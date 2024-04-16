@@ -5,19 +5,27 @@
 
 ## How to run
 
-1. 'make' command will compile simrv
+1. `make` command will compile simrv
+```
 $ make
+```
 
-2. 'make app' command will invode the simrv and run hello program
+3. `make app` command will invode the simrv and run hello program
+```
 $ make app
+```
 
-3. 'make run' command will invode the simrv with proper arguments and run linux
+5. `make run` command will invode the simrv with proper arguments and run linux
+```
 $ make run
-Once login prompt appears, type 'root' to login and enjoy linux.
-Please type Control+'q' to quit the simulation.
+```
+Once login prompt appears, type `root` to login and enjoy linux.
+Please type Control+`q` to quit the simulation.
 
-4. please read help message of SimCore/RISC-V (simrv) by
+7. please read help message of SimCore/RISC-V (simrv) by
+```
 $ ./simrv
+```
 
 ## Recommended compilers to be used
 
