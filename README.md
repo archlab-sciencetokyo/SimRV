@@ -10,12 +10,12 @@
 $ make
 ```
 
-3. `make app` command will invode the simrv and run hello program
+3. `make app` command will invoke the simrv and run hello program
 ```
 $ make app
 ```
 
-5. `make run` command will invode the simrv with proper arguments and run linux
+5. `make run` command will invoke the simrv with proper arguments and run linux
 ```
 $ make run
 ```
