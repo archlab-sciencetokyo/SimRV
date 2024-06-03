@@ -1,4 +1,4 @@
-.TH "Machine" 3 "Version 1.3.7" "My Project" \" -*- nroff -*-
+.TH "Machine" 3 "Version 1.3.7" "SimCore/RISC-V" \" -*- nroff -*-
 .ad l
 .nh
 .SH NAME
@@ -195,10 +195,10 @@ Initializes the machine\&.
 .RE
 .PP
 
-.SS "uint32_t Machine::target_read (uint32_t v_addr, uint32_t funct3)"
+.SS "uint32_t Machine::target_read (uint32_t addr, uint32_t size)"
 
 .PP
-Reads a value from the target memory\&. Read data from the target memory\&.
+Reads a value from the target memory\&. 
 .PP
 \fBParameters\fP
 .RS 4
@@ -209,21 +209,7 @@ Reads a value from the target memory\&. Read data from the target memory\&.
 .PP
 \fBReturns\fP
 .RS 4
-The value read from the memory\&.
-.RE
-.PP
-This function reads data from the target memory at the specified virtual address\&. It performs page translation using the TLB and handles page faults if necessary\&.
-.PP
-\fBParameters\fP
-.RS 4
-\fIv_addr\fP Virtual address to read from\&. 
-.br
-\fIfunct3\fP Function code specifying the access size\&. 
-.RE
-.PP
-\fBReturns\fP
-.RS 4
-The read data\&. 
+The value read from the memory\&. 
 .RE
 .PP
 
@@ -245,4 +231,4 @@ Writes a value to the target memory\&.
 
 .SH "Author"
 .PP 
-Generated automatically by Doxygen for My Project from the source code\&.
+Generated automatically by Doxygen for SimCore/RISC-V from the source code\&.
