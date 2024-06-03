@@ -1,0 +1,248 @@
+.TH "Machine" 3 "Version 1.3.7" "My Project" \" -*- nroff -*-
+.ad l
+.nh
+.SH NAME
+Machine \- The \fBMachine\fP class represents the RISC-V machine\&.  
+
+.SH SYNOPSIS
+.br
+.PP
+.PP
+\fR#include <machine\&.h>\fP
+.SS "Public Member Functions"
+
+.in +1c
+.ti -1c
+.RI "\fB~Machine\fP ()"
+.br
+.RI "Destructor for the \fBMachine\fP class\&. "
+.ti -1c
+.RI "int \fBinit\fP (int argc, char *argv[])"
+.br
+.RI "Initializes the machine\&. "
+.ti -1c
+.RI "void \fBexec\fP ()"
+.br
+.RI "Executes the main loop of the machine\&. "
+.ti -1c
+.RI "void \fBtrace_output\fP ()"
+.br
+.RI "Outputs trace information\&. "
+.ti -1c
+.RI "void \fBdisplay_result\fP ()"
+.br
+.RI "Displays the result\&. "
+.ti -1c
+.RI "void \fBinstmix_output\fP ()"
+.br
+.RI "Outputs instruction mix information\&. "
+.ti -1c
+.RI "uint32_t \fBtarget_read\fP (uint32_t addr, uint32_t size)"
+.br
+.RI "Reads a value from the target memory\&. "
+.ti -1c
+.RI "void \fBtarget_write\fP (uint32_t addr, uint32_t size, uint32_t value)"
+.br
+.RI "Writes a value to the target memory\&. "
+.in -1c
+.SS "Public Attributes"
+
+.in +1c
+.ti -1c
+.RI "uint32_t \fBtohost\fP = 0"
+.br
+.ti -1c
+.RI "uint64_t \fBe_icount\fP = 0"
+.br
+.RI "The number of executed instructions\&. "
+.ti -1c
+.RI "uint64_t \fBe_uc_cnt\fP = 0"
+.br
+.RI "The number of executed instructions on I/O controller\&. "
+.ti -1c
+.RI "uint64_t \fBe_ccount\fP = 0"
+.br
+.RI "The number of executed compressed instructions\&. "
+.ti -1c
+.RI "int \fBe_instmix\fP [NUMOFID___]"
+.br
+.RI "The array for measuring instruction mix\&. "
+.ti -1c
+.RI "int \fBs_appmode\fP = 0"
+.br
+.RI "Flag to identify whether the application mode or not\&. "
+.ti -1c
+.RI "int \fBs_rtosmode\fP = 0"
+.br
+.RI "Flag to identify whether the rtos mode or not\&. "
+.ti -1c
+.RI "int \fBs_debugmode\fP = 0"
+.br
+.RI "Flag to identify whether the debug mode or not\&. "
+.ti -1c
+.RI "int \fBs_dlog_mode\fP = 0"
+.br
+.RI "Flag to identify whether the dlog mode or not\&. "
+.ti -1c
+.RI "int \fBs_use_uc\fP = 0"
+.br
+.RI "Flag to use IO controller (micro-controller)\&. "
+.ti -1c
+.RI "int \fBs_use_disk\fP = 0"
+.br
+.RI "Flag to use disk image\&. "
+.ti -1c
+.RI "int \fBs_use_mix\fP = 0"
+.br
+.RI "Flag to measure instruction mix\&. "
+.ti -1c
+.RI "int \fBs_bp_trace\fP = 0"
+.br
+.RI "Flag for bp_trace\&. "
+.ti -1c
+.RI "uint32_t \fBs_start_pc\fP = 0"
+.br
+.RI "The start PC\&. "
+.ti -1c
+.RI "uint32_t \fBs_strace\fP = 0"
+.br
+.RI "The strace\&. "
+.ti -1c
+.RI "uint64_t \fBs_gen_binfile\fP = 0"
+.br
+.RI "Flag to generate binary image file for FPGA run\&. "
+.ti -1c
+.RI "uint64_t \fBs_memimg\fP = 0"
+.br
+.RI "The memimg\&. "
+.ti -1c
+.RI "uint64_t \fBs_fincnt\fP = ~0"
+.br
+.RI "The fincnt\&. "
+.ti -1c
+.RI "uint64_t \fBs_trace_begin\fP = ~0"
+.br
+.RI "The trace_begin\&. "
+.ti -1c
+.RI "uint64_t \fBs_trace_end\fP = ~0"
+.br
+.RI "The trace_end\&. "
+.ti -1c
+.RI "uint64_t \fBs_enabletimer\fP = ~0"
+.br
+.RI "The enabletimer\&. "
+.ti -1c
+.RI "FILE * \fBs_fp_trace\fP"
+.br
+.RI "The file pointer of trace file\&. "
+.ti -1c
+.RI "FILE * \fBs_fp_dlog\fP"
+.br
+.RI "The file pointer of dlog file\&. "
+.ti -1c
+.RI "char * \fBs_fn_memimg\fP"
+.br
+.RI "The file name of memory image\&. "
+.ti -1c
+.RI "char * \fBs_fn_dskimg\fP"
+.br
+.RI "The file name of disk image\&. "
+.ti -1c
+.RI "char * \fBs_fn_dvtree\fP"
+.br
+.RI "The file name of device tree binary\&. "
+.ti -1c
+.RI "char * \fBs_fn_iocon\fP"
+.br
+.RI "The file name of I/O controller program binary\&. "
+.ti -1c
+.RI "struct timeval \fBs_stime\fP"
+.br
+.RI "The start time stamp\&. "
+.ti -1c
+.RI "\fBCPU\fP * \fBcpu\fP"
+.br
+.ti -1c
+.RI "\fBDisk\fP * \fBdisk\fP"
+.br
+.ti -1c
+.RI "\fBConsole\fP * \fBconsole\fP"
+.br
+.ti -1c
+.RI "uint8_t * \fBmmem\fP"
+.br
+.in -1c
+.SH "Detailed Description"
+.PP 
+The \fBMachine\fP class represents the RISC-V machine\&. 
+.SH "Member Function Documentation"
+.PP 
+.SS "int Machine::init (int argc, char * argv[])"
+
+.PP
+Initializes the machine\&. 
+.PP
+\fBParameters\fP
+.RS 4
+\fIargc\fP The number of command line arguments\&. 
+.br
+\fIargv\fP The command line arguments\&. 
+.RE
+.PP
+\fBReturns\fP
+.RS 4
+0 if successful, otherwise an error code\&. 
+.RE
+.PP
+
+.SS "uint32_t Machine::target_read (uint32_t v_addr, uint32_t funct3)"
+
+.PP
+Reads a value from the target memory\&. Read data from the target memory\&.
+.PP
+\fBParameters\fP
+.RS 4
+\fIaddr\fP The address to read from\&. 
+.br
+\fIsize\fP The size of the value to read\&. 
+.RE
+.PP
+\fBReturns\fP
+.RS 4
+The value read from the memory\&.
+.RE
+.PP
+This function reads data from the target memory at the specified virtual address\&. It performs page translation using the TLB and handles page faults if necessary\&.
+.PP
+\fBParameters\fP
+.RS 4
+\fIv_addr\fP Virtual address to read from\&. 
+.br
+\fIfunct3\fP Function code specifying the access size\&. 
+.RE
+.PP
+\fBReturns\fP
+.RS 4
+The read data\&. 
+.RE
+.PP
+
+.SS "void Machine::target_write (uint32_t addr, uint32_t size, uint32_t value)"
+
+.PP
+Writes a value to the target memory\&. 
+.PP
+\fBParameters\fP
+.RS 4
+\fIaddr\fP The address to write to\&. 
+.br
+\fIsize\fP The size of the value to write\&. 
+.br
+\fIvalue\fP The value to write to the memory\&. 
+.RE
+.PP
+
+
+.SH "Author"
+.PP 
+Generated automatically by Doxygen for My Project from the source code\&.

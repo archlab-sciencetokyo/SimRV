@@ -1,0 +1,134 @@
+.TH "Console" 3 "Version 1.3.7" "My Project" \" -*- nroff -*-
+.ad l
+.nh
+.SH NAME
+Console \- Represents a console device\&.  
+
+.SH SYNOPSIS
+.br
+.PP
+.PP
+\fR#include <console\&.h>\fP
+.SS "Public Member Functions"
+
+.in +1c
+.ti -1c
+.RI "\fBConsole\fP ()"
+.br
+.RI "Default constructor for the \fBConsole\fP class\&. "
+.ti -1c
+.RI "uint32_t \fBconsole_read\fP (uint32_t offset)"
+.br
+.RI "Reads data from the console\&. "
+.ti -1c
+.RI "void \fBconsole_write\fP (\fBCPU\fP *cpu, uint32_t offset, uint32_t data)"
+.br
+.RI "Writes data to the console\&. "
+.ti -1c
+.RI "int \fBreceive_input\fP ()"
+.br
+.RI "Receives input from the console\&. "
+.ti -1c
+.RI "int \fBMC_receive_input\fP ()"
+.br
+.RI "Receives input from the MC (Management \fBConsole\fP)\&. "
+.in -1c
+.SS "Public Attributes"
+
+.in +1c
+.ti -1c
+.RI "uint8_t * \fBmmem\fP"
+.br
+.ti -1c
+.RI "\fBQueueState\fP * \fBQueue\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBDeviceFeaturesSel\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBDriverFeatures\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBDriverFeaturesSel\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBInterruptStatus\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBStatus\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBQueueSel\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBQueueNum\fP"
+.br
+.ti -1c
+.RI "uint8_t \fBcons_fifo\fP"
+.br
+.ti -1c
+.RI "uint8_t \fBfifo_en\fP"
+.br
+.in -1c
+.SH "Detailed Description"
+.PP 
+Represents a console device\&. 
+.SH "Member Function Documentation"
+.PP 
+.SS "uint32_t Console::console_read (uint32_t offset)"
+
+.PP
+Reads data from the console\&. 
+.PP
+\fBParameters\fP
+.RS 4
+\fIoffset\fP The offset to read from\&. 
+.RE
+.PP
+\fBReturns\fP
+.RS 4
+The data read from the console\&. 
+.RE
+.PP
+
+.SS "void Console::console_write (\fBCPU\fP * cpu, uint32_t offset, uint32_t data)"
+
+.PP
+Writes data to the console\&. 
+.PP
+\fBParameters\fP
+.RS 4
+\fIcpu\fP The \fBCPU\fP object\&. 
+.br
+\fIoffset\fP The offset to write to\&. 
+.br
+\fIdata\fP The data to write\&. 
+.RE
+.PP
+
+.SS "int Console::MC_receive_input ()"
+
+.PP
+Receives input from the MC (Management \fBConsole\fP)\&. 
+.PP
+\fBReturns\fP
+.RS 4
+The received input\&. 
+.RE
+.PP
+
+.SS "int Console::receive_input ()"
+
+.PP
+Receives input from the console\&. 
+.PP
+\fBReturns\fP
+.RS 4
+The received input\&. 
+.RE
+.PP
+
+
+.SH "Author"
+.PP 
+Generated automatically by Doxygen for My Project from the source code\&.

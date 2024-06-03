@@ -1,0 +1,798 @@
+.TH "define.h" 3 "Version 1.3.7" "My Project" \" -*- nroff -*-
+.ad l
+.nh
+.SH NAME
+define.h \- Header file containing various definitions and constants for the RISC-V simulation\&.  
+
+.SH SYNOPSIS
+.br
+.PP
+\fR#include <iostream>\fP
+.br
+\fR#include <fstream>\fP
+.br
+\fR#include <iomanip>\fP
+.br
+\fR#include <string>\fP
+.br
+\fR#include <cstdio>\fP
+.br
+\fR#include <cstdlib>\fP
+.br
+\fR#include <cstdint>\fP
+.br
+\fR#include <cstring>\fP
+.br
+\fR#include <signal\&.h>\fP
+.br
+\fR#include <stack>\fP
+.br
+\fR#include <sys/time\&.h>\fP
+.br
+\fR#include <sys/select\&.h>\fP
+.br
+\fR#include <sys/stat\&.h>\fP
+.br
+\fR#include <unistd\&.h>\fP
+.br
+\fR#include <termios\&.h>\fP
+.br
+
+.SS "Classes"
+
+.in +1c
+.ti -1c
+.RI "struct \fBQueueState\fP"
+.br
+.ti -1c
+.RI "struct \fBBlockRequestHeader\fP"
+.br
+.ti -1c
+.RI "struct \fBDescriptor\fP"
+.br
+.in -1c
+.SS "Macros"
+
+.in +1c
+.ti -1c
+.RI "#define \fBD_START_PC\fP   (0x80000000)"
+.br
+.ti -1c
+.RI "#define \fBD_INITD_ADDR\fP   (0x01000000)"
+.br
+.ti -1c
+.RI "#define \fBFLAG_DUMP_EXEC\fP   (1 << 0)"
+.br
+.ti -1c
+.RI "#define \fBFLAG_DUMP_REG\fP   (1 << 1)"
+.br
+.ti -1c
+.RI "#define \fBFLAG_DUMP_CSR\fP   (1 << 2)"
+.br
+.ti -1c
+.RI "#define \fBFLAG_DUMP_MIURA\fP   (1 << 3)"
+.br
+.ti -1c
+.RI "#define \fBPTE_V_MASK\fP   (1 << 0)"
+.br
+.ti -1c
+.RI "#define \fBPTE_R_MASK\fP   (1 << 1)"
+.br
+.ti -1c
+.RI "#define \fBPTE_W_MASK\fP   (1 << 2)"
+.br
+.ti -1c
+.RI "#define \fBPTE_X_MASK\fP   (1 << 3)"
+.br
+.ti -1c
+.RI "#define \fBPTE_U_MASK\fP   (1 << 4)"
+.br
+.ti -1c
+.RI "#define \fBPTE_A_MASK\fP   (1 << 6)"
+.br
+.ti -1c
+.RI "#define \fBPTE_D_MASK\fP   (1 << 7)"
+.br
+.ti -1c
+.RI "#define \fBLEVELS\fP   2"
+.br
+.ti -1c
+.RI "#define \fBPTE_SIZE\fP   4"
+.br
+.ti -1c
+.RI "#define \fBPAGE_SIZE\fP   (1 << 12)"
+.br
+.ti -1c
+.RI "#define \fBVIRTIO_BASE_ADDR\fP   (0x40000000)"
+.br
+.ti -1c
+.RI "#define \fBVIRTIO_SIZE\fP   (0x08000000)"
+.br
+.ti -1c
+.RI "#define \fBVRING_DESC_F_NEXT\fP   (1)"
+.br
+.ti -1c
+.RI "#define \fBVRING_DESC_F_WRITE\fP   (2)"
+.br
+.ti -1c
+.RI "#define \fBVRING_DESC_F_INDIRECT\fP   (4)"
+.br
+.ti -1c
+.RI "#define \fBCONSOLE_MAX_QUEUE_NUM\fP   (2)"
+.br
+.ti -1c
+.RI "#define \fBVIRTIO_CONSOLE_IRQ\fP   (1)"
+.br
+.ti -1c
+.RI "#define \fBSECTOR_SIZE\fP   (512)"
+.br
+.ti -1c
+.RI "#define \fBDISK_BUF_SIZE\fP   (512 * 512)"
+.br
+.ti -1c
+.RI "#define \fBDISK_SIZE\fP   (64 * 1024 * 1024)"
+.br
+.ti -1c
+.RI "#define \fBDISK_MAX_QUEUE_NUM\fP   (4)"
+.br
+.ti -1c
+.RI "#define \fBVIRTIO_DISK_IRQ\fP   (2)"
+.br
+.ti -1c
+.RI "#define \fBVIRTIO_BLK_T_IN\fP   (0)"
+.br
+.ti -1c
+.RI "#define \fBVIRTIO_BLK_T_OUT\fP   (1)"
+.br
+.ti -1c
+.RI "#define \fBVIRTIO_BLK_S_OK\fP   (0)"
+.br
+.ti -1c
+.RI "#define \fBVIRTIO_BLK_S_IOERR\fP   (1)"
+.br
+.ti -1c
+.RI "#define \fBVIRTIO_BLK_S_UNSUPP\fP   (2)"
+.br
+.ti -1c
+.RI "#define \fBDISK_MASK\fP   (0x3ffffff)"
+.br
+.ti -1c
+.RI "#define \fBPLIC_BASE_ADDR\fP   (0x50000000)"
+.br
+.ti -1c
+.RI "#define \fBPLIC_SIZE\fP   (0x00400000)"
+.br
+.ti -1c
+.RI "#define \fBPLIC_HART_BASE\fP   (0x200000)"
+.br
+.ti -1c
+.RI "#define \fBPLIC_HART_SIZE\fP   (0x1000)"
+.br
+.ti -1c
+.RI "#define \fBCLINT_BASE_ADDR\fP   (0x60000000)"
+.br
+.ti -1c
+.RI "#define \fBCLINT_SIZE\fP   (0x000c0000)"
+.br
+.ti -1c
+.RI "#define \fBDRAM_BASE_ADDR\fP   (0x80000000)"
+.br
+.ti -1c
+.RI "#define \fBDRAM_SIZE\fP   (64 * 1024 * 1024)"
+.br
+.ti -1c
+.RI "#define \fBDRAM_MASK\fP   (0x3ffffff)"
+.br
+.ti -1c
+.RI "#define \fBD_PAGE_SHIFT\fP   (12)"
+.br
+.ti -1c
+.RI "#define \fBD_PAGE_MASK\fP   (0x00000fff)"
+.br
+.ti -1c
+.RI "#define \fBTLB_SIZE\fP   (4)"
+.br
+.ti -1c
+.RI "#define \fBLCMEM_SIZE\fP   (32*1024)"
+.br
+.ti -1c
+.RI "#define \fBCAUSE_INTERRUPT\fP   ((uint32_t)1 << 31)"
+.br
+.ti -1c
+.RI "#define \fBCOUNTEREN_MASK\fP   ((1 << 0) | (1 << 2))"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_UIE\fP   (1 << 0)"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_SIE\fP   (1 << 1)"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_HIE\fP   (1 << 2)"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_MIE\fP   (1 << 3)"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_UPIE\fP   (1 << 4)"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_SPIE\fP   (1 << 5)"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_HPIE\fP   (1 << 6)"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_MPIE\fP   (1 << 7)"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_SPP\fP   (1 << 8)"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_HPP\fP   (3 << 9)"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_MPP\fP   (3 << 11)"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_FS\fP   (3 << 13)"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_XS\fP   (3 << 15)"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_MPRV\fP   (1 << 17)"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_SUM\fP   (1 << 18)"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_MXR\fP   (1 << 19)"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_SPIE_SHIFT\fP   5"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_MPIE_SHIFT\fP   7"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_SPP_SHIFT\fP   8"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_MPP_SHIFT\fP   11"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_FS_SHIFT\fP   13"
+.br
+.ti -1c
+.RI "#define \fBMSTATUS_MASK\fP"
+.br
+.ti -1c
+.RI "#define \fBSSTATUS_MASK0\fP"
+.br
+.ti -1c
+.RI "#define \fBSSTATUS_MASK\fP   SSTATUS_MASK0"
+.br
+.ti -1c
+.RI "#define \fBMIP_USIP\fP   (1 << 0)"
+.br
+.ti -1c
+.RI "#define \fBMIP_SSIP\fP   (1 << 1)"
+.br
+.ti -1c
+.RI "#define \fBMIP_HSIP\fP   (1 << 2)"
+.br
+.ti -1c
+.RI "#define \fBMIP_MSIP\fP   (1 << 3)"
+.br
+.ti -1c
+.RI "#define \fBMIP_UTIP\fP   (1 << 4)"
+.br
+.ti -1c
+.RI "#define \fBMIP_STIP\fP   (1 << 5)"
+.br
+.ti -1c
+.RI "#define \fBMIP_HTIP\fP   (1 << 6)"
+.br
+.ti -1c
+.RI "#define \fBMIP_MTIP\fP   (1 << 7)"
+.br
+.ti -1c
+.RI "#define \fBMIP_UEIP\fP   (1 << 8)"
+.br
+.ti -1c
+.RI "#define \fBMIP_SEIP\fP   (1 << 9)"
+.br
+.ti -1c
+.RI "#define \fBMIP_HEIP\fP   (1 << 10)"
+.br
+.ti -1c
+.RI "#define \fBMIP_MEIP\fP   (1 << 11)"
+.br
+.ti -1c
+.RI "#define \fBCSR_USTATUS\fP   0x000"
+.br
+.ti -1c
+.RI "#define \fBCSR_UIE\fP   0x004"
+.br
+.ti -1c
+.RI "#define \fBCSR_UTVEC\fP   0x005"
+.br
+.ti -1c
+.RI "#define \fBCSR_USCRATCH\fP   0x040"
+.br
+.ti -1c
+.RI "#define \fBCSR_UEPC\fP   0x041"
+.br
+.ti -1c
+.RI "#define \fBCSR_UCAUSE\fP   0x042"
+.br
+.ti -1c
+.RI "#define \fBCSR_UTVAL\fP   0x043"
+.br
+.ti -1c
+.RI "#define \fBCSR_UIP\fP   0x044"
+.br
+.ti -1c
+.RI "#define \fBCSR_FFLAGS\fP   0x001"
+.br
+.ti -1c
+.RI "#define \fBCSR_FRM\fP   0x002"
+.br
+.ti -1c
+.RI "#define \fBCSR_FCSR\fP   0x003"
+.br
+.ti -1c
+.RI "#define \fBCSR_CYCLE\fP   0xC00"
+.br
+.ti -1c
+.RI "#define \fBCSR_TIME\fP   0xC01"
+.br
+.ti -1c
+.RI "#define \fBCSR_INSTRET\fP   0xC02"
+.br
+.ti -1c
+.RI "#define \fBCSR_SSTATUS\fP   0x100"
+.br
+.ti -1c
+.RI "#define \fBCSR_SEDELEG\fP   0x102"
+.br
+.ti -1c
+.RI "#define \fBCSR_SIDELEG\fP   0x103"
+.br
+.ti -1c
+.RI "#define \fBCSR_SIE\fP   0x104"
+.br
+.ti -1c
+.RI "#define \fBCSR_STVEC\fP   0x105"
+.br
+.ti -1c
+.RI "#define \fBCSR_SCOUNTEREN\fP   0x106"
+.br
+.ti -1c
+.RI "#define \fBCSR_SSCRATCH\fP   0x140"
+.br
+.ti -1c
+.RI "#define \fBCSR_SEPC\fP   0x141"
+.br
+.ti -1c
+.RI "#define \fBCSR_SCAUSE\fP   0x142"
+.br
+.ti -1c
+.RI "#define \fBCSR_STVAL\fP   0x143"
+.br
+.ti -1c
+.RI "#define \fBCSR_SIP\fP   0x144"
+.br
+.ti -1c
+.RI "#define \fBCSR_SATP\fP   0x180"
+.br
+.ti -1c
+.RI "#define \fBCSR_MVENDORID\fP   0xF11"
+.br
+.ti -1c
+.RI "#define \fBCSR_MARCHID\fP   0xF12"
+.br
+.ti -1c
+.RI "#define \fBCSR_MIMPID\fP   0xF13"
+.br
+.ti -1c
+.RI "#define \fBCSR_MHARTID\fP   0xF14"
+.br
+.ti -1c
+.RI "#define \fBCSR_MSTATUS\fP   0x300"
+.br
+.ti -1c
+.RI "#define \fBCSR_MISA\fP   0x301"
+.br
+.ti -1c
+.RI "#define \fBCSR_MEDELEG\fP   0x302"
+.br
+.ti -1c
+.RI "#define \fBCSR_MIDELEG\fP   0x303"
+.br
+.ti -1c
+.RI "#define \fBCSR_MIE\fP   0x304"
+.br
+.ti -1c
+.RI "#define \fBCSR_MTVEC\fP   0x305"
+.br
+.ti -1c
+.RI "#define \fBCSR_MCOUNTEREN\fP   0x306"
+.br
+.ti -1c
+.RI "#define \fBCSR_MSCRATCH\fP   0x340"
+.br
+.ti -1c
+.RI "#define \fBCSR_MEPC\fP   0x341"
+.br
+.ti -1c
+.RI "#define \fBCSR_MCAUSE\fP   0x342"
+.br
+.ti -1c
+.RI "#define \fBCSR_MTVAL\fP   0x343"
+.br
+.ti -1c
+.RI "#define \fBCSR_MIP\fP   0x344"
+.br
+.ti -1c
+.RI "#define \fBCSR_MCYCLE\fP   0xB00"
+.br
+.ti -1c
+.RI "#define \fBCSR_MINSTRET\fP   0xB02"
+.br
+.ti -1c
+.RI "#define \fBCSR_MCYCLEH\fP   0xB80"
+.br
+.ti -1c
+.RI "#define \fBCSR_MINSTRETH\fP   0xB82"
+.br
+.ti -1c
+.RI "#define \fBCSR_CYCLEH\fP   0xC80"
+.br
+.ti -1c
+.RI "#define \fBCSR_TIMEH\fP   0xC81"
+.br
+.ti -1c
+.RI "#define \fBCSR_INSTRETH\fP   0xC82"
+.br
+.ti -1c
+.RI "#define \fBXLEN\fP   32"
+.br
+.ti -1c
+.RI "#define \fBMLEN\fP   32"
+.br
+.ti -1c
+.RI "#define \fBFLEN\fP   64"
+.br
+.ti -1c
+.RI "#define \fBRV32_NOP\fP   0x00000013"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_C0\fP   0x0"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_C1\fP   0x1"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_C2\fP   0x2"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_W\fP   0x3"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_OP\fP   0x33"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_OP_FP\fP   0x53"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_AMO\fP   0x2F"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_OP_IMM\fP   0x13"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_LOAD\fP   0x03"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_LOAD_FP\fP   0x07"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_JALR\fP   0x67"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_STORE\fP   0x23"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_STORE_FP\fP   0x27"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_BRANCH\fP   0x63"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_LUI\fP   0x37"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_AUIPC\fP   0x17"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_JAL\fP   0x6F"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_MADD\fP   0x43"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_MSUB\fP   0x47"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_NMADD\fP   0x4F"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_NMSUB\fP   0x4B"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_MISC_M\fP   0x0F"
+.br
+.ti -1c
+.RI "#define \fBOPCODE_SYSTEM\fP   0x73"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_ADD\fP   0x0"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_SLL\fP   0x1"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_SLT\fP   0x2"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_SLTU\fP   0x3"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_XOR\fP   0x4"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_SRL\fP   0x5"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_OR\fP   0x6"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_AND\fP   0x7"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_MUL\fP   0x0"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_MULH\fP   0x1"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_MULHSU\fP   0x2"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_MULHU\fP   0x3"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_DIV\fP   0x4"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_DIVU\fP   0x5"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_REM\fP   0x6"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_REMU\fP   0x7"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_SB\fP   0x0"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_SH\fP   0x1"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_SW\fP   0x2"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_SD\fP   0x3"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_FSW\fP   0x2"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_FSD\fP   0x3"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_LB\fP   0x0"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_LH\fP   0x1"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_LW\fP   0x2"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_LD\fP   0x3"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_LBU\fP   0x4"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_LHU\fP   0x5"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_LWU\fP   0x6"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_FLW\fP   0x2"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_FLD\fP   0x3"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_BEQ\fP   0x0"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_BNE\fP   0x1"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_BLT\fP   0x4"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_BGE\fP   0x5"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_BLTU\fP   0x6"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_BGEU\fP   0x7"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_FENCE\fP   0x0"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_FENCE_I\fP   0x1"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_PRIV\fP   0x0"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_CSRRW\fP   0x1"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_CSRRS\fP   0x2"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_CSRRC\fP   0x3"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_CSRRWI\fP   0x5"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_CSRRSI\fP   0x6"
+.br
+.ti -1c
+.RI "#define \fBFUNCT3_CSRRCI\fP   0x7"
+.br
+.ti -1c
+.RI "#define \fBFUNCT12_ECALL\fP   0x000"
+.br
+.ti -1c
+.RI "#define \fBFUNCT12_EBREAK\fP   0x001"
+.br
+.ti -1c
+.RI "#define \fBFUNCT12_ERET\fP   0x100"
+.br
+.ti -1c
+.RI "#define \fBFUNCT12_MRET\fP   0x302"
+.br
+.ti -1c
+.RI "#define \fBFUNCT12_SRET\fP   0x102"
+.br
+.ti -1c
+.RI "#define \fBFUNCT12_URET\fP   0x002"
+.br
+.ti -1c
+.RI "#define \fBFUNCT12_WFI\fP   0x105"
+.br
+.ti -1c
+.RI "#define \fBFUNCT7_SFENCE_VMA\fP   0x09"
+.br
+.ti -1c
+.RI "#define \fBFUNCT5_AMO_LR\fP   0x02"
+.br
+.ti -1c
+.RI "#define \fBFUNCT5_AMO_SC\fP   0x03"
+.br
+.ti -1c
+.RI "#define \fBFUNCT5_AMO_SWAP\fP   0x01"
+.br
+.ti -1c
+.RI "#define \fBFUNCT5_AMO_ADD\fP   0x00"
+.br
+.ti -1c
+.RI "#define \fBFUNCT5_AMO_AND\fP   0x0c"
+.br
+.ti -1c
+.RI "#define \fBFUNCT5_AMO_OR\fP   0x08"
+.br
+.ti -1c
+.RI "#define \fBFUNCT5_AMO_XOR\fP   0x04"
+.br
+.ti -1c
+.RI "#define \fBFUNCT5_AMO_MIN\fP   0x10"
+.br
+.ti -1c
+.RI "#define \fBFUNCT5_AMO_MINU\fP   0x18"
+.br
+.ti -1c
+.RI "#define \fBFUNCT5_AMO_MAX\fP   0x14"
+.br
+.ti -1c
+.RI "#define \fBFUNCT5_AMO_MAXU\fP   0x1c"
+.br
+.ti -1c
+.RI "#define \fBAMO_FAILURE_CODE\fP   1"
+.br
+.ti -1c
+.RI "#define \fBAMO_SUCCESS_CODE\fP   0"
+.br
+.in -1c
+.SS "Enumerations"
+
+.in +1c
+.ti -1c
+.RI "enum \fBPTE_ACCESS\fP { \fBACCESS_READ\fP = 0, \fBACCESS_WRITE\fP = 1, \fBACCESS_CODE\fP = 2 }"
+.br
+.ti -1c
+.RI "enum \fBEXCEPTION_CODE\fP { \fBCAUSE_MISALIGNED_FETCH\fP = 0x0, \fBCAUSE_FAULT_FETCH\fP = 0x1, \fBCAUSE_ILLEGAL_INSTRUCTION\fP = 0x2, \fBCAUSE_BREAKPOINT\fP = 0x3, \fBCAUSE_MISALIGNED_LOAD\fP = 0x4, \fBCAUSE_FAULT_LOAD\fP = 0x5, \fBCAUSE_MISALIGNED_STORE\fP = 0x6, \fBCAUSE_FAULT_STORE\fP = 0x7, \fBCAUSE_USER_ECALL\fP = 0x8, \fBCAUSE_SUPERVISOR_ECALL\fP = 0x9, \fBCAUSE_HYPERVISOR_ECALL\fP = 0xa, \fBCAUSE_MACHINE_ECALL\fP = 0xb, \fBCAUSE_FETCH_PAGE_FAULT\fP = 0xc, \fBCAUSE_LOAD_PAGE_FAULT\fP = 0xd, \fBCAUSE_STORE_PAGE_FAULT\fP = 0xf }"
+.br
+.ti -1c
+.RI "enum \fBPRIV_MODE\fP { \fBPRIV_U\fP = 0, \fBPRIV_S\fP = 1, \fBPRIV_H\fP = 2, \fBPRIV_M\fP = 3 }"
+.br
+.ti -1c
+.RI "enum \fBOPERATION_ID\fP { \fBLUI_______\fP, \fBAUIPC_____\fP, \fBJAL_______\fP, \fBJALR______\fP, \fBBEQ_______\fP, \fBBNE_______\fP, \fBBLT_______\fP, \fBBGE_______\fP, \fBBLTU______\fP, \fBBGEU______\fP, \fBLB________\fP, \fBLH________\fP, \fBLW________\fP, \fBLBU_______\fP, \fBLHU_______\fP, \fBSB________\fP, \fBSH________\fP, \fBSW________\fP, \fBADDI______\fP, \fBSLTI______\fP, \fBSLTIU_____\fP, \fBXORI______\fP, \fBORI_______\fP, \fBANDI______\fP, \fBSLLI______\fP, \fBSRLI______\fP, \fBSRAI______\fP, \fBADD_______\fP, \fBSUB_______\fP, \fBSLL_______\fP, \fBSLT_______\fP, \fBSLTU______\fP, \fBXOR_______\fP, \fBSRL_______\fP, \fBSRA_______\fP, \fBOR________\fP, \fBAND_______\fP, \fBFENCE_____\fP, \fBFENCE_I___\fP, \fBECALL_____\fP, \fBEBREAK____\fP, \fBCSRRW_____\fP, \fBCSRRS_____\fP, \fBCSRRC_____\fP, \fBCSRRWI____\fP, \fBCSRRSI____\fP, \fBCSRRCI____\fP, \fBURET______\fP, \fBSRET______\fP, \fBMRET______\fP, \fBWFI_______\fP, \fBSFENCE_VMA\fP, \fBMUL_______\fP, \fBMULH______\fP, \fBMULHSU____\fP, \fBMULHU_____\fP, \fBDIV_______\fP, \fBDIVU______\fP, \fBREM_______\fP, \fBREMU______\fP, \fBLR_W______\fP, \fBSC_W______\fP, \fBAMOSWAP_W_\fP, \fBAMOADD_W__\fP, \fBAMOXOR_W__\fP, \fBAMOAND_W__\fP, \fBAMOOR_W___\fP, \fBAMOMIN_W__\fP, \fBAMOMAX_W__\fP, \fBAMOMINU_W_\fP, \fBAMOMAXU_W_\fP, \fBUNKNOWN___\fP, \fBNUMOFID___\fP }"
+.br
+.in -1c
+.SH "Detailed Description"
+.PP 
+Header file containing various definitions and constants for the RISC-V simulation\&. 
+
+This file defines various constants, flags, and masks used in the RISC-V simulation\&. It also includes the necessary header files and enumerations for the simulation\&.
+.PP
+\fBNote\fP
+.RS 4
+This file is part of the SimCore/RISC-V project developed by ArchLab\&. TokyoTech\&. 
+.RE
+.PP
+\fBSince\fP
+.RS 4
+2018-07-05 
+.RE
+.PP
+
+.SH "Macro Definition Documentation"
+.PP 
+.SS "#define MSTATUS_MASK"
+\fBValue:\fP
+.nf
+(MSTATUS_UIE | MSTATUS_SIE | MSTATUS_MIE | \\
+MSTATUS_UPIE | MSTATUS_SPIE | MSTATUS_MPIE | \\
+MSTATUS_SPP | MSTATUS_MPP | \\
+MSTATUS_FS | \\
+MSTATUS_MPRV | MSTATUS_SUM | MSTATUS_MXR)
+.PP
+.fi
+
+.SS "#define SSTATUS_MASK0"
+\fBValue:\fP
+.nf
+(MSTATUS_UIE | MSTATUS_SIE | MSTATUS_UPIE | MSTATUS_SPIE | \\
+MSTATUS_SPP | MSTATUS_FS | MSTATUS_XS | MSTATUS_SUM | MSTATUS_MXR)
+.PP
+.fi
+
+.SH "Author"
+.PP 
+Generated automatically by Doxygen for My Project from the source code\&.

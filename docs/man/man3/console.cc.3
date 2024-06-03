@@ -1,0 +1,79 @@
+.TH "console.cc" 3 "Version 1.3.7" "My Project" \" -*- nroff -*-
+.ad l
+.nh
+.SH NAME
+console.cc \- Implementation of the \fBConsole\fP class and related functions\&.  
+
+.SH SYNOPSIS
+.br
+.PP
+\fR#include 'console\&.h'\fP
+.br
+\fR#include 'machine\&.h'\fP
+.br
+
+.SS "Macros"
+
+.in +1c
+.ti -1c
+.RI "#define \fBCONSOLE_MAGIC_VALUE\fP   0x74726976"
+.br
+.ti -1c
+.RI "#define \fBCONSOLE_VERSION\fP   2"
+.br
+.ti -1c
+.RI "#define \fBCONSOLE_DEVIDE_ID\fP   3"
+.br
+.ti -1c
+.RI "#define \fBCONSOLE_VENDOR_ID\fP   0xffff"
+.br
+.ti -1c
+.RI "#define \fBCONSOLE_DEVICE_FEATURES\fP   1"
+.br
+.ti -1c
+.RI "#define \fBCONSOLE_CONFIG_GENERATION\fP   0"
+.br
+.ti -1c
+.RI "#define \fBCONSOLE_QUEUE_NUM_MAX\fP   2"
+.br
+.ti -1c
+.RI "#define \fBDESC_SIZE\fP   16 /* descriptor size 16 byte */"
+.br
+.ti -1c
+.RI "#define \fBMICRO_CONT_MODE_KEY\fP   0"
+.br
+.in -1c
+.SS "Functions"
+
+.in +1c
+.ti -1c
+.RI "void \fBupdate_descriptor\fP (uint32_t, uint32_t, int, \fBQueueState\fP *, uint8_t *)"
+.br
+.ti -1c
+.RI "uint32_t \fBram_ld\fP (uint32_t addr, int n, uint8_t *ram)"
+.br
+.ti -1c
+.RI "void \fBram_st\fP (uint32_t addr, uint32_t data, int n, uint8_t *ram)"
+.br
+.ti -1c
+.RI "void \fBcons_request\fP (uint8_t *mmem, uint32_t q_num, \fBQueueState\fP *qs)"
+.br
+.in -1c
+.SS "Variables"
+
+.in +1c
+.ti -1c
+.RI "\fBMachine\fP \fBmm\fP"
+.br
+.ti -1c
+.RI "\fBMicrocn\fP \fBcc\fP"
+.br
+.in -1c
+.SH "Detailed Description"
+.PP 
+Implementation of the \fBConsole\fP class and related functions\&. 
+
+This file contains the implementation of the \fBConsole\fP class, which handles display output and keyboard input\&. It also includes functions for handling console requests and receiving input from the keyboard\&. 
+.SH "Author"
+.PP 
+Generated automatically by Doxygen for My Project from the source code\&.

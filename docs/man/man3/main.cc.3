@@ -1,0 +1,114 @@
+.TH "main.cc" 3 "Version 1.3.7" "My Project" \" -*- nroff -*-
+.ad l
+.nh
+.SH NAME
+main.cc \- SimCore/RISC-V Functional Simulator main file\&.  
+
+.SH SYNOPSIS
+.br
+.PP
+\fR#include 'machine\&.h'\fP
+.br
+
+.SS "Macros"
+
+.in +1c
+.ti -1c
+.RI "#define \fBPROJ\fP   'simrv'"
+.br
+.ti -1c
+.RI "#define \fBNAME\fP   'SimCore/RISC\-V Functional Simulator'"
+.br
+.ti -1c
+.RI "#define \fBVER\fP   'Version 1\&.3\&.7 test01 2020\-07\-11'"
+.br
+.in -1c
+.SS "Functions"
+
+.in +1c
+.ti -1c
+.RI "void \fBusage\fP ()"
+.br
+.RI "Displays the usage message for the simulator command line options\&. "
+.ti -1c
+.RI "uint64_t \fBto_integer\fP (char *num)"
+.br
+.RI "Converts a string representation of a number to an unsigned 64-bit integer\&. "
+.ti -1c
+.RI "void \fBset_options\fP (\fBMachine\fP *m, int argc, char *argv[])"
+.br
+.RI "Sets the command line options for the simulator\&. "
+.ti -1c
+.RI "int \fBmain\fP (int argc, char *argv[])"
+.br
+.RI "The main function of the SimCore/RISC-V Functional Simulator\&. "
+.in -1c
+.SS "Variables"
+
+.in +1c
+.ti -1c
+.RI "\fBMachine\fP \fBmm\fP"
+.br
+.ti -1c
+.RI "\fBMicrocn\fP \fBcc\fP"
+.br
+.in -1c
+.SH "Detailed Description"
+.PP 
+SimCore/RISC-V Functional Simulator main file\&. 
+
+This file contains the main function and other supporting functions for the SimCore/RISC-V Functional Simulator\&. It provides command line options for running the simulator with different configurations\&. The simulator simulates the execution of RISC-V instructions and provides various debugging and tracing options\&. It also supports the use of an I/O controller (micro-controller) for interacting with external devices\&. The main function initializes the simulator, sets the command line options, and starts the simulation\&. It also handles console input and output, and displays the simulation result at the end\&. 
+.SH "Function Documentation"
+.PP 
+.SS "int main (int argc, char * argv[])"
+
+.PP
+The main function of the SimCore/RISC-V Functional Simulator\&. 
+.PP
+\fBParameters\fP
+.RS 4
+\fIargc\fP The number of command line arguments\&. 
+.br
+\fIargv\fP The array of command line arguments\&. 
+.RE
+.PP
+\fBReturns\fP
+.RS 4
+The exit status of the program\&. 
+.RE
+.PP
+
+.SS "void set_options (\fBMachine\fP * m, int argc, char * argv[])"
+
+.PP
+Sets the command line options for the simulator\&. Set the options for the machine\&.
+.PP
+\fBParameters\fP
+.RS 4
+\fIm\fP Pointer to the \fBMachine\fP object representing the simulator\&. 
+.br
+\fIargc\fP The number of command line arguments\&. 
+.br
+\fIargv\fP The array of command line arguments\&. 
+.RE
+.PP
+
+.SS "uint64_t to_integer (char * num)"
+
+.PP
+Converts a string representation of a number to an unsigned 64-bit integer\&. 
+.PP
+\fBParameters\fP
+.RS 4
+\fInum\fP The string representation of the number\&. 
+.RE
+.PP
+\fBReturns\fP
+.RS 4
+The unsigned 64-bit integer value of the number\&. 
+.RE
+.PP
+
+.SH "Author"
+.PP 
+Generated automatically by Doxygen for My Project from the source code\&.

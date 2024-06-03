@@ -1,0 +1,82 @@
+.TH "disk.cc" 3 "Version 1.3.7" "My Project" \" -*- nroff -*-
+.ad l
+.nh
+.SH NAME
+disk.cc \- Implementation of the \fBDisk\fP class and related functions\&.  
+
+.SH SYNOPSIS
+.br
+.PP
+\fR#include 'disk\&.h'\fP
+.br
+\fR#include 'machine\&.h'\fP
+.br
+
+.SS "Macros"
+
+.in +1c
+.ti -1c
+.RI "#define \fBDISK_MAGIC_VALUE\fP   0x74726976"
+.br
+.ti -1c
+.RI "#define \fBDISK_VERSION\fP   2"
+.br
+.ti -1c
+.RI "#define \fBDISK_DEVIDE_ID\fP   2"
+.br
+.ti -1c
+.RI "#define \fBDISK_VENDOR_ID\fP   0xffff"
+.br
+.ti -1c
+.RI "#define \fBDISK_DEVICE_FEATURES\fP   1"
+.br
+.ti -1c
+.RI "#define \fBDISK_CONFIG_GENERATION\fP   0"
+.br
+.ti -1c
+.RI "#define \fBDISK_QUEUE_NUM_MAX\fP   4"
+.br
+.ti -1c
+.RI "#define \fBDESC_SIZE\fP   16 /* descriptor size 16 byte */"
+.br
+.in -1c
+.SS "Functions"
+
+.in +1c
+.ti -1c
+.RI "uint32_t \fBram_ld\fP (uint32_t addr, int n, uint8_t *ram)"
+.br
+.ti -1c
+.RI "void \fBram_st\fP (uint32_t addr, uint32_t data, int n, uint8_t *ram)"
+.br
+.ti -1c
+.RI "uint32_t \fBdsk_ld\fP (uint32_t addr, int n, uint8_t *dsk)"
+.br
+.ti -1c
+.RI "void \fBdsk_st\fP (uint32_t addr, uint8_t data, int n, uint8_t *dsk)"
+.br
+.ti -1c
+.RI "void \fBupdate_descriptor\fP (uint32_t desc_idx, uint32_t desc_len, int q_num, \fBQueueState\fP *qs, uint8_t *mmem)"
+.br
+.ti -1c
+.RI "void \fBdisk_request\fP (uint8_t *mmem, uint8_t *mdsk, int q_num, \fBQueueState\fP *qs)"
+.br
+.in -1c
+.SS "Variables"
+
+.in +1c
+.ti -1c
+.RI "\fBMachine\fP \fBmm\fP"
+.br
+.ti -1c
+.RI "\fBMicrocn\fP \fBcc\fP"
+.br
+.in -1c
+.SH "Detailed Description"
+.PP 
+Implementation of the \fBDisk\fP class and related functions\&. 
+
+
+.SH "Author"
+.PP 
+Generated automatically by Doxygen for My Project from the source code\&.

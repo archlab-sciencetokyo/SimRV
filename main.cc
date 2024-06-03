@@ -1,18 +1,26 @@
-/******************************************************************************************/
-/**** SimCore/RISC-V since 2018-07-05                               ArchLab. TokyoTech ****/
-/******************************************************************************************/
+/**
+ * @file main.cc
+ * @brief SimCore/RISC-V Functional Simulator main file
+ * @details This file contains the main function and other supporting functions for the SimCore/RISC-V Functional Simulator.
+ *          It provides command line options for running the simulator with different configurations.
+ *          The simulator simulates the execution of RISC-V instructions and provides various debugging and tracing options.
+ *          It also supports the use of an I/O controller (micro-controller) for interacting with external devices.
+ *          The main function initializes the simulator, sets the command line options, and starts the simulation.
+ *          It also handles console input and output, and displays the simulation result at the end.
+ */
+
 #include "machine.h"
 
-/******************************************************************************************/
 #define PROJ "simrv"
 #define NAME "SimCore/RISC-V Functional Simulator"
 #define VER  "Version 1.3.7 test01 2020-07-11"
 
-/******************************************************************************************/
 Machine mm;  /* class machine                     */
 Microcn cc;  /* I/O controller (micro-controller) */
 
-/******************************************************************************************/
+/**
+ * @brief Displays the usage message for the simulator command line options.
+ */
 void usage(){
     static char UsageMessage[] =  "\
   -h         : display this help and exit \n\
@@ -44,11 +52,15 @@ void usage(){
   $ simrv -m img/hello.bin \n\
 ";
     printf(" Usage: %s [-option]\n", PROJ);
-    printf("%s", UsageMessage);   
+    printf("%s", UsageMessage);
     exit(0);
 }
 
-/******************************************************************************************/
+/**
+ * @brief Converts a string representation of a number to an unsigned 64-bit integer.
+ * @param num The string representation of the number.
+ * @return The unsigned 64-bit integer value of the number.
+ */
 uint64_t to_integer(char *num){
     uint64_t ret = 0;
     for (char *p = num; *p != '\0'; p++) {
@@ -63,13 +75,18 @@ uint64_t to_integer(char *num){
     return ret;
 }
 
-/******************************************************************************************/
+/**
+ * @brief Sets the command line options for the simulator.
+ * @param m Pointer to the Machine object representing the simulator.
+ * @param argc The number of command line arguments.
+ * @param argv The array of command line arguments.
+ */
 void set_options(Machine *m, int argc, char *argv[]){
     if (argc==1) usage();
-    
+
 //    static char buf1[256] = "img/simrv.dtb";
     static char buf2[256] = "img/iocon.bin";
-    m->s_fn_dvtree = NULL; 
+    m->s_fn_dvtree = NULL;
     m->s_fn_iocon  = buf2; /* set an initial file name */
     m->s_start_pc  = D_START_PC;
     m->s_enabletimer = 70000000ul;
@@ -103,8 +120,12 @@ void set_options(Machine *m, int argc, char *argv[]){
     }
 }
 
-/***** main function                                                                  *****/
-/******************************************************************************************/
+/**
+ * @brief The main function of the SimCore/RISC-V Functional Simulator.
+ * @param argc The number of command line arguments.
+ * @param argv The array of command line arguments.
+ * @return The exit status of the program.
+ */
 int main(int argc, char *argv[]){
     printf("__ %s %s\n", NAME, VER);
     printf("__ Please type Control+'q' to quit the simulation\n\n");
@@ -113,7 +134,7 @@ int main(int argc, char *argv[]){
 
     mm.init(argc, argv);
 
-    if(mm.s_use_uc){ /***** initialize micro-controller if it is used *****/
+    if(mm.s_use_uc){ /* I/O controller (micro-controller) */
         cc.init(mm.s_fn_iocon);
         cc.mmem       = mm.mmem;
         cc.cons_queue = mm.console->Queue;
@@ -125,8 +146,7 @@ int main(int argc, char *argv[]){
 
     gettimeofday(&mm.s_stime, NULL);
 
-    /***** init term (console) ************************************************************/
-    struct termios tty, pre_tty;
+    struct termios tty, pre_tty;  /* for console input */
     memset(&tty, 0, sizeof(tty));
     tcgetattr (0, &tty);
     memcpy(&pre_tty, &tty, sizeof(tty));
@@ -138,7 +158,6 @@ int main(int argc, char *argv[]){
     tty.c_cc[VMIN] = 1;
     tty.c_cc[VTIME] = 0;
     tcsetattr (0, TCSANOW, &tty);
-    /**************************************************************************************/
 
     mm.exec();
 
@@ -146,4 +165,3 @@ int main(int argc, char *argv[]){
     tcsetattr (0, TCSANOW, &pre_tty);
     return 0;
 }
-/******************************************************************************************/

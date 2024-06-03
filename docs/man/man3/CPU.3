@@ -1,0 +1,152 @@
+.TH "CPU" 3 "Version 1.3.7" "My Project" \" -*- nroff -*-
+.ad l
+.nh
+.SH NAME
+CPU
+.SH SYNOPSIS
+.br
+.PP
+.SS "Public Member Functions"
+
+.in +1c
+.ti -1c
+.RI "void \fBTLB_flush\fP ()"
+.br
+.ti -1c
+.RI "void \fBset_mstatus\fP (uint32_t)"
+.br
+.ti -1c
+.RI "uint32_t \fBget_mstatus\fP (uint32_t)"
+.br
+.ti -1c
+.RI "uint32_t \fBread_csr\fP (uint32_t)"
+.br
+.ti -1c
+.RI "void \fBwrite_csr\fP (uint32_t, uint32_t)"
+.br
+.ti -1c
+.RI "void \fBmret\fP ()"
+.br
+.ti -1c
+.RI "void \fBsret\fP ()"
+.br
+.ti -1c
+.RI "void \fBplic_update_mip\fP ()"
+.br
+.ti -1c
+.RI "void \fBplic_set_irq\fP (int, int)"
+.br
+.ti -1c
+.RI "void \fBraise_exception\fP (uint32_t, uint32_t)"
+.br
+.in -1c
+.SS "Public Attributes"
+
+.in +1c
+.ti -1c
+.RI "uint32_t \fBpc\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBreg\fP [32]"
+.br
+.ti -1c
+.RI "uint32_t \fBmstatus\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBmtvec\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBmscratch\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBmepc\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBmcause\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBmtval\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBmhartid\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBmisa\fP = 0x00141105"
+.br
+.ti -1c
+.RI "uint32_t \fBmie\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBmip\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBmedeleg\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBmideleg\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBmcounteren\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBstvec\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBsscratch\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBsepc\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBscause\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBstval\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBsatp\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBscounteren\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBload_res\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBreserved\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBpending_exception\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBpending_tval\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBpriv\fP = PRIV_M"
+.br
+.ti -1c
+.RI "uint32_t \fBplic_pending_irq\fP"
+.br
+.ti -1c
+.RI "uint32_t \fBplic_served_irq\fP"
+.br
+.ti -1c
+.RI "uint64_t \fBmtime\fP =1"
+.br
+.ti -1c
+.RI "uint64_t \fBmtimecmp\fP =0"
+.br
+.ti -1c
+.RI "\fBTLBEntry\fP \fBTLB_inst_r\fP [TLB_SIZE]"
+.br
+.ti -1c
+.RI "\fBTLBEntry\fP \fBTLB_data_r\fP [TLB_SIZE]"
+.br
+.ti -1c
+.RI "\fBTLBEntry\fP \fBTLB_data_w\fP [TLB_SIZE]"
+.br
+.in -1c
+
+.SH "Author"
+.PP 
+Generated automatically by Doxygen for My Project from the source code\&.

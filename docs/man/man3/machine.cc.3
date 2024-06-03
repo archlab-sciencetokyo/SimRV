@@ -1,0 +1,273 @@
+.TH "machine.cc" 3 "Version 1.3.7" "My Project" \" -*- nroff -*-
+.ad l
+.nh
+.SH NAME
+machine.cc \- Implementation of the machine-related functions\&.  
+
+.SH SYNOPSIS
+.br
+.PP
+\fR#include 'machine\&.h'\fP
+.br
+
+.SS "Macros"
+
+.in +1c
+.ti -1c
+.RI "#define \fBD_SIZE_DRAM\fP   (9 * 1024 * 1024)"
+.br
+.ti -1c
+.RI "#define \fBD_SIZE_DEVT\fP   (4 * 1024)"
+.br
+.ti -1c
+.RI "#define \fBD_SIZE_DISK\fP   (16 * 1024 * 1024)"
+.br
+.ti -1c
+.RI "#define \fBD_TRACEPC_INTERVAL\fP   1000"
+.br
+.ti -1c
+.RI "#define \fBCMD_PRINT_CHAR\fP   1 /* command for application mode using tohost */"
+.br
+.ti -1c
+.RI "#define \fBCMD_POWER_OFF\fP   2  /* command for application mode using tohost */"
+.br
+.in -1c
+.SS "Functions"
+
+.in +1c
+.ti -1c
+.RI "void \fBset_options\fP (\fBMachine\fP *m, int argc, char *argv[])"
+.br
+.RI "Set the options for the machine\&. "
+.ti -1c
+.RI "void \fBbinfile_gen\fP (\fBCPU\fP *s, uint8_t *ram, uint8_t *sector)"
+.br
+.RI "Generate a binary image file for FPGA run\&. "
+.ti -1c
+.RI "void \fBload_initram\fP (char *fname, uint8_t *ram)"
+.br
+.RI "Load the binary image file and initialize memory\&. "
+.ti -1c
+.RI "void \fBload_initmem\fP (std::string file, uint8_t *ram)"
+.br
+.RI "Load the memory initialization file\&. "
+.ti -1c
+.RI "uint32_t \fBram_read\fP (uint32_t addr, uint32_t funct3, uint8_t *ram)"
+.br
+.RI "Read data from RAM\&. "
+.ti -1c
+.RI "uint32_t \fBdisk_read\fP (uint32_t addr, uint32_t n, uint8_t *dsk)"
+.br
+.RI "Read data from disk\&. "
+.ti -1c
+.RI "uint32_t \fBqueue_read\fP (uint32_t addr, \fBQueueState\fP *q)"
+.br
+.RI "Read data from a queue\&. "
+.ti -1c
+.RI "void \fBqueue_write\fP (uint32_t addr, uint32_t wdata, \fBQueueState\fP *q)"
+.br
+.RI "Write data to a queue\&. "
+.ti -1c
+.RI "int \fBpage_walk\fP (uint32_t v_addr, uint32_t *p_addr, PTE_ACCESS access, \fBCPU\fP *cpu, uint8_t *mmem)"
+.br
+.RI "Perform Sv32 page walk\&. "
+.ti -1c
+.RI "void \fBinitfile_gen2\fP (\fBCPU\fP *s, uint8_t *ram, \fBConsole\fP *cons, \fBDisk\fP *disk, uint8_t *sector)"
+.br
+.ti -1c
+.RI "void \fBgen_traces\fP (uint32_t cpc)"
+.br
+.ti -1c
+.RI "void \fBgen_bp_traces\fP (uint32_t cpc, uint32_t jmp_pc, int r_opcode, int r_tkn)"
+.br
+.ti -1c
+.RI "void \fBload_devicetree\fP (uint8_t *ram)"
+.br
+.in -1c
+.SS "Variables"
+
+.in +1c
+.ti -1c
+.RI "\fBMachine\fP \fBmm\fP"
+.br
+.ti -1c
+.RI "\fBMicrocn\fP \fBcc\fP"
+.br
+.ti -1c
+.RI "int \fBhogehoge\fP = 0"
+.br
+.in -1c
+.SH "Detailed Description"
+.PP 
+Implementation of the machine-related functions\&. 
+
+This file contains the implementation of various functions related to the machine, such as generating binary image files, loading memory initialization files, reading from RAM and disk, and performing page walks for Sv32 page translation\&. 
+.SH "Function Documentation"
+.PP 
+.SS "void binfile_gen (\fBCPU\fP * s, uint8_t * ram, uint8_t * sector)"
+
+.PP
+Generate a binary image file for FPGA run\&. This function generates a binary image file named 'inits\&.bin' based on the provided RAM and sector data\&. It writes the RAM data, device tree data, and disk sector data to the file\&.
+.PP
+\fBParameters\fP
+.RS 4
+\fIs\fP Pointer to the \fBCPU\fP object\&. 
+.br
+\fIram\fP Pointer to the RAM data\&. 
+.br
+\fIsector\fP Pointer to the disk sector data\&. 
+.RE
+.PP
+
+.SS "uint32_t disk_read (uint32_t addr, uint32_t n, uint8_t * dsk)"
+
+.PP
+Read data from disk\&. This function reads data from the disk at the specified address and with the specified access size\&.
+.PP
+\fBParameters\fP
+.RS 4
+\fIaddr\fP Address to read from\&. 
+.br
+\fIn\fP Access size in bytes (1, 2, or 4)\&. 
+.br
+\fIdsk\fP Pointer to the disk data\&. 
+.RE
+.PP
+\fBReturns\fP
+.RS 4
+The read data\&. 
+.RE
+.PP
+
+.SS "void load_initmem (std::string file, uint8_t * ram)"
+
+.PP
+Load the memory initialization file\&. This function loads the memory initialization file specified by the given filename and initializes the RAM with its contents\&.
+.PP
+\fBParameters\fP
+.RS 4
+\fIfile\fP Filename of the memory initialization file\&. 
+.br
+\fIram\fP Pointer to the RAM data\&. 
+.RE
+.PP
+
+.SS "void load_initram (char * fname, uint8_t * ram)"
+
+.PP
+Load the binary image file and initialize memory\&. This function loads the binary image file specified by the given filename and initializes the RAM with its contents\&.
+.PP
+\fBParameters\fP
+.RS 4
+\fIfname\fP Filename of the binary image file\&. 
+.br
+\fIram\fP Pointer to the RAM data\&. 
+.RE
+.PP
+
+.SS "int page_walk (uint32_t v_addr, uint32_t * p_addr, PTE_ACCESS access, \fBCPU\fP * cpu, uint8_t * mmem)"
+
+.PP
+Perform Sv32 page walk\&. This function performs the Sv32 page walk for the given virtual address and returns the corresponding physical address\&. It also handles page faults and updates the page table entries if necessary\&.
+.PP
+\fBParameters\fP
+.RS 4
+\fIv_addr\fP Virtual address to translate\&. 
+.br
+\fIp_addr\fP Pointer to store the physical address\&. 
+.br
+\fIaccess\fP Access type (read or write)\&. 
+.br
+\fIcpu\fP Pointer to the \fBCPU\fP object\&. 
+.br
+\fImmem\fP Pointer to the main memory data\&. 
+.RE
+.PP
+\fBReturns\fP
+.RS 4
+0 if the translation is successful, -1 if there is a page fault\&. 
+.RE
+.PP
+
+.SS "uint32_t queue_read (uint32_t addr, \fBQueueState\fP * q)"
+
+.PP
+Read data from a queue\&. This function reads data from the specified address in the queue\&.
+.PP
+\fBParameters\fP
+.RS 4
+\fIaddr\fP Address to read from\&. 
+.br
+\fIq\fP Pointer to the \fBQueueState\fP object\&. 
+.RE
+.PP
+\fBReturns\fP
+.RS 4
+The read data\&. 
+.RE
+.PP
+
+.SS "void queue_write (uint32_t addr, uint32_t wdata, \fBQueueState\fP * q)"
+
+.PP
+Write data to a queue\&. This function writes data to the specified address in the queue\&.
+.PP
+\fBParameters\fP
+.RS 4
+\fIaddr\fP Address to write to\&. 
+.br
+\fIwdata\fP Data to write\&. 
+.br
+\fIq\fP Pointer to the \fBQueueState\fP object\&. 
+.RE
+.PP
+
+.SS "uint32_t ram_read (uint32_t addr, uint32_t funct3, uint8_t * ram)"
+
+.PP
+Read data from RAM\&. This function reads data from the RAM at the specified address and with the specified access size\&.
+.PP
+\fBParameters\fP
+.RS 4
+\fIaddr\fP Address to read from\&. 
+.br
+\fIfunct3\fP Function code specifying the access size\&. 
+.br
+\fIram\fP Pointer to the RAM data\&. 
+.RE
+.PP
+\fBReturns\fP
+.RS 4
+The read data\&. 
+.RE
+.PP
+
+.SS "void set_options (\fBMachine\fP * m, int argc, char * argv[])"
+
+.PP
+Set the options for the machine\&. This function sets the options for the machine based on the command line arguments\&.
+.PP
+\fBParameters\fP
+.RS 4
+\fIm\fP Pointer to the \fBMachine\fP object\&. 
+.br
+\fIargc\fP Number of command line arguments\&. 
+.br
+\fIargv\fP Array of command line argument strings\&.
+.RE
+.PP
+Set the options for the machine\&.
+.PP
+\fBParameters\fP
+.RS 4
+\fIm\fP Pointer to the \fBMachine\fP object representing the simulator\&. 
+.br
+\fIargc\fP The number of command line arguments\&. 
+.br
+\fIargv\fP The array of command line arguments\&. 
+.RE
+.PP
+
+.SH "Author"
+.PP 
+Generated automatically by Doxygen for My Project from the source code\&.

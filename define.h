@@ -1,6 +1,13 @@
-/******************************************************************************************/
-/**** SimCore/RISC-V since 2018-07-05                             ArchLab. TokyoTech   ****/
-/******************************************************************************************/
+/**
+ * @file define.h
+ * @brief Header file containing various definitions and constants for the RISC-V simulation.
+ *
+ * This file defines various constants, flags, and masks used in the RISC-V simulation.
+ * It also includes the necessary header files and enumerations for the simulation.
+ *
+ * @note This file is part of the SimCore/RISC-V project developed by ArchLab. TokyoTech.
+ * @since 2018-07-05
+ */
 #ifndef __define_h__
 #define __define_h__
 
@@ -243,7 +250,7 @@ MSTATUS_SPP | MSTATUS_FS | MSTATUS_XS | MSTATUS_SUM | MSTATUS_MXR)
 //
 //
 //
-// RISC-V Instruction Set Architecture 
+// RISC-V Instruction Set Architecture
 //
 //
 // The RISC-V Instruction Set Manual
@@ -542,5 +549,3 @@ struct Descriptor {
 
 #endif /* constant_h */
 /******************************************************************************************/
-
-
