@@ -31,8 +31,9 @@
 *.out
 *.app
 
-# Project related files
+# Project related files/folders
 simrv
+build
 bin
 app
 linux

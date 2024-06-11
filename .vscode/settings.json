@@ -1,0 +1,14 @@
+{
+    "makefile.launchConfigurations": [
+        {
+            "cwd": "/home/lennart/SimRV",
+            "binaryPath": "/home/lennart/SimRV/simrv",
+            "binaryArgs": []
+        },
+        {
+            "cwd": "/home/lennart/SimRV/build",
+            "binaryPath": "/home/lennart/SimRV/build/simrv",
+            "binaryArgs": []
+        }
+    ]
+}
