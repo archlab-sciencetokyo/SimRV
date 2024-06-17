@@ -1,4 +1,12 @@
-
+/**
+ * @file console.h
+ * @brief This file contains the declaration of the Console class
+ *
+ * @note This file is part of the SimCore/RISC-V project developed by
+ * ArchLab. TokyoTech.
+ * @since 2018-07-05
+ *
+ */
 #ifndef __console_hpp__
 #define __console_hpp__
 
