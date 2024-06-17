@@ -7,7 +7,7 @@ OBJS      = $(addprefix $(BUILDDIR)/, main.o machine.o module.o disk.o console.o
 HEAD      = console.h define.h disk.h machine.h module.h state.h
 
 .SUFFIXES: .o .cc
-.PHONY: all clean run middle
+.PHONY: all clean run middle docs
 
 all: $(BUILDDIR) $(BUILDDIR)/$(TARGET)
 
