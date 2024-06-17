@@ -30,6 +30,16 @@ Please ensure these are installed and properly configured in your system's PATH 
 4. Compile the program: `make`
 5. Run the program: `./simrv`
 
+## Documentation
+
+The source code is annotated with Doxygen comments. To generate the documentation, run `make docs` in the project directory. The documentation will be generated in the `docs` directory.
+
+The generated documentation can be viewed by opening `docs/html/index.html` in a web browser.
+
+To build the documentation the submodule doxygen-awesome-css is required. To clone the repository with the submodule run `git clone --recurse-submodules`.
+
+Or if you have already cloned the repository you can run `git submodule update --init --recursive`.
+
 ## History
 
 | Date | Version | Changes |
