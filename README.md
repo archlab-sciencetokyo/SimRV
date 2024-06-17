@@ -1,7 +1,8 @@
-
 # SimCore/RISC-V since 2018-07-05
 
 &copy; [ArchLab. TokyoTech](https://www.arch.cs.titech.ac.jp)
+
+[![C/C++ CI](https://github.com/archlab-tokyotech/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=main)](https://github.com/archlab-tokyotech/SimRV/actions/workflows/c-cpp.yml)
 
 ## How to run
 
