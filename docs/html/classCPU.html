@@ -99,15 +99,19 @@ $(function(){initNavTree('classCPU.html',''); initResizable(true); });
 
 <div class="header">
   <div class="summary">
-<a href="#pub-methods">Public Member Functions</a> &#124;
-<a href="#pub-attribs">Public Attributes</a> &#124;
 <a href="classCPU-members.html">List of all members</a>  </div>
   <div class="headertitle"><div class="title">CPU Class Reference</div></div>
 </div><!--header-->
 <div class="contents">
+
+<p><a class="el" href="classCPU.html" title="CPU state.">CPU</a> state.  
+ <a href="#details">More...</a></p>
+
+<p><code>#include &lt;<a class="el" href="state_8h_source.html">state.h</a>&gt;</code></p>
 <table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="pub-methods" name="pub-methods"></a>
 Public Member Functions</h2></td></tr>
+<tr><td colspan="2"><div class="groupHeader">Control Methods</div></td></tr>
 <tr class="memitem:a51b2e2b1311a13e57bd97594d0d7f064" id="r_a51b2e2b1311a13e57bd97594d0d7f064"><td class="memItemLeft" align="right" valign="top"><a id="a51b2e2b1311a13e57bd97594d0d7f064" name="a51b2e2b1311a13e57bd97594d0d7f064"></a>
 void&#160;</td><td class="memItemRight" valign="bottom"><b>TLB_flush</b> ()</td></tr>
 <tr class="separator:a51b2e2b1311a13e57bd97594d0d7f064"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -117,12 +121,17 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>set_mstatus</b> (uint
 <tr class="memitem:aeb0545638040b629c512a73d66043be8" id="r_aeb0545638040b629c512a73d66043be8"><td class="memItemLeft" align="right" valign="top"><a id="aeb0545638040b629c512a73d66043be8" name="aeb0545638040b629c512a73d66043be8"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>get_mstatus</b> (uint32_t)</td></tr>
 <tr class="separator:aeb0545638040b629c512a73d66043be8"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr><td colspan="2"><div class="groupHeader">Register Access</div></td></tr>
 <tr class="memitem:abbc62bc01db9a2655b323da39a0e722a" id="r_abbc62bc01db9a2655b323da39a0e722a"><td class="memItemLeft" align="right" valign="top"><a id="abbc62bc01db9a2655b323da39a0e722a" name="abbc62bc01db9a2655b323da39a0e722a"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>read_csr</b> (uint32_t)</td></tr>
 <tr class="separator:abbc62bc01db9a2655b323da39a0e722a"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a7c545c61491c10c905545fbca32e6be2" id="r_a7c545c61491c10c905545fbca32e6be2"><td class="memItemLeft" align="right" valign="top"><a id="a7c545c61491c10c905545fbca32e6be2" name="a7c545c61491c10c905545fbca32e6be2"></a>
 void&#160;</td><td class="memItemRight" valign="bottom"><b>write_csr</b> (uint32_t, uint32_t)</td></tr>
 <tr class="separator:a7c545c61491c10c905545fbca32e6be2"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr><td colspan="2"><div class="groupHeader">Exception Handling</div></td></tr>
+<tr class="memitem:ab42d86afb0a70b39726cf59c47f4c042" id="r_ab42d86afb0a70b39726cf59c47f4c042"><td class="memItemLeft" align="right" valign="top"><a id="ab42d86afb0a70b39726cf59c47f4c042" name="ab42d86afb0a70b39726cf59c47f4c042"></a>
+void&#160;</td><td class="memItemRight" valign="bottom"><b>raise_exception</b> (uint32_t, uint32_t)</td></tr>
+<tr class="separator:ab42d86afb0a70b39726cf59c47f4c042"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a0928d42cd7480de5cf9dffaa85c9825b" id="r_a0928d42cd7480de5cf9dffaa85c9825b"><td class="memItemLeft" align="right" valign="top"><a id="a0928d42cd7480de5cf9dffaa85c9825b" name="a0928d42cd7480de5cf9dffaa85c9825b"></a>
 void&#160;</td><td class="memItemRight" valign="bottom"><b>mret</b> ()</td></tr>
 <tr class="separator:a0928d42cd7480de5cf9dffaa85c9825b"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -135,115 +144,186 @@ void&#160;</td><td class="memItemRight" valign="bottom"><b>plic_update_mip</b> (
 <tr class="memitem:ad3fccafaa3fc09ca53cf1f9e40066a5e" id="r_ad3fccafaa3fc09ca53cf1f9e40066a5e"><td class="memItemLeft" align="right" valign="top"><a id="ad3fccafaa3fc09ca53cf1f9e40066a5e" name="ad3fccafaa3fc09ca53cf1f9e40066a5e"></a>
 void&#160;</td><td class="memItemRight" valign="bottom"><b>plic_set_irq</b> (int, int)</td></tr>
 <tr class="separator:ad3fccafaa3fc09ca53cf1f9e40066a5e"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:ab42d86afb0a70b39726cf59c47f4c042" id="r_ab42d86afb0a70b39726cf59c47f4c042"><td class="memItemLeft" align="right" valign="top"><a id="ab42d86afb0a70b39726cf59c47f4c042" name="ab42d86afb0a70b39726cf59c47f4c042"></a>
-void&#160;</td><td class="memItemRight" valign="bottom"><b>raise_exception</b> (uint32_t, uint32_t)</td></tr>
-<tr class="separator:ab42d86afb0a70b39726cf59c47f4c042"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="pub-attribs" name="pub-attribs"></a>
 Public Attributes</h2></td></tr>
+<tr><td colspan="2"><div class="groupHeader">CPU State</div></td></tr>
 <tr class="memitem:a9fcec591aed527ecf591d6b32b9516b7" id="r_a9fcec591aed527ecf591d6b32b9516b7"><td class="memItemLeft" align="right" valign="top"><a id="a9fcec591aed527ecf591d6b32b9516b7" name="a9fcec591aed527ecf591d6b32b9516b7"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>pc</b></td></tr>
+<tr class="memdesc:a9fcec591aed527ecf591d6b32b9516b7"><td class="mdescLeft">&#160;</td><td class="mdescRight">program counter <br /></td></tr>
 <tr class="separator:a9fcec591aed527ecf591d6b32b9516b7"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a8d099ff835cce4e27fa37e7029a463a8" id="r_a8d099ff835cce4e27fa37e7029a463a8"><td class="memItemLeft" align="right" valign="top"><a id="a8d099ff835cce4e27fa37e7029a463a8" name="a8d099ff835cce4e27fa37e7029a463a8"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>reg</b> [32]</td></tr>
+<tr class="memdesc:a8d099ff835cce4e27fa37e7029a463a8"><td class="mdescLeft">&#160;</td><td class="mdescRight">general purpose registers <br /></td></tr>
 <tr class="separator:a8d099ff835cce4e27fa37e7029a463a8"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:abc27c2c29439b94d83bceb95017d97b7" id="r_abc27c2c29439b94d83bceb95017d97b7"><td class="memItemLeft" align="right" valign="top"><a id="abc27c2c29439b94d83bceb95017d97b7" name="abc27c2c29439b94d83bceb95017d97b7"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>mstatus</b></td></tr>
+<tr class="memdesc:abc27c2c29439b94d83bceb95017d97b7"><td class="mdescLeft">&#160;</td><td class="mdescRight"><a class="el" href="classMachine.html" title="The Machine class represents the RISC-V machine.">Machine</a> status register. <br /></td></tr>
 <tr class="separator:abc27c2c29439b94d83bceb95017d97b7"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a0bc540bf25059b1ab35f684a19515f7a" id="r_a0bc540bf25059b1ab35f684a19515f7a"><td class="memItemLeft" align="right" valign="top"><a id="a0bc540bf25059b1ab35f684a19515f7a" name="a0bc540bf25059b1ab35f684a19515f7a"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>mtvec</b></td></tr>
+<tr class="memdesc:a0bc540bf25059b1ab35f684a19515f7a"><td class="mdescLeft">&#160;</td><td class="mdescRight"><a class="el" href="classMachine.html" title="The Machine class represents the RISC-V machine.">Machine</a> trap-handler base address. <br /></td></tr>
 <tr class="separator:a0bc540bf25059b1ab35f684a19515f7a"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a08db75c7e770adb13cfa2ea71db914d6" id="r_a08db75c7e770adb13cfa2ea71db914d6"><td class="memItemLeft" align="right" valign="top"><a id="a08db75c7e770adb13cfa2ea71db914d6" name="a08db75c7e770adb13cfa2ea71db914d6"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>mscratch</b></td></tr>
+<tr class="memdesc:a08db75c7e770adb13cfa2ea71db914d6"><td class="mdescLeft">&#160;</td><td class="mdescRight">Scratch register for machine trap handlers. <br /></td></tr>
 <tr class="separator:a08db75c7e770adb13cfa2ea71db914d6"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a6b45afb53066f123c01def08c2283c3d" id="r_a6b45afb53066f123c01def08c2283c3d"><td class="memItemLeft" align="right" valign="top"><a id="a6b45afb53066f123c01def08c2283c3d" name="a6b45afb53066f123c01def08c2283c3d"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>mepc</b></td></tr>
+<tr class="memdesc:a6b45afb53066f123c01def08c2283c3d"><td class="mdescLeft">&#160;</td><td class="mdescRight"><a class="el" href="classMachine.html" title="The Machine class represents the RISC-V machine.">Machine</a> exception program counter. <br /></td></tr>
 <tr class="separator:a6b45afb53066f123c01def08c2283c3d"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a8c2a0173f7e0f68ac8c403795bbd58a2" id="r_a8c2a0173f7e0f68ac8c403795bbd58a2"><td class="memItemLeft" align="right" valign="top"><a id="a8c2a0173f7e0f68ac8c403795bbd58a2" name="a8c2a0173f7e0f68ac8c403795bbd58a2"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>mcause</b></td></tr>
+<tr class="memdesc:a8c2a0173f7e0f68ac8c403795bbd58a2"><td class="mdescLeft">&#160;</td><td class="mdescRight"><a class="el" href="classMachine.html" title="The Machine class represents the RISC-V machine.">Machine</a> trap cause. <br /></td></tr>
 <tr class="separator:a8c2a0173f7e0f68ac8c403795bbd58a2"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a88e2ad154aa1c8362148ee6e0145e2d1" id="r_a88e2ad154aa1c8362148ee6e0145e2d1"><td class="memItemLeft" align="right" valign="top"><a id="a88e2ad154aa1c8362148ee6e0145e2d1" name="a88e2ad154aa1c8362148ee6e0145e2d1"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>mtval</b></td></tr>
+<tr class="memdesc:a88e2ad154aa1c8362148ee6e0145e2d1"><td class="mdescLeft">&#160;</td><td class="mdescRight"><a class="el" href="classMachine.html" title="The Machine class represents the RISC-V machine.">Machine</a> bad address or instruction. <br /></td></tr>
 <tr class="separator:a88e2ad154aa1c8362148ee6e0145e2d1"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a72dfc5507501998b0520909f0d4e708d" id="r_a72dfc5507501998b0520909f0d4e708d"><td class="memItemLeft" align="right" valign="top"><a id="a72dfc5507501998b0520909f0d4e708d" name="a72dfc5507501998b0520909f0d4e708d"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>mhartid</b></td></tr>
+<tr class="memdesc:a72dfc5507501998b0520909f0d4e708d"><td class="mdescLeft">&#160;</td><td class="mdescRight">Hardware thread ID. <br /></td></tr>
 <tr class="separator:a72dfc5507501998b0520909f0d4e708d"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a26a5e98df5eeaaff251109e7a4e6b344" id="r_a26a5e98df5eeaaff251109e7a4e6b344"><td class="memItemLeft" align="right" valign="top"><a id="a26a5e98df5eeaaff251109e7a4e6b344" name="a26a5e98df5eeaaff251109e7a4e6b344"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>misa</b> = 0x00141105</td></tr>
+<tr class="memdesc:a26a5e98df5eeaaff251109e7a4e6b344"><td class="mdescLeft">&#160;</td><td class="mdescRight"><a class="el" href="classMachine.html" title="The Machine class represents the RISC-V machine.">Machine</a> ISA register. RV32acim by default. <br /></td></tr>
 <tr class="separator:a26a5e98df5eeaaff251109e7a4e6b344"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a6e566d4437c740b17faa9843f82ee75b" id="r_a6e566d4437c740b17faa9843f82ee75b"><td class="memItemLeft" align="right" valign="top"><a id="a6e566d4437c740b17faa9843f82ee75b" name="a6e566d4437c740b17faa9843f82ee75b"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>mie</b></td></tr>
+<tr class="memdesc:a6e566d4437c740b17faa9843f82ee75b"><td class="mdescLeft">&#160;</td><td class="mdescRight"><a class="el" href="classMachine.html" title="The Machine class represents the RISC-V machine.">Machine</a> interrupt-enable register. <br /></td></tr>
 <tr class="separator:a6e566d4437c740b17faa9843f82ee75b"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a7e14294a4f217a0e11a62f99c9436ec8" id="r_a7e14294a4f217a0e11a62f99c9436ec8"><td class="memItemLeft" align="right" valign="top"><a id="a7e14294a4f217a0e11a62f99c9436ec8" name="a7e14294a4f217a0e11a62f99c9436ec8"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>mip</b></td></tr>
+<tr class="memdesc:a7e14294a4f217a0e11a62f99c9436ec8"><td class="mdescLeft">&#160;</td><td class="mdescRight"><a class="el" href="classMachine.html" title="The Machine class represents the RISC-V machine.">Machine</a> interrupt pending. <br /></td></tr>
 <tr class="separator:a7e14294a4f217a0e11a62f99c9436ec8"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a24b6782c57ce801da30aa0315ee57c42" id="r_a24b6782c57ce801da30aa0315ee57c42"><td class="memItemLeft" align="right" valign="top"><a id="a24b6782c57ce801da30aa0315ee57c42" name="a24b6782c57ce801da30aa0315ee57c42"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>medeleg</b></td></tr>
+<tr class="memdesc:a24b6782c57ce801da30aa0315ee57c42"><td class="mdescLeft">&#160;</td><td class="mdescRight"><a class="el" href="classMachine.html" title="The Machine class represents the RISC-V machine.">Machine</a> exception delegation register. <br /></td></tr>
 <tr class="separator:a24b6782c57ce801da30aa0315ee57c42"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:abef42bdbdb03d7f14b514afd3d270b2f" id="r_abef42bdbdb03d7f14b514afd3d270b2f"><td class="memItemLeft" align="right" valign="top"><a id="abef42bdbdb03d7f14b514afd3d270b2f" name="abef42bdbdb03d7f14b514afd3d270b2f"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>mideleg</b></td></tr>
+<tr class="memdesc:abef42bdbdb03d7f14b514afd3d270b2f"><td class="mdescLeft">&#160;</td><td class="mdescRight"><a class="el" href="classMachine.html" title="The Machine class represents the RISC-V machine.">Machine</a> interrupt delegation register. <br /></td></tr>
 <tr class="separator:abef42bdbdb03d7f14b514afd3d270b2f"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:aca8ee99cd2465544ddb5deb0d94059a5" id="r_aca8ee99cd2465544ddb5deb0d94059a5"><td class="memItemLeft" align="right" valign="top"><a id="aca8ee99cd2465544ddb5deb0d94059a5" name="aca8ee99cd2465544ddb5deb0d94059a5"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>mcounteren</b></td></tr>
+<tr class="memdesc:aca8ee99cd2465544ddb5deb0d94059a5"><td class="mdescLeft">&#160;</td><td class="mdescRight"><a class="el" href="classMachine.html" title="The Machine class represents the RISC-V machine.">Machine</a> counter enable. <br /></td></tr>
 <tr class="separator:aca8ee99cd2465544ddb5deb0d94059a5"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a036e4742563ab1c28eceba16cfa40344" id="r_a036e4742563ab1c28eceba16cfa40344"><td class="memItemLeft" align="right" valign="top"><a id="a036e4742563ab1c28eceba16cfa40344" name="a036e4742563ab1c28eceba16cfa40344"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>stvec</b></td></tr>
+<tr class="memdesc:a036e4742563ab1c28eceba16cfa40344"><td class="mdescLeft">&#160;</td><td class="mdescRight">Supervisor trap handler base address. <br /></td></tr>
 <tr class="separator:a036e4742563ab1c28eceba16cfa40344"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ae00a44d09b1a6e1083480e5a5842be44" id="r_ae00a44d09b1a6e1083480e5a5842be44"><td class="memItemLeft" align="right" valign="top"><a id="ae00a44d09b1a6e1083480e5a5842be44" name="ae00a44d09b1a6e1083480e5a5842be44"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>sscratch</b></td></tr>
+<tr class="memdesc:ae00a44d09b1a6e1083480e5a5842be44"><td class="mdescLeft">&#160;</td><td class="mdescRight">Scratch register for supervisor trap handlers. <br /></td></tr>
 <tr class="separator:ae00a44d09b1a6e1083480e5a5842be44"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a5ad7c3a46995ee1157f84e8252a3837b" id="r_a5ad7c3a46995ee1157f84e8252a3837b"><td class="memItemLeft" align="right" valign="top"><a id="a5ad7c3a46995ee1157f84e8252a3837b" name="a5ad7c3a46995ee1157f84e8252a3837b"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>sepc</b></td></tr>
+<tr class="memdesc:a5ad7c3a46995ee1157f84e8252a3837b"><td class="mdescLeft">&#160;</td><td class="mdescRight">Supervisor exception program counter. <br /></td></tr>
 <tr class="separator:a5ad7c3a46995ee1157f84e8252a3837b"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a1d182cfbfda3402584b539cdf139a4ef" id="r_a1d182cfbfda3402584b539cdf139a4ef"><td class="memItemLeft" align="right" valign="top"><a id="a1d182cfbfda3402584b539cdf139a4ef" name="a1d182cfbfda3402584b539cdf139a4ef"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>scause</b></td></tr>
+<tr class="memdesc:a1d182cfbfda3402584b539cdf139a4ef"><td class="mdescLeft">&#160;</td><td class="mdescRight">Supervisor trap cause. <br /></td></tr>
 <tr class="separator:a1d182cfbfda3402584b539cdf139a4ef"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a82bd497c316dbb4655cec5187b6da723" id="r_a82bd497c316dbb4655cec5187b6da723"><td class="memItemLeft" align="right" valign="top"><a id="a82bd497c316dbb4655cec5187b6da723" name="a82bd497c316dbb4655cec5187b6da723"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>stval</b></td></tr>
+<tr class="memdesc:a82bd497c316dbb4655cec5187b6da723"><td class="mdescLeft">&#160;</td><td class="mdescRight">Supervisor bad address or instruction. <br /></td></tr>
 <tr class="separator:a82bd497c316dbb4655cec5187b6da723"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a36b682839951d8268d56f20144ccd88f" id="r_a36b682839951d8268d56f20144ccd88f"><td class="memItemLeft" align="right" valign="top"><a id="a36b682839951d8268d56f20144ccd88f" name="a36b682839951d8268d56f20144ccd88f"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>satp</b></td></tr>
+<tr class="memdesc:a36b682839951d8268d56f20144ccd88f"><td class="mdescLeft">&#160;</td><td class="mdescRight">Supervisor address translation and protection. <br /></td></tr>
 <tr class="separator:a36b682839951d8268d56f20144ccd88f"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ac04114633fa639c42614d92efebf1f82" id="r_ac04114633fa639c42614d92efebf1f82"><td class="memItemLeft" align="right" valign="top"><a id="ac04114633fa639c42614d92efebf1f82" name="ac04114633fa639c42614d92efebf1f82"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>scounteren</b></td></tr>
+<tr class="memdesc:ac04114633fa639c42614d92efebf1f82"><td class="mdescLeft">&#160;</td><td class="mdescRight">Supervisor counter enable. <br /></td></tr>
 <tr class="separator:ac04114633fa639c42614d92efebf1f82"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a5b54a5a9b683ec938e3431d03a95cc69" id="r_a5b54a5a9b683ec938e3431d03a95cc69"><td class="memItemLeft" align="right" valign="top"><a id="a5b54a5a9b683ec938e3431d03a95cc69" name="a5b54a5a9b683ec938e3431d03a95cc69"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>load_res</b></td></tr>
+<tr class="memdesc:a5b54a5a9b683ec938e3431d03a95cc69"><td class="mdescLeft">&#160;</td><td class="mdescRight">For atomic LR/SC. <br /></td></tr>
 <tr class="separator:a5b54a5a9b683ec938e3431d03a95cc69"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a41a2d91865f21fb0f5aedf196e6a62f4" id="r_a41a2d91865f21fb0f5aedf196e6a62f4"><td class="memItemLeft" align="right" valign="top"><a id="a41a2d91865f21fb0f5aedf196e6a62f4" name="a41a2d91865f21fb0f5aedf196e6a62f4"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>reserved</b></td></tr>
+<tr class="memdesc:a41a2d91865f21fb0f5aedf196e6a62f4"><td class="mdescLeft">&#160;</td><td class="mdescRight">Reserved for future use. <br /></td></tr>
 <tr class="separator:a41a2d91865f21fb0f5aedf196e6a62f4"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ab959e7d538ad02c5101c5cf372c5c702" id="r_ab959e7d538ad02c5101c5cf372c5c702"><td class="memItemLeft" align="right" valign="top"><a id="ab959e7d538ad02c5101c5cf372c5c702" name="ab959e7d538ad02c5101c5cf372c5c702"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>pending_exception</b></td></tr>
+<tr class="memdesc:ab959e7d538ad02c5101c5cf372c5c702"><td class="mdescLeft">&#160;</td><td class="mdescRight">Exception code for pending exception. <br /></td></tr>
 <tr class="separator:ab959e7d538ad02c5101c5cf372c5c702"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:af1d202bf9c0499f3ddebd32a6e6410bf" id="r_af1d202bf9c0499f3ddebd32a6e6410bf"><td class="memItemLeft" align="right" valign="top"><a id="af1d202bf9c0499f3ddebd32a6e6410bf" name="af1d202bf9c0499f3ddebd32a6e6410bf"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>pending_tval</b></td></tr>
+<tr class="memdesc:af1d202bf9c0499f3ddebd32a6e6410bf"><td class="mdescLeft">&#160;</td><td class="mdescRight">Additional information for pending exception. <br /></td></tr>
 <tr class="separator:af1d202bf9c0499f3ddebd32a6e6410bf"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:afb78932e789a0c1f8db25f59dd5a1e17" id="r_afb78932e789a0c1f8db25f59dd5a1e17"><td class="memItemLeft" align="right" valign="top"><a id="afb78932e789a0c1f8db25f59dd5a1e17" name="afb78932e789a0c1f8db25f59dd5a1e17"></a>
-uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>priv</b> = PRIV_M</td></tr>
+<tr class="memitem:afb78932e789a0c1f8db25f59dd5a1e17" id="r_afb78932e789a0c1f8db25f59dd5a1e17"><td class="memItemLeft" align="right" valign="top">uint32_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#afb78932e789a0c1f8db25f59dd5a1e17">priv</a></td></tr>
+<tr class="memdesc:afb78932e789a0c1f8db25f59dd5a1e17"><td class="mdescLeft">&#160;</td><td class="mdescRight">Current privilege mode: 3=machine, 1=supervisor, 0=user.  <br /></td></tr>
 <tr class="separator:afb78932e789a0c1f8db25f59dd5a1e17"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a423218e60f92078b1ed2a7040f51321c" id="r_a423218e60f92078b1ed2a7040f51321c"><td class="memItemLeft" align="right" valign="top"><a id="a423218e60f92078b1ed2a7040f51321c" name="a423218e60f92078b1ed2a7040f51321c"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>plic_pending_irq</b></td></tr>
+<tr class="memdesc:a423218e60f92078b1ed2a7040f51321c"><td class="mdescLeft">&#160;</td><td class="mdescRight">Pending IRQ number in PLIC. <br /></td></tr>
 <tr class="separator:a423218e60f92078b1ed2a7040f51321c"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a875ab1b0c2d8ba81399c2676d0512271" id="r_a875ab1b0c2d8ba81399c2676d0512271"><td class="memItemLeft" align="right" valign="top"><a id="a875ab1b0c2d8ba81399c2676d0512271" name="a875ab1b0c2d8ba81399c2676d0512271"></a>
 uint32_t&#160;</td><td class="memItemRight" valign="bottom"><b>plic_served_irq</b></td></tr>
+<tr class="memdesc:a875ab1b0c2d8ba81399c2676d0512271"><td class="mdescLeft">&#160;</td><td class="mdescRight">Last served IRQ number in PLIC. <br /></td></tr>
 <tr class="separator:a875ab1b0c2d8ba81399c2676d0512271"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:ab022fd66b5f29c32651babfc524c1e49" id="r_ab022fd66b5f29c32651babfc524c1e49"><td class="memItemLeft" align="right" valign="top"><a id="ab022fd66b5f29c32651babfc524c1e49" name="ab022fd66b5f29c32651babfc524c1e49"></a>
-uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>mtime</b> =1</td></tr>
+<tr class="memitem:ab022fd66b5f29c32651babfc524c1e49" id="r_ab022fd66b5f29c32651babfc524c1e49"><td class="memItemLeft" align="right" valign="top">uint64_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#ab022fd66b5f29c32651babfc524c1e49">mtime</a></td></tr>
+<tr class="memdesc:ab022fd66b5f29c32651babfc524c1e49"><td class="mdescLeft">&#160;</td><td class="mdescRight"><a class="el" href="classMachine.html" title="The Machine class represents the RISC-V machine.">Machine</a> time, approximates the number of executed instructions.  <br /></td></tr>
 <tr class="separator:ab022fd66b5f29c32651babfc524c1e49"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a048300325e2bb43ed32a69fb21c8c117" id="r_a048300325e2bb43ed32a69fb21c8c117"><td class="memItemLeft" align="right" valign="top"><a id="a048300325e2bb43ed32a69fb21c8c117" name="a048300325e2bb43ed32a69fb21c8c117"></a>
-uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>mtimecmp</b> =0</td></tr>
+uint64_t&#160;</td><td class="memItemRight" valign="bottom"><b>mtimecmp</b> = 0</td></tr>
+<tr class="memdesc:a048300325e2bb43ed32a69fb21c8c117"><td class="mdescLeft">&#160;</td><td class="mdescRight">Time comparator for machine timer interrupts. <br /></td></tr>
 <tr class="separator:a048300325e2bb43ed32a69fb21c8c117"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr><td colspan="2"><div class="groupHeader">TLB</div></td></tr>
 <tr class="memitem:aa713780fb86fbdf8be6911ae16bf70c9" id="r_aa713780fb86fbdf8be6911ae16bf70c9"><td class="memItemLeft" align="right" valign="top"><a id="aa713780fb86fbdf8be6911ae16bf70c9" name="aa713780fb86fbdf8be6911ae16bf70c9"></a>
 <a class="el" href="structTLBEntry.html">TLBEntry</a>&#160;</td><td class="memItemRight" valign="bottom"><b>TLB_inst_r</b> [TLB_SIZE]</td></tr>
+<tr class="memdesc:aa713780fb86fbdf8be6911ae16bf70c9"><td class="mdescLeft">&#160;</td><td class="mdescRight">TLB for instruction. <br /></td></tr>
 <tr class="separator:aa713780fb86fbdf8be6911ae16bf70c9"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a7da2abae39eeccb6f95c95535054e403" id="r_a7da2abae39eeccb6f95c95535054e403"><td class="memItemLeft" align="right" valign="top"><a id="a7da2abae39eeccb6f95c95535054e403" name="a7da2abae39eeccb6f95c95535054e403"></a>
 <a class="el" href="structTLBEntry.html">TLBEntry</a>&#160;</td><td class="memItemRight" valign="bottom"><b>TLB_data_r</b> [TLB_SIZE]</td></tr>
+<tr class="memdesc:a7da2abae39eeccb6f95c95535054e403"><td class="mdescLeft">&#160;</td><td class="mdescRight">TLB for data (load) <br /></td></tr>
 <tr class="separator:a7da2abae39eeccb6f95c95535054e403"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:aa516f96937b6116f2ac572bfb64b2e60" id="r_aa516f96937b6116f2ac572bfb64b2e60"><td class="memItemLeft" align="right" valign="top"><a id="aa516f96937b6116f2ac572bfb64b2e60" name="aa516f96937b6116f2ac572bfb64b2e60"></a>
 <a class="el" href="structTLBEntry.html">TLBEntry</a>&#160;</td><td class="memItemRight" valign="bottom"><b>TLB_data_w</b> [TLB_SIZE]</td></tr>
+<tr class="memdesc:aa516f96937b6116f2ac572bfb64b2e60"><td class="mdescLeft">&#160;</td><td class="mdescRight">TLB for data (store) <br /></td></tr>
 <tr class="separator:aa516f96937b6116f2ac572bfb64b2e60"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table>
+<a name="details" id="details"></a><h2 class="groupheader">Detailed Description</h2>
+<div class="textblock"><p><a class="el" href="classCPU.html" title="CPU state.">CPU</a> state. </p>
+<p>This class represents the state of the <a class="el" href="classCPU.html" title="CPU state.">CPU</a>. It includes the general purpose registers, the program counter, and the control and status registers (CSRs). The class also includes the TLB for instruction and data accesses. </p>
+</div><h2 class="groupheader">Member Data Documentation</h2>
+<a id="ab022fd66b5f29c32651babfc524c1e49" name="ab022fd66b5f29c32651babfc524c1e49"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ab022fd66b5f29c32651babfc524c1e49">&#9670;&#160;</a></span>mtime</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">uint64_t CPU::mtime</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+<b>Initial value:</b><div class="fragment"><div class="line">=</div>
+<div class="line">      1</div>
+</div><!-- fragment -->
+<p><a class="el" href="classMachine.html" title="The Machine class represents the RISC-V machine.">Machine</a> time, approximates the number of executed instructions. </p>
+
+</div>
+</div>
+<a id="afb78932e789a0c1f8db25f59dd5a1e17" name="afb78932e789a0c1f8db25f59dd5a1e17"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#afb78932e789a0c1f8db25f59dd5a1e17">&#9670;&#160;</a></span>priv</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">uint32_t CPU::priv</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+<b>Initial value:</b><div class="fragment"><div class="line">=</div>
+<div class="line">      PRIV_M</div>
+</div><!-- fragment -->
+<p>Current privilege mode: 3=machine, 1=supervisor, 0=user. </p>
+
+</div>
+</div>
 <hr/>The documentation for this class was generated from the following files:<ul>
 <li><a class="el" href="state_8h_source.html">state.h</a></li>
 <li><b>state.cc</b></li>

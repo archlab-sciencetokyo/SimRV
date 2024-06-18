@@ -108,37 +108,40 @@ $(function(){initNavTree('define_8h.html',''); initResizable(true); });
 
 <p>Header file containing various definitions and constants for the RISC-V simulation.  
 <a href="#details">More...</a></p>
-<div class="textblock"><code>#include &lt;iostream&gt;</code><br />
-<code>#include &lt;fstream&gt;</code><br />
-<code>#include &lt;iomanip&gt;</code><br />
-<code>#include &lt;string&gt;</code><br />
-<code>#include &lt;cstdio&gt;</code><br />
-<code>#include &lt;cstdlib&gt;</code><br />
-<code>#include &lt;cstdint&gt;</code><br />
-<code>#include &lt;cstring&gt;</code><br />
-<code>#include &lt;signal.h&gt;</code><br />
-<code>#include &lt;stack&gt;</code><br />
-<code>#include &lt;sys/time.h&gt;</code><br />
+<div class="textblock"><code>#include &lt;signal.h&gt;</code><br />
 <code>#include &lt;sys/select.h&gt;</code><br />
 <code>#include &lt;sys/stat.h&gt;</code><br />
-<code>#include &lt;unistd.h&gt;</code><br />
+<code>#include &lt;sys/time.h&gt;</code><br />
 <code>#include &lt;termios.h&gt;</code><br />
+<code>#include &lt;unistd.h&gt;</code><br />
+<code>#include &lt;cstdint&gt;</code><br />
+<code>#include &lt;cstdio&gt;</code><br />
+<code>#include &lt;cstdlib&gt;</code><br />
+<code>#include &lt;cstring&gt;</code><br />
+<code>#include &lt;fstream&gt;</code><br />
+<code>#include &lt;iomanip&gt;</code><br />
+<code>#include &lt;iostream&gt;</code><br />
+<code>#include &lt;stack&gt;</code><br />
+<code>#include &lt;string&gt;</code><br />
 </div>
 <p><a href="define_8h_source.html">Go to the source code of this file.</a></p>
 <table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="nested-classes" name="nested-classes"></a>
 Classes</h2></td></tr>
 <tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structQueueState.html">QueueState</a></td></tr>
+<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">Structure representing the state of a queue.  <a href="structQueueState.html#details">More...</a><br /></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structBlockRequestHeader.html">BlockRequestHeader</a></td></tr>
+<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">Structure representing the header of a block request.  <a href="structBlockRequestHeader.html#details">More...</a><br /></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structDescriptor.html">Descriptor</a></td></tr>
+<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">Represents a descriptor.  <a href="structDescriptor.html#details">More...</a><br /></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="define-members" name="define-members"></a>
 Macros</h2></td></tr>
 <tr class="memitem:ac01a41da7f544d80bb481cda3674a1b9" id="r_ac01a41da7f544d80bb481cda3674a1b9"><td class="memItemLeft" align="right" valign="top"><a id="ac01a41da7f544d80bb481cda3674a1b9" name="ac01a41da7f544d80bb481cda3674a1b9"></a>
-#define&#160;</td><td class="memItemRight" valign="bottom"><b>D_START_PC</b>&#160;&#160;&#160;(0x80000000)</td></tr>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>D_START_PC</b>&#160;&#160;&#160;  (0x80000000)</td></tr>
 <tr class="separator:ac01a41da7f544d80bb481cda3674a1b9"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a0e6ce30f468852290dc630020e6a0a0d" id="r_a0e6ce30f468852290dc630020e6a0a0d"><td class="memItemLeft" align="right" valign="top"><a id="a0e6ce30f468852290dc630020e6a0a0d" name="a0e6ce30f468852290dc630020e6a0a0d"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>D_INITD_ADDR</b>&#160;&#160;&#160;(0x01000000)</td></tr>
@@ -276,7 +279,7 @@ Macros</h2></td></tr>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>TLB_SIZE</b>&#160;&#160;&#160;(4)</td></tr>
 <tr class="separator:a616cf958b8efa09da7b94a9f2cd1d8b8"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ad183847182796385b20a5cc93f3fe963" id="r_ad183847182796385b20a5cc93f3fe963"><td class="memItemLeft" align="right" valign="top"><a id="ad183847182796385b20a5cc93f3fe963" name="ad183847182796385b20a5cc93f3fe963"></a>
-#define&#160;</td><td class="memItemRight" valign="bottom"><b>LCMEM_SIZE</b>&#160;&#160;&#160;(32*1024)</td></tr>
+#define&#160;</td><td class="memItemRight" valign="bottom"><b>LCMEM_SIZE</b>&#160;&#160;&#160;(32 * 1024)</td></tr>
 <tr class="separator:ad183847182796385b20a5cc93f3fe963"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a604ffb40f3df081f5d1555ffa9659eff" id="r_a604ffb40f3df081f5d1555ffa9659eff"><td class="memItemLeft" align="right" valign="top"><a id="a604ffb40f3df081f5d1555ffa9659eff" name="a604ffb40f3df081f5d1555ffa9659eff"></a>
 #define&#160;</td><td class="memItemRight" valign="bottom"><b>CAUSE_INTERRUPT</b>&#160;&#160;&#160;((uint32_t)1 &lt;&lt; 31)</td></tr>
@@ -968,11 +971,9 @@ Enumerations</h2></td></tr>
         </tr>
       </table>
 </div><div class="memdoc">
-<b>Value:</b><div class="fragment"><div class="line">(MSTATUS_UIE | MSTATUS_SIE | MSTATUS_MIE | \</div>
-<div class="line">MSTATUS_UPIE | MSTATUS_SPIE | MSTATUS_MPIE | \</div>
-<div class="line">MSTATUS_SPP | MSTATUS_MPP | \</div>
-<div class="line">MSTATUS_FS | \</div>
-<div class="line">MSTATUS_MPRV | MSTATUS_SUM | MSTATUS_MXR)</div>
+<b>Value:</b><div class="fragment"><div class="line">  (MSTATUS_UIE | MSTATUS_SIE | MSTATUS_MIE | MSTATUS_UPIE | MSTATUS_SPIE | \</div>
+<div class="line">   MSTATUS_MPIE | MSTATUS_SPP | MSTATUS_MPP | MSTATUS_FS | MSTATUS_MPRV |  \</div>
+<div class="line">   MSTATUS_SUM | MSTATUS_MXR)</div>
 </div><!-- fragment -->
 </div>
 </div>
@@ -987,8 +988,8 @@ Enumerations</h2></td></tr>
         </tr>
       </table>
 </div><div class="memdoc">
-<b>Value:</b><div class="fragment"><div class="line">(MSTATUS_UIE | MSTATUS_SIE | MSTATUS_UPIE | MSTATUS_SPIE | \</div>
-<div class="line">MSTATUS_SPP | MSTATUS_FS | MSTATUS_XS | MSTATUS_SUM | MSTATUS_MXR)</div>
+<b>Value:</b><div class="fragment"><div class="line">  (MSTATUS_UIE | MSTATUS_SIE | MSTATUS_UPIE | MSTATUS_SPIE | MSTATUS_SPP | \</div>
+<div class="line">   MSTATUS_FS | MSTATUS_XS | MSTATUS_SUM | MSTATUS_MXR)</div>
 </div><!-- fragment -->
 </div>
 </div>

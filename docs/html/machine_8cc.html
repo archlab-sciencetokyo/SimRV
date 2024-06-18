@@ -108,7 +108,7 @@ $(function(){initNavTree('machine_8cc.html',''); initResizable(true); });
 
 <p>Implementation of the machine-related functions.  
 <a href="#details">More...</a></p>
-<div class="textblock"><code>#include &quot;machine.h&quot;</code><br />
+<div class="textblock"><code>#include &quot;<a class="el" href="machine_8h_source.html">machine.h</a>&quot;</code><br />
 </div><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="define-members" name="define-members"></a>
 Macros</h2></td></tr>
@@ -217,7 +217,7 @@ int&#160;</td><td class="memItemRight" valign="bottom"><b>hogehoge</b> = 0</td><
 <p>This function generates a binary image file named "inits.bin" based on the provided RAM and sector data. It writes the RAM data, device tree data, and disk sector data to the file.</p>
 <dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
-    <tr><td class="paramname">s</td><td>Pointer to the <a class="el" href="classCPU.html">CPU</a> object. </td></tr>
+    <tr><td class="paramname">s</td><td>Pointer to the <a class="el" href="classCPU.html" title="CPU state.">CPU</a> object. </td></tr>
     <tr><td class="paramname">ram</td><td>Pointer to the RAM data. </td></tr>
     <tr><td class="paramname">sector</td><td>Pointer to the disk sector data. </td></tr>
   </table>
@@ -367,7 +367,7 @@ int&#160;</td><td class="memItemRight" valign="bottom"><b>hogehoge</b> = 0</td><
     <tr><td class="paramname">v_addr</td><td>Virtual address to translate. </td></tr>
     <tr><td class="paramname">p_addr</td><td>Pointer to store the physical address. </td></tr>
     <tr><td class="paramname">access</td><td>Access type (read or write). </td></tr>
-    <tr><td class="paramname">cpu</td><td>Pointer to the <a class="el" href="classCPU.html">CPU</a> object. </td></tr>
+    <tr><td class="paramname">cpu</td><td>Pointer to the <a class="el" href="classCPU.html" title="CPU state.">CPU</a> object. </td></tr>
     <tr><td class="paramname">mmem</td><td>Pointer to the main memory data. </td></tr>
   </table>
   </dd>
@@ -400,7 +400,7 @@ int&#160;</td><td class="memItemRight" valign="bottom"><b>hogehoge</b> = 0</td><
 <dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
     <tr><td class="paramname">addr</td><td>Address to read from. </td></tr>
-    <tr><td class="paramname">q</td><td>Pointer to the <a class="el" href="structQueueState.html">QueueState</a> object. </td></tr>
+    <tr><td class="paramname">q</td><td>Pointer to the <a class="el" href="structQueueState.html" title="Structure representing the state of a queue.">QueueState</a> object. </td></tr>
   </table>
   </dd>
 </dl>
@@ -438,7 +438,7 @@ int&#160;</td><td class="memItemRight" valign="bottom"><b>hogehoge</b> = 0</td><
   <table class="params">
     <tr><td class="paramname">addr</td><td>Address to write to. </td></tr>
     <tr><td class="paramname">wdata</td><td>Data to write. </td></tr>
-    <tr><td class="paramname">q</td><td>Pointer to the <a class="el" href="structQueueState.html">QueueState</a> object. </td></tr>
+    <tr><td class="paramname">q</td><td>Pointer to the <a class="el" href="structQueueState.html" title="Structure representing the state of a queue.">QueueState</a> object. </td></tr>
   </table>
   </dd>
 </dl>

@@ -2,10 +2,13 @@
 .ad l
 .nh
 .SH NAME
-TLBEntry
+TLBEntry \- TLB entry\&.  
+
 .SH SYNOPSIS
 .br
 .PP
+.PP
+\fR#include <state\&.h>\fP
 .SS "Public Attributes"
 
 .in +1c
@@ -16,6 +19,11 @@ TLBEntry
 .RI "uint32_t \fBp_addr\fP"
 .br
 .in -1c
+.SH "Detailed Description"
+.PP 
+TLB entry\&. 
+
+This structure represents an entry in the TLB\&. It includes the virtual address and the physical address of the page\&. 
 
 .SH "Author"
 .PP 

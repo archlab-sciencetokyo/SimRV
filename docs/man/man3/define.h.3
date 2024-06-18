@@ -7,35 +7,35 @@ define.h \- Header file containing various definitions and constants for the RIS
 .SH SYNOPSIS
 .br
 .PP
-\fR#include <iostream>\fP
-.br
-\fR#include <fstream>\fP
-.br
-\fR#include <iomanip>\fP
-.br
-\fR#include <string>\fP
-.br
-\fR#include <cstdio>\fP
-.br
-\fR#include <cstdlib>\fP
-.br
-\fR#include <cstdint>\fP
-.br
-\fR#include <cstring>\fP
-.br
 \fR#include <signal\&.h>\fP
-.br
-\fR#include <stack>\fP
-.br
-\fR#include <sys/time\&.h>\fP
 .br
 \fR#include <sys/select\&.h>\fP
 .br
 \fR#include <sys/stat\&.h>\fP
 .br
-\fR#include <unistd\&.h>\fP
+\fR#include <sys/time\&.h>\fP
 .br
 \fR#include <termios\&.h>\fP
+.br
+\fR#include <unistd\&.h>\fP
+.br
+\fR#include <cstdint>\fP
+.br
+\fR#include <cstdio>\fP
+.br
+\fR#include <cstdlib>\fP
+.br
+\fR#include <cstring>\fP
+.br
+\fR#include <fstream>\fP
+.br
+\fR#include <iomanip>\fP
+.br
+\fR#include <iostream>\fP
+.br
+\fR#include <stack>\fP
+.br
+\fR#include <string>\fP
 .br
 
 .SS "Classes"
@@ -44,18 +44,21 @@ define.h \- Header file containing various definitions and constants for the RIS
 .ti -1c
 .RI "struct \fBQueueState\fP"
 .br
+.RI "Structure representing the state of a queue\&. "
 .ti -1c
 .RI "struct \fBBlockRequestHeader\fP"
 .br
+.RI "Structure representing the header of a block request\&. "
 .ti -1c
 .RI "struct \fBDescriptor\fP"
 .br
+.RI "Represents a descriptor\&. "
 .in -1c
 .SS "Macros"
 
 .in +1c
 .ti -1c
-.RI "#define \fBD_START_PC\fP   (0x80000000)"
+.RI "#define \fBD_START_PC\fP     (0x80000000)"
 .br
 .ti -1c
 .RI "#define \fBD_INITD_ADDR\fP   (0x01000000)"
@@ -193,7 +196,7 @@ define.h \- Header file containing various definitions and constants for the RIS
 .RI "#define \fBTLB_SIZE\fP   (4)"
 .br
 .ti -1c
-.RI "#define \fBLCMEM_SIZE\fP   (32*1024)"
+.RI "#define \fBLCMEM_SIZE\fP   (32 * 1024)"
 .br
 .ti -1c
 .RI "#define \fBCAUSE_INTERRUPT\fP   ((uint32_t)1 << 31)"
@@ -777,19 +780,17 @@ This file is part of the SimCore/RISC-V project developed by ArchLab\&. TokyoTec
 .SS "#define MSTATUS_MASK"
 \fBValue:\fP
 .nf
-(MSTATUS_UIE | MSTATUS_SIE | MSTATUS_MIE | \\
-MSTATUS_UPIE | MSTATUS_SPIE | MSTATUS_MPIE | \\
-MSTATUS_SPP | MSTATUS_MPP | \\
-MSTATUS_FS | \\
-MSTATUS_MPRV | MSTATUS_SUM | MSTATUS_MXR)
+  (MSTATUS_UIE | MSTATUS_SIE | MSTATUS_MIE | MSTATUS_UPIE | MSTATUS_SPIE | \\
+   MSTATUS_MPIE | MSTATUS_SPP | MSTATUS_MPP | MSTATUS_FS | MSTATUS_MPRV |  \\
+   MSTATUS_SUM | MSTATUS_MXR)
 .PP
 .fi
 
 .SS "#define SSTATUS_MASK0"
 \fBValue:\fP
 .nf
-(MSTATUS_UIE | MSTATUS_SIE | MSTATUS_UPIE | MSTATUS_SPIE | \\
-MSTATUS_SPP | MSTATUS_FS | MSTATUS_XS | MSTATUS_SUM | MSTATUS_MXR)
+  (MSTATUS_UIE | MSTATUS_SIE | MSTATUS_UPIE | MSTATUS_SPIE | MSTATUS_SPP | \\
+   MSTATUS_FS | MSTATUS_XS | MSTATUS_SUM | MSTATUS_MXR)
 .PP
 .fi
 

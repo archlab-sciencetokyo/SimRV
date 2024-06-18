@@ -2,12 +2,20 @@
 .ad l
 .nh
 .SH NAME
-CPU
+CPU \- \fBCPU\fP state\&.  
+
 .SH SYNOPSIS
 .br
 .PP
+.PP
+\fR#include <state\&.h>\fP
 .SS "Public Member Functions"
 
+.PP
+.RI "\fBControl Methods\fP"
+.br
+
+.in +1c
 .in +1c
 .ti -1c
 .RI "void \fBTLB_flush\fP ()"
@@ -18,11 +26,30 @@ CPU
 .ti -1c
 .RI "uint32_t \fBget_mstatus\fP (uint32_t)"
 .br
+.in -1c
+.in -1c
+.PP
+.RI "\fBRegister Access\fP"
+.br
+
+.in +1c
+.in +1c
 .ti -1c
 .RI "uint32_t \fBread_csr\fP (uint32_t)"
 .br
 .ti -1c
 .RI "void \fBwrite_csr\fP (uint32_t, uint32_t)"
+.br
+.in -1c
+.in -1c
+.PP
+.RI "\fBException Handling\fP"
+.br
+
+.in +1c
+.in +1c
+.ti -1c
+.RI "void \fBraise_exception\fP (uint32_t, uint32_t)"
 .br
 .ti -1c
 .RI "void \fBmret\fP ()"
@@ -36,116 +63,189 @@ CPU
 .ti -1c
 .RI "void \fBplic_set_irq\fP (int, int)"
 .br
-.ti -1c
-.RI "void \fBraise_exception\fP (uint32_t, uint32_t)"
-.br
+.in -1c
 .in -1c
 .SS "Public Attributes"
 
+.PP
+.RI "\fBCPU State\fP"
+.br
+
+.in +1c
 .in +1c
 .ti -1c
 .RI "uint32_t \fBpc\fP"
 .br
+.RI "program counter "
 .ti -1c
 .RI "uint32_t \fBreg\fP [32]"
 .br
+.RI "general purpose registers "
 .ti -1c
 .RI "uint32_t \fBmstatus\fP"
 .br
+.RI "\fBMachine\fP status register\&. "
 .ti -1c
 .RI "uint32_t \fBmtvec\fP"
 .br
+.RI "\fBMachine\fP trap-handler base address\&. "
 .ti -1c
 .RI "uint32_t \fBmscratch\fP"
 .br
+.RI "Scratch register for machine trap handlers\&. "
 .ti -1c
 .RI "uint32_t \fBmepc\fP"
 .br
+.RI "\fBMachine\fP exception program counter\&. "
 .ti -1c
 .RI "uint32_t \fBmcause\fP"
 .br
+.RI "\fBMachine\fP trap cause\&. "
 .ti -1c
 .RI "uint32_t \fBmtval\fP"
 .br
+.RI "\fBMachine\fP bad address or instruction\&. "
 .ti -1c
 .RI "uint32_t \fBmhartid\fP"
 .br
+.RI "Hardware thread ID\&. "
 .ti -1c
 .RI "uint32_t \fBmisa\fP = 0x00141105"
 .br
+.RI "\fBMachine\fP ISA register\&. RV32acim by default\&. "
 .ti -1c
 .RI "uint32_t \fBmie\fP"
 .br
+.RI "\fBMachine\fP interrupt-enable register\&. "
 .ti -1c
 .RI "uint32_t \fBmip\fP"
 .br
+.RI "\fBMachine\fP interrupt pending\&. "
 .ti -1c
 .RI "uint32_t \fBmedeleg\fP"
 .br
+.RI "\fBMachine\fP exception delegation register\&. "
 .ti -1c
 .RI "uint32_t \fBmideleg\fP"
 .br
+.RI "\fBMachine\fP interrupt delegation register\&. "
 .ti -1c
 .RI "uint32_t \fBmcounteren\fP"
 .br
+.RI "\fBMachine\fP counter enable\&. "
 .ti -1c
 .RI "uint32_t \fBstvec\fP"
 .br
+.RI "Supervisor trap handler base address\&. "
 .ti -1c
 .RI "uint32_t \fBsscratch\fP"
 .br
+.RI "Scratch register for supervisor trap handlers\&. "
 .ti -1c
 .RI "uint32_t \fBsepc\fP"
 .br
+.RI "Supervisor exception program counter\&. "
 .ti -1c
 .RI "uint32_t \fBscause\fP"
 .br
+.RI "Supervisor trap cause\&. "
 .ti -1c
 .RI "uint32_t \fBstval\fP"
 .br
+.RI "Supervisor bad address or instruction\&. "
 .ti -1c
 .RI "uint32_t \fBsatp\fP"
 .br
+.RI "Supervisor address translation and protection\&. "
 .ti -1c
 .RI "uint32_t \fBscounteren\fP"
 .br
+.RI "Supervisor counter enable\&. "
 .ti -1c
 .RI "uint32_t \fBload_res\fP"
 .br
+.RI "For atomic LR/SC\&. "
 .ti -1c
 .RI "uint32_t \fBreserved\fP"
 .br
+.RI "Reserved for future use\&. "
 .ti -1c
 .RI "uint32_t \fBpending_exception\fP"
 .br
+.RI "Exception code for pending exception\&. "
 .ti -1c
 .RI "uint32_t \fBpending_tval\fP"
 .br
+.RI "Additional information for pending exception\&. "
 .ti -1c
-.RI "uint32_t \fBpriv\fP = PRIV_M"
+.RI "uint32_t \fBpriv\fP"
 .br
+.RI "Current privilege mode: 3=machine, 1=supervisor, 0=user\&. "
 .ti -1c
 .RI "uint32_t \fBplic_pending_irq\fP"
 .br
+.RI "Pending IRQ number in PLIC\&. "
 .ti -1c
 .RI "uint32_t \fBplic_served_irq\fP"
 .br
+.RI "Last served IRQ number in PLIC\&. "
 .ti -1c
-.RI "uint64_t \fBmtime\fP =1"
+.RI "uint64_t \fBmtime\fP"
 .br
+.RI "\fBMachine\fP time, approximates the number of executed instructions\&. "
 .ti -1c
-.RI "uint64_t \fBmtimecmp\fP =0"
+.RI "uint64_t \fBmtimecmp\fP = 0"
 .br
+.RI "Time comparator for machine timer interrupts\&. "
+.in -1c
+.in -1c
+.PP
+.RI "\fBTLB\fP"
+.br
+
+.in +1c
+.in +1c
 .ti -1c
 .RI "\fBTLBEntry\fP \fBTLB_inst_r\fP [TLB_SIZE]"
 .br
+.RI "TLB for instruction\&. "
 .ti -1c
 .RI "\fBTLBEntry\fP \fBTLB_data_r\fP [TLB_SIZE]"
 .br
+.RI "TLB for data (load) "
 .ti -1c
 .RI "\fBTLBEntry\fP \fBTLB_data_w\fP [TLB_SIZE]"
 .br
+.RI "TLB for data (store) "
 .in -1c
+.in -1c
+.SH "Detailed Description"
+.PP 
+\fBCPU\fP state\&. 
+
+This class represents the state of the \fBCPU\fP\&. It includes the general purpose registers, the program counter, and the control and status registers (CSRs)\&. The class also includes the TLB for instruction and data accesses\&. 
+.SH "Member Data Documentation"
+.PP 
+.SS "uint64_t CPU::mtime"
+\fBInitial value:\fP
+.nf
+=
+      1
+.PP
+.fi
+
+.PP
+\fBMachine\fP time, approximates the number of executed instructions\&. 
+.SS "uint32_t CPU::priv"
+\fBInitial value:\fP
+.nf
+=
+      PRIV_M
+.PP
+.fi
+
+.PP
+Current privilege mode: 3=machine, 1=supervisor, 0=user\&. 
 
 .SH "Author"
 .PP 

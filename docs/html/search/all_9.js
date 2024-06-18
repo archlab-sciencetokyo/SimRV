@@ -1,9 +1,5 @@
 var searchData=
 [
-  ['machine_0',['Machine',['../classMachine.html',1,'']]],
-  ['machine_2ecc_1',['machine.cc',['../machine_8cc.html',1,'']]],
-  ['main_2',['main',['../main_8cc.html#a0ddf1224851353fc92bfbff6f499fa97',1,'main.cc']]],
-  ['main_2ecc_3',['main.cc',['../main_8cc.html',1,'']]],
-  ['mc_5freceive_5finput_4',['MC_receive_input',['../classConsole.html#aeb426700b7ae9d0e04dcfc33a9fc393a',1,'Console']]],
-  ['microcn_5',['Microcn',['../classMicrocn.html',1,'']]]
+  ['init_0',['init',['../classMachine.html#a778510ad7db51ccee79b673eb9f4e5ea',1,'Machine::init()'],['../classMicrocn.html#a1182fd7a7f1006421935a0f8aeea000c',1,'Microcn::init()']]],
+  ['instmix_5foutput_1',['instmix_output',['../classMachine.html#a50bd3e8e5de72210c8a09748be85639b',1,'Machine']]]
 ];

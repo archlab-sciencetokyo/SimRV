@@ -2,10 +2,13 @@
 .ad l
 .nh
 .SH NAME
-Descriptor
+Descriptor \- Represents a descriptor\&.  
+
 .SH SYNOPSIS
 .br
 .PP
+.PP
+\fR#include <define\&.h>\fP
 .SS "Public Attributes"
 
 .in +1c
@@ -22,6 +25,21 @@ Descriptor
 .RI "uint16_t \fBnext\fP"
 .br
 .in -1c
+.SH "Detailed Description"
+.PP 
+Represents a descriptor\&. 
+
+This struct contains information about a descriptor, including its address, length, flags, and the index of the next descriptor\&. 
+.SH "Member Data Documentation"
+.PP 
+.SS "uint64_t Descriptor::adr"
+The address of the descriptor\&. 
+.SS "uint16_t Descriptor::flags"
+The flags associated with the descriptor\&. 
+.SS "uint32_t Descriptor::len"
+The length of the descriptor\&. 
+.SS "uint16_t Descriptor::next"
+The index of the next descriptor\&. 
 
 .SH "Author"
 .PP 

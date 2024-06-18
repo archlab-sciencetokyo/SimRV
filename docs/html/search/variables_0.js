@@ -1,7 +1,6 @@
 var searchData=
 [
-  ['e_5fccount_0',['e_ccount',['../classMachine.html#aea77f57589d054562b02b65215a8824e',1,'Machine']]],
-  ['e_5ficount_1',['e_icount',['../classMachine.html#a286d1fd39ea01cd32248ddc9ca6a6bba',1,'Machine']]],
-  ['e_5finstmix_2',['e_instmix',['../classMachine.html#a5220728a6e4bbbed2cf242a29756033a',1,'Machine']]],
-  ['e_5fuc_5fcnt_3',['e_uc_cnt',['../classMachine.html#a654d3d8a8028e3edda983616181c6087',1,'Machine']]]
+  ['adr_0',['adr',['../structDescriptor.html#a42448d4e562cce6fc4bbbd658c7c89b7',1,'Descriptor']]],
+  ['availhigh_1',['AvailHigh',['../structQueueState.html#a6b53079015367de90122a12e7fadd8a4',1,'QueueState']]],
+  ['availlow_2',['AvailLow',['../structQueueState.html#a8cbfc69e9d2fc8559ce884db6e124579',1,'QueueState']]]
 ];

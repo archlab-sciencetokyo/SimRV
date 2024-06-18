@@ -2,10 +2,13 @@
 .ad l
 .nh
 .SH NAME
-QueueState
+QueueState \- Structure representing the state of a queue\&.  
+
 .SH SYNOPSIS
 .br
 .PP
+.PP
+\fR#include <define\&.h>\fP
 .SS "Public Attributes"
 
 .in +1c
@@ -37,6 +40,29 @@ QueueState
 .RI "uint32_t \fBlast_avail_idx\fP"
 .br
 .in -1c
+.SH "Detailed Description"
+.PP 
+Structure representing the state of a queue\&. 
+.SH "Member Data Documentation"
+.PP 
+.SS "uint32_t QueueState::AvailHigh"
+Upper 32 bits of the available ring address\&. 
+.SS "uint32_t QueueState::AvailLow"
+Lower 32 bits of the available ring address\&. 
+.SS "uint32_t QueueState::DescHigh"
+Upper 32 bits of the descriptor address\&. 
+.SS "uint32_t QueueState::DescLow"
+Lower 32 bits of the descriptor address\&. 
+.SS "uint32_t QueueState::last_avail_idx"
+Index of the last available element in the queue\&. 
+.SS "uint32_t QueueState::Notify"
+Number of notifications for the queue\&. 
+.SS "uint32_t QueueState::Ready"
+Number of ready elements in the queue\&. 
+.SS "uint32_t QueueState::UsedHigh"
+Upper 32 bits of the used ring address\&. 
+.SS "uint32_t QueueState::UsedLow"
+Lower 32 bits of the used ring address\&. 
 
 .SH "Author"
 .PP 

@@ -1,4 +1,4 @@
-# SimCore/RISC-V since 2018-07-05 <!-- {#mainpage} -->
+# SimCore/RISC-V since 2018-07-05
 
 &copy; [ArchLab. TokyoTech](https://www.arch.cs.titech.ac.jp)
 

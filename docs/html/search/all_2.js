@@ -1,5 +1,6 @@
 var searchData=
 [
-  ['binfile_5fgen_0',['binfile_gen',['../machine_8cc.html#ad32e1f952e23ea47d76c4e3f3ec5202f',1,'machine.cc']]],
-  ['blockrequestheader_1',['BlockRequestHeader',['../structBlockRequestHeader.html',1,'']]]
+  ['adr_0',['adr',['../structDescriptor.html#a42448d4e562cce6fc4bbbd658c7c89b7',1,'Descriptor']]],
+  ['availhigh_1',['AvailHigh',['../structQueueState.html#a6b53079015367de90122a12e7fadd8a4',1,'QueueState']]],
+  ['availlow_2',['AvailLow',['../structQueueState.html#a8cbfc69e9d2fc8559ce884db6e124579',1,'QueueState']]]
 ];

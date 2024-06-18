@@ -101,13 +101,14 @@ $(function(){initNavTree('index.html',''); initResizable(true); });
   <div class="headertitle"><div class="title">SimCore/RISC-V since 2018-07-05 </div></div>
 </div><!--header-->
 <div class="contents">
-<div class="textblock"><p><a class="anchor" id="mainpage"></a> &copy; <a href="https://www.arch.cs.titech.ac.jp">ArchLab. TokyoTech</a></p>
-<h1><a class="anchor" id="autotoc_md0"></a>
+<div class="textblock"><p><a class="anchor" id="md_README"></a> &copy; <a href="https://www.arch.cs.titech.ac.jp">ArchLab. TokyoTech</a></p>
+<p><a href="https://github.com/archlab-tokyotech/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-tokyotech/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=main" alt="C/C++ CI" style="pointer-events: none;" class="inline"/></a></p>
+<h1><a class="anchor" id="autotoc_md1"></a>
 Overview</h1>
 <p>SimCore/RISC-V is a simulator for the RISC-V instruction set architecture (ISA). It was developed by the ArchLab at TokyoTech. The simulator is designed to be efficient and accurate, making it ideal for research and educational purposes.</p>
 <p>The simulator supports a wide range of RISC-V instructions and includes several features for advanced simulation. It provides options for generating trace files, specifying device tree files, and simulating different modes of operation, including RTOS mode.</p>
 <p>The project is written in C++ and can be built and run on any system with a C++ compiler and make. It also supports Doxygen for generating documentation from the annotated source code.</p>
-<h1><a class="anchor" id="autotoc_md1"></a>
+<h1><a class="anchor" id="autotoc_md2"></a>
 Requirements</h1>
 <p>To run and build this project, you will need:</p>
 <ul>
@@ -116,7 +117,7 @@ Requirements</h1>
 <li><code>doxygen</code>: A tool for generating documentation from annotated C++ sources. Install it on Ubuntu with <code>sudo apt install doxygen</code>.</li>
 </ul>
 <p>Please ensure these are installed and properly configured in your system's PATH before proceeding with the build process.</p>
-<h1><a class="anchor" id="autotoc_md2"></a>
+<h1><a class="anchor" id="autotoc_md3"></a>
 How to Run</h1>
 <ol type="1">
 <li>Set up your environment: Ensure you have the necessary dependencies installed.</li>
@@ -125,7 +126,13 @@ How to Run</h1>
 <li>Compile the program: <code>make</code></li>
 <li>Run the program: <code>./simrv</code></li>
 </ol>
-<h1><a class="anchor" id="autotoc_md3"></a>
+<h1><a class="anchor" id="autotoc_md4"></a>
+Documentation</h1>
+<p>The source code is annotated with Doxygen comments. To generate the documentation, run <code>make docs</code> in the project directory. The documentation will be generated in the <code>docs</code> directory.</p>
+<p>The generated documentation can be viewed by opening <code>docs/html/index.html</code> in a web browser.</p>
+<p>To build the documentation the submodule doxygen-awesome-css is required. To clone the repository with the submodule run <code>git clone --recurse-submodules</code>.</p>
+<p>Or if you have already cloned the repository you can run <code>git submodule update --init --recursive</code>.</p>
+<h1><a class="anchor" id="autotoc_md5"></a>
 History</h1>
 <table class="markdownTable">
 <tr class="markdownTableHead">
@@ -193,7 +200,7 @@ History</h1>
 <tr class="markdownTableRowOdd">
 <td class="markdownTableBodyNone">2019-07-25   </td><td class="markdownTableBodyNone">v1.0.2   </td><td class="markdownTableBodyNone">Updated cpu-&gt;reserved only if PAGEFAULT didn't occur, set local memory size to 32KB    </td></tr>
 <tr class="markdownTableRowEven">
-<td class="markdownTableBodyNone">2019-07-22   </td><td class="markdownTableBodyNone">v0.9.9   </td><td class="markdownTableBodyNone">Changed <a class="el" href="structQueueState.html">QueueState</a>'s last_avail_idx from uint16_t to uint32_t    </td></tr>
+<td class="markdownTableBodyNone">2019-07-22   </td><td class="markdownTableBodyNone">v0.9.9   </td><td class="markdownTableBodyNone">Changed <a class="el" href="structQueueState.html" title="Structure representing the state of a queue.">QueueState</a>'s last_avail_idx from uint16_t to uint32_t    </td></tr>
 <tr class="markdownTableRowOdd">
 <td class="markdownTableBodyNone">2019-07-15   </td><td class="markdownTableBodyNone">v0.9.4   </td><td class="markdownTableBodyNone">Renamed <code>sector</code> to <code>mdskresize</code>    </td></tr>
 <tr class="markdownTableRowEven">
@@ -227,7 +234,7 @@ History</h1>
 <tr class="markdownTableRowEven">
 <td class="markdownTableBodyNone">2019-06-20   </td><td class="markdownTableBodyNone">v0.6.0   </td><td class="markdownTableBodyNone">Codebase reduced to 3,593 lines, tested application mode, added <code>INI()</code>, <code>FIN()</code>    </td></tr>
 <tr class="markdownTableRowOdd">
-<td class="markdownTableBodyNone">2019-06-20   </td><td class="markdownTableBodyNone">v0.5.9   </td><td class="markdownTableBodyNone">Codebase reduced to 3,582 lines, renamed <code>CPUState</code> to <code><a class="el" href="classCPU.html">CPU</a></code>, removed debug.*    </td></tr>
+<td class="markdownTableBodyNone">2019-06-20   </td><td class="markdownTableBodyNone">v0.5.9   </td><td class="markdownTableBodyNone">Codebase reduced to 3,582 lines, renamed <code>CPUState</code> to <code><a class="el" href="classCPU.html" title="CPU state.">CPU</a></code>, removed debug.*    </td></tr>
 <tr class="markdownTableRowEven">
 <td class="markdownTableBodyNone">2019-06-19   </td><td class="markdownTableBodyNone">v0.5.8   </td><td class="markdownTableBodyNone">Removed some global variables    </td></tr>
 <tr class="markdownTableRowOdd">
