@@ -6,9 +6,9 @@
 
 ## Overview
 
-SimCore/RISC-V is a simulator for the RISC-V instruction set architecture (ISA). It was developed by the ArchLab at TokyoTech. The simulator is designed to be efficient and accurate, making it ideal for research and educational purposes.
+SimCore/RISC-V is a simulator for the RISC-V instruction set architecture (ISA). It has been developed by the ArchLab at Tokyo Tech. The simulator is designed to be efficient and accurate, making it ideal for research and educational purposes.
 
-The simulator supports a wide range of RISC-V instructions and includes several features for advanced simulation. It provides options for generating trace files, specifying device tree files, and simulating different modes of operation, including RTOS mode.
+The simulator supports RISC-V instructions (RV32IMACZicsr_Zifencei) and includes several features for advanced simulation. It provides options for generating trace files, specifying device tree files, and simulating different modes of operation, including RTOS mode.
 
 The project is written in C++ and can be built and run on any system with a C++ compiler and make. It also supports Doxygen for generating documentation from the annotated source code.
 
@@ -17,7 +17,7 @@ The project is written in C++ and can be built and run on any system with a C++ 
 To run and build this project, you will need:
 
 - `make`: A build automation tool used to manage and build this project.
-- `g++`: A popular C++ compiler. You can install it on Ubuntu with `sudo apt install g++`.
+- `g++`: A popular C++ compiler. You can install it on Ubuntu with `sudo apt install g++` or `sudo apt install build-essential`.
 - `doxygen`: A tool for generating documentation from annotated C++ sources. Install it on Ubuntu with `sudo apt install doxygen`.
 
 Please ensure these are installed and properly configured in your system's PATH before proceeding with the build process.
@@ -36,9 +36,8 @@ The source code is annotated with Doxygen comments. To generate the documentatio
 
 The generated documentation can be viewed by opening `docs/html/index.html` in a web browser.
 
-To build the documentation the submodule doxygen-awesome-css is required. To clone the repository with the submodule run `git clone --recurse-submodules`.
-
-Or if you have already cloned the repository you can run `git submodule update --init --recursive`.
+To build the documentation the submodule doxygen-awesome-css is required. If you have already cloned the repository you can run `git submodule update --init --recursive`.
+Or to clone the repository with the submodule run `git clone --recurse-submodules`. 
 
 ## History
 
