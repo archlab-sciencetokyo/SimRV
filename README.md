@@ -114,6 +114,38 @@ $ cmake --build --preset ninja-clang-release --target docs
 
 Generated HTML output is written to `docs/api/html/`.
 
+## GitHub Flow (dev branch)
+
+Simple team flow:
+
+1. `main` stays stable and release-ready.
+2. `dev` is the integration branch for ongoing work.
+3. Create short-lived feature branches from `dev`:
+    - `feature/<topic>`
+    - `fix/<topic>`
+4. Open pull requests into `dev` for review and CI.
+5. Periodically open a pull request from `dev` to `main` for release cuts.
+
+Recommended local commands:
+
+```
+# one-time
+git fetch origin
+git checkout dev
+
+# start new work
+git checkout -b feature/my-change dev
+
+# keep branch updated
+git fetch origin
+git rebase origin/dev
+
+# after merge, clean up
+git checkout dev
+git pull
+git branch -d feature/my-change
+```
+
 ## Project Layout
 
 * `src/`: simulator implementation (`*.cpp`)
