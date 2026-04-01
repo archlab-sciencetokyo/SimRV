@@ -65,7 +65,7 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-add_executable(simrv
+add_executable(SimRV
   src/Main.cpp
   src/Machine.cpp
   src/Module.cpp
@@ -76,18 +76,18 @@ add_executable(simrv
   src/State.cpp
 )
 
-target_include_directories(simrv PRIVATE
+target_include_directories(SimRV PRIVATE
   include
   include/simrv
 )
 
-target_compile_options(simrv PRIVATE
+target_compile_options(SimRV PRIVATE
   -Wall
   -Wextra
   -Wpedantic
 )
 
-target_compile_definitions(simrv PRIVATE
+target_compile_definitions(SimRV PRIVATE
   SIMRV_VERSION_STR="${SIMRV_VERSION}"
   SIMRV_GIT_BRANCH_STR="${SIMRV_GIT_BRANCH}"
   SIMRV_GIT_SHA_STR="${SIMRV_GIT_SHA}"
@@ -95,7 +95,7 @@ target_compile_definitions(simrv PRIVATE
 
 # Match prior optimization defaults for single-config generators.
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-  target_compile_options(simrv PRIVATE -O2)
+  target_compile_options(SimRV PRIVATE -O2)
 endif()
 
 set(ISA_SMOKE_RV32IM
@@ -103,23 +103,23 @@ set(ISA_SMOKE_RV32IM
 )
 
 add_custom_target(regress
-  COMMAND ${CMAKE_COMMAND} -E env SIMRV_SKIP_BUILD=1 SIMRV_BIN=$<TARGET_FILE:simrv> bash ${CMAKE_SOURCE_DIR}/scripts/regression.sh
+  COMMAND ${CMAKE_COMMAND} -E env SIMRV_SKIP_BUILD=1 SIMRV_BIN=$<TARGET_FILE:SimRV> bash ${CMAKE_SOURCE_DIR}/scripts/regression.sh
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  DEPENDS simrv
+  DEPENDS SimRV
   USES_TERMINAL
 )
 
 add_custom_target(isa-tests
-  COMMAND ${CMAKE_COMMAND} -E env SIMRV_SKIP_BUILD=1 SIMRV_BIN=$<TARGET_FILE:simrv> bash ${CMAKE_SOURCE_DIR}/scripts/run-isa-tests.sh
+  COMMAND ${CMAKE_COMMAND} -E env SIMRV_SKIP_BUILD=1 SIMRV_BIN=$<TARGET_FILE:SimRV> bash ${CMAKE_SOURCE_DIR}/scripts/run-isa-tests.sh
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  DEPENDS simrv
+  DEPENDS SimRV
   USES_TERMINAL
 )
 
 add_custom_target(isa-smoke
-  COMMAND ${CMAKE_COMMAND} -E env SIMRV_SKIP_BUILD=1 SIMRV_BIN=$<TARGET_FILE:simrv> SIMRV_ISA_LIST=${ISA_SMOKE_RV32IM} bash ${CMAKE_SOURCE_DIR}/scripts/run-isa-tests.sh
+  COMMAND ${CMAKE_COMMAND} -E env SIMRV_SKIP_BUILD=1 SIMRV_BIN=$<TARGET_FILE:SimRV> SIMRV_ISA_LIST=${ISA_SMOKE_RV32IM} bash ${CMAKE_SOURCE_DIR}/scripts/run-isa-tests.sh
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  DEPENDS simrv
+  DEPENDS SimRV
   USES_TERMINAL
 )
 

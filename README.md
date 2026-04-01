@@ -6,40 +6,29 @@
 
 ## How to run
 
-1. Configure and build with CMake + Ninja (recommended)
+1. Configure and build with CMake + Ninja
 ```
 $ cmake --preset ninja-clang-release
 $ cmake --build --preset ninja-clang-release
 ```
 
-This generates `simrv` under `build/ninja-clang-release/` using LLVM `clang++` and C++23.
+This generates `SimRV` under `build/ninja-clang-release/` using LLVM `clang++` and C++23.
 
-2. Build with Make compatibility wrapper
+2. Run an app image
 ```
-$ make
-```
-
-The Makefile now forwards to the CMake preset (`ninja-clang-release`) by default.
-
-```
-$ make CXX=g++
+$ ./build/ninja-clang-release/SimRV -m img/hello.bin
 ```
 
-3. `make app` command will invoke the simrv and run hello program
+3. Run Linux image
 ```
-$ make app
-```
-
-5. `make run` command will invoke the simrv with proper arguments and run linux
-```
-$ make run
+$ ./build/ninja-clang-release/SimRV -m img/bbl.bin -d img/root.bin -c img/devicetree.dtb
 ```
 Once login prompt appears, type `root` to login and enjoy linux.
 Please type Control+`q` to quit the simulation.
 
-7. please read help message of SimCore/RISC-V (simrv) by
+4. Read help message of SimCore/RISC-V (SimRV) by
 ```
-$ ./simrv
+$ ./build/ninja-clang-release/SimRV
 ```
 
 ## Regression Baseline (Phase 0)
@@ -48,8 +37,6 @@ Run the baseline regression harness:
 
 ```
 $ cmake --build --preset ninja-clang-release --target regress
-# legacy
-$ make regress
 ```
 
 This always checks:
@@ -79,24 +66,18 @@ You can run a small subset of riscv-isa-tests with:
 
 ```
 $ cmake --build --preset ninja-clang-release --target isa-tests
-# legacy
-$ make isa-tests
 ```
 
 For the curated Phase 1 RV32IM smoke gate:
 
 ```
 $ cmake --build --preset ninja-clang-release --target isa-smoke
-# legacy
-$ make isa-smoke
 ```
 
 To run both baseline checks and ISA smoke together:
 
 ```
 $ cmake --build --preset ninja-clang-release --target phase1-gate
-# legacy
-$ make phase1-gate
 ```
 
 ## Documentation
@@ -203,7 +184,7 @@ Notes:
 
 * SimRV uses `-T` mode to watch RAM `tohost` updates and print pass/fail markers.
 * This flow is intended for RV32 ISA tests during bring-up and may require tuning of `SIMRV_ISA_TOHOST` depending on your test build/link setup.
-* If `riscv-tests` top-level `make` fails with missing `-lm` or `-lgcc`, run the SimRV ISA target anyway. The runner builds ISA tests from `riscv-tests/isa` directly and bypasses benchmarks.
+* If `riscv-tests` top-level build fails with missing `-lm` or `-lgcc`, run the SimRV ISA target anyway. The runner builds ISA tests from `riscv-tests/isa` directly and bypasses benchmarks.
 * `rv32uc-p-rvc` currently does not emit a tohost pass/fail marker under current SimRV behavior and is not part of `isa-smoke` yet.
 
 ## Recommended compilers to be used

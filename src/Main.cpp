@@ -6,7 +6,7 @@
  */
 #include "Machine.hpp"
 
-#define PROJ "simrv"
+#define PROJ "SimRV"
 #define NAME "SimCore/RISC-V Functional Simulator"
 
 #ifndef SIMRV_VERSION_STR
@@ -51,11 +51,11 @@ void usage() {
   and 'g' and 'G' for Giga are available \n\
   \n\
   the typical command to run linux is following \n\
-  $ simrv -m img/bbl.bin -d img/root.bin \n\
+    $ SimRV -m img/bbl.bin -d img/root.bin \n\
   the command to run linux until 40 million instructions is following \n\
-  $ simrv -m img/bbl.bin -d img/root.bin -e 40m \n\
+    $ SimRV -m img/bbl.bin -d img/root.bin -e 40m \n\
   the command to run an application in app_mode is \n\
-  $ simrv -m img/hello.bin \n\
+    $ SimRV -m img/hello.bin \n\
 ";
     printf(" Usage: %s [-option]\n", PROJ);
     printf("%s", UsageMessage);

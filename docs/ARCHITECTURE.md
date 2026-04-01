@@ -24,7 +24,6 @@ These helpers are intentionally thin in this phase to preserve behavior while ma
 
 ## Build and Validation
 - Primary build framework: CMake + Ninja via preset `ninja-clang-release`.
-- Compatibility wrapper: Makefile forwards to CMake targets.
 - Validation gate:
   - `phase1-gate` = regression baseline + ISA smoke subset.
 

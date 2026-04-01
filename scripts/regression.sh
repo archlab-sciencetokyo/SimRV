@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 LOG_DIR="${SIMRV_REG_LOG_DIR:-regression_logs}"
-SIMRV_BIN="${SIMRV_BIN:-./simrv}"
+SIMRV_BIN="${SIMRV_BIN:-./build/ninja-clang-release/SimRV}"
 mkdir -p "$LOG_DIR"
 
 PASS_COUNT=0

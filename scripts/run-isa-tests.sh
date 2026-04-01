@@ -9,7 +9,7 @@ RISCV_TESTS_DIR="${RISCV_TESTS_DIR:-$DEFAULT_RISCV_TESTS_DIR}"
 if [[ ! -d "$RISCV_TESTS_DIR" ]]; then
   echo "ERROR: riscv-tests directory not found: $RISCV_TESTS_DIR"
   echo "Set RISCV_TESTS_DIR to your checkout/build directory"
-  echo "Example: RISCV_TESTS_DIR=$HOME/riscv-tests make isa-tests"
+  echo "Example: RISCV_TESTS_DIR=$HOME/riscv-tests cmake --build --preset ninja-clang-release --target isa-tests"
   exit 2
 fi
 
@@ -45,7 +45,7 @@ END_INSNS="${SIMRV_ISA_END:-2000000}"
 TOHOST_ADDR="${SIMRV_ISA_TOHOST:-0x80001000}"
 LOG_DIR="${SIMRV_ISA_LOG_DIR:-isa_logs}"
 WORK_DIR="${SIMRV_ISA_WORK_DIR:-.isa_tmp}"
-SIMRV_BIN="${SIMRV_BIN:-./simrv}"
+SIMRV_BIN="${SIMRV_BIN:-./build/ninja-clang-release/SimRV}"
 
 mkdir -p "$LOG_DIR" "$WORK_DIR"
 

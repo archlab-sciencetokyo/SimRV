@@ -14,5 +14,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: make
-      run: make
+    - name: Configure CMake
+      run: cmake --preset ninja-clang-release
+
+    - name: Build
+      run: cmake --build --preset ninja-clang-release
