@@ -5,62 +5,62 @@
 #include "Module.hpp"
 
 /* immediate generation                                                                   */
-uint32_t CB_imm_gen(uint32_t ir) {
-    uint32_t ret = 0;
+Instruction CB_imm_gen(Instruction ir) {
+    Word ret = 0;
 
-    uint32_t uimm_I = ir >> 20;
-    int32_t imm_I = (int32_t)(uimm_I | (uimm_I & 0x800 ? 0xFFFFF000 : 0x0));
+    Word uimm_I = ir >> 20;
+    SignedWord imm_I = (SignedWord)(uimm_I | (uimm_I & 0x800 ? 0xFFFFF000 : 0x0));
 
-    uint32_t uimm_S = ((ir >> 25) << 5) | ((ir >> 7) & 0x1f);
-    int32_t imm_S = (int32_t)(uimm_S | (uimm_S & 0x800 ? 0xFFFFF000 : 0x0));
+    Word uimm_S = ((ir >> 25) << 5) | ((ir >> 7) & 0x1f);
+    SignedWord imm_S = (SignedWord)(uimm_S | (uimm_S & 0x800 ? 0xFFFFF000 : 0x0));
 
-    uint32_t uimm_B = ((ir >> 31) << 12) | (((ir >> 7) & 1) << 11) | (((ir >> 25) & 0x3f) << 5) |
-                      (((ir >> 8) & 0xF) << 1);
-    int32_t imm_B = (int32_t)(uimm_B | (uimm_B & 0x1000 ? 0xFFFFE000 : 0x0));
+    Word uimm_B = ((ir >> 31) << 12) | (((ir >> 7) & 1) << 11) | (((ir >> 25) & 0x3f) << 5) |
+                  (((ir >> 8) & 0xF) << 1);
+    SignedWord imm_B = (SignedWord)(uimm_B | (uimm_B & 0x1000 ? 0xFFFFE000 : 0x0));
 
-    uint32_t uimm_U = ir >> 12;
-    int32_t imm_U = (int32_t)(uimm_U | (uimm_U & 0x80000 ? 0xFFF00000 : 0x0));
+    Word uimm_U = ir >> 12;
+    SignedWord imm_U = (SignedWord)(uimm_U | (uimm_U & 0x80000 ? 0xFFF00000 : 0x0));
 
-    uint32_t uimm_J = ((ir >> 31) << 20) | (((ir >> 12) & 0xFF) << 12) |
-                      (((ir >> 20) & 0x1) << 11) | (((ir >> 21) & 0x3FF) << 1);
-    int32_t imm_J = (int32_t)(uimm_J | (uimm_J & 0x100000 ? 0xFFE00000 : 0x0));
+    Word uimm_J = ((ir >> 31) << 20) | (((ir >> 12) & 0xFF) << 12) | (((ir >> 20) & 0x1) << 11) |
+                  (((ir >> 21) & 0x3FF) << 1);
+    SignedWord imm_J = (SignedWord)(uimm_J | (uimm_J & 0x100000 ? 0xFFE00000 : 0x0));
 
-    uint32_t zimm = (uint32_t)((ir >> 15) & 0x1f);
+    Word zimm = (Word)((ir >> 15) & 0x1f);
 
-    switch (ir & 0x7F) {
-        case OPCODE_OP_IMM: {
+    switch (opcode_of(ir)) {
+        case Opcode::OpImm: {
             ret = imm_I;
             break;
         }
-        case OPCODE_LOAD: {
+        case Opcode::Load: {
             ret = imm_I;
             break;
         }
-        case OPCODE_JALR: {
+        case Opcode::Jalr: {
             ret = imm_I;
             break;
         }
-        case OPCODE_STORE: {
+        case Opcode::Store: {
             ret = imm_S;
             break;
         }
-        case OPCODE_BRANCH: {
+        case Opcode::Branch: {
             ret = imm_B;
             break;
         }
-        case OPCODE_LUI: {
+        case Opcode::Lui: {
             ret = imm_U;
             break;
         }
-        case OPCODE_AUIPC: {
+        case Opcode::Auipc: {
             ret = imm_U;
             break;
         }
-        case OPCODE_JAL: {
+        case Opcode::Jal: {
             ret = imm_J;
             break;
         }
-        case OPCODE_SYSTEM: {
+        case Opcode::System: {
             ret = zimm;
             break;
         }
@@ -74,158 +74,173 @@ uint32_t CB_imm_gen(uint32_t ir) {
 }
 
 /* inst_decomp                                                                            */
-uint32_t decomp_c0(uint32_t ir) {
-    uint32_t funct3 = (ir >> 13) & 0x7;
-    uint32_t rs1 = ((ir >> 7) & 0x7) + 8;
-    uint32_t rs2 = ((ir >> 2) & 0x7) + 8;
-    uint32_t rd = ((ir >> 2) & 0x7) + 8;
-    uint32_t uimm1 =
-        (((ir >> 5) & 0x1) << 6) | (((ir >> 10) & 0x7) << 3) | (((ir >> 6) & 0x1) << 2);
-    uint32_t uimm2 = (((ir >> 5) & 0x3) << 6) | (((ir >> 10) & 0x7) << 3);
-    uint32_t nzuimm = (((ir >> 7) & 0xF) << 6) | (((ir >> 11) & 0x3) << 4) |
-                      (((ir >> 5) & 0x1) << 3) | (((ir >> 6) & 0x1) << 2);
+Instruction decomp_c0(Instruction ir) {
+    Word funct3 = (ir >> 13) & 0x7;
+    Word rs1 = ((ir >> 7) & 0x7) + 8;
+    Word rs2 = ((ir >> 2) & 0x7) + 8;
+    Word rd = ((ir >> 2) & 0x7) + 8;
+    Word uimm1 = (((ir >> 5) & 0x1) << 6) | (((ir >> 10) & 0x7) << 3) | (((ir >> 6) & 0x1) << 2);
+    Word uimm2 = (((ir >> 5) & 0x3) << 6) | (((ir >> 10) & 0x7) << 3);
+    Word nzuimm = (((ir >> 7) & 0xF) << 6) | (((ir >> 11) & 0x3) << 4) | (((ir >> 5) & 0x1) << 3) |
+                  (((ir >> 6) & 0x1) << 2);
 
-    uint32_t ret = ir;
+    Word ret = ir;
     switch (funct3) {
         case 0x0: {  // C.ADDI4SPN : addi rd', x2, nzuimm[9:2]
-            ret = (nzuimm << 20) | (2 << 15) | (FUNCT3_ADD << 12) | (rd << 7) | OPCODE_OP_IMM;
+            ret = (nzuimm << 20) | (2 << 15) | (static_cast<Instruction>(Funct3::Add) << 12) |
+                  (rd << 7) | static_cast<Instruction>(Opcode::OpImm);
             break;
         }
         case 0x1: {  // C.FLD : fld rd', offset[7:3](rs1')
-            ret = (uimm2 << 20) | (rs1 << 15) | (FUNCT3_LW << 12) | (rd << 7) | OPCODE_LOAD_FP;
+            ret = (uimm2 << 20) | (rs1 << 15) | (static_cast<Instruction>(Funct3::Lw) << 12) |
+                  (rd << 7) | static_cast<Instruction>(Opcode::LoadFp);
             break;
         }
         case 0x2: {  // C.LW : lw rd', offset[6:2](rs1')
-            ret = (uimm1 << 20) | (rs1 << 15) | (FUNCT3_LW << 12) | (rd << 7) | OPCODE_LOAD;
+            ret = (uimm1 << 20) | (rs1 << 15) | (static_cast<Instruction>(Funct3::Lw) << 12) |
+                  (rd << 7) | static_cast<Instruction>(Opcode::Load);
             break;
         }
         case 0x3: {  // C.FLW : flw rd', offset[6:2](rs1')
-            ret = (uimm1 << 20) | (rs1 << 15) | (FUNCT3_LD << 12) | (rd << 7) | OPCODE_LOAD_FP;
+            ret = (uimm1 << 20) | (rs1 << 15) | (static_cast<Instruction>(Funct3::Ld) << 12) |
+                  (rd << 7) | static_cast<Instruction>(Opcode::LoadFp);
             break;
         }
         case 0x5: {  // C.FSD : fsd rs2', offset[7:3](rs1')
-            ret = (((uimm1 >> 5) & 0x7F) << 25) | (rs2 << 20) | (rs1 << 15) | (FUNCT3_FSD << 12) |
-                  ((uimm1 & 0x1F) << 7) | OPCODE_STORE_FP;
+            ret = (((uimm1 >> 5) & 0x7F) << 25) | (rs2 << 20) | (rs1 << 15) |
+                  (static_cast<Instruction>(Funct3::Fsd) << 12) | ((uimm1 & 0x1F) << 7) |
+                  static_cast<Instruction>(Opcode::StoreFp);
             break;
         }
         case 0x6: {  // C.SW : sw rs2', offset[6:2](rs1')
-            ret = (((uimm1 >> 5) & 0x7F) << 25) | (rs2 << 20) | (rs1 << 15) | (FUNCT3_SW << 12) |
-                  ((uimm1 & 0x1F) << 7) | OPCODE_STORE;
+            ret = (((uimm1 >> 5) & 0x7F) << 25) | (rs2 << 20) | (rs1 << 15) |
+                  (static_cast<Instruction>(Funct3::Sw) << 12) | ((uimm1 & 0x1F) << 7) |
+                  static_cast<Instruction>(Opcode::Store);
             break;
         }
         case 0x7: {  // C.FSW : fsw rs2', offset[6:2](rs1')
-            ret = (((uimm1 >> 5) & 0x7F) << 25) | (rs2 << 20) | (rs1 << 15) | (FUNCT3_FSW << 12) |
-                  ((uimm1 & 0x1F) << 7) | OPCODE_STORE_FP;
+            ret = (((uimm1 >> 5) & 0x7F) << 25) | (rs2 << 20) | (rs1 << 15) |
+                  (static_cast<Instruction>(Funct3::Fsw) << 12) | ((uimm1 & 0x1F) << 7) |
+                  static_cast<Instruction>(Opcode::StoreFp);
             break;
         }
     }
     return ret;
 }
 
-uint32_t decomp_c1(uint32_t ir) {
-    uint32_t funct1 = (ir >> 10) & 0x3;
-    uint32_t funct2 = (((ir >> 12) & 0x1) << 2) | ((ir >> 5) & 0x3);
-    uint32_t funct3 = (ir >> 13) & 0x7;
-    uint32_t rs1 = ((ir >> 7) & 0x7) + 8;
-    uint32_t rs2 = ((ir >> 2) & 0x7) + 8;
-    uint32_t rd = ((ir >> 7) & 0x7) + 8;
-    uint32_t nzimm =
+Instruction decomp_c1(Instruction ir) {
+    Word funct1 = (ir >> 10) & 0x3;
+    Word funct2 = (((ir >> 12) & 0x1) << 2) | ((ir >> 5) & 0x3);
+    Word funct3 = (ir >> 13) & 0x7;
+    Word rs1 = ((ir >> 7) & 0x7) + 8;
+    Word rs2 = ((ir >> 2) & 0x7) + 8;
+    Word rd = ((ir >> 7) & 0x7) + 8;
+    Word nzimm =
         (((ir >> 12) & 1) ? 0xFFFFFFE0 : 0x0) | (((ir >> 12) & 1) << 5) | ((ir >> 2) & 0x1F);
-    uint32_t shamt = nzimm & 0x1F;
-    uint32_t uimm1 = (((ir >> 12) & 0x1) << 11) | (((ir >> 8) & 0x1) << 10) |
-                     (((ir >> 9) & 0x3) << 8) | (((ir >> 6) & 0x1) << 7) |
-                     (((ir >> 7) & 0x1) << 6) | (((ir >> 2) & 0x1) << 5) |
-                     (((ir >> 11) & 0x1) << 4) | (((ir >> 3) & 0x7) << 1);
-    uint32_t uimm2 = (((ir >> 12) & 0x1) << 8) | (((ir >> 5) & 0x3) << 6) |
-                     (((ir >> 2) & 0x1) << 5) | (((ir >> 10) & 0x3) << 3) |
-                     (((ir >> 3) & 0x3) << 1);
-    uint32_t uimm3 = (((ir >> 12) & 1) << 5) | ((ir >> 2) & 0x1F);
-    uint32_t uimm4 = (((ir >> 12) & 0x1) << 9) | (((ir >> 3) & 0x3) << 7) |
-                     (((ir >> 5) & 0x1) << 6) | (((ir >> 2) & 0x1) << 5) | (((ir >> 6) & 0x1) << 4);
-    uint32_t imm1 = ((uimm1 & 0x800) ? 0xFFFFF000 : 0x0) | uimm1;
-    uint32_t imm2 = ((uimm2 & 0x100) ? 0xFFFFFE00 : 0x0) | uimm2;
-    uint32_t imm3 = ((uimm3 & 0x20) ? 0xFFFFFFC0 : 0x0) | uimm3;
-    uint32_t imm4 = ((uimm4 & 0x200) ? 0xFFFFFE00 : 0x0) | uimm4;
+    Word shamt = nzimm & 0x1F;
+    Word uimm1 = (((ir >> 12) & 0x1) << 11) | (((ir >> 8) & 0x1) << 10) | (((ir >> 9) & 0x3) << 8) |
+                 (((ir >> 6) & 0x1) << 7) | (((ir >> 7) & 0x1) << 6) | (((ir >> 2) & 0x1) << 5) |
+                 (((ir >> 11) & 0x1) << 4) | (((ir >> 3) & 0x7) << 1);
+    Word uimm2 = (((ir >> 12) & 0x1) << 8) | (((ir >> 5) & 0x3) << 6) | (((ir >> 2) & 0x1) << 5) |
+                 (((ir >> 10) & 0x3) << 3) | (((ir >> 3) & 0x3) << 1);
+    Word uimm3 = (((ir >> 12) & 1) << 5) | ((ir >> 2) & 0x1F);
+    Word uimm4 = (((ir >> 12) & 0x1) << 9) | (((ir >> 3) & 0x3) << 7) | (((ir >> 5) & 0x1) << 6) |
+                 (((ir >> 2) & 0x1) << 5) | (((ir >> 6) & 0x1) << 4);
+    Word imm1 = ((uimm1 & 0x800) ? 0xFFFFF000 : 0x0) | uimm1;
+    Word imm2 = ((uimm2 & 0x100) ? 0xFFFFFE00 : 0x0) | uimm2;
+    Word imm3 = ((uimm3 & 0x20) ? 0xFFFFFFC0 : 0x0) | uimm3;
+    Word imm4 = ((uimm4 & 0x200) ? 0xFFFFFE00 : 0x0) | uimm4;
 
-    uint32_t ret = ir;
+    Word ret = ir;
     switch (funct3) {
         case 0x0: {  // C.ADDI : addi rd, rd, nzimm[5:0]
-            ret = (nzimm << 20) | (((ir >> 7) & 0x1F) << 15) | (FUNCT3_ADD << 12) |
-                  (((ir >> 7) & 0x1F) << 7) | OPCODE_OP_IMM;
+            ret = (nzimm << 20) | (((ir >> 7) & 0x1F) << 15) |
+                  (static_cast<Instruction>(Funct3::Add) << 12) | (((ir >> 7) & 0x1F) << 7) |
+                  static_cast<Instruction>(Opcode::OpImm);
             break;
         }
         case 0x1: {  // C.JAL : jal x1, offset[11:1]
             ret = (((imm1 >> 20) & 0x1) << 31) | (((imm1 >> 1) & 0x3FF) << 21) |
                   (((imm1 >> 11) & 0x1) << 20) | (((imm1 >> 12) & 0xFF) << 12) | (1 << 7) |
-                  OPCODE_JAL;
+                  static_cast<Instruction>(Opcode::Jal);
             break;
         }
         case 0x2: {  // C.LI : addi rd, x0, imm[5:0]
-            ret = (imm3 << 20) | (FUNCT3_ADD << 12) | (ir & 0xF80) | OPCODE_OP_IMM;
+            ret = (imm3 << 20) | (static_cast<Instruction>(Funct3::Add) << 12) | (ir & 0xF80) |
+                  static_cast<Instruction>(Opcode::OpImm);
             break;
         }
         case 0x3: {
             if (((ir >> 7) & 0x1F) == 2) {  // C.ADDI16SP : addi x2, x2, nzimm[9:4]
-                ret = (imm4 << 20) | (2 << 15) | (FUNCT3_ADD << 12) | (2 << 7) | OPCODE_OP_IMM;
+                ret = (imm4 << 20) | (2 << 15) | (static_cast<Instruction>(Funct3::Add) << 12) |
+                      (2 << 7) | static_cast<Instruction>(Opcode::OpImm);
             } else {  // C.LUI : lui rd, nzimm[17:12]
-                ret = (nzimm << 12) | (ir & 0xF80) | OPCODE_LUI;
+                ret = (nzimm << 12) | (ir & 0xF80) | static_cast<Instruction>(Opcode::Lui);
             }
             break;
         }
         case 0x5: {  // C.J : jal x0, offset[11:1]
             ret = (((imm1 >> 20) & 0x1) << 31) | (((imm1 >> 1) & 0x3FF) << 21) |
-                  (((imm1 >> 11) & 0x1) << 20) | (((imm1 >> 12) & 0xFF) << 12) | OPCODE_JAL;
+                  (((imm1 >> 11) & 0x1) << 20) | (((imm1 >> 12) & 0xFF) << 12) |
+                  static_cast<Instruction>(Opcode::Jal);
             break;
         }
         case 0x6: {  // C.BEQZ : beq sr1', x0, offset[8:1]
             ret = (((imm2 >> 12) & 0x1) << 31) | (((imm2 >> 5) & 0x3F) << 25) | (rs1 << 15) |
-                  (FUNCT3_BEQ << 12) | (((imm2 >> 1) & 0xF) << 8) | (((imm2 >> 11) & 0x1) << 7) |
-                  OPCODE_BRANCH;
+                  (static_cast<Instruction>(Funct3::Beq) << 12) | (((imm2 >> 1) & 0xF) << 8) |
+                  (((imm2 >> 11) & 0x1) << 7) | static_cast<Instruction>(Opcode::Branch);
             break;
         }
         case 0x7: {  // C.BNEZ : bne rs1', x0, offset[8:1]
             ret = (((imm2 >> 12) & 0x1) << 31) | (((imm2 >> 5) & 0x3F) << 25) | (rs1 << 15) |
-                  (FUNCT3_BNE << 12) | (((imm2 >> 1) & 0xF) << 8) | (((imm2 >> 11) & 0x1) << 7) |
-                  OPCODE_BRANCH;
+                  (static_cast<Instruction>(Funct3::Bne) << 12) | (((imm2 >> 1) & 0xF) << 8) |
+                  (((imm2 >> 11) & 0x1) << 7) | static_cast<Instruction>(Opcode::Branch);
             break;
         }
         case 0x4: {
             switch (funct1) {
                 case 0x0: {  // C.SRLI : srli rd', rd', shamt[5:0]
-                    ret =
-                        (shamt << 20) | (rd << 15) | (FUNCT3_SRL << 12) | (rd << 7) | OPCODE_OP_IMM;
+                    ret = (shamt << 20) | (rd << 15) |
+                          (static_cast<Instruction>(Funct3::Srl) << 12) | (rd << 7) |
+                          static_cast<Instruction>(Opcode::OpImm);
                     break;
                 }
                 case 0x1: {  // C.SRAI : srai rd', rd', shamt[5:0]
-                    ret = (1 << 30) | (shamt << 20) | (rd << 15) | (FUNCT3_SRL << 12) | (rd << 7) |
-                          OPCODE_OP_IMM;
+                    ret = (1 << 30) | (shamt << 20) | (rd << 15) |
+                          (static_cast<Instruction>(Funct3::Srl) << 12) | (rd << 7) |
+                          static_cast<Instruction>(Opcode::OpImm);
                     break;
                 }
                 case 0x2: {  // C.ANDI : andi rd', rd', imm[5:0]
-                    ret =
-                        (nzimm << 20) | (rd << 15) | (FUNCT3_AND << 12) | (rd << 7) | OPCODE_OP_IMM;
+                    ret = (nzimm << 20) | (rd << 15) |
+                          (static_cast<Instruction>(Funct3::And) << 12) | (rd << 7) |
+                          static_cast<Instruction>(Opcode::OpImm);
                     break;
                 }
                 case 0x3: {
                     switch (funct2) {
                         case 0x0: {  // C.SUB : sub rd', rd', rs2'
-                            ret = (1 << 30) | (rs2 << 20) | (rd << 15) | (FUNCT3_ADD << 12) |
-                                  (rd << 7) | OPCODE_OP;
+                            ret = (1 << 30) | (rs2 << 20) | (rd << 15) |
+                                  (static_cast<Instruction>(Funct3::Add) << 12) | (rd << 7) |
+                                  static_cast<Instruction>(Opcode::Op);
                             break;
                         }
                         case 0x1: {  // C.XOR : xor rd', rd', rs2'
-                            ret = (rs2 << 20) | (rd << 15) | (FUNCT3_XOR << 12) | (rd << 7) |
-                                  OPCODE_OP;
+                            ret = (rs2 << 20) | (rd << 15) |
+                                  (static_cast<Instruction>(Funct3::Xor) << 12) | (rd << 7) |
+                                  static_cast<Instruction>(Opcode::Op);
                             break;
                         }
                         case 0x2: {  // C.OR : or rd', rd', rs2'
-                            ret = (rs2 << 20) | (rd << 15) | (FUNCT3_OR << 12) | (rd << 7) |
-                                  OPCODE_OP;
+                            ret = (rs2 << 20) | (rd << 15) |
+                                  (static_cast<Instruction>(Funct3::Or) << 12) | (rd << 7) |
+                                  static_cast<Instruction>(Opcode::Op);
                             break;
                         }
                         case 0x3: {  // C.AND : and rd', rd', rs2'
-                            ret = (rs2 << 20) | (rd << 15) | (FUNCT3_AND << 12) | (rd << 7) |
-                                  OPCODE_OP;
+                            ret = (rs2 << 20) | (rd << 15) |
+                                  (static_cast<Instruction>(Funct3::And) << 12) | (rd << 7) |
+                                  static_cast<Instruction>(Opcode::Op);
                             break;
                         }
                     }
@@ -238,50 +253,55 @@ uint32_t decomp_c1(uint32_t ir) {
     return ret;
 }
 
-uint32_t decomp_c2(uint32_t ir) {
-    uint32_t funct3 = (ir >> 13) & 0x7;
-    uint32_t rd = (ir >> 7) & 0x1F;
-    uint32_t rs2 = (ir >> 2) & 0x1F;
-    uint32_t uimm1 =
-        (((ir >> 2) & 0x7) << 6) | (((ir >> 12) & 0x1) << 5) | (((ir >> 5) & 0x3) << 3);
-    uint32_t uimm2 =
-        (((ir >> 2) & 0x3) << 6) | (((ir >> 12) & 0x1) << 5) | (((ir >> 4) & 0x7) << 2);
-    uint32_t uimm3 = (((ir >> 7) & 0x7) << 6) | (((ir >> 10) & 0x7) << 3);
-    uint32_t uimm4 = (((ir >> 7) & 0x3) << 6) | (((ir >> 9) & 0xF) << 2);
-    uint32_t nzuimm = (((ir >> 12) & 1) << 5) | ((ir >> 2) & 0x1F);
-    uint32_t shamt = nzuimm & 0x1F;
+Instruction decomp_c2(Instruction ir) {
+    Word funct3 = (ir >> 13) & 0x7;
+    Word rd = (ir >> 7) & 0x1F;
+    Word rs2 = (ir >> 2) & 0x1F;
+    Word uimm1 = (((ir >> 2) & 0x7) << 6) | (((ir >> 12) & 0x1) << 5) | (((ir >> 5) & 0x3) << 3);
+    Word uimm2 = (((ir >> 2) & 0x3) << 6) | (((ir >> 12) & 0x1) << 5) | (((ir >> 4) & 0x7) << 2);
+    Word uimm3 = (((ir >> 7) & 0x7) << 6) | (((ir >> 10) & 0x7) << 3);
+    Word uimm4 = (((ir >> 7) & 0x3) << 6) | (((ir >> 9) & 0xF) << 2);
+    Word nzuimm = (((ir >> 12) & 1) << 5) | ((ir >> 2) & 0x1F);
+    Word shamt = nzuimm & 0x1F;
 
-    uint32_t ret = ir;
+    Word ret = ir;
     switch (funct3) {
         case 0x0: {  // C.SLLI : slli rd, rd, shamt[5:0]
-            ret = (shamt << 20) | (rd << 15) | (FUNCT3_SLL << 12) | (rd << 7) | OPCODE_OP_IMM;
+            ret = (shamt << 20) | (rd << 15) | (static_cast<Instruction>(Funct3::Sll) << 12) |
+                  (rd << 7) | static_cast<Instruction>(Opcode::OpImm);
             break;
         }
         case 0x1: {  // C.FLDSP : fld rd, offset[8:3](x2)
-            ret = (uimm1 << 20) | (2 << 15) | (FUNCT3_FLD << 12) | (rd << 7) | OPCODE_LOAD_FP;
+            ret = (uimm1 << 20) | (2 << 15) | (static_cast<Instruction>(Funct3::Fld) << 12) |
+                  (rd << 7) | static_cast<Instruction>(Opcode::LoadFp);
             break;
         }
         case 0x2: {  // C.LWSP : lw rd, offset[7:2](x2)
-            ret = (uimm2 << 20) | (2 << 15) | (FUNCT3_LW << 12) | (rd << 7) | OPCODE_LOAD;
+            ret = (uimm2 << 20) | (2 << 15) | (static_cast<Instruction>(Funct3::Lw) << 12) |
+                  (rd << 7) | static_cast<Instruction>(Opcode::Load);
             break;
         }
         case 0x3: {  // C.FLWSP : flw rd, offset[7:2](x2)
-            ret = (uimm2 << 20) | (2 << 15) | (FUNCT3_FLW << 12) | (rd << 7) | OPCODE_LOAD_FP;
+            ret = (uimm2 << 20) | (2 << 15) | (static_cast<Instruction>(Funct3::Flw) << 12) |
+                  (rd << 7) | static_cast<Instruction>(Opcode::LoadFp);
             break;
         }
         case 0x5: {  // C.FSDSP : fsd rs2, offset[8:3](x2)
-            ret = (((uimm3 >> 5) & 0x7F) << 25) | (rs2 << 20) | (2 << 15) | (FUNCT3_FSD << 12) |
-                  ((uimm3 & 0x1F) << 7) | OPCODE_STORE_FP;
+            ret = (((uimm3 >> 5) & 0x7F) << 25) | (rs2 << 20) | (2 << 15) |
+                  (static_cast<Instruction>(Funct3::Fsd) << 12) | ((uimm3 & 0x1F) << 7) |
+                  static_cast<Instruction>(Opcode::StoreFp);
             break;
         }
         case 0x6: {  // C.SWSP : sw rs2, offset[7:2](x2)
-            ret = (((uimm4 >> 5) & 0x7F) << 25) | (rs2 << 20) | (2 << 15) | (FUNCT3_SW << 12) |
-                  ((uimm4 & 0x1F) << 7) | OPCODE_STORE;
+            ret = (((uimm4 >> 5) & 0x7F) << 25) | (rs2 << 20) | (2 << 15) |
+                  (static_cast<Instruction>(Funct3::Sw) << 12) | ((uimm4 & 0x1F) << 7) |
+                  static_cast<Instruction>(Opcode::Store);
             break;
         }
         case 0x7: {  // C.FSWSP : fsw rs2, offset[7:2](x2)
-            ret = (((uimm4 >> 5) & 0x7F) << 25) | (rs2 << 20) | (2 << 15) | (FUNCT3_FSW << 12) |
-                  ((uimm4 & 0x1F) << 7) | OPCODE_STORE_FP;
+            ret = (((uimm4 >> 5) & 0x7F) << 25) | (rs2 << 20) | (2 << 15) |
+                  (static_cast<Instruction>(Funct3::Fsw) << 12) | ((uimm4 & 0x1F) << 7) |
+                  static_cast<Instruction>(Opcode::StoreFp);
             break;
         }
         case 0x4: {
@@ -289,26 +309,29 @@ uint32_t decomp_c2(uint32_t ir) {
                 case 0: {
                     // C.JR : jalr x0, rs1, 0
                     if (rd != 0 && rs2 == 0) {
-                        ret = (rd << 15) | OPCODE_JALR;
+                        ret = (rd << 15) | static_cast<Instruction>(Opcode::Jalr);
                     }
                     // C.MV : add rd, x0, rs2
                     if (rd != 0 && rs2 != 0) {
-                        ret = (rs2 << 20) | (FUNCT3_ADD << 12) | (rd << 7) | OPCODE_OP;
+                        ret = (rs2 << 20) | (static_cast<Instruction>(Funct3::Add) << 12) |
+                              (rd << 7) | static_cast<Instruction>(Opcode::Op);
                     }
                     break;
                     case 1:
                         // C.EBREAK : ebreak
                         if (rd == 0 && rs2 == 0) {
-                            ret = (FUNCT12_EBREAK << 20) | OPCODE_SYSTEM;
+                            ret = (static_cast<Instruction>(Funct12Priv::Ebreak) << 20) |
+                                  static_cast<Instruction>(Opcode::System);
                         }
                         // C.JALR : jalr x1, rs, 0
                         if (rd != 0 && rs2 == 0) {
-                            ret = (rd << 15) | (1 << 7) | OPCODE_JALR;
+                            ret = (rd << 15) | (1 << 7) | static_cast<Instruction>(Opcode::Jalr);
                         }
                         // C.ADD : add rd, rd, rs2
                         if (rd != 0 && rs2 != 0) {
-                            ret = (rs2 << 20) | (rd << 15) | (FUNCT3_ADD << 12) | (rd << 7) |
-                                  OPCODE_OP;
+                            ret = (rs2 << 20) | (rd << 15) |
+                                  (static_cast<Instruction>(Funct3::Add) << 12) | (rd << 7) |
+                                  static_cast<Instruction>(Opcode::Op);
                         }
                         break;
                 }
@@ -319,59 +342,62 @@ uint32_t decomp_c2(uint32_t ir) {
     return ret;
 }
 
-uint32_t CB_inst_decomp(uint32_t ir) {
-    switch (ir & 0x3) {
-        case OPCODE_C0:
+Instruction CB_inst_decomp(Instruction ir) {
+    switch (compressed_opcode_of(static_cast<CompressedInstruction>(ir & 0xFFFF))) {
+        case Opcode::C0:
             return decomp_c0(ir & 0xFFFF);
-        case OPCODE_C1:
+        case Opcode::C1:
             return decomp_c1(ir & 0xFFFF);
-        case OPCODE_C2:
+        case Opcode::C2:
             return decomp_c2(ir & 0xFFFF);
+        default:
+            break;
     }
     return ir;
 }
 
-uint32_t ALU_IM(uint32_t in1, uint32_t in2, uint32_t funct3, uint32_t funct7) {
-    uint32_t ret = 0;
-    uint32_t shamt = in2 & 0x1f;
+Register ALU_IM(Register in1, Register in2, Instruction funct3, Instruction funct7) {
+    Word ret = 0;
+    Word shamt = in2 & 0x1f;
+    const Funct3 f3 = static_cast<Funct3>(funct3);
 
     if ((funct7 & 0x1) == 0) {
-        switch (funct3) {
-            case FUNCT3_ADD: {
+        switch (f3) {
+            case Funct3::Add: {
                 if (funct7)
                     ret = in1 - in2;
                 else
                     ret = in1 + in2;
                 break;
             }
-            case FUNCT3_SLL: {
+            case Funct3::Sll: {
                 ret = in1 << shamt;
                 break;
             }
-            case FUNCT3_SLT: {
-                ret = (int32_t)in1 < (int32_t)in2;
+            case Funct3::Slt: {
+                ret = (SignedWord)in1 < (SignedWord)in2;
                 break;
             }
-            case FUNCT3_SLTU: {
+            case Funct3::Sltu: {
                 ret = in1 < in2;
                 break;
             }
-            case FUNCT3_XOR: {
+            case Funct3::Xor: {
                 ret = in1 ^ in2;
                 break;
             }
-            case FUNCT3_SRL: {
+            case Funct3::Srl: {
                 if (funct7)
-                    ret = (int32_t)in1 >> shamt;
+                    ret = (SignedWord)in1 >> shamt;
                 else
                     ret = in1 >> shamt;
                 break;
             }
-            case FUNCT3_OR: {
+            case Funct3::Or: {
                 ret = in1 | in2;
                 break;
             }
-            case FUNCT3_AND: {
+            case Funct3::And: {
                 ret = in1 & in2;
                 break;
             }
@@ -380,52 +406,52 @@ uint32_t ALU_IM(uint32_t in1, uint32_t in2, uint32_t funct3, uint32_t funct7) {
             }
         }
     } else {
-        uint64_t mul_SS = (int64_t)((int32_t)in1) * (int64_t)((int32_t)in2);
-        uint64_t mul_SU = (int64_t)((int32_t)in1) * (uint64_t)in2;
-        uint64_t mul_UU = (uint64_t)in1 * (uint64_t)in2;
-        switch (funct3) {
-            case FUNCT3_MUL: {
+        Counter mul_SS = (int64_t)((SignedWord)in1) * (int64_t)((SignedWord)in2);
+        Counter mul_SU = (int64_t)((SignedWord)in1) * (Counter)in2;
+        Counter mul_UU = (Counter)in1 * (Counter)in2;
+        switch (f3) {
+            case Funct3::Mul: {
                 ret = mul_SS & 0xFFFFFFFF;
                 break;
             }
-            case FUNCT3_MULH: {
+            case Funct3::Mulh: {
                 ret = (mul_SS >> 32) & 0xFFFFFFFF;
                 break;
             }
-            case FUNCT3_MULHSU: {
+            case Funct3::Mulhsu: {
                 ret = (mul_SU >> 32) & 0xFFFFFFFF;
                 break;
             }
-            case FUNCT3_MULHU: {
+            case Funct3::Mulhu: {
                 ret = (mul_UU >> 32) & 0xFFFFFFFF;
                 break;
             }
-            case FUNCT3_DIV: {
+            case Funct3::Div: {
                 if (in2 == 0xFFFFFFFF)
                     ret = in1;
                 else if (in2 == 0)
                     ret = 0xFFFFFFFF;
                 else
-                    ret = (int32_t)in1 / (int32_t)in2;
+                    ret = (SignedWord)in1 / (SignedWord)in2;
                 break;
             }
-            case FUNCT3_DIVU: {
+            case Funct3::Divu: {
                 if (in2 == 0)
                     ret = 0xFFFFFFFF;
                 else
                     ret = in1 / in2;
                 break;
             }
-            case FUNCT3_REM: {
+            case Funct3::Rem: {
                 if (in2 == 0xFFFFFFFF)
                     ret = 0;
                 else if (in2 == 0)
                     ret = in1;
                 else
-                    ret = (int32_t)in1 % (int32_t)in2;
+                    ret = (SignedWord)in1 % (SignedWord)in2;
                 break;
             }
-            case FUNCT3_REMU: {
+            case Funct3::Remu: {
                 if (in2 == 0)
                     ret = in1;
                 else
@@ -440,417 +466,444 @@ uint32_t ALU_IM(uint32_t in1, uint32_t in2, uint32_t funct3, uint32_t funct7) {
     return ret;
 }
 
-uint32_t ALU_B(uint32_t in1, uint32_t in2, uint32_t funct3) {
-    uint32_t ret = 0;
-    switch (funct3) {
-        case FUNCT3_BEQ: {
+Instruction ALU_B(Register in1, Register in2, Instruction funct3) {
+    Word ret = 0;
+    switch (static_cast<Funct3>(funct3)) {
+        case Funct3::Beq: {
             ret = in1 == in2;
             break;
         }
-        case FUNCT3_BNE: {
+        case Funct3::Bne: {
             ret = in1 != in2;
             break;
         }
-        case FUNCT3_BLT: {
-            ret = (int32_t)in1 < (int32_t)in2;
+        case Funct3::Blt: {
+            ret = (SignedWord)in1 < (SignedWord)in2;
             break;
         }
-        case FUNCT3_BGE: {
-            ret = (int32_t)in1 >= (int32_t)in2;
+        case Funct3::Bge: {
+            ret = (SignedWord)in1 >= (SignedWord)in2;
             break;
         }
-        case FUNCT3_BLTU: {
+        case Funct3::Bltu: {
             ret = in1 < in2;
             break;
         }
-        case FUNCT3_BGEU: {
+        case Funct3::Bgeu: {
             ret = in1 >= in2;
             break;
         }
+        default:
+            break;
     }
     return ret;
 }
 
-uint32_t ALU_A(uint32_t in1, uint32_t in2, uint32_t funct5) {
-    uint32_t ret = 0;
-    switch (funct5) {
-        case FUNCT5_AMO_LR: {
+Register ALU_A(Register in1, Register in2, Instruction funct5) {
+    Word ret = 0;
+    switch (static_cast<Funct5Amo>(funct5)) {
+        case Funct5Amo::Lr: {
             ret = 0;
             break;
         }
-        case FUNCT5_AMO_SC: {
+        case Funct5Amo::Sc: {
             ret = in1;
             break;
         }
-        case FUNCT5_AMO_SWAP: {
+        case Funct5Amo::Swap: {
             ret = in1;
             break;
         }
-        case FUNCT5_AMO_ADD: {
+        case Funct5Amo::Add: {
             ret = in1 + in2;
             break;
         }
-        case FUNCT5_AMO_AND: {
+        case Funct5Amo::And: {
             ret = in1 & in2;
             break;
         }
-        case FUNCT5_AMO_OR: {
+        case Funct5Amo::Or: {
             ret = in1 | in2;
             break;
         }
-        case FUNCT5_AMO_XOR: {
+        case Funct5Amo::Xor: {
             ret = in1 ^ in2;
             break;
         }
-        case FUNCT5_AMO_MIN: {
-            ret = (int32_t)in1 < (int32_t)in2 ? in1 : in2;
+        case Funct5Amo::Min: {
+            ret = (SignedWord)in1 < (SignedWord)in2 ? in1 : in2;
             break;
         }
-        case FUNCT5_AMO_MINU: {
+        case Funct5Amo::Minu: {
             ret = in1 < in2 ? in1 : in2;
             break;
         }
-        case FUNCT5_AMO_MAX: {
-            ret = (int32_t)in1 > (int32_t)in2 ? in1 : in2;
+        case Funct5Amo::Max: {
+            ret = (SignedWord)in1 > (SignedWord)in2 ? in1 : in2;
             break;
         }
-        case FUNCT5_AMO_MAXU: {
+        case Funct5Amo::Maxu: {
             ret = in1 > in2 ? in1 : in2;
             break;
         }
+        default:
+            break;
     }
     return ret;
 }
 
-uint32_t ALU_C(uint32_t rcsr, uint32_t rrs1, uint32_t imm, uint32_t funct3) {
-    uint32_t ret = 0;
-    switch (funct3) {
-        case FUNCT3_CSRRW: {
+CSRValue ALU_C(CSRValue rcsr, Register rrs1, Instruction imm, Instruction funct3) {
+    Word ret = 0;
+    switch (static_cast<Funct3>(funct3)) {
+        case Funct3::Csrrw: {
             ret = rrs1;
             break;
         }
-        case FUNCT3_CSRRS: {
+        case Funct3::Csrrs: {
             ret = rcsr | rrs1;
             break;
         }
-        case FUNCT3_CSRRC: {
+        case Funct3::Csrrc: {
             ret = rcsr & (~rrs1);
             break;
         }
-        case FUNCT3_CSRRWI: {
+        case Funct3::Csrrwi: {
             ret = imm;
             break;
         }
-        case FUNCT3_CSRRSI: {
+        case Funct3::Csrrsi: {
             ret = rcsr | imm;
             break;
         }
-        case FUNCT3_CSRRCI: {
+        case Funct3::Csrrci: {
             ret = rcsr & (~imm);
             break;
         }
+        default:
+            break;
     }
     return ret;
 }
 
-char OPERATION_NAME[NUMOFID___][11] = {
+char OPERATION_NAME[OperationIdCount][11] = {
     /* RV32I */
-    "LUI_______", "AUIPC_____", "JAL_______", "JALR______", "BEQ_______", "BNE_______",
-    "BLT_______", "BGE_______", "BLTU______", "BGEU______", "LB________", "LH________",
-    "LW________", "LBU_______", "LHU_______", "SB________", "SH________", "SW________",
-    "ADDI______", "SLTI______", "SLTIU_____", "XORI______", "ORI_______", "ANDI______",
-    "SLLI______", "SRLI______", "SRAI______", "ADD_______", "SUB_______", "SLL_______",
-    "SLT_______", "SLTU______", "XOR_______", "SRL_______", "SRA_______", "OR________",
-    "AND_______", "FENCE_____", "FENCE_I___", "ECALL_____", "EBREAK____", "CSRRW_____",
-    "CSRRS_____", "CSRRC_____", "CSRRWI____", "CSRRSI____", "CSRRCI____",
+    "LUI", "AUIPC", "JAL", "JALR", "BEQ", "BNE", "BLT", "BGE", "BLTU", "BGEU", "LB", "LH", "LW",
+    "LBU", "LHU", "SB", "SH", "SW", "ADDI", "SLTI", "SLTIU", "XORI", "ORI", "ANDI", "SLLI", "SRLI",
+    "SRAI", "ADD", "SUB", "SLL", "SLT", "SLTU", "XOR", "SRL", "SRA", "OR", "AND", "FENCE",
+    "FENCE_I", "ECALL", "EBREAK", "CSRRW", "CSRRS", "CSRRC", "CSRRWI", "CSRRSI", "CSRRCI",
     /* Privileged */
-    "URET______", "SRET______", "MRET______", "WFI_______", "SFENCE_VMA",
+    "URET", "SRET", "MRET", "WFI", "SFENCE_VMA",
     /* RV32M */
-    "MUL_______", "MULH______", "MULHSU____", "MULHU_____", "DIV_______", "DIVU______",
-    "REM_______", "REMU______",
+    "MUL", "MULH", "MULHSU", "MULHU", "DIV", "DIVU", "REM", "REMU",
     /* RV32A */
-    "LR_W______", "SC_W______", "AMOSWAP_W_", "AMOADD_W__", "AMOXOR_W__", "AMOAND_W__",
-    "AMOOR_W___", "AMOMIN_W__", "AMOMAX_W__", "AMOMINU_W_", "AMOMAXU_W_",
+    "LR_W", "SC_W", "AMOSWAP_W", "AMOADD_W", "AMOXOR_W", "AMOAND_W", "AMOOR_W", "AMOMIN_W",
+    "AMOMAX_W", "AMOMINU_W", "AMOMAXU_W",
+    /* RV32F */
+    "FLW", "FSW", "FMADD_S", "FMSUB_S", "FNMADD_S", "FNMSUB_S", "FADD_S", "FSUB_S", "FMUL_S",
+    "FDIV_S", "FSQRT_S", "FSGNJ_S", "FSGNJN_S", "FSGNJX_S", "FMIN_S", "FMAX_S", "FCVT_W_S",
+    "FCVT_WU_S", "FMV_X_W", "FEQ_S", "FLT_S", "FLE_S", "FCLASS_S", "FCVT_S_W", "FCVT_S_WU",
+    "FMV_W_X",
+    /* RV32D */
+    "FLD", "FSD", "FMADD_D", "FMSUB_D", "FNMSUB_D", "FNMADD_D", "FADD_D", "FSUB_D", "FMUL_D",
+    "FDIV_D", "FSQRT_D", "FSGNJ_D", "FSGNJN_D", "FSGNJX_D", "FMIN_D", "FMAX_D", "FCVT_S_D",
+    "FCVT_D_S", "FEQ_D", "FLT_D", "FLE_D", "FCLASS_D", "FCVT_W_D", "FCVT_WU_D", "FCVT_D_W",
+    "FCVT_D_WU",
     /* Others */
-    "UNKNOWN___"};
+    "UNKNOWN"};
 
 /* decoder                                                                                */
-OPERATION_ID decoder(uint32_t ir) {
-    OPERATION_ID ret = UNKNOWN___;
-    uint32_t opcode = ir & 0x7F;
-    uint32_t funct3 = (ir >> 12) & 0x7;
-    uint32_t funct5 = (ir >> 27) & 0x1F;
-    uint32_t funct7 = (ir >> 25);
-    uint32_t funct12 = (ir >> 20);
+OperationId decoder(Instruction ir) {
+    OperationId ret = UNKNOWN;
+    Opcode opcode = opcode_of(ir);
+    Funct3 funct3 = funct3_of(ir);
+    Funct5Amo funct5 = funct5_of(ir);
+    Instruction funct7 = (ir >> 25);
+    Funct12Priv funct12 = static_cast<Funct12Priv>(funct12_of(ir));
     switch (opcode) {
-        case OPCODE_LUI:
-            ret = LUI_______;
+        case Opcode::Lui:
+            ret = LUI;
             break;
-        case OPCODE_AUIPC:
-            ret = AUIPC_____;
+        case Opcode::Auipc:
+            ret = AUIPC;
             break;
-        case OPCODE_JAL:
-            ret = JAL_______;
+        case Opcode::Jal:
+            ret = JAL;
             break;
-        case OPCODE_JALR:
-            ret = JALR______;
+        case Opcode::Jalr:
+            ret = JALR;
             break;
-        case OPCODE_BRANCH: {
+        case Opcode::Branch: {
             switch (funct3) {
-                case FUNCT3_BEQ:
-                    ret = BEQ_______;
+                case Funct3::Beq:
+                    ret = BEQ;
                     break;
-                case FUNCT3_BNE:
-                    ret = BNE_______;
+                case Funct3::Bne:
+                    ret = BNE;
                     break;
-                case FUNCT3_BLT:
-                    ret = BLT_______;
+                case Funct3::Blt:
+                    ret = BLT;
                     break;
-                case FUNCT3_BGE:
-                    ret = BGE_______;
+                case Funct3::Bge:
+                    ret = BGE;
                     break;
-                case FUNCT3_BLTU:
-                    ret = BLTU______;
+                case Funct3::Bltu:
+                    ret = BLTU;
                     break;
-                case FUNCT3_BGEU:
-                    ret = BGEU______;
+                case Funct3::Bgeu:
+                    ret = BGEU;
+                    break;
+                default:
                     break;
             }
             break;
         }
-        case OPCODE_LOAD: {
+        case Opcode::Load: {
             switch (funct3) {
-                case FUNCT3_LB:
-                    ret = LB________;
+                case Funct3::Lb:
+                    ret = LB;
                     break;
-                case FUNCT3_LH:
-                    ret = LH________;
+                case Funct3::Lh:
+                    ret = LH;
                     break;
-                case FUNCT3_LW:
-                    ret = LW________;
+                case Funct3::Lw:
+                    ret = LW;
                     break;
-                case FUNCT3_LBU:
-                    ret = LBU_______;
+                case Funct3::Lbu:
+                    ret = LBU;
                     break;
-                case FUNCT3_LHU:
-                    ret = LHU_______;
+                case Funct3::Lhu:
+                    ret = LHU;
+                    break;
+                default:
                     break;
             }
             break;
         }
-        case OPCODE_STORE: {
+        case Opcode::Store: {
             switch (funct3) {
-                case FUNCT3_SB:
-                    ret = SB________;
+                case Funct3::Sb:
+                    ret = SB;
                     break;
-                case FUNCT3_SH:
-                    ret = SH________;
+                case Funct3::Sh:
+                    ret = SH;
                     break;
-                case FUNCT3_SW:
-                    ret = SW________;
+                case Funct3::Sw:
+                    ret = SW;
+                    break;
+                default:
                     break;
             }
             break;
         }
-        case OPCODE_OP_IMM: {
+        case Opcode::OpImm: {
             switch (funct3) {
-                case FUNCT3_ADD:
-                    ret = ADDI______;
+                case Funct3::Add:
+                    ret = ADDI;
                     break;
-                case FUNCT3_SLT:
-                    ret = SLTI______;
+                case Funct3::Slt:
+                    ret = SLTI;
                     break;
-                case FUNCT3_SLTU:
-                    ret = SLTIU_____;
+                case Funct3::Sltu:
+                    ret = SLTIU;
                     break;
-                case FUNCT3_XOR:
-                    ret = XORI______;
+                case Funct3::Xor:
+                    ret = XORI;
                     break;
-                case FUNCT3_OR:
-                    ret = ORI_______;
+                case Funct3::Or:
+                    ret = ORI;
                     break;
-                case FUNCT3_AND:
-                    ret = ANDI______;
+                case Funct3::And:
+                    ret = ANDI;
                     break;
-                case FUNCT3_SLL:
-                    ret = SLLI______;
+                case Funct3::Sll:
+                    ret = SLLI;
                     break;
-                case FUNCT3_SRL: {
+                case Funct3::Srl: {
                     if (funct7) {
-                        ret = SRAI______;
+                        ret = SRAI;
                         break;
                     } else {
-                        ret = SRLI______;
+                        ret = SRLI;
                         break;
                     }
                     break;
                 }
+                default:
+                    break;
             }
             break;
         }
-        case OPCODE_OP: {
+        case Opcode::Op: {
             if (funct7 & 0x1) {
                 switch (funct3) {
-                    case FUNCT3_MUL:
-                        ret = MUL_______;
+                    case Funct3::Mul:
+                        ret = MUL;
                         break;
-                    case FUNCT3_MULH:
-                        ret = MULH______;
+                    case Funct3::Mulh:
+                        ret = MULH;
                         break;
-                    case FUNCT3_MULHSU:
-                        ret = MULHSU____;
+                    case Funct3::Mulhsu:
+                        ret = MULHSU;
                         break;
-                    case FUNCT3_MULHU:
-                        ret = MULHU_____;
+                    case Funct3::Mulhu:
+                        ret = MULHU;
                         break;
-                    case FUNCT3_DIV:
-                        ret = DIV_______;
+                    case Funct3::Div:
+                        ret = DIV;
                         break;
-                    case FUNCT3_DIVU:
-                        ret = DIVU______;
+                    case Funct3::Divu:
+                        ret = DIVU;
                         break;
-                    case FUNCT3_REM:
-                        ret = REM_______;
+                    case Funct3::Rem:
+                        ret = REM;
                         break;
-                    case FUNCT3_REMU:
-                        ret = REMU______;
+                    case Funct3::Remu:
+                        ret = REMU;
+                        break;
+                    default:
                         break;
                 }
             } else {
                 switch (funct3) {
-                    case FUNCT3_ADD: {
+                    case Funct3::Add: {
                         if (funct7) {
-                            ret = SUB_______;
+                            ret = SUB;
                             break;
                         } else {
-                            ret = ADD_______;
+                            ret = ADD;
                             break;
                         }
                         break;
                     }
-                    case FUNCT3_SLT:
-                        ret = SLT_______;
+                    case Funct3::Slt:
+                        ret = SLT;
                         break;
-                    case FUNCT3_SLTU:
-                        ret = SLTU______;
+                    case Funct3::Sltu:
+                        ret = SLTU;
                         break;
-                    case FUNCT3_XOR:
-                        ret = XOR_______;
+                    case Funct3::Xor:
+                        ret = XOR;
                         break;
-                    case FUNCT3_OR:
-                        ret = OR________;
+                    case Funct3::Or:
+                        ret = OR;
                         break;
-                    case FUNCT3_AND:
-                        ret = AND_______;
+                    case Funct3::And:
+                        ret = AND;
                         break;
-                    case FUNCT3_SLL:
-                        ret = SLL_______;
+                    case Funct3::Sll:
+                        ret = SLL;
                         break;
-                    case FUNCT3_SRL: {
+                    case Funct3::Srl: {
                         if (funct7) {
-                            ret = SRA_______;
+                            ret = SRA;
                             break;
                         } else {
-                            ret = SRL_______;
+                            ret = SRL;
                             break;
                         }
                         break;
                     }
+                    default:
+                        break;
                 }
             }
             break;
         }
-        case OPCODE_MISC_M: {
+        case Opcode::MiscMem: {
             switch (funct3) {
-                case FUNCT3_FENCE:
-                    ret = FENCE_____;
+                case Funct3::Fence:
+                    ret = FENCE;
                     break;
-                case FUNCT3_FENCE_I:
-                    ret = FENCE_I___;
+                case Funct3::FenceI:
+                    ret = FENCE_I;
+                    break;
+                default:
                     break;
             }
             break;
         }
-        case OPCODE_AMO: {
+        case Opcode::Amo: {
             switch (funct5) {
-                case FUNCT5_AMO_LR:
-                    ret = LR_W______;
+                case Funct5Amo::Lr:
+                    ret = LR_W;
                     break;
-                case FUNCT5_AMO_SC:
-                    ret = SC_W______;
+                case Funct5Amo::Sc:
+                    ret = SC_W;
                     break;
-                case FUNCT5_AMO_SWAP:
-                    ret = AMOSWAP_W_;
+                case Funct5Amo::Swap:
+                    ret = AMOSWAP_W;
                     break;
-                case FUNCT5_AMO_ADD:
-                    ret = AMOADD_W__;
+                case Funct5Amo::Add:
+                    ret = AMOADD_W;
                     break;
-                case FUNCT5_AMO_XOR:
-                    ret = AMOXOR_W__;
+                case Funct5Amo::Xor:
+                    ret = AMOXOR_W;
                     break;
-                case FUNCT5_AMO_AND:
-                    ret = AMOAND_W__;
+                case Funct5Amo::And:
+                    ret = AMOAND_W;
                     break;
-                case FUNCT5_AMO_OR:
-                    ret = AMOOR_W___;
+                case Funct5Amo::Or:
+                    ret = AMOOR_W;
                     break;
-                case FUNCT5_AMO_MIN:
-                    ret = AMOMIN_W__;
+                case Funct5Amo::Min:
+                    ret = AMOMIN_W;
                     break;
-                case FUNCT5_AMO_MAX:
-                    ret = AMOMAX_W__;
+                case Funct5Amo::Max:
+                    ret = AMOMAX_W;
                     break;
-                case FUNCT5_AMO_MINU:
-                    ret = AMOMINU_W_;
+                case Funct5Amo::Minu:
+                    ret = AMOMINU_W;
                     break;
-                case FUNCT5_AMO_MAXU:
-                    ret = AMOMAXU_W_;
+                case Funct5Amo::Maxu:
+                    ret = AMOMAXU_W;
+                    break;
+                default:
                     break;
             }
             break;
         }
-        case OPCODE_SYSTEM: {
+        case Opcode::System: {
             switch (funct3) {
-                case FUNCT3_CSRRW:
-                    ret = CSRRW_____;
+                case Funct3::Csrrw:
+                    ret = CSRRW;
                     break;
-                case FUNCT3_CSRRS:
-                    ret = CSRRS_____;
+                case Funct3::Csrrs:
+                    ret = CSRRS;
                     break;
-                case FUNCT3_CSRRC:
-                    ret = CSRRC_____;
+                case Funct3::Csrrc:
+                    ret = CSRRC;
                     break;
-                case FUNCT3_CSRRWI:
-                    ret = CSRRWI____;
+                case Funct3::Csrrwi:
+                    ret = CSRRWI;
                     break;
-                case FUNCT3_CSRRSI:
-                    ret = CSRRSI____;
+                case Funct3::Csrrsi:
+                    ret = CSRRSI;
                     break;
-                case FUNCT3_CSRRCI:
-                    ret = CSRRCI____;
+                case Funct3::Csrrci:
+                    ret = CSRRCI;
                     break;
-                case FUNCT3_PRIV: {
+                case Funct3::Priv: {
                     switch (funct12) {
-                        case FUNCT12_ECALL:
-                            ret = ECALL_____;
+                        case Funct12Priv::Ecall:
+                            ret = ECALL;
                             break;
-                        case FUNCT12_EBREAK:
-                            ret = EBREAK____;
+                        case Funct12Priv::Ebreak:
+                            ret = EBREAK;
                             break;
-                        case FUNCT12_URET:
-                            ret = URET______;
+                        case Funct12Priv::Uret:
+                            ret = URET;
                             break;
-                        case FUNCT12_SRET:
-                            ret = SRET______;
+                        case Funct12Priv::Sret:
+                            ret = SRET;
                             break;
-                        case FUNCT12_MRET:
-                            ret = MRET______;
+                        case Funct12Priv::Mret:
+                            ret = MRET;
                             break;
-                        case FUNCT12_WFI:
-                            ret = WFI_______;
+                        case Funct12Priv::Wfi:
+                            ret = WFI;
                             break;
                         default: {
-                            if (funct7 == FUNCT7_SFENCE_VMA) {
+                            if (funct7 == static_cast<Instruction>(Funct7Priv::SfenceVma)) {
                                 ret = SFENCE_VMA;
                             }
                             break;
@@ -858,151 +911,293 @@ OPERATION_ID decoder(uint32_t ir) {
                     }
                     break;
                 }
+                default:
+                    break;
             }
             break;
         }
-        // case OPCODE_LOAD_FP : {
-        //     switch (funct3) {
-        //         case FUNCT3_FLW : ret = FLW_______; break;
-        //         case FUNCT3_FLD : ret = FLD_______; break;
-        //     }
-        //     break;
-        // }
-        // case OPCODE_STORE_FP : {
-        //     switch (funct3) {
-        //         case FUNCT3_FSW : ret = FSW_______; break;
-        //         case FUNCT3_FSD : ret = FSD_______; break;
-        //     }
-        //     break;
-        // }
-        // case OPCODE_MADD : {
-        //     switch ((ir >> 25) & 0x3) {
-        //         case 0x0 : ret = FMADD_S___; break;
-        //         case 0x1 : ret = FMADD_D___; break;
-        //     }
-        //     break;
-        // }
-        // case OPCODE_MSUB : {
-        //     switch ((ir >> 25) & 0x3) {
-        //         case 0x0 : ret = FMSUB_S___; break;
-        //         case 0x1 : ret = FMSUB_D___; break;
-        //     }
-        //     break;
-        // }
-        // case OPCODE_NMADD : {
-        //     switch ((ir >> 25) & 0x3) {
-        //         case 0x0 : ret = FNMADD_S__; break;
-        //         case 0x1 : ret = FNMADD_D__; break;
-        //     }
-        //     break;
-        // }
-        // case OPCODE_NMSUB : {
-        //     switch ((ir >> 25) & 0x3) {
-        //         case 0x0 : ret = FNMSUB_S__; break;
-        //         case 0x1 : ret = FNMSUB_D__; break;
-        //     }
-        //     break;
-        // }
-        // case OPCODE_OP_FP : {
-        //     switch (ir >> 25) {
-        //         case 0x00 : ret = FADD_S____; break;
-        //         case 0x01 : ret = FADD_D____; break;
-        //         case 0x04 : ret = FSUB_S____; break;
-        //         case 0x05 : ret = FSUB_D____; break;
-        //         case 0x08 : ret = FMUL_S____; break;
-        //         case 0x09 : ret = FMUL_D____; break;
-        //         case 0x0C : ret = FDIV_S____; break;
-        //         case 0x0D : ret = FDIV_D____; break;
-        //         case 0x10 : {
-        //             switch ((ir >> 12) & 0x7) {
-        //                 case 0x0 : ret = FSGNJ_S___; break;
-        //                 case 0x1 : ret = FSGNJN_S__; break;
-        //                 case 0x2 : ret = FSGNJX_S__; break;
-        //             }
-        //             break;
-        //         }
-        //         case 0x11 : {
-        //             switch ((ir >> 12) & 0x7) {
-        //                 case 0x0 : ret = FSGNJ_D___; break;
-        //                 case 0x1 : ret = FSGNJN_D__; break;
-        //                 case 0x2 : ret = FSGNJX_D__; break;
-        //             }
-        //             break;
-        //         }
-        //         case 0x14 : {
-        //             switch ((ir >> 12) & 0x7) {
-        //                 case 0x0 : ret = FMIN_S____; break;
-        //                 case 0x1 : ret = FMAX_S____; break;
-        //             }
-        //             break;
-        //         }
-        //         case 0x15 : {
-        //             switch ((ir >> 12) & 0x7) {
-        //                 case 0x0 : ret = FMIN_D____; break;
-        //                 case 0x1 : ret = FMAX_D____; break;
-        //             }
-        //             break;
-        //         }
-        //         case 0x20 : ret = FCVT_S_D__; break;
-        //         case 0x21 : ret = FCVT_D_S__; break;
-        //         case 0x2C : ret = FSQRT_S___; break;
-        //         case 0x2D : ret = FSQRT_D___; break;
-        //         case 0x50 : {
-        //             switch ((ir >> 12) & 0x7) {
-        //                 case 0x0 : ret = FLE_S_____; break;
-        //                 case 0x1 : ret = FLT_S_____; break;
-        //                 case 0x2 : ret = FEQ_S_____; break;
-        //             }
-        //             break;
-        //         }
-        //         case 0x51 : {
-        //             switch ((ir >> 12) & 0x7) {
-        //                 case 0x0 : ret = FLE_D_____; break;
-        //                 case 0x1 : ret = FLT_D_____; break;
-        //                 case 0x2 : ret = FEQ_D_____; break;
-        //             }
-        //             break;
-        //         }
-        //         case 0x60 : {
-        //             switch ((ir >> 20) & 0x1F) {
-        //                 case 0x0 : ret = FCVT_W_S__; break;
-        //                 case 0x1 : ret = FCVT_WU_S_; break;
-        //             }
-        //             break;
-        //         }
-        //         case 0x61 : {
-        //             switch ((ir >> 20) & 0x1F) {
-        //                 case 0x0 : ret = FCVT_W_D__; break;
-        //                 case 0x1 : ret = FCVT_WU_D_; break;
-        //             }
-        //             break;
-        //         }
-        //         case 0x68 : {
-        //             switch ((ir >> 20) & 0x1F) {
-        //                 case 0x0 : ret = FCVT_S_W__; break;
-        //                 case 0x1 : ret = FCVT_S_WU_; break;
-        //             }
-        //             break;
-        //         }
-        //         case 0x69 : {
-        //             switch ((ir >> 20) & 0x1F) {
-        //                 case 0x0 : ret = FCVT_D_W__; break;
-        //                 case 0x1 : ret = FCVT_D_WU_; break;
-        //             }
-        //             break;
-        //         }
-        //         case 0x70 : {
-        //             switch ((ir >> 12) & 0x7) {
-        //                 case 0x0 : ret = FMV_X_W___; break;
-        //                 case 0x1 : ret = FCLASS_S__; break;
-        //             }
-        //             break;
-        //         }
-        //         case 0x71 : ret = FCLASS_D__; break;
-        //         case 0x78 : ret = FMV_W_X___; break;
-        //     }
-        //     break;
-        // }
+        case Opcode::LoadFp: {
+            switch (funct3) {
+                case Funct3::Flw:
+                    ret = FLW;
+                    break;
+                case Funct3::Fld:
+                    ret = FLD;
+                    break;
+                default:
+                    break;
+            }
+            break;
+        }
+        case Opcode::StoreFp: {
+            switch (funct3) {
+                case Funct3::Fsw:
+                    ret = FSW;
+                    break;
+                case Funct3::Fsd:
+                    ret = FSD;
+                    break;
+                default:
+                    break;
+            }
+            break;
+        }
+        case Opcode::MAdd: {
+            switch ((ir >> 25) & 0x3) {
+                case 0x0:
+                    ret = FMADD_S;
+                    break;
+                case 0x1:
+                    ret = FMADD_D;
+                    break;
+                default:
+                    break;
+            }
+            break;
+        }
+        case Opcode::MSub: {
+            switch ((ir >> 25) & 0x3) {
+                case 0x0:
+                    ret = FMSUB_S;
+                    break;
+                case 0x1:
+                    ret = FMSUB_D;
+                    break;
+                default:
+                    break;
+            }
+            break;
+        }
+        case Opcode::NMAdd: {
+            switch ((ir >> 25) & 0x3) {
+                case 0x0:
+                    ret = FNMADD_S;
+                    break;
+                case 0x1:
+                    ret = FNMADD_D;
+                    break;
+                default:
+                    break;
+            }
+            break;
+        }
+        case Opcode::NMSub: {
+            switch ((ir >> 25) & 0x3) {
+                case 0x0:
+                    ret = FNMSUB_S;
+                    break;
+                case 0x1:
+                    ret = FNMSUB_D;
+                    break;
+                default:
+                    break;
+            }
+            break;
+        }
+        case Opcode::OpFp: {
+            switch (ir >> 25) {
+                case 0x00:
+                    ret = FADD_S;
+                    break;
+                case 0x01:
+                    ret = FADD_D;
+                    break;
+                case 0x04:
+                    ret = FSUB_S;
+                    break;
+                case 0x05:
+                    ret = FSUB_D;
+                    break;
+                case 0x08:
+                    ret = FMUL_S;
+                    break;
+                case 0x09:
+                    ret = FMUL_D;
+                    break;
+                case 0x0C:
+                    ret = FDIV_S;
+                    break;
+                case 0x0D:
+                    ret = FDIV_D;
+                    break;
+                case 0x10: {
+                    switch ((ir >> 12) & 0x7) {
+                        case 0x0:
+                            ret = FSGNJ_S;
+                            break;
+                        case 0x1:
+                            ret = FSGNJN_S;
+                            break;
+                        case 0x2:
+                            ret = FSGNJX_S;
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                }
+                case 0x11: {
+                    switch ((ir >> 12) & 0x7) {
+                        case 0x0:
+                            ret = FSGNJ_D;
+                            break;
+                        case 0x1:
+                            ret = FSGNJN_D;
+                            break;
+                        case 0x2:
+                            ret = FSGNJX_D;
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                }
+                case 0x14: {
+                    switch ((ir >> 12) & 0x7) {
+                        case 0x0:
+                            ret = FMIN_S;
+                            break;
+                        case 0x1:
+                            ret = FMAX_S;
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                }
+                case 0x15: {
+                    switch ((ir >> 12) & 0x7) {
+                        case 0x0:
+                            ret = FMIN_D;
+                            break;
+                        case 0x1:
+                            ret = FMAX_D;
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                }
+                case 0x20:
+                    ret = FCVT_S_D;
+                    break;
+                case 0x21:
+                    ret = FCVT_D_S;
+                    break;
+                case 0x2C:
+                    ret = FSQRT_S;
+                    break;
+                case 0x2D:
+                    ret = FSQRT_D;
+                    break;
+                case 0x50: {
+                    switch ((ir >> 12) & 0x7) {
+                        case 0x0:
+                            ret = FLE_S;
+                            break;
+                        case 0x1:
+                            ret = FLT_S;
+                            break;
+                        case 0x2:
+                            ret = FEQ_S;
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                }
+                case 0x51: {
+                    switch ((ir >> 12) & 0x7) {
+                        case 0x0:
+                            ret = FLE_D;
+                            break;
+                        case 0x1:
+                            ret = FLT_D;
+                            break;
+                        case 0x2:
+                            ret = FEQ_D;
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                }
+                case 0x60: {
+                    switch ((ir >> 20) & 0x1F) {
+                        case 0x0:
+                            ret = FCVT_W_S;
+                            break;
+                        case 0x1:
+                            ret = FCVT_WU_S;
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                }
+                case 0x61: {
+                    switch ((ir >> 20) & 0x1F) {
+                        case 0x0:
+                            ret = FCVT_W_D;
+                            break;
+                        case 0x1:
+                            ret = FCVT_WU_D;
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                }
+                case 0x68: {
+                    switch ((ir >> 20) & 0x1F) {
+                        case 0x0:
+                            ret = FCVT_S_W;
+                            break;
+                        case 0x1:
+                            ret = FCVT_S_WU;
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                }
+                case 0x69: {
+                    switch ((ir >> 20) & 0x1F) {
+                        case 0x0:
+                            ret = FCVT_D_W;
+                            break;
+                        case 0x1:
+                            ret = FCVT_D_WU;
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                }
+                case 0x70: {
+                    switch ((ir >> 12) & 0x7) {
+                        case 0x0:
+                            ret = FMV_X_W;
+                            break;
+                        case 0x1:
+                            ret = FCLASS_S;
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                }
+                case 0x71:
+                    ret = FCLASS_D;
+                    break;
+                case 0x78:
+                    ret = FMV_W_X;
+                    break;
+                default:
+                    break;
+            }
+            break;
+        }
         default: {
             fprintf(stdout, "__ Unknown Instruction %08x\n", ir);
             exit(0);
@@ -1010,4 +1205,3 @@ OPERATION_ID decoder(uint32_t ir) {
     }
     return ret;
 }
-

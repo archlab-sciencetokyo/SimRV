@@ -4,10 +4,12 @@
  */
 #include "DecodeUnit.hpp"
 
-uint32_t DecodeUnit::decompress(uint32_t raw_ir) const { return CB_inst_decomp(raw_ir); }
+#include "Module.hpp"
 
-uint32_t DecodeUnit::immGen(uint32_t ir) const { return CB_imm_gen(ir); }
+Instruction DecodeUnit::decompress(Instruction raw_ir) const { return CB_inst_decomp(raw_ir); }
 
-OPERATION_ID DecodeUnit::decodeOp(uint32_t ir) const { return decoder(ir); }
+Instruction DecodeUnit::immGen(Instruction ir) const { return CB_imm_gen(ir); }
 
-bool DecodeUnit::isCompressed(uint32_t raw_ir) const { return (raw_ir & 3u) != 3u; }
+OperationId DecodeUnit::decodeOp(Instruction ir) const { return decoder(ir); }
+
+bool DecodeUnit::isCompressed(Instruction raw_ir) const { return (raw_ir & 3u) != 3u; }

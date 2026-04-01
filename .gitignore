@@ -35,6 +35,7 @@
 SimRV
 build/
 CMakeUserPresets.json
+compile_commands.json
 .isa_tmp/
 isa_logs/
 regression_logs/

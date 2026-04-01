@@ -13,7 +13,8 @@
             "binaryDir": "${sourceDir}/build/ninja-clang-release",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_CXX_COMPILER": "clang++"
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
             }
         }
     ],

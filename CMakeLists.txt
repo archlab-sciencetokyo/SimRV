@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(SimRV LANGUAGES CXX)
 
-set(SIMRV_VERSION "0.0.0")
+set(SIMRV_VERSION "2.0.0-alpha.1")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -17,17 +17,6 @@ endif()
 
 find_package(Git QUIET)
 if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
-  execute_process(
-    COMMAND ${GIT_EXECUTABLE} describe --tags --abbrev=0
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    OUTPUT_VARIABLE SIMRV_TAG_OUTPUT
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-  )
-  if(SIMRV_TAG_OUTPUT)
-    string(REGEX REPLACE "^v" "" SIMRV_VERSION "${SIMRV_TAG_OUTPUT}")
-  endif()
-
   if(SIMRV_GIT_BRANCH STREQUAL "unknown")
     execute_process(
       COMMAND ${GIT_EXECUTABLE} rev-parse --abbrev-ref HEAD
@@ -57,6 +46,15 @@ endif()
 
 message(STATUS "SimRV version: ${SIMRV_VERSION} (${SIMRV_GIT_BRANCH}@${SIMRV_GIT_SHA})")
 
+set(SIMRV_PROJECT_NAME "SimRV")
+set(SIMRV_PROJECT_DESCRIPTION "SimCore/RISC-V Functional Simulator")
+
+configure_file(
+  ${CMAKE_SOURCE_DIR}/include/simrv/BuildInfo.hpp.in
+  ${CMAKE_CURRENT_BINARY_DIR}/generated/simrv/BuildInfo.hpp
+  @ONLY
+)
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -69,6 +67,8 @@ add_executable(SimRV
   src/Main.cpp
   src/Machine.cpp
   src/Module.cpp
+  src/CsrFile.cpp
+  src/StateControl.cpp
   src/DecodeUnit.cpp
   src/ExecuteUnit.cpp
   src/Disk.cpp
@@ -79,18 +79,13 @@ add_executable(SimRV
 target_include_directories(SimRV PRIVATE
   include
   include/simrv
+  ${CMAKE_CURRENT_BINARY_DIR}/generated/simrv
 )
 
 target_compile_options(SimRV PRIVATE
   -Wall
   -Wextra
   -Wpedantic
-)
-
-target_compile_definitions(SimRV PRIVATE
-  SIMRV_VERSION_STR="${SIMRV_VERSION}"
-  SIMRV_GIT_BRANCH_STR="${SIMRV_GIT_BRANCH}"
-  SIMRV_GIT_SHA_STR="${SIMRV_GIT_SHA}"
 )
 
 # Match prior optimization defaults for single-config generators.

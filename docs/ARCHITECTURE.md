@@ -12,6 +12,10 @@ This document describes the current high-level structure after the initial OOP w
 ## Execution Helpers
 - `DecodeUnit`: wrapper around decode/decompression/immediate generation helpers.
 - `ExecuteUnit`: wrapper around integer ALU, branch, AMO, and CSR value helper logic.
+- `CsrFile`: dedicated CSR register-file component used by `CPU` for CSR read/write and mstatus handling.
+- `TlbUnit`: dedicated TLB state helper used by `CPU` for TLB flush behavior.
+- `InterruptController`: encapsulates PLIC-facing interrupt bookkeeping (`mip` updates and IRQ set/clear).
+- `TrapController`: encapsulates trap entry and return flow (`mret`, `sret`, delegated/non-delegated exception paths).
 
 These helpers are intentionally thin in this phase to preserve behavior while making class boundaries explicit.
 
@@ -33,9 +37,11 @@ These helpers are intentionally thin in this phase to preserve behavior while ma
 
 ## Current Refactor Boundaries
 - Decode and execute helper calls in `Machine` route through class wrappers.
+- CSR read/write and mstatus policy route through `CPU::csr_file` (`CsrFile`) for clearer ownership.
+- Remaining state-control methods in `CPU` now delegate to dedicated components (`TlbUnit`, `InterruptController`, `TrapController`).
 - Internal algorithms remain unchanged in `module.cpp` to keep behavioral parity.
 - `PipelineContext` type exists as a staging container for upcoming `r_*` field extraction.
-- Architectural scalar aliases now use templated XLEN traits (`Word`, `Register`) with RV32 as active default.
+- Architectural scalar aliases now use templated XLEN traits (`Word`, `Register`) with RV32 as active default, with semantic aliases (`CSRValue`, `CSRAddress`, `Address`, `TrapCause`) expanded in core state paths.
 
 ## Next Refactor Steps
 - Introduce `PipelineContext` struct for current `r_*` transient fields.

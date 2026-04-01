@@ -9,30 +9,30 @@
 extern Machine mm; /* class machine                     */
 extern Microcn cc; /* I/O controller (micro-controller) */
 
-#define CONSOLE_MAGIC_VALUE 0x74726976
-#define CONSOLE_VERSION 2
-#define CONSOLE_DEVIDE_ID 3
-#define CONSOLE_VENDOR_ID 0xffff
-#define CONSOLE_DEVICE_FEATURES 1
-#define CONSOLE_CONFIG_GENERATION 0
-#define CONSOLE_QUEUE_NUM_MAX 2
-extern void update_descriptor(uint32_t, uint32_t, int, QueueState*, uint8_t*);
-extern uint32_t ram_ld(uint32_t addr, int n, uint8_t* ram);
-extern void ram_st(uint32_t addr, uint32_t data, int n, uint8_t* ram);
+constexpr Word CONSOLE_MAGIC_VALUE = 0x74726976;
+constexpr Word CONSOLE_VERSION = 2;
+constexpr Word CONSOLE_DEVIDE_ID = 3;
+constexpr Word CONSOLE_VENDOR_ID = 0xffff;
+constexpr Word CONSOLE_DEVICE_FEATURES = 1;
+constexpr Word CONSOLE_CONFIG_GENERATION = 0;
+constexpr Word CONSOLE_QUEUE_NUM_MAX = 2;
+extern void update_descriptor(Word, Word, int, QueueState*, Byte*);
+extern Word ram_ld(Address addr, int n, Byte* ram);
+extern void ram_st(Address addr, Word data, int n, Byte* ram);
 
-#define DESC_SIZE 16 /* descriptor size 16 byte */
-void cons_request(uint8_t* mmem, uint32_t q_num, QueueState* qs) {
+constexpr int DESC_SIZE = 16; /* descriptor size 16 byte */
+void cons_request(Byte* mmem, Word q_num, QueueState* qs) {
     Descriptor desc;
-    uint8_t* p;
+    Byte* p;
     uint16_t avail_idx = (uint16_t)ram_ld(qs->AvailLow + 2, 2, mmem);
     while (qs->last_avail_idx != avail_idx) {
-        uint32_t adr = qs->AvailLow + 4 + (qs->last_avail_idx & (q_num - 1)) * 2;
+        Address adr = qs->AvailLow + 4 + (qs->last_avail_idx & (q_num - 1)) * 2;
         uint16_t desc_idx_header = ram_ld(adr, 2, mmem);
-        uint32_t desc_adr_header = desc_idx_header * DESC_SIZE + qs->DescLow;
+        Address desc_adr_header = desc_idx_header * DESC_SIZE + qs->DescLow;
 
-        p = (uint8_t*)&desc;
+        p = reinterpret_cast<Byte*>(&desc);
         for (int i = 0; i < DESC_SIZE; i++) {
-            *p = ram_ld(desc_adr_header + i, 1, mmem);
+            *p = static_cast<Byte>(static_cast<uint8_t>(ram_ld(desc_adr_header + i, 1, mmem)));
             p++;
         }
 
@@ -49,7 +49,7 @@ void cons_request(uint8_t* mmem, uint32_t q_num, QueueState* qs) {
 
 int Console::recieve_input() {
     Descriptor desc;
-    uint8_t* p;
+    Byte* p;
 
     QueueState* qs = &Queue[0];
     if (!qs->Ready) return 0;
@@ -57,13 +57,13 @@ int Console::recieve_input() {
     uint16_t avail_idx = (uint16_t)ram_ld(qs->AvailLow + 2, 2, mmem);
     if (qs->last_avail_idx == avail_idx) return 0;
 
-    uint32_t adr = qs->AvailLow + 4 + (qs->last_avail_idx & (QueueNum - 1)) * 2;
+    Address adr = qs->AvailLow + 4 + (qs->last_avail_idx & (QueueNum - 1)) * 2;
     uint16_t desc_idx_header = ram_ld(adr, 2, mmem);
-    uint32_t desc_adr_header = desc_idx_header * DESC_SIZE + qs->DescLow;
+    Address desc_adr_header = desc_idx_header * DESC_SIZE + qs->DescLow;
 
-    p = (uint8_t*)&desc;
+    p = reinterpret_cast<Byte*>(&desc);
     for (int i = 0; i < DESC_SIZE; i++) {
-        *p = ram_ld(desc_adr_header + i, 1, mmem);
+        *p = static_cast<Byte>(static_cast<uint8_t>(ram_ld(desc_adr_header + i, 1, mmem)));
         p++;
     }
 
@@ -90,17 +90,28 @@ int Console::recieve_input() {
             exit(0);
         }
 
-        ram_st(desc.adr, (uint32_t)buf, 1, mmem);
+        ram_st(static_cast<Address>(desc.adr), static_cast<Word>(buf), 1, mmem);
         update_descriptor(desc_idx_header, r_len, 2, qs, mmem);  // 2019-08-30
         qs->last_avail_idx++;
     }
     return r_len;
 }
 
-Console::Console() { memset(this, 0, sizeof(Console)); }
+Console::Console()
+    : mmem(nullptr),
+      Queue(nullptr),
+      DeviceFeaturesSel(0),
+      DriverFeatures(0),
+      DriverFeaturesSel(0),
+      InterruptStatus(0),
+      Status(0),
+      QueueSel(0),
+      QueueNum(0),
+      cons_fifo(static_cast<Byte>(0)),
+      fifo_en(static_cast<Byte>(0)) {}
 
-uint32_t Console::console_read(uint32_t offset) {
-    uint32_t rdata = 0;
+Word Console::console_read(Address offset) {
+    Word rdata = 0;
     switch (offset) {
         case 0x000:
             rdata = CONSOLE_MAGIC_VALUE;
@@ -139,7 +150,7 @@ uint32_t Console::console_read(uint32_t offset) {
     return rdata;
 }
 
-void Console::console_write(CPU* cpu, uint32_t offset, uint32_t wdata) {
+void Console::console_write(CPU* cpu, Address offset, Word wdata) {
     switch (offset) {
         case 0x030:
             QueueSel = wdata;
@@ -194,10 +205,10 @@ void Console::console_write(CPU* cpu, uint32_t offset, uint32_t wdata) {
     }
 }
 
-#define MICRO_CONT_MODE_KEY 0
+constexpr Word MICRO_CONT_MODE_KEY = 0;
 int Console::MC_recieve_input() {
     int ret;
-    if (mm.s_use_uc && MICRO_CONT_MODE_KEY) {
+    if (mm.s_use_uc && (MICRO_CONT_MODE_KEY != 0)) {
         cc.pc = 0;
         cc.Qnum = QueueNum;
         cc.Mode = 3;

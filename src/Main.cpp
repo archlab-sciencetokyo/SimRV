@@ -4,22 +4,14 @@
  *
  * SimCore/RISC-V functional simulator (ArchLab, Science Tokyo (former TokyoTech)).
  */
+#include <signal.h>
+#include <sys/time.h>
+
+#include <string>
+
+#include "BuildInfo.hpp"
 #include "Machine.hpp"
 
-#define PROJ "SimRV"
-#define NAME "SimCore/RISC-V Functional Simulator"
-
-#ifndef SIMRV_VERSION_STR
-#define SIMRV_VERSION_STR "0.0.0"
-#endif
-
-#ifndef SIMRV_GIT_BRANCH_STR
-#define SIMRV_GIT_BRANCH_STR "unknown"
-#endif
-
-#ifndef SIMRV_GIT_SHA_STR
-#define SIMRV_GIT_SHA_STR "unknown"
-#endif
 
 Machine mm; /* simulator machine instance */
 Microcn cc; /* I/O controller (micro-controller) */
@@ -57,7 +49,7 @@ void usage() {
   the command to run an application in app_mode is \n\
     $ SimRV -m img/hello.bin \n\
 ";
-    printf(" Usage: %s [-option]\n", PROJ);
+    printf(" Usage: %s [-option]\n", simrv::buildinfo::kProjectName);
     printf("%s", UsageMessage);
     exit(0);
 }
@@ -153,7 +145,8 @@ void set_options(Machine* m, int argc, char* argv[]) {
 }
 
 int main(int argc, char* argv[]) {
-    printf("__ %s v%s (%s@%s)\n", NAME, SIMRV_VERSION_STR, SIMRV_GIT_BRANCH_STR, SIMRV_GIT_SHA_STR);
+    printf("__ %s v%s (%s@%s)\n", simrv::buildinfo::kProjectDescription, simrv::buildinfo::kVersion,
+           simrv::buildinfo::kGitBranch, simrv::buildinfo::kGitSha);
     printf("__ Please type Control+'q' to quit the simulation\n\n");
 
     signal(SIGINT, SIG_IGN);  // ignore control+'C'

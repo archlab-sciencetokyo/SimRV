@@ -3,27 +3,41 @@
  * @brief SimRV implementation unit.
  */
 #include "Machine.hpp"
+
+#include <fstream>
+#include <iomanip>
+#include <string>
+
+#include "Module.hpp"
 void set_options(Machine* m, int argc, char* argv[]);
 
 extern Machine mm; /* class machine                     */
 extern Microcn cc; /* I/O controller (micro-controller) */
 
-#define D_SIZE_DRAM (9 * 1024 * 1024)   //  9MB of bbl + kernel
-#define D_SIZE_DEVT (4 * 1024)          //  4KB of device tree
-#define D_SIZE_DISK (16 * 1024 * 1024)  // 16MB of disk image
-void binfile_gen(CPU* s, uint8_t* ram, uint8_t* sector) {
-    FILE* f = fopen("inits.bin", "wb");
-    fwrite(ram, sizeof(uint8_t), D_SIZE_DRAM, f);
-    fwrite(ram + (16 * 1024 * 1024), sizeof(uint8_t), D_SIZE_DEVT, f);
-    fwrite(sector, sizeof(uint8_t), D_SIZE_DISK, f);
-    fclose(f);
+constexpr size_t D_SIZE_DRAM = (9u * 1024u * 1024u);   // 9MB of bbl + kernel
+constexpr size_t D_SIZE_DEVT = (4u * 1024u);           // 4KB of device tree
+constexpr size_t D_SIZE_DISK = (16u * 1024u * 1024u);  // 16MB of disk image
+void binfile_gen(CPU* /*s*/, Byte* ram, Byte* sector) {
+    std::ofstream out("inits.bin", std::ios::binary);
+    if (!out.is_open()) {
+        printf("__ Error: cannot create inits.bin\n");
+        exit(1);
+    }
+    out.write(reinterpret_cast<const char*>(ram), D_SIZE_DRAM);
+    out.write(reinterpret_cast<const char*>(ram + (16 * 1024 * 1024)), D_SIZE_DEVT);
+    out.write(reinterpret_cast<const char*>(sector), D_SIZE_DISK);
+    out.close();
     printf("__ File inits.bin was generated.\n");
 
-    f = fopen("inits.bin", "rb");
+    std::ifstream in("inits.bin", std::ios::binary);
+    if (!in.is_open()) {
+        printf("__ Error: cannot reopen inits.bin\n");
+        exit(1);
+    }
     int i = 0;
-    uint32_t sum = 0;
-    uint32_t buf;
-    while (fread(&buf, 4, 1, f)) {
+    Word sum = 0;
+    Word buf;
+    while (in.read(reinterpret_cast<char*>(&buf), sizeof(buf))) {
         sum += buf;
         i++;
     }
@@ -31,60 +45,62 @@ void binfile_gen(CPU* s, uint8_t* ram, uint8_t* sector) {
     exit(0);
 }
 
-void load_initram(char* fname, uint8_t* ram) {
-    FILE* fp;
-    if ((fp = fopen(fname, "rb")) == NULL) {
+void load_initram(char* fname, Byte* ram) {
+    std::ifstream in(fname, std::ios::binary);
+    if (!in.is_open()) {
         fprintf(stdout, "__ Error: image_file %s cannot be found\n", fname);
         exit(0);
     }
+    uint8_t tmp = 0;
     int i = 0;
-    while (!feof(fp)) {
-        ram[i++] = getc(fp);
+    while (in.read(reinterpret_cast<char*>(&tmp), sizeof(tmp))) {
+        ram[i++] = static_cast<Byte>(tmp);
     }
-    fclose(fp);
 }
 
-void load_initmem(std::string file, uint8_t* ram) {
-    std::ifstream ifs(file, std::ios::binary);
-    if (!ifs.is_open()) {
+void load_initmem(std::string file, Byte* ram) {
+    std::ifstream in(file, std::ios::binary);
+    if (!in.is_open()) {
         fprintf(stdout, "__ Error: image_file cannot be found\n");
         exit(-1);
     }
+    uint8_t tmp = 0;
     int file_size = 0;
-    while (!ifs.eof()) {
-        ifs.read((char*)(&ram[file_size++]), sizeof(uint8_t));
+    while (in.read(reinterpret_cast<char*>(&tmp), sizeof(tmp))) {
+        ram[file_size++] = static_cast<Byte>(tmp);
     }
 }
 
-uint32_t ram_read(uint32_t addr, uint32_t funct3, uint8_t* ram) {
-    uint32_t rdata = 0;
+Word ram_read(Address addr, Instruction funct3, Byte* ram) {
+    Word rdata = 0;
     int n = (1 << (funct3 & 0x3));
     for (int i = 0; i < n; i++) {
-        rdata |= ((uint32_t)ram[(addr + i) & DRAM_MASK]) << (8 * i);
+        rdata |= static_cast<Word>(std::to_integer<uint8_t>(ram[(addr + i) & DRAM_MASK]))
+                 << (8 * i);
     }
 
     if ((funct3 & 0x4) == 0) { /* signed extension */
-        uint32_t sign_mask = (~((uint32_t)0)) << (8 * n - 1);
+        Word sign_mask = (~((Word)0)) << (8 * n - 1);
         rdata |= ((sign_mask & rdata) ? sign_mask : 0);
     }
     return rdata;
 }
 
-uint32_t disk_read(uint32_t addr, uint32_t n, uint8_t* dsk) {
+Word disk_read(Address addr, Word n, Byte* dsk) {
     if (n != 1 && n != 2 && n != 4) {
         printf("__ Error: dsk_r() not supported n=%d\n", n);
         exit(0);
     }
-    uint32_t data = 0;
+    Word data = 0;
 
     for (int i = 0; i < (int)n; i++) {
-        data |= ((uint32_t)dsk[(addr + i)]) << (8 * i);
+        data |= static_cast<Word>(std::to_integer<uint8_t>(dsk[(addr + i)])) << (8 * i);
     }
     return data;
 }
 
-uint32_t queue_read(uint32_t addr, QueueState* q) {
-    uint32_t rdata = 0;
+Word queue_read(Address addr, QueueState* q) {
+    Word rdata = 0;
     int idx = addr / 0x24;
     switch (addr % 0x24) {
         case 0x0:
@@ -121,7 +137,7 @@ uint32_t queue_read(uint32_t addr, QueueState* q) {
     return rdata;
 }
 
-void queue_write(uint32_t addr, uint32_t wdata, QueueState* q) {
+void queue_write(Address addr, Word wdata, QueueState* q) {
     int idx = addr / 0x24;
     switch (addr % 0x24) {
         case 0x0:
@@ -157,32 +173,33 @@ void queue_write(uint32_t addr, uint32_t wdata, QueueState* q) {
     return;
 }
 
-
-int page_walk(uint32_t v_addr, uint32_t* p_addr, PTE_ACCESS access, CPU* cpu, uint8_t* mmem) {
+int page_walk(Address v_addr, Address* p_addr, PTE_ACCESS access, CPU* cpu, Byte* mmem) {
     /* level 1 */
-    uint32_t vpn1 = (v_addr >> 22) & 0x3FF;
-    uint32_t L1_pte_addr = ((cpu->satp & 0x3FFFFF) << 12) + vpn1 * 4;
-    uint32_t L1_pte = ram_read(L1_pte_addr, FUNCT3_LW, mmem);
-    uint32_t L1_xwr = (cpu->mstatus & MSTATUS_MXR ? L1_pte >> 1 | L1_pte >> 3 : L1_pte >> 1) & 7;
-    uint32_t L1_p_addr = (v_addr & 0x3FFFFF) | (((L1_pte >> 10) << 12) & ~0x3FFFFF);
-    uint32_t L1_write =
-        !(L1_pte & PTE_A_MASK) || (!(L1_pte & PTE_D_MASK) && access == ACCESS_WRITE);
-    uint32_t L1_success =
+    Word vpn1 = (v_addr >> 22) & 0x3FF;
+    Word L1_pte_addr = ((cpu->satp & 0x3FFFFF) << 12) + vpn1 * 4;
+    Word L1_pte = ram_read(L1_pte_addr, static_cast<Instruction>(Funct3::Lw), mmem);
+    Word L1_xwr =
+        (cpu->mstatus & enum_mask(MstatusBit::Mxr) ? L1_pte >> 1 | L1_pte >> 3 : L1_pte >> 1) & 7;
+    Word L1_p_addr = (v_addr & 0x3FFFFF) | (((L1_pte >> 10) << 12) & ~0x3FFFFF);
+    Word L1_write = !(L1_pte & PTE_A_MASK) || (!(L1_pte & PTE_D_MASK) && access == ACCESS_WRITE);
+    Word L1_success =
         !(L1_xwr == 2 || L1_xwr == 6 ||
-          (cpu->priv == PRIV_S && ((L1_pte & PTE_U_MASK) && !(cpu->mstatus & MSTATUS_SUM))) ||
-          (cpu->priv == PRIV_U && (!(L1_pte & PTE_U_MASK))) || ((L1_xwr >> access) & 1) == 0);
+          (cpu->priv == kPrivSupervisor &&
+           ((L1_pte & PTE_U_MASK) && !(cpu->mstatus & enum_mask(MstatusBit::Sum)))) ||
+          (cpu->priv == kPrivUser && (!(L1_pte & PTE_U_MASK))) || ((L1_xwr >> access) & 1) == 0);
     /* level 0 */
-    uint32_t vpn0 = (v_addr >> 12) & 0x3FF;
-    uint32_t L0_pte_addr = ((L1_pte >> 10) << 12) + vpn0 * 4;
-    uint32_t L0_pte = ram_read(L0_pte_addr, FUNCT3_LW, mmem);
-    uint32_t L0_xwr = (cpu->mstatus & MSTATUS_MXR ? L0_pte >> 1 | L0_pte >> 3 : L0_pte >> 1) & 7;
-    uint32_t L0_p_addr = (v_addr & 0xFFF) | (((L0_pte >> 10) << 12) & ~0xFFF);
-    uint32_t L0_write =
-        !(L0_pte & PTE_A_MASK) || (!(L0_pte & PTE_D_MASK) && access == ACCESS_WRITE);
-    uint32_t L0_success =
+    Word vpn0 = (v_addr >> 12) & 0x3FF;
+    Word L0_pte_addr = ((L1_pte >> 10) << 12) + vpn0 * 4;
+    Word L0_pte = ram_read(L0_pte_addr, static_cast<Instruction>(Funct3::Lw), mmem);
+    Word L0_xwr =
+        (cpu->mstatus & enum_mask(MstatusBit::Mxr) ? L0_pte >> 1 | L0_pte >> 3 : L0_pte >> 1) & 7;
+    Word L0_p_addr = (v_addr & 0xFFF) | (((L0_pte >> 10) << 12) & ~0xFFF);
+    Word L0_write = !(L0_pte & PTE_A_MASK) || (!(L0_pte & PTE_D_MASK) && access == ACCESS_WRITE);
+    Word L0_success =
         !(L0_xwr == 2 || L0_xwr == 6 ||
-          ((cpu->priv == PRIV_S) && ((L0_pte & PTE_U_MASK) && !(cpu->mstatus & MSTATUS_SUM))) ||
-          ((cpu->priv == PRIV_U) && (!(L0_pte & PTE_U_MASK))) || ((L0_xwr >> access) & 1) == 0);
+          ((cpu->priv == kPrivSupervisor) &&
+           ((L0_pte & PTE_U_MASK) && !(cpu->mstatus & enum_mask(MstatusBit::Sum)))) ||
+          ((cpu->priv == kPrivUser) && (!(L0_pte & PTE_U_MASK))) || ((L0_xwr >> access) & 1) == 0);
     /* success */
     int ret = 0;
     if (!(L1_pte & PTE_V_MASK))
@@ -205,26 +222,27 @@ int page_walk(uint32_t v_addr, uint32_t* p_addr, PTE_ACCESS access, CPU* cpu, ui
         *p_addr = L0_p_addr;
 
     /* update pte */
-    uint32_t L1_pte_write = L1_pte | PTE_A_MASK | (access == ACCESS_WRITE ? PTE_D_MASK : 0);
-    uint32_t L0_pte_write = L0_pte | PTE_A_MASK | (access == ACCESS_WRITE ? PTE_D_MASK : 0);
+    Word L1_pte_write = L1_pte | PTE_A_MASK | (access == ACCESS_WRITE ? PTE_D_MASK : 0);
+    Word L0_pte_write = L0_pte | PTE_A_MASK | (access == ACCESS_WRITE ? PTE_D_MASK : 0);
     int we =
         ((L1_xwr != 0 && L1_success) && (L1_write)) || ((L0_xwr != 0 && L0_success) && (L0_write));
-    uint32_t w_addr = (L1_xwr != 0 && L1_success) ? L1_pte_addr : L0_pte_addr;
-    uint32_t w_data = (L1_xwr != 0 && L1_success) ? L1_pte_write : L0_pte_write;
+    Word w_addr = (L1_xwr != 0 && L1_success) ? L1_pte_addr : L0_pte_addr;
+    Word w_data = (L1_xwr != 0 && L1_success) ? L1_pte_write : L0_pte_write;
     if (we) {
         for (int i = 0; i < 4; i++) {
-            mmem[(w_addr + i) & DRAM_MASK] = (uint8_t)((w_data >> (8 * i)) & 0xFF);
+            mmem[(w_addr + i) & DRAM_MASK] =
+                static_cast<Byte>(static_cast<uint8_t>((w_data >> (8 * i)) & 0xFF));
         }
     }
     return ret;
 }
 
-uint32_t Machine::target_read(uint32_t v_addr, uint32_t funct3) {
-    uint32_t rdata = 0;
-    uint32_t p_addr;
+Word Machine::target_read(Address v_addr, Instruction funct3) {
+    Word rdata = 0;
+    Address p_addr;
     TLBEntry* entry = &cpu->TLB_data_r[(v_addr >> D_PAGE_SHIFT) & (TLB_SIZE - 1)];
 
-    if (cpu->priv == PRIV_M || (cpu->satp >> 31) == 0) {
+    if (cpu->priv == kPrivMachine || (cpu->satp >> 31) == 0) {
         p_addr = v_addr;
     } else if (entry->v_addr == (v_addr & ~D_PAGE_MASK)) {
         p_addr = entry->p_addr + (v_addr & D_PAGE_MASK);
@@ -238,7 +256,7 @@ uint32_t Machine::target_read(uint32_t v_addr, uint32_t funct3) {
         }
     }
 
-    uint32_t offset = p_addr & 0x07ffffff;
+    Address offset = p_addr & 0x07ffffff;
 
     if (cpu->pending_exception == ~0u) switch (p_addr & 0xF0000000) {
             case 0x10000000:
@@ -256,16 +274,16 @@ uint32_t Machine::target_read(uint32_t v_addr, uint32_t funct3) {
                 if (s_debugmode) {
                     printf("__ %10ld VIO mem_read  %08x %08x\n", cpu->mtime, p_addr, rdata);
                 }
-                if (s_dlog_mode) {
-                    fprintf(s_fp_dlog, "%x\n", rdata);
-                    fflush(s_fp_dlog);
+                if (s_dlog_mode && s_fp_dlog.is_open()) {
+                    s_fp_dlog << std::hex << rdata << '\n';
+                    s_fp_dlog.flush();
                 }
                 break;
             }
 
             case 0x50000000: {  ///// PLIC (Platform-Level Interrupt Controller)
                 if (offset == PLIC_HART_BASE + 4) {
-                    uint32_t mask = cpu->plic_pending_irq & ~cpu->plic_served_irq;
+                    CSRValue mask = cpu->plic_pending_irq & ~cpu->plic_served_irq;
                     if (mask != 0) {
                         cpu->plic_served_irq |= mask;
                         cpu->plic_update_mip();
@@ -276,10 +294,10 @@ uint32_t Machine::target_read(uint32_t v_addr, uint32_t funct3) {
             }
 
             case 0x60000000: {  ///// CLINT (Core Local Interruptor)
-                if (offset == 0xbff8) rdata = (uint32_t)cpu->mtime;
-                if (offset == 0xbffc) rdata = (uint32_t)(cpu->mtime >> 32);
-                if (offset == 0x4000) rdata = (uint32_t)cpu->mtimecmp;
-                if (offset == 0x4004) rdata = (uint32_t)(cpu->mtimecmp >> 32);
+                if (offset == 0xbff8) rdata = (Word)cpu->mtime;
+                if (offset == 0xbffc) rdata = (Word)(cpu->mtime >> 32);
+                if (offset == 0x4000) rdata = (Word)cpu->mtimecmp;
+                if (offset == 0x4004) rdata = (Word)(cpu->mtimecmp >> 32);
                 break;
             }
 
@@ -291,11 +309,11 @@ uint32_t Machine::target_read(uint32_t v_addr, uint32_t funct3) {
     return rdata;
 }
 
-void Machine::target_write(uint32_t v_addr, uint32_t wdata, uint32_t funct3) {
-    uint32_t p_addr;
+void Machine::target_write(Address v_addr, Word wdata, Instruction funct3) {
+    Address p_addr;
     TLBEntry* entry = &cpu->TLB_data_w[(v_addr >> D_PAGE_SHIFT) & (TLB_SIZE - 1)];
 
-    if (cpu->priv == PRIV_M || (cpu->satp >> 31) == 0) {
+    if (cpu->priv == kPrivMachine || (cpu->satp >> 31) == 0) {
         p_addr = v_addr;
     } else if (entry->v_addr == (v_addr & ~D_PAGE_MASK)) {
         p_addr = entry->p_addr + (v_addr & D_PAGE_MASK);
@@ -309,7 +327,7 @@ void Machine::target_write(uint32_t v_addr, uint32_t wdata, uint32_t funct3) {
         }
     }
 
-    uint32_t offset = p_addr & 0x07ffffff;
+    Address offset = p_addr & 0x07ffffff;
 
     if (cpu->pending_exception == ~0u) switch (p_addr & 0xF0000000) {
             case 0x10000000:
@@ -354,20 +372,22 @@ void Machine::target_write(uint32_t v_addr, uint32_t wdata, uint32_t funct3) {
             case 0x60000000: {  ///// CLINT (Core Local Interruptor)
                 if (offset == 0x4000) {
                     cpu->mtimecmp = (cpu->mtimecmp & ~0xffffffff) | wdata;
-                    cpu->mip &= ~MIP_MTIP;
+                    cpu->mip &= ~kMipMtip;
                 }
                 if (offset == 0x4004) {
-                    cpu->mtimecmp = (cpu->mtimecmp & 0xffffffff) | ((uint64_t)wdata << 32);
-                    cpu->mip &= ~MIP_MTIP;
+                    cpu->mtimecmp = (cpu->mtimecmp & 0xffffffff) | ((Counter)wdata << 32);
+                    cpu->mip &= ~kMipMtip;
                 }
                 break;
             }
 
             default: {  ///// RAM (0x80000000 ~ )
                 for (int i = 0; i < (1 << funct3); i++) {
-                    mmem[(p_addr + i) & DRAM_MASK] = (uint8_t)((wdata >> (8 * i)) & 0xFF);
+                    mmem[(p_addr + i) & DRAM_MASK] =
+                        static_cast<Byte>(static_cast<uint8_t>((wdata >> (8 * i)) & 0xFF));
                 }
-                if (s_isatest && funct3 == FUNCT3_SW && p_addr == s_isatest_tohost) {
+                if (s_isatest && funct3 == static_cast<Instruction>(Funct3::Sw) &&
+                    p_addr == s_isatest_tohost) {
                     tohost = wdata;
                 }
                 //            mem->ram_write(p_addr, wdata, funct3);
@@ -376,9 +396,9 @@ void Machine::target_write(uint32_t v_addr, uint32_t wdata, uint32_t funct3) {
         }
 }
 
-// void initfile_gen(CPU *s, uint8_t *ram){
+// void initfile_gen(CPU *s, Byte*ram){
 //     FILE *f = fopen("init_mem.txt", "w"); /* memory initialize file
-//     */ for(int i=0; i<DRAM_SIZE; i++) fprintf(f, "%x\n", ram[i]);
+//     */ for(int i=0; i<DRAM_SIZE; i++) fprintf(f, "%x\n", std::to_integer<uint8_t>(ram[i]));
 //     fclose(f);
 //     printf("\n__ file init_mem.txt was generated after %ld cycle\n",
 //     s->mtime);
@@ -443,12 +463,12 @@ void Machine::target_write(uint32_t v_addr, uint32_t wdata, uint32_t funct3) {
 //     printf("__ file init_reg.txt was generated after %ld cycle\n", s->mtime);
 // }
 
-// void initfile_genS(CPU *s, uint8_t *ram, Console *cons, Disk *disk, uint8_t
+// void initfile_genS(CPU *s, Byte*ram, Console *cons, Disk *disk, uint8_t
 // *sector){
 //     FILE *f = fopen("xinitmem.bin", "wb"); /* memory initialize file
-//     */ fwrite(ram, sizeof(uint8_t), DRAM_SIZE, f); fclose(f); f =
+//     */ fwrite(ram, sizeof(Byte), DRAM_SIZE, f); fclose(f); f =
 //     fopen("xinitdisk.bin", "wb"); /* memory initialize file  */
-//     fwrite(sector, sizeof(uint8_t), DISK_SIZE, f);
+//     fwrite(sector, sizeof(Byte), DISK_SIZE, f);
 //     fclose(f);
 
 //     printf("\n__ file initmem.bin and initdisk.bin were generated after %ld
@@ -551,13 +571,13 @@ void Machine::target_write(uint32_t v_addr, uint32_t wdata, uint32_t funct3) {
 //     printf("__ file initreg.txt was generated after %ld cycle\n", s->mtime);
 // }
 
-void initfile_gen2(CPU* s, uint8_t* ram, Console* cons, Disk* disk, uint8_t* sector) {
+void initfile_gen2(CPU* s, Byte* ram, Console* cons, Disk* disk, Byte* sector) {
     FILE* f = fopen("init_mem.txt", "w"); /* memory initialize file  */
-    for (int i = 0; i < DRAM_SIZE; i++) fprintf(f, "%x\n", ram[i]);
+    for (Address i = 0; i < DRAM_SIZE; i++) fprintf(f, "%x\n", std::to_integer<uint8_t>(ram[i]));
     fclose(f);
     printf("__ file init_mem.txt was generated after %ld cycle\n", s->mtime);
     f = fopen("init_dsk.txt", "w"); /* memory initialize file  */
-    for (int i = 0; i < DISK_SIZE; i++) fprintf(f, "%x\n", sector[i]);
+    for (Word i = 0; i < DISK_SIZE; i++) fprintf(f, "%x\n", std::to_integer<uint8_t>(sector[i]));
     fclose(f);
     printf("__ file init_dsk.txt was generated after %ld cycle\n", s->mtime);
 
@@ -594,17 +614,17 @@ void initfile_gen2(CPU* s, uint8_t* ram, Console* cons, Disk* disk, uint8_t* sec
     fprintf(f, "p.pending_exception   =32'h%08x;\n", s->pending_exception);
     fprintf(f, "p.pending_tval=32'h%08x;\n", s->pending_tval);
 
-    for (int i = 0; i < TLB_SIZE; i++) {
+    for (Word i = 0; i < TLB_SIZE; i++) {
         fprintf(f, "mmu.TLB_inst_r.r_valid[%d] =%d;\n", i, !(s->TLB_inst_r[i].p_addr == -1u));
         fprintf(f, "mmu.TLB_inst_r.mem[%d][39:22] =18'h%05x;\n", i, s->TLB_inst_r[i].v_addr >> 14);
         fprintf(f, "mmu.TLB_inst_r.mem[%d][21:0] =22'h%06x;\n", i, s->TLB_inst_r[i].p_addr >> 10);
     }
-    for (int i = 0; i < TLB_SIZE; i++) {
+    for (Word i = 0; i < TLB_SIZE; i++) {
         fprintf(f, "mmu.TLB_data_r.r_valid[%d] =%d;\n", i, !(s->TLB_data_r[i].p_addr == -1u));
         fprintf(f, "mmu.TLB_data_r.mem[%d][39:22] =18'h%05x;\n", i, s->TLB_data_r[i].v_addr >> 14);
         fprintf(f, "mmu.TLB_data_r.mem[%d][21:0] =22'h%06x;\n", i, s->TLB_data_r[i].p_addr >> 10);
     }
-    for (int i = 0; i < TLB_SIZE; i++) {
+    for (Word i = 0; i < TLB_SIZE; i++) {
         fprintf(f, "mmu.TLB_data_w.r_valid[%d] =%d;\n", i, !(s->TLB_data_w[i].p_addr == -1u));
         fprintf(f, "mmu.TLB_data_w.mem[%d][39:22] =18'h%05x;\n", i, s->TLB_data_w[i].v_addr >> 14);
         fprintf(f, "mmu.TLB_data_w.mem[%d][21:0] =22'h%06x;\n", i, s->TLB_data_w[i].p_addr >> 10);
@@ -612,7 +632,7 @@ void initfile_gen2(CPU* s, uint8_t* ram, Console* cons, Disk* disk, uint8_t* sec
 
     fprintf(f, "mmu.console.QueueSel       =32'h%08x;\n", cons->QueueSel);
     fprintf(f, "mmu.console.QueueNum       =32'h%08x;\n", cons->QueueNum);
-    for (int i = 0; i < CONSOLE_MAX_QUEUE_NUM; i++) {
+    for (Word i = 0; i < CONSOLE_MAX_QUEUE_NUM; i++) {
         fprintf(f, "mmu.console.Queue[%d*9+0] =32'h%08x;\n", i, cons->Queue[i].Ready);
         fprintf(f, "mmu.console.Queue[%d*9+1] =32'h%08x;\n", i, cons->Queue[i].Notify);
         fprintf(f, "mmu.console.Queue[%d*9+2] =32'h%08x;\n", i, cons->Queue[i].DescLow);
@@ -628,7 +648,7 @@ void initfile_gen2(CPU* s, uint8_t* ram, Console* cons, Disk* disk, uint8_t* sec
 
     fprintf(f, "mmu.disk.QueueSel       =32'h%08x;\n", disk->QueueSel);
     fprintf(f, "mmu.disk.QueueNum       =32'h%08x;\n", disk->QueueNum);
-    for (int i = 0; i < DISK_MAX_QUEUE_NUM; i++) {
+    for (Word i = 0; i < DISK_MAX_QUEUE_NUM; i++) {
         fprintf(f, "mmu.disk.Queue[%d*9+0] =32'h%08x;\n", i, disk->Queue[i].Ready);
         fprintf(f, "mmu.disk.Queue[%d*9+1] =32'h%08x;\n", i, disk->Queue[i].Notify);
         fprintf(f, "mmu.disk.Queue[%d*9+2] =32'h%08x;\n", i, disk->Queue[i].DescLow);
@@ -647,22 +667,25 @@ void initfile_gen2(CPU* s, uint8_t* ram, Console* cons, Disk* disk, uint8_t* sec
 }
 
 void Machine::instmix_output() {
-    FILE* fp = fopen("instmix.txt", "w");
-    fprintf(fp, "INSTRUCTION MIX\n");
+    std::ofstream out("instmix.txt");
+    if (!out.is_open()) {
+        printf("__ Error: cannot open instmix.txt\n");
+        return;
+    }
+    out << "INSTRUCTION MIX\n";
     int total = 0;
-    for (int i = 0; i < NUMOFID___; i++) {
-        fprintf(fp, "%s : %10d\n", OPERATION_NAME[i], e_instmix[i]);
+    for (int i = 0; i < OperationIdCount; i++) {
+        out << OPERATION_NAME[i] << " : " << std::setw(10) << e_instmix[i] << '\n';
         total += e_instmix[i];
     }
-    fprintf(fp, "TOTAL_____ : %10d\n", total);
-    fclose(fp);
+    out << "TOTAL_____ : " << std::setw(10) << total << '\n';
     printf("__ file instmix.txt was generated after %ld cycle\n", cpu->mtime);
 }
 
 void Machine::display_result() {
     struct timeval t;
     gettimeofday(&t, NULL);
-    uint64_t etime = (t.tv_sec - s_stime.tv_sec) * 1000000ul + t.tv_usec - s_stime.tv_usec;
+    Counter etime = (t.tv_sec - s_stime.tv_sec) * 1000000ul + t.tv_usec - s_stime.tv_usec;
     printf("__ Elapsed clocks (mtime)   : %11ld\n", cpu->mtime);
     printf("__ Executed instructions    : %11ld\n", e_icount);
     printf("__ Executed uc_instructions : %11ld\n", e_uc_cnt);
@@ -702,14 +725,17 @@ void Machine::INI() {  ///// the first stage
         initfile_gen2(cpu, mmem, console, disk, disk->sector);
     }
 
-    uint8_t buf[9] = {'r', 'o', 'o', 't', '\n', 't', 'o', 'p', '\n'};
+    Byte buf[9] = {static_cast<Byte>('r'), static_cast<Byte>('o'),  static_cast<Byte>('o'),
+                   static_cast<Byte>('t'), static_cast<Byte>('\n'), static_cast<Byte>('t'),
+                   static_cast<Byte>('o'), static_cast<Byte>('p'),  static_cast<Byte>('\n')};
     static int adr = 0;
 
     if (cpu->mtime > s_enabletimer) { /* enable timer after linux boot */
-        console->fifo_en = 1;
+        console->fifo_en = static_cast<Byte>(1);
         console->cons_fifo = buf[adr % 9];
 
-        if ((cpu->mtime & (uint64_t)0xfffff) == 0 && console->fifo_en) {  // 2019-08-30
+        if ((cpu->mtime & (Counter)0xfffff) == 0 &&
+            console->fifo_en != static_cast<Byte>(0)) {                   // 2019-08-30
             int ret = console->MC_recieve_input();                        /* Keyboard */
             if (ret > 0) {
                 cpu->plic_set_irq(VIRTIO_CONSOLE_IRQ, 1);
@@ -717,7 +743,7 @@ void Machine::INI() {  ///// the first stage
             if (ret == -1) r_running = 0; /* break by Ctrl+q */
             adr++;
         } else if (cpu->mtimecmp < cpu->mtime) { /* Timer */
-            cpu->mip |= MIP_MTIP;
+            cpu->mip |= kMipMtip;
         }
     }
 
@@ -725,44 +751,47 @@ void Machine::INI() {  ///// the first stage
     cpu->pending_tval = 0;        /* initialize regs */
 }
 
-#define D_TRACEPC_INTERVAL 1000
-void gen_traces(uint32_t cpc) {
+constexpr Counter D_TRACEPC_INTERVAL = 1000;
+void gen_traces(Register cpc) {
     static int flag = 0;
-    static FILE* f;
+    static std::ofstream out;
     if ((mm.cpu->mtime % D_TRACEPC_INTERVAL) == 0) {
         if (flag == 0) {
             flag = 1;
-            f = fopen("tracepc.txt", "wt");
+            out.open("tracepc.txt");
             printf("__ generate trace file: tracepc.txt\n\n");
         }
-        fprintf(f, "%08d %08x\n", (int)(mm.cpu->mtime / D_TRACEPC_INTERVAL), cpc);
-        fflush(f);
+        out << std::setfill('0') << std::setw(8) << std::dec
+            << static_cast<int>(mm.cpu->mtime / D_TRACEPC_INTERVAL) << ' ' << std::hex
+            << std::setw(8) << cpc << '\n';
+        out.flush();
     }
 }
 
-void gen_bp_traces(uint32_t cpc, uint32_t jmp_pc, int r_opcode, int r_tkn) {
+void gen_bp_traces(Register cpc, Register jmp_pc, int r_opcode, int r_tkn) {
     static int flag = 0;
-    static FILE* f;
+    static std::ofstream out;
     if (flag == 0) {
         flag = 1;
-        f = fopen("bpred.txt", "wt");
+        out.open("bpred.txt");
         printf("__ generate trace file: bpred.txt\n\n");
         //        fprintf(f, "TC PC jump_or_branch b_taken jump branch\n");
     }
 
-    int ir_jb =
-        (r_opcode == OPCODE_JAL) || (r_opcode == OPCODE_JALR) || (r_opcode == OPCODE_BRANCH);
-    int ir_jump = (r_opcode == OPCODE_JAL) ? 2 : (r_opcode == OPCODE_JALR) ? 3 : 0;
-    int ir_branch = (r_opcode == OPCODE_BRANCH);
+    const Opcode opcode = static_cast<Opcode>(r_opcode);
+    int ir_jb = (opcode == Opcode::Jal) || (opcode == Opcode::Jalr) || (opcode == Opcode::Branch);
+    int ir_jump = (opcode == Opcode::Jal) ? 2 : (opcode == Opcode::Jalr) ? 3 : 0;
+    int ir_branch = (opcode == Opcode::Branch);
 
     unsigned int targ = (ir_jump | ir_branch) ? jmp_pc : 0;
-    fprintf(f, "%08d %08x %08x %d %d %d %d\n", (int)mm.cpu->mtime, cpc, targ, ir_jb, r_tkn, ir_jump,
-            ir_branch);
-    fflush(f);
+    out << std::setfill('0') << std::setw(8) << std::dec << static_cast<int>(mm.cpu->mtime) << ' '
+        << std::hex << std::setw(8) << cpc << ' ' << std::setw(8) << targ << std::dec << ' '
+        << ir_jb << ' ' << r_tkn << ' ' << ir_jump << ' ' << ir_branch << '\n';
+    out.flush();
 }
 
-#define CMD_PRINT_CHAR 1 /* command for application mode using tohost */
-#define CMD_POWER_OFF 2  /* command for application mode using tohost */
+constexpr Word CMD_PRINT_CHAR = 1; /* command for application mode using tohost */
+constexpr Word CMD_POWER_OFF = 2;  /* command for application mode using tohost */
 void Machine::FIN() {  ///// the last stage
     if (s_strace != 0 && cpu->mtime >= s_strace) gen_traces(pipeline_context_.cpc);
     if (cpu->mtime >= s_trace_begin && cpu->mtime <= s_trace_end) trace_output();
@@ -799,14 +828,14 @@ void Machine::FIN() {  ///// the last stage
 
 /* IF_(Instruction Fetch) stages                                                          */
 void Machine::IFA() { /* address translation */
-    uint32_t w_padr1 = ~0u;
-    uint32_t w_padr2 = ~0u;
-    uint32_t w_vadr1 = cpu->pc;
-    uint32_t w_vadr2 = cpu->pc + 2;
+    Word w_padr1 = ~0u;
+    Word w_padr2 = ~0u;
+    Word w_vadr1 = cpu->pc;
+    Word w_vadr2 = cpu->pc + 2;
 
     pipeline_context_.cpc = cpu->pc;
 
-    if (cpu->priv == PRIV_M || (cpu->satp >> 31) == 0) { /** No translation or protection **/
+    if (cpu->priv == kPrivMachine || (cpu->satp >> 31) == 0) { /** No translation or protection **/
         w_padr1 = w_vadr1;
         w_padr2 = w_vadr2;
     } else {
@@ -828,7 +857,7 @@ void Machine::IFB(int state) { /* page walk and TLB update */
 
     Word w_padr = (state == 1) ? pipeline_context_.padr1 : pipeline_context_.padr2;
     Word* r_padr = (state == 1) ? &pipeline_context_.padr1 : &pipeline_context_.padr2;
-    uint32_t w_vadr = (state == 1) ? cpu->pc : cpu->pc + 2;
+    Word w_vadr = (state == 1) ? cpu->pc : cpu->pc + 2;
     if (w_padr == ~0u) {
         int pf = page_walk(w_vadr, &w_padr, ACCESS_CODE, cpu, mmem);  // Page Walk
         if (pf) {
@@ -846,18 +875,28 @@ void Machine::IFB(int state) { /* page walk and TLB update */
 void Machine::IFC() {
     if (cpu->pending_exception != ~0u) return;
 
-    uint32_t ir_l = ram_read(pipeline_context_.padr1, FUNCT3_LHU, mmem); /* Note !! */
-    uint32_t ir_h = ram_read(pipeline_context_.padr2, FUNCT3_LHU, mmem); /* Note !! */
+    Word ir_l = ram_read(pipeline_context_.padr1, static_cast<Instruction>(Funct3::Lhu),
+                         mmem); /* Note !! */
+    Word ir_h = ram_read(pipeline_context_.padr2, static_cast<Instruction>(Funct3::Lhu),
+                         mmem); /* Note !! */
     pipeline_context_.ir_org = (ir_h << 16) | (ir_l & 0xFFFF);
 }
 
 /* CVT(Convert) stage, OK                                                                 */
 void Machine::CVT() {
-    uint32_t w_ir_tmp = decode_unit_.decompress(pipeline_context_.ir_org);
-    uint32_t w_op = w_ir_tmp & 0x7F;
-    uint32_t w_nop = (w_op == OPCODE_OP_FP || w_op == OPCODE_LOAD_FP || w_op == OPCODE_STORE_FP);
-    pipeline_context_.ir = (w_nop) ? RV32_NOP : w_ir_tmp;
-    pipeline_context_.cinsn = decode_unit_.isCompressed(pipeline_context_.ir_org) ? 1u : 0u;
+    Instruction w_ir_tmp = decode_unit_.decompress(pipeline_context_.ir_org);
+    bool w_compressed = decode_unit_.isCompressed(pipeline_context_.ir_org);
+
+    // Check if decoded instruction is enabled by current MISA
+    if (!instruction_enabled_by_misa(cpu->misa, w_ir_tmp, w_compressed)) {
+        // Raise illegal instruction exception
+        cpu->raise_exception(CAUSE_ILLEGAL_INSTRUCTION, pipeline_context_.ir_org);
+        pipeline_context_.ir = RV32_NOP;
+    } else {
+        pipeline_context_.ir = w_ir_tmp;
+    }
+
+    pipeline_context_.cinsn = w_compressed ? 1u : 0u;
     if (s_use_mix) e_instmix[decode_unit_.decodeOp(pipeline_context_.ir)]++;
 }
 
@@ -876,12 +915,15 @@ void Machine::ID_() {
 
 /* OF_(Operand Fetch) stage                                                               */
 void Machine::OF_() {
-    uint32_t w_csr_addr = (pipeline_context_.funct3 != FUNCT3_PRIV)      ? pipeline_context_.funct12
-                          : (pipeline_context_.funct12 == FUNCT12_ECALL) ? CSR_MTVEC
-                          : (pipeline_context_.funct12 == FUNCT12_URET)  ? CSR_UEPC
-                          : (pipeline_context_.funct12 == FUNCT12_SRET)  ? CSR_SEPC
-                          : (pipeline_context_.funct12 == FUNCT12_MRET)  ? CSR_MEPC
-                                                                         : 0;
+    const Funct3 funct3 = static_cast<Funct3>(pipeline_context_.funct3);
+    const Instruction funct12 = pipeline_context_.funct12;
+    CSRAddress w_csr_addr =
+        (funct3 != Funct3::Priv) ? static_cast<CSRAddress>(funct12)
+        : (funct12 == static_cast<Instruction>(Funct12Priv::Ecall)) ? csr_addr(Csr::Mtvec)
+        : (funct12 == static_cast<Instruction>(Funct12Priv::Uret))  ? csr_addr(Csr::Uepc)
+        : (funct12 == static_cast<Instruction>(Funct12Priv::Sret))  ? csr_addr(Csr::Sepc)
+        : (funct12 == static_cast<Instruction>(Funct12Priv::Mret))  ? csr_addr(Csr::Mepc)
+                                                                    : 0;
     pipeline_context_.rrs1 = cpu->reg[pipeline_context_.rs1]; /* regfile read port 1 */
     pipeline_context_.rrs2 = cpu->reg[pipeline_context_.rs2]; /* regfile read port 2 */
     pipeline_context_.rcsr = cpu->read_csr(w_csr_addr);       /* note !! */
@@ -889,107 +931,109 @@ void Machine::OF_() {
 
 /* EX1(Execution 1) stage                                                                 */
 void Machine::EX1() {
-    switch (pipeline_context_.opcode) {
-        case OPCODE_LUI: {
+    switch (static_cast<Opcode>(pipeline_context_.opcode)) {
+        case Opcode::Lui: {
             pipeline_context_.tkn = 0;
             pipeline_context_.wb_data = pipeline_context_.imm << 12;
             break;
         }
-        case OPCODE_AUIPC: {
+        case Opcode::Auipc: {
             pipeline_context_.tkn = 0;
             pipeline_context_.wb_data = cpu->pc + (pipeline_context_.imm << 12);
             break;
         }
-        case OPCODE_JAL: {
+        case Opcode::Jal: {
             pipeline_context_.tkn = 1;
             pipeline_context_.wb_data = cpu->pc + (pipeline_context_.cinsn ? 2 : 4);
             pipeline_context_.jmp_pc = cpu->pc + pipeline_context_.imm;
             break;
         }
-        case OPCODE_JALR: {
+        case Opcode::Jalr: {
             pipeline_context_.tkn = 1;
             pipeline_context_.wb_data = cpu->pc + (pipeline_context_.cinsn ? 2 : 4);
             pipeline_context_.jmp_pc = pipeline_context_.rrs1 + pipeline_context_.imm;
             break;
         }
-        case OPCODE_OP: {
+        case Opcode::Op: {
             pipeline_context_.tkn = 0;
             pipeline_context_.wb_data =
                 execute_unit_.aluInt(pipeline_context_.rrs1, pipeline_context_.rrs2,
                                      pipeline_context_.funct3, pipeline_context_.funct7);
             break;
         }
-        case OPCODE_LOAD: {
+        case Opcode::Load: {
             pipeline_context_.tkn = 0;
             pipeline_context_.mem_addr = pipeline_context_.rrs1 + pipeline_context_.imm;
             break;
         }
-        case OPCODE_STORE: {
+        case Opcode::Store: {
             pipeline_context_.tkn = 0;
             pipeline_context_.mem_addr = pipeline_context_.rrs1 + pipeline_context_.imm;
             break;
         }
-        case OPCODE_MISC_M: {
+        case Opcode::MiscMem: {
             pipeline_context_.tkn = 0;
             break;
         }
-        case OPCODE_BRANCH: {
+        case Opcode::Branch: {
             pipeline_context_.tkn = execute_unit_.branchTaken(
                 pipeline_context_.rrs1, pipeline_context_.rrs2, pipeline_context_.funct3);
             pipeline_context_.jmp_pc = cpu->pc + pipeline_context_.imm;
             break;
         }
-        case OPCODE_OP_IMM: {
+        case Opcode::OpImm: {
             pipeline_context_.tkn = 0;
-            pipeline_context_.funct7 &= (pipeline_context_.funct3 == FUNCT3_ADD) ? 0 : 0x20;
+            pipeline_context_.funct7 &=
+                (static_cast<Funct3>(pipeline_context_.funct3) == Funct3::Add) ? 0 : 0x20;
             pipeline_context_.wb_data =
                 execute_unit_.aluInt(pipeline_context_.rrs1, pipeline_context_.imm,
                                      pipeline_context_.funct3, pipeline_context_.funct7);
             break;
         }
-        case OPCODE_AMO: {
+        case Opcode::Amo: {
             pipeline_context_.tkn = 0;
             pipeline_context_.mem_addr = pipeline_context_.rrs1;
-            if (pipeline_context_.funct5 == FUNCT5_AMO_SC) {
+            if (static_cast<Funct5Amo>(pipeline_context_.funct5) == Funct5Amo::Sc) {
                 pipeline_context_.wb_data =
                     !((pipeline_context_.rrs1 == cpu->load_res) && cpu->reserved);
             }
             break;
         }
-        case OPCODE_SYSTEM: {
-            if (pipeline_context_.funct3 == FUNCT3_PRIV) {
-                switch (pipeline_context_.funct12) {
-                    case FUNCT12_ECALL: {
+        case Opcode::System: {
+            if (static_cast<Funct3>(pipeline_context_.funct3) == Funct3::Priv) {
+                switch (static_cast<Funct12Priv>(pipeline_context_.funct12)) {
+                    case Funct12Priv::Ecall: {
                         pipeline_context_.wb_data_csr = CAUSE_USER_ECALL + cpu->priv;
                         cpu->pending_exception = CAUSE_USER_ECALL + cpu->priv;  // Note!!
                         e_icount++;
                         break;
                     }
-                    case FUNCT12_EBREAK: {
+                    case Funct12Priv::Ebreak: {
                         pipeline_context_.tkn = 0;
                         break;
                     }
-                    case FUNCT12_URET: {
+                    case Funct12Priv::Uret: {
                         pipeline_context_.tkn = 1;
                         pipeline_context_.jmp_pc = pipeline_context_.rcsr;
                         break;
                     }
-                    case FUNCT12_SRET: {
+                    case Funct12Priv::Sret: {
                         pipeline_context_.tkn = 1;
                         pipeline_context_.jmp_pc = pipeline_context_.rcsr;
                         break;
                     }
-                    case FUNCT12_MRET: {
+                    case Funct12Priv::Mret: {
                         pipeline_context_.tkn = 1;
                         pipeline_context_.jmp_pc = pipeline_context_.rcsr;
                         break;
                     }
-                    case FUNCT12_WFI: {
+                    case Funct12Priv::Wfi: {
                         pipeline_context_.tkn = 0;
                         break;
                     }
                     default: {
-                        if (pipeline_context_.funct7 == FUNCT7_SFENCE_VMA) {
+                        if (pipeline_context_.funct7 ==
+                            static_cast<Instruction>(Funct7Priv::SfenceVma)) {
                             pipeline_context_.tkn = 0;
                         }
                         break;
@@ -1003,20 +1047,26 @@ void Machine::EX1() {
             }
             break;
         }
+        default: {
+            pipeline_context_.tkn = 0;
+            break;
+        }
     }
 }
 /* LD_(Load Data) stage                                                                   */
 void Machine::LD_() {
     if (cpu->pending_exception != ~0u) return;
 
-    if (pipeline_context_.opcode == OPCODE_LOAD ||
-        (pipeline_context_.opcode == OPCODE_AMO && pipeline_context_.funct5 != FUNCT5_AMO_SC)) {
+    const Opcode opcode = static_cast<Opcode>(pipeline_context_.opcode);
+    const Funct5Amo funct5 = static_cast<Funct5Amo>(pipeline_context_.funct5);
+
+    if (opcode == Opcode::Load || (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc)) {
         pipeline_context_.mem_rdata =
             target_read(pipeline_context_.mem_addr,
                         pipeline_context_.funct3);  //, cpu, mem, console, disk);
     }
 
-    if (pipeline_context_.opcode == OPCODE_AMO && pipeline_context_.funct5 == FUNCT5_AMO_LR) {
+    if (opcode == Opcode::Amo && funct5 == Funct5Amo::Lr) {
         cpu->load_res = pipeline_context_.mem_addr;
         cpu->reserved = 1;
     }
@@ -1024,8 +1074,9 @@ void Machine::LD_() {
 
 /* EX2(Execution 2) stage                                                                 */
 void Machine::EX2() {
+    const Opcode opcode = static_cast<Opcode>(pipeline_context_.opcode);
     pipeline_context_.mem_wdata =
-        (pipeline_context_.opcode != OPCODE_AMO)
+        (opcode != Opcode::Amo)
             ? pipeline_context_.rrs2
             : execute_unit_.aluAmo(pipeline_context_.rrs2, pipeline_context_.mem_rdata,
                                    pipeline_context_.funct5);
@@ -1035,17 +1086,18 @@ void Machine::EX2() {
 void Machine::SD_() {
     if (cpu->pending_exception != ~0u) return;
 
-    if ((pipeline_context_.opcode == OPCODE_STORE) ||
-        (pipeline_context_.opcode == OPCODE_AMO && (pipeline_context_.funct5 == FUNCT5_AMO_SC &&
-                                                    !pipeline_context_.wb_data && cpu->reserved)) ||
-        (pipeline_context_.opcode == OPCODE_AMO && pipeline_context_.funct5 != FUNCT5_AMO_LR &&
-         pipeline_context_.funct5 != FUNCT5_AMO_SC)) {
+    const Opcode opcode = static_cast<Opcode>(pipeline_context_.opcode);
+    const Funct5Amo funct5 = static_cast<Funct5Amo>(pipeline_context_.funct5);
+
+    if ((opcode == Opcode::Store) ||
+        (opcode == Opcode::Amo &&
+         (funct5 == Funct5Amo::Sc && !pipeline_context_.wb_data && cpu->reserved)) ||
+        (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr && funct5 != Funct5Amo::Sc)) {
         target_write(pipeline_context_.mem_addr, pipeline_context_.mem_wdata,
                      pipeline_context_.funct3);
     }
-    if (pipeline_context_.opcode == OPCODE_AMO &&
-        (pipeline_context_.funct5 == FUNCT5_AMO_SC && !pipeline_context_.wb_data && cpu->reserved &&
-         cpu->pending_exception == ~0u)) {
+    if (opcode == Opcode::Amo && (funct5 == Funct5Amo::Sc && !pipeline_context_.wb_data &&
+                                  cpu->reserved && cpu->pending_exception == ~0u)) {
         cpu->reserved = 0;
     }
 }
@@ -1057,24 +1109,23 @@ void Machine::WB_() {
 
     e_icount++;
 
-    uint32_t wire_wb_r_data = 0;
-    uint32_t wire_wb_r_enable = 0;
+    Word wire_wb_r_data = 0;
+    Word wire_wb_r_enable = 0;
 
-    if ((pipeline_context_.opcode == OPCODE_LOAD) ||
-        (pipeline_context_.opcode == OPCODE_AMO && pipeline_context_.funct5 != FUNCT5_AMO_SC)) {
+    const Opcode opcode = static_cast<Opcode>(pipeline_context_.opcode);
+    const Funct5Amo funct5 = static_cast<Funct5Amo>(pipeline_context_.funct5);
+    const Funct3 funct3 = static_cast<Funct3>(pipeline_context_.funct3);
+
+    if ((opcode == Opcode::Load) || (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc)) {
         wire_wb_r_data = pipeline_context_.mem_rdata;
         wire_wb_r_enable = 1;
-    } else if (pipeline_context_.opcode == OPCODE_SYSTEM &&
-               pipeline_context_.funct3 != FUNCT3_PRIV) {
+    } else if (opcode == Opcode::System && funct3 != Funct3::Priv) {
         wire_wb_r_data = pipeline_context_.rcsr;
         wire_wb_r_enable = 1;
     } else {
-        if ((pipeline_context_.opcode == OPCODE_AMO && pipeline_context_.funct5 == FUNCT5_AMO_SC) ||
-            (pipeline_context_.opcode == OPCODE_LUI) ||
-            (pipeline_context_.opcode == OPCODE_AUIPC) ||
-            (pipeline_context_.opcode == OPCODE_JAL) || (pipeline_context_.opcode == OPCODE_JALR) ||
-            (pipeline_context_.opcode == OPCODE_OP) ||
-            (pipeline_context_.opcode == OPCODE_OP_IMM)) {
+        if ((opcode == Opcode::Amo && funct5 == Funct5Amo::Sc) || (opcode == Opcode::Lui) ||
+            (opcode == Opcode::Auipc) || (opcode == Opcode::Jal) || (opcode == Opcode::Jalr) ||
+            (opcode == Opcode::Op) || (opcode == Opcode::OpImm)) {
             wire_wb_r_data = pipeline_context_.wb_data;
             wire_wb_r_enable = 1;
         }
@@ -1089,44 +1140,50 @@ void Machine::WB_() {
 void Machine::COM() {
     if (pipeline_context_.cinsn) e_ccount++; /** for evaluation **/
 
-    if (pipeline_context_.opcode == OPCODE_SYSTEM) {
-        if (pipeline_context_.funct3 == FUNCT3_PRIV) {
-            switch (pipeline_context_.funct12) {
-                case FUNCT12_URET: {
+    const Opcode opcode = static_cast<Opcode>(pipeline_context_.opcode);
+    const Funct3 funct3 = static_cast<Funct3>(pipeline_context_.funct3);
+
+    if (opcode == Opcode::System) {
+        if (funct3 == Funct3::Priv) {
+            switch (static_cast<Funct12Priv>(pipeline_context_.funct12)) {
+                case Funct12Priv::Uret: {
                     break;
                 }
-                case FUNCT12_SRET: {
+                case Funct12Priv::Sret: {
                     cpu->sret();
                     break;
                 }
-                case FUNCT12_MRET: {
+                case Funct12Priv::Mret: {
                     cpu->mret();
                     break;
                 }
+                default:
+                    break;
             }
         } else {
-            cpu->write_csr(pipeline_context_.funct12, pipeline_context_.wb_data_csr);
+            cpu->write_csr(static_cast<CSRAddress>(pipeline_context_.funct12),
+                           pipeline_context_.wb_data_csr);
         }
     }
 
-    uint32_t pending_interrupts = cpu->mip & cpu->mie;
-    uint32_t enable_interrupts = 0, mask = 0, irq_num = 32;
+    Word pending_interrupts = cpu->mip & cpu->mie;
+    Word enable_interrupts = 0, mask = 0, irq_num = 32;
     if (pending_interrupts) {
         switch (cpu->priv) {
-            case PRIV_M: {
-                if (cpu->mstatus & MSTATUS_MIE) {
+            case kPrivMachine: {
+                if (cpu->mstatus & kMstatusMie) {
                     enable_interrupts = ~cpu->mideleg;
                 }
                 break;
             }
-            case PRIV_S: {
+            case kPrivSupervisor: {
                 enable_interrupts = ~cpu->mideleg;
-                if (cpu->mstatus & MSTATUS_SIE) {
+                if (cpu->mstatus & kMstatusSie) {
                     enable_interrupts |= cpu->mideleg;
                 }
                 break;
             }
-            case PRIV_U: {
+            case kPrivUser: {
                 enable_interrupts = ~0;
                 break;
             }
@@ -1148,8 +1205,8 @@ void Machine::COM() {
             cpu->pc = cpu->pc + (pipeline_context_.cinsn ? 2 : 4);
         }
         if (mask != 0) {
-            cpu->raise_exception(CAUSE_INTERRUPT | irq_num, cpu->pending_tval);
-            cpu->pending_exception = CAUSE_INTERRUPT | irq_num;
+            cpu->raise_exception(kInterruptCauseBit | irq_num, cpu->pending_tval);
+            cpu->pending_exception = kInterruptCauseBit | irq_num;
         }
     }
 }
@@ -1224,8 +1281,8 @@ void Machine::trace_output() {
     }
 }
 
-void load_devicetree(uint8_t* ram) {
-    uint32_t tbuf[344] = {
+void load_devicetree(Byte* ram) {
+    Word tbuf[344] = {
         0xedfe0dd0, 0x5a050000, 0x38000000, 0x84040000, 0x28000000, 0x11000000, 0x10000000,
         0x0,        0xd6000000, 0x4c040000, 0x0,        0x0,        0x0,        0x0,
         0x1000000,  0x0,        0x3000000,  0x4000000,  0x0,        0x2000000,  0x3000000,
@@ -1276,11 +1333,11 @@ void load_devicetree(uint8_t* ram) {
         0x646e6168, 0x7200656c, 0x65676e61, 0x6e690073, 0x72726574, 0x73747075, 0x7478652d,
         0x65646e65, 0x69720064, 0x2c766373, 0x7665646e, 0x6f6f6200, 0x67726174, 0xff0073,
         0x0};
-    int* p = (int*)ram;
+    int* p = reinterpret_cast<int*>(ram);
     for (int i = 0; i < 344; i++) p[i] = tbuf[i];
 
     if (0) {
-        char* cp = (char*)p;
+        char* cp = reinterpret_cast<char*>(p);
         for (int i = 0; i < 344 * 4; i++) printf("%02x ", cp[i] & 0xff);
         printf("\n");
         exit(0);
@@ -1294,14 +1351,14 @@ int Machine::init(int argc, char* argv[]) {
     cpu = new CPU();
     disk = new Disk();
     console = new Console();
-    mmem = console->mmem = disk->mmem = new uint8_t[DRAM_SIZE];
+    mmem = console->mmem = disk->mmem = new Byte[DRAM_SIZE];
 
     // MAKE Console QUEUE
     console->Queue = new QueueState[CONSOLE_MAX_QUEUE_NUM];
     disk->Queue = new QueueState[DISK_MAX_QUEUE_NUM];
-    // disk->sector = new uint8_t[DISK_SIZE];
+    // disk->sector = new Byte[DISK_SIZE];
 
-    if (s_dlog_mode) s_fp_dlog = fopen("init_virtio.txt", "w");
+    if (s_dlog_mode) s_fp_dlog.open("init_virtio.txt");
 
     cpu->pc = s_start_pc;
     cpu->reg[11] = (s_appmode | s_rtosmode) ? 0 : D_INITD_ADDR + D_START_PC;
@@ -1317,7 +1374,7 @@ int Machine::init(int argc, char* argv[]) {
     if (s_use_disk) load_initram(s_fn_dskimg, disk->sector);  // load a disk image file
 
     if (s_use_mix)
-        for (int i = 0; i < NUMOFID___; i++) e_instmix[i] = 0;
+        for (int i = 0; i < OperationIdCount; i++) e_instmix[i] = 0;
 
     if (s_rtosmode) cpu->misa = 0x00000100;  // RV32i, Machine ISA register when RTOS mode
 
@@ -1336,7 +1393,7 @@ Machine::~Machine() {
 }
 
 void Microcn::init(char* fname) {
-    cmem = new uint8_t[LCMEM_SIZE];
+    cmem = new Byte[LCMEM_SIZE];
     load_initram(fname, cmem);
     for (int i = 0; i < 32; i++) reg[i] = 0;
     reg[11] = 0x8000; /* D_INITD_ADDR + D_START_PC; */
@@ -1364,61 +1421,61 @@ int Microcn::exec() {
     r_rrs1 = reg[r_rs1]; /* regfile read port 1 */
     r_rrs2 = reg[r_rs2]; /* regfile read port 2 */
     switch (r_opcode) {
-        case OPCODE_LUI: {
+        case static_cast<Instruction>(Opcode::Lui): {
             r_tkn = 0;
             r_wb_data = r_imm << 12;
             break;
         }
-        case OPCODE_AUIPC: {
+        case static_cast<Instruction>(Opcode::Auipc): {
             r_tkn = 0;
             r_wb_data = pc + (r_imm << 12);
             break;
         }
-        case OPCODE_JAL: {
+        case static_cast<Instruction>(Opcode::Jal): {
             r_tkn = 1;
             r_wb_data = pc + 4;
             r_jmp_pc = pc + r_imm;
             break;
         }
-        case OPCODE_JALR: {
+        case static_cast<Instruction>(Opcode::Jalr): {
             r_tkn = 1;
             r_wb_data = pc + 4;
             r_jmp_pc = r_rrs1 + r_imm;
             break;
         }
-        case OPCODE_OP: {
+        case static_cast<Instruction>(Opcode::Op): {
             r_tkn = 0;
             r_wb_data = execute_unit.aluInt(r_rrs1, r_rrs2, r_funct3, r_funct7);
             break;
         }
-        case OPCODE_LOAD: {
+        case static_cast<Instruction>(Opcode::Load): {
             r_tkn = 0;
             r_mem_addr = r_rrs1 + r_imm;
             break;
         }
-        case OPCODE_STORE: {
+        case static_cast<Instruction>(Opcode::Store): {
             r_tkn = 0;
             r_mem_addr = r_rrs1 + r_imm;
             break;
         }
-        case OPCODE_MISC_M: {
+        case static_cast<Instruction>(Opcode::MiscMem): {
             r_tkn = 0;
             break;
         }
-        case OPCODE_BRANCH: {
+        case static_cast<Instruction>(Opcode::Branch): {
             r_tkn = execute_unit.branchTaken(r_rrs1, r_rrs2, r_funct3);
             r_jmp_pc = pc + r_imm;
             break;
         }
-        case OPCODE_OP_IMM: {
+        case static_cast<Instruction>(Opcode::OpImm): {
             r_tkn = 0;
-            r_funct7 &= (r_funct3 == FUNCT3_ADD) ? 0 : 0x20;
+            r_funct7 &= (r_funct3 == static_cast<Instruction>(Funct3::Add)) ? 0 : 0x20;
             r_wb_data = execute_unit.aluInt(r_rrs1, r_imm, r_funct3, r_funct7);
             break;
         }
     }
     int tmp = (1 << (r_funct3 & 0x3));
-    if (r_opcode == OPCODE_LOAD) {
+    if (r_opcode == static_cast<Instruction>(Opcode::Load)) {
         if ((r_mem_addr >> 28) == 0x8) {
             r_mem_rdata = ram_read(r_mem_addr & DRAM_MASK, r_funct3, mmem);
         } else if ((r_mem_addr >> 28) == 0x9) {
@@ -1434,11 +1491,11 @@ int Microcn::exec() {
         } else if ((r_mem_addr >> 12) == 0x4000b) {
             r_mem_rdata = queue_read(r_mem_addr & 0xff, disk_queue);
         } else if ((r_mem_addr >> 12) == 0x4000c) {
-            r_mem_rdata = (uint32_t)cons_fifo;
+            r_mem_rdata = static_cast<Word>(std::to_integer<uint8_t>(cons_fifo));
         } else
             r_mem_rdata = ram_read(r_mem_addr & DRAM_MASK, r_funct3, cmem);
     }
-    if (r_opcode == OPCODE_STORE) {
+    if (r_opcode == static_cast<Instruction>(Opcode::Store)) {
         if (r_mem_addr == 0x40008000) {
             if (r_rrs2 >> 16 == 1) {
                 printf("%c", (char)(r_rrs2 & 0xff));
@@ -1451,14 +1508,16 @@ int Microcn::exec() {
             //            //exit(0);}//ret=0;}
         } else if ((r_mem_addr >> 28) == 0x8) {
             for (int i = 0; i < (1 << r_funct3); i++) {
-                mmem[(r_mem_addr + i) & DRAM_MASK] = (uint8_t)((r_rrs2 >> (8 * i)) & 0xFF);
+                mmem[(r_mem_addr + i) & DRAM_MASK] =
+                    static_cast<Byte>(static_cast<uint8_t>((r_rrs2 >> (8 * i)) & 0xFF));
             }
         } else if ((r_mem_addr >> 28) == 0x9) {
-            uint32_t* dsk_tmp = (uint32_t*)disk;
+            Word* dsk_tmp = reinterpret_cast<Word*>(disk);
             dsk_tmp[(r_mem_addr & DISK_MASK) / 4] = r_rrs2;
 
             /*for (int i=0; i<(1 << r_funct3); i++) {
-                disk[(r_mem_addr+i) & DISK_MASK] = (uint8_t)((r_rrs2 >> (8*i)) & 0xFF);
+                disk[(r_mem_addr+i) & DISK_MASK] =
+                    static_cast<Byte>(static_cast<uint8_t>((r_rrs2 >> (8*i)) & 0xFF));
             }*/
         } else if ((r_mem_addr >> 12) == 0x4000a) {
             queue_write(r_mem_addr & 0xff, r_rrs2, cons_queue);
@@ -1466,18 +1525,22 @@ int Microcn::exec() {
             queue_write(r_mem_addr & 0xff, r_rrs2, disk_queue);
         } else {
             for (int i = 0; i < (1 << r_funct3); i++) {
-                cmem[(r_mem_addr + i) & DRAM_MASK] = (uint8_t)((r_rrs2 >> (8 * i)) & 0xFF);
+                cmem[(r_mem_addr + i) & DRAM_MASK] =
+                    static_cast<Byte>(static_cast<uint8_t>((r_rrs2 >> (8 * i)) & 0xFF));
             }
         }
     }
-    uint32_t wire_wb_r_data = 0;
-    uint32_t wire_wb_r_enable = 0;
-    if (r_opcode == OPCODE_LOAD) {
+    Word wire_wb_r_data = 0;
+    Word wire_wb_r_enable = 0;
+    if (r_opcode == static_cast<Instruction>(Opcode::Load)) {
         wire_wb_r_data = r_mem_rdata;
         wire_wb_r_enable = 1;
-    } else if ((r_opcode == OPCODE_LUI) || (r_opcode == OPCODE_AUIPC) || (r_opcode == OPCODE_JAL) ||
-               (r_opcode == OPCODE_JALR) || (r_opcode == OPCODE_OP) ||
-               (r_opcode == OPCODE_OP_IMM)) {
+    } else if ((r_opcode == static_cast<Instruction>(Opcode::Lui)) ||
+               (r_opcode == static_cast<Instruction>(Opcode::Auipc)) ||
+               (r_opcode == static_cast<Instruction>(Opcode::Jal)) ||
+               (r_opcode == static_cast<Instruction>(Opcode::Jalr)) ||
+               (r_opcode == static_cast<Instruction>(Opcode::Op)) ||
+               (r_opcode == static_cast<Instruction>(Opcode::OpImm))) {
         wire_wb_r_data = r_wb_data;
         wire_wb_r_enable = 1;
     }

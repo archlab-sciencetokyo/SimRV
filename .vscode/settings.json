@@ -1,6 +1,17 @@
 {
+    "cmake.configureOnOpen": true,
+    "cmake.buildDirectory": "${workspaceFolder}/build/ninja-clang-release",
+    "cmake.copyCompileCommands": "${workspaceFolder}/compile_commands.json",
+    "clangd.arguments": [
+        "--background-index",
+        "--compile-commands-dir=${workspaceFolder}/build/ninja-clang-release",
+        "--header-insertion=never",
+        "--pch-storage=memory"
+    ],
+    "C_Cpp.intelliSenseEngine": "disabled",
     "chat.tools.terminal.autoApprove": {
         "true": true,
         "command": true
-    }
+    },
+    "markdown.validate.enabled": true
 }
