@@ -1,0 +1,26 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 20,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "ninja-clang-release",
+            "displayName": "Ninja + clang (Release)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/ninja-clang-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_CXX_COMPILER": "clang++"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "ninja-clang-release",
+            "configurePreset": "ninja-clang-release"
+        }
+    ]
+}

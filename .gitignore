@@ -33,3 +33,9 @@
 
 
 simrv
+build/
+CMakeUserPresets.json
+.isa_tmp/
+isa_logs/
+regression_logs/
+.cache/

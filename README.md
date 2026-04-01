@@ -6,9 +6,23 @@
 
 ## How to run
 
-1. `make` command will compile simrv
+1. Configure and build with CMake + Ninja (recommended)
+```
+$ cmake --preset ninja-clang-release
+$ cmake --build --preset ninja-clang-release
+```
+
+This generates `simrv` under `build/ninja-clang-release/` using LLVM `clang++` and C++23.
+
+2. Build with Make compatibility wrapper
 ```
 $ make
+```
+
+The Makefile now forwards to the CMake preset (`ninja-clang-release`) by default.
+
+```
+$ make CXX=g++
 ```
 
 3. `make app` command will invoke the simrv and run hello program
@@ -28,10 +42,142 @@ Please type Control+`q` to quit the simulation.
 $ ./simrv
 ```
 
+## Regression Baseline (Phase 0)
+
+Run the baseline regression harness:
+
+```
+$ cmake --build --preset ninja-clang-release --target regress
+# legacy
+$ make regress
+```
+
+This always checks:
+
+* build success
+* help output path
+* unknown-option CLI error path
+
+Optional smoke tests are enabled by environment variables:
+
+```
+# app smoke
+SIMRV_APP_IMG=img/hello.bin cmake --build --preset ninja-clang-release --target regress
+
+# linux smoke
+SIMRV_LINUX_MEM_IMG=img/bbl.bin \
+SIMRV_LINUX_DISK_IMG=img/root.bin \
+SIMRV_LINUX_DTB=img/devicetree.dtb \
+cmake --build --preset ninja-clang-release --target regress
+```
+
+Logs are written to `regression_logs/` by default.
+
+## riscv-isa-tests (experimental)
+
+You can run a small subset of riscv-isa-tests with:
+
+```
+$ cmake --build --preset ninja-clang-release --target isa-tests
+# legacy
+$ make isa-tests
+```
+
+For the curated Phase 1 RV32IM smoke gate:
+
+```
+$ cmake --build --preset ninja-clang-release --target isa-smoke
+# legacy
+$ make isa-smoke
+```
+
+To run both baseline checks and ISA smoke together:
+
+```
+$ cmake --build --preset ninja-clang-release --target phase1-gate
+# legacy
+$ make phase1-gate
+```
+
+## Documentation
+
+Architecture and ADR docs live under `docs/`:
+
+* `docs/ARCHITECTURE.md`
+* `docs/adr/`
+
+API docs can be generated with Doxygen (when installed):
+
+```
+$ cmake --build --preset ninja-clang-release --target docs
+```
+
+Generated HTML output is written to `docs/api/html/`.
+
+## Project Layout
+
+* `src/`: simulator implementation (`*.cpp`)
+* `include/simrv/`: simulator headers (`*.hpp`)
+* `scripts/`: regression and ISA test runners
+* `docs/`: architecture notes and ADRs
+
+## Refactor Progress
+
+Completed (mechanical, behavior-preserving):
+
+* Slice 1: Decode wrapper (`DecodeUnit`) integrated in `Machine` path.
+* Slice 2: Execute wrapper (`ExecuteUnit`) integrated in `Machine` path.
+
+Remaining planned slices:
+
+* Pipeline context extraction (`r_*` grouping)
+* Memory access extraction
+
+Default `RISCV_TESTS_DIR` is `../../tests/riscv-tests` (relative to SimRV root).
+You can still override it:
+
+```
+$ RISCV_TESTS_DIR=/path/to/riscv-tests cmake --build --preset ninja-clang-release --target isa-tests
+```
+
+Current defaults run these tests if present in `RISCV_TESTS_DIR/isa`:
+
+* rv32ui-p-add
+* rv32ui-p-addi
+* rv32ui-p-and
+* rv32ui-p-beq
+* rv32ui-p-bne
+* rv32ui-p-lw
+* rv32ui-p-sw
+
+Useful variables:
+
+```
+# Override objcopy tool
+RISCV_OBJCOPY=riscv64-unknown-elf-objcopy
+
+# Custom comma-separated test list
+SIMRV_ISA_LIST=rv32ui-p-add,rv32ui-p-beq
+
+# Stop controls
+SIMRV_ISA_TIMEOUT=20
+SIMRV_ISA_END=2000000
+
+# tohost RAM address watched by SimRV in ISA-test mode
+SIMRV_ISA_TOHOST=0x80001000
+```
+
+Notes:
+
+* SimRV uses `-T` mode to watch RAM `tohost` updates and print pass/fail markers.
+* This flow is intended for RV32 ISA tests during bring-up and may require tuning of `SIMRV_ISA_TOHOST` depending on your test build/link setup.
+* If `riscv-tests` top-level `make` fails with missing `-lm` or `-lgcc`, run the SimRV ISA target anyway. The runner builds ISA tests from `riscv-tests/isa` directly and bypasses benchmarks.
+* `rv32uc-p-rvc` currently does not emit a tohost pass/fail marker under current SimRV behavior and is not part of `isa-smoke` yet.
+
 ## Recommended compilers to be used
 
-* gcc version 4.8.5 20150623 (Red Hat 4.8.5-36), bluebase.arch.cs..
-* gcc version 7.3.0 (Ubuntu 7.3.0-27ubuntu1~18.04), ff3.arch.cs..
+* clang++ 17+ (default via CMake preset)
+* gcc/g++ 12+ (supported via a custom CMake configure/build preset)
 
 ## TODO
 
