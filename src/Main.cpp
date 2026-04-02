@@ -82,7 +82,7 @@ void set_options(Machine* m, int argc, char* argv[]) {
     static char buf2[256] = "img/iocon.bin";
     m->s_fn_dvtree = NULL;
     m->s_fn_iocon = buf2; /* set an initial file name */
-    m->s_start_pc = D_START_PC;
+    m->s_start_pc = simrv::boot::kStartPc;
     m->s_enabletimer = 70000000ul;
 
     for (int i = 1; i < argc; i++) {

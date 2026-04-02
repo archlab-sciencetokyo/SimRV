@@ -14,9 +14,26 @@ void set_options(Machine* m, int argc, char* argv[]);
 extern Machine mm; /* class machine                     */
 extern Microcn cc; /* I/O controller (micro-controller) */
 
+Machine::Machine() : mmio_router_(*this) {}
+
+namespace simrv::machine_detail {
 constexpr size_t D_SIZE_DRAM = (9u * 1024u * 1024u);   // 9MB of bbl + kernel
 constexpr size_t D_SIZE_DEVT = (4u * 1024u);           // 4KB of device tree
 constexpr size_t D_SIZE_DISK = (16u * 1024u * 1024u);  // 16MB of disk image
+constexpr Address D_DEVT_OFFSET = static_cast<Address>(16u * 1024u * 1024u);
+constexpr Address D_QUEUE_STRIDE = static_cast<Address>(0x24u);
+constexpr Address D_QUEUE_READY_OFFSET = static_cast<Address>(0x0u);
+constexpr Address D_QUEUE_NOTIFY_OFFSET = static_cast<Address>(0x4u);
+constexpr Address D_QUEUE_DESC_LOW_OFFSET = static_cast<Address>(0x8u);
+constexpr Address D_QUEUE_DESC_HIGH_OFFSET = static_cast<Address>(0xCu);
+constexpr Address D_QUEUE_AVAIL_LOW_OFFSET = static_cast<Address>(0x10u);
+constexpr Address D_QUEUE_AVAIL_HIGH_OFFSET = static_cast<Address>(0x14u);
+constexpr Address D_QUEUE_USED_LOW_OFFSET = static_cast<Address>(0x18u);
+constexpr Address D_QUEUE_USED_HIGH_OFFSET = static_cast<Address>(0x1Cu);
+constexpr Address D_QUEUE_LAST_AVAIL_OFFSET = static_cast<Address>(0x20u);
+
+constexpr Word pte_access_index(PteAccess access) { return static_cast<Word>(access); }
+
 void binfile_gen(CPU* /*s*/, Byte* ram, Byte* sector) {
     std::ofstream out("inits.bin", std::ios::binary);
     if (!out.is_open()) {
@@ -24,7 +41,7 @@ void binfile_gen(CPU* /*s*/, Byte* ram, Byte* sector) {
         exit(1);
     }
     out.write(reinterpret_cast<const char*>(ram), D_SIZE_DRAM);
-    out.write(reinterpret_cast<const char*>(ram + (16 * 1024 * 1024)), D_SIZE_DEVT);
+    out.write(reinterpret_cast<const char*>(ram + D_DEVT_OFFSET), D_SIZE_DEVT);
     out.write(reinterpret_cast<const char*>(sector), D_SIZE_DISK);
     out.close();
     printf("__ File inits.bin was generated.\n");
@@ -75,7 +92,7 @@ Word ram_read(Address addr, Instruction funct3, Byte* ram) {
     Word rdata = 0;
     int n = (1 << (funct3 & 0x3));
     for (int i = 0; i < n; i++) {
-        rdata |= static_cast<Word>(std::to_integer<uint8_t>(ram[(addr + i) & DRAM_MASK]))
+        rdata |= static_cast<Word>(std::to_integer<uint8_t>(ram[(addr + i) & simrv::memory::kDramMask]))
                  << (8 * i);
     }
 
@@ -101,33 +118,33 @@ Word disk_read(Address addr, Word n, Byte* dsk) {
 
 Word queue_read(Address addr, QueueState* q) {
     Word rdata = 0;
-    int idx = addr / 0x24;
-    switch (addr % 0x24) {
-        case 0x0:
+    int idx = static_cast<int>(addr / D_QUEUE_STRIDE);
+    switch (addr % D_QUEUE_STRIDE) {
+        case D_QUEUE_READY_OFFSET:
             rdata = q[idx].Ready;
             break;
-        case 0x4:
+        case D_QUEUE_NOTIFY_OFFSET:
             rdata = q[idx].Notify;
             break;
-        case 0x8:
+        case D_QUEUE_DESC_LOW_OFFSET:
             rdata = q[idx].DescLow;
             break;
-        case 0xc:
+        case D_QUEUE_DESC_HIGH_OFFSET:
             rdata = q[idx].DescHigh;
             break;
-        case 0x10:
+        case D_QUEUE_AVAIL_LOW_OFFSET:
             rdata = q[idx].AvailLow;
             break;
-        case 0x14:
+        case D_QUEUE_AVAIL_HIGH_OFFSET:
             rdata = q[idx].AvailHigh;
             break;
-        case 0x18:
+        case D_QUEUE_USED_LOW_OFFSET:
             rdata = q[idx].UsedLow;
             break;
-        case 0x1c:
+        case D_QUEUE_USED_HIGH_OFFSET:
             rdata = q[idx].UsedHigh;
             break;
-        case 0x20:
+        case D_QUEUE_LAST_AVAIL_OFFSET:
             rdata = q[idx].last_avail_idx;
             break;
         default:
@@ -138,33 +155,33 @@ Word queue_read(Address addr, QueueState* q) {
 }
 
 void queue_write(Address addr, Word wdata, QueueState* q) {
-    int idx = addr / 0x24;
-    switch (addr % 0x24) {
-        case 0x0:
+    int idx = static_cast<int>(addr / D_QUEUE_STRIDE);
+    switch (addr % D_QUEUE_STRIDE) {
+        case D_QUEUE_READY_OFFSET:
             q[idx].Ready = wdata;
             break;
-        case 0x4:
+        case D_QUEUE_NOTIFY_OFFSET:
             q[idx].Notify = wdata;
             break;
-        case 0x8:
+        case D_QUEUE_DESC_LOW_OFFSET:
             q[idx].DescLow = wdata;
             break;
-        case 0xc:
+        case D_QUEUE_DESC_HIGH_OFFSET:
             q[idx].DescHigh = wdata;
             break;
-        case 0x10:
+        case D_QUEUE_AVAIL_LOW_OFFSET:
             q[idx].AvailLow = wdata;
             break;
-        case 0x14:
+        case D_QUEUE_AVAIL_HIGH_OFFSET:
             q[idx].AvailHigh = wdata;
             break;
-        case 0x18:
+        case D_QUEUE_USED_LOW_OFFSET:
             q[idx].UsedLow = wdata;
             break;
-        case 0x1c:
+        case D_QUEUE_USED_HIGH_OFFSET:
             q[idx].UsedHigh = wdata;
             break;
-        case 0x20:
+        case D_QUEUE_LAST_AVAIL_OFFSET:
             q[idx].last_avail_idx = wdata;
             break;
         default:
@@ -173,7 +190,7 @@ void queue_write(Address addr, Word wdata, QueueState* q) {
     return;
 }
 
-int page_walk(Address v_addr, Address* p_addr, PTE_ACCESS access, CPU* cpu, Byte* mmem) {
+int page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem) {
     /* level 1 */
     Word vpn1 = (v_addr >> 22) & 0x3FF;
     Word L1_pte_addr = ((cpu->satp & 0x3FFFFF) << 12) + vpn1 * 4;
@@ -181,12 +198,14 @@ int page_walk(Address v_addr, Address* p_addr, PTE_ACCESS access, CPU* cpu, Byte
     Word L1_xwr =
         (cpu->mstatus & enum_mask(MstatusBit::Mxr) ? L1_pte >> 1 | L1_pte >> 3 : L1_pte >> 1) & 7;
     Word L1_p_addr = (v_addr & 0x3FFFFF) | (((L1_pte >> 10) << 12) & ~0x3FFFFF);
-    Word L1_write = !(L1_pte & PTE_A_MASK) || (!(L1_pte & PTE_D_MASK) && access == ACCESS_WRITE);
+    Word L1_write = !(L1_pte & enum_mask(PteFlag::A)) ||
+                    (!(L1_pte & enum_mask(PteFlag::D)) && access == PteAccess::Write);
     Word L1_success =
         !(L1_xwr == 2 || L1_xwr == 6 ||
           (cpu->priv == kPrivSupervisor &&
-           ((L1_pte & PTE_U_MASK) && !(cpu->mstatus & enum_mask(MstatusBit::Sum)))) ||
-          (cpu->priv == kPrivUser && (!(L1_pte & PTE_U_MASK))) || ((L1_xwr >> access) & 1) == 0);
+           ((L1_pte & enum_mask(PteFlag::U)) && !(cpu->mstatus & enum_mask(MstatusBit::Sum)))) ||
+          (cpu->priv == kPrivUser && (!(L1_pte & enum_mask(PteFlag::U)))) ||
+          ((L1_xwr >> pte_access_index(access)) & 1) == 0);
     /* level 0 */
     Word vpn0 = (v_addr >> 12) & 0x3FF;
     Word L0_pte_addr = ((L1_pte >> 10) << 12) + vpn0 * 4;
@@ -194,19 +213,21 @@ int page_walk(Address v_addr, Address* p_addr, PTE_ACCESS access, CPU* cpu, Byte
     Word L0_xwr =
         (cpu->mstatus & enum_mask(MstatusBit::Mxr) ? L0_pte >> 1 | L0_pte >> 3 : L0_pte >> 1) & 7;
     Word L0_p_addr = (v_addr & 0xFFF) | (((L0_pte >> 10) << 12) & ~0xFFF);
-    Word L0_write = !(L0_pte & PTE_A_MASK) || (!(L0_pte & PTE_D_MASK) && access == ACCESS_WRITE);
+    Word L0_write = !(L0_pte & enum_mask(PteFlag::A)) ||
+                    (!(L0_pte & enum_mask(PteFlag::D)) && access == PteAccess::Write);
     Word L0_success =
         !(L0_xwr == 2 || L0_xwr == 6 ||
           ((cpu->priv == kPrivSupervisor) &&
-           ((L0_pte & PTE_U_MASK) && !(cpu->mstatus & enum_mask(MstatusBit::Sum)))) ||
-          ((cpu->priv == kPrivUser) && (!(L0_pte & PTE_U_MASK))) || ((L0_xwr >> access) & 1) == 0);
+           ((L0_pte & enum_mask(PteFlag::U)) && !(cpu->mstatus & enum_mask(MstatusBit::Sum)))) ||
+          ((cpu->priv == kPrivUser) && (!(L0_pte & enum_mask(PteFlag::U)))) ||
+          ((L0_xwr >> pte_access_index(access)) & 1) == 0);
     /* success */
     int ret = 0;
-    if (!(L1_pte & PTE_V_MASK))
+    if (!(L1_pte & enum_mask(PteFlag::V)))
         ret = -1;
     else if (L1_xwr != 0)
         ret = L1_success ? 0 : -1;
-    else if (!(L0_pte & PTE_V_MASK))
+    else if (!(L0_pte & enum_mask(PteFlag::V)))
         ret = -1;
     else if (L0_xwr != 0)
         ret = L0_success ? 0 : -1;
@@ -222,43 +243,50 @@ int page_walk(Address v_addr, Address* p_addr, PTE_ACCESS access, CPU* cpu, Byte
         *p_addr = L0_p_addr;
 
     /* update pte */
-    Word L1_pte_write = L1_pte | PTE_A_MASK | (access == ACCESS_WRITE ? PTE_D_MASK : 0);
-    Word L0_pte_write = L0_pte | PTE_A_MASK | (access == ACCESS_WRITE ? PTE_D_MASK : 0);
+    Word L1_pte_write =
+        L1_pte | enum_mask(PteFlag::A) | (access == PteAccess::Write ? enum_mask(PteFlag::D) : 0);
+    Word L0_pte_write =
+        L0_pte | enum_mask(PteFlag::A) | (access == PteAccess::Write ? enum_mask(PteFlag::D) : 0);
     int we =
         ((L1_xwr != 0 && L1_success) && (L1_write)) || ((L0_xwr != 0 && L0_success) && (L0_write));
     Word w_addr = (L1_xwr != 0 && L1_success) ? L1_pte_addr : L0_pte_addr;
     Word w_data = (L1_xwr != 0 && L1_success) ? L1_pte_write : L0_pte_write;
     if (we) {
         for (int i = 0; i < 4; i++) {
-            mmem[(w_addr + i) & DRAM_MASK] =
+            mmem[(w_addr + i) & simrv::memory::kDramMask] =
                 static_cast<Byte>(static_cast<uint8_t>((w_data >> (8 * i)) & 0xFF));
         }
     }
     return ret;
 }
 
+}  // namespace simrv::machine_detail
+
+using namespace simrv::machine_detail;
+
 Word Machine::target_read(Address v_addr, Instruction funct3) {
     Word rdata = 0;
     Address p_addr;
-    TLBEntry* entry = &cpu->TLB_data_r[(v_addr >> D_PAGE_SHIFT) & (TLB_SIZE - 1)];
+    TLBEntry* entry = &cpu->TLB_data_r[(v_addr >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1)];
 
     if (cpu->priv == kPrivMachine || (cpu->satp >> 31) == 0) {
         p_addr = v_addr;
-    } else if (entry->v_addr == (v_addr & ~D_PAGE_MASK)) {
-        p_addr = entry->p_addr + (v_addr & D_PAGE_MASK);
+    } else if (entry->v_addr == (v_addr & ~simrv::memory::kPageMask)) {
+        p_addr = entry->p_addr + (v_addr & simrv::memory::kPageMask);
     } else {
-        if (page_walk(v_addr, &p_addr, ACCESS_READ, cpu, mmem)) {
-            cpu->pending_exception = CAUSE_LOAD_PAGE_FAULT;
+        if (page_walk(v_addr, &p_addr, PteAccess::Read, cpu, mmem)) {
+            cpu->pending_exception = enum_mask(ExceptionCode::LoadPageFault);
             cpu->pending_tval = v_addr;
         } else {
-            entry->v_addr = v_addr & ~D_PAGE_MASK;
-            entry->p_addr = p_addr & ~D_PAGE_MASK;
+            entry->v_addr = v_addr & ~simrv::memory::kPageMask;
+            entry->p_addr = p_addr & ~simrv::memory::kPageMask;
         }
     }
 
-    Address offset = p_addr & 0x07ffffff;
+    if (cpu->pending_exception == ~0u) {
+        if (mmio_router_.read(p_addr, rdata)) return rdata;
 
-    if (cpu->pending_exception == ~0u) switch (p_addr & 0xF0000000) {
+        switch (p_addr & 0xF0000000) {
             case 0x10000000:
                 break;
             case 0x20000000:
@@ -267,69 +295,38 @@ Word Machine::target_read(Address v_addr, Instruction funct3) {
                 break;
             case 0x70000000:
                 break;
-
-            case 0x40000000: {  ///// VirtIO
-                if ((p_addr >> 24) == 0x40) rdata = console->console_read(offset);
-                if ((p_addr >> 24) == 0x48) rdata = disk->disk_read(offset);
-                if (s_debugmode) {
-                    printf("__ %10ld VIO mem_read  %08x %08x\n", cpu->mtime, p_addr, rdata);
-                }
-                if (s_dlog_mode && s_fp_dlog.is_open()) {
-                    s_fp_dlog << std::hex << rdata << '\n';
-                    s_fp_dlog.flush();
-                }
-                break;
-            }
-
-            case 0x50000000: {  ///// PLIC (Platform-Level Interrupt Controller)
-                if (offset == PLIC_HART_BASE + 4) {
-                    CSRValue mask = cpu->plic_pending_irq & ~cpu->plic_served_irq;
-                    if (mask != 0) {
-                        cpu->plic_served_irq |= mask;
-                        cpu->plic_update_mip();
-                        rdata = mask;
-                    }
-                }
-                break;
-            }
-
-            case 0x60000000: {  ///// CLINT (Core Local Interruptor)
-                if (offset == 0xbff8) rdata = (Word)cpu->mtime;
-                if (offset == 0xbffc) rdata = (Word)(cpu->mtime >> 32);
-                if (offset == 0x4000) rdata = (Word)cpu->mtimecmp;
-                if (offset == 0x4004) rdata = (Word)(cpu->mtimecmp >> 32);
-                break;
-            }
 
             default: {  ///// RAM (0x80000000 ~ )
                 rdata = ram_read(p_addr, funct3, mmem);
                 break;
             }
         }
+    }
     return rdata;
 }
 
 void Machine::target_write(Address v_addr, Word wdata, Instruction funct3) {
     Address p_addr;
-    TLBEntry* entry = &cpu->TLB_data_w[(v_addr >> D_PAGE_SHIFT) & (TLB_SIZE - 1)];
+    TLBEntry* entry = &cpu->TLB_data_w[(v_addr >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1)];
 
     if (cpu->priv == kPrivMachine || (cpu->satp >> 31) == 0) {
         p_addr = v_addr;
-    } else if (entry->v_addr == (v_addr & ~D_PAGE_MASK)) {
-        p_addr = entry->p_addr + (v_addr & D_PAGE_MASK);
+    } else if (entry->v_addr == (v_addr & ~simrv::memory::kPageMask)) {
+        p_addr = entry->p_addr + (v_addr & simrv::memory::kPageMask);
     } else {
-        if (page_walk(v_addr, &p_addr, ACCESS_WRITE, cpu, mmem)) {
-            cpu->pending_exception = CAUSE_STORE_PAGE_FAULT;
+        if (page_walk(v_addr, &p_addr, PteAccess::Write, cpu, mmem)) {
+            cpu->pending_exception = enum_mask(ExceptionCode::StorePageFault);
             cpu->pending_tval = v_addr;
         } else {
-            entry->v_addr = v_addr & ~D_PAGE_MASK;
-            entry->p_addr = p_addr & ~D_PAGE_MASK;
+            entry->v_addr = v_addr & ~simrv::memory::kPageMask;
+            entry->p_addr = p_addr & ~simrv::memory::kPageMask;
         }
     }
 
-    Address offset = p_addr & 0x07ffffff;
+    if (cpu->pending_exception == ~0u) {
+        if (mmio_router_.write(p_addr, wdata)) return;
 
-    if (cpu->pending_exception == ~0u) switch (p_addr & 0xF0000000) {
+        switch (p_addr & 0xF0000000) {
             case 0x10000000:
                 break;
             case 0x20000000:
@@ -339,51 +336,9 @@ void Machine::target_write(Address v_addr, Word wdata, Instruction funct3) {
             case 0x70000000:
                 break;
 
-            case 0x40000000: {                 ///// VirtIO
-                if ((p_addr >> 24) == 0x40) {  // console
-                    switch (p_addr) {
-                        case 0x40008000: {
-                            tohost = wdata;
-                            break;
-                        }
-                        default: {
-                            console->console_write(cpu, offset, wdata);
-                            break;
-                        }
-                    }
-                }
-                if ((p_addr >> 24) == 0x48) {  // disk
-                    disk->disk_write(cpu, offset, wdata);
-                }
-                if (s_debugmode) {
-                    printf("__ %10ld VIO mem_write %08x %08x\n", cpu->mtime, p_addr, wdata);
-                }
-                break;
-            }
-
-            case 0x50000000: {  ///// PLIC (Platform-Level Interrupt Controller)
-                if (offset == PLIC_HART_BASE + 4) {
-                    cpu->plic_served_irq &= ~(1 << (wdata - 1));
-                    cpu->plic_update_mip();
-                }
-                break;
-            }
-
-            case 0x60000000: {  ///// CLINT (Core Local Interruptor)
-                if (offset == 0x4000) {
-                    cpu->mtimecmp = (cpu->mtimecmp & ~0xffffffff) | wdata;
-                    cpu->mip &= ~kMipMtip;
-                }
-                if (offset == 0x4004) {
-                    cpu->mtimecmp = (cpu->mtimecmp & 0xffffffff) | ((Counter)wdata << 32);
-                    cpu->mip &= ~kMipMtip;
-                }
-                break;
-            }
-
             default: {  ///// RAM (0x80000000 ~ )
                 for (int i = 0; i < (1 << funct3); i++) {
-                    mmem[(p_addr + i) & DRAM_MASK] =
+                    mmem[(p_addr + i) & simrv::memory::kDramMask] =
                         static_cast<Byte>(static_cast<uint8_t>((wdata >> (8 * i)) & 0xFF));
                 }
                 if (s_isatest && funct3 == static_cast<Instruction>(Funct3::Sw) &&
@@ -394,11 +349,12 @@ void Machine::target_write(Address v_addr, Word wdata, Instruction funct3) {
                 break;
             }
         }
+    }
 }
 
 // void initfile_gen(CPU *s, Byte*ram){
 //     FILE *f = fopen("init_mem.txt", "w"); /* memory initialize file
-//     */ for(int i=0; i<DRAM_SIZE; i++) fprintf(f, "%x\n", std::to_integer<uint8_t>(ram[i]));
+//     */ for(int i=0; i<simrv::memory::kDramSize; i++) fprintf(f, "%x\n", std::to_integer<uint8_t>(ram[i]));
 //     fclose(f);
 //     printf("\n__ file init_mem.txt was generated after %ld cycle\n",
 //     s->mtime);
@@ -435,7 +391,7 @@ void Machine::target_write(Address v_addr, Word wdata, Instruction funct3) {
 //     fprintf(f, "p.pending_exception   =32'h%08x;\n", s->pending_exception);
 //     fprintf(f, "p.pending_tval=32'h%08x;\n", s->pending_tval);
 
-//     for(int i=0; i<TLB_SIZE; i++) {
+//     for(int i=0; i<simrv::memory::kTlbSize; i++) {
 //         fprintf(f, "mmu.TLB_inst_r.r_valid[%d] =%d;\n",
 //                 i, !(s->TLB_inst_r[i].p_addr == -1u));
 //         fprintf(f, "mmu.TLB_inst_r.mem[%d][39:22] =18'h%05x;\n",
@@ -443,7 +399,7 @@ void Machine::target_write(Address v_addr, Word wdata, Instruction funct3) {
 //         fprintf(f, "mmu.TLB_inst_r.mem[%d][21:0] =22'h%06x;\n",
 //                 i, s->TLB_inst_r[i].p_addr >> 10);
 //     }
-//     for(int i=0; i<TLB_SIZE; i++) {
+//     for(int i=0; i<simrv::memory::kTlbSize; i++) {
 //         fprintf(f, "mmu.TLB_data_r.r_valid[%d] =%d;\n",
 //                 i, !(s->TLB_data_r[i].p_addr == -1u));
 //         fprintf(f, "mmu.TLB_data_r.mem[%d][39:22] =18'h%05x;\n",
@@ -451,7 +407,7 @@ void Machine::target_write(Address v_addr, Word wdata, Instruction funct3) {
 //         fprintf(f, "mmu.TLB_data_r.mem[%d][21:0] =22'h%06x;\n",
 //                 i, s->TLB_data_r[i].p_addr >> 10);
 //     }
-//     for(int i=0; i<TLB_SIZE; i++) {
+//     for(int i=0; i<simrv::memory::kTlbSize; i++) {
 //         fprintf(f, "mmu.TLB_data_w.r_valid[%d] =%d;\n",
 //                 i, !(s->TLB_data_w[i].p_addr == -1u));
 //         fprintf(f, "mmu.TLB_data_w.mem[%d][39:22] =18'h%05x;\n",
@@ -466,9 +422,9 @@ void Machine::target_write(Address v_addr, Word wdata, Instruction funct3) {
 // void initfile_genS(CPU *s, Byte*ram, Console *cons, Disk *disk, uint8_t
 // *sector){
 //     FILE *f = fopen("xinitmem.bin", "wb"); /* memory initialize file
-//     */ fwrite(ram, sizeof(Byte), DRAM_SIZE, f); fclose(f); f =
+//     */ fwrite(ram, sizeof(Byte), simrv::memory::kDramSize, f); fclose(f); f =
 //     fopen("xinitdisk.bin", "wb"); /* memory initialize file  */
-//     fwrite(sector, sizeof(Byte), DISK_SIZE, f);
+//     fwrite(sector, sizeof(Byte), simrv::virtio::kDiskSize, f);
 //     fclose(f);
 
 //     printf("\n__ file initmem.bin and initdisk.bin were generated after %ld
@@ -506,19 +462,19 @@ void Machine::target_write(Address v_addr, Word wdata, Instruction funct3) {
 //     fprintf(f, "cpu->pending_exception   =0x%08x;\n", s->pending_exception);
 //     fprintf(f, "cpu->pending_tval=0x%08x;\n", s->pending_tval);
 
-//     for(int i=0; i<TLB_SIZE; i++) {
+//     for(int i=0; i<simrv::memory::kTlbSize; i++) {
 //         fprintf(f, "cpu->TLB_inst_r[%d].p_addr =0x%08x;\n",
 //                 i, s->TLB_inst_r[i].p_addr);
 //         fprintf(f, "cpu->TLB_inst_r[%d].v_addr =0x%08x;\n",
 //                 i, s->TLB_inst_r[i].v_addr);
 //     }
-//     for(int i=0; i<TLB_SIZE; i++) {
+//     for(int i=0; i<simrv::memory::kTlbSize; i++) {
 //         fprintf(f, "cpu->TLB_data_r[%d].p_addr =0x%08x;\n",
 //                 i, s->TLB_data_r[i].p_addr);
 //         fprintf(f, "cpu->TLB_data_r[%d].v_addr =0x%08x;\n",
 //                 i, s->TLB_data_r[i].v_addr);
 //     }
-//     for(int i=0; i<TLB_SIZE; i++) {
+//     for(int i=0; i<simrv::memory::kTlbSize; i++) {
 //         fprintf(f, "cpu->TLB_data_w[%d].p_addr =0x%08x;\n",
 //                 i, s->TLB_data_w[i].p_addr);
 //         fprintf(f, "cpu->TLB_data_w[%d].v_addr =0x%08x;\n",
@@ -527,7 +483,7 @@ void Machine::target_write(Address v_addr, Word wdata, Instruction funct3) {
 
 //     fprintf(f, "console->QueueSel       =0x%08x;\n", cons->QueueSel);
 //     fprintf(f, "console->QueueNum       =0x%08x;\n", cons->QueueNum);
-//     for(int i=0; i<CONSOLE_MAX_QUEUE_NUM; i++){
+//     for(int i=0; i<simrv::virtio::kConsoleMaxQueueNum; i++){
 //         fprintf(f, "console->Queue[%d].Ready          =0x%08x;\n", i,
 //         cons->Queue[i].Ready); fprintf(f, "console->Queue[%d].Notify
 //         =0x%08x;\n", i, cons->Queue[i].Notify); fprintf(f,
@@ -548,7 +504,7 @@ void Machine::target_write(Address v_addr, Word wdata, Instruction funct3) {
 
 //     fprintf(f, "disk->QueueSel       =0x%08x;\n", disk->QueueSel);
 //     fprintf(f, "disk->QueueNum       =0x%08x;\n", disk->QueueNum);
-//     for(int i=0; i<DISK_MAX_QUEUE_NUM; i++){
+//     for(int i=0; i<simrv::virtio::kDiskMaxQueueNum; i++){
 //         fprintf(f, "disk->Queue[%d].Ready          =0x%08x;\n", i,
 //         disk->Queue[i].Ready); fprintf(f, "disk->Queue[%d].Notify
 //         =0x%08x;\n", i, disk->Queue[i].Notify); fprintf(f,
@@ -573,11 +529,11 @@ void Machine::target_write(Address v_addr, Word wdata, Instruction funct3) {
 
 void initfile_gen2(CPU* s, Byte* ram, Console* cons, Disk* disk, Byte* sector) {
     FILE* f = fopen("init_mem.txt", "w"); /* memory initialize file  */
-    for (Address i = 0; i < DRAM_SIZE; i++) fprintf(f, "%x\n", std::to_integer<uint8_t>(ram[i]));
+    for (Address i = 0; i < simrv::memory::kDramSize; i++) fprintf(f, "%x\n", std::to_integer<uint8_t>(ram[i]));
     fclose(f);
     printf("__ file init_mem.txt was generated after %ld cycle\n", s->mtime);
     f = fopen("init_dsk.txt", "w"); /* memory initialize file  */
-    for (Word i = 0; i < DISK_SIZE; i++) fprintf(f, "%x\n", std::to_integer<uint8_t>(sector[i]));
+    for (Word i = 0; i < simrv::virtio::kDiskSize; i++) fprintf(f, "%x\n", std::to_integer<uint8_t>(sector[i]));
     fclose(f);
     printf("__ file init_dsk.txt was generated after %ld cycle\n", s->mtime);
 
@@ -614,17 +570,17 @@ void initfile_gen2(CPU* s, Byte* ram, Console* cons, Disk* disk, Byte* sector) {
     fprintf(f, "p.pending_exception   =32'h%08x;\n", s->pending_exception);
     fprintf(f, "p.pending_tval=32'h%08x;\n", s->pending_tval);
 
-    for (Word i = 0; i < TLB_SIZE; i++) {
+    for (Word i = 0; i < simrv::memory::kTlbSize; i++) {
         fprintf(f, "mmu.TLB_inst_r.r_valid[%d] =%d;\n", i, !(s->TLB_inst_r[i].p_addr == -1u));
         fprintf(f, "mmu.TLB_inst_r.mem[%d][39:22] =18'h%05x;\n", i, s->TLB_inst_r[i].v_addr >> 14);
         fprintf(f, "mmu.TLB_inst_r.mem[%d][21:0] =22'h%06x;\n", i, s->TLB_inst_r[i].p_addr >> 10);
     }
-    for (Word i = 0; i < TLB_SIZE; i++) {
+    for (Word i = 0; i < simrv::memory::kTlbSize; i++) {
         fprintf(f, "mmu.TLB_data_r.r_valid[%d] =%d;\n", i, !(s->TLB_data_r[i].p_addr == -1u));
         fprintf(f, "mmu.TLB_data_r.mem[%d][39:22] =18'h%05x;\n", i, s->TLB_data_r[i].v_addr >> 14);
         fprintf(f, "mmu.TLB_data_r.mem[%d][21:0] =22'h%06x;\n", i, s->TLB_data_r[i].p_addr >> 10);
     }
-    for (Word i = 0; i < TLB_SIZE; i++) {
+    for (Word i = 0; i < simrv::memory::kTlbSize; i++) {
         fprintf(f, "mmu.TLB_data_w.r_valid[%d] =%d;\n", i, !(s->TLB_data_w[i].p_addr == -1u));
         fprintf(f, "mmu.TLB_data_w.mem[%d][39:22] =18'h%05x;\n", i, s->TLB_data_w[i].v_addr >> 14);
         fprintf(f, "mmu.TLB_data_w.mem[%d][21:0] =22'h%06x;\n", i, s->TLB_data_w[i].p_addr >> 10);
@@ -632,7 +588,7 @@ void initfile_gen2(CPU* s, Byte* ram, Console* cons, Disk* disk, Byte* sector) {
 
     fprintf(f, "mmu.console.QueueSel       =32'h%08x;\n", cons->QueueSel);
     fprintf(f, "mmu.console.QueueNum       =32'h%08x;\n", cons->QueueNum);
-    for (Word i = 0; i < CONSOLE_MAX_QUEUE_NUM; i++) {
+    for (Word i = 0; i < simrv::virtio::kConsoleMaxQueueNum; i++) {
         fprintf(f, "mmu.console.Queue[%d*9+0] =32'h%08x;\n", i, cons->Queue[i].Ready);
         fprintf(f, "mmu.console.Queue[%d*9+1] =32'h%08x;\n", i, cons->Queue[i].Notify);
         fprintf(f, "mmu.console.Queue[%d*9+2] =32'h%08x;\n", i, cons->Queue[i].DescLow);
@@ -648,7 +604,7 @@ void initfile_gen2(CPU* s, Byte* ram, Console* cons, Disk* disk, Byte* sector) {
 
     fprintf(f, "mmu.disk.QueueSel       =32'h%08x;\n", disk->QueueSel);
     fprintf(f, "mmu.disk.QueueNum       =32'h%08x;\n", disk->QueueNum);
-    for (Word i = 0; i < DISK_MAX_QUEUE_NUM; i++) {
+    for (Word i = 0; i < simrv::virtio::kDiskMaxQueueNum; i++) {
         fprintf(f, "mmu.disk.Queue[%d*9+0] =32'h%08x;\n", i, disk->Queue[i].Ready);
         fprintf(f, "mmu.disk.Queue[%d*9+1] =32'h%08x;\n", i, disk->Queue[i].Notify);
         fprintf(f, "mmu.disk.Queue[%d*9+2] =32'h%08x;\n", i, disk->Queue[i].DescLow);
@@ -675,7 +631,7 @@ void Machine::instmix_output() {
     out << "INSTRUCTION MIX\n";
     int total = 0;
     for (int i = 0; i < OperationIdCount; i++) {
-        out << OPERATION_NAME[i] << " : " << std::setw(10) << e_instmix[i] << '\n';
+        out << simrv::module::OPERATION_NAME[i] << " : " << std::setw(10) << e_instmix[i] << '\n';
         total += e_instmix[i];
     }
     out << "TOTAL_____ : " << std::setw(10) << total << '\n';
@@ -738,12 +694,12 @@ void Machine::INI() {  ///// the first stage
             console->fifo_en != static_cast<Byte>(0)) {                   // 2019-08-30
             int ret = console->MC_recieve_input();                        /* Keyboard */
             if (ret > 0) {
-                cpu->plic_set_irq(VIRTIO_CONSOLE_IRQ, 1);
+                cpu->plic_set_irq(simrv::virtio::kConsoleIrq, 1);
             }
             if (ret == -1) r_running = 0; /* break by Ctrl+q */
             adr++;
         } else if (cpu->mtimecmp < cpu->mtime) { /* Timer */
-            cpu->mip |= kMipMtip;
+            cpu->mip |= enum_mask(MipBit::Mtip);
         }
     }
 
@@ -839,13 +795,13 @@ void Machine::IFA() { /* address translation */
         w_padr1 = w_vadr1;
         w_padr2 = w_vadr2;
     } else {
-        TLBEntry* tlb_e1 = &cpu->TLB_inst_r[(w_vadr1 >> D_PAGE_SHIFT) & (TLB_SIZE - 1)];
-        TLBEntry* tlb_e2 = &cpu->TLB_inst_r[(w_vadr2 >> D_PAGE_SHIFT) & (TLB_SIZE - 1)];
-        if (tlb_e1->v_addr == (w_vadr1 & ~D_PAGE_MASK)) {  ///// TLB hit for w_vadr1
-            w_padr1 = tlb_e1->p_addr + (w_vadr1 & D_PAGE_MASK);
+        TLBEntry* tlb_e1 = &cpu->TLB_inst_r[(w_vadr1 >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1)];
+        TLBEntry* tlb_e2 = &cpu->TLB_inst_r[(w_vadr2 >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1)];
+        if (tlb_e1->v_addr == (w_vadr1 & ~simrv::memory::kPageMask)) {  ///// TLB hit for w_vadr1
+            w_padr1 = tlb_e1->p_addr + (w_vadr1 & simrv::memory::kPageMask);
         }
-        if (tlb_e2->v_addr == (w_vadr2 & ~D_PAGE_MASK)) {  ///// TLB hit for w_vadr2
-            w_padr2 = tlb_e2->p_addr + (w_vadr2 & D_PAGE_MASK);
+        if (tlb_e2->v_addr == (w_vadr2 & ~simrv::memory::kPageMask)) {  ///// TLB hit for w_vadr2
+            w_padr2 = tlb_e2->p_addr + (w_vadr2 & simrv::memory::kPageMask);
         }
     }
     pipeline_context_.padr1 = w_padr1;
@@ -859,14 +815,14 @@ void Machine::IFB(int state) { /* page walk and TLB update */
     Word* r_padr = (state == 1) ? &pipeline_context_.padr1 : &pipeline_context_.padr2;
     Word w_vadr = (state == 1) ? cpu->pc : cpu->pc + 2;
     if (w_padr == ~0u) {
-        int pf = page_walk(w_vadr, &w_padr, ACCESS_CODE, cpu, mmem);  // Page Walk
+        int pf = page_walk(w_vadr, &w_padr, PteAccess::Code, cpu, mmem);  // Page Walk
         if (pf) {
-            cpu->pending_exception = CAUSE_FETCH_PAGE_FAULT;
+            cpu->pending_exception = enum_mask(ExceptionCode::FetchPageFault);
             cpu->pending_tval = w_vadr;
         } else {
-            TLBEntry* tlb_e1 = &cpu->TLB_inst_r[(w_vadr >> D_PAGE_SHIFT) & (TLB_SIZE - 1)];
-            tlb_e1->v_addr = w_vadr & ~D_PAGE_MASK;  // update TLB entry
-            tlb_e1->p_addr = w_padr & ~D_PAGE_MASK;  // update TLB entry
+            TLBEntry* tlb_e1 = &cpu->TLB_inst_r[(w_vadr >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1)];
+            tlb_e1->v_addr = w_vadr & ~simrv::memory::kPageMask;  // update TLB entry
+            tlb_e1->p_addr = w_padr & ~simrv::memory::kPageMask;  // update TLB entry
         }
     }
     *r_padr = w_padr;
@@ -890,7 +846,8 @@ void Machine::CVT() {
     // Check if decoded instruction is enabled by current MISA
     if (!instruction_enabled_by_misa(cpu->misa, w_ir_tmp, w_compressed)) {
         // Raise illegal instruction exception
-        cpu->raise_exception(CAUSE_ILLEGAL_INSTRUCTION, pipeline_context_.ir_org);
+        cpu->raise_exception(enum_mask(ExceptionCode::IllegalInstruction),
+                             pipeline_context_.ir_org);
         pipeline_context_.ir = RV32_NOP;
     } else {
         pipeline_context_.ir = w_ir_tmp;
@@ -931,6 +888,9 @@ void Machine::OF_() {
 
 /* EX1(Execution 1) stage                                                                 */
 void Machine::EX1() {
+    pipeline_context_.fp_wb_enable = 0;
+    pipeline_context_.int_wb_from_fp = 0;
+
     switch (static_cast<Opcode>(pipeline_context_.opcode)) {
         case Opcode::Lui: {
             pipeline_context_.tkn = 0;
@@ -966,9 +926,20 @@ void Machine::EX1() {
             pipeline_context_.mem_addr = pipeline_context_.rrs1 + pipeline_context_.imm;
             break;
         }
+        case Opcode::LoadFp: {
+            pipeline_context_.tkn = 0;
+            pipeline_context_.mem_addr = pipeline_context_.rrs1 + pipeline_context_.imm;
+            break;
+        }
         case Opcode::Store: {
             pipeline_context_.tkn = 0;
             pipeline_context_.mem_addr = pipeline_context_.rrs1 + pipeline_context_.imm;
+            break;
+        }
+        case Opcode::StoreFp: {
+            pipeline_context_.tkn = 0;
+            pipeline_context_.mem_addr = pipeline_context_.rrs1 + pipeline_context_.imm;
+            pipeline_context_.fp_mem_wdata = cpu->freg[pipeline_context_.rs2];
             break;
         }
         case Opcode::MiscMem: {
@@ -1003,8 +974,9 @@ void Machine::EX1() {
             if (static_cast<Funct3>(pipeline_context_.funct3) == Funct3::Priv) {
                 switch (static_cast<Funct12Priv>(pipeline_context_.funct12)) {
                     case Funct12Priv::Ecall: {
-                        pipeline_context_.wb_data_csr = CAUSE_USER_ECALL + cpu->priv;
-                        cpu->pending_exception = CAUSE_USER_ECALL + cpu->priv;  // Note!!
+                        pipeline_context_.wb_data_csr =
+                            enum_mask(ExceptionCode::UserEcall) + cpu->priv;
+                        cpu->pending_exception = enum_mask(ExceptionCode::UserEcall) + cpu->priv;
                         e_icount++;
                         break;
                     }
@@ -1047,6 +1019,32 @@ void Machine::EX1() {
             }
             break;
         }
+        case Opcode::MAdd:
+        case Opcode::MSub:
+        case Opcode::NMAdd:
+        case Opcode::NMSub: {
+            pipeline_context_.tkn = 0;
+            const Word fmt = (pipeline_context_.ir >> 25) & 0x3;
+            const Word rs3 = (pipeline_context_.ir >> 27) & 0x1f;
+            const FpExecResult fp = execute_unit_.fusedFp(
+                static_cast<Opcode>(pipeline_context_.opcode), fmt, pipeline_context_.rs1,
+                pipeline_context_.rs2, rs3, pipeline_context_.funct3, cpu->freg, cpu->fcsr);
+            pipeline_context_.fp_wb_data = fp.fp_wb_data;
+            pipeline_context_.fp_wb_enable = fp.fp_wb_enable;
+            break;
+        }
+        case Opcode::OpFp: {
+            pipeline_context_.tkn = 0;
+            const FpExecResult fp = execute_unit_.opFp(
+                pipeline_context_.funct7, pipeline_context_.funct3, pipeline_context_.rs2,
+                pipeline_context_.rs1, pipeline_context_.rs2, pipeline_context_.rrs1, cpu->freg,
+                cpu->fcsr);
+            pipeline_context_.wb_data = fp.int_wb_data;
+            pipeline_context_.int_wb_from_fp = fp.int_wb_enable;
+            pipeline_context_.fp_wb_data = fp.fp_wb_data;
+            pipeline_context_.fp_wb_enable = fp.fp_wb_enable;
+            break;
+        }
         default: {
             pipeline_context_.tkn = 0;
             break;
@@ -1066,6 +1064,22 @@ void Machine::LD_() {
                         pipeline_context_.funct3);  //, cpu, mem, console, disk);
     }
 
+    if (opcode == Opcode::LoadFp) {
+        const Funct3 funct3 = static_cast<Funct3>(pipeline_context_.funct3);
+        if (funct3 == Funct3::Flw) {
+            const Word lo =
+                target_read(pipeline_context_.mem_addr, static_cast<Instruction>(Funct3::Lw));
+            pipeline_context_.fp_mem_rdata = 0xffffffff00000000ull | static_cast<uint64_t>(lo);
+        } else if (funct3 == Funct3::Fld) {
+            const Word lo =
+                target_read(pipeline_context_.mem_addr, static_cast<Instruction>(Funct3::Lw));
+            const Word hi =
+                target_read(pipeline_context_.mem_addr + 4, static_cast<Instruction>(Funct3::Lw));
+            pipeline_context_.fp_mem_rdata =
+                static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32);
+        }
+    }
+
     if (opcode == Opcode::Amo && funct5 == Funct5Amo::Lr) {
         cpu->load_res = pipeline_context_.mem_addr;
         cpu->reserved = 1;
@@ -1080,6 +1094,11 @@ void Machine::EX2() {
             ? pipeline_context_.rrs2
             : execute_unit_.aluAmo(pipeline_context_.rrs2, pipeline_context_.mem_rdata,
                                    pipeline_context_.funct5);
+
+    if (opcode == Opcode::StoreFp) {
+        pipeline_context_.mem_wdata =
+            static_cast<Register>(pipeline_context_.fp_mem_wdata & 0xffffffffu);
+    }
 }
 
 /* SD_(Store Data) stage                                                                  */
@@ -1099,6 +1118,22 @@ void Machine::SD_() {
     if (opcode == Opcode::Amo && (funct5 == Funct5Amo::Sc && !pipeline_context_.wb_data &&
                                   cpu->reserved && cpu->pending_exception == ~0u)) {
         cpu->reserved = 0;
+    }
+
+    if (opcode == Opcode::StoreFp) {
+        const Funct3 funct3 = static_cast<Funct3>(pipeline_context_.funct3);
+        if (funct3 == Funct3::Fsw) {
+            target_write(pipeline_context_.mem_addr,
+                         static_cast<Word>(pipeline_context_.fp_mem_wdata & 0xffffffffu),
+                         static_cast<Instruction>(Funct3::Sw));
+        } else if (funct3 == Funct3::Fsd) {
+            target_write(pipeline_context_.mem_addr,
+                         static_cast<Word>(pipeline_context_.fp_mem_wdata & 0xffffffffu),
+                         static_cast<Instruction>(Funct3::Sw));
+            target_write(pipeline_context_.mem_addr + 4,
+                         static_cast<Word>((pipeline_context_.fp_mem_wdata >> 32) & 0xffffffffu),
+                         static_cast<Instruction>(Funct3::Sw));
+        }
     }
 }
 
@@ -1125,10 +1160,21 @@ void Machine::WB_() {
     } else {
         if ((opcode == Opcode::Amo && funct5 == Funct5Amo::Sc) || (opcode == Opcode::Lui) ||
             (opcode == Opcode::Auipc) || (opcode == Opcode::Jal) || (opcode == Opcode::Jalr) ||
-            (opcode == Opcode::Op) || (opcode == Opcode::OpImm)) {
+            (opcode == Opcode::Op) || (opcode == Opcode::OpImm) ||
+            (opcode == Opcode::OpFp && pipeline_context_.int_wb_from_fp)) {
             wire_wb_r_data = pipeline_context_.wb_data;
             wire_wb_r_enable = 1;
         }
+    }
+
+    if (opcode == Opcode::LoadFp) {
+        cpu->freg[pipeline_context_.rd] = pipeline_context_.fp_mem_rdata;
+    }
+
+    if ((opcode == Opcode::OpFp || opcode == Opcode::MAdd || opcode == Opcode::MSub ||
+         opcode == Opcode::NMAdd || opcode == Opcode::NMSub) &&
+        pipeline_context_.fp_wb_enable) {
+        cpu->freg[pipeline_context_.rd] = pipeline_context_.fp_wb_data;
     }
 
     if (wire_wb_r_enable && pipeline_context_.rd != 0) {
@@ -1171,14 +1217,14 @@ void Machine::COM() {
     if (pending_interrupts) {
         switch (cpu->priv) {
             case kPrivMachine: {
-                if (cpu->mstatus & kMstatusMie) {
+                if (cpu->mstatus & enum_mask(MstatusBit::Mie)) {
                     enable_interrupts = ~cpu->mideleg;
                 }
                 break;
             }
             case kPrivSupervisor: {
                 enable_interrupts = ~cpu->mideleg;
-                if (cpu->mstatus & kMstatusSie) {
+                if (cpu->mstatus & enum_mask(MstatusBit::Sie)) {
                     enable_interrupts |= cpu->mideleg;
                 }
                 break;
@@ -1351,32 +1397,32 @@ int Machine::init(int argc, char* argv[]) {
     cpu = new CPU();
     disk = new Disk();
     console = new Console();
-    mmem = console->mmem = disk->mmem = new Byte[DRAM_SIZE];
+    mmem = console->mmem = disk->mmem = new Byte[simrv::memory::kDramSize];
 
     // MAKE Console QUEUE
-    console->Queue = new QueueState[CONSOLE_MAX_QUEUE_NUM];
-    disk->Queue = new QueueState[DISK_MAX_QUEUE_NUM];
-    // disk->sector = new Byte[DISK_SIZE];
+    console->Queue = new QueueState[simrv::virtio::kConsoleMaxQueueNum];
+    disk->Queue = new QueueState[simrv::virtio::kDiskMaxQueueNum];
+    // disk->sector = new Byte[simrv::virtio::kDiskSize];
 
     if (s_dlog_mode) s_fp_dlog.open("init_virtio.txt");
 
     cpu->pc = s_start_pc;
-    cpu->reg[11] = (s_appmode | s_rtosmode) ? 0 : D_INITD_ADDR + D_START_PC;
+    cpu->reg[11] = (s_appmode | s_rtosmode) ? 0 : simrv::boot::kInitDataAddress + simrv::boot::kStartPc;
     cpu->TLB_flush();
 
     load_initram(s_fn_memimg, mmem);  // load a memory image file
 
     if (s_fn_dvtree == NULL)
-        load_devicetree(mmem + D_INITD_ADDR);
+        load_devicetree(mmem + simrv::boot::kInitDataAddress);
     else
-        load_initram(s_fn_dvtree, mmem + D_INITD_ADDR);
+        load_initram(s_fn_dvtree, mmem + simrv::boot::kInitDataAddress);
 
     if (s_use_disk) load_initram(s_fn_dskimg, disk->sector);  // load a disk image file
 
     if (s_use_mix)
         for (int i = 0; i < OperationIdCount; i++) e_instmix[i] = 0;
 
-    if (s_rtosmode) cpu->misa = 0x00000100;  // RV32i, Machine ISA register when RTOS mode
+    if (s_rtosmode) cpu->misa = misa_profile_bits(MisaProfile::I);
 
     // #ifdef MIDDLE
     // #include "xinitreg.txt"
@@ -1393,10 +1439,10 @@ Machine::~Machine() {
 }
 
 void Microcn::init(char* fname) {
-    cmem = new Byte[LCMEM_SIZE];
+    cmem = new Byte[simrv::memory::kLocalCoreMemorySize];
     load_initram(fname, cmem);
     for (int i = 0; i < 32; i++) reg[i] = 0;
-    reg[11] = 0x8000; /* D_INITD_ADDR + D_START_PC; */
+    reg[11] = 0x8000; /* simrv::boot::kInitDataAddress + simrv::boot::kStartPc; */
 }
 
 int Microcn::exec() {
@@ -1404,7 +1450,7 @@ int Microcn::exec() {
     ExecuteUnit execute_unit;
     int ret = 1;
     cpc = pc;
-    memcpy(&r_ir, &cmem[pc & DRAM_MASK], 4);
+    memcpy(&r_ir, &cmem[pc & simrv::memory::kDramMask], 4);
     if ((r_ir & 3) != 3) {
         printf("__ ERROR: this microcn does not support compressed insn!\n");
         exit(0);
@@ -1477,7 +1523,7 @@ int Microcn::exec() {
     int tmp = (1 << (r_funct3 & 0x3));
     if (r_opcode == static_cast<Instruction>(Opcode::Load)) {
         if ((r_mem_addr >> 28) == 0x8) {
-            r_mem_rdata = ram_read(r_mem_addr & DRAM_MASK, r_funct3, mmem);
+            r_mem_rdata = ram_read(r_mem_addr & simrv::memory::kDramMask, r_funct3, mmem);
         } else if ((r_mem_addr >> 28) == 0x9) {
             r_mem_rdata = disk_read(r_mem_addr & DISK_MASK, tmp, disk);
         } else if (r_mem_addr == 0x40009000) {
@@ -1493,7 +1539,7 @@ int Microcn::exec() {
         } else if ((r_mem_addr >> 12) == 0x4000c) {
             r_mem_rdata = static_cast<Word>(std::to_integer<uint8_t>(cons_fifo));
         } else
-            r_mem_rdata = ram_read(r_mem_addr & DRAM_MASK, r_funct3, cmem);
+            r_mem_rdata = ram_read(r_mem_addr & simrv::memory::kDramMask, r_funct3, cmem);
     }
     if (r_opcode == static_cast<Instruction>(Opcode::Store)) {
         if (r_mem_addr == 0x40008000) {
@@ -1508,7 +1554,7 @@ int Microcn::exec() {
             //            //exit(0);}//ret=0;}
         } else if ((r_mem_addr >> 28) == 0x8) {
             for (int i = 0; i < (1 << r_funct3); i++) {
-                mmem[(r_mem_addr + i) & DRAM_MASK] =
+                mmem[(r_mem_addr + i) & simrv::memory::kDramMask] =
                     static_cast<Byte>(static_cast<uint8_t>((r_rrs2 >> (8 * i)) & 0xFF));
             }
         } else if ((r_mem_addr >> 28) == 0x9) {
@@ -1525,7 +1571,7 @@ int Microcn::exec() {
             queue_write(r_mem_addr & 0xff, r_rrs2, disk_queue);
         } else {
             for (int i = 0; i < (1 << r_funct3); i++) {
-                cmem[(r_mem_addr + i) & DRAM_MASK] =
+                cmem[(r_mem_addr + i) & simrv::memory::kDramMask] =
                     static_cast<Byte>(static_cast<uint8_t>((r_rrs2 >> (8 * i)) & 0xFF));
             }
         }

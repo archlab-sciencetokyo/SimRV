@@ -40,6 +40,20 @@ if ! command -v "$OBJCOPY" >/dev/null 2>&1; then
   exit 2
 fi
 
+if [[ -z "${RISCV_NM:-}" ]]; then
+  if [[ -n "$RISCV_PREFIX" && -x "${RISCV_PREFIX}nm" ]]; then
+    NM_TOOL="${RISCV_PREFIX}nm"
+  elif command -v riscv64-unknown-elf-nm >/dev/null 2>&1; then
+    NM_TOOL="riscv64-unknown-elf-nm"
+  elif command -v nm >/dev/null 2>&1; then
+    NM_TOOL="nm"
+  else
+    NM_TOOL=""
+  fi
+else
+  NM_TOOL="$RISCV_NM"
+fi
+
 TIMEOUT_SECS="${SIMRV_ISA_TIMEOUT:-20}"
 END_INSNS="${SIMRV_ISA_END:-2000000}"
 TOHOST_ADDR="${SIMRV_ISA_TOHOST:-0x80001000}"
@@ -114,7 +128,15 @@ for t in "${TESTS[@]}"; do
   fi
 
   echo "[RUN ] $t"
-  if timeout "$TIMEOUT_SECS" "$SIMRV_BIN" -m "$BIN" -e "$END_INSNS" -T -H "$TOHOST_ADDR" </dev/null >"$LOG" 2>&1; then
+  TEST_TOHOST_ADDR="$TOHOST_ADDR"
+  if [[ -n "$NM_TOOL" ]]; then
+    TOHOST_SYM="$($NM_TOOL -g "$ELF" 2>/dev/null | awk '$3=="tohost" {print $1; exit}')"
+    if [[ -n "$TOHOST_SYM" ]]; then
+      TEST_TOHOST_ADDR="0x${TOHOST_SYM}"
+    fi
+  fi
+
+  if timeout "$TIMEOUT_SECS" "$SIMRV_BIN" -m "$BIN" -e "$END_INSNS" -T -H "$TEST_TOHOST_ADDR" </dev/null >"$LOG" 2>&1; then
     if grep -q "ISA TEST PASS" "$LOG"; then
       echo "[PASS] $t"
       PASS=$((PASS + 1))

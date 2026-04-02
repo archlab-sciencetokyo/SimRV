@@ -5,6 +5,8 @@
 #pragma once
 #include "Define.hpp"
 
+namespace simrv::module {
+
 Instruction CB_inst_decomp(Instruction ir);  // Combinatorial Logical Circuit
 Instruction CB_imm_gen(Instruction ir);      // Combinatorial Logical Circuit
 OperationId decoder(Instruction ir);
@@ -15,3 +17,5 @@ Register ALU_A(Register in1, Register in2, Instruction funct5);
 CSRValue ALU_C(CSRValue rcsr, Register rrs1, Instruction imm, Instruction funct3);
 
 extern char OPERATION_NAME[OperationIdCount][11];
+
+}  // namespace simrv::module

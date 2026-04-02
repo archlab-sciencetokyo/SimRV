@@ -26,7 +26,7 @@ Word ram_ld(Address addr, int n, Byte* ram) {
     }
     Word data = 0;
     for (int i = 0; i < n; i++) {
-        data |= byte_to_word(ram[(addr + i) & DRAM_MASK]) << (8 * i);
+        data |= byte_to_word(ram[(addr + i) & simrv::memory::kDramMask]) << (8 * i);
     }
     return data;
 }
@@ -37,15 +37,15 @@ void ram_st(Address addr, Word data, int n, Byte* ram) {
         exit(0);
     }
     if (n == 1) {
-        ram[addr & DRAM_MASK] = word_to_byte(data);
+        ram[addr & simrv::memory::kDramMask] = word_to_byte(data);
     } else if (n == 2) {
-        ram[addr & DRAM_MASK] = word_to_byte(data);
-        ram[(addr + 1) & DRAM_MASK] = word_to_byte(data >> 8);
+        ram[addr & simrv::memory::kDramMask] = word_to_byte(data);
+        ram[(addr + 1) & simrv::memory::kDramMask] = word_to_byte(data >> 8);
     } else if (n == 4) {
-        ram[addr & DRAM_MASK] = word_to_byte(data);
-        ram[(addr + 1) & DRAM_MASK] = word_to_byte(data >> 8);
-        ram[(addr + 2) & DRAM_MASK] = word_to_byte(data >> 16);
-        ram[(addr + 3) & DRAM_MASK] = word_to_byte(data >> 24);
+        ram[addr & simrv::memory::kDramMask] = word_to_byte(data);
+        ram[(addr + 1) & simrv::memory::kDramMask] = word_to_byte(data >> 8);
+        ram[(addr + 2) & simrv::memory::kDramMask] = word_to_byte(data >> 16);
+        ram[(addr + 3) & simrv::memory::kDramMask] = word_to_byte(data >> 24);
     }
 }
 
@@ -133,21 +133,21 @@ void disk_request(Byte* mmem, Byte* mdsk, int q_num, QueueState* qs) {
 
         Word request_size = 0;
         switch (header.type) {
-            case VIRTIO_BLK_T_IN: {  /////  disk -> dram
+            case enum_mask(VirtioBlkType::In): {  /////  disk -> dram
                 request_size = sector_len + 1;
                 for (int i = 0; i < (int)sector_len; i = i + 4) {  //++){
                     Word d =
-                        dsk_ld(static_cast<Address>(header.sector_num * SECTOR_SIZE + i), 4, mdsk);
+                        dsk_ld(static_cast<Address>(header.sector_num * simrv::virtio::kDiskSectorSize + i), 4, mdsk);
                     ram_st(sector_adr + i, d, 4, mmem);
                 }
                 ram_st(footer_adr, 0, 1, mmem);  //  VIRTIO_BLK_S_OK
                 break;
             }
-            case VIRTIO_BLK_T_OUT: {  ///// dram -> disk
+            case enum_mask(VirtioBlkType::Out): {  ///// dram -> disk
                 request_size = 1;
                 for (int i = 0; i < (int)sector_len; i = i + 4) {
                     Word d = ram_ld(sector_adr, 4, mmem);
-                    dsk_st(header.sector_num * SECTOR_SIZE + i, d, 4, mdsk);
+                    dsk_st(header.sector_num * simrv::virtio::kDiskSectorSize + i, d, 4, mdsk);
                 }
                 ram_st(sector_adr + sector_len - 1, 0, 1, mmem);  //  VIRTIO_BLK_S_OK
                 break;
@@ -165,7 +165,7 @@ void disk_request(Byte* mmem, Byte* mdsk, int q_num, QueueState* qs) {
 
 Disk::Disk()
     : mmem(nullptr),
-      sector(new Byte[DISK_SIZE]),  // sector is nog good name, rename this!
+      sector(new Byte[simrv::virtio::kDiskSize]),  // sector is nog good name, rename this!
       Queue(nullptr),
       DeviceFeaturesSel(0),
       DriverFeatures(0),
@@ -175,7 +175,27 @@ Disk::Disk()
       QueueSel(0),
       QueueNum(0) {}
 
-Word Disk::disk_read(Address offset) {
+bool Disk::read(Machine& machine, Address p_addr, Word& rdata) {
+    rdata = mmio_read(offset(p_addr));
+    if (machine.s_debugmode) {
+        printf("__ %10ld VIO mem_read  %08x %08x\n", machine.cpu->mtime, p_addr, rdata);
+    }
+    if (machine.s_dlog_mode && machine.s_fp_dlog.is_open()) {
+        machine.s_fp_dlog << std::hex << rdata << '\n';
+        machine.s_fp_dlog.flush();
+    }
+    return true;
+}
+
+bool Disk::write(Machine& machine, Address p_addr, Word wdata) {
+    mmio_write(machine.cpu, offset(p_addr), wdata);
+    if (machine.s_debugmode) {
+        printf("__ %10ld VIO mem_write %08x %08x\n", machine.cpu->mtime, p_addr, wdata);
+    }
+    return true;
+}
+
+Word Disk::mmio_read(Address offset) {
     Word rdata = 0;
     switch (offset) {
         case 0x000:
@@ -221,7 +241,7 @@ Word Disk::disk_read(Address offset) {
     return rdata;
 }
 
-void Disk::disk_write(CPU* cpu, Address offset, Word wdata) {
+void Disk::mmio_write(CPU* cpu, Address offset, Word wdata) {
     switch (offset) {
         case 0x038:
             QueueNum = wdata;
@@ -256,13 +276,13 @@ void Disk::disk_write(CPU* cpu, Address offset, Word wdata) {
                 disk_request(mmem, sector, QueueNum, &Queue[wdata]); /* request */
             }
             InterruptStatus |= 1;
-            cpu->plic_set_irq(VIRTIO_DISK_IRQ, 1);
+            cpu->plic_set_irq(simrv::virtio::kDiskIrq, 1);
             break;
         }
         case 0x064: {
             InterruptStatus &= ~wdata;
             if (InterruptStatus == 0) {
-                cpu->plic_set_irq(VIRTIO_DISK_IRQ, 0);
+                cpu->plic_set_irq(simrv::virtio::kDiskIrq, 0);
             }
             break;
         }

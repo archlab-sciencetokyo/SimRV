@@ -5,7 +5,18 @@
 #include "State.hpp"
 
 CPU::CPU()
-    : tlb_unit(*this), interrupt_controller(*this), trap_controller(*this), csr_file(*this) {}
+    : tlb_unit(*this),
+      interrupt_controller(*this),
+      plic_mmio(*this),
+      clint_mmio(*this),
+      trap_controller(*this),
+      csr_file(*this) {
+    for (int i = 0; i < 32; i++) {
+        reg[i] = 0;
+        freg[i] = 0;
+    }
+    fcsr = 0;
+}
 
 void CPU::TLB_flush() { tlb_unit.flush(); }
 

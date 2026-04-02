@@ -7,8 +7,8 @@
 #include "State.hpp"
 
 CSRValue CsrFile::getMstatus(CSRValue mask) const {
-    CSRValue val = (cpu_.mstatus | 0x6000) & mask;
-    return (((val >> 13) == 3) | ((val >> 15) == 3)) ? (val | 0x80000000) : val;
+    CSRValue val = (cpu_.mstatus | kMstatusFsDirty) & mask;
+    return (((val >> 13) == 3) | ((val >> 15) == 3)) ? (val | kMstatusSd) : val;
 }
 
 void CsrFile::setMstatus(CSRValue wdata) {
@@ -19,19 +19,26 @@ void CsrFile::setMstatus(CSRValue wdata) {
         ((cpu_.mstatus & enum_mask(MstatusBit::Mprv)) && (mod & enum_mask(MstatusBit::Mpp)) != 0)) {
         cpu_.TLB_flush();
     }
-    CSRValue mask = kMstatusMask & ~kMstatusFs;
+    CSRValue mask = kMstatusMask & ~enum_mask(MstatusBit::Fs);
     cpu_.mstatus = (cpu_.mstatus & ~mask) | (wdata & mask);
 }
 
 CSRValue CsrFile::read(CSRAddress addr) const {
     CSRValue rcsr = 0;
     switch (addr) {
-        case 0x3A0:
-        case 0x3B0:
-        case csr_addr(Csr::Fflags):
-        case csr_addr(Csr::Frm):
-        case csr_addr(Csr::Fcsr):
+        case csr_addr(Csr::Pmpcfg0):
+        case csr_addr(Csr::Pmpaddr0):
             rcsr = 0;
+            break;
+
+        case csr_addr(Csr::Fflags):
+            rcsr = cpu_.fcsr & kFflagsMask;
+            break;
+        case csr_addr(Csr::Frm):
+            rcsr = (cpu_.fcsr >> 5) & 0x7;
+            break;
+        case csr_addr(Csr::Fcsr):
+            rcsr = cpu_.fcsr & 0xff;
             break;
 
         case csr_addr(Csr::Sie):
@@ -93,7 +100,7 @@ CSRValue CsrFile::read(CSRAddress addr) const {
             rcsr = cpu_.mip;
             break;
         case csr_addr(Csr::Misa):
-            rcsr = cpu_.misa | 0x40000000;
+            rcsr = misa_with_mxl(cpu_.misa);
             break;
 
         case csr_addr(Csr::Mcycle):
@@ -113,10 +120,10 @@ CSRValue CsrFile::read(CSRAddress addr) const {
             break;
 
         case csr_addr(Csr::Sstatus):
-            rcsr = getMstatus(0x000de133);
+            rcsr = getMstatus(kMstatusSstatusReadMask);
             break;
         case csr_addr(Csr::Mstatus):
-            rcsr = getMstatus(0xffffffff);
+            rcsr = getMstatus(kMstatusReadMask);
             break;
 
         case csr_addr(Csr::Mhartid):
@@ -130,22 +137,30 @@ CSRValue CsrFile::read(CSRAddress addr) const {
 }
 
 void CsrFile::write(CSRAddress addr, CSRValue wdata) {
-    CSRValue mask1 = (1 << (CAUSE_STORE_PAGE_FAULT + 1)) - 1;
+    CSRValue mask1 =
+        (static_cast<CSRValue>(1) << (enum_mask(ExceptionCode::StorePageFault) + 1)) - 1;
     CSRValue mask2 = enum_mask(MipBit::Ssip) | enum_mask(MipBit::Stip) | enum_mask(MipBit::Seip);
     CSRValue mask3 = enum_mask(MipBit::Msip) | enum_mask(MipBit::Ssip) | enum_mask(MipBit::Stip) |
                      enum_mask(MipBit::Mtip) | enum_mask(MipBit::Seip);
     CSRValue mask4 = enum_mask(MipBit::Ssip) | enum_mask(MipBit::Stip);
 
     switch (addr) {
-        case csr_addr(Csr::Fflags):
-        case csr_addr(Csr::Frm):
-        case csr_addr(Csr::Fcsr):
         case csr_addr(Csr::Mhartid):
-        case 0x3A0:
-        case 0x3B0:
+        case csr_addr(Csr::Pmpcfg0):
+        case csr_addr(Csr::Pmpaddr0):
         case csr_addr(Csr::Time):
         case csr_addr(Csr::Timeh):
         case csr_addr(Csr::Misa):
+            break;
+
+        case csr_addr(Csr::Fflags):
+            cpu_.fcsr = (cpu_.fcsr & ~kFflagsMask) | (wdata & kFflagsMask);
+            break;
+        case csr_addr(Csr::Frm):
+            cpu_.fcsr = (cpu_.fcsr & ~(kFrmMask << kFrmShift)) | ((wdata & kFrmMask) << kFrmShift);
+            break;
+        case csr_addr(Csr::Fcsr):
+            cpu_.fcsr = wdata & kFcsrMask;
             break;
 
         case csr_addr(Csr::Stvec):

@@ -43,4 +43,11 @@ struct PipelineContext {
     // LD/EX2 stage memory data
     Register mem_rdata = 0;
     Register mem_wdata = 0;
+
+    // FP datapath temporaries
+    FloatingRegister fp_mem_rdata = 0;
+    FloatingRegister fp_mem_wdata = 0;
+    FloatingRegister fp_wb_data = 0;
+    Word fp_wb_enable = 0;
+    Word int_wb_from_fp = 0;
 };

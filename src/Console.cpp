@@ -80,7 +80,7 @@ int Console::recieve_input() {
     ssize_t r_len = 0;
     if (select(stdin_fd + 1, &rfds, &wfds, &efds, &tv) > 0 && FD_ISSET(stdin_fd, &rfds)) {
         uint8_t buf;
-        r_len = read(fileno(stdin), &buf, 1);
+        r_len = ::read(fileno(stdin), &buf, 1);
         if (buf == 0x11) {
             printf("\n__ Terminated by Control+'q'\n");
             return -1;
@@ -110,7 +110,27 @@ Console::Console()
       cons_fifo(static_cast<Byte>(0)),
       fifo_en(static_cast<Byte>(0)) {}
 
-Word Console::console_read(Address offset) {
+bool Console::read(Machine& machine, Address p_addr, Word& rdata) {
+    rdata = mmio_read(offset(p_addr));
+    if (machine.s_debugmode) {
+        printf("__ %10ld VIO mem_read  %08x %08x\n", machine.cpu->mtime, p_addr, rdata);
+    }
+    if (machine.s_dlog_mode && machine.s_fp_dlog.is_open()) {
+        machine.s_fp_dlog << std::hex << rdata << '\n';
+        machine.s_fp_dlog.flush();
+    }
+    return true;
+}
+
+bool Console::write(Machine& machine, Address p_addr, Word wdata) {
+    mmio_write(machine.cpu, offset(p_addr), wdata);
+    if (machine.s_debugmode) {
+        printf("__ %10ld VIO mem_write %08x %08x\n", machine.cpu->mtime, p_addr, wdata);
+    }
+    return true;
+}
+
+Word Console::mmio_read(Address offset) {
     Word rdata = 0;
     switch (offset) {
         case 0x000:
@@ -150,7 +170,7 @@ Word Console::console_read(Address offset) {
     return rdata;
 }
 
-void Console::console_write(CPU* cpu, Address offset, Word wdata) {
+void Console::mmio_write(CPU* cpu, Address offset, Word wdata) {
     switch (offset) {
         case 0x030:
             QueueSel = wdata;
@@ -198,7 +218,7 @@ void Console::console_write(CPU* cpu, Address offset, Word wdata) {
         case 0x064: {
             InterruptStatus &= ~wdata;
             if (InterruptStatus == 0) {
-                cpu->plic_set_irq(VIRTIO_CONSOLE_IRQ, 0);
+                cpu->plic_set_irq(simrv::virtio::kConsoleIrq, 0);
             }
             break;
         }

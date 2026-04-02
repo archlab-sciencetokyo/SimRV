@@ -7,7 +7,7 @@
 #include "State.hpp"
 
 void TlbUnit::flush() {
-    for (Word i = 0; i < TLB_SIZE; i++) {
+    for (Word i = 0; i < simrv::memory::kTlbSize; i++) {
         cpu_.TLB_inst_r[i].v_addr = cpu_.TLB_inst_r[i].p_addr = static_cast<Word>(-1);
         cpu_.TLB_data_r[i].v_addr = cpu_.TLB_data_r[i].p_addr = static_cast<Word>(-1);
         cpu_.TLB_data_w[i].v_addr = cpu_.TLB_data_w[i].p_addr = static_cast<Word>(-1);
@@ -34,12 +34,74 @@ void InterruptController::setIrq(int irq_num, int state) {
     updateMip();
 }
 
+bool PlicMmio::read(Machine& machine, Address p_addr, Word& rdata) {
+    (void)machine;
+    rdata = mmio_read(offset(p_addr));
+    return true;
+}
+
+bool PlicMmio::write(Machine& machine, Address p_addr, Word wdata) {
+    (void)machine;
+    mmio_write(offset(p_addr), wdata);
+    return true;
+}
+
+Word PlicMmio::mmio_read(Address offset) {
+    if (offset == simrv::mmio::kPlicHartBase + 4) {
+        CSRValue mask = cpu_.plic_pending_irq & ~cpu_.plic_served_irq;
+        if (mask != 0) {
+            cpu_.plic_served_irq |= mask;
+            cpu_.plic_update_mip();
+            return mask;
+        }
+    }
+    return 0;
+}
+
+void PlicMmio::mmio_write(Address offset, Word wdata) {
+    if (offset == simrv::mmio::kPlicHartBase + 4) {
+        cpu_.plic_served_irq &= ~(1u << (wdata - 1));
+        cpu_.plic_update_mip();
+    }
+}
+
+bool ClintMmio::read(Machine& machine, Address p_addr, Word& rdata) {
+    (void)machine;
+    rdata = mmio_read(offset(p_addr));
+    return true;
+}
+
+bool ClintMmio::write(Machine& machine, Address p_addr, Word wdata) {
+    (void)machine;
+    mmio_write(offset(p_addr), wdata);
+    return true;
+}
+
+Word ClintMmio::mmio_read(Address offset) {
+    if (offset == 0xbff8) return static_cast<Word>(cpu_.mtime);
+    if (offset == 0xbffc) return static_cast<Word>(cpu_.mtime >> 32);
+    if (offset == 0x4000) return static_cast<Word>(cpu_.mtimecmp);
+    if (offset == 0x4004) return static_cast<Word>(cpu_.mtimecmp >> 32);
+    return 0;
+}
+
+void ClintMmio::mmio_write(Address offset, Word wdata) {
+    if (offset == 0x4000) {
+        cpu_.mtimecmp = (cpu_.mtimecmp & ~0xffffffffu) | wdata;
+        cpu_.mip &= ~enum_mask(MipBit::Mtip);
+    }
+    if (offset == 0x4004) {
+        cpu_.mtimecmp = (cpu_.mtimecmp & 0xffffffffu) | ((Counter)wdata << 32);
+        cpu_.mip &= ~enum_mask(MipBit::Mtip);
+    }
+}
+
 void TrapController::mret() {
     MstatusView mstatus(cpu_.mstatus);
     const CSRValue mpp = mstatus.bits.mpp;
     const CSRValue mpie = mstatus.bits.mpie;
 
-    mstatus.raw32 = (mstatus.raw32 & ~(static_cast<CSRValue>(1) << mpp)) | (mpie << mpp);
+    mstatus.rawValue = (mstatus.rawValue & ~(static_cast<CSRValue>(1) << mpp)) | (mpie << mpp);
     mstatus.bits.mpie = 1;
     mstatus.bits.mpp = 0;
     cpu_.mstatus = mstatus.raw();
@@ -53,7 +115,7 @@ void TrapController::sret() {
     const CSRValue spp = mstatus.bits.spp;
     const CSRValue spie = mstatus.bits.spie;
 
-    mstatus.raw32 = (mstatus.raw32 & ~(static_cast<CSRValue>(1) << spp)) | (spie << spp);
+    mstatus.rawValue = (mstatus.rawValue & ~(static_cast<CSRValue>(1) << spp)) | (spie << spp);
     mstatus.bits.spie = 1;
     mstatus.bits.spp = 0;
     cpu_.mstatus = mstatus.raw();
@@ -78,20 +140,20 @@ void TrapController::raiseException(TrapCause cause, CSRValue tval) {
         cpu_.scause = cause;
         cpu_.sepc = cpu_.pc;
         cpu_.stval = tval;
-        cpu_.mstatus = (cpu_.mstatus & ~kMstatusSpie) |
-                       (((cpu_.mstatus >> cpu_.priv) & 1) << kMstatusSpieShift);
-        cpu_.mstatus = (cpu_.mstatus & ~kMstatusSpp) | (cpu_.priv << kMstatusSppShift);
-        cpu_.mstatus &= ~kMstatusSie;
+        cpu_.mstatus = (cpu_.mstatus & ~enum_mask(MstatusBit::Spie)) |
+                       (((cpu_.mstatus >> cpu_.priv) & 1) << 5);
+        cpu_.mstatus = (cpu_.mstatus & ~enum_mask(MstatusBit::Spp)) | (cpu_.priv << 8);
+        cpu_.mstatus &= ~enum_mask(MstatusBit::Sie);
         cpu_.priv = kPrivSupervisor;
         cpu_.pc = cpu_.stvec;
     } else {
         cpu_.mcause = cause;
         cpu_.mepc = cpu_.pc;
         cpu_.mtval = tval;
-        cpu_.mstatus = (cpu_.mstatus & ~kMstatusMpie) |
-                       (((cpu_.mstatus >> cpu_.priv) & 1) << kMstatusMpieShift);
-        cpu_.mstatus = (cpu_.mstatus & ~kMstatusMpp) | (cpu_.priv << kMstatusMppShift);
-        cpu_.mstatus &= ~kMstatusMie;
+        cpu_.mstatus = (cpu_.mstatus & ~enum_mask(MstatusBit::Mpie)) |
+                       (((cpu_.mstatus >> cpu_.priv) & 1) << 7);
+        cpu_.mstatus = (cpu_.mstatus & ~enum_mask(MstatusBit::Mpp)) | (cpu_.priv << 11);
+        cpu_.mstatus &= ~enum_mask(MstatusBit::Mie);
         cpu_.priv = kPrivMachine;
         cpu_.pc = cpu_.mtvec;
     }

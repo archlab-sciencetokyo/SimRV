@@ -11,10 +11,12 @@
 #include "Define.hpp"
 #include "Disk.hpp"
 #include "ExecuteUnit.hpp"
+#include "MmioRouter.hpp"
 #include "PipelineContext.hpp"
 #include "State.hpp"
 class Machine {
    public:
+    Machine();
     ~Machine();
     int init(int argc, char* argv[]);
     void exec();            // Execute the main simulation loop.
@@ -61,6 +63,7 @@ class Machine {
     Console* console;
 
     Byte* mmem;  // main memory
+    MmioRouter mmio_router_;
 
    private:
     DecodeUnit decode_unit_;
@@ -102,7 +105,7 @@ class Microcn {
     Word Qnum;
     Word Qsel;
 
-    Register pc = 0;  // D_START_PC;      // program counter
+    Register pc = 0;  // simrv::boot::kStartPc;      // program counter
     Register cpc;
     Register reg[32];  // general purpose registers
     Counter icnt = 0;  // instruction count

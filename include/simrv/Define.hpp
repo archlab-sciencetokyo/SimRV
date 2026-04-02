@@ -41,6 +41,8 @@ using CompressedInstruction = uint16_t;
 using Word = ActiveXLenTypes::Word;
 using SignedWord = ActiveXLenTypes::SignedWord;
 using Register = ActiveXLenTypes::Register;
+using WideRegister = uint64_t;
+using FloatingRegister = WideRegister;
 using Counter = uint64_t;
 using Address = Word;
 using Instruction = Word;
@@ -50,168 +52,155 @@ using ImmValue = SignedWord;
 using TrapCause = Word;
 using PrivilegeLevel = Word;
 
-constexpr Address D_START_PC = static_cast<Address>(0x80000000u);
-constexpr Address D_INITD_ADDR = static_cast<Address>(0x01000000u);
+namespace simrv::boot {
+inline constexpr Address kStartPc = static_cast<Address>(0x80000000u);
+inline constexpr Address kInitDataAddress = static_cast<Address>(0x01000000u);
+}  // namespace simrv::boot
 
-constexpr uint32_t FLAG_DUMP_EXEC = (1u << 0);
-constexpr uint32_t FLAG_DUMP_REG = (1u << 1);
-constexpr uint32_t FLAG_DUMP_CSR = (1u << 2);
-constexpr uint32_t FLAG_DUMP_MIURA = (1u << 3);
+enum class DumpFlag : uint32_t {
+    Exec = (1u << 0),
+    Reg = (1u << 1),
+    Csr = (1u << 2),
+};
 
-constexpr Word PTE_V_MASK = (Word{1} << 0);
-constexpr Word PTE_R_MASK = (Word{1} << 1);
-constexpr Word PTE_W_MASK = (Word{1} << 2);
-constexpr Word PTE_X_MASK = (Word{1} << 3);
-constexpr Word PTE_U_MASK = (Word{1} << 4);
-constexpr Word PTE_A_MASK = (Word{1} << 6);
-constexpr Word PTE_D_MASK = (Word{1} << 7);
+using DumpFlags = uint32_t;
 
-enum PTE_ACCESS { ACCESS_READ = 0, ACCESS_WRITE = 1, ACCESS_CODE = 2 };
+enum class PteFlag : Word {
+    V = (Word{1} << 0),
+    R = (Word{1} << 1),
+    W = (Word{1} << 2),
+    X = (Word{1} << 3),
+    U = (Word{1} << 4),
+    A = (Word{1} << 6),
+    D = (Word{1} << 7),
+};
+
+using PteFlags = Word;
+
+enum class PteAccess : uint8_t { Read = 0, Write = 1, Code = 2 };
 
 constexpr uint32_t LEVELS = 2;
 constexpr uint32_t PTE_SIZE = 4;
 constexpr uint32_t PAGE_SIZE = (1u << 12);
 
-constexpr Address VIRTIO_BASE_ADDR = static_cast<Address>(0x40000000u);
-constexpr Address VIRTIO_SIZE = static_cast<Address>(0x08000000u);
-constexpr uint16_t VRING_DESC_F_NEXT = 1;
-constexpr uint16_t VRING_DESC_F_WRITE = 2;
-constexpr uint16_t VRING_DESC_F_INDIRECT = 4;
+namespace simrv::virtio {
+inline constexpr Address kBaseAddress = static_cast<Address>(0x40000000u);
+inline constexpr Address kRegionSize = static_cast<Address>(0x08000000u);
+inline constexpr uint32_t kConsoleMaxQueueNum = 2;
+inline constexpr uint32_t kConsoleIrq = 1;
+inline constexpr uint32_t kDiskSectorSize = 512;
+inline constexpr uint32_t kDiskBufferSize = (512u * 512u);
+inline constexpr uint32_t kDiskSize = (64u * 1024u * 1024u);
+inline constexpr uint32_t kDiskMaxQueueNum = 4;
+inline constexpr uint32_t kDiskIrq = 2;
+}  // namespace simrv::virtio
+enum class VringDescFlag : uint16_t {
+    Next = 1,
+    Write = 2,
+    Indirect = 4,
+};
 
-/* console */
-constexpr uint32_t CONSOLE_MAX_QUEUE_NUM = 2;
-constexpr uint32_t VIRTIO_CONSOLE_IRQ = 1;
+using VringDescFlags = uint16_t;
+enum class VirtioBlkType : uint32_t {
+    In = 0,
+    Out = 1,
+};
 
-/* block device (disk) */
-constexpr uint32_t SECTOR_SIZE = 512;
-constexpr uint32_t DISK_BUF_SIZE = (512u * 512u);
-constexpr uint32_t DISK_SIZE = (64u * 1024u * 1024u);
-constexpr uint32_t DISK_MAX_QUEUE_NUM = 4;
-constexpr uint32_t VIRTIO_DISK_IRQ = 2;
-constexpr uint32_t VIRTIO_BLK_T_IN = 0;
-constexpr uint32_t VIRTIO_BLK_T_OUT = 1;
-constexpr uint32_t VIRTIO_BLK_S_OK = 0;
-constexpr uint32_t VIRTIO_BLK_S_IOERR = 1;
-constexpr uint32_t VIRTIO_BLK_S_UNSUPP = 2;
+enum class VirtioBlkStatus : uint32_t {
+    Ok = 0,
+    IoErr = 1,
+    Unsupp = 2,
+};
 
 constexpr Address DISK_MASK = static_cast<Address>(0x03ffffffu);
 
-constexpr Address PLIC_BASE_ADDR = static_cast<Address>(0x50000000u);
-constexpr Address PLIC_SIZE = static_cast<Address>(0x00400000u);
-constexpr Address PLIC_HART_BASE = static_cast<Address>(0x00200000u);
-constexpr Address PLIC_HART_SIZE = static_cast<Address>(0x00001000u);
+namespace simrv::mmio {
+inline constexpr Address kPlicBaseAddress = static_cast<Address>(0x50000000u);
+inline constexpr Address kPlicSize = static_cast<Address>(0x00400000u);
+inline constexpr Address kPlicHartBase = static_cast<Address>(0x00200000u);
+inline constexpr Address kPlicHartSize = static_cast<Address>(0x00001000u);
+inline constexpr Address kClintBaseAddress = static_cast<Address>(0x60000000u);
+inline constexpr Address kClintSize = static_cast<Address>(0x000c0000u);
+}  // namespace simrv::mmio
 
-constexpr Address CLINT_BASE_ADDR = static_cast<Address>(0x60000000u);
-constexpr Address CLINT_SIZE = static_cast<Address>(0x000c0000u);
+namespace simrv::memory {
+inline constexpr Address kDramBaseAddress = static_cast<Address>(0x80000000u);
+inline constexpr Address kDramSize = static_cast<Address>(64u * 1024u * 1024u);
+inline constexpr Address kDramMask = static_cast<Address>(0x03ffffffu);
+inline constexpr unsigned kPageShift = 12;
+inline constexpr Address kPageMask = static_cast<Address>(0x00000fffu);
+inline constexpr uint32_t kTlbSize = 4;
+inline constexpr size_t kLocalCoreMemorySize = (32u * 1024u);
+}  // namespace simrv::memory
 
-constexpr Address DRAM_BASE_ADDR = static_cast<Address>(0x80000000u);
-constexpr Address DRAM_SIZE = static_cast<Address>(64u * 1024u * 1024u);
-constexpr Address DRAM_MASK = static_cast<Address>(0x03ffffffu);
-constexpr unsigned D_PAGE_SHIFT = 12;
-constexpr Address D_PAGE_MASK = static_cast<Address>(0x00000fffu);
-constexpr uint32_t TLB_SIZE = 4;
-
-constexpr size_t LCMEM_SIZE = (32u * 1024u);
-
-constexpr TrapCause CAUSE_INTERRUPT = static_cast<TrapCause>(1u << 31);
-
-enum EXCEPTION_CODE {
-    CAUSE_MISALIGNED_FETCH = 0x0,
-    CAUSE_FAULT_FETCH = 0x1,
-    CAUSE_ILLEGAL_INSTRUCTION = 0x2,
-    CAUSE_BREAKPOINT = 0x3,
-    CAUSE_MISALIGNED_LOAD = 0x4,
-    CAUSE_FAULT_LOAD = 0x5,
-    CAUSE_MISALIGNED_STORE = 0x6,
-    CAUSE_FAULT_STORE = 0x7,
-    CAUSE_USER_ECALL = 0x8,
-    CAUSE_SUPERVISOR_ECALL = 0x9,
-    CAUSE_HYPERVISOR_ECALL = 0xa,
-    CAUSE_MACHINE_ECALL = 0xb,
-    CAUSE_FETCH_PAGE_FAULT = 0xc,
-    CAUSE_LOAD_PAGE_FAULT = 0xd,
-    CAUSE_STORE_PAGE_FAULT = 0xf
+enum class TrapFlag : TrapCause {
+    Interrupt = static_cast<TrapCause>(1u << 31),
 };
 
-enum PRIV_MODE { PRIV_U = 0, PRIV_S = 1, PRIV_H = 2, PRIV_M = 3 };
+enum class ExceptionCode : TrapCause {
+    MisalignedFetch = 0x0,
+    FaultFetch = 0x1,
+    IllegalInstruction = 0x2,
+    Breakpoint = 0x3,
+    MisalignedLoad = 0x4,
+    FaultLoad = 0x5,
+    MisalignedStore = 0x6,
+    FaultStore = 0x7,
+    UserEcall = 0x8,
+    SupervisorEcall = 0x9,
+    HypervisorEcall = 0xa,
+    MachineEcall = 0xb,
+    FetchPageFault = 0xc,
+    LoadPageFault = 0xd,
+    StorePageFault = 0xf,
+};
 
-constexpr CSRValue COUNTEREN_MASK = (1u << 0) | (1u << 2);
-
-constexpr CSRValue MSTATUS_UIE = (1u << 0);
-constexpr CSRValue MSTATUS_SIE = (1u << 1);
-constexpr CSRValue MSTATUS_HIE = (1u << 2);
-constexpr CSRValue MSTATUS_MIE = (1u << 3);
-constexpr CSRValue MSTATUS_UPIE = (1u << 4);
-constexpr CSRValue MSTATUS_SPIE = (1u << 5);
-constexpr CSRValue MSTATUS_HPIE = (1u << 6);
-constexpr CSRValue MSTATUS_MPIE = (1u << 7);
-constexpr CSRValue MSTATUS_SPP = (1u << 8);
-constexpr CSRValue MSTATUS_HPP = (3u << 9);
-constexpr CSRValue MSTATUS_MPP = (3u << 11);
-constexpr CSRValue MSTATUS_FS = (3u << 13);
-constexpr CSRValue MSTATUS_XS = (3u << 15);
-constexpr CSRValue MSTATUS_MPRV = (1u << 17);
-constexpr CSRValue MSTATUS_SUM = (1u << 18);
-constexpr CSRValue MSTATUS_MXR = (1u << 19);
-
-constexpr unsigned MSTATUS_SPIE_SHIFT = 5;
-constexpr unsigned MSTATUS_MPIE_SHIFT = 7;
-constexpr unsigned MSTATUS_SPP_SHIFT = 8;
-constexpr unsigned MSTATUS_MPP_SHIFT = 11;
-constexpr unsigned MSTATUS_FS_SHIFT = 13;
-
-constexpr CSRValue MSTATUS_MASK =
-    (MSTATUS_UIE | MSTATUS_SIE | MSTATUS_MIE | MSTATUS_UPIE | MSTATUS_SPIE | MSTATUS_MPIE |
-     MSTATUS_SPP | MSTATUS_MPP | MSTATUS_FS | MSTATUS_MPRV | MSTATUS_SUM | MSTATUS_MXR);
-
-constexpr CSRValue SSTATUS_MASK0 =
-    (MSTATUS_UIE | MSTATUS_SIE | MSTATUS_UPIE | MSTATUS_SPIE | MSTATUS_SPP | MSTATUS_FS |
-     MSTATUS_XS | MSTATUS_SUM | MSTATUS_MXR);
-
-constexpr CSRValue SSTATUS_MASK = SSTATUS_MASK0;
-
-constexpr CSRValue MIP_USIP = (1u << 0);
-constexpr CSRValue MIP_SSIP = (1u << 1);
-constexpr CSRValue MIP_HSIP = (1u << 2);
-constexpr CSRValue MIP_MSIP = (1u << 3);
-constexpr CSRValue MIP_UTIP = (1u << 4);
-constexpr CSRValue MIP_STIP = (1u << 5);
-constexpr CSRValue MIP_HTIP = (1u << 6);
-constexpr CSRValue MIP_MTIP = (1u << 7);
-constexpr CSRValue MIP_UEIP = (1u << 8);
-constexpr CSRValue MIP_SEIP = (1u << 9);
-constexpr CSRValue MIP_HEIP = (1u << 10);
-constexpr CSRValue MIP_MEIP = (1u << 11);
+enum class PrivMode : PrivilegeLevel {
+    U = 0,
+    S = 1,
+    H = 2,
+    M = 3,
+};
 
 enum class MstatusBit : CSRValue {
-    Uie = MSTATUS_UIE,
-    Sie = MSTATUS_SIE,
-    Mie = MSTATUS_MIE,
-    Upie = MSTATUS_UPIE,
-    Spie = MSTATUS_SPIE,
-    Mpie = MSTATUS_MPIE,
-    Spp = MSTATUS_SPP,
-    Mpp = MSTATUS_MPP,
-    Fs = MSTATUS_FS,
-    Mprv = MSTATUS_MPRV,
-    Sum = MSTATUS_SUM,
-    Mxr = MSTATUS_MXR,
+    Uie = (1u << 0),
+    Sie = (1u << 1),
+    Hie = (1u << 2),
+    Mie = (1u << 3),
+    Upie = (1u << 4),
+    Spie = (1u << 5),
+    Hpie = (1u << 6),
+    Mpie = (1u << 7),
+    Spp = (1u << 8),
+    Hpp = (3u << 9),
+    Mpp = (3u << 11),
+    Fs = (3u << 13),
+    Xs = (3u << 15),
+    Mprv = (1u << 17),
+    Sum = (1u << 18),
+    Mxr = (1u << 19),
 };
 
 enum class MipBit : CSRValue {
-    Msip = MIP_MSIP,
-    Ssip = MIP_SSIP,
-    Stip = MIP_STIP,
-    Mtip = MIP_MTIP,
-    Seip = MIP_SEIP,
-    Meip = MIP_MEIP,
+    Usip = (1u << 0),
+    Ssip = (1u << 1),
+    Hsip = (1u << 2),
+    Msip = (1u << 3),
+    Utip = (1u << 4),
+    Stip = (1u << 5),
+    Htip = (1u << 6),
+    Mtip = (1u << 7),
+    Ueip = (1u << 8),
+    Seip = (1u << 9),
+    Heip = (1u << 10),
+    Meip = (1u << 11),
 };
 
 enum class PrivilegeMode : PrivilegeLevel {
-    User = PRIV_U,
-    Supervisor = PRIV_S,
-    Hypervisor = PRIV_H,
-    Machine = PRIV_M,
+    User = static_cast<PrivilegeLevel>(PrivMode::U),
+    Supervisor = static_cast<PrivilegeLevel>(PrivMode::S),
+    Hypervisor = static_cast<PrivilegeLevel>(PrivMode::H),
+    Machine = static_cast<PrivilegeLevel>(PrivMode::M),
 };
 
 template <typename EnumType>
@@ -224,186 +213,135 @@ constexpr bool has_enum_mask(std::underlying_type_t<EnumType> value, EnumType bi
     return (value & enum_mask(bit)) != 0;
 }
 
-constexpr TrapCause kInterruptCauseBit = static_cast<TrapCause>(CAUSE_INTERRUPT);
+constexpr TrapCause kInterruptCauseBit = enum_mask(TrapFlag::Interrupt);
 constexpr PrivilegeLevel kPrivUser = static_cast<PrivilegeLevel>(PrivilegeMode::User);
 constexpr PrivilegeLevel kPrivSupervisor = static_cast<PrivilegeLevel>(PrivilegeMode::Supervisor);
 constexpr PrivilegeLevel kPrivMachine = static_cast<PrivilegeLevel>(PrivilegeMode::Machine);
 
-constexpr CSRValue kMstatusMask = static_cast<CSRValue>(MSTATUS_MASK);
-constexpr CSRValue kSstatusMask = static_cast<CSRValue>(SSTATUS_MASK);
-constexpr CSRValue kMstatusMie = enum_mask(MstatusBit::Mie);
-constexpr CSRValue kMstatusSie = enum_mask(MstatusBit::Sie);
-constexpr CSRValue kMstatusSpie = enum_mask(MstatusBit::Spie);
-constexpr CSRValue kMstatusMpie = enum_mask(MstatusBit::Mpie);
-constexpr CSRValue kMstatusSpp = enum_mask(MstatusBit::Spp);
-constexpr CSRValue kMstatusMpp = enum_mask(MstatusBit::Mpp);
-constexpr CSRValue kMstatusFs = enum_mask(MstatusBit::Fs);
-constexpr unsigned kMstatusSpieShift = MSTATUS_SPIE_SHIFT;
-constexpr unsigned kMstatusMpieShift = MSTATUS_MPIE_SHIFT;
-constexpr unsigned kMstatusSppShift = MSTATUS_SPP_SHIFT;
-constexpr unsigned kMstatusMppShift = MSTATUS_MPP_SHIFT;
-
-constexpr CSRValue kMipMtip = enum_mask(MipBit::Mtip);
+constexpr CSRValue kMstatusMask =
+    (enum_mask(MstatusBit::Uie) | enum_mask(MstatusBit::Sie) | enum_mask(MstatusBit::Mie) |
+     enum_mask(MstatusBit::Upie) | enum_mask(MstatusBit::Spie) | enum_mask(MstatusBit::Mpie) |
+     enum_mask(MstatusBit::Spp) | enum_mask(MstatusBit::Mpp) | enum_mask(MstatusBit::Fs) |
+     enum_mask(MstatusBit::Mprv) | enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr));
+constexpr CSRValue kSstatusMask =
+    (enum_mask(MstatusBit::Uie) | enum_mask(MstatusBit::Sie) | enum_mask(MstatusBit::Upie) |
+     enum_mask(MstatusBit::Spie) | enum_mask(MstatusBit::Spp) | enum_mask(MstatusBit::Fs) |
+     enum_mask(MstatusBit::Xs) | enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr));
+constexpr CSRValue kMstatusFsDirty = enum_mask(MstatusBit::Fs);
+constexpr CSRValue kMstatusSd = static_cast<CSRValue>(1u << 31);
+constexpr CSRValue kMstatusSstatusReadMask = static_cast<CSRValue>(0x000de133u);
+constexpr CSRValue kMstatusReadMask = static_cast<CSRValue>(0xffffffffu);
+constexpr CSRValue kFflagsMask = static_cast<CSRValue>(0x1fu);
+constexpr CSRValue kFrmMask = static_cast<CSRValue>(0x7u);
+constexpr CSRValue kFcsrMask = static_cast<CSRValue>(0xffu);
+constexpr unsigned kFrmShift = 5;
 
 struct MstatusFields {
-    uint32_t uie : 1;
-    uint32_t sie : 1;
-    uint32_t hie : 1;
-    uint32_t mie : 1;
-    uint32_t upie : 1;
-    uint32_t spie : 1;
-    uint32_t hpie : 1;
-    uint32_t mpie : 1;
-    uint32_t spp : 1;
-    uint32_t hpp : 2;
-    uint32_t mpp : 2;
-    uint32_t fs : 2;
-    uint32_t xs : 2;
-    uint32_t mprv : 1;
-    uint32_t sum : 1;
-    uint32_t mxr : 1;
-    uint32_t reserved : 12;
+    Word uie : 1;
+    Word sie : 1;
+    Word hie : 1;
+    Word mie : 1;
+    Word upie : 1;
+    Word spie : 1;
+    Word hpie : 1;
+    Word mpie : 1;
+    Word spp : 1;
+    Word hpp : 2;
+    Word mpp : 2;
+    Word fs : 2;
+    Word xs : 2;
+    Word mprv : 1;
+    Word sum : 1;
+    Word mxr : 1;
+    Word reserved : 12;
 };
 
 union MstatusView {
-    uint32_t raw32;
+    Word rawValue;
     MstatusFields bits;
 
-    explicit MstatusView(CSRValue raw = 0) : raw32(static_cast<uint32_t>(raw)) {}
+    explicit MstatusView(CSRValue raw = 0) : rawValue(static_cast<Word>(raw)) {}
 
-    CSRValue raw() const { return static_cast<CSRValue>(raw32); }
+    CSRValue raw() const { return static_cast<CSRValue>(rawValue); }
 };
 
 struct MipFields {
-    uint32_t usip : 1;
-    uint32_t ssip : 1;
-    uint32_t hsip : 1;
-    uint32_t msip : 1;
-    uint32_t utip : 1;
-    uint32_t stip : 1;
-    uint32_t htip : 1;
-    uint32_t mtip : 1;
-    uint32_t ueip : 1;
-    uint32_t seip : 1;
-    uint32_t heip : 1;
-    uint32_t meip : 1;
-    uint32_t reserved : 20;
+    Word usip : 1;
+    Word ssip : 1;
+    Word hsip : 1;
+    Word msip : 1;
+    Word utip : 1;
+    Word stip : 1;
+    Word htip : 1;
+    Word mtip : 1;
+    Word ueip : 1;
+    Word seip : 1;
+    Word heip : 1;
+    Word meip : 1;
+    Word reserved : 20;
 };
 
 union MipView {
-    uint32_t raw32;
+    Word rawValue;
     MipFields bits;
 
-    explicit MipView(CSRValue raw = 0) : raw32(static_cast<uint32_t>(raw)) {}
+    explicit MipView(CSRValue raw = 0) : rawValue(static_cast<Word>(raw)) {}
 
-    CSRValue raw() const { return static_cast<CSRValue>(raw32); }
+    CSRValue raw() const { return static_cast<CSRValue>(rawValue); }
 };
 
-/* User-Mode */
-constexpr CSRAddress CSR_USTATUS = 0x000;
-constexpr CSRAddress CSR_UIE = 0x004;
-constexpr CSRAddress CSR_UTVEC = 0x005;
-constexpr CSRAddress CSR_USCRATCH = 0x040;
-constexpr CSRAddress CSR_UEPC = 0x041;
-constexpr CSRAddress CSR_UCAUSE = 0x042;
-constexpr CSRAddress CSR_UTVAL = 0x043;
-constexpr CSRAddress CSR_UIP = 0x044;
-constexpr CSRAddress CSR_FFLAGS = 0x001;
-constexpr CSRAddress CSR_FRM = 0x002;
-constexpr CSRAddress CSR_FCSR = 0x003;
-constexpr CSRAddress CSR_CYCLE = 0xC00;
-constexpr CSRAddress CSR_TIME = 0xC01;
-constexpr CSRAddress CSR_INSTRET = 0xC02;
-
-/* Supervisor-Mode */
-constexpr CSRAddress CSR_SSTATUS = 0x100;
-constexpr CSRAddress CSR_SEDELEG = 0x102;
-constexpr CSRAddress CSR_SIDELEG = 0x103;
-constexpr CSRAddress CSR_SIE = 0x104;
-constexpr CSRAddress CSR_STVEC = 0x105;
-constexpr CSRAddress CSR_SCOUNTEREN = 0x106;
-constexpr CSRAddress CSR_SSCRATCH = 0x140;
-constexpr CSRAddress CSR_SEPC = 0x141;
-constexpr CSRAddress CSR_SCAUSE = 0x142;
-constexpr CSRAddress CSR_STVAL = 0x143;
-constexpr CSRAddress CSR_SIP = 0x144;
-constexpr CSRAddress CSR_SATP = 0x180;
-
-/* Machine-Mode */
-constexpr CSRAddress CSR_MVENDORID = 0xF11;
-constexpr CSRAddress CSR_MARCHID = 0xF12;
-constexpr CSRAddress CSR_MIMPID = 0xF13;
-constexpr CSRAddress CSR_MHARTID = 0xF14;
-constexpr CSRAddress CSR_MSTATUS = 0x300;
-constexpr CSRAddress CSR_MISA = 0x301;
-constexpr CSRAddress CSR_MEDELEG = 0x302;
-constexpr CSRAddress CSR_MIDELEG = 0x303;
-constexpr CSRAddress CSR_MIE = 0x304;
-constexpr CSRAddress CSR_MTVEC = 0x305;
-constexpr CSRAddress CSR_MCOUNTEREN = 0x306;
-constexpr CSRAddress CSR_MSCRATCH = 0x340;
-constexpr CSRAddress CSR_MEPC = 0x341;
-constexpr CSRAddress CSR_MCAUSE = 0x342;
-constexpr CSRAddress CSR_MTVAL = 0x343;
-constexpr CSRAddress CSR_MIP = 0x344;
-constexpr CSRAddress CSR_MCYCLE = 0xB00;
-constexpr CSRAddress CSR_MINSTRET = 0xB02;
-constexpr CSRAddress CSR_MCYCLEH = 0xB80;
-constexpr CSRAddress CSR_MINSTRETH = 0xB82;
-constexpr CSRAddress CSR_CYCLEH = 0xC80;
-constexpr CSRAddress CSR_TIMEH = 0xC81;
-constexpr CSRAddress CSR_INSTRETH = 0xC82;
-
 enum class Csr : CSRAddress {
-    Ustatus = CSR_USTATUS,
-    Uie = CSR_UIE,
-    Utvec = CSR_UTVEC,
-    Uscratch = CSR_USCRATCH,
-    Uepc = CSR_UEPC,
-    Ucause = CSR_UCAUSE,
-    Utval = CSR_UTVAL,
-    Uip = CSR_UIP,
-    Fflags = CSR_FFLAGS,
-    Frm = CSR_FRM,
-    Fcsr = CSR_FCSR,
-    Cycle = CSR_CYCLE,
-    Time = CSR_TIME,
-    Instret = CSR_INSTRET,
-    Sstatus = CSR_SSTATUS,
-    Sedeleg = CSR_SEDELEG,
-    Sideleg = CSR_SIDELEG,
-    Sie = CSR_SIE,
-    Stvec = CSR_STVEC,
-    Scounteren = CSR_SCOUNTEREN,
-    Sscratch = CSR_SSCRATCH,
-    Sepc = CSR_SEPC,
-    Scause = CSR_SCAUSE,
-    Stval = CSR_STVAL,
-    Sip = CSR_SIP,
-    Satp = CSR_SATP,
-    Mvendorid = CSR_MVENDORID,
-    Marchid = CSR_MARCHID,
-    Mimpid = CSR_MIMPID,
-    Mhartid = CSR_MHARTID,
-    Mstatus = CSR_MSTATUS,
-    Misa = CSR_MISA,
-    Medeleg = CSR_MEDELEG,
-    Mideleg = CSR_MIDELEG,
-    Mie = CSR_MIE,
-    Mtvec = CSR_MTVEC,
-    Mcounteren = CSR_MCOUNTEREN,
-    Mscratch = CSR_MSCRATCH,
-    Mepc = CSR_MEPC,
-    Mcause = CSR_MCAUSE,
-    Mtval = CSR_MTVAL,
-    Mip = CSR_MIP,
-    Mcycle = CSR_MCYCLE,
-    Minstret = CSR_MINSTRET,
-    Mcycleh = CSR_MCYCLEH,
-    Minstreth = CSR_MINSTRETH,
-    Cycleh = CSR_CYCLEH,
-    Timeh = CSR_TIMEH,
-    Instreth = CSR_INSTRETH,
+    Ustatus = 0x000,
+    Uie = 0x004,
+    Utvec = 0x005,
+    Uscratch = 0x040,
+    Uepc = 0x041,
+    Ucause = 0x042,
+    Utval = 0x043,
+    Uip = 0x044,
+    Fflags = 0x001,
+    Frm = 0x002,
+    Fcsr = 0x003,
+    Pmpcfg0 = 0x3A0,
+    Pmpaddr0 = 0x3B0,
+    Cycle = 0xC00,
+    Time = 0xC01,
+    Instret = 0xC02,
+    Sstatus = 0x100,
+    Sedeleg = 0x102,
+    Sideleg = 0x103,
+    Sie = 0x104,
+    Stvec = 0x105,
+    Scounteren = 0x106,
+    Sscratch = 0x140,
+    Sepc = 0x141,
+    Scause = 0x142,
+    Stval = 0x143,
+    Sip = 0x144,
+    Satp = 0x180,
+    Mvendorid = 0xF11,
+    Marchid = 0xF12,
+    Mimpid = 0xF13,
+    Mhartid = 0xF14,
+    Mstatus = 0x300,
+    Misa = 0x301,
+    Medeleg = 0x302,
+    Mideleg = 0x303,
+    Mie = 0x304,
+    Mtvec = 0x305,
+    Mcounteren = 0x306,
+    Mscratch = 0x340,
+    Mepc = 0x341,
+    Mcause = 0x342,
+    Mtval = 0x343,
+    Mip = 0x344,
+    Mcycle = 0xB00,
+    Minstret = 0xB02,
+    Mcycleh = 0xB80,
+    Minstreth = 0xB82,
+    Cycleh = 0xC80,
+    Timeh = 0xC81,
+    Instreth = 0xC82,
 };
 
 constexpr CSRAddress csr_addr(Csr csr) { return static_cast<CSRAddress>(csr); }
@@ -421,212 +359,115 @@ constexpr CSRAddress csr_addr(Csr csr) { return static_cast<CSRAddress>(csr); }
 //
 //
 
-constexpr size_t XLEN = 32;
-constexpr size_t MLEN = 32;
+constexpr size_t XLEN = sizeof(Word) * 8;
+constexpr size_t MLEN = sizeof(Address) * 8;
 constexpr size_t FLEN = 64;
 constexpr Instruction RV32_NOP = 0x00000013;
 
-constexpr Instruction OPCODE_C0 = 0x0;
-constexpr Instruction OPCODE_C1 = 0x1;
-constexpr Instruction OPCODE_C2 = 0x2;
-constexpr Instruction OPCODE_W = 0x3;
-
-constexpr Instruction OPCODE_OP = 0x33;
-constexpr Instruction OPCODE_OP_FP = 0x53;
-constexpr Instruction OPCODE_AMO = 0x2F;
-constexpr Instruction OPCODE_OP_IMM = 0x13;
-constexpr Instruction OPCODE_LOAD = 0x03;
-constexpr Instruction OPCODE_LOAD_FP = 0x07;
-constexpr Instruction OPCODE_JALR = 0x67;
-constexpr Instruction OPCODE_STORE = 0x23;
-constexpr Instruction OPCODE_STORE_FP = 0x27;
-constexpr Instruction OPCODE_BRANCH = 0x63;
-constexpr Instruction OPCODE_LUI = 0x37;
-constexpr Instruction OPCODE_AUIPC = 0x17;
-constexpr Instruction OPCODE_JAL = 0x6F;
-constexpr Instruction OPCODE_MADD = 0x43;
-constexpr Instruction OPCODE_MSUB = 0x47;
-constexpr Instruction OPCODE_NMADD = 0x4F;
-constexpr Instruction OPCODE_NMSUB = 0x4B;
-constexpr Instruction OPCODE_MISC_M = 0x0F;
-constexpr Instruction OPCODE_SYSTEM = 0x73;
-
-constexpr Instruction FUNCT3_ADD = 0x0;
-constexpr Instruction FUNCT3_SLL = 0x1;
-constexpr Instruction FUNCT3_SLT = 0x2;
-constexpr Instruction FUNCT3_SLTU = 0x3;
-constexpr Instruction FUNCT3_XOR = 0x4;
-constexpr Instruction FUNCT3_SRL = 0x5;
-constexpr Instruction FUNCT3_OR = 0x6;
-constexpr Instruction FUNCT3_AND = 0x7;
-
-constexpr Instruction FUNCT3_MUL = 0x0;
-constexpr Instruction FUNCT3_MULH = 0x1;
-constexpr Instruction FUNCT3_MULHSU = 0x2;
-constexpr Instruction FUNCT3_MULHU = 0x3;
-constexpr Instruction FUNCT3_DIV = 0x4;
-constexpr Instruction FUNCT3_DIVU = 0x5;
-constexpr Instruction FUNCT3_REM = 0x6;
-constexpr Instruction FUNCT3_REMU = 0x7;
-
-constexpr Instruction FUNCT3_SB = 0x0;
-constexpr Instruction FUNCT3_SH = 0x1;
-constexpr Instruction FUNCT3_SW = 0x2;
-constexpr Instruction FUNCT3_SD = 0x3;
-constexpr Instruction FUNCT3_FSW = 0x2;
-constexpr Instruction FUNCT3_FSD = 0x3;
-
-constexpr Instruction FUNCT3_LB = 0x0;
-constexpr Instruction FUNCT3_LH = 0x1;
-constexpr Instruction FUNCT3_LW = 0x2;
-constexpr Instruction FUNCT3_LD = 0x3;
-constexpr Instruction FUNCT3_LBU = 0x4;
-constexpr Instruction FUNCT3_LHU = 0x5;
-constexpr Instruction FUNCT3_LWU = 0x6;
-constexpr Instruction FUNCT3_FLW = 0x2;
-constexpr Instruction FUNCT3_FLD = 0x3;
-
-constexpr Instruction FUNCT3_BEQ = 0x0;
-constexpr Instruction FUNCT3_BNE = 0x1;
-constexpr Instruction FUNCT3_BLT = 0x4;
-constexpr Instruction FUNCT3_BGE = 0x5;
-constexpr Instruction FUNCT3_BLTU = 0x6;
-constexpr Instruction FUNCT3_BGEU = 0x7;
-
-constexpr Instruction FUNCT3_FENCE = 0x0;
-constexpr Instruction FUNCT3_FENCE_I = 0x1;
-
-constexpr Instruction FUNCT3_PRIV = 0x0;
-constexpr Instruction FUNCT3_CSRRW = 0x1;
-constexpr Instruction FUNCT3_CSRRS = 0x2;
-constexpr Instruction FUNCT3_CSRRC = 0x3;
-constexpr Instruction FUNCT3_CSRRWI = 0x5;
-constexpr Instruction FUNCT3_CSRRSI = 0x6;
-constexpr Instruction FUNCT3_CSRRCI = 0x7;
-
-constexpr Instruction FUNCT12_ECALL = 0x000;
-constexpr Instruction FUNCT12_EBREAK = 0x001;
-constexpr Instruction FUNCT12_ERET = 0x100;
-constexpr Instruction FUNCT12_MRET = 0x302;
-constexpr Instruction FUNCT12_SRET = 0x102;
-constexpr Instruction FUNCT12_URET = 0x002;
-constexpr Instruction FUNCT12_WFI = 0x105;
-constexpr Instruction FUNCT7_SFENCE_VMA = 0x09;
-
-constexpr Instruction FUNCT5_AMO_LR = 0x02;
-constexpr Instruction FUNCT5_AMO_SC = 0x03;
-constexpr Instruction FUNCT5_AMO_SWAP = 0x01;
-constexpr Instruction FUNCT5_AMO_ADD = 0x00;
-constexpr Instruction FUNCT5_AMO_AND = 0x0c;
-constexpr Instruction FUNCT5_AMO_OR = 0x08;
-constexpr Instruction FUNCT5_AMO_XOR = 0x04;
-constexpr Instruction FUNCT5_AMO_MIN = 0x10;
-constexpr Instruction FUNCT5_AMO_MINU = 0x18;
-constexpr Instruction FUNCT5_AMO_MAX = 0x14;
-constexpr Instruction FUNCT5_AMO_MAXU = 0x1c;
-
-constexpr Instruction AMO_FAILURE_CODE = 1;
-constexpr Instruction AMO_SUCCESS_CODE = 0;
+enum class AmoStatus : Instruction {
+    Success = 0,
+    Failure = 1,
+};
 
 enum class Opcode : Instruction {
-    C0 = OPCODE_C0,
-    C1 = OPCODE_C1,
-    C2 = OPCODE_C2,
-    W = OPCODE_W,
-    Op = OPCODE_OP,
-    OpFp = OPCODE_OP_FP,
-    Amo = OPCODE_AMO,
-    OpImm = OPCODE_OP_IMM,
-    Load = OPCODE_LOAD,
-    LoadFp = OPCODE_LOAD_FP,
-    Jalr = OPCODE_JALR,
-    Store = OPCODE_STORE,
-    StoreFp = OPCODE_STORE_FP,
-    Branch = OPCODE_BRANCH,
-    MAdd = OPCODE_MADD,
-    MSub = OPCODE_MSUB,
-    NMSub = OPCODE_NMSUB,
-    NMAdd = OPCODE_NMADD,
-    Lui = OPCODE_LUI,
-    Auipc = OPCODE_AUIPC,
-    Jal = OPCODE_JAL,
-    MiscMem = OPCODE_MISC_M,
-    System = OPCODE_SYSTEM,
+    C0 = 0x0,
+    C1 = 0x1,
+    C2 = 0x2,
+    W = 0x3,
+    Op = 0x33,
+    OpFp = 0x53,
+    Amo = 0x2F,
+    OpImm = 0x13,
+    Load = 0x03,
+    LoadFp = 0x07,
+    Jalr = 0x67,
+    Store = 0x23,
+    StoreFp = 0x27,
+    Branch = 0x63,
+    MAdd = 0x43,
+    MSub = 0x47,
+    NMSub = 0x4B,
+    NMAdd = 0x4F,
+    Lui = 0x37,
+    Auipc = 0x17,
+    Jal = 0x6F,
+    MiscMem = 0x0F,
+    System = 0x73,
 };
 
 enum class Funct3 : Instruction {
-    Add = FUNCT3_ADD,
-    Sll = FUNCT3_SLL,
-    Slt = FUNCT3_SLT,
-    Sltu = FUNCT3_SLTU,
-    Xor = FUNCT3_XOR,
-    Srl = FUNCT3_SRL,
-    Or = FUNCT3_OR,
-    And = FUNCT3_AND,
-    Mul = FUNCT3_MUL,
-    Mulh = FUNCT3_MULH,
-    Mulhsu = FUNCT3_MULHSU,
-    Mulhu = FUNCT3_MULHU,
-    Div = FUNCT3_DIV,
-    Divu = FUNCT3_DIVU,
-    Rem = FUNCT3_REM,
-    Remu = FUNCT3_REMU,
-    Sb = FUNCT3_SB,
-    Sh = FUNCT3_SH,
-    Sw = FUNCT3_SW,
-    Sd = FUNCT3_SD,
-    Lb = FUNCT3_LB,
-    Lh = FUNCT3_LH,
-    Lw = FUNCT3_LW,
-    Ld = FUNCT3_LD,
-    Lbu = FUNCT3_LBU,
-    Lhu = FUNCT3_LHU,
-    Flw = FUNCT3_FLW,
-    Fld = FUNCT3_FLD,
-    Fsw = FUNCT3_FSW,
-    Fsd = FUNCT3_FSD,
-    Beq = FUNCT3_BEQ,
-    Bne = FUNCT3_BNE,
-    Blt = FUNCT3_BLT,
-    Bge = FUNCT3_BGE,
-    Bltu = FUNCT3_BLTU,
-    Bgeu = FUNCT3_BGEU,
-    Fence = FUNCT3_FENCE,
-    FenceI = FUNCT3_FENCE_I,
-    Priv = FUNCT3_PRIV,
-    Csrrw = FUNCT3_CSRRW,
-    Csrrs = FUNCT3_CSRRS,
-    Csrrc = FUNCT3_CSRRC,
-    Csrrwi = FUNCT3_CSRRWI,
-    Csrrsi = FUNCT3_CSRRSI,
-    Csrrci = FUNCT3_CSRRCI,
+    Add = 0x0,
+    Sll = 0x1,
+    Slt = 0x2,
+    Sltu = 0x3,
+    Xor = 0x4,
+    Srl = 0x5,
+    Or = 0x6,
+    And = 0x7,
+    Mul = 0x0,
+    Mulh = 0x1,
+    Mulhsu = 0x2,
+    Mulhu = 0x3,
+    Div = 0x4,
+    Divu = 0x5,
+    Rem = 0x6,
+    Remu = 0x7,
+    Sb = 0x0,
+    Sh = 0x1,
+    Sw = 0x2,
+    Sd = 0x3,
+    Lb = 0x0,
+    Lh = 0x1,
+    Lw = 0x2,
+    Ld = 0x3,
+    Lbu = 0x4,
+    Lhu = 0x5,
+    Flw = 0x2,
+    Fld = 0x3,
+    Fsw = 0x2,
+    Fsd = 0x3,
+    Beq = 0x0,
+    Bne = 0x1,
+    Blt = 0x4,
+    Bge = 0x5,
+    Bltu = 0x6,
+    Bgeu = 0x7,
+    Fence = 0x0,
+    FenceI = 0x1,
+    Priv = 0x0,
+    Csrrw = 0x1,
+    Csrrs = 0x2,
+    Csrrc = 0x3,
+    Csrrwi = 0x5,
+    Csrrsi = 0x6,
+    Csrrci = 0x7,
 };
 
 enum class Funct12Priv : Instruction {
-    Ecall = FUNCT12_ECALL,
-    Ebreak = FUNCT12_EBREAK,
-    Uret = FUNCT12_URET,
-    Sret = FUNCT12_SRET,
-    Mret = FUNCT12_MRET,
-    Wfi = FUNCT12_WFI,
+    Ecall = 0x000,
+    Ebreak = 0x001,
+    Uret = 0x002,
+    Sret = 0x102,
+    Mret = 0x302,
+    Wfi = 0x105,
 };
 
 enum class Funct7Priv : Instruction {
-    SfenceVma = FUNCT7_SFENCE_VMA,
+    SfenceVma = 0x09,
 };
 
 enum class Funct5Amo : Instruction {
-    Lr = FUNCT5_AMO_LR,
-    Sc = FUNCT5_AMO_SC,
-    Swap = FUNCT5_AMO_SWAP,
-    Add = FUNCT5_AMO_ADD,
-    And = FUNCT5_AMO_AND,
-    Or = FUNCT5_AMO_OR,
-    Xor = FUNCT5_AMO_XOR,
-    Min = FUNCT5_AMO_MIN,
-    Minu = FUNCT5_AMO_MINU,
-    Max = FUNCT5_AMO_MAX,
-    Maxu = FUNCT5_AMO_MAXU,
+    Lr = 0x02,
+    Sc = 0x03,
+    Swap = 0x01,
+    Add = 0x00,
+    And = 0x0c,
+    Or = 0x08,
+    Xor = 0x04,
+    Min = 0x10,
+    Minu = 0x18,
+    Max = 0x14,
+    Maxu = 0x1c,
 };
 
 constexpr Opcode opcode_of(Instruction ir) { return static_cast<Opcode>(ir & 0x7F); }
@@ -654,19 +495,55 @@ enum class IsaExtension : unsigned {
     U = 20,
 };
 
+enum class MisaProfile : uint8_t {
+    I,
+    IMAC,
+    GC,
+    // Keep the API profile-oriented so RV64 presets can be added without touching call sites.
+};
+
 constexpr CSRValue misa_extension_bit(IsaExtension ext) {
     return static_cast<CSRValue>(CSRValue{1} << static_cast<unsigned>(ext));
 }
 
-constexpr CSRValue kMisaRv32i = misa_extension_bit(IsaExtension::I);
-constexpr CSRValue kMisaRv32imac =
-    misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
-    misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::C);
-constexpr CSRValue kMisaRv32gc =
-    misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
-    misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::F) |
-    misa_extension_bit(IsaExtension::D) | misa_extension_bit(IsaExtension::C) |
-    misa_extension_bit(IsaExtension::S) | misa_extension_bit(IsaExtension::U);
+constexpr CSRValue misa_base_bits() {
+    return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
+           misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::F) |
+           misa_extension_bit(IsaExtension::D) | misa_extension_bit(IsaExtension::C) |
+           misa_extension_bit(IsaExtension::S) | misa_extension_bit(IsaExtension::U);
+}
+
+constexpr CSRValue misa_profile_bits(MisaProfile profile) {
+    switch (profile) {
+        case MisaProfile::I:
+            return misa_extension_bit(IsaExtension::I);
+        case MisaProfile::IMAC:
+            return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
+                   misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::C);
+        case MisaProfile::GC:
+            return misa_base_bits();
+        default:
+            return misa_extension_bit(IsaExtension::I);
+    }
+}
+
+constexpr CSRValue misa_mxl_field() {
+    if constexpr (sizeof(CSRValue) == 4) {
+        // MXL=01 for RV32 in bits [31:30]
+        return static_cast<CSRValue>(1u << 30);
+    } else if constexpr (sizeof(CSRValue) == 8) {
+        // MXL=10 for RV64 in bits [63:62]
+        return static_cast<CSRValue>(2ull << 62);
+    } else {
+        return 0;
+    }
+}
+
+constexpr CSRValue misa_with_mxl(CSRValue misa_extensions) {
+    return misa_extensions | misa_mxl_field();
+}
+
+constexpr CSRValue kMisaDefault = misa_profile_bits(MisaProfile::GC);
 
 constexpr bool misa_has_extension(CSRValue misa, IsaExtension ext) {
     return (misa & misa_extension_bit(ext)) != 0;

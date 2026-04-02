@@ -4,6 +4,8 @@
  */
 #include "Module.hpp"
 
+namespace simrv::module {
+
 /* immediate generation                                                                   */
 Instruction CB_imm_gen(Instruction ir) {
     Word ret = 0;
@@ -36,11 +38,19 @@ Instruction CB_imm_gen(Instruction ir) {
             ret = imm_I;
             break;
         }
+        case Opcode::LoadFp: {
+            ret = imm_I;
+            break;
+        }
         case Opcode::Jalr: {
             ret = imm_I;
             break;
         }
         case Opcode::Store: {
+            ret = imm_S;
+            break;
+        }
+        case Opcode::StoreFp: {
             ret = imm_S;
             break;
         }
@@ -92,7 +102,7 @@ Instruction decomp_c0(Instruction ir) {
             break;
         }
         case 0x1: {  // C.FLD : fld rd', offset[7:3](rs1')
-            ret = (uimm2 << 20) | (rs1 << 15) | (static_cast<Instruction>(Funct3::Lw) << 12) |
+            ret = (uimm2 << 20) | (rs1 << 15) | (static_cast<Instruction>(Funct3::Fld) << 12) |
                   (rd << 7) | static_cast<Instruction>(Opcode::LoadFp);
             break;
         }
@@ -102,13 +112,13 @@ Instruction decomp_c0(Instruction ir) {
             break;
         }
         case 0x3: {  // C.FLW : flw rd', offset[6:2](rs1')
-            ret = (uimm1 << 20) | (rs1 << 15) | (static_cast<Instruction>(Funct3::Ld) << 12) |
+            ret = (uimm1 << 20) | (rs1 << 15) | (static_cast<Instruction>(Funct3::Flw) << 12) |
                   (rd << 7) | static_cast<Instruction>(Opcode::LoadFp);
             break;
         }
         case 0x5: {  // C.FSD : fsd rs2', offset[7:3](rs1')
-            ret = (((uimm1 >> 5) & 0x7F) << 25) | (rs2 << 20) | (rs1 << 15) |
-                  (static_cast<Instruction>(Funct3::Fsd) << 12) | ((uimm1 & 0x1F) << 7) |
+            ret = (((uimm2 >> 5) & 0x7F) << 25) | (rs2 << 20) | (rs1 << 15) |
+                  (static_cast<Instruction>(Funct3::Fsd) << 12) | ((uimm2 & 0x1F) << 7) |
                   static_cast<Instruction>(Opcode::StoreFp);
             break;
         }
@@ -317,24 +327,24 @@ Instruction decomp_c2(Instruction ir) {
                               (rd << 7) | static_cast<Instruction>(Opcode::Op);
                     }
                     break;
-                    case 1:
-                        // C.EBREAK : ebreak
-                        if (rd == 0 && rs2 == 0) {
-                            ret = (static_cast<Instruction>(Funct12Priv::Ebreak) << 20) |
-                                  static_cast<Instruction>(Opcode::System);
-                        }
-                        // C.JALR : jalr x1, rs, 0
-                        if (rd != 0 && rs2 == 0) {
-                            ret = (rd << 15) | (1 << 7) | static_cast<Instruction>(Opcode::Jalr);
-                        }
-                        // C.ADD : add rd, rd, rs2
-                        if (rd != 0 && rs2 != 0) {
-                            ret = (rs2 << 20) | (rd << 15) |
-                                  (static_cast<Instruction>(Funct3::Add) << 12) | (rd << 7) |
-                                  static_cast<Instruction>(Opcode::Op);
-                        }
-                        break;
                 }
+                case 1:
+                    // C.EBREAK : ebreak
+                    if (rd == 0 && rs2 == 0) {
+                        ret = (static_cast<Instruction>(Funct12Priv::Ebreak) << 20) |
+                              static_cast<Instruction>(Opcode::System);
+                    }
+                    // C.JALR : jalr x1, rs, 0
+                    if (rd != 0 && rs2 == 0) {
+                        ret = (rd << 15) | (1 << 7) | static_cast<Instruction>(Opcode::Jalr);
+                    }
+                    // C.ADD : add rd, rd, rs2
+                    if (rd != 0 && rs2 != 0) {
+                        ret = (rs2 << 20) | (rd << 15) |
+                              (static_cast<Instruction>(Funct3::Add) << 12) | (rd << 7) |
+                              static_cast<Instruction>(Opcode::Op);
+                    }
+                    break;
             }
             break;
         }
@@ -1205,3 +1215,5 @@ OperationId decoder(Instruction ir) {
     }
     return ret;
 }
+
+}  // namespace simrv::module

@@ -52,15 +52,36 @@ For the curated Phase 1 RV32IM smoke gate:
 cmake --build --preset ninja-clang-release --target isa-smoke
 ```
 
+For the curated RV32GC smoke gate:
+
+```bash
+cmake --build --preset ninja-clang-release --target isa-smoke-rv32gc
+```
+
+For experimental RV32GC extension checks (C/F/D test programs):
+
+```bash
+cmake --build --preset ninja-clang-release --target isa-ext-rv32gc-experimental
+```
+
 To run both baseline checks and ISA smoke together:
 
 ```bash
 cmake --build --preset ninja-clang-release --target phase1-gate
 ```
 
+To run baseline checks with the RV32GC smoke set:
+
+```bash
+cmake --build --preset ninja-clang-release --target phase2-gate
+```
+
+Note: `isa-smoke-rv32gc` currently tracks a stable passing subset (I/M/A coverage) while
+`isa-ext-rv32gc-experimental` tracks ongoing C/F/D bring-up behavior.
+
 ## 2.0.0 Roadmap (Preliminary)
 
-Current development version: `2.0.0-alpha.1`
+Current development version: `2.0.0-alpha.2`
 
 Planned milestones toward `2.0.0`:
 
