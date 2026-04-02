@@ -3,6 +3,8 @@
  * @brief SimRV declarations.
  */
 #pragma once
+#include <memory>
+
 #include "Cpu.hpp"
 #include "Define.hpp"
 #include "MmioDevice.hpp"
@@ -21,16 +23,19 @@ class Disk : public MmioDevice {
     bool write(Machine& machine, Address p_addr, Word wdata) override;
 
     Word mmio_read(Address);
-    void mmio_write(CPU*, Address, Word);
+    void mmio_write(Machine& machine, Address offset, Word wdata);
     constexpr bool contains(Address addr) const {
         return addr >= kBaseAddress && addr < (kBaseAddress + kSize);
     }
     constexpr Address offset(Address addr) const { return addr - kBaseAddress; }
     Word disk_read(Address offset) { return mmio_read(offset); }
-    void disk_write(CPU* cpu, Address offset, Word wdata) { mmio_write(cpu, offset, wdata); }
+    void disk_write(Machine& machine, Address offset, Word wdata) {
+        mmio_write(machine, offset, wdata);
+    }
 
-    Byte* mmem;    // main memory
-    Byte* sector;  // disk image
+    Byte* mmem;                             // main memory
+    std::unique_ptr<Byte[]> sector_owner_;  // backing owner for disk image storage
+    Byte* sector;                           // disk image
 
     QueueState* Queue; /* Queue of Disk */
 

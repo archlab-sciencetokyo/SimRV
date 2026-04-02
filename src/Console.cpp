@@ -4,10 +4,9 @@
  */
 #include "Console.hpp"
 
-#include "Machine.hpp"
+#include <algorithm>
 
-extern Machine sim_machine; /* class machine                     */
-extern Microcn micro_controller; /* I/O controller (micro-controller) */
+#include "Machine.hpp"
 
 constexpr Word CONSOLE_MAGIC_VALUE = 0x74726976;
 constexpr Word CONSOLE_VERSION = 2;
@@ -17,28 +16,37 @@ constexpr Word CONSOLE_DEVICE_FEATURES = 1;
 constexpr Word CONSOLE_CONFIG_GENERATION = 0;
 constexpr Word CONSOLE_QUEUE_NUM_MAX = 2;
 extern void update_descriptor(Word, Word, int, QueueState*, Byte*);
-extern Word ram_ld(Address addr, int n, Byte* ram);
-extern void ram_st(Address addr, Word data, int n, Byte* ram);
+extern Word load_from_ram(Address addr, int n, Byte* ram);
+extern void store_to_ram(Address addr, Word data, int n, Byte* ram);
 
 using DescriptorSize = std::integral_constant<std::size_t, 16>;
 
-void cons_request(Byte* mmem, Word q_num, QueueState* qs) {
+namespace {
+void reset_micro_controller_state(Microcn& controller) {
+    controller.pc = 0;
+    std::fill(std::begin(controller.reg), std::end(controller.reg), Register{0});
+    controller.reg[11] = 0x8000;
+}
+}  // namespace
+
+void process_console_queue_requests(Byte* mmem, Word q_num, QueueState* qs) {
     Descriptor desc;
     Byte* p;
-    uint16_t avail_idx = static_cast<uint16_t>(ram_ld(qs->AvailLow + 2, 2, mmem));
+    uint16_t avail_idx = static_cast<uint16_t>(load_from_ram(qs->AvailLow + 2, 2, mmem));
     while (qs->last_avail_idx != avail_idx) {
         Address adr = qs->AvailLow + 4 + (qs->last_avail_idx & (q_num - 1)) * 2;
-        uint16_t desc_idx_header = ram_ld(adr, 2, mmem);
+        uint16_t desc_idx_header = load_from_ram(adr, 2, mmem);
         Address desc_adr_header = desc_idx_header * DescriptorSize::value + qs->DescLow;
 
         p = reinterpret_cast<Byte*>(&desc);
         for (std::size_t i = 0; i < DescriptorSize::value; i++) {
-            *p = static_cast<Byte>(static_cast<uint8_t>(ram_ld(desc_adr_header + i, 1, mmem)));
+            *p = static_cast<Byte>(
+                static_cast<uint8_t>(load_from_ram(desc_adr_header + i, 1, mmem)));
             p++;
         }
 
-        for (int i = 0; i < (int)desc.len; i++) { /* write to stdout */
-            uint8_t d = ram_ld(desc.adr + i, 1, mmem);
+        for (int i = 0; i < static_cast<int>(desc.len); i++) { /* write to stdout */
+            uint8_t d = load_from_ram(desc.adr + i, 1, mmem);
             if (write(fileno(stdout), &d, 1) < 0) printf("__ ERROR in cons_request!\n");
         }
         fflush(stdout);
@@ -55,16 +63,16 @@ int Console::receive_input() {
     QueueState* qs = &Queue[0];
     if (!qs->Ready) return 0;
 
-    uint16_t avail_idx = static_cast<uint16_t>(ram_ld(qs->AvailLow + 2, 2, mmem));
+    uint16_t avail_idx = static_cast<uint16_t>(load_from_ram(qs->AvailLow + 2, 2, mmem));
     if (qs->last_avail_idx == avail_idx) return 0;
 
     Address adr = qs->AvailLow + 4 + (qs->last_avail_idx & (QueueNum - 1)) * 2;
-    uint16_t desc_idx_header = ram_ld(adr, 2, mmem);
+    uint16_t desc_idx_header = load_from_ram(adr, 2, mmem);
     Address desc_adr_header = desc_idx_header * DescriptorSize::value + qs->DescLow;
 
     p = reinterpret_cast<Byte*>(&desc);
     for (std::size_t i = 0; i < DescriptorSize::value; i++) {
-        *p = static_cast<Byte>(static_cast<uint8_t>(ram_ld(desc_adr_header + i, 1, mmem)));
+        *p = static_cast<Byte>(static_cast<uint8_t>(load_from_ram(desc_adr_header + i, 1, mmem)));
         p++;
     }
 
@@ -91,7 +99,7 @@ int Console::receive_input() {
             return -1;
         }
 
-        ram_st(static_cast<Address>(desc.adr), static_cast<Word>(buf), 1, mmem);
+        store_to_ram(static_cast<Address>(desc.adr), static_cast<Word>(buf), 1, mmem);
         update_descriptor(desc_idx_header, static_cast<Word>(r_len), 2, qs, mmem);  // 2019-08-30
         qs->last_avail_idx++;
     }
@@ -124,7 +132,7 @@ bool Console::read(Machine& machine, Address p_addr, Word& rdata) {
 }
 
 bool Console::write(Machine& machine, Address p_addr, Word wdata) {
-    mmio_write(&machine.cpu, offset(p_addr), wdata);
+    mmio_write(machine, offset(p_addr), wdata);
     if (machine.s_debugmode) {
         printf("__ %10ld VIO mem_write %08x %08x\n", machine.cpu.mtime, p_addr, wdata);
     }
@@ -171,7 +179,7 @@ Word Console::mmio_read(Address offset) {
     return rdata;
 }
 
-void Console::mmio_write(CPU* cpu, Address offset, Word wdata) {
+void Console::mmio_write(Machine& machine, Address offset, Word wdata) {
     switch (offset) {
         case 0x030:
             QueueSel = wdata;
@@ -201,17 +209,16 @@ void Console::mmio_write(CPU* cpu, Address offset, Word wdata) {
                 exit(0);
             }
             if (wdata == 1) {
-                if (sim_machine.s_use_uc) {
-                    micro_controller.pc = 0;
-                    micro_controller.Qnum = wdata;
-                    micro_controller.Mode = 1;
-                    micro_controller.Qsel = wdata;
-                    for (int i = 0; i < 32; i++) micro_controller.reg[i] = 0;
-                    micro_controller.reg[11] = 0x8000;
-                    while (micro_controller.exec());
+                if (machine.s_use_uc && machine.micro_controller != nullptr) {
+                    reset_micro_controller_state(*machine.micro_controller);
+                    machine.micro_controller->Qnum = wdata;
+                    machine.micro_controller->Mode = 1;
+                    machine.micro_controller->Qsel = wdata;
+                    while (machine.micro_controller->exec()) {
+                    }
 
                 } else {
-                    cons_request(mmem, wdata, &Queue[wdata]);
+                    process_console_queue_requests(mmem, wdata, &Queue[wdata]);
                 }
             }
             break;
@@ -219,7 +226,7 @@ void Console::mmio_write(CPU* cpu, Address offset, Word wdata) {
         case 0x064: {
             InterruptStatus &= ~wdata;
             if (InterruptStatus == 0) {
-                cpu->plic_set_irq(simrv::virtio::kConsoleIrq, 0);
+                machine.cpu.plic_set_irq(simrv::virtio::kConsoleIrq, 0);
             }
             break;
         }
@@ -227,16 +234,15 @@ void Console::mmio_write(CPU* cpu, Address offset, Word wdata) {
 }
 
 constexpr Word MICRO_CONT_MODE_KEY = 0;
-int Console::MC_receive_input() {
+int Console::MC_receive_input(Machine& machine) {
     int ret;
-    if (sim_machine.s_use_uc && (MICRO_CONT_MODE_KEY != 0)) {
-        micro_controller.pc = 0;
-        micro_controller.Qnum = QueueNum;
-        micro_controller.Mode = 3;
-        micro_controller.cons_fifo = cons_fifo;
-        for (int i = 0; i < 32; i++) micro_controller.reg[i] = 0;
-        micro_controller.reg[11] = 0x8000;
-        while (micro_controller.exec());
+    if (machine.s_use_uc && machine.micro_controller != nullptr && (MICRO_CONT_MODE_KEY != 0)) {
+        reset_micro_controller_state(*machine.micro_controller);
+        machine.micro_controller->Qnum = QueueNum;
+        machine.micro_controller->Mode = 3;
+        machine.micro_controller->cons_fifo = cons_fifo;
+        while (machine.micro_controller->exec()) {
+        }
         ret = 1;  // KEY_ON;
         InterruptStatus |= 1;
     } else {

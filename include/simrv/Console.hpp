@@ -21,15 +21,17 @@ class Console : public MmioDevice {
     bool write(Machine& machine, Address p_addr, Word wdata) override;
 
     Word mmio_read(Address offset);
-    void mmio_write(CPU*, Address, Word);
+    void mmio_write(Machine& machine, Address offset, Word wdata);
     constexpr bool contains(Address addr) const {
         return addr >= kBaseAddress && addr < (kBaseAddress + kSize);
     }
     constexpr Address offset(Address addr) const { return addr - kBaseAddress; }
     Word console_read(Address offset) { return mmio_read(offset); }
-    void console_write(CPU* cpu, Address offset, Word wdata) { mmio_write(cpu, offset, wdata); }
+    void console_write(Machine& machine, Address offset, Word wdata) {
+        mmio_write(machine, offset, wdata);
+    }
     int receive_input();
-    int MC_receive_input();
+    int MC_receive_input(Machine& machine);
 
     Byte* mmem;  // main memory
 

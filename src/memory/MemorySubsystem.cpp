@@ -17,13 +17,13 @@ Word ram_read(Address addr, Instruction funct3, Byte* ram) {
     }
 
     if ((funct3 & 0x4) == 0) {
-        Word sign_mask = (~((Word)0)) << (8 * n - 1);
+        Word sign_mask = (~Word{0}) << (8 * n - 1);
         rdata |= ((sign_mask & rdata) ? sign_mask : 0);
     }
     return rdata;
 }
 
-int page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem) {
+bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem) {
     Word vpn1 = (v_addr >> 22) & 0x3FF;
     Word L1_pte_addr = ((cpu->satp & 0x3FFFFF) << 12) + vpn1 * 4;
     Word L1_pte = ram_read(L1_pte_addr, static_cast<Instruction>(Funct3::Lw), mmem);
@@ -54,19 +54,19 @@ int page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte*
           ((cpu->priv == kPrivUser) && (!(L0_pte & enum_mask(PteFlag::U)))) ||
           ((L0_xwr >> static_cast<Word>(access)) & 1) == 0);
 
-    int ret = 0;
+    bool page_fault = false;
     if (!(L1_pte & enum_mask(PteFlag::V)))
-        ret = -1;
+        page_fault = true;
     else if (L1_xwr != 0)
-        ret = L1_success ? 0 : -1;
+        page_fault = !L1_success;
     else if (!(L0_pte & enum_mask(PteFlag::V)))
-        ret = -1;
+        page_fault = true;
     else if (L0_xwr != 0)
-        ret = L0_success ? 0 : -1;
+        page_fault = !L0_success;
     else
-        ret = -1;
+        page_fault = true;
 
-    if (ret)
+    if (page_fault)
         *p_addr = 0;
     else if (L1_success)
         *p_addr = L1_p_addr;
@@ -77,7 +77,7 @@ int page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte*
         L1_pte | enum_mask(PteFlag::A) | (access == PteAccess::Write ? enum_mask(PteFlag::D) : 0);
     Word L0_pte_write =
         L0_pte | enum_mask(PteFlag::A) | (access == PteAccess::Write ? enum_mask(PteFlag::D) : 0);
-    int we =
+    bool we =
         ((L1_xwr != 0 && L1_success) && (L1_write)) || ((L0_xwr != 0 && L0_success) && (L0_write));
     Word w_addr = (L1_xwr != 0 && L1_success) ? L1_pte_addr : L0_pte_addr;
     Word w_data = (L1_xwr != 0 && L1_success) ? L1_pte_write : L0_pte_write;
@@ -87,7 +87,7 @@ int page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte*
                 static_cast<Byte>(static_cast<uint8_t>((w_data >> (8 * i)) & 0xFF));
         }
     }
-    return ret;
+    return page_fault;
 }
 }  // namespace simrv::memory_detail
 

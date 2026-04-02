@@ -5,18 +5,20 @@
 #include "Machine.hpp"
 
 #include <array>
+#include <chrono>
 #include <fstream>
 #include <iomanip>
+#include <memory>
 #include <string>
 #include <utility>
 
 #include "Module.hpp"
 void set_options(Machine* m, int argc, char* argv[]);
 
-extern Machine sim_machine; /* class machine                     */
-extern Microcn micro_controller; /* I/O controller (micro-controller) */
-
-Machine::Machine() : mmio_router_(*this), memory_(*this) {}
+Machine::Machine()
+    : micro_controller(std::make_unique<Microcn>()), mmio_router_(*this), memory_(*this) {
+    micro_controller->owner = this;
+}
 
 namespace simrv::machine_detail {
 constexpr size_t D_SIZE_DRAM = (9u * 1024u * 1024u);   // 9MB of bbl + kernel
@@ -87,10 +89,10 @@ void binfile_gen(CPU* /*s*/, Byte* ram, Byte* sector) {
     exit(0);
 }
 
-void load_initram(char* fname, Byte* ram) {
-    std::ifstream in(fname, std::ios::binary);
+void load_image_into_ram(const std::string& file_path, Byte* ram) {
+    std::ifstream in(file_path, std::ios::binary);
     if (!in.is_open()) {
-        fprintf(stdout, "__ Error: image_file %s cannot be found\n", fname);
+        fprintf(stdout, "__ Error: image_file %s cannot be found\n", file_path.c_str());
         exit(0);
     }
     uint8_t tmp = 0;
@@ -100,7 +102,7 @@ void load_initram(char* fname, Byte* ram) {
     }
 }
 
-void load_initmem(std::string file, Byte* ram) {
+void load_image_file_into_ram(std::string file, Byte* ram) {
     std::ifstream in(file, std::ios::binary);
     if (!in.is_open()) {
         fprintf(stdout, "__ Error: image_file cannot be found\n");
@@ -122,7 +124,7 @@ Word ram_read(Address addr, Instruction funct3, Byte* ram) {
     }
 
     if ((funct3 & 0x4) == 0) { /* signed extension */
-        Word sign_mask = (~((Word)0)) << (8 * n - 1);
+        Word sign_mask = (~Word{0}) << (8 * n - 1);
         rdata |= ((sign_mask & rdata) ? sign_mask : 0);
     }
     return rdata;
@@ -135,7 +137,7 @@ Word disk_read(Address addr, Word n, Byte* dsk) {
     }
     Word data = 0;
 
-    for (int i = 0; i < (int)n; i++) {
+    for (int i = 0; i < static_cast<int>(n); i++) {
         data |= static_cast<Word>(std::to_integer<uint8_t>(dsk[(addr + i)])) << (8 * i);
     }
     return data;
@@ -156,7 +158,7 @@ void queue_write(Address addr, Word wdata, QueueState* q) {
     }
 }
 
-int page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem) {
+bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem) {
     /* level 1 */
     Word vpn1 = (v_addr >> 22) & 0x3FF;
     Word L1_pte_addr = ((cpu->satp & 0x3FFFFF) << 12) + vpn1 * 4;
@@ -188,20 +190,20 @@ int page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte*
           ((cpu->priv == kPrivUser) && (!(L0_pte & enum_mask(PteFlag::U)))) ||
           ((L0_xwr >> pte_access_index(access)) & 1) == 0);
     /* success */
-    int ret = 0;
+    bool page_fault = false;
     if (!(L1_pte & enum_mask(PteFlag::V)))
-        ret = -1;
+        page_fault = true;
     else if (L1_xwr != 0)
-        ret = L1_success ? 0 : -1;
+        page_fault = !L1_success;
     else if (!(L0_pte & enum_mask(PteFlag::V)))
-        ret = -1;
+        page_fault = true;
     else if (L0_xwr != 0)
-        ret = L0_success ? 0 : -1;
+        page_fault = !L0_success;
     else
-        ret = -1;
+        page_fault = true;
 
     /* phys_addr */
-    if (ret)
+    if (page_fault)
         *p_addr = 0;
     else if (L1_success)
         *p_addr = L1_p_addr;
@@ -213,7 +215,7 @@ int page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte*
         L1_pte | enum_mask(PteFlag::A) | (access == PteAccess::Write ? enum_mask(PteFlag::D) : 0);
     Word L0_pte_write =
         L0_pte | enum_mask(PteFlag::A) | (access == PteAccess::Write ? enum_mask(PteFlag::D) : 0);
-    int we =
+    bool we =
         ((L1_xwr != 0 && L1_success) && (L1_write)) || ((L0_xwr != 0 && L0_success) && (L0_write));
     Word w_addr = (L1_xwr != 0 && L1_success) ? L1_pte_addr : L0_pte_addr;
     Word w_data = (L1_xwr != 0 && L1_success) ? L1_pte_write : L0_pte_write;
@@ -223,283 +225,168 @@ int page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte*
                 static_cast<Byte>(static_cast<uint8_t>((w_data >> (8 * i)) & 0xFF));
         }
     }
-    return ret;
+    return page_fault;
 }
 
 }  // namespace simrv::machine_detail
 
 using namespace simrv::machine_detail;
 
-// void initfile_gen(CPU *s, Byte*ram){
-//     FILE *f = fopen("init_mem.txt", "w"); /* memory initialize file
-//     */ for(int i=0; i<simrv::memory::kDramSize; i++) fprintf(f, "%x\n", std::to_integer<uint8_t>(ram[i]));
-//     fclose(f);
-//     printf("\n__ file init_mem.txt was generated after %ld cycle\n",
-//     s->mtime);
-
-//     f = fopen("init_reg.txt", "wb"); /* register initialize file */
-//     fprintf(f, "p.pc=32'h%08x;\n",  s->pc);
-//     for(int i=1; i<32; i++) fprintf(f, "p.regs.mem[%d]=32'h%08x;\n", i,
-//     s->reg[i]); fprintf(f, "p.mstatus     =32'h%08x;\n", s->mstatus);
-//     fprintf(f, "p.mtvec       =32'h%08x;\n", s->mtvec);
-//     fprintf(f, "p.mscratch    =32'h%08x;\n", s->mscratch);
-//     fprintf(f, "p.mepc        =32'h%08x;\n", s->mepc);
-//     fprintf(f, "p.mcause      =32'h%08x;\n", s->mcause);
-//     fprintf(f, "p.mtval       =32'h%08x;\n", s->mtval);
-//     fprintf(f, "p.mhartid     =32'h%08x;\n", s->mhartid);
-//     fprintf(f, "p.misa        =32'h%08x;\n", s->misa);
-//     fprintf(f, "p.mie         =32'h%08x;\n", s->mie);
-//     fprintf(f, "p.mip         =32'h%08x;\n", s->mip);
-//     fprintf(f, "p.medeleg     =32'h%08x;\n", s->medeleg);
-//     fprintf(f, "p.mideleg     =32'h%08x;\n", s->mideleg);
-//     fprintf(f, "p.mcounteren  =32'h%08x;\n", s->mcounteren);
-//     fprintf(f, "p.stvec       =32'h%08x;\n", s->stvec);
-//     fprintf(f, "p.sscratch    =32'h%08x;\n", s->sscratch);
-//     fprintf(f, "p.sepc        =32'h%08x;\n", s->sepc);
-//     fprintf(f, "p.scause      =32'h%08x;\n", s->scause);
-//     fprintf(f, "p.stval       =32'h%08x;\n", s->stval);
-//     fprintf(f, "p.satp        =32'h%08x;\n", s->satp);
-//     fprintf(f, "p.scounteren  =32'h%08x;\n", s->scounteren);
-//     fprintf(f, "p.priv        =32'h%08x;\n", s->priv);
-
-//     fprintf(f, "p.mtime       =64'h%016lx;\n", s->mtime);
-//     fprintf(f, "p.mtimecmp    =64'h%016lx;\n", s->mtimecmp);
-
-//     fprintf(f, "p.load_res    =32'h%08x;\n", s->load_res);
-//     fprintf(f, "p.pending_exception   =32'h%08x;\n", s->pending_exception);
-//     fprintf(f, "p.pending_tval=32'h%08x;\n", s->pending_tval);
-
-//     for(int i=0; i<simrv::memory::kTlbSize; i++) {
-//         fprintf(f, "mmu.TLB_inst_r.r_valid[%d] =%d;\n",
-//                 i, !(s->TLB_inst_r[i].p_addr == -1u));
-//         fprintf(f, "mmu.TLB_inst_r.mem[%d][39:22] =18'h%05x;\n",
-//                 i, s->TLB_inst_r[i].v_addr >> 14);
-//         fprintf(f, "mmu.TLB_inst_r.mem[%d][21:0] =22'h%06x;\n",
-//                 i, s->TLB_inst_r[i].p_addr >> 10);
-//     }
-//     for(int i=0; i<simrv::memory::kTlbSize; i++) {
-//         fprintf(f, "mmu.TLB_data_r.r_valid[%d] =%d;\n",
-//                 i, !(s->TLB_data_r[i].p_addr == -1u));
-//         fprintf(f, "mmu.TLB_data_r.mem[%d][39:22] =18'h%05x;\n",
-//                 i, s->TLB_data_r[i].v_addr >> 14);
-//         fprintf(f, "mmu.TLB_data_r.mem[%d][21:0] =22'h%06x;\n",
-//                 i, s->TLB_data_r[i].p_addr >> 10);
-//     }
-//     for(int i=0; i<simrv::memory::kTlbSize; i++) {
-//         fprintf(f, "mmu.TLB_data_w.r_valid[%d] =%d;\n",
-//                 i, !(s->TLB_data_w[i].p_addr == -1u));
-//         fprintf(f, "mmu.TLB_data_w.mem[%d][39:22] =18'h%05x;\n",
-//                 i, s->TLB_data_w[i].v_addr >> 14);
-//         fprintf(f, "mmu.TLB_data_w.mem[%d][21:0] =22'h%06x;\n",
-//                 i, s->TLB_data_w[i].p_addr >> 10);
-//     }
-//     fclose(f);
-//     printf("__ file init_reg.txt was generated after %ld cycle\n", s->mtime);
-// }
-
-// void initfile_genS(CPU *s, Byte*ram, Console *cons, Disk *disk, uint8_t
-// *sector){
-//     FILE *f = fopen("xinitmem.bin", "wb"); /* memory initialize file
-//     */ fwrite(ram, sizeof(Byte), simrv::memory::kDramSize, f); fclose(f); f =
-//     fopen("xinitdisk.bin", "wb"); /* memory initialize file  */
-//     fwrite(sector, sizeof(Byte), simrv::virtio::kDiskSize, f);
-//     fclose(f);
-
-//     printf("\n__ file initmem.bin and initdisk.bin were generated after %ld
-//     cycle\n", s->mtime);
-
-//     f = fopen("xinitreg.txt", "wb"); /* register initialize file */
-//     fprintf(f, "cpu.pc=0x%08x;\n",  s->pc);
-//     for(int i=1; i<32; i++) fprintf(f, "cpu.reg[%d]=0x%08x;\n", i,
-//     s->reg[i]); fprintf(f, "cpu.mstatus     =0x%08x;\n", s->mstatus);
-//     fprintf(f, "cpu.mtvec       =0x%08x;\n", s->mtvec);
-//     fprintf(f, "cpu.mscratch    =0x%08x;\n", s->mscratch);
-//     fprintf(f, "cpu.mepc        =0x%08x;\n", s->mepc);
-//     fprintf(f, "cpu.mcause      =0x%08x;\n", s->mcause);
-//     fprintf(f, "cpu.mtval       =0x%08x;\n", s->mtval);
-//     fprintf(f, "cpu.mhartid     =0x%08x;\n", s->mhartid);
-//     fprintf(f, "cpu.misa        =0x%08x;\n", s->misa);
-//     fprintf(f, "cpu.mie         =0x%08x;\n", s->mie);
-//     fprintf(f, "cpu.mip         =0x%08x;\n", s->mip);
-//     fprintf(f, "cpu.medeleg     =0x%08x;\n", s->medeleg);
-//     fprintf(f, "cpu.mideleg     =0x%08x;\n", s->mideleg);
-//     fprintf(f, "cpu.mcounteren  =0x%08x;\n", s->mcounteren);
-//     fprintf(f, "cpu.stvec       =0x%08x;\n", s->stvec);
-//     fprintf(f, "cpu.sscratch    =0x%08x;\n", s->sscratch);
-//     fprintf(f, "cpu.sepc        =0x%08x;\n", s->sepc);
-//     fprintf(f, "cpu.scause      =0x%08x;\n", s->scause);
-//     fprintf(f, "cpu.stval       =0x%08x;\n", s->stval);
-//     fprintf(f, "cpu.satp        =0x%08x;\n", s->satp);
-//     fprintf(f, "cpu.scounteren  =0x%08x;\n", s->scounteren);
-//     fprintf(f, "cpu.priv        =0x%08x;\n", s->priv);
-
-//     fprintf(f, "cpu.mtime       =0x%016lx;\n", s->mtime);
-//     fprintf(f, "cpu.mtimecmp    =0x%016lx;\n", s->mtimecmp);
-
-//     fprintf(f, "cpu.load_res    =0x%08x;\n", s->load_res);
-//     fprintf(f, "cpu.pending_exception   =0x%08x;\n", s->pending_exception);
-//     fprintf(f, "cpu.pending_tval=0x%08x;\n", s->pending_tval);
-
-//     for(int i=0; i<simrv::memory::kTlbSize; i++) {
-//         fprintf(f, "cpu.TLB_inst_r[%d].p_addr =0x%08x;\n",
-//                 i, s->TLB_inst_r[i].p_addr);
-//         fprintf(f, "cpu.TLB_inst_r[%d].v_addr =0x%08x;\n",
-//                 i, s->TLB_inst_r[i].v_addr);
-//     }
-//     for(int i=0; i<simrv::memory::kTlbSize; i++) {
-//         fprintf(f, "cpu.TLB_data_r[%d].p_addr =0x%08x;\n",
-//                 i, s->TLB_data_r[i].p_addr);
-//         fprintf(f, "cpu.TLB_data_r[%d].v_addr =0x%08x;\n",
-//                 i, s->TLB_data_r[i].v_addr);
-//     }
-//     for(int i=0; i<simrv::memory::kTlbSize; i++) {
-//         fprintf(f, "cpu.TLB_data_w[%d].p_addr =0x%08x;\n",
-//                 i, s->TLB_data_w[i].p_addr);
-//         fprintf(f, "cpu.TLB_data_w[%d].v_addr =0x%08x;\n",
-//                 i, s->TLB_data_w[i].v_addr);
-//     }
-
-//     fprintf(f, "console->QueueSel       =0x%08x;\n", cons->QueueSel);
-//     fprintf(f, "console->QueueNum       =0x%08x;\n", cons->QueueNum);
-//     for(int i=0; i<simrv::virtio::kConsoleMaxQueueNum; i++){
-//         fprintf(f, "console->Queue[%d].Ready          =0x%08x;\n", i,
-//         cons->Queue[i].Ready); fprintf(f, "console->Queue[%d].Notify
-//         =0x%08x;\n", i, cons->Queue[i].Notify); fprintf(f,
-//         "console->Queue[%d].DescLow        =0x%08x;\n", i,
-//         cons->Queue[i].DescLow); fprintf(f, "console->Queue[%d].DescHigh
-//         =0x%08x;\n", i, cons->Queue[i].DescHigh); fprintf(f,
-//         "console->Queue[%d].AvailLow       =0x%08x;\n", i,
-//         cons->Queue[i].AvailLow); fprintf(f, "console->Queue[%d].AvailHigh
-//         =0x%08x;\n", i, cons->Queue[i].AvailHigh); fprintf(f,
-//         "console->Queue[%d].UsedLow        =0x%08x;\n", i,
-//         cons->Queue[i].UsedLow); fprintf(f, "console->Queue[%d].UsedHigh
-//         =0x%08x;\n", i, cons->Queue[i].UsedHigh); fprintf(f,
-//         "console->Queue[%d].last_avail_idx =0x%08x;\n", i,
-//         cons->Queue[i].last_avail_idx);
-//     }
-//     fprintf(f, "console->InterruptStatus=0x%08x;\n", cons->InterruptStatus);
-//     fprintf(f, "console->Status         =0x%08x;\n", cons->Status);
-
-//     fprintf(f, "disk->QueueSel       =0x%08x;\n", disk->QueueSel);
-//     fprintf(f, "disk->QueueNum       =0x%08x;\n", disk->QueueNum);
-//     for(int i=0; i<simrv::virtio::kDiskMaxQueueNum; i++){
-//         fprintf(f, "disk->Queue[%d].Ready          =0x%08x;\n", i,
-//         disk->Queue[i].Ready); fprintf(f, "disk->Queue[%d].Notify
-//         =0x%08x;\n", i, disk->Queue[i].Notify); fprintf(f,
-//         "disk->Queue[%d].DescLow        =0x%08x;\n", i,
-//         disk->Queue[i].DescLow); fprintf(f, "disk->Queue[%d].DescHigh
-//         =0x%08x;\n", i, disk->Queue[i].DescHigh); fprintf(f,
-//         "disk->Queue[%d].AvailLow       =0x%08x;\n", i,
-//         disk->Queue[i].AvailLow); fprintf(f, "disk->Queue[%d].AvailHigh
-//         =0x%08x;\n", i, disk->Queue[i].AvailHigh); fprintf(f,
-//         "disk->Queue[%d].UsedLow        =0x%08x;\n", i,
-//         disk->Queue[i].UsedLow); fprintf(f, "disk->Queue[%d].UsedHigh
-//         =0x%08x;\n", i, disk->Queue[i].UsedHigh); fprintf(f,
-//         "disk->Queue[%d].last_avail_idx =0x%08x;\n", i,
-//         disk->Queue[i].last_avail_idx);
-//     }
-//     fprintf(f, "disk->InterruptStatus=0x%08x;\n", disk->InterruptStatus);
-//     fprintf(f, "disk->Status         =0x%08x;\n", disk->Status);
-
-//     fclose(f);
-//     printf("__ file initreg.txt was generated after %ld cycle\n", s->mtime);
-// }
-
-void initfile_gen2(CPU* s, Byte* ram, Console* cons, Disk* disk, Byte* sector) {
-    FILE* f = fopen("init_mem.txt", "w"); /* memory initialize file  */
-    for (Address i = 0; i < simrv::memory::kDramSize; i++) fprintf(f, "%x\n", std::to_integer<uint8_t>(ram[i]));
-    fclose(f);
-    printf("__ file init_mem.txt was generated after %ld cycle\n", s->mtime);
-    f = fopen("init_dsk.txt", "w"); /* memory initialize file  */
-    for (Word i = 0; i < simrv::virtio::kDiskSize; i++) fprintf(f, "%x\n", std::to_integer<uint8_t>(sector[i]));
-    fclose(f);
-    printf("__ file init_dsk.txt was generated after %ld cycle\n", s->mtime);
-
-    f = fopen("init_reg.txt", "wb"); /* register initialize file */
-    fprintf(f, "p.pc=32'h%08x;\n", s->pc);
-    for (int i = 1; i < 32; i++) fprintf(f, "p.regs.mem[%d]=32'h%08x;\n", i, s->reg[i]);
-    fprintf(f, "p.mstatus     =32'h%08x;\n", s->mstatus);
-    fprintf(f, "p.mtvec       =32'h%08x;\n", s->mtvec);
-    fprintf(f, "p.mscratch    =32'h%08x;\n", s->mscratch);
-    fprintf(f, "p.mepc        =32'h%08x;\n", s->mepc);
-    fprintf(f, "p.mcause      =32'h%08x;\n", s->mcause);
-    fprintf(f, "p.mtval       =32'h%08x;\n", s->mtval);
-    fprintf(f, "p.mhartid     =32'h%08x;\n", s->mhartid);
-    fprintf(f, "p.misa        =32'h%08x;\n", s->misa);
-    fprintf(f, "p.mie         =32'h%08x;\n", s->mie);
-    fprintf(f, "p.mip         =32'h%08x;\n", s->mip);
-    fprintf(f, "p.medeleg     =32'h%08x;\n", s->medeleg);
-    fprintf(f, "p.mideleg     =32'h%08x;\n", s->mideleg);
-    fprintf(f, "p.mcounteren  =32'h%08x;\n", s->mcounteren);
-    fprintf(f, "p.stvec       =32'h%08x;\n", s->stvec);
-    fprintf(f, "p.sscratch    =32'h%08x;\n", s->sscratch);
-    fprintf(f, "p.sepc        =32'h%08x;\n", s->sepc);
-    fprintf(f, "p.scause      =32'h%08x;\n", s->scause);
-    fprintf(f, "p.stval       =32'h%08x;\n", s->stval);
-    fprintf(f, "p.satp        =32'h%08x;\n", s->satp);
-    fprintf(f, "p.scounteren  =32'h%08x;\n", s->scounteren);
-    fprintf(f, "p.priv        =32'h%08x;\n", s->priv);
-
-    fprintf(f, "p.mtime       =64'h%016lx;\n", s->mtime);
-    fprintf(f, "p.mtimecmp    =64'h%016lx;\n", s->mtimecmp);
-
-    fprintf(f, "p.load_res    =32'h%08x;\n", s->load_res);
-    fprintf(f, "p.reserved    = 1'h%01x;\n", s->reserved);
-    fprintf(f, "p.pending_exception   =32'h%08x;\n", s->pending_exception);
-    fprintf(f, "p.pending_tval=32'h%08x;\n", s->pending_tval);
-
-    for (Word i = 0; i < simrv::memory::kTlbSize; i++) {
-        fprintf(f, "mmu.TLB_inst_r.r_valid[%d] =%d;\n", i, !(s->TLB_inst_r[i].p_addr == -1u));
-        fprintf(f, "mmu.TLB_inst_r.mem[%d][39:22] =18'h%05x;\n", i, s->TLB_inst_r[i].v_addr >> 14);
-        fprintf(f, "mmu.TLB_inst_r.mem[%d][21:0] =22'h%06x;\n", i, s->TLB_inst_r[i].p_addr >> 10);
-    }
-    for (Word i = 0; i < simrv::memory::kTlbSize; i++) {
-        fprintf(f, "mmu.TLB_data_r.r_valid[%d] =%d;\n", i, !(s->TLB_data_r[i].p_addr == -1u));
-        fprintf(f, "mmu.TLB_data_r.mem[%d][39:22] =18'h%05x;\n", i, s->TLB_data_r[i].v_addr >> 14);
-        fprintf(f, "mmu.TLB_data_r.mem[%d][21:0] =22'h%06x;\n", i, s->TLB_data_r[i].p_addr >> 10);
-    }
-    for (Word i = 0; i < simrv::memory::kTlbSize; i++) {
-        fprintf(f, "mmu.TLB_data_w.r_valid[%d] =%d;\n", i, !(s->TLB_data_w[i].p_addr == -1u));
-        fprintf(f, "mmu.TLB_data_w.mem[%d][39:22] =18'h%05x;\n", i, s->TLB_data_w[i].v_addr >> 14);
-        fprintf(f, "mmu.TLB_data_w.mem[%d][21:0] =22'h%06x;\n", i, s->TLB_data_w[i].p_addr >> 10);
+/**
+ * @brief Emit snapshot artifacts for debug bring-up and RTL co-simulation.
+ *
+ * Generated files:
+ * - `init_mem.txt`: DRAM image as one hex byte per line.
+ * - `init_dsk.txt`: Disk image as one hex byte per line.
+ * - `init_reg.txt`: Architectural state and MMIO queue state in assignment form.
+ *
+ * This helper is intentionally I/O-only and does not mutate simulator state.
+ */
+void dump_init_artifacts(CPU* cpu, Byte* ram, Console* console, Disk* disk, Byte* sector) {
+    {
+        std::ofstream out("init_mem.txt");
+        for (Address i = 0; i < simrv::memory::kDramSize; ++i) {
+            out << std::hex << static_cast<unsigned>(std::to_integer<uint8_t>(ram[i])) << '\n';
+        }
+        printf("__ file init_mem.txt was generated after %ld cycle\n", cpu->mtime);
     }
 
-    fprintf(f, "mmu.console.QueueSel       =32'h%08x;\n", cons->QueueSel);
-    fprintf(f, "mmu.console.QueueNum       =32'h%08x;\n", cons->QueueNum);
-    for (Word i = 0; i < simrv::virtio::kConsoleMaxQueueNum; i++) {
-        fprintf(f, "mmu.console.Queue[%d*9+0] =32'h%08x;\n", i, cons->Queue[i].Ready);
-        fprintf(f, "mmu.console.Queue[%d*9+1] =32'h%08x;\n", i, cons->Queue[i].Notify);
-        fprintf(f, "mmu.console.Queue[%d*9+2] =32'h%08x;\n", i, cons->Queue[i].DescLow);
-        fprintf(f, "mmu.console.Queue[%d*9+3] =32'h%08x;\n", i, cons->Queue[i].DescHigh);
-        fprintf(f, "mmu.console.Queue[%d*9+4] =32'h%08x;\n", i, cons->Queue[i].AvailLow);
-        fprintf(f, "mmu.console.Queue[%d*9+5] =32'h%08x;\n", i, cons->Queue[i].AvailHigh);
-        fprintf(f, "mmu.console.Queue[%d*9+6] =32'h%08x;\n", i, cons->Queue[i].UsedLow);
-        fprintf(f, "mmu.console.Queue[%d*9+7] =32'h%08x;\n", i, cons->Queue[i].UsedHigh);
-        fprintf(f, "mmu.console.Queue[%d*9+8] =32'h%08x;\n", i, cons->Queue[i].last_avail_idx);
+    {
+        std::ofstream out("init_dsk.txt");
+        for (Word i = 0; i < simrv::virtio::kDiskSize; ++i) {
+            out << std::hex << static_cast<unsigned>(std::to_integer<uint8_t>(sector[i])) << '\n';
+        }
+        printf("__ file init_dsk.txt was generated after %ld cycle\n", cpu->mtime);
     }
-    fprintf(f, "mmu.console.InterruptStatus=32'h%08x;\n", cons->InterruptStatus);
-    fprintf(f, "mmu.console.Status         =32'h%08x;\n", cons->Status);
 
-    fprintf(f, "mmu.disk.QueueSel       =32'h%08x;\n", disk->QueueSel);
-    fprintf(f, "mmu.disk.QueueNum       =32'h%08x;\n", disk->QueueNum);
-    for (Word i = 0; i < simrv::virtio::kDiskMaxQueueNum; i++) {
-        fprintf(f, "mmu.disk.Queue[%d*9+0] =32'h%08x;\n", i, disk->Queue[i].Ready);
-        fprintf(f, "mmu.disk.Queue[%d*9+1] =32'h%08x;\n", i, disk->Queue[i].Notify);
-        fprintf(f, "mmu.disk.Queue[%d*9+2] =32'h%08x;\n", i, disk->Queue[i].DescLow);
-        fprintf(f, "mmu.disk.Queue[%d*9+3] =32'h%08x;\n", i, disk->Queue[i].DescHigh);
-        fprintf(f, "mmu.disk.Queue[%d*9+4] =32'h%08x;\n", i, disk->Queue[i].AvailLow);
-        fprintf(f, "mmu.disk.Queue[%d*9+5] =32'h%08x;\n", i, disk->Queue[i].AvailHigh);
-        fprintf(f, "mmu.disk.Queue[%d*9+6] =32'h%08x;\n", i, disk->Queue[i].UsedLow);
-        fprintf(f, "mmu.disk.Queue[%d*9+7] =32'h%08x;\n", i, disk->Queue[i].UsedHigh);
-        fprintf(f, "mmu.disk.Queue[%d*9+8] =32'h%08x;\n", i, disk->Queue[i].last_avail_idx);
+    std::ofstream out("init_reg.txt");
+    auto write_32 = [&out](std::string_view lhs, Word value) {
+        out << lhs << "=32'h" << std::hex << std::setw(8) << std::setfill('0') << value << ";\n";
+    };
+    auto write_64 = [&out](std::string_view lhs, Counter value) {
+        out << lhs << "=64'h" << std::hex << std::setw(16) << std::setfill('0') << value << ";\n";
+    };
+
+    write_32("p.pc", cpu->pc);
+    for (int i = 1; i < 32; ++i) {
+        out << "p.regs.mem[" << std::dec << i << "]=32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << cpu->reg[i] << ";\n";
     }
-    fprintf(f, "mmu.disk.InterruptStatus=32'h%08x;\n", disk->InterruptStatus);
-    fprintf(f, "mmu.disk.Status         =32'h%08x;\n", disk->Status);
+    write_32("p.mstatus     ", cpu->mstatus);
+    write_32("p.mtvec       ", cpu->mtvec);
+    write_32("p.mscratch    ", cpu->mscratch);
+    write_32("p.mepc        ", cpu->mepc);
+    write_32("p.mcause      ", cpu->mcause);
+    write_32("p.mtval       ", cpu->mtval);
+    write_32("p.mhartid     ", cpu->mhartid);
+    write_32("p.misa        ", cpu->misa);
+    write_32("p.mie         ", cpu->mie);
+    write_32("p.mip         ", cpu->mip);
+    write_32("p.medeleg     ", cpu->medeleg);
+    write_32("p.mideleg     ", cpu->mideleg);
+    write_32("p.mcounteren  ", cpu->mcounteren);
+    write_32("p.stvec       ", cpu->stvec);
+    write_32("p.sscratch    ", cpu->sscratch);
+    write_32("p.sepc        ", cpu->sepc);
+    write_32("p.scause      ", cpu->scause);
+    write_32("p.stval       ", cpu->stval);
+    write_32("p.satp        ", cpu->satp);
+    write_32("p.scounteren  ", cpu->scounteren);
+    write_32("p.priv        ", cpu->priv);
 
-    fclose(f);
-    printf("__ file init_reg.txt was generated after %ld cycle\n", s->mtime);
+    write_64("p.mtime       ", cpu->mtime);
+    write_64("p.mtimecmp    ", cpu->mtimecmp);
+
+    write_32("p.load_res    ", cpu->load_res);
+    out << "p.reserved    = 1'h" << std::hex << std::setw(1) << std::setfill('0') << cpu->reserved
+        << ";\n";
+    write_32("p.pending_exception   ", cpu->pending_exception);
+    write_32("p.pending_tval", cpu->pending_tval);
+
+    for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
+        out << "mmu.TLB_inst_r.r_valid[" << std::dec << i
+            << "] =" << static_cast<int>(cpu->TLB_inst_r[i].p_addr != static_cast<Address>(-1u))
+            << ";\n";
+        out << "mmu.TLB_inst_r.mem[" << std::dec << i << "][39:22] =18'h" << std::hex
+            << std::setw(5) << std::setfill('0') << (cpu->TLB_inst_r[i].v_addr >> 14) << ";\n";
+        out << "mmu.TLB_inst_r.mem[" << std::dec << i << "][21:0] =22'h" << std::hex << std::setw(6)
+            << std::setfill('0') << (cpu->TLB_inst_r[i].p_addr >> 10) << ";\n";
+    }
+    for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
+        out << "mmu.TLB_data_r.r_valid[" << std::dec << i
+            << "] =" << static_cast<int>(cpu->TLB_data_r[i].p_addr != static_cast<Address>(-1u))
+            << ";\n";
+        out << "mmu.TLB_data_r.mem[" << std::dec << i << "][39:22] =18'h" << std::hex
+            << std::setw(5) << std::setfill('0') << (cpu->TLB_data_r[i].v_addr >> 14) << ";\n";
+        out << "mmu.TLB_data_r.mem[" << std::dec << i << "][21:0] =22'h" << std::hex << std::setw(6)
+            << std::setfill('0') << (cpu->TLB_data_r[i].p_addr >> 10) << ";\n";
+    }
+    for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
+        out << "mmu.TLB_data_w.r_valid[" << std::dec << i
+            << "] =" << static_cast<int>(cpu->TLB_data_w[i].p_addr != static_cast<Address>(-1u))
+            << ";\n";
+        out << "mmu.TLB_data_w.mem[" << std::dec << i << "][39:22] =18'h" << std::hex
+            << std::setw(5) << std::setfill('0') << (cpu->TLB_data_w[i].v_addr >> 14) << ";\n";
+        out << "mmu.TLB_data_w.mem[" << std::dec << i << "][21:0] =22'h" << std::hex << std::setw(6)
+            << std::setfill('0') << (cpu->TLB_data_w[i].p_addr >> 10) << ";\n";
+    }
+
+    write_32("mmu.console.QueueSel       ", console->QueueSel);
+    write_32("mmu.console.QueueNum       ", console->QueueNum);
+    for (Word i = 0; i < simrv::virtio::kConsoleMaxQueueNum; ++i) {
+        out << "mmu.console.Queue[" << std::dec << i << "*9+0] =32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << console->Queue[i].Ready << ";\n";
+        out << "mmu.console.Queue[" << std::dec << i << "*9+1] =32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << console->Queue[i].Notify << ";\n";
+        out << "mmu.console.Queue[" << std::dec << i << "*9+2] =32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << console->Queue[i].DescLow << ";\n";
+        out << "mmu.console.Queue[" << std::dec << i << "*9+3] =32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << console->Queue[i].DescHigh << ";\n";
+        out << "mmu.console.Queue[" << std::dec << i << "*9+4] =32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << console->Queue[i].AvailLow << ";\n";
+        out << "mmu.console.Queue[" << std::dec << i << "*9+5] =32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << console->Queue[i].AvailHigh << ";\n";
+        out << "mmu.console.Queue[" << std::dec << i << "*9+6] =32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << console->Queue[i].UsedLow << ";\n";
+        out << "mmu.console.Queue[" << std::dec << i << "*9+7] =32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << console->Queue[i].UsedHigh << ";\n";
+        out << "mmu.console.Queue[" << std::dec << i << "*9+8] =32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << console->Queue[i].last_avail_idx << ";\n";
+    }
+    write_32("mmu.console.InterruptStatus", console->InterruptStatus);
+    write_32("mmu.console.Status         ", console->Status);
+
+    write_32("mmu.disk.QueueSel       ", disk->QueueSel);
+    write_32("mmu.disk.QueueNum       ", disk->QueueNum);
+    for (Word i = 0; i < simrv::virtio::kDiskMaxQueueNum; ++i) {
+        out << "mmu.disk.Queue[" << std::dec << i << "*9+0] =32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << disk->Queue[i].Ready << ";\n";
+        out << "mmu.disk.Queue[" << std::dec << i << "*9+1] =32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << disk->Queue[i].Notify << ";\n";
+        out << "mmu.disk.Queue[" << std::dec << i << "*9+2] =32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << disk->Queue[i].DescLow << ";\n";
+        out << "mmu.disk.Queue[" << std::dec << i << "*9+3] =32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << disk->Queue[i].DescHigh << ";\n";
+        out << "mmu.disk.Queue[" << std::dec << i << "*9+4] =32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << disk->Queue[i].AvailLow << ";\n";
+        out << "mmu.disk.Queue[" << std::dec << i << "*9+5] =32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << disk->Queue[i].AvailHigh << ";\n";
+        out << "mmu.disk.Queue[" << std::dec << i << "*9+6] =32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << disk->Queue[i].UsedLow << ";\n";
+        out << "mmu.disk.Queue[" << std::dec << i << "*9+7] =32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << disk->Queue[i].UsedHigh << ";\n";
+        out << "mmu.disk.Queue[" << std::dec << i << "*9+8] =32'h" << std::hex << std::setw(8)
+            << std::setfill('0') << disk->Queue[i].last_avail_idx << ";\n";
+    }
+    write_32("mmu.disk.InterruptStatus", disk->InterruptStatus);
+    write_32("mmu.disk.Status         ", disk->Status);
+
+    printf("__ file init_reg.txt was generated after %ld cycle\n", cpu->mtime);
 }
 
+/**
+ * @brief Write instruction frequency totals to `instmix.txt`.
+ */
 void Machine::write_instruction_mix_report() {
     std::ofstream out("instmix.txt");
     if (!out.is_open()) {
@@ -516,10 +403,14 @@ void Machine::write_instruction_mix_report() {
     printf("__ file instmix.txt was generated after %ld cycle\n", cpu.mtime);
 }
 
+/**
+ * @brief Print end-of-run timing and instruction statistics.
+ */
 void Machine::print_summary() {
-    struct timeval t;
-    gettimeofday(&t, NULL);
-    Counter etime = (t.tv_sec - s_stime.tv_sec) * 1000000ul + t.tv_usec - s_stime.tv_usec;
+    const auto now = std::chrono::steady_clock::now();
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::microseconds>(now - s_start_time).count();
+    const Counter etime = static_cast<Counter>(elapsed == 0 ? 1 : elapsed);
     printf("__ Elapsed clocks (mtime)   : %11ld\n", cpu.mtime);
     printf("__ Executed instructions    : %11ld\n", e_icount);
     printf("__ Executed uc_instructions : %11ld\n", e_uc_cnt);
@@ -529,6 +420,9 @@ void Machine::print_summary() {
     if (s_use_mix) write_instruction_mix_report();
 }
 
+/**
+ * @brief Run the simulation loop until a termination condition is reached.
+ */
 void Machine::run() {
     if (s_gen_binfile) {
         binfile_gen(&cpu, mmem, disk->sector);
@@ -540,24 +434,31 @@ void Machine::run() {
     }
 }
 
+/**
+ * @brief Perform per-cycle side effects before CPU stage execution.
+ *
+ * This includes optional artifact dump generation, synthetic console input/timer handling,
+ * and reset of pending trap bookkeeping fields.
+ */
 void Machine::prepare_cycle() {
-    //    if(cpu.mtime==s_memimg)  { initfile_gen(cpu, mmem); }
+    // Emit initialization artifacts at the configured cycle boundary.
     if (cpu.mtime == s_memimg) {
-        initfile_gen2(&cpu, mmem, console, disk, disk->sector);
+        dump_init_artifacts(&cpu, mmem, console.get(), disk.get(), disk->sector);
     }
 
-    Byte buf[9] = {static_cast<Byte>('r'), static_cast<Byte>('o'),  static_cast<Byte>('o'),
-                   static_cast<Byte>('t'), static_cast<Byte>('\n'), static_cast<Byte>('t'),
-                   static_cast<Byte>('o'), static_cast<Byte>('p'),  static_cast<Byte>('\n')};
+    static constexpr std::array<Byte, 9> kSyntheticInput = {
+        static_cast<Byte>('r'), static_cast<Byte>('o'),  static_cast<Byte>('o'),
+        static_cast<Byte>('t'), static_cast<Byte>('\n'), static_cast<Byte>('t'),
+        static_cast<Byte>('o'), static_cast<Byte>('p'),  static_cast<Byte>('\n')};
     static int adr = 0;
 
     if (cpu.mtime > s_enabletimer) { /* enable timer after linux boot */
         console->fifo_en = static_cast<Byte>(1);
-        console->cons_fifo = buf[adr % 9];
+        console->cons_fifo = kSyntheticInput[adr % static_cast<int>(kSyntheticInput.size())];
 
-        if ((cpu.mtime & (Counter)0xfffff) == 0 &&
+        if ((cpu.mtime & static_cast<Counter>(0xfffff)) == 0 &&
             console->fifo_en != static_cast<Byte>(0)) {  // 2019-08-30
-            int ret = console->MC_receive_input();       /* Keyboard */
+            int ret = console->MC_receive_input(*this);  /* Keyboard */
             if (ret > 0) {
                 cpu.plic_set_irq(simrv::virtio::kConsoleIrq, 1);
             }
@@ -573,23 +474,30 @@ void Machine::prepare_cycle() {
 }
 
 constexpr Counter D_TRACEPC_INTERVAL = 1000;
-void gen_traces(Register cpc) {
+/**
+ * @brief Emit sparse PC trace samples to `tracepc.txt` every fixed interval.
+ */
+void emit_periodic_pc_trace(Counter mtime, Register cpc) {
     static int flag = 0;
     static std::ofstream out;
-    if ((sim_machine.cpu.mtime % D_TRACEPC_INTERVAL) == 0) {
+    if ((mtime % D_TRACEPC_INTERVAL) == 0) {
         if (flag == 0) {
             flag = 1;
             out.open("tracepc.txt");
             printf("__ generate trace file: tracepc.txt\n\n");
         }
         out << std::setfill('0') << std::setw(8) << std::dec
-            << static_cast<int>(sim_machine.cpu.mtime / D_TRACEPC_INTERVAL) << ' ' << std::hex
-            << std::setw(8) << cpc << '\n';
+            << static_cast<int>(mtime / D_TRACEPC_INTERVAL) << ' ' << std::hex << std::setw(8)
+            << cpc << '\n';
         out.flush();
     }
 }
 
-void gen_bp_traces(Register cpc, Register jmp_pc, int r_opcode, int r_tkn) {
+/**
+ * @brief Emit branch prediction trace rows to `bpred.txt`.
+ */
+void emit_branch_prediction_trace(Counter mtime, Register cpc, Register jmp_pc, int r_opcode,
+                                  int r_tkn) {
     static int flag = 0;
     static std::ofstream out;
     if (flag == 0) {
@@ -605,7 +513,7 @@ void gen_bp_traces(Register cpc, Register jmp_pc, int r_opcode, int r_tkn) {
     int ir_branch = (opcode == Opcode::Branch);
 
     unsigned int targ = (ir_jump | ir_branch) ? jmp_pc : 0;
-    out << std::setfill('0') << std::setw(8) << std::dec << static_cast<int>(sim_machine.cpu.mtime) << ' '
+    out << std::setfill('0') << std::setw(8) << std::dec << static_cast<int>(mtime) << ' '
         << std::hex << std::setw(8) << cpc << ' ' << std::setw(8) << targ << std::dec << ' '
         << ir_jb << ' ' << r_tkn << ' ' << ir_jump << ' ' << ir_branch << '\n';
     out.flush();
@@ -613,16 +521,21 @@ void gen_bp_traces(Register cpc, Register jmp_pc, int r_opcode, int r_tkn) {
 
 constexpr Word CMD_PRINT_CHAR = 1; /* command for application mode using tohost */
 constexpr Word CMD_POWER_OFF = 2;  /* command for application mode using tohost */
+/**
+ * @brief Apply end-of-cycle termination checks and optional trace outputs.
+ */
 void Machine::finalize_cycle() {
-    if (s_strace != 0 && cpu.mtime >= s_strace) gen_traces(cpu.pipeline_context.cpc);
+    if (s_strace != 0 && cpu.mtime >= s_strace)
+        emit_periodic_pc_trace(cpu.mtime, cpu.pipeline_context.cpc);
     if (cpu.mtime >= s_trace_begin && cpu.mtime <= s_trace_end) write_trace_snapshot();
     if (cpu.mtime >= s_fincnt - 1) {
         printf("\n__finished by -e option\n");
         is_running_ = 0;
     }
     if (s_bp_trace) {
-        gen_bp_traces(cpu.pipeline_context.cpc, cpu.pipeline_context.jmp_pc,
-                      cpu.pipeline_context.opcode, cpu.pipeline_context.tkn);
+        emit_branch_prediction_trace(cpu.mtime, cpu.pipeline_context.cpc,
+                                     cpu.pipeline_context.jmp_pc, cpu.pipeline_context.opcode,
+                                     cpu.pipeline_context.tkn);
     }
 
     if (s_isatest && tohost != 0) {
@@ -647,72 +560,110 @@ void Machine::finalize_cycle() {
     }
 }
 
+/**
+ * @brief Write one full architectural snapshot row set to the trace stream.
+ */
 void Machine::write_trace_snapshot() {
-    fprintf(s_fp_trace, "%08ld ", cpu.mtime);
-    //    fprintf(s_fp_trace, "%08ld ", e_icount);
-    fprintf(s_fp_trace, "%08x ", cpu.pipeline_context.cpc);
-    fprintf(s_fp_trace, "%08x", cpu.pipeline_context.ir);
-    if (s_rtosmode) {
-        fprintf(s_fp_trace, " %08ld", cpu.mtimecmp);
+    if (!s_fp_trace.is_open()) {
+        return;
     }
-    fprintf(s_fp_trace, "\n");
+
+    auto write_hex = [&](Word value) {
+        s_fp_trace << std::hex << std::setw(8) << std::setfill('0') << value;
+    };
+
+    s_fp_trace << std::dec << std::setw(8) << std::setfill('0') << cpu.mtime << ' ';
+    write_hex(cpu.pipeline_context.cpc);
+    s_fp_trace << ' ';
+    write_hex(cpu.pipeline_context.ir);
+    if (s_rtosmode) {
+        s_fp_trace << ' ' << std::dec << std::setw(8) << std::setfill('0') << cpu.mtimecmp;
+    }
+    s_fp_trace << '\n';
 
     for (int i = 0; i < 4; i++) { /* output registers */
         for (int j = 0; j < 8; j++) {
-            fprintf(s_fp_trace, "%08x", cpu.reg[i * 8 + j]);
-            fprintf(s_fp_trace, "%s", (j != 7 ? " " : "\n"));
+            write_hex(cpu.reg[i * 8 + j]);
+            s_fp_trace << (j != 7 ? ' ' : '\n');
         }
     }
 
     if (!s_appmode) {
-        fprintf(s_fp_trace, "%08x ", cpu.mstatus);
-        fprintf(s_fp_trace, "%08x ", cpu.mtvec);
-        fprintf(s_fp_trace, "%08x ", cpu.mscratch);
-        fprintf(s_fp_trace, "%08x ", cpu.mepc);
-        fprintf(s_fp_trace, "%08x ", cpu.mcause);
-        fprintf(s_fp_trace, "%08x ", cpu.mtval);
-        fprintf(s_fp_trace, "%08x ", cpu.mhartid);
-        fprintf(s_fp_trace, "%08x ", cpu.misa);
-        fprintf(s_fp_trace, "\n");
+        write_hex(cpu.mstatus);
+        s_fp_trace << ' ';
+        write_hex(cpu.mtvec);
+        s_fp_trace << ' ';
+        write_hex(cpu.mscratch);
+        s_fp_trace << ' ';
+        write_hex(cpu.mepc);
+        s_fp_trace << ' ';
+        write_hex(cpu.mcause);
+        s_fp_trace << ' ';
+        write_hex(cpu.mtval);
+        s_fp_trace << ' ';
+        write_hex(cpu.mhartid);
+        s_fp_trace << ' ';
+        write_hex(cpu.misa);
+        s_fp_trace << '\n';
 
-        fprintf(s_fp_trace, "%08x ", cpu.mie);
-        fprintf(s_fp_trace, "%08x ", cpu.mip);
-        fprintf(s_fp_trace, "%08x ", cpu.medeleg);
-        fprintf(s_fp_trace, "%08x ", cpu.mideleg);
-        fprintf(s_fp_trace, "%08x ", cpu.mcounteren);
+        write_hex(cpu.mie);
+        s_fp_trace << ' ';
+        write_hex(cpu.mip);
+        s_fp_trace << ' ';
+        write_hex(cpu.medeleg);
+        s_fp_trace << ' ';
+        write_hex(cpu.mideleg);
+        s_fp_trace << ' ';
+        write_hex(cpu.mcounteren);
+        s_fp_trace << ' ';
         if (!s_rtosmode) {
-            fprintf(s_fp_trace, "%08x ", cpu.stvec);
-            fprintf(s_fp_trace, "%08x ", cpu.sscratch);
-            fprintf(s_fp_trace, "%08x ", cpu.sepc);
-            fprintf(s_fp_trace, "\n");
+            write_hex(cpu.stvec);
+            s_fp_trace << ' ';
+            write_hex(cpu.sscratch);
+            s_fp_trace << ' ';
+            write_hex(cpu.sepc);
+            s_fp_trace << '\n';
 
-            fprintf(s_fp_trace, "%08x ", cpu.scause);
-            fprintf(s_fp_trace, "%08x ", cpu.stval);
-            fprintf(s_fp_trace, "%08x ", cpu.satp);
-            fprintf(s_fp_trace, "%08x ", cpu.scounteren);
-            fprintf(s_fp_trace, "%08x ", cpu.load_res);
+            write_hex(cpu.scause);
+            s_fp_trace << ' ';
+            write_hex(cpu.stval);
+            s_fp_trace << ' ';
+            write_hex(cpu.satp);
+            s_fp_trace << ' ';
+            write_hex(cpu.scounteren);
+            s_fp_trace << ' ';
+            write_hex(cpu.load_res);
+            s_fp_trace << ' ';
         }
-        fprintf(s_fp_trace, "%08x ", cpu.pending_exception);
-        fprintf(s_fp_trace, "%08x ", cpu.pending_tval);
-        fprintf(s_fp_trace, "%08x ", cpu.priv);
-        fprintf(s_fp_trace, "\n");
+        write_hex(cpu.pending_exception);
+        s_fp_trace << ' ';
+        write_hex(cpu.pending_tval);
+        s_fp_trace << ' ';
+        write_hex(cpu.priv);
+        s_fp_trace << '\n';
 
         if (!s_rtosmode) {
             for (int i = 0; i < 4; i++) {
-                fprintf(s_fp_trace, "%08x ", cpu.TLB_inst_r[i].v_addr);
-                fprintf(s_fp_trace, "%08x ", cpu.TLB_inst_r[i].p_addr);
+                write_hex(cpu.TLB_inst_r[i].v_addr);
+                s_fp_trace << ' ';
+                write_hex(cpu.TLB_inst_r[i].p_addr);
+                s_fp_trace << ' ';
             }
-            fprintf(s_fp_trace, "\n");
+            s_fp_trace << '\n';
             for (int i = 0; i < 4; i++) {
-                fprintf(s_fp_trace, "%08x ", cpu.TLB_data_r[i].v_addr);
-                fprintf(s_fp_trace, "%08x ", cpu.TLB_data_r[i].p_addr);
+                write_hex(cpu.TLB_data_r[i].v_addr);
+                s_fp_trace << ' ';
+                write_hex(cpu.TLB_data_r[i].p_addr);
+                s_fp_trace << ' ';
             }
-            fprintf(s_fp_trace, "\n");
+            s_fp_trace << '\n';
             for (int i = 0; i < 4; i++) {
-                fprintf(s_fp_trace, "%08x ", cpu.TLB_data_w[i].v_addr);
-                fprintf(s_fp_trace, "%08x ", cpu.TLB_data_w[i].p_addr);
+                write_hex(cpu.TLB_data_w[i].v_addr);
+                s_fp_trace << ' ';
+                write_hex(cpu.TLB_data_w[i].p_addr);
+                s_fp_trace << ' ';
             }
-            fprintf(s_fp_trace, "\n");
+            s_fp_trace << '\n';
         }
     }
 }
@@ -780,34 +731,40 @@ void load_devicetree(Byte* ram) {
     }
 }
 
-/* Initialize                                                                             */
+/**
+ * @brief Initialize machine components and load memory/device images.
+ */
 int Machine::initialize(int argc, char* argv[]) {
     set_options(this, argc, argv); /* set options before the object instantiations */
 
-    disk = new Disk();
-    console = new Console();
-    mmem = console->mmem = disk->mmem = new Byte[simrv::memory::kDramSize];
+    disk = std::make_unique<Disk>();
+    console = std::make_unique<Console>();
+    mmem_owner_ = std::make_unique<Byte[]>(simrv::memory::kDramSize);
+    mmem = mmem_owner_.get();
+    console->mmem = mmem;
+    disk->mmem = mmem;
 
     // MAKE Console QUEUE
-    console->Queue = new QueueState[simrv::virtio::kConsoleMaxQueueNum];
-    disk->Queue = new QueueState[simrv::virtio::kDiskMaxQueueNum];
-    // disk->sector = new Byte[simrv::virtio::kDiskSize];
+    console_queue_owner_ = std::make_unique<QueueState[]>(simrv::virtio::kConsoleMaxQueueNum);
+    disk_queue_owner_ = std::make_unique<QueueState[]>(simrv::virtio::kDiskMaxQueueNum);
+    console->Queue = console_queue_owner_.get();
+    disk->Queue = disk_queue_owner_.get();
 
     if (s_dlog_mode) s_fp_dlog.open("init_virtio.txt");
 
     cpu.pc = s_start_pc;
     cpu.reg[11] =
-        (s_appmode | s_rtosmode) ? 0 : simrv::boot::kInitDataAddress + simrv::boot::kStartPc;
+        (s_appmode || s_rtosmode) ? 0 : simrv::boot::kInitDataAddress + simrv::boot::kStartPc;
     cpu.TLB_flush();
 
-    load_initram(s_fn_memimg, mmem);  // load a memory image file
+    load_image_into_ram(s_fn_memimg, mmem);  // load a memory image file
 
-    if (s_fn_dvtree == NULL)
+    if (s_fn_dvtree.empty())
         load_devicetree(mmem + simrv::boot::kInitDataAddress);
     else
-        load_initram(s_fn_dvtree, mmem + simrv::boot::kInitDataAddress);
+        load_image_into_ram(s_fn_dvtree, mmem + simrv::boot::kInitDataAddress);
 
-    if (s_use_disk) load_initram(s_fn_dskimg, disk->sector);  // load a disk image file
+    if (s_use_disk) load_image_into_ram(s_fn_dskimg, disk->sector);  // load a disk image file
 
     if (s_use_mix)
         for (int i = 0; i < OperationIdCount; i++) e_instmix[i] = 0;
@@ -816,28 +773,26 @@ int Machine::initialize(int argc, char* argv[]) {
 
     // #ifdef MIDDLE
     // #include "xinitreg.txt"
-    // load_initmem("xinitmem.bin", mmem);
+    // load_image_file_into_ram("xinitmem.bin", mmem);
     // disk->load_file("xinitdisk.bin", s_appmode);
     // #endif
     return 0;
 }
 
-Machine::~Machine() {
-    delete disk;
-    delete console;
-}
+Machine::~Machine() = default;
 
-void Microcn::init(char* fname) {
-    cmem = new Byte[simrv::memory::kLocalCoreMemorySize];
-    load_initram(fname, cmem);
+void Microcn::init(const std::string& image_path) {
+    cmem_owner_ = std::make_unique<Byte[]>(simrv::memory::kLocalCoreMemorySize);
+    cmem = cmem_owner_.get();
+    load_image_into_ram(image_path, cmem);
     for (int i = 0; i < 32; i++) reg[i] = 0;
     reg[11] = 0x8000; /* simrv::boot::kInitDataAddress + simrv::boot::kStartPc; */
 }
 
-int Microcn::exec() {
+bool Microcn::exec() {
     DecodeUnit decode_unit;
     ExecuteUnit execute_unit;
-    int ret = 1;
+    bool ret = true;
     cpc = pc;
     memcpy(&r_ir, &cmem[pc & simrv::memory::kDramMask], 4);
     if ((r_ir & 3) != 3) {
@@ -937,7 +892,7 @@ int Microcn::exec() {
                 fflush(stdout);
             }
             if (r_rrs2 >> 16 == 2) {
-                ret = 0;
+                ret = false;
             }
             //            if(r_rrs2>>16==2){ printf("\n__ Power off\n"); ret=0;}
             //            //exit(0);}//ret=0;}
@@ -983,6 +938,8 @@ int Microcn::exec() {
     if (wire_wb_r_enable && r_rd != 0) reg[r_rd] = wire_wb_r_data;
     pc = (r_tkn) ? r_jmp_pc : pc + 4;
 
-    sim_machine.e_uc_cnt++;
+    if (owner != nullptr) {
+        owner->e_uc_cnt++;
+    }
     return ret;
 }

@@ -12,7 +12,8 @@ constexpr Address D_TOHOST_ADDR = static_cast<Address>(0x40008000u);
 using DeviceList = std::array<MmioDevice*, 4>;
 
 DeviceList make_devices(Machine& machine) {
-    return {machine.console, machine.disk, static_cast<MmioDevice*>(&machine.cpu.plic_mmio),
+    return {machine.console.get(), machine.disk.get(),
+            static_cast<MmioDevice*>(&machine.cpu.plic_mmio),
             static_cast<MmioDevice*>(&machine.cpu.clint_mmio)};
 }
 }  // namespace

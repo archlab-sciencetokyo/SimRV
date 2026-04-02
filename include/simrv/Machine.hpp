@@ -4,7 +4,10 @@
  */
 #pragma once
 
+#include <chrono>
 #include <fstream>
+#include <memory>
+#include <string>
 
 #include "Console.hpp"
 #include "Cpu.hpp"
@@ -12,6 +15,8 @@
 #include "Disk.hpp"
 #include "MemorySubsystem.hpp"
 #include "MmioRouter.hpp"
+
+class Microcn;
 
 class Machine {
    public:
@@ -34,53 +39,58 @@ class Machine {
     Counter e_ccount = 0;             // the number of executed compressed instructions
     int e_instmix[OperationIdCount];  // the array for measuring instruction mix
 
-    int s_appmode = 0;                      // flag to identify whether the application mode or not
-    int s_rtosmode = 0;                     // flag to identify whether the rtos mode or not
-    int s_debugmode = 0;                    // Enable debug logging in memory-mapped paths.
-    int s_dlog_mode = 0;                    // Enable disk/console request logging.
-    int s_use_uc = 0;                       // flag to use IO controller (micro-controller)
-    int s_use_disk = 0;                     // flag to use disk image
-    int s_use_mix = 0;                      // flag to measure instruction mix
-    int s_bp_trace = 0;                     //
-    int s_isatest = 0;                      // flag to enable riscv-isa-tests tohost handling
+    bool s_appmode = false;                 // flag to identify whether the application mode or not
+    bool s_rtosmode = false;                // flag to identify whether the rtos mode or not
+    bool s_debugmode = false;               // Enable debug logging in memory-mapped paths.
+    bool s_dlog_mode = false;               // Enable disk/console request logging.
+    bool s_use_uc = false;                  // flag to use IO controller (micro-controller)
+    bool s_use_disk = false;                // flag to use disk image
+    bool s_use_mix = false;                 // flag to measure instruction mix
+    bool s_bp_trace = false;                //
+    bool s_isatest = false;                 // flag to enable riscv-isa-tests tohost handling
     Address s_start_pc = 0;                 // start PC
     Counter s_strace = 0;                   // Start cycle for tracepc generation.
     Address s_isatest_tohost = 0x80001000;  // RAM tohost address for riscv-isa-tests
-    Counter s_gen_binfile = 0;              // flag: generate binary image file for FPGA run
+    bool s_gen_binfile = false;             // flag: generate binary image file for FPGA run
     Counter s_memimg = 0;                   // Cycle to emit init dump artifacts.
     Counter s_fincnt = ~0ull;               // instruction count to finish the simulation
     Counter s_trace_begin = ~0ull;          // First cycle included in full trace output.
     Counter s_trace_end = ~0ull;            // Last cycle included in full trace output.
     Counter s_enabletimer = ~0ull;          // enable timer after N cycles Linux boots
-    FILE* s_fp_trace;                       // file pointer of trace file
+    std::ofstream s_fp_trace;               // trace output stream
     std::ofstream s_fp_dlog;                // File handle for disk/console activity log.
-    char* s_fn_memimg;                      // file name of memory image
-    char* s_fn_dskimg;                      // file name of disk   image
-    char* s_fn_dvtree;                      // file name of device-tree binary
-    char* s_fn_iocon;                       // file name of I/O controller program binary
-    struct timeval s_stime;                 // start time stamp
+    std::string s_fn_memimg;                // file name of memory image
+    std::string s_fn_dskimg;                // file name of disk image
+    std::string s_fn_dvtree;                // file name of device-tree binary
+    std::string s_fn_iocon;                 // file name of I/O controller program binary
+    std::chrono::steady_clock::time_point s_start_time;  // simulation start timestamp
 
     CPU cpu;
-    Disk* disk;
-    Console* console;
+    std::unique_ptr<Microcn> micro_controller;
+    std::unique_ptr<Disk> disk;
+    std::unique_ptr<Console> console;
 
     Byte* mmem;  // main memory
     MmioRouter mmio_router_;
 
    private:
+    std::unique_ptr<Byte[]> mmem_owner_;
+    std::unique_ptr<QueueState[]> console_queue_owner_;
+    std::unique_ptr<QueueState[]> disk_queue_owner_;
     friend class CPU;
     MemorySubsystem memory_;
     /// Perform per-cycle initialization before CPU stage execution.
     void prepare_cycle();
     /// Perform per-cycle finalization and completion checks.
     void finalize_cycle();
-    int is_running_ = 1;  // Main-loop run flag.
+    bool is_running_ = true;  // Main-loop run flag.
 };
 
 class Microcn {
    public:
-    void init(char*);
-    int exec();
+    void init(const std::string& image_path);
+    bool exec();
+    Machine* owner = nullptr;
     Byte* cmem; /* local memory */
     Byte* mmem; /* main memory of processor */
 
@@ -124,4 +134,7 @@ class Microcn {
     CSRValue r_wb_data_csr;
     // MEM stage
     Register r_mem_rdata;
+
+   private:
+    std::unique_ptr<Byte[]> cmem_owner_;
 };

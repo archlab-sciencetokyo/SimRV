@@ -6,7 +6,7 @@
 
 namespace simrv::machine_detail {
 Word ram_read(Address addr, Instruction funct3, Byte* ram);
-int page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem);
+bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem);
 }  // namespace simrv::machine_detail
 
 void CPU::run_fetch_stage(Machine& machine) {
@@ -52,7 +52,7 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) { /* page walk an
     Word* r_padr = (state == 1) ? &pipeline_context.padr1 : &pipeline_context.padr2;
     Word w_vadr = (state == 1) ? pc : pc + 2;
     if (w_padr == ~0u) {
-        int pf =
+        const bool pf =
             simrv::machine_detail::page_walk(w_vadr, &w_padr, PteAccess::Code, this, machine.mmem);
         if (pf) {
             pending_exception = enum_mask(ExceptionCode::FetchPageFault);

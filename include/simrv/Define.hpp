@@ -57,24 +57,24 @@ inline constexpr Address kStartPc = static_cast<Address>(0x80000000u);
 inline constexpr Address kInitDataAddress = static_cast<Address>(0x01000000u);
 }  // namespace simrv::boot
 
-enum class DumpFlag : uint32_t {
+using DumpFlags = uint32_t;
+
+enum class DumpFlag : DumpFlags {
     Exec = (1u << 0),
     Reg = (1u << 1),
     Csr = (1u << 2),
 };
 
-using DumpFlags = uint32_t;
-
 using PteFlags = Word;
 
 enum class PteFlag : PteFlags {
-    V = (Word{1} << 0),
-    R = (Word{1} << 1),
-    W = (Word{1} << 2),
-    X = (Word{1} << 3),
-    U = (Word{1} << 4),
-    A = (Word{1} << 6),
-    D = (Word{1} << 7),
+    V = (1 << 0),
+    R = (1 << 1),
+    W = (1 << 2),
+    X = (1 << 3),
+    U = (1 << 4),
+    A = (1 << 6),
+    D = (1 << 7),
 };
 
 enum class PteAccess : uint8_t { Read = 0, Write = 1, Code = 2 };

@@ -361,7 +361,7 @@ Register ALU_IM(Register in1, Register in2, Instruction funct3, Instruction func
                 break;
             }
             case Funct3::Slt: {
-                ret = (SignedWord)in1 < (SignedWord)in2;
+                ret = static_cast<SignedWord>(in1) < static_cast<SignedWord>(in2);
                 break;
             }
             case Funct3::Sltu: {
@@ -374,7 +374,7 @@ Register ALU_IM(Register in1, Register in2, Instruction funct3, Instruction func
             }
             case Funct3::Srl: {
                 if (funct7)
-                    ret = (SignedWord)in1 >> shamt;
+                    ret = static_cast<SignedWord>(in1) >> shamt;
                 else
                     ret = in1 >> shamt;
                 break;
@@ -392,9 +392,11 @@ Register ALU_IM(Register in1, Register in2, Instruction funct3, Instruction func
             }
         }
     } else {
-        Counter mul_SS = (int64_t)((SignedWord)in1) * (int64_t)((SignedWord)in2);
-        Counter mul_SU = (int64_t)((SignedWord)in1) * (Counter)in2;
-        Counter mul_UU = (Counter)in1 * (Counter)in2;
+        Counter mul_SS = static_cast<int64_t>(static_cast<SignedWord>(in1)) *
+                         static_cast<int64_t>(static_cast<SignedWord>(in2));
+        Counter mul_SU =
+            static_cast<int64_t>(static_cast<SignedWord>(in1)) * static_cast<Counter>(in2);
+        Counter mul_UU = static_cast<Counter>(in1) * static_cast<Counter>(in2);
         switch (f3) {
             case Funct3::Mul: {
                 ret = mul_SS & 0xFFFFFFFF;
@@ -418,7 +420,7 @@ Register ALU_IM(Register in1, Register in2, Instruction funct3, Instruction func
                 else if (in2 == 0)
                     ret = 0xFFFFFFFF;
                 else
-                    ret = (SignedWord)in1 / (SignedWord)in2;
+                    ret = static_cast<SignedWord>(in1) / static_cast<SignedWord>(in2);
                 break;
             }
             case Funct3::Divu: {
@@ -434,7 +436,7 @@ Register ALU_IM(Register in1, Register in2, Instruction funct3, Instruction func
                 else if (in2 == 0)
                     ret = in1;
                 else
-                    ret = (SignedWord)in1 % (SignedWord)in2;
+                    ret = static_cast<SignedWord>(in1) % static_cast<SignedWord>(in2);
                 break;
             }
             case Funct3::Remu: {
@@ -464,11 +466,11 @@ Instruction ALU_B(Register in1, Register in2, Instruction funct3) {
             break;
         }
         case Funct3::Blt: {
-            ret = (SignedWord)in1 < (SignedWord)in2;
+            ret = static_cast<SignedWord>(in1) < static_cast<SignedWord>(in2);
             break;
         }
         case Funct3::Bge: {
-            ret = (SignedWord)in1 >= (SignedWord)in2;
+            ret = static_cast<SignedWord>(in1) >= static_cast<SignedWord>(in2);
             break;
         }
         case Funct3::Bltu: {

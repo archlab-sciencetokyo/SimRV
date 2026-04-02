@@ -34,14 +34,12 @@ void InterruptController::setIrq(int irq_num, int state) {
     updateMip();
 }
 
-bool PlicMmio::read(Machine& machine, Address p_addr, Word& rdata) {
-    (void)machine;
+bool PlicMmio::read([[maybe_unused]] Machine& machine, Address p_addr, Word& rdata) {
     rdata = mmio_read(offset(p_addr));
     return true;
 }
 
-bool PlicMmio::write(Machine& machine, Address p_addr, Word wdata) {
-    (void)machine;
+bool PlicMmio::write([[maybe_unused]] Machine& machine, Address p_addr, Word wdata) {
     mmio_write(offset(p_addr), wdata);
     return true;
 }
@@ -65,14 +63,12 @@ void PlicMmio::mmio_write(Address offset, Word wdata) {
     }
 }
 
-bool ClintMmio::read(Machine& machine, Address p_addr, Word& rdata) {
-    (void)machine;
+bool ClintMmio::read([[maybe_unused]] Machine& machine, Address p_addr, Word& rdata) {
     rdata = mmio_read(offset(p_addr));
     return true;
 }
 
-bool ClintMmio::write(Machine& machine, Address p_addr, Word wdata) {
-    (void)machine;
+bool ClintMmio::write([[maybe_unused]] Machine& machine, Address p_addr, Word wdata) {
     mmio_write(offset(p_addr), wdata);
     return true;
 }
@@ -91,7 +87,7 @@ void ClintMmio::mmio_write(Address offset, Word wdata) {
         cpu_.mip &= ~enum_mask(MipBit::Mtip);
     }
     if (offset == 0x4004) {
-        cpu_.mtimecmp = (cpu_.mtimecmp & 0xffffffffu) | ((Counter)wdata << 32);
+        cpu_.mtimecmp = (cpu_.mtimecmp & 0xffffffffu) | (static_cast<Counter>(wdata) << 32);
         cpu_.mip &= ~enum_mask(MipBit::Mtip);
     }
 }
