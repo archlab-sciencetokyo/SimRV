@@ -4,7 +4,7 @@
  */
 #include "CsrFile.hpp"
 
-#include "State.hpp"
+#include "Cpu.hpp"
 
 CSRValue CsrFile::getMstatus(CSRValue mask) const {
     CSRValue val = (cpu_.mstatus | kMstatusFsDirty) & mask;

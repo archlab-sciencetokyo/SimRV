@@ -3,9 +3,10 @@
  * @brief SimRV declarations.
  */
 #pragma once
+#include "Cpu.hpp"
 #include "Define.hpp"
 #include "MmioDevice.hpp"
-#include "State.hpp"
+
 class Machine;
 class Disk : public MmioDevice {
    public:

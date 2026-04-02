@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(SimRV LANGUAGES CXX)
 
-set(SIMRV_VERSION "2.0.0-alpha.2")
+set(SIMRV_VERSION "2.0.0-alpha.3")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -73,10 +73,18 @@ add_executable(SimRV
   src/ExecuteUnitInt.cpp
   src/ExecuteUnitFloat.cpp
   src/ExecuteUnit.cpp
+  src/stages/StageIF.cpp
+  src/stages/StageID.cpp
+  src/stages/StageEX.cpp
+  src/stages/StageMEM.cpp
+  src/stages/StageWB.cpp
+  src/stages/StageCommit.cpp
+  src/cpu/CpuCore.cpp
+  src/cpu/CpuCycle.cpp
+  src/memory/MemorySubsystem.cpp
   src/MmioRouter.cpp
   src/Disk.cpp
   src/Console.cpp
-  src/State.cpp
 )
 
 target_include_directories(SimRV PRIVATE

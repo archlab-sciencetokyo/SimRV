@@ -65,7 +65,9 @@ enum class DumpFlag : uint32_t {
 
 using DumpFlags = uint32_t;
 
-enum class PteFlag : Word {
+using PteFlags = Word;
+
+enum class PteFlag : PteFlags {
     V = (Word{1} << 0),
     R = (Word{1} << 1),
     W = (Word{1} << 2),
@@ -74,8 +76,6 @@ enum class PteFlag : Word {
     A = (Word{1} << 6),
     D = (Word{1} << 7),
 };
-
-using PteFlags = Word;
 
 enum class PteAccess : uint8_t { Read = 0, Write = 1, Code = 2 };
 

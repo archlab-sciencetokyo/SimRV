@@ -3,9 +3,10 @@
  * @brief SimRV declarations.
  */
 #pragma once
+#include "Cpu.hpp"
 #include "Define.hpp"
 #include "MmioDevice.hpp"
-#include "State.hpp"
+
 class Machine;
 class Console : public MmioDevice {
    public:
@@ -27,8 +28,8 @@ class Console : public MmioDevice {
     constexpr Address offset(Address addr) const { return addr - kBaseAddress; }
     Word console_read(Address offset) { return mmio_read(offset); }
     void console_write(CPU* cpu, Address offset, Word wdata) { mmio_write(cpu, offset, wdata); }
-    int recieve_input();
-    int MC_recieve_input();
+    int receive_input();
+    int MC_receive_input();
 
     Byte* mmem;  // main memory
 

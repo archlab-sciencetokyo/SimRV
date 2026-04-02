@@ -20,11 +20,13 @@ This document describes the current high-level structure after the initial OOP w
 These helpers are intentionally thin in this phase to preserve behavior while making class boundaries explicit.
 
 ## Data Flow (Main CPU Path)
-1. IFA/IFB/IFC fetch raw instruction bits and translate addresses.
-2. CVT normalizes compressed instructions and updates instruction mix.
-3. ID/OF extract fields and fetch register/CSR operands.
-4. EX1/LD/EX2/SD/WB execute operation, handle memory paths, and write back results.
-5. COM/FIN update control flow, traps, and simulation completion.
+
+1. IF stage (`stage_if`) runs IFA/IFB/IFC and CVT for fetch, translation, and decompression.
+2. ID stage (`stage_id`) runs ID and OF for field decode and register/CSR operand capture.
+3. EX stage (`stage_ex`) runs EX1 for ALU/branch/core execute decisions.
+4. MEM stage (`stage_mem`) runs LD/EX2/SD for memory read/modify/write behavior.
+5. WB stage (`stage_wb`) runs WB for integer/floating writeback.
+6. Commit/finalize (`stage_commit` + FIN) applies control-flow updates, trap/interrupt handling, and termination checks.
 
 ## Build and Validation
 - Primary build framework: CMake + Ninja via preset `ninja-clang-release`.

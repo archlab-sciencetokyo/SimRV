@@ -8,19 +8,19 @@
 
 namespace {
 constexpr Address D_TOHOST_ADDR = static_cast<Address>(0x40008000u);
+
+using DeviceList = std::array<MmioDevice*, 4>;
+
+DeviceList make_devices(Machine& machine) {
+    return {machine.console, machine.disk, static_cast<MmioDevice*>(&machine.cpu.plic_mmio),
+            static_cast<MmioDevice*>(&machine.cpu.clint_mmio)};
+}
 }  // namespace
 
 MmioRouter::MmioRouter(Machine& machine) : machine_(machine) {}
 
 bool MmioRouter::read(Address p_addr, Word& rdata) {
-    MmioDevice* devices[] = {
-        machine_.console,
-        machine_.disk,
-        machine_.cpu ? static_cast<MmioDevice*>(&machine_.cpu->plic_mmio) : nullptr,
-        machine_.cpu ? static_cast<MmioDevice*>(&machine_.cpu->clint_mmio) : nullptr,
-    };
-
-    for (const auto& device : devices) {
+    for (MmioDevice* device : make_devices(machine_)) {
         if (device == nullptr) continue;
         if (device->contains(p_addr)) return device->read(machine_, p_addr, rdata);
     }
@@ -33,14 +33,7 @@ bool MmioRouter::write(Address p_addr, Word wdata) {
         return true;
     }
 
-    MmioDevice* devices[] = {
-        machine_.console,
-        machine_.disk,
-        machine_.cpu ? static_cast<MmioDevice*>(&machine_.cpu->plic_mmio) : nullptr,
-        machine_.cpu ? static_cast<MmioDevice*>(&machine_.cpu->clint_mmio) : nullptr,
-    };
-
-    for (const auto& device : devices) {
+    for (MmioDevice* device : make_devices(machine_)) {
         if (device == nullptr) continue;
         if (device->contains(p_addr)) return device->write(machine_, p_addr, wdata);
     }

@@ -7,24 +7,26 @@
 #include <fstream>
 
 #include "Console.hpp"
-#include "DecodeUnit.hpp"
+#include "Cpu.hpp"
 #include "Define.hpp"
 #include "Disk.hpp"
-#include "ExecuteUnit.hpp"
+#include "MemorySubsystem.hpp"
 #include "MmioRouter.hpp"
-#include "PipelineContext.hpp"
-#include "State.hpp"
+
 class Machine {
    public:
     Machine();
     ~Machine();
-    int init(int argc, char* argv[]);
-    void exec();            // Execute the main simulation loop.
-    void trace_output();    // Emit one trace snapshot.
-    void display_result();  // Print final simulation statistics.
-    void instmix_output();  // Dump instruction-mix report.
-    Word target_read(Address, Instruction);
-    void target_write(Address, Word, Instruction);
+    /// Initialize machine state and load runtime images/configuration.
+    int initialize(int argc, char* argv[]);
+    /// Execute the main simulation loop until termination criteria are met.
+    void run();
+    /// Emit one architectural trace snapshot to the configured trace stream.
+    void write_trace_snapshot();
+    /// Print final simulation statistics.
+    void print_summary();
+    /// Dump instruction-mix report to disk.
+    void write_instruction_mix_report();
     Word tohost = 0;  // Host communication register used by tests and app mode.
 
     Counter e_icount = 0;             // the number of executed instructions
@@ -58,7 +60,7 @@ class Machine {
     char* s_fn_iocon;                       // file name of I/O controller program binary
     struct timeval s_stime;                 // start time stamp
 
-    CPU* cpu;
+    CPU cpu;
     Disk* disk;
     Console* console;
 
@@ -66,24 +68,13 @@ class Machine {
     MmioRouter mmio_router_;
 
    private:
-    DecodeUnit decode_unit_;
-    ExecuteUnit execute_unit_;
-    PipelineContext pipeline_context_;
-    void INI();
-    void IFA(); /* the first IF */
-    void IFB(int);
-    void IFC();
-    void CVT();
-    void ID_();
-    void OF_();
-    void EX1();
-    void LD_();
-    void EX2();
-    void SD_();
-    void WB_();
-    void COM();
-    void FIN();
-    int r_running = 1;  // Main-loop run flag.
+    friend class CPU;
+    MemorySubsystem memory_;
+    /// Perform per-cycle initialization before CPU stage execution.
+    void prepare_cycle();
+    /// Perform per-cycle finalization and completion checks.
+    void finalize_cycle();
+    int is_running_ = 1;  // Main-loop run flag.
 };
 
 class Microcn {

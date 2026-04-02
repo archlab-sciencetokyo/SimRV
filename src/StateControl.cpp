@@ -4,7 +4,7 @@
  */
 #include "StateControl.hpp"
 
-#include "State.hpp"
+#include "Cpu.hpp"
 
 void TlbUnit::flush() {
     for (Word i = 0; i < simrv::memory::kTlbSize; i++) {

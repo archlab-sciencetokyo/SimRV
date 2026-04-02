@@ -3,6 +3,10 @@
  * @brief SimRV declarations.
  */
 #pragma once
+
+#include <array>
+#include <string_view>
+
 #include "Define.hpp"
 
 namespace simrv::module {
@@ -16,6 +20,6 @@ Instruction ALU_B(Register in1, Register in2, Instruction funct3);
 Register ALU_A(Register in1, Register in2, Instruction funct5);
 CSRValue ALU_C(CSRValue rcsr, Register rrs1, Instruction imm, Instruction funct3);
 
-extern char OPERATION_NAME[OperationIdCount][11];
+extern const std::array<std::string_view, kOperationIdCount> OPERATION_NAME;
 
 }  // namespace simrv::module

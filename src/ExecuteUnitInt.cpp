@@ -28,7 +28,7 @@ Register ExecuteUnit::aluInt(Register in1, Register in2, Instruction funct3,
                 ret = in1 << shamt;
                 break;
             case Funct3::Slt:
-                ret = (SignedWord)in1 < (SignedWord)in2;
+                ret = static_cast<SignedWord>(in1) < static_cast<SignedWord>(in2);
                 break;
             case Funct3::Sltu:
                 ret = in1 < in2;
@@ -37,7 +37,7 @@ Register ExecuteUnit::aluInt(Register in1, Register in2, Instruction funct3,
                 ret = in1 ^ in2;
                 break;
             case Funct3::Srl:
-                ret = funct7 ? ((SignedWord)in1 >> shamt) : (in1 >> shamt);
+                ret = funct7 ? (static_cast<SignedWord>(in1) >> shamt) : (in1 >> shamt);
                 break;
             case Funct3::Or:
                 ret = in1 | in2;
@@ -49,9 +49,11 @@ Register ExecuteUnit::aluInt(Register in1, Register in2, Instruction funct3,
                 break;
         }
     } else {
-        Counter mul_SS = (int64_t)((SignedWord)in1) * (int64_t)((SignedWord)in2);
-        Counter mul_SU = (int64_t)((SignedWord)in1) * (Counter)in2;
-        Counter mul_UU = (Counter)in1 * (Counter)in2;
+        Counter mul_SS = static_cast<int64_t>(static_cast<SignedWord>(in1)) *
+                         static_cast<int64_t>(static_cast<SignedWord>(in2));
+        Counter mul_SU =
+            static_cast<int64_t>(static_cast<SignedWord>(in1)) * static_cast<Counter>(in2);
+        Counter mul_UU = static_cast<Counter>(in1) * static_cast<Counter>(in2);
         switch (f3) {
             case Funct3::Mul:
                 ret = mul_SS & D_WORD_LOW_MASK;
@@ -71,7 +73,7 @@ Register ExecuteUnit::aluInt(Register in1, Register in2, Instruction funct3,
                 else if (in2 == 0)
                     ret = D_DIV_BY_ZERO_RESULT;
                 else
-                    ret = (SignedWord)in1 / (SignedWord)in2;
+                    ret = static_cast<SignedWord>(in1) / static_cast<SignedWord>(in2);
                 break;
             case Funct3::Divu:
                 ret = (in2 == 0) ? D_DIV_BY_ZERO_RESULT : (in1 / in2);
@@ -82,7 +84,7 @@ Register ExecuteUnit::aluInt(Register in1, Register in2, Instruction funct3,
                 else if (in2 == 0)
                     ret = in1;
                 else
-                    ret = (SignedWord)in1 % (SignedWord)in2;
+                    ret = static_cast<SignedWord>(in1) % static_cast<SignedWord>(in2);
                 break;
             case Funct3::Remu:
                 ret = (in2 == 0) ? in1 : (in1 % in2);
@@ -101,9 +103,9 @@ Instruction ExecuteUnit::branchTaken(Register in1, Register in2, Instruction fun
         case Funct3::Bne:
             return in1 != in2;
         case Funct3::Blt:
-            return (SignedWord)in1 < (SignedWord)in2;
+            return static_cast<SignedWord>(in1) < static_cast<SignedWord>(in2);
         case Funct3::Bge:
-            return (SignedWord)in1 >= (SignedWord)in2;
+            return static_cast<SignedWord>(in1) >= static_cast<SignedWord>(in2);
         case Funct3::Bltu:
             return in1 < in2;
         case Funct3::Bgeu:
@@ -129,11 +131,11 @@ Register ExecuteUnit::aluAmo(Register in1, Register in2, Instruction funct5) con
         case Funct5Amo::Xor:
             return in1 ^ in2;
         case Funct5Amo::Min:
-            return (SignedWord)in1 < (SignedWord)in2 ? in1 : in2;
+            return static_cast<SignedWord>(in1) < static_cast<SignedWord>(in2) ? in1 : in2;
         case Funct5Amo::Minu:
             return in1 < in2 ? in1 : in2;
         case Funct5Amo::Max:
-            return (SignedWord)in1 > (SignedWord)in2 ? in1 : in2;
+            return static_cast<SignedWord>(in1) > static_cast<SignedWord>(in2) ? in1 : in2;
         case Funct5Amo::Maxu:
             return in1 > in2 ? in1 : in2;
         default:

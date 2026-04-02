@@ -5,16 +5,18 @@
 #include "Disk.hpp"
 
 #include "Machine.hpp"
-extern Machine mm; /* class machine                     */
-extern Microcn cc; /* I/O controller (micro-controller) */
+extern Machine sim_machine; /* class machine                     */
+extern Microcn micro_controller; /* I/O controller (micro-controller) */
 
 constexpr Word DISK_MAGIC_VALUE = 0x74726976;
 constexpr Word DISK_VERSION = 2;
-constexpr Word DISK_DEVIDE_ID = 2;
+constexpr Word DISK_DEVICE_ID = 2;
 constexpr Word DISK_VENDOR_ID = 0xffff;
 constexpr Word DISK_DEVICE_FEATURES = 1;
 constexpr Word DISK_CONFIG_GENERATION = 0;
 constexpr Word DISK_QUEUE_NUM_MAX = 4;
+
+using DescriptorSize = std::integral_constant<std::size_t, 16>;
 
 constexpr Word byte_to_word(Byte b) { return static_cast<Word>(std::to_integer<uint8_t>(b)); }
 constexpr Byte word_to_byte(Word w) { return static_cast<Byte>(static_cast<uint8_t>(w & 0xffu)); }
@@ -78,7 +80,6 @@ void update_descriptor(Word desc_idx, Word desc_len, int q_num, QueueState* qs, 
     ram_st(addr_used_entry + 4, desc_len, 4, mmem);
 }
 
-constexpr int DESC_SIZE = 16; /* descriptor size 16 byte */
 void disk_request(Byte* mmem, Byte* mdsk, int q_num, QueueState* qs) {
     Descriptor desc;
     BlockRequestHeader header;
@@ -90,10 +91,10 @@ void disk_request(Byte* mmem, Byte* mdsk, int q_num, QueueState* qs) {
         // (1) header
         Address adr = qs->AvailLow + 4 + (qs->last_avail_idx & (q_num - 1)) * 2;
         uint16_t desc_idx_header = ram_ld(adr, 2, mmem);
-        Address desc_adr_header = desc_idx_header * DESC_SIZE + qs->DescLow;
+        Address desc_adr_header = desc_idx_header * DescriptorSize::value + qs->DescLow;
 
         p = reinterpret_cast<Byte*>(&desc);
-        for (int i = 0; i < DESC_SIZE; i++) {
+        for (std::size_t i = 0; i < DescriptorSize::value; i++) {
             *p = static_cast<Byte>(static_cast<uint8_t>(ram_ld(desc_adr_header + i, 1, mmem)));
             p++;
         }
@@ -110,9 +111,9 @@ void disk_request(Byte* mmem, Byte* mdsk, int q_num, QueueState* qs) {
 
         // (2) sector
         uint16_t desc_idx_sector = desc.next;
-        Address desc_adr_sector = desc_idx_sector * DESC_SIZE + qs->DescLow;
+        Address desc_adr_sector = desc_idx_sector * DescriptorSize::value + qs->DescLow;
         p = reinterpret_cast<Byte*>(&desc);
-        for (int i = 0; i < DESC_SIZE; i++) {
+        for (std::size_t i = 0; i < DescriptorSize::value; i++) {
             *p = static_cast<Byte>(static_cast<uint8_t>(ram_ld(desc_adr_sector + i, 1, mmem)));
             p++;
         }
@@ -122,9 +123,9 @@ void disk_request(Byte* mmem, Byte* mdsk, int q_num, QueueState* qs) {
 
         // (3) footer
         uint16_t desc_idx_footer = desc.next;
-        Address desc_adr_footer = desc_idx_footer * DESC_SIZE + qs->DescLow;
+        Address desc_adr_footer = desc_idx_footer * DescriptorSize::value + qs->DescLow;
         p = reinterpret_cast<Byte*>(&desc);
-        for (int i = 0; i < DESC_SIZE; i++) {
+        for (std::size_t i = 0; i < DescriptorSize::value; i++) {
             *p = static_cast<Byte>(static_cast<uint8_t>(ram_ld(desc_adr_footer + i, 1, mmem)));
             p++;
         }
@@ -165,7 +166,7 @@ void disk_request(Byte* mmem, Byte* mdsk, int q_num, QueueState* qs) {
 
 Disk::Disk()
     : mmem(nullptr),
-      sector(new Byte[simrv::virtio::kDiskSize]),  // sector is nog good name, rename this!
+      sector(new Byte[simrv::virtio::kDiskSize]),  // sector is not a good name, rename this!
       Queue(nullptr),
       DeviceFeaturesSel(0),
       DriverFeatures(0),
@@ -178,7 +179,7 @@ Disk::Disk()
 bool Disk::read(Machine& machine, Address p_addr, Word& rdata) {
     rdata = mmio_read(offset(p_addr));
     if (machine.s_debugmode) {
-        printf("__ %10ld VIO mem_read  %08x %08x\n", machine.cpu->mtime, p_addr, rdata);
+        printf("__ %10ld VIO mem_read  %08x %08x\n", machine.cpu.mtime, p_addr, rdata);
     }
     if (machine.s_dlog_mode && machine.s_fp_dlog.is_open()) {
         machine.s_fp_dlog << std::hex << rdata << '\n';
@@ -188,9 +189,9 @@ bool Disk::read(Machine& machine, Address p_addr, Word& rdata) {
 }
 
 bool Disk::write(Machine& machine, Address p_addr, Word wdata) {
-    mmio_write(machine.cpu, offset(p_addr), wdata);
+    mmio_write(&machine.cpu, offset(p_addr), wdata);
     if (machine.s_debugmode) {
-        printf("__ %10ld VIO mem_write %08x %08x\n", machine.cpu->mtime, p_addr, wdata);
+        printf("__ %10ld VIO mem_write %08x %08x\n", machine.cpu.mtime, p_addr, wdata);
     }
     return true;
 }
@@ -205,7 +206,7 @@ Word Disk::mmio_read(Address offset) {
             rdata = DISK_VERSION;
             break;
         case 0x008:
-            rdata = DISK_DEVIDE_ID;
+            rdata = DISK_DEVICE_ID;
             break;
         case 0x00c:
             rdata = DISK_VENDOR_ID;
@@ -237,7 +238,7 @@ Word Disk::mmio_read(Address offset) {
         default:
             break;  //{ printf("__ Error: disk_read() default %x.\n", offset); exit(0); }
     }
-    // printf("%8ld:CALL Disk READ mem[%x]->%x\n", cpu->mtime, offset, rdata);
+    // printf("%8ld:CALL Disk READ mem[%x]->%x\n", cpu.mtime, offset, rdata);
     return rdata;
 }
 
@@ -263,15 +264,15 @@ void Disk::mmio_write(CPU* cpu, Address offset, Word wdata) {
             break;
         case 0x050: {
             Queue[QueueSel].Notify = wdata;
-            //        printf("__ disk_request %10ld: %d\n", cpu->mtime, wdata);
-            if (mm.s_use_uc) {
-                cc.pc = 0;
-                cc.Qnum = QueueNum;
-                cc.Mode = 2;
-                cc.Qsel = wdata;
-                for (int i = 0; i < 32; i++) cc.reg[i] = 0;
-                cc.reg[11] = 0x8000;
-                while (cc.exec());
+            //        printf("__ disk_request %10ld: %d\n", cpu.mtime, wdata);
+            if (sim_machine.s_use_uc) {
+                micro_controller.pc = 0;
+                micro_controller.Qnum = QueueNum;
+                micro_controller.Mode = 2;
+                micro_controller.Qsel = wdata;
+                for (int i = 0; i < 32; i++) micro_controller.reg[i] = 0;
+                micro_controller.reg[11] = 0x8000;
+                while (micro_controller.exec());
             } else {
                 disk_request(mmem, sector, QueueNum, &Queue[wdata]); /* request */
             }
