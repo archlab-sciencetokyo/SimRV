@@ -40,3 +40,5 @@ compile_commands.json
 isa_logs/
 regression_logs/
 .cache/
+
+docs/api/
