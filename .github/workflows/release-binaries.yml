@@ -11,6 +11,8 @@ permissions:
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
+    env:
+      LLVM_VERSION: "20"
 
     steps:
       - name: Checkout
@@ -19,14 +21,18 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
+          sudo apt-get install -y wget lsb-release software-properties-common gnupg
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh "${LLVM_VERSION}"
+          sudo apt-get install -y clang-"${LLVM_VERSION}" cmake ninja-build gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
 
       - name: Fetch riscv-tests
         run: |
           git clone --depth 1 https://github.com/riscv-software-src/riscv-tests.git "$RUNNER_TEMP/riscv-tests"
 
       - name: Configure
-        run: cmake --preset ninja-clang-release
+        run: CC=clang-"${LLVM_VERSION}" CXX=clang++-"${LLVM_VERSION}" cmake --preset ninja-clang-release
 
       - name: Build
         run: cmake --build --preset ninja-clang-release
