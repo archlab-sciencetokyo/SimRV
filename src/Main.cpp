@@ -4,12 +4,15 @@
  *
  * SimCore/RISC-V functional simulator (ArchLab, Science Tokyo (former TokyoTech)).
  */
+#include <cctype>
 #include <charconv>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <expected>
+#include <filesystem>
+#include <initializer_list>
 #include <iostream>
 #include <span>
 #include <string>
@@ -29,6 +32,7 @@ enum class CliAction { Run, ShowHelp, ShowVersion };
 
 struct RuntimeOptions {
     std::string fn_memimg;
+    std::string fn_asm;
     std::string fn_dskimg;
     std::string fn_dvtree;
     std::string fn_iocon = "img/iocon.bin";
@@ -41,6 +45,8 @@ struct RuntimeOptions {
     Counter trace_end = ~0ull;
     Counter enabletimer = 70000000ul;
     Address isatest_tohost = 0x80001000;
+    MisaProfile misa_profile = MisaProfile::GC;
+    bool misa_override = false;
 
     bool appmode = false;
     bool rtosmode = false;
@@ -161,6 +167,136 @@ std::expected<void, std::string> parse_trace_window(RuntimeOptions& options,
     return {};
 }
 
+std::string lowercase_copy(std::string_view text) {
+    std::string result(text);
+    for (char& c : result) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return result;
+}
+
+std::expected<MisaProfile, std::string> parse_misa_profile(std::string_view value) {
+    const std::string normalized = lowercase_copy(value);
+    if (normalized == "rv32i") {
+        return MisaProfile::I;
+    }
+    if (normalized == "rv32imac") {
+        return MisaProfile::IMAC;
+    }
+    if (normalized == "rv32gc") {
+        return MisaProfile::GC;
+    }
+    return std::unexpected("unsupported MISA profile '" + std::string(value) +
+                           "' (supported: rv32i, rv32imac, rv32gc)");
+}
+
+MisaProfile effective_misa_profile(const RuntimeOptions& options) {
+    if (options.misa_override) {
+        return options.misa_profile;
+    }
+    if (options.rtosmode) {
+        return MisaProfile::I;
+    }
+    return MisaProfile::GC;
+}
+
+std::string shell_quote(std::string_view arg) {
+    std::string quoted = "'";
+    for (char c : arg) {
+        if (c == '\'') {
+            quoted += "'\\''";
+        } else {
+            quoted += c;
+        }
+    }
+    quoted += "'";
+    return quoted;
+}
+
+bool shell_command_success(const std::string& command) { return std::system(command.c_str()) == 0; }
+
+bool command_exists(std::string_view command) {
+    return shell_command_success("command -v " + shell_quote(command) + " >/dev/null 2>&1");
+}
+
+std::string resolve_tool(const char* env_name, std::initializer_list<std::string_view> candidates,
+                         std::string_view display_name) {
+    if (const char* env_value = std::getenv(env_name); env_value != nullptr && *env_value != '\0') {
+        return std::string(env_value);
+    }
+    for (const auto candidate : candidates) {
+        if (command_exists(candidate)) {
+            return std::string(candidate);
+        }
+    }
+    option_error(std::string("cannot find ") + std::string(display_name) +
+                 "; set environment variable " + env_name);
+}
+
+std::pair<std::string, std::string> misa_toolchain_flags(MisaProfile profile) {
+    switch (profile) {
+        case MisaProfile::I:
+            return {"rv32i", "ilp32"};
+        case MisaProfile::IMAC:
+            return {"rv32imac", "ilp32"};
+        case MisaProfile::GC:
+            return {"rv32gc", "ilp32d"};
+        default:
+            return {"rv32gc", "ilp32d"};
+    }
+}
+
+std::expected<std::string, std::string> assemble_to_binary(const RuntimeOptions& options) {
+    namespace fs = std::filesystem;
+
+    if (options.fn_asm.empty()) {
+        return std::unexpected("-A/--asm requires an assembly source path");
+    }
+
+    std::error_code ec;
+    const fs::path source_path = fs::path(options.fn_asm);
+    if (!fs::exists(source_path, ec)) {
+        return std::unexpected("assembly source not found: " + options.fn_asm);
+    }
+
+    const MisaProfile profile = effective_misa_profile(options);
+    const auto [march, mabi] = misa_toolchain_flags(profile);
+
+    const std::string cc = resolve_tool(
+        "RISCV_CC", {"riscv64-unknown-elf-gcc", "riscv32-unknown-elf-gcc"}, "RISC-V C compiler");
+    const std::string objcopy = resolve_tool(
+        "RISCV_OBJCOPY", {"riscv64-unknown-elf-objcopy", "riscv32-unknown-elf-objcopy", "objcopy"},
+        "RISC-V objcopy");
+
+    const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+    const fs::path base = fs::temp_directory_path(ec) /
+                          ("simrv-asm-" + std::to_string(static_cast<long long>(::getpid())) + "-" +
+                           std::to_string(nonce));
+    if (ec) {
+        return std::unexpected("failed to resolve temporary directory");
+    }
+
+    const fs::path elf_path = base.string() + ".elf";
+    const fs::path bin_path = base.string() + ".bin";
+
+    const std::string compile_cmd =
+        shell_quote(cc) + " -x assembler-with-cpp" + " -march=" + march + " -mabi=" + mabi +
+        " -nostdlib -nostartfiles -Wl,-N -Wl,--build-id=none -Ttext=0" + " -o " +
+        shell_quote(elf_path.string()) + " " + shell_quote(source_path.string());
+    if (!shell_command_success(compile_cmd)) {
+        return std::unexpected("failed to assemble source: " + options.fn_asm);
+    }
+
+    const std::string objcopy_cmd = shell_quote(objcopy) + " -O binary " +
+                                    shell_quote(elf_path.string()) + " " +
+                                    shell_quote(bin_path.string());
+    if (!shell_command_success(objcopy_cmd)) {
+        return std::unexpected("failed to objcopy assembled ELF to binary image");
+    }
+
+    return bin_path.string();
+}
+
 std::expected<ParseResult, std::string> parse_command_line(std::span<char* const> args) {
     ParseResult result{};
 
@@ -181,6 +317,14 @@ std::expected<ParseResult, std::string> parse_command_line(std::span<char* const
                 return std::unexpected(value.error());
             }
             result.options.fn_memimg = std::string(*value);
+            continue;
+        }
+        if (arg == "-A" || arg == "--asm") {
+            auto value = next_argument(args, i, "-A/--asm");
+            if (!value) {
+                return std::unexpected(value.error());
+            }
+            result.options.fn_asm = std::string(*value);
             continue;
         }
         if (arg == "-d") {
@@ -256,6 +400,19 @@ std::expected<ParseResult, std::string> parse_command_line(std::span<char* const
             }
             continue;
         }
+        if (arg == "--misa") {
+            auto value = next_argument(args, i, "--misa");
+            if (!value) {
+                return std::unexpected(value.error());
+            }
+            auto profile = parse_misa_profile(*value);
+            if (!profile) {
+                return std::unexpected(profile.error());
+            }
+            result.options.misa_profile = *profile;
+            result.options.misa_override = true;
+            continue;
+        }
 
         if (arg == "-w") {
             result.options.bp_trace = true;
@@ -300,8 +457,11 @@ std::expected<ParseResult, std::string> parse_command_line(std::span<char* const
         return std::unexpected("unknown option : " + std::string(arg));
     }
 
-    if (result.options.fn_memimg.empty()) {
-        return std::unexpected("-m <FILE> is required");
+    if (!result.options.fn_memimg.empty() && !result.options.fn_asm.empty()) {
+        return std::unexpected("choose either -m <FILE> or -A/--asm <FILE>, not both");
+    }
+    if (result.options.fn_memimg.empty() && result.options.fn_asm.empty()) {
+        return std::unexpected("either -m <FILE> or -A/--asm <FILE> is required");
     }
 
     return result;
@@ -309,7 +469,16 @@ std::expected<ParseResult, std::string> parse_command_line(std::span<char* const
 
 std::expected<void, std::string> apply_runtime_options(Machine* machine,
                                                        const RuntimeOptions& options) {
-    machine->s_fn_memimg = options.fn_memimg;
+    std::string memimg_path = options.fn_memimg;
+    if (!options.fn_asm.empty()) {
+        auto assembled = assemble_to_binary(options);
+        if (!assembled) {
+            return std::unexpected(assembled.error());
+        }
+        memimg_path = *assembled;
+    }
+
+    machine->s_fn_memimg = memimg_path;
     machine->s_fn_dskimg = options.fn_dskimg;
     machine->s_fn_dvtree = options.fn_dvtree;
     machine->s_fn_iocon = options.fn_iocon;
@@ -322,6 +491,8 @@ std::expected<void, std::string> apply_runtime_options(Machine* machine,
     machine->s_trace_end = options.trace_end;
     machine->s_enabletimer = options.enabletimer;
     machine->s_isatest_tohost = options.isatest_tohost;
+    machine->s_misa_profile = misa_profile_bits(effective_misa_profile(options));
+    machine->s_misa_override = options.misa_override;
 
     machine->s_appmode = options.appmode;
     machine->s_rtosmode = options.rtosmode;
@@ -353,7 +524,8 @@ void set_start_time(Machine& machine) { machine.s_start_time = std::chrono::stea
 [[noreturn]] void usage(const char* program_name, int exit_code = 0) {
     std::cout << "Usage: " << program_name << " [options]\n\n"
               << "Required:\n"
-              << "  -m <FILE>        Memory image file\n\n"
+              << "  -m <FILE>        Memory image file\n"
+              << "  -A, --asm <FILE> Assemble source file and run generated image\n\n"
               << "Images and Devices:\n"
               << "  -d <FILE>        Disk image file (enables disk mode)\n"
               << "  -c <FILE>        Device-tree binary file\n"
@@ -362,7 +534,8 @@ void set_start_time(Machine& machine) { machine.s_start_time = std::chrono::stea
               << "  -e <N>           Stop after N instructions\n"
               << "  -l <N>           Enable timer after N cycles\n"
               << "  -a               App mode (start_pc=0)\n"
-              << "  -r               RTOS mode (start_pc=0, timer enabled at cycle 0)\n\n"
+              << "  -r               RTOS mode (start_pc=0, timer enabled at cycle 0)\n"
+              << "  --misa <PROFILE> Select MISA profile: rv32i | rv32imac | rv32gc\n\n"
               << "Tracing and Debug:\n"
               << "  -t <BEGIN> <END> Write trace.txt for instruction range [BEGIN, END]\n"
               << "  -q <N>           Generate tracepc.txt every 1000 instructions after N\n"
@@ -383,7 +556,8 @@ void set_start_time(Machine& machine) { machine.s_start_time = std::chrono::stea
               << "Examples:\n"
               << "  " << program_name << " -m img/bbl.bin -d img/root.bin\n"
               << "  " << program_name << " -m img/bbl.bin -d img/root.bin -e 40m\n"
-              << "  " << program_name << " -m img/hello.bin -a\n";
+              << "  " << program_name << " -m img/hello.bin -a\n"
+              << "  " << program_name << " -A prog.S --misa rv32imac\n";
     std::exit(exit_code);
 }
 

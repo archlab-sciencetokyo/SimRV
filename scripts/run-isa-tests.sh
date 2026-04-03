@@ -9,7 +9,7 @@ RISCV_TESTS_DIR="${RISCV_TESTS_DIR:-$DEFAULT_RISCV_TESTS_DIR}"
 if [[ ! -d "$RISCV_TESTS_DIR" ]]; then
   echo "ERROR: riscv-tests directory not found: $RISCV_TESTS_DIR"
   echo "Set RISCV_TESTS_DIR to your checkout/build directory"
-  echo "Example: RISCV_TESTS_DIR=$HOME/riscv-tests cmake --build --preset ninja-clang-release --target isa-tests"
+  echo "Example: RISCV_TESTS_DIR=$HOME/riscv-tests ctest --test-dir build/ninja-clang-release -L gate"
   exit 2
 fi
 

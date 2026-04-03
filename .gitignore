@@ -1,44 +1,39 @@
-# Prerequisites
+# Build dependencies and intermediate files
 *.d
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
 *.gch
-*.pch
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
 *.lai
 *.la
-*.a
 *.lib
+*.lo
+*.mod
+*.o
+*.obj
+*.pch
+*.slo
+*.smod
 
-# Executables
+# Libraries
+*.dll
+*.dylib
+*.so
+
+# Binaries
+*.app
 *.exe
 *.out
-*.app
-
-
 SimRV
+
+# Build system outputs
 build/
 CMakeUserPresets.json
 compile_commands.json
+
+# Generated benchmark/test outputs
+.bench_tmp/
+.cache/
 .isa_tmp/
 isa_logs/
 regression_logs/
-.cache/
 
+# Generated documentation
 docs/api/

@@ -2,9 +2,12 @@ name: C/C++ CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -13,9 +16,29 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+
+    - name: Install build tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang cmake ninja-build gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
+
+    - name: Fetch riscv-tests
+      run: |
+        git clone --depth 1 https://github.com/riscv-software-src/riscv-tests.git "$RUNNER_TEMP/riscv-tests"
+
+    - name: Show toolchain versions
+      run: |
+        clang++ --version
+        cmake --version
+        ninja --version
     
     - name: Configure CMake
       run: cmake --preset ninja-clang-release
 
     - name: Build
       run: cmake --build --preset ninja-clang-release
+
+    - name: Run CTest gate suite
+      env:
+        RISCV_TESTS_DIR: ${{ runner.temp }}/riscv-tests
+      run: ctest --test-dir build/ninja-clang-release --output-on-failure -L gate

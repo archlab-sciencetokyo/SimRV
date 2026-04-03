@@ -1,0 +1,75 @@
+name: Release Binaries
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
+
+      - name: Fetch riscv-tests
+        run: |
+          git clone --depth 1 https://github.com/riscv-software-src/riscv-tests.git "$RUNNER_TEMP/riscv-tests"
+
+      - name: Configure
+        run: cmake --preset ninja-clang-release
+
+      - name: Build
+        run: cmake --build --preset ninja-clang-release
+
+      - name: Run CTest gate suite
+        env:
+          RISCV_TESTS_DIR: ${{ runner.temp }}/riscv-tests
+        run: ctest --test-dir build/ninja-clang-release --output-on-failure -L gate
+
+      - name: Compute asset names
+        id: names
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if [[ -n "${{ github.event.release.tag_name }}" ]]; then
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+          ASSET_BASE="SimRV-linux-x86_64-${TAG}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "asset_base=${ASSET_BASE}" >> "$GITHUB_OUTPUT"
+
+      - name: Package binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp build/ninja-clang-release/SimRV dist/SimRV
+          tar -C dist -czf "${{ steps.names.outputs.asset_base }}.tar.gz" SimRV
+          sha256sum "${{ steps.names.outputs.asset_base }}.tar.gz" > "${{ steps.names.outputs.asset_base }}.sha256"
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.names.outputs.asset_base }}
+          path: |
+            ${{ steps.names.outputs.asset_base }}.tar.gz
+            ${{ steps.names.outputs.asset_base }}.sha256
+
+      - name: Upload release assets
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.names.outputs.asset_base }}.tar.gz
+            ${{ steps.names.outputs.asset_base }}.sha256

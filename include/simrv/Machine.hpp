@@ -48,9 +48,11 @@ class Machine {
     bool s_use_mix = false;                 // flag to measure instruction mix
     bool s_bp_trace = false;                //
     bool s_isatest = false;                 // flag to enable riscv-isa-tests tohost handling
+    bool s_misa_override = false;           // true when CLI explicitly selected a MISA profile
     Address s_start_pc = 0;                 // start PC
     Counter s_strace = 0;                   // Start cycle for tracepc generation.
     Address s_isatest_tohost = 0x80001000;  // RAM tohost address for riscv-isa-tests
+    CSRValue s_misa_profile = kMisaDefault;  // Selected MISA extension bits (without MXL).
     bool s_gen_binfile = false;             // flag: generate binary image file for FPGA run
     Counter s_memimg = 0;                   // Cycle to emit init dump artifacts.
     Counter s_fincnt = ~0ull;               // instruction count to finish the simulation

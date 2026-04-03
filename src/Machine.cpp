@@ -769,7 +769,10 @@ int Machine::initialize(int argc, char* argv[]) {
     if (s_use_mix)
         for (int i = 0; i < OperationIdCount; i++) e_instmix[i] = 0;
 
-    if (s_rtosmode) cpu.misa = misa_profile_bits(MisaProfile::I);
+    if (s_misa_override)
+        cpu.misa = s_misa_profile;
+    else if (s_rtosmode)
+        cpu.misa = misa_profile_bits(MisaProfile::I);
 
     // #ifdef MIDDLE
     // #include "xinitreg.txt"
