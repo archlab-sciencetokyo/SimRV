@@ -47,11 +47,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          SIMRV_VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt | head -n 1)"
+          if [[ -z "${SIMRV_VERSION}" ]]; then
+            echo "Failed to parse SIMRV_VERSION from CMakeLists.txt" >&2
+            exit 1
+          fi
+
+          VERSION_TAG="v${SIMRV_VERSION}"
           TAG="${GITHUB_REF_NAME}"
           if [[ -n "${{ github.event.release.tag_name }}" ]]; then
             TAG="${{ github.event.release.tag_name }}"
           fi
-          ASSET_BASE="SimRV-linux-x86_64-${TAG}"
+
+          if [[ "${TAG}" != "${VERSION_TAG}" ]]; then
+            echo "Warning: release tag ${TAG} does not match CMake version tag ${VERSION_TAG}" >&2
+          fi
+
+          ASSET_BASE="SimRV-linux-x86_64-${VERSION_TAG}"
+          echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version_tag=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "asset_base=${ASSET_BASE}" >> "$GITHUB_OUTPUT"
 
