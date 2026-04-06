@@ -19,13 +19,23 @@ void CPU::decode_fields(Machine& /*machine*/) {
     pipeline_context.funct5 = (pipeline_context.ir >> 27) & 0x1F;
     pipeline_context.funct7 = (pipeline_context.ir >> 25);
     pipeline_context.funct12 = (pipeline_context.ir >> 20);
-    pipeline_context.imm = decode_unit.immGen(pipeline_context.ir);
+    pipeline_context.imm = decode_unit.decodeImmediate(pipeline_context.ir);
 }
 
 /* fetch_operands(Operand Fetch) stage                                                               */
 void CPU::fetch_operands(Machine& /*machine*/) {
+    const Opcode opcode = static_cast<Opcode>(pipeline_context.opcode);
     const Funct3 funct3 = static_cast<Funct3>(pipeline_context.funct3);
     const Instruction funct12 = pipeline_context.funct12;
+
+    pipeline_context.rrs1 = reg[pipeline_context.rs1]; /* regfile read port 1 */
+    pipeline_context.rrs2 = reg[pipeline_context.rs2]; /* regfile read port 2 */
+
+    if (simrv::compiler::likely(opcode != Opcode::System)) {
+        pipeline_context.rcsr = 0;
+        return;
+    }
+
     CSRAddress w_csr_addr =
         (funct3 != Funct3::Priv) ? static_cast<CSRAddress>(funct12)
         : (funct12 == static_cast<Instruction>(Funct12Priv::Ecall)) ? csr_addr(Csr::Mtvec)
@@ -33,7 +43,5 @@ void CPU::fetch_operands(Machine& /*machine*/) {
         : (funct12 == static_cast<Instruction>(Funct12Priv::Sret))  ? csr_addr(Csr::Sepc)
         : (funct12 == static_cast<Instruction>(Funct12Priv::Mret))  ? csr_addr(Csr::Mepc)
                                                                     : 0;
-    pipeline_context.rrs1 = reg[pipeline_context.rs1]; /* regfile read port 1 */
-    pipeline_context.rrs2 = reg[pipeline_context.rs2]; /* regfile read port 2 */
-    pipeline_context.rcsr = read_csr(w_csr_addr);      /* note !! */
+    pipeline_context.rcsr = read_csr(w_csr_addr);
 }

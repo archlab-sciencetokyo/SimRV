@@ -133,6 +133,26 @@ inline constexpr uint32_t kTlbSize = 4;
 inline constexpr size_t kLocalCoreMemorySize = (32u * 1024u);
 }  // namespace simrv::memory
 
+namespace simrv::compiler {
+template <typename T>
+constexpr bool likely(T value) {
+#if defined(__GNUC__) || defined(__clang__)
+    return __builtin_expect(static_cast<bool>(value), true);
+#else
+    return static_cast<bool>(value);
+#endif
+}
+
+template <typename T>
+constexpr bool unlikely(T value) {
+#if defined(__GNUC__) || defined(__clang__)
+    return __builtin_expect(static_cast<bool>(value), false);
+#else
+    return static_cast<bool>(value);
+#endif
+}
+}  // namespace simrv::compiler
+
 enum class TrapFlag : TrapCause {
     Interrupt = static_cast<TrapCause>(1u << 31),
 };

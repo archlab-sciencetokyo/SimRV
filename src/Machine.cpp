@@ -6,6 +6,7 @@
 
 #include <array>
 #include <chrono>
+#include <cstdio>
 #include <fstream>
 #include <iomanip>
 #include <memory>
@@ -116,18 +117,7 @@ void load_image_file_into_ram(std::string file, Byte* ram) {
 }
 
 Word ram_read(Address addr, Instruction funct3, Byte* ram) {
-    Word rdata = 0;
-    int n = (1 << (funct3 & 0x3));
-    for (int i = 0; i < n; i++) {
-        rdata |= static_cast<Word>(std::to_integer<uint8_t>(ram[(addr + i) & simrv::memory::kDramMask]))
-                 << (8 * i);
-    }
-
-    if ((funct3 & 0x4) == 0) { /* signed extension */
-        Word sign_mask = (~Word{0}) << (8 * n - 1);
-        rdata |= ((sign_mask & rdata) ? sign_mask : 0);
-    }
-    return rdata;
+    return simrv::memory_detail::ram_read_fast(addr, funct3, ram);
 }
 
 Word disk_read(Address addr, Word n, Byte* dsk) {
@@ -739,7 +729,12 @@ int Machine::initialize(int argc, char* argv[]) {
 
     disk = std::make_unique<Disk>();
     console = std::make_unique<Console>();
-    mmem_owner_ = std::make_unique<Byte[]>(simrv::memory::kDramSize);
+    mmem_owner_.reset(static_cast<Byte*>(std::calloc(simrv::memory::kDramSize, sizeof(Byte))));
+    if (mmem_owner_ == nullptr) {
+        std::fprintf(stderr, "Error: failed to allocate main memory (%zu bytes)\n",
+                     static_cast<std::size_t>(simrv::memory::kDramSize));
+        return 1;
+    }
     mmem = mmem_owner_.get();
     console->mmem = mmem;
     disk->mmem = mmem;
@@ -810,7 +805,7 @@ bool Microcn::exec() {
     r_funct5 = (r_ir >> 27) & 0x1F;
     r_funct7 = (r_ir >> 25);
     r_funct12 = (r_ir >> 20);
-    r_imm = decode_unit.immGen(r_ir);
+    r_imm = decode_unit.decodeImmediate(r_ir);
     r_rrs1 = reg[r_rs1]; /* regfile read port 1 */
     r_rrs2 = reg[r_rs2]; /* regfile read port 2 */
     switch (r_opcode) {

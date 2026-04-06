@@ -5,6 +5,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -76,7 +77,7 @@ class Machine {
     MmioRouter mmio_router_;
 
    private:
-    std::unique_ptr<Byte[]> mmem_owner_;
+    std::unique_ptr<Byte, decltype(&std::free)> mmem_owner_{nullptr, &std::free};
     std::unique_ptr<QueueState[]> console_queue_owner_;
     std::unique_ptr<QueueState[]> disk_queue_owner_;
     friend class CPU;

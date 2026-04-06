@@ -28,6 +28,10 @@ build/
 CMakeUserPresets.json
 compile_commands.json
 
+# Benchmark and profiling outputs
+benchmark_logs/
+perf*.data*
+
 # Generated benchmark/test outputs
 .bench_tmp/
 .cache/

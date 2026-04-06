@@ -10,12 +10,6 @@
 namespace simrv::module {
 
 namespace {
-constexpr SignedWord sign_extend(Word value, unsigned bits) {
-    const Word sign_bit = Word{1} << (bits - 1);
-    const Word extend_mask = ~Word{0} << bits;
-    return static_cast<SignedWord>((value & sign_bit) ? (value | extend_mask) : value);
-}
-
 constexpr Instruction make_i_type(Word imm, Word rs1, Funct3 funct3, Word rd, Opcode opcode) {
     return (imm << 20) | (rs1 << 15) | (static_cast<Instruction>(funct3) << 12) | (rd << 7) |
            static_cast<Instruction>(opcode);
@@ -48,57 +42,7 @@ constexpr Instruction make_j_type(Word imm, Word rd, Opcode opcode) {
            (((imm >> 11) & 0x1) << 20) | (((imm >> 12) & 0xFF) << 12) | (rd << 7) |
            static_cast<Instruction>(opcode);
 }
-
-constexpr Instruction imm_i(Instruction ir) {
-    return static_cast<Instruction>(sign_extend(ir >> 20, 12));
-}
-
-constexpr Instruction imm_s(Instruction ir) {
-    const Word value = ((ir >> 25) << 5) | ((ir >> 7) & 0x1f);
-    return static_cast<Instruction>(sign_extend(value, 12));
-}
-
-constexpr Instruction imm_b(Instruction ir) {
-    const Word value = ((ir >> 31) << 12) | (((ir >> 7) & 1) << 11) | (((ir >> 25) & 0x3f) << 5) |
-                       (((ir >> 8) & 0xF) << 1);
-    return static_cast<Instruction>(sign_extend(value, 13));
-}
-
-constexpr Instruction imm_u(Instruction ir) {
-    return static_cast<Instruction>(sign_extend(ir >> 12, 20));
-}
-
-constexpr Instruction imm_j(Instruction ir) {
-    const Word value = ((ir >> 31) << 20) | (((ir >> 12) & 0xFF) << 12) |
-                       (((ir >> 20) & 0x1) << 11) | (((ir >> 21) & 0x3FF) << 1);
-    return static_cast<Instruction>(sign_extend(value, 21));
-}
 }  // namespace
-
-/* immediate generation                                                                   */
-Instruction CB_imm_gen(Instruction ir) {
-    switch (opcode_of(ir)) {
-        case Opcode::OpImm:
-        case Opcode::Load:
-        case Opcode::LoadFp:
-        case Opcode::Jalr:
-            return imm_i(ir);
-        case Opcode::Store:
-        case Opcode::StoreFp:
-            return imm_s(ir);
-        case Opcode::Branch:
-            return imm_b(ir);
-        case Opcode::Lui:
-        case Opcode::Auipc:
-            return imm_u(ir);
-        case Opcode::Jal:
-            return imm_j(ir);
-        case Opcode::System:
-            return static_cast<Instruction>((ir >> 15) & 0x1f);
-        default:
-            return 0;
-    }
-}
 
 /* inst_decomp                                                                            */
 Instruction decomp_c0(Instruction ir) {
@@ -335,7 +279,7 @@ constexpr Instruction decode_compressed_dispatch(CompressedInstruction ir) {
     }
 }
 
-Instruction CB_inst_decomp(Instruction ir) {
+Instruction decompressInstruction(Instruction ir) {
     if ((ir & 0x3u) == 0x3u) {
         return ir;
     }

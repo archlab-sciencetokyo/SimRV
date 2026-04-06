@@ -7,10 +7,18 @@
 
 void CPU::run_cycle(Machine& machine) {
     run_fetch_stage(machine);
-    run_decode_stage(machine);
-    run_execute_stage(machine);
-    run_memory_stage(machine);
-    run_writeback_stage(machine);
-    run_commit_stage(machine);
+
+    decode_fields(machine);
+    fetch_operands(machine);
+
+    execute_core(machine);
+
+    memory_load_phase(machine);
+    memory_prepare_store_data(machine);
+    memory_store_phase(machine);
+
+    writeback_registers(machine);
+    commit_control_flow_and_traps(machine);
+
     mtime++;
 }

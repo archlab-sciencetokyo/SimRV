@@ -7,26 +7,10 @@
 #include "Machine.hpp"
 
 namespace simrv::memory_detail {
-Word ram_read(Address addr, Instruction funct3, Byte* ram) {
-    Word rdata = 0;
-    int n = (1 << (funct3 & 0x3));
-    for (int i = 0; i < n; i++) {
-        rdata |=
-            static_cast<Word>(std::to_integer<uint8_t>(ram[(addr + i) & simrv::memory::kDramMask]))
-            << (8 * i);
-    }
-
-    if ((funct3 & 0x4) == 0) {
-        Word sign_mask = (~Word{0}) << (8 * n - 1);
-        rdata |= ((sign_mask & rdata) ? sign_mask : 0);
-    }
-    return rdata;
-}
-
 bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem) {
     Word vpn1 = (v_addr >> 22) & 0x3FF;
     Word L1_pte_addr = ((cpu->satp & 0x3FFFFF) << 12) + vpn1 * 4;
-    Word L1_pte = ram_read(L1_pte_addr, static_cast<Instruction>(Funct3::Lw), mmem);
+    Word L1_pte = ram_read_fast(L1_pte_addr, static_cast<Instruction>(Funct3::Lw), mmem);
     Word L1_xwr =
         (cpu->mstatus & enum_mask(MstatusBit::Mxr) ? L1_pte >> 1 | L1_pte >> 3 : L1_pte >> 1) & 7;
     Word L1_p_addr = (v_addr & 0x3FFFFF) | (((L1_pte >> 10) << 12) & ~0x3FFFFF);
@@ -41,7 +25,7 @@ bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte
 
     Word vpn0 = (v_addr >> 12) & 0x3FF;
     Word L0_pte_addr = ((L1_pte >> 10) << 12) + vpn0 * 4;
-    Word L0_pte = ram_read(L0_pte_addr, static_cast<Instruction>(Funct3::Lw), mmem);
+    Word L0_pte = ram_read_fast(L0_pte_addr, static_cast<Instruction>(Funct3::Lw), mmem);
     Word L0_xwr =
         (cpu->mstatus & enum_mask(MstatusBit::Mxr) ? L0_pte >> 1 | L0_pte >> 3 : L0_pte >> 1) & 7;
     Word L0_p_addr = (v_addr & 0xFFF) | (((L0_pte >> 10) << 12) & ~0xFFF);
@@ -92,6 +76,12 @@ bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte
 }  // namespace simrv::memory_detail
 
 Word MemorySubsystem::target_read(CPU& cpu, Address v_addr, Instruction funct3) {
+    if (simrv::compiler::likely(cpu.pending_exception == ~0u) &&
+        simrv::compiler::likely(cpu.priv == kPrivMachine || (cpu.satp >> 31) == 0) &&
+        simrv::compiler::likely(simrv::memory_detail::is_dram_addr(v_addr))) {
+        return simrv::memory_detail::ram_read_fast(v_addr, funct3, machine_.mmem);
+    }
+
     Word rdata = 0;
     Address p_addr;
     TLBEntry* entry =
@@ -113,23 +103,31 @@ Word MemorySubsystem::target_read(CPU& cpu, Address v_addr, Instruction funct3) 
     }
 
     if (cpu.pending_exception == ~0u) {
-        if (machine_.mmio_router_.read(p_addr, rdata)) return rdata;
+        if (simrv::memory_detail::is_dram_addr(p_addr)) {
+            rdata = simrv::memory_detail::ram_read_fast(p_addr, funct3, machine_.mmem);
+            return rdata;
+        }
 
-        switch (p_addr & 0xF0000000) {
-            case 0x10000000:
-            case 0x20000000:
-            case 0x30000000:
-            case 0x70000000:
-                break;
-            default:
-                rdata = simrv::memory_detail::ram_read(p_addr, funct3, machine_.mmem);
-                break;
+        if (machine_.mmio_router_.read(p_addr, rdata)) return rdata;
+        if (!simrv::memory_detail::is_legacy_reserved_region(p_addr)) {
+            rdata = simrv::memory_detail::ram_read_fast(p_addr, funct3, machine_.mmem);
         }
     }
     return rdata;
 }
 
 void MemorySubsystem::target_write(CPU& cpu, Address v_addr, Word wdata, Instruction funct3) {
+    if (simrv::compiler::likely(cpu.pending_exception == ~0u) &&
+        simrv::compiler::likely(cpu.priv == kPrivMachine || (cpu.satp >> 31) == 0) &&
+        simrv::compiler::likely(simrv::memory_detail::is_dram_addr(v_addr))) {
+        simrv::memory_detail::ram_write_fast(v_addr, wdata, funct3, machine_.mmem);
+        if (machine_.s_isatest && funct3 == static_cast<Instruction>(Funct3::Sw) &&
+            v_addr == machine_.s_isatest_tohost) {
+            machine_.tohost = wdata;
+        }
+        return;
+    }
+
     Address p_addr;
     TLBEntry* entry =
         &cpu.TLB_data_w[(v_addr >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1)];
@@ -150,24 +148,22 @@ void MemorySubsystem::target_write(CPU& cpu, Address v_addr, Word wdata, Instruc
     }
 
     if (cpu.pending_exception == ~0u) {
-        if (machine_.mmio_router_.write(p_addr, wdata)) return;
+        if (simrv::memory_detail::is_dram_addr(p_addr)) {
+            simrv::memory_detail::ram_write_fast(p_addr, wdata, funct3, machine_.mmem);
+            if (machine_.s_isatest && funct3 == static_cast<Instruction>(Funct3::Sw) &&
+                p_addr == machine_.s_isatest_tohost) {
+                machine_.tohost = wdata;
+            }
+            return;
+        }
 
-        switch (p_addr & 0xF0000000) {
-            case 0x10000000:
-            case 0x20000000:
-            case 0x30000000:
-            case 0x70000000:
-                break;
-            default:
-                for (int i = 0; i < (1 << funct3); i++) {
-                    machine_.mmem[(p_addr + i) & simrv::memory::kDramMask] =
-                        static_cast<Byte>(static_cast<uint8_t>((wdata >> (8 * i)) & 0xFF));
-                }
-                if (machine_.s_isatest && funct3 == static_cast<Instruction>(Funct3::Sw) &&
-                    p_addr == machine_.s_isatest_tohost) {
-                    machine_.tohost = wdata;
-                }
-                break;
+        if (machine_.mmio_router_.write(p_addr, wdata)) return;
+        if (!simrv::memory_detail::is_legacy_reserved_region(p_addr)) {
+            simrv::memory_detail::ram_write_fast(p_addr, wdata, funct3, machine_.mmem);
+            if (machine_.s_isatest && funct3 == static_cast<Instruction>(Funct3::Sw) &&
+                p_addr == machine_.s_isatest_tohost) {
+                machine_.tohost = wdata;
+            }
         }
     }
 }
