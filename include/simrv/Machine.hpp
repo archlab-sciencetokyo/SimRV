@@ -109,34 +109,9 @@ class Microcn {
     Word Qnum;
     Word Qsel;
 
-    Register pc = 0;  // simrv::boot::kStartPc;      // program counter
-    Register cpc;
+    Register pc = 0;   // simrv::boot::kStartPc;      // program counter
     Register reg[32];  // general purpose registers
     Counter icnt = 0;  // instruction count
-
-    // IF_ stage
-    Instruction r_ir;
-    // ID_ stage
-    Instruction r_opcode;
-    Instruction r_rd;
-    Instruction r_rs1;
-    Instruction r_rs2;
-    Instruction r_funct3;
-    Instruction r_funct5;
-    Instruction r_funct7;
-    Instruction r_funct12;
-    Instruction r_imm;
-    // OF_ stage
-    Register r_rrs1;
-    Register r_rrs2;
-    // EX1 stage
-    Word r_tkn;  // Flag for branch/jump taken or not taken.
-    Register r_jmp_pc;
-    Address r_mem_addr;
-    Register r_wb_data;
-    CSRValue r_wb_data_csr;
-    // MEM stage
-    Register r_mem_rdata;
 
    private:
     std::unique_ptr<Byte[]> cmem_owner_;

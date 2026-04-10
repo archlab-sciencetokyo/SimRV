@@ -819,8 +819,11 @@ bool Microcn::exec() {
     ctx.cpc = pc;
     memcpy(&ctx.ir, &cmem[pc & simrv::memory::kDramMask], 4);
     if ((ctx.ir & 3) != 3) {
-        printf("__ ERROR: this microcn does not support compressed insn!\n");
-        exit(0);
+        fprintf(stderr,
+                "[MICROCN] ERROR: Compressed instruction (RV32C) not supported at PC=0x%08x "
+                "(instruction=0x%04x)\n",
+                pc, static_cast<uint16_t>(ctx.ir & 0xFFFF));
+        exit(1);
     }
     // Decode instruction fields from 32-bit word
     ctx.opcode = (ctx.ir >> 0) & 0x7F;
@@ -889,6 +892,43 @@ bool Microcn::exec() {
             ctx.tkn = 0;
             ctx.funct7 &= (ctx.funct3 == static_cast<Instruction>(Funct3::Add)) ? 0 : 0x20;
             ctx.wb_data = execute_unit.aluInt(ctx.rrs1, ctx.imm, ctx.funct3, ctx.funct7);
+            break;
+        }
+        case static_cast<Instruction>(Opcode::System): {
+            // System instructions: ECALL, EBREAK, CSR operations
+            // Microcn does not support privileged system operations; log as unsupported
+            if (ctx.funct12 == 0x0) {  // ECALL
+                fprintf(stderr,
+                        "[MICROCN] WARNING: ECALL (system call) not supported at PC=0x%08x\n",
+                        ctx.cpc);
+                ctx.tkn = 0;                  // No effect
+            } else if (ctx.funct12 == 0x1) {  // EBREAK
+                fprintf(stderr,
+                        "[MICROCN] WARNING: EBREAK (debugger break) not supported at PC=0x%08x\n",
+                        ctx.cpc);
+                ctx.tkn = 0;                                      // No effect
+            } else if ((ctx.funct3 >= 1) && (ctx.funct3 <= 3)) {  // CSRRW, CSRRS, CSRRC
+                fprintf(stderr,
+                        "[MICROCN] WARNING: CSR operations not supported at PC=0x%08x (funct3=%d, "
+                        "csr=0x%03x)\n",
+                        ctx.cpc, ctx.funct3, ctx.funct12);
+                ctx.tkn = 0;  // No effect
+            } else {
+                fprintf(stderr,
+                        "[MICROCN] WARNING: Unknown System instruction at PC=0x%08x "
+                        "(funct3=%d, funct12=0x%03x)\n",
+                        ctx.cpc, ctx.funct3, ctx.funct12);
+                ctx.tkn = 0;  // No effect
+            }
+            break;
+        }
+        default: {
+            // Unsupported opcode: log instead of silent failure
+            fprintf(stderr,
+                    "[MICROCN] WARNING: Unsupported instruction opcode=0x%02x at PC=0x%08x "
+                    "(ir=0x%08x)\n",
+                    ctx.opcode, ctx.cpc, ctx.ir);
+            ctx.tkn = 0;  // No effect, instruction behaves as no-op
             break;
         }
     }
