@@ -61,8 +61,12 @@ The project uses GitHub Issues, Milestones, and Projects to track RV64GC migrati
 - **Phase 1.5** ✓ COMPLETE: ISA-Tests Integration for RV32 (9/19 tests passing)
 - **Phase 2** 🔄 ACTIVE: OOP Refactor for RV64 Readiness (Due: April 24, 2026)
   - Issue: [#14](https://github.com/archlab-sciencetokyo/SimRV/issues/14)
-  - Current: Slices 1-2 complete, ready for Slice 3 (Memory helpers)
-  - Branch: `phase-2/oop-refactor-slice3`
+  - **Slices 1-3 Complete**:
+    - ✅ Slice 1-2 (CPU refactor): PipelineContext extraction from CPU
+    - ✅ Slice 3 (Memory helpers): PipelineContext integration in Microcn
+    - ✅ Slice 4 (Microcontroller): Microcn extraction & error handling (PR [#19](https://github.com/archlab-sciencetokyo/SimRV/pull/19))
+  - ⏳ Slice 5 (Final validation): Phase 2 cleanup & comprehensive testing
+  - Branch tracking: `phase-2/oop-refactor-slice*`
   - Guardrail: <3% performance regression, phase1-gate must pass
 - **Phase 3** ⏳ UPCOMING: XLEN Abstraction Layer (Due: May 8, 2026)
   - Issue: [#15](https://github.com/archlab-sciencetokyo/SimRV/issues/15)
@@ -72,16 +76,23 @@ The project uses GitHub Issues, Milestones, and Projects to track RV64GC migrati
   - Issue: [#17](https://github.com/archlab-sciencetokyo/SimRV/issues/17)
 
 ### For Phase 2 (OOP Refactor) Work
-- Branch pattern: `phase-2/*` (e.g., `phase-2/oop-refactor-slice3`)
-- Link PRs to issue #14 using "Closes" or "Linked PR" syntax
+- Branch pattern: `phase-2/oop-refactor-slice*` (e.g., `phase-2/oop-refactor-slice4`)
+- Link PRs to issue #14 using "Closes" syntax in commit messages
 - Run phase1-gate before every commit: `cmake --build --preset ninja-clang-release --target phase1-gate`
 - Monitor performance on baseline workloads; benchmark before and after major changes
 - See `REFACTOR_CLASS_CONCEPT.md` and `ARCHITECTURE.md` for design patterns
+
+### Phase 2 Slice Descriptions
+- **Slices 1-2**: CPU refactor (PipelineContext extraction from Machine, FETCH→WRITEBACK consolidation)
+- **Slice 3**: Minimal controller refactor (PipelineContext integration in Microcn::exec())
+- **Slice 4**: Microcontroller extraction (remove old members, add System ISA support, error handling)
+- **Slice 5**: Comprehensive testing & validation (cross-slice regression, performance check)
 
 ### Tracking Links
 - **GitHub Project**: See "Projects" tab for visual board
 - **Label system**: `milestone-phaseX`, `type-epic`, `component-*`, `rv64-migration`
 - **Milestones**: View all phases and deadlines in the Milestones tab
+- **Active PRs**: PR #19 (Slice 4)
 
 ## Pitfalls
 - `isa-tests` and smoke targets require external `riscv-tests` artifacts.

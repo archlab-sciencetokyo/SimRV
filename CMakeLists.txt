@@ -68,6 +68,7 @@ endif()
 add_executable(SimRV
   src/Main.cpp
   src/Machine.cpp
+  src/IoController.cpp
   src/Module.cpp
   src/CsrFile.cpp
   src/StateControl.cpp

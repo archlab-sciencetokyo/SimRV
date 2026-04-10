@@ -14,10 +14,9 @@
 #include "Cpu.hpp"
 #include "Define.hpp"
 #include "Disk.hpp"
+#include "IoController.hpp"
 #include "MemorySubsystem.hpp"
 #include "MmioRouter.hpp"
-
-class Microcn;
 
 class Machine {
    public:
@@ -69,7 +68,7 @@ class Machine {
     std::chrono::steady_clock::time_point s_start_time;  // simulation start timestamp
 
     CPU cpu;
-    std::unique_ptr<Microcn> micro_controller;
+    std::unique_ptr<IoController> micro_controller;
     std::unique_ptr<Disk> disk;
     std::unique_ptr<Console> console;
 
@@ -87,57 +86,4 @@ class Machine {
     /// Perform per-cycle finalization and completion checks.
     void finalize_cycle();
     bool is_running_ = true;  // Main-loop run flag.
-};
-
-class Microcn {
-   public:
-    void init(const std::string& image_path);
-    bool exec();
-    Machine* owner = nullptr;
-    Byte* cmem; /* local memory */
-    Byte* mmem; /* main memory of processor */
-
-    QueueState* cons_queue; /* Queue of Console */
-    QueueState* disk_queue; /* Queue of Disk */
-
-    Byte cons_fifo;
-    Byte fifo_en;
-
-    Byte* disk; /* Disk */
-
-    Word Mode;
-    Word Qnum;
-    Word Qsel;
-
-    Register pc = 0;  // simrv::boot::kStartPc;      // program counter
-    Register cpc;
-    Register reg[32];  // general purpose registers
-    Counter icnt = 0;  // instruction count
-
-    // IF_ stage
-    Instruction r_ir;
-    // ID_ stage
-    Instruction r_opcode;
-    Instruction r_rd;
-    Instruction r_rs1;
-    Instruction r_rs2;
-    Instruction r_funct3;
-    Instruction r_funct5;
-    Instruction r_funct7;
-    Instruction r_funct12;
-    Instruction r_imm;
-    // OF_ stage
-    Register r_rrs1;
-    Register r_rrs2;
-    // EX1 stage
-    Word r_tkn;  // Flag for branch/jump taken or not taken.
-    Register r_jmp_pc;
-    Address r_mem_addr;
-    Register r_wb_data;
-    CSRValue r_wb_data_csr;
-    // MEM stage
-    Register r_mem_rdata;
-
-   private:
-    std::unique_ptr<Byte[]> cmem_owner_;
 };
