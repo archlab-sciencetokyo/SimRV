@@ -791,150 +791,152 @@ bool Microcn::exec() {
     DecodeUnit decode_unit;
     ExecuteUnit execute_unit;
     bool ret = true;
-    cpc = pc;
-    memcpy(&r_ir, &cmem[pc & simrv::memory::kDramMask], 4);
-    if ((r_ir & 3) != 3) {
+    PipelineContext ctx;
+
+    ctx.cpc = pc;
+    memcpy(&ctx.ir, &cmem[pc & simrv::memory::kDramMask], 4);
+    if ((ctx.ir & 3) != 3) {
         printf("__ ERROR: this microcn does not support compressed insn!\n");
         exit(0);
     }
-    r_opcode = (r_ir >> 0) & 0x7F;
-    r_rd = (r_ir >> 7) & 0x1f;
-    r_rs1 = (r_ir >> 15) & 0x1f;
-    r_rs2 = (r_ir >> 20) & 0x1f;
-    r_funct3 = (r_ir >> 12) & 0x7;
-    r_funct5 = (r_ir >> 27) & 0x1F;
-    r_funct7 = (r_ir >> 25);
-    r_funct12 = (r_ir >> 20);
-    r_imm = decode_unit.decodeImmediate(r_ir);
-    r_rrs1 = reg[r_rs1]; /* regfile read port 1 */
-    r_rrs2 = reg[r_rs2]; /* regfile read port 2 */
-    switch (r_opcode) {
+    ctx.opcode = (ctx.ir >> 0) & 0x7F;
+    ctx.rd = (ctx.ir >> 7) & 0x1f;
+    ctx.rs1 = (ctx.ir >> 15) & 0x1f;
+    ctx.rs2 = (ctx.ir >> 20) & 0x1f;
+    ctx.funct3 = (ctx.ir >> 12) & 0x7;
+    ctx.funct5 = (ctx.ir >> 27) & 0x1F;
+    ctx.funct7 = (ctx.ir >> 25);
+    ctx.funct12 = (ctx.ir >> 20);
+    ctx.imm = decode_unit.decodeImmediate(ctx.ir);
+    ctx.rrs1 = reg[ctx.rs1]; /* regfile read port 1 */
+    ctx.rrs2 = reg[ctx.rs2]; /* regfile read port 2 */
+    switch (ctx.opcode) {
         case static_cast<Instruction>(Opcode::Lui): {
-            r_tkn = 0;
-            r_wb_data = r_imm << 12;
+            ctx.tkn = 0;
+            ctx.wb_data = ctx.imm << 12;
             break;
         }
         case static_cast<Instruction>(Opcode::Auipc): {
-            r_tkn = 0;
-            r_wb_data = pc + (r_imm << 12);
+            ctx.tkn = 0;
+            ctx.wb_data = pc + (ctx.imm << 12);
             break;
         }
         case static_cast<Instruction>(Opcode::Jal): {
-            r_tkn = 1;
-            r_wb_data = pc + 4;
-            r_jmp_pc = pc + r_imm;
+            ctx.tkn = 1;
+            ctx.wb_data = pc + 4;
+            ctx.jmp_pc = pc + ctx.imm;
             break;
         }
         case static_cast<Instruction>(Opcode::Jalr): {
-            r_tkn = 1;
-            r_wb_data = pc + 4;
-            r_jmp_pc = r_rrs1 + r_imm;
+            ctx.tkn = 1;
+            ctx.wb_data = pc + 4;
+            ctx.jmp_pc = ctx.rrs1 + ctx.imm;
             break;
         }
         case static_cast<Instruction>(Opcode::Op): {
-            r_tkn = 0;
-            r_wb_data = execute_unit.aluInt(r_rrs1, r_rrs2, r_funct3, r_funct7);
+            ctx.tkn = 0;
+            ctx.wb_data = execute_unit.aluInt(ctx.rrs1, ctx.rrs2, ctx.funct3, ctx.funct7);
             break;
         }
         case static_cast<Instruction>(Opcode::Load): {
-            r_tkn = 0;
-            r_mem_addr = r_rrs1 + r_imm;
+            ctx.tkn = 0;
+            ctx.mem_addr = ctx.rrs1 + ctx.imm;
             break;
         }
         case static_cast<Instruction>(Opcode::Store): {
-            r_tkn = 0;
-            r_mem_addr = r_rrs1 + r_imm;
+            ctx.tkn = 0;
+            ctx.mem_addr = ctx.rrs1 + ctx.imm;
             break;
         }
         case static_cast<Instruction>(Opcode::MiscMem): {
-            r_tkn = 0;
+            ctx.tkn = 0;
             break;
         }
         case static_cast<Instruction>(Opcode::Branch): {
-            r_tkn = execute_unit.branchTaken(r_rrs1, r_rrs2, r_funct3);
-            r_jmp_pc = pc + r_imm;
+            ctx.tkn = execute_unit.branchTaken(ctx.rrs1, ctx.rrs2, ctx.funct3);
+            ctx.jmp_pc = pc + ctx.imm;
             break;
         }
         case static_cast<Instruction>(Opcode::OpImm): {
-            r_tkn = 0;
-            r_funct7 &= (r_funct3 == static_cast<Instruction>(Funct3::Add)) ? 0 : 0x20;
-            r_wb_data = execute_unit.aluInt(r_rrs1, r_imm, r_funct3, r_funct7);
+            ctx.tkn = 0;
+            ctx.funct7 &= (ctx.funct3 == static_cast<Instruction>(Funct3::Add)) ? 0 : 0x20;
+            ctx.wb_data = execute_unit.aluInt(ctx.rrs1, ctx.imm, ctx.funct3, ctx.funct7);
             break;
         }
     }
-    int tmp = (1 << (r_funct3 & 0x3));
-    if (r_opcode == static_cast<Instruction>(Opcode::Load)) {
-        if ((r_mem_addr >> 28) == 0x8) {
-            r_mem_rdata = ram_read(r_mem_addr & simrv::memory::kDramMask, r_funct3, mmem);
-        } else if ((r_mem_addr >> 28) == 0x9) {
-            r_mem_rdata = disk_read(r_mem_addr & DISK_MASK, tmp, disk);
-        } else if (r_mem_addr == 0x40009000) {
-            r_mem_rdata = Mode;
-        } else if (r_mem_addr == 0x40009004) {
-            r_mem_rdata = Qnum;
-        } else if (r_mem_addr == 0x40009008) {
-            r_mem_rdata = Qsel;
-        } else if ((r_mem_addr >> 12) == 0x4000a) {
-            r_mem_rdata = queue_read(r_mem_addr & 0xff, cons_queue);
-        } else if ((r_mem_addr >> 12) == 0x4000b) {
-            r_mem_rdata = queue_read(r_mem_addr & 0xff, disk_queue);
-        } else if ((r_mem_addr >> 12) == 0x4000c) {
-            r_mem_rdata = static_cast<Word>(std::to_integer<uint8_t>(cons_fifo));
+    int tmp = (1 << (ctx.funct3 & 0x3));
+    if (ctx.opcode == static_cast<Instruction>(Opcode::Load)) {
+        if ((ctx.mem_addr >> 28) == 0x8) {
+            ctx.mem_rdata = ram_read(ctx.mem_addr & simrv::memory::kDramMask, ctx.funct3, mmem);
+        } else if ((ctx.mem_addr >> 28) == 0x9) {
+            ctx.mem_rdata = disk_read(ctx.mem_addr & DISK_MASK, tmp, disk);
+        } else if (ctx.mem_addr == 0x40009000) {
+            ctx.mem_rdata = Mode;
+        } else if (ctx.mem_addr == 0x40009004) {
+            ctx.mem_rdata = Qnum;
+        } else if (ctx.mem_addr == 0x40009008) {
+            ctx.mem_rdata = Qsel;
+        } else if ((ctx.mem_addr >> 12) == 0x4000a) {
+            ctx.mem_rdata = queue_read(ctx.mem_addr & 0xff, cons_queue);
+        } else if ((ctx.mem_addr >> 12) == 0x4000b) {
+            ctx.mem_rdata = queue_read(ctx.mem_addr & 0xff, disk_queue);
+        } else if ((ctx.mem_addr >> 12) == 0x4000c) {
+            ctx.mem_rdata = static_cast<Word>(std::to_integer<uint8_t>(cons_fifo));
         } else
-            r_mem_rdata = ram_read(r_mem_addr & simrv::memory::kDramMask, r_funct3, cmem);
+            ctx.mem_rdata = ram_read(ctx.mem_addr & simrv::memory::kDramMask, ctx.funct3, cmem);
     }
-    if (r_opcode == static_cast<Instruction>(Opcode::Store)) {
-        if (r_mem_addr == 0x40008000) {
-            if (r_rrs2 >> 16 == 1) {
-                printf("%c", (char)(r_rrs2 & 0xff));
+    if (ctx.opcode == static_cast<Instruction>(Opcode::Store)) {
+        if (ctx.mem_addr == 0x40008000) {
+            if (ctx.rrs2 >> 16 == 1) {
+                printf("%c", (char)(ctx.rrs2 & 0xff));
                 fflush(stdout);
             }
-            if (r_rrs2 >> 16 == 2) {
+            if (ctx.rrs2 >> 16 == 2) {
                 ret = false;
             }
-            //            if(r_rrs2>>16==2){ printf("\n__ Power off\n"); ret=0;}
+            //            if(ctx.rrs2>>16==2){ printf("\n__ Power off\n"); ret=0;}
             //            //exit(0);}//ret=0;}
-        } else if ((r_mem_addr >> 28) == 0x8) {
-            for (int i = 0; i < (1 << r_funct3); i++) {
-                mmem[(r_mem_addr + i) & simrv::memory::kDramMask] =
-                    static_cast<Byte>(static_cast<uint8_t>((r_rrs2 >> (8 * i)) & 0xFF));
+        } else if ((ctx.mem_addr >> 28) == 0x8) {
+            for (int i = 0; i < (1 << ctx.funct3); i++) {
+                mmem[(ctx.mem_addr + i) & simrv::memory::kDramMask] =
+                    static_cast<Byte>(static_cast<uint8_t>((ctx.rrs2 >> (8 * i)) & 0xFF));
             }
-        } else if ((r_mem_addr >> 28) == 0x9) {
+        } else if ((ctx.mem_addr >> 28) == 0x9) {
             Word* dsk_tmp = reinterpret_cast<Word*>(disk);
-            dsk_tmp[(r_mem_addr & DISK_MASK) / 4] = r_rrs2;
+            dsk_tmp[(ctx.mem_addr & DISK_MASK) / 4] = ctx.rrs2;
 
-            /*for (int i=0; i<(1 << r_funct3); i++) {
-                disk[(r_mem_addr+i) & DISK_MASK] =
-                    static_cast<Byte>(static_cast<uint8_t>((r_rrs2 >> (8*i)) & 0xFF));
+            /*for (int i=0; i<(1 << ctx.funct3); i++) {
+                disk[(ctx.mem_addr+i) & DISK_MASK] =
+                    static_cast<Byte>(static_cast<uint8_t>((ctx.rrs2 >> (8*i)) & 0xFF));
             }*/
-        } else if ((r_mem_addr >> 12) == 0x4000a) {
-            queue_write(r_mem_addr & 0xff, r_rrs2, cons_queue);
-        } else if ((r_mem_addr >> 12) == 0x4000b) {
-            queue_write(r_mem_addr & 0xff, r_rrs2, disk_queue);
+        } else if ((ctx.mem_addr >> 12) == 0x4000a) {
+            queue_write(ctx.mem_addr & 0xff, ctx.rrs2, cons_queue);
+        } else if ((ctx.mem_addr >> 12) == 0x4000b) {
+            queue_write(ctx.mem_addr & 0xff, ctx.rrs2, disk_queue);
         } else {
-            for (int i = 0; i < (1 << r_funct3); i++) {
-                cmem[(r_mem_addr + i) & simrv::memory::kDramMask] =
-                    static_cast<Byte>(static_cast<uint8_t>((r_rrs2 >> (8 * i)) & 0xFF));
+            for (int i = 0; i < (1 << ctx.funct3); i++) {
+                cmem[(ctx.mem_addr + i) & simrv::memory::kDramMask] =
+                    static_cast<Byte>(static_cast<uint8_t>((ctx.rrs2 >> (8 * i)) & 0xFF));
             }
         }
     }
     Word wire_wb_r_data = 0;
     Word wire_wb_r_enable = 0;
-    if (r_opcode == static_cast<Instruction>(Opcode::Load)) {
-        wire_wb_r_data = r_mem_rdata;
+    if (ctx.opcode == static_cast<Instruction>(Opcode::Load)) {
+        wire_wb_r_data = ctx.mem_rdata;
         wire_wb_r_enable = 1;
-    } else if ((r_opcode == static_cast<Instruction>(Opcode::Lui)) ||
-               (r_opcode == static_cast<Instruction>(Opcode::Auipc)) ||
-               (r_opcode == static_cast<Instruction>(Opcode::Jal)) ||
-               (r_opcode == static_cast<Instruction>(Opcode::Jalr)) ||
-               (r_opcode == static_cast<Instruction>(Opcode::Op)) ||
-               (r_opcode == static_cast<Instruction>(Opcode::OpImm))) {
-        wire_wb_r_data = r_wb_data;
+    } else if ((ctx.opcode == static_cast<Instruction>(Opcode::Lui)) ||
+               (ctx.opcode == static_cast<Instruction>(Opcode::Auipc)) ||
+               (ctx.opcode == static_cast<Instruction>(Opcode::Jal)) ||
+               (ctx.opcode == static_cast<Instruction>(Opcode::Jalr)) ||
+               (ctx.opcode == static_cast<Instruction>(Opcode::Op)) ||
+               (ctx.opcode == static_cast<Instruction>(Opcode::OpImm))) {
+        wire_wb_r_data = ctx.wb_data;
         wire_wb_r_enable = 1;
     }
 
-    if (wire_wb_r_enable && r_rd != 0) reg[r_rd] = wire_wb_r_data;
-    pc = (r_tkn) ? r_jmp_pc : pc + 4;
+    if (wire_wb_r_enable && ctx.rd != 0) reg[ctx.rd] = wire_wb_r_data;
+    pc = (ctx.tkn) ? ctx.jmp_pc : pc + 4;
 
     if (owner != nullptr) {
         owner->e_uc_cnt++;
