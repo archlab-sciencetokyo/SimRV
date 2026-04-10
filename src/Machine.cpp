@@ -787,18 +787,42 @@ void Microcn::init(const std::string& image_path) {
     reg[11] = 0x8000; /* simrv::boot::kInitDataAddress + simrv::boot::kStartPc; */
 }
 
+/**
+ * @brief Execute one cycle of the optional I/O controller (Microcn).
+ *
+ * This is a simplified in-order pipeline execution for the micro-controller,
+ * condensed into a single function. It performs fetch-decode-execute-memory-writeback
+ * in a single call, using a local PipelineContext to maintain per-instruction transient state.
+ *
+ * @return true if execution should continue; false if system should halt (power-off command).
+ *
+ * @details
+ * Flow:
+ * 1. **Fetch & Decode**: Load and decompress instruction, extract opcode/fields/immediate.
+ * 2. **Operand Fetch**: Read integer registers and CSR values into operand registers.
+ * 3. **Execute**: Compute ALU results, branch conditions, decide memory addresses.
+ * 4. **Memory**: Read/write to local/main memory or memory-mapped I/O regions.
+ * 5. **Writeback**: Commit results to register file or state.
+ *
+ * @note
+ * - Supports RV32I base ISA only (no compressed instruction support).
+ * - Memory path includes special handling for MMIO regions (console queues, disk, etc.).
+ * - Local state (PipelineContext ctx) is allocated on stack; not persisted between cycles.
+ */
 bool Microcn::exec() {
     DecodeUnit decode_unit;
     ExecuteUnit execute_unit;
     bool ret = true;
     PipelineContext ctx;
 
+    // ===== FETCH & DECODE STAGE =====
     ctx.cpc = pc;
     memcpy(&ctx.ir, &cmem[pc & simrv::memory::kDramMask], 4);
     if ((ctx.ir & 3) != 3) {
         printf("__ ERROR: this microcn does not support compressed insn!\n");
         exit(0);
     }
+    // Decode instruction fields from 32-bit word
     ctx.opcode = (ctx.ir >> 0) & 0x7F;
     ctx.rd = (ctx.ir >> 7) & 0x1f;
     ctx.rs1 = (ctx.ir >> 15) & 0x1f;
@@ -808,8 +832,12 @@ bool Microcn::exec() {
     ctx.funct7 = (ctx.ir >> 25);
     ctx.funct12 = (ctx.ir >> 20);
     ctx.imm = decode_unit.decodeImmediate(ctx.ir);
+
+    // ===== OPERAND FETCH STAGE =====
     ctx.rrs1 = reg[ctx.rs1]; /* regfile read port 1 */
     ctx.rrs2 = reg[ctx.rs2]; /* regfile read port 2 */
+
+    // ===== EXECUTE STAGE =====
     switch (ctx.opcode) {
         case static_cast<Instruction>(Opcode::Lui): {
             ctx.tkn = 0;
@@ -864,8 +892,11 @@ bool Microcn::exec() {
             break;
         }
     }
+
+    // ===== MEMORY STAGE =====
     int tmp = (1 << (ctx.funct3 & 0x3));
     if (ctx.opcode == static_cast<Instruction>(Opcode::Load)) {
+        // Handle load from main memory, disk, or memory-mapped I/O regions
         if ((ctx.mem_addr >> 28) == 0x8) {
             ctx.mem_rdata = ram_read(ctx.mem_addr & simrv::memory::kDramMask, ctx.funct3, mmem);
         } else if ((ctx.mem_addr >> 28) == 0x9) {
@@ -920,6 +951,9 @@ bool Microcn::exec() {
             }
         }
     }
+
+    // ===== WRITEBACK STAGE =====
+    // Select data and enable signal based on operation type
     Word wire_wb_r_data = 0;
     Word wire_wb_r_enable = 0;
     if (ctx.opcode == static_cast<Instruction>(Opcode::Load)) {
@@ -935,7 +969,11 @@ bool Microcn::exec() {
         wire_wb_r_enable = 1;
     }
 
+    // ===== COMMIT STAGE =====
+    // Write result to destination register (rd != 0 to skip x0)
     if (wire_wb_r_enable && ctx.rd != 0) reg[ctx.rd] = wire_wb_r_data;
+
+    // Update PC: jump if branch taken, otherwise sequential increment
     pc = (ctx.tkn) ? ctx.jmp_pc : pc + 4;
 
     if (owner != nullptr) {
