@@ -22,7 +22,7 @@ extern void store_to_ram(Address addr, Word data, int n, Byte* ram);
 using DescriptorSize = std::integral_constant<std::size_t, 16>;
 
 namespace {
-void reset_micro_controller_state(Microcn& controller) {
+void reset_micro_controller_state(IoController& controller) {
     controller.pc = 0;
     std::fill(std::begin(controller.reg), std::end(controller.reg), Register{0});
     controller.reg[11] = 0x8000;
