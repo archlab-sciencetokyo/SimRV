@@ -1,5 +1,7 @@
 # SimRV
 
+[![C/C++ CI](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=dev)](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml)
+
 SimRV is a cycle-oriented RISC-V functional simulator focused on RV32 development.
 It supports Linux and application execution, includes VirtIO-style console/disk devices,
 and uses a CMake/Ninja-based validation workflow.
