@@ -165,7 +165,7 @@ Instruction decomp_c1(Instruction ir) {
                 case 0x3: {
                     switch (funct2) {
                         case 0x0: {  // C.SUB : sub rd', rd', rs2'
-                            ret = make_r_type(1, rs2, rd, Funct3::Add, rd, Opcode::Op);
+                            ret = make_r_type(0x20, rs2, rd, Funct3::Add, rd, Opcode::Op);
                             break;
                         }
                         case 0x1: {  // C.XOR : xor rd', rd', rs2'

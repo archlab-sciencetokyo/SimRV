@@ -13,8 +13,8 @@
             "binaryDir": "${sourceDir}/build/ninja-clang-release",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_C_COMPILER": "clang-20",
-                "CMAKE_CXX_COMPILER": "clang++-20",
+                "CMAKE_C_COMPILER": "${sourceDir}/scripts/archlab-clang",
+                "CMAKE_CXX_COMPILER": "${sourceDir}/scripts/archlab-clangxx",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
             }
         },

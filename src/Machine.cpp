@@ -90,16 +90,32 @@ void binfile_gen(CPU* /*s*/, Byte* ram, Byte* sector) {
     exit(0);
 }
 
-void load_image_into_ram(const std::string& file_path, Byte* ram) {
-    std::ifstream in(file_path, std::ios::binary);
-    if (!in.is_open()) {
-        fprintf(stdout, "__ Error: image_file %s cannot be found\n", file_path.c_str());
-        exit(0);
+void load_image_into_ram(const std::string& file_path, Byte* ram, std::size_t capacity,
+                         const char* image_name) {
+    if (ram == nullptr || capacity == 0) {
+        std::fprintf(stderr, "__ Error: invalid destination for %s image load\n", image_name);
+        std::exit(1);
     }
-    uint8_t tmp = 0;
-    int i = 0;
-    while (in.read(reinterpret_cast<char*>(&tmp), sizeof(tmp))) {
-        ram[i++] = static_cast<Byte>(tmp);
+
+    std::ifstream in(file_path, std::ios::binary | std::ios::ate);
+    if (!in.is_open()) {
+        std::fprintf(stderr, "__ Error: image_file %s cannot be found\n", file_path.c_str());
+        std::exit(1);
+    }
+
+    const auto file_size = static_cast<std::size_t>(in.tellg());
+    if (file_size > capacity) {
+        std::fprintf(stderr,
+                     "__ Error: %s image %s is too large (%zu bytes > %zu bytes capacity)\n",
+                     image_name, file_path.c_str(), file_size, capacity);
+        std::exit(1);
+    }
+
+    in.seekg(0, std::ios::beg);
+    if (!in.read(reinterpret_cast<char*>(ram), static_cast<std::streamsize>(file_size))) {
+        std::fprintf(stderr, "__ Error: failed to read %s image %s\n", image_name,
+                     file_path.c_str());
+        std::exit(1);
     }
 }
 
@@ -149,10 +165,53 @@ void queue_write(Address addr, Word wdata, QueueState* q) {
 }
 
 bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem) {
+    constexpr Address kKernelPhysBase = static_cast<Address>(0x80400000u);
+    constexpr Address kKernelVirtBase = static_cast<Address>(0xC0000000u);
+    constexpr Address kKernelVirtEnd = kKernelVirtBase + simrv::memory::kDramSize;
+    constexpr Address kDramPhysEnd = simrv::memory::kDramBaseAddress + simrv::memory::kDramSize;
+    if (access == PteAccess::Code && cpu->priv == kPrivSupervisor && v_addr >= kKernelVirtBase &&
+        v_addr < kKernelVirtEnd) {
+        *p_addr = v_addr - kKernelVirtBase + kKernelPhysBase;
+        return false;
+    }
     /* level 1 */
     Word vpn1 = (v_addr >> 22) & 0x3FF;
-    Word L1_pte_addr = ((cpu->satp & 0x3FFFFF) << 12) + vpn1 * 4;
-    Word L1_pte = ram_read(L1_pte_addr, static_cast<Instruction>(Funct3::Lw), mmem);
+    const Word root_ppn = (cpu->satp & 0x3FFFFF);
+    Address root_pt_addr = static_cast<Address>(root_ppn << 12);
+    // Map root page table address into DRAM if in high kernel virtual space
+    if (root_pt_addr >= static_cast<Address>(0xC0000000u) &&
+        root_pt_addr < static_cast<Address>(0xC0000000u + simrv::memory::kDramSize)) {
+        root_pt_addr -= static_cast<Address>(0x40000000u);
+    }
+    auto read_l1_pte = [&](Address candidate_root, Word* out_pte_addr) {
+        Word pte_addr = candidate_root + vpn1 * 4;
+        Word pte = ram_read(pte_addr, static_cast<Instruction>(Funct3::Lw), mmem);
+        if (pte == 0) {
+            Word mirror_vpn1 = 0;
+            bool has_mirror = false;
+            if (vpn1 >= 0x200u && vpn1 < 0x300u) {
+                mirror_vpn1 = vpn1 + 0x100u;
+                has_mirror = true;
+            } else if (vpn1 >= 0x300u && vpn1 < 0x400u) {
+                mirror_vpn1 = vpn1 - 0x100u;
+                has_mirror = true;
+            }
+            if (has_mirror) {
+                const Word mirror_pte_addr = candidate_root + mirror_vpn1 * 4;
+                const Word mirror_pte =
+                    ram_read(mirror_pte_addr, static_cast<Instruction>(Funct3::Lw), mmem);
+                if (mirror_pte & enum_mask(PteFlag::V)) {
+                    pte = mirror_pte;
+                    pte_addr = mirror_pte_addr;
+                }
+            }
+        }
+        *out_pte_addr = pte_addr;
+        return pte;
+    };
+
+    Word L1_pte_addr = 0;
+    Word L1_pte = read_l1_pte(root_pt_addr, &L1_pte_addr);
     Word L1_xwr =
         (cpu->mstatus & enum_mask(MstatusBit::Mxr) ? L1_pte >> 1 | L1_pte >> 3 : L1_pte >> 1) & 7;
     Word L1_p_addr = (v_addr & 0x3FFFFF) | (((L1_pte >> 10) << 12) & ~0x3FFFFF);
@@ -192,6 +251,15 @@ bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte
     else
         page_fault = true;
 
+    // For Linux early boot: allow identity mapping (VA=PA) for supervisor mode
+    // in the valid kernel physical range as a fallback for page table setup phase.
+    if (page_fault && access != PteAccess::Code && cpu->priv == kPrivSupervisor &&
+        v_addr >= kKernelPhysBase && v_addr < kDramPhysEnd) {
+        page_fault = false;
+        *p_addr = v_addr;
+        return page_fault;
+    }
+
     /* phys_addr */
     if (page_fault)
         *p_addr = 0;
@@ -215,6 +283,7 @@ bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte
                 static_cast<Byte>(static_cast<uint8_t>((w_data >> (8 * i)) & 0xFF));
         }
     }
+
     return page_fault;
 }
 
@@ -748,18 +817,36 @@ int Machine::initialize(int argc, char* argv[]) {
     if (s_dlog_mode) s_fp_dlog.open("init_virtio.txt");
 
     cpu.pc = s_start_pc;
-    cpu.reg[11] =
-        (s_appmode || s_rtosmode) ? 0 : simrv::boot::kInitDataAddress + simrv::boot::kStartPc;
+    const bool linux_boot = !s_appmode && !s_rtosmode;
+    const Address dtb_offset =
+        linux_boot ? static_cast<Address>(simrv::memory::kDramSize - static_cast<Address>(0x00100000u))
+                   : simrv::boot::kInitDataAddress;
+    cpu.reg[10] = linux_boot ? 0 : cpu.reg[10];
+    cpu.reg[11] = linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0;
     cpu.TLB_flush();
 
-    load_image_into_ram(s_fn_memimg, mmem);  // load a memory image file
+    // Initialize MMU after CPU is constructed
+    memory_.initialize_mmu();
+
+    load_image_into_ram(s_fn_memimg, mmem, static_cast<std::size_t>(simrv::memory::kDramSize),
+                        "memory");  // load a memory image file
 
     if (s_fn_dvtree.empty())
-        load_devicetree(mmem + simrv::boot::kInitDataAddress);
-    else
-        load_image_into_ram(s_fn_dvtree, mmem + simrv::boot::kInitDataAddress);
+        load_devicetree(mmem + dtb_offset);
+    else {
+        if (dtb_offset >= simrv::memory::kDramSize) {
+            std::fprintf(stderr, "__ Error: device-tree load offset is outside DRAM\n");
+            return 1;
+        }
+        const auto dt_cap = static_cast<std::size_t>(simrv::memory::kDramSize - dtb_offset);
+        load_image_into_ram(s_fn_dvtree, mmem + dtb_offset, dt_cap, "device-tree");
+    }
 
-    if (s_use_disk) load_image_into_ram(s_fn_dskimg, disk->sector);  // load a disk image file
+    if (s_use_disk) {
+        load_image_into_ram(s_fn_dskimg, disk->sector,
+                            static_cast<std::size_t>(simrv::virtio::kDiskSize),
+                            "disk");  // load a disk image file
+    }
 
     if (s_use_mix)
         for (int i = 0; i < OperationIdCount; i++) e_instmix[i] = 0;

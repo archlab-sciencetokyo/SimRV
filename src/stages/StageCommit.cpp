@@ -28,6 +28,9 @@ void CPU::commit_control_flow_and_traps(Machine& machine) {
                     break;
                 }
                 default:
+                    if (pipeline_context.funct7 == static_cast<Instruction>(Funct7Priv::SfenceVma)) {
+                        TLB_flush();
+                    }
                     break;
             }
         } else {
@@ -76,7 +79,6 @@ void CPU::commit_control_flow_and_traps(Machine& machine) {
         }
         if (mask != 0) {
             raise_exception(kInterruptCauseBit | irq_num, pending_tval);
-            pending_exception = kInterruptCauseBit | irq_num;
         }
     }
 }

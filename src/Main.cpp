@@ -35,6 +35,7 @@ struct RuntimeOptions {
     std::string fn_asm;
     std::string fn_dskimg;
     std::string fn_dvtree;
+    std::string fn_traplog;
     std::string fn_iocon = "img/iocon.bin";
 
     Address start_pc = simrv::boot::kStartPc;
@@ -52,6 +53,7 @@ struct RuntimeOptions {
     bool rtosmode = false;
     bool debugmode = false;
     bool dlog_mode = false;
+    bool traplog_mode = false;
     bool use_uc = false;
     bool use_disk = false;
     bool use_mix = false;
@@ -438,6 +440,15 @@ std::expected<ParseResult, std::string> parse_command_line(std::span<char* const
             result.options.dlog_mode = true;
             continue;
         }
+        if (arg == "-P" || arg == "--trap-log") {
+            auto value = next_argument(args, i, "-P/--trap-log");
+            if (!value) {
+                return std::unexpected(value.error());
+            }
+            result.options.fn_traplog = std::string(*value);
+            result.options.traplog_mode = true;
+            continue;
+        }
         if (arg == "-x") {
             result.options.use_mix = true;
             continue;
@@ -481,6 +492,7 @@ std::expected<void, std::string> apply_runtime_options(Machine* machine,
     machine->s_fn_memimg = memimg_path;
     machine->s_fn_dskimg = options.fn_dskimg;
     machine->s_fn_dvtree = options.fn_dvtree;
+    machine->s_fn_traplog = options.fn_traplog;
     machine->s_fn_iocon = options.fn_iocon;
 
     machine->s_start_pc = options.start_pc;
@@ -498,6 +510,7 @@ std::expected<void, std::string> apply_runtime_options(Machine* machine,
     machine->s_rtosmode = options.rtosmode;
     machine->s_debugmode = options.debugmode;
     machine->s_dlog_mode = options.dlog_mode;
+    machine->s_traplog_mode = options.traplog_mode;
     machine->s_use_uc = options.use_uc;
     machine->s_use_disk = options.use_disk;
     machine->s_use_mix = options.use_mix;
@@ -512,6 +525,17 @@ std::expected<void, std::string> apply_runtime_options(Machine* machine,
         if (!machine->s_fp_trace.is_open()) {
             return std::unexpected("cannot open trace");
         }
+    }
+
+    machine->s_fp_traplog.close();
+    machine->cpu.trap_log_stream = nullptr;
+    if (options.traplog_mode) {
+        machine->s_fp_traplog.clear();
+        machine->s_fp_traplog.open(options.fn_traplog, std::ios::out | std::ios::trunc);
+        if (!machine->s_fp_traplog.is_open()) {
+            return std::unexpected("cannot open trap/SBI log file: " + options.fn_traplog);
+        }
+        machine->cpu.trap_log_stream = &machine->s_fp_traplog;
     }
 
     return {};
@@ -543,6 +567,7 @@ void set_start_time(Machine& machine) { machine.s_start_time = std::chrono::stea
               << "  -i <N>           Dump init artifacts at cycle N\n"
               << "  -g               Enable debug logging\n"
               << "  -p               Enable disk/console transaction log\n"
+              << "  -P <FILE>        Write trap/SBI diagnostics to file\n"
               << "  -x               Write instruction mix report\n"
               << "  -b               Generate inits.bin and exit\n\n"
               << "ISA Test Mode:\n"

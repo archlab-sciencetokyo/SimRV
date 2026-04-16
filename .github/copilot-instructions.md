@@ -61,11 +61,16 @@ The project uses GitHub Issues, Milestones, and Projects to track RV64GC migrati
 - **Phase 1.5** ✓ COMPLETE: ISA-Tests Integration for RV32 (9/19 tests passing)
 - **Phase 2** 🔄 ACTIVE: OOP Refactor for RV64 Readiness (Due: April 24, 2026)
   - Issue: [#14](https://github.com/archlab-sciencetokyo/SimRV/issues/14)
-  - **Slices 1-3 Complete**:
+  - **Slices 1-4 Complete** (Merged to dev):
     - ✅ Slice 1-2 (CPU refactor): PipelineContext extraction from CPU
     - ✅ Slice 3 (Memory helpers): PipelineContext integration in Microcn
-    - ✅ Slice 4 (Microcontroller): Microcn extraction & error handling (PR [#19](https://github.com/archlab-sciencetokyo/SimRV/pull/19))
-  - ⏳ Slice 5 (Final validation): Phase 2 cleanup & comprehensive testing
+    - ✅ Slice 4 (Microcontroller): Microcn extraction & C++23 modernization (merged as commit 393e114)
+  - 🔄 **Slice 5 (IN PROGRESS)**: Comprehensive testing & validation
+    - Extended regression testing (include Linux boot, ISA tests)
+    - Performance profiling & regression analysis
+    - Cross-slice validation
+    - Branch: `phase-2/oop-refactor-slice5`
+    - Run: `cmake --build --preset ninja-clang-release --target phase2-gate`
   - Branch tracking: `phase-2/oop-refactor-slice*`
   - Guardrail: <3% performance regression, phase1-gate must pass
 - **Phase 3** ⏳ UPCOMING: XLEN Abstraction Layer (Due: May 8, 2026)
@@ -76,25 +81,37 @@ The project uses GitHub Issues, Milestones, and Projects to track RV64GC migrati
   - Issue: [#17](https://github.com/archlab-sciencetokyo/SimRV/issues/17)
 
 ### For Phase 2 (OOP Refactor) Work
-- Branch pattern: `phase-2/oop-refactor-slice*` (e.g., `phase-2/oop-refactor-slice4`)
+- Branch pattern: `phase-2/oop-refactor-slice*` (e.g., `phase-2/oop-refactor-slice5`)
 - Link PRs to issue #14 using "Closes" syntax in commit messages
 - Run phase1-gate before every commit: `cmake --build --preset ninja-clang-release --target phase1-gate`
+- Run phase2-gate for comprehensive validation: `cmake --build --preset ninja-clang-release --target phase2-gate`
 - Monitor performance on baseline workloads; benchmark before and after major changes
 - See `REFACTOR_CLASS_CONCEPT.md` and `ARCHITECTURE.md` for design patterns
 
 ### Phase 2 Slice Descriptions
 - **Slices 1-2**: CPU refactor (PipelineContext extraction from Machine, FETCH→WRITEBACK consolidation)
 - **Slice 3**: Minimal controller refactor (PipelineContext integration in Microcn::exec())
-- **Slice 4**: Microcontroller extraction (remove old members, add System ISA support, error handling)
-- **Slice 5**: Comprehensive testing & validation (cross-slice regression, performance check)
+- **Slice 4**: Microcontroller extraction (remove old members, add System ISA support, error handling, C++23 modernization)
+- **Slice 5**: Comprehensive testing & validation (all regression paths, Linux boot, ISA tests, performance profiling)
+
+### Comprehensive Validation (Slice 5)
+The `phase2-gate` target runs comprehensive tests across:
+1. **Build** - CMake configuration and compilation
+2. **CLI** - Help output, error handling (required)
+3. **Application** - Optional smoke test if SIMRV_APP_IMG set
+4. **Linux Boot** - Extended test with full kernel boot if images available (NEW in Slice 5)
+5. **ISA Tests** - riscv-isa-tests execution if available
+6. **Performance** - Baseline profiling and regression analysis
+
+Run: `bash scripts/phase2-gate.sh` or `cmake --build --preset ninja-clang-release --target phase2-gate`
 
 ### Tracking Links
 - **GitHub Project**: See "Projects" tab for visual board
 - **Label system**: `milestone-phaseX`, `type-epic`, `component-*`, `rv64-migration`
 - **Milestones**: View all phases and deadlines in the Milestones tab
-- **Active PRs**: PR #19 (Slice 4)
 
 ## Pitfalls
 - `isa-tests` and smoke targets require external `riscv-tests` artifacts.
-- Linux/app smoke checks in `scripts/regression.sh` are optional and require environment-provided images.
+- Linux boot test in Slice 5 requires SIMRV_LINUX_MEM_IMG and SIMRV_LINUX_DISK_IMG to be set.
 - `isa-ext-rv32gc-experimental` tracks bring-up behavior and is not equivalent to stable gate coverage.
+- Slice 5 comprehensive testing is "no-skip" - all available tests are attempted.

@@ -222,6 +222,7 @@ void CsrFile::write(CSRAddress addr, CSRValue wdata) {
 
         case csr_addr(Csr::Satp):
             cpu_.satp = wdata;
+            cpu_.TLB_flush();
             break;
 
         case csr_addr(Csr::Mstatus):

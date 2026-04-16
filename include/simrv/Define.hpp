@@ -90,7 +90,7 @@ inline constexpr uint32_t kConsoleMaxQueueNum = 2;
 inline constexpr uint32_t kConsoleIrq = 1;
 inline constexpr uint32_t kDiskSectorSize = 512;
 inline constexpr uint32_t kDiskBufferSize = (512u * 512u);
-inline constexpr uint32_t kDiskSize = (64u * 1024u * 1024u);
+inline constexpr uint32_t kDiskSize = (128u * 1024u * 1024u);
 inline constexpr uint32_t kDiskMaxQueueNum = 4;
 inline constexpr uint32_t kDiskIrq = 2;
 }  // namespace simrv::virtio

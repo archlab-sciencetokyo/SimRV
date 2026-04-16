@@ -5,6 +5,7 @@
 #pragma once
 
 #include <array>
+#include <fstream>
 
 #include "CsrFile.hpp"
 #include "DecodeUnit.hpp"
@@ -136,4 +137,5 @@ class CPU {
     DecodeUnit decode_unit;
     ExecuteUnit execute_unit;
     PipelineContext pipeline_context;
+    std::ofstream* trap_log_stream = nullptr;
 };

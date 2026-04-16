@@ -43,6 +43,7 @@ class Machine {
     bool s_rtosmode = false;                // flag to identify whether the rtos mode or not
     bool s_debugmode = false;               // Enable debug logging in memory-mapped paths.
     bool s_dlog_mode = false;               // Enable disk/console request logging.
+    bool s_traplog_mode = false;            // Enable trap/SBI logging to a file.
     bool s_use_uc = false;                  // flag to use IO controller (micro-controller)
     bool s_use_disk = false;                // flag to use disk image
     bool s_use_mix = false;                 // flag to measure instruction mix
@@ -61,9 +62,11 @@ class Machine {
     Counter s_enabletimer = ~0ull;          // enable timer after N cycles Linux boots
     std::ofstream s_fp_trace;               // trace output stream
     std::ofstream s_fp_dlog;                // File handle for disk/console activity log.
+    std::ofstream s_fp_traplog;             // File handle for trap/SBI diagnostics.
     std::string s_fn_memimg;                // file name of memory image
     std::string s_fn_dskimg;                // file name of disk image
     std::string s_fn_dvtree;                // file name of device-tree binary
+    std::string s_fn_traplog;               // file name of trap/SBI log
     std::string s_fn_iocon;                 // file name of I/O controller program binary
     std::chrono::steady_clock::time_point s_start_time;  // simulation start timestamp
 

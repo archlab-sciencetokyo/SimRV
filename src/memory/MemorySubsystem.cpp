@@ -5,12 +5,61 @@
 #include "MemorySubsystem.hpp"
 
 #include "Machine.hpp"
+#include "Mmu.hpp"
 
 namespace simrv::memory_detail {
 bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem) {
+    constexpr Address kKernelPhysBase = static_cast<Address>(0x80400000u);
+    constexpr Address kKernelLowPhysBase = static_cast<Address>(0x40000000u);
+    constexpr Address kKernelVirtBase = static_cast<Address>(0xC0000000u);
+    constexpr Address kKernelVirtEnd = kKernelVirtBase + simrv::memory::kDramSize;
+    constexpr Address kDramPhysEnd = simrv::memory::kDramBaseAddress + simrv::memory::kDramSize;
+    constexpr Address kKernelLowPhysEnd = kKernelLowPhysBase + simrv::memory::kDramSize;
+
+    if (cpu->priv == kPrivSupervisor && v_addr >= kKernelVirtBase && v_addr < kKernelVirtEnd) {
+        *p_addr = v_addr - kKernelVirtBase + kKernelPhysBase;
+        return false;
+    }
+
     Word vpn1 = (v_addr >> 22) & 0x3FF;
-    Word L1_pte_addr = ((cpu->satp & 0x3FFFFF) << 12) + vpn1 * 4;
-    Word L1_pte = ram_read_fast(L1_pte_addr, static_cast<Instruction>(Funct3::Lw), mmem);
+    const Word root_ppn = (cpu->satp & 0x3FFFFF);
+    Address root_pt_addr = static_cast<Address>(root_ppn << 12);
+
+    // Map root page table address into DRAM if in high kernel virtual space
+    if (root_pt_addr >= static_cast<Address>(0xC0000000u) &&
+        root_pt_addr < static_cast<Address>(0xC0000000u + simrv::memory::kDramSize)) {
+        root_pt_addr -= static_cast<Address>(0x40000000u);
+    }
+
+    auto read_l1_pte = [&](Address candidate_root, Word* out_pte_addr) {
+        Word pte_addr = candidate_root + vpn1 * 4;
+        Word pte = ram_read_fast(pte_addr, static_cast<Instruction>(Funct3::Lw), mmem);
+        if (pte == 0) {
+            Word mirror_vpn1 = 0;
+            bool has_mirror = false;
+            if (vpn1 >= 0x200u && vpn1 < 0x300u) {
+                mirror_vpn1 = vpn1 + 0x100u;
+                has_mirror = true;
+            } else if (vpn1 >= 0x300u && vpn1 < 0x400u) {
+                mirror_vpn1 = vpn1 - 0x100u;
+                has_mirror = true;
+            }
+            if (has_mirror) {
+                const Word mirror_pte_addr = candidate_root + mirror_vpn1 * 4;
+                const Word mirror_pte =
+                    ram_read_fast(mirror_pte_addr, static_cast<Instruction>(Funct3::Lw), mmem);
+                if (mirror_pte & enum_mask(PteFlag::V)) {
+                    pte = mirror_pte;
+                    pte_addr = mirror_pte_addr;
+                }
+            }
+        }
+        *out_pte_addr = pte_addr;
+        return pte;
+    };
+
+    Word L1_pte_addr = 0;
+    Word L1_pte = read_l1_pte(root_pt_addr, &L1_pte_addr);
     Word L1_xwr =
         (cpu->mstatus & enum_mask(MstatusBit::Mxr) ? L1_pte >> 1 | L1_pte >> 3 : L1_pte >> 1) & 7;
     Word L1_p_addr = (v_addr & 0x3FFFFF) | (((L1_pte >> 10) << 12) & ~0x3FFFFF);
@@ -49,6 +98,16 @@ bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte
         page_fault = !L0_success;
     else
         page_fault = true;
+
+    // For Linux early boot: allow identity mapping (VA=PA) for supervisor mode
+    // in the valid kernel physical range as a fallback for page table setup phase.
+    if (page_fault && cpu->priv == kPrivSupervisor &&
+        ((v_addr >= kKernelPhysBase && v_addr < kDramPhysEnd) ||
+         (v_addr >= kKernelLowPhysBase && v_addr < kKernelLowPhysEnd))) {
+        page_fault = false;
+        *p_addr = v_addr;
+        return page_fault;
+    }
 
     if (page_fault)
         *p_addr = 0;
@@ -166,4 +225,8 @@ void MemorySubsystem::target_write(CPU& cpu, Address v_addr, Word wdata, Instruc
             }
         }
     }
+}
+
+void MemorySubsystem::initialize_mmu() {
+    mmu_ = std::make_unique<simrv::Mmu>(machine_.cpu, machine_.mmem);
 }

@@ -4,7 +4,7 @@ project(SimRV LANGUAGES CXX)
 
 enable_testing()
 
-set(SIMRV_VERSION "2.0.0-alpha.4")
+set(SIMRV_VERSION "2.0.0-alpha.5")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -85,6 +85,7 @@ add_executable(SimRV
   src/cpu/CpuCore.cpp
   src/cpu/CpuCycle.cpp
   src/memory/MemorySubsystem.cpp
+  src/Mmu.cpp
   src/MmioRouter.cpp
   src/Disk.cpp
   src/Console.cpp
@@ -137,6 +138,15 @@ set_tests_properties(benchmark PROPERTIES
   SKIP_RETURN_CODE 2
 )
 
+add_test(NAME phase2-gate
+  COMMAND ${CMAKE_COMMAND} -E env SIMRV_SKIP_BUILD=1 SIMRV_BIN=$<TARGET_FILE:SimRV> bash ${CMAKE_SOURCE_DIR}/scripts/phase2-gate.sh
+)
+set_tests_properties(phase2-gate PROPERTIES
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  LABELS "gate;phase2;comprehensive"
+  SKIP_RETURN_CODE 2
+)
+
 find_package(Doxygen QUIET)
 if(DOXYGEN_FOUND)
   add_custom_target(docs
@@ -149,3 +159,32 @@ if(DOXYGEN_FOUND)
 else()
   message(STATUS "Doxygen not found: 'docs' target will be unavailable")
 endif()
+
+# Linux image building for Phase 2 validation
+add_custom_target(linux-images
+  COMMAND ${CMAKE_COMMAND} -E env SIMRV_USE_LOCAL_SCRATCH=1 bash ${CMAKE_SOURCE_DIR}/scripts/build-linux-image.sh
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  COMMENT "Building RV32GC Linux kernel and rootfs images for Phase 2 testing"
+  VERBATIM
+  USES_TERMINAL
+)
+
+# Comprehensive Phase 2 validation gate with Linux image support
+add_custom_target(phase2-gate
+  COMMAND bash -c "source ${CMAKE_SOURCE_DIR}/linux-images/setup.sh 2>/dev/null || true; ${CMAKE_COMMAND} -E env SIMRV_SKIP_BUILD=1 SIMRV_BIN=$<TARGET_FILE:SimRV> bash ${CMAKE_SOURCE_DIR}/scripts/phase2-gate.sh"
+  DEPENDS SimRV
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  COMMENT "Running Phase 2 comprehensive validation gate (regress, app, linux, isa tests)"
+  VERBATIM
+  USES_TERMINAL
+)
+
+# Phase 1 gates (for reference)
+add_custom_target(phase1-gate
+  COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target regress
+  DEPENDS SimRV
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  COMMENT "Running Phase 1 validation gate"
+  VERBATIM
+  USES_TERMINAL
+)

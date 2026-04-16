@@ -1,0 +1,92 @@
+/dts-v1/;
+
+/ {
+    #address-cells = <1>;
+    #size-cells = <1>;
+    compatible = "simrv,virt";
+    model = "simrv,virt-rv32";
+
+    chosen {
+        stdout-path = "serial0:115200n8";
+        bootargs = "console=ttyS0,115200 earlycon=uart8250,mmio,0x10000000 root=/dev/vda rw ignore_loglevel loglevel=8";
+    };
+
+    aliases {
+        serial0 = &uart0;
+    };
+
+    memory@80000000 {
+        device_type = "memory";
+        reg = <0x80000000 0x04000000>;
+    };
+
+    cpus {
+        #address-cells = <1>;
+        #size-cells = <0>;
+        timebase-frequency = <10000000>;
+
+        cpu0: cpu@0 {
+            compatible = "riscv";
+            device_type = "cpu";
+            reg = <0>;
+            riscv,isa = "rv32gc";
+            mmu-type = "riscv,sv32";
+            clock-frequency = <1000000000>;
+
+            cpu0_intc: interrupt-controller {
+                #interrupt-cells = <1>;
+                compatible = "riscv,cpu-intc";
+                interrupt-controller;
+            };
+        };
+    };
+
+    soc {
+        #address-cells = <1>;
+        #size-cells = <1>;
+        compatible = "simple-bus";
+        ranges;
+
+        plic: interrupt-controller@50000000 {
+            #address-cells = <0>;
+            #interrupt-cells = <1>;
+            compatible = "riscv,plic0";
+            interrupt-controller;
+            reg = <0x50000000 0x00400000>;
+            interrupts-extended = <&cpu0_intc 11>;
+            riscv,ndev = <2>;
+        };
+
+        clint: timer@60000000 {
+            compatible = "riscv,clint0";
+            reg = <0x60000000 0x000c0000>;
+            interrupts-extended = <&cpu0_intc 3 &cpu0_intc 7>;
+            clock-frequency = <10000000>;
+        };
+
+        uart0: serial@10000000 {
+            compatible = "ns16550a";
+            reg = <0x10000000 0x100>;
+            reg-shift = <0>;
+            reg-io-width = <1>;
+            clock-frequency = <3686400>;
+            current-speed = <115200>;
+            interrupt-parent = <&plic>;
+            interrupts = <3>;
+        };
+
+        virtio_console: virtio@40000000 {
+            compatible = "virtio,mmio";
+            reg = <0x40000000 0x1000>;
+            interrupt-parent = <&plic>;
+            interrupts = <1>;
+        };
+
+        virtio_disk: virtio@48000000 {
+            compatible = "virtio,mmio";
+            reg = <0x48000000 0x1000>;
+            interrupt-parent = <&plic>;
+            interrupts = <2>;
+        };
+    };
+};

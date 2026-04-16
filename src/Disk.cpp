@@ -245,7 +245,7 @@ Word Disk::mmio_read(Address offset) {
             rdata = Status;
             break;
         case 0x100:
-            rdata = 0;
+            rdata = static_cast<Word>(simrv::virtio::kDiskSize / simrv::virtio::kDiskSectorSize);
             break;
         case 0x104:
             rdata = 0;

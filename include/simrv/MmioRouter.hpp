@@ -18,4 +18,12 @@ class MmioRouter {
 
    private:
     Machine& machine_;
+    Word uart_lcr_ = 0;
+    Word uart_ier_ = 0;
+    Word uart_mcr_ = 0;
+    Word uart_scr_ = 0;
+    Word uart_dll_ = 0;
+    Word uart_dlm_ = 0;
+    bool uart_rx_ready_ = false;
+    uint8_t uart_rx_byte_ = 0;
 };
