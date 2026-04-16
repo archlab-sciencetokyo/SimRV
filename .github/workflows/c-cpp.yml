@@ -26,7 +26,7 @@ jobs:
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
         sudo ./llvm.sh "${LLVM_VERSION}"
-        sudo apt-get install -y clang-"${LLVM_VERSION}" cmake ninja-build gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
+        sudo apt-get install -y clang-"${LLVM_VERSION}" clang-tidy-"${LLVM_VERSION}" cmake ninja-build gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
 
     - name: Fetch riscv-tests
       run: |
@@ -46,6 +46,10 @@ jobs:
 
     - name: Build
       run: cmake --build --preset ninja-clang-release
+
+    - name: Run clang-tidy
+      run: >-
+        cmake --build --preset ninja-clang-release --target clang-tidy
 
     - name: Run CTest gate suite
       env:

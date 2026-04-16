@@ -23,7 +23,7 @@ constexpr uint32_t F32_EXP_MASK = 0xffu;
 constexpr uint32_t F32_EXP_SHIFT = 23u;
 constexpr uint32_t F32_FRAC_MASK = 0x7fffffu;
 constexpr uint32_t F32_QNAN = 0x7fc00000u;
-constexpr uint32_t F32_BOXER_BITS = 0xffffffff00000000ull;
+constexpr FloatingRegister F32_BOXER_BITS = 0xffffffff00000000ull;
 constexpr uint32_t F32_FRAC_QNAN_BIT = 22u;
 
 // IEEE 754 Double-Precision (64-bit) Constants

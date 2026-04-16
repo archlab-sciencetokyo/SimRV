@@ -194,3 +194,23 @@ add_custom_target(phase1-gate
   VERBATIM
   USES_TERMINAL
 )
+
+find_program(SIMRV_CLANG_TIDY_BIN
+  NAMES clang-tidy clang-tidy-22 clang-tidy-21 clang-tidy-20
+)
+
+if(SIMRV_CLANG_TIDY_BIN)
+  add_custom_target(clang-tidy
+    COMMAND ${CMAKE_COMMAND} -E env CLANG_TIDY_BIN=${SIMRV_CLANG_TIDY_BIN} ${CMAKE_SOURCE_DIR}/scripts/run-clang-tidy.sh ${CMAKE_BINARY_DIR}
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Running clang-tidy static analysis"
+    VERBATIM
+    USES_TERMINAL
+  )
+else()
+  add_custom_target(clang-tidy
+    COMMAND ${CMAKE_COMMAND} -E echo "clang-tidy not found; skipping static analysis target"
+    COMMENT "Skipping clang-tidy (tool not found)"
+    VERBATIM
+  )
+endif()
