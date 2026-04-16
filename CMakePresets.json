@@ -13,8 +13,6 @@
             "binaryDir": "${sourceDir}/build/ninja-clang-release",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_C_COMPILER": "${sourceDir}/scripts/archlab-clang",
-                "CMAKE_CXX_COMPILER": "${sourceDir}/scripts/archlab-clangxx",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
             }
         },
@@ -25,7 +23,6 @@
             "binaryDir": "${sourceDir}/build/ninja-gcc-o3-lto",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_C_COMPILER": "gcc",
                 "CMAKE_CXX_COMPILER": "g++",
                 "CMAKE_CXX_FLAGS_RELEASE": "-O3 -flto",
                 "CMAKE_EXE_LINKER_FLAGS_RELEASE": "-flto",
