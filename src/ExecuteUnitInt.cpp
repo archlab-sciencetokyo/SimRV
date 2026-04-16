@@ -5,7 +5,7 @@
 #include "ExecuteUnit.hpp"
 
 namespace {
-constexpr Word D_SHIFT_MASK = static_cast<Word>(0x1fu);
+constexpr Word D_SHIFT_MASK = xlen_shift_mask();
 constexpr Instruction D_MULDIV_FLAG = static_cast<Instruction>(0x1u);
 constexpr Register D_WORD_LOW_MASK = static_cast<Register>(0xffffffffu);
 constexpr Register D_DIV_BY_ZERO_RESULT = static_cast<Register>(0xffffffffu);

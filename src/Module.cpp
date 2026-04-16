@@ -97,8 +97,8 @@ Instruction decomp_c1(Instruction ir) {
     Word rs2 = ((ir >> 2) & 0x7) + 8;
     Word rd = ((ir >> 7) & 0x7) + 8;
     Word nzimm =
-        (((ir >> 12) & 1) ? 0xFFFFFFE0 : 0x0) | (((ir >> 12) & 1) << 5) | ((ir >> 2) & 0x1F);
-    Word shamt = nzimm & 0x1F;
+        sign_extend<Word>((((ir >> 12) & 1) << 5) | ((ir >> 2) & 0x1F), 6);
+    Word shamt = nzimm & xlen_shift_mask();
     Word uimm1 = (((ir >> 12) & 0x1) << 11) | (((ir >> 8) & 0x1) << 10) | (((ir >> 9) & 0x3) << 8) |
                  (((ir >> 6) & 0x1) << 7) | (((ir >> 7) & 0x1) << 6) | (((ir >> 2) & 0x1) << 5) |
                  (((ir >> 11) & 0x1) << 4) | (((ir >> 3) & 0x7) << 1);
@@ -107,10 +107,10 @@ Instruction decomp_c1(Instruction ir) {
     Word uimm3 = (((ir >> 12) & 1) << 5) | ((ir >> 2) & 0x1F);
     Word uimm4 = (((ir >> 12) & 0x1) << 9) | (((ir >> 3) & 0x3) << 7) | (((ir >> 5) & 0x1) << 6) |
                  (((ir >> 2) & 0x1) << 5) | (((ir >> 6) & 0x1) << 4);
-    Word imm1 = ((uimm1 & 0x800) ? 0xFFFFF000 : 0x0) | uimm1;
-    Word imm2 = ((uimm2 & 0x100) ? 0xFFFFFE00 : 0x0) | uimm2;
-    Word imm3 = ((uimm3 & 0x20) ? 0xFFFFFFC0 : 0x0) | uimm3;
-    Word imm4 = ((uimm4 & 0x200) ? 0xFFFFFE00 : 0x0) | uimm4;
+    Word imm1 = sign_extend<Word>(uimm1, 12);
+    Word imm2 = sign_extend<Word>(uimm2, 9);
+    Word imm3 = sign_extend<Word>(uimm3, 6);
+    Word imm4 = sign_extend<Word>(uimm4, 9);
 
     Word ret = ir;
     switch (funct3) {
@@ -199,7 +199,7 @@ Instruction decomp_c2(Instruction ir) {
     Word uimm3 = (((ir >> 7) & 0x7) << 6) | (((ir >> 10) & 0x7) << 3);
     Word uimm4 = (((ir >> 7) & 0x3) << 6) | (((ir >> 9) & 0xF) << 2);
     Word nzuimm = (((ir >> 12) & 1) << 5) | ((ir >> 2) & 0x1F);
-    Word shamt = nzuimm & 0x1F;
+    Word shamt = nzuimm & xlen_shift_mask();
 
     Word ret = ir;
     switch (funct3) {

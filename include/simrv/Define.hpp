@@ -41,6 +41,8 @@ using CompressedInstruction = uint16_t;
 using Word = ActiveXLenTypes::Word;
 using SignedWord = ActiveXLenTypes::SignedWord;
 using Register = ActiveXLenTypes::Register;
+using xlen_t = SignedWord;
+using uxlen_t = Word;
 using WideRegister = uint64_t;
 using FloatingRegister = WideRegister;
 using Counter = uint64_t;
@@ -51,6 +53,22 @@ using CSRAddress = Address;
 using ImmValue = SignedWord;
 using TrapCause = Word;
 using PrivilegeLevel = Word;
+
+inline constexpr unsigned kXLenBits = static_cast<unsigned>(sizeof(uxlen_t) * 8u);
+
+inline constexpr uxlen_t xlen_shift_mask() {
+    return static_cast<uxlen_t>(kXLenBits - 1u);
+}
+
+template <typename T>
+constexpr T sign_extend(T value, unsigned bits) {
+    static_assert(std::is_integral_v<T>, "sign_extend requires an integral type");
+    using UnsignedT = std::make_unsigned_t<T>;
+    const UnsignedT sign_bit = static_cast<UnsignedT>(1u) << (bits - 1u);
+    const UnsignedT value_mask = static_cast<UnsignedT>(1u) << bits;
+    const UnsignedT masked = static_cast<UnsignedT>(value) & (value_mask - static_cast<UnsignedT>(1u));
+    return static_cast<T>((masked ^ sign_bit) - sign_bit);
+}
 
 namespace simrv::boot {
 inline constexpr Address kStartPc = static_cast<Address>(0x80000000u);
