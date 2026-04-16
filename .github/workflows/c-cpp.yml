@@ -39,7 +39,10 @@ jobs:
         ninja --version
     
     - name: Configure CMake
-      run: CC=clang-"${LLVM_VERSION}" CXX=clang++-"${LLVM_VERSION}" cmake --preset ninja-clang-release
+      run: >-
+        cmake --preset ninja-clang-release
+        -DCMAKE_C_COMPILER=clang-"${LLVM_VERSION}"
+        -DCMAKE_CXX_COMPILER=clang++-"${LLVM_VERSION}"
 
     - name: Build
       run: cmake --build --preset ninja-clang-release

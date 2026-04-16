@@ -32,7 +32,10 @@ jobs:
           git clone --depth 1 https://github.com/riscv-software-src/riscv-tests.git "$RUNNER_TEMP/riscv-tests"
 
       - name: Configure
-        run: CC=clang-"${LLVM_VERSION}" CXX=clang++-"${LLVM_VERSION}" cmake --preset ninja-clang-release
+        run: >-
+          cmake --preset ninja-clang-release
+          -DCMAKE_C_COMPILER=clang-"${LLVM_VERSION}"
+          -DCMAKE_CXX_COMPILER=clang++-"${LLVM_VERSION}"
 
       - name: Build
         run: cmake --build --preset ninja-clang-release
