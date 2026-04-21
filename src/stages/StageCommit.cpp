@@ -10,8 +10,8 @@ void CPU::run_commit_stage(Machine& machine) { commit_control_flow_and_traps(mac
 void CPU::commit_control_flow_and_traps(Machine& machine) {
     if (pipeline_context.cinsn) machine.e_ccount++; /** for evaluation **/
 
-    const Opcode opcode = static_cast<Opcode>(pipeline_context.opcode);
-    const Funct3 funct3 = static_cast<Funct3>(pipeline_context.funct3);
+    const auto opcode = static_cast<Opcode>(pipeline_context.opcode);
+    const auto funct3 = static_cast<Funct3>(pipeline_context.funct3);
 
     if (opcode == Opcode::System) {
         if (funct3 == Funct3::Priv) {
@@ -60,6 +60,8 @@ void CPU::commit_control_flow_and_traps(Machine& machine) {
                 enable_interrupts = ~0;
                 break;
             }
+            default:
+                break;
         }
         mask = pending_interrupts & enable_interrupts;
         for (int i = 0; i < 32; i++) {

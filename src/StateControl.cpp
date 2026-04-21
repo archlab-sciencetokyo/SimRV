@@ -179,17 +179,17 @@ void InterruptController::setIrq(int irq_num, int state) {
     updateMip();
 }
 
-bool PlicMmio::read([[maybe_unused]] Machine& machine, Address p_addr, Word& rdata) {
+auto PlicMmio::read([[maybe_unused]] Machine& machine, Address p_addr, Word& rdata) -> bool {
     rdata = mmio_read(offset(p_addr));
     return true;
 }
 
-bool PlicMmio::write([[maybe_unused]] Machine& machine, Address p_addr, Word wdata) {
+auto PlicMmio::write([[maybe_unused]] Machine& machine, Address p_addr, Word wdata) -> bool {
     mmio_write(offset(p_addr), wdata);
     return true;
 }
 
-Word PlicMmio::mmio_read(Address offset) {
+auto PlicMmio::mmio_read(Address offset) -> Word {
     if (offset == simrv::mmio::kPlicHartBase + 4) {
         CSRValue mask = cpu_.plic_pending_irq & ~cpu_.plic_served_irq;
         if (mask != 0) {
@@ -208,17 +208,17 @@ void PlicMmio::mmio_write(Address offset, Word wdata) {
     }
 }
 
-bool ClintMmio::read([[maybe_unused]] Machine& machine, Address p_addr, Word& rdata) {
+auto ClintMmio::read([[maybe_unused]] Machine& machine, Address p_addr, Word& rdata) -> bool {
     rdata = mmio_read(offset(p_addr));
     return true;
 }
 
-bool ClintMmio::write([[maybe_unused]] Machine& machine, Address p_addr, Word wdata) {
+auto ClintMmio::write([[maybe_unused]] Machine& machine, Address p_addr, Word wdata) -> bool {
     mmio_write(offset(p_addr), wdata);
     return true;
 }
 
-Word ClintMmio::mmio_read(Address offset) {
+auto ClintMmio::mmio_read(Address offset) -> Word {
     if (offset == 0xbff8) return static_cast<Word>(cpu_.mtime);
     if (offset == 0xbffc) return static_cast<Word>(cpu_.mtime >> 32);
     if (offset == 0x4000) return static_cast<Word>(cpu_.mtimecmp);

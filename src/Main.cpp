@@ -8,6 +8,7 @@
 #include <charconv>
 #include <chrono>
 #include <csignal>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <expected>
@@ -23,12 +24,12 @@
 
 Machine sim_machine; /* simulator machine instance */
 
-bool parse_scaled_u64(std::string_view num, uint64_t& out);
-bool parse_u32_base0(std::string_view num, uint32_t& out);
+auto parse_scaled_u64(std::string_view num, uint64_t& out) -> bool;
+auto parse_u32_base0(std::string_view num, uint32_t& out) -> bool;
 
 namespace {
 
-enum class CliAction { Run, ShowHelp, ShowVersion };
+enum class CliAction : uint8_t { Run, ShowHelp, ShowVersion };
 
 struct RuntimeOptions {
     std::string fn_memimg;
@@ -76,7 +77,7 @@ class TerminalModeGuard {
         }
     }
 
-    bool enable_raw_mode() {
+    auto enable_raw_mode() -> bool {
         struct termios tty{};
         if (tcgetattr(0, &tty) != 0) {
             return false;
@@ -108,9 +109,8 @@ class TerminalModeGuard {
     std::exit(code);
 }
 
-std::expected<std::string_view, std::string> next_argument(std::span<char* const> args,
-                                                           std::size_t& index,
-                                                           std::string_view option_name) {
+auto next_argument(std::span<char* const> args, std::size_t& index, std::string_view option_name)
+    -> std::expected<std::string_view, std::string> {
     if (index + 1 >= args.size()) {
         return std::unexpected("missing value for " + std::string(option_name));
     }
@@ -118,9 +118,8 @@ std::expected<std::string_view, std::string> next_argument(std::span<char* const
     return std::string_view(args[index]);
 }
 
-std::expected<uint64_t, std::string> parse_scaled_required(std::span<char* const> args,
-                                                           std::size_t& index,
-                                                           std::string_view option_name) {
+auto parse_scaled_required(std::span<char* const> args, std::size_t& index,
+                           std::string_view option_name) -> std::expected<uint64_t, std::string> {
     auto value_text = next_argument(args, index, option_name);
     if (!value_text) {
         return std::unexpected(value_text.error());
@@ -133,9 +132,8 @@ std::expected<uint64_t, std::string> parse_scaled_required(std::span<char* const
     return parsed_value;
 }
 
-std::expected<uint32_t, std::string> parse_u32_required(std::span<char* const> args,
-                                                        std::size_t& index,
-                                                        std::string_view option_name) {
+auto parse_u32_required(std::span<char* const> args, std::size_t& index,
+                        std::string_view option_name) -> std::expected<uint32_t, std::string> {
     auto value_text = next_argument(args, index, option_name);
     if (!value_text) {
         return std::unexpected(value_text.error());
@@ -148,9 +146,8 @@ std::expected<uint32_t, std::string> parse_u32_required(std::span<char* const> a
     return parsed_value;
 }
 
-std::expected<void, std::string> parse_trace_window(RuntimeOptions& options,
-                                                    std::span<char* const> args,
-                                                    std::size_t& index) {
+auto parse_trace_window(RuntimeOptions& options, std::span<char* const> args, std::size_t& index)
+    -> std::expected<void, std::string> {
     auto begin = parse_scaled_required(args, index, "-t");
     if (!begin) {
         return std::unexpected(begin.error());
@@ -169,7 +166,7 @@ std::expected<void, std::string> parse_trace_window(RuntimeOptions& options,
     return {};
 }
 
-std::string lowercase_copy(std::string_view text) {
+auto lowercase_copy(std::string_view text) -> std::string {
     std::string result(text);
     for (char& c : result) {
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -177,7 +174,7 @@ std::string lowercase_copy(std::string_view text) {
     return result;
 }
 
-std::expected<MisaProfile, std::string> parse_misa_profile(std::string_view value) {
+auto parse_misa_profile(std::string_view value) -> std::expected<MisaProfile, std::string> {
     const std::string normalized = lowercase_copy(value);
     if (normalized == "rv32i") {
         return MisaProfile::I;
@@ -192,7 +189,7 @@ std::expected<MisaProfile, std::string> parse_misa_profile(std::string_view valu
                            "' (supported: rv32i, rv32imac, rv32gc)");
 }
 
-MisaProfile effective_misa_profile(const RuntimeOptions& options) {
+auto effective_misa_profile(const RuntimeOptions& options) -> MisaProfile {
     if (options.misa_override) {
         return options.misa_profile;
     }
@@ -202,7 +199,7 @@ MisaProfile effective_misa_profile(const RuntimeOptions& options) {
     return MisaProfile::GC;
 }
 
-std::string shell_quote(std::string_view arg) {
+auto shell_quote(std::string_view arg) -> std::string {
     std::string quoted = "'";
     for (char c : arg) {
         if (c == '\'') {
@@ -215,16 +212,18 @@ std::string shell_quote(std::string_view arg) {
     return quoted;
 }
 
-bool shell_command_success(const std::string& command) { return std::system(command.c_str()) == 0; }
+auto shell_command_success(const std::string& command) -> bool {
+    return std::system(command.c_str()) == 0;
+}
 
-bool command_exists(std::string_view command) {
+auto command_exists(std::string_view command) -> bool {
     return shell_command_success("command -v " + shell_quote(command) + " >/dev/null 2>&1");
 }
 
-std::string resolve_tool(const char* env_name, std::initializer_list<std::string_view> candidates,
-                         std::string_view display_name) {
+auto resolve_tool(const char* env_name, std::initializer_list<std::string_view> candidates,
+                  std::string_view display_name) -> std::string {
     if (const char* env_value = std::getenv(env_name); env_value != nullptr && *env_value != '\0') {
-        return std::string(env_value);
+        return {env_value};
     }
     for (const auto candidate : candidates) {
         if (command_exists(candidate)) {
@@ -235,20 +234,19 @@ std::string resolve_tool(const char* env_name, std::initializer_list<std::string
                  "; set environment variable " + env_name);
 }
 
-std::pair<std::string, std::string> misa_toolchain_flags(MisaProfile profile) {
+auto misa_toolchain_flags(MisaProfile profile) -> std::pair<std::string, std::string> {
     switch (profile) {
         case MisaProfile::I:
             return {"rv32i", "ilp32"};
         case MisaProfile::IMAC:
             return {"rv32imac", "ilp32"};
         case MisaProfile::GC:
-            return {"rv32gc", "ilp32d"};
         default:
             return {"rv32gc", "ilp32d"};
     }
 }
 
-std::expected<std::string, std::string> assemble_to_binary(const RuntimeOptions& options) {
+auto assemble_to_binary(const RuntimeOptions& options) -> std::expected<std::string, std::string> {
     namespace fs = std::filesystem;
 
     if (options.fn_asm.empty()) {
@@ -299,7 +297,7 @@ std::expected<std::string, std::string> assemble_to_binary(const RuntimeOptions&
     return bin_path.string();
 }
 
-std::expected<ParseResult, std::string> parse_command_line(std::span<char* const> args) {
+auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResult, std::string> {
     ParseResult result{};
 
     for (std::size_t i = 1; i < args.size(); ++i) {
@@ -478,8 +476,8 @@ std::expected<ParseResult, std::string> parse_command_line(std::span<char* const
     return result;
 }
 
-std::expected<void, std::string> apply_runtime_options(Machine* machine,
-                                                       const RuntimeOptions& options) {
+auto apply_runtime_options(Machine* machine, const RuntimeOptions& options)
+    -> std::expected<void, std::string> {
     std::string memimg_path = options.fn_memimg;
     if (!options.fn_asm.empty()) {
         auto assembled = assemble_to_binary(options);
@@ -586,7 +584,7 @@ void set_start_time(Machine& machine) { machine.s_start_time = std::chrono::stea
     std::exit(exit_code);
 }
 
-bool parse_scaled_u64(std::string_view num, uint64_t& out) {
+auto parse_scaled_u64(std::string_view num, uint64_t& out) -> bool {
     uint64_t multiplier = 1;
     if (!num.empty()) {
         switch (num.back()) {
@@ -625,7 +623,7 @@ bool parse_scaled_u64(std::string_view num, uint64_t& out) {
     return true;
 }
 
-bool parse_u32_base0(std::string_view num, uint32_t& out) {
+auto parse_u32_base0(std::string_view num, uint32_t& out) -> bool {
     uint64_t value = 0;
     int base = 10;
     if (num.size() > 2 && num[0] == '0' && (num[1] == 'x' || num[1] == 'X')) {
@@ -650,7 +648,7 @@ bool parse_u32_base0(std::string_view num, uint32_t& out) {
     return true;
 }
 
-void set_options(Machine* m, int argc, char* argv[]) {
+void set_options(Machine* m, int argc, char* const* argv) {
     if (argc == 1) usage(argv[0], 1);
 
     std::span<char* const> args(argv, static_cast<std::size_t>(argc));
@@ -675,7 +673,7 @@ void set_options(Machine* m, int argc, char* argv[]) {
     }
 }
 
-int main(int argc, char* argv[]) {
+auto main(int argc, char* argv[]) -> int {
     std::cout << "__ " << simrv::buildinfo::kProjectDescription << " v"
               << simrv::buildinfo::kVersion << " (" << simrv::buildinfo::kGitBranch << "@"
               << simrv::buildinfo::kGitSha << ")\n"

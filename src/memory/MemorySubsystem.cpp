@@ -5,10 +5,9 @@
 #include "MemorySubsystem.hpp"
 
 #include "Machine.hpp"
-#include "Mmu.hpp"
 
 namespace simrv::memory_detail {
-bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem) {
+auto page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem) -> bool {
     constexpr Address kKernelPhysBase = static_cast<Address>(0x80400000u);
     constexpr Address kKernelLowPhysBase = static_cast<Address>(0x40000000u);
     constexpr Address kKernelVirtBase = static_cast<Address>(0xC0000000u);
@@ -25,7 +24,6 @@ bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte
     const Word root_ppn = (cpu->satp & 0x3FFFFF);
     Address root_pt_addr = static_cast<Address>(root_ppn << 12);
 
-    // Map root page table address into DRAM if in high kernel virtual space
     if (root_pt_addr >= static_cast<Address>(0xC0000000u) &&
         root_pt_addr < static_cast<Address>(0xC0000000u + simrv::memory::kDramSize)) {
         root_pt_addr -= static_cast<Address>(0x40000000u);
@@ -87,20 +85,10 @@ bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte
           ((cpu->priv == kPrivUser) && (!(L0_pte & enum_mask(PteFlag::U)))) ||
           ((L0_xwr >> static_cast<Word>(access)) & 1) == 0);
 
-    bool page_fault = false;
-    if (!(L1_pte & enum_mask(PteFlag::V)))
-        page_fault = true;
-    else if (L1_xwr != 0)
-        page_fault = !L1_success;
-    else if (!(L0_pte & enum_mask(PteFlag::V)))
-        page_fault = true;
-    else if (L0_xwr != 0)
-        page_fault = !L0_success;
-    else
-        page_fault = true;
+    bool page_fault =
+        (!(L1_pte & enum_mask(PteFlag::V))) || (L1_xwr != 0 && !L1_success) ||
+        (L1_xwr == 0 && ((!(L0_pte & enum_mask(PteFlag::V))) || (L0_xwr == 0) || !L0_success));
 
-    // For Linux early boot: allow identity mapping (VA=PA) for supervisor mode
-    // in the valid kernel physical range as a fallback for page table setup phase.
     if (page_fault && cpu->priv == kPrivSupervisor &&
         ((v_addr >= kKernelPhysBase && v_addr < kDramPhysEnd) ||
          (v_addr >= kKernelLowPhysBase && v_addr < kKernelLowPhysEnd))) {
@@ -134,7 +122,7 @@ bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte
 }
 }  // namespace simrv::memory_detail
 
-Word MemorySubsystem::target_read(CPU& cpu, Address v_addr, Instruction funct3) {
+auto MemorySubsystem::target_read(CPU& cpu, Address v_addr, Instruction funct3) -> Word {
     if (simrv::compiler::likely(cpu.pending_exception == ~0u) &&
         simrv::compiler::likely(cpu.priv == kPrivMachine || (cpu.satp >> 31) == 0) &&
         simrv::compiler::likely(simrv::memory_detail::is_dram_addr(v_addr))) {
@@ -225,8 +213,4 @@ void MemorySubsystem::target_write(CPU& cpu, Address v_addr, Word wdata, Instruc
             }
         }
     }
-}
-
-void MemorySubsystem::initialize_mmu() {
-    mmu_ = std::make_unique<simrv::Mmu>(machine_.cpu, machine_.mmem);
 }

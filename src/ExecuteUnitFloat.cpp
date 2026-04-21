@@ -93,22 +93,22 @@ constexpr Word FUNCT3_FCLASS = 0x1;
 // Bit Manipulation Helpers
 // ============================================================================
 
-uint32_t f32_bits(float v) { return std::bit_cast<uint32_t>(v); }
-float f32_from_bits(uint32_t v) { return std::bit_cast<float>(v); }
-uint64_t f64_bits(double v) { return std::bit_cast<uint64_t>(v); }
-double f64_from_bits(uint64_t v) { return std::bit_cast<double>(v); }
+auto f32_bits(float v) -> uint32_t { return std::bit_cast<uint32_t>(v); }
+auto f32_from_bits(uint32_t v) -> float { return std::bit_cast<float>(v); }
+auto f64_bits(double v) -> uint64_t { return std::bit_cast<uint64_t>(v); }
+auto f64_from_bits(uint64_t v) -> double { return std::bit_cast<double>(v); }
 
 // ============================================================================
 // Register Access Helpers
 // ============================================================================
 
-float read_f32(const FloatingRegister* freg, Word idx) {
+auto read_f32(const FloatingRegister* freg, Word idx) -> float {
     return f32_from_bits(static_cast<uint32_t>(freg[idx] & 0xffffffffu));
 }
 
-double read_f64(const FloatingRegister* freg, Word idx) { return f64_from_bits(freg[idx]); }
+auto read_f64(const FloatingRegister* freg, Word idx) -> double { return f64_from_bits(freg[idx]); }
 
-FloatingRegister write_f32_boxed(float v) {
+auto write_f32_boxed(float v) -> FloatingRegister {
     return constants::F32_BOXER_BITS | static_cast<FloatingRegister>(f32_bits(v));
 }
 
@@ -116,7 +116,7 @@ FloatingRegister write_f32_boxed(float v) {
 // Classification Functions
 // ============================================================================
 
-uint32_t fclass32(float v) {
+auto fclass32(float v) -> uint32_t {
     const uint32_t bits = f32_bits(v);
     const bool sign = (bits >> constants::F32_SIGN_BIT) != 0;
     const uint32_t exp = (bits >> constants::F32_EXP_SHIFT) & constants::F32_EXP_MASK;
@@ -134,7 +134,7 @@ uint32_t fclass32(float v) {
     return sign ? (1u << 1) : (1u << 6);
 }
 
-uint32_t fclass64(double v) {
+auto fclass64(double v) -> uint32_t {
     const uint64_t bits = f64_bits(v);
     const bool sign = (bits >> constants::F64_SIGN_BIT) != 0;
     const uint64_t exp = (bits >> constants::F64_EXP_SHIFT) & constants::F64_EXP_MASK;
@@ -156,7 +156,7 @@ uint32_t fclass64(double v) {
 // Signaling NaN Detection
 // ============================================================================
 
-bool is_snan32(float v) {
+auto is_snan32(float v) -> bool {
     const uint32_t bits = f32_bits(v);
     const uint32_t exp = (bits >> constants::F32_EXP_SHIFT) & constants::F32_EXP_MASK;
     const uint32_t frac = bits & constants::F32_FRAC_MASK;
@@ -164,7 +164,7 @@ bool is_snan32(float v) {
            ((frac & (1u << constants::F32_FRAC_QNAN_BIT)) == 0);
 }
 
-bool is_snan64(double v) {
+auto is_snan64(double v) -> bool {
     const uint64_t bits = f64_bits(v);
     const uint64_t exp = (bits >> constants::F64_EXP_SHIFT) & constants::F64_EXP_MASK;
     const uint64_t frac = bits & constants::F64_FRAC_MASK;
@@ -176,7 +176,7 @@ bool is_snan64(double v) {
 // Min/Max Functions
 // ============================================================================
 
-FloatingRegister fmin32_riscv(float a, float b) {
+auto fmin32_riscv(float a, float b) -> FloatingRegister {
     const bool a_nan = std::isnan(a);
     const bool b_nan = std::isnan(b);
     if (is_snan32(a) || is_snan32(b)) std::feraiseexcept(FE_INVALID);
@@ -190,7 +190,7 @@ FloatingRegister fmin32_riscv(float a, float b) {
     return write_f32_boxed(std::fmin(a, b));
 }
 
-FloatingRegister fmax32_riscv(float a, float b) {
+auto fmax32_riscv(float a, float b) -> FloatingRegister {
     const bool a_nan = std::isnan(a);
     const bool b_nan = std::isnan(b);
     if (is_snan32(a) || is_snan32(b)) std::feraiseexcept(FE_INVALID);
@@ -204,7 +204,7 @@ FloatingRegister fmax32_riscv(float a, float b) {
     return write_f32_boxed(std::fmax(a, b));
 }
 
-FloatingRegister fmin64_riscv(double a, double b) {
+auto fmin64_riscv(double a, double b) -> FloatingRegister {
     const bool a_nan = std::isnan(a);
     const bool b_nan = std::isnan(b);
     if (is_snan64(a) || is_snan64(b)) std::feraiseexcept(FE_INVALID);
@@ -218,7 +218,7 @@ FloatingRegister fmin64_riscv(double a, double b) {
     return f64_bits(std::fmin(a, b));
 }
 
-FloatingRegister fmax64_riscv(double a, double b) {
+auto fmax64_riscv(double a, double b) -> FloatingRegister {
     const bool a_nan = std::isnan(a);
     const bool b_nan = std::isnan(b);
     if (is_snan64(a) || is_snan64(b)) std::feraiseexcept(FE_INVALID);
@@ -236,7 +236,7 @@ FloatingRegister fmax64_riscv(double a, double b) {
 // Exception Handling
 // ============================================================================
 
-uint32_t host_except_to_fflags(int ex) {
+auto host_except_to_fflags(int ex) -> uint32_t {
     uint32_t flags = 0;
     if (ex & FE_INEXACT) flags |= constants::FFLAGS_NX;
     if (ex & FE_UNDERFLOW) flags |= constants::FFLAGS_UF;
@@ -257,7 +257,7 @@ void accumulate_fp_flags(CSRValue& fcsr) {
 // Rounding Mode Management
 // ============================================================================
 
-int rm_to_fe_round(Word rm, CSRValue fcsr) {
+auto rm_to_fe_round(Word rm, CSRValue fcsr) -> int {
     Word effective_rm = rm;
     if (effective_rm == constants::RM_DYN) effective_rm = (fcsr >> 5) & 0x7;
 
@@ -270,10 +270,8 @@ int rm_to_fe_round(Word rm, CSRValue fcsr) {
             return FE_DOWNWARD;
         case constants::RM_RUP:
             return FE_UPWARD;
-        case constants::RM_RMM:
-            return FE_TONEAREST;  // Host fallback for RMM.
         default:
-            return FE_TONEAREST;
+            return FE_TONEAREST;  // Host fallback for unsupported modes (including RMM).
     }
 }
 
@@ -293,7 +291,7 @@ class ScopedRoundingMode {
 // Floating-Point to Integer Conversion
 // ============================================================================
 
-Register fcvt_to_i32(double value, bool unsigned_mode) {
+auto fcvt_to_i32(double value, bool unsigned_mode) -> Register {
     if (std::isnan(value)) {
         std::feraiseexcept(FE_INVALID);
         return unsigned_mode ? std::numeric_limits<uint32_t>::max()
@@ -310,20 +308,16 @@ Register fcvt_to_i32(double value, bool unsigned_mode) {
         }
     }
 
-    double rounded = value;
+    double rounded = std::rint(value);
     int rmode = std::fegetround();
 
     // Apply explicit rounding
-    if (rmode == FE_TONEAREST) {
-        rounded = std::rint(value);
-    } else if (rmode == FE_TOWARDZERO) {
+    if (rmode == FE_TOWARDZERO) {
         rounded = std::trunc(value);
     } else if (rmode == FE_DOWNWARD) {
         rounded = std::floor(value);
     } else if (rmode == FE_UPWARD) {
         rounded = std::ceil(value);
-    } else {
-        rounded = std::rint(value);
     }
 
     if (rounded != value) {
@@ -331,8 +325,8 @@ Register fcvt_to_i32(double value, bool unsigned_mode) {
     }
 
     if (!unsigned_mode) {
-        constexpr double min_v = static_cast<double>(std::numeric_limits<int32_t>::min());
-        constexpr double max_v = static_cast<double>(std::numeric_limits<int32_t>::max());
+        constexpr auto min_v = static_cast<double>(std::numeric_limits<int32_t>::min());
+        constexpr auto max_v = static_cast<double>(std::numeric_limits<int32_t>::max());
         if (rounded < min_v) {
             std::feraiseexcept(FE_INVALID);
             return static_cast<Register>(std::numeric_limits<int32_t>::min());
@@ -345,7 +339,7 @@ Register fcvt_to_i32(double value, bool unsigned_mode) {
     }
 
     constexpr double min_v = 0.0;
-    constexpr double max_v = static_cast<double>(std::numeric_limits<uint32_t>::max());
+    constexpr auto max_v = static_cast<double>(std::numeric_limits<uint32_t>::max());
     if (rounded < min_v) {
         std::feraiseexcept(FE_INVALID);
         return 0;
@@ -366,8 +360,8 @@ Register fcvt_to_i32(double value, bool unsigned_mode) {
 using namespace simrv::fp;
 using namespace simrv::fp::constants;
 
-FpExecResult ExecuteUnit::fusedFp(Opcode opcode, Word fmt, Word rs1, Word rs2, Word rs3, Word rm,
-                                  const FloatingRegister* freg, CSRValue& fcsr) const {
+auto ExecuteUnit::fusedFp(Opcode opcode, Word fmt, Word rs1, Word rs2, Word rs3, Word rm,
+                          const FloatingRegister* freg, CSRValue& fcsr) const -> FpExecResult {
     FpExecResult out;
     std::feclearexcept(FE_ALL_EXCEPT);
     {
@@ -402,8 +396,8 @@ FpExecResult ExecuteUnit::fusedFp(Opcode opcode, Word fmt, Word rs1, Word rs2, W
     return out;
 }
 
-FpExecResult ExecuteUnit::opFp(Word funct7, Word funct3, Word rs2_field, Word rs1, Word rs2,
-                               Register rrs1, const FloatingRegister* freg, CSRValue& fcsr) const {
+auto ExecuteUnit::opFp(Word funct7, Word funct3, Word rs2_field, Word rs1, Word rs2, Register rrs1,
+                       const FloatingRegister* freg, CSRValue& fcsr) const -> FpExecResult {
     FpExecResult out;
     const Word rm = funct3;
 
@@ -599,8 +593,8 @@ FpExecResult ExecuteUnit::opFp(Word funct7, Word funct3, Word rs2_field, Word rs
         out.int_wb_enable = true;
         accumulate_fp_flags(fcsr);
     } else if (funct7 == FUNCT7_FCVT_S_W || funct7 == FUNCT7_FCVT_D_W) {
-        const int32_t i = static_cast<int32_t>(rrs1);
-        const uint32_t u = static_cast<uint32_t>(rrs1);
+        const auto i = static_cast<int32_t>(rrs1);
+        const auto u = static_cast<uint32_t>(rrs1);
         const bool is_d = (funct7 == FUNCT7_FCVT_D_W);
         std::feclearexcept(FE_ALL_EXCEPT);
         {

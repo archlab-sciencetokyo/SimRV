@@ -10,11 +10,12 @@
 #include <fstream>
 #include <iomanip>
 #include <memory>
+#include <print>
 #include <string>
 #include <utility>
 
 #include "Module.hpp"
-void set_options(Machine* m, int argc, char* argv[]);
+void set_options(Machine* m, int argc, char* const* argv);
 
 Machine::Machine()
     : micro_controller(std::make_unique<IoController>()), mmio_router_(*this), memory_(*this) {
@@ -22,9 +23,9 @@ Machine::Machine()
 }
 
 namespace simrv::machine_detail {
-constexpr size_t D_SIZE_DRAM = (9u * 1024u * 1024u);   // 9MB of bbl + kernel
-constexpr size_t D_SIZE_DEVT = (4u * 1024u);           // 4KB of device tree
-constexpr size_t D_SIZE_DISK = (16u * 1024u * 1024u);  // 16MB of disk image
+constexpr size_t D_SIZE_DRAM = (size_t{9} * 1024u * 1024u);   // 9MB of bbl + kernel
+constexpr size_t D_SIZE_DEVT = (size_t{4} * 1024u);           // 4KB of device tree
+constexpr size_t D_SIZE_DISK = (size_t{16} * 1024u * 1024u);  // 16MB of disk image
 constexpr Address D_DEVT_OFFSET = static_cast<Address>(16u * 1024u * 1024u);
 constexpr Address D_QUEUE_STRIDE = static_cast<Address>(0x24u);
 constexpr Address D_QUEUE_READY_OFFSET = static_cast<Address>(0x0u);
@@ -51,7 +52,7 @@ constexpr std::array<std::pair<Address, QueueField>, 9> kQueueFields = {{
     {D_QUEUE_LAST_AVAIL_OFFSET, &QueueState::last_avail_idx},
 }};
 
-constexpr QueueField queue_field(Address offset) {
+constexpr auto queue_field(Address offset) -> QueueField {
     for (const auto& [field_offset, field] : kQueueFields) {
         if (field_offset == offset) {
             return field;
@@ -60,23 +61,23 @@ constexpr QueueField queue_field(Address offset) {
     return nullptr;
 }
 
-constexpr Word pte_access_index(PteAccess access) { return std::to_underlying(access); }
+constexpr auto pte_access_index(PteAccess access) -> Word { return std::to_underlying(access); }
 
 void binfile_gen(CPU* /*s*/, Byte* ram, Byte* sector) {
     std::ofstream out("inits.bin", std::ios::binary);
     if (!out.is_open()) {
-        printf("__ Error: cannot create inits.bin\n");
+        std::println("__ Error: cannot create inits.bin");
         exit(1);
     }
     out.write(reinterpret_cast<const char*>(ram), D_SIZE_DRAM);
     out.write(reinterpret_cast<const char*>(ram + D_DEVT_OFFSET), D_SIZE_DEVT);
     out.write(reinterpret_cast<const char*>(sector), D_SIZE_DISK);
     out.close();
-    printf("__ File inits.bin was generated.\n");
+    std::println("__ File inits.bin was generated.");
 
     std::ifstream in("inits.bin", std::ios::binary);
     if (!in.is_open()) {
-        printf("__ Error: cannot reopen inits.bin\n");
+        std::println("__ Error: cannot reopen inits.bin");
         exit(1);
     }
     int i = 0;
@@ -86,43 +87,27 @@ void binfile_gen(CPU* /*s*/, Byte* ram, Byte* sector) {
         sum += buf;
         i++;
     }
-    printf("__ %8d byte file, checksum %08x\n\n", i * 4, sum);
+    std::println("__ {:8} byte file, checksum {:08x}\n", i * 4, sum);
     exit(0);
 }
 
-void load_image_into_ram(const std::string& file_path, Byte* ram, std::size_t capacity,
-                         const char* image_name) {
-    if (ram == nullptr || capacity == 0) {
-        std::fprintf(stderr, "__ Error: invalid destination for %s image load\n", image_name);
-        std::exit(1);
-    }
-
-    std::ifstream in(file_path, std::ios::binary | std::ios::ate);
+void load_image_into_ram(const std::string& file_path, Byte* ram) {
+    std::ifstream in(file_path, std::ios::binary);
     if (!in.is_open()) {
-        std::fprintf(stderr, "__ Error: image_file %s cannot be found\n", file_path.c_str());
-        std::exit(1);
+        std::println(stdout, "__ Error: image_file {} cannot be found", file_path);
+        exit(0);
     }
-
-    const auto file_size = static_cast<std::size_t>(in.tellg());
-    if (file_size > capacity) {
-        std::fprintf(stderr,
-                     "__ Error: %s image %s is too large (%zu bytes > %zu bytes capacity)\n",
-                     image_name, file_path.c_str(), file_size, capacity);
-        std::exit(1);
-    }
-
-    in.seekg(0, std::ios::beg);
-    if (!in.read(reinterpret_cast<char*>(ram), static_cast<std::streamsize>(file_size))) {
-        std::fprintf(stderr, "__ Error: failed to read %s image %s\n", image_name,
-                     file_path.c_str());
-        std::exit(1);
+    uint8_t tmp = 0;
+    int i = 0;
+    while (in.read(reinterpret_cast<char*>(&tmp), sizeof(tmp))) {
+        ram[i++] = static_cast<Byte>(tmp);
     }
 }
 
-void load_image_file_into_ram(std::string file, Byte* ram) {
+void load_image_file_into_ram(const std::string& file, Byte* ram) {
     std::ifstream in(file, std::ios::binary);
     if (!in.is_open()) {
-        fprintf(stdout, "__ Error: image_file cannot be found\n");
+        std::println(stdout, "__ Error: image_file cannot be found");
         exit(-1);
     }
     uint8_t tmp = 0;
@@ -132,24 +117,24 @@ void load_image_file_into_ram(std::string file, Byte* ram) {
     }
 }
 
-Word ram_read(Address addr, Instruction funct3, Byte* ram) {
+auto ram_read(Address addr, Instruction funct3, Byte* ram) -> Word {
     return simrv::memory_detail::ram_read_fast(addr, funct3, ram);
 }
 
-Word disk_read(Address addr, Word n, Byte* dsk) {
+auto disk_read(Address addr, Word n, Byte* dsk) -> Word {
     if (n != 1 && n != 2 && n != 4) {
-        printf("__ Error: dsk_r() not supported n=%d\n", n);
+        std::println("__ Error: dsk_r() not supported n={}", n);
         exit(0);
     }
     Word data = 0;
 
-    for (int i = 0; i < static_cast<int>(n); i++) {
+    for (int i = 0; std::cmp_less(i, n); i++) {
         data |= static_cast<Word>(std::to_integer<uint8_t>(dsk[(addr + i)])) << (8 * i);
     }
     return data;
 }
 
-Word queue_read(Address addr, QueueState* q) {
+auto queue_read(Address addr, QueueState* q) -> Word {
     int idx = static_cast<int>(addr / D_QUEUE_STRIDE);
     if (QueueField field = queue_field(addr % D_QUEUE_STRIDE); field != nullptr) {
         return q[idx].*field;
@@ -164,25 +149,27 @@ void queue_write(Address addr, Word wdata, QueueState* q) {
     }
 }
 
-bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem) {
+auto page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem) -> bool {
     constexpr Address kKernelPhysBase = static_cast<Address>(0x80400000u);
     constexpr Address kKernelVirtBase = static_cast<Address>(0xC0000000u);
     constexpr Address kKernelVirtEnd = kKernelVirtBase + simrv::memory::kDramSize;
     constexpr Address kDramPhysEnd = simrv::memory::kDramBaseAddress + simrv::memory::kDramSize;
+
     if (access == PteAccess::Code && cpu->priv == kPrivSupervisor && v_addr >= kKernelVirtBase &&
         v_addr < kKernelVirtEnd) {
         *p_addr = v_addr - kKernelVirtBase + kKernelPhysBase;
         return false;
     }
+
     /* level 1 */
     Word vpn1 = (v_addr >> 22) & 0x3FF;
     const Word root_ppn = (cpu->satp & 0x3FFFFF);
     Address root_pt_addr = static_cast<Address>(root_ppn << 12);
-    // Map root page table address into DRAM if in high kernel virtual space
     if (root_pt_addr >= static_cast<Address>(0xC0000000u) &&
         root_pt_addr < static_cast<Address>(0xC0000000u + simrv::memory::kDramSize)) {
         root_pt_addr -= static_cast<Address>(0x40000000u);
     }
+
     auto read_l1_pte = [&](Address candidate_root, Word* out_pte_addr) {
         Word pte_addr = candidate_root + vpn1 * 4;
         Word pte = ram_read(pte_addr, static_cast<Instruction>(Funct3::Lw), mmem);
@@ -239,20 +226,10 @@ bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte
           ((cpu->priv == kPrivUser) && (!(L0_pte & enum_mask(PteFlag::U)))) ||
           ((L0_xwr >> pte_access_index(access)) & 1) == 0);
     /* success */
-    bool page_fault = false;
-    if (!(L1_pte & enum_mask(PteFlag::V)))
-        page_fault = true;
-    else if (L1_xwr != 0)
-        page_fault = !L1_success;
-    else if (!(L0_pte & enum_mask(PteFlag::V)))
-        page_fault = true;
-    else if (L0_xwr != 0)
-        page_fault = !L0_success;
-    else
-        page_fault = true;
+    bool page_fault =
+        (!(L1_pte & enum_mask(PteFlag::V))) || (L1_xwr != 0 && !L1_success) ||
+        (L1_xwr == 0 && ((!(L0_pte & enum_mask(PteFlag::V))) || (L0_xwr == 0) || !L0_success));
 
-    // For Linux early boot: allow identity mapping (VA=PA) for supervisor mode
-    // in the valid kernel physical range as a fallback for page table setup phase.
     if (page_fault && access != PteAccess::Code && cpu->priv == kPrivSupervisor &&
         v_addr >= kKernelPhysBase && v_addr < kDramPhysEnd) {
         page_fault = false;
@@ -283,7 +260,6 @@ bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte
                 static_cast<Byte>(static_cast<uint8_t>((w_data >> (8 * i)) & 0xFF));
         }
     }
-
     return page_fault;
 }
 
@@ -307,7 +283,7 @@ void dump_init_artifacts(CPU* cpu, Byte* ram, Console* console, Disk* disk, Byte
         for (Address i = 0; i < simrv::memory::kDramSize; ++i) {
             out << std::hex << static_cast<unsigned>(std::to_integer<uint8_t>(ram[i])) << '\n';
         }
-        printf("__ file init_mem.txt was generated after %ld cycle\n", cpu->mtime);
+        std::println("__ file init_mem.txt was generated after {} cycle", cpu->mtime);
     }
 
     {
@@ -315,7 +291,7 @@ void dump_init_artifacts(CPU* cpu, Byte* ram, Console* console, Disk* disk, Byte
         for (Word i = 0; i < simrv::virtio::kDiskSize; ++i) {
             out << std::hex << static_cast<unsigned>(std::to_integer<uint8_t>(sector[i])) << '\n';
         }
-        printf("__ file init_dsk.txt was generated after %ld cycle\n", cpu->mtime);
+        std::println("__ file init_dsk.txt was generated after {} cycle", cpu->mtime);
     }
 
     std::ofstream out("init_reg.txt");
@@ -440,7 +416,7 @@ void dump_init_artifacts(CPU* cpu, Byte* ram, Console* console, Disk* disk, Byte
     write_32("mmu.disk.InterruptStatus", disk->InterruptStatus);
     write_32("mmu.disk.Status         ", disk->Status);
 
-    printf("__ file init_reg.txt was generated after %ld cycle\n", cpu->mtime);
+    std::println("__ file init_reg.txt was generated after {} cycle", cpu->mtime);
 }
 
 /**
@@ -449,7 +425,7 @@ void dump_init_artifacts(CPU* cpu, Byte* ram, Console* console, Disk* disk, Byte
 void Machine::write_instruction_mix_report() {
     std::ofstream out("instmix.txt");
     if (!out.is_open()) {
-        printf("__ Error: cannot open instmix.txt\n");
+        std::println("__ Error: cannot open instmix.txt");
         return;
     }
     out << "INSTRUCTION MIX\n";
@@ -459,7 +435,7 @@ void Machine::write_instruction_mix_report() {
         total += e_instmix[i];
     }
     out << "TOTAL_____ : " << std::setw(10) << total << '\n';
-    printf("__ file instmix.txt was generated after %ld cycle\n", cpu.mtime);
+    std::println("__ file instmix.txt was generated after {} cycle", cpu.mtime);
 }
 
 /**
@@ -469,13 +445,13 @@ void Machine::print_summary() {
     const auto now = std::chrono::steady_clock::now();
     const auto elapsed =
         std::chrono::duration_cast<std::chrono::microseconds>(now - s_start_time).count();
-    const Counter etime = static_cast<Counter>(elapsed == 0 ? 1 : elapsed);
-    printf("__ Elapsed clocks (mtime)   : %11ld\n", cpu.mtime);
-    printf("__ Executed instructions    : %11ld\n", e_icount);
-    printf("__ Executed uc_instructions : %11ld\n", e_uc_cnt);
-    printf("__ Fetched compressed insns : %11ld\n", e_ccount);
-    printf("__ Elapsed time (usec)      : %11ld\n", etime);
-    printf("__ Simulation speed (KIPS)  : %11ld\n", e_icount * 1000ul / etime);
+    const auto etime = static_cast<Counter>(elapsed == 0 ? 1 : elapsed);
+    std::println("__ Elapsed clocks (mtime)   : {:11}", cpu.mtime);
+    std::println("__ Executed instructions    : {:11}", e_icount);
+    std::println("__ Executed uc_instructions : {:11}", e_uc_cnt);
+    std::println("__ Fetched compressed insns : {:11}", e_ccount);
+    std::println("__ Elapsed time (usec)      : {:11}", etime);
+    std::println("__ Simulation speed (KIPS)  : {:11}", e_icount * 1000ul / etime);
     if (s_use_mix) write_instruction_mix_report();
 }
 
@@ -521,7 +497,7 @@ void Machine::prepare_cycle() {
             if (ret > 0) {
                 cpu.plic_set_irq(simrv::virtio::kConsoleIrq, 1);
             }
-            if (ret == -1) is_running_ = 0; /* break by Ctrl+q */
+            if (ret == -1) is_running_ = false; /* break by Ctrl+q */
             adr++;
         } else if (cpu.mtimecmp < cpu.mtime) { /* Timer */
             cpu.mip |= enum_mask(MipBit::Mtip);
@@ -543,7 +519,7 @@ void emit_periodic_pc_trace(Counter mtime, Register cpc) {
         if (flag == 0) {
             flag = 1;
             out.open("tracepc.txt");
-            printf("__ generate trace file: tracepc.txt\n\n");
+            std::println("__ generate trace file: tracepc.txt\n");
         }
         out << std::setfill('0') << std::setw(8) << std::dec
             << static_cast<int>(mtime / D_TRACEPC_INTERVAL) << ' ' << std::hex << std::setw(8)
@@ -555,23 +531,24 @@ void emit_periodic_pc_trace(Counter mtime, Register cpc) {
 /**
  * @brief Emit branch prediction trace rows to `bpred.txt`.
  */
-void emit_branch_prediction_trace(Counter mtime, Register cpc, Register jmp_pc, int r_opcode,
-                                  int r_tkn) {
+void emit_branch_prediction_trace(Counter mtime, Register cpc, Register jmp_pc, Word r_opcode,
+                                  Word r_tkn) {
     static int flag = 0;
     static std::ofstream out;
     if (flag == 0) {
         flag = 1;
         out.open("bpred.txt");
-        printf("__ generate trace file: bpred.txt\n\n");
+        std::println("__ generate trace file: bpred.txt\n");
         //        fprintf(f, "TC PC jump_or_branch b_taken jump branch\n");
     }
 
-    const Opcode opcode = static_cast<Opcode>(r_opcode);
-    int ir_jb = (opcode == Opcode::Jal) || (opcode == Opcode::Jalr) || (opcode == Opcode::Branch);
-    int ir_jump = (opcode == Opcode::Jal) ? 2 : (opcode == Opcode::Jalr) ? 3 : 0;
-    int ir_branch = (opcode == Opcode::Branch);
+    const auto opcode = static_cast<Opcode>(r_opcode);
+    const int ir_jb =
+        (opcode == Opcode::Jal) || (opcode == Opcode::Jalr) || (opcode == Opcode::Branch);
+    const int ir_jump = (opcode == Opcode::Jal) ? 2 : (opcode == Opcode::Jalr) ? 3 : 0;
+    const int ir_branch = (opcode == Opcode::Branch);
 
-    unsigned int targ = (ir_jump | ir_branch) ? jmp_pc : 0;
+    const Word targ = (ir_jump | ir_branch) ? jmp_pc : 0;
     out << std::setfill('0') << std::setw(8) << std::dec << static_cast<int>(mtime) << ' '
         << std::hex << std::setw(8) << cpc << ' ' << std::setw(8) << targ << std::dec << ' '
         << ir_jb << ' ' << r_tkn << ' ' << ir_jump << ' ' << ir_branch << '\n';
@@ -588,8 +565,8 @@ void Machine::finalize_cycle() {
         emit_periodic_pc_trace(cpu.mtime, cpu.pipeline_context.cpc);
     if (cpu.mtime >= s_trace_begin && cpu.mtime <= s_trace_end) write_trace_snapshot();
     if (cpu.mtime >= s_fincnt - 1) {
-        printf("\n__finished by -e option\n");
-        is_running_ = 0;
+        std::println("\n__finished by -e option");
+        is_running_ = false;
     }
     if (s_bp_trace) {
         emit_branch_prediction_trace(cpu.mtime, cpu.pipeline_context.cpc,
@@ -599,21 +576,21 @@ void Machine::finalize_cycle() {
 
     if (s_isatest && tohost != 0) {
         if (tohost == 1) {
-            printf("\n__ ISA TEST PASS\n");
+            std::println("\n__ ISA TEST PASS");
         } else if (tohost & 1) {
-            printf("\n__ ISA TEST FAIL code=%u (tohost=0x%08x)\n", tohost >> 1, tohost);
+            std::println("\n__ ISA TEST FAIL code={} (tohost=0x{:08x})", tohost >> 1, tohost);
         } else {
-            printf("\n__ ISA TEST TOHOST update=0x%08x\n", tohost);
+            std::println("\n__ ISA TEST TOHOST update=0x{:08x}", tohost);
         }
-        is_running_ = 0;
+        is_running_ = false;
     }
 
     if ((tohost >> 16) == CMD_POWER_OFF) {
-        printf("\n__ Power off\n");
-        is_running_ = 0;
+        std::println("\n__ Power off");
+        is_running_ = false;
     }
     if ((tohost >> 16) == CMD_PRINT_CHAR) {
-        printf("%c", (char)(tohost & 0xff));
+        std::print("{}", (char)(tohost & 0xff));
         tohost = 0;
         fflush(stdout);
     }
@@ -728,7 +705,7 @@ void Machine::write_trace_snapshot() {
 }
 
 void load_devicetree(Byte* ram) {
-    Word tbuf[344] = {
+    constexpr std::array<Word, 344> tbuf = {
         0xedfe0dd0, 0x5a050000, 0x38000000, 0x84040000, 0x28000000, 0x11000000, 0x10000000,
         0x0,        0xd6000000, 0x4c040000, 0x0,        0x0,        0x0,        0x0,
         0x1000000,  0x0,        0x3000000,  0x4000000,  0x0,        0x2000000,  0x3000000,
@@ -779,13 +756,15 @@ void load_devicetree(Byte* ram) {
         0x646e6168, 0x7200656c, 0x65676e61, 0x6e690073, 0x72726574, 0x73747075, 0x7478652d,
         0x65646e65, 0x69720064, 0x2c766373, 0x7665646e, 0x6f6f6200, 0x67726174, 0xff0073,
         0x0};
-    int* p = reinterpret_cast<int*>(ram);
-    for (int i = 0; i < 344; i++) p[i] = tbuf[i];
+    Word* p = reinterpret_cast<Word*>(ram);
+    for (std::size_t i = 0; i < tbuf.size(); i++) p[i] = tbuf[i];
 
-    if (0) {
+    if (false) {
         char* cp = reinterpret_cast<char*>(p);
-        for (int i = 0; i < 344 * 4; i++) printf("%02x ", cp[i] & 0xff);
-        printf("\n");
+        for (std::size_t i = 0; i < tbuf.size() * sizeof(Word); i++) {
+            std::print("{:02x} ", cp[i] & 0xff);
+        }
+        std::println("");
         exit(0);
     }
 }
@@ -793,14 +772,14 @@ void load_devicetree(Byte* ram) {
 /**
  * @brief Initialize machine components and load memory/device images.
  */
-int Machine::initialize(int argc, char* argv[]) {
+auto Machine::initialize(int argc, char* const* argv) -> int {
     set_options(this, argc, argv); /* set options before the object instantiations */
 
     disk = std::make_unique<Disk>();
     console = std::make_unique<Console>();
     mmem_owner_.reset(static_cast<Byte*>(std::calloc(simrv::memory::kDramSize, sizeof(Byte))));
     if (mmem_owner_ == nullptr) {
-        std::fprintf(stderr, "Error: failed to allocate main memory (%zu bytes)\n",
+        std::println(stderr, "Error: failed to allocate main memory ({} bytes)",
                      static_cast<std::size_t>(simrv::memory::kDramSize));
         return 1;
     }
@@ -809,10 +788,10 @@ int Machine::initialize(int argc, char* argv[]) {
     disk->mmem = mmem;
 
     // MAKE Console QUEUE
-    console_queue_owner_ = std::make_unique<QueueState[]>(simrv::virtio::kConsoleMaxQueueNum);
-    disk_queue_owner_ = std::make_unique<QueueState[]>(simrv::virtio::kDiskMaxQueueNum);
-    console->Queue = console_queue_owner_.get();
-    disk->Queue = disk_queue_owner_.get();
+    console_queue_owner_.assign(simrv::virtio::kConsoleMaxQueueNum, QueueState{});
+    disk_queue_owner_.assign(simrv::virtio::kDiskMaxQueueNum, QueueState{});
+    console->Queue = console_queue_owner_.data();
+    disk->Queue = disk_queue_owner_.data();
 
     if (s_dlog_mode) s_fp_dlog.open("init_virtio.txt");
 
@@ -825,31 +804,17 @@ int Machine::initialize(int argc, char* argv[]) {
     cpu.reg[11] = linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0;
     cpu.TLB_flush();
 
-    // Initialize MMU after CPU is constructed
-    memory_.initialize_mmu();
-
-    load_image_into_ram(s_fn_memimg, mmem, static_cast<std::size_t>(simrv::memory::kDramSize),
-                        "memory");  // load a memory image file
+    load_image_into_ram(s_fn_memimg, mmem);  // load a memory image file
 
     if (s_fn_dvtree.empty())
         load_devicetree(mmem + dtb_offset);
-    else {
-        if (dtb_offset >= simrv::memory::kDramSize) {
-            std::fprintf(stderr, "__ Error: device-tree load offset is outside DRAM\n");
-            return 1;
-        }
-        const auto dt_cap = static_cast<std::size_t>(simrv::memory::kDramSize - dtb_offset);
-        load_image_into_ram(s_fn_dvtree, mmem + dtb_offset, dt_cap, "device-tree");
-    }
+    else
+        load_image_into_ram(s_fn_dvtree, mmem + dtb_offset);
 
-    if (s_use_disk) {
-        load_image_into_ram(s_fn_dskimg, disk->sector,
-                            static_cast<std::size_t>(simrv::virtio::kDiskSize),
-                            "disk");  // load a disk image file
-    }
+    if (s_use_disk) load_image_into_ram(s_fn_dskimg, disk->sector);  // load a disk image file
 
     if (s_use_mix)
-        for (int i = 0; i < OperationIdCount; i++) e_instmix[i] = 0;
+        for (int& i : e_instmix) i = 0;
 
     if (s_misa_override)
         cpu.misa = s_misa_profile;

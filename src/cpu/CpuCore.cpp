@@ -18,11 +18,11 @@ CPU::CPU()
 
 void CPU::TLB_flush() { tlb_unit.flush(); }
 
-CSRValue CPU::get_mstatus(CSRValue mask) { return csr_file.getMstatus(mask); }
+auto CPU::get_mstatus(CSRValue mask) -> CSRValue { return csr_file.getMstatus(mask); }
 
 void CPU::set_mstatus(CSRValue wdata) { csr_file.setMstatus(wdata); }
 
-CSRValue CPU::read_csr(CSRAddress addr) { return csr_file.read(addr); }
+auto CPU::read_csr(CSRAddress addr) -> CSRValue { return csr_file.read(addr); }
 
 void CPU::write_csr(CSRAddress addr, CSRValue wdata) { csr_file.write(addr, wdata); }
 

@@ -13,11 +13,11 @@ constexpr Register D_NEG_ONE = static_cast<Register>(0xffffffffu);
 constexpr unsigned D_WORD_BITS = 32u;
 }  // namespace
 
-Register ExecuteUnit::aluInt(Register in1, Register in2, Instruction funct3,
-                             Instruction funct7) const {
+auto ExecuteUnit::aluInt(Register in1, Register in2, Instruction funct3, Instruction funct7) const
+    -> Register {
     Word ret = 0;
     Word shamt = in2 & D_SHIFT_MASK;
-    const Funct3 f3 = static_cast<Funct3>(funct3);
+    const auto f3 = static_cast<Funct3>(funct3);
 
     if ((funct7 & D_MULDIV_FLAG) == 0) {
         switch (f3) {
@@ -96,7 +96,7 @@ Register ExecuteUnit::aluInt(Register in1, Register in2, Instruction funct3,
     return ret;
 }
 
-Instruction ExecuteUnit::branchTaken(Register in1, Register in2, Instruction funct3) const {
+auto ExecuteUnit::branchTaken(Register in1, Register in2, Instruction funct3) const -> Instruction {
     switch (static_cast<Funct3>(funct3)) {
         case Funct3::Beq:
             return in1 == in2;
@@ -115,7 +115,7 @@ Instruction ExecuteUnit::branchTaken(Register in1, Register in2, Instruction fun
     }
 }
 
-Register ExecuteUnit::aluAmo(Register in1, Register in2, Instruction funct5) const {
+auto ExecuteUnit::aluAmo(Register in1, Register in2, Instruction funct5) const -> Register {
     switch (static_cast<Funct5Amo>(funct5)) {
         case Funct5Amo::Lr:
             return 0;
@@ -143,8 +143,8 @@ Register ExecuteUnit::aluAmo(Register in1, Register in2, Instruction funct5) con
     }
 }
 
-CSRValue ExecuteUnit::csrWriteValue(CSRValue rcsr, Register rrs1, Instruction imm,
-                                    Instruction funct3) const {
+auto ExecuteUnit::csrWriteValue(CSRValue rcsr, Register rrs1, Instruction imm,
+                                Instruction funct3) const -> CSRValue {
     switch (static_cast<Funct3>(funct3)) {
         case Funct3::Csrrw:
             return rrs1;

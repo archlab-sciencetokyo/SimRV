@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <print>
 
 #include "DecodeUnit.hpp"
 #include "ExecuteUnit.hpp"
@@ -25,8 +26,8 @@ namespace {
 inline void load_image_into_buffer(std::string_view file_path, Byte* dest) {
     std::ifstream in(static_cast<std::string>(file_path), std::ios::binary);
     if (!in.is_open()) {
-        std::fprintf(stdout, "__ Error: image_file %.*s cannot be found\n",
-                     static_cast<int>(file_path.size()), file_path.data());
+        std::println(stdout, "__ Error: image_file {:.{}} cannot be found", file_path.data(),
+                     static_cast<int>(file_path.size()));
         exit(0);
     }
     uint8_t tmp = 0;
@@ -40,8 +41,8 @@ inline void load_image_into_buffer(std::string_view file_path, Byte* dest) {
 
 void IoController::init(std::string_view image_path) {
     constexpr auto local_mem_size = simrv::memory::kLocalCoreMemorySize;
-    cmem_owner_ = std::make_unique<Byte[]>(local_mem_size);
-    cmem = cmem_owner_.get();
+    cmem_storage_.assign(local_mem_size, Byte{});
+    cmem = cmem_storage_.data();
     load_image_into_buffer(image_path, cmem);
 
     // Initialize register file
@@ -49,7 +50,7 @@ void IoController::init(std::string_view image_path) {
     reg[11] = 0x8000;  // Stack pointer initialization
 }
 
-bool IoController::exec() noexcept {
+auto IoController::exec() -> bool {
     DecodeUnit decode_unit;
     ExecuteUnit execute_unit;
     bool ret = true;
@@ -59,11 +60,10 @@ bool IoController::exec() noexcept {
     ctx.cpc = pc;
     std::memcpy(&ctx.ir, &cmem[pc & simrv::memory::kDramMask], sizeof(ctx.ir));
     if ((ctx.ir & 3) != 3) {
-        std::fprintf(
-            stderr,
-            "[IoController] ERROR: Compressed instruction (RV32C) not supported at PC=0x%08x "
-            "(instruction=0x%04x)\n",
-            pc, static_cast<uint16_t>(ctx.ir & 0xFFFFu));
+        std::println(stderr,
+                     "[IoController] ERROR: Compressed instruction (RV32C) not supported at "
+                     "PC=0x{:08x} (instruction=0x{:04x})",
+                     pc, static_cast<uint16_t>(ctx.ir & 0xFFFFu));
         exit(1);
     }
 
@@ -111,11 +111,7 @@ bool IoController::exec() noexcept {
             ctx.wb_data = execute_unit.aluInt(ctx.rrs1, ctx.rrs2, ctx.funct3, ctx.funct7);
             break;
         }
-        case static_cast<Instruction>(Opcode::Load): {
-            ctx.tkn = 0;
-            ctx.mem_addr = ctx.rrs1 + ctx.imm;
-            break;
-        }
+        case static_cast<Instruction>(Opcode::Load):
         case static_cast<Instruction>(Opcode::Store): {
             ctx.tkn = 0;
             ctx.mem_addr = ctx.rrs1 + ctx.imm;
@@ -140,27 +136,27 @@ bool IoController::exec() noexcept {
             // System instructions: ECALL, EBREAK, CSR operations
             // IoController does not support privileged system operations
             if (ctx.funct12 == 0x0) {  // ECALL
-                std::fprintf(
+                std::println(
                     stderr,
-                    "[IoController] WARNING: ECALL (system call) not supported at PC=0x%08x\n",
+                    "[IoController] WARNING: ECALL (system call) not supported at PC=0x{:08x}",
                     ctx.cpc);
                 ctx.tkn = 0;
             } else if (ctx.funct12 == 0x1) {  // EBREAK
-                std::fprintf(stderr,
-                             "[IoController] WARNING: EBREAK (debugger break) not supported at "
-                             "PC=0x%08x\n",
-                             ctx.cpc);
+                std::println(
+                    stderr,
+                    "[IoController] WARNING: EBREAK (debugger break) not supported at PC=0x{:08x}",
+                    ctx.cpc);
                 ctx.tkn = 0;
             } else if ((ctx.funct3 >= 1) && (ctx.funct3 <= 3)) {  // CSR operations
-                std::fprintf(stderr,
-                             "[IoController] WARNING: CSR operations not supported at PC=0x%08x "
-                             "(funct3=%d, csr=0x%03x)\n",
+                std::println(stderr,
+                             "[IoController] WARNING: CSR operations not supported at PC=0x{:08x} "
+                             "(funct3={}, csr=0x{:03x})",
                              ctx.cpc, ctx.funct3, ctx.funct12);
                 ctx.tkn = 0;
             } else {
-                std::fprintf(stderr,
-                             "[IoController] WARNING: Unknown System instruction at PC=0x%08x "
-                             "(funct3=%d, funct12=0x%03x)\n",
+                std::println(stderr,
+                             "[IoController] WARNING: Unknown System instruction at PC=0x{:08x} "
+                             "(funct3={}, funct12=0x{:03x})",
                              ctx.cpc, ctx.funct3, ctx.funct12);
                 ctx.tkn = 0;
             }
@@ -168,9 +164,9 @@ bool IoController::exec() noexcept {
         }
         default: {
             // Unsupported opcode
-            std::fprintf(stderr,
-                         "[IoController] WARNING: Unsupported instruction opcode=0x%02x at "
-                         "PC=0x%08x (ir=0x%08x)\n",
+            std::println(stderr,
+                         "[IoController] WARNING: Unsupported instruction opcode=0x{:02x} at "
+                         "PC=0x{:08x} (ir=0x{:08x})",
                          ctx.opcode, ctx.cpc, ctx.ir);
             ctx.tkn = 0;
             break;
@@ -258,7 +254,7 @@ bool IoController::exec() noexcept {
         if (ctx.mem_addr == 0x40008000) {
             // Console control register
             if ((ctx.rrs2 >> 16) == 1) {
-                std::printf("%c", static_cast<char>(ctx.rrs2 & 0xff));
+                std::print("{}", static_cast<char>(ctx.rrs2 & 0xff));
                 std::fflush(stdout);
             }
             if ((ctx.rrs2 >> 16) == 2) {

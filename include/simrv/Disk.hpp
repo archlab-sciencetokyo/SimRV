@@ -4,6 +4,7 @@
  */
 #pragma once
 #include <memory>
+#include <vector>
 
 #include "Cpu.hpp"
 #include "Define.hpp"
@@ -34,7 +35,7 @@ class Disk : public MmioDevice {
     }
 
     Byte* mmem;                             // main memory
-    std::unique_ptr<Byte[]> sector_owner_;  // backing owner for disk image storage
+    std::vector<Byte> sector_storage_;      // backing owner for disk image storage
     Byte* sector;                           // disk image
 
     QueueState* Queue; /* Queue of Disk */

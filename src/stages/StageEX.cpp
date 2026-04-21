@@ -41,16 +41,8 @@ void CPU::execute_core(Machine& machine) {
                                     pipeline_context.funct3, pipeline_context.funct7);
             break;
         }
-        case Opcode::Load: {
-            pipeline_context.tkn = 0;
-            pipeline_context.mem_addr = pipeline_context.rrs1 + pipeline_context.imm;
-            break;
-        }
-        case Opcode::LoadFp: {
-            pipeline_context.tkn = 0;
-            pipeline_context.mem_addr = pipeline_context.rrs1 + pipeline_context.imm;
-            break;
-        }
+        case Opcode::Load:
+        case Opcode::LoadFp:
         case Opcode::Store: {
             pipeline_context.tkn = 0;
             pipeline_context.mem_addr = pipeline_context.rrs1 + pipeline_context.imm;
@@ -102,16 +94,8 @@ void CPU::execute_core(Machine& machine) {
                         pipeline_context.tkn = 0;
                         break;
                     }
-                    case Funct12Priv::Uret: {
-                        pipeline_context.tkn = 1;
-                        pipeline_context.jmp_pc = pipeline_context.rcsr;
-                        break;
-                    }
-                    case Funct12Priv::Sret: {
-                        pipeline_context.tkn = 1;
-                        pipeline_context.jmp_pc = pipeline_context.rcsr;
-                        break;
-                    }
+                    case Funct12Priv::Uret:
+                    case Funct12Priv::Sret:
                     case Funct12Priv::Mret: {
                         pipeline_context.tkn = 1;
                         pipeline_context.jmp_pc = pipeline_context.rcsr;

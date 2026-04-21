@@ -15,9 +15,9 @@ void CPU::writeback_registers(Machine& machine) {
     Word wire_wb_r_data = 0;
     Word wire_wb_r_enable = 0;
 
-    const Opcode opcode = static_cast<Opcode>(pipeline_context.opcode);
-    const Funct5Amo funct5 = static_cast<Funct5Amo>(pipeline_context.funct5);
-    const Funct3 funct3 = static_cast<Funct3>(pipeline_context.funct3);
+    const auto opcode = static_cast<Opcode>(pipeline_context.opcode);
+    const auto funct5 = static_cast<Funct5Amo>(pipeline_context.funct5);
+    const auto funct3 = static_cast<Funct3>(pipeline_context.funct3);
 
     if ((opcode == Opcode::Load) || (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc)) {
         wire_wb_r_data = pipeline_context.mem_rdata;

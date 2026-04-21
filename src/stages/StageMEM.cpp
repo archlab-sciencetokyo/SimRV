@@ -14,8 +14,8 @@ void CPU::run_memory_stage(Machine& machine) {
 void CPU::memory_load_phase(Machine& machine) {
     if (pending_exception != ~0u) return;
 
-    const Opcode opcode = static_cast<Opcode>(pipeline_context.opcode);
-    const Funct5Amo funct5 = static_cast<Funct5Amo>(pipeline_context.funct5);
+    const auto opcode = static_cast<Opcode>(pipeline_context.opcode);
+    const auto funct5 = static_cast<Funct5Amo>(pipeline_context.funct5);
 
     if (opcode == Opcode::Load || (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc)) {
         pipeline_context.mem_rdata =
@@ -23,7 +23,7 @@ void CPU::memory_load_phase(Machine& machine) {
     }
 
     if (opcode == Opcode::LoadFp) {
-        const Funct3 funct3 = static_cast<Funct3>(pipeline_context.funct3);
+        const auto funct3 = static_cast<Funct3>(pipeline_context.funct3);
         if (funct3 == Funct3::Flw) {
             const Word lo = machine.memory_.target_read(*this, pipeline_context.mem_addr,
                                                         static_cast<Instruction>(Funct3::Lw));
@@ -46,7 +46,7 @@ void CPU::memory_load_phase(Machine& machine) {
 
 /* memory_prepare_store_data(Execution 2) stage                                                                 */
 void CPU::memory_prepare_store_data(Machine& /*machine*/) {
-    const Opcode opcode = static_cast<Opcode>(pipeline_context.opcode);
+    const auto opcode = static_cast<Opcode>(pipeline_context.opcode);
     pipeline_context.mem_wdata =
         (opcode != Opcode::Amo)
             ? pipeline_context.rrs2
@@ -63,8 +63,8 @@ void CPU::memory_prepare_store_data(Machine& /*machine*/) {
 void CPU::memory_store_phase(Machine& machine) {
     if (pending_exception != ~0u) return;
 
-    const Opcode opcode = static_cast<Opcode>(pipeline_context.opcode);
-    const Funct5Amo funct5 = static_cast<Funct5Amo>(pipeline_context.funct5);
+    const auto opcode = static_cast<Opcode>(pipeline_context.opcode);
+    const auto funct5 = static_cast<Funct5Amo>(pipeline_context.funct5);
 
     if ((opcode == Opcode::Store) ||
         (opcode == Opcode::Amo &&
@@ -79,7 +79,7 @@ void CPU::memory_store_phase(Machine& machine) {
     }
 
     if (opcode == Opcode::StoreFp) {
-        const Funct3 funct3 = static_cast<Funct3>(pipeline_context.funct3);
+        const auto funct3 = static_cast<Funct3>(pipeline_context.funct3);
         if (funct3 == Funct3::Fsw) {
             machine.memory_.target_write(
                 *this, pipeline_context.mem_addr,

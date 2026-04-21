@@ -5,7 +5,7 @@
 #include "Machine.hpp"
 
 namespace simrv::machine_detail {
-bool page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem);
+auto page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem) -> bool;
 }  // namespace simrv::machine_detail
 
 void CPU::run_fetch_stage(Machine& machine) {

@@ -24,8 +24,8 @@ void CPU::decode_fields(Machine& /*machine*/) {
 
 /* fetch_operands(Operand Fetch) stage                                                               */
 void CPU::fetch_operands(Machine& /*machine*/) {
-    const Opcode opcode = static_cast<Opcode>(pipeline_context.opcode);
-    const Funct3 funct3 = static_cast<Funct3>(pipeline_context.funct3);
+    const auto opcode = static_cast<Opcode>(pipeline_context.opcode);
+    const auto funct3 = static_cast<Funct3>(pipeline_context.funct3);
     const Instruction funct12 = pipeline_context.funct12;
 
     pipeline_context.rrs1 = reg[pipeline_context.rs1]; /* regfile read port 1 */

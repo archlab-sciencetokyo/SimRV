@@ -69,6 +69,12 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
+set(SIMRV_XLEN "32" CACHE STRING "Architectural XLEN for scalar aliases (32 or 64)")
+set_property(CACHE SIMRV_XLEN PROPERTY STRINGS 32 64)
+if(NOT SIMRV_XLEN STREQUAL "32" AND NOT SIMRV_XLEN STREQUAL "64")
+  message(FATAL_ERROR "SIMRV_XLEN must be 32 or 64 (got: ${SIMRV_XLEN})")
+endif()
+
 add_executable(SimRV
   src/Main.cpp
   src/Machine.cpp
@@ -96,6 +102,8 @@ add_executable(SimRV
 )
 
 target_compile_features(SimRV PRIVATE cxx_std_23)
+
+target_compile_definitions(SimRV PRIVATE SIMRV_XLEN=${SIMRV_XLEN})
 
 target_include_directories(SimRV PRIVATE
   include

@@ -9,6 +9,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "Console.hpp"
 #include "Cpu.hpp"
@@ -23,7 +24,7 @@ class Machine {
     Machine();
     ~Machine();
     /// Initialize machine state and load runtime images/configuration.
-    int initialize(int argc, char* argv[]);
+    int initialize(int argc, char* const* argv);
     /// Execute the main simulation loop until termination criteria are met.
     void run();
     /// Emit one architectural trace snapshot to the configured trace stream.
@@ -80,8 +81,8 @@ class Machine {
 
    private:
     std::unique_ptr<Byte, decltype(&std::free)> mmem_owner_{nullptr, &std::free};
-    std::unique_ptr<QueueState[]> console_queue_owner_;
-    std::unique_ptr<QueueState[]> disk_queue_owner_;
+    std::vector<QueueState> console_queue_owner_;
+    std::vector<QueueState> disk_queue_owner_;
     friend class CPU;
     MemorySubsystem memory_;
     /// Perform per-cycle initialization before CPU stage execution.

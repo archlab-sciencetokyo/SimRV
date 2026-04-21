@@ -5,39 +5,43 @@
 #include "Module.hpp"
 
 #include <array>
+#include <print>
 #include <string_view>
 
 namespace simrv::module {
 
 namespace {
-constexpr Instruction make_i_type(Word imm, Word rs1, Funct3 funct3, Word rd, Opcode opcode) {
+constexpr auto make_i_type(Word imm, Word rs1, Funct3 funct3, Word rd, Opcode opcode)
+    -> Instruction {
     return (imm << 20) | (rs1 << 15) | (static_cast<Instruction>(funct3) << 12) | (rd << 7) |
            static_cast<Instruction>(opcode);
 }
 
-constexpr Instruction make_r_type(Word funct7, Word rs2, Word rs1, Funct3 funct3, Word rd,
-                                  Opcode opcode) {
+constexpr auto make_r_type(Word funct7, Word rs2, Word rs1, Funct3 funct3, Word rd, Opcode opcode)
+    -> Instruction {
     return (funct7 << 25) | (rs2 << 20) | (rs1 << 15) | (static_cast<Instruction>(funct3) << 12) |
            (rd << 7) | static_cast<Instruction>(opcode);
 }
 
-constexpr Instruction make_s_type(Word imm, Word rs2, Word rs1, Funct3 funct3, Opcode opcode) {
+constexpr auto make_s_type(Word imm, Word rs2, Word rs1, Funct3 funct3, Opcode opcode)
+    -> Instruction {
     return (((imm >> 5) & 0x7F) << 25) | (rs2 << 20) | (rs1 << 15) |
            (static_cast<Instruction>(funct3) << 12) | ((imm & 0x1F) << 7) |
            static_cast<Instruction>(opcode);
 }
 
-constexpr Instruction make_b_type(Word imm, Word rs2, Word rs1, Funct3 funct3, Opcode opcode) {
+constexpr auto make_b_type(Word imm, Word rs2, Word rs1, Funct3 funct3, Opcode opcode)
+    -> Instruction {
     return (((imm >> 12) & 0x1) << 31) | (((imm >> 5) & 0x3F) << 25) | (rs2 << 20) | (rs1 << 15) |
            (static_cast<Instruction>(funct3) << 12) | (((imm >> 1) & 0xF) << 8) |
            (((imm >> 11) & 0x1) << 7) | static_cast<Instruction>(opcode);
 }
 
-constexpr Instruction make_u_type(Word imm, Word rd, Opcode opcode) {
+constexpr auto make_u_type(Word imm, Word rd, Opcode opcode) -> Instruction {
     return (imm << 12) | (rd << 7) | static_cast<Instruction>(opcode);
 }
 
-constexpr Instruction make_j_type(Word imm, Word rd, Opcode opcode) {
+constexpr auto make_j_type(Word imm, Word rd, Opcode opcode) -> Instruction {
     return (((imm >> 20) & 0x1) << 31) | (((imm >> 1) & 0x3FF) << 21) |
            (((imm >> 11) & 0x1) << 20) | (((imm >> 12) & 0xFF) << 12) | (rd << 7) |
            static_cast<Instruction>(opcode);
@@ -45,7 +49,7 @@ constexpr Instruction make_j_type(Word imm, Word rd, Opcode opcode) {
 }  // namespace
 
 /* inst_decomp                                                                            */
-Instruction decomp_c0(Instruction ir) {
+auto decomp_c0(Instruction ir) -> Instruction {
     Word funct3 = (ir >> 13) & 0x7;
     Word rs1 = ((ir >> 7) & 0x7) + 8;
     Word rs2 = ((ir >> 2) & 0x7) + 8;
@@ -85,19 +89,20 @@ Instruction decomp_c0(Instruction ir) {
             ret = make_s_type(uimm1, rs2, rs1, Funct3::Fsw, Opcode::StoreFp);
             break;
         }
+        default:
+            break;
     }
     return ret;
 }
 
-Instruction decomp_c1(Instruction ir) {
+auto decomp_c1(Instruction ir) -> Instruction {
     Word funct1 = (ir >> 10) & 0x3;
     Word funct2 = (((ir >> 12) & 0x1) << 2) | ((ir >> 5) & 0x3);
     Word funct3 = (ir >> 13) & 0x7;
     Word rs1 = ((ir >> 7) & 0x7) + 8;
     Word rs2 = ((ir >> 2) & 0x7) + 8;
     Word rd = ((ir >> 7) & 0x7) + 8;
-    Word nzimm =
-        sign_extend<Word>((((ir >> 12) & 1) << 5) | ((ir >> 2) & 0x1F), 6);
+    Word nzimm = sign_extend<Word>((((ir >> 12) & 1) << 5) | ((ir >> 2) & 0x1F), 6);
     Word shamt = nzimm & xlen_shift_mask();
     Word uimm1 = (((ir >> 12) & 0x1) << 11) | (((ir >> 8) & 0x1) << 10) | (((ir >> 9) & 0x3) << 8) |
                  (((ir >> 6) & 0x1) << 7) | (((ir >> 7) & 0x1) << 6) | (((ir >> 2) & 0x1) << 5) |
@@ -180,17 +185,23 @@ Instruction decomp_c1(Instruction ir) {
                             ret = make_r_type(0, rs2, rd, Funct3::And, rd, Opcode::Op);
                             break;
                         }
+                        default:
+                            break;
                     }
                     break;
                 }
+                default:
+                    break;
             }
             break;
         }
+        default:
+            break;
     }
     return ret;
 }
 
-Instruction decomp_c2(Instruction ir) {
+auto decomp_c2(Instruction ir) -> Instruction {
     Word funct3 = (ir >> 13) & 0x7;
     Word rd = (ir >> 7) & 0x1F;
     Word rs2 = (ir >> 2) & 0x1F;
@@ -259,14 +270,18 @@ Instruction decomp_c2(Instruction ir) {
                         ret = make_r_type(0, rs2, rd, Funct3::Add, rd, Opcode::Op);
                     }
                     break;
+                default:
+                    break;
             }
             break;
         }
+        default:
+            break;
     }
     return ret;
 }
 
-constexpr Instruction decode_compressed_dispatch(CompressedInstruction ir) {
+constexpr auto decode_compressed_dispatch(CompressedInstruction ir) -> Instruction {
     switch (compressed_opcode_of(ir)) {
         case Opcode::C0:
             return decomp_c0(ir);
@@ -279,17 +294,17 @@ constexpr Instruction decode_compressed_dispatch(CompressedInstruction ir) {
     }
 }
 
-Instruction decompressInstruction(Instruction ir) {
+auto decompressInstruction(Instruction ir) -> Instruction {
     if ((ir & 0x3u) == 0x3u) {
         return ir;
     }
     return decode_compressed_dispatch(static_cast<CompressedInstruction>(ir & 0xFFFF));
 }
 
-Register ALU_IM(Register in1, Register in2, Instruction funct3, Instruction funct7) {
+auto ALU_IM(Register in1, Register in2, Instruction funct3, Instruction funct7) -> Register {
     Word ret = 0;
     Word shamt = in2 & 0x1f;
-    const Funct3 f3 = static_cast<Funct3>(funct3);
+    const auto f3 = static_cast<Funct3>(funct3);
 
     if ((funct7 & 0x1) == 0) {
         switch (f3) {
@@ -398,7 +413,7 @@ Register ALU_IM(Register in1, Register in2, Instruction funct3, Instruction func
     return ret;
 }
 
-Instruction ALU_B(Register in1, Register in2, Instruction funct3) {
+auto ALU_B(Register in1, Register in2, Instruction funct3) -> Instruction {
     Word ret = 0;
     switch (static_cast<Funct3>(funct3)) {
         case Funct3::Beq: {
@@ -431,17 +446,14 @@ Instruction ALU_B(Register in1, Register in2, Instruction funct3) {
     return ret;
 }
 
-Register ALU_A(Register in1, Register in2, Instruction funct5) {
+auto ALU_A(Register in1, Register in2, Instruction funct5) -> Register {
     Word ret = 0;
     switch (static_cast<Funct5Amo>(funct5)) {
         case Funct5Amo::Lr: {
             ret = 0;
             break;
         }
-        case Funct5Amo::Sc: {
-            ret = in1;
-            break;
-        }
+        case Funct5Amo::Sc:
         case Funct5Amo::Swap: {
             ret = in1;
             break;
@@ -484,7 +496,7 @@ Register ALU_A(Register in1, Register in2, Instruction funct5) {
     return ret;
 }
 
-CSRValue ALU_C(CSRValue rcsr, Register rrs1, Instruction imm, Instruction funct3) {
+auto ALU_C(CSRValue rcsr, Register rrs1, Instruction imm, Instruction funct3) -> CSRValue {
     Word ret = 0;
     switch (static_cast<Funct3>(funct3)) {
         case Funct3::Csrrw:
@@ -539,7 +551,7 @@ const std::array<std::string_view, kOperationIdCount> OPERATION_NAME = {
 
 namespace {
 template <typename Table>
-constexpr OperationId lookup_operation(const Table& table, std::size_t index) {
+constexpr auto lookup_operation(const Table& table, std::size_t index) -> OperationId {
     return index < table.size() ? table[index] : UNKNOWN;
 }
 
@@ -580,7 +592,7 @@ constexpr std::array<OperationId, 8> kLoadFpOps = {UNKNOWN, UNKNOWN, FLW,     FL
 constexpr std::array<OperationId, 8> kStoreFpOps = {UNKNOWN, UNKNOWN, FSW,     FSD,
                                                     UNKNOWN, UNKNOWN, UNKNOWN, UNKNOWN};
 
-constexpr OperationId decode_funct12_priv(Funct12Priv funct12, Instruction funct7) {
+constexpr auto decode_funct12_priv(Funct12Priv funct12, Instruction funct7) -> OperationId {
     switch (funct12) {
         case Funct12Priv::Ecall:
             return ECALL;
@@ -600,12 +612,12 @@ constexpr OperationId decode_funct12_priv(Funct12Priv funct12, Instruction funct
 }
 }  // namespace
 
-OperationId decoder(Instruction ir) {
+auto decoder(Instruction ir) -> OperationId {
     const Opcode opcode = opcode_of(ir);
     const Funct3 funct3 = funct3_of(ir);
     const Funct5Amo funct5 = funct5_of(ir);
     const Instruction funct7 = ir >> 25;
-    const Funct12Priv funct12 = static_cast<Funct12Priv>(funct12_of(ir));
+    const auto funct12 = static_cast<Funct12Priv>(funct12_of(ir));
 
     switch (opcode) {
         case Opcode::Lui:
@@ -826,7 +838,7 @@ OperationId decoder(Instruction ir) {
                     return UNKNOWN;
             }
         default:
-            fprintf(stdout, "__ Unknown Instruction %08x\n", ir);
+            std::println(stdout, "__ Unknown Instruction {:08x}", ir);
             exit(0);
     }
 }

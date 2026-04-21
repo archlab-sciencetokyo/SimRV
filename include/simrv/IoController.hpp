@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 #include "Define.hpp"
 #include "PipelineContext.hpp"
@@ -39,7 +40,7 @@ class IoController {
      *
      * @return true if execution should continue; false if power-off command received
      */
-    [[nodiscard]] bool exec() noexcept;
+    [[nodiscard]] bool exec();
 
     // Ownership & context linkage
     Machine* owner = nullptr;  ///< Parent machine for statistics tracking
@@ -72,7 +73,7 @@ class IoController {
     /**
      * Allocate and manage local controller memory.
      */
-    std::unique_ptr<Byte[]> cmem_owner_;
+    std::vector<Byte> cmem_storage_;
 
     /**
      * Load firmware image file into controller memory.

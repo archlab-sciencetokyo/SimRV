@@ -6,7 +6,7 @@
 
 #include "Cpu.hpp"
 
-CSRValue CsrFile::getMstatus(CSRValue mask) const {
+auto CsrFile::getMstatus(CSRValue mask) const -> CSRValue {
     CSRValue val = (cpu_.mstatus | kMstatusFsDirty) & mask;
     return (((val >> 13) == 3) | ((val >> 15) == 3)) ? (val | kMstatusSd) : val;
 }
@@ -23,7 +23,7 @@ void CsrFile::setMstatus(CSRValue wdata) {
     cpu_.mstatus = (cpu_.mstatus & ~mask) | (wdata & mask);
 }
 
-CSRValue CsrFile::read(CSRAddress addr) const {
+auto CsrFile::read(CSRAddress addr) const -> CSRValue {
     CSRValue rcsr = 0;
     switch (addr) {
         case csr_addr(Csr::Pmpcfg0):
