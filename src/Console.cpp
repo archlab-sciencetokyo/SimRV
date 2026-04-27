@@ -4,11 +4,25 @@
  */
 #include "Console.hpp"
 
+#include <bits/types/struct_timeval.h>
+#include <sys/select.h>
+#include <sys/types.h>
+#include <unistd.h>
+
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <ios>
 #include <print>
+#include <type_traits>
 #include <utility>
 
+#include "Define.hpp"
+#include "IoController.hpp"
 #include "Machine.hpp"
+#include "XLen.hpp"
 
 constexpr Word CONSOLE_MAGIC_VALUE = 0x74726976;
 constexpr Word CONSOLE_VERSION = 2;
@@ -17,11 +31,56 @@ constexpr Word CONSOLE_VENDOR_ID = 0xffff;
 constexpr Word CONSOLE_DEVICE_FEATURES = 1;
 constexpr Word CONSOLE_CONFIG_GENERATION = 0;
 constexpr Word CONSOLE_QUEUE_NUM_MAX = 2;
-extern void update_descriptor(Word, Word, int, QueueState*, Byte*);
-extern auto load_from_ram(Address addr, int n, Byte* ram) -> Word;
-extern void store_to_ram(Address addr, Word data, int n, Byte* ram);
 
 using DescriptorSize = std::integral_constant<std::size_t, 16>;
+
+static constexpr auto byte_to_word(Byte b) -> Word {
+    return static_cast<Word>(std::to_integer<uint8_t>(b));
+}
+static constexpr auto word_to_byte(Word w) -> Byte {
+    return static_cast<Byte>(static_cast<uint8_t>(w & 0xffU));
+}
+
+static auto load_from_ram(Address addr, int n, Byte* ram) -> Word {
+    if (n != 1 && n != 2 && n != 4) {
+        std::println("__ Error: ram_r() not supported n={}", n);
+        exit(0);
+    }
+    Word data = 0;
+    for (int i = 0; i < n; i++) {
+        data |= byte_to_word(ram[(addr + i) & simrv::memory::kDramMask]) << (8 * i);
+    }
+    return data;
+}
+
+static void store_to_ram(Address addr, Word data, int n, Byte* ram) {
+    if (n != 1 && n != 2 && n != 4) {
+        std::println("__ Error: dsk_w() not supported n={}", n);
+        exit(0);
+    }
+    if (n == 1) {
+        ram[addr & simrv::memory::kDramMask] = word_to_byte(data);
+    } else if (n == 2) {
+        ram[addr & simrv::memory::kDramMask] = word_to_byte(data);
+        ram[(addr + 1) & simrv::memory::kDramMask] = word_to_byte(data >> 8);
+    } else if (n == 4) {
+        ram[addr & simrv::memory::kDramMask] = word_to_byte(data);
+        ram[(addr + 1) & simrv::memory::kDramMask] = word_to_byte(data >> 8);
+        ram[(addr + 2) & simrv::memory::kDramMask] = word_to_byte(data >> 16);
+        ram[(addr + 3) & simrv::memory::kDramMask] = word_to_byte(data >> 24);
+    }
+}
+
+static void update_descriptor(Word desc_idx, Word desc_len, int q_num, QueueState* qs, Byte* mmem) {
+    Address const addr_used_idx = qs->UsedLow + 2;
+    Word const index = static_cast<uint16_t>(load_from_ram(addr_used_idx, 2, mmem));
+
+    store_to_ram(addr_used_idx, index + 1, 2, mmem);
+
+    Address const addr_used_entry = qs->UsedLow + 4 + ((index & (q_num - 1)) * 8);
+    store_to_ram(addr_used_entry, desc_idx, 4, mmem);
+    store_to_ram(addr_used_entry + 4, desc_len, 4, mmem);
+}
 
 namespace {
 void reset_micro_controller_state(IoController& controller) {
@@ -31,14 +90,14 @@ void reset_micro_controller_state(IoController& controller) {
 }
 }  // namespace
 
-void process_console_queue_requests(Byte* mmem, Word q_num, QueueState* qs) {
-    Descriptor desc;
-    Byte* p;
+static void process_console_queue_requests(Byte* mmem, Word q_num, QueueState* qs) {
+    Descriptor desc{};
+    Byte* p = nullptr;
     auto avail_idx = static_cast<uint16_t>(load_from_ram(qs->AvailLow + 2, 2, mmem));
     while (qs->last_avail_idx != avail_idx) {
-        Address adr = qs->AvailLow + 4 + (qs->last_avail_idx & (q_num - 1)) * 2;
-        uint16_t desc_idx_header = load_from_ram(adr, 2, mmem);
-        Address desc_adr_header = desc_idx_header * DescriptorSize::value + qs->DescLow;
+        Address const adr = qs->AvailLow + 4 + ((qs->last_avail_idx & (q_num - 1)) * 2);
+        uint16_t const desc_idx_header = load_from_ram(adr, 2, mmem);
+        Address const desc_adr_header = (desc_idx_header * DescriptorSize::value) + qs->DescLow;
 
         p = reinterpret_cast<Byte*>(&desc);
         for (std::size_t i = 0; i < DescriptorSize::value; i++) {
@@ -49,7 +108,9 @@ void process_console_queue_requests(Byte* mmem, Word q_num, QueueState* qs) {
 
         for (int i = 0; std::cmp_less(i, desc.len); i++) { /* write to stdout */
             uint8_t d = load_from_ram(desc.adr + i, 1, mmem);
-            if (write(fileno(stdout), &d, 1) < 0) std::println("__ ERROR in cons_request!");
+            if (write(fileno(stdout), &d, 1) < 0) {
+                std::println("__ ERROR in cons_request!");
+            }
         }
         fflush(stdout);
 
@@ -58,19 +119,23 @@ void process_console_queue_requests(Byte* mmem, Word q_num, QueueState* qs) {
     }
 }
 
-auto Console::receive_input() -> int {
-    Descriptor desc;
-    Byte* p;
+auto Console::receive_input() const -> int {
+    Descriptor desc{};
+    Byte* p = nullptr;
 
     QueueState* qs = &Queue[0];
-    if (!qs->Ready) return 0;
+    if (qs->Ready == 0u) {
+        return 0;
+    }
 
     auto avail_idx = static_cast<uint16_t>(load_from_ram(qs->AvailLow + 2, 2, mmem));
-    if (qs->last_avail_idx == avail_idx) return 0;
+    if (qs->last_avail_idx == avail_idx) {
+        return 0;
+    }
 
-    Address adr = qs->AvailLow + 4 + (qs->last_avail_idx & (QueueNum - 1)) * 2;
-    uint16_t desc_idx_header = load_from_ram(adr, 2, mmem);
-    Address desc_adr_header = desc_idx_header * DescriptorSize::value + qs->DescLow;
+    Address const adr = qs->AvailLow + 4 + ((qs->last_avail_idx & (QueueNum - 1)) * 2);
+    uint16_t const desc_idx_header = load_from_ram(adr, 2, mmem);
+    Address const desc_adr_header = (desc_idx_header * DescriptorSize::value) + qs->DescLow;
 
     p = reinterpret_cast<Byte*>(&desc);
     for (std::size_t i = 0; i < DescriptorSize::value; i++) {
@@ -79,8 +144,10 @@ auto Console::receive_input() -> int {
     }
 
     constexpr int stdin_fd = 0;
-    struct timeval tv;
-    fd_set rfds, wfds, efds;
+    struct timeval tv{};
+    fd_set rfds;
+    fd_set wfds;
+    fd_set efds;
     FD_ZERO(&rfds);
     FD_ZERO(&wfds);
     FD_ZERO(&efds);
@@ -90,7 +157,7 @@ auto Console::receive_input() -> int {
 
     ssize_t r_len = 0;
     if (select(stdin_fd + 1, &rfds, &wfds, &efds, &tv) > 0 && FD_ISSET(stdin_fd, &rfds)) {
-        uint8_t buf;
+        uint8_t buf = 0;
         r_len = ::read(fileno(stdin), &buf, 1);
         if (r_len != 1) {
             std::println("__ ERROR: in console input");
@@ -141,7 +208,7 @@ auto Console::write(Machine& machine, Address p_addr, Word wdata) -> bool {
     return true;
 }
 
-auto Console::mmio_read(Address offset) -> Word {
+auto Console::mmio_read(Address offset) const -> Word {
     Word rdata = 0;
     switch (offset) {
         case 0x000:
@@ -239,7 +306,7 @@ void Console::mmio_write(Machine& machine, Address offset, Word wdata) {
 
 constexpr Word MICRO_CONT_MODE_KEY = 0;
 auto Console::MC_receive_input(Machine& machine) -> int {
-    int ret;
+    int ret = 0;
     if (machine.s_use_uc && machine.micro_controller != nullptr && (MICRO_CONT_MODE_KEY != 0)) {
         reset_micro_controller_state(*machine.micro_controller);
         machine.micro_controller->Qnum = QueueNum;

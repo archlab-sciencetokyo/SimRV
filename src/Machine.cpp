@@ -6,15 +6,27 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
+#include <ios>
 #include <memory>
 #include <print>
 #include <string>
+#include <string_view>
 #include <utility>
 
+#include "Console.hpp"
+#include "Cpu.hpp"
+#include "Define.hpp"
+#include "Disk.hpp"
+#include "IoController.hpp"
+#include "MemoryUtil.hpp"
 #include "Module.hpp"
+#include "XLen.hpp"
 void set_options(Machine* m, int argc, char* const* argv);
 
 Machine::Machine()
@@ -23,20 +35,20 @@ Machine::Machine()
 }
 
 namespace simrv::machine_detail {
-constexpr size_t D_SIZE_DRAM = (size_t{9} * 1024u * 1024u);   // 9MB of bbl + kernel
-constexpr size_t D_SIZE_DEVT = (size_t{4} * 1024u);           // 4KB of device tree
-constexpr size_t D_SIZE_DISK = (size_t{16} * 1024u * 1024u);  // 16MB of disk image
-constexpr Address D_DEVT_OFFSET = static_cast<Address>(16u * 1024u * 1024u);
-constexpr Address D_QUEUE_STRIDE = static_cast<Address>(0x24u);
-constexpr Address D_QUEUE_READY_OFFSET = static_cast<Address>(0x0u);
-constexpr Address D_QUEUE_NOTIFY_OFFSET = static_cast<Address>(0x4u);
-constexpr Address D_QUEUE_DESC_LOW_OFFSET = static_cast<Address>(0x8u);
-constexpr Address D_QUEUE_DESC_HIGH_OFFSET = static_cast<Address>(0xCu);
-constexpr Address D_QUEUE_AVAIL_LOW_OFFSET = static_cast<Address>(0x10u);
-constexpr Address D_QUEUE_AVAIL_HIGH_OFFSET = static_cast<Address>(0x14u);
-constexpr Address D_QUEUE_USED_LOW_OFFSET = static_cast<Address>(0x18u);
-constexpr Address D_QUEUE_USED_HIGH_OFFSET = static_cast<Address>(0x1Cu);
-constexpr Address D_QUEUE_LAST_AVAIL_OFFSET = static_cast<Address>(0x20u);
+constexpr size_t D_SIZE_DRAM = (size_t{9} * 1024U * 1024U);   // 9MB of bbl + kernel
+constexpr size_t D_SIZE_DEVT = (size_t{4} * 1024U);           // 4KB of device tree
+constexpr size_t D_SIZE_DISK = (size_t{16} * 1024U * 1024U);  // 16MB of disk image
+constexpr Address D_DEVT_OFFSET = static_cast<Address>(16U * 1024U * 1024U);
+constexpr Address D_QUEUE_STRIDE = static_cast<Address>(0x24U);
+constexpr Address D_QUEUE_READY_OFFSET = static_cast<Address>(0x0U);
+constexpr Address D_QUEUE_NOTIFY_OFFSET = static_cast<Address>(0x4U);
+constexpr Address D_QUEUE_DESC_LOW_OFFSET = static_cast<Address>(0x8U);
+constexpr Address D_QUEUE_DESC_HIGH_OFFSET = static_cast<Address>(0xCU);
+constexpr Address D_QUEUE_AVAIL_LOW_OFFSET = static_cast<Address>(0x10U);
+constexpr Address D_QUEUE_AVAIL_HIGH_OFFSET = static_cast<Address>(0x14U);
+constexpr Address D_QUEUE_USED_LOW_OFFSET = static_cast<Address>(0x18U);
+constexpr Address D_QUEUE_USED_HIGH_OFFSET = static_cast<Address>(0x1CU);
+constexpr Address D_QUEUE_LAST_AVAIL_OFFSET = static_cast<Address>(0x20U);
 
 using QueueField = Word QueueState::*;
 
@@ -52,7 +64,7 @@ constexpr std::array<std::pair<Address, QueueField>, 9> kQueueFields = {{
     {D_QUEUE_LAST_AVAIL_OFFSET, &QueueState::last_avail_idx},
 }};
 
-constexpr auto queue_field(Address offset) -> QueueField {
+static constexpr auto queue_field(Address offset) -> QueueField {
     for (const auto& [field_offset, field] : kQueueFields) {
         if (field_offset == offset) {
             return field;
@@ -61,9 +73,9 @@ constexpr auto queue_field(Address offset) -> QueueField {
     return nullptr;
 }
 
-constexpr auto pte_access_index(PteAccess access) -> Word { return std::to_underlying(access); }
+static constexpr auto pte_access_index(PteAccess access) -> Word { return std::to_underlying(access); }
 
-void binfile_gen(CPU* /*s*/, Byte* ram, Byte* sector) {
+static void binfile_gen(CPU* /*s*/, Byte* ram, Byte* sector) {
     std::ofstream out("inits.bin", std::ios::binary);
     if (!out.is_open()) {
         std::println("__ Error: cannot create inits.bin");
@@ -82,7 +94,7 @@ void binfile_gen(CPU* /*s*/, Byte* ram, Byte* sector) {
     }
     int i = 0;
     Word sum = 0;
-    Word buf;
+    Word buf = 0;
     while (in.read(reinterpret_cast<char*>(&buf), sizeof(buf))) {
         sum += buf;
         i++;
@@ -91,7 +103,7 @@ void binfile_gen(CPU* /*s*/, Byte* ram, Byte* sector) {
     exit(0);
 }
 
-void load_image_into_ram(const std::string& file_path, Byte* ram) {
+static void load_image_into_ram(const std::string& file_path, Byte* ram) {
     std::ifstream in(file_path, std::ios::binary);
     if (!in.is_open()) {
         std::println(stdout, "__ Error: image_file {} cannot be found", file_path);
@@ -104,7 +116,7 @@ void load_image_into_ram(const std::string& file_path, Byte* ram) {
     }
 }
 
-void load_image_file_into_ram(const std::string& file, Byte* ram) {
+static void load_image_file_into_ram(const std::string& file, Byte* ram) {
     std::ifstream in(file, std::ios::binary);
     if (!in.is_open()) {
         std::println(stdout, "__ Error: image_file cannot be found");
@@ -117,11 +129,11 @@ void load_image_file_into_ram(const std::string& file, Byte* ram) {
     }
 }
 
-auto ram_read(Address addr, Instruction funct3, Byte* ram) -> Word {
+static auto ram_read(Address addr, Instruction funct3, Byte* ram) -> Word {
     return simrv::memory_detail::ram_read_fast(addr, funct3, ram);
 }
 
-auto disk_read(Address addr, Word n, Byte* dsk) -> Word {
+static auto disk_read(Address addr, Word n, Byte* dsk) -> Word {
     if (n != 1 && n != 2 && n != 4) {
         std::println("__ Error: dsk_r() not supported n={}", n);
         exit(0);
@@ -134,24 +146,24 @@ auto disk_read(Address addr, Word n, Byte* dsk) -> Word {
     return data;
 }
 
-auto queue_read(Address addr, QueueState* q) -> Word {
-    int idx = static_cast<int>(addr / D_QUEUE_STRIDE);
-    if (QueueField field = queue_field(addr % D_QUEUE_STRIDE); field != nullptr) {
+static auto queue_read(Address addr, QueueState* q) -> Word {
+    int const idx = static_cast<int>(addr / D_QUEUE_STRIDE);
+    if (QueueField const field = queue_field(addr % D_QUEUE_STRIDE); field != nullptr) {
         return q[idx].*field;
     }
     return 0;
 }
 
-void queue_write(Address addr, Word wdata, QueueState* q) {
-    int idx = static_cast<int>(addr / D_QUEUE_STRIDE);
-    if (QueueField field = queue_field(addr % D_QUEUE_STRIDE); field != nullptr) {
+static void queue_write(Address addr, Word wdata, QueueState* q) {
+    int const idx = static_cast<int>(addr / D_QUEUE_STRIDE);
+    if (QueueField const field = queue_field(addr % D_QUEUE_STRIDE); field != nullptr) {
         q[idx].*field = wdata;
     }
 }
 
 auto page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem) -> bool {
-    constexpr Address kKernelPhysBase = static_cast<Address>(0x80400000u);
-    constexpr Address kKernelVirtBase = static_cast<Address>(0xC0000000u);
+    constexpr auto kKernelPhysBase = static_cast<Address>(0x80400000U);
+    constexpr auto kKernelVirtBase = static_cast<Address>(0xC0000000U);
     constexpr Address kKernelVirtEnd = kKernelVirtBase + simrv::memory::kDramSize;
     constexpr Address kDramPhysEnd = simrv::memory::kDramBaseAddress + simrv::memory::kDramSize;
 
@@ -164,27 +176,27 @@ auto page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte
     /* level 1 */
     Word vpn1 = (v_addr >> 22) & 0x3FF;
     const Word root_ppn = (cpu->satp & 0x3FFFFF);
-    Address root_pt_addr = static_cast<Address>(root_ppn << 12);
-    if (root_pt_addr >= static_cast<Address>(0xC0000000u) &&
-        root_pt_addr < static_cast<Address>(0xC0000000u + simrv::memory::kDramSize)) {
-        root_pt_addr -= static_cast<Address>(0x40000000u);
+    auto root_pt_addr = static_cast<Address>(root_ppn << 12);
+    if (root_pt_addr >= static_cast<Address>(0xC0000000U) &&
+        root_pt_addr < static_cast<Address>(0xC0000000U + simrv::memory::kDramSize)) {
+        root_pt_addr -= static_cast<Address>(0x40000000U);
     }
 
     auto read_l1_pte = [&](Address candidate_root, Word* out_pte_addr) {
-        Word pte_addr = candidate_root + vpn1 * 4;
+        Word pte_addr = candidate_root + (vpn1 * 4);
         Word pte = ram_read(pte_addr, static_cast<Instruction>(Funct3::Lw), mmem);
         if (pte == 0) {
             Word mirror_vpn1 = 0;
             bool has_mirror = false;
-            if (vpn1 >= 0x200u && vpn1 < 0x300u) {
-                mirror_vpn1 = vpn1 + 0x100u;
+            if (vpn1 >= 0x200U && vpn1 < 0x300U) {
+                mirror_vpn1 = vpn1 + 0x100U;
                 has_mirror = true;
-            } else if (vpn1 >= 0x300u && vpn1 < 0x400u) {
-                mirror_vpn1 = vpn1 - 0x100u;
+            } else if (vpn1 >= 0x300U && vpn1 < 0x400U) {
+                mirror_vpn1 = vpn1 - 0x100U;
                 has_mirror = true;
             }
             if (has_mirror) {
-                const Word mirror_pte_addr = candidate_root + mirror_vpn1 * 4;
+                const Word mirror_pte_addr = candidate_root + (mirror_vpn1 * 4);
                 const Word mirror_pte =
                     ram_read(mirror_pte_addr, static_cast<Instruction>(Funct3::Lw), mmem);
                 if (mirror_pte & enum_mask(PteFlag::V)) {
@@ -198,37 +210,37 @@ auto page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte
     };
 
     Word L1_pte_addr = 0;
-    Word L1_pte = read_l1_pte(root_pt_addr, &L1_pte_addr);
-    Word L1_xwr =
-        (cpu->mstatus & enum_mask(MstatusBit::Mxr) ? L1_pte >> 1 | L1_pte >> 3 : L1_pte >> 1) & 7;
-    Word L1_p_addr = (v_addr & 0x3FFFFF) | (((L1_pte >> 10) << 12) & ~0x3FFFFF);
-    Word L1_write = !(L1_pte & enum_mask(PteFlag::A)) ||
-                    (!(L1_pte & enum_mask(PteFlag::D)) && access == PteAccess::Write);
-    Word L1_success =
-        !(L1_xwr == 2 || L1_xwr == 6 ||
-          (cpu->priv == kPrivSupervisor &&
-           ((L1_pte & enum_mask(PteFlag::U)) && !(cpu->mstatus & enum_mask(MstatusBit::Sum)))) ||
-          (cpu->priv == kPrivUser && (!(L1_pte & enum_mask(PteFlag::U)))) ||
-          ((L1_xwr >> pte_access_index(access)) & 1) == 0);
+    Word const L1_pte = read_l1_pte(root_pt_addr, &L1_pte_addr);
+    Word const L1_xwr =
+        (((cpu->mstatus & enum_mask(MstatusBit::Mxr)) != 0u) ? L1_pte >> 1 | L1_pte >> 3 : L1_pte >> 1) & 7;
+    Word const L1_p_addr = (v_addr & 0x3FFFFF) | (((L1_pte >> 10) << 12) & ~0x3FFFFF);
+    Word const L1_write = static_cast<Word>(((L1_pte & enum_mask(PteFlag::A)) == 0u) ||
+                    (((L1_pte & enum_mask(PteFlag::D)) == 0u) && access == PteAccess::Write));
+    Word const L1_success =
+        static_cast<Word>(L1_xwr != 2 && L1_xwr != 6 &&
+          (cpu->priv != kPrivSupervisor ||
+           !((L1_pte & enum_mask(PteFlag::U)) != 0u) || (cpu->mstatus & enum_mask(MstatusBit::Sum))) &&
+          (cpu->priv != kPrivUser || !((L1_pte & enum_mask(PteFlag::U)) == 0u)) &&
+          ((L1_xwr >> pte_access_index(access)) & 1) != 0);
     /* level 0 */
-    Word vpn0 = (v_addr >> 12) & 0x3FF;
-    Word L0_pte_addr = ((L1_pte >> 10) << 12) + vpn0 * 4;
-    Word L0_pte = ram_read(L0_pte_addr, static_cast<Instruction>(Funct3::Lw), mmem);
-    Word L0_xwr =
-        (cpu->mstatus & enum_mask(MstatusBit::Mxr) ? L0_pte >> 1 | L0_pte >> 3 : L0_pte >> 1) & 7;
-    Word L0_p_addr = (v_addr & 0xFFF) | (((L0_pte >> 10) << 12) & ~0xFFF);
-    Word L0_write = !(L0_pte & enum_mask(PteFlag::A)) ||
-                    (!(L0_pte & enum_mask(PteFlag::D)) && access == PteAccess::Write);
-    Word L0_success =
-        !(L0_xwr == 2 || L0_xwr == 6 ||
-          ((cpu->priv == kPrivSupervisor) &&
-           ((L0_pte & enum_mask(PteFlag::U)) && !(cpu->mstatus & enum_mask(MstatusBit::Sum)))) ||
-          ((cpu->priv == kPrivUser) && (!(L0_pte & enum_mask(PteFlag::U)))) ||
-          ((L0_xwr >> pte_access_index(access)) & 1) == 0);
+    Word const vpn0 = (v_addr >> 12) & 0x3FF;
+    Word const L0_pte_addr = ((L1_pte >> 10) << 12) + (vpn0 * 4);
+    Word const L0_pte = ram_read(L0_pte_addr, static_cast<Instruction>(Funct3::Lw), mmem);
+    Word const L0_xwr =
+        (((cpu->mstatus & enum_mask(MstatusBit::Mxr)) != 0u) ? L0_pte >> 1 | L0_pte >> 3 : L0_pte >> 1) & 7;
+    Word const L0_p_addr = (v_addr & 0xFFF) | (((L0_pte >> 10) << 12) & ~0xFFF);
+    Word const L0_write = static_cast<Word>(((L0_pte & enum_mask(PteFlag::A)) == 0u) ||
+                    (((L0_pte & enum_mask(PteFlag::D)) == 0u) && access == PteAccess::Write));
+    Word const L0_success =
+        static_cast<Word>(L0_xwr != 2 && L0_xwr != 6 &&
+          ((cpu->priv != kPrivSupervisor) ||
+           !((L0_pte & enum_mask(PteFlag::U)) != 0u) || (cpu->mstatus & enum_mask(MstatusBit::Sum))) &&
+          ((cpu->priv != kPrivUser) || !((L0_pte & enum_mask(PteFlag::U)) == 0u)) &&
+          ((L0_xwr >> pte_access_index(access)) & 1) != 0);
     /* success */
     bool page_fault =
-        (!(L1_pte & enum_mask(PteFlag::V))) || (L1_xwr != 0 && !L1_success) ||
-        (L1_xwr == 0 && ((!(L0_pte & enum_mask(PteFlag::V))) || (L0_xwr == 0) || !L0_success));
+        ((L1_pte & enum_mask(PteFlag::V)) == 0u) || (L1_xwr != 0 && (L1_success == 0u)) ||
+        (L1_xwr == 0 && (((L0_pte & enum_mask(PteFlag::V)) == 0u) || (L0_xwr == 0) || (L0_success == 0u)));
 
     if (page_fault && access != PteAccess::Code && cpu->priv == kPrivSupervisor &&
         v_addr >= kKernelPhysBase && v_addr < kDramPhysEnd) {
@@ -238,22 +250,23 @@ auto page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte
     }
 
     /* phys_addr */
-    if (page_fault)
+    if (page_fault) {
         *p_addr = 0;
-    else if (L1_success)
+    } else if (L1_success != 0u) {
         *p_addr = L1_p_addr;
-    else if (L0_success)
+    } else if (L0_success != 0u) {
         *p_addr = L0_p_addr;
+}
 
     /* update pte */
-    Word L1_pte_write =
+    Word const L1_pte_write =
         L1_pte | enum_mask(PteFlag::A) | (access == PteAccess::Write ? enum_mask(PteFlag::D) : 0);
-    Word L0_pte_write =
+    Word const L0_pte_write =
         L0_pte | enum_mask(PteFlag::A) | (access == PteAccess::Write ? enum_mask(PteFlag::D) : 0);
-    bool we =
-        ((L1_xwr != 0 && L1_success) && (L1_write)) || ((L0_xwr != 0 && L0_success) && (L0_write));
-    Word w_addr = (L1_xwr != 0 && L1_success) ? L1_pte_addr : L0_pte_addr;
-    Word w_data = (L1_xwr != 0 && L1_success) ? L1_pte_write : L0_pte_write;
+    bool const we =
+        ((L1_xwr != 0 && (L1_success != 0u)) && ((L1_write) != 0u)) || ((L0_xwr != 0 && (L0_success != 0u)) && ((L0_write) != 0u));
+    Word const w_addr = (L1_xwr != 0 && (L1_success != 0u)) ? L1_pte_addr : L0_pte_addr;
+    Word const w_data = (L1_xwr != 0 && (L1_success != 0u)) ? L1_pte_write : L0_pte_write;
     if (we) {
         for (int i = 0; i < 4; i++) {
             mmem[(w_addr + i) & simrv::memory::kDramMask] =
@@ -277,7 +290,7 @@ using namespace simrv::machine_detail;
  *
  * This helper is intentionally I/O-only and does not mutate simulator state.
  */
-void dump_init_artifacts(CPU* cpu, Byte* ram, Console* console, Disk* disk, Byte* sector) {
+static void dump_init_artifacts(CPU* cpu, Byte* ram, Console* console, Disk* disk, Byte* sector) {
     {
         std::ofstream out("init_mem.txt");
         for (Address i = 0; i < simrv::memory::kDramSize; ++i) {
@@ -340,7 +353,7 @@ void dump_init_artifacts(CPU* cpu, Byte* ram, Console* console, Disk* disk, Byte
 
     for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
         out << "mmu.TLB_inst_r.r_valid[" << std::dec << i
-            << "] =" << static_cast<int>(cpu->TLB_inst_r[i].p_addr != static_cast<Address>(-1u))
+            << "] =" << static_cast<int>(cpu->TLB_inst_r[i].p_addr != static_cast<Address>(-1U))
             << ";\n";
         out << "mmu.TLB_inst_r.mem[" << std::dec << i << "][39:22] =18'h" << std::hex
             << std::setw(5) << std::setfill('0') << (cpu->TLB_inst_r[i].v_addr >> 14) << ";\n";
@@ -349,7 +362,7 @@ void dump_init_artifacts(CPU* cpu, Byte* ram, Console* console, Disk* disk, Byte
     }
     for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
         out << "mmu.TLB_data_r.r_valid[" << std::dec << i
-            << "] =" << static_cast<int>(cpu->TLB_data_r[i].p_addr != static_cast<Address>(-1u))
+            << "] =" << static_cast<int>(cpu->TLB_data_r[i].p_addr != static_cast<Address>(-1U))
             << ";\n";
         out << "mmu.TLB_data_r.mem[" << std::dec << i << "][39:22] =18'h" << std::hex
             << std::setw(5) << std::setfill('0') << (cpu->TLB_data_r[i].v_addr >> 14) << ";\n";
@@ -358,7 +371,7 @@ void dump_init_artifacts(CPU* cpu, Byte* ram, Console* console, Disk* disk, Byte
     }
     for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
         out << "mmu.TLB_data_w.r_valid[" << std::dec << i
-            << "] =" << static_cast<int>(cpu->TLB_data_w[i].p_addr != static_cast<Address>(-1u))
+            << "] =" << static_cast<int>(cpu->TLB_data_w[i].p_addr != static_cast<Address>(-1U))
             << ";\n";
         out << "mmu.TLB_data_w.mem[" << std::dec << i << "][39:22] =18'h" << std::hex
             << std::setw(5) << std::setfill('0') << (cpu->TLB_data_w[i].v_addr >> 14) << ";\n";
@@ -451,8 +464,9 @@ void Machine::print_summary() {
     std::println("__ Executed uc_instructions : {:11}", e_uc_cnt);
     std::println("__ Fetched compressed insns : {:11}", e_ccount);
     std::println("__ Elapsed time (usec)      : {:11}", etime);
-    std::println("__ Simulation speed (KIPS)  : {:11}", e_icount * 1000ul / etime);
-    if (s_use_mix) write_instruction_mix_report();
+    std::println("__ Simulation speed (KIPS)  : {:11}", e_icount * 1000UL / etime);
+    if (s_use_mix) { write_instruction_mix_report();
+}
 }
 
 /**
@@ -493,18 +507,19 @@ void Machine::prepare_cycle() {
 
         if ((cpu.mtime & static_cast<Counter>(0xfffff)) == 0 &&
             console->fifo_en != static_cast<Byte>(0)) {  // 2019-08-30
-            int ret = console->MC_receive_input(*this);  /* Keyboard */
+            int const ret = console->MC_receive_input(*this);  /* Keyboard */
             if (ret > 0) {
                 cpu.plic_set_irq(simrv::virtio::kConsoleIrq, 1);
             }
-            if (ret == -1) is_running_ = false; /* break by Ctrl+q */
+            if (ret == -1) { is_running_ = false; /* break by Ctrl+q */
+}
             adr++;
         } else if (cpu.mtimecmp < cpu.mtime) { /* Timer */
             cpu.mip |= enum_mask(MipBit::Mtip);
         }
     }
 
-    cpu.pending_exception = ~0u; /* initialize regs */
+    cpu.pending_exception = ~0U; /* initialize regs */
     cpu.pending_tval = 0;        /* initialize regs */
 }
 
@@ -512,7 +527,7 @@ constexpr Counter D_TRACEPC_INTERVAL = 1000;
 /**
  * @brief Emit sparse PC trace samples to `tracepc.txt` every fixed interval.
  */
-void emit_periodic_pc_trace(Counter mtime, Register cpc) {
+static void emit_periodic_pc_trace(Counter mtime, Register cpc) {
     static int flag = 0;
     static std::ofstream out;
     if ((mtime % D_TRACEPC_INTERVAL) == 0) {
@@ -531,7 +546,7 @@ void emit_periodic_pc_trace(Counter mtime, Register cpc) {
 /**
  * @brief Emit branch prediction trace rows to `bpred.txt`.
  */
-void emit_branch_prediction_trace(Counter mtime, Register cpc, Register jmp_pc, Word r_opcode,
+static void emit_branch_prediction_trace(Counter mtime, Register cpc, Register jmp_pc, Word r_opcode,
                                   Word r_tkn) {
     static int flag = 0;
     static std::ofstream out;
@@ -544,11 +559,11 @@ void emit_branch_prediction_trace(Counter mtime, Register cpc, Register jmp_pc, 
 
     const auto opcode = static_cast<Opcode>(r_opcode);
     const int ir_jb =
-        (opcode == Opcode::Jal) || (opcode == Opcode::Jalr) || (opcode == Opcode::Branch);
+        static_cast<const int>((opcode == Opcode::Jal) || (opcode == Opcode::Jalr) || (opcode == Opcode::Branch));
     const int ir_jump = (opcode == Opcode::Jal) ? 2 : (opcode == Opcode::Jalr) ? 3 : 0;
-    const int ir_branch = (opcode == Opcode::Branch);
+    const int ir_branch = static_cast<const int>(opcode == Opcode::Branch);
 
-    const Word targ = (ir_jump | ir_branch) ? jmp_pc : 0;
+    const Word targ = ((ir_jump | ir_branch) != 0) ? jmp_pc : 0;
     out << std::setfill('0') << std::setw(8) << std::dec << static_cast<int>(mtime) << ' '
         << std::hex << std::setw(8) << cpc << ' ' << std::setw(8) << targ << std::dec << ' '
         << ir_jb << ' ' << r_tkn << ' ' << ir_jump << ' ' << ir_branch << '\n';
@@ -561,9 +576,11 @@ constexpr Word CMD_POWER_OFF = 2;  /* command for application mode using tohost 
  * @brief Apply end-of-cycle termination checks and optional trace outputs.
  */
 void Machine::finalize_cycle() {
-    if (s_strace != 0 && cpu.mtime >= s_strace)
+    if (s_strace != 0 && cpu.mtime >= s_strace) {
         emit_periodic_pc_trace(cpu.mtime, cpu.pipeline_context.cpc);
-    if (cpu.mtime >= s_trace_begin && cpu.mtime <= s_trace_end) write_trace_snapshot();
+}
+    if (cpu.mtime >= s_trace_begin && cpu.mtime <= s_trace_end) { write_trace_snapshot();
+}
     if (cpu.mtime >= s_fincnt - 1) {
         std::println("\n__finished by -e option");
         is_running_ = false;
@@ -577,7 +594,7 @@ void Machine::finalize_cycle() {
     if (s_isatest && tohost != 0) {
         if (tohost == 1) {
             std::println("\n__ ISA TEST PASS");
-        } else if (tohost & 1) {
+        } else if ((tohost & 1) != 0u) {
             std::println("\n__ ISA TEST FAIL code={} (tohost=0x{:08x})", tohost >> 1, tohost);
         } else {
             std::println("\n__ ISA TEST TOHOST update=0x{:08x}", tohost);
@@ -619,7 +636,7 @@ void Machine::write_trace_snapshot() {
 
     for (int i = 0; i < 4; i++) { /* output registers */
         for (int j = 0; j < 8; j++) {
-            write_hex(cpu.reg[i * 8 + j]);
+            write_hex(cpu.reg[(i * 8) + j]);
             s_fp_trace << (j != 7 ? ' ' : '\n');
         }
     }
@@ -704,7 +721,7 @@ void Machine::write_trace_snapshot() {
     }
 }
 
-void load_devicetree(Byte* ram) {
+static void load_devicetree(Byte* ram) {
     constexpr std::array<Word, 344> tbuf = {
         0xedfe0dd0, 0x5a050000, 0x38000000, 0x84040000, 0x28000000, 0x11000000, 0x10000000,
         0x0,        0xd6000000, 0x4c040000, 0x0,        0x0,        0x0,        0x0,
@@ -757,16 +774,10 @@ void load_devicetree(Byte* ram) {
         0x65646e65, 0x69720064, 0x2c766373, 0x7665646e, 0x6f6f6200, 0x67726174, 0xff0073,
         0x0};
     Word* p = reinterpret_cast<Word*>(ram);
-    for (std::size_t i = 0; i < tbuf.size(); i++) p[i] = tbuf[i];
+    for (std::size_t i = 0; i < tbuf.size(); i++) { p[i] = tbuf[i];
+}
 
-    if (false) {
-        char* cp = reinterpret_cast<char*>(p);
-        for (std::size_t i = 0; i < tbuf.size() * sizeof(Word); i++) {
-            std::print("{:02x} ", cp[i] & 0xff);
-        }
-        std::println("");
-        exit(0);
-    }
+    
 }
 
 /**
@@ -793,12 +804,13 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
     console->Queue = console_queue_owner_.data();
     disk->Queue = disk_queue_owner_.data();
 
-    if (s_dlog_mode) s_fp_dlog.open("init_virtio.txt");
+    if (s_dlog_mode) { s_fp_dlog.open("init_virtio.txt");
+}
 
     cpu.pc = s_start_pc;
     const bool linux_boot = !s_appmode && !s_rtosmode;
     const Address dtb_offset =
-        linux_boot ? static_cast<Address>(simrv::memory::kDramSize - static_cast<Address>(0x00100000u))
+        linux_boot ? static_cast<Address>(simrv::memory::kDramSize - static_cast<Address>(0x00100000U))
                    : simrv::boot::kInitDataAddress;
     cpu.reg[10] = linux_boot ? 0 : cpu.reg[10];
     cpu.reg[11] = linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0;
@@ -806,20 +818,25 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
 
     load_image_into_ram(s_fn_memimg, mmem);  // load a memory image file
 
-    if (s_fn_dvtree.empty())
+    if (s_fn_dvtree.empty()) {
         load_devicetree(mmem + dtb_offset);
-    else
+    } else {
         load_image_into_ram(s_fn_dvtree, mmem + dtb_offset);
+}
 
-    if (s_use_disk) load_image_into_ram(s_fn_dskimg, disk->sector);  // load a disk image file
+    if (s_use_disk) { load_image_into_ram(s_fn_dskimg, disk->sector);  // load a disk image file
+}
 
-    if (s_use_mix)
-        for (int& i : e_instmix) i = 0;
+    if (s_use_mix) {
+        for (int& i : e_instmix) { i = 0;
+}
+}
 
-    if (s_misa_override)
+    if (s_misa_override) {
         cpu.misa = s_misa_profile;
-    else if (s_rtosmode)
+    } else if (s_rtosmode) {
         cpu.misa = misa_profile_bits(MisaProfile::I);
+}
 
     // #ifdef MIDDLE
     // #include "xinitreg.txt"

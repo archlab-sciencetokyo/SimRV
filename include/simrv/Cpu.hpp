@@ -29,9 +29,9 @@ class CPU {
     /// Write mstatus with architectural side effects applied.
     void set_mstatus(CSRValue);
     /// Read masked mstatus value with architectural projections.
-    CSRValue get_mstatus(CSRValue);
+    CSRValue get_mstatus(CSRValue) const;
     /// Read a CSR value.
-    CSRValue read_csr(CSRAddress);
+    CSRValue read_csr(CSRAddress) const;
     /// Write a CSR value.
     void write_csr(CSRAddress, CSRValue);
     /// Return from machine-mode trap.
@@ -88,39 +88,39 @@ class CPU {
     void commit_control_flow_and_traps(Machine& machine);
 
    public:
-    Register pc;
+    Register pc{};
     std::array<Register, 32> reg{};
     std::array<FloatingRegister, 32> freg{};
 
-    CSRValue mstatus;
-    CSRValue mtvec;
-    CSRValue mscratch;
-    CSRValue mepc;
-    TrapCause mcause;
-    CSRValue mtval;
-    CSRValue mhartid;
+    CSRValue mstatus{};
+    CSRValue mtvec{};
+    CSRValue mscratch{};
+    CSRValue mepc{};
+    TrapCause mcause{};
+    CSRValue mtval{};
+    CSRValue mhartid{};
     CSRValue misa = kMisaDefault;
-    CSRValue mie;
-    CSRValue mip;
-    CSRValue medeleg;
-    CSRValue mideleg;
-    CSRValue mcounteren;
-    CSRValue stvec;
-    CSRValue sscratch;
-    CSRValue sepc;
-    TrapCause scause;
-    CSRValue stval;
-    CSRValue satp;
-    CSRValue scounteren;
+    CSRValue mie{};
+    CSRValue mip{};
+    CSRValue medeleg{};
+    CSRValue mideleg{};
+    CSRValue mcounteren{};
+    CSRValue stvec{};
+    CSRValue sscratch{};
+    CSRValue sepc{};
+    TrapCause scause{};
+    CSRValue stval{};
+    CSRValue satp{};
+    CSRValue scounteren{};
     CSRValue fcsr = 0;
 
-    Address load_res;
-    CSRValue reserved;
-    TrapCause pending_exception;
-    CSRValue pending_tval;
+    Address load_res{};
+    CSRValue reserved{};
+    TrapCause pending_exception{};
+    CSRValue pending_tval{};
     PrivilegeLevel priv = static_cast<PrivilegeLevel>(PrivilegeMode::Machine);
-    CSRValue plic_pending_irq;
-    CSRValue plic_served_irq;
+    CSRValue plic_pending_irq{};
+    CSRValue plic_served_irq{};
     Counter mtime = 1;
     Counter mtimecmp = 0;
 

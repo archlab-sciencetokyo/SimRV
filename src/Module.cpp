@@ -5,8 +5,13 @@
 #include "Module.hpp"
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 #include <print>
 #include <string_view>
+#include "Define.hpp"
+#include "XLen.hpp"
 
 namespace simrv::module {
 
@@ -49,14 +54,14 @@ constexpr auto make_j_type(Word imm, Word rd, Opcode opcode) -> Instruction {
 }  // namespace
 
 /* inst_decomp                                                                            */
-auto decomp_c0(Instruction ir) -> Instruction {
-    Word funct3 = (ir >> 13) & 0x7;
-    Word rs1 = ((ir >> 7) & 0x7) + 8;
-    Word rs2 = ((ir >> 2) & 0x7) + 8;
-    Word rd = ((ir >> 2) & 0x7) + 8;
-    Word uimm1 = (((ir >> 5) & 0x1) << 6) | (((ir >> 10) & 0x7) << 3) | (((ir >> 6) & 0x1) << 2);
-    Word uimm2 = (((ir >> 5) & 0x3) << 6) | (((ir >> 10) & 0x7) << 3);
-    Word nzuimm = (((ir >> 7) & 0xF) << 6) | (((ir >> 11) & 0x3) << 4) | (((ir >> 5) & 0x1) << 3) |
+static auto decomp_c0(Instruction ir) -> Instruction {
+    Word const funct3 = (ir >> 13) & 0x7;
+    Word const rs1 = ((ir >> 7) & 0x7) + 8;
+    Word const rs2 = ((ir >> 2) & 0x7) + 8;
+    Word const rd = ((ir >> 2) & 0x7) + 8;
+    Word const uimm1 = (((ir >> 5) & 0x1) << 6) | (((ir >> 10) & 0x7) << 3) | (((ir >> 6) & 0x1) << 2);
+    Word const uimm2 = (((ir >> 5) & 0x3) << 6) | (((ir >> 10) & 0x7) << 3);
+    Word const nzuimm = (((ir >> 7) & 0xF) << 6) | (((ir >> 11) & 0x3) << 4) | (((ir >> 5) & 0x1) << 3) |
                   (((ir >> 6) & 0x1) << 2);
 
     Word ret = ir;
@@ -95,27 +100,27 @@ auto decomp_c0(Instruction ir) -> Instruction {
     return ret;
 }
 
-auto decomp_c1(Instruction ir) -> Instruction {
-    Word funct1 = (ir >> 10) & 0x3;
-    Word funct2 = (((ir >> 12) & 0x1) << 2) | ((ir >> 5) & 0x3);
-    Word funct3 = (ir >> 13) & 0x7;
-    Word rs1 = ((ir >> 7) & 0x7) + 8;
-    Word rs2 = ((ir >> 2) & 0x7) + 8;
-    Word rd = ((ir >> 7) & 0x7) + 8;
-    Word nzimm = sign_extend<Word>((((ir >> 12) & 1) << 5) | ((ir >> 2) & 0x1F), 6);
-    Word shamt = nzimm & xlen_shift_mask();
-    Word uimm1 = (((ir >> 12) & 0x1) << 11) | (((ir >> 8) & 0x1) << 10) | (((ir >> 9) & 0x3) << 8) |
+static auto decomp_c1(Instruction ir) -> Instruction {
+    Word const funct1 = (ir >> 10) & 0x3;
+    Word const funct2 = (((ir >> 12) & 0x1) << 2) | ((ir >> 5) & 0x3);
+    Word const funct3 = (ir >> 13) & 0x7;
+    Word const rs1 = ((ir >> 7) & 0x7) + 8;
+    Word const rs2 = ((ir >> 2) & 0x7) + 8;
+    Word const rd = ((ir >> 7) & 0x7) + 8;
+    Word const nzimm = sign_extend<Word>((((ir >> 12) & 1) << 5) | ((ir >> 2) & 0x1F), 6);
+    Word const shamt = nzimm & xlen_shift_mask();
+    Word const uimm1 = (((ir >> 12) & 0x1) << 11) | (((ir >> 8) & 0x1) << 10) | (((ir >> 9) & 0x3) << 8) |
                  (((ir >> 6) & 0x1) << 7) | (((ir >> 7) & 0x1) << 6) | (((ir >> 2) & 0x1) << 5) |
                  (((ir >> 11) & 0x1) << 4) | (((ir >> 3) & 0x7) << 1);
-    Word uimm2 = (((ir >> 12) & 0x1) << 8) | (((ir >> 5) & 0x3) << 6) | (((ir >> 2) & 0x1) << 5) |
+    Word const uimm2 = (((ir >> 12) & 0x1) << 8) | (((ir >> 5) & 0x3) << 6) | (((ir >> 2) & 0x1) << 5) |
                  (((ir >> 10) & 0x3) << 3) | (((ir >> 3) & 0x3) << 1);
-    Word uimm3 = (((ir >> 12) & 1) << 5) | ((ir >> 2) & 0x1F);
-    Word uimm4 = (((ir >> 12) & 0x1) << 9) | (((ir >> 3) & 0x3) << 7) | (((ir >> 5) & 0x1) << 6) |
+    Word const uimm3 = (((ir >> 12) & 1) << 5) | ((ir >> 2) & 0x1F);
+    Word const uimm4 = (((ir >> 12) & 0x1) << 9) | (((ir >> 3) & 0x3) << 7) | (((ir >> 5) & 0x1) << 6) |
                  (((ir >> 2) & 0x1) << 5) | (((ir >> 6) & 0x1) << 4);
-    Word imm1 = sign_extend<Word>(uimm1, 12);
-    Word imm2 = sign_extend<Word>(uimm2, 9);
-    Word imm3 = sign_extend<Word>(uimm3, 6);
-    Word imm4 = sign_extend<Word>(uimm4, 9);
+    Word const imm1 = sign_extend<Word>(uimm1, 12);
+    Word const imm2 = sign_extend<Word>(uimm2, 9);
+    Word const imm3 = sign_extend<Word>(uimm3, 6);
+    Word const imm4 = sign_extend<Word>(uimm4, 9);
 
     Word ret = ir;
     switch (funct3) {
@@ -201,16 +206,16 @@ auto decomp_c1(Instruction ir) -> Instruction {
     return ret;
 }
 
-auto decomp_c2(Instruction ir) -> Instruction {
-    Word funct3 = (ir >> 13) & 0x7;
-    Word rd = (ir >> 7) & 0x1F;
-    Word rs2 = (ir >> 2) & 0x1F;
-    Word uimm1 = (((ir >> 2) & 0x7) << 6) | (((ir >> 12) & 0x1) << 5) | (((ir >> 5) & 0x3) << 3);
-    Word uimm2 = (((ir >> 2) & 0x3) << 6) | (((ir >> 12) & 0x1) << 5) | (((ir >> 4) & 0x7) << 2);
-    Word uimm3 = (((ir >> 7) & 0x7) << 6) | (((ir >> 10) & 0x7) << 3);
-    Word uimm4 = (((ir >> 7) & 0x3) << 6) | (((ir >> 9) & 0xF) << 2);
-    Word nzuimm = (((ir >> 12) & 1) << 5) | ((ir >> 2) & 0x1F);
-    Word shamt = nzuimm & xlen_shift_mask();
+static auto decomp_c2(Instruction ir) -> Instruction {
+    Word const funct3 = (ir >> 13) & 0x7;
+    Word const rd = (ir >> 7) & 0x1F;
+    Word const rs2 = (ir >> 2) & 0x1F;
+    Word const uimm1 = (((ir >> 2) & 0x7) << 6) | (((ir >> 12) & 0x1) << 5) | (((ir >> 5) & 0x3) << 3);
+    Word const uimm2 = (((ir >> 2) & 0x3) << 6) | (((ir >> 12) & 0x1) << 5) | (((ir >> 4) & 0x7) << 2);
+    Word const uimm3 = (((ir >> 7) & 0x7) << 6) | (((ir >> 10) & 0x7) << 3);
+    Word const uimm4 = (((ir >> 7) & 0x3) << 6) | (((ir >> 9) & 0xF) << 2);
+    Word const nzuimm = (((ir >> 12) & 1) << 5) | ((ir >> 2) & 0x1F);
+    Word const shamt = nzuimm & xlen_shift_mask();
 
     Word ret = ir;
     switch (funct3) {
@@ -281,7 +286,7 @@ auto decomp_c2(Instruction ir) -> Instruction {
     return ret;
 }
 
-constexpr auto decode_compressed_dispatch(CompressedInstruction ir) -> Instruction {
+static constexpr auto decode_compressed_dispatch(CompressedInstruction ir) -> Instruction {
     switch (compressed_opcode_of(ir)) {
         case Opcode::C0:
             return decomp_c0(ir);
@@ -295,7 +300,7 @@ constexpr auto decode_compressed_dispatch(CompressedInstruction ir) -> Instructi
 }
 
 auto decompressInstruction(Instruction ir) -> Instruction {
-    if ((ir & 0x3u) == 0x3u) {
+    if ((ir & 0x3U) == 0x3U) {
         return ir;
     }
     return decode_compressed_dispatch(static_cast<CompressedInstruction>(ir & 0xFFFF));
@@ -303,16 +308,17 @@ auto decompressInstruction(Instruction ir) -> Instruction {
 
 auto ALU_IM(Register in1, Register in2, Instruction funct3, Instruction funct7) -> Register {
     Word ret = 0;
-    Word shamt = in2 & 0x1f;
+    Word const shamt = in2 & 0x1f;
     const auto f3 = static_cast<Funct3>(funct3);
 
     if ((funct7 & 0x1) == 0) {
         switch (f3) {
             case Funct3::Add: {
-                if (funct7)
+                if (funct7 != 0u) {
                     ret = in1 - in2;
-                else
+                } else {
                     ret = in1 + in2;
+}
                 break;
             }
             case Funct3::Sll: {
@@ -320,11 +326,11 @@ auto ALU_IM(Register in1, Register in2, Instruction funct3, Instruction funct7) 
                 break;
             }
             case Funct3::Slt: {
-                ret = static_cast<SignedWord>(in1) < static_cast<SignedWord>(in2);
+                ret = static_cast<Word>(static_cast<SignedWord>(in1) < static_cast<SignedWord>(in2));
                 break;
             }
             case Funct3::Sltu: {
-                ret = in1 < in2;
+                ret = static_cast<Word>(in1 < in2);
                 break;
             }
             case Funct3::Xor: {
@@ -332,10 +338,11 @@ auto ALU_IM(Register in1, Register in2, Instruction funct3, Instruction funct7) 
                 break;
             }
             case Funct3::Srl: {
-                if (funct7)
+                if (funct7 != 0u) {
                     ret = static_cast<SignedWord>(in1) >> shamt;
-                else
+                } else {
                     ret = in1 >> shamt;
+}
                 break;
             }
             case Funct3::Or: {
@@ -351,11 +358,11 @@ auto ALU_IM(Register in1, Register in2, Instruction funct3, Instruction funct7) 
             }
         }
     } else {
-        Counter mul_SS = static_cast<int64_t>(static_cast<SignedWord>(in1)) *
+        Counter const mul_SS = static_cast<int64_t>(static_cast<SignedWord>(in1)) *
                          static_cast<int64_t>(static_cast<SignedWord>(in2));
-        Counter mul_SU =
+        Counter const mul_SU =
             static_cast<int64_t>(static_cast<SignedWord>(in1)) * static_cast<Counter>(in2);
-        Counter mul_UU = static_cast<Counter>(in1) * static_cast<Counter>(in2);
+        Counter const mul_UU = static_cast<Counter>(in1) * static_cast<Counter>(in2);
         switch (f3) {
             case Funct3::Mul: {
                 ret = mul_SS & 0xFFFFFFFF;
@@ -374,35 +381,39 @@ auto ALU_IM(Register in1, Register in2, Instruction funct3, Instruction funct7) 
                 break;
             }
             case Funct3::Div: {
-                if (in2 == 0xFFFFFFFF)
+                if (in2 == 0xFFFFFFFF) {
                     ret = in1;
-                else if (in2 == 0)
+                } else if (in2 == 0) {
                     ret = 0xFFFFFFFF;
-                else
+                } else {
                     ret = static_cast<SignedWord>(in1) / static_cast<SignedWord>(in2);
+}
                 break;
             }
             case Funct3::Divu: {
-                if (in2 == 0)
+                if (in2 == 0) {
                     ret = 0xFFFFFFFF;
-                else
+                } else {
                     ret = in1 / in2;
+}
                 break;
             }
             case Funct3::Rem: {
-                if (in2 == 0xFFFFFFFF)
+                if (in2 == 0xFFFFFFFF) {
                     ret = 0;
-                else if (in2 == 0)
+                } else if (in2 == 0) {
                     ret = in1;
-                else
+                } else {
                     ret = static_cast<SignedWord>(in1) % static_cast<SignedWord>(in2);
+}
                 break;
             }
             case Funct3::Remu: {
-                if (in2 == 0)
+                if (in2 == 0) {
                     ret = in1;
-                else
+                } else {
                     ret = in1 % in2;
+}
                 break;
             }
             default: {
@@ -417,27 +428,27 @@ auto ALU_B(Register in1, Register in2, Instruction funct3) -> Instruction {
     Word ret = 0;
     switch (static_cast<Funct3>(funct3)) {
         case Funct3::Beq: {
-            ret = in1 == in2;
+            ret = static_cast<Word>(in1 == in2);
             break;
         }
         case Funct3::Bne: {
-            ret = in1 != in2;
+            ret = static_cast<Word>(in1 != in2);
             break;
         }
         case Funct3::Blt: {
-            ret = static_cast<SignedWord>(in1) < static_cast<SignedWord>(in2);
+            ret = static_cast<Word>(static_cast<SignedWord>(in1) < static_cast<SignedWord>(in2));
             break;
         }
         case Funct3::Bge: {
-            ret = static_cast<SignedWord>(in1) >= static_cast<SignedWord>(in2);
+            ret = static_cast<Word>(static_cast<SignedWord>(in1) >= static_cast<SignedWord>(in2));
             break;
         }
         case Funct3::Bltu: {
-            ret = in1 < in2;
+            ret = static_cast<Word>(in1 < in2);
             break;
         }
         case Funct3::Bgeu: {
-            ret = in1 >= in2;
+            ret = static_cast<Word>(in1 >= in2);
             break;
         }
         default:
@@ -522,32 +533,6 @@ auto ALU_C(CSRValue rcsr, Register rrs1, Instruction imm, Instruction funct3) ->
     }
     return ret;
 }
-
-const std::array<std::string_view, kOperationIdCount> OPERATION_NAME = {
-    /* RV32I */
-    "LUI", "AUIPC", "JAL", "JALR", "BEQ", "BNE", "BLT", "BGE", "BLTU", "BGEU", "LB", "LH", "LW",
-    "LBU", "LHU", "SB", "SH", "SW", "ADDI", "SLTI", "SLTIU", "XORI", "ORI", "ANDI", "SLLI", "SRLI",
-    "SRAI", "ADD", "SUB", "SLL", "SLT", "SLTU", "XOR", "SRL", "SRA", "OR", "AND", "FENCE",
-    "FENCE_I", "ECALL", "EBREAK", "CSRRW", "CSRRS", "CSRRC", "CSRRWI", "CSRRSI", "CSRRCI",
-    /* Privileged */
-    "URET", "SRET", "MRET", "WFI", "SFENCE_VMA",
-    /* RV32M */
-    "MUL", "MULH", "MULHSU", "MULHU", "DIV", "DIVU", "REM", "REMU",
-    /* RV32A */
-    "LR_W", "SC_W", "AMOSWAP_W", "AMOADD_W", "AMOXOR_W", "AMOAND_W", "AMOOR_W", "AMOMIN_W",
-    "AMOMAX_W", "AMOMINU_W", "AMOMAXU_W",
-    /* RV32F */
-    "FLW", "FSW", "FMADD_S", "FMSUB_S", "FNMADD_S", "FNMSUB_S", "FADD_S", "FSUB_S", "FMUL_S",
-    "FDIV_S", "FSQRT_S", "FSGNJ_S", "FSGNJN_S", "FSGNJX_S", "FMIN_S", "FMAX_S", "FCVT_W_S",
-    "FCVT_WU_S", "FMV_X_W", "FEQ_S", "FLT_S", "FLE_S", "FCLASS_S", "FCVT_S_W", "FCVT_S_WU",
-    "FMV_W_X",
-    /* RV32D */
-    "FLD", "FSD", "FMADD_D", "FMSUB_D", "FNMSUB_D", "FNMADD_D", "FADD_D", "FSUB_D", "FMUL_D",
-    "FDIV_D", "FSQRT_D", "FSGNJ_D", "FSGNJN_D", "FSGNJX_D", "FMIN_D", "FMAX_D", "FCVT_S_D",
-    "FCVT_D_S", "FEQ_D", "FLT_D", "FLE_D", "FCLASS_D", "FCVT_W_D", "FCVT_WU_D", "FCVT_D_W",
-    "FCVT_D_WU",
-    /* Others */
-    "UNKNOWN"};
 
 namespace {
 template <typename Table>
@@ -636,17 +621,17 @@ auto decoder(Instruction ir) -> OperationId {
             return lookup_operation(kStoreOps, static_cast<std::size_t>(funct3));
         case Opcode::OpImm:
             return (funct3 == Funct3::Srl)
-                       ? (funct7 ? SRAI : SRLI)
+                       ? ((funct7 != 0u) ? SRAI : SRLI)
                        : lookup_operation(kOpImmOps, static_cast<std::size_t>(funct3));
         case Opcode::Op:
-            if (funct7 & 0x1) {
+            if ((funct7 & 0x1) != 0u) {
                 return lookup_operation(kOpMulDivOps, static_cast<std::size_t>(funct3));
             }
             if (funct3 == Funct3::Add) {
-                return funct7 ? SUB : ADD;
+                return (funct7 != 0u) ? SUB : ADD;
             }
             if (funct3 == Funct3::Srl) {
-                return funct7 ? SRA : SRL;
+                return (funct7 != 0u) ? SRA : SRL;
             }
             return lookup_operation(kOpBaseOps, static_cast<std::size_t>(funct3));
         case Opcode::MiscMem:

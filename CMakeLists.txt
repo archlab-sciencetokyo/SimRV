@@ -61,6 +61,10 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(CMAKE_CXX_CLANG_TIDY clang-tidy)
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 if(NOT "cxx_std_23" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
   message(FATAL_ERROR "${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} does not support required C++23 features")
 endif()
@@ -195,30 +199,10 @@ add_custom_target(phase2-gate
 
 # Phase 1 gates (for reference)
 add_custom_target(phase1-gate
-  COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target regress
+  COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR} --output-on-failure -R "^regress$"
   DEPENDS SimRV
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
   COMMENT "Running Phase 1 validation gate"
   VERBATIM
   USES_TERMINAL
 )
-
-find_program(SIMRV_CLANG_TIDY_BIN
-  NAMES clang-tidy clang-tidy-22 clang-tidy-21 clang-tidy-20
-)
-
-if(SIMRV_CLANG_TIDY_BIN)
-  add_custom_target(clang-tidy
-    COMMAND ${CMAKE_COMMAND} -E env CLANG_TIDY_BIN=${SIMRV_CLANG_TIDY_BIN} ${CMAKE_SOURCE_DIR}/scripts/run-clang-tidy.sh ${CMAKE_BINARY_DIR}
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMENT "Running clang-tidy static analysis"
-    VERBATIM
-    USES_TERMINAL
-  )
-else()
-  add_custom_target(clang-tidy
-    COMMAND ${CMAKE_COMMAND} -E echo "clang-tidy not found; skipping static analysis target"
-    COMMENT "Skipping clang-tidy (tool not found)"
-    VERBATIM
-  )
-endif()

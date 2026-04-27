@@ -2,7 +2,11 @@
  * @file StageEX.cpp
  * @brief EX stage implementation for Machine.
  */
+#include "Cpu.hpp"
+#include "Define.hpp"
+#include "ExecuteUnit.hpp"
 #include "Machine.hpp"
+#include "XLen.hpp"
 
 void CPU::run_execute_stage(Machine& machine) { execute_core(machine); }
 
@@ -24,13 +28,13 @@ void CPU::execute_core(Machine& machine) {
         }
         case Opcode::Jal: {
             pipeline_context.tkn = 1;
-            pipeline_context.wb_data = pc + (pipeline_context.cinsn ? 2 : 4);
+            pipeline_context.wb_data = pc + ((pipeline_context.cinsn != 0u) ? 2 : 4);
             pipeline_context.jmp_pc = pc + pipeline_context.imm;
             break;
         }
         case Opcode::Jalr: {
             pipeline_context.tkn = 1;
-            pipeline_context.wb_data = pc + (pipeline_context.cinsn ? 2 : 4);
+            pipeline_context.wb_data = pc + ((pipeline_context.cinsn != 0u) ? 2 : 4);
             pipeline_context.jmp_pc = pipeline_context.rrs1 + pipeline_context.imm;
             break;
         }
@@ -77,7 +81,7 @@ void CPU::execute_core(Machine& machine) {
             pipeline_context.tkn = 0;
             pipeline_context.mem_addr = pipeline_context.rrs1;
             if (static_cast<Funct5Amo>(pipeline_context.funct5) == Funct5Amo::Sc) {
-                pipeline_context.wb_data = !((pipeline_context.rrs1 == load_res) && reserved);
+                pipeline_context.wb_data = static_cast<Register>((pipeline_context.rrs1 != load_res) || !(reserved != 0u));
             }
             break;
         }
@@ -132,7 +136,7 @@ void CPU::execute_core(Machine& machine) {
                 static_cast<Opcode>(pipeline_context.opcode), fmt, pipeline_context.rs1,
                 pipeline_context.rs2, rs3, pipeline_context.funct3, freg.data(), fcsr);
             pipeline_context.fp_wb_data = fp.fp_wb_data;
-            pipeline_context.fp_wb_enable = fp.fp_wb_enable;
+            pipeline_context.fp_wb_enable = static_cast<Word>(fp.fp_wb_enable);
             break;
         }
         case Opcode::OpFp: {
@@ -142,9 +146,9 @@ void CPU::execute_core(Machine& machine) {
                                   pipeline_context.rs2, pipeline_context.rs1, pipeline_context.rs2,
                                   pipeline_context.rrs1, freg.data(), fcsr);
             pipeline_context.wb_data = fp.int_wb_data;
-            pipeline_context.int_wb_from_fp = fp.int_wb_enable;
+            pipeline_context.int_wb_from_fp = static_cast<Word>(fp.int_wb_enable);
             pipeline_context.fp_wb_data = fp.fp_wb_data;
-            pipeline_context.fp_wb_enable = fp.fp_wb_enable;
+            pipeline_context.fp_wb_enable = static_cast<Word>(fp.fp_wb_enable);
             break;
         }
         default: {

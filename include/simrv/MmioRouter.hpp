@@ -1,19 +1,35 @@
 /**
  * @file MmioRouter.hpp
- * @brief SimRV MMIO routing helpers.
+ * @brief MMIO request dispatch router.
  */
 #pragma once
 
-#include "Define.hpp"
-
+#include "XLen.hpp"
 class Machine;
 class MmioDevice;
 
+/**
+ * @class MmioRouter
+ * @brief Dispatches MMIO reads/writes to concrete device handlers.
+ */
 class MmioRouter {
    public:
+    /// Construct router bound to simulator machine state.
     explicit MmioRouter(Machine& machine);
 
+    /**
+     * @brief Route MMIO read request.
+     * @param p_addr Physical MMIO address.
+     * @param rdata Output value when read is handled.
+     * @return true if handled by a routed device.
+     */
     bool read(Address p_addr, Word& rdata);
+    /**
+     * @brief Route MMIO write request.
+     * @param p_addr Physical MMIO address.
+     * @param wdata Value to write.
+     * @return true if handled by a routed device.
+     */
     bool write(Address p_addr, Word wdata);
 
    private:

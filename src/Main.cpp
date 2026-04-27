@@ -4,6 +4,8 @@
  *
  * SimCore/RISC-V functional simulator (ArchLab, Science Tokyo (former TokyoTech)).
  */
+#include <termios.h>
+#include <unistd.h>
 #include <cctype>
 #include <charconv>
 #include <chrono>
@@ -18,14 +20,18 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <utility>
 
 #include "BuildInfo.hpp"
+#include "Define.hpp"
 #include "Machine.hpp"
+#include "XLen.hpp"
 
-Machine sim_machine; /* simulator machine instance */
+static Machine sim_machine; /* simulator machine instance */
 
-auto parse_scaled_u64(std::string_view num, uint64_t& out) -> bool;
-auto parse_u32_base0(std::string_view num, uint32_t& out) -> bool;
+static auto parse_scaled_u64(std::string_view num, uint64_t& out) -> bool;
+static auto parse_u32_base0(std::string_view num, uint32_t& out) -> bool;
 
 namespace {
 
@@ -40,12 +46,12 @@ struct RuntimeOptions {
     std::string fn_iocon = "img/iocon.bin";
 
     Address start_pc = simrv::boot::kStartPc;
-    Counter fincnt = ~0ull;
+    Counter fincnt = ~0ULL;
     Counter memimg = 0;
     Counter strace = 0;
-    Counter trace_begin = ~0ull;
-    Counter trace_end = ~0ull;
-    Counter enabletimer = 70000000ul;
+    Counter trace_begin = ~0ULL;
+    Counter trace_end = ~0ULL;
+    Counter enabletimer = 70000000UL;
     Address isatest_tohost = 0x80001000;
     MisaProfile misa_profile = MisaProfile::GC;
     bool misa_override = false;
@@ -201,7 +207,7 @@ auto effective_misa_profile(const RuntimeOptions& options) -> MisaProfile {
 
 auto shell_quote(std::string_view arg) -> std::string {
     std::string quoted = "'";
-    for (char c : arg) {
+    for (char const c : arg) {
         if (c == '\'') {
             quoted += "'\\''";
         } else {
@@ -301,7 +307,7 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
     ParseResult result{};
 
     for (std::size_t i = 1; i < args.size(); ++i) {
-        std::string_view arg = args[i];
+        std::string_view const arg = args[i];
         if (arg == "-h" || arg == "--help") {
             result.action = CliAction::ShowHelp;
             return result;
@@ -543,7 +549,7 @@ void set_start_time(Machine& machine) { machine.s_start_time = std::chrono::stea
 
 }  // namespace
 
-[[noreturn]] void usage(const char* program_name, int exit_code = 0) {
+[[noreturn]] static void usage(const char* program_name, int exit_code = 0) {
     std::cout << "Usage: " << program_name << " [options]\n\n"
               << "Required:\n"
               << "  -m <FILE>        Memory image file\n"
@@ -590,17 +596,17 @@ auto parse_scaled_u64(std::string_view num, uint64_t& out) -> bool {
         switch (num.back()) {
             case 'k':
             case 'K':
-                multiplier = 1000ull;
+                multiplier = 1000ULL;
                 num.remove_suffix(1);
                 break;
             case 'm':
             case 'M':
-                multiplier = 1000000ull;
+                multiplier = 1000000ULL;
                 num.remove_suffix(1);
                 break;
             case 'g':
             case 'G':
-                multiplier = 1000000000ull;
+                multiplier = 1000000000ULL;
                 num.remove_suffix(1);
                 break;
             default:
@@ -649,9 +655,10 @@ auto parse_u32_base0(std::string_view num, uint32_t& out) -> bool {
 }
 
 void set_options(Machine* m, int argc, char* const* argv) {
-    if (argc == 1) usage(argv[0], 1);
+    if (argc == 1) { usage(argv[0], 1);
+}
 
-    std::span<char* const> args(argv, static_cast<std::size_t>(argc));
+    std::span<char* const> const args(argv, static_cast<std::size_t>(argc));
     auto parsed = parse_command_line(args);
     if (!parsed) {
         option_error(parsed.error());

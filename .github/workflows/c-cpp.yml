@@ -47,10 +47,6 @@ jobs:
     - name: Build
       run: cmake --build --preset ninja-clang-release
 
-    - name: Run clang-tidy
-      run: >-
-        cmake --build --preset ninja-clang-release --target clang-tidy
-
     - name: Run CTest gate suite
       env:
         RISCV_TESTS_DIR: ${{ runner.temp }}/riscv-tests

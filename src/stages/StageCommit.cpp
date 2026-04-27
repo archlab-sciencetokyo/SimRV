@@ -2,13 +2,17 @@
  * @file StageCommit.cpp
  * @brief Commit stage implementation for Machine.
  */
+#include "Cpu.hpp"
+#include "Define.hpp"
 #include "Machine.hpp"
+#include "XLen.hpp"
 
 void CPU::run_commit_stage(Machine& machine) { commit_control_flow_and_traps(machine); }
 
 /* commit_control_flow_and_traps(Complete) stage                                                                    */
 void CPU::commit_control_flow_and_traps(Machine& machine) {
-    if (pipeline_context.cinsn) machine.e_ccount++; /** for evaluation **/
+    if (pipeline_context.cinsn != 0u) { machine.e_ccount++; /** for evaluation **/
+}
 
     const auto opcode = static_cast<Opcode>(pipeline_context.opcode);
     const auto funct3 = static_cast<Funct3>(pipeline_context.funct3);
@@ -39,19 +43,21 @@ void CPU::commit_control_flow_and_traps(Machine& machine) {
         }
     }
 
-    Word pending_interrupts = mip & mie;
-    Word enable_interrupts = 0, mask = 0, irq_num = 32;
-    if (pending_interrupts) {
+    Word const pending_interrupts = mip & mie;
+    Word enable_interrupts = 0;
+    Word mask = 0;
+    Word irq_num = 32;
+    if (pending_interrupts != 0u) {
         switch (priv) {
             case kPrivMachine: {
-                if (mstatus & enum_mask(MstatusBit::Mie)) {
+                if ((mstatus & enum_mask(MstatusBit::Mie)) != 0u) {
                     enable_interrupts = ~mideleg;
                 }
                 break;
             }
             case kPrivSupervisor: {
                 enable_interrupts = ~mideleg;
-                if (mstatus & enum_mask(MstatusBit::Sie)) {
+                if ((mstatus & enum_mask(MstatusBit::Sie)) != 0u) {
                     enable_interrupts |= mideleg;
                 }
                 break;
@@ -65,19 +71,19 @@ void CPU::commit_control_flow_and_traps(Machine& machine) {
         }
         mask = pending_interrupts & enable_interrupts;
         for (int i = 0; i < 32; i++) {
-            if ((1 << i) & mask) {
+            if (((1 << i) & mask) != 0u) {
                 irq_num = i;
                 break;
             }
         }
     }
-    if (pending_exception != ~0u) {
+    if (pending_exception != ~0U) {
         raise_exception(pending_exception, pending_tval);
     } else {
-        if (pipeline_context.tkn) {
+        if (pipeline_context.tkn != 0u) {
             pc = pipeline_context.jmp_pc;
         } else {
-            pc = pc + (pipeline_context.cinsn ? 2 : 4);
+            pc = pc + ((pipeline_context.cinsn != 0u) ? 2 : 4);
         }
         if (mask != 0) {
             raise_exception(kInterruptCauseBit | irq_num, pending_tval);

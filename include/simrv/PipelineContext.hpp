@@ -1,11 +1,18 @@
 /**
  * @file PipelineContext.hpp
- * @brief SimRV declarations.
+ * @brief Shared per-cycle pipeline data bundle.
  */
 #pragma once
 
 #include "Define.hpp"
 
+/**
+ * @struct PipelineContext
+ * @brief Carries decoded instruction state and stage intermediates.
+ *
+ * Fields are grouped by pipeline stage progression and reused during a
+ * single machine cycle.
+ */
 struct PipelineContext {
     // IF stage transient values
     Address padr1 = 0;

@@ -2,7 +2,10 @@
  * @file StageID.cpp
  * @brief ID stage implementation for Machine.
  */
+#include "Cpu.hpp"
+#include "Define.hpp"
 #include "Machine.hpp"
+#include "XLen.hpp"
 
 void CPU::run_decode_stage(Machine& machine) {
     decode_fields(machine);
@@ -36,7 +39,7 @@ void CPU::fetch_operands(Machine& /*machine*/) {
         return;
     }
 
-    CSRAddress w_csr_addr =
+    CSRAddress const w_csr_addr =
         (funct3 != Funct3::Priv) ? static_cast<CSRAddress>(funct12)
         : (funct12 == static_cast<Instruction>(Funct12Priv::Ecall)) ? csr_addr(Csr::Mtvec)
         : (funct12 == static_cast<Instruction>(Funct12Priv::Uret))  ? csr_addr(Csr::Uepc)

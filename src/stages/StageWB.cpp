@@ -2,13 +2,17 @@
  * @file StageWB.cpp
  * @brief WB stage implementation for Machine.
  */
+#include "Cpu.hpp"
+#include "Define.hpp"
 #include "Machine.hpp"
+#include "XLen.hpp"
 
 void CPU::run_writeback_stage(Machine& machine) { writeback_registers(machine); }
 
 /* writeback_registers(Write Back) stage                                                                  */
 void CPU::writeback_registers(Machine& machine) {
-    if (pending_exception != ~0u) return;
+    if (pending_exception != ~0U) { return;
+}
 
     machine.e_icount++;
 
@@ -29,7 +33,7 @@ void CPU::writeback_registers(Machine& machine) {
         if ((opcode == Opcode::Amo && funct5 == Funct5Amo::Sc) || (opcode == Opcode::Lui) ||
             (opcode == Opcode::Auipc) || (opcode == Opcode::Jal) || (opcode == Opcode::Jalr) ||
             (opcode == Opcode::Op) || (opcode == Opcode::OpImm) ||
-            (opcode == Opcode::OpFp && pipeline_context.int_wb_from_fp)) {
+            (opcode == Opcode::OpFp && (pipeline_context.int_wb_from_fp != 0u))) {
             wire_wb_r_data = pipeline_context.wb_data;
             wire_wb_r_enable = 1;
         }
@@ -41,11 +45,11 @@ void CPU::writeback_registers(Machine& machine) {
 
     if ((opcode == Opcode::OpFp || opcode == Opcode::MAdd || opcode == Opcode::MSub ||
          opcode == Opcode::NMAdd || opcode == Opcode::NMSub) &&
-        pipeline_context.fp_wb_enable) {
+        (pipeline_context.fp_wb_enable != 0u)) {
         freg[pipeline_context.rd] = pipeline_context.fp_wb_data;
     }
 
-    if (wire_wb_r_enable && pipeline_context.rd != 0) {
+    if ((wire_wb_r_enable != 0u) && pipeline_context.rd != 0) {
         reg[pipeline_context.rd] = wire_wb_r_data; /* regifile write port 1 */
     }
 }

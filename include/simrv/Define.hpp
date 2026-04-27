@@ -1,6 +1,6 @@
 /**
  * @file Define.hpp
- * @brief SimRV declarations.
+ * @brief Core ISA constants, enums, and shared simulator type definitions.
  */
 #pragma once
 
@@ -59,6 +59,14 @@ inline constexpr uint32_t kDiskBufferSize = (512u * 512u);
 inline constexpr uint32_t kDiskSize = (128u * 1024u * 1024u);
 inline constexpr uint32_t kDiskMaxQueueNum = 4;
 inline constexpr uint32_t kDiskIrq = 2;
+
+inline constexpr Word kDiskMagicValue = 0x74726976;
+inline constexpr Word kDiskVersion = 2;
+inline constexpr Word kDiskDeviceId = 2;
+inline constexpr Word kDiskVendorId = 0xffff;
+inline constexpr Word kDiskDeviceFeatures = 1;
+inline constexpr Word kDiskConfigGeneration = 0;
+inline constexpr Word kDiskQueueNumMax = 4;
 }  // namespace simrv::virtio
 enum class VringDescFlag : uint16_t {
     Next = 1,

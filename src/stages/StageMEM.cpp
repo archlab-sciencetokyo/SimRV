@@ -2,7 +2,11 @@
  * @file StageMEM.cpp
  * @brief MEM stage implementation for Machine.
  */
+#include "Cpu.hpp"
+#include "Define.hpp"
+#include <cstdint>
 #include "Machine.hpp"
+#include "XLen.hpp"
 
 void CPU::run_memory_stage(Machine& machine) {
     memory_load_phase(machine);
@@ -12,7 +16,8 @@ void CPU::run_memory_stage(Machine& machine) {
 
 /* memory_load_phase(Load Data) stage                                                                   */
 void CPU::memory_load_phase(Machine& machine) {
-    if (pending_exception != ~0u) return;
+    if (pending_exception != ~0U) { return;
+}
 
     const auto opcode = static_cast<Opcode>(pipeline_context.opcode);
     const auto funct5 = static_cast<Funct5Amo>(pipeline_context.funct5);
@@ -27,7 +32,7 @@ void CPU::memory_load_phase(Machine& machine) {
         if (funct3 == Funct3::Flw) {
             const Word lo = machine.memory_.target_read(*this, pipeline_context.mem_addr,
                                                         static_cast<Instruction>(Funct3::Lw));
-            pipeline_context.fp_mem_rdata = 0xffffffff00000000ull | static_cast<uint64_t>(lo);
+            pipeline_context.fp_mem_rdata = 0xffffffff00000000ULL | static_cast<uint64_t>(lo);
         } else if (funct3 == Funct3::Fld) {
             const Word lo = machine.memory_.target_read(*this, pipeline_context.mem_addr,
                                                         static_cast<Instruction>(Funct3::Lw));
@@ -55,26 +60,27 @@ void CPU::memory_prepare_store_data(Machine& /*machine*/) {
 
     if (opcode == Opcode::StoreFp) {
         pipeline_context.mem_wdata =
-            static_cast<Register>(pipeline_context.fp_mem_wdata & 0xffffffffu);
+            static_cast<Register>(pipeline_context.fp_mem_wdata & 0xffffffffU);
     }
 }
 
 /* memory_store_phase(Store Data) stage                                                                  */
 void CPU::memory_store_phase(Machine& machine) {
-    if (pending_exception != ~0u) return;
+    if (pending_exception != ~0U) { return;
+}
 
     const auto opcode = static_cast<Opcode>(pipeline_context.opcode);
     const auto funct5 = static_cast<Funct5Amo>(pipeline_context.funct5);
 
     if ((opcode == Opcode::Store) ||
         (opcode == Opcode::Amo &&
-         (funct5 == Funct5Amo::Sc && !pipeline_context.wb_data && reserved)) ||
+         (funct5 == Funct5Amo::Sc && (pipeline_context.wb_data == 0u) && (reserved != 0u))) ||
         (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr && funct5 != Funct5Amo::Sc)) {
         machine.memory_.target_write(*this, pipeline_context.mem_addr, pipeline_context.mem_wdata,
                                      pipeline_context.funct3);
     }
-    if (opcode == Opcode::Amo && (funct5 == Funct5Amo::Sc && !pipeline_context.wb_data &&
-                                  reserved && pending_exception == ~0u)) {
+    if (opcode == Opcode::Amo && (funct5 == Funct5Amo::Sc && (pipeline_context.wb_data == 0u) &&
+                                  (reserved != 0u) && pending_exception == ~0U)) {
         reserved = 0;
     }
 
@@ -83,16 +89,16 @@ void CPU::memory_store_phase(Machine& machine) {
         if (funct3 == Funct3::Fsw) {
             machine.memory_.target_write(
                 *this, pipeline_context.mem_addr,
-                static_cast<Word>(pipeline_context.fp_mem_wdata & 0xffffffffu),
+                static_cast<Word>(pipeline_context.fp_mem_wdata & 0xffffffffU),
                 static_cast<Instruction>(Funct3::Sw));
         } else if (funct3 == Funct3::Fsd) {
             machine.memory_.target_write(
                 *this, pipeline_context.mem_addr,
-                static_cast<Word>(pipeline_context.fp_mem_wdata & 0xffffffffu),
+                static_cast<Word>(pipeline_context.fp_mem_wdata & 0xffffffffU),
                 static_cast<Instruction>(Funct3::Sw));
             machine.memory_.target_write(
                 *this, pipeline_context.mem_addr + 4,
-                static_cast<Word>((pipeline_context.fp_mem_wdata >> 32) & 0xffffffffu),
+                static_cast<Word>((pipeline_context.fp_mem_wdata >> 32) & 0xffffffffU),
                 static_cast<Instruction>(Funct3::Sw));
         }
     }

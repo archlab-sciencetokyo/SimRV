@@ -10,6 +10,10 @@
 class CPU;
 class Machine;
 
+/**
+ * @class TlbUnit
+ * @brief Wrapper for TLB maintenance operations.
+ */
 class TlbUnit {
    public:
     explicit TlbUnit(CPU& cpu) : cpu_(cpu) {}
@@ -20,6 +24,10 @@ class TlbUnit {
     CPU& cpu_;
 };
 
+/**
+ * @class InterruptController
+ * @brief Encapsulates interrupt pending/enable updates for CPU state.
+ */
 class InterruptController {
    public:
     explicit InterruptController(CPU& cpu) : cpu_(cpu) {}
@@ -31,6 +39,10 @@ class InterruptController {
     CPU& cpu_;
 };
 
+/**
+ * @class PlicMmio
+ * @brief Platform-level interrupt controller MMIO front-end.
+ */
 class PlicMmio : public MmioDevice {
    public:
     explicit PlicMmio(CPU& cpu) : cpu_(cpu) {}
@@ -56,6 +68,10 @@ class PlicMmio : public MmioDevice {
     CPU& cpu_;
 };
 
+/**
+ * @class ClintMmio
+ * @brief CLINT timer/software-interrupt MMIO front-end.
+ */
 class ClintMmio : public MmioDevice {
    public:
     explicit ClintMmio(CPU& cpu) : cpu_(cpu) {}
@@ -74,13 +90,17 @@ class ClintMmio : public MmioDevice {
     }
     constexpr Address offset(Address addr) const { return addr - kBaseAddress; }
 
-    Word mmio_read(Address offset);
+    Word mmio_read(Address offset) const;
     void mmio_write(Address offset, Word wdata);
 
    private:
     CPU& cpu_;
 };
 
+/**
+ * @class TrapController
+ * @brief Handles trap entry/return sequencing and cause propagation.
+ */
 class TrapController {
    public:
     explicit TrapController(CPU& cpu) : cpu_(cpu) {}

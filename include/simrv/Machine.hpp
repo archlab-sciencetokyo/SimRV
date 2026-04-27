@@ -1,9 +1,10 @@
 /**
  * @file Machine.hpp
- * @brief SimRV declarations.
+ * @brief Top-level simulator orchestration interface.
  */
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -19,11 +20,30 @@
 #include "MemorySubsystem.hpp"
 #include "MmioRouter.hpp"
 
+// NOLINTBEGIN(misc-non-private-member-variables-in-classes)
+/**
+ * @class Machine
+ * @brief Owns and orchestrates CPU, memory subsystem, and MMIO devices.
+ *
+ * Machine is the simulator root object and drives the pipeline-cycle loop,
+ * image loading, device wiring, tracing, and run termination checks.
+ */
 class Machine {
    public:
+    /// Construct the simulator root object.
     Machine();
+    /// Destroy simulator resources.
     ~Machine();
-    /// Initialize machine state and load runtime images/configuration.
+    Machine(const Machine&) = delete;
+    auto operator=(const Machine&) -> Machine& = delete;
+    Machine(Machine&&) = delete;
+    auto operator=(Machine&&) -> Machine& = delete;
+    /**
+     * @brief Initialize machine state and load runtime images/configuration.
+     * @param argc CLI argument count.
+     * @param argv CLI argument vector.
+     * @return 0 on success, non-zero on configuration error.
+     */
     int initialize(int argc, char* const* argv);
     /// Execute the main simulation loop until termination criteria are met.
     void run();
@@ -38,7 +58,7 @@ class Machine {
     Counter e_icount = 0;             // the number of executed instructions
     Counter e_uc_cnt = 0;             // the number of executed instructions on I/O controller
     Counter e_ccount = 0;             // the number of executed compressed instructions
-    int e_instmix[OperationIdCount];  // the array for measuring instruction mix
+    std::array<int, OperationIdCount> e_instmix{};  // the array for measuring instruction mix
 
     bool s_appmode = false;                 // flag to identify whether the application mode or not
     bool s_rtosmode = false;                // flag to identify whether the rtos mode or not
@@ -76,7 +96,7 @@ class Machine {
     std::unique_ptr<Disk> disk;
     std::unique_ptr<Console> console;
 
-    Byte* mmem;  // main memory
+    Byte* mmem{};  // main memory
     MmioRouter mmio_router_;
 
    private:
@@ -91,3 +111,4 @@ class Machine {
     void finalize_cycle();
     bool is_running_ = true;  // Main-loop run flag.
 };
+// NOLINTEND(misc-non-private-member-variables-in-classes)

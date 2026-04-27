@@ -5,15 +5,25 @@
 
 #include "IoController.hpp"
 
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <ios>
 #include <print>
+#include <string>
+#include <string_view>
 
 #include "DecodeUnit.hpp"
+#include "Define.hpp"
 #include "ExecuteUnit.hpp"
 #include "Machine.hpp"
 #include "MemorySubsystem.hpp"
+#include "MemoryUtil.hpp"
+#include "PipelineContext.hpp"
+#include "XLen.hpp"
 
 namespace {
 
@@ -51,8 +61,8 @@ void IoController::init(std::string_view image_path) {
 }
 
 auto IoController::exec() -> bool {
-    DecodeUnit decode_unit;
-    ExecuteUnit execute_unit;
+    DecodeUnit const decode_unit;
+    ExecuteUnit const execute_unit;
     bool ret = true;
     PipelineContext ctx;
 
@@ -63,7 +73,7 @@ auto IoController::exec() -> bool {
         std::println(stderr,
                      "[IoController] ERROR: Compressed instruction (RV32C) not supported at "
                      "PC=0x{:08x} (instruction=0x{:04x})",
-                     pc, static_cast<uint16_t>(ctx.ir & 0xFFFFu));
+                     pc, static_cast<uint16_t>(ctx.ir & 0xFFFFU));
         exit(1);
     }
 
@@ -197,48 +207,48 @@ auto IoController::exec() -> bool {
             ctx.mem_rdata = Qsel;
         } else if ((ctx.mem_addr >> 12) == 0x4000a) {
             // Console queue read
-            const int idx = static_cast<int>(ctx.mem_addr / 0x24u);
-            const Address offset = ctx.mem_addr % 0x24u;
-            if (offset == 0x0u) {
+            const int idx = static_cast<int>(ctx.mem_addr / 0x24U);
+            const Address offset = ctx.mem_addr % 0x24U;
+            if (offset == 0x0U) {
                 ctx.mem_rdata = cons_queue[idx].Ready;
-            } else if (offset == 0x4u) {
+            } else if (offset == 0x4U) {
                 ctx.mem_rdata = cons_queue[idx].Notify;
-            } else if (offset == 0x8u) {
+            } else if (offset == 0x8U) {
                 ctx.mem_rdata = cons_queue[idx].DescLow;
-            } else if (offset == 0xCu) {
+            } else if (offset == 0xCU) {
                 ctx.mem_rdata = cons_queue[idx].DescHigh;
-            } else if (offset == 0x10u) {
+            } else if (offset == 0x10U) {
                 ctx.mem_rdata = cons_queue[idx].AvailLow;
-            } else if (offset == 0x14u) {
+            } else if (offset == 0x14U) {
                 ctx.mem_rdata = cons_queue[idx].AvailHigh;
-            } else if (offset == 0x18u) {
+            } else if (offset == 0x18U) {
                 ctx.mem_rdata = cons_queue[idx].UsedLow;
-            } else if (offset == 0x1Cu) {
+            } else if (offset == 0x1CU) {
                 ctx.mem_rdata = cons_queue[idx].UsedHigh;
-            } else if (offset == 0x20u) {
+            } else if (offset == 0x20U) {
                 ctx.mem_rdata = cons_queue[idx].last_avail_idx;
             }
         } else if ((ctx.mem_addr >> 12) == 0x4000b) {
             // Disk queue read
-            const int idx = static_cast<int>(ctx.mem_addr / 0x24u);
-            const Address offset = ctx.mem_addr % 0x24u;
-            if (offset == 0x0u) {
+            const int idx = static_cast<int>(ctx.mem_addr / 0x24U);
+            const Address offset = ctx.mem_addr % 0x24U;
+            if (offset == 0x0U) {
                 ctx.mem_rdata = disk_queue[idx].Ready;
-            } else if (offset == 0x4u) {
+            } else if (offset == 0x4U) {
                 ctx.mem_rdata = disk_queue[idx].Notify;
-            } else if (offset == 0x8u) {
+            } else if (offset == 0x8U) {
                 ctx.mem_rdata = disk_queue[idx].DescLow;
-            } else if (offset == 0xCu) {
+            } else if (offset == 0xCU) {
                 ctx.mem_rdata = disk_queue[idx].DescHigh;
-            } else if (offset == 0x10u) {
+            } else if (offset == 0x10U) {
                 ctx.mem_rdata = disk_queue[idx].AvailLow;
-            } else if (offset == 0x14u) {
+            } else if (offset == 0x14U) {
                 ctx.mem_rdata = disk_queue[idx].AvailHigh;
-            } else if (offset == 0x18u) {
+            } else if (offset == 0x18U) {
                 ctx.mem_rdata = disk_queue[idx].UsedLow;
-            } else if (offset == 0x1Cu) {
+            } else if (offset == 0x1CU) {
                 ctx.mem_rdata = disk_queue[idx].UsedHigh;
-            } else if (offset == 0x20u) {
+            } else if (offset == 0x20U) {
                 ctx.mem_rdata = disk_queue[idx].last_avail_idx;
             }
         } else if ((ctx.mem_addr >> 12) == 0x4000c) {
@@ -272,48 +282,48 @@ auto IoController::exec() -> bool {
             dsk_tmp[(ctx.mem_addr) / 4] = ctx.rrs2;
         } else if ((ctx.mem_addr >> 12) == 0x4000a) {
             // Console queue write
-            const int idx = static_cast<int>(ctx.mem_addr / 0x24u);
-            const Address offset = ctx.mem_addr % 0x24u;
-            if (offset == 0x0u) {
+            const int idx = static_cast<int>(ctx.mem_addr / 0x24U);
+            const Address offset = ctx.mem_addr % 0x24U;
+            if (offset == 0x0U) {
                 cons_queue[idx].Ready = ctx.rrs2;
-            } else if (offset == 0x4u) {
+            } else if (offset == 0x4U) {
                 cons_queue[idx].Notify = ctx.rrs2;
-            } else if (offset == 0x8u) {
+            } else if (offset == 0x8U) {
                 cons_queue[idx].DescLow = ctx.rrs2;
-            } else if (offset == 0xCu) {
+            } else if (offset == 0xCU) {
                 cons_queue[idx].DescHigh = ctx.rrs2;
-            } else if (offset == 0x10u) {
+            } else if (offset == 0x10U) {
                 cons_queue[idx].AvailLow = ctx.rrs2;
-            } else if (offset == 0x14u) {
+            } else if (offset == 0x14U) {
                 cons_queue[idx].AvailHigh = ctx.rrs2;
-            } else if (offset == 0x18u) {
+            } else if (offset == 0x18U) {
                 cons_queue[idx].UsedLow = ctx.rrs2;
-            } else if (offset == 0x1Cu) {
+            } else if (offset == 0x1CU) {
                 cons_queue[idx].UsedHigh = ctx.rrs2;
-            } else if (offset == 0x20u) {
+            } else if (offset == 0x20U) {
                 cons_queue[idx].last_avail_idx = ctx.rrs2;
             }
         } else if ((ctx.mem_addr >> 12) == 0x4000b) {
             // Disk queue write
-            const int idx = static_cast<int>(ctx.mem_addr / 0x24u);
-            const Address offset = ctx.mem_addr % 0x24u;
-            if (offset == 0x0u) {
+            const int idx = static_cast<int>(ctx.mem_addr / 0x24U);
+            const Address offset = ctx.mem_addr % 0x24U;
+            if (offset == 0x0U) {
                 disk_queue[idx].Ready = ctx.rrs2;
-            } else if (offset == 0x4u) {
+            } else if (offset == 0x4U) {
                 disk_queue[idx].Notify = ctx.rrs2;
-            } else if (offset == 0x8u) {
+            } else if (offset == 0x8U) {
                 disk_queue[idx].DescLow = ctx.rrs2;
-            } else if (offset == 0xCu) {
+            } else if (offset == 0xCU) {
                 disk_queue[idx].DescHigh = ctx.rrs2;
-            } else if (offset == 0x10u) {
+            } else if (offset == 0x10U) {
                 disk_queue[idx].AvailLow = ctx.rrs2;
-            } else if (offset == 0x14u) {
+            } else if (offset == 0x14U) {
                 disk_queue[idx].AvailHigh = ctx.rrs2;
-            } else if (offset == 0x18u) {
+            } else if (offset == 0x18U) {
                 disk_queue[idx].UsedLow = ctx.rrs2;
-            } else if (offset == 0x1Cu) {
+            } else if (offset == 0x1CU) {
                 disk_queue[idx].UsedHigh = ctx.rrs2;
-            } else if (offset == 0x20u) {
+            } else if (offset == 0x20U) {
                 disk_queue[idx].last_avail_idx = ctx.rrs2;
             }
         } else {

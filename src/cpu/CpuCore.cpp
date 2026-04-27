@@ -3,9 +3,10 @@
  * @brief CPU core state/control implementation.
  */
 #include "Cpu.hpp"
+#include "XLen.hpp"
 
 CPU::CPU()
-    : tlb_unit(*this),
+    :  tlb_unit(*this),
       interrupt_controller(*this),
       plic_mmio(*this),
       clint_mmio(*this),
@@ -13,16 +14,16 @@ CPU::CPU()
       csr_file(*this) {
     reg.fill(0);
     freg.fill(0);
-    fcsr = 0;
+    
 }
 
 void CPU::TLB_flush() { tlb_unit.flush(); }
 
-auto CPU::get_mstatus(CSRValue mask) -> CSRValue { return csr_file.getMstatus(mask); }
+auto CPU::get_mstatus(CSRValue mask) const -> CSRValue { return csr_file.getMstatus(mask); }
 
 void CPU::set_mstatus(CSRValue wdata) { csr_file.setMstatus(wdata); }
 
-auto CPU::read_csr(CSRAddress addr) -> CSRValue { return csr_file.read(addr); }
+auto CPU::read_csr(CSRAddress addr) const -> CSRValue { return csr_file.read(addr); }
 
 void CPU::write_csr(CSRAddress addr, CSRValue wdata) { csr_file.write(addr, wdata); }
 

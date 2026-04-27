@@ -5,21 +5,30 @@
 #include "CsrFile.hpp"
 
 #include "Cpu.hpp"
+#include "Define.hpp"
+#include "XLen.hpp"
+
+namespace {
+constexpr unsigned kHighWordShift = 32;
+constexpr CSRValue kCounterEnableMask = static_cast<CSRValue>(0x5u);
+}  // namespace
 
 auto CsrFile::getMstatus(CSRValue mask) const -> CSRValue {
-    CSRValue val = (cpu_.mstatus | kMstatusFsDirty) & mask;
-    return (((val >> 13) == 3) | ((val >> 15) == 3)) ? (val | kMstatusSd) : val;
+    CSRValue const val = (cpu_.mstatus | kMstatusFsDirty) & mask;
+    const bool fs_dirty = (val & enum_mask(MstatusBit::Fs)) == enum_mask(MstatusBit::Fs);
+    const bool xs_dirty = (val & enum_mask(MstatusBit::Xs)) == enum_mask(MstatusBit::Xs);
+    return (fs_dirty || xs_dirty) ? (val | kMstatusSd) : val;
 }
 
 void CsrFile::setMstatus(CSRValue wdata) {
-    CSRValue mod = cpu_.mstatus ^ wdata;
+    CSRValue const mod = cpu_.mstatus ^ wdata;
     const CSRValue tlb_sensitive =
         enum_mask(MstatusBit::Mprv) | enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr);
-    if ((mod & tlb_sensitive) != 0 ||
-        ((cpu_.mstatus & enum_mask(MstatusBit::Mprv)) && (mod & enum_mask(MstatusBit::Mpp)) != 0)) {
+    if ((mod & tlb_sensitive) != 0 || (((cpu_.mstatus & enum_mask(MstatusBit::Mprv)) != 0u) &&
+                                       (mod & enum_mask(MstatusBit::Mpp)) != 0)) {
         cpu_.TLB_flush();
     }
-    CSRValue mask = kMstatusMask & ~enum_mask(MstatusBit::Fs);
+    CSRValue const mask = kMstatusMask & ~enum_mask(MstatusBit::Fs);
     cpu_.mstatus = (cpu_.mstatus & ~mask) | (wdata & mask);
 }
 
@@ -35,10 +44,10 @@ auto CsrFile::read(CSRAddress addr) const -> CSRValue {
             rcsr = cpu_.fcsr & kFflagsMask;
             break;
         case csr_addr(Csr::Frm):
-            rcsr = (cpu_.fcsr >> 5) & 0x7;
+            rcsr = (cpu_.fcsr >> kFrmShift) & kFrmMask;
             break;
         case csr_addr(Csr::Fcsr):
-            rcsr = cpu_.fcsr & 0xff;
+            rcsr = cpu_.fcsr & kFcsrMask;
             break;
 
         case csr_addr(Csr::Sie):
@@ -116,7 +125,7 @@ auto CsrFile::read(CSRAddress addr) const -> CSRValue {
         case csr_addr(Csr::Cycleh):
         case csr_addr(Csr::Instreth):
         case csr_addr(Csr::Timeh):
-            rcsr = static_cast<CSRValue>(cpu_.mtime >> 32);
+            rcsr = static_cast<CSRValue>(cpu_.mtime >> kHighWordShift);
             break;
 
         case csr_addr(Csr::Sstatus):
@@ -136,13 +145,16 @@ auto CsrFile::read(CSRAddress addr) const -> CSRValue {
     return rcsr;
 }
 
-void CsrFile::write(CSRAddress addr, CSRValue wdata) {
-    CSRValue mask1 =
+void CsrFile::write(CSRAddress addr,
+                    CSRValue wdata) {  // NOLINT(bugprone-easily-swappable-parameters)
+    CSRValue const mask1 =
         (static_cast<CSRValue>(1) << (enum_mask(ExceptionCode::StorePageFault) + 1)) - 1;
-    CSRValue mask2 = enum_mask(MipBit::Ssip) | enum_mask(MipBit::Stip) | enum_mask(MipBit::Seip);
-    CSRValue mask3 = enum_mask(MipBit::Msip) | enum_mask(MipBit::Ssip) | enum_mask(MipBit::Stip) |
-                     enum_mask(MipBit::Mtip) | enum_mask(MipBit::Seip);
-    CSRValue mask4 = enum_mask(MipBit::Ssip) | enum_mask(MipBit::Stip);
+    CSRValue const mask2 =
+        enum_mask(MipBit::Ssip) | enum_mask(MipBit::Stip) | enum_mask(MipBit::Seip);
+    CSRValue const mask3 = enum_mask(MipBit::Msip) | enum_mask(MipBit::Ssip) |
+                           enum_mask(MipBit::Stip) | enum_mask(MipBit::Mtip) |
+                           enum_mask(MipBit::Seip);
+    CSRValue const mask4 = enum_mask(MipBit::Ssip) | enum_mask(MipBit::Stip);
 
     switch (addr) {
         case csr_addr(Csr::Mhartid):
@@ -167,7 +179,7 @@ void CsrFile::write(CSRAddress addr, CSRValue wdata) {
             cpu_.stvec = wdata & ~3;
             break;
         case csr_addr(Csr::Scounteren):
-            cpu_.scounteren = wdata & 5;
+            cpu_.scounteren = wdata & kCounterEnableMask;
             break;
         case csr_addr(Csr::Sscratch):
             cpu_.sscratch = wdata;
@@ -186,7 +198,7 @@ void CsrFile::write(CSRAddress addr, CSRValue wdata) {
             cpu_.mtvec = wdata & ~3;
             break;
         case csr_addr(Csr::Mcounteren):
-            cpu_.mcounteren = wdata & 5;
+            cpu_.mcounteren = wdata & kCounterEnableMask;
             break;
         case csr_addr(Csr::Mscratch):
             cpu_.mscratch = wdata;

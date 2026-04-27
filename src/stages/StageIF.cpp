@@ -2,7 +2,11 @@
  * @file StageIF.cpp
  * @brief IF stage implementation for Machine.
  */
+#include "Cpu.hpp"
+#include "Define.hpp"
 #include "Machine.hpp"
+#include "MemoryUtil.hpp"
+#include "XLen.hpp"
 
 namespace simrv::machine_detail {
 auto page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem) -> bool;
@@ -11,14 +15,14 @@ auto page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte
 void CPU::run_fetch_stage(Machine& machine) {
     const bool split_page =
         ((pc & ~simrv::memory::kPageMask) != ((pc + 2) & ~simrv::memory::kPageMask));
-    const bool translation_enabled = !(priv == kPrivMachine || (satp >> 31) == 0);
+    const bool translation_enabled = priv != kPrivMachine && (satp >> 31) != 0;
 
     fetch_address_translate(machine);
 
     if (simrv::compiler::unlikely(translation_enabled)) {
         fetch_resolve_page_walk(machine, 1);
         if (simrv::compiler::likely(!split_page)) {
-            if (pending_exception == ~0u && pipeline_context.padr1 != ~0u) {
+            if (pending_exception == ~0U && pipeline_context.padr1 != ~0U) {
                 pipeline_context.padr2 = pipeline_context.padr1 + 2;
             }
         } else {
@@ -32,10 +36,10 @@ void CPU::run_fetch_stage(Machine& machine) {
 
 /* IF_(Instruction Fetch) stages                                                          */
 void CPU::fetch_address_translate(Machine& /*machine*/) { /* address translation */
-    Word w_padr1 = ~0u;
-    Word w_padr2 = ~0u;
-    Word w_vadr1 = pc;
-    Word w_vadr2 = pc + 2;
+    Word w_padr1 = ~0U;
+    Word w_padr2 = ~0U;
+    Word const w_vadr1 = pc;
+    Word const w_vadr2 = pc + 2;
 
     pipeline_context.cpc = pc;
 
@@ -53,7 +57,7 @@ void CPU::fetch_address_translate(Machine& /*machine*/) { /* address translation
         }
 
         if (simrv::compiler::likely(!split_page)) {
-            if (w_padr1 != ~0u) {
+            if (w_padr1 != ~0U) {
                 w_padr2 = w_padr1 + 2;
             }
         } else {
@@ -69,12 +73,13 @@ void CPU::fetch_address_translate(Machine& /*machine*/) { /* address translation
 }
 
 void CPU::fetch_resolve_page_walk(Machine& machine, int state) { /* page walk and TLB update */
-    if (pending_exception != ~0u) return;
+    if (pending_exception != ~0U) { return;
+}
 
     Word w_padr = (state == 1) ? pipeline_context.padr1 : pipeline_context.padr2;
     Word* r_padr = (state == 1) ? &pipeline_context.padr1 : &pipeline_context.padr2;
-    Word w_vadr = (state == 1) ? pc : pc + 2;
-    if (w_padr == ~0u) {
+    Word const w_vadr = (state == 1) ? pc : pc + 2;
+    if (w_padr == ~0U) {
         const bool pf =
             simrv::machine_detail::page_walk(w_vadr, &w_padr, PteAccess::Code, this, machine.mmem);
         if (pf) {
@@ -91,15 +96,16 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) { /* page walk an
 }
 
 void CPU::fetch_read_instruction_word(Machine& machine) {
-    if (pending_exception != ~0u) return;
+    if (pending_exception != ~0U) { return;
+}
 
     if (simrv::compiler::likely(pipeline_context.padr2 == pipeline_context.padr1 + 2)) {
         pipeline_context.ir_org = simrv::memory_detail::ram_read_fast(
             pipeline_context.padr1, static_cast<Instruction>(Funct3::Lw), machine.mmem);
     } else {
-        Word ir_l = simrv::memory_detail::ram_read_fast(
+        Word const ir_l = simrv::memory_detail::ram_read_fast(
             pipeline_context.padr1, static_cast<Instruction>(Funct3::Lhu), machine.mmem);
-        Word ir_h = simrv::memory_detail::ram_read_fast(
+        Word const ir_h = simrv::memory_detail::ram_read_fast(
             pipeline_context.padr2, static_cast<Instruction>(Funct3::Lhu), machine.mmem);
         pipeline_context.ir_org = (ir_h << 16) | (ir_l & 0xFFFF);
     }
@@ -107,8 +113,8 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
 
 /* decode_and_normalize_instruction(Convert) stage, OK                                                                 */
 void CPU::decode_and_normalize_instruction(Machine& machine) {
-    bool w_compressed = decode_unit.isCompressedInstruction(pipeline_context.ir_org);
-    Instruction w_ir_tmp = w_compressed ? decode_unit.decompressInstruction(pipeline_context.ir_org)
+    bool const w_compressed = DecodeUnit::isCompressedInstruction(pipeline_context.ir_org);
+    Instruction const w_ir_tmp = w_compressed ? decode_unit.decompressInstruction(pipeline_context.ir_org)
                                         : pipeline_context.ir_org;
 
     // Check if decoded instruction is enabled by current MISA
@@ -121,6 +127,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
         pipeline_context.ir = RV32_NOP;
     }
 
-    pipeline_context.cinsn = w_compressed ? 1u : 0u;
-    if (machine.s_use_mix) machine.e_instmix[decode_unit.decodeOperation(pipeline_context.ir)]++;
+    pipeline_context.cinsn = w_compressed ? 1U : 0U;
+    if (machine.s_use_mix) { machine.e_instmix[decode_unit.decodeOperation(pipeline_context.ir)]++;
+}
 }
