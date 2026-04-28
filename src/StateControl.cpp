@@ -156,10 +156,11 @@ auto handle_sbi_ecall(CPU& cpu, TrapCause cause) -> bool {
 }  // namespace
 
 void TlbUnit::flush() {
+    constexpr Word kInvalidAddr = ~Word(0);
     for (Word i = 0; i < simrv::memory::kTlbSize; i++) {
-        cpu_.TLB_inst_r[i].v_addr = cpu_.TLB_inst_r[i].p_addr = static_cast<Word>(-1);
-        cpu_.TLB_data_r[i].v_addr = cpu_.TLB_data_r[i].p_addr = static_cast<Word>(-1);
-        cpu_.TLB_data_w[i].v_addr = cpu_.TLB_data_w[i].p_addr = static_cast<Word>(-1);
+        cpu_.TLB_inst_r.at(i).v_addr = cpu_.TLB_inst_r.at(i).p_addr = kInvalidAddr;
+        cpu_.TLB_data_r.at(i).v_addr = cpu_.TLB_data_r.at(i).p_addr = kInvalidAddr;
+        cpu_.TLB_data_w.at(i).v_addr = cpu_.TLB_data_w.at(i).p_addr = kInvalidAddr;
     }
 }
 
@@ -298,7 +299,7 @@ void TrapController::raiseException(TrapCause cause, CSRValue tval) {
 
     if (handle_sbi_ecall(cpu_, cause)) {
         cpu_.TLB_flush();
-        cpu_.pending_exception = ~0U;
+        cpu_.pending_exception = ~Word(0);
         cpu_.pending_tval = 0;
         return;
     }
@@ -336,6 +337,6 @@ void TrapController::raiseException(TrapCause cause, CSRValue tval) {
         cpu_.pc = cpu_.mtvec;
     }
     cpu_.TLB_flush();
-    cpu_.pending_exception = ~0U;
+    cpu_.pending_exception = ~Word(0);
     cpu_.pending_tval = 0;
 }

@@ -8,13 +8,11 @@
  */
 #pragma once
 
-#include <cstdint>
-#include <memory>
+#include <array>
 #include <string_view>
 #include <vector>
 
 #include "Define.hpp"
-#include "PipelineContext.hpp"
 
 class Machine;  // Forward declaration
 
@@ -40,7 +38,7 @@ class IoController {
      *
      * @return true if execution should continue; false if power-off command received
      */
-    [[nodiscard]] bool exec();
+    [[nodiscard]] auto exec() -> bool;
 
     // Ownership & context linkage
     Machine* owner = nullptr;  ///< Parent machine for statistics tracking

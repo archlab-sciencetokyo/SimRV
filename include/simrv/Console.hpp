@@ -48,13 +48,15 @@ class Console : public MmioDevice {
     [[nodiscard]] constexpr auto contains(Address addr) const -> bool {
         return addr >= kBaseAddress && addr < (kBaseAddress + kSize);
     }
-    constexpr Address offset(Address addr) const { return addr - kBaseAddress; }
-    Word console_read(Address offset) { return mmio_read(offset); }
+    [[nodiscard]] constexpr auto offset(Address addr) const -> Address {
+        return addr - kBaseAddress;
+    }
+    auto console_read(Address offset) -> Word { return mmio_read(offset); }
     void console_write(Machine& machine, Address offset, Word wdata) {
         mmio_write(machine, offset, wdata);
     }
-    int receive_input() const;
-    int MC_receive_input(Machine& machine);
+    [[nodiscard]] auto receive_input() const -> int;
+    auto MC_receive_input(Machine& machine) -> int;
 
     Byte* mmem;  // main memory
 

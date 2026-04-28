@@ -23,14 +23,14 @@ class MmioRouter {
      * @param rdata Output value when read is handled.
      * @return true if handled by a routed device.
      */
-    bool read(Address p_addr, Word& rdata);
+    auto read(Address p_addr, Word& rdata) -> bool;
     /**
      * @brief Route MMIO write request.
      * @param p_addr Physical MMIO address.
      * @param wdata Value to write.
      * @return true if handled by a routed device.
      */
-    bool write(Address p_addr, Word wdata);
+    auto write(Address p_addr, Word wdata) -> bool;
 
    private:
     Machine& machine_;

@@ -11,8 +11,9 @@ void CPU::run_writeback_stage(Machine& machine) { writeback_registers(machine); 
 
 /* writeback_registers(Write Back) stage                                                                  */
 void CPU::writeback_registers(Machine& machine) {
-    if (pending_exception != ~0U) { return;
-}
+    if (pending_exception != ~Word(0)) {
+        return;
+    }
 
     machine.e_icount++;
 
@@ -40,16 +41,16 @@ void CPU::writeback_registers(Machine& machine) {
     }
 
     if (opcode == Opcode::LoadFp) {
-        freg[pipeline_context.rd] = pipeline_context.fp_mem_rdata;
+        freg.at(pipeline_context.rd) = pipeline_context.fp_mem_rdata;
     }
 
     if ((opcode == Opcode::OpFp || opcode == Opcode::MAdd || opcode == Opcode::MSub ||
          opcode == Opcode::NMAdd || opcode == Opcode::NMSub) &&
         (pipeline_context.fp_wb_enable != 0u)) {
-        freg[pipeline_context.rd] = pipeline_context.fp_wb_data;
+        freg.at(pipeline_context.rd) = pipeline_context.fp_wb_data;
     }
 
     if ((wire_wb_r_enable != 0u) && pipeline_context.rd != 0) {
-        reg[pipeline_context.rd] = wire_wb_r_data; /* regifile write port 1 */
+        reg.at(pipeline_context.rd) = wire_wb_r_data; /* regifile write port 1 */
     }
 }

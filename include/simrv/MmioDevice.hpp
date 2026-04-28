@@ -16,17 +16,17 @@ class MmioDevice {
     virtual ~MmioDevice() = default;
 
     /// Return short device name used for logs/debug output.
-    virtual const char* name() const = 0;
+    [[nodiscard]] virtual auto name() const -> const char* = 0;
     /// Return base physical address of the MMIO region.
-    virtual Address base_address() const = 0;
+    [[nodiscard]] virtual auto base_address() const -> Address = 0;
     /// Return region size in bytes.
-    virtual Address size() const = 0;
+    [[nodiscard]] virtual auto size() const -> Address = 0;
     /// Read device register at physical address.
-    virtual bool read(Machine& machine, Address p_addr, Word& rdata) = 0;
+    virtual auto read(Machine& machine, Address p_addr, Word& rdata) -> bool = 0;
     /// Write device register at physical address.
-    virtual bool write(Machine& machine, Address p_addr, Word wdata) = 0;
+    virtual auto write(Machine& machine, Address p_addr, Word wdata) -> bool = 0;
 
-    bool contains(Address addr) const {
+    [[nodiscard]] auto contains(Address addr) const -> bool {
         return addr >= base_address() && addr < (base_address() + size());
     }
 };

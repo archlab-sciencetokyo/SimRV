@@ -22,9 +22,9 @@ class Disk : public MmioDevice {
     static constexpr Address kBaseAddress = static_cast<Address>(0x48000000u);
     static constexpr Address kSize = static_cast<Address>(0x08000000u);
 
-    const char* name() const override { return "disk"; }
-    Address base_address() const override { return kBaseAddress; }
-    Address size() const override { return kSize; }
+    [[nodiscard]] auto name() const -> const char* override { return "disk"; }
+    [[nodiscard]] auto base_address() const -> Address override { return kBaseAddress; }
+    [[nodiscard]] auto size() const -> Address override { return kSize; }
     /**
      * @brief Read a disk MMIO register.
      * @param machine Active machine instance.
@@ -40,15 +40,17 @@ class Disk : public MmioDevice {
      * @param wdata Value to write.
      * @return true when handled by this device.
      */
-    bool write(Machine& machine, Address p_addr, Word wdata) override;
+    auto write(Machine& machine, Address p_addr, Word wdata) -> bool override;
 
-    Word mmio_read(Address) const;
+    [[nodiscard]] auto mmio_read(Address) const -> Word;
     void mmio_write(Machine& machine, Address offset, Word wdata);
-    constexpr bool contains(Address addr) const {
+    [[nodiscard]] constexpr auto contains(Address addr) const -> bool {
         return addr >= kBaseAddress && addr < (kBaseAddress + kSize);
     }
-    constexpr Address offset(Address addr) const { return addr - kBaseAddress; }
-    Word disk_read(Address offset) { return mmio_read(offset); }
+    [[nodiscard]] constexpr auto offset(Address addr) const -> Address {
+        return addr - kBaseAddress;
+    }
+    auto disk_read(Address offset) -> Word { return mmio_read(offset); }
     void disk_write(Machine& machine, Address offset, Word wdata) {
         mmio_write(machine, offset, wdata);
     }

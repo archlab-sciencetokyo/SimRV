@@ -29,9 +29,9 @@ class CPU {
     /// Write mstatus with architectural side effects applied.
     void set_mstatus(CSRValue);
     /// Read masked mstatus value with architectural projections.
-    CSRValue get_mstatus(CSRValue) const;
+    [[nodiscard]] auto get_mstatus(CSRValue) const -> CSRValue;
     /// Read a CSR value.
-    CSRValue read_csr(CSRAddress) const;
+    [[nodiscard]] auto read_csr(CSRAddress) const -> CSRValue;
     /// Write a CSR value.
     void write_csr(CSRAddress, CSRValue);
     /// Return from machine-mode trap.

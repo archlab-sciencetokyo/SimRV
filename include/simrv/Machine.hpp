@@ -44,7 +44,7 @@ class Machine {
      * @param argv CLI argument vector.
      * @return 0 on success, non-zero on configuration error.
      */
-    int initialize(int argc, char* const* argv);
+    auto initialize(int argc, char* const* argv) -> int;
     /// Execute the main simulation loop until termination criteria are met.
     void run();
     /// Emit one architectural trace snapshot to the configured trace stream.

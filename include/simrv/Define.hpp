@@ -23,7 +23,7 @@ inline constexpr Address kStartPc = static_cast<Address>(0x80000000u);
 inline constexpr Address kInitDataAddress = static_cast<Address>(0x01000000u);
 }  // namespace simrv::boot
 
-using DumpFlags = uint32_t;
+using DumpFlags = uint8_t;
 
 enum class DumpFlag : DumpFlags {
     Exec = (1u << 0),
@@ -31,7 +31,7 @@ enum class DumpFlag : DumpFlags {
     Csr = (1u << 2),
 };
 
-using PteFlags = Word;
+using PteFlags = uint8_t;
 
 enum class PteFlag : PteFlags {
     V = (1 << 0),
@@ -68,19 +68,20 @@ inline constexpr Word kDiskDeviceFeatures = 1;
 inline constexpr Word kDiskConfigGeneration = 0;
 inline constexpr Word kDiskQueueNumMax = 4;
 }  // namespace simrv::virtio
-enum class VringDescFlag : uint16_t {
+
+using VringDescFlags = uint8_t;
+enum class VringDescFlag : VringDescFlags {
     Next = 1,
     Write = 2,
     Indirect = 4,
 };
 
-using VringDescFlags = uint16_t;
-enum class VirtioBlkType : uint32_t {
+enum class VirtioBlkType : uint8_t {
     In = 0,
     Out = 1,
 };
 
-enum class VirtioBlkStatus : uint32_t {
+enum class VirtioBlkStatus : uint8_t {
     Ok = 0,
     IoErr = 1,
     Unsupp = 2,
@@ -104,12 +105,12 @@ inline constexpr Address kDramMask = static_cast<Address>(0x03ffffffu);
 inline constexpr unsigned kPageShift = 12;
 inline constexpr Address kPageMask = static_cast<Address>(0x00000fffu);
 inline constexpr uint32_t kTlbSize = 4;
-inline constexpr size_t kLocalCoreMemorySize = (32u * 1024u);
+inline constexpr size_t kLocalCoreMemorySize = (static_cast<const size_t>(32u * 1024u));
 }  // namespace simrv::memory
 
 namespace simrv::compiler {
 template <typename T>
-constexpr bool likely(T value) {
+constexpr auto likely(T value) -> bool {
 #if defined(__GNUC__) || defined(__clang__)
     return __builtin_expect(static_cast<bool>(value), true);
 #else
@@ -118,7 +119,7 @@ constexpr bool likely(T value) {
 }
 
 template <typename T>
-constexpr bool unlikely(T value) {
+constexpr auto unlikely(T value) -> bool {
 #if defined(__GNUC__) || defined(__clang__)
     return __builtin_expect(static_cast<bool>(value), false);
 #else
@@ -256,7 +257,7 @@ union MstatusView {
 
     explicit MstatusView(CSRValue raw = 0) : rawValue(static_cast<Word>(raw)) {}
 
-    CSRValue raw() const { return static_cast<CSRValue>(rawValue); }
+    [[nodiscard]] auto raw() const -> CSRValue { return static_cast<CSRValue>(rawValue); }
 };
 
 struct MipFields {
@@ -358,12 +359,12 @@ constexpr size_t MLEN = sizeof(Address) * 8;
 constexpr size_t FLEN = 64;
 constexpr Instruction RV32_NOP = 0x00000013;
 
-enum class AmoStatus : Instruction {
+enum class AmoStatus : uint8_t {
     Success = 0,
     Failure = 1,
 };
 
-enum class Opcode : Instruction {
+enum class Opcode : uint8_t {
     C0 = 0x0,
     C1 = 0x1,
     C2 = 0x2,
@@ -389,7 +390,7 @@ enum class Opcode : Instruction {
     System = 0x73,
 };
 
-enum class Funct3 : Instruction {
+enum class Funct3 : uint8_t {
     Add = 0x0,
     Sll = 0x1,
     Slt = 0x2,
@@ -437,7 +438,7 @@ enum class Funct3 : Instruction {
     Csrrci = 0x7,
 };
 
-enum class Funct12Priv : Instruction {
+enum class Funct12Priv : uint16_t {
     Ecall = 0x000,
     Ebreak = 0x001,
     Uret = 0x002,
@@ -446,11 +447,11 @@ enum class Funct12Priv : Instruction {
     Wfi = 0x105,
 };
 
-enum class Funct7Priv : Instruction {
+enum class Funct7Priv : uint8_t {
     SfenceVma = 0x09,
 };
 
-enum class Funct5Amo : Instruction {
+enum class Funct5Amo : uint8_t {
     Lr = 0x02,
     Sc = 0x03,
     Swap = 0x01,
@@ -464,21 +465,23 @@ enum class Funct5Amo : Instruction {
     Maxu = 0x1c,
 };
 
-constexpr Opcode opcode_of(Instruction ir) { return static_cast<Opcode>(ir & 0x7F); }
+constexpr auto opcode_of(Instruction ir) -> Opcode { return static_cast<Opcode>(ir & 0x7F); }
 
-constexpr Opcode compressed_opcode_of(CompressedInstruction ir) {
+constexpr auto compressed_opcode_of(CompressedInstruction ir) -> Opcode {
     return static_cast<Opcode>(ir & 0x3);
 }
 
-constexpr Funct3 funct3_of(Instruction ir) { return static_cast<Funct3>((ir >> 12) & 0x7); }
+constexpr auto funct3_of(Instruction ir) -> Funct3 { return static_cast<Funct3>((ir >> 12) & 0x7); }
 
-constexpr Instruction funct12_of(Instruction ir) { return (ir >> 20) & 0xFFF; }
+constexpr auto funct12_of(Instruction ir) -> Instruction { return (ir >> 20) & 0xFFF; }
 
-constexpr Instruction funct7_of(Instruction ir) { return (ir >> 25) & 0x7F; }
+constexpr auto funct7_of(Instruction ir) -> Instruction { return (ir >> 25) & 0x7F; }
 
-constexpr Funct5Amo funct5_of(Instruction ir) { return static_cast<Funct5Amo>((ir >> 27) & 0x1F); }
+constexpr auto funct5_of(Instruction ir) -> Funct5Amo {
+    return static_cast<Funct5Amo>((ir >> 27) & 0x1F);
+}
 
-enum class IsaExtension : unsigned {
+enum class IsaExtension : uint8_t {
     A = 0,
     C = 2,
     D = 3,
@@ -496,18 +499,18 @@ enum class MisaProfile : uint8_t {
     // Keep the API profile-oriented so RV64 presets can be added without touching call sites.
 };
 
-constexpr CSRValue misa_extension_bit(IsaExtension ext) {
+constexpr auto misa_extension_bit(IsaExtension ext) -> CSRValue {
     return static_cast<CSRValue>(CSRValue{1} << static_cast<unsigned>(ext));
 }
 
-constexpr CSRValue misa_base_bits() {
+constexpr auto misa_base_bits() -> CSRValue {
     return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
            misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::F) |
            misa_extension_bit(IsaExtension::D) | misa_extension_bit(IsaExtension::C) |
            misa_extension_bit(IsaExtension::S) | misa_extension_bit(IsaExtension::U);
 }
 
-constexpr CSRValue misa_profile_bits(MisaProfile profile) {
+constexpr auto misa_profile_bits(MisaProfile profile) -> CSRValue {
     switch (profile) {
         case MisaProfile::I:
             return misa_extension_bit(IsaExtension::I);
@@ -521,7 +524,7 @@ constexpr CSRValue misa_profile_bits(MisaProfile profile) {
     }
 }
 
-constexpr CSRValue misa_mxl_field() {
+constexpr auto misa_mxl_field() -> CSRValue {
     if constexpr (sizeof(CSRValue) == 4) {
         // MXL=01 for RV32 in bits [31:30]
         return static_cast<CSRValue>(1u << 30);
@@ -533,17 +536,17 @@ constexpr CSRValue misa_mxl_field() {
     }
 }
 
-constexpr CSRValue misa_with_mxl(CSRValue misa_extensions) {
+constexpr auto misa_with_mxl(CSRValue misa_extensions) -> CSRValue {
     return misa_extensions | misa_mxl_field();
 }
 
 constexpr CSRValue kMisaDefault = misa_profile_bits(MisaProfile::GC);
 
-constexpr bool misa_has_extension(CSRValue misa, IsaExtension ext) {
+constexpr auto misa_has_extension(CSRValue misa, IsaExtension ext) -> bool {
     return (misa & misa_extension_bit(ext)) != 0;
 }
 
-constexpr IsaExtension required_extension_for_instruction(Instruction ir, bool compressed) {
+constexpr auto required_extension_for_instruction(Instruction ir, bool compressed) -> IsaExtension {
     if (compressed) {
         return IsaExtension::C;
     }
@@ -568,11 +571,11 @@ constexpr IsaExtension required_extension_for_instruction(Instruction ir, bool c
     }
 }
 
-constexpr bool instruction_enabled_by_misa(CSRValue misa, Instruction ir, bool compressed) {
+constexpr auto instruction_enabled_by_misa(CSRValue misa, Instruction ir, bool compressed) -> bool {
     return misa_has_extension(misa, required_extension_for_instruction(ir, compressed));
 }
 
-enum OperationId : uint16_t {
+enum OperationId : uint8_t {
     /* RV32I */
     LUI,
     AUIPC,

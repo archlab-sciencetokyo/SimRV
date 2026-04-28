@@ -8,7 +8,6 @@
 #pragma once
 
 #include "Cpu.hpp"
-#include "MemoryUtil.hpp"
 
 namespace simrv {
 
@@ -36,7 +35,7 @@ class Mmu {
      * @param access Access type (read/write/execute)
      * @return true if page fault occurred, false on successful translation
      */
-    bool page_walk(Address v_addr, Address* p_addr, PteAccess access);
+    auto page_walk(Address v_addr, Address* p_addr, PteAccess access) -> bool;
 
     /**
      * @brief Translate address without performing page walk.
@@ -49,7 +48,7 @@ class Mmu {
      * @param access Access type
      * @return true if translation resulted in page fault
      */
-    bool translate(Address v_addr, Address* p_addr, PteAccess access);
+    auto translate(Address v_addr, Address* p_addr, PteAccess access) -> bool;
 
    private:
     CPU& cpu_;
@@ -70,8 +69,8 @@ class Mmu {
      * @param out_pte_addr Output: physical address where PTE was found
      * @return PTE value (or mirrored PTE if fallback was used)
      */
-    Word read_level1_pte_with_mirror(Address root_page_table_addr, Word vpn_level1,
-                                     Word* out_pte_addr);
+    auto read_level1_pte_with_mirror(Address root_page_table_addr, Word vpn_level1,
+                                     Word* out_pte_addr) -> Word;
 
     /**
      * @brief Validate PTE access permissions for current privilege level.
@@ -84,7 +83,8 @@ class Mmu {
      * @param access Requested access type (read/write/execute)
      * @return true if access is allowed, false if access should fault
      */
-    bool validate_pte_permissions(Word pte, Word permission_bits, PteAccess access) const;
+    [[nodiscard]] auto validate_pte_permissions(Word pte, Word permission_bits,
+                                                PteAccess access) const -> bool;
 
     /**
      * @brief Update PTE accessed (A) and dirty (D) flag bits per RISC-V spec.

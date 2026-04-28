@@ -264,7 +264,7 @@ Usage: $0 [OPTIONS]
 Options:
   --help              Show this help message
   --clean             Clean build directories before building
-    --scratch           Build in local scratch directory (overrides LINUX_BUILD_DIR)
+  --scratch           Build in local scratch directory (overrides LINUX_BUILD_DIR)
   --arch rv32|rv64    Target architecture (default: rv32)
 
 Environment Variables:

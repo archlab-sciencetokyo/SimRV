@@ -22,7 +22,7 @@ void CPU::run_fetch_stage(Machine& machine) {
     if (simrv::compiler::unlikely(translation_enabled)) {
         fetch_resolve_page_walk(machine, 1);
         if (simrv::compiler::likely(!split_page)) {
-            if (pending_exception == ~0U && pipeline_context.padr1 != ~0U) {
+            if (pending_exception == ~Word(0) && pipeline_context.padr1 != ~Word(0)) {
                 pipeline_context.padr2 = pipeline_context.padr1 + 2;
             }
         } else {
@@ -51,7 +51,7 @@ void CPU::fetch_address_translate(Machine& /*machine*/) { /* address translation
             ((w_vadr1 & ~simrv::memory::kPageMask) != (w_vadr2 & ~simrv::memory::kPageMask));
 
         TLBEntry* tlb_e1 =
-            &TLB_inst_r[(w_vadr1 >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1)];
+            &TLB_inst_r.at((w_vadr1 >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1));
         if (tlb_e1->v_addr == (w_vadr1 & ~simrv::memory::kPageMask)) {  ///// TLB hit for w_vadr1
             w_padr1 = tlb_e1->p_addr + (w_vadr1 & simrv::memory::kPageMask);
         }
@@ -61,8 +61,8 @@ void CPU::fetch_address_translate(Machine& /*machine*/) { /* address translation
                 w_padr2 = w_padr1 + 2;
             }
         } else {
-            TLBEntry* tlb_e2 =
-                &TLB_inst_r[(w_vadr2 >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1)];
+            TLBEntry* tlb_e2 = &TLB_inst_r.at((w_vadr2 >> simrv::memory::kPageShift) &
+                                              (simrv::memory::kTlbSize - 1));
             if (tlb_e2->v_addr == (w_vadr2 & ~simrv::memory::kPageMask)) {
                 w_padr2 = tlb_e2->p_addr + (w_vadr2 & simrv::memory::kPageMask);
             }
@@ -86,8 +86,8 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) { /* page walk an
             pending_exception = enum_mask(ExceptionCode::FetchPageFault);
             pending_tval = w_vadr;
         } else {
-            TLBEntry* tlb_e1 =
-                &TLB_inst_r[(w_vadr >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1)];
+            TLBEntry* tlb_e1 = &TLB_inst_r.at((w_vadr >> simrv::memory::kPageShift) &
+                                              (simrv::memory::kTlbSize - 1));
             tlb_e1->v_addr = w_vadr & ~simrv::memory::kPageMask;  // update TLB entry
             tlb_e1->p_addr = w_padr & ~simrv::memory::kPageMask;  // update TLB entry
         }
@@ -128,6 +128,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
     }
 
     pipeline_context.cinsn = w_compressed ? 1U : 0U;
-    if (machine.s_use_mix) { machine.e_instmix[decode_unit.decodeOperation(pipeline_context.ir)]++;
-}
+    if (machine.s_use_mix) {
+        machine.e_instmix.at(decode_unit.decodeOperation(pipeline_context.ir))++;
+    }
 }

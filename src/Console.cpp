@@ -10,10 +10,12 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <ios>
 #include <print>
 #include <type_traits>
@@ -22,7 +24,14 @@
 #include "Define.hpp"
 #include "IoController.hpp"
 #include "Machine.hpp"
+#include "VirtioUtil.hpp"
 #include "XLen.hpp"
+
+using simrv::virtio_detail::byte_to_word;
+using simrv::virtio_detail::load_from_ram;
+using simrv::virtio_detail::store_to_ram;
+using simrv::virtio_detail::update_descriptor;
+using simrv::virtio_detail::word_to_byte;
 
 constexpr Word CONSOLE_MAGIC_VALUE = 0x74726976;
 constexpr Word CONSOLE_VERSION = 2;
@@ -34,54 +43,6 @@ constexpr Word CONSOLE_QUEUE_NUM_MAX = 2;
 
 using DescriptorSize = std::integral_constant<std::size_t, 16>;
 
-static constexpr auto byte_to_word(Byte b) -> Word {
-    return static_cast<Word>(std::to_integer<uint8_t>(b));
-}
-static constexpr auto word_to_byte(Word w) -> Byte {
-    return static_cast<Byte>(static_cast<uint8_t>(w & 0xffU));
-}
-
-static auto load_from_ram(Address addr, int n, Byte* ram) -> Word {
-    if (n != 1 && n != 2 && n != 4) {
-        std::println("__ Error: ram_r() not supported n={}", n);
-        exit(0);
-    }
-    Word data = 0;
-    for (int i = 0; i < n; i++) {
-        data |= byte_to_word(ram[(addr + i) & simrv::memory::kDramMask]) << (8 * i);
-    }
-    return data;
-}
-
-static void store_to_ram(Address addr, Word data, int n, Byte* ram) {
-    if (n != 1 && n != 2 && n != 4) {
-        std::println("__ Error: dsk_w() not supported n={}", n);
-        exit(0);
-    }
-    if (n == 1) {
-        ram[addr & simrv::memory::kDramMask] = word_to_byte(data);
-    } else if (n == 2) {
-        ram[addr & simrv::memory::kDramMask] = word_to_byte(data);
-        ram[(addr + 1) & simrv::memory::kDramMask] = word_to_byte(data >> 8);
-    } else if (n == 4) {
-        ram[addr & simrv::memory::kDramMask] = word_to_byte(data);
-        ram[(addr + 1) & simrv::memory::kDramMask] = word_to_byte(data >> 8);
-        ram[(addr + 2) & simrv::memory::kDramMask] = word_to_byte(data >> 16);
-        ram[(addr + 3) & simrv::memory::kDramMask] = word_to_byte(data >> 24);
-    }
-}
-
-static void update_descriptor(Word desc_idx, Word desc_len, int q_num, QueueState* qs, Byte* mmem) {
-    Address const addr_used_idx = qs->UsedLow + 2;
-    Word const index = static_cast<uint16_t>(load_from_ram(addr_used_idx, 2, mmem));
-
-    store_to_ram(addr_used_idx, index + 1, 2, mmem);
-
-    Address const addr_used_entry = qs->UsedLow + 4 + ((index & (q_num - 1)) * 8);
-    store_to_ram(addr_used_entry, desc_idx, 4, mmem);
-    store_to_ram(addr_used_entry + 4, desc_len, 4, mmem);
-}
-
 namespace {
 void reset_micro_controller_state(IoController& controller) {
     controller.pc = 0;
@@ -92,19 +53,18 @@ void reset_micro_controller_state(IoController& controller) {
 
 static void process_console_queue_requests(Byte* mmem, Word q_num, QueueState* qs) {
     Descriptor desc{};
-    Byte* p = nullptr;
+    std::array<Byte, DescriptorSize::value> desc_bytes{};
     auto avail_idx = static_cast<uint16_t>(load_from_ram(qs->AvailLow + 2, 2, mmem));
     while (qs->last_avail_idx != avail_idx) {
         Address const adr = qs->AvailLow + 4 + ((qs->last_avail_idx & (q_num - 1)) * 2);
         uint16_t const desc_idx_header = load_from_ram(adr, 2, mmem);
         Address const desc_adr_header = (desc_idx_header * DescriptorSize::value) + qs->DescLow;
 
-        p = reinterpret_cast<Byte*>(&desc);
-        for (std::size_t i = 0; i < DescriptorSize::value; i++) {
-            *p = static_cast<Byte>(
+        for (std::size_t i = 0; i < DescriptorSize::value; ++i) {
+            *(desc_bytes.data() + i) = static_cast<Byte>(
                 static_cast<uint8_t>(load_from_ram(desc_adr_header + i, 1, mmem)));
-            p++;
         }
+        std::memcpy(&desc, desc_bytes.data(), DescriptorSize::value);
 
         for (int i = 0; std::cmp_less(i, desc.len); i++) { /* write to stdout */
             uint8_t d = load_from_ram(desc.adr + i, 1, mmem);
@@ -121,7 +81,7 @@ static void process_console_queue_requests(Byte* mmem, Word q_num, QueueState* q
 
 auto Console::receive_input() const -> int {
     Descriptor desc{};
-    Byte* p = nullptr;
+    std::array<Byte, DescriptorSize::value> desc_bytes{};
 
     QueueState* qs = &Queue[0];
     if (qs->Ready == 0u) {
@@ -137,11 +97,11 @@ auto Console::receive_input() const -> int {
     uint16_t const desc_idx_header = load_from_ram(adr, 2, mmem);
     Address const desc_adr_header = (desc_idx_header * DescriptorSize::value) + qs->DescLow;
 
-    p = reinterpret_cast<Byte*>(&desc);
-    for (std::size_t i = 0; i < DescriptorSize::value; i++) {
-        *p = static_cast<Byte>(static_cast<uint8_t>(load_from_ram(desc_adr_header + i, 1, mmem)));
-        p++;
+    for (std::size_t i = 0; i < DescriptorSize::value; ++i) {
+        *(desc_bytes.data() + i) =
+            static_cast<Byte>(static_cast<uint8_t>(load_from_ram(desc_adr_header + i, 1, mmem)));
     }
+    std::memcpy(&desc, desc_bytes.data(), DescriptorSize::value);
 
     constexpr int stdin_fd = 0;
     struct timeval tv{};

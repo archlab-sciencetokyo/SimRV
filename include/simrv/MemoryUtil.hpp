@@ -12,10 +12,12 @@
 namespace simrv::memory_detail {
 
 /// Check if a physical address is within DRAM range
-inline bool is_dram_addr(Address p_addr) { return p_addr >= simrv::memory::kDramBaseAddress; }
+inline auto is_dram_addr(Address p_addr) -> bool {
+    return p_addr >= simrv::memory::kDramBaseAddress;
+}
 
 /// Check if a physical address is in a legacy reserved region (MMIO)
-inline bool is_legacy_reserved_region(Address p_addr) {
+inline auto is_legacy_reserved_region(Address p_addr) -> bool {
     switch (p_addr & static_cast<Address>(0xF0000000u)) {
         case static_cast<Address>(0x10000000u):
         case static_cast<Address>(0x20000000u):
@@ -28,7 +30,7 @@ inline bool is_legacy_reserved_region(Address p_addr) {
 }
 
 /// Fast inline RAM read with support for various load formats
-inline Word ram_read_fast(Address addr, Instruction funct3, Byte* ram) {
+inline auto ram_read_fast(Address addr, Instruction funct3, Byte* ram) -> Word {
     constexpr auto kFunct3Mask = static_cast<Instruction>(0x7u);
     const Address masked = addr & simrv::memory::kDramMask;
 
@@ -41,7 +43,7 @@ inline Word ram_read_fast(Address addr, Instruction funct3, Byte* ram) {
             return static_cast<Word>(std::to_integer<uint8_t>(ram[masked]));
         case static_cast<Instruction>(Funct3::Lh): {
             const Address m1 = (addr + 1) & simrv::memory::kDramMask;
-            const uint16_t u = static_cast<uint16_t>(
+            const auto u = static_cast<uint16_t>(
                 static_cast<uint16_t>(std::to_integer<uint8_t>(ram[masked])) |
                 (static_cast<uint16_t>(std::to_integer<uint8_t>(ram[m1])) << 8));
             return static_cast<Word>(static_cast<SignedWord>(static_cast<int16_t>(u)));

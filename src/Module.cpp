@@ -9,9 +9,10 @@
 #include <cstdint>
 #include <cstdlib>
 #include <print>
-#include <string_view>
+
 #include "Define.hpp"
 #include "XLen.hpp"
+
 
 namespace simrv::module {
 
@@ -537,7 +538,7 @@ auto ALU_C(CSRValue rcsr, Register rrs1, Instruction imm, Instruction funct3) ->
 namespace {
 template <typename Table>
 constexpr auto lookup_operation(const Table& table, std::size_t index) -> OperationId {
-    return index < table.size() ? table[index] : UNKNOWN;
+    return index < table.size() ? table.at(index) : UNKNOWN;
 }
 
 constexpr std::array<OperationId, 8> kBranchOps = {BEQ, BNE, UNKNOWN, UNKNOWN,

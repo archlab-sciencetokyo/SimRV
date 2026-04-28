@@ -129,7 +129,7 @@ static auto page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cp
 }  // namespace simrv::memory_detail
 
 auto MemorySubsystem::target_read(CPU& cpu, Address v_addr, Instruction funct3) -> Word {
-    if (simrv::compiler::likely(cpu.pending_exception == ~0U) &&
+    if (simrv::compiler::likely(cpu.pending_exception == ~Word(0)) &&
         simrv::compiler::likely(cpu.priv == kPrivMachine || (cpu.satp >> 31) == 0) &&
         simrv::compiler::likely(simrv::memory_detail::is_dram_addr(v_addr))) {
         return simrv::memory_detail::ram_read_fast(v_addr, funct3, machine_.mmem);
@@ -138,7 +138,7 @@ auto MemorySubsystem::target_read(CPU& cpu, Address v_addr, Instruction funct3) 
     Word rdata = 0;
     Address p_addr = 0;
     TLBEntry* entry =
-        &cpu.TLB_data_r[(v_addr >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1)];
+        &cpu.TLB_data_r.at((v_addr >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1));
 
     if (cpu.priv == kPrivMachine || (cpu.satp >> 31) == 0) {
         p_addr = v_addr;
@@ -155,7 +155,7 @@ auto MemorySubsystem::target_read(CPU& cpu, Address v_addr, Instruction funct3) 
         }
     }
 
-    if (cpu.pending_exception == ~0U) {
+    if (cpu.pending_exception == ~Word(0)) {
         if (simrv::memory_detail::is_dram_addr(p_addr)) {
             rdata = simrv::memory_detail::ram_read_fast(p_addr, funct3, machine_.mmem);
             return rdata;
@@ -171,7 +171,7 @@ auto MemorySubsystem::target_read(CPU& cpu, Address v_addr, Instruction funct3) 
 }
 
 void MemorySubsystem::target_write(CPU& cpu, Address v_addr, Word wdata, Instruction funct3) {
-    if (simrv::compiler::likely(cpu.pending_exception == ~0U) &&
+    if (simrv::compiler::likely(cpu.pending_exception == ~Word(0)) &&
         simrv::compiler::likely(cpu.priv == kPrivMachine || (cpu.satp >> 31) == 0) &&
         simrv::compiler::likely(simrv::memory_detail::is_dram_addr(v_addr))) {
         simrv::memory_detail::ram_write_fast(v_addr, wdata, funct3, machine_.mmem);
@@ -184,7 +184,7 @@ void MemorySubsystem::target_write(CPU& cpu, Address v_addr, Word wdata, Instruc
 
     Address p_addr = 0;
     TLBEntry* entry =
-        &cpu.TLB_data_w[(v_addr >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1)];
+        &cpu.TLB_data_w.at((v_addr >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1));
 
     if (cpu.priv == kPrivMachine || (cpu.satp >> 31) == 0) {
         p_addr = v_addr;
@@ -201,7 +201,7 @@ void MemorySubsystem::target_write(CPU& cpu, Address v_addr, Word wdata, Instruc
         }
     }
 
-    if (cpu.pending_exception == ~0U) {
+    if (cpu.pending_exception == ~Word(0)) {
         if (simrv::memory_detail::is_dram_addr(p_addr)) {
             simrv::memory_detail::ram_write_fast(p_addr, wdata, funct3, machine_.mmem);
             if (machine_.s_isatest && funct3 == static_cast<Instruction>(Funct3::Sw) &&

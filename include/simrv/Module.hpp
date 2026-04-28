@@ -16,8 +16,8 @@ namespace simrv::module {
  * @param ir Raw fetched instruction word.
  * @return Canonical instruction.
  */
-Instruction decompressInstruction(Instruction ir);
-[[gnu::always_inline]] inline Instruction decodeImmediate(Instruction ir) {
+auto decompressInstruction(Instruction ir) -> Instruction;
+[[gnu::always_inline]] inline auto decodeImmediate(Instruction ir) -> Instruction {
     switch (opcode_of(ir)) {
         case Opcode::OpImm:
         case Opcode::Load:
@@ -51,16 +51,16 @@ Instruction decompressInstruction(Instruction ir);
             return 0;
     }
 }
-OperationId decoder(Instruction ir);
+auto decoder(Instruction ir) -> OperationId;
 
 /// Integer ALU operation helper (includes M-extension forms).
-Register ALU_IM(Register in1, Register in2, Instruction funct3, Instruction funct7);
+auto ALU_IM(Register in1, Register in2, Instruction funct3, Instruction funct7) -> Register;
 /// Branch condition evaluation helper.
-Instruction ALU_B(Register in1, Register in2, Instruction funct3);
+auto ALU_B(Register in1, Register in2, Instruction funct3) -> Instruction;
 /// AMO operation helper.
-Register ALU_A(Register in1, Register in2, Instruction funct5);
+auto ALU_A(Register in1, Register in2, Instruction funct5) -> Register;
 /// CSR value update helper.
-CSRValue ALU_C(CSRValue rcsr, Register rrs1, Instruction imm, Instruction funct3);
+auto ALU_C(CSRValue rcsr, Register rrs1, Instruction imm, Instruction funct3) -> CSRValue;
 
 inline constexpr std::array<std::string_view, kOperationIdCount> OPERATION_NAME = {
     /* RV32I */

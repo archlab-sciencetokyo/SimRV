@@ -53,11 +53,11 @@ using CSRValue = Word;
 using CSRAddress = Address;
 using ImmValue = SignedWord;
 using TrapCause = Word;
-using PrivilegeLevel = Word;
+using PrivilegeLevel = uint8_t;
 
 inline constexpr unsigned kXLenBits = static_cast<unsigned>(sizeof(Word) * 8u);
 
-inline constexpr Word xlen_shift_mask() { return static_cast<Word>(kXLenBits - 1u); }
+inline constexpr auto xlen_shift_mask() -> Word { return static_cast<Word>(kXLenBits - 1u); }
 
 template <typename T>
 constexpr auto zero_extend(T value, unsigned bits) -> std::make_unsigned_t<T> {

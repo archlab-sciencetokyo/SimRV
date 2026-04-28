@@ -50,18 +50,20 @@ class PlicMmio : public MmioDevice {
     static constexpr Address kBaseAddress = simrv::mmio::kPlicBaseAddress;
     static constexpr Address kSize = simrv::mmio::kPlicSize;
 
-    const char* name() const override { return "plic"; }
-    Address base_address() const override { return kBaseAddress; }
-    Address size() const override { return kSize; }
-    bool read(Machine& machine, Address p_addr, Word& rdata) override;
-    bool write(Machine& machine, Address p_addr, Word wdata) override;
+    [[nodiscard]] auto name() const -> const char* override { return "plic"; }
+    [[nodiscard]] auto base_address() const -> Address override { return kBaseAddress; }
+    [[nodiscard]] auto size() const -> Address override { return kSize; }
+    auto read(Machine& machine, Address p_addr, Word& rdata) -> bool override;
+    auto write(Machine& machine, Address p_addr, Word wdata) -> bool override;
 
-    constexpr bool contains(Address addr) const {
+    [[nodiscard]] constexpr auto contains(Address addr) const -> bool {
         return addr >= kBaseAddress && addr < (kBaseAddress + kSize);
     }
-    constexpr Address offset(Address addr) const { return addr - kBaseAddress; }
+    [[nodiscard]] constexpr auto offset(Address addr) const -> Address {
+        return addr - kBaseAddress;
+    }
 
-    Word mmio_read(Address offset);
+    auto mmio_read(Address offset) -> Word;
     void mmio_write(Address offset, Word wdata);
 
    private:
@@ -79,18 +81,20 @@ class ClintMmio : public MmioDevice {
     static constexpr Address kBaseAddress = simrv::mmio::kClintBaseAddress;
     static constexpr Address kSize = simrv::mmio::kClintSize;
 
-    const char* name() const override { return "clint"; }
-    Address base_address() const override { return kBaseAddress; }
-    Address size() const override { return kSize; }
-    bool read(Machine& machine, Address p_addr, Word& rdata) override;
-    bool write(Machine& machine, Address p_addr, Word wdata) override;
+    [[nodiscard]] auto name() const -> const char* override { return "clint"; }
+    [[nodiscard]] auto base_address() const -> Address override { return kBaseAddress; }
+    [[nodiscard]] auto size() const -> Address override { return kSize; }
+    auto read(Machine& machine, Address p_addr, Word& rdata) -> bool override;
+    auto write(Machine& machine, Address p_addr, Word wdata) -> bool override;
 
-    constexpr bool contains(Address addr) const {
+    [[nodiscard]] constexpr auto contains(Address addr) const -> bool {
         return addr >= kBaseAddress && addr < (kBaseAddress + kSize);
     }
-    constexpr Address offset(Address addr) const { return addr - kBaseAddress; }
+    [[nodiscard]] constexpr auto offset(Address addr) const -> Address {
+        return addr - kBaseAddress;
+    }
 
-    Word mmio_read(Address offset) const;
+    [[nodiscard]] auto mmio_read(Address offset) const -> Word;
     void mmio_write(Address offset, Word wdata);
 
    private:

@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iomanip>
 #include <ios>
+#include <iostream>
 #include <memory>
 #include <print>
 #include <string>
@@ -103,62 +104,35 @@ static void binfile_gen(CPU* /*s*/, Byte* ram, Byte* sector) {
     exit(0);
 }
 
-static void load_image_into_ram(const std::string& file_path, Byte* ram) {
-    std::ifstream in(file_path, std::ios::binary);
-    if (!in.is_open()) {
-        std::println(stdout, "__ Error: image_file {} cannot be found", file_path);
-        exit(0);
+static void load_image_into_ram(const std::string& file_path, Byte* ram, std::size_t capacity,
+                                const char* image_name) {
+    if (ram == nullptr || capacity == 0) {
+        std::println(stderr, "__ Error: invalid destination for {} image load", image_name);
+        std::exit(1);
     }
-    uint8_t tmp = 0;
-    int i = 0;
-    while (in.read(reinterpret_cast<char*>(&tmp), sizeof(tmp))) {
-        ram[i++] = static_cast<Byte>(tmp);
-    }
-}
 
-static void load_image_file_into_ram(const std::string& file, Byte* ram) {
-    std::ifstream in(file, std::ios::binary);
+    std::ifstream in(file_path, std::ios::binary | std::ios::ate);
     if (!in.is_open()) {
-        std::println(stdout, "__ Error: image_file cannot be found");
-        exit(-1);
+        std::println(stderr, "__ Error: image_file {} cannot be found", file_path);
+        std::exit(1);
     }
-    uint8_t tmp = 0;
-    int file_size = 0;
-    while (in.read(reinterpret_cast<char*>(&tmp), sizeof(tmp))) {
-        ram[file_size++] = static_cast<Byte>(tmp);
+
+    const auto file_size = static_cast<std::size_t>(in.tellg());
+    if (file_size > capacity) {
+        std::println(stderr, "__ Error: {} image {} is too large ({} bytes > {} bytes capacity)",
+                     image_name, file_path, file_size, capacity);
+        std::exit(1);
+    }
+
+    in.seekg(0, std::ios::beg);
+    if (!in.read(reinterpret_cast<char*>(ram), static_cast<std::streamsize>(file_size))) {
+        std::println(stderr, "__ Error: failed to read {} image {}", image_name, file_path);
+        std::exit(1);
     }
 }
 
 static auto ram_read(Address addr, Instruction funct3, Byte* ram) -> Word {
     return simrv::memory_detail::ram_read_fast(addr, funct3, ram);
-}
-
-static auto disk_read(Address addr, Word n, Byte* dsk) -> Word {
-    if (n != 1 && n != 2 && n != 4) {
-        std::println("__ Error: dsk_r() not supported n={}", n);
-        exit(0);
-    }
-    Word data = 0;
-
-    for (int i = 0; std::cmp_less(i, n); i++) {
-        data |= static_cast<Word>(std::to_integer<uint8_t>(dsk[(addr + i)])) << (8 * i);
-    }
-    return data;
-}
-
-static auto queue_read(Address addr, QueueState* q) -> Word {
-    int const idx = static_cast<int>(addr / D_QUEUE_STRIDE);
-    if (QueueField const field = queue_field(addr % D_QUEUE_STRIDE); field != nullptr) {
-        return q[idx].*field;
-    }
-    return 0;
-}
-
-static void queue_write(Address addr, Word wdata, QueueState* q) {
-    int const idx = static_cast<int>(addr / D_QUEUE_STRIDE);
-    if (QueueField const field = queue_field(addr % D_QUEUE_STRIDE); field != nullptr) {
-        q[idx].*field = wdata;
-    }
 }
 
 auto page_walk(Address v_addr, Address* p_addr, PteAccess access, CPU* cpu, Byte* mmem) -> bool {
@@ -318,7 +292,7 @@ static void dump_init_artifacts(CPU* cpu, Byte* ram, Console* console, Disk* dis
     write_32("p.pc", cpu->pc);
     for (int i = 1; i < 32; ++i) {
         out << "p.regs.mem[" << std::dec << i << "]=32'h" << std::hex << std::setw(8)
-            << std::setfill('0') << cpu->reg[i] << ";\n";
+            << std::setfill('0') << cpu->reg.at(i) << ";\n";
     }
     write_32("p.mstatus     ", cpu->mstatus);
     write_32("p.mtvec       ", cpu->mtvec);
@@ -353,30 +327,30 @@ static void dump_init_artifacts(CPU* cpu, Byte* ram, Console* console, Disk* dis
 
     for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
         out << "mmu.TLB_inst_r.r_valid[" << std::dec << i
-            << "] =" << static_cast<int>(cpu->TLB_inst_r[i].p_addr != static_cast<Address>(-1U))
+            << "] =" << static_cast<int>(cpu->TLB_inst_r.at(i).p_addr != static_cast<Address>(-1U))
             << ";\n";
         out << "mmu.TLB_inst_r.mem[" << std::dec << i << "][39:22] =18'h" << std::hex
-            << std::setw(5) << std::setfill('0') << (cpu->TLB_inst_r[i].v_addr >> 14) << ";\n";
+            << std::setw(5) << std::setfill('0') << (cpu->TLB_inst_r.at(i).v_addr >> 14) << ";\n";
         out << "mmu.TLB_inst_r.mem[" << std::dec << i << "][21:0] =22'h" << std::hex << std::setw(6)
-            << std::setfill('0') << (cpu->TLB_inst_r[i].p_addr >> 10) << ";\n";
+            << std::setfill('0') << (cpu->TLB_inst_r.at(i).p_addr >> 10) << ";\n";
     }
     for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
         out << "mmu.TLB_data_r.r_valid[" << std::dec << i
-            << "] =" << static_cast<int>(cpu->TLB_data_r[i].p_addr != static_cast<Address>(-1U))
+            << "] =" << static_cast<int>(cpu->TLB_data_r.at(i).p_addr != static_cast<Address>(-1U))
             << ";\n";
         out << "mmu.TLB_data_r.mem[" << std::dec << i << "][39:22] =18'h" << std::hex
-            << std::setw(5) << std::setfill('0') << (cpu->TLB_data_r[i].v_addr >> 14) << ";\n";
+            << std::setw(5) << std::setfill('0') << (cpu->TLB_data_r.at(i).v_addr >> 14) << ";\n";
         out << "mmu.TLB_data_r.mem[" << std::dec << i << "][21:0] =22'h" << std::hex << std::setw(6)
-            << std::setfill('0') << (cpu->TLB_data_r[i].p_addr >> 10) << ";\n";
+            << std::setfill('0') << (cpu->TLB_data_r.at(i).p_addr >> 10) << ";\n";
     }
     for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
         out << "mmu.TLB_data_w.r_valid[" << std::dec << i
-            << "] =" << static_cast<int>(cpu->TLB_data_w[i].p_addr != static_cast<Address>(-1U))
+            << "] =" << static_cast<int>(cpu->TLB_data_w.at(i).p_addr != static_cast<Address>(-1U))
             << ";\n";
         out << "mmu.TLB_data_w.mem[" << std::dec << i << "][39:22] =18'h" << std::hex
-            << std::setw(5) << std::setfill('0') << (cpu->TLB_data_w[i].v_addr >> 14) << ";\n";
+            << std::setw(5) << std::setfill('0') << (cpu->TLB_data_w.at(i).v_addr >> 14) << ";\n";
         out << "mmu.TLB_data_w.mem[" << std::dec << i << "][21:0] =22'h" << std::hex << std::setw(6)
-            << std::setfill('0') << (cpu->TLB_data_w[i].p_addr >> 10) << ";\n";
+            << std::setfill('0') << (cpu->TLB_data_w.at(i).p_addr >> 10) << ";\n";
     }
 
     write_32("mmu.console.QueueSel       ", console->QueueSel);
@@ -444,8 +418,9 @@ void Machine::write_instruction_mix_report() {
     out << "INSTRUCTION MIX\n";
     int total = 0;
     for (int i = 0; i < OperationIdCount; i++) {
-        out << simrv::module::OPERATION_NAME[i] << " : " << std::setw(10) << e_instmix[i] << '\n';
-        total += e_instmix[i];
+        out << simrv::module::OPERATION_NAME.at(i) << " : " << std::setw(10) << e_instmix.at(i)
+            << '\n';
+        total += e_instmix.at(i);
     }
     out << "TOTAL_____ : " << std::setw(10) << total << '\n';
     std::println("__ file instmix.txt was generated after {} cycle", cpu.mtime);
@@ -503,7 +478,7 @@ void Machine::prepare_cycle() {
 
     if (cpu.mtime > s_enabletimer) { /* enable timer after linux boot */
         console->fifo_en = static_cast<Byte>(1);
-        console->cons_fifo = kSyntheticInput[adr % static_cast<int>(kSyntheticInput.size())];
+        console->cons_fifo = kSyntheticInput.at(adr % static_cast<int>(kSyntheticInput.size()));
 
         if ((cpu.mtime & static_cast<Counter>(0xfffff)) == 0 &&
             console->fifo_en != static_cast<Byte>(0)) {  // 2019-08-30
@@ -519,7 +494,7 @@ void Machine::prepare_cycle() {
         }
     }
 
-    cpu.pending_exception = ~0U; /* initialize regs */
+    cpu.pending_exception = ~Word(0); /* initialize regs */
     cpu.pending_tval = 0;        /* initialize regs */
 }
 
@@ -636,7 +611,7 @@ void Machine::write_trace_snapshot() {
 
     for (int i = 0; i < 4; i++) { /* output registers */
         for (int j = 0; j < 8; j++) {
-            write_hex(cpu.reg[(i * 8) + j]);
+            write_hex(cpu.reg.at((i * 8) + j));
             s_fp_trace << (j != 7 ? ' ' : '\n');
         }
     }
@@ -697,23 +672,23 @@ void Machine::write_trace_snapshot() {
 
         if (!s_rtosmode) {
             for (int i = 0; i < 4; i++) {
-                write_hex(cpu.TLB_inst_r[i].v_addr);
+                write_hex(cpu.TLB_inst_r.at(i).v_addr);
                 s_fp_trace << ' ';
-                write_hex(cpu.TLB_inst_r[i].p_addr);
-                s_fp_trace << ' ';
-            }
-            s_fp_trace << '\n';
-            for (int i = 0; i < 4; i++) {
-                write_hex(cpu.TLB_data_r[i].v_addr);
-                s_fp_trace << ' ';
-                write_hex(cpu.TLB_data_r[i].p_addr);
+                write_hex(cpu.TLB_inst_r.at(i).p_addr);
                 s_fp_trace << ' ';
             }
             s_fp_trace << '\n';
             for (int i = 0; i < 4; i++) {
-                write_hex(cpu.TLB_data_w[i].v_addr);
+                write_hex(cpu.TLB_data_r.at(i).v_addr);
                 s_fp_trace << ' ';
-                write_hex(cpu.TLB_data_w[i].p_addr);
+                write_hex(cpu.TLB_data_r.at(i).p_addr);
+                s_fp_trace << ' ';
+            }
+            s_fp_trace << '\n';
+            for (int i = 0; i < 4; i++) {
+                write_hex(cpu.TLB_data_w.at(i).v_addr);
+                s_fp_trace << ' ';
+                write_hex(cpu.TLB_data_w.at(i).p_addr);
                 s_fp_trace << ' ';
             }
             s_fp_trace << '\n';
@@ -774,10 +749,9 @@ static void load_devicetree(Byte* ram) {
         0x65646e65, 0x69720064, 0x2c766373, 0x7665646e, 0x6f6f6200, 0x67726174, 0xff0073,
         0x0};
     Word* p = reinterpret_cast<Word*>(ram);
-    for (std::size_t i = 0; i < tbuf.size(); i++) { p[i] = tbuf[i];
-}
-
-    
+    for (std::size_t i = 0; i < tbuf.size(); i++) {
+        p[i] = tbuf.at(i);
+    }
 }
 
 /**
@@ -790,7 +764,7 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
     console = std::make_unique<Console>();
     mmem_owner_.reset(static_cast<Byte*>(std::calloc(simrv::memory::kDramSize, sizeof(Byte))));
     if (mmem_owner_ == nullptr) {
-        std::println(stderr, "Error: failed to allocate main memory ({} bytes)",
+        std::println(std::cerr, "Error: failed to allocate main memory ({} bytes)",
                      static_cast<std::size_t>(simrv::memory::kDramSize));
         return 1;
     }
@@ -816,16 +790,25 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
     cpu.reg[11] = linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0;
     cpu.TLB_flush();
 
-    load_image_into_ram(s_fn_memimg, mmem);  // load a memory image file
+    load_image_into_ram(s_fn_memimg, mmem, static_cast<std::size_t>(simrv::memory::kDramSize),
+                        "memory");  // load a memory image file
 
     if (s_fn_dvtree.empty()) {
         load_devicetree(mmem + dtb_offset);
     } else {
-        load_image_into_ram(s_fn_dvtree, mmem + dtb_offset);
-}
+        if (dtb_offset >= simrv::memory::kDramSize) {
+            std::println(std::cerr, "__ Error: device-tree load offset is outside DRAM");
+            return 1;
+        }
+        const auto dt_cap = static_cast<std::size_t>(simrv::memory::kDramSize - dtb_offset);
+        load_image_into_ram(s_fn_dvtree, mmem + dtb_offset, dt_cap, "device-tree");
+    }
 
-    if (s_use_disk) { load_image_into_ram(s_fn_dskimg, disk->sector);  // load a disk image file
-}
+    if (s_use_disk) {
+        load_image_into_ram(s_fn_dskimg, disk->sector,
+                            static_cast<std::size_t>(simrv::virtio::kDiskSize),
+                            "disk");  // load a disk image file
+    }
 
     if (s_use_mix) {
         for (int& i : e_instmix) { i = 0;
@@ -836,13 +819,7 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
         cpu.misa = s_misa_profile;
     } else if (s_rtosmode) {
         cpu.misa = misa_profile_bits(MisaProfile::I);
-}
-
-    // #ifdef MIDDLE
-    // #include "xinitreg.txt"
-    // load_image_file_into_ram("xinitmem.bin", mmem);
-    // disk->load_file("xinitdisk.bin", s_appmode);
-    // #endif
+    }
     return 0;
 }
 

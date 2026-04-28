@@ -18,7 +18,8 @@ class DecodeUnit {
      * @param raw_ir Raw instruction bits fetched from memory.
      * @return Expanded 32-bit instruction form.
      */
-    [[nodiscard]] constexpr Instruction decompressInstruction(Instruction raw_ir) const noexcept {
+    [[nodiscard]] constexpr auto decompressInstruction(Instruction raw_ir) const noexcept
+        -> Instruction {
         return simrv::module::decompressInstruction(raw_ir);
     }
 
@@ -27,7 +28,7 @@ class DecodeUnit {
      * @param ir Canonical 32-bit instruction.
      * @return Sign-extended immediate value.
      */
-    [[nodiscard]] constexpr Instruction decodeImmediate(Instruction ir) const noexcept {
+    [[nodiscard]] constexpr auto decodeImmediate(Instruction ir) const noexcept -> Instruction {
         return simrv::module::decodeImmediate(ir);
     }
 
@@ -36,11 +37,12 @@ class DecodeUnit {
      * @param ir Canonical 32-bit instruction.
      * @return Operation identifier for pipeline execution.
      */
-    [[nodiscard]] constexpr OperationId decodeOperation(Instruction ir) const noexcept {
+    [[nodiscard]] constexpr auto decodeOperation(Instruction ir) const noexcept -> OperationId {
         return simrv::module::decoder(ir);
     }
 
-    [[nodiscard]] static constexpr bool isCompressedInstruction(Instruction raw_ir) noexcept {
+    [[nodiscard]] static constexpr auto isCompressedInstruction(Instruction raw_ir) noexcept
+        -> bool {
         return (raw_ir & 3u) != 3u;
     }
 };

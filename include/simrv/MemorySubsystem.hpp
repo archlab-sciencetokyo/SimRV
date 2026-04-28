@@ -6,8 +6,6 @@
 
 #include <memory>
 
-#include "Define.hpp"
-#include "MemoryUtil.hpp"
 #include "Mmu.hpp"
 
 class Machine;
@@ -21,7 +19,7 @@ class MemorySubsystem {
     /// Initialize MMU after CPU is constructed
     void initialize_mmu();
 
-    Word target_read(CPU& cpu, Address v_addr, Instruction funct3);
+    auto target_read(CPU& cpu, Address v_addr, Instruction funct3) -> Word;
     void target_write(CPU& cpu, Address v_addr, Word wdata, Instruction funct3);
 
    private:
