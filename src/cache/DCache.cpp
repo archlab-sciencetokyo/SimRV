@@ -1,0 +1,84 @@
+/**
+ * @file DCache.cpp
+ * @brief Level-1 Data Cache implementation.
+ */
+#include "simrv/cache/DCache.hpp"
+
+#include <algorithm>
+#include <cstring>
+
+#include "simrv/Define.hpp"
+#include "simrv/xlen/Math.hpp"
+
+namespace simrv::cache {
+
+auto DCache::read(Address addr, Word& data, Instruction funct3) -> bool {
+    ++access_tick_;
+    const uint32_t set_idx = get_set_index(addr);
+    const Address tag = get_tag(addr);
+    const unsigned size_bytes = 1u << (funct3 & 0x3u);
+
+    for (auto& line : sets_[set_idx]) {
+        if (line.valid && line.tag == tag) {
+            const uint32_t byte_offset = addr & (kLineBytes - 1u);
+            if (simrv::compiler::unlikely(byte_offset + size_bytes > kLineBytes)) {
+                ++misses_;
+                return false;
+            }
+
+            Word raw = 0;
+            std::memcpy(&raw, line.data.data() + byte_offset, size_bytes);
+
+            if ((funct3 & 0x4u) == 0) {  // Signed load
+                data = sign_extend(raw, 8 * size_bytes);
+            } else {
+                data = raw;
+            }
+
+            line.last_used = access_tick_;
+            ++hits_;
+            return true;
+        }
+    }
+    ++misses_;
+    return false;
+}
+
+void DCache::write(Address addr, Word data, Instruction funct3) {
+    const uint32_t set_idx = get_set_index(addr);
+    const Address tag = get_tag(addr);
+    const unsigned size_bytes = 1u << (funct3 & 0x3u);
+
+    for (auto& line : sets_[set_idx]) {
+        if (line.valid && line.tag == tag) {
+            const uint32_t byte_offset = addr & (kLineBytes - 1u);
+            if (simrv::compiler::likely(byte_offset + size_bytes <= kLineBytes)) {
+                std::memcpy(line.data.data() + byte_offset, &data, size_bytes);
+            }
+            break;
+        }
+    }
+}
+
+void DCache::insert(Address base_addr, const Byte* line_data) {
+    ++access_tick_;
+    auto& set = sets_[get_set_index(base_addr)];
+    CacheLine* victim = &set[0];
+    for (auto& line : set) {
+        if (!line.valid) {
+            victim = &line;
+            break;
+        }
+        if (line.last_used < victim->last_used) {
+            victim = &line;
+        }
+    }
+    victim->tag = get_tag(base_addr);
+    victim->valid = true;
+    victim->last_used = access_tick_;
+    std::memcpy(victim->data.data(), line_data, kLineBytes);
+}
+
+void DCache::flush() { std::ranges::fill(sets_, std::array<CacheLine, kWays>{}); }
+
+}  // namespace simrv::cache

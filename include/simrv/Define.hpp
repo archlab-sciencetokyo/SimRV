@@ -4,24 +4,20 @@
  */
 #pragma once
 
-#include <sys/select.h>
-#include <sys/stat.h>
-#include <sys/time.h>
-#include <termios.h>
-#include <unistd.h>
-
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <utility>
 
-#include "XLen.hpp"
+#include "simrv/xlen/Constants.hpp"
+#include "simrv/xlen/Types.hpp"
 
-namespace simrv::boot {
-inline constexpr Address kStartPc = static_cast<Address>(0x80000000u);
-inline constexpr Address kInitDataAddress = static_cast<Address>(0x01000000u);
-}  // namespace simrv::boot
+#ifndef SIMRV_CORE_COUNT
+#define SIMRV_CORE_COUNT 1
+#endif
+inline constexpr unsigned kCoreCount = SIMRV_CORE_COUNT;
 
 using DumpFlags = uint8_t;
 
@@ -49,25 +45,7 @@ constexpr uint32_t LEVELS = 2;
 constexpr uint32_t PTE_SIZE = 4;
 constexpr uint32_t PAGE_SIZE = (1u << 12);
 
-namespace simrv::virtio {
-inline constexpr Address kBaseAddress = static_cast<Address>(0x40000000u);
-inline constexpr Address kRegionSize = static_cast<Address>(0x08000000u);
-inline constexpr uint32_t kConsoleMaxQueueNum = 2;
-inline constexpr uint32_t kConsoleIrq = 1;
-inline constexpr uint32_t kDiskSectorSize = 512;
-inline constexpr uint32_t kDiskBufferSize = (512u * 512u);
-inline constexpr uint32_t kDiskSize = (128u * 1024u * 1024u);
-inline constexpr uint32_t kDiskMaxQueueNum = 4;
-inline constexpr uint32_t kDiskIrq = 2;
-
-inline constexpr Word kDiskMagicValue = 0x74726976;
-inline constexpr Word kDiskVersion = 2;
-inline constexpr Word kDiskDeviceId = 2;
-inline constexpr Word kDiskVendorId = 0xffff;
-inline constexpr Word kDiskDeviceFeatures = 1;
-inline constexpr Word kDiskConfigGeneration = 0;
-inline constexpr Word kDiskQueueNumMax = 4;
-}  // namespace simrv::virtio
+// Virtio vring descriptor and block device status/type enums
 
 using VringDescFlags = uint8_t;
 enum class VringDescFlag : VringDescFlags {
@@ -88,25 +66,6 @@ enum class VirtioBlkStatus : uint8_t {
 };
 
 constexpr Address DISK_MASK = static_cast<Address>(0x03ffffffu);
-
-namespace simrv::mmio {
-inline constexpr Address kPlicBaseAddress = static_cast<Address>(0x50000000u);
-inline constexpr Address kPlicSize = static_cast<Address>(0x00400000u);
-inline constexpr Address kPlicHartBase = static_cast<Address>(0x00200000u);
-inline constexpr Address kPlicHartSize = static_cast<Address>(0x00001000u);
-inline constexpr Address kClintBaseAddress = static_cast<Address>(0x60000000u);
-inline constexpr Address kClintSize = static_cast<Address>(0x000c0000u);
-}  // namespace simrv::mmio
-
-namespace simrv::memory {
-inline constexpr Address kDramBaseAddress = static_cast<Address>(0x80000000u);
-inline constexpr Address kDramSize = static_cast<Address>(64u * 1024u * 1024u);
-inline constexpr Address kDramMask = static_cast<Address>(0x03ffffffu);
-inline constexpr unsigned kPageShift = 12;
-inline constexpr Address kPageMask = static_cast<Address>(0x00000fffu);
-inline constexpr uint32_t kTlbSize = 4;
-inline constexpr size_t kLocalCoreMemorySize = (static_cast<const size_t>(32u * 1024u));
-}  // namespace simrv::memory
 
 namespace simrv::compiler {
 template <typename T>
@@ -129,7 +88,7 @@ constexpr auto unlikely(T value) -> bool {
 }  // namespace simrv::compiler
 
 enum class TrapFlag : TrapCause {
-    Interrupt = static_cast<TrapCause>(1u << 31),
+    Interrupt = static_cast<TrapCause>(Word{1} << (kXLenBits - 1u)),
 };
 
 enum class ExceptionCode : TrapCause {
@@ -199,8 +158,8 @@ enum class PrivilegeMode : PrivilegeLevel {
 };
 
 template <typename EnumType>
-constexpr auto enum_mask(EnumType bit) -> std::underlying_type_t<EnumType> {
-    return static_cast<std::underlying_type_t<EnumType>>(bit);
+constexpr auto enum_mask(EnumType bit) {
+    return std::to_underlying(bit);
 }
 
 template <typename EnumType>
@@ -209,6 +168,16 @@ constexpr bool has_enum_mask(std::underlying_type_t<EnumType> value, EnumType bi
 }
 
 constexpr TrapCause kInterruptCauseBit = enum_mask(TrapFlag::Interrupt);
+constexpr TrapCause kExceptionCodeMask = static_cast<TrapCause>(kInterruptCauseBit - 1u);
+
+constexpr auto trap_exception_code(TrapCause cause) -> TrapCause {
+    return cause & kExceptionCodeMask;
+}
+
+constexpr auto trap_is_interrupt(TrapCause cause) -> bool {
+    return (cause & kInterruptCauseBit) != 0u;
+}
+
 constexpr PrivilegeLevel kPrivUser = static_cast<PrivilegeLevel>(PrivilegeMode::User);
 constexpr PrivilegeLevel kPrivSupervisor = static_cast<PrivilegeLevel>(PrivilegeMode::Supervisor);
 constexpr PrivilegeLevel kPrivMachine = static_cast<PrivilegeLevel>(PrivilegeMode::Machine);
@@ -223,67 +192,13 @@ constexpr CSRValue kSstatusMask =
      enum_mask(MstatusBit::Spie) | enum_mask(MstatusBit::Spp) | enum_mask(MstatusBit::Fs) |
      enum_mask(MstatusBit::Xs) | enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr));
 constexpr CSRValue kMstatusFsDirty = enum_mask(MstatusBit::Fs);
-constexpr CSRValue kMstatusSd = static_cast<CSRValue>(1u << 31);
-constexpr CSRValue kMstatusSstatusReadMask = static_cast<CSRValue>(0x000de133u);
-constexpr CSRValue kMstatusReadMask = static_cast<CSRValue>(0xffffffffu);
+constexpr CSRValue kMstatusSd = static_cast<CSRValue>(Word{1} << (kXLenBits - 1u));
+constexpr CSRValue kMstatusSstatusReadMask = static_cast<CSRValue>(0x000de133u) | kMstatusSd;
+constexpr CSRValue kMstatusReadMask = static_cast<CSRValue>(kXLenMask);
 constexpr CSRValue kFflagsMask = static_cast<CSRValue>(0x1fu);
 constexpr CSRValue kFrmMask = static_cast<CSRValue>(0x7u);
 constexpr CSRValue kFcsrMask = static_cast<CSRValue>(0xffu);
 constexpr unsigned kFrmShift = 5;
-
-struct MstatusFields {
-    Word uie : 1;
-    Word sie : 1;
-    Word hie : 1;
-    Word mie : 1;
-    Word upie : 1;
-    Word spie : 1;
-    Word hpie : 1;
-    Word mpie : 1;
-    Word spp : 1;
-    Word hpp : 2;
-    Word mpp : 2;
-    Word fs : 2;
-    Word xs : 2;
-    Word mprv : 1;
-    Word sum : 1;
-    Word mxr : 1;
-    Word reserved : 12;
-};
-
-union MstatusView {
-    Word rawValue;
-    MstatusFields bits;
-
-    explicit MstatusView(CSRValue raw = 0) : rawValue(static_cast<Word>(raw)) {}
-
-    [[nodiscard]] auto raw() const -> CSRValue { return static_cast<CSRValue>(rawValue); }
-};
-
-struct MipFields {
-    Word usip : 1;
-    Word ssip : 1;
-    Word hsip : 1;
-    Word msip : 1;
-    Word utip : 1;
-    Word stip : 1;
-    Word htip : 1;
-    Word mtip : 1;
-    Word ueip : 1;
-    Word seip : 1;
-    Word heip : 1;
-    Word meip : 1;
-    Word reserved : 20;
-};
-
-union MipView {
-    Word rawValue;
-    MipFields bits;
-
-    explicit MipView(CSRValue raw = 0) : rawValue(static_cast<Word>(raw)) {}
-
-    CSRValue raw() const { return static_cast<CSRValue>(rawValue); }
-};
 
 enum class Csr : CSRAddress {
     Ustatus = 0x000,
@@ -364,12 +279,17 @@ enum class AmoStatus : uint8_t {
     Failure = 1,
 };
 
-enum class Opcode : uint8_t {
+enum class CompressedOpcode : uint8_t {
     C0 = 0x0,
     C1 = 0x1,
     C2 = 0x2,
-    W = 0x3,
+    C3 = 0x3,
+};
+
+enum class Opcode : uint8_t {
+    OpImm32 = 0x1B,
     Op = 0x33,
+    Op32 = 0x3B,
     OpFp = 0x53,
     Amo = 0x2F,
     OpImm = 0x13,
@@ -438,6 +358,62 @@ enum class Funct3 : uint8_t {
     Csrrci = 0x7,
 };
 
+enum class Funct7Fp : Word {
+    FaddS = 0x00,
+    FaddD = 0x01,
+    FsubS = 0x04,
+    FsubD = 0x05,
+    FmulS = 0x08,
+    FmulD = 0x09,
+    FdivS = 0x0c,
+    FdivD = 0x0d,
+    FsqrtS = 0x2c,
+    FsqrtD = 0x2d,
+    FsgnjS = 0x10,
+    FsgnjD = 0x11,
+    FminmaxS = 0x14,
+    FminmaxD = 0x15,
+    FcvtSD = 0x20,
+    FcvtDS = 0x21,
+    FcmpS = 0x50,
+    FcmpD = 0x51,
+    FcvtWS = 0x60,
+    FcvtWD = 0x61,
+    FcvtSW = 0x68,
+    FcvtDW = 0x69,
+    FmvXW = 0x70,
+    FmvXD = 0x71,
+    FmvWX = 0x78,
+    FmvDX = 0x79,
+};
+
+enum class Funct3Fp : Word {
+    Min = 0x0,
+    Max = 0x1,
+    Leq = 0x0,
+    Lt = 0x1,
+    Eq = 0x2,
+    FmvXW = 0x0,
+    Fclass = 0x1,
+};
+
+enum class FflagsBit : uint32_t {
+    Nx = 0x01,
+    Uf = 0x02,
+    Of = 0x04,
+    Dz = 0x08,
+    Nv = 0x10,
+};
+
+enum class RoundingMode : Word {
+    Rne = 0x0,
+    Rtz = 0x1,
+    Rdn = 0x2,
+    Rup = 0x3,
+    Rmm = 0x4,
+    Dyn = 0x7,
+};
+
 enum class Funct12Priv : uint16_t {
     Ecall = 0x000,
     Ebreak = 0x001,
@@ -467,8 +443,8 @@ enum class Funct5Amo : uint8_t {
 
 constexpr auto opcode_of(Instruction ir) -> Opcode { return static_cast<Opcode>(ir & 0x7F); }
 
-constexpr auto compressed_opcode_of(CompressedInstruction ir) -> Opcode {
-    return static_cast<Opcode>(ir & 0x3);
+constexpr auto compressed_opcode_of(CompressedInstruction ir) -> CompressedOpcode {
+    return static_cast<CompressedOpcode>(ir & 0x3);
 }
 
 constexpr auto funct3_of(Instruction ir) -> Funct3 { return static_cast<Funct3>((ir >> 12) & 0x7); }
@@ -555,6 +531,7 @@ constexpr auto required_extension_for_instruction(Instruction ir, bool compresse
         case Opcode::Amo:
             return IsaExtension::A;
         case Opcode::Op:
+        case Opcode::Op32:
             return (funct7_of(ir) & 0x1u) ? IsaExtension::M : IsaExtension::I;
         case Opcode::LoadFp:
         case Opcode::StoreFp:
@@ -590,11 +567,14 @@ enum OperationId : uint8_t {
     LB,
     LH,
     LW,
+    LD,
     LBU,
     LHU,
+    LWU,
     SB,
     SH,
     SW,
+    SD,
     ADDI,
     SLTI,
     SLTIU,
@@ -604,6 +584,10 @@ enum OperationId : uint8_t {
     SLLI,
     SRLI,
     SRAI,
+    ADDIW,
+    SLLIW,
+    SRLIW,
+    SRAIW,
     ADD,
     SUB,
     SLL,
@@ -614,6 +598,11 @@ enum OperationId : uint8_t {
     SRA,
     OR,
     AND,
+    ADDW,
+    SUBW,
+    SLLW,
+    SRLW,
+    SRAW,
     FENCE,
     FENCE_I,
     ECALL,
@@ -639,6 +628,11 @@ enum OperationId : uint8_t {
     DIVU,
     REM,
     REMU,
+    MULW,
+    DIVW,
+    DIVUW,
+    REMW,
+    REMUW,
     /* RV32A */
     LR_W,
     SC_W,
@@ -730,28 +724,3 @@ constexpr OperationId kOpRangeRv32dBegin = FLD;
 constexpr OperationId kOpRangeRv32dEnd = FCVT_D_WU;
 
 constexpr size_t kOperationIdCount = static_cast<size_t>(OperationIdCount);
-
-struct QueueState {
-    Word Ready;
-    Word Notify;
-    Address DescLow;
-    Address DescHigh;
-    Address AvailLow;
-    Address AvailHigh;
-    Address UsedLow;
-    Address UsedHigh;
-    Word last_avail_idx;  //    uint16_t last_avail_idx;
-};
-
-struct BlockRequestHeader {
-    Word type;
-    Word ioprio;
-    Counter sector_num;
-};
-
-struct Descriptor {
-    Counter adr;
-    Word len;
-    uint16_t flags;
-    uint16_t next;
-};

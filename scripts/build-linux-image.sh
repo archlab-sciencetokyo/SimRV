@@ -286,9 +286,9 @@ Toolchain Detection:
 Output:
   Generates in $IMAGES_DIR/:
     - vmlinux           Kernel image
-  - root.bin          Root filesystem image
-  - devicetree.dtb    Device tree blob
-  - setup.sh          Environment setup script for SimRV
+    - root.bin          Root filesystem image
+    - devicetree.dtb    Device tree blob
+    - setup.sh          Environment setup script for SimRV
 
 Example:
   ./scripts/build-linux-image.sh

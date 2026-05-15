@@ -60,6 +60,12 @@ TOHOST_ADDR="${SIMRV_ISA_TOHOST:-0x80001000}"
 LOG_DIR="${SIMRV_ISA_LOG_DIR:-isa_logs}"
 WORK_DIR="${SIMRV_ISA_WORK_DIR:-.isa_tmp}"
 SIMRV_BIN="${SIMRV_BIN:-./build/ninja-clang-release/SimRV}"
+ISA_XLEN="${SIMRV_ISA_XLEN:-32}"
+
+if [[ "$ISA_XLEN" != "32" && "$ISA_XLEN" != "64" ]]; then
+  echo "ERROR: SIMRV_ISA_XLEN must be 32 or 64 (got: $ISA_XLEN)"
+  exit 2
+fi
 
 mkdir -p "$LOG_DIR" "$WORK_DIR"
 
@@ -67,7 +73,7 @@ echo "== SimRV riscv-isa-tests runner =="
 echo "RISCV_TESTS_DIR=$RISCV_TESTS_DIR"
 echo "OBJCOPY=$OBJCOPY"
 echo "RISCV_PREFIX=${RISCV_PREFIX:-<unset>}"
-echo "TIMEOUT=$TIMEOUT_SECS END=$END_INSNS TOHOST=$TOHOST_ADDR"
+echo "XLEN=$ISA_XLEN TIMEOUT=$TIMEOUT_SECS END=$END_INSNS TOHOST=$TOHOST_ADDR"
 
 if [[ "${SIMRV_SKIP_BUILD:-0}" != "1" ]]; then
   CMAKE_PRESET="${SIMRV_CMAKE_PRESET:-ninja-clang-release}"
@@ -86,15 +92,70 @@ fi
 if [[ -n "${SIMRV_ISA_LIST:-}" ]]; then
   mapfile -t TESTS < <(printf '%s\n' "$SIMRV_ISA_LIST" | tr ',' '\n' | sed '/^$/d')
 else
-  TESTS=(
-    rv32ui-p-add
-    rv32ui-p-addi
-    rv32ui-p-and
-    rv32ui-p-beq
-    rv32ui-p-bne
-    rv32ui-p-lw
-    rv32ui-p-sw
-  )
+  if [[ "$ISA_XLEN" == "64" ]]; then
+    TESTS=(
+      rv64ui-p-add
+      rv64ui-p-addi
+      rv64ui-p-and
+      rv64ui-p-auipc
+      rv64ui-p-beq
+      rv64ui-p-bge
+      rv64ui-p-bgeu
+      rv64ui-p-blt
+      rv64ui-p-bltu
+      rv64ui-p-bne
+      rv64ui-p-jal
+      rv64ui-p-jalr
+      rv64ui-p-lb
+      rv64ui-p-lbu
+      rv64ui-p-lh
+      rv64ui-p-lhu
+      rv64ui-p-lw
+      rv64ui-p-lwu
+      rv64ui-p-or
+      rv64ui-p-sb
+      rv64ui-p-sd
+      rv64ui-p-sh
+      rv64ui-p-sw
+      rv64ui-p-sll
+      rv64ui-p-slli
+      rv64ui-p-slt
+      rv64ui-p-sltu
+      rv64ui-p-sra
+      rv64ui-p-srai
+      rv64ui-p-srl
+      rv64ui-p-srli
+      rv64ui-p-sub
+      rv64ui-p-xor
+      rv64um-p-mul
+      rv64um-p-mulh
+      rv64um-p-mulhsu
+      rv64um-p-mulhu
+      rv64um-p-div
+      rv64um-p-divu
+      rv64um-p-rem
+      rv64um-p-remu
+      rv64ua-p-amoadd_w
+      rv64ua-p-amomax_w
+      rv64ua-p-amomaxu_w
+      rv64ua-p-amomin_w
+      rv64ua-p-amominu_w
+      rv64ua-p-amoor_w
+      rv64ua-p-amoswap_w
+      rv64ua-p-amoxor_w
+      rv64ua-p-lrsc
+    )
+  else
+    TESTS=(
+      rv32ui-p-add
+      rv32ui-p-addi
+      rv32ui-p-and
+      rv32ui-p-beq
+      rv32ui-p-bne
+      rv32ui-p-lw
+      rv32ui-p-sw
+    )
+  fi
 fi
 
 PASS=0
@@ -106,7 +167,7 @@ for t in "${TESTS[@]}"; do
   if [[ ! -f "$ELF" ]]; then
     if [[ -n "$RISCV_PREFIX" ]]; then
       echo "[MAKE] $t"
-      if ! make -C "$ISA_DIR" -f ../isa/Makefile src_dir=../isa XLEN=32 RISCV_PREFIX="$RISCV_PREFIX" "$t" >/dev/null 2>&1; then
+      if ! make -C "$ISA_DIR" -f ../isa/Makefile src_dir=../isa XLEN="$ISA_XLEN" RISCV_PREFIX="$RISCV_PREFIX" "$t" >/dev/null 2>&1; then
         echo "[SKIP] $t (build failed in riscv-tests/isa)"
         SKIP=$((SKIP + 1))
         continue

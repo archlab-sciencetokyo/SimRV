@@ -17,6 +17,17 @@
             }
         },
         {
+            "name": "ninja-clang-release-rv64",
+            "displayName": "Ninja + clang (Release, RV64)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/ninja-clang-release-rv64",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "SIMRV_XLEN": "64"
+            }
+        },
+        {
             "name": "ninja-gcc-o3-lto",
             "displayName": "Ninja + gcc (Release, O3 + LTO)",
             "generator": "Ninja",
@@ -28,6 +39,16 @@
                 "CMAKE_EXE_LINKER_FLAGS_RELEASE": "-flto",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
             }
+        },
+        {
+            "name": "ninja-clang-debug",
+            "displayName": "Ninja + clang (Debug)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/ninja-clang-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -36,8 +57,16 @@
             "configurePreset": "ninja-clang-release"
         },
         {
+            "name": "ninja-clang-release-rv64",
+            "configurePreset": "ninja-clang-release-rv64"
+        },
+        {
             "name": "ninja-gcc-o3-lto",
             "configurePreset": "ninja-gcc-o3-lto"
+        },
+        {
+            "name": "ninja-clang-debug",
+            "configurePreset": "ninja-clang-debug"
         }
     ]
 }
