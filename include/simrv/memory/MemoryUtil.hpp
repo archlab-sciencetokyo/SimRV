@@ -52,7 +52,8 @@ concept StoreFunct3Like = std::unsigned_integral<T>;
 
 /// Check if a physical address is within DRAM range
 inline auto is_dram_addr(Address p_addr) -> bool {
-    return p_addr >= simrv::memory::kDramBaseAddress;
+    return p_addr >= simrv::memory::kDramBaseAddress &&
+           p_addr < (simrv::memory::kDramBaseAddress + simrv::memory::kDramSize);
 }
 
 /// Check if a physical address is in a legacy reserved region (MMIO)
@@ -77,7 +78,7 @@ constexpr auto store_width_bytes(Instruction funct3) -> size_t {
     const auto base_width = static_cast<size_t>(1u << (funct3 & kStoreSizeMask));
 
     // In RV64, SD (funct3=3) is 8 bytes; in RV32, it's treated as word (4 bytes)
-    if constexpr (kXLenBits == 64) {
+    if constexpr (simrv::xlen::kIsXLen64) {
         if ((funct3 & kStoreSizeMask) == 3u) {
             return 8u;  // SD instruction in RV64
         }
@@ -141,7 +142,7 @@ inline auto ram_read_fast(Address addr, Instruction funct3, Byte* ram) -> Word {
         }
         // RV64 LD (load double-word) instruction
         case static_cast<Instruction>(Funct3::Ld): {
-            if constexpr (kXLenBits == 64) {
+            if constexpr (simrv::xlen::kIsXLen64) {
                 uint64_t val;
                 if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 7))) {
                     std::memcpy(&val, ram + masked, sizeof(val));
@@ -223,7 +224,7 @@ inline void ram_write_fast(Address addr, Word wdata, Instruction funct3, Byte* r
             break;
         }
         case 3: {  // SD: Store Doubleword (8 bytes, RV64 only)
-            if constexpr (kXLenBits == 64) {
+            if constexpr (simrv::xlen::kIsXLen64) {
                 if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 7))) {
                     uint64_t val = static_cast<uint64_t>(wdata);
                     std::memcpy(ram + masked, &val, sizeof(val));

@@ -30,6 +30,9 @@ LOG_DIR="${SIMRV_REG_LOG_DIR:-regression_logs}"
 SIMRV_BIN="${SIMRV_BIN:-./build/ninja-clang-release/SimRV}"
 ISA_LOG_DIR="${SIMRV_ISA_LOG_DIR:-isa_logs}"
 RISCV_TESTS_DIR="${RISCV_TESTS_DIR:-$ROOT_DIR/../../tests/riscv-tests}"
+if [[ -d "$RISCV_TESTS_DIR/share/riscv-tests" ]]; then
+  RISCV_TESTS_DIR="$RISCV_TESTS_DIR/share/riscv-tests"
+fi
 
 mkdir -p "$LOG_DIR"
 

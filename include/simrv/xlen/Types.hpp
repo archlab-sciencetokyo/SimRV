@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
+#include <utility>
 
 #ifndef SIMRV_XLEN
 #define SIMRV_XLEN 32
@@ -41,4 +42,27 @@ using CSRValue = Word;
 using CSRAddress = Address;
 using ImmValue = SignedWord;
 using TrapCause = Word;
-using PrivilegeLevel = uint8_t;
+enum class PrivilegeLevel : uint8_t {
+    User = 0,
+    Supervisor = 1,
+    Machine = 3
+};
+
+constexpr auto operator<(PrivilegeLevel lhs, PrivilegeLevel rhs) -> bool {
+    return std::to_underlying(lhs) < std::to_underlying(rhs);
+}
+
+constexpr auto operator<=(PrivilegeLevel lhs, PrivilegeLevel rhs) -> bool {
+    return std::to_underlying(lhs) <= std::to_underlying(rhs);
+}
+
+constexpr auto operator>(PrivilegeLevel lhs, PrivilegeLevel rhs) -> bool {
+    return std::to_underlying(lhs) > std::to_underlying(rhs);
+}
+
+constexpr auto operator>=(PrivilegeLevel lhs, PrivilegeLevel rhs) -> bool {
+    return std::to_underlying(lhs) >= std::to_underlying(rhs);
+}
+
+enum class RegId : uint8_t {};
+enum class FpRegId : uint8_t {};

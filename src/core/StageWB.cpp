@@ -15,7 +15,7 @@ void CPU::run_writeback_stage(Machine& machine) { writeback_registers(machine); 
 /* writeback_registers(Write Back) stage */
 void CPU::writeback_registers(Machine& machine) {
     auto& ctx = pipeline_context;
-    if (ctx.pending_exception != kWordAllOnes) {
+    if (ctx.pending_exception.has_value()) {
         return;
     }
 

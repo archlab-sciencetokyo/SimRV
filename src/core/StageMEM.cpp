@@ -21,7 +21,7 @@ void CPU::run_memory_stage(Machine& machine) {
 /* memory_load_phase(Load Data) stage */
 void CPU::memory_load_phase(Machine& machine) {
     auto& ctx = pipeline_context;
-    if (ctx.pending_exception != kWordAllOnes) {
+    if (ctx.pending_exception.has_value()) {
         return;
     }
 
@@ -48,9 +48,10 @@ void CPU::memory_load_phase(Machine& machine) {
 void CPU::memory_prepare_store_data(Machine& /*machine*/) {
     auto& ctx = pipeline_context;
     const auto opcode = static_cast<Opcode>(ctx.opcode);
-    ctx.mem_wdata = (opcode != Opcode::Amo)
+    const auto funct5 = static_cast<Funct5Amo>(ctx.funct5);
+    ctx.mem_wdata = (opcode != Opcode::Amo || funct5 == Funct5Amo::Sc)
                         ? ctx.rrs2
-                        : execute::ExecuteUnit::aluAmo(ctx.rrs2, ctx.mem_rdata, ctx.funct5);
+                        : execute::ExecuteUnit::aluAmo(ctx.rrs2, ctx.mem_rdata, funct5, ctx.funct3);
 
     if (opcode == Opcode::StoreFp) {
         ctx.mem_wdata =
@@ -61,7 +62,7 @@ void CPU::memory_prepare_store_data(Machine& /*machine*/) {
 /* memory_store_phase(Store Data) stage */
 void CPU::memory_store_phase(Machine& machine) {
     auto& ctx = pipeline_context;
-    if (ctx.pending_exception != kWordAllOnes) {
+    if (ctx.pending_exception.has_value()) {
         return;
     }
 
@@ -76,15 +77,17 @@ void CPU::memory_store_phase(Machine& machine) {
                                               ctx.funct3);
     }
 
-    if (opcode == Opcode::Amo &&
-        (funct5 == Funct5Amo::Sc && (ctx.wb_data == 0u) && (state_.reserved != 0u) &&
-         ctx.pending_exception == kWordAllOnes)) {
-        state_.reserved = 0;
-    }
-
     if (opcode == Opcode::StoreFp) {
         simrv::memory::MemoryAccess::storeFp(machine.memory_, *this, ctx.mem_addr, ctx.fp_mem_wdata,
                                              ctx.funct3);
+    }
+
+    // Any store instruction or non-LR AMO instruction from the same hart clears the reservation.
+    if ((opcode == Opcode::Store) || (opcode == Opcode::StoreFp) ||
+        (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr)) {
+        if (!ctx.pending_exception.has_value()) {
+            state_.reserved = 0;
+        }
     }
 }
 

@@ -124,16 +124,40 @@ inline void store_to_ram(Address addr, Word data, int n, Byte* ram) {
     }
 }
 
+inline auto get_desc_addr_combined(const virtio::QueueState* qs) -> Address {
+    if constexpr (kIsXLen64) {
+        return (static_cast<Address>(qs->DescHigh) << 32) | static_cast<uint32_t>(qs->DescLow);
+    } else {
+        return qs->DescLow;
+    }
+}
+
+inline auto get_avail_addr_combined(const virtio::QueueState* qs) -> Address {
+    if constexpr (kIsXLen64) {
+        return (static_cast<Address>(qs->AvailHigh) << 32) | static_cast<uint32_t>(qs->AvailLow);
+    } else {
+        return qs->AvailLow;
+    }
+}
+
+inline auto get_used_addr_combined(const virtio::QueueState* qs) -> Address {
+    if constexpr (kIsXLen64) {
+        return (static_cast<Address>(qs->UsedHigh) << 32) | static_cast<uint32_t>(qs->UsedLow);
+    } else {
+        return qs->UsedLow;
+    }
+}
+
 /**
  * Get the address of a descriptor header for the current available index.
  */
 inline auto next_avail_desc_idx(const virtio::QueueState* qs, Word q_num, Byte* mmem) -> uint16_t {
-    Address const adr = qs->AvailLow + 4 + ((qs->last_avail_idx & (q_num - 1)) * 2);
+    Address const adr = get_avail_addr_combined(qs) + 4 + ((qs->last_avail_idx & (q_num - 1)) * 2);
     return static_cast<uint16_t>(load_from_ram(adr, 2, mmem));
 }
 
 inline auto get_desc_addr(uint16_t desc_idx, const virtio::QueueState* qs) -> Address {
-    return (static_cast<Address>(desc_idx) * 16) + qs->DescLow;
+    return (static_cast<Address>(desc_idx) * 16) + get_desc_addr_combined(qs);
 }
 
 /**
@@ -149,12 +173,12 @@ inline auto get_desc_addr(uint16_t desc_idx, const virtio::QueueState* qs) -> Ad
  */
 inline void update_descriptor(Word desc_idx, Word desc_len, int q_num, virtio::QueueState* qs,
                               Byte* mmem) {
-    Address const addr_used_idx = qs->UsedLow + 2;
+    Address const addr_used_idx = get_used_addr_combined(qs) + 2;
     auto const index = read_struct_from_ram<uint16_t>(addr_used_idx, mmem);
 
     write_struct_to_ram<uint16_t>(addr_used_idx, index + 1, mmem);
 
-    Address const addr_used_entry = qs->UsedLow + 4 + ((index & (q_num - 1)) * 8);
+    Address const addr_used_entry = get_used_addr_combined(qs) + 4 + ((index & (q_num - 1)) * 8);
     virtio::VirtqUsedElem const elem{static_cast<uint32_t>(desc_idx),
                                      static_cast<uint32_t>(desc_len)};
     write_struct_to_ram<virtio::VirtqUsedElem>(addr_used_entry, elem, mmem);

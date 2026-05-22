@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <expected>
 #include <filesystem>
+#include "simrv/DebugLog.hpp"
 #include <format>
 #include <initializer_list>
 #include <limits>
@@ -28,7 +29,7 @@
 #include <utility>
 
 #include "simrv/Define.hpp"
-#include "simrv/core/BootHacks.hpp"
+#include "simrv/core/Boot.hpp"
 #include "simrv/core/BuildInfo.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -181,18 +182,58 @@ inline auto iequals(std::string_view a, std::string_view b) -> bool {
 }
 
 auto parse_misa_profile(std::string_view value) -> std::expected<MisaProfile, std::string> {
-    // Accept both rv32 and rv64 variants; the profile itself (I/IMAC/GC) is XLEN-agnostic
-    if (iequals(value, "rv32i") || iequals(value, "rv64i")) {
+    // 1. Accept XLEN-agnostic profiles without warning
+    if (iequals(value, "i")) {
         return MisaProfile::I;
     }
-    if (iequals(value, "rv32imac") || iequals(value, "rv64imac")) {
+    if (iequals(value, "imac")) {
         return MisaProfile::IMAC;
     }
-    if (iequals(value, "rv32gc") || iequals(value, "rv64gc")) {
+    if (iequals(value, "gc")) {
         return MisaProfile::GC;
     }
-    const auto xlen_suffix = (kXLenBits == 64) ? "64" : "32";
-    auto supported = std::format("rv{}i, rv{}imac, rv{}gc", xlen_suffix, xlen_suffix, xlen_suffix);
+
+    // 2. Accept rv32/rv64 prefixed options and warn if they don't match the current simulator XLEN
+    unsigned int parsed_xlen = 0;
+    MisaProfile profile = MisaProfile::GC;
+    bool valid = false;
+
+    if (iequals(value, "rv32i")) {
+        parsed_xlen = 32;
+        profile = MisaProfile::I;
+        valid = true;
+    } else if (iequals(value, "rv64i")) {
+        parsed_xlen = 64;
+        profile = MisaProfile::I;
+        valid = true;
+    } else if (iequals(value, "rv32imac")) {
+        parsed_xlen = 32;
+        profile = MisaProfile::IMAC;
+        valid = true;
+    } else if (iequals(value, "rv64imac")) {
+        parsed_xlen = 64;
+        profile = MisaProfile::IMAC;
+        valid = true;
+    } else if (iequals(value, "rv32gc")) {
+        parsed_xlen = 32;
+        profile = MisaProfile::GC;
+        valid = true;
+    } else if (iequals(value, "rv64gc")) {
+        parsed_xlen = 64;
+        profile = MisaProfile::GC;
+        valid = true;
+    }
+
+    if (valid) {
+        if (parsed_xlen != simrv::xlen::kXLenBits) {
+            std::println(stderr, "__ Warning: Specified MISA profile '{}' has XLEN={} which differs from simulator architecture (RV{}). Operating under RV{} mode.",
+                         value, parsed_xlen, simrv::xlen::kXLenBits, simrv::xlen::kXLenBits);
+        }
+        return profile;
+    }
+
+    const auto xlen_suffix = simrv::xlen::kIsXLen64 ? "64" : "32";
+    auto supported = std::format("i, imac, gc, rv{}i, rv{}imac, rv{}gc", xlen_suffix, xlen_suffix, xlen_suffix);
     return std::unexpected(
         std::format("unsupported MISA profile '{}' (supported: {})", value, supported));
 }
@@ -225,26 +266,31 @@ auto shell_command_success(const std::string& command) -> bool {
 }
 
 auto command_exists(std::string_view command) -> bool {
-    return shell_command_success("command -v " + shell_quote(command) + " >/dev/null 2>&1");
+    return shell_command_success(std::format("command -v {} >/dev/null 2>&1", shell_quote(command)));
 }
 
 auto resolve_tool(const char* env_name, std::initializer_list<std::string_view> candidates,
-                  std::string_view display_name) -> std::string {
+                  std::string_view display_name) -> std::expected<std::string, std::string> {
     if (const char* env_value = std::getenv(env_name); env_value != nullptr && *env_value != '\0') {
-        return {env_value};
+        return std::string{env_value};
     }
     for (const auto candidate : candidates) {
         if (command_exists(candidate)) {
             return std::string(candidate);
         }
     }
-    option_error(
-        std::format("cannot find {}; set environment variable {}", display_name, env_name));
+    return std::unexpected(std::format("cannot find {}; set environment variable {}", display_name, env_name));
 }
 
-auto misa_toolchain_flags(MisaProfile profile) -> std::pair<std::string, std::string> {
-    const auto xlen_suffix = (kXLenBits == 64) ? "64" : "32";
-    const auto abi_prefix = (kXLenBits == 64) ? "lp64" : "ilp32";
+// ToolchainInfo aggregates architecture and ABI strings.
+struct ToolchainInfo {
+    std::string arch; // e.g., "rv64gc"
+    std::string abi;  // e.g., "lp64d"
+};
+
+auto misa_toolchain_flags(MisaProfile profile) -> ToolchainInfo {
+    const auto xlen_suffix = simrv::xlen::kIsXLen64 ? "64" : "32";
+    const auto abi_prefix = simrv::xlen::kIsXLen64 ? "lp64" : "ilp32";
 
     switch (profile) {
         case MisaProfile::I:
@@ -273,11 +319,18 @@ auto assemble_to_binary(const RuntimeOptions& options) -> std::expected<std::str
     const MisaProfile profile = effective_misa_profile(options);
     const auto [march, mabi] = misa_toolchain_flags(profile);
 
-    const std::string cc = resolve_tool(
+    auto cc_res = resolve_tool(
         "RISCV_CC", {"riscv64-unknown-elf-gcc", "riscv32-unknown-elf-gcc"}, "RISC-V C compiler");
-    const std::string objcopy = resolve_tool(
-        "RISCV_OBJCOPY", {"riscv64-unknown-elf-objcopy", "riscv32-unknown-elf-objcopy", "objcopy"},
-        "RISC-V objcopy");
+    if (!cc_res) {
+        option_error(cc_res.error());
+    }
+    const std::string cc = *cc_res;
+    auto objcopy_res = resolve_tool(
+        "RISCV_OBJCOPY", {"riscv64-unknown-elf-objcopy", "riscv32-unknown-elf-objcopy", "objcopy"}, "RISC-V objcopy");
+    if (!objcopy_res) {
+        option_error(objcopy_res.error());
+    }
+    const std::string objcopy = *objcopy_res;
 
     const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
     const fs::path base = fs::temp_directory_path(ec) /
@@ -535,6 +588,7 @@ void set_start_time(simrv::core::Machine& machine) {
 }  // namespace
 
 [[noreturn]] static void usage(const char* program_name, int exit_code = 0) {
+    const auto xlen_suffix = simrv::xlen::kIsXLen64 ? "64" : "32";
     std::print(
         "Usage: {} [options]\n\n"
         "Required:\n"
@@ -571,8 +625,7 @@ void set_start_time(simrv::core::Machine& machine) {
         "  {} -m img/bbl.bin -d img/root.bin -e 40m\n"
         "  {} -m img/hello.bin -a\n"
         "  {} -A prog.S --misa rv32imac\n",
-        program_name, (kXLenBits == 64 ? "64" : "32"), (kXLenBits == 64 ? "64" : "32"),
-        (kXLenBits == 64 ? "64" : "32"), program_name, program_name, program_name, program_name);
+        program_name, xlen_suffix, xlen_suffix, xlen_suffix, program_name, program_name, program_name, program_name);
     std::exit(exit_code);
 }
 
@@ -664,6 +717,10 @@ auto main(int argc, char* argv[]) -> int {
     std::println("__ {} v{} ({}@{})\n__ Please type Control+'q' to quit the simulation\n",
                  simrv::buildinfo::kProjectDescription, simrv::buildinfo::kVersion,
                  simrv::buildinfo::kGitBranch, simrv::buildinfo::kGitSha);
+
+    // Write startup entry to MMU debug log
+    simrv::get_mmu_log() << "[SIM] Simulator start" << '\n';
+    simrv::get_mmu_log().flush();
 
     std::signal(SIGINT, SIG_IGN);  // ignore control+'C'
 

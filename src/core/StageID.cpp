@@ -19,18 +19,18 @@ void CPU::run_decode_stage(Machine& machine) {
 /* decode_fields(Instruction Decode) stage, OK */
 void CPU::decode_fields(Machine& /*machine*/) {
     auto& ctx = pipeline_context;
-    if (simrv::compiler::unlikely(ctx.pending_exception != kWordAllOnes)) {
+    if (simrv::compiler::unlikely(ctx.pending_exception.has_value())) {
         return;
     }
 
     simrv::decode::Decoder dec(ctx.ir);
 
-    ctx.opcode = static_cast<Word>(dec.opcode());
+    ctx.opcode = static_cast<Opcode>(dec.opcode());
     ctx.rd = dec.rd();
     ctx.rs1 = dec.rs1();
     ctx.rs2 = dec.rs2();
-    ctx.funct3 = dec.funct3();
-    ctx.funct5 = (ctx.ir >> 27) & 0x1F;
+    ctx.funct3 = static_cast<Funct3>(dec.funct3());
+    ctx.funct5 = static_cast<Funct5Amo>((ctx.ir >> 27) & 0x1F);
     ctx.funct7 = dec.funct7();
     ctx.funct12 = (ctx.ir >> 20);
 
@@ -58,12 +58,12 @@ void CPU::decode_fields(Machine& /*machine*/) {
 /* fetch_operands(Operand Fetch) stage */
 void CPU::fetch_operands(Machine& /*machine*/) {
     auto& ctx = pipeline_context;
-    if (simrv::compiler::unlikely(ctx.pending_exception != simrv::xlen::kWordAllOnes)) {
+    if (simrv::compiler::unlikely(ctx.pending_exception.has_value())) {
         return;
     }
 
-    const auto opcode = static_cast<Opcode>(ctx.opcode);
-    const auto funct3 = static_cast<Funct3>(ctx.funct3);
+    const auto opcode = ctx.opcode;
+    const auto funct3 = ctx.funct3;
     const Instruction funct12 = ctx.funct12;
 
     ctx.rrs1 = state_.regs.read(ctx.rs1); /* regfile read port 1 */
@@ -83,28 +83,35 @@ void CPU::fetch_operands(Machine& /*machine*/) {
                                                                     : 0;
 
     if (funct3 == Funct3::Priv) {
-        if ((funct12 == static_cast<Instruction>(Funct12Priv::Mret) &&
-             state_.priv < kPrivMachine) ||
-            (funct12 == static_cast<Instruction>(Funct12Priv::Sret) &&
-             state_.priv < kPrivSupervisor) ||
-            (ctx.funct7 == static_cast<Instruction>(Funct7Priv::SfenceVma) &&
-             state_.priv < kPrivSupervisor)) {
-            ctx.pending_exception = enum_mask(ExceptionCode::IllegalInstruction);
+        if (!TrapController::canExecutePrivilegedInstruction(state_.priv, state_.misa, state_.mstatus, funct12, ctx.funct7)) {
+            ctx.pending_exception = ExceptionCode::IllegalInstruction;
             ctx.pending_tval = ctx.ir_org;
             return;
         }
     } else {
-        const bool is_write = ((static_cast<uint8_t>(funct3) & 0x3u) == 0x1u) || (ctx.rs1 != 0);
-        const Word csr_priv = (w_csr_addr >> 8) & 0x3u;
-        const bool is_read_only = ((w_csr_addr >> 10) & 0x3u) == 0x3u;
+        const bool is_write = ((static_cast<uint8_t>(funct3) & 0x3u) == 0x1u) || (std::to_underlying(ctx.rs1) != 0);
+        if (!TrapController::canAccessCsr(state_.priv, w_csr_addr, is_write)) {
+            ctx.pending_exception = ExceptionCode::IllegalInstruction;
+            ctx.pending_tval = ctx.ir_org;
+            return;
+        }
+        if (!misa_has_extension(state_.misa, IsaExtension::S)) {
+            const Word csr_priv = (w_csr_addr >> 8) & 0x3u;
+            if (csr_priv == 1 || w_csr_addr == csr_addr(Csr::Medeleg) || w_csr_addr == csr_addr(Csr::Mideleg)) {
+                ctx.pending_exception = ExceptionCode::IllegalInstruction;
+                ctx.pending_tval = ctx.ir_org;
+                return;
+            }
+        }
 
-        if (state_.priv < csr_priv || (is_write && is_read_only)) {
-            ctx.pending_exception = enum_mask(ExceptionCode::IllegalInstruction);
+        if (w_csr_addr == csr_addr(Csr::Satp) && state_.priv == kPrivSupervisor &&
+            (state_.mstatus & enum_mask(MstatusBit::Tvm)) != 0) {
+            ctx.pending_exception = ExceptionCode::IllegalInstruction;
             ctx.pending_tval = ctx.ir_org;
             return;
         }
 
-        if (state_.priv < kPrivMachine) {
+        if (static_cast<PrivilegeLevel>(std::to_underlying(state_.priv)) < kPrivMachine) {
             if ((w_csr_addr >= 0xC00 && w_csr_addr <= 0xC1F) ||
                 (w_csr_addr >= 0xC80 && w_csr_addr <= 0xC9F)) {
                 const Word counter_bit = 1u << (w_csr_addr & 0x1Fu);
@@ -113,7 +120,7 @@ void CPU::fetch_operands(Machine& /*machine*/) {
                     access_denied = access_denied || ((state_.scounteren & counter_bit) == 0);
                 }
                 if (access_denied) {
-                    ctx.pending_exception = enum_mask(ExceptionCode::IllegalInstruction);
+                    ctx.pending_exception = ExceptionCode::IllegalInstruction;
                     ctx.pending_tval = ctx.ir_org;
                     return;
                 }
@@ -125,7 +132,7 @@ void CPU::fetch_operands(Machine& /*machine*/) {
                                   w_csr_addr == csr_addr(Csr::Frm) ||
                                   w_csr_addr == csr_addr(Csr::Fcsr))) {
         if ((state_.mstatus & enum_mask(MstatusBit::Fs)) == 0) {
-            ctx.pending_exception = enum_mask(ExceptionCode::IllegalInstruction);
+            ctx.pending_exception = ExceptionCode::IllegalInstruction;
             ctx.pending_tval = ctx.ir_org;
             return;
         }

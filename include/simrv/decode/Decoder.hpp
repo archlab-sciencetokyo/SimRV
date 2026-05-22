@@ -59,13 +59,13 @@ class Decoder {
     // Standard R-Type & Base Fields
     // =========================================================================
 
-    [[nodiscard]] constexpr auto rd() const -> uint32_t { return (inst_ >> 7) & 0x1F; }
-    [[nodiscard]] constexpr auto funct3() const -> uint32_t { return (inst_ >> 12) & 0x7; }
-    [[nodiscard]] constexpr auto rs1() const -> uint32_t { return (inst_ >> 15) & 0x1F; }
-    [[nodiscard]] constexpr auto rs2() const -> uint32_t { return (inst_ >> 20) & 0x1F; }
+    [[nodiscard]] constexpr auto rd() const -> RegId { return static_cast<RegId>((inst_ >> 7) & 0x1F); }
+    [[nodiscard]] constexpr auto funct3() const -> Funct3 { return static_cast<Funct3>((inst_ >> 12) & 0x7); }
+    [[nodiscard]] constexpr auto rs1() const -> RegId { return static_cast<RegId>((inst_ >> 15) & 0x1F); }
+    [[nodiscard]] constexpr auto rs2() const -> RegId { return static_cast<RegId>((inst_ >> 20) & 0x1F); }
     [[nodiscard]] constexpr auto funct7() const -> uint32_t { return (inst_ >> 25) & 0x7F; }
-    [[nodiscard]] constexpr auto rs3() const -> uint32_t {
-        return (inst_ >> 27) & 0x1F;
+    [[nodiscard]] constexpr auto rs3() const -> RegId {
+        return static_cast<RegId>((inst_ >> 27) & 0x1F);
     }  // For FP FMA
 
     // =========================================================================
@@ -107,7 +107,7 @@ class Decoder {
 
     [[nodiscard]] constexpr auto csr() const -> uint32_t { return (inst_ >> 20) & 0xFFF; }
     [[nodiscard]] constexpr auto zimm() const -> uint32_t {
-        return rs1();
+        return std::to_underlying(rs1());
     }  // CSR uimm is in the rs1 field
 
     // =========================================================================
@@ -118,12 +118,12 @@ class Decoder {
     [[nodiscard]] constexpr auto c_funct4() const -> uint32_t { return (inst_ >> 12) & 0xF; }
 
     // Standard C register mappings
-    [[nodiscard]] constexpr auto c_rs1_rd() const -> uint32_t { return (inst_ >> 7) & 0x1F; }
-    [[nodiscard]] constexpr auto c_rs2() const -> uint32_t { return (inst_ >> 2) & 0x1F; }
+    [[nodiscard]] constexpr auto c_rs1_rd() const -> RegId { return static_cast<RegId>((inst_ >> 7) & 0x1F); }
+    [[nodiscard]] constexpr auto c_rs2() const -> RegId { return static_cast<RegId>((inst_ >> 2) & 0x1F); }
 
     // Compressed 'prime' register mappings (x8-x15 limiters)
-    [[nodiscard]] constexpr auto c_rs1_rd_p() const -> uint32_t { return 8 + ((inst_ >> 7) & 0x7); }
-    [[nodiscard]] constexpr auto c_rs2_p() const -> uint32_t { return 8 + ((inst_ >> 2) & 0x7); }
+    [[nodiscard]] constexpr auto c_rs1_rd_p() const -> RegId { return static_cast<RegId>(8 + ((inst_ >> 7) & 0x7)); }
+    [[nodiscard]] constexpr auto c_rs2_p() const -> RegId { return static_cast<RegId>(8 + ((inst_ >> 2) & 0x7)); }
 
    private:
     uint32_t inst_;

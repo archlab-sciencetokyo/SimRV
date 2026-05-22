@@ -41,6 +41,10 @@ class ICache {
     /// Returns true if hit, false if miss
     [[nodiscard]] auto read(Address addr, uint32_t& data) -> bool;
 
+    /// Attempt to read a halfword from cache
+    /// Returns true if hit, false if miss
+    [[nodiscard]] auto read16(Address addr, uint16_t& data) -> bool;
+
     /// Insert a cache line at the given address (aligned to kLineBytes)
     void insert(Address base_addr, const Byte* line_data);
 

@@ -16,6 +16,9 @@ BENCH_TOHOST_ADDR="${SIMRV_BENCH_TOHOST:-0x80001000}"
 
 DEFAULT_RISCV_TESTS_DIR="$ROOT_DIR/../../tests/riscv-tests"
 RISCV_TESTS_DIR="${RISCV_TESTS_DIR:-$DEFAULT_RISCV_TESTS_DIR}"
+if [[ -d "$RISCV_TESTS_DIR/share/riscv-tests" ]]; then
+  RISCV_TESTS_DIR="$RISCV_TESTS_DIR/share/riscv-tests"
+fi
 
 mkdir -p "$BENCH_LOG_DIR" "$BENCH_WORK_DIR"
 

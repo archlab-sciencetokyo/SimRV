@@ -28,7 +28,7 @@ const std::array<std::string_view, static_cast<size_t>(OperationIdCount)> OPERAT
 auto decoder(Instruction ir) -> OperationId {
     simrv::decode::Decoder dec(ir);
     const auto op = dec.opcode();
-    const auto funct3 = dec.funct3();
+    const auto funct3 = std::to_underlying(dec.funct3());
     const auto funct7 = dec.funct7();
 
     switch (op) {
@@ -286,7 +286,7 @@ auto decoder(Instruction ir) -> OperationId {
         case Opcode::kOpFp: {
             const uint32_t fmt = funct7 & 0x03;
             const uint32_t f5 = funct7 >> 2;
-            const uint32_t rs2 = dec.rs2();
+            const uint32_t rs2 = std::to_underlying(dec.rs2());
             if (fmt == 0) {  // Single precision (S)
                 switch (f5) {
                     case 0x00:
@@ -419,10 +419,10 @@ auto decompressInstruction(Instruction ir) -> Instruction {
                (((imm >> 1) & 0x3FF) << 21) | (((imm >> 20) & 0x1) << 31);
     };
 
-    const uint32_t rs1_rd = dec.c_rs1_rd();
-    const uint32_t rs2 = dec.c_rs2();
-    const uint32_t rs1_p = dec.c_rs1_rd_p();
-    const uint32_t rs2_p = dec.c_rs2_p();
+    const uint32_t rs1_rd = std::to_underlying(dec.c_rs1_rd());
+    const uint32_t rs2 = std::to_underlying(dec.c_rs2());
+    const uint32_t rs1_p = std::to_underlying(dec.c_rs1_rd_p());
+    const uint32_t rs2_p = std::to_underlying(dec.c_rs2_p());
 
     if (quadrant == 0x0) {
         switch (op) {

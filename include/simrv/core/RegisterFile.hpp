@@ -5,6 +5,9 @@
 #pragma once
 
 #include <array>
+#include <optional>
+
+#include <simrv/Define.hpp>
 
 #include "simrv/xlen/Types.hpp"
 
@@ -21,17 +24,17 @@ class RegisterFile {
    public:
     static constexpr std::size_t kNumRegisters = 32;
 
-    [[nodiscard]] constexpr auto read(Word idx) const -> Register { return reg_[idx]; }
+    [[nodiscard]] constexpr auto read(RegId idx) const -> Register { return reg_[std::to_underlying(idx)]; }
 
-    constexpr void write(Word idx, Register val) {
-        if (idx != 0) {
-            reg_[idx] = val;
+    constexpr void write(RegId idx, Register val) {
+        if (std::to_underlying(idx) != 0) {
+            reg_[std::to_underlying(idx)] = val;
         }
     }
 
-    [[nodiscard]] constexpr auto read_fp(Word idx) const -> FloatingRegister { return freg_[idx]; }
+    [[nodiscard]] constexpr auto read_fp(RegId idx) const -> FloatingRegister { return freg_[std::to_underlying(idx)]; }
 
-    constexpr void write_fp(Word idx, FloatingRegister val) { freg_[idx] = val; }
+    constexpr void write_fp(RegId idx, FloatingRegister val) { freg_[std::to_underlying(idx)] = val; }
 
     constexpr void fill(Register val) {
         reg_.fill(val);

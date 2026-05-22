@@ -69,15 +69,13 @@ if(NOT "cxx_std_23" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
   message(FATAL_ERROR "${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} does not support required C++23 features")
 endif()
 
-if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
-endif()
-
-set(SIMRV_XLEN "32" CACHE STRING "Architectural XLEN for scalar aliases (32 or 64)")
+# XLEN option (32 or 64) – compile-time selection
+option(SIMRV_XLEN "Target XLEN (32 or 64)" 32)
 set_property(CACHE SIMRV_XLEN PROPERTY STRINGS 32 64)
 if(NOT SIMRV_XLEN STREQUAL "32" AND NOT SIMRV_XLEN STREQUAL "64")
   message(FATAL_ERROR "SIMRV_XLEN must be 32 or 64 (got: ${SIMRV_XLEN})")
 endif()
+
 
 set(SIMRV_DRAM_SIZE_MB "64" CACHE STRING "DRAM size in megabytes (must be power of 2)")
 set(SIMRV_DISK_SIZE_MB "128" CACHE STRING "Disk size in megabytes")
@@ -92,7 +90,6 @@ add_executable(SimRV
   src/core/Tracer.cpp
   src/core/Sbi.cpp
   src/core/Tlb.cpp
-  src/core/BootHacks.cpp
   src/decode/Decoder.cpp
   src/execute/ExecuteUnitInt.cpp
   src/execute/ExecuteUnitFloat.cpp

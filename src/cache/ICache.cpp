@@ -36,6 +36,29 @@ auto ICache::read(Address addr, uint32_t& data) -> bool {
     return false;
 }
 
+auto ICache::read16(Address addr, uint16_t& data) -> bool {
+    ++access_tick_;
+    const uint32_t set_idx = get_set_index(addr);
+    const Address tag = get_tag(addr);
+
+    for (auto& line : sets_[set_idx]) {
+        if (line.valid && line.tag == tag) {
+            const uint32_t byte_offset = addr & (kLineBytes - 1u);
+            if (simrv::compiler::unlikely(byte_offset + sizeof(uint16_t) > kLineBytes)) {
+                ++misses_;
+                return false;
+            }
+            std::memcpy(&data, line.data.data() + byte_offset, sizeof(uint16_t));
+            line.last_used = access_tick_;
+            ++hits_;
+            return true;
+        }
+    }
+
+    ++misses_;
+    return false;
+}
+
 void ICache::insert(Address base_addr, const Byte* line_data) {
     ++access_tick_;
     const uint32_t set_idx = get_set_index(base_addr);

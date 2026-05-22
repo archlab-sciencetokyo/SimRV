@@ -8,6 +8,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
+#include "simrv/DebugLog.hpp"
 
 namespace simrv::core {
 
@@ -185,7 +186,7 @@ void CsrFile::write(CSRAddress addr,
             break;
 
         case csr_addr(Csr::Stvec):
-            cpu_.state().stvec = wdata & ~3;
+            cpu_.state().stvec = wdata & ~static_cast<CSRValue>(2);
             break;
         case csr_addr(Csr::Scounteren):
             cpu_.state().scounteren = wdata & kCounterEnableMask;
@@ -204,7 +205,7 @@ void CsrFile::write(CSRAddress addr,
             break;
 
         case csr_addr(Csr::Mtvec):
-            cpu_.state().mtvec = wdata & ~3;
+            cpu_.state().mtvec = wdata & ~static_cast<CSRValue>(2);
             break;
         case csr_addr(Csr::Mcounteren):
             cpu_.state().mcounteren = wdata & kCounterEnableMask;
@@ -247,6 +248,9 @@ void CsrFile::write(CSRAddress addr,
             const Word mode = simrv::xlen::satp_mode(wdata);
             if (simrv::xlen::satp_mode_supported(mode)) {
                 cpu_.state().satp = wdata;
+                // Log the new satp value for debugging
+                get_mmu_log() << "[MMU] SATP set to 0x" << std::hex << wdata << std::dec << "\n";
+                get_mmu_log().flush();
             }
             break;
         }

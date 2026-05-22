@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstddef>
+#include <expected>
 #include <fstream>
 
 #include "simrv/Define.hpp"
@@ -14,6 +15,7 @@
 #include "simrv/core/CsrFile.hpp"
 #include "simrv/core/PipelineContext.hpp"
 #include "simrv/core/RegisterFile.hpp"
+#include "simrv/core/Sbi.hpp"
 #include "simrv/core/StateControl.hpp"
 #include "simrv/core/Tlb.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
@@ -52,7 +54,7 @@ struct ArchState {
     CSRValue scounteren{};
     CSRValue fcsr{};
 
-    PrivilegeLevel priv = static_cast<PrivilegeLevel>(PrivilegeMode::Machine);
+    PrivilegeLevel priv = kPrivMachine;
 
     Address load_res{};
     CSRValue reserved{};
@@ -101,6 +103,14 @@ class CPU {
     void run_writeback_stage(Machine& machine);
     /// Run commit/trap resolution stage group.
     void run_commit_stage(Machine& machine);
+
+    /// Functional monadic stage transitions (C++23)
+    [[nodiscard]] auto fetch_stage(Machine& machine, Address pc) -> std::expected<FetchResult, StageError>;
+    [[nodiscard]] auto decode_stage(Machine& machine, const FetchResult& fetch) -> std::expected<DecodeResult, StageError>;
+    [[nodiscard]] auto execute_stage(Machine& machine, const DecodeResult& decode) -> std::expected<ExecuteResult, StageError>;
+    [[nodiscard]] auto memory_stage(Machine& machine, const ExecuteResult& exec) -> std::expected<MemoryResult, StageError>;
+    [[nodiscard]] auto writeback_stage(Machine& machine, const MemoryResult& mem) -> std::expected<WritebackResult, StageError>;
+    [[nodiscard]] auto commit_stage(Machine& machine, const WritebackResult& wb) -> std::expected<void, StageError>;
 
    private:
     /// Translate fetch addresses and prime IF transient context.
@@ -159,6 +169,7 @@ class CPU {
     PipelineContext pipeline_context;
     simrv::cache::ICache icache;
     simrv::cache::DCache dcache;
+    sbi::Sbi sbi;
     std::ofstream* trap_log_stream = nullptr;
 
     // ========== Execution Metrics ==========

@@ -4,7 +4,7 @@
  */
 #pragma once
 
-#include "simrv/XLen.hpp"
+#include "simrv/xlen/Types.hpp"
 
 namespace simrv::boot {
 inline constexpr Address kStartPc = static_cast<Address>(0x80000000u);

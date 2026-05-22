@@ -9,18 +9,27 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/memory/Mmu.hpp"
 #include "simrv/xlen/Constants.hpp"
+#include "simrv/xlen/Helpers.hpp"
 
 namespace simrv::memory {
 
 auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_addr,
                                Instruction funct3) -> Word {
-    const unsigned size_bytes = 1u << (funct3 & 0x3u);
+    if (simrv::compiler::unlikely(cpu.pipeline_context.pending_exception.has_value())) {
+        return 0;
+    }
+
+    const unsigned size_bytes = 1u << (funct3 & 0x3u); // unchanged
     const bool is_amo = (static_cast<Opcode>(cpu.pipeline_context.opcode) == Opcode::Amo);
+    const bool is_lr =
+        is_amo && (static_cast<Funct5Amo>(cpu.pipeline_context.funct5) == Funct5Amo::Lr);
 
     if (simrv::compiler::unlikely((v_addr & (size_bytes - 1u)) != 0)) {
-        cpu.pipeline_context.pending_exception = is_amo ? enum_mask(ExceptionCode::MisalignedStore)
-                                                        : enum_mask(ExceptionCode::MisalignedLoad);
+        cpu.pipeline_context.pending_exception = (is_amo && !is_lr)
+                                                     ? ExceptionCode::MisalignedStore
+                                                     : ExceptionCode::MisalignedLoad;
         cpu.pipeline_context.pending_tval = v_addr;
         return 0;
     }
@@ -29,21 +38,10 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
 
     if constexpr (simrv::xlen::kIsXLen64) {
         if (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(cpu.state().satp)) {
-            const Word mode = simrv::xlen::satp_mode(cpu.state().satp);
-            bool canonical = true;
-            if (mode == 8) {  // SV39
-                const Word shift = 64 - 39;
-                canonical = (static_cast<SignedWord>(v_addr << shift) >> shift) ==
-                            static_cast<SignedWord>(v_addr);
-            } else if (mode == 9) {  // SV48
-                const Word shift = 64 - 48;
-                canonical = (static_cast<SignedWord>(v_addr << shift) >> shift) ==
-                            static_cast<SignedWord>(v_addr);
-            }
-            if (simrv::compiler::unlikely(!canonical)) {
+            if (simrv::compiler::unlikely(!simrv::Mmu::is_canonical(v_addr, cpu.state().satp))) {
                 cpu.pipeline_context.pending_exception =
-                    is_amo ? enum_mask(ExceptionCode::StorePageFault)
-                           : enum_mask(ExceptionCode::LoadPageFault);
+                    is_amo ? ExceptionCode::StorePageFault
+                           : ExceptionCode::LoadPageFault;
                 cpu.pipeline_context.pending_tval = v_addr;
                 return 0;
             }
@@ -51,6 +49,25 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     }
 
     auto issue_read = [&](Address addr) -> Word {
+        if (!simrv::memory::is_dram_addr(addr)) {
+            TlChannelA req{};
+            req.opcode = TlOpcodeA::Get;
+            req.size = static_cast<uint8_t>(funct3 & 0x3);
+            req.source = 0;  // CPU Data Bus source ID
+            req.address = addr;
+            mem.system_bus().send_request(req);
+
+            TlChannelD resp{};
+            if (mem.system_bus().get_response(0, resp)) {
+                if (simrv::compiler::unlikely(resp.error)) {
+                    cpu.pipeline_context.pending_exception = ExceptionCode::FaultLoad;
+                    cpu.pipeline_context.pending_tval = v_addr;
+                }
+                return resp.data;
+            }
+            return 0;
+        }
+
         Word cached_data = 0;
         if (cpu.dcache.read(addr, cached_data, funct3)) {
             return cached_data;
@@ -60,9 +77,9 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             addr & ~(static_cast<Address>(simrv::cache::DCache::kLineBytes - 1u));
         std::array<Byte, simrv::cache::DCache::kLineBytes> line_data{};
 
-        const unsigned fetch_size = (kXLenBits == 64) ? 8 : 4;
-        const Instruction fetch_funct3 = (kXLenBits == 64) ? static_cast<Instruction>(Funct3::Sd)
-                                                           : static_cast<Instruction>(Funct3::Sw);
+        constexpr unsigned fetch_size = xlen::kFetchSize;
+        const Instruction fetch_funct3 = static_cast<Instruction>(
+            xlen::kIsXLen64 ? ::Funct3::Sd : ::Funct3::Sw);
 
         for (uint32_t i = 0; i < simrv::cache::DCache::kLineBytes; i += fetch_size) {
             TlChannelA req{};
@@ -75,7 +92,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             TlChannelD resp{};
             if (mem.system_bus().get_response(0, resp)) {
                 if (simrv::compiler::unlikely(resp.error)) {
-                    cpu.pipeline_context.pending_exception = enum_mask(ExceptionCode::FaultLoad);
+                    cpu.pipeline_context.pending_exception = ExceptionCode::FaultLoad;
                     cpu.pipeline_context.pending_tval = v_addr;
                 }
                 std::memcpy(line_data.data() + i, &resp.data, fetch_size);
@@ -89,7 +106,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
         return 0;
     };
 
-    if (simrv::compiler::likely(cpu.pipeline_context.pending_exception == kWordAllOnes) &&
+    if (simrv::compiler::likely(!cpu.pipeline_context.pending_exception.has_value()) &&
         simrv::compiler::likely(eff_priv == kPrivMachine ||
                                 !simrv::xlen::satp_translation_enabled(cpu.state().satp)) &&
         simrv::compiler::likely(simrv::memory::is_dram_addr(v_addr))) {
@@ -117,12 +134,12 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             entry->asid = current_asid;
             entry->valid = true;
         } else {
-            cpu.pipeline_context.pending_exception = translate_result.error();
+            cpu.pipeline_context.pending_exception = static_cast<ExceptionCode>(translate_result.error());
             cpu.pipeline_context.pending_tval = v_addr;
         }
     }
 
-    if (cpu.pipeline_context.pending_exception == kWordAllOnes) {
+    if (!cpu.pipeline_context.pending_exception.has_value()) {
         return issue_read(p_addr);
     }
     return rdata;
@@ -130,10 +147,14 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
 
 void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_addr, Word wdata,
                                 Instruction funct3) {
+    if (simrv::compiler::unlikely(cpu.pipeline_context.pending_exception.has_value())) {
+        return;
+    }
+
     const unsigned size_bytes = 1u << (funct3 & 0x3u);
 
     if (simrv::compiler::unlikely((v_addr & (size_bytes - 1u)) != 0)) {
-        cpu.pipeline_context.pending_exception = enum_mask(ExceptionCode::MisalignedStore);
+        cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedStore;
         cpu.pipeline_context.pending_tval = v_addr;
         return;
     }
@@ -142,19 +163,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
 
     if constexpr (simrv::xlen::kIsXLen64) {
         if (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(cpu.state().satp)) {
-            const Word mode = simrv::xlen::satp_mode(cpu.state().satp);
-            bool canonical = true;
-            if (mode == 8) {  // SV39
-                const Word shift = 64 - 39;
-                canonical = (static_cast<SignedWord>(v_addr << shift) >> shift) ==
-                            static_cast<SignedWord>(v_addr);
-            } else if (mode == 9) {  // SV48
-                const Word shift = 64 - 48;
-                canonical = (static_cast<SignedWord>(v_addr << shift) >> shift) ==
-                            static_cast<SignedWord>(v_addr);
-            }
-            if (simrv::compiler::unlikely(!canonical)) {
-                cpu.pipeline_context.pending_exception = enum_mask(ExceptionCode::StorePageFault);
+            if (simrv::compiler::unlikely(!simrv::Mmu::is_canonical(v_addr, cpu.state().satp))) {
+                cpu.pipeline_context.pending_exception = ExceptionCode::StorePageFault;
                 cpu.pipeline_context.pending_tval = v_addr;
                 return;
             }
@@ -162,7 +172,9 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
     }
 
     auto issue_write = [&](Address addr, Word data) {
-        cpu.dcache.write(addr, data, funct3);
+        if (simrv::memory::is_dram_addr(addr)) {
+            cpu.dcache.write(addr, data, funct3);
+        }
 
         TlChannelA req{};
         req.opcode = TlOpcodeA::PutFullData;
@@ -175,13 +187,13 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
         TlChannelD resp{};
         if (mem.system_bus().get_response(0, resp)) {
             if (simrv::compiler::unlikely(resp.error)) {
-                cpu.pipeline_context.pending_exception = enum_mask(ExceptionCode::FaultStore);
+                cpu.pipeline_context.pending_exception = ExceptionCode::FaultStore;
                 cpu.pipeline_context.pending_tval = v_addr;
             }
         }
     };
 
-    if (simrv::compiler::likely(cpu.pipeline_context.pending_exception == kWordAllOnes) &&
+    if (simrv::compiler::likely(!cpu.pipeline_context.pending_exception.has_value()) &&
         simrv::compiler::likely(eff_priv == kPrivMachine ||
                                 !simrv::xlen::satp_translation_enabled(cpu.state().satp)) &&
         simrv::compiler::likely(simrv::memory::is_dram_addr(v_addr))) {
@@ -209,24 +221,24 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             entry->asid = current_asid;
             entry->valid = true;
         } else {
-            cpu.pipeline_context.pending_exception = translate_result.error();
+            cpu.pipeline_context.pending_exception = static_cast<ExceptionCode>(translate_result.error());
             cpu.pipeline_context.pending_tval = v_addr;
         }
     }
 
-    if (cpu.pipeline_context.pending_exception == kWordAllOnes) {
+    if (!cpu.pipeline_context.pending_exception.has_value()) {
         issue_write(p_addr, wdata);
     }
 }
 
-auto MemoryAccess::loadInt(MemorySubsystem& mem, core::CPU& cpu, Address addr, Instruction funct3)
+auto MemoryAccess::loadInt(MemorySubsystem& mem, core::CPU& cpu, Address addr, Funct3 funct3)
     -> Word {
-    return target_read(mem, cpu, addr, funct3);
+    return target_read(mem, cpu, addr, enum_mask(funct3));
 }
 
-auto MemoryAccess::loadFp(MemorySubsystem& mem, core::CPU& cpu, Address addr, Instruction funct3)
+auto MemoryAccess::loadFp(MemorySubsystem& mem, core::CPU& cpu, Address addr, Funct3 funct3)
     -> FloatingRegister {
-    const auto f3 = static_cast<Funct3>(funct3);
+    const auto f3 = funct3;
     if (f3 == Funct3::Flw) {
         const Word lo = target_read(mem, cpu, addr, static_cast<Instruction>(Funct3::Lw));
         return static_cast<uint64_t>(kF32BoxerBits) | static_cast<uint64_t>(lo & kLower32Mask);
@@ -235,6 +247,11 @@ auto MemoryAccess::loadFp(MemorySubsystem& mem, core::CPU& cpu, Address addr, In
             return static_cast<FloatingRegister>(
                 target_read(mem, cpu, addr, static_cast<Instruction>(Funct3::Ld)));
         } else {
+            if (simrv::compiler::unlikely((addr & 7) != 0)) {
+                cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedLoad;
+                cpu.pipeline_context.pending_tval = addr;
+                return 0;
+            }
             const Word lo = target_read(mem, cpu, addr, static_cast<Instruction>(Funct3::Lw));
             const Word hi = target_read(mem, cpu, addr + 4, static_cast<Instruction>(Funct3::Lw));
             return static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32);
@@ -244,13 +261,13 @@ auto MemoryAccess::loadFp(MemorySubsystem& mem, core::CPU& cpu, Address addr, In
 }
 
 void MemoryAccess::storeInt(MemorySubsystem& mem, core::CPU& cpu, Address addr, Word data,
-                            Instruction funct3) {
-    target_write(mem, cpu, addr, data, funct3);
+                            Funct3 funct3) {
+    target_write(mem, cpu, addr, data, enum_mask(funct3));
 }
 
 void MemoryAccess::storeFp(MemorySubsystem& mem, core::CPU& cpu, Address addr,
-                           FloatingRegister data, Instruction funct3) {
-    const auto f3 = static_cast<Funct3>(funct3);
+                           FloatingRegister data, Funct3 funct3) {
+    const auto f3 = funct3;
     if (f3 == Funct3::Fsw) {
         target_write(mem, cpu, addr,
                      static_cast<Word>(data & static_cast<FloatingRegister>(kLower32Mask)),
@@ -260,6 +277,11 @@ void MemoryAccess::storeFp(MemorySubsystem& mem, core::CPU& cpu, Address addr,
             target_write(mem, cpu, addr, static_cast<Word>(data),
                          static_cast<Instruction>(Funct3::Sd));
         } else {
+            if (simrv::compiler::unlikely((addr & 7) != 0)) {
+                cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedStore;
+                cpu.pipeline_context.pending_tval = addr;
+                return;
+            }
             target_write(mem, cpu, addr,
                          static_cast<Word>(data & static_cast<FloatingRegister>(kLower32Mask)),
                          static_cast<Instruction>(Funct3::Sw));

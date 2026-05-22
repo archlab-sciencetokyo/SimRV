@@ -6,6 +6,9 @@ cd "$ROOT_DIR"
 
 DEFAULT_RISCV_TESTS_DIR="$ROOT_DIR/../../tests/riscv-tests"
 RISCV_TESTS_DIR="${RISCV_TESTS_DIR:-$DEFAULT_RISCV_TESTS_DIR}"
+if [[ -d "$RISCV_TESTS_DIR/share/riscv-tests" ]]; then
+  RISCV_TESTS_DIR="$RISCV_TESTS_DIR/share/riscv-tests"
+fi
 if [[ ! -d "$RISCV_TESTS_DIR" ]]; then
   echo "ERROR: riscv-tests directory not found: $RISCV_TESTS_DIR"
   echo "Set RISCV_TESTS_DIR to your checkout/build directory"

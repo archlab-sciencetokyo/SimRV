@@ -434,10 +434,10 @@ auto ExecuteUnit::fusedFp(Opcode opcode, Word fmt, Word rs1, Word rs2, Word rs3,
     return out;
 }
 
-auto ExecuteUnit::opFp(Word funct7, Word funct3, Word rs1, Word rs2, Register rrs1,
+auto ExecuteUnit::opFp(Word funct7, Funct3 funct3, Word rs1, Word rs2, Register rrs1,
                        const FloatingRegister* freg, CSRValue& fcsr) -> FpExecResult {
     FpExecResult out;
-    const Word rm = funct3;
+    const Word rm = enum_mask(funct3);
 
     if (funct7 == enum_mask(Funct7Fp::FaddS)) {
         std::feclearexcept(FE_ALL_EXCEPT);
@@ -565,13 +565,13 @@ auto ExecuteUnit::opFp(Word funct7, Word funct3, Word rs1, Word rs2, Register rr
         const FloatingRegister b = freg[rs2];
         FloatingRegister value = 0;
         const uint64_t sign_bit = is_d ? (1ULL << 63U) : (1ULL << 31U);
-        if (funct3 == 0) {
+        if (enum_mask(funct3) == 0) {
             value = (a & (~sign_bit)) | (b & sign_bit);
         }
-        if (funct3 == 1) {
+        if (enum_mask(funct3) == 1) {
             value = (a & (~sign_bit)) | ((~b) & sign_bit);
         }
-        if (funct3 == 2) {
+        if (enum_mask(funct3) == 2) {
             value = a ^ (b & sign_bit);
         }
         out.fp_wb_data = is_d ? value
@@ -583,7 +583,7 @@ auto ExecuteUnit::opFp(Word funct7, Word funct3, Word rs1, Word rs2, Register rr
         const float a = read_f32(freg, rs1);
         const float b = read_f32(freg, rs2);
         out.fp_wb_data =
-            (funct3 == enum_mask(Funct3Fp::Max)) ? fmax32_riscv(a, b) : fmin32_riscv(a, b);
+            (enum_mask(funct3) == enum_mask(Funct3Fp::Max)) ? fmax32_riscv(a, b) : fmin32_riscv(a, b);
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
     } else if (funct7 == enum_mask(Funct7Fp::FminmaxD)) {
@@ -591,7 +591,7 @@ auto ExecuteUnit::opFp(Word funct7, Word funct3, Word rs1, Word rs2, Register rr
         const double a = read_f64(freg, rs1);
         const double b = read_f64(freg, rs2);
         out.fp_wb_data =
-            (funct3 == enum_mask(Funct3Fp::Max)) ? fmax64_riscv(a, b) : fmin64_riscv(a, b);
+            (enum_mask(funct3) == enum_mask(Funct3Fp::Max)) ? fmax64_riscv(a, b) : fmin64_riscv(a, b);
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
     } else if (funct7 == enum_mask(Funct7Fp::FcvtSD)) {
@@ -627,18 +627,18 @@ auto ExecuteUnit::opFp(Word funct7, Word funct3, Word rs1, Word rs2, Register rr
             const float a = read_f32(freg, rs1);
             const float b = read_f32(freg, rs2);
             if (std::isnan(a) || std::isnan(b)) {
-                if (funct3 != enum_mask(Funct3Fp::Eq) || is_snan32(a) || is_snan32(b)) {
+                if (enum_mask(funct3) != enum_mask(Funct3Fp::Eq) || is_snan32(a) || is_snan32(b)) {
                     std::feraiseexcept(FE_INVALID);
                 }
                 out.int_wb_data = 0;
             } else {
-                if (funct3 == enum_mask(Funct3Fp::Eq)) {
+                if (enum_mask(funct3) == enum_mask(Funct3Fp::Eq)) {
                     out.int_wb_data = static_cast<Register>(a == b);
                 }
-                if (funct3 == enum_mask(Funct3Fp::Lt)) {
+                if (enum_mask(funct3) == enum_mask(Funct3Fp::Lt)) {
                     out.int_wb_data = static_cast<Register>(a < b);
                 }
-                if (funct3 == enum_mask(Funct3Fp::Leq)) {
+                if (enum_mask(funct3) == enum_mask(Funct3Fp::Leq)) {
                     out.int_wb_data = static_cast<Register>(a <= b);
                 }
             }
@@ -646,18 +646,18 @@ auto ExecuteUnit::opFp(Word funct7, Word funct3, Word rs1, Word rs2, Register rr
             const double a = read_f64(freg, rs1);
             const double b = read_f64(freg, rs2);
             if (std::isnan(a) || std::isnan(b)) {
-                if (funct3 != enum_mask(Funct3Fp::Eq) || is_snan64(a) || is_snan64(b)) {
+                if (enum_mask(funct3) != enum_mask(Funct3Fp::Eq) || is_snan64(a) || is_snan64(b)) {
                     std::feraiseexcept(FE_INVALID);
                 }
                 out.int_wb_data = 0;
             } else {
-                if (funct3 == enum_mask(Funct3Fp::Eq)) {
+                if (enum_mask(funct3) == enum_mask(Funct3Fp::Eq)) {
                     out.int_wb_data = static_cast<Register>(a == b);
                 }
-                if (funct3 == enum_mask(Funct3Fp::Lt)) {
+                if (enum_mask(funct3) == enum_mask(Funct3Fp::Lt)) {
                     out.int_wb_data = static_cast<Register>(a < b);
                 }
-                if (funct3 == enum_mask(Funct3Fp::Leq)) {
+                if (enum_mask(funct3) == enum_mask(Funct3Fp::Leq)) {
                     out.int_wb_data = static_cast<Register>(a <= b);
                 }
             }
@@ -700,7 +700,7 @@ auto ExecuteUnit::opFp(Word funct7, Word funct3, Word rs1, Word rs2, Register rr
         accumulate_fp_flags(fcsr);
     } else if (funct7 == enum_mask(Funct7Fp::FmvXW) || funct7 == enum_mask(Funct7Fp::FmvXD)) {
         const bool is_d = (funct7 == enum_mask(Funct7Fp::FmvXD));
-        if (funct3 == enum_mask(Funct3Fp::FmvXW)) {
+        if (enum_mask(funct3) == enum_mask(Funct3Fp::FmvXW)) {
             if (is_d) {
                 out.int_wb_data = static_cast<Register>(freg[rs1]);
             } else {
@@ -708,7 +708,7 @@ auto ExecuteUnit::opFp(Word funct7, Word funct3, Word rs1, Word rs2, Register rr
                     static_cast<Register>(static_cast<SignedWord>(static_cast<int32_t>(freg[rs1])));
             }
             out.int_wb_enable = true;
-        } else if (funct3 == enum_mask(Funct3Fp::Fclass)) {
+        } else if (enum_mask(funct3) == enum_mask(Funct3Fp::Fclass)) {
             out.int_wb_data = is_d ? fclass64(read_f64(freg, rs1)) : fclass32(read_f32(freg, rs1));
             out.int_wb_enable = true;
         }

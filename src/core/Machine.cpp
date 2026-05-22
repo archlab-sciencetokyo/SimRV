@@ -11,7 +11,6 @@
 #include <cstring>
 #include <print>
 
-#include "simrv/core/BootHacks.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
@@ -43,13 +42,6 @@ void Machine::prepare_cycle() {
         tracer.dump_init_artifacts();
     }
 
-    // Intercept satp CSR changes to apply legacy BBL page table mirroring patches
-    static Word last_satp = 0;
-    if (cpu.state().satp != last_satp) {
-        simrv::boot::handle_legacy_bbl_satp_hacks(*this, cpu.state().satp);
-        last_satp = cpu.state().satp;
-    }
-
     static constexpr std::array<Byte, 9> kSyntheticInput = {
         static_cast<Byte>('r'), static_cast<Byte>('o'),  static_cast<Byte>('o'),
         static_cast<Byte>('t'), static_cast<Byte>('\n'), static_cast<Byte>('t'),
@@ -75,7 +67,7 @@ void Machine::prepare_cycle() {
         }
     }
 
-    cpu.pipeline_context.pending_exception = kWordAllOnes; /* initialize regs */
+    cpu.pipeline_context.pending_exception = std::nullopt; /* initialize regs */
     cpu.pipeline_context.pending_tval = 0;                 /* initialize regs */
 }
 
@@ -118,8 +110,8 @@ void Machine::finalize_cycle() {
     }
 
     // Standard 64-bit HTIF handling
-    const uint8_t dev = static_cast<uint8_t>(tohost >> 56);
-    const uint8_t cmd = static_cast<uint8_t>(tohost >> 48);
+    const auto dev = static_cast<uint8_t>(tohost >> 56);
+    const auto cmd = static_cast<uint8_t>(tohost >> 48);
     const uint64_t payload = tohost & 0x0000FFFFFFFFFFFFULL;
 
     if (dev == 1 && cmd == 1) {

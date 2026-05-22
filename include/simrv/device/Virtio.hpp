@@ -70,16 +70,16 @@ struct QueueState {
 };
 
 struct Descriptor {
-    Counter adr;
-    Word len;
+    uint64_t adr;
+    uint32_t len;
     uint16_t flags;
     uint16_t next;
 };
 
 struct BlockRequestHeader {
-    Word type;
-    Word ioprio;
-    Counter sector_num;
+    uint32_t type;
+    uint32_t ioprio;
+    uint64_t sector_num;
 };
 
 struct VirtqUsedElem {

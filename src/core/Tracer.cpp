@@ -79,7 +79,7 @@ void Tracer::dump_init_artifacts() {
 
     std::ofstream out("init_reg.txt");
     auto write_xlen = [&out](std::string_view lhs, Word value) {
-        std::println(out, "{}={}'h{:0{}x};", lhs, kXLenBits, value, kXLenHexDigits);
+        std::println(out, "{}={}'h{:0{}x};", lhs, simrv::xlen::kXLenBits, value, kXLenHexDigits);
     };
     auto write_32 = [&out](std::string_view lhs, Word value) {
         std::println(out, "{}=32'h{:08x};", lhs, value);
@@ -89,13 +89,13 @@ void Tracer::dump_init_artifacts() {
     };
 
     write_xlen("p.pc", cpu->state().pc);
-    for (int i = 1; i < 32; ++i) {
-        std::println(out, "p.regs.mem[{}]={}'h{:0{}x};", i, kXLenBits, cpu->state().regs.read(i),
+    for (uint8_t i = 1; i < 32; ++i) {
+        std::println(out, "p.regs.mem[{}]={}'h{:0{}x};", i, simrv::xlen::kXLenBits, cpu->state().regs.read(static_cast<RegId>(i)),
                      kXLenHexDigits);
     }
-    for (int i = 0; i < 32; ++i) {
-        std::println(out, "p.fregs.mem[{}]={}'h{:016x};", i, kXLenBits,
-                     cpu->state().regs.read_fp(i));
+    for (uint8_t i = 0; i < 32; ++i) {
+        std::println(out, "p.fregs.mem[{}]={}'h{:016x};", i, simrv::xlen::kXLenBits,
+                     cpu->state().regs.read_fp(static_cast<RegId>(i)));
     }
     write_xlen("p.fcsr        ", cpu->state().fcsr);
     write_xlen("p.mstatus     ", cpu->state().mstatus);
@@ -118,14 +118,14 @@ void Tracer::dump_init_artifacts() {
     write_xlen("p.stval       ", cpu->state().stval);
     write_xlen("p.satp        ", cpu->state().satp);
     write_xlen("p.scounteren  ", cpu->state().scounteren);
-    write_xlen("p.priv        ", cpu->state().priv);
+    write_xlen("p.priv        ", std::to_underlying(cpu->state().priv));
 
     write_64("p.mtime       ", cpu->clint_mmio.mtime);
     write_64("p.mtimecmp    ", cpu->clint_mmio.mtimecmp);
 
     write_xlen("p.load_res    ", cpu->state().load_res);
     std::println(out, "p.reserved    = 1'h{:x};", cpu->state().reserved);
-    write_xlen("p.pending_exception   ", cpu->pipeline_context.pending_exception);
+    write_xlen("p.pending_exception   ", cpu->pipeline_context.pending_exception ? std::to_underlying(*cpu->pipeline_context.pending_exception) : simrv::xlen::kWordAllOnes);
     write_xlen("p.pending_tval", cpu->pipeline_context.pending_tval);
 
     for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
@@ -235,14 +235,14 @@ void Tracer::emit_periodic_pc_trace(Counter mtime, Register cpc) {
 }
 
 void Tracer::emit_branch_prediction_trace(Counter mtime, Register cpc, Register jmp_pc,
-                                          Word r_opcode, Word r_tkn) {
+                                          Opcode r_opcode, bool r_tkn) {
     if (!bpred_opened_) {
         bpred_opened_ = true;
         fp_bpred_.open("bpred.txt");
         std::println("__ generate trace file: bpred.txt\n");
     }
 
-    const auto opcode = static_cast<Opcode>(r_opcode);
+    const auto opcode = r_opcode;
     const int ir_jb = static_cast<const int>((opcode == Opcode::Jal) || (opcode == Opcode::Jalr) ||
                                              (opcode == Opcode::Branch));
     const int ir_jump = (opcode == Opcode::Jal) ? 2 : (opcode == Opcode::Jalr) ? 3 : 0;
@@ -250,7 +250,7 @@ void Tracer::emit_branch_prediction_trace(Counter mtime, Register cpc, Register 
 
     const Word targ = ((ir_jump | ir_branch) != 0) ? jmp_pc : 0;
     std::println(fp_bpred_, "{:08} {:0{}x} {:0{}x} {} {} {} {}", static_cast<int>(mtime), cpc,
-                 D_TRACE_HEX_WIDTH, targ, D_TRACE_HEX_WIDTH, ir_jb, r_tkn, ir_jump, ir_branch);
+                 D_TRACE_HEX_WIDTH, targ, D_TRACE_HEX_WIDTH, ir_jb, static_cast<int>(r_tkn), ir_jump, ir_branch);
     fp_bpred_.flush();
 }
 
@@ -270,7 +270,7 @@ void Tracer::write_trace_snapshot() {
 
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 8; j++) {
-            std::print(fp_trace, "{:0{}x}{}", st.regs.read((i * 8) + j), D_TRACE_HEX_WIDTH,
+            std::print(fp_trace, "{:0{}x}{}", st.regs.read(static_cast<RegId>((i * 8) + j)), D_TRACE_HEX_WIDTH,
                        (j != 7 ? " " : "\n"));
         }
     }
@@ -294,9 +294,9 @@ void Tracer::write_trace_snapshot() {
                        D_TRACE_HEX_WIDTH, st.stval, D_TRACE_HEX_WIDTH, st.satp, D_TRACE_HEX_WIDTH,
                        st.scounteren, D_TRACE_HEX_WIDTH, st.load_res, D_TRACE_HEX_WIDTH);
         }
-        std::println(fp_trace, "{:0{}x} {:0{}x} {:0{}x}", cpu.pipeline_context.pending_exception,
+        std::println(fp_trace, "{:0{}x} {:0{}x} {:0{}x}", cpu.pipeline_context.pending_exception ? std::to_underlying(*cpu.pipeline_context.pending_exception) : simrv::xlen::kWordAllOnes,
                      D_TRACE_HEX_WIDTH, cpu.pipeline_context.pending_tval, D_TRACE_HEX_WIDTH,
-                     st.priv, D_TRACE_HEX_WIDTH);
+                     std::to_underlying(st.priv), D_TRACE_HEX_WIDTH);
 
         if (!machine_.s_rtosmode) {
             for (int i = 0; i < 4; i++) {

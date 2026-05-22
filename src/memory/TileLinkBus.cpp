@@ -47,21 +47,16 @@ void TileLinkBus::tick() {
                 resp.data = simrv::memory::ram_read_fast(req.address, funct3, machine_.mmem);
                 ++read_count_;
                 handled = true;
-            } else if (!simrv::memory::is_legacy_reserved_region(req.address) &&
-                       machine_.mmem != nullptr) {
-                resp.data = simrv::memory::ram_read_fast(req.address, funct3, machine_.mmem);
-                ++read_count_;
-                handled = true;
             }
         } else {
             resp.opcode = TlOpcodeD::AccessAck;
             if (machine_.s_isatest) {
                 const bool is_tohost_write =
-                    (kXLenBits == 64) ? (funct3 == static_cast<Instruction>(Funct3::Sw) ||
-                                         funct3 == static_cast<Instruction>(Funct3::Sd))
-                                      : (funct3 == static_cast<Instruction>(Funct3::Sw));
+                    simrv::xlen::kIsXLen64 ? (funct3 == static_cast<Instruction>(Funct3::Sw) ||
+                                              funct3 == static_cast<Instruction>(Funct3::Sd))
+                                          : (funct3 == static_cast<Instruction>(Funct3::Sw));
                 if (is_tohost_write && req.address == machine_.s_isatest_tohost) {
-                    machine_.tohost = (kXLenBits == 64)
+                    machine_.tohost = simrv::xlen::kIsXLen64
                                           ? req.data
                                           : ((machine_.tohost & 0xFFFFFFFF00000000ULL) | req.data);
                 } else if (!simrv::xlen::kIsXLen64 && is_tohost_write &&
@@ -72,11 +67,6 @@ void TileLinkBus::tick() {
             }
 
             if (simrv::memory::is_dram_addr(req.address) && machine_.mmem != nullptr) {
-                simrv::memory::ram_write_fast(req.address, req.data, funct3, machine_.mmem);
-                ++write_count_;
-                handled = true;
-            } else if (!simrv::memory::is_legacy_reserved_region(req.address) &&
-                       machine_.mmem != nullptr) {
                 simrv::memory::ram_write_fast(req.address, req.data, funct3, machine_.mmem);
                 ++write_count_;
                 handled = true;
@@ -120,13 +110,18 @@ void TileLinkBus::tick() {
 }
 
 auto TileLinkBus::get_response(uint8_t source_id, TlChannelD& resp) -> bool {
-    tick();  // Process any pending asynchronous requests
-    auto it = std::ranges::find_if(resp_queue_,
-                                   [source_id](const auto& r) { return r.source == source_id; });
-    if (it != resp_queue_.end()) {
-        resp = *it;
-        resp_queue_.erase(it);
-        return true;
+    while (true) {
+        auto it = std::ranges::find_if(
+            resp_queue_, [source_id](const auto& r) { return r.source == source_id; });
+        if (it != resp_queue_.end()) {
+            resp = *it;
+            resp_queue_.erase(it);
+            return true;
+        }
+        if (req_queue_.empty()) {
+            break;
+        }
+        tick();
     }
     return false;
 }

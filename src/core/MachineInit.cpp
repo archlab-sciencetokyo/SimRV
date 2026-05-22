@@ -11,7 +11,7 @@
 #include <string>
 
 #include "simrv/Define.hpp"
-#include "simrv/core/BootHacks.hpp"
+#include "simrv/core/Boot.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/device/Console.hpp"
@@ -152,7 +152,7 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
     console = std::make_unique<simrv::device::Console>(*this);
     rtc = std::make_unique<simrv::Rtc>(*this);
     uart = std::make_unique<simrv::device::Uart>(*this);
-    mmem_owner_.reset(static_cast<Byte*>(std::calloc(simrv::memory::kDramSize, sizeof(Byte))));
+    mmem_owner_.reset(new Byte[simrv::memory::kDramSize]());
     if (mmem_owner_ == nullptr) {
         std::println(std::cerr, "Error: failed to allocate main memory ({} bytes)",
                      static_cast<std::size_t>(simrv::memory::kDramSize));
@@ -165,7 +165,16 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
     console_queue_owner_.assign(simrv::virtio::kConsoleMaxQueueNum, simrv::virtio::QueueState{});
     disk_queue_owner_.assign(simrv::virtio::kDiskMaxQueueNum, simrv::virtio::QueueState{});
     console->Queue = console_queue_owner_.data();
+    console->QueueSel = 0;
+    console->QueueNum = 0;
+    console->InterruptStatus = 0;
+    console->Status = 0;
+
     disk->Queue = disk_queue_owner_.data();
+    disk->QueueSel = 0;
+    disk->QueueNum = 0;
+    disk->InterruptStatus = 0;
+    disk->Status = 0;
 
     memory_.initialize_mmu();
 
@@ -186,8 +195,8 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
                             : s_rtosmode    ? misa_profile_bits(MisaProfile::I)
                                             : kMisaDefault;
     cpu.state().pc = s_start_pc;
-    cpu.state().regs.write(10, 0);  // a0 = hartid
-    cpu.state().regs.write(11, linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);  // a1 = dtb
+    cpu.state().regs.write(static_cast<RegId>(10), 0);  // a0 = hartid
+    cpu.state().regs.write(static_cast<RegId>(11), linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);  // a1 = dtb
     cpu.state().misa = initial_misa;
     cpu.state().priv = kPrivMachine;
     cpu.TLB_flush();
@@ -209,6 +218,8 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
     if (s_use_disk) {
         load_image_into_ram(s_fn_dskimg, disk->sector,
                             static_cast<std::size_t>(simrv::virtio::kDiskSize), "disk");
+    } else {
+        std::memset(disk->sector, 0, simrv::virtio::kDiskSize);
     }
 
     if (s_use_mix) {

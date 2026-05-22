@@ -10,6 +10,7 @@
 #include <expected>
 
 #include "simrv/Define.hpp"
+#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv {
@@ -59,6 +60,31 @@ class Mmu {
      */
     auto translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
                    Word satp) -> std::expected<Address, TrapCause>;
+
+    /**
+     * @brief Verify if a virtual address is canonical according to the active SV mode.
+     *
+     * @param v_addr Virtual address to verify
+     * @param satp Current CPU satp register to determine SV mode
+     * @return true if the address is canonical, false otherwise
+     */
+    [[nodiscard]] static constexpr auto is_canonical(Address v_addr, Word satp) -> bool {
+        if constexpr (!simrv::xlen::kIsXLen64) {
+            return true;
+        } else {
+            const Word mode = simrv::xlen::satp_mode(satp);
+            if (mode == 8) {  // SV39
+                constexpr Word shift = 64 - 39;
+                return (static_cast<SignedWord>(v_addr << shift) >> shift) ==
+                       static_cast<SignedWord>(v_addr);
+            } else if (mode == 9) {  // SV48
+                constexpr Word shift = 64 - 48;
+                return (static_cast<SignedWord>(v_addr << shift) >> shift) ==
+                       static_cast<SignedWord>(v_addr);
+            }
+            return true;
+        }
+    }
 
    private:
     Byte* mmem_;

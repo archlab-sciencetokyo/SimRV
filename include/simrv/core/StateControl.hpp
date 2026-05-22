@@ -100,6 +100,36 @@ class TrapController {
     static void mret(ArchState& state, Tlb& tlb);
     static void sret(ArchState& state, Tlb& tlb);
     static void raiseException(CPU& cpu, TrapCause cause, CSRValue tval);
+
+    /**
+     * @brief Validates if the current privilege level is sufficient to execute a given privileged instruction.
+     *
+     * Checks requirements for instruction variants like mret, sret, or sfence.vma based on current
+     * privilege, MISA extensions, and TSR/TVM bits of mstatus.
+     *
+     * @param current_priv The CPU's current privilege level.
+     * @param misa The current machine ISA configuration (MISA).
+     * @param mstatus The current status register (mstatus).
+     * @param funct12 The 12-bit privileged function field of the system instruction.
+     * @param funct7 The 7-bit function field (used for SFENCE.VMA).
+     * @return true if the instruction is allowed under current privilege, false otherwise.
+     */
+    static auto canExecutePrivilegedInstruction(PrivilegeLevel current_priv, CSRValue misa,
+                                                CSRValue mstatus, Instruction funct12,
+                                                Word funct7) -> bool;
+
+    /**
+     * @brief Validates if the current privilege level has access to a specific CSR.
+     *
+     * Checks if the CPU has the privilege to read/write the requested CSR address,
+     * including read-only restrictions.
+     *
+     * @param current_priv The CPU's current privilege level.
+     * @param csr_addr The address of the CSR.
+     * @param is_write True if this is a write or read-write access to the CSR.
+     * @return true if access is permitted, false if it triggers an illegal instruction exception.
+     */
+    static auto canAccessCsr(PrivilegeLevel current_priv, CSRAddress csr_addr, bool is_write) -> bool;
 };
 
 }  // namespace simrv::core

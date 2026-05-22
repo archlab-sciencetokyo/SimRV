@@ -88,7 +88,7 @@ constexpr auto unlikely(T value) -> bool {
 }  // namespace simrv::compiler
 
 enum class TrapFlag : TrapCause {
-    Interrupt = static_cast<TrapCause>(Word{1} << (kXLenBits - 1u)),
+    Interrupt = static_cast<TrapCause>(Word{1} << (simrv::xlen::kXLenBits - 1u)),
 };
 
 enum class ExceptionCode : TrapCause {
@@ -109,12 +109,7 @@ enum class ExceptionCode : TrapCause {
     StorePageFault = 0xf,
 };
 
-enum class PrivMode : PrivilegeLevel {
-    U = 0,
-    S = 1,
-    H = 2,
-    M = 3,
-};
+
 
 enum class MstatusBit : CSRValue {
     Uie = (1u << 0),
@@ -133,6 +128,9 @@ enum class MstatusBit : CSRValue {
     Mprv = (1u << 17),
     Sum = (1u << 18),
     Mxr = (1u << 19),
+    Tvm = (1u << 20),
+    Tw = (1u << 21),
+    Tsr = (1u << 22),
 };
 
 enum class MipBit : CSRValue {
@@ -150,12 +148,7 @@ enum class MipBit : CSRValue {
     Meip = (1u << 11),
 };
 
-enum class PrivilegeMode : PrivilegeLevel {
-    User = static_cast<PrivilegeLevel>(PrivMode::U),
-    Supervisor = static_cast<PrivilegeLevel>(PrivMode::S),
-    Hypervisor = static_cast<PrivilegeLevel>(PrivMode::H),
-    Machine = static_cast<PrivilegeLevel>(PrivMode::M),
-};
+
 
 template <typename EnumType>
 constexpr auto enum_mask(EnumType bit) {
@@ -178,9 +171,9 @@ constexpr auto trap_is_interrupt(TrapCause cause) -> bool {
     return (cause & kInterruptCauseBit) != 0u;
 }
 
-constexpr PrivilegeLevel kPrivUser = static_cast<PrivilegeLevel>(PrivilegeMode::User);
-constexpr PrivilegeLevel kPrivSupervisor = static_cast<PrivilegeLevel>(PrivilegeMode::Supervisor);
-constexpr PrivilegeLevel kPrivMachine = static_cast<PrivilegeLevel>(PrivilegeMode::Machine);
+constexpr PrivilegeLevel kPrivUser = PrivilegeLevel::User;
+constexpr PrivilegeLevel kPrivSupervisor = PrivilegeLevel::Supervisor;
+constexpr PrivilegeLevel kPrivMachine = PrivilegeLevel::Machine;
 
 constexpr CSRValue kMstatusMask =
     (enum_mask(MstatusBit::Uie) | enum_mask(MstatusBit::Sie) | enum_mask(MstatusBit::Mie) |
@@ -192,7 +185,7 @@ constexpr CSRValue kSstatusMask =
      enum_mask(MstatusBit::Spie) | enum_mask(MstatusBit::Spp) | enum_mask(MstatusBit::Fs) |
      enum_mask(MstatusBit::Xs) | enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr));
 constexpr CSRValue kMstatusFsDirty = enum_mask(MstatusBit::Fs);
-constexpr CSRValue kMstatusSd = static_cast<CSRValue>(Word{1} << (kXLenBits - 1u));
+constexpr CSRValue kMstatusSd = static_cast<CSRValue>(Word{1} << (simrv::xlen::kXLenBits - 1u));
 constexpr CSRValue kMstatusSstatusReadMask = static_cast<CSRValue>(0x000de133u) | kMstatusSd;
 constexpr CSRValue kMstatusReadMask = static_cast<CSRValue>(kXLenMask);
 constexpr CSRValue kFflagsMask = static_cast<CSRValue>(0x1fu);
