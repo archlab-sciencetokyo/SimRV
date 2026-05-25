@@ -12,6 +12,9 @@
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/Machine.hpp"
+#include "simrv/device/Tui.hpp"
+#include "simrv/device/Uart.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::sbi {
@@ -117,7 +120,11 @@ auto Sbi::handle_legacy(Word ext_id, Word func_id) -> bool {
         }
         case LegacyId::ConsolePutchar: {
             const auto ch = static_cast<uint8_t>(cpu_.state().regs.read(static_cast<RegId>(10)) & 0xffU);
-            (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
+            if (cpu_.machine_ && cpu_.machine_->s_tuimode && cpu_.machine_->uart && cpu_.machine_->uart->tui()) {
+                cpu_.machine_->uart->tui()->handle_char_write(static_cast<char>(ch));
+            } else {
+                (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
+            }
             sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
             return true;
         }
@@ -216,6 +223,10 @@ auto Sbi::handle_hsm(Word func_id) -> bool {
 }
 
 auto Sbi::handle_ecall(TrapCause cause) -> bool {
+    if (cpu_.use_opensbi) {
+        return false;
+    }
+
     if (cause != enum_mask(ExceptionCode::SupervisorEcall) &&
         cause != enum_mask(ExceptionCode::MachineEcall)) {
         return false;

@@ -1,6 +1,6 @@
 /**
  * @file Uart.cpp
- * @brief UART device node implementation.
+ * @brief UART device node implementation with TUI dashboard support.
  */
 #include "simrv/device/Uart.hpp"
 
@@ -8,7 +8,11 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#include <chrono>
+#include <thread>
+
 #include "simrv/core/Machine.hpp"
+#include "simrv/device/Tui.hpp"
 
 namespace simrv::device {
 
@@ -41,7 +45,13 @@ auto poll_uart_rx(uint8_t& byte_out) -> bool {
 }
 }  // namespace
 
-Uart::Uart(simrv::core::Machine& machine) : machine_(machine) {}
+Uart::Uart(simrv::core::Machine& machine) : machine_(machine) {
+    if (machine_.s_tuimode) {
+        tui_ = std::make_unique<Tui>(machine_);
+    }
+}
+
+Uart::~Uart() = default;
 
 auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
     const Address reg = simrv::mmio::uart_reg(req.address, uart_reg_shift_);
@@ -57,16 +67,26 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                 if (dlab_enabled) {
                     resp.data = uart_dll_;
                 } else {
-                    if (!uart_rx_ready_) {
-                        uart_rx_ready_ = poll_uart_rx(uart_rx_byte_);
-                        update_uart_irq(machine_, uart_rx_ready_, uart_ier_);
-                    }
-                    if (uart_rx_ready_) {
-                        resp.data = static_cast<Word>(uart_rx_byte_);
-                        uart_rx_ready_ = false;
-                        update_uart_irq(machine_, false, uart_ier_);
+                    if (machine_.s_tuimode) {
+                        if (!rx_fifo_.empty()) {
+                            resp.data = static_cast<Word>(rx_fifo_.front());
+                            rx_fifo_.pop();
+                            update_uart_irq(machine_, !rx_fifo_.empty(), uart_ier_);
+                        } else {
+                            resp.data = 0;
+                        }
                     } else {
-                        resp.data = 0;
+                        if (!uart_rx_ready_) {
+                            uart_rx_ready_ = poll_uart_rx(uart_rx_byte_);
+                            update_uart_irq(machine_, uart_rx_ready_, uart_ier_);
+                        }
+                        if (uart_rx_ready_) {
+                            resp.data = static_cast<Word>(uart_rx_byte_);
+                            uart_rx_ready_ = false;
+                            update_uart_irq(machine_, false, uart_ier_);
+                        } else {
+                            resp.data = 0;
+                        }
                     }
                 }
                 break;
@@ -83,13 +103,19 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                 resp.data = uart_mcr_;
                 break;
             case simrv::mmio::kUartRegLsr:
-                if (!uart_rx_ready_) {
-                    uart_rx_ready_ = poll_uart_rx(uart_rx_byte_);
-                    update_uart_irq(machine_, uart_rx_ready_, uart_ier_);
+                if (machine_.s_tuimode) {
+                    resp.data =
+                        simrv::mmio::kUartLsrThreTemt |
+                        (!rx_fifo_.empty() ? simrv::mmio::kUartLsrDataReady : static_cast<Word>(0));
+                } else {
+                    if (!uart_rx_ready_) {
+                        uart_rx_ready_ = poll_uart_rx(uart_rx_byte_);
+                        update_uart_irq(machine_, uart_rx_ready_, uart_ier_);
+                    }
+                    resp.data =
+                        simrv::mmio::kUartLsrThreTemt |
+                        (uart_rx_ready_ ? simrv::mmio::kUartLsrDataReady : static_cast<Word>(0));
                 }
-                resp.data =
-                    simrv::mmio::kUartLsrThreTemt |
-                    (uart_rx_ready_ ? simrv::mmio::kUartLsrDataReady : static_cast<Word>(0));
                 break;
             case simrv::mmio::kUartRegScr:
                 resp.data = uart_scr_;
@@ -105,7 +131,11 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                     uart_dll_ = wdata & static_cast<Word>(0xffU);
                 } else {
                     const auto ch = static_cast<uint8_t>(wdata & static_cast<Word>(0xffU));
-                    (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
+                    if (machine_.s_tuimode) {
+                        tui_->handle_char_write(static_cast<char>(ch));
+                    } else {
+                        (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
+                    }
                 }
                 break;
             case simrv::mmio::kUartRegIerDlm:
@@ -113,7 +143,11 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                     uart_dlm_ = wdata & static_cast<Word>(0xffU);
                 } else {
                     uart_ier_ = wdata & static_cast<Word>(0x0fU);
-                    update_uart_irq(machine_, uart_rx_ready_, uart_ier_);
+                    if (machine_.s_tuimode) {
+                        update_uart_irq(machine_, !rx_fifo_.empty(), uart_ier_);
+                    } else {
+                        update_uart_irq(machine_, uart_rx_ready_, uart_ier_);
+                    }
                 }
                 break;
             case simrv::mmio::kUartRegIirFcr:
@@ -133,4 +167,71 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
     }
     return true;
 }
+
+void Uart::tui_update() {
+    if (!machine_.s_tuimode) return;
+
+    uint8_t byte = 0;
+    while (poll_uart_rx(byte)) {
+        if (byte == 17) {  // Ctrl-Q
+            machine_.is_running_ = false;
+            return;
+        }
+        if (byte == 16) {  // Ctrl-P: Toggle Pause
+            tui_pause_loop();
+            return;
+        }
+        if (byte == 9) {  // Tab: Cycle Layout
+            if (tui_) {
+                tui_->cycle_layout();
+            }
+            return;
+        }
+        rx_fifo_.push(byte);
+        update_uart_irq(machine_, true, uart_ier_);
+    }
+}
+
+void Uart::tui_pause_loop() {
+    bool paused = true;
+    tui_->set_paused(true);
+    tui_->render();
+
+    while (paused && machine_.is_running_) {
+        if (g_resized) {
+            if (tui_) {
+                tui_->render();
+            }
+        }
+        uint8_t byte = 0;
+        if (poll_uart_rx(byte)) {
+            if (byte == 16) {  // Ctrl-P to resume
+                paused = false;
+            } else if (byte == 17) {  // Ctrl-Q to quit
+                machine_.is_running_ = false;
+                paused = false;
+            } else if (byte == 9) {  // Tab to cycle layout
+                if (tui_) {
+                    tui_->cycle_layout();
+                }
+            } else if (byte == ' ' || byte == 's' || byte == 'S') {  // Step one instruction/cycle
+                machine_.prepare_cycle();
+                machine_.cpu.run_cycle(machine_);
+                machine_.finalize_cycle();
+                tui_->render();
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    tui_->set_paused(false);
+    tui_->render();
+}
+
+void Uart::refresh_tui() {
+    if (tui_) {
+        tui_->render();
+    }
+}
+
 }  // namespace simrv::device

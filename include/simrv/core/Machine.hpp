@@ -53,6 +53,7 @@ class Machine {
     // ========== Simulation Configuration Flags ==========
     bool s_appmode = false;        // Application mode (vs. kernel/RTOS mode)
     bool s_rtosmode = false;       // RTOS mode (vs. kernel/application mode)
+    bool s_tuimode = false;        // Enable TUI monitor mode
     bool s_debugmode = false;      // Enable debug logging in MMIO paths
     bool s_dlog_mode = false;      // Enable device request/response logging
     bool s_traplog_mode = false;   // Enable trap/SBI/exception logging
@@ -99,6 +100,7 @@ class Machine {
     std::vector<simrv::virtio::QueueState> console_queue_owner_;
     std::vector<simrv::virtio::QueueState> disk_queue_owner_;
     friend class simrv::core::CPU;
+    friend class simrv::device::Uart;
     simrv::memory::MemorySubsystem memory_;
     /// Perform per-cycle initialization before CPU stage execution.
     void prepare_cycle();

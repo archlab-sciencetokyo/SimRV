@@ -112,6 +112,7 @@ add_executable(SimRV
   src/device/VirtioDevice.cpp
   src/device/Rtc.cpp
   src/device/Uart.cpp
+  src/device/Tui.cpp
 )
 
 target_compile_features(SimRV PRIVATE cxx_std_23)

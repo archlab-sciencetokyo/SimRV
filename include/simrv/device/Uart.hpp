@@ -5,6 +5,8 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
+#include <queue>
 
 #include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
@@ -15,15 +17,25 @@ class Machine;
 }
 
 namespace simrv::device {
+
+class Tui;
+
 class Uart : public memory::TileLinkNode {
    public:
     explicit Uart(simrv::core::Machine& machine);
+    ~Uart() override;
     [[nodiscard]] auto name() const -> const char* override { return "uart"; }
     [[nodiscard]] auto base_address() const -> Address override {
         return simrv::mmio::kUartBaseAddress;
     }
     [[nodiscard]] auto size() const -> Address override { return simrv::mmio::kUartSize; }
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool override;
+
+    void tui_update();
+    void tui_pause_loop();
+    void refresh_tui();
+    [[nodiscard]] auto tui() -> Tui* { return tui_.get(); }
+    [[nodiscard]] auto tui() const -> const Tui* { return tui_.get(); }
 
    private:
     simrv::core::Machine& machine_;
@@ -36,5 +48,8 @@ class Uart : public memory::TileLinkNode {
     Word uart_dlm_ = 0;
     bool uart_rx_ready_ = false;
     uint8_t uart_rx_byte_ = 0;
+
+    std::unique_ptr<Tui> tui_;
+    std::queue<uint8_t> rx_fifo_;
 };
 }  // namespace simrv::device

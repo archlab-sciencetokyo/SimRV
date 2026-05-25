@@ -171,6 +171,8 @@ class CPU {
     simrv::cache::DCache dcache;
     sbi::Sbi sbi;
     std::ofstream* trap_log_stream = nullptr;
+    bool use_opensbi = false;
+    Machine* machine_ = nullptr;
 
     // ========== Execution Metrics ==========
     Counter e_icount = 0;                           // Total instructions executed

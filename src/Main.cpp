@@ -61,6 +61,7 @@ struct RuntimeOptions {
 
     bool appmode = false;
     bool rtosmode = false;
+    bool tuimode = false;
     bool debugmode = false;
     bool dlog_mode = false;
     bool traplog_mode = false;
@@ -70,6 +71,7 @@ struct RuntimeOptions {
     bool isatest = false;
     bool gen_binfile = false;
     bool trace_enabled = false;
+    bool use_opensbi = false;
 };
 
 struct ParseResult {
@@ -470,6 +472,11 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             continue;
         }
 
+        if (arg == "-B" || arg == "--opensbi") {
+            result.options.use_opensbi = true;
+            continue;
+        }
+
         if (arg == "-w") {
             result.options.bp_trace = true;
             continue;
@@ -512,6 +519,10 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             result.options.start_pc = 0;
             result.options.enabletimer = 0;
             result.options.rtosmode = true;
+            continue;
+        }
+        if (arg == "--tui") {
+            result.options.tuimode = true;
             continue;
         }
 
@@ -557,6 +568,7 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
 
     machine->s_appmode = options.appmode;
     machine->s_rtosmode = options.rtosmode;
+    machine->s_tuimode = options.tuimode;
     machine->s_debugmode = options.debugmode;
     machine->s_dlog_mode = options.dlog_mode;
     machine->s_traplog_mode = options.traplog_mode;
@@ -577,6 +589,8 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
         }
         machine->cpu.trap_log_stream = &machine->tracer.fp_traplog;
     }
+
+    machine->cpu.use_opensbi = options.use_opensbi;
 
     return {};
 }
@@ -600,8 +614,10 @@ void set_start_time(simrv::core::Machine& machine) {
         "Execution Control:\n"
         "  -e <N>           Stop after N instructions\n"
         "  -l <N>           Enable timer after N cycles\n"
+        "  -B, --opensbi    Bypass legacy C++ SBI and boot native OpenSBI\n"
         "  -a               App mode (start_pc=0)\n"
         "  -r               RTOS mode (start_pc=0, timer enabled at cycle 0)\n"
+        "  --tui            Enable interactive TUI monitor mode\n"
         "  --misa <PROFILE> Select MISA profile: rv{}i | rv{}imac | rv{}gc\n\n"
         "Tracing and Debug:\n"
         "  -t <BEGIN> <END> Write trace.txt for instruction range [BEGIN, END]\n"

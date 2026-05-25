@@ -3,6 +3,7 @@
  * @brief SimRV implementation unit.
  */
 #include "simrv/core/Machine.hpp"
+#include "simrv/device/Tui.hpp"
 
 #include <array>
 #include <cstdint>
@@ -14,7 +15,9 @@
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
-Machine::Machine() : memory_(*this) {}
+Machine::Machine() : memory_(*this) {
+    cpu.machine_ = this;
+}
 
 /**
  * @brief Run the simulation loop until a termination condition is reached.
@@ -22,6 +25,9 @@ Machine::Machine() : memory_(*this) {}
 void Machine::run() {
     if (s_gen_binfile) {
         generate_binfile();
+    }
+    if (s_tuimode && uart) {
+        uart->tui_pause_loop();
     }
     while (is_running_) {
         prepare_cycle();
@@ -77,6 +83,16 @@ constexpr Word CMD_POWER_OFF = 2;  /* command for application mode using tohost 
  * @brief Apply end-of-cycle termination checks and optional trace outputs.
  */
 void Machine::finalize_cycle() {
+    if (s_tuimode) {
+        if (simrv::device::g_resized) {
+            uart->refresh_tui();
+        }
+        if ((cpu.clint_mmio.mtime % 50000) == 0) {
+            uart->tui_update();
+            uart->refresh_tui();
+        }
+    }
+
     if (s_strace != 0 && cpu.clint_mmio.mtime >= s_strace) {
         tracer.emit_periodic_pc_trace(cpu.clint_mmio.mtime, cpu.pipeline_context.cpc);
     }
@@ -97,6 +113,36 @@ void Machine::finalize_cycle() {
         return;
     }
 
+    // Standard 64-bit HTIF handling
+    const auto dev = static_cast<uint8_t>(tohost >> 56);
+    const auto cmd = static_cast<uint8_t>(tohost >> 48);
+    const uint64_t payload = tohost & 0x0000FFFFFFFFFFFFULL;
+
+    if (dev == 1 && cmd == 1) {
+        // HTIF Console Print
+        if (s_tuimode && uart && uart->tui()) {
+            uart->tui()->handle_char_write(static_cast<char>(payload & 0xff));
+        } else {
+            std::print("{}", static_cast<char>(payload & 0xff));
+            fflush(stdout);
+        }
+        tohost = 0;
+        return;
+    }
+
+    // TUI Halting check
+    if (s_tuimode && uart && uart->tui()) {
+        if (tohost == 1) {
+            uart->tui()->print_log("\n__ Program Halted (SUCCESS / PASS)\n");
+            uart->tui_pause_loop();
+        } else if ((tohost & 1) != 0u || (tohost >> 16) == CMD_POWER_OFF) {
+            uart->tui()->print_log(std::format("\n__ Program Halted (FAIL / EXIT code={})\n", tohost >> 1));
+            uart->tui_pause_loop();
+        }
+        tohost = 0;
+        return;
+    }
+
     if (s_isatest) {
         if (tohost == 1) {
             std::println("\n__ ISA TEST PASS");
@@ -109,27 +155,14 @@ void Machine::finalize_cycle() {
         }
     }
 
-    // Standard 64-bit HTIF handling
-    const auto dev = static_cast<uint8_t>(tohost >> 56);
-    const auto cmd = static_cast<uint8_t>(tohost >> 48);
-    const uint64_t payload = tohost & 0x0000FFFFFFFFFFFFULL;
-
-    if (dev == 1 && cmd == 1) {
-        // HTIF Console Print
-        std::print("{}", static_cast<char>(payload & 0xff));
-        tohost = 0;
-        fflush(stdout);
-        return;
-    }
-
     // Legacy 32-bit SimRV application mode magic handling
     if ((tohost >> 16) == CMD_POWER_OFF) {
         std::println("\n__ Power off");
         is_running_ = false;
     } else if ((tohost >> 16) == CMD_PRINT_CHAR) {
         std::print("{}", static_cast<char>(tohost & 0xff));
-        tohost = 0;
         fflush(stdout);
+        tohost = 0;
     }
 }
 
