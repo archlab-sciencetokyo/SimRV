@@ -212,6 +212,7 @@ make PLATFORM=generic CROSS_COMPILE="$CROSS_COMPILE" \
      PLATFORM_RISCV_XLEN="$XLEN" \
      FW_PAYLOAD_PATH="$BUILD_DIR/vmlinux_${ARCH}.bin" \
      FW_TEXT_START=0x80000000 \
+     FW_PAYLOAD_FDT_ADDR=0x83000000 \
      clean
 
 make PLATFORM=generic CROSS_COMPILE="$CROSS_COMPILE" \
@@ -219,6 +220,7 @@ make PLATFORM=generic CROSS_COMPILE="$CROSS_COMPILE" \
      PLATFORM_RISCV_XLEN="$XLEN" \
      FW_PAYLOAD_PATH="$BUILD_DIR/vmlinux_${ARCH}.bin" \
      FW_TEXT_START=0x80000000 \
+     FW_PAYLOAD_FDT_ADDR=0x83000000 \
      -j"$(nproc)"
 
 # ----------------------------------------------------------------------------

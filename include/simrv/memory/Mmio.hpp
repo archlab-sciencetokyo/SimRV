@@ -17,7 +17,7 @@ inline constexpr Address kRtcSize = static_cast<Address>(0x00001000u);
 
 // Interrupt controller addresses
 inline constexpr Address kPlicBaseAddress = static_cast<Address>(0x50000000u);
-inline constexpr Address kPlicSize = static_cast<Address>(0x00400000u);
+inline constexpr Address kPlicSize = static_cast<Address>(0x04000000u);
 inline constexpr Address kPlicHartBase = static_cast<Address>(0x00200000u);
 inline constexpr Address kPlicHartSize = static_cast<Address>(0x00001000u);
 inline constexpr Address kClintBaseAddress = static_cast<Address>(0x60000000u);

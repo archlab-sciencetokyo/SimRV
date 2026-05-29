@@ -175,9 +175,9 @@ class CPU {
     Machine* machine_ = nullptr;
 
     // ========== Execution Metrics ==========
-    Counter e_icount = 0;                           // Total instructions executed
+    uint64_t e_icount{0};                                // Total instruction count
     Counter e_ccount = 0;                           // Compressed instructions executed
-    std::array<int, OperationIdCount> e_instmix{};  // Instruction-mix statistics
+    std::array<uint64_t, OperationIdCount> e_instmix{};  // Instruction-mix statistics
 };
 
 }  // namespace simrv::core

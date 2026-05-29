@@ -16,11 +16,6 @@
 #include <fstream>
 
 namespace simrv {
-std::ofstream& get_mmu_log() {
-    static std::ofstream log("/home/archlab/ltrunk/workspace/tools/SimRV/mmu_debug.log", std::ios::app);
-    return log;
-}
-
 
 // Static member initialization
 Word Mmu::s_last_valid_root_ppn = 0;
@@ -31,22 +26,16 @@ auto Mmu::translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
                     Word satp) -> std::expected<Address, TrapCause> {
     // Ensure virtual address fits within XLEN mask
     if ((v_addr & ~simrv::xlen::kAddrMask) != 0) {
-        get_mmu_log() << "[MMU] Virtual address out of XLEN range: " << std::hex << v_addr << std::dec << '\n';
-        get_mmu_log().flush();
         // Optionally abort translation in debug builds
         // std::terminate();
     }
-    // Log SATP mode and ASID for debugging
-    get_mmu_log() << "[MMU] SATP=0x" << std::hex << satp << std::dec << " mode=" << simrv::xlen::satp_mode(satp) << " asid=" << simrv::xlen::satp_asid(satp) << '\n';
-    get_mmu_log().flush();
     // Machine mode or MMU disabled: use physical addressing
     if (priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(satp)) {
         return v_addr;
     }
 
 
-    // Translate through page tables (debug log)
-    get_mmu_log() << "[MMU] Translating VA " << std::hex << v_addr << std::dec << " with satp=" << satp << '\n'; get_mmu_log().flush();
+    // Translate through page tables
     return page_walk(v_addr, access, priv, mstatus, satp);
 }
 
@@ -56,7 +45,7 @@ auto Mmu::validate_pte_permissions(Word pte, Word permission_bits, PteAccess acc
     constexpr Word kPermWriteOnly = 2;
     constexpr Word kPermWriteExecute = 6;
     if (permission_bits == kPermWriteOnly || permission_bits == kPermWriteExecute) {
-        get_mmu_log() << "[MMU] Illegal permission bits: " << permission_bits << '\n'; get_mmu_log().flush();
+
         return false;
     }
 
@@ -92,7 +81,7 @@ void Mmu::update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess ac
         Instruction const store_op = simrv::xlen::kIsXLen64 ? static_cast<Instruction>(Funct3::Sd)
                                                             : static_cast<Instruction>(Funct3::Sw);
         simrv::memory::ram_write_fast(pte_addr, updated_pte, store_op, mmem_);
-        get_mmu_log() << "[MMU] Updated PTE at " << std::hex << pte_addr << " to " << updated_pte << std::dec << '\n'; get_mmu_log().flush();
+
     }
 }
 
@@ -161,11 +150,7 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
             (((mstatus & enum_mask(MstatusBit::Mxr)) != 0u) ? pte >> 1 | pte >> 3 : pte >> 1) &
             kPermissionBitsMask;
 
-        // Debug logging for each level
-        get_mmu_log() << "[MMU] level=" << i << " vpn_i=0x" << std::hex << vpn_i << std::dec
-                  << " pte_addr=0x" << std::hex << pte_addr << std::dec
-                  << " pte=0x" << std::hex << pte << std::dec
-                  << " perm_bits=0x" << std::hex << permission_bits << std::dec << '\n'; get_mmu_log().flush();
+
 
         if (permission_bits == 0) {
             // Pointer to next level

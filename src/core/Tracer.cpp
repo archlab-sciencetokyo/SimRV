@@ -263,9 +263,6 @@ void Tracer::write_trace_snapshot() {
 
     std::print(fp_trace, "{:08} {:0{}x} {:08x}", cpu.clint_mmio.mtime, cpu.pipeline_context.cpc,
                D_TRACE_HEX_WIDTH, static_cast<uint32_t>(cpu.pipeline_context.ir));
-    if (machine_.s_rtosmode) {
-        std::print(fp_trace, " {:08}", cpu.clint_mmio.mtimecmp);
-    }
     std::println(fp_trace, "");
 
     for (int i = 0; i < 4; i++) {
@@ -286,35 +283,31 @@ void Tracer::write_trace_snapshot() {
                    st.mip, D_TRACE_HEX_WIDTH, st.medeleg, D_TRACE_HEX_WIDTH, st.mideleg,
                    D_TRACE_HEX_WIDTH, st.mcounteren, D_TRACE_HEX_WIDTH);
 
-        if (!machine_.s_rtosmode) {
-            std::println(fp_trace, "{:0{}x} {:0{}x} {:0{}x}", st.stvec, D_TRACE_HEX_WIDTH,
-                         st.sscratch, D_TRACE_HEX_WIDTH, st.sepc, D_TRACE_HEX_WIDTH);
+        std::println(fp_trace, "{:0{}x} {:0{}x} {:0{}x}", st.stvec, D_TRACE_HEX_WIDTH,
+                     st.sscratch, D_TRACE_HEX_WIDTH, st.sepc, D_TRACE_HEX_WIDTH);
 
-            std::print(fp_trace, "{:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x} ", st.scause,
-                       D_TRACE_HEX_WIDTH, st.stval, D_TRACE_HEX_WIDTH, st.satp, D_TRACE_HEX_WIDTH,
-                       st.scounteren, D_TRACE_HEX_WIDTH, st.load_res, D_TRACE_HEX_WIDTH);
-        }
+        std::print(fp_trace, "{:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x} ", st.scause,
+                   D_TRACE_HEX_WIDTH, st.stval, D_TRACE_HEX_WIDTH, st.satp, D_TRACE_HEX_WIDTH,
+                   st.scounteren, D_TRACE_HEX_WIDTH, st.load_res, D_TRACE_HEX_WIDTH);
         std::println(fp_trace, "{:0{}x} {:0{}x} {:0{}x}", cpu.pipeline_context.pending_exception ? std::to_underlying(*cpu.pipeline_context.pending_exception) : simrv::xlen::kWordAllOnes,
                      D_TRACE_HEX_WIDTH, cpu.pipeline_context.pending_tval, D_TRACE_HEX_WIDTH,
                      std::to_underlying(st.priv), D_TRACE_HEX_WIDTH);
 
-        if (!machine_.s_rtosmode) {
-            for (int i = 0; i < 4; i++) {
-                std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.TLB_inst_r.at(i).v_addr,
-                           D_TRACE_HEX_WIDTH, cpu.TLB_inst_r.at(i).p_addr, D_TRACE_HEX_WIDTH);
-            }
-            std::println(fp_trace, "");
-            for (int i = 0; i < 4; i++) {
-                std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.TLB_data_r.at(i).v_addr,
-                           D_TRACE_HEX_WIDTH, cpu.TLB_data_r.at(i).p_addr, D_TRACE_HEX_WIDTH);
-            }
-            std::println(fp_trace, "");
-            for (int i = 0; i < 4; i++) {
-                std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.TLB_data_w.at(i).v_addr,
-                           D_TRACE_HEX_WIDTH, cpu.TLB_data_w.at(i).p_addr, D_TRACE_HEX_WIDTH);
-            }
-            std::println(fp_trace, "");
+        for (int i = 0; i < 4; i++) {
+            std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.TLB_inst_r.at(i).v_addr,
+                       D_TRACE_HEX_WIDTH, cpu.TLB_inst_r.at(i).p_addr, D_TRACE_HEX_WIDTH);
         }
+        std::println(fp_trace, "");
+        for (int i = 0; i < 4; i++) {
+            std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.TLB_data_r.at(i).v_addr,
+                       D_TRACE_HEX_WIDTH, cpu.TLB_data_r.at(i).p_addr, D_TRACE_HEX_WIDTH);
+        }
+        std::println(fp_trace, "");
+        for (int i = 0; i < 4; i++) {
+            std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.TLB_data_w.at(i).v_addr,
+                       D_TRACE_HEX_WIDTH, cpu.TLB_data_w.at(i).p_addr, D_TRACE_HEX_WIDTH);
+        }
+        std::println(fp_trace, "");
     }
 }
 

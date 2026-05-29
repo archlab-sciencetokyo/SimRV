@@ -59,13 +59,27 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
 
             TlChannelD resp{};
             if (mem.system_bus().get_response(0, resp)) {
-                if (simrv::compiler::unlikely(resp.error)) {
-                    cpu.pipeline_context.pending_exception = ExceptionCode::FaultLoad;
-                    cpu.pipeline_context.pending_tval = v_addr;
+                    if (simrv::compiler::unlikely(resp.error)) {
+                        cpu.pipeline_context.pending_exception = ExceptionCode::FaultLoad;
+                        cpu.pipeline_context.pending_tval = v_addr;
+                    }
+                    Word rdata = resp.data;
+                    const unsigned req_size_bytes = 1u << (funct3 & 0x3u);
+                    const unsigned bits = 8 * req_size_bytes;
+                    if (bits < simrv::xlen::kXLenBits) {
+                        const Word mask = (static_cast<Word>(1) << bits) - 1;
+                        rdata &= mask;
+                        constexpr auto kSignExtendBit = 0x4u;
+                        if ((funct3 & kSignExtendBit) == 0) {
+                            const Word sign_bit = static_cast<Word>(1) << (bits - 1);
+                            if ((rdata & sign_bit) != 0) {
+                                rdata |= ~mask;
+                            }
+                        }
+                    }
+                    return static_cast<Word>(rdata & simrv::xlen::kXLenMask);
                 }
-                return resp.data;
-            }
-            return 0;
+                return 0;
         }
 
         Word cached_data = 0;
@@ -181,7 +195,9 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
         req.size = static_cast<uint8_t>(funct3 & 0x3);
         req.source = 0;  // CPU Data Bus source ID
         req.address = addr;
-        req.data = data;
+        const unsigned req_size_bytes = 1u << (funct3 & 0x3u);
+        const unsigned bits = 8 * req_size_bytes;
+        req.data = (bits < simrv::xlen::kXLenBits) ? (data & ((static_cast<Word>(1) << bits) - 1)) : data;
         mem.system_bus().send_request(req);
 
         TlChannelD resp{};

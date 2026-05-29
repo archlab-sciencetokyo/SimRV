@@ -33,9 +33,16 @@ void Tlb::flush_selective(bool match_all_vaddr, Address vaddr, bool match_all_as
         }
     };
 
-    std::ranges::for_each(inst_r, check_and_flush);
-    std::ranges::for_each(data_r, check_and_flush);
-    std::ranges::for_each(data_w, check_and_flush);
+    if (!match_all_vaddr) {
+        const Word index = (masked_vaddr >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1);
+        check_and_flush(inst_r.at(index));
+        check_and_flush(data_r.at(index));
+        check_and_flush(data_w.at(index));
+    } else {
+        std::ranges::for_each(inst_r, check_and_flush);
+        std::ranges::for_each(data_r, check_and_flush);
+        std::ranges::for_each(data_w, check_and_flush);
+    }
 }
 
 }  // namespace simrv::core

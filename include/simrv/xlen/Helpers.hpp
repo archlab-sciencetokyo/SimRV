@@ -15,10 +15,25 @@ inline constexpr Word kAddrMask = (kIsXLen64 ? UINT64_MAX : UINT32_MAX);
 inline constexpr Address maskAddress(Address a) noexcept { return a & kAddrMask; }
 
 inline auto resolve_misa_string(CSRValue misa) -> std::string {
-    std::string s = kIsXLen64 ? "rv64" : "rv32";
+    std::string s = kIsXLen64 ? "RV64" : "RV32";
+    bool has_i = (misa & (static_cast<CSRValue>(1) << ('i' - 'a'))) != 0;
+    bool has_m = (misa & (static_cast<CSRValue>(1) << ('m' - 'a'))) != 0;
+    bool has_a = (misa & (static_cast<CSRValue>(1) << ('a' - 'a'))) != 0;
+    bool has_f = (misa & (static_cast<CSRValue>(1) << ('f' - 'a'))) != 0;
+    bool has_d = (misa & (static_cast<CSRValue>(1) << ('d' - 'a'))) != 0;
+    bool is_g = has_i && has_m && has_a && has_f && has_d;
+
+    if (is_g) {
+        s += "G";
+    }
+
     for (int i = 0; i < 26; ++i) {
         if ((misa & (static_cast<CSRValue>(1) << i)) != 0) {
-            s += static_cast<char>('a' + i);
+            char c = static_cast<char>('a' + i);
+            if (is_g && (c == 'i' || c == 'm' || c == 'a' || c == 'f' || c == 'd')) {
+                continue;
+            }
+            s += static_cast<char>(c - 'a' + 'A');
         }
     }
     return s;

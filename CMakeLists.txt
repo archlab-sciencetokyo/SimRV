@@ -77,8 +77,8 @@ if(NOT SIMRV_XLEN STREQUAL "32" AND NOT SIMRV_XLEN STREQUAL "64")
 endif()
 
 
-set(SIMRV_DRAM_SIZE_MB "64" CACHE STRING "DRAM size in megabytes (must be power of 2)")
-set(SIMRV_DISK_SIZE_MB "128" CACHE STRING "Disk size in megabytes")
+set(SIMRV_DRAM_SIZE_MB "256" CACHE STRING "DRAM size in megabytes (must be power of 2)")
+set(SIMRV_DISK_SIZE_MB "256" CACHE STRING "Disk size in megabytes")
 set(SIMRV_CORE_COUNT "1" CACHE STRING "Number of CPU cores (experimental)")
 
 add_executable(SimRV

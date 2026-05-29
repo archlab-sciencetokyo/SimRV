@@ -50,7 +50,7 @@ void TileLinkBus::tick() {
             }
         } else {
             resp.opcode = TlOpcodeD::AccessAck;
-            if (machine_.s_isatest) {
+            if (machine_.s_isatest || (machine_.s_tuimode && !machine_.cpu.use_opensbi)) {
                 const bool is_tohost_write =
                     simrv::xlen::kIsXLen64 ? (funct3 == static_cast<Instruction>(Funct3::Sw) ||
                                               funct3 == static_cast<Instruction>(Funct3::Sd))

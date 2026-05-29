@@ -251,9 +251,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
     }
 
     ctx.cinsn = w_compressed ? 1U : 0U;
-    if (machine.s_use_mix) {
-        e_instmix.at(simrv::decode::decoder(ctx.ir))++;
-    }
+    e_instmix.at(simrv::decode::decoder(ctx.ir))++;
 }
 
 }  // namespace simrv::core

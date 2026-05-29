@@ -51,8 +51,7 @@ class Machine {
     Counter tohost = 0;  // Host communication register (always 64-bit for HTIF).
 
     // ========== Simulation Configuration Flags ==========
-    bool s_appmode = false;        // Application mode (vs. kernel/RTOS mode)
-    bool s_rtosmode = false;       // RTOS mode (vs. kernel/application mode)
+    bool s_appmode = false;        // Binary mode (start_pc=0, no OS)
     bool s_tuimode = false;        // Enable TUI monitor mode
     bool s_debugmode = false;      // Enable debug logging in MMIO paths
     bool s_dlog_mode = false;      // Enable device request/response logging

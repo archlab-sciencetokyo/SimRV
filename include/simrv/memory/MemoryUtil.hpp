@@ -19,14 +19,14 @@
 namespace simrv::memory {
 
 #ifndef SIMRV_DRAM_SIZE_MB
-#define SIMRV_DRAM_SIZE_MB 64
+#define SIMRV_DRAM_SIZE_MB 256
 #endif
 
 inline constexpr Address kDramBaseAddress = static_cast<Address>(0x80000000u);
 inline constexpr Address kDramSize = static_cast<Address>(SIMRV_DRAM_SIZE_MB * 1024u * 1024u);
 inline constexpr Address kDramMask = kDramSize - 1;
 
-inline constexpr Word kTlbSize = 4;
+inline constexpr Word kTlbSize = 1024;
 inline constexpr Word kPageShift = 12;
 inline constexpr Word kPageMask = (1u << kPageShift) - 1;
 

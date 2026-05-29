@@ -12,8 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <format>
-#include <iostream>
-#include <utility>
+#include <print>
 
 #include "simrv/core/Machine.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -62,6 +61,7 @@ auto format_to_width(const std::string& colored_str, int target_width) -> std::s
     int current_width = 0;
     std::string result;
     bool in_esc = false;
+    bool skipping = false;
     
     for (std::size_t i = 0; i < colored_str.length(); ++i) {
         if (colored_str[i] == '\033') {
@@ -77,11 +77,15 @@ auto format_to_width(const std::string& colored_str, int target_width) -> std::s
             bool is_lead = (c < 0x80 || c >= 0xC0);
             if (is_lead) {
                 if (current_width >= target_width) {
-                    continue;
+                    skipping = true;
+                } else {
+                    skipping = false;
+                    current_width++;
                 }
-                current_width++;
             }
-            result += colored_str[i];
+            if (!skipping) {
+                result += colored_str[i];
+            }
         }
     }
     
@@ -89,7 +93,7 @@ auto format_to_width(const std::string& colored_str, int target_width) -> std::s
         result += std::string(static_cast<std::size_t>(target_width - current_width), ' ');
     }
     
-    return result;
+    return result + "\033[0m";
 }
 
 static constexpr std::array<const char*, 32> kRegNames = {
@@ -97,6 +101,13 @@ static constexpr std::array<const char*, 32> kRegNames = {
     "s0/fp", "s1", "a0", "a1", "a2", "a3", "a4", "a5",
     "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7",
     "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6"
+};
+
+static constexpr std::array<const char*, 32> kFpRegNames = {
+    "ft0", "ft1", "ft2", "ft3", "ft4", "ft5", "ft6", "ft7",
+    "fs0", "fs1", "fa0", "fa1", "fa2", "fa3", "fa4", "fa5",
+    "fa6", "fa7", "fs2", "fs3", "fs4", "fs5", "fs6", "fs7",
+    "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11"
 };
 
 auto format_with_commas(uint64_t val) -> std::string {
@@ -169,8 +180,9 @@ Tui::~Tui() {
 }
 
 void Tui::initialize() {
-    // Hide cursor & clear screen
-    (void)(::write(STDOUT_FILENO, "\033[?25l\033[2J", 10) == 0);
+    // Enter alternate screen buffer, hide cursor & clear screen
+    (void)(::write(STDOUT_FILENO, "\033[?1049h\033[?25l\033[2J", 18) == 0);
+    g_resized = 1; // Force a full clear on the first render to ensure no layout corruption
 
     // Register SIGWINCH handler for dynamic terminal resizing
     struct sigaction sa{};
@@ -185,8 +197,8 @@ void Tui::initialize() {
 }
 
 void Tui::shutdown() {
-    // Show cursor & reset text styles
-    (void)(::write(STDOUT_FILENO, "\033[?25h\033[0m\n", 9) == 0);
+    // Show cursor, reset text styles & exit alternate screen buffer
+    (void)(::write(STDOUT_FILENO, "\033[?25h\033[0m\033[?1049l\n", 18) == 0);
 
     // Restore default SIGWINCH behavior
     struct sigaction sa{};
@@ -221,7 +233,6 @@ void Tui::handle_char_write(char ch) {
             raw_current_line_.clear();
         }
     }
-    render();
 }
 
 void Tui::print_log(const std::string& msg) {
@@ -236,13 +247,13 @@ void Tui::print_log(const std::string& msg) {
             raw_current_line_ += ch;
         }
     }
-    render();
 }
 
 void Tui::render() {
     // 1. Clear screen if resized
     if (g_resized) {
         g_resized = 0;
+        cached_left_rows_.clear();
         (void)(::write(STDOUT_FILENO, "\033[2J", 4) == 0);
     }
 
@@ -255,15 +266,51 @@ void Tui::render() {
         if (w.ws_row > 0) term_height = w.ws_row;
     }
 
-    // Adjust to terminal capabilities safely
-    if (term_width < 80) term_width = 80;
-    if (term_height < 24) term_height = 24;
+    // 60 columns is the minimum width to comfortably show the raw console in FullConsole mode.
+    int min_term_width = 60;
+    if (term_width < min_term_width || term_height < 28) {
+        std::string screen = "\033[H\033[2J\033[?25l";
+        std::string warning_title = " ⚠️  Terminal Too Small ";
+        std::string req_text = std::format("Required: at least {}x28  |  Current: {}x{}", min_term_width, term_width, term_height);
+        std::string action_text = "Please resize your terminal window to continue simulation.";
+
+        int box_width = std::max(60, term_width - 4);
+        int pad_y = (term_height - 6) / 2;
+        if (pad_y < 1) pad_y = 1;
+
+        for (int y = 0; y < pad_y; ++y) screen += "\n";
+
+        screen += "\033[1;31m╔" + make_repeated_string("═", box_width - 2) + "╗\033[0m\n";
+        screen += "\033[1;31m║\033[0m" + format_to_width(std::format(" \033[1;97m{}\033[0m", warning_title), box_width - 2) + "\033[1;31m║\033[0m\n";
+        screen += "\033[1;31m╠" + make_repeated_string("═", box_width - 2) + "╣\033[0m\n";
+        screen += "\033[1;31m║\033[0m" + format_to_width(std::format(" \033[93m{}\033[0m", req_text), box_width - 2) + "\033[1;31m║\033[0m\n";
+        screen += "\033[1;31m║\033[0m" + format_to_width(std::format(" {}", action_text), box_width - 2) + "\033[1;31m║\033[0m\n";
+        screen += "\033[1;31m╚" + make_repeated_string("═", box_width - 2) + "╝\033[0m\n";
+
+        for (int y = 0; y < pad_y; ++y) screen += "\n";
+
+        (void)(::write(STDOUT_FILENO, screen.data(), screen.size()) == 0);
+        ::fflush(stdout);
+        return;
+    }
+
+    // Auto-fallback to FullConsole if the terminal isn't wide enough to comfortably fit the Split view.
+    // 64-bit needs ~62 for left pane + 40 for right pane = ~105
+    // 32-bit needs ~46 for left pane + 40 for right pane = ~90
+    int split_threshold = simrv::xlen::kIsXLen64 ? 105 : 90;
+    auto effective_layout = layout_;
+    if (layout_ == TuiLayout::Split && term_width < split_threshold) {
+        effective_layout = TuiLayout::FullConsole;
+    }
 
     // Calculate dynamic pane widths to sum to EXACTLY term_width
     int left_pane_width = term_width - 2;
     int right_pane_width = term_width - 2;
-    if (layout_ == TuiLayout::Split) {
+    if (effective_layout == TuiLayout::Split) {
         left_pane_width = (term_width - 3) / 2;
+        if (left_pane_width > 62) {
+            left_pane_width = 62;
+        }
         right_pane_width = term_width - 3 - left_pane_width;
     }
     
@@ -300,11 +347,19 @@ void Tui::render() {
 
     // Align to dynamic num_rows
     lines_to_draw_.clear();
-    if (wrapped_lines.size() < static_cast<std::size_t>(num_rows)) {
-        lines_to_draw_.insert(lines_to_draw_.end(), num_rows - wrapped_lines.size(), "");
-        lines_to_draw_.insert(lines_to_draw_.end(), wrapped_lines.begin(), wrapped_lines.end());
-    } else {
-        lines_to_draw_.insert(lines_to_draw_.end(), wrapped_lines.end() - num_rows, wrapped_lines.end());
+    int total_wrapped = static_cast<int>(wrapped_lines.size());
+    int start_idx = total_wrapped - num_rows - scroll_offset_;
+    int end_idx = total_wrapped - scroll_offset_;
+    if (start_idx < 0) start_idx = 0;
+    if (end_idx < 0) end_idx = 0;
+    if (end_idx > total_wrapped) end_idx = total_wrapped;
+
+    int actual_drawn = end_idx - start_idx;
+    if (actual_drawn < num_rows) {
+        lines_to_draw_.insert(lines_to_draw_.end(), num_rows - actual_drawn, "");
+    }
+    if (actual_drawn > 0) {
+        lines_to_draw_.insert(lines_to_draw_.end(), wrapped_lines.begin() + start_idx, wrapped_lines.begin() + end_idx);
     }
 
     // 5. Build whole screen buffer to avoid flickering
@@ -318,38 +373,69 @@ void Tui::render() {
     }
 
     // Header info (row 2)
-    std::string status_badge = paused_ ? "\033[1;43;30m PAUSED \033[0m" : "\033[1;42;30m RUNNING \033[0m";
+    std::string status_badge;
+    if (!status_override_.empty()) {
+        status_badge = status_override_;
+    } else {
+        status_badge = paused_ ? "\033[1;43;30m PAUSED \033[0m" : "\033[1;42;30m RUNNING \033[0m";
+    }
+
+    std::string page_badge;
+    if (reg_page_ == TuiRegPage::GPR) page_badge = "GPR";
+    else if (reg_page_ == TuiRegPage::FPR) page_badge = "FPR";
+    else page_badge = "VEC";
+
     std::string binary_name = machine_.s_fn_memimg;
     auto last_slash = binary_name.find_last_of("/\\");
     if (last_slash != std::string::npos) {
         binary_name = binary_name.substr(last_slash + 1);
     }
-    std::string left_text = std::format(" SimRV Monitor [{}] | Status: ", binary_name);
-    std::string left_render = left_text + status_badge;
-    int left_printed_len = static_cast<int>(left_text.length()) + (paused_ ? 8 : 9);
-    int pad_left = (layout_ == TuiLayout::Split ? left_pane_width : term_width - 2) - left_printed_len;
+    std::string left_text = std::format(" SimRV [{}] | Status: ", binary_name);
+    std::string left_render = left_text + status_badge + std::format(" | Page: \033[1;36m{}\033[0m", page_badge);
+    int left_printed_len = get_display_width(left_render);
+    int pad_left = (effective_layout == TuiLayout::Split ? left_pane_width : term_width - 2) - left_printed_len;
     if (pad_left > 0) {
         left_render += std::string(static_cast<std::size_t>(pad_left), ' ');
     } else {
-        left_render = format_to_width(left_render, layout_ == TuiLayout::Split ? left_pane_width : term_width - 2);
+        left_render = format_to_width(left_render, effective_layout == TuiLayout::Split ? left_pane_width : term_width - 2);
     }
 
-    std::string right_text = std::format("Cycles: {} | Insns: {} | KIPS: {}", 
-                                         format_with_commas(machine_.cpu.clint_mmio.mtime),
-                                         format_with_commas(machine_.cpu.e_icount),
-                                         format_with_commas(kips_));
-    int pad_right = (layout_ == TuiLayout::Split ? right_pane_width : term_width - 2) - static_cast<int>(right_text.length());
+    std::string right_text;
+    int right_text_display_len = 0;
+    std::string color_prefix = "";
+    std::string color_suffix = "";
+    if (scroll_offset_ > 0) {
+        color_prefix = "\033[1;5;30;43m";
+        color_suffix = "\033[0m";
+        right_text = std::format(" ═══ SCROLLBACK (Offset: -{}) [Press 'c'/'Enter' to Live] ═══ ", scroll_offset_);
+        right_text_display_len = get_display_width(right_text);
+    } else {
+        right_text = std::format("Cycles: {} | Insns: {} | KIPS: {}", 
+                                 format_with_commas(machine_.cpu.clint_mmio.mtime),
+                                 format_with_commas(machine_.cpu.e_icount),
+                                 format_with_commas(kips_));
+        right_text_display_len = get_display_width(right_text);
+    }
+    int pad_right = (effective_layout == TuiLayout::Split ? right_pane_width : term_width - 2) - right_text_display_len;
     std::string right_render = right_text;
     if (pad_right > 0) {
-        right_render = std::string(static_cast<std::size_t>(pad_right), ' ') + right_render;
+        if (scroll_offset_ > 0) {
+            right_render = std::string(static_cast<std::size_t>(pad_right / 2), ' ') + right_render + std::string(static_cast<std::size_t>((pad_right + 1) / 2), ' ');
+            right_render = color_prefix + right_render + color_suffix;
+        } else {
+            right_render = std::string(static_cast<std::size_t>(pad_right), ' ') + right_render;
+        }
     } else {
-        right_render = format_to_width(right_render, layout_ == TuiLayout::Split ? right_pane_width : term_width - 2);
+        right_render = format_to_width(right_render, effective_layout == TuiLayout::Split ? right_pane_width : term_width - 2);
+        if (scroll_offset_ > 0) {
+            right_render = color_prefix + right_render + color_suffix;
+        }
     }
 
-    if (layout_ == TuiLayout::Split) {
+    if (effective_layout == TuiLayout::Split) {
         screen += "\033[1;94m║\033[0m" + left_render + "\033[1;94m│\033[0m" + right_render + "\033[1;94m║\033[0m\n";
         screen += "\033[1;94m╠" + make_repeated_string("═", left_pane_width) + "╪" + make_repeated_string("═", right_pane_width) + "╣\033[0m\n";
-    } else if (layout_ == TuiLayout::FullConsole) {
+    } else if (effective_layout == TuiLayout::FullConsole) {
         screen += "\033[1;94m║\033[0m" + right_render + "\033[1;94m║\033[0m\n";
         screen += "\033[1;94m╠" + make_repeated_string("═", term_width - 2) + "╣\033[0m\n";
     } else {
@@ -359,11 +445,11 @@ void Tui::render() {
 
     // Rows 4 to end (num_rows)
     for (int i = 0; i < num_rows; ++i) {
-        if (layout_ == TuiLayout::Split) {
+        if (effective_layout == TuiLayout::Split) {
             std::string left = get_left_pane_row(i, left_pane_width);
             std::string right = get_right_pane_row(i, right_pane_width);
             screen += "\033[1;94m║\033[0m" + left + "\033[1;94m│\033[0m" + right + "\033[1;94m║\033[0m\n";
-        } else if (layout_ == TuiLayout::FullConsole) {
+        } else if (effective_layout == TuiLayout::FullConsole) {
             std::string right = get_right_pane_row(i, term_width - 2);
             screen += "\033[1;94m║\033[0m" + right + "\033[1;94m║\033[0m\n";
         } else {
@@ -373,15 +459,21 @@ void Tui::render() {
     }
 
     // Split border
-    if (layout_ == TuiLayout::Split) {
+    if (effective_layout == TuiLayout::Split) {
         screen += "\033[1;94m╠" + make_repeated_string("═", left_pane_width) + "╧" + make_repeated_string("═", right_pane_width) + "╣\033[0m\n";
     } else {
         screen += "\033[1;94m╠" + make_repeated_string("═", term_width - 2) + "╣\033[0m\n";
     }
 
     // Footer info
-    std::string footer_text = " [Ctrl+Q] Quit | [Ctrl+P] Pause/Step | [Space/S] Step Cycle (when paused) | [Tab] Cycle Panel Layout ";
-    int pad_foot = (term_width - 2) - static_cast<int>(footer_text.length());
+    std::string footer_text;
+    if (paused_) {
+        footer_text = " [Ctrl+Q] Quit | \033[1;92m[c] Continue\033[0m | [Space] Step | [Tab] Layout | [u/d] Scroll | [r] Reg Page ";
+    } else {
+        footer_text = " [Ctrl+Q] Quit | \033[1;93m[Ctrl+P] Pause\033[0m | [Tab] Layout | [u/d] Scroll | [r] Reg Page ";
+    }
+    int footer_len = get_display_width(footer_text);
+    int pad_foot = (term_width - 2) - footer_len;
     std::string footer_render = footer_text;
     if (pad_foot > 0) {
         footer_render += std::string(static_cast<std::size_t>(pad_foot), ' ');
@@ -406,123 +498,158 @@ auto Tui::get_sparkline_string(int width) -> std::string {
 
     std::string s;
     int history_size = static_cast<int>(kips_history_.size());
-    if (history_size < width) {
-        s += std::string(static_cast<std::size_t>(width - history_size), ' ');
+    int pad = width - history_size;
+    if (pad > 0) {
+        s += std::string(static_cast<std::size_t>(pad), ' ');
     }
 
-    static constexpr std::array<const char*, 9> kBlocks = {
-        " ", " ", "▂", "▃", "▄", "▅", "▆", "▇", "█"
-    };
-
-    int start_idx = (history_size > width) ? (history_size - width) : 0;
-    for (int i = start_idx; i < history_size; ++i) {
-        uint64_t val = kips_history_[static_cast<std::size_t>(i)];
-        double ratio = static_cast<double>(val) / static_cast<double>(max_val);
-        int idx = static_cast<int>(ratio * 8.0);
-        if (idx < 0) idx = 0;
-        if (idx > 8) idx = 8;
-        s += kBlocks[static_cast<std::size_t>(idx)];
+    const char* blocks[8] = { " ", "▂", "▃", "▄", "▅", "▆", "▇", "█" };
+    int start_hist = (history_size > width) ? (history_size - width) : 0;
+    for (int i = start_hist; i < history_size; ++i) {
+        double ratio = static_cast<double>(kips_history_[static_cast<std::size_t>(i)]) / static_cast<double>(max_val);
+        int block_idx = static_cast<int>(ratio * 7.0);
+        if (block_idx < 0) block_idx = 0;
+        if (block_idx > 7) block_idx = 7;
+        s += blocks[block_idx];
     }
     return s;
 }
 
 auto Tui::get_left_pane_row(int row_idx, int pane_width) -> std::string {
+    if (cached_left_rows_.size() <= static_cast<std::size_t>(row_idx)) {
+        cached_left_rows_.resize(30);
+    }
+
+    if (row_idx >= 0 && row_idx <= 24) {
+        if (!paused_ && !cached_left_rows_[static_cast<std::size_t>(row_idx)].empty()) {
+            return cached_left_rows_[static_cast<std::size_t>(row_idx)];
+        }
+    }
+
+    auto get_row_uncached = [&]() -> std::string {
+        auto& cpu = machine_.cpu;
+        auto& st = cpu.state();
+        int col_width = pane_width / 2;
+
+        if (row_idx >= 0 && row_idx < 16) {
+            int reg1 = row_idx;
+            int reg2 = row_idx + 16;
+
+            if (reg_page_ == TuiRegPage::GPR) {
+                auto val1 = st.regs.read(static_cast<RegId>(reg1));
+                auto val2 = st.regs.read(static_cast<RegId>(reg2));
+
+                std::string name1 = kRegNames[static_cast<std::size_t>(reg1)];
+                std::string name2 = kRegNames[static_cast<std::size_t>(reg2)];
+
+                std::string col1_color = std::format(" \033[97mx{:<2}\033[0m/\033[36m{:<5}\033[0m: \033[92m0x{:0{}x}\033[0m", 
+                                                     reg1, name1, val1, simrv::xlen::kXLenHexDigits);
+                std::string col2_color = std::format(" \033[97mx{:<2}\033[0m/\033[36m{:<5}\033[0m: \033[92m0x{:0{}x}\033[0m", 
+                                                     reg2, name2, val2, simrv::xlen::kXLenHexDigits);
+
+                return format_to_width(col1_color, col_width) + format_to_width(col2_color, pane_width - col_width);
+            } else if (reg_page_ == TuiRegPage::FPR) {
+                auto val1 = st.regs.read_fp(static_cast<RegId>(reg1));
+                auto val2 = st.regs.read_fp(static_cast<RegId>(reg2));
+
+                std::string name1 = kFpRegNames[static_cast<std::size_t>(reg1)];
+                std::string name2 = kFpRegNames[static_cast<std::size_t>(reg2)];
+
+                std::string col1_color = std::format(" \033[97mf{:<2}\033[0m/\033[36m{:<5}\033[0m: \033[92m0x{:016x}\033[0m", 
+                                                     reg1, name1, val1);
+                std::string col2_color = std::format(" \033[97mf{:<2}\033[0m/\033[36m{:<5}\033[0m: \033[92m0x{:016x}\033[0m", 
+                                                     reg2, name2, val2);
+
+                return format_to_width(col1_color, col_width) + format_to_width(col2_color, pane_width - col_width);
+            } else {
+                // VEC page
+                std::string col1_color = std::format(" \033[97mv{:<2}\033[0m       : \033[90m0x0000000000000000\033[0m", reg1);
+                std::string col2_color = std::format(" \033[97mv{:<2}\033[0m       : \033[90m0x0000000000000000\033[0m", reg2);
+
+                return format_to_width(col1_color, col_width) + format_to_width(col2_color, pane_width - col_width);
+            }
+        }
+
+        if (row_idx == 16) {
+            std::string title = " ── CSRs & Privilege State ";
+            std::string dashes = make_repeated_string("─", std::max(0, pane_width - static_cast<int>(title.length())));
+            return "\033[1;90m" + format_to_width(title + dashes, pane_width) + "\033[0m";
+        }
+
+        if (row_idx == 17) {
+            std::string priv_str = (st.priv == PrivilegeLevel::Machine)      ? "Machine"
+                                   : (st.priv == PrivilegeLevel::Supervisor) ? "Supervisor"
+                                                                             : "User";
+            std::string col1_color = std::format(" \033[97mpc\033[0m      : \033[92m0x{:0{}x}\033[0m", st.pc, simrv::xlen::kXLenHexDigits);
+            std::string col2_color = std::format(" \033[97mpriv\033[0m    : \033[35m{}\033[0m", priv_str);
+
+            return format_to_width(col1_color, col_width) + format_to_width(col2_color, pane_width - col_width);
+        }
+
+        if (row_idx == 18) {
+            std::string misa_str = simrv::xlen::resolve_misa_string(st.misa);
+            if (misa_str.size() >= 4 && (misa_str.starts_with("RV32") || misa_str.starts_with("RV64"))) {
+                misa_str = misa_str.substr(4);
+            }
+
+            std::string col1_color = std::format(" \033[97mmstatus\033[0m: \033[36m0x{:0{}x}\033[0m", st.mstatus, simrv::xlen::kXLenHexDigits);
+            std::string col2_color = std::format(" \033[97mmisa\033[0m   : \033[36m{}\033[0m", misa_str);
+
+            return format_to_width(col1_color, col_width) + format_to_width(col2_color, pane_width - col_width);
+        }
+
+        if (row_idx == 19) {
+            std::string col1_color = std::format(" \033[97mmie\033[0m     : \033[36m0x{:0{}x}\033[0m", st.mie, simrv::xlen::kXLenHexDigits);
+            std::string col2_color = std::format(" \033[97mmip\033[0m    : \033[36m0x{:0{}x}\033[0m", st.mip, simrv::xlen::kXLenHexDigits);
+
+            return format_to_width(col1_color, col_width) + format_to_width(col2_color, pane_width - col_width);
+        }
+
+        if (row_idx == 20) {
+            std::string col1_color = std::format(" \033[97mmtvec\033[0m    : \033[36m0x{:0{}x}\033[0m", st.mtvec, simrv::xlen::kXLenHexDigits);
+            std::string col2_color = std::format(" \033[97mmepc\033[0m   : \033[36m0x{:0{}x}\033[0m", st.mepc, simrv::xlen::kXLenHexDigits);
+
+            return format_to_width(col1_color, col_width) + format_to_width(col2_color, pane_width - col_width);
+        }
+
+        if (row_idx == 21) {
+            std::string col1_color = std::format(" \033[97mstvec\033[0m    : \033[36m0x{:0{}x}\033[0m", st.stvec, simrv::xlen::kXLenHexDigits);
+            std::string col2_color = std::format(" \033[97msepc\033[0m   : \033[36m0x{:0{}x}\033[0m", st.sepc, simrv::xlen::kXLenHexDigits);
+
+            return format_to_width(col1_color, col_width) + format_to_width(col2_color, pane_width - col_width);
+        }
+
+        if (row_idx == 22) {
+            std::string col1_color = std::format(" \033[97mmtval\033[0m  : \033[36m0x{:0{}x}\033[0m", st.mtval, simrv::xlen::kXLenHexDigits);
+            std::string col2_color = std::format(" \033[97msatp\033[0m   : \033[36m0x{:0{}x}\033[0m", st.satp, simrv::xlen::kXLenHexDigits);
+
+            return format_to_width(col1_color, col_width) + format_to_width(col2_color, pane_width - col_width);
+        }
+
+        if (row_idx == 23) {
+            std::string col1_color = std::format(" \033[97mscause\033[0m  : \033[36m0x{:0{}x}\033[0m", st.scause, simrv::xlen::kXLenHexDigits);
+            std::string col2_color = std::format(" \033[97mstval\033[0m  : \033[36m0x{:0{}x}\033[0m", st.stval, simrv::xlen::kXLenHexDigits);
+
+            return format_to_width(col1_color, col_width) + format_to_width(col2_color, pane_width - col_width);
+        }
+
+        if (row_idx == 24) {
+            std::string col1_color = std::format(" \033[97mmedeleg\033[0m : \033[36m0x{:0{}x}\033[0m", st.medeleg, simrv::xlen::kXLenHexDigits);
+            std::string col2_color = std::format(" \033[97mmideleg\033[0m: \033[36m0x{:0{}x}\033[0m", st.mideleg, simrv::xlen::kXLenHexDigits);
+
+            return format_to_width(col1_color, col_width) + format_to_width(col2_color, pane_width - col_width);
+        }
+
+        return "";
+    };
+
+    if (row_idx >= 0 && row_idx <= 24) {
+        std::string res = get_row_uncached();
+        cached_left_rows_[static_cast<std::size_t>(row_idx)] = res;
+        return res;
+    }
+
     auto& cpu = machine_.cpu;
-    auto& st = cpu.state();
-
-    int col_width = pane_width / 2;
-
-    if (row_idx >= 0 && row_idx <= 15) {
-        int reg1 = row_idx;
-        int reg2 = row_idx + 16;
-
-        auto val1 = st.regs.read(static_cast<RegId>(reg1));
-        auto val2 = st.regs.read(static_cast<RegId>(reg2));
-
-        std::string name1 = kRegNames[static_cast<std::size_t>(reg1)];
-        std::string name2 = kRegNames[static_cast<std::size_t>(reg2)];
-
-        std::string col1_color = std::format(" \033[97mx{:<2}\033[0m/\033[36m{:<5}\033[0m: \033[92m0x{:0{}x}\033[0m", 
-                                             reg1, name1, val1, simrv::xlen::kXLenHexDigits);
-        std::string col2_color = std::format(" \033[97mx{:<2}\033[0m/\033[36m{:<5}\033[0m: \033[92m0x{:0{}x}\033[0m", 
-                                             reg2, name2, val2, simrv::xlen::kXLenHexDigits);
-
-        return format_to_width(col1_color, col_width) + format_to_width(col2_color, pane_width - col_width);
-    }
-
-    if (row_idx == 16) {
-        std::string title = " ── CPU Status & CSRs ";
-        std::string dashes = make_repeated_string("─", std::max(0, pane_width - static_cast<int>(title.length())));
-        return "\033[1;90m" + format_to_width(title + dashes, pane_width) + "\033[0m";
-    }
-
-    if (row_idx == 17) {
-        std::string priv_str = (st.priv == kPrivMachine) ? "MACHINE" :
-                               (st.priv == kPrivSupervisor) ? "SUPERVISOR" : "USER";
-        std::string col1_color = std::format(" \033[97mpc\033[0m     : \033[93m0x{:0{}x}\033[0m", st.pc, simrv::xlen::kXLenHexDigits);
-        std::string col2_color = std::format(" \033[97mpriv\033[0m   : \033[1;35m{}\033[0m", priv_str);
-
-        return format_to_width(col1_color, col_width) + format_to_width(col2_color, pane_width - col_width);
-    }
-
-    if (row_idx == 18) {
-        std::string mstatus_str = simrv::xlen::resolve_mstatus_short_string(st.mstatus);
-        std::string misa_str = simrv::xlen::resolve_misa_string(st.misa);
-
-        std::string col1_color = std::format(" \033[97mmstatus\033[0m: \033[36m0x{:0{}x}\033[0m \033[90m{}\033[0m", st.mstatus, simrv::xlen::kXLenHexDigits, mstatus_str);
-        std::string col2_color = std::format(" \033[97mmisa\033[0m   : \033[36m{}\033[0m", misa_str);
-
-        // Adjust split so mstatus doesn't get truncated (needs ~32 chars)
-        int custom_col1 = std::min(pane_width - 10, std::max(col_width, 32));
-        return format_to_width(col1_color, custom_col1) + format_to_width(col2_color, pane_width - custom_col1);
-    }
-
-    if (row_idx == 19) {
-        std::string col1_color = std::format(" \033[97mmie\033[0m    : \033[36m0x{:0{}x}\033[0m", st.mie, simrv::xlen::kXLenHexDigits);
-        std::string col2_color = std::format(" \033[97mmip\033[0m    : \033[36m0x{:0{}x}\033[0m", st.mip, simrv::xlen::kXLenHexDigits);
-
-        return format_to_width(col1_color, col_width) + format_to_width(col2_color, pane_width - col_width);
-    }
-
-    if (row_idx == 20) {
-        std::string col1_color = std::format(" \033[97mmtvec\033[0m  : \033[36m0x{:0{}x}\033[0m", st.mtvec, simrv::xlen::kXLenHexDigits);
-        std::string col2_color = std::format(" \033[97mmscr\033[0m   : \033[36m0x{:0{}x}\033[0m", st.mscratch, simrv::xlen::kXLenHexDigits);
-
-        return format_to_width(col1_color, col_width) + format_to_width(col2_color, pane_width - col_width);
-    }
-
-    if (row_idx == 21) {
-        std::string mcause_str = simrv::xlen::resolve_cause_string(st.mcause);
-        std::string col1_color = std::format(" \033[97mmepc\033[0m   : \033[36m0x{:0{}x}\033[0m", st.mepc, simrv::xlen::kXLenHexDigits);
-        std::string col2_color = std::format(" \033[97mmcause\033[0m : \033[36m{}\033[0m", mcause_str);
-
-        return format_to_width(col1_color, col_width) + format_to_width(col2_color, pane_width - col_width);
-    }
-
-    if (row_idx == 22) {
-        std::string satp_mode_str = simrv::xlen::resolve_satp_string(st.satp);
-        std::string col1_color = std::format(" \033[97mmtval\033[0m  : \033[36m0x{:0{}x}\033[0m", st.mtval, simrv::xlen::kXLenHexDigits);
-        std::string col2_color = std::format(" \033[97msatp\033[0m   : \033[36m0x{:0{}x}\033[0m \033[90m({})\033[0m", st.satp, simrv::xlen::kXLenHexDigits, satp_mode_str);
-
-        // Adjust split so satp doesn't get truncated (needs ~33 chars in col2)
-        int custom_col1 = std::max(10, std::min(col_width, pane_width - 33));
-        return format_to_width(col1_color, custom_col1) + format_to_width(col2_color, pane_width - custom_col1);
-    }
-
-    if (row_idx == 23) {
-        std::string scause_str = simrv::xlen::resolve_cause_string(st.scause);
-        std::string col1_color = std::format(" \033[97msepc\033[0m   : \033[36m0x{:0{}x}\033[0m", st.sepc, simrv::xlen::kXLenHexDigits);
-        std::string col2_color = std::format(" \033[97mscause\033[0m : \033[36m{}\033[0m", scause_str);
-
-        return format_to_width(col1_color, col_width) + format_to_width(col2_color, pane_width - col_width);
-    }
-
-    if (row_idx == 24) {
-        std::string col1_color = std::format(" \033[97mstval\033[0m  : \033[36m0x{:0{}x}\033[0m", st.stval, simrv::xlen::kXLenHexDigits);
-        std::string col2_color = std::format(" \033[97mloadres\033[0m: \033[36m0x{:0{}x}\033[0m", st.load_res, simrv::xlen::kXLenHexDigits);
-
-        return format_to_width(col1_color, col_width) + format_to_width(col2_color, pane_width - col_width);
-    }
 
     if (row_idx == 25) {
         std::string title = " ── L1 Cache & Performance ";
@@ -623,6 +750,38 @@ auto Tui::get_left_pane_row(int row_idx, int pane_width) -> std::string {
 auto Tui::get_right_pane_row(int row_idx, int pane_width) -> std::string {
     std::string line = lines_to_draw_[static_cast<std::size_t>(row_idx)];
     return format_to_width(line, pane_width);
+}
+
+void Tui::cycle_reg_page() {
+    bool has_f = (machine_.cpu.state().misa & (1ULL << ('f' - 'a'))) != 0;
+    bool has_d = (machine_.cpu.state().misa & (1ULL << ('d' - 'a'))) != 0;
+    bool has_v = (machine_.cpu.state().misa & (1ULL << ('v' - 'a'))) != 0;
+
+    if (reg_page_ == TuiRegPage::GPR) {
+        if (has_f || has_d) reg_page_ = TuiRegPage::FPR;
+        else if (has_v) reg_page_ = TuiRegPage::VEC;
+        else reg_page_ = TuiRegPage::GPR;
+    } else if (reg_page_ == TuiRegPage::FPR) {
+        if (has_v) reg_page_ = TuiRegPage::VEC;
+        else reg_page_ = TuiRegPage::GPR;
+    } else {
+        reg_page_ = TuiRegPage::GPR;
+    }
+    cached_left_rows_.clear();
+    render();
+}
+
+void Tui::scroll(int lines) {
+    scroll_offset_ += lines;
+    if (scroll_offset_ < 0) {
+        scroll_offset_ = 0;
+    }
+    render();
+}
+
+void Tui::reset_scroll() {
+    scroll_offset_ = 0;
+    render();
 }
 
 }  // namespace simrv::device

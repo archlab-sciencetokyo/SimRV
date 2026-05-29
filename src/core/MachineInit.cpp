@@ -184,16 +184,14 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
     memory_.system_bus().add_node(uart.get());
     memory_.system_bus().add_node(&cpu.plic_mmio);
     memory_.system_bus().add_node(&cpu.clint_mmio);
-
-    const bool linux_boot = !s_appmode && !s_rtosmode;
+    const bool linux_boot = !s_appmode;
     const Address dtb_offset =
         linux_boot
             ? static_cast<Address>(simrv::memory::kDramSize - static_cast<Address>(0x00100000U))
             : simrv::boot::kInitDataAddress;
 
-    CSRValue initial_misa = s_misa_override ? s_misa_profile
-                            : s_rtosmode    ? misa_profile_bits(MisaProfile::I)
-                                            : kMisaDefault;
+    CSRValue initial_misa = misa_with_mxl(s_misa_override ? s_misa_profile
+                                                          : kMisaDefault);
     cpu.state().pc = s_start_pc;
     cpu.state().regs.write(static_cast<RegId>(10), 0);  // a0 = hartid
     cpu.state().regs.write(static_cast<RegId>(11), linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);  // a1 = dtb

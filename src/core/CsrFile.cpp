@@ -14,7 +14,7 @@ namespace simrv::core {
 
 namespace {
 constexpr unsigned kHighWordShift = 32;
-constexpr CSRValue kCounterEnableMask = static_cast<CSRValue>(0x5u);
+constexpr CSRValue kCounterEnableMask = static_cast<CSRValue>(0x7u);
 }  // namespace
 
 auto CsrFile::getMstatus(CSRValue mask) const -> CSRValue {
@@ -160,7 +160,9 @@ void CsrFile::write(CSRAddress addr,
     CSRValue const mask3 = enum_mask(MipBit::Msip) | enum_mask(MipBit::Ssip) |
                            enum_mask(MipBit::Stip) | enum_mask(MipBit::Mtip) |
                            enum_mask(MipBit::Seip);
-    CSRValue const mask4 = enum_mask(MipBit::Ssip) | enum_mask(MipBit::Stip);
+    CSRValue const mask4 = enum_mask(MipBit::Msip) | enum_mask(MipBit::Ssip) |
+                           enum_mask(MipBit::Mtip) | enum_mask(MipBit::Stip) |
+                           enum_mask(MipBit::Meip) | enum_mask(MipBit::Seip);
 
     switch (addr) {
         case csr_addr(Csr::Mhartid):
@@ -248,9 +250,6 @@ void CsrFile::write(CSRAddress addr,
             const Word mode = simrv::xlen::satp_mode(wdata);
             if (simrv::xlen::satp_mode_supported(mode)) {
                 cpu_.state().satp = wdata;
-                // Log the new satp value for debugging
-                get_mmu_log() << "[MMU] SATP set to 0x" << std::hex << wdata << std::dec << "\n";
-                get_mmu_log().flush();
             }
             break;
         }

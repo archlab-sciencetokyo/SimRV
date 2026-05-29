@@ -187,6 +187,30 @@ void Uart::tui_update() {
             }
             return;
         }
+        if (byte == 'r' || byte == 'R') {  // R: Cycle Register Page
+            if (tui_) {
+                tui_->cycle_reg_page();
+            }
+            return;
+        }
+        if (byte == 'u' || byte == 'U') {  // u/U: Scroll Up
+            if (tui_) {
+                tui_->scroll(5);
+            }
+            return;
+        }
+        if (byte == 'd' || byte == 'D') {  // d/D: Scroll Down
+            if (tui_) {
+                tui_->scroll(-5);
+            }
+            return;
+        }
+        if (byte == 'c' || byte == 'C' || byte == '\r' || byte == '\n') {  // c/C/Enter: Reset Scroll to Live
+            if (tui_) {
+                tui_->reset_scroll();
+            }
+            return;
+        }
         rx_fifo_.push(byte);
         update_uart_irq(machine_, true, uart_ier_);
     }
@@ -207,12 +231,30 @@ void Uart::tui_pause_loop() {
         if (poll_uart_rx(byte)) {
             if (byte == 16) {  // Ctrl-P to resume
                 paused = false;
+            } else if (byte == 'c' || byte == 'C') {  // 'c'/'C': Continue (or reset scroll first if scrolled)
+                paused = false;
+            } else if (byte == '\r' || byte == '\n') {  // Enter: snap to live first
+                if (tui_) {
+                    tui_->reset_scroll();
+                }
             } else if (byte == 17) {  // Ctrl-Q to quit
                 machine_.is_running_ = false;
                 paused = false;
             } else if (byte == 9) {  // Tab to cycle layout
                 if (tui_) {
                     tui_->cycle_layout();
+                }
+            } else if (byte == 'r' || byte == 'R') {  // 'r'/'R' to cycle register page
+                if (tui_) {
+                    tui_->cycle_reg_page();
+                }
+            } else if (byte == 'u' || byte == 'U') {  // u/U: Scroll Up
+                if (tui_) {
+                    tui_->scroll(5);
+                }
+            } else if (byte == 'd' || byte == 'D') {  // d/D: Scroll Down
+                if (tui_) {
+                    tui_->scroll(-5);
                 }
             } else if (byte == ' ' || byte == 's' || byte == 'S') {  // Step one instruction/cycle
                 machine_.prepare_cycle();
@@ -225,6 +267,7 @@ void Uart::tui_pause_loop() {
     }
 
     tui_->set_paused(false);
+    tui_->reset_scroll();
     tui_->render();
 }
 

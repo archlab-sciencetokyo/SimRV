@@ -43,7 +43,6 @@ enum class CliAction : uint8_t { Run, ShowHelp, ShowVersion };
 
 struct RuntimeOptions {
     std::string fn_memimg;
-    std::string fn_asm;
     std::string fn_dskimg;
     std::string fn_dvtree;
     std::string fn_traplog;
@@ -60,7 +59,6 @@ struct RuntimeOptions {
     bool misa_override = false;
 
     bool appmode = false;
-    bool rtosmode = false;
     bool tuimode = false;
     bool debugmode = false;
     bool dlog_mode = false;
@@ -244,123 +242,7 @@ auto effective_misa_profile(const RuntimeOptions& options) -> MisaProfile {
     if (options.misa_override) {
         return options.misa_profile;
     }
-    if (options.rtosmode) {
-        return MisaProfile::I;
-    }
     return MisaProfile::GC;
-}
-
-auto shell_quote(std::string_view arg) -> std::string {
-    std::string quoted = "'";
-    for (char const c : arg) {
-        if (c == '\'') {
-            quoted += "'\\''";
-        } else {
-            quoted += c;
-        }
-    }
-    quoted += "'";
-    return quoted;
-}
-
-auto shell_command_success(const std::string& command) -> bool {
-    return std::system(command.c_str()) == 0;
-}
-
-auto command_exists(std::string_view command) -> bool {
-    return shell_command_success(std::format("command -v {} >/dev/null 2>&1", shell_quote(command)));
-}
-
-auto resolve_tool(const char* env_name, std::initializer_list<std::string_view> candidates,
-                  std::string_view display_name) -> std::expected<std::string, std::string> {
-    if (const char* env_value = std::getenv(env_name); env_value != nullptr && *env_value != '\0') {
-        return std::string{env_value};
-    }
-    for (const auto candidate : candidates) {
-        if (command_exists(candidate)) {
-            return std::string(candidate);
-        }
-    }
-    return std::unexpected(std::format("cannot find {}; set environment variable {}", display_name, env_name));
-}
-
-// ToolchainInfo aggregates architecture and ABI strings.
-struct ToolchainInfo {
-    std::string arch; // e.g., "rv64gc"
-    std::string abi;  // e.g., "lp64d"
-};
-
-auto misa_toolchain_flags(MisaProfile profile) -> ToolchainInfo {
-    const auto xlen_suffix = simrv::xlen::kIsXLen64 ? "64" : "32";
-    const auto abi_prefix = simrv::xlen::kIsXLen64 ? "lp64" : "ilp32";
-
-    switch (profile) {
-        case MisaProfile::I:
-            return {std::format("rv{}i", xlen_suffix), abi_prefix};
-        case MisaProfile::IMAC:
-            return {std::format("rv{}imac", xlen_suffix), abi_prefix};
-        case MisaProfile::GC:
-        default:
-            return {std::format("rv{}gc", xlen_suffix), std::format("{}d", abi_prefix)};
-    }
-}
-
-auto assemble_to_binary(const RuntimeOptions& options) -> std::expected<std::string, std::string> {
-    namespace fs = std::filesystem;
-
-    if (options.fn_asm.empty()) {
-        return std::unexpected("-A/--asm requires an assembly source path");
-    }
-
-    std::error_code ec;
-    const fs::path source_path = fs::path(options.fn_asm);
-    if (!fs::exists(source_path, ec)) {
-        return std::unexpected("assembly source not found: " + options.fn_asm);
-    }
-
-    const MisaProfile profile = effective_misa_profile(options);
-    const auto [march, mabi] = misa_toolchain_flags(profile);
-
-    auto cc_res = resolve_tool(
-        "RISCV_CC", {"riscv64-unknown-elf-gcc", "riscv32-unknown-elf-gcc"}, "RISC-V C compiler");
-    if (!cc_res) {
-        option_error(cc_res.error());
-    }
-    const std::string cc = *cc_res;
-    auto objcopy_res = resolve_tool(
-        "RISCV_OBJCOPY", {"riscv64-unknown-elf-objcopy", "riscv32-unknown-elf-objcopy", "objcopy"}, "RISC-V objcopy");
-    if (!objcopy_res) {
-        option_error(objcopy_res.error());
-    }
-    const std::string objcopy = *objcopy_res;
-
-    const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
-    const fs::path base = fs::temp_directory_path(ec) /
-                          std::format("simrv-asm-{}-{}", static_cast<long long>(::getpid()), nonce);
-    if (ec) {
-        return std::unexpected("failed to resolve temporary directory");
-    }
-
-    const fs::path elf_path = base.string() + ".elf";
-    const fs::path bin_path = base.string() + ".bin";
-
-    const std::string compile_cmd = std::format(
-        "{} -x assembler-with-cpp -march={} -mabi={} -nostdlib -nostartfiles -Wl,-N "
-        "-Wl,--build-id=none -Ttext=0 -o {} {}",
-        shell_quote(cc), march, mabi, shell_quote(elf_path.string()),
-        shell_quote(source_path.string()));
-    if (!shell_command_success(compile_cmd)) {
-        return std::unexpected("failed to assemble source: " + options.fn_asm);
-    }
-
-    const std::string objcopy_cmd =
-        std::format("{} -O binary {} {}", shell_quote(objcopy), shell_quote(elf_path.string()),
-                    shell_quote(bin_path.string()));
-    if (!shell_command_success(objcopy_cmd)) {
-        return std::unexpected("failed to objcopy assembled ELF to binary image");
-    }
-
-    return bin_path.string();
 }
 
 auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResult, std::string> {
@@ -383,14 +265,6 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
                 return std::unexpected(value.error());
             }
             result.options.fn_memimg = std::string(*value);
-            continue;
-        }
-        if (arg == "-A" || arg == "--asm") {
-            auto value = next_argument(args, i, "-A/--asm");
-            if (!value) {
-                return std::unexpected(value.error());
-            }
-            result.options.fn_asm = std::string(*value);
             continue;
         }
         if (arg == "-d") {
@@ -515,12 +389,6 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             result.options.appmode = true;
             continue;
         }
-        if (arg == "-r") {
-            result.options.start_pc = 0;
-            result.options.enabletimer = 0;
-            result.options.rtosmode = true;
-            continue;
-        }
         if (arg == "--tui") {
             result.options.tuimode = true;
             continue;
@@ -529,11 +397,8 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
         return std::unexpected(std::format("unknown option : {}", arg));
     }
 
-    if (!result.options.fn_memimg.empty() && !result.options.fn_asm.empty()) {
-        return std::unexpected("choose either -m <FILE> or -A/--asm <FILE>, not both");
-    }
-    if (result.options.fn_memimg.empty() && result.options.fn_asm.empty()) {
-        return std::unexpected("either -m <FILE> or -A/--asm <FILE> is required");
+    if (result.options.fn_memimg.empty()) {
+        return std::unexpected("-m <FILE> is required to load a memory image");
     }
 
     return result;
@@ -541,16 +406,7 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
 
 auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& options)
     -> std::expected<void, std::string> {
-    std::string memimg_path = options.fn_memimg;
-    if (!options.fn_asm.empty()) {
-        auto assembled = assemble_to_binary(options);
-        if (!assembled) {
-            return std::unexpected(assembled.error());
-        }
-        memimg_path = *assembled;
-    }
-
-    machine->s_fn_memimg = memimg_path;
+    machine->s_fn_memimg = options.fn_memimg;
     machine->s_fn_dskimg = options.fn_dskimg;
     machine->s_fn_dvtree = options.fn_dvtree;
     machine->s_fn_traplog = options.fn_traplog;
@@ -567,7 +423,6 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     machine->s_misa_override = options.misa_override;
 
     machine->s_appmode = options.appmode;
-    machine->s_rtosmode = options.rtosmode;
     machine->s_tuimode = options.tuimode;
     machine->s_debugmode = options.debugmode;
     machine->s_dlog_mode = options.dlog_mode;
@@ -606,8 +461,7 @@ void set_start_time(simrv::core::Machine& machine) {
     std::print(
         "Usage: {} [options]\n\n"
         "Required:\n"
-        "  -m <FILE>        Memory image file\n"
-        "  -A, --asm <FILE> Assemble source file and run generated image\n\n"
+        "  -m <FILE>        Memory image file\n\n"
         "Images and Devices:\n"
         "  -d <FILE>        Disk image file (enables disk mode)\n"
         "  -c <FILE>        Device-tree binary file\n\n"
@@ -615,8 +469,7 @@ void set_start_time(simrv::core::Machine& machine) {
         "  -e <N>           Stop after N instructions\n"
         "  -l <N>           Enable timer after N cycles\n"
         "  -B, --opensbi    Bypass legacy C++ SBI and boot native OpenSBI\n"
-        "  -a               App mode (start_pc=0)\n"
-        "  -r               RTOS mode (start_pc=0, timer enabled at cycle 0)\n"
+        "  -a               Binary mode (start_pc=0, no OS)\n"
         "  --tui            Enable interactive TUI monitor mode\n"
         "  --misa <PROFILE> Select MISA profile: rv{}i | rv{}imac | rv{}gc\n\n"
         "Tracing and Debug:\n"
@@ -639,9 +492,8 @@ void set_start_time(simrv::core::Machine& machine) {
         "Examples:\n"
         "  {} -m img/bbl.bin -d img/root.bin\n"
         "  {} -m img/bbl.bin -d img/root.bin -e 40m\n"
-        "  {} -m img/hello.bin -a\n"
-        "  {} -A prog.S --misa rv32imac\n",
-        program_name, xlen_suffix, xlen_suffix, xlen_suffix, program_name, program_name, program_name, program_name);
+        "  {} -m img/hello.bin -a\n",
+        program_name, xlen_suffix, xlen_suffix, xlen_suffix, program_name, program_name, program_name);
     std::exit(exit_code);
 }
 
@@ -730,14 +582,21 @@ void set_options(simrv::core::Machine* m, int argc, char* const* argv) {
 }
 
 auto main(int argc, char* argv[]) -> int {
-    std::println("__ {} v{} ({}@{})\n__ Please type Control+'q' to quit the simulation\n",
-                 simrv::buildinfo::kProjectDescription, simrv::buildinfo::kVersion,
-                 simrv::buildinfo::kGitBranch, simrv::buildinfo::kGitSha);
+    bool is_tui = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string_view(argv[i]) == "--tui") {
+            is_tui = true;
+            break;
+        }
+    }
+
+    if (!is_tui) {
+        std::println("__ {} v{} ({}@{})\n__ Please type Control+'q' to quit the simulation\n",
+                     simrv::buildinfo::kProjectDescription, simrv::buildinfo::kVersion,
+                     simrv::buildinfo::kGitBranch, simrv::buildinfo::kGitSha);
+    }
 
     // Write startup entry to MMU debug log
-    simrv::get_mmu_log() << "[SIM] Simulator start" << '\n';
-    simrv::get_mmu_log().flush();
-
     std::signal(SIGINT, SIG_IGN);  // ignore control+'C'
 
     simrv::core::Machine sim_machine;
@@ -752,11 +611,15 @@ auto main(int argc, char* argv[]) -> int {
     // Initialize terminal in raw mode for simulator I/O.
     TerminalModeGuard terminal_mode;
     if (!terminal_mode.enable_raw_mode()) {
-        std::println(stderr,
-                     "__ Warning: terminal raw mode setup failed; continuing in current mode");
+        if (!is_tui) {
+            std::println(stderr,
+                         "__ Warning: terminal raw mode setup failed; continuing in current mode");
+        }
     }
     sim_machine.run();
 
-    sim_machine.tracer.print_summary();
+    if (!sim_machine.s_tuimode) {
+        sim_machine.tracer.print_summary();
+    }
     return 0;
 }

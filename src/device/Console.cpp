@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "simrv/core/Machine.hpp"
+#include "simrv/device/Tui.hpp"
 #include "simrv/device/Virtio.hpp"
 #include "simrv/device/VirtioUtil.hpp"
 
@@ -30,7 +31,11 @@ void Console::process_queue(Word q_idx) {
             for (Word i = 0; i < desc.len; ++i) {
                 const char c =
                     static_cast<char>(virtio_detail::load_from_ram(desc.adr + i, 1, mmem));
-                if (::write(STDOUT_FILENO, &c, 1) < 0) {
+                if (machine_.s_tuimode && machine_.uart && machine_.uart->tui()) {
+                    machine_.uart->tui()->handle_char_write(c);
+                } else {
+                    if (::write(STDOUT_FILENO, &c, 1) < 0) {
+                    }
                 }
             }
             written = true;

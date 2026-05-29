@@ -59,7 +59,7 @@ void CPU::sret() { TrapController::sret(state_, tlb); }
 void CPU::plic_update_mip() { InterruptController::updateMip(plic_mmio, state_); }
 
 void CPU::plic_set_irq(int irq_num, int state) {
-    InterruptController::setIrq(plic_mmio, state_, irq_num, state);
+    InterruptController::setIrq(plic_mmio, irq_num, state);
 }
 
 void CPU::raise_exception(TrapCause cause, CSRValue tval) {

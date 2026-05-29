@@ -2,9 +2,14 @@
  * @file StageEX.cpp
  * @brief EX stage implementation for Machine.
  */
+#include <unistd.h>
+#include <iostream>
+
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/device/Tui.hpp"
+#include "simrv/device/Uart.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -59,10 +64,11 @@ void CPU::execute_core(Machine& machine) {
             break;
         case Opcode::Op32:
             ctx.tkn = false;
+            // Preserve SUBW/SRAW bit (0x20) and M-extension bit (0x01)
             ctx.funct7 &= ((enum_mask(ctx.funct3) == 0x0u) ||
                            (enum_mask(ctx.funct3) == 0x5u))
-                              ? 0x20
-                              : 0;
+                              ? 0x21
+                              : 0x01;
             ctx.wb_data = execute::ExecuteUnit::aluIntW(Opcode::Op32, ctx.rrs1, ctx.rrs2,
                                                         ctx.funct3, ctx.funct7);
             break;
@@ -104,9 +110,78 @@ void CPU::execute_core(Machine& machine) {
                         ctx.pending_exception = static_cast<ExceptionCode>(enum_mask(ExceptionCode::UserEcall) + std::to_underlying(state_.priv));
                         e_icount++;
                         break;
-                    case Funct12Priv::Ebreak:
-                        ctx.tkn = false;
-                        break;
+                     case Funct12Priv::Ebreak: {
+                         bool semihost_handled = false;
+                         const bool in_dram = simrv::memory::is_dram_addr(state_.pc - 4) && simrv::memory::is_dram_addr(state_.pc + 4);
+                         if (in_dram) {
+                             const Word inst_prev = simrv::memory::ram_read_fast(state_.pc - 4, static_cast<Instruction>(Funct3::Lw), machine.mmem);
+                             const Word inst_next = simrv::memory::ram_read_fast(state_.pc + 4, static_cast<Instruction>(Funct3::Lw), machine.mmem);
+                             if (inst_prev == 0x01f01013 && inst_next == 0x40705013) {
+                                 semihost_handled = true;
+                                 const Word semihost_op = state_.regs.read(static_cast<RegId>(10)); // a0
+                                 const Address arg_ptr = state_.regs.read(static_cast<RegId>(11)); // a1
+                                 
+                                 if (semihost_op == 0x05) { // SYS_WRITE
+                                     const Instruction load_op = kIsXLen64 ? static_cast<Instruction>(Funct3::Ld) : static_cast<Instruction>(Funct3::Lw);
+                                     const Address fd = simrv::memory::ram_read_fast(arg_ptr, load_op, machine.mmem);
+                                     const Address buf_addr = simrv::memory::ram_read_fast(arg_ptr + (kIsXLen64 ? 8 : 4), load_op, machine.mmem);
+                                     const Address len = simrv::memory::ram_read_fast(arg_ptr + (kIsXLen64 ? 16 : 8), load_op, machine.mmem);
+                                     (void)fd;
+                                     
+                                     if (simrv::memory::is_dram_addr(buf_addr)) {
+                                         for (Address i = 0; i < len; ++i) {
+                                             const uint8_t ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(buf_addr + i, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
+                                             if (machine.s_tuimode && machine.uart && machine.uart->tui()) {
+                                                 machine.uart->tui()->handle_char_write(static_cast<char>(ch));
+                                             } else {
+                                                 (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
+                                             }
+                                         }
+                                     }
+                                     state_.regs.write(static_cast<RegId>(10), 0); // Success: returns 0 bytes NOT written
+                                 } else if (semihost_op == 0x03) { // SYS_WRITEC
+                                     if (simrv::memory::is_dram_addr(arg_ptr)) {
+                                         const uint8_t ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(arg_ptr, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
+                                         if (machine.s_tuimode && machine.uart && machine.uart->tui()) {
+                                             machine.uart->tui()->handle_char_write(static_cast<char>(ch));
+                                         } else {
+                                             (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
+                                         }
+                                     }
+                                     state_.regs.write(static_cast<RegId>(10), 0);
+                                 } else if (semihost_op == 0x04) { // SYS_WRITE0
+                                     Address ptr = arg_ptr;
+                                     if (simrv::memory::is_dram_addr(ptr)) {
+                                         while (true) {
+                                             const uint8_t ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(ptr, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
+                                             if (ch == 0) break;
+                                             if (machine.s_tuimode && machine.uart && machine.uart->tui()) {
+                                                 machine.uart->tui()->handle_char_write(static_cast<char>(ch));
+                                             } else {
+                                                 (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
+                                             }
+                                             ptr++;
+                                         }
+                                     }
+                                     state_.regs.write(static_cast<RegId>(10), 0);
+                                 } else {
+                                     std::println(std::cerr, "__ Unhandled semihosting op: 0x{:02x}", semihost_op);
+                                     state_.regs.write(static_cast<RegId>(10), static_cast<Word>(-1));
+                                 }
+                                 
+                                 // Advance PC past signature (skip srai instruction)
+                                 ctx.tkn = true;
+                                 ctx.jmp_pc = state_.pc + 8;
+                             }
+                         }
+                         
+                         if (!semihost_handled) {
+                             ctx.wb_data_csr = enum_mask(ExceptionCode::Breakpoint);
+                             ctx.pending_exception = ExceptionCode::Breakpoint;
+                             ctx.tkn = false;
+                         }
+                         break;
+                     }
                     case Funct12Priv::Uret:
                     case Funct12Priv::Sret:
                     case Funct12Priv::Mret:

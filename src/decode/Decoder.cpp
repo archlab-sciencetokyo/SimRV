@@ -497,9 +497,11 @@ auto decompressInstruction(Instruction ir) -> Instruction {
             }
             case 3: {
                 if (rs1_rd == 2) {
-                    const uint32_t imm = ((ir >> 2) & 0x1) << 5 | ((ir >> 8) & 0x3) << 7 |
-                                         ((ir >> 10) & 0x1) << 6 | ((ir >> 11) & 0x1) << 4 |
-                                         (((ir >> 12) & 0x1) ? 0xFFFFFC00 : 0);
+                    const uint32_t imm = ((ir >> 2) & 0x1) << 5 |
+                                         ((ir >> 3) & 0x3) << 7 |
+                                         ((ir >> 5) & 0x1) << 6 |
+                                         ((ir >> 6) & 0x1) << 4 |
+                                         (((ir >> 12) & 0x1) ? 0xFFFFFE00 : 0);
                     return i_type(0x13, 0x0, 2, 2, imm);
                 } else {
                     const uint32_t imm =
@@ -589,7 +591,7 @@ auto decompressInstruction(Instruction ir) -> Instruction {
                 }
             }
             case 5: {
-                const uint32_t imm = ((ir >> 7) & 0x7) << 3 | ((ir >> 10) & 0x7) << 6;
+                const uint32_t imm = ((ir >> 7) & 0x7) << 6 | ((ir >> 10) & 0x7) << 3;
                 return s_type(0x27, 0x3, 2, rs2, imm);
             }
             case 6: {
@@ -598,7 +600,7 @@ auto decompressInstruction(Instruction ir) -> Instruction {
             }
             case 7: {
                 if constexpr (simrv::xlen::kIsXLen64) {
-                    const uint32_t imm = ((ir >> 7) & 0x7) << 3 | ((ir >> 10) & 0x7) << 6;
+                    const uint32_t imm = ((ir >> 7) & 0x7) << 6 | ((ir >> 10) & 0x7) << 3;
                     return s_type(0x23, 0x3, 2, rs2, imm);
                 } else {
                     const uint32_t imm = ((ir >> 7) & 0x3) << 6 | ((ir >> 9) & 0xF) << 2;

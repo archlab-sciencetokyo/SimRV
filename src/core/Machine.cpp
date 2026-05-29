@@ -6,6 +6,7 @@
 #include "simrv/device/Tui.hpp"
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -71,6 +72,8 @@ void Machine::prepare_cycle() {
         } else {
             cpu.evaluate_timer_interrupt(); /* Timer */
         }
+    } else {
+        cpu.evaluate_timer_interrupt(); /* Timer always evaluated */
     }
 
     cpu.pipeline_context.pending_exception = std::nullopt; /* initialize regs */
@@ -87,9 +90,14 @@ void Machine::finalize_cycle() {
         if (simrv::device::g_resized) {
             uart->refresh_tui();
         }
-        if ((cpu.clint_mmio.mtime % 50000) == 0) {
+        if ((cpu.clint_mmio.mtime % 5000) == 0) {
             uart->tui_update();
-            uart->refresh_tui();
+            static auto last_tui_render = std::chrono::steady_clock::now();
+            auto now = std::chrono::steady_clock::now();
+            if (now - last_tui_render >= std::chrono::milliseconds(33)) {
+                uart->refresh_tui();
+                last_tui_render = now;
+            }
         }
     }
 
@@ -100,7 +108,12 @@ void Machine::finalize_cycle() {
         tracer.write_trace_snapshot();
     }
     if (cpu.clint_mmio.mtime >= s_fincnt - 1) {
-        std::println("\n__finished by -e option");
+        if (s_tuimode && uart && uart->tui()) {
+            uart->tui()->print_log("\n__ finished by -e option\n");
+            uart->tui_pause_loop();
+        } else {
+            std::println("\n__finished by -e option");
+        }
         is_running_ = false;
     }
     if (s_bp_trace) {
@@ -135,9 +148,11 @@ void Machine::finalize_cycle() {
         if (tohost == 1) {
             uart->tui()->print_log("\n__ Program Halted (SUCCESS / PASS)\n");
             uart->tui_pause_loop();
+            is_running_ = false;
         } else if ((tohost & 1) != 0u || (tohost >> 16) == CMD_POWER_OFF) {
             uart->tui()->print_log(std::format("\n__ Program Halted (FAIL / EXIT code={})\n", tohost >> 1));
             uart->tui_pause_loop();
+            is_running_ = false;
         }
         tohost = 0;
         return;
@@ -157,11 +172,20 @@ void Machine::finalize_cycle() {
 
     // Legacy 32-bit SimRV application mode magic handling
     if ((tohost >> 16) == CMD_POWER_OFF) {
-        std::println("\n__ Power off");
+        if (s_tuimode && uart && uart->tui()) {
+            uart->tui()->print_log("\n__ Power off\n");
+            uart->tui_pause_loop();
+        } else {
+            std::println("\n__ Power off");
+        }
         is_running_ = false;
     } else if ((tohost >> 16) == CMD_PRINT_CHAR) {
-        std::print("{}", static_cast<char>(tohost & 0xff));
-        fflush(stdout);
+        if (s_tuimode && uart && uart->tui()) {
+            uart->tui()->handle_char_write(static_cast<char>(tohost & 0xff));
+        } else {
+            std::print("{}", static_cast<char>(tohost & 0xff));
+            fflush(stdout);
+        }
         tohost = 0;
     }
 }
