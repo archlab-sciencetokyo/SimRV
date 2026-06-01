@@ -3,6 +3,7 @@
  * @brief SimRV implementation unit.
  */
 #include "simrv/device/Disk.hpp"
+#include "simrv/core/Logger.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -39,7 +40,7 @@ void Disk::process_queue(Word q_idx) {
                 static_cast<Address>(desc.adr), mmem, desc.len);
 
         if (desc.len != 16) {
-            std::println(stderr, "__ ERROR: disk_request() desc.len!=16");
+            simrv::log::error("disk_request() desc.len!=16");
             std::exit(EXIT_FAILURE);
         }
 
@@ -93,7 +94,7 @@ void Disk::process_queue(Word q_idx) {
                 break;
             }
             default: {
-                std::println(stderr, "__ ERROR: disk unknown header {:x}", header.type);
+                simrv::log::error("disk unknown header {:x}", header.type);
                 std::exit(EXIT_FAILURE);
             }
         }

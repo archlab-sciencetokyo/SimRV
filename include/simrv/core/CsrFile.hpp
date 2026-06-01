@@ -4,6 +4,9 @@
  */
 #pragma once
 
+#include <expected>
+
+#include "simrv/Define.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
@@ -20,8 +23,8 @@ class CsrFile {
 
     [[nodiscard]] auto getMstatus(CSRValue mask) const -> CSRValue;
     void setMstatus(CSRValue wdata);
-    [[nodiscard]] auto read(CSRAddress addr) const -> CSRValue;
-    void write(CSRAddress addr, CSRValue wdata);
+    [[nodiscard]] auto read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCode>;
+    auto write(CSRAddress addr, CSRValue wdata) -> std::expected<void, ExceptionCode>;
 
    private:
     CPU& cpu_;

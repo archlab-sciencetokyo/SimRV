@@ -16,20 +16,20 @@ SimRV uses CMake and Ninja for its build system.
 
 **Build Commands:**
 ```bash
-cmake --preset ninja-clang-release
-cmake --build --preset ninja-clang-release
+cmake --preset rv32-release
+cmake --build --preset rv32-release
 ```
 
 **Run Commands:**
 ```bash
 # Run an application image
-./build/ninja-clang-release/SimRV -m img/hello.bin
+./build/rv32-release/SimRV -m img/hello.bin
 
 # Run a Linux image
-./build/ninja-clang-release/SimRV -m img/bbl.bin -d img/root.bin -c img/devicetree.dtb
+./build/rv32-release/SimRV -m linux-images/rv32/fw_payload.bin -d linux-images/rv32/root.bin -c linux-images/rv32/devicetree.dtb
 
 # Run command-line help
-./build/ninja-clang-release/SimRV -h
+./build/rv32-release/SimRV -h
 ```
 
 ## Testing and Validation
@@ -39,10 +39,10 @@ Testing involves CTest and requires the `RISCV_TESTS_DIR` environment variable t
 **Test Commands:**
 ```bash
 # CTest gate suite (regression + rv32gc smoke)
-ctest --test-dir build/ninja-clang-release --output-on-failure -L gate
+ctest --test-dir build/rv32-release --output-on-failure -L gate
 
 # Run Phase 1 Validation Gate (pre-PR check)
-cmake --build --preset ninja-clang-release --target phase1-gate
+cmake --build --preset rv32-release --target phase1-gate
 ```
 
 ## Development Conventions
@@ -58,8 +58,8 @@ cmake --build --preset ninja-clang-release --target phase1-gate
   - For releases, open PR from `dev` to `main`.
 - **Validation:** Always run at least the build and `phase1-gate` checks before opening a PR:
   ```bash
-  cmake --build --preset ninja-clang-release
-  cmake --build --preset ninja-clang-release --target phase1-gate
+  cmake --build --preset rv32-release
+  cmake --build --preset rv32-release --target phase1-gate
   ```
 
 ## Directory Structure

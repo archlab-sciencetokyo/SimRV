@@ -9,7 +9,7 @@
 #include <unistd.h>
 
 #include "simrv/core/Machine.hpp"
-#include "simrv/device/Tui.hpp"
+#include "simrv/tui/Tui.hpp"
 #include "simrv/device/Virtio.hpp"
 #include "simrv/device/VirtioUtil.hpp"
 

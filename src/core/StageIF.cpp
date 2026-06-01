@@ -56,7 +56,7 @@ void CPU::fetch_address_translate(Machine& /*machine*/) { /* address translation
         const Word current_asid = simrv::xlen::satp_asid(state_.satp);
 
         TLBEntry* tlb_e1 =
-            &TLB_inst_r.at((w_vadr1 >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1));
+            &tlb.inst_r[(w_vadr1 >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1)];
         if (tlb_e1->valid && tlb_e1->asid == current_asid &&
             tlb_e1->v_addr == (w_vadr1 & ~simrv::memory::kPageMask)) {  ///// TLB hit for w_vadr1
             w_padr1 = tlb_e1->p_addr + (w_vadr1 & simrv::memory::kPageMask);
@@ -67,8 +67,8 @@ void CPU::fetch_address_translate(Machine& /*machine*/) { /* address translation
                 w_padr2 = w_padr1 + 2;
             }
         } else {
-            TLBEntry* tlb_e2 = &TLB_inst_r.at((w_vadr2 >> simrv::memory::kPageShift) &
-                                              (simrv::memory::kTlbSize - 1));
+            TLBEntry* tlb_e2 = &tlb.inst_r[(w_vadr2 >> simrv::memory::kPageShift) &
+                                              (simrv::memory::kTlbSize - 1)];
             if (tlb_e2->valid && tlb_e2->asid == current_asid &&
                 tlb_e2->v_addr == (w_vadr2 & ~simrv::memory::kPageMask)) {
                 w_padr2 = tlb_e2->p_addr + (w_vadr2 & simrv::memory::kPageMask);
@@ -105,8 +105,8 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) { /* page walk an
             ctx.pending_tval = w_vadr;
         } else {
             w_padr = translate_res.value();
-            TLBEntry* tlb_e1 = &TLB_inst_r.at((w_vadr >> simrv::memory::kPageShift) &
-                                              (simrv::memory::kTlbSize - 1));
+            TLBEntry* tlb_e1 = &tlb.inst_r[(w_vadr >> simrv::memory::kPageShift) &
+                                              (simrv::memory::kTlbSize - 1)];
             tlb_e1->v_addr = w_vadr & ~simrv::memory::kPageMask;  // update TLB entry
             tlb_e1->p_addr = w_padr & ~simrv::memory::kPageMask;  // update TLB entry
             tlb_e1->asid = simrv::xlen::satp_asid(state_.satp);
@@ -251,7 +251,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
     }
 
     ctx.cinsn = w_compressed ? 1U : 0U;
-    e_instmix.at(simrv::decode::decoder(ctx.ir))++;
+    e_instmix[simrv::decode::decoder(ctx.ir)]++;
 }
 
 }  // namespace simrv::core

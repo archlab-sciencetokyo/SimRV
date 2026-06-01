@@ -2,6 +2,7 @@
  * @file MachineInit.cpp
  * @brief Machine initialization and image loading routines.
  */
+#include "simrv/core/Logger.hpp"
 #include <array>
 #include <cstdlib>
 #include <cstring>
@@ -36,27 +37,39 @@ constexpr Address D_DEVT_OFFSET = static_cast<Address>(16U * 1024U * 1024U);
 void load_image_into_ram(const std::string& file_path, Byte* ram, std::size_t capacity,
                          const char* image_name) {
     if (ram == nullptr || capacity == 0) {
-        std::println(stderr, "__ Error: invalid destination for {} image load", image_name);
+        simrv::log::error("invalid destination for {} image load", image_name);
         std::exit(EXIT_FAILURE);
     }
 
     std::ifstream in(file_path, std::ios::binary | std::ios::ate);
     if (!in.is_open()) {
-        std::println(stderr, "__ Error: image_file {} cannot be found", file_path);
+        simrv::log::error("image_file {} cannot be found", file_path);
         std::exit(EXIT_FAILURE);
     }
 
     const auto file_size = static_cast<std::size_t>(in.tellg());
     if (file_size > capacity) {
-        std::println(stderr, "__ Error: {} image {} is too large ({} bytes > {} bytes capacity)",
+        simrv::log::error("{} image {} is too large ({} bytes > {} bytes capacity)",
                      image_name, file_path, file_size, capacity);
         std::exit(EXIT_FAILURE);
     }
 
     in.seekg(0, std::ios::beg);
     if (!in.read(reinterpret_cast<char*>(ram), static_cast<std::streamsize>(file_size))) {
-        std::println(stderr, "__ Error: failed to read {} image {}", image_name, file_path);
+        simrv::log::error("failed to read {} image {}", image_name, file_path);
         std::exit(EXIT_FAILURE);
+    }
+
+    if (file_size >= 5 && std::to_integer<uint8_t>(ram[0]) == 0x7f && 
+        std::to_integer<char>(ram[1]) == 'E' && 
+        std::to_integer<char>(ram[2]) == 'L' && 
+        std::to_integer<char>(ram[3]) == 'F') {
+        const uint8_t elf_class = std::to_integer<uint8_t>(ram[4]);
+        constexpr uint8_t expected_class = simrv::xlen::kXLenBits == 32 ? 1 : 2;
+        if (elf_class != expected_class) {
+            simrv::log::warn("Loaded ELF image {} is {}-bit but SimRV is compiled for {}-bit!", 
+                         file_path, elf_class == 1 ? 32 : 64, simrv::xlen::kXLenBits);
+        }
     }
 }
 
@@ -120,18 +133,18 @@ void load_devicetree(Byte* ram) {
 void Machine::generate_binfile() const {
     std::ofstream out("inits.bin", std::ios::binary);
     if (!out.is_open()) {
-        std::println(stderr, "__ Error: cannot create inits.bin");
+        simrv::log::error("cannot create inits.bin");
         std::exit(EXIT_FAILURE);
     }
     out.write(reinterpret_cast<const char*>(mmem), D_SIZE_DRAM);
     out.write(reinterpret_cast<const char*>(mmem + D_DEVT_OFFSET), D_SIZE_DEVT);
     out.write(reinterpret_cast<const char*>(disk->sector), D_SIZE_DISK);
     out.close();
-    std::println("__ File inits.bin was generated.");
+    simrv::log::info("File inits.bin was generated.");
 
     std::ifstream in("inits.bin", std::ios::binary);
     if (!in.is_open()) {
-        std::println(stderr, "__ Error: cannot reopen inits.bin");
+        simrv::log::error("cannot reopen inits.bin");
         std::exit(EXIT_FAILURE);
     }
     int i = 0;
@@ -141,7 +154,7 @@ void Machine::generate_binfile() const {
         sum += buf;
         i++;
     }
-    std::println("__ {:8} byte file, checksum {:08x}\n", i * 4, sum);
+    simrv::log::info("{:8} byte file, checksum {:08x}\n", i * 4, sum);
     std::exit(EXIT_SUCCESS);
 }
 
@@ -206,7 +219,7 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
         load_devicetree(mmem + dtb_offset);
     } else {
         if (dtb_offset >= simrv::memory::kDramSize) {
-            std::println(std::cerr, "__ Error: device-tree load offset is outside DRAM");
+            simrv::log::error("device-tree load offset is outside DRAM");
             return 1;
         }
         const auto dt_cap = static_cast<std::size_t>(simrv::memory::kDramSize - dtb_offset);

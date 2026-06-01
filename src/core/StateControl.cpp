@@ -2,20 +2,21 @@
  * @file StateControl.cpp
  * @brief SimRV implementation unit.
  */
+#include "simrv/core/Logger.hpp"
 #include "simrv/core/StateControl.hpp"
 
-#include <algorithm>
 #include <cstdint>
+#include <print>
+#include <ranges>
 #include <print>
 
 #include "simrv/xlen/Types.hpp"
-#include "simrv/xlen/Helpers.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Sbi.hpp"
 #include "simrv/core/Tlb.hpp"
 #include "simrv/device/Uart.hpp"
-#include "simrv/device/Tui.hpp"
+#include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Constants.hpp"
 
 namespace simrv::core {
@@ -35,7 +36,7 @@ void InterruptController::updateMip(PlicMmio& plic, ArchState& state) {
 
     // Evaluate Context 0 (M-mode)
     Word m_max_prio = 0;
-    for (int i = 1; i < 32; i++) {
+    for (int i : std::views::iota(1, 32)) {
         if ((plic.plic_pending[0] & (1u << i)) != 0 && (plic.plic_enables[0][0] & (1u << i)) != 0) {
             if (plic.plic_priorities[i] > m_max_prio) {
                 m_max_prio = plic.plic_priorities[i];
@@ -48,7 +49,7 @@ void InterruptController::updateMip(PlicMmio& plic, ArchState& state) {
 
     // Evaluate Context 1 (S-mode)
     Word s_max_prio = 0;
-    for (int i = 1; i < 32; i++) {
+    for (int i : std::views::iota(1, 32)) {
         if ((plic.plic_pending[0] & (1u << i)) != 0 && (plic.plic_enables[1][0] & (1u << i)) != 0) {
             if (plic.plic_priorities[i] > s_max_prio) {
                 s_max_prio = plic.plic_priorities[i];
@@ -74,6 +75,7 @@ void InterruptController::setIrq(PlicMmio& plic, int irq_num, int state_val) {
     } else {
         plic.plic_pending[0] &= ~mask;
     }
+    plic.cpu_.plic_update_mip();
 }
 
 auto PlicMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
@@ -115,7 +117,7 @@ auto PlicMmio::mmio_read(Address offset) -> Word {
             // Claim: evaluate highest priority pending & enabled for this context
             Word max_prio = 0;
             int claim_id = 0;
-            for (int i = 1; i < 32; i++) {
+            for (int i : std::views::iota(1, 32)) {
                 if ((plic_pending[0] & (1u << i)) != 0 && (plic_enables[context][0] & (1u << i)) != 0) {
                     if (plic_priorities[i] > max_prio) {
                         max_prio = plic_priorities[i];
@@ -190,8 +192,8 @@ auto ClintMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
         const Word wdata = req.data;
         if (req_bytes == 8) {
             if (off == kClintMtimecmpOffset) {
-                mtimecmp = static_cast<Counter>(wdata);
-                cpu_.evaluate_timer_interrupt();
+                mtimecmp = static_cast<Counter>(wdata); std::println("mtimecmp written: {}", mtimecmp);
+                std::println("mtimecmp updated to {}", mtimecmp); cpu_.evaluate_timer_interrupt();
             } else if (off == kClintMtimeOffset) {
                 mtime = static_cast<Counter>(wdata);
             } else {
@@ -200,10 +202,10 @@ auto ClintMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
         } else {
             if (off == kClintMtimecmpOffset) {
                 mtimecmp = (mtimecmp & ~static_cast<Counter>(0xFFFFFFFFull)) | (wdata & 0xFFFFFFFFull);
-                cpu_.evaluate_timer_interrupt();
+                std::println("mtimecmp updated to {}", mtimecmp); cpu_.evaluate_timer_interrupt();
             } else if (off == kClintMtimecmpOffset + 4) {
                 mtimecmp = (mtimecmp & 0xFFFFFFFFull) | (static_cast<Counter>(wdata) << 32);
-                cpu_.evaluate_timer_interrupt();
+                std::println("mtimecmp updated to {}", mtimecmp); cpu_.evaluate_timer_interrupt();
             } else if (off == kClintMtimeOffset) {
                 mtime = (mtime & ~static_cast<Counter>(0xFFFFFFFFull)) | (wdata & 0xFFFFFFFFull);
             } else if (off == kClintMtimeOffset + 4) {
@@ -310,7 +312,7 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
     if (cpu.trap_log_stream != nullptr && cpu.trap_log_stream->is_open()) {
         std::println(
             *cpu.trap_log_stream,
-            "__ TRAP mtime={} cause={:0{}x} pc={:0{}x} priv={} ra={:0{}x} sp={:0{}x} tp={:0{}x} a0={:0{}x} "
+            "TRAP mtime={} cause={:0{}x} pc={:0{}x} priv={} ra={:0{}x} sp={:0{}x} tp={:0{}x} a0={:0{}x} "
             "a1={:0{}x} mtvec={:0{}x} stvec={:0{}x} mepc={:0{}x} sepc={:0{}x} satp={:0{}x} "
             "tval={:0{}x}",
             cpu.clint_mmio.mtime,
@@ -395,19 +397,19 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
     if (cpu.machine_ && cpu.machine_->s_tuimode && cpu.machine_->uart && cause == static_cast<TrapCause>(ExceptionCode::Breakpoint)) {
         if (cpu.machine_->uart->tui()) {
             cpu.machine_->uart->tui()->set_status_override("\033[1;30;41m TRAPPED \033[0m");
-            if constexpr (simrv::xlen::kIsXLen64) {
-                cpu.machine_->uart->tui()->print_log(std::format(
-                    "\n__ Breakpoint: cause=0x{:016x} pc=0x{:016x} tval=0x{:016x}\n",
-                    static_cast<uint64_t>(cause),
-                    static_cast<uint64_t>(trap_pc),
-                    static_cast<uint64_t>(tval)));
-            } else {
-                cpu.machine_->uart->tui()->print_log(std::format(
-                    "\n__ Breakpoint: cause=0x{:08x} pc=0x{:08x} tval=0x{:08x}\n",
-                    static_cast<uint64_t>(cause),
-                    static_cast<uint64_t>(trap_pc),
-                    static_cast<uint64_t>(tval)));
-            }
+        }
+        if constexpr (simrv::xlen::kIsXLen64) {
+            simrv::log::warn(
+                "Breakpoint: cause=0x{:016x} pc=0x{:016x} tval=0x{:016x}",
+                static_cast<uint64_t>(cause),
+                static_cast<uint64_t>(trap_pc),
+                static_cast<uint64_t>(tval));
+        } else {
+            simrv::log::warn(
+                "Breakpoint: cause=0x{:08x} pc=0x{:08x} tval=0x{:08x}",
+                static_cast<uint64_t>(cause),
+                static_cast<uint64_t>(trap_pc),
+                static_cast<uint64_t>(tval));
         }
         cpu.machine_->uart->tui_update();
         cpu.machine_->uart->tui_pause_loop();

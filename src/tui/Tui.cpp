@@ -189,7 +189,7 @@ void Tui::initialize() {
     term.c_cc[VTIME] = 0;
     tcsetattr(STDIN_FILENO, TCSANOW, &term);
 
-    const char* init_seq = "\033[?1049h\033[2J\033[H\033[?1000h\033[?1006h\033[?25h";
+    const char* init_seq = "\033[?1049h\033[2J\033[H\033[?1000h\033[?1006h\033[?25l";
     (void)(::write(STDOUT_FILENO, init_seq, strlen(init_seq)) == 0);
 
     struct sigaction sa{};
@@ -293,22 +293,6 @@ void Tui::render() {
         last_speed_update_ = now;
     }
 
-    // Update panes state
-    reg_pane_->set_kips(kips_);
-    reg_pane_->set_kips_history(kips_history_);
-    reg_pane_->set_paused(paused_);
-    if (!paused_) {
-        reg_pane_->update_cache();
-    }
-    console_pane_->set_lines(lines_to_draw_);
-
-    status_bar_->set_paused(paused_);
-    status_bar_->set_status_override(status_override_);
-    status_bar_->update_kips(kips_);
-    status_bar_->set_layout(layout_);
-    status_bar_->set_active_page(reg_pane_->get_page());
-    status_bar_->set_scroll_offset(scroll_offset_);
-
     int left_pane_width = (term_width > 120) ? 75 : 62;
     int right_pane_width = term_width - left_pane_width - 3;
     if (layout_ == TuiLayout::FullConsole) {
@@ -319,14 +303,68 @@ void Tui::render() {
         right_pane_width = 0;
     }
 
+    // StatusBar renders 3 header lines + 2 footer lines, and we add 1 separator before footer.
+    int num_rows = term_height - 6;
+
+    // Rebuild visible console rows from raw log state.
+    lines_to_draw_.clear();
+    if (right_pane_width > 0 && num_rows > 0) {
+        std::vector<std::string> all_lines = raw_lines_;
+        if (!raw_current_line_.empty()) {
+            all_lines.push_back(raw_current_line_);
+        }
+
+        std::vector<std::string> wrapped_lines;
+        wrapped_lines.reserve(all_lines.size());
+        for (const auto& line : all_lines) {
+            auto chunks = wrap_line(line, right_pane_width);
+            wrapped_lines.insert(wrapped_lines.end(), chunks.begin(), chunks.end());
+        }
+        if (wrapped_lines.empty()) {
+            wrapped_lines.emplace_back("");
+        }
+
+        const int total = static_cast<int>(wrapped_lines.size());
+        int end_exclusive = total - scroll_offset_;
+        if (end_exclusive < 0) {
+            end_exclusive = 0;
+        }
+        if (end_exclusive > total) {
+            end_exclusive = total;
+        }
+        int start = end_exclusive - num_rows;
+        if (start < 0) {
+            start = 0;
+        }
+
+        lines_to_draw_.insert(lines_to_draw_.end(), wrapped_lines.begin() + start,
+                              wrapped_lines.begin() + end_exclusive);
+        while (static_cast<int>(lines_to_draw_.size()) < num_rows) {
+            lines_to_draw_.emplace_back("");
+        }
+    }
+
+    // Update panes state
+    reg_pane_->set_kips(kips_);
+    reg_pane_->set_kips_history(kips_history_);
+    reg_pane_->set_paused(paused_);
+    if (!paused_) {
+        reg_pane_->update_cache();
+    }
+    console_pane_->set_lines(lines_to_draw_);
+    console_pane_->set_scroll_offset(scroll_offset_);
+
+    status_bar_->set_paused(paused_);
+    status_bar_->set_status_override(status_override_);
+    status_bar_->update_kips(kips_);
+    status_bar_->set_layout(layout_);
+    status_bar_->set_active_page(reg_pane_->get_page());
+    status_bar_->set_scroll_offset(scroll_offset_);
     status_bar_->set_pane_widths(left_pane_width, right_pane_width);
 
     // Render loop
     std::string screen = "[H";
     screen += status_bar_->render_row(0, term_width);
-    screen += "\n";
-
-    int num_rows = term_height - 3;  // header and footer
 
     for (int i = 0; i < num_rows; ++i) {
         if (layout_ == TuiLayout::Split) {
@@ -343,16 +381,14 @@ void Tui::render() {
         }
     }
 
-    screen += status_bar_->render_row(1, term_width);
-
-    // Position cursor at bottom of console pane
     if (layout_ == TuiLayout::Split) {
-        screen += std::format("[{};{}H", term_height - 1, term_width - 1);
-    } else if (layout_ == TuiLayout::FullConsole) {
-        screen += std::format("[{};{}H", term_height - 1, term_width - 1);
+        screen += "\033[1;94m╠" + make_repeated_string("═", left_pane_width) + "╧" +
+                  make_repeated_string("═", right_pane_width) + "╣\033[0m\n";
     } else {
-        screen += std::format("[{};{}H", term_height - 1, term_width - 1);
+        screen += "\033[1;94m╠" + make_repeated_string("═", term_width - 2) + "╣\033[0m\n";
     }
+
+    screen += status_bar_->render_row(1, term_width);
 
     (void)(::write(STDOUT_FILENO, screen.data(), screen.size()) == 0);
     ::fflush(stdout);
@@ -392,12 +428,14 @@ void Tui::cycle_reg_page() {
         else if (has_v)
             rp = TuiRegPage::VEC;
         else
-            rp = TuiRegPage::GPR;
+            rp = TuiRegPage::PIPELINE;
     } else if (rp == TuiRegPage::FPR) {
         if (has_v)
             rp = TuiRegPage::VEC;
         else
-            rp = TuiRegPage::GPR;
+            rp = TuiRegPage::PIPELINE;
+    } else if (rp == TuiRegPage::VEC) {
+        rp = TuiRegPage::PIPELINE;
     } else {
         rp = TuiRegPage::GPR;
     }

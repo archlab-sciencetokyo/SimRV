@@ -1,9 +1,9 @@
 #pragma once
 
-#include "simrv/xlen/Types.hpp"
 #include "simrv/Define.hpp"
-#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
+#include "simrv/xlen/Types.hpp"
 
 namespace simrv::xlen {
 
@@ -47,31 +47,53 @@ inline auto resolve_cause_string(uint64_t cause) -> std::string {
 
     if (is_interrupt) {
         switch (code) {
-            case 1:  return "S-SoftwareInt";
-            case 3:  return "M-SoftwareInt";
-            case 5:  return "S-TimerInt";
-            case 7:  return "M-TimerInt";
-            case 9:  return "S-ExternalInt";
-            case 11: return "M-ExternalInt";
-            default: return std::format("Interrupt #{}", code);
+            case 1:
+                return "S-SoftwareInt";
+            case 3:
+                return "M-SoftwareInt";
+            case 5:
+                return "S-TimerInt";
+            case 7:
+                return "M-TimerInt";
+            case 9:
+                return "S-ExternalInt";
+            case 11:
+                return "M-ExternalInt";
+            default:
+                return std::format("Interrupt #{}", code);
         }
     } else {
         switch (code) {
-            case 0:  return "AddrMisalignedFetch";
-            case 1:  return "AccessFaultFetch";
-            case 2:  return "IllegalInst";
-            case 3:  return "Breakpoint";
-            case 4:  return "AddrMisalignedLoad";
-            case 5:  return "AccessFaultLoad";
-            case 6:  return "AddrMisalignedStore";
-            case 7:  return "AccessFaultStore";
-            case 8:  return "U-Ecall";
-            case 9:  return "S-Ecall";
-            case 11: return "M-Ecall";
-            case 12: return "PageFaultFetch";
-            case 13: return "PageFaultLoad";
-            case 15: return "PageFaultStore";
-            default: return std::format("Exception #{}", code);
+            case 0:
+                return "AddrMisalignedFetch";
+            case 1:
+                return "AccessFaultFetch";
+            case 2:
+                return "IllegalInst";
+            case 3:
+                return "Breakpoint";
+            case 4:
+                return "AddrMisalignedLoad";
+            case 5:
+                return "AccessFaultLoad";
+            case 6:
+                return "AddrMisalignedStore";
+            case 7:
+                return "AccessFaultStore";
+            case 8:
+                return "U-Ecall";
+            case 9:
+                return "S-Ecall";
+            case 11:
+                return "M-Ecall";
+            case 12:
+                return "PageFaultFetch";
+            case 13:
+                return "PageFaultLoad";
+            case 15:
+                return "PageFaultStore";
+            default:
+                return std::format("Exception #{}", code);
         }
     }
 }
@@ -80,7 +102,7 @@ inline auto resolve_mstatus_short_string(CSRValue mstatus) -> std::string {
     std::string s;
     CSRValue mpp = (mstatus & enum_mask(MstatusBit::Mpp)) >> 11;
     s += (mpp == 3 ? "M" : mpp == 1 ? "S" : "U");
-    
+
     if ((mstatus & enum_mask(MstatusBit::Mie)) != 0) s += "|MIE";
     if ((mstatus & enum_mask(MstatusBit::Sie)) != 0) s += "|SIE";
     if ((mstatus & enum_mask(MstatusBit::Sum)) != 0) s += "|SUM";
@@ -88,7 +110,7 @@ inline auto resolve_mstatus_short_string(CSRValue mstatus) -> std::string {
     if ((mstatus & enum_mask(MstatusBit::Mxr)) != 0) s += "|MXR";
     if ((mstatus & enum_mask(MstatusBit::Tvm)) != 0) s += "|TVM";
     if ((mstatus & enum_mask(MstatusBit::Tsr)) != 0) s += "|TSR";
-    
+
     return std::format("[{}]", s);
 }
 
@@ -104,4 +126,4 @@ inline auto resolve_satp_string(CSRValue satp) -> std::string {
     return std::format("MODE{}", mode);
 }
 
-} // namespace simrv::xlen
+}  // namespace simrv::xlen

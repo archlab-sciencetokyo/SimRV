@@ -7,13 +7,14 @@
 #include <unistd.h>
 
 #include <cstdint>
+#include <print>
 #include <format>
 #include <ostream>
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/device/Tui.hpp"
+#include "simrv/tui/Tui.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -113,8 +114,9 @@ void Sbi::sbi_return(SignedWord error, Word value) {
 auto Sbi::handle_legacy(Word ext_id, Word func_id) -> bool {
     switch (static_cast<LegacyId>(ext_id)) {
         case LegacyId::SetTimer: {
-            cpu_.clint_mmio.mtimecmp = timer_value();
+            cpu_.clint_mmio.mtimecmp = timer_value(); std::println("SBI SetTimer: mtimecmp updated to {}", cpu_.clint_mmio.mtimecmp);
             cpu_.state().mip &= ~enum_mask(MipBit::Mtip);
+            cpu_.state().mip &= ~enum_mask(MipBit::Stip);
             sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
             return true;
         }
@@ -176,8 +178,9 @@ auto Sbi::handle_base(Word func_id) -> bool {
 
 auto Sbi::handle_time(Word func_id) -> bool {
     if (static_cast<TimeFid>(func_id) == TimeFid::SetTimer) {
-        cpu_.clint_mmio.mtimecmp = timer_value();
+        cpu_.clint_mmio.mtimecmp = timer_value(); std::println("SBI SetTimer: mtimecmp updated to {}", cpu_.clint_mmio.mtimecmp);
         cpu_.state().mip &= ~enum_mask(MipBit::Mtip);
+        cpu_.state().mip &= ~enum_mask(MipBit::Stip);
         sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
     } else {
         sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);

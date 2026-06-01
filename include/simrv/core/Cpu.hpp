@@ -5,8 +5,7 @@
 #pragma once
 
 #include <array>
-#include <cstddef>
-#include <expected>
+
 #include <fstream>
 
 #include "simrv/Define.hpp"
@@ -19,7 +18,8 @@
 #include "simrv/core/StateControl.hpp"
 #include "simrv/core/Tlb.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
-#include "simrv/memory/MemoryUtil.hpp"
+
+#include "simrv/core/PipelineTask.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -72,9 +72,9 @@ class CPU {
     /// Read masked mstatus value with architectural projections.
     [[nodiscard]] auto get_mstatus(CSRValue) const -> CSRValue;
     /// Read a CSR value.
-    [[nodiscard]] auto read_csr(CSRAddress) const -> CSRValue;
+    [[nodiscard]] auto read_csr(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCode>;
     /// Write a CSR value.
-    void write_csr(CSRAddress, CSRValue);
+    auto write_csr(CSRAddress addr, CSRValue val) -> std::expected<void, ExceptionCode>;
     /// Return from machine-mode trap.
     void mret();
     /// Return from supervisor-mode trap.
@@ -89,6 +89,9 @@ class CPU {
     void evaluate_timer_interrupt();
     /// Execute one full CPU cycle (all pipeline stages).
     void run_cycle(Machine& machine);
+    
+    /// Coroutine generator for persistent zero-allocation pipeline
+    PipelineTask run_pipeline_coroutine(Machine& machine);
 
    public:
     /// Run instruction fetch + decode-normalization stage group.
@@ -105,12 +108,12 @@ class CPU {
     void run_commit_stage(Machine& machine);
 
     /// Functional monadic stage transitions (C++23)
-    [[nodiscard]] auto fetch_stage(Machine& machine, Address pc) -> std::expected<FetchResult, StageError>;
-    [[nodiscard]] auto decode_stage(Machine& machine, const FetchResult& fetch) -> std::expected<DecodeResult, StageError>;
-    [[nodiscard]] auto execute_stage(Machine& machine, const DecodeResult& decode) -> std::expected<ExecuteResult, StageError>;
-    [[nodiscard]] auto memory_stage(Machine& machine, const ExecuteResult& exec) -> std::expected<MemoryResult, StageError>;
-    [[nodiscard]] auto writeback_stage(Machine& machine, const MemoryResult& mem) -> std::expected<WritebackResult, StageError>;
-    [[nodiscard]] auto commit_stage(Machine& machine, const WritebackResult& wb) -> std::expected<void, StageError>;
+    [[nodiscard]] auto fetch_stage(Machine& machine, Address pc) -> bool;
+    [[nodiscard]] auto decode_stage(Machine& machine) -> bool;
+    [[nodiscard]] auto execute_stage(Machine& machine) -> bool;
+    [[nodiscard]] auto memory_stage(Machine& machine) -> bool;
+    [[nodiscard]] auto writeback_stage(Machine& machine) -> bool;
+    [[nodiscard]] auto commit_stage(Machine& machine) -> bool;
 
    private:
     /// Translate fetch addresses and prime IF transient context.
@@ -157,11 +160,6 @@ class CPU {
 
     Tlb tlb;
 
-    // Legacy references for backward compatibility with un-refactored pipeline stages
-    std::array<TLBEntry, simrv::memory::kTlbSize>& TLB_inst_r;
-    std::array<TLBEntry, simrv::memory::kTlbSize>& TLB_data_r;
-    std::array<TLBEntry, simrv::memory::kTlbSize>& TLB_data_w;
-
     PlicMmio plic_mmio;
     ClintMmio clint_mmio;
     CsrFile csr_file;
@@ -173,6 +171,7 @@ class CPU {
     std::ofstream* trap_log_stream = nullptr;
     bool use_opensbi = false;
     Machine* machine_ = nullptr;
+    PipelineTask pipeline_task;
 
     // ========== Execution Metrics ==========
     uint64_t e_icount{0};                                // Total instruction count

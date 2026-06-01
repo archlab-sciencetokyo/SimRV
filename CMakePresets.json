@@ -7,20 +7,21 @@
     },
     "configurePresets": [
         {
-            "name": "ninja-clang-release",
-            "displayName": "Ninja + clang (Release)",
+            "name": "rv32-release",
+            "displayName": "RV32 Release (Ninja + Clang)",
             "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build/ninja-clang-release",
+            "binaryDir": "${sourceDir}/build/rv32-release",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "SIMRV_XLEN": "32"
             }
         },
         {
-            "name": "ninja-clang-release-rv64",
-            "displayName": "Ninja + clang (Release, RV64)",
+            "name": "rv64-release",
+            "displayName": "RV64 Release (Ninja + Clang)",
             "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build/ninja-clang-release-rv64",
+            "binaryDir": "${sourceDir}/build/rv64-release",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
@@ -28,45 +29,44 @@
             }
         },
         {
-            "name": "ninja-gcc-o3-lto",
-            "displayName": "Ninja + gcc (Release, O3 + LTO)",
+            "name": "rv32-debug",
+            "displayName": "RV32 Debug (Ninja + Clang)",
             "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build/ninja-gcc-o3-lto",
+            "binaryDir": "${sourceDir}/build/rv32-debug",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_CXX_COMPILER": "g++",
-                "CMAKE_CXX_FLAGS_RELEASE": "-O3 -flto",
-                "CMAKE_EXE_LINKER_FLAGS_RELEASE": "-flto",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "SIMRV_XLEN": "32"
             }
         },
         {
-            "name": "ninja-clang-debug",
-            "displayName": "Ninja + clang (Debug)",
+            "name": "rv64-debug",
+            "displayName": "RV64 Debug (Ninja + Clang)",
             "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build/ninja-clang-debug",
+            "binaryDir": "${sourceDir}/build/rv64-debug",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "SIMRV_XLEN": "64"
             }
         }
     ],
     "buildPresets": [
         {
-            "name": "ninja-clang-release",
-            "configurePreset": "ninja-clang-release"
+            "name": "rv32-release",
+            "configurePreset": "rv32-release"
         },
         {
-            "name": "ninja-clang-release-rv64",
-            "configurePreset": "ninja-clang-release-rv64"
+            "name": "rv64-release",
+            "configurePreset": "rv64-release"
         },
         {
-            "name": "ninja-gcc-o3-lto",
-            "configurePreset": "ninja-gcc-o3-lto"
+            "name": "rv32-debug",
+            "configurePreset": "rv32-debug"
         },
         {
-            "name": "ninja-clang-debug",
-            "configurePreset": "ninja-clang-debug"
+            "name": "rv64-debug",
+            "configurePreset": "rv64-debug"
         }
     ]
 }

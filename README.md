@@ -11,38 +11,53 @@ and uses a CMake/Ninja-based validation workflow.
 Build:
 
 ```bash
-cmake --preset ninja-clang-release
-cmake --build --preset ninja-clang-release
+# RV32 build (default)
+cmake --preset rv32-release
+cmake --build --preset rv32-release
+
+# RV64 build
+cmake --preset rv64-release
+cmake --build --preset rv64-release
 ```
 
 Run an application image:
 
 ```bash
-./build/ninja-clang-release/SimRV -m img/hello.bin
+./build/rv32-release/SimRV -m path/to/hello.bin
 ```
 
 Run Linux image:
 
 ```bash
-./build/ninja-clang-release/SimRV -m img/bbl.bin -d img/root.bin -c img/devicetree.dtb
+./build/rv64-release/SimRV -m linux-images/rv64/fw_payload.bin -d linux-images/rv64/root.bin -c linux-images/rv64/devicetree.dtb
+```
+
+To build these images yourself:
+
+```bash
+# Build RV32 linux images (outputs to linux-images/rv32/)
+./scripts/build-linux-image.sh --arch rv32
+
+# Build RV64 linux images (outputs to linux-images/rv64/)
+./scripts/build-linux-image.sh --arch rv64
 ```
 
 Show command-line help:
 
 ```bash
-./build/ninja-clang-release/SimRV
+./build/rv32-release/SimRV
 ```
 
 Run an assembly source directly (assembled at launch):
 
 ```bash
-./build/ninja-clang-release/SimRV -A path/to/prog.S
+./build/rv32-release/SimRV -A path/to/prog.S
 ```
 
 Select a supported MISA profile:
 
 ```bash
-./build/ninja-clang-release/SimRV -m img/hello.bin --misa rv32imac
+./build/rv32-release/SimRV -m path/to/hello.bin --misa rv32imac
 ```
 
 ## Supported RISC-V Extensions
@@ -69,19 +84,19 @@ Validation policy:
 CTest gate suite (regression + rv32gc smoke):
 
 ```bash
-ctest --test-dir build/ninja-clang-release --output-on-failure -L gate
+ctest --test-dir build/rv32-release --output-on-failure -L gate
 ```
 
 ISA-only smoke subset:
 
 ```bash
-RISCV_TESTS_DIR=/path/to/riscv-tests ctest --test-dir build/ninja-clang-release --output-on-failure -L rv32gc
+RISCV_TESTS_DIR=/path/to/riscv-tests ctest --test-dir build/rv32-release --output-on-failure -L rv32gc
 ```
 
 For ISA CTest runs, the `RISCV_TESTS_DIR` environment variable should be set to your `riscv-tests` path.
 
 ```bash
-RISCV_TESTS_DIR=/path/to/riscv-tests ctest --test-dir build/ninja-clang-release --output-on-failure -L gate
+RISCV_TESTS_DIR=/path/to/riscv-tests ctest --test-dir build/rv32-release --output-on-failure -L gate
 ```
 
 ## Benchmarking
@@ -89,7 +104,7 @@ RISCV_TESTS_DIR=/path/to/riscv-tests ctest --test-dir build/ninja-clang-release 
 Run the benchmark CTest entry:
 
 ```bash
-RISCV_TESTS_DIR=/path/to/riscv-tests ctest --test-dir build/ninja-clang-release --output-on-failure -L benchmark
+RISCV_TESTS_DIR=/path/to/riscv-tests ctest --test-dir build/rv32-release --output-on-failure -L benchmark
 ```
 
 The benchmark executes multiple runs and reports mean/median/min/max KIPS.
@@ -111,7 +126,7 @@ Useful benchmark environment variables:
 Generate API docs (if Doxygen is installed):
 
 ```bash
-cmake --build --preset ninja-clang-release --target docs
+cmake --build --preset rv32-release --target docs
 ```
 
 ## GitHub CI/CD
@@ -120,7 +135,7 @@ This repository now includes two GitHub Actions workflows:
 
 - CI build: `.github/workflows/c-cpp.yml`
   - Runs on pushes and pull requests to `main` and `dev`
-  - Configures and builds SimRV with the `ninja-clang-release` preset
+  - Configures and builds SimRV with the `rv32-release` preset
   - Runs CTest gate suite (`-L gate`) with `riscv-tests`
 
 - Release binaries: `.github/workflows/release-binaries.yml`

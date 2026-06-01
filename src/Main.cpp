@@ -4,29 +4,25 @@
  *
  * SimCore/RISC-V functional simulator (ArchLab, Science Tokyo (former TokyoTech)).
  */
+#include "simrv/core/Logger.hpp"
 #include <termios.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <cctype>
 #include <charconv>
-#include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <expected>
-#include <filesystem>
-#include "simrv/DebugLog.hpp"
 #include <format>
-#include <initializer_list>
 #include <limits>
 #include <print>
 #include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <utility>
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Boot.hpp"
@@ -113,7 +109,7 @@ class TerminalModeGuard {
 };
 
 [[noreturn]] void option_error(std::string_view message, int code = 1) {
-    std::println(stderr, "__ Error: {}", message);
+    simrv::log::error("{}", message);
     std::exit(code);
 }
 
@@ -128,50 +124,43 @@ auto next_argument(std::span<char* const> args, std::size_t& index, std::string_
 
 auto parse_scaled_required(std::span<char* const> args, std::size_t& index,
                            std::string_view option_name) -> std::expected<uint64_t, std::string> {
-    auto value_text = next_argument(args, index, option_name);
-    if (!value_text) {
-        return std::unexpected(value_text.error());
-    }
-
-    uint64_t parsed_value = 0;
-    if (!parse_scaled_u64(*value_text, parsed_value)) {
-        return std::unexpected(std::format("invalid numeric value for {}", option_name));
-    }
-    return parsed_value;
+    return next_argument(args, index, option_name)
+        .and_then([&](std::string_view value_text) -> std::expected<uint64_t, std::string> {
+            uint64_t parsed_value = 0;
+            if (!parse_scaled_u64(value_text, parsed_value)) {
+                return std::unexpected(std::format("invalid numeric value for {}", option_name));
+            }
+            return parsed_value;
+        });
 }
 
 auto parse_u32_required(std::span<char* const> args, std::size_t& index,
                         std::string_view option_name) -> std::expected<uint32_t, std::string> {
-    auto value_text = next_argument(args, index, option_name);
-    if (!value_text) {
-        return std::unexpected(value_text.error());
-    }
-
-    uint32_t parsed_value = 0;
-    if (!parse_u32_base0(*value_text, parsed_value)) {
-        return std::unexpected(std::format("invalid address value for {}", option_name));
-    }
-    return parsed_value;
+    return next_argument(args, index, option_name)
+        .and_then([&](std::string_view value_text) -> std::expected<uint32_t, std::string> {
+            uint32_t parsed_value = 0;
+            if (!parse_u32_base0(value_text, parsed_value)) {
+                return std::unexpected(std::format("invalid address value for {}", option_name));
+            }
+            return parsed_value;
+        });
 }
 
 auto parse_trace_window(RuntimeOptions& options, std::span<char* const> args, std::size_t& index)
     -> std::expected<void, std::string> {
-    auto begin = parse_scaled_required(args, index, "-t");
-    if (!begin) {
-        return std::unexpected(begin.error());
-    }
-    auto end = parse_scaled_required(args, index, "-t");
-    if (!end) {
-        return std::unexpected(end.error());
-    }
-    if (*begin > *end) {
-        return std::unexpected("-t begin must be <= end");
-    }
-
-    options.trace_enabled = true;
-    options.trace_begin = *begin;
-    options.trace_end = *end;
-    return {};
+    return parse_scaled_required(args, index, "-t")
+        .and_then([&](uint64_t begin) {
+            return parse_scaled_required(args, index, "-t")
+                .and_then([&](uint64_t end) -> std::expected<void, std::string> {
+                    if (begin > end) {
+                        return std::unexpected("-t begin must be <= end");
+                    }
+                    options.trace_enabled = true;
+                    options.trace_begin = begin;
+                    options.trace_end = end;
+                    return {};
+                });
+        });
 }
 
 inline auto iequals(std::string_view a, std::string_view b) -> bool {
@@ -226,7 +215,7 @@ auto parse_misa_profile(std::string_view value) -> std::expected<MisaProfile, st
 
     if (valid) {
         if (parsed_xlen != simrv::xlen::kXLenBits) {
-            std::println(stderr, "__ Warning: Specified MISA profile '{}' has XLEN={} which differs from simulator architecture (RV{}). Operating under RV{} mode.",
+            simrv::log::warn("Specified MISA profile '{}' has XLEN={} which differs from simulator architecture (RV{}). Operating under RV{} mode.",
                          value, parsed_xlen, simrv::xlen::kXLenBits, simrv::xlen::kXLenBits);
         }
         return profile;
@@ -581,7 +570,7 @@ void set_options(simrv::core::Machine* m, int argc, char* const* argv) {
     }
 }
 
-auto main(int argc, char* argv[]) -> int {
+auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     bool is_tui = false;
     for (int i = 1; i < argc; ++i) {
         if (std::string_view(argv[i]) == "--tui") {
@@ -591,7 +580,7 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     if (!is_tui) {
-        std::println("__ {} v{} ({}@{})\n__ Please type Control+'q' to quit the simulation\n",
+        simrv::log::info("{} v{} ({}@{})\nPlease type Control+'q' to quit the simulation\n",
                      simrv::buildinfo::kProjectDescription, simrv::buildinfo::kVersion,
                      simrv::buildinfo::kGitBranch, simrv::buildinfo::kGitSha);
     }

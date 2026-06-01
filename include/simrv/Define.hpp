@@ -226,6 +226,7 @@ enum class Csr : CSRAddress {
     Marchid = 0xF12,
     Mimpid = 0xF13,
     Mhartid = 0xF14,
+    Mconfigptr = 0xF15,
     Mstatus = 0x300,
     Misa = 0x301,
     Medeleg = 0x302,

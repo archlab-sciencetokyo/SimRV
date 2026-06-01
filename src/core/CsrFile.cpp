@@ -8,7 +8,6 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
-#include "simrv/DebugLog.hpp"
 
 namespace simrv::core {
 
@@ -38,7 +37,7 @@ void CsrFile::setMstatus(CSRValue wdata) {
     cpu_.state().mstatus = (cpu_.state().mstatus & ~mask) | (wdata & mask);
 }
 
-auto CsrFile::read(CSRAddress addr) const -> CSRValue {
+auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCode> {
     CSRValue rcsr = 0;
     switch (addr) {
         case csr_addr(Csr::Pmpcfg0):
@@ -122,6 +121,8 @@ auto CsrFile::read(CSRAddress addr) const -> CSRValue {
         case csr_addr(Csr::Minstret):
         case csr_addr(Csr::Cycle):
         case csr_addr(Csr::Instret):
+            rcsr = static_cast<CSRValue>(cpu_.clint_mmio.mcycle);
+            break;
         case csr_addr(Csr::Time):
             rcsr = static_cast<CSRValue>(cpu_.clint_mmio.mtime);
             break;
@@ -130,6 +131,8 @@ auto CsrFile::read(CSRAddress addr) const -> CSRValue {
         case csr_addr(Csr::Minstreth):
         case csr_addr(Csr::Cycleh):
         case csr_addr(Csr::Instreth):
+            rcsr = static_cast<CSRValue>(cpu_.clint_mmio.mcycle >> kHighWordShift);
+            break;
         case csr_addr(Csr::Timeh):
             rcsr = static_cast<CSRValue>(cpu_.clint_mmio.mtime >> kHighWordShift);
             break;
@@ -141,18 +144,25 @@ auto CsrFile::read(CSRAddress addr) const -> CSRValue {
             rcsr = getMstatus(kMstatusReadMask);
             break;
 
+        case csr_addr(Csr::Mvendorid):
+        case csr_addr(Csr::Marchid):
+        case csr_addr(Csr::Mimpid):
+        case csr_addr(Csr::Mconfigptr):
+            rcsr = 0;
+            break;
+
         case csr_addr(Csr::Mhartid):
             rcsr = cpu_.state().mhartid;
             break;
 
         default:
-            break;
+            return std::unexpected(ExceptionCode::IllegalInstruction);
     }
     return rcsr;
 }
 
-void CsrFile::write(CSRAddress addr,
-                    CSRValue wdata) {  // NOLINT(bugprone-easily-swappable-parameters)
+auto CsrFile::write(CSRAddress addr,
+                    CSRValue wdata) -> std::expected<void, ExceptionCode> {  // NOLINT(bugprone-easily-swappable-parameters)
     CSRValue const mask1 =
         (static_cast<CSRValue>(1) << (enum_mask(ExceptionCode::StorePageFault) + 1)) - 1;
     CSRValue const mask2 =
@@ -165,6 +175,10 @@ void CsrFile::write(CSRAddress addr,
                            enum_mask(MipBit::Meip) | enum_mask(MipBit::Seip);
 
     switch (addr) {
+        case csr_addr(Csr::Mvendorid):
+        case csr_addr(Csr::Marchid):
+        case csr_addr(Csr::Mimpid):
+        case csr_addr(Csr::Mconfigptr):
         case csr_addr(Csr::Mhartid):
         case csr_addr(Csr::Pmpcfg0):
         case csr_addr(Csr::Pmpaddr0):
@@ -261,8 +275,9 @@ void CsrFile::write(CSRAddress addr,
             setMstatus((cpu_.state().mstatus & ~kSstatusMask) | (wdata & kSstatusMask));
             break;
         default:
-            break;
+            return std::unexpected(ExceptionCode::IllegalInstruction);
     }
+    return {};
 }
 
 }  // namespace simrv::core

@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 LOG_DIR="${SIMRV_REG_LOG_DIR:-regression_logs}"
-SIMRV_BIN="${SIMRV_BIN:-./build/ninja-clang-release/SimRV}"
+SIMRV_BIN="${SIMRV_BIN:-./build/rv32-release/SimRV}"
 mkdir -p "$LOG_DIR"
 
 PASS_COUNT=0
@@ -34,7 +34,7 @@ echo "Root: $ROOT_DIR"
 echo "Logs: $LOG_DIR"
 
 if [[ "${SIMRV_SKIP_BUILD:-0}" != "1" ]]; then
-  CMAKE_PRESET="${SIMRV_CMAKE_PRESET:-ninja-clang-release}"
+  CMAKE_PRESET="${SIMRV_CMAKE_PRESET:-rv32-release}"
   BUILD_PRESET="${SIMRV_CMAKE_BUILD_PRESET:-$CMAKE_PRESET}"
   BUILD_JOBS="${SIMRV_MAKE_JOBS:-1}"
   run_with_log configure cmake --preset "$CMAKE_PRESET"

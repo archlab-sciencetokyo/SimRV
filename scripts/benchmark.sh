@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-SIMRV_BIN="${SIMRV_BIN:-./build/ninja-clang-release/SimRV}"
+SIMRV_BIN="${SIMRV_BIN:-./build/rv32-release/SimRV}"
 BENCH_LOG_DIR="${SIMRV_BENCH_LOG_DIR:-benchmark_logs}"
 BENCH_WORK_DIR="${SIMRV_BENCH_WORK_DIR:-.bench_tmp}"
 BENCH_ITERS="${SIMRV_BENCH_ITERS:-5}"

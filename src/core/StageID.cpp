@@ -138,7 +138,20 @@ void CPU::fetch_operands(Machine& /*machine*/) {
         }
     }
 
-    ctx.rcsr = read_csr(w_csr_addr);
+    if (funct3 != Funct3::Priv) {
+        auto res = read_csr(w_csr_addr);
+        if (!res) {
+            ctx.pending_exception = res.error();
+            ctx.pending_tval = ctx.ir_org;
+            return;
+        }
+        ctx.rcsr = *res;
+    } else {
+        if (w_csr_addr != 0) {
+            auto res = read_csr(w_csr_addr);
+            if (res) ctx.rcsr = *res;
+        }
+    }
 }
 
 }  // namespace simrv::core
