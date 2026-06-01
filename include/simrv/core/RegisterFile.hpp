@@ -24,6 +24,19 @@ class RegisterFile {
    public:
     static constexpr std::size_t kNumRegisters = 32;
 
+    struct RegisterProxy {
+        RegisterFile* rf;
+        RegId idx;
+        constexpr auto operator=(Register val) -> RegisterProxy& {
+            rf->write(idx, val);
+            return *this;
+        }
+        constexpr operator Register() const { return rf->read(idx); }
+    };
+
+    [[nodiscard]] constexpr auto operator[](RegId idx) -> RegisterProxy { return {this, idx}; }
+    [[nodiscard]] constexpr auto operator[](RegId idx) const -> Register { return read(idx); }
+
     [[nodiscard]] constexpr auto read(RegId idx) const -> Register { return reg_[std::to_underlying(idx)]; }
 
     constexpr void write(RegId idx, Register val) {

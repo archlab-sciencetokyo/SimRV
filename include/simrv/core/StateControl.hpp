@@ -32,6 +32,7 @@ class InterruptController {
  */
 class PlicMmio : public memory::TileLinkNode {
    public:
+    friend class InterruptController;
     explicit PlicMmio(CPU& cpu) : cpu_(cpu) {}
 
     static constexpr Address kBaseAddress = simrv::mmio::kPlicBaseAddress;
@@ -96,6 +97,8 @@ class ClintMmio : public memory::TileLinkNode {
 
     Counter mtime{1};
     Counter mtimecmp{};
+    Counter mcycle{1};
+    int rtc_divider{0};
 
    private:
     CPU& cpu_;

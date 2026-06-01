@@ -3,7 +3,8 @@
  * @brief SimRV implementation unit.
  */
 #include "simrv/core/Machine.hpp"
-#include "simrv/device/Tui.hpp"
+#include "simrv/tui/Tui.hpp"
+#include "simrv/core/Logger.hpp"
 
 #include <array>
 #include <chrono>
@@ -80,17 +81,19 @@ void Machine::prepare_cycle() {
     cpu.pipeline_context.pending_tval = 0;                 /* initialize regs */
 }
 
-constexpr Word CMD_PRINT_CHAR = 1; /* command for application mode using tohost */
-constexpr Word CMD_POWER_OFF = 2;  /* command for application mode using tohost */
+enum class AppCommand : Word {
+    PrintChar = 1,  /* command for application mode using tohost */
+    PowerOff = 2    /* command for application mode using tohost */
+};
 /**
  * @brief Apply end-of-cycle termination checks and optional trace outputs.
  */
 void Machine::finalize_cycle() {
     if (s_tuimode) {
-        if (simrv::device::g_resized) {
+        if (simrv::tui::g_resized) {
             uart->refresh_tui();
         }
-        if ((cpu.clint_mmio.mtime % 5000) == 0) {
+        if ((cpu.clint_mmio.mtime % 50000) == 0) {
             uart->tui_update();
             static auto last_tui_render = std::chrono::steady_clock::now();
             auto now = std::chrono::steady_clock::now();
@@ -98,6 +101,10 @@ void Machine::finalize_cycle() {
                 uart->refresh_tui();
                 last_tui_render = now;
             }
+        }
+    } else if (uart) {
+        if ((cpu.clint_mmio.mtime % 10000) == 0) {
+            uart->non_tui_poll_input();
         }
     }
 
@@ -108,11 +115,9 @@ void Machine::finalize_cycle() {
         tracer.write_trace_snapshot();
     }
     if (cpu.clint_mmio.mtime >= s_fincnt - 1) {
+        simrv::log::info("finished by -e option");
         if (s_tuimode && uart && uart->tui()) {
-            uart->tui()->print_log("\n__ finished by -e option\n");
             uart->tui_pause_loop();
-        } else {
-            std::println("\n__finished by -e option");
         }
         is_running_ = false;
     }
@@ -146,11 +151,11 @@ void Machine::finalize_cycle() {
     // TUI Halting check
     if (s_tuimode && uart && uart->tui()) {
         if (tohost == 1) {
-            uart->tui()->print_log("\n__ Program Halted (SUCCESS / PASS)\n");
+            simrv::log::info("Program Halted (SUCCESS / PASS)");
             uart->tui_pause_loop();
             is_running_ = false;
-        } else if ((tohost & 1) != 0u || (tohost >> 16) == CMD_POWER_OFF) {
-            uart->tui()->print_log(std::format("\n__ Program Halted (FAIL / EXIT code={})\n", tohost >> 1));
+        } else if ((tohost & 1) != 0u || (tohost >> 16) == std::to_underlying(AppCommand::PowerOff)) {
+            simrv::log::error("Program Halted (FAIL / EXIT code={})", tohost >> 1);
             uart->tui_pause_loop();
             is_running_ = false;
         }
@@ -160,26 +165,24 @@ void Machine::finalize_cycle() {
 
     if (s_isatest) {
         if (tohost == 1) {
-            std::println("\n__ ISA TEST PASS");
+            simrv::log::info("ISA TEST PASS");
             is_running_ = false;
             return;
         } else if ((tohost & 1) != 0u) {
-            std::println("\n__ ISA TEST FAIL code={} (tohost=0x{:016x})", tohost >> 1, tohost);
+            simrv::log::error("ISA TEST FAIL code={} (tohost=0x{:016x})", tohost >> 1, tohost);
             is_running_ = false;
             return;
         }
     }
 
     // Legacy 32-bit SimRV application mode magic handling
-    if ((tohost >> 16) == CMD_POWER_OFF) {
+    if ((tohost >> 16) == std::to_underlying(AppCommand::PowerOff)) {
+        simrv::log::info("Power off");
         if (s_tuimode && uart && uart->tui()) {
-            uart->tui()->print_log("\n__ Power off\n");
             uart->tui_pause_loop();
-        } else {
-            std::println("\n__ Power off");
         }
         is_running_ = false;
-    } else if ((tohost >> 16) == CMD_PRINT_CHAR) {
+    } else if ((tohost >> 16) == std::to_underlying(AppCommand::PrintChar)) {
         if (s_tuimode && uart && uart->tui()) {
             uart->tui()->handle_char_write(static_cast<char>(tohost & 0xff));
         } else {

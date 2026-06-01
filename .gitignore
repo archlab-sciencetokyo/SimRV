@@ -24,7 +24,7 @@
 SimRV
 
 # Build system outputs
-build/
+build*/
 linux-build/
 linux-images/
 CMakeUserPresets.json
@@ -49,4 +49,6 @@ regression_logs/
 Testing/
 
 # Generated documentation
-docs/api/
+docs/
+trace/
+log/

@@ -26,12 +26,15 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     const bool is_lr =
         is_amo && (static_cast<Funct5Amo>(cpu.pipeline_context.funct5) == Funct5Amo::Lr);
 
+    const bool crosses_page = ((v_addr & simrv::memory::kPageMask) + size_bytes) > (1u << simrv::memory::kPageShift);
     if (simrv::compiler::unlikely((v_addr & (size_bytes - 1u)) != 0)) {
-        cpu.pipeline_context.pending_exception = (is_amo && !is_lr)
-                                                     ? ExceptionCode::MisalignedStore
-                                                     : ExceptionCode::MisalignedLoad;
-        cpu.pipeline_context.pending_tval = v_addr;
-        return 0;
+        if (is_amo || crosses_page) {
+            cpu.pipeline_context.pending_exception = (is_amo && !is_lr)
+                                                         ? ExceptionCode::MisalignedStore
+                                                         : ExceptionCode::MisalignedLoad;
+            cpu.pipeline_context.pending_tval = v_addr;
+            return 0;
+        }
     }
 
     const PrivilegeLevel eff_priv = cpu.effective_data_privilege();
@@ -167,10 +170,13 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
 
     const unsigned size_bytes = 1u << (funct3 & 0x3u);
 
+    const bool crosses_page = ((v_addr & simrv::memory::kPageMask) + size_bytes) > (1u << simrv::memory::kPageShift);
     if (simrv::compiler::unlikely((v_addr & (size_bytes - 1u)) != 0)) {
-        cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedStore;
-        cpu.pipeline_context.pending_tval = v_addr;
-        return;
+        if (crosses_page) {
+            cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedStore;
+            cpu.pipeline_context.pending_tval = v_addr;
+            return;
+        }
     }
 
     const PrivilegeLevel eff_priv = cpu.effective_data_privilege();

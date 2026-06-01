@@ -14,7 +14,11 @@ jobs:
 
     runs-on: ubuntu-latest
     env:
-      LLVM_VERSION: "20"
+      LLVM_VERSION: "22"
+
+    strategy:
+      matrix:
+        arch: [rv32, rv64]
 
     steps:
     - uses: actions/checkout@v5
@@ -40,14 +44,14 @@ jobs:
     
     - name: Configure CMake
       run: >-
-        cmake --preset ninja-clang-release
+        cmake --preset ${{ matrix.arch }}-release
         -DCMAKE_C_COMPILER=clang-"${LLVM_VERSION}"
         -DCMAKE_CXX_COMPILER=clang++-"${LLVM_VERSION}"
 
     - name: Build
-      run: cmake --build --preset ninja-clang-release
+      run: cmake --build --preset ${{ matrix.arch }}-release
 
     - name: Run CTest gate suite
       env:
         RISCV_TESTS_DIR: ${{ runner.temp }}/riscv-tests
-      run: ctest --test-dir build/ninja-clang-release --output-on-failure -L gate
+      run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L gate

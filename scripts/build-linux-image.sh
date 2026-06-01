@@ -8,8 +8,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$ROOT_DIR/linux-build"
-IMAGES_DIR="$ROOT_DIR/linux-images"
 ARCH="${ARCH:-rv64}"
+IMAGES_DIR="$ROOT_DIR/linux-images/$ARCH"
 
 # Versions
 OPENSBI_VER="1.8.1"

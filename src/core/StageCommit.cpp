@@ -46,7 +46,7 @@ void CPU::commit_control_flow_and_traps(Machine& machine) {
                     break;
             }
         } else {
-            write_csr(static_cast<CSRAddress>(ctx.funct12), ctx.wb_data_csr);
+            auto res = write_csr(static_cast<CSRAddress>(ctx.funct12), ctx.wb_data_csr); if (!res) { ctx.pending_exception = res.error(); }
         }
     }
 

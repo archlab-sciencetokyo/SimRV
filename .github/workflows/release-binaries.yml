@@ -14,6 +14,10 @@ jobs:
     env:
       LLVM_VERSION: "20"
 
+    strategy:
+      matrix:
+        arch: [rv32, rv64]
+
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -33,17 +37,17 @@ jobs:
 
       - name: Configure
         run: >-
-          cmake --preset ninja-clang-release
+          cmake --preset ${{ matrix.arch }}-release
           -DCMAKE_C_COMPILER=clang-"${LLVM_VERSION}"
           -DCMAKE_CXX_COMPILER=clang++-"${LLVM_VERSION}"
 
       - name: Build
-        run: cmake --build --preset ninja-clang-release
+        run: cmake --build --preset ${{ matrix.arch }}-release
 
       - name: Run CTest gate suite
         env:
           RISCV_TESTS_DIR: ${{ runner.temp }}/riscv-tests
-        run: ctest --test-dir build/ninja-clang-release --output-on-failure -L gate
+        run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L gate
 
       - name: Compute asset names
         id: names
@@ -66,7 +70,7 @@ jobs:
             echo "Warning: release tag ${TAG} does not match CMake version tag ${VERSION_TAG}" >&2
           fi
 
-          ASSET_BASE="SimRV-linux-x86_64-${VERSION_TAG}"
+          ASSET_BASE="SimRV-${{ matrix.arch }}-linux-x86_64-${VERSION_TAG}"
           echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
           echo "version_tag=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
@@ -77,7 +81,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp build/ninja-clang-release/SimRV dist/SimRV
+          cp build/${{ matrix.arch }}-release/SimRV dist/SimRV
           tar -C dist -czf "${{ steps.names.outputs.asset_base }}.tar.gz" SimRV
           sha256sum "${{ steps.names.outputs.asset_base }}.tar.gz" > "${{ steps.names.outputs.asset_base }}.sha256"
 

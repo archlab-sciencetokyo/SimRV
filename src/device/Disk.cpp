@@ -3,6 +3,7 @@
  * @brief SimRV implementation unit.
  */
 #include "simrv/device/Disk.hpp"
+#include "simrv/core/Logger.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -24,53 +25,54 @@ namespace simrv::device {
 
 void Disk::process_queue(Word q_idx) {
     virtio::QueueState& qs = Queue[q_idx];
-    auto avail_idx = static_cast<uint16_t>(load_from_ram(qs.AvailLow + 2, 2, mmem));
+    if (qs.Ready == 0) return;
+    const auto avail_idx = static_cast<uint16_t>(load_from_ram(qs.AvailLow + 2, 2, mmem));
     while (qs.last_avail_idx != avail_idx) { /* header -> sector -> footer */
 
         // (1) header
-        uint16_t const desc_idx_header =
+        const auto desc_idx_header =
             simrv::virtio_detail::next_avail_desc_idx(&qs, QueueNum, mmem);
-        Address const desc_adr_header = simrv::virtio_detail::get_desc_addr(desc_idx_header, &qs);
-        virtio::Descriptor desc =
+        const auto desc_adr_header = simrv::virtio_detail::get_desc_addr(desc_idx_header, &qs);
+        auto desc =
             simrv::virtio_detail::read_struct_from_ram<virtio::Descriptor>(desc_adr_header, mmem);
 
-        virtio::BlockRequestHeader const header =
+        const auto header =
             simrv::virtio_detail::read_struct_from_ram<virtio::BlockRequestHeader>(
                 static_cast<Address>(desc.adr), mmem, desc.len);
 
         if (desc.len != 16) {
-            std::println(stderr, "__ ERROR: disk_request() desc.len!=16");
+            simrv::log::error("disk_request() desc.len!=16");
             std::exit(EXIT_FAILURE);
         }
 
         // (2) sector
-        uint16_t const desc_idx_sector = desc.next;
-        Address const desc_adr_sector = simrv::virtio_detail::get_desc_addr(desc_idx_sector, &qs);
+        const auto desc_idx_sector = desc.next;
+        const auto desc_adr_sector = simrv::virtio_detail::get_desc_addr(desc_idx_sector, &qs);
         desc =
             simrv::virtio_detail::read_struct_from_ram<virtio::Descriptor>(desc_adr_sector, mmem);
 
-        Word const sector_len = desc.len;
-        auto sector_adr = static_cast<Address>(desc.adr);
+        const auto sector_len = desc.len;
+        const auto sector_adr = static_cast<Address>(desc.adr);
 
         // (3) footer
-        uint16_t const desc_idx_footer = desc.next;
-        Address const desc_adr_footer = simrv::virtio_detail::get_desc_addr(desc_idx_footer, &qs);
+        const auto desc_idx_footer = desc.next;
+        const auto desc_adr_footer = simrv::virtio_detail::get_desc_addr(desc_idx_footer, &qs);
         desc =
             simrv::virtio_detail::read_struct_from_ram<virtio::Descriptor>(desc_adr_footer, mmem);
 
-        auto footer_adr = static_cast<Address>(desc.adr);
+        const auto footer_adr = static_cast<Address>(desc.adr);
 
         Word request_size = 0;
         switch (header.type) {
             case enum_mask(VirtioBlkType::In): {  /////  disk -> dram
                 request_size = sector_len + 1;
-                Address const disk_offset =
+                const auto disk_offset =
                     static_cast<Address>(header.sector_num * simrv::virtio::kDiskSectorSize);
-                Address const start_idx = sector_adr & simrv::memory::kDramMask;
+                const auto start_idx = sector_adr & simrv::memory::kDramMask;
                 if (start_idx + sector_len <= simrv::memory::kDramSize) {
                     std::memcpy(mmem + start_idx, sector + disk_offset, sector_len);
                 } else {
-                    std::size_t const first_part = simrv::memory::kDramSize - start_idx;
+                    const std::size_t first_part = simrv::memory::kDramSize - start_idx;
                     std::memcpy(mmem + start_idx, sector + disk_offset, first_part);
                     std::memcpy(mmem, sector + disk_offset + first_part, sector_len - first_part);
                 }
@@ -79,13 +81,13 @@ void Disk::process_queue(Word q_idx) {
             }
             case enum_mask(VirtioBlkType::Out): {  ///// dram -> disk
                 request_size = 1;
-                Address const disk_offset =
+                const auto disk_offset =
                     static_cast<Address>(header.sector_num * simrv::virtio::kDiskSectorSize);
-                Address const start_idx = sector_adr & simrv::memory::kDramMask;
+                const auto start_idx = sector_adr & simrv::memory::kDramMask;
                 if (start_idx + sector_len <= simrv::memory::kDramSize) {
                     std::memcpy(sector + disk_offset, mmem + start_idx, sector_len);
                 } else {
-                    std::size_t const first_part = simrv::memory::kDramSize - start_idx;
+                    const std::size_t first_part = simrv::memory::kDramSize - start_idx;
                     std::memcpy(sector + disk_offset, mmem + start_idx, first_part);
                     std::memcpy(sector + disk_offset + first_part, mmem, sector_len - first_part);
                 }
@@ -93,12 +95,12 @@ void Disk::process_queue(Word q_idx) {
                 break;
             }
             default: {
-                std::println(stderr, "__ ERROR: disk unknown header {:x}", header.type);
+                simrv::log::error("disk unknown header {:x}", header.type);
                 std::exit(EXIT_FAILURE);
             }
         }
 
-        update_descriptor(desc_idx_header, request_size, QueueNum, &qs, mmem);
+        update_descriptor(desc_idx_header, request_size, static_cast<int>(QueueNum), &qs, mmem);
         qs.last_avail_idx++;
 
         trigger_interrupt();

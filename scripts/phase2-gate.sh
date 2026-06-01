@@ -13,7 +13,7 @@
 #
 # Environment variables:
 #   SIMRV_SKIP_BUILD: Skip build step (default: 0)
-#   SIMRV_CMAKE_PRESET: CMake preset to use (default: ninja-clang-release)
+#   SIMRV_CMAKE_PRESET: CMake preset to use (default: rv32-release)
 #   SIMRV_APP_IMG: Path to application image for smoke test
 #   SIMRV_LINUX_MEM_IMG: Path to Linux kernel image
 #   SIMRV_LINUX_DISK_IMG: Path to Linux disk image
@@ -27,7 +27,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 LOG_DIR="${SIMRV_REG_LOG_DIR:-regression_logs}"
-SIMRV_BIN="${SIMRV_BIN:-./build/ninja-clang-release/SimRV}"
+SIMRV_BIN="${SIMRV_BIN:-./build/rv32-release/SimRV}"
 ISA_LOG_DIR="${SIMRV_ISA_LOG_DIR:-isa_logs}"
 RISCV_TESTS_DIR="${RISCV_TESTS_DIR:-$ROOT_DIR/../../tests/riscv-tests}"
 if [[ -d "$RISCV_TESTS_DIR/share/riscv-tests" ]]; then
@@ -86,7 +86,7 @@ echo "PHASE 1: Build & Compilation"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 if [[ "${SIMRV_SKIP_BUILD:-0}" != "1" ]]; then
-  CMAKE_PRESET="${SIMRV_CMAKE_PRESET:-ninja-clang-release}"
+  CMAKE_PRESET="${SIMRV_CMAKE_PRESET:-rv32-release}"
   BUILD_PRESET="${SIMRV_CMAKE_BUILD_PRESET:-$CMAKE_PRESET}"
   BUILD_JOBS="${SIMRV_MAKE_JOBS:-1}"
   

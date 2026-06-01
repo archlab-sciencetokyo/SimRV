@@ -12,7 +12,7 @@ fi
 if [[ ! -d "$RISCV_TESTS_DIR" ]]; then
   echo "ERROR: riscv-tests directory not found: $RISCV_TESTS_DIR"
   echo "Set RISCV_TESTS_DIR to your checkout/build directory"
-  echo "Example: RISCV_TESTS_DIR=$HOME/riscv-tests ctest --test-dir build/ninja-clang-release -L gate"
+  echo "Example: RISCV_TESTS_DIR=$HOME/riscv-tests ctest --test-dir build/rv32-release -L gate"
   exit 2
 fi
 
@@ -62,7 +62,7 @@ END_INSNS="${SIMRV_ISA_END:-2000000}"
 TOHOST_ADDR="${SIMRV_ISA_TOHOST:-0x80001000}"
 LOG_DIR="${SIMRV_ISA_LOG_DIR:-isa_logs}"
 WORK_DIR="${SIMRV_ISA_WORK_DIR:-.isa_tmp}"
-SIMRV_BIN="${SIMRV_BIN:-./build/ninja-clang-release/SimRV}"
+SIMRV_BIN="${SIMRV_BIN:-./build/rv32-release/SimRV}"
 ISA_XLEN="${SIMRV_ISA_XLEN:-32}"
 
 if [[ "$ISA_XLEN" != "32" && "$ISA_XLEN" != "64" ]]; then
@@ -79,7 +79,7 @@ echo "RISCV_PREFIX=${RISCV_PREFIX:-<unset>}"
 echo "XLEN=$ISA_XLEN TIMEOUT=$TIMEOUT_SECS END=$END_INSNS TOHOST=$TOHOST_ADDR"
 
 if [[ "${SIMRV_SKIP_BUILD:-0}" != "1" ]]; then
-  CMAKE_PRESET="${SIMRV_CMAKE_PRESET:-ninja-clang-release}"
+  CMAKE_PRESET="${SIMRV_CMAKE_PRESET:-rv32-release}"
   BUILD_PRESET="${SIMRV_CMAKE_BUILD_PRESET:-$CMAKE_PRESET}"
   BUILD_JOBS="${SIMRV_MAKE_JOBS:-1}"
   cmake --preset "$CMAKE_PRESET" >/dev/null

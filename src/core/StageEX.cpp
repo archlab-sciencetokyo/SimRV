@@ -8,7 +8,7 @@
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/device/Tui.hpp"
+#include "simrv/tui/Tui.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/xlen/Constants.hpp"

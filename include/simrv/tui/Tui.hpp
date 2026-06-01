@@ -8,12 +8,13 @@
 #include <csignal>
 #include <string>
 #include <vector>
+#include <memory>
 
 namespace simrv::core {
 class Machine;
 }
 
-namespace simrv::device {
+namespace simrv::tui {
 extern volatile std::sig_atomic_t g_resized;
 
 enum class TuiLayout {
@@ -25,13 +26,18 @@ enum class TuiLayout {
 enum class TuiRegPage {
     GPR,
     FPR,
-    VEC
+    VEC,
+    PIPELINE
 };
 
 /**
  * @class Tui
  * @brief Handles ANSI-based split-screen rendering, scrolling, and status display for RTOS mode.
  */
+class RegisterPane;
+class ConsolePane;
+class StatusBar;
+
 class Tui {
    public:
     explicit Tui(simrv::core::Machine& machine);
@@ -45,7 +51,7 @@ class Tui {
 
     void set_paused(bool p) {
         paused_ = p;
-        if (!p) status_override_.clear();
+                if (!p) status_override_.clear();
     }
     [[nodiscard]] auto is_paused() const -> bool { return paused_; }
 
@@ -62,21 +68,24 @@ class Tui {
     void cycle_reg_page();
     void scroll(int lines);
     void reset_scroll();
+    [[nodiscard]] auto get_scroll_offset() const -> int { return scroll_offset_; }
+
+
+    void handle_mouse(int x, int y, int b);
 
    private:
-    [[nodiscard]] auto get_left_pane_row(int row_idx, int pane_width) -> std::string;
-    [[nodiscard]] auto get_right_pane_row(int row_idx, int pane_width) -> std::string;
-    [[nodiscard]] auto get_sparkline_string(int width) -> std::string;
-
     simrv::core::Machine& machine_;
+    
+    std::unique_ptr<RegisterPane> reg_pane_;
+    std::unique_ptr<ConsolePane> console_pane_;
+    std::unique_ptr<StatusBar> status_bar_;
+
     int pane_width_cached_ = 62;
     std::vector<std::string> raw_lines_;
     std::string raw_current_line_;
     std::vector<std::string> lines_to_draw_;
-    std::vector<std::string> cached_left_rows_;
     bool paused_ = true;
     TuiLayout layout_ = TuiLayout::Split;
-    TuiRegPage reg_page_ = TuiRegPage::GPR;
     std::string status_override_;
     int scroll_offset_{0};
 
@@ -88,4 +97,4 @@ class Tui {
     std::vector<uint64_t> kips_history_;
 };
 
-}  // namespace simrv::device
+} // namespace simrv::tui

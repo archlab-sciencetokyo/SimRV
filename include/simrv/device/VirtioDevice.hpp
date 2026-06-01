@@ -4,7 +4,7 @@
  */
 #pragma once
 
-#include "simrv/Define.hpp"
+
 #include "simrv/device/Virtio.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 
@@ -32,7 +32,7 @@ class VirtioDevice : public memory::TileLinkNode {
     Word QueueNum = 0;
 
    protected:
-    simrv::core::Machine& machine_;
+    simrv::core::Machine& machine_; // NOLINT
     Word irq_;
 
     [[nodiscard]] virtual auto get_device_id() const -> Word = 0;
@@ -43,8 +43,8 @@ class VirtioDevice : public memory::TileLinkNode {
 
     virtual void process_queue(Word q_idx) = 0;
 
-    [[nodiscard]] virtual auto read_config(Address offset) const -> Word { return 0; }
-    virtual void write_config(Address offset, Word wdata) {}
+    [[nodiscard]] virtual auto read_config(Address /*offset*/) const -> Word { return 0; }
+    virtual void write_config(Address /*offset*/, Word /*wdata*/) {}
 
     void trigger_interrupt();
 

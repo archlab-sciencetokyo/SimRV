@@ -4,7 +4,7 @@ project(SimRV LANGUAGES CXX)
 
 enable_testing()
 
-set(SIMRV_VERSION "2.0.0-alpha.5")
+set(SIMRV_VERSION "2.0.0-beta.1")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -83,6 +83,7 @@ set(SIMRV_CORE_COUNT "1" CACHE STRING "Number of CPU cores (experimental)")
 
 add_executable(SimRV
   src/Main.cpp
+  src/core/Logger.cpp
   src/core/Machine.cpp
   src/core/MachineInit.cpp
   src/core/StateControl.cpp
@@ -112,7 +113,8 @@ add_executable(SimRV
   src/device/VirtioDevice.cpp
   src/device/Rtc.cpp
   src/device/Uart.cpp
-  src/device/Tui.cpp
+  src/tui/Tui.cpp
+  src/tui/TuiComponents.cpp
 )
 
 target_compile_features(SimRV PRIVATE cxx_std_23)
