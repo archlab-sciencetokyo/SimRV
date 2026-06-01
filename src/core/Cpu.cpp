@@ -66,8 +66,10 @@ void CPU::raise_exception(TrapCause cause, CSRValue tval) {
 void CPU::evaluate_timer_interrupt() {
     if (clint_mmio.mtime >= clint_mmio.mtimecmp) {
         state_.mip |= enum_mask(MipBit::Mtip);
+        state_.mip |= enum_mask(MipBit::Stip);
     } else {
         state_.mip &= ~enum_mask(MipBit::Mtip);
+        state_.mip &= ~enum_mask(MipBit::Stip);
     }
 }
 

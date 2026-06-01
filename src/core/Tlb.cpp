@@ -18,31 +18,12 @@ void Tlb::flush() {
     data_w.fill(TLBEntry{});
 }
 
-void Tlb::flush_selective(bool match_all_vaddr, Address vaddr, bool match_all_asid, Word asid) {
-    const Address masked_vaddr = vaddr & ~simrv::memory::kPageMask;
-    const Word masked_asid = asid & simrv::xlen::kSatpAsidMask;
-
-    auto check_and_flush = [&](TLBEntry& entry) {
-        if (!entry.valid) {
-            return;
-        }
-        const bool vaddr_match = match_all_vaddr || (entry.v_addr == masked_vaddr);
-        const bool asid_match = match_all_asid || (entry.asid == masked_asid);
-        if (vaddr_match && asid_match) {
-            entry.valid = false;
-        }
-    };
-
-    if (!match_all_vaddr) {
-        const Word index = (masked_vaddr >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1);
-        check_and_flush(inst_r[index]);
-        check_and_flush(data_r[index]);
-        check_and_flush(data_w[index]);
-    } else {
-        std::ranges::for_each(inst_r, check_and_flush);
-        std::ranges::for_each(data_r, check_and_flush);
-        std::ranges::for_each(data_w, check_and_flush);
-    }
+void Tlb::flush_selective(bool /*match_all_vaddr*/, Address /*vaddr*/, bool /*match_all_asid*/, Word /*asid*/) {
+    // Stale translations for superpages (HugeTLB) can cause kernel crashes if we selectively
+    // flush only a single 4KB subpage, since a superpage spans multiple subpages.
+    // To ensure correctness and safety under all virtual memory configurations,
+    // we perform a full TLB invalidation (which is a standard-compliant simplification).
+    flush();
 }
 
 }  // namespace simrv::core

@@ -102,6 +102,10 @@ void Machine::finalize_cycle() {
                 last_tui_render = now;
             }
         }
+    } else if (uart) {
+        if ((cpu.clint_mmio.mtime % 10000) == 0) {
+            uart->non_tui_poll_input();
+        }
     }
 
     if (s_strace != 0 && cpu.clint_mmio.mtime >= s_strace) {

@@ -110,7 +110,18 @@ auto Uart::consume_tui_control_sequence(uint8_t first_byte) -> bool {
 
     constexpr int kMaxSeqLen = 64;
     uint8_t byte = 0;
-    while (static_cast<int>(esc_buf_.size()) < kMaxSeqLen && poll_uart_rx(byte)) {
+    while (static_cast<int>(esc_buf_.size()) < kMaxSeqLen) {
+        bool polled = false;
+        for (int retry = 0; retry < 10; ++retry) {
+            if (poll_uart_rx(byte)) {
+                polled = true;
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (!polled) {
+            break;
+        }
         esc_buf_.push_back(static_cast<char>(byte));
         if (byte == 'M' || byte == 'm' || byte == '~' || byte == 'A' || byte == 'B' ||
             byte == 'C' || byte == 'D') {
@@ -154,14 +165,27 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                             resp.data = 0;
                         }
                     } else {
+                        if (!uart_rx_ready_ && !rx_fifo_.empty()) {
+                            uart_rx_byte_ = rx_fifo_.front();
+                            rx_fifo_.pop();
+                            uart_rx_ready_ = true;
+                        }
                         if (!uart_rx_ready_) {
                             uart_rx_ready_ = poll_uart_rx(uart_rx_byte_);
+                            if (uart_rx_ready_ && uart_rx_byte_ == 17) {
+                                machine_.is_running_ = false;
+                            }
                             update_uart_irq(machine_, uart_rx_ready_, uart_ier_, tx_irq_pending_);
                         }
                         if (uart_rx_ready_) {
                             resp.data = static_cast<Word>(uart_rx_byte_);
                             uart_rx_ready_ = false;
-                            update_uart_irq(machine_, false, uart_ier_, tx_irq_pending_);
+                            if (!rx_fifo_.empty()) {
+                                uart_rx_byte_ = rx_fifo_.front();
+                                rx_fifo_.pop();
+                                uart_rx_ready_ = true;
+                            }
+                            update_uart_irq(machine_, uart_rx_ready_, uart_ier_, tx_irq_pending_);
                         } else {
                             resp.data = 0;
                         }
@@ -194,8 +218,17 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                         simrv::mmio::kUartLsrThreTemt |
                         (!rx_fifo_.empty() ? simrv::mmio::kUartLsrDataReady : static_cast<Word>(0));
                 } else {
+                    if (!uart_rx_ready_ && !rx_fifo_.empty()) {
+                        uart_rx_byte_ = rx_fifo_.front();
+                        rx_fifo_.pop();
+                        uart_rx_ready_ = true;
+                        update_uart_irq(machine_, uart_rx_ready_, uart_ier_, tx_irq_pending_);
+                    }
                     if (!uart_rx_ready_) {
                         uart_rx_ready_ = poll_uart_rx(uart_rx_byte_);
+                        if (uart_rx_ready_ && uart_rx_byte_ == 17) {
+                            machine_.is_running_ = false;
+                        }
                         update_uart_irq(machine_, uart_rx_ready_, uart_ier_, tx_irq_pending_);
                     }
                     resp.data =
@@ -374,6 +407,31 @@ void Uart::tui_pause_loop() {
 void Uart::refresh_tui() {
     if (tui_) {
         tui_->render();
+    }
+}
+
+void Uart::non_tui_poll_input() {
+    if (machine_.s_tuimode) return;
+
+    if (uart_rx_ready_ && uart_rx_byte_ == 17) {
+        machine_.is_running_ = false;
+        return;
+    }
+
+    uint8_t byte = 0;
+    if (poll_uart_rx(byte)) {
+        if (byte == 17) {  // Ctrl-Q
+            machine_.is_running_ = false;
+            return;
+        }
+
+        rx_fifo_.push(byte);
+        if (!uart_rx_ready_) {
+            uart_rx_byte_ = rx_fifo_.front();
+            rx_fifo_.pop();
+            uart_rx_ready_ = true;
+            update_uart_irq(machine_, true, uart_ier_, tx_irq_pending_);
+        }
     }
 }
 

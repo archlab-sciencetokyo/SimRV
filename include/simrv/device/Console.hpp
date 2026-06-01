@@ -29,7 +29,7 @@ class Console : public VirtioDevice {
     [[nodiscard]] auto base_address() const -> Address override { return kBaseAddress; }
     [[nodiscard]] auto size() const -> Address override { return kSize; }
 
-    int MC_receive_input(simrv::core::Machine& machine);
+    auto MC_receive_input(simrv::core::Machine& machine) -> int;
 
     Byte* mmem = nullptr;
     Byte fifo_en = static_cast<Byte>(0);

@@ -37,6 +37,7 @@ class Uart : public memory::TileLinkNode {
     void tui_update();
     void tui_pause_loop();
     void refresh_tui();
+    void non_tui_poll_input();
     [[nodiscard]] auto tui() -> simrv::tui::Tui* { return tui_.get(); }
     [[nodiscard]] auto tui() const -> const simrv::tui::Tui* { return tui_.get(); }
 
