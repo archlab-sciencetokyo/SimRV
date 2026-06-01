@@ -1,81 +1,25 @@
 /**
  * @file Define.hpp
- * @brief SimRV declarations.
+ * @brief Core ISA constants, enums, and shared simulator type definitions.
  */
 #pragma once
-
-#include <sys/select.h>
-#include <sys/stat.h>
-#include <sys/time.h>
-#include <termios.h>
-#include <unistd.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <type_traits>
+#include <utility>
 
-template <size_t Bits>
-struct XLenTypes;
+#include "simrv/xlen/Constants.hpp"
+#include "simrv/xlen/Types.hpp"
 
-template <>
-struct XLenTypes<32> {
-    using Word = uint32_t;
-    using SignedWord = int32_t;
-    using Register = uint32_t;
-};
+#ifndef SIMRV_CORE_COUNT
+#define SIMRV_CORE_COUNT 1
+#endif
+inline constexpr unsigned kCoreCount = SIMRV_CORE_COUNT;
 
-template <>
-struct XLenTypes<64> {
-    using Word = uint64_t;
-    using SignedWord = int64_t;
-    using Register = uint64_t;
-};
-
-// Active architectural scalar set. RV32 remains the default until RV64 bring-up.
-using ActiveXLenTypes = XLenTypes<32>;
-using Byte = std::byte;
-using CompressedInstruction = uint16_t;
-using Word = ActiveXLenTypes::Word;
-using SignedWord = ActiveXLenTypes::SignedWord;
-using Register = ActiveXLenTypes::Register;
-using xlen_t = SignedWord;
-using uxlen_t = Word;
-using WideRegister = uint64_t;
-using FloatingRegister = WideRegister;
-using Counter = uint64_t;
-using Address = Word;
-using Instruction = Word;
-using CSRValue = Word;
-using CSRAddress = Address;
-using ImmValue = SignedWord;
-using TrapCause = Word;
-using PrivilegeLevel = Word;
-
-inline constexpr unsigned kXLenBits = static_cast<unsigned>(sizeof(uxlen_t) * 8u);
-
-inline constexpr uxlen_t xlen_shift_mask() {
-    return static_cast<uxlen_t>(kXLenBits - 1u);
-}
-
-template <typename T>
-constexpr T sign_extend(T value, unsigned bits) {
-    static_assert(std::is_integral_v<T>, "sign_extend requires an integral type");
-    using UnsignedT = std::make_unsigned_t<T>;
-    const UnsignedT sign_bit = static_cast<UnsignedT>(1u) << (bits - 1u);
-    const UnsignedT value_mask = static_cast<UnsignedT>(1u) << bits;
-    const UnsignedT masked = static_cast<UnsignedT>(value) & (value_mask - static_cast<UnsignedT>(1u));
-    return static_cast<T>((masked ^ sign_bit) - sign_bit);
-}
-
-namespace simrv::boot {
-inline constexpr Address kStartPc = static_cast<Address>(0x80000000u);
-inline constexpr Address kInitDataAddress = static_cast<Address>(0x01000000u);
-}  // namespace simrv::boot
-
-using DumpFlags = uint32_t;
+using DumpFlags = uint8_t;
 
 enum class DumpFlag : DumpFlags {
     Exec = (1u << 0),
@@ -83,7 +27,7 @@ enum class DumpFlag : DumpFlags {
     Csr = (1u << 2),
 };
 
-using PteFlags = Word;
+using PteFlags = uint8_t;
 
 enum class PteFlag : PteFlags {
     V = (1 << 0),
@@ -101,30 +45,21 @@ constexpr uint32_t LEVELS = 2;
 constexpr uint32_t PTE_SIZE = 4;
 constexpr uint32_t PAGE_SIZE = (1u << 12);
 
-namespace simrv::virtio {
-inline constexpr Address kBaseAddress = static_cast<Address>(0x40000000u);
-inline constexpr Address kRegionSize = static_cast<Address>(0x08000000u);
-inline constexpr uint32_t kConsoleMaxQueueNum = 2;
-inline constexpr uint32_t kConsoleIrq = 1;
-inline constexpr uint32_t kDiskSectorSize = 512;
-inline constexpr uint32_t kDiskBufferSize = (512u * 512u);
-inline constexpr uint32_t kDiskSize = (128u * 1024u * 1024u);
-inline constexpr uint32_t kDiskMaxQueueNum = 4;
-inline constexpr uint32_t kDiskIrq = 2;
-}  // namespace simrv::virtio
-enum class VringDescFlag : uint16_t {
+// Virtio vring descriptor and block device status/type enums
+
+using VringDescFlags = uint8_t;
+enum class VringDescFlag : VringDescFlags {
     Next = 1,
     Write = 2,
     Indirect = 4,
 };
 
-using VringDescFlags = uint16_t;
-enum class VirtioBlkType : uint32_t {
+enum class VirtioBlkType : uint8_t {
     In = 0,
     Out = 1,
 };
 
-enum class VirtioBlkStatus : uint32_t {
+enum class VirtioBlkStatus : uint8_t {
     Ok = 0,
     IoErr = 1,
     Unsupp = 2,
@@ -132,28 +67,9 @@ enum class VirtioBlkStatus : uint32_t {
 
 constexpr Address DISK_MASK = static_cast<Address>(0x03ffffffu);
 
-namespace simrv::mmio {
-inline constexpr Address kPlicBaseAddress = static_cast<Address>(0x50000000u);
-inline constexpr Address kPlicSize = static_cast<Address>(0x00400000u);
-inline constexpr Address kPlicHartBase = static_cast<Address>(0x00200000u);
-inline constexpr Address kPlicHartSize = static_cast<Address>(0x00001000u);
-inline constexpr Address kClintBaseAddress = static_cast<Address>(0x60000000u);
-inline constexpr Address kClintSize = static_cast<Address>(0x000c0000u);
-}  // namespace simrv::mmio
-
-namespace simrv::memory {
-inline constexpr Address kDramBaseAddress = static_cast<Address>(0x80000000u);
-inline constexpr Address kDramSize = static_cast<Address>(64u * 1024u * 1024u);
-inline constexpr Address kDramMask = static_cast<Address>(0x03ffffffu);
-inline constexpr unsigned kPageShift = 12;
-inline constexpr Address kPageMask = static_cast<Address>(0x00000fffu);
-inline constexpr uint32_t kTlbSize = 4;
-inline constexpr size_t kLocalCoreMemorySize = (32u * 1024u);
-}  // namespace simrv::memory
-
 namespace simrv::compiler {
 template <typename T>
-constexpr bool likely(T value) {
+constexpr auto likely(T value) -> bool {
 #if defined(__GNUC__) || defined(__clang__)
     return __builtin_expect(static_cast<bool>(value), true);
 #else
@@ -162,7 +78,7 @@ constexpr bool likely(T value) {
 }
 
 template <typename T>
-constexpr bool unlikely(T value) {
+constexpr auto unlikely(T value) -> bool {
 #if defined(__GNUC__) || defined(__clang__)
     return __builtin_expect(static_cast<bool>(value), false);
 #else
@@ -172,7 +88,7 @@ constexpr bool unlikely(T value) {
 }  // namespace simrv::compiler
 
 enum class TrapFlag : TrapCause {
-    Interrupt = static_cast<TrapCause>(1u << 31),
+    Interrupt = static_cast<TrapCause>(Word{1} << (simrv::xlen::kXLenBits - 1u)),
 };
 
 enum class ExceptionCode : TrapCause {
@@ -193,12 +109,7 @@ enum class ExceptionCode : TrapCause {
     StorePageFault = 0xf,
 };
 
-enum class PrivMode : PrivilegeLevel {
-    U = 0,
-    S = 1,
-    H = 2,
-    M = 3,
-};
+
 
 enum class MstatusBit : CSRValue {
     Uie = (1u << 0),
@@ -217,6 +128,9 @@ enum class MstatusBit : CSRValue {
     Mprv = (1u << 17),
     Sum = (1u << 18),
     Mxr = (1u << 19),
+    Tvm = (1u << 20),
+    Tw = (1u << 21),
+    Tsr = (1u << 22),
 };
 
 enum class MipBit : CSRValue {
@@ -234,16 +148,11 @@ enum class MipBit : CSRValue {
     Meip = (1u << 11),
 };
 
-enum class PrivilegeMode : PrivilegeLevel {
-    User = static_cast<PrivilegeLevel>(PrivMode::U),
-    Supervisor = static_cast<PrivilegeLevel>(PrivMode::S),
-    Hypervisor = static_cast<PrivilegeLevel>(PrivMode::H),
-    Machine = static_cast<PrivilegeLevel>(PrivMode::M),
-};
+
 
 template <typename EnumType>
-constexpr auto enum_mask(EnumType bit) -> std::underlying_type_t<EnumType> {
-    return static_cast<std::underlying_type_t<EnumType>>(bit);
+constexpr auto enum_mask(EnumType bit) {
+    return std::to_underlying(bit);
 }
 
 template <typename EnumType>
@@ -252,9 +161,19 @@ constexpr bool has_enum_mask(std::underlying_type_t<EnumType> value, EnumType bi
 }
 
 constexpr TrapCause kInterruptCauseBit = enum_mask(TrapFlag::Interrupt);
-constexpr PrivilegeLevel kPrivUser = static_cast<PrivilegeLevel>(PrivilegeMode::User);
-constexpr PrivilegeLevel kPrivSupervisor = static_cast<PrivilegeLevel>(PrivilegeMode::Supervisor);
-constexpr PrivilegeLevel kPrivMachine = static_cast<PrivilegeLevel>(PrivilegeMode::Machine);
+constexpr TrapCause kExceptionCodeMask = static_cast<TrapCause>(kInterruptCauseBit - 1u);
+
+constexpr auto trap_exception_code(TrapCause cause) -> TrapCause {
+    return cause & kExceptionCodeMask;
+}
+
+constexpr auto trap_is_interrupt(TrapCause cause) -> bool {
+    return (cause & kInterruptCauseBit) != 0u;
+}
+
+constexpr PrivilegeLevel kPrivUser = PrivilegeLevel::User;
+constexpr PrivilegeLevel kPrivSupervisor = PrivilegeLevel::Supervisor;
+constexpr PrivilegeLevel kPrivMachine = PrivilegeLevel::Machine;
 
 constexpr CSRValue kMstatusMask =
     (enum_mask(MstatusBit::Uie) | enum_mask(MstatusBit::Sie) | enum_mask(MstatusBit::Mie) |
@@ -266,67 +185,13 @@ constexpr CSRValue kSstatusMask =
      enum_mask(MstatusBit::Spie) | enum_mask(MstatusBit::Spp) | enum_mask(MstatusBit::Fs) |
      enum_mask(MstatusBit::Xs) | enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr));
 constexpr CSRValue kMstatusFsDirty = enum_mask(MstatusBit::Fs);
-constexpr CSRValue kMstatusSd = static_cast<CSRValue>(1u << 31);
-constexpr CSRValue kMstatusSstatusReadMask = static_cast<CSRValue>(0x000de133u);
-constexpr CSRValue kMstatusReadMask = static_cast<CSRValue>(0xffffffffu);
+constexpr CSRValue kMstatusSd = static_cast<CSRValue>(Word{1} << (simrv::xlen::kXLenBits - 1u));
+constexpr CSRValue kMstatusSstatusReadMask = static_cast<CSRValue>(0x000de133u) | kMstatusSd;
+constexpr CSRValue kMstatusReadMask = static_cast<CSRValue>(kXLenMask);
 constexpr CSRValue kFflagsMask = static_cast<CSRValue>(0x1fu);
 constexpr CSRValue kFrmMask = static_cast<CSRValue>(0x7u);
 constexpr CSRValue kFcsrMask = static_cast<CSRValue>(0xffu);
 constexpr unsigned kFrmShift = 5;
-
-struct MstatusFields {
-    Word uie : 1;
-    Word sie : 1;
-    Word hie : 1;
-    Word mie : 1;
-    Word upie : 1;
-    Word spie : 1;
-    Word hpie : 1;
-    Word mpie : 1;
-    Word spp : 1;
-    Word hpp : 2;
-    Word mpp : 2;
-    Word fs : 2;
-    Word xs : 2;
-    Word mprv : 1;
-    Word sum : 1;
-    Word mxr : 1;
-    Word reserved : 12;
-};
-
-union MstatusView {
-    Word rawValue;
-    MstatusFields bits;
-
-    explicit MstatusView(CSRValue raw = 0) : rawValue(static_cast<Word>(raw)) {}
-
-    CSRValue raw() const { return static_cast<CSRValue>(rawValue); }
-};
-
-struct MipFields {
-    Word usip : 1;
-    Word ssip : 1;
-    Word hsip : 1;
-    Word msip : 1;
-    Word utip : 1;
-    Word stip : 1;
-    Word htip : 1;
-    Word mtip : 1;
-    Word ueip : 1;
-    Word seip : 1;
-    Word heip : 1;
-    Word meip : 1;
-    Word reserved : 20;
-};
-
-union MipView {
-    Word rawValue;
-    MipFields bits;
-
-    explicit MipView(CSRValue raw = 0) : rawValue(static_cast<Word>(raw)) {}
-
-    CSRValue raw() const { return static_cast<CSRValue>(rawValue); }
-};
 
 enum class Csr : CSRAddress {
     Ustatus = 0x000,
@@ -402,17 +267,22 @@ constexpr size_t MLEN = sizeof(Address) * 8;
 constexpr size_t FLEN = 64;
 constexpr Instruction RV32_NOP = 0x00000013;
 
-enum class AmoStatus : Instruction {
+enum class AmoStatus : uint8_t {
     Success = 0,
     Failure = 1,
 };
 
-enum class Opcode : Instruction {
+enum class CompressedOpcode : uint8_t {
     C0 = 0x0,
     C1 = 0x1,
     C2 = 0x2,
-    W = 0x3,
+    C3 = 0x3,
+};
+
+enum class Opcode : uint8_t {
+    OpImm32 = 0x1B,
     Op = 0x33,
+    Op32 = 0x3B,
     OpFp = 0x53,
     Amo = 0x2F,
     OpImm = 0x13,
@@ -433,7 +303,7 @@ enum class Opcode : Instruction {
     System = 0x73,
 };
 
-enum class Funct3 : Instruction {
+enum class Funct3 : uint8_t {
     Add = 0x0,
     Sll = 0x1,
     Slt = 0x2,
@@ -481,7 +351,63 @@ enum class Funct3 : Instruction {
     Csrrci = 0x7,
 };
 
-enum class Funct12Priv : Instruction {
+enum class Funct7Fp : Word {
+    FaddS = 0x00,
+    FaddD = 0x01,
+    FsubS = 0x04,
+    FsubD = 0x05,
+    FmulS = 0x08,
+    FmulD = 0x09,
+    FdivS = 0x0c,
+    FdivD = 0x0d,
+    FsqrtS = 0x2c,
+    FsqrtD = 0x2d,
+    FsgnjS = 0x10,
+    FsgnjD = 0x11,
+    FminmaxS = 0x14,
+    FminmaxD = 0x15,
+    FcvtSD = 0x20,
+    FcvtDS = 0x21,
+    FcmpS = 0x50,
+    FcmpD = 0x51,
+    FcvtWS = 0x60,
+    FcvtWD = 0x61,
+    FcvtSW = 0x68,
+    FcvtDW = 0x69,
+    FmvXW = 0x70,
+    FmvXD = 0x71,
+    FmvWX = 0x78,
+    FmvDX = 0x79,
+};
+
+enum class Funct3Fp : Word {
+    Min = 0x0,
+    Max = 0x1,
+    Leq = 0x0,
+    Lt = 0x1,
+    Eq = 0x2,
+    FmvXW = 0x0,
+    Fclass = 0x1,
+};
+
+enum class FflagsBit : uint32_t {
+    Nx = 0x01,
+    Uf = 0x02,
+    Of = 0x04,
+    Dz = 0x08,
+    Nv = 0x10,
+};
+
+enum class RoundingMode : Word {
+    Rne = 0x0,
+    Rtz = 0x1,
+    Rdn = 0x2,
+    Rup = 0x3,
+    Rmm = 0x4,
+    Dyn = 0x7,
+};
+
+enum class Funct12Priv : uint16_t {
     Ecall = 0x000,
     Ebreak = 0x001,
     Uret = 0x002,
@@ -490,11 +416,11 @@ enum class Funct12Priv : Instruction {
     Wfi = 0x105,
 };
 
-enum class Funct7Priv : Instruction {
+enum class Funct7Priv : uint8_t {
     SfenceVma = 0x09,
 };
 
-enum class Funct5Amo : Instruction {
+enum class Funct5Amo : uint8_t {
     Lr = 0x02,
     Sc = 0x03,
     Swap = 0x01,
@@ -508,21 +434,23 @@ enum class Funct5Amo : Instruction {
     Maxu = 0x1c,
 };
 
-constexpr Opcode opcode_of(Instruction ir) { return static_cast<Opcode>(ir & 0x7F); }
+constexpr auto opcode_of(Instruction ir) -> Opcode { return static_cast<Opcode>(ir & 0x7F); }
 
-constexpr Opcode compressed_opcode_of(CompressedInstruction ir) {
-    return static_cast<Opcode>(ir & 0x3);
+constexpr auto compressed_opcode_of(CompressedInstruction ir) -> CompressedOpcode {
+    return static_cast<CompressedOpcode>(ir & 0x3);
 }
 
-constexpr Funct3 funct3_of(Instruction ir) { return static_cast<Funct3>((ir >> 12) & 0x7); }
+constexpr auto funct3_of(Instruction ir) -> Funct3 { return static_cast<Funct3>((ir >> 12) & 0x7); }
 
-constexpr Instruction funct12_of(Instruction ir) { return (ir >> 20) & 0xFFF; }
+constexpr auto funct12_of(Instruction ir) -> Instruction { return (ir >> 20) & 0xFFF; }
 
-constexpr Instruction funct7_of(Instruction ir) { return (ir >> 25) & 0x7F; }
+constexpr auto funct7_of(Instruction ir) -> Instruction { return (ir >> 25) & 0x7F; }
 
-constexpr Funct5Amo funct5_of(Instruction ir) { return static_cast<Funct5Amo>((ir >> 27) & 0x1F); }
+constexpr auto funct5_of(Instruction ir) -> Funct5Amo {
+    return static_cast<Funct5Amo>((ir >> 27) & 0x1F);
+}
 
-enum class IsaExtension : unsigned {
+enum class IsaExtension : uint8_t {
     A = 0,
     C = 2,
     D = 3,
@@ -540,18 +468,18 @@ enum class MisaProfile : uint8_t {
     // Keep the API profile-oriented so RV64 presets can be added without touching call sites.
 };
 
-constexpr CSRValue misa_extension_bit(IsaExtension ext) {
+constexpr auto misa_extension_bit(IsaExtension ext) -> CSRValue {
     return static_cast<CSRValue>(CSRValue{1} << static_cast<unsigned>(ext));
 }
 
-constexpr CSRValue misa_base_bits() {
+constexpr auto misa_base_bits() -> CSRValue {
     return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
            misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::F) |
            misa_extension_bit(IsaExtension::D) | misa_extension_bit(IsaExtension::C) |
            misa_extension_bit(IsaExtension::S) | misa_extension_bit(IsaExtension::U);
 }
 
-constexpr CSRValue misa_profile_bits(MisaProfile profile) {
+constexpr auto misa_profile_bits(MisaProfile profile) -> CSRValue {
     switch (profile) {
         case MisaProfile::I:
             return misa_extension_bit(IsaExtension::I);
@@ -565,7 +493,7 @@ constexpr CSRValue misa_profile_bits(MisaProfile profile) {
     }
 }
 
-constexpr CSRValue misa_mxl_field() {
+constexpr auto misa_mxl_field() -> CSRValue {
     if constexpr (sizeof(CSRValue) == 4) {
         // MXL=01 for RV32 in bits [31:30]
         return static_cast<CSRValue>(1u << 30);
@@ -577,17 +505,17 @@ constexpr CSRValue misa_mxl_field() {
     }
 }
 
-constexpr CSRValue misa_with_mxl(CSRValue misa_extensions) {
+constexpr auto misa_with_mxl(CSRValue misa_extensions) -> CSRValue {
     return misa_extensions | misa_mxl_field();
 }
 
 constexpr CSRValue kMisaDefault = misa_profile_bits(MisaProfile::GC);
 
-constexpr bool misa_has_extension(CSRValue misa, IsaExtension ext) {
+constexpr auto misa_has_extension(CSRValue misa, IsaExtension ext) -> bool {
     return (misa & misa_extension_bit(ext)) != 0;
 }
 
-constexpr IsaExtension required_extension_for_instruction(Instruction ir, bool compressed) {
+constexpr auto required_extension_for_instruction(Instruction ir, bool compressed) -> IsaExtension {
     if (compressed) {
         return IsaExtension::C;
     }
@@ -596,6 +524,7 @@ constexpr IsaExtension required_extension_for_instruction(Instruction ir, bool c
         case Opcode::Amo:
             return IsaExtension::A;
         case Opcode::Op:
+        case Opcode::Op32:
             return (funct7_of(ir) & 0x1u) ? IsaExtension::M : IsaExtension::I;
         case Opcode::LoadFp:
         case Opcode::StoreFp:
@@ -612,11 +541,11 @@ constexpr IsaExtension required_extension_for_instruction(Instruction ir, bool c
     }
 }
 
-constexpr bool instruction_enabled_by_misa(CSRValue misa, Instruction ir, bool compressed) {
+constexpr auto instruction_enabled_by_misa(CSRValue misa, Instruction ir, bool compressed) -> bool {
     return misa_has_extension(misa, required_extension_for_instruction(ir, compressed));
 }
 
-enum OperationId : uint16_t {
+enum OperationId : uint8_t {
     /* RV32I */
     LUI,
     AUIPC,
@@ -631,11 +560,14 @@ enum OperationId : uint16_t {
     LB,
     LH,
     LW,
+    LD,
     LBU,
     LHU,
+    LWU,
     SB,
     SH,
     SW,
+    SD,
     ADDI,
     SLTI,
     SLTIU,
@@ -645,6 +577,10 @@ enum OperationId : uint16_t {
     SLLI,
     SRLI,
     SRAI,
+    ADDIW,
+    SLLIW,
+    SRLIW,
+    SRAIW,
     ADD,
     SUB,
     SLL,
@@ -655,6 +591,11 @@ enum OperationId : uint16_t {
     SRA,
     OR,
     AND,
+    ADDW,
+    SUBW,
+    SLLW,
+    SRLW,
+    SRAW,
     FENCE,
     FENCE_I,
     ECALL,
@@ -680,6 +621,11 @@ enum OperationId : uint16_t {
     DIVU,
     REM,
     REMU,
+    MULW,
+    DIVW,
+    DIVUW,
+    REMW,
+    REMUW,
     /* RV32A */
     LR_W,
     SC_W,
@@ -771,28 +717,3 @@ constexpr OperationId kOpRangeRv32dBegin = FLD;
 constexpr OperationId kOpRangeRv32dEnd = FCVT_D_WU;
 
 constexpr size_t kOperationIdCount = static_cast<size_t>(OperationIdCount);
-
-struct QueueState {
-    Word Ready;
-    Word Notify;
-    Address DescLow;
-    Address DescHigh;
-    Address AvailLow;
-    Address AvailHigh;
-    Address UsedLow;
-    Address UsedHigh;
-    Word last_avail_idx;  //    uint16_t last_avail_idx;
-};
-
-struct BlockRequestHeader {
-    Word type;
-    Word ioprio;
-    Counter sector_num;
-};
-
-struct Descriptor {
-    Counter adr;
-    Word len;
-    uint16_t flags;
-    uint16_t next;
-};

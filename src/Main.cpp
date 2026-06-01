@@ -4,63 +4,72 @@
  *
  * SimCore/RISC-V functional simulator (ArchLab, Science Tokyo (former TokyoTech)).
  */
+#include <termios.h>
+#include <unistd.h>
+
+#include <algorithm>
 #include <cctype>
 #include <charconv>
 #include <chrono>
 #include <csignal>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <expected>
 #include <filesystem>
+#include "simrv/DebugLog.hpp"
+#include <format>
 #include <initializer_list>
-#include <iostream>
+#include <limits>
+#include <print>
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <utility>
 
-#include "BuildInfo.hpp"
-#include "Machine.hpp"
+#include "simrv/Define.hpp"
+#include "simrv/core/Boot.hpp"
+#include "simrv/core/BuildInfo.hpp"
+#include "simrv/core/Machine.hpp"
+#include "simrv/xlen/Types.hpp"
 
-Machine sim_machine; /* simulator machine instance */
-
-bool parse_scaled_u64(std::string_view num, uint64_t& out);
-bool parse_u32_base0(std::string_view num, uint32_t& out);
+static auto parse_scaled_u64(std::string_view num, uint64_t& out) -> bool;
+static auto parse_u32_base0(std::string_view num, uint32_t& out) -> bool;
 
 namespace {
 
-enum class CliAction { Run, ShowHelp, ShowVersion };
+enum class CliAction : uint8_t { Run, ShowHelp, ShowVersion };
 
 struct RuntimeOptions {
     std::string fn_memimg;
-    std::string fn_asm;
     std::string fn_dskimg;
     std::string fn_dvtree;
     std::string fn_traplog;
-    std::string fn_iocon = "img/iocon.bin";
 
     Address start_pc = simrv::boot::kStartPc;
-    Counter fincnt = ~0ull;
+    Counter fincnt = std::numeric_limits<Counter>::max();
     Counter memimg = 0;
     Counter strace = 0;
-    Counter trace_begin = ~0ull;
-    Counter trace_end = ~0ull;
-    Counter enabletimer = 70000000ul;
+    Counter trace_begin = std::numeric_limits<Counter>::max();
+    Counter trace_end = std::numeric_limits<Counter>::max();
+    Counter enabletimer = 70000000UL;
     Address isatest_tohost = 0x80001000;
     MisaProfile misa_profile = MisaProfile::GC;
     bool misa_override = false;
 
     bool appmode = false;
-    bool rtosmode = false;
+    bool tuimode = false;
     bool debugmode = false;
     bool dlog_mode = false;
     bool traplog_mode = false;
-    bool use_uc = false;
     bool use_disk = false;
     bool use_mix = false;
     bool bp_trace = false;
     bool isatest = false;
     bool gen_binfile = false;
     bool trace_enabled = false;
+    bool use_opensbi = false;
 };
 
 struct ParseResult {
@@ -76,7 +85,7 @@ class TerminalModeGuard {
         }
     }
 
-    bool enable_raw_mode() {
+    auto enable_raw_mode() -> bool {
         struct termios tty{};
         if (tcgetattr(0, &tty) != 0) {
             return false;
@@ -104,23 +113,21 @@ class TerminalModeGuard {
 };
 
 [[noreturn]] void option_error(std::string_view message, int code = 1) {
-    std::cerr << "__ Error: " << message << '\n';
+    std::println(stderr, "__ Error: {}", message);
     std::exit(code);
 }
 
-std::expected<std::string_view, std::string> next_argument(std::span<char* const> args,
-                                                           std::size_t& index,
-                                                           std::string_view option_name) {
+auto next_argument(std::span<char* const> args, std::size_t& index, std::string_view option_name)
+    -> std::expected<std::string_view, std::string> {
     if (index + 1 >= args.size()) {
-        return std::unexpected("missing value for " + std::string(option_name));
+        return std::unexpected(std::format("missing value for {}", option_name));
     }
     ++index;
     return std::string_view(args[index]);
 }
 
-std::expected<uint64_t, std::string> parse_scaled_required(std::span<char* const> args,
-                                                           std::size_t& index,
-                                                           std::string_view option_name) {
+auto parse_scaled_required(std::span<char* const> args, std::size_t& index,
+                           std::string_view option_name) -> std::expected<uint64_t, std::string> {
     auto value_text = next_argument(args, index, option_name);
     if (!value_text) {
         return std::unexpected(value_text.error());
@@ -128,14 +135,13 @@ std::expected<uint64_t, std::string> parse_scaled_required(std::span<char* const
 
     uint64_t parsed_value = 0;
     if (!parse_scaled_u64(*value_text, parsed_value)) {
-        return std::unexpected("invalid numeric value for " + std::string(option_name));
+        return std::unexpected(std::format("invalid numeric value for {}", option_name));
     }
     return parsed_value;
 }
 
-std::expected<uint32_t, std::string> parse_u32_required(std::span<char* const> args,
-                                                        std::size_t& index,
-                                                        std::string_view option_name) {
+auto parse_u32_required(std::span<char* const> args, std::size_t& index,
+                        std::string_view option_name) -> std::expected<uint32_t, std::string> {
     auto value_text = next_argument(args, index, option_name);
     if (!value_text) {
         return std::unexpected(value_text.error());
@@ -143,14 +149,13 @@ std::expected<uint32_t, std::string> parse_u32_required(std::span<char* const> a
 
     uint32_t parsed_value = 0;
     if (!parse_u32_base0(*value_text, parsed_value)) {
-        return std::unexpected("invalid address value for " + std::string(option_name));
+        return std::unexpected(std::format("invalid address value for {}", option_name));
     }
     return parsed_value;
 }
 
-std::expected<void, std::string> parse_trace_window(RuntimeOptions& options,
-                                                    std::span<char* const> args,
-                                                    std::size_t& index) {
+auto parse_trace_window(RuntimeOptions& options, std::span<char* const> args, std::size_t& index)
+    -> std::expected<void, std::string> {
     auto begin = parse_scaled_required(args, index, "-t");
     if (!begin) {
         return std::unexpected(begin.error());
@@ -169,141 +174,82 @@ std::expected<void, std::string> parse_trace_window(RuntimeOptions& options,
     return {};
 }
 
-std::string lowercase_copy(std::string_view text) {
-    std::string result(text);
-    for (char& c : result) {
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    }
-    return result;
+inline auto iequals(std::string_view a, std::string_view b) -> bool {
+    return std::ranges::equal(a, b, [](char c1, char c2) {
+        return std::tolower(static_cast<unsigned char>(c1)) ==
+               std::tolower(static_cast<unsigned char>(c2));
+    });
 }
 
-std::expected<MisaProfile, std::string> parse_misa_profile(std::string_view value) {
-    const std::string normalized = lowercase_copy(value);
-    if (normalized == "rv32i") {
+auto parse_misa_profile(std::string_view value) -> std::expected<MisaProfile, std::string> {
+    // 1. Accept XLEN-agnostic profiles without warning
+    if (iequals(value, "i")) {
         return MisaProfile::I;
     }
-    if (normalized == "rv32imac") {
+    if (iequals(value, "imac")) {
         return MisaProfile::IMAC;
     }
-    if (normalized == "rv32gc") {
+    if (iequals(value, "gc")) {
         return MisaProfile::GC;
     }
-    return std::unexpected("unsupported MISA profile '" + std::string(value) +
-                           "' (supported: rv32i, rv32imac, rv32gc)");
+
+    // 2. Accept rv32/rv64 prefixed options and warn if they don't match the current simulator XLEN
+    unsigned int parsed_xlen = 0;
+    MisaProfile profile = MisaProfile::GC;
+    bool valid = false;
+
+    if (iequals(value, "rv32i")) {
+        parsed_xlen = 32;
+        profile = MisaProfile::I;
+        valid = true;
+    } else if (iequals(value, "rv64i")) {
+        parsed_xlen = 64;
+        profile = MisaProfile::I;
+        valid = true;
+    } else if (iequals(value, "rv32imac")) {
+        parsed_xlen = 32;
+        profile = MisaProfile::IMAC;
+        valid = true;
+    } else if (iequals(value, "rv64imac")) {
+        parsed_xlen = 64;
+        profile = MisaProfile::IMAC;
+        valid = true;
+    } else if (iequals(value, "rv32gc")) {
+        parsed_xlen = 32;
+        profile = MisaProfile::GC;
+        valid = true;
+    } else if (iequals(value, "rv64gc")) {
+        parsed_xlen = 64;
+        profile = MisaProfile::GC;
+        valid = true;
+    }
+
+    if (valid) {
+        if (parsed_xlen != simrv::xlen::kXLenBits) {
+            std::println(stderr, "__ Warning: Specified MISA profile '{}' has XLEN={} which differs from simulator architecture (RV{}). Operating under RV{} mode.",
+                         value, parsed_xlen, simrv::xlen::kXLenBits, simrv::xlen::kXLenBits);
+        }
+        return profile;
+    }
+
+    const auto xlen_suffix = simrv::xlen::kIsXLen64 ? "64" : "32";
+    auto supported = std::format("i, imac, gc, rv{}i, rv{}imac, rv{}gc", xlen_suffix, xlen_suffix, xlen_suffix);
+    return std::unexpected(
+        std::format("unsupported MISA profile '{}' (supported: {})", value, supported));
 }
 
-MisaProfile effective_misa_profile(const RuntimeOptions& options) {
+auto effective_misa_profile(const RuntimeOptions& options) -> MisaProfile {
     if (options.misa_override) {
         return options.misa_profile;
-    }
-    if (options.rtosmode) {
-        return MisaProfile::I;
     }
     return MisaProfile::GC;
 }
 
-std::string shell_quote(std::string_view arg) {
-    std::string quoted = "'";
-    for (char c : arg) {
-        if (c == '\'') {
-            quoted += "'\\''";
-        } else {
-            quoted += c;
-        }
-    }
-    quoted += "'";
-    return quoted;
-}
-
-bool shell_command_success(const std::string& command) { return std::system(command.c_str()) == 0; }
-
-bool command_exists(std::string_view command) {
-    return shell_command_success("command -v " + shell_quote(command) + " >/dev/null 2>&1");
-}
-
-std::string resolve_tool(const char* env_name, std::initializer_list<std::string_view> candidates,
-                         std::string_view display_name) {
-    if (const char* env_value = std::getenv(env_name); env_value != nullptr && *env_value != '\0') {
-        return std::string(env_value);
-    }
-    for (const auto candidate : candidates) {
-        if (command_exists(candidate)) {
-            return std::string(candidate);
-        }
-    }
-    option_error(std::string("cannot find ") + std::string(display_name) +
-                 "; set environment variable " + env_name);
-}
-
-std::pair<std::string, std::string> misa_toolchain_flags(MisaProfile profile) {
-    switch (profile) {
-        case MisaProfile::I:
-            return {"rv32i", "ilp32"};
-        case MisaProfile::IMAC:
-            return {"rv32imac", "ilp32"};
-        case MisaProfile::GC:
-            return {"rv32gc", "ilp32d"};
-        default:
-            return {"rv32gc", "ilp32d"};
-    }
-}
-
-std::expected<std::string, std::string> assemble_to_binary(const RuntimeOptions& options) {
-    namespace fs = std::filesystem;
-
-    if (options.fn_asm.empty()) {
-        return std::unexpected("-A/--asm requires an assembly source path");
-    }
-
-    std::error_code ec;
-    const fs::path source_path = fs::path(options.fn_asm);
-    if (!fs::exists(source_path, ec)) {
-        return std::unexpected("assembly source not found: " + options.fn_asm);
-    }
-
-    const MisaProfile profile = effective_misa_profile(options);
-    const auto [march, mabi] = misa_toolchain_flags(profile);
-
-    const std::string cc = resolve_tool(
-        "RISCV_CC", {"riscv64-unknown-elf-gcc", "riscv32-unknown-elf-gcc"}, "RISC-V C compiler");
-    const std::string objcopy = resolve_tool(
-        "RISCV_OBJCOPY", {"riscv64-unknown-elf-objcopy", "riscv32-unknown-elf-objcopy", "objcopy"},
-        "RISC-V objcopy");
-
-    const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
-    const fs::path base = fs::temp_directory_path(ec) /
-                          ("simrv-asm-" + std::to_string(static_cast<long long>(::getpid())) + "-" +
-                           std::to_string(nonce));
-    if (ec) {
-        return std::unexpected("failed to resolve temporary directory");
-    }
-
-    const fs::path elf_path = base.string() + ".elf";
-    const fs::path bin_path = base.string() + ".bin";
-
-    const std::string compile_cmd =
-        shell_quote(cc) + " -x assembler-with-cpp" + " -march=" + march + " -mabi=" + mabi +
-        " -nostdlib -nostartfiles -Wl,-N -Wl,--build-id=none -Ttext=0" + " -o " +
-        shell_quote(elf_path.string()) + " " + shell_quote(source_path.string());
-    if (!shell_command_success(compile_cmd)) {
-        return std::unexpected("failed to assemble source: " + options.fn_asm);
-    }
-
-    const std::string objcopy_cmd = shell_quote(objcopy) + " -O binary " +
-                                    shell_quote(elf_path.string()) + " " +
-                                    shell_quote(bin_path.string());
-    if (!shell_command_success(objcopy_cmd)) {
-        return std::unexpected("failed to objcopy assembled ELF to binary image");
-    }
-
-    return bin_path.string();
-}
-
-std::expected<ParseResult, std::string> parse_command_line(std::span<char* const> args) {
+auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResult, std::string> {
     ParseResult result{};
 
     for (std::size_t i = 1; i < args.size(); ++i) {
-        std::string_view arg = args[i];
+        std::string_view const arg = args[i];
         if (arg == "-h" || arg == "--help") {
             result.action = CliAction::ShowHelp;
             return result;
@@ -321,14 +267,6 @@ std::expected<ParseResult, std::string> parse_command_line(std::span<char* const
             result.options.fn_memimg = std::string(*value);
             continue;
         }
-        if (arg == "-A" || arg == "--asm") {
-            auto value = next_argument(args, i, "-A/--asm");
-            if (!value) {
-                return std::unexpected(value.error());
-            }
-            result.options.fn_asm = std::string(*value);
-            continue;
-        }
         if (arg == "-d") {
             auto value = next_argument(args, i, "-d");
             if (!value) {
@@ -344,14 +282,6 @@ std::expected<ParseResult, std::string> parse_command_line(std::span<char* const
                 return std::unexpected(value.error());
             }
             result.options.fn_dvtree = std::string(*value);
-            continue;
-        }
-        if (arg == "-u") {
-            auto value = next_argument(args, i, "-u");
-            if (!value) {
-                return std::unexpected(value.error());
-            }
-            result.options.fn_iocon = std::string(*value);
             continue;
         }
 
@@ -416,6 +346,11 @@ std::expected<ParseResult, std::string> parse_command_line(std::span<char* const
             continue;
         }
 
+        if (arg == "-B" || arg == "--opensbi") {
+            result.options.use_opensbi = true;
+            continue;
+        }
+
         if (arg == "-w") {
             result.options.bp_trace = true;
             continue;
@@ -430,10 +365,6 @@ std::expected<ParseResult, std::string> parse_command_line(std::span<char* const
         }
         if (arg == "-g") {
             result.options.debugmode = true;
-            continue;
-        }
-        if (arg == "-s") {
-            result.options.use_uc = true;
             continue;
         }
         if (arg == "-p") {
@@ -458,42 +389,27 @@ std::expected<ParseResult, std::string> parse_command_line(std::span<char* const
             result.options.appmode = true;
             continue;
         }
-        if (arg == "-r") {
-            result.options.start_pc = 0;
-            result.options.enabletimer = 0;
-            result.options.rtosmode = true;
+        if (arg == "--tui") {
+            result.options.tuimode = true;
             continue;
         }
 
-        return std::unexpected("unknown option : " + std::string(arg));
+        return std::unexpected(std::format("unknown option : {}", arg));
     }
 
-    if (!result.options.fn_memimg.empty() && !result.options.fn_asm.empty()) {
-        return std::unexpected("choose either -m <FILE> or -A/--asm <FILE>, not both");
-    }
-    if (result.options.fn_memimg.empty() && result.options.fn_asm.empty()) {
-        return std::unexpected("either -m <FILE> or -A/--asm <FILE> is required");
+    if (result.options.fn_memimg.empty()) {
+        return std::unexpected("-m <FILE> is required to load a memory image");
     }
 
     return result;
 }
 
-std::expected<void, std::string> apply_runtime_options(Machine* machine,
-                                                       const RuntimeOptions& options) {
-    std::string memimg_path = options.fn_memimg;
-    if (!options.fn_asm.empty()) {
-        auto assembled = assemble_to_binary(options);
-        if (!assembled) {
-            return std::unexpected(assembled.error());
-        }
-        memimg_path = *assembled;
-    }
-
-    machine->s_fn_memimg = memimg_path;
+auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& options)
+    -> std::expected<void, std::string> {
+    machine->s_fn_memimg = options.fn_memimg;
     machine->s_fn_dskimg = options.fn_dskimg;
     machine->s_fn_dvtree = options.fn_dvtree;
     machine->s_fn_traplog = options.fn_traplog;
-    machine->s_fn_iocon = options.fn_iocon;
 
     machine->s_start_pc = options.start_pc;
     machine->s_fincnt = options.fincnt;
@@ -507,107 +423,96 @@ std::expected<void, std::string> apply_runtime_options(Machine* machine,
     machine->s_misa_override = options.misa_override;
 
     machine->s_appmode = options.appmode;
-    machine->s_rtosmode = options.rtosmode;
+    machine->s_tuimode = options.tuimode;
     machine->s_debugmode = options.debugmode;
     machine->s_dlog_mode = options.dlog_mode;
     machine->s_traplog_mode = options.traplog_mode;
-    machine->s_use_uc = options.use_uc;
     machine->s_use_disk = options.use_disk;
     machine->s_use_mix = options.use_mix;
     machine->s_bp_trace = options.bp_trace;
     machine->s_isatest = options.isatest;
     machine->s_gen_binfile = options.gen_binfile;
 
-    machine->s_fp_trace.close();
-    if (options.trace_enabled) {
-        machine->s_fp_trace.clear();
-        machine->s_fp_trace.open("trace.txt");
-        if (!machine->s_fp_trace.is_open()) {
-            return std::unexpected("cannot open trace");
-        }
-    }
+    machine->tracer.init_trace(options.trace_enabled);
+    machine->tracer.init_dlog(options.dlog_mode);
 
-    machine->s_fp_traplog.close();
     machine->cpu.trap_log_stream = nullptr;
     if (options.traplog_mode) {
-        machine->s_fp_traplog.clear();
-        machine->s_fp_traplog.open(options.fn_traplog, std::ios::out | std::ios::trunc);
-        if (!machine->s_fp_traplog.is_open()) {
+        machine->tracer.init_trap_log(options.traplog_mode, options.fn_traplog);
+        if (!machine->tracer.fp_traplog.is_open()) {
             return std::unexpected("cannot open trap/SBI log file: " + options.fn_traplog);
         }
-        machine->cpu.trap_log_stream = &machine->s_fp_traplog;
+        machine->cpu.trap_log_stream = &machine->tracer.fp_traplog;
     }
+
+    machine->cpu.use_opensbi = options.use_opensbi;
 
     return {};
 }
 
-void set_start_time(Machine& machine) { machine.s_start_time = std::chrono::steady_clock::now(); }
+void set_start_time(simrv::core::Machine& machine) {
+    machine.s_start_time = std::chrono::steady_clock::now();
+}
 
 }  // namespace
 
-[[noreturn]] void usage(const char* program_name, int exit_code = 0) {
-    std::cout << "Usage: " << program_name << " [options]\n\n"
-              << "Required:\n"
-              << "  -m <FILE>        Memory image file\n"
-              << "  -A, --asm <FILE> Assemble source file and run generated image\n\n"
-              << "Images and Devices:\n"
-              << "  -d <FILE>        Disk image file (enables disk mode)\n"
-              << "  -c <FILE>        Device-tree binary file\n"
-              << "  -u <FILE>        Micro-controller program image\n\n"
-              << "Execution Control:\n"
-              << "  -e <N>           Stop after N instructions\n"
-              << "  -l <N>           Enable timer after N cycles\n"
-              << "  -a               App mode (start_pc=0)\n"
-              << "  -r               RTOS mode (start_pc=0, timer enabled at cycle 0)\n"
-              << "  --misa <PROFILE> Select MISA profile: rv32i | rv32imac | rv32gc\n\n"
-              << "Tracing and Debug:\n"
-              << "  -t <BEGIN> <END> Write trace.txt for instruction range [BEGIN, END]\n"
-              << "  -q <N>           Generate tracepc.txt every 1000 instructions after N\n"
-              << "  -w               Generate bpred.txt branch trace\n"
-              << "  -i <N>           Dump init artifacts at cycle N\n"
-              << "  -g               Enable debug logging\n"
-              << "  -p               Enable disk/console transaction log\n"
-              << "  -P <FILE>        Write trap/SBI diagnostics to file\n"
-              << "  -x               Write instruction mix report\n"
-              << "  -b               Generate inits.bin and exit\n\n"
-              << "ISA Test Mode:\n"
-              << "  -T               Enable riscv-isa-tests tohost monitoring\n"
-              << "  -H <ADDR>        Set tohost address for -T (default: 0x80001000)\n\n"
-              << "Misc:\n"
-              << "  -s               Enable micro-controller I/O path\n"
-              << "  -h, --help       Show this help and exit\n"
-              << "  --version        Show version and exit\n\n"
-              << "Numeric suffixes: k/K (1e3), m/M (1e6), g/G (1e9)\n\n"
-              << "Examples:\n"
-              << "  " << program_name << " -m img/bbl.bin -d img/root.bin\n"
-              << "  " << program_name << " -m img/bbl.bin -d img/root.bin -e 40m\n"
-              << "  " << program_name << " -m img/hello.bin -a\n"
-              << "  " << program_name << " -A prog.S --misa rv32imac\n";
+[[noreturn]] static void usage(const char* program_name, int exit_code = 0) {
+    const auto xlen_suffix = simrv::xlen::kIsXLen64 ? "64" : "32";
+    std::print(
+        "Usage: {} [options]\n\n"
+        "Required:\n"
+        "  -m <FILE>        Memory image file\n\n"
+        "Images and Devices:\n"
+        "  -d <FILE>        Disk image file (enables disk mode)\n"
+        "  -c <FILE>        Device-tree binary file\n\n"
+        "Execution Control:\n"
+        "  -e <N>           Stop after N instructions\n"
+        "  -l <N>           Enable timer after N cycles\n"
+        "  -B, --opensbi    Bypass legacy C++ SBI and boot native OpenSBI\n"
+        "  -a               Binary mode (start_pc=0, no OS)\n"
+        "  --tui            Enable interactive TUI monitor mode\n"
+        "  --misa <PROFILE> Select MISA profile: rv{}i | rv{}imac | rv{}gc\n\n"
+        "Tracing and Debug:\n"
+        "  -t <BEGIN> <END> Write trace.txt for instruction range [BEGIN, END]\n"
+        "  -q <N>           Generate tracepc.txt every 1000 instructions after N\n"
+        "  -w               Generate bpred.txt branch trace\n"
+        "  -i <N>           Dump init artifacts at cycle N\n"
+        "  -g               Enable debug logging\n"
+        "  -p               Enable disk/console transaction log\n"
+        "  -P <FILE>        Write trap/SBI diagnostics to file\n"
+        "  -x               Write instruction mix report\n"
+        "  -b               Generate inits.bin and exit\n\n"
+        "ISA Test Mode:\n"
+        "  -T               Enable riscv-isa-tests tohost monitoring\n"
+        "  -H <ADDR>        Set tohost address for -T (default: 0x80001000)\n\n"
+        "Misc:\n"
+        "  -h, --help       Show this help and exit\n"
+        "  --version        Show version and exit\n\n"
+        "Numeric suffixes: k/K (1e3), m/M (1e6), g/G (1e9)\n\n"
+        "Examples:\n"
+        "  {} -m img/bbl.bin -d img/root.bin\n"
+        "  {} -m img/bbl.bin -d img/root.bin -e 40m\n"
+        "  {} -m img/hello.bin -a\n",
+        program_name, xlen_suffix, xlen_suffix, xlen_suffix, program_name, program_name, program_name);
     std::exit(exit_code);
 }
 
-bool parse_scaled_u64(std::string_view num, uint64_t& out) {
+auto parse_scaled_u64(std::string_view num, uint64_t& out) -> bool {
+    if (num.empty()) {
+        return false;
+    }
+
     uint64_t multiplier = 1;
-    if (!num.empty()) {
-        switch (num.back()) {
-            case 'k':
-            case 'K':
-                multiplier = 1000ull;
-                num.remove_suffix(1);
-                break;
-            case 'm':
-            case 'M':
-                multiplier = 1000000ull;
-                num.remove_suffix(1);
-                break;
-            case 'g':
-            case 'G':
-                multiplier = 1000000000ull;
-                num.remove_suffix(1);
-                break;
-            default:
-                break;
-        }
+    const char last = static_cast<char>(std::tolower(static_cast<unsigned char>(num.back())));
+    if (last == 'k') {
+        multiplier = 1000ULL;
+        num.remove_suffix(1);
+    } else if (last == 'm') {
+        multiplier = 1000000ULL;
+        num.remove_suffix(1);
+    } else if (last == 'g') {
+        multiplier = 1000000000ULL;
+        num.remove_suffix(1);
     }
 
     if (num.empty()) {
@@ -625,19 +530,19 @@ bool parse_scaled_u64(std::string_view num, uint64_t& out) {
     return true;
 }
 
-bool parse_u32_base0(std::string_view num, uint32_t& out) {
-    uint64_t value = 0;
-    int base = 10;
-    if (num.size() > 2 && num[0] == '0' && (num[1] == 'x' || num[1] == 'X')) {
-        num.remove_prefix(2);
-        base = 16;
-    } else if (num.size() > 1 && num[0] == '0') {
-        num.remove_prefix(1);
-        base = 8;
-    }
-
+auto parse_u32_base0(std::string_view num, uint32_t& out) -> bool {
     if (num.empty()) {
         return false;
+    }
+
+    uint64_t value = 0;
+    int base = 10;
+    if (num.starts_with("0x") || num.starts_with("0X")) {
+        num.remove_prefix(2);
+        base = 16;
+    } else if (num.starts_with('0') && num.size() > 1) {
+        num.remove_prefix(1);
+        base = 8;
     }
 
     const char* begin = num.data();
@@ -650,10 +555,11 @@ bool parse_u32_base0(std::string_view num, uint32_t& out) {
     return true;
 }
 
-void set_options(Machine* m, int argc, char* argv[]) {
-    if (argc == 1) usage(argv[0], 1);
+void set_options(simrv::core::Machine* m, int argc, char* const* argv) {
+    if (argc == 1) { usage(argv[0], 1);
+}
 
-    std::span<char* const> args(argv, static_cast<std::size_t>(argc));
+    std::span<char* const> const args(argv, static_cast<std::size_t>(argc));
     auto parsed = parse_command_line(args);
     if (!parsed) {
         option_error(parsed.error());
@@ -663,7 +569,7 @@ void set_options(Machine* m, int argc, char* argv[]) {
         case CliAction::ShowHelp:
             usage(args[0], 0);
         case CliAction::ShowVersion:
-            std::cout << simrv::buildinfo::kVersion << '\n';
+            std::println("{}", simrv::buildinfo::kVersion);
             std::exit(0);
         case CliAction::Run:
             break;
@@ -675,28 +581,29 @@ void set_options(Machine* m, int argc, char* argv[]) {
     }
 }
 
-int main(int argc, char* argv[]) {
-    std::cout << "__ " << simrv::buildinfo::kProjectDescription << " v"
-              << simrv::buildinfo::kVersion << " (" << simrv::buildinfo::kGitBranch << "@"
-              << simrv::buildinfo::kGitSha << ")\n"
-              << "__ Please type Control+'q' to quit the simulation\n\n";
+auto main(int argc, char* argv[]) -> int {
+    bool is_tui = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string_view(argv[i]) == "--tui") {
+            is_tui = true;
+            break;
+        }
+    }
 
+    if (!is_tui) {
+        std::println("__ {} v{} ({}@{})\n__ Please type Control+'q' to quit the simulation\n",
+                     simrv::buildinfo::kProjectDescription, simrv::buildinfo::kVersion,
+                     simrv::buildinfo::kGitBranch, simrv::buildinfo::kGitSha);
+    }
+
+    // Write startup entry to MMU debug log
     std::signal(SIGINT, SIG_IGN);  // ignore control+'C'
+
+    simrv::core::Machine sim_machine;
 
     const int init_result = sim_machine.initialize(argc, argv);
     if (init_result != 0) {
         return init_result;
-    }
-
-    if (sim_machine.s_use_uc && sim_machine.micro_controller != nullptr) {
-        // Initialize micro-controller path when requested.
-        sim_machine.micro_controller->init(sim_machine.s_fn_iocon);
-        sim_machine.micro_controller->mmem = sim_machine.mmem;
-        sim_machine.micro_controller->cons_queue = sim_machine.console->Queue;
-        sim_machine.micro_controller->disk_queue = sim_machine.disk->Queue;
-        sim_machine.micro_controller->disk = sim_machine.disk->sector;
-        sim_machine.micro_controller->cons_fifo = sim_machine.console->cons_fifo;
-        sim_machine.micro_controller->fifo_en = sim_machine.console->fifo_en;
     }
 
     set_start_time(sim_machine);
@@ -704,10 +611,15 @@ int main(int argc, char* argv[]) {
     // Initialize terminal in raw mode for simulator I/O.
     TerminalModeGuard terminal_mode;
     if (!terminal_mode.enable_raw_mode()) {
-        std::cerr << "__ Warning: terminal raw mode setup failed; continuing in current mode\n";
+        if (!is_tui) {
+            std::println(stderr,
+                         "__ Warning: terminal raw mode setup failed; continuing in current mode");
+        }
     }
     sim_machine.run();
 
-    sim_machine.print_summary();
+    if (!sim_machine.s_tuimode) {
+        sim_machine.tracer.print_summary();
+    }
     return 0;
 }

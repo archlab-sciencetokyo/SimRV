@@ -17,7 +17,7 @@
 
     memory@80000000 {
         device_type = "memory";
-        reg = <0x80000000 0x04000000>;
+        reg = <0x80000000 0x10000000>;
     };
 
     cpus {
@@ -35,6 +35,7 @@
 
             cpu0_intc: interrupt-controller {
                 #interrupt-cells = <1>;
+                #address-cells = <0>;
                 compatible = "riscv,cpu-intc";
                 interrupt-controller;
             };
@@ -50,15 +51,15 @@
         plic: interrupt-controller@50000000 {
             #address-cells = <0>;
             #interrupt-cells = <1>;
-            compatible = "riscv,plic0";
+            compatible = "sifive,plic-1.0.0", "riscv,plic0";
             interrupt-controller;
             reg = <0x50000000 0x00400000>;
-            interrupts-extended = <&cpu0_intc 11>;
-            riscv,ndev = <2>;
+            interrupts-extended = <&cpu0_intc 11 &cpu0_intc 9>;
+            riscv,ndev = <31>;
         };
 
         clint: timer@60000000 {
-            compatible = "riscv,clint0";
+            compatible = "sifive,clint0", "riscv,clint0";
             reg = <0x60000000 0x000c0000>;
             interrupts-extended = <&cpu0_intc 3 &cpu0_intc 7>;
             clock-frequency = <10000000>;

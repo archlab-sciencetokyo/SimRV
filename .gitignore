@@ -46,6 +46,7 @@ perf*.data*
 .isa_tmp/
 isa_logs/
 regression_logs/
+Testing/
 
 # Generated documentation
 docs/api/

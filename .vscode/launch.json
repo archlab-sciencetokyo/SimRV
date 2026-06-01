@@ -1,0 +1,45 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "SimRV Debug (Linux)",
+            "type": "lldb-dap",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/ninja-clang-debug/SimRV",
+            "args": [
+                "-m",
+                "${workspaceFolder}/linux-images/vmlinux",
+                "-d",
+                "${workspaceFolder}/linux-images/root.bin",
+                "-c",
+                "${workspaceFolder}/linux-images/devicetree.dtb",
+                "-e",
+                "200000000"
+            ],
+            "cwd": "${workspaceFolder}",
+            "stopOnEntry": false,
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "sourceLanguages": [
+                "cpp"
+            ],
+            "preLaunchTask": "build-debug"
+        },
+        {
+            "name": "SimRV Debug (Simple)",
+            "type": "lldb-dap",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/ninja-clang-debug/SimRV",
+            "args": [
+                "--help"
+            ],
+            "cwd": "${workspaceFolder}",
+            "stopOnEntry": false,
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "preLaunchTask": "build-debug"
+        }
+    ]
+}
