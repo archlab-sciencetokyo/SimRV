@@ -149,7 +149,7 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
     memory_.system_bus().add_node(power.get());
     memory_.system_bus().add_node(&cpu.plic_mmio);
     memory_.system_bus().add_node(&cpu.clint_mmio);
-    const bool linux_boot = !s_appmode;
+    const bool linux_boot = !s_appmode && !s_isatest;
     const Address dtb_offset =
         linux_boot
             ? static_cast<Address>(simrv::memory::kDramSize - static_cast<Address>(0x00100000U))

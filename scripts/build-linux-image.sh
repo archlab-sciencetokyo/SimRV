@@ -165,12 +165,7 @@ cat > "$INITRAMFS_DIR/init" <<'EOF'
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -t devtmpfs devtmpfs /dev || true
-exec >/dev/ttyS0 2>&1
-echo "=== SIMRV INIT DEBUG ==="
-echo "Devices in /dev:"
-ls -la /dev
-echo "Checking sh..."
-/bin/sh -c "echo 'sh works!'"
+
 exec </dev/ttyS0 >/dev/ttyS0 2>&1
 clear
 echo "=================================================="
@@ -183,7 +178,11 @@ else
 fi
 echo "=================================================="
 while true; do
-    /bin/sh
+    if command -v cttyhack >/dev/null 2>&1; then
+        setsid cttyhack /bin/sh
+    else
+        /bin/sh
+    fi
     echo "Shell exited, respawning..."
     sleep 2
 done

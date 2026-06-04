@@ -245,6 +245,25 @@ void Tui::shutdown() {
 }
 
 void Tui::handle_char_write(char ch) {
+    if (ansi_state_ == AnsiState::Esc) {
+        if (ch == '[') {
+            ansi_state_ = AnsiState::Csi;
+        } else {
+            ansi_state_ = AnsiState::Normal;
+        }
+        return;
+    }
+    if (ansi_state_ == AnsiState::Csi) {
+        if (ch >= 0x40 && ch <= 0x7E) {
+            ansi_state_ = AnsiState::Normal;
+        }
+        return;
+    }
+    if (ch == '\x1b') {
+        ansi_state_ = AnsiState::Esc;
+        return;
+    }
+
     if (ch == '\n') {
         raw_lines_.push_back(raw_current_line_);
         if (raw_lines_.size() > 500) {

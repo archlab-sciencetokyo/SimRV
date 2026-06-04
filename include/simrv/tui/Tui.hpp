@@ -74,6 +74,13 @@ class Tui {
     void handle_mouse(int x, int y, int b);
 
    private:
+    enum class AnsiState {
+        Normal,
+        Esc,
+        Csi
+    };
+    AnsiState ansi_state_ = AnsiState::Normal;
+
     simrv::core::Machine& machine_;
     
     std::unique_ptr<RegisterPane> reg_pane_;

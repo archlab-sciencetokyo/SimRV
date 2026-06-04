@@ -196,14 +196,17 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                 resp.data = dlab_enabled ? uart_dlm_ : uart_ier_;
                 break;
             case simrv::mmio::kUartRegIirFcr:
-                if (uart_rx_ready_) {
-                    resp.data = static_cast<Word>(0x04U);
-                } else if (tx_irq_pending_ && ((uart_ier_ & static_cast<Word>(0x2U)) != 0)) {
-                    resp.data = static_cast<Word>(0x02U);
-                    tx_irq_pending_ = false;
-                    update_uart_irq(machine_, uart_rx_ready_, uart_ier_, tx_irq_pending_);
-                } else {
-                    resp.data = static_cast<Word>(0x01U);
+                {
+                    const bool rx_ready = machine_.s_tuimode ? !rx_fifo_.empty() : uart_rx_ready_;
+                    if (rx_ready) {
+                        resp.data = static_cast<Word>(0x04U);
+                    } else if (tx_irq_pending_ && ((uart_ier_ & static_cast<Word>(0x2U)) != 0)) {
+                        resp.data = static_cast<Word>(0x02U);
+                        tx_irq_pending_ = false;
+                        update_uart_irq(machine_, rx_ready, uart_ier_, tx_irq_pending_);
+                    } else {
+                        resp.data = static_cast<Word>(0x01U);
+                    }
                 }
                 break;
             case simrv::mmio::kUartRegLcr:
@@ -256,7 +259,8 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                         (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
                     }
                     tx_irq_pending_ = true;
-                    update_uart_irq(machine_, uart_rx_ready_, uart_ier_, tx_irq_pending_);
+                    const bool rx_ready = machine_.s_tuimode ? !rx_fifo_.empty() : uart_rx_ready_;
+                    update_uart_irq(machine_, rx_ready, uart_ier_, tx_irq_pending_);
                 }
                 break;
             case simrv::mmio::kUartRegIerDlm:
@@ -267,7 +271,8 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                     if ((uart_ier_ & static_cast<Word>(0x2U)) != 0) {
                         tx_irq_pending_ = true;
                     }
-                    update_uart_irq(machine_, uart_rx_ready_, uart_ier_, tx_irq_pending_);
+                    const bool rx_ready = machine_.s_tuimode ? !rx_fifo_.empty() : uart_rx_ready_;
+                    update_uart_irq(machine_, rx_ready, uart_ier_, tx_irq_pending_);
                 }
                 break;
             case simrv::mmio::kUartRegIirFcr:
