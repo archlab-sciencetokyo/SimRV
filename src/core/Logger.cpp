@@ -7,6 +7,8 @@
 
 #include <iostream>
 #include <print>
+#include <unistd.h>
+#include "simrv/util/FormatUtil.hpp"
 
 namespace simrv::log {
 
@@ -23,7 +25,11 @@ void print_info(const std::string& msg) {
     if (g_tui_callback) {
         g_tui_callback(formatted + "\n");
     } else {
-        std::println(stdout, "{}", formatted);
+        if (simrv::util::is_terminal(STDOUT_FILENO)) {
+            std::println(stdout, "\033[36m{}\033[0m", formatted); // Cyan for Info
+        } else {
+            std::println(stdout, "{}", formatted);
+        }
     }
 }
 
@@ -32,7 +38,11 @@ void print_warn(const std::string& msg) {
     if (g_tui_callback) {
         g_tui_callback("\033[93m" + formatted + "\033[0m\n");
     } else {
-        std::println(stderr, "{}", formatted);
+        if (simrv::util::is_terminal(STDERR_FILENO)) {
+            std::println(stderr, "\033[93m{}\033[0m", formatted); // Yellow/gold for Warn
+        } else {
+            std::println(stderr, "{}", formatted);
+        }
     }
 }
 
@@ -41,7 +51,11 @@ void print_error(const std::string& msg) {
     if (g_tui_callback) {
         g_tui_callback("\033[91m" + formatted + "\033[0m\n");
     } else {
-        std::println(stderr, "{}", formatted);
+        if (simrv::util::is_terminal(STDERR_FILENO)) {
+            std::println(stderr, "\033[1;91m{}\033[0m", formatted); // Bold Red for Error
+        } else {
+            std::println(stderr, "{}", formatted);
+        }
     }
 }
 

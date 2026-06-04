@@ -108,6 +108,21 @@ if [[ ! -d "opensbi-${OPENSBI_VER}" ]]; then
     tar -xf "sources/opensbi-${OPENSBI_VER}.tar.gz"
 fi
 
+# Configure OpenSBI features (disable legacy SBI and semihosting console)
+OPENSBI_DEFCONFIG="$BUILD_DIR/opensbi-${OPENSBI_VER}/platform/generic/configs/defconfig"
+if [[ -f "$OPENSBI_DEFCONFIG" ]]; then
+    print_step "Configuring OpenSBI defconfig..."
+    # Disable semihosting console
+    sed -i 's/CONFIG_SERIAL_SEMIHOSTING=y/# CONFIG_SERIAL_SEMIHOSTING is not set/' "$OPENSBI_DEFCONFIG"
+    # Disable legacy SBI extensions
+    if grep -q "CONFIG_SBI_ECALL_LEGACY=y" "$OPENSBI_DEFCONFIG"; then
+        sed -i 's/CONFIG_SBI_ECALL_LEGACY=y/# CONFIG_SBI_ECALL_LEGACY is not set/' "$OPENSBI_DEFCONFIG"
+    elif ! grep -q "CONFIG_SBI_ECALL_LEGACY" "$OPENSBI_DEFCONFIG"; then
+        echo "# CONFIG_SBI_ECALL_LEGACY is not set" >> "$OPENSBI_DEFCONFIG"
+    fi
+fi
+
+
 if [[ ! -d "linux-${LINUX_VER}" ]]; then
     print_step "Extracting Linux..."
     tar -xf "sources/linux-${LINUX_VER}.tar.xz"
@@ -150,6 +165,13 @@ cat > "$INITRAMFS_DIR/init" <<'EOF'
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -t devtmpfs devtmpfs /dev || true
+exec >/dev/ttyS0 2>&1
+echo "=== SIMRV INIT DEBUG ==="
+echo "Devices in /dev:"
+ls -la /dev
+echo "Checking sh..."
+/bin/sh -c "echo 'sh works!'"
+exec </dev/ttyS0 >/dev/ttyS0 2>&1
 clear
 echo "=================================================="
 echo "          Welcome to SimRV Linux Boot             "
@@ -160,7 +182,11 @@ else
     echo "Minimal BusyBox Linux (riscv32)"
 fi
 echo "=================================================="
-exec /bin/sh
+while true; do
+    /bin/sh
+    echo "Shell exited, respawning..."
+    sleep 2
+done
 EOF
 chmod +x "$INITRAMFS_DIR/init"
 
@@ -192,10 +218,8 @@ fi
 make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
 
 # Build kernel (vmlinux)
-if [[ ! -f vmlinux ]]; then
-    print_step "Compiling Linux Kernel v${LINUX_VER}..."
-    make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" -j"$(nproc)" vmlinux
-fi
+print_step "Compiling/linking Linux Kernel v${LINUX_VER}..."
+make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" -j"$(nproc)" vmlinux
 
 # Objcopy to bin format
 "${CROSS_COMPILE}objcopy" -O binary vmlinux "$BUILD_DIR/vmlinux_${ARCH}.bin"
@@ -206,14 +230,10 @@ fi
 OPENSBI_BUILD="$BUILD_DIR/opensbi-${OPENSBI_VER}"
 cd "$OPENSBI_BUILD"
 
+# Remove cached build directory to force complete rebuild
+rm -rf "$OPENSBI_BUILD/build"
+
 print_step "Compiling OpenSBI v${OPENSBI_VER} (FW_PAYLOAD)..."
-make PLATFORM=generic CROSS_COMPILE="$CROSS_COMPILE" \
-     "CC=${CROSS_COMPILE}gcc -march=${M_ARCH} -mabi=${M_ABI}" \
-     PLATFORM_RISCV_XLEN="$XLEN" \
-     FW_PAYLOAD_PATH="$BUILD_DIR/vmlinux_${ARCH}.bin" \
-     FW_TEXT_START=0x80000000 \
-     FW_PAYLOAD_FDT_ADDR=0x83000000 \
-     clean
 
 make PLATFORM=generic CROSS_COMPILE="$CROSS_COMPILE" \
      "CC=${CROSS_COMPILE}gcc -march=${M_ARCH} -mabi=${M_ABI}" \

@@ -4,9 +4,9 @@
 #include <optional>
 #include <exception>
 
-#include "simrv/core/PipelineContext.hpp"
+#include "simrv/pipeline/PipelineContext.hpp"
 
-namespace simrv::core {
+namespace simrv::pipeline {
 
 /**
  * @struct PipelineTask
@@ -74,4 +74,4 @@ struct PipelineTask {
     }
 };
 
-} // namespace simrv::core
+} // namespace simrv::pipeline

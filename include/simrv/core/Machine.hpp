@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <string>
@@ -9,12 +10,18 @@
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Tracer.hpp"
+#include "simrv/debug/GdbStub.hpp"
+#include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/device/Console.hpp"
 #include "simrv/device/Disk.hpp"
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/Virtio.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
+
+namespace simrv::device {
+class PowerMmio;
+}
 
 namespace simrv::core {
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
@@ -44,6 +51,9 @@ class Machine {
     auto initialize(int argc, char* const* argv) -> int;
     /// Execute the main simulation loop until termination criteria are met.
     void run();
+    /// Stop the simulation loop.
+    void stop() { is_running_ = false; }
+
     /// Generate binary image file for FPGA
     void generate_binfile() const;
 
@@ -62,6 +72,12 @@ class Machine {
     bool s_isatest = false;        // Enable riscv-isa-tests tohost handling
     bool s_misa_override = false;  // True when CLI explicitly selected MISA profile
     bool s_gen_binfile = false;    // Generate binary image file for FPGA
+
+    // ========== Debug / Co-Simulation Flags ==========
+    bool     s_gdb_mode      = false;      // Enable GDB RSP stub
+    uint16_t s_gdb_port      = 1234;       // GDB stub TCP port
+    bool     s_lockstep_mode = false;      // Enable Spike lockstep co-simulation
+    std::string s_spike_bin  = "spike";    // Path to Spike binary
 
     // ========== Simulation Control Parameters ==========
     Address s_start_pc = 0;                                  // Initial PC value
@@ -89,6 +105,11 @@ class Machine {
     std::unique_ptr<simrv::device::Console> console;
     std::unique_ptr<simrv::Rtc> rtc;
     std::unique_ptr<simrv::device::Uart> uart;
+    std::unique_ptr<simrv::device::PowerMmio> power;
+
+    // ========== Debug Subsystems (null when disabled) ==========
+    std::unique_ptr<simrv::debug::GdbStub>       gdb_stub;
+    std::unique_ptr<simrv::debug::SpikeLockstep> spike_lockstep;
 
     // ========== Memory and Interconnect ==========
     Byte* mmem{};          // Pointer to main memory buffer

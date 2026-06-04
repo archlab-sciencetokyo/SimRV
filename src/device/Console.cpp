@@ -49,7 +49,8 @@ void Console::process_queue(Word q_idx) {
     }
 }
 
-auto Console::MC_receive_input(simrv::core::Machine& /*machine*/) -> int {
+auto Console::MC_receive_input(simrv::core::Machine& machine) -> int {
+    if (machine.s_tuimode) return 0;
     if (Status == 0) return 0;
 
     // Check if terminal data is available via poll without blocking

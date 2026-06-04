@@ -6,7 +6,7 @@
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/decode/Decoder.hpp"
+#include "simrv/pipeline/Decoder.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/Mmu.hpp"
@@ -184,7 +184,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
         simrv::memory::TlChannelD resp_l{};
         if (machine.memory_.system_bus().get_response(1, resp_l)) ir_l = resp_l.data;
 
-        simrv::decode::Decoder dec_temp(ir_l);
+        simrv::pipeline::Decoder dec_temp(ir_l);
         if (!dec_temp.is_compressed()) {
             const bool translation_enabled =
                 state_.priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp);
@@ -216,17 +216,17 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
         return;
     }
 
-    simrv::decode::Decoder dec_org(ctx.ir_org);
+    simrv::pipeline::Decoder dec_org(ctx.ir_org);
     bool const w_compressed = dec_org.is_compressed();
     Instruction const w_ir_tmp =
-        w_compressed ? simrv::decode::decompressInstruction(ctx.ir_org) : ctx.ir_org;
+        w_compressed ? simrv::pipeline::decompressInstruction(ctx.ir_org) : ctx.ir_org;
 
     bool is_valid = true;
     if (simrv::compiler::unlikely(machine.s_misa_profile != kMisaDefault)) {
         is_valid = instruction_enabled_by_misa(state_.misa, w_ir_tmp, w_compressed);
     }
 
-    if (simrv::compiler::unlikely(simrv::decode::decoder(w_ir_tmp) == ::UNKNOWN)) {
+    if (simrv::compiler::unlikely(simrv::pipeline::decoder(w_ir_tmp) == ::UNKNOWN)) {
         is_valid = false;
     }
 
@@ -251,7 +251,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
     }
 
     ctx.cinsn = w_compressed ? 1U : 0U;
-    e_instmix[simrv::decode::decoder(ctx.ir)]++;
+    e_instmix[simrv::pipeline::decoder(ctx.ir)]++;
 }
 
 }  // namespace simrv::core

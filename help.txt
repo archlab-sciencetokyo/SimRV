@@ -1,0 +1,54 @@
+[INFO] SimCore/RISC-V Functional Simulator v2.0.0-beta.1 (dev@78cab3aa8f03)
+Please type Control+'q' to quit the simulation
+
+
+ SimRV - High-Performance RISC-V Functional Simulator 
+
+Usage: ./build/rv32-release/SimRV [options]
+
+Required:
+  -m <FILE>        Memory image file (required to boot)
+
+Images and Devices:
+  -d <FILE>        Disk image file (enables block storage virtio-disk)
+  -c <FILE>        Device-tree binary file (FDT / DTB configuration)
+
+Execution Control (runs on high-performance simrv::pipeline engine):
+  -e <N>           Stop execution after N instructions (zero-overhead count)
+  -l <N>           Enable timer after N cycles (CLINT ticker threshold)
+  -B, --opensbi    Bypass legacy C++ SBI and boot native OpenSBI kernel payload
+  -a                Binary mode (raw baremetal execution, start_pc=0, no OS / SBI)
+  --tui             Enable interactive TUI split-screen monitor dashboard
+  --misa <PROFILE> Select CPU MISA profile: rv32i | rv32imac | rv32gc
+
+Tracing and Debug (outputs generated inside trace/ subdirectory):
+  -t <BEGIN> <END> Write trace/trace.txt for instruction range [BEGIN, END]
+  -q <N>           Generate periodic trace/tracepc.txt every 1,000 instructions after N
+  -w                Generate trace/bpred.txt branch prediction trace
+  -i <N>           Dump init architectural and TLB state artifacts at cycle N
+  -g                Enable verbose debug logging output
+  -p                Enable interactive disk/console MMIO transaction logging
+  -P <FILE>        Write comprehensive trap/SBI diagnostic logs to file
+  -x                Write instruction mix metrics report to trace/instmix.txt on exit
+  -b                Generate hardware initialization trace/inits.bin and exit
+
+ISA Test Mode:
+  -T                Enable riscv-isa-tests tohost termination monitoring
+  -H <ADDR>        Set custom tohost device MMIO address for -T (default: 0x80001000)
+
+Miscellaneous:
+  -h, --help        Show this colorized dashboard menu and exit
+  --version         Show compiler-injected version details and exit
+
+Debug and Co-Simulation:
+  --gdb             Enable GDB RSP stub (waits for client before running)
+  --gdb-port <PORT> Override GDB stub listen port (default: 1234)
+  --lockstep        Enable Spike lockstep instruction-by-instruction verification
+  --spike-bin <PATH> Path to spike binary for lockstep (default: spike in PATH)
+
+Numeric values accept standard scaled suffixes: k/K (1e3), m/M (1e6), g/G (1e9)
+
+Examples:
+  ./build/rv32-release/SimRV -m img/hello.bin -a
+  ./build/rv32-release/SimRV -m linux-images/rv32/fw_payload.bin -d linux-images/rv32/root.bin -c linux-images/rv32/devicetree.dtb
+  ./build/rv32-release/SimRV -m linux-images/rv32/fw_payload.bin --tui

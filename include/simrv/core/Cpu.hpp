@@ -12,14 +12,14 @@
 #include "simrv/cache/DCache.hpp"
 #include "simrv/cache/ICache.hpp"
 #include "simrv/core/CsrFile.hpp"
-#include "simrv/core/PipelineContext.hpp"
+#include "simrv/pipeline/PipelineContext.hpp"
 #include "simrv/core/RegisterFile.hpp"
 #include "simrv/core/Sbi.hpp"
 #include "simrv/core/StateControl.hpp"
 #include "simrv/core/Tlb.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 
-#include "simrv/core/PipelineTask.hpp"
+#include "simrv/pipeline/PipelineTask.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -91,7 +91,7 @@ class CPU {
     void run_cycle(Machine& machine);
     
     /// Coroutine generator for persistent zero-allocation pipeline
-    PipelineTask run_pipeline_coroutine(Machine& machine);
+    simrv::pipeline::PipelineTask run_pipeline_coroutine(Machine& machine);
 
    public:
     /// Run instruction fetch + decode-normalization stage group.
@@ -164,14 +164,14 @@ class CPU {
     ClintMmio clint_mmio;
     CsrFile csr_file;
     execute::ExecuteUnit execute_unit;
-    PipelineContext pipeline_context;
+    simrv::pipeline::PipelineContext pipeline_context;
     simrv::cache::ICache icache;
     simrv::cache::DCache dcache;
     sbi::Sbi sbi;
     std::ofstream* trap_log_stream = nullptr;
     bool use_opensbi = false;
     Machine* machine_ = nullptr;
-    PipelineTask pipeline_task;
+    simrv::pipeline::PipelineTask pipeline_task;
 
     // ========== Execution Metrics ==========
     uint64_t e_icount{0};                                // Total instruction count

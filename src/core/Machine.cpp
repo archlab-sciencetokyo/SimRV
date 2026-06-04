@@ -5,6 +5,8 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/core/Logger.hpp"
+#include "simrv/device/Power.hpp"
+#include "simrv/device/Uart.hpp"
 
 #include <array>
 #include <chrono>
@@ -12,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <print>
 
 #include "simrv/xlen/Types.hpp"
@@ -35,6 +38,30 @@ void Machine::run() {
         prepare_cycle();
         cpu.run_cycle(*this);
         finalize_cycle();
+
+        // ---- GDB stub post-cycle hook ----
+        if (gdb_stub && gdb_stub->is_connected()) {
+            const bool hit_ebreak =
+                (cpu.pipeline_context.opcode == Opcode::System) &&
+                (cpu.pipeline_context.funct12 ==
+                    static_cast<Word>(Funct12Priv::Ebreak)) &&
+                !cpu.pipeline_context.pending_exception.has_value();
+
+            if (gdb_stub->single_step() || hit_ebreak) {
+                gdb_stub->notify_breakpoint(*this);
+            } else {
+                gdb_stub->poll(*this);
+            }
+        }
+
+        // ---- Spike lockstep post-cycle hook ----
+        if (spike_lockstep && spike_lockstep->is_running()) {
+            spike_lockstep->compare_and_report(cpu.state(), cpu.e_icount);
+            if (spike_lockstep->should_halt()) {
+                simrv::log::error("Lockstep: halting on divergence");
+                is_running_ = false;
+            }
+        }
     }
 }
 
@@ -81,10 +108,7 @@ void Machine::prepare_cycle() {
     cpu.pipeline_context.pending_tval = 0;                 /* initialize regs */
 }
 
-enum class AppCommand : Word {
-    PrintChar = 1,  /* command for application mode using tohost */
-    PowerOff = 2    /* command for application mode using tohost */
-};
+
 /**
  * @brief Apply end-of-cycle termination checks and optional trace outputs.
  */
@@ -154,7 +178,7 @@ void Machine::finalize_cycle() {
             simrv::log::info("Program Halted (SUCCESS / PASS)");
             uart->tui_pause_loop();
             is_running_ = false;
-        } else if ((tohost & 1) != 0u || (tohost >> 16) == std::to_underlying(AppCommand::PowerOff)) {
+        } else if ((tohost & 1) != 0u) {
             simrv::log::error("Program Halted (FAIL / EXIT code={})", tohost >> 1);
             uart->tui_pause_loop();
             is_running_ = false;
@@ -175,23 +199,10 @@ void Machine::finalize_cycle() {
         }
     }
 
-    // Legacy 32-bit SimRV application mode magic handling
-    if ((tohost >> 16) == std::to_underlying(AppCommand::PowerOff)) {
-        simrv::log::info("Power off");
-        if (s_tuimode && uart && uart->tui()) {
-            uart->tui_pause_loop();
-        }
-        is_running_ = false;
-    } else if ((tohost >> 16) == std::to_underlying(AppCommand::PrintChar)) {
-        if (s_tuimode && uart && uart->tui()) {
-            uart->tui()->handle_char_write(static_cast<char>(tohost & 0xff));
-        } else {
-            std::print("{}", static_cast<char>(tohost & 0xff));
-            fflush(stdout);
-        }
-        tohost = 0;
-    }
+
 }
+
+
 
 Machine::~Machine() = default;
 

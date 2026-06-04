@@ -5,7 +5,7 @@
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/decode/Decoder.hpp"
+#include "simrv/pipeline/Decoder.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -23,7 +23,7 @@ void CPU::decode_fields(Machine& /*machine*/) {
         return;
     }
 
-    simrv::decode::Decoder dec(ctx.ir);
+    simrv::pipeline::Decoder dec(ctx.ir);
 
     ctx.opcode = static_cast<Opcode>(dec.opcode());
     ctx.rd = dec.rd();
@@ -35,18 +35,18 @@ void CPU::decode_fields(Machine& /*machine*/) {
     ctx.funct12 = (ctx.ir >> 20);
 
     switch (dec.opcode()) {
-        case simrv::decode::Opcode::kLui:
-        case simrv::decode::Opcode::kAuipc:
+        case simrv::pipeline::Opcode::kLui:
+        case simrv::pipeline::Opcode::kAuipc:
             ctx.imm = dec.imm_u();
             break;
-        case simrv::decode::Opcode::kJal:
+        case simrv::pipeline::Opcode::kJal:
             ctx.imm = dec.imm_j();
             break;
-        case simrv::decode::Opcode::kBranch:
+        case simrv::pipeline::Opcode::kBranch:
             ctx.imm = dec.imm_b();
             break;
-        case simrv::decode::Opcode::kStore:
-        case simrv::decode::Opcode::kStoreFp:
+        case simrv::pipeline::Opcode::kStore:
+        case simrv::pipeline::Opcode::kStoreFp:
             ctx.imm = dec.imm_s();
             break;
         default:

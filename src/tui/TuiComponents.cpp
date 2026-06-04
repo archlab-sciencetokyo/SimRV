@@ -1,4 +1,6 @@
 #include "simrv/tui/TuiComponents.hpp"
+#include "simrv/util/FormatUtil.hpp"
+
 
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -14,7 +16,6 @@
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/tui/Ansi.hpp"
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -104,15 +105,7 @@ static constexpr std::array<const char*, 32> kFpRegNames = {
     "fa1", "fa2", "fa3", "fa4", "fa5",  "fa6",  "fa7", "fs2", "fs3",  "fs4", "fs5",
     "fs6", "fs7", "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11"};
 
-auto format_with_commas(uint64_t val) -> std::string {
-    std::string s = std::to_string(val);
-    int n = static_cast<int>(s.length()) - 3;
-    while (n > 0) {
-        s.insert(static_cast<std::size_t>(n), ",");
-        n -= 3;
-    }
-    return s;
-}
+using simrv::util::format_with_commas;
 
 auto make_progress_bar(double ratio, int width, const std::string& color_code) -> std::string {
     int filled = static_cast<int>(ratio * width);
@@ -349,12 +342,17 @@ auto RegisterPane::render_row(int row_idx, int width) -> std::string {
                 std::string name1 = kFpRegNames[static_cast<std::size_t>(reg1)];
                 std::string name2 = kFpRegNames[static_cast<std::size_t>(reg2)];
 
+                bool changed = paused_ && (cached_fpr_[reg1] != val1);
+                std::string c1 = changed ? "\033[93m" : "\033[92m";
+                bool changed2 = paused_ && (cached_fpr_[reg2] != val2);
+                std::string c2 = changed2 ? "\033[93m" : "\033[92m";
+
                 std::string col1_color = std::format(
-                    " \033[97mf{:<2}\033[0m/\033[36m{:<5}\033[0m: \033[92m0x{:016x}\033[0m", reg1,
-                    name1, val1);
+                    " \033[97mf{:<2}\033[0m/\033[36m{:<5}\033[0m: {}0x{:016x}\033[0m", reg1,
+                    name1, c1, val1);
                 std::string col2_color = std::format(
-                    " \033[97mf{:<2}\033[0m/\033[36m{:<5}\033[0m: \033[92m0x{:016x}\033[0m", reg2,
-                    name2, val2);
+                    " \033[97mf{:<2}\033[0m/\033[36m{:<5}\033[0m: {}0x{:016x}\033[0m", reg2,
+                    name2, c2, val2);
 
                 return format_to_width(col1_color, col_width) +
                        format_to_width(col2_color, width - col_width);

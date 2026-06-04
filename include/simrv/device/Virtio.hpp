@@ -29,6 +29,8 @@ inline constexpr Word kDiskDeviceId = 2;
 inline constexpr Word kDiskDeviceFeatures = 1;
 inline constexpr Word kDiskConfigGeneration = 0;
 inline constexpr Word kDiskQueueNumMax = 4;
+inline constexpr Word kConsoleQueueNumMax = 16;
+
 
 enum class MmioOffset : Address {
     MagicValue = 0x000,

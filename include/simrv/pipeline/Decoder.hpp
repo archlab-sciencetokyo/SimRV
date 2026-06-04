@@ -7,7 +7,7 @@
 #include "simrv/Define.hpp"
 #include "simrv/xlen/Types.hpp"
 
-namespace simrv::decode {
+namespace simrv::pipeline {
 
 /// Standard RISC-V Major Opcodes (lower 7 bits)
 enum class Opcode : uint32_t {
@@ -138,4 +138,4 @@ auto decompressInstruction(Instruction ir) -> Instruction;
 /// String mapping for instruction mix profiling
 extern const std::array<std::string_view, static_cast<size_t>(OperationIdCount)> OPERATION_NAME;
 
-}  // namespace simrv::decode
+}  // namespace simrv::pipeline

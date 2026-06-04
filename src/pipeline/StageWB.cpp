@@ -61,4 +61,4 @@ void CPU::writeback_registers(Machine& machine) {
     }
 }
 
-}  // namespace simrv::core
+} // namespace simrv::core

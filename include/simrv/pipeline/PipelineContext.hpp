@@ -4,7 +4,7 @@
 #include <optional>
 #include <simrv/Define.hpp>
 
-namespace simrv::core {
+namespace simrv::pipeline {
 
 /**
  * @struct StageError
@@ -72,4 +72,4 @@ struct PipelineContext {
     CSRValue pending_tval = 0;
 };
 
-}  // namespace simrv::core
+}  // namespace simrv::pipeline

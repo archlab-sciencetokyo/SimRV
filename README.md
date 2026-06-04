@@ -2,8 +2,8 @@
 
 [![C/C++ CI](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=dev)](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml)
 
-SimRV is a cycle-oriented RISC-V functional simulator focused on RV32 development.
-It supports Linux and application execution, includes VirtIO-style console/disk devices,
+SimRV is a high-performance RISC-V functional simulator supporting both RV32GC and RV64GC.
+It runs Linux and bare-metal application images, includes VirtIO-style console/disk devices,
 and uses a CMake/Ninja-based validation workflow.
 
 ## Quick Start
@@ -62,22 +62,25 @@ Select a supported MISA profile:
 
 ## Supported RISC-V Extensions
 
-Current implementation is RV32 with default MISA profile set to GC and privilege-related
-S/U bits enabled in the simulator state.
+Both RV32GC and RV64GC are fully implemented.  The default MISA profile is GC for each
+build, selectable at configure time via `SIMRV_XLEN` and overridable at runtime with `--misa`.
 
 | Extension Group | Status | Notes |
 | --- | --- | --- |
-| RV32I | Supported | Base integer instruction set |
-| RV32M | Supported | Integer multiply/divide and remainder instructions are available. |
-| RV32A | Supported | LR/SC and AMO word operations are available. |
-| RV32C | Supported | Compressed instruction decode and execution are available. |
-| RV32F | Supported | Single-precision floating-point instructions and FP CSRs are available. |
-| RV32D | Supported | Double-precision floating-point instructions are available. |
-| Privileged + CSR | Supported | Machine/Supervisor/User state, CSR access, traps, and interrupts are implemented. |
+| RV32I / RV64I | ✅ Supported | Base integer instruction set for both widths |
+| M | ✅ Supported | Integer multiply/divide and remainder |
+| A | ✅ Supported | LR/SC and AMO word (and doubleword in RV64) operations |
+| C | ✅ Supported | Compressed instruction decode and execution |
+| F | ✅ Supported | Single-precision floating-point (FP CSRs included) |
+| D | ✅ Supported | Double-precision floating-point |
+| Privileged + CSR | ✅ Supported | M/S/U privilege, CSR access, traps, interrupts, TLB/MMU |
+| SV32 (RV32) | ✅ Supported | Page-based virtual memory for RV32 |
+| SV39 / SV48 (RV64) | ✅ Supported | Page-based virtual memory for RV64 |
 
 Validation policy:
 
-- Current public smoke coverage centers on RV32I/M/A via `isa-smoke-rv32gc`.
+- Public smoke coverage centres on RV32I/M/A via `isa-smoke-rv32gc` and RV64I/M/A via `isa-smoke-rv64gc`.
+- Full GDB remote debug and Spike lockstep co-simulation are available for deeper validation.
 
 ## Testing
 
@@ -90,7 +93,10 @@ ctest --test-dir build/rv32-release --output-on-failure -L gate
 ISA-only smoke subset:
 
 ```bash
+# RV32
 RISCV_TESTS_DIR=/path/to/riscv-tests ctest --test-dir build/rv32-release --output-on-failure -L rv32gc
+# RV64
+RISCV_TESTS_DIR=/path/to/riscv-tests ctest --test-dir build/rv64-release --output-on-failure -L rv64gc
 ```
 
 For ISA CTest runs, the `RISCV_TESTS_DIR` environment variable should be set to your `riscv-tests` path.
@@ -117,11 +123,45 @@ Useful benchmark environment variables:
 - `SIMRV_BENCH_IMG` (optional direct binary image path)
 - `SIMRV_BENCH_TEST` (default riscv-tests ELF name: `rv32ui-p-add`)
 
+## GDB Debugging
+
+SimRV includes a GDB RSP stub for source-level debugging:
+
+```bash
+# Start SimRV with GDB stub listening on port 1234 (default)
+./build/rv32-release/SimRV -m path/to/hello.bin --gdb
+
+# In another terminal, attach with riscv GDB
+riscv32-unknown-elf-gdb hello.elf -ex "target remote :1234"
+
+# RV64 example
+./build/rv64-release/SimRV -m path/to/hello64.bin --gdb --gdb-port 2345
+riscv64-unknown-linux-gnu-gdb hello64.elf -ex "target remote :2345"
+```
+
+Supported RSP operations: register read/write, memory read/write, software breakpoints,
+single-step, continue, detach.
+
+## Spike Lockstep Co-Simulation
+
+For correctness verification, SimRV can run Spike as a co-simulator and compare
+architectural state after every committed instruction:
+
+```bash
+# RV32
+./build/rv32-release/SimRV -m path/to/hello.bin --lockstep
+
+# RV64 with custom spike path
+./build/rv64-release/SimRV -m path/to/hello64.bin --lockstep --spike-bin /opt/riscv/bin/spike
+```
+
+The ISA string passed to Spike is derived automatically from the active MISA profile
+(e.g. `rv32gc`, `rv64imac`).  Divergences are printed as a coloured diff to stderr.
+
 ## Documentation
 
 - Architecture overview: `docs/ARCHITECTURE.md`
 - Refactor concept: `REFACTOR_CLASS_CONCEPT.md`
-- RV64 migration roadmap: `ROADMAP_RV32GC_to_RV64GC.md`
 
 Generate API docs (if Doxygen is installed):
 

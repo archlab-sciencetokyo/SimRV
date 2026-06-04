@@ -80,6 +80,7 @@ endif()
 set(SIMRV_DRAM_SIZE_MB "256" CACHE STRING "DRAM size in megabytes (must be power of 2)")
 set(SIMRV_DISK_SIZE_MB "256" CACHE STRING "Disk size in megabytes")
 set(SIMRV_CORE_COUNT "1" CACHE STRING "Number of CPU cores (experimental)")
+set(SIMRV_SPIKE_PATH "spike" CACHE STRING "Path to Spike binary for lockstep co-simulation (runtime default, not used at build time)")
 
 add_executable(SimRV
   src/Main.cpp
@@ -91,16 +92,16 @@ add_executable(SimRV
   src/core/Tracer.cpp
   src/core/Sbi.cpp
   src/core/Tlb.cpp
-  src/decode/Decoder.cpp
+  src/pipeline/Decoder.cpp
   src/execute/ExecuteUnitInt.cpp
   src/execute/ExecuteUnitFloat.cpp
   src/execute/ExecuteUnit.cpp
-  src/core/StageIF.cpp
-  src/core/StageID.cpp
-  src/core/StageEX.cpp
-  src/core/StageMEM.cpp
-  src/core/StageWB.cpp
-  src/core/StageCommit.cpp
+  src/pipeline/StageIF.cpp
+  src/pipeline/StageID.cpp
+  src/pipeline/StageEX.cpp
+  src/pipeline/StageMEM.cpp
+  src/pipeline/StageWB.cpp
+  src/pipeline/StageCommit.cpp
   src/core/Cpu.cpp
   src/cache/ICache.cpp
   src/cache/DCache.cpp
@@ -113,8 +114,11 @@ add_executable(SimRV
   src/device/VirtioDevice.cpp
   src/device/Rtc.cpp
   src/device/Uart.cpp
+  src/device/Power.cpp
   src/tui/Tui.cpp
   src/tui/TuiComponents.cpp
+  src/debug/GdbStub.cpp
+  src/debug/SpikeLockstep.cpp
 )
 
 target_compile_features(SimRV PRIVATE cxx_std_23)

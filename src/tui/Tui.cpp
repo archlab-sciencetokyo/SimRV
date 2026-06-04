@@ -1,4 +1,4 @@
-#include "simrv/tui/Ansi.hpp"
+#include "simrv/util/FormatUtil.hpp"
 /**
  * @file Tui.cpp
  * @brief Interactive TUI console dashboard implementation with premium double-line borders and
@@ -133,15 +133,7 @@ static constexpr std::array<const char*, 32> kFpRegNames = {
     "fa1", "fa2", "fa3", "fa4", "fa5",  "fa6",  "fa7", "fs2", "fs3",  "fs4", "fs5",
     "fs6", "fs7", "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11"};
 
-auto format_with_commas(uint64_t val) -> std::string {
-    std::string s = std::to_string(val);
-    int n = static_cast<int>(s.length()) - 3;
-    while (n > 0) {
-        s.insert(static_cast<std::size_t>(n), ",");
-        n -= 3;
-    }
-    return s;
-}
+
 
 auto make_progress_bar(double ratio, int width, const std::string& color_code) -> std::string {
     int filled = static_cast<int>(ratio * width);
@@ -445,10 +437,6 @@ void Tui::handle_mouse(int x, int y, int b) {
             if (scroll_offset_ < 0) scroll_offset_ = 0;
             console_pane_->set_scroll_offset(scroll_offset_);
             render();
-        }
-    } else if (b == 0) {
-        if (layout_ == TuiLayout::Split && x <= pane_width_cached_) {
-            cycle_reg_page();
         }
     }
 }

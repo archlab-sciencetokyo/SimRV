@@ -90,35 +90,35 @@ void CPU::run_cycle(Machine& machine) {
     }
 }
 
-auto CPU::run_pipeline_coroutine(Machine& machine) -> PipelineTask {
+auto CPU::run_pipeline_coroutine(Machine& machine) -> simrv::pipeline::PipelineTask {
     while (true) {
         if (!fetch_stage(machine, state_.pc)) {
-            co_yield StageError{.code = pipeline_context.pending_exception.value(),
+            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value(),
                                 .tval = pipeline_context.pending_tval};
             continue;
         }
         if (!decode_stage(machine)) {
-            co_yield StageError{.code = pipeline_context.pending_exception.value(),
+            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value(),
                                 .tval = pipeline_context.pending_tval};
             continue;
         }
         if (!execute_stage(machine)) {
-            co_yield StageError{.code = pipeline_context.pending_exception.value(),
+            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value(),
                                 .tval = pipeline_context.pending_tval};
             continue;
         }
         if (!memory_stage(machine)) {
-            co_yield StageError{.code = pipeline_context.pending_exception.value(),
+            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value(),
                                 .tval = pipeline_context.pending_tval};
             continue;
         }
         if (!writeback_stage(machine)) {
-            co_yield StageError{.code = pipeline_context.pending_exception.value(),
+            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value(),
                                 .tval = pipeline_context.pending_tval};
             continue;
         }
         if (!commit_stage(machine)) {
-            co_yield StageError{.code = pipeline_context.pending_exception.value(),
+            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value(),
                                 .tval = pipeline_context.pending_tval};
             continue;
         }

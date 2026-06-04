@@ -71,7 +71,7 @@ void CPU::memory_store_phase(Machine& machine) {
 
     if ((opcode == Opcode::Store) ||
         (opcode == Opcode::Amo &&
-         (funct5 == Funct5Amo::Sc && (ctx.wb_data == 0u) && (state_.reserved != 0u))) ||
+          (funct5 == Funct5Amo::Sc && (ctx.wb_data == 0u) && (state_.reserved != 0u))) ||
         (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr && funct5 != Funct5Amo::Sc)) {
         simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, ctx.mem_addr, ctx.mem_wdata,
                                               ctx.funct3);

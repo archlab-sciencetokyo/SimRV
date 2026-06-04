@@ -192,8 +192,8 @@ auto ClintMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
         const Word wdata = req.data;
         if (req_bytes == 8) {
             if (off == kClintMtimecmpOffset) {
-                mtimecmp = static_cast<Counter>(wdata); std::println("mtimecmp written: {}", mtimecmp);
-                std::println("mtimecmp updated to {}", mtimecmp); cpu_.evaluate_timer_interrupt();
+                mtimecmp = static_cast<Counter>(wdata);
+                cpu_.evaluate_timer_interrupt();
             } else if (off == kClintMtimeOffset) {
                 mtime = static_cast<Counter>(wdata);
             } else {
@@ -202,10 +202,10 @@ auto ClintMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
         } else {
             if (off == kClintMtimecmpOffset) {
                 mtimecmp = (mtimecmp & ~static_cast<Counter>(0xFFFFFFFFull)) | (wdata & 0xFFFFFFFFull);
-                std::println("mtimecmp updated to {}", mtimecmp); cpu_.evaluate_timer_interrupt();
+                cpu_.evaluate_timer_interrupt();
             } else if (off == kClintMtimecmpOffset + 4) {
                 mtimecmp = (mtimecmp & 0xFFFFFFFFull) | (static_cast<Counter>(wdata) << 32);
-                std::println("mtimecmp updated to {}", mtimecmp); cpu_.evaluate_timer_interrupt();
+                cpu_.evaluate_timer_interrupt();
             } else if (off == kClintMtimeOffset) {
                 mtime = (mtime & ~static_cast<Counter>(0xFFFFFFFFull)) | (wdata & 0xFFFFFFFFull);
             } else if (off == kClintMtimeOffset + 4) {

@@ -39,7 +39,7 @@ class Console : public VirtioDevice {
     [[nodiscard]] auto get_device_id() const -> Word override { return 3; }
     [[nodiscard]] auto get_device_features() const -> Word override { return 0; }
     [[nodiscard]] auto get_queue_num_max() const -> Word override {
-        return QueueSel < virtio::kConsoleMaxQueueNum ? QueueNum : 0;
+        return QueueSel < virtio::kConsoleMaxQueueNum ? virtio::kConsoleQueueNumMax : 0;
     }
     void process_queue(Word q_idx) override;
 };

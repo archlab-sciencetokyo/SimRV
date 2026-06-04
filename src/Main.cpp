@@ -5,6 +5,7 @@
  * SimCore/RISC-V functional simulator (ArchLab, Science Tokyo (former TokyoTech)).
  */
 #include "simrv/core/Logger.hpp"
+#include "simrv/util/FormatUtil.hpp"
 #include <termios.h>
 #include <unistd.h>
 
@@ -66,6 +67,12 @@ struct RuntimeOptions {
     bool gen_binfile = false;
     bool trace_enabled = false;
     bool use_opensbi = false;
+
+    // Debug / co-simulation options
+    bool     gdb_mode      = false;
+    uint16_t gdb_port      = 1234;
+    bool     lockstep_mode = false;
+    std::string spike_bin  = "spike";
 };
 
 struct ParseResult {
@@ -383,6 +390,32 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             continue;
         }
 
+        // ---- Debug / co-simulation ----
+        if (arg == "--gdb") {
+            result.options.gdb_mode = true;
+            continue;
+        }
+        if (arg == "--gdb-port") {
+            auto value = next_argument(args, i, "--gdb-port");
+            if (!value) return std::unexpected(value.error());
+            uint64_t port_val = 0;
+            if (!parse_scaled_u64(*value, port_val) || port_val == 0 || port_val > 65535) {
+                return std::unexpected("invalid GDB port value for --gdb-port");
+            }
+            result.options.gdb_port = static_cast<uint16_t>(port_val);
+            continue;
+        }
+        if (arg == "--lockstep") {
+            result.options.lockstep_mode = true;
+            continue;
+        }
+        if (arg == "--spike-bin") {
+            auto value = next_argument(args, i, "--spike-bin");
+            if (!value) return std::unexpected(value.error());
+            result.options.spike_bin = std::string(*value);
+            continue;
+        }
+
         return std::unexpected(std::format("unknown option : {}", arg));
     }
 
@@ -436,6 +469,12 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
 
     machine->cpu.use_opensbi = options.use_opensbi;
 
+    // Debug / co-simulation flags
+    machine->s_gdb_mode      = options.gdb_mode;
+    machine->s_gdb_port      = options.gdb_port;
+    machine->s_lockstep_mode = options.lockstep_mode;
+    machine->s_spike_bin     = options.spike_bin;
+
     return {};
 }
 
@@ -447,42 +486,109 @@ void set_start_time(simrv::core::Machine& machine) {
 
 [[noreturn]] static void usage(const char* program_name, int exit_code = 0) {
     const auto xlen_suffix = simrv::xlen::kIsXLen64 ? "64" : "32";
-    std::print(
-        "Usage: {} [options]\n\n"
-        "Required:\n"
-        "  -m <FILE>        Memory image file\n\n"
-        "Images and Devices:\n"
-        "  -d <FILE>        Disk image file (enables disk mode)\n"
-        "  -c <FILE>        Device-tree binary file\n\n"
-        "Execution Control:\n"
-        "  -e <N>           Stop after N instructions\n"
-        "  -l <N>           Enable timer after N cycles\n"
-        "  -B, --opensbi    Bypass legacy C++ SBI and boot native OpenSBI\n"
-        "  -a               Binary mode (start_pc=0, no OS)\n"
-        "  --tui            Enable interactive TUI monitor mode\n"
-        "  --misa <PROFILE> Select MISA profile: rv{}i | rv{}imac | rv{}gc\n\n"
-        "Tracing and Debug:\n"
-        "  -t <BEGIN> <END> Write trace.txt for instruction range [BEGIN, END]\n"
-        "  -q <N>           Generate tracepc.txt every 1000 instructions after N\n"
-        "  -w               Generate bpred.txt branch trace\n"
-        "  -i <N>           Dump init artifacts at cycle N\n"
-        "  -g               Enable debug logging\n"
-        "  -p               Enable disk/console transaction log\n"
-        "  -P <FILE>        Write trap/SBI diagnostics to file\n"
-        "  -x               Write instruction mix report\n"
-        "  -b               Generate inits.bin and exit\n\n"
-        "ISA Test Mode:\n"
-        "  -T               Enable riscv-isa-tests tohost monitoring\n"
-        "  -H <ADDR>        Set tohost address for -T (default: 0x80001000)\n\n"
-        "Misc:\n"
-        "  -h, --help       Show this help and exit\n"
-        "  --version        Show version and exit\n\n"
-        "Numeric suffixes: k/K (1e3), m/M (1e6), g/G (1e9)\n\n"
-        "Examples:\n"
-        "  {} -m img/bbl.bin -d img/root.bin\n"
-        "  {} -m img/bbl.bin -d img/root.bin -e 40m\n"
-        "  {} -m img/hello.bin -a\n",
-        program_name, xlen_suffix, xlen_suffix, xlen_suffix, program_name, program_name, program_name);
+    const bool use_color = simrv::util::is_terminal(STDOUT_FILENO);
+
+    auto style = [use_color](std::string_view ansi_code) -> std::string_view {
+        return use_color ? ansi_code : "";
+    };
+
+    using namespace simrv::util::ansi;
+
+    // Banner
+    std::print(stdout, "\n{}{}{} SimRV - High-Performance RISC-V Functional Simulator {}\n\n", 
+                 style(kBold), style(kBrightWhite), style(kReset), style(kReset));
+
+    // Usage
+    std::print(stdout, "{}Usage:{} {}{} [options]{}\n\n",
+                 style(kBold), style(kReset),
+                 style(kBrightGreen), program_name, style(kReset));
+
+    // Required
+    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Required", style(kReset), style(kReset));
+    std::print(stdout, "  {}-m {}{}<FILE>{}        Memory image file (required to boot)\n\n",
+                 style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+
+    // Images and Devices
+    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Images and Devices", style(kReset), style(kReset));
+    std::print(stdout, "  {}-d {}{}<FILE>{}        Disk image file (enables block storage virtio-disk)\n",
+                 style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout, "  {}-c {}{}<FILE>{}        Device-tree binary file (FDT / DTB configuration)\n\n",
+                 style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+
+    // Execution Control
+    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Execution Control (runs on high-performance simrv::pipeline engine)", style(kReset), style(kReset));
+    std::print(stdout, "  {}-e {}{}<N>{}           Stop execution after N instructions (zero-overhead count)\n",
+                 style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout, "  {}-l {}{}<N>{}           Enable timer after N cycles (CLINT ticker threshold)\n",
+                 style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout, "  {}-B, --opensbi{}    Bypass legacy C++ SBI and boot native OpenSBI kernel payload\n",
+                 style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}-a{}                Binary mode (raw baremetal execution, start_pc=0, no OS / SBI)\n",
+                 style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}--tui{}             Enable interactive TUI split-screen monitor dashboard\n",
+                 style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}--misa {}{}<PROFILE>{} Select CPU MISA profile: rv{}i | rv{}imac | rv{}gc\n\n",
+                 style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset), xlen_suffix, xlen_suffix, xlen_suffix);
+
+    // Tracing and Debug
+    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Tracing and Debug (outputs generated inside trace/ subdirectory)", style(kReset), style(kReset));
+    std::print(stdout, "  {}-t {}{}<BEGIN> <END>{} Write trace/trace.txt for instruction range [BEGIN, END]\n",
+                 style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout, "  {}-q {}{}<N>{}           Generate periodic trace/tracepc.txt every 1,000 instructions after N\n",
+                 style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout, "  {}-w{}                Generate trace/bpred.txt branch prediction trace\n",
+                 style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}-i {}{}<N>{}           Dump init architectural and TLB state artifacts at cycle N\n",
+                 style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout, "  {}-g{}                Enable verbose debug logging output\n",
+                 style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}-p{}                Enable interactive disk/console MMIO transaction logging\n",
+                 style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}-P {}{}<FILE>{}        Write comprehensive trap/SBI diagnostic logs to file\n",
+                 style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout, "  {}-x{}                Write instruction mix metrics report to trace/instmix.txt on exit\n",
+                 style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}-b{}                Generate hardware initialization trace/inits.bin and exit\n\n",
+                 style(kBrightGreen), style(kReset));
+
+    // ISA Test Mode
+    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "ISA Test Mode", style(kReset), style(kReset));
+    std::print(stdout, "  {}-T{}                Enable riscv-isa-tests tohost termination monitoring\n",
+                 style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}-H {}{}<ADDR>{}        Set custom tohost device MMIO address for -T (default: 0x80001000)\n\n",
+                 style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+
+    // Miscellaneous
+    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Miscellaneous", style(kReset), style(kReset));
+    std::print(stdout, "  {}-h, --help{}        Show this colorized dashboard menu and exit\n",
+                 style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}--version{}         Show compiler-injected version details and exit\n\n",
+                 style(kBrightGreen), style(kReset));
+
+    // Debug and Co-Simulation
+    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Debug and Co-Simulation", style(kReset), style(kReset));
+    std::print(stdout, "  {}--gdb{}              Enable GDB RSP stub (waits for client before running)\n",
+                 style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}--gdb-port {}{}<PORT>{}  Override GDB stub listen port (default: 1234)\n",
+                 style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout, "  {}--lockstep{}         Enable Spike lockstep instruction-by-instruction verification\n",
+                 style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}--spike-bin {}{}<PATH>{} Path to spike binary for lockstep (default: spike in PATH)\n\n",
+                 style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+
+    // scaled suffixes
+    std::print(stdout, "{}Numeric values accept standard scaled suffixes:{} k/K (1e3), m/M (1e6), g/G (1e9)\n\n",
+                 style(kBold), style(kReset));
+
+    // Examples
+    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Examples", style(kReset), style(kReset));
+    std::print(stdout, "  {}{}{} -m img/hello.bin -a\n",
+                 style(kBrightBlack), program_name, style(kReset));
+    std::print(stdout, "  {}{}{} -m linux-images/rv{}/fw_payload.bin -d linux-images/rv{}/root.bin -c linux-images/rv{}/devicetree.dtb\n",
+                 style(kBrightBlack), program_name, style(kReset), xlen_suffix, xlen_suffix, xlen_suffix);
+    std::print(stdout, "  {}{}{} -m linux-images/rv{}/fw_payload.bin --tui\n",
+                 style(kBrightBlack), program_name, style(kReset), xlen_suffix);
+
     std::exit(exit_code);
 }
 
@@ -572,14 +678,17 @@ void set_options(simrv::core::Machine* m, int argc, char* const* argv) {
 
 auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     bool is_tui = false;
+    bool skip_banner = false;
     for (int i = 1; i < argc; ++i) {
-        if (std::string_view(argv[i]) == "--tui") {
+        std::string_view const arg(argv[i]);
+        if (arg == "--tui") {
             is_tui = true;
-            break;
+        } else if (arg == "-h" || arg == "--help" || arg == "--version") {
+            skip_banner = true;
         }
     }
 
-    if (!is_tui) {
+    if (!is_tui && !skip_banner) {
         simrv::log::info("{} v{} ({}@{})\nPlease type Control+'q' to quit the simulation\n",
                      simrv::buildinfo::kProjectDescription, simrv::buildinfo::kVersion,
                      simrv::buildinfo::kGitBranch, simrv::buildinfo::kGitSha);
@@ -601,8 +710,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     TerminalModeGuard terminal_mode;
     if (!terminal_mode.enable_raw_mode()) {
         if (!is_tui) {
-            std::println(stderr,
-                         "__ Warning: terminal raw mode setup failed; continuing in current mode");
+            simrv::log::warn("Terminal raw mode setup failed; continuing in current mode");
         }
     }
     sim_machine.run();

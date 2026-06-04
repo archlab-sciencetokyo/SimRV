@@ -3,6 +3,7 @@
  * @brief SBI handling implementation.
  */
 #include "simrv/core/Sbi.hpp"
+#include "simrv/core/Logger.hpp"
 
 #include <unistd.h>
 
@@ -21,23 +22,14 @@
 namespace simrv::sbi {
 namespace {
 
-enum class LegacyId : Word {
-    SetTimer = 0x00,
-    ConsolePutchar = 0x01,
-    ConsoleGetchar = 0x02,
-    ClearIpi = 0x03,
-    SendIpi = 0x04,
-    RemoteFenceI = 0x05,
-    RemoteSfenceVma = 0x06,
-    RemoteSfenceVmaAsid = 0x07,
-    Shutdown = 0x08,
-};
 
 enum class ExtId : Word {
     Base = 0x10,
     Time = 0x54494D45,
     Rfence = 0x52464E43,
     Hsm = 0x48534D,
+    Ipi = 0x735049,
+    SystemReset = 0x53525354,
 };
 
 enum class BaseFid : Word {
@@ -111,40 +103,6 @@ void Sbi::sbi_return(SignedWord error, Word value) {
     cpu_.state().pc += 4;
 }
 
-auto Sbi::handle_legacy(Word ext_id, Word func_id) -> bool {
-    switch (static_cast<LegacyId>(ext_id)) {
-        case LegacyId::SetTimer: {
-            cpu_.clint_mmio.mtimecmp = timer_value();
-            cpu_.state().mip &= ~enum_mask(MipBit::Mtip);
-            cpu_.state().mip &= ~enum_mask(MipBit::Stip);
-            sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
-            return true;
-        }
-        case LegacyId::ConsolePutchar: {
-            const auto ch = static_cast<uint8_t>(cpu_.state().regs.read(static_cast<RegId>(10)) & 0xffU);
-            if (cpu_.machine_ && cpu_.machine_->s_tuimode && cpu_.machine_->uart && cpu_.machine_->uart->tui()) {
-                cpu_.machine_->uart->tui()->handle_char_write(static_cast<char>(ch));
-            } else {
-                (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
-            }
-            sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
-            return true;
-        }
-        case LegacyId::ConsoleGetchar: {
-            sbi_return(static_cast<SignedWord>(-1), 0);
-            return true;
-        }
-        case LegacyId::ClearIpi:
-        case LegacyId::SendIpi:
-        case LegacyId::RemoteFenceI:
-        case LegacyId::RemoteSfenceVma:
-        case LegacyId::RemoteSfenceVmaAsid:
-        case LegacyId::Shutdown:
-            sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
-            return true;
-    }
-    return false;
-}
 
 auto Sbi::handle_base(Word func_id) -> bool {
     switch (static_cast<BaseFid>(func_id)) {
@@ -161,7 +119,8 @@ auto Sbi::handle_base(Word func_id) -> bool {
             const Word probed = cpu_.state().regs.read(static_cast<RegId>(10));
             const bool supported =
                 (probed == enum_mask(ExtId::Base)) || (probed == enum_mask(ExtId::Time)) ||
-                (probed == enum_mask(ExtId::Rfence)) || (probed == enum_mask(ExtId::Hsm));
+                (probed == enum_mask(ExtId::Rfence)) || (probed == enum_mask(ExtId::Hsm)) ||
+                (probed == enum_mask(ExtId::Ipi)) || (probed == enum_mask(ExtId::SystemReset));
             sbi_return(static_cast<SignedWord>(SbiError::Success), supported ? 1U : 0U);
             return true;
         }
@@ -225,6 +184,48 @@ auto Sbi::handle_hsm(Word func_id) -> bool {
     }
 }
 
+auto Sbi::handle_ipi(Word func_id) -> bool {
+    if (func_id == 0) { // send_ipi
+        const Word hart_mask = cpu_.state().regs.read(static_cast<RegId>(10));
+        const Word hart_mask_base = cpu_.state().regs.read(static_cast<RegId>(11));
+        
+        const bool target_hart0 = (hart_mask == 0) || (hart_mask_base == 0 && (hart_mask & 1) != 0);
+        if (target_hart0) {
+            cpu_.state().mip |= enum_mask(MipBit::Ssip);
+        }
+        sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
+    } else {
+        sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);
+    }
+    return true;
+}
+
+auto Sbi::handle_system_reset(Word func_id) -> bool {
+    if (func_id == 0) { // sbi_system_reset
+        const Word reset_type = cpu_.state().regs.read(static_cast<RegId>(10));
+        const Word reset_reason = cpu_.state().regs.read(static_cast<RegId>(11));
+        
+        if (reset_type == 0) {
+            simrv::log::info("[SBI] System Reset: Shutdown requested (reason: 0x{:x}).", reset_reason);
+            if (cpu_.machine_ != nullptr) {
+                cpu_.machine_->stop();
+            }
+            sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
+        } else if (reset_type == 1 || reset_type == 2) {
+            simrv::log::info("[SBI] System Reset: Reboot requested (reason: 0x{:x}).", reset_reason);
+            if (cpu_.machine_ != nullptr) {
+                cpu_.machine_->stop();
+            }
+            sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
+        } else {
+            sbi_return(static_cast<SignedWord>(SbiError::InvalidParam), 0);
+        }
+    } else {
+        sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);
+    }
+    return true;
+}
+
 auto Sbi::handle_ecall(TrapCause cause) -> bool {
     if (cpu_.use_opensbi) {
         return false;
@@ -251,9 +252,6 @@ auto Sbi::handle_ecall(TrapCause cause) -> bool {
         cpu_.trap_log_stream->flush();
     }
 
-    if (ext_id <= enum_mask(LegacyId::Shutdown)) {
-        return handle_legacy(ext_id, func_id);
-    }
 
     switch (static_cast<ExtId>(ext_id)) {
         case ExtId::Base:
@@ -264,6 +262,10 @@ auto Sbi::handle_ecall(TrapCause cause) -> bool {
             return handle_rfence(func_id);
         case ExtId::Hsm:
             return handle_hsm(func_id);
+        case ExtId::Ipi:
+            return handle_ipi(func_id);
+        case ExtId::SystemReset:
+            return handle_system_reset(func_id);
         default:
             sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);
             return true;

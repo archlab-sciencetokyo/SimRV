@@ -4,6 +4,8 @@
  */
 #include "simrv/core/Tracer.hpp"
 #include "simrv/core/Logger.hpp"
+#include "simrv/util/FormatUtil.hpp"
+
 
 #include <chrono>
 #include <cstddef>
@@ -20,7 +22,7 @@
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/decode/Decoder.hpp"
+#include "simrv/pipeline/Decoder.hpp"
 #include "simrv/device/Console.hpp"
 #include "simrv/device/Disk.hpp"
 #include "simrv/device/Virtio.hpp"
@@ -203,7 +205,7 @@ void Tracer::write_instruction_mix_report() {
     std::println(out, "INSTRUCTION MIX");
     uint64_t total = 0;
     for (auto const [i, count] : std::views::enumerate(machine_.cpu.e_instmix)) {
-        std::println(out, "{} : {:10}", simrv::decode::OPERATION_NAME[i], count);
+        std::println(out, "{} : {:10}", simrv::pipeline::OPERATION_NAME[i], count);
         total += count;
     }
     std::println(out, "TOTAL      : {:10}", total);
@@ -211,15 +213,27 @@ void Tracer::write_instruction_mix_report() {
 }
 
 void Tracer::print_summary() {
+    using simrv::util::format_with_commas;
     const auto now = std::chrono::steady_clock::now();
     const auto elapsed =
         std::chrono::duration_cast<std::chrono::microseconds>(now - machine_.s_start_time).count();
     const auto etime = static_cast<Counter>(elapsed == 0 ? 1 : elapsed);
-    simrv::log::info("Elapsed clocks (mtime)   : {:11}", machine_.cpu.clint_mmio.mtime);
-    simrv::log::info("Executed instructions    : {:11}", machine_.cpu.e_icount);
-    simrv::log::info("Fetched compressed insns : {:11}", machine_.cpu.e_ccount);
-    simrv::log::info("Elapsed time (usec)      : {:11}", etime);
-    simrv::log::info("Simulation speed (KIPS)  : {:11}", machine_.cpu.e_icount * 1000UL / etime);
+    
+    simrv::log::info("Elapsed clocks (mtime)   : {:>11}", format_with_commas(machine_.cpu.clint_mmio.mtime));
+    simrv::log::info("Executed instructions    : {:>11}", format_with_commas(machine_.cpu.e_icount));
+    simrv::log::info("Fetched compressed insns : {:>11}", format_with_commas(machine_.cpu.e_ccount));
+    
+    const double etime_sec = static_cast<double>(etime) / 1000000.0;
+    simrv::log::info("Elapsed time (usec)      : {:>11} usec ({:.2f} sec)", format_with_commas(etime), etime_sec);
+    
+    const auto kips = machine_.cpu.e_icount * 1000UL / etime;
+    const double mips = static_cast<double>(machine_.cpu.e_icount) / static_cast<double>(etime);
+    if (mips >= 1.0) {
+        simrv::log::info("Simulation speed (KIPS)  : {:>11} ({:.2f} MIPS)", format_with_commas(kips), mips);
+    } else {
+        simrv::log::info("Simulation speed (KIPS)  : {:>11}", format_with_commas(kips));
+    }
+    
     if (machine_.s_use_mix) {
         write_instruction_mix_report();
     }

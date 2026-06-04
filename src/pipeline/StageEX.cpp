@@ -2,8 +2,8 @@
  * @file StageEX.cpp
  * @brief EX stage implementation for Machine.
  */
-#include <unistd.h>
 #include <iostream>
+#include "simrv/core/Logger.hpp"
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
@@ -60,7 +60,7 @@ void CPU::execute_core(Machine& machine) {
             ctx.tkn = false;
             ctx.funct7 &= (enum_mask(ctx.funct3) == 0x5u) ? 0x20 : 0;
             ctx.wb_data = execute::ExecuteUnit::aluIntW(Opcode::OpImm32, ctx.rrs1, ctx.imm,
-                                                        ctx.funct3, ctx.funct7);
+                                                         ctx.funct3, ctx.funct7);
             break;
         case Opcode::Op32:
             ctx.tkn = false;
@@ -70,7 +70,7 @@ void CPU::execute_core(Machine& machine) {
                               ? 0x21
                               : 0x01;
             ctx.wb_data = execute::ExecuteUnit::aluIntW(Opcode::Op32, ctx.rrs1, ctx.rrs2,
-                                                        ctx.funct3, ctx.funct7);
+                                                         ctx.funct3, ctx.funct7);
             break;
         case Opcode::Load:
         case Opcode::LoadFp:
@@ -165,7 +165,7 @@ void CPU::execute_core(Machine& machine) {
                                      }
                                      state_.regs.write(static_cast<RegId>(10), 0);
                                  } else {
-                                     std::println(std::cerr, "__ Unhandled semihosting op: 0x{:02x}", semihost_op);
+                                     simrv::log::warn("__ Unhandled semihosting op: 0x{:02x}", semihost_op);
                                      state_.regs.write(static_cast<RegId>(10), static_cast<Word>(-1));
                                  }
                                  

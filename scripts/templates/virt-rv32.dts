@@ -48,6 +48,11 @@
         compatible = "simple-bus";
         ranges;
 
+        test: test@100000 {
+            compatible = "sifive,test1", "sifive,test0", "syscon";
+            reg = <0x100000 0x1000>;
+        };
+
         plic: interrupt-controller@50000000 {
             #address-cells = <0>;
             #interrupt-cells = <1>;

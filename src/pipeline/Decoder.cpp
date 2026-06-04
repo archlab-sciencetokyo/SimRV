@@ -1,6 +1,6 @@
-#include "simrv/decode/Decoder.hpp"
+#include "simrv/pipeline/Decoder.hpp"
 
-namespace simrv::decode {
+namespace simrv::pipeline {
 
 const std::array<std::string_view, static_cast<size_t>(OperationIdCount)> OPERATION_NAME = {
     "LUI",        "AUIPC",    "JAL",       "JALR",      "BEQ",       "BNE",      "BLT",
@@ -26,7 +26,7 @@ const std::array<std::string_view, static_cast<size_t>(OperationIdCount)> OPERAT
     "UNKNOWN"};
 
 auto decoder(Instruction ir) -> OperationId {
-    simrv::decode::Decoder dec(ir);
+    simrv::pipeline::Decoder dec(ir);
     const auto op = dec.opcode();
     const auto funct3 = std::to_underlying(dec.funct3());
     const auto funct7 = dec.funct7();
@@ -384,7 +384,7 @@ auto decoder(Instruction ir) -> OperationId {
 }
 
 auto decompressInstruction(Instruction ir) -> Instruction {
-    simrv::decode::Decoder dec(ir);
+    simrv::pipeline::Decoder dec(ir);
     if (!dec.is_compressed()) {
         return ir;
     }
@@ -612,4 +612,4 @@ auto decompressInstruction(Instruction ir) -> Instruction {
     return 0;
 }
 
-}  // namespace simrv::decode
+}  // namespace simrv::pipeline
