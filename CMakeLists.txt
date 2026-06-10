@@ -194,8 +194,8 @@ if(NOT "${RISCV_PREFIX}" STREQUAL "")
   list(APPEND OBJCOPY_NAMES "${RISCV_PREFIX}objcopy")
   list(APPEND NM_NAMES "${RISCV_PREFIX}nm")
 endif()
-list(APPEND OBJCOPY_NAMES "riscv64-unknown-elf-objcopy" "riscv32-unknown-elf-objcopy" "objcopy")
-list(APPEND NM_NAMES "riscv64-unknown-elf-nm" "riscv32-unknown-elf-nm" "nm")
+list(APPEND OBJCOPY_NAMES "riscv64-unknown-elf-objcopy" "riscv32-unknown-elf-objcopy" "riscv-none-elf-objcopy" "objcopy")
+list(APPEND NM_NAMES "riscv64-unknown-elf-nm" "riscv32-unknown-elf-nm" "riscv-none-elf-nm" "nm")
 
 find_program(RISCV_OBJCOPY NAMES ${OBJCOPY_NAMES}
              DOC "Path to objcopy tool for binary extraction")

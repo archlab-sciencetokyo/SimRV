@@ -11,10 +11,9 @@ permissions:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-    env:
-      LLVM_VERSION: "22"
+    container:
+      image: almalinux:10
 
     strategy:
       matrix:
@@ -25,24 +24,44 @@ jobs:
 
     - name: Install build tools
       run: |
-        sudo apt-get update
-        sudo apt-get install -y gcc-14 g++-14 clang-tidy cmake ninja-build gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
+        dnf update -y
+        dnf install -y dnf-plugins-core
+        dnf config-manager --enable crb || dnf config-manager --set-enabled crb || true
+        dnf install -y git cmake ninja-build gcc gcc-c++ clang-tools-extra wget tar xz autoconf make
 
-    - name: Fetch riscv-tests
+    - name: Fetch and compile riscv-tests
       run: |
+        # Download and extract prebuilt xPack RISC-V GCC toolchain
+        wget -q https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v15.2.0-1/xpack-riscv-none-elf-gcc-15.2.0-1-linux-x64.tar.gz -O /tmp/riscv-toolchain.tar.gz
+        mkdir -p /opt/riscv
+        tar -xzf /tmp/riscv-toolchain.tar.gz -C /opt/riscv --strip-components=1
+        
+        # Add toolchain bin directory to GITHUB_PATH for subsequent steps
+        echo "/opt/riscv/bin" >> $GITHUB_PATH
+        
+        # Expose in current execution path
+        export PATH="/opt/riscv/bin:$PATH"
+
+        # Clone and build riscv-tests
         git clone --depth 1 https://github.com/riscv-software-src/riscv-tests.git "$RUNNER_TEMP/riscv-tests"
+        cd "$RUNNER_TEMP/riscv-tests"
+        git submodule update --init --recursive
+        autoconf
+        ./configure
+        make -j$(nproc) RISCV_PREFIX=riscv-none-elf-
 
     - name: Show toolchain versions
       run: |
-        g++-14 --version
+        g++ --version
+        riscv-none-elf-gcc --version
         cmake --version
         ninja --version
     
     - name: Configure CMake
       run: >-
         cmake --preset ${{ matrix.arch }}-release
-        -DCMAKE_C_COMPILER=gcc-14
-        -DCMAKE_CXX_COMPILER=g++-14
+        -DCMAKE_C_COMPILER=gcc
+        -DCMAKE_CXX_COMPILER=g++
 
     - name: Build
       run: cmake --build --preset ${{ matrix.arch }}-release
