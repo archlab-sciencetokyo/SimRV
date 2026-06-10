@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <print>
 #include <ranges>
-#include <print>
+#include <ostream>
 
 #include "simrv/xlen/Types.hpp"
 #include "simrv/core/Cpu.hpp"
