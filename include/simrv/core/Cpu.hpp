@@ -5,6 +5,7 @@
 #pragma once
 
 #include <array>
+#include <expected>
 
 #include <fstream>
 

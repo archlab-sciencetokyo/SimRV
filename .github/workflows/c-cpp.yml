@@ -26,11 +26,7 @@ jobs:
     - name: Install build tools
       run: |
         sudo apt-get update
-        sudo apt-get install -y wget lsb-release software-properties-common gnupg
-        wget https://apt.llvm.org/llvm.sh
-        chmod +x llvm.sh
-        sudo ./llvm.sh "${LLVM_VERSION}"
-        sudo apt-get install -y clang-"${LLVM_VERSION}" clang-tidy-"${LLVM_VERSION}" g++-14 cmake ninja-build gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
+        sudo apt-get install -y gcc-14 g++-14 clang-tidy cmake ninja-build gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
 
     - name: Fetch riscv-tests
       run: |
@@ -38,15 +34,15 @@ jobs:
 
     - name: Show toolchain versions
       run: |
-        clang++-"${LLVM_VERSION}" --version
+        g++-14 --version
         cmake --version
         ninja --version
     
     - name: Configure CMake
       run: >-
         cmake --preset ${{ matrix.arch }}-release
-        -DCMAKE_C_COMPILER=clang-"${LLVM_VERSION}"
-        -DCMAKE_CXX_COMPILER=clang++-"${LLVM_VERSION}"
+        -DCMAKE_C_COMPILER=gcc-14
+        -DCMAKE_CXX_COMPILER=g++-14
 
     - name: Build
       run: cmake --build --preset ${{ matrix.arch }}-release
