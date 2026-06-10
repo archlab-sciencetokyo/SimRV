@@ -14,7 +14,7 @@ jobs:
 
     runs-on: ubuntu-latest
     env:
-      LLVM_VERSION: "22"
+      LLVM_VERSION: "18"
 
     strategy:
       matrix:
@@ -30,7 +30,7 @@ jobs:
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
         sudo ./llvm.sh "${LLVM_VERSION}"
-        sudo apt-get install -y clang-"${LLVM_VERSION}" clang-tidy-"${LLVM_VERSION}" cmake ninja-build gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
+        sudo apt-get install -y clang-"${LLVM_VERSION}" clang-tidy-"${LLVM_VERSION}" libc++-"${LLVM_VERSION}"-dev libc++abi-"${LLVM_VERSION}"-dev cmake ninja-build gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
 
     - name: Fetch riscv-tests
       run: |
@@ -47,6 +47,9 @@ jobs:
         cmake --preset ${{ matrix.arch }}-release
         -DCMAKE_C_COMPILER=clang-"${LLVM_VERSION}"
         -DCMAKE_CXX_COMPILER=clang++-"${LLVM_VERSION}"
+        -DCMAKE_CXX_FLAGS="-stdlib=libc++"
+        -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++"
+        -DCMAKE_SHARED_LINKER_FLAGS="-stdlib=libc++"
 
     - name: Build
       run: cmake --build --preset ${{ matrix.arch }}-release

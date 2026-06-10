@@ -9,6 +9,7 @@
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 #include "simrv/pipeline/Decoder.hpp"
+#include "simrv/memory/MemoryAccess.hpp"
 
 namespace simrv::core {
 
@@ -167,9 +168,9 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     // Load Phase
     if (opcode == Opcode::Load || (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc)) {
         if (simrv::compiler::likely(addr < simrv::memory::kDramSize)) {
-            ctx.mem_rdata = simrv::memory::ram_read_fast(addr, ctx.funct3, machine.mmem);
+            ctx.mem_rdata = simrv::memory::ram_read_fast(addr, static_cast<Instruction>(ctx.funct3), machine.mmem);
         } else {
-            ctx.mem_rdata = MemoryAccess::loadInt(machine.memory_, *this, addr, ctx.funct3);
+            ctx.mem_rdata = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, addr, ctx.funct3);
         }
     }
 
@@ -190,7 +191,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                 }
             }
         } else {
-            ctx.fp_mem_rdata = MemoryAccess::loadFp(machine.memory_, *this, addr, ctx.funct3);
+            ctx.fp_mem_rdata = simrv::memory::MemoryAccess::loadFp(machine.memory_, *this, addr, ctx.funct3);
         }
     }
 
@@ -218,9 +219,9 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
             // Check tohost writes
             if (simrv::compiler::unlikely(addr == machine.s_isatest_tohost || addr == 0x80001000 || addr == 0x40008000)) {
                 const bool is_tohost_write =
-                    simrv::xlen::kIsXLen64 ? (ctx.funct3 == static_cast<Instruction>(Funct3::Sw) ||
-                                               ctx.funct3 == static_cast<Instruction>(Funct3::Sd))
-                                          : (ctx.funct3 == static_cast<Instruction>(Funct3::Sw));
+                    simrv::xlen::kIsXLen64 ? (ctx.funct3 == Funct3::Sw ||
+                                               ctx.funct3 == Funct3::Sd)
+                                          : (ctx.funct3 == Funct3::Sw);
                 if (is_tohost_write) {
                     machine.tohost = simrv::xlen::kIsXLen64
                                           ? ctx.mem_wdata
@@ -228,15 +229,15 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                 }
             } else if (simrv::compiler::unlikely(!simrv::xlen::kIsXLen64 &&
                                                  (addr == machine.s_isatest_tohost + 4 || addr == 0x80001004 || addr == 0x40008004))) {
-                const bool is_tohost_write = (ctx.funct3 == static_cast<Instruction>(Funct3::Sw));
+                const bool is_tohost_write = (ctx.funct3 == Funct3::Sw);
                 if (is_tohost_write) {
                     machine.tohost = (machine.tohost & 0x00000000FFFFFFFFULL) |
                                       (static_cast<uint64_t>(ctx.mem_wdata) << 32);
                 }
             }
-            simrv::memory::ram_write_fast(addr, ctx.mem_wdata, ctx.funct3, machine.mmem);
+            simrv::memory::ram_write_fast(addr, ctx.mem_wdata, static_cast<Instruction>(ctx.funct3), machine.mmem);
         } else {
-            MemoryAccess::storeInt(machine.memory_, *this, addr, ctx.mem_wdata, ctx.funct3);
+            simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, addr, ctx.mem_wdata, ctx.funct3);
         }
     }
 
@@ -258,7 +259,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                 }
             }
         } else {
-            MemoryAccess::storeFp(machine.memory_, *this, addr, ctx.fp_mem_wdata, ctx.funct3);
+            simrv::memory::MemoryAccess::storeFp(machine.memory_, *this, addr, ctx.fp_mem_wdata, ctx.funct3);
         }
     }
 

@@ -12,7 +12,7 @@ jobs:
   build-and-upload:
     runs-on: ubuntu-latest
     env:
-      LLVM_VERSION: "20"
+      LLVM_VERSION: "18"
 
     strategy:
       matrix:
@@ -29,7 +29,7 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh "${LLVM_VERSION}"
-          sudo apt-get install -y clang-"${LLVM_VERSION}" clang-tidy-"${LLVM_VERSION}" cmake ninja-build gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
+          sudo apt-get install -y clang-"${LLVM_VERSION}" clang-tidy-"${LLVM_VERSION}" libc++-"${LLVM_VERSION}"-dev libc++abi-"${LLVM_VERSION}"-dev cmake ninja-build gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
 
       - name: Fetch riscv-tests
         run: |
@@ -40,6 +40,9 @@ jobs:
           cmake --preset ${{ matrix.arch }}-release
           -DCMAKE_C_COMPILER=clang-"${LLVM_VERSION}"
           -DCMAKE_CXX_COMPILER=clang++-"${LLVM_VERSION}"
+          -DCMAKE_CXX_FLAGS="-stdlib=libc++"
+          -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++"
+          -DCMAKE_SHARED_LINKER_FLAGS="-stdlib=libc++"
 
       - name: Build
         run: cmake --build --preset ${{ matrix.arch }}-release
@@ -83,7 +86,9 @@ jobs:
           mkdir -p dist
           cp build/${{ matrix.arch }}-release/SimRV dist/SimRV
           tar -C dist -czf "${{ steps.names.outputs.asset_base }}.tar.gz" SimRV
+          cp build/${{ matrix.arch }}-release/SimRV "${{ steps.names.outputs.asset_base }}"
           sha256sum "${{ steps.names.outputs.asset_base }}.tar.gz" > "${{ steps.names.outputs.asset_base }}.sha256"
+          sha256sum "${{ steps.names.outputs.asset_base }}" >> "${{ steps.names.outputs.asset_base }}.sha256"
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v5
@@ -91,6 +96,7 @@ jobs:
           name: ${{ steps.names.outputs.asset_base }}
           path: |
             ${{ steps.names.outputs.asset_base }}.tar.gz
+            ${{ steps.names.outputs.asset_base }}
             ${{ steps.names.outputs.asset_base }}.sha256
 
       - name: Upload release assets
@@ -99,4 +105,5 @@ jobs:
         with:
           files: |
             ${{ steps.names.outputs.asset_base }}.tar.gz
+            ${{ steps.names.outputs.asset_base }}
             ${{ steps.names.outputs.asset_base }}.sha256
