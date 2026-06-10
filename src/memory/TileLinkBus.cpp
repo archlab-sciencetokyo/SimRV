@@ -5,10 +5,12 @@
 #include "simrv/memory/TileLinkBus.hpp"
 
 #include <cstdint>
+#include <format>
 #include <print>
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/Logger.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -50,17 +52,17 @@ void TileLinkBus::tick() {
             }
         } else {
             resp.opcode = TlOpcodeD::AccessAck;
-            if (machine_.s_isatest || (machine_.s_tuimode && !machine_.cpu.use_opensbi)) {
-                const bool is_tohost_write =
-                    simrv::xlen::kIsXLen64 ? (funct3 == static_cast<Instruction>(Funct3::Sw) ||
-                                              funct3 == static_cast<Instruction>(Funct3::Sd))
-                                          : (funct3 == static_cast<Instruction>(Funct3::Sw));
-                if (is_tohost_write && req.address == machine_.s_isatest_tohost) {
+            const bool is_tohost_write =
+                simrv::xlen::kIsXLen64 ? (funct3 == static_cast<Instruction>(Funct3::Sw) ||
+                                           funct3 == static_cast<Instruction>(Funct3::Sd))
+                                      : (funct3 == static_cast<Instruction>(Funct3::Sw));
+            if (is_tohost_write) {
+                if (req.address == machine_.s_isatest_tohost || req.address == 0x80001000 || req.address == 0x40008000) {
                     machine_.tohost = simrv::xlen::kIsXLen64
                                           ? req.data
                                           : ((machine_.tohost & 0xFFFFFFFF00000000ULL) | req.data);
-                } else if (!simrv::xlen::kIsXLen64 && is_tohost_write &&
-                           req.address == machine_.s_isatest_tohost + 4) {
+                } else if (!simrv::xlen::kIsXLen64 &&
+                           (req.address == machine_.s_isatest_tohost + 4 || req.address == 0x80001004 || req.address == 0x40008004)) {
                     machine_.tohost = (machine_.tohost & 0x00000000FFFFFFFFULL) |
                                       (static_cast<uint64_t>(req.data) << 32);
                 }
@@ -80,7 +82,7 @@ void TileLinkBus::tick() {
                         if (machine_.s_debugmode) {
                             static int mmio_log_count = 0;
                             if (mmio_log_count < 64) {
-                                std::println(
+                                simrv::log::info(
                                     "__ {:10} MMIO {:5} {:7} addr={:08x} data={:08x} f3={}",
                                     machine_.cpu.clint_mmio.mtime,
                                     req.opcode == TlOpcodeA::Get ? "read" : "write", node->name(),
@@ -112,7 +114,7 @@ void TileLinkBus::tick() {
 auto TileLinkBus::get_response(uint8_t source_id, TlChannelD& resp) -> bool {
     while (true) {
         auto it = std::ranges::find_if(
-            resp_queue_, [source_id](const auto& r) { return r.source == source_id; });
+            resp_queue_, [source_id](const auto& r) -> bool { return r.source == source_id; });
         if (it != resp_queue_.end()) {
             resp = *it;
             resp_queue_.erase(it);

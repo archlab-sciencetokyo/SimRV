@@ -13,7 +13,7 @@
 namespace simrv::log {
 
 namespace {
-simrv::log::LogCallback g_tui_callback = nullptr;
+simrv::log::LogCallback g_tui_callback = nullptr; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 }
 
 void set_tui_callback(LogCallback cb) {

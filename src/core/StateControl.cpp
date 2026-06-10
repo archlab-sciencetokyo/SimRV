@@ -37,26 +37,28 @@ void InterruptController::updateMip(PlicMmio& plic, ArchState& state) {
     // Evaluate Context 0 (M-mode)
     Word m_max_prio = 0;
     for (int i : std::views::iota(1, 32)) {
-        if ((plic.plic_pending[0] & (1u << i)) != 0 && (plic.plic_enables[0][0] & (1u << i)) != 0) {
-            if (plic.plic_priorities[i] > m_max_prio) {
-                m_max_prio = plic.plic_priorities[i];
+        const auto idx = static_cast<std::size_t>(i);
+        if ((plic.plic_pending.at(0) & (1u << i)) != 0 && (plic.plic_enables.at(0).at(0) & (1u << i)) != 0) {
+            if (plic.plic_priorities.at(idx) > m_max_prio) {
+                m_max_prio = plic.plic_priorities.at(idx);
             }
         }
     }
-    if (m_max_prio > plic.plic_threshold[0]) {
+    if (m_max_prio > plic.plic_threshold.at(0)) {
         m_ext = true;
     }
 
     // Evaluate Context 1 (S-mode)
     Word s_max_prio = 0;
     for (int i : std::views::iota(1, 32)) {
-        if ((plic.plic_pending[0] & (1u << i)) != 0 && (plic.plic_enables[1][0] & (1u << i)) != 0) {
-            if (plic.plic_priorities[i] > s_max_prio) {
-                s_max_prio = plic.plic_priorities[i];
+        const auto idx = static_cast<std::size_t>(i);
+        if ((plic.plic_pending.at(0) & (1u << i)) != 0 && (plic.plic_enables.at(1).at(0) & (1u << i)) != 0) {
+            if (plic.plic_priorities.at(idx) > s_max_prio) {
+                s_max_prio = plic.plic_priorities.at(idx);
             }
         }
     }
-    if (s_max_prio > plic.plic_threshold[1]) {
+    if (s_max_prio > plic.plic_threshold.at(1)) {
         s_ext = true;
     }
 
@@ -71,9 +73,9 @@ void InterruptController::setIrq(PlicMmio& plic, int irq_num, int state_val) {
     if (irq_num <= 0 || irq_num >= 32) return;
     const Word mask = static_cast<Word>(1) << irq_num;
     if (state_val != 0) {
-        plic.plic_pending[0] |= mask;
+        plic.plic_pending.at(0) |= mask;
     } else {
-        plic.plic_pending[0] &= ~mask;
+        plic.plic_pending.at(0) &= ~mask;
     }
     plic.cpu_.plic_update_mip();
 }
@@ -94,66 +96,69 @@ auto PlicMmio::get_context_for_offset(Address offset) const -> int {
 }
 
 auto PlicMmio::mmio_read(Address offset) -> Word {
-    if (offset >= 0 && offset < 0x1000) {
-        return plic_priorities[offset / 4];
+    if (offset < 0x1000) {
+        return plic_priorities.at(offset / 4);
     }
     if (offset >= 0x1000 && offset < 0x1080) {
-        return plic_pending[(offset - 0x1000) / 4];
+        return plic_pending.at((offset - 0x1000) / 4);
     }
     if (offset >= 0x2000 && offset < 0x2080) {
-        return plic_enables[0][(offset - 0x2000) / 4];
+        return plic_enables.at(0).at((offset - 0x2000) / 4);
     }
     if (offset >= 0x2080 && offset < 0x2100) {
-        return plic_enables[1][(offset - 0x2080) / 4];
+        return plic_enables.at(1).at((offset - 0x2080) / 4);
     }
     
     int context = get_context_for_offset(offset);
     if (context >= 0) {
+        const auto ctx_idx = static_cast<std::size_t>(context);
         Address ctx_base = 0x200000 + (context * 0x1000);
         if (offset == ctx_base) {
-            return plic_threshold[context];
+            return plic_threshold.at(ctx_idx);
         }
         if (offset == ctx_base + 4) {
             // Claim: evaluate highest priority pending & enabled for this context
             Word max_prio = 0;
             int claim_id = 0;
             for (int i : std::views::iota(1, 32)) {
-                if ((plic_pending[0] & (1u << i)) != 0 && (plic_enables[context][0] & (1u << i)) != 0) {
-                    if (plic_priorities[i] > max_prio) {
-                        max_prio = plic_priorities[i];
+                const auto idx = static_cast<std::size_t>(i);
+                if ((plic_pending.at(0) & (1u << i)) != 0 && (plic_enables.at(ctx_idx).at(0) & (1u << i)) != 0) {
+                    if (plic_priorities.at(idx) > max_prio) {
+                        max_prio = plic_priorities.at(idx);
                         claim_id = i;
                     }
                 }
             }
             if (claim_id > 0) {
                 // Clear the pending bit on claim
-                plic_pending[0] &= ~(1u << claim_id);
-                plic_claim[context] = claim_id;
+                plic_pending.at(0) &= ~(1u << claim_id);
+                plic_claim.at(ctx_idx) = static_cast<Word>(claim_id);
                 cpu_.plic_update_mip();
             }
-            return claim_id;
+            return static_cast<Word>(claim_id);
         }
     }
     return 0;
 }
 
 void PlicMmio::mmio_write(Address offset, Word wdata) {
-    if (offset >= 0 && offset < 0x1000) {
-        plic_priorities[offset / 4] = wdata;
+    if (offset < 0x1000) {
+        plic_priorities.at(offset / 4) = wdata;
     } else if (offset >= 0x2000 && offset < 0x2080) {
-        plic_enables[0][(offset - 0x2000) / 4] = wdata;
+        plic_enables.at(0).at((offset - 0x2000) / 4) = wdata;
     } else if (offset >= 0x2080 && offset < 0x2100) {
-        plic_enables[1][(offset - 0x2080) / 4] = wdata;
+        plic_enables.at(1).at((offset - 0x2080) / 4) = wdata;
     } else {
         int context = get_context_for_offset(offset);
         if (context >= 0) {
+            const auto ctx_idx = static_cast<std::size_t>(context);
             Address ctx_base = 0x200000 + (context * 0x1000);
             if (offset == ctx_base) {
-                plic_threshold[context] = wdata;
+                plic_threshold.at(ctx_idx) = wdata;
             } else if (offset == ctx_base + 4) {
                 // Complete: indicates the handler has finished with the IRQ
-                if (plic_claim[context] == wdata && wdata != 0) {
-                    plic_claim[context] = 0;
+                if (plic_claim.at(ctx_idx) == wdata && wdata != 0) {
+                    plic_claim.at(ctx_idx) = 0;
                 }
             }
         }

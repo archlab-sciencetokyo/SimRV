@@ -1,4 +1,5 @@
-#include <iostream>\n/**
+#include <iostream>
+/**
  * @file VirtioDevice.cpp
  * @brief Common implementation for VirtIO MMIO device registers.
  */
@@ -15,7 +16,7 @@ VirtioDevice::VirtioDevice(simrv::core::Machine& machine, Word irq)
     : machine_(machine), irq_(irq) {}
 
 auto VirtioDevice::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
-    std::cout << "VirtIO Access: addr=" << std::hex << req.address << "\n";
+    // std::cout << "VirtIO Access: addr=" << std::hex << req.address << "\n";
     const Address offset = req.address - base_address();
     if (req.opcode == memory::TlOpcodeA::Get) {
         resp.data = mmio_read(offset);
@@ -31,7 +32,7 @@ auto VirtioDevice::handle_request(const memory::TlChannelA& req, memory::TlChann
 
 void VirtioDevice::trigger_interrupt() {
     InterruptStatus |= 1;
-    machine_.cpu.plic_set_irq(irq_, 1);
+    machine_.cpu.plic_set_irq(static_cast<int>(irq_), 1);
 }
 
 auto VirtioDevice::mmio_read(Address offset) const -> Word {
@@ -100,7 +101,7 @@ void VirtioDevice::mmio_write(Address offset, Word wdata) {
         case virtio::MmioOffset::InterruptACK:
             InterruptStatus &= ~wdata;
             if (InterruptStatus == 0) {
-                machine_.cpu.plic_set_irq(irq_, 0);
+                machine_.cpu.plic_set_irq(static_cast<int>(irq_), 0);
             }
             break;
         case virtio::MmioOffset::Status:

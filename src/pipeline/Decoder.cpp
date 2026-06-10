@@ -19,11 +19,12 @@ const std::array<std::string_view, static_cast<size_t>(OperationIdCount)> OPERAT
     "FMSUB_S",    "FNMADD_S", "FNMSUB_S",  "FADD_S",    "FSUB_S",    "FMUL_S",   "FDIV_S",
     "FSQRT_S",    "FSGNJ_S",  "FSGNJN_S",  "FSGNJX_S",  "FMIN_S",    "FMAX_S",   "FCVT_W_S",
     "FCVT_WU_S",  "FMV_X_W",  "FEQ_S",     "FLT_S",     "FLE_S",     "FCLASS_S", "FCVT_S_W",
-    "FCVT_S_WU",  "FMV_W_X",  "FLD",       "FSD",       "FMADD_D",   "FMSUB_D",  "FNMSUB_D",
-    "FNMADD_D",   "FADD_D",   "FSUB_D",    "FMUL_D",    "FDIV_D",    "FSQRT_D",  "FSGNJ_D",
-    "FSGNJN_D",   "FSGNJX_D", "FMIN_D",    "FMAX_D",    "FCVT_S_D",  "FCVT_D_S", "FEQ_D",
-    "FLT_D",      "FLE_D",    "FCLASS_D",  "FCVT_W_D",  "FCVT_WU_D", "FCVT_D_W", "FCVT_D_WU",
-    "UNKNOWN"};
+    "FCVT_S_WU",  "FMV_W_X",  "FCVT_L_S",  "FCVT_LU_S", "FCVT_S_L",  "FCVT_S_LU", "FLD",
+    "FSD",        "FMADD_D",  "FMSUB_D",   "FNMSUB_D",  "FNMADD_D",  "FADD_D",   "FSUB_D",
+    "FMUL_D",     "FDIV_D",   "FSQRT_D",   "FSGNJ_D",   "FSGNJN_D",  "FSGNJX_D", "FMIN_D",
+    "FMAX_D",     "FCVT_S_D", "FCVT_D_S",  "FEQ_D",     "FLT_D",     "FLE_D",    "FCLASS_D",
+    "FCVT_W_D",   "FCVT_WU_D","FCVT_D_W",  "FCVT_D_WU", "FMV_X_D",   "FMV_D_X",  "FCVT_L_D",
+    "FCVT_LU_D",  "FCVT_D_L", "FCVT_D_LU", "UNKNOWN"};
 
 auto decoder(Instruction ir) -> OperationId {
     simrv::pipeline::Decoder dec(ir);
@@ -316,13 +317,17 @@ auto decoder(Instruction ir) -> OperationId {
                         if (funct3 == 2) return OperationId::FEQ_S;
                         break;
                     case 0x18:
-                        return (rs2 == 0)   ? OperationId::FCVT_W_S
-                               : (rs2 == 1) ? OperationId::FCVT_WU_S
-                                            : OperationId::UNKNOWN;
+                        if (rs2 == 0) return OperationId::FCVT_W_S;
+                        if (rs2 == 1) return OperationId::FCVT_WU_S;
+                        if (rs2 == 2) return OperationId::FCVT_L_S;
+                        if (rs2 == 3) return OperationId::FCVT_LU_S;
+                        return OperationId::UNKNOWN;
                     case 0x1A:
-                        return (rs2 == 0)   ? OperationId::FCVT_S_W
-                               : (rs2 == 1) ? OperationId::FCVT_S_WU
-                                            : OperationId::UNKNOWN;
+                        if (rs2 == 0) return OperationId::FCVT_S_W;
+                        if (rs2 == 1) return OperationId::FCVT_S_WU;
+                        if (rs2 == 2) return OperationId::FCVT_S_L;
+                        if (rs2 == 3) return OperationId::FCVT_S_LU;
+                        return OperationId::UNKNOWN;
                     case 0x1C:
                         return (funct3 == 0)   ? OperationId::FMV_X_W
                                : (funct3 == 1) ? OperationId::FCLASS_S
@@ -361,15 +366,23 @@ auto decoder(Instruction ir) -> OperationId {
                         if (funct3 == 2) return OperationId::FEQ_D;
                         break;
                     case 0x18:
-                        return (rs2 == 0)   ? OperationId::FCVT_W_D
-                               : (rs2 == 1) ? OperationId::FCVT_WU_D
-                                            : OperationId::UNKNOWN;
+                        if (rs2 == 0) return OperationId::FCVT_W_D;
+                        if (rs2 == 1) return OperationId::FCVT_WU_D;
+                        if (rs2 == 2) return OperationId::FCVT_L_D;
+                        if (rs2 == 3) return OperationId::FCVT_LU_D;
+                        return OperationId::UNKNOWN;
                     case 0x1A:
-                        return (rs2 == 0)   ? OperationId::FCVT_D_W
-                               : (rs2 == 1) ? OperationId::FCVT_D_WU
-                                            : OperationId::UNKNOWN;
+                        if (rs2 == 0) return OperationId::FCVT_D_W;
+                        if (rs2 == 1) return OperationId::FCVT_D_WU;
+                        if (rs2 == 2) return OperationId::FCVT_D_L;
+                        if (rs2 == 3) return OperationId::FCVT_D_LU;
+                        return OperationId::UNKNOWN;
                     case 0x1C:
-                        return (funct3 == 1) ? OperationId::FCLASS_D : OperationId::UNKNOWN;
+                        if (funct3 == 0) return OperationId::FMV_X_D;
+                        if (funct3 == 1) return OperationId::FCLASS_D;
+                        return OperationId::UNKNOWN;
+                    case 0x1E:
+                        return (funct3 == 0) ? OperationId::FMV_D_X : OperationId::UNKNOWN;
                     default:
                         break;
                 }
@@ -547,6 +560,8 @@ auto decompressInstruction(Instruction ir) -> Instruction {
                                      (((ir >> 12) & 0x1) ? 0xFFFFFF00 : 0);
                 return b_type(0x63, (op == 6) ? 0x0 : 0x1, rs1_p, 0, imm);
             }
+            default:
+                break;
         }
     } else if (quadrant == 0x2) {
         switch (op) {
@@ -607,6 +622,8 @@ auto decompressInstruction(Instruction ir) -> Instruction {
                     return s_type(0x27, 0x2, 2, rs2, imm);
                 }
             }
+            default:
+                break;
         }
     }
     return 0;

@@ -114,7 +114,7 @@ class SpikeLockstep {
      * @brief Fork Spike and open the log-commit pipe.
      * @return true on success.
      */
-    [[nodiscard]] bool start();
+    [[nodiscard]] auto start() -> bool;
 
     /** @brief Terminate Spike and close all file descriptors. */
     void stop();
@@ -126,7 +126,7 @@ class SpikeLockstep {
      * @brief Read the next commit record from Spike's output.
      * @return The record, or std::nullopt on EOF or parse error.
      */
-    [[nodiscard]] std::optional<SpikeCommitRecord> next_commit();
+    [[nodiscard]] auto next_commit() -> std::optional<SpikeCommitRecord>;
 
     /**
      * @brief Compare SimRV's committed state with the next Spike record.
@@ -139,7 +139,7 @@ class SpikeLockstep {
      * @param icount  Instruction count (for diagnostics).
      * @return true if states match, false on divergence.
      */
-    bool compare_and_report(const simrv::core::ArchState& state, uint64_t icount);
+    auto compare_and_report(const simrv::core::ArchState& state, uint64_t icount) -> bool;
 
     /** @return True if a divergence has been detected and simulation should halt. */
     [[nodiscard]] bool should_halt() const { return should_halt_; }
@@ -161,11 +161,11 @@ class SpikeLockstep {
     std::string line_buf_;
 
     /** Read one '\n'-terminated line from Spike's stderr; returns empty on EOF. */
-    [[nodiscard]] std::string read_line();
+    [[nodiscard]] auto read_line() -> std::string;
 
     /** Parse one Spike --log-commits line into a SpikeCommitRecord. */
-    [[nodiscard]] static std::optional<SpikeCommitRecord>
-    parse_commit_line(const std::string& line, SpikeCommitRecord& rec);
+    [[nodiscard]] static auto
+    parse_commit_line(const std::string& line, SpikeCommitRecord& rec) -> std::optional<SpikeCommitRecord>;
 
     /** Print a coloured divergence report. */
     static void print_divergence(uint64_t icount, Address simrv_pc,

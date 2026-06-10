@@ -51,14 +51,18 @@ class Machine {
     auto initialize(int argc, char* const* argv) -> int;
     /// Execute the main simulation loop until termination criteria are met.
     void run();
+    /// Execute the main simulation loop in optimized baremetal mode.
+    void run_baremetal();
+    /// Finalize cycle for tohost checks only.
+    void finalize_cycle_tohost();
     /// Stop the simulation loop.
     void stop() { is_running_ = false; }
+    /// Request system reboot.
+    void request_reboot() { reboot_requested = true; is_running_ = false; }
 
-    /// Generate binary image file for FPGA
-    void generate_binfile() const;
-
-    // ========== Execution State & Metrics ==========
     Counter tohost = 0;  // Host communication register (always 64-bit for HTIF).
+    bool reboot_requested = false;  // Reboot requested flag.
+    int exit_code = 0;             // Exit/status code of the simulation.
 
     // ========== Simulation Configuration Flags ==========
     bool s_appmode = false;        // Binary mode (start_pc=0, no OS)
@@ -71,7 +75,8 @@ class Machine {
     bool s_bp_trace = false;       // Enable branch prediction tracing
     bool s_isatest = false;        // Enable riscv-isa-tests tohost handling
     bool s_misa_override = false;  // True when CLI explicitly selected MISA profile
-    bool s_gen_binfile = false;    // Generate binary image file for FPGA
+    bool s_cycle_accurate = false; // Enable cycle-accurate performance simulation mode
+    bool s_high_performance = true; // Enable high-performance optimized simulation mode
 
     // ========== Debug / Co-Simulation Flags ==========
     bool     s_gdb_mode      = false;      // Enable GDB RSP stub

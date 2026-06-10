@@ -8,6 +8,7 @@
 #include "simrv/core/Tracer.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
+#include "simrv/pipeline/Decoder.hpp"
 
 namespace simrv::core {
 
@@ -74,51 +75,231 @@ void CPU::evaluate_timer_interrupt() {
 }
 
 void CPU::run_cycle(Machine& machine) {
-    if (!pipeline_task.handle) {
-        pipeline_task = run_pipeline_coroutine(machine);
+    uint32_t step_cycles = 1;
+
+    if (machine.s_cycle_accurate) {
+        uint64_t prev_imiss = icache.miss_count();
+        uint64_t prev_dmiss = dcache.miss_count();
+
+        if (!pipeline_task.handle) {
+            pipeline_task = run_pipeline_coroutine(&machine);
+        }
+
+        auto err = pipeline_task.resume();
+        if (err.has_value()) {
+            raise_exception(static_cast<TrapCause>(err->code), err->tval);
+        }
+
+        bool icache_miss = (icache.miss_count() > prev_imiss);
+        bool dcache_miss = (dcache.miss_count() > prev_dmiss);
+
+        bool is_branch = (pipeline_context.opcode == Opcode::Branch);
+        bool is_jump = (pipeline_context.opcode == Opcode::Jal || pipeline_context.opcode == Opcode::Jalr);
+        bool branched = pipeline_context.tkn;
+
+        step_cycles = pipeline_sim.step_instruction(
+            pipeline_context.cpc, pipeline_context.opcode, pipeline_context.rd,
+            pipeline_context.rs1, pipeline_context.rs2, pipeline_context.op_id, branched,
+            is_branch, is_jump, icache_miss, dcache_miss
+        );
+    } else {
+        if (machine.s_high_performance) {
+            const bool success = fetch_stage(machine, state_.pc) &&
+                                 decode_stage(machine) &&
+                                 execute_stage(machine) &&
+                                 memory_stage(machine) &&
+                                 writeback_stage(machine) &&
+                                 commit_stage(machine);
+            if (!success) {
+                const auto cause = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0));
+                raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
+            }
+        } else {
+            if (!pipeline_task.handle) {
+                pipeline_task = run_pipeline_coroutine(&machine);
+            }
+
+            auto err = pipeline_task.resume();
+            if (err.has_value()) {
+                raise_exception(static_cast<TrapCause>(err->code), err->tval);
+            }
+        }
     }
 
-    auto err = pipeline_task.resume();
-    if (err.has_value()) {
-        raise_exception(static_cast<TrapCause>(err->code), err->tval);
-    }
-
-    clint_mmio.mcycle++;
-    if (++clint_mmio.rtc_divider >= 10) {
-        clint_mmio.mtime++;
-        clint_mmio.rtc_divider = 0;
+    clint_mmio.mcycle += step_cycles;
+    clint_mmio.rtc_divider += static_cast<int>(step_cycles);
+    if (clint_mmio.rtc_divider >= 10) {
+        clint_mmio.mtime += clint_mmio.rtc_divider / 10;
+        clint_mmio.rtc_divider %= 10;
     }
 }
 
-auto CPU::run_pipeline_coroutine(Machine& machine) -> simrv::pipeline::PipelineTask {
+void CPU::run_cycle_baremetal(Machine& machine) {
+    pipeline_context.pending_exception = std::nullopt;
+    pipeline_context.pending_tval = 0;
+    
+    run_fetch_stage_baremetal(machine);
+    const bool success = !pipeline_context.pending_exception.has_value() &&
+                         decode_stage(machine) &&
+                         execute_stage(machine) &&
+                         (run_memory_stage_baremetal(machine), !pipeline_context.pending_exception.has_value()) &&
+                         writeback_stage(machine) &&
+                         (run_commit_stage_baremetal(machine), !pipeline_context.pending_exception.has_value());
+
+    if (simrv::compiler::unlikely(!success)) {
+        const auto cause = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0));
+        raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
+    }
+
+    clint_mmio.mcycle++;
+}
+
+void CPU::run_memory_stage_baremetal(Machine& machine) {
+    auto& ctx = pipeline_context;
+    if (ctx.pending_exception.has_value()) {
+        return;
+    }
+
+    const auto opcode = static_cast<Opcode>(ctx.opcode);
+    const auto funct5 = static_cast<Funct5Amo>(ctx.funct5);
+    const auto addr = ctx.mem_addr;
+
+    // Load Phase
+    if (opcode == Opcode::Load || (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc)) {
+        if (simrv::compiler::likely(addr < simrv::memory::kDramSize)) {
+            ctx.mem_rdata = simrv::memory::ram_read_fast(addr, ctx.funct3, machine.mmem);
+        } else {
+            ctx.mem_rdata = MemoryAccess::loadInt(machine.memory_, *this, addr, ctx.funct3);
+        }
+    }
+
+    if (opcode == Opcode::LoadFp) {
+        if (simrv::compiler::likely(addr < simrv::memory::kDramSize)) {
+            const auto f3 = ctx.funct3;
+            if (f3 == Funct3::Flw) {
+                const Word lo = simrv::memory::ram_read_fast(addr, static_cast<Instruction>(Funct3::Lw), machine.mmem);
+                ctx.fp_mem_rdata = static_cast<uint64_t>(kF32BoxerBits) | static_cast<uint64_t>(lo & kLower32Mask);
+            } else if (f3 == Funct3::Fld) {
+                if constexpr (simrv::xlen::kIsXLen64) {
+                    ctx.fp_mem_rdata = static_cast<FloatingRegister>(
+                        simrv::memory::ram_read_fast(addr, static_cast<Instruction>(Funct3::Ld), machine.mmem));
+                } else {
+                    const Word lo = simrv::memory::ram_read_fast(addr, static_cast<Instruction>(Funct3::Lw), machine.mmem);
+                    const Word hi = simrv::memory::ram_read_fast(addr + 4, static_cast<Instruction>(Funct3::Lw), machine.mmem);
+                    ctx.fp_mem_rdata = static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32);
+                }
+            }
+        } else {
+            ctx.fp_mem_rdata = MemoryAccess::loadFp(machine.memory_, *this, addr, ctx.funct3);
+        }
+    }
+
+    if (opcode == Opcode::Amo && funct5 == Funct5Amo::Lr) {
+        state_.load_res = addr;
+        state_.reserved = 1;
+    }
+
+    // Prepare Store Data
+    ctx.mem_wdata = (opcode != Opcode::Amo || funct5 == Funct5Amo::Sc)
+                        ? ctx.rrs2
+                        : execute::ExecuteUnit::aluAmo(ctx.rrs2, ctx.mem_rdata, funct5, ctx.funct3);
+
+    if (opcode == Opcode::StoreFp) {
+        ctx.mem_wdata =
+            static_cast<Register>(ctx.fp_mem_wdata & static_cast<FloatingRegister>(kLower32Mask));
+    }
+
+    // Store Phase
+    if ((opcode == Opcode::Store) ||
+        (opcode == Opcode::Amo &&
+          (funct5 == Funct5Amo::Sc && (ctx.wb_data == 0u) && (state_.reserved != 0u))) ||
+        (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr && funct5 != Funct5Amo::Sc)) {
+        if (simrv::compiler::likely(addr < simrv::memory::kDramSize)) {
+            // Check tohost writes
+            if (simrv::compiler::unlikely(addr == machine.s_isatest_tohost || addr == 0x80001000 || addr == 0x40008000)) {
+                const bool is_tohost_write =
+                    simrv::xlen::kIsXLen64 ? (ctx.funct3 == static_cast<Instruction>(Funct3::Sw) ||
+                                               ctx.funct3 == static_cast<Instruction>(Funct3::Sd))
+                                          : (ctx.funct3 == static_cast<Instruction>(Funct3::Sw));
+                if (is_tohost_write) {
+                    machine.tohost = simrv::xlen::kIsXLen64
+                                          ? ctx.mem_wdata
+                                          : ((machine.tohost & 0xFFFFFFFF00000000ULL) | ctx.mem_wdata);
+                }
+            } else if (simrv::compiler::unlikely(!simrv::xlen::kIsXLen64 &&
+                                                 (addr == machine.s_isatest_tohost + 4 || addr == 0x80001004 || addr == 0x40008004))) {
+                const bool is_tohost_write = (ctx.funct3 == static_cast<Instruction>(Funct3::Sw));
+                if (is_tohost_write) {
+                    machine.tohost = (machine.tohost & 0x00000000FFFFFFFFULL) |
+                                      (static_cast<uint64_t>(ctx.mem_wdata) << 32);
+                }
+            }
+            simrv::memory::ram_write_fast(addr, ctx.mem_wdata, ctx.funct3, machine.mmem);
+        } else {
+            MemoryAccess::storeInt(machine.memory_, *this, addr, ctx.mem_wdata, ctx.funct3);
+        }
+    }
+
+    if (opcode == Opcode::StoreFp) {
+        if (simrv::compiler::likely(addr < simrv::memory::kDramSize)) {
+            const auto f3 = ctx.funct3;
+            if (f3 == Funct3::Fsw) {
+                simrv::memory::ram_write_fast(addr, static_cast<Word>(ctx.fp_mem_wdata & static_cast<FloatingRegister>(kLower32Mask)),
+                                             static_cast<Instruction>(Funct3::Sw), machine.mmem);
+            } else if (f3 == Funct3::Fsd) {
+                if constexpr (simrv::xlen::kIsXLen64) {
+                    simrv::memory::ram_write_fast(addr, static_cast<Word>(ctx.fp_mem_wdata),
+                                                 static_cast<Instruction>(Funct3::Sd), machine.mmem);
+                } else {
+                    simrv::memory::ram_write_fast(addr, static_cast<Word>(ctx.fp_mem_wdata & static_cast<FloatingRegister>(kLower32Mask)),
+                                                 static_cast<Instruction>(Funct3::Sw), machine.mmem);
+                    simrv::memory::ram_write_fast(addr + 4, static_cast<Word>((ctx.fp_mem_wdata >> 32) & static_cast<FloatingRegister>(kLower32Mask)),
+                                                 static_cast<Instruction>(Funct3::Sw), machine.mmem);
+                }
+            }
+        } else {
+            MemoryAccess::storeFp(machine.memory_, *this, addr, ctx.fp_mem_wdata, ctx.funct3);
+        }
+    }
+
+    if ((opcode == Opcode::Store) || (opcode == Opcode::StoreFp) ||
+        (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr)) {
+        if (!ctx.pending_exception.has_value()) {
+            state_.reserved = 0;
+        }
+    }
+}
+
+auto CPU::run_pipeline_coroutine(Machine* machine_ptr) -> simrv::pipeline::PipelineTask {
+    Machine& machine = *machine_ptr;
     while (true) {
         if (!fetch_stage(machine, state_.pc)) {
-            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value(),
+            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0)),
                                 .tval = pipeline_context.pending_tval};
             continue;
         }
         if (!decode_stage(machine)) {
-            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value(),
+            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0)),
                                 .tval = pipeline_context.pending_tval};
             continue;
         }
         if (!execute_stage(machine)) {
-            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value(),
+            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0)),
                                 .tval = pipeline_context.pending_tval};
             continue;
         }
         if (!memory_stage(machine)) {
-            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value(),
+            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0)),
                                 .tval = pipeline_context.pending_tval};
             continue;
         }
         if (!writeback_stage(machine)) {
-            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value(),
+            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0)),
                                 .tval = pipeline_context.pending_tval};
             continue;
         }
         if (!commit_stage(machine)) {
-            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value(),
+            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0)),
                                 .tval = pipeline_context.pending_tval};
             continue;
         }

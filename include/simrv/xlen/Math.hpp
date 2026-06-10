@@ -30,7 +30,14 @@ constexpr auto mul_high_unsigned32(std::uint32_t lhs, std::uint32_t rhs) -> std:
 
 constexpr auto mul_high_unsigned64(std::uint64_t lhs, std::uint64_t rhs) -> std::uint64_t {
 #if defined(__SIZEOF_INT128__)
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
     const auto product = static_cast<unsigned __int128>(lhs) * static_cast<unsigned __int128>(rhs);
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
     return static_cast<std::uint64_t>(product >> 64u);
 #else
     constexpr std::uint64_t mask32 = 0xffffffffULL;

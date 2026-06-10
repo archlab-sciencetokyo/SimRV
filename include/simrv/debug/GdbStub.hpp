@@ -96,12 +96,12 @@ class GdbStub {
     /** Send a pre-computed packet string directly. */
     void send_raw(const std::string& s);
     /** Read one character from the connection; returns -1 on error/close. */
-    [[nodiscard]] int recv_char();
+    [[nodiscard]] auto recv_char() -> int;
     /**
      * @brief Read one complete RSP packet into `out`.
      * @return true on success, false if connection closed or malformed.
      */
-    [[nodiscard]] bool recv_packet(std::string& out);
+    [[nodiscard]] auto recv_packet(std::string& out) -> bool;
 
     // ---- RSP command handlers ----
     /**
@@ -111,8 +111,8 @@ class GdbStub {
      * @return true if execution should resume (continue or detach), false to
      *         keep processing commands.
      */
-    [[nodiscard]] bool handle_packet(const std::string& pkt,
-                                     simrv::core::Machine& machine);
+    [[nodiscard]] auto handle_packet(const std::string& pkt,
+                                     simrv::core::Machine& machine) -> bool;
 
     void handle_query(const std::string& pkt, simrv::core::Machine& machine);
 

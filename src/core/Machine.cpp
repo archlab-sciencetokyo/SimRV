@@ -19,6 +19,10 @@
 
 #include "simrv/xlen/Types.hpp"
 
+namespace simrv::memory {
+bool g_appmode = false;
+}
+
 namespace simrv::core {
 Machine::Machine() : memory_(*this) {
     cpu.machine_ = this;
@@ -28,9 +32,13 @@ Machine::Machine() : memory_(*this) {
  * @brief Run the simulation loop until a termination condition is reached.
  */
 void Machine::run() {
-    if (s_gen_binfile) {
-        generate_binfile();
+    const bool runs_gdb = gdb_stub && gdb_stub->is_connected();
+    const bool runs_lockstep = spike_lockstep && spike_lockstep->is_running();
+    if (s_appmode && !runs_gdb && !runs_lockstep) {
+        run_baremetal();
+        return;
     }
+
     if (s_tuimode && uart) {
         uart->tui_pause_loop();
     }
@@ -59,6 +67,39 @@ void Machine::run() {
             spike_lockstep->compare_and_report(cpu.state(), cpu.e_icount);
             if (spike_lockstep->should_halt()) {
                 simrv::log::error("Lockstep: halting on divergence");
+                is_running_ = false;
+            }
+        }
+    }
+}
+
+void Machine::run_baremetal() {
+    if (s_tuimode && uart) {
+        uart->tui_pause_loop();
+    }
+
+    uint32_t cycle_count = 0;
+
+    while (is_running_) {
+        cpu.run_cycle_baremetal(*this);
+
+        if (simrv::compiler::unlikely(tohost != 0)) {
+            finalize_cycle_tohost();
+        }
+
+        cycle_count++;
+        if (simrv::compiler::unlikely(cycle_count >= 1024)) {
+            cycle_count = 0;
+
+            // Tick the CLINT timer: 1024 CPU cycles is approximately 102 CLINT timer ticks
+            cpu.clint_mmio.mtime += 102;
+
+            if (uart) {
+                uart->non_tui_poll_input();
+            }
+
+            if (cpu.clint_mmio.mtime >= s_fincnt - 1) {
+                simrv::log::info("finished by -e option");
                 is_running_ = false;
             }
         }
@@ -117,7 +158,7 @@ void Machine::finalize_cycle() {
         if (simrv::tui::g_resized) {
             uart->refresh_tui();
         }
-        if ((cpu.clint_mmio.mtime % 50000) == 0) {
+        if ((cpu.e_icount % 20000) == 0) {
             uart->tui_update();
             static auto last_tui_render = std::chrono::steady_clock::now();
             auto now = std::chrono::steady_clock::now();
@@ -151,6 +192,10 @@ void Machine::finalize_cycle() {
                                             cpu.pipeline_context.opcode, cpu.pipeline_context.tkn);
     }
 
+    finalize_cycle_tohost();
+}
+
+void Machine::finalize_cycle_tohost() {
     if (tohost == 0) {
         return;
     }
@@ -172,31 +217,58 @@ void Machine::finalize_cycle() {
         return;
     }
 
-    // TUI Halting check
-    if (s_tuimode && uart && uart->tui()) {
-        if (tohost == 1) {
-            simrv::log::info("Program Halted (SUCCESS / PASS)");
-            uart->tui_pause_loop();
+    // Compatibility for older 32-bit SimRV HTIF protocol:
+    // writes of ((CMD_PRINT_CHAR << 16) | c) or (CMD_POWER_OFF << 16)
+    if (dev == 0 && cmd == 0) {
+        const auto old_cmd = static_cast<uint16_t>(tohost >> 16);
+        const auto old_payload = static_cast<uint16_t>(tohost & 0xffffULL);
+        if (old_cmd == 1) { // CMD_PRINT_CHAR
+            const char ch = static_cast<char>(old_payload & 0xff);
+            if (s_tuimode && uart && uart->tui()) {
+                uart->tui()->handle_char_write(ch);
+            } else {
+                std::print("{}", ch);
+                fflush(stdout);
+            }
+            tohost = 0;
+            return;
+        } else if (old_cmd == 2) { // CMD_POWER_OFF
+            simrv::log::info("[Power] Compatibility: guest requested poweroff via tohost (old protocol).");
+            exit_code = 0;
             is_running_ = false;
-        } else if ((tohost & 1) != 0u) {
-            simrv::log::error("Program Halted (FAIL / EXIT code={})", tohost >> 1);
-            uart->tui_pause_loop();
-            is_running_ = false;
+            tohost = 0;
+            return;
         }
-        tohost = 0;
-        return;
     }
 
-    if (s_isatest) {
-        if (tohost == 1) {
+    // Universal tohost halting check (e.g. exit code via tohost)
+    if (tohost == 1) {
+        if (s_isatest) {
             simrv::log::info("ISA TEST PASS");
-            is_running_ = false;
-            return;
-        } else if ((tohost & 1) != 0u) {
-            simrv::log::error("ISA TEST FAIL code={} (tohost=0x{:016x})", tohost >> 1, tohost);
-            is_running_ = false;
-            return;
+        } else {
+            simrv::log::info("Program Halted (SUCCESS / PASS)");
         }
+        exit_code = 0;
+        if (s_tuimode && uart && uart->tui()) {
+            uart->tui_pause_loop();
+        }
+        is_running_ = false;
+        tohost = 0;
+        return;
+    } else if ((tohost & 1) != 0u) {
+        const int code = static_cast<int>(tohost >> 1);
+        if (s_isatest) {
+            simrv::log::error("ISA TEST FAIL code={} (tohost=0x{:016x})", code, tohost);
+        } else {
+            simrv::log::error("Program Halted (FAIL / EXIT code={})", code);
+        }
+        exit_code = code == 0 ? 1 : code;
+        if (s_tuimode && uart && uart->tui()) {
+            uart->tui_pause_loop();
+        }
+        is_running_ = false;
+        tohost = 0;
+        return;
     }
 
 

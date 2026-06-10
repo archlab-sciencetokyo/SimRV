@@ -15,6 +15,7 @@
 
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/Tui.hpp"
+#include "simrv/tui/TuiKey.hpp"
 
 namespace simrv::device {
 
@@ -60,7 +61,7 @@ Uart::~Uart() = default;
 
 auto Uart::parse_sgr_mouse(const std::string& seq, int& b, int& x, int& y) -> bool {
     // Expected SGR mouse format: ESC [ < b ; x ; y M|m
-    if (seq.size() < 7 || seq[0] != '\x1b' || seq[1] != '[' || seq[2] != '<') {
+    if (seq.size() < 7 || seq.at(0) != '\x1b' || seq.at(1) != '[' || seq.at(2) != '<') {
         return false;
     }
 
@@ -112,7 +113,7 @@ auto Uart::consume_tui_control_sequence(uint8_t first_byte) -> bool {
     uint8_t byte = 0;
     while (static_cast<int>(esc_buf_.size()) < kMaxSeqLen) {
         bool polled = false;
-        for (int retry = 0; retry < 10; ++retry) {
+        for (int retry = 0; retry < 5; ++retry) {
             if (poll_uart_rx(byte)) {
                 polled = true;
                 break;
@@ -123,12 +124,14 @@ auto Uart::consume_tui_control_sequence(uint8_t first_byte) -> bool {
             break;
         }
         esc_buf_.push_back(static_cast<char>(byte));
-        if (byte == 'M' || byte == 'm' || byte == '~' || byte == 'A' || byte == 'B' ||
-            byte == 'C' || byte == 'D') {
+        if (byte == 'M' || byte == 'm' || byte == '~' ||
+            (byte >= 'A' && byte <= 'Z' && byte != 'O') ||
+            (byte >= 'a' && byte <= 'z')) {
             break;
         }
     }
 
+    // 1. Mouse reporting
     int button = 0;
     int x = 0;
     int y = 0;
@@ -137,7 +140,48 @@ auto Uart::consume_tui_control_sequence(uint8_t first_byte) -> bool {
         return true;
     }
 
-    // Non-mouse escape sequence consumed deliberately in TUI mode.
+    // 2. Alt modifier shortcuts
+    if (esc_buf_.size() == 2) {
+        char key = esc_buf_.at(1);
+        if (key == 'r' || key == 'R') {
+            tui_->cycle_reg_page();
+            return true;
+        }
+        if (key == 'l' || key == 'L') {
+            tui_->cycle_layout();
+            return true;
+        }
+        if (key == 'u' || key == 'U') {
+            tui_->scroll(5);
+            return true;
+        }
+        if (key == 'd' || key == 'D') {
+            tui_->scroll(-5);
+            return true;
+        }
+        if (key == 'w' || key == 'W') {
+            tui_->scroll_regs(-2);
+            return true;
+        }
+        if (key == 's' || key == 'S') {
+            tui_->scroll_regs(2);
+            return true;
+        }
+        if (key == 'z' || key == 'Z') {
+            tui_->reset_scroll_regs();
+            return true;
+        }
+        if (key == 'c' || key == 'C') {
+            tui_->reset_scroll();
+            return true;
+        }
+    }
+
+    // 3. Forward all other escape sequences (like arrow keys) to the guest OS
+    for (char c : esc_buf_) {
+        rx_fifo_.push(static_cast<uint8_t>(c));
+    }
+    update_uart_irq(machine_, true, uart_ier_, tx_irq_pending_);
     return true;
 }
 
@@ -302,44 +346,14 @@ void Uart::tui_update() {
             continue;
         }
 
-        if (byte == 17 || byte == 3) {  // Ctrl-Q or Ctrl-C
+        const auto key = static_cast<simrv::tui::TuiKey>(byte);
+        if (key == simrv::tui::TuiKey::CtrlQ) {
             machine_.is_running_ = false;
             return;
         }
-        if (byte == 16) {  // Ctrl-P: Toggle Pause
+        if (key == simrv::tui::TuiKey::CtrlP) {
             tui_pause_loop();
             return;
-        }
-        if (byte == 9) {  // Tab: Cycle Layout
-            if (tui_) {
-                tui_->cycle_layout();
-            }
-            return;
-        }
-        if (byte == 'r' || byte == 'R') {  // R: Cycle Register Page
-            if (tui_) {
-                tui_->cycle_reg_page();
-            }
-            return;
-        }
-        if (byte == 'u' || byte == 'U') {  // u/U: Scroll Up
-            if (tui_) {
-                tui_->scroll(5);
-            }
-            return;
-        }
-        if (byte == 'd' || byte == 'D') {  // d/D: Scroll Down
-            if (tui_) {
-                tui_->scroll(-5);
-            }
-            return;
-        }
-        if (tui_ && tui_->get_scroll_offset() > 0) {
-            if (byte == 'c' || byte == 'C' || byte == '\r' ||
-                byte == '\n') {  // c/C/Enter: Reset Scroll to Live
-                tui_->reset_scroll();
-                return;
-            }
         }
         rx_fifo_.push(byte);
         update_uart_irq(machine_, true, uart_ier_, tx_irq_pending_);
@@ -363,35 +377,37 @@ void Uart::tui_pause_loop() {
                 continue;
             }
 
-            if (byte == 16) {  // Ctrl-P to resume
+            const auto key = static_cast<simrv::tui::TuiKey>(byte);
+            if (key == simrv::tui::TuiKey::CtrlP || key == simrv::tui::TuiKey::c || key == simrv::tui::TuiKey::C) {
                 paused = false;
-            } else if (byte == 'c' || byte == 'C') {  // 'c'/'C': Continue (or reset scroll first if scrolled)
-                paused = false;
-            } else if (byte == '\r' || byte == '\n') {  // Enter: snap to live first
+            } else if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
                 if (tui_) {
                     tui_->reset_scroll();
                 }
-            } else if (byte == 17 || byte == 3 || byte == 'q' ||
-                       byte == 'Q') {  // Ctrl-Q/Ctrl-C/q/Q to quit
+            } else if (key == simrv::tui::TuiKey::CtrlQ || key == simrv::tui::TuiKey::CtrlC ||
+                       key == simrv::tui::TuiKey::q || key == simrv::tui::TuiKey::Q) {
                 machine_.is_running_ = false;
                 paused = false;
-            } else if (byte == 9) {  // Tab to cycle layout
+            } else if (key == simrv::tui::TuiKey::Tab) {
                 if (tui_) {
                     tui_->cycle_layout();
                 }
-            } else if (byte == 'r' || byte == 'R') {  // 'r'/'R' to cycle register page
+            } else if (key == simrv::tui::TuiKey::r || key == simrv::tui::TuiKey::R) {
                 if (tui_) {
                     tui_->cycle_reg_page();
                 }
-            } else if (byte == 'u' || byte == 'U') {  // u/U: Scroll Up
+            } else if (key == simrv::tui::TuiKey::u || key == simrv::tui::TuiKey::U) {
                 if (tui_) {
                     tui_->scroll(5);
                 }
-            } else if (byte == 'd' || byte == 'D') {  // d/D: Scroll Down
+            } else if (key == simrv::tui::TuiKey::d || key == simrv::tui::TuiKey::D) {
                 if (tui_) {
                     tui_->scroll(-5);
                 }
-            } else if (byte == 's' || byte == 'S' || byte == ' ') {  // 's'/'S'/Space: Step
+            } else if (key == simrv::tui::TuiKey::s || key == simrv::tui::TuiKey::S || key == simrv::tui::TuiKey::Space) {
+                if (tui_) {
+                    tui_->update_cache();
+                }
                 uint64_t old_icount = machine_.cpu.e_icount;
                 while (machine_.cpu.e_icount == old_icount && machine_.is_running_) {
                     machine_.prepare_cycle();
@@ -404,6 +420,9 @@ void Uart::tui_pause_loop() {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
+    if (tui_) {
+        tui_->update_cache();
+    }
     tui_->set_paused(false);
     tui_->reset_scroll();
     tui_->render();

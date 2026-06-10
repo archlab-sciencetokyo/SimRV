@@ -85,13 +85,13 @@ void Tracer::dump_init_artifacts() {
     }
 
     std::ofstream out("trace/init_reg.txt");
-    auto write_xlen = [&out](std::string_view lhs, Word value) {
+    auto write_xlen = [&out](std::string_view lhs, Word value) -> void {
         std::println(out, "{}={}'h{:0{}x};", lhs, simrv::xlen::kXLenBits, value, kXLenHexDigits);
     };
-    auto write_32 = [&out](std::string_view lhs, Word value) {
+    auto write_32 = [&out](std::string_view lhs, Word value) -> void {
         std::println(out, "{}=32'h{:08x};", lhs, value);
     };
-    auto write_64 = [&out](std::string_view lhs, Counter value) {
+    auto write_64 = [&out](std::string_view lhs, Counter value) -> void {
         std::println(out, "{}=64'h{:016x};", lhs, value);
     };
 
@@ -137,27 +137,27 @@ void Tracer::dump_init_artifacts() {
 
     for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
         std::println(out, "mmu.TLB_inst_r.r_valid[{}] ={};", i,
-                     static_cast<int>(cpu->tlb.inst_r[i].valid));
+                     static_cast<int>(cpu->tlb.inst_r.at(i).valid));
         std::println(out, "mmu.TLB_inst_r.mem[{}][39:22] =18'h{:05x};", i,
-                     cpu->tlb.inst_r[i].v_addr >> 14);
+                     cpu->tlb.inst_r.at(i).v_addr >> 14);
         std::println(out, "mmu.TLB_inst_r.mem[{}][21:0] =22'h{:06x};", i,
-                     cpu->tlb.inst_r[i].p_addr >> 10);
+                     cpu->tlb.inst_r.at(i).p_addr >> 10);
     }
     for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
         std::println(out, "mmu.TLB_data_r.r_valid[{}] ={};", i,
-                     static_cast<int>(cpu->tlb.data_r[i].valid));
+                     static_cast<int>(cpu->tlb.data_r.at(i).valid));
         std::println(out, "mmu.TLB_data_r.mem[{}][39:22] =18'h{:05x};", i,
-                     cpu->tlb.data_r[i].v_addr >> 14);
+                     cpu->tlb.data_r.at(i).v_addr >> 14);
         std::println(out, "mmu.TLB_data_r.mem[{}][21:0] =22'h{:06x};", i,
-                     cpu->tlb.data_r[i].p_addr >> 10);
+                     cpu->tlb.data_r.at(i).p_addr >> 10);
     }
     for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
         std::println(out, "mmu.TLB_data_w.r_valid[{}] ={};", i,
-                     static_cast<int>(cpu->tlb.data_w[i].valid));
+                     static_cast<int>(cpu->tlb.data_w.at(i).valid));
         std::println(out, "mmu.TLB_data_w.mem[{}][39:22] =18'h{:05x};", i,
-                     cpu->tlb.data_w[i].v_addr >> 14);
+                     cpu->tlb.data_w.at(i).v_addr >> 14);
         std::println(out, "mmu.TLB_data_w.mem[{}][21:0] =22'h{:06x};", i,
-                     cpu->tlb.data_w[i].p_addr >> 10);
+                     cpu->tlb.data_w.at(i).p_addr >> 10);
     }
 
     write_32("mmu.console.QueueSel       ", console->QueueSel);
@@ -205,7 +205,7 @@ void Tracer::write_instruction_mix_report() {
     std::println(out, "INSTRUCTION MIX");
     uint64_t total = 0;
     for (auto const [i, count] : std::views::enumerate(machine_.cpu.e_instmix)) {
-        std::println(out, "{} : {:10}", simrv::pipeline::OPERATION_NAME[i], count);
+        std::println(out, "{} : {:10}", simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(i)), count);
         total += count;
     }
     std::println(out, "TOTAL      : {:10}", total);
@@ -214,25 +214,55 @@ void Tracer::write_instruction_mix_report() {
 
 void Tracer::print_summary() {
     using simrv::util::format_with_commas;
+    using simrv::util::format_scaled;
     const auto now = std::chrono::steady_clock::now();
     const auto elapsed =
         std::chrono::duration_cast<std::chrono::microseconds>(now - machine_.s_start_time).count();
     const auto etime = static_cast<Counter>(elapsed == 0 ? 1 : elapsed);
     
-    simrv::log::info("Elapsed clocks (mtime)   : {:>11}", format_with_commas(machine_.cpu.clint_mmio.mtime));
-    simrv::log::info("Executed instructions    : {:>11}", format_with_commas(machine_.cpu.e_icount));
-    simrv::log::info("Fetched compressed insns : {:>11}", format_with_commas(machine_.cpu.e_ccount));
+    const auto mcycle = machine_.cpu.clint_mmio.mcycle;
+    const auto icount = machine_.cpu.e_icount;
+    const auto ccount = machine_.cpu.e_ccount;
     
+    const double cpi = icount == 0 ? 0.0 : static_cast<double>(mcycle) / static_cast<double>(icount);
+    const double ipc = mcycle == 0 ? 0.0 : static_cast<double>(icount) / static_cast<double>(mcycle);
+    const double comp_ratio = icount == 0 ? 0.0 : (static_cast<double>(ccount) * 100.0) / static_cast<double>(icount);
     const double etime_sec = static_cast<double>(etime) / 1000000.0;
-    simrv::log::info("Elapsed time (usec)      : {:>11} usec ({:.2f} sec)", format_with_commas(etime), etime_sec);
     
-    const auto kips = machine_.cpu.e_icount * 1000UL / etime;
-    const double mips = static_cast<double>(machine_.cpu.e_icount) / static_cast<double>(etime);
-    if (mips >= 1.0) {
-        simrv::log::info("Simulation speed (KIPS)  : {:>11} ({:.2f} MIPS)", format_with_commas(kips), mips);
+    simrv::log::info("--------------------------------------------------");
+    simrv::log::info("                Execution Summary                 ");
+    simrv::log::info("--------------------------------------------------");
+    if (machine_.s_cycle_accurate) {
+        simrv::log::info("Simulation Mode          :         Cycle-Accurate");
     } else {
-        simrv::log::info("Simulation speed (KIPS)  : {:>11}", format_with_commas(kips));
+        simrv::log::info("Simulation Mode          :         Functional-Only");
     }
+    simrv::log::info("Elapsed cycles (clocks)  : {:>12}  ({})", format_scaled(mcycle), format_with_commas(mcycle));
+    simrv::log::info("Executed instructions    : {:>12}  ({})", format_scaled(icount), format_with_commas(icount));
+    simrv::log::info("Fetched compressed insns : {:>12}  ({})  [{:.1f}%]", format_scaled(ccount), format_with_commas(ccount), comp_ratio);
+    simrv::log::info("Cycles Per Instr (CPI)   : {:>12.3f}", cpi);
+    simrv::log::info("Instrs Per Cycle (IPC)   : {:>12.3f}", ipc);
+    
+    if (machine_.s_cycle_accurate) {
+        const auto& ps = machine_.cpu.pipeline_sim;
+        double stall_pct = mcycle == 0 ? 0.0 : (static_cast<double>(ps.stall_cycles()) * 100.0) / static_cast<double>(mcycle);
+        simrv::log::info("Total Stall/Bubble Cycles: {:>12}  [{:.1f}%]", format_with_commas(ps.stall_cycles()), stall_pct);
+        simrv::log::info(" - Data RAW Stalls       : {:>12}", format_with_commas(ps.data_hazard_stalls()));
+        simrv::log::info(" - Control Bubbles       : {:>12}", format_with_commas(ps.control_hazard_bubbles()));
+        simrv::log::info(" - ICache Miss Stalls    : {:>12}", format_with_commas(ps.icache_stalls()));
+        simrv::log::info(" - DCache Miss Stalls    : {:>12}", format_with_commas(ps.dcache_stalls()));
+    }
+    
+    simrv::log::info("Elapsed time (real)      : {:>12.3f} sec", etime_sec);
+    
+    const auto kips = icount * 1000UL / etime;
+    const double mips = static_cast<double>(icount) / static_cast<double>(etime);
+    if (mips >= 1.0) {
+        simrv::log::info("Simulation speed         : {:>12.2f} MIPS ({}/s)", mips, format_with_commas(kips * 1000));
+    } else {
+        simrv::log::info("Simulation speed         : {:>12} KIPS", format_with_commas(kips));
+    }
+    simrv::log::info("--------------------------------------------------");
     
     if (machine_.s_use_mix) {
         write_instruction_mix_report();
@@ -261,10 +291,10 @@ void Tracer::emit_branch_prediction_trace(Counter mtime, Register cpc, Register 
     }
 
     const auto opcode = r_opcode;
-    const int ir_jb = static_cast<const int>((opcode == Opcode::Jal) || (opcode == Opcode::Jalr) ||
+    const int ir_jb = static_cast<int>((opcode == Opcode::Jal) || (opcode == Opcode::Jalr) ||
                                              (opcode == Opcode::Branch));
     const int ir_jump = (opcode == Opcode::Jal) ? 2 : (opcode == Opcode::Jalr) ? 3 : 0;
-    const int ir_branch = static_cast<const int>(opcode == Opcode::Branch);
+    const int ir_branch = static_cast<int>(opcode == Opcode::Branch);
 
     const Word targ = ((ir_jump | ir_branch) != 0) ? jmp_pc : 0;
     std::println(fp_bpred_, "{:08} {:0{}x} {:0{}x} {} {} {} {}", static_cast<int>(mtime), cpc,
@@ -312,18 +342,18 @@ void Tracer::write_trace_snapshot() {
                      std::to_underlying(st.priv), D_TRACE_HEX_WIDTH);
 
         for (int i = 0; i < 4; i++) {
-            std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.tlb.inst_r[i].v_addr,
-                       D_TRACE_HEX_WIDTH, cpu.tlb.inst_r[i].p_addr, D_TRACE_HEX_WIDTH);
+            std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.tlb.inst_r.at(static_cast<std::size_t>(i)).v_addr,
+                       D_TRACE_HEX_WIDTH, cpu.tlb.inst_r.at(static_cast<std::size_t>(i)).p_addr, D_TRACE_HEX_WIDTH);
         }
         std::println(fp_trace, "");
         for (int i = 0; i < 4; i++) {
-            std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.tlb.data_r[i].v_addr,
-                       D_TRACE_HEX_WIDTH, cpu.tlb.data_r[i].p_addr, D_TRACE_HEX_WIDTH);
+            std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.tlb.data_r.at(static_cast<std::size_t>(i)).v_addr,
+                       D_TRACE_HEX_WIDTH, cpu.tlb.data_r.at(static_cast<std::size_t>(i)).p_addr, D_TRACE_HEX_WIDTH);
         }
         std::println(fp_trace, "");
         for (int i = 0; i < 4; i++) {
-            std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.tlb.data_w[i].v_addr,
-                       D_TRACE_HEX_WIDTH, cpu.tlb.data_w[i].p_addr, D_TRACE_HEX_WIDTH);
+            std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.tlb.data_w.at(static_cast<std::size_t>(i)).v_addr,
+                       D_TRACE_HEX_WIDTH, cpu.tlb.data_w.at(static_cast<std::size_t>(i)).p_addr, D_TRACE_HEX_WIDTH);
         }
         std::println(fp_trace, "");
     }

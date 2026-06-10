@@ -40,8 +40,7 @@ namespace simrv::debug {
 // Construction / destruction
 // ---------------------------------------------------------------------------
 
-GdbStub::GdbStub(uint16_t port) : port_(port) {
-    listen_fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
+GdbStub::GdbStub(uint16_t port) : listen_fd_(::socket(AF_INET, SOCK_STREAM, 0)), port_(port) {
     if (listen_fd_ < 0) {
         throw std::runtime_error(
             std::format("GdbStub: socket() failed: {}", std::strerror(errno)));
@@ -56,7 +55,7 @@ GdbStub::GdbStub(uint16_t port) : port_(port) {
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port        = htons(port_);
 
-    if (::bind(listen_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+    if (::bind(listen_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
         ::close(listen_fd_);
         listen_fd_ = -1;
         throw std::runtime_error(
@@ -86,7 +85,7 @@ GdbStub::~GdbStub() {
 void GdbStub::wait_for_connection() {
     sockaddr_in peer{};
     socklen_t peer_len = sizeof(peer);
-    conn_fd_ = ::accept(listen_fd_, reinterpret_cast<sockaddr*>(&peer), &peer_len);
+    conn_fd_ = ::accept(listen_fd_, reinterpret_cast<sockaddr*>(&peer), &peer_len); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
     if (conn_fd_ < 0) {
         throw std::runtime_error(
             std::format("GdbStub: accept() failed: {}", std::strerror(errno)));
@@ -94,9 +93,9 @@ void GdbStub::wait_for_connection() {
     int opt = 1;
     ::setsockopt(conn_fd_, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 
-    char peer_ip[INET_ADDRSTRLEN] = {};
-    ::inet_ntop(AF_INET, &peer.sin_addr, peer_ip, sizeof(peer_ip));
-    simrv::log::info("GDB connected from {}:{}", peer_ip, ntohs(peer.sin_port));
+    std::array<char, INET_ADDRSTRLEN> peer_ip{};
+    ::inet_ntop(AF_INET, &peer.sin_addr, peer_ip.data(), peer_ip.size());
+    simrv::log::info("GDB connected from {}:{}", peer_ip.data(), ntohs(peer.sin_port));
 }
 
 void GdbStub::close_connection() {
@@ -112,7 +111,7 @@ void GdbStub::close_connection() {
 // Low-level RSP I/O
 // ---------------------------------------------------------------------------
 
-int GdbStub::recv_char() {
+auto GdbStub::recv_char() -> int {
     char c = 0;
     const ssize_t n = ::read(conn_fd_, &c, 1);
     if (n <= 0) {
@@ -122,7 +121,7 @@ int GdbStub::recv_char() {
     return static_cast<unsigned char>(c);
 }
 
-bool GdbStub::recv_packet(std::string& out) {
+auto GdbStub::recv_packet(std::string& out) -> bool {
     // Eat any '+'/'-' acks
     while (true) {
         const int c = recv_char();
@@ -170,7 +169,7 @@ bool GdbStub::recv_packet(std::string& out) {
         return 0;
     };
 
-    const uint8_t recv_sum =
+    const auto recv_sum =
         static_cast<uint8_t>((hex_digit(hi) << 4) | hex_digit(lo));
 
     if (!no_ack_mode_) {
@@ -181,7 +180,7 @@ bool GdbStub::recv_packet(std::string& out) {
     return recv_sum == sum;
 }
 
-uint8_t GdbStub::checksum(const std::string& data) {
+auto GdbStub::checksum(const std::string& data) -> uint8_t {
     uint8_t s = 0;
     for (const char c : data) {
         s += static_cast<uint8_t>(c);
@@ -351,15 +350,15 @@ void GdbStub::cmd_read_memory(const std::string& pkt,
     const uint32_t safe_len = std::min(len, uint32_t{4096});
 
     std::string resp;
-    resp.reserve(safe_len * 2);
+    resp.reserve(static_cast<std::size_t>(safe_len) * 2);
 
     // Direct physical memory read (bypasses MMU)
-    const uint8_t* base = reinterpret_cast<const uint8_t*>(machine.mmem);
-    const uint64_t dram_size = static_cast<uint64_t>(simrv::memory::kDramSize);
+    const auto* base = reinterpret_cast<const uint8_t*>(machine.mmem); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    const auto dram_size = static_cast<uint64_t>(simrv::memory::kDramSize);
     constexpr uint32_t kDramBase = 0x80000000U;
 
     for (uint32_t i = 0; i < safe_len; ++i) {
-        const uint64_t phys = static_cast<uint64_t>(addr + i);
+        const auto phys = static_cast<uint64_t>(addr) + i;
         uint8_t byte_val = 0;
         if (phys >= kDramBase && (phys - kDramBase) < dram_size) {
             byte_val = static_cast<uint8_t>(base[phys - kDramBase]);
@@ -384,8 +383,8 @@ void GdbStub::cmd_write_memory(const std::string& pkt,
         std::stoul(pkt.substr(comma + 1, colon - comma - 1), nullptr, 16));
 
     constexpr uint32_t kDramBase = 0x80000000U;
-    const uint64_t dram_size     = static_cast<uint64_t>(simrv::memory::kDramSize);
-    uint8_t* base                = reinterpret_cast<uint8_t*>(machine.mmem);
+    const auto dram_size         = static_cast<uint64_t>(simrv::memory::kDramSize);
+    auto* base                   = reinterpret_cast<uint8_t*>(machine.mmem); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
     auto hd = [](char c) -> uint8_t {
         if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
@@ -395,13 +394,13 @@ void GdbStub::cmd_write_memory(const std::string& pkt,
     };
 
     for (uint32_t i = 0; i < len; ++i) {
-        const std::size_t hex_off = colon + 1 + i * 2;
+        const auto hex_off = colon + 1 + static_cast<std::size_t>(i) * 2;
         if (hex_off + 1 >= pkt.size()) break;
-        const uint8_t byte_val =
-            static_cast<uint8_t>((hd(pkt[hex_off]) << 4) | hd(pkt[hex_off + 1]));
-        const uint64_t phys = static_cast<uint64_t>(addr + i);
+        const auto byte_val =
+            static_cast<uint8_t>((hd(pkt.at(hex_off)) << 4) | hd(pkt.at(hex_off + 1)));
+        const auto phys = static_cast<uint64_t>(addr) + i;
         if (phys >= kDramBase && (phys - kDramBase) < dram_size) {
-            reinterpret_cast<uint8_t*>(base)[phys - kDramBase] = byte_val;
+            base[phys - kDramBase] = byte_val;
         }
     }
     send_packet("OK");
@@ -423,14 +422,14 @@ void GdbStub::cmd_insert_breakpoint(const std::string& pkt,
         std::stoul(pkt.substr(c1 + 1, c2 - c1 - 1), nullptr, 16));
 
     constexpr uint32_t kDramBase = 0x80000000U;
-    const uint64_t dram_size     = static_cast<uint64_t>(simrv::memory::kDramSize);
-    const uint64_t phys          = static_cast<uint64_t>(addr);
+    const auto dram_size         = static_cast<uint64_t>(simrv::memory::kDramSize);
+    const auto phys              = static_cast<uint64_t>(addr);
 
     if (phys < kDramBase || (phys - kDramBase + 4) > dram_size) {
         send_packet("E02");
         return;
     }
-    uint8_t* ptr = reinterpret_cast<uint8_t*>(machine.mmem) + (phys - kDramBase);
+    auto* ptr = reinterpret_cast<uint8_t*>(machine.mmem) + (phys - kDramBase); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
     // Save original word
     uint32_t orig = 0;
@@ -466,10 +465,10 @@ void GdbStub::cmd_remove_breakpoint(const std::string& pkt,
     }
 
     constexpr uint32_t kDramBase = 0x80000000U;
-    const uint64_t dram_size     = static_cast<uint64_t>(simrv::memory::kDramSize);
-    const uint64_t phys          = static_cast<uint64_t>(addr);
+    const auto dram_size         = static_cast<uint64_t>(simrv::memory::kDramSize);
+    const auto phys              = static_cast<uint64_t>(addr);
     if (phys >= kDramBase && (phys - kDramBase + 4) <= dram_size) {
-        uint8_t* ptr = reinterpret_cast<uint8_t*>(machine.mmem) + (phys - kDramBase);
+        auto* ptr = reinterpret_cast<uint8_t*>(machine.mmem) + (phys - kDramBase); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
         std::memcpy(ptr, &it->second, 4);
     }
     sw_breakpoints_.erase(it);
@@ -519,20 +518,20 @@ void GdbStub::handle_query(const std::string& pkt,
 // Main packet dispatcher
 // ---------------------------------------------------------------------------
 
-bool GdbStub::handle_packet(const std::string& pkt,
-                              simrv::core::Machine& machine) {
+auto GdbStub::handle_packet(const std::string& pkt,
+                            simrv::core::Machine& machine) -> bool {
     if (pkt.empty()) {
         send_packet("");
         return false;
     }
 
     // Ctrl-C interrupt
-    if (pkt[0] == '\x03') {
+    if (pkt.front() == '\x03') {
         send_packet("S05");  // SIGTRAP
         return false;
     }
 
-    switch (pkt[0]) {
+    switch (pkt.front()) {
         case '?':
             send_packet("S05");  // SIGTRAP
             return false;
@@ -592,12 +591,8 @@ bool GdbStub::handle_packet(const std::string& pkt,
             return true;
 
         case 'H':
-            // Set thread – only one hart, always OK
-            send_packet("OK");
-            return false;
-
         case 'T':
-            // Thread alive check
+            // Set thread / Thread alive check – only one hart, always OK
             send_packet("OK");
             return false;
 
@@ -645,7 +640,7 @@ void GdbStub::poll(simrv::core::Machine& machine) {
     std::string pkt;
     if (!recv_packet(pkt)) return;
 
-    handle_packet(pkt, machine);
+    static_cast<void>(handle_packet(pkt, machine));
 }
 
 void GdbStub::notify_breakpoint(simrv::core::Machine& machine) {

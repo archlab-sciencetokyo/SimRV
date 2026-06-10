@@ -44,5 +44,5 @@ Before opening a PR, run at least:
 
 ```bash
 cmake --build --preset ninja-clang-release
-cmake --build --preset ninja-clang-release --target phase1-gate
+cmake --build --preset ninja-clang-release --target smoke-gate
 ```

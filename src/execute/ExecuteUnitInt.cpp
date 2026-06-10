@@ -88,8 +88,8 @@ auto ExecuteUnit::aluIntW(Opcode opcode, Register in1, Register in2, Funct3 func
         return 0;  // W instructions are invalid on RV32
     } else {
         const bool is_m_extension = (funct7 & 0x01) != 0;
-        const uint32_t lhs32 = static_cast<uint32_t>(in1);
-        const uint32_t rhs32 = static_cast<uint32_t>(in2);
+        const auto lhs32 = static_cast<uint32_t>(in1);
+        const auto rhs32 = static_cast<uint32_t>(in2);
         int32_t res32 = 0;
 
         if (opcode == Opcode::Op32 && is_m_extension) {
@@ -98,8 +98,8 @@ auto ExecuteUnit::aluIntW(Opcode opcode, Register in1, Register in2, Funct3 func
                     res32 = static_cast<int32_t>(lhs32 * rhs32);
                     break;  // MULW
                 case 4: {   // DIVW
-                    const int32_t lhs_s = static_cast<int32_t>(lhs32);
-                    const int32_t rhs_s = static_cast<int32_t>(rhs32);
+                    const auto lhs_s = static_cast<int32_t>(lhs32);
+                    const auto rhs_s = static_cast<int32_t>(rhs32);
                     if (rhs_s == 0)
                         res32 = -1;
                     else if (lhs_s == std::numeric_limits<int32_t>::min() && rhs_s == -1)
@@ -116,8 +116,8 @@ auto ExecuteUnit::aluIntW(Opcode opcode, Register in1, Register in2, Funct3 func
                     break;
                 }
                 case 6: {  // REMW
-                    const int32_t lhs_s = static_cast<int32_t>(lhs32);
-                    const int32_t rhs_s = static_cast<int32_t>(rhs32);
+                    const auto lhs_s = static_cast<int32_t>(lhs32);
+                    const auto rhs_s = static_cast<int32_t>(rhs32);
                     if (rhs_s == 0)
                         res32 = lhs_s;
                     else if (lhs_s == std::numeric_limits<int32_t>::min() && rhs_s == -1)
@@ -184,8 +184,8 @@ auto ExecuteUnit::branchTaken(Register in1, Register in2, Funct3 funct3) -> bool
 auto ExecuteUnit::aluAmo(Register in1, Register in2, Funct5Amo funct5, Funct3 funct3) -> Register {
     if constexpr (kIsXLen64) {
         if (funct3 == static_cast<Funct3>(2)) { // AMO*W (32-bit)
-            const int32_t a = static_cast<int32_t>(in1);
-            const int32_t b = static_cast<int32_t>(in2);
+            const auto a = static_cast<int32_t>(in1);
+            const auto b = static_cast<int32_t>(in2);
             int32_t res = 0;
             switch (enum_mask(funct5)) {
                 case 0x01: // SWAP

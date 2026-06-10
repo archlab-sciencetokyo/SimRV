@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <string_view>
 #include <cstdint>
+#include <format>
 
 
 namespace simrv::util {
@@ -25,6 +26,24 @@ inline auto format_with_commas(uint64_t val) -> std::string {
         n -= 3;
     }
     return s;
+}
+
+/**
+ * @brief Format a large integer into a human-readable scaled string (e.g. 1.23M, 4.56B, 800.00K).
+ * @param val The value to format.
+ * @return Scaled string representation.
+ */
+inline auto format_scaled(uint64_t val) -> std::string {
+    if (val >= 1000000000ULL) {
+        return std::format("{:.2f}B", static_cast<double>(val) / 1000000000.0);
+    }
+    if (val >= 1000000ULL) {
+        return std::format("{:.2f}M", static_cast<double>(val) / 1000000.0);
+    }
+    if (val >= 1000ULL) {
+        return std::format("{:.2f}K", static_cast<double>(val) / 1000.0);
+    }
+    return std::to_string(val);
 }
 
 /**

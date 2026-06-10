@@ -18,7 +18,7 @@ auto ICache::read(Address addr, uint32_t& data) -> bool {
     const uint32_t set_idx = get_set_index(addr);
     const Address tag = get_tag(addr);
 
-    for (auto& line : sets_[set_idx]) {
+    for (auto& line : sets_.at(set_idx)) {
         if (line.valid && line.tag == tag) {
             const uint32_t byte_offset = addr & (kLineBytes - 1u);
             if (simrv::compiler::unlikely(byte_offset + sizeof(uint32_t) > kLineBytes)) {
@@ -41,7 +41,7 @@ auto ICache::read16(Address addr, uint16_t& data) -> bool {
     const uint32_t set_idx = get_set_index(addr);
     const Address tag = get_tag(addr);
 
-    for (auto& line : sets_[set_idx]) {
+    for (auto& line : sets_.at(set_idx)) {
         if (line.valid && line.tag == tag) {
             const uint32_t byte_offset = addr & (kLineBytes - 1u);
             if (simrv::compiler::unlikely(byte_offset + sizeof(uint16_t) > kLineBytes)) {
@@ -63,8 +63,8 @@ void ICache::insert(Address base_addr, const Byte* line_data) {
     ++access_tick_;
     const uint32_t set_idx = get_set_index(base_addr);
     const Address tag = get_tag(base_addr);
-    auto& set = sets_[set_idx];
-    CacheLine* victim = &set[0];
+    auto& set = sets_.at(set_idx);
+    CacheLine* victim = &set.at(0);
     for (auto& line : set) {
         if (!line.valid) {
             victim = &line;

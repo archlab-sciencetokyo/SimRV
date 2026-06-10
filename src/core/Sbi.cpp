@@ -32,7 +32,7 @@ enum class ExtId : Word {
     SystemReset = 0x53525354,
 };
 
-enum class BaseFid : Word {
+enum class BaseFid : std::uint8_t {
     GetSpecVersion = 0x0,
     GetImplId = 0x1,
     GetImplVersion = 0x2,
@@ -42,11 +42,11 @@ enum class BaseFid : Word {
     GetMimpId = 0x6,
 };
 
-enum class TimeFid : Word {
+enum class TimeFid : std::uint8_t {
     SetTimer = 0x0,
 };
 
-enum class RfenceFid : Word {
+enum class RfenceFid : std::uint8_t {
     RemoteFenceI = 0x0,
     RemoteSfenceVma = 0x1,
     RemoteSfenceVmaAsid = 0x2,
@@ -55,14 +55,14 @@ enum class RfenceFid : Word {
     RemoteHfenceVvmaAsid = 0x5,
 };
 
-enum class HsmFid : Word {
+enum class HsmFid : std::uint8_t {
     HartStart = 0x0,
     HartStop = 0x1,
     HartStatus = 0x2,
     HartSuspend = 0x3,
 };
 
-enum class SbiError : SignedWord {
+enum class SbiError : std::int8_t {
     Success = 0,
     Failed = -1,
     NotSupported = -2,
@@ -208,13 +208,14 @@ auto Sbi::handle_system_reset(Word func_id) -> bool {
         if (reset_type == 0) {
             simrv::log::info("[SBI] System Reset: Shutdown requested (reason: 0x{:x}).", reset_reason);
             if (cpu_.machine_ != nullptr) {
+                cpu_.machine_->exit_code = static_cast<int>(reset_reason);
                 cpu_.machine_->stop();
             }
             sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
         } else if (reset_type == 1 || reset_type == 2) {
             simrv::log::info("[SBI] System Reset: Reboot requested (reason: 0x{:x}).", reset_reason);
             if (cpu_.machine_ != nullptr) {
-                cpu_.machine_->stop();
+                cpu_.machine_->request_reboot();
             }
             sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
         } else {

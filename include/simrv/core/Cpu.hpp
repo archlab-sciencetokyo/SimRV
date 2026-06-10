@@ -20,6 +20,7 @@
 #include "simrv/execute/ExecuteUnit.hpp"
 
 #include "simrv/pipeline/PipelineTask.hpp"
+#include "simrv/pipeline/PipelineSim.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -89,23 +90,31 @@ class CPU {
     void evaluate_timer_interrupt();
     /// Execute one full CPU cycle (all pipeline stages).
     void run_cycle(Machine& machine);
+    /// Execute one full CPU cycle in optimized baremetal mode.
+    void run_cycle_baremetal(Machine& machine);
     
     /// Coroutine generator for persistent zero-allocation pipeline
-    simrv::pipeline::PipelineTask run_pipeline_coroutine(Machine& machine);
+    simrv::pipeline::PipelineTask run_pipeline_coroutine(Machine* machine);
 
    public:
     /// Run instruction fetch + decode-normalization stage group.
     void run_fetch_stage(Machine& machine);
+    /// Run instruction fetch in baremetal mode.
+    void run_fetch_stage_baremetal(Machine& machine);
     /// Run decode + operand-fetch stage group.
     void run_decode_stage(Machine& machine);
     /// Run execute stage group.
     void run_execute_stage(Machine& machine);
     /// Run memory stage group.
     void run_memory_stage(Machine& machine);
+    /// Run memory access stage in baremetal mode.
+    void run_memory_stage_baremetal(Machine& machine);
     /// Run writeback stage group.
     void run_writeback_stage(Machine& machine);
     /// Run commit/trap resolution stage group.
     void run_commit_stage(Machine& machine);
+    /// Run commit stage in baremetal mode.
+    void run_commit_stage_baremetal(Machine& machine);
 
     /// Functional monadic stage transitions (C++23)
     [[nodiscard]] auto fetch_stage(Machine& machine, Address pc) -> bool;
@@ -172,6 +181,7 @@ class CPU {
     bool use_opensbi = false;
     Machine* machine_ = nullptr;
     simrv::pipeline::PipelineTask pipeline_task;
+    simrv::pipeline::PipelineSim pipeline_sim;
 
     // ========== Execution Metrics ==========
     uint64_t e_icount{0};                                // Total instruction count

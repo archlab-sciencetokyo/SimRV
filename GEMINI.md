@@ -12,7 +12,7 @@ The architecture consists of:
 ## Building and Running
 
 SimRV uses CMake and Ninja for its build system.
-- **Recommended Compilers:** Clang 17+ (default in preset) or GCC 12+.
+- **Recommended Compilers:** Clang 17+ (default in preset) or GCC 13+.
 
 **Build Commands:**
 ```bash
@@ -41,8 +41,8 @@ Testing involves CTest and requires the `RISCV_TESTS_DIR` environment variable t
 # CTest gate suite (regression + rv32gc smoke)
 ctest --test-dir build/rv32-release --output-on-failure -L gate
 
-# Run Phase 1 Validation Gate (pre-PR check)
-cmake --build --preset rv32-release --target phase1-gate
+# Run Smoke Validation Gate (pre-PR check)
+cmake --build --preset rv32-release --target smoke-gate
 ```
 
 ## Development Conventions
@@ -56,10 +56,10 @@ cmake --build --preset rv32-release --target phase1-gate
   - Keep commit messages short and imperative. One concern per commit.
   - Open Pull Requests into `dev`. Include build/test context in the description.
   - For releases, open PR from `dev` to `main`.
-- **Validation:** Always run at least the build and `phase1-gate` checks before opening a PR:
+- **Validation:** Always run at least the build and `smoke-gate` checks before opening a PR:
   ```bash
   cmake --build --preset rv32-release
-  cmake --build --preset rv32-release --target phase1-gate
+  cmake --build --preset rv32-release --target smoke-gate
   ```
 
 ## Directory Structure

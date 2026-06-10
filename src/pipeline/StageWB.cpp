@@ -13,7 +13,7 @@ namespace simrv::core {
 void CPU::run_writeback_stage(Machine& machine) { writeback_registers(machine); }
 
 /* writeback_registers(Write Back) stage */
-void CPU::writeback_registers(Machine& machine) {
+void CPU::writeback_registers([[maybe_unused]] Machine& machine) {
     auto& ctx = pipeline_context;
     if (ctx.pending_exception.has_value()) {
         return;

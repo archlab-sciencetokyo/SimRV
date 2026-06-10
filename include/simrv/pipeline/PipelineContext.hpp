@@ -33,6 +33,7 @@ struct PipelineContext {
     // CVT stage transient values
     Instruction cinsn = 0;
     Instruction ir = 0;
+    ::OperationId op_id = ::UNKNOWN;
 
     // ID stage decoded fields
     Opcode opcode = static_cast<Opcode>(0);

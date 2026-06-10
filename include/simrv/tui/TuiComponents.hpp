@@ -17,6 +17,17 @@ class Machine;
 
 namespace simrv::tui {
 
+// Sakura Pastel Theme Colors
+inline constexpr const char* kSakuraBorder = "\033[38;5;218m";  // Soft pink borders
+inline constexpr const char* kSakuraText   = "\033[38;5;254m";  // Warm white text
+inline constexpr const char* kSakuraVal    = "\033[38;5;183m";  // Pastel lavender for register names/values
+inline constexpr const char* kSakuraMuted  = "\033[38;5;245m";  // Soft gray for details/dashes
+inline constexpr const char* kSakuraMint   = "\033[38;5;121m";  // Soft mint green for counts/speeds
+inline constexpr const char* kSakuraPeach  = "\033[38;5;223m";  // Soft peach/yellow for changed values
+inline constexpr const char* kSakuraCoral  = "\033[38;5;210m";  // Soft coral red for stalls
+inline constexpr const char* kSakuraSky    = "\033[38;5;117m";  // Soft sky blue for auxiliary/page details
+inline constexpr const char* kSakuraPink   = "\033[38;5;211m";  // Sakura Pink accent (progress bars)
+
 
 /**
  * @class RegisterPane
@@ -47,6 +58,11 @@ class RegisterPane : public TuiWidget {
     void set_kips(uint64_t kips) { kips_ = kips; }
     void set_kips_history(const std::vector<uint64_t>& history) { kips_history_ = history; }
     void set_paused(bool paused) { paused_ = paused; }
+    void set_visible_rows(int rows) { visible_rows_ = rows; }
+    void set_active_runtime(double secs) { active_runtime_ = secs; }
+    void scroll(int lines);
+    void reset_scroll() { scroll_offset_ = 0; }
+    [[nodiscard]] auto get_scroll_offset() const -> int { return scroll_offset_; }
     
    private:
     [[nodiscard]] auto get_sparkline_string(int width) -> std::string;
@@ -58,10 +74,14 @@ class RegisterPane : public TuiWidget {
     std::array<uint32_t, 32> cached_gpr_;
     std::array<uint64_t, 32> cached_fpr_;
     std::array<uint64_t, 32> cached_vec_; // Or whatever type it uses
-    std::array<std::string, 25> cached_left_rows_;
+    std::array<std::string, 40> cached_left_rows_;
+    int last_width_ = 0;
     
     uint64_t kips_ = 0;
     std::vector<uint64_t> kips_history_;
+    int visible_rows_ = 25;
+    int scroll_offset_ = 0;
+    double active_runtime_ = 0.0;
 };
 
 
@@ -119,6 +139,7 @@ class StatusBar : public TuiWidget {
 
     std::vector<uint64_t> kips_history_;
     uint64_t last_icount_ = 0;
+    uint64_t kips_ = 0;
 };
 
 }  // namespace simrv::device

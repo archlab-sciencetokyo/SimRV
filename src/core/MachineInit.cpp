@@ -58,7 +58,7 @@ void load_image_into_ram(const std::string& file_path, Byte* ram, std::size_t ca
     }
 
     in.seekg(0, std::ios::beg);
-    if (!in.read(reinterpret_cast<char*>(ram), static_cast<std::streamsize>(file_size))) {
+    if (!in.read(reinterpret_cast<char*>(ram), static_cast<std::streamsize>(file_size))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
         simrv::log::error("failed to read {} image {}", image_name, file_path);
         std::exit(EXIT_FAILURE);
     }
@@ -67,7 +67,7 @@ void load_image_into_ram(const std::string& file_path, Byte* ram, std::size_t ca
         std::to_integer<char>(ram[1]) == 'E' && 
         std::to_integer<char>(ram[2]) == 'L' && 
         std::to_integer<char>(ram[3]) == 'F') {
-        const uint8_t elf_class = std::to_integer<uint8_t>(ram[4]);
+        const auto elf_class = std::to_integer<uint8_t>(ram[4]);
         constexpr uint8_t expected_class = simrv::xlen::kXLenBits == 32 ? 1 : 2;
         if (elf_class != expected_class) {
             simrv::log::warn("Loaded ELF image {} is {}-bit but SimRV is compiled for {}-bit!", 
@@ -80,34 +80,6 @@ void load_image_into_ram(const std::string& file_path, Byte* ram, std::size_t ca
 
 }  // namespace
 
-void Machine::generate_binfile() const {
-    std::ofstream out("inits.bin", std::ios::binary);
-    if (!out.is_open()) {
-        simrv::log::error("cannot create inits.bin");
-        std::exit(EXIT_FAILURE);
-    }
-    out.write(reinterpret_cast<const char*>(mmem), D_SIZE_DRAM);
-    out.write(reinterpret_cast<const char*>(mmem + D_DEVT_OFFSET), D_SIZE_DEVT);
-    out.write(reinterpret_cast<const char*>(disk->sector), D_SIZE_DISK);
-    out.close();
-    simrv::log::info("File inits.bin was generated.");
-
-    std::ifstream in("inits.bin", std::ios::binary);
-    if (!in.is_open()) {
-        simrv::log::error("cannot reopen inits.bin");
-        std::exit(EXIT_FAILURE);
-    }
-    int i = 0;
-    Word sum = 0;
-    Word buf = 0;
-    while (in.read(reinterpret_cast<char*>(&buf), sizeof(buf))) {
-        sum += buf;
-        i++;
-    }
-    simrv::log::info("{:8} byte file, checksum {:08x}\n", i * 4, sum);
-    std::exit(EXIT_SUCCESS);
-}
-
 auto Machine::initialize(int argc, char* const* argv) -> int {
     set_options(this, argc, argv);
 
@@ -116,7 +88,7 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
     rtc = std::make_unique<simrv::Rtc>(*this);
     uart = std::make_unique<simrv::device::Uart>(*this);
     power = std::make_unique<simrv::device::PowerMmio>(*this);
-    mmem_owner_.reset(new Byte[simrv::memory::kDramSize]());
+    mmem_owner_.reset(static_cast<Byte*>(std::calloc(simrv::memory::kDramSize, sizeof(Byte)))); // NOLINT(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory)
     if (mmem_owner_ == nullptr) {
         std::println(std::cerr, "Error: failed to allocate main memory ({} bytes)",
                      static_cast<std::size_t>(simrv::memory::kDramSize));

@@ -18,7 +18,7 @@ auto DCache::read(Address addr, Word& data, Instruction funct3) -> bool {
     const Address tag = get_tag(addr);
     const unsigned size_bytes = 1u << (funct3 & 0x3u);
 
-    for (auto& line : sets_[set_idx]) {
+    for (auto& line : sets_.at(set_idx)) {
         if (line.valid && line.tag == tag) {
             const uint32_t byte_offset = addr & (kLineBytes - 1u);
             if (simrv::compiler::unlikely(byte_offset + size_bytes > kLineBytes)) {
@@ -45,25 +45,44 @@ auto DCache::read(Address addr, Word& data, Instruction funct3) -> bool {
 }
 
 void DCache::write(Address addr, Word data, Instruction funct3) {
-    const uint32_t set_idx = get_set_index(addr);
-    const Address tag = get_tag(addr);
     const unsigned size_bytes = 1u << (funct3 & 0x3u);
+    const uint32_t byte_offset = addr & (kLineBytes - 1u);
 
-    for (auto& line : sets_[set_idx]) {
-        if (line.valid && line.tag == tag) {
-            const uint32_t byte_offset = addr & (kLineBytes - 1u);
-            if (simrv::compiler::likely(byte_offset + size_bytes <= kLineBytes)) {
+    if (simrv::compiler::likely(byte_offset + size_bytes <= kLineBytes)) {
+        const uint32_t set_idx = get_set_index(addr);
+        const Address tag = get_tag(addr);
+        for (auto& line : sets_.at(set_idx)) {
+            if (line.valid && line.tag == tag) {
                 std::memcpy(line.data.data() + byte_offset, &data, size_bytes);
+                break;
             }
-            break;
+        }
+    } else {
+        const Address tag1 = get_tag(addr);
+        const uint32_t set_idx1 = get_set_index(addr);
+        for (auto& line : sets_.at(set_idx1)) {
+            if (line.valid && line.tag == tag1) {
+                line.valid = false;
+                break;
+            }
+        }
+
+        const Address addr2 = addr + (kLineBytes - byte_offset);
+        const Address tag2 = get_tag(addr2);
+        const uint32_t set_idx2 = get_set_index(addr2);
+        for (auto& line : sets_.at(set_idx2)) {
+            if (line.valid && line.tag == tag2) {
+                line.valid = false;
+                break;
+            }
         }
     }
 }
 
 void DCache::insert(Address base_addr, const Byte* line_data) {
     ++access_tick_;
-    auto& set = sets_[get_set_index(base_addr)];
-    CacheLine* victim = &set[0];
+    auto& set = sets_.at(get_set_index(base_addr));
+    CacheLine* victim = &set.at(0);
     for (auto& line : set) {
         if (!line.valid) {
             victim = &line;

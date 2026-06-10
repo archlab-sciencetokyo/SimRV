@@ -145,11 +145,15 @@ if [[ "$XLEN" == "32" ]]; then
     BUSYBOX_BUILD="$BUILD_DIR/busybox-${BUSYBOX_VER}"
     if [[ ! -f "$BUSYBOX_BUILD/busybox" ]]; then
         print_step "Configuring BusyBox..."
-        make -C "$BUSYBOX_BUILD" ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" "EXTRA_CFLAGS=-march=${M_ARCH} -mabi=${M_ABI}" defconfig
+        make -C "$BUSYBOX_BUILD" clean || true
+        make -C "$BUSYBOX_BUILD" ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" LD="${CROSS_COMPILE}ld -m elf32lriscv" "EXTRA_CFLAGS=-march=${M_ARCH} -mabi=${M_ABI}" defconfig
         # Force static build
         sed -i 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' "$BUSYBOX_BUILD/.config"
+        # Disable TC applet which fails with modern headers
+        sed -i 's/CONFIG_TC=y/# CONFIG_TC is not set/' "$BUSYBOX_BUILD/.config"
+        sed -i 's/CONFIG_FEATURE_TC_INGRESS=y/# CONFIG_FEATURE_TC_INGRESS is not set/' "$BUSYBOX_BUILD/.config"
         print_step "Compiling BusyBox (RV32)..."
-        make -C "$BUSYBOX_BUILD" ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" "EXTRA_CFLAGS=-march=${M_ARCH} -mabi=${M_ABI}" -j"$(nproc)" install
+        make -C "$BUSYBOX_BUILD" ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" LD="${CROSS_COMPILE}ld -m elf32lriscv" "EXTRA_CFLAGS=-march=${M_ARCH} -mabi=${M_ABI}" "EXTRA_LDFLAGS=-Wl,-m,elf32lriscv" -j"$(nproc)" install
     fi
     cp -a "$BUSYBOX_BUILD/_install/"* "$INITRAMFS_DIR/"
 else
@@ -158,15 +162,18 @@ else
     tar -xf "sources/alpine-minirootfs-${ALPINE_VER}-riscv64.tar.gz" -C "$INITRAMFS_DIR"
 fi
 
-# Set up init script
+# Set up init script and inittab
 mkdir -p "$INITRAMFS_DIR/proc" "$INITRAMFS_DIR/sys" "$INITRAMFS_DIR/dev" "$INITRAMFS_DIR/etc" "$INITRAMFS_DIR/tmp"
+
+cat > "$INITRAMFS_DIR/etc/inittab" <<'EOF'
+::sysinit:/bin/mount -t proc proc /proc
+::sysinit:/bin/mount -t sysfs sysfs /sys
+::sysinit:/bin/mount -t devtmpfs devtmpfs /dev || true
+ttyS0::respawn:-/bin/sh
+EOF
+
 cat > "$INITRAMFS_DIR/init" <<'EOF'
 #!/bin/sh
-mount -t proc proc /proc
-mount -t sysfs sysfs /sys
-mount -t devtmpfs devtmpfs /dev || true
-
-exec </dev/ttyS0 >/dev/ttyS0 2>&1
 clear
 echo "=================================================="
 echo "          Welcome to SimRV Linux Boot             "
@@ -177,15 +184,7 @@ else
     echo "Minimal BusyBox Linux (riscv32)"
 fi
 echo "=================================================="
-while true; do
-    if command -v cttyhack >/dev/null 2>&1; then
-        setsid cttyhack /bin/sh
-    else
-        /bin/sh
-    fi
-    echo "Shell exited, respawning..."
-    sleep 2
-done
+exec /sbin/init
 EOF
 chmod +x "$INITRAMFS_DIR/init"
 

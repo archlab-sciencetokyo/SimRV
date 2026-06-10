@@ -201,8 +201,9 @@ To publish binaries automatically:
 
 ## Recommended Compilers
 
+Since SimRV is written using C++23 features, the recommended compiler versions are:
 - `clang++` 17+ (default in preset)
-- `gcc/g++` 12+
+- `gcc/g++` 13+
 
 ## Development Flow
 

@@ -50,8 +50,13 @@ concept StoreFunct3Like = std::unsigned_integral<T>;
 
 // ========== Memory Region Classification ==========
 
+extern bool g_appmode;
+
 /// Check if a physical address is within DRAM range
 inline auto is_dram_addr(Address p_addr) -> bool {
+    if (g_appmode) {
+        return p_addr < simrv::memory::kDramSize;
+    }
     return p_addr >= simrv::memory::kDramBaseAddress &&
            p_addr < (simrv::memory::kDramBaseAddress + simrv::memory::kDramSize);
 }

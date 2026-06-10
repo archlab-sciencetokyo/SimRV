@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/Machine.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/Mmu.hpp"
@@ -52,6 +53,9 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     }
 
     auto issue_read = [&](Address addr) -> Word {
+        if (cpu.machine_->s_high_performance && simrv::memory::is_dram_addr(addr)) {
+            return simrv::memory::ram_read_fast(addr, funct3, mem.mmu()->mmem());
+        }
         if (!simrv::memory::is_dram_addr(addr)) {
             TlChannelA req{};
             req.opcode = TlOpcodeA::Get;
@@ -85,6 +89,11 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                 return 0;
         }
 
+        const bool crosses_cache_line = ((addr & (simrv::cache::DCache::kLineBytes - 1u)) + size_bytes) > simrv::cache::DCache::kLineBytes;
+        if (crosses_cache_line) {
+            return simrv::memory::ram_read_fast(addr, funct3, mem.mmu()->mmem());
+        }
+
         Word cached_data = 0;
         if (cpu.dcache.read(addr, cached_data, funct3)) {
             return cached_data;
@@ -95,7 +104,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
         std::array<Byte, simrv::cache::DCache::kLineBytes> line_data{};
 
         constexpr unsigned fetch_size = xlen::kFetchSize;
-        const Instruction fetch_funct3 = static_cast<Instruction>(
+        const auto fetch_funct3 = static_cast<Instruction>(
             xlen::kIsXLen64 ? ::Funct3::Sd : ::Funct3::Sw);
 
         for (uint32_t i = 0; i < simrv::cache::DCache::kLineBytes; i += fetch_size) {
@@ -142,18 +151,23 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                entry->v_addr == (v_addr & ~simrv::memory::kPageMask)) {
         p_addr = entry->p_addr + (v_addr & simrv::memory::kPageMask);
     } else {
-        auto translate_result = mem.mmu()->translate(v_addr, PteAccess::Read, eff_priv,
-                                                     cpu.state().mstatus, cpu.state().satp);
-        if (translate_result.has_value()) {
-            p_addr = translate_result.value();
-            entry->v_addr = v_addr & ~simrv::memory::kPageMask;
-            entry->p_addr = p_addr & ~simrv::memory::kPageMask;
-            entry->asid = current_asid;
-            entry->valid = true;
-        } else {
-            cpu.pipeline_context.pending_exception = static_cast<ExceptionCode>(translate_result.error());
-            cpu.pipeline_context.pending_tval = v_addr;
-        }
+        auto translate_res = mem.mmu()->translate(v_addr, PteAccess::Read, eff_priv,
+                                                  cpu.state().mstatus, cpu.state().satp);
+        auto chain_res = translate_res
+            .and_then([&](Address phys) -> std::expected<void, TrapCause> {
+                p_addr = phys;
+                entry->v_addr = v_addr & ~simrv::memory::kPageMask;
+                entry->p_addr = p_addr & ~simrv::memory::kPageMask;
+                entry->asid = current_asid;
+                entry->valid = true;
+                return {};
+            })
+            .or_else([&](TrapCause error) -> std::expected<void, TrapCause> {
+                cpu.pipeline_context.pending_exception = static_cast<ExceptionCode>(error);
+                cpu.pipeline_context.pending_tval = v_addr;
+                return {};
+            });
+        (void)chain_res;
     }
 
     if (!cpu.pipeline_context.pending_exception.has_value()) {
@@ -191,7 +205,26 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
         }
     }
 
-    auto issue_write = [&](Address addr, Word data) {
+    auto issue_write = [&](Address addr, Word data) -> void {
+        if (cpu.machine_->s_high_performance && simrv::memory::is_dram_addr(addr)) {
+            const bool is_tohost_write =
+                simrv::xlen::kIsXLen64 ? (funct3 == static_cast<Instruction>(Funct3::Sw) ||
+                                           funct3 == static_cast<Instruction>(Funct3::Sd))
+                                      : (funct3 == static_cast<Instruction>(Funct3::Sw));
+            if (is_tohost_write) {
+                if (addr == cpu.machine_->s_isatest_tohost || addr == 0x80001000 || addr == 0x40008000) {
+                    cpu.machine_->tohost = simrv::xlen::kIsXLen64
+                                          ? data
+                                          : ((cpu.machine_->tohost & 0xFFFFFFFF00000000ULL) | data);
+                } else if (!simrv::xlen::kIsXLen64 &&
+                           (addr == cpu.machine_->s_isatest_tohost + 4 || addr == 0x80001004 || addr == 0x40008004)) {
+                    cpu.machine_->tohost = (cpu.machine_->tohost & 0x00000000FFFFFFFFULL) |
+                                           (static_cast<uint64_t>(data) << 32);
+                }
+            }
+            simrv::memory::ram_write_fast(addr, data, funct3, mem.mmu()->mmem());
+            return;
+        }
         if (simrv::memory::is_dram_addr(addr)) {
             cpu.dcache.write(addr, data, funct3);
         }
@@ -234,18 +267,23 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
                entry->v_addr == (v_addr & ~simrv::memory::kPageMask)) {
         p_addr = entry->p_addr + (v_addr & simrv::memory::kPageMask);
     } else {
-        auto translate_result = mem.mmu()->translate(v_addr, PteAccess::Write, eff_priv,
-                                                     cpu.state().mstatus, cpu.state().satp);
-        if (translate_result.has_value()) {
-            p_addr = translate_result.value();
-            entry->v_addr = v_addr & ~simrv::memory::kPageMask;
-            entry->p_addr = p_addr & ~simrv::memory::kPageMask;
-            entry->asid = current_asid;
-            entry->valid = true;
-        } else {
-            cpu.pipeline_context.pending_exception = static_cast<ExceptionCode>(translate_result.error());
-            cpu.pipeline_context.pending_tval = v_addr;
-        }
+        auto translate_res = mem.mmu()->translate(v_addr, PteAccess::Write, eff_priv,
+                                                  cpu.state().mstatus, cpu.state().satp);
+        auto chain_res = translate_res
+            .and_then([&](Address phys) -> std::expected<void, TrapCause> {
+                p_addr = phys;
+                entry->v_addr = v_addr & ~simrv::memory::kPageMask;
+                entry->p_addr = p_addr & ~simrv::memory::kPageMask;
+                entry->asid = current_asid;
+                entry->valid = true;
+                return {};
+            })
+            .or_else([&](TrapCause error) -> std::expected<void, TrapCause> {
+                cpu.pipeline_context.pending_exception = static_cast<ExceptionCode>(error);
+                cpu.pipeline_context.pending_tval = v_addr;
+                return {};
+            });
+        (void)chain_res;
     }
 
     if (!cpu.pipeline_context.pending_exception.has_value()) {

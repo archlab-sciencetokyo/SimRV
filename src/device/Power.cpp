@@ -23,12 +23,20 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
         // The finisher has a single 32-bit register at offset 0
         if (offset == 0 && req.size >= 2) {
             const Word wdata = req.data;
-            if (wdata == 0x5555) {
-                simrv::log::info("[Power] SiFive Test Finisher: System Poweroff requested.");
+            const Word cmd = wdata & 0xffffU;
+            if (cmd == 0x5555) {
+                const int status = static_cast<int>(wdata >> 16);
+                simrv::log::info("[Power] SiFive Test Finisher: System Poweroff requested (status: {}).", status);
+                machine_.exit_code = status;
                 machine_.stop();
-            } else if (wdata == 0x7777) {
+            } else if (cmd == 0x3333) {
+                const int status = static_cast<int>(wdata >> 16);
+                simrv::log::info("[Power] SiFive Test Finisher: System Fail/Crash requested (status: {}).", status);
+                machine_.exit_code = (status != 0) ? status : 1;
+                machine_.stop();
+            } else if (cmd == 0x7777) {
                 simrv::log::info("[Power] SiFive Test Finisher: System Reboot requested.");
-                machine_.stop();
+                machine_.request_reboot();
             } else {
                 simrv::log::warn("[Power] SiFive Test Finisher: Write offset 0, unknown value 0x{:08x}", wdata);
             }

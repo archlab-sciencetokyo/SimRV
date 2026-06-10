@@ -19,6 +19,7 @@
 #include <string>
 
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/Logger.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiComponents.hpp"
 #include "simrv/xlen/Helpers.hpp"
@@ -26,9 +27,9 @@
 
 namespace simrv::tui {
 
-static struct termios g_saved_termios;
-static bool g_termios_saved = false;
-static bool g_tui_active = false;
+static struct termios g_saved_termios; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+static bool g_termios_saved = false;   // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+static bool g_tui_active = false;      // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 extern "C" void emergency_terminal_restore() {
     if (g_tui_active) {
@@ -47,7 +48,7 @@ static void handle_termination_signal(int sig) {
     ::raise(sig);
 }
 
-volatile std::sig_atomic_t g_resized = 0;
+volatile std::sig_atomic_t g_resized = 0; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 namespace {
 
@@ -64,138 +65,44 @@ auto make_repeated_string(const std::string& pattern, int count) -> std::string 
     return s;
 }
 
-auto get_display_width(const std::string& s) -> int {
-    int len = 0;
-    bool in_esc = false;
-    for (std::size_t i = 0; i < s.length(); ++i) {
-        if (s[i] == '\033') {
-            in_esc = true;
-        } else if (in_esc) {
-            if (s[i] == 'm') {
-                in_esc = false;
-            }
-        } else {
-            unsigned char c = static_cast<unsigned char>(s[i]);
-            if (c < 0x80 || c >= 0xC0) {
-                len++;
-            }
-        }
-    }
-    return len;
-}
 
-auto format_to_width(const std::string& colored_str, int target_width) -> std::string {
-    int current_width = 0;
-    std::string result;
-    bool in_esc = false;
-    bool skipping = false;
-
-    for (std::size_t i = 0; i < colored_str.length(); ++i) {
-        if (colored_str[i] == '\033') {
-            in_esc = true;
-            result += colored_str[i];
-        } else if (in_esc) {
-            result += colored_str[i];
-            if (colored_str[i] == 'm') {
-                in_esc = false;
-            }
-        } else {
-            unsigned char c = static_cast<unsigned char>(colored_str[i]);
-            bool is_lead = (c < 0x80 || c >= 0xC0);
-            if (is_lead) {
-                if (current_width >= target_width) {
-                    skipping = true;
-                } else {
-                    skipping = false;
-                    current_width++;
-                }
-            }
-            if (!skipping) {
-                result += colored_str[i];
-            }
-        }
-    }
-
-    if (current_width < target_width) {
-        result += std::string(static_cast<std::size_t>(target_width - current_width), ' ');
-    }
-
-    return result + "\033[0m";
-}
-
-static constexpr std::array<const char*, 32> kRegNames = {
-    "zero", "ra", "sp", "gp", "tp",  "t0",  "t1", "t2", "s0/fp", "s1", "a0",
-    "a1",   "a2", "a3", "a4", "a5",  "a6",  "a7", "s2", "s3",    "s4", "s5",
-    "s6",   "s7", "s8", "s9", "s10", "s11", "t3", "t4", "t5",    "t6"};
-
-static constexpr std::array<const char*, 32> kFpRegNames = {
-    "ft0", "ft1", "ft2", "ft3", "ft4",  "ft5",  "ft6", "ft7", "fs0",  "fs1", "fa0",
-    "fa1", "fa2", "fa3", "fa4", "fa5",  "fa6",  "fa7", "fs2", "fs3",  "fs4", "fs5",
-    "fs6", "fs7", "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11"};
-
-
-
-auto make_progress_bar(double ratio, int width, const std::string& color_code) -> std::string {
-    int filled = static_cast<int>(ratio * width);
-    if (filled < 0) filled = 0;
-    if (filled > width) filled = width;
-    std::string bar;
-    bar += color_code;
-    for (int i = 0; i < filled; ++i) {
-        bar += "█";
-    }
-    bar += "\033[90m";  // Dark gray
-    for (int i = filled; i < width; ++i) {
-        bar += "░";
-    }
-    bar += "\033[0m";
-    return bar;
-}
-
-auto format_compact(uint64_t val) -> std::string {
-    if (val >= 1000000000ULL) {
-        return std::format("{:.1f}G", static_cast<double>(val) / 1000000000.0);
-    }
-    if (val >= 1000000ULL) {
-        return std::format("{:.1f}M", static_cast<double>(val) / 1000000.0);
-    }
-    if (val >= 1000ULL) {
-        return std::format("{:.1f}K", static_cast<double>(val) / 1000.0);
-    }
-    return std::to_string(val);
-}
-auto wrap_line(const std::string& line, int max_width) -> std::vector<std::string> {
-    std::vector<std::string> chunks;
-    if (line.empty()) {
-        chunks.push_back("");
-        return chunks;
-    }
-    if (max_width <= 0) {
-        chunks.push_back(line);
-        return chunks;
-    }
-    std::size_t pos = 0;
-    while (pos < line.length()) {
-        std::size_t len = std::min(static_cast<std::size_t>(max_width), line.length() - pos);
-        chunks.push_back(line.substr(pos, len));
-        pos += len;
-    }
-    return chunks;
-}
 
 }  // namespace
 
 Tui::Tui(simrv::core::Machine& machine) : machine_(machine) {
     last_speed_update_ = std::chrono::steady_clock::now();
+    vt_.set_scroll_offset_callback([this](int lines) -> void {
+        if (scroll_offset_ > 0) {
+            scroll_offset_ += lines;
+        }
+    });
     initialize();
 }
 
 Tui::~Tui() { shutdown(); }
 
+void Tui::set_paused(bool p) {
+    if (paused_ != p) {
+        paused_ = p;
+        if (!p) {
+            status_override_.clear();
+            last_runtime_tick_ = std::chrono::steady_clock::now();
+        } else {
+            if (last_runtime_tick_ != std::chrono::steady_clock::time_point{}) {
+                runtime_duration_ += std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - last_runtime_tick_);
+                last_runtime_tick_ = std::chrono::steady_clock::time_point{};
+            }
+        }
+    }
+}
+
 void Tui::initialize() {
     reg_pane_ = std::make_unique<RegisterPane>(machine_);
     console_pane_ = std::make_unique<ConsolePane>();
     status_bar_ = std::make_unique<StatusBar>(machine_);
+
+    reg_pane_->update_cache();
 
     if (!g_termios_saved) {
         tcgetattr(STDIN_FILENO, &g_saved_termios);
@@ -232,9 +139,13 @@ void Tui::initialize() {
 
     print_log("SimRV Simulator Debug Dashboard Init...\n");
     print_log("Please press [Ctrl+P] to start/pause, [Space/s/S] to step, [Ctrl+Q] to quit.\n");
+    simrv::log::set_tui_callback([this](const std::string& msg) -> void {
+        print_log(msg);
+    });
 }
 
 void Tui::shutdown() {
+    simrv::log::set_tui_callback(nullptr);
     emergency_terminal_restore();
 
     struct sigaction sa{};
@@ -245,63 +156,11 @@ void Tui::shutdown() {
 }
 
 void Tui::handle_char_write(char ch) {
-    if (ansi_state_ == AnsiState::Esc) {
-        if (ch == '[') {
-            ansi_state_ = AnsiState::Csi;
-        } else {
-            ansi_state_ = AnsiState::Normal;
-        }
-        return;
-    }
-    if (ansi_state_ == AnsiState::Csi) {
-        if (ch >= 0x40 && ch <= 0x7E) {
-            ansi_state_ = AnsiState::Normal;
-        }
-        return;
-    }
-    if (ch == '\x1b') {
-        ansi_state_ = AnsiState::Esc;
-        return;
-    }
-
-    if (ch == '\n') {
-        raw_lines_.push_back(raw_current_line_);
-        if (raw_lines_.size() > 500) {
-            raw_lines_.erase(raw_lines_.begin());
-        }
-        raw_current_line_.clear();
-    } else if (ch == '\r') {
-        // Ignore carriage return
-    } else if (ch == '\t') {
-        raw_current_line_ += "    ";
-    } else if (ch == '\b' || ch == 127) {
-        if (!raw_current_line_.empty()) {
-            raw_current_line_.pop_back();
-        }
-    } else if (ch >= 32 && ch <= 126) {
-        raw_current_line_ += ch;
-        if (raw_current_line_.length() >= 1024) {
-            raw_lines_.push_back(raw_current_line_);
-            if (raw_lines_.size() > 500) {
-                raw_lines_.erase(raw_lines_.begin());
-            }
-            raw_current_line_.clear();
-        }
-    }
+    vt_.write_char(ch);
 }
 
 void Tui::print_log(const std::string& msg) {
-    for (char ch : msg) {
-        if (ch == '\n') {
-            raw_lines_.push_back(raw_current_line_);
-            if (raw_lines_.size() > 500) {
-                raw_lines_.erase(raw_lines_.begin());
-            }
-            raw_current_line_.clear();
-        } else if (ch != '\r') {
-            raw_current_line_ += ch;
-        }
-    }
+    vt_.write_string(msg);
 }
 
 void Tui::render() {
@@ -313,8 +172,8 @@ void Tui::render() {
         g_resized = 0;
     }
 
-    struct winsize w;
-    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+    struct winsize w{};
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w); // NOLINT(cppcoreguidelines-pro-type-vararg)
     int term_width = w.ws_col;
     int term_height = w.ws_row;
 
@@ -322,6 +181,17 @@ void Tui::render() {
 
     // Track KIPS and notify RegisterPane
     auto now = std::chrono::steady_clock::now();
+
+    // Update active runtime duration if running
+    if (!paused_) {
+        if (last_runtime_tick_ != std::chrono::steady_clock::time_point{}) {
+            runtime_duration_ += std::chrono::duration_cast<std::chrono::microseconds>(now - last_runtime_tick_);
+        }
+        last_runtime_tick_ = now;
+    } else {
+        last_runtime_tick_ = std::chrono::steady_clock::time_point{};
+    }
+
     auto diff =
         std::chrono::duration_cast<std::chrono::milliseconds>(now - last_speed_update_).count();
     if (diff >= 500) {
@@ -351,41 +221,31 @@ void Tui::render() {
     // StatusBar renders 3 header lines + 2 footer lines, and we add 1 separator before footer.
     int num_rows = term_height - 6;
 
-    // Rebuild visible console rows from raw log state.
+    // Rebuild visible console rows from virtual terminal state.
     lines_to_draw_.clear();
     if (right_pane_width > 0 && num_rows > 0) {
-        std::vector<std::string> all_lines = raw_lines_;
-        if (!raw_current_line_.empty()) {
-            all_lines.push_back(raw_current_line_);
-        }
+        vt_.resize(right_pane_width, num_rows);
 
-        std::vector<std::string> wrapped_lines;
-        wrapped_lines.reserve(all_lines.size());
-        for (const auto& line : all_lines) {
-            auto chunks = wrap_line(line, right_pane_width);
-            wrapped_lines.insert(wrapped_lines.end(), chunks.begin(), chunks.end());
-        }
-        if (wrapped_lines.empty()) {
-            wrapped_lines.emplace_back("");
-        }
-
-        const int total = static_cast<int>(wrapped_lines.size());
+        int total = vt_.get_lines_count();
         int end_exclusive = total - scroll_offset_;
         if (end_exclusive < 0) {
             end_exclusive = 0;
-        }
-        if (end_exclusive > total) {
-            end_exclusive = total;
         }
         int start = end_exclusive - num_rows;
         if (start < 0) {
             start = 0;
         }
 
-        lines_to_draw_.insert(lines_to_draw_.end(), wrapped_lines.begin() + start,
-                              wrapped_lines.begin() + end_exclusive);
-        while (static_cast<int>(lines_to_draw_.size()) < num_rows) {
-            lines_to_draw_.emplace_back("");
+        int cursor_abs_line = vt_.get_scrollback_size() + vt_.get_cursor_y();
+        bool is_live = (scroll_offset_ == 0);
+
+        for (int i = start; i < end_exclusive; ++i) {
+            bool draw_cursor = is_live && (i == cursor_abs_line) && vt_.is_cursor_visible();
+            lines_to_draw_.push_back(vt_.get_line_as_string(i, right_pane_width, draw_cursor));
+        }
+
+        while (lines_to_draw_.size() < static_cast<std::size_t>(num_rows)) {
+            lines_to_draw_.emplace_back(static_cast<std::size_t>(right_pane_width), ' ');
         }
     }
 
@@ -393,9 +253,8 @@ void Tui::render() {
     reg_pane_->set_kips(kips_);
     reg_pane_->set_kips_history(kips_history_);
     reg_pane_->set_paused(paused_);
-    if (!paused_) {
-        reg_pane_->update_cache();
-    }
+    reg_pane_->set_visible_rows(num_rows);
+    reg_pane_->set_active_runtime(static_cast<double>(runtime_duration_.count()) / 1000000.0);
     console_pane_->set_lines(lines_to_draw_);
     console_pane_->set_scroll_offset(scroll_offset_);
 
@@ -408,29 +267,27 @@ void Tui::render() {
     status_bar_->set_pane_widths(left_pane_width, right_pane_width);
 
     // Render loop
-    std::string screen = "[H";
+    std::string screen = "\033[?25l\033[H";
     screen += status_bar_->render_row(0, term_width);
 
     for (int i = 0; i < num_rows; ++i) {
         if (layout_ == TuiLayout::Split) {
             std::string left = reg_pane_->render_row(i, left_pane_width);
             std::string right = console_pane_->render_row(i, right_pane_width);
-            screen +=
-                "\033[1;94m║\033[0m" + left + "\033[1;94m│\033[0m" + right + "\033[1;94m║\033[0m\n";
+            screen += std::format("{}║\033[0m{}{}│\033[0m{}{}║\033[0m\n", kSakuraBorder, left, kSakuraBorder, right, kSakuraBorder);
         } else if (layout_ == TuiLayout::FullConsole) {
             std::string right = console_pane_->render_row(i, right_pane_width);
-            screen += "\033[1;94m║\033[0m" + right + "\033[1;94m║\033[0m\n";
+            screen += std::format("{}║\033[0m{}{}║\033[0m\n", kSakuraBorder, right, kSakuraBorder);
         } else {
             std::string left = reg_pane_->render_row(i, left_pane_width);
-            screen += "\033[1;94m║\033[0m" + left + "\033[1;94m║\033[0m\n";
+            screen += std::format("{}║\033[0m{}{}║\033[0m\n", kSakuraBorder, left, kSakuraBorder);
         }
     }
 
     if (layout_ == TuiLayout::Split) {
-        screen += "\033[1;94m╠" + make_repeated_string("═", left_pane_width) + "╧" +
-                  make_repeated_string("═", right_pane_width) + "╣\033[0m\n";
+        screen += std::format("{}╠{}╧{}╣\033[0m\n", kSakuraBorder, make_repeated_string("═", left_pane_width), make_repeated_string("═", right_pane_width));
     } else {
-        screen += "\033[1;94m╠" + make_repeated_string("═", term_width - 2) + "╣\033[0m\n";
+        screen += std::format("{}╠{}╣\033[0m\n", kSakuraBorder, make_repeated_string("═", term_width - 2));
     }
 
     screen += status_bar_->render_row(1, term_width);
@@ -444,18 +301,27 @@ void Tui::handle_mouse(int x, int y, int b) {
         return;
     }
 
-    (void)x;
     (void)y;
-    if (b == 64) {
-        scroll_offset_ += 5;
-        console_pane_->set_scroll_offset(scroll_offset_);
-        render();
-    } else if (b == 65) {
-        if (scroll_offset_ > 0) {
-            scroll_offset_ -= 5;
-            if (scroll_offset_ < 0) scroll_offset_ = 0;
+    if (x < pane_width_cached_) {
+        if (b == 64) {
+            reg_pane_->scroll(-2);
+            render();
+        } else if (b == 65) {
+            reg_pane_->scroll(2);
+            render();
+        }
+    } else {
+        if (b == 64) {
+            scroll_offset_ += 5;
             console_pane_->set_scroll_offset(scroll_offset_);
             render();
+        } else if (b == 65) {
+            if (scroll_offset_ > 0) {
+                scroll_offset_ -= 5;
+                if (scroll_offset_ < 0) scroll_offset_ = 0;
+                console_pane_->set_scroll_offset(scroll_offset_);
+                render();
+            }
         }
     }
 }
@@ -497,6 +363,26 @@ void Tui::scroll(int lines) {
 void Tui::reset_scroll() {
     scroll_offset_ = 0;
     render();
+}
+
+void Tui::scroll_regs(int lines) {
+    if (reg_pane_) {
+        reg_pane_->scroll(lines);
+        render();
+    }
+}
+
+void Tui::reset_scroll_regs() {
+    if (reg_pane_) {
+        reg_pane_->reset_scroll();
+        render();
+    }
+}
+
+void Tui::update_cache() {
+    if (reg_pane_) {
+        reg_pane_->update_cache();
+    }
 }
 
 }  // namespace simrv::tui

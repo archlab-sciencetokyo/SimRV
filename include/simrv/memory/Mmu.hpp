@@ -30,6 +30,8 @@ class Mmu {
      */
     explicit Mmu(Byte* mmem);
 
+    [[nodiscard]] auto mmem() const -> Byte* { return mmem_; }
+
     /**
      * @brief Perform SV32 page walk and address translation.
      *

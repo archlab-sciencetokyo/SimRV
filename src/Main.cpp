@@ -23,6 +23,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <system_error>
 
 #include "simrv/Define.hpp"
@@ -64,9 +65,10 @@ struct RuntimeOptions {
     bool use_mix = false;
     bool bp_trace = false;
     bool isatest = false;
-    bool gen_binfile = false;
     bool trace_enabled = false;
     bool use_opensbi = false;
+    bool cycle_accurate = false;
+    bool high_performance = true;
 
     // Debug / co-simulation options
     bool     gdb_mode      = false;
@@ -126,7 +128,7 @@ auto next_argument(std::span<char* const> args, std::size_t& index, std::string_
         return std::unexpected(std::format("missing value for {}", option_name));
     }
     ++index;
-    return std::string_view(args[index]);
+    return std::string_view(args[index]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 }
 
 auto parse_scaled_required(std::span<char* const> args, std::size_t& index,
@@ -156,7 +158,7 @@ auto parse_u32_required(std::span<char* const> args, std::size_t& index,
 auto parse_trace_window(RuntimeOptions& options, std::span<char* const> args, std::size_t& index)
     -> std::expected<void, std::string> {
     return parse_scaled_required(args, index, "-t")
-        .and_then([&](uint64_t begin) {
+        .and_then([&](uint64_t begin) -> std::expected<void, std::string> {
             return parse_scaled_required(args, index, "-t")
                 .and_then([&](uint64_t end) -> std::expected<void, std::string> {
                     if (begin > end) {
@@ -171,7 +173,7 @@ auto parse_trace_window(RuntimeOptions& options, std::span<char* const> args, st
 }
 
 inline auto iequals(std::string_view a, std::string_view b) -> bool {
-    return std::ranges::equal(a, b, [](char c1, char c2) {
+    return std::ranges::equal(a, b, [](char c1, char c2) -> bool {
         return std::tolower(static_cast<unsigned char>(c1)) ==
                std::tolower(static_cast<unsigned char>(c2));
     });
@@ -245,7 +247,7 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
     ParseResult result{};
 
     for (std::size_t i = 1; i < args.size(); ++i) {
-        std::string_view const arg = args[i];
+        std::string_view const arg = args[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         if (arg == "-h" || arg == "--help") {
             result.action = CliAction::ShowHelp;
             return result;
@@ -255,16 +257,19 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             return result;
         }
 
-        if (arg == "-m") {
-            auto value = next_argument(args, i, "-m");
+        // Memory Image
+        if (arg == "-m" || arg == "-k" || arg == "-i" || arg == "--image" || arg == "--kernel") {
+            auto value = next_argument(args, i, arg);
             if (!value) {
                 return std::unexpected(value.error());
             }
             result.options.fn_memimg = std::string(*value);
             continue;
         }
-        if (arg == "-d") {
-            auto value = next_argument(args, i, "-d");
+
+        // Disk Image
+        if (arg == "-d" || arg == "--disk") {
+            auto value = next_argument(args, i, arg);
             if (!value) {
                 return std::unexpected(value.error());
             }
@@ -272,8 +277,10 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             result.options.use_disk = true;
             continue;
         }
-        if (arg == "-c") {
-            auto value = next_argument(args, i, "-c");
+
+        // FDT/DTB
+        if (arg == "-f" || arg == "--fdt" || arg == "--dtb" || arg == "-c") {
+            auto value = next_argument(args, i, arg);
             if (!value) {
                 return std::unexpected(value.error());
             }
@@ -281,53 +288,46 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             continue;
         }
 
-        if (arg == "-e") {
-            auto value = parse_scaled_required(args, i, "-e");
+        // Steps limit
+        if (arg == "-s" || arg == "--steps" || arg == "-e") {
+            auto value = parse_scaled_required(args, i, arg);
             if (!value) {
                 return std::unexpected(value.error());
             }
             result.options.fincnt = *value;
             continue;
         }
-        if (arg == "-i") {
-            auto value = parse_scaled_required(args, i, "-i");
-            if (!value) {
-                return std::unexpected(value.error());
-            }
-            result.options.memimg = *value;
-            continue;
-        }
-        if (arg == "-q") {
-            auto value = parse_scaled_required(args, i, "-q");
-            if (!value) {
-                return std::unexpected(value.error());
-            }
-            result.options.strace = *value;
-            continue;
-        }
-        if (arg == "-l") {
-            auto value = parse_scaled_required(args, i, "-l");
+
+        // Timer limit
+        if (arg == "-t" || arg == "--timer" || arg == "-l") {
+            auto value = parse_scaled_required(args, i, arg);
             if (!value) {
                 return std::unexpected(value.error());
             }
             result.options.enabletimer = *value;
             continue;
         }
-        if (arg == "-H") {
-            auto value = parse_u32_required(args, i, "-H");
+
+        // Custom tohost address (HTIF)
+        if (arg == "-H" || arg == "--tohost-addr") {
+            auto value = parse_u32_required(args, i, arg);
             if (!value) {
                 return std::unexpected(value.error());
             }
             result.options.isatest_tohost = *value;
             continue;
         }
-        if (arg == "-t") {
+
+        // Trace Window / Range
+        if (arg == "--trace-range" || arg == "-r") {
             auto trace = parse_trace_window(result.options, args, i);
             if (!trace) {
                 return std::unexpected(trace.error());
             }
             continue;
         }
+
+        // MISA profile
         if (arg == "--misa") {
             auto value = next_argument(args, i, "--misa");
             if (!value) {
@@ -342,33 +342,40 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             continue;
         }
 
+        // OpenSBI flag - ignored with deprecation warning
         if (arg == "-B" || arg == "--opensbi") {
-            result.options.use_opensbi = true;
+            simrv::log::warn("Option '{}' is deprecated. OpenSBI is automatically enabled when a device tree is loaded.", arg);
             continue;
         }
 
-        if (arg == "-w") {
+        // Branch trace
+        if (arg == "--trace-bpred" || arg == "-w") {
             result.options.bp_trace = true;
             continue;
         }
-        if (arg == "-T") {
+
+        // HTIF monitor
+        if (arg == "-T" || arg == "--tohost-monitor") {
             result.options.isatest = true;
             continue;
         }
-        if (arg == "-b") {
-            result.options.gen_binfile = true;
-            continue;
-        }
-        if (arg == "-g") {
+
+
+        // Debug mode
+        if (arg == "-g" || arg == "-v" || arg == "--debug" || arg == "--verbose") {
             result.options.debugmode = true;
             continue;
         }
-        if (arg == "-p") {
+
+        // MMIO logging
+        if (arg == "--log-mmio" || arg == "-M") {
             result.options.dlog_mode = true;
             continue;
         }
-        if (arg == "-P" || arg == "--trap-log") {
-            auto value = next_argument(args, i, "-P/--trap-log");
+
+        // Trap logging file
+        if (arg == "--trap-log" || arg == "-P") {
+            auto value = next_argument(args, i, arg);
             if (!value) {
                 return std::unexpected(value.error());
             }
@@ -376,31 +383,80 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             result.options.traplog_mode = true;
             continue;
         }
-        if (arg == "-x") {
+
+        // Instruction Mix report
+        if (arg == "--instmix" || arg == "-x") {
             result.options.use_mix = true;
             continue;
         }
-        if (arg == "-a") {
+
+        // Baremetal mode
+        if (arg == "-b" || arg == "--baremetal" || arg == "-a") {
             result.options.start_pc = 0;
             result.options.appmode = true;
             continue;
         }
-        if (arg == "--tui") {
+
+        // Trace period PC
+        if (arg == "--trace-pc-period" || arg == "-q") {
+            auto value = parse_scaled_required(args, i, arg);
+            if (!value) {
+                return std::unexpected(value.error());
+            }
+            result.options.strace = *value;
+            continue;
+        }
+
+        // Dump initial state
+        if (arg == "--dump-init" || arg == "-I") {
+            auto value = parse_scaled_required(args, i, arg);
+            if (!value) {
+                return std::unexpected(value.error());
+            }
+            result.options.memimg = *value;
+            continue;
+        }
+
+        // TUI dashboard
+        if (arg == "--tui" || arg == "-u") {
             result.options.tuimode = true;
             continue;
         }
 
+
+
+        // Cycle-accurate simulation mode
+        if (arg == "--cycle-accurate" || arg == "-C") {
+            result.options.cycle_accurate = true;
+            result.options.high_performance = false;
+            continue;
+        }
+
+        // High-accuracy mode
+        if (arg == "--high-accuracy" || arg == "--accuracy-mode") {
+            result.options.cycle_accurate = true;
+            result.options.high_performance = false;
+            continue;
+        }
+
+        // High-performance mode
+        if (arg == "--high-performance" || arg == "--perf-mode") {
+            result.options.cycle_accurate = false;
+            result.options.high_performance = true;
+            continue;
+        }
+
         // ---- Debug / co-simulation ----
-        if (arg == "--gdb") {
+        if (arg == "--gdb" || arg == "-G") {
             result.options.gdb_mode = true;
             continue;
         }
-        if (arg == "--gdb-port") {
-            auto value = next_argument(args, i, "--gdb-port");
+        if (arg == "--gdb-port" || arg == "--port" || arg == "-p") {
+            auto value = next_argument(args, i, arg);
             if (!value) return std::unexpected(value.error());
             uint64_t port_val = 0;
             if (!parse_scaled_u64(*value, port_val) || port_val == 0 || port_val > 65535) {
-                return std::unexpected("invalid GDB port value for --gdb-port");
+                return std::unexpected(std::format("invalid GDB port value for {}", arg));
             }
             result.options.gdb_port = static_cast<uint16_t>(port_val);
             continue;
@@ -420,7 +476,7 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
     }
 
     if (result.options.fn_memimg.empty()) {
-        return std::unexpected("-m <FILE> is required to load a memory image");
+        return std::unexpected("-m/--image <FILE> is required to load a memory image");
     }
 
     return result;
@@ -445,6 +501,7 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     machine->s_misa_override = options.misa_override;
 
     machine->s_appmode = options.appmode;
+    simrv::memory::g_appmode = options.appmode;
     machine->s_tuimode = options.tuimode;
     machine->s_debugmode = options.debugmode;
     machine->s_dlog_mode = options.dlog_mode;
@@ -453,7 +510,9 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     machine->s_use_mix = options.use_mix;
     machine->s_bp_trace = options.bp_trace;
     machine->s_isatest = options.isatest;
-    machine->s_gen_binfile = options.gen_binfile;
+
+    machine->s_cycle_accurate = options.cycle_accurate;
+    machine->s_high_performance = options.high_performance;
 
     machine->tracer.init_trace(options.trace_enabled);
     machine->tracer.init_dlog(options.dlog_mode);
@@ -467,7 +526,7 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
         machine->cpu.trap_log_stream = &machine->tracer.fp_traplog;
     }
 
-    machine->cpu.use_opensbi = options.use_opensbi;
+    machine->cpu.use_opensbi = options.use_opensbi || !options.fn_dvtree.empty();
 
     // Debug / co-simulation flags
     machine->s_gdb_mode      = options.gdb_mode;
@@ -505,71 +564,71 @@ void set_start_time(simrv::core::Machine& machine) {
 
     // Required
     std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Required", style(kReset), style(kReset));
-    std::print(stdout, "  {}-m {}{}<FILE>{}        Memory image file (required to boot)\n\n",
+    std::print(stdout, "  {}-m, -k, -i, --image, --kernel {}{}<FILE>{} Memory image file to load\n\n",
                  style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
 
-    // Images and Devices
-    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Images and Devices", style(kReset), style(kReset));
-    std::print(stdout, "  {}-d {}{}<FILE>{}        Disk image file (enables block storage virtio-disk)\n",
+    // Devices & Files
+    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Devices and Files", style(kReset), style(kReset));
+    std::print(stdout, "  {}-d, --disk {}{}<FILE>{}      Disk image file (enables block storage virtio-disk)\n",
                  style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout, "  {}-c {}{}<FILE>{}        Device-tree binary file (FDT / DTB configuration)\n\n",
+    std::print(stdout, "  {}-f, -c, --fdt, --dtb {}{}<FILE>{} Device-tree binary file (FDT / DTB configuration)\n\n",
                  style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
 
     // Execution Control
     std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Execution Control (runs on high-performance simrv::pipeline engine)", style(kReset), style(kReset));
-    std::print(stdout, "  {}-e {}{}<N>{}           Stop execution after N instructions (zero-overhead count)\n",
+    std::print(stdout, "  {}-s, -e, --steps {}{}<N>{}    Stop execution after N instructions\n",
                  style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout, "  {}-l {}{}<N>{}           Enable timer after N cycles (CLINT ticker threshold)\n",
+    std::print(stdout, "  {}-t, -l, --timer {}{}<N>{}    Enable timer after N cycles (CLINT ticker threshold)\n",
                  style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout, "  {}-B, --opensbi{}    Bypass legacy C++ SBI and boot native OpenSBI kernel payload\n",
+    std::print(stdout, "  {}-b, -a, --baremetal{}         Binary mode (raw baremetal execution, start_pc=0)\n",
                  style(kBrightGreen), style(kReset));
-    std::print(stdout, "  {}-a{}                Binary mode (raw baremetal execution, start_pc=0, no OS / SBI)\n",
+    std::print(stdout, "  {}-u, --tui{}                  Enable interactive TUI split-screen monitor dashboard\n",
                  style(kBrightGreen), style(kReset));
-    std::print(stdout, "  {}--tui{}             Enable interactive TUI split-screen monitor dashboard\n",
+
+    std::print(stdout, "  {}-C, --cycle-accurate{}       Enable structural cycle-accurate performance simulation mode\n",
                  style(kBrightGreen), style(kReset));
-    std::print(stdout, "  {}--misa {}{}<PROFILE>{} Select CPU MISA profile: rv{}i | rv{}imac | rv{}gc\n\n",
+    std::print(stdout, "  {}--high-accuracy, --accuracy-mode{} Alias for --cycle-accurate (High-Accuracy Mode)\n",
+                 style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}--high-performance, --perf-mode{}  Enable optimized simulation mode bypassing caches/coroutines (default)\n",
+                 style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}--misa {}{}<PROFILE>{}      Select CPU MISA profile: rv{}i | rv{}imac | rv{}gc\n\n",
                  style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset), xlen_suffix, xlen_suffix, xlen_suffix);
 
     // Tracing and Debug
     std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Tracing and Debug (outputs generated inside trace/ subdirectory)", style(kReset), style(kReset));
-    std::print(stdout, "  {}-t {}{}<BEGIN> <END>{} Write trace/trace.txt for instruction range [BEGIN, END]\n",
+    std::print(stdout, "  {}-r, --trace-range {}{}<BG> <EN>{} Write trace snapshot to trace/trace.txt for instruction range\n",
                  style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout, "  {}-q {}{}<N>{}           Generate periodic trace/tracepc.txt every 1,000 instructions after N\n",
+    std::print(stdout, "  {}--trace-pc-period {}{}<N>{}   Generate periodic trace/tracepc.txt every N instructions\n",
                  style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout, "  {}-w{}                Generate trace/bpred.txt branch prediction trace\n",
+    std::print(stdout, "  {}--trace-bpred{}           Generate trace/bpred.txt branch prediction trace\n",
                  style(kBrightGreen), style(kReset));
-    std::print(stdout, "  {}-i {}{}<N>{}           Dump init architectural and TLB state artifacts at cycle N\n",
+    std::print(stdout, "  {}-I, --dump-init {}{}<N>{}     Dump initial architectural and TLB state artifacts at cycle N\n",
                  style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout, "  {}-g{}                Enable verbose debug logging output\n",
+    std::print(stdout, "  {}-g, -v, --debug, --verbose{} Enable verbose debug logging output\n",
                  style(kBrightGreen), style(kReset));
-    std::print(stdout, "  {}-p{}                Enable interactive disk/console MMIO transaction logging\n",
+    std::print(stdout, "  {}-M, --log-mmio{}              Enable interactive disk/console MMIO transaction logging\n",
                  style(kBrightGreen), style(kReset));
-    std::print(stdout, "  {}-P {}{}<FILE>{}        Write comprehensive trap/SBI diagnostic logs to file\n",
+    std::print(stdout, "  {}--trap-log {}{}<FILE>{}     Write comprehensive trap/SBI diagnostic logs to file\n",
                  style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout, "  {}-x{}                Write instruction mix metrics report to trace/instmix.txt on exit\n",
-                 style(kBrightGreen), style(kReset));
-    std::print(stdout, "  {}-b{}                Generate hardware initialization trace/inits.bin and exit\n\n",
+    std::print(stdout, "  {}--instmix{}               Write instruction mix metrics report to trace/instmix.txt on exit\n\n",
                  style(kBrightGreen), style(kReset));
 
     // ISA Test Mode
     std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "ISA Test Mode", style(kReset), style(kReset));
-    std::print(stdout, "  {}-T{}                Enable riscv-isa-tests tohost termination monitoring\n",
+    std::print(stdout, "  {}-T, --tohost-monitor{}    Enable riscv-isa-tests tohost termination monitoring\n",
                  style(kBrightGreen), style(kReset));
-    std::print(stdout, "  {}-H {}{}<ADDR>{}        Set custom tohost device MMIO address for -T (default: 0x80001000)\n\n",
+    std::print(stdout, "  {}-H, --tohost-addr {}{}<AD>{} Custom custom tohost device MMIO address for -T\n\n",
                  style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
 
     // Miscellaneous
-    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Miscellaneous", style(kReset), style(kReset));
+    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Miscellaneous / Co-Simulation", style(kReset), style(kReset));
     std::print(stdout, "  {}-h, --help{}        Show this colorized dashboard menu and exit\n",
                  style(kBrightGreen), style(kReset));
-    std::print(stdout, "  {}--version{}         Show compiler-injected version details and exit\n\n",
+    std::print(stdout, "  {}--version{}         Show compiler-injected version details and exit\n",
                  style(kBrightGreen), style(kReset));
-
-    // Debug and Co-Simulation
-    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Debug and Co-Simulation", style(kReset), style(kReset));
-    std::print(stdout, "  {}--gdb{}              Enable GDB RSP stub (waits for client before running)\n",
+    std::print(stdout, "  {}-G, --gdb{}                  Enable GDB RSP stub (waits for client before running)\n",
                  style(kBrightGreen), style(kReset));
-    std::print(stdout, "  {}--gdb-port {}{}<PORT>{}  Override GDB stub listen port (default: 1234)\n",
+    std::print(stdout, "  {}-p, --port, --gdb-port {}{}<PORT>{} Override GDB stub listen port (default: 1234)\n",
                  style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout, "  {}--lockstep{}         Enable Spike lockstep instruction-by-instruction verification\n",
                  style(kBrightGreen), style(kReset));
@@ -582,11 +641,11 @@ void set_start_time(simrv::core::Machine& machine) {
 
     // Examples
     std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Examples", style(kReset), style(kReset));
-    std::print(stdout, "  {}{}{} -m img/hello.bin -a\n",
+    std::print(stdout, "  {}{}{} -m img/hello.bin -b\n",
                  style(kBrightBlack), program_name, style(kReset));
-    std::print(stdout, "  {}{}{} -m linux-images/rv{}/fw_payload.bin -d linux-images/rv{}/root.bin -c linux-images/rv{}/devicetree.dtb\n",
+    std::print(stdout, "  {}{}{} --image linux-images/rv{}/fw_payload.bin --disk linux-images/rv{}/root.bin --fdt linux-images/rv{}/devicetree.dtb\n",
                  style(kBrightBlack), program_name, style(kReset), xlen_suffix, xlen_suffix, xlen_suffix);
-    std::print(stdout, "  {}{}{} -m linux-images/rv{}/fw_payload.bin --tui\n",
+    std::print(stdout, "  {}{}{} --image linux-images/rv{}/fw_payload.bin -u\n",
                  style(kBrightBlack), program_name, style(kReset), xlen_suffix);
 
     std::exit(exit_code);
@@ -662,9 +721,9 @@ void set_options(simrv::core::Machine* m, int argc, char* const* argv) {
 
     switch (parsed->action) {
         case CliAction::ShowHelp:
-            usage(args[0], 0);
+            usage(args[0], 0); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         case CliAction::ShowVersion:
-            std::println("{}", simrv::buildinfo::kVersion);
+            std::println("{} (RV{})", simrv::buildinfo::kVersion, simrv::xlen::kXLenBits);
             std::exit(0);
         case CliAction::Run:
             break;
@@ -681,7 +740,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     bool skip_banner = false;
     for (int i = 1; i < argc; ++i) {
         std::string_view const arg(argv[i]);
-        if (arg == "--tui") {
+        if (arg == "--tui" || arg == "-u") {
             is_tui = true;
         } else if (arg == "-h" || arg == "--help" || arg == "--version") {
             skip_banner = true;
@@ -697,26 +756,37 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     // Write startup entry to MMU debug log
     std::signal(SIGINT, SIG_IGN);  // ignore control+'C'
 
-    simrv::core::Machine sim_machine;
+    bool keep_running = true;
+    int final_exit_code = 0;
+    while (keep_running) {
+        simrv::core::Machine sim_machine;
 
-    const int init_result = sim_machine.initialize(argc, argv);
-    if (init_result != 0) {
-        return init_result;
-    }
+        const int init_result = sim_machine.initialize(argc, argv);
+        if (init_result != 0) {
+            return init_result;
+        }
 
-    set_start_time(sim_machine);
+        set_start_time(sim_machine);
 
-    // Initialize terminal in raw mode for simulator I/O.
-    TerminalModeGuard terminal_mode;
-    if (!terminal_mode.enable_raw_mode()) {
-        if (!is_tui) {
-            simrv::log::warn("Terminal raw mode setup failed; continuing in current mode");
+        // Initialize terminal in raw mode for simulator I/O.
+        TerminalModeGuard terminal_mode;
+        if (!terminal_mode.enable_raw_mode()) {
+            if (!is_tui) {
+                simrv::log::warn("Terminal raw mode setup failed; continuing in current mode");
+            }
+        }
+        sim_machine.run();
+
+        if (sim_machine.reboot_requested) {
+            simrv::log::info("Rebooting guest system...");
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        } else {
+            keep_running = false;
+            final_exit_code = sim_machine.exit_code;
+            if (!sim_machine.s_tuimode) {
+                sim_machine.tracer.print_summary();
+            }
         }
     }
-    sim_machine.run();
-
-    if (!sim_machine.s_tuimode) {
-        sim_machine.tracer.print_summary();
-    }
-    return 0;
+    return final_exit_code;
 }

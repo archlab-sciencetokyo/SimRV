@@ -666,6 +666,10 @@ enum OperationId : uint8_t {
     FCVT_S_W,
     FCVT_S_WU,
     FMV_W_X,
+    FCVT_L_S,
+    FCVT_LU_S,
+    FCVT_S_L,
+    FCVT_S_LU,
     /* RV32D */
     FLD,
     FSD,
@@ -693,6 +697,12 @@ enum OperationId : uint8_t {
     FCVT_WU_D,
     FCVT_D_W,
     FCVT_D_WU,
+    FMV_X_D,
+    FMV_D_X,
+    FCVT_L_D,
+    FCVT_LU_D,
+    FCVT_D_L,
+    FCVT_D_LU,
     /* Others */
     UNKNOWN,
     OperationIdCount
@@ -712,9 +722,9 @@ constexpr OperationId kOpRangeRv32aBegin = LR_W;
 constexpr OperationId kOpRangeRv32aEnd = AMOMAXU_W;
 
 constexpr OperationId kOpRangeRv32fBegin = FLW;
-constexpr OperationId kOpRangeRv32fEnd = FMV_W_X;
+constexpr OperationId kOpRangeRv32fEnd = FCVT_S_LU;
 
 constexpr OperationId kOpRangeRv32dBegin = FLD;
-constexpr OperationId kOpRangeRv32dEnd = FCVT_D_WU;
+constexpr OperationId kOpRangeRv32dEnd = FCVT_D_LU;
 
 constexpr size_t kOperationIdCount = static_cast<size_t>(OperationIdCount);

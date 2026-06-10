@@ -130,7 +130,7 @@ void CPU::execute_core(Machine& machine) {
                                      
                                      if (simrv::memory::is_dram_addr(buf_addr)) {
                                          for (Address i = 0; i < len; ++i) {
-                                             const uint8_t ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(buf_addr + i, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
+                                             const auto ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(buf_addr + i, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
                                              if (machine.s_tuimode && machine.uart && machine.uart->tui()) {
                                                  machine.uart->tui()->handle_char_write(static_cast<char>(ch));
                                              } else {
@@ -141,7 +141,7 @@ void CPU::execute_core(Machine& machine) {
                                      state_.regs.write(static_cast<RegId>(10), 0); // Success: returns 0 bytes NOT written
                                  } else if (semihost_op == 0x03) { // SYS_WRITEC
                                      if (simrv::memory::is_dram_addr(arg_ptr)) {
-                                         const uint8_t ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(arg_ptr, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
+                                         const auto ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(arg_ptr, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
                                          if (machine.s_tuimode && machine.uart && machine.uart->tui()) {
                                              machine.uart->tui()->handle_char_write(static_cast<char>(ch));
                                          } else {
@@ -153,7 +153,7 @@ void CPU::execute_core(Machine& machine) {
                                      Address ptr = arg_ptr;
                                      if (simrv::memory::is_dram_addr(ptr)) {
                                          while (true) {
-                                             const uint8_t ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(ptr, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
+                                             const auto ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(ptr, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
                                              if (ch == 0) break;
                                              if (machine.s_tuimode && machine.uart && machine.uart->tui()) {
                                                  machine.uart->tui()->handle_char_write(static_cast<char>(ch));

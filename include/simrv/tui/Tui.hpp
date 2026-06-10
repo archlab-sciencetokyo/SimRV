@@ -10,6 +10,8 @@
 #include <vector>
 #include <memory>
 
+#include "simrv/tui/VirtualTerminal.hpp"
+
 namespace simrv::core {
 class Machine;
 }
@@ -49,11 +51,9 @@ class Tui {
     void handle_char_write(char ch);
     void print_log(const std::string& msg);
 
-    void set_paused(bool p) {
-        paused_ = p;
-                if (!p) status_override_.clear();
-    }
+    void set_paused(bool p);
     [[nodiscard]] auto is_paused() const -> bool { return paused_; }
+    void update_cache();
 
     void set_status_override(const std::string& status) { status_override_ = status; }
     void clear_status_override() { status_override_.clear(); }
@@ -68,19 +68,14 @@ class Tui {
     void cycle_reg_page();
     void scroll(int lines);
     void reset_scroll();
+    void scroll_regs(int lines);
+    void reset_scroll_regs();
     [[nodiscard]] auto get_scroll_offset() const -> int { return scroll_offset_; }
 
 
     void handle_mouse(int x, int y, int b);
 
    private:
-    enum class AnsiState {
-        Normal,
-        Esc,
-        Csi
-    };
-    AnsiState ansi_state_ = AnsiState::Normal;
-
     simrv::core::Machine& machine_;
     
     std::unique_ptr<RegisterPane> reg_pane_;
@@ -88,8 +83,7 @@ class Tui {
     std::unique_ptr<StatusBar> status_bar_;
 
     int pane_width_cached_ = 62;
-    std::vector<std::string> raw_lines_;
-    std::string raw_current_line_;
+    VirtualTerminal vt_;
     std::vector<std::string> lines_to_draw_;
     bool paused_ = true;
     TuiLayout layout_ = TuiLayout::Split;
@@ -102,6 +96,10 @@ class Tui {
     uint64_t speed_ips_ = 0;
     uint64_t kips_ = 0;
     std::vector<uint64_t> kips_history_;
+
+    // Active runtime tracking
+    std::chrono::microseconds runtime_duration_{0};
+    std::chrono::steady_clock::time_point last_runtime_tick_{};
 };
 
 } // namespace simrv::tui

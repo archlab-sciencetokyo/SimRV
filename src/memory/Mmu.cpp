@@ -24,7 +24,7 @@ Mmu::Mmu(Byte* mmem) : mmem_(mmem) {}
 auto Mmu::translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
                     Word satp) -> std::expected<Address, TrapCause> {
     // Ensure virtual address fits within XLEN mask
-    if ((v_addr & ~simrv::xlen::kAddrMask) != 0) {
+    if (simrv::compiler::unlikely((v_addr & ~simrv::xlen::kAddrMask) != 0)) {
         // Optionally abort translation in debug builds
         // std::terminate();
     }
@@ -140,7 +140,7 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
         pte_addr = root_pt_addr + (vpn_i * pte_size);
         pte = simrv::memory::ram_read_fast(pte_addr, pte_load_op, mmem_);
 
-        if ((pte & enum_mask(PteFlag::V)) == 0u) {
+        if (simrv::compiler::unlikely((pte & enum_mask(PteFlag::V)) == 0u)) {
             // PTE invalid: page fault
             return std::unexpected(make_fault());
         }
@@ -180,7 +180,7 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
     const Word ppn_mask_for_level =
         (i == 0) ? 0 : (static_cast<Word>(1) << (i * vpn_bits_per_level)) - 1;
     const Word ppn = (pte >> kPteShift);
-    if ((ppn & ppn_mask_for_level) != 0) {
+    if (simrv::compiler::unlikely((ppn & ppn_mask_for_level) != 0)) {
         return std::unexpected(make_fault());
     }
 

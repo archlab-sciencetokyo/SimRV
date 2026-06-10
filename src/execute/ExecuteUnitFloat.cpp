@@ -31,8 +31,12 @@ constexpr auto f64_from_bits(uint64_t v) -> double { return std::bit_cast<double
 // ============================================================================
 
 constexpr auto read_f32(const FloatingRegister* freg, Word idx) -> float {
+    const FloatingRegister val = freg[idx];
+    if ((val & simrv::xlen::kF32BoxerBits) != simrv::xlen::kF32BoxerBits) {
+        return f32_from_bits(0x7fc00000U);
+    }
     return f32_from_bits(
-        static_cast<uint32_t>(freg[idx] & static_cast<FloatingRegister>(kLower32Mask)));
+        static_cast<uint32_t>(val & static_cast<FloatingRegister>(simrv::xlen::kLower32Mask)));
 }
 
 constexpr auto read_f64(const FloatingRegister* freg, Word idx) -> double {
@@ -561,8 +565,16 @@ auto ExecuteUnit::opFp(Word funct7, Funct3 funct3, Word rs1, Word rs2, Register 
         accumulate_fp_flags(fcsr);
     } else if (funct7 == enum_mask(Funct7Fp::FsgnjS) || funct7 == enum_mask(Funct7Fp::FsgnjD)) {
         const bool is_d = (funct7 == enum_mask(Funct7Fp::FsgnjD));
-        const FloatingRegister a = freg[rs1];
-        const FloatingRegister b = freg[rs2];
+        FloatingRegister a = freg[rs1];
+        FloatingRegister b = freg[rs2];
+        if (!is_d) {
+            if ((a & simrv::xlen::kF32BoxerBits) != simrv::xlen::kF32BoxerBits) {
+                a = static_cast<FloatingRegister>(simrv::xlen::kF32BoxerBits) | 0x7fc00000U;
+            }
+            if ((b & simrv::xlen::kF32BoxerBits) != simrv::xlen::kF32BoxerBits) {
+                b = static_cast<FloatingRegister>(simrv::xlen::kF32BoxerBits) | 0x7fc00000U;
+            }
+        }
         FloatingRegister value = 0;
         const uint64_t sign_bit = is_d ? (1ULL << 63U) : (1ULL << 31U);
         if (enum_mask(funct3) == 0) {
