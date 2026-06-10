@@ -27,7 +27,7 @@ jobs:
           dnf update -y
           dnf install -y dnf-plugins-core
           dnf config-manager --enable crb || dnf config-manager --set-enabled crb || true
-          dnf install -y git cmake ninja-build gcc gcc-c++ clang-tools-extra wget tar xz autoconf make
+          dnf install -y git cmake ninja-build gcc gcc-c++ clang-tools-extra wget tar xz autoconf make which
 
       - name: Fetch and compile riscv-tests
         run: |
