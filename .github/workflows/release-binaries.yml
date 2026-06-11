@@ -48,7 +48,8 @@ jobs:
           git submodule update --init --recursive
           autoconf
           ./configure
-          make -C isa -j$(nproc) RISCV_PREFIX=riscv-none-elf-
+          ARCH="${{ matrix.arch }}"
+          make -C isa -j$(nproc) RISCV_PREFIX=riscv-none-elf- XLEN="${ARCH#rv}"
 
       - name: Configure
         env:
