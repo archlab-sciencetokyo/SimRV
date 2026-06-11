@@ -58,6 +58,8 @@ jobs:
         ninja --version
     
     - name: Configure CMake
+      env:
+        RISCV_TESTS_DIR: ${{ runner.temp }}/riscv-tests
       run: >-
         cmake --preset ${{ matrix.arch }}-release
         -DCMAKE_C_COMPILER=gcc

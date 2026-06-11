@@ -51,6 +51,8 @@ jobs:
           make -C isa -j$(nproc) RISCV_PREFIX=riscv-none-elf-
 
       - name: Configure
+        env:
+          RISCV_TESTS_DIR: ${{ runner.temp }}/riscv-tests
         run: >-
           cmake --preset ${{ matrix.arch }}-release
           -DCMAKE_C_COMPILER=gcc
