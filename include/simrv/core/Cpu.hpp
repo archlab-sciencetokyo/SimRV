@@ -61,6 +61,26 @@ struct ArchState {
 
     Address load_res{};
     CSRValue reserved{};
+
+    [[nodiscard]] constexpr auto current_xlen() const -> unsigned {
+        if constexpr (!simrv::xlen::kIsXLen64) {
+            return 32;
+        } else {
+            if (priv == PrivilegeLevel::Machine) {
+                return 64;
+            } else if (priv == PrivilegeLevel::Supervisor) {
+                const unsigned sxl = (mstatus >> 34) & 3;
+                return (sxl == 1) ? 32 : 64;
+            } else { // User
+                const unsigned uxl = (mstatus >> 32) & 3;
+                return (uxl == 1) ? 32 : 64;
+            }
+        }
+    }
+
+    constexpr void update_xlen() {
+        regs.xlen = current_xlen();
+    }
 };
 
 struct SoftTlbEntry {

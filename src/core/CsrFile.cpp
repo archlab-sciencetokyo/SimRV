@@ -35,6 +35,7 @@ void CsrFile::setMstatus(CSRValue wdata) {
     }
     CSRValue const mask = kMstatusMask;
     cpu_.state().mstatus = (cpu_.state().mstatus & ~mask) | (wdata & mask);
+    cpu_.state().update_xlen();
 }
 
 auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCode> {

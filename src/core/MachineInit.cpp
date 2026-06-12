@@ -142,6 +142,7 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
     cpu.state().regs.write(static_cast<RegId>(11), linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);  // a1 = dtb
     cpu.state().misa = initial_misa;
     cpu.state().priv = kPrivMachine;
+    cpu.state().update_xlen();
     cpu.TLB_flush();
 
     load_image_into_ram(s_fn_memimg, mmem, static_cast<std::size_t>(simrv::memory::kDramSize),

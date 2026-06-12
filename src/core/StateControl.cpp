@@ -279,7 +279,11 @@ void TrapController::mret(ArchState& state, Tlb& tlb) {
 
     state.mstatus = mstatus;
     state.priv = static_cast<PrivilegeLevel>(mpp);
+    state.update_xlen();
     state.pc = state.mepc;
+    if (state.regs.xlen == 32) {
+        state.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state.pc)));
+    }
     state.reserved = 0;
     tlb.flush();
 }
@@ -305,7 +309,11 @@ void TrapController::sret(ArchState& state, Tlb& tlb) {
 
     state.mstatus = mstatus;
     state.priv = static_cast<PrivilegeLevel>(spp);
+    state.update_xlen();
     state.pc = state.sepc;
+    if (state.regs.xlen == 32) {
+        state.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state.pc)));
+    }
     state.reserved = 0;
     tlb.flush();
 }
@@ -367,6 +375,7 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
                         (static_cast<CSRValue>(std::to_underlying(state.priv)) << 8);
         state.mstatus &= ~enum_mask(MstatusBit::Sie);
         state.priv = kPrivSupervisor;
+        state.update_xlen();
 
         const Address tvec_base = state.stvec & ~Address{3};
         const Word tvec_mode = state.stvec & 3;
@@ -385,6 +394,7 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
                         (static_cast<CSRValue>(std::to_underlying(state.priv)) << 11);
         state.mstatus &= ~enum_mask(MstatusBit::Mie);
         state.priv = kPrivMachine;
+        state.update_xlen();
 
         const Address tvec_base = state.mtvec & ~Address{3};
         const Word tvec_mode = state.mtvec & 3;
@@ -393,6 +403,9 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
         } else {
             state.pc = tvec_base;
         }
+    }
+    if (state.regs.xlen == 32) {
+        state.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state.pc)));
     }
     state.reserved = 0;
     cpu.TLB_flush();

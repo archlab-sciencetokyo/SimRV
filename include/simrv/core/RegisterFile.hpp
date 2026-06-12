@@ -34,6 +34,8 @@ class RegisterFile {
         constexpr operator Register() const { return rf->read(idx); }
     };
 
+    unsigned xlen = 64;
+
     [[nodiscard]] constexpr auto operator[](RegId idx) -> RegisterProxy { return {this, idx}; }
     [[nodiscard]] constexpr auto operator[](RegId idx) const -> Register { return read(idx); }
 
@@ -41,6 +43,9 @@ class RegisterFile {
 
     constexpr void write(RegId idx, Register val) {
         if (std::to_underlying(idx) != 0) {
+            if (xlen == 32) {
+                val = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(val)));
+            }
             reg_[std::to_underlying(idx)] = val;
         }
     }

@@ -133,7 +133,7 @@ class Decoder {
 auto decoder(Instruction ir) -> OperationId;
 
 // Expand 16-bit C-extension instructions to canonical 32-bit forms
-auto decompressInstruction(Instruction ir) -> Instruction;
+auto decompressInstruction(Instruction ir, bool is_rv64) -> Instruction;
 
 /// String mapping for instruction mix profiling
 extern const std::array<std::string_view, static_cast<size_t>(OperationIdCount)> OPERATION_NAME;

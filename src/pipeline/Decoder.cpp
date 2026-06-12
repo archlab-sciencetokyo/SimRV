@@ -396,7 +396,7 @@ auto decoder(Instruction ir) -> OperationId {
     return OperationId::UNKNOWN;
 }
 
-auto decompressInstruction(Instruction ir) -> Instruction {
+auto decompressInstruction(Instruction ir, bool is_rv64) -> Instruction {
     simrv::pipeline::Decoder dec(ir);
     if (!dec.is_compressed()) {
         return ir;
@@ -455,7 +455,7 @@ auto decompressInstruction(Instruction ir) -> Instruction {
                 return i_type(0x03, 0x2, rs2_p, rs1_p, imm);
             }
             case 3: {
-                if constexpr (simrv::xlen::kIsXLen64) {
+                if (is_rv64) {
                     const uint32_t imm = ((ir >> 5) & 0x3) << 6 | ((ir >> 10) & 0x7) << 3;
                     return i_type(0x03, 0x3, rs2_p, rs1_p, imm);
                 } else {
@@ -474,7 +474,7 @@ auto decompressInstruction(Instruction ir) -> Instruction {
                 return s_type(0x23, 0x2, rs1_p, rs2_p, imm);
             }
             case 7: {
-                if constexpr (simrv::xlen::kIsXLen64) {
+                if (is_rv64) {
                     const uint32_t imm = ((ir >> 5) & 0x3) << 6 | ((ir >> 10) & 0x7) << 3;
                     return s_type(0x23, 0x3, rs1_p, rs2_p, imm);
                 } else {
@@ -493,7 +493,7 @@ auto decompressInstruction(Instruction ir) -> Instruction {
                 return i_type(0x13, 0x0, rs1_rd, rs1_rd, imm);
             }
             case 1: {
-                if constexpr (simrv::xlen::kIsXLen64) {
+                if (is_rv64) {
                     const uint32_t imm = ((ir >> 2) & 0x1F) | (((ir >> 12) & 0x1) ? 0xFFFFFFE0 : 0);
                     return i_type(0x1B, 0x0, rs1_rd, rs1_rd, imm);
                 } else {
@@ -580,7 +580,7 @@ auto decompressInstruction(Instruction ir) -> Instruction {
                 return i_type(0x03, 0x2, rs1_rd, 2, imm);
             }
             case 3: {
-                if constexpr (simrv::xlen::kIsXLen64) {
+                if (is_rv64) {
                     const uint32_t imm =
                         ((ir >> 2) & 0x7) << 6 | ((ir >> 5) & 0x3) << 3 | ((ir >> 12) & 0x1) << 5;
                     return i_type(0x03, 0x3, rs1_rd, 2, imm);
@@ -614,7 +614,7 @@ auto decompressInstruction(Instruction ir) -> Instruction {
                 return s_type(0x23, 0x2, 2, rs2, imm);
             }
             case 7: {
-                if constexpr (simrv::xlen::kIsXLen64) {
+                if (is_rv64) {
                     const uint32_t imm = ((ir >> 7) & 0x7) << 6 | ((ir >> 10) & 0x7) << 3;
                     return s_type(0x23, 0x3, 2, rs2, imm);
                 } else {

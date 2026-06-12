@@ -16,6 +16,10 @@ namespace simrv::core {
 CPU::CPU() : plic_mmio(*this), clint_mmio(*this), csr_file(*this), sbi(*this) {
     state_.regs.fill(0);
     state_.regs.fill_fp(0);
+    if constexpr (simrv::xlen::kIsXLen64) {
+        state_.mstatus = (static_cast<CSRValue>(2) << 34) | (static_cast<CSRValue>(2) << 32);
+    }
+    state_.update_xlen();
 }
 
 void CPU::TLB_flush() {

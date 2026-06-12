@@ -179,14 +179,18 @@ constexpr CSRValue kMstatusMask =
     (enum_mask(MstatusBit::Uie) | enum_mask(MstatusBit::Sie) | enum_mask(MstatusBit::Mie) |
      enum_mask(MstatusBit::Upie) | enum_mask(MstatusBit::Spie) | enum_mask(MstatusBit::Mpie) |
      enum_mask(MstatusBit::Spp) | enum_mask(MstatusBit::Mpp) | enum_mask(MstatusBit::Fs) |
-     enum_mask(MstatusBit::Mprv) | enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr));
+     enum_mask(MstatusBit::Mprv) | enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr) |
+     (simrv::xlen::kIsXLen64 ? (static_cast<CSRValue>(0xF) << 32) : 0));
 constexpr CSRValue kSstatusMask =
     (enum_mask(MstatusBit::Uie) | enum_mask(MstatusBit::Sie) | enum_mask(MstatusBit::Upie) |
      enum_mask(MstatusBit::Spie) | enum_mask(MstatusBit::Spp) | enum_mask(MstatusBit::Fs) |
-     enum_mask(MstatusBit::Xs) | enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr));
+     enum_mask(MstatusBit::Xs) | enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr) |
+     (simrv::xlen::kIsXLen64 ? (static_cast<CSRValue>(0x3) << 32) : 0));
 constexpr CSRValue kMstatusFsDirty = enum_mask(MstatusBit::Fs);
 constexpr CSRValue kMstatusSd = static_cast<CSRValue>(Word{1} << (simrv::xlen::kXLenBits - 1u));
-constexpr CSRValue kMstatusSstatusReadMask = static_cast<CSRValue>(0x000de133u) | kMstatusSd;
+constexpr CSRValue kMstatusSstatusReadMask =
+    static_cast<CSRValue>(0x000de133u) | kMstatusSd |
+    (simrv::xlen::kIsXLen64 ? (static_cast<CSRValue>(0x3) << 32) : 0);
 constexpr CSRValue kMstatusReadMask = static_cast<CSRValue>(kXLenMask);
 constexpr CSRValue kFflagsMask = static_cast<CSRValue>(0x1fu);
 constexpr CSRValue kFrmMask = static_cast<CSRValue>(0x7u);
