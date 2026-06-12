@@ -66,6 +66,7 @@ class Tui {
     }
 
     void cycle_reg_page();
+    void toggle_high_contrast();
     void scroll(int lines);
     void reset_scroll();
     void scroll_regs(int lines);

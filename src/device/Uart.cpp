@@ -147,6 +147,10 @@ auto Uart::consume_tui_control_sequence(uint8_t first_byte) -> bool {
             tui_->cycle_reg_page();
             return true;
         }
+        if (key == 'h' || key == 'H') {
+            tui_->toggle_high_contrast();
+            return true;
+        }
         if (key == 'l' || key == 'L') {
             tui_->cycle_layout();
             return true;
@@ -395,6 +399,10 @@ void Uart::tui_pause_loop() {
             } else if (key == simrv::tui::TuiKey::r || key == simrv::tui::TuiKey::R) {
                 if (tui_) {
                     tui_->cycle_reg_page();
+                }
+            } else if (key == simrv::tui::TuiKey::h || key == simrv::tui::TuiKey::H) {
+                if (tui_) {
+                    tui_->toggle_high_contrast();
                 }
             } else if (key == simrv::tui::TuiKey::u || key == simrv::tui::TuiKey::U) {
                 if (tui_) {

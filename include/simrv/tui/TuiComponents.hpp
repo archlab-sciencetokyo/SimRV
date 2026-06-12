@@ -17,16 +17,55 @@ class Machine;
 
 namespace simrv::tui {
 
-// Sakura Pastel Theme Colors
-inline constexpr const char* kSakuraBorder = "\033[38;5;218m";  // Soft pink borders
-inline constexpr const char* kSakuraText   = "\033[38;5;254m";  // Warm white text
-inline constexpr const char* kSakuraVal    = "\033[38;5;183m";  // Pastel lavender for register names/values
-inline constexpr const char* kSakuraMuted  = "\033[38;5;245m";  // Soft gray for details/dashes
-inline constexpr const char* kSakuraMint   = "\033[38;5;121m";  // Soft mint green for counts/speeds
-inline constexpr const char* kSakuraPeach  = "\033[38;5;223m";  // Soft peach/yellow for changed values
-inline constexpr const char* kSakuraCoral  = "\033[38;5;210m";  // Soft coral red for stalls
-inline constexpr const char* kSakuraSky    = "\033[38;5;117m";  // Soft sky blue for auxiliary/page details
-inline constexpr const char* kSakuraPink   = "\033[38;5;211m";  // Sakura Pink accent (progress bars)
+// Sakura Pastel Theme Colors (static constants)
+inline constexpr const char* kSakuraBorderConst = "\033[38;5;218m";  // Soft pink borders
+inline constexpr const char* kSakuraTextConst   = "\033[38;5;254m";  // Warm white text
+inline constexpr const char* kSakuraValConst    = "\033[38;5;183m";  // Pastel lavender for register names/values
+inline constexpr const char* kSakuraMutedConst  = "\033[38;5;245m";  // Soft gray for details/dashes
+inline constexpr const char* kSakuraMintConst   = "\033[38;5;121m";  // Soft mint green for counts/speeds
+inline constexpr const char* kSakuraPeachConst  = "\033[38;5;223m";  // Soft peach/yellow for changed values
+inline constexpr const char* kSakuraCoralConst  = "\033[38;5;210m";  // Soft coral red for stalls
+inline constexpr const char* kSakuraSkyConst    = "\033[38;5;117m";  // Soft sky blue for auxiliary/page details
+inline constexpr const char* kSakuraPinkConst   = "\033[38;5;211m";  // Sakura Pink accent (progress bars)
+
+// High Contrast Theme Colors (static constants)
+inline constexpr const char* kContrastBorder = "\033[1;37m";  // Bold White
+inline constexpr const char* kContrastText   = "\033[1;37m";  // Bold White
+inline constexpr const char* kContrastVal    = "\033[1;36m";  // Bold Cyan
+inline constexpr const char* kContrastMuted  = "\033[0;37m";  // Standard White/Gray
+inline constexpr const char* kContrastMint   = "\033[1;32m";  // Bold Green
+inline constexpr const char* kContrastPeach  = "\033[1;33m";  // Bold Yellow
+inline constexpr const char* kContrastCoral  = "\033[1;31m";  // Bold Red
+inline constexpr const char* kContrastSky    = "\033[1;36m";  // Bold Cyan
+inline constexpr const char* kContrastPink   = "\033[1;35m";  // Bold Magenta
+
+// Theme Variables (pointers to active color definitions)
+extern const char* g_theme_border;
+extern const char* g_theme_text;
+extern const char* g_theme_val;
+extern const char* g_theme_muted;
+extern const char* g_theme_mint;
+extern const char* g_theme_peach;
+extern const char* g_theme_coral;
+extern const char* g_theme_sky;
+extern const char* g_theme_pink;
+
+extern std::array<const char*, 16> g_theme_palette;
+extern std::array<const char*, 16> g_theme_bg_palette;
+
+// Map place names to dynamic theme variables for cleaner software decoupling
+#define kSakuraBorder g_theme_border
+#define kSakuraText g_theme_text
+#define kSakuraVal g_theme_val
+#define kSakuraMuted g_theme_muted
+#define kSakuraMint g_theme_mint
+#define kSakuraPeach g_theme_peach
+#define kSakuraCoral g_theme_coral
+#define kSakuraSky g_theme_sky
+#define kSakuraPink g_theme_pink
+
+void set_high_contrast(bool enable);
+bool is_high_contrast();
 
 
 /**
@@ -137,7 +176,6 @@ class StatusBar : public TuiWidget {
     int left_width_ = 0;
     int right_width_ = 0;
 
-    std::vector<uint64_t> kips_history_;
     uint64_t last_icount_ = 0;
     uint64_t kips_ = 0;
 };

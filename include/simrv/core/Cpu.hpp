@@ -22,6 +22,7 @@
 
 #include "simrv/pipeline/PipelineTask.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
+#include "simrv/core/DecodeCache.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -60,6 +61,14 @@ struct ArchState {
 
     Address load_res{};
     CSRValue reserved{};
+};
+
+struct SoftTlbEntry {
+    Address vpn = 0;          // Tag: vaddr >> 12
+    Address paddr_base = 0;   // Physical base: paddr & ~0xFFF
+    Address asid = 0;         // current_asid tag
+    PrivilegeLevel priv = kPrivUser; // privilege level under translation
+    bool valid = false;
 };
 
 class CPU {
@@ -183,6 +192,10 @@ class CPU {
     Machine* machine_ = nullptr;
     simrv::pipeline::PipelineTask pipeline_task;
     simrv::pipeline::PipelineSim pipeline_sim;
+    DecodeCache decode_cache;
+    std::array<SoftTlbEntry, 2048> soft_tlb_read{};
+    std::array<SoftTlbEntry, 2048> soft_tlb_write{};
+    void soft_tlb_flush();
 
     // ========== Execution Metrics ==========
     uint64_t e_icount{0};                                // Total instruction count

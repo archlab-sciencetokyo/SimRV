@@ -32,8 +32,9 @@ static bool g_termios_saved = false;   // NOLINT(cppcoreguidelines-avoid-non-con
 static bool g_tui_active = false;      // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 extern "C" void emergency_terminal_restore() {
+    std::fflush(stdout);
     if (g_tui_active) {
-        const char* shutdown_seq = "\033[?1006l\033[?1000l\033[?25h\033[?1049l\n";
+        const char* shutdown_seq = "\033[0m\033[?1006l\033[?1000l\033[?25h\033[2J\033[H\033[?1049l\n";
         (void)(::write(STDOUT_FILENO, shutdown_seq, std::strlen(shutdown_seq)) == 0);
         g_tui_active = false;
     }
@@ -87,6 +88,8 @@ void Tui::set_paused(bool p) {
         if (!p) {
             status_override_.clear();
             last_runtime_tick_ = std::chrono::steady_clock::now();
+            last_speed_update_ = std::chrono::steady_clock::now();
+            last_icount_ = machine_.cpu.e_icount;
         } else {
             if (last_runtime_tick_ != std::chrono::steady_clock::time_point{}) {
                 runtime_duration_ += std::chrono::duration_cast<std::chrono::microseconds>(
@@ -101,6 +104,8 @@ void Tui::initialize() {
     reg_pane_ = std::make_unique<RegisterPane>(machine_);
     console_pane_ = std::make_unique<ConsolePane>();
     status_bar_ = std::make_unique<StatusBar>(machine_);
+
+    set_high_contrast(machine_.s_high_contrast);
 
     reg_pane_->update_cache();
 
@@ -192,19 +197,23 @@ void Tui::render() {
         last_runtime_tick_ = std::chrono::steady_clock::time_point{};
     }
 
-    auto diff =
-        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_speed_update_).count();
-    if (diff >= 500) {
-        uint64_t current_icount = machine_.cpu.e_icount;
-        uint64_t insns_since_last = current_icount - last_icount_;
-        speed_ips_ = (insns_since_last * 1000ULL) / static_cast<uint64_t>(diff);
-        kips_ = speed_ips_ / 1000;
-        kips_history_.push_back(kips_);
-        if (kips_history_.size() > 60) {
-            kips_history_.erase(kips_history_.begin());
+    if (!paused_) {
+        auto diff =
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - last_speed_update_).count();
+        if (diff >= 500) {
+            uint64_t current_icount = machine_.cpu.e_icount;
+            uint64_t insns_since_last = current_icount - last_icount_;
+            speed_ips_ = (insns_since_last * 1000ULL) / static_cast<uint64_t>(diff);
+            kips_ = speed_ips_ / 1000;
+            kips_history_.push_back(kips_);
+            if (kips_history_.size() > 60) {
+                kips_history_.erase(kips_history_.begin());
+            }
+            last_icount_ = current_icount;
+            last_speed_update_ = now;
         }
-        last_icount_ = current_icount;
-        last_speed_update_ = now;
+    } else {
+        kips_ = 0;
     }
 
     int left_pane_width = (term_width > 120) ? 75 : 62;
@@ -349,6 +358,12 @@ void Tui::cycle_reg_page() {
         rp = TuiRegPage::GPR;
     }
     reg_pane_->set_page(rp);
+    render();
+}
+
+void Tui::toggle_high_contrast() {
+    machine_.s_high_contrast = !machine_.s_high_contrast;
+    set_high_contrast(machine_.s_high_contrast);
     render();
 }
 

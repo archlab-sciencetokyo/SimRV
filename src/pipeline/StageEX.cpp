@@ -88,6 +88,7 @@ void CPU::execute_core(Machine& machine) {
             if (ctx.funct3 == Funct3::FenceI) {
                 icache.flush();
                 dcache.flush();
+                decode_cache.flush();
             }
             break;
         case Opcode::Branch:

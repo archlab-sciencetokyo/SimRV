@@ -18,10 +18,25 @@ CPU::CPU() : plic_mmio(*this), clint_mmio(*this), csr_file(*this), sbi(*this) {
     state_.regs.fill_fp(0);
 }
 
-void CPU::TLB_flush() { tlb.flush(); }
+void CPU::TLB_flush() {
+    tlb.flush();
+    decode_cache.flush();
+    soft_tlb_flush();
+}
 
 void CPU::TLB_flush(bool match_all_vaddr, Address vaddr, bool match_all_asid, Word asid) {
     tlb.flush_selective(match_all_vaddr, vaddr, match_all_asid, asid);
+    decode_cache.flush();
+    soft_tlb_flush();
+}
+
+void CPU::soft_tlb_flush() {
+    for (auto& entry : soft_tlb_read) {
+        entry.valid = false;
+    }
+    for (auto& entry : soft_tlb_write) {
+        entry.valid = false;
+    }
 }
 
 auto CPU::get_mstatus(CSRValue mask) const -> CSRValue { return csr_file.getMstatus(mask); }
@@ -101,16 +116,39 @@ void CPU::run_cycle(Machine& machine) {
         step_cycles = pipeline_sim.step_instruction(
             pipeline_context.cpc, pipeline_context.opcode, pipeline_context.rd,
             pipeline_context.rs1, pipeline_context.rs2, pipeline_context.op_id, branched,
-            is_branch, is_jump, icache_miss, dcache_miss
+            is_branch, is_jump, icache_miss, dcache_miss, pipeline_context.tlb_miss, pipeline_context.jmp_pc
         );
     } else {
         if (machine.s_high_performance) {
-            const bool success = fetch_stage(machine, state_.pc) &&
-                                 decode_stage(machine) &&
-                                 execute_stage(machine) &&
-                                 memory_stage(machine) &&
-                                 writeback_stage(machine) &&
-                                 commit_stage(machine);
+            auto* cached = decode_cache.lookup(state_.pc);
+            bool success = true;
+            if (simrv::compiler::likely(cached != nullptr)) {
+                static_cast<pipeline::DecodedInstruction&>(pipeline_context) = *cached;
+                pipeline_context.tlb_miss = false;
+
+                fetch_operands(machine);
+                success = execute_stage(machine) &&
+                          memory_stage(machine) &&
+                          writeback_stage(machine) &&
+                          commit_stage(machine);
+            } else {
+                success = fetch_stage(machine, state_.pc) &&
+                          decode_stage(machine);
+                
+                if (success && !pipeline_context.pending_exception.has_value()) {
+                    CachedOp op;
+                    static_cast<pipeline::DecodedInstruction&>(op) = pipeline_context;
+                    decode_cache.insert(state_.pc, op);
+                }
+
+                if (success) {
+                    success = execute_stage(machine) &&
+                              memory_stage(machine) &&
+                              writeback_stage(machine) &&
+                              commit_stage(machine);
+                }
+            }
+
             if (!success) {
                 const auto cause = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0));
                 raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);

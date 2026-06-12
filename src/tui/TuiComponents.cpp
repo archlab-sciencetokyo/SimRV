@@ -18,8 +18,55 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
+#include "simrv/pipeline/Decoder.hpp"
 
 namespace simrv::tui {
+
+const char* g_theme_border = kSakuraBorderConst;
+const char* g_theme_text   = kSakuraTextConst;
+const char* g_theme_val    = kSakuraValConst;
+const char* g_theme_muted  = kSakuraMutedConst;
+const char* g_theme_mint   = kSakuraMintConst;
+const char* g_theme_peach  = kSakuraPeachConst;
+const char* g_theme_coral  = kSakuraCoralConst;
+const char* g_theme_sky    = kSakuraSkyConst;
+const char* g_theme_pink   = kSakuraPinkConst;
+
+std::array<const char*, 16> g_theme_palette = kSakuraPalette;
+std::array<const char*, 16> g_theme_bg_palette = kSakuraBgPalette;
+
+bool g_high_contrast = false;
+
+void set_high_contrast(bool enable) {
+    g_high_contrast = enable;
+    if (enable) {
+        g_theme_border  = kContrastBorder;
+        g_theme_text    = kContrastText;
+        g_theme_val     = kContrastVal;
+        g_theme_muted   = kContrastMuted;
+        g_theme_mint    = kContrastMint;
+        g_theme_peach   = kContrastPeach;
+        g_theme_coral   = kContrastCoral;
+        g_theme_sky     = kContrastSky;
+        g_theme_pink    = kContrastPink;
+        g_theme_palette = kHighContrastPalette;
+        g_theme_bg_palette = kHighContrastBgPalette;
+    } else {
+        g_theme_border  = kSakuraBorderConst;
+        g_theme_text    = kSakuraTextConst;
+        g_theme_val     = kSakuraValConst;
+        g_theme_muted   = kSakuraMutedConst;
+        g_theme_mint    = kSakuraMintConst;
+        g_theme_peach   = kSakuraPeachConst;
+        g_theme_coral   = kSakuraCoralConst;
+        g_theme_sky     = kSakuraSkyConst;
+        g_theme_pink    = kSakuraPinkConst;
+        g_theme_palette = kSakuraPalette;
+        g_theme_bg_palette = kSakuraBgPalette;
+    }
+}
+
+bool is_high_contrast() { return g_high_contrast; }
 
 namespace {
 
@@ -148,15 +195,15 @@ auto make_progress_bar(double ratio, int width, const std::string& color_code) -
 
 auto format_compact(uint64_t val) -> std::string {
     if (val >= 1000000000ULL) {
-        return std::format("{:.1f}G", static_cast<double>(val) / 1000000000.0);
+        return std::format("{:5.1f}G", static_cast<double>(val) / 1000000000.0);
     }
     if (val >= 1000000ULL) {
-        return std::format("{:.1f}M", static_cast<double>(val) / 1000000.0);
+        return std::format("{:5.1f}M", static_cast<double>(val) / 1000000.0);
     }
     if (val >= 1000ULL) {
-        return std::format("{:.1f}K", static_cast<double>(val) / 1000.0);
+        return std::format("{:5.1f}K", static_cast<double>(val) / 1000.0);
     }
-    return std::to_string(val);
+    return std::format("{:6d}", val);
 }
 
 }  // namespace
@@ -175,10 +222,14 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             binary_name = "application";
         }
         std::string mode_str = machine_.s_appmode ? "Application" : "OS/RTOS";
-        std::string status_badge =
-            status_override_.empty()
-                ? (paused_ ? "\033[48;5;223m\033[38;5;232m PAUSED \033[0m" : "\033[48;5;121m\033[38;5;232m RUNNING \033[0m")
-                : status_override_;
+        std::string status_badge = status_override_;
+        if (status_badge.empty()) {
+            status_badge = paused_
+                ? (g_high_contrast ? "\033[43;30m PAUSED \033[0m" : "\033[48;5;223m\033[38;5;232m PAUSED \033[0m")
+                : (g_high_contrast ? "\033[42;30m RUNNING \033[0m" : "\033[48;5;121m\033[38;5;232m RUNNING \033[0m");
+        } else if (status_badge == "\033[1;38;5;234;48;5;210m TRAPPED \033[0m" && g_high_contrast) {
+            status_badge = "\033[1;41;37m TRAPPED \033[0m";
+        }
         std::string page_badge;
         if (active_page_ == TuiRegPage::GPR) {
             page_badge = "GPR";
@@ -189,16 +240,23 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         } else {
             page_badge = "PIPE";
         }
-        std::string left_text = std::format(" SimRV [{}] ({}) | Status: ", binary_name, mode_str);
-        std::string left_render =
-            left_text + status_badge + std::format(" | Page: {}{}\033[0m", kSakuraSky, page_badge);
+        int target_width = layout_ == TuiLayout::Split ? left_width_ : width - 2;
+        std::string left_render;
+        if (target_width < 45) {
+            left_render = std::format(" SimRV | {}{}\033[0m", kSakuraSky, page_badge);
+        } else if (target_width < 60) {
+            left_render = std::format(" SimRV [{}] | {}{}\033[0m", binary_name, kSakuraSky, page_badge);
+        } else {
+            std::string left_text = std::format(" SimRV [{}] ({}) | ", binary_name, mode_str);
+            left_render = left_text + status_badge + std::format(" | {}{}\033[0m", kSakuraSky, page_badge);
+        }
+
         int left_printed_len = get_display_width(left_render);
-        int pad_left = (layout_ == TuiLayout::Split ? left_width_ : width - 2) - left_printed_len;
+        int pad_left = target_width - left_printed_len;
         if (pad_left > 0) {
             left_render += std::string(static_cast<std::size_t>(pad_left), ' ');
         } else {
-            left_render =
-                format_to_width(left_render, layout_ == TuiLayout::Split ? left_width_ : width - 2);
+            left_render = format_to_width(left_render, target_width);
         }
 
         std::string right_text;
@@ -327,10 +385,10 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         std::string footer_text;
         if (paused_) {
             footer_text =
-                " [s] Step | [c] Continue | [q] Quit | [r] Cycle Regs | [Tab] Cycle Layout | [u/d] Scroll ";
+                " [s] Step | [c] Continue | [q] Quit | [r] Cycle Regs | [Tab] Cycle Layout | [u/d] Scroll | [h] Contrast ";
         } else {
             footer_text =
-                " [Ctrl-P] Pause | [Ctrl-Q] Quit | [Alt-L] Layout | [Alt-R] Regs | [Alt-U/D] Scroll ";
+                " [Ctrl-P] Pause | [Ctrl-Q] Quit | [Alt-L] Layout | [Alt-R] Regs | [Alt-U/D] Scroll | [Alt-H] Contrast ";
         }
         int footer_len = get_display_width(footer_text);
         int pad_foot = (width - 2) - footer_len;
@@ -349,10 +407,6 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
 
 void StatusBar::update_kips(uint64_t current_kips) {
     kips_ = current_kips;
-    kips_history_.push_back(current_kips);
-    if (kips_history_.size() > 60) {
-        kips_history_.erase(kips_history_.begin());
-    }
 }
 
 auto ConsolePane::render_row(int row_idx, int width) -> std::string {
@@ -369,10 +423,22 @@ auto RegisterPane::render_row(int row_idx, int width) -> std::string {
     }
 
     auto section_line = [&](const std::string& title) -> std::string {
-        std::string full = " " + title + " ";
-        std::string dashes =
-            make_repeated_string("─", std::max(0, width - get_display_width(full)));
-        return std::format("{}{}\033[0m", kSakuraMuted, format_to_width(full + dashes, width));
+        if (title.starts_with("─") || title.starts_with(" ")) {
+            std::string full = title + " ";
+            int dash_len = width - get_display_width(full);
+            if (dash_len < 0) dash_len = 0;
+            return std::format("\033[1;38;5;254m{} \033[0m{}{}", title, kSakuraBorder, make_repeated_string("─", dash_len));
+        } else {
+            std::string text = " " + title + " ";
+            int dash_len = width - get_display_width(text);
+            if (dash_len < 0) dash_len = 0;
+            int left_dashes = std::min(4, dash_len / 2);
+            int right_dashes = dash_len - left_dashes;
+            return std::format("{}{} \033[1;38;5;254m{}\033[0m {}{}", 
+                               kSakuraBorder, make_repeated_string("─", left_dashes),
+                               title,
+                               kSakuraBorder, make_repeated_string("─", right_dashes));
+        }
     };
 
     if (!paused_) {
@@ -478,84 +544,200 @@ auto RegisterPane::render_row(int row_idx, int width) -> std::string {
                        format_to_width(col2_color, width - col_width);
             } else {
                 // PIPELINE page
-                auto& ctx = cpu.pipeline_context;
+                if (machine_.s_cycle_accurate) {
+                    auto& ps = cpu.pipeline_sim;
 
-                switch (logical_row) {
-                    case 0:
-                        return section_line("── IF/CVT");
-                    case 1:
-                        return render_pair(
-                            "cpc", std::format("0x{:0{}x}", ctx.cpc, simrv::xlen::kXLenHexDigits),
-                            kSakuraMint, "ir_org", std::format("0x{:08x}", ctx.ir_org), kSakuraVal);
-                    case 2:
-                        return render_pair("ir", std::format("0x{:08x}", ctx.ir), kSakuraVal,
-                                           "cinsn", std::format("0x{:08x}", ctx.cinsn), kSakuraVal);
-                    case 3:
-                        return section_line("── ID");
-                    case 4:
-                        return render_pair(
-                            "opcode", std::to_string(std::to_underlying(ctx.opcode)), kSakuraVal,
-                            "funct3", std::to_string(std::to_underlying(ctx.funct3)), kSakuraVal);
-                    case 5:
-                        return render_pair(
-                            "rd/rs1",
-                            std::format("{}/{}", std::to_underlying(ctx.rd),
-                                        std::to_underlying(ctx.rs1)),
-                            kSakuraVal, "rs2/f7",
-                            std::format("{}/0x{:x}", std::to_underlying(ctx.rs2), ctx.funct7),
-                            kSakuraVal);
-                    case 6:
-                        return render_pair(
-                            "imm", std::format("0x{:0{}x}", ctx.imm, simrv::xlen::kXLenHexDigits),
-                            kSakuraVal, "funct12", std::format("0x{:x}", ctx.funct12), kSakuraVal);
-                    case 7:
-                        return section_line("── OF/EX");
-                    case 8:
-                        return render_pair(
-                            "rrs1", std::format("0x{:0{}x}", ctx.rrs1, simrv::xlen::kXLenHexDigits),
-                            kSakuraMint, "rrs2",
-                            std::format("0x{:0{}x}", ctx.rrs2, simrv::xlen::kXLenHexDigits),
-                            kSakuraMint);
-                    case 9:
-                        return render_pair(
-                            "jmp_pc",
-                            std::format("0x{:0{}x}", ctx.jmp_pc, simrv::xlen::kXLenHexDigits),
-                            kSakuraMint, "taken", ctx.tkn ? "yes" : "no", kSakuraVal);
-                    case 10:
-                        return render_pair(
-                            "wb_data",
-                            std::format("0x{:0{}x}", ctx.wb_data, simrv::xlen::kXLenHexDigits),
-                            kSakuraMint, "wb_csr",
-                            std::format("0x{:0{}x}", ctx.wb_data_csr, simrv::xlen::kXLenHexDigits),
-                            kSakuraVal);
-                    case 11:
-                        return section_line("── MEM/FP");
-                    case 12:
-                        return render_pair(
-                            "mem_addr",
-                            std::format("0x{:0{}x}", ctx.mem_addr, simrv::xlen::kXLenHexDigits),
-                            kSakuraMint, "mem_w",
-                            std::format("0x{:0{}x}", ctx.mem_wdata, simrv::xlen::kXLenHexDigits),
-                            kSakuraMint);
-                    case 13:
-                        return render_pair(
-                            "mem_r",
-                            std::format("0x{:0{}x}", ctx.mem_rdata, simrv::xlen::kXLenHexDigits),
-                            kSakuraMint, "fp_wb", std::format("0x{:016x}", ctx.fp_wb_data),
-                            kSakuraVal);
-                    case 14:
-                        return render_pair("fp_wb_en", ctx.fp_wb_enable ? "on" : "off", kSakuraVal,
-                                           "int<-fp", ctx.int_wb_from_fp ? "on" : "off",
-                                           kSakuraVal);
-                    case 15:
-                        return section_line("── TRAP/TLB");
-                    default:
-                        return format_to_width(std::format(" {}Pipeline page\033[0m", kSakuraMuted), width);
+                    auto get_stage_desc = [](const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem, const std::string& stall_type, bool raw_stall = false) -> std::string {
+                        if (!reg.valid) {
+                            return "\033[38;5;244mbubble/empty\033[0m";
+                        }
+                        std::string_view op_name = "UNKNOWN";
+                        if (static_cast<std::size_t>(reg.op_id) < simrv::pipeline::OPERATION_NAME.size()) {
+                            op_name = simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(reg.op_id));
+                        }
+                        std::string desc = std::format("\033[1;38;5;121m0x{:0{}x}\033[0m (\033[1;38;5;183m{}\033[0m)", 
+                                                       reg.pc, simrv::xlen::kXLenHexDigits, op_name);
+                        if (stall_rem > 0) {
+                            desc += std::format(" \033[38;5;203m[Stall: {} ({} clk)]\033[0m", stall_type, stall_rem);
+                        } else if (raw_stall) {
+                            desc += " \033[38;5;203m[Stall: RAW Hazard]\033[0m";
+                        } else if (reg.remaining_latency > 0) {
+                            desc += std::format(" \033[38;5;218m[Lat: {} clk]\033[0m", reg.remaining_latency);
+                        }
+                        return desc;
+                    };
+
+                    // Check RAW stall for ID
+                    bool is_raw_stalled = false;
+                    if (ps.d_reg_.valid) {
+                        bool reads_rs1 = (ps.d_reg_.rs1 != static_cast<RegId>(0));
+                        bool reads_rs2 = (ps.d_reg_.rs2 != static_cast<RegId>(0));
+                        if (reads_rs1 || reads_rs2) {
+                            if (ps.e_reg_.valid && ps.e_reg_.writes_reg && ps.e_reg_.rd != static_cast<RegId>(0)) {
+                                if ((reads_rs1 && ps.d_reg_.rs1 == ps.e_reg_.rd) || (reads_rs2 && ps.d_reg_.rs2 == ps.e_reg_.rd)) {
+                                    if (ps.e_reg_.remaining_latency > 0) is_raw_stalled = true;
+                                }
+                            }
+                            if (ps.m_reg_.valid && ps.m_reg_.writes_reg && ps.m_reg_.rd != static_cast<RegId>(0)) {
+                                if ((reads_rs1 && ps.d_reg_.rs1 == ps.m_reg_.rd) || (reads_rs2 && ps.d_reg_.rs2 == ps.m_reg_.rd)) {
+                                    if (ps.m_reg_.remaining_latency > 0) is_raw_stalled = true;
+                                }
+                            }
+                        }
+                    }
+
+                    switch (logical_row) {
+                        case 0:
+                            return section_line("Pipeline Stages (Cycle-Accurate Mode)");
+                        case 1:
+                            {
+                                std::string stall_type = ps.tlb_stall_remaining_ > 0 ? "TLB Miss" : "ICache Miss";
+                                uint32_t stall_rem = ps.tlb_stall_remaining_ > 0 ? ps.tlb_stall_remaining_ : ps.icache_stall_remaining_;
+                                return format_to_width(std::format("  \033[1;38;5;189mIF\033[0m  : {}", get_stage_desc(ps.f_reg_, stall_rem, stall_type)), width);
+                            }
+                        case 2:
+                            return format_to_width(std::format("  \033[1;38;5;189mID\033[0m  : {}", get_stage_desc(ps.d_reg_, 0, "", is_raw_stalled)), width);
+                        case 3:
+                            return format_to_width(std::format("  \033[1;38;5;189mEX\033[0m  : {}", get_stage_desc(ps.e_reg_, ps.div_busy_cycles_remaining_, "Divider")), width);
+                        case 4:
+                            return format_to_width(std::format("  \033[1;38;5;189mMEM\033[0m : {}", get_stage_desc(ps.m_reg_, ps.dcache_stall_remaining_, "DCache Miss")), width);
+                        case 5:
+                            return format_to_width(std::format("  \033[1;38;5;189mWB\033[0m  : {}", get_stage_desc(ps.w_reg_, 0, "")), width);
+                        case 6:
+                            return section_line("Active Stalls & Hazards");
+                        case 7:
+                            return render_pair("RAW Stall", is_raw_stalled ? "Active" : "None", is_raw_stalled ? kSakuraPeach : kSakuraMint,
+                                               "Divider St", ps.div_busy_cycles_remaining_ > 0 ? "Active" : "None", ps.div_busy_cycles_remaining_ > 0 ? kSakuraPeach : kSakuraMint);
+                        case 8:
+                            return render_pair("ICache St", ps.icache_stall_remaining_ > 0 ? "Active" : "None", ps.icache_stall_remaining_ > 0 ? kSakuraPeach : kSakuraMint,
+                                               "DCache St", ps.dcache_stall_remaining_ > 0 ? "Active" : "None", ps.dcache_stall_remaining_ > 0 ? kSakuraPeach : kSakuraMint);
+                        case 9:
+                            return render_pair("TLB Stall", ps.tlb_stall_remaining_ > 0 ? "Active" : "None", ps.tlb_stall_remaining_ > 0 ? kSakuraPeach : kSakuraMint,
+                                               "Ctrl St", ps.control_bubble_remaining_ > 0 ? "Redirecting" : "None", ps.control_bubble_remaining_ > 0 ? kSakuraPeach : kSakuraMint);
+                        case 10:
+                            return section_line("Branch Prediction & BTB");
+                        case 11:
+                            {
+                                Register pc = 0;
+                                if (ps.e_reg_.valid && (ps.e_reg_.is_branch || ps.e_reg_.is_jump)) pc = ps.e_reg_.pc;
+                                else if (ps.d_reg_.valid && (ps.d_reg_.is_branch || ps.d_reg_.is_jump)) pc = ps.d_reg_.pc;
+                                
+                                std::string bht_str = "N/A";
+                                if (pc != 0) {
+                                    const uint32_t bht_idx = (pc >> 1) & 0xFF;
+                                    uint8_t counter = ps.branch_history_table_.at(bht_idx);
+                                    bht_str = counter == 0 ? "Strongly Not Taken (00)" :
+                                              counter == 1 ? "Weakly Not Taken (01)" :
+                                              counter == 2 ? "Weakly Taken (10)" : "Strongly Taken (11)";
+                                }
+                                return format_to_width(std::format("  {}BHT State\033[0m : {}{}\033[0m", kSakuraText, kSakuraVal, bht_str), width);
+                            }
+                        case 12:
+                            {
+                                Register pc = 0;
+                                if (ps.e_reg_.valid && (ps.e_reg_.is_branch || ps.e_reg_.is_jump)) pc = ps.e_reg_.pc;
+                                else if (ps.d_reg_.valid && (ps.d_reg_.is_branch || ps.d_reg_.is_jump)) pc = ps.d_reg_.pc;
+
+                                std::string btb_str = "N/A";
+                                if (pc != 0) {
+                                    const uint32_t btb_idx = (pc >> 1) & 0x7F;
+                                    auto& btb_entry = ps.btb_.at(btb_idx);
+                                    if (btb_entry.valid && btb_entry.pc == pc) {
+                                        btb_str = std::format("Hit (Target: 0x{:0{}x})", btb_entry.target, simrv::xlen::kXLenHexDigits);
+                                    } else {
+                                        btb_str = "Miss";
+                                    }
+                                }
+                                return format_to_width(std::format("  {}BTB State\033[0m : {}{}\033[0m", kSakuraText, kSakuraVal, btb_str), width);
+                            }
+                        case 13:
+                            return section_line("End Pipeline Visualizer");
+                        default:
+                            return format_to_width("", width);
+                    }
+                } else {
+                    auto& ctx = cpu.pipeline_context;
+
+                    switch (logical_row) {
+                        case 0:
+                            return section_line("── IF/CVT");
+                        case 1:
+                            return render_pair(
+                                "cpc", std::format("0x{:0{}x}", ctx.cpc, simrv::xlen::kXLenHexDigits),
+                                kSakuraMint, "ir_org", std::format("0x{:08x}", ctx.ir_org), kSakuraVal);
+                        case 2:
+                            return render_pair("ir", std::format("0x{:08x}", ctx.ir), kSakuraVal,
+                                               "cinsn", std::format("0x{:08x}", ctx.cinsn), kSakuraVal);
+                        case 3:
+                            return section_line("── ID");
+                        case 4:
+                            return render_pair(
+                                "opcode", std::to_string(std::to_underlying(ctx.opcode)), kSakuraVal,
+                                "funct3", std::to_string(std::to_underlying(ctx.funct3)), kSakuraVal);
+                        case 5:
+                            return render_pair(
+                                "rd/rs1",
+                                std::format("{}/{}", std::to_underlying(ctx.rd),
+                                            std::to_underlying(ctx.rs1)),
+                                kSakuraVal, "rs2/f7",
+                                std::format("{}/0x{:x}", std::to_underlying(ctx.rs2), ctx.funct7),
+                                kSakuraVal);
+                        case 6:
+                            return render_pair(
+                                "imm", std::format("0x{:0{}x}", ctx.imm, simrv::xlen::kXLenHexDigits),
+                                kSakuraVal, "funct12", std::format("0x{:x}", ctx.funct12), kSakuraVal);
+                        case 7:
+                            return section_line("── OF/EX");
+                        case 8:
+                            return render_pair(
+                                "rrs1", std::format("0x{:0{}x}", ctx.rrs1, simrv::xlen::kXLenHexDigits),
+                                kSakuraMint, "rrs2",
+                                std::format("0x{:0{}x}", ctx.rrs2, simrv::xlen::kXLenHexDigits),
+                                kSakuraMint);
+                        case 9:
+                            return render_pair(
+                                "jmp_pc",
+                                std::format("0x{:0{}x}", ctx.jmp_pc, simrv::xlen::kXLenHexDigits),
+                                kSakuraMint, "taken", ctx.tkn ? "yes" : "no", kSakuraVal);
+                        case 10:
+                            return render_pair(
+                                "wb_data",
+                                std::format("0x{:0{}x}", ctx.wb_data, simrv::xlen::kXLenHexDigits),
+                                kSakuraMint, "wb_csr",
+                                std::format("0x{:0{}x}", ctx.wb_data_csr, simrv::xlen::kXLenHexDigits),
+                                kSakuraVal);
+                        case 11:
+                            return section_line("── MEM/FP");
+                        case 12:
+                            return render_pair(
+                                "mem_addr",
+                                std::format("0x{:0{}x}", ctx.mem_addr, simrv::xlen::kXLenHexDigits),
+                                kSakuraMint, "mem_w",
+                                std::format("0x{:0{}x}", ctx.mem_wdata, simrv::xlen::kXLenHexDigits),
+                                kSakuraMint);
+                        case 13:
+                            return render_pair(
+                                "mem_r",
+                                std::format("0x{:0{}x}", ctx.mem_rdata, simrv::xlen::kXLenHexDigits),
+                                kSakuraMint, "fp_wb", std::format("0x{:016x}", ctx.fp_wb_data),
+                                kSakuraVal);
+                        case 14:
+                            return render_pair("fp_wb_en", ctx.fp_wb_enable ? "on" : "off", kSakuraVal,
+                                               "int<-fp", ctx.int_wb_from_fp ? "on" : "off",
+                                               kSakuraVal);
+                        case 15:
+                            return section_line("── TRAP/TLB");
+                        default:
+                            return format_to_width(std::format(" {}Pipeline page\033[0m", kSakuraMuted), width);
+                    }
                 }
             }
         }
 
         if (page_ == TuiRegPage::PIPELINE) {
+            if (machine_.s_cycle_accurate) {
+                return format_to_width("", width);
+            }
             auto& ctx = cpu.pipeline_context;
             auto exc_text = ctx.pending_exception.has_value()
                                 ? std::to_string(std::to_underlying(ctx.pending_exception.value()))
@@ -742,7 +924,7 @@ auto RegisterPane::render_row(int row_idx, int width) -> std::string {
         double i_ratio =
             (i_total == 0) ? 0.0 : static_cast<double>(i_hits) / static_cast<double>(i_total);
 
-        std::string suffix = std::format(" {:.1f}% (H:{} M:{})", i_ratio * 100.0,
+        std::string suffix = std::format(" {:5.1f}% (H:{} M:{})", i_ratio * 100.0,
                                          format_compact(i_hits), format_compact(i_misses));
         std::string prefix = "  L1-I Cache     : [";
         int bar_width =
@@ -751,7 +933,7 @@ auto RegisterPane::render_row(int row_idx, int width) -> std::string {
 
         std::string bar = make_progress_bar(i_ratio, bar_width, kSakuraSky);
         std::string color = std::format(
-            "  {}L1-I Cache\033[0m     : [{}] {}{:.1f}%\033[0m {}(H:{} M:{})\033[0m",
+            "  {}L1-I Cache\033[0m     : [{}] {}{:5.1f}%\033[0m {}(H:{} M:{})\033[0m",
             kSakuraText, bar, kSakuraSky, i_ratio * 100.0, kSakuraMuted, format_compact(i_hits), format_compact(i_misses));
 
         return format_to_width(color, width);
@@ -764,7 +946,7 @@ auto RegisterPane::render_row(int row_idx, int width) -> std::string {
         double d_ratio =
             (d_total == 0) ? 0.0 : static_cast<double>(d_hits) / static_cast<double>(d_total);
 
-        std::string suffix = std::format(" {:.1f}% (H:{} M:{})", d_ratio * 100.0,
+        std::string suffix = std::format(" {:5.1f}% (H:{} M:{})", d_ratio * 100.0,
                                          format_compact(d_hits), format_compact(d_misses));
         std::string prefix = "  L1-D Cache     : [";
         int bar_width =
@@ -773,7 +955,7 @@ auto RegisterPane::render_row(int row_idx, int width) -> std::string {
 
         std::string bar = make_progress_bar(d_ratio, bar_width, kSakuraPink);
         std::string color = std::format(
-            "  {}L1-D Cache\033[0m     : [{}] {}{:.1f}%\033[0m {}(H:{} M:{})\033[0m",
+            "  {}L1-D Cache\033[0m     : [{}] {}{:5.1f}%\033[0m {}(H:{} M:{})\033[0m",
             kSakuraText, bar, kSakuraPink, d_ratio * 100.0, kSakuraMuted, format_compact(d_hits), format_compact(d_misses));
 
         return format_to_width(color, width);
@@ -798,7 +980,7 @@ auto RegisterPane::render_row(int row_idx, int width) -> std::string {
 
     if (logical_row == 29) {
         std::string color = std::format(
-            "  {}Stall Ratio\033[0m    : {}{:.1f}%\033[0m (Stall:{} clk, Bubble:{} clk)",
+            "  {}Stall Ratio\033[0m    : {}{:5.1f}%\033[0m (Stall:{} clk, Bubble:{} clk)",
             kSakuraText, kSakuraCoral, stall_pct, format_compact(stalls), format_compact(bubbles));
         return format_to_width(color, width);
     }
@@ -812,7 +994,7 @@ auto RegisterPane::render_row(int row_idx, int width) -> std::string {
     if (logical_row == 30) {
         double data_pct = (cycles == 0) ? 0.0 : (static_cast<double>(data_stalls) * 100.0) / static_cast<double>(cycles);
         std::string color = std::format(
-            "    {}- Data RAW\033[0m   : {}{:>10}\033[0m clk {}({:.1f}%)\033[0m",
+            "    {}- Data RAW\033[0m   : {}{:>10}\033[0m clk {}({:5.1f}%)\033[0m",
             kSakuraMuted, kSakuraPeach, format_with_commas(data_stalls), kSakuraMuted, data_pct);
         return format_to_width(color, width);
     }
@@ -820,7 +1002,7 @@ auto RegisterPane::render_row(int row_idx, int width) -> std::string {
     if (logical_row == 31) {
         double ctrl_pct = (cycles == 0) ? 0.0 : (static_cast<double>(ctrl_bubbles) * 100.0) / static_cast<double>(cycles);
         std::string color = std::format(
-            "    {}- Control\033[0m    : {}{:>10}\033[0m clk {}({:.1f}%)\033[0m",
+            "    {}- Control\033[0m    : {}{:>10}\033[0m clk {}({:5.1f}%)\033[0m",
             kSakuraMuted, kSakuraPeach, format_with_commas(ctrl_bubbles), kSakuraMuted, ctrl_pct);
         return format_to_width(color, width);
     }
@@ -828,7 +1010,7 @@ auto RegisterPane::render_row(int row_idx, int width) -> std::string {
     if (logical_row == 32) {
         double cache_pct = (cycles == 0) ? 0.0 : (static_cast<double>(cache_stalls) * 100.0) / static_cast<double>(cycles);
         std::string color = std::format(
-            "    {}- Cache\033[0m      : {}{:>10}\033[0m clk {}({:.1f}%)\033[0m",
+            "    {}- Cache\033[0m      : {}{:>10}\033[0m clk {}({:5.1f}%)\033[0m",
             kSakuraMuted, kSakuraPeach, format_with_commas(cache_stalls), kSakuraMuted, cache_pct);
         return format_to_width(color, width);
     }

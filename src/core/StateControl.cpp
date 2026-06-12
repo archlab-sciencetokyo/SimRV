@@ -401,7 +401,7 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
 
     if (cpu.machine_ && cpu.machine_->s_tuimode && cpu.machine_->uart && cause == static_cast<TrapCause>(ExceptionCode::Breakpoint)) {
         if (cpu.machine_->uart->tui()) {
-            cpu.machine_->uart->tui()->set_status_override("\033[1;30;41m TRAPPED \033[0m");
+            cpu.machine_->uart->tui()->set_status_override("\033[1;38;5;234;48;5;210m TRAPPED \033[0m");
         }
         if constexpr (simrv::xlen::kIsXLen64) {
             simrv::log::warn(

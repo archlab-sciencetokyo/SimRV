@@ -18,6 +18,8 @@ enum class TuiKey : uint8_t {
     Space    = 32,   // ' '
     c        = 'c',
     C        = 'C',
+    h        = 'h',
+    H        = 'H',
     q        = 'q',
     Q        = 'Q',
     r        = 'r',

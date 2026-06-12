@@ -5,6 +5,7 @@
 #pragma once
 
 #include <vector>
+#include <array>
 #include <string>
 #include <algorithm>
 #include <format>
@@ -15,6 +16,10 @@
 
 namespace simrv::tui {
 
+extern bool g_high_contrast;
+extern std::array<const char*, 16> g_theme_palette;
+extern std::array<const char*, 16> g_theme_bg_palette;
+
 struct Cell {
     std::string ch = " ";
     uint8_t fg = 7;
@@ -24,6 +29,83 @@ struct Cell {
     bool reverse = false;
 
     auto operator==(const Cell&) const -> bool = default;
+};
+
+// Sakura Pastel Theme Colors mapping for Virtual Terminal emulation
+inline constexpr std::array<const char*, 16> kSakuraPalette = {
+    "\033[38;5;234m", // 0: Black (very dark gray)
+    "\033[38;5;210m", // 1: Red (Sakura Coral)
+    "\033[38;5;121m", // 2: Green (Sakura Mint)
+    "\033[38;5;223m", // 3: Yellow (Sakura Peach)
+    "\033[38;5;117m", // 4: Blue (Sakura Sky)
+    "\033[38;5;183m", // 5: Magenta (Sakura Val/Lavender)
+    "\033[38;5;122m", // 6: Cyan (Teal/Sky)
+    "\033[38;5;254m", // 7: White (Sakura Text)
+    "\033[38;5;244m", // 8: Bright Black (Muted gray)
+    "\033[38;5;211m", // 9: Bright Red (Sakura Pink)
+    "\033[38;5;121m", // 10: Bright Green (Sakura Mint)
+    "\033[38;5;223m", // 11: Bright Yellow (Sakura Peach)
+    "\033[38;5;117m", // 12: Bright Blue (Sakura Sky)
+    "\033[38;5;183m", // 13: Bright Magenta (Lavender)
+    "\033[38;5;122m", // 14: Bright Cyan (Teal)
+    "\033[38;5;255m"  // 15: Bright White (Pure pastel white)
+};
+
+inline constexpr std::array<const char*, 16> kSakuraBgPalette = {
+    "\033[48;5;234m", // 0: Black
+    "\033[48;5;210m", // 1: Red
+    "\033[48;5;121m", // 2: Green
+    "\033[48;5;223m", // 3: Yellow
+    "\033[48;5;117m", // 4: Blue
+    "\033[48;5;183m", // 5: Magenta
+    "\033[48;5;122m", // 6: Cyan
+    "\033[48;5;254m", // 7: White
+    "\033[48;5;244m", // 8: Bright Black
+    "\033[48;5;211m", // 9: Bright Red
+    "\033[48;5;121m", // 10: Bright Green
+    "\033[48;5;223m", // 11: Bright Yellow
+    "\033[48;5;117m", // 12: Bright Blue
+    "\033[48;5;183m", // 13: Bright Magenta
+    "\033[48;5;122m", // 14: Bright Cyan
+    "\033[48;5;255m"  // 15: Bright White
+};
+
+inline constexpr std::array<const char*, 16> kHighContrastPalette = {
+    "\033[30m", // 0: Black
+    "\033[31m", // 1: Red
+    "\033[32m", // 2: Green
+    "\033[33m", // 3: Yellow
+    "\033[34m", // 4: Blue
+    "\033[35m", // 5: Magenta
+    "\033[36m", // 6: Cyan
+    "\033[37m", // 7: White
+    "\033[90m", // 8: Bright Black
+    "\033[91m", // 9: Bright Red
+    "\033[92m", // 10: Bright Green
+    "\033[93m", // 11: Bright Yellow
+    "\033[94m", // 12: Bright Blue
+    "\033[95m", // 13: Bright Magenta
+    "\033[96m", // 14: Bright Cyan
+    "\033[97m"  // 15: Bright White
+};
+
+inline constexpr std::array<const char*, 16> kHighContrastBgPalette = {
+    "\033[40m", // 0: Black
+    "\033[41m", // 1: Red
+    "\033[42m", // 2: Green
+    "\033[43m", // 3: Yellow
+    "\033[44m", // 4: Blue
+    "\033[45m", // 5: Magenta
+    "\033[46m", // 6: Cyan
+    "\033[47m", // 7: White
+    "\033[100m", // 8: Bright Black
+    "\033[101m", // 9: Bright Red
+    "\033[102m", // 10: Bright Green
+    "\033[103m", // 11: Bright Yellow
+    "\033[104m", // 12: Bright Blue
+    "\033[105m", // 13: Bright Magenta
+    "\033[106m", // 14: Bright Cyan
+    "\033[107m"  // 15: Bright White
 };
 
 class VirtualTerminal {
@@ -185,30 +267,29 @@ public:
             }
 
             if (!(cell == prev_cell) || x == 0 || (draw_cursor_at_x && (x == cursor_x_ || x == cursor_x_ + 1))) {
-                // Generate ANSI codes for diffs
                 res += "\033[0m";
-                std::string attr;
-                if (cell.bold) attr += ";1";
-                if (cell.underline) attr += ";4";
-                if (cell.reverse) attr += ";7";
                 
-                // FG color
-                if (cell.fg >= 8 && cell.fg < 16) {
-                    attr += std::format(";{}", cell.fg - 8 + 90);
-                } else if (cell.fg < 8) {
-                    attr += std::format(";{}", cell.fg + 30);
+                // 1. Text attributes
+                if (cell.bold) res += "\033[1m";
+                if (cell.underline) res += "\033[4m";
+                if (cell.reverse) res += "\033[7m";
+                
+                // 2. FG color mapping to Active Theme
+                if (cell.fg < 16) {
+                    res += g_theme_palette.at(cell.fg);
+                } else {
+                    res += std::format("\033[38;5;{}m", cell.fg);
                 }
 
-                // BG color
-                if (cell.bg >= 8 && cell.bg < 16) {
-                    attr += std::format(";{}", cell.bg - 8 + 100);
-                } else if (cell.bg < 8) {
-                    attr += std::format(";{}", cell.bg + 40);
+                // 3. BG color mapping to Active Theme
+                if (cell.bg < 16) {
+                    if (cell.bg != 0) {
+                        res += g_theme_bg_palette.at(cell.bg);
+                    }
+                } else {
+                    res += std::format("\033[48;5;{}m", cell.bg);
                 }
 
-                if (!attr.empty()) {
-                    res += std::format("\033[{}m", attr.substr(1));
-                }
                 prev_cell = cell;
             }
             res += cell.ch;

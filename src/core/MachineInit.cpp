@@ -25,6 +25,7 @@
 #include "simrv/device/Power.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/xlen/Types.hpp"
+#include "simrv/core/CpuConfigParser.hpp"
 
 void set_options(simrv::core::Machine* m, int argc, char* const* argv);
 
@@ -82,6 +83,13 @@ void load_image_into_ram(const std::string& file_path, Byte* ram, std::size_t ca
 
 auto Machine::initialize(int argc, char* const* argv) -> int {
     set_options(this, argc, argv);
+
+    if (!s_fn_cpuconfig.empty()) {
+        if (!simrv::core::load_cpu_config(s_fn_cpuconfig, cpu.pipeline_sim.config)) {
+            simrv::log::error("Failed to load CPU configuration file: {}", s_fn_cpuconfig);
+            return 1;
+        }
+    }
 
     disk = std::make_unique<simrv::device::Disk>(*this);
     console = std::make_unique<simrv::device::Console>(*this);

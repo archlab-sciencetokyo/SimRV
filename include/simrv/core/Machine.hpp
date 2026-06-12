@@ -67,6 +67,7 @@ class Machine {
     // ========== Simulation Configuration Flags ==========
     bool s_appmode = false;        // Binary mode (start_pc=0, no OS)
     bool s_tuimode = false;        // Enable TUI monitor mode
+    bool s_high_contrast = false;  // Enable high-contrast TUI mode
     bool s_debugmode = false;      // Enable debug logging in MMIO paths
     bool s_dlog_mode = false;      // Enable device request/response logging
     bool s_traplog_mode = false;   // Enable trap/SBI/exception logging
@@ -102,6 +103,7 @@ class Machine {
     std::string s_fn_dskimg;                             // Disk image filename
     std::string s_fn_dvtree;                             // Device-tree binary filename
     std::string s_fn_traplog;                            // Trap/exception log filename
+    std::string s_fn_cpuconfig;                           // CPU config filename
     std::chrono::steady_clock::time_point s_start_time;  // Simulation start timestamp
 
     // ========== CPU and Subsystems ==========

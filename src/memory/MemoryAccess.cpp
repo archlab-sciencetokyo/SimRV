@@ -39,6 +39,17 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     }
 
     const PrivilegeLevel eff_priv = cpu.effective_data_privilege();
+    const Word current_asid = simrv::xlen::satp_asid(cpu.state().satp);
+    const bool translation_enabled = (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(cpu.state().satp));
+
+    if (cpu.machine_->s_high_performance && !crosses_page) {
+        size_t tlb_idx = (v_addr >> 12) & 2047;
+        const auto& entry = cpu.soft_tlb_read[tlb_idx];
+        if (entry.valid && entry.vpn == (v_addr >> 12) && entry.priv == eff_priv && 
+            entry.asid == (translation_enabled ? current_asid : 0xFFFF'FFFF'FFFF'FFFFULL)) {
+            return simrv::memory::ram_read_fast(entry.paddr_base + (v_addr & 0xFFF), funct3, mem.mmu()->mmem());
+        }
+    }
 
     if constexpr (simrv::xlen::kIsXLen64) {
         if (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(cpu.state().satp)) {
@@ -143,7 +154,6 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     Address p_addr = 0;
     core::TLBEntry* entry =
         &cpu.tlb.data_r.at((v_addr >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1));
-    const Word current_asid = simrv::xlen::satp_asid(cpu.state().satp);
 
     if (eff_priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(cpu.state().satp)) {
         p_addr = v_addr;
@@ -151,6 +161,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                entry->v_addr == (v_addr & ~simrv::memory::kPageMask)) {
         p_addr = entry->p_addr + (v_addr & simrv::memory::kPageMask);
     } else {
+        cpu.pipeline_context.tlb_miss = true;
         auto translate_res = mem.mmu()->translate(v_addr, PteAccess::Read, eff_priv,
                                                   cpu.state().mstatus, cpu.state().satp);
         auto chain_res = translate_res
@@ -171,6 +182,15 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     }
 
     if (!cpu.pipeline_context.pending_exception.has_value()) {
+        if (cpu.machine_->s_high_performance && simrv::memory::is_dram_addr(p_addr)) {
+            size_t tlb_idx = (v_addr >> 12) & 2047;
+            auto& entry_soft = cpu.soft_tlb_read[tlb_idx];
+            entry_soft.vpn = v_addr >> 12;
+            entry_soft.paddr_base = p_addr & ~0xFFF;
+            entry_soft.priv = eff_priv;
+            entry_soft.asid = translation_enabled ? current_asid : 0xFFFF'FFFF'FFFF'FFFFULL;
+            entry_soft.valid = true;
+        }
         return issue_read(p_addr);
     }
     return rdata;
@@ -194,6 +214,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
     }
 
     const PrivilegeLevel eff_priv = cpu.effective_data_privilege();
+    const Word current_asid = simrv::xlen::satp_asid(cpu.state().satp);
+    const bool translation_enabled = (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(cpu.state().satp));
 
     if constexpr (simrv::xlen::kIsXLen64) {
         if (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(cpu.state().satp)) {
@@ -248,6 +270,16 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
         }
     };
 
+    if (cpu.machine_->s_high_performance && !crosses_page) {
+        size_t tlb_idx = (v_addr >> 12) & 2047;
+        const auto& entry = cpu.soft_tlb_write[tlb_idx];
+        if (entry.valid && entry.vpn == (v_addr >> 12) && entry.priv == eff_priv && 
+            entry.asid == (translation_enabled ? current_asid : 0xFFFF'FFFF'FFFF'FFFFULL)) {
+            issue_write(entry.paddr_base + (v_addr & 0xFFF), wdata);
+            return;
+        }
+    }
+
     if (simrv::compiler::likely(!cpu.pipeline_context.pending_exception.has_value()) &&
         simrv::compiler::likely(eff_priv == kPrivMachine ||
                                 !simrv::xlen::satp_translation_enabled(cpu.state().satp)) &&
@@ -259,7 +291,6 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
     Address p_addr = 0;
     core::TLBEntry* entry =
         &cpu.tlb.data_w.at((v_addr >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1));
-    const Word current_asid = simrv::xlen::satp_asid(cpu.state().satp);
 
     if (eff_priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(cpu.state().satp)) {
         p_addr = v_addr;
@@ -267,6 +298,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
                entry->v_addr == (v_addr & ~simrv::memory::kPageMask)) {
         p_addr = entry->p_addr + (v_addr & simrv::memory::kPageMask);
     } else {
+        cpu.pipeline_context.tlb_miss = true;
         auto translate_res = mem.mmu()->translate(v_addr, PteAccess::Write, eff_priv,
                                                   cpu.state().mstatus, cpu.state().satp);
         auto chain_res = translate_res
@@ -287,6 +319,15 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
     }
 
     if (!cpu.pipeline_context.pending_exception.has_value()) {
+        if (cpu.machine_->s_high_performance && simrv::memory::is_dram_addr(p_addr)) {
+            size_t tlb_idx = (v_addr >> 12) & 2047;
+            auto& entry_soft = cpu.soft_tlb_write[tlb_idx];
+            entry_soft.vpn = v_addr >> 12;
+            entry_soft.paddr_base = p_addr & ~0xFFF;
+            entry_soft.priv = eff_priv;
+            entry_soft.asid = translation_enabled ? current_asid : 0xFFFF'FFFF'FFFF'FFFFULL;
+            entry_soft.valid = true;
+        }
         issue_write(p_addr, wdata);
     }
 }

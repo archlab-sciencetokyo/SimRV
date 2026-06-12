@@ -69,12 +69,15 @@ struct RuntimeOptions {
     bool use_opensbi = false;
     bool cycle_accurate = false;
     bool high_performance = true;
+    bool high_contrast = false;
 
     // Debug / co-simulation options
     bool     gdb_mode      = false;
     uint16_t gdb_port      = 1234;
     bool     lockstep_mode = false;
     std::string spike_bin  = "spike";
+
+    std::string fn_cpuconfig;
 };
 
 struct ParseResult {
@@ -423,6 +426,26 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             continue;
         }
 
+        // High-contrast TUI mode
+        if (arg == "--high-contrast" || arg == "--contrast") {
+            result.options.high_contrast = true;
+            continue;
+        }
+
+        // Shorthands for cycle-accurate
+        if (arg == "--ca") {
+            result.options.cycle_accurate = true;
+            result.options.high_performance = false;
+            continue;
+        }
+
+        // Shorthands for instruction-accurate / high-performance
+        if (arg == "--ia") {
+            result.options.cycle_accurate = false;
+            result.options.high_performance = true;
+            continue;
+        }
+
 
 
         // Cycle-accurate simulation mode
@@ -472,6 +495,16 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             continue;
         }
 
+        // CPU configuration file
+        if (arg == "--cpu-config") {
+            auto value = next_argument(args, i, arg);
+            if (!value) {
+                return std::unexpected(value.error());
+            }
+            result.options.fn_cpuconfig = std::string(*value);
+            continue;
+        }
+
         return std::unexpected(std::format("unknown option : {}", arg));
     }
 
@@ -503,6 +536,7 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     machine->s_appmode = options.appmode;
     simrv::memory::g_appmode = options.appmode;
     machine->s_tuimode = options.tuimode;
+    machine->s_high_contrast = options.high_contrast;
     machine->s_debugmode = options.debugmode;
     machine->s_dlog_mode = options.dlog_mode;
     machine->s_traplog_mode = options.traplog_mode;
@@ -513,6 +547,7 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
 
     machine->s_cycle_accurate = options.cycle_accurate;
     machine->s_high_performance = options.high_performance;
+    machine->s_fn_cpuconfig = options.fn_cpuconfig;
 
     machine->tracer.init_trace(options.trace_enabled);
     machine->tracer.init_dlog(options.dlog_mode);
@@ -584,13 +619,17 @@ void set_start_time(simrv::core::Machine& machine) {
                  style(kBrightGreen), style(kReset));
     std::print(stdout, "  {}-u, --tui{}                  Enable interactive TUI split-screen monitor dashboard\n",
                  style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}--high-contrast, --contrast{} Toggle TUI colors to high-contrast palette\n",
+                 style(kBrightGreen), style(kReset));
 
-    std::print(stdout, "  {}-C, --cycle-accurate{}       Enable structural cycle-accurate performance simulation mode\n",
+    std::print(stdout, "  {}-C, --cycle-accurate, --ca{} Enable structural cycle-accurate performance simulation mode\n",
                  style(kBrightGreen), style(kReset));
     std::print(stdout, "  {}--high-accuracy, --accuracy-mode{} Alias for --cycle-accurate (High-Accuracy Mode)\n",
                  style(kBrightGreen), style(kReset));
-    std::print(stdout, "  {}--high-performance, --perf-mode{}  Enable optimized simulation mode bypassing caches/coroutines (default)\n",
+    std::print(stdout, "  {}--high-performance, --perf-mode, --ia{} Enable optimized simulation mode bypassing caches/coroutines (default)\n",
                  style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}--cpu-config {}{}<FILE>{}    Load CPU latency configuration from a text file\n",
+                 style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout, "  {}--misa {}{}<PROFILE>{}      Select CPU MISA profile: rv{}i | rv{}imac | rv{}gc\n\n",
                  style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset), xlen_suffix, xlen_suffix, xlen_suffix);
 

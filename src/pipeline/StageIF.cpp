@@ -16,6 +16,7 @@ namespace simrv::core {
 
 void CPU::run_fetch_stage(Machine& machine) {
     auto& ctx = pipeline_context;
+    ctx.tlb_miss = false;
     const bool split_page =
         ((state_.pc & ~simrv::memory::kPageMask) != ((state_.pc + 2) & ~simrv::memory::kPageMask));
     const bool translation_enabled =
@@ -89,6 +90,7 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) { /* page walk an
     Word* r_padr = (state == 1) ? &ctx.padr1 : &ctx.padr2;
     Word const w_vadr = (state == 1) ? state_.pc : state_.pc + 2;
     if (w_padr == kWordAllOnes) {
+        ctx.tlb_miss = true;
         if constexpr (simrv::xlen::kIsXLen64) {
             if (simrv::compiler::unlikely(!simrv::Mmu::is_canonical(w_vadr, state_.satp))) {
                 ctx.pending_exception = ExceptionCode::FetchPageFault;
@@ -130,6 +132,17 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
     if (machine.s_high_performance) {
         if (simrv::compiler::likely(ctx.padr2 == ctx.padr1 + 2 &&
                                     simrv::memory::is_dram_addr(ctx.padr1))) {
+            const Address masked = ctx.padr1 & simrv::memory::kDramMask;
+            if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 3))) {
+                uint32_t val = 0;
+                std::memcpy(&val, machine.mmem + masked, 4);
+                if ((val & 0x3) != 0x3) {
+                    ctx.ir_org = val & 0xFFFF;
+                } else {
+                    ctx.ir_org = val;
+                }
+                return;
+            }
             const uint16_t h1 = simrv::memory::ram_read_fast(ctx.padr1, static_cast<Instruction>(Funct3::Lhu), machine.mmem);
             if ((h1 & 0x3) != 0x3) {
                 ctx.ir_org = h1;
@@ -278,6 +291,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
 
 void CPU::run_fetch_stage_baremetal(Machine& machine) {
     auto& ctx = pipeline_context;
+    ctx.tlb_miss = false;
     ctx.cpc = state_.pc;
     ctx.padr1 = state_.pc;
     ctx.padr2 = state_.pc + 2;
