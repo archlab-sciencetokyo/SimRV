@@ -104,9 +104,9 @@ jobs:
           mkdir -p dist
           cp build/${{ matrix.arch }}-release/SimRV dist/SimRV
           tar -C dist -czf "${{ steps.names.outputs.asset_base }}.tar.gz" SimRV
-          cp build/${{ matrix.arch }}-release/SimRV "${{ steps.names.outputs.asset_base }}"
+          cp build/${{ matrix.arch }}-release/SimRV "${{ steps.names.outputs.asset_base }}.bin"
           sha256sum "${{ steps.names.outputs.asset_base }}.tar.gz" > "${{ steps.names.outputs.asset_base }}.sha256"
-          sha256sum "${{ steps.names.outputs.asset_base }}" >> "${{ steps.names.outputs.asset_base }}.sha256"
+          sha256sum "${{ steps.names.outputs.asset_base }}.bin" >> "${{ steps.names.outputs.asset_base }}.sha256"
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v5
@@ -114,7 +114,7 @@ jobs:
           name: ${{ steps.names.outputs.asset_base }}
           path: |
             ${{ steps.names.outputs.asset_base }}.tar.gz
-            ${{ steps.names.outputs.asset_base }}
+            ${{ steps.names.outputs.asset_base }}.bin
             ${{ steps.names.outputs.asset_base }}.sha256
 
       - name: Upload release assets
@@ -123,7 +123,7 @@ jobs:
         with:
           files: |
             ${{ steps.names.outputs.asset_base }}.tar.gz
-            ${{ steps.names.outputs.asset_base }}
+            ${{ steps.names.outputs.asset_base }}.bin
             ${{ steps.names.outputs.asset_base }}.sha256
           tag_name: ${{ steps.names.outputs.version_tag }}
           prerelease: ${{ github.ref_name == 'dev' || github.event.release.target_commitish == 'dev' || contains(steps.names.outputs.version_tag, '-') }}
