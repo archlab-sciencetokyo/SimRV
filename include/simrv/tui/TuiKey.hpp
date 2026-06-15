@@ -15,6 +15,7 @@ enum class TuiKey : uint8_t {
     Newline  = 10,   // '\n'
     CtrlP    = 16,
     CtrlQ    = 17,
+    CtrlR    = 18,
     Space    = 32,   // ' '
     c        = 'c',
     C        = 'C',
@@ -30,6 +31,10 @@ enum class TuiKey : uint8_t {
     U        = 'U',
     d        = 'd',
     D        = 'D',
+    p        = 'p',
+    P        = 'P',
+    t        = 't',
+    T        = 'T',
 };
 
 }  // namespace simrv::tui

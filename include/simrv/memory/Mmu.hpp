@@ -44,7 +44,7 @@ class Mmu {
      * @return Translated physical address or TrapCause on fault
      */
     auto page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
-                   Word satp) -> std::expected<Address, TrapCause>;
+                   Word satp, unsigned xlen = xlen::kXLenBits) -> std::expected<Address, TrapCause>;
 
     /**
      * @brief Translate address without performing page walk.
@@ -58,24 +58,28 @@ class Mmu {
      * @param priv Current CPU privilege level
      * @param mstatus Current CPU mstatus register
      * @param satp Current CPU satp register
+     * @param xlen Current execution XLEN
      * @return Translated physical address or TrapCause on fault
      */
     auto translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
-                   Word satp) -> std::expected<Address, TrapCause>;
+                   Word satp, unsigned xlen = xlen::kXLenBits) -> std::expected<Address, TrapCause>;
 
     /**
      * @brief Verify if a virtual address is canonical according to the active SV mode.
      *
      * @param v_addr Virtual address to verify
      * @param satp Current CPU satp register to determine SV mode
+     * @param xlen Current execution XLEN
      * @return true if the address is canonical, false otherwise
      */
-    [[nodiscard]] static constexpr auto is_canonical(Address v_addr, Word satp) -> bool {
-        if constexpr (!simrv::xlen::kIsXLen64) {
+    [[nodiscard]] static constexpr auto is_canonical(Address v_addr, Word satp, unsigned xlen = xlen::kXLenBits) -> bool {
+        if (xlen == 32) {
             return true;
         } else {
-            const Word mode = simrv::xlen::satp_mode(satp);
-            if (mode == 8) {  // SV39
+            const Word mode = simrv::xlen::satp_mode(satp, 64);
+            if (mode == 1) { // SV32 compatibility mode under RV64
+                return true;
+            } else if (mode == 8) {  // SV39
                 constexpr Word shift = 64 - 39;
                 return (static_cast<SignedWord>(v_addr << shift) >> shift) ==
                        static_cast<SignedWord>(v_addr);
@@ -122,10 +126,9 @@ class Mmu {
      * @param pte_value Page table entry value to update
      * @param access Access type that triggered the update
      */
-    void update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess access);
+    void update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess access, unsigned xlen = xlen::kXLenBits);
 
     // Page table structure constants
-    static constexpr Word kPpnMask = simrv::xlen::kSatpRootPpnMask;
     static constexpr Word kPermissionBitsMask = 0x7;  // 3 bits for XWR
     static constexpr Word kPteShift = 10;             // PPN to PTE conversion shift
 };

@@ -26,7 +26,7 @@ cmake --build --preset rv32-release
 ./build/rv32-release/SimRV -m img/hello.bin
 
 # Run a Linux image
-./build/rv32-release/SimRV -m linux-images/rv32/fw_payload.bin -d linux-images/rv32/root.bin -c linux-images/rv32/devicetree.dtb
+./build/rv32-release/SimRV -m linux-images/rv32/fw_payload.bin -D linux-images/rv32/root.bin -c linux-images/rv32/devicetree.dtb
 
 # Run command-line help
 ./build/rv32-release/SimRV -h

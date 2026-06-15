@@ -60,5 +60,6 @@ class Uart : public memory::TileLinkNode {
     std::unique_ptr<simrv::tui::Tui> tui_;
     std::queue<uint8_t> rx_fifo_;
     std::string esc_buf_;
+    bool tui_loop_paused_ = false;
 };
 }  // namespace simrv::device

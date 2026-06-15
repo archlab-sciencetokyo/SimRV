@@ -149,12 +149,6 @@ auto SpikeLockstep::start() -> bool {
 }
 
 void SpikeLockstep::stop() {
-    if (spike_pid_ > 0) {
-        ::kill(spike_pid_, SIGTERM);
-        int status = 0;
-        ::waitpid(spike_pid_, &status, 0);
-        spike_pid_ = -1;
-    }
     if (spike_stderr_ >= 0) {
         ::close(spike_stderr_);
         spike_stderr_ = -1;
@@ -163,6 +157,12 @@ void SpikeLockstep::stop() {
         ::close(spike_stdout_);
         spike_stdout_ = -1;
     }
+    if (spike_pid_ > 0) {
+        ::kill(spike_pid_, SIGTERM);
+        int status = 0;
+        ::waitpid(spike_pid_, &status, 0);
+        spike_pid_ = -1;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -170,13 +170,23 @@ void SpikeLockstep::stop() {
 // ---------------------------------------------------------------------------
 
 auto SpikeLockstep::read_line() -> std::string {
+    auto record_and_return = [this](std::string line) -> std::string {
+        if (!line.empty()) {
+            spike_history_.push_back(line);
+            if (spike_history_.size() > 20) {
+                spike_history_.erase(spike_history_.begin());
+            }
+        }
+        return line;
+    };
+
     while (true) {
         // Check if we already have a newline in the buffer
         const auto pos = line_buf_.find('\n');
         if (pos != std::string::npos) {
             std::string line = line_buf_.substr(0, pos);
             line_buf_.erase(0, pos + 1);
-            return line;
+            return record_and_return(line);
         }
 
         // Need more data
@@ -186,7 +196,7 @@ auto SpikeLockstep::read_line() -> std::string {
             // EOF or error — return whatever is buffered
             std::string remainder = std::move(line_buf_);
             line_buf_.clear();
-            return remainder;
+            return record_and_return(remainder);
         }
         line_buf_.append(tmp.data(), static_cast<std::size_t>(n));
     }
@@ -209,44 +219,44 @@ auto SpikeLockstep::parse_commit_line(const std::string& line,
         return std::nullopt;
     }
 
-    // Find PC: first "0x" after the ":"
-    const auto colon_pos = line.find(':');
-    if (colon_pos == std::string::npos) return std::nullopt;
-
-    // Skip priv field, find PC hex
     const std::string_view sv(line);
+
+    // Find the instruction encoding parentheses "(0x"
+    const auto paren_pos = sv.find("(0x");
+    if (paren_pos == std::string::npos) {
+        return std::nullopt;
+    }
+
+    // Find the last "0x" before "(0x"
+    const auto pc_pos = sv.rfind("0x", paren_pos);
+    if (pc_pos == std::string::npos) {
+        return std::nullopt;
+    }
+
+    // Parse PC
+    uint64_t pc_val = 0;
+    const auto [ptr_pc, ec_pc] =
+        std::from_chars(sv.data() + pc_pos + 2, sv.data() + paren_pos, pc_val, 16);
+    if (ec_pc != std::errc{}) {
+        return std::nullopt;
+    }
+    rec.pc = static_cast<Address>(pc_val);
+
+    // Parse register write after the closing parenthesis of the instruction
+    const auto close_paren_pos = sv.find(')', paren_pos);
+    if (close_paren_pos == std::string::npos) {
+        return std::nullopt;
+    }
+
     auto skip_ws = [&](std::size_t idx) -> std::size_t {
         while (idx < sv.size() && (sv.at(idx) == ' ' || sv.at(idx) == '\t')) ++idx;
         return idx;
     };
 
-    // After colon: " <priv> 0x<pc>"
-    std::size_t i = colon_pos + 1;
-    i = skip_ws(i);
-    // Skip priv digit(s)
-    while (i < sv.size() && sv.at(i) != ' ' && sv.at(i) != '\t') ++i;
-    i = skip_ws(i);
-
-    // Parse PC
-    if (i + 2 >= sv.size() || sv.at(i) != '0' || sv.at(i + 1) != 'x') return std::nullopt;
-    i += 2;
-    uint64_t pc_val = 0;
-    const auto [ptr_pc, ec_pc] =
-        std::from_chars(sv.data() + i, sv.data() + sv.size(), pc_val, 16);
-    if (ec_pc != std::errc{}) return std::nullopt;
-    rec.pc = static_cast<Address>(pc_val);
-    i = static_cast<std::size_t>(ptr_pc - sv.data());
-
-    // Skip "(0x<insn>)"
-    i = skip_ws(i);
-    if (i < sv.size() && sv.at(i) == '(') {
-        while (i < sv.size() && sv.at(i) != ')') ++i;
-        if (i < sv.size()) ++i;  // skip ')'
+    std::size_t i = skip_ws(close_paren_pos + 1);
+    if (i >= sv.size()) {
+        return rec;
     }
-
-    // Optional: " <regname> <val>"
-    i = skip_ws(i);
-    if (i >= sv.size()) return rec;
 
     // Parse register name (e.g. "x5", "a0", "zero", "pc")
     std::size_t reg_start = i;
@@ -292,7 +302,17 @@ auto SpikeLockstep::parse_commit_line(const std::string& line,
     return rec;
 }
 
+auto SpikeLockstep::read_and_cache_next_commit() -> std::optional<SpikeCommitRecord> {
+    return peek_commit(0);
+}
+
 auto SpikeLockstep::next_commit() -> std::optional<SpikeCommitRecord> {
+    if (!cached_recs_.empty()) {
+        auto rec = cached_recs_.front();
+        cached_recs_.erase(cached_recs_.begin());
+        return rec;
+    }
+
     SpikeCommitRecord rec{};
     while (true) {
         const std::string line = read_line();
@@ -303,8 +323,48 @@ auto SpikeLockstep::next_commit() -> std::optional<SpikeCommitRecord> {
         if (result) {
             return result;
         }
-        // Skip non-commit lines (e.g. banner, interrupt messages)
     }
+}
+
+auto SpikeLockstep::peek_commit(std::size_t index) -> std::optional<SpikeCommitRecord> {
+    while (cached_recs_.size() <= index) {
+        SpikeCommitRecord rec{};
+        bool found = false;
+        while (true) {
+            const std::string line = read_line();
+            if (line.empty()) {
+                break;
+            }
+            const auto result = parse_commit_line(line, rec);
+            if (result) {
+                cached_recs_.push_back(*result);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            return std::nullopt;
+        }
+    }
+    return cached_recs_.at(index);
+}
+
+auto SpikeLockstep::determine_sc_success() -> std::optional<bool> {
+    // Look at the next 2 instruction commits.
+    // If a backward jump (next->pc < cur->pc) occurs between instruction 1 and 2,
+    // it means the retry branch was taken, so sc failed (return false).
+    // Otherwise, it succeeded (return true).
+    for (std::size_t i = 0; i < 2; ++i) {
+        auto cur = peek_commit(i);
+        auto next = peek_commit(i + 1);
+        if (!cur || !next) {
+            return std::nullopt;
+        }
+        if (next->pc < cur->pc) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -316,6 +376,11 @@ void SpikeLockstep::print_divergence(uint64_t icount, Address simrv_pc,
                                       const simrv::core::ArchState& simrv_state,
                                       const SpikeCommitRecord& spike_rec) {
     simrv::log::error("[LOCKSTEP] Divergence at instruction #{}", icount);
+
+    simrv::log::error("  Spike commit history:");
+    for (const auto& line : spike_history_) {
+        simrv::log::error("    {}", line);
+    }
 
     if (simrv_pc != spike_pc) {
         simrv::log::error("  PC:   SimRV=0x{:08x}  Spike=0x{:08x}",
@@ -344,21 +409,42 @@ void SpikeLockstep::print_divergence(uint64_t icount, Address simrv_pc,
 // ---------------------------------------------------------------------------
 
 auto SpikeLockstep::compare_and_report(const simrv::core::ArchState& state,
+                                       Address current_pc,
                                        uint64_t icount) -> bool {
     if (!is_running()) return true;
 
-    const auto spike_rec_opt = next_commit();
-    if (!spike_rec_opt) {
-        simrv::log::warn("SpikeLockstep: Spike EOF at instruction #{}", icount);
-        should_halt_ = halt_on_diverge_;
-        return false;
+    const Address pc_mask = (state.regs.xlen == 32) ? 0xFFFFFFFFULL : ~0ULL;
+    const Address masked_current_pc = current_pc & pc_mask;
+
+    SpikeCommitRecord spike_rec{};
+    if (icount == 1) {
+        // Discard Spike's bootrom instructions until we align with SimRV's start PC (current_pc)
+        while (true) {
+            const auto spike_rec_opt = next_commit();
+            if (!spike_rec_opt) {
+                simrv::log::warn("SpikeLockstep: Spike EOF during alignment at instruction #{}", icount);
+                should_halt_ = halt_on_diverge_;
+                return false;
+            }
+            if ((spike_rec_opt->pc & pc_mask) == masked_current_pc) {
+                spike_rec = *spike_rec_opt;
+                break;
+            }
+        }
+    } else {
+        const auto spike_rec_opt = next_commit();
+        if (!spike_rec_opt) {
+            simrv::log::warn("SpikeLockstep: Spike EOF at instruction #{}", icount);
+            should_halt_ = halt_on_diverge_;
+            return false;
+        }
+        spike_rec = *spike_rec_opt;
     }
-    const SpikeCommitRecord& spike_rec = *spike_rec_opt;
 
     bool ok = true;
 
     // Compare PC
-    if (state.pc != spike_rec.pc) {
+    if (masked_current_pc != (spike_rec.pc & pc_mask)) {
         ok = false;
     }
 
@@ -377,7 +463,7 @@ auto SpikeLockstep::compare_and_report(const simrv::core::ArchState& state,
     }
 
     if (!ok) {
-        print_divergence(icount, state.pc, spike_rec.pc, state, spike_rec);
+        print_divergence(icount, masked_current_pc, spike_rec.pc & pc_mask, state, spike_rec);
         if (halt_on_diverge_) {
             should_halt_ = true;
         }

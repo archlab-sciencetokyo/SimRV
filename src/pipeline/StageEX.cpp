@@ -13,6 +13,7 @@
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
+#include "simrv/debug/SpikeLockstep.hpp"
 
 namespace simrv::core {
 
@@ -99,8 +100,16 @@ void CPU::execute_core(Machine& machine) {
             ctx.tkn = false;
             ctx.mem_addr = ctx.rrs1;
             if (ctx.funct5 == Funct5Amo::Sc) {
-                ctx.wb_data = static_cast<Register>((ctx.rrs1 != state_.load_res) ||
-                                                    !(state_.reserved != 0u));
+                const bool native_success = (ctx.rrs1 == state_.load_res) && (state_.reserved != 0u);
+                ctx.wb_data = native_success ? 0 : 1;
+                if (machine.spike_lockstep && machine.spike_lockstep->is_running()) {
+                    if (native_success) {
+                        auto sc_success_opt = machine.spike_lockstep->determine_sc_success();
+                        if (sc_success_opt.has_value() && !sc_success_opt.value()) {
+                            ctx.wb_data = 1;
+                        }
+                    }
+                }
             }
             break;
         case Opcode::System:
@@ -180,6 +189,7 @@ void CPU::execute_core(Machine& machine) {
                              ctx.wb_data_csr = enum_mask(ExceptionCode::Breakpoint);
                              ctx.pending_exception = ExceptionCode::Breakpoint;
                              ctx.tkn = false;
+                             e_icount++;
                          }
                          break;
                      }

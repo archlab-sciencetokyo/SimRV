@@ -114,10 +114,11 @@ inline auto resolve_mstatus_short_string(CSRValue mstatus) -> std::string {
     return std::format("[{}]", s);
 }
 
-inline auto resolve_satp_string(CSRValue satp) -> std::string {
-    Word mode = satp_mode(satp);
+inline auto resolve_satp_string(CSRValue satp, unsigned xlen = kXLenBits) -> std::string {
+    Word mode = satp_mode(satp, xlen);
     if (mode == 0) return "BARE";
-    if constexpr (kIsXLen64) {
+    if (xlen == 64) {
+        if (mode == 1) return "SV32";
         if (mode == 8) return "SV39";
         if (mode == 9) return "SV48";
     } else {

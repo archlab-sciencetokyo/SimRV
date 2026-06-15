@@ -136,6 +136,35 @@ auto Uart::consume_tui_control_sequence(uint8_t first_byte) -> bool {
     int x = 0;
     int y = 0;
     if (parse_sgr_mouse(esc_buf_, button, x, y)) {
+        // Double-click prevention: only register left clicks on press event ('M')
+        if (esc_buf_.back() == 'M' && button == 0 && y == 2) {
+            const auto layout = tui_->get_layout();
+            bool on_left = false;
+            if (layout == simrv::tui::TuiLayout::Split) {
+                on_left = (x <= tui_->get_pane_width());
+            } else if (layout == simrv::tui::TuiLayout::FullRegister) {
+                on_left = true;
+            } else {
+                on_left = false;
+            }
+
+            if (on_left) {
+                tui_->cycle_reg_page();
+            } else {
+                if (machine_.is_shutdown_) {
+                    machine_.request_reboot();
+                    tui_loop_paused_ = false;
+                } else {
+                    if (tui_loop_paused_) {
+                        tui_loop_paused_ = false;
+                    } else {
+                        tui_pause_loop();
+                    }
+                }
+            }
+            return true;
+        }
+
         tui_->handle_mouse(x, y, button);
         return true;
     }
@@ -143,12 +172,20 @@ auto Uart::consume_tui_control_sequence(uint8_t first_byte) -> bool {
     // 2. Alt modifier shortcuts
     if (esc_buf_.size() == 2) {
         char key = esc_buf_.at(1);
+        if (key == 'p' || key == 'P') {
+            tui_->cycle_right_panel_mode();
+            return true;
+        }
         if (key == 'r' || key == 'R') {
             tui_->cycle_reg_page();
             return true;
         }
         if (key == 'h' || key == 'H') {
             tui_->toggle_high_contrast();
+            return true;
+        }
+        if (key == 't' || key == 'T') {
+            tui_->toggle_sakura_theme();
             return true;
         }
         if (key == 'l' || key == 'L') {
@@ -365,11 +402,11 @@ void Uart::tui_update() {
 }
 
 void Uart::tui_pause_loop() {
-    bool paused = true;
+    tui_loop_paused_ = true;
     tui_->set_paused(true);
     tui_->render();
 
-    while (paused && machine_.is_running_) {
+    while (tui_loop_paused_ && (machine_.is_running_ || machine_.is_shutdown_)) {
         if (simrv::tui::g_resized) {
             if (tui_) {
                 tui_->render();
@@ -383,7 +420,12 @@ void Uart::tui_pause_loop() {
 
             const auto key = static_cast<simrv::tui::TuiKey>(byte);
             if (key == simrv::tui::TuiKey::CtrlP || key == simrv::tui::TuiKey::c || key == simrv::tui::TuiKey::C) {
-                paused = false;
+                if (!machine_.is_shutdown_) {
+                    tui_loop_paused_ = false;
+                }
+            } else if (key == simrv::tui::TuiKey::CtrlR) {
+                machine_.request_reboot();
+                tui_loop_paused_ = false;
             } else if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
                 if (tui_) {
                     tui_->reset_scroll();
@@ -391,7 +433,8 @@ void Uart::tui_pause_loop() {
             } else if (key == simrv::tui::TuiKey::CtrlQ || key == simrv::tui::TuiKey::CtrlC ||
                        key == simrv::tui::TuiKey::q || key == simrv::tui::TuiKey::Q) {
                 machine_.is_running_ = false;
-                paused = false;
+                machine_.is_shutdown_ = false;
+                tui_loop_paused_ = false;
             } else if (key == simrv::tui::TuiKey::Tab) {
                 if (tui_) {
                     tui_->cycle_layout();
@@ -404,6 +447,14 @@ void Uart::tui_pause_loop() {
                 if (tui_) {
                     tui_->toggle_high_contrast();
                 }
+            } else if (key == simrv::tui::TuiKey::t || key == simrv::tui::TuiKey::T) {
+                if (tui_) {
+                    tui_->toggle_sakura_theme();
+                }
+            } else if (key == simrv::tui::TuiKey::p || key == simrv::tui::TuiKey::P) {
+                if (tui_) {
+                    tui_->cycle_right_panel_mode();
+                }
             } else if (key == simrv::tui::TuiKey::u || key == simrv::tui::TuiKey::U) {
                 if (tui_) {
                     tui_->scroll(5);
@@ -413,16 +464,18 @@ void Uart::tui_pause_loop() {
                     tui_->scroll(-5);
                 }
             } else if (key == simrv::tui::TuiKey::s || key == simrv::tui::TuiKey::S || key == simrv::tui::TuiKey::Space) {
-                if (tui_) {
-                    tui_->update_cache();
+                if (!machine_.is_shutdown_) {
+                    if (tui_) {
+                        tui_->update_cache();
+                    }
+                    uint64_t old_icount = machine_.cpu.e_icount;
+                    while (machine_.cpu.e_icount == old_icount && machine_.is_running_) {
+                        machine_.prepare_cycle();
+                        machine_.cpu.run_cycle(machine_);
+                        machine_.finalize_cycle();
+                    }
+                    tui_->render();
                 }
-                uint64_t old_icount = machine_.cpu.e_icount;
-                while (machine_.cpu.e_icount == old_icount && machine_.is_running_) {
-                    machine_.prepare_cycle();
-                    machine_.cpu.run_cycle(machine_);
-                    machine_.finalize_cycle();
-                }
-                tui_->render();
             }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));

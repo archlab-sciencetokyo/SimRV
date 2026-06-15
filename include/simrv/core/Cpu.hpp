@@ -66,6 +66,10 @@ struct ArchState {
         if constexpr (!simrv::xlen::kIsXLen64) {
             return 32;
         } else {
+            const unsigned mxl = (misa >> 62) & 3;
+            if (mxl == 1) {
+                return 32;
+            }
             if (priv == PrivilegeLevel::Machine) {
                 return 64;
             } else if (priv == PrivilegeLevel::Supervisor) {

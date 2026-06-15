@@ -10,6 +10,8 @@
 #include "simrv/xlen/Types.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
+#include "simrv/device/Uart.hpp"
+#include "simrv/tui/Tui.hpp"
 
 namespace simrv::core {
 
@@ -174,6 +176,83 @@ void CPU::run_cycle(Machine& machine) {
     if (clint_mmio.rtc_divider >= 10) {
         clint_mmio.mtime += clint_mmio.rtc_divider / 10;
         clint_mmio.rtc_divider %= 10;
+    }
+
+    if (machine.s_tuimode && machine.uart && machine.uart->tui()) {
+        auto op_id = static_cast<uint8_t>(pipeline_context.op_id);
+        auto rd = static_cast<uint8_t>(pipeline_context.rd);
+        auto rs1 = static_cast<uint8_t>(pipeline_context.rs1);
+        auto rs2 = static_cast<uint8_t>(pipeline_context.rs2);
+        
+        Register rd_val = 0;
+        Register rs1_val = 0;
+        Register rs2_val = 0;
+        
+        std::string op_name;
+        if (op_id < simrv::pipeline::OPERATION_NAME.size()) {
+            std::string_view name_sv = simrv::pipeline::OPERATION_NAME.at(op_id);
+            for (char c : name_sv) {
+                op_name += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
+        }
+        bool is_fp = op_name.starts_with("f") && !op_name.starts_with("fence");
+        
+        bool rd_fp = is_fp;
+        bool rs1_fp = is_fp;
+        bool rs2_fp = is_fp;
+        
+        if (op_name == "fcvt.w.s" || op_name == "fcvt.wu.s" || op_name == "fcvt.w.d" || op_name == "fcvt.wu.d" ||
+            op_name == "fcvt.l.s" || op_name == "fcvt.lu.s" || op_name == "fcvt.l.d" || op_name == "fcvt.lu.d" ||
+            op_name == "fmv.x.w" || op_name == "fmv.x.d" || op_name.starts_with("feq") ||
+            op_name.starts_with("flt") || op_name.starts_with("fle") || op_name.starts_with("fclass")) {
+            rd_fp = false;
+            rs1_fp = true;
+            rs2_fp = true;
+        } else if (op_name == "fcvt.s.w" || op_name == "fcvt.s.wu" || op_name == "fcvt.d.w" || op_name == "fcvt.d.wu" ||
+                   op_name == "fcvt.s.l" || op_name == "fcvt.s.lu" || op_name == "fcvt.d.l" || op_name == "fcvt.d.lu" ||
+                   op_name == "fmv.w.x" || op_name == "fmv.d.x") {
+            rd_fp = true;
+            rs1_fp = false;
+            rs2_fp = false;
+        } else if (op_name.starts_with("l") && !op_name.starts_with("lui")) {
+            rd_fp = is_fp;
+            rs1_fp = false;
+        } else if (op_name.starts_with("s") && !op_name.starts_with("slt") && !op_name.starts_with("sll") &&
+                   !op_name.starts_with("sra") && !op_name.starts_with("srl") && !op_name.starts_with("sub") &&
+                   !op_name.starts_with("sret") && !op_name.starts_with("sfence") && !op_name.starts_with("sc")) {
+            rs2_fp = is_fp;
+            rs1_fp = false;
+        }
+        
+        if (rd_fp) {
+            rd_val = state_.regs.read_fp(static_cast<RegId>(rd));
+        } else {
+            rd_val = state_.regs.read(static_cast<RegId>(rd));
+        }
+        
+        if (rs1_fp) {
+            rs1_val = state_.regs.read_fp(static_cast<RegId>(rs1));
+        } else {
+            rs1_val = state_.regs.read(static_cast<RegId>(rs1));
+        }
+        
+        if (rs2_fp) {
+            rs2_val = state_.regs.read_fp(static_cast<RegId>(rs2));
+        } else {
+            rs2_val = state_.regs.read(static_cast<RegId>(rs2));
+        }
+
+        machine.uart->tui()->record_instruction(
+            pipeline_context.cpc,
+            op_id,
+            rd,
+            rd_val,
+            rs1,
+            rs1_val,
+            rs2,
+            rs2_val,
+            pipeline_context.imm
+        );
     }
 }
 

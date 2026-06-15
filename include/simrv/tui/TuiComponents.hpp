@@ -17,6 +17,13 @@ class Machine;
 
 namespace simrv::tui {
 
+// Theme Enum
+enum class TuiTheme {
+    Adaptive,
+    Sakura,
+    HighContrast
+};
+
 // Sakura Pastel Theme Colors (static constants)
 inline constexpr const char* kSakuraBorderConst = "\033[38;5;218m";  // Soft pink borders
 inline constexpr const char* kSakuraTextConst   = "\033[38;5;254m";  // Warm white text
@@ -38,6 +45,17 @@ inline constexpr const char* kContrastPeach  = "\033[1;33m";  // Bold Yellow
 inline constexpr const char* kContrastCoral  = "\033[1;31m";  // Bold Red
 inline constexpr const char* kContrastSky    = "\033[1;36m";  // Bold Cyan
 inline constexpr const char* kContrastPink   = "\033[1;35m";  // Bold Magenta
+
+// Adaptive Theme Colors (static constants using theme-adaptive ANSI colors)
+inline constexpr const char* kAdaptiveBorder = "\033[34m";  // Standard Blue
+inline constexpr const char* kAdaptiveText   = "\033[39m";  // Default foreground
+inline constexpr const char* kAdaptiveVal    = "\033[36m";  // Standard Cyan
+inline constexpr const char* kAdaptiveMuted  = "\033[90m";  // Dark Gray
+inline constexpr const char* kAdaptiveMint   = "\033[32m";  // Standard Green
+inline constexpr const char* kAdaptivePeach  = "\033[33m";  // Standard Yellow
+inline constexpr const char* kAdaptiveCoral  = "\033[31m";  // Standard Red
+inline constexpr const char* kAdaptiveSky    = "\033[36m";  // Standard Cyan
+inline constexpr const char* kAdaptivePink   = "\033[35m";  // Standard Magenta
 
 // Theme Variables (pointers to active color definitions)
 extern const char* g_theme_border;
@@ -63,6 +81,10 @@ extern std::array<const char*, 16> g_theme_bg_palette;
 #define kSakuraCoral g_theme_coral
 #define kSakuraSky g_theme_sky
 #define kSakuraPink g_theme_pink
+
+extern TuiTheme g_tui_theme;
+void set_tui_theme(TuiTheme theme);
+TuiTheme get_tui_theme();
 
 void set_high_contrast(bool enable);
 bool is_high_contrast();
@@ -161,6 +183,7 @@ class StatusBar : public TuiWidget {
     void set_scroll_offset(int offset) { scroll_offset_ = offset; }
     void set_layout(TuiLayout layout) { layout_ = layout; }
     void set_pane_widths(int left, int right) { left_width_ = left; right_width_ = right; }
+    void set_right_panel_mode(TuiRightPanelMode mode) { right_panel_mode_ = mode; }
 
     [[nodiscard]] auto render_row(int row_idx, int width) -> std::string override;
 
@@ -172,6 +195,7 @@ class StatusBar : public TuiWidget {
     std::string status_override_;
     TuiRegPage active_page_ = TuiRegPage::GPR;
     TuiLayout layout_ = TuiLayout::Split;
+    TuiRightPanelMode right_panel_mode_ = TuiRightPanelMode::Terminal;
     int scroll_offset_ = 0;
     int left_width_ = 0;
     int right_width_ = 0;
@@ -180,4 +204,4 @@ class StatusBar : public TuiWidget {
     uint64_t kips_ = 0;
 };
 
-}  // namespace simrv::device
+}  // namespace simrv::tui

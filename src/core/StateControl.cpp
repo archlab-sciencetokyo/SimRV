@@ -318,6 +318,42 @@ void TrapController::sret(ArchState& state, Tlb& tlb) {
     tlb.flush();
 }
 
+namespace {
+auto trap_cause_name(TrapCause cause) -> std::string {
+    const bool is_interrupt = (cause & (1ULL << 63)) != 0;
+    const uint64_t code = cause & ~(1ULL << 63);
+    if (is_interrupt) {
+        switch (code) {
+            case 1:  return "Supervisor software interrupt";
+            case 3:  return "Machine software interrupt";
+            case 5:  return "Supervisor timer interrupt";
+            case 7:  return "Machine timer interrupt";
+            case 9:  return "Supervisor external interrupt";
+            case 11: return "Machine external interrupt";
+            default: return "Unknown interrupt " + std::to_string(code);
+        }
+    } else {
+        switch (code) {
+            case 0:  return "Instruction address misaligned";
+            case 1:  return "Instruction access fault";
+            case 2:  return "Illegal instruction";
+            case 3:  return "Breakpoint";
+            case 4:  return "Load address misaligned";
+            case 5:  return "Load access fault";
+            case 6:  return "Store/AMO address misaligned";
+            case 7:  return "Store/AMO access fault";
+            case 8:  return "Environment call from U-mode";
+            case 9:  return "Environment call from S-mode";
+            case 11: return "Environment call from M-mode";
+            case 12: return "Instruction page fault";
+            case 13: return "Load page fault";
+            case 15: return "Store/AMO page fault";
+            default: return "Unknown exception " + std::to_string(code);
+        }
+    }
+}
+} // namespace
+
 void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
     ArchState& state = cpu.state();
     const Address trap_pc = state.pc;
@@ -325,11 +361,13 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
     if (cpu.trap_log_stream != nullptr && cpu.trap_log_stream->is_open()) {
         std::println(
             *cpu.trap_log_stream,
-            "TRAP mtime={} cause={:0{}x} pc={:0{}x} priv={} ra={:0{}x} sp={:0{}x} tp={:0{}x} a0={:0{}x} "
+            "TRAP mtime={} cause={:0{}x} ({}) pc={:0{}x} priv={} ra={:0{}x} sp={:0{}x} tp={:0{}x} a0={:0{}x} "
             "a1={:0{}x} mtvec={:0{}x} stvec={:0{}x} mepc={:0{}x} sepc={:0{}x} satp={:0{}x} "
             "tval={:0{}x}",
             cpu.clint_mmio.mtime,
-            static_cast<uint64_t>(cause), kLogHexWidth, static_cast<uint64_t>(trap_pc),
+            static_cast<uint64_t>(cause), kLogHexWidth,
+            trap_cause_name(cause),
+            static_cast<uint64_t>(trap_pc),
             kLogHexWidth,            static_cast<unsigned>(state.priv),
             static_cast<uint64_t>(state.regs.read(static_cast<RegId>(1))), kLogHexWidth,
             static_cast<uint64_t>(state.regs.read(static_cast<RegId>(2))), kLogHexWidth,

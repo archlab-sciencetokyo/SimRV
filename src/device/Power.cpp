@@ -6,6 +6,7 @@
 
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/device/Uart.hpp"
 
 namespace simrv::device {
 
@@ -29,11 +30,17 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
                 simrv::log::info("[Power] SiFive Test Finisher: System Poweroff requested (status: {}).", status);
                 machine_.exit_code = status;
                 machine_.stop();
+                if (machine_.s_tuimode && machine_.uart) {
+                    machine_.uart->tui_pause_loop();
+                }
             } else if (cmd == 0x3333) {
                 const int status = static_cast<int>(wdata >> 16);
                 simrv::log::info("[Power] SiFive Test Finisher: System Fail/Crash requested (status: {}).", status);
                 machine_.exit_code = (status != 0) ? status : 1;
                 machine_.stop();
+                if (machine_.s_tuimode && machine_.uart) {
+                    machine_.uart->tui_pause_loop();
+                }
             } else if (cmd == 0x7777) {
                 simrv::log::info("[Power] SiFive Test Finisher: System Reboot requested.");
                 machine_.request_reboot();

@@ -22,20 +22,20 @@ Word Mmu::s_last_valid_root_ppn = 0;
 Mmu::Mmu(Byte* mmem) : mmem_(mmem) {}
 
 auto Mmu::translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
-                    Word satp) -> std::expected<Address, TrapCause> {
+                    Word satp, unsigned xlen) -> std::expected<Address, TrapCause> {
     // Ensure virtual address fits within XLEN mask
     if (simrv::compiler::unlikely((v_addr & ~simrv::xlen::kAddrMask) != 0)) {
         // Optionally abort translation in debug builds
         // std::terminate();
     }
     // Machine mode or MMU disabled: use physical addressing
-    if (priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(satp)) {
+    if (priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(satp, xlen)) {
         return v_addr;
     }
 
 
     // Translate through page tables
-    return page_walk(v_addr, access, priv, mstatus, satp);
+    return page_walk(v_addr, access, priv, mstatus, satp, xlen);
 }
 
 auto Mmu::validate_pte_permissions(Word pte, Word permission_bits, PteAccess access,
@@ -67,7 +67,7 @@ auto Mmu::validate_pte_permissions(Word pte, Word permission_bits, PteAccess acc
     return true;
 }
 
-void Mmu::update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess access) {
+void Mmu::update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess access, unsigned xlen) {
     // Update A (accessed) and D (dirty) bits as per RISC-V spec
     Word updated_pte = pte_value | enum_mask(PteFlag::A);
     if (access == PteAccess::Write) {
@@ -77,15 +77,16 @@ void Mmu::update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess ac
     // Write back only if modified
     if (updated_pte != pte_value) {
         pte_value = updated_pte;
-        Instruction const store_op = simrv::xlen::kIsXLen64 ? static_cast<Instruction>(Funct3::Sd)
-                                                            : static_cast<Instruction>(Funct3::Sw);
+        Instruction const store_op = (xlen == 32) ? static_cast<Instruction>(Funct3::Sw)
+                                     : (simrv::xlen::kIsXLen64 ? static_cast<Instruction>(Funct3::Sd)
+                                                              : static_cast<Instruction>(Funct3::Sw));
         simrv::memory::ram_write_fast(pte_addr, updated_pte, store_op, mmem_);
 
     }
 }
 
 auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
-                    Word satp) -> std::expected<Address, TrapCause> {
+                    Word satp, unsigned xlen) -> std::expected<Address, TrapCause> {
     auto make_fault = [access]() -> TrapCause {
         switch (access) {
             case PteAccess::Code:
@@ -102,8 +103,8 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
     int pte_size = 4;
     int vpn_bits_per_level = 10;
 
-    if constexpr (simrv::xlen::kIsXLen64) {
-        const Word mode = simrv::xlen::satp_mode(satp);
+    const Word mode = simrv::xlen::satp_mode(satp, xlen);
+    if (xlen == 64) {
         if (mode == 8) {  // SV39
             levels = 3;
             pte_size = 8;
@@ -112,22 +113,28 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
             levels = 4;
             pte_size = 8;
             vpn_bits_per_level = 9;
+        } else if (mode == 1) {  // SV32 compatibility mode under RV64
+            levels = 2;
+            pte_size = 4;
+            vpn_bits_per_level = 10;
         } else {
             return std::unexpected(make_fault());
         }
     } else {
-        const Word mode = simrv::xlen::satp_mode(satp);
         if (mode != 1) {  // SV32
             return std::unexpected(make_fault());
         }
+        levels = 2;
+        pte_size = 4;
+        vpn_bits_per_level = 10;
     }
 
     const int vpn_shift_base = 12;  // Page size is 4KB (2^12)
     const Word vpn_mask = (static_cast<Word>(1) << vpn_bits_per_level) - 1;
-    const Instruction pte_load_op = simrv::xlen::kIsXLen64 ? static_cast<Instruction>(Funct3::Ld)
-                                                           : static_cast<Instruction>(Funct3::Lw);
+    const Instruction pte_load_op = (pte_size == 4) ? static_cast<Instruction>(Funct3::Lw)
+                                                    : static_cast<Instruction>(Funct3::Ld);
 
-    const Word root_ppn = (satp & kPpnMask);
+    const Word root_ppn = simrv::xlen::satp_root_ppn(satp, xlen);
     auto root_pt_addr = static_cast<Address>(root_ppn << 12);
 
     Word pte = 0;
@@ -139,6 +146,9 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
 
         pte_addr = root_pt_addr + (vpn_i * pte_size);
         pte = simrv::memory::ram_read_fast(pte_addr, pte_load_op, mmem_);
+        if (pte_size == 4) {
+            pte &= 0xFFFFFFFFu;
+        }
 
         if (simrv::compiler::unlikely((pte & enum_mask(PteFlag::V)) == 0u)) {
             // PTE invalid: page fault
@@ -189,7 +199,7 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
     const Word offset_mask = (static_cast<Word>(1) << offset_bits) - 1;
     const Word phys_addr = (v_addr & offset_mask) | ((ppn << 12) & ~offset_mask);
 
-    update_pte_access_bits(pte_addr, pte, access);
+    update_pte_access_bits(pte_addr, pte, access, xlen);
     return phys_addr;
 }
 

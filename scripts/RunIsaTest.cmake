@@ -37,8 +37,17 @@ if(EXISTS "${NM_BIN}")
 endif()
 
 # 3. Run SimRV
+set(SIMRV_ARGS -m ${bin_path} -e ${END_INSNS} -T -H ${tohost_addr})
+if(LOCKSTEP)
+  list(APPEND SIMRV_ARGS --lockstep)
+  list(APPEND SIMRV_ARGS --spike-elf ${ELF_PATH})
+  if(SPIKE_BIN)
+    list(APPEND SIMRV_ARGS --spike-bin ${SPIKE_BIN})
+  endif()
+endif()
+
 execute_process(
-  COMMAND ${SIMRV_BIN} -m ${bin_path} -e ${END_INSNS} -T -H ${tohost_addr}
+  COMMAND ${SIMRV_BIN} ${SIMRV_ARGS}
   TIMEOUT ${TIMEOUT_SECS}
   OUTPUT_VARIABLE sim_out
   ERROR_VARIABLE sim_err

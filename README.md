@@ -29,7 +29,7 @@ Run an application image:
 Run Linux image:
 
 ```bash
-./build/rv64-release/SimRV -m linux-images/rv64/fw_payload.bin -d linux-images/rv64/root.bin -c linux-images/rv64/devicetree.dtb
+./build/rv64-release/SimRV -m linux-images/rv64/fw_payload.bin -D linux-images/rv64/root.bin -c linux-images/rv64/devicetree.dtb
 ```
 
 To build these images yourself:

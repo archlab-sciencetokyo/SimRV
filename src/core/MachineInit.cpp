@@ -38,8 +38,8 @@ constexpr size_t D_SIZE_DEVT = (size_t{4} * 1024U);           // 4KB of device t
 constexpr size_t D_SIZE_DISK = (size_t{16} * 1024U * 1024U);  // 16MB of disk image
 constexpr Address D_DEVT_OFFSET = static_cast<Address>(16U * 1024U * 1024U);
 
-void load_image_into_ram(const std::string& file_path, Byte* ram, std::size_t capacity,
-                         const char* image_name) {
+void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity,
+                         const char* image_name, bool tuimode) {
     if (ram == nullptr || capacity == 0) {
         simrv::log::error("invalid destination for {} image load", image_name);
         std::exit(EXIT_FAILURE);
@@ -47,8 +47,41 @@ void load_image_into_ram(const std::string& file_path, Byte* ram, std::size_t ca
 
     std::ifstream in(file_path, std::ios::binary | std::ios::ate);
     if (!in.is_open()) {
-        simrv::log::error("image_file {} cannot be found", file_path);
-        std::exit(EXIT_FAILURE);
+        if (tuimode) {
+            std::string temp_path = file_path;
+            while (true) {
+                std::println(stderr, "\033[1;33m[TUI File Prompt] {} image '{}' is missing or cannot be opened.\033[0m", image_name, temp_path);
+                std::print(stderr, "Please enter path to a valid {} image file (or press Enter/Ctrl+D to exit): ", image_name);
+                std::fflush(stderr);
+                std::string input;
+                std::getline(std::cin, input);
+                if (input.empty() && std::cin.eof()) {
+                    simrv::log::error("No valid {} image file provided. Exiting.", image_name);
+                    std::exit(EXIT_FAILURE);
+                }
+                if (std::cin.eof()) {
+                    std::cin.clear();
+                }
+                if (input.empty()) {
+                    simrv::log::error("No valid {} image file provided. Exiting.", image_name);
+                    std::exit(EXIT_FAILURE);
+                }
+                // Strip leading/trailing spaces and quotes
+                if ((input.front() == '"' && input.back() == '"') ||
+                    (input.front() == '\'' && input.back() == '\'')) {
+                    input = input.substr(1, input.size() - 2);
+                }
+                std::ifstream test_in(input, std::ios::binary | std::ios::ate);
+                if (test_in.is_open()) {
+                    file_path = input;
+                    in = std::move(test_in);
+                    break;
+                }
+            }
+        } else {
+            simrv::log::error("image_file {} cannot be found", file_path);
+            std::exit(EXIT_FAILURE);
+        }
     }
 
     const auto file_size = static_cast<std::size_t>(in.tellg());
@@ -137,16 +170,69 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
 
     CSRValue initial_misa = misa_with_mxl(s_misa_override ? s_misa_profile
                                                           : kMisaDefault);
+    if constexpr (simrv::xlen::kIsXLen64) {
+        bool is_32bit = false;
+        if (s_misa_override && s_misa_xlen == 32) {
+            is_32bit = true;
+        } else if (!s_misa_override || s_misa_xlen == 0) {
+            auto check_elf = [&](const std::string& path) {
+                if (path.empty()) return;
+                std::ifstream file(path, std::ios::binary);
+                if (file.is_open()) {
+                    std::array<char, 5> header{};
+                    if (file.read(header.data(), 5)) {
+                        if (header[0] == 0x7f && header[1] == 'E' && header[2] == 'L' && header[3] == 'F') {
+                            if (header[4] == 1) { // ELFCLASS32
+                                is_32bit = true;
+                            }
+                        }
+                    }
+                }
+            };
+            check_elf(s_fn_memimg);
+            check_elf(s_spike_elf);
+            if (!is_32bit && !s_fn_memimg.empty()) {
+                std::string base_path = s_fn_memimg;
+                size_t last_dot = base_path.find_last_of('.');
+                size_t last_slash = base_path.find_last_of("/\\");
+                if (last_dot != std::string::npos && (last_slash == std::string::npos || last_dot > last_slash)) {
+                    base_path = base_path.substr(0, last_dot);
+                }
+                if (base_path != s_fn_memimg) {
+                    check_elf(base_path + ".elf");
+                    check_elf(base_path + ".ELF");
+                    check_elf(base_path + ".out");
+                    check_elf(base_path + ".OUT");
+                    check_elf(base_path + ".axf");
+                    check_elf(base_path + ".AXF");
+                    check_elf(base_path);
+                }
+            }
+            if (!is_32bit) {
+                if (s_fn_memimg.find("rv32") != std::string::npos ||
+                    s_spike_elf.find("rv32") != std::string::npos) {
+                    is_32bit = true;
+                }
+            }
+        }
+        if (is_32bit) {
+            initial_misa = (initial_misa & ~(3ull << 62)) | (1ull << 62);
+        }
+    }
     cpu.state().pc = s_start_pc;
     cpu.state().regs.write(static_cast<RegId>(10), 0);  // a0 = hartid
     cpu.state().regs.write(static_cast<RegId>(11), linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);  // a1 = dtb
     cpu.state().misa = initial_misa;
     cpu.state().priv = kPrivMachine;
     cpu.state().update_xlen();
+    if (cpu.state().regs.xlen == 32) {
+        cpu.state().pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(cpu.state().pc)));
+    }
     cpu.TLB_flush();
 
     load_image_into_ram(s_fn_memimg, mmem, static_cast<std::size_t>(simrv::memory::kDramSize),
-                        "memory");
+                        "memory", s_tuimode);
+    symbols.load_from_elf(s_fn_memimg);
 
     if (s_fn_dvtree.empty()) {
         if (linux_boot) {
@@ -159,12 +245,12 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
             return 1;
         }
         const auto dt_cap = static_cast<std::size_t>(simrv::memory::kDramSize - dtb_offset);
-        load_image_into_ram(s_fn_dvtree, mmem + dtb_offset, dt_cap, "device-tree");
+        load_image_into_ram(s_fn_dvtree, mmem + dtb_offset, dt_cap, "device-tree", s_tuimode);
     }
 
     if (s_use_disk) {
         load_image_into_ram(s_fn_dskimg, disk->sector,
-                            static_cast<std::size_t>(simrv::virtio::kDiskSize), "disk");
+                            static_cast<std::size_t>(simrv::virtio::kDiskSize), "disk", s_tuimode);
     } else {
         std::memset(disk->sector, 0, simrv::virtio::kDiskSize);
     }
@@ -189,9 +275,10 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
     // ---- Spike lockstep initialization ----
     if (s_lockstep_mode) {
         // Derive the ISA string from the active MISA profile and compile-time XLEN
-        const std::string isa_str = simrv::debug::spike_isa_string(s_misa_profile);
+        const std::string isa_str = simrv::debug::spike_isa_string(cpu.state().misa);
+        const std::string spike_img = s_spike_elf.empty() ? s_fn_memimg : s_spike_elf;
         spike_lockstep = std::make_unique<simrv::debug::SpikeLockstep>(
-            s_spike_bin, s_fn_memimg, s_fn_dskimg, s_fn_dvtree, isa_str);
+            s_spike_bin, spike_img, s_fn_dskimg, s_fn_dvtree, isa_str);
         simrv::log::info("Spike lockstep co-simulation active (isa={})", isa_str);
         if (!spike_lockstep->start()) {
             simrv::log::error("Failed to launch Spike for lockstep verification");

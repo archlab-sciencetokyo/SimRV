@@ -36,10 +36,12 @@ std::array<const char*, 16> g_theme_palette = kSakuraPalette;
 std::array<const char*, 16> g_theme_bg_palette = kSakuraBgPalette;
 
 bool g_high_contrast = false;
+TuiTheme g_tui_theme = TuiTheme::Sakura;
 
-void set_high_contrast(bool enable) {
-    g_high_contrast = enable;
-    if (enable) {
+void set_tui_theme(TuiTheme theme) {
+    g_tui_theme = theme;
+    if (theme == TuiTheme::HighContrast) {
+        g_high_contrast = true;
         g_theme_border  = kContrastBorder;
         g_theme_text    = kContrastText;
         g_theme_val     = kContrastVal;
@@ -51,7 +53,21 @@ void set_high_contrast(bool enable) {
         g_theme_pink    = kContrastPink;
         g_theme_palette = kHighContrastPalette;
         g_theme_bg_palette = kHighContrastBgPalette;
-    } else {
+    } else if (theme == TuiTheme::Adaptive) {
+        g_high_contrast = false;
+        g_theme_border  = kAdaptiveBorder;
+        g_theme_text    = kAdaptiveText;
+        g_theme_val     = kAdaptiveVal;
+        g_theme_muted   = kAdaptiveMuted;
+        g_theme_mint    = kAdaptiveMint;
+        g_theme_peach   = kAdaptivePeach;
+        g_theme_coral   = kAdaptiveCoral;
+        g_theme_sky     = kAdaptiveSky;
+        g_theme_pink    = kAdaptivePink;
+        g_theme_palette = kHighContrastPalette;
+        g_theme_bg_palette = kHighContrastBgPalette;
+    } else { // TuiTheme::Sakura
+        g_high_contrast = false;
         g_theme_border  = kSakuraBorderConst;
         g_theme_text    = kSakuraTextConst;
         g_theme_val     = kSakuraValConst;
@@ -63,6 +79,18 @@ void set_high_contrast(bool enable) {
         g_theme_pink    = kSakuraPinkConst;
         g_theme_palette = kSakuraPalette;
         g_theme_bg_palette = kSakuraBgPalette;
+    }
+}
+
+TuiTheme get_tui_theme() {
+    return g_tui_theme;
+}
+
+void set_high_contrast(bool enable) {
+    if (enable) {
+        set_tui_theme(TuiTheme::HighContrast);
+    } else {
+        set_tui_theme(TuiTheme::Sakura);
     }
 }
 
@@ -260,7 +288,6 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         }
 
         std::string right_text;
-        int right_text_display_len = 0;
         std::string color_prefix = "";
         std::string color_suffix = "";
         if (scroll_offset_ > 0) {
@@ -268,7 +295,6 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             color_suffix = "\033[0m";
             right_text = std::format(
                 " ═══ SCROLLBACK (Offset: -{}) [Press 'c'/'Enter' to Live] ═══ ", scroll_offset_);
-            right_text_display_len = get_display_width(right_text);
         } else {
             const auto cycles = machine_.cpu.clint_mmio.mcycle;
             const auto icount = machine_.cpu.e_icount;
@@ -340,25 +366,41 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                     }
                 }
             }
-            right_text_display_len = get_display_width(right_text);
         }
-        int pad_right =
-            (layout_ == TuiLayout::Split ? right_width_ : width - 2) - right_text_display_len;
-        std::string right_render = right_text;
-        if (pad_right > 0) {
-            if (scroll_offset_ > 0) {
-                right_render = std::string(static_cast<std::size_t>(pad_right / 2), ' ') +
-                               right_render +
-                               std::string(static_cast<std::size_t>((pad_right + 1) / 2), ' ');
-                right_render = color_prefix + right_render + color_suffix;
-            } else {
-                right_render = std::string(static_cast<std::size_t>(pad_right), ' ') + right_render;
-            }
+
+        int target_right_width = layout_ == TuiLayout::Split ? right_width_ : width - 2;
+        std::string right_render;
+
+        std::string mode_label;
+        if (right_panel_mode_ == TuiRightPanelMode::Terminal) {
+            mode_label = "Terminal";
+        } else if (right_panel_mode_ == TuiRightPanelMode::Log) {
+            mode_label = "System Log";
         } else {
-            right_render = format_to_width(right_render,
-                                           layout_ == TuiLayout::Split ? right_width_ : width - 2);
-            if (scroll_offset_ > 0) {
-                right_render = color_prefix + right_render + color_suffix;
+            mode_label = "Live Trace";
+        }
+        std::string mode_prefix = std::format("{}[{}]\033[0m", kSakuraSky, mode_label);
+        int mode_len = get_display_width(mode_prefix);
+
+        if (scroll_offset_ > 0) {
+            std::string text = " " + right_text;
+            int text_len = get_display_width(text);
+            int pad = target_right_width - (mode_len + text_len);
+            if (pad > 0) {
+                int left_pad = pad / 2;
+                int right_pad = pad - left_pad;
+                right_render = mode_prefix + std::string(static_cast<std::size_t>(left_pad), ' ') + text + std::string(static_cast<std::size_t>(right_pad), ' ');
+            } else {
+                right_render = format_to_width(mode_prefix + text, target_right_width);
+            }
+            right_render = color_prefix + right_render + color_suffix;
+        } else {
+            int stats_len = get_display_width(right_text);
+            int pad = target_right_width - (mode_len + stats_len);
+            if (pad > 0) {
+                right_render = mode_prefix + std::string(static_cast<std::size_t>(pad), ' ') + right_text;
+            } else {
+                right_render = format_to_width(mode_prefix + right_text, target_right_width);
             }
         }
 
@@ -416,7 +458,9 @@ auto ConsolePane::render_row(int row_idx, int width) -> std::string {
 
 auto RegisterPane::render_row(int row_idx, int width) -> std::string {
     int logical_row = row_idx + scroll_offset_;
-    int total_logical_rows = machine_.s_cycle_accurate ? 43 : 35;
+    int base_rows = machine_.s_cycle_accurate ? 43 : 35;
+    int debug_rows = machine_.s_debug_mode ? 4 : 0;
+    int total_logical_rows = base_rows + debug_rows;
 
     if (logical_row >= total_logical_rows) {
         return format_to_width("", width);
@@ -828,6 +872,37 @@ auto RegisterPane::render_row(int row_idx, int width) -> std::string {
                 std::format("0x{:0{}x}", st.mideleg, simrv::xlen::kXLenHexDigits), kSakuraVal);
         }
 
+        if (machine_.s_debug_mode && logical_row >= base_rows && logical_row < total_logical_rows) {
+            int debug_row = logical_row - base_rows;
+            if (debug_row == 0) {
+                return section_line("Debug Diagnostics");
+            }
+            if (debug_row == 1) {
+                std::string sym = machine_.symbols.lookup(st.pc);
+                if (sym.empty()) {
+                    sym = "none";
+                } else {
+                    sym = "<" + sym + ">";
+                }
+                return format_to_width(std::format(" {}{:<8}\033[0m: {}{}\033[0m", kSakuraText, "symbol", kSakuraPeach, sym), width);
+            }
+            if (debug_row == 2) {
+                std::string gdb_status = "disabled";
+                if (machine_.gdb_stub) {
+                    gdb_status = machine_.gdb_stub->is_connected() ? "connected" : "listening";
+                }
+                std::string lockstep_status = machine_.spike_lockstep ? "active" : "disabled";
+                return render_pair("gdb_stub", gdb_status, machine_.gdb_stub ? kSakuraMint : kSakuraMuted,
+                                   "lockstep", lockstep_status, machine_.spike_lockstep ? kSakuraMint : kSakuraMuted);
+            }
+            if (debug_row == 3) {
+                std::string tohost_str = std::format("0x{:x}", machine_.tohost);
+                std::string traplog_status = machine_.s_traplog_mode ? "active" : "disabled";
+                return render_pair("tohost", tohost_str, machine_.tohost != 0 ? kSakuraPeach : kSakuraVal,
+                                   "traplog", traplog_status, machine_.s_traplog_mode ? kSakuraMint : kSakuraMuted);
+            }
+        }
+
         return "";
     };
 
@@ -836,6 +911,10 @@ auto RegisterPane::render_row(int row_idx, int width) -> std::string {
         cached_left_rows_.at(static_cast<std::size_t>(logical_row)) = res;
         last_width_ = width;
         return res;
+    }
+
+    if (machine_.s_debug_mode && logical_row >= base_rows && logical_row < total_logical_rows) {
+        return get_row_uncached();
     }
 
     auto& cpu = machine_.cpu;
@@ -1176,7 +1255,9 @@ void RegisterPane::update_cache() {
 }
 
 void RegisterPane::scroll(int lines) {
-    int total_logical_rows = machine_.s_cycle_accurate ? 43 : 35;
+    int base_rows = machine_.s_cycle_accurate ? 43 : 35;
+    int debug_rows = machine_.s_debug_mode ? 4 : 0;
+    int total_logical_rows = base_rows + debug_rows;
     int max_scroll = std::max(0, total_logical_rows - visible_rows_);
     scroll_offset_ += lines;
     if (scroll_offset_ > max_scroll) {

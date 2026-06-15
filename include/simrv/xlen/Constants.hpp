@@ -49,36 +49,48 @@ inline constexpr uint64_t kF64FracQnanBit = 51U;
 // =========================================================================
 // SATP CSR Layouts (Strict RISC-V Standard)
 // =========================================================================
-inline constexpr Word kSatpModeShift = kIsXLen64 ? 60 : 31;
-inline constexpr Word kSatpModeMask = kIsXLen64 ? 0xFu : 0x1u;
-inline constexpr Word kSatpAsidShift = kIsXLen64 ? 44 : 22;
-inline constexpr Word kSatpAsidMask = kIsXLen64 ? 0xffffu : 0x1ffu;
-inline constexpr Word kSatpRootPpnMask = kIsXLen64 ? 0x00000fffffffffffULL : 0x003fffffu;
 inline constexpr Word kMegapageOffsetMask = 0x003fffffu;
 inline constexpr Word kPageOffsetMask = 0x00000fffu;
 
-[[nodiscard]] inline constexpr auto satp_mode(Word satp) -> Word {
-    return (satp >> kSatpModeShift) & kSatpModeMask;
+[[nodiscard]] inline constexpr auto satp_mode(Word satp, unsigned xlen = kXLenBits) -> Word {
+    if (xlen == 64) {
+        return (satp >> 60) & 0xFu;
+    } else {
+        return (satp >> 31) & 0x1u;
+    }
 }
 
-[[nodiscard]] inline constexpr auto satp_translation_enabled(Word satp) -> bool {
-    return satp_mode(satp) != 0;
+[[nodiscard]] inline constexpr auto satp_translation_enabled(Word satp, unsigned xlen = kXLenBits) -> bool {
+    return satp_mode(satp, xlen) != 0;
 }
 
-[[nodiscard]] inline constexpr auto satp_mode_supported(Word mode) -> bool {
-    if constexpr (kIsXLen64) {
-        return mode == 0 || mode == 8 || mode == 9;  // Bare, SV39, SV48
+[[nodiscard]] inline constexpr auto satp_mode_supported(Word mode, unsigned xlen = kXLenBits) -> bool {
+    if (xlen == 64) {
+        return mode == 0 || mode == 8 || mode == 9 || mode == 1;  // Bare, SV39, SV48, SV32 (compatibility)
     } else {
         return mode == 0 || mode == 1;  // Bare, SV32
     }
 }
 
-[[nodiscard]] inline constexpr auto satp_asid(Word satp) -> Word {
-    return (satp >> kSatpAsidShift) & kSatpAsidMask;
+[[nodiscard]] inline constexpr auto satp_asid(Word satp, unsigned xlen = kXLenBits) -> Word {
+    if (xlen == 64) {
+        return (satp >> 44) & 0xffffu;
+    } else {
+        return (satp >> 22) & 0x1ffu;
+    }
 }
 
-[[nodiscard]] inline constexpr auto satp_root_ppn(Word satp) -> Word {
-    return satp & kSatpRootPpnMask;
+[[nodiscard]] inline constexpr auto satp_root_ppn(Word satp, unsigned xlen = kXLenBits) -> Word {
+    if (xlen == 64) {
+        // Under SV32 mode on a 64-bit machine, we extract the 22-bit PPN.
+        // Otherwise, SV39/SV48 uses a 44-bit PPN.
+        if (satp_mode(satp, 64) == 1) {
+            return satp & 0x003fffffu;
+        }
+        return satp & 0x00000fffffffffffULL;
+    } else {
+        return satp & 0x003fffffu;
+    }
 }
 
 }  // namespace simrv::xlen

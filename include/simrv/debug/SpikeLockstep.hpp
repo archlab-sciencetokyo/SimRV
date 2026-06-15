@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "simrv/Define.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -43,7 +44,12 @@ namespace simrv::debug {
  * @return      Lowercase ISA string suitable for Spike's --isa= flag.
  */
 [[nodiscard]] inline auto spike_isa_string(CSRValue misa) -> std::string {
-    std::string s = kIsXLen64 ? "rv64" : "rv32";
+    unsigned xlen = 32;
+    if constexpr (kIsXLen64) {
+        const unsigned mxl = (misa >> 62) & 3;
+        xlen = (mxl == 1) ? 32 : 64;
+    }
+    std::string s = (xlen == 64) ? "rv64" : "rv32";
 
     // Check IMAFD bits for the 'G' shorthand
     const auto bit = [&](char c) -> bool {
@@ -58,12 +64,15 @@ namespace simrv::debug {
             if ((misa & (static_cast<CSRValue>(1) << i)) == 0) continue;
             const char c = static_cast<char>('a' + i);
             if (c == 'i' || c == 'm' || c == 'a' || c == 'f' || c == 'd') continue;
+            if (c == 's' || c == 'u') continue;
             s += c;
         }
     } else {
         for (int i = 0; i < 26; ++i) {
             if ((misa & (static_cast<CSRValue>(1) << i)) != 0) {
-                s += static_cast<char>('a' + i);
+                const char c = static_cast<char>('a' + i);
+                if (c == 's' || c == 'u') continue;
+                s += c;
             }
         }
     }
@@ -128,6 +137,9 @@ class SpikeLockstep {
      */
     [[nodiscard]] auto next_commit() -> std::optional<SpikeCommitRecord>;
 
+    /** @brief Reads the next commit from Spike (if not cached) and returns it. */
+    auto read_and_cache_next_commit() -> std::optional<SpikeCommitRecord>;
+
     /**
      * @brief Compare SimRV's committed state with the next Spike record.
      *
@@ -139,10 +151,16 @@ class SpikeLockstep {
      * @param icount  Instruction count (for diagnostics).
      * @return true if states match, false on divergence.
      */
-    auto compare_and_report(const simrv::core::ArchState& state, uint64_t icount) -> bool;
+    auto compare_and_report(const simrv::core::ArchState& state, Address current_pc, uint64_t icount) -> bool;
 
     /** @return True if a divergence has been detected and simulation should halt. */
     [[nodiscard]] bool should_halt() const { return should_halt_; }
+
+    /** Peek at a future commit record without consuming it. */
+    [[nodiscard]] auto peek_commit(std::size_t index) -> std::optional<SpikeCommitRecord>;
+
+    /** Determine if the current sc instruction succeeded based on Spike's future execution path. */
+    [[nodiscard]] auto determine_sc_success() -> std::optional<bool>;
 
    private:
     std::string spike_bin_;
@@ -159,6 +177,8 @@ class SpikeLockstep {
 
     // Line-level buffered reader for spike_stderr_
     std::string line_buf_;
+    std::vector<std::string> spike_history_;
+    std::vector<SpikeCommitRecord> cached_recs_;
 
     /** Read one '\n'-terminated line from Spike's stderr; returns empty on EOF. */
     [[nodiscard]] auto read_line() -> std::string;
@@ -168,10 +188,10 @@ class SpikeLockstep {
     parse_commit_line(const std::string& line, SpikeCommitRecord& rec) -> std::optional<SpikeCommitRecord>;
 
     /** Print a coloured divergence report. */
-    static void print_divergence(uint64_t icount, Address simrv_pc,
-                                 Address spike_pc,
-                                 const simrv::core::ArchState& simrv_state,
-                                 const SpikeCommitRecord& spike_rec);
+    void print_divergence(uint64_t icount, Address simrv_pc,
+                          Address spike_pc,
+                          const simrv::core::ArchState& simrv_state,
+                          const SpikeCommitRecord& spike_rec);
 };
 
 }  // namespace simrv::debug

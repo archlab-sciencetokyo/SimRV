@@ -12,6 +12,7 @@
 #include "simrv/core/Tracer.hpp"
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
+#include "simrv/debug/SymbolTable.hpp"
 #include "simrv/device/Console.hpp"
 #include "simrv/device/Disk.hpp"
 #include "simrv/device/Rtc.hpp"
@@ -56,19 +57,21 @@ class Machine {
     /// Finalize cycle for tohost checks only.
     void finalize_cycle_tohost();
     /// Stop the simulation loop.
-    void stop() { is_running_ = false; }
+    void stop() { is_running_ = false; is_shutdown_ = true; }
     /// Request system reboot.
     void request_reboot() { reboot_requested = true; is_running_ = false; }
 
     Counter tohost = 0;  // Host communication register (always 64-bit for HTIF).
     bool reboot_requested = false;  // Reboot requested flag.
     int exit_code = 0;             // Exit/status code of the simulation.
+    bool is_shutdown_ = false;     // System shutdown flag.
 
     // ========== Simulation Configuration Flags ==========
     bool s_appmode = false;        // Binary mode (start_pc=0, no OS)
     bool s_tuimode = false;        // Enable TUI monitor mode
     bool s_high_contrast = false;  // Enable high-contrast TUI mode
     bool s_debugmode = false;      // Enable debug logging in MMIO paths
+    bool s_debug_mode = false;     // Enable TUI debug diagnostics mode
     bool s_dlog_mode = false;      // Enable device request/response logging
     bool s_traplog_mode = false;   // Enable trap/SBI/exception logging
     bool s_use_disk = false;       // Enable disk image simulation
@@ -84,6 +87,7 @@ class Machine {
     uint16_t s_gdb_port      = 1234;       // GDB stub TCP port
     bool     s_lockstep_mode = false;      // Enable Spike lockstep co-simulation
     std::string s_spike_bin  = "spike";    // Path to Spike binary
+    std::string s_spike_elf;               // Path to Spike ELF image
 
     // ========== Simulation Control Parameters ==========
     Address s_start_pc = 0;                                  // Initial PC value
@@ -97,6 +101,7 @@ class Machine {
     // ========== ISA/Privilege Configuration ==========
     Address s_isatest_tohost = 0x80001000;   // ISA-test tohost RAM address
     CSRValue s_misa_profile = kMisaDefault;  // Selected MISA profile (without MXL)
+    unsigned int s_misa_xlen = 0;            // Selected MISA XLEN (32 or 64, or 0 if default)
 
     // ========== I/O and Logging ==========
     std::string s_fn_memimg;                             // Memory image filename
@@ -121,6 +126,7 @@ class Machine {
     // ========== Memory and Interconnect ==========
     Byte* mmem{};          // Pointer to main memory buffer
     Tracer tracer{*this};  // Tracing facility
+    simrv::debug::SymbolTable symbols;  // ELF debugging symbols
 
    private:
     std::unique_ptr<Byte, decltype(&std::free)> mmem_owner_{nullptr, &std::free};

@@ -4,7 +4,7 @@ project(SimRV LANGUAGES CXX)
 
 enable_testing()
 
-set(SIMRV_VERSION "2.0.0-beta.3")
+set(SIMRV_VERSION "2.0.0-beta.4")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -120,6 +120,7 @@ add_executable(SimRV
   src/tui/TuiComponents.cpp
   src/debug/GdbStub.cpp
   src/debug/SpikeLockstep.cpp
+  src/debug/SymbolTable.cpp
 )
 
 target_compile_features(SimRV PRIVATE cxx_std_23)
@@ -201,6 +202,7 @@ find_program(RISCV_OBJCOPY NAMES ${OBJCOPY_NAMES}
              DOC "Path to objcopy tool for binary extraction")
 find_program(RISCV_NM NAMES ${NM_NAMES}
              DOC "Path to nm tool for symbol lookup")
+find_program(SPIKE_BIN spike DOC "Path to Spike binary for lockstep co-simulation")
 
 set(ISA_WORK_DIR "${CMAKE_CURRENT_BINARY_DIR}/.isa_tmp")
 file(MAKE_DIRECTORY "${ISA_WORK_DIR}")
@@ -228,7 +230,7 @@ if(DEFINED ENV{SIMRV_APP_IMG})
 endif()
 
 if(DEFINED ENV{SIMRV_LINUX_MEM_IMG} AND DEFINED ENV{SIMRV_LINUX_DISK_IMG})
-  set(LINUX_BOOT_CMD $<TARGET_FILE:SimRV> -m $ENV{SIMRV_LINUX_MEM_IMG} -d $ENV{SIMRV_LINUX_DISK_IMG} -e 1000000)
+  set(LINUX_BOOT_CMD $<TARGET_FILE:SimRV> -m $ENV{SIMRV_LINUX_MEM_IMG} -D $ENV{SIMRV_LINUX_DISK_IMG} -e 1000000)
   if(DEFINED ENV{SIMRV_LINUX_DTB})
     list(APPEND LINUX_BOOT_CMD -c $ENV{SIMRV_LINUX_DTB})
   endif()
@@ -316,6 +318,28 @@ function(register_isa_test test_name is_smoke)
   )
 endfunction()
 
+function(register_lockstep_isa_test test_name)
+  add_test(NAME "isa-lockstep-${test_name}"
+    COMMAND ${CMAKE_COMMAND}
+      -D SIMRV_BIN=$<TARGET_FILE:SimRV>
+      -D ELF_PATH=${ISA_DIR}/${test_name}
+      -D OBJCOPY_BIN=${RISCV_OBJCOPY}
+      -D NM_BIN=${RISCV_NM}
+      -D WORK_DIR=${ISA_WORK_DIR}
+      -D TIMEOUT_SECS=20
+      -D END_INSNS=2000000
+      -D DEFAULT_TOHOST_ADDR=0x80001000
+      -D LOCKSTEP=TRUE
+      -D SPIKE_BIN=${SPIKE_BIN}
+      -P ${CMAKE_SOURCE_DIR}/scripts/RunIsaTest.cmake
+  )
+  set_tests_properties("isa-lockstep-${test_name}" PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    LABELS "gate;isa;lockstep;rv${SIMRV_XLEN}gc"
+    SKIP_RETURN_CODE 2
+  )
+endfunction()
+
 if(SIMRV_XLEN STREQUAL "64")
   set(SMOKE_LIST ${ISA_SMOKE_RV64GC})
 else()
@@ -325,6 +349,12 @@ endif()
 foreach(test_name IN LISTS SMOKE_LIST)
   register_isa_test("${test_name}" TRUE)
 endforeach()
+
+if(SPIKE_BIN)
+  foreach(test_name IN LISTS SMOKE_LIST)
+    register_lockstep_isa_test("${test_name}")
+  endforeach()
+endif()
 
 foreach(test_name IN LISTS ALL_ISA_TESTS)
   if(NOT test_name IN_LIST SMOKE_LIST)
@@ -388,9 +418,20 @@ add_custom_target(integration-gate
   USES_TERMINAL
 )
 
+if(SPIKE_BIN)
+  add_custom_target(lockstep-gate
+    COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR} --output-on-failure -L "lockstep"
+    DEPENDS SimRV
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Running RISC-V ISA tests in instruction-level lockstep with Spike..."
+    VERBATIM
+    USES_TERMINAL
+  )
+endif()
+
 add_custom_target(run-tui
   COMMAND $<TARGET_FILE:SimRV> -m ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/fw_payload.bin
-                               -d ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/root.bin
+                               -D ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/root.bin
                                -c ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/devicetree.dtb
                                -u
   DEPENDS SimRV
@@ -402,7 +443,7 @@ add_custom_target(run-tui
 
 add_custom_target(run-linux
   COMMAND $<TARGET_FILE:SimRV> -m ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/fw_payload.bin
-                               -d ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/root.bin
+                               -D ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/root.bin
                                -c ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/devicetree.dtb
   DEPENDS SimRV
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}

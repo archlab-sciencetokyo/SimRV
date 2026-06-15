@@ -92,6 +92,9 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
         } else {
             state_.pc = state_.pc + ((ctx.cinsn != 0u) ? 2 : 4);
         }
+        if (state_.regs.xlen == 32) {
+            state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+        }
         if (mask != 0) {
             raise_exception(kInterruptCauseBit | irq_num, ctx.pending_tval);
         }
@@ -121,6 +124,9 @@ void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
             state_.pc = ctx.jmp_pc;
         } else {
             state_.pc = state_.pc + ((ctx.cinsn != 0u) ? 2 : 4);
+        }
+        if (state_.regs.xlen == 32) {
+            state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
         }
     }
 }

@@ -10,6 +10,7 @@
 #include <vector>
 #include <memory>
 
+#include "simrv/xlen/Types.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
 
 namespace simrv::core {
@@ -30,6 +31,12 @@ enum class TuiRegPage {
     FPR,
     VEC,
     PIPELINE
+};
+
+enum class TuiRightPanelMode {
+    Terminal,
+    Log,
+    LiveTrace
 };
 
 /**
@@ -67,11 +74,17 @@ class Tui {
 
     void cycle_reg_page();
     void toggle_high_contrast();
+    void toggle_sakura_theme();
+    void cycle_right_panel_mode();
+    void record_instruction(Register pc, uint8_t op_id, uint8_t rd, Register rd_val, uint8_t rs1, Register rs1_val, uint8_t rs2, Register rs2_val, int64_t imm);
     void scroll(int lines);
     void reset_scroll();
     void scroll_regs(int lines);
     void reset_scroll_regs();
     [[nodiscard]] auto get_scroll_offset() const -> int { return scroll_offset_; }
+    [[nodiscard]] auto get_right_panel_mode() const -> TuiRightPanelMode { return right_panel_mode_; }
+    [[nodiscard]] auto get_pane_width() const -> int { return pane_width_cached_; }
+    [[nodiscard]] auto get_layout() const -> TuiLayout { return layout_; }
 
 
     void handle_mouse(int x, int y, int b);
@@ -85,9 +98,12 @@ class Tui {
 
     int pane_width_cached_ = 62;
     VirtualTerminal vt_;
+    VirtualTerminal vt_log_;
+    std::vector<std::string> trace_buffer_;
     std::vector<std::string> lines_to_draw_;
     bool paused_ = true;
     TuiLayout layout_ = TuiLayout::Split;
+    TuiRightPanelMode right_panel_mode_ = TuiRightPanelMode::Terminal;
     std::string status_override_;
     int scroll_offset_{0};
 

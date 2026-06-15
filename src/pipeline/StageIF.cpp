@@ -15,12 +15,15 @@
 namespace simrv::core {
 
 void CPU::run_fetch_stage(Machine& machine) {
+    if (state_.regs.xlen == 32) {
+        state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+    }
     auto& ctx = pipeline_context;
     ctx.tlb_miss = false;
     const bool split_page =
         ((state_.pc & ~simrv::memory::kPageMask) != ((state_.pc + 2) & ~simrv::memory::kPageMask));
     const bool translation_enabled =
-        state_.priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp);
+        state_.priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp, state_.regs.xlen);
 
     fetch_address_translate(machine);
 
@@ -48,13 +51,13 @@ void CPU::fetch_address_translate(Machine& /*machine*/) { /* address translation
     ctx.cpc = state_.pc;
 
     if (state_.priv == kPrivMachine ||
-        !simrv::xlen::satp_translation_enabled(state_.satp)) { /** No translation or protection **/
-        w_padr1 = w_vadr1;
-        w_padr2 = w_vadr2;
+        !simrv::xlen::satp_translation_enabled(state_.satp, state_.regs.xlen)) { /** No translation or protection **/
+        w_padr1 = (state_.regs.xlen == 32) ? (w_vadr1 & 0xFFFFFFFFULL) : w_vadr1;
+        w_padr2 = (state_.regs.xlen == 32) ? (w_vadr2 & 0xFFFFFFFFULL) : w_vadr2;
     } else {
         const bool split_page =
             ((w_vadr1 & ~simrv::memory::kPageMask) != (w_vadr2 & ~simrv::memory::kPageMask));
-        const Word current_asid = simrv::xlen::satp_asid(state_.satp);
+        const Word current_asid = simrv::xlen::satp_asid(state_.satp, state_.regs.xlen);
 
         TLBEntry* tlb_e1 =
             &tlb.inst_r.at((w_vadr1 >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1));
@@ -101,7 +104,7 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) { /* page walk an
 
         auto* mmu = machine.memory_.mmu();
         auto translate_res =
-            mmu->translate(w_vadr, PteAccess::Code, state_.priv, state_.mstatus, state_.satp);
+            mmu->translate(w_vadr, PteAccess::Code, state_.priv, state_.mstatus, state_.satp, state_.regs.xlen);
         auto chain_res = translate_res
             .and_then([&](Address phys) -> std::expected<void, TrapCause> {
                 w_padr = phys;
@@ -109,7 +112,7 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) { /* page walk an
                                                   (simrv::memory::kTlbSize - 1));
                 tlb_e1->v_addr = w_vadr & ~simrv::memory::kPageMask;  // update TLB entry
                 tlb_e1->p_addr = w_padr & ~simrv::memory::kPageMask;  // update TLB entry
-                tlb_e1->asid = simrv::xlen::satp_asid(state_.satp);
+                tlb_e1->asid = simrv::xlen::satp_asid(state_.satp, state_.regs.xlen);
                 tlb_e1->valid = true;
                 return {};
             })
@@ -219,7 +222,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
         simrv::pipeline::Decoder dec_temp(ir_l);
         if (!dec_temp.is_compressed()) {
             const bool translation_enabled =
-                state_.priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp);
+                state_.priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp, state_.regs.xlen);
             if (translation_enabled && ctx.padr2 == kWordAllOnes) {
                 fetch_resolve_page_walk(machine, 2);
             }
@@ -251,7 +254,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
     simrv::pipeline::Decoder dec_org(ctx.ir_org);
     bool const w_compressed = dec_org.is_compressed();
     Instruction const w_ir_tmp =
-        w_compressed ? simrv::pipeline::decompressInstruction(ctx.ir_org) : ctx.ir_org;
+        w_compressed ? simrv::pipeline::decompressInstruction(ctx.ir_org, state_.current_xlen() == 64) : ctx.ir_org;
 
     bool is_valid = true;
     if (simrv::compiler::unlikely(machine.s_misa_profile != kMisaDefault)) {
@@ -290,11 +293,14 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
 }
 
 void CPU::run_fetch_stage_baremetal(Machine& machine) {
+    if (state_.regs.xlen == 32) {
+        state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+    }
     auto& ctx = pipeline_context;
     ctx.tlb_miss = false;
     ctx.cpc = state_.pc;
-    ctx.padr1 = state_.pc;
-    ctx.padr2 = state_.pc + 2;
+    ctx.padr1 = (state_.regs.xlen == 32) ? (state_.pc & 0xFFFFFFFFULL) : state_.pc;
+    ctx.padr2 = (state_.regs.xlen == 32) ? ((state_.pc + 2) & 0xFFFFFFFFULL) : (state_.pc + 2);
 
     if (simrv::compiler::likely(ctx.padr1 < simrv::memory::kDramSize)) {
         const uint16_t h1 = simrv::memory::ram_read_fast(ctx.padr1, static_cast<Instruction>(Funct3::Lhu), machine.mmem);

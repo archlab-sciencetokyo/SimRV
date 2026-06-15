@@ -64,10 +64,21 @@ void Machine::run() {
 
         // ---- Spike lockstep post-cycle hook ----
         if (spike_lockstep && spike_lockstep->is_running()) {
-            spike_lockstep->compare_and_report(cpu.state(), cpu.e_icount);
+            spike_lockstep->compare_and_report(cpu.state(), cpu.pipeline_context.cpc, cpu.e_icount);
             if (spike_lockstep->should_halt()) {
                 simrv::log::error("Lockstep: halting on divergence");
                 is_running_ = false;
+            }
+        }
+
+        // ---- TUI Breakpoint Pause hook ----
+        if (s_tuimode && uart) {
+            const bool hit_ebreak =
+                (cpu.pipeline_context.opcode == Opcode::System) &&
+                (cpu.pipeline_context.funct12 ==
+                    static_cast<Word>(Funct12Priv::Ebreak));
+            if (hit_ebreak) {
+                uart->tui_pause_loop();
             }
         }
     }
@@ -82,6 +93,17 @@ void Machine::run_baremetal() {
 
     while (is_running_) {
         cpu.run_cycle_baremetal(*this);
+
+        // ---- TUI Breakpoint Pause hook ----
+        if (s_tuimode && uart) {
+            const bool hit_ebreak =
+                (cpu.pipeline_context.opcode == Opcode::System) &&
+                (cpu.pipeline_context.funct12 ==
+                    static_cast<Word>(Funct12Priv::Ebreak));
+            if (hit_ebreak) {
+                uart->tui_pause_loop();
+            }
+        }
 
         if (simrv::compiler::unlikely(tohost != 0)) {
             finalize_cycle_tohost();
@@ -181,6 +203,7 @@ void Machine::finalize_cycle() {
     }
     if (cpu.clint_mmio.mtime >= s_fincnt - 1) {
         simrv::log::info("finished by -e option");
+        is_shutdown_ = true;
         if (s_tuimode && uart && uart->tui()) {
             uart->tui_pause_loop();
         }
@@ -249,6 +272,7 @@ void Machine::finalize_cycle_tohost() {
             simrv::log::info("Program Halted (SUCCESS / PASS)");
         }
         exit_code = 0;
+        is_shutdown_ = true;
         if (s_tuimode && uart && uart->tui()) {
             uart->tui_pause_loop();
         }
@@ -263,6 +287,7 @@ void Machine::finalize_cycle_tohost() {
             simrv::log::error("Program Halted (FAIL / EXIT code={})", code);
         }
         exit_code = code == 0 ? 1 : code;
+        is_shutdown_ = true;
         if (s_tuimode && uart && uart->tui()) {
             uart->tui_pause_loop();
         }
