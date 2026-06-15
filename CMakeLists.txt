@@ -158,7 +158,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
 endif()
 
 # Enable native CPU optimizations (AVX, AVX2, etc.)
-option(SIMRV_ENABLE_NATIVE "Enable native compiler optimization (-march=native / -mtune=native)" ON)
+option(SIMRV_ENABLE_NATIVE "Enable native compiler optimization (-march=native / -mtune=native)" OFF)
 if(SIMRV_ENABLE_NATIVE)
   include(CheckCXXCompilerFlag)
   check_cxx_compiler_flag("-march=native" COMPILER_SUPPORTS_MARCH_NATIVE)
