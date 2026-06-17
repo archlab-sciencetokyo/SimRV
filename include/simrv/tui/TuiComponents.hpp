@@ -184,6 +184,7 @@ class StatusBar : public TuiWidget {
     void set_layout(TuiLayout layout) { layout_ = layout; }
     void set_pane_widths(int left, int right) { left_width_ = left; right_width_ = right; }
     void set_right_panel_mode(TuiRightPanelMode mode) { right_panel_mode_ = mode; }
+    void set_trace_enabled(bool enabled) { trace_enabled_ = enabled; }
 
     [[nodiscard]] auto render_row(int row_idx, int width) -> std::string override;
 
@@ -192,6 +193,7 @@ class StatusBar : public TuiWidget {
 
     simrv::core::Machine& machine_;
     bool paused_ = true;
+    bool trace_enabled_ = false;
     std::string status_override_;
     TuiRegPage active_page_ = TuiRegPage::GPR;
     TuiLayout layout_ = TuiLayout::Split;

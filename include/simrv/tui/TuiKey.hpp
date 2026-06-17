@@ -35,6 +35,8 @@ enum class TuiKey : uint8_t {
     P        = 'P',
     t        = 't',
     T        = 'T',
+    v        = 'v',
+    V        = 'V',
 };
 
 }  // namespace simrv::tui

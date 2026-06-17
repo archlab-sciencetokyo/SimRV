@@ -178,7 +178,9 @@ void CPU::run_cycle(Machine& machine) {
         clint_mmio.rtc_divider %= 10;
     }
 
-    if (machine.s_tuimode && machine.uart && machine.uart->tui()) {
+    if (machine.s_tuimode && machine.uart && machine.uart->tui() &&
+        (machine.uart->tui()->get_right_panel_mode() == simrv::tui::TuiRightPanelMode::LiveTrace ||
+         machine.uart->tui()->is_trace_enabled())) {
         auto op_id = static_cast<uint8_t>(pipeline_context.op_id);
         auto rd = static_cast<uint8_t>(pipeline_context.rd);
         auto rs1 = static_cast<uint8_t>(pipeline_context.rs1);

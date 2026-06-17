@@ -455,6 +455,10 @@ void Uart::tui_pause_loop() {
                 if (tui_) {
                     tui_->cycle_right_panel_mode();
                 }
+            } else if (key == simrv::tui::TuiKey::v || key == simrv::tui::TuiKey::V) {
+                if (tui_) {
+                    tui_->toggle_trace_enabled();
+                }
             } else if (key == simrv::tui::TuiKey::u || key == simrv::tui::TuiKey::U) {
                 if (tui_) {
                     tui_->scroll(5);

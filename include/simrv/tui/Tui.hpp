@@ -77,6 +77,8 @@ class Tui {
     void toggle_sakura_theme();
     void cycle_right_panel_mode();
     void record_instruction(Register pc, uint8_t op_id, uint8_t rd, Register rd_val, uint8_t rs1, Register rs1_val, uint8_t rs2, Register rs2_val, int64_t imm);
+    void toggle_trace_enabled();
+    [[nodiscard]] auto is_trace_enabled() const -> bool { return trace_enabled_; }
     void scroll(int lines);
     void reset_scroll();
     void scroll_regs(int lines);
@@ -102,6 +104,7 @@ class Tui {
     std::vector<std::string> trace_buffer_;
     std::vector<std::string> lines_to_draw_;
     bool paused_ = true;
+    bool trace_enabled_ = false;
     TuiLayout layout_ = TuiLayout::Split;
     TuiRightPanelMode right_panel_mode_ = TuiRightPanelMode::Terminal;
     std::string status_override_;

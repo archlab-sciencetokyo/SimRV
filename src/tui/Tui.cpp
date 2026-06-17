@@ -306,6 +306,7 @@ void Tui::render() {
     status_bar_->set_scroll_offset(scroll_offset_);
     status_bar_->set_pane_widths(left_pane_width, right_pane_width);
     status_bar_->set_right_panel_mode(right_panel_mode_);
+    status_bar_->set_trace_enabled(trace_enabled_);
 
     // Render loop
     std::string screen = "\033[?25l\033[H";
@@ -421,6 +422,11 @@ void Tui::cycle_right_panel_mode() {
         right_panel_mode_ = TuiRightPanelMode::Terminal;
     }
     scroll_offset_ = 0;
+    render();
+}
+
+void Tui::toggle_trace_enabled() {
+    trace_enabled_ = !trace_enabled_;
     render();
 }
 

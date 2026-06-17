@@ -373,9 +373,9 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
 
         std::string mode_label;
         if (right_panel_mode_ == TuiRightPanelMode::Terminal) {
-            mode_label = "Terminal";
+            mode_label = trace_enabled_ ? "Terminal [Trace ON]" : "Terminal";
         } else if (right_panel_mode_ == TuiRightPanelMode::Log) {
-            mode_label = "System Log";
+            mode_label = trace_enabled_ ? "System Log [Trace ON]" : "System Log";
         } else {
             mode_label = "Live Trace";
         }
@@ -427,7 +427,7 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         std::string footer_text;
         if (paused_) {
             footer_text =
-                " [s] Step | [c] Continue | [q] Quit | [r] Cycle Regs | [Tab] Cycle Layout | [u/d] Scroll | [h] Contrast ";
+                " [s] Step | [c] Continue | [q] Quit | [r] Cycle Regs | [Tab] Cycle Layout | [u/d] Scroll | [v] Trace | [h] Contrast ";
         } else {
             footer_text =
                 " [Ctrl-P] Pause | [Ctrl-Q] Quit | [Alt-L] Layout | [Alt-R] Regs | [Alt-U/D] Scroll | [Alt-H] Contrast ";
