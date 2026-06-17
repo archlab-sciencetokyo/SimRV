@@ -203,9 +203,6 @@ void CPU::execute_core(Machine& machine) {
                         break;
                     case Funct12Priv::Wfi:
                         ctx.tkn = false;
-                        if ((state_.mip & state_.mie) == 0) {
-                            std::this_thread::sleep_for(std::chrono::microseconds(100));
-                        }
                         break;
                     default:
                         if (ctx.funct7 == static_cast<Instruction>(Funct7Priv::SfenceVma)) {
