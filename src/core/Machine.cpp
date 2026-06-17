@@ -181,12 +181,12 @@ void Machine::finalize_cycle() {
             uart->refresh_tui();
         }
         if ((cpu.e_icount % 20000) == 0) {
-            uart->tui_update();
-            static auto last_tui_render = std::chrono::steady_clock::now();
+            static auto last_tui_update = std::chrono::steady_clock::now();
             auto now = std::chrono::steady_clock::now();
-            if (now - last_tui_render >= std::chrono::milliseconds(33)) {
+            if (now - last_tui_update >= std::chrono::milliseconds(33)) {
+                uart->tui_update();
                 uart->refresh_tui();
-                last_tui_render = now;
+                last_tui_update = now;
             }
         }
     } else if (uart) {
