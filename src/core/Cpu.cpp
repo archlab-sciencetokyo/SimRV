@@ -127,23 +127,15 @@ void CPU::run_cycle(Machine& machine) {
     } else {
         if (machine.s_high_performance) {
             auto* cached = decode_cache.lookup(state_.pc);
-            bool success = true;
             if (simrv::compiler::likely(cached != nullptr)) {
-                static_cast<pipeline::DecodedInstruction&>(pipeline_context) = *cached;
-                pipeline_context.tlb_miss = false;
-
-                fetch_operands(machine);
-                success = execute_stage(machine) &&
-                          memory_stage(machine) &&
-                          writeback_stage(machine) &&
-                          commit_stage(machine);
+                execute_cached_op_fast(machine, *cached);
             } else {
-                success = fetch_stage(machine, state_.pc) &&
-                          decode_stage(machine);
+                bool success = fetch_stage(machine, state_.pc) &&
+                              decode_stage(machine);
                 
                 if (success && !pipeline_context.pending_exception.has_value()) {
                     CachedOp op;
-                    static_cast<pipeline::DecodedInstruction&>(op) = pipeline_context;
+                    op.copy_from(pipeline_context);
                     decode_cache.insert(state_.pc, op);
                 }
 
@@ -153,11 +145,11 @@ void CPU::run_cycle(Machine& machine) {
                               writeback_stage(machine) &&
                               commit_stage(machine);
                 }
-            }
 
-            if (!success) {
-                const auto cause = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0));
-                raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
+                if (!success) {
+                    const auto cause = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0));
+                    raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
+                }
             }
         } else {
             if (!pipeline_task.handle) {
@@ -464,6 +456,298 @@ auto CPU::writeback_stage(Machine& machine) -> bool {
 auto CPU::commit_stage(Machine& machine) -> bool {
     run_commit_stage(machine);
     return !pipeline_context.pending_exception.has_value();
+}
+
+void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
+    // 1. Copy metadata to pipeline_context to support tracers and lockstep
+    pipeline_context.copy_from(op);
+    pipeline_context.tlb_miss = false;
+    pipeline_context.pending_exception = std::nullopt;
+    pipeline_context.pending_tval = 0;
+
+    // 2. Fetch operands
+    Register const rrs1 = state_.regs.read(op.rs1);
+    Register const rrs2 = state_.regs.read(op.rs2);
+
+    // 3. Execute, Memory, Writeback, Commit in a monolithic fast path
+    switch (op.opcode) {
+        case Opcode::Lui: {
+            if (op.rd != static_cast<RegId>(0)) {
+                state_.regs.write(op.rd, op.imm);
+            }
+            e_icount++;
+            if (op.cinsn) e_ccount++;
+            state_.pc += (op.cinsn ? 2 : 4);
+            if (state_.regs.xlen == 32) {
+                state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+            }
+            break;
+        }
+        case Opcode::Auipc: {
+            if (op.rd != static_cast<RegId>(0)) {
+                state_.regs.write(op.rd, state_.pc + op.imm);
+            }
+            e_icount++;
+            if (op.cinsn) e_ccount++;
+            state_.pc += (op.cinsn ? 2 : 4);
+            if (state_.regs.xlen == 32) {
+                state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+            }
+            break;
+        }
+        case Opcode::Jal: {
+            Register const next_pc = state_.pc + (op.cinsn ? 2 : 4);
+            pipeline_context.tkn = true;
+            pipeline_context.jmp_pc = state_.pc + op.imm;
+            if (op.rd != static_cast<RegId>(0)) {
+                state_.regs.write(op.rd, next_pc);
+            }
+            state_.pc = pipeline_context.jmp_pc;
+            e_icount++;
+            if (op.cinsn) e_ccount++;
+            if (state_.regs.xlen == 32) {
+                state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+            }
+            break;
+        }
+        case Opcode::Jalr: {
+            Register const next_pc = state_.pc + (op.cinsn ? 2 : 4);
+            pipeline_context.tkn = true;
+            pipeline_context.jmp_pc = rrs1 + op.imm;
+            if (op.rd != static_cast<RegId>(0)) {
+                state_.regs.write(op.rd, next_pc);
+            }
+            state_.pc = pipeline_context.jmp_pc;
+            e_icount++;
+            if (op.cinsn) e_ccount++;
+            if (state_.regs.xlen == 32) {
+                state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+            }
+            break;
+        }
+        case Opcode::Branch: {
+            bool const tkn = execute::ExecuteUnit::branchTaken(rrs1, rrs2, op.funct3);
+            pipeline_context.tkn = tkn;
+            pipeline_context.jmp_pc = state_.pc + op.imm;
+            state_.pc = tkn ? pipeline_context.jmp_pc : (state_.pc + (op.cinsn ? 2 : 4));
+            e_icount++;
+            if (op.cinsn) e_ccount++;
+            if (state_.regs.xlen == 32) {
+                state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+            }
+            break;
+        }
+        case Opcode::Op: {
+            Register const wb_data = execute::ExecuteUnit::aluInt(rrs1, rrs2, op.funct3, op.funct7);
+            if (op.rd != static_cast<RegId>(0)) {
+                state_.regs.write(op.rd, wb_data);
+            }
+            e_icount++;
+            if (op.cinsn) e_ccount++;
+            state_.pc += (op.cinsn ? 2 : 4);
+            if (state_.regs.xlen == 32) {
+                state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+            }
+            break;
+        }
+        case Opcode::OpImm: {
+            Word const funct7 = op.funct7 & ((op.funct3 == Funct3::Add) ? 0 : 0x20);
+            Register const wb_data = execute::ExecuteUnit::aluInt(rrs1, op.imm, op.funct3, funct7);
+            if (op.rd != static_cast<RegId>(0)) {
+                state_.regs.write(op.rd, wb_data);
+            }
+            e_icount++;
+            if (op.cinsn) e_ccount++;
+            state_.pc += (op.cinsn ? 2 : 4);
+            if (state_.regs.xlen == 32) {
+                state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+            }
+            break;
+        }
+        case Opcode::OpImm32: {
+            Word const funct7 = op.funct7 & ((enum_mask(op.funct3) == 0x5u) ? 0x20 : 0);
+            Register const wb_data = execute::ExecuteUnit::aluIntW(Opcode::OpImm32, rrs1, op.imm,
+                                                                 op.funct3, funct7);
+            if (op.rd != static_cast<RegId>(0)) {
+                state_.regs.write(op.rd, wb_data);
+            }
+            e_icount++;
+            if (op.cinsn) e_ccount++;
+            state_.pc += (op.cinsn ? 2 : 4);
+            if (state_.regs.xlen == 32) {
+                state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+            }
+            break;
+        }
+        case Opcode::Op32: {
+            Word const funct7 = op.funct7 & (((enum_mask(op.funct3) == 0x0u) ||
+                                              (enum_mask(op.funct3) == 0x5u))
+                                                 ? 0x21
+                                                 : 0x01);
+            Register const wb_data = execute::ExecuteUnit::aluIntW(Opcode::Op32, rrs1, rrs2,
+                                                                 op.funct3, funct7);
+            if (op.rd != static_cast<RegId>(0)) {
+                state_.regs.write(op.rd, wb_data);
+            }
+            e_icount++;
+            if (op.cinsn) e_ccount++;
+            state_.pc += (op.cinsn ? 2 : 4);
+            if (state_.regs.xlen == 32) {
+                state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+            }
+            break;
+        }
+        case Opcode::Load: {
+            Address const mem_addr = rrs1 + op.imm;
+            pipeline_context.mem_addr = mem_addr;
+            Register mem_rdata = 0;
+            bool handled = false;
+            const unsigned size_bytes = 1u << (static_cast<unsigned>(op.funct3) & 0x3u);
+            const bool crosses_page = ((mem_addr & simrv::memory::kPageMask) + size_bytes) > (1u << simrv::memory::kPageShift);
+            
+            if (simrv::compiler::likely(!crosses_page && (mem_addr & (size_bytes - 1u)) == 0)) {
+                const PrivilegeLevel eff_priv = effective_data_privilege();
+                const bool translation_enabled = (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp, state_.regs.xlen));
+                if (!translation_enabled) {
+                    if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr))) {
+                        mem_rdata = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(op.funct3), machine.memory_.mmu()->mmem());
+                        handled = true;
+                    }
+                } else {
+                    const Word current_asid = simrv::xlen::satp_asid(state_.satp, state_.regs.xlen);
+                    size_t const tlb_idx = (mem_addr >> 12) & 2047;
+                    const auto& entry = soft_tlb_read[tlb_idx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    if (simrv::compiler::likely(entry.valid && entry.vpn == (mem_addr >> 12) && entry.priv == eff_priv && 
+                        entry.asid == current_asid)) {
+                        mem_rdata = simrv::memory::ram_read_fast(entry.paddr_base + (mem_addr & 0xFFF), static_cast<Instruction>(op.funct3), machine.memory_.mmu()->mmem());
+                        handled = true;
+                    }
+                }
+            }
+
+            if (simrv::compiler::unlikely(!handled)) {
+                mem_rdata = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, mem_addr, op.funct3);
+                if (simrv::compiler::unlikely(pipeline_context.pending_exception.has_value())) {
+                    raise_exception(static_cast<TrapCause>(*pipeline_context.pending_exception), pipeline_context.pending_tval);
+                    return;
+                }
+            }
+
+            if (op.rd != static_cast<RegId>(0)) {
+                state_.regs.write(op.rd, mem_rdata);
+            }
+            e_icount++;
+            if (op.cinsn) e_ccount++;
+            state_.pc += (op.cinsn ? 2 : 4);
+            if (state_.regs.xlen == 32) {
+                state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+            }
+            break;
+        }
+        case Opcode::Store: {
+            Address const mem_addr = rrs1 + op.imm;
+            pipeline_context.mem_addr = mem_addr;
+            bool handled = false;
+            const unsigned size_bytes = 1u << (static_cast<unsigned>(op.funct3) & 0x3u);
+            const bool crosses_page = ((mem_addr & simrv::memory::kPageMask) + size_bytes) > (1u << simrv::memory::kPageShift);
+            
+            if (simrv::compiler::likely(!crosses_page && (mem_addr & (size_bytes - 1u)) == 0)) {
+                const PrivilegeLevel eff_priv = effective_data_privilege();
+                const bool translation_enabled = (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp, state_.regs.xlen));
+                if (!translation_enabled) {
+                    if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr) && 
+                        mem_addr != machine.s_isatest_tohost && mem_addr != 0x80001000 && mem_addr != 0x40008000 &&
+                        mem_addr != machine.s_isatest_tohost + 4 && mem_addr != 0x80001004 && mem_addr != 0x40008004)) {
+                        simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(op.funct3), machine.memory_.mmu()->mmem());
+                        handled = true;
+                    }
+                } else {
+                    const Word current_asid = simrv::xlen::satp_asid(state_.satp, state_.regs.xlen);
+                    size_t const tlb_idx = (mem_addr >> 12) & 2047;
+                    const auto& entry = soft_tlb_write[tlb_idx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    if (simrv::compiler::likely(entry.valid && entry.vpn == (mem_addr >> 12) && entry.priv == eff_priv && 
+                        entry.asid == current_asid)) {
+                        Address const paddr = entry.paddr_base + (mem_addr & 0xFFF);
+                        if (simrv::compiler::likely(simrv::memory::is_dram_addr(paddr) && 
+                            paddr != machine.s_isatest_tohost && paddr != 0x80001000 && paddr != 0x40008000 &&
+                            paddr != machine.s_isatest_tohost + 4 && paddr != 0x80001004 && paddr != 0x40008004)) {
+                            simrv::memory::ram_write_fast(paddr, rrs2, static_cast<Instruction>(op.funct3), machine.memory_.mmu()->mmem());
+                            handled = true;
+                        }
+                    }
+                }
+            }
+
+            if (simrv::compiler::unlikely(!handled)) {
+                simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, mem_addr, rrs2, op.funct3);
+                if (simrv::compiler::unlikely(pipeline_context.pending_exception.has_value())) {
+                    raise_exception(static_cast<TrapCause>(*pipeline_context.pending_exception), pipeline_context.pending_tval);
+                    return;
+                }
+            }
+
+            state_.reserved = 0;
+            e_icount++;
+            if (op.cinsn) e_ccount++;
+            state_.pc += (op.cinsn ? 2 : 4);
+            if (state_.regs.xlen == 32) {
+                state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+            }
+            break;
+        }
+        default: {
+            // Complex/infrequent instructions (System, Amo, LoadFp, StoreFp, OpFp, fused FP, etc.)
+            // Fallback to regular pipeline stage execution logic.
+            fetch_operands(machine);
+            bool success = execute_stage(machine) &&
+                           memory_stage(machine) &&
+                           writeback_stage(machine) &&
+                           commit_stage(machine);
+            if (!success) {
+                const auto cause = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0));
+                raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
+            }
+            return;
+        }
+    }
+
+    // 4. Handle pending interrupts (same check as commit_stage)
+    Word const pending_interrupts = state_.mip & state_.mie;
+    if (simrv::compiler::unlikely(pending_interrupts != 0u)) {
+        Word enable_interrupts = 0;
+        switch (state_.priv) {
+            case kPrivMachine: {
+                if ((state_.mstatus & enum_mask(MstatusBit::Mie)) != 0u) {
+                    enable_interrupts = ~state_.mideleg;
+                }
+                break;
+            }
+            case kPrivSupervisor: {
+                enable_interrupts = ~state_.mideleg;
+                if ((state_.mstatus & enum_mask(MstatusBit::Sie)) != 0u) {
+                    enable_interrupts |= state_.mideleg;
+                }
+                break;
+            }
+            case kPrivUser: {
+                enable_interrupts = ~0;
+                break;
+            }
+            default:
+                break;
+        }
+        Word const mask = pending_interrupts & enable_interrupts;
+        if (mask != 0u) {
+            Word irq_num = 32;
+            for (int i = 31; i >= 0; i--) {
+                if (((1u << i) & mask) != 0u) {
+                    irq_num = i;
+                    break;
+                }
+            }
+            raise_exception(kInterruptCauseBit | irq_num, 0);
+        }
+    }
 }
 
 }  // namespace simrv::core

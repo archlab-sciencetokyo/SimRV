@@ -23,6 +23,10 @@ struct DecodedInstruction {
     ImmValue imm = 0;
     std::optional<ExceptionCode> pending_exception;
     CSRValue pending_tval = 0;
+
+    constexpr void copy_from(const DecodedInstruction& other) {
+        *this = other;
+    }
 };
 
 } // namespace simrv::pipeline

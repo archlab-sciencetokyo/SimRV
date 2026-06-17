@@ -97,12 +97,7 @@ add_executable(SimRV
   src/execute/ExecuteUnitInt.cpp
   src/execute/ExecuteUnitFloat.cpp
   src/execute/ExecuteUnit.cpp
-  src/pipeline/StageIF.cpp
-  src/pipeline/StageID.cpp
-  src/pipeline/StageEX.cpp
-  src/pipeline/StageMEM.cpp
-  src/pipeline/StageWB.cpp
-  src/pipeline/StageCommit.cpp
+  src/pipeline/PipelineStages.cpp
   src/core/Cpu.cpp
   src/cache/ICache.cpp
   src/cache/DCache.cpp

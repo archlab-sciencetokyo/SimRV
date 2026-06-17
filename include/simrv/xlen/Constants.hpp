@@ -54,7 +54,7 @@ inline constexpr Word kPageOffsetMask = 0x00000fffu;
 
 [[nodiscard]] inline constexpr auto satp_mode(Word satp, unsigned xlen = kXLenBits) -> Word {
     if (xlen == 64) {
-        return (satp >> 60) & 0xFu;
+        return static_cast<Word>((static_cast<uint64_t>(satp) >> 60) & 0xFu);
     } else {
         return (satp >> 31) & 0x1u;
     }
@@ -74,7 +74,7 @@ inline constexpr Word kPageOffsetMask = 0x00000fffu;
 
 [[nodiscard]] inline constexpr auto satp_asid(Word satp, unsigned xlen = kXLenBits) -> Word {
     if (xlen == 64) {
-        return (satp >> 44) & 0xffffu;
+        return static_cast<Word>((static_cast<uint64_t>(satp) >> 44) & 0xffffu);
     } else {
         return (satp >> 22) & 0x1ffu;
     }
@@ -87,7 +87,7 @@ inline constexpr Word kPageOffsetMask = 0x00000fffu;
         if (satp_mode(satp, 64) == 1) {
             return satp & 0x003fffffu;
         }
-        return satp & 0x00000fffffffffffULL;
+        return static_cast<Word>(static_cast<uint64_t>(satp) & 0x00000fffffffffffULL);
     } else {
         return satp & 0x003fffffu;
     }

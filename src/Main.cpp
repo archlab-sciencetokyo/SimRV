@@ -194,13 +194,13 @@ struct ParsedMisa {
 auto parse_misa_profile(std::string_view value) -> std::expected<ParsedMisa, std::string> {
     // 1. Accept XLEN-agnostic profiles without warning
     if (iequals(value, "i")) {
-        return ParsedMisa{MisaProfile::I, 0};
+        return ParsedMisa{.profile = MisaProfile::I, .xlen = 0};
     }
     if (iequals(value, "imac")) {
-        return ParsedMisa{MisaProfile::IMAC, 0};
+        return ParsedMisa{.profile = MisaProfile::IMAC, .xlen = 0};
     }
     if (iequals(value, "gc")) {
-        return ParsedMisa{MisaProfile::GC, 0};
+        return ParsedMisa{.profile = MisaProfile::GC, .xlen = 0};
     }
 
     // 2. Accept rv32/rv64 prefixed options and validate constraints
@@ -239,7 +239,7 @@ auto parse_misa_profile(std::string_view value) -> std::expected<ParsedMisa, std
             return std::unexpected(std::format(
                 "cannot run a 64-bit MISA profile ({}) on a 32-bit simulator build", value));
         }
-        return ParsedMisa{profile, parsed_xlen};
+        return ParsedMisa{.profile = profile, .xlen = parsed_xlen};
     }
 
     const auto xlen_suffix = simrv::xlen::kIsXLen64 ? "64" : "32";
@@ -858,8 +858,7 @@ void set_options(simrv::core::Machine* m, int argc, char* const* argv) {
 
     switch (parsed->action) {
         case CliAction::ShowHelp:
-            usage(args[0],
-                  0);  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            usage(args.front(), 0);
         case CliAction::ShowVersion:
             std::println("{} (RV{})", simrv::buildinfo::kVersion, simrv::xlen::kXLenBits);
             std::exit(0);
