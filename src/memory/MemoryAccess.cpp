@@ -163,7 +163,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     if (eff_priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(cpu.state().satp, cpu.state().regs.xlen)) {
         p_addr = eff_vaddr;
     } else if (entry->valid && entry->asid == current_asid &&
-               entry->v_addr == (v_addr & ~simrv::memory::kPageMask)) {
+               entry->v_addr == (v_addr & ~simrv::memory::kPageMask) &&
+               entry->priv == eff_priv) {
         p_addr = entry->p_addr + (v_addr & simrv::memory::kPageMask);
     } else {
         cpu.pipeline_context.tlb_miss = true;
@@ -175,6 +176,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                 entry->v_addr = v_addr & ~simrv::memory::kPageMask;
                 entry->p_addr = p_addr & ~simrv::memory::kPageMask;
                 entry->asid = current_asid;
+                entry->priv = eff_priv;
                 entry->valid = true;
                 return {};
             })
@@ -305,7 +307,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
     if (eff_priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(cpu.state().satp, cpu.state().regs.xlen)) {
         p_addr = eff_vaddr;
     } else if (entry->valid && entry->asid == current_asid &&
-               entry->v_addr == (v_addr & ~simrv::memory::kPageMask)) {
+               entry->v_addr == (v_addr & ~simrv::memory::kPageMask) &&
+               entry->priv == eff_priv) {
         p_addr = entry->p_addr + (v_addr & simrv::memory::kPageMask);
     } else {
         cpu.pipeline_context.tlb_miss = true;
@@ -317,6 +320,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
                 entry->v_addr = v_addr & ~simrv::memory::kPageMask;
                 entry->p_addr = p_addr & ~simrv::memory::kPageMask;
                 entry->asid = current_asid;
+                entry->priv = eff_priv;
                 entry->valid = true;
                 return {};
             })

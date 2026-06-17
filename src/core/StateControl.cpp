@@ -285,7 +285,6 @@ void TrapController::mret(ArchState& state, Tlb& tlb) {
         state.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state.pc)));
     }
     state.reserved = 0;
-    tlb.flush();
 }
 
 void TrapController::sret(ArchState& state, Tlb& tlb) {
@@ -315,7 +314,6 @@ void TrapController::sret(ArchState& state, Tlb& tlb) {
         state.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state.pc)));
     }
     state.reserved = 0;
-    tlb.flush();
 }
 
 namespace {
@@ -383,7 +381,6 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
 
     if (cpu.sbi.handle_ecall(cause)) {
         state.reserved = 0;
-        cpu.TLB_flush();
         cpu.pipeline_context.pending_exception = std::nullopt;
         cpu.pipeline_context.pending_tval = 0;
         return;
@@ -446,7 +443,6 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
         state.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state.pc)));
     }
     state.reserved = 0;
-    cpu.TLB_flush();
     cpu.pipeline_context.pending_exception = std::nullopt;
     cpu.pipeline_context.pending_tval = 0;
 

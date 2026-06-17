@@ -15,6 +15,7 @@ struct TLBEntry {
     Address v_addr{};
     Address p_addr{};
     Word asid{};
+    PrivilegeLevel priv = PrivilegeLevel::User;
     bool valid{false};
 };
 
