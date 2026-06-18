@@ -49,6 +49,9 @@ regression_logs/
 Testing/
 
 # Generated documentation
-docs/
+# Unignore markdown documentation files (except NOTEBOOK_LM.md)
+!docs/*.md
+# Keep NOTEBOOK_LM.md ignored
+docs/NOTEBOOK_LM.md
 trace/
 log/
