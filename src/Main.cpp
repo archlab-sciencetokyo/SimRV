@@ -31,13 +31,14 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/xlen/Types.hpp"
+#include "simrv/util/InstructionExplainer.hpp"
 
 static auto parse_scaled_u64(std::string_view num, uint64_t& out) -> bool;
 static auto parse_u32_base0(std::string_view num, uint32_t& out) -> bool;
 
 namespace {
 
-enum class CliAction : uint8_t { Run, ShowHelp, ShowVersion };
+enum class CliAction : uint8_t { Run, ShowHelp, ShowVersion, ExplainInstruction };
 
 struct RuntimeOptions {
     std::string fn_memimg;
@@ -81,6 +82,7 @@ struct RuntimeOptions {
 
     std::string fn_cpuconfig;
     bool debug_mode = false;
+    uint32_t explain_inst_val = 0;
 };
 
 struct ParseResult {
@@ -360,6 +362,21 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             continue;
         }
 
+        // Instruction Explainer CLI option
+        if (arg == "--explain-inst" || arg == "--explain") {
+            auto value = next_argument(args, i, arg);
+            if (!value) {
+                return std::unexpected(value.error());
+            }
+            uint32_t raw_val = 0;
+            if (!parse_u32_base0(*value, raw_val)) {
+                return std::unexpected(std::format("invalid hex instruction value for --explain-inst: {}", *value));
+            }
+            result.action = CliAction::ExplainInstruction;
+            result.options.explain_inst_val = raw_val;
+            continue;
+        }
+
         // OpenSBI flag - ignored with deprecation warning
         if (arg == "-B" || arg == "--opensbi") {
             simrv::log::warn(
@@ -535,7 +552,10 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
         return std::unexpected(std::format("unknown option : {}", arg));
     }
 
-    if (result.options.fn_memimg.empty() && !result.options.tuimode) {
+    if (result.options.fn_memimg.empty() && !result.options.tuimode &&
+        result.action != CliAction::ExplainInstruction &&
+        result.action != CliAction::ShowHelp &&
+        result.action != CliAction::ShowVersion) {
         return std::unexpected("-m/--image <FILE> is required to load a memory image");
     }
 
@@ -742,6 +762,9 @@ void set_start_time(simrv::core::Machine& machine) {
     std::print(stdout,
                "  {}-d, --debug-mode{}            Enable TUI debug diagnostics panel/symbol view\n",
                style(kBrightGreen), style(kReset));
+    std::print(stdout,
+               "  {}--explain-inst {}{}<HEX>{} Explain a hex instruction and exit (e.g., 0x005202b3)\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout, "  {}--version{}         Show compiler-injected version details and exit\n",
                style(kBrightGreen), style(kReset));
     std::print(
@@ -861,6 +884,9 @@ void set_options(simrv::core::Machine* m, int argc, char* const* argv) {
             usage(args.front(), 0);
         case CliAction::ShowVersion:
             std::println("{} (RV{})", simrv::buildinfo::kVersion, simrv::xlen::kXLenBits);
+            std::exit(0);
+        case CliAction::ExplainInstruction:
+            simrv::util::explain_instruction(parsed->options.explain_inst_val);
             std::exit(0);
         case CliAction::Run:
             break;

@@ -30,7 +30,8 @@ enum class TuiRegPage {
     GPR,
     FPR,
     VEC,
-    PIPELINE
+    PIPELINE,
+    EXPLAIN
 };
 
 enum class TuiRightPanelMode {
@@ -73,6 +74,8 @@ class Tui {
     }
 
     void cycle_reg_page();
+    void set_reg_page(TuiRegPage page);
+    void toggle_explain();
     void toggle_high_contrast();
     void toggle_sakura_theme();
     void cycle_right_panel_mode();
@@ -87,6 +90,7 @@ class Tui {
     [[nodiscard]] auto get_right_panel_mode() const -> TuiRightPanelMode { return right_panel_mode_; }
     [[nodiscard]] auto get_pane_width() const -> int { return pane_width_cached_; }
     [[nodiscard]] auto get_layout() const -> TuiLayout { return layout_; }
+    void adjust_left_pane_width(int delta);
 
 
     void handle_mouse(int x, int y, int b);
@@ -99,6 +103,7 @@ class Tui {
     std::unique_ptr<StatusBar> status_bar_;
 
     int pane_width_cached_ = 62;
+    int user_left_pane_width_{-1};
     VirtualTerminal vt_;
     VirtualTerminal vt_log_;
     std::vector<std::string> trace_buffer_;

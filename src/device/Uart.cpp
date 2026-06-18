@@ -443,6 +443,18 @@ void Uart::tui_pause_loop() {
                 if (tui_) {
                     tui_->cycle_reg_page();
                 }
+            } else if (key == simrv::tui::TuiKey::e || key == simrv::tui::TuiKey::E) {
+                if (tui_) {
+                    tui_->toggle_explain();
+                }
+            } else if (key == simrv::tui::TuiKey::LeftBracket) {
+                if (tui_) {
+                    tui_->adjust_left_pane_width(-2);
+                }
+            } else if (key == simrv::tui::TuiKey::RightBracket) {
+                if (tui_) {
+                    tui_->adjust_left_pane_width(2);
+                }
             } else if (key == simrv::tui::TuiKey::h || key == simrv::tui::TuiKey::H) {
                 if (tui_) {
                     tui_->toggle_high_contrast();

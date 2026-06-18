@@ -22,7 +22,10 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/tui/Tui.hpp"
-#include "simrv/tui/TuiComponents.hpp"
+#include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/RegisterPane.hpp"
+#include "simrv/tui/ConsolePane.hpp"
+#include "simrv/tui/StatusBar.hpp"
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
 #include "simrv/pipeline/Decoder.hpp"
@@ -59,16 +62,6 @@ void handle_sigwinch(int sig) {
     (void)sig;
     g_resized = 1;
 }
-
-auto make_repeated_string(const std::string& pattern, int count) -> std::string {
-    std::string s;
-    for (int i = 0; i < count; ++i) {
-        s += pattern;
-    }
-    return s;
-}
-
-
 
 }  // namespace
 
@@ -223,7 +216,9 @@ void Tui::render() {
         kips_ = 0;
     }
 
-    int left_pane_width = (term_width > 120) ? 75 : 62;
+    int left_pane_width = user_left_pane_width_ > 0 ? user_left_pane_width_ : ((term_width > 120) ? 75 : 62);
+    if (left_pane_width < 40) left_pane_width = 40;
+    if (left_pane_width > term_width - 10) left_pane_width = std::max(40, term_width - 10);
     pane_width_cached_ = left_pane_width;
     int right_pane_width = term_width - left_pane_width - 3;
     if (layout_ == TuiLayout::FullConsole) {
@@ -236,6 +231,22 @@ void Tui::render() {
 
     // StatusBar renders 3 header lines + 2 footer lines, and we add 1 separator before footer.
     int num_rows = term_height - 6;
+
+    // Limit scrollback to the existing rows to prevent clearing the screen completely
+    {
+        int total = 0;
+        if (right_panel_mode_ == TuiRightPanelMode::Terminal) {
+            total = vt_.get_lines_count();
+        } else if (right_panel_mode_ == TuiRightPanelMode::Log) {
+            total = vt_log_.get_lines_count();
+        } else {
+            total = static_cast<int>(trace_buffer_.size());
+        }
+        int max_scroll = std::max(0, total - num_rows);
+        if (scroll_offset_ > max_scroll) {
+            scroll_offset_ = max_scroll;
+        }
+    }
 
     // Rebuild visible console/log/trace rows depending on panel mode.
     lines_to_draw_.clear();
@@ -387,11 +398,31 @@ void Tui::cycle_reg_page() {
             rp = TuiRegPage::PIPELINE;
     } else if (rp == TuiRegPage::VEC) {
         rp = TuiRegPage::PIPELINE;
+    } else if (rp == TuiRegPage::PIPELINE) {
+        rp = TuiRegPage::EXPLAIN;
     } else {
         rp = TuiRegPage::GPR;
     }
     reg_pane_->set_page(rp);
     render();
+}
+
+void Tui::set_reg_page(TuiRegPage page) {
+    if (reg_pane_) {
+        reg_pane_->set_page(page);
+        render();
+    }
+}
+
+void Tui::toggle_explain() {
+    if (reg_pane_) {
+        if (reg_pane_->get_page() == TuiRegPage::EXPLAIN) {
+            reg_pane_->set_page(TuiRegPage::GPR);
+        } else {
+            reg_pane_->set_page(TuiRegPage::EXPLAIN);
+        }
+        render();
+    }
 }
 
 void Tui::toggle_high_contrast() {
@@ -612,6 +643,19 @@ void Tui::update_cache() {
     if (reg_pane_) {
         reg_pane_->update_cache();
     }
+}
+
+void Tui::adjust_left_pane_width(int delta) {
+    struct winsize w{};
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w); // NOLINT(cppcoreguidelines-pro-type-vararg)
+    int term_width = w.ws_col;
+
+    int current = user_left_pane_width_ > 0 ? user_left_pane_width_ : ((term_width > 120) ? 75 : 62);
+    current += delta;
+    if (current < 40) current = 40;
+    if (current > term_width - 10) current = std::max(40, term_width - 10);
+    user_left_pane_width_ = current;
+    render();
 }
 
 }  // namespace simrv::tui

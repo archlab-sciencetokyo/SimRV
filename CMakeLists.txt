@@ -112,10 +112,14 @@ add_executable(SimRV
   src/device/Uart.cpp
   src/device/Power.cpp
   src/tui/Tui.cpp
-  src/tui/TuiComponents.cpp
+  src/tui/TuiTheme.cpp
+  src/tui/RegisterPane.cpp
+  src/tui/ConsolePane.cpp
+  src/tui/StatusBar.cpp
   src/debug/GdbStub.cpp
   src/debug/SpikeLockstep.cpp
   src/debug/SymbolTable.cpp
+  src/util/InstructionExplainer.cpp
 )
 
 target_compile_features(SimRV PRIVATE cxx_std_23)
