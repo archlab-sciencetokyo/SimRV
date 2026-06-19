@@ -292,7 +292,7 @@ void explain_instruction(uint32_t raw_inst) {
     }
 
     // Extract core fields
-    simrv::pipeline::Opcode const op = static_cast<simrv::pipeline::Opcode>(inst & 0x7F);
+    auto const op = static_cast<simrv::pipeline::Opcode>(inst & 0x7F);
     uint32_t const rd_val = (inst >> 7) & 0x1F;
     uint32_t const funct3_val = (inst >> 12) & 0x7;
     uint32_t const rs1_val = (inst >> 15) & 0x1F;
@@ -433,7 +433,7 @@ void explain_instruction(uint32_t raw_inst) {
 
     } else if (fmt == InstFormat::U) {
         uint32_t const imm_bits = (inst >> 12) & 0xFFFFF;
-        int32_t const imm_val = static_cast<int32_t>(inst & 0xFFFFF000);
+        auto const imm_val = static_cast<int32_t>(inst & 0xFFFFF000);
 
         std::println("Visual Bit Fields Breakdown (U-Type format):");
         std::println("  31                                12 11        7 6           0");
@@ -566,19 +566,14 @@ void explain_instruction(uint32_t raw_inst) {
                 assembly = std::format("{}.aqrl {}, {}, ({})", mnemonic, rd_str, rs2_str, rs1_str);
             } else if (is_fp_sys) {
                 // Conversions and Moves
-                if (op_id == FMV_X_W || op_id == FMV_X_D) {
+                if ((op_id == FMV_X_W || op_id == FMV_X_D) ||
+                    (op_id == FCLASS_S || op_id == FCLASS_D) ||
+                    (op_id >= FCVT_W_S && op_id <= FCVT_LU_S) ||
+                    (op_id >= FCVT_W_D && op_id <= FCVT_LU_D)) {
                     assembly = std::format("{} {}, {}", mnemonic, rd_str, frs1_str);
-                } else if (op_id == FMV_W_X || op_id == FMV_D_X) {
-                    assembly = std::format("{} {}, {}", mnemonic, frd_str, rs1_str);
-                } else if (op_id == FCLASS_S || op_id == FCLASS_D) {
-                    assembly = std::format("{} {}, {}", mnemonic, rd_str, frs1_str);
-                } else if (op_id >= FCVT_W_S && op_id <= FCVT_LU_S) {
-                    assembly = std::format("{} {}, {}", mnemonic, rd_str, frs1_str);
-                } else if (op_id >= FCVT_W_D && op_id <= FCVT_LU_D) {
-                    assembly = std::format("{} {}, {}", mnemonic, rd_str, frs1_str);
-                } else if (op_id >= FCVT_S_W && op_id <= FCVT_S_LU) {
-                    assembly = std::format("{} {}, {}", mnemonic, frd_str, rs1_str);
-                } else if (op_id >= FCVT_D_W && op_id <= FCVT_D_LU) {
+                } else if ((op_id == FMV_W_X || op_id == FMV_D_X) ||
+                           (op_id >= FCVT_S_W && op_id <= FCVT_S_LU) ||
+                           (op_id >= FCVT_D_W && op_id <= FCVT_D_LU)) {
                     assembly = std::format("{} {}, {}", mnemonic, frd_str, rs1_str);
                 }
             } else if (is_dst_fp || is_src_fp) {
@@ -645,7 +640,7 @@ void explain_instruction(uint32_t raw_inst) {
             std::string const rs2_str = ABI_NAMES[rs2_val];
             assembly = std::format("{} {}, {}, {}", mnemonic, rs1_str, rs2_str, imm_val);
         } else if (fmt == InstFormat::U) {
-            int32_t const imm_val = static_cast<int32_t>(inst & 0xFFFFF000);
+            auto const imm_val = static_cast<int32_t>(inst & 0xFFFFF000);
             std::string const rd_str = ABI_NAMES[rd_val];
             assembly = std::format("{} {}, 0x{:X}", mnemonic, rd_str, static_cast<uint32_t>(imm_val));
         } else if (fmt == InstFormat::J) {

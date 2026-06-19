@@ -544,10 +544,7 @@ void Tui::record_instruction(Register pc, uint8_t op_id, uint8_t rd, Register rd
         rs1_fp = false;
     }
 
-    if (is_lui) {
-        inst_str = std::format("{} {}, {:#x}", op_name, get_reg_name(rd, rd_fp), static_cast<uint32_t>(imm) >> 12);
-        side_effect = std::format("{} = {:#x}", get_reg_name(rd, rd_fp), rd_val);
-    } else if (is_auipc) {
+    if (is_lui || is_auipc) {
         inst_str = std::format("{} {}, {:#x}", op_name, get_reg_name(rd, rd_fp), static_cast<uint32_t>(imm) >> 12);
         side_effect = std::format("{} = {:#x}", get_reg_name(rd, rd_fp), rd_val);
     } else if (is_jal) {
@@ -557,14 +554,11 @@ void Tui::record_instruction(Register pc, uint8_t op_id, uint8_t rd, Register rd
             inst_str = std::format("{} {}, {:#x}", op_name, get_reg_name(rd, rd_fp), pc + imm);
             side_effect = std::format("{} = {:#x}", get_reg_name(rd, rd_fp), rd_val);
         }
-    } else if (is_jalr) {
+    } else if (is_jalr || is_load) {
         inst_str = std::format("{} {}, {}({})", op_name, get_reg_name(rd, rd_fp), imm, get_reg_name(rs1, rs1_fp));
         side_effect = std::format("{} = {:#x}", get_reg_name(rd, rd_fp), rd_val);
     } else if (is_branch) {
         inst_str = std::format("{} {}, {}, {:#x}", op_name, get_reg_name(rs1, rs1_fp), get_reg_name(rs2, rs2_fp), pc + imm);
-    } else if (is_load) {
-        inst_str = std::format("{} {}, {}({})", op_name, get_reg_name(rd, rd_fp), imm, get_reg_name(rs1, rs1_fp));
-        side_effect = std::format("{} = {:#x}", get_reg_name(rd, rd_fp), rd_val);
     } else if (is_store) {
         inst_str = std::format("{} {}, {}({})", op_name, get_reg_name(rs2, rs2_fp), imm, get_reg_name(rs1, rs1_fp));
         side_effect = std::format("mem[{:#x}] = {:#x}", rs1_val + imm, rs2_val);

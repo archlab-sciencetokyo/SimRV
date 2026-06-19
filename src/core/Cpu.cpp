@@ -627,7 +627,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
 
             if (simrv::compiler::unlikely(!handled)) {
                 mem_rdata = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, mem_addr, op.funct3);
-                if (simrv::compiler::unlikely(pipeline_context.pending_exception.has_value())) {
+                if (pipeline_context.pending_exception.has_value()) {
                     raise_exception(static_cast<TrapCause>(*pipeline_context.pending_exception), pipeline_context.pending_tval);
                     return;
                 }
@@ -680,7 +680,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
 
             if (simrv::compiler::unlikely(!handled)) {
                 simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, mem_addr, rrs2, op.funct3);
-                if (simrv::compiler::unlikely(pipeline_context.pending_exception.has_value())) {
+                if (pipeline_context.pending_exception.has_value()) {
                     raise_exception(static_cast<TrapCause>(*pipeline_context.pending_exception), pipeline_context.pending_tval);
                     return;
                 }

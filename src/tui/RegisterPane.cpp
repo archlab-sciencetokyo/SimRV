@@ -946,7 +946,7 @@ auto RegisterPane::get_explain_rows(int width) -> std::vector<std::string> {
 
     auto& ctx = cpu.pipeline_context;
     if (ctx.cpc != st.pc) {
-        simrv::core::CPU& mutable_cpu = const_cast<simrv::core::CPU&>(cpu);
+        auto& mutable_cpu = const_cast<simrv::core::CPU&>(cpu);
         auto saved_pc = st.pc;
         bool fetch_success = mutable_cpu.fetch_stage(machine_, st.pc);
         if (fetch_success) {
