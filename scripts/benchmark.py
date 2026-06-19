@@ -73,6 +73,7 @@ def detect_xlen(simrv_bin):
 def parse_simrv_output(output):
     instrs = None
     kips = None
+    sim_time = None
     
     for line in output.splitlines():
         if "Executed instructions" in line:
@@ -97,7 +98,14 @@ def parse_simrv_output(output):
                         kips = val * 1000.0
                     else:
                         kips = val
-    return instrs, kips
+
+        if "Elapsed time (real)" in line:
+            parts = line.split(":")
+            if len(parts) > 1:
+                match = re.search(r'([\d.]+)\s+sec', parts[1])
+                if match:
+                    sim_time = float(match.group(1))
+    return instrs, kips, sim_time
 
 def calculate_stats(data_list):
     if not data_list:
@@ -144,6 +152,12 @@ def print_stats_table(simrv_stats, spike_stats, test_name, runs, insts):
     print(f"  Min / Max          | {simrv_stats['time']['min']:>5.2f}/{simrv_stats['time']['max']:<4.2f}  | {spike_stats['time']['min']:>5.2f}/{spike_stats['time']['max']:<4.2f}")
     print(f"  Std Dev            | {simrv_stats['time']['stddev']:>10.4f}   | {spike_stats['time']['stddev']:>10.4f}")
     print(f"---------------------+--------------+--------------")
+    
+    # Sim execution time and overhead (SimRV only)
+    if 'sim_time' in simrv_stats and 'overhead' in simrv_stats:
+        print(f"{BOLD}{'Sim Time (seconds)':<20}{RESET} | {simrv_stats['sim_time']['mean']:>10.4f}   | {'N/A':^12}")
+        print(f"{BOLD}{'Overhead (seconds)':<20}{RESET} | {simrv_stats['overhead']['mean']:>10.4f}   | {'N/A':^12}")
+        print(f"---------------------+--------------+--------------")
     
     # Wall-clock Speed KIPS
     print(f"{BOLD}{'Wall Speed (KIPS)':<20}{RESET} |              | ")
@@ -290,6 +304,7 @@ def main():
     print(f"Runs         : {args.runs} | Limit: {args.limit} | Timeout: {args.timeout}s")
     
     simrv_times = []
+    simrv_sim_times = []
     simrv_speeds = []
     simrv_instrs = None
     
@@ -320,7 +335,7 @@ def main():
                 print(f"ERROR: SimRV failed with exit code {res.returncode}. See {log_file}", file=sys.stderr)
                 sys.exit(1)
                 
-            insts, kips = parse_simrv_output(res.stdout + "\n" + res.stderr)
+            insts, kips, sim_time = parse_simrv_output(res.stdout + "\n" + res.stderr)
             if kips is None:
                 print(f"ERROR: Could not parse simulation speed from SimRV output. See {log_file}", file=sys.stderr)
                 sys.exit(1)
@@ -328,6 +343,10 @@ def main():
             elapsed = end_t - start_t
             simrv_times.append(elapsed)
             simrv_speeds.append(kips)
+            if sim_time is not None:
+                simrv_sim_times.append(sim_time)
+            else:
+                simrv_sim_times.append(0.0)
             if insts:
                 simrv_instrs = insts
                 
@@ -351,8 +370,10 @@ def main():
             simrv_wall_speeds = [(simrv_instrs / t) / 1000.0 for t in simrv_times]
         simrv_stats = {
             "time": calculate_stats(simrv_times),
+            "sim_time": calculate_stats(simrv_sim_times),
             "sim_speed": calculate_stats(simrv_speeds),
-            "wall_speed": calculate_stats(simrv_wall_speeds)
+            "wall_speed": calculate_stats(simrv_wall_speeds),
+            "overhead": calculate_stats([wall - sim for wall, sim in zip(simrv_times, simrv_sim_times)])
         }
     else:
         print(f"\nRunning Spike...")
@@ -396,8 +417,10 @@ def main():
 
         simrv_stats = {
             "time": calculate_stats(simrv_times),
+            "sim_time": calculate_stats(simrv_sim_times),
             "sim_speed": calculate_stats(simrv_speeds),
-            "wall_speed": calculate_stats(simrv_wall_speeds)
+            "wall_speed": calculate_stats(simrv_wall_speeds),
+            "overhead": calculate_stats([wall - sim for wall, sim in zip(simrv_times, simrv_sim_times)])
         }
         spike_stats = {
             "time": calculate_stats(spike_times),

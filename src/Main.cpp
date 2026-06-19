@@ -261,13 +261,320 @@ auto effective_misa_profile(const RuntimeOptions& options) -> MisaProfile {
     return MisaProfile::GC;
 }
 
+auto is_image_option(std::string_view arg) -> bool {
+    return arg == "-m" || arg == "-k" || arg == "-i" || arg == "--image" || arg == "--kernel";
+}
+
+auto is_disk_option(std::string_view arg) -> bool {
+    return arg == "-D" || arg == "--disk";
+}
+
+auto is_fdt_option(std::string_view arg) -> bool {
+    return arg == "-f" || arg == "--fdt" || arg == "--dtb" || arg == "-c";
+}
+
+auto is_traplog_option(std::string_view arg) -> bool {
+    return arg == "--trap-log" || arg == "-P";
+}
+
+auto is_steps_option(std::string_view arg) -> bool {
+    return arg == "-s" || arg == "--steps" || arg == "-e";
+}
+
+auto is_timer_option(std::string_view arg) -> bool {
+    return arg == "-t" || arg == "--timer" || arg == "-l";
+}
+
+auto is_tohost_addr_option(std::string_view arg) -> bool {
+    return arg == "-H" || arg == "--tohost-addr";
+}
+
+auto is_trace_range_option(std::string_view arg) -> bool {
+    return arg == "--trace-range" || arg == "-r";
+}
+
+auto is_trace_pc_period_option(std::string_view arg) -> bool {
+    return arg == "--trace-pc-period" || arg == "-q";
+}
+
+auto is_dump_init_option(std::string_view arg) -> bool {
+    return arg == "--dump-init" || arg == "-I";
+}
+
+auto is_baremetal_option(std::string_view arg) -> bool {
+    return arg == "-b" || arg == "--baremetal" || arg == "-a";
+}
+
+auto is_ca_option(std::string_view arg) -> bool {
+    return arg == "--ca" || arg == "--cycle-accurate" || arg == "-C" || arg == "--high-accuracy" || arg == "--accuracy-mode";
+}
+
+auto is_ia_option(std::string_view arg) -> bool {
+    return arg == "--ia" || arg == "--high-performance" || arg == "--perf-mode";
+}
+
+auto is_tui_option(std::string_view arg) -> bool {
+    return arg == "--tui" || arg == "-u";
+}
+
+auto is_high_contrast_option(std::string_view arg) -> bool {
+    return arg == "--high-contrast" || arg == "--contrast";
+}
+
+auto is_explain_inst_option(std::string_view arg) -> bool {
+    return arg == "--explain-inst" || arg == "--explain";
+}
+
+auto is_opensbi_option(std::string_view arg) -> bool {
+    return arg == "-B" || arg == "--opensbi";
+}
+
+auto is_debug_mode_option(std::string_view arg) -> bool {
+    return arg == "-d" || arg == "--debug-mode";
+}
+
+auto is_log_mmio_option(std::string_view arg) -> bool {
+    return arg == "--log-mmio" || arg == "-M";
+}
+
+auto is_instmix_option(std::string_view arg) -> bool {
+    return arg == "--instmix" || arg == "-x";
+}
+
+auto is_trace_bpred_option(std::string_view arg) -> bool {
+    return arg == "--trace-bpred" || arg == "-w";
+}
+
+auto is_tohost_monitor_option(std::string_view arg) -> bool {
+    return arg == "-T" || arg == "--tohost-monitor";
+}
+
+auto is_debug_option(std::string_view arg) -> bool {
+    return arg == "-g" || arg == "-v" || arg == "--debug" || arg == "--verbose";
+}
+
+auto is_gdb_port_option(std::string_view arg) -> bool {
+    return arg == "--gdb-port" || arg == "--port" || arg == "-p";
+}
+
+auto is_gdb_option(std::string_view arg) -> bool {
+    return arg == "--gdb" || arg == "-G";
+}
+
+auto is_help_option(std::string_view arg) -> bool {
+    return arg == "-h" || arg == "--help";
+}
+
+auto needs_memory_image(const ParseResult& result) -> bool {
+    return result.options.fn_memimg.empty() && !result.options.tuimode &&
+           result.action != CliAction::ExplainInstruction &&
+           result.action != CliAction::ShowHelp &&
+           result.action != CliAction::ShowVersion;
+}
+
+auto parse_file_options(std::string_view arg, std::span<char* const> args, std::size_t& i, RuntimeOptions& options)
+    -> std::expected<bool, std::string> {
+    if (is_image_option(arg)) {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.fn_memimg = std::string(*value);
+        return true;
+    }
+    if (is_disk_option(arg)) {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.fn_dskimg = std::string(*value);
+        options.use_disk = true;
+        return true;
+    }
+    if (is_fdt_option(arg)) {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.fn_dvtree = std::string(*value);
+        return true;
+    }
+    if (arg == "--cpu-config") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.fn_cpuconfig = std::string(*value);
+        return true;
+    }
+    if (is_traplog_option(arg)) {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.fn_traplog = std::string(*value);
+        options.traplog_mode = true;
+        return true;
+    }
+    return false;
+}
+
+auto parse_execution_options(std::string_view arg, std::span<char* const> args, std::size_t& i, RuntimeOptions& options)
+    -> std::expected<bool, std::string> {
+    if (is_steps_option(arg)) {
+        auto value = parse_scaled_required(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.fincnt = *value;
+        return true;
+    }
+    if (is_timer_option(arg)) {
+        auto value = parse_scaled_required(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.enabletimer = *value;
+        return true;
+    }
+    if (is_tohost_addr_option(arg)) {
+        auto value = parse_u32_required(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.isatest_tohost = *value;
+        return true;
+    }
+    if (is_trace_range_option(arg)) {
+        auto trace = parse_trace_window(options, args, i);
+        if (!trace) return std::unexpected(trace.error());
+        return true;
+    }
+    if (is_trace_pc_period_option(arg)) {
+        auto value = parse_scaled_required(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.strace = *value;
+        return true;
+    }
+    if (is_dump_init_option(arg)) {
+        auto value = parse_scaled_required(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.memimg = *value;
+        return true;
+    }
+    return false;
+}
+
+auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::size_t& i, ParseResult& result)
+    -> std::expected<bool, std::string> {
+    if (arg == "--misa") {
+        auto value = next_argument(args, i, "--misa");
+        if (!value) return std::unexpected(value.error());
+        auto parsed_misa = parse_misa_profile(*value);
+        if (!parsed_misa) return std::unexpected(parsed_misa.error());
+        result.options.misa_profile = parsed_misa->profile;
+        result.options.misa_xlen = parsed_misa->xlen;
+        result.options.misa_override = true;
+        return true;
+    }
+    if (is_baremetal_option(arg)) {
+        result.options.start_pc = 0;
+        result.options.appmode = true;
+        return true;
+    }
+    if (is_ca_option(arg)) {
+        result.options.cycle_accurate = true;
+        result.options.high_performance = false;
+        return true;
+    }
+    if (is_ia_option(arg)) {
+        result.options.cycle_accurate = false;
+        result.options.high_performance = true;
+        return true;
+    }
+    return false;
+}
+
+auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::size_t& i, ParseResult& result)
+    -> std::expected<bool, std::string> {
+    if (is_tui_option(arg)) {
+        result.options.tuimode = true;
+        return true;
+    }
+    if (is_high_contrast_option(arg)) {
+        result.options.high_contrast = true;
+        return true;
+    }
+    if (is_explain_inst_option(arg)) {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        uint32_t raw_val = 0;
+        if (!parse_u32_base0(*value, raw_val)) {
+            return std::unexpected(std::format("invalid hex instruction value for --explain-inst: {}", *value));
+        }
+        result.action = CliAction::ExplainInstruction;
+        result.options.explain_inst_val = raw_val;
+        return true;
+    }
+    if (is_opensbi_option(arg)) {
+        simrv::log::warn(
+            "Option '{}' is deprecated. OpenSBI is automatically enabled when a device tree is loaded.",
+            arg);
+        return true;
+    }
+    if (is_debug_mode_option(arg)) {
+        result.options.debug_mode = true;
+        return true;
+    }
+    if (is_log_mmio_option(arg)) {
+        result.options.dlog_mode = true;
+        return true;
+    }
+    if (is_instmix_option(arg)) {
+        result.options.use_mix = true;
+        return true;
+    }
+    return false;
+}
+
+auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args, std::size_t& i, RuntimeOptions& options)
+    -> std::expected<bool, std::string> {
+    if (is_trace_bpred_option(arg)) {
+        options.bp_trace = true;
+        return true;
+    }
+    if (is_tohost_monitor_option(arg)) {
+        options.isatest = true;
+        return true;
+    }
+    if (is_debug_option(arg)) {
+        options.debugmode = true;
+        return true;
+    }
+    if (is_gdb_option(arg)) {
+        options.gdb_mode = true;
+        return true;
+    }
+    if (is_gdb_port_option(arg)) {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        uint64_t port_val = 0;
+        if (!parse_scaled_u64(*value, port_val) || port_val == 0 || port_val > 65535) {
+            return std::unexpected(std::format("invalid GDB port value for {}", arg));
+        }
+        options.gdb_port = static_cast<uint16_t>(port_val);
+        return true;
+    }
+    if (arg == "--lockstep") {
+        options.lockstep_mode = true;
+        return true;
+    }
+    if (arg == "--spike-bin") {
+        auto value = next_argument(args, i, "--spike-bin");
+        if (!value) return std::unexpected(value.error());
+        options.spike_bin = std::string(*value);
+        return true;
+    }
+    if (arg == "--spike-elf") {
+        auto value = next_argument(args, i, "--spike-elf");
+        if (!value) return std::unexpected(value.error());
+        options.spike_elf = std::string(*value);
+        return true;
+    }
+    return false;
+}
+
 auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResult, std::string> {
     ParseResult result{};
 
     for (std::size_t i = 1; i < args.size(); ++i) {
         std::string_view const arg =
             args[i];  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        if (arg == "-h" || arg == "--help") {
+        if (is_help_option(arg)) {
             result.action = CliAction::ShowHelp;
             return result;
         }
@@ -276,286 +583,35 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             return result;
         }
 
-        // Memory Image
-        if (arg == "-m" || arg == "-k" || arg == "-i" || arg == "--image" || arg == "--kernel") {
-            auto value = next_argument(args, i, arg);
-            if (!value) {
-                return std::unexpected(value.error());
-            }
-            result.options.fn_memimg = std::string(*value);
-            continue;
-        }
+        // Try parsing file options
+        auto res_file = parse_file_options(arg, args, i, result.options);
+        if (!res_file) return std::unexpected(res_file.error());
+        if (*res_file) continue;
 
-        // Disk Image
-        if (arg == "-D" || arg == "--disk") {
-            auto value = next_argument(args, i, arg);
-            if (!value) {
-                return std::unexpected(value.error());
-            }
-            result.options.fn_dskimg = std::string(*value);
-            result.options.use_disk = true;
-            continue;
-        }
+        // Try parsing execution options
+        auto res_exec = parse_execution_options(arg, args, i, result.options);
+        if (!res_exec) return std::unexpected(res_exec.error());
+        if (*res_exec) continue;
 
-        // FDT/DTB
-        if (arg == "-f" || arg == "--fdt" || arg == "--dtb" || arg == "-c") {
-            auto value = next_argument(args, i, arg);
-            if (!value) {
-                return std::unexpected(value.error());
-            }
-            result.options.fn_dvtree = std::string(*value);
-            continue;
-        }
+        // Try parsing mode options
+        auto res_mode = parse_mode_options(arg, args, i, result);
+        if (!res_mode) return std::unexpected(res_mode.error());
+        if (*res_mode) continue;
 
-        // Steps limit
-        if (arg == "-s" || arg == "--steps" || arg == "-e") {
-            auto value = parse_scaled_required(args, i, arg);
-            if (!value) {
-                return std::unexpected(value.error());
-            }
-            result.options.fincnt = *value;
-            continue;
-        }
+        // Try parsing TUI options
+        auto res_tui = parse_tui_options(arg, args, i, result);
+        if (!res_tui) return std::unexpected(res_tui.error());
+        if (*res_tui) continue;
 
-        // Timer limit
-        if (arg == "-t" || arg == "--timer" || arg == "-l") {
-            auto value = parse_scaled_required(args, i, arg);
-            if (!value) {
-                return std::unexpected(value.error());
-            }
-            result.options.enabletimer = *value;
-            continue;
-        }
-
-        // Custom tohost address (HTIF)
-        if (arg == "-H" || arg == "--tohost-addr") {
-            auto value = parse_u32_required(args, i, arg);
-            if (!value) {
-                return std::unexpected(value.error());
-            }
-            result.options.isatest_tohost = *value;
-            continue;
-        }
-
-        // Trace Window / Range
-        if (arg == "--trace-range" || arg == "-r") {
-            auto trace = parse_trace_window(result.options, args, i);
-            if (!trace) {
-                return std::unexpected(trace.error());
-            }
-            continue;
-        }
-
-        // MISA profile
-        if (arg == "--misa") {
-            auto value = next_argument(args, i, "--misa");
-            if (!value) {
-                return std::unexpected(value.error());
-            }
-            auto parsed_misa = parse_misa_profile(*value);
-            if (!parsed_misa) {
-                return std::unexpected(parsed_misa.error());
-            }
-            result.options.misa_profile = parsed_misa->profile;
-            result.options.misa_xlen = parsed_misa->xlen;
-            result.options.misa_override = true;
-            continue;
-        }
-
-        // Instruction Explainer CLI option
-        if (arg == "--explain-inst" || arg == "--explain") {
-            auto value = next_argument(args, i, arg);
-            if (!value) {
-                return std::unexpected(value.error());
-            }
-            uint32_t raw_val = 0;
-            if (!parse_u32_base0(*value, raw_val)) {
-                return std::unexpected(std::format("invalid hex instruction value for --explain-inst: {}", *value));
-            }
-            result.action = CliAction::ExplainInstruction;
-            result.options.explain_inst_val = raw_val;
-            continue;
-        }
-
-        // OpenSBI flag - ignored with deprecation warning
-        if (arg == "-B" || arg == "--opensbi") {
-            simrv::log::warn(
-                "Option '{}' is deprecated. OpenSBI is automatically enabled when a device tree is "
-                "loaded.",
-                arg);
-            continue;
-        }
-
-        // Branch trace
-        if (arg == "--trace-bpred" || arg == "-w") {
-            result.options.bp_trace = true;
-            continue;
-        }
-
-        // HTIF monitor
-        if (arg == "-T" || arg == "--tohost-monitor") {
-            result.options.isatest = true;
-            continue;
-        }
-
-        // Debug mode
-        if (arg == "-g" || arg == "-v" || arg == "--debug" || arg == "--verbose") {
-            result.options.debugmode = true;
-            continue;
-        }
-
-        // TUI Debug diagnostics mode
-        if (arg == "-d" || arg == "--debug-mode") {
-            result.options.debug_mode = true;
-            continue;
-        }
-
-        // MMIO logging
-        if (arg == "--log-mmio" || arg == "-M") {
-            result.options.dlog_mode = true;
-            continue;
-        }
-
-        // Trap logging file
-        if (arg == "--trap-log" || arg == "-P") {
-            auto value = next_argument(args, i, arg);
-            if (!value) {
-                return std::unexpected(value.error());
-            }
-            result.options.fn_traplog = std::string(*value);
-            result.options.traplog_mode = true;
-            continue;
-        }
-
-        // Instruction Mix report
-        if (arg == "--instmix" || arg == "-x") {
-            result.options.use_mix = true;
-            continue;
-        }
-
-        // Baremetal mode
-        if (arg == "-b" || arg == "--baremetal" || arg == "-a") {
-            result.options.start_pc = 0;
-            result.options.appmode = true;
-            continue;
-        }
-
-        // Trace period PC
-        if (arg == "--trace-pc-period" || arg == "-q") {
-            auto value = parse_scaled_required(args, i, arg);
-            if (!value) {
-                return std::unexpected(value.error());
-            }
-            result.options.strace = *value;
-            continue;
-        }
-
-        // Dump initial state
-        if (arg == "--dump-init" || arg == "-I") {
-            auto value = parse_scaled_required(args, i, arg);
-            if (!value) {
-                return std::unexpected(value.error());
-            }
-            result.options.memimg = *value;
-            continue;
-        }
-
-        // TUI dashboard
-        if (arg == "--tui" || arg == "-u") {
-            result.options.tuimode = true;
-            continue;
-        }
-
-        // High-contrast TUI mode
-        if (arg == "--high-contrast" || arg == "--contrast") {
-            result.options.high_contrast = true;
-            continue;
-        }
-
-        // Shorthands for cycle-accurate
-        if (arg == "--ca") {
-            result.options.cycle_accurate = true;
-            result.options.high_performance = false;
-            continue;
-        }
-
-        // Shorthands for instruction-accurate / high-performance
-        if (arg == "--ia") {
-            result.options.cycle_accurate = false;
-            result.options.high_performance = true;
-            continue;
-        }
-
-        // Cycle-accurate simulation mode
-        if (arg == "--cycle-accurate" || arg == "-C") {
-            result.options.cycle_accurate = true;
-            result.options.high_performance = false;
-            continue;
-        }
-
-        // High-accuracy mode
-        if (arg == "--high-accuracy" || arg == "--accuracy-mode") {
-            result.options.cycle_accurate = true;
-            result.options.high_performance = false;
-            continue;
-        }
-
-        // High-performance mode
-        if (arg == "--high-performance" || arg == "--perf-mode") {
-            result.options.cycle_accurate = false;
-            result.options.high_performance = true;
-            continue;
-        }
-
-        // ---- Debug / co-simulation ----
-        if (arg == "--gdb" || arg == "-G") {
-            result.options.gdb_mode = true;
-            continue;
-        }
-        if (arg == "--gdb-port" || arg == "--port" || arg == "-p") {
-            auto value = next_argument(args, i, arg);
-            if (!value) return std::unexpected(value.error());
-            uint64_t port_val = 0;
-            if (!parse_scaled_u64(*value, port_val) || port_val == 0 || port_val > 65535) {
-                return std::unexpected(std::format("invalid GDB port value for {}", arg));
-            }
-            result.options.gdb_port = static_cast<uint16_t>(port_val);
-            continue;
-        }
-        if (arg == "--lockstep") {
-            result.options.lockstep_mode = true;
-            continue;
-        }
-        if (arg == "--spike-bin") {
-            auto value = next_argument(args, i, "--spike-bin");
-            if (!value) return std::unexpected(value.error());
-            result.options.spike_bin = std::string(*value);
-            continue;
-        }
-        if (arg == "--spike-elf") {
-            auto value = next_argument(args, i, "--spike-elf");
-            if (!value) return std::unexpected(value.error());
-            result.options.spike_elf = std::string(*value);
-            continue;
-        }
-
-        // CPU configuration file
-        if (arg == "--cpu-config") {
-            auto value = next_argument(args, i, arg);
-            if (!value) {
-                return std::unexpected(value.error());
-            }
-            result.options.fn_cpuconfig = std::string(*value);
-            continue;
-        }
+        // Try parsing debug/cosrv options
+        auto res_debug = parse_debug_cosrv_options(arg, args, i, result.options);
+        if (!res_debug) return std::unexpected(res_debug.error());
+        if (*res_debug) continue;
 
         return std::unexpected(std::format("unknown option : {}", arg));
     }
 
-    if (result.options.fn_memimg.empty() && !result.options.tuimode &&
-        result.action != CliAction::ExplainInstruction &&
-        result.action != CliAction::ShowHelp &&
-        result.action != CliAction::ShowVersion) {
+    if (needs_memory_image(result)) {
         return std::unexpected("-m/--image <FILE> is required to load a memory image");
     }
 

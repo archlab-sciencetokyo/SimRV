@@ -225,11 +225,11 @@ SimRV codebase metrics are monitored using static analysis tools (`lizard`). The
 
 ### Top 5 Most Complex Functions
 The cyclomatic complexity (CCN) hot-spots in the simulator are:
-1. `parse_command_line` (in `Main.cpp`) - **CCN: 101**, NLOC: 238 (Simulator command-line parser)
-2. `simrv::util::get_description` (in `InstructionExplainer.cpp`) - **CCN: 93**, NLOC: 98 (Instruction educational behavior desc decoder)
-3. `simrv::util::explain_instruction` (in `InstructionExplainer.cpp`) - **CCN: 90**, NLOC: 358 (Instruction disassembly explainer)
-4. `simrv::core::CPU::execute_core` (in `PipelineStages.cpp`) - **CCN: 80**, NLOC: 247 (Pipeline stage instruction execution)
-5. `simrv::execute::ExecuteUnit::opFp` (in `ExecuteUnitFloat.cpp`) - **CCN: 77**, NLOC: 297 (Floating-point execution unit)
+1. `simrv::util::get_description` (in `InstructionExplainer.cpp`) - **CCN: 93**, NLOC: 98 (Instruction educational behavior desc decoder)
+2. `simrv::util::explain_instruction` (in `InstructionExplainer.cpp`) - **CCN: 90**, NLOC: 358 (Instruction disassembly explainer)
+3. `simrv::core::CPU::execute_core` (in `PipelineStages.cpp`) - **CCN: 80**, NLOC: 247 (Pipeline stage instruction execution)
+4. `simrv::execute::ExecuteUnit::opFp` (in `ExecuteUnitFloat.cpp`) - **CCN: 77**, NLOC: 297 (Floating-point execution unit)
+5. `simrv::tui::Tui::record_instruction` (in `Tui.cpp`) - **CCN: 72**, NLOC: 133 (TUI instruction execution/trace recording)
 
 These metrics provide guidelines for identifying components that could benefit from future refactoring and simplification.
 

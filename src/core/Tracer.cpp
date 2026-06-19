@@ -76,7 +76,7 @@ void Tracer::dump_init_artifacts() {
         simrv::log::info("file init_mem.txt was generated after {} cycle", cpu->clint_mmio.mtime);
     }
 
-    {
+    if (sector != nullptr) {
         std::ofstream out("trace/init_dsk.txt");
         for (Word i = 0; i < simrv::virtio::kDiskSize; ++i) {
             out << std::hex << static_cast<unsigned>(std::to_integer<uint8_t>(sector[i])) << '\n';

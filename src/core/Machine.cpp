@@ -7,6 +7,7 @@
 #include "simrv/core/Logger.hpp"
 #include "simrv/device/Power.hpp"
 #include "simrv/device/Uart.hpp"
+#include "simrv/memory/MemoryUtil.hpp"
 
 #include <array>
 #include <chrono>
@@ -176,7 +177,7 @@ void Machine::prepare_cycle() {
  * @brief Apply end-of-cycle termination checks and optional trace outputs.
  */
 void Machine::finalize_cycle() {
-    if (s_tuimode) {
+    if (simrv::compiler::unlikely(s_tuimode)) {
         if (simrv::tui::g_resized) {
             uart->refresh_tui();
         }
@@ -190,18 +191,19 @@ void Machine::finalize_cycle() {
             }
         }
     } else if (uart) {
-        if ((cpu.clint_mmio.mtime % 10000) == 0) {
+        // Optimization: Use bitwise AND mask instead of modulo to avoid division instruction
+        if (simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
             uart->non_tui_poll_input();
         }
     }
 
-    if (s_strace != 0 && cpu.clint_mmio.mtime >= s_strace) {
+    if (simrv::compiler::unlikely(s_strace != 0 && cpu.clint_mmio.mtime >= s_strace)) {
         tracer.emit_periodic_pc_trace(cpu.clint_mmio.mtime, cpu.pipeline_context.cpc);
     }
-    if (cpu.clint_mmio.mtime >= s_trace_begin && cpu.clint_mmio.mtime <= s_trace_end) {
+    if (simrv::compiler::unlikely(cpu.clint_mmio.mtime >= s_trace_begin && cpu.clint_mmio.mtime <= s_trace_end)) {
         tracer.write_trace_snapshot();
     }
-    if (cpu.clint_mmio.mtime >= s_fincnt - 1) {
+    if (simrv::compiler::unlikely(cpu.clint_mmio.mtime >= s_fincnt - 1)) {
         simrv::log::info("finished by -e option");
         is_shutdown_ = true;
         if (s_tuimode && uart && uart->tui()) {
@@ -209,7 +211,7 @@ void Machine::finalize_cycle() {
         }
         is_running_ = false;
     }
-    if (s_bp_trace) {
+    if (simrv::compiler::unlikely(s_bp_trace)) {
         tracer.emit_branch_prediction_trace(cpu.clint_mmio.mtime, cpu.pipeline_context.cpc,
                                             cpu.pipeline_context.jmp_pc,
                                             cpu.pipeline_context.opcode, cpu.pipeline_context.tkn);
@@ -261,6 +263,66 @@ void Machine::finalize_cycle_tohost() {
             is_running_ = false;
             tohost = 0;
             return;
+        } else {
+            // HTIF Syscall handling: payload is a pointer to the syscall block in guest DRAM
+            if (payload >= 0x80000000ULL && payload < (0x80000000ULL + memory::kDramSize)) {
+                const Address masked_payload = payload & simrv::memory::kDramMask;
+                uint64_t syscall_num = 0;
+                uint64_t arg0 = 0;
+                uint64_t arg1 = 0;
+                uint64_t arg2 = 0;
+
+                std::memcpy(&syscall_num, mmem + masked_payload + 0, 8);
+                std::memcpy(&arg0, mmem + masked_payload + 8, 8);
+                std::memcpy(&arg1, mmem + masked_payload + 16, 8);
+                std::memcpy(&arg2, mmem + masked_payload + 24, 8);
+
+                if (syscall_num == 64) { // SYS_write
+                    const Address buf_masked = arg1 & simrv::memory::kDramMask;
+                    for (uint64_t i = 0; i < arg2; ++i) {
+                        char ch = static_cast<char>(mmem[buf_masked + i]);
+                        if (s_tuimode && uart && uart->tui()) {
+                            uart->tui()->handle_char_write(ch);
+                        } else {
+                            std::print("{}", ch);
+                        }
+                    }
+                    if (!s_tuimode) {
+                        std::fflush(stdout);
+                    }
+
+                    // Write success response (bytes written) to fromhost
+                    const Address fromhost_addr = (s_isatest_tohost != 0 ? s_isatest_tohost : 0x80001000) + 8;
+                    const Address fromhost_masked = fromhost_addr & simrv::memory::kDramMask;
+                    uint64_t resp = arg2;
+                    std::memcpy(mmem + fromhost_masked, &resp, 8);
+                    tohost = 0;
+                    return;
+                } else if (syscall_num == 93) { // SYS_exit
+                    const int code = static_cast<int>(arg0);
+                    if (s_isatest) {
+                        if (code == 0) {
+                            simrv::log::info("ISA TEST PASS");
+                        } else {
+                            simrv::log::error("ISA TEST FAIL code={}", code);
+                        }
+                    } else {
+                        if (code == 0) {
+                            simrv::log::info("Program Halted (SUCCESS / PASS)");
+                        } else {
+                            simrv::log::error("Program Halted (FAIL / EXIT code={})", code);
+                        }
+                    }
+                    exit_code = code;
+                    is_shutdown_ = true;
+                    if (s_tuimode && uart && uart->tui()) {
+                        uart->tui_pause_loop();
+                    }
+                    is_running_ = false;
+                    tohost = 0;
+                    return;
+                }
+            }
         }
     }
 

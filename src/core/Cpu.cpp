@@ -173,8 +173,13 @@ void CPU::run_cycle(Machine& machine) {
     clint_mmio.mcycle += step_cycles;
     clint_mmio.rtc_divider += static_cast<int>(step_cycles);
     if (clint_mmio.rtc_divider >= 10) {
-        clint_mmio.mtime += clint_mmio.rtc_divider / 10;
-        clint_mmio.rtc_divider %= 10;
+        if (clint_mmio.rtc_divider < 20) {
+            clint_mmio.mtime += 1;
+            clint_mmio.rtc_divider -= 10;
+        } else {
+            clint_mmio.mtime += clint_mmio.rtc_divider / 10;
+            clint_mmio.rtc_divider %= 10;
+        }
     }
 
     if (machine.s_tuimode && machine.uart && machine.uart->tui() &&
@@ -593,8 +598,8 @@ void CPU::execute_cached_op32(CachedOp& op, Register rrs1, Register rrs2) {
 
 auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Register& out_val) -> bool {
     const unsigned size_bytes = 1u << (static_cast<unsigned>(funct3) & 0x3u);
-    const bool crosses_page = ((mem_addr & simrv::memory::kPageMask) + size_bytes) > (1u << simrv::memory::kPageShift);
-    if (simrv::compiler::unlikely(crosses_page || (mem_addr & (size_bytes - 1u)) != 0)) {
+    const unsigned alignment_mask = size_bytes - 1u;
+    if (simrv::compiler::unlikely((mem_addr & alignment_mask) != 0)) {
         return false;
     }
     const PrivilegeLevel eff_priv = effective_data_privilege();
@@ -619,8 +624,8 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
 
 auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Register rrs2) -> bool {
     const unsigned size_bytes = 1u << (static_cast<unsigned>(funct3) & 0x3u);
-    const bool crosses_page = ((mem_addr & simrv::memory::kPageMask) + size_bytes) > (1u << simrv::memory::kPageShift);
-    if (simrv::compiler::unlikely(crosses_page || (mem_addr & (size_bytes - 1u)) != 0)) {
+    const unsigned alignment_mask = size_bytes - 1u;
+    if (simrv::compiler::unlikely((mem_addr & alignment_mask) != 0)) {
         return false;
     }
     const PrivilegeLevel eff_priv = effective_data_privilege();

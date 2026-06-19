@@ -4,7 +4,7 @@ project(SimRV LANGUAGES CXX)
 
 enable_testing()
 
-set(SIMRV_VERSION "2.0.0-beta.5")
+set(SIMRV_VERSION "2.0.0-beta.6")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -146,6 +146,13 @@ target_compile_options(SimRV PRIVATE
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
   target_compile_options(SimRV PRIVATE -O3)
   
+  include(CheckCXXCompilerFlag)
+  check_cxx_compiler_flag("-march=x86-64-v3" COMPILER_SUPPORTS_MARCH_X86_64_V3)
+  if(COMPILER_SUPPORTS_MARCH_X86_64_V3)
+    target_compile_options(SimRV PRIVATE -march=x86-64-v3)
+    message(STATUS "x86-64-v3 instruction set architecture (AVX2/FMA/BMI) enabled.")
+  endif()
+  
   include(CheckIPOSupported)
   check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
   if(ipo_supported)
@@ -156,22 +163,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
   endif()
 endif()
 
-# Enable native CPU optimizations (AVX, AVX2, etc.)
-option(SIMRV_ENABLE_NATIVE "Enable native compiler optimization (-march=native / -mtune=native)" OFF)
-if(SIMRV_ENABLE_NATIVE)
-  include(CheckCXXCompilerFlag)
-  check_cxx_compiler_flag("-march=native" COMPILER_SUPPORTS_MARCH_NATIVE)
-  if(COMPILER_SUPPORTS_MARCH_NATIVE)
-    target_compile_options(SimRV PRIVATE -march=native)
-    message(STATUS "Native CPU optimization (-march=native) enabled.")
-  else()
-    check_cxx_compiler_flag("-mtune=native" COMPILER_SUPPORTS_MTUNE_NATIVE)
-    if(COMPILER_SUPPORTS_MTUNE_NATIVE)
-      target_compile_options(SimRV PRIVATE -mtune=native)
-      message(STATUS "Native CPU tuning (-mtune=native) enabled.")
-    endif()
-  endif()
-endif()
+# Standard compilation optimization options are handled via build types (e.g., -O3 in Release mode)
 
 # Toolchain detection for testing
 if(NOT DEFINED RISCV_PREFIX)

@@ -109,7 +109,6 @@ void Disk::process_queue(Word q_idx) {
 
 Disk::Disk(simrv::core::Machine& machine)
     : VirtioDevice(machine, virtio::kDiskIrq),
-      sector_storage_(simrv::virtio::kDiskSize),
-      sector(sector_storage_.data()) {}
+      sector(nullptr) {}
 
 }  // namespace simrv::device

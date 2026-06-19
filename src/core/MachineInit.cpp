@@ -232,7 +232,9 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
 
     load_image_into_ram(s_fn_memimg, mmem, static_cast<std::size_t>(simrv::memory::kDramSize),
                         "memory", s_tuimode);
-    symbols.load_from_elf(s_fn_memimg);
+    if (s_tuimode || s_debug_mode || s_gdb_mode || s_lockstep_mode) {
+        symbols.load_from_elf(s_fn_memimg);
+    }
 
     if (s_fn_dvtree.empty()) {
         if (linux_boot) {
@@ -249,10 +251,10 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
     }
 
     if (s_use_disk) {
+        disk->sector_storage_.resize(simrv::virtio::kDiskSize);
+        disk->sector = disk->sector_storage_.data();
         load_image_into_ram(s_fn_dskimg, disk->sector,
                             static_cast<std::size_t>(simrv::virtio::kDiskSize), "disk", s_tuimode);
-    } else {
-        std::memset(disk->sector, 0, simrv::virtio::kDiskSize);
     }
 
     if (s_use_mix) {

@@ -904,9 +904,14 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
                     break;
             }
         } else {
-            auto res = write_csr(static_cast<CSRAddress>(ctx.funct12), ctx.wb_data_csr);
-            if (!res) {
-                ctx.pending_exception = res.error();
+            const bool is_write =
+                (funct3 == Funct3::Csrrw || funct3 == Funct3::Csrrwi) ||
+                (std::to_underlying(ctx.rs1) != 0);
+            if (is_write) {
+                auto res = write_csr(static_cast<CSRAddress>(ctx.funct12), ctx.wb_data_csr);
+                if (!res) {
+                    ctx.pending_exception = res.error();
+                }
             }
         }
     }
@@ -973,9 +978,14 @@ void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
 
     if (!ctx.pending_exception.has_value() && opcode == Opcode::System) {
         if (funct3 != Funct3::Priv) {
-            auto res = write_csr(static_cast<CSRAddress>(ctx.funct12), ctx.wb_data_csr);
-            if (!res) {
-                ctx.pending_exception = res.error();
+            const bool is_write =
+                (funct3 == Funct3::Csrrw || funct3 == Funct3::Csrrwi) ||
+                (std::to_underlying(ctx.rs1) != 0);
+            if (is_write) {
+                auto res = write_csr(static_cast<CSRAddress>(ctx.funct12), ctx.wb_data_csr);
+                if (!res) {
+                    ctx.pending_exception = res.error();
+                }
             }
         }
     }
