@@ -187,6 +187,25 @@ class CPU {
     void commit_control_flow_and_traps(Machine& machine);
 
    private:
+    auto execute_cached_lui(CachedOp& op) -> void;
+    auto execute_cached_auipc(CachedOp& op) -> void;
+    auto execute_cached_jal(CachedOp& op) -> void;
+    auto execute_cached_jalr(CachedOp& op, Register rrs1) -> void;
+    auto execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) -> void;
+    auto execute_cached_op(CachedOp& op, Register rrs1, Register rrs2) -> void;
+    auto execute_cached_op_imm(CachedOp& op, Register rrs1) -> void;
+    auto execute_cached_op_imm32(CachedOp& op, Register rrs1) -> void;
+    auto execute_cached_op32(CachedOp& op, Register rrs1, Register rrs2) -> void;
+    auto execute_cached_control_imm(CachedOp& op, Register rrs1, Register rrs2) -> void;
+    auto execute_cached_alu(CachedOp& op, Register rrs1, Register rrs2) -> void;
+    auto try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Register& out_val) -> bool;
+    auto try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Register rrs2) -> bool;
+    auto execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> bool;
+    auto execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Register rrs2) -> bool;
+    auto execute_cached_load_store(Machine& machine, CachedOp& op, Register rrs1, Register rrs2) -> bool;
+    auto execute_cached_fallback(Machine& machine) -> void;
+    auto handle_cached_interrupts() -> void;
+
     ArchState state_;
 
    public:

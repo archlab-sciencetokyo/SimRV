@@ -90,6 +90,19 @@ public:
 
 private:
     void tick_pipeline();
+    void init_execution_latency(PipelineReg& reg);
+    [[nodiscard]] auto check_stall_mem() const -> bool;
+    [[nodiscard]] auto check_stall_ex() const -> bool;
+    [[nodiscard]] auto check_stall_id() const -> bool;
+    [[nodiscard]] auto check_stall_if() const -> bool;
+    auto resolve_branches_ex() -> bool;
+
+    [[nodiscard]] auto check_hazard_with_stage(const PipelineReg& stage_reg, bool reads_rs1, bool reads_rs2) const -> bool;
+    auto resolve_jump_ex(BtbEntry& btb_entry, Register pc, Opcode opcode, Register target_pc) -> uint32_t;
+    auto resolve_branch_ex(BtbEntry& btb_entry, Register pc, Register target_pc, bool branched) -> uint32_t;
+    void update_stall_stats(bool stall_mem, bool stall_ex, bool stall_id, bool stall_if);
+    void decrement_latencies();
+    void stage_register_transfers(bool MEM_stalled, bool EX_stalled, bool ID_stalled, bool IF_stalled);
 
     uint64_t cycle_count_ = 0;
     uint64_t stall_cycles_ = 0;
