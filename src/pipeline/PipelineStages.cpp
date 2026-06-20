@@ -39,7 +39,7 @@ void CPU::run_fetch_stage(Machine& machine) {
     const bool split_page =
         ((state_.pc & ~simrv::memory::kPageMask) != ((state_.pc + 2) & ~simrv::memory::kPageMask));
     const bool translation_enabled =
-        state_.priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp, state_.regs.xlen);
+        state_.priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp);
 
     fetch_address_translate(machine);
 
@@ -66,13 +66,13 @@ void CPU::fetch_address_translate(Machine& /*machine*/) {
     ctx.cpc = state_.pc;
 
     if (state_.priv == kPrivMachine ||
-        !simrv::xlen::satp_translation_enabled(state_.satp, state_.regs.xlen)) {
+        !simrv::xlen::satp_translation_enabled(state_.satp)) {
         w_padr1 = (state_.regs.xlen == 32) ? (w_vadr1 & 0xFFFFFFFFULL) : w_vadr1;
         w_padr2 = (state_.regs.xlen == 32) ? (w_vadr2 & 0xFFFFFFFFULL) : w_vadr2;
     } else {
         const bool split_page =
             ((w_vadr1 & ~simrv::memory::kPageMask) != (w_vadr2 & ~simrv::memory::kPageMask));
-        const Word current_asid = simrv::xlen::satp_asid(state_.satp, state_.regs.xlen);
+        const Word current_asid = simrv::xlen::satp_asid(state_.satp);
 
         TLBEntry* tlb_e1 =
             &tlb.inst_r.at((w_vadr1 >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1));
@@ -121,7 +121,7 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
 
         auto* mmu = machine.memory_.mmu();
         auto translate_res =
-            mmu->translate(w_vadr, PteAccess::Code, state_.priv, state_.mstatus, state_.satp, state_.regs.xlen);
+            mmu->translate(w_vadr, PteAccess::Code, state_.priv, state_.mstatus, state_.satp);
         auto chain_res = translate_res
             .and_then([&](Address phys) -> std::expected<void, TrapCause> {
                 w_padr = phys;
@@ -129,7 +129,7 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
                                                   (simrv::memory::kTlbSize - 1));
                 tlb_e1->v_addr = w_vadr & ~simrv::memory::kPageMask;
                 tlb_e1->p_addr = w_padr & ~simrv::memory::kPageMask;
-                tlb_e1->asid = simrv::xlen::satp_asid(state_.satp, state_.regs.xlen);
+                tlb_e1->asid = simrv::xlen::satp_asid(state_.satp);
                 tlb_e1->priv = state_.priv;
                 tlb_e1->valid = true;
                 return {};
@@ -232,7 +232,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
         simrv::pipeline::Decoder dec_temp(ir_l);
         if (!dec_temp.is_compressed()) {
             const bool translation_enabled =
-                state_.priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp, state_.regs.xlen);
+                state_.priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp);
             if (translation_enabled && ctx.padr2 == kWordAllOnes) {
                 fetch_resolve_page_walk(machine, 2);
             }

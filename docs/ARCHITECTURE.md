@@ -205,31 +205,31 @@ SimRV codebase metrics are monitored using static analysis tools (`lizard`). The
 
 ### Global Metrics
 - **Total C++ Files (Source & Header):** 95
-- **Total Code Lines (NLOC):** 15,633
-- **Average Function NLOC:** 19.5
-- **Average Cyclomatic Complexity (CCN):** 6.9
-- **Function Count:** 646
+- **Total Code Lines (NLOC):** 15,983
+- **Average Function NLOC:** 17.8
+- **Average Cyclomatic Complexity (CCN):** 6.2
+- **Function Count:** 726
 
 ### Subsystem Breakdown
 | Subsystem / Directory | Description | Files | NLOC | Avg CCN |
 |:---|:---|:---|:---|:---|
-| `src/tui` / `include/simrv/tui` | Modular TUI components and Virtual Terminal | 13 | 3,902 | 6.8 |
-| `src/core` / `include/simrv/core` | Architectural state, CPU, SBI, and Machine orchestration | 16 | 3,118 | 8.1 |
-| `src/pipeline` / `include/simrv/pipeline` | Instruction fetch/decode stages and execution pipeline | 8 | 2,126 | 7.4 |
-| `src/execute` / `include/simrv/execute` | Floating-point and integer execution units | 4 | 2,126 | 7.9 |
-| `src/device` / `include/simrv/device` | VirtIO Console, Disk, UART, RTC, and Power devices | 11 | 2,014 | 8.2 |
-| `src/debug` / `include/simrv/debug` | GDB stub, Lockstep comparison, and symbol resolution | 6 | 1,842 | 6.8 |
+| `src/tui` / `include/simrv/tui` | Modular TUI components and Virtual Terminal | 13 | 3,866 | 7.3 |
+| `src/core` / `include/simrv/core` | Architectural state, CPU, SBI, and Machine orchestration | 16 | 3,257 | 5.9 |
+| `src/pipeline` / `include/simrv/pipeline` | Instruction fetch/decode stages and execution pipeline | 8 | 2,279 | 6.8 |
+| `src/execute` / `include/simrv/execute` | Floating-point and integer execution units | 4 | 2,118 | 7.1 |
+| `src/device` / `include/simrv/device` | VirtIO Console, Disk, UART, RTC, and Power devices | 11 | 2,024 | 5.9 |
+| `src/debug` / `include/simrv/debug` | GDB stub, Lockstep comparison, and symbol resolution | 6 | 1,701 | 6.0 |
 | `src/memory` / `include/simrv/memory` | SV32/SV39 MMU, TileLink bus, and memory dispatch | 8 | 1,212 | 7.5 |
-| `src/util` / `include/simrv/util` | Explainer routines | 2 | 752 | 8.7 |
+| `src/util` / `include/simrv/util` | Explainer routines | 2 | 696 | 4.2 |
 
 
 ### Top 5 Most Complex Functions
 The cyclomatic complexity (CCN) hot-spots in the simulator are:
-1. `simrv::util::get_description` (in `InstructionExplainer.cpp`) - **CCN: 93**, NLOC: 98 (Instruction educational behavior desc decoder)
-2. `simrv::util::explain_instruction` (in `InstructionExplainer.cpp`) - **CCN: 90**, NLOC: 358 (Instruction disassembly explainer)
-3. `simrv::core::CPU::execute_core` (in `PipelineStages.cpp`) - **CCN: 80**, NLOC: 247 (Pipeline stage instruction execution)
-4. `simrv::execute::ExecuteUnit::opFp` (in `ExecuteUnitFloat.cpp`) - **CCN: 77**, NLOC: 297 (Floating-point execution unit)
-5. `simrv::tui::Tui::record_instruction` (in `Tui.cpp`) - **CCN: 72**, NLOC: 133 (TUI instruction execution/trace recording)
+1. `simrv::core::CPU::execute_core` (in `PipelineStages.cpp`) - **CCN: 80**, NLOC: 247 (Pipeline stage instruction execution)
+2. `simrv::tui::VirtualTerminal::execute_csi_command` (in `VirtualTerminal.hpp`) - **CCN: 78**, NLOC: 121 (TUI virtual terminal CSI escape sequence parsing)
+3. `simrv::execute::ExecuteUnit::opFp` (in `ExecuteUnitFloat.cpp`) - **CCN: 77**, NLOC: 297 (Floating-point execution unit)
+4. `simrv::tui::Tui::record_instruction` (in `Tui.cpp`) - **CCN: 72**, NLOC: 133 (TUI instruction execution/trace recording)
+5. `simrv::core::CPU::run_cycle` (in `Cpu.cpp`) - **CCN: 65**, NLOC: 138 (Main CPU pipeline run loop)
 
 These metrics provide guidelines for identifying components that could benefit from future refactoring and simplification.
 

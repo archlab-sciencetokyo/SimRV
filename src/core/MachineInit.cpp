@@ -101,6 +101,9 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
         std::to_integer<char>(ram[1]) == 'E' && 
         std::to_integer<char>(ram[2]) == 'L' && 
         std::to_integer<char>(ram[3]) == 'F') {
+        if (std::strcmp(image_name, "memory") == 0) {
+            simrv::log::warn("Loaded image {} has ELF magic! SimRV does not parse ELF files directly for execution; it loads files raw starting at DRAM base (0x80000000). Executing ELF headers directly may cause unexpected behavior or hangs. Please use 'objcopy -O binary' to extract a raw binary first.", file_path);
+        }
         const auto elf_class = std::to_integer<uint8_t>(ram[4]);
         constexpr uint8_t expected_class = simrv::xlen::kXLenBits == 32 ? 1 : 2;
         if (elf_class != expected_class) {

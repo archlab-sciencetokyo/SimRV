@@ -201,6 +201,7 @@ auto ClintMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
                 cpu_.evaluate_timer_interrupt();
             } else if (off == kClintMtimeOffset) {
                 mtime = static_cast<Counter>(wdata);
+                cpu_.evaluate_timer_interrupt();
             } else {
                 mmio_write(off, wdata);
             }
@@ -213,8 +214,10 @@ auto ClintMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
                 cpu_.evaluate_timer_interrupt();
             } else if (off == kClintMtimeOffset) {
                 mtime = (mtime & ~static_cast<Counter>(0xFFFFFFFFull)) | (wdata & 0xFFFFFFFFull);
+                cpu_.evaluate_timer_interrupt();
             } else if (off == kClintMtimeOffset + 4) {
                 mtime = (mtime & 0xFFFFFFFFull) | (static_cast<Counter>(wdata) << 32);
+                cpu_.evaluate_timer_interrupt();
             } else {
                 mmio_write(off, wdata);
             }
@@ -251,9 +254,11 @@ void ClintMmio::mmio_write(Address offset, Word wdata) {
     } else if (offset == kClintMtimecmpOffset) {
         mtimecmp = (mtimecmp & ~kWord32Mask) | wdata_64;
         cpu_.state().mip &= ~enum_mask(MipBit::Mtip);
+        cpu_.evaluate_timer_interrupt();
     } else if (offset == kClintMtimecmpOffset + 4) {
         mtimecmp = (mtimecmp & kWord32Mask) | (wdata_64 << kWord32Shift);
         cpu_.state().mip &= ~enum_mask(MipBit::Mtip);
+        cpu_.evaluate_timer_interrupt();
     }
 }
 

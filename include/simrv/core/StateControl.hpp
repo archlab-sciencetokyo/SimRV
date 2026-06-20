@@ -99,6 +99,8 @@ class ClintMmio : public memory::TileLinkNode {
     Counter mtimecmp{};
     Counter mcycle{1};
     int rtc_divider{0};
+    Counter last_mtime{0};
+    Counter last_mtimecmp{0};
 
    private:
     CPU& cpu_;

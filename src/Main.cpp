@@ -639,6 +639,7 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
 
     machine->s_appmode = options.appmode;
     simrv::memory::g_appmode = options.appmode;
+    simrv::memory::g_dram_base = options.appmode ? 0 : simrv::memory::kDramBaseAddress;
     machine->s_tuimode = options.tuimode;
     machine->s_high_contrast = options.high_contrast;
     machine->s_debugmode = options.debugmode;

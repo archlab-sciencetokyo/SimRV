@@ -17,8 +17,9 @@ namespace simrv::core {
 
 namespace {
 auto is_tohost_addr(const Machine& machine, Address addr) -> bool {
-    return addr == machine.s_isatest_tohost || addr == 0x80001000 || addr == 0x40008000 ||
-           addr == machine.s_isatest_tohost + 4 || addr == 0x80001004 || addr == 0x40008004;
+    return (addr - machine.s_isatest_tohost < 8) ||
+           (addr - 0x80001000ULL < 8) ||
+           (addr - 0x40008000ULL < 8);
 }
 }  // namespace
 
@@ -94,12 +95,21 @@ void CPU::raise_exception(TrapCause cause, CSRValue tval) {
 }
 
 void CPU::evaluate_timer_interrupt() {
+    if (clint_mmio.mtime == clint_mmio.last_mtime && clint_mmio.mtimecmp == clint_mmio.last_mtimecmp) {
+        return;
+    }
+    clint_mmio.last_mtime = clint_mmio.mtime;
+    clint_mmio.last_mtimecmp = clint_mmio.mtimecmp;
+
+    const CSRValue mask = enum_mask(MipBit::Mtip) | enum_mask(MipBit::Stip);
     if (clint_mmio.mtime >= clint_mmio.mtimecmp) {
-        state_.mip |= enum_mask(MipBit::Mtip);
-        state_.mip |= enum_mask(MipBit::Stip);
+        if ((state_.mip & mask) != mask) {
+            state_.mip |= mask;
+        }
     } else {
-        state_.mip &= ~enum_mask(MipBit::Mtip);
-        state_.mip &= ~enum_mask(MipBit::Stip);
+        if ((state_.mip & mask) != 0) {
+            state_.mip &= ~mask;
+        }
     }
 }
 
@@ -170,15 +180,26 @@ void CPU::run_cycle(Machine& machine) {
         }
     }
 
-    clint_mmio.mcycle += step_cycles;
-    clint_mmio.rtc_divider += static_cast<int>(step_cycles);
-    if (clint_mmio.rtc_divider >= 10) {
-        if (clint_mmio.rtc_divider < 20) {
-            clint_mmio.mtime += 1;
-            clint_mmio.rtc_divider -= 10;
-        } else {
-            clint_mmio.mtime += clint_mmio.rtc_divider / 10;
-            clint_mmio.rtc_divider %= 10;
+    if (simrv::compiler::likely(!machine.s_cycle_accurate)) {
+        clint_mmio.mcycle++;
+        clint_mmio.rtc_divider++;
+        if (clint_mmio.rtc_divider == 10) {
+            clint_mmio.mtime++;
+            clint_mmio.rtc_divider = 0;
+            evaluate_timer_interrupt();
+        }
+    } else {
+        clint_mmio.mcycle += step_cycles;
+        clint_mmio.rtc_divider += static_cast<int>(step_cycles);
+        if (clint_mmio.rtc_divider >= 10) {
+            if (clint_mmio.rtc_divider < 20) {
+                clint_mmio.mtime += 1;
+                clint_mmio.rtc_divider -= 10;
+            } else {
+                clint_mmio.mtime += clint_mmio.rtc_divider / 10;
+                clint_mmio.rtc_divider %= 10;
+            }
+            evaluate_timer_interrupt();
         }
     }
 
@@ -263,18 +284,38 @@ void CPU::run_cycle(Machine& machine) {
 }
 
 void CPU::run_cycle_baremetal(Machine& machine) {
+    if (machine.s_high_performance) {
+        auto* cached = decode_cache.lookup(state_.pc);
+        if (simrv::compiler::likely(cached != nullptr)) {
+            execute_cached_op_fast(machine, *cached);
+            clint_mmio.mcycle++;
+            return;
+        }
+    }
+
     pipeline_context.pending_exception = std::nullopt;
     pipeline_context.pending_tval = 0;
     
     run_fetch_stage_baremetal(machine);
     const bool success = !pipeline_context.pending_exception.has_value() &&
-                         decode_stage(machine) &&
-                         execute_stage(machine) &&
-                         (run_memory_stage_baremetal(machine), !pipeline_context.pending_exception.has_value()) &&
-                         writeback_stage(machine) &&
-                         (run_commit_stage_baremetal(machine), !pipeline_context.pending_exception.has_value());
+                         decode_stage(machine);
 
-    if (simrv::compiler::unlikely(!success)) {
+    if (success && !pipeline_context.pending_exception.has_value()) {
+        CachedOp op;
+        op.copy_from(pipeline_context);
+        decode_cache.insert(state_.pc, op);
+    }
+
+    if (success) {
+        const bool rest_success = execute_stage(machine) &&
+                                  (run_memory_stage_baremetal(machine), !pipeline_context.pending_exception.has_value()) &&
+                                  writeback_stage(machine) &&
+                                  (run_commit_stage_baremetal(machine), !pipeline_context.pending_exception.has_value());
+        if (simrv::compiler::unlikely(!rest_success)) {
+            const auto cause = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0));
+            raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
+        }
+    } else {
         const auto cause = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0));
         raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
     }
@@ -603,14 +644,14 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
         return false;
     }
     const PrivilegeLevel eff_priv = effective_data_privilege();
-    const bool translation_enabled = (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp, state_.regs.xlen));
+    const bool translation_enabled = (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp));
     if (!translation_enabled) {
         if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr))) {
             out_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3), machine.memory_.mmu()->mmem());
             return true;
         }
     } else {
-        const Word current_asid = simrv::xlen::satp_asid(state_.satp, state_.regs.xlen);
+        const Word current_asid = simrv::xlen::satp_asid(state_.satp);
         size_t const tlb_idx = (mem_addr >> 12) & 2047;
         const auto& entry = soft_tlb_read[tlb_idx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         if (simrv::compiler::likely(entry.valid && entry.vpn == (mem_addr >> 12) && entry.priv == eff_priv && 
@@ -629,14 +670,14 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
         return false;
     }
     const PrivilegeLevel eff_priv = effective_data_privilege();
-    const bool translation_enabled = (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp, state_.regs.xlen));
+    const bool translation_enabled = (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp));
     if (!translation_enabled) {
         if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr) && !is_tohost_addr(machine, mem_addr))) {
             simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3), machine.memory_.mmu()->mmem());
             return true;
         }
     } else {
-        const Word current_asid = simrv::xlen::satp_asid(state_.satp, state_.regs.xlen);
+        const Word current_asid = simrv::xlen::satp_asid(state_.satp);
         size_t const tlb_idx = (mem_addr >> 12) & 2047;
         const auto& entry = soft_tlb_write[tlb_idx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         if (simrv::compiler::likely(entry.valid && entry.vpn == (mem_addr >> 12) && entry.priv == eff_priv && 
@@ -797,11 +838,17 @@ void CPU::handle_cached_interrupts() {
 }
 
 void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
-    // 1. Copy metadata to pipeline_context to support tracers and lockstep
-    pipeline_context.copy_from(op);
-    pipeline_context.tlb_miss = false;
-    pipeline_context.pending_exception = std::nullopt;
-    pipeline_context.pending_tval = 0;
+    // 1. Copy metadata to pipeline_context to support tracers and lockstep only when needed
+    if (simrv::compiler::unlikely(machine.s_tuimode || machine.s_lockstep_mode || 
+                                  machine.s_gdb_mode || machine.s_bp_trace || 
+                                  (machine.s_strace != 0))) {
+        pipeline_context.copy_from(op);
+        pipeline_context.tlb_miss = false;
+        pipeline_context.pending_exception = std::nullopt;
+        pipeline_context.pending_tval = 0;
+    } else {
+        pipeline_context.pending_exception = std::nullopt;
+    }
 
     // 2. Fetch operands
     Register const rrs1 = state_.regs.read(op.rs1);
@@ -829,6 +876,10 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
             }
             break;
         default:
+            pipeline_context.copy_from(op);
+            pipeline_context.tlb_miss = false;
+            pipeline_context.pending_exception = std::nullopt;
+            pipeline_context.pending_tval = 0;
             execute_cached_fallback(machine);
             return;
     }

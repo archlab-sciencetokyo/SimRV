@@ -22,6 +22,7 @@
 
 namespace simrv::memory {
 bool g_appmode = false;
+Address g_dram_base = kDramBaseAddress;
 }
 
 namespace simrv::core {
@@ -43,6 +44,9 @@ void Machine::run() {
     if (s_tuimode && uart) {
         uart->tui_pause_loop();
     }
+
+    cpu.evaluate_timer_interrupt();
+
     while (is_running_) {
         prepare_cycle();
         cpu.run_cycle(*this);
@@ -92,6 +96,8 @@ void Machine::run_baremetal() {
 
     uint32_t cycle_count = 0;
 
+    cpu.evaluate_timer_interrupt();
+
     while (is_running_) {
         cpu.run_cycle_baremetal(*this);
 
@@ -110,20 +116,21 @@ void Machine::run_baremetal() {
             finalize_cycle_tohost();
         }
 
+        if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() && cpu.e_icount >= s_fincnt)) {
+            simrv::log::info("finished by -e option");
+            is_running_ = false;
+        }
+
         cycle_count++;
         if (simrv::compiler::unlikely(cycle_count >= 1024)) {
             cycle_count = 0;
 
             // Tick the CLINT timer: 1024 CPU cycles is approximately 102 CLINT timer ticks
             cpu.clint_mmio.mtime += 102;
+            cpu.evaluate_timer_interrupt();
 
             if (uart) {
                 uart->non_tui_poll_input();
-            }
-
-            if (cpu.clint_mmio.mtime >= s_fincnt - 1) {
-                simrv::log::info("finished by -e option");
-                is_running_ = false;
             }
         }
     }
@@ -136,6 +143,15 @@ void Machine::run_baremetal() {
  * and reset of pending trap bookkeeping fields.
  */
 void Machine::prepare_cycle() {
+    if (simrv::compiler::likely(s_high_performance && cpu.clint_mmio.mtime <= s_enabletimer)) {
+        if (simrv::compiler::unlikely(cpu.clint_mmio.mtime == s_memimg)) {
+            tracer.dump_init_artifacts();
+        }
+        cpu.pipeline_context.pending_exception = std::nullopt;
+        cpu.pipeline_context.pending_tval = 0;
+        return;
+    }
+
     // Emit initialization artifacts at the configured cycle boundary.
     if (cpu.clint_mmio.mtime == s_memimg) {
         tracer.dump_init_artifacts();
@@ -161,11 +177,7 @@ void Machine::prepare_cycle() {
                 is_running_ = false; /* break by Ctrl+q */
             }
             adr++;
-        } else {
-            cpu.evaluate_timer_interrupt(); /* Timer */
         }
-    } else {
-        cpu.evaluate_timer_interrupt(); /* Timer always evaluated */
     }
 
     cpu.pipeline_context.pending_exception = std::nullopt; /* initialize regs */
@@ -177,6 +189,23 @@ void Machine::prepare_cycle() {
  * @brief Apply end-of-cycle termination checks and optional trace outputs.
  */
 void Machine::finalize_cycle() {
+    const bool in_trace_window = (cpu.clint_mmio.mtime >= s_trace_begin && cpu.clint_mmio.mtime <= s_trace_end);
+    if (simrv::compiler::likely(s_high_performance && !s_tuimode && s_strace == 0 && 
+                                  !in_trace_window && !s_bp_trace)) {
+        if (simrv::compiler::unlikely(tohost != 0)) {
+            finalize_cycle_tohost();
+        }
+        if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() && cpu.e_icount >= s_fincnt)) {
+            simrv::log::info("finished by -e option");
+            is_shutdown_ = true;
+            is_running_ = false;
+        }
+        if (uart && simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
+            uart->non_tui_poll_input();
+        }
+        return;
+    }
+
     if (simrv::compiler::unlikely(s_tuimode)) {
         if (simrv::tui::g_resized) {
             uart->refresh_tui();
@@ -203,7 +232,7 @@ void Machine::finalize_cycle() {
     if (simrv::compiler::unlikely(cpu.clint_mmio.mtime >= s_trace_begin && cpu.clint_mmio.mtime <= s_trace_end)) {
         tracer.write_trace_snapshot();
     }
-    if (simrv::compiler::unlikely(cpu.clint_mmio.mtime >= s_fincnt - 1)) {
+    if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() && cpu.e_icount >= s_fincnt)) {
         simrv::log::info("finished by -e option");
         is_shutdown_ = true;
         if (s_tuimode && uart && uart->tui()) {
@@ -213,8 +242,8 @@ void Machine::finalize_cycle() {
     }
     if (simrv::compiler::unlikely(s_bp_trace)) {
         tracer.emit_branch_prediction_trace(cpu.clint_mmio.mtime, cpu.pipeline_context.cpc,
-                                            cpu.pipeline_context.jmp_pc,
-                                            cpu.pipeline_context.opcode, cpu.pipeline_context.tkn);
+                                             cpu.pipeline_context.jmp_pc,
+                                             cpu.pipeline_context.opcode, cpu.pipeline_context.tkn);
     }
 
     finalize_cycle_tohost();

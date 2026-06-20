@@ -161,102 +161,447 @@ auto get_format_name(InstFormat fmt) -> std::string_view {
 }
 
 auto get_description(::OperationId op_id) -> std::pair<std::string_view, std::string_view> {
-    switch (op_id) {
-        case LUI: return {"LUI", "Load Upper Immediate. Loads the 20-bit immediate into the upper 20 bits of the destination register rd, filling the lowest 12 bits with zeros."};
-        case AUIPC: return {"AUIPC", "Add Upper Immediate to PC. Adds the 20-bit sign-extended immediate to the PC and stores the result in rd."};
-        case JAL: return {"JAL", "Jump and Link. Jump to the address PC + offset, and store the return address (PC + 4) in rd."};
-        case JALR: return {"JALR", "Jump and Link Register. Jump to the address (rs1 + offset) & ~1, and store the return address (PC + 4) in rd."};
-        case BEQ: return {"BEQ", "Branch if Equal. Branch to PC + offset if the values in rs1 and rs2 are equal."};
-        case BNE: return {"BNE", "Branch if Not Equal. Branch to PC + offset if the values in rs1 and rs2 are not equal."};
-        case BLT: return {"BLT", "Branch if Less Than. Branch to PC + offset if the value in rs1 is less than rs2 (signed comparison)."};
-        case BGE: return {"BGE", "Branch if Greater than or Equal. Branch to PC + offset if the value in rs1 is greater than or equal to rs2 (signed comparison)."};
-        case BLTU: return {"BLTU", "Branch if Less Than (Unsigned). Branch to PC + offset if the value in rs1 is less than rs2 (unsigned comparison)."};
-        case BGEU: return {"BGEU", "Branch if Greater than or Equal (Unsigned). Branch to PC + offset if the value in rs1 is greater than or equal to rs2 (unsigned comparison)."};
-        case LB: return {"LB", "Load Byte. Read an 8-bit value from memory address (rs1 + offset), sign-extend it to XLEN, and store it in rd."};
-        case LH: return {"LH", "Load Halfword. Read a 16-bit value from memory address (rs1 + offset), sign-extend it to XLEN, and store it in rd."};
-        case LW: return {"LW", "Load Word. Read a 32-bit value from memory address (rs1 + offset), sign-extend it to XLEN (in RV64) or XLEN, and store it in rd."};
-        case LD: return {"LD", "Load Doubleword. Read a 64-bit value from memory address (rs1 + offset) and store it in rd."};
-        case LBU: return {"LBU", "Load Byte (Unsigned). Read an 8-bit value from memory address (rs1 + offset), zero-extend it, and store it in rd."};
-        case LHU: return {"LHU", "Load Halfword (Unsigned). Read a 16-bit value from memory address (rs1 + offset), zero-extend it, and store it in rd."};
-        case LWU: return {"LWU", "Load Word (Unsigned). Read a 32-bit value from memory address (rs1 + offset), zero-extend it, and store it in rd."};
-        case SB: return {"SB", "Store Byte. Write the lower 8 bits of rs2 to memory address (rs1 + offset)."};
-        case SH: return {"SH", "Store Halfword. Write the lower 16 bits of rs2 to memory address (rs1 + offset)."};
-        case SW: return {"SW", "Store Word. Write the lower 32 bits of rs2 to memory address (rs1 + offset)."};
-        case SD: return {"SD", "Store Doubleword. Write the 64-bit value of rs2 to memory address (rs1 + offset)."};
-        case ADDI: return {"ADDI", "Add Immediate. Add the sign-extended 12-bit immediate to rs1 and store the result in rd."};
-        case SLTI: return {"SLTI", "Set if Less Than Immediate. Set rd to 1 if rs1 is less than the sign-extended immediate (signed comparison), otherwise set rd to 0."};
-        case SLTIU: return {"SLTIU", "Set if Less Than Immediate (Unsigned). Set rd to 1 if rs1 is less than the sign-extended immediate (unsigned comparison), otherwise set rd to 0."};
-        case XORI: return {"XORI", "Bitwise XOR Immediate. Performs bitwise XOR of rs1 and the sign-extended immediate, and stores the result in rd."};
-        case ORI: return {"ORI", "Bitwise OR Immediate. Performs bitwise OR of rs1 and the sign-extended immediate, and stores the result in rd."};
-        case ANDI: return {"ANDI", "Bitwise AND Immediate. Performs bitwise AND of rs1 and the sign-extended immediate, and stores the result in rd."};
-        case SLLI: return {"SLLI", "Shift Left Logical Immediate. Performs logical left shift of rs1 by the shift amount (shamt) and stores the result in rd."};
-        case SRLI: return {"SRLI", "Shift Right Logical Immediate. Performs logical right shift of rs1 by the shift amount (shamt) and stores the result in rd."};
-        case SRAI: return {"SRAI", "Shift Right Arithmetic Immediate. Performs arithmetic right shift of rs1 by the shift amount (shamt), preserving the sign bit, and stores the result in rd."};
-        case ADDIW: return {"ADDIW", "Add Immediate Word. Adds the sign-extended 12-bit immediate to rs1, truncating the result to 32 bits, sign-extending to 64 bits, and storing in rd."};
-        case SLLIW: return {"SLLIW", "Shift Left Logical Immediate Word. Performs logical left shift of 32-bit rs1 by shamt, sign-extending the 32-bit result to 64 bits and storing in rd."};
-        case SRLIW: return {"SRLIW", "Shift Right Logical Immediate Word. Performs logical right shift of 32-bit rs1 by shamt, sign-extending the 32-bit result to 64 bits and storing in rd."};
-        case SRAIW: return {"SRAIW", "Shift Right Arithmetic Immediate Word. Performs arithmetic right shift of 32-bit rs1 by shamt, sign-extending the 32-bit result to 64 bits and storing in rd."};
-        case ADD: return {"ADD", "Add. Adds the values in rs1 and rs2 and stores the result in rd."};
-        case SUB: return {"SUB", "Subtract. Subtracts the value in rs2 from rs1 and stores the result in rd."};
-        case SLL: return {"SLL", "Shift Left Logical. Performs logical left shift of rs1 by the amount in rs2 (lower 5/6 bits) and stores the result in rd."};
-        case SLT: return {"SLT", "Set if Less Than. Set rd to 1 if rs1 is less than rs2 (signed comparison), otherwise set rd to 0."};
-        case SLTU: return {"SLTU", "Set if Less Than (Unsigned). Set rd to 1 if rs1 is less than rs2 (unsigned comparison), otherwise set rd to 0."};
-        case XOR: return {"XOR", "Bitwise XOR. Performs bitwise XOR of rs1 and rs2, and stores the result in rd."};
-        case SRL: return {"SRL", "Shift Right Logical. Performs logical right shift of rs1 by the amount in rs2 (lower 5/6 bits) and stores the result in rd."};
-        case SRA: return {"SRA", "Shift Right Arithmetic. Performs arithmetic right shift of rs1 by the amount in rs2 (lower 5/6 bits), preserving the sign, and stores the result in rd."};
-        case OR: return {"OR", "Bitwise OR. Performs bitwise OR of rs1 and rs2, and stores the result in rd."};
-        case AND: return {"AND", "Bitwise AND. Performs bitwise AND of rs1 and rs2, and stores the result in rd."};
-        case ADDW: return {"ADDW", "Add Word. Adds the lower 32 bits of rs1 and rs2, sign-extending the 32-bit result to 64 bits and storing in rd."};
-        case SUBW: return {"SUBW", "Subtract Word. Subtracts the lower 32 bits of rs2 from rs1, sign-extending the 32-bit result to 64 bits and storing in rd."};
-        case SLLW: return {"SLLW", "Shift Left Logical Word. Performs logical left shift of 32-bit rs1 by the shift amount in rs2 (lower 5 bits), sign-extending the 32-bit result to 64 bits and storing in rd."};
-        case SRLW: return {"SRLW", "Shift Right Logical Word. Performs logical right shift of 32-bit rs1 by the shift amount in rs2 (lower 5 bits), sign-extending the 32-bit result to 64 bits and storing in rd."};
-        case SRAW: return {"SRAW", "Shift Right Arithmetic Word. Performs arithmetic right shift of 32-bit rs1 by the shift amount in rs2 (lower 5 bits), sign-extending the 32-bit result to 64 bits and storing in rd."};
-        case FENCE: return {"FENCE", "Fence. Orders memory accesses and instruction fetches across threads."};
-        case FENCE_I: return {"FENCE.I", "Fence Instruction. Synchronizes the instruction cache with data writes."};
-        case ECALL: return {"ECALL", "Environment Call. Triggers a system call exception corresponding to the current privilege mode."};
-        case EBREAK: return {"EBREAK", "Breakpoint. Triggers a breakpoint exception, handing control back to a debugger."};
-        case CSRRW: return {"CSRRW", "CSR Read/Write. Atomically swaps the value of a CSR with the value in rs1, storing the old CSR value in rd."};
-        case CSRRS: return {"CSRRS", "CSR Read and Set Bits. Atomically sets bits in a CSR based on the mask in rs1, storing the old CSR value in rd."};
-        case CSRRC: return {"CSRRC", "CSR Read and Clear Bits. Atomically clears bits in a CSR based on the mask in rs1, storing the old CSR value in rd."};
-        case CSRRWI: return {"CSRRWI", "CSR Read/Write Immediate. Atomically swaps the value of a CSR with a zero-extended 5-bit immediate, storing the old CSR value in rd."};
-        case CSRRSI: return {"CSRRSI", "CSR Read and Set Bits Immediate. Atomically sets bits in a CSR based on a zero-extended 5-bit immediate mask, storing the old CSR value in rd."};
-        case CSRRCI: return {"CSRRCI", "CSR Read and Clear Bits Immediate. Atomically clears bits in a CSR based on a zero-extended 5-bit immediate mask, storing the old CSR value in rd."};
-        case URET: return {"URET", "User-mode Return. Returns from an exception/interrupt handler in User mode, restoring PC from uepc."};
-        case SRET: return {"SRET", "Supervisor-mode Return. Returns from an exception/interrupt handler in Supervisor mode, restoring PC from sepc and privilege level from mstatus.spp."};
-        case MRET: return {"MRET", "Machine-mode Return. Returns from an exception/interrupt handler in Machine mode, restoring PC from mepc and privilege level from mstatus.mpp."};
-        case WFI: return {"WFI", "Wait For Interrupt. Suspends instruction execution until an interrupt is received, saving power."};
-        case SFENCE_VMA: return {"SFENCE.VMA", "Supervisor Fence Virtual Memory Address. Flushes the TLB cache, synchronizing page table writes with address translation."};
-        case MUL: return {"MUL", "Multiply. Multiplies rs1 and rs2 and stores the lower XLEN bits of the result in rd."};
-        case MULH: return {"MULH", "Multiply High (Signed). Multiplies rs1 and rs2 and stores the upper XLEN bits of the signed product in rd."};
-        case MULHSU: return {"MULHSU", "Multiply High (Signed/Unsigned). Multiplies signed rs1 and unsigned rs2, storing the upper XLEN bits of the product in rd."};
-        case MULHU: return {"MULHU", "Multiply High (Unsigned). Multiplies unsigned rs1 and rs2, storing the upper XLEN bits of the product in rd."};
-        case DIV: return {"DIV", "Divide. Divides rs1 by rs2 (signed division) and stores the quotient in rd."};
-        case DIVU: return {"DIVU", "Divide (Unsigned). Divides rs1 by rs2 (unsigned division) and stores the quotient in rd."};
-        case REM: return {"REM", "Remainder. Calculates the remainder of signed division of rs1 by rs2, storing the result in rd."};
-        case REMU: return {"REMU", "Remainder (Unsigned). Calculates the remainder of unsigned division of rs1 by rs2, storing the result in rd."};
-        case MULW: return {"MULW", "Multiply Word. Multiplies 32-bit values from rs1 and rs2, sign-extending the lower 32 bits of the product to 64 bits and storing in rd."};
-        case DIVW: return {"DIVW", "Divide Word. Divides 32-bit signed value from rs1 by 32-bit signed value from rs2, sign-extending the 32-bit quotient to 64 bits and storing in rd."};
-        case DIVUW: return {"DIVUW", "Divide Word (Unsigned). Divides 32-bit unsigned value from rs1 by 32-bit unsigned value from rs2, sign-extending the 32-bit quotient to 64 bits and storing in rd."};
-        case REMW: return {"REMW", "Remainder Word. Calculates remainder of 32-bit signed division of rs1 by rs2, sign-extending the 32-bit result to 64 bits and storing in rd."};
-        case REMUW: return {"REMUW", "Remainder Word (Unsigned). Calculates remainder of 32-bit unsigned division of rs1 by rs2, sign-extending the 32-bit result to 64 bits and storing in rd."};
-        case LR_W: return {"LR.W", "Load-Reserved Word. Loads a word from address rs1 into rd, and registers a reservation on that memory address."};
-        case SC_W: return {"SC.W", "Store-Conditional Word. Conditionally writes a word from rs2 to address rs1 if a reservation on that address is active, storing 0 in rd on success, or non-zero on failure."};
-        case AMOSWAP_W: return {"AMOSWAP.W", "Atomic Swap Word. Atomically loads a word from address rs1 into rd, and stores rs2 to address rs1."};
-        case AMOADD_W: return {"AMOADD.W", "Atomic Add Word. Atomically loads a word from address rs1 into rd, adds rs2 to it, and stores the result back to address rs1."};
-        case AMOXOR_W: return {"AMOXOR.W", "Atomic XOR Word. Atomically loads a word from address rs1 into rd, XORs rs2 with it, and stores the result back to address rs1."};
-        case AMOAND_W: return {"AMOAND.W", "Atomic AND Word. Atomically loads a word from address rs1 into rd, ANDs rs2 with it, and stores the result back to address rs1."};
-        case AMOOR_W: return {"AMOOR.W", "Atomic OR Word. Atomically loads a word from address rs1 into rd, ORs rs2 with it, and stores the result back to address rs1."};
-        case AMOMIN_W: return {"AMOMIN.W", "Atomic Min Word. Atomically loads a word from address rs1 into rd, calculates the signed min with rs2, and stores the result back to address rs1."};
-        case AMOMAX_W: return {"AMOMAX.W", "Atomic Max Word. Atomically loads a word from address rs1 into rd, calculates the signed max with rs2, and stores the result back to address rs1."};
-        case AMOMINU_W: return {"AMOMINU.W", "Atomic Min Word (Unsigned). Atomically loads a word from address rs1 into rd, calculates the unsigned min with rs2, and stores the result back to address rs1."};
-        case AMOMAXU_W: return {"AMOMAXU.W", "Atomic Max Word (Unsigned). Atomically loads a word from address rs1 into rd, calculates the unsigned max with rs2, and stores the result back to address rs1."};
-        case FLW: return {"FLW", "Floating-Point Load Word. Loads a 32-bit floating-point value from memory address rs1 + immediate into floating-point register rd."};
-        case FSW: return {"FSW", "Floating-Point Store Word. Stores a 32-bit floating-point value from floating-point register rs2 to memory address rs1 + immediate."};
-        case FLD: return {"FLD", "Floating-Point Load Double. Loads a 64-bit floating-point value from memory address rs1 + immediate into floating-point register rd."};
-        case FSD: return {"FSD", "Floating-Point Store Double. Stores a 64-bit floating-point value from floating-point register rs2 to memory address rs1 + immediate."};
-        default:
-            return {"UNKNOWN", "Instruction not explicitly detailed or custom extension opcode. Verify against compiler specification."};
+    static constexpr std::pair<std::string_view, std::string_view> kDefaultDesc = {
+        "UNKNOWN", "Instruction not explicitly detailed or custom extension opcode. Verify against compiler specification."
+    };
+
+    static const auto kOpDescriptions = []() {
+        std::array<std::pair<std::string_view, std::string_view>, kOperationIdCount> arr;
+        arr.fill(kDefaultDesc);
+
+        arr[LUI] = {"LUI", "Load Upper Immediate. Loads the 20-bit immediate into the upper 20 bits of the destination register rd, filling the lowest 12 bits with zeros."};
+        arr[AUIPC] = {"AUIPC", "Add Upper Immediate to PC. Adds the 20-bit sign-extended immediate to the PC and stores the result in rd."};
+        arr[JAL] = {"JAL", "Jump and Link. Jump to the address PC + offset, and store the return address (PC + 4) in rd."};
+        arr[JALR] = {"JALR", "Jump and Link Register. Jump to the address (rs1 + offset) & ~1, and store the return address (PC + 4) in rd."};
+        arr[BEQ] = {"BEQ", "Branch if Equal. Branch to PC + offset if the values in rs1 and rs2 are equal."};
+        arr[BNE] = {"BNE", "Branch if Not Equal. Branch to PC + offset if the values in rs1 and rs2 are not equal."};
+        arr[BLT] = {"BLT", "Branch if Less Than. Branch to PC + offset if the value in rs1 is less than rs2 (signed comparison)."};
+        arr[BGE] = {"BGE", "Branch if Greater than or Equal. Branch to PC + offset if the value in rs1 is greater than or equal to rs2 (signed comparison)."};
+        arr[BLTU] = {"BLTU", "Branch if Less Than (Unsigned). Branch to PC + offset if the value in rs1 is less than rs2 (unsigned comparison)."};
+        arr[BGEU] = {"BGEU", "Branch if Greater than or Equal (Unsigned). Branch to PC + offset if the value in rs1 is greater than or equal to rs2 (unsigned comparison)."};
+        arr[LB] = {"LB", "Load Byte. Read an 8-bit value from memory address (rs1 + offset), sign-extend it to XLEN, and store it in rd."};
+        arr[LH] = {"LH", "Load Halfword. Read a 16-bit value from memory address (rs1 + offset), sign-extend it to XLEN, and store it in rd."};
+        arr[LW] = {"LW", "Load Word. Read a 32-bit value from memory address (rs1 + offset), sign-extend it to XLEN (in RV64) or XLEN, and store it in rd."};
+        arr[LD] = {"LD", "Load Doubleword. Read a 64-bit value from memory address (rs1 + offset) and store it in rd."};
+        arr[LBU] = {"LBU", "Load Byte (Unsigned). Read an 8-bit value from memory address (rs1 + offset), zero-extend it, and store it in rd."};
+        arr[LHU] = {"LHU", "Load Halfword (Unsigned). Read a 16-bit value from memory address (rs1 + offset), zero-extend it, and store it in rd."};
+        arr[LWU] = {"LWU", "Load Word (Unsigned). Read a 32-bit value from memory address (rs1 + offset), zero-extend it, and store it in rd."};
+        arr[SB] = {"SB", "Store Byte. Write the lower 8 bits of rs2 to memory address (rs1 + offset)."};
+        arr[SH] = {"SH", "Store Halfword. Write the lower 16 bits of rs2 to memory address (rs1 + offset)."};
+        arr[SW] = {"SW", "Store Word. Write the lower 32 bits of rs2 to memory address (rs1 + offset)."};
+        arr[SD] = {"SD", "Store Doubleword. Write the 64-bit value of rs2 to memory address (rs1 + offset)."};
+        arr[ADDI] = {"ADDI", "Add Immediate. Add the sign-extended 12-bit immediate to rs1 and store the result in rd."};
+        arr[SLTI] = {"SLTI", "Set if Less Than Immediate. Set rd to 1 if rs1 is less than the sign-extended immediate (signed comparison), otherwise set rd to 0."};
+        arr[SLTIU] = {"SLTIU", "Set if Less Than Immediate (Unsigned). Set rd to 1 if rs1 is less than the sign-extended immediate (unsigned comparison), otherwise set rd to 0."};
+        arr[XORI] = {"XORI", "Bitwise XOR Immediate. Performs bitwise XOR of rs1 and the sign-extended immediate, and stores the result in rd."};
+        arr[ORI] = {"ORI", "Bitwise OR Immediate. Performs bitwise OR of rs1 and the sign-extended immediate, and stores the result in rd."};
+        arr[ANDI] = {"ANDI", "Bitwise AND Immediate. Performs bitwise AND of rs1 and the sign-extended immediate, and stores the result in rd."};
+        arr[SLLI] = {"SLLI", "Shift Left Logical Immediate. Performs logical left shift of rs1 by the shift amount (shamt) and stores the result in rd."};
+        arr[SRLI] = {"SRLI", "Shift Right Logical Immediate. Performs logical right shift of rs1 by the shift amount (shamt) and stores the result in rd."};
+        arr[SRAI] = {"SRAI", "Shift Right Arithmetic Immediate. Performs arithmetic right shift of rs1 by the shift amount (shamt), preserving the sign bit, and stores the result in rd."};
+        arr[ADDIW] = {"ADDIW", "Add Immediate Word. Adds the sign-extended 12-bit immediate to rs1, truncating the result to 32 bits, sign-extending to 64 bits, and storing in rd."};
+        arr[SLLIW] = {"SLLIW", "Shift Left Logical Immediate Word. Performs logical left shift of 32-bit rs1 by shamt, sign-extending the 32-bit result to 64 bits and storing in rd."};
+        arr[SRLIW] = {"SRLIW", "Shift Right Logical Immediate Word. Performs logical right shift of 32-bit rs1 by shamt, sign-extending the 32-bit result to 64 bits and storing in rd."};
+        arr[SRAIW] = {"SRAIW", "Shift Right Arithmetic Immediate Word. Performs arithmetic right shift of 32-bit rs1 by shamt, sign-extending the 32-bit result to 64 bits and storing in rd."};
+        arr[ADD] = {"ADD", "Add. Adds the values in rs1 and rs2 and stores the result in rd."};
+        arr[SUB] = {"SUB", "Subtract. Subtracts the value in rs2 from rs1 and stores the result in rd."};
+        arr[SLL] = {"SLL", "Shift Left Logical. Performs logical left shift of rs1 by the amount in rs2 (lower 5/6 bits) and stores the result in rd."};
+        arr[SLT] = {"SLT", "Set if Less Than. Set rd to 1 if rs1 is less than rs2 (signed comparison), otherwise set rd to 0."};
+        arr[SLTU] = {"SLTU", "Set if Less Than (Unsigned). Set rd to 1 if rs1 is less than rs2 (unsigned comparison), otherwise set rd to 0."};
+        arr[XOR] = {"XOR", "Bitwise XOR. Performs bitwise XOR of rs1 and rs2, and stores the result in rd."};
+        arr[SRL] = {"SRL", "Shift Right Logical. Performs logical right shift of rs1 by the amount in rs2 (lower 5/6 bits) and stores the result in rd."};
+        arr[SRA] = {"SRA", "Shift Right Arithmetic. Performs arithmetic right shift of rs1 by the amount in rs2 (lower 5/6 bits), preserving the sign, and stores the result in rd."};
+        arr[OR] = {"OR", "Bitwise OR. Performs bitwise OR of rs1 and rs2, and stores the result in rd."};
+        arr[AND] = {"AND", "Bitwise AND. Performs bitwise AND of rs1 and rs2, and stores the result in rd."};
+        arr[ADDW] = {"ADDW", "Add Word. Adds the lower 32 bits of rs1 and rs2, sign-extending the 32-bit result to 64 bits and storing in rd."};
+        arr[SUBW] = {"SUBW", "Subtract Word. Subtracts the lower 32 bits of rs2 from rs1, sign-extending the 32-bit result to 64 bits and storing in rd."};
+        arr[SLLW] = {"SLLW", "Shift Left Logical Word. Performs logical left shift of 32-bit rs1 by the shift amount in rs2 (lower 5 bits), sign-extending the 32-bit result to 64 bits and storing in rd."};
+        arr[SRLW] = {"SRLW", "Shift Right Logical Word. Performs logical right shift of 32-bit rs1 by the shift amount in rs2 (lower 5 bits), sign-extending the 32-bit result to 64 bits and storing in rd."};
+        arr[SRAW] = {"SRAW", "Shift Right Arithmetic Word. Performs arithmetic right shift of 32-bit rs1 by the shift amount in rs2 (lower 5 bits), sign-extending the 32-bit result to 64 bits and storing in rd."};
+        arr[FENCE] = {"FENCE", "Fence. Orders memory accesses and instruction fetches across threads."};
+        arr[FENCE_I] = {"FENCE.I", "Fence Instruction. Synchronizes the instruction cache with data writes."};
+        arr[ECALL] = {"ECALL", "Environment Call. Triggers a system call exception corresponding to the current privilege mode."};
+        arr[EBREAK] = {"EBREAK", "Breakpoint. Triggers a breakpoint exception, handing control back to a debugger."};
+        arr[CSRRW] = {"CSRRW", "CSR Read/Write. Atomically swaps the value of a CSR with the value in rs1, storing the old CSR value in rd."};
+        arr[CSRRS] = {"CSRRS", "CSR Read and Set Bits. Atomically sets bits in a CSR based on the mask in rs1, storing the old CSR value in rd."};
+        arr[CSRRC] = {"CSRRC", "CSR Read and Clear Bits. Atomically clears bits in a CSR based on the mask in rs1, storing the old CSR value in rd."};
+        arr[CSRRWI] = {"CSRRWI", "CSR Read/Write Immediate. Atomically swaps the value of a CSR with a zero-extended 5-bit immediate, storing the old CSR value in rd."};
+        arr[CSRRSI] = {"CSRRSI", "CSR Read and Set Bits Immediate. Atomically sets bits in a CSR based on a zero-extended 5-bit immediate mask, storing the old CSR value in rd."};
+        arr[CSRRCI] = {"CSRRCI", "CSR Read and Clear Bits Immediate. Atomically clears bits in a CSR based on a zero-extended 5-bit immediate mask, storing the old CSR value in rd."};
+        arr[URET] = {"URET", "User-mode Return. Returns from an exception/interrupt handler in User mode, restoring PC from uepc."};
+        arr[SRET] = {"SRET", "Supervisor-mode Return. Returns from an exception/interrupt handler in Supervisor mode, restoring PC from sepc and privilege level from mstatus.spp."};
+        arr[MRET] = {"MRET", "Machine-mode Return. Returns from an exception/interrupt handler in Machine mode, restoring PC from mepc and privilege level from mstatus.mpp."};
+        arr[WFI] = {"WFI", "Wait For Interrupt. Suspends instruction execution until an interrupt is received, saving power."};
+        arr[SFENCE_VMA] = {"SFENCE.VMA", "Supervisor Fence Virtual Memory Address. Flushes the TLB cache, synchronizing page table writes with address translation."};
+        arr[MUL] = {"MUL", "Multiply. Multiplies rs1 and rs2 and stores the lower XLEN bits of the result in rd."};
+        arr[MULH] = {"MULH", "Multiply High (Signed). Multiplies rs1 and rs2 and stores the upper XLEN bits of the signed product in rd."};
+        arr[MULHSU] = {"MULHSU", "Multiply High (Signed/Unsigned). Multiplies signed rs1 and unsigned rs2, storing the upper XLEN bits of the product in rd."};
+        arr[MULHU] = {"MULHU", "Multiply High (Unsigned). Multiplies unsigned rs1 and rs2, storing the upper XLEN bits of the product in rd."};
+        arr[DIV] = {"DIV", "Divide. Divides rs1 by rs2 (signed division) and stores the quotient in rd."};
+        arr[DIVU] = {"DIVU", "Divide (Unsigned). Divides rs1 by rs2 (unsigned division) and stores the quotient in rd."};
+        arr[REM] = {"REM", "Remainder. Calculates the remainder of signed division of rs1 by rs2, storing the result in rd."};
+        arr[REMU] = {"REMU", "Remainder (Unsigned). Calculates the remainder of unsigned division of rs1 by rs2, storing the result in rd."};
+        arr[MULW] = {"MULW", "Multiply Word. Multiplies 32-bit values from rs1 and rs2, sign-extending the lower 32 bits of the product to 64 bits and storing in rd."};
+        arr[DIVW] = {"DIVW", "Divide Word. Divides 32-bit signed value from rs1 by 32-bit signed value from rs2, sign-extending the 32-bit quotient to 64 bits and storing in rd."};
+        arr[DIVUW] = {"DIVUW", "Divide Word (Unsigned). Divides 32-bit unsigned value from rs1 by 32-bit unsigned value from rs2, sign-extending the 32-bit quotient to 64 bits and storing in rd."};
+        arr[REMW] = {"REMW", "Remainder Word. Calculates remainder of 32-bit signed division of rs1 by rs2, sign-extending the 32-bit result to 64 bits and storing in rd."};
+        arr[REMUW] = {"REMUW", "Remainder Word (Unsigned). Calculates remainder of 32-bit unsigned division of rs1 by rs2, sign-extending the 32-bit result to 64 bits and storing in rd."};
+        arr[LR_W] = {"LR.W", "Load-Reserved Word. Loads a word from address rs1 into rd, and registers a reservation on that memory address."};
+        arr[SC_W] = {"SC.W", "Store-Conditional Word. Conditionally writes a word from rs2 to address rs1 if a reservation on that address is active, storing 0 in rd on success, or non-zero on failure."};
+        arr[AMOSWAP_W] = {"AMOSWAP.W", "Atomic Swap Word. Atomically loads a word from address rs1 into rd, and stores rs2 to address rs1."};
+        arr[AMOADD_W] = {"AMOADD.W", "Atomic Add Word. Atomically loads a word from address rs1 into rd, adds rs2 to it, and stores the result back to address rs1."};
+        arr[AMOXOR_W] = {"AMOXOR.W", "Atomic XOR Word. Atomically loads a word from address rs1 into rd, XORs rs2 with it, and stores the result back to address rs1."};
+        arr[AMOAND_W] = {"AMOAND.W", "Atomic AND Word. Atomically loads a word from address rs1 into rd, ANDs rs2 with it, and stores the result back to address rs1."};
+        arr[AMOOR_W] = {"AMOOR.W", "Atomic OR Word. Atomically loads a word from address rs1 into rd, ORs rs2 with it, and stores the result back to address rs1."};
+        arr[AMOMIN_W] = {"AMOMIN.W", "Atomic Min Word. Atomically loads a word from address rs1 into rd, calculates the signed min with rs2, and stores the result back to address rs1."};
+        arr[AMOMAX_W] = {"AMOMAX.W", "Atomic Max Word. Atomically loads a word from address rs1 into rd, calculates the signed max with rs2, and stores the result back to address rs1."};
+        arr[AMOMINU_W] = {"AMOMINU.W", "Atomic Min Word (Unsigned). Atomically loads a word from address rs1 into rd, calculates the unsigned min with rs2, and stores the result back to address rs1."};
+        arr[AMOMAXU_W] = {"AMOMAXU.W", "Atomic Max Word (Unsigned). Atomically loads a word from address rs1 into rd, calculates the unsigned max with rs2, and stores the result back to address rs1."};
+        arr[FLW] = {"FLW", "Floating-Point Load Word. Loads a 32-bit floating-point value from memory address rs1 + immediate into floating-point register rd."};
+        arr[FSW] = {"FSW", "Floating-Point Store Word. Stores a 32-bit floating-point value from floating-point register rs2 to memory address rs1 + immediate."};
+        arr[FLD] = {"FLD", "Floating-Point Load Double. Loads a 64-bit floating-point value from memory address rs1 + immediate into floating-point register rd."};
+        arr[FSD] = {"FSD", "Floating-Point Store Double. Stores a 64-bit floating-point value from floating-point register rs2 to memory address rs1 + immediate."};
+
+        return arr;
+    }();
+
+    auto const idx = static_cast<size_t>(op_id);
+    if (idx < kOpDescriptions.size()) {
+        return kOpDescriptions[idx];
     }
+    return kDefaultDesc;
+}
+
+auto c_code(std::string_view ansi_code, bool use_color) -> std::string_view {
+    return use_color ? ansi_code : "";
+}
+
+auto print_r_format(uint32_t funct7_val, uint32_t rs2_val, uint32_t rs1_val, uint32_t funct3_val, uint32_t rd_val, simrv::pipeline::Opcode op, bool use_color) -> void {
+    auto c = [use_color](std::string_view code) { return c_code(code, use_color); };
+    std::println("Visual Bit Fields Breakdown (R-Type format):");
+    std::println("  31          25 24      20 19      15 14  12 11        7 6           0");
+    std::println("  +------------+----------+----------+----+----------+-------------+");
+    std::println("  |   funct7   |   rs2    |   rs1    | f3 |    rd    |   opcode    |");
+    std::println("  +------------+----------+----------+----+----------+-------------+");
+    std::print("  |   {}{:07b}{}  |  {}{:05b}{}   |  {}{:05b}{}   | {}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
+               c(kBrightRed), funct7_val, c(kReset),
+               c(kBrightMagenta), rs2_val, c(kReset),
+               c(kBrightYellow), rs1_val, c(kReset),
+               c(kBrightCyan), funct3_val, c(kReset),
+               c(kBrightGreen), rd_val, c(kReset),
+               c(kBrightBlue), std::to_underlying(op), c(kReset));
+    std::println("  +------------+----------+----------+----+----------+-------------+");
+
+    std::println("\nField Decoded Meanings:");
+    std::println("  opcode  : {}0x{:02X}{} ({:07b}) -> Major Opcode", c(kBrightBlue), std::to_underlying(op), c(kBrightBlue), std::to_underlying(op), c(kReset));
+    std::println("  rd      : {}x{:<2}{} ({:05b}) -> Destination Register: {}", c(kBrightGreen), rd_val, c(kBrightGreen), rd_val, reg_name(rd_val), c(kReset));
+    std::println("  funct3  : {}0x{:01X}{}  ({:03b}) -> Sub-function selector", c(kBrightCyan), funct3_val, c(kBrightCyan), funct3_val, c(kReset));
+    std::println("  rs1     : {}x{:<2}{} ({:05b}) -> Source Register 1: {}", c(kBrightYellow), rs1_val, c(kBrightYellow), rs1_val, reg_name(rs1_val), c(kReset));
+    std::println("  rs2     : {}x{:<2}{} ({:05b}) -> Source Register 2: {}", c(kBrightMagenta), rs2_val, c(kBrightMagenta), rs2_val, reg_name(rs2_val), c(kReset));
+    std::println("  funct7  : {}0x{:02X}{} ({:07b}) -> Operations modifier", c(kBrightRed), funct7_val, c(kBrightRed), funct7_val, c(kReset));
+}
+
+auto print_i_format(uint32_t imm_bits, int32_t imm_val, uint32_t rs1_val, uint32_t funct3_val, uint32_t rd_val, simrv::pipeline::Opcode op, bool use_color) -> void {
+    auto c = [use_color](std::string_view code) { return c_code(code, use_color); };
+    std::println("Visual Bit Fields Breakdown (I-Type format):");
+    std::println("  31                20 19      15 14  12 11        7 6           0");
+    std::println("  +----------------------+----------+----+----------+-------------+");
+    std::println("  |      immediate       |   rs1    | f3 |    rd    |   opcode    |");
+    std::println("  +----------------------+----------+----+----------+-------------+");
+    std::print("  |     {}{:012b}{}     |  {}{:05b}{}   | {}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
+               c(kBrightRed), imm_bits, c(kReset),
+               c(kBrightYellow), rs1_val, c(kReset),
+               c(kBrightCyan), funct3_val, c(kReset),
+               c(kBrightGreen), rd_val, c(kReset),
+               c(kBrightBlue), std::to_underlying(op), c(kReset));
+    std::println("  +----------------------+----------+----+----------+-------------+");
+
+    std::println("\nField Decoded Meanings:");
+    std::println("  opcode  : {}0x{:02X}{} ({:07b}) -> Major Opcode", c(kBrightBlue), std::to_underlying(op), c(kBrightBlue), std::to_underlying(op), c(kReset));
+    std::println("  rd      : {}x{:<2}{} ({:05b}) -> Destination Register: {}", c(kBrightGreen), rd_val, c(kBrightGreen), rd_val, reg_name(rd_val), c(kReset));
+    std::println("  funct3  : {}0x{:01X}{}  ({:03b}) -> Sub-function selector", c(kBrightCyan), funct3_val, c(kBrightCyan), funct3_val, c(kReset));
+    std::println("  rs1     : {}x{:<2}{} ({:05b}) -> Source Register 1: {}", c(kBrightYellow), rs1_val, c(kBrightYellow), rs1_val, reg_name(rs1_val), c(kReset));
+    std::println("  imm     : {}0x{:03X}{}  ({:012b}) -> Sign-extended 12-bit Immediate", c(kBrightRed), imm_bits, c(kBrightRed), imm_bits, c(kReset));
+
+    std::println("\nImmediate Reconstruction:");
+    std::println("  imm[11:0] = inst[31:20] = {:012b}", imm_bits);
+    std::println("  Sign-extended to 32 bits: {}{} (0x{:X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
+}
+
+auto print_s_format(uint32_t imm_hi, uint32_t imm_lo, int32_t imm_val, uint32_t rs1_val, uint32_t rs2_val, uint32_t funct3_val, simrv::pipeline::Opcode op, bool use_color) -> void {
+    auto c = [use_color](std::string_view code) { return c_code(code, use_color); };
+    std::println("Visual Bit Fields Breakdown (S-Type format):");
+    std::println("  31          25 24      20 19      15 14  12 11        7 6           0");
+    std::println("  +------------+----------+----------+----+----------+-------------+");
+    std::println("  |  imm[11:5] |   rs2    |   rs1    | f3 | imm[4:0] |   opcode    |");
+    std::println("  +------------+----------+----------+----+----------+-------------+");
+    std::print("  |   {}{:07b}{}  |  {}{:05b}{}   |  {}{:05b}{}   | {}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
+               c(kBrightRed), imm_hi, c(kReset),
+               c(kBrightMagenta), rs2_val, c(kReset),
+               c(kBrightYellow), rs1_val, c(kReset),
+               c(kBrightCyan), funct3_val, c(kReset),
+               c(kBrightRed), imm_lo, c(kReset),
+               c(kBrightBlue), std::to_underlying(op), c(kReset));
+    std::println("  +------------+----------+----------+----+----------+-------------+");
+
+    std::println("\nField Decoded Meanings:");
+    std::println("  opcode  : {}0x{:02X}{} ({:07b}) -> Major Opcode", c(kBrightBlue), std::to_underlying(op), c(kBrightBlue), std::to_underlying(op), c(kReset));
+    std::println("  imm_lo  : {}0x{:02X}{}   ({:05b}) -> Lower bits of immediate", c(kBrightRed), imm_lo, c(kBrightRed), imm_lo, c(kReset));
+    std::println("  funct3  : {}0x{:01X}{}  ({:03b}) -> Sub-function selector", c(kBrightCyan), funct3_val, c(kBrightCyan), funct3_val, c(kReset));
+    std::println("  rs1     : {}x{:<2}{} ({:05b}) -> Base Address Register: {}", c(kBrightYellow), rs1_val, c(kBrightYellow), rs1_val, reg_name(rs1_val), c(kReset));
+    std::println("  rs2     : {}x{:<2}{} ({:05b}) -> Source Register (Value to store): {}", c(kBrightMagenta), rs2_val, c(kBrightMagenta), rs2_val, reg_name(rs2_val), c(kReset));
+    std::println("  imm_hi  : {}0x{:02X}{}   ({:07b}) -> Upper bits of immediate", c(kBrightRed), imm_hi, c(kBrightRed), imm_hi, c(kReset));
+
+    std::println("\nImmediate Reconstruction:");
+    std::println("  imm[11:5] = inst[31:25] = {:07b}", imm_hi);
+    std::println("  imm[4:0]  = inst[11:7]  = {:05b}", imm_lo);
+    std::println("  Combined  = {:012b}", (imm_hi << 5) | imm_lo);
+    std::println("  Sign-extended to 32 bits: {}{} (0x{:X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
+}
+
+auto print_b_format(uint32_t inst, uint32_t imm_hi, uint32_t imm_lo, int32_t imm_val, uint32_t rs1_val, uint32_t rs2_val, uint32_t funct3_val, simrv::pipeline::Opcode op, bool use_color) -> void {
+    auto c = [use_color](std::string_view code) { return c_code(code, use_color); };
+    std::println("Visual Bit Fields Breakdown (B-Type format):");
+    std::println("  31          25 24      20 19      15 14  12 11        7 6           0");
+    std::println("  +------------+----------+----------+----+----------+-------------+");
+    std::println("  |imm[12|10:5]|   rs2    |   rs1    | f3 |imm[4:1|11]|   opcode    |");
+    std::println("  +------------+----------+----------+----+----------+-------------+");
+    std::print("  |   {}{:07b}{}  |  {}{:05b}{}   |  {}{:05b}{}   | {}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
+               c(kBrightRed), imm_hi, c(kReset),
+               c(kBrightMagenta), rs2_val, c(kReset),
+               c(kBrightYellow), rs1_val, c(kReset),
+               c(kBrightCyan), funct3_val, c(kReset),
+               c(kBrightRed), imm_lo, c(kReset),
+               c(kBrightBlue), std::to_underlying(op), c(kReset));
+    std::println("  +------------+----------+----------+----+----------+-------------+");
+
+    std::println("\nField Decoded Meanings:");
+    std::println("  opcode  : {}0x{:02X}{} ({:07b}) -> Major Opcode", c(kBrightBlue), std::to_underlying(op), c(kBrightBlue), std::to_underlying(op), c(kReset));
+    std::println("  imm_lo  : {}0x{:02X}{}   ({:05b}) -> Branch offset bits [4:1, 11]", c(kBrightRed), imm_lo, c(kBrightRed), imm_lo, c(kReset));
+    std::println("  funct3  : {}0x{:01X}{}  ({:03b}) -> Branch condition selector", c(kBrightCyan), funct3_val, c(kBrightCyan), funct3_val, c(kReset));
+    std::println("  rs1     : {}x{:<2}{} ({:05b}) -> Source Register 1: {}", c(kBrightYellow), rs1_val, c(kBrightYellow), rs1_val, reg_name(rs1_val), c(kReset));
+    std::println("  rs2     : {}x{:<2}{} ({:05b}) -> Source Register 2: {}", c(kBrightMagenta), rs2_val, c(kBrightMagenta), rs2_val, reg_name(rs2_val), c(kReset));
+    std::println("  imm_hi  : {}0x{:02X}{}   ({:07b}) -> Branch offset bits [12, 10:5]", c(kBrightRed), imm_hi, c(kBrightRed), imm_hi, c(kReset));
+
+    std::println("\nImmediate Reconstruction:");
+    uint32_t const b31 = (inst >> 31) & 1;
+    uint32_t const b7 = (inst >> 7) & 1;
+    uint32_t const b30_25 = (inst >> 25) & 0x3F;
+    uint32_t const b11_8 = (inst >> 8) & 0xF;
+    std::println("  imm[12]   = inst[31]    = {}", b31);
+    std::println("  imm[11]   = inst[7]     = {}", b7);
+    std::println("  imm[10:5] = inst[30:25] = {:06b}", b30_25);
+    std::println("  imm[4:1]  = inst[11:8]  = {:04b}", b11_8);
+    std::println("  imm[0]    = 0           = 0 (Implicitly zero for 2-byte alignment)");
+    std::println("  Combined  = {:013b}", (b31 << 12) | (b7 << 11) | (b30_25 << 5) | (b11_8 << 1));
+    std::println("  Sign-extended to 32 bits: {}{} bytes (0x{:X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
+}
+
+auto print_u_format(uint32_t imm_bits, int32_t imm_val, uint32_t rd_val, simrv::pipeline::Opcode op, bool use_color) -> void {
+    auto c = [use_color](std::string_view code) { return c_code(code, use_color); };
+    std::println("Visual Bit Fields Breakdown (U-Type format):");
+    std::println("  31                                12 11        7 6           0");
+    std::println("  +--------------------------------------+----------+-------------+");
+    std::println("  |              immediate               |    rd    |   opcode    |");
+    std::println("  +--------------------------------------+----------+-------------+");
+    std::print("  |         {}{:020b}{}       |  {}{:05b}{}   |   {}{:07b}{}   |\n",
+               c(kBrightRed), imm_bits, c(kReset),
+               c(kBrightGreen), rd_val, c(kReset),
+               c(kBrightBlue), std::to_underlying(op), c(kReset));
+    std::println("  +--------------------------------------+----------+-------------+");
+
+    std::println("\nField Decoded Meanings:");
+    std::println("  opcode  : {}0x{:02X}{} ({:07b}) -> Major Opcode", c(kBrightBlue), std::to_underlying(op), c(kBrightBlue), std::to_underlying(op), c(kReset));
+    std::println("  rd      : {}x{:<2}{} ({:05b}) -> Destination Register: {}", c(kBrightGreen), rd_val, c(kBrightGreen), rd_val, reg_name(rd_val), c(kReset));
+    std::println("  imm     : {}0x{:05X}{} ({:020b}) -> Upper 20-bit Immediate", c(kBrightRed), imm_bits, c(kBrightRed), imm_bits, c(kReset));
+
+    std::println("\nImmediate Reconstruction:");
+    std::println("  imm[31:12] = inst[31:12] = {:020b}", imm_bits);
+    std::println("  imm[11:0]  = 0            = 000000000000");
+    std::println("  Combined Value           : {}{} (0x{:X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
+}
+
+auto print_j_format(uint32_t inst, uint32_t imm_bits, int32_t imm_val, uint32_t rd_val, simrv::pipeline::Opcode op, bool use_color) -> void {
+    auto c = [use_color](std::string_view code) { return c_code(code, use_color); };
+    std::println("Visual Bit Fields Breakdown (J-Type format):");
+    std::println("  31                                12 11        7 6           0");
+    std::println("  +--------------------------------------+----------+-------------+");
+    std::println("  |              immediate               |    rd    |   opcode    |");
+    std::println("  +--------------------------------------+----------+-------------+");
+    std::print("  |         {}{:020b}{}       |  {}{:05b}{}   |   {}{:07b}{}   |\n",
+               c(kBrightRed), imm_bits, c(kReset),
+               c(kBrightGreen), rd_val, c(kReset),
+               c(kBrightBlue), std::to_underlying(op), c(kReset));
+    std::println("  +--------------------------------------+----------+-------------+");
+
+    std::println("\nField Decoded Meanings:");
+    std::println("  opcode  : {}0x{:02X}{} ({:07b}) -> Major Opcode", c(kBrightBlue), std::to_underlying(op), c(kBrightBlue), std::to_underlying(op), c(kReset));
+    std::println("  rd      : {}x{:<2}{} ({:05b}) -> Destination Register: {}", c(kBrightGreen), rd_val, c(kBrightGreen), rd_val, reg_name(rd_val), c(kReset));
+    std::println("  imm_bits: {}0x{:05X}{} ({:020b}) -> Raw scrambled immediate bits", c(kBrightRed), imm_bits, c(kBrightRed), imm_bits, c(kReset));
+
+    std::println("\nImmediate Reconstruction:");
+    uint32_t const j31 = (inst >> 31) & 1;
+    uint32_t const j19_12 = (inst >> 12) & 0xFF;
+    uint32_t const j20 = (inst >> 20) & 1;
+    uint32_t const j30_21 = (inst >> 21) & 0x3FF;
+    std::println("  imm[20]    = inst[31]     = {}", j31);
+    std::println("  imm[19:12] = inst[19:12]  = {:08b}", j19_12);
+    std::println("  imm[11]    = inst[20]     = {}", j20);
+    std::println("  imm[10:1]  = inst[30:21]  = {:010b}", j30_21);
+    std::println("  imm[0]     = 0            = 0 (Implicitly zero for 2-byte alignment)");
+    std::println("  Combined   = {:021b}", (j31 << 20) | (j19_12 << 12) | (j20 << 11) | (j30_21 << 1));
+    std::println("  Sign-extended to 32 bits: {}{} bytes (0x{:X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
+}
+
+auto print_r4_format(uint32_t funct7_val, uint32_t rs3_val, uint32_t rs2_val, uint32_t rs1_val, uint32_t funct3_val, uint32_t rd_val, simrv::pipeline::Opcode op, bool use_color) -> void {
+    auto c = [use_color](std::string_view code) { return c_code(code, use_color); };
+    std::println("Visual Bit Fields Breakdown (R4-Type format):");
+    std::println("  31    27 26 25 24      20 19      15 14  12 11        7 6           0");
+    std::println("  +-----+----+--+----------+----------+----+----------+-------------+");
+    std::println("  | rs3 |fmt |..|   rs2    |   rs1    | f3 |    rd    |   opcode    |");
+    std::println("  +-----+----+--+----------+----------+----+----------+-------------+");
+    std::print("  | {}{:05b}{} | {:02b} |00|  {}{:05b}{}   |  {}{:05b}{}   | {}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
+               c(kBrightWhite), rs3_val, c(kReset),
+               funct7_val & 3,
+               c(kBrightMagenta), rs2_val, c(kReset),
+               c(kBrightYellow), rs1_val, c(kReset),
+               c(kBrightCyan), funct3_val, c(kReset),
+               c(kBrightGreen), rd_val, c(kReset),
+               c(kBrightBlue), std::to_underlying(op), c(kReset));
+    std::println("  +-----+----+--+----------+----------+----+----------+-------------+");
+
+    std::println("\nField Decoded Meanings:");
+    std::println("  opcode  : {}0x{:02X}{} ({:07b}) -> Major Opcode", c(kBrightBlue), std::to_underlying(op), c(kBrightBlue), std::to_underlying(op), c(kReset));
+    std::println("  rd      : {}f{:<2}{} ({:05b}) -> FP Destination Register: {}", c(kBrightGreen), rd_val, c(kBrightGreen), rd_val, reg_name(rd_val, true), c(kReset));
+    std::println("  funct3  : {}0x{:01X}{}  ({:03b}) -> FP rounding mode or sub-function", c(kBrightCyan), funct3_val, c(kBrightCyan), funct3_val, c(kReset));
+    std::println("  rs1     : {}f{:<2}{} ({:05b}) -> FP Source Register 1: {}", c(kBrightYellow), rs1_val, c(kBrightYellow), rs1_val, reg_name(rs1_val, true), c(kReset));
+    std::println("  rs2     : {}f{:<2}{} ({:05b}) -> FP Source Register 2: {}", c(kBrightMagenta), rs2_val, c(kBrightMagenta), rs2_val, reg_name(rs2_val, true), c(kReset));
+    std::println("  rs3     : {}f{:<2}{} ({:05b}) -> FP Source Register 3: {}", c(kBrightWhite), rs3_val, c(kBrightWhite), rs3_val, reg_name(rs3_val, true), c(kReset));
+}
+
+auto format_r_type(::OperationId op_id, std::string_view mnemonic, uint32_t rd_val, uint32_t rs1_val, uint32_t rs2_val, bool is_fp_sys) -> std::string {
+    bool const is_dst_fp = (op_id >= FLW && op_id <= FSW) ||
+                          (op_id >= FADD_S && op_id <= FMAX_S) ||
+                          (op_id >= FCVT_S_W && op_id <= FMV_W_X) ||
+                          (op_id >= FLD && op_id <= FSD) ||
+                          (op_id >= FADD_D && op_id <= FMAX_D) ||
+                          (op_id >= FCVT_D_W && op_id <= FMV_D_X);
+
+    bool const is_src_fp = (op_id >= FADD_S && op_id <= FCVT_W_S) ||
+                          (op_id >= FEQ_S && op_id <= FCLASS_S) ||
+                          (op_id >= FADD_D && op_id <= FCVT_W_D) ||
+                          (op_id >= FEQ_D && op_id <= FCLASS_D);
+
+    std::string const rd_str = ABI_NAMES[rd_val];
+    std::string const rs1_str = ABI_NAMES[rs1_val];
+    std::string const rs2_str = ABI_NAMES[rs2_val];
+    std::string const frd_str = FP_ABI_NAMES[rd_val];
+    std::string const frs1_str = FP_ABI_NAMES[rs1_val];
+    std::string const frs2_str = FP_ABI_NAMES[rs2_val];
+
+    if (op_id == SFENCE_VMA) {
+        return std::format("sfence.vma {}, {}", rs1_str, rs2_str);
+    } else if (op_id >= LR_W && op_id <= SC_W) {
+        if (op_id == LR_W) {
+            return std::format("lr.w {}, ({})", rd_str, rs1_str);
+        } else {
+            return std::format("sc.w {}, {}, ({})", rd_str, rs2_str, rs1_str);
+        }
+    } else if (op_id >= AMOSWAP_W && op_id <= AMOMAXU_W) {
+        return std::format("{}.aqrl {}, {}, ({})", mnemonic, rd_str, rs2_str, rs1_str);
+    } else if (is_fp_sys) {
+        // Conversions and Moves
+        if ((op_id == FMV_X_W || op_id == FMV_X_D) ||
+            (op_id == FCLASS_S || op_id == FCLASS_D) ||
+            (op_id >= FCVT_W_S && op_id <= FCVT_LU_S) ||
+            (op_id >= FCVT_W_D && op_id <= FCVT_LU_D)) {
+            return std::format("{} {}, {}", mnemonic, rd_str, frs1_str);
+        } else if ((op_id == FMV_W_X || op_id == FMV_D_X) ||
+                   (op_id >= FCVT_S_W && op_id <= FCVT_S_LU) ||
+                   (op_id >= FCVT_D_W && op_id <= FCVT_D_LU)) {
+            return std::format("{} {}, {}", mnemonic, frd_str, rs1_str);
+        }
+    } else if (is_dst_fp || is_src_fp) {
+        if (op_id == FSQRT_S || op_id == FSQRT_D) {
+            return std::format("{} {}, {}", mnemonic, frd_str, frs1_str);
+        } else if (op_id == FEQ_S || op_id == FLT_S || op_id == FLE_S ||
+                   op_id == FEQ_D || op_id == FLT_D || op_id == FLE_D) {
+            return std::format("{} {}, {}, {}", mnemonic, rd_str, frs1_str, frs2_str);
+        } else {
+            return std::format("{} {}, {}, {}", mnemonic, frd_str, frs1_str, frs2_str);
+        }
+    }
+    return std::format("{} {}, {}, {}", mnemonic, rd_str, rs1_str, rs2_str);
+}
+
+auto format_i_type(::OperationId op_id, std::string_view mnemonic, uint32_t rd_val, uint32_t rs1_val, int32_t imm_val, uint32_t csr_val, simrv::pipeline::Opcode op, bool is_load, bool is_csr) -> std::string {
+    std::string const rd_str = ABI_NAMES[rd_val];
+    std::string const rs1_str = ABI_NAMES[rs1_val];
+    std::string const frd_str = FP_ABI_NAMES[rd_val];
+
+    if (is_load) {
+        if (op == simrv::pipeline::Opcode::kLoadFp) {
+            return std::format("{} {}, {}({})", mnemonic, frd_str, imm_val, rs1_str);
+        } else {
+            return std::format("{} {}, {}({})", mnemonic, rd_str, imm_val, rs1_str);
+        }
+    } else if (op_id == JALR) {
+        return std::format("jalr {}, {}({})", rd_str, imm_val, rs1_str);
+    } else if (is_csr) {
+        std::string const csr_str = csr_name(csr_val);
+        if (op_id == CSRRWI || op_id == CSRRSI || op_id == CSRRCI) {
+            return std::format("{} {}, {}, {}", mnemonic, rd_str, csr_str, rs1_val); // rs1 field acts as uimm
+        } else {
+            return std::format("{} {}, {}, {}", mnemonic, rd_str, csr_str, rs1_str);
+        }
+    } else if (op_id == ECALL || op_id == EBREAK) {
+        return std::string(mnemonic);
+    } else if (op_id == FENCE) {
+        return "fence";
+    } else if (op_id == FENCE_I) {
+        return "fence.i";
+    } else if (op_id == SLLI || op_id == SRLI || op_id == SRAI ||
+               op_id == SLLIW || op_id == SRLIW || op_id == SRAIW) {
+        uint32_t const shamt = imm_val & 0x3F;
+        return std::format("{} {}, {}, {}", mnemonic, rd_str, rs1_str, shamt);
+    }
+    return std::format("{} {}, {}, {}", mnemonic, rd_str, rs1_str, imm_val);
+}
+
+auto format_s_type(std::string_view mnemonic, uint32_t rs1_val, uint32_t rs2_val, int32_t imm_val, simrv::pipeline::Opcode op) -> std::string {
+    std::string const rs1_str = ABI_NAMES[rs1_val];
+    std::string const rs2_str = ABI_NAMES[rs2_val];
+    std::string const frs2_str = FP_ABI_NAMES[rs2_val];
+
+    if (op == simrv::pipeline::Opcode::kStoreFp) {
+        return std::format("{} {}, {}({})", mnemonic, frs2_str, imm_val, rs1_str);
+    } else {
+        return std::format("{} {}, {}({})", mnemonic, rs2_str, imm_val, rs1_str);
+    }
+}
+
+auto format_b_type(std::string_view mnemonic, uint32_t rs1_val, uint32_t rs2_val, int32_t imm_val) -> std::string {
+    std::string const rs1_str = ABI_NAMES[rs1_val];
+    std::string const rs2_str = ABI_NAMES[rs2_val];
+    return std::format("{} {}, {}, {}", mnemonic, rs1_str, rs2_str, imm_val);
+}
+
+auto format_u_type(std::string_view mnemonic, uint32_t rd_val, int32_t imm_val) -> std::string {
+    std::string const rd_str = ABI_NAMES[rd_val];
+    return std::format("{} {}, 0x{:X}", mnemonic, rd_str, static_cast<uint32_t>(imm_val));
+}
+
+auto format_j_type(uint32_t rd_val, int32_t imm_val) -> std::string {
+    std::string const rd_str = ABI_NAMES[rd_val];
+    return std::format("jal {}, {}", rd_str, imm_val);
+}
+
+auto format_r4_type(std::string_view mnemonic, uint32_t rd_val, uint32_t rs1_val, uint32_t rs2_val, uint32_t rs3_val) -> std::string {
+    std::string const frd_str = FP_ABI_NAMES[rd_val];
+    std::string const frs1_str = FP_ABI_NAMES[rs1_val];
+    std::string const frs2_str = FP_ABI_NAMES[rs2_val];
+    std::string const frs3_str = FP_ABI_NAMES[rs3_val];
+    return std::format("{} {}, {}, {}, {}", mnemonic, frd_str, frs1_str, frs2_str, frs3_str);
 }
 
 } // namespace
@@ -307,213 +652,33 @@ void explain_instruction(uint32_t raw_inst) {
     // Print Visual Fields
     std::println("");
     if (fmt == InstFormat::R) {
-        std::println("Visual Bit Fields Breakdown (R-Type format):");
-        std::println("  31          25 24      20 19      15 14  12 11        7 6           0");
-        std::println("  +------------+----------+----------+----+----------+-------------+");
-        std::println("  |   funct7   |   rs2    |   rs1    | f3 |    rd    |   opcode    |");
-        std::println("  +------------+----------+----------+----+----------+-------------+");
-        std::print("  |   {}{:07b}{}  |  {}{:05b}{}   |  {}{:05b}{}   | {}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
-                   c(kBrightRed), funct7_val, c(kReset),
-                   c(kBrightMagenta), rs2_val, c(kReset),
-                   c(kBrightYellow), rs1_val, c(kReset),
-                   c(kBrightCyan), funct3_val, c(kReset),
-                   c(kBrightGreen), rd_val, c(kReset),
-                   c(kBrightBlue), std::to_underlying(op), c(kReset));
-        std::println("  +------------+----------+----------+----+----------+-------------+");
-
-        std::println("\nField Decoded Meanings:");
-        std::println("  opcode  : {}0x{:02X}{} ({:07b}) -> Major Opcode", c(kBrightBlue), std::to_underlying(op), c(kBrightBlue), std::to_underlying(op), c(kReset));
-        std::println("  rd      : {}x{:<2}{} ({:05b}) -> Destination Register: {}", c(kBrightGreen), rd_val, c(kBrightGreen), rd_val, reg_name(rd_val), c(kReset));
-        std::println("  funct3  : {}0x{:01X}{}  ({:03b}) -> Sub-function selector", c(kBrightCyan), funct3_val, c(kBrightCyan), funct3_val, c(kReset));
-        std::println("  rs1     : {}x{:<2}{} ({:05b}) -> Source Register 1: {}", c(kBrightYellow), rs1_val, c(kBrightYellow), rs1_val, reg_name(rs1_val), c(kReset));
-        std::println("  rs2     : {}x{:<2}{} ({:05b}) -> Source Register 2: {}", c(kBrightMagenta), rs2_val, c(kBrightMagenta), rs2_val, reg_name(rs2_val), c(kReset));
-        std::println("  funct7  : {}0x{:02X}{} ({:07b}) -> Operations modifier", c(kBrightRed), funct7_val, c(kBrightRed), funct7_val, c(kReset));
-
+        print_r_format(funct7_val, rs2_val, rs1_val, funct3_val, rd_val, op, use_color);
     } else if (fmt == InstFormat::I) {
         uint32_t const imm_bits = (inst >> 20) & 0xFFF;
         int32_t const imm_val = static_cast<int32_t>(inst) >> 20;
-
-        std::println("Visual Bit Fields Breakdown (I-Type format):");
-        std::println("  31                20 19      15 14  12 11        7 6           0");
-        std::println("  +----------------------+----------+----+----------+-------------+");
-        std::println("  |      immediate       |   rs1    | f3 |    rd    |   opcode    |");
-        std::println("  +----------------------+----------+----+----------+-------------+");
-        std::print("  |     {}{:012b}{}     |  {}{:05b}{}   | {}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
-                   c(kBrightRed), imm_bits, c(kReset),
-                   c(kBrightYellow), rs1_val, c(kReset),
-                   c(kBrightCyan), funct3_val, c(kReset),
-                   c(kBrightGreen), rd_val, c(kReset),
-                   c(kBrightBlue), std::to_underlying(op), c(kReset));
-        std::println("  +----------------------+----------+----+----------+-------------+");
-
-        std::println("\nField Decoded Meanings:");
-        std::println("  opcode  : {}0x{:02X}{} ({:07b}) -> Major Opcode", c(kBrightBlue), std::to_underlying(op), c(kBrightBlue), std::to_underlying(op), c(kReset));
-        std::println("  rd      : {}x{:<2}{} ({:05b}) -> Destination Register: {}", c(kBrightGreen), rd_val, c(kBrightGreen), rd_val, reg_name(rd_val), c(kReset));
-        std::println("  funct3  : {}0x{:01X}{}  ({:03b}) -> Sub-function selector", c(kBrightCyan), funct3_val, c(kBrightCyan), funct3_val, c(kReset));
-        std::println("  rs1     : {}x{:<2}{} ({:05b}) -> Source Register 1: {}", c(kBrightYellow), rs1_val, c(kBrightYellow), rs1_val, reg_name(rs1_val), c(kReset));
-        std::println("  imm     : {}0x{:03X}{}  ({:012b}) -> Sign-extended 12-bit Immediate", c(kBrightRed), imm_bits, c(kBrightRed), imm_bits, c(kReset));
-
-        std::println("\nImmediate Reconstruction:");
-        std::println("  imm[11:0] = inst[31:20] = {:012b}", imm_bits);
-        std::println("  Sign-extended to 32 bits: {}{} (0x{:X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
-
+        print_i_format(imm_bits, imm_val, rs1_val, funct3_val, rd_val, op, use_color);
     } else if (fmt == InstFormat::S) {
         uint32_t const imm_hi = (inst >> 25) & 0x7F;
         uint32_t const imm_lo = (inst >> 7) & 0x1F;
         int32_t const imm_val = (static_cast<int32_t>(inst & 0xFE000000) >> 20) | ((inst >> 7) & 0x1F);
-
-        std::println("Visual Bit Fields Breakdown (S-Type format):");
-        std::println("  31          25 24      20 19      15 14  12 11        7 6           0");
-        std::println("  +------------+----------+----------+----+----------+-------------+");
-        std::println("  |  imm[11:5] |   rs2    |   rs1    | f3 | imm[4:0] |   opcode    |");
-        std::println("  +------------+----------+----------+----+----------+-------------+");
-        std::print("  |   {}{:07b}{}  |  {}{:05b}{}   |  {}{:05b}{}   | {}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
-                   c(kBrightRed), imm_hi, c(kReset),
-                   c(kBrightMagenta), rs2_val, c(kReset),
-                   c(kBrightYellow), rs1_val, c(kReset),
-                   c(kBrightCyan), funct3_val, c(kReset),
-                   c(kBrightRed), imm_lo, c(kReset),
-                   c(kBrightBlue), std::to_underlying(op), c(kReset));
-        std::println("  +------------+----------+----------+----+----------+-------------+");
-
-        std::println("\nField Decoded Meanings:");
-        std::println("  opcode  : {}0x{:02X}{} ({:07b}) -> Major Opcode", c(kBrightBlue), std::to_underlying(op), c(kBrightBlue), std::to_underlying(op), c(kReset));
-        std::println("  imm_lo  : {}0x{:02X}{}   ({:05b}) -> Lower bits of immediate", c(kBrightRed), imm_lo, c(kBrightRed), imm_lo, c(kReset));
-        std::println("  funct3  : {}0x{:01X}{}  ({:03b}) -> Sub-function selector", c(kBrightCyan), funct3_val, c(kBrightCyan), funct3_val, c(kReset));
-        std::println("  rs1     : {}x{:<2}{} ({:05b}) -> Base Address Register: {}", c(kBrightYellow), rs1_val, c(kBrightYellow), rs1_val, reg_name(rs1_val), c(kReset));
-        std::println("  rs2     : {}x{:<2}{} ({:05b}) -> Source Register (Value to store): {}", c(kBrightMagenta), rs2_val, c(kBrightMagenta), rs2_val, reg_name(rs2_val), c(kReset));
-        std::println("  imm_hi  : {}0x{:02X}{}   ({:07b}) -> Upper bits of immediate", c(kBrightRed), imm_hi, c(kBrightRed), imm_hi, c(kReset));
-
-        std::println("\nImmediate Reconstruction:");
-        std::println("  imm[11:5] = inst[31:25] = {:07b}", imm_hi);
-        std::println("  imm[4:0]  = inst[11:7]  = {:05b}", imm_lo);
-        std::println("  Combined  = {:012b}", (imm_hi << 5) | imm_lo);
-        std::println("  Sign-extended to 32 bits: {}{} (0x{:X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
-
+        print_s_format(imm_hi, imm_lo, imm_val, rs1_val, rs2_val, funct3_val, op, use_color);
     } else if (fmt == InstFormat::B) {
         uint32_t const imm_hi = (inst >> 25) & 0x7F;
         uint32_t const imm_lo = (inst >> 7) & 0x1F;
         int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 19) | ((inst & 0x7E000000) >> 20) |
                                ((inst & 0x00000F00) >> 7) | ((inst & 0x00000080) << 4);
-
-        std::println("Visual Bit Fields Breakdown (B-Type format):");
-        std::println("  31          25 24      20 19      15 14  12 11        7 6           0");
-        std::println("  +------------+----------+----------+----+----------+-------------+");
-        std::println("  |imm[12|10:5]|   rs2    |   rs1    | f3 |imm[4:1|11]|   opcode    |");
-        std::println("  +------------+----------+----------+----+----------+-------------+");
-        std::print("  |   {}{:07b}{}  |  {}{:05b}{}   |  {}{:05b}{}   | {}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
-                   c(kBrightRed), imm_hi, c(kReset),
-                   c(kBrightMagenta), rs2_val, c(kReset),
-                   c(kBrightYellow), rs1_val, c(kReset),
-                   c(kBrightCyan), funct3_val, c(kReset),
-                   c(kBrightRed), imm_lo, c(kReset),
-                   c(kBrightBlue), std::to_underlying(op), c(kReset));
-        std::println("  +------------+----------+----------+----+----------+-------------+");
-
-        std::println("\nField Decoded Meanings:");
-        std::println("  opcode  : {}0x{:02X}{} ({:07b}) -> Major Opcode", c(kBrightBlue), std::to_underlying(op), c(kBrightBlue), std::to_underlying(op), c(kReset));
-        std::println("  imm_lo  : {}0x{:02X}{}   ({:05b}) -> Branch offset bits [4:1, 11]", c(kBrightRed), imm_lo, c(kBrightRed), imm_lo, c(kReset));
-        std::println("  funct3  : {}0x{:01X}{}  ({:03b}) -> Branch condition selector", c(kBrightCyan), funct3_val, c(kBrightCyan), funct3_val, c(kReset));
-        std::println("  rs1     : {}x{:<2}{} ({:05b}) -> Source Register 1: {}", c(kBrightYellow), rs1_val, c(kBrightYellow), rs1_val, reg_name(rs1_val), c(kReset));
-        std::println("  rs2     : {}x{:<2}{} ({:05b}) -> Source Register 2: {}", c(kBrightMagenta), rs2_val, c(kBrightMagenta), rs2_val, reg_name(rs2_val), c(kReset));
-        std::println("  imm_hi  : {}0x{:02X}{}   ({:07b}) -> Branch offset bits [12, 10:5]", c(kBrightRed), imm_hi, c(kBrightRed), imm_hi, c(kReset));
-
-        std::println("\nImmediate Reconstruction:");
-        uint32_t const b31 = (inst >> 31) & 1;
-        uint32_t const b7 = (inst >> 7) & 1;
-        uint32_t const b30_25 = (inst >> 25) & 0x3F;
-        uint32_t const b11_8 = (inst >> 8) & 0xF;
-        std::println("  imm[12]   = inst[31]    = {}", b31);
-        std::println("  imm[11]   = inst[7]     = {}", b7);
-        std::println("  imm[10:5] = inst[30:25] = {:06b}", b30_25);
-        std::println("  imm[4:1]  = inst[11:8]  = {:04b}", b11_8);
-        std::println("  imm[0]    = 0           = 0 (Implicitly zero for 2-byte alignment)");
-        std::println("  Combined  = {:013b}", (b31 << 12) | (b7 << 11) | (b30_25 << 5) | (b11_8 << 1));
-        std::println("  Sign-extended to 32 bits: {}{} bytes (0x{:X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
-
+        print_b_format(inst, imm_hi, imm_lo, imm_val, rs1_val, rs2_val, funct3_val, op, use_color);
     } else if (fmt == InstFormat::U) {
         uint32_t const imm_bits = (inst >> 12) & 0xFFFFF;
         auto const imm_val = static_cast<int32_t>(inst & 0xFFFFF000);
-
-        std::println("Visual Bit Fields Breakdown (U-Type format):");
-        std::println("  31                                12 11        7 6           0");
-        std::println("  +--------------------------------------+----------+-------------+");
-        std::println("  |              immediate               |    rd    |   opcode    |");
-        std::println("  +--------------------------------------+----------+-------------+");
-        std::print("  |         {}{:020b}{}       |  {}{:05b}{}   |   {}{:07b}{}   |\n",
-                   c(kBrightRed), imm_bits, c(kReset),
-                   c(kBrightGreen), rd_val, c(kReset),
-                   c(kBrightBlue), std::to_underlying(op), c(kReset));
-        std::println("  +--------------------------------------+----------+-------------+");
-
-        std::println("\nField Decoded Meanings:");
-        std::println("  opcode  : {}0x{:02X}{} ({:07b}) -> Major Opcode", c(kBrightBlue), std::to_underlying(op), c(kBrightBlue), std::to_underlying(op), c(kReset));
-        std::println("  rd      : {}x{:<2}{} ({:05b}) -> Destination Register: {}", c(kBrightGreen), rd_val, c(kBrightGreen), rd_val, reg_name(rd_val), c(kReset));
-        std::println("  imm     : {}0x{:05X}{} ({:020b}) -> Upper 20-bit Immediate", c(kBrightRed), imm_bits, c(kBrightRed), imm_bits, c(kReset));
-
-        std::println("\nImmediate Reconstruction:");
-        std::println("  imm[31:12] = inst[31:12] = {:020b}", imm_bits);
-        std::println("  imm[11:0]  = 0            = 000000000000");
-        std::println("  Combined Value           : {}{} (0x{:X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
-
+        print_u_format(imm_bits, imm_val, rd_val, op, use_color);
     } else if (fmt == InstFormat::J) {
         uint32_t const imm_bits = ((inst >> 12) & 0xFFFFF);
         int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 11) | (inst & 0x000FF000) |
                                ((inst & 0x00100000) >> 9) | ((inst & 0x7FE00000) >> 20);
-
-        std::println("Visual Bit Fields Breakdown (J-Type format):");
-        std::println("  31                                12 11        7 6           0");
-        std::println("  +--------------------------------------+----------+-------------+");
-        std::println("  |              immediate               |    rd    |   opcode    |");
-        std::println("  +--------------------------------------+----------+-------------+");
-        std::print("  |         {}{:020b}{}       |  {}{:05b}{}   |   {}{:07b}{}   |\n",
-                   c(kBrightRed), imm_bits, c(kReset),
-                   c(kBrightGreen), rd_val, c(kReset),
-                   c(kBrightBlue), std::to_underlying(op), c(kReset));
-        std::println("  +--------------------------------------+----------+-------------+");
-
-        std::println("\nField Decoded Meanings:");
-        std::println("  opcode  : {}0x{:02X}{} ({:07b}) -> Major Opcode", c(kBrightBlue), std::to_underlying(op), c(kBrightBlue), std::to_underlying(op), c(kReset));
-        std::println("  rd      : {}x{:<2}{} ({:05b}) -> Destination Register: {}", c(kBrightGreen), rd_val, c(kBrightGreen), rd_val, reg_name(rd_val), c(kReset));
-        std::println("  imm_bits: {}0x{:05X}{} ({:020b}) -> Raw scrambled immediate bits", c(kBrightRed), imm_bits, c(kBrightRed), imm_bits, c(kReset));
-
-        std::println("\nImmediate Reconstruction:");
-        uint32_t const j31 = (inst >> 31) & 1;
-        uint32_t const j19_12 = (inst >> 12) & 0xFF;
-        uint32_t const j20 = (inst >> 20) & 1;
-        uint32_t const j30_21 = (inst >> 21) & 0x3FF;
-        std::println("  imm[20]    = inst[31]     = {}", j31);
-        std::println("  imm[19:12] = inst[19:12]  = {:08b}", j19_12);
-        std::println("  imm[11]    = inst[20]     = {}", j20);
-        std::println("  imm[10:1]  = inst[30:21]  = {:010b}", j30_21);
-        std::println("  imm[0]     = 0            = 0 (Implicitly zero for 2-byte alignment)");
-        std::println("  Combined   = {:021b}", (j31 << 20) | (j19_12 << 12) | (j20 << 11) | (j30_21 << 1));
-        std::println("  Sign-extended to 32 bits: {}{} bytes (0x{:X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
-
+        print_j_format(inst, imm_bits, imm_val, rd_val, op, use_color);
     } else if (fmt == InstFormat::R4) {
-        std::println("Visual Bit Fields Breakdown (R4-Type format):");
-        std::println("  31    27 26 25 24      20 19      15 14  12 11        7 6           0");
-        std::println("  +-----+----+--+----------+----------+----+----------+-------------+");
-        std::println("  | rs3 |fmt |..|   rs2    |   rs1    | f3 |    rd    |   opcode    |");
-        std::println("  +-----+----+--+----------+----------+----+----------+-------------+");
-        std::print("  | {}{:05b}{} | {:02b} |00|  {}{:05b}{}   |  {}{:05b}{}   | {}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
-                   c(kBrightWhite), rs3_val, c(kReset),
-                   funct7_val & 3,
-                   c(kBrightMagenta), rs2_val, c(kReset),
-                   c(kBrightYellow), rs1_val, c(kReset),
-                   c(kBrightCyan), funct3_val, c(kReset),
-                   c(kBrightGreen), rd_val, c(kReset),
-                   c(kBrightBlue), std::to_underlying(op), c(kReset));
-        std::println("  +-----+----+--+----------+----------+----+----------+-------------+");
-
-        std::println("\nField Decoded Meanings:");
-        std::println("  opcode  : {}0x{:02X}{} ({:07b}) -> Major Opcode", c(kBrightBlue), std::to_underlying(op), c(kBrightBlue), std::to_underlying(op), c(kReset));
-        std::println("  rd      : {}f{:<2}{} ({:05b}) -> FP Destination Register: {}", c(kBrightGreen), rd_val, c(kBrightGreen), rd_val, reg_name(rd_val, true), c(kReset));
-        std::println("  funct3  : {}0x{:01X}{}  ({:03b}) -> FP rounding mode or sub-function", c(kBrightCyan), funct3_val, c(kBrightCyan), funct3_val, c(kReset));
-        std::println("  rs1     : {}f{:<2}{} ({:05b}) -> FP Source Register 1: {}", c(kBrightYellow), rs1_val, c(kBrightYellow), rs1_val, reg_name(rs1_val, true), c(kReset));
-        std::println("  rs2     : {}f{:<2}{} ({:05b}) -> FP Source Register 2: {}", c(kBrightMagenta), rs2_val, c(kBrightMagenta), rs2_val, reg_name(rs2_val, true), c(kReset));
-        std::println("  rs3     : {}f{:<2}{} ({:05b}) -> FP Source Register 3: {}", c(kBrightWhite), rs3_val, c(kBrightWhite), rs3_val, reg_name(rs3_val, true), c(kReset));
-
+        print_r4_format(funct7_val, rs3_val, rs2_val, rs1_val, funct3_val, rd_val, op, use_color);
     } else {
         std::println("Visual Bit Fields Breakdown: Format unrecognized.");
     }
@@ -535,125 +700,26 @@ void explain_instruction(uint32_t raw_inst) {
                               (op_id >= FCVT_W_D && op_id <= FMV_D_X);
 
         if (fmt == InstFormat::R) {
-            bool const is_dst_fp = (op_id >= FLW && op_id <= FSW) ||
-                                  (op_id >= FADD_S && op_id <= FMAX_S) ||
-                                  (op_id >= FCVT_S_W && op_id <= FMV_W_X) ||
-                                  (op_id >= FLD && op_id <= FSD) ||
-                                  (op_id >= FADD_D && op_id <= FMAX_D) ||
-                                  (op_id >= FCVT_D_W && op_id <= FMV_D_X);
-
-            bool const is_src_fp = (op_id >= FADD_S && op_id <= FCVT_W_S) ||
-                                  (op_id >= FEQ_S && op_id <= FCLASS_S) ||
-                                  (op_id >= FADD_D && op_id <= FCVT_W_D) ||
-                                  (op_id >= FEQ_D && op_id <= FCLASS_D);
-
-            std::string const rd_str = ABI_NAMES[rd_val];
-            std::string const rs1_str = ABI_NAMES[rs1_val];
-            std::string const rs2_str = ABI_NAMES[rs2_val];
-            std::string const frd_str = FP_ABI_NAMES[rd_val];
-            std::string const frs1_str = FP_ABI_NAMES[rs1_val];
-            std::string const frs2_str = FP_ABI_NAMES[rs2_val];
-
-            if (op_id == SFENCE_VMA) {
-                assembly = std::format("sfence.vma {}, {}", rs1_str, rs2_str);
-            } else if (op_id >= LR_W && op_id <= SC_W) {
-                if (op_id == LR_W) {
-                    assembly = std::format("lr.w {}, ({})", rd_str, rs1_str);
-                } else {
-                    assembly = std::format("sc.w {}, {}, ({})", rd_str, rs2_str, rs1_str);
-                }
-            } else if (op_id >= AMOSWAP_W && op_id <= AMOMAXU_W) {
-                assembly = std::format("{}.aqrl {}, {}, ({})", mnemonic, rd_str, rs2_str, rs1_str);
-            } else if (is_fp_sys) {
-                // Conversions and Moves
-                if ((op_id == FMV_X_W || op_id == FMV_X_D) ||
-                    (op_id == FCLASS_S || op_id == FCLASS_D) ||
-                    (op_id >= FCVT_W_S && op_id <= FCVT_LU_S) ||
-                    (op_id >= FCVT_W_D && op_id <= FCVT_LU_D)) {
-                    assembly = std::format("{} {}, {}", mnemonic, rd_str, frs1_str);
-                } else if ((op_id == FMV_W_X || op_id == FMV_D_X) ||
-                           (op_id >= FCVT_S_W && op_id <= FCVT_S_LU) ||
-                           (op_id >= FCVT_D_W && op_id <= FCVT_D_LU)) {
-                    assembly = std::format("{} {}, {}", mnemonic, frd_str, rs1_str);
-                }
-            } else if (is_dst_fp || is_src_fp) {
-                if (op_id == FSQRT_S || op_id == FSQRT_D) {
-                    assembly = std::format("{} {}, {}", mnemonic, frd_str, frs1_str);
-                } else if (op_id == FEQ_S || op_id == FLT_S || op_id == FLE_S ||
-                           op_id == FEQ_D || op_id == FLT_D || op_id == FLE_D) {
-                    assembly = std::format("{} {}, {}, {}", mnemonic, rd_str, frs1_str, frs2_str);
-                } else {
-                    assembly = std::format("{} {}, {}, {}", mnemonic, frd_str, frs1_str, frs2_str);
-                }
-            } else {
-                assembly = std::format("{} {}, {}, {}", mnemonic, rd_str, rs1_str, rs2_str);
-            }
+            assembly = format_r_type(op_id, mnemonic, rd_val, rs1_val, rs2_val, is_fp_sys);
         } else if (fmt == InstFormat::I) {
             int32_t const imm_val = static_cast<int32_t>(inst) >> 20;
-            std::string const rd_str = ABI_NAMES[rd_val];
-            std::string const rs1_str = ABI_NAMES[rs1_val];
-            std::string const frd_str = FP_ABI_NAMES[rd_val];
-
-            if (is_load) {
-                if (op == simrv::pipeline::Opcode::kLoadFp) {
-                    assembly = std::format("{} {}, {}({})", mnemonic, frd_str, imm_val, rs1_str);
-                } else {
-                    assembly = std::format("{} {}, {}({})", mnemonic, rd_str, imm_val, rs1_str);
-                }
-            } else if (op_id == JALR) {
-                assembly = std::format("jalr {}, {}({})", rd_str, imm_val, rs1_str);
-            } else if (is_csr) {
-                std::string const csr_str = csr_name(csr_val);
-                if (op_id == CSRRWI || op_id == CSRRSI || op_id == CSRRCI) {
-                    assembly = std::format("{} {}, {}, {}", mnemonic, rd_str, csr_str, rs1_val); // rs1 field acts as uimm
-                } else {
-                    assembly = std::format("{} {}, {}, {}", mnemonic, rd_str, csr_str, rs1_str);
-                }
-            } else if (op_id == ECALL || op_id == EBREAK) {
-                assembly = mnemonic;
-            } else if (op_id == FENCE) {
-                assembly = "fence";
-            } else if (op_id == FENCE_I) {
-                assembly = "fence.i";
-            } else if (op_id == SLLI || op_id == SRLI || op_id == SRAI ||
-                       op_id == SLLIW || op_id == SRLIW || op_id == SRAIW) {
-                uint32_t const shamt = imm_val & 0x3F;
-                assembly = std::format("{} {}, {}, {}", mnemonic, rd_str, rs1_str, shamt);
-            } else {
-                assembly = std::format("{} {}, {}, {}", mnemonic, rd_str, rs1_str, imm_val);
-            }
+            assembly = format_i_type(op_id, mnemonic, rd_val, rs1_val, imm_val, csr_val, op, is_load, is_csr);
         } else if (fmt == InstFormat::S) {
             int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 20) | ((inst >> 7) & 0x1F) | ((inst >> 20) & 0x7E0);
-            std::string const rs1_str = ABI_NAMES[rs1_val];
-            std::string const rs2_str = ABI_NAMES[rs2_val];
-            std::string const frs2_str = FP_ABI_NAMES[rs2_val];
-
-            if (op == simrv::pipeline::Opcode::kStoreFp) {
-                assembly = std::format("{} {}, {}({})", mnemonic, frs2_str, imm_val, rs1_str);
-            } else {
-                assembly = std::format("{} {}, {}({})", mnemonic, rs2_str, imm_val, rs1_str);
-            }
+            assembly = format_s_type(mnemonic, rs1_val, rs2_val, imm_val, op);
         } else if (fmt == InstFormat::B) {
             int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 19) | ((inst & 0x7E000000) >> 20) |
                                    ((inst & 0x00000F00) >> 7) | ((inst & 0x00000080) << 4);
-            std::string const rs1_str = ABI_NAMES[rs1_val];
-            std::string const rs2_str = ABI_NAMES[rs2_val];
-            assembly = std::format("{} {}, {}, {}", mnemonic, rs1_str, rs2_str, imm_val);
+            assembly = format_b_type(mnemonic, rs1_val, rs2_val, imm_val);
         } else if (fmt == InstFormat::U) {
             auto const imm_val = static_cast<int32_t>(inst & 0xFFFFF000);
-            std::string const rd_str = ABI_NAMES[rd_val];
-            assembly = std::format("{} {}, 0x{:X}", mnemonic, rd_str, static_cast<uint32_t>(imm_val));
+            assembly = format_u_type(mnemonic, rd_val, imm_val);
         } else if (fmt == InstFormat::J) {
             int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 11) | (inst & 0x000FF000) |
                                    ((inst & 0x00100000) >> 9) | ((inst & 0x7FE00000) >> 20);
-            std::string const rd_str = ABI_NAMES[rd_val];
-            assembly = std::format("jal {}, {}", rd_str, imm_val);
+            assembly = format_j_type(rd_val, imm_val);
         } else if (fmt == InstFormat::R4) {
-            std::string const frd_str = FP_ABI_NAMES[rd_val];
-            std::string const frs1_str = FP_ABI_NAMES[rs1_val];
-            std::string const frs2_str = FP_ABI_NAMES[rs2_val];
-            std::string const frs3_str = FP_ABI_NAMES[rs3_val];
-            assembly = std::format("{} {}, {}, {}, {}", mnemonic, frd_str, frs1_str, frs2_str, frs3_str);
+            assembly = format_r4_type(mnemonic, rd_val, rs1_val, rs2_val, rs3_val);
         }
 
         std::println("  Assembly Rep     : {}# {}{}", c(kBrightBlack), assembly, c(kReset));

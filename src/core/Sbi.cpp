@@ -140,6 +140,7 @@ auto Sbi::handle_time(Word func_id) -> bool {
         cpu_.clint_mmio.mtimecmp = timer_value();
         cpu_.state().mip &= ~enum_mask(MipBit::Mtip);
         cpu_.state().mip &= ~enum_mask(MipBit::Stip);
+        cpu_.evaluate_timer_interrupt();
         sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
     } else {
         sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);

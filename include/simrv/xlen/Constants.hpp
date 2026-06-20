@@ -52,44 +52,89 @@ inline constexpr uint64_t kF64FracQnanBit = 51U;
 inline constexpr Word kMegapageOffsetMask = 0x003fffffu;
 inline constexpr Word kPageOffsetMask = 0x00000fffu;
 
-[[nodiscard]] inline constexpr auto satp_mode(Word satp, unsigned xlen = kXLenBits) -> Word {
-    if (xlen == 64) {
+template <unsigned XLen = kXLenBits>
+[[nodiscard]] inline constexpr auto satp_mode(Word satp) -> Word {
+    if constexpr (XLen == 64) {
         return static_cast<Word>((static_cast<uint64_t>(satp) >> 60) & 0xFu);
     } else {
         return (satp >> 31) & 0x1u;
     }
 }
 
-[[nodiscard]] inline constexpr auto satp_translation_enabled(Word satp, unsigned xlen = kXLenBits) -> bool {
-    return satp_mode(satp, xlen) != 0;
+template <unsigned XLen = kXLenBits>
+[[nodiscard]] inline constexpr auto satp_translation_enabled(Word satp) -> bool {
+    return satp_mode<XLen>(satp) != 0;
 }
 
-[[nodiscard]] inline constexpr auto satp_mode_supported(Word mode, unsigned xlen = kXLenBits) -> bool {
-    if (xlen == 64) {
+template <unsigned XLen = kXLenBits>
+[[nodiscard]] inline constexpr auto satp_mode_supported(Word mode) -> bool {
+    if constexpr (XLen == 64) {
         return mode == 0 || mode == 8 || mode == 9 || mode == 1;  // Bare, SV39, SV48, SV32 (compatibility)
     } else {
         return mode == 0 || mode == 1;  // Bare, SV32
     }
 }
 
-[[nodiscard]] inline constexpr auto satp_asid(Word satp, unsigned xlen = kXLenBits) -> Word {
-    if (xlen == 64) {
+template <unsigned XLen = kXLenBits>
+[[nodiscard]] inline constexpr auto satp_asid(Word satp) -> Word {
+    if constexpr (XLen == 64) {
         return static_cast<Word>((static_cast<uint64_t>(satp) >> 44) & 0xffffu);
     } else {
         return (satp >> 22) & 0x1ffu;
     }
 }
 
-[[nodiscard]] inline constexpr auto satp_root_ppn(Word satp, unsigned xlen = kXLenBits) -> Word {
-    if (xlen == 64) {
+template <unsigned XLen = kXLenBits>
+[[nodiscard]] inline constexpr auto satp_root_ppn(Word satp) -> Word {
+    if constexpr (XLen == 64) {
         // Under SV32 mode on a 64-bit machine, we extract the 22-bit PPN.
         // Otherwise, SV39/SV48 uses a 44-bit PPN.
-        if (satp_mode(satp, 64) == 1) {
+        if (satp_mode<64>(satp) == 1) {
             return satp & 0x003fffffu;
         }
         return static_cast<Word>(static_cast<uint64_t>(satp) & 0x00000fffffffffffULL);
     } else {
         return satp & 0x003fffffu;
+    }
+}
+
+[[nodiscard]] inline auto satp_mode(Word satp, unsigned xlen) -> Word {
+    if constexpr (kXLenBits == 32) {
+        return satp_mode<32>(satp);
+    } else {
+        return (xlen == 64) ? satp_mode<64>(satp) : satp_mode<32>(satp);
+    }
+}
+
+[[nodiscard]] inline auto satp_translation_enabled(Word satp, unsigned xlen) -> bool {
+    if constexpr (kXLenBits == 32) {
+        return satp_translation_enabled<32>(satp);
+    } else {
+        return (xlen == 64) ? satp_translation_enabled<64>(satp) : satp_translation_enabled<32>(satp);
+    }
+}
+
+[[nodiscard]] inline auto satp_mode_supported(Word mode, unsigned xlen) -> bool {
+    if constexpr (kXLenBits == 32) {
+        return satp_mode_supported<32>(mode);
+    } else {
+        return (xlen == 64) ? satp_mode_supported<64>(mode) : satp_mode_supported<32>(mode);
+    }
+}
+
+[[nodiscard]] inline auto satp_asid(Word satp, unsigned xlen) -> Word {
+    if constexpr (kXLenBits == 32) {
+        return satp_asid<32>(satp);
+    } else {
+        return (xlen == 64) ? satp_asid<64>(satp) : satp_asid<32>(satp);
+    }
+}
+
+[[nodiscard]] inline auto satp_root_ppn(Word satp, unsigned xlen) -> Word {
+    if constexpr (kXLenBits == 32) {
+        return satp_root_ppn<32>(satp);
+    } else {
+        return (xlen == 64) ? satp_root_ppn<64>(satp) : satp_root_ppn<32>(satp);
     }
 }
 
