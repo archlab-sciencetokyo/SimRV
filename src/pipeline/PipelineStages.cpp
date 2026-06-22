@@ -312,7 +312,12 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
     ctx.padr1 = (state_.regs.xlen == 32) ? (state_.pc & 0xFFFFFFFFULL) : state_.pc;
     ctx.padr2 = (state_.regs.xlen == 32) ? ((state_.pc + 2) & 0xFFFFFFFFULL) : (state_.pc + 2);
 
-    if (simrv::compiler::likely(simrv::memory::is_dram_addr(ctx.padr1))) {
+    const bool split_page =
+        ((state_.pc & ~simrv::memory::kPageMask) != ((state_.pc + 2) & ~simrv::memory::kPageMask));
+    const bool translation_enabled =
+        state_.priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp);
+
+    if (simrv::compiler::likely(simrv::memory::is_dram_addr(ctx.padr1) && !translation_enabled)) {
         const uint16_t h1 = simrv::memory::ram_read_fast(ctx.padr1, static_cast<Instruction>(Funct3::Lhu), machine.mmem);
         if ((h1 & 0x3) != 0x3) {
             ctx.ir_org = h1;
@@ -322,6 +327,16 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
         }
     } else {
         fetch_address_translate(machine);
+
+        if (simrv::compiler::unlikely(translation_enabled)) {
+            fetch_resolve_page_walk(machine, 1);
+            if (simrv::compiler::likely(!split_page)) {
+                if (!ctx.pending_exception.has_value() && ctx.padr1 != kWordAllOnes) {
+                    ctx.padr2 = ctx.padr1 + 2;
+                }
+            }
+        }
+
         fetch_read_instruction_word(machine);
     }
     decode_and_normalize_instruction(machine);

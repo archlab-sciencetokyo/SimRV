@@ -43,8 +43,8 @@ auto Mmu::validate_pte_permissions(Word pte, Word permission_bits, PteAccess acc
     // XWR field must not be reserved values: Write-Only (2) or Write-Execute (6)
     constexpr Word kPermWriteOnly = 2;
     constexpr Word kPermWriteExecute = 6;
-    if (permission_bits == kPermWriteOnly || permission_bits == kPermWriteExecute) {
-
+    const Word original_rwx = (pte >> 1) & 0x7;
+    if (original_rwx == kPermWriteOnly || original_rwx == kPermWriteExecute) {
         return false;
     }
 
@@ -155,13 +155,9 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
             return std::unexpected(make_fault());
         }
 
-        const Word permission_bits =
-            (((mstatus & enum_mask(MstatusBit::Mxr)) != 0u) ? pte >> 1 | pte >> 3 : pte >> 1) &
-            kPermissionBitsMask;
+        const Word original_rwx = (pte >> 1) & 0x7;
 
-
-
-        if (permission_bits == 0) {
+        if (original_rwx == 0) {
             // Pointer to next level
             root_pt_addr = static_cast<Address>((pte >> kPteShift) << 12);
         } else {
@@ -178,9 +174,14 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
 
     const int i = *leaf_level;
 
-    const Word permission_bits =
-        (((mstatus & enum_mask(MstatusBit::Mxr)) != 0u) ? pte >> 1 | pte >> 3 : pte >> 1) &
-        kPermissionBitsMask;
+    const bool mxr = (mstatus & enum_mask(MstatusBit::Mxr)) != 0u;
+    const bool pte_r = (pte & enum_mask(PteFlag::R)) != 0u;
+    const bool pte_w = (pte & enum_mask(PteFlag::W)) != 0u;
+    const bool pte_x = (pte & enum_mask(PteFlag::X)) != 0u;
+
+    const Word permission_bits = (static_cast<Word>(pte_x) << 2) |
+                                 (static_cast<Word>(pte_w) << 1) |
+                                 static_cast<Word>(pte_r | (mxr && pte_x));
 
     if (!validate_pte_permissions(pte, permission_bits, access, priv, mstatus)) {
         return std::unexpected(make_fault());
