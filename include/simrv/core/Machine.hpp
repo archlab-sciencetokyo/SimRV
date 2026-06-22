@@ -38,22 +38,18 @@ class Machine {
     /// Construct the simulator root object.
     Machine();
     /// Destroy simulator resources.
-    ~Machine();
+    virtual ~Machine();
     Machine(const Machine&) = delete;
     auto operator=(const Machine&) -> Machine& = delete;
     Machine(Machine&&) = delete;
     auto operator=(Machine&&) -> Machine& = delete;
     /**
      * @brief Initialize machine state and load runtime images/configuration.
-     * @param argc CLI argument count.
-     * @param argv CLI argument vector.
      * @return 0 on success, non-zero on configuration error.
      */
-    auto initialize(int argc, char* const* argv) -> int;
+    auto initialize() -> int;
     /// Execute the main simulation loop until termination criteria are met.
-    void run();
-    /// Execute the main simulation loop in optimized baremetal mode.
-    void run_baremetal();
+    virtual void run() = 0;
     /// Finalize cycle for tohost checks only.
     void finalize_cycle_tohost();
     /// Stop the simulation loop.
@@ -77,7 +73,6 @@ class Machine {
     bool s_use_disk = false;       // Enable disk image simulation
     bool s_use_mix = false;        // Enable instruction-mix statistics collection
     bool s_bp_trace = false;       // Enable branch prediction tracing
-    bool s_isatest = false;        // Enable riscv-isa-tests tohost handling
     bool s_misa_override = false;  // True when CLI explicitly selected MISA profile
     bool s_cycle_accurate = false; // Enable cycle-accurate performance simulation mode
     bool s_high_performance = true; // Enable high-performance optimized simulation mode
@@ -128,7 +123,7 @@ class Machine {
     Tracer tracer{*this};  // Tracing facility
     simrv::debug::SymbolTable symbols;  // ELF debugging symbols
 
-   private:
+   protected:
     std::unique_ptr<Byte, decltype(&std::free)> mmem_owner_{nullptr, &std::free};
     std::vector<simrv::virtio::QueueState> console_queue_owner_;
     std::vector<simrv::virtio::QueueState> disk_queue_owner_;
@@ -136,9 +131,9 @@ class Machine {
     friend class simrv::device::Uart;
     simrv::memory::MemorySubsystem memory_;
     /// Perform per-cycle initialization before CPU stage execution.
-    void prepare_cycle();
+    virtual void prepare_cycle() {}
     /// Perform per-cycle finalization and completion checks.
-    void finalize_cycle();
+    virtual void finalize_cycle() {}
     bool is_running_ = true;  // Main-loop run flag.
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes)

@@ -27,7 +27,7 @@
 #include "simrv/xlen/Types.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
 
-void set_options(simrv::core::Machine* m, int argc, char* const* argv);
+
 
 namespace simrv::core {
 
@@ -117,8 +117,7 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
 
 }  // namespace
 
-auto Machine::initialize(int argc, char* const* argv) -> int {
-    set_options(this, argc, argv);
+auto Machine::initialize() -> int {
 
     if (!s_fn_cpuconfig.empty()) {
         if (!simrv::core::load_cpu_config(s_fn_cpuconfig, cpu.pipeline_sim.config)) {
@@ -165,7 +164,7 @@ auto Machine::initialize(int argc, char* const* argv) -> int {
     memory_.system_bus().add_node(power.get());
     memory_.system_bus().add_node(&cpu.plic_mmio);
     memory_.system_bus().add_node(&cpu.clint_mmio);
-    const bool linux_boot = !s_appmode && !s_isatest;
+    const bool linux_boot = !s_appmode;
     const Address dtb_offset =
         linux_boot
             ? static_cast<Address>(simrv::memory::kDramSize - static_cast<Address>(0x00100000U))

@@ -4,7 +4,7 @@ project(SimRV LANGUAGES CXX)
 
 enable_testing()
 
-set(SIMRV_VERSION "2.0.0-beta.6")
+set(SIMRV_VERSION "2.0.0-beta.7")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -86,6 +86,8 @@ add_executable(SimRV
   src/Main.cpp
   src/core/Logger.cpp
   src/core/Machine.cpp
+  src/core/BaremetalMachine.cpp
+  src/core/OSMachine.cpp
   src/core/MachineInit.cpp
   src/core/StateControl.cpp
   src/core/CsrFile.cpp
@@ -99,6 +101,7 @@ add_executable(SimRV
   src/execute/ExecuteUnit.cpp
   src/pipeline/PipelineStages.cpp
   src/core/Cpu.cpp
+  src/util/CliParser.cpp
   src/cache/ICache.cpp
   src/cache/DCache.cpp
   src/memory/MemoryAccess.cpp

@@ -37,7 +37,7 @@ if(EXISTS "${NM_BIN}")
 endif()
 
 # 3. Run SimRV
-set(SIMRV_ARGS -m ${bin_path} -e ${END_INSNS} -T -H ${tohost_addr})
+set(SIMRV_ARGS -m ${bin_path} -e ${END_INSNS} -b -H ${tohost_addr})
 if(LOCKSTEP)
   list(APPEND SIMRV_ARGS --lockstep)
   list(APPEND SIMRV_ARGS --spike-elf ${ELF_PATH})

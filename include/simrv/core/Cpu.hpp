@@ -205,6 +205,13 @@ class CPU {
     auto execute_cached_load_store(Machine& machine, CachedOp& op, Register rrs1, Register rrs2) -> bool;
     auto execute_cached_fallback(Machine& machine) -> void;
     auto handle_cached_interrupts() -> void;
+    inline void pc_sign_extend() {
+        if constexpr (simrv::xlen::kIsXLen64) {
+            if (simrv::compiler::unlikely(state_.regs.xlen == 32)) {
+                state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+            }
+        }
+    }
 
     ArchState state_;
 

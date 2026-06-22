@@ -3,6 +3,7 @@
  * @brief CPU core state/control implementation.
  */
 #include "simrv/core/Cpu.hpp"
+#include <bit>
 
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Tracer.hpp"
@@ -284,6 +285,9 @@ void CPU::run_cycle(Machine& machine) {
 }
 
 void CPU::run_cycle_baremetal(Machine& machine) {
+    pipeline_context.pending_exception = std::nullopt;
+    pipeline_context.pending_tval = 0;
+
     if (machine.s_high_performance) {
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
@@ -292,9 +296,6 @@ void CPU::run_cycle_baremetal(Machine& machine) {
             return;
         }
     }
-
-    pipeline_context.pending_exception = std::nullopt;
-    pipeline_context.pending_tval = 0;
     
     run_fetch_stage_baremetal(machine);
     const bool success = !pipeline_context.pending_exception.has_value() &&
@@ -335,7 +336,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
 
     // Load Phase
     if (opcode == Opcode::Load || (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc)) {
-        if (simrv::compiler::likely(addr < simrv::memory::kDramSize)) {
+        if (simrv::compiler::likely(simrv::memory::is_dram_addr(addr))) {
             ctx.mem_rdata = simrv::memory::ram_read_fast(addr, static_cast<Instruction>(ctx.funct3), machine.mmem);
         } else {
             ctx.mem_rdata = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, addr, ctx.funct3);
@@ -343,7 +344,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     }
 
     if (opcode == Opcode::LoadFp) {
-        if (simrv::compiler::likely(addr < simrv::memory::kDramSize)) {
+        if (simrv::compiler::likely(simrv::memory::is_dram_addr(addr))) {
             const auto f3 = ctx.funct3;
             if (f3 == Funct3::Flw) {
                 const Word lo = simrv::memory::ram_read_fast(addr, static_cast<Instruction>(Funct3::Lw), machine.mmem);
@@ -383,7 +384,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         (opcode == Opcode::Amo &&
           (funct5 == Funct5Amo::Sc && (ctx.wb_data == 0u) && (state_.reserved != 0u))) ||
         (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr && funct5 != Funct5Amo::Sc)) {
-        if (simrv::compiler::likely(addr < simrv::memory::kDramSize)) {
+        if (simrv::compiler::likely(simrv::memory::is_dram_addr(addr))) {
             // Check tohost writes
             if (simrv::compiler::unlikely(addr == machine.s_isatest_tohost || addr == 0x80001000 || addr == 0x40008000)) {
                 const bool is_tohost_write =
@@ -410,7 +411,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     }
 
     if (opcode == Opcode::StoreFp) {
-        if (simrv::compiler::likely(addr < simrv::memory::kDramSize)) {
+        if (simrv::compiler::likely(simrv::memory::is_dram_addr(addr))) {
             const auto f3 = ctx.funct3;
             if (f3 == Funct3::Fsw) {
                 simrv::memory::ram_write_fast(addr, static_cast<Word>(ctx.fp_mem_wdata & static_cast<FloatingRegister>(kLower32Mask)),
@@ -518,9 +519,7 @@ void CPU::execute_cached_lui(CachedOp& op) {
     e_icount++;
     if (op.cinsn) e_ccount++;
     state_.pc += (op.cinsn ? 2 : 4);
-    if (state_.regs.xlen == 32) {
-        state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
-    }
+    pc_sign_extend();
 }
 
 void CPU::execute_cached_auipc(CachedOp& op) {
@@ -530,9 +529,7 @@ void CPU::execute_cached_auipc(CachedOp& op) {
     e_icount++;
     if (op.cinsn) e_ccount++;
     state_.pc += (op.cinsn ? 2 : 4);
-    if (state_.regs.xlen == 32) {
-        state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
-    }
+    pc_sign_extend();
 }
 
 void CPU::execute_cached_jal(CachedOp& op) {
@@ -545,9 +542,7 @@ void CPU::execute_cached_jal(CachedOp& op) {
     state_.pc = pipeline_context.jmp_pc;
     e_icount++;
     if (op.cinsn) e_ccount++;
-    if (state_.regs.xlen == 32) {
-        state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
-    }
+    pc_sign_extend();
 }
 
 void CPU::execute_cached_jalr(CachedOp& op, Register rrs1) {
@@ -560,9 +555,7 @@ void CPU::execute_cached_jalr(CachedOp& op, Register rrs1) {
     state_.pc = pipeline_context.jmp_pc;
     e_icount++;
     if (op.cinsn) e_ccount++;
-    if (state_.regs.xlen == 32) {
-        state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
-    }
+    pc_sign_extend();
 }
 
 void CPU::execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) {
@@ -572,9 +565,7 @@ void CPU::execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) {
     state_.pc = tkn ? pipeline_context.jmp_pc : (state_.pc + (op.cinsn ? 2 : 4));
     e_icount++;
     if (op.cinsn) e_ccount++;
-    if (state_.regs.xlen == 32) {
-        state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
-    }
+    pc_sign_extend();
 }
 
 void CPU::execute_cached_op(CachedOp& op, Register rrs1, Register rrs2) {
@@ -585,9 +576,7 @@ void CPU::execute_cached_op(CachedOp& op, Register rrs1, Register rrs2) {
     e_icount++;
     if (op.cinsn) e_ccount++;
     state_.pc += (op.cinsn ? 2 : 4);
-    if (state_.regs.xlen == 32) {
-        state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
-    }
+    pc_sign_extend();
 }
 
 void CPU::execute_cached_op_imm(CachedOp& op, Register rrs1) {
@@ -599,9 +588,7 @@ void CPU::execute_cached_op_imm(CachedOp& op, Register rrs1) {
     e_icount++;
     if (op.cinsn) e_ccount++;
     state_.pc += (op.cinsn ? 2 : 4);
-    if (state_.regs.xlen == 32) {
-        state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
-    }
+    pc_sign_extend();
 }
 
 void CPU::execute_cached_op_imm32(CachedOp& op, Register rrs1) {
@@ -614,9 +601,7 @@ void CPU::execute_cached_op_imm32(CachedOp& op, Register rrs1) {
     e_icount++;
     if (op.cinsn) e_ccount++;
     state_.pc += (op.cinsn ? 2 : 4);
-    if (state_.regs.xlen == 32) {
-        state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
-    }
+    pc_sign_extend();
 }
 
 void CPU::execute_cached_op32(CachedOp& op, Register rrs1, Register rrs2) {
@@ -632,15 +617,20 @@ void CPU::execute_cached_op32(CachedOp& op, Register rrs1, Register rrs2) {
     e_icount++;
     if (op.cinsn) e_ccount++;
     state_.pc += (op.cinsn ? 2 : 4);
-    if (state_.regs.xlen == 32) {
-        state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
-    }
+    pc_sign_extend();
 }
 
 auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Register& out_val) -> bool {
     const unsigned size_bytes = 1u << (static_cast<unsigned>(funct3) & 0x3u);
     const unsigned alignment_mask = size_bytes - 1u;
     if (simrv::compiler::unlikely((mem_addr & alignment_mask) != 0)) {
+        return false;
+    }
+    if (machine.s_appmode) {
+        if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr))) {
+            out_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3), machine.memory_.mmu()->mmem());
+            return true;
+        }
         return false;
     }
     const PrivilegeLevel eff_priv = effective_data_privilege();
@@ -667,6 +657,13 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
     const unsigned size_bytes = 1u << (static_cast<unsigned>(funct3) & 0x3u);
     const unsigned alignment_mask = size_bytes - 1u;
     if (simrv::compiler::unlikely((mem_addr & alignment_mask) != 0)) {
+        return false;
+    }
+    if (machine.s_appmode) {
+        if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr) && !is_tohost_addr(machine, mem_addr))) {
+            simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3), machine.memory_.mmu()->mmem());
+            return true;
+        }
         return false;
     }
     const PrivilegeLevel eff_priv = effective_data_privilege();
@@ -710,9 +707,7 @@ auto CPU::execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> 
     e_icount++;
     if (op.cinsn) e_ccount++;
     state_.pc += (op.cinsn ? 2 : 4);
-    if (state_.regs.xlen == 32) {
-        state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
-    }
+    pc_sign_extend();
     return true;
 }
 
@@ -731,9 +726,7 @@ auto CPU::execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Re
     e_icount++;
     if (op.cinsn) e_ccount++;
     state_.pc += (op.cinsn ? 2 : 4);
-    if (state_.regs.xlen == 32) {
-        state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
-    }
+    pc_sign_extend();
     return true;
 }
 
@@ -825,13 +818,7 @@ void CPU::handle_cached_interrupts() {
         }
         Word const mask = pending_interrupts & enable_interrupts;
         if (mask != 0u) {
-            Word irq_num = 32;
-            for (int i = 31; i >= 0; i--) {
-                if (((1u << i) & mask) != 0u) {
-                    irq_num = i;
-                    break;
-                }
-            }
+            Word const irq_num = static_cast<Word>(std::bit_width(mask) - 1);
             raise_exception(kInterruptCauseBit | irq_num, 0);
         }
     }

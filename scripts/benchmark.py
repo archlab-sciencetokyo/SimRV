@@ -318,7 +318,7 @@ def main():
             simrv_bin,
             "-m", bin_path,
             "-e", str(args.limit),
-            "-T",
+            "-b",
             "-H", tohost_addr
         ]
         

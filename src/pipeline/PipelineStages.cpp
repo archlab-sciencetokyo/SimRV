@@ -2,6 +2,7 @@
  * @file PipelineStages.cpp
  * @brief Consolidated pipeline stages implementation for Machine.
  */
+#include <bit>
 #include <iostream>
 #include <thread>
 #include <chrono>
@@ -311,7 +312,7 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
     ctx.padr1 = (state_.regs.xlen == 32) ? (state_.pc & 0xFFFFFFFFULL) : state_.pc;
     ctx.padr2 = (state_.regs.xlen == 32) ? ((state_.pc + 2) & 0xFFFFFFFFULL) : (state_.pc + 2);
 
-    if (simrv::compiler::likely(ctx.padr1 < simrv::memory::kDramSize)) {
+    if (simrv::compiler::likely(simrv::memory::is_dram_addr(ctx.padr1))) {
         const uint16_t h1 = simrv::memory::ram_read_fast(ctx.padr1, static_cast<Instruction>(Funct3::Lhu), machine.mmem);
         if ((h1 & 0x3) != 0x3) {
             ctx.ir_org = h1;
@@ -943,11 +944,8 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
                 break;
         }
         mask = pending_interrupts & enable_interrupts;
-        for (int i = 31; i >= 0; i--) {
-            if (((1u << i) & mask) != 0u) {
-                irq_num = i;
-                break;
-            }
+        if (mask != 0) {
+            irq_num = static_cast<Word>(std::bit_width(mask) - 1);
         }
     }
     if (ctx.pending_exception.has_value()) {
@@ -977,7 +975,30 @@ void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
     const auto funct3 = static_cast<Funct3>(ctx.funct3);
 
     if (!ctx.pending_exception.has_value() && opcode == Opcode::System) {
-        if (funct3 != Funct3::Priv) {
+        if (funct3 == Funct3::Priv) {
+            switch (static_cast<Funct12Priv>(ctx.funct12)) {
+                case Funct12Priv::Uret: {
+                    break;
+                }
+                case Funct12Priv::Sret: {
+                    sret();
+                    break;
+                }
+                case Funct12Priv::Mret: {
+                    mret();
+                    break;
+                }
+                default:
+                    if (ctx.funct7 == static_cast<Instruction>(Funct7Priv::SfenceVma)) {
+                        const bool match_all_vaddr = (std::to_underlying(ctx.rs1) == 0);
+                        const bool match_all_asid = (std::to_underlying(ctx.rs2) == 0);
+                        TLB_flush(match_all_vaddr, ctx.rrs1, match_all_asid,
+                                  static_cast<Word>(ctx.rrs2));
+                        dcache.flush();
+                    }
+                    break;
+            }
+        } else {
             const bool is_write =
                 (funct3 == Funct3::Csrrw || funct3 == Funct3::Csrrwi) ||
                 (std::to_underlying(ctx.rs1) != 0);
@@ -987,6 +1008,38 @@ void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
                     ctx.pending_exception = res.error();
                 }
             }
+        }
+    }
+
+    Word const pending_interrupts = state_.mip & state_.mie;
+    Word enable_interrupts = 0;
+    Word mask = 0;
+    Word irq_num = 32;
+    if (simrv::compiler::unlikely(pending_interrupts != 0u)) {
+        switch (state_.priv) {
+            case kPrivMachine: {
+                if ((state_.mstatus & enum_mask(MstatusBit::Mie)) != 0u) {
+                    enable_interrupts = ~state_.mideleg;
+                }
+                break;
+            }
+            case kPrivSupervisor: {
+                enable_interrupts = ~state_.mideleg;
+                if ((state_.mstatus & enum_mask(MstatusBit::Sie)) != 0u) {
+                    enable_interrupts |= state_.mideleg;
+                }
+                break;
+            }
+            case kPrivUser: {
+                enable_interrupts = ~0;
+                break;
+            }
+            default:
+                break;
+        }
+        mask = pending_interrupts & enable_interrupts;
+        if (mask != 0) {
+            irq_num = static_cast<Word>(std::bit_width(mask) - 1);
         }
     }
 
@@ -1000,6 +1053,9 @@ void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
         }
         if (state_.regs.xlen == 32) {
             state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+        }
+        if (simrv::compiler::unlikely(mask != 0)) {
+            raise_exception(kInterruptCauseBit | irq_num, ctx.pending_tval);
         }
     }
 }

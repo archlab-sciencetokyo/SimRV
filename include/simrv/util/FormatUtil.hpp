@@ -9,6 +9,7 @@
 #include <string_view>
 #include <cstdint>
 #include <format>
+#include <termios.h>
 
 
 namespace simrv::util {
@@ -111,5 +112,40 @@ namespace ansi {
     constexpr std::string_view kEnterAltScreen = "\033[?1049h";
     constexpr std::string_view kLeaveAltScreen = "\033[?1049l";
 } // namespace ansi
+
+class TerminalModeGuard {
+   public:
+    ~TerminalModeGuard() {
+        if (active_) {
+            tcsetattr(0, TCSANOW, &saved_);
+        }
+    }
+
+    auto enable_raw_mode() -> bool {
+        struct termios tty{};
+        if (tcgetattr(0, &tty) != 0) {
+            return false;
+        }
+        saved_ = tty;
+
+        tty.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
+        tty.c_oflag |= OPOST;
+        tty.c_lflag &= ~(ECHO | ECHONL | ICANON | IEXTEN);
+        tty.c_cflag &= ~(CSIZE | PARENB);
+        tty.c_cflag |= CS8;
+        tty.c_cc[VMIN] = 1;
+        tty.c_cc[VTIME] = 0;
+        if (tcsetattr(0, TCSANOW, &tty) != 0) {
+            return false;
+        }
+
+        active_ = true;
+        return true;
+    }
+
+   private:
+    bool active_ = false;
+    struct termios saved_{};
+};
 
 } // namespace simrv::util
