@@ -81,9 +81,9 @@ auto CPU::write_csr(CSRAddress addr, CSRValue wdata) -> std::expected<void, Exce
     return {};
 }
 
-void CPU::mret() { TrapController::mret(state_, tlb); }
+void CPU::mret() { TrapController::mret(state_); }
 
-void CPU::sret() { TrapController::sret(state_, tlb); }
+void CPU::sret() { TrapController::sret(state_); }
 
 void CPU::plic_update_mip() { InterruptController::updateMip(plic_mmio, state_); }
 

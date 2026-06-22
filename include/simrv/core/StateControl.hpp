@@ -11,7 +11,6 @@
 namespace simrv::core {
 
 class CPU;
-class Tlb;
 struct ArchState;
 
 class PlicMmio;
@@ -112,8 +111,8 @@ class ClintMmio : public memory::TileLinkNode {
  */
 class TrapController {
    public:
-    static void mret(ArchState& state, Tlb& tlb);
-    static void sret(ArchState& state, Tlb& tlb);
+    static void mret(ArchState& state);
+    static void sret(ArchState& state);
     static void raiseException(CPU& cpu, TrapCause cause, CSRValue tval);
 
     /**

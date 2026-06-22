@@ -21,7 +21,7 @@ void explain_instruction(uint32_t raw_inst);
 /**
  * @brief Get the educational mnemonic and description/behavior of an instruction by its OperationId.
  */
-std::pair<std::string_view, std::string_view> get_operation_details(::OperationId op_id);
+auto get_operation_details(::OperationId op_id) -> std::pair<std::string_view, std::string_view>;
 
 /**
  * @brief Get the symbolic name of a CSR from its address.
@@ -31,6 +31,6 @@ std::string csr_name(uint32_t csr_addr);
 /**
  * @brief Get the ISA extension name (e.g., RV32I, RV32M, Privileged) that an instruction belongs to.
  */
-std::string_view get_isa_extension_name(::OperationId op_id);
+auto get_isa_extension_name(::OperationId op_id) -> std::string_view;
 
 } // namespace simrv::util

@@ -277,7 +277,7 @@ auto c_code(std::string_view ansi_code, bool use_color) -> std::string_view {
 }
 
 auto print_r_format(uint32_t funct7_val, uint32_t rs2_val, uint32_t rs1_val, uint32_t funct3_val, uint32_t rd_val, simrv::pipeline::Opcode op, bool use_color) -> void {
-    auto c = [use_color](std::string_view code) { return c_code(code, use_color); };
+    auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (R-Type format):");
     std::println("  31          25 24      20 19      15 14  12 11        7 6           0");
     std::println("  +------------+----------+----------+----+----------+-------------+");
@@ -302,7 +302,7 @@ auto print_r_format(uint32_t funct7_val, uint32_t rs2_val, uint32_t rs1_val, uin
 }
 
 auto print_i_format(uint32_t imm_bits, int32_t imm_val, uint32_t rs1_val, uint32_t funct3_val, uint32_t rd_val, simrv::pipeline::Opcode op, bool use_color) -> void {
-    auto c = [use_color](std::string_view code) { return c_code(code, use_color); };
+    auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (I-Type format):");
     std::println("  31                20 19      15 14  12 11        7 6           0");
     std::println("  +----------------------+----------+----+----------+-------------+");
@@ -329,7 +329,7 @@ auto print_i_format(uint32_t imm_bits, int32_t imm_val, uint32_t rs1_val, uint32
 }
 
 auto print_s_format(uint32_t imm_hi, uint32_t imm_lo, int32_t imm_val, uint32_t rs1_val, uint32_t rs2_val, uint32_t funct3_val, simrv::pipeline::Opcode op, bool use_color) -> void {
-    auto c = [use_color](std::string_view code) { return c_code(code, use_color); };
+    auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (S-Type format):");
     std::println("  31          25 24      20 19      15 14  12 11        7 6           0");
     std::println("  +------------+----------+----------+----+----------+-------------+");
@@ -360,7 +360,7 @@ auto print_s_format(uint32_t imm_hi, uint32_t imm_lo, int32_t imm_val, uint32_t 
 }
 
 auto print_b_format(uint32_t inst, uint32_t imm_hi, uint32_t imm_lo, int32_t imm_val, uint32_t rs1_val, uint32_t rs2_val, uint32_t funct3_val, simrv::pipeline::Opcode op, bool use_color) -> void {
-    auto c = [use_color](std::string_view code) { return c_code(code, use_color); };
+    auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (B-Type format):");
     std::println("  31          25 24      20 19      15 14  12 11        7 6           0");
     std::println("  +------------+----------+----------+----+----------+-------------+");
@@ -398,7 +398,7 @@ auto print_b_format(uint32_t inst, uint32_t imm_hi, uint32_t imm_lo, int32_t imm
 }
 
 auto print_u_format(uint32_t imm_bits, int32_t imm_val, uint32_t rd_val, simrv::pipeline::Opcode op, bool use_color) -> void {
-    auto c = [use_color](std::string_view code) { return c_code(code, use_color); };
+    auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (U-Type format):");
     std::println("  31                                12 11        7 6           0");
     std::println("  +--------------------------------------+----------+-------------+");
@@ -422,7 +422,7 @@ auto print_u_format(uint32_t imm_bits, int32_t imm_val, uint32_t rd_val, simrv::
 }
 
 auto print_j_format(uint32_t inst, uint32_t imm_bits, int32_t imm_val, uint32_t rd_val, simrv::pipeline::Opcode op, bool use_color) -> void {
-    auto c = [use_color](std::string_view code) { return c_code(code, use_color); };
+    auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (J-Type format):");
     std::println("  31                                12 11        7 6           0");
     std::println("  +--------------------------------------+----------+-------------+");
@@ -454,7 +454,7 @@ auto print_j_format(uint32_t inst, uint32_t imm_bits, int32_t imm_val, uint32_t 
 }
 
 auto print_r4_format(uint32_t funct7_val, uint32_t rs3_val, uint32_t rs2_val, uint32_t rs1_val, uint32_t funct3_val, uint32_t rd_val, simrv::pipeline::Opcode op, bool use_color) -> void {
-    auto c = [use_color](std::string_view code) { return c_code(code, use_color); };
+    auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (R4-Type format):");
     std::println("  31    27 26 25 24      20 19      15 14  12 11        7 6           0");
     std::println("  +-----+----+--+----------+----------+----+----------+-------------+");
@@ -660,13 +660,13 @@ void explain_instruction(uint32_t raw_inst) {
     } else if (fmt == InstFormat::S) {
         uint32_t const imm_hi = (inst >> 25) & 0x7F;
         uint32_t const imm_lo = (inst >> 7) & 0x1F;
-        int32_t const imm_val = (static_cast<int32_t>(inst & 0xFE000000) >> 20) | ((inst >> 7) & 0x1F);
+        int32_t const imm_val = (static_cast<int32_t>(inst & 0xFE000000) >> 20) | static_cast<int32_t>((inst >> 7) & 0x1F);
         print_s_format(imm_hi, imm_lo, imm_val, rs1_val, rs2_val, funct3_val, op, use_color);
     } else if (fmt == InstFormat::B) {
         uint32_t const imm_hi = (inst >> 25) & 0x7F;
         uint32_t const imm_lo = (inst >> 7) & 0x1F;
-        int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 19) | ((inst & 0x7E000000) >> 20) |
-                               ((inst & 0x00000F00) >> 7) | ((inst & 0x00000080) << 4);
+        int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 19) | static_cast<int32_t>((inst & 0x7E000000) >> 20) |
+                               static_cast<int32_t>((inst & 0x00000F00) >> 7) | static_cast<int32_t>((inst & 0x00000080) << 4);
         print_b_format(inst, imm_hi, imm_lo, imm_val, rs1_val, rs2_val, funct3_val, op, use_color);
     } else if (fmt == InstFormat::U) {
         uint32_t const imm_bits = (inst >> 12) & 0xFFFFF;
@@ -674,8 +674,8 @@ void explain_instruction(uint32_t raw_inst) {
         print_u_format(imm_bits, imm_val, rd_val, op, use_color);
     } else if (fmt == InstFormat::J) {
         uint32_t const imm_bits = ((inst >> 12) & 0xFFFFF);
-        int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 11) | (inst & 0x000FF000) |
-                               ((inst & 0x00100000) >> 9) | ((inst & 0x7FE00000) >> 20);
+        int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 11) | static_cast<int32_t>(inst & 0x000FF000) |
+                               static_cast<int32_t>((inst & 0x00100000) >> 9) | static_cast<int32_t>((inst & 0x7FE00000) >> 20);
         print_j_format(inst, imm_bits, imm_val, rd_val, op, use_color);
     } else if (fmt == InstFormat::R4) {
         print_r4_format(funct7_val, rs3_val, rs2_val, rs1_val, funct3_val, rd_val, op, use_color);
@@ -705,18 +705,18 @@ void explain_instruction(uint32_t raw_inst) {
             int32_t const imm_val = static_cast<int32_t>(inst) >> 20;
             assembly = format_i_type(op_id, mnemonic, rd_val, rs1_val, imm_val, csr_val, op, is_load, is_csr);
         } else if (fmt == InstFormat::S) {
-            int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 20) | ((inst >> 7) & 0x1F) | ((inst >> 20) & 0x7E0);
+            int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 20) | static_cast<int32_t>((inst >> 7) & 0x1F) | static_cast<int32_t>((inst >> 20) & 0x7E0);
             assembly = format_s_type(mnemonic, rs1_val, rs2_val, imm_val, op);
         } else if (fmt == InstFormat::B) {
-            int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 19) | ((inst & 0x7E000000) >> 20) |
-                                   ((inst & 0x00000F00) >> 7) | ((inst & 0x00000080) << 4);
+            int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 19) | static_cast<int32_t>((inst & 0x7E000000) >> 20) |
+                                   static_cast<int32_t>((inst & 0x00000F00) >> 7) | static_cast<int32_t>((inst & 0x00000080) << 4);
             assembly = format_b_type(mnemonic, rs1_val, rs2_val, imm_val);
         } else if (fmt == InstFormat::U) {
             auto const imm_val = static_cast<int32_t>(inst & 0xFFFFF000);
             assembly = format_u_type(mnemonic, rd_val, imm_val);
         } else if (fmt == InstFormat::J) {
-            int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 11) | (inst & 0x000FF000) |
-                                   ((inst & 0x00100000) >> 9) | ((inst & 0x7FE00000) >> 20);
+            int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 11) | static_cast<int32_t>(inst & 0x000FF000) |
+                                   static_cast<int32_t>((inst & 0x00100000) >> 9) | static_cast<int32_t>((inst & 0x7FE00000) >> 20);
             assembly = format_j_type(rd_val, imm_val);
         } else if (fmt == InstFormat::R4) {
             assembly = format_r4_type(mnemonic, rd_val, rs1_val, rs2_val, rs3_val);
@@ -733,11 +733,11 @@ void explain_instruction(uint32_t raw_inst) {
     std::println("\n{}================================================={}\n", c(kBoldFgBrightBlue), c(kReset));
 }
 
-std::pair<std::string_view, std::string_view> get_operation_details(::OperationId op_id) {
+auto get_operation_details(::OperationId op_id) -> std::pair<std::string_view, std::string_view> {
     return get_description(op_id);
 }
 
-std::string_view get_isa_extension_name(::OperationId op_id) {
+auto get_isa_extension_name(::OperationId op_id) -> std::string_view {
     if (op_id >= ::LUI && op_id <= ::CSRRCI) {
         if (op_id == ::LWU || op_id == ::LD || op_id == ::SD ||
             op_id == ::ADDIW || op_id == ::SLLIW || op_id == ::SRLIW || op_id == ::SRAIW ||

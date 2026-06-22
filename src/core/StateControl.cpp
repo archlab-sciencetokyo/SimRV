@@ -262,7 +262,7 @@ void ClintMmio::mmio_write(Address offset, Word wdata) {
     }
 }
 
-void TrapController::mret(ArchState& state, Tlb& tlb) {
+void TrapController::mret(ArchState& state) {
     CSRValue mstatus = state.mstatus;
     const CSRValue mpp = (mstatus & enum_mask(MstatusBit::Mpp)) >> 11;
     const CSRValue mpie = (mstatus & enum_mask(MstatusBit::Mpie)) >> 7;
@@ -292,7 +292,7 @@ void TrapController::mret(ArchState& state, Tlb& tlb) {
     state.reserved = 0;
 }
 
-void TrapController::sret(ArchState& state, Tlb& tlb) {
+void TrapController::sret(ArchState& state) {
     CSRValue mstatus = state.mstatus;
     const CSRValue spp = (mstatus & enum_mask(MstatusBit::Spp)) >> 8;
     const CSRValue spie = (mstatus & enum_mask(MstatusBit::Spie)) >> 5;

@@ -68,7 +68,7 @@ enum class InstFormat : uint8_t {
 };
 
 auto get_format(::Opcode op) -> InstFormat {
-    static constexpr std::array<InstFormat, 128> format_lut = []() {
+    static constexpr std::array<InstFormat, 128> format_lut = []() -> std::array<InstFormat, 128> {
         std::array<InstFormat, 128> lut{};
         lut.fill(InstFormat::Unknown);
         
@@ -103,7 +103,7 @@ auto get_format(::Opcode op) -> InstFormat {
         return lut;
     }();
     
-    size_t idx = static_cast<size_t>(op);
+    auto idx = static_cast<size_t>(op);
     if (idx < format_lut.size()) {
         return format_lut[idx];
     }
@@ -310,7 +310,7 @@ auto has_target(InstFormat fmt) -> bool {
 }
 
 auto is_unary_float_op(uint8_t op_id) -> bool {
-    static constexpr std::array<bool, 256> unary_float_lut = []() {
+    static constexpr std::array<bool, 256> unary_float_lut = []() -> std::array<bool, 256> {
         std::array<bool, 256> lut{};
         lut.fill(false);
         lut[FSQRT_S] = true;
@@ -499,7 +499,7 @@ enum class InstCategory : uint8_t {
 };
 
 auto get_inst_category(int i) -> InstCategory {
-    static constexpr std::array<InstCategory, 256> category_lut = []() {
+    static constexpr std::array<InstCategory, 256> category_lut = []() -> std::array<InstCategory, 256> {
         std::array<InstCategory, 256> lut{};
         lut.fill(InstCategory::ALU);
         
@@ -682,7 +682,7 @@ auto RegisterPane::render_active_spinner(int logical_row, int width) -> std::str
     std::string spin = spinner.at((static_cast<std::size_t>(now_ms / 80)) % 10);
 
     bool const is_reg_page = (page_ == TuiRegPage::GPR || page_ == TuiRegPage::FPR || page_ == TuiRegPage::VEC);
-    bool const single_column = is_reg_page && ([&]() {
+    bool const single_column = is_reg_page && ([&]() -> bool {
         if (page_ == TuiRegPage::GPR) {
             return (simrv::xlen::kIsXLen64 && width < 58) || (!simrv::xlen::kIsXLen64 && width < 42);
         }
@@ -1575,7 +1575,8 @@ auto RegisterPane::render_row(int row_idx, int width) -> std::string {
 
 auto RegisterPane::get_sparkline_string(int width) -> std::string {
     if (kips_history_.empty()) {
-        return std::string(static_cast<std::size_t>(width), ' ');
+        std::string res(static_cast<std::size_t>(width), ' ');
+        return res;
     }
     uint64_t max_val = 1;
     for (auto val : kips_history_) {
