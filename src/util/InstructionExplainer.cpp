@@ -277,8 +277,10 @@ auto print_i_format(uint32_t imm_bits, int32_t imm_val, uint32_t rs1_val, uint32
     std::println("  imm[11:0] = inst[31:20] = {:012b}", imm_bits);
     if constexpr (simrv::xlen::kIsXLen64) {
         std::println("  Sign-extended to 64 bits: {}{} (0x{:016X}){}", c(kBrightRed), imm_val, static_cast<uint64_t>(imm_val), c(kReset));
+        std::println("  Binary (64-bit view)    : {}{:064b}{}", c(kBrightRed), static_cast<uint64_t>(imm_val), c(kReset));
     } else {
         std::println("  Sign-extended to 32 bits: {}{} (0x{:08X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
+        std::println("  Binary (32-bit view)    : {}{:032b}{}", c(kBrightRed), static_cast<uint32_t>(imm_val), c(kReset));
     }
 }
 
@@ -312,8 +314,10 @@ auto print_s_format(uint32_t imm_hi, uint32_t imm_lo, int32_t imm_val, uint32_t 
     std::println("  Combined  = {:012b}", (imm_hi << 5) | imm_lo);
     if constexpr (simrv::xlen::kIsXLen64) {
         std::println("  Sign-extended to 64 bits: {}{} (0x{:016X}){}", c(kBrightRed), imm_val, static_cast<uint64_t>(imm_val), c(kReset));
+        std::println("  Binary (64-bit view)    : {}{:064b}{}", c(kBrightRed), static_cast<uint64_t>(imm_val), c(kReset));
     } else {
         std::println("  Sign-extended to 32 bits: {}{} (0x{:08X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
+        std::println("  Binary (32-bit view)    : {}{:032b}{}", c(kBrightRed), static_cast<uint32_t>(imm_val), c(kReset));
     }
 }
 
@@ -354,8 +358,10 @@ auto print_b_format(uint32_t inst, uint32_t imm_hi, uint32_t imm_lo, int32_t imm
     std::println("  Combined  = {:013b}", (b31 << 12) | (b7 << 11) | (b30_25 << 5) | (b11_8 << 1));
     if constexpr (simrv::xlen::kIsXLen64) {
         std::println("  Sign-extended to 64 bits: {}{} bytes (0x{:016X}){}", c(kBrightRed), imm_val, static_cast<uint64_t>(imm_val), c(kReset));
+        std::println("  Binary (64-bit view)    : {}{:064b}{}", c(kBrightRed), static_cast<uint64_t>(imm_val), c(kReset));
     } else {
         std::println("  Sign-extended to 32 bits: {}{} bytes (0x{:08X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
+        std::println("  Binary (32-bit view)    : {}{:032b}{}", c(kBrightRed), static_cast<uint32_t>(imm_val), c(kReset));
     }
 }
 
@@ -382,8 +388,10 @@ auto print_u_format(uint32_t imm_bits, int32_t imm_val, uint32_t rd_val, Opcode 
     std::println("  imm[11:0]  = 0            = 000000000000");
     if constexpr (simrv::xlen::kIsXLen64) {
         std::println("  Combined Value           : {}{} (0x{:016X}){}", c(kBrightRed), imm_val, static_cast<uint64_t>(imm_val), c(kReset));
+        std::println("  Binary (64-bit view)     : {}{:064b}{}", c(kBrightRed), static_cast<uint64_t>(imm_val), c(kReset));
     } else {
         std::println("  Combined Value           : {}{} (0x{:08X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
+        std::println("  Binary (32-bit view)     : {}{:032b}{}", c(kBrightRed), static_cast<uint32_t>(imm_val), c(kReset));
     }
 }
 
@@ -418,8 +426,10 @@ auto print_j_format(uint32_t inst, uint32_t imm_bits, int32_t imm_val, uint32_t 
     std::println("  Combined   = {:021b}", (j31 << 20) | (j19_12 << 12) | (j20 << 11) | (j30_21 << 1));
     if constexpr (simrv::xlen::kIsXLen64) {
         std::println("  Sign-extended to 64 bits: {}{} bytes (0x{:016X}){}", c(kBrightRed), imm_val, static_cast<uint64_t>(imm_val), c(kReset));
+        std::println("  Binary (64-bit view)    : {}{:064b}{}", c(kBrightRed), static_cast<uint64_t>(imm_val), c(kReset));
     } else {
         std::println("  Sign-extended to 32 bits: {}{} bytes (0x{:08X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
+        std::println("  Binary (32-bit view)    : {}{:032b}{}", c(kBrightRed), static_cast<uint32_t>(imm_val), c(kReset));
     }
 }
 
