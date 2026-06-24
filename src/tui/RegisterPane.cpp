@@ -129,7 +129,7 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width) -> std:
             (ir_org >> 12) & 0x07, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
         rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
     } else if (fmt == InstFormat::I) {
-        rows.push_back(format_to_width("   31         20  19  15  1412  11   7   6     0", width));
+        rows.push_back(format_to_width("   31          20 19   15 14 12 11    7 6       0", width));
         rows.push_back(format_to_width("  +--------------+-------+-----+-------+---------+", width));
         rows.push_back(format_to_width("  |  immediate   |  rs1  |  f3 |  rd   | opcode  |", width));
         rows.push_back(format_to_width(std::format("  | {:012b} | {:05b} | {:03b} | {:05b} | {:07b} |",
@@ -137,37 +137,30 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width) -> std:
             (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
         rows.push_back(format_to_width("  +--------------+-------+-----+-------+---------+", width));
     } else if (fmt == InstFormat::S) {
-        rows.push_back(format_to_width("   11     5  24  20  19  15  1412  4   0   6     0", width));
+        rows.push_back(format_to_width("   31     25 24   20 19   15 14 12 11    7 6       0", width));
         rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
-        rows.push_back(format_to_width("  | imm115  |  rs2  |  rs1  |  f3 | imm40 | opcode  |", width));
+        rows.push_back(format_to_width("  | imm11:5 |  rs2  |  rs1  |  f3 | imm4:0| opcode  |", width));
         rows.push_back(format_to_width(std::format("  | {:07b} | {:05b} | {:05b} | {:03b} | {:05b} | {:07b} |",
             (ir_org >> 25) & 0x7F, (ir_org >> 20) & 0x1F, (ir_org >> 15) & 0x1F,
             (ir_org >> 12) & 0x07, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
         rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
     } else if (fmt == InstFormat::B) {
-        rows.push_back(format_to_width("   12     5  24  20  19  15  1412  4  11   6     0", width));
+        rows.push_back(format_to_width("   31     25 24   20 19   15 14 12 11    7 6       0", width));
         rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
-        rows.push_back(format_to_width("  | imm125  |  rs2  |  rs1  |  f3 | imm411| opcode  |", width));
+        rows.push_back(format_to_width("  | imm12:5 |  rs2  |  rs1  |  f3 |imm11:1| opcode  |", width));
         rows.push_back(format_to_width(std::format("  | {:07b} | {:05b} | {:05b} | {:03b} | {:05b} | {:07b} |",
             (ir_org >> 25) & 0x7F, (ir_org >> 20) & 0x1F, (ir_org >> 15) & 0x1F,
             (ir_org >> 12) & 0x07, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
         rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
-    } else if (fmt == InstFormat::U) {
-        rows.push_back(format_to_width("     31                 12 11   7   6     0", width));
-        rows.push_back(format_to_width("  +--------------------------+-------+---------+", width));
-        rows.push_back(format_to_width("  |        immediate         |  rd   | opcode  |", width));
-        rows.push_back(format_to_width(std::format("  |   {:020b}   | {:05b} | {:07b} |",
-            (ir_org >> 12) & 0xFFFFF, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
-        rows.push_back(format_to_width("  +--------------------------+-------+---------+", width));
-    } else if (fmt == InstFormat::J) {
-        rows.push_back(format_to_width("     31                  1 11   7   6     0", width));
+    } else if (fmt == InstFormat::U || fmt == InstFormat::J) {
+        rows.push_back(format_to_width("   31                      12 11    7 6       0", width));
         rows.push_back(format_to_width("  +--------------------------+-------+---------+", width));
         rows.push_back(format_to_width("  |        immediate         |  rd   | opcode  |", width));
         rows.push_back(format_to_width(std::format("  |   {:020b}   | {:05b} | {:07b} |",
             (ir_org >> 12) & 0xFFFFF, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
         rows.push_back(format_to_width("  +--------------------------+-------+---------+", width));
     } else if (fmt == InstFormat::R4) {
-        rows.push_back(format_to_width("   31  27 2625      24  20  19  15  1412  11   7   6     0", width));
+        rows.push_back(format_to_width("   31   27 2625      24   20 19   15 14 12 11    7 6       0", width));
         rows.push_back(format_to_width("  +-------+----+----+-------+-------+-----+-------+---------+", width));
         rows.push_back(format_to_width("  |  rs3  |fmt | .. |  rs2  |  rs1  |  f3 |  rd   | opcode  |", width));
         rows.push_back(format_to_width(std::format("  | {:05b} | {:02b} | 00 | {:05b} | {:05b} | {:03b} | {:05b} | {:07b} |",

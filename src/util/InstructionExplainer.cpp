@@ -229,11 +229,11 @@ auto c_code(std::string_view ansi_code, bool use_color) -> std::string_view {
 auto print_r_format(uint32_t funct7_val, uint32_t rs2_val, uint32_t rs1_val, uint32_t funct3_val, uint32_t rd_val, Opcode op, bool use_color) -> void {
     auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (R-Type format):");
-    std::println("  31          25 24      20 19      15 14  12 11        7 6           0");
+    std::println("  31         25 24      20 19      15 1412 11       7 6           0");
     std::println("  +------------+----------+----------+----+----------+-------------+");
     std::println("  |   funct7   |   rs2    |   rs1    | f3 |    rd    |   opcode    |");
     std::println("  +------------+----------+----------+----+----------+-------------+");
-    std::print("  |   {}{:07b}{}  |  {}{:05b}{}   |  {}{:05b}{}   | {}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
+    std::print("  |   {}{:07b}{}  |  {}{:05b}{}   |  {}{:05b}{}   |{}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
                c(kBrightRed), funct7_val, c(kReset),
                c(kBrightMagenta), rs2_val, c(kReset),
                c(kBrightYellow), rs1_val, c(kReset),
@@ -254,11 +254,11 @@ auto print_r_format(uint32_t funct7_val, uint32_t rs2_val, uint32_t rs1_val, uin
 auto print_i_format(uint32_t imm_bits, int32_t imm_val, uint32_t rs1_val, uint32_t funct3_val, uint32_t rd_val, Opcode op, bool use_color) -> void {
     auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (I-Type format):");
-    std::println("  31                20 19      15 14  12 11        7 6           0");
+    std::println("  31                   20 19      15 1412 11       7 6           0");
     std::println("  +----------------------+----------+----+----------+-------------+");
     std::println("  |      immediate       |   rs1    | f3 |    rd    |   opcode    |");
     std::println("  +----------------------+----------+----+----------+-------------+");
-    std::print("  |     {}{:012b}{}     |  {}{:05b}{}   | {}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
+    std::print("  |     {}{:012b}{}     |  {}{:05b}{}   |{}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
                c(kBrightRed), imm_bits, c(kReset),
                c(kBrightYellow), rs1_val, c(kReset),
                c(kBrightCyan), funct3_val, c(kReset),
@@ -287,11 +287,11 @@ auto print_i_format(uint32_t imm_bits, int32_t imm_val, uint32_t rs1_val, uint32
 auto print_s_format(uint32_t imm_hi, uint32_t imm_lo, int32_t imm_val, uint32_t rs1_val, uint32_t rs2_val, uint32_t funct3_val, Opcode op, bool use_color) -> void {
     auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (S-Type format):");
-    std::println("  31          25 24      20 19      15 14  12 11        7 6           0");
+    std::println("  31         25 24      20 19      15 1412 11       7 6           0");
     std::println("  +------------+----------+----------+----+----------+-------------+");
     std::println("  |  imm[11:5] |   rs2    |   rs1    | f3 | imm[4:0] |   opcode    |");
     std::println("  +------------+----------+----------+----+----------+-------------+");
-    std::print("  |   {}{:07b}{}  |  {}{:05b}{}   |  {}{:05b}{}   | {}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
+    std::print("  |   {}{:07b}{}  |  {}{:05b}{}   |  {}{:05b}{}   |{}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
                c(kBrightRed), imm_hi, c(kReset),
                c(kBrightMagenta), rs2_val, c(kReset),
                c(kBrightYellow), rs1_val, c(kReset),
@@ -324,11 +324,11 @@ auto print_s_format(uint32_t imm_hi, uint32_t imm_lo, int32_t imm_val, uint32_t 
 auto print_b_format(uint32_t inst, uint32_t imm_hi, uint32_t imm_lo, int32_t imm_val, uint32_t rs1_val, uint32_t rs2_val, uint32_t funct3_val, Opcode op, bool use_color) -> void {
     auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (B-Type format):");
-    std::println("  31          25 24      20 19      15 14  12 11        7 6           0");
+    std::println("  31         25 24      20 19      15 1412 11       7 6           0");
     std::println("  +------------+----------+----------+----+----------+-------------+");
     std::println("  |imm[12|10:5]|   rs2    |   rs1    | f3 |imm[4:1|11]|   opcode    |");
     std::println("  +------------+----------+----------+----+----------+-------------+");
-    std::print("  |   {}{:07b}{}  |  {}{:05b}{}   |  {}{:05b}{}   | {}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
+    std::print("  |   {}{:07b}{}  |  {}{:05b}{}   |  {}{:05b}{}   |{}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
                c(kBrightRed), imm_hi, c(kReset),
                c(kBrightMagenta), rs2_val, c(kReset),
                c(kBrightYellow), rs1_val, c(kReset),
@@ -368,11 +368,11 @@ auto print_b_format(uint32_t inst, uint32_t imm_hi, uint32_t imm_lo, int32_t imm
 auto print_u_format(uint32_t imm_bits, int32_t imm_val, uint32_t rd_val, Opcode op, bool use_color) -> void {
     auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (U-Type format):");
-    std::println("  31                                12 11        7 6           0");
+    std::println("  31                                   12 11       7 6           0");
     std::println("  +--------------------------------------+----------+-------------+");
     std::println("  |              immediate               |    rd    |   opcode    |");
     std::println("  +--------------------------------------+----------+-------------+");
-    std::print("  |         {}{:020b}{}       |  {}{:05b}{}   |   {}{:07b}{}   |\n",
+    std::print("  |         {}{:020b}{}         |  {}{:05b}{}   |   {}{:07b}{}   |\n",
                c(kBrightRed), imm_bits, c(kReset),
                c(kBrightGreen), rd_val, c(kReset),
                c(kBrightBlue), std::to_underlying(op), c(kReset));
@@ -398,11 +398,11 @@ auto print_u_format(uint32_t imm_bits, int32_t imm_val, uint32_t rd_val, Opcode 
 auto print_j_format(uint32_t inst, uint32_t imm_bits, int32_t imm_val, uint32_t rd_val, Opcode op, bool use_color) -> void {
     auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (J-Type format):");
-    std::println("  31                                12 11        7 6           0");
+    std::println("  31                                   12 11       7 6           0");
     std::println("  +--------------------------------------+----------+-------------+");
     std::println("  |              immediate               |    rd    |   opcode    |");
     std::println("  +--------------------------------------+----------+-------------+");
-    std::print("  |         {}{:020b}{}       |  {}{:05b}{}   |   {}{:07b}{}   |\n",
+    std::print("  |         {}{:020b}{}         |  {}{:05b}{}   |   {}{:07b}{}   |\n",
                c(kBrightRed), imm_bits, c(kReset),
                c(kBrightGreen), rd_val, c(kReset),
                c(kBrightBlue), std::to_underlying(op), c(kReset));
@@ -436,11 +436,11 @@ auto print_j_format(uint32_t inst, uint32_t imm_bits, int32_t imm_val, uint32_t 
 auto print_r4_format(uint32_t funct7_val, uint32_t rs3_val, uint32_t rs2_val, uint32_t rs1_val, uint32_t funct3_val, uint32_t rd_val, Opcode op, bool use_color) -> void {
     auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (R4-Type format):");
-    std::println("  31    27 26 25 24      20 19      15 14  12 11        7 6           0");
+    std::println("  31   27 2625    24      20 19      15 1412 11       7 6           0");
     std::println("  +-----+----+--+----------+----------+----+----------+-------------+");
     std::println("  | rs3 |fmt |..|   rs2    |   rs1    | f3 |    rd    |   opcode    |");
     std::println("  +-----+----+--+----------+----------+----+----------+-------------+");
-    std::print("  | {}{:05b}{} | {:02b} |00|  {}{:05b}{}   |  {}{:05b}{}   | {}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
+    std::print("  |{}{:05b}{} | {:02b} |00|  {}{:05b}{}   |  {}{:05b}{}   |{}{:03b}{} |  {}{:05b}{}   |   {}{:07b}{}   |\n",
                c(kBrightWhite), rs3_val, c(kReset),
                funct7_val & 3,
                c(kBrightMagenta), rs2_val, c(kReset),
