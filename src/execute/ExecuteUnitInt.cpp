@@ -1,7 +1,4 @@
-/**
- * @file ExecuteUnitInt.cpp
- * @brief Integer ALU and control flow execution paths.
- */
+#include <algorithm>
 #include <limits>
 
 #include "simrv/Define.hpp"
@@ -13,6 +10,26 @@ namespace simrv::execute {
 using simrv::isa::Funct3;
 using simrv::isa::Opcode;
 using simrv::isa::Funct5Amo;
+
+namespace {
+template <typename T>
+constexpr auto perform_amo_op(T reg_val, T mem_val, Funct5Amo funct5) -> T {
+    using SignedT = std::make_signed_t<T>;
+    using UnsignedT = std::make_unsigned_t<T>;
+    switch (enum_mask(funct5)) {
+        case 0x01: return reg_val; // SWAP
+        case 0x00: return mem_val + reg_val; // ADD
+        case 0x0c: return mem_val & reg_val; // AND
+        case 0x08: return mem_val | reg_val; // OR
+        case 0x04: return mem_val ^ reg_val; // XOR
+        case 0x10: return static_cast<T>(std::min(static_cast<SignedT>(reg_val), static_cast<SignedT>(mem_val))); // MIN
+        case 0x14: return static_cast<T>(std::max(static_cast<SignedT>(reg_val), static_cast<SignedT>(mem_val))); // MAX
+        case 0x18: return static_cast<T>(std::min(static_cast<UnsignedT>(reg_val), static_cast<UnsignedT>(mem_val))); // MINU
+        case 0x1c: return static_cast<T>(std::max(static_cast<UnsignedT>(reg_val), static_cast<UnsignedT>(mem_val))); // MAXU
+        default:   return mem_val;
+    }
+}
+} // namespace
 
 auto ExecuteUnit::aluInt(Register in1, Register in2, Funct3 funct3, Instruction funct7)
     -> Register {
@@ -188,67 +205,14 @@ auto ExecuteUnit::branchTaken(Register in1, Register in2, Funct3 funct3) -> bool
 auto ExecuteUnit::aluAmo(Register in1, Register in2, Funct5Amo funct5, Funct3 funct3) -> Register {
     if constexpr (kIsXLen64) {
         if (funct3 == static_cast<Funct3>(2)) { // AMO*W (32-bit)
-            const auto a = static_cast<int32_t>(in1);
-            const auto b = static_cast<int32_t>(in2);
-            int32_t res = 0;
-            switch (enum_mask(funct5)) {
-                case 0x01: // SWAP
-                    res = a;
-                    break;
-                case 0x00: // ADD
-                    res = b + a;
-                    break;
-                case 0x0c: // AND
-                    res = b & a;
-                    break;
-                case 0x08: // OR
-                    res = b | a;
-                    break;
-                case 0x04: // XOR
-                    res = b ^ a;
-                    break;
-                case 0x10: // MIN
-                    res = (a < b) ? a : b;
-                    break;
-                case 0x14: // MAX
-                    res = (a > b) ? a : b;
-                    break;
-                case 0x18: // MINU
-                    res = (static_cast<uint32_t>(a) < static_cast<uint32_t>(b)) ? a : b;
-                    break;
-                case 0x1c: // MAXU
-                    res = (static_cast<uint32_t>(a) > static_cast<uint32_t>(b)) ? a : b;
-                    break;
-                default:
-                    res = b;
-                    break;
-            }
-            return static_cast<Register>(static_cast<int64_t>(res)); // sign-extend to 64-bit
+            const auto res32 = perform_amo_op<int32_t>(static_cast<int32_t>(in1),
+                                                      static_cast<int32_t>(in2),
+                                                      funct5);
+            return static_cast<Register>(static_cast<int64_t>(res32)); // sign-extend to 64-bit
         }
     }
 
-    switch (enum_mask(funct5)) {
-        case 0x01:
-            return in1;  // SWAP
-        case 0x00:
-            return in2 + in1;  // ADD
-        case 0x0c:
-            return in2 & in1;  // AND
-        case 0x08:
-            return in2 | in1;  // OR
-        case 0x04:
-            return in2 ^ in1;  // XOR
-        case 0x10:
-            return static_cast<SignedWord>(in1) < static_cast<SignedWord>(in2) ? in1 : in2;  // MIN
-        case 0x14:
-            return static_cast<SignedWord>(in1) > static_cast<SignedWord>(in2) ? in1 : in2;  // MAX
-        case 0x18:
-            return in1 < in2 ? in1 : in2;  // MINU
-        case 0x1c:
-            return in1 > in2 ? in1 : in2;  // MAXU
-        default:
-            return in2;
-    }
+    return perform_amo_op<Word>(in1, in2, funct5);
 }
 
 auto ExecuteUnit::csrWriteValue(CSRValue rcsr, Register rrs1, ImmValue imm, Funct3 funct3)
