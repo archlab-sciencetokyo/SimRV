@@ -4,7 +4,6 @@
  */
 #include "simrv/cache/DCache.hpp"
 
-#include <algorithm>
 #include <cstring>
 
 #include "simrv/Define.hpp"
@@ -78,26 +77,5 @@ void DCache::write(Address addr, Word data, Instruction funct3) {
         }
     }
 }
-
-void DCache::insert(Address base_addr, const Byte* line_data) {
-    ++access_tick_;
-    auto& set = sets_.at(get_set_index(base_addr));
-    CacheLine* victim = &set.at(0);
-    for (auto& line : set) {
-        if (!line.valid) {
-            victim = &line;
-            break;
-        }
-        if (line.last_used < victim->last_used) {
-            victim = &line;
-        }
-    }
-    victim->tag = get_tag(base_addr);
-    victim->valid = true;
-    victim->last_used = access_tick_;
-    std::memcpy(victim->data.data(), line_data, kLineBytes);
-}
-
-void DCache::flush() { std::ranges::fill(sets_, std::array<CacheLine, kWays>{}); }
 
 }  // namespace simrv::cache
