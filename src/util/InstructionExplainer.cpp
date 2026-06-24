@@ -23,6 +23,7 @@ using simrv::isa::OperationId;
 using enum simrv::isa::OperationId;
 using simrv::isa::kOperationIdCount;
 using simrv::isa::Opcode;
+using simrv::isa::InstFormat;
 using simrv::core::Csr;
 using enum simrv::core::Csr;
 
@@ -86,16 +87,7 @@ auto csr_name(uint32_t csr_addr) -> std::string {
 
 namespace {
 
-enum class InstFormat : uint8_t {
-    R,
-    I,
-    S,
-    B,
-    U,
-    J,
-    R4,
-    Unknown
-};
+
 
 const std::array<const char*, 32> ABI_NAMES = {
     "zero", "ra", "sp", "gp", "tp",  "t0",  "t1", "t2", "s0/fp", "s1", "a0",
@@ -116,55 +108,7 @@ auto reg_name(uint32_t r, bool is_fp = false) -> std::string {
     }
 }
 
-auto get_format(Opcode op) -> InstFormat {
-    using enum Opcode;
-    switch (op) {
-        case Load:
-        case LoadFp:
-        case MiscMem:
-        case OpImm:
-        case OpImm32:
-        case Jalr:
-        case System:
-            return InstFormat::I;
-        case Store:
-        case StoreFp:
-            return InstFormat::S;
-        case Branch:
-            return InstFormat::B;
-        case Auipc:
-        case Lui:
-            return InstFormat::U;
-        case Jal:
-            return InstFormat::J;
-        case Op:
-        case Op32:
-        case Amo:
-        case OpFp:
-            return InstFormat::R;
-        case MAdd:
-        case MSub:
-        case NMSub:
-        case NMAdd:
-            return InstFormat::R4;
-        default:
-            return InstFormat::Unknown;
-    }
-}
 
-auto get_format_name(InstFormat fmt) -> std::string_view {
-    switch (fmt) {
-        case InstFormat::R: return "R-Type (Register-Register)";
-        case InstFormat::I: return "I-Type (Register-Immediate / Load / Jump)";
-        case InstFormat::S: return "S-Type (Store)";
-        case InstFormat::B: return "B-Type (Branch)";
-        case InstFormat::U: return "U-Type (Upper Immediate)";
-        case InstFormat::J: return "J-Type (Unconditional Jump)";
-        case InstFormat::R4: return "R4-Type (Fused Multiply-Add)";
-        case InstFormat::Unknown: return "Unknown / Custom Format";
-    }
-    return "Unknown";
-}
 
 auto get_description(OperationId op_id) -> std::pair<std::string_view, std::string_view> {
     static constexpr std::pair<std::string_view, std::string_view> kDefaultDesc = {
@@ -652,8 +596,8 @@ void explain_instruction(uint32_t raw_inst) {
     uint32_t const rs3_val = (inst >> 27) & 0x1F;
     uint32_t const csr_val = (inst >> 20) & 0xFFF;
 
-    InstFormat const fmt = get_format(op);
-    std::println("Instruction Format: {}{}{}", c(kBold), get_format_name(fmt), c(kReset));
+    InstFormat const fmt = simrv::isa::get_instruction_format(op);
+    std::println("Instruction Format: {}{}{}", c(kBold), simrv::isa::get_instruction_format_name(fmt), c(kReset));
 
     // Print Visual Fields
     std::println("");

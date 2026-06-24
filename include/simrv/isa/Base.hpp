@@ -97,4 +97,15 @@ enum class MisaProfile : uint8_t {
     GC,
 };
 
+enum class InstFormat : uint8_t {
+    R,
+    I,
+    S,
+    B,
+    U,
+    J,
+    R4,
+    Unknown
+};
+
 } // namespace simrv::isa

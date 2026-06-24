@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include <string_view>
 #include "simrv/xlen/Types.hpp" // IWYU pragma: export
 #include "simrv/isa/Base.hpp" // IWYU pragma: export
 #include "simrv/isa/Amo.hpp" // IWYU pragma: export
@@ -181,6 +182,55 @@ constexpr auto is_rs2_fp(Opcode opcode, [[maybe_unused]] OperationId op_id) -> b
         return false;
     }
     return true;
+}
+
+constexpr auto get_instruction_format(Opcode op) -> InstFormat {
+    switch (op) {
+        case Opcode::Load:
+        case Opcode::LoadFp:
+        case Opcode::MiscMem:
+        case Opcode::OpImm:
+        case Opcode::OpImm32:
+        case Opcode::Jalr:
+        case Opcode::System:
+            return InstFormat::I;
+        case Opcode::Store:
+        case Opcode::StoreFp:
+            return InstFormat::S;
+        case Opcode::Branch:
+            return InstFormat::B;
+        case Opcode::Auipc:
+        case Opcode::Lui:
+            return InstFormat::U;
+        case Opcode::Jal:
+            return InstFormat::J;
+        case Opcode::Op:
+        case Opcode::Op32:
+        case Opcode::Amo:
+        case Opcode::OpFp:
+            return InstFormat::R;
+        case Opcode::MAdd:
+        case Opcode::MSub:
+        case Opcode::NMSub:
+        case Opcode::NMAdd:
+            return InstFormat::R4;
+        default:
+            return InstFormat::Unknown;
+    }
+}
+
+constexpr auto get_instruction_format_name(InstFormat fmt) -> std::string_view {
+    switch (fmt) {
+        case InstFormat::R: return "R-Type (Register-Register)";
+        case InstFormat::I: return "I-Type (Register-Immediate / Load / Jump)";
+        case InstFormat::S: return "S-Type (Store)";
+        case InstFormat::B: return "B-Type (Branch)";
+        case InstFormat::U: return "U-Type (Upper Immediate)";
+        case InstFormat::J: return "J-Type (Unconditional Jump)";
+        case InstFormat::R4: return "R4-Type (Fused Multiply-Add)";
+        case InstFormat::Unknown: return "Unknown / Custom Format";
+    }
+    return "Unknown";
 }
 
 } // namespace simrv::isa

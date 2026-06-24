@@ -24,6 +24,7 @@ namespace simrv::tui {
 using simrv::isa::Opcode;
 using simrv::isa::OperationId;
 using enum simrv::isa::OperationId;
+using simrv::isa::InstFormat;
 
 namespace {
 
@@ -67,65 +68,7 @@ auto format_compact(uint64_t val) -> std::string {
     return std::format("{:6d}", val);
 }
 
-enum class InstFormat : uint8_t {
-    R, I, S, B, U, J, R4, Unknown
-};
 
-auto get_format(Opcode op) -> InstFormat {
-    static constexpr std::array<InstFormat, 128> format_lut = []() -> std::array<InstFormat, 128> {
-        std::array<InstFormat, 128> lut{};
-        lut.fill(InstFormat::Unknown);
-        
-        lut[static_cast<size_t>(Opcode::Load)] = InstFormat::I;
-        lut[static_cast<size_t>(Opcode::LoadFp)] = InstFormat::I;
-        lut[static_cast<size_t>(Opcode::MiscMem)] = InstFormat::I;
-        lut[static_cast<size_t>(Opcode::OpImm)] = InstFormat::I;
-        lut[static_cast<size_t>(Opcode::OpImm32)] = InstFormat::I;
-        lut[static_cast<size_t>(Opcode::Jalr)] = InstFormat::I;
-        lut[static_cast<size_t>(Opcode::System)] = InstFormat::I;
-        
-        lut[static_cast<size_t>(Opcode::Store)] = InstFormat::S;
-        lut[static_cast<size_t>(Opcode::StoreFp)] = InstFormat::S;
-        
-        lut[static_cast<size_t>(Opcode::Branch)] = InstFormat::B;
-        
-        lut[static_cast<size_t>(Opcode::Auipc)] = InstFormat::U;
-        lut[static_cast<size_t>(Opcode::Lui)] = InstFormat::U;
-        
-        lut[static_cast<size_t>(Opcode::Jal)] = InstFormat::J;
-        
-        lut[static_cast<size_t>(Opcode::Op)] = InstFormat::R;
-        lut[static_cast<size_t>(Opcode::Op32)] = InstFormat::R;
-        lut[static_cast<size_t>(Opcode::Amo)] = InstFormat::R;
-        lut[static_cast<size_t>(Opcode::OpFp)] = InstFormat::R;
-        
-        lut[static_cast<size_t>(Opcode::MAdd)] = InstFormat::R4;
-        lut[static_cast<size_t>(Opcode::MSub)] = InstFormat::R4;
-        lut[static_cast<size_t>(Opcode::NMSub)] = InstFormat::R4;
-        lut[static_cast<size_t>(Opcode::NMAdd)] = InstFormat::R4;
-        
-        return lut;
-    }();
-    
-    auto idx = static_cast<size_t>(op);
-    if (idx < format_lut.size()) {
-        return format_lut[idx];
-    }
-    return InstFormat::Unknown;
-}
-
-auto get_format_name(InstFormat fmt) -> std::string_view {
-    switch (fmt) {
-        case InstFormat::R: return "R-Type (Register-Register)";
-        case InstFormat::I: return "I-Type (Register-Immediate / Load / Jump)";
-        case InstFormat::S: return "S-Type (Store)";
-        case InstFormat::B: return "B-Type (Branch)";
-        case InstFormat::U: return "U-Type (Upper Immediate)";
-        case InstFormat::J: return "J-Type (Unconditional Jump)";
-        case InstFormat::R4: return "R4-Type (Fused Multiply-Add)";
-        default: return "Unknown / Custom Format";
-    }
-}
 
 auto get_reg_name(RegId reg, bool is_fp) -> std::string {
     uint32_t r = std::to_underlying(reg);
@@ -1592,7 +1535,7 @@ auto RegisterPane::get_explain_rows(int width) -> std::vector<std::string> {
     bool const is_compressed = (ctx.ir_org & 0x3) != 0x3;
     uint32_t decompressed_inst = ctx.ir;
     
-    InstFormat const fmt = get_format(ctx.opcode);
+    InstFormat const fmt = simrv::isa::get_instruction_format(ctx.opcode);
     auto const [mnemonic, behavior_desc] = simrv::util::get_operation_details(ctx.op_id);
 
     bool const is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
@@ -1631,7 +1574,7 @@ auto RegisterPane::get_explain_rows(int width) -> std::vector<std::string> {
     explain_rows.push_back(format_to_width(std::format("  {}Bin    : {}{}\033[0m", kSakuraText, kSakuraVal, bin_str), width));
 
     explain_rows.push_back(format_to_width(std::format("  {}Asm    : {}{}\033[0m", kSakuraText, kSakuraPeach, assembly), width));
-    explain_rows.push_back(format_to_width(std::format("  {}Format : {}{}\033[0m", kSakuraText, kSakuraVal, get_format_name(fmt)), width));
+    explain_rows.push_back(format_to_width(std::format("  {}Format : {}{}\033[0m", kSakuraText, kSakuraVal, simrv::isa::get_instruction_format_name(fmt)), width));
     explain_rows.push_back(format_to_width(std::format("  {}ISA Ext: {}{}\033[0m", kSakuraText, kSakuraMint, simrv::util::get_isa_extension_name(ctx.op_id)), width));
     explain_rows.push_back(format_to_width("", width));
 
