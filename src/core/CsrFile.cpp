@@ -15,6 +15,20 @@ namespace simrv::core {
 namespace {
 constexpr unsigned kHighWordShift = 32;
 constexpr CSRValue kCounterEnableMask = static_cast<CSRValue>(0x7u);
+
+constexpr auto cause_read_translate(CSRValue value, unsigned xlen) -> CSRValue {
+    if (xlen == 32 && (value & (1ULL << 63)) != 0) {
+        return (value & ~(1ULL << 63)) | (1ULL << 31);
+    }
+    return value;
+}
+
+constexpr auto cause_write_translate(CSRValue value, unsigned xlen) -> CSRValue {
+    if (xlen == 32 && (value & (1ULL << 31)) != 0) {
+        return (value & ~(1ULL << 31)) | (1ULL << 63);
+    }
+    return value;
+}
 }  // namespace
 
 auto CsrFile::getMstatus(CSRValue mask) const -> CSRValue {
@@ -73,10 +87,7 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
             rcsr = cpu_.state().sepc;
             break;
         case csr_addr(Csr::Scause):
-            rcsr = cpu_.state().scause;
-            if (cpu_.state().regs.xlen == 32 && (rcsr & (1ULL << 63)) != 0) {
-                rcsr = (rcsr & ~(1ULL << 63)) | (1ULL << 31);
-            }
+            rcsr = cause_read_translate(cpu_.state().scause, cpu_.state().regs.xlen);
             break;
         case csr_addr(Csr::Stval):
             rcsr = cpu_.state().stval;
@@ -110,10 +121,7 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
             rcsr = cpu_.state().mepc;
             break;
         case csr_addr(Csr::Mcause):
-            rcsr = cpu_.state().mcause;
-            if (cpu_.state().regs.xlen == 32 && (rcsr & (1ULL << 63)) != 0) {
-                rcsr = (rcsr & ~(1ULL << 63)) | (1ULL << 31);
-            }
+            rcsr = cause_read_translate(cpu_.state().mcause, cpu_.state().regs.xlen);
             break;
         case csr_addr(Csr::Mtval):
             rcsr = cpu_.state().mtval;
@@ -222,11 +230,7 @@ auto CsrFile::write(CSRAddress addr,
             cpu_.state().sepc = wdata & ~1;
             break;
         case csr_addr(Csr::Scause):
-            if (cpu_.state().regs.xlen == 32 && (wdata & (1ULL << 31)) != 0) {
-                cpu_.state().scause = (wdata & ~(1ULL << 31)) | (1ULL << 63);
-            } else {
-                cpu_.state().scause = wdata;
-            }
+            cpu_.state().scause = cause_write_translate(wdata, cpu_.state().regs.xlen);
             break;
         case csr_addr(Csr::Stval):
             cpu_.state().stval = wdata;
@@ -245,11 +249,7 @@ auto CsrFile::write(CSRAddress addr,
             cpu_.state().mepc = wdata & ~1;
             break;
         case csr_addr(Csr::Mcause):
-            if (cpu_.state().regs.xlen == 32 && (wdata & (1ULL << 31)) != 0) {
-                cpu_.state().mcause = (wdata & ~(1ULL << 31)) | (1ULL << 63);
-            } else {
-                cpu_.state().mcause = wdata;
-            }
+            cpu_.state().mcause = cause_write_translate(wdata, cpu_.state().regs.xlen);
             break;
         case csr_addr(Csr::Mtval):
             cpu_.state().mtval = wdata;
