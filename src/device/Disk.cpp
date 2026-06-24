@@ -64,7 +64,7 @@ void Disk::process_queue(Word q_idx) {
 
         Word request_size = 0;
         switch (header.type) {
-            case enum_mask(VirtioBlkType::In): {  /////  disk -> dram
+            case enum_mask(virtio::VirtioBlkType::In): {  /////  disk -> dram
                 request_size = sector_len + 1;
                 const auto disk_offset =
                     static_cast<Address>(header.sector_num * simrv::virtio::kDiskSectorSize);
@@ -79,7 +79,7 @@ void Disk::process_queue(Word q_idx) {
                 store_to_ram(footer_adr, 0, 1, mmem);  //  VIRTIO_BLK_S_OK
                 break;
             }
-            case enum_mask(VirtioBlkType::Out): {  ///// dram -> disk
+            case enum_mask(virtio::VirtioBlkType::Out): {  ///// dram -> disk
                 request_size = 1;
                 const auto disk_offset =
                     static_cast<Address>(header.sector_num * simrv::virtio::kDiskSectorSize);

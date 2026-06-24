@@ -7,23 +7,23 @@
 
 namespace simrv::tui {
 
-const char* g_theme_border = kAdaptiveBorder;
-const char* g_theme_text   = kAdaptiveText;
-const char* g_theme_val    = kAdaptiveVal;
-const char* g_theme_muted  = kAdaptiveMuted;
-const char* g_theme_mint   = kAdaptiveMint;
-const char* g_theme_peach  = kAdaptivePeach;
-const char* g_theme_coral  = kAdaptiveCoral;
-const char* g_theme_sky    = kAdaptiveSky;
-const char* g_theme_pink   = kAdaptivePink;
+const char* g_theme_border = kAdaptiveBorder; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+const char* g_theme_text   = kAdaptiveText; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+const char* g_theme_val    = kAdaptiveVal; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+const char* g_theme_muted  = kAdaptiveMuted; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+const char* g_theme_mint   = kAdaptiveMint; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+const char* g_theme_peach  = kAdaptivePeach; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+const char* g_theme_coral  = kAdaptiveCoral; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+const char* g_theme_sky    = kAdaptiveSky; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+const char* g_theme_pink   = kAdaptivePink; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
-std::array<const char*, 16> g_theme_palette = kHighContrastPalette;
-std::array<const char*, 16> g_theme_bg_palette = kHighContrastBgPalette;
+std::array<const char*, 16> g_theme_palette = kHighContrastPalette; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+std::array<const char*, 16> g_theme_bg_palette = kHighContrastBgPalette; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
-bool g_high_contrast = false;
-TuiTheme g_tui_theme = TuiTheme::Adaptive;
+bool g_high_contrast = false; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+TuiTheme g_tui_theme = TuiTheme::Adaptive; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
-void set_tui_theme(TuiTheme theme) {
+auto set_tui_theme(TuiTheme theme) -> void {
     g_tui_theme = theme;
     if (theme == TuiTheme::HighContrast) {
         g_high_contrast = true;
@@ -67,11 +67,11 @@ void set_tui_theme(TuiTheme theme) {
     }
 }
 
-TuiTheme get_tui_theme() {
+auto get_tui_theme() -> TuiTheme {
     return g_tui_theme;
 }
 
-void set_high_contrast(bool enable) {
+auto set_high_contrast(bool enable) -> void {
     if (enable) {
         set_tui_theme(TuiTheme::HighContrast);
     } else {
@@ -79,7 +79,7 @@ void set_high_contrast(bool enable) {
     }
 }
 
-bool is_high_contrast() { return g_high_contrast; }
+auto is_high_contrast() -> bool { return g_high_contrast; }
 
 auto make_repeated_string(const std::string& pattern, int count) -> std::string {
     std::string s;

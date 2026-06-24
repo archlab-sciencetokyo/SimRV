@@ -97,13 +97,13 @@ inline auto ram_read_fast(Address addr, Instruction funct3, Byte* ram) -> Word {
     const Address masked = addr & simrv::memory::kDramMask;
 
     switch (funct3 & kFunct3Mask) {
-        case static_cast<Instruction>(Funct3::Lb): {
+        case static_cast<Instruction>(isa::Funct3::Lb): {
             const auto b = static_cast<int8_t>(std::to_integer<uint8_t>(ram[masked]));
             return static_cast<Word>(static_cast<SignedWord>(b));
         }
-        case static_cast<Instruction>(Funct3::Lbu):
+        case static_cast<Instruction>(isa::Funct3::Lbu):
             return static_cast<Word>(std::to_integer<uint8_t>(ram[masked]));
-        case static_cast<Instruction>(Funct3::Lh): {
+        case static_cast<Instruction>(isa::Funct3::Lh): {
             int16_t val;
             if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 1))) {
                 std::memcpy(&val, ram + masked, sizeof(val));
@@ -115,7 +115,7 @@ inline auto ram_read_fast(Address addr, Instruction funct3, Byte* ram) -> Word {
             }
             return static_cast<Word>(static_cast<SignedWord>(val));
         }
-        case static_cast<Instruction>(Funct3::Lhu): {
+        case static_cast<Instruction>(isa::Funct3::Lhu): {
             uint16_t val;
             if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 1))) {
                 std::memcpy(&val, ram + masked, sizeof(val));
@@ -126,7 +126,7 @@ inline auto ram_read_fast(Address addr, Instruction funct3, Byte* ram) -> Word {
             }
             return static_cast<Word>(val);
         }
-        case static_cast<Instruction>(Funct3::Lw): {
+        case static_cast<Instruction>(isa::Funct3::Lw): {
             int32_t val;
             if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 3))) {
                 std::memcpy(&val, ram + masked, sizeof(val));
@@ -143,7 +143,7 @@ inline auto ram_read_fast(Address addr, Instruction funct3, Byte* ram) -> Word {
             return static_cast<Word>(static_cast<SignedWord>(val));
         }
         // RV64 LD (load double-word) instruction
-        case static_cast<Instruction>(Funct3::Ld): {
+        case static_cast<Instruction>(isa::Funct3::Ld): {
             if constexpr (simrv::xlen::kIsXLen64) {
                 uint64_t val;
                 if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 7))) {

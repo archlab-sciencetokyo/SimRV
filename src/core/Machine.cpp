@@ -9,20 +9,17 @@
 #include "simrv/device/Uart.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 
-#include <array>
-#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <iostream>
 #include <print>
 
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::memory {
-bool g_appmode = false;
-Address g_dram_base = kDramBaseAddress;
+bool g_appmode = false; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+Address g_dram_base = kDramBaseAddress; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 }
 
 namespace simrv::core {

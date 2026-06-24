@@ -9,36 +9,7 @@
 
 namespace simrv::pipeline {
 
-/// Standard RISC-V Major Opcodes (lower 7 bits)
-enum class Opcode : uint32_t {
-    kLoad = 0x03,
-    kLoadFp = 0x07,
-    kCustom0 = 0x0B,
-    kMiscMem = 0x0F,
-    kOpImm = 0x13,
-    kAuipc = 0x17,
-    kOpImm32 = 0x1B,  // RV64
-    kStore = 0x23,
-    kStoreFp = 0x27,
-    kCustom1 = 0x2B,
-    kAmo = 0x2F,
-    kOp = 0x33,
-    kLui = 0x37,
-    kOp32 = 0x3B,  // RV64
-    kMadd = 0x43,
-    kMsub = 0x47,
-    kNmsub = 0x4B,
-    kNmadd = 0x4F,
-    kOpFp = 0x53,
-    kReserved0 = 0x57,
-    kCustom2 = 0x5B,
-    kBranch = 0x63,
-    kJalr = 0x67,
-    kReserved1 = 0x6B,
-    kJal = 0x6F,
-    kSystem = 0x73,
-    kCustom3 = 0x7B
-};
+using Opcode = simrv::isa::Opcode;
 
 class Decoder {
    public:
@@ -60,7 +31,7 @@ class Decoder {
     // =========================================================================
 
     [[nodiscard]] constexpr auto rd() const -> RegId { return static_cast<RegId>((inst_ >> 7) & 0x1F); }
-    [[nodiscard]] constexpr auto funct3() const -> Funct3 { return static_cast<Funct3>((inst_ >> 12) & 0x7); }
+    [[nodiscard]] constexpr auto funct3() const -> isa::Funct3 { return static_cast<isa::Funct3>((inst_ >> 12) & 0x7); }
     [[nodiscard]] constexpr auto rs1() const -> RegId { return static_cast<RegId>((inst_ >> 15) & 0x1F); }
     [[nodiscard]] constexpr auto rs2() const -> RegId { return static_cast<RegId>((inst_ >> 20) & 0x1F); }
     [[nodiscard]] constexpr auto funct7() const -> uint32_t { return (inst_ >> 25) & 0x7F; }
@@ -130,12 +101,12 @@ class Decoder {
 };
 
 // Instruction-mix identification helper (currently stubbed)
-auto decoder(Instruction ir) -> OperationId;
+auto decoder(Instruction ir) -> isa::OperationId;
 
 // Expand 16-bit C-extension instructions to canonical 32-bit forms
 auto decompressInstruction(Instruction ir, bool is_rv64) -> Instruction;
 
 /// String mapping for instruction mix profiling
-extern const std::array<std::string_view, static_cast<size_t>(OperationIdCount)> OPERATION_NAME;
+extern const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> OPERATION_NAME;
 
 }  // namespace simrv::pipeline

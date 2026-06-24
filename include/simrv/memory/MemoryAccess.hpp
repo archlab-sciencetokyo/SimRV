@@ -25,15 +25,15 @@ class MemoryAccess {
     static void target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_addr, Word wdata,
                              Instruction funct3);
 
-    static auto loadInt(MemorySubsystem& mem, core::CPU& cpu, Address addr, Funct3 funct3)
+    static auto loadInt(MemorySubsystem& mem, core::CPU& cpu, Address addr, isa::Funct3 funct3)
         -> Word;
-    static auto loadFp(MemorySubsystem& mem, core::CPU& cpu, Address addr, Funct3 funct3)
+    static auto loadFp(MemorySubsystem& mem, core::CPU& cpu, Address addr, isa::Funct3 funct3)
         -> FloatingRegister;
 
     static void storeInt(MemorySubsystem& mem, core::CPU& cpu, Address addr, Word data,
-                         Funct3 funct3);
+                         isa::Funct3 funct3);
     static void storeFp(MemorySubsystem& mem, core::CPU& cpu, Address addr, FloatingRegister data,
-                        Funct3 funct3);
+                        isa::Funct3 funct3);
 };
 
 }  // namespace simrv::memory

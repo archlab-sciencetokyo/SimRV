@@ -31,6 +31,23 @@ inline constexpr Word kDiskConfigGeneration = 0;
 inline constexpr Word kDiskQueueNumMax = 4;
 inline constexpr Word kConsoleQueueNumMax = 16;
 
+using VringDescFlags = uint8_t;
+enum class VringDescFlag : VringDescFlags {
+    Next = 1,
+    Write = 2,
+    Indirect = 4,
+};
+
+enum class VirtioBlkType : uint8_t {
+    In = 0,
+    Out = 1,
+};
+
+enum class VirtioBlkStatus : uint8_t {
+    Ok = 0,
+    IoErr = 1,
+    Unsupp = 2,
+};
 
 enum class MmioOffset : Address {
     MagicValue = 0x000,

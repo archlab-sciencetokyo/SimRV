@@ -8,9 +8,7 @@
 #include <unistd.h>
 
 #include <cstdint>
-#include <print>
 #include <format>
-#include <ostream>
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
@@ -20,10 +18,13 @@
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::sbi {
+
+using core::MipBit;
+
 namespace {
 
 
-enum class ExtId : Word {
+enum class ExtId : std::uint32_t {
     Base = 0x10,
     Time = 0x54494D45,
     Rfence = 0x52464E43,

@@ -25,7 +25,7 @@ class Tracer {
     void write_instruction_mix_report();
     void print_summary();
     void emit_periodic_pc_trace(Counter mtime, Register cpc);
-    void emit_branch_prediction_trace(Counter mtime, Register cpc, Register jmp_pc, Opcode r_opcode,
+    void emit_branch_prediction_trace(Counter mtime, Register cpc, Register jmp_pc, isa::Opcode r_opcode,
                                       bool r_tkn);
     void write_trace_snapshot();
 

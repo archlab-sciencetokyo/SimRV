@@ -15,6 +15,14 @@
 
 namespace simrv::execute {
 
+using simrv::isa::Opcode;
+using simrv::isa::Funct3;
+using simrv::isa::FflagsBit;
+using simrv::isa::RoundingMode;
+using simrv::isa::Funct7Fp;
+using simrv::isa::Funct3Fp;
+using simrv::core::kFflagsMask;
+
 namespace fp {
 
 // ============================================================================

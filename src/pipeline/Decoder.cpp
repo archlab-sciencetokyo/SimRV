@@ -2,7 +2,10 @@
 
 namespace simrv::pipeline {
 
-const std::array<std::string_view, static_cast<size_t>(OperationIdCount)> OPERATION_NAME = {
+using simrv::isa::OperationId;
+using enum simrv::isa::OperationId;
+
+const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> OPERATION_NAME = {
     "LUI",        "AUIPC",    "JAL",       "JALR",      "BEQ",       "BNE",      "BLT",
     "BGE",        "BLTU",     "BGEU",      "LB",        "LH",        "LW",       "LD",
     "LBU",        "LHU",      "LWU",       "SB",        "SH",        "SW",       "SD",
@@ -146,19 +149,19 @@ auto decode_system(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operatio
 
 auto decode_ext_i(Opcode op, uint32_t funct3, uint32_t funct7, Instruction ir) -> OperationId {
     switch (op) {
-        case Opcode::kLui: return OperationId::LUI;
-        case Opcode::kAuipc: return OperationId::AUIPC;
-        case Opcode::kJal: return OperationId::JAL;
-        case Opcode::kJalr: return OperationId::JALR;
-        case Opcode::kBranch: return decode_branch(funct3);
-        case Opcode::kLoad: return decode_load(funct3);
-        case Opcode::kStore: return decode_store(funct3);
-        case Opcode::kOpImm: return decode_op_imm(funct3, funct7);
-        case Opcode::kOpImm32: return decode_op_imm32(funct3, funct7);
-        case Opcode::kOp: return decode_op_standard(funct3, funct7);
-        case Opcode::kOp32: return decode_op32_standard(funct3, funct7);
-        case Opcode::kMiscMem: return (funct3 == 1) ? OperationId::FENCE_I : OperationId::FENCE;
-        case Opcode::kSystem: return decode_system(funct3, funct7, ir);
+        case Opcode::Lui: return OperationId::LUI;
+        case Opcode::Auipc: return OperationId::AUIPC;
+        case Opcode::Jal: return OperationId::JAL;
+        case Opcode::Jalr: return OperationId::JALR;
+        case Opcode::Branch: return decode_branch(funct3);
+        case Opcode::Load: return decode_load(funct3);
+        case Opcode::Store: return decode_store(funct3);
+        case Opcode::OpImm: return decode_op_imm(funct3, funct7);
+        case Opcode::OpImm32: return decode_op_imm32(funct3, funct7);
+        case Opcode::Op: return decode_op_standard(funct3, funct7);
+        case Opcode::Op32: return decode_op32_standard(funct3, funct7);
+        case Opcode::MiscMem: return (funct3 == 1) ? OperationId::FENCE_I : OperationId::FENCE;
+        case Opcode::System: return decode_system(funct3, funct7, ir);
         default: return OperationId::UNKNOWN;
     }
 }
@@ -189,7 +192,7 @@ auto decode_ext_m_op32(uint32_t funct3) -> OperationId {
 }
 
 auto decode_ext_m(Opcode op, uint32_t funct3) -> OperationId {
-    if (op == Opcode::kOp32) {
+    if (op == Opcode::Op32) {
         return decode_ext_m_op32(funct3);
     }
     return decode_ext_m_op(funct3);
@@ -216,10 +219,10 @@ auto decode_ext_a(uint32_t funct7) -> OperationId {
 auto decode_fma(Opcode op, uint32_t funct7) -> OperationId {
     const bool is_double = ((funct7 & 0x03) == 1);
     switch (op) {
-        case Opcode::kMadd: return is_double ? OperationId::FMADD_D : OperationId::FMADD_S;
-        case Opcode::kMsub: return is_double ? OperationId::FMSUB_D : OperationId::FMSUB_S;
-        case Opcode::kNmsub: return is_double ? OperationId::FNMSUB_D : OperationId::FNMSUB_S;
-        case Opcode::kNmadd: return is_double ? OperationId::FNMADD_D : OperationId::FNMADD_S;
+        case Opcode::MAdd: return is_double ? OperationId::FMADD_D : OperationId::FMADD_S;
+        case Opcode::MSub: return is_double ? OperationId::FMSUB_D : OperationId::FMSUB_S;
+        case Opcode::NMSub: return is_double ? OperationId::FNMSUB_D : OperationId::FNMSUB_S;
+        case Opcode::NMAdd: return is_double ? OperationId::FNMADD_D : OperationId::FNMADD_S;
         default: return OperationId::UNKNOWN;
     }
 }
@@ -375,16 +378,16 @@ auto decode_op_fp(uint32_t funct3, uint32_t funct7, uint32_t rs2) -> OperationId
 
 auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2) -> OperationId {
     switch (op) {
-        case Opcode::kLoadFp:
+        case Opcode::LoadFp:
             return (funct3 == 3) ? OperationId::FLD : OperationId::FLW;
-        case Opcode::kStoreFp:
+        case Opcode::StoreFp:
             return (funct3 == 3) ? OperationId::FSD : OperationId::FSW;
-        case Opcode::kMadd:
-        case Opcode::kMsub:
-        case Opcode::kNmsub:
-        case Opcode::kNmadd:
+        case Opcode::MAdd:
+        case Opcode::MSub:
+        case Opcode::NMSub:
+        case Opcode::NMAdd:
             return decode_fma(op, funct7);
-        case Opcode::kOpFp:
+        case Opcode::OpFp:
             return decode_op_fp(funct3, funct7, rs2);
         default:
             return OperationId::UNKNOWN;
@@ -648,14 +651,14 @@ auto decoder(Instruction ir) -> OperationId {
     const auto funct3 = std::to_underlying(dec.funct3());
     const auto funct7 = dec.funct7();
 
-    if (op == Opcode::kAmo) {
+    if (op == Opcode::Amo) {
         return decode_ext_a(funct7);
     }
-    if (op == Opcode::kLoadFp || op == Opcode::kStoreFp || op == Opcode::kOpFp ||
-        op == Opcode::kMadd || op == Opcode::kMsub || op == Opcode::kNmsub || op == Opcode::kNmadd) {
+    if (op == Opcode::LoadFp || op == Opcode::StoreFp || op == Opcode::OpFp ||
+        op == Opcode::MAdd || op == Opcode::MSub || op == Opcode::NMSub || op == Opcode::NMAdd) {
         return decode_ext_f_d(op, funct3, funct7, std::to_underlying(dec.rs2()));
     }
-    if ((op == Opcode::kOp || op == Opcode::kOp32) && (funct7 & 0x01)) {
+    if ((op == Opcode::Op || op == Opcode::Op32) && (funct7 & 0x01)) {
         return decode_ext_m(op, funct3);
     }
     return decode_ext_i(op, funct3, funct7, ir);

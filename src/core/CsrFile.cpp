@@ -6,6 +6,7 @@
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/Machine.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -121,7 +122,7 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
             rcsr = cpu_.state().mip;
             break;
         case csr_addr(Csr::Misa):
-            rcsr = misa_with_mxl(cpu_.state().misa);
+            rcsr = isa::misa_with_mxl(cpu_.state().misa);
             break;
 
         case csr_addr(Csr::Mcycle):
@@ -280,6 +281,10 @@ auto CsrFile::write(CSRAddress addr,
             const Word mode = simrv::xlen::satp_mode(wdata, xlen);
             if (simrv::xlen::satp_mode_supported(mode, xlen)) {
                 cpu_.state().satp = wdata;
+                // Latch: once translation is enabled it is never "un-seen"
+                if (mode != 0) {
+                    cpu_.machine_->s_mmu_ever_used = true;
+                }
             }
             break;
         }

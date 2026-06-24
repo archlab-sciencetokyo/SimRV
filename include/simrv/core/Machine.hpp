@@ -57,7 +57,7 @@ class Machine {
     /// Request system reboot.
     void request_reboot() { reboot_requested = true; is_running_ = false; }
 
-    Counter tohost = 0;  // Host communication register (always 64-bit for HTIF).
+    uint64_t tohost = 0;  // Host communication register (always 64-bit for HTIF).
     bool reboot_requested = false;  // Reboot requested flag.
     int exit_code = 0;             // Exit/status code of the simulation.
     bool is_shutdown_ = false;     // System shutdown flag.
@@ -74,8 +74,9 @@ class Machine {
     bool s_use_mix = false;        // Enable instruction-mix statistics collection
     bool s_bp_trace = false;       // Enable branch prediction tracing
     bool s_misa_override = false;  // True when CLI explicitly selected MISA profile
-    bool s_cycle_accurate = false; // Enable cycle-accurate performance simulation mode
+    bool s_cycle_accurate = false;  // Enable cycle-accurate performance simulation mode
     bool s_high_performance = true; // Enable high-performance optimized simulation mode
+    bool s_mmu_ever_used = false;   // Latched true the first time satp enables translation
 
     // ========== Debug / Co-Simulation Flags ==========
     bool     s_gdb_mode      = false;      // Enable GDB RSP stub
@@ -95,7 +96,7 @@ class Machine {
 
     // ========== ISA/Privilege Configuration ==========
     Address s_isatest_tohost = 0x80001000;   // ISA-test tohost RAM address
-    CSRValue s_misa_profile = kMisaDefault;  // Selected MISA profile (without MXL)
+    CSRValue s_misa_profile = isa::kMisaDefault;  // Selected MISA profile (without MXL)
     unsigned int s_misa_xlen = 0;            // Selected MISA XLEN (32 or 64, or 0 if default)
 
     // ========== I/O and Logging ==========

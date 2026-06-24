@@ -170,14 +170,14 @@ auto Machine::initialize() -> int {
             ? static_cast<Address>(simrv::memory::kDramSize - static_cast<Address>(0x00100000U))
             : simrv::boot::kInitDataAddress;
 
-    CSRValue initial_misa = misa_with_mxl(s_misa_override ? s_misa_profile
-                                                          : kMisaDefault);
+    CSRValue initial_misa = isa::misa_with_mxl(s_misa_override ? s_misa_profile
+                                                                : isa::kMisaDefault);
     if constexpr (simrv::xlen::kIsXLen64) {
         bool is_32bit = false;
         if (s_misa_override && s_misa_xlen == 32) {
             is_32bit = true;
         } else if (!s_misa_override || s_misa_xlen == 0) {
-            auto check_elf = [&](const std::string& path) {
+            auto check_elf = [&](const std::string& path) -> void {
                 if (path.empty()) return;
                 std::ifstream file(path, std::ios::binary);
                 if (file.is_open()) {

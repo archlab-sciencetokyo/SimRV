@@ -10,6 +10,10 @@
 
 namespace simrv::execute {
 
+using simrv::isa::Funct3;
+using simrv::isa::Opcode;
+using simrv::isa::Funct5Amo;
+
 auto ExecuteUnit::aluInt(Register in1, Register in2, Funct3 funct3, Instruction funct7)
     -> Register {
     const bool is_m_extension = (funct7 & 0x01) != 0;

@@ -13,14 +13,14 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
-#include <chrono>
 #include <format>
-#include <iostream>
 #include <print>
 #include <string>
 #include <span>
 
 namespace simrv::util {
+
+using isa::MisaProfile;
 
 namespace {
 

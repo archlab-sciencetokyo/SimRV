@@ -54,3 +54,4 @@ docs/
 !docs/*.md
 trace/
 log/
+.clangd

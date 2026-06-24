@@ -21,6 +21,10 @@
 
 namespace simrv::tui {
 
+using simrv::isa::Opcode;
+using simrv::isa::OperationId;
+using enum simrv::isa::OperationId;
+
 namespace {
 
 static constexpr std::array<const char*, 32> kRegNames = {
@@ -67,38 +71,38 @@ enum class InstFormat : uint8_t {
     R, I, S, B, U, J, R4, Unknown
 };
 
-auto get_format(::Opcode op) -> InstFormat {
+auto get_format(Opcode op) -> InstFormat {
     static constexpr std::array<InstFormat, 128> format_lut = []() -> std::array<InstFormat, 128> {
         std::array<InstFormat, 128> lut{};
         lut.fill(InstFormat::Unknown);
         
-        lut[static_cast<size_t>(::Opcode::Load)] = InstFormat::I;
-        lut[static_cast<size_t>(::Opcode::LoadFp)] = InstFormat::I;
-        lut[static_cast<size_t>(::Opcode::MiscMem)] = InstFormat::I;
-        lut[static_cast<size_t>(::Opcode::OpImm)] = InstFormat::I;
-        lut[static_cast<size_t>(::Opcode::OpImm32)] = InstFormat::I;
-        lut[static_cast<size_t>(::Opcode::Jalr)] = InstFormat::I;
-        lut[static_cast<size_t>(::Opcode::System)] = InstFormat::I;
+        lut[static_cast<size_t>(Opcode::Load)] = InstFormat::I;
+        lut[static_cast<size_t>(Opcode::LoadFp)] = InstFormat::I;
+        lut[static_cast<size_t>(Opcode::MiscMem)] = InstFormat::I;
+        lut[static_cast<size_t>(Opcode::OpImm)] = InstFormat::I;
+        lut[static_cast<size_t>(Opcode::OpImm32)] = InstFormat::I;
+        lut[static_cast<size_t>(Opcode::Jalr)] = InstFormat::I;
+        lut[static_cast<size_t>(Opcode::System)] = InstFormat::I;
         
-        lut[static_cast<size_t>(::Opcode::Store)] = InstFormat::S;
-        lut[static_cast<size_t>(::Opcode::StoreFp)] = InstFormat::S;
+        lut[static_cast<size_t>(Opcode::Store)] = InstFormat::S;
+        lut[static_cast<size_t>(Opcode::StoreFp)] = InstFormat::S;
         
-        lut[static_cast<size_t>(::Opcode::Branch)] = InstFormat::B;
+        lut[static_cast<size_t>(Opcode::Branch)] = InstFormat::B;
         
-        lut[static_cast<size_t>(::Opcode::Auipc)] = InstFormat::U;
-        lut[static_cast<size_t>(::Opcode::Lui)] = InstFormat::U;
+        lut[static_cast<size_t>(Opcode::Auipc)] = InstFormat::U;
+        lut[static_cast<size_t>(Opcode::Lui)] = InstFormat::U;
         
-        lut[static_cast<size_t>(::Opcode::Jal)] = InstFormat::J;
+        lut[static_cast<size_t>(Opcode::Jal)] = InstFormat::J;
         
-        lut[static_cast<size_t>(::Opcode::Op)] = InstFormat::R;
-        lut[static_cast<size_t>(::Opcode::Op32)] = InstFormat::R;
-        lut[static_cast<size_t>(::Opcode::Amo)] = InstFormat::R;
-        lut[static_cast<size_t>(::Opcode::OpFp)] = InstFormat::R;
+        lut[static_cast<size_t>(Opcode::Op)] = InstFormat::R;
+        lut[static_cast<size_t>(Opcode::Op32)] = InstFormat::R;
+        lut[static_cast<size_t>(Opcode::Amo)] = InstFormat::R;
+        lut[static_cast<size_t>(Opcode::OpFp)] = InstFormat::R;
         
-        lut[static_cast<size_t>(::Opcode::MAdd)] = InstFormat::R4;
-        lut[static_cast<size_t>(::Opcode::MSub)] = InstFormat::R4;
-        lut[static_cast<size_t>(::Opcode::NMSub)] = InstFormat::R4;
-        lut[static_cast<size_t>(::Opcode::NMAdd)] = InstFormat::R4;
+        lut[static_cast<size_t>(Opcode::MAdd)] = InstFormat::R4;
+        lut[static_cast<size_t>(Opcode::MSub)] = InstFormat::R4;
+        lut[static_cast<size_t>(Opcode::NMSub)] = InstFormat::R4;
+        lut[static_cast<size_t>(Opcode::NMAdd)] = InstFormat::R4;
         
         return lut;
     }();
@@ -129,48 +133,7 @@ auto get_reg_name(RegId reg, bool is_fp) -> std::string {
     return is_fp ? kFpRegNames.at(r) : kRegNames.at(r);
 }
 
-auto is_float_to_int_conv_or_cmp(uint8_t op_id) -> bool {
-    switch (op_id) {
-        case FCVT_W_S:
-        case FCVT_WU_S:
-        case FEQ_S:
-        case FLT_S:
-        case FLE_S:
-        case FCLASS_S:
-        case FCVT_W_D:
-        case FCVT_WU_D:
-        case FEQ_D:
-        case FLT_D:
-        case FLE_D:
-        case FCLASS_D:
-        case FMV_X_W:
-        case FMV_X_D:
-            return true;
-        default:
-            return false;
-    }
-}
 
-auto is_destination_fp(::Opcode opcode, uint8_t op_id) -> bool {
-    if (opcode == ::Opcode::LoadFp) return true;
-    if (opcode != ::Opcode::OpFp) return false;
-    return !is_float_to_int_conv_or_cmp(op_id);
-}
-
-auto is_source_fp(::Opcode opcode) -> bool {
-    return (opcode == ::Opcode::StoreFp) || (opcode == ::Opcode::OpFp);
-}
-
-auto is_rs1_fp(::Opcode opcode, uint8_t op_id) -> bool {
-    bool const is_src_fp_val = is_source_fp(opcode);
-    return is_src_fp_val &&
-           op_id != FCVT_S_W &&
-           op_id != FCVT_S_WU &&
-           op_id != FCVT_D_W &&
-           op_id != FCVT_D_WU &&
-           op_id != FMV_W_X &&
-           op_id != FMV_D_X;
-}
 
 
 auto wrap_text(const std::string& text, int max_len) -> std::vector<std::string> {
@@ -370,7 +333,7 @@ auto format_assembly_i(
     const std::string& rd_name,
     const std::string& rs1_name
 ) -> std::string {
-    bool const is_load = (ctx.opcode == ::Opcode::Load) || (ctx.opcode == ::Opcode::LoadFp);
+    bool const is_load = (ctx.opcode == Opcode::Load) || (ctx.opcode == Opcode::LoadFp);
     bool const is_csr = (ctx.op_id >= CSRRW && ctx.op_id <= CSRRCI);
     if (is_load) {
         return std::format("{} {}, {}({})", mnemonic, rd_name, ctx.imm, rs1_name);
@@ -410,7 +373,7 @@ auto format_assembly_s_b_u_j_r4(
     const std::string& rs2_name
 ) -> std::string {
     if (fmt == InstFormat::S) {
-        bool const is_store_fp = (ctx.opcode == ::Opcode::StoreFp);
+        bool const is_store_fp = (ctx.opcode == Opcode::StoreFp);
         return std::format("{} {}, {}({})", mnemonic, get_reg_name(ctx.rs2, is_store_fp), ctx.imm, rs1_name);
     }
     if (fmt == InstFormat::B) {
@@ -443,16 +406,16 @@ auto render_field_decoded_values(
     rows.push_back(format_to_width(std::format("  opcode : 0x{:02X} ({:07b})", std::to_underlying(ctx.opcode), std::to_underlying(ctx.opcode)), width));
     
     if (has_rd(fmt)) {
-        bool const is_dst_fp = is_destination_fp(ctx.opcode, ctx.op_id);
+        bool const is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
         rows.push_back(format_to_width(std::format("  rd     : {} = {}", rd_name, read_reg_str(st, ctx.rd, is_dst_fp)), width));
     }
     if (has_rs1(fmt)) {
-        bool const is_rs1_fpr = is_rs1_fp(ctx.opcode, ctx.op_id);
+        bool const is_rs1_fpr = simrv::isa::is_rs1_fp(ctx.opcode, ctx.op_id);
         rows.push_back(format_to_width(std::format("  rs1    : {} = {}", rs1_name, read_reg_str(st, ctx.rs1, is_rs1_fpr)), width));
     }
     if (has_rs2(fmt)) {
-        bool const is_src_fp = is_source_fp(ctx.opcode);
-        rows.push_back(format_to_width(std::format("  rs2    : {} = {}", rs2_name, read_reg_str(st, ctx.rs2, is_src_fp)), width));
+        bool const is_rs2_fpr = simrv::isa::is_rs2_fp(ctx.opcode, ctx.op_id);
+        rows.push_back(format_to_width(std::format("  rs2    : {} = {}", rs2_name, read_reg_str(st, ctx.rs2, is_rs2_fpr)), width));
     }
     if (fmt == InstFormat::R4) {
         uint32_t rs3_val = (ctx.ir_org >> 27) & 0x1F;
@@ -1632,12 +1595,13 @@ auto RegisterPane::get_explain_rows(int width) -> std::vector<std::string> {
     InstFormat const fmt = get_format(ctx.opcode);
     auto const [mnemonic, behavior_desc] = simrv::util::get_operation_details(ctx.op_id);
 
-    bool const is_dst_fp = is_destination_fp(ctx.opcode, ctx.op_id);
-    bool const is_src_fp = is_source_fp(ctx.opcode);
+    bool const is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
+    bool const is_rs1_fpr = simrv::isa::is_rs1_fp(ctx.opcode, ctx.op_id);
+    bool const is_rs2_fpr = simrv::isa::is_rs2_fp(ctx.opcode, ctx.op_id);
 
     std::string rd_name = get_reg_name(ctx.rd, is_dst_fp);
-    std::string rs1_name = get_reg_name(ctx.rs1, is_rs1_fp(ctx.opcode, ctx.op_id));
-    std::string rs2_name = get_reg_name(ctx.rs2, is_src_fp);
+    std::string rs1_name = get_reg_name(ctx.rs1, is_rs1_fpr);
+    std::string rs2_name = get_reg_name(ctx.rs2, is_rs2_fpr);
 
     std::string assembly = format_instruction_assembly(ctx, fmt, mnemonic, rd_name, rs1_name, rs2_name);
 

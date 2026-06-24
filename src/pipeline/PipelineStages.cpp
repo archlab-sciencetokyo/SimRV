@@ -3,9 +3,6 @@
  * @brief Consolidated pipeline stages implementation for Machine.
  */
 #include <bit>
-#include <iostream>
-#include <thread>
-#include <chrono>
 #include <cstdint>
 
 #include "simrv/Define.hpp"
@@ -26,6 +23,8 @@
 #include "simrv/debug/SpikeLockstep.hpp"
 
 namespace simrv::core {
+
+using namespace simrv::isa;
 
 // ==========================================
 // IF (Instruction Fetch) Stage
@@ -189,7 +188,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             std::array<Byte, simrv::cache::ICache::kLineBytes> line_data{};
             const unsigned fetch_size = xlen::kFetchSize;
             const auto fetch_funct3 = static_cast<Instruction>(
-                xlen::kIsXLen64 ? ::Funct3::Sd : ::Funct3::Sw);
+                xlen::kIsXLen64 ? isa::Funct3::Sd : isa::Funct3::Sw);
 
             for (uint32_t i = 0; i < simrv::cache::ICache::kLineBytes; i += fetch_size) {
                 simrv::memory::TlChannelA req{};
@@ -257,7 +256,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
 void CPU::decode_and_normalize_instruction(Machine& machine) {
     auto& ctx = pipeline_context;
     if (simrv::compiler::unlikely(ctx.pending_exception.has_value())) {
-        ctx.ir = RV32_NOP;
+        ctx.ir = isa::RV32_NOP;
         return;
     }
 
@@ -271,8 +270,8 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
         is_valid = instruction_enabled_by_misa(state_.misa, w_ir_tmp, w_compressed);
     }
 
-    const ::OperationId op_id = simrv::pipeline::decoder(w_ir_tmp);
-    if (simrv::compiler::unlikely(op_id == ::UNKNOWN)) {
+    const isa::OperationId op_id = simrv::pipeline::decoder(w_ir_tmp);
+    if (simrv::compiler::unlikely(op_id == isa::UNKNOWN)) {
         is_valid = false;
     }
 
@@ -294,8 +293,8 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
     } else {
         ctx.pending_exception = ExceptionCode::IllegalInstruction;
         ctx.pending_tval = ctx.ir_org;
-        ctx.ir = RV32_NOP;
-        ctx.op_id = ::UNKNOWN;
+        ctx.ir = isa::RV32_NOP;
+        ctx.op_id = isa::UNKNOWN;
     }
 
     ctx.cinsn = w_compressed ? 1U : 0U;
@@ -312,12 +311,13 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
     ctx.padr1 = (state_.regs.xlen == 32) ? (state_.pc & 0xFFFFFFFFULL) : state_.pc;
     ctx.padr2 = (state_.regs.xlen == 32) ? ((state_.pc + 2) & 0xFFFFFFFFULL) : (state_.pc + 2);
 
-    const bool split_page =
-        ((state_.pc & ~simrv::memory::kPageMask) != ((state_.pc + 2) & ~simrv::memory::kPageMask));
-    const bool translation_enabled =
-        state_.priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp);
-
-    if (simrv::compiler::likely(simrv::memory::is_dram_addr(ctx.padr1) && !translation_enabled)) {
+    // Fast path: DRAM physical fetch — valid only while the MMU has never been
+    // enabled.  The latch is set once on the first satp write that activates
+    // translation, so the branch predictor sees this as "not taken" for nearly
+    // all cycles of a physical-only run and switches to "always taken" after
+    // the OS enables virtual memory.
+    if (simrv::compiler::likely(
+            simrv::memory::is_dram_addr(ctx.padr1) && !machine.s_mmu_ever_used)) {
         const uint16_t h1 = simrv::memory::ram_read_fast(ctx.padr1, static_cast<Instruction>(Funct3::Lhu), machine.mmem);
         if ((h1 & 0x3) != 0x3) {
             ctx.ir_org = h1;
@@ -326,6 +326,13 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
             ctx.ir_org = (static_cast<uint32_t>(h2) << 16) | h1;
         }
     } else {
+        // Slow path: MMU may be active.  Compute translation_enabled here (not
+        // on every cycle in the fast path above).
+        const bool split_page =
+            ((state_.pc & ~simrv::memory::kPageMask) != ((state_.pc + 2) & ~simrv::memory::kPageMask));
+        const bool translation_enabled =
+            state_.priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp);
+
         fetch_address_translate(machine);
 
         if (simrv::compiler::unlikely(translation_enabled)) {
@@ -369,18 +376,18 @@ void CPU::decode_fields(Machine& /*machine*/) {
     ctx.funct12 = (ctx.ir >> 20);
 
     switch (dec.opcode()) {
-        case simrv::pipeline::Opcode::kLui:
-        case simrv::pipeline::Opcode::kAuipc:
+        case Opcode::Lui:
+        case Opcode::Auipc:
             ctx.imm = dec.imm_u();
             break;
-        case simrv::pipeline::Opcode::kJal:
+        case Opcode::Jal:
             ctx.imm = dec.imm_j();
             break;
-        case simrv::pipeline::Opcode::kBranch:
+        case Opcode::Branch:
             ctx.imm = dec.imm_b();
             break;
-        case simrv::pipeline::Opcode::kStore:
-        case simrv::pipeline::Opcode::kStoreFp:
+        case Opcode::Store:
+        case Opcode::StoreFp:
             ctx.imm = dec.imm_s();
             break;
         default:

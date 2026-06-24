@@ -3,31 +3,34 @@
 
 namespace simrv::pipeline {
 
+using simrv::isa::OperationId;
+using enum simrv::isa::OperationId;
+
 namespace {
 
-auto is_mul_op(OperationId op_id) -> bool {
+auto is_mul_op(isa::OperationId op_id) -> bool {
     switch (op_id) {
-        case OperationId::MUL:
-        case OperationId::MULH:
-        case OperationId::MULHSU:
-        case OperationId::MULHU:
-        case OperationId::MULW:
+        case MUL:
+        case MULH:
+        case MULHSU:
+        case MULHU:
+        case MULW:
             return true;
         default:
             return false;
     }
 }
 
-auto is_div_rem_op(OperationId op_id) -> bool {
+auto is_div_rem_op(isa::OperationId op_id) -> bool {
     switch (op_id) {
-        case OperationId::DIV:
-        case OperationId::DIVU:
-        case OperationId::REM:
-        case OperationId::REMU:
-        case OperationId::DIVW:
-        case OperationId::DIVUW:
-        case OperationId::REMW:
-        case OperationId::REMUW:
+        case DIV:
+        case DIVU:
+        case REM:
+        case REMU:
+        case DIVW:
+        case DIVUW:
+        case REMW:
+        case REMUW:
             return true;
         default:
             return false;
@@ -124,9 +127,9 @@ auto PipelineSim::check_stall_if() const -> bool {
             (f_reg_.icache_miss && icache_stall_remaining_ > 0));
 }
 
-auto PipelineSim::resolve_jump_ex(BtbEntry& btb_entry, Register pc, Opcode opcode, Register target_pc) -> uint32_t {
+auto PipelineSim::resolve_jump_ex(BtbEntry& btb_entry, Register pc, isa::Opcode opcode, Register target_pc) -> uint32_t {
     const bool btb_hit = btb_entry.valid && (btb_entry.pc == pc);
-    if (opcode == Opcode::Jalr) {
+    if (opcode == isa::Opcode::Jalr) {
         if (btb_hit && btb_entry.target == target_pc) {
             return 0;
         }
@@ -319,8 +322,8 @@ void PipelineSim::tick_pipeline() {
     stage_register_transfers(MEM_stalled, EX_stalled, ID_stalled, IF_stalled);
 }
 
-auto PipelineSim::step_instruction(Register pc, Opcode opcode, RegId rd, RegId rs1, RegId rs2,
-                                  OperationId op_id, bool branched, bool is_branch, bool is_jump,
+auto PipelineSim::step_instruction(Register pc, isa::Opcode opcode, RegId rd, RegId rs1, RegId rs2,
+                                  isa::OperationId op_id, bool branched, bool is_branch, bool is_jump,
                                   bool icache_miss, bool dcache_miss, bool tlb_miss, Register target_pc) -> uint32_t {
     uint32_t cycles_spent = 0;
 
@@ -347,10 +350,10 @@ auto PipelineSim::step_instruction(Register pc, Opcode opcode, RegId rd, RegId r
     f_reg_.rs2 = rs2;
     f_reg_.op_id = op_id;
     f_reg_.writes_reg = (rd != static_cast<RegId>(0)) && 
-                        (opcode != Opcode::Branch) && 
-                        (opcode != Opcode::Store) && 
-                        (opcode != Opcode::StoreFp);
-    f_reg_.is_load = (opcode == Opcode::Load) || (opcode == Opcode::LoadFp);
+                        (opcode != isa::Opcode::Branch) && 
+                        (opcode != isa::Opcode::Store) && 
+                        (opcode != isa::Opcode::StoreFp);
+    f_reg_.is_load = (opcode == isa::Opcode::Load) || (opcode == isa::Opcode::LoadFp);
     f_reg_.tlb_miss = tlb_miss;
     f_reg_.icache_miss = icache_miss;
     f_reg_.dcache_miss = dcache_miss;

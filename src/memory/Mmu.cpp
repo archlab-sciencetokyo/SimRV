@@ -16,6 +16,9 @@
 
 namespace simrv {
 
+using isa::Funct3;
+using core::MstatusBit;
+
 // Static member initialization
 Word Mmu::s_last_valid_root_ppn = 0;
 
@@ -67,7 +70,7 @@ auto Mmu::validate_pte_permissions(Word pte, Word permission_bits, PteAccess acc
     return true;
 }
 
-void Mmu::update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess access, unsigned xlen) {
+void Mmu::update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess access, unsigned pte_size) {
     // Update A (accessed) and D (dirty) bits as per RISC-V spec
     Word updated_pte = pte_value | enum_mask(PteFlag::A);
     if (access == PteAccess::Write) {
@@ -77,9 +80,8 @@ void Mmu::update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess ac
     // Write back only if modified
     if (updated_pte != pte_value) {
         pte_value = updated_pte;
-        Instruction const store_op = (xlen == 32) ? static_cast<Instruction>(Funct3::Sw)
-                                     : (simrv::xlen::kIsXLen64 ? static_cast<Instruction>(Funct3::Sd)
-                                                              : static_cast<Instruction>(Funct3::Sw));
+        Instruction const store_op = (pte_size == 4) ? static_cast<Instruction>(Funct3::Sw)
+                                                     : static_cast<Instruction>(Funct3::Sd);
         simrv::memory::ram_write_fast(pte_addr, updated_pte, store_op, mmem_);
 
     }
@@ -200,7 +202,7 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
     const Word offset_mask = (static_cast<Word>(1) << offset_bits) - 1;
     const Word phys_addr = (v_addr & offset_mask) | ((ppn << 12) & ~offset_mask);
 
-    update_pte_access_bits(pte_addr, pte, access, xlen);
+    update_pte_access_bits(pte_addr, pte, access, pte_size);
     return phys_addr;
 }
 

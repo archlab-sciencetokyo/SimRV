@@ -19,6 +19,12 @@
 namespace simrv::util {
 
 using namespace simrv::util::ansi;
+using simrv::isa::OperationId;
+using enum simrv::isa::OperationId;
+using simrv::isa::kOperationIdCount;
+using simrv::isa::Opcode;
+using simrv::core::Csr;
+using enum simrv::core::Csr;
 
 auto csr_name(uint32_t csr_addr) -> std::string {
     switch (static_cast<Csr>(csr_addr)) {
@@ -110,36 +116,36 @@ auto reg_name(uint32_t r, bool is_fp = false) -> std::string {
     }
 }
 
-auto get_format(simrv::pipeline::Opcode op) -> InstFormat {
-    using enum simrv::pipeline::Opcode;
+auto get_format(Opcode op) -> InstFormat {
+    using enum Opcode;
     switch (op) {
-        case kLoad:
-        case kLoadFp:
-        case kMiscMem:
-        case kOpImm:
-        case kOpImm32:
-        case kJalr:
-        case kSystem:
+        case Load:
+        case LoadFp:
+        case MiscMem:
+        case OpImm:
+        case OpImm32:
+        case Jalr:
+        case System:
             return InstFormat::I;
-        case kStore:
-        case kStoreFp:
+        case Store:
+        case StoreFp:
             return InstFormat::S;
-        case kBranch:
+        case Branch:
             return InstFormat::B;
-        case kAuipc:
-        case kLui:
+        case Auipc:
+        case Lui:
             return InstFormat::U;
-        case kJal:
+        case Jal:
             return InstFormat::J;
-        case kOp:
-        case kOp32:
-        case kAmo:
-        case kOpFp:
+        case Op:
+        case Op32:
+        case Amo:
+        case OpFp:
             return InstFormat::R;
-        case kMadd:
-        case kMsub:
-        case kNmsub:
-        case kNmadd:
+        case MAdd:
+        case MSub:
+        case NMSub:
+        case NMAdd:
             return InstFormat::R4;
         default:
             return InstFormat::Unknown;
@@ -160,12 +166,12 @@ auto get_format_name(InstFormat fmt) -> std::string_view {
     return "Unknown";
 }
 
-auto get_description(::OperationId op_id) -> std::pair<std::string_view, std::string_view> {
+auto get_description(OperationId op_id) -> std::pair<std::string_view, std::string_view> {
     static constexpr std::pair<std::string_view, std::string_view> kDefaultDesc = {
         "UNKNOWN", "Instruction not explicitly detailed or custom extension opcode. Verify against compiler specification."
     };
 
-    static const auto kOpDescriptions = []() {
+    static const auto kOpDescriptions = []() -> std::array<std::pair<std::string_view, std::string_view>, kOperationIdCount> {
         std::array<std::pair<std::string_view, std::string_view>, kOperationIdCount> arr;
         arr.fill(kDefaultDesc);
 
@@ -276,7 +282,7 @@ auto c_code(std::string_view ansi_code, bool use_color) -> std::string_view {
     return use_color ? ansi_code : "";
 }
 
-auto print_r_format(uint32_t funct7_val, uint32_t rs2_val, uint32_t rs1_val, uint32_t funct3_val, uint32_t rd_val, simrv::pipeline::Opcode op, bool use_color) -> void {
+auto print_r_format(uint32_t funct7_val, uint32_t rs2_val, uint32_t rs1_val, uint32_t funct3_val, uint32_t rd_val, Opcode op, bool use_color) -> void {
     auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (R-Type format):");
     std::println("  31          25 24      20 19      15 14  12 11        7 6           0");
@@ -301,7 +307,7 @@ auto print_r_format(uint32_t funct7_val, uint32_t rs2_val, uint32_t rs1_val, uin
     std::println("  funct7  : {}0x{:02X}{} ({:07b}) -> Operations modifier", c(kBrightRed), funct7_val, c(kBrightRed), funct7_val, c(kReset));
 }
 
-auto print_i_format(uint32_t imm_bits, int32_t imm_val, uint32_t rs1_val, uint32_t funct3_val, uint32_t rd_val, simrv::pipeline::Opcode op, bool use_color) -> void {
+auto print_i_format(uint32_t imm_bits, int32_t imm_val, uint32_t rs1_val, uint32_t funct3_val, uint32_t rd_val, Opcode op, bool use_color) -> void {
     auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (I-Type format):");
     std::println("  31                20 19      15 14  12 11        7 6           0");
@@ -328,7 +334,7 @@ auto print_i_format(uint32_t imm_bits, int32_t imm_val, uint32_t rs1_val, uint32
     std::println("  Sign-extended to 32 bits: {}{} (0x{:X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
 }
 
-auto print_s_format(uint32_t imm_hi, uint32_t imm_lo, int32_t imm_val, uint32_t rs1_val, uint32_t rs2_val, uint32_t funct3_val, simrv::pipeline::Opcode op, bool use_color) -> void {
+auto print_s_format(uint32_t imm_hi, uint32_t imm_lo, int32_t imm_val, uint32_t rs1_val, uint32_t rs2_val, uint32_t funct3_val, Opcode op, bool use_color) -> void {
     auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (S-Type format):");
     std::println("  31          25 24      20 19      15 14  12 11        7 6           0");
@@ -359,7 +365,7 @@ auto print_s_format(uint32_t imm_hi, uint32_t imm_lo, int32_t imm_val, uint32_t 
     std::println("  Sign-extended to 32 bits: {}{} (0x{:X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
 }
 
-auto print_b_format(uint32_t inst, uint32_t imm_hi, uint32_t imm_lo, int32_t imm_val, uint32_t rs1_val, uint32_t rs2_val, uint32_t funct3_val, simrv::pipeline::Opcode op, bool use_color) -> void {
+auto print_b_format(uint32_t inst, uint32_t imm_hi, uint32_t imm_lo, int32_t imm_val, uint32_t rs1_val, uint32_t rs2_val, uint32_t funct3_val, Opcode op, bool use_color) -> void {
     auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (B-Type format):");
     std::println("  31          25 24      20 19      15 14  12 11        7 6           0");
@@ -397,7 +403,7 @@ auto print_b_format(uint32_t inst, uint32_t imm_hi, uint32_t imm_lo, int32_t imm
     std::println("  Sign-extended to 32 bits: {}{} bytes (0x{:X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
 }
 
-auto print_u_format(uint32_t imm_bits, int32_t imm_val, uint32_t rd_val, simrv::pipeline::Opcode op, bool use_color) -> void {
+auto print_u_format(uint32_t imm_bits, int32_t imm_val, uint32_t rd_val, Opcode op, bool use_color) -> void {
     auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (U-Type format):");
     std::println("  31                                12 11        7 6           0");
@@ -421,7 +427,7 @@ auto print_u_format(uint32_t imm_bits, int32_t imm_val, uint32_t rd_val, simrv::
     std::println("  Combined Value           : {}{} (0x{:X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
 }
 
-auto print_j_format(uint32_t inst, uint32_t imm_bits, int32_t imm_val, uint32_t rd_val, simrv::pipeline::Opcode op, bool use_color) -> void {
+auto print_j_format(uint32_t inst, uint32_t imm_bits, int32_t imm_val, uint32_t rd_val, Opcode op, bool use_color) -> void {
     auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (J-Type format):");
     std::println("  31                                12 11        7 6           0");
@@ -453,7 +459,7 @@ auto print_j_format(uint32_t inst, uint32_t imm_bits, int32_t imm_val, uint32_t 
     std::println("  Sign-extended to 32 bits: {}{} bytes (0x{:X}){}", c(kBrightRed), imm_val, static_cast<uint32_t>(imm_val), c(kReset));
 }
 
-auto print_r4_format(uint32_t funct7_val, uint32_t rs3_val, uint32_t rs2_val, uint32_t rs1_val, uint32_t funct3_val, uint32_t rd_val, simrv::pipeline::Opcode op, bool use_color) -> void {
+auto print_r4_format(uint32_t funct7_val, uint32_t rs3_val, uint32_t rs2_val, uint32_t rs1_val, uint32_t funct3_val, uint32_t rd_val, Opcode op, bool use_color) -> void {
     auto c = [use_color](std::string_view code) -> std::string_view { return c_code(code, use_color); };
     std::println("Visual Bit Fields Breakdown (R4-Type format):");
     std::println("  31    27 26 25 24      20 19      15 14  12 11        7 6           0");
@@ -479,7 +485,7 @@ auto print_r4_format(uint32_t funct7_val, uint32_t rs3_val, uint32_t rs2_val, ui
     std::println("  rs3     : {}f{:<2}{} ({:05b}) -> FP Source Register 3: {}", c(kBrightWhite), rs3_val, c(kBrightWhite), rs3_val, reg_name(rs3_val, true), c(kReset));
 }
 
-auto format_r_type(::OperationId op_id, std::string_view mnemonic, uint32_t rd_val, uint32_t rs1_val, uint32_t rs2_val, bool is_fp_sys) -> std::string {
+auto format_r_type(OperationId op_id, std::string_view mnemonic, uint32_t rd_val, uint32_t rs1_val, uint32_t rs2_val, bool is_fp_sys) -> std::string {
     bool const is_dst_fp = (op_id >= FLW && op_id <= FSW) ||
                           (op_id >= FADD_S && op_id <= FMAX_S) ||
                           (op_id >= FCVT_S_W && op_id <= FMV_W_X) ||
@@ -534,13 +540,13 @@ auto format_r_type(::OperationId op_id, std::string_view mnemonic, uint32_t rd_v
     return std::format("{} {}, {}, {}", mnemonic, rd_str, rs1_str, rs2_str);
 }
 
-auto format_i_type(::OperationId op_id, std::string_view mnemonic, uint32_t rd_val, uint32_t rs1_val, int32_t imm_val, uint32_t csr_val, simrv::pipeline::Opcode op, bool is_load, bool is_csr) -> std::string {
+auto format_i_type(OperationId op_id, std::string_view mnemonic, uint32_t rd_val, uint32_t rs1_val, int32_t imm_val, uint32_t csr_val, Opcode op, bool is_load, bool is_csr) -> std::string {
     std::string const rd_str = ABI_NAMES[rd_val];
     std::string const rs1_str = ABI_NAMES[rs1_val];
     std::string const frd_str = FP_ABI_NAMES[rd_val];
 
     if (is_load) {
-        if (op == simrv::pipeline::Opcode::kLoadFp) {
+        if (op == Opcode::LoadFp) {
             return std::format("{} {}, {}({})", mnemonic, frd_str, imm_val, rs1_str);
         } else {
             return std::format("{} {}, {}({})", mnemonic, rd_str, imm_val, rs1_str);
@@ -568,12 +574,12 @@ auto format_i_type(::OperationId op_id, std::string_view mnemonic, uint32_t rd_v
     return std::format("{} {}, {}, {}", mnemonic, rd_str, rs1_str, imm_val);
 }
 
-auto format_s_type(std::string_view mnemonic, uint32_t rs1_val, uint32_t rs2_val, int32_t imm_val, simrv::pipeline::Opcode op) -> std::string {
+auto format_s_type(std::string_view mnemonic, uint32_t rs1_val, uint32_t rs2_val, int32_t imm_val, Opcode op) -> std::string {
     std::string const rs1_str = ABI_NAMES[rs1_val];
     std::string const rs2_str = ABI_NAMES[rs2_val];
     std::string const frs2_str = FP_ABI_NAMES[rs2_val];
 
-    if (op == simrv::pipeline::Opcode::kStoreFp) {
+    if (op == Opcode::StoreFp) {
         return std::format("{} {}, {}({})", mnemonic, frs2_str, imm_val, rs1_str);
     } else {
         return std::format("{} {}, {}({})", mnemonic, rs2_str, imm_val, rs1_str);
@@ -637,7 +643,7 @@ void explain_instruction(uint32_t raw_inst) {
     }
 
     // Extract core fields
-    auto const op = static_cast<simrv::pipeline::Opcode>(inst & 0x7F);
+    auto const op = static_cast<Opcode>(inst & 0x7F);
     uint32_t const rd_val = (inst >> 7) & 0x1F;
     uint32_t const funct3_val = (inst >> 12) & 0x7;
     uint32_t const rs1_val = (inst >> 15) & 0x1F;
@@ -685,7 +691,7 @@ void explain_instruction(uint32_t raw_inst) {
 
     // Decode Operation ID
     std::println("--------------------------------------------------------------------------------");
-    ::OperationId const op_id = simrv::pipeline::decoder(inst);
+    OperationId const op_id = simrv::pipeline::decoder(inst);
     auto const [mnemonic, desc] = get_description(op_id);
 
     std::println("{}Decoded Instruction Detail:{}", c(kBold), c(kReset));
@@ -694,7 +700,7 @@ void explain_instruction(uint32_t raw_inst) {
 
         // Format Assembly Representation
         std::string assembly;
-        bool const is_load = (op == simrv::pipeline::Opcode::kLoad) || (op == simrv::pipeline::Opcode::kLoadFp);
+        bool const is_load = (op == Opcode::Load) || (op == Opcode::LoadFp);
         bool const is_csr = (op_id >= CSRRW) && (op_id <= CSRRCI);
         bool const is_fp_sys = (op_id >= FCVT_W_S && op_id <= FMV_W_X) ||
                               (op_id >= FCVT_W_D && op_id <= FMV_D_X);
@@ -733,35 +739,35 @@ void explain_instruction(uint32_t raw_inst) {
     std::println("\n{}================================================={}\n", c(kBoldFgBrightBlue), c(kReset));
 }
 
-auto get_operation_details(::OperationId op_id) -> std::pair<std::string_view, std::string_view> {
+auto get_operation_details(OperationId op_id) -> std::pair<std::string_view, std::string_view> {
     return get_description(op_id);
 }
 
-auto get_isa_extension_name(::OperationId op_id) -> std::string_view {
-    if (op_id >= ::LUI && op_id <= ::CSRRCI) {
-        if (op_id == ::LWU || op_id == ::LD || op_id == ::SD ||
-            op_id == ::ADDIW || op_id == ::SLLIW || op_id == ::SRLIW || op_id == ::SRAIW ||
-            op_id == ::ADDW || op_id == ::SUBW || op_id == ::SLLW || op_id == ::SRLW || op_id == ::SRAW) {
+auto get_isa_extension_name(OperationId op_id) -> std::string_view {
+    if (op_id >= LUI && op_id <= CSRRCI) {
+        if (op_id == LWU || op_id == LD || op_id == SD ||
+            op_id == ADDIW || op_id == SLLIW || op_id == SRLIW || op_id == SRAIW ||
+            op_id == ADDW || op_id == SUBW || op_id == SLLW || op_id == SRLW || op_id == SRAW) {
             return "RV64I";
         }
         return "RV32I";
     }
-    if (op_id >= ::URET && op_id <= ::SFENCE_VMA) {
+    if (op_id >= URET && op_id <= SFENCE_VMA) {
         return "Privileged";
     }
-    if (op_id >= ::MUL && op_id <= ::REMUW) {
-        if (op_id == ::MULW || op_id == ::DIVW || op_id == ::DIVUW || op_id == ::REMW || op_id == ::REMUW) {
+    if (op_id >= MUL && op_id <= REMUW) {
+        if (op_id == MULW || op_id == DIVW || op_id == DIVUW || op_id == REMW || op_id == REMUW) {
             return "RV64M";
         }
         return "RV32M";
     }
-    if (op_id >= ::LR_W && op_id <= ::AMOMAXU_W) {
+    if (op_id >= LR_W && op_id <= AMOMAXU_W) {
         return "RV32A";
     }
-    if (op_id >= ::FLW && op_id <= ::FCVT_S_LU) {
+    if (op_id >= FLW && op_id <= FCVT_S_LU) {
         return "RV32F";
     }
-    if (op_id >= ::FLD && op_id <= ::FCVT_D_LU) {
+    if (op_id >= FLD && op_id <= FCVT_D_LU) {
         return "RV32D";
     }
     return "Unknown";

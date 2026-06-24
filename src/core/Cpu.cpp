@@ -9,12 +9,13 @@
 #include "simrv/core/Tracer.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
-#include "simrv/pipeline/Decoder.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/tui/Tui.hpp"
 
 namespace simrv::core {
+
+using namespace simrv::isa;
 
 namespace {
 auto is_tohost_addr(const Machine& machine, Address addr) -> bool {
@@ -207,77 +208,47 @@ void CPU::run_cycle(Machine& machine) {
     if (machine.s_tuimode && machine.uart && machine.uart->tui() &&
         (machine.uart->tui()->get_right_panel_mode() == simrv::tui::TuiRightPanelMode::LiveTrace ||
          machine.uart->tui()->is_trace_enabled())) {
-        auto op_id = static_cast<uint8_t>(pipeline_context.op_id);
-        auto rd = static_cast<uint8_t>(pipeline_context.rd);
-        auto rs1 = static_cast<uint8_t>(pipeline_context.rs1);
-        auto rs2 = static_cast<uint8_t>(pipeline_context.rs2);
+        const auto op_id = pipeline_context.op_id;
+        const auto opcode = pipeline_context.opcode;
+        const auto rd = pipeline_context.rd;
+        const auto rs1 = pipeline_context.rs1;
+        const auto rs2 = pipeline_context.rs2;
         
         Register rd_val = 0;
         Register rs1_val = 0;
         Register rs2_val = 0;
         
-        std::string op_name;
-        if (op_id < simrv::pipeline::OPERATION_NAME.size()) {
-            std::string_view name_sv = simrv::pipeline::OPERATION_NAME.at(op_id);
-            for (char c : name_sv) {
-                op_name += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            }
-        }
-        bool is_fp = op_name.starts_with("f") && !op_name.starts_with("fence");
-        
-        bool rd_fp = is_fp;
-        bool rs1_fp = is_fp;
-        bool rs2_fp = is_fp;
-        
-        if (op_name == "fcvt.w.s" || op_name == "fcvt.wu.s" || op_name == "fcvt.w.d" || op_name == "fcvt.wu.d" ||
-            op_name == "fcvt.l.s" || op_name == "fcvt.lu.s" || op_name == "fcvt.l.d" || op_name == "fcvt.lu.d" ||
-            op_name == "fmv.x.w" || op_name == "fmv.x.d" || op_name.starts_with("feq") ||
-            op_name.starts_with("flt") || op_name.starts_with("fle") || op_name.starts_with("fclass")) {
-            rd_fp = false;
-            rs1_fp = true;
-            rs2_fp = true;
-        } else if (op_name == "fcvt.s.w" || op_name == "fcvt.s.wu" || op_name == "fcvt.d.w" || op_name == "fcvt.d.wu" ||
-                   op_name == "fcvt.s.l" || op_name == "fcvt.s.lu" || op_name == "fcvt.d.l" || op_name == "fcvt.d.lu" ||
-                   op_name == "fmv.w.x" || op_name == "fmv.d.x") {
-            rd_fp = true;
-            rs1_fp = false;
-            rs2_fp = false;
-        } else if (op_name.starts_with("l") && !op_name.starts_with("lui")) {
-            rd_fp = is_fp;
-            rs1_fp = false;
-        } else if (op_name.starts_with("s") && !op_name.starts_with("slt") && !op_name.starts_with("sll") &&
-                   !op_name.starts_with("sra") && !op_name.starts_with("srl") && !op_name.starts_with("sub") &&
-                   !op_name.starts_with("sret") && !op_name.starts_with("sfence") && !op_name.starts_with("sc")) {
-            rs2_fp = is_fp;
-            rs1_fp = false;
-        }
+        const bool rd_fp = isa::is_destination_fp(opcode, op_id);
+        const bool rs1_fp = isa::is_rs1_fp(opcode, op_id);
+        const bool rs2_fp = isa::is_rs2_fp(opcode, op_id);
         
         if (rd_fp) {
-            rd_val = state_.regs.read_fp(static_cast<RegId>(rd));
+            rd_val = state_.regs.read_fp(rd);
         } else {
-            rd_val = state_.regs.read(static_cast<RegId>(rd));
+            rd_val = state_.regs.read(rd);
         }
         
         if (rs1_fp) {
-            rs1_val = state_.regs.read_fp(static_cast<RegId>(rs1));
+            rs1_val = state_.regs.read_fp(rs1);
         } else {
-            rs1_val = state_.regs.read(static_cast<RegId>(rs1));
+            rs1_val = state_.regs.read(rs1);
         }
         
         if (rs2_fp) {
-            rs2_val = state_.regs.read_fp(static_cast<RegId>(rs2));
+            rs2_val = state_.regs.read_fp(rs2);
         } else {
-            rs2_val = state_.regs.read(static_cast<RegId>(rs2));
+            rs2_val = state_.regs.read(rs2);
         }
 
         machine.uart->tui()->record_instruction(
             pipeline_context.cpc,
+            opcode,
             op_id,
-            rd,
+            std::to_underlying(rd),
             rd_val,
-            rs1,
+            std::to_underlying(rs1),
             rs1_val,
-            rs2,
+            std::to_underlying(rs2),
             rs2_val,
             pipeline_context.imm
         );
@@ -730,14 +701,6 @@ auto CPU::execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Re
     return true;
 }
 
-auto CPU::execute_cached_load_store(Machine& machine, CachedOp& op, Register rrs1, Register rrs2) -> bool {
-    if (op.opcode == Opcode::Load) {
-        return execute_cached_load(machine, op, rrs1);
-    } else {
-        return execute_cached_store(machine, op, rrs1, rrs2);
-    }
-}
-
 auto CPU::execute_cached_fallback(Machine& machine) -> void {
     fetch_operands(machine);
     bool success = execute_stage(machine) &&
@@ -747,47 +710,6 @@ auto CPU::execute_cached_fallback(Machine& machine) -> void {
     if (!success) {
         const auto cause = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0));
         raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
-    }
-}
-
-void CPU::execute_cached_control_imm(CachedOp& op, Register rrs1, Register rrs2) {
-    switch (op.opcode) {
-        case Opcode::Lui:
-            execute_cached_lui(op);
-            break;
-        case Opcode::Auipc:
-            execute_cached_auipc(op);
-            break;
-        case Opcode::Jal:
-            execute_cached_jal(op);
-            break;
-        case Opcode::Jalr:
-            execute_cached_jalr(op, rrs1);
-            break;
-        case Opcode::Branch:
-            execute_cached_branch(op, rrs1, rrs2);
-            break;
-        default:
-            break;
-    }
-}
-
-void CPU::execute_cached_alu(CachedOp& op, Register rrs1, Register rrs2) {
-    switch (op.opcode) {
-        case Opcode::Op:
-            execute_cached_op(op, rrs1, rrs2);
-            break;
-        case Opcode::OpImm:
-            execute_cached_op_imm(op, rrs1);
-            break;
-        case Opcode::OpImm32:
-            execute_cached_op_imm32(op, rrs1);
-            break;
-        case Opcode::Op32:
-            execute_cached_op32(op, rrs1, rrs2);
-            break;
-        default:
-            break;
     }
 }
 
@@ -844,21 +766,39 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
     // 3. Execute, Memory, Writeback, Commit in a monolithic fast path
     switch (op.opcode) {
         case Opcode::Lui:
+            execute_cached_lui(op);
+            break;
         case Opcode::Auipc:
+            execute_cached_auipc(op);
+            break;
         case Opcode::Jal:
+            execute_cached_jal(op);
+            break;
         case Opcode::Jalr:
+            execute_cached_jalr(op, rrs1);
+            break;
         case Opcode::Branch:
-            execute_cached_control_imm(op, rrs1, rrs2);
+            execute_cached_branch(op, rrs1, rrs2);
             break;
         case Opcode::Op:
+            execute_cached_op(op, rrs1, rrs2);
+            break;
         case Opcode::OpImm:
+            execute_cached_op_imm(op, rrs1);
+            break;
         case Opcode::OpImm32:
+            execute_cached_op_imm32(op, rrs1);
+            break;
         case Opcode::Op32:
-            execute_cached_alu(op, rrs1, rrs2);
+            execute_cached_op32(op, rrs1, rrs2);
             break;
         case Opcode::Load:
+            if (!execute_cached_load(machine, op, rrs1)) {
+                return;
+            }
+            break;
         case Opcode::Store:
-            if (!execute_cached_load_store(machine, op, rrs1, rrs2)) {
+            if (!execute_cached_store(machine, op, rrs1, rrs2)) {
                 return;
             }
             break;

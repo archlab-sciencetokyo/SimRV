@@ -16,6 +16,8 @@
 
 namespace simrv::memory {
 
+using simrv::isa::Funct3;
+
 TileLinkBus::TileLinkBus(simrv::core::Machine& machine) : machine_(machine) {}
 
 void TileLinkBus::add_node(TileLinkNode* node) {

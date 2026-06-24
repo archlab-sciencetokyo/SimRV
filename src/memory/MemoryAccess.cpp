@@ -16,6 +16,10 @@
 
 namespace simrv::memory {
 
+using simrv::isa::Opcode;
+using simrv::isa::Funct3;
+using simrv::isa::Funct5Amo;
+
 auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_addr,
                                Instruction funct3) -> Word {
     if (cpu.state().regs.xlen == 32) {
@@ -119,7 +123,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
 
         constexpr unsigned fetch_size = xlen::kFetchSize;
         const auto fetch_funct3 = static_cast<Instruction>(
-            xlen::kIsXLen64 ? ::Funct3::Sd : ::Funct3::Sw);
+            xlen::kIsXLen64 ? isa::Funct3::Sd : isa::Funct3::Sw);
 
         for (uint32_t i = 0; i < simrv::cache::DCache::kLineBytes; i += fetch_size) {
             TlChannelA req{};
@@ -346,12 +350,12 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
     }
 }
 
-auto MemoryAccess::loadInt(MemorySubsystem& mem, core::CPU& cpu, Address addr, Funct3 funct3)
+auto MemoryAccess::loadInt(MemorySubsystem& mem, core::CPU& cpu, Address addr, isa::Funct3 funct3)
     -> Word {
     return target_read(mem, cpu, addr, enum_mask(funct3));
 }
 
-auto MemoryAccess::loadFp(MemorySubsystem& mem, core::CPU& cpu, Address addr, Funct3 funct3)
+auto MemoryAccess::loadFp(MemorySubsystem& mem, core::CPU& cpu, Address addr, isa::Funct3 funct3)
     -> FloatingRegister {
     const auto f3 = funct3;
     if (f3 == Funct3::Flw) {
@@ -376,12 +380,12 @@ auto MemoryAccess::loadFp(MemorySubsystem& mem, core::CPU& cpu, Address addr, Fu
 }
 
 void MemoryAccess::storeInt(MemorySubsystem& mem, core::CPU& cpu, Address addr, Word data,
-                            Funct3 funct3) {
+                            isa::Funct3 funct3) {
     target_write(mem, cpu, addr, data, enum_mask(funct3));
 }
 
 void MemoryAccess::storeFp(MemorySubsystem& mem, core::CPU& cpu, Address addr,
-                           FloatingRegister data, Funct3 funct3) {
+                           FloatingRegister data, isa::Funct3 funct3) {
     const auto f3 = funct3;
     if (f3 == Funct3::Fsw) {
         target_write(mem, cpu, addr,

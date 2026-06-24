@@ -14,6 +14,8 @@
 
 namespace simrv::core {
 
+using namespace simrv::isa;
+
 void OSMachine::run() {
     if (s_tuimode && uart) {
         uart->tui_pause_loop();

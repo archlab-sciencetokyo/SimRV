@@ -42,7 +42,7 @@ struct ArchState {
     TrapCause mcause{};
     CSRValue mtval{};
     CSRValue mhartid{};
-    CSRValue misa = kMisaDefault;
+    CSRValue misa = isa::kMisaDefault;
     CSRValue mie{};
     CSRValue mip{};
     CSRValue medeleg{};
@@ -196,13 +196,10 @@ class CPU {
     auto execute_cached_op_imm(CachedOp& op, Register rrs1) -> void;
     auto execute_cached_op_imm32(CachedOp& op, Register rrs1) -> void;
     auto execute_cached_op32(CachedOp& op, Register rrs1, Register rrs2) -> void;
-    auto execute_cached_control_imm(CachedOp& op, Register rrs1, Register rrs2) -> void;
-    auto execute_cached_alu(CachedOp& op, Register rrs1, Register rrs2) -> void;
-    auto try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Register& out_val) -> bool;
-    auto try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Register rrs2) -> bool;
+    auto try_fast_load(Machine& machine, Address mem_addr, isa::Funct3 funct3, Register& out_val) -> bool;
+    auto try_fast_store(Machine& machine, Address mem_addr, isa::Funct3 funct3, Register rrs2) -> bool;
     auto execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> bool;
     auto execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Register rrs2) -> bool;
-    auto execute_cached_load_store(Machine& machine, CachedOp& op, Register rrs1, Register rrs2) -> bool;
     auto execute_cached_fallback(Machine& machine) -> void;
     auto handle_cached_interrupts() -> void;
     inline void pc_sign_extend() {
@@ -252,7 +249,7 @@ class CPU {
     // ========== Execution Metrics ==========
     uint64_t e_icount{0};                                // Total instruction count
     Counter e_ccount = 0;                           // Compressed instructions executed
-    std::array<uint64_t, OperationIdCount> e_instmix{};  // Instruction-mix statistics
+    std::array<uint64_t, isa::OperationIdCount> e_instmix{};  // Instruction-mix statistics
 };
 
 }  // namespace simrv::core

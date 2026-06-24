@@ -27,7 +27,7 @@ struct RuntimeOptions {
     Counter trace_end = std::numeric_limits<Counter>::max();
     Counter enabletimer = 70000000UL;
     Address isatest_tohost = 0x80001000;
-    MisaProfile misa_profile = MisaProfile::GC;
+    isa::MisaProfile misa_profile = isa::MisaProfile::GC;
     bool misa_override = false;
     unsigned int misa_xlen = 0;
 

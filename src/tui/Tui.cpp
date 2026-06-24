@@ -1,4 +1,3 @@
-#include "simrv/util/FormatUtil.hpp"
 /**
  * @file Tui.cpp
  * @brief Interactive TUI console dashboard implementation with premium double-line borders and
@@ -16,7 +15,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <format>
-#include <print>
 #include <string>
 
 #include "simrv/core/Machine.hpp"
@@ -26,7 +24,6 @@
 #include "simrv/tui/RegisterPane.hpp"
 #include "simrv/tui/ConsolePane.hpp"
 #include "simrv/tui/StatusBar.hpp"
-#include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 
@@ -286,10 +283,10 @@ void Tui::render() {
 
             for (int i = start; i < end_exclusive; ++i) {
                 std::string s = trace_buffer_.at(static_cast<std::size_t>(i));
-                if (static_cast<int>(s.length()) > right_pane_width) {
+                if (s.length() > static_cast<std::size_t>(right_pane_width)) {
                     s = s.substr(0, static_cast<std::size_t>(right_pane_width));
                 } else {
-                    s += std::string(static_cast<std::size_t>(right_pane_width - s.length()), ' ');
+                    s += std::string(static_cast<std::size_t>(right_pane_width) - s.length(), ' ');
                 }
                 lines_to_draw_.push_back(s);
             }
@@ -461,12 +458,12 @@ void Tui::toggle_trace_enabled() {
     render();
 }
 
-void Tui::record_instruction(Register pc, uint8_t op_id, uint8_t rd, Register rd_val,
+void Tui::record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa::OperationId op_id, uint8_t rd, Register rd_val,
                               uint8_t rs1, Register rs1_val, uint8_t rs2, Register rs2_val,
                               int64_t imm) {
     std::string op_name;
     if (static_cast<std::size_t>(op_id) < simrv::pipeline::OPERATION_NAME.size()) {
-        std::string_view name_sv = simrv::pipeline::OPERATION_NAME.at(op_id);
+        std::string_view name_sv = simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(op_id));
         for (char c : name_sv) {
             op_name += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         }
@@ -478,9 +475,11 @@ void Tui::record_instruction(Register pc, uint8_t op_id, uint8_t rd, Register rd
         if (c == '_') c = '.';
     }
 
-    bool is_fp = op_name.starts_with("f") && !op_name.starts_with("fence");
+    const bool rd_fp = isa::is_destination_fp(opcode, op_id);
+    const bool rs1_fp = isa::is_rs1_fp(opcode, op_id);
+    const bool rs2_fp = isa::is_rs2_fp(opcode, op_id);
 
-    auto get_reg_name = [is_fp](uint8_t reg, bool fp_override = false) -> std::string {
+    auto get_reg_name = [](uint8_t reg, bool is_reg_fp) -> std::string {
         static constexpr std::array<const char*, 32> abi_names = {
             "zero", "ra", "sp", "gp", "tp",  "t0",  "t1", "t2", "s0", "s1", "a0",
             "a1",   "a2", "a3", "a4", "a5",  "a6",  "a7", "s2", "s3", "s4", "s5",
@@ -492,7 +491,7 @@ void Tui::record_instruction(Register pc, uint8_t op_id, uint8_t rd, Register rd
             "fs6", "fs7", "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11"
         };
         if (reg >= 32) return "??";
-        return (is_fp || fp_override) ? fp_names[reg] : abi_names[reg];
+        return is_reg_fp ? fp_names[reg] : abi_names[reg];
     };
 
     std::string inst_str;
@@ -517,31 +516,6 @@ void Tui::record_instruction(Register pc, uint8_t op_id, uint8_t rd, Register rd
         is_store = true;
     } else if (op_name.starts_with("b") && op_name != "break") {
         is_branch = true;
-    }
-
-    bool rd_fp = is_fp;
-    bool rs1_fp = is_fp;
-    bool rs2_fp = is_fp;
-
-    if (op_name == "fcvt.w.s" || op_name == "fcvt.wu.s" || op_name == "fcvt.w.d" || op_name == "fcvt.wu.d" ||
-        op_name == "fcvt.l.s" || op_name == "fcvt.lu.s" || op_name == "fcvt.l.d" || op_name == "fcvt.lu.d" ||
-        op_name == "fmv.x.w" || op_name == "fmv.x.d" || op_name.starts_with("feq") ||
-        op_name.starts_with("flt") || op_name.starts_with("fle") || op_name.starts_with("fclass")) {
-        rd_fp = false;
-        rs1_fp = true;
-        rs2_fp = true;
-    } else if (op_name == "fcvt.s.w" || op_name == "fcvt.s.wu" || op_name == "fcvt.d.w" || op_name == "fcvt.d.wu" ||
-               op_name == "fcvt.s.l" || op_name == "fcvt.s.lu" || op_name == "fcvt.d.l" || op_name == "fcvt.d.lu" ||
-               op_name == "fmv.w.x" || op_name == "fmv.d.x") {
-        rd_fp = true;
-        rs1_fp = false;
-        rs2_fp = false;
-    } else if (is_load) {
-        rd_fp = is_fp;
-        rs1_fp = false;
-    } else if (is_store) {
-        rs2_fp = is_fp;
-        rs1_fp = false;
     }
 
     if (is_lui || is_auipc) {

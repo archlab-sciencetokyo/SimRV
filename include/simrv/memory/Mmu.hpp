@@ -9,11 +9,24 @@
 
 #include <expected>
 
-#include "simrv/Define.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv {
+
+using PteFlags = uint8_t;
+
+enum class PteFlag : PteFlags {
+    V = (1 << 0),
+    R = (1 << 1),
+    W = (1 << 2),
+    X = (1 << 3),
+    U = (1 << 4),
+    A = (1 << 6),
+    D = (1 << 7),
+};
+
+enum class PteAccess : uint8_t { Read = 0, Write = 1, Code = 2 };
 
 /**
  * @class Mmu
@@ -125,8 +138,9 @@ class Mmu {
      * @param pte_addr Physical address of the PTE in memory
      * @param pte_value Page table entry value to update
      * @param access Access type that triggered the update
+     * @param pte_size Size of the PTE in bytes (4 or 8)
      */
-    void update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess access, unsigned xlen = xlen::kXLenBits);
+    void update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess access, unsigned pte_size);
 
     // Page table structure constants
     static constexpr Word kPermissionBitsMask = 0x7;  // 3 bits for XWR

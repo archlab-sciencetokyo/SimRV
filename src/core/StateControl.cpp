@@ -323,8 +323,8 @@ void TrapController::sret(ArchState& state) {
 
 namespace {
 auto trap_cause_name(TrapCause cause) -> std::string {
-    const bool is_interrupt = (cause & (1ULL << 63)) != 0;
-    const uint64_t code = cause & ~(1ULL << 63);
+    const bool is_interrupt = trap_is_interrupt(cause);
+    const uint64_t code = trap_exception_code(cause);
     if (is_interrupt) {
         switch (code) {
             case 1:  return "Supervisor software interrupt";
@@ -392,7 +392,7 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
     }
 
     CSRValue deleg = 0;
-    if (state.priv <= kPrivSupervisor && misa_has_extension(state.misa, IsaExtension::S)) {
+    if (state.priv <= kPrivSupervisor && misa_has_extension(state.misa, isa::IsaExtension::S)) {
         const auto cause_code = static_cast<CSRValue>(trap_exception_code(cause));
         if (cause_code < xlen::kXLenBits) {
             if (trap_is_interrupt(cause)) {
@@ -476,16 +476,16 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
 auto TrapController::canExecutePrivilegedInstruction(PrivilegeLevel current_priv, CSRValue misa,
                                                     CSRValue mstatus, Instruction funct12,
                                                     Word funct7) -> bool {
-    if (funct12 == static_cast<Instruction>(Funct12Priv::Mret)) {
+    if (funct12 == static_cast<Instruction>(isa::Funct12Priv::Mret)) {
         return current_priv >= kPrivMachine;
     }
-    if (funct12 == static_cast<Instruction>(Funct12Priv::Sret)) {
-        return misa_has_extension(misa, IsaExtension::S) &&
+    if (funct12 == static_cast<Instruction>(isa::Funct12Priv::Sret)) {
+        return misa_has_extension(misa, isa::IsaExtension::S) &&
                current_priv >= kPrivSupervisor &&
                !(current_priv == kPrivSupervisor && (mstatus & enum_mask(MstatusBit::Tsr)) != 0);
     }
-    if (funct7 == static_cast<Instruction>(Funct7Priv::SfenceVma)) {
-        return misa_has_extension(misa, IsaExtension::S) &&
+    if (funct7 == static_cast<Instruction>(isa::Funct7Priv::SfenceVma)) {
+        return misa_has_extension(misa, isa::IsaExtension::S) &&
                current_priv >= kPrivSupervisor &&
                !(current_priv == kPrivSupervisor && (mstatus & enum_mask(MstatusBit::Tvm)) != 0);
     }

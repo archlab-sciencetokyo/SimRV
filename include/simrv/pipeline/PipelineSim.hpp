@@ -16,11 +16,11 @@ struct BtbEntry {
 
 struct PipelineReg {
     Register pc = 0;
-    Opcode opcode = static_cast<Opcode>(0);
+    isa::Opcode opcode = static_cast<isa::Opcode>(0);
     RegId rd = static_cast<RegId>(0);
     RegId rs1 = static_cast<RegId>(0);
     RegId rs2 = static_cast<RegId>(0);
-    OperationId op_id = OperationId::UNKNOWN;
+    isa::OperationId op_id = isa::OperationId::UNKNOWN;
     bool writes_reg = false;
     bool is_load = false;
     int remaining_latency = 0; // Cycles until value is ready for forwarding
@@ -57,8 +57,8 @@ public:
      * @brief Process a single committed instruction and calculate its cycle latency
      * @return Number of simulated cycles spent for this instruction (1 base + stalls/bubbles)
      */
-    auto step_instruction(Register pc, Opcode opcode, RegId rd, RegId rs1, RegId rs2,
-                          OperationId op_id, bool branched, bool is_branch, bool is_jump,
+    auto step_instruction(Register pc, isa::Opcode opcode, RegId rd, RegId rs1, RegId rs2,
+                          isa::OperationId op_id, bool branched, bool is_branch, bool is_jump,
                           bool icache_miss, bool dcache_miss, bool tlb_miss, Register target_pc) -> uint32_t;
 
     // Getters for statistics
@@ -98,7 +98,7 @@ private:
     auto resolve_branches_ex() -> bool;
 
     [[nodiscard]] auto check_hazard_with_stage(const PipelineReg& stage_reg, bool reads_rs1, bool reads_rs2) const -> bool;
-    auto resolve_jump_ex(BtbEntry& btb_entry, Register pc, Opcode opcode, Register target_pc) -> uint32_t;
+    auto resolve_jump_ex(BtbEntry& btb_entry, Register pc, isa::Opcode opcode, Register target_pc) -> uint32_t;
     auto resolve_branch_ex(BtbEntry& btb_entry, Register pc, Register target_pc, bool branched) -> uint32_t;
     void update_stall_stats(bool stall_mem, bool stall_ex, bool stall_id, bool stall_if);
     void decrement_latencies();

@@ -100,16 +100,16 @@ inline auto resolve_cause_string(uint64_t cause) -> std::string {
 
 inline auto resolve_mstatus_short_string(CSRValue mstatus) -> std::string {
     std::string s;
-    CSRValue mpp = (mstatus & enum_mask(MstatusBit::Mpp)) >> 11;
+    CSRValue mpp = (mstatus & enum_mask(core::MstatusBit::Mpp)) >> 11;
     s += (mpp == 3 ? "M" : mpp == 1 ? "S" : "U");
 
-    if ((mstatus & enum_mask(MstatusBit::Mie)) != 0) s += "|MIE";
-    if ((mstatus & enum_mask(MstatusBit::Sie)) != 0) s += "|SIE";
-    if ((mstatus & enum_mask(MstatusBit::Sum)) != 0) s += "|SUM";
-    if ((mstatus & enum_mask(MstatusBit::Mprv)) != 0) s += "|MPRV";
-    if ((mstatus & enum_mask(MstatusBit::Mxr)) != 0) s += "|MXR";
-    if ((mstatus & enum_mask(MstatusBit::Tvm)) != 0) s += "|TVM";
-    if ((mstatus & enum_mask(MstatusBit::Tsr)) != 0) s += "|TSR";
+    if ((mstatus & enum_mask(core::MstatusBit::Mie)) != 0) s += "|MIE";
+    if ((mstatus & enum_mask(core::MstatusBit::Sie)) != 0) s += "|SIE";
+    if ((mstatus & enum_mask(core::MstatusBit::Sum)) != 0) s += "|SUM";
+    if ((mstatus & enum_mask(core::MstatusBit::Mprv)) != 0) s += "|MPRV";
+    if ((mstatus & enum_mask(core::MstatusBit::Mxr)) != 0) s += "|MXR";
+    if ((mstatus & enum_mask(core::MstatusBit::Tvm)) != 0) s += "|TVM";
+    if ((mstatus & enum_mask(core::MstatusBit::Tsr)) != 0) s += "|TSR";
 
     return std::format("[{}]", s);
 }

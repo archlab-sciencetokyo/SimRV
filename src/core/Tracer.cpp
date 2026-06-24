@@ -32,6 +32,8 @@
 
 namespace simrv::core {
 
+using namespace simrv::isa;
+
 constexpr auto D_TRACE_HEX_WIDTH = static_cast<int>(kXLenHexDigits);
 constexpr Counter D_TRACEPC_INTERVAL = 1000;
 
