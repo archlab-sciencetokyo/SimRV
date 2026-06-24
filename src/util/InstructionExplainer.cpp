@@ -586,15 +586,16 @@ void explain_instruction(uint32_t raw_inst) {
         std::println("--------------------------------------------------------------------------------");
     }
 
-    // Extract core fields
-    auto const op = static_cast<Opcode>(inst & 0x7F);
-    uint32_t const rd_val = (inst >> 7) & 0x1F;
-    uint32_t const funct3_val = (inst >> 12) & 0x7;
-    uint32_t const rs1_val = (inst >> 15) & 0x1F;
-    uint32_t const rs2_val = (inst >> 20) & 0x1F;
-    uint32_t const funct7_val = (inst >> 25) & 0x7F;
-    uint32_t const rs3_val = (inst >> 27) & 0x1F;
-    uint32_t const csr_val = (inst >> 20) & 0xFFF;
+    // Extract core fields using Decoder
+    simrv::pipeline::Decoder const dec(inst);
+    auto const op = dec.opcode();
+    uint32_t const rd_val = std::to_underlying(dec.rd());
+    uint32_t const funct3_val = std::to_underlying(dec.funct3());
+    uint32_t const rs1_val = std::to_underlying(dec.rs1());
+    uint32_t const rs2_val = std::to_underlying(dec.rs2());
+    uint32_t const funct7_val = dec.funct7();
+    uint32_t const rs3_val = std::to_underlying(dec.rs3());
+    uint32_t const csr_val = dec.csr();
 
     InstFormat const fmt = simrv::isa::get_instruction_format(op);
     std::println("Instruction Format: {}{}{}", c(kBold), simrv::isa::get_instruction_format_name(fmt), c(kReset));
@@ -605,28 +606,21 @@ void explain_instruction(uint32_t raw_inst) {
         print_r_format(funct7_val, rs2_val, rs1_val, funct3_val, rd_val, op, use_color);
     } else if (fmt == InstFormat::I) {
         uint32_t const imm_bits = (inst >> 20) & 0xFFF;
-        int32_t const imm_val = static_cast<int32_t>(inst) >> 20;
-        print_i_format(imm_bits, imm_val, rs1_val, funct3_val, rd_val, op, use_color);
+        print_i_format(imm_bits, dec.imm_i(), rs1_val, funct3_val, rd_val, op, use_color);
     } else if (fmt == InstFormat::S) {
         uint32_t const imm_hi = (inst >> 25) & 0x7F;
         uint32_t const imm_lo = (inst >> 7) & 0x1F;
-        int32_t const imm_val = (static_cast<int32_t>(inst & 0xFE000000) >> 20) | static_cast<int32_t>((inst >> 7) & 0x1F);
-        print_s_format(imm_hi, imm_lo, imm_val, rs1_val, rs2_val, funct3_val, op, use_color);
+        print_s_format(imm_hi, imm_lo, dec.imm_s(), rs1_val, rs2_val, funct3_val, op, use_color);
     } else if (fmt == InstFormat::B) {
         uint32_t const imm_hi = (inst >> 25) & 0x7F;
         uint32_t const imm_lo = (inst >> 7) & 0x1F;
-        int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 19) | static_cast<int32_t>((inst & 0x7E000000) >> 20) |
-                               static_cast<int32_t>((inst & 0x00000F00) >> 7) | static_cast<int32_t>((inst & 0x00000080) << 4);
-        print_b_format(inst, imm_hi, imm_lo, imm_val, rs1_val, rs2_val, funct3_val, op, use_color);
+        print_b_format(inst, imm_hi, imm_lo, dec.imm_b(), rs1_val, rs2_val, funct3_val, op, use_color);
     } else if (fmt == InstFormat::U) {
         uint32_t const imm_bits = (inst >> 12) & 0xFFFFF;
-        auto const imm_val = static_cast<int32_t>(inst & 0xFFFFF000);
-        print_u_format(imm_bits, imm_val, rd_val, op, use_color);
+        print_u_format(imm_bits, dec.imm_u(), rd_val, op, use_color);
     } else if (fmt == InstFormat::J) {
         uint32_t const imm_bits = ((inst >> 12) & 0xFFFFF);
-        int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 11) | static_cast<int32_t>(inst & 0x000FF000) |
-                               static_cast<int32_t>((inst & 0x00100000) >> 9) | static_cast<int32_t>((inst & 0x7FE00000) >> 20);
-        print_j_format(inst, imm_bits, imm_val, rd_val, op, use_color);
+        print_j_format(inst, imm_bits, dec.imm_j(), rd_val, op, use_color);
     } else if (fmt == InstFormat::R4) {
         print_r4_format(funct7_val, rs3_val, rs2_val, rs1_val, funct3_val, rd_val, op, use_color);
     } else {
@@ -652,22 +646,15 @@ void explain_instruction(uint32_t raw_inst) {
         if (fmt == InstFormat::R) {
             assembly = format_r_type(op_id, mnemonic, rd_val, rs1_val, rs2_val, is_fp_sys);
         } else if (fmt == InstFormat::I) {
-            int32_t const imm_val = static_cast<int32_t>(inst) >> 20;
-            assembly = format_i_type(op_id, mnemonic, rd_val, rs1_val, imm_val, csr_val, op, is_load, is_csr);
+            assembly = format_i_type(op_id, mnemonic, rd_val, rs1_val, dec.imm_i(), csr_val, op, is_load, is_csr);
         } else if (fmt == InstFormat::S) {
-            int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 20) | static_cast<int32_t>((inst >> 7) & 0x1F) | static_cast<int32_t>((inst >> 20) & 0x7E0);
-            assembly = format_s_type(mnemonic, rs1_val, rs2_val, imm_val, op);
+            assembly = format_s_type(mnemonic, rs1_val, rs2_val, dec.imm_s(), op);
         } else if (fmt == InstFormat::B) {
-            int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 19) | static_cast<int32_t>((inst & 0x7E000000) >> 20) |
-                                   static_cast<int32_t>((inst & 0x00000F00) >> 7) | static_cast<int32_t>((inst & 0x00000080) << 4);
-            assembly = format_b_type(mnemonic, rs1_val, rs2_val, imm_val);
+            assembly = format_b_type(mnemonic, rs1_val, rs2_val, dec.imm_b());
         } else if (fmt == InstFormat::U) {
-            auto const imm_val = static_cast<int32_t>(inst & 0xFFFFF000);
-            assembly = format_u_type(mnemonic, rd_val, imm_val);
+            assembly = format_u_type(mnemonic, rd_val, dec.imm_u());
         } else if (fmt == InstFormat::J) {
-            int32_t const imm_val = (static_cast<int32_t>(inst & 0x80000000) >> 11) | static_cast<int32_t>(inst & 0x000FF000) |
-                                   static_cast<int32_t>((inst & 0x00100000) >> 9) | static_cast<int32_t>((inst & 0x7FE00000) >> 20);
-            assembly = format_j_type(rd_val, imm_val);
+            assembly = format_j_type(rd_val, dec.imm_j());
         } else if (fmt == InstFormat::R4) {
             assembly = format_r4_type(mnemonic, rd_val, rs1_val, rs2_val, rs3_val);
         }
