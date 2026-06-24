@@ -108,9 +108,6 @@ class Mmu {
    private:
     Byte* mmem_;
 
-    // Early boot support: cache last valid root page table for fallback
-    static Word s_last_valid_root_ppn;
-
     // Per-address-space translation helpers
     /**
      * @brief Validate PTE access permissions for current privilege level.
@@ -143,7 +140,6 @@ class Mmu {
     void update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess access, unsigned pte_size);
 
     // Page table structure constants
-    static constexpr Word kPermissionBitsMask = 0x7;  // 3 bits for XWR
     static constexpr Word kPteShift = 10;             // PPN to PTE conversion shift
 };
 

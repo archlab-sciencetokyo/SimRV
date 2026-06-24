@@ -19,9 +19,6 @@ namespace simrv {
 using isa::Funct3;
 using core::MstatusBit;
 
-// Static member initialization
-Word Mmu::s_last_valid_root_ppn = 0;
-
 Mmu::Mmu(Byte* mmem) : mmem_(mmem) {}
 
 auto Mmu::translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
