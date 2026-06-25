@@ -175,6 +175,10 @@ class CPU {
     void fetch_operands(Machine& machine);
     /// Perform ALU/branch/CSR/FP execute operations.
     void execute_core(Machine& machine);
+    /// Helper for execute_core to process System instruction opcode.
+    void execute_system(Machine& machine);
+    /// Helper for execute_core to process floating point/fused FP instruction opcodes.
+    void execute_fp(Machine& machine);
     /// Perform load-side memory access work.
     void memory_load_phase(Machine& machine);
     /// Prepare memory write payloads for store/AMO paths.

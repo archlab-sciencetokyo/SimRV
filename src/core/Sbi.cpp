@@ -86,8 +86,8 @@ constexpr auto kLogHexWidth = static_cast<int>(kXLenHexDigits);
 Sbi::Sbi(core::CPU& cpu) : cpu_(cpu) {}
 
 auto Sbi::timer_value() const -> Counter {
-    const auto a0 = static_cast<RegId>(10);
-    const auto a1 = static_cast<RegId>(11);
+    const auto a0 = RegId::A0;
+    const auto a1 = RegId::A1;
     if constexpr (xlen::kIsXLen64) {
         return static_cast<Counter>(cpu_.state().regs.read(a0));
     } else {
@@ -97,8 +97,8 @@ auto Sbi::timer_value() const -> Counter {
 }
 
 void Sbi::sbi_return(SignedWord error, Word value) {
-    const auto a0 = static_cast<RegId>(10);
-    const auto a1 = static_cast<RegId>(11);
+    const auto a0 = RegId::A0;
+    const auto a1 = RegId::A1;
     cpu_.state().regs.write(a0, static_cast<Word>(error));
     cpu_.state().regs.write(a1, value);
     cpu_.state().pc += 4;
@@ -117,7 +117,7 @@ auto Sbi::handle_base(Word func_id) -> bool {
             sbi_return(static_cast<SignedWord>(SbiError::Success), kImplVersion);
             return true;
         case BaseFid::ProbeExtension: {
-            const Word probed = cpu_.state().regs.read(static_cast<RegId>(10));
+            const Word probed = cpu_.state().regs.read(RegId::A0);
             const bool supported =
                 (probed == enum_mask(ExtId::Base)) || (probed == enum_mask(ExtId::Time)) ||
                 (probed == enum_mask(ExtId::Rfence)) || (probed == enum_mask(ExtId::Hsm)) ||
@@ -150,18 +150,33 @@ auto Sbi::handle_time(Word func_id) -> bool {
 }
 
 auto Sbi::handle_rfence(Word func_id) -> bool {
-    if (func_id <= enum_mask(RfenceFid::RemoteHfenceVvmaAsid)) {
-        sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
-    } else {
-        sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);
+    switch (static_cast<RfenceFid>(func_id)) {
+        case RfenceFid::RemoteFenceI:
+            cpu_.icache.flush();
+            cpu_.dcache.flush();
+            cpu_.decode_cache.flush();
+            sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
+            return true;
+        case RfenceFid::RemoteSfenceVma:
+        case RfenceFid::RemoteSfenceVmaAsid:
+            cpu_.TLB_flush();
+            cpu_.dcache.flush();
+            sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
+            return true;
+        default:
+            if (func_id <= enum_mask(RfenceFid::RemoteHfenceVvmaAsid)) {
+                sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
+            } else {
+                sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);
+            }
+            return true;
     }
-    return true;
 }
 
 auto Sbi::handle_hsm(Word func_id) -> bool {
     switch (static_cast<HsmFid>(func_id)) {
         case HsmFid::HartStart: {
-            const Word hartid = cpu_.state().regs.read(static_cast<RegId>(10));
+            const Word hartid = cpu_.state().regs.read(RegId::A0);
             sbi_return(
                 static_cast<SignedWord>(hartid == cpu_.state().mhartid ? SbiError::Success
                                                                        : SbiError::NotSupported),
@@ -172,7 +187,7 @@ auto Sbi::handle_hsm(Word func_id) -> bool {
             sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);
             return true;
         case HsmFid::HartStatus: {
-            const Word hartid = cpu_.state().regs.read(static_cast<RegId>(10));
+            const Word hartid = cpu_.state().regs.read(RegId::A0);
             sbi_return(static_cast<SignedWord>(SbiError::Success),
                        hartid == cpu_.state().mhartid ? 0U : 1U);
             return true;
@@ -188,8 +203,8 @@ auto Sbi::handle_hsm(Word func_id) -> bool {
 
 auto Sbi::handle_ipi(Word func_id) -> bool {
     if (func_id == 0) { // send_ipi
-        const Word hart_mask = cpu_.state().regs.read(static_cast<RegId>(10));
-        const Word hart_mask_base = cpu_.state().regs.read(static_cast<RegId>(11));
+        const Word hart_mask = cpu_.state().regs.read(RegId::A0);
+        const Word hart_mask_base = cpu_.state().regs.read(RegId::A1);
         
         const bool target_hart0 = (hart_mask == 0) || (hart_mask_base == 0 && (hart_mask & 1) != 0);
         if (target_hart0) {
@@ -204,8 +219,8 @@ auto Sbi::handle_ipi(Word func_id) -> bool {
 
 auto Sbi::handle_system_reset(Word func_id) -> bool {
     if (func_id == 0) { // sbi_system_reset
-        const Word reset_type = cpu_.state().regs.read(static_cast<RegId>(10));
-        const Word reset_reason = cpu_.state().regs.read(static_cast<RegId>(11));
+        const Word reset_type = cpu_.state().regs.read(RegId::A0);
+        const Word reset_reason = cpu_.state().regs.read(RegId::A1);
         
         if (reset_type == 0) {
             simrv::log::info("[SBI] System Reset: Shutdown requested (reason: 0x{:x}).", reset_reason);
@@ -239,8 +254,8 @@ auto Sbi::handle_ecall(TrapCause cause) -> bool {
         return false;
     }
 
-    const auto a6 = static_cast<RegId>(16);
-    const auto a7 = static_cast<RegId>(17);
+    const auto a6 = RegId::A6;
+    const auto a7 = RegId::A7;
     const Word ext_id = cpu_.state().regs.read(a7);
     const Word func_id = cpu_.state().regs.read(a6);
 
@@ -249,8 +264,8 @@ auto Sbi::handle_ecall(TrapCause cause) -> bool {
             "__ SBI ecall cause={} ext={:0{}x} fid={:0{}x} a0={:0{}x} a1={:0{}x} pc={:0{}x}\n",
             static_cast<unsigned>(cause), static_cast<uint64_t>(ext_id), kLogHexWidth,
             static_cast<uint64_t>(func_id), kLogHexWidth,
-            static_cast<uint64_t>(cpu_.state().regs.read(static_cast<RegId>(10))), kLogHexWidth,
-            static_cast<uint64_t>(cpu_.state().regs.read(static_cast<RegId>(11))), kLogHexWidth,
+            static_cast<uint64_t>(cpu_.state().regs.read(RegId::A0)), kLogHexWidth,
+            static_cast<uint64_t>(cpu_.state().regs.read(RegId::A1)), kLogHexWidth,
             static_cast<uint64_t>(cpu_.state().pc), kLogHexWidth);
         cpu_.trap_log_stream->flush();
     }

@@ -69,11 +69,16 @@ auto decode_store(uint32_t funct3) -> OperationId {
 auto decode_op_imm(uint32_t funct3, uint32_t funct7) -> OperationId {
     switch (funct3) {
         case 0: return OperationId::ADDI;
-        case 1: return OperationId::SLLI;
+        case 1:
+            if (funct7 == 0x00 || funct7 == 0x01) return OperationId::SLLI;
+            return OperationId::UNKNOWN;
         case 2: return OperationId::SLTI;
         case 3: return OperationId::SLTIU;
         case 4: return OperationId::XORI;
-        case 5: return (funct7 & 0x20) ? OperationId::SRAI : OperationId::SRLI;
+        case 5:
+            if (funct7 == 0x00 || funct7 == 0x01) return OperationId::SRLI;
+            if (funct7 == 0x20 || funct7 == 0x21) return OperationId::SRAI;
+            return OperationId::UNKNOWN;
         case 6: return OperationId::ORI;
         case 7: return OperationId::ANDI;
         default: return OperationId::UNKNOWN;
@@ -82,14 +87,32 @@ auto decode_op_imm(uint32_t funct3, uint32_t funct7) -> OperationId {
 
 auto decode_op_standard(uint32_t funct3, uint32_t funct7) -> OperationId {
     switch (funct3) {
-        case 0: return (funct7 & 0x20) ? OperationId::SUB : OperationId::ADD;
-        case 1: return OperationId::SLL;
-        case 2: return OperationId::SLT;
-        case 3: return OperationId::SLTU;
-        case 4: return OperationId::XOR;
-        case 5: return (funct7 & 0x20) ? OperationId::SRA : OperationId::SRL;
-        case 6: return OperationId::OR;
-        case 7: return OperationId::AND;
+        case 0:
+            if (funct7 == 0x00) return OperationId::ADD;
+            if (funct7 == 0x20) return OperationId::SUB;
+            return OperationId::UNKNOWN;
+        case 1:
+            if (funct7 == 0x00) return OperationId::SLL;
+            return OperationId::UNKNOWN;
+        case 2:
+            if (funct7 == 0x00) return OperationId::SLT;
+            return OperationId::UNKNOWN;
+        case 3:
+            if (funct7 == 0x00) return OperationId::SLTU;
+            return OperationId::UNKNOWN;
+        case 4:
+            if (funct7 == 0x00) return OperationId::XOR;
+            return OperationId::UNKNOWN;
+        case 5:
+            if (funct7 == 0x00) return OperationId::SRL;
+            if (funct7 == 0x20) return OperationId::SRA;
+            return OperationId::UNKNOWN;
+        case 6:
+            if (funct7 == 0x00) return OperationId::OR;
+            return OperationId::UNKNOWN;
+        case 7:
+            if (funct7 == 0x00) return OperationId::AND;
+            return OperationId::UNKNOWN;
         default: return OperationId::UNKNOWN;
     }
 }
@@ -97,17 +120,30 @@ auto decode_op_standard(uint32_t funct3, uint32_t funct7) -> OperationId {
 auto decode_op_imm32(uint32_t funct3, uint32_t funct7) -> OperationId {
     switch (funct3) {
         case 0: return OperationId::ADDIW;
-        case 1: return OperationId::SLLIW;
-        case 5: return (funct7 & 0x20) ? OperationId::SRAIW : OperationId::SRLIW;
+        case 1:
+            if (funct7 == 0x00) return OperationId::SLLIW;
+            return OperationId::UNKNOWN;
+        case 5:
+            if (funct7 == 0x00) return OperationId::SRLIW;
+            if (funct7 == 0x20) return OperationId::SRAIW;
+            return OperationId::UNKNOWN;
         default: return OperationId::UNKNOWN;
     }
 }
 
 auto decode_op32_standard(uint32_t funct3, uint32_t funct7) -> OperationId {
     switch (funct3) {
-        case 0: return (funct7 & 0x20) ? OperationId::SUBW : OperationId::ADDW;
-        case 1: return OperationId::SLLW;
-        case 5: return (funct7 & 0x20) ? OperationId::SRAW : OperationId::SRLW;
+        case 0:
+            if (funct7 == 0x00) return OperationId::ADDW;
+            if (funct7 == 0x20) return OperationId::SUBW;
+            return OperationId::UNKNOWN;
+        case 1:
+            if (funct7 == 0x00) return OperationId::SLLW;
+            return OperationId::UNKNOWN;
+        case 5:
+            if (funct7 == 0x00) return OperationId::SRLW;
+            if (funct7 == 0x20) return OperationId::SRAW;
+            return OperationId::UNKNOWN;
         default: return OperationId::UNKNOWN;
     }
 }
@@ -160,7 +196,10 @@ auto decode_ext_i(Opcode op, uint32_t funct3, uint32_t funct7, Instruction ir) -
         case Opcode::OpImm32: return decode_op_imm32(funct3, funct7);
         case Opcode::Op: return decode_op_standard(funct3, funct7);
         case Opcode::Op32: return decode_op32_standard(funct3, funct7);
-        case Opcode::MiscMem: return (funct3 == 1) ? OperationId::FENCE_I : OperationId::FENCE;
+        case Opcode::MiscMem:
+            if (funct3 == 0) return OperationId::FENCE;
+            if (funct3 == 1) return OperationId::FENCE_I;
+            return OperationId::UNKNOWN;
         case Opcode::System: return decode_system(funct3, funct7, ir);
         default: return OperationId::UNKNOWN;
     }
@@ -198,22 +237,40 @@ auto decode_ext_m(Opcode op, uint32_t funct3) -> OperationId {
     return decode_ext_m_op(funct3);
 }
 
-auto decode_ext_a(uint32_t funct7) -> OperationId {
+auto decode_ext_a(uint32_t funct7, uint32_t funct3) -> OperationId {
     const uint32_t funct5 = funct7 >> 2;
-    switch (funct5) {
-        case 0x02: return OperationId::LR_W;
-        case 0x03: return OperationId::SC_W;
-        case 0x01: return OperationId::AMOSWAP_W;
-        case 0x00: return OperationId::AMOADD_W;
-        case 0x04: return OperationId::AMOXOR_W;
-        case 0x0C: return OperationId::AMOAND_W;
-        case 0x08: return OperationId::AMOOR_W;
-        case 0x10: return OperationId::AMOMIN_W;
-        case 0x14: return OperationId::AMOMAX_W;
-        case 0x18: return OperationId::AMOMINU_W;
-        case 0x1C: return OperationId::AMOMAXU_W;
-        default: return OperationId::UNKNOWN;
+    if (funct3 == 2) { // 32-bit AMO*W
+        switch (funct5) {
+            case 0x02: return OperationId::LR_W;
+            case 0x03: return OperationId::SC_W;
+            case 0x01: return OperationId::AMOSWAP_W;
+            case 0x00: return OperationId::AMOADD_W;
+            case 0x04: return OperationId::AMOXOR_W;
+            case 0x0C: return OperationId::AMOAND_W;
+            case 0x08: return OperationId::AMOOR_W;
+            case 0x10: return OperationId::AMOMIN_W;
+            case 0x14: return OperationId::AMOMAX_W;
+            case 0x18: return OperationId::AMOMINU_W;
+            case 0x1C: return OperationId::AMOMAXU_W;
+            default: return OperationId::UNKNOWN;
+        }
+    } else if (funct3 == 3) { // 64-bit AMO*D
+        switch (funct5) {
+            case 0x02: return OperationId::LR_D;
+            case 0x03: return OperationId::SC_D;
+            case 0x01: return OperationId::AMOSWAP_D;
+            case 0x00: return OperationId::AMOADD_D;
+            case 0x04: return OperationId::AMOXOR_D;
+            case 0x0C: return OperationId::AMOAND_D;
+            case 0x08: return OperationId::AMOOR_D;
+            case 0x10: return OperationId::AMOMIN_D;
+            case 0x14: return OperationId::AMOMAX_D;
+            case 0x18: return OperationId::AMOMINU_D;
+            case 0x1C: return OperationId::AMOMAXU_D;
+            default: return OperationId::UNKNOWN;
+        }
     }
+    return OperationId::UNKNOWN;
 }
 
 auto decode_fma(Opcode op, uint32_t funct7) -> OperationId {
@@ -379,9 +436,13 @@ auto decode_op_fp(uint32_t funct3, uint32_t funct7, uint32_t rs2) -> OperationId
 auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2) -> OperationId {
     switch (op) {
         case Opcode::LoadFp:
-            return (funct3 == 3) ? OperationId::FLD : OperationId::FLW;
+            if (funct3 == 2) return OperationId::FLW;
+            if (funct3 == 3) return OperationId::FLD;
+            return OperationId::UNKNOWN;
         case Opcode::StoreFp:
-            return (funct3 == 3) ? OperationId::FSD : OperationId::FSW;
+            if (funct3 == 2) return OperationId::FSW;
+            if (funct3 == 3) return OperationId::FSD;
+            return OperationId::UNKNOWN;
         case Opcode::MAdd:
         case Opcode::MSub:
         case Opcode::NMSub:
@@ -652,13 +713,13 @@ auto decoder(Instruction ir) -> OperationId {
     const auto funct7 = dec.funct7();
 
     if (op == Opcode::Amo) {
-        return decode_ext_a(funct7);
+        return decode_ext_a(funct7, funct3);
     }
     if (op == Opcode::LoadFp || op == Opcode::StoreFp || op == Opcode::OpFp ||
         op == Opcode::MAdd || op == Opcode::MSub || op == Opcode::NMSub || op == Opcode::NMAdd) {
         return decode_ext_f_d(op, funct3, funct7, std::to_underlying(dec.rs2()));
     }
-    if ((op == Opcode::Op || op == Opcode::Op32) && (funct7 & 0x01)) {
+    if ((op == Opcode::Op || op == Opcode::Op32) && (funct7 == 0x01)) {
         return decode_ext_m(op, funct3);
     }
     return decode_ext_i(op, funct3, funct7, ir);

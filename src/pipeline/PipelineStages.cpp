@@ -36,6 +36,17 @@ void CPU::run_fetch_stage(Machine& machine) {
     }
     auto& ctx = pipeline_context;
     ctx.tlb_miss = false;
+
+    const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
+    const Word alignment_mask = has_c ? 1u : 3u;
+    if ((state_.pc & alignment_mask) != 0) {
+        ctx.pending_exception = ExceptionCode::MisalignedFetch;
+        ctx.pending_tval = state_.pc;
+        ctx.ir = isa::RV32_NOP;
+        ctx.op_id = isa::UNKNOWN;
+        return;
+    }
+
     const bool split_page =
         ((state_.pc & ~simrv::memory::kPageMask) != ((state_.pc + 2) & ~simrv::memory::kPageMask));
     const bool translation_enabled =
@@ -275,6 +286,34 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
         is_valid = false;
     }
 
+    if (is_valid && state_.regs.xlen == 32 && requires_rv64(op_id)) {
+        is_valid = false;
+    }
+
+    if (is_valid && state_.regs.xlen == 32) {
+        if (op_id == OperationId::SLLI || op_id == OperationId::SRLI || op_id == OperationId::SRAI) {
+            if ((funct7_of(w_ir_tmp) & 0x01) != 0) {
+                is_valid = false;
+            }
+        }
+    }
+
+    if (is_valid) {
+        const auto op = opcode_of(w_ir_tmp);
+        if (op == Opcode::Amo) {
+            const auto f3 = std::to_underlying(funct3_of(w_ir_tmp));
+            if (state_.regs.xlen == 32) {
+                if (f3 != 2) {
+                    is_valid = false;
+                }
+            } else {
+                if (f3 != 2 && f3 != 3) {
+                    is_valid = false;
+                }
+            }
+        }
+    }
+
     if (is_valid) {
         const auto op = opcode_of(w_ir_tmp);
         const bool is_fp_op = (op == Opcode::LoadFp) || (op == Opcode::StoreFp) ||
@@ -308,6 +347,17 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
     auto& ctx = pipeline_context;
     ctx.tlb_miss = false;
     ctx.cpc = state_.pc;
+
+    const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
+    const Word alignment_mask = has_c ? 1u : 3u;
+    if ((state_.pc & alignment_mask) != 0) {
+        ctx.pending_exception = ExceptionCode::MisalignedFetch;
+        ctx.pending_tval = state_.pc;
+        ctx.ir = isa::RV32_NOP;
+        ctx.op_id = isa::UNKNOWN;
+        return;
+    }
+
     ctx.padr1 = (state_.regs.xlen == 32) ? (state_.pc & 0xFFFFFFFFULL) : state_.pc;
     ctx.padr2 = (state_.regs.xlen == 32) ? ((state_.pc + 2) & 0xFFFFFFFFULL) : (state_.pc + 2);
 
@@ -526,7 +576,7 @@ void CPU::execute_core(Machine& machine) {
         case Opcode::Jalr:
             ctx.tkn = true;
             ctx.wb_data = state_.pc + ((ctx.cinsn != 0u) ? 2 : 4);
-            ctx.jmp_pc = ctx.rrs1 + ctx.imm;
+            ctx.jmp_pc = (ctx.rrs1 + ctx.imm) & ~static_cast<Register>(1);
             break;
         case Opcode::Op:
             ctx.tkn = false;
@@ -592,115 +642,138 @@ void CPU::execute_core(Machine& machine) {
             }
             break;
         case Opcode::System:
-            if (ctx.funct3 == Funct3::Priv) {
-                switch (static_cast<Funct12Priv>(ctx.funct12)) {
-                    case Funct12Priv::Ecall:
-                        ctx.wb_data_csr = enum_mask(ExceptionCode::UserEcall) + std::to_underlying(state_.priv);
-                        ctx.pending_exception = static_cast<ExceptionCode>(enum_mask(ExceptionCode::UserEcall) + std::to_underlying(state_.priv));
-                        e_icount++;
-                        break;
-                     case Funct12Priv::Ebreak: {
-                          bool semihost_handled = false;
-                          const bool in_dram = simrv::memory::is_dram_addr(state_.pc - 4) && simrv::memory::is_dram_addr(state_.pc + 4);
-                          if (in_dram) {
-                              const Word inst_prev = simrv::memory::ram_read_fast(state_.pc - 4, static_cast<Instruction>(Funct3::Lw), machine.mmem);
-                              const Word inst_next = simrv::memory::ram_read_fast(state_.pc + 4, static_cast<Instruction>(Funct3::Lw), machine.mmem);
-                              if (inst_prev == 0x01f01013 && inst_next == 0x40705013) {
-                                  semihost_handled = true;
-                                  const Word semihost_op = state_.regs.read(static_cast<RegId>(10));
-                                  const Address arg_ptr = state_.regs.read(static_cast<RegId>(11));
-                                  
-                                  if (semihost_op == 0x05) {
-                                      const Instruction load_op = kIsXLen64 ? static_cast<Instruction>(Funct3::Ld) : static_cast<Instruction>(Funct3::Lw);
-                                      const Address fd = simrv::memory::ram_read_fast(arg_ptr, load_op, machine.mmem);
-                                      const Address buf_addr = simrv::memory::ram_read_fast(arg_ptr + (kIsXLen64 ? 8 : 4), load_op, machine.mmem);
-                                      const Address len = simrv::memory::ram_read_fast(arg_ptr + (kIsXLen64 ? 16 : 8), load_op, machine.mmem);
-                                      (void)fd;
-                                      
-                                      if (simrv::memory::is_dram_addr(buf_addr)) {
-                                          for (Address i = 0; i < len; ++i) {
-                                              const auto ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(buf_addr + i, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
-                                              if (machine.s_tuimode && machine.uart && machine.uart->tui()) {
-                                                  machine.uart->tui()->handle_char_write(static_cast<char>(ch));
-                                              } else {
-                                                  (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
-                                              }
-                                          }
-                                      }
-                                      state_.regs.write(static_cast<RegId>(10), 0);
-                                  } else if (semihost_op == 0x03) {
-                                      if (simrv::memory::is_dram_addr(arg_ptr)) {
-                                          const auto ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(arg_ptr, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
-                                          if (machine.s_tuimode && machine.uart && machine.uart->tui()) {
-                                              machine.uart->tui()->handle_char_write(static_cast<char>(ch));
-                                          } else {
-                                              (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
-                                          }
-                                      }
-                                      state_.regs.write(static_cast<RegId>(10), 0);
-                                  } else if (semihost_op == 0x04) {
-                                      Address ptr = arg_ptr;
-                                      if (simrv::memory::is_dram_addr(ptr)) {
-                                          while (true) {
-                                              const auto ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(ptr, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
-                                              if (ch == 0) break;
-                                              if (machine.s_tuimode && machine.uart && machine.uart->tui()) {
-                                                  machine.uart->tui()->handle_char_write(static_cast<char>(ch));
-                                              } else {
-                                                  (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
-                                              }
-                                              ptr++;
-                                          }
-                                      }
-                                      state_.regs.write(static_cast<RegId>(10), 0);
-                                  } else {
-                                      simrv::log::warn("__ Unhandled semihosting op: 0x{:02x}", semihost_op);
-                                      state_.regs.write(static_cast<RegId>(10), static_cast<Word>(-1));
-                                  }
-                                  
-                                  ctx.tkn = true;
-                                  ctx.jmp_pc = state_.pc + 8;
-                              }
-                          }
-                          
-                          if (!semihost_handled) {
-                              ctx.wb_data_csr = enum_mask(ExceptionCode::Breakpoint);
-                              ctx.pending_exception = ExceptionCode::Breakpoint;
-                              ctx.tkn = false;
-                              e_icount++;
-                          }
-                          break;
-                      }
-                    case Funct12Priv::Uret:
-                    case Funct12Priv::Sret:
-                    case Funct12Priv::Mret:
-                        ctx.tkn = true;
-                        ctx.jmp_pc = ctx.rcsr;
-                        break;
-                    case Funct12Priv::Wfi:
-                        ctx.tkn = false;
-                        break;
-                    default:
-                        if (ctx.funct7 == static_cast<Instruction>(Funct7Priv::SfenceVma)) {
-                            ctx.tkn = false;
-                        }
-                        break;
-                }
-            } else {
-                const auto csr_val_imm = ((std::to_underlying(ctx.funct3) & 4) != 0)
-                                             ? static_cast<ImmValue>(std::to_underlying(ctx.rs1))
-                                             : ctx.imm;
-                auto csr_result =
-                    execute::ExecuteUnit::csrWriteValue(ctx.rcsr, ctx.rrs1, csr_val_imm, ctx.funct3);
-                if (csr_result.has_value()) {
-                    ctx.tkn = false;
-                    ctx.wb_data_csr = csr_result.value();
-                } else {
-                    ctx.pending_exception = static_cast<ExceptionCode>(csr_result.error());
-                    ctx.pending_tval = ctx.ir;
-                }
-            }
+            execute_system(machine);
             break;
+        case Opcode::MAdd:
+        case Opcode::MSub:
+        case Opcode::NMAdd:
+        case Opcode::NMSub:
+        case Opcode::OpFp:
+            execute_fp(machine);
+            break;
+        default:
+            ctx.tkn = false;
+            ctx.pending_exception = ExceptionCode::IllegalInstruction;
+            ctx.pending_tval = ctx.ir;
+            break;
+    }
+}
+
+void CPU::execute_system(Machine& machine) {
+    auto& ctx = pipeline_context;
+    if (ctx.funct3 == Funct3::Priv) {
+        switch (static_cast<Funct12Priv>(ctx.funct12)) {
+            case Funct12Priv::Ecall:
+                ctx.wb_data_csr = enum_mask(ExceptionCode::UserEcall) + std::to_underlying(state_.priv);
+                ctx.pending_exception = static_cast<ExceptionCode>(enum_mask(ExceptionCode::UserEcall) + std::to_underlying(state_.priv));
+                e_icount++;
+                break;
+            case Funct12Priv::Ebreak: {
+                bool semihost_handled = false;
+                const bool in_dram = simrv::memory::is_dram_addr(state_.pc - 4) && simrv::memory::is_dram_addr(state_.pc + 4);
+                if (in_dram) {
+                    const Word inst_prev = simrv::memory::ram_read_fast(state_.pc - 4, static_cast<Instruction>(Funct3::Lw), machine.mmem);
+                    const Word inst_next = simrv::memory::ram_read_fast(state_.pc + 4, static_cast<Instruction>(Funct3::Lw), machine.mmem);
+                    if (inst_prev == 0x01f01013 && inst_next == 0x40705013) {
+                        semihost_handled = true;
+                        const Word semihost_op = state_.regs.read(RegId::A0);
+                        const Address arg_ptr = state_.regs.read(RegId::A1);
+                        
+                        if (semihost_op == 0x05) {
+                            const Instruction load_op = kIsXLen64 ? static_cast<Instruction>(Funct3::Ld) : static_cast<Instruction>(Funct3::Lw);
+                            const Address fd = simrv::memory::ram_read_fast(arg_ptr, load_op, machine.mmem);
+                            const Address buf_addr = simrv::memory::ram_read_fast(arg_ptr + (kIsXLen64 ? 8 : 4), load_op, machine.mmem);
+                            const Address len = simrv::memory::ram_read_fast(arg_ptr + (kIsXLen64 ? 16 : 8), load_op, machine.mmem);
+                            (void)fd;
+                            
+                            if (simrv::memory::is_dram_addr(buf_addr)) {
+                                for (Address i = 0; i < len; ++i) {
+                                    const auto ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(buf_addr + i, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
+                                    if (machine.s_tuimode && machine.uart && machine.uart->tui()) {
+                                        machine.uart->tui()->handle_char_write(static_cast<char>(ch));
+                                    } else {
+                                        (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
+                                    }
+                                }
+                            }
+                            state_.regs.write(RegId::A0, 0);
+                        } else if (semihost_op == 0x03) {
+                            if (simrv::memory::is_dram_addr(arg_ptr)) {
+                                const auto ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(arg_ptr, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
+                                if (machine.s_tuimode && machine.uart && machine.uart->tui()) {
+                                    machine.uart->tui()->handle_char_write(static_cast<char>(ch));
+                                } else {
+                                    (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
+                                }
+                            }
+                            state_.regs.write(RegId::A0, 0);
+                        } else if (semihost_op == 0x04) {
+                            Address ptr = arg_ptr;
+                            if (simrv::memory::is_dram_addr(ptr)) {
+                                while (true) {
+                                    const auto ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(ptr, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
+                                    if (ch == 0) break;
+                                    if (machine.s_tuimode && machine.uart && machine.uart->tui()) {
+                                        machine.uart->tui()->handle_char_write(static_cast<char>(ch));
+                                    } else {
+                                        (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
+                                    }
+                                    ptr++;
+                                }
+                            }
+                            state_.regs.write(RegId::A0, 0);
+                        } else {
+                            simrv::log::warn("__ Unhandled semihosting op: 0x{:02x}", semihost_op);
+                            state_.regs.write(RegId::A0, static_cast<Word>(-1));
+                        }
+                        
+                        ctx.tkn = true;
+                        ctx.jmp_pc = state_.pc + 8;
+                    }
+                }
+                
+                if (!semihost_handled) {
+                    ctx.wb_data_csr = enum_mask(ExceptionCode::Breakpoint);
+                    ctx.pending_exception = ExceptionCode::Breakpoint;
+                    ctx.tkn = false;
+                    e_icount++;
+                }
+                break;
+            }
+            case Funct12Priv::Uret:
+            case Funct12Priv::Sret:
+            case Funct12Priv::Mret:
+                ctx.tkn = true;
+                ctx.jmp_pc = ctx.rcsr;
+                break;
+            case Funct12Priv::Wfi:
+                ctx.tkn = false;
+                break;
+            default:
+                if (ctx.funct7 == static_cast<Instruction>(Funct7Priv::SfenceVma)) {
+                    ctx.tkn = false;
+                }
+                break;
+        }
+    } else {
+        const auto csr_val_imm = ((std::to_underlying(ctx.funct3) & 4) != 0)
+                                     ? static_cast<ImmValue>(std::to_underlying(ctx.rs1))
+                                     : ctx.imm;
+        auto csr_result =
+            execute::ExecuteUnit::csrWriteValue(ctx.rcsr, ctx.rrs1, csr_val_imm, ctx.funct3);
+        if (csr_result.has_value()) {
+            ctx.tkn = false;
+            ctx.wb_data_csr = csr_result.value();
+        } else {
+            ctx.pending_exception = static_cast<ExceptionCode>(csr_result.error());
+            ctx.pending_tval = ctx.ir;
+        }
+    }
+}
+
+void CPU::execute_fp(Machine& /*machine*/) {
+    auto& ctx = pipeline_context;
+    switch (ctx.opcode) {
         case Opcode::MAdd:
         case Opcode::MSub:
         case Opcode::NMAdd:
@@ -747,9 +820,6 @@ void CPU::execute_core(Machine& machine) {
             break;
         }
         default:
-            ctx.tkn = false;
-            ctx.pending_exception = ExceptionCode::IllegalInstruction;
-            ctx.pending_tval = ctx.ir;
             break;
     }
 }
@@ -974,6 +1044,14 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
         raise_exception(std::to_underlying(*ctx.pending_exception), ctx.pending_tval);
     } else {
         if (ctx.tkn != 0u) {
+            const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
+            const Word alignment_mask = has_c ? 1u : 3u;
+            if ((ctx.jmp_pc & alignment_mask) != 0) {
+                ctx.pending_exception = ExceptionCode::MisalignedFetch;
+                ctx.pending_tval = ctx.jmp_pc;
+                raise_exception(std::to_underlying(*ctx.pending_exception), ctx.pending_tval);
+                return;
+            }
             state_.pc = ctx.jmp_pc;
         } else {
             state_.pc = state_.pc + ((ctx.cinsn != 0u) ? 2 : 4);
@@ -1069,6 +1147,14 @@ void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
         raise_exception(std::to_underlying(*ctx.pending_exception), ctx.pending_tval);
     } else {
         if (ctx.tkn != 0u) {
+            const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
+            const Word alignment_mask = has_c ? 1u : 3u;
+            if ((ctx.jmp_pc & alignment_mask) != 0) {
+                ctx.pending_exception = ExceptionCode::MisalignedFetch;
+                ctx.pending_tval = ctx.jmp_pc;
+                raise_exception(std::to_underlying(*ctx.pending_exception), ctx.pending_tval);
+                return;
+            }
             state_.pc = ctx.jmp_pc;
         } else {
             state_.pc = state_.pc + ((ctx.cinsn != 0u) ? 2 : 4);

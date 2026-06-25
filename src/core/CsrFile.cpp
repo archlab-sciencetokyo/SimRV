@@ -40,6 +40,10 @@ auto CsrFile::getMstatus(CSRValue mask) const -> CSRValue {
 }
 
 void CsrFile::setMstatus(CSRValue wdata) {
+    CSRValue mpp = (wdata & enum_mask(MstatusBit::Mpp)) >> 11;
+    if (mpp == 2) {
+        wdata &= ~enum_mask(MstatusBit::Mpp);
+    }
     CSRValue const mod = cpu_.state().mstatus ^ wdata;
     const CSRValue tlb_sensitive =
         enum_mask(MstatusBit::Mprv) | enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr);
@@ -198,10 +202,8 @@ auto CsrFile::write(CSRAddress addr,
         enum_mask(MipBit::Ssip) | enum_mask(MipBit::Stip) | enum_mask(MipBit::Seip);
     CSRValue const mask3 = enum_mask(MipBit::Msip) | enum_mask(MipBit::Ssip) |
                            enum_mask(MipBit::Stip) | enum_mask(MipBit::Mtip) |
-                           enum_mask(MipBit::Seip);
-    CSRValue const mask4 = enum_mask(MipBit::Msip) | enum_mask(MipBit::Ssip) |
-                           enum_mask(MipBit::Mtip) | enum_mask(MipBit::Stip) |
-                           enum_mask(MipBit::Meip) | enum_mask(MipBit::Seip);
+                           enum_mask(MipBit::Seip) | enum_mask(MipBit::Meip);
+    CSRValue const mask4 = enum_mask(MipBit::Msip) | enum_mask(MipBit::Ssip);
 
     switch (addr) {
         case csr_addr(Csr::Mvendorid):
@@ -299,10 +301,11 @@ auto CsrFile::write(CSRAddress addr,
             cpu_.state().mie =
                 (cpu_.state().mie & ~cpu_.state().mideleg) | (wdata & cpu_.state().mideleg);
             break;
-        case csr_addr(Csr::Sip):
-            cpu_.state().mip =
-                (cpu_.state().mip & ~cpu_.state().mideleg) | (wdata & cpu_.state().mideleg);
+        case csr_addr(Csr::Sip): {
+            const CSRValue mask = enum_mask(MipBit::Ssip) & cpu_.state().mideleg;
+            cpu_.state().mip = (cpu_.state().mip & ~mask) | (wdata & mask);
             break;
+        }
         case csr_addr(Csr::Medeleg):
             cpu_.state().medeleg = (cpu_.state().medeleg & ~mask1) | (wdata & mask1);
             break;

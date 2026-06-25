@@ -166,7 +166,7 @@ void CPU::run_cycle(Machine& machine) {
                 }
 
                 if (!success) {
-                    const auto cause = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0));
+                    const auto cause = pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
                     raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
                 }
             }
@@ -284,11 +284,11 @@ void CPU::run_cycle_baremetal(Machine& machine) {
                                   writeback_stage(machine) &&
                                   (run_commit_stage_baremetal(machine), !pipeline_context.pending_exception.has_value());
         if (simrv::compiler::unlikely(!rest_success)) {
-            const auto cause = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0));
+            const auto cause = pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
             raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
         }
     } else {
-        const auto cause = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0));
+        const auto cause = pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
         raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
     }
 
@@ -415,32 +415,32 @@ auto CPU::run_pipeline_coroutine(Machine* machine_ptr) -> simrv::pipeline::Pipel
     Machine& machine = *machine_ptr;
     while (true) {
         if (!fetch_stage(machine, state_.pc)) {
-            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0)),
+            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch),
                                 .tval = pipeline_context.pending_tval};
             continue;
         }
         if (!decode_stage(machine)) {
-            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0)),
+            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch),
                                 .tval = pipeline_context.pending_tval};
             continue;
         }
         if (!execute_stage(machine)) {
-            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0)),
+            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch),
                                 .tval = pipeline_context.pending_tval};
             continue;
         }
         if (!memory_stage(machine)) {
-            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0)),
+            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch),
                                 .tval = pipeline_context.pending_tval};
             continue;
         }
         if (!writeback_stage(machine)) {
-            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0)),
+            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch),
                                 .tval = pipeline_context.pending_tval};
             continue;
         }
         if (!commit_stage(machine)) {
-            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0)),
+            co_yield simrv::pipeline::StageError{.code = pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch),
                                 .tval = pipeline_context.pending_tval};
             continue;
         }
@@ -484,7 +484,7 @@ auto CPU::commit_stage(Machine& machine) -> bool {
 }
 
 void CPU::execute_cached_lui(CachedOp& op) {
-    if (op.rd != static_cast<RegId>(0)) {
+    if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, op.imm);
     }
     e_icount++;
@@ -494,7 +494,7 @@ void CPU::execute_cached_lui(CachedOp& op) {
 }
 
 void CPU::execute_cached_auipc(CachedOp& op) {
-    if (op.rd != static_cast<RegId>(0)) {
+    if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, state_.pc + op.imm);
     }
     e_icount++;
@@ -507,8 +507,14 @@ void CPU::execute_cached_jal(CachedOp& op) {
     Register const next_pc = state_.pc + (op.cinsn ? 2 : 4);
     pipeline_context.tkn = true;
     pipeline_context.jmp_pc = state_.pc + op.imm;
-    if (op.rd != static_cast<RegId>(0)) {
+    if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, next_pc);
+    }
+    const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
+    const Word alignment_mask = has_c ? 1u : 3u;
+    if ((pipeline_context.jmp_pc & alignment_mask) != 0) {
+        raise_exception(static_cast<TrapCause>(ExceptionCode::MisalignedFetch), pipeline_context.jmp_pc);
+        return;
     }
     state_.pc = pipeline_context.jmp_pc;
     e_icount++;
@@ -519,9 +525,15 @@ void CPU::execute_cached_jal(CachedOp& op) {
 void CPU::execute_cached_jalr(CachedOp& op, Register rrs1) {
     Register const next_pc = state_.pc + (op.cinsn ? 2 : 4);
     pipeline_context.tkn = true;
-    pipeline_context.jmp_pc = rrs1 + op.imm;
-    if (op.rd != static_cast<RegId>(0)) {
+    pipeline_context.jmp_pc = (rrs1 + op.imm) & ~static_cast<Register>(1);
+    if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, next_pc);
+    }
+    const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
+    const Word alignment_mask = has_c ? 1u : 3u;
+    if ((pipeline_context.jmp_pc & alignment_mask) != 0) {
+        raise_exception(static_cast<TrapCause>(ExceptionCode::MisalignedFetch), pipeline_context.jmp_pc);
+        return;
     }
     state_.pc = pipeline_context.jmp_pc;
     e_icount++;
@@ -533,7 +545,16 @@ void CPU::execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) {
     bool const tkn = execute::ExecuteUnit::branchTaken(rrs1, rrs2, op.funct3);
     pipeline_context.tkn = tkn;
     pipeline_context.jmp_pc = state_.pc + op.imm;
-    state_.pc = tkn ? pipeline_context.jmp_pc : (state_.pc + (op.cinsn ? 2 : 4));
+    Register const target_pc = tkn ? pipeline_context.jmp_pc : (state_.pc + (op.cinsn ? 2 : 4));
+    if (tkn) {
+        const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
+        const Word alignment_mask = has_c ? 1u : 3u;
+        if ((target_pc & alignment_mask) != 0) {
+            raise_exception(static_cast<TrapCause>(ExceptionCode::MisalignedFetch), target_pc);
+            return;
+        }
+    }
+    state_.pc = target_pc;
     e_icount++;
     if (op.cinsn) e_ccount++;
     pc_sign_extend();
@@ -541,7 +562,7 @@ void CPU::execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) {
 
 void CPU::execute_cached_op(CachedOp& op, Register rrs1, Register rrs2) {
     Register const wb_data = execute::ExecuteUnit::aluInt(rrs1, rrs2, op.funct3, op.funct7);
-    if (op.rd != static_cast<RegId>(0)) {
+    if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, wb_data);
     }
     e_icount++;
@@ -553,7 +574,7 @@ void CPU::execute_cached_op(CachedOp& op, Register rrs1, Register rrs2) {
 void CPU::execute_cached_op_imm(CachedOp& op, Register rrs1) {
     Word const funct7 = op.funct7 & ((op.funct3 == Funct3::Add) ? 0 : 0x20);
     Register const wb_data = execute::ExecuteUnit::aluInt(rrs1, op.imm, op.funct3, funct7);
-    if (op.rd != static_cast<RegId>(0)) {
+    if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, wb_data);
     }
     e_icount++;
@@ -566,7 +587,7 @@ void CPU::execute_cached_op_imm32(CachedOp& op, Register rrs1) {
     Word const funct7 = op.funct7 & ((enum_mask(op.funct3) == 0x5u) ? 0x20 : 0);
     Register const wb_data = execute::ExecuteUnit::aluIntW(Opcode::OpImm32, rrs1, op.imm,
                                                          op.funct3, funct7);
-    if (op.rd != static_cast<RegId>(0)) {
+    if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, wb_data);
     }
     e_icount++;
@@ -582,7 +603,7 @@ void CPU::execute_cached_op32(CachedOp& op, Register rrs1, Register rrs2) {
                                          : 0x01);
     Register const wb_data = execute::ExecuteUnit::aluIntW(Opcode::Op32, rrs1, rrs2,
                                                          op.funct3, funct7);
-    if (op.rd != static_cast<RegId>(0)) {
+    if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, wb_data);
     }
     e_icount++;
@@ -672,7 +693,7 @@ auto CPU::execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> 
         }
     }
 
-    if (op.rd != static_cast<RegId>(0)) {
+    if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, mem_rdata);
     }
     e_icount++;
@@ -708,7 +729,7 @@ auto CPU::execute_cached_fallback(Machine& machine) -> void {
                    writeback_stage(machine) &&
                    commit_stage(machine);
     if (!success) {
-        const auto cause = pipeline_context.pending_exception.value_or(static_cast<ExceptionCode>(0));
+        const auto cause = pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
         raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
     }
 }

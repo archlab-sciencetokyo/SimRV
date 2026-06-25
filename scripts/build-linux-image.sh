@@ -162,18 +162,29 @@ else
     tar -xf "sources/alpine-minirootfs-${ALPINE_VER}-riscv64.tar.gz" -C "$INITRAMFS_DIR"
 fi
 
+# Compile custom Snake game
+print_step "Compiling custom Snake game..."
+if [[ "$ARCH" == "rv64" ]]; then
+    "${CROSS_COMPILE}gcc" -O2 -march="${M_ARCH}" -mabi="${M_ABI}" -Wl,-dynamic-linker=/lib/ld-musl-riscv64.so.1 -nodefaultlibs "$SCRIPT_DIR/snake.c" "$INITRAMFS_DIR/lib/libc.musl-riscv64.so.1" -lgcc -o "$INITRAMFS_DIR/usr/bin/snake"
+else
+    "${CROSS_COMPILE}gcc" -static -O2 -march="${M_ARCH}" -mabi="${M_ABI}" "$SCRIPT_DIR/snake.c" -o "$INITRAMFS_DIR/usr/bin/snake"
+fi
+
 # Set up init script and inittab
 mkdir -p "$INITRAMFS_DIR/proc" "$INITRAMFS_DIR/sys" "$INITRAMFS_DIR/dev" "$INITRAMFS_DIR/etc" "$INITRAMFS_DIR/tmp"
 
 cat > "$INITRAMFS_DIR/etc/inittab" <<'EOF'
-::sysinit:/bin/mount -t proc proc /proc
-::sysinit:/bin/mount -t sysfs sysfs /sys
-::sysinit:/bin/mount -t devtmpfs devtmpfs /dev || true
 ttyS0::respawn:-/bin/sh
 EOF
 
 cat > "$INITRAMFS_DIR/init" <<'EOF'
 #!/bin/sh
+/bin/mount -t proc proc /proc
+/bin/mount -t sysfs sysfs /sys
+/bin/mount -t devtmpfs devtmpfs /dev || true
+exec 0</dev/ttyS0
+exec 1>/dev/ttyS0
+exec 2>/dev/ttyS0
 clear
 echo "=================================================="
 echo "          Welcome to SimRV Linux Boot             "
@@ -184,6 +195,9 @@ else
     echo "Minimal BusyBox Linux (riscv32)"
 fi
 echo "=================================================="
+if [ -f /usr/bin/snake ]; then
+    /usr/bin/snake
+fi
 exec /sbin/init
 EOF
 chmod +x "$INITRAMFS_DIR/init"
@@ -246,6 +260,7 @@ make PLATFORM=generic CROSS_COMPILE="$CROSS_COMPILE" \
 # ----------------------------------------------------------------------------
 print_step "Packaging output artifacts..."
 cp "$OPENSBI_BUILD/build/platform/generic/firmware/fw_payload.bin" "$IMAGES_DIR/fw_payload.bin"
+cp "$OPENSBI_BUILD/build/platform/generic/firmware/fw_payload.elf" "$IMAGES_DIR/fw_payload.elf"
 cp "$LINUX_BUILD/vmlinux" "$IMAGES_DIR/vmlinux"
 
 # Compile DTS to DTB

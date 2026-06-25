@@ -233,4 +233,39 @@ constexpr auto get_instruction_format_name(InstFormat fmt) -> std::string_view {
     return "Unknown";
 }
 
+constexpr auto requires_rv64(OperationId op_id) -> bool {
+    switch (op_id) {
+        case OperationId::LD:
+        case OperationId::LWU:
+        case OperationId::SD:
+        case OperationId::ADDIW:
+        case OperationId::SLLIW:
+        case OperationId::SRLIW:
+        case OperationId::SRAIW:
+        case OperationId::ADDW:
+        case OperationId::SUBW:
+        case OperationId::SLLW:
+        case OperationId::SRLW:
+        case OperationId::SRAW:
+        case OperationId::MULW:
+        case OperationId::DIVW:
+        case OperationId::DIVUW:
+        case OperationId::REMW:
+        case OperationId::REMUW:
+        case OperationId::FCVT_L_S:
+        case OperationId::FCVT_LU_S:
+        case OperationId::FCVT_S_L:
+        case OperationId::FCVT_S_LU:
+        case OperationId::FCVT_L_D:
+        case OperationId::FCVT_LU_D:
+        case OperationId::FCVT_D_L:
+        case OperationId::FCVT_D_LU:
+        case OperationId::FMV_X_D:
+        case OperationId::FMV_D_X:
+            return true;
+        default:
+            return false;
+    }
+}
+
 } // namespace simrv::isa

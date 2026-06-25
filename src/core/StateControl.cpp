@@ -8,13 +8,11 @@
 #include <cstdint>
 #include <print>
 #include <ranges>
-#include <ostream>
 
 #include "simrv/xlen/Types.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Sbi.hpp"
-#include "simrv/core/Tlb.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Constants.hpp"
@@ -372,11 +370,11 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
             trap_cause_name(cause),
             static_cast<uint64_t>(trap_pc),
             kLogHexWidth,            static_cast<unsigned>(state.priv),
-            static_cast<uint64_t>(state.regs.read(static_cast<RegId>(1))), kLogHexWidth,
-            static_cast<uint64_t>(state.regs.read(static_cast<RegId>(2))), kLogHexWidth,
-            static_cast<uint64_t>(state.regs.read(static_cast<RegId>(4))), kLogHexWidth,
-            static_cast<uint64_t>(state.regs.read(static_cast<RegId>(10))), kLogHexWidth,
-            static_cast<uint64_t>(state.regs.read(static_cast<RegId>(11))), kLogHexWidth,
+            static_cast<uint64_t>(state.regs.read(RegId::Ra)), kLogHexWidth,
+            static_cast<uint64_t>(state.regs.read(RegId::Sp)), kLogHexWidth,
+            static_cast<uint64_t>(state.regs.read(RegId::Tp)), kLogHexWidth,
+            static_cast<uint64_t>(state.regs.read(RegId::A0)), kLogHexWidth,
+            static_cast<uint64_t>(state.regs.read(RegId::A1)), kLogHexWidth,
             static_cast<uint64_t>(state.mtvec), kLogHexWidth, static_cast<uint64_t>(state.stvec),
             kLogHexWidth, static_cast<uint64_t>(state.mepc), kLogHexWidth,
             static_cast<uint64_t>(state.sepc), kLogHexWidth, static_cast<uint64_t>(state.satp),
@@ -483,6 +481,13 @@ auto TrapController::canExecutePrivilegedInstruction(PrivilegeLevel current_priv
         return misa_has_extension(misa, isa::IsaExtension::S) &&
                current_priv >= kPrivSupervisor &&
                !(current_priv == kPrivSupervisor && (mstatus & enum_mask(MstatusBit::Tsr)) != 0);
+    }
+    if (funct12 == static_cast<Instruction>(isa::Funct12Priv::Uret)) {
+        return false;
+    }
+    if (funct12 == static_cast<Instruction>(isa::Funct12Priv::Wfi)) {
+        return current_priv >= kPrivSupervisor &&
+               !(current_priv == kPrivSupervisor && (mstatus & enum_mask(MstatusBit::Tw)) != 0);
     }
     if (funct7 == static_cast<Instruction>(isa::Funct7Priv::SfenceVma)) {
         return misa_has_extension(misa, isa::IsaExtension::S) &&

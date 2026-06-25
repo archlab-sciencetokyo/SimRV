@@ -5,6 +5,7 @@
 #pragma once
 
 #include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/Constants.hpp"
 
 namespace simrv::core {
 
@@ -50,6 +51,7 @@ constexpr CSRValue kMstatusMask =
      enum_mask(MstatusBit::Upie) | enum_mask(MstatusBit::Spie) | enum_mask(MstatusBit::Mpie) |
      enum_mask(MstatusBit::Spp) | enum_mask(MstatusBit::Mpp) | enum_mask(MstatusBit::Fs) |
      enum_mask(MstatusBit::Mprv) | enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr) |
+     enum_mask(MstatusBit::Tvm) | enum_mask(MstatusBit::Tw) | enum_mask(MstatusBit::Tsr) |
      (simrv::xlen::kIsXLen64 ? (static_cast<CSRValue>(0xF) << 32) : 0));
 constexpr CSRValue kSstatusMask =
     (enum_mask(MstatusBit::Uie) | enum_mask(MstatusBit::Sie) | enum_mask(MstatusBit::Upie) |

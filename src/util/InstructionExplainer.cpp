@@ -207,6 +207,17 @@ auto get_description(OperationId op_id) -> std::pair<std::string_view, std::stri
         arr[AMOMAX_W] = {"AMOMAX.W", "Atomic Max Word. Atomically loads a word from address rs1 into rd, calculates the signed max with rs2, and stores the result back to address rs1."};
         arr[AMOMINU_W] = {"AMOMINU.W", "Atomic Min Word (Unsigned). Atomically loads a word from address rs1 into rd, calculates the unsigned min with rs2, and stores the result back to address rs1."};
         arr[AMOMAXU_W] = {"AMOMAXU.W", "Atomic Max Word (Unsigned). Atomically loads a word from address rs1 into rd, calculates the unsigned max with rs2, and stores the result back to address rs1."};
+        arr[LR_D] = {"LR.D", "Load-Reserved Doubleword. Loads a doubleword from address rs1 into rd, and registers a reservation on that memory address."};
+        arr[SC_D] = {"SC.D", "Store-Conditional Doubleword. Conditionally writes a doubleword from rs2 to address rs1 if a reservation on that address is active, storing 0 in rd on success, or non-zero on failure."};
+        arr[AMOSWAP_D] = {"AMOSWAP.D", "Atomic Swap Doubleword. Atomically loads a doubleword from address rs1 into rd, and stores rs2 to address rs1."};
+        arr[AMOADD_D] = {"AMOADD.D", "Atomic Add Doubleword. Atomically loads a doubleword from address rs1 into rd, adds rs2 to it, and stores the result back to address rs1."};
+        arr[AMOXOR_D] = {"AMOXOR.D", "Atomic XOR Doubleword. Atomically loads a doubleword from address rs1 into rd, XORs rs2 with it, and stores the result back to address rs1."};
+        arr[AMOAND_D] = {"AMOAND.D", "Atomic AND Doubleword. Atomically loads a doubleword from address rs1 into rd, ANDs rs2 with it, and stores the result back to address rs1."};
+        arr[AMOOR_D] = {"AMOOR.D", "Atomic OR Doubleword. Atomically loads a doubleword from address rs1 into rd, ORs rs2 with it, and stores the result back to address rs1."};
+        arr[AMOMIN_D] = {"AMOMIN.D", "Atomic Min Doubleword. Atomically loads a doubleword from address rs1 into rd, calculates the signed min with rs2, and stores the result back to address rs1."};
+        arr[AMOMAX_D] = {"AMOMAX.D", "Atomic Max Doubleword. Atomically loads a doubleword from address rs1 into rd, calculates the signed max with rs2, and stores the result back to address rs1."};
+        arr[AMOMINU_D] = {"AMOMINU.D", "Atomic Min Doubleword (Unsigned). Atomically loads a doubleword from address rs1 into rd, calculates the unsigned min with rs2, and stores the result back to address rs1."};
+        arr[AMOMAXU_D] = {"AMOMAXU.D", "Atomic Max Doubleword (Unsigned). Atomically loads a doubleword from address rs1 into rd, calculates the unsigned max with rs2, and stores the result back to address rs1."};
         arr[FLW] = {"FLW", "Floating-Point Load Word. Loads a 32-bit floating-point value from memory address rs1 + immediate into floating-point register rd."};
         arr[FSW] = {"FSW", "Floating-Point Store Word. Stores a 32-bit floating-point value from floating-point register rs2 to memory address rs1 + immediate."};
         arr[FLD] = {"FLD", "Floating-Point Load Double. Loads a 64-bit floating-point value from memory address rs1 + immediate into floating-point register rd."};
@@ -481,13 +492,17 @@ auto format_r_type(OperationId op_id, std::string_view mnemonic, uint32_t rd_val
 
     if (op_id == SFENCE_VMA) {
         return std::format("sfence.vma {}, {}", rs1_str, rs2_str);
-    } else if (op_id >= LR_W && op_id <= SC_W) {
+    } else if ((op_id >= LR_W && op_id <= SC_W) || (op_id >= LR_D && op_id <= SC_D)) {
         if (op_id == LR_W) {
             return std::format("lr.w {}, ({})", rd_str, rs1_str);
-        } else {
+        } else if (op_id == LR_D) {
+            return std::format("lr.d {}, ({})", rd_str, rs1_str);
+        } else if (op_id == SC_W) {
             return std::format("sc.w {}, {}, ({})", rd_str, rs2_str, rs1_str);
+        } else {
+            return std::format("sc.d {}, {}, ({})", rd_str, rs2_str, rs1_str);
         }
-    } else if (op_id >= AMOSWAP_W && op_id <= AMOMAXU_W) {
+    } else if ((op_id >= AMOSWAP_W && op_id <= AMOMAXU_W) || (op_id >= AMOSWAP_D && op_id <= AMOMAXU_D)) {
         return std::format("{}.aqrl {}, {}, ({})", mnemonic, rd_str, rs2_str, rs1_str);
     } else if (is_fp_sys) {
         // Conversions and Moves
@@ -724,6 +739,9 @@ auto get_isa_extension_name(OperationId op_id) -> std::string_view {
     }
     if (op_id >= LR_W && op_id <= AMOMAXU_W) {
         return "RV32A";
+    }
+    if (op_id >= LR_D && op_id <= AMOMAXU_D) {
+        return "RV64A";
     }
     if (op_id >= FLW && op_id <= FCVT_S_LU) {
         return "RV32F";

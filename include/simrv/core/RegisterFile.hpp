@@ -5,7 +5,6 @@
 #pragma once
 
 #include <array>
-#include <optional>
 
 #include <simrv/Define.hpp>
 
@@ -42,7 +41,7 @@ class RegisterFile {
     [[nodiscard]] constexpr auto read(RegId idx) const -> Register { return reg_[std::to_underlying(idx)]; }
 
     constexpr void write(RegId idx, Register val) {
-        if (std::to_underlying(idx) != 0) {
+        if (idx != RegId::Zero) {
             if (xlen == 32) {
                 val = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(val)));
             }
