@@ -1,10 +1,9 @@
 {
     "cmake.configureOnOpen": true,
-    "cmake.buildDirectory": "${workspaceFolder}/build/ninja-clang-release",
     "cmake.copyCompileCommands": "${workspaceFolder}/compile_commands.json",
     "clangd.arguments": [
         "--background-index",
-        "--compile-commands-dir=${workspaceFolder}/build/ninja-clang-release",
+        "--compile-commands-dir=${workspaceFolder}",
         "--header-insertion=never",
         "--pch-storage=memory"
     ],
