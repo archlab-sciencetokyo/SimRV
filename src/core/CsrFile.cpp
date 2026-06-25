@@ -134,22 +134,35 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
             break;
 
         case csr_addr(Csr::Mcycle):
-        case csr_addr(Csr::Minstret):
         case csr_addr(Csr::Cycle):
-        case csr_addr(Csr::Instret):
             rcsr = static_cast<CSRValue>(cpu_.clint_mmio.mcycle);
+            break;
+        case csr_addr(Csr::Minstret):
+        case csr_addr(Csr::Instret):
+            rcsr = static_cast<CSRValue>(cpu_.e_icount);
             break;
         case csr_addr(Csr::Time):
             rcsr = static_cast<CSRValue>(cpu_.clint_mmio.mtime);
             break;
 
         case csr_addr(Csr::Mcycleh):
-        case csr_addr(Csr::Minstreth):
         case csr_addr(Csr::Cycleh):
-        case csr_addr(Csr::Instreth):
+            if (cpu_.state().regs.xlen == 64) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
             rcsr = static_cast<CSRValue>(cpu_.clint_mmio.mcycle >> kHighWordShift);
             break;
+        case csr_addr(Csr::Minstreth):
+        case csr_addr(Csr::Instreth):
+            if (cpu_.state().regs.xlen == 64) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = static_cast<CSRValue>(cpu_.e_icount >> kHighWordShift);
+            break;
         case csr_addr(Csr::Timeh):
+            if (cpu_.state().regs.xlen == 64) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
             rcsr = static_cast<CSRValue>(cpu_.clint_mmio.mtime >> kHighWordShift);
             break;
 
@@ -201,6 +214,33 @@ auto CsrFile::write(CSRAddress addr,
         case csr_addr(Csr::Time):
         case csr_addr(Csr::Timeh):
         case csr_addr(Csr::Misa):
+            break;
+
+        case csr_addr(Csr::Mcycle):
+            if (cpu_.state().regs.xlen == 32) {
+                cpu_.clint_mmio.mcycle = (cpu_.clint_mmio.mcycle & 0xFFFFFFFF00000000ULL) | static_cast<uint32_t>(wdata);
+            } else {
+                cpu_.clint_mmio.mcycle = wdata;
+            }
+            break;
+        case csr_addr(Csr::Mcycleh):
+            if (cpu_.state().regs.xlen == 64) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            cpu_.clint_mmio.mcycle = (cpu_.clint_mmio.mcycle & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(wdata) << 32);
+            break;
+        case csr_addr(Csr::Minstret):
+            if (cpu_.state().regs.xlen == 32) {
+                cpu_.e_icount = (cpu_.e_icount & 0xFFFFFFFF00000000ULL) | static_cast<uint32_t>(wdata);
+            } else {
+                cpu_.e_icount = wdata;
+            }
+            break;
+        case csr_addr(Csr::Minstreth):
+            if (cpu_.state().regs.xlen == 64) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            cpu_.e_icount = (cpu_.e_icount & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(wdata) << 32);
             break;
 
         case csr_addr(Csr::Fflags):
