@@ -175,7 +175,7 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width) -> std:
 
 auto read_reg_str(const simrv::core::ArchState& st, RegId reg, bool is_fp) -> std::string {
     uint32_t r = std::to_underlying(reg);
-    if (r == 0 && !is_fp) return "0x00000000";
+    if (r == 0 && !is_fp) return std::format("0x{:0{}x}", 0, simrv::xlen::kXLenHexDigits);
     Register val = is_fp ? st.regs.read_fp(reg) : st.regs.read(reg);
     return std::format("0x{:0{}x}", val, simrv::xlen::kXLenHexDigits);
 }
