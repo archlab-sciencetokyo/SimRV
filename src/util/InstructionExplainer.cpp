@@ -599,6 +599,216 @@ auto format_r4_type(std::string_view mnemonic, uint32_t rd_val, uint32_t rs1_val
     return std::format("{} {}, {}, {}, {}", mnemonic, frd_str, frs1_str, frs2_str, frs3_str);
 }
 
+auto get_reg_name(uint32_t idx, bool is_fp) -> std::string {
+    if (is_fp) {
+        if (idx < FP_ABI_NAMES.size()) {
+            return std::format("f{} ({})", idx, FP_ABI_NAMES[idx]);
+        }
+        return std::format("f{}", idx);
+    } else {
+        if (idx == 0) {
+            return "x0 (zero)";
+        }
+        if (idx < ABI_NAMES.size()) {
+            return std::format("x{} ({})", idx, ABI_NAMES[idx]);
+        }
+        return std::format("x{}", idx);
+    }
+}
+
+void explain_pipeline_hazards(OperationId op_id, InstFormat fmt, uint32_t rd_val, uint32_t rs1_val, uint32_t rs2_val, uint32_t rs3_val, Opcode op, bool use_color) {
+    auto c = [use_color](std::string_view ansi_code) -> std::string_view {
+        return use_color ? ansi_code : "";
+    };
+    constexpr std::string_view kItalic = "\033[3m";
+
+    bool writes_rd = false;
+    bool rd_is_fp = false;
+    
+    if (fmt == InstFormat::R || fmt == InstFormat::I || fmt == InstFormat::U || fmt == InstFormat::J || fmt == InstFormat::R4) {
+        writes_rd = true;
+    }
+    
+    if (op_id == ECALL || op_id == EBREAK || op_id == FENCE || op_id == FENCE_I || 
+        op_id == WFI || op_id == SRET || op_id == MRET || op_id == SFENCE_VMA ||
+        op_id == UNKNOWN) {
+        writes_rd = false;
+    }
+    
+    if (writes_rd) {
+        if (op == Opcode::LoadFp) {
+            rd_is_fp = true;
+        } else if (op == Opcode::OpFp || op == Opcode::MAdd || op == Opcode::MSub || op == Opcode::NMSub || op == Opcode::NMAdd) {
+            if (op_id == FEQ_S || op_id == FLT_S || op_id == FLE_S ||
+                op_id == FEQ_D || op_id == FLT_D || op_id == FLE_D ||
+                op_id == FCLASS_S || op_id == FCLASS_D ||
+                (op_id >= FCVT_W_S && op_id <= FCVT_LU_S) ||
+                (op_id >= FCVT_W_D && op_id <= FCVT_LU_D) ||
+                op_id == FMV_X_W || op_id == FMV_X_D) {
+                rd_is_fp = false;
+            } else {
+                rd_is_fp = true;
+            }
+        }
+    }
+
+    bool reads_rs1 = false;
+    bool rs1_is_fp = false;
+    
+    if (fmt == InstFormat::R || fmt == InstFormat::I || fmt == InstFormat::S || fmt == InstFormat::B || fmt == InstFormat::R4) {
+        reads_rs1 = true;
+    }
+    
+    if (op_id == ECALL || op_id == EBREAK || op_id == FENCE || op_id == FENCE_I || 
+        op_id == WFI || op_id == SRET || op_id == MRET ||
+        op_id == CSRRWI || op_id == CSRRSI || op_id == CSRRCI ||
+        op_id == UNKNOWN) {
+        reads_rs1 = false;
+    }
+    
+    if (reads_rs1) {
+        if (op == Opcode::OpFp || op == Opcode::MAdd || op == Opcode::MSub || op == Opcode::NMSub || op == Opcode::NMAdd) {
+            if ((op_id >= FCVT_S_W && op_id <= FCVT_S_LU) ||
+                (op_id >= FCVT_D_W && op_id <= FCVT_D_LU) ||
+                op_id == FMV_W_X || op_id == FMV_D_X) {
+                rs1_is_fp = false;
+            } else {
+                rs1_is_fp = true;
+            }
+        }
+    }
+
+    bool reads_rs2 = false;
+    bool rs2_is_fp = false;
+    
+    if (fmt == InstFormat::R || fmt == InstFormat::S || fmt == InstFormat::B || fmt == InstFormat::R4) {
+        reads_rs2 = true;
+    }
+    
+    if (op_id == UNKNOWN) {
+        reads_rs2 = false;
+    }
+    
+    if (reads_rs2) {
+        if (op == Opcode::StoreFp) {
+            rs2_is_fp = true;
+        } else if (op == Opcode::OpFp || op == Opcode::MAdd || op == Opcode::MSub || op == Opcode::NMSub || op == Opcode::NMAdd) {
+            if (op_id == FSQRT_S || op_id == FSQRT_D ||
+                op_id == FCLASS_S || op_id == FCLASS_D ||
+                (op_id >= FCVT_W_S && op_id <= FCVT_LU_S) ||
+                (op_id >= FCVT_W_D && op_id <= FCVT_LU_D) ||
+                (op_id >= FCVT_S_W && op_id <= FCVT_S_LU) ||
+                (op_id >= FCVT_D_W && op_id <= FCVT_D_LU) ||
+                op_id == FMV_X_W || op_id == FMV_X_D ||
+                op_id == FMV_W_X || op_id == FMV_D_X) {
+                reads_rs2 = false;
+            } else {
+                rs2_is_fp = true;
+            }
+        }
+    }
+
+    bool reads_rs3 = (fmt == InstFormat::R4);
+    bool rs3_is_fp = reads_rs3;
+
+    std::println("{}Pipeline Hazard Analysis:{}", c(kBold), c(kReset));
+
+    bool has_registers = false;
+    if (reads_rs1 || reads_rs2 || reads_rs3) {
+        std::println("  Register Reads (Data Dependencies):");
+        if (reads_rs1) {
+            std::println("    - rs1: {} ({})", get_reg_name(rs1_val, rs1_is_fp), rs1_is_fp ? "FP" : "GPR");
+        }
+        if (reads_rs2) {
+            std::println("    - rs2: {} ({})", get_reg_name(rs2_val, rs2_is_fp), rs2_is_fp ? "FP" : "GPR");
+        }
+        if (reads_rs3) {
+            std::println("    - rs3: {} ({})", get_reg_name(rs3_val, rs3_is_fp), rs3_is_fp ? "FP" : "GPR");
+        }
+        has_registers = true;
+    }
+
+    if (writes_rd) {
+        std::println("  Register Writes (Data Production):");
+        std::println("    - rd : {} ({})", get_reg_name(rd_val, rd_is_fp), rd_is_fp ? "FP" : "GPR");
+        has_registers = true;
+    }
+
+    if (!has_registers) {
+        std::println("    (No register operands accessed by this instruction)");
+    }
+
+    bool has_read_hazard = false;
+    std::string read_hazards_str;
+    
+    if (reads_rs1 && !(rs1_val == 0 && !rs1_is_fp)) {
+        read_hazards_str += std::format("\n       * '{}'", get_reg_name(rs1_val, rs1_is_fp));
+        has_read_hazard = true;
+    }
+    if (reads_rs2 && !(rs2_val == 0 && !rs2_is_fp)) {
+        read_hazards_str += std::format("\n       * '{}'", get_reg_name(rs2_val, rs2_is_fp));
+        has_read_hazard = true;
+    }
+    if (reads_rs3 && !(rs3_val == 0 && !rs3_is_fp)) {
+        read_hazards_str += std::format("\n       * '{}'", get_reg_name(rs3_val, rs3_is_fp));
+        has_read_hazard = true;
+    }
+
+    if (has_read_hazard) {
+        std::println("\n  Read-After-Write (RAW) Data Hazards (Consumer Side):");
+        std::print("    - If a preceding instruction writes to any of:{}", read_hazards_str);
+        std::println("\n      it creates a RAW hazard requiring resolution:");
+        std::println("      * {}Standard 5-stage pipeline without forwarding:{}", c(kBold), c(kReset));
+        std::println("        - Stall for 2 cycles if the producer is 1 cycle ahead.");
+        std::println("        - Stall for 1 cycle if the producer is 2 cycles ahead.");
+        std::println("      * {}Pipeline with operand forwarding:{}", c(kBold), c(kReset));
+        std::println("        - 0 stall cycles for most ALU-to-ALU dependencies (forwarded from EX/MEM or MEM/WB).");
+        std::println("        - 1 stall cycle ('load-use' delay) if the producer is a LOAD instruction immediately preceding this one.");
+    }
+
+    if (writes_rd && !(rd_val == 0 && !rd_is_fp)) {
+        std::println("\n  Read-After-Write (RAW) Data Hazards (Producer Side):");
+        std::println("    - This instruction writes to '{}'. Any subsequent instruction", get_reg_name(rd_val, rd_is_fp));
+        std::println("      reading this register within 1-2 cycles will face a RAW hazard:");
+        std::println("      * {}Standard 5-stage pipeline without forwarding:{}", c(kBold), c(kReset));
+        std::println("        - The subsequent instruction will stall 2 cycles if it immediately follows this one.");
+        std::println("        - The subsequent instruction will stall 1 cycle if it is 2 cycles later.");
+        std::println("      * {}Pipeline with operand forwarding:{}", c(kBold), c(kReset));
+        if (op == Opcode::Load || op == Opcode::LoadFp) {
+            std::println("        - Since this is a LOAD, it produces the data in the MEM stage. An immediately");
+            std::println("          following instruction that uses this data will stall for 1 cycle.");
+        } else {
+            std::println("        - Forwarding path from EX/MEM or MEM/WB will eliminate stalls (0 cycles) for ALU consumers.");
+        }
+    }
+
+    if ((reads_rs1 && rs1_val == 0 && !rs1_is_fp) || (reads_rs2 && rs2_val == 0 && !rs2_is_fp) || (writes_rd && rd_val == 0 && !rd_is_fp)) {
+        std::println("\n  {}Note on register x0 (zero):{}", c(kItalic), c(kReset));
+        std::println("    - The 'x0' GPR is hardwired to zero. Reading it always returns 0, and writing");
+        std::println("      to it has no effect. Thus, accesses to 'x0' never cause pipeline data hazards.");
+    }
+
+    bool is_branch_jump = (op == Opcode::Branch) || (op_id == JALR) || (op_id == JAL);
+    bool is_exception_flush = (op_id == SRET || op_id == MRET || op_id == SFENCE_VMA);
+
+    if (is_branch_jump || is_exception_flush) {
+        std::println("\n  Control Hazards (Branch/Jump Penalties):");
+        if (is_branch_jump) {
+            std::println("    - This instruction alters the control flow (Program Counter).");
+            std::println("    - In a pipelined CPU:");
+            std::println("      * {}Without Branch Prediction:{}", c(kBold), c(kReset));
+            std::println("        - The processor stalls/flushes (typically 1-2 bubble cycles) when a branch is taken.");
+            std::println("      * {}With Branch Prediction:{}", c(kBold), c(kReset));
+            std::println("        - 0 stall cycles if the branch outcome and target are correctly predicted.");
+            std::println("        - 2 to 3 penalty cycles (flushing speculative instructions) if mispredicted.");
+        } else if (is_exception_flush) {
+            std::println("    - This instruction returns from an exception or invalidates TLB page translations.");
+            std::println("    - Resolution requires flushing speculatively fetched instructions from the pipeline");
+            std::println("      to ensure correct architectural state and TLB consistency.");
+        }
+    }
+}
+
 } // namespace
 
 void explain_instruction(uint32_t raw_inst) {
@@ -707,6 +917,9 @@ void explain_instruction(uint32_t raw_inst) {
         std::println("  Assembly Rep     : {}# {}{}", c(kBrightBlack), assembly, c(kReset));
         std::println("\nDescription (Behavior):");
         std::println("  [ISA: {}] {}", get_isa_extension_name(op_id), desc);
+
+        std::println("\n--------------------------------------------------------------------------------");
+        explain_pipeline_hazards(op_id, fmt, rd_val, rs1_val, rs2_val, rs3_val, op, use_color);
 
     } else {
         std::println("  Mnemonic         : {}UNKNOWN / RESERVED{}", c(kBoldFgRed), c(kReset));
