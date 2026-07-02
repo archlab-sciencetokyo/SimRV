@@ -7,6 +7,7 @@
 #include "simrv/core/Logger.hpp"
 #include "simrv/device/Power.hpp"
 #include "simrv/device/Uart.hpp"
+#include "simrv/device/InputDevice.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 
 #include <cstdint>
@@ -41,8 +42,8 @@ void Machine::finalize_cycle_tohost() {
 
     if (dev == 1 && cmd == 1) {
         // HTIF Console Print
-        if (s_tuimode && uart && uart->tui()) {
-            uart->tui()->handle_char_write(static_cast<char>(payload & 0xff));
+        if (s_tuimode && tui) {
+            tui->handle_char_write(static_cast<char>(payload & 0xff));
         } else {
             std::print("{}", static_cast<char>(payload & 0xff));
             fflush(stdout);
@@ -58,8 +59,8 @@ void Machine::finalize_cycle_tohost() {
         const auto old_payload = static_cast<uint16_t>(tohost & 0xffffULL);
         if (old_cmd == 1) { // CMD_PRINT_CHAR
             const char ch = static_cast<char>(old_payload & 0xff);
-            if (s_tuimode && uart && uart->tui()) {
-                uart->tui()->handle_char_write(ch);
+            if (s_tuimode && tui) {
+                tui->handle_char_write(ch);
             } else {
                 std::print("{}", ch);
                 fflush(stdout);
@@ -90,8 +91,8 @@ void Machine::finalize_cycle_tohost() {
                     const Address buf_masked = arg1 & simrv::memory::kDramMask;
                     for (uint64_t i = 0; i < arg2; ++i) {
                         char ch = static_cast<char>(mmem[buf_masked + i]);
-                        if (s_tuimode && uart && uart->tui()) {
-                            uart->tui()->handle_char_write(ch);
+                        if (s_tuimode && tui) {
+                            tui->handle_char_write(ch);
                         } else {
                             std::print("{}", ch);
                         }
@@ -124,8 +125,8 @@ void Machine::finalize_cycle_tohost() {
                     }
                     exit_code = code;
                     is_shutdown_ = true;
-                    if (s_tuimode && uart && uart->tui()) {
-                        uart->tui_pause_loop();
+                    if (s_tuimode && tui) {
+                        tui->pause_loop();
                     }
                     is_running_ = false;
                     tohost = 0;
@@ -144,8 +145,8 @@ void Machine::finalize_cycle_tohost() {
         }
         exit_code = 0;
         is_shutdown_ = true;
-        if (s_tuimode && uart && uart->tui()) {
-            uart->tui_pause_loop();
+        if (s_tuimode && tui) {
+            tui->pause_loop();
         }
         is_running_ = false;
         tohost = 0;
@@ -159,8 +160,8 @@ void Machine::finalize_cycle_tohost() {
         }
         exit_code = code == 0 ? 1 : code;
         is_shutdown_ = true;
-        if (s_tuimode && uart && uart->tui()) {
-            uart->tui_pause_loop();
+        if (s_tuimode && tui) {
+            tui->pause_loop();
         }
         is_running_ = false;
         tohost = 0;

@@ -12,8 +12,8 @@
 
 namespace simrv::device {
 
-VirtioDevice::VirtioDevice(simrv::core::Machine& machine, Word irq)
-    : machine_(machine), irq_(irq) {}
+VirtioDevice::VirtioDevice(simrv::core::Machine& machine, Word irq, Word max_queues)
+    : machine_(machine), irq_(irq), max_queues_(max_queues) {}
 
 auto VirtioDevice::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
     // std::cout << "VirtIO Access: addr=" << std::hex << req.address << "\n";
@@ -59,7 +59,7 @@ auto VirtioDevice::mmio_read(Address offset) const -> Word {
         case virtio::MmioOffset::ConfigGeneration:
             return get_config_generation();
         case virtio::MmioOffset::QueueReady:
-            return Queue[QueueSel].Ready;
+            return QueueSel < max_queues_ ? Queue[QueueSel].Ready : 0;
         case virtio::MmioOffset::InterruptStatus:
             return InterruptStatus;
         case virtio::MmioOffset::Status:
@@ -89,14 +89,20 @@ void VirtioDevice::mmio_write(Address offset, Word wdata) {
             QueueSel = wdata;
             break;
         case virtio::MmioOffset::QueueNum:
-            QueueNum = wdata;
+            if (QueueSel < max_queues_) {
+                QueueNum = wdata;
+            }
             break;
         case virtio::MmioOffset::QueueReady:
-            Queue[QueueSel].Ready = wdata;
+            if (QueueSel < max_queues_) {
+                Queue[QueueSel].Ready = wdata;
+            }
             break;
         case virtio::MmioOffset::QueueNotify:
-            Queue[QueueSel].Notify = wdata;
-            process_queue(wdata);
+            if (QueueSel < max_queues_ && wdata < max_queues_) {
+                Queue[QueueSel].Notify = wdata;
+                process_queue(wdata);
+            }
             break;
         case virtio::MmioOffset::InterruptACK:
             InterruptStatus &= ~wdata;
@@ -108,22 +114,34 @@ void VirtioDevice::mmio_write(Address offset, Word wdata) {
             Status = wdata;
             break;
         case virtio::MmioOffset::QueueDescLow:
-            Queue[QueueSel].DescLow = wdata;
+            if (QueueSel < max_queues_) {
+                Queue[QueueSel].DescLow = wdata;
+            }
             break;
         case virtio::MmioOffset::QueueDescHigh:
-            Queue[QueueSel].DescHigh = wdata;
+            if (QueueSel < max_queues_) {
+                Queue[QueueSel].DescHigh = wdata;
+            }
             break;
         case virtio::MmioOffset::QueueAvailLow:
-            Queue[QueueSel].AvailLow = wdata;
+            if (QueueSel < max_queues_) {
+                Queue[QueueSel].AvailLow = wdata;
+            }
             break;
         case virtio::MmioOffset::QueueAvailHigh:
-            Queue[QueueSel].AvailHigh = wdata;
+            if (QueueSel < max_queues_) {
+                Queue[QueueSel].AvailHigh = wdata;
+            }
             break;
         case virtio::MmioOffset::QueueUsedLow:
-            Queue[QueueSel].UsedLow = wdata;
+            if (QueueSel < max_queues_) {
+                Queue[QueueSel].UsedLow = wdata;
+            }
             break;
         case virtio::MmioOffset::QueueUsedHigh:
-            Queue[QueueSel].UsedHigh = wdata;
+            if (QueueSel < max_queues_) {
+                Queue[QueueSel].UsedHigh = wdata;
+            }
             break;
         default:
             break;

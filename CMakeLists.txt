@@ -97,6 +97,7 @@ add_executable(SimRV
   src/pipeline/Decoder.cpp
   src/pipeline/PipelineSim.cpp
   src/execute/ExecuteUnitInt.cpp
+  src/execute/ExecuteUnitB.cpp
   src/execute/ExecuteUnitFloat.cpp
   src/execute/ExecuteUnit.cpp
   src/pipeline/PipelineStages.cpp
@@ -117,13 +118,22 @@ add_executable(SimRV
   src/tui/Tui.cpp
   src/tui/TuiTheme.cpp
   src/tui/RegisterPane.cpp
+  src/tui/RegisterPaneRegs.cpp
+  src/tui/RegisterPanePipeline.cpp
+  src/tui/RegisterPaneStats.cpp
+  src/tui/RegisterPaneExplain.cpp
   src/tui/ConsolePane.cpp
   src/tui/StatusBar.cpp
   src/debug/GdbStub.cpp
   src/debug/SpikeLockstep.cpp
   src/debug/SymbolTable.cpp
   src/util/InstructionExplainer.cpp
-)
+  src/device/Framebuffer.cpp
+  src/util/SdlDisplay.cpp
+  src/device/Audio.cpp
+  src/util/SdlAudio.cpp
+  src/device/InputDevice.cpp
+ )
 
 target_compile_features(SimRV PRIVATE cxx_std_23)
 
@@ -138,6 +148,28 @@ target_include_directories(SimRV PRIVATE
   include
   ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
+
+find_package(SDL3 QUIET)
+if(NOT SDL3_FOUND)
+  find_package(PkgConfig QUIET)
+  if(PKG_CONFIG_FOUND)
+    pkg_check_modules(SDL3 sdl3)
+  endif()
+endif()
+
+if(SDL3_FOUND)
+  message(STATUS "SDL3 found: compiling with SDL3 graphics support")
+  target_compile_definitions(SimRV PRIVATE HAVE_SDL3)
+  if(TARGET SDL3::SDL3)
+    target_link_libraries(SimRV PRIVATE SDL3::SDL3)
+  else()
+    target_include_directories(SimRV PRIVATE ${SDL3_INCLUDE_DIRS})
+    target_link_libraries(SimRV PRIVATE ${SDL3_LIBRARIES})
+  endif()
+else()
+  message(STATUS "SDL3 not found: compiling without SDL3 graphics support")
+endif()
+
 
 target_compile_options(SimRV PRIVATE
   -Wall
@@ -280,7 +312,7 @@ if(EXISTS "${ISA_DIR}" AND IS_DIRECTORY "${ISA_DIR}")
     endif()
     get_filename_component(ext "${f}" LAST_EXT)
     get_filename_component(name "${f}" NAME)
-    if(ext STREQUAL "" AND name MATCHES "^rv${SIMRV_XLEN}(ui|uc|um|ua|uf|ud)-[pv]-")
+    if(ext STREQUAL "" AND name MATCHES "^rv${SIMRV_XLEN}(ui|uc|um|ua|uf|ud|uv|uzba|uzbb|uzbc|uzbs)-[pv]-")
       list(APPEND ALL_ISA_TESTS "${name}")
     endif()
   endforeach()

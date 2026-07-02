@@ -15,6 +15,8 @@ auto Rtc::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp
         const Address offset = req.address - kBaseAddress;
         if (offset == kRtcOffset) {
             resp.data = static_cast<Word>(machine_.cpu.clint_mmio.mtime);
+        } else if (offset == kRtcOffset + 4) {
+            resp.data = static_cast<Word>(machine_.cpu.clint_mmio.mtime >> 32);
         } else {
             resp.data = 0;
         }

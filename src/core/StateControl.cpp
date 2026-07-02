@@ -449,10 +449,8 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
     cpu.pipeline_context.pending_exception = std::nullopt;
     cpu.pipeline_context.pending_tval = 0;
 
-    if (cpu.machine_ && cpu.machine_->s_tuimode && cpu.machine_->uart && cause == static_cast<TrapCause>(ExceptionCode::Breakpoint)) {
-        if (cpu.machine_->uart->tui()) {
-            cpu.machine_->uart->tui()->set_status_override("\033[1;38;5;234;48;5;210m TRAPPED \033[0m");
-        }
+    if (cpu.machine_ && cpu.machine_->s_tuimode && cpu.machine_->tui && cause == static_cast<TrapCause>(ExceptionCode::Breakpoint)) {
+        cpu.machine_->tui->set_status_override("\033[1;38;5;234;48;5;210m TRAPPED \033[0m");
         if constexpr (simrv::xlen::kIsXLen64) {
             simrv::log::warn(
                 "Breakpoint: cause=0x{:016x} pc=0x{:016x} tval=0x{:016x}",
@@ -466,8 +464,8 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
                 static_cast<uint64_t>(trap_pc),
                 static_cast<uint64_t>(tval));
         }
-        cpu.machine_->uart->tui_update();
-        cpu.machine_->uart->tui_pause_loop();
+        cpu.machine_->tui->update();
+        cpu.machine_->tui->pause_loop();
     }
 }
 

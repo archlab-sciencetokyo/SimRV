@@ -23,12 +23,11 @@ struct FpExecResult {
  */
 class ExecuteUnit {
    public:
-    /// Execute integer ALU or M-extension operation.
-    static auto aluInt(Register in1, Register in2, isa::Funct3 funct3, Instruction funct7)
+    /// Execute integer ALU or M-extension or B-extension operation.
+    static auto aluInt(Register in1, Register in2, isa::OperationId op_id)
         -> Register;
     /// Execute RV64 W-class integer operations with 32-bit result semantics.
-    static auto aluIntW(isa::Opcode opcode, Register in1, Register in2, isa::Funct3 funct3,
-                        Instruction funct7) -> Register;
+    static auto aluIntW(Register in1, Register in2, isa::OperationId op_id) -> Register;
     /// Evaluate branch condition and return taken flag.
     static auto branchTaken(Register in1, Register in2, isa::Funct3 funct3) -> bool;
     /// Execute AMO arithmetic/logic result function.
@@ -42,6 +41,10 @@ class ExecuteUnit {
     /// Execute non-fused floating-point operations and conversions.
     static auto opFp(Word funct7, isa::Funct3 funct3, Word rs1, Word rs2, Register rrs1,
                      const FloatingRegister* freg, CSRValue& fcsr) -> FpExecResult;
+
+   private:
+    static auto aluIntB(Register in1, Register in2, isa::OperationId op_id) -> Register;
+    static auto aluIntBW(Register in1, Register in2, isa::OperationId op_id) -> Register;
 };
 
 }  // namespace simrv::execute

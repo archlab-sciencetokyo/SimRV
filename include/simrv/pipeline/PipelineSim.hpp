@@ -35,6 +35,14 @@ struct PipelineReg {
     bool control_resolved = false;
 };
 
+enum class BranchPredictorType : uint8_t {
+    StaticNotTaken,
+    StaticTaken,
+    OneBitBimodal,
+    TwoBitBimodal,
+    Gshare
+};
+
 struct CpuConfig {
     uint32_t icache_miss_penalty = 10;
     uint32_t dcache_miss_penalty = 15;
@@ -42,6 +50,12 @@ struct CpuConfig {
     uint32_t mul_latency = 3;
     uint32_t div_latency = 20;
     uint32_t branch_mispredict_penalty = 2;
+    bool enable_forwarding = true;
+    BranchPredictorType bp_type = BranchPredictorType::TwoBitBimodal;
+    uint32_t btb_entries = 128;
+    uint32_t global_history_bits = 8;
+    bool enable_ex_forwarding = true;
+    bool enable_mem_forwarding = true;
 };
 
 class PipelineSim {
@@ -80,7 +94,7 @@ public:
     PipelineReg w_reg_; // WB stage
 
     std::array<uint8_t, 256> branch_history_table_{}; // 2-bit dynamic bimodal predictor (0-3)
-    std::array<BtbEntry, 128> btb_{};                 // Branch Target Buffer
+    std::vector<BtbEntry> btb_;                       // Branch Target Buffer
 
     uint32_t control_bubble_remaining_ = 0;
     uint32_t tlb_stall_remaining_ = 0;
@@ -113,6 +127,7 @@ private:
     uint64_t structural_stalls_ = 0;
     uint64_t data_hazard_stalls_ = 0;
     uint64_t control_hazard_bubbles_ = 0;
+    uint32_t gshare_history_ = 0;
 };
 
 } // namespace simrv::pipeline

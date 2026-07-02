@@ -220,8 +220,56 @@ auto get_description(OperationId op_id) -> std::pair<std::string_view, std::stri
         arr[AMOMAXU_D] = {"AMOMAXU.D", "Atomic Max Doubleword (Unsigned). Atomically loads a doubleword from address rs1 into rd, calculates the unsigned max with rs2, and stores the result back to address rs1."};
         arr[FLW] = {"FLW", "Floating-Point Load Word. Loads a 32-bit floating-point value from memory address rs1 + immediate into floating-point register rd."};
         arr[FSW] = {"FSW", "Floating-Point Store Word. Stores a 32-bit floating-point value from floating-point register rs2 to memory address rs1 + immediate."};
-        arr[FLD] = {"FLD", "Floating-Point Load Double. Loads a 64-bit floating-point value from memory address rs1 + immediate into floating-point register rd."};
         arr[FSD] = {"FSD", "Floating-Point Store Double. Stores a 64-bit floating-point value from floating-point register rs2 to memory address rs1 + immediate."};
+
+        // B-Extension instructions (Zba, Zbb, Zbc, Zbs)
+        arr[SH1ADD] = {"SH1ADD", "Shift Left by 1 and Add. Computes rs2 + (rs1 << 1)."};
+        arr[SH2ADD] = {"SH2ADD", "Shift Left by 2 and Add. Computes rs2 + (rs1 << 2)."};
+        arr[SH3ADD] = {"SH3ADD", "Shift Left by 3 and Add. Computes rs2 + (rs1 << 3)."};
+        arr[ANDN] = {"ANDN", "AND with inverted operand. Computes rs1 & ~rs2."};
+        arr[ORN] = {"ORN", "OR with inverted operand. Computes rs1 | ~rs2."};
+        arr[XNOR] = {"XNOR", "Exclusive NOR. Computes ~(rs1 ^ rs2)."};
+        arr[CLZ] = {"CLZ", "Count Leading Zeros. Returns the number of leading zero bits starting from the MSB."};
+        arr[CTZ] = {"CTZ", "Count Trailing Zeros. Returns the number of trailing zero bits starting from the LSB."};
+        arr[CPOP] = {"CPOP", "Count Population. Returns the number of set (1) bits."};
+        arr[MIN] = {"MIN", "Minimum. Returns the smaller of two signed integers."};
+        arr[MAX] = {"MAX", "Maximum. Returns the larger of two signed integers."};
+        arr[MINU] = {"MINU", "Minimum Unsigned. Returns the smaller of two unsigned integers."};
+        arr[MAXU] = {"MAXU", "Maximum Unsigned. Returns the larger of two unsigned integers."};
+        arr[SEXT_B] = {"SEXT_B", "Sign-extend Byte. Sign-extends the lower 8 bits of rs1 to XLEN."};
+        arr[SEXT_H] = {"SEXT_H", "Sign-extend Halfword. Sign-extends the lower 16 bits of rs1 to XLEN."};
+        arr[ZEXT_H] = {"ZEXT_H", "Zero-extend Halfword. Zero-extends the lower 16 bits of rs1 to XLEN."};
+        arr[ROL] = {"ROL", "Rotate Left. Rotates rs1 left by rs2 shift amount."};
+        arr[ROR] = {"ROR", "Rotate Right. Rotates rs1 right by rs2 shift amount."};
+        arr[RORI] = {"RORI", "Rotate Right Immediate. Rotates rs1 right by immediate shift amount."};
+        arr[CLMUL] = {"CLMUL", "Polynomial Carry-less Multiply (low). Returns lower half of carry-less product."};
+        arr[CLMULH] = {"CLMULH", "Polynomial Carry-less Multiply (high). Returns upper half of carry-less product."};
+        arr[CLMULR] = {"CLMULR", "Polynomial Carry-less Multiply (round). Returns middle bits of carry-less product."};
+        arr[BSET] = {"BSET", "Single-Bit Set. Returns rs1 with bit rs2 set to 1."};
+        arr[BSETI] = {"BSETI", "Single-Bit Set Immediate. Returns rs1 with bit immediate set to 1."};
+        arr[BCLR] = {"BCLR", "Single-Bit Clear. Returns rs1 with bit rs2 cleared to 0."};
+        arr[BCLRI] = {"BCLRI", "Single-Bit Clear Immediate. Returns rs1 with bit immediate cleared to 0."};
+        arr[BINV] = {"BINV", "Single-Bit Invert. Returns rs1 with bit rs2 inverted."};
+        arr[BINVI] = {"BINVI", "Single-Bit Invert Immediate. Returns rs1 with bit immediate inverted."};
+        arr[BEXT] = {"BEXT", "Single-Bit Extract. Extracts bit rs2 from rs1 and returns it in bit 0."};
+        arr[BEXTI] = {"BEXTI", "Single-Bit Extract Immediate. Extracts bit immediate from rs1 and returns it in bit 0."};
+        arr[ORC_B] = {"ORC_B", "Bit-wise OR-combine. Sets each byte to 0xFF if it contains any set bits, else 0x00."};
+        arr[REV8] = {"REV8", "Reverse Bytes. Reverses byte order of the entire register (endianness swap)."};
+        arr[PACK] = {"PACK", "Pack. Combines lower halfwords of rs1 and rs2 into rd."};
+
+        arr[ADD_UW] = {"ADD_UW", "Add Unsigned Word. Zero-extends lower 32 bits of rs1 and adds rs2."};
+        arr[SLLI_UW] = {"SLLI_UW", "Shift Left Logical Unsigned Word. Zero-extends rs1 and shifts left by immediate."};
+        arr[SH1ADD_UW] = {"SH1ADD_UW", "Shift Left by 1 and Add Unsigned Word. Zero-extends rs1, shifts left by 1, and adds rs2."};
+        arr[SH2ADD_UW] = {"SH2ADD_UW", "Shift Left by 2 and Add Unsigned Word. Zero-extends rs1, shifts left by 2, and adds rs2."};
+        arr[SH3ADD_UW] = {"SH3ADD_UW", "Shift Left by 3 and Add Unsigned Word. Zero-extends rs1, shifts left by 3, and adds rs2."};
+
+        arr[CLZW] = {"CLZW", "Count Leading Zeros Word. Returns number of leading zeros in the lower 32 bits."};
+        arr[CTZW] = {"CTZW", "Count Trailing Zeros Word. Returns number of trailing zeros in the lower 32 bits."};
+        arr[CPOPW] = {"CPOPW", "Count Population Word. Returns number of set bits in the lower 32 bits."};
+        arr[ROLW] = {"ROLW", "Rotate Left Word. Rotates lower 32 bits of rs1 left by rs2."};
+        arr[RORW] = {"RORW", "Rotate Right Word. Rotates lower 32 bits of rs1 right by rs2."};
+        arr[RORIW] = {"RORIW", "Rotate Right Word Immediate. Rotates lower 32 bits of rs1 right by immediate."};
+        arr[PACKW] = {"PACKW", "Pack Word. Packs the lower halfwords of rs1 and rs2 into lower 32 bits of rd (sign-extended)."};
 
         return arr;
     }();
@@ -961,6 +1009,21 @@ auto get_isa_extension_name(OperationId op_id) -> std::string_view {
     }
     if (op_id >= FLD && op_id <= FCVT_D_LU) {
         return "RV32D";
+    }
+    if (op_id >= SH1ADD && op_id <= PACKW) {
+        if (op_id == SH1ADD || op_id == SH2ADD || op_id == SH3ADD ||
+            op_id == ADD_UW || op_id == SLLI_UW ||
+            op_id == SH1ADD_UW || op_id == SH2ADD_UW || op_id == SH3ADD_UW) {
+            return "Zba";
+        }
+        if (op_id == CLMUL || op_id == CLMULH || op_id == CLMULR) {
+            return "Zbc";
+        }
+        if (op_id == BSET || op_id == BSETI || op_id == BCLR || op_id == BCLRI ||
+            op_id == BINV || op_id == BINVI || op_id == BEXT || op_id == BEXTI) {
+            return "Zbs";
+        }
+        return "Zbb";
     }
     return "Unknown";
 }

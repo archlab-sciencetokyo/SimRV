@@ -28,8 +28,11 @@ auto is_tohost_addr(const Machine& machine, Address addr) -> bool {
 CPU::CPU() : plic_mmio(*this), clint_mmio(*this), csr_file(*this), sbi(*this) {
     state_.regs.fill(0);
     state_.regs.fill_fp(0);
+    state_.regs.fill_vector(VectorRegister{});
+    // Set mstatus.VS to Clean (2 << 9)
+    state_.mstatus = static_cast<CSRValue>(2) << 9;
     if constexpr (simrv::xlen::kIsXLen64) {
-        state_.mstatus = (static_cast<CSRValue>(2) << 34) | (static_cast<CSRValue>(2) << 32);
+        state_.mstatus |= (static_cast<CSRValue>(2) << 34) | (static_cast<CSRValue>(2) << 32);
     }
     state_.update_xlen();
 }
@@ -205,9 +208,9 @@ void CPU::run_cycle(Machine& machine) {
         }
     }
 
-    if (machine.s_tuimode && machine.uart && machine.uart->tui() &&
-        (machine.uart->tui()->get_right_panel_mode() == simrv::tui::TuiRightPanelMode::LiveTrace ||
-         machine.uart->tui()->is_trace_enabled())) {
+    if (machine.s_tuimode && machine.tui &&
+        (machine.tui->get_right_panel_mode() == simrv::tui::TuiRightPanelMode::LiveTrace ||
+         machine.tui->is_trace_enabled())) {
         const auto op_id = pipeline_context.op_id;
         const auto opcode = pipeline_context.opcode;
         const auto rd = pipeline_context.rd;
@@ -240,7 +243,7 @@ void CPU::run_cycle(Machine& machine) {
             rs2_val = state_.regs.read(rs2);
         }
 
-        machine.uart->tui()->record_instruction(
+        machine.tui->record_instruction(
             pipeline_context.cpc,
             opcode,
             op_id,
@@ -561,7 +564,7 @@ void CPU::execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) {
 }
 
 void CPU::execute_cached_op(CachedOp& op, Register rrs1, Register rrs2) {
-    Register const wb_data = execute::ExecuteUnit::aluInt(rrs1, rrs2, op.funct3, op.funct7);
+    Register const wb_data = execute::ExecuteUnit::aluInt(rrs1, rrs2, op.op_id);
     if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, wb_data);
     }
@@ -572,8 +575,7 @@ void CPU::execute_cached_op(CachedOp& op, Register rrs1, Register rrs2) {
 }
 
 void CPU::execute_cached_op_imm(CachedOp& op, Register rrs1) {
-    Word const funct7 = op.funct7 & ((op.funct3 == Funct3::Add) ? 0 : 0x20);
-    Register const wb_data = execute::ExecuteUnit::aluInt(rrs1, op.imm, op.funct3, funct7);
+    Register const wb_data = execute::ExecuteUnit::aluInt(rrs1, op.imm, op.op_id);
     if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, wb_data);
     }
@@ -584,9 +586,7 @@ void CPU::execute_cached_op_imm(CachedOp& op, Register rrs1) {
 }
 
 void CPU::execute_cached_op_imm32(CachedOp& op, Register rrs1) {
-    Word const funct7 = op.funct7 & ((enum_mask(op.funct3) == 0x5u) ? 0x20 : 0);
-    Register const wb_data = execute::ExecuteUnit::aluIntW(Opcode::OpImm32, rrs1, op.imm,
-                                                         op.funct3, funct7);
+    Register const wb_data = execute::ExecuteUnit::aluIntW(rrs1, op.imm, op.op_id);
     if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, wb_data);
     }
@@ -597,12 +597,7 @@ void CPU::execute_cached_op_imm32(CachedOp& op, Register rrs1) {
 }
 
 void CPU::execute_cached_op32(CachedOp& op, Register rrs1, Register rrs2) {
-    Word const funct7 = op.funct7 & (((enum_mask(op.funct3) == 0x0u) ||
-                                      (enum_mask(op.funct3) == 0x5u))
-                                         ? 0x21
-                                         : 0x01);
-    Register const wb_data = execute::ExecuteUnit::aluIntW(Opcode::Op32, rrs1, rrs2,
-                                                         op.funct3, funct7);
+    Register const wb_data = execute::ExecuteUnit::aluIntW(rrs1, rrs2, op.op_id);
     if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, wb_data);
     }

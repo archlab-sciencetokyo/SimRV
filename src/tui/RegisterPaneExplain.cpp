@@ -1,0 +1,449 @@
+#include "simrv/tui/RegisterPane.hpp"
+#include "simrv/tui/TuiTheme.hpp"
+#include "simrv/util/FormatUtil.hpp"
+#include "simrv/util/InstructionExplainer.hpp"
+#include "simrv/Define.hpp"
+#include "simrv/core/Cpu.hpp"
+#include "simrv/core/Machine.hpp"
+#include "simrv/xlen/Helpers.hpp"
+#include "simrv/xlen/Types.hpp"
+#include "simrv/pipeline/Decoder.hpp"
+#include <format>
+#include <string>
+#include <vector>
+#include <array>
+#include <algorithm>
+
+namespace simrv::tui {
+
+using simrv::isa::Opcode;
+using simrv::isa::OperationId;
+using enum simrv::isa::OperationId;
+using simrv::isa::InstFormat;
+
+namespace {
+
+static constexpr std::array<const char*, 32> kRegNames = {
+    "zero", "ra", "sp", "gp", "tp",  "t0",  "t1", "t2", "s0/fp", "s1", "a0",
+    "a1",   "a2", "a3", "a4", "a5",  "a6",  "a7", "s2", "s3",    "s4", "s5",
+    "s6",   "s7", "s8", "s9", "s10", "s11", "t3", "t4", "t5",    "t6"};
+
+static constexpr std::array<const char*, 32> kFpRegNames = {
+    "ft0", "ft1", "ft2", "ft3", "ft4",  "ft5",  "ft6", "ft7", "fs0",  "fs1", "fa0",
+    "fa1", "fa2", "fa3", "fa4", "fa5",  "fa6",  "fa7", "fs2", "fs3",  "fs4", "fs5",
+    "fs6", "fs7", "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11"};
+
+auto get_reg_name(RegId reg, bool is_fp) -> std::string {
+    uint32_t r = std::to_underlying(reg);
+    if (r >= 32) return std::format("r{}", r);
+    return is_fp ? kFpRegNames.at(r) : kRegNames.at(r);
+}
+
+auto wrap_text(const std::string& text, int max_len) -> std::vector<std::string> {
+    std::vector<std::string> lines;
+    std::string current_line;
+    std::string word;
+    for (char c : text) {
+        if (c == ' ') {
+            if (!word.empty()) {
+                if (current_line.length() + word.length() + 1 > static_cast<std::size_t>(max_len)) {
+                    lines.push_back(current_line);
+                    current_line = word;
+                } else {
+                    if (!current_line.empty()) {
+                        current_line += " ";
+                    }
+                    current_line += word;
+                }
+                word.clear();
+            }
+        } else {
+            word += c;
+        }
+    }
+    if (!word.empty()) {
+        if (current_line.length() + word.length() + 1 > static_cast<std::size_t>(max_len)) {
+            lines.push_back(current_line);
+            current_line = word;
+        } else {
+            if (!current_line.empty()) {
+                current_line += " ";
+            }
+            current_line += word;
+        }
+    }
+    if (!current_line.empty()) {
+        lines.push_back(current_line);
+    }
+    return lines;
+}
+
+auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width) -> std::vector<std::string> {
+    std::vector<std::string> rows;
+    if (fmt == InstFormat::R) {
+        rows.push_back(format_to_width("   31     25 24   20 19   15 14 12 11    7 6       0", width));
+        rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
+        rows.push_back(format_to_width("  | funct7  |  rs2  |  rs1  |  f3 |  rd   | opcode  |", width));
+        rows.push_back(format_to_width(std::format("  | {:07b} | {:05b} | {:05b} | {:03b} | {:05b} | {:07b} |",
+            (ir_org >> 25) & 0x7F, (ir_org >> 20) & 0x1F, (ir_org >> 15) & 0x1F,
+            (ir_org >> 12) & 0x07, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
+        rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
+    } else if (fmt == InstFormat::I) {
+        rows.push_back(format_to_width("   31          20 19   15 14 12 11    7 6       0", width));
+        rows.push_back(format_to_width("  +--------------+-------+-----+-------+---------+", width));
+        rows.push_back(format_to_width("  |  immediate   |  rs1  |  f3 |  rd   | opcode  |", width));
+        rows.push_back(format_to_width(std::format("  | {:012b} | {:05b} | {:03b} | {:05b} | {:07b} |",
+            (ir_org >> 20) & 0xFFF, (ir_org >> 15) & 0x1F, (ir_org >> 12) & 0x07,
+            (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
+        rows.push_back(format_to_width("  +--------------+-------+-----+-------+---------+", width));
+    } else if (fmt == InstFormat::S) {
+        rows.push_back(format_to_width("   31     25 24   20 19   15 14 12 11    7 6       0", width));
+        rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
+        rows.push_back(format_to_width("  | imm11:5 |  rs2  |  rs1  |  f3 | imm4:0| opcode  |", width));
+        rows.push_back(format_to_width(std::format("  | {:07b} | {:05b} | {:05b} | {:03b} | {:05b} | {:07b} |",
+            (ir_org >> 25) & 0x7F, (ir_org >> 20) & 0x1F, (ir_org >> 15) & 0x1F,
+            (ir_org >> 12) & 0x07, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
+        rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
+    } else if (fmt == InstFormat::B) {
+        rows.push_back(format_to_width("   31     25 24   20 19   15 14 12 11    7 6       0", width));
+        rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
+        rows.push_back(format_to_width("  | imm12:5 |  rs2  |  rs1  |  f3 |imm11:1| opcode  |", width));
+        rows.push_back(format_to_width(std::format("  | {:07b} | {:05b} | {:05b} | {:03b} | {:05b} | {:07b} |",
+            (ir_org >> 25) & 0x7F, (ir_org >> 20) & 0x1F, (ir_org >> 15) & 0x1F,
+            (ir_org >> 12) & 0x07, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
+        rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
+    } else if (fmt == InstFormat::U || fmt == InstFormat::J) {
+        rows.push_back(format_to_width("   31                      12 11    7 6       0", width));
+        rows.push_back(format_to_width("  +--------------------------+-------+---------+", width));
+        rows.push_back(format_to_width("  |        immediate         |  rd   | opcode  |", width));
+        rows.push_back(format_to_width(std::format("  |   {:020b}   | {:05b} | {:07b} |",
+            (ir_org >> 12) & 0xFFFFF, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
+        rows.push_back(format_to_width("  +--------------------------+-------+---------+", width));
+    } else if (fmt == InstFormat::R4) {
+        rows.push_back(format_to_width("   31   27 2625      24   20 19   15 14 12 11    7 6       0", width));
+        rows.push_back(format_to_width("  +-------+----+----+-------+-------+-----+-------+---------+", width));
+        rows.push_back(format_to_width("  |  rs3  |fmt | .. |  rs2  |  rs1  |  f3 |  rd   | opcode  |", width));
+        rows.push_back(format_to_width(std::format("  | {:05b} | {:02b} | 00 | {:05b} | {:05b} | {:03b} | {:05b} | {:07b} |",
+            (ir_org >> 27) & 0x1F, (ir_org >> 25) & 0x03, (ir_org >> 20) & 0x1F, (ir_org >> 15) & 0x1F,
+            (ir_org >> 12) & 0x07, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
+        rows.push_back(format_to_width("  +-------+----+----+-------+-------+-----+-------+---------+", width));
+    } else {
+        rows.push_back(format_to_width("  (Unknown instruction format layout)", width));
+    }
+    return rows;
+}
+
+auto read_reg_str(const simrv::core::ArchState& st, RegId reg, bool is_fp) -> std::string {
+    uint32_t r = std::to_underlying(reg);
+    if (r == 0 && !is_fp) return std::format("0x{:0{}x}", 0, simrv::xlen::kXLenHexDigits);
+    Register val = is_fp ? st.regs.read_fp(reg) : st.regs.read(reg);
+    return std::format("0x{:0{}x}", val, simrv::xlen::kXLenHexDigits);
+}
+
+auto has_rd(InstFormat fmt) -> bool {
+    return fmt == InstFormat::R || fmt == InstFormat::I || fmt == InstFormat::U || fmt == InstFormat::J || fmt == InstFormat::R4;
+}
+
+auto has_rs1(InstFormat fmt) -> bool {
+    return fmt == InstFormat::R || fmt == InstFormat::I || fmt == InstFormat::S || fmt == InstFormat::B || fmt == InstFormat::R4;
+}
+
+auto has_rs2(InstFormat fmt) -> bool {
+    return fmt == InstFormat::R || fmt == InstFormat::S || fmt == InstFormat::B || fmt == InstFormat::R4;
+}
+
+auto has_funct3(InstFormat fmt) -> bool {
+    return fmt == InstFormat::R || fmt == InstFormat::I || fmt == InstFormat::S || fmt == InstFormat::B || fmt == InstFormat::R4;
+}
+
+auto has_funct7(InstFormat fmt) -> bool {
+    return fmt == InstFormat::R || fmt == InstFormat::R4;
+}
+
+auto has_imm(InstFormat fmt) -> bool {
+    return fmt == InstFormat::I || fmt == InstFormat::S || fmt == InstFormat::B || fmt == InstFormat::U || fmt == InstFormat::J;
+}
+
+auto has_target(InstFormat fmt) -> bool {
+    return fmt == InstFormat::B || fmt == InstFormat::J;
+}
+
+auto is_unary_float_op(uint8_t op_id) -> bool {
+    static constexpr std::array<bool, 256> unary_float_lut = []() -> std::array<bool, 256> {
+        std::array<bool, 256> lut{};
+        lut.fill(false);
+        lut[FSQRT_S] = true;
+        lut[FSQRT_D] = true;
+        lut[FCLASS_S] = true;
+        lut[FCLASS_D] = true;
+        lut[FMV_X_W] = true;
+        lut[FMV_X_D] = true;
+        lut[FMV_W_X] = true;
+        lut[FMV_D_X] = true;
+        for (int i = FCVT_W_S; i <= FCVT_LU_S; ++i) lut[i] = true;
+        for (int i = FCVT_W_D; i <= FCVT_LU_D; ++i) lut[i] = true;
+        for (int i = FCVT_S_W; i <= FCVT_S_LU; ++i) lut[i] = true;
+        for (int i = FCVT_D_W; i <= FCVT_D_LU; ++i) lut[i] = true;
+        return lut;
+    }();
+    return unary_float_lut[op_id];
+}
+
+auto is_shift_imm_op(uint8_t op_id) -> bool {
+    return op_id == SLLI || op_id == SRLI || op_id == SRAI ||
+           op_id == SLLIW || op_id == SRLIW || op_id == SRAIW;
+}
+
+auto is_csr_imm_op(uint8_t op_id) -> bool {
+    return op_id == CSRRWI || op_id == CSRRSI || op_id == CSRRCI;
+}
+
+auto format_assembly_r(
+    const simrv::pipeline::PipelineContext& ctx,
+    std::string_view mnemonic,
+    const std::string& rd_name,
+    const std::string& rs1_name,
+    const std::string& rs2_name
+) -> std::string {
+    if (ctx.op_id == SFENCE_VMA) {
+        return std::format("sfence.vma {}, {}", rs1_name, rs2_name);
+    }
+    if (ctx.op_id >= LR_W && ctx.op_id <= SC_W) {
+        if (ctx.op_id == LR_W) {
+            return std::format("lr.w {}, ({})", rd_name, rs1_name);
+        }
+        return std::format("sc.w {}, {}, ({})", rd_name, rs2_name, rs1_name);
+    }
+    if (ctx.op_id >= AMOSWAP_W && ctx.op_id <= AMOMAXU_W) {
+        return std::format("{}.aqrl {}, {}, ({})", mnemonic, rd_name, rs2_name, rs1_name);
+    }
+    if (is_unary_float_op(ctx.op_id)) {
+        return std::format("{} {}, {}", mnemonic, rd_name, rs1_name);
+    }
+    return std::format("{} {}, {}, {}", mnemonic, rd_name, rs1_name, rs2_name);
+}
+
+auto format_assembly_i(
+    const simrv::pipeline::PipelineContext& ctx,
+    std::string_view mnemonic,
+    const std::string& rd_name,
+    const std::string& rs1_name
+) -> std::string {
+    bool const is_load = (ctx.opcode == Opcode::Load) || (ctx.opcode == Opcode::LoadFp);
+    bool const is_csr = (ctx.op_id >= CSRRW && ctx.op_id <= CSRRCI);
+    if (is_load) {
+        return std::format("{} {}, {}({})", mnemonic, rd_name, ctx.imm, rs1_name);
+    }
+    if (ctx.op_id == JALR) {
+        return std::format("jalr {}, {}({})", rd_name, ctx.imm, rs1_name);
+    }
+    if (is_csr) {
+        std::string csr_str = simrv::util::csr_name(ctx.imm & 0xFFF);
+        if (is_csr_imm_op(ctx.op_id)) {
+            return std::format("{} {}, {}, {}", mnemonic, rd_name, csr_str, std::to_underlying(ctx.rs1));
+        }
+        return std::format("{} {}, {}, {}", mnemonic, rd_name, csr_str, rs1_name);
+    }
+    if (ctx.op_id == ECALL || ctx.op_id == EBREAK) {
+        return std::string(mnemonic);
+    }
+    if (ctx.op_id == FENCE) {
+        return "fence";
+    }
+    if (ctx.op_id == FENCE_I) {
+        return "fence.i";
+    }
+    if (is_shift_imm_op(ctx.op_id)) {
+        uint32_t shamt = ctx.imm & 0x3F;
+        return std::format("{} {}, {}, {}", mnemonic, rd_name, rs1_name, shamt);
+    }
+    return std::format("{} {}, {}, {}", mnemonic, rd_name, rs1_name, ctx.imm);
+}
+
+auto format_assembly_s_b_u_j_r4(
+    const simrv::pipeline::PipelineContext& ctx,
+    InstFormat fmt,
+    std::string_view mnemonic,
+    const std::string& rd_name,
+    const std::string& rs1_name,
+    const std::string& rs2_name
+) -> std::string {
+    if (fmt == InstFormat::S) {
+        bool const is_store_fp = (ctx.opcode == Opcode::StoreFp);
+        return std::format("{} {}, {}({})", mnemonic, get_reg_name(ctx.rs2, is_store_fp), ctx.imm, rs1_name);
+    }
+    if (fmt == InstFormat::B) {
+        return std::format("{} {}, {}, {}", mnemonic, rs1_name, rs2_name, ctx.imm);
+    }
+    if (fmt == InstFormat::U) {
+        return std::format("{} {}, 0x{:X}", mnemonic, rd_name, static_cast<uint32_t>(ctx.imm));
+    }
+    if (fmt == InstFormat::J) {
+        return std::format("jal {}, {}", rd_name, ctx.imm);
+    }
+    if (fmt == InstFormat::R4) {
+        uint32_t rs3_val = (ctx.ir_org >> 27) & 0x1F;
+        std::string rs3_name = kFpRegNames.at(rs3_val);
+        return std::format("{} {}, {}, {}, {}", mnemonic, rd_name, rs1_name, rs2_name, rs3_name);
+    }
+    return "unknown / illegal instruction";
+}
+
+auto format_instruction_assembly(
+    const simrv::pipeline::PipelineContext& ctx,
+    InstFormat fmt,
+    std::string_view mnemonic,
+    const std::string& rd_name,
+    const std::string& rs1_name,
+    const std::string& rs2_name
+) -> std::string {
+    if (ctx.op_id == UNKNOWN) {
+        return "unknown / illegal instruction";
+    }
+    if (fmt == InstFormat::R) {
+        return format_assembly_r(ctx, mnemonic, rd_name, rs1_name, rs2_name);
+    }
+    if (fmt == InstFormat::I) {
+        return format_assembly_i(ctx, mnemonic, rd_name, rs1_name);
+    }
+    return format_assembly_s_b_u_j_r4(ctx, fmt, mnemonic, rd_name, rs1_name, rs2_name);
+}
+
+auto render_field_decoded_values(
+    const simrv::core::ArchState& st,
+    const simrv::pipeline::PipelineContext& ctx,
+    InstFormat fmt,
+    const std::string& rd_name,
+    const std::string& rs1_name,
+    const std::string& rs2_name,
+    int width
+) -> std::vector<std::string> {
+    std::vector<std::string> rows;
+    rows.push_back(format_to_width(std::format("  opcode : 0x{:02X} ({:07b})", std::to_underlying(ctx.opcode), std::to_underlying(ctx.opcode)), width));
+    
+    if (has_rd(fmt)) {
+        bool const is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
+        rows.push_back(format_to_width(std::format("  rd     : {} = {}", rd_name, read_reg_str(st, ctx.rd, is_dst_fp)), width));
+    }
+    if (has_rs1(fmt)) {
+        bool const is_rs1_fpr = simrv::isa::is_rs1_fp(ctx.opcode, ctx.op_id);
+        rows.push_back(format_to_width(std::format("  rs1    : {} = {}", rs1_name, read_reg_str(st, ctx.rs1, is_rs1_fpr)), width));
+    }
+    if (has_rs2(fmt)) {
+        bool const is_rs2_fpr = simrv::isa::is_rs2_fp(ctx.opcode, ctx.op_id);
+        rows.push_back(format_to_width(std::format("  rs2    : {} = {}", rs2_name, read_reg_str(st, ctx.rs2, is_rs2_fpr)), width));
+    }
+    if (fmt == InstFormat::R4) {
+        uint32_t rs3_val = (ctx.ir_org >> 27) & 0x1F;
+        std::string rs3_name = kFpRegNames.at(rs3_val);
+        rows.push_back(format_to_width(std::format("  rs3    : {} = {}", rs3_name, read_reg_str(st, static_cast<RegId>(rs3_val), true)), width));
+    }
+    if (has_funct3(fmt)) {
+        rows.push_back(format_to_width(std::format("  funct3 : 0x{:X} ({:03b})", std::to_underlying(ctx.funct3), std::to_underlying(ctx.funct3)), width));
+    }
+    if (has_funct7(fmt)) {
+        rows.push_back(format_to_width(std::format("  funct7 : 0x{:02X} ({:07b})", (ctx.ir_org >> 25) & 0x7F, (ctx.ir_org >> 25) & 0x7F), width));
+    }
+    if (has_imm(fmt)) {
+        rows.push_back(format_to_width(std::format("  imm    : {} (0x{:X})", ctx.imm, static_cast<uint32_t>(ctx.imm)), width));
+    }
+    if (has_target(fmt)) {
+        rows.push_back(format_to_width(std::format("  target : 0x{:0{}x}", st.pc + ctx.imm, simrv::xlen::kXLenHexDigits), width));
+    }
+    return rows;
+}
+
+} // namespace
+
+auto RegisterPane::get_explain_rows(int width) -> std::vector<std::string> {
+    auto& cpu = machine_.cpu;
+    auto& st = cpu.state();
+    auto& ctx = cpu.pipeline_context;
+
+    if (ctx.cpc != st.pc) {
+        auto& mutable_cpu = const_cast<simrv::core::CPU&>(cpu);
+        auto saved_pc = st.pc;
+        bool fetch_success = mutable_cpu.fetch_stage(machine_, st.pc);
+        if (fetch_success) {
+            (void)mutable_cpu.decode_stage(machine_);
+        }
+        st.pc = saved_pc;
+    }
+
+    bool const is_compressed = (ctx.ir_org & 0x3) != 0x3;
+    uint32_t decompressed_inst = ctx.ir;
+    
+    InstFormat const fmt = simrv::isa::get_instruction_format(ctx.opcode);
+    auto const [mnemonic, behavior_desc] = simrv::util::get_operation_details(ctx.op_id);
+
+    bool const is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
+    bool const is_rs1_fpr = simrv::isa::is_rs1_fp(ctx.opcode, ctx.op_id);
+    bool const is_rs2_fpr = simrv::isa::is_rs2_fp(ctx.opcode, ctx.op_id);
+
+    std::string rd_name = get_reg_name(ctx.rd, is_dst_fp);
+    std::string rs1_name = get_reg_name(ctx.rs1, is_rs1_fpr);
+    std::string rs2_name = get_reg_name(ctx.rs2, is_rs2_fpr);
+
+    std::string assembly = format_instruction_assembly(ctx, fmt, mnemonic, rd_name, rs1_name, rs2_name);
+
+    std::vector<std::string> explain_rows;
+    explain_rows.push_back(section_line("Instruction Explainer", width));
+
+    std::string sym = machine_.symbols.lookup(st.pc);
+    std::string pc_label = sym.empty() ? std::format("0x{:0{}x}", st.pc, simrv::xlen::kXLenHexDigits)
+                                       : std::format("0x{:0{}x} <{}>", st.pc, simrv::xlen::kXLenHexDigits, sym);
+    explain_rows.push_back(format_to_width(std::format("  {}PC     : {}{}\033[0m", kSakuraText, kSakuraMint, pc_label), width));
+
+    std::string hex_str;
+    if (is_compressed) {
+        uint32_t raw_16 = ctx.ir_org & 0xFFFF;
+        hex_str = std::format("0x{:04X} (compressed) -> 0x{:08X}", raw_16, decompressed_inst);
+    } else {
+        hex_str = std::format("0x{:08X}", ctx.ir_org);
+    }
+    explain_rows.push_back(format_to_width(std::format("  {}Hex    : {}{}\033[0m", kSakuraText, kSakuraMint, hex_str), width));
+
+    std::string bin_str;
+    if (is_compressed) {
+        bin_str = std::format("{:016b}", ctx.ir_org & 0xFFFF);
+    } else {
+        bin_str = std::format("{:032b}", ctx.ir_org);
+    }
+    explain_rows.push_back(format_to_width(std::format("  {}Bin    : {}{}\033[0m", kSakuraText, kSakuraVal, bin_str), width));
+
+    explain_rows.push_back(format_to_width(std::format("  {}Asm    : {}{}\033[0m", kSakuraText, kSakuraPeach, assembly), width));
+    explain_rows.push_back(format_to_width(std::format("  {}Format : {}{}\033[0m", kSakuraText, kSakuraVal, simrv::isa::get_instruction_format_name(fmt)), width));
+    explain_rows.push_back(format_to_width(std::format("  {}ISA Ext: {}{}\033[0m", kSakuraText, kSakuraMint, simrv::util::get_isa_extension_name(ctx.op_id)), width));
+    explain_rows.push_back(format_to_width("", width));
+
+    explain_rows.push_back(section_line("Visual Bit Fields", width));
+    auto visual_fields = render_visual_bitfields(fmt, ctx.ir_org, width);
+    explain_rows.insert(explain_rows.end(), visual_fields.begin(), visual_fields.end());
+    explain_rows.push_back(format_to_width("", width));
+
+    explain_rows.push_back(section_line("Field Decoded Values", width));
+    auto decoded_fields = render_field_decoded_values(st, ctx, fmt, rd_name, rs1_name, rs2_name, width);
+    explain_rows.insert(explain_rows.end(), decoded_fields.begin(), decoded_fields.end());
+    explain_rows.push_back(format_to_width("", width));
+
+    bool const is_csr = (ctx.op_id >= CSRRW && ctx.op_id <= CSRRCI);
+    if (is_csr) {
+        uint32_t csr_addr = ctx.imm & 0xFFF;
+        std::string csr_nm = simrv::util::csr_name(csr_addr);
+        explain_rows.push_back(format_to_width(std::format("  CSR    : {} (addr 0x{:03X})", csr_nm, csr_addr), width));
+        explain_rows.push_back(format_to_width("", width));
+    }
+
+    explain_rows.push_back(section_line("Instruction Description", width));
+    std::string isa_ext = std::string(simrv::util::get_isa_extension_name(ctx.op_id));
+    std::string full_desc = std::format("[ISA: {}] {}", isa_ext, behavior_desc);
+    auto wrapped = wrap_text(full_desc, width - 4);
+    for (const auto& line : wrapped) {
+        explain_rows.push_back(format_to_width("  " + line, width));
+    }
+    explain_rows.push_back(section_line("End Explainer", width));
+
+    return explain_rows;
+}
+
+}  // namespace simrv::tui

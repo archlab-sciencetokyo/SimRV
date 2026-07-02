@@ -1,0 +1,427 @@
+#include "simrv/tui/RegisterPane.hpp"
+#include "simrv/tui/TuiTheme.hpp"
+#include "simrv/Define.hpp"
+#include "simrv/core/Cpu.hpp"
+#include "simrv/core/Machine.hpp"
+#include "simrv/xlen/Helpers.hpp"
+#include "simrv/xlen/Types.hpp"
+#include "simrv/pipeline/Decoder.hpp"
+#include <format>
+#include <string>
+#include <vector>
+#include <array>
+#include <algorithm>
+
+namespace simrv::tui {
+
+using simrv::isa::Opcode;
+using simrv::isa::OperationId;
+using enum simrv::isa::OperationId;
+using simrv::isa::InstFormat;
+
+namespace {
+
+auto has_stage_raw_hazard(const simrv::pipeline::PipelineSim& ps,
+                          const simrv::pipeline::PipelineReg& d_reg,
+                          const simrv::pipeline::PipelineReg& stage_reg) -> bool {
+    if (!stage_reg.valid || !stage_reg.writes_reg || stage_reg.rd == static_cast<RegId>(0)) {
+        return false;
+    }
+    if (ps.config.enable_forwarding) {
+        if (stage_reg.remaining_latency == 0) {
+            return false;
+        }
+    }
+    bool reads_rs1 = (d_reg.rs1 != static_cast<RegId>(0));
+    bool reads_rs2 = (d_reg.rs2 != static_cast<RegId>(0));
+    return (reads_rs1 && d_reg.rs1 == stage_reg.rd) || (reads_rs2 && d_reg.rs2 == stage_reg.rd);
+}
+
+auto is_raw_hazard_stalled(const simrv::pipeline::PipelineSim& ps) -> bool {
+    if (!ps.d_reg_.valid) {
+        return false;
+    }
+    return has_stage_raw_hazard(ps, ps.d_reg_, ps.e_reg_) ||
+           has_stage_raw_hazard(ps, ps.d_reg_, ps.m_reg_);
+}
+
+auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem, const std::string& stall_type, bool raw_stall = false) -> std::string {
+    if (!reg.valid) {
+        return "\033[38;5;244mbubble/empty\033[0m";
+    }
+    std::string_view op_name = "UNKNOWN";
+    if (static_cast<std::size_t>(reg.op_id) < simrv::pipeline::OPERATION_NAME.size()) {
+        op_name = simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(reg.op_id));
+    }
+    std::string desc = std::format("\033[1;38;5;121m0x{:0{}x}\033[0m (\033[1;38;5;183m{}\033[0m)", 
+                                   reg.pc, simrv::xlen::kXLenHexDigits, op_name);
+    if (stall_rem > 0) {
+        desc += std::format(" \033[38;5;203m[Stall: {} ({} clk)]\033[0m", stall_type, stall_rem);
+    } else if (raw_stall) {
+        desc += " \033[38;5;203m[Stall: RAW Hazard]\033[0m";
+    } else if (reg.remaining_latency > 0) {
+        desc += std::format(" \033[38;5;218m[Lat: {} clk]\033[0m", reg.remaining_latency);
+    }
+    return desc;
+}
+
+auto get_stall_status(bool active, const char* active_str = "Active") -> std::pair<const char*, const char*> {
+    if (active) {
+        return {active_str, kSakuraPeach};
+    }
+    return {"None", kSakuraMint};
+}
+
+auto get_active_branch_pc(const simrv::pipeline::PipelineSim& ps) -> Register {
+    if (ps.e_reg_.valid && (ps.e_reg_.is_branch || ps.e_reg_.is_jump)) {
+        return ps.e_reg_.pc;
+    }
+    if (ps.d_reg_.valid && (ps.d_reg_.is_branch || ps.d_reg_.is_jump)) {
+        return ps.d_reg_.pc;
+    }
+    return 0;
+}
+
+auto get_bht_string(const simrv::pipeline::PipelineSim& ps, Register pc) -> std::string {
+    if (pc == 0) {
+        return "N/A";
+    }
+    const uint32_t bht_idx = (pc >> 1) & 0xFF;
+    uint8_t counter = ps.branch_history_table_.at(bht_idx);
+    switch (counter) {
+        case 0: return "Strongly Not Taken (00)";
+        case 1: return "Weakly Not Taken (01)";
+        case 2: return "Weakly Taken (10)";
+        default: return "Strongly Taken (11)";
+    }
+}
+
+auto get_btb_string(const simrv::pipeline::PipelineSim& ps, Register pc) -> std::string {
+    if (pc == 0) {
+        return "N/A";
+    }
+    const uint32_t btb_idx = (pc >> 1) & 0x7F;
+    auto& btb_entry = ps.btb_.at(btb_idx);
+    if (btb_entry.valid && btb_entry.pc == pc) {
+        return std::format("Hit (Target: 0x{:0{}x})", btb_entry.target, simrv::xlen::kXLenHexDigits);
+    }
+    return "Miss";
+}
+
+} // namespace
+
+auto RegisterPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+    if (machine_.s_cycle_accurate) {
+        return render_pipeline_stages_cycle_accurate(cpu, logical_row, col_width, right_width);
+    } else {
+        return render_pipeline_stages_functional(cpu, logical_row, col_width, right_width);
+    }
+}
+
+auto RegisterPane::render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+    int const val = logical_row - 16;
+    if (val >= 0 && val <= 5) {
+        return render_pipeline_stages_ca_core(cpu, val, col_width + right_width);
+    }
+    if (val >= 6 && val <= 9) {
+        return render_pipeline_stages_ca_hazards(cpu, val, col_width, right_width);
+    }
+    return render_pipeline_stages_ca_pred(cpu, val, col_width + right_width);
+}
+
+auto RegisterPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int stage_idx, int width) -> std::string {
+    auto& ps = cpu.pipeline_sim;
+    bool is_raw_stalled = is_raw_hazard_stalled(ps);
+
+    switch (stage_idx) {
+        case 0:
+            return section_line("Pipeline Stages (Cycle-Accurate Mode)", width);
+        case 1:
+            {
+                std::string stall_type = ps.tlb_stall_remaining_ > 0 ? "TLB Miss" : "ICache Miss";
+                uint32_t stall_rem = ps.tlb_stall_remaining_ > 0 ? ps.tlb_stall_remaining_ : ps.icache_stall_remaining_;
+                return format_to_width(std::format("  \033[1;38;5;189mIF\033[0m  : {}", get_stage_desc(ps.f_reg_, stall_rem, stall_type)), width);
+            }
+        case 2:
+            return format_to_width(std::format("  \033[1;38;5;189mID\033[0m  : {}", get_stage_desc(ps.d_reg_, 0, "", is_raw_stalled)), width);
+        case 3:
+            return format_to_width(std::format("  \033[1;38;5;189mEX\033[0m  : {}", get_stage_desc(ps.e_reg_, ps.div_busy_cycles_remaining_, "Divider")), width);
+        case 4:
+            return format_to_width(std::format("  \033[1;38;5;189mMEM\033[0m : {}", get_stage_desc(ps.m_reg_, ps.dcache_stall_remaining_, "DCache Miss")), width);
+        case 5:
+            return format_to_width(std::format("  \033[1;38;5;189mWB\033[0m  : {}", get_stage_desc(ps.w_reg_, 0, "")), width);
+        default:
+            return format_to_width("", width);
+    }
+}
+
+auto RegisterPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu, int stage_idx, int col_width, int right_width) -> std::string {
+    auto& ps = cpu.pipeline_sim;
+    int const width = col_width + right_width;
+    bool is_raw_stalled = is_raw_hazard_stalled(ps);
+
+    auto [raw_status, raw_color] = get_stall_status(is_raw_stalled);
+    auto [div_status, div_color] = get_stall_status(ps.div_busy_cycles_remaining_ > 0);
+    auto [ic_status, ic_color] = get_stall_status(ps.icache_stall_remaining_ > 0);
+    auto [dc_status, dc_color] = get_stall_status(ps.dcache_stall_remaining_ > 0);
+    auto [tlb_status, tlb_color] = get_stall_status(ps.tlb_stall_remaining_ > 0);
+    auto [ctrl_status, ctrl_color] = get_stall_status(ps.control_bubble_remaining_ > 0, "Redirecting");
+
+    switch (stage_idx) {
+        case 6:
+            return section_line("Active Stalls & Hazards", width);
+        case 7:
+            return render_pair("RAW Stall", raw_status, raw_color,
+                               "Divider St", div_status, div_color,
+                               col_width, right_width, 10);
+        case 8:
+            return render_pair("ICache St", ic_status, ic_color,
+                               "DCache St", dc_status, dc_color,
+                               col_width, right_width, 10);
+        case 9:
+            return render_pair("TLB Stall", tlb_status, tlb_color,
+                               "Ctrl St", ctrl_status, ctrl_color,
+                               col_width, right_width, 10);
+        default:
+            return format_to_width("", width);
+    }
+}
+
+auto RegisterPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, int stage_idx, int width) -> std::string {
+    auto& ps = cpu.pipeline_sim;
+
+    switch (stage_idx) {
+        case 10:
+            return section_line("Branch Prediction & BTB", width);
+        case 11:
+            {
+                Register pc = get_active_branch_pc(ps);
+                std::string bht_str = get_bht_string(ps, pc);
+                return format_to_width(std::format("  {}BHT State\033[0m : {}{}\033[0m", kSakuraText, kSakuraVal, bht_str), width);
+            }
+        case 12:
+            {
+                Register pc = get_active_branch_pc(ps);
+                std::string btb_str = get_btb_string(ps, pc);
+                return format_to_width(std::format("  {}BTB State\033[0m : {}{}\033[0m", kSakuraText, kSakuraVal, btb_str), width);
+            }
+        case 13:
+            return section_line("End Pipeline Visualizer", width);
+        default:
+            return format_to_width("", width);
+    }
+}
+
+auto RegisterPane::render_pipeline_stages_functional(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+    if (logical_row >= 0 && logical_row < 16) {
+        return render_pipeline_stages_functional_low(cpu, logical_row, col_width, right_width);
+    }
+    return render_pipeline_stages_functional_high(cpu, logical_row, col_width, right_width);
+}
+
+auto RegisterPane::render_pipeline_stages_functional_low(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+    if (logical_row >= 0 && logical_row <= 7) {
+        return render_pipeline_stages_functional_low_part1(cpu, logical_row, col_width, right_width);
+    }
+    if (logical_row >= 8 && logical_row <= 15) {
+        return render_pipeline_stages_functional_low_part2(cpu, logical_row, col_width, right_width);
+    }
+    return format_to_width(std::format(" {}Pipeline page\033[0m", kSakuraMuted), col_width + right_width);
+}
+
+auto RegisterPane::render_pipeline_stages_functional_low_part1(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+    int const width = col_width + right_width;
+    auto& ctx = cpu.pipeline_context;
+    switch (logical_row) {
+        case 0:
+            return section_line("── IF/CVT", width);
+        case 1:
+            return render_pair(
+                "cpc", std::format("0x{:0{}x}", ctx.cpc, simrv::xlen::kXLenHexDigits),
+                kSakuraMint, "ir_org", std::format("0x{:08x}", ctx.ir_org), kSakuraVal,
+                col_width, right_width, 8);
+        case 2:
+            return render_pair("ir", std::format("0x{:08x}", ctx.ir), kSakuraVal,
+                               "cinsn", std::format("0x{:08x}", ctx.cinsn), kSakuraVal,
+                               col_width, right_width, 8);
+        case 3:
+            return section_line("── ID", width);
+        case 4:
+            return render_pair(
+                "opcode", std::to_string(std::to_underlying(ctx.opcode)), kSakuraVal,
+                "funct3", std::to_string(std::to_underlying(ctx.funct3)), kSakuraVal,
+                col_width, right_width, 8);
+        case 5:
+            return render_pair(
+                "rd/rs1",
+                std::format("{}/{}", std::to_underlying(ctx.rd),
+                             std::to_underlying(ctx.rs1)),
+                kSakuraVal, "rs2/f7",
+                std::format("{}/0x{:x}", std::to_underlying(ctx.rs2), ctx.funct7),
+                kSakuraVal, col_width, right_width, 8);
+        case 6:
+            return render_pair(
+                "imm", std::format("0x{:0{}x}", ctx.imm, simrv::xlen::kXLenHexDigits),
+                kSakuraVal, "funct12", std::format("0x{:x}", ctx.funct12), kSakuraVal,
+                col_width, right_width, 8);
+        case 7:
+            return section_line("── OF/EX", width);
+        default:
+            return format_to_width("", width);
+    }
+}
+
+auto RegisterPane::render_pipeline_stages_functional_low_part2(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+    int const width = col_width + right_width;
+    auto& ctx = cpu.pipeline_context;
+    switch (logical_row) {
+        case 8:
+            return render_pair(
+                "rrs1", std::format("0x{:0{}x}", ctx.rrs1, simrv::xlen::kXLenHexDigits),
+                kSakuraMint, "rrs2",
+                std::format("0x{:0{}x}", ctx.rrs2, simrv::xlen::kXLenHexDigits),
+                kSakuraMint, col_width, right_width, 8);
+        case 9:
+            return render_pair(
+                "jmp_pc",
+                std::format("0x{:0{}x}", ctx.jmp_pc, simrv::xlen::kXLenHexDigits),
+                kSakuraMint, "taken", ctx.tkn ? "yes" : "no", kSakuraVal,
+                col_width, right_width, 8);
+        case 10:
+            return render_pair(
+                "wb_data",
+                std::format("0x{:0{}x}", ctx.wb_data, simrv::xlen::kXLenHexDigits),
+                kSakuraMint, "wb_csr",
+                std::format("0x{:0{}x}", ctx.wb_data_csr, simrv::xlen::kXLenHexDigits),
+                kSakuraVal, col_width, right_width, 8);
+        case 11:
+            return section_line("── MEM/FP", width);
+        case 12:
+            return render_pair(
+                "mem_addr",
+                std::format("0x{:0{}x}", ctx.mem_addr, simrv::xlen::kXLenHexDigits),
+                kSakuraMint, "mem_w",
+                std::format("0x{:0{}x}", ctx.mem_wdata, simrv::xlen::kXLenHexDigits),
+                kSakuraMint, col_width, right_width, 8);
+        case 13:
+            return render_pair(
+                "mem_r",
+                std::format("0x{:0{}x}", ctx.mem_rdata, simrv::xlen::kXLenHexDigits),
+                kSakuraMint, "fp_wb", std::format("0x{:016x}", ctx.fp_wb_data),
+                kSakuraVal, col_width, right_width, 8);
+        case 14:
+            return render_pair("fp_wb_en", ctx.fp_wb_enable ? "on" : "off", kSakuraVal,
+                               "int<-fp", ctx.int_wb_from_fp ? "on" : "off",
+                               kSakuraVal, col_width, right_width, 8);
+        case 15:
+            return section_line("── TRAP/TLB", width);
+        default:
+            return format_to_width("", width);
+    }
+}
+
+auto RegisterPane::render_pipeline_stages_functional_high(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+    int const width = col_width + right_width;
+    auto& ctx = cpu.pipeline_context;
+    auto exc_text = ctx.pending_exception.has_value()
+                        ? std::to_string(std::to_underlying(ctx.pending_exception.value()))
+                        : std::string("none");
+
+    switch (logical_row) {
+        case 16:
+            return render_pair(
+                "exc", exc_text, kSakuraPeach, "tval",
+                std::format("0x{:0{}x}", ctx.pending_tval, simrv::xlen::kXLenHexDigits),
+                kSakuraVal, col_width, right_width, 8);
+        case 17:
+            return render_pair(
+                "padr1", std::format("0x{:0{}x}", ctx.padr1, simrv::xlen::kXLenHexDigits),
+                kSakuraVal, "padr2",
+                std::format("0x{:0{}x}", ctx.padr2, simrv::xlen::kXLenHexDigits),
+                kSakuraVal, col_width, right_width, 8);
+        case 18:
+            return render_pair(
+                "rcsr", std::format("0x{:0{}x}", ctx.rcsr, simrv::xlen::kXLenHexDigits),
+                kSakuraVal, "funct5", std::to_string(std::to_underlying(ctx.funct5)),
+                kSakuraVal, col_width, right_width, 8);
+        case 19:
+            return section_line("── End Pipeline Snapshot", width);
+        default:
+            return format_to_width("", width);
+    }
+}
+
+auto RegisterPane::render_system_state(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+    auto const& st = cpu.state();
+    int const width = col_width + right_width;
+    int label_pad = (width < 50) ? 0 : ((width < 65) ? 5 : 8);
+
+    if (logical_row == 16) {
+        return section_line("CSRs & Privilege State", width);
+    }
+    if (logical_row == 17) {
+        std::string priv_str = (st.priv == PrivilegeLevel::Machine)      ? "Machine"
+                               : (st.priv == PrivilegeLevel::Supervisor) ? "Supervisor"
+                                                                         : "User";
+        return render_pair("pc", std::format("0x{:0{}x}", st.pc, simrv::xlen::kXLenHexDigits),
+                           kSakuraMint, "priv", priv_str, kSakuraPink, col_width, right_width, label_pad);
+    }
+    if (logical_row == 18) {
+        std::string misa_str = simrv::xlen::resolve_misa_string(st.misa);
+        return render_pair("mstatus",
+                           std::format("0x{:0{}x}", st.mstatus, simrv::xlen::kXLenHexDigits),
+                           kSakuraVal, "misa", misa_str, kSakuraVal, col_width, right_width, label_pad);
+    }
+    if (logical_row == 19) {
+        return render_pair(
+            "mie", std::format("0x{:0{}x}", st.mie, simrv::xlen::kXLenHexDigits), kSakuraVal,
+            "mip", std::format("0x{:0{}x}", st.mip, simrv::xlen::kXLenHexDigits), kSakuraVal,
+            col_width, right_width, label_pad);
+    }
+    if (logical_row == 20) {
+        return render_pair(
+            "mtvec", std::format("0x{:0{}x}", st.mtvec, simrv::xlen::kXLenHexDigits),
+            kSakuraVal, "mepc", std::format("0x{:0{}x}", st.mepc, simrv::xlen::kXLenHexDigits),
+            kSakuraVal, col_width, right_width, label_pad);
+    }
+    if (logical_row == 21) {
+        return render_pair(
+            "stvec", std::format("0x{:0{}x}", st.stvec, simrv::xlen::kXLenHexDigits),
+            kSakuraVal, "sepc", std::format("0x{:0{}x}", st.sepc, simrv::xlen::kXLenHexDigits),
+            kSakuraVal, col_width, right_width, label_pad);
+    }
+    if (logical_row == 22) {
+        return render_pair(
+            "mtval", std::format("0x{:0{}x}", st.mtval, simrv::xlen::kXLenHexDigits),
+            kSakuraVal, "satp", std::format("0x{:0{}x}", st.satp, simrv::xlen::kXLenHexDigits),
+            kSakuraVal, col_width, right_width, label_pad);
+    }
+    if (logical_row == 23) {
+        return render_pair(
+            "scause", std::format("0x{:0{}x}", st.scause, simrv::xlen::kXLenHexDigits),
+            kSakuraVal, "stval",
+            std::format("0x{:0{}x}", st.stval, simrv::xlen::kXLenHexDigits), kSakuraVal,
+            col_width, right_width, label_pad);
+    }
+    if (logical_row == 24) {
+        return render_pair(
+            "medeleg", std::format("0x{:0{}x}", st.medeleg, simrv::xlen::kXLenHexDigits),
+            kSakuraVal, "mideleg",
+            std::format("0x{:0{}x}", st.mideleg, simrv::xlen::kXLenHexDigits), kSakuraVal,
+            col_width, right_width, label_pad);
+    }
+    return format_to_width("", width);
+}
+
+auto RegisterPane::render_system_or_pipeline_extended(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width, bool single_column) -> std::string {
+    if (logical_row >= 16 && logical_row <= 24) {
+        if (page_ == TuiRegPage::PIPELINE) {
+            return render_pipeline_stages(cpu, logical_row, col_width, right_width);
+        } else if (!single_column) {
+            return render_system_state(cpu, logical_row, col_width, right_width);
+        }
+    }
+    return "";
+}
+
+}  // namespace simrv::tui

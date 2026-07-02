@@ -24,6 +24,7 @@ using simrv::virtio_detail::update_descriptor;
 namespace simrv::device {
 
 void Disk::process_queue(Word q_idx) {
+    if (q_idx >= virtio::kDiskMaxQueueNum) return;
     virtio::QueueState& qs = Queue[q_idx];
     if (qs.Ready == 0) return;
     const auto avail_idx = static_cast<uint16_t>(load_from_ram(qs.AvailLow + 2, 2, mmem));
@@ -108,6 +109,6 @@ void Disk::process_queue(Word q_idx) {
 }
 
 Disk::Disk(simrv::core::Machine& machine)
-    : VirtioDevice(machine, virtio::kDiskIrq) {}
+    : VirtioDevice(machine, virtio::kDiskIrq, virtio::kDiskMaxQueueNum) {}
 
 }  // namespace simrv::device

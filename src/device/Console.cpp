@@ -15,9 +15,10 @@
 
 namespace simrv::device {
 
-Console::Console(simrv::core::Machine& machine) : VirtioDevice(machine, virtio::kConsoleIrq) {}
+Console::Console(simrv::core::Machine& machine) : VirtioDevice(machine, virtio::kConsoleIrq, virtio::kConsoleMaxQueueNum) {}
 
 void Console::process_queue(Word q_idx) {
+    if (q_idx >= virtio::kConsoleMaxQueueNum) return;
     if (q_idx == 1) {  // TX Queue
         virtio::QueueState& qs = Queue[q_idx];
         if (qs.Ready == 0) return;
@@ -32,8 +33,8 @@ void Console::process_queue(Word q_idx) {
             for (Word i = 0; i < desc.len; ++i) {
                 const char c =
                     static_cast<char>(virtio_detail::load_from_ram(desc.adr + i, 1, mmem));
-                if (machine_.s_tuimode && machine_.uart && machine_.uart->tui()) {
-                    machine_.uart->tui()->handle_char_write(c);
+                if (machine_.s_tuimode && machine_.tui) {
+                    machine_.tui->handle_char_write(c);
                 } else {
                     if (::write(STDOUT_FILENO, &c, 1) < 0) {
                     }

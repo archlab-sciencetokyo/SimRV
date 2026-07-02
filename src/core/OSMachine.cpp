@@ -17,51 +17,76 @@ namespace simrv::core {
 using namespace simrv::isa;
 
 void OSMachine::run() {
-    if (s_tuimode && uart) {
-        uart->tui_pause_loop();
+    if (s_tuimode && tui) {
+        tui->pause_loop();
     }
 
     cpu.evaluate_timer_interrupt();
 
-    while (is_running_) {
-        prepare_cycle();
-        cpu.run_cycle(*this);
-        finalize_cycle();
+    // Start background stdin input thread (removes uart poll from hot path)
+    if (uart && !s_tuimode) {
+        uart->start_input_thread();
+    }
 
-        // ---- GDB stub post-cycle hook ----
-        if (gdb_stub && gdb_stub->is_connected()) {
-            const bool hit_ebreak =
-                (cpu.pipeline_context.opcode == Opcode::System) &&
-                (cpu.pipeline_context.funct12 ==
-                    static_cast<Word>(Funct12Priv::Ebreak)) &&
-                !cpu.pipeline_context.pending_exception.has_value();
+    // --- Optimisation 1: two separate inner loops ---
+    // Check debug features once up-front and run the appropriate loop.
+    // In normal Linux/RTOS execution none of these fire, so the fast path
+    // has zero per-cycle branches for GDB, lockstep, or TUI ebreak.
+    const bool has_debug = (gdb_stub && gdb_stub->is_connected()) ||
+                           (spike_lockstep && spike_lockstep->is_running()) ||
+                           (s_tuimode && uart);
 
-            if (gdb_stub->single_step() || hit_ebreak) {
-                gdb_stub->notify_breakpoint(*this);
-            } else {
-                gdb_stub->poll(*this);
+    if (has_debug) {
+        // ---- Debug path: GDB / lockstep / TUI ebreak ----
+        while (is_running_) {
+            prepare_cycle();
+            cpu.run_cycle(*this);
+            finalize_cycle();
+
+            if (gdb_stub && gdb_stub->is_connected()) {
+                const bool hit_ebreak =
+                    (cpu.pipeline_context.opcode == Opcode::System) &&
+                    (cpu.pipeline_context.funct12 ==
+                        static_cast<Word>(Funct12Priv::Ebreak)) &&
+                    !cpu.pipeline_context.pending_exception.has_value();
+                if (gdb_stub->single_step() || hit_ebreak) {
+                    gdb_stub->notify_breakpoint(*this);
+                } else {
+                    gdb_stub->poll(*this);
+                }
+            }
+
+            if (spike_lockstep && spike_lockstep->is_running()) {
+                spike_lockstep->compare_and_report(cpu.state(), cpu.pipeline_context.cpc, cpu.e_icount);
+                if (spike_lockstep->should_halt()) {
+                    simrv::log::error("Lockstep: halting on divergence");
+                    is_running_ = false;
+                }
+            }
+
+            if (s_tuimode && tui) {
+                const bool hit_ebreak =
+                    (cpu.pipeline_context.opcode == Opcode::System) &&
+                    (cpu.pipeline_context.funct12 ==
+                        static_cast<Word>(Funct12Priv::Ebreak));
+                if (simrv::compiler::unlikely(hit_ebreak)) {
+                    tui->pause_loop();
+                }
             }
         }
-
-        // ---- Spike lockstep post-cycle hook ----
-        if (spike_lockstep && spike_lockstep->is_running()) {
-            spike_lockstep->compare_and_report(cpu.state(), cpu.pipeline_context.cpc, cpu.e_icount);
-            if (spike_lockstep->should_halt()) {
-                simrv::log::error("Lockstep: halting on divergence");
-                is_running_ = false;
-            }
+    } else {
+        // ---- Fast path: normal Linux/RTOS execution ----
+        // No per-cycle GDB/lockstep/TUI branches.
+        while (is_running_) {
+            prepare_cycle();
+            cpu.run_cycle(*this);
+            finalize_cycle();
         }
+    }
 
-        // ---- TUI Breakpoint Pause hook ----
-        if (s_tuimode && uart) {
-            const bool hit_ebreak =
-                (cpu.pipeline_context.opcode == Opcode::System) &&
-                (cpu.pipeline_context.funct12 ==
-                    static_cast<Word>(Funct12Priv::Ebreak));
-            if (hit_ebreak) {
-                uart->tui_pause_loop();
-            }
-        }
+    // Clean up background input thread
+    if (uart && !s_tuimode) {
+        uart->stop_input_thread();
     }
 }
 
@@ -87,11 +112,14 @@ void OSMachine::prepare_cycle() {
     static int adr = 0;
 
     if (cpu.clint_mmio.mtime > s_enabletimer) { /* enable timer after linux boot */
-        console->fifo_en = static_cast<Byte>(1);
-        console->cons_fifo = kSyntheticInput.at(adr % static_cast<int>(kSyntheticInput.size()));
+        if (adr < static_cast<int>(kSyntheticInput.size())) {
+            console->fifo_en = static_cast<Byte>(1);
+            console->cons_fifo = kSyntheticInput.at(static_cast<std::size_t>(adr));
+        } else {
+            console->fifo_en = static_cast<Byte>(0);
+        }
 
-        if ((cpu.clint_mmio.mtime & static_cast<Counter>(0xfffff)) == 0 &&
-            console->fifo_en != static_cast<Byte>(0)) {       // 2019-08-30
+        if ((cpu.clint_mmio.mtime & static_cast<Counter>(0xfffff)) == 0) {
             int const ret = console->MC_receive_input(*this); /* Keyboard */
             if (ret > 0) {
                 cpu.plic_set_irq(simrv::virtio::kConsoleIrq, 1);
@@ -99,7 +127,9 @@ void OSMachine::prepare_cycle() {
             if (ret == -1) {
                 is_running_ = false; /* break by Ctrl+q */
             }
-            adr++;
+            if (adr < static_cast<int>(kSyntheticInput.size())) {
+                adr++;
+            }
         }
     }
 
@@ -109,7 +139,7 @@ void OSMachine::prepare_cycle() {
 
 void OSMachine::finalize_cycle() {
     const bool in_trace_window = (cpu.clint_mmio.mtime >= s_trace_begin && cpu.clint_mmio.mtime <= s_trace_end);
-    if (simrv::compiler::likely(s_high_performance && !s_tuimode && s_strace == 0 && 
+    if (simrv::compiler::likely(s_high_performance && (!s_tuimode || s_multithreaded) && s_strace == 0 && 
                                   !in_trace_window && !s_bp_trace)) {
         if (simrv::compiler::unlikely(tohost != 0)) {
             finalize_cycle_tohost();
@@ -119,28 +149,40 @@ void OSMachine::finalize_cycle() {
             is_shutdown_ = true;
             is_running_ = false;
         }
+        // SDL update only from main thread in multithreaded mode (optimisation 2)
+        if (!s_multithreaded && sdl_display && simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
+            sdl_display->update(cpu.e_icount);
+        }
         if (uart && simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
             uart->non_tui_poll_input();
         }
         return;
     }
 
-    if (simrv::compiler::unlikely(s_tuimode)) {
+    if (simrv::compiler::unlikely(s_tuimode && !s_multithreaded && tui)) {
         if (simrv::tui::g_resized) {
-            uart->refresh_tui();
+            tui->render();
         }
-        if ((cpu.e_icount % 20000) == 0) {
+        static uint64_t last_tui_check_cycles = 0;
+        if (cpu.e_icount - last_tui_check_cycles >= 500000) {
+            last_tui_check_cycles = cpu.e_icount;
             static auto last_tui_update = std::chrono::steady_clock::now();
             auto now = std::chrono::steady_clock::now();
             if (now - last_tui_update >= std::chrono::milliseconds(33)) {
-                uart->tui_update();
-                uart->refresh_tui();
+                tui->update();
+                tui->render();
                 last_tui_update = now;
             }
         }
     } else if (uart) {
         if (simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
             uart->non_tui_poll_input();
+        }
+    }
+    // SDL update only from main thread in multithreaded mode (optimisation 2)
+    if (!s_multithreaded && sdl_display) {
+        if (simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
+            sdl_display->update(cpu.e_icount);
         }
     }
 
@@ -153,8 +195,8 @@ void OSMachine::finalize_cycle() {
     if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() && cpu.e_icount >= s_fincnt)) {
         simrv::log::info("finished by -e option");
         is_shutdown_ = true;
-        if (s_tuimode && uart && uart->tui()) {
-            uart->tui_pause_loop();
+        if (s_tuimode && tui) {
+            tui->pause_loop();
         }
         is_running_ = false;
     }

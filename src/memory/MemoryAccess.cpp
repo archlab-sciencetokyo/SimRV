@@ -13,6 +13,7 @@
 #include "simrv/memory/Mmu.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Helpers.hpp"
+#include "simrv/device/Framebuffer.hpp"
 
 namespace simrv::memory {
 
@@ -71,6 +72,28 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     }
 
     auto issue_read = [&](Address addr) -> Word {
+        if (addr >= 0x30001000u && addr < 0x30200000u && cpu.machine_->framebuffer) {
+            uint8_t* fb_ptr = cpu.machine_->framebuffer->get_fb_ptr();
+            size_t fb_offset = addr - 0x30001000u;
+            uint64_t raw_val = 0;
+            const unsigned req_size_bytes = 1u << (funct3 & 0x3u);
+            std::memcpy(&raw_val, fb_ptr + fb_offset, req_size_bytes);
+            
+            Word rdata = raw_val;
+            const unsigned bits = 8 * req_size_bytes;
+            if (bits < simrv::xlen::kXLenBits) {
+                const Word mask = (static_cast<Word>(1) << bits) - 1;
+                rdata &= mask;
+                constexpr auto kSignExtendBit = 0x4u;
+                if ((funct3 & kSignExtendBit) == 0) {
+                    const Word sign_bit = static_cast<Word>(1) << (bits - 1);
+                    if ((rdata & sign_bit) != 0) {
+                        rdata |= ~mask;
+                    }
+                }
+            }
+            return static_cast<Word>(rdata & simrv::xlen::kXLenMask);
+        }
         if (cpu.machine_->s_high_performance && simrv::memory::is_dram_addr(addr)) {
             return simrv::memory::ram_read_fast(addr, funct3, mem.mmu()->mmem());
         }
@@ -242,6 +265,14 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
     }
 
     auto issue_write = [&](Address addr, Word data) -> void {
+        if (addr >= 0x30001000u && addr < 0x30200000u && cpu.machine_->framebuffer) {
+            uint8_t* fb_ptr = cpu.machine_->framebuffer->get_fb_ptr();
+            size_t fb_offset = addr - 0x30001000u;
+            const unsigned req_size_bytes = 1u << (funct3 & 0x3u);
+            std::memcpy(fb_ptr + fb_offset, &data, req_size_bytes);
+            cpu.machine_->framebuffer->set_dirty(true);
+            return;
+        }
         if (cpu.machine_->s_high_performance && simrv::memory::is_dram_addr(addr)) {
             const bool is_tohost_write =
                 simrv::xlen::kIsXLen64 ? (funct3 == static_cast<Instruction>(Funct3::Sw) ||

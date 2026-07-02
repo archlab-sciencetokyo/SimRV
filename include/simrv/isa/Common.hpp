@@ -47,9 +47,10 @@ constexpr auto misa_extension_bit(IsaExtension ext) -> CSRValue {
 
 constexpr auto misa_base_bits() -> CSRValue {
     return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
-           misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::F) |
-           misa_extension_bit(IsaExtension::D) | misa_extension_bit(IsaExtension::C) |
-           misa_extension_bit(IsaExtension::S) | misa_extension_bit(IsaExtension::U);
+           misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::B) |
+           misa_extension_bit(IsaExtension::F) | misa_extension_bit(IsaExtension::D) |
+           misa_extension_bit(IsaExtension::C) | misa_extension_bit(IsaExtension::S) |
+           misa_extension_bit(IsaExtension::U) | misa_extension_bit(IsaExtension::V);
 }
 
 constexpr auto misa_profile_bits(MisaProfile profile) -> CSRValue {
@@ -109,6 +110,8 @@ constexpr auto required_extension_for_instruction(Instruction ir, bool compresse
         case Opcode::NMAdd:
         case Opcode::NMSub:
             return (((ir >> 25) & 0x3u) == 0x1u) ? IsaExtension::D : IsaExtension::F;
+        case Opcode::OpV:
+            return IsaExtension::V;
         default:
             return IsaExtension::I;
     }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <limits>
@@ -18,10 +19,19 @@
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/Virtio.hpp"
+#include "simrv/device/Framebuffer.hpp"
+#include "simrv/device/Audio.hpp"
+#include "simrv/util/SdlDisplay.hpp"
+#include "simrv/util/SdlAudio.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 
 namespace simrv::device {
 class PowerMmio;
+class InputDevice;
+}
+
+namespace simrv::tui {
+class Tui;
 }
 
 namespace simrv::core {
@@ -54,17 +64,20 @@ class Machine {
     void finalize_cycle_tohost();
     /// Stop the simulation loop.
     void stop() { is_running_ = false; is_shutdown_ = true; }
+    /// Check if the simulation loop is running.
+    [[nodiscard]] auto is_running() const -> bool { return is_running_; }
     /// Request system reboot.
     void request_reboot() { reboot_requested = true; is_running_ = false; }
 
     uint64_t tohost = 0;  // Host communication register (always 64-bit for HTIF).
-    bool reboot_requested = false;  // Reboot requested flag.
+    std::atomic<bool> reboot_requested = false;  // Reboot requested flag.
     int exit_code = 0;             // Exit/status code of the simulation.
-    bool is_shutdown_ = false;     // System shutdown flag.
+    std::atomic<bool> is_shutdown_ = false;     // System shutdown flag.
 
     // ========== Simulation Configuration Flags ==========
     bool s_appmode = false;        // Binary mode (start_pc=0, no OS)
     bool s_tuimode = false;        // Enable TUI monitor mode
+    bool s_gui_mode = false;       // Enable GUI graphics window mode
     bool s_high_contrast = false;  // Enable high-contrast TUI mode
     bool s_debugmode = false;      // Enable debug logging in MMIO paths
     bool s_debug_mode = false;     // Enable TUI debug diagnostics mode
@@ -77,6 +90,8 @@ class Machine {
     bool s_cycle_accurate = false;  // Enable cycle-accurate performance simulation mode
     bool s_high_performance = true; // Enable high-performance optimized simulation mode
     bool s_mmu_ever_used = false;   // Latched true the first time satp enables translation
+    bool s_multithreaded = false;   // Run simulation in a background thread
+    double s_mouse_sensitivity = 1.0; // Mouse relative sensitivity factor
 
     // ========== Debug / Co-Simulation Flags ==========
     bool     s_gdb_mode      = false;      // Enable GDB RSP stub
@@ -113,7 +128,13 @@ class Machine {
     std::unique_ptr<simrv::device::Console> console;
     std::unique_ptr<simrv::Rtc> rtc;
     std::unique_ptr<simrv::device::Uart> uart;
+    std::unique_ptr<simrv::tui::Tui> tui;
     std::unique_ptr<simrv::device::PowerMmio> power;
+    std::unique_ptr<simrv::device::Framebuffer> framebuffer;
+    std::unique_ptr<simrv::device::InputDevice> input_device;
+    std::unique_ptr<simrv::device::Audio> audio;
+    std::unique_ptr<simrv::util::SdlDisplay> sdl_display;
+    std::unique_ptr<simrv::util::SdlAudio> sdl_audio;
 
     // ========== Debug Subsystems (null when disabled) ==========
     std::unique_ptr<simrv::debug::GdbStub>       gdb_stub;
@@ -130,12 +151,13 @@ class Machine {
     std::vector<simrv::virtio::QueueState> disk_queue_owner_;
     friend class simrv::core::CPU;
     friend class simrv::device::Uart;
+    friend class simrv::tui::Tui;
     simrv::memory::MemorySubsystem memory_;
     /// Perform per-cycle initialization before CPU stage execution.
     virtual void prepare_cycle() {}
     /// Perform per-cycle finalization and completion checks.
     virtual void finalize_cycle() {}
-    bool is_running_ = true;  // Main-loop run flag.
+    std::atomic<bool> is_running_ = true;  // Main-loop run flag.
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes)
 }  // namespace simrv::core

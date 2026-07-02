@@ -7,6 +7,7 @@
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/device/Uart.hpp"
+#include "simrv/tui/Tui.hpp"
 
 namespace simrv::device {
 
@@ -24,24 +25,24 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
         // The finisher has a single 32-bit register at offset 0
         if (offset == 0 && req.size >= 2) {
             const Word wdata = req.data;
-            const Word cmd = wdata & 0xffffU;
-            if (cmd == 0x5555) {
+            const auto cmd = static_cast<PowerCommand>(wdata & 0xffffU);
+            if (cmd == PowerCommand::Poweroff) {
                 const int status = static_cast<int>(wdata >> 16);
                 simrv::log::info("[Power] SiFive Test Finisher: System Poweroff requested (status: {}).", status);
                 machine_.exit_code = status;
                 machine_.stop();
-                if (machine_.s_tuimode && machine_.uart) {
-                    machine_.uart->tui_pause_loop();
+                if (machine_.s_tuimode && machine_.tui) {
+                    machine_.tui->pause_loop();
                 }
-            } else if (cmd == 0x3333) {
+            } else if (cmd == PowerCommand::Crash) {
                 const int status = static_cast<int>(wdata >> 16);
                 simrv::log::info("[Power] SiFive Test Finisher: System Fail/Crash requested (status: {}).", status);
                 machine_.exit_code = (status != 0) ? status : 1;
                 machine_.stop();
-                if (machine_.s_tuimode && machine_.uart) {
-                    machine_.uart->tui_pause_loop();
+                if (machine_.s_tuimode && machine_.tui) {
+                    machine_.tui->pause_loop();
                 }
-            } else if (cmd == 0x7777) {
+            } else if (cmd == PowerCommand::Reboot) {
                 simrv::log::info("[Power] SiFive Test Finisher: System Reboot requested.");
                 machine_.request_reboot();
             } else {

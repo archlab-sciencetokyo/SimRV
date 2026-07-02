@@ -74,6 +74,55 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
         case csr_addr(Csr::Fcsr):
             rcsr = cpu_.state().fcsr & kFcsrMask;
             break;
+        case csr_addr(Csr::Vstart):
+            if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::V) ||
+                (cpu_.state().mstatus & enum_mask(MstatusBit::Vs)) == 0) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = cpu_.state().vstart;
+            break;
+        case csr_addr(Csr::Vxsat):
+            if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::V) ||
+                (cpu_.state().mstatus & enum_mask(MstatusBit::Vs)) == 0) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = cpu_.state().vxsat;
+            break;
+        case csr_addr(Csr::Vxrm):
+            if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::V) ||
+                (cpu_.state().mstatus & enum_mask(MstatusBit::Vs)) == 0) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = cpu_.state().vxrm;
+            break;
+        case csr_addr(Csr::Vcsr):
+            if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::V) ||
+                (cpu_.state().mstatus & enum_mask(MstatusBit::Vs)) == 0) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = (cpu_.state().vxrm << 1) | cpu_.state().vxsat;
+            break;
+        case csr_addr(Csr::Vl):
+            if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::V) ||
+                (cpu_.state().mstatus & enum_mask(MstatusBit::Vs)) == 0) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = cpu_.state().vl;
+            break;
+        case csr_addr(Csr::Vtype):
+            if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::V) ||
+                (cpu_.state().mstatus & enum_mask(MstatusBit::Vs)) == 0) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = cpu_.state().vtype;
+            break;
+        case csr_addr(Csr::Vlenb):
+            if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::V) ||
+                (cpu_.state().mstatus & enum_mask(MstatusBit::Vs)) == 0) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            rcsr = 32; // VLEN=256 bits -> 32 bytes
+            break;
 
         case csr_addr(Csr::Sie):
             rcsr = cpu_.state().mie & cpu_.state().mideleg;
@@ -257,6 +306,55 @@ auto CsrFile::write(CSRAddress addr,
         case csr_addr(Csr::Fcsr):
             cpu_.state().fcsr = wdata & kFcsrMask;
             cpu_.state().mstatus |= enum_mask(MstatusBit::Fs);
+            break;
+        case csr_addr(Csr::Vstart):
+            if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::V) ||
+                (cpu_.state().mstatus & enum_mask(MstatusBit::Vs)) == 0) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            cpu_.state().vstart = wdata & 0x1FF;
+            cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+            break;
+        case csr_addr(Csr::Vxsat):
+            if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::V) ||
+                (cpu_.state().mstatus & enum_mask(MstatusBit::Vs)) == 0) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            cpu_.state().vxsat = wdata & 1;
+            cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+            break;
+        case csr_addr(Csr::Vxrm):
+            if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::V) ||
+                (cpu_.state().mstatus & enum_mask(MstatusBit::Vs)) == 0) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            cpu_.state().vxrm = wdata & 3;
+            cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+            break;
+        case csr_addr(Csr::Vcsr):
+            if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::V) ||
+                (cpu_.state().mstatus & enum_mask(MstatusBit::Vs)) == 0) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            cpu_.state().vxrm = (wdata >> 1) & 3;
+            cpu_.state().vxsat = wdata & 1;
+            cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+            break;
+        case csr_addr(Csr::Vl):
+            if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::V) ||
+                (cpu_.state().mstatus & enum_mask(MstatusBit::Vs)) == 0) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            cpu_.state().vl = wdata;
+            cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+            break;
+        case csr_addr(Csr::Vtype):
+            if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::V) ||
+                (cpu_.state().mstatus & enum_mask(MstatusBit::Vs)) == 0) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            cpu_.state().vtype = wdata;
+            cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
             break;
 
         case csr_addr(Csr::Stvec):

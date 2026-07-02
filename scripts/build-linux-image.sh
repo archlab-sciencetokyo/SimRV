@@ -177,11 +177,14 @@ cat > "$INITRAMFS_DIR/etc/inittab" <<'EOF'
 ttyS0::respawn:-/bin/sh
 EOF
 
+echo "SimRV" > "$INITRAMFS_DIR/etc/hostname"
+
 cat > "$INITRAMFS_DIR/init" <<'EOF'
 #!/bin/sh
 /bin/mount -t proc proc /proc
 /bin/mount -t sysfs sysfs /sys
 /bin/mount -t devtmpfs devtmpfs /dev || true
+[ -f /etc/hostname ] && hostname -F /etc/hostname
 exec 0</dev/ttyS0
 exec 1>/dev/ttyS0
 exec 2>/dev/ttyS0
@@ -194,10 +197,7 @@ if [ -f /etc/alpine-release ]; then
 else
     echo "Minimal BusyBox Linux (riscv32)"
 fi
-echo "=================================================="
-if [ -f /usr/bin/snake ]; then
-    /usr/bin/snake
-fi
+echo "=========================================="
 exec /sbin/init
 EOF
 chmod +x "$INITRAMFS_DIR/init"

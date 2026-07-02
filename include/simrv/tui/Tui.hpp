@@ -9,6 +9,9 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <queue>
+#include <mutex>
+#include <atomic>
 
 #include "simrv/xlen/Types.hpp"
 #include "simrv/isa/Base.hpp"
@@ -39,7 +42,8 @@ enum class TuiRegPage {
 enum class TuiRightPanelMode {
     Terminal,
     Log,
-    LiveTrace
+    LiveTrace,
+    Display
 };
 
 /**
@@ -57,9 +61,13 @@ class Tui {
 
     void initialize();
     void shutdown();
-    void render();
+    void render(bool force = true);
     void handle_char_write(char ch);
     void print_log(const std::string& msg);
+
+    void update();
+    void pause_loop();
+    [[nodiscard]] auto is_tui_paused() const -> bool { return tui_loop_paused_.load(std::memory_order_relaxed); }
 
     void set_paused(bool p);
     [[nodiscard]] auto is_paused() const -> bool { return paused_; }
@@ -127,6 +135,18 @@ class Tui {
     // Active runtime tracking
     std::chrono::microseconds runtime_duration_{0};
     std::chrono::steady_clock::time_point last_runtime_tick_{};
+
+    // Thread-safe queues for decoupling writes from simulation
+    std::queue<char> tx_fifo_;
+    std::queue<std::string> log_fifo_;
+    mutable std::mutex tui_mutex_;
+
+    std::string esc_buf_;
+    std::atomic<bool> tui_loop_paused_{false};
+
+    auto consume_control_sequence(uint8_t first_byte) -> bool;
+    auto parse_sgr_mouse(const std::string& seq, int& b, int& x, int& y) -> bool;
+    auto poll_keyboard(uint8_t& byte_out) -> bool;
 };
 
 } // namespace simrv::tui

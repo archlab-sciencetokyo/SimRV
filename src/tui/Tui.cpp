@@ -4,10 +4,13 @@
  * resolved registers.
  */
 #include <sys/ioctl.h>
+#include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
 
 #include <cctype>
+#include <charconv>
+#include <thread>
 #include <array>
 #include <chrono>
 #include <csignal>
@@ -20,7 +23,9 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/tui/Tui.hpp"
+#include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/device/Uart.hpp"
 #include "simrv/tui/RegisterPane.hpp"
 #include "simrv/tui/ConsolePane.hpp"
 #include "simrv/tui/StatusBar.hpp"
@@ -158,17 +163,43 @@ void Tui::shutdown() {
 }
 
 void Tui::handle_char_write(char ch) {
-    vt_.write_char(ch);
+    std::scoped_lock lock(tui_mutex_);
+    tx_fifo_.push(ch);
 }
 
 void Tui::print_log(const std::string& msg) {
-    vt_log_.write_string(msg);
+    std::scoped_lock lock(tui_mutex_);
+    log_fifo_.push(msg);
 }
 
-void Tui::render() {
+void Tui::render(bool force) {
+    std::unique_lock<std::mutex> lock(tui_mutex_);
+
+    const bool has_tx = !tx_fifo_.empty();
+    const bool has_log = !log_fifo_.empty();
+
+    // Drain queues
+    while (!tx_fifo_.empty()) {
+        vt_.write_char(tx_fifo_.front());
+        tx_fifo_.pop();
+    }
+    while (!log_fifo_.empty()) {
+        vt_log_.write_string(log_fifo_.front());
+        log_fifo_.pop();
+    }
+
     if (!reg_pane_ || !console_pane_ || !status_bar_) {
         return;
     }
+
+    static auto last_draw_time = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_draw_time).count();
+
+    if (!force && !has_tx && !has_log && !g_resized && elapsed_ms < 200) {
+        return;
+    }
+    last_draw_time = now;
 
     if (g_resized) {
         g_resized = 0;
@@ -182,7 +213,7 @@ void Tui::render() {
     if (term_width < 40 || term_height < 10) return;
 
     // Track KIPS and notify RegisterPane
-    auto now = std::chrono::steady_clock::now();
+    now = std::chrono::steady_clock::now();
 
     // Update active runtime duration if running
     if (!paused_) {
@@ -269,7 +300,7 @@ void Tui::render() {
                 bool draw_cursor = (right_panel_mode_ == TuiRightPanelMode::Terminal) && is_live && (i == cursor_abs_line) && current_vt.is_cursor_visible();
                 lines_to_draw_.push_back(current_vt.get_line_as_string(i, right_pane_width, draw_cursor));
             }
-        } else {
+        } else if (right_panel_mode_ == TuiRightPanelMode::LiveTrace) {
             // LiveTrace
             int total = static_cast<int>(trace_buffer_.size());
             int end_exclusive = total - scroll_offset_;
@@ -289,6 +320,13 @@ void Tui::render() {
                     s += std::string(static_cast<std::size_t>(right_pane_width) - s.length(), ' ');
                 }
                 lines_to_draw_.push_back(s);
+            }
+        } else if (right_panel_mode_ == TuiRightPanelMode::Display) {
+            if (machine_.framebuffer) {
+                std::vector<std::string> fb_rows = machine_.framebuffer->get_tui_rows(right_pane_width, num_rows);
+                for (const auto& row_str : fb_rows) {
+                    lines_to_draw_.push_back(row_str);
+                }
             }
         }
 
@@ -315,6 +353,8 @@ void Tui::render() {
     status_bar_->set_pane_widths(left_pane_width, right_pane_width);
     status_bar_->set_right_panel_mode(right_panel_mode_);
     status_bar_->set_trace_enabled(trace_enabled_);
+
+    lock.unlock();
 
     // Render loop
     std::string screen = "\033[?25l\033[H";
@@ -446,6 +486,8 @@ void Tui::cycle_right_panel_mode() {
         right_panel_mode_ = TuiRightPanelMode::Log;
     } else if (right_panel_mode_ == TuiRightPanelMode::Log) {
         right_panel_mode_ = TuiRightPanelMode::LiveTrace;
+    } else if (right_panel_mode_ == TuiRightPanelMode::LiveTrace) {
+        right_panel_mode_ = TuiRightPanelMode::Display;
     } else {
         right_panel_mode_ = TuiRightPanelMode::Terminal;
     }
@@ -574,9 +616,12 @@ void Tui::record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa:
         }
     }
 
-    trace_buffer_.push_back(line);
-    if (trace_buffer_.size() > 200) {
-        trace_buffer_.erase(trace_buffer_.begin());
+    {
+        std::scoped_lock lock(tui_mutex_);
+        trace_buffer_.push_back(line);
+        if (trace_buffer_.size() > 200) {
+            trace_buffer_.erase(trace_buffer_.begin());
+        }
     }
 }
 
@@ -624,6 +669,291 @@ void Tui::adjust_left_pane_width(int delta) {
     if (current > term_width - 10) current = std::max(40, term_width - 10);
     user_left_pane_width_ = current;
     render();
+}
+
+auto Tui::poll_keyboard(uint8_t& byte_out) -> bool {
+    constexpr int stdin_fd = STDIN_FILENO;
+    fd_set read_fds;
+    struct timeval timeout{.tv_sec = 0, .tv_usec = 0};
+    FD_ZERO(&read_fds);
+    FD_SET(stdin_fd, &read_fds);
+    if (select(stdin_fd + 1, &read_fds, nullptr, nullptr, &timeout) <= 0) {
+        return false;
+    }
+    if (!FD_ISSET(stdin_fd, &read_fds)) {
+        return false;
+    }
+    uint8_t byte = 0;
+    if (::read(stdin_fd, &byte, 1) != 1) {
+        return false;
+    }
+    byte_out = byte;
+    return true;
+}
+
+void Tui::update() {
+    uint8_t byte = 0;
+    while (poll_keyboard(byte)) {
+        if (consume_control_sequence(byte)) {
+            continue;
+        }
+
+        const auto key = static_cast<simrv::tui::TuiKey>(byte);
+        if (key == simrv::tui::TuiKey::CtrlQ) {
+            machine_.is_running_ = false;
+            return;
+        }
+        if (key == simrv::tui::TuiKey::CtrlP) {
+            pause_loop();
+            return;
+        }
+
+        if (machine_.uart) {
+            machine_.uart->push_rx_byte(byte);
+        }
+    }
+}
+
+void Tui::pause_loop() {
+    tui_loop_paused_ = true;
+    set_paused(true);
+    render();
+
+    while (tui_loop_paused_ && (machine_.is_running_ || machine_.is_shutdown_)) {
+        if (simrv::tui::g_resized) {
+            render();
+        }
+        uint8_t byte = 0;
+        if (poll_keyboard(byte)) {
+            if (consume_control_sequence(byte)) {
+                continue;
+            }
+
+            const auto key = static_cast<simrv::tui::TuiKey>(byte);
+            if (key == simrv::tui::TuiKey::CtrlP || key == simrv::tui::TuiKey::c || key == simrv::tui::TuiKey::C) {
+                if (!machine_.is_shutdown_) {
+                    tui_loop_paused_ = false;
+                }
+            } else if (key == simrv::tui::TuiKey::CtrlR) {
+                machine_.request_reboot();
+                tui_loop_paused_ = false;
+            } else if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+                reset_scroll();
+            } else if (key == simrv::tui::TuiKey::CtrlQ || key == simrv::tui::TuiKey::CtrlC ||
+                       key == simrv::tui::TuiKey::q || key == simrv::tui::TuiKey::Q) {
+                machine_.is_running_ = false;
+                machine_.is_shutdown_ = false;
+                tui_loop_paused_ = false;
+            } else if (key == simrv::tui::TuiKey::Tab) {
+                cycle_layout();
+            } else if (key == simrv::tui::TuiKey::r || key == simrv::tui::TuiKey::R) {
+                cycle_reg_page();
+            } else if (key == simrv::tui::TuiKey::e || key == simrv::tui::TuiKey::E) {
+                toggle_explain();
+            } else if (key == simrv::tui::TuiKey::LeftBracket) {
+                adjust_left_pane_width(-2);
+            } else if (key == simrv::tui::TuiKey::RightBracket) {
+                adjust_left_pane_width(2);
+            } else if (key == simrv::tui::TuiKey::h || key == simrv::tui::TuiKey::H) {
+                toggle_high_contrast();
+            } else if (key == simrv::tui::TuiKey::t || key == simrv::tui::TuiKey::T) {
+                toggle_sakura_theme();
+            } else if (key == simrv::tui::TuiKey::p || key == simrv::tui::TuiKey::P) {
+                cycle_right_panel_mode();
+            } else if (key == simrv::tui::TuiKey::v || key == simrv::tui::TuiKey::V) {
+                toggle_trace_enabled();
+            } else if (key == simrv::tui::TuiKey::u || key == simrv::tui::TuiKey::U) {
+                scroll(5);
+            } else if (key == simrv::tui::TuiKey::d || key == simrv::tui::TuiKey::D) {
+                scroll(-5);
+            } else if (key == simrv::tui::TuiKey::s || key == simrv::tui::TuiKey::S || key == simrv::tui::TuiKey::Space) {
+                if (!machine_.is_shutdown_) {
+                    update_cache();
+                    uint64_t old_icount = machine_.cpu.e_icount;
+                    while (machine_.cpu.e_icount == old_icount && machine_.is_running_) {
+                        machine_.prepare_cycle();
+                        machine_.cpu.run_cycle(machine_);
+                        machine_.finalize_cycle();
+                    }
+                    render();
+                }
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    update_cache();
+    set_paused(false);
+    reset_scroll();
+    render(false);
+}
+
+auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
+    if (first_byte != 0x1b) {
+        return false;
+    }
+
+    esc_buf_.clear();
+    esc_buf_.push_back(static_cast<char>(first_byte));
+
+    constexpr int kMaxSeqLen = 64;
+    uint8_t byte = 0;
+    while (static_cast<int>(esc_buf_.size()) < kMaxSeqLen) {
+        bool polled = false;
+        for (int retry = 0; retry < 5; ++retry) {
+            if (poll_keyboard(byte)) {
+                polled = true;
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (!polled) {
+            break;
+        }
+        esc_buf_.push_back(static_cast<char>(byte));
+        if (byte == 'M' || byte == 'm' || byte == '~' ||
+            (byte >= 'A' && byte <= 'Z' && byte != 'O') ||
+            (byte >= 'a' && byte <= 'z')) {
+            break;
+        }
+    }
+
+    // 1. Mouse reporting
+    int button = 0;
+    int x = 0;
+    int y = 0;
+    if (parse_sgr_mouse(esc_buf_, button, x, y)) {
+        // Double-click prevention: only register left clicks on press event ('M')
+        if (esc_buf_.back() == 'M' && button == 0 && y == 2) {
+            const auto layout = get_layout();
+            bool on_left = false;
+            if (layout == TuiLayout::Split) {
+                on_left = (x <= get_pane_width());
+            } else if (layout == TuiLayout::FullRegister) {
+                on_left = true;
+            } else {
+                on_left = false;
+            }
+
+            if (on_left) {
+                cycle_reg_page();
+            } else {
+                if (machine_.is_shutdown_) {
+                    machine_.request_reboot();
+                    tui_loop_paused_ = false;
+                } else {
+                    if (tui_loop_paused_) {
+                        tui_loop_paused_ = false;
+                    } else {
+                        pause_loop();
+                    }
+                }
+            }
+            return true;
+        }
+
+        handle_mouse(x, y, button);
+        return true;
+    }
+
+    // 2. Alt modifier shortcuts
+    if (esc_buf_.size() == 2) {
+        char key = esc_buf_.at(1);
+        if (key == 'p' || key == 'P') {
+            cycle_right_panel_mode();
+            return true;
+        }
+        if (key == 'r' || key == 'R') {
+            cycle_reg_page();
+            return true;
+        }
+        if (key == 'h' || key == 'H') {
+            toggle_high_contrast();
+            return true;
+        }
+        if (key == 't' || key == 'T') {
+            toggle_sakura_theme();
+            return true;
+        }
+        if (key == 'l' || key == 'L') {
+            cycle_layout();
+            return true;
+        }
+        if (key == 'u' || key == 'U') {
+            scroll(5);
+            return true;
+        }
+        if (key == 'd' || key == 'D') {
+            scroll(-5);
+            return true;
+        }
+        if (key == 'w' || key == 'W') {
+            scroll_regs(-2);
+            return true;
+        }
+        if (key == 's' || key == 'S') {
+            scroll_regs(2);
+            return true;
+        }
+        if (key == 'z' || key == 'Z') {
+            reset_scroll_regs();
+            return true;
+        }
+        if (key == 'c' || key == 'C') {
+            reset_scroll();
+            return true;
+        }
+    }
+
+    // 3. Forward all other escape sequences (like arrow keys) to the guest OS
+    if (machine_.uart) {
+        for (char c : esc_buf_) {
+            machine_.uart->push_rx_byte(static_cast<uint8_t>(c));
+        }
+    }
+    return true;
+}
+
+auto Tui::parse_sgr_mouse(const std::string& seq, int& b, int& x, int& y) -> bool {
+    // Expected SGR mouse format: ESC [ < b ; x ; y M|m
+    if (seq.size() < 7 || seq.at(0) != '\x1b' || seq.at(1) != '[' || seq.at(2) != '<') {
+        return false;
+    }
+
+    const char tail = seq.back();
+    if (tail != 'M' && tail != 'm') {
+        return false;
+    }
+
+    std::string_view payload(seq.data() + 3, seq.size() - 4);
+    const std::size_t semi1 = payload.find(';');
+    if (semi1 == std::string_view::npos) {
+        return false;
+    }
+    const std::size_t semi2 = payload.find(';', semi1 + 1);
+    if (semi2 == std::string_view::npos) {
+        return false;
+    }
+
+    const std::string_view b_text = payload.substr(0, semi1);
+    const std::string_view x_text = payload.substr(semi1 + 1, semi2 - semi1 - 1);
+    const std::string_view y_text = payload.substr(semi2 + 1);
+
+    auto parse_int = [](std::string_view text, int& out) -> bool {
+        if (text.empty()) {
+            return false;
+        }
+        const char* first = text.data();
+        const char* last = text.data() + text.size();
+        const auto result = std::from_chars(first, last, out);
+        return result.ec == std::errc{} && result.ptr == last;
+    };
+
+    if (!parse_int(b_text, b) || !parse_int(x_text, x) || !parse_int(y_text, y)) {
+        return false;
+    }
+
+    return true;
 }
 
 }  // namespace simrv::tui

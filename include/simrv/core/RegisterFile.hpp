@@ -12,9 +12,24 @@
 
 namespace simrv::core {
 
+struct alignas(32) VectorRegister {
+    union {
+        uint8_t  u8[32];
+        uint16_t u16[16];
+        uint32_t u32[8];
+        uint64_t u64[4];
+        int8_t   i8[32];
+        int16_t  i16[16];
+        int32_t  i32[8];
+        int64_t  i64[4];
+        float    f32[8];
+        double   f64[4];
+    };
+};
+
 /**
  * @class RegisterFile
- * @brief Manages integer and floating-point architectural registers.
+ * @brief Manages integer, floating-point, and vector architectural registers.
  *
  * Encapsulates the hardwired x0 == 0 behavior and provides a unified
  * state block for the register arrays.
@@ -53,12 +68,20 @@ class RegisterFile {
 
     constexpr void write_fp(RegId idx, FloatingRegister val) { freg_[std::to_underlying(idx)] = val; }
 
+    [[nodiscard]] constexpr auto read_vector(RegId idx) const -> const VectorRegister& { return vreg_[std::to_underlying(idx)]; }
+
+    [[nodiscard]] constexpr auto read_vector(RegId idx) -> VectorRegister& { return vreg_[std::to_underlying(idx)]; }
+
+    constexpr void write_vector(RegId idx, const VectorRegister& val) { vreg_[std::to_underlying(idx)] = val; }
+
     constexpr void fill(Register val) {
         reg_.fill(val);
         reg_[0] = 0;
     }
 
     constexpr void fill_fp(FloatingRegister val) { freg_.fill(val); }
+
+    constexpr void fill_vector(const VectorRegister& val) { vreg_.fill(val); }
 
     [[nodiscard]] constexpr auto fp_data_ptr() const -> const FloatingRegister* {
         return freg_.data();
@@ -67,6 +90,7 @@ class RegisterFile {
    private:
     std::array<Register, kNumRegisters> reg_{};
     std::array<FloatingRegister, kNumRegisters> freg_{};
+    std::array<VectorRegister, kNumRegisters> vreg_{};
 };
 
 }  // namespace simrv::core

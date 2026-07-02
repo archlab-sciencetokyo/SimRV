@@ -160,8 +160,10 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             mode_label = trace_enabled_ ? "Terminal [Trace ON]" : "Terminal";
         } else if (right_panel_mode_ == TuiRightPanelMode::Log) {
             mode_label = trace_enabled_ ? "System Log [Trace ON]" : "System Log";
-        } else {
+        } else if (right_panel_mode_ == TuiRightPanelMode::LiveTrace) {
             mode_label = "Live Trace";
+        } else {
+            mode_label = "Display";
         }
         std::string mode_prefix = std::format("{}[{}]\033[0m", kSakuraSky, mode_label);
         int mode_len = get_display_width(mode_prefix);

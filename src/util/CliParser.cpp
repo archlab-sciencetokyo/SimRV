@@ -267,8 +267,32 @@ auto is_tui_option(std::string_view arg) -> bool {
     return arg == "--tui" || arg == "-u";
 }
 
+auto is_gui_option(std::string_view arg) -> bool {
+    return arg == "--gui" || arg == "-G";
+}
+
 auto is_high_contrast_option(std::string_view arg) -> bool {
     return arg == "--high-contrast" || arg == "--contrast";
+}
+
+auto is_no_forwarding_option(std::string_view arg) -> bool {
+    return arg == "--no-forwarding" || arg == "--disable-forwarding";
+}
+
+auto is_bp_type_option(std::string_view arg) -> bool {
+    return arg == "--bp-type" || arg == "--bp";
+}
+
+auto is_btb_size_option(std::string_view arg) -> bool {
+    return arg == "--btb-size" || arg == "--btb";
+}
+
+auto is_disable_ex_forwarding_option(std::string_view arg) -> bool {
+    return arg == "--disable-ex-forwarding" || arg == "--no-ex-forwarding";
+}
+
+auto is_disable_mem_forwarding_option(std::string_view arg) -> bool {
+    return arg == "--disable-mem-forwarding" || arg == "--no-mem-forwarding";
 }
 
 auto is_explain_inst_option(std::string_view arg) -> bool {
@@ -424,8 +448,56 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.tuimode = true;
         return true;
     }
+    if (is_gui_option(arg)) {
+        result.options.gui_mode = true;
+        return true;
+    }
+    if (arg == "--mouse-sensitivity" || arg == "--mouse-speed") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        try {
+            double val = std::stod(std::string(*value));
+            result.options.mouse_sensitivity = val;
+        } catch (...) {
+            return std::unexpected(std::format("invalid double value for {}: {}", arg, *value));
+        }
+        return true;
+    }
     if (is_high_contrast_option(arg)) {
         result.options.high_contrast = true;
+        return true;
+    }
+    if (is_no_forwarding_option(arg)) {
+        result.options.disable_forwarding = true;
+        return true;
+    }
+    if (is_bp_type_option(arg)) {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        std::string val_str{ *value };
+        if (val_str != "static-taken" && val_str != "static-not-taken" &&
+            val_str != "1bit" && val_str != "2bit" && val_str != "gshare") {
+            return std::unexpected(std::format("invalid branch predictor type: {}. Allowed: static-taken, static-not-taken, 1bit, 2bit, gshare", val_str));
+        }
+        result.options.bp_type = val_str;
+        return true;
+    }
+    if (is_btb_size_option(arg)) {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        uint32_t val = 0;
+        if (!parse_u32_base0(*value, val)) {
+            return std::unexpected(std::format("invalid integer value for --btb-size: {}", *value));
+        }
+        result.options.btb_size = val;
+        return true;
+    }
+    if (is_disable_ex_forwarding_option(arg)) {
+        result.options.disable_ex_forwarding = true;
+        return true;
+    }
+    if (is_disable_mem_forwarding_option(arg)) {
+        result.options.disable_mem_forwarding = true;
         return true;
     }
     if (is_explain_inst_option(arg)) {
@@ -578,9 +650,11 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     simrv::memory::g_appmode = options.appmode;
     simrv::memory::g_dram_base = options.appmode ? options.start_pc : simrv::memory::kDramBaseAddress;
     machine->s_tuimode = options.tuimode;
+    machine->s_gui_mode = options.gui_mode;
     machine->s_high_contrast = options.high_contrast;
     machine->s_debugmode = options.debugmode;
     machine->s_debug_mode = options.debug_mode;
+    machine->s_mouse_sensitivity = options.mouse_sensitivity;
     machine->s_dlog_mode = options.dlog_mode;
     machine->s_traplog_mode = options.traplog_mode;
     machine->s_use_disk = options.use_disk;
@@ -590,6 +664,19 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     machine->s_cycle_accurate = options.cycle_accurate;
     machine->s_high_performance = options.high_performance;
     machine->s_fn_cpuconfig = options.fn_cpuconfig;
+    machine->cpu.pipeline_sim.config.enable_forwarding = !options.disable_forwarding;
+    machine->cpu.pipeline_sim.config.enable_ex_forwarding = !options.disable_ex_forwarding;
+    machine->cpu.pipeline_sim.config.enable_mem_forwarding = !options.disable_mem_forwarding;
+    machine->cpu.pipeline_sim.config.btb_entries = options.btb_size;
+
+    {
+        using BPT = pipeline::BranchPredictorType;
+        if (options.bp_type == "static-not-taken")  machine->cpu.pipeline_sim.config.bp_type = BPT::StaticNotTaken;
+        else if (options.bp_type == "static-taken") machine->cpu.pipeline_sim.config.bp_type = BPT::StaticTaken;
+        else if (options.bp_type == "1bit")         machine->cpu.pipeline_sim.config.bp_type = BPT::OneBitBimodal;
+        else if (options.bp_type == "gshare")       machine->cpu.pipeline_sim.config.bp_type = BPT::Gshare;
+        else                                        machine->cpu.pipeline_sim.config.bp_type = BPT::TwoBitBimodal; // default "2bit"
+    }
 
     machine->tracer.init_trace(options.trace_enabled);
     machine->tracer.init_dlog(options.dlog_mode);
@@ -677,6 +764,14 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         stdout,
         "  {}-u, --tui{}                  Enable interactive TUI split-screen monitor dashboard\n",
         style(kBrightGreen), style(kReset));
+    std::print(
+        stdout,
+        "  {}-G, --gui{}                  Enable external SDL3 graphical window\n",
+        style(kBrightGreen), style(kReset));
+    std::print(
+        stdout,
+        "  {}--mouse-sensitivity, --mouse-speed {}{}<FACTOR>{} Adjust mouse relative speed scaling factor (default: 1.0)\n",
+        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--high-contrast, --contrast{} Toggle TUI colors to high-contrast palette\n",
                style(kBrightGreen), style(kReset));
@@ -757,6 +852,21 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout, "  {}--version{}         Show compiler-injected version details and exit\n",
                style(kBrightGreen), style(kReset));
+    std::print(stdout,
+               "  {}--no-forwarding{}    Disable operand forwarding in cycle-accurate simulation\n",
+               style(kBrightGreen), style(kReset));
+    std::print(stdout,
+               "  {}--no-ex-forwarding{}  Disable EX-to-EX forwarding path only\n",
+               style(kBrightGreen), style(kReset));
+    std::print(stdout,
+               "  {}--no-mem-forwarding{} Disable MEM-to-EX forwarding path only\n",
+               style(kBrightGreen), style(kReset));
+    std::print(stdout,
+               "  {}--bp-type {}{}<TYPE>{}  Branch predictor type [static-not-taken|static-taken|1bit|2bit|gshare] (default: 2bit)\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--btb-size {}{}<N>{}    Branch target buffer entries (default: 128, 0 = disabled)\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(
         stdout,
         "  {}-G, --gdb{}                  Enable GDB RSP stub (waits for client before running)\n",

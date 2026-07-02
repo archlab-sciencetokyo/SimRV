@@ -56,5 +56,15 @@ trace/
 log/
 .clangd
 
+# Framebuffer screenshots
+screenshot.ppm
+*.ppm
+
+# Baremetal Doom build artifacts
+baremetal-doom/
+
+# Bundled SoundFonts
+share/soundfonts/
+
 .agents
 GEMINI.md

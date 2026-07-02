@@ -53,6 +53,17 @@ inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuConfig&
         }
 
         try {
+            // Handle string-valued keys first
+            if (key == "bp_type") {
+                using BPT = simrv::pipeline::BranchPredictorType;
+                if (val_str == "static-not-taken")  config.bp_type = BPT::StaticNotTaken;
+                else if (val_str == "static-taken") config.bp_type = BPT::StaticTaken;
+                else if (val_str == "1bit")         config.bp_type = BPT::OneBitBimodal;
+                else if (val_str == "gshare")       config.bp_type = BPT::Gshare;
+                else                                config.bp_type = BPT::TwoBitBimodal;
+                continue;
+            }
+
             uint32_t val = static_cast<uint32_t>(std::stoul(val_str));
             if (key == "icache_miss_penalty") {
                 config.icache_miss_penalty = val;
@@ -66,6 +77,16 @@ inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuConfig&
                 config.div_latency = val;
             } else if (key == "branch_mispredict_penalty") {
                 config.branch_mispredict_penalty = val;
+            } else if (key == "enable_forwarding") {
+                config.enable_forwarding = (val != 0);
+            } else if (key == "enable_ex_forwarding") {
+                config.enable_ex_forwarding = (val != 0);
+            } else if (key == "enable_mem_forwarding") {
+                config.enable_mem_forwarding = (val != 0);
+            } else if (key == "btb_entries") {
+                config.btb_entries = val;
+            } else if (key == "global_history_bits") {
+                config.global_history_bits = val;
             } else {
                 simrv::log::warn("Unknown CPU config key: {}", key);
             }

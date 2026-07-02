@@ -23,6 +23,8 @@
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/Virtio.hpp"
 #include "simrv/device/Power.hpp"
+#include "simrv/tui/Tui.hpp"
+#include "simrv/device/InputDevice.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/xlen/Types.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
@@ -131,6 +133,19 @@ auto Machine::initialize() -> int {
     rtc = std::make_unique<simrv::Rtc>(*this);
     uart = std::make_unique<simrv::device::Uart>(*this);
     power = std::make_unique<simrv::device::PowerMmio>(*this);
+    framebuffer = std::make_unique<simrv::device::Framebuffer>(*this);
+    input_device = std::make_unique<simrv::device::InputDevice>(*this);
+    sdl_display = std::make_unique<simrv::util::SdlDisplay>(*this);
+    if (s_gui_mode) {
+        sdl_display->init();
+    }
+    audio = std::make_unique<simrv::device::Audio>(*this);
+    sdl_audio = std::make_unique<simrv::util::SdlAudio>(*this);
+    sdl_audio->init_audio();
+    if (s_tuimode) {
+        tui = std::make_unique<simrv::tui::Tui>(*this);
+        tui->initialize();
+    }
     mmem_owner_.reset(static_cast<Byte*>(std::calloc(simrv::memory::kDramSize, sizeof(Byte)))); // NOLINT(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory)
     if (mmem_owner_ == nullptr) {
         std::println(std::cerr, "Error: failed to allocate main memory ({} bytes)",
@@ -162,6 +177,9 @@ auto Machine::initialize() -> int {
     memory_.system_bus().add_node(rtc.get());
     memory_.system_bus().add_node(uart.get());
     memory_.system_bus().add_node(power.get());
+    memory_.system_bus().add_node(framebuffer.get());
+    memory_.system_bus().add_node(input_device.get());
+    memory_.system_bus().add_node(audio.get());
     memory_.system_bus().add_node(&cpu.plic_mmio);
     memory_.system_bus().add_node(&cpu.clint_mmio);
     const bool linux_boot = !s_appmode;

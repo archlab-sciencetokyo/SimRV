@@ -56,6 +56,11 @@ struct ArchState {
     CSRValue satp{};
     CSRValue scounteren{};
     CSRValue fcsr{};
+    CSRValue vstart{};
+    CSRValue vxsat{};
+    CSRValue vxrm{};
+    CSRValue vl{};
+    CSRValue vtype{};
 
     PrivilegeLevel priv = kPrivMachine;
 

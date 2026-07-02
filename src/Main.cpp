@@ -20,6 +20,7 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/BaremetalMachine.hpp"
 #include "simrv/core/OSMachine.hpp"
+#include "simrv/tui/Tui.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/xlen/Types.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
@@ -100,7 +101,36 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 simrv::log::warn("Terminal raw mode setup failed; continuing in current mode");
             }
         }
-        sim_machine->run();
+        if ((sim_machine->s_gui_mode && sim_machine->framebuffer) || sim_machine->s_tuimode) {
+            sim_machine->s_multithreaded = true;
+            if (sim_machine->s_gui_mode && sim_machine->framebuffer) {
+                sim_machine->framebuffer->set_multithreaded(true);
+            }
+            auto* machine_ptr = sim_machine.get();
+            std::thread sim_thread([machine_ptr]() {
+                machine_ptr->run();
+            });
+
+            while (machine_ptr->is_running()) {
+                if (machine_ptr->s_tuimode) {
+                    if (simrv::tui::g_resized) {
+                        machine_ptr->tui->render(true);
+                    }
+                    machine_ptr->tui->update();
+                    machine_ptr->tui->render(false);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(33)); // ~30 FPS
+                } else {
+                    machine_ptr->sdl_display->update_gui_only();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(16)); // ~60 FPS
+                }
+            }
+
+            if (sim_thread.joinable()) {
+                sim_thread.join();
+            }
+        } else {
+            sim_machine->run();
+        }
 
         if (sim_machine->reboot_requested) {
             simrv::log::info("Rebooting guest system...");

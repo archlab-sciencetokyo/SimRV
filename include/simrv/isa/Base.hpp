@@ -30,6 +30,7 @@ enum class Opcode : uint8_t {
     Jal = 0x6F,
     MiscMem = 0x0F,
     System = 0x73,
+    OpV = 0x57,
 };
 
 enum class Funct3 : uint8_t {
@@ -82,6 +83,7 @@ enum class Funct3 : uint8_t {
 
 enum class IsaExtension : uint8_t {
     A = 0,
+    B = 1,
     C = 2,
     D = 3,
     F = 5,
@@ -89,6 +91,7 @@ enum class IsaExtension : uint8_t {
     M = 12,
     S = 18,
     U = 20,
+    V = 21,
 };
 
 enum class MisaProfile : uint8_t {

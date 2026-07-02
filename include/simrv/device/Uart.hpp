@@ -12,6 +12,9 @@
 #include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/xlen/Types.hpp"
+#include <mutex>
+#include <atomic>
+#include <thread>
 
 namespace simrv::core {
 class Machine;
@@ -34,17 +37,12 @@ class Uart : public memory::TileLinkNode {
     [[nodiscard]] auto size() const -> Address override { return simrv::mmio::kUartSize; }
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool override;
 
-    void tui_update();
-    void tui_pause_loop();
-    void refresh_tui();
     void non_tui_poll_input();
-    [[nodiscard]] auto tui() -> simrv::tui::Tui* { return tui_.get(); }
-    [[nodiscard]] auto tui() const -> const simrv::tui::Tui* { return tui_.get(); }
+    void start_input_thread();
+    void stop_input_thread();
+    void push_rx_byte(uint8_t byte);
 
    private:
-    auto consume_tui_control_sequence(uint8_t first_byte) -> bool;
-    auto parse_sgr_mouse(const std::string& seq, int& b, int& x, int& y) -> bool;
-
     simrv::core::Machine& machine_;
     int8_t uart_reg_shift_ = -1;
     Word uart_lcr_ = 0;
@@ -57,9 +55,10 @@ class Uart : public memory::TileLinkNode {
     bool tx_irq_pending_ = false;
     uint8_t uart_rx_byte_ = 0;
 
-    std::unique_ptr<simrv::tui::Tui> tui_;
     std::queue<uint8_t> rx_fifo_;
-    std::string esc_buf_;
-    bool tui_loop_paused_ = false;
+    std::atomic<bool> rx_ready_{false};
+    mutable std::mutex rx_mutex_;
+    std::thread input_thread_;
+    std::atomic<bool> input_thread_stop_{false};
 };
 }  // namespace simrv::device

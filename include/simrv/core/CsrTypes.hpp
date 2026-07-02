@@ -19,7 +19,7 @@ enum class MstatusBit : CSRValue {
     Hpie = (1u << 6),
     Mpie = (1u << 7),
     Spp = (1u << 8),
-    Hpp = (3u << 9),
+    Vs = (3u << 9),
     Mpp = (3u << 11),
     Fs = (3u << 13),
     Xs = (3u << 15),
@@ -50,18 +50,20 @@ constexpr CSRValue kMstatusMask =
     (enum_mask(MstatusBit::Uie) | enum_mask(MstatusBit::Sie) | enum_mask(MstatusBit::Mie) |
      enum_mask(MstatusBit::Upie) | enum_mask(MstatusBit::Spie) | enum_mask(MstatusBit::Mpie) |
      enum_mask(MstatusBit::Spp) | enum_mask(MstatusBit::Mpp) | enum_mask(MstatusBit::Fs) |
+     enum_mask(MstatusBit::Vs) |
      enum_mask(MstatusBit::Mprv) | enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr) |
      enum_mask(MstatusBit::Tvm) | enum_mask(MstatusBit::Tw) | enum_mask(MstatusBit::Tsr) |
      (simrv::xlen::kIsXLen64 ? (static_cast<CSRValue>(0xF) << 32) : 0));
 constexpr CSRValue kSstatusMask =
     (enum_mask(MstatusBit::Uie) | enum_mask(MstatusBit::Sie) | enum_mask(MstatusBit::Upie) |
      enum_mask(MstatusBit::Spie) | enum_mask(MstatusBit::Spp) | enum_mask(MstatusBit::Fs) |
+     enum_mask(MstatusBit::Vs) |
      enum_mask(MstatusBit::Xs) | enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr) |
      (simrv::xlen::kIsXLen64 ? (static_cast<CSRValue>(0x3) << 32) : 0));
 constexpr CSRValue kMstatusFsDirty = enum_mask(MstatusBit::Fs);
 constexpr CSRValue kMstatusSd = static_cast<CSRValue>(Word{1} << (simrv::xlen::kXLenBits - 1u));
 constexpr CSRValue kMstatusSstatusReadMask =
-    static_cast<CSRValue>(0x000de133u) | kMstatusSd |
+    static_cast<CSRValue>(0x000de133u) | enum_mask(MstatusBit::Vs) | kMstatusSd |
     (simrv::xlen::kIsXLen64 ? (static_cast<CSRValue>(0x3) << 32) : 0);
 constexpr CSRValue kMstatusReadMask = static_cast<CSRValue>(kXLenMask);
 constexpr CSRValue kFflagsMask = static_cast<CSRValue>(0x1fu);
@@ -81,11 +83,18 @@ enum class Csr : CSRAddress {
     Fflags = 0x001,
     Frm = 0x002,
     Fcsr = 0x003,
+    Vstart = 0x008,
+    Vxsat = 0x009,
+    Vxrm = 0x00A,
+    Vcsr = 0x00F,
     Pmpcfg0 = 0x3A0,
     Pmpaddr0 = 0x3B0,
     Cycle = 0xC00,
     Time = 0xC01,
     Instret = 0xC02,
+    Vl = 0xC20,
+    Vtype = 0xC21,
+    Vlenb = 0xC22,
     Sstatus = 0x100,
     Sedeleg = 0x102,
     Sideleg = 0x103,

@@ -24,6 +24,9 @@ inline constexpr Address kClintBaseAddress = static_cast<Address>(0x60000000u);
 inline constexpr Address kClintSize = static_cast<Address>(0x000c0000u);
 
 // Virtio and device addresses
+inline constexpr Address kFramebufferBaseAddress = static_cast<Address>(0x30000000u);
+inline constexpr Address kFramebufferSize = static_cast<Address>(0x00200000u);
+
 inline constexpr Address kVirtioBaseAddress = static_cast<Address>(0x40000000u);
 inline constexpr Address kVirtioSize = static_cast<Address>(0x08000000u);
 inline constexpr Address kDiskBaseAddress = static_cast<Address>(0x48000000u);

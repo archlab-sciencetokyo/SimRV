@@ -580,27 +580,19 @@ void CPU::execute_core(Machine& machine) {
             break;
         case Opcode::Op:
             ctx.tkn = false;
-            ctx.wb_data = execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.rrs2, ctx.funct3, ctx.funct7);
+            ctx.wb_data = execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.rrs2, ctx.op_id);
             break;
         case Opcode::OpImm:
             ctx.tkn = false;
-            ctx.funct7 &= (ctx.funct3 == Funct3::Add) ? 0 : 0x20;
-            ctx.wb_data = execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.imm, ctx.funct3, ctx.funct7);
+            ctx.wb_data = execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.imm, ctx.op_id);
             break;
         case Opcode::OpImm32:
             ctx.tkn = false;
-            ctx.funct7 &= (enum_mask(ctx.funct3) == 0x5u) ? 0x20 : 0;
-            ctx.wb_data = execute::ExecuteUnit::aluIntW(Opcode::OpImm32, ctx.rrs1, ctx.imm,
-                                                         ctx.funct3, ctx.funct7);
+            ctx.wb_data = execute::ExecuteUnit::aluIntW(ctx.rrs1, ctx.imm, ctx.op_id);
             break;
         case Opcode::Op32:
             ctx.tkn = false;
-            ctx.funct7 &= ((enum_mask(ctx.funct3) == 0x0u) ||
-                           (enum_mask(ctx.funct3) == 0x5u))
-                              ? 0x21
-                              : 0x01;
-            ctx.wb_data = execute::ExecuteUnit::aluIntW(Opcode::Op32, ctx.rrs1, ctx.rrs2,
-                                                         ctx.funct3, ctx.funct7);
+            ctx.wb_data = execute::ExecuteUnit::aluIntW(ctx.rrs1, ctx.rrs2, ctx.op_id);
             break;
         case Opcode::Load:
         case Opcode::LoadFp:
@@ -689,8 +681,8 @@ void CPU::execute_system(Machine& machine) {
                             if (simrv::memory::is_dram_addr(buf_addr)) {
                                 for (Address i = 0; i < len; ++i) {
                                     const auto ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(buf_addr + i, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
-                                    if (machine.s_tuimode && machine.uart && machine.uart->tui()) {
-                                        machine.uart->tui()->handle_char_write(static_cast<char>(ch));
+                                    if (machine.s_tuimode && machine.tui) {
+                                        machine.tui->handle_char_write(static_cast<char>(ch));
                                     } else {
                                         (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
                                     }
@@ -700,27 +692,27 @@ void CPU::execute_system(Machine& machine) {
                         } else if (semihost_op == 0x03) {
                             if (simrv::memory::is_dram_addr(arg_ptr)) {
                                 const auto ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(arg_ptr, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
-                                if (machine.s_tuimode && machine.uart && machine.uart->tui()) {
-                                    machine.uart->tui()->handle_char_write(static_cast<char>(ch));
-                                } else {
-                                    (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
-                                }
-                            }
-                            state_.regs.write(RegId::A0, 0);
-                        } else if (semihost_op == 0x04) {
-                            Address ptr = arg_ptr;
-                            if (simrv::memory::is_dram_addr(ptr)) {
-                                while (true) {
-                                    const auto ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(ptr, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
-                                    if (ch == 0) break;
-                                    if (machine.s_tuimode && machine.uart && machine.uart->tui()) {
-                                        machine.uart->tui()->handle_char_write(static_cast<char>(ch));
+                                if (machine.s_tuimode && machine.tui) {
+                                    machine.tui->handle_char_write(static_cast<char>(ch));
                                     } else {
                                         (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
                                     }
-                                    ptr++;
                                 }
-                            }
+                                state_.regs.write(RegId::A0, 0);
+                            } else if (semihost_op == 0x04) {
+                                Address ptr = arg_ptr;
+                                if (simrv::memory::is_dram_addr(ptr)) {
+                                    while (true) {
+                                        const auto ch = static_cast<uint8_t>(simrv::memory::ram_read_fast(ptr, static_cast<Instruction>(Funct3::Lb), machine.mmem) & 0xFF);
+                                        if (ch == 0) break;
+                                        if (machine.s_tuimode && machine.tui) {
+                                            machine.tui->handle_char_write(static_cast<char>(ch));
+                                        } else {
+                                            (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
+                                        }
+                                        ptr++;
+                                    }
+                                }
                             state_.regs.write(RegId::A0, 0);
                         } else {
                             simrv::log::warn("__ Unhandled semihosting op: 0x{:02x}", semihost_op);

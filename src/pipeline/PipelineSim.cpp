@@ -1,5 +1,4 @@
 #include "simrv/pipeline/PipelineSim.hpp"
-#include <algorithm>
 
 namespace simrv::pipeline {
 
@@ -41,7 +40,7 @@ auto is_div_rem_op(isa::OperationId op_id) -> bool {
 
 PipelineSim::PipelineSim() {
     branch_history_table_.fill(1); // Default: Weakly Not Taken
-    btb_.fill(BtbEntry{});
+    btb_.resize(config.btb_entries);
 }
 
 void PipelineSim::reset() {
@@ -52,7 +51,9 @@ void PipelineSim::reset() {
     w_reg_ = PipelineReg{};
 
     branch_history_table_.fill(1);
-    btb_.fill(BtbEntry{});
+    btb_.clear();
+    btb_.resize(config.btb_entries);
+    gshare_history_ = 0;
 
     control_bubble_remaining_ = 0;
     tlb_stall_remaining_ = 0;
@@ -106,7 +107,17 @@ auto PipelineSim::check_hazard_with_stage(const PipelineReg& stage_reg, bool rea
         return false;
     }
     if ((reads_rs1 && d_reg_.rs1 == stage_reg.rd) || (reads_rs2 && d_reg_.rs2 == stage_reg.rd)) {
-        return stage_reg.remaining_latency > 0;
+        bool forward_enabled = config.enable_forwarding;
+        if (&stage_reg == &e_reg_) {
+            forward_enabled = forward_enabled && config.enable_ex_forwarding;
+        } else if (&stage_reg == &m_reg_) {
+            forward_enabled = forward_enabled && config.enable_mem_forwarding;
+        }
+        if (forward_enabled) {
+            return stage_reg.remaining_latency > 0;
+        } else {
+            return true;
+        }
     }
     return false;
 }
@@ -128,32 +139,50 @@ auto PipelineSim::check_stall_if() const -> bool {
 }
 
 auto PipelineSim::resolve_jump_ex(BtbEntry& btb_entry, Register pc, isa::Opcode opcode, Register target_pc) -> uint32_t {
-    const bool btb_hit = btb_entry.valid && (btb_entry.pc == pc);
+    const bool btb_hit = (config.btb_entries > 0) && btb_entry.valid && (btb_entry.pc == pc);
     if (opcode == isa::Opcode::Jalr) {
         if (btb_hit && btb_entry.target == target_pc) {
             return 0;
         }
-        btb_entry.pc = pc;
-        btb_entry.target = target_pc;
-        btb_entry.valid = true;
+        if (config.btb_entries > 0) {
+            btb_entry.pc = pc;
+            btb_entry.target = target_pc;
+            btb_entry.valid = true;
+        }
         return config.branch_mispredict_penalty;
     } else {
         if (btb_hit && btb_entry.target == target_pc) {
             return 0;
         }
-        btb_entry.pc = pc;
-        btb_entry.target = target_pc;
-        btb_entry.valid = true;
+        if (config.btb_entries > 0) {
+            btb_entry.pc = pc;
+            btb_entry.target = target_pc;
+            btb_entry.valid = true;
+        }
         return 1;
     }
 }
 
 auto PipelineSim::resolve_branch_ex(BtbEntry& btb_entry, Register pc, Register target_pc, bool branched) -> uint32_t {
-    const uint32_t bht_idx = (pc >> 1) & 0xFF;
-    const auto bht_idx_sz = static_cast<std::size_t>(bht_idx);
-    uint8_t counter = branch_history_table_.at(bht_idx_sz);
-    const bool predicted_taken = (counter >= 2);
-    const bool btb_hit = btb_entry.valid && (btb_entry.pc == pc);
+    bool predicted_taken = false;
+    uint32_t bht_idx = 0;
+    
+    if (config.bp_type == BranchPredictorType::StaticNotTaken) {
+        predicted_taken = false;
+    } else if (config.bp_type == BranchPredictorType::StaticTaken) {
+        predicted_taken = true;
+    } else if (config.bp_type == BranchPredictorType::OneBitBimodal) {
+        bht_idx = (pc >> 1) & 0xFF;
+        predicted_taken = (branch_history_table_.at(bht_idx) != 0);
+    } else if (config.bp_type == BranchPredictorType::TwoBitBimodal) {
+        bht_idx = (pc >> 1) & 0xFF;
+        predicted_taken = (branch_history_table_.at(bht_idx) >= 2);
+    } else if (config.bp_type == BranchPredictorType::Gshare) {
+        bht_idx = ((pc >> 1) ^ gshare_history_) & 0xFF;
+        predicted_taken = (branch_history_table_.at(bht_idx) >= 2);
+    }
+
+    const bool btb_hit = (config.btb_entries > 0) && btb_entry.valid && (btb_entry.pc == pc);
 
     uint32_t control_bubbles = 0;
     if (predicted_taken != branched) {
@@ -168,15 +197,31 @@ auto PipelineSim::resolve_branch_ex(BtbEntry& btb_entry, Register pc, Register t
         control_bubbles = 0;
     }
 
-    if (branched) {
-        if (counter < 3) counter++;
-        btb_entry.pc = pc;
-        btb_entry.target = target_pc;
-        btb_entry.valid = true;
-    } else {
-        if (counter > 0) counter--;
+    // Update predictor tables
+    if (config.bp_type == BranchPredictorType::OneBitBimodal) {
+        branch_history_table_.at(bht_idx) = branched ? 1 : 0;
+    } else if (config.bp_type == BranchPredictorType::TwoBitBimodal || config.bp_type == BranchPredictorType::Gshare) {
+        uint8_t counter = branch_history_table_.at(bht_idx);
+        if (branched) {
+            if (counter < 3) counter++;
+        } else {
+            if (counter > 0) counter--;
+        }
+        branch_history_table_.at(bht_idx) = counter;
     }
-    branch_history_table_.at(bht_idx_sz) = counter;
+
+    if (config.bp_type == BranchPredictorType::Gshare) {
+        gshare_history_ = ((gshare_history_ << 1) | (branched ? 1 : 0)) & ((1u << config.global_history_bits) - 1);
+    }
+
+    // Update BTB
+    if (config.btb_entries > 0) {
+        if (branched) {
+            btb_entry.pc = pc;
+            btb_entry.target = target_pc;
+            btb_entry.valid = true;
+        }
+    }
 
     return control_bubbles;
 }
@@ -187,14 +232,18 @@ auto PipelineSim::resolve_branches_ex() -> bool {
     }
     e_reg_.control_resolved = true;
     
-    const uint32_t btb_idx = (e_reg_.pc >> 1) & 0x7F;
-    auto& btb_entry = btb_.at(btb_idx);
+    BtbEntry dummy{};
+    BtbEntry* entry_ptr = &dummy;
+    if (config.btb_entries > 0 && !btb_.empty()) {
+        const uint32_t btb_idx = (e_reg_.pc >> 1) % config.btb_entries;
+        entry_ptr = &btb_.at(btb_idx);
+    }
 
     uint32_t control_bubbles = 0;
     if (e_reg_.is_jump) {
-        control_bubbles = resolve_jump_ex(btb_entry, e_reg_.pc, e_reg_.opcode, e_reg_.target_pc);
+        control_bubbles = resolve_jump_ex(*entry_ptr, e_reg_.pc, e_reg_.opcode, e_reg_.target_pc);
     } else if (e_reg_.is_branch) {
-        control_bubbles = resolve_branch_ex(btb_entry, e_reg_.pc, e_reg_.target_pc, e_reg_.branched);
+        control_bubbles = resolve_branch_ex(*entry_ptr, e_reg_.pc, e_reg_.target_pc, e_reg_.branched);
     }
 
     if (control_bubbles > 0) {

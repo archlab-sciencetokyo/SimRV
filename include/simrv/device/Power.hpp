@@ -13,6 +13,12 @@ class Machine;
 
 namespace simrv::device {
 
+enum class PowerCommand : Word {
+    Poweroff = 0x5555U,
+    Crash = 0x3333U,
+    Reboot = 0x7777U,
+};
+
 /**
  * @class PowerMmio
  * @brief SiFive Test Finisher syscon power device emulation.

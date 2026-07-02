@@ -16,7 +16,7 @@ namespace simrv::device {
 
 class VirtioDevice : public memory::TileLinkNode {
    public:
-    explicit VirtioDevice(simrv::core::Machine& machine, Word irq);
+    explicit VirtioDevice(simrv::core::Machine& machine, Word irq, Word max_queues);
     ~VirtioDevice() override = default;
 
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool override;
@@ -34,6 +34,7 @@ class VirtioDevice : public memory::TileLinkNode {
    protected:
     simrv::core::Machine& machine_; // NOLINT
     Word irq_;
+    Word max_queues_ = 0;
 
     [[nodiscard]] virtual auto get_device_id() const -> Word = 0;
     [[nodiscard]] virtual auto get_vendor_id() const -> Word { return virtio::kVendorId; }

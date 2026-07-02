@@ -33,6 +33,7 @@ struct RuntimeOptions {
 
     bool appmode = false;
     bool tuimode = false;
+    bool gui_mode = false;
     bool debugmode = false;
     bool dlog_mode = false;
     bool traplog_mode = false;
@@ -44,6 +45,11 @@ struct RuntimeOptions {
     bool cycle_accurate = false;
     bool high_performance = true;
     bool high_contrast = false;
+    bool disable_forwarding = false;
+    std::string bp_type = "2bit";
+    uint32_t btb_size = 128;
+    bool disable_ex_forwarding = false;
+    bool disable_mem_forwarding = false;
 
     // Debug / co-simulation options
     bool gdb_mode = false;
@@ -55,6 +61,7 @@ struct RuntimeOptions {
     std::string fn_cpuconfig;
     bool debug_mode = false;
     uint32_t explain_inst_val = 0;
+    double mouse_sensitivity = 1.0;
 };
 
 struct ParseResult {
