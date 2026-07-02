@@ -59,7 +59,7 @@ fi
 # Set architecture specifics
 if [[ "$ARCH" == "rv64" ]]; then
     XLEN=64
-    M_ARCH="rv64gc"
+    M_ARCH="rv64gcbv"
     M_ABI="lp64d"
     LINUX_DEFCONFIG="defconfig"
 else
