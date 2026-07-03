@@ -14,7 +14,6 @@
 #include <thread>
 
 #include "simrv/Define.hpp"
-#include "simrv/core/Boot.hpp"
 #include "simrv/core/BuildInfo.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
@@ -107,7 +106,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 sim_machine->framebuffer->set_multithreaded(true);
             }
             auto* machine_ptr = sim_machine.get();
-            std::thread sim_thread([machine_ptr]() {
+            std::thread sim_thread([machine_ptr]() -> void {
                 machine_ptr->run();
             });
 

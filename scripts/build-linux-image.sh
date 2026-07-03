@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @file build-linux-image.sh
 # @brief Modernized, high-speed boot image compiler for SimRV.
-# Packages OpenSBI v1.8.1 and Linux v7.0.9 with embedded initramfs.
+# Packages OpenSBI v1.8.1 and Linux v7.1.2 with embedded initramfs.
 
 set -euo pipefail
 
@@ -13,9 +13,9 @@ IMAGES_DIR="$ROOT_DIR/linux-images/$ARCH"
 
 # Versions
 OPENSBI_VER="1.8.1"
-LINUX_VER="7.0.9"
+LINUX_VER="7.1.2"
 BUSYBOX_VER="1.36.1"
-ALPINE_VER="3.20.0"
+ALPINE_VER="3.24.1"
 
 # Colors
 GREEN='\033[0;32m'
@@ -83,7 +83,7 @@ fi
 
 if [[ ! -f "linux-${LINUX_VER}.tar.xz" ]]; then
     print_step "Downloading Linux ${LINUX_VER}..."
-    wget -q --show-progress "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-${LINUX_VER}.tar.xz"
+    wget -q --show-progress --tries=3 "https://www.kernel.org/pub/linux/kernel/v7.x/linux-${LINUX_VER}.tar.xz"
 fi
 
 if [[ "$XLEN" == "32" ]]; then
@@ -94,7 +94,7 @@ if [[ "$XLEN" == "32" ]]; then
 else
     if [[ ! -f "alpine-minirootfs-${ALPINE_VER}-riscv64.tar.gz" ]]; then
         print_step "Downloading Alpine Linux minirootfs..."
-        wget -q --show-progress -O "alpine-minirootfs-${ALPINE_VER}-riscv64.tar.gz" "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/riscv64/alpine-minirootfs-${ALPINE_VER}-riscv64.tar.gz"
+        wget -q --show-progress -O "alpine-minirootfs-${ALPINE_VER}-riscv64.tar.gz" "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/riscv64/alpine-minirootfs-${ALPINE_VER}-riscv64.tar.gz"
     fi
 fi
 
