@@ -39,6 +39,14 @@ void OSMachine::run() {
     if (has_debug) {
         // ---- Debug path: GDB / lockstep / TUI ebreak ----
         while (is_running_) {
+            if (s_tuimode && tui && tui->is_tui_paused()) {
+                tui->set_sim_thread_sleeping(true);
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                continue;
+            }
+            if (s_tuimode && tui) {
+                tui->set_sim_thread_sleeping(false);
+            }
             prepare_cycle();
             cpu.run_cycle(*this);
             finalize_cycle();

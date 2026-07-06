@@ -47,6 +47,8 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             page_badge = "FPR";
         } else if (active_page_ == TuiRegPage::VEC) {
             page_badge = "VEC";
+        } else if (active_page_ == TuiRegPage::CACHE) {
+            page_badge = "CCHE";
         } else if (active_page_ == TuiRegPage::EXPLAIN) {
             page_badge = "EXPL";
         } else {

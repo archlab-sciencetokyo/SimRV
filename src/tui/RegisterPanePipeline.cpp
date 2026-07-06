@@ -6,6 +6,7 @@
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
 #include "simrv/pipeline/Decoder.hpp"
+#include "simrv/pipeline/PipelineSim.hpp"
 #include <format>
 #include <string>
 #include <vector>
@@ -112,6 +113,9 @@ auto get_btb_string(const simrv::pipeline::PipelineSim& ps, Register pc) -> std:
 
 auto RegisterPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
     if (machine_.s_cycle_accurate) {
+        if (logical_row < 16) {
+            return render_pipeline_timeline(cpu, logical_row, col_width + right_width);
+        }
         return render_pipeline_stages_cycle_accurate(cpu, logical_row, col_width, right_width);
     } else {
         return render_pipeline_stages_functional(cpu, logical_row, col_width, right_width);
@@ -422,6 +426,217 @@ auto RegisterPane::render_system_or_pipeline_extended(const simrv::core::CPU& cp
         }
     }
     return "";
+}
+
+auto RegisterPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical_row, int width) -> std::string {
+    auto const& ps = cpu.pipeline_sim;
+    auto const history = ps.get_cycle_history_copy();
+
+    if (logical_row == 0) {
+        return section_line("Pipeline Execution Timeline (Last 5 Inst)", width);
+    }
+
+    if (history.empty()) {
+        if (logical_row == 1) {
+            return format_to_width("  No cycle history collected yet.", width);
+        }
+        return format_to_width("", width);
+    }
+
+    // Compute the prefix width of each instruction row dynamically so header
+    // and data rows always align regardless of xlen (RV32: 8 hex digits, RV64: 16).
+    //   "  0x" (4) + addr_digits + " " (1) + mnem<5 (5) + " |" (2) = addr_digits + 12
+    int const addr_digits = static_cast<int>(simrv::xlen::kXLenHexDigits);
+    int const desc_width = addr_digits + 12;
+    int const cycle_col_width = 5;
+    // Cap at 10 cycle columns so the grid never overflows the pane width
+    constexpr int kMaxCycleColumns = 10;
+    int const max_cycles = std::min(kMaxCycleColumns, (width - desc_width) / cycle_col_width);
+    if (max_cycles <= 0) {
+        if (logical_row == 1) {
+            return format_to_width("  TUI Pane too narrow for timeline.", width);
+        }
+        return format_to_width("", width);
+    }
+
+    // Determine cycle window to display
+    int const history_size = static_cast<int>(history.size());
+    int const num_cols = std::min(max_cycles, history_size);
+    int const start_idx = history_size - num_cols;
+
+    // Collect unique PCs in this window chronologically.
+    struct InstRef {
+        Register pc = 0;
+        isa::OperationId op_id = isa::OperationId::UNKNOWN;
+        
+        auto operator==(const InstRef& o) const -> bool { return pc == o.pc; }
+    };
+    std::vector<InstRef> active_insts;
+    for (int i = start_idx; i < history_size; ++i) {
+        auto const& snap = history.at(i);
+        std::array<simrv::pipeline::PipelineCycleSnapshot::StageInfo const*, 5> stages = {&snap.w, &snap.m, &snap.e, &snap.d, &snap.f};
+        for (auto const* stage : stages) {
+            if (stage->valid && stage->pc != 0) {
+                InstRef ref{.pc = stage->pc, .op_id = stage->op_id};
+                if (std::ranges::find(active_insts, ref) == active_insts.end()) {
+                    active_insts.push_back(ref);
+                }
+            }
+        }
+    }
+
+    // Keep only the 5 most-recently-seen instructions to avoid overflow
+    constexpr int kMaxInstRows = 5;
+    if (static_cast<int>(active_insts.size()) > kMaxInstRows) {
+        active_insts.erase(active_insts.begin(), active_insts.begin() + (static_cast<int>(active_insts.size()) - kMaxInstRows));
+    }
+
+    if (logical_row == 1) {
+        // Header prefix width = addr_digits + 10 chars ("  0x" + addr + " " + mnem<5)
+        std::string header = std::format("{:<{}} |", "Instruction PC/Mnem", addr_digits + 10);
+        for (int i = start_idx; i < history_size; ++i) {
+            header += std::format(" #{:<2d} ", history.at(i).cycle % 100);
+        }
+        return format_to_width(header, width);
+    }
+
+    int const inst_row = logical_row - 2;
+    if (inst_row >= 0 && static_cast<std::size_t>(inst_row) < active_insts.size() && inst_row < 5) {
+        auto const& inst = active_insts.at(inst_row);
+        
+        // Get assembly mnemonic
+        std::string_view op_name = "UNK";
+        if (static_cast<std::size_t>(inst.op_id) < simrv::pipeline::OPERATION_NAME.size()) {
+            op_name = simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(inst.op_id));
+        }
+        std::string line = std::format("  0x{:0{}x} {:<5} |", inst.pc, addr_digits, op_name);
+
+        for (int i = start_idx; i < history_size; ++i) {
+            auto const& snap = history.at(i);
+            std::string stage_lbl = " .   ";
+            // Check stages
+            if (snap.w.valid && snap.w.pc == inst.pc) {
+                stage_lbl = "\033[1;37m WB\033[0m  ";
+            } else if (snap.m.valid && snap.m.pc == inst.pc) {
+                stage_lbl = snap.m.stalled ? "\033[38;5;203m ME*\033[0m " : "\033[1;34m ME\033[0m  ";
+            } else if (snap.e.valid && snap.e.pc == inst.pc) {
+                stage_lbl = snap.e.stalled ? "\033[38;5;203m EX*\033[0m " : "\033[1;31m EX\033[0m  ";
+            } else if (snap.d.valid && snap.d.pc == inst.pc) {
+                stage_lbl = snap.d.stalled ? "\033[38;5;203m ID*\033[0m " : "\033[1;33m ID\033[0m  ";
+            } else if (snap.f.valid && snap.f.pc == inst.pc) {
+                stage_lbl = snap.f.stalled ? "\033[38;5;203m IF*\033[0m " : "\033[1;32m IF\033[0m  ";
+            }
+            line += stage_lbl;
+        }
+        return format_to_width(line, width);
+    }
+
+    if (logical_row == 9) {
+        return section_line("Legend: IF: Green | ID: Yellow | EX: Red | ME: Blue | WB: White (*Stall)", width);
+    }
+
+    return format_to_width("", width);
+}
+
+auto RegisterPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+    int const width = col_width + right_width;
+    auto const& ic = cpu.icache;
+    auto const& dc = cpu.dcache;
+
+    auto get_stats_strings = [](uint64_t hits, uint64_t misses) {
+        uint64_t total = hits + misses;
+        double ratio = (total == 0) ? 1.0 : (static_cast<double>(hits) / static_cast<double>(total));
+        double miss_ratio = (total == 0) ? 0.0 : (static_cast<double>(misses) / static_cast<double>(total));
+        std::string hits_str = std::format("Hits: {:>9}", hits);
+        std::string misses_str = std::format("Misses: {:>8}", misses);
+        std::string miss_rate = std::format("Miss Rate: {:>6.2f}%", miss_ratio * 100.0);
+        return std::make_tuple(hits_str, misses_str, miss_rate, ratio);
+    };
+
+    auto make_bar = [](double ratio, int bar_width) -> std::string {
+        int filled = static_cast<int>(ratio * bar_width);
+        if (filled < 0) filled = 0;
+        if (filled > bar_width) filled = bar_width;
+        std::string bar = "\033[38;5;121m";
+        for (int i = 0; i < filled; ++i) {
+            bar += "█";
+        }
+        bar += "\033[38;5;244m";
+        for (int i = filled; i < bar_width; ++i) {
+            bar += "░";
+        }
+        bar += "\033[0m";
+        return bar;
+    };
+
+    switch (logical_row) {
+        case 0:
+            return section_line("L1 Instruction Cache (ICache)", width);
+        case 1:
+            {
+                auto [h, m, mr, ratio] = get_stats_strings(ic.hit_count(), ic.miss_count());
+                return render_pair(h, m, kSakuraMint, "Type", "Direct-Mapped", kSakuraVal, col_width, right_width, 0);
+            }
+        case 2:
+            {
+                auto [h, m, mr, ratio] = get_stats_strings(ic.hit_count(), ic.miss_count());
+                std::string bar = make_bar(ratio, 20);
+                return render_pair(mr, bar, kSakuraPeach, "Line/Way", "32B / 4-way", kSakuraVal, col_width, right_width, 0);
+            }
+        case 3:
+            return section_line("L1 Data Cache (DCache)", width);
+        case 4:
+            {
+                auto [h, m, mr, ratio] = get_stats_strings(dc.hit_count(), dc.miss_count());
+                return render_pair(h, m, kSakuraMint, "Type", "Set-Associative", kSakuraVal, col_width, right_width, 0);
+            }
+        case 5:
+            {
+                auto [h, m, mr, ratio] = get_stats_strings(dc.hit_count(), dc.miss_count());
+                std::string bar = make_bar(ratio, 20);
+                return render_pair(mr, bar, kSakuraPeach, "Line/Way", "32B / 4-way", kSakuraVal, col_width, right_width, 0);
+            }
+        case 6:
+            return section_line("L1 Cache Set Occupancy Map", width);
+        case 7:
+        case 8:
+        case 9:
+        case 10:
+        case 11:
+        case 12:
+        case 13:
+        case 14:
+            {
+                int const base_set = (logical_row - 7) * 2;
+                
+                auto make_set_str = [](auto const& cache, int set_idx) -> std::string {
+                    std::string s = std::format("Set {:02d}: [", set_idx);
+                    for (uint32_t w = 0; w < 4; ++w) {
+                        if (cache.is_line_valid(set_idx, w)) {
+                            s += "\033[1;32m■\033[0m";
+                        } else {
+                            s += "\033[38;5;244m.\033[0m";
+                        }
+                    }
+                    s += "]";
+                    return s;
+                };
+
+                std::string ic_left = make_set_str(ic, base_set);
+                std::string ic_right = make_set_str(ic, base_set + 1);
+                std::string dc_left = make_set_str(dc, base_set);
+                std::string dc_right = make_set_str(dc, base_set + 1);
+
+                std::string left_col = std::format("  IC {} {}", ic_left, ic_right);
+                std::string right_col = std::format("  DC {} {}", dc_left, dc_right);
+
+                return format_to_width(left_col, col_width) + format_to_width(right_col, right_width);
+            }
+        case 15:
+            return section_line("Occupancy Block: ■ (Valid) | . (Empty)", width);
+        default:
+            return format_to_width("", width);
+    }
 }
 
 }  // namespace simrv::tui

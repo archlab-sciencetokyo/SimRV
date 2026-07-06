@@ -12,6 +12,7 @@
 #include <queue>
 #include <mutex>
 #include <atomic>
+#include <thread>
 
 #include "simrv/xlen/Types.hpp"
 #include "simrv/isa/Base.hpp"
@@ -36,6 +37,7 @@ enum class TuiRegPage {
     FPR,
     VEC,
     PIPELINE,
+    CACHE,
     EXPLAIN
 };
 
@@ -71,6 +73,8 @@ class Tui {
 
     void set_paused(bool p);
     [[nodiscard]] auto is_paused() const -> bool { return paused_; }
+    void set_sim_thread_sleeping(bool s) { sim_thread_is_sleeping_.store(s, std::memory_order_relaxed); }
+    [[nodiscard]] auto is_sim_thread_sleeping() const -> bool { return sim_thread_is_sleeping_.load(std::memory_order_relaxed); }
     void update_cache();
 
     void set_status_override(const std::string& status) { status_override_ = status; }
@@ -143,6 +147,8 @@ class Tui {
 
     std::string esc_buf_;
     std::atomic<bool> tui_loop_paused_{false};
+    std::atomic<bool> sim_thread_is_sleeping_{false};
+    std::thread::id main_thread_id_;
 
     auto consume_control_sequence(uint8_t first_byte) -> bool;
     auto parse_sgr_mouse(const std::string& seq, int& b, int& x, int& y) -> bool;

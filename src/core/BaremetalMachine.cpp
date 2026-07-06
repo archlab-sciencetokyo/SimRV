@@ -43,6 +43,12 @@ void BaremetalMachine::run() {
     if (s_tuimode && tui) {
         // ---- TUI / debug path (ebreak-aware, single-threaded) ----
         while (is_running_) {
+            if (tui->is_tui_paused()) {
+                tui->set_sim_thread_sleeping(true);
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                continue;
+            }
+            tui->set_sim_thread_sleeping(false);
             cpu.run_cycle_baremetal(*this);
 
             // Ebreak pause hook

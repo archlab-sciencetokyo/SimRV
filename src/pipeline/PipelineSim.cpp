@@ -53,6 +53,10 @@ void PipelineSim::reset() {
     branch_history_table_.fill(1);
     btb_.clear();
     btb_.resize(config.btb_entries);
+    {
+        std::scoped_lock lock(history_mutex_);
+        cycle_history_.clear();
+    }
     gshare_history_ = 0;
 
     control_bubble_remaining_ = 0;
@@ -342,6 +346,7 @@ void PipelineSim::tick_pipeline() {
         init_execution_latency(e_reg_);
         d_reg_ = f_reg_;
         f_reg_ = PipelineReg{};
+        record_cycle_snapshot();
         return;
     }
 
@@ -365,10 +370,12 @@ void PipelineSim::tick_pipeline() {
     decrement_latencies();
 
     if (resolve_branches_ex()) {
+        record_cycle_snapshot();
         return;
     }
 
     stage_register_transfers(MEM_stalled, EX_stalled, ID_stalled, IF_stalled);
+    record_cycle_snapshot();
 }
 
 auto PipelineSim::step_instruction(Register pc, isa::Opcode opcode, RegId rd, RegId rs1, RegId rs2,
@@ -424,6 +431,49 @@ auto PipelineSim::step_instruction(Register pc, isa::Opcode opcode, RegId rd, Re
     cycles_spent++;
 
     return cycles_spent;
+}
+
+void PipelineSim::record_cycle_snapshot() {
+    PipelineCycleSnapshot snap;
+    snap.cycle = cycle_count_;
+
+    snap.f.pc = f_reg_.pc;
+    snap.f.op_id = f_reg_.op_id;
+    snap.f.valid = f_reg_.valid;
+    snap.f.stalled = (icache_stall_remaining_ > 0 || tlb_stall_remaining_ > 0);
+
+    snap.d.pc = d_reg_.pc;
+    snap.d.op_id = d_reg_.op_id;
+    snap.d.valid = d_reg_.valid;
+    snap.d.stalled = check_stall_id();
+
+    snap.e.pc = e_reg_.pc;
+    snap.e.op_id = e_reg_.op_id;
+    snap.e.valid = e_reg_.valid;
+    snap.e.stalled = (div_busy_cycles_remaining_ > 0);
+
+    snap.m.pc = m_reg_.pc;
+    snap.m.op_id = m_reg_.op_id;
+    snap.m.valid = m_reg_.valid;
+    snap.m.stalled = (dcache_stall_remaining_ > 0);
+
+    snap.w.pc = w_reg_.pc;
+    snap.w.op_id = w_reg_.op_id;
+    snap.w.valid = w_reg_.valid;
+    snap.w.stalled = false;
+
+    {
+        std::scoped_lock lock(history_mutex_);
+        cycle_history_.push_back(snap);
+        if (cycle_history_.size() > 80) {
+            cycle_history_.pop_front();
+        }
+    }
+}
+
+auto PipelineSim::get_cycle_history_copy() const -> std::vector<PipelineCycleSnapshot> {
+    std::scoped_lock lock(history_mutex_);
+    return {cycle_history_.begin(), cycle_history_.end()};
 }
 
 } // namespace simrv::pipeline

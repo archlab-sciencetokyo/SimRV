@@ -68,6 +68,7 @@ void handle_sigwinch(int sig) {
 }  // namespace
 
 Tui::Tui(simrv::core::Machine& machine) : machine_(machine) {
+    main_thread_id_ = std::this_thread::get_id();
     last_speed_update_ = std::chrono::steady_clock::now();
     vt_.set_scroll_offset_callback([this](int lines) -> void {
         if (scroll_offset_ > 0) {
@@ -436,6 +437,8 @@ void Tui::cycle_reg_page() {
     } else if (rp == TuiRegPage::VEC) {
         rp = TuiRegPage::PIPELINE;
     } else if (rp == TuiRegPage::PIPELINE) {
+        rp = TuiRegPage::CACHE;
+    } else if (rp == TuiRegPage::CACHE) {
         rp = TuiRegPage::EXPLAIN;
     } else {
         rp = TuiRegPage::GPR;
@@ -717,6 +720,13 @@ void Tui::update() {
 void Tui::pause_loop() {
     tui_loop_paused_ = true;
     set_paused(true);
+
+    if (std::this_thread::get_id() == main_thread_id_) {
+        while (!sim_thread_is_sleeping_.load(std::memory_order_relaxed) && tui_loop_paused_ && machine_.is_running_ && !machine_.is_shutdown_) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+
     render();
 
     while (tui_loop_paused_ && (machine_.is_running_ || machine_.is_shutdown_)) {

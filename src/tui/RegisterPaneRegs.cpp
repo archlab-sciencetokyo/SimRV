@@ -133,6 +133,8 @@ auto RegisterPane::render_registers_or_pipeline(const simrv::core::CPU& cpu, con
                 return render_registers_double_column(st, logical_row, col_width, right_width);
             } else if (page_ == TuiRegPage::PIPELINE) {
                 return render_pipeline_stages(cpu, logical_row, col_width, right_width);
+            } else if (page_ == TuiRegPage::CACHE) {
+                return render_cache_stats(cpu, logical_row, col_width, right_width);
             }
         }
     }

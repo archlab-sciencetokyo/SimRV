@@ -857,6 +857,108 @@ void explain_pipeline_hazards(OperationId op_id, InstFormat fmt, uint32_t rd_val
     }
 }
 
+void explain_datapath_diagram(isa::OperationId op_id, isa::InstFormat fmt, isa::Opcode op, bool use_color) {
+    auto c = [use_color](std::string_view ansi_code) -> std::string_view {
+        return use_color ? ansi_code : "";
+    };
+
+    std::println("\n{}Hardware Data-Path Routing:{}", c(kBold), c(kReset));
+
+    // Identify instruction classes
+    bool const is_load = (op == isa::Opcode::Load) || (op == isa::Opcode::LoadFp);
+    bool const is_store = (op == isa::Opcode::Store) || (op == isa::Opcode::StoreFp);
+    bool const is_csr = (op_id >= isa::OperationId::CSRRW && op_id <= isa::OperationId::CSRRCI);
+    bool const is_branch = (op == isa::Opcode::Branch);
+    bool const is_jal = (op_id == isa::OperationId::JAL);
+    bool const is_jalr = (op_id == isa::OperationId::JALR);
+
+    if (is_load) {
+        std::println(
+            "  [rs1 (Base Reg)] ──► [Read Data 1] ──────────────┐\n"
+            "                                                  ▼\n"
+            "                                             [ ALU Addr ] ──► [ Data Memory ] ──► [rd (Dest Reg)]\n"
+            "                                             [   Calc   ]     [ (Read Address) ]\n"
+            "                                                  ▲\n"
+            "  [Immediate (I)]  ──► [Sign-Extend Unit] ────────┘"
+        );
+    } else if (is_store) {
+        std::println(
+            "  [rs1 (Base Reg)] ──► [Read Data 1] ──────────────┐\n"
+            "                                                  ▼\n"
+            "                                             [ ALU Addr ] ──► [ Data Memory ]\n"
+            "                                             [   Calc   ]     [ (Write Address) ]\n"
+            "                                                  ▲                    ▲\n"
+            "  [Immediate (S)]  ──► [Sign-Extend Unit] ────────┘                    │\n"
+            "                                                                       │\n"
+            "  [rs2 (Src Reg)]  ──► [Read Data 2] ──────────────────────────────────┘\n"
+            "                                                                  (Write Data)"
+        );
+    } else if (is_branch) {
+        std::println(
+            "  [rs1 (Src Reg 1)] ──► [Read Data 1] ─────────────┐\n"
+            "                                                   ▼\n"
+            "                                              [ ALU / Comp ] ──► [ Branch Control ]\n"
+            "                                              [ (Evaluate) ]     [   Taken / NT   ] ──► [PC Target]\n"
+            "                                                   ▲                    ▲\n"
+            "  [rs2 (Src Reg 2)] ──► [Read Data 2] ─────────────┘                    │\n"
+            "                                                                        │\n"
+            "  [Immediate (B)]   ──► [Sign-Extend Unit] ─────────────────────────────┘\n"
+            "                                                                  (Target Offset)"
+        );
+    } else if (is_jal) {
+        std::println(
+            "  [Current PC] ───────────────────► [ Adder (+4) ] ────────────────────► [rd (Dest Reg)]\n"
+            "        │\n"
+            "        ▼\n"
+            "  [Current PC] ─────────┐\n"
+            "                        ▼\n"
+            "                   [ ALU Target ] ◄── [Sign-Extend Unit] ◄── [Immediate (J)]\n"
+            "                   [   Adder    ]\n"
+            "                        │\n"
+            "                        ▼\n"
+            "                 [New PC Target]"
+        );
+    } else if (is_jalr) {
+        std::println(
+            "  [Current PC] ───────────────────► [ Adder (+4) ] ────────────────────► [rd (Dest Reg)]\n"
+            "\n"
+            "  [rs1 (Target Reg)] ──► [Read Data 1] ────────────┐\n"
+            "                                                   ▼\n"
+            "                                              [ ALU Target ] ──► [New PC Target]\n"
+            "                                              [   Adder    ]\n"
+            "                                                   ▲\n"
+            "  [Immediate (I)]    ──► [Sign-Extend Unit] ───────┘"
+        );
+    } else if (is_csr) {
+        std::println(
+            "  [rs1 / uimm] ────────► [ Read Data 1 / uimm ] ───┐\n"
+            "                                                   ▼\n"
+            "                                              [ CSR Logic  ] ──► [rd (Dest Reg)] (Old Value)\n"
+            "                                              [ (ALU/Mux)  ]\n"
+            "                                                   ▲\n"
+            "  [CSR Address] ───────► [Read CSR State] ─────────┴───────────► [Write New CSR State]"
+        );
+    } else if (fmt == isa::InstFormat::R) {
+        std::println(
+            "  [rs1 (Src Reg 1)] ──► [Read Data 1] ────────────────────────────► [   ALU    ]\n"
+            "                                                                    [ (Op: Math) ] ──► [rd (Dest Reg)]\n"
+            "  [rs2 (Src Reg 2)] ──► [Read Data 2] ──► [Mux: RS2 Select] ──────► [          ]\n"
+            "                                                 ▲\n"
+            "                                           (Selects RS2)"
+        );
+    } else if (fmt == isa::InstFormat::I) {
+        std::println(
+            "  [rs1 (Src Reg 1)] ──► [Read Data 1] ────────────────────────────► [   ALU    ]\n"
+            "                                                                    [ (Op: Math) ] ──► [rd (Dest Reg)]\n"
+            "  [Immediate (I)]   ──► [Sign-Extend] ───► [Mux: RS2 Select] ──────► [          ]\n"
+            "                                                 ▲\n"
+            "                                           (Selects Imm)"
+        );
+    } else {
+        std::println("  (Data-path layout not defined for this instruction format)");
+    }
+}
+
 } // namespace
 
 void explain_instruction(uint32_t raw_inst) {
@@ -968,6 +1070,8 @@ void explain_instruction(uint32_t raw_inst) {
 
         std::println("\n--------------------------------------------------------------------------------");
         explain_pipeline_hazards(op_id, fmt, rd_val, rs1_val, rs2_val, rs3_val, op, use_color);
+        std::println("\n--------------------------------------------------------------------------------");
+        explain_datapath_diagram(op_id, fmt, op, use_color);
 
     } else {
         std::println("  Mnemonic         : {}UNKNOWN / RESERVED{}", c(kBoldFgRed), c(kReset));

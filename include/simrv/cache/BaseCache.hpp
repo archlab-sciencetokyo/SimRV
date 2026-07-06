@@ -66,6 +66,18 @@ class BaseCache {
 
     [[nodiscard]] auto hit_count() const -> uint64_t { return hits_; }
     [[nodiscard]] auto miss_count() const -> uint64_t { return misses_; }
+    [[nodiscard]] auto is_line_valid(uint32_t set_idx, uint32_t way_idx) const -> bool {
+        if (set_idx < kNumSets && way_idx < kWays) {
+            return sets_.at(set_idx).at(way_idx).valid;
+        }
+        return false;
+    }
+    [[nodiscard]] auto get_line_tag(uint32_t set_idx, uint32_t way_idx) const -> Address {
+        if (set_idx < kNumSets && way_idx < kWays) {
+            return sets_.at(set_idx).at(way_idx).tag;
+        }
+        return ~Address{0};
+    }
 
    protected:
     std::array<std::array<CacheLine, kWays>, kNumSets> sets_{};

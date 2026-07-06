@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <vector>
 #include <array>
+#include <deque>
+#include <mutex>
 #include <simrv/Define.hpp>
 #include <simrv/xlen/Types.hpp>
 
@@ -57,6 +59,21 @@ struct CpuConfig {
     bool enable_ex_forwarding = true;
     bool enable_mem_forwarding = true;
 };
+ 
+struct PipelineCycleSnapshot {
+    uint64_t cycle = 0;
+    struct StageInfo {
+        Register pc = 0;
+        isa::OperationId op_id = isa::OperationId::UNKNOWN;
+        bool valid = false;
+        bool stalled = false;
+    };
+    StageInfo f;
+    StageInfo d;
+    StageInfo e;
+    StageInfo m;
+    StageInfo w;
+};
 
 class PipelineSim {
 public:
@@ -85,6 +102,7 @@ public:
     [[nodiscard]] auto structural_stalls() const -> uint64_t { return structural_stalls_; }
     [[nodiscard]] auto data_hazard_stalls() const -> uint64_t { return data_hazard_stalls_; }
     [[nodiscard]] auto control_hazard_bubbles() const -> uint64_t { return control_hazard_bubbles_; }
+    [[nodiscard]] auto get_cycle_history_copy() const -> std::vector<PipelineCycleSnapshot>;
 
     // Exposed pipeline stage registers and predictor tables for TUI visualizer
     PipelineReg f_reg_; // IF stage
@@ -95,6 +113,8 @@ public:
 
     std::array<uint8_t, 256> branch_history_table_{}; // 2-bit dynamic bimodal predictor (0-3)
     std::vector<BtbEntry> btb_;                       // Branch Target Buffer
+    std::deque<PipelineCycleSnapshot> cycle_history_; // Cycle-by-cycle pipeline stage snapshot history
+    mutable std::mutex history_mutex_;                // Mutex protecting cycle history access
 
     uint32_t control_bubble_remaining_ = 0;
     uint32_t tlb_stall_remaining_ = 0;
@@ -104,6 +124,7 @@ public:
 
 private:
     void tick_pipeline();
+    void record_cycle_snapshot();
     void init_execution_latency(PipelineReg& reg);
     [[nodiscard]] auto check_stall_mem() const -> bool;
     [[nodiscard]] auto check_stall_ex() const -> bool;
