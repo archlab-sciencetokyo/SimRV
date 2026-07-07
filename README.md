@@ -161,6 +161,7 @@ The ISA string passed to Spike is derived automatically from the active MISA pro
 ## Documentation
 
 - Architecture overview: `docs/ARCHITECTURE.md`
+- Baremetal programming and MMIO guide: [docs/BAREMETAL_GUIDE.md](file:///home/archlab/ltrunk/workspace/tools/SimRV/docs/BAREMETAL_GUIDE.md)
 - Refactor concept: `REFACTOR_CLASS_CONCEPT.md`
 
 Generate API docs (if Doxygen is installed):
