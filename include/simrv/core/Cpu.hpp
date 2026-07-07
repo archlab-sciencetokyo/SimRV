@@ -131,6 +131,8 @@ class CPU {
     void run_cycle(Machine& machine);
     /// Execute one full CPU cycle in optimized baremetal mode.
     void run_cycle_baremetal(Machine& machine);
+    /// Record instruction details to the TUI trace buffer if enabled.
+    void record_trace_for_tui(Machine& machine);
     /// Execute a cached instruction using the monolithic fast path in IA mode.
     void execute_cached_op_fast(Machine& machine, CachedOp& op);
     

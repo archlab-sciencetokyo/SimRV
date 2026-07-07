@@ -211,51 +211,55 @@ void CPU::run_cycle(Machine& machine) {
     if (machine.s_tuimode && machine.tui &&
         (machine.tui->get_right_panel_mode() == simrv::tui::TuiRightPanelMode::LiveTrace ||
          machine.tui->is_trace_enabled())) {
-        const auto op_id = pipeline_context.op_id;
-        const auto opcode = pipeline_context.opcode;
-        const auto rd = pipeline_context.rd;
-        const auto rs1 = pipeline_context.rs1;
-        const auto rs2 = pipeline_context.rs2;
-        
-        Register rd_val = 0;
-        Register rs1_val = 0;
-        Register rs2_val = 0;
-        
-        const bool rd_fp = isa::is_destination_fp(opcode, op_id);
-        const bool rs1_fp = isa::is_rs1_fp(opcode, op_id);
-        const bool rs2_fp = isa::is_rs2_fp(opcode, op_id);
-        
-        if (rd_fp) {
-            rd_val = state_.regs.read_fp(rd);
-        } else {
-            rd_val = state_.regs.read(rd);
-        }
-        
-        if (rs1_fp) {
-            rs1_val = state_.regs.read_fp(rs1);
-        } else {
-            rs1_val = state_.regs.read(rs1);
-        }
-        
-        if (rs2_fp) {
-            rs2_val = state_.regs.read_fp(rs2);
-        } else {
-            rs2_val = state_.regs.read(rs2);
-        }
-
-        machine.tui->record_instruction(
-            pipeline_context.cpc,
-            opcode,
-            op_id,
-            std::to_underlying(rd),
-            rd_val,
-            std::to_underlying(rs1),
-            rs1_val,
-            std::to_underlying(rs2),
-            rs2_val,
-            pipeline_context.imm
-        );
+        record_trace_for_tui(machine);
     }
+}
+
+void CPU::record_trace_for_tui(Machine& machine) {
+    const auto op_id = pipeline_context.op_id;
+    const auto opcode = pipeline_context.opcode;
+    const auto rd = pipeline_context.rd;
+    const auto rs1 = pipeline_context.rs1;
+    const auto rs2 = pipeline_context.rs2;
+    
+    Register rd_val = 0;
+    Register rs1_val = 0;
+    Register rs2_val = 0;
+    
+    const bool rd_fp = isa::is_destination_fp(opcode, op_id);
+    const bool rs1_fp = isa::is_rs1_fp(opcode, op_id);
+    const bool rs2_fp = isa::is_rs2_fp(opcode, op_id);
+    
+    if (rd_fp) {
+        rd_val = state_.regs.read_fp(rd);
+    } else {
+        rd_val = state_.regs.read(rd);
+    }
+    
+    if (rs1_fp) {
+        rs1_val = state_.regs.read_fp(rs1);
+    } else {
+        rs1_val = state_.regs.read(rs1);
+    }
+    
+    if (rs2_fp) {
+        rs2_val = state_.regs.read_fp(rs2);
+    } else {
+        rs2_val = state_.regs.read(rs2);
+    }
+
+    machine.tui->record_instruction(
+        pipeline_context.cpc,
+        opcode,
+        op_id,
+        std::to_underlying(rd),
+        rd_val,
+        std::to_underlying(rs1),
+        rs1_val,
+        std::to_underlying(rs2),
+        rs2_val,
+        pipeline_context.imm
+    );
 }
 
 void CPU::run_cycle_baremetal(Machine& machine) {
@@ -267,6 +271,11 @@ void CPU::run_cycle_baremetal(Machine& machine) {
         if (simrv::compiler::likely(cached != nullptr)) {
             execute_cached_op_fast(machine, *cached);
             clint_mmio.mcycle++;
+            if (machine.s_tuimode && machine.tui &&
+                (machine.tui->get_right_panel_mode() == simrv::tui::TuiRightPanelMode::LiveTrace ||
+                 machine.tui->is_trace_enabled())) {
+                record_trace_for_tui(machine);
+            }
             return;
         }
     }
@@ -296,6 +305,11 @@ void CPU::run_cycle_baremetal(Machine& machine) {
     }
 
     clint_mmio.mcycle++;
+    if (machine.s_tuimode && machine.tui &&
+        (machine.tui->get_right_panel_mode() == simrv::tui::TuiRightPanelMode::LiveTrace ||
+         machine.tui->is_trace_enabled())) {
+        record_trace_for_tui(machine);
+    }
 }
 
 void CPU::run_memory_stage_baremetal(Machine& machine) {
