@@ -208,6 +208,16 @@ auto RegisterPane::render_cycle_accurate_core_stats(const simrv::core::CPU& cpu,
         double i_ratio =
             (i_total == 0) ? 0.0 : static_cast<double>(i_hits) / static_cast<double>(i_total);
 
+        // In high-performance mode the fetch stage bypasses the ICache entirely;
+        // report this explicitly instead of showing misleading 0% stats.
+        const bool hp_mode = cpu.machine_ && cpu.machine_->s_high_performance;
+        if (hp_mode && i_total == 0) {
+            std::string color = std::format(
+                "  {}L1-I Cache\033[0m     : {}bypassed (high-perf mode)\033[0m",
+                kSakuraText, kSakuraMuted);
+            return format_to_width(color, width);
+        }
+
         std::string suffix = std::format(" {:5.1f}% (H:{} M:{})", i_ratio * 100.0,
                                          format_compact(i_hits), format_compact(i_misses));
         std::string prefix = "  L1-I Cache     : [";
@@ -369,11 +379,17 @@ auto RegisterPane::render_cycle_accurate_mix_stats(const simrv::core::CPU& cpu, 
                            ? 0.0
                            : static_cast<double>(vec_count * 100ULL) / static_cast<double>(total);
 
-        std::string color = std::format(
-            "  {}Inst Mix\033[0m       : {}ALU:{:.1f}%\033[0m {}MEM:{:.1f}%\033[0m "
-            "{}CTRL:{:.1f}%\033[0m {}SYS:{:.1f}%\033[0m {}VEC:{:.1f}%\033[0m",
-            kSakuraText, kSakuraMint, alu_p, kSakuraSky, mem_p, kSakuraPeach, ctrl_p, kSakuraPink, sys_p,
-            kSakuraVal, vec_p);
+        // Build the inst mix line, suppressing zero-percentage categories
+        std::string color = std::format("  {}Inst Mix\033[0m       :", kSakuraText);
+        auto append_cat = [&](const char* label, const char* col, double pct) {
+            if (pct < 0.05) return; // suppress 0.0%
+            color += std::format(" {}{}: {:.1f}%\033[0m", col, label, pct);
+        };
+        append_cat("ALU",  kSakuraMint,  alu_p);
+        append_cat("MEM",  kSakuraSky,   mem_p);
+        append_cat("CTRL", kSakuraPeach, ctrl_p);
+        append_cat("SYS",  kSakuraPink,  sys_p);
+        append_cat("VEC",  kSakuraCoral, vec_p);
 
         return format_to_width(color, width);
     }
