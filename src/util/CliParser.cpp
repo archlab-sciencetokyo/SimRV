@@ -258,11 +258,6 @@ auto is_baremetal_option(std::string_view arg) -> bool {
 auto is_ca_option(std::string_view arg) -> bool {
     return arg == "--ca" || arg == "--cycle-accurate" || arg == "-C" || arg == "--high-accuracy" || arg == "--accuracy-mode";
 }
-
-auto is_ooo_option(std::string_view arg) -> bool {
-    return arg == "--ooo" || arg == "--out-of-order";
-}
-
 auto is_ia_option(std::string_view arg) -> bool {
     return arg == "--ia" || arg == "--high-performance" || arg == "--perf-mode";
 }
@@ -436,12 +431,6 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
     if (is_ca_option(arg)) {
         result.options.cycle_accurate = true;
         result.options.high_performance = false;
-        return true;
-    }
-    if (is_ooo_option(arg)) {
-        result.options.cycle_accurate = true;
-        result.options.high_performance = false;
-        result.options.enable_ooo = true;
         return true;
     }
     if (is_ia_option(arg)) {
@@ -674,7 +663,6 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     machine->s_cycle_accurate = options.cycle_accurate;
     machine->s_high_performance = options.high_performance;
     machine->s_fn_cpuconfig = options.fn_cpuconfig;
-    machine->cpu.pipeline_sim.config.enable_ooo = options.enable_ooo;
     machine->cpu.pipeline_sim.config.enable_forwarding = !options.disable_forwarding;
     machine->cpu.pipeline_sim.config.enable_ex_forwarding = !options.disable_ex_forwarding;
     machine->cpu.pipeline_sim.config.enable_mem_forwarding = !options.disable_mem_forwarding;

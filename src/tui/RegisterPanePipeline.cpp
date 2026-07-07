@@ -123,9 +123,6 @@ auto RegisterPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logic
 
 auto RegisterPane::render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
     int const val = logical_row - 16;
-    if (cpu.pipeline_sim.config.enable_ooo) {
-        return render_pipeline_stages_ooo(cpu, val, col_width, right_width);
-    }
     if (val >= 0 && val <= 5) {
         return render_pipeline_stages_ca_core(cpu, val, col_width + right_width);
     }
@@ -193,76 +190,7 @@ auto RegisterPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu
     }
 }
 
-auto RegisterPane::render_pipeline_stages_ooo(const simrv::core::CPU& cpu, int val, int col_width, int right_width) -> std::string {
-    auto& ps = cpu.pipeline_sim;
-    const auto* model = ps.get_model();
-    const int width = col_width + right_width;
-    
-    if (!model) return format_to_width("", width);
 
-    switch (val) {
-        case 0:
-            return section_line("Pipeline Stages (Out-of-Order Mode)", width);
-        case 1:
-            {
-                size_t const occ = model->get_rob_occupancy();
-                size_t const size = model->get_rob_size();
-                size_t const pct = size > 0 ? (occ * 10 / size) : 0;
-                std::string bar = "[";
-                for (size_t i = 0; i < 10; i++) {
-                    if (i < pct) bar += "█";
-                    else bar += "░";
-                }
-                bar += "]";
-                return format_to_width(std::format("  \033[1;38;5;189mROB Occ\033[0m: {}/{} {}", occ, size, bar), width);
-            }
-        case 2:
-        case 3:
-        case 4:
-        case 5:
-            {
-                auto entries = model->get_rob_entries();
-                size_t const idx = val - 2;
-                if (idx < entries.size()) {
-                    const auto& entry = entries.at(idx);
-                    std::string_view op_name = "UNKNOWN";
-                    if (static_cast<std::size_t>(entry.op_id) < simrv::pipeline::OPERATION_NAME.size()) {
-                        op_name = simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(entry.op_id));
-                    }
-                    std::string status = entry.ready ? "\033[38;5;121mReady\033[0m" : "\033[38;5;218mExec\033[0m";
-                    std::string markers = "";
-                    if (entry.head) markers += " <- Head";
-                    if (entry.tail) markers += " <- Tail";
-                    return format_to_width(std::format("    [0x{:0{}x}] \033[1;38;5;183m{:<6}\033[0m [{}]{}",
-                                                       entry.pc, simrv::xlen::kXLenHexDigits, op_name, status, markers), width);
-                } else {
-                    return format_to_width("    [empty ROB entry]", width);
-                }
-            }
-        case 6:
-            return section_line("Reservation Stations & LSU", width);
-        case 7:
-            {
-                size_t const occ = model->get_rs_occupancy();
-                return format_to_width(std::format("  \033[1;38;5;189mRS Occ\033[0m : {} active entries", occ), width);
-            }
-        case 8:
-            {
-                auto [status, color] = get_stall_status(model->dcache_stall_remaining() > 0, "D$ Miss Stall");
-                return render_pair("LSU State", status, color,
-                                   "Div Port", model->div_busy_cycles_remaining() > 0 ? "Busy" : "Free", 
-                                   model->div_busy_cycles_remaining() > 0 ? kSakuraPeach : kSakuraMint,
-                                   col_width, right_width, 10);
-            }
-        case 9:
-            {
-                auto [status, color] = get_stall_status(model->control_bubble_remaining() > 0, "Flush/Recover");
-                return format_to_width(std::format("  \033[1;38;5;189mFetch St\033[0m: \033[{}m{}\033[0m", color, status), width);
-            }
-        default:
-            return format_to_width("", width);
-    }
-}
 
 auto RegisterPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, int stage_idx, int width) -> std::string {
     auto& ps = cpu.pipeline_sim;

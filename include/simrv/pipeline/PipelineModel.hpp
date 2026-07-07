@@ -55,20 +55,6 @@ public:
     // Predictor queries
     [[nodiscard]] virtual auto get_bht_entry(Register pc) const -> uint8_t = 0;
     [[nodiscard]] virtual auto get_btb_target(Register pc) const -> std::pair<bool, Register> = 0;
-
-    // Out-of-order specific visual info (returns empty/false if in-order)
-    [[nodiscard]] virtual auto is_ooo() const -> bool { return false; }
-    [[nodiscard]] virtual auto get_rob_size() const -> size_t { return 0; }
-    [[nodiscard]] virtual auto get_rob_occupancy() const -> size_t { return 0; }
-    struct RobEntryInfo {
-        Register pc;
-        isa::OperationId op_id;
-        bool ready;
-        bool head;
-        bool tail;
-    };
-    [[nodiscard]] virtual auto get_rob_entries() const -> std::vector<RobEntryInfo> { return {}; }
-    [[nodiscard]] virtual auto get_rs_occupancy() const -> size_t { return 0; }
 };
 
 } // namespace simrv::pipeline

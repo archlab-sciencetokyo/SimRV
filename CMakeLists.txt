@@ -97,7 +97,6 @@ add_executable(SimRV
   src/pipeline/Decoder.cpp
   src/pipeline/PipelineSim.cpp
   src/pipeline/InOrderPipeline.cpp
-  src/pipeline/OutOfOrderPipeline.cpp
   src/execute/ExecuteUnitInt.cpp
   src/execute/ExecuteUnitB.cpp
   src/execute/ExecuteUnitFloat.cpp

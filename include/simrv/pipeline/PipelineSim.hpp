@@ -60,13 +60,6 @@ struct CpuConfig {
     uint32_t global_history_bits = 8;
     bool enable_ex_forwarding = true;
     bool enable_mem_forwarding = true;
-    bool enable_ooo = false;
-    uint32_t rob_size = 32;
-    uint32_t rs_size = 16;
-    uint32_t lsq_size = 12;
-    uint32_t ooo_dispatch_width = 2;
-    uint32_t ooo_issue_width = 2;
-    uint32_t ooo_commit_width = 2;
 };
  
 struct PipelineCycleSnapshot {

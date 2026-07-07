@@ -61,7 +61,6 @@ class RegisterPane : public TuiWidget {
     [[nodiscard]] auto render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string;
     [[nodiscard]] auto render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int stage_idx, int width) -> std::string;
     [[nodiscard]] auto render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu, int stage_idx, int col_width, int right_width) -> std::string;
-    [[nodiscard]] auto render_pipeline_stages_ooo(const simrv::core::CPU& cpu, int stage_idx, int col_width, int right_width) -> std::string;
     [[nodiscard]] auto render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, int stage_idx, int width) -> std::string;
     [[nodiscard]] auto render_pipeline_stages_functional(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string;
     [[nodiscard]] auto render_pipeline_stages_functional_low(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string;

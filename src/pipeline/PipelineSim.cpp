@@ -1,7 +1,6 @@
 #include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/pipeline/PipelineModel.hpp"
 #include "simrv/pipeline/InOrderPipeline.hpp"
-#include "simrv/pipeline/OutOfOrderPipeline.hpp"
 
 namespace simrv::pipeline {
 
@@ -12,11 +11,7 @@ PipelineSim::PipelineSim() {
 PipelineSim::~PipelineSim() = default;
 
 void PipelineSim::init_model() {
-    if (config.enable_ooo) {
-        model_ = std::make_unique<OutOfOrderPipeline>(config);
-    } else {
-        model_ = std::make_unique<InOrderPipeline>(config);
-    }
+    model_ = std::make_unique<InOrderPipeline>(config);
 }
 
 void PipelineSim::reset() {
