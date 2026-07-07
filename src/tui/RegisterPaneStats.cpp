@@ -24,12 +24,12 @@ using simrv::isa::InstFormat;
 namespace {
 
 enum class InstCategory : uint8_t {
-    ALU, MEM, CTRL, SYS
+    ALU, MEM, CTRL, SYS, VEC
 };
 
 auto get_inst_category(int i) -> InstCategory {
-    static constexpr std::array<InstCategory, 256> category_lut = []() -> std::array<InstCategory, 256> {
-        std::array<InstCategory, 256> lut{};
+    static constexpr std::array<InstCategory, 512> category_lut = []() -> std::array<InstCategory, 512> {
+        std::array<InstCategory, 512> lut{};
         lut.fill(InstCategory::ALU);
         
         lut[OperationId::JAL] = InstCategory::CTRL;
@@ -54,10 +54,14 @@ auto get_inst_category(int i) -> InstCategory {
         lut[OperationId::MRET] = InstCategory::SYS;
         lut[OperationId::WFI] = InstCategory::SYS;
         lut[OperationId::SFENCE_VMA] = InstCategory::SYS;
+
+        for (int op = OperationId::VSETVLI; op <= OperationId::VMAXU_VX; ++op) {
+            lut[op] = InstCategory::VEC;
+        }
         
         return lut;
     }();
-    if (i >= 0 && i < 256) {
+    if (i >= 0 && i < 512) {
         return category_lut[i];
     }
     return InstCategory::ALU;
@@ -330,6 +334,7 @@ auto RegisterPane::render_cycle_accurate_mix_stats(const simrv::core::CPU& cpu, 
         uint64_t mem_count = 0;
         uint64_t ctrl_count = 0;
         uint64_t sys_count = 0;
+        uint64_t vec_count = 0;
 
         for (int i = 0; i < OperationIdCount; ++i) {
             uint64_t count = cpu.e_instmix.at(static_cast<std::size_t>(i));
@@ -340,12 +345,14 @@ auto RegisterPane::render_cycle_accurate_mix_stats(const simrv::core::CPU& cpu, 
                 mem_count += count;
             } else if (cat == InstCategory::SYS) {
                 sys_count += count;
+            } else if (cat == InstCategory::VEC) {
+                vec_count += count;
             } else {
                 alu_count += count;
             }
         }
 
-        uint64_t total = alu_count + mem_count + ctrl_count + sys_count;
+        uint64_t total = alu_count + mem_count + ctrl_count + sys_count + vec_count;
         double alu_p = (total == 0)
                            ? 0.0
                            : static_cast<double>(alu_count * 100ULL) / static_cast<double>(total);
@@ -358,11 +365,15 @@ auto RegisterPane::render_cycle_accurate_mix_stats(const simrv::core::CPU& cpu, 
         double sys_p = (total == 0)
                            ? 0.0
                            : static_cast<double>(sys_count * 100ULL) / static_cast<double>(total);
+        double vec_p = (total == 0)
+                           ? 0.0
+                           : static_cast<double>(vec_count * 100ULL) / static_cast<double>(total);
 
         std::string color = std::format(
             "  {}Inst Mix\033[0m       : {}ALU:{:.1f}%\033[0m {}MEM:{:.1f}%\033[0m "
-            "{}CTRL:{:.1f}%\033[0m {}SYS:{:.1f}%\033[0m",
-            kSakuraText, kSakuraMint, alu_p, kSakuraSky, mem_p, kSakuraPeach, ctrl_p, kSakuraPink, sys_p);
+            "{}CTRL:{:.1f}%\033[0m {}SYS:{:.1f}%\033[0m {}VEC:{:.1f}%\033[0m",
+            kSakuraText, kSakuraMint, alu_p, kSakuraSky, mem_p, kSakuraPeach, ctrl_p, kSakuraPink, sys_p,
+            kSakuraVal, vec_p);
 
         return format_to_width(color, width);
     }
