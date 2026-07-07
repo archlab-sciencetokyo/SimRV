@@ -81,7 +81,7 @@ void InputDevice::push_key(Word key_event) {
 void InputDevice::push_mouse(int dx, int dy, uint8_t buttons) {
     std::scoped_lock lock(mouse_mutex_);
     if (mouse_queue_.size() < 256) {
-        mouse_queue_.push({dx, dy, buttons});
+        mouse_queue_.push({.dx = dx, .dy = dy, .buttons = buttons});
     }
 }
 

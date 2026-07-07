@@ -270,6 +270,72 @@ auto get_description(OperationId op_id) -> std::pair<std::string_view, std::stri
         arr[RORW] = {"RORW", "Rotate Right Word. Rotates lower 32 bits of rs1 right by rs2."};
         arr[RORIW] = {"RORIW", "Rotate Right Word Immediate. Rotates lower 32 bits of rs1 right by immediate."};
         arr[PACKW] = {"PACKW", "Pack Word. Packs the lower halfwords of rs1 and rs2 into lower 32 bits of rd (sign-extended)."};
+        arr[VSETVLI] = {"VSETVLI", "Vector Set Configuration (immediate). Configures vtype and vl from immediate/rs1, and writes new vl to rd."};
+        arr[VSETIVLI] = {"VSETIVLI", "Vector Set Configuration (immediate, uimm). Configures vtype and vl from immediate/uimm, and writes new vl to rd."};
+        arr[VSETVL] = {"VSETVL", "Vector Set Configuration. Configures vtype and vl from rs2/rs1, and writes new vl to rd."};
+        arr[VLE8_V] = {"VLE8.V", "Vector Load unit-strided 8-bit elements. Reads vl elements of 8-bit width from memory address rs1 into vector register rd."};
+        arr[VLE16_V] = {"VLE16.V", "Vector Load unit-strided 16-bit elements. Reads vl elements of 16-bit width from memory address rs1 into vector register rd."};
+        arr[VLE32_V] = {"VLE32.V", "Vector Load unit-strided 32-bit elements. Reads vl elements of 32-bit width from memory address rs1 into vector register rd."};
+        arr[VSE8_V] = {"VSE8.V", "Vector Store unit-strided 8-bit elements. Writes vl elements of 8-bit width from vector register vs3 to memory address rs1."};
+        arr[VSE16_V] = {"VSE16.V", "Vector Store unit-strided 16-bit elements. Writes vl elements of 16-bit width from vector register vs3 to memory address rs1."};
+        arr[VSE32_V] = {"VSE32.V", "Vector Store unit-strided 32-bit elements. Writes vl elements of 32-bit width from vector register vs3 to memory address rs1."};
+        arr[VADD_VV] = {"VADD.VV", "Vector-Vector Addition. Adds elements of vector register rs2 to vector register rs1, and stores result in rd."};
+        arr[VADD_VX] = {"VADD.VX", "Vector-Scalar Addition. Adds scalar register rs1 to elements of vector register rs2, and stores result in rd."};
+        arr[VADD_VI] = {"VADD.VI", "Vector-Immediate Addition. Adds sign-extended immediate to elements of vector register rs2, and stores result in rd."};
+        arr[VSUB_VV] = {"VSUB.VV", "Vector-Vector Subtraction. Subtracts elements of vector register rs1 from vector register rs2, and stores result in rd."};
+        arr[VSUB_VX] = {"VSUB.VX", "Vector-Scalar Subtraction. Subtracts scalar register rs1 from elements of vector register rs2, and stores result in rd."};
+        arr[VMUL_VV] = {"VMUL.VV", "Vector-Vector Multiplication. Multiplies elements of vector register rs2 by vector register rs1, and stores result in rd."};
+        arr[VMUL_VX] = {"VMUL.VX", "Vector-Scalar Multiplication. Multiplies elements of vector register rs2 by scalar register rs1, and stores result in rd."};
+        arr[VDIV_VV] = {"VDIV.VV", "Vector-Vector Signed Division. Divides elements of vector register rs2 by vector register rs1, and stores result in rd."};
+        arr[VDIV_VX] = {"VDIV.VX", "Vector-Scalar Signed Division. Divides elements of vector register rs2 by scalar register rs1, and stores result in rd."};
+        arr[VDIVU_VV] = {"VDIVU.VV", "Vector-Vector Unsigned Division. Divides elements of vector register rs2 by vector register rs1, and stores result in rd."};
+        arr[VDIVU_VX] = {"VDIVU.VX", "Vector-Scalar Unsigned Division. Divides elements of vector register rs2 by scalar register rs1, and stores result in rd."};
+        arr[VAND_VV] = {"VAND.VV", "Vector-Vector Bitwise AND. Performs bitwise AND of vector register rs2 and vector register rs1, and stores result in rd."};
+        arr[VAND_VX] = {"VAND.VX", "Vector-Scalar Bitwise AND. Performs bitwise AND of vector register rs2 and scalar register rs1, and stores result in rd."};
+        arr[VAND_VI] = {"VAND.VI", "Vector-Immediate Bitwise AND. Performs bitwise AND of vector register rs2 and immediate, and stores result in rd."};
+        arr[VOR_VV] = {"VOR.VV", "Vector-Vector Bitwise OR. Performs bitwise OR of vector register rs2 and vector register rs1, and stores result in rd."};
+        arr[VOR_VX] = {"VOR.VX", "Vector-Scalar Bitwise OR. Performs bitwise OR of vector register rs2 and scalar register rs1, and stores result in rd."};
+        arr[VOR_VI] = {"VOR.VI", "Vector-Immediate Bitwise OR. Performs bitwise OR of vector register rs2 and immediate, and stores result in rd."};
+        arr[VXOR_VV] = {"VXOR.VV", "Vector-Vector Bitwise XOR. Performs bitwise XOR of vector register rs2 and vector register rs1, and stores result in rd."};
+        arr[VXOR_VX] = {"VXOR.VX", "Vector-Scalar Bitwise XOR. Performs bitwise XOR of vector register rs2 and scalar register rs1, and stores result in rd."};
+        arr[VXOR_VI] = {"VXOR.VI", "Vector-Immediate Bitwise XOR. Performs bitwise XOR of vector register rs2 and immediate, and stores result in rd."};
+        arr[VSLL_VV] = {"VSLL.VV", "Vector-Vector Shift Left Logical. Shifts elements of vector register rs2 left by amounts in vector register rs1, and stores result in rd."};
+        arr[VSLL_VX] = {"VSLL.VX", "Vector-Scalar Shift Left Logical. Shifts elements of vector register rs2 left by amount in scalar register rs1, and stores result in rd."};
+        arr[VSLL_VI] = {"VSLL.VI", "Vector-Immediate Shift Left Logical. Shifts elements of vector register rs2 left by immediate amount, and stores result in rd."};
+        arr[VSRL_VV] = {"VSRL.VV", "Vector-Vector Shift Right Logical. Shifts elements of vector register rs2 right by amounts in vector register rs1, and stores result in rd."};
+        arr[VSRL_VX] = {"VSRL.VX", "Vector-Scalar Shift Right Logical. Shifts elements of vector register rs2 right by amount in scalar register rs1, and stores result in rd."};
+        arr[VSRL_VI] = {"VSRL.VI", "Vector-Immediate Shift Right Logical. Shifts elements of vector register rs2 right by immediate amount, and stores result in rd."};
+        arr[VSRA_VV] = {"VSRA.VV", "Vector-Vector Shift Right Arithmetic. Shifts elements of vector register rs2 right arithmetically by amounts in vector register rs1, and stores result in rd."};
+        arr[VSRA_VX] = {"VSRA.VX", "Vector-Scalar Shift Right Arithmetic. Shifts elements of vector register rs2 right arithmetically by amount in scalar register rs1, and stores result in rd."};
+        arr[VSRA_VI] = {"VSRA.VI", "Vector-Immediate Shift Right Arithmetic. Shifts elements of vector register rs2 right arithmetically by immediate amount, and stores result in rd."};
+        arr[VMV_V_V] = {"VMV.V.V", "Vector Register Copy. Copies elements of vector register rs1 to vector register rd."};
+        arr[VMV_V_X] = {"VMV.V.X", "Vector-Scalar Move/Splat. Copies scalar register rs1 to all active elements of vector register rd."};
+        arr[VMV_V_I] = {"VMV.V.I", "Vector-Immediate Move/Splat. Copies immediate to all active elements of vector register rd."};
+        arr[VMV_X_S] = {"VMV.X.S", "Vector Move Element 0 to Scalar. Copies element 0 of vector register rs2 to scalar register rd."};
+        arr[VMV_S_X] = {"VMV.S.X", "Vector Move Scalar to Element 0. Copies scalar register rs1 to element 0 of vector register rd."};
+        arr[VMSEQ_VV] = {"VMSEQ.VV", "Vector-Vector Compare Equal. Compares vector register rs2 with rs1, and writes mask result bits to vector register rd."};
+        arr[VMSEQ_VX] = {"VMSEQ.VX", "Vector-Scalar Compare Equal. Compares vector register rs2 with scalar rs1, and writes mask result bits to vector register rd."};
+        arr[VMSEQ_VI] = {"VMSEQ.VI", "Vector-Immediate Compare Equal. Compares vector register rs2 with immediate, and writes mask result bits to vector register rd."};
+        arr[VMSNE_VV] = {"VMSNE.VV", "Vector-Vector Compare Not Equal. Compares vector register rs2 with rs1, and writes mask result bits to vector register rd."};
+        arr[VMSNE_VX] = {"VMSNE.VX", "Vector-Scalar Compare Not Equal. Compares vector register rs2 with scalar rs1, and writes mask result bits to vector register rd."};
+        arr[VMSNE_VI] = {"VMSNE.VI", "Vector-Immediate Compare Not Equal. Compares vector register rs2 with immediate, and writes mask result bits to vector register rd."};
+        arr[VMSLT_VV] = {"VMSLT.VV", "Vector-Vector Compare Less Than (signed). Compares signed elements in rs2 and rs1, and writes mask result bits to vector register rd."};
+        arr[VMSLT_VX] = {"VMSLT.VX", "Vector-Scalar Compare Less Than (signed). Compares signed elements in rs2 and scalar rs1, and writes mask result bits to vector register rd."};
+        arr[VMSLTU_VV] = {"VMSLTU.VV", "Vector-Vector Compare Less Than (unsigned). Compares unsigned elements in rs2 and rs1, and writes mask result bits to vector register rd."};
+        arr[VMSLTU_VX] = {"VMSLTU.VX", "Vector-Scalar Compare Less Than (unsigned). Compares unsigned elements in rs2 and scalar rs1, and writes mask result bits to vector register rd."};
+        arr[VMSLE_VV] = {"VMSLE.VV", "Vector-Vector Compare Less Than or Equal (signed). Compares signed elements in rs2 and rs1, and writes mask result bits to vector register rd."};
+        arr[VMSLE_VX] = {"VMSLE.VX", "Vector-Scalar Compare Less Than or Equal (signed). Compares signed elements in rs2 and scalar rs1, and writes mask result bits to vector register rd."};
+        arr[VMSLE_VI] = {"VMSLE.VI", "Vector-Immediate Compare Less Than or Equal (signed). Compares signed elements in rs2 and immediate, and writes mask result bits to vector register rd."};
+        arr[VMSLEU_VV] = {"VMSLEU.VV", "Vector-Vector Compare Less Than or Equal (unsigned). Compares unsigned elements in rs2 and rs1, and writes mask result bits to vector register rd."};
+        arr[VMSLEU_VX] = {"VMSLEU.VX", "Vector-Scalar Compare Less Than or Equal (unsigned). Compares unsigned elements in rs2 and scalar rs1, and writes mask result bits to vector register rd."};
+        arr[VMSLEU_VI] = {"VMSLEU.VI", "Vector-Immediate Compare Less Than or Equal (unsigned). Compares unsigned elements in rs2 and immediate, and writes mask result bits to vector register rd."};
+        arr[VMSGT_VX] = {"VMSGT.VX", "Vector-Scalar Compare Greater Than (signed). Compares signed elements in rs2 and scalar rs1, and writes mask result bits to vector register rd."};
+        arr[VMSGT_VI] = {"VMSGT.VI", "Vector-Immediate Compare Greater Than (signed). Compares signed elements in rs2 and immediate, and writes mask result bits to vector register rd."};
+        arr[VMSGTU_VX] = {"VMSGTU.VX", "Vector-Scalar Compare Greater Than (unsigned). Compares unsigned elements in rs2 and scalar rs1, and writes mask result bits to vector register rd."};
+        arr[VMSGTU_VI] = {"VMSGTU.VI", "Vector-Immediate Compare Greater Than (unsigned). Compares unsigned elements in rs2 and immediate, and writes mask result bits to vector register rd."};
+        arr[VMERGE_VVM] = {"VMERGE.VVM", "Vector Merge. Merges vector register rs2 and rs1 under mask v0, and writes result to rd."};
+        arr[VMERGE_VXM] = {"VMERGE.VXM", "Vector Merge. Merges vector register rs2 and scalar rs1 under mask v0, and writes result to rd."};
+        arr[VMERGE_VIM] = {"VMERGE.VIM", "Vector Merge. Merges vector register rs2 and immediate under mask v0, and writes result to rd."};
 
         return arr;
     }();
@@ -1128,6 +1194,9 @@ auto get_isa_extension_name(OperationId op_id) -> std::string_view {
             return "Zbs";
         }
         return "Zbb";
+    }
+    if (op_id >= VSETVLI && op_id <= VMERGE_VIM) {
+        return "RV32V";
     }
     return "Unknown";
 }

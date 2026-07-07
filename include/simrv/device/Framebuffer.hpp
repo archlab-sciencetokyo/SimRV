@@ -50,9 +50,6 @@ class Framebuffer : public memory::TileLinkNode {
 
     // --- Public API ---
     void set_multithreaded(bool m) { multithreaded_.store(m, std::memory_order_relaxed); }
-    
-    // Dump current frame to a PPM file
-    void dump_ppm(const std::string& filename);
 
     // Fast-path direct pixel access
     [[nodiscard]] auto get_fb_ptr() -> uint8_t* { return fb_mem_.data(); }

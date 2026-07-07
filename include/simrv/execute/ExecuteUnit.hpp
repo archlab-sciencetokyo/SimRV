@@ -4,6 +4,11 @@
 
 #include "simrv/Define.hpp"
 
+namespace simrv::core {
+class CPU;
+class Machine;
+}
+
 namespace simrv::execute {
 
 /**
@@ -41,6 +46,8 @@ class ExecuteUnit {
     /// Execute non-fused floating-point operations and conversions.
     static auto opFp(Word funct7, isa::Funct3 funct3, Word rs1, Word rs2, Register rrs1,
                      const FloatingRegister* freg, CSRValue& fcsr) -> FpExecResult;
+    /// Execute vector instructions.
+    static void execute_vector(core::CPU& cpu, core::Machine& machine, isa::OperationId op_id, Instruction ir);
 
    private:
     static auto aluIntB(Register in1, Register in2, isa::OperationId op_id) -> Register;

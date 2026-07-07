@@ -44,6 +44,7 @@ struct RuntimeOptions {
     bool use_opensbi = false;
     bool cycle_accurate = false;
     bool high_performance = true;
+    bool enable_ooo = false;
     bool high_contrast = false;
     bool disable_forwarding = false;
     std::string bp_type = "2bit";

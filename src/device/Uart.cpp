@@ -8,15 +8,11 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#include <charconv>
-#include <chrono>
-#include <string_view>
 #include <thread>
 
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/tui/Tui.hpp"
-#include "simrv/tui/TuiKey.hpp"
 
 namespace simrv::device {
 
@@ -42,7 +38,7 @@ Uart::~Uart() {
 void Uart::start_input_thread() {
     if (machine_.s_tuimode) return;  // TUI manages its own input
     input_thread_stop_.store(false, std::memory_order_relaxed);
-    input_thread_ = std::thread([this]() {
+    input_thread_ = std::thread([this]() -> void {
         constexpr int stdin_fd = STDIN_FILENO;
         while (!input_thread_stop_.load(std::memory_order_relaxed)) {
             // Block for up to 20ms waiting for stdin data
@@ -61,7 +57,7 @@ void Uart::start_input_thread() {
                 machine_.is_running_ = false;
                 return;
             }
-            std::lock_guard<std::mutex> lock(rx_mutex_);
+            std::scoped_lock lock(rx_mutex_);
             rx_fifo_.push(byte);
         }
     });
@@ -220,7 +216,7 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
 }
 
 void Uart::push_rx_byte(uint8_t byte) {
-    std::lock_guard<std::mutex> lock(rx_mutex_);
+    std::scoped_lock lock(rx_mutex_);
     rx_fifo_.push(byte);
     rx_ready_.store(true, std::memory_order_release);
 }

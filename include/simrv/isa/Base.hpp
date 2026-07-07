@@ -31,6 +31,7 @@ enum class Opcode : uint8_t {
     MiscMem = 0x0F,
     System = 0x73,
     OpV = 0x57,
+    Custom0 = 0x0B,
 };
 
 enum class Funct3 : uint8_t {

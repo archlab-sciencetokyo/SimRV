@@ -7,8 +7,8 @@
 
 #include <cstring>
 #include <format>
-#include <fstream>
 #include <iostream>
+#include <utility>
 
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
@@ -18,7 +18,7 @@ namespace simrv::device {
 Framebuffer::Framebuffer(simrv::core::Machine& machine)
     : machine_(machine), fb_mem_(kSize - 0x1000, 0) {}
 
-Framebuffer::~Framebuffer() {}
+Framebuffer::~Framebuffer() = default;
 
 auto Framebuffer::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
     resp.error = false;
@@ -66,8 +66,6 @@ auto Framebuffer::handle_request(const memory::TlChannelA& req, memory::TlChanne
                         if (machine_.sdl_display && !multithreaded_.load(std::memory_order_relaxed)) {
                             machine_.sdl_display->update_gui_only();
                         }
-                    } else if (val == 2) {
-                        dump_ppm("screenshot.ppm");
                     }
                 } break;
                 default:
@@ -120,44 +118,6 @@ auto Framebuffer::handle_request(const memory::TlChannelA& req, memory::TlChanne
 
 
 
-void Framebuffer::dump_ppm(const std::string& filename) {
-    std::ofstream out(filename, std::ios::binary);
-    if (!out.is_open()) {
-        simrv::log::error("[Framebuffer] Failed to write PPM screenshot to '{}'.", filename);
-        return;
-    }
-
-    out << "P6\n" << width_ << " " << height_ << "\n255\n";
-
-    for (int y = 0; y < height_; ++y) {
-        for (int x = 0; x < width_; ++x) {
-            uint8_t r = 0, g = 0, b = 0;
-            if (format_ == 0) {
-                // RGB565
-                const size_t offset = (static_cast<size_t>(y) * width_ + x) * 2;
-                if (offset + 1 < fb_mem_.size()) {
-                    uint16_t pixel = fb_mem_[offset] | (fb_mem_[offset + 1] << 8);
-                    r = ((pixel >> 11) & 0x1F) * 255 / 31;
-                    g = ((pixel >> 5) & 0x3F) * 255 / 63;
-                    b = (pixel & 0x1F) * 255 / 31;
-                }
-            } else {
-                // BGRA8888 format written by guest
-                const size_t offset = (static_cast<size_t>(y) * width_ + x) * 4;
-                if (offset + 2 < fb_mem_.size()) {
-                    r = fb_mem_[offset + 2];
-                    g = fb_mem_[offset + 1];
-                    b = fb_mem_[offset];
-                }
-            }
-            out.put(static_cast<char>(r));
-            out.put(static_cast<char>(g));
-            out.put(static_cast<char>(b));
-        }
-    }
-    simrv::log::info("[Framebuffer] Saved screenshot to '{}'.", filename);
-}
-
 namespace {
 
 inline void append_uint8(std::string& s, uint8_t val) {
@@ -198,7 +158,7 @@ auto Framebuffer::get_tui_rows(int term_w, int term_h) -> std::vector<std::strin
     // A single terminal cell renders two vertical pixels (top/bottom) using the '▀' character.
     // Thus, the target resolution is term_w x (term_h * 2).
     const int target_height = term_h * 2;
-    const size_t sz_w = static_cast<size_t>(width_);
+    const auto sz_w = static_cast<size_t>(width_);
 
     if (format_ == 0) {
         // RGB565 format
@@ -216,7 +176,7 @@ auto Framebuffer::get_tui_rows(int term_w, int term_h) -> std::vector<std::strin
                 uint8_t r_top = 0, g_top = 0, b_top = 0;
                 uint8_t r_bot = 0, g_bot = 0, b_bot = 0;
 
-                const size_t sz_x = static_cast<size_t>(x);
+                const auto sz_x = static_cast<size_t>(x);
 
                 const size_t offset_top = (static_cast<size_t>(y_top) * sz_w + sz_x) * 2;
                 if (offset_top + 1 < fb_mem_.size()) {
@@ -234,18 +194,18 @@ auto Framebuffer::get_tui_rows(int term_w, int term_h) -> std::vector<std::strin
                     b_bot = (pixel & 0x1F) * 255 / 31;
                 }
 
-                if (static_cast<int>(r_top) != prev_fg_r ||
-                    static_cast<int>(g_top) != prev_fg_g ||
-                    static_cast<int>(b_top) != prev_fg_b) {
+                if (std::cmp_not_equal(r_top, prev_fg_r) ||
+                    std::cmp_not_equal(g_top, prev_fg_g) ||
+                    std::cmp_not_equal(b_top, prev_fg_b)) {
                     append_color_escape(line, true, r_top, g_top, b_top);
                     prev_fg_r = r_top;
                     prev_fg_g = g_top;
                     prev_fg_b = b_top;
                 }
 
-                if (static_cast<int>(r_bot) != prev_bg_r ||
-                    static_cast<int>(g_bot) != prev_bg_g ||
-                    static_cast<int>(b_bot) != prev_bg_b) {
+                if (std::cmp_not_equal(r_bot, prev_bg_r) ||
+                    std::cmp_not_equal(g_bot, prev_bg_g) ||
+                    std::cmp_not_equal(b_bot, prev_bg_b)) {
                     append_color_escape(line, false, r_bot, g_bot, b_bot);
                     prev_bg_r = r_bot;
                     prev_bg_g = g_bot;
@@ -273,7 +233,7 @@ auto Framebuffer::get_tui_rows(int term_w, int term_h) -> std::vector<std::strin
                 uint8_t r_top = 0, g_top = 0, b_top = 0;
                 uint8_t r_bot = 0, g_bot = 0, b_bot = 0;
 
-                const size_t sz_x = static_cast<size_t>(x);
+                const auto sz_x = static_cast<size_t>(x);
 
                 const size_t offset_top = (static_cast<size_t>(y_top) * sz_w + sz_x) * 4;
                 if (offset_top + 2 < fb_mem_.size()) {
@@ -289,18 +249,18 @@ auto Framebuffer::get_tui_rows(int term_w, int term_h) -> std::vector<std::strin
                     b_bot = fb_mem_[offset_bot];
                 }
 
-                if (static_cast<int>(r_top) != prev_fg_r ||
-                    static_cast<int>(g_top) != prev_fg_g ||
-                    static_cast<int>(b_top) != prev_fg_b) {
+                if (std::cmp_not_equal(r_top, prev_fg_r) ||
+                    std::cmp_not_equal(g_top, prev_fg_g) ||
+                    std::cmp_not_equal(b_top, prev_fg_b)) {
                     append_color_escape(line, true, r_top, g_top, b_top);
                     prev_fg_r = r_top;
                     prev_fg_g = g_top;
                     prev_fg_b = b_top;
                 }
 
-                if (static_cast<int>(r_bot) != prev_bg_r ||
-                    static_cast<int>(g_bot) != prev_bg_g ||
-                    static_cast<int>(b_bot) != prev_bg_b) {
+                if (std::cmp_not_equal(r_bot, prev_bg_r) ||
+                    std::cmp_not_equal(g_bot, prev_bg_g) ||
+                    std::cmp_not_equal(b_bot, prev_bg_b)) {
                     append_color_escape(line, false, r_bot, g_bot, b_bot);
                     prev_bg_r = r_bot;
                     prev_bg_g = g_bot;

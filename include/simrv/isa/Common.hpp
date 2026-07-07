@@ -101,17 +101,20 @@ constexpr auto required_extension_for_instruction(Instruction ir, bool compresse
         case Opcode::Op32:
             return (funct7_of(ir) & 0x1u) ? IsaExtension::M : IsaExtension::I;
         case Opcode::LoadFp:
-        case Opcode::StoreFp:
-            return (funct3_of(ir) == Funct3::Fld || funct3_of(ir) == Funct3::Fsd) ? IsaExtension::D
-                                                                                  : IsaExtension::F;
+        case Opcode::StoreFp: {
+            const auto f3 = funct3_of(ir);
+            if (f3 == Funct3::Fld || f3 == Funct3::Fsd) return IsaExtension::D;
+            if (static_cast<uint8_t>(f3) == 2) return IsaExtension::F;
+            return IsaExtension::V;
+        }
+        case Opcode::OpV:
+            return IsaExtension::V;
         case Opcode::OpFp:
         case Opcode::MAdd:
         case Opcode::MSub:
         case Opcode::NMAdd:
         case Opcode::NMSub:
             return (((ir >> 25) & 0x3u) == 0x1u) ? IsaExtension::D : IsaExtension::F;
-        case Opcode::OpV:
-            return IsaExtension::V;
         default:
             return IsaExtension::I;
     }
@@ -211,6 +214,7 @@ constexpr auto get_instruction_format(Opcode op) -> InstFormat {
         case Opcode::Op32:
         case Opcode::Amo:
         case Opcode::OpFp:
+        case Opcode::OpV:
             return InstFormat::R;
         case Opcode::MAdd:
         case Opcode::MSub:

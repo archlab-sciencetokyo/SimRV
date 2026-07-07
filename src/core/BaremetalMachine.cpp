@@ -51,6 +51,10 @@ void BaremetalMachine::run() {
             tui->set_sim_thread_sleeping(false);
             cpu.run_cycle_baremetal(*this);
 
+            if (simrv::compiler::unlikely(tracer.fp_trace.is_open())) {
+                tracer.write_trace_snapshot();
+            }
+
             // Ebreak pause hook
             const bool hit_ebreak =
                 (cpu.pipeline_context.opcode == Opcode::System) &&
@@ -104,6 +108,10 @@ void BaremetalMachine::run() {
         // SDL rendering stays entirely in the main thread (optimisation 2).
         while (is_running_) {
             cpu.run_cycle_baremetal(*this);
+
+            if (simrv::compiler::unlikely(tracer.fp_trace.is_open())) {
+                tracer.write_trace_snapshot();
+            }
 
             if (simrv::compiler::unlikely(tohost != 0)) {
                 finalize_cycle_tohost();

@@ -356,6 +356,14 @@ auto render_field_decoded_values(
 } // namespace
 
 auto RegisterPane::get_explain_rows(int width) -> std::vector<std::string> {
+    if (machine_.is_running()) {
+        std::vector<std::string> explain_rows;
+        explain_rows.push_back(section_line("Instruction Explainer", width));
+        explain_rows.push_back(format_to_width("  [Explainer disabled while simulator is running]", width));
+        explain_rows.push_back(section_line("End Explainer", width));
+        return explain_rows;
+    }
+
     auto& cpu = machine_.cpu;
     auto& st = cpu.state();
     auto& ctx = cpu.pipeline_context;

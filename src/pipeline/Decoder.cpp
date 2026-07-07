@@ -35,7 +35,36 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "CLZW",       "CTZW",     "CPOPW",     "ROLW",      "RORW",      "RORIW",
     "CLMUL",      "CLMULH",   "CLMULR",    "BSET",      "BSETI",     "BCLR",
     "BCLRI",      "BINV",     "BINVI",     "BEXT",      "BEXTI",     "ORC.B",
-    "REV8",       "PACK",     "PACKW",     "UNKNOWN"};
+    "REV8",       "PACK",     "PACKW",
+    "VSETVLI",    "VSETIVLI", "VSETVL",
+    "VLE8_V",     "VLE16_V",  "VLE32_V",
+    "VSE8_V",     "VSE16_V",  "VSE32_V",
+    "VADD_VV",    "VADD_VX",  "VADD_VI",
+    "VSUB_VV",    "VSUB_VX",
+    "VMUL_VV",    "VMUL_VX",
+    "VDIV_VV",    "VDIV_VX",
+    "VDIVU_VV",   "VDIVU_VX",
+    "VAND_VV",    "VAND_VX",  "VAND_VI",
+    "VOR_VV",     "VOR_VX",   "VOR_VI",
+    "VXOR_VV",    "VXOR_VX",  "VXOR_VI",
+    "VSLL_VV",    "VSLL_VX",  "VSLL_VI",
+    "VSRL_VV",    "VSRL_VX",  "VSRL_VI",
+    "VSRA_VV",    "VSRA_VX",  "VSRA_VI",
+    "VMV_V_V",    "VMV_V_X",  "VMV_V_I",
+    "VMV_X_S",    "VMV_S_X",
+    "VMSEQ_VV",   "VMSEQ_VX", "VMSEQ_VI",
+    "VMSNE_VV",   "VMSNE_VX", "VMSNE_VI",
+    "VMSLT_VV",   "VMSLT_VX",
+    "VMSLTU_VV",  "VMSLTU_VX",
+    "VMSLE_VV",   "VMSLE_VX", "VMSLE_VI",
+    "VMSLEU_VV",  "VMSLEU_VX", "VMSLEU_VI",
+    "VMSGT_VX",   "VMSGT_VI",
+    "VMSGTU_VX",  "VMSGTU_VI",
+    "VMERGE_VVM", "VMERGE_VXM", "VMERGE_VIM",
+    "VMIN_VV", "VMIN_VX", "VMINU_VV", "VMINU_VX",
+    "VMAX_VV", "VMAX_VX", "VMAXU_VV", "VMAXU_VX",
+    "VCHECK",
+    "UNKNOWN"};
 
 namespace {
 
@@ -495,15 +524,160 @@ auto decode_op_fp(uint32_t funct3, uint32_t funct7, uint32_t rs2) -> OperationId
     return OperationId::UNKNOWN;
 }
 
+auto decode_ext_v(uint32_t funct3, uint32_t funct7, Instruction ir) -> OperationId {
+    if (funct3 == 7) {
+        if ((ir & (1u << 31)) == 0) {
+            return OperationId::VSETVLI;
+        }
+        if (((ir >> 30) & 0x3) == 0x3) {
+            return OperationId::VSETIVLI;
+        }
+        if (funct7 == 0x40) {
+            return OperationId::VSETVL;
+        }
+        return OperationId::UNKNOWN;
+    }
+
+    const bool vm = (ir & (1u << 25)) != 0;
+
+    switch (funct7 >> 1) {
+        case 0x00:
+            if (funct3 == 0) return OperationId::VADD_VV;
+            if (funct3 == 4) return OperationId::VADD_VX;
+            if (funct3 == 3) return OperationId::VADD_VI;
+            break;
+        case 0x02:
+            if (funct3 == 0) return OperationId::VSUB_VV;
+            if (funct3 == 4) return OperationId::VSUB_VX;
+            break;
+        case 0x04:
+            if (funct3 == 0) return OperationId::VMINU_VV;
+            if (funct3 == 4) return OperationId::VMINU_VX;
+            break;
+        case 0x05:
+            if (funct3 == 0) return OperationId::VMIN_VV;
+            if (funct3 == 4) return OperationId::VMIN_VX;
+            break;
+        case 0x06:
+            if (funct3 == 0) return OperationId::VMAXU_VV;
+            if (funct3 == 4) return OperationId::VMAXU_VX;
+            break;
+        case 0x07:
+            if (funct3 == 0) return OperationId::VMAX_VV;
+            if (funct3 == 4) return OperationId::VMAX_VX;
+            break;
+        case 0x25:
+            if (funct3 == 0) return OperationId::VSLL_VV;
+            if (funct3 == 4) return OperationId::VSLL_VX;
+            if (funct3 == 3) return OperationId::VSLL_VI;
+            if (funct3 == 2) return OperationId::VMUL_VV;
+            if (funct3 == 6) return OperationId::VMUL_VX;
+            break;
+        case 0x21:
+            if (funct3 == 2) return OperationId::VDIV_VV;
+            if (funct3 == 6) return OperationId::VDIV_VX;
+            break;
+        case 0x20:
+            if (funct3 == 2) return OperationId::VDIVU_VV;
+            if (funct3 == 6) return OperationId::VDIVU_VX;
+            break;
+        case 0x09:
+            if (funct3 == 0) return OperationId::VAND_VV;
+            if (funct3 == 4) return OperationId::VAND_VX;
+            if (funct3 == 3) return OperationId::VAND_VI;
+            break;
+        case 0x0A:
+            if (funct3 == 0) return OperationId::VOR_VV;
+            if (funct3 == 4) return OperationId::VOR_VX;
+            if (funct3 == 3) return OperationId::VOR_VI;
+            break;
+        case 0x0B:
+            if (funct3 == 0) return OperationId::VXOR_VV;
+            if (funct3 == 4) return OperationId::VXOR_VX;
+            if (funct3 == 3) return OperationId::VXOR_VI;
+            break;
+        case 0x28:
+            if (funct3 == 0) return OperationId::VSRL_VV;
+            if (funct3 == 4) return OperationId::VSRL_VX;
+            if (funct3 == 3) return OperationId::VSRL_VI;
+            break;
+        case 0x29:
+            if (funct3 == 0) return OperationId::VSRA_VV;
+            if (funct3 == 4) return OperationId::VSRA_VX;
+            if (funct3 == 3) return OperationId::VSRA_VI;
+            break;
+        case 0x17:
+            if (vm) {
+                if (funct3 == 0) return OperationId::VMV_V_V;
+                if (funct3 == 4) return OperationId::VMV_V_X;
+                if (funct3 == 3) return OperationId::VMV_V_I;
+            } else {
+                if (funct3 == 0) return OperationId::VMERGE_VVM;
+                if (funct3 == 4) return OperationId::VMERGE_VXM;
+                if (funct3 == 3) return OperationId::VMERGE_VIM;
+            }
+            break;
+        case 0x10:
+            if (funct3 == 2) return OperationId::VMV_X_S;
+            if (funct3 == 6) return OperationId::VMV_S_X;
+            break;
+        case 0x18:
+            if (funct3 == 0) return OperationId::VMSEQ_VV;
+            if (funct3 == 4) return OperationId::VMSEQ_VX;
+            if (funct3 == 3) return OperationId::VMSEQ_VI;
+            break;
+        case 0x19:
+            if (funct3 == 0) return OperationId::VMSNE_VV;
+            if (funct3 == 4) return OperationId::VMSNE_VX;
+            if (funct3 == 3) return OperationId::VMSNE_VI;
+            break;
+        case 0x1B:
+            if (funct3 == 0) return OperationId::VMSLT_VV;
+            if (funct3 == 4) return OperationId::VMSLT_VX;
+            break;
+        case 0x1A:
+            if (funct3 == 0) return OperationId::VMSLTU_VV;
+            if (funct3 == 4) return OperationId::VMSLTU_VX;
+            break;
+        case 0x1D:
+            if (funct3 == 0) return OperationId::VMSLE_VV;
+            if (funct3 == 4) return OperationId::VMSLE_VX;
+            if (funct3 == 3) return OperationId::VMSLE_VI;
+            break;
+        case 0x1C:
+            if (funct3 == 0) return OperationId::VMSLEU_VV;
+            if (funct3 == 4) return OperationId::VMSLEU_VX;
+            if (funct3 == 3) return OperationId::VMSLEU_VI;
+            break;
+        case 0x1E:
+            if (funct3 == 4) return OperationId::VMSGT_VX;
+            if (funct3 == 3) return OperationId::VMSGT_VI;
+            break;
+        case 0x1F:
+            if (funct3 == 4) return OperationId::VMSGTU_VX;
+            if (funct3 == 3) return OperationId::VMSGTU_VI;
+            break;
+        default:
+            break;
+    }
+    return OperationId::UNKNOWN;
+}
+
 auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2) -> OperationId {
     switch (op) {
         case Opcode::LoadFp:
             if (funct3 == 2) return OperationId::FLW;
             if (funct3 == 3) return OperationId::FLD;
+            if (funct3 == 0) return OperationId::VLE8_V;
+            if (funct3 == 5) return OperationId::VLE16_V;
+            if (funct3 == 6) return OperationId::VLE32_V;
             return OperationId::UNKNOWN;
         case Opcode::StoreFp:
             if (funct3 == 2) return OperationId::FSW;
             if (funct3 == 3) return OperationId::FSD;
+            if (funct3 == 0) return OperationId::VSE8_V;
+            if (funct3 == 5) return OperationId::VSE16_V;
+            if (funct3 == 6) return OperationId::VSE32_V;
             return OperationId::UNKNOWN;
         case Opcode::MAdd:
         case Opcode::MSub:
@@ -780,6 +954,12 @@ auto decoder(Instruction ir) -> OperationId {
     if (op == Opcode::LoadFp || op == Opcode::StoreFp || op == Opcode::OpFp ||
         op == Opcode::MAdd || op == Opcode::MSub || op == Opcode::NMSub || op == Opcode::NMAdd) {
         return decode_ext_f_d(op, funct3, funct7, std::to_underlying(dec.rs2()));
+    }
+    if (op == Opcode::OpV) {
+        return decode_ext_v(funct3, funct7, ir);
+    }
+    if (op == Opcode::Custom0) {
+        return OperationId::VCHECK;
     }
     if ((op == Opcode::Op || op == Opcode::Op32) && (funct7 == 0x01)) {
         return decode_ext_m(op, funct3);

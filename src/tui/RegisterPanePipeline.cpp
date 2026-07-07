@@ -7,6 +7,7 @@
 #include "simrv/xlen/Types.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
+#include "simrv/pipeline/PipelineModel.hpp"
 #include <format>
 #include <string>
 #include <vector>
@@ -39,11 +40,11 @@ auto has_stage_raw_hazard(const simrv::pipeline::PipelineSim& ps,
 }
 
 auto is_raw_hazard_stalled(const simrv::pipeline::PipelineSim& ps) -> bool {
-    if (!ps.d_reg_.valid) {
+    if (!ps.d_reg().valid) {
         return false;
     }
-    return has_stage_raw_hazard(ps, ps.d_reg_, ps.e_reg_) ||
-           has_stage_raw_hazard(ps, ps.d_reg_, ps.m_reg_);
+    return has_stage_raw_hazard(ps, ps.d_reg(), ps.e_reg()) ||
+           has_stage_raw_hazard(ps, ps.d_reg(), ps.m_reg());
 }
 
 auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem, const std::string& stall_type, bool raw_stall = false) -> std::string {
@@ -74,11 +75,11 @@ auto get_stall_status(bool active, const char* active_str = "Active") -> std::pa
 }
 
 auto get_active_branch_pc(const simrv::pipeline::PipelineSim& ps) -> Register {
-    if (ps.e_reg_.valid && (ps.e_reg_.is_branch || ps.e_reg_.is_jump)) {
-        return ps.e_reg_.pc;
+    if (ps.e_reg().valid && (ps.e_reg().is_branch || ps.e_reg().is_jump)) {
+        return ps.e_reg().pc;
     }
-    if (ps.d_reg_.valid && (ps.d_reg_.is_branch || ps.d_reg_.is_jump)) {
-        return ps.d_reg_.pc;
+    if (ps.d_reg().valid && (ps.d_reg().is_branch || ps.d_reg().is_jump)) {
+        return ps.d_reg().pc;
     }
     return 0;
 }
@@ -87,8 +88,7 @@ auto get_bht_string(const simrv::pipeline::PipelineSim& ps, Register pc) -> std:
     if (pc == 0) {
         return "N/A";
     }
-    const uint32_t bht_idx = (pc >> 1) & 0xFF;
-    uint8_t counter = ps.branch_history_table_.at(bht_idx);
+    uint8_t counter = ps.get_model() ? ps.get_model()->get_bht_entry(pc) : 1;
     switch (counter) {
         case 0: return "Strongly Not Taken (00)";
         case 1: return "Weakly Not Taken (01)";
@@ -101,10 +101,9 @@ auto get_btb_string(const simrv::pipeline::PipelineSim& ps, Register pc) -> std:
     if (pc == 0) {
         return "N/A";
     }
-    const uint32_t btb_idx = (pc >> 1) & 0x7F;
-    auto& btb_entry = ps.btb_.at(btb_idx);
-    if (btb_entry.valid && btb_entry.pc == pc) {
-        return std::format("Hit (Target: 0x{:0{}x})", btb_entry.target, simrv::xlen::kXLenHexDigits);
+    auto [valid, target] = ps.get_model() ? ps.get_model()->get_btb_target(pc) : std::pair<bool, Register>{false, 0};
+    if (valid) {
+        return std::format("Hit (Target: 0x{:0{}x})", target, simrv::xlen::kXLenHexDigits);
     }
     return "Miss";
 }
@@ -124,6 +123,9 @@ auto RegisterPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logic
 
 auto RegisterPane::render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
     int const val = logical_row - 16;
+    if (cpu.pipeline_sim.config.enable_ooo) {
+        return render_pipeline_stages_ooo(cpu, val, col_width, right_width);
+    }
     if (val >= 0 && val <= 5) {
         return render_pipeline_stages_ca_core(cpu, val, col_width + right_width);
     }
@@ -142,18 +144,18 @@ auto RegisterPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, i
             return section_line("Pipeline Stages (Cycle-Accurate Mode)", width);
         case 1:
             {
-                std::string stall_type = ps.tlb_stall_remaining_ > 0 ? "TLB Miss" : "ICache Miss";
-                uint32_t stall_rem = ps.tlb_stall_remaining_ > 0 ? ps.tlb_stall_remaining_ : ps.icache_stall_remaining_;
-                return format_to_width(std::format("  \033[1;38;5;189mIF\033[0m  : {}", get_stage_desc(ps.f_reg_, stall_rem, stall_type)), width);
+                std::string stall_type = ps.tlb_stall_remaining() > 0 ? "TLB Miss" : "ICache Miss";
+                uint32_t stall_rem = ps.tlb_stall_remaining() > 0 ? ps.tlb_stall_remaining() : ps.icache_stall_remaining();
+                return format_to_width(std::format("  \033[1;38;5;189mIF\033[0m  : {}", get_stage_desc(ps.f_reg(), stall_rem, stall_type)), width);
             }
         case 2:
-            return format_to_width(std::format("  \033[1;38;5;189mID\033[0m  : {}", get_stage_desc(ps.d_reg_, 0, "", is_raw_stalled)), width);
+            return format_to_width(std::format("  \033[1;38;5;189mID\033[0m  : {}", get_stage_desc(ps.d_reg(), 0, "", is_raw_stalled)), width);
         case 3:
-            return format_to_width(std::format("  \033[1;38;5;189mEX\033[0m  : {}", get_stage_desc(ps.e_reg_, ps.div_busy_cycles_remaining_, "Divider")), width);
+            return format_to_width(std::format("  \033[1;38;5;189mEX\033[0m  : {}", get_stage_desc(ps.e_reg(), ps.div_busy_cycles_remaining(), "Divider")), width);
         case 4:
-            return format_to_width(std::format("  \033[1;38;5;189mMEM\033[0m : {}", get_stage_desc(ps.m_reg_, ps.dcache_stall_remaining_, "DCache Miss")), width);
+            return format_to_width(std::format("  \033[1;38;5;189mMEM\033[0m : {}", get_stage_desc(ps.m_reg(), ps.dcache_stall_remaining(), "DCache Miss")), width);
         case 5:
-            return format_to_width(std::format("  \033[1;38;5;189mWB\033[0m  : {}", get_stage_desc(ps.w_reg_, 0, "")), width);
+            return format_to_width(std::format("  \033[1;38;5;189mWB\033[0m  : {}", get_stage_desc(ps.w_reg(), 0, "")), width);
         default:
             return format_to_width("", width);
     }
@@ -165,11 +167,11 @@ auto RegisterPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu
     bool is_raw_stalled = is_raw_hazard_stalled(ps);
 
     auto [raw_status, raw_color] = get_stall_status(is_raw_stalled);
-    auto [div_status, div_color] = get_stall_status(ps.div_busy_cycles_remaining_ > 0);
-    auto [ic_status, ic_color] = get_stall_status(ps.icache_stall_remaining_ > 0);
-    auto [dc_status, dc_color] = get_stall_status(ps.dcache_stall_remaining_ > 0);
-    auto [tlb_status, tlb_color] = get_stall_status(ps.tlb_stall_remaining_ > 0);
-    auto [ctrl_status, ctrl_color] = get_stall_status(ps.control_bubble_remaining_ > 0, "Redirecting");
+    auto [div_status, div_color] = get_stall_status(ps.div_busy_cycles_remaining() > 0);
+    auto [ic_status, ic_color] = get_stall_status(ps.icache_stall_remaining() > 0);
+    auto [dc_status, dc_color] = get_stall_status(ps.dcache_stall_remaining() > 0);
+    auto [tlb_status, tlb_color] = get_stall_status(ps.tlb_stall_remaining() > 0);
+    auto [ctrl_status, ctrl_color] = get_stall_status(ps.control_bubble_remaining() > 0, "Redirecting");
 
     switch (stage_idx) {
         case 6:
@@ -186,6 +188,77 @@ auto RegisterPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu
             return render_pair("TLB Stall", tlb_status, tlb_color,
                                "Ctrl St", ctrl_status, ctrl_color,
                                col_width, right_width, 10);
+        default:
+            return format_to_width("", width);
+    }
+}
+
+auto RegisterPane::render_pipeline_stages_ooo(const simrv::core::CPU& cpu, int val, int col_width, int right_width) -> std::string {
+    auto& ps = cpu.pipeline_sim;
+    const auto* model = ps.get_model();
+    const int width = col_width + right_width;
+    
+    if (!model) return format_to_width("", width);
+
+    switch (val) {
+        case 0:
+            return section_line("Pipeline Stages (Out-of-Order Mode)", width);
+        case 1:
+            {
+                size_t const occ = model->get_rob_occupancy();
+                size_t const size = model->get_rob_size();
+                size_t const pct = size > 0 ? (occ * 10 / size) : 0;
+                std::string bar = "[";
+                for (size_t i = 0; i < 10; i++) {
+                    if (i < pct) bar += "█";
+                    else bar += "░";
+                }
+                bar += "]";
+                return format_to_width(std::format("  \033[1;38;5;189mROB Occ\033[0m: {}/{} {}", occ, size, bar), width);
+            }
+        case 2:
+        case 3:
+        case 4:
+        case 5:
+            {
+                auto entries = model->get_rob_entries();
+                size_t const idx = val - 2;
+                if (idx < entries.size()) {
+                    const auto& entry = entries.at(idx);
+                    std::string_view op_name = "UNKNOWN";
+                    if (static_cast<std::size_t>(entry.op_id) < simrv::pipeline::OPERATION_NAME.size()) {
+                        op_name = simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(entry.op_id));
+                    }
+                    std::string status = entry.ready ? "\033[38;5;121mReady\033[0m" : "\033[38;5;218mExec\033[0m";
+                    std::string markers = "";
+                    if (entry.head) markers += " <- Head";
+                    if (entry.tail) markers += " <- Tail";
+                    return format_to_width(std::format("    [0x{:0{}x}] \033[1;38;5;183m{:<6}\033[0m [{}]{}",
+                                                       entry.pc, simrv::xlen::kXLenHexDigits, op_name, status, markers), width);
+                } else {
+                    return format_to_width("    [empty ROB entry]", width);
+                }
+            }
+        case 6:
+            return section_line("Reservation Stations & LSU", width);
+        case 7:
+            {
+                size_t const occ = model->get_rs_occupancy();
+                return format_to_width(std::format("  \033[1;38;5;189mRS Occ\033[0m : {} active entries", occ), width);
+            }
+        case 8:
+            {
+                auto [status, color] = get_stall_status(model->dcache_stall_remaining() > 0, "D$ Miss Stall");
+                return render_pair("LSU State", status, color,
+                                   "Div Port", model->div_busy_cycles_remaining() > 0 ? "Busy" : "Free", 
+                                   model->div_busy_cycles_remaining() > 0 ? kSakuraPeach : kSakuraMint,
+                                   col_width, right_width, 10);
+            }
+        case 9:
+            {
+                auto [status, color] = get_stall_status(model->control_bubble_remaining() > 0, "Flush/Recover");
+                return format_to_width(std::format("  \033[1;38;5;189mFetch St\033[0m: \033[{}m{}\033[0m", color, status), width);
+            }
         default:
             return format_to_width("", width);
     }
@@ -543,7 +616,7 @@ auto RegisterPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_r
     auto const& ic = cpu.icache;
     auto const& dc = cpu.dcache;
 
-    auto get_stats_strings = [](uint64_t hits, uint64_t misses) {
+    auto get_stats_strings = [](uint64_t hits, uint64_t misses) -> std::tuple<std::string, std::string, std::string, double> {
         uint64_t total = hits + misses;
         double ratio = (total == 0) ? 1.0 : (static_cast<double>(hits) / static_cast<double>(total));
         double miss_ratio = (total == 0) ? 0.0 : (static_cast<double>(misses) / static_cast<double>(total));

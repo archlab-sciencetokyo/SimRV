@@ -5,12 +5,12 @@
 #include "simrv/core/OSMachine.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/core/Logger.hpp"
-#include "simrv/device/Power.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/xlen/Types.hpp"
 #include <array>
 #include <chrono>
 #include <limits>
+#include <utility>
 
 namespace simrv::core {
 
@@ -120,7 +120,7 @@ void OSMachine::prepare_cycle() {
     static int adr = 0;
 
     if (cpu.clint_mmio.mtime > s_enabletimer) { /* enable timer after linux boot */
-        if (adr < static_cast<int>(kSyntheticInput.size())) {
+        if (std::cmp_less(adr, kSyntheticInput.size())) {
             console->fifo_en = static_cast<Byte>(1);
             console->cons_fifo = kSyntheticInput.at(static_cast<std::size_t>(adr));
         } else {
@@ -135,7 +135,7 @@ void OSMachine::prepare_cycle() {
             if (ret == -1) {
                 is_running_ = false; /* break by Ctrl+q */
             }
-            if (adr < static_cast<int>(kSyntheticInput.size())) {
+            if (std::cmp_less(adr, kSyntheticInput.size())) {
                 adr++;
             }
         }

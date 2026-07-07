@@ -5,8 +5,8 @@
 #include "simrv/util/SdlAudio.hpp"
 
 #include <algorithm>
+#include <array>
 #include <fstream>
-#include <print>
 
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Logger.hpp"
@@ -45,7 +45,6 @@ void SdlAudio::init_audio() {
     }
 
     audio_initialized_ = true;
-    simrv::log::info("[SdlAudio] SDL3 Audio initialized successfully.");
 #endif
 }
 
@@ -78,11 +77,11 @@ void SdlAudio::play_channel(int chan, Address phys_addr, Word length, Word rate,
 
     if (phys_addr < 0x80000000u || length == 0 || rate == 0) return;
 
-    const uint8_t* guest_src =
-        reinterpret_cast<const uint8_t*>(machine_.mmem) + (phys_addr - 0x80000000u);
+    const auto* guest_src =
+        reinterpret_cast<const uint8_t*>(machine_.mmem) + (phys_addr - 0x80000000u); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
     // Convert mono U8 → stereo U8 with panning
-    std::vector<uint8_t> stereo_buf(length * 2);
+    std::vector<uint8_t> stereo_buf(static_cast<size_t>(length) * 2);
     float left_gain  = 1.0f;
     float right_gain = 1.0f;
     if (panning <= 128) right_gain = static_cast<float>(panning) / 128.0f;
@@ -90,12 +89,12 @@ void SdlAudio::play_channel(int chan, Address phys_addr, Word length, Word rate,
 
     for (Word i = 0; i < length; ++i) {
         int s = static_cast<int>(guest_src[i]) - 128;
-        stereo_buf[2 * i]     = static_cast<uint8_t>(std::clamp(static_cast<int>(left_gain  * s) + 128, 0, 255));
-        stereo_buf[2 * i + 1] = static_cast<uint8_t>(std::clamp(static_cast<int>(right_gain * s) + 128, 0, 255));
+        stereo_buf[static_cast<size_t>(i) * 2]     = static_cast<uint8_t>(std::clamp(static_cast<int>(left_gain  * static_cast<float>(s)) + 128, 0, 255));
+        stereo_buf[static_cast<size_t>(i) * 2 + 1] = static_cast<uint8_t>(std::clamp(static_cast<int>(right_gain * static_cast<float>(s)) + 128, 0, 255));
     }
 
-    SDL_AudioSpec spec{SDL_AUDIO_U8, 2, static_cast<int>(rate)};
-    const size_t c_idx = static_cast<size_t>(chan);
+    SDL_AudioSpec spec{.format = SDL_AUDIO_U8, .channels = 2, .freq = static_cast<int>(rate)};
+    const auto c_idx = static_cast<size_t>(chan);
     streams_[c_idx] = SDL_CreateAudioStream(&spec, nullptr);
     if (!streams_[c_idx]) return;
 
@@ -116,7 +115,7 @@ void SdlAudio::play_channel(int chan, Address phys_addr, Word length, Word rate,
 
 void SdlAudio::stop_channel(int chan) {
 #ifdef HAVE_SDL3
-    const size_t c_idx = static_cast<size_t>(chan);
+    const auto c_idx = static_cast<size_t>(chan);
     if (streams_[c_idx]) {
         SDL_DestroyAudioStream(streams_[c_idx]);
         streams_[c_idx] = nullptr;
@@ -126,7 +125,7 @@ void SdlAudio::stop_channel(int chan) {
 
 void SdlAudio::update_channel_params(int chan, Word volume) {
 #ifdef HAVE_SDL3
-    const size_t c_idx = static_cast<size_t>(chan);
+    const auto c_idx = static_cast<size_t>(chan);
     if (!audio_initialized_ || !streams_[c_idx]) return;
     float gain = std::clamp(static_cast<float>(volume) / 127.0f, 0.0f, 1.0f);
     SDL_SetAudioStreamGain(streams_[c_idx], gain);
@@ -141,8 +140,8 @@ void SdlAudio::play_music(Address music_addr, Word music_length, Word music_volu
     stop_music();  // clean up any previous track
 
     // --- 1. Load MIDI from guest DRAM memory directly using tml ---
-    const uint8_t* midi_src =
-        reinterpret_cast<const uint8_t*>(machine_.mmem) + (music_addr - 0x80000000u);
+    const auto* midi_src =
+        reinterpret_cast<const uint8_t*>(machine_.mmem) + (music_addr - 0x80000000u); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
     tml_message* midi = tml_load_memory(midi_src, static_cast<int>(music_length));
     if (!midi) {
@@ -151,22 +150,21 @@ void SdlAudio::play_music(Address music_addr, Word music_length, Word music_volu
     }
 
     // --- 2. Find and load a SoundFont ---
-    static const char* sf2_paths[] = {
+    static const std::array<const char*, 6> sf2_paths = {
         "share/soundfonts/TimGM6mb.sf2",
         "./TimGM6mb.sf2",
         "/usr/share/soundfonts/FluidR3_GM.sf2",
         "/usr/share/sounds/sf2/FluidR3_GM.sf2",
         "/usr/share/soundfonts/default.sf2",
-        "/usr/share/generaluser-gs/GeneralUser-GS.sf2",
-        nullptr
+        "/usr/share/generaluser-gs/GeneralUser-GS.sf2"
     };
 
     tsf* synth = nullptr;
-    for (int i = 0; sf2_paths[i]; ++i) {
-        if (std::ifstream(sf2_paths[i]).good()) {
-            synth = tsf_load_filename(sf2_paths[i]);
+    for (const char* path : sf2_paths) {
+        if (std::ifstream(path).good()) {
+            synth = tsf_load_filename(path);
             if (synth) {
-                simrv::log::info("[SdlAudio] Music: loaded SoundFont: {}", sf2_paths[i]);
+                simrv::log::info("[SdlAudio] Music: loaded SoundFont: {}", path);
                 break;
             }
         }
@@ -194,10 +192,10 @@ void SdlAudio::play_music(Address music_addr, Word music_length, Word music_volu
 
     double total_secs = static_cast<double>(midi_len_ms) / 1000.0;
     unsigned int sample_rate = 44100;
-    unsigned int total_frames = static_cast<unsigned int>(total_secs * sample_rate);
+    const auto total_frames = static_cast<unsigned int>(total_secs * sample_rate);
 
     // Pre-allocate the float buffer (2 channels per frame)
-    music_pcm_buf_.resize(total_frames * 2);
+    music_pcm_buf_.resize(static_cast<size_t>(total_frames) * 2);
 
     tml_message* curr = midi;
     unsigned int current_frame = 0;
@@ -216,25 +214,27 @@ void SdlAudio::play_music(Address music_addr, Word music_length, Word music_volu
         while (curr && curr->time <= next_msec) {
             switch (curr->type) {
                 case TML_NOTE_ON:
-                    tsf_channel_note_on(synth, curr->channel, curr->key, static_cast<float>(curr->velocity) / 127.0f);
+                    tsf_channel_note_on(synth, curr->channel, curr->key, static_cast<float>(curr->velocity) / 127.0f); // NOLINT(cppcoreguidelines-pro-type-union-access)
                     break;
                 case TML_NOTE_OFF:
-                    tsf_channel_note_off(synth, curr->channel, curr->key);
+                    tsf_channel_note_off(synth, curr->channel, curr->key); // NOLINT(cppcoreguidelines-pro-type-union-access)
                     break;
                 case TML_PROGRAM_CHANGE:
-                    tsf_channel_set_presetnumber(synth, curr->channel, curr->program, (curr->channel == 9));
+                    tsf_channel_set_presetnumber(synth, curr->channel, curr->program, (curr->channel == 9)); // NOLINT(cppcoreguidelines-pro-type-union-access)
                     break;
                 case TML_PITCH_BEND:
-                    tsf_channel_set_pitchwheel(synth, curr->channel, curr->pitch_bend);
+                    tsf_channel_set_pitchwheel(synth, curr->channel, curr->pitch_bend); // NOLINT(cppcoreguidelines-pro-type-union-access)
                     break;
                 case TML_CONTROL_CHANGE:
-                    tsf_channel_midi_control(synth, curr->channel, curr->control, curr->control_value);
+                    tsf_channel_midi_control(synth, curr->channel, curr->control, curr->control_value); // NOLINT(cppcoreguidelines-pro-type-union-access)
+                    break;
+                default:
                     break;
             }
             curr = curr->next;
         }
 
-        tsf_render_float(synth, &music_pcm_buf_[current_frame * 2], static_cast<int>(block_size), 0);
+        tsf_render_float(synth, &music_pcm_buf_[static_cast<size_t>(current_frame) * 2], static_cast<int>(block_size), 0);
 
         current_frame += block_size;
         msec = next_msec;
@@ -244,7 +244,7 @@ void SdlAudio::play_music(Address music_addr, Word music_length, Word music_volu
     tsf_close(synth);
 
     // --- 4. Create an SDL3 audio stream and push the PCM ---
-    SDL_AudioSpec spec{SDL_AUDIO_F32, 2, 44100};
+    SDL_AudioSpec spec{.format = SDL_AUDIO_F32, .channels = 2, .freq = 44100};
     music_stream_ = SDL_CreateAudioStream(&spec, nullptr);
     if (!music_stream_) {
         music_pcm_buf_.clear();
@@ -271,12 +271,12 @@ void SdlAudio::play_music(Address music_addr, Word music_length, Word music_volu
     // --- 5. Background thread: re-queue data when stream runs dry (looping) ---
     if (music_looping) {
         music_stop_flag_ = false;
-        music_thread_ = std::thread([this]() {
+        music_thread_ = std::thread([this]() -> void {
             while (!music_stop_flag_) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
                 if (!music_stream_ || music_pcm_buf_.empty()) break;
                 int queued = SDL_GetAudioStreamQueued(music_stream_);
-                if (queued < static_cast<int>(music_pcm_buf_.size() * sizeof(float) / 4)) {
+                if (static_cast<size_t>(queued) < music_pcm_buf_.size() * sizeof(float) / 4) {
                     SDL_PutAudioStreamData(music_stream_, music_pcm_buf_.data(),
                                            static_cast<int>(music_pcm_buf_.size() * sizeof(float)));
                 }

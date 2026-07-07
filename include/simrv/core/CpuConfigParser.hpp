@@ -83,6 +83,20 @@ inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuConfig&
                 config.enable_ex_forwarding = (val != 0);
             } else if (key == "enable_mem_forwarding") {
                 config.enable_mem_forwarding = (val != 0);
+            } else if (key == "enable_ooo") {
+                config.enable_ooo = (val != 0);
+            } else if (key == "rob_size") {
+                config.rob_size = val;
+            } else if (key == "rs_size") {
+                config.rs_size = val;
+            } else if (key == "lsq_size") {
+                config.lsq_size = val;
+            } else if (key == "ooo_dispatch_width") {
+                config.ooo_dispatch_width = val;
+            } else if (key == "ooo_issue_width") {
+                config.ooo_issue_width = val;
+            } else if (key == "ooo_commit_width") {
+                config.ooo_commit_width = val;
             } else if (key == "btb_entries") {
                 config.btb_entries = val;
             } else if (key == "global_history_bits") {

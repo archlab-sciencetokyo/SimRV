@@ -4,7 +4,6 @@
  */
 #include "simrv/tui/RegisterPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
-#include "simrv/util/FormatUtil.hpp"
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
@@ -171,7 +170,7 @@ void RegisterPane::update_cache() {
     for (int i = 0; i < 32; ++i) {
         cached_gpr_.at(static_cast<std::size_t>(i)) = st.regs.read(static_cast<RegId>(i));
         cached_fpr_.at(static_cast<std::size_t>(i)) = st.regs.read_fp(static_cast<RegId>(i));
-        cached_vec_.at(static_cast<std::size_t>(i)) = st.regs.read_vector(static_cast<RegId>(i)).u64[0];
+        cached_vec_.at(static_cast<std::size_t>(i)) = st.regs.read_vector(static_cast<RegId>(i)).u64[0]; // NOLINT(cppcoreguidelines-pro-type-union-access)
     }
 }
 

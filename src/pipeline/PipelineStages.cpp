@@ -316,13 +316,21 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
 
     if (is_valid) {
         const auto op = opcode_of(w_ir_tmp);
-        const bool is_fp_op = (op == Opcode::LoadFp) || (op == Opcode::StoreFp) ||
+        const bool is_vector = (op == Opcode::OpV) || 
+                               ((op == Opcode::LoadFp || op == Opcode::StoreFp) && 
+                                (funct3_of(w_ir_tmp) != Funct3::Fld && funct3_of(w_ir_tmp) != Funct3::Fsd && static_cast<uint8_t>(funct3_of(w_ir_tmp)) != 2));
+        const bool is_fp_op = !is_vector && ((op == Opcode::LoadFp) || (op == Opcode::StoreFp) ||
                               (op == Opcode::OpFp) || (op == Opcode::MAdd) ||
                               (op == Opcode::MSub) || (op == Opcode::NMAdd) ||
-                              (op == Opcode::NMSub);
-        if (simrv::compiler::unlikely(is_fp_op &&
-                                      (state_.mstatus & enum_mask(MstatusBit::Fs)) == 0)) {
-            is_valid = false;
+                              (op == Opcode::NMSub));
+        if (is_vector) {
+            if (simrv::compiler::unlikely((state_.mstatus & enum_mask(MstatusBit::Vs)) == 0)) {
+                is_valid = false;
+            }
+        } else if (is_fp_op) {
+            if (simrv::compiler::unlikely((state_.mstatus & enum_mask(MstatusBit::Fs)) == 0)) {
+                is_valid = false;
+            }
         }
     }
 
@@ -556,6 +564,12 @@ void CPU::execute_core(Machine& machine) {
         return;
     }
 
+    if (ctx.op_id >= isa::OperationId::VSETVLI && ctx.op_id <= isa::OperationId::VMAXU_VX) {
+        ctx.tkn = false;
+        execute::ExecuteUnit::execute_vector(*this, machine, ctx.op_id, ctx.ir);
+        return;
+    }
+
     ctx.fp_wb_enable = false;
     ctx.int_wb_from_fp = false;
 
@@ -635,6 +649,9 @@ void CPU::execute_core(Machine& machine) {
             break;
         case Opcode::System:
             execute_system(machine);
+            break;
+        case Opcode::Custom0:
+            ctx.tkn = false;
             break;
         case Opcode::MAdd:
         case Opcode::MSub:

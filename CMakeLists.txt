@@ -96,10 +96,13 @@ add_executable(SimRV
   src/core/Tlb.cpp
   src/pipeline/Decoder.cpp
   src/pipeline/PipelineSim.cpp
+  src/pipeline/InOrderPipeline.cpp
+  src/pipeline/OutOfOrderPipeline.cpp
   src/execute/ExecuteUnitInt.cpp
   src/execute/ExecuteUnitB.cpp
   src/execute/ExecuteUnitFloat.cpp
   src/execute/ExecuteUnit.cpp
+  src/execute/ExecuteUnitVector.cpp
   src/pipeline/PipelineStages.cpp
   src/core/Cpu.cpp
   src/util/CliParser.cpp
@@ -387,6 +390,69 @@ foreach(test_name IN LISTS ALL_ISA_TESTS)
     register_isa_test("${test_name}" FALSE)
   endif()
 endforeach()
+
+# Generate and register vector tests if toolchain and vector test package are available
+if(EXISTS "/var/archlab-modules/riscv-vector-tests/2026.07.06")
+  find_program(RISCV_GCC NAMES "${RISCV_PREFIX}gcc" "riscv64-unknown-elf-gcc" "riscv32-unknown-elf-gcc"
+               DOC "Path to RISC-V GCC cross-compiler for compiling vector tests")
+  if(RISCV_GCC)
+    message(STATUS "Generating and compiling vector tests...")
+    set(VEC_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/vector-tests-gen")
+    file(MAKE_DIRECTORY "${VEC_GEN_DIR}")
+    execute_process(
+      COMMAND /var/archlab-modules/riscv-vector-tests/2026.07.06/bin/riscv-vector-tests-generator
+        -XLEN 32 -VLEN 256 -integer
+        -configs /var/archlab-modules/riscv-vector-tests/2026.07.06/configs/v
+        -pattern "^v(add|sub|and|or|xor|sll|srl|sra|mul|div|divu|merge|mv|seq|sne|sltu?|sleu?|sgtu?|min|max|le8|le16|le32|se8|se16|se32|setvli|setivli|setvl)\\."
+        -stage1output "${VEC_GEN_DIR}"
+      RESULT_VARIABLE gen_res
+    )
+    if(gen_res EQUAL 0)
+      file(GLOB VEC_S_FILES "${VEC_GEN_DIR}/*.S")
+      foreach(s_file IN LISTS VEC_S_FILES)
+        get_filename_component(test_name "${s_file}" NAME_WE)
+        set(elf_file "${VEC_GEN_DIR}/${test_name}.elf")
+        if(NOT EXISTS "${elf_file}")
+          execute_process(
+            COMMAND ${RISCV_GCC} -march=rv32gcv -mabi=ilp32d -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles
+              -I /var/archlab-modules/riscv-vector-tests/2026.07.06/env/riscv-test-env
+              -I /var/archlab-modules/riscv-vector-tests/2026.07.06/env/riscv-test-env/p
+              -I /var/archlab-modules/riscv-vector-tests/2026.07.06/env
+              -I /var/archlab-modules/riscv-vector-tests/2026.07.06/macros/general
+              -T /var/archlab-modules/riscv-vector-tests/2026.07.06/env/riscv-test-env/p/link.ld
+              ${s_file} -o ${elf_file}
+            RESULT_VARIABLE compile_res
+          )
+          if(NOT compile_res EQUAL 0)
+            message(WARNING "Failed to compile vector test: ${s_file}")
+          endif()
+        endif()
+        if(EXISTS "${elf_file}")
+          add_test(NAME "isa-vector-${test_name}"
+            COMMAND ${CMAKE_COMMAND}
+              -D SIMRV_BIN=$<TARGET_FILE:SimRV>
+              -D ELF_PATH=${elf_file}
+              -D OBJCOPY_BIN=${RISCV_OBJCOPY}
+              -D NM_BIN=${RISCV_NM}
+              -D WORK_DIR=${ISA_WORK_DIR}
+              -D TIMEOUT_SECS=20
+              -D END_INSNS=2000000
+              -D DEFAULT_TOHOST_ADDR=0x80006000
+              -P ${CMAKE_SOURCE_DIR}/scripts/RunIsaTest.cmake
+          )
+          set_tests_properties("isa-vector-${test_name}" PROPERTIES
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            LABELS "gate;isa;vector;rv32gc"
+            SKIP_RETURN_CODE 2
+          )
+        endif()
+      endforeach()
+    else()
+      message(WARNING "Failed to generate vector tests")
+    endif()
+  endif()
+endif()
+
 
 add_test(NAME benchmark
   COMMAND ${CMAKE_COMMAND} -E env SIMRV_BIN=$<TARGET_FILE:SimRV> SIMRV_BENCH_ITERS=5 bash ${CMAKE_SOURCE_DIR}/scripts/benchmark.sh

@@ -124,7 +124,7 @@ auto Audio::handle_request(const memory::TlChannelA& req, memory::TlChannelD& re
 
 void Audio::play_channel(int chan) {
     if (machine_.sdl_audio) {
-        const size_t c_idx = static_cast<size_t>(chan);
+        const auto c_idx = static_cast<size_t>(chan);
         machine_.sdl_audio->play_channel(chan, sample_address_[c_idx], sample_length_[c_idx],
                                          sample_rate_[c_idx], volume_[c_idx], panning_[c_idx]);
     }

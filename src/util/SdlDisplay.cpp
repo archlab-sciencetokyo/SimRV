@@ -18,7 +18,7 @@ SdlDisplay::SdlDisplay(simrv::core::Machine& machine)
 SdlDisplay::~SdlDisplay() {
     try {
         shutdown();
-    } catch (...) {}
+    } catch (...) {} // NOLINT(bugprone-empty-catch)
 }
 
 void SdlDisplay::init() {

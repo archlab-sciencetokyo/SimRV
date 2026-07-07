@@ -150,6 +150,7 @@ class Machine {
     std::vector<simrv::virtio::QueueState> console_queue_owner_;
     std::vector<simrv::virtio::QueueState> disk_queue_owner_;
     friend class simrv::core::CPU;
+    friend class simrv::execute::ExecuteUnit;
     friend class simrv::device::Uart;
     friend class simrv::tui::Tui;
     simrv::memory::MemorySubsystem memory_;
