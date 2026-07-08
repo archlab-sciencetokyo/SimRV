@@ -69,9 +69,9 @@ auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem,
 
 auto get_stall_status(bool active, const char* active_str = "Active") -> std::pair<const char*, const char*> {
     if (active) {
-        return {active_str, kSakuraPeach};
+        return {active_str, kThemePeach};
     }
-    return {"None", kSakuraMint};
+    return {"None", kThemeMint};
 }
 
 auto get_active_branch_pc(const simrv::pipeline::PipelineSim& ps) -> Register {
@@ -202,13 +202,13 @@ auto RegisterPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, i
             {
                 Register pc = get_active_branch_pc(ps);
                 std::string bht_str = get_bht_string(ps, pc);
-                return format_to_width(std::format("  {}BHT State\033[0m : {}{}\033[0m", kSakuraText, kSakuraVal, bht_str), width);
+                return format_to_width(std::format("  {}BHT State\033[0m : {}{}\033[0m", kThemeText, kThemeVal, bht_str), width);
             }
         case 12:
             {
                 Register pc = get_active_branch_pc(ps);
                 std::string btb_str = get_btb_string(ps, pc);
-                return format_to_width(std::format("  {}BTB State\033[0m : {}{}\033[0m", kSakuraText, kSakuraVal, btb_str), width);
+                return format_to_width(std::format("  {}BTB State\033[0m : {}{}\033[0m", kThemeText, kThemeVal, btb_str), width);
             }
         case 13:
             return section_line("End Pipeline Visualizer", width);
@@ -231,7 +231,7 @@ auto RegisterPane::render_pipeline_stages_functional_low(const simrv::core::CPU&
     if (logical_row >= 8 && logical_row <= 15) {
         return render_pipeline_stages_functional_low_part2(cpu, logical_row, col_width, right_width);
     }
-    return format_to_width(std::format(" {}Pipeline page\033[0m", kSakuraMuted), col_width + right_width);
+    return format_to_width(std::format(" {}Pipeline page\033[0m", kThemeMuted), col_width + right_width);
 }
 
 auto RegisterPane::render_pipeline_stages_functional_low_part1(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
@@ -243,31 +243,31 @@ auto RegisterPane::render_pipeline_stages_functional_low_part1(const simrv::core
         case 1:
             return render_pair(
                 "cpc", std::format("0x{:0{}x}", ctx.cpc, simrv::xlen::kXLenHexDigits),
-                kSakuraMint, "ir_org", std::format("0x{:08x}", ctx.ir_org), kSakuraVal,
+                kThemeMint, "ir_org", std::format("0x{:08x}", ctx.ir_org), kThemeVal,
                 col_width, right_width, 8);
         case 2:
-            return render_pair("ir", std::format("0x{:08x}", ctx.ir), kSakuraVal,
-                               "cinsn", std::format("0x{:08x}", ctx.cinsn), kSakuraVal,
+            return render_pair("ir", std::format("0x{:08x}", ctx.ir), kThemeVal,
+                               "cinsn", std::format("0x{:08x}", ctx.cinsn), kThemeVal,
                                col_width, right_width, 8);
         case 3:
             return section_line("── ID", width);
         case 4:
             return render_pair(
-                "opcode", std::to_string(std::to_underlying(ctx.opcode)), kSakuraVal,
-                "funct3", std::to_string(std::to_underlying(ctx.funct3)), kSakuraVal,
+                "opcode", std::to_string(std::to_underlying(ctx.opcode)), kThemeVal,
+                "funct3", std::to_string(std::to_underlying(ctx.funct3)), kThemeVal,
                 col_width, right_width, 8);
         case 5:
             return render_pair(
                 "rd/rs1",
                 std::format("{}/{}", std::to_underlying(ctx.rd),
                              std::to_underlying(ctx.rs1)),
-                kSakuraVal, "rs2/f7",
+                kThemeVal, "rs2/f7",
                 std::format("{}/0x{:x}", std::to_underlying(ctx.rs2), ctx.funct7),
-                kSakuraVal, col_width, right_width, 8);
+                kThemeVal, col_width, right_width, 8);
         case 6:
             return render_pair(
                 "imm", std::format("0x{:0{}x}", ctx.imm, simrv::xlen::kXLenHexDigits),
-                kSakuraVal, "funct12", std::format("0x{:x}", ctx.funct12), kSakuraVal,
+                kThemeVal, "funct12", std::format("0x{:x}", ctx.funct12), kThemeVal,
                 col_width, right_width, 8);
         case 7:
             return section_line("── OF/EX", width);
@@ -283,41 +283,41 @@ auto RegisterPane::render_pipeline_stages_functional_low_part2(const simrv::core
         case 8:
             return render_pair(
                 "rrs1", std::format("0x{:0{}x}", ctx.rrs1, simrv::xlen::kXLenHexDigits),
-                kSakuraMint, "rrs2",
+                kThemeMint, "rrs2",
                 std::format("0x{:0{}x}", ctx.rrs2, simrv::xlen::kXLenHexDigits),
-                kSakuraMint, col_width, right_width, 8);
+                kThemeMint, col_width, right_width, 8);
         case 9:
             return render_pair(
                 "jmp_pc",
                 std::format("0x{:0{}x}", ctx.jmp_pc, simrv::xlen::kXLenHexDigits),
-                kSakuraMint, "taken", ctx.tkn ? "yes" : "no", kSakuraVal,
+                kThemeMint, "taken", ctx.tkn ? "yes" : "no", kThemeVal,
                 col_width, right_width, 8);
         case 10:
             return render_pair(
                 "wb_data",
                 std::format("0x{:0{}x}", ctx.wb_data, simrv::xlen::kXLenHexDigits),
-                kSakuraMint, "wb_csr",
+                kThemeMint, "wb_csr",
                 std::format("0x{:0{}x}", ctx.wb_data_csr, simrv::xlen::kXLenHexDigits),
-                kSakuraVal, col_width, right_width, 8);
+                kThemeVal, col_width, right_width, 8);
         case 11:
             return section_line("── MEM/FP", width);
         case 12:
             return render_pair(
                 "mem_addr",
                 std::format("0x{:0{}x}", ctx.mem_addr, simrv::xlen::kXLenHexDigits),
-                kSakuraMint, "mem_w",
+                kThemeMint, "mem_w",
                 std::format("0x{:0{}x}", ctx.mem_wdata, simrv::xlen::kXLenHexDigits),
-                kSakuraMint, col_width, right_width, 8);
+                kThemeMint, col_width, right_width, 8);
         case 13:
             return render_pair(
                 "mem_r",
                 std::format("0x{:0{}x}", ctx.mem_rdata, simrv::xlen::kXLenHexDigits),
-                kSakuraMint, "fp_wb", std::format("0x{:016x}", ctx.fp_wb_data),
-                kSakuraVal, col_width, right_width, 8);
+                kThemeMint, "fp_wb", std::format("0x{:016x}", ctx.fp_wb_data),
+                kThemeVal, col_width, right_width, 8);
         case 14:
-            return render_pair("fp_wb_en", ctx.fp_wb_enable ? "on" : "off", kSakuraVal,
+            return render_pair("fp_wb_en", ctx.fp_wb_enable ? "on" : "off", kThemeVal,
                                "int<-fp", ctx.int_wb_from_fp ? "on" : "off",
-                               kSakuraVal, col_width, right_width, 8);
+                               kThemeVal, col_width, right_width, 8);
         case 15:
             return section_line("── TRAP/TLB", width);
         default:
@@ -335,20 +335,20 @@ auto RegisterPane::render_pipeline_stages_functional_high(const simrv::core::CPU
     switch (logical_row) {
         case 16:
             return render_pair(
-                "exc", exc_text, kSakuraPeach, "tval",
+                "exc", exc_text, kThemePeach, "tval",
                 std::format("0x{:0{}x}", ctx.pending_tval, simrv::xlen::kXLenHexDigits),
-                kSakuraVal, col_width, right_width, 8);
+                kThemeVal, col_width, right_width, 8);
         case 17:
             return render_pair(
                 "padr1", std::format("0x{:0{}x}", ctx.padr1, simrv::xlen::kXLenHexDigits),
-                kSakuraVal, "padr2",
+                kThemeVal, "padr2",
                 std::format("0x{:0{}x}", ctx.padr2, simrv::xlen::kXLenHexDigits),
-                kSakuraVal, col_width, right_width, 8);
+                kThemeVal, col_width, right_width, 8);
         case 18:
             return render_pair(
                 "rcsr", std::format("0x{:0{}x}", ctx.rcsr, simrv::xlen::kXLenHexDigits),
-                kSakuraVal, "funct5", std::to_string(std::to_underlying(ctx.funct5)),
-                kSakuraVal, col_width, right_width, 8);
+                kThemeVal, "funct5", std::to_string(std::to_underlying(ctx.funct5)),
+                kThemeVal, col_width, right_width, 8);
         case 19:
             return section_line("── End Pipeline Snapshot", width);
         default:
@@ -369,50 +369,50 @@ auto RegisterPane::render_system_state(const simrv::core::CPU& cpu, int logical_
                                : (st.priv == PrivilegeLevel::Supervisor) ? "Supervisor"
                                                                          : "User";
         return render_pair("pc", std::format("0x{:0{}x}", st.pc, simrv::xlen::kXLenHexDigits),
-                           kSakuraMint, "priv", priv_str, kSakuraPink, col_width, right_width, label_pad);
+                           kThemeMint, "priv", priv_str, kThemePink, col_width, right_width, label_pad);
     }
     if (logical_row == 18) {
         std::string misa_str = simrv::xlen::resolve_misa_string(st.misa);
         return render_pair("mstatus",
                            std::format("0x{:0{}x}", st.mstatus, simrv::xlen::kXLenHexDigits),
-                           kSakuraVal, "misa", misa_str, kSakuraVal, col_width, right_width, label_pad);
+                           kThemeVal, "misa", misa_str, kThemeVal, col_width, right_width, label_pad);
     }
     if (logical_row == 19) {
         return render_pair(
-            "mie", std::format("0x{:0{}x}", st.mie, simrv::xlen::kXLenHexDigits), kSakuraVal,
-            "mip", std::format("0x{:0{}x}", st.mip, simrv::xlen::kXLenHexDigits), kSakuraVal,
+            "mie", std::format("0x{:0{}x}", st.mie, simrv::xlen::kXLenHexDigits), kThemeVal,
+            "mip", std::format("0x{:0{}x}", st.mip, simrv::xlen::kXLenHexDigits), kThemeVal,
             col_width, right_width, label_pad);
     }
     if (logical_row == 20) {
         return render_pair(
             "mtvec", std::format("0x{:0{}x}", st.mtvec, simrv::xlen::kXLenHexDigits),
-            kSakuraVal, "mepc", std::format("0x{:0{}x}", st.mepc, simrv::xlen::kXLenHexDigits),
-            kSakuraVal, col_width, right_width, label_pad);
+            kThemeVal, "mepc", std::format("0x{:0{}x}", st.mepc, simrv::xlen::kXLenHexDigits),
+            kThemeVal, col_width, right_width, label_pad);
     }
     if (logical_row == 21) {
         return render_pair(
             "stvec", std::format("0x{:0{}x}", st.stvec, simrv::xlen::kXLenHexDigits),
-            kSakuraVal, "sepc", std::format("0x{:0{}x}", st.sepc, simrv::xlen::kXLenHexDigits),
-            kSakuraVal, col_width, right_width, label_pad);
+            kThemeVal, "sepc", std::format("0x{:0{}x}", st.sepc, simrv::xlen::kXLenHexDigits),
+            kThemeVal, col_width, right_width, label_pad);
     }
     if (logical_row == 22) {
         return render_pair(
             "mtval", std::format("0x{:0{}x}", st.mtval, simrv::xlen::kXLenHexDigits),
-            kSakuraVal, "satp", std::format("0x{:0{}x}", st.satp, simrv::xlen::kXLenHexDigits),
-            kSakuraVal, col_width, right_width, label_pad);
+            kThemeVal, "satp", std::format("0x{:0{}x}", st.satp, simrv::xlen::kXLenHexDigits),
+            kThemeVal, col_width, right_width, label_pad);
     }
     if (logical_row == 23) {
         return render_pair(
             "scause", std::format("0x{:0{}x}", st.scause, simrv::xlen::kXLenHexDigits),
-            kSakuraVal, "stval",
-            std::format("0x{:0{}x}", st.stval, simrv::xlen::kXLenHexDigits), kSakuraVal,
+            kThemeVal, "stval",
+            std::format("0x{:0{}x}", st.stval, simrv::xlen::kXLenHexDigits), kThemeVal,
             col_width, right_width, label_pad);
     }
     if (logical_row == 24) {
         return render_pair(
             "medeleg", std::format("0x{:0{}x}", st.medeleg, simrv::xlen::kXLenHexDigits),
-            kSakuraVal, "mideleg",
-            std::format("0x{:0{}x}", st.mideleg, simrv::xlen::kXLenHexDigits), kSakuraVal,
+            kThemeVal, "mideleg",
+            std::format("0x{:0{}x}", st.mideleg, simrv::xlen::kXLenHexDigits), kThemeVal,
             col_width, right_width, label_pad);
     }
     return format_to_width("", width);
@@ -576,26 +576,26 @@ auto RegisterPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_r
         case 1:
             {
                 auto [h, m, mr, ratio] = get_stats_strings(ic.hit_count(), ic.miss_count());
-                return render_pair(h, m, kSakuraMint, "Type", "Direct-Mapped", kSakuraVal, col_width, right_width, 0);
+                return render_pair(h, m, kThemeMint, "Type", "Direct-Mapped", kThemeVal, col_width, right_width, 0);
             }
         case 2:
             {
                 auto [h, m, mr, ratio] = get_stats_strings(ic.hit_count(), ic.miss_count());
                 std::string bar = make_bar(ratio, 20);
-                return render_pair(mr, bar, kSakuraPeach, "Line/Way", "32B / 4-way", kSakuraVal, col_width, right_width, 0);
+                return render_pair(mr, bar, kThemePeach, "Line/Way", "32B / 4-way", kThemeVal, col_width, right_width, 0);
             }
         case 3:
             return section_line("L1 Data Cache (DCache)", width);
         case 4:
             {
                 auto [h, m, mr, ratio] = get_stats_strings(dc.hit_count(), dc.miss_count());
-                return render_pair(h, m, kSakuraMint, "Type", "Set-Associative", kSakuraVal, col_width, right_width, 0);
+                return render_pair(h, m, kThemeMint, "Type", "Set-Associative", kThemeVal, col_width, right_width, 0);
             }
         case 5:
             {
                 auto [h, m, mr, ratio] = get_stats_strings(dc.hit_count(), dc.miss_count());
                 std::string bar = make_bar(ratio, 20);
-                return render_pair(mr, bar, kSakuraPeach, "Line/Way", "32B / 4-way", kSakuraVal, col_width, right_width, 0);
+                return render_pair(mr, bar, kThemePeach, "Line/Way", "32B / 4-way", kThemeVal, col_width, right_width, 0);
             }
         case 6:
             return section_line("L1 Cache Set Occupancy Map", width);

@@ -85,11 +85,8 @@ void CPU::fetch_address_translate(Machine& /*machine*/) {
             ((w_vadr1 & ~simrv::memory::kPageMask) != (w_vadr2 & ~simrv::memory::kPageMask));
         const Word current_asid = simrv::xlen::satp_asid(state_.satp);
 
-        TLBEntry* tlb_e1 =
-            &tlb.inst_r.at((w_vadr1 >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1));
-        if (tlb_e1->valid && tlb_e1->asid == current_asid &&
-            tlb_e1->v_addr == (w_vadr1 & ~simrv::memory::kPageMask) &&
-            tlb_e1->priv == state_.priv) {
+        TLBEntry* tlb_e1 = tlb.lookup_inst_r(w_vadr1, current_asid, state_.priv);
+        if (tlb_e1) {
             w_padr1 = tlb_e1->p_addr + (w_vadr1 & simrv::memory::kPageMask);
         }
 
@@ -98,11 +95,8 @@ void CPU::fetch_address_translate(Machine& /*machine*/) {
                 w_padr2 = w_padr1 + 2;
             }
         } else {
-            TLBEntry* tlb_e2 = &tlb.inst_r.at((w_vadr2 >> simrv::memory::kPageShift) &
-                                              (simrv::memory::kTlbSize - 1));
-            if (tlb_e2->valid && tlb_e2->asid == current_asid &&
-                tlb_e2->v_addr == (w_vadr2 & ~simrv::memory::kPageMask) &&
-                tlb_e2->priv == state_.priv) {
+            TLBEntry* tlb_e2 = tlb.lookup_inst_r(w_vadr2, current_asid, state_.priv);
+            if (tlb_e2) {
                 w_padr2 = tlb_e2->p_addr + (w_vadr2 & simrv::memory::kPageMask);
             }
         }
@@ -136,13 +130,7 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
         auto chain_res = translate_res
             .and_then([&](Address phys) -> std::expected<void, TrapCause> {
                 w_padr = phys;
-                TLBEntry* tlb_e1 = &tlb.inst_r.at((w_vadr >> simrv::memory::kPageShift) &
-                                                  (simrv::memory::kTlbSize - 1));
-                tlb_e1->v_addr = w_vadr & ~simrv::memory::kPageMask;
-                tlb_e1->p_addr = w_padr & ~simrv::memory::kPageMask;
-                tlb_e1->asid = simrv::xlen::satp_asid(state_.satp);
-                tlb_e1->priv = state_.priv;
-                tlb_e1->valid = true;
+                tlb.insert_inst_r(w_vadr, w_padr, simrv::xlen::satp_asid(state_.satp), state_.priv);
                 return {};
             })
             .or_else([&](TrapCause error) -> std::expected<void, TrapCause> {
@@ -838,6 +826,9 @@ void CPU::execute_fp(Machine& /*machine*/) {
 // ==========================================
 
 void CPU::run_memory_stage(Machine& machine) {
+    if (pipeline_context.op_id >= isa::OperationId::VSETVLI && pipeline_context.op_id <= isa::OperationId::VMAXU_VX) {
+        return;
+    }
     memory_load_phase(machine);
     memory_prepare_store_data(machine);
     memory_store_phase(machine);
@@ -925,6 +916,10 @@ void CPU::writeback_registers([[maybe_unused]] Machine& machine) {
     }
 
     e_icount++;
+
+    if (ctx.op_id >= isa::OperationId::VSETVLI && ctx.op_id <= isa::OperationId::VMAXU_VX) {
+        return;
+    }
 
     Word wire_wb_r_data = 0;
     Word wire_wb_r_enable = 0;

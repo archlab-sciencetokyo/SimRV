@@ -400,20 +400,27 @@ if(EXISTS "/var/archlab-modules/riscv-vector-tests/2026.07.06")
     file(MAKE_DIRECTORY "${VEC_GEN_DIR}")
     execute_process(
       COMMAND /var/archlab-modules/riscv-vector-tests/2026.07.06/bin/riscv-vector-tests-generator
-        -XLEN 32 -VLEN 256 -integer
+        -XLEN ${SIMRV_XLEN} -VLEN 256 -integer
         -configs /var/archlab-modules/riscv-vector-tests/2026.07.06/configs/v
-        -pattern "^v(add|sub|and|or|xor|sll|srl|sra|mul|div|divu|merge|mv|seq|sne|sltu?|sleu?|sgtu?|min|max|le8|le16|le32|se8|se16|se32|setvli|setivli|setvl)\\."
+        -pattern "^v(add|sub|and|or|xor|sll|srl|sra|mul|div|divu|merge|mv|seq|sne|sltu?|sleu?|sgtu?|min|max|le8|le16|le32|le64|se8|se16|se32|se64|setvli|setivli|setvl|macc|madd|nmsac|nmsub|wmacc|wmaccu|wmaccsu|wmaccus)\\."
         -stage1output "${VEC_GEN_DIR}"
       RESULT_VARIABLE gen_res
     )
     if(gen_res EQUAL 0)
+      if(SIMRV_XLEN STREQUAL "64")
+        set(VEC_ARCH "rv64gcv")
+        set(VEC_ABI "lp64d")
+      else()
+        set(VEC_ARCH "rv32gcv")
+        set(VEC_ABI "ilp32d")
+      endif()
       file(GLOB VEC_S_FILES "${VEC_GEN_DIR}/*.S")
       foreach(s_file IN LISTS VEC_S_FILES)
         get_filename_component(test_name "${s_file}" NAME_WE)
         set(elf_file "${VEC_GEN_DIR}/${test_name}.elf")
         if(NOT EXISTS "${elf_file}")
           execute_process(
-            COMMAND ${RISCV_GCC} -march=rv32gcv -mabi=ilp32d -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles
+            COMMAND ${RISCV_GCC} -march=${VEC_ARCH} -mabi=${VEC_ABI} -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles
               -I /var/archlab-modules/riscv-vector-tests/2026.07.06/env/riscv-test-env
               -I /var/archlab-modules/riscv-vector-tests/2026.07.06/env/riscv-test-env/p
               -I /var/archlab-modules/riscv-vector-tests/2026.07.06/env
@@ -441,7 +448,7 @@ if(EXISTS "/var/archlab-modules/riscv-vector-tests/2026.07.06")
           )
           set_tests_properties("isa-vector-${test_name}" PROPERTIES
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-            LABELS "gate;isa;vector;rv32gc"
+            LABELS "gate;isa;vector;rv${SIMRV_XLEN}gc"
             SKIP_RETURN_CODE 2
           )
         endif()

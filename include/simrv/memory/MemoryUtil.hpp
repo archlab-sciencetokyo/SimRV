@@ -26,7 +26,7 @@ inline constexpr Address kDramBaseAddress = static_cast<Address>(0x80000000u);
 inline constexpr Address kDramSize = static_cast<Address>(SIMRV_DRAM_SIZE_MB * 1024u * 1024u);
 inline constexpr Address kDramMask = kDramSize - 1;
 
-inline constexpr Word kTlbSize = 1024;
+inline constexpr Word kTlbSize = 2048;
 inline constexpr Word kPageShift = 12;
 inline constexpr Word kPageMask = (1u << kPageShift) - 1;
 
@@ -86,6 +86,69 @@ constexpr auto store_width_bytes(Instruction funct3) -> size_t {
         }
     }
     return base_width;
+}
+
+// ========== Fast Host Memory Read/Write Operations (Direct Translation Fast Path) ==========
+
+inline auto host_read_fast(const Byte* host_ptr, Instruction funct3) -> Word {
+    switch (static_cast<isa::Funct3>(funct3 & 0x7u)) {
+        case isa::Funct3::Lb:
+            return static_cast<Word>(static_cast<SignedWord>(*reinterpret_cast<const int8_t*>(host_ptr)));
+        case isa::Funct3::Lbu:
+            return static_cast<Word>(*reinterpret_cast<const uint8_t*>(host_ptr));
+        case isa::Funct3::Lh: {
+            int16_t val = 0;
+            std::memcpy(&val, host_ptr, sizeof(val));
+            return static_cast<Word>(static_cast<SignedWord>(val));
+        }
+        case isa::Funct3::Lhu: {
+            uint16_t val = 0;
+            std::memcpy(&val, host_ptr, sizeof(val));
+            return static_cast<Word>(val);
+        }
+        case isa::Funct3::Lw: {
+            int32_t val = 0;
+            std::memcpy(&val, host_ptr, sizeof(val));
+            return static_cast<Word>(val);
+        }
+        case static_cast<isa::Funct3>(6): {
+            uint32_t val = 0;
+            std::memcpy(&val, host_ptr, sizeof(val));
+            return static_cast<Word>(val);
+        }
+        case isa::Funct3::Ld: {
+            uint64_t val = 0;
+            std::memcpy(&val, host_ptr, sizeof(val));
+            return static_cast<Word>(val);
+        }
+        default:
+            return 0;
+    }
+}
+
+inline void host_write_fast(Byte* host_ptr, Register val, Instruction funct3) {
+    switch (static_cast<isa::Funct3>(funct3 & 0x7u)) {
+        case isa::Funct3::Sb:
+            *reinterpret_cast<uint8_t*>(host_ptr) = static_cast<uint8_t>(val);
+            break;
+        case isa::Funct3::Sh: {
+            uint16_t const tmp = static_cast<uint16_t>(val);
+            std::memcpy(host_ptr, &tmp, sizeof(tmp));
+            break;
+        }
+        case isa::Funct3::Sw: {
+            uint32_t const tmp = static_cast<uint32_t>(val);
+            std::memcpy(host_ptr, &tmp, sizeof(tmp));
+            break;
+        }
+        case isa::Funct3::Sd: {
+            uint64_t const tmp = static_cast<uint64_t>(val);
+            std::memcpy(host_ptr, &tmp, sizeof(tmp));
+            break;
+        }
+        default:
+            break;
+    }
 }
 
 // ========== Fast RAM Read Operations ==========

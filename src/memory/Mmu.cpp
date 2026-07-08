@@ -98,43 +98,50 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
         }
     };
 
-    int levels = 2;
-    int pte_size = 4;
-    int vpn_bits_per_level = 10;
-
-    const Word mode = simrv::xlen::satp_mode(satp, xlen);
-    if (xlen == 64) {
-        if (mode == 8) {  // SV39
-            levels = 3;
-            pte_size = 8;
-            vpn_bits_per_level = 9;
-        } else if (mode == 9) {  // SV48
-            levels = 4;
-            pte_size = 8;
-            vpn_bits_per_level = 9;
-        } else if (mode == 1) {  // SV32 compatibility mode under RV64
-            levels = 2;
-            pte_size = 4;
-            vpn_bits_per_level = 10;
+    if (simrv::compiler::unlikely(!cached_valid_ || cached_satp_ != satp || cached_xlen_ != xlen)) {
+        cached_satp_ = satp;
+        cached_xlen_ = xlen;
+        cached_satp_mode_ = simrv::xlen::satp_mode(satp, xlen);
+        if (xlen == 64) {
+            if (cached_satp_mode_ == 8) {  // SV39
+                cached_levels_ = 3;
+                cached_pte_size_ = 8;
+                cached_vpn_bits_per_level_ = 9;
+            } else if (cached_satp_mode_ == 9) {  // SV48
+                cached_levels_ = 4;
+                cached_pte_size_ = 8;
+                cached_vpn_bits_per_level_ = 9;
+            } else if (cached_satp_mode_ == 1) {  // SV32 compatibility mode under RV64
+                cached_levels_ = 2;
+                cached_pte_size_ = 4;
+                cached_vpn_bits_per_level_ = 10;
+            } else {
+                cached_valid_ = false;
+                return std::unexpected(make_fault());
+            }
         } else {
-            return std::unexpected(make_fault());
+            if (cached_satp_mode_ != 1) {  // SV32
+                cached_valid_ = false;
+                return std::unexpected(make_fault());
+            }
+            cached_levels_ = 2;
+            cached_pte_size_ = 4;
+            cached_vpn_bits_per_level_ = 10;
         }
-    } else {
-        if (mode != 1) {  // SV32
-            return std::unexpected(make_fault());
-        }
-        levels = 2;
-        pte_size = 4;
-        vpn_bits_per_level = 10;
+        cached_root_ppn_ = simrv::xlen::satp_root_ppn(satp, xlen);
+        cached_root_pt_addr_ = static_cast<Address>(cached_root_ppn_ << 12);
+        cached_valid_ = true;
     }
 
+    const int levels = cached_levels_;
+    const int pte_size = cached_pte_size_;
+    const int vpn_bits_per_level = cached_vpn_bits_per_level_;
     const int vpn_shift_base = 12;  // Page size is 4KB (2^12)
     const Word vpn_mask = (static_cast<Word>(1) << vpn_bits_per_level) - 1;
     const Instruction pte_load_op = (pte_size == 4) ? static_cast<Instruction>(Funct3::Lw)
                                                     : static_cast<Instruction>(Funct3::Ld);
 
-    const Word root_ppn = simrv::xlen::satp_root_ppn(satp, xlen);
-    auto root_pt_addr = static_cast<Address>(root_ppn << 12);
+    auto root_pt_addr = cached_root_pt_addr_;
 
     Word pte = 0;
     Word pte_addr = 0;

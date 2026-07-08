@@ -69,7 +69,7 @@ void SdlDisplay::init() {
     }
 
     SDL_SetTextureScaleMode(texture_, SDL_SCALEMODE_NEAREST);
-    simrv::log::info("[SdlDisplay] SDL3 graphics initialized ({}x{}, format: {}).", width, height, format);
+    // simrv::log::info("[SdlDisplay] SDL3 graphics initialized ({}x{}, format: {}).", width, height, format);
 #else
     simrv::log::warn("[SdlDisplay] SimRV compiled without SDL3 support. GUI window is disabled.");
 #endif
@@ -86,7 +86,7 @@ void SdlDisplay::shutdown() {
         renderer_ = nullptr;
         window_ = nullptr;
         gui_enabled_ = false;
-        simrv::log::info("[SdlDisplay] SDL3 graphics shut down.");
+        // simrv::log::info("[SdlDisplay] SDL3 graphics shut down.");
     }
 #endif
 }
@@ -159,7 +159,7 @@ void SdlDisplay::recreate_sdl_properties() {
         simrv::log::error("[SdlDisplay] Failed to recreate SDL3 texture: {}", SDL_GetError());
     } else {
         SDL_SetTextureScaleMode(texture_, SDL_SCALEMODE_NEAREST);
-        simrv::log::info("[SdlDisplay] SDL3 texture recreated ({}x{}, format: {}).", width, height, format);
+        // simrv::log::info("[SdlDisplay] SDL3 texture recreated ({}x{}, format: {}).", width, height, format);
     }
 #endif
 }

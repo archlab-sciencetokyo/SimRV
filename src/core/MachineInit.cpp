@@ -141,7 +141,9 @@ auto Machine::initialize() -> int {
     }
     audio = std::make_unique<simrv::device::Audio>(*this);
     sdl_audio = std::make_unique<simrv::util::SdlAudio>(*this);
-    sdl_audio->init_audio();
+    if (s_gui_mode) {
+        sdl_audio->init_audio();
+    }
     if (s_tuimode) {
         tui = std::make_unique<simrv::tui::Tui>(*this);
         tui->initialize();

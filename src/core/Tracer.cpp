@@ -137,29 +137,33 @@ void Tracer::dump_init_artifacts() {
     write_xlen("p.pending_exception   ", cpu->pipeline_context.pending_exception ? std::to_underlying(*cpu->pipeline_context.pending_exception) : simrv::xlen::kWordAllOnes);
     write_xlen("p.pending_tval", cpu->pipeline_context.pending_tval);
 
+    const size_t kNumSets = simrv::core::Tlb::kNumSets;
     for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
+        const auto& entry = cpu->tlb.inst_r.at(i % kNumSets).at(i / kNumSets);
         std::println(out, "mmu.TLB_inst_r.r_valid[{}] ={};", i,
-                     static_cast<int>(cpu->tlb.inst_r.at(i).valid));
+                     static_cast<int>(entry.valid));
         std::println(out, "mmu.TLB_inst_r.mem[{}][39:22] =18'h{:05x};", i,
-                     cpu->tlb.inst_r.at(i).v_addr >> 14);
+                     entry.v_addr >> 14);
         std::println(out, "mmu.TLB_inst_r.mem[{}][21:0] =22'h{:06x};", i,
-                     cpu->tlb.inst_r.at(i).p_addr >> 10);
+                     entry.p_addr >> 10);
     }
     for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
+        const auto& entry = cpu->tlb.data_r.at(i % kNumSets).at(i / kNumSets);
         std::println(out, "mmu.TLB_data_r.r_valid[{}] ={};", i,
-                     static_cast<int>(cpu->tlb.data_r.at(i).valid));
+                     static_cast<int>(entry.valid));
         std::println(out, "mmu.TLB_data_r.mem[{}][39:22] =18'h{:05x};", i,
-                     cpu->tlb.data_r.at(i).v_addr >> 14);
+                     entry.v_addr >> 14);
         std::println(out, "mmu.TLB_data_r.mem[{}][21:0] =22'h{:06x};", i,
-                     cpu->tlb.data_r.at(i).p_addr >> 10);
+                     entry.p_addr >> 10);
     }
     for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
+        const auto& entry = cpu->tlb.data_w.at(i % kNumSets).at(i / kNumSets);
         std::println(out, "mmu.TLB_data_w.r_valid[{}] ={};", i,
-                     static_cast<int>(cpu->tlb.data_w.at(i).valid));
+                     static_cast<int>(entry.valid));
         std::println(out, "mmu.TLB_data_w.mem[{}][39:22] =18'h{:05x};", i,
-                     cpu->tlb.data_w.at(i).v_addr >> 14);
+                     entry.v_addr >> 14);
         std::println(out, "mmu.TLB_data_w.mem[{}][21:0] =22'h{:06x};", i,
-                     cpu->tlb.data_w.at(i).p_addr >> 10);
+                     entry.p_addr >> 10);
     }
 
     write_32("mmu.console.QueueSel       ", console->QueueSel);
@@ -344,18 +348,18 @@ void Tracer::write_trace_snapshot() {
                      std::to_underlying(st.priv), D_TRACE_HEX_WIDTH);
 
         for (int i = 0; i < 4; i++) {
-            std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.tlb.inst_r.at(static_cast<std::size_t>(i)).v_addr,
-                       D_TRACE_HEX_WIDTH, cpu.tlb.inst_r.at(static_cast<std::size_t>(i)).p_addr, D_TRACE_HEX_WIDTH);
+            std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.tlb.inst_r.at(static_cast<std::size_t>(i)).at(0).v_addr,
+                       D_TRACE_HEX_WIDTH, cpu.tlb.inst_r.at(static_cast<std::size_t>(i)).at(0).p_addr, D_TRACE_HEX_WIDTH);
         }
         std::println(fp_trace, "");
         for (int i = 0; i < 4; i++) {
-            std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.tlb.data_r.at(static_cast<std::size_t>(i)).v_addr,
-                       D_TRACE_HEX_WIDTH, cpu.tlb.data_r.at(static_cast<std::size_t>(i)).p_addr, D_TRACE_HEX_WIDTH);
+            std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.tlb.data_r.at(static_cast<std::size_t>(i)).at(0).v_addr,
+                       D_TRACE_HEX_WIDTH, cpu.tlb.data_r.at(static_cast<std::size_t>(i)).at(0).p_addr, D_TRACE_HEX_WIDTH);
         }
         std::println(fp_trace, "");
         for (int i = 0; i < 4; i++) {
-            std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.tlb.data_w.at(static_cast<std::size_t>(i)).v_addr,
-                       D_TRACE_HEX_WIDTH, cpu.tlb.data_w.at(static_cast<std::size_t>(i)).p_addr, D_TRACE_HEX_WIDTH);
+            std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.tlb.data_w.at(static_cast<std::size_t>(i)).at(0).v_addr,
+                       D_TRACE_HEX_WIDTH, cpu.tlb.data_w.at(static_cast<std::size_t>(i)).at(0).p_addr, D_TRACE_HEX_WIDTH);
         }
         std::println(fp_trace, "");
     }

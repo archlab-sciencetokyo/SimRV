@@ -64,15 +64,15 @@ extern std::array<const char*, 16> g_theme_palette;
 extern std::array<const char*, 16> g_theme_bg_palette;
 
 // Map place names to dynamic theme variables for cleaner software decoupling
-#define kSakuraBorder g_theme_border
-#define kSakuraText g_theme_text
-#define kSakuraVal g_theme_val
-#define kSakuraMuted g_theme_muted
-#define kSakuraMint g_theme_mint
-#define kSakuraPeach g_theme_peach
-#define kSakuraCoral g_theme_coral
-#define kSakuraSky g_theme_sky
-#define kSakuraPink g_theme_pink
+#define kThemeBorder g_theme_border
+#define kThemeText g_theme_text
+#define kThemeVal g_theme_val
+#define kThemeMuted g_theme_muted
+#define kThemeMint g_theme_mint
+#define kThemePeach g_theme_peach
+#define kThemeCoral g_theme_coral
+#define kThemeSky g_theme_sky
+#define kThemePink g_theme_pink
 
 extern TuiTheme g_tui_theme;
 void set_tui_theme(TuiTheme theme);

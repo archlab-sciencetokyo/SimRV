@@ -13,9 +13,12 @@
 namespace simrv::core {
 
 void Tlb::flush() {
-    inst_r.fill(TLBEntry{});
-    data_r.fill(TLBEntry{});
-    data_w.fill(TLBEntry{});
+    for (auto& set : inst_r) set.fill(TLBEntry{});
+    for (auto& set : data_r) set.fill(TLBEntry{});
+    for (auto& set : data_w) set.fill(TLBEntry{});
+    inst_r_lru.fill(0);
+    data_r_lru.fill(0);
+    data_w_lru.fill(0);
 }
 
 void Tlb::flush_selective(bool /*match_all_vaddr*/, Address /*vaddr*/, bool /*match_all_asid*/, Word /*asid*/) {

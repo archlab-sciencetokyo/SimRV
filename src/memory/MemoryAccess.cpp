@@ -184,14 +184,11 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
 
     Word rdata = 0;
     Address p_addr = 0;
-    core::TLBEntry* entry =
-        &cpu.tlb.data_r.at((v_addr >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1));
+    core::TLBEntry* entry = cpu.tlb.lookup_data_r(v_addr, current_asid, eff_priv);
 
     if (eff_priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(cpu.state().satp)) {
         p_addr = eff_vaddr;
-    } else if (entry->valid && entry->asid == current_asid &&
-               entry->v_addr == (v_addr & ~simrv::memory::kPageMask) &&
-               entry->priv == eff_priv) {
+    } else if (entry) {
         p_addr = entry->p_addr + (v_addr & simrv::memory::kPageMask);
     } else {
         cpu.pipeline_context.tlb_miss = true;
@@ -200,11 +197,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
         auto chain_res = translate_res
             .and_then([&](Address phys) -> std::expected<void, TrapCause> {
                 p_addr = phys;
-                entry->v_addr = v_addr & ~simrv::memory::kPageMask;
-                entry->p_addr = p_addr & ~simrv::memory::kPageMask;
-                entry->asid = current_asid;
-                entry->priv = eff_priv;
-                entry->valid = true;
+                cpu.tlb.insert_data_r(v_addr, p_addr, current_asid, eff_priv);
                 return {};
             })
             .or_else([&](TrapCause error) -> std::expected<void, TrapCause> {
@@ -221,6 +214,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             auto& entry_soft = cpu.soft_tlb_read[tlb_idx];
             entry_soft.vpn = v_addr >> 12;
             entry_soft.paddr_base = p_addr & ~0xFFF;
+            entry_soft.host_ptr_base = mem.mmu()->mmem() + ((p_addr & ~0xFFF) & simrv::memory::kDramMask);
             entry_soft.priv = eff_priv;
             entry_soft.asid = translation_enabled ? current_asid : 0xFFFF'FFFF'FFFF'FFFFULL;
             entry_soft.valid = true;
@@ -336,14 +330,11 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
     }
 
     Address p_addr = 0;
-    core::TLBEntry* entry =
-        &cpu.tlb.data_w.at((v_addr >> simrv::memory::kPageShift) & (simrv::memory::kTlbSize - 1));
+    core::TLBEntry* entry = cpu.tlb.lookup_data_w(v_addr, current_asid, eff_priv);
 
     if (eff_priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(cpu.state().satp)) {
         p_addr = eff_vaddr;
-    } else if (entry->valid && entry->asid == current_asid &&
-               entry->v_addr == (v_addr & ~simrv::memory::kPageMask) &&
-               entry->priv == eff_priv) {
+    } else if (entry) {
         p_addr = entry->p_addr + (v_addr & simrv::memory::kPageMask);
     } else {
         cpu.pipeline_context.tlb_miss = true;
@@ -352,11 +343,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
         auto chain_res = translate_res
             .and_then([&](Address phys) -> std::expected<void, TrapCause> {
                 p_addr = phys;
-                entry->v_addr = v_addr & ~simrv::memory::kPageMask;
-                entry->p_addr = p_addr & ~simrv::memory::kPageMask;
-                entry->asid = current_asid;
-                entry->priv = eff_priv;
-                entry->valid = true;
+                cpu.tlb.insert_data_w(v_addr, p_addr, current_asid, eff_priv);
                 return {};
             })
             .or_else([&](TrapCause error) -> std::expected<void, TrapCause> {
@@ -373,6 +360,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             auto& entry_soft = cpu.soft_tlb_write[tlb_idx];
             entry_soft.vpn = v_addr >> 12;
             entry_soft.paddr_base = p_addr & ~0xFFF;
+            entry_soft.host_ptr_base = mem.mmu()->mmem() + ((p_addr & ~0xFFF) & simrv::memory::kDramMask);
             entry_soft.priv = eff_priv;
             entry_soft.asid = translation_enabled ? current_asid : 0xFFFF'FFFF'FFFF'FFFFULL;
             entry_soft.valid = true;

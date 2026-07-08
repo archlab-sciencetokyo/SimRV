@@ -276,9 +276,11 @@ auto get_description(OperationId op_id) -> std::pair<std::string_view, std::stri
         arr[VLE8_V] = {"VLE8.V", "Vector Load unit-strided 8-bit elements. Reads vl elements of 8-bit width from memory address rs1 into vector register rd."};
         arr[VLE16_V] = {"VLE16.V", "Vector Load unit-strided 16-bit elements. Reads vl elements of 16-bit width from memory address rs1 into vector register rd."};
         arr[VLE32_V] = {"VLE32.V", "Vector Load unit-strided 32-bit elements. Reads vl elements of 32-bit width from memory address rs1 into vector register rd."};
+        arr[VLE64_V] = {"VLE64.V", "Vector Load unit-strided 64-bit elements. Reads vl elements of 64-bit width from memory address rs1 into vector register rd."};
         arr[VSE8_V] = {"VSE8.V", "Vector Store unit-strided 8-bit elements. Writes vl elements of 8-bit width from vector register vs3 to memory address rs1."};
         arr[VSE16_V] = {"VSE16.V", "Vector Store unit-strided 16-bit elements. Writes vl elements of 16-bit width from vector register vs3 to memory address rs1."};
         arr[VSE32_V] = {"VSE32.V", "Vector Store unit-strided 32-bit elements. Writes vl elements of 32-bit width from vector register vs3 to memory address rs1."};
+        arr[VSE64_V] = {"VSE64.V", "Vector Store unit-strided 64-bit elements. Writes vl elements of 64-bit width from vector register vs3 to memory address rs1."};
         arr[VADD_VV] = {"VADD.VV", "Vector-Vector Addition. Adds elements of vector register rs2 to vector register rs1, and stores result in rd."};
         arr[VADD_VX] = {"VADD.VX", "Vector-Scalar Addition. Adds scalar register rs1 to elements of vector register rs2, and stores result in rd."};
         arr[VADD_VI] = {"VADD.VI", "Vector-Immediate Addition. Adds sign-extended immediate to elements of vector register rs2, and stores result in rd."};
@@ -336,6 +338,21 @@ auto get_description(OperationId op_id) -> std::pair<std::string_view, std::stri
         arr[VMERGE_VVM] = {"VMERGE.VVM", "Vector Merge. Merges vector register rs2 and rs1 under mask v0, and writes result to rd."};
         arr[VMERGE_VXM] = {"VMERGE.VXM", "Vector Merge. Merges vector register rs2 and scalar rs1 under mask v0, and writes result to rd."};
         arr[VMERGE_VIM] = {"VMERGE.VIM", "Vector Merge. Merges vector register rs2 and immediate under mask v0, and writes result to rd."};
+        arr[VMACC_VV] = {"VMACC.VV", "Vector Multiply-Accumulate. Multiplies vector registers rs1 and rs2, and adds product to vector register rd."};
+        arr[VMACC_VX] = {"VMACC.VX", "Vector-Scalar Multiply-Accumulate. Multiplies scalar rs1 and vector rs2, and adds product to vector register rd."};
+        arr[VMADD_VV] = {"VMADD.VV", "Vector Multiply-Add. Multiplies vector registers rs1 and rd, and adds product to vector register rs2."};
+        arr[VMADD_VX] = {"VMADD.VX", "Vector-Scalar Multiply-Add. Multiplies scalar rs1 and vector rd, and adds product to vector register rs2."};
+        arr[VNMSAC_VV] = {"VNMSAC.VV", "Vector Negative Multiply-Accumulate. Multiplies vector registers rs1 and rs2, subtracts product from vector register rd."};
+        arr[VNMSAC_VX] = {"VNMSAC.VX", "Vector-Scalar Negative Multiply-Accumulate. Multiplies scalar rs1 and vector rs2, subtracts product from vector register rd."};
+        arr[VNSUB_VV] = {"VNSUB.VV", "Vector Negative Multiply-Add. Multiplies vector registers rs1 and rd, subtracts product from vector register rs2."};
+        arr[VNSUB_VX] = {"VNSUB.VX", "Vector-Scalar Negative Multiply-Add. Multiplies scalar rs1 and vector rd, subtracts product from vector register rs2."};
+        arr[VWMACCU_VV] = {"VWMACCU.VV", "Vector Widening Unsigned Multiply-Accumulate. Multiplies unsigned vector registers rs1 and rs2, and adds widening product to vector register rd."};
+        arr[VWMACCU_VX] = {"VWMACCU.VX", "Vector-Scalar Widening Unsigned Multiply-Accumulate. Multiplies unsigned scalar rs1 and vector rs2, and adds widening product to vector register rd."};
+        arr[VWMACC_VV] = {"VWMACC.VV", "Vector Widening Signed Multiply-Accumulate. Multiplies signed vector registers rs1 and rs2, and adds widening product to vector register rd."};
+        arr[VWMACC_VX] = {"VWMACC.VX", "Vector-Scalar Widening Signed Multiply-Accumulate. Multiplies signed scalar rs1 and vector rs2, and adds widening product to vector register rd."};
+        arr[VWMACCUS_VX] = {"VWMACCUS.VX", "Vector-Scalar Widening Unsigned-Signed Multiply-Accumulate. Multiplies unsigned scalar rs1 and signed vector rs2, and adds widening product to vector register rd."};
+        arr[VWMACCSU_VV] = {"VWMACCSU.VV", "Vector Widening Signed-Unsigned Multiply-Accumulate. Multiplies signed vector rs1 and unsigned vector rs2, and adds widening product to vector register rd."};
+        arr[VWMACCSU_VX] = {"VWMACCSU.VX", "Vector-Scalar Widening Signed-Unsigned Multiply-Accumulate. Multiplies signed scalar rs1 and unsigned vector rs2, and adds widening product to vector register rd."};
 
         return arr;
     }();

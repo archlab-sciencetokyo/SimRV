@@ -155,7 +155,23 @@ void execute_vle(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd, 
     for (uint32_t i = 0; i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
         Address addr = base_addr + i * sizeof(T);
-        Word val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
+        uint64_t val = 0;
+        if constexpr (sizeof(T) == 8) {
+            if constexpr (simrv::xlen::kIsXLen64) {
+                val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
+            } else {
+                if (simrv::compiler::unlikely((addr & 7) != 0)) {
+                    cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedLoad;
+                    cpu.pipeline_context.pending_tval = addr;
+                    return;
+                }
+                Word lo = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, isa::Funct3::Lw);
+                Word hi = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr + 4, isa::Funct3::Lw);
+                val = static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32);
+            }
+        } else {
+            val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
+        }
         if (cpu.pipeline_context.pending_exception.has_value()) {
             return;
         }
@@ -172,10 +188,100 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3,
         if (!is_element_active(mask_reg, i, vm)) continue;
         Address addr = base_addr + i * sizeof(T);
         T val = get_group_element<T>(cpu.state().regs, vs3, i);
-        simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val), mem_f3);
+        if constexpr (sizeof(T) == 8) {
+            if constexpr (simrv::xlen::kIsXLen64) {
+                simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val), mem_f3);
+            } else {
+                if (simrv::compiler::unlikely((addr & 7) != 0)) {
+                    cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedStore;
+                    cpu.pipeline_context.pending_tval = addr;
+                    return;
+                }
+                simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val & 0xFFFFFFFFULL), isa::Funct3::Sw);
+                simrv::memory::MemoryAccess::storeInt(mem, cpu, addr + 4, static_cast<Word>((val >> 32) & 0xFFFFFFFFULL), isa::Funct3::Sw);
+            }
+        } else {
+            simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val), mem_f3);
+        }
         if (cpu.pipeline_context.pending_exception.has_value()) {
             return;
         }
+    }
+}
+
+template <typename T>
+void perform_mac_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, bool overwrite_acc, bool subtract) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+
+    for (uint32_t i = 0; i < vl; i++) {
+        if (!is_element_active(mask_reg, i, vm)) continue;
+        T val1 = get_group_element<T>(cpu.state().regs, rs1, i);
+        T val2 = get_group_element<T>(cpu.state().regs, rs2, i);
+        T dest_val = get_group_element<T>(cpu.state().regs, rd, i);
+
+        T prod = val1 * val2;
+        T res = 0;
+        if (overwrite_acc) {
+            res = subtract ? (dest_val - prod) : (dest_val + prod);
+        } else {
+            T term1 = val1 * dest_val;
+            res = subtract ? (val2 - term1) : (val2 + term1);
+        }
+        set_group_element<T>(cpu.state().regs, rd, i, res);
+    }
+}
+
+template <typename T>
+void perform_mac_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl, bool overwrite_acc, bool subtract) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    T val1 = static_cast<T>(rs1_val);
+
+    for (uint32_t i = 0; i < vl; i++) {
+        if (!is_element_active(mask_reg, i, vm)) continue;
+        T val2 = get_group_element<T>(cpu.state().regs, rs2, i);
+        T dest_val = get_group_element<T>(cpu.state().regs, rd, i);
+
+        T prod = val1 * val2;
+        T res = 0;
+        if (overwrite_acc) {
+            res = subtract ? (dest_val - prod) : (dest_val + prod);
+        } else {
+            T term1 = val1 * dest_val;
+            res = subtract ? (val2 - term1) : (val2 + term1);
+        }
+        set_group_element<T>(cpu.state().regs, rd, i, res);
+    }
+}
+
+template <typename T_dest, typename T_src1, typename T_src2>
+void perform_widening_mac_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, bool subtract = false) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+
+    for (uint32_t i = 0; i < vl; i++) {
+        if (!is_element_active(mask_reg, i, vm)) continue;
+        T_src1 val1 = get_group_element<T_src1>(cpu.state().regs, rs1, i);
+        T_src2 val2 = get_group_element<T_src2>(cpu.state().regs, rs2, i);
+        T_dest dest_val = get_group_element<T_dest>(cpu.state().regs, rd, i);
+
+        T_dest prod = static_cast<T_dest>(val1) * static_cast<T_dest>(val2);
+        T_dest res = subtract ? (dest_val - prod) : (dest_val + prod);
+        set_group_element<T_dest>(cpu.state().regs, rd, i, res);
+    }
+}
+
+template <typename T_dest, typename T_src1, typename T_src2>
+void perform_widening_mac_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl, bool subtract = false) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    T_src1 val1 = static_cast<T_src1>(rs1_val);
+
+    for (uint32_t i = 0; i < vl; i++) {
+        if (!is_element_active(mask_reg, i, vm)) continue;
+        T_src2 val2 = get_group_element<T_src2>(cpu.state().regs, rs2, i);
+        T_dest dest_val = get_group_element<T_dest>(cpu.state().regs, rd, i);
+
+        T_dest prod = static_cast<T_dest>(val1) * static_cast<T_dest>(val2);
+        T_dest res = subtract ? (dest_val - prod) : (dest_val + prod);
+        set_group_element<T_dest>(cpu.state().regs, rd, i, res);
     }
 }
 
@@ -286,6 +392,10 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::Op
         execute_vle<uint32_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), vm, vl, isa::Funct3::Lw);
         return;
     }
+    if (op_id == isa::OperationId::VLE64_V) {
+        execute_vle<uint64_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), vm, vl, isa::Funct3::Ld);
+        return;
+    }
     if (op_id == isa::OperationId::VSE8_V) {
         execute_vse<uint8_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), vm, vl, isa::Funct3::Sb);
         return;
@@ -296,6 +406,10 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::Op
     }
     if (op_id == isa::OperationId::VSE32_V) {
         execute_vse<uint32_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), vm, vl, isa::Funct3::Sw);
+        return;
+    }
+    if (op_id == isa::OperationId::VSE64_V) {
+        execute_vse<uint64_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), vm, vl, isa::Funct3::Sd);
         return;
     }
 
@@ -445,6 +559,91 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::Op
     DISPATCH_V_CMP(VMSLE, le_f)
     DISPATCH_V_CMP(VMSLEU, leu_f)
     
+    // Vector single-width multiply-accumulate instructions
+    if (op_id >= isa::OperationId::VMACC_VV && op_id <= isa::OperationId::VNSUB_VX) {
+        bool is_vv = (op_id == isa::OperationId::VMACC_VV || op_id == isa::OperationId::VMADD_VV ||
+                      op_id == isa::OperationId::VNMSAC_VV || op_id == isa::OperationId::VNSUB_VV);
+        bool overwrite_acc = (op_id == isa::OperationId::VMACC_VV || op_id == isa::OperationId::VMACC_VX ||
+                              op_id == isa::OperationId::VNMSAC_VV || op_id == isa::OperationId::VNMSAC_VX);
+        bool subtract = (op_id == isa::OperationId::VNMSAC_VV || op_id == isa::OperationId::VNMSAC_VX ||
+                         op_id == isa::OperationId::VNSUB_VV || op_id == isa::OperationId::VNSUB_VX);
+
+        if (sew == 8) {
+            if (is_vv) perform_mac_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, overwrite_acc, subtract);
+            else perform_mac_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, overwrite_acc, subtract);
+        } else if (sew == 16) {
+            if (is_vv) perform_mac_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, overwrite_acc, subtract);
+            else perform_mac_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, overwrite_acc, subtract);
+        } else if (sew == 32) {
+            if (is_vv) perform_mac_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, overwrite_acc, subtract);
+            else perform_mac_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, overwrite_acc, subtract);
+        } else {
+            if (is_vv) perform_mac_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, overwrite_acc, subtract);
+            else perform_mac_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, overwrite_acc, subtract);
+        }
+        return;
+    }
+
+    // Vector widening integer multiply-accumulate instructions
+    if (op_id >= isa::OperationId::VWMACCU_VV && op_id <= isa::OperationId::VWMACCSU_VX) {
+        if (sew == 8) {
+            switch (op_id) {
+                case isa::OperationId::VWMACCU_VV:
+                    perform_widening_mac_vv<uint16_t, uint8_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl); break;
+                case isa::OperationId::VWMACCU_VX:
+                    perform_widening_mac_vx<uint16_t, uint8_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl); break;
+                case isa::OperationId::VWMACC_VV:
+                    perform_widening_mac_vv<int16_t, int8_t, int8_t>(cpu, rd, rs1, rs2, vm, vl); break;
+                case isa::OperationId::VWMACC_VX:
+                    perform_widening_mac_vx<int16_t, int8_t, int8_t>(cpu, rd, rs1_val, rs2, vm, vl); break;
+                case isa::OperationId::VWMACCUS_VX:
+                    perform_widening_mac_vx<int16_t, uint8_t, int8_t>(cpu, rd, rs1_val, rs2, vm, vl); break;
+                case isa::OperationId::VWMACCSU_VV:
+                    perform_widening_mac_vv<int16_t, int8_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl); break;
+                case isa::OperationId::VWMACCSU_VX:
+                    perform_widening_mac_vx<int16_t, int8_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl); break;
+                default: break;
+            }
+        } else if (sew == 16) {
+            switch (op_id) {
+                case isa::OperationId::VWMACCU_VV:
+                    perform_widening_mac_vv<uint32_t, uint16_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl); break;
+                case isa::OperationId::VWMACCU_VX:
+                    perform_widening_mac_vx<uint32_t, uint16_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl); break;
+                case isa::OperationId::VWMACC_VV:
+                    perform_widening_mac_vv<int32_t, int16_t, int16_t>(cpu, rd, rs1, rs2, vm, vl); break;
+                case isa::OperationId::VWMACC_VX:
+                    perform_widening_mac_vx<int32_t, int16_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl); break;
+                case isa::OperationId::VWMACCUS_VX:
+                    perform_widening_mac_vx<int32_t, uint16_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl); break;
+                case isa::OperationId::VWMACCSU_VV:
+                    perform_widening_mac_vv<int32_t, int16_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl); break;
+                case isa::OperationId::VWMACCSU_VX:
+                    perform_widening_mac_vx<int32_t, int16_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl); break;
+                default: break;
+            }
+        } else if (sew == 32) {
+            switch (op_id) {
+                case isa::OperationId::VWMACCU_VV:
+                    perform_widening_mac_vv<uint64_t, uint32_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl); break;
+                case isa::OperationId::VWMACCU_VX:
+                    perform_widening_mac_vx<uint64_t, uint32_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl); break;
+                case isa::OperationId::VWMACC_VV:
+                    perform_widening_mac_vv<int64_t, int32_t, int32_t>(cpu, rd, rs1, rs2, vm, vl); break;
+                case isa::OperationId::VWMACC_VX:
+                    perform_widening_mac_vx<int64_t, int32_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl); break;
+                case isa::OperationId::VWMACCUS_VX:
+                    perform_widening_mac_vx<int64_t, uint32_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl); break;
+                case isa::OperationId::VWMACCSU_VV:
+                    perform_widening_mac_vv<int64_t, int32_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl); break;
+                case isa::OperationId::VWMACCSU_VX:
+                    perform_widening_mac_vx<int64_t, int32_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl); break;
+                default: break;
+            }
+        }
+        return;
+    }
+
     // Greater-Than (VMSGT)
     if (sew == 8) {
         if (op_id == isa::OperationId::VMSGT_VX) { perform_compare_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, gt_f); return; }

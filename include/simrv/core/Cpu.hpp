@@ -95,6 +95,7 @@ struct ArchState {
 struct SoftTlbEntry {
     Address vpn = 0;          // Tag: vaddr >> 12
     Address paddr_base = 0;   // Physical base: paddr & ~0xFFF
+    Byte* host_ptr_base = nullptr; // Host memory base pointer
     Address asid = 0;         // current_asid tag
     PrivilegeLevel priv = kPrivUser; // privilege level under translation
     bool valid = false;

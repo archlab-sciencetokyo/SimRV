@@ -57,12 +57,12 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         int target_width = layout_ == TuiLayout::Split ? left_width_ : width - 2;
         std::string left_render;
         if (target_width < 45) {
-            left_render = std::format(" SimRV | {}{}\033[0m", kSakuraSky, page_badge);
+            left_render = std::format(" SimRV | {}{}\033[0m", kThemeSky, page_badge);
         } else if (target_width < 60) {
-            left_render = std::format(" SimRV [{}] | {}{}\033[0m", binary_name, kSakuraSky, page_badge);
+            left_render = std::format(" SimRV [{}] | {}{}\033[0m", binary_name, kThemeSky, page_badge);
         } else {
             std::string left_text = std::format(" SimRV [{}] ({}) | ", binary_name, mode_str);
-            left_render = left_text + status_badge + std::format(" | {}{}\033[0m", kSakuraSky, page_badge);
+            left_render = left_text + status_badge + std::format(" | {}{}\033[0m", kThemeSky, page_badge);
         }
 
         int left_printed_len = get_display_width(left_render);
@@ -167,7 +167,7 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         } else {
             mode_label = "Display";
         }
-        std::string mode_prefix = std::format("{}[{}]\033[0m", kSakuraSky, mode_label);
+        std::string mode_prefix = std::format("{}[{}]\033[0m", kThemeSky, mode_label);
         int mode_len = get_display_width(mode_prefix);
 
         if (scroll_offset_ > 0) {
@@ -194,20 +194,20 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
 
         std::string screen;
         if (layout_ == TuiLayout::Split) {
-            screen += std::string(kSakuraBorder) + "╔" + make_repeated_string("═", left_width_) + "╤" +
+            screen += std::string(kThemeBorder) + "╔" + make_repeated_string("═", left_width_) + "╤" +
                       make_repeated_string("═", right_width_) + "╗\033[0m\n";
-            screen += std::string(kSakuraBorder) + "║\033[0m" + left_render + kSakuraBorder + "│\033[0m" + right_render +
-                      kSakuraBorder + "║\033[0m\n";
-            screen += std::string(kSakuraBorder) + "╠" + make_repeated_string("═", left_width_) + "╪" +
+            screen += std::string(kThemeBorder) + "║\033[0m" + left_render + kThemeBorder + "│\033[0m" + right_render +
+                      kThemeBorder + "║\033[0m\n";
+            screen += std::string(kThemeBorder) + "╠" + make_repeated_string("═", left_width_) + "╪" +
                       make_repeated_string("═", right_width_) + "╣\033[0m\n";
         } else if (layout_ == TuiLayout::FullConsole) {
-            screen += std::string(kSakuraBorder) + "╔" + make_repeated_string("═", width - 2) + "╗\033[0m\n";
-            screen += std::string(kSakuraBorder) + "║\033[0m" + right_render + kSakuraBorder + "║\033[0m\n";
-            screen += std::string(kSakuraBorder) + "╠" + make_repeated_string("═", width - 2) + "╣\033[0m\n";
+            screen += std::string(kThemeBorder) + "╔" + make_repeated_string("═", width - 2) + "╗\033[0m\n";
+            screen += std::string(kThemeBorder) + "║\033[0m" + right_render + kThemeBorder + "║\033[0m\n";
+            screen += std::string(kThemeBorder) + "╠" + make_repeated_string("═", width - 2) + "╣\033[0m\n";
         } else {
-            screen += std::string(kSakuraBorder) + "╔" + make_repeated_string("═", width - 2) + "╗\033[0m\n";
-            screen += std::string(kSakuraBorder) + "║\033[0m" + left_render + kSakuraBorder + "║\033[0m\n";
-            screen += std::string(kSakuraBorder) + "╠" + make_repeated_string("═", width - 2) + "╣\033[0m\n";
+            screen += std::string(kThemeBorder) + "╔" + make_repeated_string("═", width - 2) + "╗\033[0m\n";
+            screen += std::string(kThemeBorder) + "║\033[0m" + left_render + kThemeBorder + "║\033[0m\n";
+            screen += std::string(kThemeBorder) + "╠" + make_repeated_string("═", width - 2) + "╣\033[0m\n";
         }
         return screen;
     } else if (row_idx == 1) {
@@ -228,8 +228,8 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         } else {
             footer_render = format_to_width(footer_render, width - 2);
         }
-        std::string screen = std::string(kSakuraBorder) + "║\033[0m" + footer_render + kSakuraBorder + "║\033[0m\n";
-        screen += std::string(kSakuraBorder) + "╚" + make_repeated_string("═", width - 2) + "╝\033[0m";
+        std::string screen = std::string(kThemeBorder) + "║\033[0m" + footer_render + kThemeBorder + "║\033[0m\n";
+        screen += std::string(kThemeBorder) + "╚" + make_repeated_string("═", width - 2) + "╝\033[0m";
         return screen;
     }
     return "";

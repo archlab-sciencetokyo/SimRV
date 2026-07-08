@@ -37,8 +37,8 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "BCLRI",      "BINV",     "BINVI",     "BEXT",      "BEXTI",     "ORC.B",
     "REV8",       "PACK",     "PACKW",
     "VSETVLI",    "VSETIVLI", "VSETVL",
-    "VLE8_V",     "VLE16_V",  "VLE32_V",
-    "VSE8_V",     "VSE16_V",  "VSE32_V",
+    "VLE8_V",     "VLE16_V",  "VLE32_V",  "VLE64_V",
+    "VSE8_V",     "VSE16_V",  "VSE32_V",  "VSE64_V",
     "VADD_VV",    "VADD_VX",  "VADD_VI",
     "VSUB_VV",    "VSUB_VX",
     "VMUL_VV",    "VMUL_VX",
@@ -61,6 +61,10 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "VMSGT_VX",   "VMSGT_VI",
     "VMSGTU_VX",  "VMSGTU_VI",
     "VMERGE_VVM", "VMERGE_VXM", "VMERGE_VIM",
+    "VMACC_VV", "VMACC_VX", "VMADD_VV", "VMADD_VX",
+    "VNMSAC_VV", "VNMSAC_VX", "VNSUB_VV", "VNSUB_VX",
+    "VWMACCU_VV", "VWMACCU_VX", "VWMACC_VV", "VWMACC_VX",
+    "VWMACCUS_VX", "VWMACCSU_VV", "VWMACCSU_VX",
     "VMIN_VV", "VMIN_VX", "VMINU_VV", "VMINU_VX",
     "VMAX_VV", "VMAX_VX", "VMAXU_VV", "VMAXU_VX",
     "VCHECK",
@@ -605,6 +609,35 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operation
             if (funct3 == 0) return OperationId::VSRA_VV;
             if (funct3 == 4) return OperationId::VSRA_VX;
             if (funct3 == 3) return OperationId::VSRA_VI;
+            if (funct3 == 2) return OperationId::VMADD_VV;
+            if (funct3 == 6) return OperationId::VMADD_VX;
+            break;
+        case 0x2B:
+            if (funct3 == 2) return OperationId::VNSUB_VV;
+            if (funct3 == 6) return OperationId::VNSUB_VX;
+            break;
+        case 0x2D:
+            if (funct3 == 2) return OperationId::VMACC_VV;
+            if (funct3 == 6) return OperationId::VMACC_VX;
+            break;
+        case 0x2F:
+            if (funct3 == 2) return OperationId::VNMSAC_VV;
+            if (funct3 == 6) return OperationId::VNMSAC_VX;
+            break;
+        case 0x3C:
+            if (funct3 == 2) return OperationId::VWMACCU_VV;
+            if (funct3 == 6) return OperationId::VWMACCU_VX;
+            break;
+        case 0x3D:
+            if (funct3 == 2) return OperationId::VWMACC_VV;
+            if (funct3 == 6) return OperationId::VWMACC_VX;
+            break;
+        case 0x3E:
+            if (funct3 == 6) return OperationId::VWMACCUS_VX;
+            break;
+        case 0x3F:
+            if (funct3 == 2) return OperationId::VWMACCSU_VV;
+            if (funct3 == 6) return OperationId::VWMACCSU_VX;
             break;
         case 0x17:
             if (vm) {
@@ -665,12 +698,14 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operation
 
 auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2) -> OperationId {
     switch (op) {
+
         case Opcode::LoadFp:
             if (funct3 == 2) return OperationId::FLW;
             if (funct3 == 3) return OperationId::FLD;
             if (funct3 == 0) return OperationId::VLE8_V;
             if (funct3 == 5) return OperationId::VLE16_V;
             if (funct3 == 6) return OperationId::VLE32_V;
+            if (funct3 == 7) return OperationId::VLE64_V;
             return OperationId::UNKNOWN;
         case Opcode::StoreFp:
             if (funct3 == 2) return OperationId::FSW;
@@ -678,6 +713,7 @@ auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2) -
             if (funct3 == 0) return OperationId::VSE8_V;
             if (funct3 == 5) return OperationId::VSE16_V;
             if (funct3 == 6) return OperationId::VSE32_V;
+            if (funct3 == 7) return OperationId::VSE64_V;
             return OperationId::UNKNOWN;
         case Opcode::MAdd:
         case Opcode::MSub:

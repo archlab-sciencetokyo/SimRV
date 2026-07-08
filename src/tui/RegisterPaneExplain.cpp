@@ -400,7 +400,7 @@ auto RegisterPane::get_explain_rows(int width) -> std::vector<std::string> {
     std::string sym = machine_.symbols.lookup(st.pc);
     std::string pc_label = sym.empty() ? std::format("0x{:0{}x}", st.pc, simrv::xlen::kXLenHexDigits)
                                        : std::format("0x{:0{}x} <{}>", st.pc, simrv::xlen::kXLenHexDigits, sym);
-    explain_rows.push_back(format_to_width(std::format("  {}PC     : {}{}\033[0m", kSakuraText, kSakuraMint, pc_label), width));
+    explain_rows.push_back(format_to_width(std::format("  {}PC     : {}{}\033[0m", kThemeText, kThemeMint, pc_label), width));
 
     std::string hex_str;
     if (is_compressed) {
@@ -409,7 +409,7 @@ auto RegisterPane::get_explain_rows(int width) -> std::vector<std::string> {
     } else {
         hex_str = std::format("0x{:08X}", ctx.ir_org);
     }
-    explain_rows.push_back(format_to_width(std::format("  {}Hex    : {}{}\033[0m", kSakuraText, kSakuraMint, hex_str), width));
+    explain_rows.push_back(format_to_width(std::format("  {}Hex    : {}{}\033[0m", kThemeText, kThemeMint, hex_str), width));
 
     std::string bin_str;
     if (is_compressed) {
@@ -417,11 +417,11 @@ auto RegisterPane::get_explain_rows(int width) -> std::vector<std::string> {
     } else {
         bin_str = std::format("{:032b}", ctx.ir_org);
     }
-    explain_rows.push_back(format_to_width(std::format("  {}Bin    : {}{}\033[0m", kSakuraText, kSakuraVal, bin_str), width));
+    explain_rows.push_back(format_to_width(std::format("  {}Bin    : {}{}\033[0m", kThemeText, kThemeVal, bin_str), width));
 
-    explain_rows.push_back(format_to_width(std::format("  {}Asm    : {}{}\033[0m", kSakuraText, kSakuraPeach, assembly), width));
-    explain_rows.push_back(format_to_width(std::format("  {}Format : {}{}\033[0m", kSakuraText, kSakuraVal, simrv::isa::get_instruction_format_name(fmt)), width));
-    explain_rows.push_back(format_to_width(std::format("  {}ISA Ext: {}{}\033[0m", kSakuraText, kSakuraMint, simrv::util::get_isa_extension_name(ctx.op_id)), width));
+    explain_rows.push_back(format_to_width(std::format("  {}Asm    : {}{}\033[0m", kThemeText, kThemePeach, assembly), width));
+    explain_rows.push_back(format_to_width(std::format("  {}Format : {}{}\033[0m", kThemeText, kThemeVal, simrv::isa::get_instruction_format_name(fmt)), width));
+    explain_rows.push_back(format_to_width(std::format("  {}ISA Ext: {}{}\033[0m", kThemeText, kThemeMint, simrv::util::get_isa_extension_name(ctx.op_id)), width));
     explain_rows.push_back(format_to_width("", width));
 
     explain_rows.push_back(section_line("Visual Bit Fields", width));

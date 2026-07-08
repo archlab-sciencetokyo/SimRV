@@ -5,6 +5,7 @@
 #pragma once
 
 #include <vector>
+#include <deque>
 #include <array>
 #include <string>
 #include <algorithm>
@@ -327,10 +328,10 @@ private:
 
     void scroll_up() {
         scrollback_.push_back(cells_.front());
-        cells_.erase(cells_.begin());
+        cells_.pop_front();
         cells_.push_back(std::vector<Cell>(width_, Cell{ .ch = " ", .fg = 7, .bg = current_attr_.bg }));
-        if (scrollback_.size() > 5000) {
-            scrollback_.erase(scrollback_.begin());
+        if (scrollback_.size() > 9999) {
+            scrollback_.pop_front();
         }
         if (scroll_offset_cb_) {
             scroll_offset_cb_(1);
@@ -370,7 +371,7 @@ private:
             if (ch == 'M') { // Reverse Index
                 cursor_y_--;
                 if (cursor_y_ < 0) {
-                    cells_.insert(cells_.begin(), std::vector<Cell>(width_, Cell{ .ch = " ", .fg = 7, .bg = current_attr_.bg }));
+                    cells_.push_front(std::vector<Cell>(width_, Cell{ .ch = " ", .fg = 7, .bg = current_attr_.bg }));
                     cells_.pop_back();
                     cursor_y_ = 0;
                 }
@@ -550,8 +551,8 @@ private:
     bool cursor_visible_ = true;
     Cell current_attr_;
 
-    std::vector<std::vector<Cell>> cells_;
-    std::vector<std::vector<Cell>> scrollback_;
+    std::deque<std::vector<Cell>> cells_;
+    std::deque<std::vector<Cell>> scrollback_;
 
     AnsiState ansi_state_ = AnsiState::Normal;
     std::string csi_buf_;

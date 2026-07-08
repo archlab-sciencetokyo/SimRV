@@ -208,9 +208,7 @@ void CPU::run_cycle(Machine& machine) {
         }
     }
 
-    if (machine.s_tuimode && machine.tui &&
-        (machine.tui->get_right_panel_mode() == simrv::tui::TuiRightPanelMode::LiveTrace ||
-         machine.tui->is_trace_enabled())) {
+    if (machine.s_tuimode && machine.tui && machine.tui->is_trace_active()) {
         record_trace_for_tui(machine);
     }
 }
@@ -271,9 +269,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
         if (simrv::compiler::likely(cached != nullptr)) {
             execute_cached_op_fast(machine, *cached);
             clint_mmio.mcycle++;
-            if (machine.s_tuimode && machine.tui &&
-                (machine.tui->get_right_panel_mode() == simrv::tui::TuiRightPanelMode::LiveTrace ||
-                 machine.tui->is_trace_enabled())) {
+            if (machine.s_tuimode && machine.tui && machine.tui->is_trace_active()) {
                 record_trace_for_tui(machine);
             }
             return;
@@ -305,9 +301,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
     }
 
     clint_mmio.mcycle++;
-    if (machine.s_tuimode && machine.tui &&
-        (machine.tui->get_right_panel_mode() == simrv::tui::TuiRightPanelMode::LiveTrace ||
-         machine.tui->is_trace_enabled())) {
+    if (machine.s_tuimode && machine.tui && machine.tui->is_trace_active()) {
         record_trace_for_tui(machine);
     }
 }
@@ -647,6 +641,10 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
         const auto& entry = soft_tlb_read[tlb_idx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         if (simrv::compiler::likely(entry.valid && entry.vpn == (mem_addr >> 12) && entry.priv == eff_priv && 
             entry.asid == current_asid)) {
+            if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
+                out_val = simrv::memory::host_read_fast(entry.host_ptr_base + (mem_addr & 0xFFF), static_cast<Instruction>(funct3));
+                return true;
+            }
             out_val = simrv::memory::ram_read_fast(entry.paddr_base + (mem_addr & 0xFFF), static_cast<Instruction>(funct3), machine.memory_.mmu()->mmem());
             return true;
         }
@@ -680,6 +678,10 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
         const auto& entry = soft_tlb_write[tlb_idx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         if (simrv::compiler::likely(entry.valid && entry.vpn == (mem_addr >> 12) && entry.priv == eff_priv && 
             entry.asid == current_asid)) {
+            if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
+                simrv::memory::host_write_fast(entry.host_ptr_base + (mem_addr & 0xFFF), rrs2, static_cast<Instruction>(funct3));
+                return true;
+            }
             Address const paddr = entry.paddr_base + (mem_addr & 0xFFF);
             if (simrv::compiler::likely(simrv::memory::is_dram_addr(paddr) && !is_tohost_addr(machine, paddr))) {
                 simrv::memory::ram_write_fast(paddr, rrs2, static_cast<Instruction>(funct3), machine.memory_.mmu()->mmem());

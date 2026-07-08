@@ -26,24 +26,24 @@ auto RegisterPane::render_registers_single_column(const simrv::core::ArchState& 
             auto val = st.regs.read(static_cast<RegId>(reg));
             std::string name = kRegNames.at(static_cast<std::size_t>(reg));
             bool changed = paused_ && (cached_gpr_.at(static_cast<std::size_t>(reg)) != val);
-            std::string c = changed ? kSakuraPeach : kSakuraMint;
+            std::string c = changed ? kThemePeach : kThemeMint;
             std::string col_color = std::format(" {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m",
-                                                kSakuraText, reg, kSakuraVal, name, c, val, simrv::xlen::kXLenHexDigits);
+                                                kThemeText, reg, kThemeVal, name, c, val, simrv::xlen::kXLenHexDigits);
             return format_to_width(col_color, width);
         } else if (page_ == TuiRegPage::FPR) {
             auto val = st.regs.read_fp(static_cast<RegId>(reg));
             std::string name = kFpRegNames.at(static_cast<std::size_t>(reg));
             bool changed = paused_ && (cached_fpr_.at(static_cast<std::size_t>(reg)) != val);
-            std::string c = changed ? kSakuraPeach : kSakuraMint;
+            std::string c = changed ? kThemePeach : kThemeMint;
             std::string col_color = std::format(" {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m",
-                                                kSakuraText, reg, kSakuraVal, name, c, val);
+                                                kThemeText, reg, kThemeVal, name, c, val);
             return format_to_width(col_color, width);
         } else if (page_ == TuiRegPage::VEC) {
             auto val = st.regs.read_vector(static_cast<RegId>(reg));
             bool changed = paused_ && (cached_vec_.at(static_cast<std::size_t>(reg)) != val.u64[0]); // NOLINT(cppcoreguidelines-pro-type-union-access)
-            std::string c = changed ? kSakuraPeach : kSakuraMint;
+            std::string c = changed ? kThemePeach : kThemeMint;
             std::string col_color = std::format(" {}v{:<2}\033[0m       : {}0x{:016x}\033[0m",
-                                                kSakuraText, reg, c, val.u64[0]); // NOLINT(cppcoreguidelines-pro-type-union-access)
+                                                kThemeText, reg, c, val.u64[0]); // NOLINT(cppcoreguidelines-pro-type-union-access)
             return format_to_width(col_color, width);
         }
     }
@@ -63,16 +63,16 @@ auto RegisterPane::render_registers_double_column(const simrv::core::ArchState& 
             std::string name2 = kRegNames.at(static_cast<std::size_t>(reg2));
 
             bool changed = paused_ && (cached_gpr_.at(static_cast<std::size_t>(reg1)) != val1);
-            std::string c1 = changed ? kSakuraPeach : kSakuraMint;
+            std::string c1 = changed ? kThemePeach : kThemeMint;
             bool changed2 = paused_ && (cached_gpr_.at(static_cast<std::size_t>(reg2)) != val2);
-            std::string c2 = changed2 ? kSakuraPeach : kSakuraMint;
+            std::string c2 = changed2 ? kThemePeach : kThemeMint;
 
             std::string col1_color =
                 std::format(" {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m",
-                            kSakuraText, reg1, kSakuraVal, name1, c1, val1, simrv::xlen::kXLenHexDigits);
+                            kThemeText, reg1, kThemeVal, name1, c1, val1, simrv::xlen::kXLenHexDigits);
             std::string col2_color =
                 std::format(" {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m",
-                            kSakuraText, reg2, kSakuraVal, name2, c2, val2, simrv::xlen::kXLenHexDigits);
+                            kThemeText, reg2, kThemeVal, name2, c2, val2, simrv::xlen::kXLenHexDigits);
 
             return format_to_width(col1_color, col_width) +
                    format_to_width(col2_color, right_width);
@@ -84,16 +84,16 @@ auto RegisterPane::render_registers_double_column(const simrv::core::ArchState& 
             std::string name2 = kFpRegNames.at(static_cast<std::size_t>(reg2));
 
             bool changed = paused_ && (cached_fpr_.at(static_cast<std::size_t>(reg1)) != val1);
-            std::string c1 = changed ? kSakuraPeach : kSakuraMint;
+            std::string c1 = changed ? kThemePeach : kThemeMint;
             bool changed2 = paused_ && (cached_fpr_.at(static_cast<std::size_t>(reg2)) != val2);
-            std::string c2 = changed2 ? kSakuraPeach : kSakuraMint;
+            std::string c2 = changed2 ? kThemePeach : kThemeMint;
 
             std::string col1_color = std::format(
-                " {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m", kSakuraText, reg1,
-                kSakuraVal, name1, c1, val1);
+                " {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m", kThemeText, reg1,
+                kThemeVal, name1, c1, val1);
             std::string col2_color = std::format(
-                " {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m", kSakuraText, reg2,
-                kSakuraVal, name2, c2, val2);
+                " {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m", kThemeText, reg2,
+                kThemeVal, name2, c2, val2);
 
             return format_to_width(col1_color, col_width) +
                    format_to_width(col2_color, right_width);
@@ -104,13 +104,13 @@ auto RegisterPane::render_registers_double_column(const simrv::core::ArchState& 
             bool changed1 = paused_ && (cached_vec_.at(static_cast<std::size_t>(reg1)) != val1.u64[0]); // NOLINT(cppcoreguidelines-pro-type-union-access)
             bool changed2 = paused_ && (cached_vec_.at(static_cast<std::size_t>(reg2)) != val2.u64[0]); // NOLINT(cppcoreguidelines-pro-type-union-access)
 
-            std::string c1 = changed1 ? kSakuraPeach : kSakuraMint;
-            std::string c2 = changed2 ? kSakuraPeach : kSakuraMint;
+            std::string c1 = changed1 ? kThemePeach : kThemeMint;
+            std::string c2 = changed2 ? kThemePeach : kThemeMint;
 
             std::string col1_color = std::format(
-                " {}v{:<2}\033[0m       : {}0x{:016x}\033[0m", kSakuraText, reg1, c1, val1.u64[0]); // NOLINT(cppcoreguidelines-pro-type-union-access)
+                " {}v{:<2}\033[0m       : {}0x{:016x}\033[0m", kThemeText, reg1, c1, val1.u64[0]); // NOLINT(cppcoreguidelines-pro-type-union-access)
             std::string col2_color = std::format(
-                " {}v{:<2}\033[0m       : {}0x{:016x}\033[0m", kSakuraText, reg2, c2, val2.u64[0]); // NOLINT(cppcoreguidelines-pro-type-union-access)
+                " {}v{:<2}\033[0m       : {}0x{:016x}\033[0m", kThemeText, reg2, c2, val2.u64[0]); // NOLINT(cppcoreguidelines-pro-type-union-access)
 
             return format_to_width(col1_color, col_width) +
                    format_to_width(col2_color, right_width);

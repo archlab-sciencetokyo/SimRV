@@ -44,7 +44,7 @@ auto RegisterPane::section_line(const std::string& title, int width) -> std::str
         std::string full = title + " ";
         int dash_len = width - get_display_width(full);
         if (dash_len < 0) dash_len = 0;
-        return std::format("\033[1;38;5;254m{} \033[0m{}{}", title, kSakuraBorder, make_repeated_string("─", dash_len));
+        return std::format("\033[1;38;5;254m{} \033[0m{}{}", title, kThemeBorder, make_repeated_string("─", dash_len));
     } else {
         std::string text = " " + title + " ";
         int dash_len = width - get_display_width(text);
@@ -52,18 +52,18 @@ auto RegisterPane::section_line(const std::string& title, int width) -> std::str
         int left_dashes = std::min(4, dash_len / 2);
         int right_dashes = dash_len - left_dashes;
         return std::format("{}{} \033[1;38;5;254m{}\033[0m {}{}", 
-                           kSakuraBorder, make_repeated_string("─", left_dashes),
+                           kThemeBorder, make_repeated_string("─", left_dashes),
                            title,
-                           kSakuraBorder, make_repeated_string("─", right_dashes));
+                           kThemeBorder, make_repeated_string("─", right_dashes));
     }
 }
 
 auto RegisterPane::make_field(const std::string& label, const std::string& value,
                              const char* value_color, int label_pad) -> std::string {
     if (label_pad == 0) {
-        return std::format(" {}{}\033[0m: {}{}\033[0m", kSakuraText, label, value_color, value);
+        return std::format(" {}{}\033[0m: {}{}\033[0m", kThemeText, label, value_color, value);
     } else {
-        return std::format(" {}{:<{}}\033[0m: {}{}\033[0m", kSakuraText, label, label_pad, value_color, value);
+        return std::format(" {}{:<{}}\033[0m: {}{}\033[0m", kThemeText, label, label_pad, value_color, value);
     }
 }
 

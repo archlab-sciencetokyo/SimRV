@@ -141,6 +141,17 @@ class Mmu {
 
     // Page table structure constants
     static constexpr Word kPteShift = 10;             // PPN to PTE conversion shift
+
+    // Cached SATP configuration parameters to accelerate page walks
+    Word cached_satp_ = ~Word{0};
+    unsigned cached_xlen_ = 0;
+    int cached_levels_ = 2;
+    int cached_pte_size_ = 4;
+    int cached_vpn_bits_per_level_ = 10;
+    Word cached_root_ppn_ = 0;
+    Address cached_root_pt_addr_ = 0;
+    Word cached_satp_mode_ = 0;
+    bool cached_valid_ = false;
 };
 
 }  // namespace simrv

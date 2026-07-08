@@ -5,7 +5,6 @@
 #pragma once
 
 #include <vector>
-#include <mutex>
 #include <atomic>
 #include <string>
 
@@ -62,6 +61,7 @@ class Framebuffer : public memory::TileLinkNode {
         }
     }
     [[nodiscard]] auto is_dirty() const -> bool { return dirty_; }
+    [[nodiscard]] auto is_tui_dirty() const -> bool { return tui_dirty_.load(std::memory_order_relaxed); }
 
     [[nodiscard]] auto get_width() const -> int { return width_; }
     [[nodiscard]] auto get_height() const -> int { return height_; }
@@ -72,6 +72,8 @@ class Framebuffer : public memory::TileLinkNode {
 
     // Generates the TUI-rendered display lines for ncurses
     auto get_tui_rows(int term_w, int term_h) -> std::vector<std::string>;
+    auto get_sixel_escape(int target_w, int target_h) -> std::string;
+    auto get_active_bounds(int& w, int& h) -> bool;
 
    private:
     simrv::core::Machine& machine_;

@@ -28,7 +28,7 @@ SdlAudio::~SdlAudio() {
 
 void SdlAudio::init_audio() {
 #ifdef HAVE_SDL3
-    if (!machine_.s_gui_mode && !machine_.s_tuimode) return;
+    if (!machine_.s_gui_mode) return;
 
     if (!SDL_WasInit(SDL_INIT_AUDIO)) {
         if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
@@ -164,7 +164,7 @@ void SdlAudio::play_music(Address music_addr, Word music_length, Word music_volu
         if (std::ifstream(path).good()) {
             synth = tsf_load_filename(path);
             if (synth) {
-                simrv::log::info("[SdlAudio] Music: loaded SoundFont: {}", path);
+                // simrv::log::info("[SdlAudio] Music: loaded SoundFont: {}", path);
                 break;
             }
         }
@@ -265,8 +265,8 @@ void SdlAudio::play_music(Address music_addr, Word music_length, Word music_volu
                            static_cast<int>(music_pcm_buf_.size() * sizeof(float)));
     SDL_ResumeAudioStreamDevice(music_stream_);
 
-    simrv::log::info("[SdlAudio] Music playing ({} KB synthesized PCM, looping={})",
-                      (music_pcm_buf_.size() * sizeof(float)) / 1024, music_looping);
+    // simrv::log::info("[SdlAudio] Music playing ({} KB synthesized PCM, looping={})",
+    //                   (music_pcm_buf_.size() * sizeof(float)) / 1024, music_looping);
 
     // --- 5. Background thread: re-queue data when stream runs dry (looping) ---
     if (music_looping) {

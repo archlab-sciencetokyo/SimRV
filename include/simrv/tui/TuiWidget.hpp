@@ -25,4 +25,4 @@ class TuiWidget {
     [[nodiscard]] virtual auto render_row(int row_idx, int width) -> std::string = 0;
 };
 
-}  // namespace simrv::device
+}  // namespace simrv::tui
