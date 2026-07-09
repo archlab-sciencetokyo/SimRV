@@ -445,6 +445,13 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
     if (state.regs.xlen == 32) {
         state.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state.pc)));
     }
+    if (state.pc == 0) {
+        simrv::log::error("[FATAL] Trap vector (mtvec/stvec) is 0. Cannot handle trap: {} (0x{:x}) at PC 0x{:x}. Halting simulator.",
+                          trap_cause_name(cause), static_cast<uint64_t>(cause), static_cast<uint64_t>(trap_pc));
+        if (cpu.machine_) {
+            cpu.machine_->stop();
+        }
+    }
     state.reserved = 0;
     cpu.pipeline_context.pending_exception = std::nullopt;
     cpu.pipeline_context.pending_tval = 0;

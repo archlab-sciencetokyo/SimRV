@@ -47,6 +47,7 @@ perf*.data*
 isa_logs/
 regression_logs/
 Testing/
+repro/
 
 # Generated documentation
 docs/

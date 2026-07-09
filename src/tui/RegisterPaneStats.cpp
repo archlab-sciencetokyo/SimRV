@@ -55,7 +55,7 @@ auto get_inst_category(int i) -> InstCategory {
         lut[OperationId::WFI] = InstCategory::SYS;
         lut[OperationId::SFENCE_VMA] = InstCategory::SYS;
 
-        for (int op = OperationId::VSETVLI; op <= OperationId::VMAXU_VX; ++op) {
+        for (int op = OperationId::VSETVLI; op <= OperationId::VFMACC_VF; ++op) {
             lut[op] = InstCategory::VEC;
         }
         

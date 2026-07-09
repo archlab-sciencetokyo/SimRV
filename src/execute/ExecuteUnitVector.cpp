@@ -5,6 +5,7 @@
 #include "simrv/isa/Common.hpp"
 #include <algorithm>
 #include <type_traits>
+#include <cstdio>
 
 namespace simrv::execute {
 
@@ -36,7 +37,11 @@ inline T get_group_element(const core::RegisterFile& regs, RegId base_reg, uint3
     RegId actual_reg = static_cast<RegId>((std::to_underlying(base_reg) + reg_offset) & 0x1F);
     const auto& vreg = regs.read_vector(actual_reg);
 
-    if constexpr (sizeof(T) == 1) {
+    if constexpr (std::is_same_v<T, float>) {
+        return vreg.f32[elem_idx];
+    } else if constexpr (std::is_same_v<T, double>) {
+        return vreg.f64[elem_idx];
+    } else if constexpr (sizeof(T) == 1) {
         return static_cast<T>(vreg.u8[elem_idx]);
     } else if constexpr (sizeof(T) == 2) {
         return static_cast<T>(vreg.u16[elem_idx]);
@@ -56,7 +61,11 @@ inline void set_group_element(core::RegisterFile& regs, RegId base_reg, uint32_t
     RegId actual_reg = static_cast<RegId>((std::to_underlying(base_reg) + reg_offset) & 0x1F);
     auto& vreg = regs.read_vector(actual_reg);
 
-    if constexpr (sizeof(T) == 1) {
+    if constexpr (std::is_same_v<T, float>) {
+        vreg.f32[elem_idx] = val;
+    } else if constexpr (std::is_same_v<T, double>) {
+        vreg.f64[elem_idx] = val;
+    } else if constexpr (sizeof(T) == 1) {
         vreg.u8[elem_idx] = static_cast<uint8_t>(val);
     } else if constexpr (sizeof(T) == 2) {
         vreg.u16[elem_idx] = static_cast<uint16_t>(val);
@@ -209,6 +218,198 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3,
     }
 }
 
+// Vector strided load helper
+template <typename T>
+void execute_vlse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd, Register base_addr, Register stride_reg_val, bool vm, uint32_t vl, isa::Funct3 mem_f3) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    int64_t stride = static_cast<int64_t>(static_cast<std::make_signed_t<Register>>(stride_reg_val));
+
+    for (uint32_t i = 0; i < vl; i++) {
+        if (!is_element_active(mask_reg, i, vm)) continue;
+        Address addr = base_addr + i * stride;
+        uint64_t val = 0;
+        if constexpr (sizeof(T) == 8) {
+            if constexpr (simrv::xlen::kIsXLen64) {
+                val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
+            } else {
+                if (simrv::compiler::unlikely((addr & 7) != 0)) {
+                    cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedLoad;
+                    cpu.pipeline_context.pending_tval = addr;
+                    return;
+                }
+                Word lo = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, isa::Funct3::Lw);
+                Word hi = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr + 4, isa::Funct3::Lw);
+                val = static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32);
+            }
+        } else {
+            val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
+        }
+        if (cpu.pipeline_context.pending_exception.has_value()) {
+            return;
+        }
+        set_group_element<T>(cpu.state().regs, rd, i, static_cast<T>(val));
+    }
+}
+
+// Vector strided store helper
+template <typename T>
+void execute_vsse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3, Register base_addr, Register stride_reg_val, bool vm, uint32_t vl, isa::Funct3 mem_f3) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    int64_t stride = static_cast<int64_t>(static_cast<std::make_signed_t<Register>>(stride_reg_val));
+
+    for (uint32_t i = 0; i < vl; i++) {
+        if (!is_element_active(mask_reg, i, vm)) continue;
+        Address addr = base_addr + i * stride;
+        T val = get_group_element<T>(cpu.state().regs, vs3, i);
+        if constexpr (sizeof(T) == 8) {
+            if constexpr (simrv::xlen::kIsXLen64) {
+                simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val), mem_f3);
+            } else {
+                if (simrv::compiler::unlikely((addr & 7) != 0)) {
+                    cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedStore;
+                    cpu.pipeline_context.pending_tval = addr;
+                    return;
+                }
+                simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val & 0xFFFFFFFFULL), isa::Funct3::Sw);
+                simrv::memory::MemoryAccess::storeInt(mem, cpu, addr + 4, static_cast<Word>((val >> 32) & 0xFFFFFFFFULL), isa::Funct3::Sw);
+            }
+        } else {
+            simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val), mem_f3);
+        }
+        if (cpu.pipeline_context.pending_exception.has_value()) {
+            return;
+        }
+    }
+}
+
+// Vector indexed load helper
+template <typename T_data, typename T_idx>
+void execute_vluxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd, Register base_addr, RegId vs2, bool vm, uint32_t vl, isa::Funct3 mem_f3) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+
+    for (uint32_t i = 0; i < vl; i++) {
+        if (!is_element_active(mask_reg, i, vm)) continue;
+        T_idx offset = get_group_element<T_idx>(cpu.state().regs, vs2, i);
+        Address addr = base_addr + static_cast<int64_t>(offset);
+
+        uint64_t val = 0;
+        if constexpr (sizeof(T_data) == 8) {
+            if constexpr (simrv::xlen::kIsXLen64) {
+                val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
+            } else {
+                if (simrv::compiler::unlikely((addr & 7) != 0)) {
+                    cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedLoad;
+                    cpu.pipeline_context.pending_tval = addr;
+                    return;
+                }
+                Word lo = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, isa::Funct3::Lw);
+                Word hi = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr + 4, isa::Funct3::Lw);
+                val = static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32);
+            }
+        } else {
+            val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
+        }
+        if (cpu.pipeline_context.pending_exception.has_value()) {
+            return;
+        }
+        set_group_element<T_data>(cpu.state().regs, rd, i, static_cast<T_data>(val));
+    }
+}
+
+template <typename T_idx>
+void dispatch_vluxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd, Register base_addr, RegId vs2, bool vm, uint32_t vl, uint32_t sew) {
+    if (sew == 8) {
+        execute_vluxei<uint8_t, T_idx>(cpu, mem, rd, base_addr, vs2, vm, vl, isa::Funct3::Lbu);
+    } else if (sew == 16) {
+        execute_vluxei<uint16_t, T_idx>(cpu, mem, rd, base_addr, vs2, vm, vl, isa::Funct3::Lhu);
+    } else if (sew == 32) {
+        execute_vluxei<uint32_t, T_idx>(cpu, mem, rd, base_addr, vs2, vm, vl, isa::Funct3::Lw);
+    } else {
+        execute_vluxei<uint64_t, T_idx>(cpu, mem, rd, base_addr, vs2, vm, vl, isa::Funct3::Ld);
+    }
+}
+
+// Vector indexed store helper
+template <typename T_data, typename T_idx>
+void execute_vsuxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3, Register base_addr, RegId vs2, bool vm, uint32_t vl, isa::Funct3 mem_f3) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+
+    for (uint32_t i = 0; i < vl; i++) {
+        if (!is_element_active(mask_reg, i, vm)) continue;
+        T_idx offset = get_group_element<T_idx>(cpu.state().regs, vs2, i);
+        Address addr = base_addr + static_cast<int64_t>(offset);
+        T_data val = get_group_element<T_data>(cpu.state().regs, vs3, i);
+        if constexpr (sizeof(T_data) == 8) {
+            if constexpr (simrv::xlen::kIsXLen64) {
+                simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val), mem_f3);
+            } else {
+                if (simrv::compiler::unlikely((addr & 7) != 0)) {
+                    cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedStore;
+                    cpu.pipeline_context.pending_tval = addr;
+                    return;
+                }
+                simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val & 0xFFFFFFFFULL), isa::Funct3::Sw);
+                simrv::memory::MemoryAccess::storeInt(mem, cpu, addr + 4, static_cast<Word>((val >> 32) & 0xFFFFFFFFULL), isa::Funct3::Sw);
+            }
+        } else {
+            simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val), mem_f3);
+        }
+        if (cpu.pipeline_context.pending_exception.has_value()) {
+            return;
+        }
+    }
+}
+
+template <typename T_idx>
+void dispatch_vsuxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3, Register base_addr, RegId vs2, bool vm, uint32_t vl, uint32_t sew) {
+    if (sew == 8) {
+        execute_vsuxei<uint8_t, T_idx>(cpu, mem, vs3, base_addr, vs2, vm, vl, isa::Funct3::Sb);
+    } else if (sew == 16) {
+        execute_vsuxei<uint16_t, T_idx>(cpu, mem, vs3, base_addr, vs2, vm, vl, isa::Funct3::Sh);
+    } else if (sew == 32) {
+        execute_vsuxei<uint32_t, T_idx>(cpu, mem, vs3, base_addr, vs2, vm, vl, isa::Funct3::Sw);
+    } else {
+        execute_vsuxei<uint64_t, T_idx>(cpu, mem, vs3, base_addr, vs2, vm, vl, isa::Funct3::Sd);
+    }
+}
+
+// Vector floating-point MAC helpers
+template <typename T>
+void perform_vfmacc_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    for (uint32_t i = 0; i < vl; i++) {
+        if (!is_element_active(mask_reg, i, vm)) continue;
+        T val1 = get_group_element<T>(cpu.state().regs, rs1, i);
+        T val2 = get_group_element<T>(cpu.state().regs, rs2, i);
+        T dest_val = get_group_element<T>(cpu.state().regs, rd, i);
+        T res = dest_val + val2 * val1;
+        set_group_element<T>(cpu.state().regs, rd, i, res);
+    }
+}
+
+template <typename T>
+void perform_vfmacc_vf(core::CPU& cpu, RegId rd, FloatingRegister rs1_val, RegId rs2, bool vm, uint32_t vl) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    T scalar = 0;
+    if constexpr (std::is_same_v<T, float>) {
+        if ((rs1_val & simrv::xlen::kF32BoxerBits) != simrv::xlen::kF32BoxerBits) {
+            scalar = std::bit_cast<float>(0x7fc00000U);
+        } else {
+            scalar = std::bit_cast<float>(static_cast<uint32_t>(rs1_val & 0xFFFFFFFFULL));
+        }
+    } else {
+        scalar = std::bit_cast<double>(rs1_val);
+    }
+
+    for (uint32_t i = 0; i < vl; i++) {
+        if (!is_element_active(mask_reg, i, vm)) continue;
+        T val2 = get_group_element<T>(cpu.state().regs, rs2, i);
+        T dest_val = get_group_element<T>(cpu.state().regs, rd, i);
+        T res = dest_val + val2 * scalar;
+        set_group_element<T>(cpu.state().regs, rd, i, res);
+    }
+}
+
 template <typename T>
 void perform_mac_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, bool overwrite_acc, bool subtract) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
@@ -320,9 +521,19 @@ void execute_vmerge_vi(core::CPU& cpu, RegId rd, int32_t imm, RegId rs2, uint32_
     }
 }
 
+template <typename T>
+void execute_vid(core::CPU& cpu, RegId rd, bool vm, uint32_t vl) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    for (uint32_t i = 0; i < vl; i++) {
+        if (!is_element_active(mask_reg, i, vm)) continue;
+        set_group_element<T>(cpu.state().regs, rd, i, static_cast<T>(i));
+    }
+}
+
 } // namespace
 
 void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::OperationId op_id, Instruction ir) {
+
     const auto rd = static_cast<RegId>((ir >> 7) & 0x1F);
     const auto rs1 = static_cast<RegId>((ir >> 15) & 0x1F);
     const auto rs2 = static_cast<RegId>((ir >> 20) & 0x1F);
@@ -410,6 +621,91 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::Op
     }
     if (op_id == isa::OperationId::VSE64_V) {
         execute_vse<uint64_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), vm, vl, isa::Funct3::Sd);
+        return;
+    }
+
+    // Execute Vector Strided Load instructions
+    if (op_id == isa::OperationId::VLSE8_V) {
+        execute_vlse<uint8_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), cpu.state().regs.read(rs2), vm, vl, isa::Funct3::Lbu);
+        return;
+    }
+    if (op_id == isa::OperationId::VLSE16_V) {
+        execute_vlse<uint16_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), cpu.state().regs.read(rs2), vm, vl, isa::Funct3::Lhu);
+        return;
+    }
+    if (op_id == isa::OperationId::VLSE32_V) {
+        execute_vlse<uint32_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), cpu.state().regs.read(rs2), vm, vl, isa::Funct3::Lw);
+        return;
+    }
+    if (op_id == isa::OperationId::VLSE64_V) {
+        execute_vlse<uint64_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), cpu.state().regs.read(rs2), vm, vl, isa::Funct3::Ld);
+        return;
+    }
+
+    // Execute Vector Strided Store instructions
+    if (op_id == isa::OperationId::VSSE8_V) {
+        execute_vsse<uint8_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), cpu.state().regs.read(rs2), vm, vl, isa::Funct3::Sb);
+        return;
+    }
+    if (op_id == isa::OperationId::VSSE16_V) {
+        execute_vsse<uint16_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), cpu.state().regs.read(rs2), vm, vl, isa::Funct3::Sh);
+        return;
+    }
+    if (op_id == isa::OperationId::VSSE32_V) {
+        execute_vsse<uint32_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), cpu.state().regs.read(rs2), vm, vl, isa::Funct3::Sw);
+        return;
+    }
+    if (op_id == isa::OperationId::VSSE64_V) {
+        execute_vsse<uint64_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), cpu.state().regs.read(rs2), vm, vl, isa::Funct3::Sd);
+        return;
+    }
+
+    // Execute Vector Indexed Load instructions
+    if (op_id == isa::OperationId::VLUXEI8_V || op_id == isa::OperationId::VLOXEI8_V) {
+        dispatch_vluxei<int8_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), rs2, vm, vl, sew);
+        return;
+    }
+    if (op_id == isa::OperationId::VLUXEI16_V || op_id == isa::OperationId::VLOXEI16_V) {
+        dispatch_vluxei<int16_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), rs2, vm, vl, sew);
+        return;
+    }
+    if (op_id == isa::OperationId::VLUXEI32_V || op_id == isa::OperationId::VLOXEI32_V) {
+        dispatch_vluxei<int32_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), rs2, vm, vl, sew);
+        return;
+    }
+    if (op_id == isa::OperationId::VLUXEI64_V || op_id == isa::OperationId::VLOXEI64_V) {
+        dispatch_vluxei<int64_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), rs2, vm, vl, sew);
+        return;
+    }
+
+    // Execute Vector Indexed Store instructions
+    if (op_id == isa::OperationId::VSUXEI8_V || op_id == isa::OperationId::VSOXEI8_V) {
+        dispatch_vsuxei<int8_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), rs2, vm, vl, sew);
+        return;
+    }
+    if (op_id == isa::OperationId::VSUXEI16_V || op_id == isa::OperationId::VSOXEI16_V) {
+        dispatch_vsuxei<int16_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), rs2, vm, vl, sew);
+        return;
+    }
+    if (op_id == isa::OperationId::VSUXEI32_V || op_id == isa::OperationId::VSOXEI32_V) {
+        dispatch_vsuxei<int32_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), rs2, vm, vl, sew);
+        return;
+    }
+    if (op_id == isa::OperationId::VSUXEI64_V || op_id == isa::OperationId::VSOXEI64_V) {
+        dispatch_vsuxei<int64_t>(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), rs2, vm, vl, sew);
+        return;
+    }
+
+    // Vector floating-point MAC instructions
+    if (op_id == isa::OperationId::VFMACC_VV) {
+        if (sew == 32) perform_vfmacc_vv<float>(cpu, rd, rs1, rs2, vm, vl);
+        else if (sew == 64) perform_vfmacc_vv<double>(cpu, rd, rs1, rs2, vm, vl);
+        return;
+    }
+    if (op_id == isa::OperationId::VFMACC_VF) {
+        FloatingRegister rs1_fp_val = cpu.state().regs.read_fp(rs1);
+        if (sew == 32) perform_vfmacc_vf<float>(cpu, rd, rs1_fp_val, rs2, vm, vl);
+        else if (sew == 64) perform_vfmacc_vf<double>(cpu, rd, rs1_fp_val, rs2, vm, vl);
         return;
     }
 
@@ -685,6 +981,20 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::Op
             if (op_id == isa::OperationId::VMERGE_VVM) execute_vmerge_vv<uint64_t>(cpu, rd, rs1, rs2, vl);
             else if (op_id == isa::OperationId::VMERGE_VXM) execute_vmerge_vx<uint64_t>(cpu, rd, rs1_val, rs2, vl);
             else execute_vmerge_vi<uint64_t>(cpu, rd, simm5, rs2, vl);
+        }
+        return;
+    }
+
+    // VID (VID_V)
+    if (op_id == isa::OperationId::VID_V) {
+        if (sew == 8) {
+            execute_vid<uint8_t>(cpu, rd, vm, vl);
+        } else if (sew == 16) {
+            execute_vid<uint16_t>(cpu, rd, vm, vl);
+        } else if (sew == 32) {
+            execute_vid<uint32_t>(cpu, rd, vm, vl);
+        } else {
+            execute_vid<uint64_t>(cpu, rd, vm, vl);
         }
         return;
     }

@@ -1,4 +1,5 @@
 #include "simrv/pipeline/Decoder.hpp"
+#include <cstdio>
 
 namespace simrv::pipeline {
 
@@ -18,7 +19,10 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "SFENCE_VMA", "MUL",      "MULH",      "MULHSU",    "MULHU",     "DIV",      "DIVU",
     "REM",        "REMU",     "MULW",      "DIVW",      "DIVUW",     "REMW",     "REMUW",
     "LR_W",       "SC_W",     "AMOSWAP_W", "AMOADD_W",  "AMOXOR_W",  "AMOAND_W", "AMOOR_W",
-    "AMOMIN_W",   "AMOMAX_W", "AMOMINU_W", "AMOMAXU_W", "FLW",       "FSW",      "FMADD_S",
+    "AMOMIN_W",   "AMOMAX_W", "AMOMINU_W", "AMOMAXU_W",
+    "LR_D",       "SC_D",     "AMOSWAP_D", "AMOADD_D",  "AMOXOR_D",  "AMOAND_D", "AMOOR_D",
+    "AMOMIN_D",   "AMOMAX_D", "AMOMINU_D", "AMOMAXU_D",
+    "FLW",       "FSW",      "FMADD_S",
     "FMSUB_S",    "FNMADD_S", "FNMSUB_S",  "FADD_S",    "FSUB_S",    "FMUL_S",   "FDIV_S",
     "FSQRT_S",    "FSGNJ_S",  "FSGNJN_S",  "FSGNJX_S",  "FMIN_S",    "FMAX_S",   "FCVT_W_S",
     "FCVT_WU_S",  "FMV_X_W",  "FEQ_S",     "FLT_S",     "FLE_S",     "FCLASS_S", "FCVT_S_W",
@@ -67,6 +71,14 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "VWMACCUS_VX", "VWMACCSU_VV", "VWMACCSU_VX",
     "VMIN_VV", "VMIN_VX", "VMINU_VV", "VMINU_VX",
     "VMAX_VV", "VMAX_VX", "VMAXU_VV", "VMAXU_VX",
+    "VLSE8_V", "VLSE16_V", "VLSE32_V", "VLSE64_V",
+    "VSSE8_V", "VSSE16_V", "VSSE32_V", "VSSE64_V",
+    "VLUXEI8_V", "VLUXEI16_V", "VLUXEI32_V", "VLUXEI64_V",
+    "VLOXEI8_V", "VLOXEI16_V", "VLOXEI32_V", "VLOXEI64_V",
+    "VSUXEI8_V", "VSUXEI16_V", "VSUXEI32_V", "VSUXEI64_V",
+    "VSOXEI8_V", "VSOXEI16_V", "VSOXEI32_V", "VSOXEI64_V",
+    "VID_V",
+    "VFMACC_VV", "VFMACC_VF",
     "VCHECK",
     "UNKNOWN"};
 
@@ -570,6 +582,9 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operation
             if (funct3 == 0) return OperationId::VMAX_VV;
             if (funct3 == 4) return OperationId::VMAX_VX;
             break;
+        case 0x14:
+            if (funct3 == 2 && ((ir >> 15) & 0x1F) == 17 && ((ir >> 20) & 0x1F) == 0) return OperationId::VID_V;
+            break;
         case 0x25:
             if (funct3 == 0) return OperationId::VSLL_VV;
             if (funct3 == 4) return OperationId::VSLL_VX;
@@ -619,6 +634,10 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operation
         case 0x2D:
             if (funct3 == 2) return OperationId::VMACC_VV;
             if (funct3 == 6) return OperationId::VMACC_VX;
+            break;
+        case 0x2C:
+            if (funct3 == 1) return OperationId::VFMACC_VV;
+            if (funct3 == 5) return OperationId::VFMACC_VF;
             break;
         case 0x2F:
             if (funct3 == 2) return OperationId::VNMSAC_VV;
@@ -696,25 +715,63 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operation
     return OperationId::UNKNOWN;
 }
 
-auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2) -> OperationId {
+auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2, Instruction ir) -> OperationId {
     switch (op) {
 
-        case Opcode::LoadFp:
+        case Opcode::LoadFp: {
             if (funct3 == 2) return OperationId::FLW;
             if (funct3 == 3) return OperationId::FLD;
-            if (funct3 == 0) return OperationId::VLE8_V;
-            if (funct3 == 5) return OperationId::VLE16_V;
-            if (funct3 == 6) return OperationId::VLE32_V;
-            if (funct3 == 7) return OperationId::VLE64_V;
+            uint32_t mop = (ir >> 26) & 3;
+            if (mop == 0) {
+                if (funct3 == 0) return OperationId::VLE8_V;
+                if (funct3 == 5) return OperationId::VLE16_V;
+                if (funct3 == 6) return OperationId::VLE32_V;
+                if (funct3 == 7) return OperationId::VLE64_V;
+            } else if (mop == 2) {
+                if (funct3 == 0) return OperationId::VLSE8_V;
+                if (funct3 == 5) return OperationId::VLSE16_V;
+                if (funct3 == 6) return OperationId::VLSE32_V;
+                if (funct3 == 7) return OperationId::VLSE64_V;
+            } else if (mop == 1) {
+                if (funct3 == 0) return OperationId::VLUXEI8_V;
+                if (funct3 == 5) return OperationId::VLUXEI16_V;
+                if (funct3 == 6) return OperationId::VLUXEI32_V;
+                if (funct3 == 7) return OperationId::VLUXEI64_V;
+            } else if (mop == 3) {
+                if (funct3 == 0) return OperationId::VLOXEI8_V;
+                if (funct3 == 5) return OperationId::VLOXEI16_V;
+                if (funct3 == 6) return OperationId::VLOXEI32_V;
+                if (funct3 == 7) return OperationId::VLOXEI64_V;
+            }
             return OperationId::UNKNOWN;
-        case Opcode::StoreFp:
+        }
+        case Opcode::StoreFp: {
             if (funct3 == 2) return OperationId::FSW;
             if (funct3 == 3) return OperationId::FSD;
-            if (funct3 == 0) return OperationId::VSE8_V;
-            if (funct3 == 5) return OperationId::VSE16_V;
-            if (funct3 == 6) return OperationId::VSE32_V;
-            if (funct3 == 7) return OperationId::VSE64_V;
+            uint32_t mop = (ir >> 26) & 3;
+            if (mop == 0) {
+                if (funct3 == 0) return OperationId::VSE8_V;
+                if (funct3 == 5) return OperationId::VSE16_V;
+                if (funct3 == 6) return OperationId::VSE32_V;
+                if (funct3 == 7) return OperationId::VSE64_V;
+            } else if (mop == 2) {
+                if (funct3 == 0) return OperationId::VSSE8_V;
+                if (funct3 == 5) return OperationId::VSSE16_V;
+                if (funct3 == 6) return OperationId::VSSE32_V;
+                if (funct3 == 7) return OperationId::VSSE64_V;
+            } else if (mop == 1) {
+                if (funct3 == 0) return OperationId::VSUXEI8_V;
+                if (funct3 == 5) return OperationId::VSUXEI16_V;
+                if (funct3 == 6) return OperationId::VSUXEI32_V;
+                if (funct3 == 7) return OperationId::VSUXEI64_V;
+            } else if (mop == 3) {
+                if (funct3 == 0) return OperationId::VSOXEI8_V;
+                if (funct3 == 5) return OperationId::VSOXEI16_V;
+                if (funct3 == 6) return OperationId::VSOXEI32_V;
+                if (funct3 == 7) return OperationId::VSOXEI64_V;
+            }
             return OperationId::UNKNOWN;
+        }
         case Opcode::MAdd:
         case Opcode::MSub:
         case Opcode::NMSub:
@@ -989,7 +1046,7 @@ auto decoder(Instruction ir) -> OperationId {
     }
     if (op == Opcode::LoadFp || op == Opcode::StoreFp || op == Opcode::OpFp ||
         op == Opcode::MAdd || op == Opcode::MSub || op == Opcode::NMSub || op == Opcode::NMAdd) {
-        return decode_ext_f_d(op, funct3, funct7, std::to_underlying(dec.rs2()));
+        return decode_ext_f_d(op, funct3, funct7, std::to_underlying(dec.rs2()), ir);
     }
     if (op == Opcode::OpV) {
         return decode_ext_v(funct3, funct7, ir);
@@ -1000,7 +1057,8 @@ auto decoder(Instruction ir) -> OperationId {
     if ((op == Opcode::Op || op == Opcode::Op32) && (funct7 == 0x01)) {
         return decode_ext_m(op, funct3);
     }
-    return decode_ext_i(op, funct3, funct7, ir);
+    auto res = decode_ext_i(op, funct3, funct7, ir);
+    return res;
 }
 
 auto decompressInstruction(Instruction ir, bool is_rv64) -> Instruction {

@@ -1212,7 +1212,7 @@ auto get_isa_extension_name(OperationId op_id) -> std::string_view {
         }
         return "Zbb";
     }
-    if (op_id >= VSETVLI && op_id <= VMERGE_VIM) {
+    if (op_id >= VSETVLI && op_id <= VFMACC_VF) {
         return "RV32V";
     }
     return "Unknown";

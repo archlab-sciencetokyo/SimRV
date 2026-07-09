@@ -552,7 +552,7 @@ void CPU::execute_core(Machine& machine) {
         return;
     }
 
-    if (ctx.op_id >= isa::OperationId::VSETVLI && ctx.op_id <= isa::OperationId::VMAXU_VX) {
+    if (ctx.op_id >= isa::OperationId::VSETVLI && ctx.op_id <= isa::OperationId::VFMACC_VF) {
         ctx.tkn = false;
         execute::ExecuteUnit::execute_vector(*this, machine, ctx.op_id, ctx.ir);
         return;
@@ -826,7 +826,7 @@ void CPU::execute_fp(Machine& /*machine*/) {
 // ==========================================
 
 void CPU::run_memory_stage(Machine& machine) {
-    if (pipeline_context.op_id >= isa::OperationId::VSETVLI && pipeline_context.op_id <= isa::OperationId::VMAXU_VX) {
+    if (pipeline_context.op_id >= isa::OperationId::VSETVLI && pipeline_context.op_id <= isa::OperationId::VFMACC_VF) {
         return;
     }
     memory_load_phase(machine);
@@ -917,7 +917,7 @@ void CPU::writeback_registers([[maybe_unused]] Machine& machine) {
 
     e_icount++;
 
-    if (ctx.op_id >= isa::OperationId::VSETVLI && ctx.op_id <= isa::OperationId::VMAXU_VX) {
+    if (ctx.op_id >= isa::OperationId::VSETVLI && ctx.op_id <= isa::OperationId::VFMACC_VF) {
         return;
     }
 

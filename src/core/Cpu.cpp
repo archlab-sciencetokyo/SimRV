@@ -312,6 +312,10 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         return;
     }
 
+    if (ctx.op_id >= OperationId::VSETVLI && ctx.op_id <= OperationId::VFMACC_VF) {
+        return;
+    }
+
     const auto opcode = static_cast<Opcode>(ctx.opcode);
     const auto funct5 = static_cast<Funct5Amo>(ctx.funct5);
     const auto addr = ctx.mem_addr;
