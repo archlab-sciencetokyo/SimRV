@@ -20,7 +20,7 @@ jobs:
         arch: [rv32, rv64]
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
 
     - name: Install build tools
       run: |
