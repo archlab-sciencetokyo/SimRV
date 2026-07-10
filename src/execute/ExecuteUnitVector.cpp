@@ -15,7 +15,7 @@ namespace {
 // Helper to check/get active elements under mask
 inline bool is_element_active(const core::VectorRegister& mask_reg, uint32_t i, bool vm) {
     if (vm) return true;
-    return (mask_reg.u8[i / 8] & (1u << (i % 8))) != 0;
+    return (mask_reg.u8[i / 8] & (1u << (i % 8))) != 0; // NOLINT(cppcoreguidelines-pro-type-union-access)
 }
 
 // Helper to write mask bits
@@ -23,9 +23,9 @@ inline void set_mask_bit(core::VectorRegister& dest, uint32_t i, bool val) {
     uint32_t byte_idx = i / 8;
     uint32_t bit_idx = i % 8;
     if (val) {
-        dest.u8[byte_idx] |= (1u << bit_idx);
+        dest.u8[byte_idx] |= (1u << bit_idx); // NOLINT(cppcoreguidelines-pro-type-union-access)
     } else {
-        dest.u8[byte_idx] &= ~(1u << bit_idx);
+        dest.u8[byte_idx] &= ~(1u << bit_idx); // NOLINT(cppcoreguidelines-pro-type-union-access)
     }
 }
 
@@ -35,21 +35,21 @@ inline T get_group_element(const core::RegisterFile& regs, RegId base_reg, uint3
     constexpr uint32_t elems_per_reg = 32 / sizeof(T);
     uint32_t reg_offset = i / elems_per_reg;
     uint32_t elem_idx = i % elems_per_reg;
-    RegId actual_reg = static_cast<RegId>((std::to_underlying(base_reg) + reg_offset) & 0x1F);
+    auto actual_reg = static_cast<RegId>((std::to_underlying(base_reg) + reg_offset) & 0x1F);
     const auto& vreg = regs.read_vector(actual_reg);
 
     if constexpr (std::is_same_v<T, float>) {
-        return vreg.f32[elem_idx];
+        return vreg.f32[elem_idx]; // NOLINT(cppcoreguidelines-pro-type-union-access)
     } else if constexpr (std::is_same_v<T, double>) {
-        return vreg.f64[elem_idx];
+        return vreg.f64[elem_idx]; // NOLINT(cppcoreguidelines-pro-type-union-access)
     } else if constexpr (sizeof(T) == 1) {
-        return static_cast<T>(vreg.u8[elem_idx]);
+        return static_cast<T>(vreg.u8[elem_idx]); // NOLINT(cppcoreguidelines-pro-type-union-access)
     } else if constexpr (sizeof(T) == 2) {
-        return static_cast<T>(vreg.u16[elem_idx]);
+        return static_cast<T>(vreg.u16[elem_idx]); // NOLINT(cppcoreguidelines-pro-type-union-access)
     } else if constexpr (sizeof(T) == 4) {
-        return static_cast<T>(vreg.u32[elem_idx]);
+        return static_cast<T>(vreg.u32[elem_idx]); // NOLINT(cppcoreguidelines-pro-type-union-access)
     } else {
-        return static_cast<T>(vreg.u64[elem_idx]);
+        return static_cast<T>(vreg.u64[elem_idx]); // NOLINT(cppcoreguidelines-pro-type-union-access)
     }
 }
 
@@ -59,21 +59,21 @@ inline void set_group_element(core::RegisterFile& regs, RegId base_reg, uint32_t
     constexpr uint32_t elems_per_reg = 32 / sizeof(T);
     uint32_t reg_offset = i / elems_per_reg;
     uint32_t elem_idx = i % elems_per_reg;
-    RegId actual_reg = static_cast<RegId>((std::to_underlying(base_reg) + reg_offset) & 0x1F);
+    auto actual_reg = static_cast<RegId>((std::to_underlying(base_reg) + reg_offset) & 0x1F);
     auto& vreg = regs.read_vector(actual_reg);
 
     if constexpr (std::is_same_v<T, float>) {
-        vreg.f32[elem_idx] = val;
+        vreg.f32[elem_idx] = val; // NOLINT(cppcoreguidelines-pro-type-union-access)
     } else if constexpr (std::is_same_v<T, double>) {
-        vreg.f64[elem_idx] = val;
+        vreg.f64[elem_idx] = val; // NOLINT(cppcoreguidelines-pro-type-union-access)
     } else if constexpr (sizeof(T) == 1) {
-        vreg.u8[elem_idx] = static_cast<uint8_t>(val);
+        vreg.u8[elem_idx] = static_cast<uint8_t>(val); // NOLINT(cppcoreguidelines-pro-type-union-access)
     } else if constexpr (sizeof(T) == 2) {
-        vreg.u16[elem_idx] = static_cast<uint16_t>(val);
+        vreg.u16[elem_idx] = static_cast<uint16_t>(val); // NOLINT(cppcoreguidelines-pro-type-union-access)
     } else if constexpr (sizeof(T) == 4) {
-        vreg.u32[elem_idx] = static_cast<uint32_t>(val);
+        vreg.u32[elem_idx] = static_cast<uint32_t>(val); // NOLINT(cppcoreguidelines-pro-type-union-access)
     } else {
-        vreg.u64[elem_idx] = static_cast<uint64_t>(val);
+        vreg.u64[elem_idx] = static_cast<uint64_t>(val); // NOLINT(cppcoreguidelines-pro-type-union-access)
     }
 }
 
@@ -223,7 +223,7 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3,
 template <typename T>
 void execute_vlse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd, Register base_addr, Register stride_reg_val, bool vm, uint32_t vl, isa::Funct3 mem_f3) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    int64_t stride = static_cast<int64_t>(static_cast<std::make_signed_t<Register>>(stride_reg_val));
+    auto stride = static_cast<int64_t>(static_cast<std::make_signed_t<Register>>(stride_reg_val));
 
     for (uint32_t i = 0; i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
@@ -256,7 +256,7 @@ void execute_vlse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd,
 template <typename T>
 void execute_vsse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3, Register base_addr, Register stride_reg_val, bool vm, uint32_t vl, isa::Funct3 mem_f3) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    int64_t stride = static_cast<int64_t>(static_cast<std::make_signed_t<Register>>(stride_reg_val));
+    auto stride = static_cast<int64_t>(static_cast<std::make_signed_t<Register>>(stride_reg_val));
 
     for (uint32_t i = 0; i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
@@ -290,7 +290,7 @@ void execute_vluxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId r
 
     for (uint32_t i = 0; i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
-        T_idx offset = get_group_element<T_idx>(cpu.state().regs, vs2, i);
+        auto offset = get_group_element<T_idx>(cpu.state().regs, vs2, i);
         Address addr = base_addr + static_cast<int64_t>(offset);
 
         uint64_t val = 0;
@@ -337,9 +337,9 @@ void execute_vsuxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId v
 
     for (uint32_t i = 0; i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
-        T_idx offset = get_group_element<T_idx>(cpu.state().regs, vs2, i);
+        auto offset = get_group_element<T_idx>(cpu.state().regs, vs2, i);
         Address addr = base_addr + static_cast<int64_t>(offset);
-        T_data val = get_group_element<T_data>(cpu.state().regs, vs3, i);
+        auto val = get_group_element<T_data>(cpu.state().regs, vs3, i);
         if constexpr (sizeof(T_data) == 8) {
             if constexpr (simrv::xlen::kIsXLen64) {
                 simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val), mem_f3);
@@ -461,9 +461,9 @@ void perform_widening_mac_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, boo
 
     for (uint32_t i = 0; i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
-        T_src1 val1 = get_group_element<T_src1>(cpu.state().regs, rs1, i);
-        T_src2 val2 = get_group_element<T_src2>(cpu.state().regs, rs2, i);
-        T_dest dest_val = get_group_element<T_dest>(cpu.state().regs, rd, i);
+        auto val1 = get_group_element<T_src1>(cpu.state().regs, rs1, i);
+        auto val2 = get_group_element<T_src2>(cpu.state().regs, rs2, i);
+        auto dest_val = get_group_element<T_dest>(cpu.state().regs, rd, i);
 
         T_dest prod = static_cast<T_dest>(val1) * static_cast<T_dest>(val2);
         T_dest res = subtract ? (dest_val - prod) : (dest_val + prod);
@@ -474,12 +474,12 @@ void perform_widening_mac_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, boo
 template <typename T_dest, typename T_src1, typename T_src2>
 void perform_widening_mac_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl, bool subtract = false) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    T_src1 val1 = static_cast<T_src1>(rs1_val);
+    auto val1 = static_cast<T_src1>(rs1_val);
 
     for (uint32_t i = 0; i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
-        T_src2 val2 = get_group_element<T_src2>(cpu.state().regs, rs2, i);
-        T_dest dest_val = get_group_element<T_dest>(cpu.state().regs, rd, i);
+        auto val2 = get_group_element<T_src2>(cpu.state().regs, rs2, i);
+        auto dest_val = get_group_element<T_dest>(cpu.state().regs, rd, i);
 
         T_dest prod = static_cast<T_dest>(val1) * static_cast<T_dest>(val2);
         T_dest res = subtract ? (dest_val - prod) : (dest_val + prod);
@@ -492,7 +492,7 @@ void execute_vmerge_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, uint32_t 
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
 
     for (uint32_t i = 0; i < vl; i++) {
-        bool mask_bit = (mask_reg.u8[i / 8] & (1u << (i % 8))) != 0;
+        bool mask_bit = is_element_active(mask_reg, i, false);
         T val = mask_bit ? get_group_element<T>(cpu.state().regs, rs1, i) : get_group_element<T>(cpu.state().regs, rs2, i);
         set_group_element<T>(cpu.state().regs, rd, i, val);
     }
@@ -504,7 +504,7 @@ void execute_vmerge_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, ui
     T val1 = static_cast<T>(rs1_val);
 
     for (uint32_t i = 0; i < vl; i++) {
-        bool mask_bit = (mask_reg.u8[i / 8] & (1u << (i % 8))) != 0;
+        bool mask_bit = is_element_active(mask_reg, i, false);
         T val = mask_bit ? val1 : get_group_element<T>(cpu.state().regs, rs2, i);
         set_group_element<T>(cpu.state().regs, rd, i, val);
     }
@@ -516,7 +516,7 @@ void execute_vmerge_vi(core::CPU& cpu, RegId rd, int32_t imm, RegId rs2, uint32_
     T val1 = static_cast<T>(imm);
 
     for (uint32_t i = 0; i < vl; i++) {
-        bool mask_bit = (mask_reg.u8[i / 8] & (1u << (i % 8))) != 0;
+        bool mask_bit = is_element_active(mask_reg, i, false);
         T val = mask_bit ? val1 : get_group_element<T>(cpu.state().regs, rs2, i);
         set_group_element<T>(cpu.state().regs, rd, i, val);
     }
