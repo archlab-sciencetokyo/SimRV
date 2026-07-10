@@ -4,10 +4,8 @@
  */
 #include "simrv/util/CliParser.hpp"
 #include "simrv/core/Logger.hpp"
-#include "simrv/core/Boot.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/xlen/Types.hpp"
-#include "simrv/util/InstructionExplainer.hpp"
 #include "simrv/util/FormatUtil.hpp"
 
 #include <algorithm>
@@ -51,6 +49,9 @@ auto parse_scaled_u64(std::string_view num, uint64_t& out) -> bool {
     const char* end = num.data() + num.size();
     const auto result = std::from_chars(begin, end, value);
     if (result.ec != std::errc{} || result.ptr != end) {
+        return false;
+    }
+    if (value > std::numeric_limits<uint64_t>::max() / multiplier) {
         return false;
     }
     out = value * multiplier;
@@ -574,14 +575,118 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
     return false;
 }
 
+auto is_known_short_flag(char c) -> bool {
+    switch (c) {
+        case 'm': case 'k': case 'i':
+        case 'D':
+        case 'f': case 'c':
+        case 'P':
+        case 's': case 'e':
+        case 't': case 'l':
+        case 'H':
+        case 'r':
+        case 'q':
+        case 'I':
+        case 'p':
+        case 'b': case 'a':
+        case 'u':
+        case 'G':
+        case 'C':
+        case 'd':
+        case 'M':
+        case 'x':
+        case 'w':
+        case 'g': case 'v':
+        case 'B':
+        case 'h':
+            return true;
+        default:
+            return false;
+    }
+}
+
+auto short_flag_takes_argument(char c) -> bool {
+    switch (c) {
+        case 'm': case 'k': case 'i':
+        case 'D':
+        case 'f': case 'c':
+        case 'P':
+        case 's': case 'e':
+        case 't': case 'l':
+        case 'H':
+        case 'r':
+        case 'q':
+        case 'I':
+        case 'p':
+            return true;
+        default:
+            return false;
+    }
+}
+
+auto expand_short_flags(const std::vector<std::string>& original_args) -> std::vector<std::string> {
+    std::vector<std::string> expanded;
+    expanded.push_back(original_args[0]);
+
+    for (std::size_t i = 1; i < original_args.size(); ++i) {
+        const std::string& arg = original_args[i];
+        if (arg.starts_with('-') && !arg.starts_with("--") && arg.size() > 2) {
+            if (std::isdigit(static_cast<unsigned char>(arg[1]))) {
+                expanded.push_back(arg);
+                continue;
+            }
+
+            bool can_expand = true;
+            std::vector<std::string> local_expanded;
+            for (std::size_t j = 1; j < arg.size(); ++j) {
+                char c = arg[j];
+                if (is_known_short_flag(c)) {
+                    local_expanded.push_back(std::string("-") + c);
+                    if (short_flag_takes_argument(c)) {
+                        if (j + 1 < arg.size()) {
+                            local_expanded.push_back(arg.substr(j + 1));
+                        }
+                        break;
+                    }
+                } else {
+                    can_expand = false;
+                    break;
+                }
+            }
+
+            if (can_expand) {
+                expanded.insert(expanded.end(), local_expanded.begin(), local_expanded.end());
+            } else {
+                expanded.push_back(arg);
+            }
+        } else {
+            expanded.push_back(arg);
+        }
+    }
+    return expanded;
+}
+
 } // namespace
 
 auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResult, std::string> {
+    std::vector<std::string> original_args;
+    original_args.reserve(args.size());
+    for (auto* ptr : args) {
+        original_args.emplace_back(ptr);
+    }
+
+    std::vector<std::string> expanded_strings = expand_short_flags(original_args);
+    std::vector<char*> expanded_pointers;
+    expanded_pointers.reserve(expanded_strings.size());
+    for (auto& s : expanded_strings) {
+        expanded_pointers.push_back(s.data());
+    }
+    std::span<char* const> expanded_span(expanded_pointers.data(), expanded_pointers.size());
+
     ParseResult result{};
 
-    for (std::size_t i = 1; i < args.size(); ++i) {
-        std::string_view const arg =
-            args[i];  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    for (std::size_t i = 1; i < expanded_span.size(); ++i) {
+        std::string_view const arg = expanded_span[i];
         if (is_help_option(arg)) {
             result.action = CliAction::ShowHelp;
             return result;
@@ -592,27 +697,27 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
         }
 
         // Try parsing file options
-        auto res_file = parse_file_options(arg, args, i, result.options);
+        auto res_file = parse_file_options(arg, expanded_span, i, result.options);
         if (!res_file) return std::unexpected(res_file.error());
         if (*res_file) continue;
 
         // Try parsing execution options
-        auto res_exec = parse_execution_options(arg, args, i, result.options);
+        auto res_exec = parse_execution_options(arg, expanded_span, i, result.options);
         if (!res_exec) return std::unexpected(res_exec.error());
         if (*res_exec) continue;
 
         // Try parsing mode options
-        auto res_mode = parse_mode_options(arg, args, i, result);
+        auto res_mode = parse_mode_options(arg, expanded_span, i, result);
         if (!res_mode) return std::unexpected(res_mode.error());
         if (*res_mode) continue;
 
         // Try parsing TUI options
-        auto res_tui = parse_tui_options(arg, args, i, result);
+        auto res_tui = parse_tui_options(arg, expanded_span, i, result);
         if (!res_tui) return std::unexpected(res_tui.error());
         if (*res_tui) continue;
 
         // Try parsing debug/cosrv options
-        auto res_debug = parse_debug_cosrv_options(arg, args, i, result.options);
+        auto res_debug = parse_debug_cosrv_options(arg, expanded_span, i, result.options);
         if (!res_debug) return std::unexpected(res_debug.error());
         if (*res_debug) continue;
 

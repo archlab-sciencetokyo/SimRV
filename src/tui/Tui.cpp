@@ -255,24 +255,6 @@ void Tui::render(bool force) {
 
     TuiRightPanelMode const panel_mode = right_panel_mode_.load(std::memory_order_relaxed);
 
-    // Asynchronously format trace records in TUI thread if LiveTrace is active
-    if (panel_mode == TuiRightPanelMode::LiveTrace) {
-        std::vector<TraceRecord> local_records;
-        {
-            std::scoped_lock tr_lock(trace_mutex_);
-            local_records.reserve(trace_buffer_size_);
-            size_t idx = trace_buffer_tail_;
-            for (size_t i = 0; i < trace_buffer_size_; ++i) {
-                local_records.push_back(trace_record_buffer_[idx]);
-                idx = (idx + 1) % kTraceBufferSize;
-            }
-        }
-        trace_buffer_.clear();
-        for (const auto& rec : local_records) {
-            trace_buffer_.push_back(format_trace_record(rec));
-        }
-    }
-
     static auto last_draw_time = std::chrono::steady_clock::now();
     auto now = std::chrono::steady_clock::now();
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_draw_time).count();
@@ -294,6 +276,24 @@ void Tui::render(bool force) {
 
     if (g_resized) {
         g_resized = 0;
+    }
+
+    // Asynchronously format trace records in TUI thread if LiveTrace is active
+    if (panel_mode == TuiRightPanelMode::LiveTrace) {
+        std::vector<TraceRecord> local_records;
+        {
+            std::scoped_lock tr_lock(trace_mutex_);
+            local_records.reserve(trace_buffer_size_);
+            size_t idx = trace_buffer_tail_;
+            for (size_t i = 0; i < trace_buffer_size_; ++i) {
+                local_records.push_back(trace_record_buffer_[idx]);
+                idx = (idx + 1) % kTraceBufferSize;
+            }
+        }
+        trace_buffer_.clear();
+        for (const auto& rec : local_records) {
+            trace_buffer_.push_back(format_trace_record(rec));
+        }
     }
 
     struct winsize w{};
@@ -928,6 +928,10 @@ auto Tui::poll_keyboard(uint8_t& byte_out) -> bool {
 }
 
 void Tui::update() {
+    if (tui_loop_paused_.load(std::memory_order_relaxed)) {
+        return;
+    }
+
     uint8_t byte = 0;
     while (poll_keyboard(byte)) {
         if (consume_control_sequence(byte)) {
@@ -953,6 +957,11 @@ void Tui::update() {
 void Tui::pause_loop() {
     tui_loop_paused_ = true;
     set_paused(true);
+
+    bool const is_sim_thread = (std::this_thread::get_id() != main_thread_id_);
+    if (is_sim_thread) {
+        sim_thread_is_sleeping_.store(true, std::memory_order_relaxed);
+    }
 
     if (std::this_thread::get_id() == main_thread_id_) {
         while (!sim_thread_is_sleeping_.load(std::memory_order_relaxed) && tui_loop_paused_ && machine_.is_running_ && !machine_.is_shutdown_) {
@@ -1012,12 +1021,9 @@ void Tui::pause_loop() {
             } else if (key == simrv::tui::TuiKey::s || key == simrv::tui::TuiKey::S || key == simrv::tui::TuiKey::Space) {
                 if (!machine_.is_shutdown_) {
                     update_cache();
-                    uint64_t old_icount = machine_.cpu.e_icount;
-                    while (machine_.cpu.e_icount == old_icount && machine_.is_running_) {
-                        machine_.prepare_cycle();
-                        machine_.cpu.run_cycle(machine_);
-                        machine_.finalize_cycle();
-                    }
+                    machine_.prepare_cycle();
+                    machine_.cpu.run_cycle(machine_);
+                    machine_.finalize_cycle();
                     render(true);
                 }
             }
@@ -1029,6 +1035,10 @@ void Tui::pause_loop() {
     set_paused(false);
     reset_scroll();
     render(true);
+
+    if (is_sim_thread) {
+        sim_thread_is_sleeping_.store(false, std::memory_order_relaxed);
+    }
 }
 
 auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {

@@ -1,18 +1,14 @@
 #include "simrv/tui/RegisterPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
-#include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
-#include "simrv/pipeline/Decoder.hpp"
 #include <format>
 #include <string>
 #include <vector>
 #include <array>
-#include <algorithm>
 
 namespace simrv::tui {
 
@@ -356,7 +352,7 @@ auto render_field_decoded_values(
 } // namespace
 
 auto RegisterPane::get_explain_rows(int width) -> std::vector<std::string> {
-    if (machine_.is_running()) {
+    if (!paused_) {
         std::vector<std::string> explain_rows;
         explain_rows.push_back(section_line("Instruction Explainer", width));
         explain_rows.push_back(format_to_width("  [Explainer disabled while simulator is running]", width));

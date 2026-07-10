@@ -10,7 +10,6 @@
 #include "simrv/Define.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Math.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::execute {
@@ -289,7 +288,7 @@ class ScopedRoundingMode {
 // Floating-Point to Integer Conversion
 // ============================================================================
 
-static auto fcvt_to_int(double value, Word op_mode) -> Register {
+static auto fcvt_to_int(double value, Word op_mode, Word effective_rm) -> Register {
     const bool is_unsigned = (op_mode & 1) != 0;
     const bool is_64 = (op_mode >= 2);
 
@@ -327,15 +326,18 @@ static auto fcvt_to_int(double value, Word op_mode) -> Register {
         return saturate(false, value > 0);
     }
 
-    double rounded = std::rint(value);
-    int const rmode = std::fegetround();
-
-    if (rmode == FE_TOWARDZERO) {
+    double rounded = 0.0;
+    if (effective_rm == enum_mask(RoundingMode::Rtz)) {
         rounded = std::trunc(value);
-    } else if (rmode == FE_DOWNWARD) {
+    } else if (effective_rm == enum_mask(RoundingMode::Rdn)) {
         rounded = std::floor(value);
-    } else if (rmode == FE_UPWARD) {
+    } else if (effective_rm == enum_mask(RoundingMode::Rup)) {
         rounded = std::ceil(value);
+    } else if (effective_rm == enum_mask(RoundingMode::Rmm)) {
+        rounded = std::round(value);
+    } else {
+        // Round to nearest, ties to even (Rne / dynamic default fallback)
+        rounded = std::rint(value);
     }
 
     if (rounded != value) {
@@ -619,6 +621,9 @@ auto ExecuteUnit::opFp(Word funct7, Funct3 funct3, Word rs1, Word rs2, Register 
         {
             ScopedRoundingMode const scope(rm, fcsr);
             const double src = read_f64(freg, rs1);
+            if (is_snan64(src)) {
+                std::feraiseexcept(FE_INVALID);
+            }
             if (std::isnan(src)) {
                 out.fp_wb_data = write_f32_boxed(f32_from_bits(simrv::xlen::kF32Qnan));
             } else {
@@ -632,6 +637,9 @@ auto ExecuteUnit::opFp(Word funct7, Funct3 funct3, Word rs1, Word rs2, Register 
         {
             ScopedRoundingMode const scope(rm, fcsr);
             const float src = read_f32(freg, rs1);
+            if (is_snan32(src)) {
+                std::feraiseexcept(FE_INVALID);
+            }
             if (std::isnan(src)) {
                 out.fp_wb_data = static_cast<FloatingRegister>(simrv::xlen::kF64Qnan);
             } else {
@@ -690,7 +698,11 @@ auto ExecuteUnit::opFp(Word funct7, Funct3 funct3, Word rs1, Word rs2, Register 
         {
             ScopedRoundingMode const scope(rm, fcsr);
             const double a = !is_d ? static_cast<double>(read_f32(freg, rs1)) : read_f64(freg, rs1);
-            out.int_wb_data = fcvt_to_int(a, rs2);
+            Word effective_rm = rm;
+            if (effective_rm == enum_mask(RoundingMode::Dyn)) {
+                effective_rm = (fcsr >> 5) & 0x7;
+            }
+            out.int_wb_data = fcvt_to_int(a, rs2, effective_rm);
         }
         out.int_wb_enable = true;
         accumulate_fp_flags(fcsr);

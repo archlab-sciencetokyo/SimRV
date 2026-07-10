@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <type_traits>
 #include <cstdio>
+#include <limits>
 
 namespace simrv::execute {
 
@@ -803,7 +804,12 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::Op
     auto add_f = []<typename T>(T a, T b) -> T { return a + b; };
     auto sub_f = []<typename T>(T a, T b) -> T { return a - b; };
     auto mul_f = []<typename T>(T a, T b) -> T { return a * b; };
-    auto div_f = []<typename T>(T a, T b) -> T { return b == 0 ? static_cast<T>(-1) : static_cast<T>(static_cast<std::make_signed_t<T>>(a) / static_cast<std::make_signed_t<T>>(b)); };
+    auto div_f = []<typename T>(T a, T b) -> T {
+        using S = std::make_signed_t<T>;
+        if (b == 0) return static_cast<T>(-1);
+        if (static_cast<S>(a) == std::numeric_limits<S>::min() && static_cast<S>(b) == -1) return a;
+        return static_cast<T>(static_cast<S>(a) / static_cast<S>(b));
+    };
     auto divu_f = []<typename T>(T a, T b) -> T { return b == 0 ? static_cast<T>(-1) : a / b; };
     auto and_f = []<typename T>(T a, T b) -> T { return a & b; };
     auto or_f = []<typename T>(T a, T b) -> T { return a | b; };

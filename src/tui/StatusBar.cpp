@@ -7,8 +7,6 @@
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/xlen/Helpers.hpp"
-#include "simrv/xlen/Types.hpp"
 #include <format>
 
 namespace simrv::tui {
@@ -93,7 +91,7 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             if (mips >= 1.0) {
                 speed_str = std::format("{:.2f} MIPS", mips);
             } else {
-                speed_str = std::format("{:.1f} KIPS", mips * 100.0);
+                speed_str = std::format("{:.1f} KIPS", static_cast<double>(kips_));
             }
 
             int target_width_right = layout_ == TuiLayout::Split ? right_width_ : width - 2;

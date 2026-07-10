@@ -3,117 +3,165 @@ tests = \
   vadd_vi-1 \
   vadd_vi-2 \
   vadd_vi-3 \
+  vadd_vi-4 \
   vadd_vv-0 \
   vadd_vv-1 \
+  vadd_vv-2 \
   vadd_vx-0 \
   vadd_vx-1 \
   vadd_vx-2 \
   vadd_vx-3 \
   vadd_vx-4 \
+  vadd_vx-5 \
+  vadd_vx-6 \
   vand_vi-0 \
   vand_vi-1 \
   vand_vi-2 \
   vand_vi-3 \
+  vand_vi-4 \
   vand_vv-0 \
   vand_vv-1 \
+  vand_vv-2 \
   vand_vx-0 \
   vand_vx-1 \
   vand_vx-2 \
   vand_vx-3 \
   vand_vx-4 \
+  vand_vx-5 \
+  vand_vx-6 \
   vdiv_vv-0 \
   vdiv_vv-1 \
+  vdiv_vv-2 \
   vdiv_vx-0 \
   vdiv_vx-1 \
   vdiv_vx-2 \
   vdiv_vx-3 \
   vdiv_vx-4 \
   vdiv_vx-5 \
+  vdiv_vx-6 \
+  vdiv_vx-7 \
+  vdiv_vx-8 \
   vdivu_vv-0 \
   vdivu_vv-1 \
+  vdivu_vv-2 \
   vdivu_vx-0 \
   vdivu_vx-1 \
   vdivu_vx-2 \
   vdivu_vx-3 \
   vdivu_vx-4 \
   vdivu_vx-5 \
+  vdivu_vx-6 \
+  vdivu_vx-7 \
+  vdivu_vx-8 \
   vle16_v-0 \
   vle32_v-0 \
+  vle64_v-0 \
   vle8_v-0 \
   vmacc_vv-0 \
   vmacc_vv-1 \
+  vmacc_vv-2 \
   vmacc_vx-0 \
   vmacc_vx-1 \
   vmacc_vx-2 \
   vmacc_vx-3 \
   vmacc_vx-4 \
+  vmacc_vx-5 \
+  vmacc_vx-6 \
   vmadd_vv-0 \
   vmadd_vv-1 \
+  vmadd_vv-2 \
   vmadd_vx-0 \
   vmadd_vx-1 \
   vmadd_vx-2 \
   vmadd_vx-3 \
   vmadd_vx-4 \
+  vmadd_vx-5 \
+  vmadd_vx-6 \
   vmax_vv-0 \
   vmax_vv-1 \
+  vmax_vv-2 \
   vmax_vx-0 \
   vmax_vx-1 \
   vmax_vx-2 \
   vmax_vx-3 \
   vmax_vx-4 \
+  vmax_vx-5 \
+  vmax_vx-6 \
   vmerge_vim-0 \
   vmerge_vim-1 \
+  vmerge_vim-2 \
   vmerge_vvm-0 \
+  vmerge_vvm-1 \
   vmerge_vxm-0 \
   vmerge_vxm-1 \
   vmerge_vxm-2 \
+  vmerge_vxm-3 \
   vmin_vv-0 \
   vmin_vv-1 \
+  vmin_vv-2 \
   vmin_vx-0 \
   vmin_vx-1 \
   vmin_vx-2 \
   vmin_vx-3 \
   vmin_vx-4 \
+  vmin_vx-5 \
+  vmin_vx-6 \
   vmul_vv-0 \
   vmul_vv-1 \
+  vmul_vv-2 \
   vmul_vx-0 \
   vmul_vx-1 \
   vmul_vx-2 \
   vmul_vx-3 \
   vmul_vx-4 \
   vmul_vx-5 \
+  vmul_vx-6 \
+  vmul_vx-7 \
+  vmul_vx-8 \
   vmv_s_x-0 \
   vmv_v_i-0 \
+  vmv_v_i-1 \
   vmv_v_v-0 \
   vmv_v_x-0 \
   vmv_x_s-0 \
   vnmsac_vv-0 \
   vnmsac_vv-1 \
+  vnmsac_vv-2 \
   vnmsac_vx-0 \
   vnmsac_vx-1 \
   vnmsac_vx-2 \
   vnmsac_vx-3 \
   vnmsac_vx-4 \
+  vnmsac_vx-5 \
+  vnmsac_vx-6 \
   vnmsub_vv-0 \
   vnmsub_vv-1 \
+  vnmsub_vv-2 \
   vnmsub_vx-0 \
   vnmsub_vx-1 \
   vnmsub_vx-2 \
   vnmsub_vx-3 \
   vnmsub_vx-4 \
+  vnmsub_vx-5 \
+  vnmsub_vx-6 \
   vor_vi-0 \
   vor_vi-1 \
   vor_vi-2 \
   vor_vi-3 \
+  vor_vi-4 \
   vor_vv-0 \
   vor_vv-1 \
+  vor_vv-2 \
   vor_vx-0 \
   vor_vx-1 \
   vor_vx-2 \
   vor_vx-3 \
   vor_vx-4 \
+  vor_vx-5 \
+  vor_vx-6 \
   vse16_v-0 \
   vse32_v-0 \
+  vse64_v-0 \
   vse8_v-0 \
   vsll_vi-0 \
   vsll_vi-1 \
@@ -121,35 +169,45 @@ tests = \
   vsll_vi-3 \
   vsll_vv-0 \
   vsll_vv-1 \
+  vsll_vv-2 \
   vsll_vx-0 \
   vsll_vx-1 \
   vsll_vx-2 \
   vsll_vx-3 \
   vsll_vx-4 \
+  vsll_vx-5 \
+  vsll_vx-6 \
   vsra_vi-0 \
   vsra_vi-1 \
   vsra_vi-2 \
   vsra_vi-3 \
   vsra_vv-0 \
   vsra_vv-1 \
+  vsra_vv-2 \
   vsra_vx-0 \
   vsra_vx-1 \
   vsra_vx-2 \
   vsra_vx-3 \
   vsra_vx-4 \
+  vsra_vx-5 \
+  vsra_vx-6 \
   vsrl_vi-0 \
   vsrl_vi-1 \
   vsrl_vi-2 \
   vsrl_vi-3 \
   vsrl_vv-0 \
   vsrl_vv-1 \
+  vsrl_vv-2 \
   vsrl_vx-0 \
   vsrl_vx-1 \
   vsrl_vx-2 \
   vsrl_vx-3 \
   vsrl_vx-4 \
+  vsrl_vx-5 \
+  vsrl_vx-6 \
   vsub_vv-0 \
   vsub_vv-1 \
+  vsub_vv-2 \
   vsub_vx-0 \
   vsub_vx-1 \
   vsub_vx-2 \
@@ -157,29 +215,47 @@ tests = \
   vsub_vx-4 \
   vsub_vx-5 \
   vsub_vx-6 \
+  vsub_vx-7 \
+  vsub_vx-8 \
+  vsub_vx-9 \
   vwmacc_vv-0 \
+  vwmacc_vv-1 \
   vwmacc_vx-0 \
   vwmacc_vx-1 \
   vwmacc_vx-2 \
+  vwmacc_vx-3 \
+  vwmacc_vx-4 \
   vwmaccsu_vv-0 \
+  vwmaccsu_vv-1 \
   vwmaccsu_vx-0 \
   vwmaccsu_vx-1 \
   vwmaccsu_vx-2 \
+  vwmaccsu_vx-3 \
+  vwmaccsu_vx-4 \
   vwmaccu_vv-0 \
+  vwmaccu_vv-1 \
   vwmaccu_vx-0 \
   vwmaccu_vx-1 \
   vwmaccu_vx-2 \
+  vwmaccu_vx-3 \
+  vwmaccu_vx-4 \
   vwmaccus_vx-0 \
   vwmaccus_vx-1 \
   vwmaccus_vx-2 \
+  vwmaccus_vx-3 \
+  vwmaccus_vx-4 \
   vxor_vi-0 \
   vxor_vi-1 \
   vxor_vi-2 \
   vxor_vi-3 \
+  vxor_vi-4 \
   vxor_vv-0 \
   vxor_vv-1 \
+  vxor_vv-2 \
   vxor_vx-0 \
   vxor_vx-1 \
   vxor_vx-2 \
   vxor_vx-3 \
   vxor_vx-4 \
+  vxor_vx-5 \
+  vxor_vx-6 \

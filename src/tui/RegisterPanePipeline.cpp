@@ -576,7 +576,7 @@ auto RegisterPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_r
         case 1:
             {
                 auto [h, m, mr, ratio] = get_stats_strings(ic.hit_count(), ic.miss_count());
-                return render_pair(h, m, kThemeMint, "Type", "Direct-Mapped", kThemeVal, col_width, right_width, 0);
+                return render_pair(h, m, kThemeMint, "Type", "Set-Associative", kThemeVal, col_width, right_width, 0);
             }
         case 2:
             {
