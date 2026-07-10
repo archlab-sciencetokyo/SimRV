@@ -285,6 +285,73 @@ auto format_assembly_s_b_u_j_r4(
     return "unknown / illegal instruction";
 }
 
+auto format_assembly_vector(
+    const simrv::pipeline::PipelineContext& ctx,
+    std::string_view mnemonic
+) -> std::string {
+    auto const op_id = ctx.op_id;
+    
+    auto vr_name = [](RegId r) { return std::format("v{}", std::to_underlying(r)); };
+    auto gpr_name = [](RegId r) { return kRegNames.at(std::to_underlying(r)); };
+    auto fpr_name = [](RegId r) { return kFpRegNames.at(std::to_underlying(r)); };
+    
+    std::string rd = vr_name(ctx.rd);
+    std::string rs1 = gpr_name(ctx.rs1);
+    std::string rs2 = vr_name(ctx.rs2);
+    
+    if (op_id == VSETVLI) {
+        return std::format("vsetvli {}, {}, {}", gpr_name(ctx.rd), gpr_name(ctx.rs1), ctx.imm);
+    }
+    if (op_id == VSETIVLI) {
+        uint32_t uimm = std::to_underlying(ctx.rs1);
+        return std::format("vsetivli {}, {}, {}", gpr_name(ctx.rd), uimm, ctx.imm);
+    }
+    if (op_id == VSETVL) {
+        return std::format("vsetvl {}, {}, {}", gpr_name(ctx.rd), gpr_name(ctx.rs1), gpr_name(ctx.rs2));
+    }
+    if (op_id >= VLE8_V && op_id <= VLE64_V) {
+        return std::format("{} {}, ({})", mnemonic, rd, rs1);
+    }
+    if (op_id >= VSE8_V && op_id <= VSE64_V) {
+        return std::format("{} {}, ({})", mnemonic, rd, rs1);
+    }
+    if (op_id >= VLSE8_V && op_id <= VLSE64_V) {
+        return std::format("{} {}, ({}), {}", mnemonic, rd, rs1, gpr_name(ctx.rs2));
+    }
+    if (op_id >= VSSE8_V && op_id <= VSSE64_V) {
+        return std::format("{} {}, ({}), {}", mnemonic, rd, rs1, gpr_name(ctx.rs2));
+    }
+    if ((op_id >= VLUXEI8_V && op_id <= VLUXEI64_V) || (op_id >= VLOXEI8_V && op_id <= VLOXEI64_V)) {
+        return std::format("{} {}, ({}), {}", mnemonic, rd, rs1, rs2);
+    }
+    if ((op_id >= VSUXEI8_V && op_id <= VSUXEI64_V) || (op_id >= VSOXEI8_V && op_id <= VSOXEI64_V)) {
+        return std::format("{} {}, ({}), {}", mnemonic, rd, rs1, rs2);
+    }
+    if (op_id == VID_V) {
+        return std::format("vid.v {}", rd);
+    }
+    if (mnemonic.ends_with(".vv") || mnemonic.ends_with(".vvm")) {
+        return std::format("{} {}, {}, {}", mnemonic, rd, rs2, vr_name(ctx.rs1));
+    }
+    if (mnemonic.ends_with(".vx") || mnemonic.ends_with(".vxm")) {
+        return std::format("{} {}, {}, {}", mnemonic, rd, rs2, rs1);
+    }
+    if (mnemonic.ends_with(".vi") || mnemonic.ends_with(".vim")) {
+        auto imm = static_cast<int32_t>(ctx.imm);
+        return std::format("{} {}, {}, {}", mnemonic, rd, rs2, imm);
+    }
+    if (mnemonic.ends_with(".vf")) {
+        return std::format("{} {}, {}, {}", mnemonic, rd, rs2, fpr_name(ctx.rs1));
+    }
+    if (op_id == VMV_X_S) {
+        return std::format("vmv.x.s {}, {}", gpr_name(ctx.rd), rs2);
+    }
+    if (op_id == VMV_S_X) {
+        return std::format("vmv.s.x {}, {}", rd, rs1);
+    }
+    return std::format("{} {}, {}, {}", mnemonic, rd, vr_name(ctx.rs1), rs2);
+}
+
 auto format_instruction_assembly(
     const simrv::pipeline::PipelineContext& ctx,
     InstFormat fmt,
@@ -295,6 +362,9 @@ auto format_instruction_assembly(
 ) -> std::string {
     if (ctx.op_id == UNKNOWN) {
         return "unknown / illegal instruction";
+    }
+    if (ctx.opcode == Opcode::OpV) {
+        return format_assembly_vector(ctx, mnemonic);
     }
     if (fmt == InstFormat::R) {
         return format_assembly_r(ctx, mnemonic, rd_name, rs1_name, rs2_name);
@@ -317,22 +387,56 @@ auto render_field_decoded_values(
     std::vector<std::string> rows;
     rows.push_back(format_to_width(std::format("  opcode : 0x{:02X} ({:07b})", std::to_underlying(ctx.opcode), std::to_underlying(ctx.opcode)), width));
     
-    if (has_rd(fmt)) {
-        bool const is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
-        rows.push_back(format_to_width(std::format("  rd     : {} = {}", rd_name, read_reg_str(st, ctx.rd, is_dst_fp)), width));
-    }
-    if (has_rs1(fmt)) {
-        bool const is_rs1_fpr = simrv::isa::is_rs1_fp(ctx.opcode, ctx.op_id);
-        rows.push_back(format_to_width(std::format("  rs1    : {} = {}", rs1_name, read_reg_str(st, ctx.rs1, is_rs1_fpr)), width));
-    }
-    if (has_rs2(fmt)) {
-        bool const is_rs2_fpr = simrv::isa::is_rs2_fp(ctx.opcode, ctx.op_id);
-        rows.push_back(format_to_width(std::format("  rs2    : {} = {}", rs2_name, read_reg_str(st, ctx.rs2, is_rs2_fpr)), width));
-    }
-    if (fmt == InstFormat::R4) {
-        uint32_t rs3_val = (ctx.ir_org >> 27) & 0x1F;
-        std::string rs3_name = kFpRegNames.at(rs3_val);
-        rows.push_back(format_to_width(std::format("  rs3    : {} = {}", rs3_name, read_reg_str(st, static_cast<RegId>(rs3_val), true)), width));
+    if (ctx.opcode == Opcode::OpV) {
+        auto const op_id = ctx.op_id;
+        auto const [mnemonic, desc] = simrv::util::get_operation_details(op_id);
+        
+        bool rd_is_v = !(op_id == VSETVLI || op_id == VSETIVLI || op_id == VSETVL || op_id == VMV_X_S);
+        bool rs1_is_v = (mnemonic.ends_with(".vv") || mnemonic.ends_with(".vvm"));
+        bool rs1_is_fp = mnemonic.ends_with(".vf");
+        bool rs1_is_reg = !(mnemonic.ends_with(".vi") || mnemonic.ends_with(".vim") || op_id == VSETIVLI);
+        bool rs2_is_v = !(op_id == VSETVL || op_id == VSETVLI || op_id == VSETIVLI || (op_id >= VLE8_V && op_id <= VSE64_V) || op_id == VID_V);
+        bool rs2_is_gpr = (op_id == VSETVL);
+        
+        if (has_rd(fmt)) {
+            if (rd_is_v) {
+                rows.push_back(format_to_width(std::format("  rd     : v{}", std::to_underlying(ctx.rd)), width));
+            } else {
+                rows.push_back(format_to_width(std::format("  rd     : {} = {}", rd_name, read_reg_str(st, ctx.rd, false)), width));
+            }
+        }
+        if (has_rs1(fmt) && rs1_is_reg) {
+            if (rs1_is_v) {
+                rows.push_back(format_to_width(std::format("  rs1    : v{}", std::to_underlying(ctx.rs1)), width));
+            } else {
+                rows.push_back(format_to_width(std::format("  rs1    : {} = {}", rs1_name, read_reg_str(st, ctx.rs1, rs1_is_fp)), width));
+            }
+        }
+        if (has_rs2(fmt) && (rs2_is_v || rs2_is_gpr)) {
+            if (rs2_is_v) {
+                rows.push_back(format_to_width(std::format("  rs2    : v{}", std::to_underlying(ctx.rs2)), width));
+            } else {
+                rows.push_back(format_to_width(std::format("  rs2    : {} = {}", rs2_name, read_reg_str(st, ctx.rs2, false)), width));
+            }
+        }
+    } else {
+        if (has_rd(fmt)) {
+            bool const is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
+            rows.push_back(format_to_width(std::format("  rd     : {} = {}", rd_name, read_reg_str(st, ctx.rd, is_dst_fp)), width));
+        }
+        if (has_rs1(fmt)) {
+            bool const is_rs1_fpr = simrv::isa::is_rs1_fp(ctx.opcode, ctx.op_id);
+            rows.push_back(format_to_width(std::format("  rs1    : {} = {}", rs1_name, read_reg_str(st, ctx.rs1, is_rs1_fpr)), width));
+        }
+        if (has_rs2(fmt)) {
+            bool const is_rs2_fpr = simrv::isa::is_rs2_fp(ctx.opcode, ctx.op_id);
+            rows.push_back(format_to_width(std::format("  rs2    : {} = {}", rs2_name, read_reg_str(st, ctx.rs2, is_rs2_fpr)), width));
+        }
+        if (fmt == InstFormat::R4) {
+            uint32_t rs3_val = (ctx.ir_org >> 27) & 0x1F;
+            std::string rs3_name = kFpRegNames.at(rs3_val);
+            rows.push_back(format_to_width(std::format("  rs3    : {} = {}", rs3_name, read_reg_str(st, static_cast<RegId>(rs3_val), true)), width));
+        }
     }
     if (has_funct3(fmt)) {
         rows.push_back(format_to_width(std::format("  funct3 : 0x{:X} ({:03b})", std::to_underlying(ctx.funct3), std::to_underlying(ctx.funct3)), width));
