@@ -113,6 +113,7 @@ class Machine {
     Address s_isatest_tohost = 0x80001000;   // ISA-test tohost RAM address
     CSRValue s_misa_profile = isa::kMisaDefault;  // Selected MISA profile (without MXL)
     unsigned int s_misa_xlen = 0;            // Selected MISA XLEN (32 or 64, or 0 if default)
+    unsigned int s_vlen = 0;                 // Selected VLEN (bits, or 0 if default)
 
     // ========== I/O and Logging ==========
     std::string s_fn_memimg;                             // Memory image filename

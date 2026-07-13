@@ -17,6 +17,9 @@
 #endif
 inline constexpr unsigned kCoreCount = SIMRV_CORE_COUNT;
 
+inline constexpr unsigned kVlenMaxBits = 1024;
+inline constexpr unsigned kVlenMaxBytes = kVlenMaxBits / 8;
+
 using DumpFlags = uint8_t;
 
 enum class DumpFlag : DumpFlags {

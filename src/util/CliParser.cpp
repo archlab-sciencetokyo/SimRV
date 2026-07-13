@@ -425,6 +425,19 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.misa_override = true;
         return true;
     }
+    if (arg == "--vlen" || arg == "-VLEN") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        uint32_t val = 0;
+        if (!parse_u32_base0(*value, val)) {
+            return std::unexpected(std::format("invalid numeric value for {}", arg));
+        }
+        if (val < 32 || val > 1024 || (val & (val - 1)) != 0) {
+            return std::unexpected(std::format("VLEN must be a power of 2 between 32 and 1024 (got: {})", val));
+        }
+        result.options.vlen = val;
+        return true;
+    }
     if (is_baremetal_option(arg)) {
         result.options.appmode = true;
         return true;
@@ -749,6 +762,7 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     machine->s_misa_profile = misa_profile_bits(effective_misa_profile(options));
     machine->s_misa_override = options.misa_override;
     machine->s_misa_xlen = options.misa_xlen;
+    machine->s_vlen = options.vlen;
 
     machine->s_appmode = options.appmode;
     simrv::memory::g_appmode = options.appmode;

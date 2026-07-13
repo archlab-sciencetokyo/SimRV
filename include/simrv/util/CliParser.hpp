@@ -62,6 +62,7 @@ struct RuntimeOptions {
     bool debug_mode = false;
     uint32_t explain_inst_val = 0;
     double mouse_sensitivity = 1.0;
+    unsigned int vlen = 0;
 };
 
 struct ParseResult {

@@ -1,4 +1,6 @@
 #include "simrv/execute/ExecuteUnit.hpp"
+#include <bit>
+#include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
@@ -32,9 +34,10 @@ inline void set_mask_bit(core::VectorRegister& dest, uint32_t i, bool val) {
 // Helper to read group element
 template <typename T>
 inline T get_group_element(const core::RegisterFile& regs, RegId base_reg, uint32_t i) {
-    constexpr uint32_t elems_per_reg = 32 / sizeof(T);
-    uint32_t reg_offset = i / elems_per_reg;
-    uint32_t elem_idx = i % elems_per_reg;
+    const uint32_t elems_per_reg = regs.vlen_bytes() / sizeof(T);
+    const uint32_t shift = std::countr_zero(elems_per_reg);
+    uint32_t reg_offset = i >> shift;
+    uint32_t elem_idx = i & (elems_per_reg - 1);
     auto actual_reg = static_cast<RegId>((std::to_underlying(base_reg) + reg_offset) & 0x1F);
     const auto& vreg = regs.read_vector(actual_reg);
 
@@ -56,9 +59,10 @@ inline T get_group_element(const core::RegisterFile& regs, RegId base_reg, uint3
 // Helper to write group element
 template <typename T>
 inline void set_group_element(core::RegisterFile& regs, RegId base_reg, uint32_t i, T val) {
-    constexpr uint32_t elems_per_reg = 32 / sizeof(T);
-    uint32_t reg_offset = i / elems_per_reg;
-    uint32_t elem_idx = i % elems_per_reg;
+    const uint32_t elems_per_reg = regs.vlen_bytes() / sizeof(T);
+    const uint32_t shift = std::countr_zero(elems_per_reg);
+    uint32_t reg_offset = i >> shift;
+    uint32_t elem_idx = i & (elems_per_reg - 1);
     auto actual_reg = static_cast<RegId>((std::to_underlying(base_reg) + reg_offset) & 0x1F);
     auto& vreg = regs.read_vector(actual_reg);
 
@@ -569,7 +573,7 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::Op
         else if (lmul_field == 6) lmul = 0.25;
         else if (lmul_field == 7) lmul = 0.5;
 
-        auto vlmax = static_cast<uint32_t>((256.0 / req_sew) * lmul);
+        auto vlmax = static_cast<uint32_t>((static_cast<double>(cpu.state().regs.vlen) / req_sew) * lmul);
         uint32_t new_vl = 0;
 
         if (op_id == isa::OperationId::VSETIVLI) {

@@ -246,6 +246,7 @@ auto Machine::initialize() -> int {
     cpu.state().regs.write(static_cast<RegId>(11), linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);  // a1 = dtb
     cpu.state().misa = initial_misa;
     cpu.state().priv = kPrivMachine;
+    cpu.state().regs.vlen = s_vlen ? s_vlen : 256;
     cpu.state().update_xlen();
     if (cpu.state().regs.xlen == 32) {
         cpu.state().pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(cpu.state().pc)));

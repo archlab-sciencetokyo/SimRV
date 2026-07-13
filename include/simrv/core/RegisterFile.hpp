@@ -12,18 +12,18 @@
 
 namespace simrv::core {
 
-struct alignas(32) VectorRegister {
+struct alignas(kVlenMaxBytes) VectorRegister {
     union {
-        uint8_t  u8[32];
-        uint16_t u16[16];
-        uint32_t u32[8];
-        uint64_t u64[4];
-        int8_t   i8[32];
-        int16_t  i16[16];
-        int32_t  i32[8];
-        int64_t  i64[4];
-        float    f32[8];
-        double   f64[4];
+        uint8_t  u8[kVlenMaxBytes];
+        uint16_t u16[kVlenMaxBytes / 2];
+        uint32_t u32[kVlenMaxBytes / 4];
+        uint64_t u64[kVlenMaxBytes / 8];
+        int8_t   i8[kVlenMaxBytes];
+        int16_t  i16[kVlenMaxBytes / 2];
+        int32_t  i32[kVlenMaxBytes / 4];
+        int64_t  i64[kVlenMaxBytes / 8];
+        float    f32[kVlenMaxBytes / 4];
+        double   f64[kVlenMaxBytes / 8];
     };
 };
 
@@ -49,6 +49,9 @@ class RegisterFile {
     };
 
     unsigned xlen = 64;
+    unsigned vlen = 256;
+
+    [[nodiscard]] constexpr auto vlen_bytes() const -> unsigned { return vlen / 8; }
 
     [[nodiscard]] constexpr auto operator[](RegId idx) -> RegisterProxy { return {this, idx}; }
     [[nodiscard]] constexpr auto operator[](RegId idx) const -> Register { return read(idx); }
