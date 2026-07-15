@@ -273,25 +273,25 @@ auto format_assembly_s_b_u_j_r4(
     const std::string& rs1_name,
     const std::string& rs2_name
 ) -> std::string {
-    if (fmt == InstFormat::S) {
-        bool const is_store_fp = (ctx.opcode == Opcode::StoreFp);
-        return std::format("{} {}, {}({})", mnemonic, get_reg_name(ctx.rs2, is_store_fp), ctx.imm, rs1_name);
+    switch (fmt) {
+        case InstFormat::S: {
+            bool const is_store_fp = (ctx.opcode == Opcode::StoreFp);
+            return std::format("{} {}, {}({})", mnemonic, get_reg_name(ctx.rs2, is_store_fp), ctx.imm, rs1_name);
+        }
+        case InstFormat::B:
+            return std::format("{} {}, {}, {}", mnemonic, rs1_name, rs2_name, ctx.imm);
+        case InstFormat::U:
+            return std::format("{} {}, 0x{:X}", mnemonic, rd_name, static_cast<uint32_t>(ctx.imm));
+        case InstFormat::J:
+            return std::format("jal {}, {}", rd_name, ctx.imm);
+        case InstFormat::R4: {
+            uint32_t rs3_val = (ctx.ir_org >> 27) & 0x1F;
+            std::string rs3_name = kFpRegNames.at(rs3_val);
+            return std::format("{} {}, {}, {}, {}", mnemonic, rd_name, rs1_name, rs2_name, rs3_name);
+        }
+        default:
+            return "unknown / illegal instruction";
     }
-    if (fmt == InstFormat::B) {
-        return std::format("{} {}, {}, {}", mnemonic, rs1_name, rs2_name, ctx.imm);
-    }
-    if (fmt == InstFormat::U) {
-        return std::format("{} {}, 0x{:X}", mnemonic, rd_name, static_cast<uint32_t>(ctx.imm));
-    }
-    if (fmt == InstFormat::J) {
-        return std::format("jal {}, {}", rd_name, ctx.imm);
-    }
-    if (fmt == InstFormat::R4) {
-        uint32_t rs3_val = (ctx.ir_org >> 27) & 0x1F;
-        std::string rs3_name = kFpRegNames.at(rs3_val);
-        return std::format("{} {}, {}, {}, {}", mnemonic, rd_name, rs1_name, rs2_name, rs3_name);
-    }
-    return "unknown / illegal instruction";
 }
 
 auto format_assembly_vector(

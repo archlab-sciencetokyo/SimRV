@@ -340,18 +340,25 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     if (opcode == Opcode::LoadFp) {
         if (simrv::compiler::likely(simrv::memory::is_dram_addr(addr))) {
             const auto f3 = ctx.funct3;
-            if (f3 == Funct3::Flw) {
-                const Word lo = simrv::memory::ram_read_fast(addr, static_cast<Instruction>(Funct3::Lw), machine.mmem);
-                ctx.fp_mem_rdata = static_cast<uint64_t>(kF32BoxerBits) | static_cast<uint64_t>(lo & kLower32Mask);
-            } else if (f3 == Funct3::Fld) {
-                if constexpr (simrv::xlen::kIsXLen64) {
-                    ctx.fp_mem_rdata = static_cast<FloatingRegister>(
-                        simrv::memory::ram_read_fast(addr, static_cast<Instruction>(Funct3::Ld), machine.mmem));
-                } else {
+            switch (f3) {
+                case Funct3::Flw: {
                     const Word lo = simrv::memory::ram_read_fast(addr, static_cast<Instruction>(Funct3::Lw), machine.mmem);
-                    const Word hi = simrv::memory::ram_read_fast(addr + 4, static_cast<Instruction>(Funct3::Lw), machine.mmem);
-                    ctx.fp_mem_rdata = static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32);
+                    ctx.fp_mem_rdata = static_cast<uint64_t>(kF32BoxerBits) | static_cast<uint64_t>(lo & kLower32Mask);
+                    break;
                 }
+                case Funct3::Fld: {
+                    if constexpr (simrv::xlen::kIsXLen64) {
+                        ctx.fp_mem_rdata = static_cast<FloatingRegister>(
+                            simrv::memory::ram_read_fast(addr, static_cast<Instruction>(Funct3::Ld), machine.mmem));
+                    } else {
+                        const Word lo = simrv::memory::ram_read_fast(addr, static_cast<Instruction>(Funct3::Lw), machine.mmem);
+                        const Word hi = simrv::memory::ram_read_fast(addr + 4, static_cast<Instruction>(Funct3::Lw), machine.mmem);
+                        ctx.fp_mem_rdata = static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32);
+                    }
+                    break;
+                }
+                default:
+                    break;
             }
         } else {
             ctx.fp_mem_rdata = simrv::memory::MemoryAccess::loadFp(machine.memory_, *this, addr, ctx.funct3);
@@ -407,19 +414,24 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     if (opcode == Opcode::StoreFp) {
         if (simrv::compiler::likely(simrv::memory::is_dram_addr(addr))) {
             const auto f3 = ctx.funct3;
-            if (f3 == Funct3::Fsw) {
-                simrv::memory::ram_write_fast(addr, static_cast<Word>(ctx.fp_mem_wdata & static_cast<FloatingRegister>(kLower32Mask)),
-                                             static_cast<Instruction>(Funct3::Sw), machine.mmem);
-            } else if (f3 == Funct3::Fsd) {
-                if constexpr (simrv::xlen::kIsXLen64) {
-                    simrv::memory::ram_write_fast(addr, static_cast<Word>(ctx.fp_mem_wdata),
-                                                 static_cast<Instruction>(Funct3::Sd), machine.mmem);
-                } else {
+            switch (f3) {
+                case Funct3::Fsw:
                     simrv::memory::ram_write_fast(addr, static_cast<Word>(ctx.fp_mem_wdata & static_cast<FloatingRegister>(kLower32Mask)),
                                                  static_cast<Instruction>(Funct3::Sw), machine.mmem);
-                    simrv::memory::ram_write_fast(addr + 4, static_cast<Word>((ctx.fp_mem_wdata >> 32) & static_cast<FloatingRegister>(kLower32Mask)),
-                                                 static_cast<Instruction>(Funct3::Sw), machine.mmem);
-                }
+                    break;
+                case Funct3::Fsd:
+                    if constexpr (simrv::xlen::kIsXLen64) {
+                        simrv::memory::ram_write_fast(addr, static_cast<Word>(ctx.fp_mem_wdata),
+                                                     static_cast<Instruction>(Funct3::Sd), machine.mmem);
+                    } else {
+                        simrv::memory::ram_write_fast(addr, static_cast<Word>(ctx.fp_mem_wdata & static_cast<FloatingRegister>(kLower32Mask)),
+                                                     static_cast<Instruction>(Funct3::Sw), machine.mmem);
+                        simrv::memory::ram_write_fast(addr + 4, static_cast<Word>((ctx.fp_mem_wdata >> 32) & static_cast<FloatingRegister>(kLower32Mask)),
+                                                     static_cast<Instruction>(Funct3::Sw), machine.mmem);
+                    }
+                    break;
+                default:
+                    break;
             }
         } else {
             simrv::memory::MemoryAccess::storeFp(machine.memory_, *this, addr, ctx.fp_mem_wdata, ctx.funct3);
