@@ -244,7 +244,7 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                 " [s] Step | [b] Back | [o] Rollback | [n] Step 50 | [c] Continue | [q] Quit | [Tab] Layout ";
         } else {
             footer_text =
-                " [Ctrl-P] Pause | [Ctrl-Q] Quit | [Alt-L] Layout | [+/-] Speed ";
+                " [Ctrl-P] Pause | [Ctrl-Q] Quit | [Tab] Layout | [+/-] Speed ";
         }
         int footer_len = get_display_width(footer_text);
         int pad_foot = (width - 2) - footer_len;
