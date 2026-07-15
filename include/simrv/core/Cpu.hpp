@@ -92,6 +92,8 @@ struct ArchState {
     }
 };
 
+#include <deque>
+
 struct SoftTlbEntry {
     Address vpn = 0;          // Tag: vaddr >> 12
     Address paddr_base = 0;   // Physical base: paddr & ~0xFFF
@@ -99,6 +101,14 @@ struct SoftTlbEntry {
     Address asid = 0;         // current_asid tag
     PrivilegeLevel priv = kPrivUser; // privilege level under translation
     bool valid = false;
+};
+
+struct UndoStep {
+    simrv::core::ArchState state;
+    bool has_mem_write = false;
+    Address mem_addr = 0;
+    Word mem_old_data = 0;
+    Instruction mem_funct3 = 0;
 };
 
 class CPU {
@@ -262,6 +272,12 @@ class CPU {
     uint64_t e_icount{0};                                // Total instruction count
     Counter e_ccount = 0;                           // Compressed instructions executed
     std::array<uint64_t, isa::OperationIdCount> e_instmix{};  // Instruction-mix statistics
+
+    // ========== Reverse Stepping / Time-Travel Debugging ==========
+    std::deque<UndoStep> undo_stack;
+    void push_undo_state();
+    void record_mem_write(Address paddr, Word old_data, Instruction funct3);
+    auto perform_backstep() -> bool;
 };
 
 }  // namespace simrv::core

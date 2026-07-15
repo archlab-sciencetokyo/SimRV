@@ -78,12 +78,16 @@ class BaseCache {
         }
         return ~Address{0};
     }
+    [[nodiscard]] auto last_accessed_set() const -> uint32_t { return last_accessed_set_; }
+    [[nodiscard]] auto last_access_was_hit() const -> bool { return last_access_was_hit_; }
 
    protected:
     std::array<std::array<CacheLine, kWays>, kNumSets> sets_{};
     uint64_t access_tick_ = 0;
     uint64_t hits_ = 0;
     uint64_t misses_ = 0;
+    mutable uint32_t last_accessed_set_ = 0xFFFFFFFF;
+    mutable bool last_access_was_hit_ = false;
 
     [[nodiscard]] constexpr auto get_set_index(Address addr) const -> uint32_t {
         return (addr >> kLineShift) & kSetMask;

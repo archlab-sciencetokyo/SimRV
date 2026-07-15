@@ -43,6 +43,13 @@ git rebase origin/dev
 Before opening a PR, run at least:
 
 ```bash
-cmake --build --preset ninja-clang-release
-cmake --build --preset ninja-clang-release --target smoke-gate
+# RV64 Build and validation
+cmake --preset rv64-release
+cmake --build --preset rv64-release
+cmake --build --preset rv64-release --target smoke-gate
+
+# RV32 Build and validation
+cmake --preset rv32-release
+cmake --build --preset rv32-release
+cmake --build --preset rv32-release --target smoke-gate
 ```

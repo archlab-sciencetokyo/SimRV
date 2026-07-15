@@ -61,6 +61,7 @@ enum class Funct3 : uint8_t {
     Ld = 0x3,
     Lbu = 0x4,
     Lhu = 0x5,
+    Lwu = 0x6,
     Flw = 0x2,
     Fld = 0x3,
     Fsw = 0x2,

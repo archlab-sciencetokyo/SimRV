@@ -10,6 +10,8 @@
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
+#include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/tui/Tui.hpp"
 
@@ -119,6 +121,9 @@ void CPU::evaluate_timer_interrupt() {
 }
 
 void CPU::run_cycle(Machine& machine) {
+    if (machine.s_rollback_enabled) {
+        push_undo_state();
+    }
     uint32_t step_cycles = 1;
 
     if (machine.s_cycle_accurate) {
@@ -261,6 +266,9 @@ void CPU::record_trace_for_tui(Machine& machine) {
 }
 
 void CPU::run_cycle_baremetal(Machine& machine) {
+    if (machine.s_rollback_enabled) {
+        push_undo_state();
+    }
     pipeline_context.pending_exception = std::nullopt;
     pipeline_context.pending_tval = 0;
 
@@ -795,6 +803,11 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         pipeline_context.pending_exception = std::nullopt;
     }
 
+    // Update instruction-mix statistics for cached execution when profiling or TUI is active
+    if (simrv::compiler::unlikely(machine.s_use_mix || machine.s_tuimode)) {
+        e_instmix[static_cast<std::size_t>(op.op_id)]++;
+    }
+
     // 2. Fetch operands
     Register const rrs1 = state_.regs.read(op.rs1);
     Register const rrs2 = state_.regs.read(op.rs2);
@@ -849,6 +862,38 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
 
     // 4. Handle pending interrupts (same check as commit_stage)
     handle_cached_interrupts();
+}
+
+void CPU::push_undo_state() {
+    UndoStep step;
+    step.state = state_;
+    step.has_mem_write = false;
+    undo_stack.push_front(step);
+    if (undo_stack.size() > 1024) {
+        undo_stack.pop_back();
+    }
+}
+
+void CPU::record_mem_write(Address paddr, Word old_data, Instruction funct3) {
+    if (undo_stack.empty()) return;
+    auto& step = undo_stack.front();
+    step.has_mem_write = true;
+    step.mem_addr = paddr;
+    step.mem_old_data = old_data;
+    step.mem_funct3 = funct3;
+}
+
+auto CPU::perform_backstep() -> bool {
+    if (undo_stack.empty()) return false;
+    auto step = undo_stack.front();
+    undo_stack.pop_front();
+    if (step.has_mem_write && machine_) {
+        simrv::memory::ram_write_fast(step.mem_addr, step.mem_old_data, step.mem_funct3, machine_->memory_.mmu()->mmem());
+    }
+    state_ = step.state;
+    if (e_icount > 0) e_icount--;
+    soft_tlb_flush();
+    return true;
 }
 
 }  // namespace simrv::core

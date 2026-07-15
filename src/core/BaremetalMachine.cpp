@@ -50,6 +50,7 @@ void BaremetalMachine::run() {
             }
             tui->set_sim_thread_sleeping(false);
             cpu.run_cycle_baremetal(*this);
+            tui->on_cycle_completed();
 
             if (simrv::compiler::unlikely(tracer.fp_trace.is_open())) {
                 tracer.write_trace_snapshot();

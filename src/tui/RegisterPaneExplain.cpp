@@ -76,55 +76,64 @@ auto wrap_text(const std::string& text, int max_len) -> std::vector<std::string>
 
 auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width) -> std::vector<std::string> {
     std::vector<std::string> rows;
-    if (fmt == InstFormat::R) {
-        rows.push_back(format_to_width("   31     25 24   20 19   15 14 12 11    7 6       0", width));
-        rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
-        rows.push_back(format_to_width("  | funct7  |  rs2  |  rs1  |  f3 |  rd   | opcode  |", width));
-        rows.push_back(format_to_width(std::format("  | {:07b} | {:05b} | {:05b} | {:03b} | {:05b} | {:07b} |",
-            (ir_org >> 25) & 0x7F, (ir_org >> 20) & 0x1F, (ir_org >> 15) & 0x1F,
-            (ir_org >> 12) & 0x07, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
-        rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
-    } else if (fmt == InstFormat::I) {
-        rows.push_back(format_to_width("   31          20 19   15 14 12 11    7 6       0", width));
-        rows.push_back(format_to_width("  +--------------+-------+-----+-------+---------+", width));
-        rows.push_back(format_to_width("  |  immediate   |  rs1  |  f3 |  rd   | opcode  |", width));
-        rows.push_back(format_to_width(std::format("  | {:012b} | {:05b} | {:03b} | {:05b} | {:07b} |",
-            (ir_org >> 20) & 0xFFF, (ir_org >> 15) & 0x1F, (ir_org >> 12) & 0x07,
-            (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
-        rows.push_back(format_to_width("  +--------------+-------+-----+-------+---------+", width));
-    } else if (fmt == InstFormat::S) {
-        rows.push_back(format_to_width("   31     25 24   20 19   15 14 12 11    7 6       0", width));
-        rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
-        rows.push_back(format_to_width("  | imm11:5 |  rs2  |  rs1  |  f3 | imm4:0| opcode  |", width));
-        rows.push_back(format_to_width(std::format("  | {:07b} | {:05b} | {:05b} | {:03b} | {:05b} | {:07b} |",
-            (ir_org >> 25) & 0x7F, (ir_org >> 20) & 0x1F, (ir_org >> 15) & 0x1F,
-            (ir_org >> 12) & 0x07, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
-        rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
-    } else if (fmt == InstFormat::B) {
-        rows.push_back(format_to_width("   31     25 24   20 19   15 14 12 11    7 6       0", width));
-        rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
-        rows.push_back(format_to_width("  | imm12:5 |  rs2  |  rs1  |  f3 |imm11:1| opcode  |", width));
-        rows.push_back(format_to_width(std::format("  | {:07b} | {:05b} | {:05b} | {:03b} | {:05b} | {:07b} |",
-            (ir_org >> 25) & 0x7F, (ir_org >> 20) & 0x1F, (ir_org >> 15) & 0x1F,
-            (ir_org >> 12) & 0x07, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
-        rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
-    } else if (fmt == InstFormat::U || fmt == InstFormat::J) {
-        rows.push_back(format_to_width("   31                      12 11    7 6       0", width));
-        rows.push_back(format_to_width("  +--------------------------+-------+---------+", width));
-        rows.push_back(format_to_width("  |        immediate         |  rd   | opcode  |", width));
-        rows.push_back(format_to_width(std::format("  |   {:020b}   | {:05b} | {:07b} |",
-            (ir_org >> 12) & 0xFFFFF, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
-        rows.push_back(format_to_width("  +--------------------------+-------+---------+", width));
-    } else if (fmt == InstFormat::R4) {
-        rows.push_back(format_to_width("   31   27 2625      24   20 19   15 14 12 11    7 6       0", width));
-        rows.push_back(format_to_width("  +-------+----+----+-------+-------+-----+-------+---------+", width));
-        rows.push_back(format_to_width("  |  rs3  |fmt | .. |  rs2  |  rs1  |  f3 |  rd   | opcode  |", width));
-        rows.push_back(format_to_width(std::format("  | {:05b} | {:02b} | 00 | {:05b} | {:05b} | {:03b} | {:05b} | {:07b} |",
-            (ir_org >> 27) & 0x1F, (ir_org >> 25) & 0x03, (ir_org >> 20) & 0x1F, (ir_org >> 15) & 0x1F,
-            (ir_org >> 12) & 0x07, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
-        rows.push_back(format_to_width("  +-------+----+----+-------+-------+-----+-------+---------+", width));
-    } else {
-        rows.push_back(format_to_width("  (Unknown instruction format layout)", width));
+    switch (fmt) {
+        case InstFormat::R:
+            rows.push_back(format_to_width("   31     25 24   20 19   15 14 12 11    7 6       0", width));
+            rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
+            rows.push_back(format_to_width("  | funct7  |  rs2  |  rs1  |  f3 |  rd   | opcode  |", width));
+            rows.push_back(format_to_width(std::format("  | {:07b} | {:05b} | {:05b} | {:03b} | {:05b} | {:07b} |",
+                (ir_org >> 25) & 0x7F, (ir_org >> 20) & 0x1F, (ir_org >> 15) & 0x1F,
+                (ir_org >> 12) & 0x07, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
+            rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
+            break;
+        case InstFormat::I:
+            rows.push_back(format_to_width("   31          20 19   15 14 12 11    7 6       0", width));
+            rows.push_back(format_to_width("  +--------------+-------+-----+-------+---------+", width));
+            rows.push_back(format_to_width("  |  immediate   |  rs1  |  f3 |  rd   | opcode  |", width));
+            rows.push_back(format_to_width(std::format("  | {:012b} | {:05b} | {:03b} | {:05b} | {:07b} |",
+                (ir_org >> 20) & 0xFFF, (ir_org >> 15) & 0x1F, (ir_org >> 12) & 0x07,
+                (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
+            rows.push_back(format_to_width("  +--------------+-------+-----+-------+---------+", width));
+            break;
+        case InstFormat::S:
+            rows.push_back(format_to_width("   31     25 24   20 19   15 14 12 11    7 6       0", width));
+            rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
+            rows.push_back(format_to_width("  | imm11:5 |  rs2  |  rs1  |  f3 | imm4:0| opcode  |", width));
+            rows.push_back(format_to_width(std::format("  | {:07b} | {:05b} | {:05b} | {:03b} | {:05b} | {:07b} |",
+                (ir_org >> 25) & 0x7F, (ir_org >> 20) & 0x1F, (ir_org >> 15) & 0x1F,
+                (ir_org >> 12) & 0x07, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
+            rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
+            break;
+        case InstFormat::B:
+            rows.push_back(format_to_width("   31     25 24   20 19   15 14 12 11    7 6       0", width));
+            rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
+            rows.push_back(format_to_width("  | imm12:5 |  rs2  |  rs1  |  f3 |imm11:1| opcode  |", width));
+            rows.push_back(format_to_width(std::format("  | {:07b} | {:05b} | {:05b} | {:03b} | {:05b} | {:07b} |",
+                (ir_org >> 25) & 0x7F, (ir_org >> 20) & 0x1F, (ir_org >> 15) & 0x1F,
+                (ir_org >> 12) & 0x07, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
+            rows.push_back(format_to_width("  +---------+-------+-------+-----+-------+---------+", width));
+            break;
+        case InstFormat::U:
+        case InstFormat::J:
+            rows.push_back(format_to_width("   31                      12 11    7 6       0", width));
+            rows.push_back(format_to_width("  +--------------------------+-------+---------+", width));
+            rows.push_back(format_to_width("  |        immediate         |  rd   | opcode  |", width));
+            rows.push_back(format_to_width(std::format("  |   {:020b}   | {:05b} | {:07b} |",
+                (ir_org >> 12) & 0xFFFFF, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
+            rows.push_back(format_to_width("  +--------------------------+-------+---------+", width));
+            break;
+        case InstFormat::R4:
+            rows.push_back(format_to_width("   31   27 2625      24   20 19   15 14 12 11    7 6       0", width));
+            rows.push_back(format_to_width("  +-------+----+----+-------+-------+-----+-------+---------+", width));
+            rows.push_back(format_to_width("  |  rs3  |fmt | .. |  rs2  |  rs1  |  f3 |  rd   | opcode  |", width));
+            rows.push_back(format_to_width(std::format("  | {:05b} | {:02b} | 00 | {:05b} | {:05b} | {:03b} | {:05b} | {:07b} |",
+                (ir_org >> 27) & 0x1F, (ir_org >> 25) & 0x03, (ir_org >> 20) & 0x1F, (ir_org >> 15) & 0x1F,
+                (ir_org >> 12) & 0x07, (ir_org >> 7) & 0x1F, ir_org & 0x7F), width));
+            rows.push_back(format_to_width("  +-------+----+----+-------+-------+-----+-------+---------+", width));
+            break;
+        default:
+            rows.push_back(format_to_width("  (Unknown instruction format layout)", width));
+            break;
     }
     return rows;
 }
@@ -291,9 +300,9 @@ auto format_assembly_vector(
 ) -> std::string {
     auto const op_id = ctx.op_id;
     
-    auto vr_name = [](RegId r) { return std::format("v{}", std::to_underlying(r)); };
-    auto gpr_name = [](RegId r) { return kRegNames.at(std::to_underlying(r)); };
-    auto fpr_name = [](RegId r) { return kFpRegNames.at(std::to_underlying(r)); };
+    auto vr_name = [](RegId r) -> std::string { return std::format("v{}", std::to_underlying(r)); };
+    auto gpr_name = [](RegId r) -> std::string { return {kRegNames.at(std::to_underlying(r))}; };
+    auto fpr_name = [](RegId r) -> std::string { return {kFpRegNames.at(std::to_underlying(r))}; };
     
     std::string rd = vr_name(ctx.rd);
     std::string rs1 = gpr_name(ctx.rs1);

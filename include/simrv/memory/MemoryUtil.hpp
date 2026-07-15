@@ -111,7 +111,7 @@ inline auto host_read_fast(const Byte* host_ptr, Instruction funct3) -> Word {
             std::memcpy(&val, host_ptr, sizeof(val));
             return static_cast<Word>(val);
         }
-        case static_cast<isa::Funct3>(6): {
+        case isa::Funct3::Lwu: {
             uint32_t val = 0;
             std::memcpy(&val, host_ptr, sizeof(val));
             return static_cast<Word>(val);
@@ -222,6 +222,27 @@ inline auto ram_read_fast(Address addr, Instruction funct3, Byte* ram) -> Word {
                 return static_cast<Word>(val);
             } else {
                 // In RV32, LD is not defined; treat as reserved
+                return 0;
+            }
+        }
+        // RV64 LWU (load word unsigned) instruction
+        case static_cast<Instruction>(isa::Funct3::Lwu): {
+            if constexpr (simrv::xlen::kIsXLen64) {
+                uint32_t val = 0;
+                if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 3))) {
+                    std::memcpy(&val, ram + masked, sizeof(val));
+                } else {
+                    const Address m1 = (addr + 1) & simrv::memory::kDramMask;
+                    const Address m2 = (addr + 2) & simrv::memory::kDramMask;
+                    const Address m3 = (addr + 3) & simrv::memory::kDramMask;
+                    val = static_cast<uint32_t>(std::to_integer<uint8_t>(ram[masked])) |
+                          (static_cast<uint32_t>(std::to_integer<uint8_t>(ram[m1])) << 8) |
+                          (static_cast<uint32_t>(std::to_integer<uint8_t>(ram[m2])) << 16) |
+                          (static_cast<uint32_t>(std::to_integer<uint8_t>(ram[m3])) << 24);
+                }
+                return static_cast<Word>(val);
+            } else {
+                // In RV32, LWU is not defined; treat as reserved
                 return 0;
             }
         }

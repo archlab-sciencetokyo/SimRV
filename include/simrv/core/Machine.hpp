@@ -32,6 +32,7 @@ class InputDevice;
 
 namespace simrv::tui {
 class Tui;
+class RegisterPane;
 }
 
 namespace simrv::core {
@@ -91,6 +92,7 @@ class Machine {
     bool s_high_performance = true; // Enable high-performance optimized simulation mode
     bool s_mmu_ever_used = false;   // Latched true the first time satp enables translation
     bool s_multithreaded = false;   // Run simulation in a background thread
+    bool s_rollback_enabled = false; // Enable instruction rollback tracking
     double s_mouse_sensitivity = 1.0; // Mouse relative sensitivity factor
 
     // ========== Debug / Co-Simulation Flags ==========
@@ -154,6 +156,7 @@ class Machine {
     friend class simrv::execute::ExecuteUnit;
     friend class simrv::device::Uart;
     friend class simrv::tui::Tui;
+    friend class simrv::tui::RegisterPane;
     simrv::memory::MemorySubsystem memory_;
     /// Perform per-cycle initialization before CPU stage execution.
     virtual void prepare_cycle() {}

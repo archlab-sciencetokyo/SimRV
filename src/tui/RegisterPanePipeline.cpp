@@ -108,6 +108,44 @@ auto get_btb_string(const simrv::pipeline::PipelineSim& ps, Register pc) -> std:
     return "Miss";
 }
 
+auto get_active_forwarding_paths(const simrv::pipeline::PipelineSim& ps) -> std::vector<std::string> {
+    std::vector<std::string> paths;
+    if (!ps.config.enable_forwarding) return paths;
+
+    auto d = ps.d_reg();
+    if (!d.valid) return paths;
+
+    auto e = ps.e_reg();
+    auto m = ps.m_reg();
+    auto w = ps.w_reg();
+
+    auto check_src = [&](RegId rs, const std::string& rs_name) -> void {
+        if (rs == static_cast<RegId>(0)) return;
+
+        if (e.valid && e.writes_reg && e.rd == rs) {
+            if (e.remaining_latency == 0) {
+                paths.push_back(std::format("EX->ID({})", rs_name));
+                return;
+            }
+        }
+        if (m.valid && m.writes_reg && m.rd == rs) {
+            if (m.remaining_latency == 0) {
+                paths.push_back(std::format("MEM->ID({})", rs_name));
+                return;
+            }
+        }
+        if (w.valid && w.writes_reg && w.rd == rs) {
+            paths.push_back(std::format("WB->ID({})", rs_name));
+            return;
+        }
+    };
+
+    check_src(d.rs1, "rs1");
+    check_src(d.rs2, "rs2");
+
+    return paths;
+}
+
 } // namespace
 
 auto RegisterPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
@@ -126,7 +164,7 @@ auto RegisterPane::render_pipeline_stages_cycle_accurate(const simrv::core::CPU&
     if (val >= 0 && val <= 5) {
         return render_pipeline_stages_ca_core(cpu, val, col_width + right_width);
     }
-    if (val >= 6 && val <= 9) {
+    if (val >= 6 && val <= 10) {
         return render_pipeline_stages_ca_hazards(cpu, val, col_width, right_width);
     }
     return render_pipeline_stages_ca_pred(cpu, val, col_width + right_width);
@@ -185,6 +223,22 @@ auto RegisterPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu
             return render_pair("TLB Stall", tlb_status, tlb_color,
                                "Ctrl St", ctrl_status, ctrl_color,
                                col_width, right_width, 10);
+        case 10:
+            {
+                auto paths = get_active_forwarding_paths(ps);
+                std::string paths_str = "None";
+                if (!paths.empty()) {
+                    paths_str = "";
+                    for (size_t i = 0; i < paths.size(); ++i) {
+                        if (i > 0) paths_str += ", ";
+                        paths_str += paths[i];
+                    }
+                }
+                const char* paths_color = paths.empty() ? kThemeVal : kThemeMint;
+                return render_pair("Active Fwd", paths_str, paths_color,
+                                   "Fwd Mode", ps.config.enable_forwarding ? "Enabled" : "Disabled", kThemeVal,
+                                   col_width, right_width, 10);
+            }
         default:
             return format_to_width("", width);
     }
@@ -196,21 +250,21 @@ auto RegisterPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, i
     auto& ps = cpu.pipeline_sim;
 
     switch (stage_idx) {
-        case 10:
-            return section_line("Branch Prediction & BTB", width);
         case 11:
+            return section_line("Branch Prediction & BTB", width);
+        case 12:
             {
                 Register pc = get_active_branch_pc(ps);
                 std::string bht_str = get_bht_string(ps, pc);
                 return format_to_width(std::format("  {}BHT State\033[0m : {}{}\033[0m", kThemeText, kThemeVal, bht_str), width);
             }
-        case 12:
+        case 13:
             {
                 Register pc = get_active_branch_pc(ps);
                 std::string btb_str = get_btb_string(ps, pc);
                 return format_to_width(std::format("  {}BTB State\033[0m : {}{}\033[0m", kThemeText, kThemeVal, btb_str), width);
             }
-        case 13:
+        case 14:
             return section_line("End Pipeline Visualizer", width);
         default:
             return format_to_width("", width);
@@ -541,6 +595,21 @@ auto RegisterPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int log
 
 auto RegisterPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
     int const width = col_width + right_width;
+    if (!machine_.s_cycle_accurate) {
+        if (logical_row == 0) {
+            return section_line("L1 Cache Status", width);
+        }
+        if (logical_row == 2) {
+            std::string msg = "  \033[1;38;5;203mCache simulation is disabled in IA mode.\033[0m";
+            return format_to_width(msg, width);
+        }
+        if (logical_row == 3) {
+            std::string msg = "  Run SimRV with cycle-accurate mode (-c) to enable.";
+            return format_to_width(msg, width);
+        }
+        return format_to_width("", width);
+    }
+
     auto const& ic = cpu.icache;
     auto const& dc = cpu.dcache;
 
@@ -611,10 +680,32 @@ auto RegisterPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_r
                 int const base_set = (logical_row - 7) * 2;
                 
                 auto make_set_str = [](auto const& cache, int set_idx) -> std::string {
-                    std::string s = std::format("Set {:02d}: [", set_idx);
+                    bool const is_last = (static_cast<uint32_t>(set_idx) == cache.last_accessed_set());
+                    bool const was_hit = cache.last_access_was_hit();
+                    
+                    std::string set_prefix;
+                    if (is_last) {
+                        if (was_hit) {
+                            set_prefix = std::format("\033[1;38;5;121m{:02d}:\033[0m[", set_idx);
+                        } else {
+                            set_prefix = std::format("\033[1;38;5;203m{:02d}:\033[0m[", set_idx);
+                        }
+                    } else {
+                        set_prefix = std::format("{:02d}:[", set_idx);
+                    }
+                    
+                    std::string s = set_prefix;
                     for (uint32_t w = 0; w < 4; ++w) {
                         if (cache.is_line_valid(set_idx, w)) {
-                            s += "\033[1;32m■\033[0m";
+                            if (is_last) {
+                                if (was_hit) {
+                                    s += "\033[1;32m#\033[0m";
+                                } else {
+                                    s += "\033[1;31m#\033[0m";
+                                }
+                            } else {
+                                s += "\033[32m#\033[0m";
+                            }
                         } else {
                             s += "\033[38;5;244m.\033[0m";
                         }
@@ -628,13 +719,13 @@ auto RegisterPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_r
                 std::string dc_left = make_set_str(dc, base_set);
                 std::string dc_right = make_set_str(dc, base_set + 1);
 
-                std::string left_col = std::format("  IC {} {}", ic_left, ic_right);
-                std::string right_col = std::format("  DC {} {}", dc_left, dc_right);
+                std::string left_col = std::format(" IC {} {}", ic_left, ic_right);
+                std::string right_col = std::format(" DC {} {}", dc_left, dc_right);
 
                 return format_to_width(left_col, col_width) + format_to_width(right_col, right_width);
             }
         case 15:
-            return section_line("Occupancy Block: ■ (Valid) | . (Empty)", width);
+            return section_line("Occupancy: # (Valid) | . (Empty) | Access: Set/Way (Green: Hit, Red: Miss)", width);
         default:
             return format_to_width("", width);
     }

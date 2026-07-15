@@ -4,7 +4,7 @@ project(SimRV LANGUAGES CXX)
 
 enable_testing()
 
-set(SIMRV_VERSION "2.0.0-beta.16")
+set(SIMRV_VERSION "2.0.0-beta.17")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -123,6 +123,7 @@ add_executable(SimRV
   src/tui/RegisterPanePipeline.cpp
   src/tui/RegisterPaneStats.cpp
   src/tui/RegisterPaneExplain.cpp
+  src/tui/RegisterPaneStack.cpp
   src/tui/ConsolePane.cpp
   src/tui/StatusBar.cpp
   src/debug/GdbStub.cpp

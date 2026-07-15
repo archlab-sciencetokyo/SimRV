@@ -247,11 +247,15 @@ Description (Behavior):
 | `P` | Pause / Resume simulation |
 | `S` / `Space` | Single step one instruction |
 | `E` | Toggle EXPLAIN pane |
-| `R` | Cycle register page (GPR → FPR → PIPELINE → EXPLAIN) |
+| `R` | Cycle register page (GPR → FPR → PIPELINE) |
 | `L` | Cycle layout (Split → Full Console → Full Register) |
 | `H` | Toggle High-Contrast theme |
 | `T` | Toggle Sakura theme |
 | `V` | Toggle background instruction tracing |
 | `[` / `]` | Adjust left pane width |
 | `↑` / `↓` | Scroll console |
+| `B` | Step backward one instruction (requires Rollback to be ON) |
+| `O` | Toggle instruction rollback tracking (ON/OFF) |
+| `N` | Run next 50 instructions and pause |
+| `+` / `-` | Increase/decrease stepping speed (slow-mo execution) |
 | `Q` / `Ctrl-C` | Quit simulator |

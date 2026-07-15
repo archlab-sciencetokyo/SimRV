@@ -118,7 +118,7 @@ The TUI provides an ANSI-based split-screen monitor during simulation.
 
 **Layouts:** Split (default), FullConsole, FullRegister — cycled with `L`.
 
-**Register pages:** GPR → FPR → PIPELINE → EXPLAIN, cycled with `R`; `E` toggles EXPLAIN directly.
+**Register pages:** GPR → FPR → PIPELINE, cycled with `R`; `E` toggles EXPLAIN directly.
 
 **Themes** (toggled with `H`/`T`):
 - `Adaptive` (default): Standard ANSI SGR codes, adapts to terminal theme.

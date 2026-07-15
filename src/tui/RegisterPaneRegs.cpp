@@ -126,12 +126,19 @@ auto RegisterPane::render_registers_or_pipeline(const simrv::core::CPU& cpu, con
         }
     } else {
         if (logical_row >= 0 && logical_row < 16) {
-            if (page_ == TuiRegPage::GPR || page_ == TuiRegPage::FPR || page_ == TuiRegPage::VEC) {
-                return render_registers_double_column(st, logical_row, col_width, right_width);
-            } else if (page_ == TuiRegPage::PIPELINE) {
-                return render_pipeline_stages(cpu, logical_row, col_width, right_width);
-            } else if (page_ == TuiRegPage::CACHE) {
-                return render_cache_stats(cpu, logical_row, col_width, right_width);
+            switch (page_) {
+                case TuiRegPage::GPR:
+                case TuiRegPage::FPR:
+                case TuiRegPage::VEC:
+                    return render_registers_double_column(st, logical_row, col_width, right_width);
+                case TuiRegPage::PIPELINE:
+                    return render_pipeline_stages(cpu, logical_row, col_width, right_width);
+                case TuiRegPage::CACHE:
+                    return render_cache_stats(cpu, logical_row, col_width, right_width);
+                case TuiRegPage::STACK:
+                    return render_stack_frame(cpu, logical_row, col_width, right_width);
+                default:
+                    break;
             }
         }
     }

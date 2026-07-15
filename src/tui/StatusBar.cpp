@@ -5,6 +5,7 @@
 #include "simrv/tui/StatusBar.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/util/FormatUtil.hpp"
+#include "simrv/tui/Tui.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include <format>
@@ -39,18 +40,15 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             status_badge = "\033[1;41;37m TRAPPED \033[0m";
         }
         std::string page_badge;
-        if (active_page_ == TuiRegPage::GPR) {
-            page_badge = "GPR";
-        } else if (active_page_ == TuiRegPage::FPR) {
-            page_badge = "FPR";
-        } else if (active_page_ == TuiRegPage::VEC) {
-            page_badge = "VEC";
-        } else if (active_page_ == TuiRegPage::CACHE) {
-            page_badge = "CCHE";
-        } else if (active_page_ == TuiRegPage::EXPLAIN) {
-            page_badge = "EXPL";
-        } else {
-            page_badge = "PIPE";
+        switch (active_page_) {
+            case TuiRegPage::GPR:      page_badge = "GPR"; break;
+            case TuiRegPage::FPR:      page_badge = "FPR"; break;
+            case TuiRegPage::VEC:      page_badge = "VEC"; break;
+            case TuiRegPage::CACHE:    page_badge = "CCHE"; break;
+            case TuiRegPage::EXPLAIN:  page_badge = "EXPL"; break;
+            case TuiRegPage::STACK:    page_badge = "STCK"; break;
+            case TuiRegPage::PIPELINE:
+            default:                   page_badge = "PIPE"; break;
         }
         int target_width = layout_ == TuiLayout::Split ? left_width_ : width - 2;
         std::string left_render;
@@ -94,59 +92,83 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                 speed_str = std::format("{:.1f} KIPS", static_cast<double>(kips_));
             }
 
+            uint64_t budget = 0;
+            uint64_t delay = 0;
+            if (machine_.tui) {
+                budget = machine_.tui->step_budget_.load(std::memory_order_relaxed);
+                delay = machine_.tui->step_delay_us_.load(std::memory_order_relaxed);
+            }
+            std::string dbg_info;
+            if (machine_.s_rollback_enabled) {
+                dbg_info += "Rollback: ON | ";
+            }
+            if (budget > 0) {
+                dbg_info += std::format("Steps: {} | ", budget);
+            }
+            if (delay > 0) {
+                double hz = 1000000.0 / static_cast<double>(delay);
+                if (hz >= 1000.0) {
+                    dbg_info += std::format("Speed: {:.0f}kHz | ", hz / 1000.0);
+                } else {
+                    dbg_info += std::format("Speed: {:.1f}Hz | ", hz);
+                }
+            } else if (paused_) {
+                dbg_info += "Speed: Max | ";
+            }
+
             int target_width_right = layout_ == TuiLayout::Split ? right_width_ : width - 2;
             
             if (paused_) {
                 if (target_width_right >= 55) {
                     if (machine_.s_cycle_accurate) {
-                        right_text = std::format("Cycles: {} | Insns: {} | CPI: {:.2f}",
-                                                 simrv::util::format_with_commas(cycles), simrv::util::format_with_commas(icount), cpi);
+                        right_text = std::format("{}Cycles: {} | Insns: {} | CPI: {:.2f}",
+                                                 dbg_info, simrv::util::format_with_commas(cycles), simrv::util::format_with_commas(icount), cpi);
                     } else {
-                        right_text = std::format("Insns: {}",
-                                                 simrv::util::format_with_commas(icount));
+                        right_text = std::format("{}Insns: {}",
+                                                 dbg_info, simrv::util::format_with_commas(icount));
                     }
                 } else {
                     if (machine_.s_cycle_accurate) {
-                        right_text = std::format("C: {} | I: {}",
-                                                 simrv::util::format_with_commas(cycles), simrv::util::format_with_commas(icount));
+                        right_text = std::format("{}C: {} | I: {}",
+                                                 dbg_info, simrv::util::format_with_commas(cycles), simrv::util::format_with_commas(icount));
                     } else {
-                        right_text = std::format("I: {}",
-                                                 simrv::util::format_with_commas(icount));
+                        right_text = std::format("{}I: {}",
+                                                 dbg_info, simrv::util::format_with_commas(icount));
                     }
                 }
             } else {
                 if (target_width_right >= 75) {
                     if (machine_.s_cycle_accurate) {
-                        right_text = std::format("Cycles: {} | Insns: {} | CPI: {:.2f} | Speed: {}",
-                                                 simrv::util::format_scaled(cycles), simrv::util::format_scaled(icount),
+                        right_text = std::format("{}Cycles: {} | Insns: {} | CPI: {:.2f} | Speed: {}",
+                                                 dbg_info, simrv::util::format_scaled(cycles), simrv::util::format_scaled(icount),
                                                  cpi, speed_str);
                     } else {
-                        right_text = std::format("Insns: {} | Speed: {}",
-                                                 simrv::util::format_scaled(icount), speed_str);
+                        right_text = std::format("{}Insns: {} | Speed: {}",
+                                                 dbg_info, simrv::util::format_scaled(icount), speed_str);
                     }
                 } else if (target_width_right >= 55) {
                     if (machine_.s_cycle_accurate) {
-                        right_text = std::format("Cycles: {} | Insns: {} | Speed: {}",
-                                                 simrv::util::format_scaled(cycles), simrv::util::format_scaled(icount), speed_str);
+                        right_text = std::format("{}Cycles: {} | Insns: {} | Speed: {}",
+                                                 dbg_info, simrv::util::format_scaled(cycles), simrv::util::format_scaled(icount), speed_str);
                     } else {
-                        right_text = std::format("Insns: {} | Speed: {}",
-                                                 simrv::util::format_scaled(icount), speed_str);
+                        right_text = std::format("{}Insns: {} | Speed: {}",
+                                                 dbg_info, simrv::util::format_scaled(icount), speed_str);
                     }
                 } else if (target_width_right >= 40) {
                     if (machine_.s_cycle_accurate) {
-                        right_text = std::format("C: {} | I: {} | Speed: {}",
-                                                 simrv::util::format_scaled(cycles), simrv::util::format_scaled(icount), speed_str);
+                        right_text = std::format("{}C: {} | I: {} | Speed: {}",
+                                                 dbg_info, simrv::util::format_scaled(cycles), simrv::util::format_scaled(icount), speed_str);
                     } else {
-                        right_text = std::format("I: {} | Speed: {}",
-                                                 simrv::util::format_scaled(icount), speed_str);
+                        right_text = std::format("{}I: {} | Speed: {}",
+                                                 dbg_info, simrv::util::format_scaled(icount), speed_str);
                     }
                 } else {
                     if (machine_.s_cycle_accurate) {
-                        right_text = std::format("C: {} | I: {}",
-                                                 simrv::util::format_scaled(cycles), simrv::util::format_scaled(icount));
+                        right_text = std::format("{}C: {} | I: {}",
+                                                 dbg_info, simrv::util::format_scaled(cycles), simrv::util::format_scaled(icount));
                     } else {
-                        right_text = std::format("I: {}",
-                                                 simrv::util::format_scaled(icount));
+                        right_text = std::format("{}I: {}",
+                                                 dbg_info, simrv::util::format_scaled(icount));
                     }
                 }
             }
@@ -156,14 +178,20 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         std::string right_render;
 
         std::string mode_label;
-        if (right_panel_mode_ == TuiRightPanelMode::Terminal) {
-            mode_label = trace_enabled_ ? "Terminal [Trace ON]" : "Terminal";
-        } else if (right_panel_mode_ == TuiRightPanelMode::Log) {
-            mode_label = trace_enabled_ ? "System Log [Trace ON]" : "System Log";
-        } else if (right_panel_mode_ == TuiRightPanelMode::LiveTrace) {
-            mode_label = "Live Trace";
-        } else {
-            mode_label = "Display";
+        switch (right_panel_mode_) {
+            case TuiRightPanelMode::Terminal:
+                mode_label = trace_enabled_ ? "Terminal [Trace ON]" : "Terminal";
+                break;
+            case TuiRightPanelMode::Log:
+                mode_label = trace_enabled_ ? "System Log [Trace ON]" : "System Log";
+                break;
+            case TuiRightPanelMode::LiveTrace:
+                mode_label = "Live Trace";
+                break;
+            case TuiRightPanelMode::Display:
+            default:
+                mode_label = "Display";
+                break;
         }
         std::string mode_prefix = std::format("{}[{}]\033[0m", kThemeSky, mode_label);
         int mode_len = get_display_width(mode_prefix);
@@ -213,10 +241,10 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         std::string footer_text;
         if (paused_) {
             footer_text =
-                " [s] Step | [c] Continue | [q] Quit | [r] Cycle Regs | [Tab] Cycle Layout | [u/d] Scroll | [v] Trace | [h] Contrast ";
+                " [s] Step | [b] Back | [o] Rollback | [n] Step 50 | [c] Continue | [q] Quit | [Tab] Layout ";
         } else {
             footer_text =
-                " [Ctrl-P] Pause | [Ctrl-Q] Quit | [Alt-L] Layout | [Alt-R] Regs | [Alt-U/D] Scroll | [Alt-H] Contrast ";
+                " [Ctrl-P] Pause | [Ctrl-Q] Quit | [Alt-L] Layout | [+/-] Speed ";
         }
         int footer_len = get_display_width(footer_text);
         int pad_foot = (width - 2) - footer_len;

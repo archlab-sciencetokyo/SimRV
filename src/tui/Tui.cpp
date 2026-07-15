@@ -624,26 +624,37 @@ void Tui::cycle_reg_page() {
     bool has_d = (machine_.cpu.state().misa & (1ULL << ('d' - 'a'))) != 0;
     bool has_v = (machine_.cpu.state().misa & (1ULL << ('v' - 'a'))) != 0;
     TuiRegPage rp = reg_pane_->get_page();
-    if (rp == TuiRegPage::GPR) {
-        if (has_f || has_d)
-            rp = TuiRegPage::FPR;
-        else if (has_v)
-            rp = TuiRegPage::VEC;
-        else
+    switch (rp) {
+        case TuiRegPage::GPR:
+            if (has_f || has_d)
+                rp = TuiRegPage::FPR;
+            else if (has_v)
+                rp = TuiRegPage::VEC;
+            else
+                rp = TuiRegPage::PIPELINE;
+            break;
+        case TuiRegPage::FPR:
+            if (has_v)
+                rp = TuiRegPage::VEC;
+            else
+                rp = TuiRegPage::PIPELINE;
+            break;
+        case TuiRegPage::VEC:
             rp = TuiRegPage::PIPELINE;
-    } else if (rp == TuiRegPage::FPR) {
-        if (has_v)
-            rp = TuiRegPage::VEC;
-        else
-            rp = TuiRegPage::PIPELINE;
-    } else if (rp == TuiRegPage::VEC) {
-        rp = TuiRegPage::PIPELINE;
-    } else if (rp == TuiRegPage::PIPELINE) {
-        rp = TuiRegPage::CACHE;
-    } else if (rp == TuiRegPage::CACHE) {
-        rp = TuiRegPage::EXPLAIN;
-    } else {
-        rp = TuiRegPage::GPR;
+            break;
+        case TuiRegPage::PIPELINE:
+            if (machine_.s_cycle_accurate) {
+                rp = TuiRegPage::CACHE;
+            } else {
+                rp = TuiRegPage::STACK;
+            }
+            break;
+        case TuiRegPage::CACHE:
+            rp = TuiRegPage::STACK;
+            break;
+        default:
+            rp = TuiRegPage::GPR;
+            break;
     }
     reg_pane_->set_page(rp);
     render(true);
@@ -689,14 +700,20 @@ void Tui::toggle_sakura_theme() {
 void Tui::cycle_right_panel_mode() {
     TuiRightPanelMode current = right_panel_mode_.load(std::memory_order_relaxed);
     TuiRightPanelMode next = TuiRightPanelMode::Terminal;
-    if (current == TuiRightPanelMode::Terminal) {
-        next = TuiRightPanelMode::Log;
-    } else if (current == TuiRightPanelMode::Log) {
-        next = TuiRightPanelMode::LiveTrace;
-    } else if (current == TuiRightPanelMode::LiveTrace) {
-        next = TuiRightPanelMode::Display;
-    } else {
-        next = TuiRightPanelMode::Terminal;
+    switch (current) {
+        case TuiRightPanelMode::Terminal:
+            next = TuiRightPanelMode::Log;
+            break;
+        case TuiRightPanelMode::Log:
+            next = TuiRightPanelMode::LiveTrace;
+            break;
+        case TuiRightPanelMode::LiveTrace:
+            next = TuiRightPanelMode::Display;
+            break;
+        case TuiRightPanelMode::Display:
+        default:
+            next = TuiRightPanelMode::Terminal;
+            break;
     }
     right_panel_mode_.store(next, std::memory_order_relaxed);
     update_trace_active_cache();
@@ -1018,6 +1035,46 @@ void Tui::pause_loop() {
                 scroll(5);
             } else if (key == simrv::tui::TuiKey::d || key == simrv::tui::TuiKey::D) {
                 scroll(-5);
+            } else if (key == simrv::tui::TuiKey::b || key == simrv::tui::TuiKey::B) {
+                if (machine_.cpu.perform_backstep()) {
+                    update_cache();
+                    render(true);
+                }
+            } else if (key == simrv::tui::TuiKey::n || key == simrv::tui::TuiKey::N) {
+                if (!machine_.is_shutdown_) {
+                    step_budget_.store(50, std::memory_order_relaxed);
+                    tui_loop_paused_ = false;
+                }
+            } else if (key == simrv::tui::TuiKey::o || key == simrv::tui::TuiKey::O) {
+                machine_.s_rollback_enabled = !machine_.s_rollback_enabled;
+                if (!machine_.s_rollback_enabled) {
+                    machine_.cpu.undo_stack.clear();
+                }
+                render(true);
+            } else if (key == simrv::tui::TuiKey::Plus || key == simrv::tui::TuiKey::Equal) {
+                uint64_t cur_delay = step_delay_us_.load(std::memory_order_relaxed);
+                if (cur_delay >= 1000000) {
+                    step_delay_us_.store(100000, std::memory_order_relaxed);
+                } else if (cur_delay >= 100000) {
+                    step_delay_us_.store(10000, std::memory_order_relaxed);
+                } else if (cur_delay >= 10000) {
+                    step_delay_us_.store(1000, std::memory_order_relaxed);
+                } else {
+                    step_delay_us_.store(0, std::memory_order_relaxed);
+                }
+                render(true);
+            } else if (key == simrv::tui::TuiKey::Minus) {
+                uint64_t cur_delay = step_delay_us_.load(std::memory_order_relaxed);
+                if (cur_delay == 0) {
+                    step_delay_us_.store(1000, std::memory_order_relaxed);
+                } else if (cur_delay <= 1000) {
+                    step_delay_us_.store(10000, std::memory_order_relaxed);
+                } else if (cur_delay <= 10000) {
+                    step_delay_us_.store(100000, std::memory_order_relaxed);
+                } else if (cur_delay <= 100000) {
+                    step_delay_us_.store(1000000, std::memory_order_relaxed);
+                }
+                render(true);
             } else if (key == simrv::tui::TuiKey::s || key == simrv::tui::TuiKey::S || key == simrv::tui::TuiKey::Space) {
                 if (!machine_.is_shutdown_) {
                     update_cache();
@@ -1207,6 +1264,22 @@ auto Tui::parse_sgr_mouse(const std::string& seq, int& b, int& x, int& y) -> boo
     }
 
     return true;
+}
+
+void Tui::on_cycle_completed() {
+    uint64_t budget = step_budget_.load(std::memory_order_relaxed);
+    while (budget > 0) {
+        if (step_budget_.compare_exchange_weak(budget, budget - 1, std::memory_order_relaxed)) {
+            if (budget == 1) {
+                pause_loop();
+            }
+            break;
+        }
+    }
+    uint64_t delay = step_delay_us_.load(std::memory_order_relaxed);
+    if (delay > 0) {
+        std::this_thread::sleep_for(std::chrono::microseconds(delay));
+    }
 }
 
 }  // namespace simrv::tui

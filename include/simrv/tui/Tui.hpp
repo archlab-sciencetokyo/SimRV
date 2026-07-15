@@ -26,22 +26,23 @@ class Machine;
 namespace simrv::tui {
 extern volatile std::sig_atomic_t g_resized;
 
-enum class TuiLayout {
+enum class TuiLayout : uint8_t {
     Split,
     FullConsole,
     FullRegister
 };
 
-enum class TuiRegPage {
+enum class TuiRegPage : uint8_t {
     GPR,
     FPR,
     VEC,
     PIPELINE,
     CACHE,
-    EXPLAIN
+    EXPLAIN,
+    STACK
 };
 
-enum class TuiRightPanelMode {
+enum class TuiRightPanelMode : uint8_t {
     Terminal,
     Log,
     LiveTrace,
@@ -77,6 +78,10 @@ class Tui {
     void set_sim_thread_sleeping(bool s) { sim_thread_is_sleeping_.store(s, std::memory_order_relaxed); }
     [[nodiscard]] auto is_sim_thread_sleeping() const -> bool { return sim_thread_is_sleeping_.load(std::memory_order_relaxed); }
     void update_cache();
+    void on_cycle_completed();
+
+    std::atomic<uint64_t> step_budget_{0};
+    std::atomic<uint64_t> step_delay_us_{0};
 
     void set_status_override(const std::string& status) { status_override_ = status; }
     void clear_status_override() { status_override_.clear(); }

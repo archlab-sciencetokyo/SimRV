@@ -50,6 +50,9 @@ void OSMachine::run() {
             prepare_cycle();
             cpu.run_cycle(*this);
             finalize_cycle();
+            if (s_tuimode && tui) {
+                tui->on_cycle_completed();
+            }
 
             if (gdb_stub && gdb_stub->is_connected()) {
                 const bool hit_ebreak =

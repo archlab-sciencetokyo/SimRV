@@ -51,11 +51,19 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     const bool translation_enabled = (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(cpu.state().satp));
 
     if (cpu.machine_->s_high_performance && !crosses_page) {
-        size_t tlb_idx = (v_addr >> 12) & 2047;
-        const auto& entry = cpu.soft_tlb_read[tlb_idx];
-        if (entry.valid && entry.vpn == (v_addr >> 12) && entry.priv == eff_priv && 
-            entry.asid == (translation_enabled ? current_asid : 0xFFFF'FFFF'FFFF'FFFFULL)) {
-            return simrv::memory::ram_read_fast(entry.paddr_base + (v_addr & 0xFFF), funct3, mem.mmu()->mmem());
+        if (!translation_enabled) {
+            // Bypass soft TLB lookup if translation is disabled (direct DRAM access)
+            const Address eff_vaddr = (cpu.state().regs.xlen == 32) ? (v_addr & 0xFFFFFFFFULL) : v_addr;
+            if (simrv::compiler::likely(simrv::memory::is_dram_addr(eff_vaddr))) {
+                return simrv::memory::ram_read_fast(eff_vaddr, funct3, mem.mmu()->mmem());
+            }
+        } else {
+            size_t tlb_idx = (v_addr >> 12) & 2047;
+            const auto& entry = cpu.soft_tlb_read[tlb_idx];
+            if (entry.valid && entry.vpn == (v_addr >> 12) && entry.priv == eff_priv && 
+                entry.asid == current_asid) {
+                return simrv::memory::ram_read_fast(entry.paddr_base + (v_addr & 0xFFF), funct3, mem.mmu()->mmem());
+            }
         }
     }
 
@@ -259,6 +267,10 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
     }
 
     auto issue_write = [&](Address addr, Word data) -> void {
+        if (cpu.machine_->s_rollback_enabled && simrv::memory::is_dram_addr(addr)) {
+            Word old_val = simrv::memory::ram_read_fast(addr, funct3, mem.mmu()->mmem());
+            cpu.record_mem_write(addr, old_val, funct3);
+        }
         if (addr >= 0x30001000u && addr < 0x30200000u && cpu.machine_->framebuffer) {
             uint8_t* fb_ptr = cpu.machine_->framebuffer->get_fb_ptr();
             size_t fb_offset = addr - 0x30001000u;
@@ -310,12 +322,21 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
     };
 
     if (cpu.machine_->s_high_performance && !crosses_page) {
-        size_t tlb_idx = (v_addr >> 12) & 2047;
-        const auto& entry = cpu.soft_tlb_write[tlb_idx];
-        if (entry.valid && entry.vpn == (v_addr >> 12) && entry.priv == eff_priv && 
-            entry.asid == (translation_enabled ? current_asid : 0xFFFF'FFFF'FFFF'FFFFULL)) {
-            issue_write(entry.paddr_base + (v_addr & 0xFFF), wdata);
-            return;
+        if (!translation_enabled) {
+            // Bypass soft TLB lookup if translation is disabled (direct DRAM access)
+            const Address eff_vaddr = (cpu.state().regs.xlen == 32) ? (v_addr & 0xFFFFFFFFULL) : v_addr;
+            if (simrv::compiler::likely(simrv::memory::is_dram_addr(eff_vaddr))) {
+                issue_write(eff_vaddr, wdata);
+                return;
+            }
+        } else {
+            size_t tlb_idx = (v_addr >> 12) & 2047;
+            const auto& entry = cpu.soft_tlb_write[tlb_idx];
+            if (entry.valid && entry.vpn == (v_addr >> 12) && entry.priv == eff_priv && 
+                entry.asid == current_asid) {
+                issue_write(entry.paddr_base + (v_addr & 0xFFF), wdata);
+                return;
+            }
         }
     }
 
