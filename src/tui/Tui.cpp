@@ -610,30 +610,45 @@ void Tui::cycle_reg_page() {
     bool has_d = (machine_.cpu.state().misa & (1ULL << ('d' - 'a'))) != 0;
     bool has_v = (machine_.cpu.state().misa & (1ULL << ('v' - 'a'))) != 0;
     TuiRegPage rp = left_pane_->get_page();
+
+    // If currently on a tool tab, jump back to GPR
+    if (rp != TuiRegPage::GPR && rp != TuiRegPage::FPR && rp != TuiRegPage::VEC) {
+        rp = TuiRegPage::GPR;
+    } else {
+        // Cycle within register sub-views only
+        switch (rp) {
+            case TuiRegPage::GPR:
+                if (has_f || has_d) rp = TuiRegPage::FPR;
+                else if (has_v)     rp = TuiRegPage::VEC;
+                // else stay on GPR (no fp/vec extensions)
+                break;
+            case TuiRegPage::FPR:
+                if (has_v) rp = TuiRegPage::VEC;
+                else       rp = TuiRegPage::GPR;
+                break;
+            case TuiRegPage::VEC:
+                rp = TuiRegPage::GPR;
+                break;
+            default:
+                rp = TuiRegPage::GPR;
+                break;
+        }
+    }
+    left_pane_->set_page(rp);
+    update_trace_active_cache();
+    render(true);
+}
+
+void Tui::cycle_tool_page() {
+    TuiRegPage rp = left_pane_->get_page();
     switch (rp) {
         case TuiRegPage::GPR:
-            if (has_f || has_d)
-                rp = TuiRegPage::FPR;
-            else if (has_v)
-                rp = TuiRegPage::VEC;
-            else
-                rp = TuiRegPage::PIPELINE;
-            break;
         case TuiRegPage::FPR:
-            if (has_v)
-                rp = TuiRegPage::VEC;
-            else
-                rp = TuiRegPage::PIPELINE;
-            break;
         case TuiRegPage::VEC:
             rp = TuiRegPage::PIPELINE;
             break;
         case TuiRegPage::PIPELINE:
-            if (machine_.s_cycle_accurate) {
-                rp = TuiRegPage::CACHE;
-            } else {
-                rp = TuiRegPage::TRACE;
-            }
+            rp = TuiRegPage::CACHE;
             break;
         case TuiRegPage::CACHE:
             rp = TuiRegPage::TRACE;
@@ -645,8 +660,6 @@ void Tui::cycle_reg_page() {
             rp = TuiRegPage::STACK;
             break;
         case TuiRegPage::STACK:
-            rp = TuiRegPage::GPR;
-            break;
         default:
             rp = TuiRegPage::GPR;
             break;
@@ -1020,6 +1033,8 @@ void Tui::pause_loop() {
                 cycle_layout();
             } else if (key == simrv::tui::TuiKey::r || key == simrv::tui::TuiKey::R) {
                 cycle_reg_page();
+            } else if (key == simrv::tui::TuiKey::l || key == simrv::tui::TuiKey::L) {
+                cycle_tool_page();
             } else if (key == simrv::tui::TuiKey::e || key == simrv::tui::TuiKey::E) {
                 toggle_explain();
             } else if (key == simrv::tui::TuiKey::Colon) {
@@ -1497,9 +1512,10 @@ void Tui::render_modal_overlay(std::vector<std::string>& lines, int term_width, 
             add_row(std::format(" {}{:<18}\033[0m {}Inspect Memory Address modal\033[0m", kThemeSky, "[m]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Run / Pause simulation loop\033[0m", kThemeSky, "[c] / [Ctrl-P]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Cycle TUI panel layout\033[0m", kThemeSky, "[Tab]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Cycle Left Pane page\033[0m", kThemeSky, "[r]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Cycle register sub-views (GPR/FPR/VEC)\033[0m", kThemeSky, "[r]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Cycle tool tabs (Pipe/Cache/Trace/Exp/Stack)\033[0m", kThemeSky, "[l]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Cycle Right Pane mode\033[0m", kThemeSky, "[p]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Toggle Explainer & Trap Details\033[0m", kThemeSky, "[e]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Jump to Explainer / Trap Details\033[0m", kThemeSky, "[e]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Show this help dialog\033[0m", kThemeSky, "[F1] / [h] / [?]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Toggle High Contrast theme\033[0m", kThemeSky, "[Alt-h]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Toggle Sakura Pastel theme\033[0m", kThemeSky, "[Alt-t]", kThemeText));

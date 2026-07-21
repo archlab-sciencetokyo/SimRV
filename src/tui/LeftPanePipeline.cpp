@@ -4,6 +4,7 @@
  */
 #include "simrv/tui/LeftPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/util/FormatUtil.hpp"
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
@@ -619,15 +620,6 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
     auto const& ic = cpu.icache;
     auto const& dc = cpu.dcache;
 
-    auto get_stats_strings = [](uint64_t hits, uint64_t misses) -> std::tuple<std::string, std::string, std::string, double> {
-        uint64_t total = hits + misses;
-        double ratio = (total == 0) ? 1.0 : (static_cast<double>(hits) / static_cast<double>(total));
-        double miss_ratio = (total == 0) ? 0.0 : (static_cast<double>(misses) / static_cast<double>(total));
-        std::string hits_str = std::format("Hits: {:>9}", hits);
-        std::string misses_str = std::format("Misses: {:>8}", misses);
-        std::string miss_rate = std::format("Miss Rate: {:>6.2f}%", miss_ratio * 100.0);
-        return std::make_tuple(hits_str, misses_str, miss_rate, ratio);
-    };
 
     auto make_bar = [](double ratio, int bar_width) -> std::string {
         int filled = static_cast<int>(ratio * bar_width);
@@ -647,33 +639,55 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
 
     switch (logical_row) {
         case 0:
-            return section_line("L1 Instruction Cache (ICache)", width);
+            return section_line("L1 Instruction Cache", width);
         case 1:
             {
-                auto [h, m, mr, ratio] = get_stats_strings(ic.hit_count(), ic.miss_count());
-                return render_pair(h, m, kThemeMint, "Type", "Set-Associative", kThemeVal, col_width, right_width, 0);
+                uint64_t h = ic.hit_count(), m = ic.miss_count();
+                uint64_t tot = h + m;
+                double mr = (tot == 0) ? 0.0 : 100.0 * static_cast<double>(m) / static_cast<double>(tot);
+                return format_to_width(std::format(
+                    "  {}Hits:\033[0m {:>12}   {}Misses:\033[0m {:>10}   {}Miss Rate:\033[0m {:>6.2f}%",
+                    kThemeText, simrv::util::format_with_commas(h),
+                    kThemeText, simrv::util::format_with_commas(m),
+                    kThemeText, mr), width);
             }
         case 2:
             {
-                auto [h, m, mr, ratio] = get_stats_strings(ic.hit_count(), ic.miss_count());
-                std::string bar = make_bar(ratio, 20);
-                return render_pair(mr, bar, kThemePeach, "Line/Way", "32B / 4-way", kThemeVal, col_width, right_width, 0);
+                uint64_t h = ic.hit_count(), m = ic.miss_count();
+                uint64_t tot = h + m;
+                double ratio = (tot == 0) ? 1.0 : static_cast<double>(h) / static_cast<double>(tot);
+                int bar_w = std::max(5, width - 38);
+                std::string bar = make_bar(ratio, bar_w);
+                return format_to_width(std::format(
+                    "  {}Hit Rate\033[0m  [{}] {:>6.2f}%   {}32B / 4-way\033[0m",
+                    kThemeText, bar, ratio * 100.0, kThemeMuted), width);
             }
         case 3:
-            return section_line("L1 Data Cache (DCache)", width);
+            return section_line("L1 Data Cache", width);
         case 4:
             {
-                auto [h, m, mr, ratio] = get_stats_strings(dc.hit_count(), dc.miss_count());
-                return render_pair(h, m, kThemeMint, "Type", "Set-Associative", kThemeVal, col_width, right_width, 0);
+                uint64_t h = dc.hit_count(), m = dc.miss_count();
+                uint64_t tot = h + m;
+                double mr = (tot == 0) ? 0.0 : 100.0 * static_cast<double>(m) / static_cast<double>(tot);
+                return format_to_width(std::format(
+                    "  {}Hits:\033[0m {:>12}   {}Misses:\033[0m {:>10}   {}Miss Rate:\033[0m {:>6.2f}%",
+                    kThemeText, simrv::util::format_with_commas(h),
+                    kThemeText, simrv::util::format_with_commas(m),
+                    kThemeText, mr), width);
             }
         case 5:
             {
-                auto [h, m, mr, ratio] = get_stats_strings(dc.hit_count(), dc.miss_count());
-                std::string bar = make_bar(ratio, 20);
-                return render_pair(mr, bar, kThemePeach, "Line/Way", "32B / 4-way", kThemeVal, col_width, right_width, 0);
+                uint64_t h = dc.hit_count(), m = dc.miss_count();
+                uint64_t tot = h + m;
+                double ratio = (tot == 0) ? 1.0 : static_cast<double>(h) / static_cast<double>(tot);
+                int bar_w = std::max(5, width - 38);
+                std::string bar = make_bar(ratio, bar_w);
+                return format_to_width(std::format(
+                    "  {}Hit Rate\033[0m  [{}] {:>6.2f}%   {}32B / 4-way\033[0m",
+                    kThemeText, bar, ratio * 100.0, kThemeMuted), width);
             }
         case 6:
-            return section_line("L1 Cache Set Occupancy Map", width);
+            return section_line("Set Occupancy Map", width);
         case 7:
         case 8:
         case 9:
@@ -731,7 +745,7 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
                 return format_to_width(left_col, col_width) + format_to_width(right_col, right_width);
             }
         case 15:
-            return section_line("Occupancy: # (Valid) | . (Empty) | Access: Set/Way (Green: Hit, Red: Miss)", width);
+            return section_line("Occupancy: # (Valid)  . (Empty)  Bold set# = last accessed", width);
         default:
             return format_to_width("", width);
     }

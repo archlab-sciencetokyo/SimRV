@@ -106,6 +106,7 @@ class Tui {
     }
 
     void cycle_reg_page();
+    void cycle_tool_page();
     void set_reg_page(TuiRegPage page);
     void toggle_explain();
     void toggle_high_contrast();

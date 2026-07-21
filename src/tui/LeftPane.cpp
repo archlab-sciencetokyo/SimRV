@@ -130,33 +130,39 @@ auto LeftPane::get_row_uncached(int logical_row, int width) -> std::string {
 }
 
 auto LeftPane::render_tab_bar(int width) const -> std::string {
-    struct TabInfo {
-        TuiRegPage page;
-        const char* name;
-    };
-    static constexpr std::array<TabInfo, 8> tabs = {{
-        {.page = TuiRegPage::GPR,      .name = "Regs"},
-        {.page = TuiRegPage::FPR,      .name = "Float"},
-        {.page = TuiRegPage::VEC,      .name = "Vec"},
+    // Determine if we're in the Regs group (GPR/FPR/VEC)
+    bool const is_regs = (page_ == TuiRegPage::GPR || page_ == TuiRegPage::FPR || page_ == TuiRegPage::VEC);
+    const char* reg_sub = "GPR";
+    if (page_ == TuiRegPage::FPR) reg_sub = "FPR";
+    else if (page_ == TuiRegPage::VEC) reg_sub = "VEC";
+
+    // Build the grouped Regs tab
+    std::string line;
+    if (is_regs) {
+        line += std::format("\033[1m{}[Regs:{}]\033[0m", kThemeSky, reg_sub);
+    } else {
+        line += std::format("{}Regs\033[0m", kThemeMuted);
+    }
+
+    // Remaining 5 tool tabs
+    struct ToolTab { TuiRegPage page; const char* name; };
+    static constexpr std::array<ToolTab, 5> tool_tabs = {{
         {.page = TuiRegPage::PIPELINE, .name = "Pipe"},
         {.page = TuiRegPage::CACHE,    .name = "Cache"},
         {.page = TuiRegPage::TRACE,    .name = "Trace"},
         {.page = TuiRegPage::EXPLAIN,  .name = "Exp"},
-        {.page = TuiRegPage::STACK,    .name = "Stack"}
+        {.page = TuiRegPage::STACK,    .name = "Stack"},
     }};
 
-    std::string line;
-    for (size_t i = 0; i < tabs.size(); ++i) {
-        bool active = (page_ == tabs[i].page);
-        if (active) {
-            line += std::format("\033[1m{}\033[38;5;117m[{}]\033[0m", kThemeSky, tabs[i].name);
+    for (auto const& tab : tool_tabs) {
+        line += std::format("{}│\033[0m", kThemeBorder);
+        if (page_ == tab.page) {
+            line += std::format("\033[1m{}[{}]\033[0m", kThemeSky, tab.name);
         } else {
-            line += std::format("{}{}\033[0m", kThemeMuted, tabs[i].name);
-        }
-        if (i + 1 < tabs.size()) {
-            line += std::format("{}│\033[0m", kThemeBorder);
+            line += std::format("{}{}\033[0m", kThemeMuted, tab.name);
         }
     }
+
     return format_to_width(line, width);
 }
 
