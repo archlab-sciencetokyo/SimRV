@@ -26,8 +26,8 @@
 #include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/device/Uart.hpp"
-#include "simrv/tui/RegisterPane.hpp"
-#include "simrv/tui/ConsolePane.hpp"
+#include "simrv/tui/LeftPane.hpp"
+#include "simrv/tui/RightPane.hpp"
 #include "simrv/device/Framebuffer.hpp"
 #include "simrv/tui/StatusBar.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -94,7 +94,6 @@ Tui::Tui(simrv::core::Machine& machine) : machine_(machine) {
             scroll_offset_ += lines;
         }
     });
-    initialize();
 }
 
 Tui::~Tui() { shutdown(); }
@@ -118,13 +117,13 @@ void Tui::set_paused(bool p) {
 }
 
 void Tui::initialize() {
-    reg_pane_ = std::make_unique<RegisterPane>(machine_);
-    console_pane_ = std::make_unique<ConsolePane>();
+    left_pane_ = std::make_unique<LeftPane>(machine_);
+    right_pane_ = std::make_unique<RightPane>();
     status_bar_ = std::make_unique<StatusBar>(machine_);
 
     set_high_contrast(machine_.s_high_contrast);
 
-    reg_pane_->update_cache();
+    left_pane_->update_cache();
 
     if (!g_termios_saved) {
         tcgetattr(STDIN_FILENO, &g_saved_termios);
@@ -249,7 +248,7 @@ void Tui::render(bool force) {
         local_log.pop();
     }
 
-    if (!reg_pane_ || !console_pane_ || !status_bar_) {
+    if (!left_pane_ || !right_pane_ || !status_bar_) {
         return;
     }
 
@@ -278,8 +277,8 @@ void Tui::render(bool force) {
         g_resized = 0;
     }
 
-    // Asynchronously format trace records in TUI thread if LiveTrace is active
-    if (panel_mode == TuiRightPanelMode::LiveTrace) {
+    // Asynchronously format trace records in TUI thread if trace is active
+    if (trace_or_livetrace_active_.load(std::memory_order_relaxed)) {
         std::vector<TraceRecord> local_records;
         {
             std::scoped_lock tr_lock(trace_mutex_);
@@ -340,10 +339,10 @@ void Tui::render(bool force) {
     if (left_pane_width > term_width - 10) left_pane_width = std::max(40, term_width - 10);
     pane_width_cached_ = left_pane_width;
     int right_pane_width = term_width - left_pane_width - 3;
-    if (layout_ == TuiLayout::FullConsole) {
+    if (layout_ == TuiLayout::FullRight) {
         left_pane_width = 0;
         right_pane_width = term_width - 2;
-    } else if (layout_ == TuiLayout::FullRegister) {
+    } else if (layout_ == TuiLayout::FullLeft) {
         left_pane_width = term_width - 2;
         right_pane_width = 0;
     }
@@ -351,30 +350,22 @@ void Tui::render(bool force) {
     // StatusBar renders 3 header lines + 2 footer lines, and we add 1 separator before footer.
     int num_rows = term_height - 6;
 
-    // Limit scrollback to the existing rows to prevent clearing the screen completely
+    // Limit scrollback to the existing rows
     {
-        int total = 0;
-        if (panel_mode == TuiRightPanelMode::Terminal) {
-            total = vt_.get_lines_count();
-        } else if (panel_mode == TuiRightPanelMode::Log) {
-            total = vt_log_.get_lines_count();
-        } else {
-            total = static_cast<int>(trace_buffer_.size());
-        }
+        int total = (panel_mode == TuiRightPanelMode::Terminal) ? vt_.get_lines_count() : 0;
         int max_scroll = std::max(0, total - num_rows);
         if (scroll_offset_ > max_scroll) {
             scroll_offset_ = max_scroll;
         }
     }
 
-    // Rebuild visible console/log/trace rows depending on panel mode.
+    // Rebuild visible console/display rows depending on right panel mode.
     lines_to_draw_.clear();
     if (right_pane_width > 0 && num_rows > 0) {
-        if (panel_mode == TuiRightPanelMode::Terminal || panel_mode == TuiRightPanelMode::Log) {
-            VirtualTerminal& current_vt = (panel_mode == TuiRightPanelMode::Terminal) ? vt_ : vt_log_;
-            current_vt.resize(right_pane_width, num_rows);
+        if (panel_mode == TuiRightPanelMode::Terminal) {
+            vt_.resize(right_pane_width, num_rows);
 
-            int total = current_vt.get_lines_count();
+            int total = vt_.get_lines_count();
             int end_exclusive = total - scroll_offset_;
             if (end_exclusive < 0) {
                 end_exclusive = 0;
@@ -384,33 +375,12 @@ void Tui::render(bool force) {
                 start = 0;
             }
 
-            int cursor_abs_line = current_vt.get_scrollback_size() + current_vt.get_cursor_y();
+            int cursor_abs_line = vt_.get_scrollback_size() + vt_.get_cursor_y();
             bool is_live = (scroll_offset_ == 0);
 
             for (int i = start; i < end_exclusive; ++i) {
-                bool draw_cursor = (panel_mode == TuiRightPanelMode::Terminal) && is_live && (i == cursor_abs_line) && current_vt.is_cursor_visible();
-                lines_to_draw_.push_back(current_vt.get_line_as_string(i, right_pane_width, draw_cursor));
-            }
-        } else if (panel_mode == TuiRightPanelMode::LiveTrace) {
-            // LiveTrace
-            int total = static_cast<int>(trace_buffer_.size());
-            int end_exclusive = total - scroll_offset_;
-            if (end_exclusive < 0) {
-                end_exclusive = 0;
-            }
-            int start = end_exclusive - num_rows;
-            if (start < 0) {
-                start = 0;
-            }
-
-            for (int i = start; i < end_exclusive; ++i) {
-                std::string s = trace_buffer_.at(static_cast<std::size_t>(i));
-                if (s.length() > static_cast<std::size_t>(right_pane_width)) {
-                    s = s.substr(0, static_cast<std::size_t>(right_pane_width));
-                } else {
-                    s += std::string(static_cast<std::size_t>(right_pane_width) - s.length(), ' ');
-                }
-                lines_to_draw_.push_back(s);
+                bool draw_cursor = is_live && (i == cursor_abs_line) && vt_.is_cursor_visible();
+                lines_to_draw_.push_back(vt_.get_line_as_string(i, right_pane_width, draw_cursor));
             }
         } else if (panel_mode == TuiRightPanelMode::Display) {
             for (int i = 0; i < num_rows; ++i) {
@@ -423,20 +393,34 @@ void Tui::render(bool force) {
         }
     }
 
+    // Prepare log lines for left_pane_
+    vt_log_.resize(300, num_rows);
+    std::vector<std::string> log_lines;
+    int total_written = vt_log_.get_scrollback_size() + vt_log_.get_cursor_y();
+    if (vt_log_.get_cursor_x() > 0) {
+        total_written += 1;
+    }
+    int start_log = std::max(0, total_written - 20);
+    for (int i = start_log; i < total_written; ++i) {
+        log_lines.push_back(vt_log_.get_line_as_string(i, 300, false));
+    }
+
     // Update panes state
-    reg_pane_->set_kips(kips_);
-    reg_pane_->set_kips_history(kips_history_);
-    reg_pane_->set_paused(paused_);
-    reg_pane_->set_visible_rows(num_rows);
-    reg_pane_->set_active_runtime(static_cast<double>(runtime_duration_.count()) / 1000000.0);
-    console_pane_->set_lines(lines_to_draw_);
-    console_pane_->set_scroll_offset(scroll_offset_);
+    left_pane_->set_kips(kips_);
+    left_pane_->set_kips_history(kips_history_);
+    left_pane_->set_paused(paused_);
+    left_pane_->set_visible_rows(num_rows);
+    left_pane_->set_active_runtime(static_cast<double>(runtime_duration_.count()) / 1000000.0);
+    left_pane_->set_trace_buffer(&trace_buffer_);
+    left_pane_->set_log_lines(std::move(log_lines));
+    right_pane_->set_lines(lines_to_draw_);
+    right_pane_->set_scroll_offset(scroll_offset_);
 
     status_bar_->set_paused(paused_);
     status_bar_->set_status_override(status_override_);
     status_bar_->update_kips(kips_);
     status_bar_->set_layout(layout_);
-    status_bar_->set_active_page(reg_pane_->get_page());
+    status_bar_->set_active_page(left_pane_->get_page());
     status_bar_->set_scroll_offset(scroll_offset_);
     status_bar_->set_pane_widths(left_pane_width, right_pane_width);
     status_bar_->set_right_panel_mode(panel_mode);
@@ -465,14 +449,14 @@ void Tui::render(bool force) {
 
     for (int i = 0; i < num_rows; ++i) {
         if (layout_ == TuiLayout::Split) {
-            std::string left = reg_pane_->render_row(i, left_pane_width);
-            std::string right = console_pane_->render_row(i, right_pane_width);
+            std::string left = left_pane_->render_row(i, left_pane_width);
+            std::string right = right_pane_->render_row(i, right_pane_width);
             new_lines.push_back(std::format("{}║\033[0m{}{}│\033[0m{}{}║\033[0m", kThemeBorder, left, kThemeBorder, right, kThemeBorder));
-        } else if (layout_ == TuiLayout::FullConsole) {
-            std::string right = console_pane_->render_row(i, right_pane_width);
+        } else if (layout_ == TuiLayout::FullRight) {
+            std::string right = right_pane_->render_row(i, right_pane_width);
             new_lines.push_back(std::format("{}║\033[0m{}{}║\033[0m", kThemeBorder, right, kThemeBorder));
         } else {
-            std::string left = reg_pane_->render_row(i, left_pane_width);
+            std::string left = left_pane_->render_row(i, left_pane_width);
             new_lines.push_back(std::format("{}║\033[0m{}{}║\033[0m", kThemeBorder, left, kThemeBorder));
         }
     }
@@ -589,7 +573,7 @@ void Tui::render(bool force) {
         // 2. Always rewrite/restore the left pane body text cells to columns 1..left_pane_width+2
         // to overlay them on top of any cells cleared by the Sixel graphic draw.
         for (int i = 0; i < num_rows; ++i) {
-            std::string left = reg_pane_->render_row(i, left_pane_width);
+            std::string left = left_pane_->render_row(i, left_pane_width);
             update_cmds += std::format("\033[{};1H{}║\033[0m{}{}│\033[0m", i + 4, kThemeBorder, left, kThemeBorder);
         }
 
@@ -601,7 +585,7 @@ void Tui::render(bool force) {
 }
 
 void Tui::handle_mouse(int x, int y, int b) {
-    if (!console_pane_ || !reg_pane_) {
+    if (!right_pane_ || !left_pane_) {
         return;
     }
 
@@ -625,7 +609,7 @@ void Tui::cycle_reg_page() {
     bool has_f = (machine_.cpu.state().misa & (1ULL << ('f' - 'a'))) != 0;
     bool has_d = (machine_.cpu.state().misa & (1ULL << ('d' - 'a'))) != 0;
     bool has_v = (machine_.cpu.state().misa & (1ULL << ('v' - 'a'))) != 0;
-    TuiRegPage rp = reg_pane_->get_page();
+    TuiRegPage rp = left_pane_->get_page();
     switch (rp) {
         case TuiRegPage::GPR:
             if (has_f || has_d)
@@ -648,34 +632,46 @@ void Tui::cycle_reg_page() {
             if (machine_.s_cycle_accurate) {
                 rp = TuiRegPage::CACHE;
             } else {
-                rp = TuiRegPage::STACK;
+                rp = TuiRegPage::TRACE;
             }
             break;
         case TuiRegPage::CACHE:
+            rp = TuiRegPage::TRACE;
+            break;
+        case TuiRegPage::TRACE:
+            rp = TuiRegPage::EXPLAIN;
+            break;
+        case TuiRegPage::EXPLAIN:
             rp = TuiRegPage::STACK;
+            break;
+        case TuiRegPage::STACK:
+            rp = TuiRegPage::GPR;
             break;
         default:
             rp = TuiRegPage::GPR;
             break;
     }
-    reg_pane_->set_page(rp);
+    left_pane_->set_page(rp);
+    update_trace_active_cache();
     render(true);
 }
 
 void Tui::set_reg_page(TuiRegPage page) {
-    if (reg_pane_) {
-        reg_pane_->set_page(page);
+    if (left_pane_) {
+        left_pane_->set_page(page);
+        update_trace_active_cache();
         render(true);
     }
 }
 
 void Tui::toggle_explain() {
-    if (reg_pane_) {
-        if (reg_pane_->get_page() == TuiRegPage::EXPLAIN) {
-            reg_pane_->set_page(TuiRegPage::GPR);
+    if (left_pane_) {
+        if (left_pane_->get_page() == TuiRegPage::EXPLAIN) {
+            left_pane_->set_page(TuiRegPage::GPR);
         } else {
-            reg_pane_->set_page(TuiRegPage::EXPLAIN);
+            left_pane_->set_page(TuiRegPage::EXPLAIN);
         }
+        update_trace_active_cache();
         render(true);
     }
 }
@@ -701,24 +697,8 @@ void Tui::toggle_sakura_theme() {
 
 void Tui::cycle_right_panel_mode() {
     TuiRightPanelMode current = right_panel_mode_.load(std::memory_order_relaxed);
-    TuiRightPanelMode next = TuiRightPanelMode::Terminal;
-    switch (current) {
-        case TuiRightPanelMode::Terminal:
-            next = TuiRightPanelMode::Log;
-            break;
-        case TuiRightPanelMode::Log:
-            next = TuiRightPanelMode::LiveTrace;
-            break;
-        case TuiRightPanelMode::LiveTrace:
-            next = TuiRightPanelMode::Display;
-            break;
-        case TuiRightPanelMode::Display:
-        default:
-            next = TuiRightPanelMode::Terminal;
-            break;
-    }
+    TuiRightPanelMode next = (current == TuiRightPanelMode::Terminal) ? TuiRightPanelMode::Display : TuiRightPanelMode::Terminal;
     right_panel_mode_.store(next, std::memory_order_relaxed);
-    update_trace_active_cache();
     scroll_offset_ = 0;
     render(true);
 }
@@ -730,9 +710,9 @@ void Tui::toggle_trace_enabled() {
 }
 
 void Tui::update_trace_active_cache() {
+    bool trace_page_active = left_pane_ && (left_pane_->get_page() == TuiRegPage::TRACE);
     trace_or_livetrace_active_.store(
-        trace_enabled_.load(std::memory_order_relaxed) ||
-        (right_panel_mode_.load(std::memory_order_relaxed) == TuiRightPanelMode::LiveTrace),
+        trace_enabled_.load(std::memory_order_relaxed) || trace_page_active,
         std::memory_order_relaxed
     );
 }
@@ -894,22 +874,22 @@ void Tui::reset_scroll() {
 }
 
 void Tui::scroll_regs(int lines) {
-    if (reg_pane_) {
-        reg_pane_->scroll(lines);
+    if (left_pane_) {
+        left_pane_->scroll(lines);
         render();
     }
 }
 
 void Tui::reset_scroll_regs() {
-    if (reg_pane_) {
-        reg_pane_->reset_scroll();
+    if (left_pane_) {
+        left_pane_->reset_scroll();
         render();
     }
 }
 
 void Tui::update_cache() {
-    if (reg_pane_) {
-        reg_pane_->update_cache();
+    if (left_pane_) {
+        left_pane_->update_cache();
     }
 }
 
@@ -1006,6 +986,8 @@ void Tui::pause_loop() {
                     close_modal();
                 } else if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
                     submit_modal();
+                } else if (active_modal_ == ModalType::Help && (key == simrv::tui::TuiKey::h || key == simrv::tui::TuiKey::H || key == simrv::tui::TuiKey::QuestionMark)) {
+                    close_modal();
                 } else if (byte == 8 || byte == 127 || key == simrv::tui::TuiKey::Backspace) {
                     if (!modal_input_.empty()) {
                         modal_input_.pop_back();
@@ -1048,14 +1030,12 @@ void Tui::pause_loop() {
                 open_modal(ModalType::SetSpeed);
             } else if (key == simrv::tui::TuiKey::m || key == simrv::tui::TuiKey::M) {
                 open_modal(ModalType::InspectAddress);
-            } else if (key == simrv::tui::TuiKey::QuestionMark) {
+            } else if (key == simrv::tui::TuiKey::QuestionMark || key == simrv::tui::TuiKey::h || key == simrv::tui::TuiKey::H) {
                 open_modal(ModalType::Help);
             } else if (key == simrv::tui::TuiKey::LeftBracket) {
                 adjust_left_pane_width(-2);
             } else if (key == simrv::tui::TuiKey::RightBracket) {
                 adjust_left_pane_width(2);
-            } else if (key == simrv::tui::TuiKey::h || key == simrv::tui::TuiKey::H) {
-                toggle_high_contrast();
             } else if (key == simrv::tui::TuiKey::t || key == simrv::tui::TuiKey::T) {
                 toggle_sakura_theme();
             } else if (key == simrv::tui::TuiKey::p || key == simrv::tui::TuiKey::P) {
@@ -1181,7 +1161,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             bool on_left = false;
             if (layout == TuiLayout::Split) {
                 on_left = (x <= get_pane_width());
-            } else if (layout == TuiLayout::FullRegister) {
+            } else if (layout == TuiLayout::FullLeft) {
                 on_left = true;
             } else {
                 on_left = false;
@@ -1255,6 +1235,16 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             reset_scroll();
             return true;
         }
+    }
+
+    // 3. Function key (F1) help shortcut
+    if (esc_buf_ == "\033OP" || esc_buf_ == "\033[11~" || esc_buf_ == "\033[1;2P" || esc_buf_ == "\033[O1P") {
+        if (active_modal_ == ModalType::Help) {
+            close_modal();
+        } else {
+            open_modal(ModalType::Help);
+        }
+        return true;
     }
 
     if (esc_buf_.size() == 1) {
@@ -1433,7 +1423,7 @@ void Tui::submit_modal() {
                     }
                 }
                 if (ok) {
-                    reg_pane_->set_inspect_addr(addr);
+                    left_pane_->set_inspect_addr(addr);
                     set_reg_page(TuiRegPage::STACK);
                     set_status_override(std::format("Inspecting memory at 0x{:08x}", addr));
                 } else {
@@ -1455,48 +1445,64 @@ void Tui::render_modal_overlay(std::vector<std::string>& lines, int term_width, 
     if (active_modal_ == ModalType::None || lines.empty()) return;
 
     bool is_help = (active_modal_ == ModalType::Help);
-    int box_w = is_help ? std::min(66, term_width - 4) : std::min(56, term_width - 4);
+    int box_w = is_help ? std::min(68, term_width - 4) : std::min(58, term_width - 4);
     if (box_w < 35) return;
 
+    std::string m_bg = kThemeModalBg;
+    std::string m_rst = std::string("\033[0m") + m_bg;
+
     std::vector<std::string> content_rows;
+    auto add_row = [&](const std::string& formatted_str) {
+        std::string s = formatted_str;
+        std::string target = "\033[0m";
+        size_t pos = 0;
+        while ((pos = s.find(target, pos)) != std::string::npos) {
+            s.replace(pos, target.length(), m_rst);
+            pos += m_rst.length();
+        }
+        content_rows.push_back(s);
+    };
+
     std::string title;
     switch (active_modal_) {
         case ModalType::SetBreakpoint:
             title = " SET BREAKPOINT ";
-            content_rows.push_back("Enter PC Address (hex) or Symbol:");
-            content_rows.push_back(std::format("  > {}_", modal_input_));
+            add_row(std::format("{}Enter PC Address (hex) or Symbol:\033[0m", kThemeText));
+            add_row(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, modal_input_));
             break;
         case ModalType::SetStepSize:
             title = " SET STEP SIZE (N) ";
-            content_rows.push_back("Enter Step Count N (instructions):");
-            content_rows.push_back(std::format("  > {}_", modal_input_));
+            add_row(std::format("{}Enter Step Count N (instructions):\033[0m", kThemeText));
+            add_row(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, modal_input_));
             break;
         case ModalType::SetSpeed:
             title = " SET SIMULATION SPEED ";
-            content_rows.push_back("Enter Step Delay (microseconds, 0=Max):");
-            content_rows.push_back(std::format("  > {}_", modal_input_));
+            add_row(std::format("{}Enter Step Delay (microseconds, 0=Max):\033[0m", kThemeText));
+            add_row(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, modal_input_));
             break;
         case ModalType::InspectAddress:
             title = " INSPECT MEMORY ADDRESS ";
-            content_rows.push_back("Enter Target Address (hex) or Symbol:");
-            content_rows.push_back(std::format("  > {}_", modal_input_));
+            add_row(std::format("{}Enter Target Address (hex) or Symbol:\033[0m", kThemeText));
+            add_row(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, modal_input_));
             break;
         case ModalType::Help:
             title = " SIMULATOR KEYBOARD SHORTCUTS ";
-            content_rows.push_back(" [s] / [Space]  Single instruction step");
-            content_rows.push_back(" [n]            Step N instructions");
-            content_rows.push_back(" [b]            Undo / Step back 1 instruction");
-            content_rows.push_back(" [:]            Set PC Breakpoint modal");
-            content_rows.push_back(" [k]            Toggle PC breakpoint at current PC");
-            content_rows.push_back(" [g]            Set Step Size (N) modal");
-            content_rows.push_back(" [f]            Set Speed Delay (us) modal");
-            content_rows.push_back(" [m]            Inspect Memory Address modal");
-            content_rows.push_back(" [c] / [Ctrl-P] Run / Pause simulation loop");
-            content_rows.push_back(" [Tab]          Cycle TUI panel layout");
-            content_rows.push_back(" [r]            Cycle Register page (GPR/FPR/VEC)");
-            content_rows.push_back(" [e]            Toggle Explainer & Trap Details");
-            content_rows.push_back(" [?]            Show this help dialog");
-            content_rows.push_back(" [Esc]          Close modal dialog");
+            add_row(std::format(" {}{:<18}\033[0m {}Single instruction step\033[0m", kThemeSky, "[s] / [Space]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Step N instructions\033[0m", kThemeSky, "[n]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Undo / Step back 1 instruction\033[0m", kThemeSky, "[b]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Set PC Breakpoint modal\033[0m", kThemeSky, "[:]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Toggle PC breakpoint at current PC\033[0m", kThemeSky, "[k]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Set Step Size (N) modal\033[0m", kThemeSky, "[g]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Set Speed Delay (us) modal\033[0m", kThemeSky, "[f]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Inspect Memory Address modal\033[0m", kThemeSky, "[m]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Run / Pause simulation loop\033[0m", kThemeSky, "[c] / [Ctrl-P]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Cycle TUI panel layout\033[0m", kThemeSky, "[Tab]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Cycle Register page (GPR/FPR/VEC)\033[0m", kThemeSky, "[r]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Toggle Explainer & Trap Details\033[0m", kThemeSky, "[e]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Show this help dialog\033[0m", kThemeSky, "[F1] / [h] / [?]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Toggle High Contrast theme\033[0m", kThemeSky, "[Alt-h]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Toggle Sakura Pastel theme\033[0m", kThemeSky, "[Alt-t]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Close modal dialog\033[0m", kThemeSky, "[Esc]", kThemeText));
             break;
         default:
             break;
@@ -1507,7 +1513,7 @@ void Tui::render_modal_overlay(std::vector<std::string>& lines, int term_width, 
 
     auto pad_center = [&](const std::string& text, int width) -> std::string {
         int text_len = get_display_width(text);
-        if (text_len >= width) return text.substr(0, width);
+        if (text_len >= width) return format_to_width(text, width);
         int pad_l = (width - text_len) / 2;
         int pad_r = width - text_len - pad_l;
         return std::string(pad_l, ' ') + text + std::string(pad_r, ' ');
@@ -1515,25 +1521,25 @@ void Tui::render_modal_overlay(std::vector<std::string>& lines, int term_width, 
 
     auto pad_left = [&](const std::string& text, int width) -> std::string {
         int text_len = get_display_width(text);
-        if (text_len >= width) return text.substr(0, width);
+        if (text_len >= width) return format_to_width(text, width);
         return text + std::string(width - text_len, ' ');
     };
 
-    std::string top_border = "╔" + pad_center("═ " + title + " ═", inner_w) + "╗";
+    std::string top_border = std::format("{}{}╔{}\033[0m{}{}╗\033[0m", m_bg, kThemeBorder, pad_center(std::format("═ \033[1m{}{}\033[0m{} ═", kThemeSky, title, kThemeBorder), inner_w), m_bg, kThemeBorder);
     box_lines.push_back(top_border);
-    box_lines.push_back("║" + std::string(inner_w, ' ') + "║");
+    box_lines.push_back(std::format("{}{}║\033[0m{}\033[0m{}{}║\033[0m", m_bg, kThemeBorder, std::string(inner_w, ' '), m_bg, kThemeBorder));
 
     for (const auto& row : content_rows) {
-        box_lines.push_back("║" + pad_left(" " + row, inner_w) + "║");
+        box_lines.push_back(std::format("{}{}║\033[0m{}\033[0m{}{}║\033[0m", m_bg, kThemeBorder, pad_left(" " + row, inner_w), m_bg, kThemeBorder));
     }
 
-    box_lines.push_back("║" + std::string(inner_w, ' ') + "║");
+    box_lines.push_back(std::format("{}{}║\033[0m{}\033[0m{}{}║\033[0m", m_bg, kThemeBorder, std::string(inner_w, ' '), m_bg, kThemeBorder));
     if (!is_help) {
-        box_lines.push_back("║" + pad_center("[Enter] Submit  |  [Esc] Cancel", inner_w) + "║");
+        box_lines.push_back(std::format("{}{}║\033[0m{}\033[0m{}{}║\033[0m", m_bg, kThemeBorder, pad_center(std::format("{}[Enter]\033[0m{} {}Submit  |  {}[Esc]\033[0m{} {}Cancel", kThemeVal, m_rst, kThemeMuted, kThemeVal, m_rst, kThemeMuted), inner_w), m_bg, kThemeBorder));
     } else {
-        box_lines.push_back("║" + pad_center("Press [Esc] or [Enter] to close", inner_w) + "║");
+        box_lines.push_back(std::format("{}{}║\033[0m{}\033[0m{}{}║\033[0m", m_bg, kThemeBorder, pad_center(std::format("{}Press {}[Esc]\033[0m{}, {}[Enter]\033[0m{}, {}[h]\033[0m{} or {}[F1]\033[0m{} to close", kThemeMuted, kThemeVal, m_rst, kThemeVal, m_rst, kThemeVal, m_rst, kThemeVal, m_rst), inner_w), m_bg, kThemeBorder));
     }
-    box_lines.push_back("╚" + make_repeated_string("═", inner_w) + "╝");
+    box_lines.push_back(std::format("{}{}╚{}╝\033[0m", m_bg, kThemeBorder, make_repeated_string("═", inner_w)));
 
     int box_h = static_cast<int>(box_lines.size());
     int start_y = (static_cast<int>(lines.size()) - box_h) / 2;
@@ -1541,13 +1547,11 @@ void Tui::render_modal_overlay(std::vector<std::string>& lines, int term_width, 
     if (start_y < 0) start_y = 0;
     if (start_x < 0) start_x = 0;
 
-    std::string indent(static_cast<std::size_t>(start_x), ' ');
-
     for (size_t i = 0; i < box_lines.size(); ++i) {
         int r = start_y + static_cast<int>(i);
         if (r >= 0 && static_cast<size_t>(r) < lines.size()) {
-            std::string styled_line = std::format("{}\033[1;38;5;255;48;5;236m{}\033[0m", indent, box_lines[i]);
-            lines[r] = styled_line;
+            std::string styled_modal_box_line = std::format("\033[1m{}{}\033[0m", kThemeModalBg, box_lines[i]);
+            lines[r] = overlay_string(lines[r], styled_modal_box_line, start_x, box_w);
         }
     }
 }

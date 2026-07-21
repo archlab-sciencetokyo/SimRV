@@ -1,8 +1,8 @@
 /**
- * @file RegisterPane.cpp
- * @brief Implements RegisterPane widget rendering base and infrastructure.
+ * @file LeftPane.cpp
+ * @brief Implements LeftPane widget rendering base and infrastructure.
  */
-#include "simrv/tui/RegisterPane.hpp"
+#include "simrv/tui/LeftPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
@@ -17,7 +17,7 @@
 
 namespace simrv::tui {
 
-auto RegisterPane::is_single_column(int width) const -> bool {
+auto LeftPane::is_single_column(int width) const -> bool {
     bool const is_reg_page = (page_ == TuiRegPage::GPR || page_ == TuiRegPage::FPR || page_ == TuiRegPage::VEC);
     if (!is_reg_page) return false;
     if (page_ == TuiRegPage::GPR) {
@@ -26,7 +26,7 @@ auto RegisterPane::is_single_column(int width) const -> bool {
     return width < 58;
 }
 
-auto RegisterPane::get_total_rows(int width) -> int {
+auto LeftPane::get_total_rows(int width) -> int {
     if (page_ == TuiRegPage::EXPLAIN) {
         return static_cast<int>(get_explain_rows(width).size());
     }
@@ -39,7 +39,7 @@ auto RegisterPane::get_total_rows(int width) -> int {
     return base_rows + debug_rows;
 }
 
-auto RegisterPane::section_line(const std::string& title, int width) -> std::string {
+auto LeftPane::section_line(const std::string& title, int width) -> std::string {
     if (title.starts_with("─") || title.starts_with(" ")) {
         std::string full = title + " ";
         int dash_len = width - get_display_width(full);
@@ -58,8 +58,8 @@ auto RegisterPane::section_line(const std::string& title, int width) -> std::str
     }
 }
 
-auto RegisterPane::make_field(const std::string& label, const std::string& value,
-                             const char* value_color, int label_pad) -> std::string {
+auto LeftPane::make_field(const std::string& label, const std::string& value,
+                          const char* value_color, int label_pad) -> std::string {
     if (label_pad == 0) {
         return std::format(" {}{}\033[0m: {}{}\033[0m", kThemeText, label, value_color, value);
     } else {
@@ -67,14 +67,14 @@ auto RegisterPane::make_field(const std::string& label, const std::string& value
     }
 }
 
-auto RegisterPane::render_pair(const std::string& l1, const std::string& v1, const char* c1,
-                               const std::string& l2, const std::string& v2, const char* c2,
-                               int col_width, int right_width, int label_pad) -> std::string {
+auto LeftPane::render_pair(const std::string& l1, const std::string& v1, const char* c1,
+                            const std::string& l2, const std::string& v2, const char* c2,
+                            int col_width, int right_width, int label_pad) -> std::string {
     return format_to_width(make_field(l1, v1, c1, label_pad), col_width) +
            format_to_width(make_field(l2, v2, c2, label_pad), right_width);
 }
 
-auto RegisterPane::render_active_spinner(int logical_row, int width) -> std::string {
+auto LeftPane::render_active_spinner(int logical_row, int width) -> std::string {
     auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
     constexpr std::array<const char*, 10> spinner = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
     std::string spin = spinner.at((static_cast<std::size_t>(now_ms / 80)) % 10);
@@ -109,7 +109,7 @@ auto RegisterPane::render_active_spinner(int logical_row, int width) -> std::str
     return format_to_width("", width);
 }
 
-auto RegisterPane::get_row_uncached(int logical_row, int width) -> std::string {
+auto LeftPane::get_row_uncached(int logical_row, int width) -> std::string {
     auto const& cpu = machine_.cpu;
     auto const& st = cpu.state();
     int const col_width = width / 2;
@@ -129,9 +129,86 @@ auto RegisterPane::get_row_uncached(int logical_row, int width) -> std::string {
     return render_perf_or_debug(cpu, logical_row, width, single_column);
 }
 
-auto RegisterPane::render_row(int row_idx, int width) -> std::string {
+auto LeftPane::render_tab_bar(int width) const -> std::string {
+    struct TabInfo {
+        TuiRegPage page;
+        const char* name;
+    };
+    static constexpr std::array<TabInfo, 8> tabs = {{
+        {TuiRegPage::GPR, "Regs"},
+        {TuiRegPage::FPR, "Float"},
+        {TuiRegPage::VEC, "Vec"},
+        {TuiRegPage::PIPELINE, "Pipe"},
+        {TuiRegPage::CACHE, "Cache"},
+        {TuiRegPage::TRACE, "Trace"},
+        {TuiRegPage::EXPLAIN, "Exp"},
+        {TuiRegPage::STACK, "Stack"}
+    }};
+
+    std::string line;
+    for (size_t i = 0; i < tabs.size(); ++i) {
+        bool active = (page_ == tabs[i].page);
+        if (active) {
+            line += std::format("\033[1m{}\033[38;5;117m[{}]\033[0m", kThemeSky, tabs[i].name);
+        } else {
+            line += std::format("{}{}\033[0m", kThemeMuted, tabs[i].name);
+        }
+        if (i + 1 < tabs.size()) {
+            line += std::format("{}│\033[0m", kThemeBorder);
+        }
+    }
+    return format_to_width(line, width);
+}
+
+auto LeftPane::render_trace_row(int logical_row, int width) -> std::string {
+    if (!trace_buffer_ || trace_buffer_->empty()) {
+        if (logical_row == 1) {
+            return format_to_width(" [No execution trace recorded yet]", width);
+        }
+        return format_to_width("", width);
+    }
+    int total = static_cast<int>(trace_buffer_->size());
+    if (logical_row < 0 || logical_row >= total) {
+        return format_to_width("", width);
+    }
+    return format_to_width(" " + trace_buffer_->at(static_cast<std::size_t>(logical_row)), width);
+}
+
+auto LeftPane::render_log_bottom_row(int row_idx, int num_rows, int width) -> std::string {
+    if (row_idx == 0) {
+        return section_line("Log", width);
+    }
+    if (log_lines_.empty()) {
+        return format_to_width("", width);
+    }
+    int total = static_cast<int>(log_lines_.size());
+    int max_entries = num_rows - 1;
+    int log_idx = total - max_entries + (row_idx - 1);
+    if (log_idx < 0 || log_idx >= total) {
+        return format_to_width("", width);
+    }
+    return format_to_width(" " + log_lines_.at(static_cast<std::size_t>(log_idx)), width);
+}
+
+auto LeftPane::render_row(int row_idx, int width) -> std::string {
     last_width_ = width;
-    int const logical_row = row_idx + scroll_offset_;
+
+    if (row_idx == 0) {
+        return render_tab_bar(width);
+    }
+
+    constexpr int kLogAreaHeight = 10;
+    if (visible_rows_ >= 15 && row_idx >= visible_rows_ - kLogAreaHeight) {
+        int log_row_idx = row_idx - (visible_rows_ - kLogAreaHeight);
+        return render_log_bottom_row(log_row_idx, kLogAreaHeight, width);
+    }
+
+    int const content_row_idx = row_idx - 1;
+    int const logical_row = content_row_idx + scroll_offset_;
+
+    if (page_ == TuiRegPage::TRACE) {
+        return render_trace_row(logical_row, width);
+    }
 
     if (page_ == TuiRegPage::EXPLAIN) {
         auto explain_rows = get_explain_rows(width);
@@ -173,7 +250,7 @@ auto RegisterPane::render_row(int row_idx, int width) -> std::string {
     return get_row_uncached(logical_row, width);
 }
 
-void RegisterPane::update_cache() {
+void LeftPane::update_cache() {
     auto& st = machine_.cpu.state();
     for (int i = 0; i < 32; ++i) {
         cached_gpr_.at(static_cast<std::size_t>(i)) = st.regs.read(static_cast<RegId>(i));
@@ -182,7 +259,7 @@ void RegisterPane::update_cache() {
     }
 }
 
-void RegisterPane::scroll(int lines) {
+void LeftPane::scroll(int lines) {
     int w = last_width_ > 0 ? last_width_ : 60;
     int total_logical_rows = get_total_rows(w);
     int max_scroll = std::max(0, total_logical_rows - visible_rows_);

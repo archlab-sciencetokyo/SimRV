@@ -1,6 +1,6 @@
 /**
- * @file ConsolePane.hpp
- * @brief OOP Widget for standard log console.
+ * @file RightPane.hpp
+ * @brief OOP Widget for TUI right pane (Guest console / Sixel display).
  */
 #pragma once
 
@@ -10,10 +10,10 @@
 
 namespace simrv::tui {
 
-class ConsolePane : public TuiWidget {
+class RightPane : public TuiWidget {
    public:
-    ConsolePane() = default;
-    ~ConsolePane() override = default;
+    RightPane() = default;
+    ~RightPane() override = default;
 
     [[nodiscard]] auto render_row(int row_idx, int width) -> std::string override;
     

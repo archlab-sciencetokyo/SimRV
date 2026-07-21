@@ -28,8 +28,8 @@ extern volatile std::sig_atomic_t g_resized;
 
 enum class TuiLayout : uint8_t {
     Split,
-    FullConsole,
-    FullRegister
+    FullRight,
+    FullLeft
 };
 
 enum class TuiRegPage : uint8_t {
@@ -38,14 +38,13 @@ enum class TuiRegPage : uint8_t {
     VEC,
     PIPELINE,
     CACHE,
+    TRACE,
     EXPLAIN,
     STACK
 };
 
 enum class TuiRightPanelMode : uint8_t {
     Terminal,
-    Log,
-    LiveTrace,
     Display
 };
 
@@ -53,8 +52,8 @@ enum class TuiRightPanelMode : uint8_t {
  * @class Tui
  * @brief Handles ANSI-based split-screen rendering, scrolling, and status display for RTOS mode.
  */
-class RegisterPane;
-class ConsolePane;
+class LeftPane;
+class RightPane;
 class StatusBar;
 
 class Tui {
@@ -100,8 +99,8 @@ class Tui {
     void clear_status_override() { status_override_.clear(); }
 
     void cycle_layout() {
-        if (layout_ == TuiLayout::Split) layout_ = TuiLayout::FullConsole;
-        else if (layout_ == TuiLayout::FullConsole) layout_ = TuiLayout::FullRegister;
+        if (layout_ == TuiLayout::Split) layout_ = TuiLayout::FullRight;
+        else if (layout_ == TuiLayout::FullRight) layout_ = TuiLayout::FullLeft;
         else layout_ = TuiLayout::Split;
         render(true);
     }
@@ -145,8 +144,8 @@ class Tui {
 
     simrv::core::Machine& machine_;
     
-    std::unique_ptr<RegisterPane> reg_pane_;
-    std::unique_ptr<ConsolePane> console_pane_;
+    std::unique_ptr<LeftPane> left_pane_;
+    std::unique_ptr<RightPane> right_pane_;
     std::unique_ptr<StatusBar> status_bar_;
 
     int pane_width_cached_ = 62;

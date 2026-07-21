@@ -1,12 +1,13 @@
 /**
- * @file RegisterPane.hpp
- * @brief OOP Widget for Register and Pipeline visualizer.
+ * @file LeftPane.hpp
+ * @brief OOP Widget for TUI Left Pane (Registers, Pipeline, Cache, Trace, Stack, Explainer & Log).
  */
 #pragma once
 
 #include <vector>
 #include <array>
 #include <string>
+#include <optional>
 #include "simrv/tui/TuiWidget.hpp"
 #include "simrv/tui/Tui.hpp"
 
@@ -30,14 +31,14 @@ inline constexpr std::array<const char*, 32> kFpRegNames = {
     "fa1", "fa2", "fa3", "fa4", "fa5",  "fa6",  "fa7", "fs2", "fs3",  "fs4", "fs5",
     "fs6", "fs7", "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11"};
 
-class RegisterPane : public TuiWidget {
+class LeftPane : public TuiWidget {
    public:
-    explicit RegisterPane(simrv::core::Machine& machine) : machine_(machine) {
+    explicit LeftPane(simrv::core::Machine& machine) : machine_(machine) {
         cached_gpr_.fill(0);
         cached_fpr_.fill(0);
         cached_vec_.fill(0);
     }
-    ~RegisterPane() override = default;
+    ~LeftPane() override = default;
 
     [[nodiscard]] auto render_row(int row_idx, int width) -> std::string override;
 
@@ -55,8 +56,14 @@ class RegisterPane : public TuiWidget {
     [[nodiscard]] auto get_scroll_offset() const -> int { return scroll_offset_; }
     void set_inspect_addr(Register addr) { inspect_addr_ = addr; }
     [[nodiscard]] auto get_inspect_addr() const -> Register { return inspect_addr_; }
-    
+    void set_trace_buffer(const std::vector<std::string>* trace_buf) { trace_buffer_ = trace_buf; }
+    void set_log_lines(std::vector<std::string> log_lines) { log_lines_ = std::move(log_lines); }
+
    private:
+    [[nodiscard]] auto render_tab_bar(int width) const -> std::string;
+    [[nodiscard]] auto render_trace_row(int logical_row, int width) -> std::string;
+    [[nodiscard]] auto render_log_bottom_row(int row_idx, int num_rows, int width) -> std::string;
+
     [[nodiscard]] auto get_sparkline_string(int width) -> std::string;
     [[nodiscard]] auto get_row_uncached(int logical_row, int width) -> std::string;
     [[nodiscard]] auto get_explain_rows(int width) -> std::vector<std::string>;
@@ -114,6 +121,8 @@ class RegisterPane : public TuiWidget {
     int scroll_offset_ = 0;
     double active_runtime_ = 0.0;
     Register inspect_addr_ = 0;
+    const std::vector<std::string>* trace_buffer_ = nullptr;
+    std::vector<std::string> log_lines_;
 };
 
 }  // namespace simrv::tui

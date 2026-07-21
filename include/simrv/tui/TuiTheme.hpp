@@ -59,6 +59,7 @@ extern const char* g_theme_peach;
 extern const char* g_theme_coral;
 extern const char* g_theme_sky;
 extern const char* g_theme_pink;
+extern const char* g_theme_modal_bg;
 
 extern std::array<const char*, 16> g_theme_palette;
 extern std::array<const char*, 16> g_theme_bg_palette;
@@ -73,6 +74,7 @@ extern std::array<const char*, 16> g_theme_bg_palette;
 #define kThemeCoral g_theme_coral
 #define kThemeSky g_theme_sky
 #define kThemePink g_theme_pink
+#define kThemeModalBg g_theme_modal_bg
 
 extern TuiTheme g_tui_theme;
 void set_tui_theme(TuiTheme theme);
@@ -84,5 +86,6 @@ bool is_high_contrast();
 auto make_repeated_string(const std::string& pattern, int count) -> std::string;
 auto get_display_width(const std::string& s) -> int;
 auto format_to_width(const std::string& colored_str, int target_width) -> std::string;
+auto overlay_string(const std::string& base_line, const std::string& overlay_line, int start_x, int box_w) -> std::string;
 
 }  // namespace simrv::tui

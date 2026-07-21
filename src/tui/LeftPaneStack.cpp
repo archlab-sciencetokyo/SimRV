@@ -2,7 +2,7 @@
  * @file RegisterPaneStack.cpp
  * @brief Stack memory view pane rendering for the TUI register panel.
  */
-#include "simrv/tui/RegisterPane.hpp"
+#include "simrv/tui/LeftPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
@@ -13,7 +13,7 @@
 
 namespace simrv::tui {
 
-auto RegisterPane::translate_safe(const simrv::core::CPU& cpu, Register vaddr) const -> std::optional<Register> {
+auto LeftPane::translate_safe(const simrv::core::CPU& cpu, Register vaddr) const -> std::optional<Register> {
     const auto eff_priv = cpu.effective_data_privilege();
     const bool translation_enabled = (eff_priv != PrivilegeLevel::Machine &&
                                       simrv::xlen::satp_translation_enabled(cpu.state().satp));
@@ -29,7 +29,7 @@ auto RegisterPane::translate_safe(const simrv::core::CPU& cpu, Register vaddr) c
     return std::nullopt;
 }
 
-auto RegisterPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
     int const width = col_width + right_width;
     
     Register sp = cpu.state().regs.read(RegId::Sp);

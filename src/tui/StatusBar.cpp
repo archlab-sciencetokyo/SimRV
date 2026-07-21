@@ -39,26 +39,14 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         } else if (status_badge == "\033[1;38;5;234;48;5;210m TRAPPED \033[0m" && (get_tui_theme() == TuiTheme::HighContrast || get_tui_theme() == TuiTheme::Adaptive)) {
             status_badge = "\033[1;41;37m TRAPPED \033[0m";
         }
-        std::string page_badge;
-        switch (active_page_) {
-            case TuiRegPage::GPR:      page_badge = "GPR"; break;
-            case TuiRegPage::FPR:      page_badge = "FPR"; break;
-            case TuiRegPage::VEC:      page_badge = "VEC"; break;
-            case TuiRegPage::CACHE:    page_badge = "CCHE"; break;
-            case TuiRegPage::EXPLAIN:  page_badge = "EXPL"; break;
-            case TuiRegPage::STACK:    page_badge = "STCK"; break;
-            case TuiRegPage::PIPELINE:
-            default:                   page_badge = "PIPE"; break;
-        }
         int target_width = layout_ == TuiLayout::Split ? left_width_ : width - 2;
         std::string left_render;
-        if (target_width < 45) {
-            left_render = std::format(" SimRV | {}{}\033[0m", kThemeSky, page_badge);
-        } else if (target_width < 60) {
-            left_render = std::format(" SimRV [{}] | {}{}\033[0m", binary_name, kThemeSky, page_badge);
+        if (target_width < 35) {
+            left_render = std::format(" SimRV | {}", status_badge);
+        } else if (target_width < 50) {
+            left_render = std::format(" SimRV [{}] | {}", binary_name, status_badge);
         } else {
-            std::string left_text = std::format(" SimRV [{}] ({}) | ", binary_name, mode_str);
-            left_render = left_text + status_badge + std::format(" | {}{}\033[0m", kThemeSky, page_badge);
+            left_render = std::format(" SimRV [{}] ({}) | {}", binary_name, mode_str, status_badge);
         }
 
         int left_printed_len = get_display_width(left_render);
@@ -189,12 +177,6 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             case TuiRightPanelMode::Terminal:
                 mode_label = trace_enabled_ ? "Terminal [Trace ON]" : "Terminal";
                 break;
-            case TuiRightPanelMode::Log:
-                mode_label = trace_enabled_ ? "System Log [Trace ON]" : "System Log";
-                break;
-            case TuiRightPanelMode::LiveTrace:
-                mode_label = "Live Trace";
-                break;
             case TuiRightPanelMode::Display:
             default:
                 mode_label = "Display";
@@ -235,7 +217,7 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                 screen += std::string(kThemeBorder) + "╠" + make_repeated_string("═", left_width_) + "╪" +
                           make_repeated_string("═", right_width_) + "╣\033[0m\n";
                 break;
-            case TuiLayout::FullConsole:
+            case TuiLayout::FullRight:
                 screen += std::string(kThemeBorder) + "╔" + make_repeated_string("═", width - 2) + "╗\033[0m\n";
                 screen += std::string(kThemeBorder) + "║\033[0m" + right_render + kThemeBorder + "║\033[0m\n";
                 screen += std::string(kThemeBorder) + "╠" + make_repeated_string("═", width - 2) + "╣\033[0m\n";
@@ -252,10 +234,10 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         std::string footer_text;
         if (paused_) {
             footer_text =
-                " [s] Step | [b] Back | [n] Step N | [:] Break | [g] StepSize | [m] Mem | [f] Speed | [?] Help | [c] Run | [q] Quit ";
+                " [s] Step | [b] Back | [n] Step N | [:] Break | [g] StepSize | [m] Mem | [f] Speed | [F1/h/?] Help | [c] Run | [q] Quit ";
         } else {
             footer_text =
-                " [Ctrl-P] Pause | [Ctrl-Q] Quit | [Tab] Layout | [+/-] Speed | [:] Break | [g] StepSize | [m] Mem | [?] Help ";
+                " [Ctrl-P] Pause | [Ctrl-Q] Quit | [Tab] Layout | [+/-] Speed | [:] Break | [g] StepSize | [m] Mem | [F1/h/?] Help ";
         }
         int footer_len = get_display_width(footer_text);
         int pad_foot = (width - 2) - footer_len;

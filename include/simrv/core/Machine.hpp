@@ -33,7 +33,7 @@ class InputDevice;
 
 namespace simrv::tui {
 class Tui;
-class RegisterPane;
+class LeftPane;
 }
 
 namespace simrv::core {
@@ -158,7 +158,7 @@ class Machine {
     friend class simrv::execute::ExecuteUnit;
     friend class simrv::device::Uart;
     friend class simrv::tui::Tui;
-    friend class simrv::tui::RegisterPane;
+    friend class simrv::tui::LeftPane;
     simrv::memory::MemorySubsystem memory_;
     /// Perform per-cycle initialization before CPU stage execution.
     virtual void prepare_cycle() {}

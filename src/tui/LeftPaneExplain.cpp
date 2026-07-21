@@ -2,7 +2,7 @@
  * @file RegisterPaneExplain.cpp
  * @brief Instruction explainer pane rendering for the TUI register panel.
  */
-#include "simrv/tui/RegisterPane.hpp"
+#include "simrv/tui/LeftPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
 #include "simrv/Define.hpp"
@@ -458,7 +458,7 @@ auto render_field_decoded_values(
 
 } // namespace
 
-auto RegisterPane::get_explain_rows(int width) -> std::vector<std::string> {
+auto LeftPane::get_explain_rows(int width) -> std::vector<std::string> {
     bool show_disabled = !paused_;
     if (show_disabled && machine_.tui) {
         uint64_t delay = machine_.tui->step_delay_us_.load(std::memory_order_relaxed);

@@ -2,7 +2,7 @@
  * @file RegisterPaneRegs.cpp
  * @brief GPR, FPR, and vector register rendering for the TUI register panel.
  */
-#include "simrv/tui/RegisterPane.hpp"
+#include "simrv/tui/LeftPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/core/Cpu.hpp"
 #include <format>
@@ -12,7 +12,7 @@
 
 namespace simrv::tui {
 
-auto RegisterPane::render_registers_single_column(const simrv::core::ArchState& st, int logical_row, int width) -> std::string {
+auto LeftPane::render_registers_single_column(const simrv::core::ArchState& st, int logical_row, int width) -> std::string {
     if (logical_row >= 0 && logical_row < 32) {
         int reg = logical_row;
         switch (page_) {
@@ -49,7 +49,7 @@ auto RegisterPane::render_registers_single_column(const simrv::core::ArchState& 
     return format_to_width("", width);
 }
 
-auto RegisterPane::render_registers_double_column(const simrv::core::ArchState& st, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_registers_double_column(const simrv::core::ArchState& st, int logical_row, int col_width, int right_width) -> std::string {
     if (logical_row >= 0 && logical_row < 16) {
         int reg1 = logical_row;
         int reg2 = logical_row + 16;
@@ -124,7 +124,7 @@ auto RegisterPane::render_registers_double_column(const simrv::core::ArchState& 
     return format_to_width("", col_width + right_width);
 }
 
-auto RegisterPane::render_registers_or_pipeline(const simrv::core::CPU& cpu, const simrv::core::ArchState& st, int logical_row, int col_width, int right_width, int width, bool single_column) -> std::string {
+auto LeftPane::render_registers_or_pipeline(const simrv::core::CPU& cpu, const simrv::core::ArchState& st, int logical_row, int col_width, int right_width, int width, bool single_column) -> std::string {
     if (single_column) {
         if (logical_row >= 0 && logical_row < 32) {
             return render_registers_single_column(st, logical_row, width);

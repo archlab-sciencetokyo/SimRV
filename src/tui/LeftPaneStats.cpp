@@ -2,7 +2,7 @@
  * @file RegisterPaneStats.cpp
  * @brief Performance statistics and pipeline counters pane rendering.
  */
-#include "simrv/tui/RegisterPane.hpp"
+#include "simrv/tui/LeftPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/Define.hpp"
@@ -103,14 +103,14 @@ auto make_progress_bar(double ratio, int width, const std::string& color_code) -
 
 } // namespace
 
-auto RegisterPane::render_machine_performance_stats(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
+auto LeftPane::render_machine_performance_stats(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
     if (adj_logical_row >= 25 && adj_logical_row <= 30) {
         return render_machine_performance_stats_core(cpu, adj_logical_row, width);
     }
     return render_machine_performance_stats_sys(cpu, adj_logical_row, width);
 }
 
-auto RegisterPane::render_machine_performance_stats_core(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
+auto LeftPane::render_machine_performance_stats_core(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
     if (adj_logical_row == 25) {
         return section_line("Performance & Machine Stats", width);
     }
@@ -141,7 +141,7 @@ auto RegisterPane::render_machine_performance_stats_core(const simrv::core::CPU&
     return format_to_width("", width);
 }
 
-auto RegisterPane::render_machine_performance_stats_sys([[maybe_unused]] const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
+auto LeftPane::render_machine_performance_stats_sys([[maybe_unused]] const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
     if (adj_logical_row == 31) {
         std::string mem_name = machine_.s_fn_memimg;
         auto pos = mem_name.find_last_of("/\\");
@@ -187,7 +187,7 @@ auto RegisterPane::render_machine_performance_stats_sys([[maybe_unused]] const s
     return format_to_width("", width);
 }
 
-auto RegisterPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
+auto LeftPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
     if (adj_logical_row >= 25 && adj_logical_row <= 29) {
         return render_cycle_accurate_core_stats(cpu, adj_logical_row, width);
     }
@@ -200,7 +200,7 @@ auto RegisterPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int 
     return render_cycle_accurate_hw_info(cpu, adj_logical_row, width);
 }
 
-auto RegisterPane::render_cycle_accurate_core_stats(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
+auto LeftPane::render_cycle_accurate_core_stats(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
     if (adj_logical_row == 25) {
         return section_line("Statistics & Performance", width);
     }
@@ -286,7 +286,7 @@ auto RegisterPane::render_cycle_accurate_core_stats(const simrv::core::CPU& cpu,
     return format_to_width("", width);
 }
 
-auto RegisterPane::render_cycle_accurate_hazard_stats(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
+auto LeftPane::render_cycle_accurate_hazard_stats(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
     uint64_t cycles = cpu.clint_mmio.mcycle;
     uint64_t data_stalls = cpu.pipeline_sim.data_hazard_stalls();
     uint64_t ctrl_bubbles = cpu.pipeline_sim.control_hazard_bubbles();
@@ -321,7 +321,7 @@ auto RegisterPane::render_cycle_accurate_hazard_stats(const simrv::core::CPU& cp
     return format_to_width("", width);
 }
 
-auto RegisterPane::render_cycle_accurate_mix_stats(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
+auto LeftPane::render_cycle_accurate_mix_stats(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
     if (adj_logical_row == 33) {
         uint64_t max_val = 1;
         for (auto val : kips_history_) {
@@ -401,7 +401,7 @@ auto RegisterPane::render_cycle_accurate_mix_stats(const simrv::core::CPU& cpu, 
     return format_to_width("", width);
 }
 
-auto RegisterPane::render_cycle_accurate_hw_info(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
+auto LeftPane::render_cycle_accurate_hw_info(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
     if (adj_logical_row == 35) {
         return section_line("Machine & Hardware Info", width);
     }
@@ -461,7 +461,7 @@ auto RegisterPane::render_cycle_accurate_hw_info(const simrv::core::CPU& cpu, in
     return format_to_width("", width);
 }
 
-auto RegisterPane::render_debug_state(int debug_row, int width) -> std::string {
+auto LeftPane::render_debug_state(int debug_row, int width) -> std::string {
     auto const& cpu = machine_.cpu;
     auto const& st = cpu.state();
     int col_width = width / 2;
@@ -499,7 +499,7 @@ auto RegisterPane::render_debug_state(int debug_row, int width) -> std::string {
     return format_to_width("", width);
 }
 
-auto RegisterPane::render_perf_or_debug(const simrv::core::CPU& cpu, int logical_row, int width, bool single_column) -> std::string {
+auto LeftPane::render_perf_or_debug(const simrv::core::CPU& cpu, int logical_row, int width, bool single_column) -> std::string {
     int const total_logical_rows = get_total_rows(width);
     int const adj_base_rows = total_logical_rows - (machine_.s_debug_mode ? 4 : 0);
 
@@ -516,7 +516,7 @@ auto RegisterPane::render_perf_or_debug(const simrv::core::CPU& cpu, int logical
     }
 }
 
-auto RegisterPane::get_sparkline_string(int width) -> std::string {
+auto LeftPane::get_sparkline_string(int width) -> std::string {
     if (kips_history_.empty()) {
         std::string res(static_cast<std::size_t>(width), ' ');
         return res;

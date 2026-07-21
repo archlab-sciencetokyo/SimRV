@@ -4,7 +4,7 @@ project(SimRV LANGUAGES CXX)
 
 enable_testing()
 
-set(SIMRV_VERSION "2.0.0-beta.18")
+set(SIMRV_VERSION "2.0.0-beta.19")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -124,13 +124,13 @@ add_executable(SimRV
   src/device/Power.cpp
   src/tui/Tui.cpp
   src/tui/TuiTheme.cpp
-  src/tui/RegisterPane.cpp
-  src/tui/RegisterPaneRegs.cpp
-  src/tui/RegisterPanePipeline.cpp
-  src/tui/RegisterPaneStats.cpp
-  src/tui/RegisterPaneExplain.cpp
-  src/tui/RegisterPaneStack.cpp
-  src/tui/ConsolePane.cpp
+  src/tui/LeftPane.cpp
+  src/tui/LeftPaneRegs.cpp
+  src/tui/LeftPanePipeline.cpp
+  src/tui/LeftPaneStats.cpp
+  src/tui/LeftPaneExplain.cpp
+  src/tui/LeftPaneStack.cpp
+  src/tui/RightPane.cpp
   src/tui/StatusBar.cpp
   src/debug/GdbStub.cpp
   src/debug/SpikeLockstep.cpp

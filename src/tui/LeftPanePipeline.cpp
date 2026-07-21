@@ -2,7 +2,7 @@
  * @file RegisterPanePipeline.cpp
  * @brief Pipeline visualization pane rendering for the TUI register panel.
  */
-#include "simrv/tui/RegisterPane.hpp"
+#include "simrv/tui/LeftPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
@@ -152,7 +152,7 @@ auto get_active_forwarding_paths(const simrv::pipeline::PipelineSim& ps) -> std:
 
 } // namespace
 
-auto RegisterPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
     if (machine_.s_cycle_accurate) {
         if (logical_row < 16) {
             return render_pipeline_timeline(cpu, logical_row, col_width + right_width);
@@ -163,7 +163,7 @@ auto RegisterPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logic
     }
 }
 
-auto RegisterPane::render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
     int const val = logical_row - 16;
     if (val >= 0 && val <= 5) {
         return render_pipeline_stages_ca_core(cpu, val, col_width + right_width);
@@ -174,7 +174,7 @@ auto RegisterPane::render_pipeline_stages_cycle_accurate(const simrv::core::CPU&
     return render_pipeline_stages_ca_pred(cpu, val, col_width + right_width);
 }
 
-auto RegisterPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int stage_idx, int width) -> std::string {
+auto LeftPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int stage_idx, int width) -> std::string {
     auto& ps = cpu.pipeline_sim;
     bool is_raw_stalled = is_raw_hazard_stalled(ps);
 
@@ -200,7 +200,7 @@ auto RegisterPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, i
     }
 }
 
-auto RegisterPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu, int stage_idx, int col_width, int right_width) -> std::string {
+auto LeftPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu, int stage_idx, int col_width, int right_width) -> std::string {
     auto& ps = cpu.pipeline_sim;
     int const width = col_width + right_width;
     bool is_raw_stalled = is_raw_hazard_stalled(ps);
@@ -250,7 +250,7 @@ auto RegisterPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu
 
 
 
-auto RegisterPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, int stage_idx, int width) -> std::string {
+auto LeftPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, int stage_idx, int width) -> std::string {
     auto& ps = cpu.pipeline_sim;
 
     switch (stage_idx) {
@@ -275,14 +275,14 @@ auto RegisterPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, i
     }
 }
 
-auto RegisterPane::render_pipeline_stages_functional(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_pipeline_stages_functional(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
     if (logical_row >= 0 && logical_row < 16) {
         return render_pipeline_stages_functional_low(cpu, logical_row, col_width, right_width);
     }
     return render_pipeline_stages_functional_high(cpu, logical_row, col_width, right_width);
 }
 
-auto RegisterPane::render_pipeline_stages_functional_low(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_pipeline_stages_functional_low(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
     if (logical_row >= 0 && logical_row <= 7) {
         return render_pipeline_stages_functional_low_part1(cpu, logical_row, col_width, right_width);
     }
@@ -292,7 +292,7 @@ auto RegisterPane::render_pipeline_stages_functional_low(const simrv::core::CPU&
     return format_to_width(std::format(" {}Pipeline page\033[0m", kThemeMuted), col_width + right_width);
 }
 
-auto RegisterPane::render_pipeline_stages_functional_low_part1(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_pipeline_stages_functional_low_part1(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
     int const width = col_width + right_width;
     auto& ctx = cpu.pipeline_context;
     switch (logical_row) {
@@ -334,7 +334,7 @@ auto RegisterPane::render_pipeline_stages_functional_low_part1(const simrv::core
     }
 }
 
-auto RegisterPane::render_pipeline_stages_functional_low_part2(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_pipeline_stages_functional_low_part2(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
     int const width = col_width + right_width;
     auto& ctx = cpu.pipeline_context;
     switch (logical_row) {
@@ -383,7 +383,7 @@ auto RegisterPane::render_pipeline_stages_functional_low_part2(const simrv::core
     }
 }
 
-auto RegisterPane::render_pipeline_stages_functional_high(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_pipeline_stages_functional_high(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
     int const width = col_width + right_width;
     auto& ctx = cpu.pipeline_context;
     auto exc_text = ctx.pending_exception.has_value()
@@ -414,7 +414,7 @@ auto RegisterPane::render_pipeline_stages_functional_high(const simrv::core::CPU
     }
 }
 
-auto RegisterPane::render_system_state(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_system_state(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
     auto const& st = cpu.state();
     int const width = col_width + right_width;
     int label_pad = (width < 50) ? 0 : ((width < 65) ? 5 : 8);
@@ -476,7 +476,7 @@ auto RegisterPane::render_system_state(const simrv::core::CPU& cpu, int logical_
     return format_to_width("", width);
 }
 
-auto RegisterPane::render_system_or_pipeline_extended(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width, bool single_column) -> std::string {
+auto LeftPane::render_system_or_pipeline_extended(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width, bool single_column) -> std::string {
     if (logical_row >= 16 && logical_row <= 24) {
         if (page_ == TuiRegPage::PIPELINE) {
             return render_pipeline_stages(cpu, logical_row, col_width, right_width);
@@ -487,7 +487,7 @@ auto RegisterPane::render_system_or_pipeline_extended(const simrv::core::CPU& cp
     return "";
 }
 
-auto RegisterPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical_row, int width) -> std::string {
+auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical_row, int width) -> std::string {
     auto const& ps = cpu.pipeline_sim;
     auto const history = ps.get_cycle_history_copy();
 
@@ -597,7 +597,7 @@ auto RegisterPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int log
     return format_to_width("", width);
 }
 
-auto RegisterPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
     int const width = col_width + right_width;
     if (!machine_.s_cycle_accurate) {
         if (logical_row == 0) {
