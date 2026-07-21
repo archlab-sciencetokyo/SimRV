@@ -1,6 +1,6 @@
 /**
  * @file StateControl.cpp
- * @brief SimRV implementation unit.
+ * @brief CPU state control, trap handling, and privilege management.
  */
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/StateControl.hpp"

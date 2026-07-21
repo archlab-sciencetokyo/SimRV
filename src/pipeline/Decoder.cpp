@@ -79,6 +79,55 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "VSOXEI8_V", "VSOXEI16_V", "VSOXEI32_V", "VSOXEI64_V",
     "VID_V",
     "VFMACC_VV", "VFMACC_VF",
+    "VREDSUM_VS",
+    "VWMUL_VV", "VWMUL_VX",
+    "VNCLIP_WV", "VNCLIP_WX", "VNCLIP_WI",
+    "VNCLIPU_WV", "VNCLIPU_WX", "VNCLIPU_WI",
+    "VSLIDE1UP_VX", "VSLIDE1DOWN_VX",
+    "VFADD_VV", "VFADD_VF",
+    "VRSUB_VX", "VRSUB_VI",
+    "VSADD_VV", "VSADD_VX", "VSADD_VI",
+    "VSADDU_VV", "VSADDU_VX", "VSADDU_VI",
+    "VSBC_VVM", "VSBC_VXM",
+    "VSEXT_VF2", "VSEXT_VF4", "VSEXT_VF8",
+    "VZEXT_VF2", "VZEXT_VF4", "VZEXT_VF8",
+    "VSLIDEDOWN_VX", "VSLIDEDOWN_VI",
+    "VSLIDEUP_VX", "VSLIDEUP_VI",
+    "VSMUL_VV", "VSMUL_VX",
+    "VSSRA_VV", "VSSRA_VX", "VSSRA_VI",
+    "VSSRL_VV", "VSSRL_VX", "VSSRL_VI",
+    "VSSUB_VV", "VSSUB_VX",
+    "VSSUBU_VV", "VSSUBU_VX",
+    "VWADD_VV", "VWADD_VX", "VWADD_WV", "VWADD_WX",
+    "VWADDU_VV", "VWADDU_VX", "VWADDU_WV", "VWADDU_WX",
+    "VWSUB_VV", "VWSUB_VX", "VWSUB_WV", "VWSUB_WX",
+    "VWSUBU_VV", "VWSUBU_VX", "VWSUBU_WV", "VWSUBU_WX",
+    "VWMULU_VV", "VWMULU_VX",
+    "VWMULSU_VV", "VWMULSU_VX",
+    "VWREDSUM_VS", "VWREDSUMU_VS",
+    "VMV1R_V", "VMV2R_V", "VMV4R_V", "VMV8R_V",
+    "VL1RE8_V", "VL1RE16_V", "VL1RE32_V", "VL1RE64_V",
+    "VL2RE8_V", "VL2RE16_V", "VL2RE32_V", "VL2RE64_V",
+    "VL4RE8_V", "VL4RE16_V", "VL4RE32_V", "VL4RE64_V",
+    "VL8RE8_V", "VL8RE16_V", "VL8RE32_V", "VL8RE64_V",
+    "VS1R_V", "VS2R_V", "VS4R_V", "VS8R_V",
+    "VADC_VVM", "VADC_VXM", "VADC_VIM",
+    "VMADC_VV", "VMADC_VX", "VMADC_VI",
+    "VMADC_VVM", "VMADC_VXM", "VMADC_VIM",
+    "VMSBC_VV", "VMSBC_VX", "VMSBC_VVM", "VMSBC_VXM",
+    "VMSBF_M", "VMSIF_M", "VMSOF_M", "VFIRST_M", "VCPOP_M", "VIOTA_M", "VCOMPRESS_VM",
+    "VANDN_VV", "VANDN_VX",
+    "VROL_VV", "VROL_VX",
+    "VROR_VV", "VROR_VX", "VROR_VI",
+    "VCLZ_V", "VCTZ_V", "VCPOP_V",
+    "VBREV_V", "VBREV8_V", "VREV8_V",
+    "VCLMUL_VV", "VCLMUL_VX",
+    "VCLMULH_VV", "VCLMULH_VX",
+    "VMAND_MM", "VMNAND_MM", "VMANDN_MM",
+    "VMOR_MM", "VMNOR_MM", "VMORN_MM",
+    "VMXOR_MM", "VMXNOR_MM",
+    "VFMV_F_S", "VFMV_S_F", "VFMERGE_VFM",
+    "VWSLL_VV", "VWSLL_VX", "VWSLL_VI",
     "VCHECK",
     "UNKNOWN"};
 
@@ -561,10 +610,21 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operation
             if (funct3 == 0) return OperationId::VADD_VV;
             if (funct3 == 4) return OperationId::VADD_VX;
             if (funct3 == 3) return OperationId::VADD_VI;
+            if (funct3 == 1) return OperationId::VFADD_VV;
+            if (funct3 == 5) return OperationId::VFADD_VF;
+            if (funct3 == 2) return OperationId::VREDSUM_VS;
+            break;
+        case 0x01:
+            if (funct3 == 0) return OperationId::VANDN_VV;
+            if (funct3 == 4) return OperationId::VANDN_VX;
             break;
         case 0x02:
             if (funct3 == 0) return OperationId::VSUB_VV;
             if (funct3 == 4) return OperationId::VSUB_VX;
+            break;
+        case 0x03:
+            if (funct3 == 4) return OperationId::VRSUB_VX;
+            if (funct3 == 3) return OperationId::VRSUB_VI;
             break;
         case 0x04:
             if (funct3 == 0) return OperationId::VMINU_VV;
@@ -582,8 +642,32 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operation
             if (funct3 == 0) return OperationId::VMAX_VV;
             if (funct3 == 4) return OperationId::VMAX_VX;
             break;
+        case 0x0E:
+            if (funct3 == 6) return OperationId::VSLIDE1UP_VX;
+            if (funct3 == 4) return OperationId::VSLIDEUP_VX;
+            if (funct3 == 3) return OperationId::VSLIDEUP_VI;
+            break;
+        case 0x0F:
+            if (funct3 == 6) return OperationId::VSLIDE1DOWN_VX;
+            if (funct3 == 4) return OperationId::VSLIDEDOWN_VX;
+            if (funct3 == 3) return OperationId::VSLIDEDOWN_VI;
+            break;
         case 0x14:
-            if (funct3 == 2 && ((ir >> 15) & 0x1F) == 17 && ((ir >> 20) & 0x1F) == 0) return OperationId::VID_V;
+            if (funct3 == 0) return OperationId::VROR_VV;
+            if (funct3 == 4) return OperationId::VROR_VX;
+            if (funct3 == 3) return OperationId::VROR_VI;
+            if (funct3 == 2) {
+                uint32_t rs1_val = (ir >> 15) & 0x1F;
+                if (rs1_val == 1) return OperationId::VMSBF_M;
+                if (rs1_val == 2) return OperationId::VMSOF_M;
+                if (rs1_val == 3) return OperationId::VMSIF_M;
+                if (rs1_val == 16) return OperationId::VIOTA_M;
+                if (rs1_val == 17 && ((ir >> 20) & 0x1F) == 0) return OperationId::VID_V;
+            }
+            break;
+        case 0x15:
+            if (funct3 == 0) return OperationId::VROL_VV;
+            if (funct3 == 4) return OperationId::VROL_VX;
             break;
         case 0x25:
             if (funct3 == 0) return OperationId::VSLL_VV;
@@ -592,18 +676,51 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operation
             if (funct3 == 2) return OperationId::VMUL_VV;
             if (funct3 == 6) return OperationId::VMUL_VX;
             break;
-        case 0x21:
-            if (funct3 == 2) return OperationId::VDIV_VV;
-            if (funct3 == 6) return OperationId::VDIV_VX;
+        case 0x27:
+            if (funct3 == 0) return OperationId::VSMUL_VV;
+            if (funct3 == 4) return OperationId::VSMUL_VX;
+            if (funct3 == 3) {
+                uint32_t simm5 = (ir >> 15) & 0x1F;
+                if (simm5 == 0) return OperationId::VMV1R_V;
+                if (simm5 == 1) return OperationId::VMV2R_V;
+                if (simm5 == 3) return OperationId::VMV4R_V;
+                if (simm5 == 7) return OperationId::VMV8R_V;
+            }
             break;
         case 0x20:
             if (funct3 == 2) return OperationId::VDIVU_VV;
             if (funct3 == 6) return OperationId::VDIVU_VX;
+            if (funct3 == 0) return OperationId::VSADDU_VV;
+            if (funct3 == 4) return OperationId::VSADDU_VX;
+            if (funct3 == 3) return OperationId::VSADDU_VI;
+            break;
+        case 0x21:
+            if (funct3 == 2) return OperationId::VDIV_VV;
+            if (funct3 == 6) return OperationId::VDIV_VX;
+            if (funct3 == 0) return OperationId::VSADD_VV;
+            if (funct3 == 4) return OperationId::VSADD_VX;
+            if (funct3 == 3) return OperationId::VSADD_VI;
+            break;
+        case 0x22:
+            if (funct3 == 0) return OperationId::VSSUBU_VV;
+            if (funct3 == 4) return OperationId::VSSUBU_VX;
+            break;
+        case 0x23:
+            if (funct3 == 0) return OperationId::VSSUB_VV;
+            if (funct3 == 4) return OperationId::VSSUB_VX;
             break;
         case 0x09:
             if (funct3 == 0) return OperationId::VAND_VV;
             if (funct3 == 4) return OperationId::VAND_VX;
             if (funct3 == 3) return OperationId::VAND_VI;
+            break;
+        case 0x0C:
+            if (funct3 == 2) return OperationId::VCLMUL_VV;
+            if (funct3 == 6) return OperationId::VCLMUL_VX;
+            break;
+        case 0x0D:
+            if (funct3 == 2) return OperationId::VCLMULH_VV;
+            if (funct3 == 6) return OperationId::VCLMULH_VX;
             break;
         case 0x0A:
             if (funct3 == 0) return OperationId::VOR_VV;
@@ -627,9 +744,17 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operation
             if (funct3 == 2) return OperationId::VMADD_VV;
             if (funct3 == 6) return OperationId::VMADD_VX;
             break;
+        case 0x2A:
+            if (funct3 == 0) return OperationId::VSSRL_VV;
+            if (funct3 == 4) return OperationId::VSSRL_VX;
+            if (funct3 == 3) return OperationId::VSSRL_VI;
+            break;
         case 0x2B:
             if (funct3 == 2) return OperationId::VNSUB_VV;
             if (funct3 == 6) return OperationId::VNSUB_VX;
+            if (funct3 == 0) return OperationId::VSSRA_VV;
+            if (funct3 == 4) return OperationId::VSSRA_VX;
+            if (funct3 == 3) return OperationId::VSSRA_VI;
             break;
         case 0x2D:
             if (funct3 == 2) return OperationId::VMACC_VV;
@@ -642,6 +767,63 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operation
         case 0x2F:
             if (funct3 == 2) return OperationId::VNMSAC_VV;
             if (funct3 == 6) return OperationId::VNMSAC_VX;
+            if (funct3 == 0) return OperationId::VNCLIP_WV;
+            if (funct3 == 4) return OperationId::VNCLIP_WX;
+            if (funct3 == 3) return OperationId::VNCLIP_WI;
+            break;
+        case 0x2E:
+            if (funct3 == 0) return OperationId::VNCLIPU_WV;
+            if (funct3 == 4) return OperationId::VNCLIPU_WX;
+            if (funct3 == 3) return OperationId::VNCLIPU_WI;
+            break;
+        case 0x30:
+            if (funct3 == 2) return OperationId::VWADDU_VV;
+            if (funct3 == 6) return OperationId::VWADDU_VX;
+            if (funct3 == 0) return OperationId::VWREDSUMU_VS;
+            break;
+        case 0x31:
+            if (funct3 == 2) return OperationId::VWADD_VV;
+            if (funct3 == 6) return OperationId::VWADD_VX;
+            if (funct3 == 0) return OperationId::VWREDSUM_VS;
+            break;
+        case 0x32:
+            if (funct3 == 2) return OperationId::VWSUBU_VV;
+            if (funct3 == 6) return OperationId::VWSUBU_VX;
+            break;
+        case 0x33:
+            if (funct3 == 2) return OperationId::VWSUB_VV;
+            if (funct3 == 6) return OperationId::VWSUB_VX;
+            break;
+        case 0x34:
+            if (funct3 == 2) return OperationId::VWADDU_WV;
+            if (funct3 == 6) return OperationId::VWADDU_WX;
+            break;
+        case 0x35:
+            if (funct3 == 2) return OperationId::VWADD_WV;
+            if (funct3 == 6) return OperationId::VWADD_WX;
+            if (funct3 == 0) return OperationId::VWSLL_VV;
+            if (funct3 == 4) return OperationId::VWSLL_VX;
+            if (funct3 == 3) return OperationId::VWSLL_VI;
+            break;
+        case 0x36:
+            if (funct3 == 2) return OperationId::VWSUBU_WV;
+            if (funct3 == 6) return OperationId::VWSUBU_WX;
+            break;
+        case 0x37:
+            if (funct3 == 2) return OperationId::VWSUB_WV;
+            if (funct3 == 6) return OperationId::VWSUB_WX;
+            break;
+        case 0x38:
+            if (funct3 == 2) return OperationId::VWMULU_VV;
+            if (funct3 == 6) return OperationId::VWMULU_VX;
+            break;
+        case 0x3A:
+            if (funct3 == 2) return OperationId::VWMULSU_VV;
+            if (funct3 == 6) return OperationId::VWMULSU_VX;
+            break;
+        case 0x3B:
+            if (funct3 == 2) return OperationId::VWMUL_VV;
+            if (funct3 == 6) return OperationId::VWMUL_VX;
             break;
         case 0x3C:
             if (funct3 == 2) return OperationId::VWMACCU_VV;
@@ -663,51 +845,116 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operation
                 if (funct3 == 0) return OperationId::VMV_V_V;
                 if (funct3 == 4) return OperationId::VMV_V_X;
                 if (funct3 == 3) return OperationId::VMV_V_I;
+                if (funct3 == 2) return OperationId::VCOMPRESS_VM;
             } else {
                 if (funct3 == 0) return OperationId::VMERGE_VVM;
                 if (funct3 == 4) return OperationId::VMERGE_VXM;
                 if (funct3 == 3) return OperationId::VMERGE_VIM;
+                if (funct3 == 5) return OperationId::VFMERGE_VFM;
             }
             break;
         case 0x10:
-            if (funct3 == 2) return OperationId::VMV_X_S;
-            if (funct3 == 6) return OperationId::VMV_S_X;
+            if (funct3 == 2) {
+                uint32_t rs1_val = (ir >> 15) & 0x1F;
+                if (rs1_val == 0) return OperationId::VMV_X_S;
+                if (rs1_val == 16) return OperationId::VCPOP_M;
+                if (rs1_val == 17) return OperationId::VFIRST_M;
+            } else if (funct3 == 6) {
+                return OperationId::VMV_S_X;
+            } else if (funct3 == 1) {
+                uint32_t rs1_val = (ir >> 15) & 0x1F;
+                if (rs1_val == 0) return OperationId::VFMV_F_S;
+            } else if (funct3 == 5) {
+                uint32_t vs2 = (ir >> 20) & 0x1F;
+                if (vs2 == 0) return OperationId::VFMV_S_F;
+            } else if (!vm) {
+                if (funct3 == 0) return OperationId::VADC_VVM;
+                if (funct3 == 4) return OperationId::VADC_VXM;
+                if (funct3 == 3) return OperationId::VADC_VIM;
+            }
+            break;
+        case 0x11:
+            if (vm) {
+                if (funct3 == 0) return OperationId::VMADC_VV;
+                if (funct3 == 4) return OperationId::VMADC_VX;
+                if (funct3 == 3) return OperationId::VMADC_VI;
+            } else {
+                if (funct3 == 0) return OperationId::VMADC_VVM;
+                if (funct3 == 4) return OperationId::VMADC_VXM;
+                if (funct3 == 3) return OperationId::VMADC_VIM;
+            }
+            break;
+        case 0x12:
+            if (funct3 == 0) return OperationId::VSBC_VVM;
+            if (funct3 == 4) return OperationId::VSBC_VXM;
+            if (funct3 == 2) {
+                uint32_t rs1_val = (ir >> 15) & 0x1F;
+                if (rs1_val == 7) return OperationId::VSEXT_VF2;
+                if (rs1_val == 5) return OperationId::VSEXT_VF4;
+                if (rs1_val == 3) return OperationId::VSEXT_VF8;
+                if (rs1_val == 6) return OperationId::VZEXT_VF2;
+                if (rs1_val == 4) return OperationId::VZEXT_VF4;
+                if (rs1_val == 2) return OperationId::VZEXT_VF8;
+                if (rs1_val == 8) return OperationId::VCLZ_V;
+                if (rs1_val == 9) return OperationId::VBREV8_V;
+                if (rs1_val == 10) return OperationId::VREV8_V;
+                if (rs1_val == 12) return OperationId::VBREV_V;
+                if (rs1_val == 13) return OperationId::VCTZ_V;
+                if (rs1_val == 14) return OperationId::VCPOP_V;
+            }
+            break;
+        case 0x13:
+            if (vm) {
+                if (funct3 == 0) return OperationId::VMSBC_VV;
+                if (funct3 == 4) return OperationId::VMSBC_VX;
+            } else {
+                if (funct3 == 0) return OperationId::VMSBC_VVM;
+                if (funct3 == 4) return OperationId::VMSBC_VXM;
+            }
             break;
         case 0x18:
             if (funct3 == 0) return OperationId::VMSEQ_VV;
             if (funct3 == 4) return OperationId::VMSEQ_VX;
             if (funct3 == 3) return OperationId::VMSEQ_VI;
+            if (funct3 == 2) return OperationId::VMNAND_MM;
             break;
         case 0x19:
             if (funct3 == 0) return OperationId::VMSNE_VV;
             if (funct3 == 4) return OperationId::VMSNE_VX;
             if (funct3 == 3) return OperationId::VMSNE_VI;
+            if (funct3 == 2) return OperationId::VMAND_MM;
             break;
         case 0x1B:
             if (funct3 == 0) return OperationId::VMSLT_VV;
             if (funct3 == 4) return OperationId::VMSLT_VX;
+            if (funct3 == 2) return OperationId::VMXOR_MM;
             break;
         case 0x1A:
             if (funct3 == 0) return OperationId::VMSLTU_VV;
             if (funct3 == 4) return OperationId::VMSLTU_VX;
+            if (funct3 == 2) return OperationId::VMANDN_MM;
             break;
         case 0x1D:
             if (funct3 == 0) return OperationId::VMSLE_VV;
             if (funct3 == 4) return OperationId::VMSLE_VX;
             if (funct3 == 3) return OperationId::VMSLE_VI;
+            if (funct3 == 2) return OperationId::VMNOR_MM;
             break;
         case 0x1C:
             if (funct3 == 0) return OperationId::VMSLEU_VV;
             if (funct3 == 4) return OperationId::VMSLEU_VX;
             if (funct3 == 3) return OperationId::VMSLEU_VI;
+            if (funct3 == 2) return OperationId::VMOR_MM;
             break;
         case 0x1E:
-            if (funct3 == 4) return OperationId::VMSGT_VX;
-            if (funct3 == 3) return OperationId::VMSGT_VI;
-            break;
-        case 0x1F:
             if (funct3 == 4) return OperationId::VMSGTU_VX;
             if (funct3 == 3) return OperationId::VMSGTU_VI;
+            if (funct3 == 2) return OperationId::VMORN_MM;
+            break;
+        case 0x1F:
+            if (funct3 == 4) return OperationId::VMSGT_VX;
+            if (funct3 == 3) return OperationId::VMSGT_VI;
+            if (funct3 == 2) return OperationId::VMXNOR_MM;
             break;
         default:
             break;
@@ -723,10 +970,39 @@ auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2, I
             if (funct3 == 3) return OperationId::FLD;
             uint32_t mop = (ir >> 26) & 3;
             if (mop == 0) {
-                if (funct3 == 0) return OperationId::VLE8_V;
-                if (funct3 == 5) return OperationId::VLE16_V;
-                if (funct3 == 6) return OperationId::VLE32_V;
-                if (funct3 == 7) return OperationId::VLE64_V;
+                uint32_t lumop = (ir >> 20) & 0x1F;
+                if (lumop == 8) {
+                    uint32_t nf = (ir >> 29) & 7;
+                    if (nf == 0) {
+                        if (funct3 == 0) return OperationId::VL1RE8_V;
+                        if (funct3 == 5) return OperationId::VL1RE16_V;
+                        if (funct3 == 6) return OperationId::VL1RE32_V;
+                        if (funct3 == 7) return OperationId::VL1RE64_V;
+                    }
+                    if (nf == 1) {
+                        if (funct3 == 0) return OperationId::VL2RE8_V;
+                        if (funct3 == 5) return OperationId::VL2RE16_V;
+                        if (funct3 == 6) return OperationId::VL2RE32_V;
+                        if (funct3 == 7) return OperationId::VL2RE64_V;
+                    }
+                    if (nf == 3) {
+                        if (funct3 == 0) return OperationId::VL4RE8_V;
+                        if (funct3 == 5) return OperationId::VL4RE16_V;
+                        if (funct3 == 6) return OperationId::VL4RE32_V;
+                        if (funct3 == 7) return OperationId::VL4RE64_V;
+                    }
+                    if (nf == 7) {
+                        if (funct3 == 0) return OperationId::VL8RE8_V;
+                        if (funct3 == 5) return OperationId::VL8RE16_V;
+                        if (funct3 == 6) return OperationId::VL8RE32_V;
+                        if (funct3 == 7) return OperationId::VL8RE64_V;
+                    }
+                } else {
+                    if (funct3 == 0) return OperationId::VLE8_V;
+                    if (funct3 == 5) return OperationId::VLE16_V;
+                    if (funct3 == 6) return OperationId::VLE32_V;
+                    if (funct3 == 7) return OperationId::VLE64_V;
+                }
             } else if (mop == 2) {
                 if (funct3 == 0) return OperationId::VLSE8_V;
                 if (funct3 == 5) return OperationId::VLSE16_V;
@@ -750,10 +1026,21 @@ auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2, I
             if (funct3 == 3) return OperationId::FSD;
             uint32_t mop = (ir >> 26) & 3;
             if (mop == 0) {
-                if (funct3 == 0) return OperationId::VSE8_V;
-                if (funct3 == 5) return OperationId::VSE16_V;
-                if (funct3 == 6) return OperationId::VSE32_V;
-                if (funct3 == 7) return OperationId::VSE64_V;
+                uint32_t sumop = (ir >> 20) & 0x1F;
+                if (sumop == 8) {
+                    uint32_t nf = (ir >> 29) & 7;
+                    if (funct3 == 0) {
+                        if (nf == 0) return OperationId::VS1R_V;
+                        if (nf == 1) return OperationId::VS2R_V;
+                        if (nf == 3) return OperationId::VS4R_V;
+                        if (nf == 7) return OperationId::VS8R_V;
+                    }
+                } else {
+                    if (funct3 == 0) return OperationId::VSE8_V;
+                    if (funct3 == 5) return OperationId::VSE16_V;
+                    if (funct3 == 6) return OperationId::VSE32_V;
+                    if (funct3 == 7) return OperationId::VSE64_V;
+                }
             } else if (mop == 2) {
                 if (funct3 == 0) return OperationId::VSSE8_V;
                 if (funct3 == 5) return OperationId::VSSE16_V;

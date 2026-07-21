@@ -46,10 +46,10 @@ Before opening a PR, run at least:
 # RV64 Build and validation
 cmake --preset rv64-release
 cmake --build --preset rv64-release
-cmake --build --preset rv64-release --target smoke-gate
+cmake --build --preset rv64-release --target isa-gate
 
 # RV32 Build and validation
 cmake --preset rv32-release
 cmake --build --preset rv32-release
-cmake --build --preset rv32-release --target smoke-gate
+cmake --build --preset rv32-release --target isa-gate
 ```

@@ -271,6 +271,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
 
     const isa::OperationId op_id = simrv::pipeline::decoder(w_ir_tmp);
     if (simrv::compiler::unlikely(op_id == isa::UNKNOWN)) {
+        std::printf("[DECODER] Unknown instruction: PC=0x%lx, HEX=0x%x\n", (unsigned long)state_.pc, w_ir_tmp);
         is_valid = false;
     }
 
@@ -313,6 +314,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
                               (op == Opcode::NMSub));
         if (is_vector) {
             if (simrv::compiler::unlikely((state_.mstatus & enum_mask(MstatusBit::Vs)) == 0)) {
+                std::printf("[VS CHECK] VS is 0! mstatus=0x%lx, Vs mask=0x%lx\n", (unsigned long)state_.mstatus, (unsigned long)enum_mask(MstatusBit::Vs));
                 is_valid = false;
             }
         } else if (is_fp_op) {
@@ -552,7 +554,7 @@ void CPU::execute_core(Machine& machine) {
         return;
     }
 
-    if (ctx.op_id >= isa::OperationId::VSETVLI && ctx.op_id <= isa::OperationId::VFMACC_VF) {
+    if (ctx.op_id >= isa::OperationId::VSETVLI && ctx.op_id <= isa::OperationId::VWSLL_VI) {
         ctx.tkn = false;
         execute::ExecuteUnit::execute_vector(*this, machine, ctx.op_id, ctx.ir);
         return;
@@ -826,7 +828,7 @@ void CPU::execute_fp(Machine& /*machine*/) {
 // ==========================================
 
 void CPU::run_memory_stage(Machine& machine) {
-    if (pipeline_context.op_id >= isa::OperationId::VSETVLI && pipeline_context.op_id <= isa::OperationId::VFMACC_VF) {
+    if (pipeline_context.op_id >= isa::OperationId::VSETVLI && pipeline_context.op_id <= isa::OperationId::VWSLL_VI) {
         return;
     }
     memory_load_phase(machine);
@@ -917,7 +919,7 @@ void CPU::writeback_registers([[maybe_unused]] Machine& machine) {
 
     e_icount++;
 
-    if (ctx.op_id >= isa::OperationId::VSETVLI && ctx.op_id <= isa::OperationId::VFMACC_VF) {
+    if (ctx.op_id >= isa::OperationId::VSETVLI && ctx.op_id <= isa::OperationId::VWSLL_VI) {
         return;
     }
 

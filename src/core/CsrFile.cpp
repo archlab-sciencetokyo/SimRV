@@ -1,6 +1,6 @@
 /**
  * @file CsrFile.cpp
- * @brief SimRV implementation unit.
+ * @brief Control and Status Register (CSR) file implementation.
  */
 #include "simrv/core/CsrFile.hpp"
 

@@ -1,3 +1,7 @@
+/**
+ * @file RegisterPaneStats.cpp
+ * @brief Performance statistics and pipeline counters pane rendering.
+ */
 #include "simrv/tui/RegisterPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/util/FormatUtil.hpp"
@@ -55,7 +59,7 @@ auto get_inst_category(int i) -> InstCategory {
         lut[OperationId::WFI] = InstCategory::SYS;
         lut[OperationId::SFENCE_VMA] = InstCategory::SYS;
 
-        for (int op = OperationId::VSETVLI; op <= OperationId::VFMACC_VF; ++op) {
+        for (int op = OperationId::VSETVLI; op <= OperationId::VWSLL_VI; ++op) {
             lut[op] = InstCategory::VEC;
         }
         

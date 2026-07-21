@@ -150,7 +150,15 @@ auto RegisterPane::render_row(int row_idx, int width) -> std::string {
     bool const single_column = is_single_column(width);
     int const max_active_row = single_column ? 40 : 24;
 
-    if (!paused_ && logical_row <= max_active_row) {
+    bool show_spinner = !paused_;
+    if (show_spinner && machine_.tui) {
+        uint64_t delay = machine_.tui->step_delay_us_.load(std::memory_order_relaxed);
+        if (delay >= 10000) {
+            show_spinner = false;
+        }
+    }
+
+    if (show_spinner && logical_row <= max_active_row) {
         return render_active_spinner(logical_row, width);
     }
 

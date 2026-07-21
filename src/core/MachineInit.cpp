@@ -52,7 +52,7 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
         if (tuimode) {
             std::string temp_path = file_path;
             while (true) {
-                std::println(stderr, "\033[1;33m[TUI File Prompt] {} image '{}' is missing or cannot be opened.\033[0m", image_name, temp_path);
+                simrv::log::warn("[TUI File Prompt] {} image '{}' is missing or cannot be opened.", image_name, temp_path);
                 std::print(stderr, "Please enter path to a valid {} image file (or press Enter/Ctrl+D to exit): ", image_name);
                 std::fflush(stderr);
                 std::string input;
@@ -95,7 +95,7 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
 
     in.seekg(0, std::ios::beg);
     if (!in.read(reinterpret_cast<char*>(ram), static_cast<std::streamsize>(file_size))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-        simrv::log::error("failed to read {} image {}", image_name, file_path);
+        simrv::log::error("Failed to read {} image {}", image_name, file_path);
         std::exit(EXIT_FAILURE);
     }
 
@@ -150,7 +150,7 @@ auto Machine::initialize() -> int {
     }
     mmem_owner_.reset(static_cast<Byte*>(std::calloc(simrv::memory::kDramSize, sizeof(Byte)))); // NOLINT(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory)
     if (mmem_owner_ == nullptr) {
-        std::println(std::cerr, "Error: failed to allocate main memory ({} bytes)",
+        simrv::log::error("Failed to allocate main memory ({} bytes)",
                      static_cast<std::size_t>(simrv::memory::kDramSize));
         return 1;
     }

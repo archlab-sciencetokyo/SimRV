@@ -1,6 +1,6 @@
 # SimRV Architecture
 
-**Version:** 2.0.0-beta.5 · **Targets:** RV32GC and RV64GC
+**Version:** 2.0.0-beta.17 · **Targets:** RV32GC, RV64GC, Vector, and Bitmanip
 
 ## Scope
 
@@ -137,6 +137,8 @@ The TUI provides an ANSI-based split-screen monitor during simulation.
 | F (Single FP) | ✅ Full |
 | D (Double FP) | ✅ Full |
 | C (Compressed) | ✅ Full |
+| V (Vector) | ✅ Full |
+| B (Bitmanip) | ✅ Full |
 | Zicsr / Zifencei | ✅ Full |
 | SV32 / SV39 MMU | ✅ Full |
 | M/S/U privilege | ✅ Full |
@@ -192,10 +194,10 @@ docs/                  Architecture, extension, build, and education guides
 
 ## Current Development Status
 
-- **Stable:** RV32GC and RV64GC full feature sets, including Linux boot for both.
+- **Stable:** RV32GC and RV64GC full feature sets (including Vector and Bitmanip extensions), with support for Linux boot on both targets.
 - **Compile-time XLEN:** Select the target with the appropriate CMake preset
   (`rv32-release` / `rv64-release`). XLEN cannot be changed at runtime.
-- **Planned:** Further ISA extension coverage (Vector, Bit-Manipulation, Crypto).
+- **Planned:** Further ISA extension coverage (e.g., Cryptographic extensions).
 
 ---
 

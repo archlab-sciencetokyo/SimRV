@@ -183,124 +183,140 @@ void SdlDisplay::process_sdl_events() {
 #ifdef HAVE_SDL3
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
-        if (event.type == SDL_EVENT_QUIT) {
-            simrv::log::info("[SdlDisplay] SDL window closed. Shutting down simulation.");
-            machine_.stop();
-        } else if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED) {
-            if (window_ && !mouse_grabbed_) {
-                SDL_SetWindowMouseGrab(window_, true);
-                mouse_grabbed_ = true;
-                simrv::log::info("[SdlDisplay] Mouse joystick mode active. Press Ctrl+Alt to release.");
-            }
-        } else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
-            if (window_ && mouse_grabbed_) {
-                SDL_SetWindowMouseGrab(window_, false);
-                mouse_grabbed_ = false;
-                simrv::log::info("[SdlDisplay] Mouse joystick mode released due to focus loss.");
-            }
-        } else if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) {
-            const bool pressed = (event.type == SDL_EVENT_KEY_DOWN);
-
-            // Release grab on Ctrl+Alt
-            if (pressed && (event.key.mod & SDL_KMOD_CTRL) && (event.key.mod & SDL_KMOD_ALT)) {
+        switch (event.type) {
+            case SDL_EVENT_QUIT:
+                simrv::log::info("[SdlDisplay] SDL window closed. Shutting down simulation.");
+                machine_.stop();
+                break;
+            case SDL_EVENT_WINDOW_FOCUS_GAINED:
+                if (window_ && !mouse_grabbed_) {
+                    SDL_SetWindowMouseGrab(window_, true);
+                    mouse_grabbed_ = true;
+                    simrv::log::info("[SdlDisplay] Mouse joystick mode active. Press Ctrl+Alt to release.");
+                }
+                break;
+            case SDL_EVENT_WINDOW_FOCUS_LOST:
                 if (window_ && mouse_grabbed_) {
                     SDL_SetWindowMouseGrab(window_, false);
                     mouse_grabbed_ = false;
-                    simrv::log::info("[SdlDisplay] Mouse joystick mode released.");
+                    simrv::log::info("[SdlDisplay] Mouse joystick mode released due to focus loss.");
                 }
-            }
+                break;
+            case SDL_EVENT_KEY_DOWN:
+            case SDL_EVENT_KEY_UP: {
+                const bool pressed = (event.type == SDL_EVENT_KEY_DOWN);
 
-            Word ascii = 0;
-            const auto key = event.key.key;
-
-            if (key >= SDLK_A && key <= SDLK_Z) {
-                ascii = 'a' + (key - SDLK_A);
-                if (event.key.mod & SDL_KMOD_SHIFT) {
-                    ascii = std::toupper(static_cast<unsigned char>(ascii));
+                // Release grab on Ctrl+Alt
+                if (pressed && (event.key.mod & SDL_KMOD_CTRL) && (event.key.mod & SDL_KMOD_ALT)) {
+                    if (window_ && mouse_grabbed_) {
+                        SDL_SetWindowMouseGrab(window_, false);
+                        mouse_grabbed_ = false;
+                        simrv::log::info("[SdlDisplay] Mouse joystick mode released.");
+                    }
                 }
-            } else if (key >= SDLK_0 && key <= SDLK_9) {
-                ascii = '0' + (key - SDLK_0);
-            } else {
-                switch (key) {
-                    case SDLK_RETURN:
-                        ascii = '\r';
-                        break;
-                    case SDLK_ESCAPE:
-                        ascii = 27;
-                        break;
-                    case SDLK_BACKSPACE:
-                        ascii = 8;
-                        break;
-                    case SDLK_SPACE:
-                        ascii = ' ';
-                        break;
-                    case SDLK_UP:
-                        ascii = 'w';
-                        break;  // WASD mappings for Doom
-                    case SDLK_DOWN:
-                        ascii = 's';
-                        break;
-                    case SDLK_LEFT:
-                        ascii = 'a';
-                        break;
-                    case SDLK_RIGHT:
-                        ascii = 'd';
-                        break;
-                    default:
-                        if (key < 128) {
-                            ascii = static_cast<Word>(key);
-                        }
-                        break;
-                }
-            }
 
-            // Pack pressed bit at bit 31, ASCII in low byte
-            Word pressed_bit = pressed ? 1ULL : 0ULL;
-            Word packed_key = (pressed_bit << 31) | (static_cast<Word>(key) << 8) | (ascii & 0xFFULL);
+                Word ascii = 0;
+                const auto key = event.key.key;
 
-            if (packed_key != 0 && machine_.input_device) {
-                machine_.input_device->push_key(packed_key);
-            }
-        } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
-            const bool pressed = (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN);
-
-            // Grab mouse on click inside the window
-            if (pressed && window_ && !mouse_grabbed_) {
-                SDL_RaiseWindow(window_);
-                SDL_SetWindowMouseGrab(window_, true);
-                mouse_grabbed_ = true;
-                simrv::log::info("[SdlDisplay] Mouse joystick mode active. Press Ctrl+Alt to release.");
-            }
-
-            const auto btn = event.button.button;
-            uint8_t bit = 0;
-            if (btn == SDL_BUTTON_LEFT) bit = 1;
-            else if (btn == SDL_BUTTON_RIGHT) bit = 2;
-            else if (btn == SDL_BUTTON_MIDDLE) bit = 4;
-
-            if (bit != 0) {
-                if (pressed) {
-                    mouse_buttons_ |= bit;
+                if (key >= SDLK_A && key <= SDLK_Z) {
+                    ascii = 'a' + (key - SDLK_A);
+                    if (event.key.mod & SDL_KMOD_SHIFT) {
+                        ascii = std::toupper(static_cast<unsigned char>(ascii));
+                    }
+                } else if (key >= SDLK_0 && key <= SDLK_9) {
+                    ascii = '0' + (key - SDLK_0);
                 } else {
-                    mouse_buttons_ &= ~bit;
+                    switch (key) {
+                        case SDLK_RETURN:
+                            ascii = '\r';
+                            break;
+                        case SDLK_ESCAPE:
+                            ascii = 27;
+                            break;
+                        case SDLK_BACKSPACE:
+                            ascii = 8;
+                            break;
+                        case SDLK_SPACE:
+                            ascii = ' ';
+                            break;
+                        case SDLK_UP:
+                            ascii = 'w';
+                            break;  // WASD mappings for Doom
+                        case SDLK_DOWN:
+                            ascii = 's';
+                            break;
+                        case SDLK_LEFT:
+                            ascii = 'a';
+                            break;
+                        case SDLK_RIGHT:
+                            ascii = 'd';
+                            break;
+                        default:
+                            if (key < 128) {
+                                ascii = static_cast<Word>(key);
+                            }
+                            break;
+                    }
                 }
-                if (machine_.input_device) {
-                    machine_.input_device->push_mouse(0, 0, mouse_buttons_);
+
+                // Pack pressed bit at bit 31, ASCII in low byte
+                Word pressed_bit = pressed ? 1ULL : 0ULL;
+                Word packed_key = (pressed_bit << 31) | (static_cast<Word>(key) << 8) | (ascii & 0xFFULL);
+
+                if (packed_key != 0 && machine_.input_device) {
+                    machine_.input_device->push_key(packed_key);
                 }
+                break;
             }
-        } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
-            if (mouse_grabbed_ && machine_.input_device) {
-                // Accumulate relative movement from SDL events (works under X11/WSLg without warping)
-                accumulated_x_ += static_cast<float>(event.motion.xrel) * static_cast<float>(machine_.s_mouse_sensitivity);
-                accumulated_y_ += static_cast<float>(event.motion.yrel) * static_cast<float>(machine_.s_mouse_sensitivity);
-                int dx = static_cast<int>(accumulated_x_);
-                int dy = static_cast<int>(accumulated_y_);
-                accumulated_x_ -= static_cast<float>(dx);
-                accumulated_y_ -= static_cast<float>(dy);
-                if (dx != 0 || dy != 0) {
-                    machine_.input_device->push_mouse(-dx, -dy, mouse_buttons_);
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            case SDL_EVENT_MOUSE_BUTTON_UP: {
+                const bool pressed = (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN);
+
+                // Grab mouse on click inside the window
+                if (pressed && window_ && !mouse_grabbed_) {
+                    SDL_RaiseWindow(window_);
+                    SDL_SetWindowMouseGrab(window_, true);
+                    mouse_grabbed_ = true;
+                    simrv::log::info("[SdlDisplay] Mouse joystick mode active. Press Ctrl+Alt to release.");
                 }
+
+                const auto btn = event.button.button;
+                uint8_t bit = 0;
+                switch (btn) {
+                    case SDL_BUTTON_LEFT:   bit = 1; break;
+                    case SDL_BUTTON_RIGHT:  bit = 2; break;
+                    case SDL_BUTTON_MIDDLE: bit = 4; break;
+                    default: break;
+                }
+
+                if (bit != 0) {
+                    if (pressed) {
+                        mouse_buttons_ |= bit;
+                    } else {
+                        mouse_buttons_ &= ~bit;
+                    }
+                    if (machine_.input_device) {
+                        machine_.input_device->push_mouse(0, 0, mouse_buttons_);
+                    }
+                }
+                break;
             }
+            case SDL_EVENT_MOUSE_MOTION:
+                if (mouse_grabbed_ && machine_.input_device) {
+                    // Accumulate relative movement from SDL events (works under X11/WSLg without warping)
+                    accumulated_x_ += static_cast<float>(event.motion.xrel) * static_cast<float>(machine_.s_mouse_sensitivity);
+                    accumulated_y_ += static_cast<float>(event.motion.yrel) * static_cast<float>(machine_.s_mouse_sensitivity);
+                    int dx = static_cast<int>(accumulated_x_);
+                    int dy = static_cast<int>(accumulated_y_);
+                    accumulated_x_ -= static_cast<float>(dx);
+                    accumulated_y_ -= static_cast<float>(dy);
+                    if (dx != 0 || dy != 0) {
+                        machine_.input_device->push_mouse(-dx, -dy, mouse_buttons_);
+                    }
+                }
+                break;
+            default:
+                break;
         }
     }
 #endif

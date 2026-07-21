@@ -1,5 +1,6 @@
 /**
- *@file ExecuteUnitFloat.cpp* @brief SimRV floating - point execution unit implementation.
+ * @file ExecuteUnitFloat.cpp
+ * @brief Floating-point execution unit implementation.
  */
 #include <bit>
 #include <cfenv>

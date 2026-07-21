@@ -52,6 +52,27 @@ class ExecuteUnit {
    private:
     static auto aluIntB(Register in1, Register in2, isa::OperationId op_id) -> Register;
     static auto aluIntBW(Register in1, Register in2, isa::OperationId op_id) -> Register;
+
+    static void execute_vector_config(core::CPU& cpu, isa::OperationId op_id, Instruction ir,
+                                      RegId rd, RegId rs1, RegId rs2);
+
+    static void execute_vector_memory(core::CPU& cpu, core::Machine& machine, isa::OperationId op_id,
+                                      RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew);
+
+    static void execute_vector_integer(core::CPU& cpu, isa::OperationId op_id,
+                                       RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew,
+                                       Register rs1_val, int32_t simm5);
+
+    static void execute_vector_fixed_point(core::CPU& cpu, isa::OperationId op_id,
+                                           RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew,
+                                           Register rs1_val, int32_t simm5);
+
+    static void execute_vector_float(core::CPU& cpu, isa::OperationId op_id,
+                                     RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew);
+
+    static void execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
+                                       RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew,
+                                       Register rs1_val, int32_t simm5);
 };
 
 }  // namespace simrv::execute

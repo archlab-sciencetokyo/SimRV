@@ -1,6 +1,6 @@
 /**
  * @file Machine.cpp
- * @brief SimRV implementation unit.
+ * @brief Machine top-level orchestration and cycle-loop implementation.
  */
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/Tui.hpp"

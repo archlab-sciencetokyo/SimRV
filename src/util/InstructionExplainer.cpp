@@ -447,6 +447,32 @@ auto get_description(OperationId op_id) -> std::pair<std::string_view, std::stri
         arr[VID_V] = {"VID.V", "Vector Element Index. Writes the element index sequence 0, 1, ..., vl-1 into the destination vector register rd."};
         arr[VFMACC_VV] = {"VFMACC.VV", "Vector-Vector Floating-Point Multiply-Accumulate. Multiplies elements of vs1 and vs2, and adds single/double-precision product to vector rd."};
         arr[VFMACC_VF] = {"VFMACC.VF", "Vector-Scalar Floating-Point Multiply-Accumulate. Multiplies single/double-precision scalar from GPR/FPR rs1 and vector vs2, and adds product to vector rd."};
+        arr[VREDSUM_VS] = {"VREDSUM.VS", "Vector Single-Width Integer Sum Reduction. Sums elements of vector vs2 with initial scalar vs1[0] and writes to vd[0]."};
+        arr[VWMUL_VV] = {"VWMUL.VV", "Vector Widening Integer Multiply Vector-Vector. Multiplies signed elements of vs2 by vs1 and writes double-width product to vector vd."};
+        arr[VWMUL_VX] = {"VWMUL.VX", "Vector Widening Integer Multiply Vector-Scalar. Multiplies signed elements of vs2 by GPR rs1 and writes double-width product to vector vd."};
+        arr[VNCLIP_WV] = {"VNCLIP.WV", "Vector Narrowing Fixed-Point Clip Vector-Vector. Shifts and clips double-width vs2 elements by vs1 vector shift amounts, writes to narrower vd."};
+        arr[VNCLIP_WX] = {"VNCLIP.WX", "Vector Narrowing Fixed-Point Clip Vector-Scalar. Shifts and clips double-width vs2 elements by GPR rs1 shift amount, writes to narrower vd."};
+        arr[VNCLIP_WI] = {"VNCLIP.WI", "Vector Narrowing Fixed-Point Clip Vector-Immediate. Shifts and clips double-width vs2 elements by immediate shift amount, writes to narrower vd."};
+        arr[VNCLIPU_WV] = {"VNCLIPU.WV", "Vector Narrowing Unsigned Fixed-Point Clip Vector-Vector. Shifts and clips double-width vs2 elements into narrower unsigned vd."};
+        arr[VNCLIPU_WX] = {"VNCLIPU.WX", "Vector Narrowing Unsigned Fixed-Point Clip Vector-Scalar. Shifts and clips double-width vs2 elements into narrower unsigned vd."};
+        arr[VNCLIPU_WI] = {"VNCLIPU.WI", "Vector Narrowing Unsigned Fixed-Point Clip Vector-Immediate. Shifts and clips double-width vs2 elements into narrower unsigned vd."};
+        arr[VSLIDE1UP_VX] = {"VSLIDE1UP.VX", "Vector Slide 1 Up. Shifts vector elements of vs2 up by 1 and inserts GPR rs1 at index 0."};
+        arr[VSLIDE1DOWN_VX] = {"VSLIDE1DOWN.VX", "Vector Slide 1 Down. Shifts vector elements of vs2 down by 1 and inserts GPR rs1 at index vl-1."};
+        arr[VFADD_VV] = {"VFADD.VV", "Vector-Vector Floating-Point Addition. Adds vector elements of vs2 and vs1, writes to vector vd."};
+        arr[VFADD_VF] = {"VFADD.VF", "Vector-Scalar Floating-Point Addition. Adds scalar from GPR/FPR rs1 to vector elements of vs2, writes to vector vd."};
+        arr[VFIRST_M] = {"VFIRST.M", "Vector Find First Set Mask Bit. Scans the mask register vs2 for the first active bit set to 1, and writes its index to scalar register rd (or -1 if none)."};
+        arr[VCPOP_M] = {"VCPOP.M", "Vector Population Count in Mask. Counts the number of active bits set to 1 in the mask register vs2, and writes the count to scalar register rd."};
+        arr[VMAND_MM] = {"VMAND.MM", "Vector Mask Logical AND. Performs bitwise AND between mask registers vs2 and vs1, and writes to mask register rd."};
+        arr[VMNAND_MM] = {"VMNAND.MM", "Vector Mask Logical NAND. Performs bitwise NAND between mask registers vs2 and vs1, and writes to mask register rd."};
+        arr[VMANDN_MM] = {"VMANDN.MM", "Vector Mask Logical AND-NOT. Performs bitwise AND between vs2 and NOT vs1, and writes to mask register rd."};
+        arr[VMXOR_MM] = {"VMXOR.MM", "Vector Mask Logical XOR. Performs bitwise XOR between mask registers vs2 and vs1, and writes to mask register rd."};
+        arr[VMOR_MM] = {"VMOR.MM", "Vector Mask Logical OR. Performs bitwise OR between mask registers vs2 and vs1, and writes to mask register rd."};
+        arr[VMNOR_MM] = {"VMNOR.MM", "Vector Mask Logical NOR. Performs bitwise NOR between mask registers vs2 and vs1, and writes to mask register rd."};
+        arr[VMORN_MM] = {"VMORN.MM", "Vector Mask Logical OR-NOT. Performs bitwise OR between vs2 and NOT vs1, and writes to mask register rd."};
+        arr[VMXNOR_MM] = {"VMXNOR.MM", "Vector Mask Logical XNOR. Performs bitwise XNOR between mask registers vs2 and vs1, and writes to mask register rd."};
+        arr[VFMV_F_S] = {"VFMV.F.S", "Vector Floating-Point Move Element 0 to Scalar. Copies element 0 of vector register vs2 to floating-point scalar register rd."};
+        arr[VFMV_S_F] = {"VFMV.S.F", "Vector Floating-Point Move Scalar to Element 0. Copies floating-point scalar register rs1 to element 0 of vector register rd."};
+        arr[VFMERGE_VFM] = {"VFMERGE.VFM", "Vector Floating-Point Merge Vector-Scalar. Merges scalar float register rs1 and vector register vs2 according to v0 mask, writes to vector rd."};
         arr[VCHECK] = {"VCHECK", "Vector Check Assertion. Validates vector registers or states for debugging/test harness purposes."};
 
         return arr;
@@ -1185,29 +1211,43 @@ void explain_instruction(uint32_t raw_inst) {
 
     // Print Visual Fields
     std::println("");
-    if (fmt == InstFormat::R) {
-        print_r_format(funct7_val, rs2_val, rs1_val, funct3_val, rd_val, op, use_color);
-    } else if (fmt == InstFormat::I) {
-        uint32_t const imm_bits = (inst >> 20) & 0xFFF;
-        print_i_format(imm_bits, dec.imm_i(), rs1_val, funct3_val, rd_val, op, use_color);
-    } else if (fmt == InstFormat::S) {
-        uint32_t const imm_hi = (inst >> 25) & 0x7F;
-        uint32_t const imm_lo = (inst >> 7) & 0x1F;
-        print_s_format(imm_hi, imm_lo, dec.imm_s(), rs1_val, rs2_val, funct3_val, op, use_color);
-    } else if (fmt == InstFormat::B) {
-        uint32_t const imm_hi = (inst >> 25) & 0x7F;
-        uint32_t const imm_lo = (inst >> 7) & 0x1F;
-        print_b_format(inst, imm_hi, imm_lo, dec.imm_b(), rs1_val, rs2_val, funct3_val, op, use_color);
-    } else if (fmt == InstFormat::U) {
-        uint32_t const imm_bits = (inst >> 12) & 0xFFFFF;
-        print_u_format(imm_bits, dec.imm_u(), rd_val, op, use_color);
-    } else if (fmt == InstFormat::J) {
-        uint32_t const imm_bits = ((inst >> 12) & 0xFFFFF);
-        print_j_format(inst, imm_bits, dec.imm_j(), rd_val, op, use_color);
-    } else if (fmt == InstFormat::R4) {
-        print_r4_format(funct7_val, rs3_val, rs2_val, rs1_val, funct3_val, rd_val, op, use_color);
-    } else {
-        std::println("Visual Bit Fields Breakdown: Format unrecognized.");
+    switch (fmt) {
+        case InstFormat::R:
+            print_r_format(funct7_val, rs2_val, rs1_val, funct3_val, rd_val, op, use_color);
+            break;
+        case InstFormat::I: {
+            uint32_t const imm_bits = (inst >> 20) & 0xFFF;
+            print_i_format(imm_bits, dec.imm_i(), rs1_val, funct3_val, rd_val, op, use_color);
+            break;
+        }
+        case InstFormat::S: {
+            uint32_t const imm_hi = (inst >> 25) & 0x7F;
+            uint32_t const imm_lo = (inst >> 7) & 0x1F;
+            print_s_format(imm_hi, imm_lo, dec.imm_s(), rs1_val, rs2_val, funct3_val, op, use_color);
+            break;
+        }
+        case InstFormat::B: {
+            uint32_t const imm_hi = (inst >> 25) & 0x7F;
+            uint32_t const imm_lo = (inst >> 7) & 0x1F;
+            print_b_format(inst, imm_hi, imm_lo, dec.imm_b(), rs1_val, rs2_val, funct3_val, op, use_color);
+            break;
+        }
+        case InstFormat::U: {
+            uint32_t const imm_bits = (inst >> 12) & 0xFFFFF;
+            print_u_format(imm_bits, dec.imm_u(), rd_val, op, use_color);
+            break;
+        }
+        case InstFormat::J: {
+            uint32_t const imm_bits = ((inst >> 12) & 0xFFFFF);
+            print_j_format(inst, imm_bits, dec.imm_j(), rd_val, op, use_color);
+            break;
+        }
+        case InstFormat::R4:
+            print_r4_format(funct7_val, rs3_val, rs2_val, rs1_val, funct3_val, rd_val, op, use_color);
+            break;
+        default:
+            std::println("Visual Bit Fields Breakdown: Format unrecognized.");
+            break;
     }
 
     // Decode Operation ID
@@ -1226,20 +1266,30 @@ void explain_instruction(uint32_t raw_inst) {
         bool const is_fp_sys = (op_id >= FCVT_W_S && op_id <= FMV_W_X) ||
                               (op_id >= FCVT_W_D && op_id <= FMV_D_X);
 
-        if (fmt == InstFormat::R) {
-            assembly = format_r_type(op_id, mnemonic, rd_val, rs1_val, rs2_val, is_fp_sys);
-        } else if (fmt == InstFormat::I) {
-            assembly = format_i_type(op_id, mnemonic, rd_val, rs1_val, dec.imm_i(), csr_val, op, is_load, is_csr);
-        } else if (fmt == InstFormat::S) {
-            assembly = format_s_type(mnemonic, rs1_val, rs2_val, dec.imm_s(), op);
-        } else if (fmt == InstFormat::B) {
-            assembly = format_b_type(mnemonic, rs1_val, rs2_val, dec.imm_b());
-        } else if (fmt == InstFormat::U) {
-            assembly = format_u_type(mnemonic, rd_val, dec.imm_u());
-        } else if (fmt == InstFormat::J) {
-            assembly = format_j_type(rd_val, dec.imm_j());
-        } else if (fmt == InstFormat::R4) {
-            assembly = format_r4_type(mnemonic, rd_val, rs1_val, rs2_val, rs3_val);
+        switch (fmt) {
+            case InstFormat::R:
+                assembly = format_r_type(op_id, mnemonic, rd_val, rs1_val, rs2_val, is_fp_sys);
+                break;
+            case InstFormat::I:
+                assembly = format_i_type(op_id, mnemonic, rd_val, rs1_val, dec.imm_i(), csr_val, op, is_load, is_csr);
+                break;
+            case InstFormat::S:
+                assembly = format_s_type(mnemonic, rs1_val, rs2_val, dec.imm_s(), op);
+                break;
+            case InstFormat::B:
+                assembly = format_b_type(mnemonic, rs1_val, rs2_val, dec.imm_b());
+                break;
+            case InstFormat::U:
+                assembly = format_u_type(mnemonic, rd_val, dec.imm_u());
+                break;
+            case InstFormat::J:
+                assembly = format_j_type(rd_val, dec.imm_j());
+                break;
+            case InstFormat::R4:
+                assembly = format_r4_type(mnemonic, rd_val, rs1_val, rs2_val, rs3_val);
+                break;
+            default:
+                break;
         }
 
         std::println("  Assembly Rep     : {}# {}{}", c(kBrightBlack), assembly, c(kReset));
@@ -1307,7 +1357,7 @@ auto get_isa_extension_name(OperationId op_id) -> std::string_view {
         }
         return "Zbb";
     }
-    if (op_id >= VSETVLI && op_id <= VFMACC_VF) {
+    if (op_id >= VSETVLI && op_id <= VWSLL_VI) {
         return "RV32V";
     }
     return "Unknown";

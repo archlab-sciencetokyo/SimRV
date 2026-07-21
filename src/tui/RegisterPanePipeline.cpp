@@ -1,3 +1,7 @@
+/**
+ * @file RegisterPanePipeline.cpp
+ * @brief Pipeline visualization pane rendering for the TUI register panel.
+ */
 #include "simrv/tui/RegisterPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/Define.hpp"

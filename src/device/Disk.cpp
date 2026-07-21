@@ -1,6 +1,6 @@
 /**
  * @file Disk.cpp
- * @brief SimRV implementation unit.
+ * @brief VirtIO block disk device implementation.
  */
 #include "simrv/device/Disk.hpp"
 #include "simrv/core/Logger.hpp"

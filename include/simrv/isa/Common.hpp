@@ -17,34 +17,73 @@ namespace simrv::isa {
 
 constexpr Instruction RV32_NOP = 0x00000013;
 
+/**
+ * @brief Extracts the standard 7-bit base opcode from a 32-bit instruction word.
+ * @param ir The raw instruction word.
+ * @return Opcode enum representing bits [6:0].
+ */
 constexpr auto opcode_of(Instruction ir) -> Opcode {
     return static_cast<Opcode>(ir & 0x7F);
 }
 
+/**
+ * @brief Extracts the 2-bit compressed opcode quadrant from a 16-bit compressed instruction.
+ * @param ir The compressed instruction.
+ * @return CompressedOpcode enum representing bits [1:0].
+ */
 constexpr auto compressed_opcode_of(CompressedInstruction ir) -> CompressedOpcode {
     return static_cast<CompressedOpcode>(ir & 0x3);
 }
 
+/**
+ * @brief Extracts the 3-bit funct3 field from an instruction word.
+ * @param ir The raw instruction word.
+ * @return Funct3 enum representing bits [14:12].
+ */
 constexpr auto funct3_of(Instruction ir) -> Funct3 {
     return static_cast<Funct3>((ir >> 12) & 0x7);
 }
 
+/**
+ * @brief Extracts the 12-bit funct12 field from a system/privileged instruction.
+ * @param ir The raw instruction word.
+ * @return 12-bit value representing bits [31:20].
+ */
 constexpr auto funct12_of(Instruction ir) -> Instruction {
     return (ir >> 20) & 0xFFF;
 }
 
+/**
+ * @brief Extracts the 7-bit funct7 field from a register-register instruction.
+ * @param ir The raw instruction word.
+ * @return 7-bit value representing bits [31:25].
+ */
 constexpr auto funct7_of(Instruction ir) -> Instruction {
     return (ir >> 25) & 0x7F;
 }
 
+/**
+ * @brief Extracts the 5-bit funct5 field from an atomic memory operation (AMO).
+ * @param ir The raw instruction word.
+ * @return Funct5Amo enum representing bits [31:27].
+ */
 constexpr auto funct5_of(Instruction ir) -> Funct5Amo {
     return static_cast<Funct5Amo>((ir >> 27) & 0x1F);
 }
 
+/**
+ * @brief Computes the bit mask for a specific ISA extension in the MISA CSR.
+ * @param ext The target ISA extension.
+ * @return CSRValue containing a single set bit at the extension position.
+ */
 constexpr auto misa_extension_bit(IsaExtension ext) -> CSRValue {
     return static_cast<CSRValue>(CSRValue{1} << static_cast<unsigned>(ext));
 }
 
+/**
+ * @brief Computes the combined bitmask of all baseline supported extensions.
+ * @return CSRValue mask for all base extensions.
+ */
 constexpr auto misa_base_bits() -> CSRValue {
     return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
            misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::B) |
@@ -53,6 +92,11 @@ constexpr auto misa_base_bits() -> CSRValue {
            misa_extension_bit(IsaExtension::U) | misa_extension_bit(IsaExtension::V);
 }
 
+/**
+ * @brief Decodes the extension set mask matching a specified MISA profile.
+ * @param profile The profile definition (I, IMAC, GC).
+ * @return CSRValue bitmask containing the profile's extensions.
+ */
 constexpr auto misa_profile_bits(MisaProfile profile) -> CSRValue {
     switch (profile) {
         case MisaProfile::I:
@@ -67,6 +111,10 @@ constexpr auto misa_profile_bits(MisaProfile profile) -> CSRValue {
     }
 }
 
+/**
+ * @brief Computes the MXL (Machine XLEN) field mask to write to MISA bits [XLEN-1 : XLEN-2].
+ * @return CSRValue containing the MXL value for either RV32 (01) or RV64 (10).
+ */
 constexpr auto misa_mxl_field() -> CSRValue {
     if constexpr (sizeof(CSRValue) == 4) {
         // MXL=01 for RV32 in bits [31:30]
@@ -79,16 +127,33 @@ constexpr auto misa_mxl_field() -> CSRValue {
     }
 }
 
+/**
+ * @brief Integrates the target MXL field into an extensions mask to construct a valid MISA CSR value.
+ * @param misa_extensions The mask of enabled extensions.
+ * @return Combined CSRValue containing both extensions and MXL configuration.
+ */
 constexpr auto misa_with_mxl(CSRValue misa_extensions) -> CSRValue {
     return misa_extensions | misa_mxl_field();
 }
 
 constexpr CSRValue kMisaDefault = misa_profile_bits(MisaProfile::GC);
 
+/**
+ * @brief Checks if a specific extension bit is set in a MISA CSR value.
+ * @param misa The MISA register value.
+ * @param ext The target extension.
+ * @return True if the extension is enabled, false otherwise.
+ */
 constexpr auto misa_has_extension(CSRValue misa, IsaExtension ext) -> bool {
     return (misa & misa_extension_bit(ext)) != 0;
 }
 
+/**
+ * @brief Identifies the required ISA extension bit corresponding to an instruction word.
+ * @param ir The raw instruction word.
+ * @param compressed True if the instruction is compressed (16-bit).
+ * @return The required IsaExtension.
+ */
 constexpr auto required_extension_for_instruction(Instruction ir, bool compressed) -> IsaExtension {
     if (compressed) {
         return IsaExtension::C;
@@ -120,10 +185,23 @@ constexpr auto required_extension_for_instruction(Instruction ir, bool compresse
     }
 }
 
+/**
+ * @brief Verifies whether an instruction's required ISA extension is enabled in the current MISA.
+ * @param misa The active MISA CSR value.
+ * @param ir The raw instruction word.
+ * @param compressed True if the instruction is compressed.
+ * @return True if the instruction is supported and enabled, false otherwise.
+ */
 constexpr auto instruction_enabled_by_misa(CSRValue misa, Instruction ir, bool compressed) -> bool {
     return misa_has_extension(misa, required_extension_for_instruction(ir, compressed));
 }
 
+/**
+ * @brief Checks if the instruction's destination register (rd) is a floating-point register.
+ * @param opcode The instruction opcode.
+ * @param op_id The instruction OperationId.
+ * @return True if the destination register is floating-point, false otherwise.
+ */
 constexpr auto is_destination_fp(Opcode opcode, OperationId op_id) -> bool {
     if (opcode == Opcode::LoadFp) {
         return true;
@@ -156,6 +234,12 @@ constexpr auto is_destination_fp(Opcode opcode, OperationId op_id) -> bool {
     }
 }
 
+/**
+ * @brief Checks if the instruction's source register 1 (rs1) is a floating-point register.
+ * @param opcode The instruction opcode.
+ * @param op_id The instruction OperationId.
+ * @return True if rs1 is a floating-point register, false otherwise.
+ */
 constexpr auto is_rs1_fp(Opcode opcode, OperationId op_id) -> bool {
     if (opcode == Opcode::StoreFp) {
         return true;
@@ -180,6 +264,12 @@ constexpr auto is_rs1_fp(Opcode opcode, OperationId op_id) -> bool {
     }
 }
 
+/**
+ * @brief Checks if the instruction's source register 2 (rs2) is a floating-point register.
+ * @param opcode The instruction opcode.
+ * @param op_id The instruction OperationId.
+ * @return True if rs2 is a floating-point register, false otherwise.
+ */
 constexpr auto is_rs2_fp(Opcode opcode, [[maybe_unused]] OperationId op_id) -> bool {
     if (opcode == Opcode::StoreFp) {
         return true;
@@ -190,6 +280,11 @@ constexpr auto is_rs2_fp(Opcode opcode, [[maybe_unused]] OperationId op_id) -> b
     return true;
 }
 
+/**
+ * @brief Maps an opcode to its standard RISC-V instruction format category.
+ * @param op The instruction opcode.
+ * @return The InstFormat enum value.
+ */
 constexpr auto get_instruction_format(Opcode op) -> InstFormat {
     switch (op) {
         case Opcode::Load:
@@ -226,6 +321,11 @@ constexpr auto get_instruction_format(Opcode op) -> InstFormat {
     }
 }
 
+/**
+ * @brief Retrieves a human-readable name/description of an instruction format.
+ * @param fmt The instruction format.
+ * @return A string view containing the human-readable format description.
+ */
 constexpr auto get_instruction_format_name(InstFormat fmt) -> std::string_view {
     switch (fmt) {
         case InstFormat::R: return "R-Type (Register-Register)";
@@ -240,6 +340,11 @@ constexpr auto get_instruction_format_name(InstFormat fmt) -> std::string_view {
     return "Unknown";
 }
 
+/**
+ * @brief Checks if a given operation ID requires a 64-bit architecture (RV64).
+ * @param op_id The OperationId to check.
+ * @return True if the instruction is RV64-only, false if it is supported on RV32.
+ */
 constexpr auto requires_rv64(OperationId op_id) -> bool {
     switch (op_id) {
         case OperationId::LD:

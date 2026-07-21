@@ -343,30 +343,191 @@ enum OperationId : uint16_t {
     VID_V,
     VFMACC_VV,
     VFMACC_VF,
+    VREDSUM_VS,
+    VWMUL_VV,
+    VWMUL_VX,
+    VNCLIP_WV,
+    VNCLIP_WX,
+    VNCLIP_WI,
+    VNCLIPU_WV,
+    VNCLIPU_WX,
+    VNCLIPU_WI,
+    VSLIDE1UP_VX,
+    VSLIDE1DOWN_VX,
+    VFADD_VV,
+    VFADD_VF,
+    VRSUB_VX,
+    VRSUB_VI,
+    VSADD_VV,
+    VSADD_VX,
+    VSADD_VI,
+    VSADDU_VV,
+    VSADDU_VX,
+    VSADDU_VI,
+    VSBC_VVM,
+    VSBC_VXM,
+    VSEXT_VF2,
+    VSEXT_VF4,
+    VSEXT_VF8,
+    VZEXT_VF2,
+    VZEXT_VF4,
+    VZEXT_VF8,
+    VSLIDEDOWN_VX,
+    VSLIDEDOWN_VI,
+    VSLIDEUP_VX,
+    VSLIDEUP_VI,
+    VSMUL_VV,
+    VSMUL_VX,
+    VSSRA_VV,
+    VSSRA_VX,
+    VSSRA_VI,
+    VSSRL_VV,
+    VSSRL_VX,
+    VSSRL_VI,
+    VSSUB_VV,
+    VSSUB_VX,
+    VSSUBU_VV,
+    VSSUBU_VX,
+    VWADD_VV,
+    VWADD_VX,
+    VWADD_WV,
+    VWADD_WX,
+    VWADDU_VV,
+    VWADDU_VX,
+    VWADDU_WV,
+    VWADDU_WX,
+    VWSUB_VV,
+    VWSUB_VX,
+    VWSUB_WV,
+    VWSUB_WX,
+    VWSUBU_VV,
+    VWSUBU_VX,
+    VWSUBU_WV,
+    VWSUBU_WX,
+    VWMULU_VV,
+    VWMULU_VX,
+    VWMULSU_VV,
+    VWMULSU_VX,
+    VWREDSUM_VS,
+    VWREDSUMU_VS,
+    /* Whole register moves */
+    VMV1R_V,
+    VMV2R_V,
+    VMV4R_V,
+    VMV8R_V,
+    /* Whole register loads */
+    VL1RE8_V,
+    VL1RE16_V,
+    VL1RE32_V,
+    VL1RE64_V,
+    VL2RE8_V,
+    VL2RE16_V,
+    VL2RE32_V,
+    VL2RE64_V,
+    VL4RE8_V,
+    VL4RE16_V,
+    VL4RE32_V,
+    VL4RE64_V,
+    VL8RE8_V,
+    VL8RE16_V,
+    VL8RE32_V,
+    VL8RE64_V,
+    /* Whole register stores */
+    VS1R_V,
+    VS2R_V,
+    VS4R_V,
+    VS8R_V,
+    /* Add with carry / subtract with borrow */
+    VADC_VVM,
+    VADC_VXM,
+    VADC_VIM,
+    VMADC_VV,
+    VMADC_VX,
+    VMADC_VI,
+    VMADC_VVM,
+    VMADC_VXM,
+    VMADC_VIM,
+    VMSBC_VV,
+    VMSBC_VX,
+    VMSBC_VVM,
+    VMSBC_VXM,
+    /* Mask instructions */
+    VMSBF_M,
+    VMSIF_M,
+    VMSOF_M,
+    VFIRST_M,
+    VCPOP_M,
+    VIOTA_M,
+    VCOMPRESS_VM,
+    /* Vector bitmanip Zvbb/Zvbc */
+    VANDN_VV,
+    VANDN_VX,
+    VROL_VV,
+    VROL_VX,
+    VROR_VV,
+    VROR_VX,
+    VROR_VI,
+    VCLZ_V,
+    VCTZ_V,
+    VCPOP_V,
+    VBREV_V,
+    VBREV8_V,
+    VREV8_V,
+    VCLMUL_VV,
+    VCLMUL_VX,
+    VCLMULH_VV,
+    VCLMULH_VX,
+    VMAND_MM,
+    VMNAND_MM,
+    VMANDN_MM,
+    VMOR_MM,
+    VMNOR_MM,
+    VMORN_MM,
+    VMXOR_MM,
+    VMXNOR_MM,
+    VFMV_F_S,
+    VFMV_S_F,
+    VFMERGE_VFM,
+    VWSLL_VV,
+    VWSLL_VX,
+    VWSLL_VI,
     VCHECK,
     /* Others */
     UNKNOWN,
     OperationIdCount
 };
 
+/// @brief Start of base RV32I integer instruction IDs
 constexpr OperationId kOpRangeRv32iBegin = LUI;
+/// @brief End of base RV32I integer instruction IDs
 constexpr OperationId kOpRangeRv32iEnd = CSRRCI;
 
+/// @brief Start of privileged instruction IDs
 constexpr OperationId kOpRangePrivBegin = URET;
+/// @brief End of privileged instruction IDs
 constexpr OperationId kOpRangePrivEnd = SFENCE_VMA;
 
+/// @brief Start of RV32M/RV64M multiply-divide instruction IDs
 constexpr OperationId kOpRangeRv32mBegin = MUL;
+/// @brief End of RV32M/RV64M multiply-divide instruction IDs
 constexpr OperationId kOpRangeRv32mEnd = REMU;
 
+/// @brief Start of RV32A atomic instruction IDs
 constexpr OperationId kOpRangeRv32aBegin = LR_W;
+/// @brief End of RV32A atomic instruction IDs
 constexpr OperationId kOpRangeRv32aEnd = AMOMAXU_W;
 
+/// @brief Start of RV32F single-precision float instruction IDs
 constexpr OperationId kOpRangeRv32fBegin = FLW;
+/// @brief End of RV32F single-precision float instruction IDs
 constexpr OperationId kOpRangeRv32fEnd = FCVT_S_LU;
 
+/// @brief Start of RV32D double-precision float instruction IDs
 constexpr OperationId kOpRangeRv32dBegin = FLD;
+/// @brief End of RV32D double-precision float instruction IDs
 constexpr OperationId kOpRangeRv32dEnd = FCVT_D_LU;
 
+/// @brief Unified count of all valid simulator operations
 constexpr size_t kOperationIdCount = static_cast<size_t>(OperationIdCount);
 
 } // namespace simrv::isa

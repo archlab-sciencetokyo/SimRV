@@ -171,19 +171,25 @@ auto InOrderPipeline::resolve_branch_ex(BtbEntry& btb_entry, Register pc, Regist
     bool predicted_taken = false;
     uint32_t bht_idx = 0;
     
-    if (config.bp_type == BranchPredictorType::StaticNotTaken) {
-        predicted_taken = false;
-    } else if (config.bp_type == BranchPredictorType::StaticTaken) {
-        predicted_taken = true;
-    } else if (config.bp_type == BranchPredictorType::OneBitBimodal) {
-        bht_idx = (pc >> 1) & 0xFF;
-        predicted_taken = (branch_history_table_.at(bht_idx) != 0);
-    } else if (config.bp_type == BranchPredictorType::TwoBitBimodal) {
-        bht_idx = (pc >> 1) & 0xFF;
-        predicted_taken = (branch_history_table_.at(bht_idx) >= 2);
-    } else if (config.bp_type == BranchPredictorType::Gshare) {
-        bht_idx = ((pc >> 1) ^ gshare_history_) & 0xFF;
-        predicted_taken = (branch_history_table_.at(bht_idx) >= 2);
+    switch (config.bp_type) {
+        case BranchPredictorType::StaticNotTaken:
+            predicted_taken = false;
+            break;
+        case BranchPredictorType::StaticTaken:
+            predicted_taken = true;
+            break;
+        case BranchPredictorType::OneBitBimodal:
+            bht_idx = (pc >> 1) & 0xFF;
+            predicted_taken = (branch_history_table_.at(bht_idx) != 0);
+            break;
+        case BranchPredictorType::TwoBitBimodal:
+            bht_idx = (pc >> 1) & 0xFF;
+            predicted_taken = (branch_history_table_.at(bht_idx) >= 2);
+            break;
+        case BranchPredictorType::Gshare:
+            bht_idx = ((pc >> 1) ^ gshare_history_) & 0xFF;
+            predicted_taken = (branch_history_table_.at(bht_idx) >= 2);
+            break;
     }
 
     const bool btb_hit = (config.btb_entries > 0) && btb_entry.valid && (btb_entry.pc == pc);
@@ -202,16 +208,23 @@ auto InOrderPipeline::resolve_branch_ex(BtbEntry& btb_entry, Register pc, Regist
     }
 
     // Update predictor tables
-    if (config.bp_type == BranchPredictorType::OneBitBimodal) {
-        branch_history_table_.at(bht_idx) = branched ? 1 : 0;
-    } else if (config.bp_type == BranchPredictorType::TwoBitBimodal || config.bp_type == BranchPredictorType::Gshare) {
-        uint8_t counter = branch_history_table_.at(bht_idx);
-        if (branched) {
-            if (counter < 3) counter++;
-        } else {
-            if (counter > 0) counter--;
+    switch (config.bp_type) {
+        case BranchPredictorType::OneBitBimodal:
+            branch_history_table_.at(bht_idx) = branched ? 1 : 0;
+            break;
+        case BranchPredictorType::TwoBitBimodal:
+        case BranchPredictorType::Gshare: {
+            uint8_t counter = branch_history_table_.at(bht_idx);
+            if (branched) {
+                if (counter < 3) counter++;
+            } else {
+                if (counter > 0) counter--;
+            }
+            branch_history_table_.at(bht_idx) = counter;
+            break;
         }
-        branch_history_table_.at(bht_idx) = counter;
+        default:
+            break;
     }
 
     if (config.bp_type == BranchPredictorType::Gshare) {
