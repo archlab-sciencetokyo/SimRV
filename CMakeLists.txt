@@ -4,7 +4,7 @@ project(SimRV LANGUAGES CXX)
 
 enable_testing()
 
-set(SIMRV_VERSION "2.0.0-beta.17")
+set(SIMRV_VERSION "2.0.0-beta.18")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -101,6 +101,12 @@ add_executable(SimRV
   src/execute/ExecuteUnitFloat.cpp
   src/execute/ExecuteUnit.cpp
   src/execute/ExecuteUnitVector.cpp
+  src/execute/vector/VectorConfig.cpp
+  src/execute/vector/VectorMemory.cpp
+  src/execute/vector/VectorInteger.cpp
+  src/execute/vector/VectorFixedPoint.cpp
+  src/execute/vector/VectorFloat.cpp
+  src/execute/vector/VectorPermute.cpp
   src/pipeline/PipelineStages.cpp
   src/core/Cpu.cpp
   src/util/CliParser.cpp
@@ -129,6 +135,7 @@ add_executable(SimRV
   src/debug/GdbStub.cpp
   src/debug/SpikeLockstep.cpp
   src/debug/SymbolTable.cpp
+  src/debug/BreakpointManager.cpp
   src/util/InstructionExplainer.cpp
   src/device/Framebuffer.cpp
   src/util/SdlDisplay.cpp
@@ -390,72 +397,30 @@ foreach(test_name IN LISTS ALL_ISA_TESTS)
   endif()
 endforeach()
 
-# Generate and register vector tests if toolchain and vector test package are available
+# Register vector tests wrapper if toolchain and vector test package are available
 if(EXISTS "/var/archlab-modules/riscv-vector-tests/2026.07.06")
   find_program(RISCV_GCC NAMES "${RISCV_PREFIX}gcc" "riscv64-unknown-elf-gcc" "riscv32-unknown-elf-gcc"
                DOC "Path to RISC-V GCC cross-compiler for compiling vector tests")
+  find_program(PYTHON_BIN NAMES "python3" "python" DOC "Path to python3 interpreter")
+  if(NOT PYTHON_BIN)
+    set(PYTHON_BIN "python3")
+  endif()
+
   if(RISCV_GCC)
-    message(STATUS "Generating and compiling vector tests...")
-    set(VEC_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/vector-tests-gen")
-    file(MAKE_DIRECTORY "${VEC_GEN_DIR}")
-    execute_process(
-      COMMAND /var/archlab-modules/riscv-vector-tests/2026.07.06/bin/riscv-vector-tests-generator
-        -XLEN ${SIMRV_XLEN} -VLEN 256 -integer
-        -configs /var/archlab-modules/riscv-vector-tests/2026.07.06/configs/v
-        -pattern "^v(add|sub|and|or|xor|sll|srl|sra|mul|div|divu|merge|mv|seq|sne|sltu?|sleu?|sgtu?|min|max|le8|le16|le32|le64|se8|se16|se32|se64|setvli|setivli|setvl|macc|madd|nmsac|nmsub|wmacc|wmaccu|wmaccsu|wmaccus)\\."
-        -stage1output "${VEC_GEN_DIR}"
-      RESULT_VARIABLE gen_res
+    add_test(NAME vector-suite
+      COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/run_vector_tests.py
+        --simrv $<TARGET_FILE:SimRV>
+        --xlen ${SIMRV_XLEN}
+        --gcc ${RISCV_GCC}
+        --objcopy ${RISCV_OBJCOPY}
+        --nm ${RISCV_NM}
+        --work-dir ${CMAKE_CURRENT_BINARY_DIR}/vector-tests-gen
     )
-    if(gen_res EQUAL 0)
-      if(SIMRV_XLEN STREQUAL "64")
-        set(VEC_ARCH "rv64gcv")
-        set(VEC_ABI "lp64d")
-      else()
-        set(VEC_ARCH "rv32gcv")
-        set(VEC_ABI "ilp32d")
-      endif()
-      file(GLOB VEC_S_FILES "${VEC_GEN_DIR}/*.S")
-      foreach(s_file IN LISTS VEC_S_FILES)
-        get_filename_component(test_name "${s_file}" NAME_WE)
-        set(elf_file "${VEC_GEN_DIR}/${test_name}.elf")
-        if(NOT EXISTS "${elf_file}")
-          execute_process(
-            COMMAND ${RISCV_GCC} -march=${VEC_ARCH} -mabi=${VEC_ABI} -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles
-              -I /var/archlab-modules/riscv-vector-tests/2026.07.06/env/riscv-test-env
-              -I /var/archlab-modules/riscv-vector-tests/2026.07.06/env/riscv-test-env/p
-              -I /var/archlab-modules/riscv-vector-tests/2026.07.06/env
-              -I /var/archlab-modules/riscv-vector-tests/2026.07.06/macros/general
-              -T /var/archlab-modules/riscv-vector-tests/2026.07.06/env/riscv-test-env/p/link.ld
-              ${s_file} -o ${elf_file}
-            RESULT_VARIABLE compile_res
-          )
-          if(NOT compile_res EQUAL 0)
-            message(WARNING "Failed to compile vector test: ${s_file}")
-          endif()
-        endif()
-        if(EXISTS "${elf_file}")
-          add_test(NAME "isa-vector-${test_name}"
-            COMMAND ${CMAKE_COMMAND}
-              -D SIMRV_BIN=$<TARGET_FILE:SimRV>
-              -D ELF_PATH=${elf_file}
-              -D OBJCOPY_BIN=${RISCV_OBJCOPY}
-              -D NM_BIN=${RISCV_NM}
-              -D WORK_DIR=${ISA_WORK_DIR}
-              -D TIMEOUT_SECS=20
-              -D END_INSNS=2000000
-              -D DEFAULT_TOHOST_ADDR=0x80006000
-              -P ${CMAKE_SOURCE_DIR}/scripts/RunIsaTest.cmake
-          )
-          set_tests_properties("isa-vector-${test_name}" PROPERTIES
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-            LABELS "gate;isa;vector;rv${SIMRV_XLEN}gc"
-            SKIP_RETURN_CODE 2
-          )
-        endif()
-      endforeach()
-    else()
-      message(WARNING "Failed to generate vector tests")
-    endif()
+    set_tests_properties(vector-suite PROPERTIES
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+      LABELS "vector"
+      TIMEOUT 600
+    )
   endif()
 endif()
 
@@ -489,39 +454,27 @@ add_custom_target(linux-images
   USES_TERMINAL
 )
 
-add_custom_target(smoke-gate
-  COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR} --output-on-failure -L "smoke|regress"
-  DEPENDS SimRV
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  COMMENT "Running Smoke validation gate (CLI and ISA smoke tests)"
-  VERBATIM
-  USES_TERMINAL
-)
-
 add_custom_target(isa-gate
-  COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR} --output-on-failure -L "isa"
-  DEPENDS SimRV
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  COMMENT "Running ISA validation gate (All RV${SIMRV_XLEN}GC ISA tests)"
-  VERBATIM
-  USES_TERMINAL
-)
-
-add_custom_target(integration-gate
   COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR} --output-on-failure -L "gate"
   DEPENDS SimRV
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  COMMENT "Running Comprehensive Integration validation gate (regress, app, linux, and isa tests)"
+  COMMENT "Running ISA validation gate (All non-vector RV${SIMRV_XLEN}GC ISA and CLI tests)"
   VERBATIM
   USES_TERMINAL
 )
 
-if(SPIKE_BIN)
-  add_custom_target(lockstep-gate
-    COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR} --output-on-failure -L "lockstep"
+if(EXISTS "/var/archlab-modules/riscv-vector-tests/2026.07.06" AND RISCV_GCC)
+  add_custom_target(vector-gate
+    COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/run_vector_tests.py
+      --simrv $<TARGET_FILE:SimRV>
+      --xlen ${SIMRV_XLEN}
+      --gcc ${RISCV_GCC}
+      --objcopy ${RISCV_OBJCOPY}
+      --nm ${RISCV_NM}
+      --work-dir ${CMAKE_CURRENT_BINARY_DIR}/vector-tests-gen
     DEPENDS SimRV
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMENT "Running RISC-V ISA tests in instruction-level lockstep with Spike..."
+    COMMENT "Running Full Vector validation gate"
     VERBATIM
     USES_TERMINAL
   )
