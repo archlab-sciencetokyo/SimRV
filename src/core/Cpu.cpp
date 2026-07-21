@@ -121,12 +121,22 @@ void CPU::evaluate_timer_interrupt() {
 }
 
 void CPU::run_cycle(Machine& machine) {
+    prev_state_ = state_;
+    if (auto hit = machine.breakpoints.check_pc(state_.pc)) {
+        if (machine.tui) {
+            machine.tui->set_status_override(hit->description);
+            machine.tui->pause_loop();
+        }
+    }
+    // If rollback support is active, record architectural and memory checkpoints before updating state.
     if (machine.s_rollback_enabled) {
         push_undo_state();
     }
     uint32_t step_cycles = 1;
 
     if (machine.s_cycle_accurate) {
+        // Mode 1: Cycle-accurate pipeline execution.
+        // Runs stages via persistent coroutines and tracks pipeline stalls, cache misses, and hazard resolutions.
         uint64_t prev_imiss = icache.miss_count();
         uint64_t prev_dmiss = dcache.miss_count();
 
@@ -153,10 +163,13 @@ void CPU::run_cycle(Machine& machine) {
         );
     } else {
         if (machine.s_high_performance) {
+            // Mode 2: Cached fast-path functional execution (pre-decoded direct-lookup cache).
+            // Bypasses pipeline orchestration and fetches from direct lookup cache if available.
             auto* cached = decode_cache.lookup(state_.pc);
             if (simrv::compiler::likely(cached != nullptr)) {
                 execute_cached_op_fast(machine, *cached);
             } else {
+                // Decode cache miss: run basic functional stages sequentially and cache the decoded op.
                 bool success = fetch_stage(machine, state_.pc) &&
                               decode_stage(machine);
                 
@@ -179,6 +192,8 @@ void CPU::run_cycle(Machine& machine) {
                 }
             }
         } else {
+            // Mode 3: Normal pipeline coroutine execution.
+            // Bypasses cycle-accurate latency step tracking but executes instruction stages via coroutine states.
             if (!pipeline_task.handle) {
                 pipeline_task = run_pipeline_coroutine(&machine);
             }
@@ -190,6 +205,7 @@ void CPU::run_cycle(Machine& machine) {
         }
     }
 
+    // CLINT real-time-clock interrupt and cycle counter increments.
     if (simrv::compiler::likely(!machine.s_cycle_accurate)) {
         clint_mmio.mcycle++;
         clint_mmio.rtc_divider++;
@@ -213,6 +229,7 @@ void CPU::run_cycle(Machine& machine) {
         }
     }
 
+    // Record trace logs for active debug TUI components.
     if (machine.s_tuimode && machine.tui && machine.tui->is_trace_active()) {
         record_trace_for_tui(machine);
     }
@@ -266,6 +283,13 @@ void CPU::record_trace_for_tui(Machine& machine) {
 }
 
 void CPU::run_cycle_baremetal(Machine& machine) {
+    prev_state_ = state_;
+    if (auto hit = machine.breakpoints.check_pc(state_.pc)) {
+        if (machine.tui) {
+            machine.tui->set_status_override(hit->description);
+            machine.tui->pause_loop();
+        }
+    }
     if (machine.s_rollback_enabled) {
         push_undo_state();
     }
@@ -320,7 +344,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         return;
     }
 
-    if (ctx.op_id >= OperationId::VSETVLI && ctx.op_id <= OperationId::VFMACC_VF) {
+    if (ctx.op_id >= OperationId::VSETVLI && ctx.op_id <= OperationId::VWSLL_VI) {
         return;
     }
 
@@ -405,6 +429,10 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                                       (static_cast<uint64_t>(ctx.mem_wdata) << 32);
                 }
             }
+            if (machine.s_rollback_enabled) {
+                Word old_val = simrv::memory::ram_read_fast(addr, static_cast<Instruction>(ctx.funct3), machine.mmem);
+                record_mem_write(addr, old_val, static_cast<Instruction>(ctx.funct3));
+            }
             simrv::memory::ram_write_fast(addr, ctx.mem_wdata, static_cast<Instruction>(ctx.funct3), machine.mmem);
         } else {
             simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, addr, ctx.mem_wdata, ctx.funct3);
@@ -416,14 +444,28 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
             const auto f3 = ctx.funct3;
             switch (f3) {
                 case Funct3::Fsw:
+                    if (machine.s_rollback_enabled) {
+                        Word old_val = simrv::memory::ram_read_fast(addr, static_cast<Instruction>(Funct3::Sw), machine.mmem);
+                        record_mem_write(addr, old_val, static_cast<Instruction>(Funct3::Sw));
+                    }
                     simrv::memory::ram_write_fast(addr, static_cast<Word>(ctx.fp_mem_wdata & static_cast<FloatingRegister>(kLower32Mask)),
                                                  static_cast<Instruction>(Funct3::Sw), machine.mmem);
                     break;
                 case Funct3::Fsd:
                     if constexpr (simrv::xlen::kIsXLen64) {
+                        if (machine.s_rollback_enabled) {
+                            Word old_val = simrv::memory::ram_read_fast(addr, static_cast<Instruction>(Funct3::Sd), machine.mmem);
+                            record_mem_write(addr, old_val, static_cast<Instruction>(Funct3::Sd));
+                        }
                         simrv::memory::ram_write_fast(addr, static_cast<Word>(ctx.fp_mem_wdata),
                                                      static_cast<Instruction>(Funct3::Sd), machine.mmem);
                     } else {
+                        if (machine.s_rollback_enabled) {
+                            Word old1 = simrv::memory::ram_read_fast(addr, static_cast<Instruction>(Funct3::Sw), machine.mmem);
+                            record_mem_write(addr, old1, static_cast<Instruction>(Funct3::Sw));
+                            Word old2 = simrv::memory::ram_read_fast(addr + 4, static_cast<Instruction>(Funct3::Sw), machine.mmem);
+                            record_mem_write(addr + 4, old2, static_cast<Instruction>(Funct3::Sw));
+                        }
                         simrv::memory::ram_write_fast(addr, static_cast<Word>(ctx.fp_mem_wdata & static_cast<FloatingRegister>(kLower32Mask)),
                                                      static_cast<Instruction>(Funct3::Sw), machine.mmem);
                         simrv::memory::ram_write_fast(addr + 4, static_cast<Word>((ctx.fp_mem_wdata >> 32) & static_cast<FloatingRegister>(kLower32Mask)),
@@ -684,6 +726,10 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
     }
     if (machine.s_appmode) {
         if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr) && !is_tohost_addr(machine, mem_addr))) {
+            if (machine.s_rollback_enabled) {
+                Word old_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3), machine.memory_.mmu()->mmem());
+                record_mem_write(mem_addr, old_val, static_cast<Instruction>(funct3));
+            }
             simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3), machine.memory_.mmu()->mmem());
             return true;
         }
@@ -693,6 +739,10 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
     const bool translation_enabled = (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp));
     if (!translation_enabled) {
         if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr) && !is_tohost_addr(machine, mem_addr))) {
+            if (machine.s_rollback_enabled) {
+                Word old_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3), machine.memory_.mmu()->mmem());
+                record_mem_write(mem_addr, old_val, static_cast<Instruction>(funct3));
+            }
             simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3), machine.memory_.mmu()->mmem());
             return true;
         }
@@ -702,11 +752,15 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
         const auto& entry = soft_tlb_write[tlb_idx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         if (simrv::compiler::likely(entry.valid && entry.vpn == (mem_addr >> 12) && entry.priv == eff_priv && 
             entry.asid == current_asid)) {
+            Address const paddr = entry.paddr_base + (mem_addr & 0xFFF);
+            if (machine.s_rollback_enabled && simrv::memory::is_dram_addr(paddr)) {
+                Word old_val = simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(funct3), machine.memory_.mmu()->mmem());
+                record_mem_write(paddr, old_val, static_cast<Instruction>(funct3));
+            }
             if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
                 simrv::memory::host_write_fast(entry.host_ptr_base + (mem_addr & 0xFFF), rrs2, static_cast<Instruction>(funct3));
                 return true;
             }
-            Address const paddr = entry.paddr_base + (mem_addr & 0xFFF);
             if (simrv::compiler::likely(simrv::memory::is_dram_addr(paddr) && !is_tohost_addr(machine, paddr))) {
                 simrv::memory::ram_write_fast(paddr, rrs2, static_cast<Instruction>(funct3), machine.memory_.mmu()->mmem());
                 return true;
@@ -879,8 +933,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
 void CPU::push_undo_state() {
     UndoStep step;
     step.state = state_;
-    step.has_mem_write = false;
-    undo_stack.push_front(step);
+    undo_stack.push_front(std::move(step));
     if (undo_stack.size() > 1024) {
         undo_stack.pop_back();
     }
@@ -889,23 +942,34 @@ void CPU::push_undo_state() {
 void CPU::record_mem_write(Address paddr, Word old_data, Instruction funct3) {
     if (undo_stack.empty()) return;
     auto& step = undo_stack.front();
-    step.has_mem_write = true;
-    step.mem_addr = paddr;
-    step.mem_old_data = old_data;
-    step.mem_funct3 = funct3;
+    step.mem_writes.push_back(MemWriteRecord{
+        .addr = paddr,
+        .old_data = old_data,
+        .funct3 = funct3
+    });
 }
 
 auto CPU::perform_backstep() -> bool {
     if (undo_stack.empty()) return false;
-    auto step = undo_stack.front();
+    auto step = std::move(undo_stack.front());
     undo_stack.pop_front();
-    if (step.has_mem_write && machine_) {
-        simrv::memory::ram_write_fast(step.mem_addr, step.mem_old_data, step.mem_funct3, machine_->memory_.mmu()->mmem());
+    if (machine_) {
+        for (auto it = step.mem_writes.rbegin(); it != step.mem_writes.rend(); ++it) {
+            simrv::memory::ram_write_fast(it->addr, it->old_data, it->funct3, machine_->memory_.mmu()->mmem());
+        }
     }
     state_ = step.state;
     if (e_icount > 0) e_icount--;
     soft_tlb_flush();
+    pipeline_context = {};
     return true;
+}
+
+void CPU::push_trace_history(Address pc, Instruction inst, const std::string& symbol) {
+    if (trace_history_.size() >= 50) {
+        trace_history_.erase(trace_history_.begin());
+    }
+    trace_history_.push_back(TraceHistoryEntry{pc, inst, symbol});
 }
 
 }  // namespace simrv::core

@@ -5,6 +5,7 @@
 #include "simrv/util/CliParser.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Types.hpp"
 #include "simrv/util/FormatUtil.hpp"
 
@@ -573,6 +574,20 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         options.lockstep_mode = true;
         return true;
     }
+    if (arg == "--rollback") {
+        options.rollback = true;
+        return true;
+    }
+    if (arg == "--step-delay" || arg == "--speed") {
+        auto value = next_argument(args, i, std::string(arg));
+        if (!value) return std::unexpected(value.error());
+        uint64_t delay_val = 0;
+        if (!parse_scaled_u64(*value, delay_val)) {
+            return std::unexpected(std::format("invalid step delay value for {}", arg));
+        }
+        options.step_delay_us = delay_val;
+        return true;
+    }
     if (arg == "--spike-bin") {
         auto value = next_argument(args, i, "--spike-bin");
         if (!value) return std::unexpected(value.error());
@@ -816,6 +831,10 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     machine->s_lockstep_mode = options.lockstep_mode;
     machine->s_spike_bin = options.spike_bin;
     machine->s_spike_elf = options.spike_elf;
+    machine->s_rollback_enabled = options.rollback;
+    if (machine->tui && options.step_delay_us > 0) {
+        machine->tui->step_delay_us_.store(options.step_delay_us, std::memory_order_relaxed);
+    }
 
     return {};
 }

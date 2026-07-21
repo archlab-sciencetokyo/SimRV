@@ -5,7 +5,9 @@
 #pragma once
 
 #include <array>
+#include <deque>
 #include <expected>
+#include <vector>
 
 #include <fstream>
 
@@ -32,41 +34,51 @@ class Machine;
  * @brief Groups all architectural registers and CSRs into a cohesive block.
  */
 struct ArchState {
-    Register pc{};
-    RegisterFile regs{};
+    Register pc{};       ///< Program Counter (instruction address pointer)
+    RegisterFile regs{}; ///< General-purpose integer, FP, and vector registers
 
-    CSRValue mstatus{};
-    CSRValue mtvec{};
-    CSRValue mscratch{};
-    CSRValue mepc{};
-    TrapCause mcause{};
-    CSRValue mtval{};
-    CSRValue mhartid{};
-    CSRValue misa = isa::kMisaDefault;
-    CSRValue mie{};
-    CSRValue mip{};
-    CSRValue medeleg{};
-    CSRValue mideleg{};
-    CSRValue mcounteren{};
-    CSRValue stvec{};
-    CSRValue sscratch{};
-    CSRValue sepc{};
-    TrapCause scause{};
-    CSRValue stval{};
-    CSRValue satp{};
-    CSRValue scounteren{};
-    CSRValue fcsr{};
-    CSRValue vstart{};
-    CSRValue vxsat{};
-    CSRValue vxrm{};
-    CSRValue vl{};
-    CSRValue vtype{};
+    /* Machine Mode CSRs */
+    CSRValue mstatus{};                 ///< Machine Status (tracks processor mode, interrupt states, extension states)
+    CSRValue mtvec{};                   ///< Machine Trap-Vector Base-Address (address of machine mode trap handler)
+    CSRValue mscratch{};                ///< Machine Scratch register (used for temporary context swapping)
+    CSRValue mepc{};                    ///< Machine Exception Program Counter (returns address on MRET)
+    TrapCause mcause{};                 ///< Machine Trap Cause (interrupt vs exception and exact code)
+    CSRValue mtval{};                   ///< Machine Trap Value (holds faulting addresses or instruction bytes)
+    CSRValue mhartid{};                 ///< Machine Hardware Thread ID (processor core identifier)
+    CSRValue misa = isa::kMisaDefault;  ///< Machine ISA and extensions descriptor
+    CSRValue mie{};                     ///< Machine Interrupt Enable
+    CSRValue mip{};                     ///< Machine Interrupt Pending
+    CSRValue medeleg{};                 ///< Machine Exception Delegation (delegates trap handling to supervisor mode)
+    CSRValue mideleg{};                 ///< Machine Interrupt Delegation (delegates interrupts to supervisor mode)
+    CSRValue mcounteren{};              ///< Machine Counter Enable (controls user/supervisor access to performance counters)
 
-    PrivilegeLevel priv = kPrivMachine;
+    /* Supervisor Mode CSRs */
+    CSRValue stvec{};       ///< Supervisor Trap-Vector Base-Address (address of supervisor trap handler)
+    CSRValue sscratch{};    ///< Supervisor Scratch register
+    CSRValue sepc{};        ///< Supervisor Exception Program Counter (returns address on SRET)
+    TrapCause scause{};     ///< Supervisor Trap Cause
+    CSRValue stval{};       ///< Supervisor Trap Value
+    CSRValue satp{};        ///< Supervisor Address Translation and Protection (virtual memory mode and page table base physical address)
+    CSRValue scounteren{};  ///< Supervisor Counter Enable
 
-    Address load_res{};
-    CSRValue reserved{};
+    /* Floating-Point CSRs */
+    CSRValue fcsr{}; ///< Floating-Point Control and Status register (rounding mode and cumulative exception flags)
 
+    /* Vector Extension CSRs */
+    CSRValue vstart{}; ///< Vector Start Index (specifies the register element index to start vector execution)
+    CSRValue vxsat{};  ///< Vector Fixed-Point Saturation flag
+    CSRValue vxrm{};   ///< Vector Fixed-Point Rounding Mode selector
+    CSRValue vl{};     ///< Vector Length (active number of elements to process in a vector instruction)
+    CSRValue vtype{};  ///< Vector Type (contains element width VSEW, vector group multiplier LMUL, etc.)
+
+    PrivilegeLevel priv = kPrivMachine; ///< Current processor privilege level
+
+    Address load_res{};  ///< Active memory physical address reservation for Load-Reserved / Store-Conditional (LR/SC)
+    CSRValue reserved{}; ///< Reserved for internal architectural extensions or tracking
+
+    /**
+     * @brief Determines the active XLEN (register width in bits: 32 or 64) based on the CPU state.
+     */
     [[nodiscard]] constexpr auto current_xlen() const -> unsigned {
         if constexpr (!simrv::xlen::kIsXLen64) {
             return 32;
@@ -87,6 +99,9 @@ struct ArchState {
         }
     }
 
+    /**
+     * @brief Updates the active XLEN configurations in register file proxies.
+     */
     constexpr void update_xlen() {
         regs.xlen = current_xlen();
     }
@@ -103,79 +118,210 @@ struct SoftTlbEntry {
     bool valid = false;
 };
 
+struct MemWriteRecord {
+    Address addr = 0;
+    Word old_data = 0;
+    Instruction funct3 = 0;
+};
+
 struct UndoStep {
     simrv::core::ArchState state;
-    bool has_mem_write = false;
-    Address mem_addr = 0;
-    Word mem_old_data = 0;
-    Instruction mem_funct3 = 0;
+    std::vector<MemWriteRecord> mem_writes;
 };
 
 class CPU {
    public:
+    /**
+     * @brief Constructs a new CPU core, resetting GPRs, floating-point registers, and setting initial status values.
+     */
     CPU();
-    /// Flush all instruction/data TLB entries.
+
+    /**
+     * @brief Flushes all instruction/data Translation Lookaside Buffer (TLB) entries and invalidates the decode cache.
+     */
     void TLB_flush();
-    /// Selectively flush TLB entries matching virtual address and/or ASID criteria.
+
+    /**
+     * @brief Selectively flushes TLB entries matching virtual address and/or Address Space Identifier (ASID).
+     * @param match_all_vaddr If true, ignores the vaddr matching criteria (flushes all virtual addresses matching ASID).
+     * @param vaddr The target virtual address to match.
+     * @param match_all_asid If true, ignores the ASID matching criteria.
+     * @param asid The target ASID to match.
+     */
     void TLB_flush(bool match_all_vaddr, Address vaddr, bool match_all_asid, Word asid);
-    /// Write mstatus with architectural side effects applied.
-    void set_mstatus(CSRValue);
-    /// Read masked mstatus value with architectural projections.
-    [[nodiscard]] auto get_mstatus(CSRValue) const -> CSRValue;
-    /// Read a CSR value.
+
+    /**
+     * @brief Writes the `mstatus` CSR, applying any architectural side effects (such as flushing the TLB if configuration changes).
+     * @param val The new value to write to `mstatus`.
+     */
+    void set_mstatus(CSRValue val);
+
+    /**
+     * @brief Reads a masked `mstatus` value with active architectural projections.
+     * @param mask The bitmask of the status fields to retrieve.
+     * @return The masked `mstatus` register value.
+     */
+    [[nodiscard]] auto get_mstatus(CSRValue mask) const -> CSRValue;
+
+    /**
+     * @brief Reads a value from a specified Control and Status Register (CSR).
+     * @param addr The 12-bit address of the CSR.
+     * @return The CSR's value if successful, or an ExceptionCode if the access is unauthorized or invalid.
+     */
     [[nodiscard]] auto read_csr(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCode>;
-    /// Write a CSR value.
+
+    /**
+     * @brief Writes a value to a specified Control and Status Register (CSR).
+     * @param addr The 12-bit address of the CSR.
+     * @param val The new value to write.
+     * @return A void result if successful, or an ExceptionCode on failure.
+     */
     auto write_csr(CSRAddress addr, CSRValue val) -> std::expected<void, ExceptionCode>;
-    /// Return from machine-mode trap.
+
+    /**
+     * @brief Handles execution return from a machine-mode trap (MRET instruction).
+     * Restores privilege level and interrupt enable bits from `mstatus`.
+     */
     void mret();
-    /// Return from supervisor-mode trap.
+
+    /**
+     * @brief Handles execution return from a supervisor-mode trap (SRET instruction).
+     * Restores privilege level and interrupt enable bits from `sstatus`.
+     */
     void sret();
-    /// Recompute MIP from currently pending/served interrupts.
+
+    /**
+     * @brief Recomputes the MIP (Machine Interrupt Pending) register based on currently active external interrupts.
+     */
     void plic_update_mip();
-    /// Assert or deassert a PLIC interrupt line.
-    void plic_set_irq(int, int);
-    /// Raise an architectural exception/interrupt trap.
-    void raise_exception(TrapCause, CSRValue);
-    /// Evaluate CLINT timer interrupt against mtimecmp.
+
+    /**
+     * @brief Sets or deasserts a PLIC (Platform-Level Interrupt Controller) interrupt source line.
+     * @param irq_num The interrupt request number.
+     * @param state The state to write (1 for asserted, 0 for deasserted).
+     */
+    void plic_set_irq(int irq_num, int state);
+
+    /**
+     * @brief Triggers an architectural exception or interrupt trap, transitioning privilege levels and saving return states.
+     * @param cause The trap cause (exception code or interrupt bit).
+     * @param tval The trap-specific value (bad address, illegal instruction word, etc.) to save in `mtval`/`stval`.
+     */
+    void raise_exception(TrapCause cause, CSRValue tval);
+
+    /**
+     * @brief Evaluates CLINT (Core Local Interruptor) timer interrupts against `mtimecmp`.
+     * Asserts timer interrupt pending flags in `mip` if current `mtime` >= `mtimecmp`.
+     */
     void evaluate_timer_interrupt();
-    /// Execute one full CPU cycle (all pipeline stages).
+
+    /**
+     * @brief Executes one full CPU cycle. Resolves all pipeline stages or steps coroutine execution.
+     * @param machine Reference to the top-level machine orchestration unit.
+     */
     void run_cycle(Machine& machine);
-    /// Execute one full CPU cycle in optimized baremetal mode.
+
+    /**
+     * @brief Executes one full CPU cycle in optimized baremetal mode.
+     * Bypasses full pipeline tracking for functional performance.
+     * @param machine Reference to the top-level machine orchestration unit.
+     */
     void run_cycle_baremetal(Machine& machine);
-    /// Record instruction details to the TUI trace buffer if enabled.
+
+    /**
+     * @brief Records active instruction details to the TUI (Text User Interface) trace buffer if enabled.
+     * @param machine Reference to the top-level machine orchestration unit.
+     */
     void record_trace_for_tui(Machine& machine);
-    /// Execute a cached instruction using the monolithic fast path in IA mode.
+
+    /**
+     * @brief Executes a cached decoded instruction via the monolithic fast path execution engine.
+     * @param machine Reference to the top-level machine orchestration.
+     * @param op Reference to the cached pre-decoded operation.
+     */
     void execute_cached_op_fast(Machine& machine, CachedOp& op);
     
-    /// Coroutine generator for persistent zero-allocation pipeline
+    /**
+     * @brief Coroutine generator for persistent zero-allocation pipeline simulation.
+     * @param machine Pointer to the top-level machine orchestration unit.
+     * @return PipelineTask handle.
+     */
     simrv::pipeline::PipelineTask run_pipeline_coroutine(Machine* machine);
 
    public:
-    /// Run instruction fetch + decode-normalization stage group.
+    /**
+     * @brief Runs the Fetch stage of the cycle-accurate pipeline.
+     */
     void run_fetch_stage(Machine& machine);
-    /// Run instruction fetch in baremetal mode.
+
+    /**
+     * @brief Runs the Fetch stage of the baremetal execution path.
+     */
     void run_fetch_stage_baremetal(Machine& machine);
-    /// Run decode + operand-fetch stage group.
+
+    /**
+     * @brief Runs the Decode stage of the cycle-accurate pipeline.
+     */
     void run_decode_stage(Machine& machine);
-    /// Run execute stage group.
+
+    /**
+     * @brief Runs the Execute stage of the cycle-accurate pipeline.
+     */
     void run_execute_stage(Machine& machine);
-    /// Run memory stage group.
+
+    /**
+     * @brief Runs the Memory stage of the cycle-accurate pipeline.
+     */
     void run_memory_stage(Machine& machine);
-    /// Run memory access stage in baremetal mode.
+
+    /**
+     * @brief Runs the Memory stage of the baremetal execution path.
+     */
     void run_memory_stage_baremetal(Machine& machine);
-    /// Run writeback stage group.
+
+    /**
+     * @brief Runs the Writeback stage of the cycle-accurate pipeline.
+     */
     void run_writeback_stage(Machine& machine);
-    /// Run commit/trap resolution stage group.
+
+    /**
+     * @brief Runs the Commit stage of the cycle-accurate pipeline.
+     */
     void run_commit_stage(Machine& machine);
-    /// Run commit stage in baremetal mode.
+
+    /**
+     * @brief Runs the Commit stage of the baremetal execution path.
+     */
     void run_commit_stage_baremetal(Machine& machine);
 
-    /// Functional monadic stage transitions (C++23)
+    /**
+     * @brief Functional monadic Fetch stage (C++23 expected monadic structure).
+     */
     [[nodiscard]] auto fetch_stage(Machine& machine, Address pc) -> bool;
+
+    /**
+     * @brief Functional monadic Decode stage.
+     */
     [[nodiscard]] auto decode_stage(Machine& machine) -> bool;
+
+    /**
+     * @brief Functional monadic Execute stage.
+     */
     [[nodiscard]] auto execute_stage(Machine& machine) -> bool;
+
+    /**
+     * @brief Functional monadic Memory stage.
+     */
     [[nodiscard]] auto memory_stage(Machine& machine) -> bool;
+
+    /**
+     * @brief Functional monadic Writeback stage.
+     */
     [[nodiscard]] auto writeback_stage(Machine& machine) -> bool;
+
+    /**
+     * @brief Functional monadic Commit stage.
+     */
     [[nodiscard]] auto commit_stage(Machine& machine) -> bool;
 
    private:
@@ -233,12 +379,23 @@ class CPU {
     }
 
     ArchState state_;
+    ArchState prev_state_;
 
    public:
     /// Zero-cost read-only access to architectural state for tracing/logging.
     [[nodiscard]] constexpr auto state() const -> const ArchState& { return state_; }
     /// Mutable access to architectural state for decoupled controllers.
     [[nodiscard]] constexpr auto state() -> ArchState& { return state_; }
+    /// Access to architectural state prior to current step for diff rendering.
+    [[nodiscard]] constexpr auto prev_state() const -> const ArchState& { return prev_state_; }
+
+    struct TraceHistoryEntry {
+        Address pc = 0;
+        Instruction inst = 0;
+        std::string symbol;
+    };
+    std::vector<TraceHistoryEntry> trace_history_;
+    void push_trace_history(Address pc, Instruction inst, const std::string& symbol);
 
     /// Get the effective privilege level for data accesses (considering MPRV).
     [[nodiscard]] constexpr auto effective_data_privilege() const -> PrivilegeLevel {

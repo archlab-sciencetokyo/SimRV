@@ -60,6 +60,8 @@ struct RuntimeOptions {
 
     std::string fn_cpuconfig;
     bool debug_mode = false;
+    bool rollback = false;
+    uint64_t step_delay_us = 0;
     uint32_t explain_inst_val = 0;
     double mouse_sensitivity = 1.0;
     unsigned int vlen = 0;
