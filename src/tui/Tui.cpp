@@ -1497,7 +1497,8 @@ void Tui::render_modal_overlay(std::vector<std::string>& lines, int term_width, 
             add_row(std::format(" {}{:<18}\033[0m {}Inspect Memory Address modal\033[0m", kThemeSky, "[m]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Run / Pause simulation loop\033[0m", kThemeSky, "[c] / [Ctrl-P]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Cycle TUI panel layout\033[0m", kThemeSky, "[Tab]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Cycle Register page (GPR/FPR/VEC)\033[0m", kThemeSky, "[r]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Cycle Left Pane page\033[0m", kThemeSky, "[r]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Cycle Right Pane mode\033[0m", kThemeSky, "[p]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Toggle Explainer & Trap Details\033[0m", kThemeSky, "[e]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Show this help dialog\033[0m", kThemeSky, "[F1] / [h] / [?]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Toggle High Contrast theme\033[0m", kThemeSky, "[Alt-h]", kThemeText));
@@ -1525,19 +1526,19 @@ void Tui::render_modal_overlay(std::vector<std::string>& lines, int term_width, 
         return text + std::string(width - text_len, ' ');
     };
 
-    std::string top_border = std::format("{}{}╔{}\033[0m{}{}╗\033[0m", m_bg, kThemeBorder, pad_center(std::format("═ \033[1m{}{}\033[0m{} ═", kThemeSky, title, kThemeBorder), inner_w), m_bg, kThemeBorder);
+    std::string top_border = std::format("{}{}╔{}{}{}╗\033[0m", m_bg, kThemeBorder, pad_center(std::format("═ \033[1m{}{}{}{} ═", kThemeSky, title, m_rst, kThemeBorder), inner_w), m_bg, kThemeBorder);
     box_lines.push_back(top_border);
-    box_lines.push_back(std::format("{}{}║\033[0m{}\033[0m{}{}║\033[0m", m_bg, kThemeBorder, std::string(inner_w, ' '), m_bg, kThemeBorder));
+    box_lines.push_back(std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder, pad_center("", inner_w), m_bg, kThemeBorder));
 
     for (const auto& row : content_rows) {
-        box_lines.push_back(std::format("{}{}║\033[0m{}\033[0m{}{}║\033[0m", m_bg, kThemeBorder, pad_left(" " + row, inner_w), m_bg, kThemeBorder));
+        box_lines.push_back(std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder, pad_left(" " + row, inner_w), m_bg, kThemeBorder));
     }
 
-    box_lines.push_back(std::format("{}{}║\033[0m{}\033[0m{}{}║\033[0m", m_bg, kThemeBorder, std::string(inner_w, ' '), m_bg, kThemeBorder));
+    box_lines.push_back(std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder, pad_center("", inner_w), m_bg, kThemeBorder));
     if (!is_help) {
-        box_lines.push_back(std::format("{}{}║\033[0m{}\033[0m{}{}║\033[0m", m_bg, kThemeBorder, pad_center(std::format("{}[Enter]\033[0m{} {}Submit  |  {}[Esc]\033[0m{} {}Cancel", kThemeVal, m_rst, kThemeMuted, kThemeVal, m_rst, kThemeMuted), inner_w), m_bg, kThemeBorder));
+        box_lines.push_back(std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder, pad_center(std::format("{}[Enter]\033[0m{} {}Submit  |  {}[Esc]\033[0m{} {}Cancel", kThemeVal, m_rst, kThemeMuted, kThemeVal, m_rst, kThemeMuted), inner_w), m_bg, kThemeBorder));
     } else {
-        box_lines.push_back(std::format("{}{}║\033[0m{}\033[0m{}{}║\033[0m", m_bg, kThemeBorder, pad_center(std::format("{}Press {}[Esc]\033[0m{}, {}[Enter]\033[0m{}, {}[h]\033[0m{} or {}[F1]\033[0m{} to close", kThemeMuted, kThemeVal, m_rst, kThemeVal, m_rst, kThemeVal, m_rst, kThemeVal, m_rst), inner_w), m_bg, kThemeBorder));
+        box_lines.push_back(std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder, pad_center(std::format("{}Press {}[Esc]\033[0m{}, {}[Enter]\033[0m{}, {}[h]\033[0m{} or {}[F1]\033[0m{} to close", kThemeMuted, kThemeVal, m_rst, kThemeVal, m_rst, kThemeVal, m_rst, kThemeVal, m_rst), inner_w), m_bg, kThemeBorder));
     }
     box_lines.push_back(std::format("{}{}╚{}╝\033[0m", m_bg, kThemeBorder, make_repeated_string("═", inner_w)));
 
