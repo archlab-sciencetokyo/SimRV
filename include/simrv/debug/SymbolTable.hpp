@@ -6,6 +6,7 @@
 
 #include <string>
 #include <map>
+#include <optional>
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::debug {
@@ -27,6 +28,7 @@ class SymbolTable {
      * @return Formatted string "symbol_name" or "symbol_name+0xoffset", or empty string if not found.
      */
     [[nodiscard]] auto lookup(Address addr) const -> std::string;
+    [[nodiscard]] auto lookup_name(const std::string& name) const -> std::optional<Address>;
 
    private:
     std::map<Address, std::string> symbols_;

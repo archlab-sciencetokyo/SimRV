@@ -1,3 +1,7 @@
+/**
+ * @file RegisterPaneExplain.cpp
+ * @brief Instruction explainer pane rendering for the TUI register panel.
+ */
 #include "simrv/tui/RegisterPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
@@ -18,16 +22,6 @@ using enum simrv::isa::OperationId;
 using simrv::isa::InstFormat;
 
 namespace {
-
-static constexpr std::array<const char*, 32> kRegNames = {
-    "zero", "ra", "sp", "gp", "tp",  "t0",  "t1", "t2", "s0/fp", "s1", "a0",
-    "a1",   "a2", "a3", "a4", "a5",  "a6",  "a7", "s2", "s3",    "s4", "s5",
-    "s6",   "s7", "s8", "s9", "s10", "s11", "t3", "t4", "t5",    "t6"};
-
-static constexpr std::array<const char*, 32> kFpRegNames = {
-    "ft0", "ft1", "ft2", "ft3", "ft4",  "ft5",  "ft6", "ft7", "fs0",  "fs1", "fa0",
-    "fa1", "fa2", "fa3", "fa4", "fa5",  "fa6",  "fa7", "fs2", "fs3",  "fs4", "fs5",
-    "fs6", "fs7", "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11"};
 
 auto get_reg_name(RegId reg, bool is_fp) -> std::string {
     uint32_t r = std::to_underlying(reg);
@@ -465,7 +459,14 @@ auto render_field_decoded_values(
 } // namespace
 
 auto RegisterPane::get_explain_rows(int width) -> std::vector<std::string> {
-    if (!paused_) {
+    bool show_disabled = !paused_;
+    if (show_disabled && machine_.tui) {
+        uint64_t delay = machine_.tui->step_delay_us_.load(std::memory_order_relaxed);
+        if (delay >= 10000) {
+            show_disabled = false;
+        }
+    }
+    if (show_disabled) {
         std::vector<std::string> explain_rows;
         explain_rows.push_back(section_line("Instruction Explainer", width));
         explain_rows.push_back(format_to_width("  [Explainer disabled while simulator is running]", width));
@@ -558,6 +559,26 @@ auto RegisterPane::get_explain_rows(int width) -> std::vector<std::string> {
     for (const auto& line : wrapped) {
         explain_rows.push_back(format_to_width("  " + line, width));
     }
+
+    if (ctx.pending_exception.has_value() || st.mcause != 0 || st.scause != 0) {
+        explain_rows.push_back(format_to_width("", width));
+        explain_rows.push_back(section_line("Trap & Exception Diagnostic Analysis", width));
+        uint64_t cause = ctx.pending_exception.has_value() ? static_cast<uint64_t>(*ctx.pending_exception) : (st.mcause != 0 ? st.mcause : st.scause);
+        uint64_t tval = ctx.pending_exception.has_value() ? ctx.pending_tval : (st.mcause != 0 ? st.mtval : st.stval);
+        
+        static constexpr std::array<const char*, 16> kCauseNames = {
+            "Instruction Address Misaligned", "Instruction Access Fault", "Illegal Instruction", "Breakpoint",
+            "Load Address Misaligned", "Load Access Fault", "Store Address Misaligned", "Store Access Fault",
+            "Environment Call (U-Mode)", "Environment Call (S-Mode)", "Reserved (10)", "Environment Call (M-Mode)",
+            "Instruction Page Fault", "Load Page Fault", "Reserved (14)", "Store Page Fault"
+        };
+        std::string cause_name = (cause < kCauseNames.size()) ? kCauseNames.at(cause) : std::format("Exception ({})", cause);
+        explain_rows.push_back(format_to_width(std::format("  {}Cause      : {}{} (0x{:X})\033[0m", kThemeText, kThemePeach, cause_name, cause), width));
+        explain_rows.push_back(format_to_width(std::format("  {}Target VAddr: {}0x{:0{}x}\033[0m", kThemeText, kThemeVal, tval, simrv::xlen::kXLenHexDigits), width));
+        std::string priv_str = (st.priv == PrivilegeLevel::Machine) ? "Machine (M)" : ((st.priv == PrivilegeLevel::Supervisor) ? "Supervisor (S)" : "User (U)");
+        explain_rows.push_back(format_to_width(std::format("  {}Privilege  : {}{}\033[0m", kThemeText, kThemeMint, priv_str), width));
+    }
+
     explain_rows.push_back(section_line("End Explainer", width));
 
     return explain_rows;

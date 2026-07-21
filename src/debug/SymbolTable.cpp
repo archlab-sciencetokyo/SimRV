@@ -179,4 +179,13 @@ auto SymbolTable::lookup(Address addr) const -> std::string {
     return "";
 }
 
+auto SymbolTable::lookup_name(const std::string& name) const -> std::optional<Address> {
+    for (const auto& [addr, sym_name] : symbols_) {
+        if (sym_name == name) {
+            return addr;
+        }
+    }
+    return std::nullopt;
+}
+
 }  // namespace simrv::debug

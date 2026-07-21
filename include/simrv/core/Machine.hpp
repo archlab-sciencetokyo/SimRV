@@ -14,6 +14,7 @@
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/debug/SymbolTable.hpp"
+#include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/device/Console.hpp"
 #include "simrv/device/Disk.hpp"
 #include "simrv/device/Rtc.hpp"
@@ -142,6 +143,7 @@ class Machine {
     // ========== Debug Subsystems (null when disabled) ==========
     std::unique_ptr<simrv::debug::GdbStub>       gdb_stub;
     std::unique_ptr<simrv::debug::SpikeLockstep> spike_lockstep;
+    simrv::debug::BreakpointManager breakpoints;
 
     // ========== Memory and Interconnect ==========
     Byte* mmem{};          // Pointer to main memory buffer
