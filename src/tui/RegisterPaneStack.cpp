@@ -1,3 +1,7 @@
+/**
+ * @file RegisterPaneStack.cpp
+ * @brief Stack memory view pane rendering for the TUI register panel.
+ */
 #include "simrv/tui/RegisterPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/core/Cpu.hpp"
@@ -32,19 +36,57 @@ auto RegisterPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_r
     unsigned int xlen = cpu.state().regs.xlen;
     int word_size = static_cast<int>(xlen) / 8;
     
+    // Check if the stack pointer is valid and mapped in DRAM
+    auto sp_phys = translate_safe(cpu, sp);
+    bool const sp_valid = (sp != 0 && sp_phys.has_value() && simrv::memory::is_dram_addr(*sp_phys));
+    
+    // Fallback: Display warning message when sp is invalid or null (e.g. during initial boot)
+    if (!sp_valid) {
+        if (logical_row == 0) {
+            return section_line("Live Guest Stack Watch", width);
+        }
+        if (logical_row == 4) {
+            std::string text = "\033[1;38;5;203m⚠️  STACK POINTER INVALID / NULL\033[0m";
+            int spaces = std::max(0, (width - 32) / 2);
+            return format_to_width(std::string(spaces, ' ') + text, width);
+        }
+        if (logical_row == 6) {
+            std::string val_str = (xlen == 64) ? std::format("0x{:016x}", sp) : std::format("0x{:08x}", sp);
+            std::string text = std::format("sp register = {}{}\033[0m", kThemeVal, val_str);
+            int spaces = std::max(0, (width - (14 + (xlen == 64 ? 18 : 10))) / 2);
+            return format_to_width(std::string(spaces, ' ') + text, width);
+        }
+        if (logical_row == 8) {
+            std::string text = "Stack watch requires a valid DRAM-mapped pointer.";
+            int spaces = std::max(0, (width - static_cast<int>(text.length())) / 2);
+            return format_to_width(std::string(spaces, ' ') + text, width);
+        }
+        if (logical_row == 9) {
+            std::string text = "It will activate once guest code initializes sp.";
+            int spaces = std::max(0, (width - static_cast<int>(text.length())) / 2);
+            return format_to_width(std::string(spaces, ' ') + text, width);
+        }
+        if (logical_row == 14) {
+            return section_line("Status: Stack Watch Inactive", width);
+        }
+        return format_to_width("", width);
+    }
+    
     Register aligned_sp = sp & ~(static_cast<Register>(word_size) - 1);
     
     if (logical_row == 0) {
         return section_line("Live Guest Stack Watch (sp-aligned)", width);
     }
-    if (logical_row == 11) {
-        return section_line("Occupancy: sp (Mint) | scratch/free (Peach)", width);
+    if (logical_row == 14) {
+        return section_line("Occupancy: sp | active frame | free/scratch", width);
     }
-    if (logical_row > 11) {
+    if (logical_row > 14) {
         return format_to_width("", width);
     }
     
-    int word_offset = logical_row - 5;
+    // logical_row ranges from 1 to 13 (inclusive). 13 elements.
+    // Center it around sp (word_offset = 0 at logical_row = 7)
+    int word_offset = logical_row - 7;
     Register target_vaddr = aligned_sp + static_cast<Register>(word_offset * word_size);
     if (xlen == 32) {
         target_vaddr &= 0xFFFFFFFFULL;
@@ -83,19 +125,27 @@ auto RegisterPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_r
         val_str = "unmapped";
     }
     
-    const char* label_color = kThemeText;
-    const char* val_color = kThemeVal;
+    const char* label_color = nullptr;
+    const char* val_color = nullptr;
     if (word_offset == 0) {
         label_color = kThemeMint;
         val_color = kThemeMint;
-    } else if (word_offset < 0) {
+    } else if (word_offset > 0) { // Active frame (addresses above sp)
         label_color = kThemePeach;
+        val_color = kThemeVal;
+    } else { // Free/scratch area (addresses below sp)
+        label_color = kThemeMuted;
+        val_color = kThemeMuted;
     }
     
-    std::string left_col = std::format("  \033[38;5;244m{}\033[0m  {}{:<8}\033[0m: {}{}\033[0m", addr_str, label_color, offset_str, val_color, val_str);
-    std::string right_col = std::format(" {}{}\033[0m", kThemeText, dec_str);
+    // Formatting: dynamically compute alignment to completely prevent hex value truncation
+    std::string left_part = std::format("  \033[38;5;244m{}\033[0m  {}{:<8}\033[0m: {}{}\033[0m", addr_str, label_color, offset_str, val_color, val_str);
+    int printable_len = 2 + static_cast<int>(addr_str.length()) + 2 + 8 + 2 + static_cast<int>(val_str.length());
+    int pad_len = std::max(1, col_width - printable_len);
+    std::string padding = std::string(static_cast<std::size_t>(pad_len), ' ');
+    std::string full_row = left_part + padding + std::format(" {}{}\033[0m", kThemeText, dec_str);
     
-    return format_to_width(left_col, col_width) + format_to_width(right_col, right_width);
+    return format_to_width(full_row, width);
 }
 
 } // namespace simrv::tui

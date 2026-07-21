@@ -18,6 +18,18 @@ struct ArchState;
 
 namespace simrv::tui {
 
+/// Canonical ABI register names shared by all register pane sub-units.
+inline constexpr std::array<const char*, 32> kRegNames = {
+    "zero", "ra", "sp", "gp", "tp",  "t0",  "t1", "t2", "s0/fp", "s1", "a0",
+    "a1",   "a2", "a3", "a4", "a5",  "a6",  "a7", "s2", "s3",    "s4", "s5",
+    "s6",   "s7", "s8", "s9", "s10", "s11", "t3", "t4", "t5",    "t6"};
+
+/// Canonical FP ABI register names shared by all register pane sub-units.
+inline constexpr std::array<const char*, 32> kFpRegNames = {
+    "ft0", "ft1", "ft2", "ft3", "ft4",  "ft5",  "ft6", "ft7", "fs0",  "fs1", "fa0",
+    "fa1", "fa2", "fa3", "fa4", "fa5",  "fa6",  "fa7", "fs2", "fs3",  "fs4", "fs5",
+    "fs6", "fs7", "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11"};
+
 class RegisterPane : public TuiWidget {
    public:
     explicit RegisterPane(simrv::core::Machine& machine) : machine_(machine) {
@@ -41,6 +53,8 @@ class RegisterPane : public TuiWidget {
     void scroll(int lines);
     void reset_scroll() { scroll_offset_ = 0; }
     [[nodiscard]] auto get_scroll_offset() const -> int { return scroll_offset_; }
+    void set_inspect_addr(Register addr) { inspect_addr_ = addr; }
+    [[nodiscard]] auto get_inspect_addr() const -> Register { return inspect_addr_; }
     
    private:
     [[nodiscard]] auto get_sparkline_string(int width) -> std::string;
@@ -99,6 +113,7 @@ class RegisterPane : public TuiWidget {
     int visible_rows_ = 25;
     int scroll_offset_ = 0;
     double active_runtime_ = 0.0;
+    Register inspect_addr_ = 0;
 };
 
 }  // namespace simrv::tui

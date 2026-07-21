@@ -91,17 +91,24 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             } else {
                 speed_str = std::format("{:.1f} KIPS", static_cast<double>(kips_));
             }
-
             uint64_t budget = 0;
             uint64_t delay = 0;
+            uint64_t gran = 50;
             if (machine_.tui) {
                 budget = machine_.tui->step_budget_.load(std::memory_order_relaxed);
                 delay = machine_.tui->step_delay_us_.load(std::memory_order_relaxed);
+                gran = machine_.tui->step_granularity_.load(std::memory_order_relaxed);
             }
             std::string dbg_info;
+            const auto num_bp = machine_.breakpoints.get_pc_breakpoints().size();
+            const auto num_wp = machine_.breakpoints.get_watchpoints().size();
+            if (num_bp > 0 || num_wp > 0) {
+                dbg_info += std::format("BP:{} WP:{} | ", num_bp, num_wp);
+            }
             if (machine_.s_rollback_enabled) {
                 dbg_info += "Rollback: ON | ";
             }
+            dbg_info += std::format("StepN: {} | ", gran);
             if (budget > 0) {
                 dbg_info += std::format("Steps: {} | ", budget);
             }
@@ -219,21 +226,25 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         }
 
         std::string screen;
-        if (layout_ == TuiLayout::Split) {
-            screen += std::string(kThemeBorder) + "╔" + make_repeated_string("═", left_width_) + "╤" +
-                      make_repeated_string("═", right_width_) + "╗\033[0m\n";
-            screen += std::string(kThemeBorder) + "║\033[0m" + left_render + kThemeBorder + "│\033[0m" + right_render +
-                      kThemeBorder + "║\033[0m\n";
-            screen += std::string(kThemeBorder) + "╠" + make_repeated_string("═", left_width_) + "╪" +
-                      make_repeated_string("═", right_width_) + "╣\033[0m\n";
-        } else if (layout_ == TuiLayout::FullConsole) {
-            screen += std::string(kThemeBorder) + "╔" + make_repeated_string("═", width - 2) + "╗\033[0m\n";
-            screen += std::string(kThemeBorder) + "║\033[0m" + right_render + kThemeBorder + "║\033[0m\n";
-            screen += std::string(kThemeBorder) + "╠" + make_repeated_string("═", width - 2) + "╣\033[0m\n";
-        } else {
-            screen += std::string(kThemeBorder) + "╔" + make_repeated_string("═", width - 2) + "╗\033[0m\n";
-            screen += std::string(kThemeBorder) + "║\033[0m" + left_render + kThemeBorder + "║\033[0m\n";
-            screen += std::string(kThemeBorder) + "╠" + make_repeated_string("═", width - 2) + "╣\033[0m\n";
+        switch (layout_) {
+            case TuiLayout::Split:
+                screen += std::string(kThemeBorder) + "╔" + make_repeated_string("═", left_width_) + "╤" +
+                          make_repeated_string("═", right_width_) + "╗\033[0m\n";
+                screen += std::string(kThemeBorder) + "║\033[0m" + left_render + kThemeBorder + "│\033[0m" + right_render +
+                          kThemeBorder + "║\033[0m\n";
+                screen += std::string(kThemeBorder) + "╠" + make_repeated_string("═", left_width_) + "╪" +
+                          make_repeated_string("═", right_width_) + "╣\033[0m\n";
+                break;
+            case TuiLayout::FullConsole:
+                screen += std::string(kThemeBorder) + "╔" + make_repeated_string("═", width - 2) + "╗\033[0m\n";
+                screen += std::string(kThemeBorder) + "║\033[0m" + right_render + kThemeBorder + "║\033[0m\n";
+                screen += std::string(kThemeBorder) + "╠" + make_repeated_string("═", width - 2) + "╣\033[0m\n";
+                break;
+            default:
+                screen += std::string(kThemeBorder) + "╔" + make_repeated_string("═", width - 2) + "╗\033[0m\n";
+                screen += std::string(kThemeBorder) + "║\033[0m" + left_render + kThemeBorder + "║\033[0m\n";
+                screen += std::string(kThemeBorder) + "╠" + make_repeated_string("═", width - 2) + "╣\033[0m\n";
+                break;
         }
         return screen;
     } else if (row_idx == 1) {
@@ -241,10 +252,10 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         std::string footer_text;
         if (paused_) {
             footer_text =
-                " [s] Step | [b] Back | [o] Rollback | [n] Step 50 | [c] Continue | [q] Quit | [Tab] Layout ";
+                " [s] Step | [b] Back | [n] Step N | [:] Break | [g] StepSize | [m] Mem | [f] Speed | [?] Help | [c] Run | [q] Quit ";
         } else {
             footer_text =
-                " [Ctrl-P] Pause | [Ctrl-Q] Quit | [Tab] Layout | [+/-] Speed ";
+                " [Ctrl-P] Pause | [Ctrl-Q] Quit | [Tab] Layout | [+/-] Speed | [:] Break | [g] StepSize | [m] Mem | [?] Help ";
         }
         int footer_len = get_display_width(footer_text);
         int pad_foot = (width - 2) - footer_len;

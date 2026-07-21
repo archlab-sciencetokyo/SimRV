@@ -80,8 +80,21 @@ class Tui {
     void update_cache();
     void on_cycle_completed();
 
+    enum class ModalType : uint8_t { None, SetBreakpoint, SetStepSize, SetSpeed, InspectAddress, Help };
+
+    void render_modal_overlay(std::vector<std::string>& lines, int term_width, int term_height) const;
+
     std::atomic<uint64_t> step_budget_{0};
     std::atomic<uint64_t> step_delay_us_{0};
+    std::atomic<uint64_t> step_granularity_{50};
+
+    void cycle_step_granularity(bool increase = true);
+
+    void open_modal(ModalType type);
+    void close_modal();
+    void submit_modal();
+    void handle_modal_char(char ch);
+    [[nodiscard]] auto is_modal_active() const -> bool { return active_modal_ != ModalType::None; }
 
     void set_status_override(const std::string& status) { status_override_ = status; }
     void clear_status_override() { status_override_.clear(); }
@@ -178,6 +191,8 @@ class Tui {
     mutable std::mutex io_mutex_;
 
     std::string esc_buf_;
+    ModalType active_modal_ = ModalType::None;
+    std::string modal_input_;
     std::atomic<bool> tui_loop_paused_{false};
     std::atomic<bool> sim_thread_is_sleeping_{false};
     std::thread::id main_thread_id_;

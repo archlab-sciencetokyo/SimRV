@@ -485,6 +485,8 @@ void Tui::render(bool force) {
 
     append_split_lines(status_bar_->render_row(1, term_width));
 
+    render_modal_overlay(new_lines, term_width, term_height);
+
     std::string update_cmds = "\033[?25l";
 
     if (force || last_screen_lines_.size() != new_lines.size()) {
@@ -999,6 +1001,25 @@ void Tui::pause_loop() {
             }
 
             const auto key = static_cast<simrv::tui::TuiKey>(byte);
+            if (is_modal_active()) {
+                if (byte == 27 || key == simrv::tui::TuiKey::Esc) {
+                    close_modal();
+                } else if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+                    submit_modal();
+                } else if (byte == 8 || byte == 127 || key == simrv::tui::TuiKey::Backspace) {
+                    if (!modal_input_.empty()) {
+                        modal_input_.pop_back();
+                        render(true);
+                    }
+                } else if (byte >= 32 && byte <= 126) {
+                    if (active_modal_ != ModalType::Help) {
+                        modal_input_.push_back(static_cast<char>(byte));
+                        render(true);
+                    }
+                }
+                continue;
+            }
+
             if (key == simrv::tui::TuiKey::CtrlP || key == simrv::tui::TuiKey::c || key == simrv::tui::TuiKey::C) {
                 if (!machine_.is_shutdown_) {
                     tui_loop_paused_ = false;
@@ -1019,6 +1040,16 @@ void Tui::pause_loop() {
                 cycle_reg_page();
             } else if (key == simrv::tui::TuiKey::e || key == simrv::tui::TuiKey::E) {
                 toggle_explain();
+            } else if (key == simrv::tui::TuiKey::Colon) {
+                open_modal(ModalType::SetBreakpoint);
+            } else if (key == simrv::tui::TuiKey::g || key == simrv::tui::TuiKey::G) {
+                open_modal(ModalType::SetStepSize);
+            } else if (key == simrv::tui::TuiKey::f || key == simrv::tui::TuiKey::F) {
+                open_modal(ModalType::SetSpeed);
+            } else if (key == simrv::tui::TuiKey::m || key == simrv::tui::TuiKey::M) {
+                open_modal(ModalType::InspectAddress);
+            } else if (key == simrv::tui::TuiKey::QuestionMark) {
+                open_modal(ModalType::Help);
             } else if (key == simrv::tui::TuiKey::LeftBracket) {
                 adjust_left_pane_width(-2);
             } else if (key == simrv::tui::TuiKey::RightBracket) {
@@ -1042,38 +1073,49 @@ void Tui::pause_loop() {
                 }
             } else if (key == simrv::tui::TuiKey::n || key == simrv::tui::TuiKey::N) {
                 if (!machine_.is_shutdown_) {
-                    step_budget_.store(50, std::memory_order_relaxed);
+                    uint64_t g = step_granularity_.load(std::memory_order_relaxed);
+                    step_budget_.store(g, std::memory_order_relaxed);
                     tui_loop_paused_ = false;
                 }
+            } else if (key == simrv::tui::TuiKey::k || key == simrv::tui::TuiKey::K) {
+                Address pc = machine_.cpu.state().pc;
+                if (machine_.breakpoints.has_pc_breakpoint(pc)) {
+                    machine_.breakpoints.remove_pc_breakpoint(pc);
+                    set_status_override(std::format("Removed breakpoint at 0x{:08x}", pc));
+                } else {
+                    machine_.breakpoints.add_pc_breakpoint(pc);
+                    set_status_override(std::format("Breakpoint set at 0x{:08x}", pc));
+                }
+                render(true);
             } else if (key == simrv::tui::TuiKey::o || key == simrv::tui::TuiKey::O) {
                 machine_.s_rollback_enabled = !machine_.s_rollback_enabled;
                 if (!machine_.s_rollback_enabled) {
                     machine_.cpu.undo_stack.clear();
                 }
                 render(true);
-            } else if (key == simrv::tui::TuiKey::Plus || key == simrv::tui::TuiKey::Equal) {
+            } else if (key == simrv::tui::TuiKey::Plus || key == simrv::tui::TuiKey::Equal || key == simrv::tui::TuiKey::Dot) {
+                static constexpr std::array<uint64_t, 10> kSpeedLevels = {1000000, 500000, 100000, 50000, 10000, 5000, 1000, 100, 10, 0};
                 uint64_t cur_delay = step_delay_us_.load(std::memory_order_relaxed);
-                if (cur_delay >= 1000000) {
-                    step_delay_us_.store(100000, std::memory_order_relaxed);
-                } else if (cur_delay >= 100000) {
-                    step_delay_us_.store(10000, std::memory_order_relaxed);
-                } else if (cur_delay >= 10000) {
-                    step_delay_us_.store(1000, std::memory_order_relaxed);
-                } else {
-                    step_delay_us_.store(0, std::memory_order_relaxed);
+                uint64_t next_delay = 0;
+                for (uint64_t lvl : kSpeedLevels) {
+                    if (lvl < cur_delay) {
+                        next_delay = lvl;
+                        break;
+                    }
                 }
+                step_delay_us_.store(next_delay, std::memory_order_relaxed);
                 render(true);
-            } else if (key == simrv::tui::TuiKey::Minus) {
+            } else if (key == simrv::tui::TuiKey::Minus || key == simrv::tui::TuiKey::Comma) {
+                static constexpr std::array<uint64_t, 10> kSpeedLevels = {0, 10, 100, 1000, 5000, 10000, 50000, 100000, 500000, 1000000};
                 uint64_t cur_delay = step_delay_us_.load(std::memory_order_relaxed);
-                if (cur_delay == 0) {
-                    step_delay_us_.store(1000, std::memory_order_relaxed);
-                } else if (cur_delay <= 1000) {
-                    step_delay_us_.store(10000, std::memory_order_relaxed);
-                } else if (cur_delay <= 10000) {
-                    step_delay_us_.store(100000, std::memory_order_relaxed);
-                } else if (cur_delay <= 100000) {
-                    step_delay_us_.store(1000000, std::memory_order_relaxed);
+                uint64_t next_delay = 1000000;
+                for (uint64_t lvl : kSpeedLevels) {
+                    if (lvl > cur_delay) {
+                        next_delay = lvl;
+                        break;
+                    }
                 }
+                step_delay_us_.store(next_delay, std::memory_order_relaxed);
                 render(true);
             } else if (key == simrv::tui::TuiKey::s || key == simrv::tui::TuiKey::S || key == simrv::tui::TuiKey::Space) {
                 if (!machine_.is_shutdown_) {
@@ -1215,6 +1257,13 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         }
     }
 
+    if (esc_buf_.size() == 1) {
+        if (is_modal_active()) {
+            close_modal();
+            return true;
+        }
+    }
+
     // 3. Forward all other escape sequences (like arrow keys) to the guest OS
     if (machine_.uart) {
         for (char c : esc_buf_) {
@@ -1266,6 +1315,24 @@ auto Tui::parse_sgr_mouse(const std::string& seq, int& b, int& x, int& y) -> boo
     return true;
 }
 
+void Tui::cycle_step_granularity(bool increase) {
+    static constexpr std::array<uint64_t, 9> kPresets = {1, 5, 10, 50, 100, 500, 1000, 5000, 10000};
+    uint64_t cur = step_granularity_.load(std::memory_order_relaxed);
+    std::size_t idx = 3;
+    for (std::size_t i = 0; i < kPresets.size(); ++i) {
+        if (kPresets[i] == cur) {
+            idx = i;
+            break;
+        }
+    }
+    if (increase) {
+        if (idx + 1 < kPresets.size()) ++idx;
+    } else {
+        if (idx > 0) --idx;
+    }
+    step_granularity_.store(kPresets[idx], std::memory_order_relaxed);
+}
+
 void Tui::on_cycle_completed() {
     uint64_t budget = step_budget_.load(std::memory_order_relaxed);
     while (budget > 0) {
@@ -1279,6 +1346,209 @@ void Tui::on_cycle_completed() {
     uint64_t delay = step_delay_us_.load(std::memory_order_relaxed);
     if (delay > 0) {
         std::this_thread::sleep_for(std::chrono::microseconds(delay));
+    }
+}
+
+void Tui::open_modal(ModalType type) {
+    active_modal_ = type;
+    modal_input_.clear();
+    set_paused(true);
+    render(true);
+}
+
+void Tui::close_modal() {
+    active_modal_ = ModalType::None;
+    modal_input_.clear();
+    render(true);
+}
+
+void Tui::submit_modal() {
+    if (active_modal_ == ModalType::None) return;
+    std::string text = modal_input_;
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front()))) text.erase(text.begin());
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back()))) text.pop_back();
+
+    if (!text.empty() && active_modal_ != ModalType::Help) {
+        switch (active_modal_) {
+            case ModalType::SetBreakpoint: {
+                Address addr = 0;
+                bool ok = false;
+                if (text.starts_with("0x") || text.starts_with("0X")) {
+                    auto result = std::from_chars(text.data() + 2, text.data() + text.size(), addr, 16);
+                    ok = (result.ec == std::errc{});
+                } else if (std::all_of(text.begin(), text.end(), ::isxdigit)) {
+                    auto result = std::from_chars(text.data(), text.data() + text.size(), addr, 16);
+                    ok = (result.ec == std::errc{});
+                } else {
+                    auto sym_opt = machine_.symbols.lookup_name(text);
+                    if (sym_opt.has_value()) {
+                        addr = *sym_opt;
+                        ok = true;
+                    }
+                }
+                if (ok) {
+                    machine_.breakpoints.add_pc_breakpoint(addr);
+                    set_status_override(std::format("Breakpoint set at 0x{:08x}", addr));
+                } else {
+                    set_status_override(std::format("Symbol/address not found: {}", text));
+                }
+                break;
+            }
+            case ModalType::SetStepSize: {
+                uint64_t val = 0;
+                auto result = std::from_chars(text.data(), text.data() + text.size(), val);
+                if (result.ec == std::errc{} && val > 0) {
+                    step_granularity_.store(val, std::memory_order_relaxed);
+                    set_status_override(std::format("StepN set to {} instructions", val));
+                } else {
+                    set_status_override(std::format("Invalid step size: {}", text));
+                }
+                break;
+            }
+            case ModalType::SetSpeed: {
+                uint64_t val = 0;
+                auto result = std::from_chars(text.data(), text.data() + text.size(), val);
+                if (result.ec == std::errc{}) {
+                    step_delay_us_.store(val, std::memory_order_relaxed);
+                    set_status_override(std::format("Step delay set to {}us", val));
+                } else {
+                    set_status_override(std::format("Invalid speed delay: {}", text));
+                }
+                break;
+            }
+            case ModalType::InspectAddress: {
+                Address addr = 0;
+                bool ok = false;
+                if (text.starts_with("0x") || text.starts_with("0X")) {
+                    auto result = std::from_chars(text.data() + 2, text.data() + text.size(), addr, 16);
+                    ok = (result.ec == std::errc{});
+                } else if (std::all_of(text.begin(), text.end(), ::isxdigit)) {
+                    auto result = std::from_chars(text.data(), text.data() + text.size(), addr, 16);
+                    ok = (result.ec == std::errc{});
+                } else {
+                    auto sym_opt = machine_.symbols.lookup_name(text);
+                    if (sym_opt.has_value()) {
+                        addr = *sym_opt;
+                        ok = true;
+                    }
+                }
+                if (ok) {
+                    reg_pane_->set_inspect_addr(addr);
+                    set_reg_page(TuiRegPage::STACK);
+                    set_status_override(std::format("Inspecting memory at 0x{:08x}", addr));
+                } else {
+                    set_status_override(std::format("Invalid address/symbol: {}", text));
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    active_modal_ = ModalType::None;
+    modal_input_.clear();
+    render(true);
+}
+
+void Tui::render_modal_overlay(std::vector<std::string>& lines, int term_width, int term_height) const {
+    (void)term_height;
+    if (active_modal_ == ModalType::None || lines.empty()) return;
+
+    bool is_help = (active_modal_ == ModalType::Help);
+    int box_w = is_help ? std::min(66, term_width - 4) : std::min(56, term_width - 4);
+    if (box_w < 35) return;
+
+    std::vector<std::string> content_rows;
+    std::string title;
+    switch (active_modal_) {
+        case ModalType::SetBreakpoint:
+            title = " SET BREAKPOINT ";
+            content_rows.push_back("Enter PC Address (hex) or Symbol:");
+            content_rows.push_back(std::format("  > {}_", modal_input_));
+            break;
+        case ModalType::SetStepSize:
+            title = " SET STEP SIZE (N) ";
+            content_rows.push_back("Enter Step Count N (instructions):");
+            content_rows.push_back(std::format("  > {}_", modal_input_));
+            break;
+        case ModalType::SetSpeed:
+            title = " SET SIMULATION SPEED ";
+            content_rows.push_back("Enter Step Delay (microseconds, 0=Max):");
+            content_rows.push_back(std::format("  > {}_", modal_input_));
+            break;
+        case ModalType::InspectAddress:
+            title = " INSPECT MEMORY ADDRESS ";
+            content_rows.push_back("Enter Target Address (hex) or Symbol:");
+            content_rows.push_back(std::format("  > {}_", modal_input_));
+            break;
+        case ModalType::Help:
+            title = " SIMULATOR KEYBOARD SHORTCUTS ";
+            content_rows.push_back(" [s] / [Space]  Single instruction step");
+            content_rows.push_back(" [n]            Step N instructions");
+            content_rows.push_back(" [b]            Undo / Step back 1 instruction");
+            content_rows.push_back(" [:]            Set PC Breakpoint modal");
+            content_rows.push_back(" [k]            Toggle PC breakpoint at current PC");
+            content_rows.push_back(" [g]            Set Step Size (N) modal");
+            content_rows.push_back(" [f]            Set Speed Delay (us) modal");
+            content_rows.push_back(" [m]            Inspect Memory Address modal");
+            content_rows.push_back(" [c] / [Ctrl-P] Run / Pause simulation loop");
+            content_rows.push_back(" [Tab]          Cycle TUI panel layout");
+            content_rows.push_back(" [r]            Cycle Register page (GPR/FPR/VEC)");
+            content_rows.push_back(" [e]            Toggle Explainer & Trap Details");
+            content_rows.push_back(" [?]            Show this help dialog");
+            content_rows.push_back(" [Esc]          Close modal dialog");
+            break;
+        default:
+            break;
+    }
+
+    std::vector<std::string> box_lines;
+    int inner_w = box_w - 2;
+
+    auto pad_center = [&](const std::string& text, int width) -> std::string {
+        int text_len = get_display_width(text);
+        if (text_len >= width) return text.substr(0, width);
+        int pad_l = (width - text_len) / 2;
+        int pad_r = width - text_len - pad_l;
+        return std::string(pad_l, ' ') + text + std::string(pad_r, ' ');
+    };
+
+    auto pad_left = [&](const std::string& text, int width) -> std::string {
+        int text_len = get_display_width(text);
+        if (text_len >= width) return text.substr(0, width);
+        return text + std::string(width - text_len, ' ');
+    };
+
+    std::string top_border = "╔" + pad_center("═ " + title + " ═", inner_w) + "╗";
+    box_lines.push_back(top_border);
+    box_lines.push_back("║" + std::string(inner_w, ' ') + "║");
+
+    for (const auto& row : content_rows) {
+        box_lines.push_back("║" + pad_left(" " + row, inner_w) + "║");
+    }
+
+    box_lines.push_back("║" + std::string(inner_w, ' ') + "║");
+    if (!is_help) {
+        box_lines.push_back("║" + pad_center("[Enter] Submit  |  [Esc] Cancel", inner_w) + "║");
+    } else {
+        box_lines.push_back("║" + pad_center("Press [Esc] or [Enter] to close", inner_w) + "║");
+    }
+    box_lines.push_back("╚" + make_repeated_string("═", inner_w) + "╝");
+
+    int box_h = static_cast<int>(box_lines.size());
+    int start_y = (static_cast<int>(lines.size()) - box_h) / 2;
+    int start_x = (term_width - box_w) / 2;
+    if (start_y < 0) start_y = 0;
+    if (start_x < 0) start_x = 0;
+
+    std::string indent(static_cast<std::size_t>(start_x), ' ');
+
+    for (size_t i = 0; i < box_lines.size(); ++i) {
+        int r = start_y + static_cast<int>(i);
+        if (r >= 0 && static_cast<size_t>(r) < lines.size()) {
+            std::string styled_line = std::format("{}\033[1;38;5;255;48;5;236m{}\033[0m", indent, box_lines[i]);
+            lines[r] = styled_line;
+        }
     }
 }
 
