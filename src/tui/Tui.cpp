@@ -1214,16 +1214,24 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             cycle_reg_page();
             return true;
         }
+        if (key == 'l' || key == 'L') {
+            cycle_tool_page();
+            return true;
+        }
+        if (key == 'e' || key == 'E') {
+            toggle_explain();
+            return true;
+        }
+        if (key == 'v' || key == 'V') {
+            toggle_trace_enabled();
+            return true;
+        }
         if (key == 'h' || key == 'H') {
             toggle_high_contrast();
             return true;
         }
         if (key == 't' || key == 'T') {
             toggle_sakura_theme();
-            return true;
-        }
-        if (key == 'l' || key == 'L') {
-            cycle_layout();
             return true;
         }
         if (key == 'u' || key == 'U') {
@@ -1512,10 +1520,11 @@ void Tui::render_modal_overlay(std::vector<std::string>& lines, int term_width, 
             add_row(std::format(" {}{:<18}\033[0m {}Inspect Memory Address modal\033[0m", kThemeSky, "[m]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Run / Pause simulation loop\033[0m", kThemeSky, "[c] / [Ctrl-P]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Cycle TUI panel layout\033[0m", kThemeSky, "[Tab]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Cycle register sub-views (GPR/FPR/VEC)\033[0m", kThemeSky, "[r]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Cycle tool tabs (Pipe/Cache/Trace/Exp/Stack)\033[0m", kThemeSky, "[l]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Cycle Right Pane mode\033[0m", kThemeSky, "[p]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Jump to Explainer / Trap Details\033[0m", kThemeSky, "[e]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Cycle register sub-views (GPR/FPR/VEC)\033[0m", kThemeSky, "[r] / [Alt-r]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Cycle tool tabs (Pipe/Cache/Trace/Exp/Stack)\033[0m", kThemeSky, "[l] / [Alt-l]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Cycle Right Pane mode\033[0m", kThemeSky, "[p] / [Alt-p]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Jump to Explainer / Trap Details\033[0m", kThemeSky, "[e] / [Alt-e]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Toggle trace recording\033[0m", kThemeSky, "[v] / [Alt-v]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Show this help dialog\033[0m", kThemeSky, "[F1] / [h] / [?]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Toggle High Contrast theme\033[0m", kThemeSky, "[Alt-h]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Toggle Sakura Pastel theme\033[0m", kThemeSky, "[Alt-t]", kThemeText));
@@ -1567,8 +1576,8 @@ void Tui::render_modal_overlay(std::vector<std::string>& lines, int term_width, 
     for (size_t i = 0; i < box_lines.size(); ++i) {
         int r = start_y + static_cast<int>(i);
         if (r >= 0 && static_cast<size_t>(r) < lines.size()) {
-            std::string styled_modal_box_line = std::format("\033[1m{}{}\033[0m", kThemeModalBg, box_lines[i]);
-            lines[r] = overlay_string(lines[r], styled_modal_box_line, start_x, box_w);
+            // box_lines[i] already starts with m_bg (\033[48;5;236m) and resets with \033[0m
+            lines[r] = overlay_string(lines[r], box_lines[i], start_x, box_w);
         }
     }
 }
