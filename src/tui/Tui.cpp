@@ -1422,10 +1422,16 @@ void Tui::submit_modal() {
                 uint64_t val = 0;
                 auto result = std::from_chars(text.data(), text.data() + text.size(), val);
                 if (result.ec == std::errc{}) {
-                    step_delay_us_.store(val, std::memory_order_relaxed);
-                    set_status_override(std::format("Step delay set to {}us", val));
+                    if (val == 0) {
+                        step_delay_us_.store(0, std::memory_order_relaxed);
+                        set_status_override("Speed set to Max (no delay)");
+                    } else {
+                        uint64_t delay = 1000000 / val;
+                        step_delay_us_.store(delay, std::memory_order_relaxed);
+                        set_status_override(std::format("Speed set to {} Hz (delay: {}us)", val, delay));
+                    }
                 } else {
-                    set_status_override(std::format("Invalid speed delay: {}", text));
+                    set_status_override(std::format("Invalid speed frequency: {}", text));
                 }
                 break;
             }
@@ -1499,8 +1505,8 @@ void Tui::render_modal_overlay(std::vector<std::string>& lines, int term_width, 
             add_row(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, modal_input_));
             break;
         case ModalType::SetSpeed:
-            title = " SET SIMULATION SPEED ";
-            add_row(std::format("{}Enter Step Delay (microseconds, 0=Max):\033[0m", kThemeText));
+            title = " SET SIMULATION FREQUENCY ";
+            add_row(std::format("{}Enter Target Frequency (Hz, 0=Max):\033[0m", kThemeText));
             add_row(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, modal_input_));
             break;
         case ModalType::InspectAddress:
@@ -1516,7 +1522,7 @@ void Tui::render_modal_overlay(std::vector<std::string>& lines, int term_width, 
             add_row(std::format(" {}{:<18}\033[0m {}Set PC Breakpoint modal\033[0m", kThemeSky, "[:]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Toggle PC breakpoint at current PC\033[0m", kThemeSky, "[k]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Set Step Size (N) modal\033[0m", kThemeSky, "[g]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Set Speed Delay (us) modal\033[0m", kThemeSky, "[f]", kThemeText));
+            add_row(std::format(" {}{:<18}\033[0m {}Set Speed Frequency (Hz) modal\033[0m", kThemeSky, "[f]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Inspect Memory Address modal\033[0m", kThemeSky, "[m]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Run / Pause simulation loop\033[0m", kThemeSky, "[c] / [Ctrl-P]", kThemeText));
             add_row(std::format(" {}{:<18}\033[0m {}Cycle TUI panel layout\033[0m", kThemeSky, "[Tab]", kThemeText));
