@@ -166,6 +166,36 @@ auto LeftPane::render_tab_bar(int width) const -> std::string {
     return format_to_width(line, width);
 }
 
+auto LeftPane::get_tab_at_col(int col) const -> std::optional<TuiRegPage> {
+    bool const is_regs = (page_ == TuiRegPage::GPR || page_ == TuiRegPage::FPR || page_ == TuiRegPage::VEC);
+    int regs_width = is_regs ? 10 : 4;
+
+    int current_x = 0;
+    if (col < current_x + regs_width) {
+        return std::nullopt; // Clicked on Regs tab
+    }
+    current_x += regs_width + 1; // +1 for │
+
+    struct ToolTab { TuiRegPage page; const char* name; };
+    static constexpr std::array<ToolTab, 5> tool_tabs = {{
+        {.page = TuiRegPage::PIPELINE, .name = "Pipe"},
+        {.page = TuiRegPage::CACHE,    .name = "Cache"},
+        {.page = TuiRegPage::TRACE,    .name = "Trace"},
+        {.page = TuiRegPage::EXPLAIN,  .name = "Exp"},
+        {.page = TuiRegPage::STACK,    .name = "Stack"},
+    }};
+
+    for (auto const& tab : tool_tabs) {
+        int tab_width = (page_ == tab.page) ? (static_cast<int>(std::strlen(tab.name)) + 2) : static_cast<int>(std::strlen(tab.name));
+        if (col < current_x + tab_width) {
+            return tab.page;
+        }
+        current_x += tab_width + 1;
+    }
+
+    return std::nullopt;
+}
+
 auto LeftPane::render_trace_row(int logical_row, int width) -> std::string {
     if (!trace_buffer_ || trace_buffer_->empty()) {
         if (logical_row == 1) {
@@ -193,8 +223,8 @@ auto LeftPane::render_log_bottom_row(int row_idx, int num_rows, int width) -> st
     if (log_idx < 0 || log_idx >= total) {
         return format_to_width("", width);
     }
-    // Log lines come from vt_log_ with their own content — just clamp to width.
-    return format_to_width(log_lines_.at(static_cast<std::size_t>(log_idx)), width);
+    // Log lines come from vt_log_ with their own content — prepend space to align with pane section text.
+    return format_to_width(" " + log_lines_.at(static_cast<std::size_t>(log_idx)), width);
 }
 
 auto LeftPane::render_row(int row_idx, int width) -> std::string {

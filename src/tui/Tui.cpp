@@ -77,7 +77,7 @@ void handle_sigwinch(int sig) {
 
 }  // namespace
 
-Tui::Tui(simrv::core::Machine& machine) : machine_(machine) {
+Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
     main_thread_id_ = std::this_thread::get_id();
     last_speed_update_ = std::chrono::steady_clock::now();
     trace_enabled_.store(false, std::memory_order_relaxed);
@@ -196,8 +196,8 @@ void Tui::initialize() {
     sa.sa_flags = SA_RESTART;
     sigaction(SIGWINCH, &sa, nullptr);
 
-    print_log("SimRV Simulator Debug Dashboard Init...\n");
-    print_log("Please press [Ctrl+P] to start/pause, [Space/s/S] to step, [Ctrl+Q] to quit.\n");
+    print_log("SimRV RISC-V Interactive Environment initialized.\n");
+    print_log("Press [s] Step, [c] Run/Pause, [F1] Help.\n");
     simrv::log::set_tui_callback([this](const std::string& msg) -> void {
         print_log(msg);
     });
@@ -469,7 +469,7 @@ void Tui::render(bool force) {
 
     append_split_lines(status_bar_->render_row(1, term_width));
 
-    render_modal_overlay(new_lines, term_width, term_height);
+    modal_.render_overlay(new_lines, term_width, term_height);
 
     std::string update_cmds = "\033[?25l";
 
@@ -999,16 +999,14 @@ void Tui::pause_loop() {
                     close_modal();
                 } else if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
                     submit_modal();
-                } else if (active_modal_ == ModalType::Help && (key == simrv::tui::TuiKey::h || key == simrv::tui::TuiKey::H || key == simrv::tui::TuiKey::QuestionMark)) {
+                } else if (get_active_modal() == ModalType::Help && (key == simrv::tui::TuiKey::h || key == simrv::tui::TuiKey::H || key == simrv::tui::TuiKey::QuestionMark)) {
                     close_modal();
                 } else if (byte == 8 || byte == 127 || key == simrv::tui::TuiKey::Backspace) {
-                    if (!modal_input_.empty()) {
-                        modal_input_.pop_back();
-                        render(true);
-                    }
+                    modal_.pop_char();
+                    render(true);
                 } else if (byte >= 32 && byte <= 126) {
-                    if (active_modal_ != ModalType::Help) {
-                        modal_input_.push_back(static_cast<char>(byte));
+                    if (get_active_modal() != ModalType::Help) {
+                        modal_.push_char(static_cast<char>(byte));
                         render(true);
                     }
                 }
@@ -1172,31 +1170,110 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
     if (parse_sgr_mouse(esc_buf_, button, x, y)) {
         // Double-click prevention: only register left clicks on press event ('M')
         if (esc_buf_.back() == 'M' && button == 0 && y == 2) {
-            const auto layout = get_layout();
-            bool on_left = false;
-            if (layout == TuiLayout::Split) {
-                on_left = (x <= get_pane_width());
-            } else if (layout == TuiLayout::FullLeft) {
-                on_left = true;
-            } else {
-                on_left = false;
-            }
-
-            if (on_left) {
-                cycle_reg_page();
-            } else {
-                if (machine_.is_shutdown_) {
-                    machine_.request_reboot();
-                    tui_loop_paused_ = false;
-                } else {
-                    if (tui_loop_paused_) {
+            struct winsize w{};
+            ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+            int term_w = w.ws_col > 0 ? w.ws_col : 80;
+            if (status_bar_) {
+                if (status_bar_->is_pos_on_status_badge(x, term_w)) {
+                    if (machine_.is_shutdown_) {
+                        machine_.request_reboot();
                         tui_loop_paused_ = false;
                     } else {
-                        pause_loop();
+                        if (tui_loop_paused_) {
+                            tui_loop_paused_ = false;
+                        } else {
+                            pause_loop();
+                        }
                     }
+                } else if (status_bar_->is_pos_on_right_panel_mode(x)) {
+                    cycle_right_panel_mode();
                 }
             }
             return true;
+        }
+
+        struct winsize w_footer{};
+        ioctl(STDOUT_FILENO, TIOCGWINSZ, &w_footer);
+        int term_h = w_footer.ws_row > 0 ? w_footer.ws_row : 24;
+
+        if (esc_buf_.back() == 'M' && button == 0 && y == term_h - 1) {
+            int col = x - 2;
+            if (status_bar_) {
+                auto act_opt = status_bar_->get_footer_action_at_col(col);
+                if (act_opt.has_value()) {
+                    switch (act_opt.value()) {
+                        case TuiFooterAction::Step:
+                            if (!machine_.is_shutdown_) {
+                                update_cache();
+                                machine_.prepare_cycle();
+                                machine_.cpu.run_cycle(machine_);
+                                machine_.finalize_cycle();
+                                render(true);
+                            }
+                            break;
+                        case TuiFooterAction::StepBack:
+                            if (machine_.cpu.perform_backstep()) {
+                                update_cache();
+                                render(true);
+                            }
+                            break;
+                        case TuiFooterAction::StepN:
+                            if (!machine_.is_shutdown_) {
+                                uint64_t g = step_granularity_.load(std::memory_order_relaxed);
+                                step_budget_.store(g, std::memory_order_relaxed);
+                                tui_loop_paused_ = false;
+                            }
+                            break;
+                        case TuiFooterAction::CycleRegs: cycle_reg_page(); break;
+                        case TuiFooterAction::CycleTools: cycle_tool_page(); break;
+                        case TuiFooterAction::SetBreakpoint: open_modal(ModalType::SetBreakpoint); break;
+                        case TuiFooterAction::TogglePcBreakpoint: {
+                            Address pc = machine_.cpu.state().pc;
+                            if (machine_.breakpoints.has_pc_breakpoint(pc)) {
+                                machine_.breakpoints.remove_pc_breakpoint(pc);
+                                set_status_override(std::format("Removed breakpoint at 0x{:08x}", pc));
+                            } else {
+                                machine_.breakpoints.add_pc_breakpoint(pc);
+                                set_status_override(std::format("Breakpoint set at 0x{:08x}", pc));
+                            }
+                            render(true);
+                            break;
+                        }
+                        case TuiFooterAction::SetStepSize: open_modal(ModalType::SetStepSize); break;
+                        case TuiFooterAction::SetSpeed: open_modal(ModalType::SetSpeed); break;
+                        case TuiFooterAction::InspectMem: open_modal(ModalType::InspectAddress); break;
+                        case TuiFooterAction::ToggleHelp: open_modal(ModalType::Help); break;
+                        case TuiFooterAction::RunPause:
+                            if (tui_loop_paused_) { tui_loop_paused_ = false; } else { pause_loop(); }
+                            break;
+                        case TuiFooterAction::Quit:
+                            machine_.is_running_ = false;
+                            machine_.is_shutdown_ = false;
+                            tui_loop_paused_ = false;
+                            break;
+                        case TuiFooterAction::CycleLayout: cycle_layout(); break;
+                        case TuiFooterAction::TogglePanel: cycle_right_panel_mode(); break;
+                        case TuiFooterAction::ToggleTrace: toggle_trace_enabled(); break;
+                    }
+                    return true;
+                }
+            }
+        }
+
+        if (esc_buf_.back() == 'M' && button == 0 && y == 4) {
+            int pane_w = get_pane_width();
+            if (x >= 2 && x <= pane_w + 1) {
+                int col = x - 2;
+                if (left_pane_) {
+                    auto tab_opt = left_pane_->get_tab_at_col(col);
+                    if (tab_opt.has_value()) {
+                        set_reg_page(tab_opt.value());
+                    } else {
+                        cycle_reg_page();
+                    }
+                }
+                return true;
+            }
         }
 
         handle_mouse(x, y, button);
@@ -1260,9 +1337,39 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         }
     }
 
-    // 3. Function key (F1) help shortcut
+    // 3. Arrow keys, Page Up/Down, Home, End
+    if (esc_buf_ == "\033[A" || esc_buf_ == "\033OA") {
+        scroll(-1);
+        return true;
+    }
+    if (esc_buf_ == "\033[B" || esc_buf_ == "\033OB") {
+        scroll(1);
+        return true;
+    }
+    if (esc_buf_ == "\033[C" || esc_buf_ == "\033OC") {
+        adjust_left_pane_width(2);
+        return true;
+    }
+    if (esc_buf_ == "\033[D" || esc_buf_ == "\033OD") {
+        adjust_left_pane_width(-2);
+        return true;
+    }
+    if (esc_buf_ == "\033[5~") {
+        scroll(-10);
+        return true;
+    }
+    if (esc_buf_ == "\033[6~") {
+        scroll(10);
+        return true;
+    }
+    if (esc_buf_ == "\033[H" || esc_buf_ == "\033[1~") {
+        reset_scroll();
+        return true;
+    }
+
+    // 4. Function key (F1) help shortcut
     if (esc_buf_ == "\033OP" || esc_buf_ == "\033[11~" || esc_buf_ == "\033[1;2P" || esc_buf_ == "\033[O1P") {
-        if (active_modal_ == ModalType::Help) {
+        if (get_active_modal() == ModalType::Help) {
             close_modal();
         } else {
             open_modal(ModalType::Help);
@@ -1359,232 +1466,6 @@ void Tui::on_cycle_completed() {
     uint64_t delay = step_delay_us_.load(std::memory_order_relaxed);
     if (delay > 0) {
         std::this_thread::sleep_for(std::chrono::microseconds(delay));
-    }
-}
-
-void Tui::open_modal(ModalType type) {
-    active_modal_ = type;
-    modal_input_.clear();
-    set_paused(true);
-    render(true);
-}
-
-void Tui::close_modal() {
-    active_modal_ = ModalType::None;
-    modal_input_.clear();
-    render(true);
-}
-
-void Tui::submit_modal() {
-    if (active_modal_ == ModalType::None) return;
-    std::string text = modal_input_;
-    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front()))) text.erase(text.begin());
-    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back()))) text.pop_back();
-
-    if (!text.empty() && active_modal_ != ModalType::Help) {
-        switch (active_modal_) {
-            case ModalType::SetBreakpoint: {
-                Address addr = 0;
-                bool ok = false;
-                if (text.starts_with("0x") || text.starts_with("0X")) {
-                    auto result = std::from_chars(text.data() + 2, text.data() + text.size(), addr, 16);
-                    ok = (result.ec == std::errc{});
-                } else if (std::all_of(text.begin(), text.end(), ::isxdigit)) {
-                    auto result = std::from_chars(text.data(), text.data() + text.size(), addr, 16);
-                    ok = (result.ec == std::errc{});
-                } else {
-                    auto sym_opt = machine_.symbols.lookup_name(text);
-                    if (sym_opt.has_value()) {
-                        addr = *sym_opt;
-                        ok = true;
-                    }
-                }
-                if (ok) {
-                    machine_.breakpoints.add_pc_breakpoint(addr);
-                    set_status_override(std::format("Breakpoint set at 0x{:08x}", addr));
-                } else {
-                    set_status_override(std::format("Symbol/address not found: {}", text));
-                }
-                break;
-            }
-            case ModalType::SetStepSize: {
-                uint64_t val = 0;
-                auto result = std::from_chars(text.data(), text.data() + text.size(), val);
-                if (result.ec == std::errc{} && val > 0) {
-                    step_granularity_.store(val, std::memory_order_relaxed);
-                    set_status_override(std::format("StepN set to {} instructions", val));
-                } else {
-                    set_status_override(std::format("Invalid step size: {}", text));
-                }
-                break;
-            }
-            case ModalType::SetSpeed: {
-                uint64_t val = 0;
-                auto result = std::from_chars(text.data(), text.data() + text.size(), val);
-                if (result.ec == std::errc{}) {
-                    if (val == 0) {
-                        step_delay_us_.store(0, std::memory_order_relaxed);
-                        set_status_override("Speed set to Max (no delay)");
-                    } else {
-                        uint64_t delay = 1000000 / val;
-                        step_delay_us_.store(delay, std::memory_order_relaxed);
-                        set_status_override(std::format("Speed set to {} Hz (delay: {}us)", val, delay));
-                    }
-                } else {
-                    set_status_override(std::format("Invalid speed frequency: {}", text));
-                }
-                break;
-            }
-            case ModalType::InspectAddress: {
-                Address addr = 0;
-                bool ok = false;
-                if (text.starts_with("0x") || text.starts_with("0X")) {
-                    auto result = std::from_chars(text.data() + 2, text.data() + text.size(), addr, 16);
-                    ok = (result.ec == std::errc{});
-                } else if (std::all_of(text.begin(), text.end(), ::isxdigit)) {
-                    auto result = std::from_chars(text.data(), text.data() + text.size(), addr, 16);
-                    ok = (result.ec == std::errc{});
-                } else {
-                    auto sym_opt = machine_.symbols.lookup_name(text);
-                    if (sym_opt.has_value()) {
-                        addr = *sym_opt;
-                        ok = true;
-                    }
-                }
-                if (ok) {
-                    left_pane_->set_inspect_addr(addr);
-                    set_reg_page(TuiRegPage::STACK);
-                    set_status_override(std::format("Inspecting memory at 0x{:08x}", addr));
-                } else {
-                    set_status_override(std::format("Invalid address/symbol: {}", text));
-                }
-                break;
-            }
-            default:
-                break;
-        }
-    }
-    active_modal_ = ModalType::None;
-    modal_input_.clear();
-    render(true);
-}
-
-void Tui::render_modal_overlay(std::vector<std::string>& lines, int term_width, int term_height) const {
-    (void)term_height;
-    if (active_modal_ == ModalType::None || lines.empty()) return;
-
-    bool is_help = (active_modal_ == ModalType::Help);
-    int box_w = is_help ? std::min(68, term_width - 4) : std::min(58, term_width - 4);
-    if (box_w < 35) return;
-
-    std::string m_bg = kThemeModalBg;
-    std::string m_rst = std::string("\033[0m") + m_bg;
-
-    std::vector<std::string> content_rows;
-    auto add_row = [&](const std::string& formatted_str) {
-        std::string s = formatted_str;
-        std::string target = "\033[0m";
-        size_t pos = 0;
-        while ((pos = s.find(target, pos)) != std::string::npos) {
-            s.replace(pos, target.length(), m_rst);
-            pos += m_rst.length();
-        }
-        content_rows.push_back(s);
-    };
-
-    std::string title;
-    switch (active_modal_) {
-        case ModalType::SetBreakpoint:
-            title = " SET BREAKPOINT ";
-            add_row(std::format("{}Enter PC Address (hex) or Symbol:\033[0m", kThemeText));
-            add_row(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, modal_input_));
-            break;
-        case ModalType::SetStepSize:
-            title = " SET STEP SIZE (N) ";
-            add_row(std::format("{}Enter Step Count N (instructions):\033[0m", kThemeText));
-            add_row(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, modal_input_));
-            break;
-        case ModalType::SetSpeed:
-            title = " SET SIMULATION FREQUENCY ";
-            add_row(std::format("{}Enter Target Frequency (Hz, 0=Max):\033[0m", kThemeText));
-            add_row(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, modal_input_));
-            break;
-        case ModalType::InspectAddress:
-            title = " INSPECT MEMORY ADDRESS ";
-            add_row(std::format("{}Enter Target Address (hex) or Symbol:\033[0m", kThemeText));
-            add_row(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, modal_input_));
-            break;
-        case ModalType::Help:
-            title = " SIMULATOR KEYBOARD SHORTCUTS ";
-            add_row(std::format(" {}{:<18}\033[0m {}Single instruction step\033[0m", kThemeSky, "[s] / [Space]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Step N instructions\033[0m", kThemeSky, "[n]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Undo / Step back 1 instruction\033[0m", kThemeSky, "[b]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Set PC Breakpoint modal\033[0m", kThemeSky, "[:]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Toggle PC breakpoint at current PC\033[0m", kThemeSky, "[k]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Set Step Size (N) modal\033[0m", kThemeSky, "[g]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Set Speed Frequency (Hz) modal\033[0m", kThemeSky, "[f]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Inspect Memory Address modal\033[0m", kThemeSky, "[m]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Run / Pause simulation loop\033[0m", kThemeSky, "[c] / [Ctrl-P]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Cycle TUI panel layout\033[0m", kThemeSky, "[Tab]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Cycle register sub-views (GPR/FPR/VEC)\033[0m", kThemeSky, "[r] / [Alt-r]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Cycle tool tabs (Pipe/Cache/Trace/Exp/Stack)\033[0m", kThemeSky, "[l] / [Alt-l]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Cycle Right Pane mode\033[0m", kThemeSky, "[p] / [Alt-p]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Jump to Explainer / Trap Details\033[0m", kThemeSky, "[e] / [Alt-e]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Toggle trace recording\033[0m", kThemeSky, "[v] / [Alt-v]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Show this help dialog\033[0m", kThemeSky, "[F1] / [h] / [?]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Toggle High Contrast theme\033[0m", kThemeSky, "[Alt-h]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Toggle Sakura Pastel theme\033[0m", kThemeSky, "[Alt-t]", kThemeText));
-            add_row(std::format(" {}{:<18}\033[0m {}Close modal dialog\033[0m", kThemeSky, "[Esc]", kThemeText));
-            break;
-        default:
-            break;
-    }
-
-    std::vector<std::string> box_lines;
-    int inner_w = box_w - 2;
-
-    auto pad_center = [&](const std::string& text, int width) -> std::string {
-        int text_len = get_display_width(text);
-        if (text_len >= width) return format_to_width(text, width);
-        int pad_l = (width - text_len) / 2;
-        int pad_r = width - text_len - pad_l;
-        return std::string(pad_l, ' ') + text + std::string(pad_r, ' ');
-    };
-
-    auto pad_left = [&](const std::string& text, int width) -> std::string {
-        int text_len = get_display_width(text);
-        if (text_len >= width) return format_to_width(text, width);
-        return text + std::string(width - text_len, ' ');
-    };
-
-    std::string top_border = std::format("{}{}╔{}{}{}╗\033[0m", m_bg, kThemeBorder, pad_center(std::format("═ \033[1m{}{}{}{} ═", kThemeSky, title, m_rst, kThemeBorder), inner_w), m_bg, kThemeBorder);
-    box_lines.push_back(top_border);
-    box_lines.push_back(std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder, pad_center("", inner_w), m_bg, kThemeBorder));
-
-    for (const auto& row : content_rows) {
-        box_lines.push_back(std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder, pad_left(" " + row, inner_w), m_bg, kThemeBorder));
-    }
-
-    box_lines.push_back(std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder, pad_center("", inner_w), m_bg, kThemeBorder));
-    if (!is_help) {
-        box_lines.push_back(std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder, pad_center(std::format("{}[Enter]\033[0m{} {}Submit  |  {}[Esc]\033[0m{} {}Cancel", kThemeVal, m_rst, kThemeMuted, kThemeVal, m_rst, kThemeMuted), inner_w), m_bg, kThemeBorder));
-    } else {
-        box_lines.push_back(std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder, pad_center(std::format("{}Press {}[Esc]\033[0m{}, {}[Enter]\033[0m{}, {}[h]\033[0m{} or {}[F1]\033[0m{} to close", kThemeMuted, kThemeVal, m_rst, kThemeVal, m_rst, kThemeVal, m_rst, kThemeVal, m_rst), inner_w), m_bg, kThemeBorder));
-    }
-    box_lines.push_back(std::format("{}{}╚{}╝\033[0m", m_bg, kThemeBorder, make_repeated_string("═", inner_w)));
-
-    int box_h = static_cast<int>(box_lines.size());
-    int start_y = (static_cast<int>(lines.size()) - box_h) / 2;
-    int start_x = (term_width - box_w) / 2;
-    if (start_y < 0) start_y = 0;
-    if (start_x < 0) start_x = 0;
-
-    for (size_t i = 0; i < box_lines.size(); ++i) {
-        int r = start_y + static_cast<int>(i);
-        if (r >= 0 && static_cast<size_t>(r) < lines.size()) {
-            // box_lines[i] already starts with m_bg (\033[48;5;236m) and resets with \033[0m
-            lines[r] = overlay_string(lines[r], box_lines[i], start_x, box_w);
-        }
     }
 }
 

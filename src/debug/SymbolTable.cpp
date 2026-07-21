@@ -150,7 +150,7 @@ auto SymbolTable::load_from_elf(const std::string& elf_path) -> bool {
     }
 
     if (!symbols_.empty()) {
-        simrv::log::info("[Debug] Loaded {} symbols from ELF image: {}", symbols_.size(), path_to_load);
+        simrv::log::info("Loaded {} symbols from ELF image: {}", symbols_.size(), path_to_load);
         return true;
     }
     return false;

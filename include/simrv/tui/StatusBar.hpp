@@ -4,8 +4,9 @@
  */
 #pragma once
 
+#include <cstdint>
+#include <optional>
 #include <string>
-#include <vector>
 #include "simrv/tui/TuiWidget.hpp"
 #include "simrv/tui/Tui.hpp"
 
@@ -14,6 +15,25 @@ class Machine;
 }
 
 namespace simrv::tui {
+
+enum class TuiFooterAction : uint8_t {
+    Step,
+    StepBack,
+    StepN,
+    CycleRegs,
+    CycleTools,
+    SetBreakpoint,
+    TogglePcBreakpoint,
+    SetStepSize,
+    SetSpeed,
+    InspectMem,
+    ToggleHelp,
+    RunPause,
+    Quit,
+    CycleLayout,
+    TogglePanel,
+    ToggleTrace
+};
 
 class StatusBar : public TuiWidget {
    public:
@@ -30,6 +50,9 @@ class StatusBar : public TuiWidget {
     void set_right_panel_mode(TuiRightPanelMode mode) { right_panel_mode_ = mode; }
     void set_trace_enabled(bool enabled) { trace_enabled_ = enabled; }
 
+    [[nodiscard]] auto is_pos_on_status_badge(int x, int width) const -> bool;
+    [[nodiscard]] auto is_pos_on_right_panel_mode(int x) const -> bool;
+    [[nodiscard]] auto get_footer_action_at_col(int col) const -> std::optional<TuiFooterAction>;
     [[nodiscard]] auto render_row(int row_idx, int width) -> std::string override;
 
    private:

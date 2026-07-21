@@ -74,11 +74,15 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
     
     Register aligned_sp = sp & ~(static_cast<Register>(word_size) - 1);
     
+    bool const is_16b_aligned = (sp % 16 == 0);
     if (logical_row == 0) {
-        return section_line("Live Guest Stack Watch (sp-aligned)", width);
+        std::string title = std::format("Live Guest Stack Watch ({})", is_16b_aligned ? "16B ABI Aligned" : "Unaligned sp!");
+        return section_line(title, width);
     }
     if (logical_row == 14) {
-        return section_line("Occupancy: sp | active frame | free/scratch", width);
+        std::string footer_desc = std::format("Occupancy: sp | active frame | free/scratch  [{}]",
+                                              is_16b_aligned ? "\033[38;5;120m16B ABI Aligned\033[0m" : "\033[38;5;203m16B Misaligned\033[0m");
+        return section_line(footer_desc, width);
     }
     if (logical_row > 14) {
         return format_to_width("", width);
@@ -97,9 +101,14 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
         addr_str = std::format("0x{:016x}", target_vaddr);
     }
     
+    Register fp = cpu.state().regs.read(RegId::S0);
+    Register ra = cpu.state().regs.read(RegId::Ra);
+
     std::string offset_str = std::format("sp{:+d}", word_offset * word_size);
     if (word_offset == 0) {
         offset_str = "sp";
+    } else if (target_vaddr == fp) {
+        offset_str = "s0/fp";
     }
     
     std::string val_str = "????";
@@ -109,14 +118,28 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
     if (paddr_opt) {
         Register paddr = *paddr_opt;
         if (simrv::memory::is_dram_addr(paddr)) {
+            Register raw_val = 0;
             if (xlen == 64) {
                 uint64_t data = simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(isa::Funct3::Sd), machine_.memory_.mmu()->mmem());
                 val_str = std::format("0x{:016x}", data);
                 dec_str = std::format("{}", static_cast<int64_t>(data));
+                raw_val = data;
             } else {
                 uint32_t data = simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(isa::Funct3::Sw), machine_.memory_.mmu()->mmem());
                 val_str = std::format("0x{:08x}", data);
                 dec_str = std::format("{}", static_cast<int32_t>(data));
+                raw_val = data;
+            }
+            
+            if (raw_val != 0) {
+                std::string sym = machine_.symbols.lookup(raw_val);
+                if (!sym.empty()) {
+                    dec_str += std::format(" <{}>", sym);
+                } else if (raw_val == ra) {
+                    dec_str += " [ra]";
+                } else if (raw_val == fp) {
+                    dec_str += " [prev fp]";
+                }
             }
         } else {
             val_str = "device_mmio";
@@ -130,6 +153,9 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
     if (word_offset == 0) {
         label_color = kThemeMint;
         val_color = kThemeMint;
+    } else if (target_vaddr == fp) {
+        label_color = kThemeSky;
+        val_color = kThemeSky;
     } else if (word_offset > 0) { // Active frame (addresses above sp)
         label_color = kThemePeach;
         val_color = kThemeVal;

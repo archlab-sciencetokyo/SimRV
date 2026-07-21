@@ -123,6 +123,7 @@ add_executable(SimRV
   src/device/Uart.cpp
   src/device/Power.cpp
   src/tui/Tui.cpp
+  src/tui/TuiModal.cpp
   src/tui/TuiTheme.cpp
   src/tui/LeftPane.cpp
   src/tui/LeftPaneRegs.cpp

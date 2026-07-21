@@ -18,6 +18,126 @@ void StatusBar::update_kips(uint64_t current_kips) {
     kips_ = current_kips;
 }
 
+auto StatusBar::is_pos_on_status_badge(int x, int width) const -> bool {
+    std::string binary_name = machine_.s_fn_memimg;
+    auto last_slash = binary_name.find_last_of("/\\");
+    if (last_slash != std::string::npos) {
+        binary_name = binary_name.substr(last_slash + 1);
+    }
+    if (binary_name.empty()) {
+        binary_name = "application";
+    }
+    std::string mode_str = machine_.s_appmode ? "Application" : "OS/RTOS";
+    int target_width = layout_ == TuiLayout::Split ? left_width_ : width - 2;
+    std::string prefix;
+    if (target_width < 35) {
+        prefix = " SimRV | ";
+    } else if (target_width < 50) {
+        prefix = std::format(" SimRV [{}] | ", binary_name);
+    } else {
+        prefix = std::format(" SimRV [{}] ({}) | ", binary_name, mode_str);
+    }
+
+    int prefix_len = get_display_width(prefix);
+    std::string status_text = paused_ ? " PAUSED " : " RUNNING ";
+    if (!status_override_.empty()) {
+        status_text = " TRAPPED ";
+    }
+    int badge_len = static_cast<int>(status_text.length());
+
+    int x_start = 2 + prefix_len; // 1-indexed column + 1 border char ║
+    int x_end = x_start + badge_len - 1;
+
+    return (x >= x_start && x <= x_end);
+}
+
+auto StatusBar::is_pos_on_right_panel_mode(int x) const -> bool {
+    if (layout_ != TuiLayout::Split && layout_ != TuiLayout::FullRight) {
+        return false;
+    }
+
+    int x_start = (layout_ == TuiLayout::Split) ? (left_width_ + 2) : 2;
+    std::string mode_label;
+    switch (right_panel_mode_) {
+        case TuiRightPanelMode::Terminal:
+            mode_label = trace_enabled_ ? "Terminal [Trace ON]" : "Terminal";
+            break;
+        case TuiRightPanelMode::Display:
+        default:
+            mode_label = "Display";
+            break;
+    }
+    int mode_len = 2 + static_cast<int>(mode_label.length()); // "[" + mode_label + "]"
+    int x_end = x_start + mode_len - 1;
+
+    return (x >= x_start && x <= x_end);
+}
+
+auto StatusBar::get_footer_action_at_col(int col) const -> std::optional<TuiFooterAction> {
+    if (col < 0) return std::nullopt;
+
+    struct FooterItem {
+        const char* text;
+        TuiFooterAction action;
+    };
+
+    static constexpr std::array<FooterItem, 13> paused_items = {{
+        {" [s] Step",      TuiFooterAction::Step},
+        {"[b] Back",       TuiFooterAction::StepBack},
+        {"[n] StepN",      TuiFooterAction::StepN},
+        {"[g] N-Size",     TuiFooterAction::SetStepSize},
+        {"[r] Regs",       TuiFooterAction::CycleRegs},
+        {"[l] Tools",      TuiFooterAction::CycleTools},
+        {"[:] Set-BP",     TuiFooterAction::SetBreakpoint},
+        {"[k] Toggle-BP",  TuiFooterAction::TogglePcBreakpoint},
+        {"[f] Speed",      TuiFooterAction::SetSpeed},
+        {"[m] Mem",        TuiFooterAction::InspectMem},
+        {"[F1/?] Help",    TuiFooterAction::ToggleHelp},
+        {"[c] Run",        TuiFooterAction::RunPause},
+        {"[q] Quit",       TuiFooterAction::Quit},
+    }};
+
+    static constexpr std::array<FooterItem, 10> running_items = {{
+        {" [Ctrl-P] Pause", TuiFooterAction::RunPause},
+        {"[r] Regs",        TuiFooterAction::CycleRegs},
+        {"[l] Tools",       TuiFooterAction::CycleTools},
+        {"[Tab] Layout",    TuiFooterAction::CycleLayout},
+        {"[p] Panel",       TuiFooterAction::TogglePanel},
+        {"[v] Trace",       TuiFooterAction::ToggleTrace},
+        {"[f] Speed",       TuiFooterAction::SetSpeed},
+        {"[:] Set-BP",      TuiFooterAction::SetBreakpoint},
+        {"[F1/?] Help",     TuiFooterAction::ToggleHelp},
+        {"[Ctrl-Q] Quit",    TuiFooterAction::Quit},
+    }};
+
+    int current_x = 0;
+    if (paused_) {
+        for (std::size_t i = 0; i < paused_items.size(); ++i) {
+            int len = static_cast<int>(std::strlen(paused_items[i].text));
+            if (col >= current_x && col < current_x + len) {
+                return paused_items[i].action;
+            }
+            current_x += len;
+            if (i + 1 < paused_items.size()) {
+                current_x += 3; // +3 for " | "
+            }
+        }
+    } else {
+        for (std::size_t i = 0; i < running_items.size(); ++i) {
+            int len = static_cast<int>(std::strlen(running_items[i].text));
+            if (col >= current_x && col < current_x + len) {
+                return running_items[i].action;
+            }
+            current_x += len;
+            if (i + 1 < running_items.size()) {
+                current_x += 3; // +3 for " | "
+            }
+        }
+    }
+
+    return std::nullopt;
+}
+
 auto StatusBar::render_row(int row_idx, int width) -> std::string {
     if (row_idx == 0) {
         // Header
@@ -234,10 +354,10 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         std::string footer_text;
         if (paused_) {
             footer_text =
-                " [s] Step | [b] Back | [n] Step N | [:] Break | [g] StepSize | [m] Mem | [f] Speed | [F1/h/?] Help | [c] Run | [q] Quit ";
+                " [s] Step | [b] Back | [n] StepN | [g] N-Size | [r] Regs | [l] Tools | [:] Set-BP | [k] Toggle-BP | [f] Speed | [m] Mem | [F1/?] Help | [c] Run | [q] Quit ";
         } else {
             footer_text =
-                " [Ctrl-P] Pause | [Ctrl-Q] Quit | [Tab] Layout | [+/-] Speed | [:] Break | [g] StepSize | [m] Mem | [F1/h/?] Help ";
+                " [Ctrl-P] Pause | [r] Regs | [l] Tools | [Tab] Layout | [p] Panel | [v] Trace | [f] Speed | [:] Set-BP | [F1/?] Help | [Ctrl-Q] Quit ";
         }
         int footer_len = get_display_width(footer_text);
         int pad_foot = (width - 2) - footer_len;

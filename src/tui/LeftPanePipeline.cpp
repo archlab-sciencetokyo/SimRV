@@ -181,8 +181,20 @@ auto LeftPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int s
     bool is_raw_stalled = is_raw_hazard_stalled(ps);
 
     switch (stage_idx) {
-        case 0:
-            return section_line("Pipeline Stages (Cycle-Accurate Mode)", width);
+        case 0: {
+            auto get_short_op = [](const simrv::pipeline::PipelineReg& reg) -> std::string {
+                if (!reg.valid) return "-";
+                if (static_cast<std::size_t>(reg.op_id) < simrv::pipeline::OPERATION_NAME.size()) {
+                    return std::string(simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(reg.op_id)));
+                }
+                return "insn";
+            };
+            std::string diagram = std::format(
+                "  \033[1;36mIF:{}\033[0m ─> \033[1;33mID:{}\033[0m ─> \033[1;32mEX:{}\033[0m ─> \033[1;35mMEM:{}\033[0m ─> \033[1;34mWB:{}\033[0m",
+                get_short_op(ps.f_reg()), get_short_op(ps.d_reg()), get_short_op(ps.e_reg()),
+                get_short_op(ps.m_reg()), get_short_op(ps.w_reg()));
+            return format_to_width(diagram, width);
+        }
         case 1:
             {
                 std::string stall_type = ps.tlb_stall_remaining() > 0 ? "TLB Miss" : "ICache Miss";
@@ -299,38 +311,38 @@ auto LeftPane::render_pipeline_stages_functional_low_part1(const simrv::core::CP
     auto& ctx = cpu.pipeline_context;
     switch (logical_row) {
         case 0:
-            return section_line("── IF/CVT", width);
+            return section_line("── IF (Fetch Stage)", width);
         case 1:
             return render_pair(
-                "cpc", std::format("0x{:0{}x}", ctx.cpc, simrv::xlen::kXLenHexDigits),
-                kThemeMint, "ir_org", std::format("0x{:08x}", ctx.ir_org), kThemeVal,
-                col_width, right_width, 8);
+                "Fetch PC", std::format("0x{:0{}x}", ctx.cpc, simrv::xlen::kXLenHexDigits),
+                kThemeMint, "Raw Inst", std::format("0x{:08x}", ctx.ir_org), kThemeVal,
+                col_width, right_width, 10);
         case 2:
-            return render_pair("ir", std::format("0x{:08x}", ctx.ir), kThemeVal,
-                               "cinsn", std::format("0x{:08x}", ctx.cinsn), kThemeVal,
-                               col_width, right_width, 8);
+            return render_pair("Inst Word", std::format("0x{:08x}", ctx.ir), kThemeVal,
+                               "RVC Decomp", std::format("0x{:08x}", ctx.cinsn), kThemeVal,
+                               col_width, right_width, 10);
         case 3:
-            return section_line("── ID", width);
+            return section_line("── ID (Decode & Operand Fetch Stage)", width);
         case 4:
             return render_pair(
-                "opcode", std::to_string(std::to_underlying(ctx.opcode)), kThemeVal,
-                "funct3", std::to_string(std::to_underlying(ctx.funct3)), kThemeVal,
-                col_width, right_width, 8);
+                "Opcode", std::to_string(std::to_underlying(ctx.opcode)), kThemeVal,
+                "Funct3", std::to_string(std::to_underlying(ctx.funct3)), kThemeVal,
+                col_width, right_width, 10);
         case 5:
             return render_pair(
-                "rd/rs1",
+                "rd / rs1",
                 std::format("{}/{}", std::to_underlying(ctx.rd),
                              std::to_underlying(ctx.rs1)),
-                kThemeVal, "rs2/f7",
+                kThemeVal, "rs2 / f7",
                 std::format("{}/0x{:x}", std::to_underlying(ctx.rs2), ctx.funct7),
-                kThemeVal, col_width, right_width, 8);
+                kThemeVal, col_width, right_width, 10);
         case 6:
             return render_pair(
-                "imm", std::format("0x{:0{}x}", ctx.imm, simrv::xlen::kXLenHexDigits),
-                kThemeVal, "funct12", std::format("0x{:x}", ctx.funct12), kThemeVal,
-                col_width, right_width, 8);
+                "Immediate", std::format("0x{:0{}x}", ctx.imm, simrv::xlen::kXLenHexDigits),
+                kThemeVal, "Funct12", std::format("0x{:x}", ctx.funct12), kThemeVal,
+                col_width, right_width, 10);
         case 7:
-            return section_line("── OF/EX", width);
+            return section_line("── EX (Execute & Branch Calc Stage)", width);
         default:
             return format_to_width("", width);
     }
@@ -342,44 +354,44 @@ auto LeftPane::render_pipeline_stages_functional_low_part2(const simrv::core::CP
     switch (logical_row) {
         case 8:
             return render_pair(
-                "rrs1", std::format("0x{:0{}x}", ctx.rrs1, simrv::xlen::kXLenHexDigits),
-                kThemeMint, "rrs2",
+                "rs1 Val", std::format("0x{:0{}x}", ctx.rrs1, simrv::xlen::kXLenHexDigits),
+                kThemeMint, "rs2 Val",
                 std::format("0x{:0{}x}", ctx.rrs2, simrv::xlen::kXLenHexDigits),
-                kThemeMint, col_width, right_width, 8);
+                kThemeMint, col_width, right_width, 10);
         case 9:
             return render_pair(
-                "jmp_pc",
+                "Jump PC",
                 std::format("0x{:0{}x}", ctx.jmp_pc, simrv::xlen::kXLenHexDigits),
-                kThemeMint, "taken", ctx.tkn ? "yes" : "no", kThemeVal,
-                col_width, right_width, 8);
+                kThemeMint, "Branch Tkn", ctx.tkn ? "YES" : "NO", kThemeVal,
+                col_width, right_width, 10);
         case 10:
             return render_pair(
-                "wb_data",
+                "ALU Result",
                 std::format("0x{:0{}x}", ctx.wb_data, simrv::xlen::kXLenHexDigits),
-                kThemeMint, "wb_csr",
+                kThemeMint, "CSR Result",
                 std::format("0x{:0{}x}", ctx.wb_data_csr, simrv::xlen::kXLenHexDigits),
-                kThemeVal, col_width, right_width, 8);
+                kThemeVal, col_width, right_width, 10);
         case 11:
-            return section_line("── MEM/FP", width);
+            return section_line("── MEM (Memory Access & FP Stage)", width);
         case 12:
             return render_pair(
-                "mem_addr",
+                "V-Addr",
                 std::format("0x{:0{}x}", ctx.mem_addr, simrv::xlen::kXLenHexDigits),
-                kThemeMint, "mem_w",
+                kThemeMint, "Write Data",
                 std::format("0x{:0{}x}", ctx.mem_wdata, simrv::xlen::kXLenHexDigits),
-                kThemeMint, col_width, right_width, 8);
+                kThemeMint, col_width, right_width, 10);
         case 13:
             return render_pair(
-                "mem_r",
+                "Read Data",
                 std::format("0x{:0{}x}", ctx.mem_rdata, simrv::xlen::kXLenHexDigits),
-                kThemeMint, "fp_wb", std::format("0x{:016x}", ctx.fp_wb_data),
-                kThemeVal, col_width, right_width, 8);
+                kThemeMint, "FP Write", std::format("0x{:016x}", ctx.fp_wb_data),
+                kThemeVal, col_width, right_width, 10);
         case 14:
-            return render_pair("fp_wb_en", ctx.fp_wb_enable ? "on" : "off", kThemeVal,
-                               "int<-fp", ctx.int_wb_from_fp ? "on" : "off",
-                               kThemeVal, col_width, right_width, 8);
+            return render_pair("FP WB En", ctx.fp_wb_enable ? "YES" : "NO", kThemeVal,
+                               "Int<-FP", ctx.int_wb_from_fp ? "YES" : "NO",
+                               kThemeVal, col_width, right_width, 10);
         case 15:
-            return section_line("── TRAP/TLB", width);
+            return section_line("── TRAP & MMU Diagnostics", width);
         default:
             return format_to_width("", width);
     }
@@ -395,22 +407,22 @@ auto LeftPane::render_pipeline_stages_functional_high(const simrv::core::CPU& cp
     switch (logical_row) {
         case 16:
             return render_pair(
-                "exc", exc_text, kThemePeach, "tval",
+                "Exception", exc_text, kThemePeach, "Trap Val",
                 std::format("0x{:0{}x}", ctx.pending_tval, simrv::xlen::kXLenHexDigits),
-                kThemeVal, col_width, right_width, 8);
+                kThemeVal, col_width, right_width, 10);
         case 17:
             return render_pair(
-                "padr1", std::format("0x{:0{}x}", ctx.padr1, simrv::xlen::kXLenHexDigits),
-                kThemeVal, "padr2",
+                "P-Addr 1", std::format("0x{:0{}x}", ctx.padr1, simrv::xlen::kXLenHexDigits),
+                kThemeVal, "P-Addr 2",
                 std::format("0x{:0{}x}", ctx.padr2, simrv::xlen::kXLenHexDigits),
-                kThemeVal, col_width, right_width, 8);
+                kThemeVal, col_width, right_width, 10);
         case 18:
             return render_pair(
-                "rcsr", std::format("0x{:0{}x}", ctx.rcsr, simrv::xlen::kXLenHexDigits),
-                kThemeVal, "funct5", std::to_string(std::to_underlying(ctx.funct5)),
-                kThemeVal, col_width, right_width, 8);
+                "CSR Read", std::format("0x{:0{}x}", ctx.rcsr, simrv::xlen::kXLenHexDigits),
+                kThemeVal, "Funct5", std::to_string(std::to_underlying(ctx.funct5)),
+                kThemeVal, col_width, right_width, 10);
         case 19:
-            return section_line("── End Pipeline Snapshot", width);
+            return section_line("── End Pipeline Diagnostic Snapshot", width);
         default:
             return format_to_width("", width);
     }
@@ -593,7 +605,7 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
     }
 
     if (logical_row == 9) {
-        return section_line("Legend: IF: Green | ID: Yellow | EX: Red | ME: Blue | WB: White (*Stall)", width);
+        return section_line("Stage Timeline: IF, ID, EX, MEM, WB (* = Stalled)", width);
     }
 
     return format_to_width("", width);
@@ -745,7 +757,7 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
                 return format_to_width(left_col, col_width) + format_to_width(right_col, right_width);
             }
         case 15:
-            return section_line("Occupancy: # (Valid)  . (Empty)  Bold set# = last accessed", width);
+            return section_line("Cache Set Map [Tag | Set: 5b | Off: 5b (32B)] (# Valid, . Empty)", width);
         default:
             return format_to_width("", width);
     }

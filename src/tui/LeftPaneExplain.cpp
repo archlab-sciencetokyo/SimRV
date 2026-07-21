@@ -456,6 +456,36 @@ auto render_field_decoded_values(
     return rows;
 }
 
+auto render_dataflow_breakdown(const simrv::core::ArchState& st, const simrv::pipeline::PipelineContext& ctx, InstFormat fmt, const std::string& rd_name, const std::string& rs1_name, const std::string& rs2_name, int width) -> std::vector<std::string> {
+    std::vector<std::string> rows;
+    bool is_rs1_fpr = simrv::isa::is_rs1_fp(ctx.opcode, ctx.op_id);
+    bool is_rs2_fpr = simrv::isa::is_rs2_fp(ctx.opcode, ctx.op_id);
+    bool is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
+
+    std::string op1_str = has_rs1(fmt) ? std::format("{} ({}) = {}", rs1_name, is_rs1_fpr ? "FPR" : "GPR", read_reg_str(st, ctx.rs1, is_rs1_fpr)) : "N/A (No rs1)";
+    std::string op2_str;
+    if (has_imm(fmt)) {
+        op2_str = std::format("imm = {} (0x{:X})", ctx.imm, static_cast<uint64_t>(ctx.imm));
+    } else if (has_rs2(fmt)) {
+        op2_str = std::format("{} ({}) = {}", rs2_name, is_rs2_fpr ? "FPR" : "GPR", read_reg_str(st, ctx.rs2, is_rs2_fpr));
+    } else {
+        op2_str = "N/A";
+    }
+
+    std::string dst_str = has_rd(fmt) ? std::format("{} ({}) → {}", rd_name, is_dst_fp ? "FPR" : "GPR", read_reg_str(st, ctx.rd, is_dst_fp)) : "None (No rd)";
+
+    rows.push_back(format_to_width(std::format("  {}Operand 1   : {}{}\033[0m", kThemeText, kThemeSky, op1_str), width));
+    rows.push_back(format_to_width(std::format("  {}Operand 2   : {}{}\033[0m", kThemeText, kThemeSky, op2_str), width));
+    rows.push_back(format_to_width(std::format("  {}Destination : {}{}\033[0m", kThemeText, kThemeMint, dst_str), width));
+
+    if (has_imm(fmt) && fmt != InstFormat::U) {
+        bool sign_bit = (ctx.imm < 0);
+        rows.push_back(format_to_width(std::format("  {}Sign Ext    : {}\033[0m", kThemeText, sign_bit ? "\033[38;5;203m1 (sign-extended negative)\033[0m" : "\033[38;5;120m0 (positive)\033[0m"), width));
+    }
+
+    return rows;
+}
+
 } // namespace
 
 auto LeftPane::get_explain_rows(int width) -> std::vector<std::string> {
@@ -542,6 +572,11 @@ auto LeftPane::get_explain_rows(int width) -> std::vector<std::string> {
     explain_rows.push_back(section_line("Field Decoded Values", width));
     auto decoded_fields = render_field_decoded_values(st, ctx, fmt, rd_name, rs1_name, rs2_name, width);
     explain_rows.insert(explain_rows.end(), decoded_fields.begin(), decoded_fields.end());
+    explain_rows.push_back(format_to_width("", width));
+
+    explain_rows.push_back(section_line("Dataflow & Execution Breakdown", width));
+    auto dataflow_fields = render_dataflow_breakdown(st, ctx, fmt, rd_name, rs1_name, rs2_name, width);
+    explain_rows.insert(explain_rows.end(), dataflow_fields.begin(), dataflow_fields.end());
     explain_rows.push_back(format_to_width("", width));
 
     bool const is_csr = (ctx.op_id >= CSRRW && ctx.op_id <= CSRRCI);

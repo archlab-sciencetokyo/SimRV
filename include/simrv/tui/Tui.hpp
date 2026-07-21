@@ -18,12 +18,14 @@
 #include "simrv/isa/Base.hpp"
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
+#include "simrv/tui/TuiModal.hpp"
 
 namespace simrv::core {
 class Machine;
 }
 
 namespace simrv::tui {
+
 extern volatile std::sig_atomic_t g_resized;
 
 enum class TuiLayout : uint8_t {
@@ -79,21 +81,26 @@ class Tui {
     void update_cache();
     void on_cycle_completed();
 
-    enum class ModalType : uint8_t { None, SetBreakpoint, SetStepSize, SetSpeed, InspectAddress, Help };
-
-    void render_modal_overlay(std::vector<std::string>& lines, int term_width, int term_height) const;
-
     std::atomic<uint64_t> step_budget_{0};
     std::atomic<uint64_t> step_delay_us_{0};
     std::atomic<uint64_t> step_granularity_{50};
 
     void cycle_step_granularity(bool increase = true);
 
-    void open_modal(ModalType type);
-    void close_modal();
-    void submit_modal();
-    void handle_modal_char(char ch);
-    [[nodiscard]] auto is_modal_active() const -> bool { return active_modal_ != ModalType::None; }
+    void open_modal(ModalType type) {
+        modal_.open(type, left_pane_.get(), step_granularity_.load(std::memory_order_relaxed), step_delay_us_.load(std::memory_order_relaxed));
+        set_paused(true);
+        render(true);
+    }
+    void close_modal() { modal_.close(); render(true); }
+    void submit_modal() {
+        modal_.submit(left_pane_.get(), step_granularity_, step_delay_us_,
+                      [this](TuiRegPage page) { set_reg_page(page); },
+                      [this](const std::string& status) { set_status_override(status); });
+        render(true);
+    }
+    [[nodiscard]] auto is_modal_active() const -> bool { return modal_.is_active(); }
+    [[nodiscard]] auto get_active_modal() const -> ModalType { return modal_.get_type(); }
 
     void set_status_override(const std::string& status) { status_override_ = status; }
     void clear_status_override() { status_override_.clear(); }
@@ -126,7 +133,6 @@ class Tui {
     [[nodiscard]] auto get_layout() const -> TuiLayout { return layout_; }
     void adjust_left_pane_width(int delta);
 
-
     void handle_mouse(int x, int y, int b);
 
    private:
@@ -144,6 +150,7 @@ class Tui {
     };
 
     simrv::core::Machine& machine_;
+    TuiModal modal_;
     
     std::unique_ptr<LeftPane> left_pane_;
     std::unique_ptr<RightPane> right_pane_;
@@ -191,8 +198,6 @@ class Tui {
     mutable std::mutex io_mutex_;
 
     std::string esc_buf_;
-    ModalType active_modal_ = ModalType::None;
-    std::string modal_input_;
     std::atomic<bool> tui_loop_paused_{false};
     std::atomic<bool> sim_thread_is_sleeping_{false};
     std::thread::id main_thread_id_;

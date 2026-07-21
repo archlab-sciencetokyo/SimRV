@@ -125,7 +125,7 @@ To maintain full observability:
 
 2. **TUI Register Pane:** The TUI is split into modular components under `src/tui/`:
    - If you add new architectural state (e.g., vector registers), update
-     [`src/tui/RegisterPane.cpp`](../src/tui/RegisterPane.cpp) to display the new
+     [`src/tui/LeftPaneRegs.cpp`](../src/tui/LeftPaneRegs.cpp) to display the new
      register page. Add a new `TuiRegPage` enum value in
      [`include/simrv/tui/Tui.hpp`](../include/simrv/tui/Tui.hpp) and wire it into
      `Tui::cycle_reg_page()`.
@@ -140,11 +140,10 @@ To maintain full observability:
    the new extension's ISA test suite. Smoke tests and the full ISA gate will
    automatically pick up matching `rv32*/rv64*` binaries via CMake glob.
 
-2. **Gate Suite:** Run the full smoke and ISA gates to ensure no regression:
+2. **Gate Suite:** Run the full ISA gate to ensure no regression:
 
    ```bash
    cmake --build --preset rv32-release
-   cmake --build --preset rv32-release --target smoke-gate
    cmake --build --preset rv32-release --target isa-gate
    ```
 

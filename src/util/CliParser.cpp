@@ -899,7 +899,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         style(kBrightGreen), style(kReset));
     std::print(
         stdout,
-        "  {}-u, --tui{}                  Enable interactive TUI split-screen monitor dashboard\n",
+        "  {}-u, --tui{}                  Enable interactive TUI split-screen monitor mode\n",
         style(kBrightGreen), style(kReset));
     std::print(
         stdout,

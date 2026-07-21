@@ -59,6 +59,8 @@ class LeftPane : public TuiWidget {
     void set_trace_buffer(const std::vector<std::string>* trace_buf) { trace_buffer_ = trace_buf; }
     void set_log_lines(std::vector<std::string> log_lines) { log_lines_ = std::move(log_lines); }
 
+    [[nodiscard]] auto get_tab_at_col(int col) const -> std::optional<TuiRegPage>;
+
    private:
     [[nodiscard]] auto render_tab_bar(int width) const -> std::string;
     [[nodiscard]] auto render_trace_row(int logical_row, int width) -> std::string;

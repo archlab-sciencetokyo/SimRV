@@ -162,7 +162,6 @@ XLEN is a **compile-time** selection via `SIMRV_XLEN` (32 or 64). There is no ru
 
 | Target | Covers |
 |:---|:---|
-| `smoke-gate` | CLI tests + ISA smoke subset (regression baseline) |
 | `isa-gate` | Full RV32/64GC ISA test suite |
 | `integration-gate` | All gate-labeled tests (regression, app, linux, ISA) |
 | `lockstep-gate` | Spike instruction-level lockstep (requires `spike` in PATH) |

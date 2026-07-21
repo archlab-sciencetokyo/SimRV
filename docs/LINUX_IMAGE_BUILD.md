@@ -319,7 +319,7 @@ cmake --build --preset rv32-release --target integration-gate
 
 The Linux boot test runs SimRV with a 1,000,000 cycle limit and checks for a
 clean boot sequence. It is labeled `gate;regress;linux` in CTest and included
-in `integration-gate` but not in `smoke-gate`.
+in `integration-gate`.
 
 ---
 
