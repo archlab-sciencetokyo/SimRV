@@ -44,16 +44,16 @@ auto LeftPane::section_line(const std::string& title, int width) -> std::string 
         std::string full = title + " ";
         int dash_len = width - get_display_width(full);
         if (dash_len < 0) dash_len = 0;
-        return std::format("\033[1;38;5;254m{} \033[0m{}{}", title, kThemeBorder, make_repeated_string("─", dash_len));
+        return std::format("\033[1m{}{} \033[0m{}{}", kThemeText, title, kThemeBorder, make_repeated_string("─", dash_len));
     } else {
         std::string text = " " + title + " ";
         int dash_len = width - get_display_width(text);
         if (dash_len < 0) dash_len = 0;
         int left_dashes = std::min(4, dash_len / 2);
         int right_dashes = dash_len - left_dashes;
-        return std::format("{}{} \033[1;38;5;254m{}\033[0m {}{}", 
+        return std::format("{}{} \033[1m{}{}\033[0m {}{}", 
                            kThemeBorder, make_repeated_string("─", left_dashes),
-                           title,
+                           kThemeText, title,
                            kThemeBorder, make_repeated_string("─", right_dashes));
     }
 }
@@ -89,19 +89,19 @@ auto LeftPane::render_active_spinner(int logical_row, int width) -> std::string 
 
     int target_row_offset = single_column ? 8 : 0;
     if (logical_row == 10 + target_row_offset) {
-        std::string text = std::format("\033[38;5;218m●\033[0m \033[1;38;5;218mSIMULATOR ACTIVE\033[0m");
+        std::string text = std::format("{}●\033[0m \033[1m{}SIMULATOR ACTIVE\033[0m", kThemePink, kThemePink);
         int spaces = std::max(0, (width - 18) / 2);
         std::string line = std::string(spaces, ' ') + text;
         return format_to_width(line, width);
     }
     if (logical_row == 11 + target_row_offset) {
-        std::string text = std::format("[  \033[38;5;121m{}\033[0m  Executing instructions... ]", spin);
+        std::string text = std::format("[  {}{}\033[0m  Executing instructions... ]", kThemeMint, spin);
         int spaces = std::max(0, (width - 33) / 2);
         std::string line = std::string(spaces, ' ') + text;
         return format_to_width(line, width);
     }
     if (logical_row == 12 + target_row_offset) {
-        std::string text = std::format("Press \033[38;5;183m[Ctrl-P]\033[0m or \033[38;5;183mClick Mouse\033[0m to pause");
+        std::string text = std::format("Press {}[Ctrl-P]\033[0m or {}[Click Mouse]\033[0m to pause", kThemeSky, kThemeSky);
         int spaces = std::max(0, (width - 38) / 2);
         std::string line = std::string(spaces, ' ') + text;
         return format_to_width(line, width);
@@ -135,14 +135,14 @@ auto LeftPane::render_tab_bar(int width) const -> std::string {
         const char* name;
     };
     static constexpr std::array<TabInfo, 8> tabs = {{
-        {TuiRegPage::GPR, "Regs"},
-        {TuiRegPage::FPR, "Float"},
-        {TuiRegPage::VEC, "Vec"},
-        {TuiRegPage::PIPELINE, "Pipe"},
-        {TuiRegPage::CACHE, "Cache"},
-        {TuiRegPage::TRACE, "Trace"},
-        {TuiRegPage::EXPLAIN, "Exp"},
-        {TuiRegPage::STACK, "Stack"}
+        {.page = TuiRegPage::GPR,      .name = "Regs"},
+        {.page = TuiRegPage::FPR,      .name = "Float"},
+        {.page = TuiRegPage::VEC,      .name = "Vec"},
+        {.page = TuiRegPage::PIPELINE, .name = "Pipe"},
+        {.page = TuiRegPage::CACHE,    .name = "Cache"},
+        {.page = TuiRegPage::TRACE,    .name = "Trace"},
+        {.page = TuiRegPage::EXPLAIN,  .name = "Exp"},
+        {.page = TuiRegPage::STACK,    .name = "Stack"}
     }};
 
     std::string line;
@@ -187,7 +187,8 @@ auto LeftPane::render_log_bottom_row(int row_idx, int num_rows, int width) -> st
     if (log_idx < 0 || log_idx >= total) {
         return format_to_width("", width);
     }
-    return format_to_width(" " + log_lines_.at(static_cast<std::size_t>(log_idx)), width);
+    // Log lines come from vt_log_ with their own content — just clamp to width.
+    return format_to_width(log_lines_.at(static_cast<std::size_t>(log_idx)), width);
 }
 
 auto LeftPane::render_row(int row_idx, int width) -> std::string {

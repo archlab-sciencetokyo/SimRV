@@ -53,20 +53,21 @@ auto is_raw_hazard_stalled(const simrv::pipeline::PipelineSim& ps) -> bool {
 
 auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem, const std::string& stall_type, bool raw_stall = false) -> std::string {
     if (!reg.valid) {
-        return "\033[38;5;244mbubble/empty\033[0m";
+        return std::format("{}bubble/empty\033[0m", kThemeMuted);
     }
     std::string_view op_name = "UNKNOWN";
     if (static_cast<std::size_t>(reg.op_id) < simrv::pipeline::OPERATION_NAME.size()) {
         op_name = simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(reg.op_id));
     }
-    std::string desc = std::format("\033[1;38;5;121m0x{:0{}x}\033[0m (\033[1;38;5;183m{}\033[0m)", 
-                                   reg.pc, simrv::xlen::kXLenHexDigits, op_name);
+    std::string desc = std::format("\033[1m{}0x{:0{}x}\033[0m ({}{}{})",
+                                   kThemeMint, reg.pc, simrv::xlen::kXLenHexDigits,
+                                   kThemeSky, op_name, "\033[0m");
     if (stall_rem > 0) {
-        desc += std::format(" \033[38;5;203m[Stall: {} ({} clk)]\033[0m", stall_type, stall_rem);
+        desc += std::format(" {}[Stall: {} ({} clk)]\033[0m", kThemeCoral, stall_type, stall_rem);
     } else if (raw_stall) {
-        desc += " \033[38;5;203m[Stall: RAW Hazard]\033[0m";
+        desc += std::format(" {}[Stall: RAW Hazard]\033[0m", kThemeCoral);
     } else if (reg.remaining_latency > 0) {
-        desc += std::format(" \033[38;5;218m[Lat: {} clk]\033[0m", reg.remaining_latency);
+        desc += std::format(" {}[Lat: {} clk]\033[0m", kThemePeach, reg.remaining_latency);
     }
     return desc;
 }
@@ -185,16 +186,16 @@ auto LeftPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int s
             {
                 std::string stall_type = ps.tlb_stall_remaining() > 0 ? "TLB Miss" : "ICache Miss";
                 uint32_t stall_rem = ps.tlb_stall_remaining() > 0 ? ps.tlb_stall_remaining() : ps.icache_stall_remaining();
-                return format_to_width(std::format("  \033[1;38;5;189mIF\033[0m  : {}", get_stage_desc(ps.f_reg(), stall_rem, stall_type)), width);
+                return format_to_width(std::format("  \033[1m{}IF\033[0m  : {}", kThemeSky, get_stage_desc(ps.f_reg(), stall_rem, stall_type)), width);
             }
         case 2:
-            return format_to_width(std::format("  \033[1;38;5;189mID\033[0m  : {}", get_stage_desc(ps.d_reg(), 0, "", is_raw_stalled)), width);
+            return format_to_width(std::format("  \033[1m{}ID\033[0m  : {}", kThemeSky, get_stage_desc(ps.d_reg(), 0, "", is_raw_stalled)), width);
         case 3:
-            return format_to_width(std::format("  \033[1;38;5;189mEX\033[0m  : {}", get_stage_desc(ps.e_reg(), ps.div_busy_cycles_remaining(), "Divider")), width);
+            return format_to_width(std::format("  \033[1m{}EX\033[0m  : {}", kThemeSky, get_stage_desc(ps.e_reg(), ps.div_busy_cycles_remaining(), "Divider")), width);
         case 4:
-            return format_to_width(std::format("  \033[1;38;5;189mMEM\033[0m : {}", get_stage_desc(ps.m_reg(), ps.dcache_stall_remaining(), "DCache Miss")), width);
+            return format_to_width(std::format("  \033[1m{}MEM\033[0m : {}", kThemeSky, get_stage_desc(ps.m_reg(), ps.dcache_stall_remaining(), "DCache Miss")), width);
         case 5:
-            return format_to_width(std::format("  \033[1;38;5;189mWB\033[0m  : {}", get_stage_desc(ps.w_reg(), 0, "")), width);
+            return format_to_width(std::format("  \033[1m{}WB\033[0m  : {}", kThemeSky, get_stage_desc(ps.w_reg(), 0, "")), width);
         default:
             return format_to_width("", width);
     }
@@ -600,18 +601,19 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
 auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
     int const width = col_width + right_width;
     if (!machine_.s_cycle_accurate) {
-        if (logical_row == 0) {
-            return section_line("L1 Cache Status", width);
+        switch (logical_row) {
+            case 0:
+                return section_line("Cache — Not Available", width);
+            case 2:
+                return format_to_width(
+                    std::format("  {}Cache simulation is disabled in high-performance mode.\033[0m", kThemeMuted), width);
+            case 3:
+                return format_to_width(
+                    std::format("  {}Relaunch SimRV with {}--cycle-accurate\033[0m{} (-c) to enable.\033[0m",
+                                kThemeMuted, kThemeVal, kThemeMuted), width);
+            default:
+                return format_to_width("", width);
         }
-        if (logical_row == 2) {
-            std::string msg = "  \033[1;38;5;203mCache simulation is disabled in IA mode.\033[0m";
-            return format_to_width(msg, width);
-        }
-        if (logical_row == 3) {
-            std::string msg = "  Run SimRV with cycle-accurate mode (-c) to enable.";
-            return format_to_width(msg, width);
-        }
-        return format_to_width("", width);
     }
 
     auto const& ic = cpu.icache;
@@ -631,11 +633,11 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
         int filled = static_cast<int>(ratio * bar_width);
         if (filled < 0) filled = 0;
         if (filled > bar_width) filled = bar_width;
-        std::string bar = "\033[38;5;121m";
+        std::string bar = kThemeMint;
         for (int i = 0; i < filled; ++i) {
             bar += "█";
         }
-        bar += "\033[38;5;244m";
+        bar += kThemeMuted;
         for (int i = filled; i < bar_width; ++i) {
             bar += "░";
         }
@@ -682,36 +684,36 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
         case 14:
             {
                 int const base_set = (logical_row - 7) * 2;
-                
+
                 auto make_set_str = [](auto const& cache, int set_idx) -> std::string {
                     bool const is_last = (static_cast<uint32_t>(set_idx) == cache.last_accessed_set());
                     bool const was_hit = cache.last_access_was_hit();
-                    
+
                     std::string set_prefix;
                     if (is_last) {
                         if (was_hit) {
-                            set_prefix = std::format("\033[1;38;5;121m{:02d}:\033[0m[", set_idx);
+                            set_prefix = std::format("\033[1m{}{:02d}:\033[0m[", kThemeMint, set_idx);
                         } else {
-                            set_prefix = std::format("\033[1;38;5;203m{:02d}:\033[0m[", set_idx);
+                            set_prefix = std::format("\033[1m{}{:02d}:\033[0m[", kThemeCoral, set_idx);
                         }
                     } else {
-                        set_prefix = std::format("{:02d}:[", set_idx);
+                        set_prefix = std::format("{}{:02d}:\033[0m[", kThemeMuted, set_idx);
                     }
-                    
+
                     std::string s = set_prefix;
                     for (uint32_t w = 0; w < 4; ++w) {
                         if (cache.is_line_valid(set_idx, w)) {
                             if (is_last) {
                                 if (was_hit) {
-                                    s += "\033[1;32m#\033[0m";
+                                    s += std::format("\033[1m{}#\033[0m", kThemeMint);
                                 } else {
-                                    s += "\033[1;31m#\033[0m";
+                                    s += std::format("\033[1m{}#\033[0m", kThemeCoral);
                                 }
                             } else {
-                                s += "\033[32m#\033[0m";
+                                s += std::format("{}#\033[0m", kThemeMint);
                             }
                         } else {
-                            s += "\033[38;5;244m.\033[0m";
+                            s += std::format("{}.\033[0m", kThemeMuted);
                         }
                     }
                     s += "]";
