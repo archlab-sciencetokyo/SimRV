@@ -83,7 +83,7 @@ auto StatusBar::get_footer_action_at_col(int col) const -> std::optional<TuiFoot
         TuiFooterAction action;
     };
 
-    static constexpr std::array<FooterItem, 17> paused_items = {{
+    static constexpr std::array<FooterItem, 15> paused_items = {{
         {" [s] Step",      TuiFooterAction::Step},
         {"[b] Back",       TuiFooterAction::StepBack},
         {"[n] StepN",      TuiFooterAction::StepN},
@@ -91,9 +91,7 @@ auto StatusBar::get_footer_action_at_col(int col) const -> std::optional<TuiFoot
         {"[r] Regs",       TuiFooterAction::CycleRegs},
         {"[l] Tools",      TuiFooterAction::CycleTools},
         {"[o] Load",       TuiFooterAction::LoadBinary},
-        {"[Alt-a] IA/CA",  TuiFooterAction::ToggleCycleAccurate},
-        {"[Alt-d] Debug",  TuiFooterAction::ToggleDebugMode},
-        {"[Alt-s] Settings", TuiFooterAction::OpenSettings},
+        {"[,] Settings",   TuiFooterAction::OpenSettings},
         {"[:] Set-BP",     TuiFooterAction::SetBreakpoint},
         {"[k] Toggle-BP",  TuiFooterAction::TogglePcBreakpoint},
         {"[f] Speed",      TuiFooterAction::SetSpeed},
@@ -103,16 +101,14 @@ auto StatusBar::get_footer_action_at_col(int col) const -> std::optional<TuiFoot
         {"[q] Quit",       TuiFooterAction::Quit},
     }};
 
-    static constexpr std::array<FooterItem, 13> running_items = {{
+    static constexpr std::array<FooterItem, 11> running_items = {{
         {" [Ctrl-P] Pause", TuiFooterAction::RunPause},
         {"[r] Regs",        TuiFooterAction::CycleRegs},
         {"[l] Tools",       TuiFooterAction::CycleTools},
         {"[Tab] Layout",    TuiFooterAction::CycleLayout},
         {"[p] Panel",       TuiFooterAction::TogglePanel},
         {"[v] Trace",       TuiFooterAction::ToggleTrace},
-        {"[Alt-a] IA/CA",   TuiFooterAction::ToggleCycleAccurate},
-        {"[Alt-d] Debug",   TuiFooterAction::ToggleDebugMode},
-        {"[Alt-s] Settings", TuiFooterAction::OpenSettings},
+        {"[,] Settings",    TuiFooterAction::OpenSettings},
         {"[f] Speed",       TuiFooterAction::SetSpeed},
         {"[:] Set-BP",      TuiFooterAction::SetBreakpoint},
         {"[F1/?] Help",     TuiFooterAction::ToggleHelp},
@@ -363,10 +359,10 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         std::string footer_text;
         if (paused_) {
             footer_text =
-                " [s] Step | [b] Back | [n] StepN | [g] N-Size | [r] Regs | [l] Tools | [o] Load | [Alt-a] IA/CA | [Alt-d] Debug | [Alt-s] Settings | [:] Set-BP | [k] Toggle-BP | [f] Speed | [m] Mem | [F1/?] Help | [c] Run | [q] Quit ";
+                " [s] Step | [b] Back | [n] StepN | [g] N-Size | [r] Regs | [l] Tools | [o] Load | [,] Settings | [:] Set-BP | [k] Toggle-BP | [f] Speed | [m] Mem | [F1/?] Help | [c] Run | [q] Quit ";
         } else {
             footer_text =
-                " [Ctrl-P] Pause | [r] Regs | [l] Tools | [Tab] Layout | [p] Panel | [v] Trace | [Alt-a] IA/CA | [Alt-d] Debug | [Alt-s] Settings | [f] Speed | [:] Set-BP | [F1/?] Help | [Ctrl-Q] Quit ";
+                " [Ctrl-P] Pause | [r] Regs | [l] Tools | [Tab] Layout | [p] Panel | [v] Trace | [,] Settings | [f] Speed | [:] Set-BP | [F1/?] Help | [Ctrl-Q] Quit ";
         }
         int footer_len = get_display_width(footer_text);
         int pad_foot = (width - 2) - footer_len;

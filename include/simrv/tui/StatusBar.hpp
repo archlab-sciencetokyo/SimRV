@@ -34,8 +34,6 @@ enum class TuiFooterAction : uint8_t {
     CycleLayout,
     TogglePanel,
     ToggleTrace,
-    ToggleCycleAccurate,
-    ToggleDebugMode,
     OpenSettings
 };
 

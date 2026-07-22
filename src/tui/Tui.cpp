@@ -1070,20 +1070,22 @@ void Tui::pause_loop() {
                 if (get_active_modal() == ModalType::Settings) {
                     if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
                         close_modal();
-                    } else if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline || byte == ' ') {
+                    } else if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+                        submit_modal();
+                    } else if (byte == ' ') {
                         modal_.toggle_setting_at_cursor();
                         render(true);
                     } else if (byte >= '1' && byte <= '9') {
                         modal_.toggle_setting_by_index(byte - '1');
                         render(true);
                     } else if (byte == '0') {
-                        modal_.toggle_setting_by_index(9);
+                        modal_.toggle_setting_by_index(8);
                         render(true);
                     } else if (byte == 'a' || byte == 'A') {
-                        modal_.toggle_setting_by_index(10);
+                        modal_.toggle_setting_by_index(9);
                         render(true);
                     } else if (byte == 'g' || byte == 'G') {
-                        modal_.toggle_setting_by_index(11);
+                        modal_.toggle_setting_by_index(10);
                         render(true);
                     }
                     continue;
@@ -1369,8 +1371,6 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                         case TuiFooterAction::CycleLayout: cycle_layout(); break;
                         case TuiFooterAction::TogglePanel: cycle_right_panel_mode(); break;
                         case TuiFooterAction::ToggleTrace: toggle_trace_enabled(); break;
-                        case TuiFooterAction::ToggleCycleAccurate: toggle_cycle_accurate(); break;
-                        case TuiFooterAction::ToggleDebugMode: toggle_debug_mode(); break;
                         case TuiFooterAction::OpenSettings: open_modal(ModalType::Settings); break;
                     }
                     return true;
@@ -1444,14 +1444,6 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         }
         if (key == 't' || key == 'T') {
             toggle_sakura_theme();
-            return true;
-        }
-        if (key == 'a' || key == 'A') {
-            toggle_cycle_accurate();
-            return true;
-        }
-        if (key == 'd' || key == 'D') {
-            toggle_debug_mode();
             return true;
         }
         if (key == 'u' || key == 'U') {

@@ -32,6 +32,20 @@ enum class ModalType : uint8_t {
     Settings
 };
 
+struct SettingsDraft {
+    bool cycle_accurate = false;
+    bool debug_mode = false;
+    bool rollback_enabled = false;
+    bool high_contrast = false;
+    bool use_mix = false;
+    bool bp_trace = false;
+    bool traplog_mode = false;
+    bool dlog_mode = false;
+    bool high_performance = false;
+    bool lockstep_mode = false;
+    bool gdb_mode = false;
+};
+
 class TuiModal {
    public:
     explicit TuiModal(simrv::core::Machine& machine);
@@ -64,6 +78,7 @@ class TuiModal {
     ModalType active_modal_ = ModalType::None;
     std::string input_;
     int settings_cursor_ = 0;
+    SettingsDraft settings_draft_;
     bool load_appmode_ =
         false;  // Toggle for App (baremetal) vs OS (Linux) mode in LoadBinary modal
     std::string staged_binary_path_;

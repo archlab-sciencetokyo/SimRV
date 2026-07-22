@@ -41,6 +41,17 @@ void TuiModal::open(ModalType type, LeftPane* left_pane, uint64_t step_granulari
             break;
         case ModalType::Settings:
             settings_cursor_ = 0;
+            settings_draft_.cycle_accurate = machine_.s_cycle_accurate;
+            settings_draft_.debug_mode = machine_.s_debug_mode;
+            settings_draft_.rollback_enabled = machine_.s_rollback_enabled;
+            settings_draft_.high_contrast = machine_.s_high_contrast;
+            settings_draft_.use_mix = machine_.s_use_mix;
+            settings_draft_.bp_trace = machine_.s_bp_trace;
+            settings_draft_.traplog_mode = machine_.s_traplog_mode;
+            settings_draft_.dlog_mode = machine_.s_dlog_mode;
+            settings_draft_.high_performance = machine_.s_high_performance;
+            settings_draft_.lockstep_mode = machine_.s_lockstep_mode;
+            settings_draft_.gdb_mode = machine_.s_gdb_mode;
             break;
         default:
             break;
@@ -58,20 +69,17 @@ void TuiModal::toggle_setting_at_cursor() {
 
 void TuiModal::toggle_setting_by_index(int index) {
     switch (index) {
-        case 0: machine_.s_cycle_accurate = !machine_.s_cycle_accurate; break;
-        case 1: machine_.s_debug_mode = !machine_.s_debug_mode; break;
-        case 2:
-            machine_.s_rollback_enabled = !machine_.s_rollback_enabled;
-            if (!machine_.s_rollback_enabled) machine_.cpu.undo_stack.clear();
-            break;
-        case 3: machine_.s_high_contrast = !machine_.s_high_contrast; break;
-        case 4: machine_.s_use_mix = !machine_.s_use_mix; break;
-        case 5: machine_.s_bp_trace = !machine_.s_bp_trace; break;
-        case 6: machine_.s_traplog_mode = !machine_.s_traplog_mode; break;
-        case 7: machine_.s_dlog_mode = !machine_.s_dlog_mode; break;
-        case 8: machine_.s_high_performance = !machine_.s_high_performance; break;
-        case 9: machine_.s_lockstep_mode = !machine_.s_lockstep_mode; break;
-        case 10: machine_.s_gdb_mode = !machine_.s_gdb_mode; break;
+        case 0: settings_draft_.cycle_accurate = !settings_draft_.cycle_accurate; break;
+        case 1: settings_draft_.debug_mode = !settings_draft_.debug_mode; break;
+        case 2: settings_draft_.rollback_enabled = !settings_draft_.rollback_enabled; break;
+        case 3: settings_draft_.high_contrast = !settings_draft_.high_contrast; break;
+        case 4: settings_draft_.use_mix = !settings_draft_.use_mix; break;
+        case 5: settings_draft_.bp_trace = !settings_draft_.bp_trace; break;
+        case 6: settings_draft_.traplog_mode = !settings_draft_.traplog_mode; break;
+        case 7: settings_draft_.dlog_mode = !settings_draft_.dlog_mode; break;
+        case 8: settings_draft_.high_performance = !settings_draft_.high_performance; break;
+        case 9: settings_draft_.lockstep_mode = !settings_draft_.lockstep_mode; break;
+        case 10: settings_draft_.gdb_mode = !settings_draft_.gdb_mode; break;
         default: break;
     }
 }
@@ -87,6 +95,30 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_granulari
                       const std::function<void(const std::string&)>& set_status_override_cb,
                       const std::function<void()>& on_speed_changed_cb) -> bool {
     if (active_modal_ == ModalType::None) return false;
+
+    if (active_modal_ == ModalType::Settings) {
+        machine_.s_cycle_accurate = settings_draft_.cycle_accurate;
+        machine_.s_debug_mode = settings_draft_.debug_mode;
+        if (machine_.s_rollback_enabled != settings_draft_.rollback_enabled) {
+            machine_.s_rollback_enabled = settings_draft_.rollback_enabled;
+            if (!machine_.s_rollback_enabled) machine_.cpu.undo_stack.clear();
+        }
+        machine_.s_high_contrast = settings_draft_.high_contrast;
+        machine_.s_use_mix = settings_draft_.use_mix;
+        machine_.s_bp_trace = settings_draft_.bp_trace;
+        machine_.s_traplog_mode = settings_draft_.traplog_mode;
+        machine_.s_dlog_mode = settings_draft_.dlog_mode;
+        machine_.s_high_performance = settings_draft_.high_performance;
+        machine_.s_lockstep_mode = settings_draft_.lockstep_mode;
+        machine_.s_gdb_mode = settings_draft_.gdb_mode;
+        if (set_status_override_cb) {
+            set_status_override_cb("Simulator settings saved and applied");
+        }
+        active_modal_ = ModalType::None;
+        input_.clear();
+        return false;
+    }
+
     std::string text = input_;
     while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front()))) text.erase(text.begin());
     while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back()))) text.pop_back();
@@ -368,7 +400,7 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width, i
             break;
         case ModalType::Settings: {
             title = " SIMULATOR SETTINGS ";
-            add_row(std::format("{}Use \033[1m[↑/↓/←/→]\033[0m + \033[1m[Enter/Space]\033[0m or key \033[1m[1-9,0,a,g]\033[0m to toggle:\033[0m", kThemeMuted));
+            add_row(std::format("{}Use \033[1m[↑/↓/←/→]\033[0m or key \033[1m[1-9,0,a,g]\033[0m to toggle, \033[1m[Enter]\033[0m to apply:\033[0m", kThemeMuted));
             add_row("");
 
             struct SettingItem {
@@ -378,17 +410,17 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width, i
             };
 
             std::array<SettingItem, 11> settings = {{
-                {" 1", "Simulation Mode",           machine_.s_cycle_accurate ? "\033[1;36m[CA (Cycle-Accurate)]\033[0m" : "\033[1;33m[IA (Instruction-Accurate)]\033[0m"},
-                {" 2", "TUI Diagnostics View",      machine_.s_debug_mode ? "\033[1;32m[Debug Mode (Diagnostics ON)]\033[0m" : "\033[90m[Normal Mode]\033[0m"},
-                {" 3", "Step Rollback History",     machine_.s_rollback_enabled ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-                {" 4", "High Contrast Theme",       machine_.s_high_contrast ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-                {" 5", "Instruction Mix Stats",     machine_.s_use_mix ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-                {" 6", "Branch Prediction Trace",   machine_.s_bp_trace ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-                {" 7", "Exception & Trap Log",      machine_.s_traplog_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-                {" 8", "Device MMIO Access Log",    machine_.s_dlog_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-                {" 9", "High-Performance Engine",   machine_.s_high_performance ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-                {" a", "Co-Sim Spike Lockstep",     machine_.s_lockstep_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-                {" g", "GDB Server Stub (1234)",    machine_.s_gdb_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 1", "Simulation Mode",           settings_draft_.cycle_accurate ? "\033[1;36m[CA (Cycle-Accurate)]\033[0m" : "\033[1;33m[IA (Instruction-Accurate)]\033[0m"},
+                {" 2", "TUI Diagnostics View",      settings_draft_.debug_mode ? "\033[1;32m[Debug Mode (Diagnostics ON)]\033[0m" : "\033[90m[Normal Mode]\033[0m"},
+                {" 3", "Step Rollback History",     settings_draft_.rollback_enabled ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 4", "High Contrast Theme",       settings_draft_.high_contrast ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 5", "Instruction Mix Stats",     settings_draft_.use_mix ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 6", "Branch Prediction Trace",   settings_draft_.bp_trace ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 7", "Exception & Trap Log",      settings_draft_.traplog_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 8", "Device MMIO Access Log",    settings_draft_.dlog_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 9", "High-Performance Engine",   settings_draft_.high_performance ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" a", "Co-Sim Spike Lockstep",     settings_draft_.lockstep_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" g", "GDB Server Stub (1234)",    settings_draft_.gdb_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
             }};
 
             for (std::size_t i = 0; i < settings.size(); ++i) {
@@ -399,7 +431,7 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width, i
                 add_row(std::format("{}{} {} : {}", prefix, num_key, name_str, settings[i].val));
             }
             add_row("");
-            add_row(std::format("{}Press \033[1m[Esc]\033[0m or \033[1m[q]\033[0m to close\033[0m", kThemeMuted));
+            add_row(std::format("{}Press \033[1m[Enter]\033[0m to apply settings, \033[1m[Esc]\033[0m or \033[1m[q]\033[0m to cancel\033[0m", kThemeMuted));
             break;
         }
         case ModalType::Help:
@@ -407,14 +439,12 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width, i
             if (term_height < 32 && box_w >= 70) {
                 // Dual-column layout for small screen height
                 struct Shortcut { const char* key; const char* desc; };
-                static constexpr std::array<Shortcut, 27> help_items = {{
+                static constexpr std::array<Shortcut, 25> help_items = {{
                     {"[s] / [Space]", "Step 1 inst"},
                     {"[n]",          "Step N insts"},
                     {"[b] / [Alt-b]", "Undo / Toggle Rollback"},
                     {"[o] / [Alt-o]", "Load Binary / Disk"},
                     {"[,] / [Alt-s]", "Simulator Settings"},
-                    {"[Alt-a]",      "Toggle IA / CA Mode"},
-                    {"[Alt-d]",      "Toggle Debug Mode"},
                     {"[:]",          "Set PC Breakpoint"},
                     {"[k]",          "Toggle PC Breakpoint"},
                     {"[g]",          "Set N Step Size"},
