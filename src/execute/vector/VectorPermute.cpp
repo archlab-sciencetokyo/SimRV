@@ -269,7 +269,7 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
             break;
 
         case isa::OperationId::VSLIDEDOWN_VX: {
-            uint32_t offset = static_cast<uint32_t>(rs1_val);
+            auto offset = static_cast<uint32_t>(rs1_val);
             if (sew == 8) execute_vslidedown<uint8_t>(cpu, rd, offset, rs2, vm, vl);
             else if (sew == 16) execute_vslidedown<uint16_t>(cpu, rd, offset, rs2, vm, vl);
             else if (sew == 32) execute_vslidedown<uint32_t>(cpu, rd, offset, rs2, vm, vl);
@@ -277,7 +277,7 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
             break;
         }
         case isa::OperationId::VSLIDEDOWN_VI: {
-            uint32_t offset = static_cast<uint32_t>(simm5 & 0x1F);
+            auto offset = static_cast<uint32_t>(simm5 & 0x1F);
             if (sew == 8) execute_vslidedown<uint8_t>(cpu, rd, offset, rs2, vm, vl);
             else if (sew == 16) execute_vslidedown<uint16_t>(cpu, rd, offset, rs2, vm, vl);
             else if (sew == 32) execute_vslidedown<uint32_t>(cpu, rd, offset, rs2, vm, vl);
@@ -285,7 +285,7 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
             break;
         }
         case isa::OperationId::VSLIDEUP_VX: {
-            uint32_t offset = static_cast<uint32_t>(rs1_val);
+            auto offset = static_cast<uint32_t>(rs1_val);
             if (sew == 8) execute_vslideup<uint8_t>(cpu, rd, offset, rs2, vm, vl);
             else if (sew == 16) execute_vslideup<uint16_t>(cpu, rd, offset, rs2, vm, vl);
             else if (sew == 32) execute_vslideup<uint32_t>(cpu, rd, offset, rs2, vm, vl);
@@ -293,7 +293,7 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
             break;
         }
         case isa::OperationId::VSLIDEUP_VI: {
-            uint32_t offset = static_cast<uint32_t>(simm5 & 0x1F);
+            auto offset = static_cast<uint32_t>(simm5 & 0x1F);
             if (sew == 8) execute_vslideup<uint8_t>(cpu, rd, offset, rs2, vm, vl);
             else if (sew == 16) execute_vslideup<uint16_t>(cpu, rd, offset, rs2, vm, vl);
             else if (sew == 32) execute_vslideup<uint32_t>(cpu, rd, offset, rs2, vm, vl);

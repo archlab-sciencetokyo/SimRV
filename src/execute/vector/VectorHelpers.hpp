@@ -248,7 +248,7 @@ inline uint16_t fp32_to_fp16(float f) {
 template <typename T>
 inline T sat_add_signed(T a, T b, bool& sat) {
     static_assert(std::is_signed_v<T>);
-    using Promoted = std::conditional_t<sizeof(T) < 8, int64_t, __int128>;
+    using Promoted = std::conditional_t<sizeof(T) < 8, int64_t, __int128_t>;
     Promoted res = static_cast<Promoted>(a) + static_cast<Promoted>(b);
     Promoted min_limit = std::numeric_limits<T>::min();
     Promoted max_limit = std::numeric_limits<T>::max();
@@ -268,7 +268,7 @@ inline T sat_add_unsigned(T a, T b, bool& sat) {
 template <typename T>
 inline T sat_sub_signed(T a, T b, bool& sat) {
     static_assert(std::is_signed_v<T>);
-    using Promoted = std::conditional_t<sizeof(T) < 8, int64_t, __int128>;
+    using Promoted = std::conditional_t<sizeof(T) < 8, int64_t, __int128_t>;
     Promoted res = static_cast<Promoted>(a) - static_cast<Promoted>(b);
     Promoted min_limit = std::numeric_limits<T>::min();
     Promoted max_limit = std::numeric_limits<T>::max();
@@ -339,7 +339,7 @@ inline T execute_vsmul_element(T vs2, T vs1, uint32_t vxrm, bool& saturated) {
     static_assert(std::is_signed_v<T>);
     using DoubleWidth = std::conditional_t<sizeof(T) == 1, int16_t,
                         std::conditional_t<sizeof(T) == 2, int32_t,
-                        std::conditional_t<sizeof(T) == 4, int64_t, __int128>>>;
+                        std::conditional_t<sizeof(T) == 4, int64_t, __int128_t>>>;
     
     DoubleWidth d = static_cast<DoubleWidth>(vs2) * static_cast<DoubleWidth>(vs1);
     uint32_t shift = sizeof(T) * 8 - 1;

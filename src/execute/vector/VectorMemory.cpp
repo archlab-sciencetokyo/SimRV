@@ -66,7 +66,7 @@ void execute_vle(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd, 
             if (cpu.pipeline_context.pending_exception.has_value()) {
                 return;
             }
-            RegId target_reg = static_cast<RegId>((static_cast<uint32_t>(rd) + f) % 32);
+            auto target_reg = static_cast<RegId>((static_cast<uint32_t>(rd) + f) % 32);
             vector::set_group_element<T>(cpu.state().regs, target_reg, i, static_cast<T>(val));
         }
     }
@@ -83,7 +83,7 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3,
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         for (uint32_t f = 0; f < nfields; f++) {
             Address addr = base_addr + (i * nfields + f) * sizeof(T);
-            RegId source_reg = static_cast<RegId>((static_cast<uint32_t>(vs3) + f) % 32);
+            auto source_reg = static_cast<RegId>((static_cast<uint32_t>(vs3) + f) % 32);
             T val = vector::get_group_element<T>(cpu.state().regs, source_reg, i);
             if constexpr (sizeof(T) == 8) {
                 if constexpr (simrv::xlen::kIsXLen64) {

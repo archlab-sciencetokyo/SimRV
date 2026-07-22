@@ -147,8 +147,8 @@ void execute_vnclip(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uin
             shift = static_cast<uint32_t>(vector::get_group_element<T_dest>(cpu.state().regs, rs1, i)) & shift_mask;
         }
         
-        T_src val2 = vector::get_group_element<T_src>(cpu.state().regs, rs2, i);
-        T_dest res = vector::round_and_clip<T_dest, T_src>(val2, shift, vxrm, saturated);
+        auto val2 = vector::get_group_element<T_src>(cpu.state().regs, rs2, i);
+        auto res = vector::round_and_clip<T_dest, T_src>(val2, shift, vxrm, saturated);
         vector::set_group_element<T_dest>(cpu.state().regs, rd, i, res);
     }
     

@@ -786,9 +786,9 @@ void execute_vwsll_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, u
     for (uint32_t i = 0; i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         using U_dest = std::make_unsigned_t<T_dest>;
-        U_dest u2 = static_cast<U_dest>(static_cast<std::make_unsigned_t<T_src>>(src2_vals[i]));
+        auto u2 = static_cast<U_dest>(static_cast<std::make_unsigned_t<T_src>>(src2_vals[i]));
         uint32_t shift = static_cast<uint32_t>(src1_vals[i]) & shift_mask;
-        T_dest res = static_cast<T_dest>(u2 << shift);
+        auto res = static_cast<T_dest>(u2 << shift);
         vector::set_group_element<T_dest>(cpu.state().regs, rd, i, res);
     }
 }
@@ -804,9 +804,9 @@ void execute_vwsll_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, boo
     for (uint32_t i = 0; i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         using U_dest = std::make_unsigned_t<T_dest>;
-        U_dest u2 = static_cast<U_dest>(static_cast<std::make_unsigned_t<T_src>>(src2_vals[i]));
+        auto u2 = static_cast<U_dest>(static_cast<std::make_unsigned_t<T_src>>(src2_vals[i]));
         uint32_t shift = static_cast<uint32_t>(rs1_val) & shift_mask;
-        T_dest res = static_cast<T_dest>(u2 << shift);
+        auto res = static_cast<T_dest>(u2 << shift);
         vector::set_group_element<T_dest>(cpu.state().regs, rd, i, res);
     }
 }
@@ -822,9 +822,9 @@ void execute_vwsll_vi(core::CPU& cpu, RegId rd, int32_t simm5, RegId rs2, bool v
     for (uint32_t i = 0; i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         using U_dest = std::make_unsigned_t<T_dest>;
-        U_dest u2 = static_cast<U_dest>(static_cast<std::make_unsigned_t<T_src>>(src2_vals[i]));
+        auto u2 = static_cast<U_dest>(static_cast<std::make_unsigned_t<T_src>>(src2_vals[i]));
         uint32_t shift = static_cast<uint32_t>(simm5 & 0x1F) & shift_mask;
-        T_dest res = static_cast<T_dest>(u2 << shift);
+        auto res = static_cast<T_dest>(u2 << shift);
         vector::set_group_element<T_dest>(cpu.state().regs, rd, i, res);
     }
 }

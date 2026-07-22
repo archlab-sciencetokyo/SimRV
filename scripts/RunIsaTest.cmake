@@ -7,6 +7,7 @@ endif()
 
 get_filename_component(test_name "${ELF_PATH}" NAME)
 set(bin_path "${WORK_DIR}/${test_name}.bin")
+file(MAKE_DIRECTORY "${WORK_DIR}")
 
 # 1. Run objcopy to extract raw binary
 execute_process(
@@ -37,7 +38,7 @@ if(EXISTS "${NM_BIN}")
 endif()
 
 # 3. Run SimRV
-set(SIMRV_ARGS -m ${bin_path} -e ${END_INSNS} -b -H ${tohost_addr})
+set(SIMRV_ARGS -a --cli -m ${bin_path} -e ${END_INSNS} -b -H ${tohost_addr})
 if(LOCKSTEP)
   list(APPEND SIMRV_ARGS --lockstep)
   list(APPEND SIMRV_ARGS --spike-elf ${ELF_PATH})

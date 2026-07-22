@@ -13,8 +13,8 @@ void execute_vfadd_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, u
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         
         if constexpr (std::is_same_v<T, uint16_t>) {
-            uint16_t val1_raw = vector::get_group_element<uint16_t>(cpu.state().regs, rs1, i);
-            uint16_t val2_raw = vector::get_group_element<uint16_t>(cpu.state().regs, rs2, i);
+            auto val1_raw = vector::get_group_element<uint16_t>(cpu.state().regs, rs1, i);
+            auto val2_raw = vector::get_group_element<uint16_t>(cpu.state().regs, rs2, i);
             float val1 = vector::fp16_to_fp32(val1_raw);
             float val2 = vector::fp16_to_fp32(val2_raw);
             float res = val2 + val1;
@@ -36,8 +36,8 @@ void execute_vfadd_vf(core::CPU& cpu, RegId rd, FloatingRegister rs1_val, RegId 
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         
         if constexpr (std::is_same_v<T, uint16_t>) {
-            uint16_t val1_raw = static_cast<uint16_t>(rs1_val & 0xFFFFULL);
-            uint16_t val2_raw = vector::get_group_element<uint16_t>(cpu.state().regs, rs2, i);
+            auto val1_raw = static_cast<uint16_t>(rs1_val & 0xFFFFULL);
+            auto val2_raw = vector::get_group_element<uint16_t>(cpu.state().regs, rs2, i);
             float val1 = vector::fp16_to_fp32(val1_raw);
             float val2 = vector::fp16_to_fp32(val2_raw);
             float res = val2 + val1;
@@ -49,12 +49,12 @@ void execute_vfadd_vf(core::CPU& cpu, RegId rd, FloatingRegister rs1_val, RegId 
             } else {
                 val1 = std::bit_cast<float>(static_cast<uint32_t>(rs1_val & 0xFFFFFFFFULL));
             }
-            float val2 = vector::get_group_element<float>(cpu.state().regs, rs2, i);
+            auto val2 = vector::get_group_element<float>(cpu.state().regs, rs2, i);
             float res = val2 + val1;
             vector::set_group_element<float>(cpu.state().regs, rd, i, res);
         } else {
             double val1 = std::bit_cast<double>(rs1_val);
-            double val2 = vector::get_group_element<double>(cpu.state().regs, rs2, i);
+            auto val2 = vector::get_group_element<double>(cpu.state().regs, rs2, i);
             double res = val2 + val1;
             vector::set_group_element<double>(cpu.state().regs, rd, i, res);
         }

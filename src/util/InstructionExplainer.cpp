@@ -108,7 +108,7 @@ auto reg_name(uint32_t r, bool is_fp = false) -> std::string {
     }
 }
 
-auto extract_bitfields(uint32_t raw_inst) -> Bitfields {
+[[maybe_unused]] auto extract_bitfields(uint32_t raw_inst) -> Bitfields {
     Bitfields bf{};
     bf.opcode = raw_inst & 0x7F;
     bf.rd = (raw_inst >> 7) & 0x1F;
