@@ -94,6 +94,9 @@ Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
             scroll_offset_ += lines;
         }
     });
+    if (machine_.s_fn_memimg.empty()) {
+        open_modal(ModalType::LoadBinary);
+    }
 }
 
 Tui::~Tui() { shutdown(); }
@@ -589,9 +592,58 @@ void Tui::handle_mouse(int x, int y, int b) {
         return;
     }
 
-    (void)y;
     if (x < pane_width_cached_) {
-        if (b == 64) {
+        if (b == 0) {      // Left mouse click
+            if (y == 4) {  // Left Pane Tab Bar (row 4 in 1-indexed terminal coords)
+                int const col = x - 2;
+                if (col < 0) {
+                    return;
+                }
+                auto tab = left_pane_->get_tab_at_col(col);
+                if (tab.has_value()) {
+                    left_pane_->set_previous_page(left_pane_->get_page());
+                    set_reg_page(*tab);
+                    return;
+                }
+            } else if (y >= 5) {  // Left Pane Content Area (row 5+)
+                int logical_row = (y - 5) + left_pane_->get_scroll_offset();
+                if (left_pane_->get_page() == TuiRegPage::PIPELINE) {
+                    Register clicked_pc = left_pane_->get_pipeline_pc_at_row(logical_row);
+                    if (clicked_pc != 0) {
+                        left_pane_->set_previous_page(TuiRegPage::PIPELINE);
+                        left_pane_->set_inspect_addr(clicked_pc);
+                        set_reg_page(TuiRegPage::EXPLAIN);
+                        return;
+                    }
+                } else if (left_pane_->get_page() == TuiRegPage::EXPLAIN) {
+                    if (logical_row <= 1) {
+                        auto prev = left_pane_->get_previous_page();
+                        if (prev.has_value()) {
+                            set_reg_page(*prev);
+                            return;
+                        }
+                    }
+                } else if (left_pane_->get_page() == TuiRegPage::GPR ||
+                           left_pane_->get_page() == TuiRegPage::FPR) {
+                    auto reg_val =
+                        left_pane_->get_register_value_at_row(logical_row, x, pane_width_cached_);
+                    if (reg_val.has_value()) {
+                        left_pane_->set_inspect_addr(*reg_val);
+                        open_modal(ModalType::InspectAddress);
+                        return;
+                    }
+                } else if (left_pane_->get_page() == TuiRegPage::STACK) {
+                    auto stack_addr = left_pane_->get_stack_addr_at_row(logical_row);
+                    if (stack_addr.has_value()) {
+                        left_pane_->set_inspect_addr(*stack_addr);
+                        set_status_override(
+                            std::format("Inspecting stack address 0x{:08x}", *stack_addr));
+                        render(true);
+                        return;
+                    }
+                }
+            }
+        } else if (b == 64) {
             scroll_regs(-2);
         } else if (b == 65) {
             scroll_regs(2);
@@ -627,8 +679,6 @@ void Tui::cycle_reg_page() {
                 else       rp = TuiRegPage::GPR;
                 break;
             case TuiRegPage::VEC:
-                rp = TuiRegPage::GPR;
-                break;
             default:
                 rp = TuiRegPage::GPR;
                 break;
@@ -906,6 +956,14 @@ void Tui::update_cache() {
     }
 }
 
+void Tui::reset_speed_history() {
+    last_speed_update_ = std::chrono::steady_clock::now();
+    last_icount_ = machine_.cpu.e_icount;
+    speed_ips_ = 0;
+    kips_ = 0;
+    kips_history_.clear();
+}
+
 void Tui::adjust_left_pane_width(int delta) {
     struct winsize w{};
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w); // NOLINT(cppcoreguidelines-pro-type-vararg)
@@ -996,11 +1054,19 @@ void Tui::pause_loop() {
             const auto key = static_cast<simrv::tui::TuiKey>(byte);
             if (is_modal_active()) {
                 if (byte == 27 || key == simrv::tui::TuiKey::Esc) {
-                    close_modal();
+                    // Dismiss modal — but only allow dismissing LoadBinary if a binary is already
+                    // loaded
+                    if (get_active_modal() != ModalType::LoadBinary ||
+                        !machine_.s_fn_memimg.empty()) {
+                        close_modal();
+                    }
                 } else if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
                     submit_modal();
                 } else if (get_active_modal() == ModalType::Help && (key == simrv::tui::TuiKey::h || key == simrv::tui::TuiKey::H || key == simrv::tui::TuiKey::QuestionMark)) {
                     close_modal();
+                } else if (get_active_modal() == ModalType::LoadBinary && byte == 9 /* Tab */) {
+                    modal_.toggle_load_mode();
+                    render(true);
                 } else if (byte == 8 || byte == 127 || key == simrv::tui::TuiKey::Backspace) {
                     modal_.pop_char();
                     render(true);
@@ -1081,11 +1147,7 @@ void Tui::pause_loop() {
                 }
                 render(true);
             } else if (key == simrv::tui::TuiKey::o || key == simrv::tui::TuiKey::O) {
-                machine_.s_rollback_enabled = !machine_.s_rollback_enabled;
-                if (!machine_.s_rollback_enabled) {
-                    machine_.cpu.undo_stack.clear();
-                }
-                render(true);
+                open_modal(ModalType::LoadBinary);
             } else if (key == simrv::tui::TuiKey::Plus || key == simrv::tui::TuiKey::Equal || key == simrv::tui::TuiKey::Dot) {
                 static constexpr std::array<uint64_t, 10> kSpeedLevels = {1000000, 500000, 100000, 50000, 10000, 5000, 1000, 100, 10, 0};
                 uint64_t cur_delay = step_delay_us_.load(std::memory_order_relaxed);
@@ -1097,6 +1159,9 @@ void Tui::pause_loop() {
                     }
                 }
                 step_delay_us_.store(next_delay, std::memory_order_relaxed);
+                if (next_delay != cur_delay) {
+                    reset_speed_history();
+                }
                 render(true);
             } else if (key == simrv::tui::TuiKey::Minus || key == simrv::tui::TuiKey::Comma) {
                 static constexpr std::array<uint64_t, 10> kSpeedLevels = {0, 10, 100, 1000, 5000, 10000, 50000, 100000, 500000, 1000000};
@@ -1109,6 +1174,9 @@ void Tui::pause_loop() {
                     }
                 }
                 step_delay_us_.store(next_delay, std::memory_order_relaxed);
+                if (next_delay != cur_delay) {
+                    reset_speed_history();
+                }
                 render(true);
             } else if (key == simrv::tui::TuiKey::s || key == simrv::tui::TuiKey::S || key == simrv::tui::TuiKey::Space) {
                 if (!machine_.is_shutdown_) {
@@ -1168,6 +1236,12 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
     int x = 0;
     int y = 0;
     if (parse_sgr_mouse(esc_buf_, button, x, y)) {
+        if (esc_buf_.back() == 'M' && (button == 0 || button == 1 || button == 2)) {
+            if (is_modal_active()) {
+                close_modal();
+                return true;
+            }
+        }
         // Double-click prevention: only register left clicks on press event ('M')
         if (esc_buf_.back() == 'M' && button == 0 && y == 2) {
             struct winsize w{};
@@ -1242,6 +1316,9 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                         case TuiFooterAction::SetStepSize: open_modal(ModalType::SetStepSize); break;
                         case TuiFooterAction::SetSpeed: open_modal(ModalType::SetSpeed); break;
                         case TuiFooterAction::InspectMem: open_modal(ModalType::InspectAddress); break;
+                        case TuiFooterAction::LoadBinary:
+                            open_modal(ModalType::LoadBinary);
+                            break;
                         case TuiFooterAction::ToggleHelp: open_modal(ModalType::Help); break;
                         case TuiFooterAction::RunPause:
                             if (tui_loop_paused_) { tui_loop_paused_ = false; } else { pause_loop(); }
@@ -1276,13 +1353,26 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             }
         }
 
-        handle_mouse(x, y, button);
+        // Process click actions only on mouse-press events; the matching release
+        // event ('m') can otherwise trigger a second tab transition.
+        if (esc_buf_.back() == 'M') {
+            handle_mouse(x, y, button);
+        }
         return true;
     }
 
     // 2. Alt modifier shortcuts
     if (esc_buf_.size() == 2) {
         char key = esc_buf_.at(1);
+        if (key == 'b' || key == 'B') {
+            machine_.s_rollback_enabled = !machine_.s_rollback_enabled;
+            if (!machine_.s_rollback_enabled) {
+                machine_.cpu.undo_stack.clear();
+            }
+            set_status_override(std::format("Rollback tracking {}",
+                                           machine_.s_rollback_enabled ? "enabled" : "disabled"));
+            return true;
+        }
         if (key == 'p' || key == 'P') {
             cycle_right_panel_mode();
             return true;
@@ -1297,6 +1387,10 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         }
         if (key == 'e' || key == 'E') {
             toggle_explain();
+            return true;
+        }
+        if (key == 'o' || key == 'O' || byte == 15) {
+            open_modal(ModalType::LoadBinary);
             return true;
         }
         if (key == 'v' || key == 'V') {

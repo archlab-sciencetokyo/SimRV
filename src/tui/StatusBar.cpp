@@ -81,13 +81,14 @@ auto StatusBar::get_footer_action_at_col(int col) const -> std::optional<TuiFoot
         TuiFooterAction action;
     };
 
-    static constexpr std::array<FooterItem, 13> paused_items = {{
+    static constexpr std::array<FooterItem, 14> paused_items = {{
         {" [s] Step",      TuiFooterAction::Step},
         {"[b] Back",       TuiFooterAction::StepBack},
         {"[n] StepN",      TuiFooterAction::StepN},
         {"[g] N-Size",     TuiFooterAction::SetStepSize},
         {"[r] Regs",       TuiFooterAction::CycleRegs},
         {"[l] Tools",      TuiFooterAction::CycleTools},
+        {"[o] Load",       TuiFooterAction::LoadBinary},
         {"[:] Set-BP",     TuiFooterAction::SetBreakpoint},
         {"[k] Toggle-BP",  TuiFooterAction::TogglePcBreakpoint},
         {"[f] Speed",      TuiFooterAction::SetSpeed},
@@ -354,7 +355,7 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         std::string footer_text;
         if (paused_) {
             footer_text =
-                " [s] Step | [b] Back | [n] StepN | [g] N-Size | [r] Regs | [l] Tools | [:] Set-BP | [k] Toggle-BP | [f] Speed | [m] Mem | [F1/?] Help | [c] Run | [q] Quit ";
+                " [s] Step | [b] Back | [n] StepN | [g] N-Size | [r] Regs | [l] Tools | [o] Load | [:] Set-BP | [k] Toggle-BP | [f] Speed | [m] Mem | [F1/?] Help | [c] Run | [q] Quit ";
         } else {
             footer_text =
                 " [Ctrl-P] Pause | [r] Regs | [l] Tools | [Tab] Layout | [p] Panel | [v] Trace | [f] Speed | [:] Set-BP | [F1/?] Help | [Ctrl-Q] Quit ";

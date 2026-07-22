@@ -43,13 +43,13 @@ namespace {
 auto reg_name(RegId r) -> std::string {
     uint32_t idx = std::to_underlying(r);
     if (idx >= 32) return std::format("x{}", idx);
-    return std::string(kRegNames.at(idx));
+    return {kRegNames.at(idx)};
 }
 
 auto fp_reg_name(RegId r) -> std::string {
     uint32_t idx = std::to_underlying(r);
     if (idx >= 32) return std::format("f{}", idx);
-    return std::string(kFpRegNames.at(idx));
+    return {kFpRegNames.at(idx)};
 }
 
 auto reg_with_x(RegId r) -> std::string {
@@ -59,7 +59,15 @@ auto reg_with_x(RegId r) -> std::string {
 }
 
 auto hex_val(Register v) -> std::string {
-    return std::format("0x{:0{}x}", v, simrv::xlen::kXLenHexDigits);
+    if constexpr (sizeof(Register) <= 4) {
+        return std::format("0x{:08x}", v);
+    } else {
+        auto val = static_cast<uint64_t>(v);
+        if ((val >> 32) == 0) {
+            return std::format("0x{:08x}", static_cast<uint32_t>(val));
+        }
+        return std::format("0x{:016x}", val);
+    }
 }
 
 auto short_op_name(const simrv::pipeline::PipelineReg& reg) -> std::string {
@@ -235,6 +243,10 @@ auto is_raw_hazard_stalled(const simrv::pipeline::PipelineSim& ps) -> bool {
            has_stage_raw_hazard(ps, ps.d_reg(), ps.m_reg());
 }
 
+auto compact_hex(Register v) -> std::string {
+    return hex_val(v);
+}
+
 auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem, const std::string& stall_type, bool raw_stall = false) -> std::string {
     if (!reg.valid) {
         return std::format("{}bubble (empty)\033[0m", kThemeMuted);
@@ -243,15 +255,41 @@ auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem,
     if (static_cast<std::size_t>(reg.op_id) < simrv::pipeline::OPERATION_NAME.size()) {
         op_name = simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(reg.op_id));
     }
-    std::string desc = std::format("\033[1m{}{}\033[0m ({}{}{})",
-                                   kThemeMint, op_name,
-                                   kThemeSky, hex_val(reg.pc), "\033[0m");
+
+    std::string ops_info;
+    if (reg.rs1 != static_cast<RegId>(0) || reg.rs2 != static_cast<RegId>(0) ||
+        (reg.writes_reg && reg.rd != static_cast<RegId>(0))) {
+        std::vector<std::string> srcs;
+        if (reg.rs1 != static_cast<RegId>(0)) srcs.push_back(reg_name(reg.rs1));
+        if (reg.rs2 != static_cast<RegId>(0)) srcs.push_back(reg_name(reg.rs2));
+
+        std::string src_str =
+            srcs.empty() ? ""
+                         : (srcs.size() == 1 ? srcs[0] : std::format("{}, {}", srcs[0], srcs[1]));
+        if (reg.writes_reg && reg.rd != static_cast<RegId>(0)) {
+            if (!src_str.empty()) {
+                ops_info = std::format(" \033[90m[{} → {}]\033[0m", src_str, reg_name(reg.rd));
+            } else {
+                ops_info = std::format(" \033[90m[→ {}]\033[0m", reg_name(reg.rd));
+            }
+        } else if (!src_str.empty()) {
+            ops_info = std::format(" \033[90m[{}]\033[0m", src_str);
+        }
+    }
+
+    std::string desc = std::format("\033[1m{}{}\033[0m ({}{}{}){}", kThemeMint, op_name, kThemeSky,
+                                   compact_hex(reg.pc), "\033[0m", ops_info);
     if (stall_rem > 0) {
-        desc += std::format(" {}[{} — {} clk left]\033[0m", kThemeCoral, stall_type, stall_rem);
+        std::string tag = stall_type;
+        if (tag == "I-Cache Miss") tag = "I-Cache";
+        else if (tag == "D-Cache Miss") tag = "D-Cache";
+        else if (tag == "TLB Miss") tag = "TLB";
+        else if (tag == "Divider Busy") tag = "Divider";
+        desc += std::format(" {}[{}: {}c]\033[0m", kThemeCoral, tag, stall_rem);
     } else if (raw_stall) {
-        desc += std::format(" {}[Data Hazard — waiting for result]\033[0m", kThemeCoral);
+        desc += std::format(" {}[RAW Stall]\033[0m", kThemeCoral);
     } else if (reg.remaining_latency > 0) {
-        desc += std::format(" {}[Latency: {} clk left]\033[0m", kThemePeach, reg.remaining_latency);
+        desc += std::format(" {}[Lat: {}c]\033[0m", kThemePeach, reg.remaining_latency);
     }
     return desc;
 }
@@ -381,14 +419,26 @@ auto LeftPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int s
         case 2: {
             std::string stall_type = ps.tlb_stall_remaining() > 0 ? "TLB Miss" : "I-Cache Miss";
             uint32_t stall_rem = ps.tlb_stall_remaining() > 0 ? ps.tlb_stall_remaining() : ps.icache_stall_remaining();
-            return format_to_width(std::format("  \033[1m{}IF  (Fetch)\033[0m   : {}", kThemeSky, get_stage_desc(ps.f_reg(), stall_rem, stall_type)), width);
+            return format_to_width(std::format("  \033[1m{}IF  (Fetch)\033[0m     : {}", kThemeSky,
+                                               get_stage_desc(ps.f_reg(), stall_rem, stall_type)),
+                                   width);
         }
         case 3:
-            return format_to_width(std::format("  \033[1m{}ID  (Decode)\033[0m  : {}", kThemeSky, get_stage_desc(ps.d_reg(), 0, "", is_raw_stalled)), width);
+            return format_to_width(std::format("  \033[1m{}ID  (Decode)\033[0m    : {}", kThemeSky,
+                                               get_stage_desc(ps.d_reg(), 0, "", is_raw_stalled)),
+                                   width);
         case 4:
-            return format_to_width(std::format("  \033[1m{}EX  (Execute)\033[0m : {}", kThemeSky, get_stage_desc(ps.e_reg(), ps.div_busy_cycles_remaining(), "Divider Busy")), width);
+            return format_to_width(
+                std::format(
+                    "  \033[1m{}EX  (Execute)\033[0m   : {}", kThemeSky,
+                    get_stage_desc(ps.e_reg(), ps.div_busy_cycles_remaining(), "Divider Busy")),
+                width);
         case 5:
-            return format_to_width(std::format("  \033[1m{}MEM (Memory)\033[0m  : {}", kThemeSky, get_stage_desc(ps.m_reg(), ps.dcache_stall_remaining(), "D-Cache Miss")), width);
+            return format_to_width(
+                std::format(
+                    "  \033[1m{}MEM (Memory)\033[0m    : {}", kThemeSky,
+                    get_stage_desc(ps.m_reg(), ps.dcache_stall_remaining(), "D-Cache Miss")),
+                width);
         case 6:
             return format_to_width(std::format("  \033[1m{}WB  (Write-Back)\033[0m: {}", kThemeSky, get_stage_desc(ps.w_reg(), 0, "")), width);
         default:
@@ -428,6 +478,12 @@ auto LeftPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu, in
                                "Control Hazard", ctrl_status, ctrl_color,
                                col_width, right_width, 18);
         case 11: {
+            if (!ps.config.enable_forwarding) {
+                return format_to_width(
+                    std::format(" {}Forwarding\033[0m        : {}Disabled\033[0m", kThemeText,
+                                kThemeMuted),
+                    width);
+            }
             auto paths = get_active_forwarding_paths(ps);
             std::string paths_str = "None";
             if (!paths.empty()) {
@@ -438,9 +494,9 @@ auto LeftPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu, in
                 }
             }
             const char* paths_color = paths.empty() ? kThemeVal : kThemeMint;
-            return render_pair("Forwarding", paths_str, paths_color,
-                               "Fwd Mode", ps.config.enable_forwarding ? "Enabled" : "Disabled", kThemeVal,
-                               col_width, right_width, 18);
+            return format_to_width(std::format(" {}Forwarding\033[0m        : {}{}\033[0m",
+                                               kThemeText, paths_color, paths_str),
+                                   width);
         }
         default:
             return format_to_width("", width);
@@ -456,7 +512,9 @@ auto LeftPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, int s
         case 14: {
             Register pc = get_active_branch_pc(ps);
             std::string bht_str = get_bht_string(ps, pc);
-            return format_to_width(std::format("  {}Branch History\033[0m  : {}{}\033[0m", kThemeText, kThemeVal, bht_str), width);
+            return format_to_width(std::format("  {}Branch History\033[0m : {}{}\033[0m",
+                                               kThemeText, kThemeVal, bht_str),
+                                   width);
         }
         case 15: {
             Register pc = get_active_branch_pc(ps);
@@ -689,7 +747,7 @@ auto LeftPane::render_pipeline_stages_functional_high(const simrv::core::CPU& cp
                     "Env Call (U-Mode)", "Env Call (S-Mode)", "Reserved (10)", "Env Call (M-Mode)",
                     "Inst Page Fault", "Load Page Fault", "Reserved (14)", "Store Page Fault"
                 };
-                uint64_t cause = static_cast<uint64_t>(*ctx.pending_exception);
+                auto cause = static_cast<uint64_t>(*ctx.pending_exception);
                 std::string cause_name = (cause < kCauseNames.size()) ? kCauseNames.at(cause) : std::format("Exception ({})", cause);
                 return render_pair("Exception", cause_name, kThemePeach,
                                    "Trap Value", hex_val(ctx.pending_tval), kThemeVal,
@@ -729,7 +787,7 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
     auto const history = ps.get_cycle_history_copy();
 
     if (logical_row == 0) {
-        return section_line("Execution Timeline (Last 5 Instructions)", width);
+        return section_line("Execution Timeline (Clock Cycles #NN)", width);
     }
 
     if (history.empty()) {
@@ -739,38 +797,21 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
         return format_to_width("", width);
     }
 
-    // Compute the prefix width of each instruction row dynamically so header
-    // and data rows always align regardless of xlen (RV32: 8 hex digits, RV64: 16).
-    //   "  0x" (4) + addr_digits + " " (1) + mnem<5 (5) + " |" (2) = addr_digits + 12
-    int const addr_digits = static_cast<int>(simrv::xlen::kXLenHexDigits);
-    int const desc_width = addr_digits + 12;
-    int const cycle_col_width = 5;
-    // Cap at 10 cycle columns so the grid never overflows the pane width
-    constexpr int kMaxCycleColumns = 10;
-    int const max_cycles = std::min(kMaxCycleColumns, (width - desc_width) / cycle_col_width);
-    if (max_cycles <= 0) {
-        if (logical_row == 1) {
-            return format_to_width("  TUI Pane too narrow for timeline.", width);
-        }
-        return format_to_width("", width);
-    }
-
-    // Determine cycle window to display
     int const history_size = static_cast<int>(history.size());
-    int const num_cols = std::min(max_cycles, history_size);
-    int const start_idx = history_size - num_cols;
 
     // Collect unique PCs in this window chronologically.
     struct InstRef {
         Register pc = 0;
         isa::OperationId op_id = isa::OperationId::UNKNOWN;
-        
+
         auto operator==(const InstRef& o) const -> bool { return pc == o.pc; }
     };
     std::vector<InstRef> active_insts;
-    for (int i = start_idx; i < history_size; ++i) {
+    int const scan_start = std::max(0, history_size - 14);
+    for (int i = scan_start; i < history_size; ++i) {
         auto const& snap = history.at(i);
-        std::array<simrv::pipeline::PipelineCycleSnapshot::StageInfo const*, 5> stages = {&snap.w, &snap.m, &snap.e, &snap.d, &snap.f};
+        std::array<simrv::pipeline::PipelineCycleSnapshot::StageInfo const*, 5> stages = {
+            &snap.w, &snap.m, &snap.e, &snap.d, &snap.f};
         for (auto const* stage : stages) {
             if (stage->valid && stage->pc != 0) {
                 InstRef ref{.pc = stage->pc, .op_id = stage->op_id};
@@ -784,14 +825,43 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
     // Keep only the 5 most-recently-seen instructions to avoid overflow
     constexpr int kMaxInstRows = 5;
     if (static_cast<int>(active_insts.size()) > kMaxInstRows) {
-        active_insts.erase(active_insts.begin(), active_insts.begin() + (static_cast<int>(active_insts.size()) - kMaxInstRows));
+        active_insts.erase(active_insts.begin(),
+                           active_insts.begin() +
+                               (static_cast<int>(active_insts.size()) - kMaxInstRows));
     }
 
+    // Determine max PC width dynamically (10 for 8-digit hex e.g. 0x8000002a, 18 for full 64-bit)
+    int max_pc_width = 10;
+    for (auto const& ref : active_insts) {
+        if (hex_val(ref.pc).size() > 10) {
+            max_pc_width = 18;
+        }
+    }
+    int const header_prefix_len = max_pc_width + 8; // e.g. 10 + 8 = 18
+    int const desc_width = header_prefix_len + 2;   // prefix + " |"
+    int const cycle_col_width = 5;
+    constexpr int kMaxCycleColumns = 14;
+    int const max_cycles = std::min(kMaxCycleColumns, (width - desc_width) / cycle_col_width);
+    if (max_cycles <= 0) {
+        if (logical_row == 1) {
+            return format_to_width("  TUI Pane too narrow for timeline.", width);
+        }
+        return format_to_width("", width);
+    }
+
+    // Determine cycle window to display
+    int const num_cols = std::min(max_cycles, history_size);
+    int const start_idx = history_size - num_cols;
+
     if (logical_row == 1) {
-        // Header prefix width = addr_digits + 10 chars ("  0x" + addr + " " + mnem<5)
-        std::string header = std::format("{:<{}} |", "Instruction", addr_digits + 10);
+        std::string header = std::format("{:<{}} |", "Instruction", header_prefix_len);
         for (int i = start_idx; i < history_size; ++i) {
-            header += std::format(" #{:<2d} ", history.at(i).cycle % 100);
+            bool const is_current = (i == history_size - 1);
+            if (is_current) {
+                header += std::format(" \033[1;33m#\033[0m{:<2d} ", history.at(i).cycle % 100);
+            } else {
+                header += std::format(" \033[90m#\033[0m{:<2d} ", history.at(i).cycle % 100);
+            }
         }
         return format_to_width(header, width);
     }
@@ -799,13 +869,16 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
     int const inst_row = logical_row - 2;
     if (inst_row >= 0 && static_cast<std::size_t>(inst_row) < active_insts.size() && inst_row < 5) {
         auto const& inst = active_insts.at(inst_row);
-        
-        // Get assembly mnemonic
+
+        // Get assembly mnemonic (truncated to max 5 chars to ensure table alignment)
         std::string_view op_mnem = "UNK";
         if (static_cast<std::size_t>(inst.op_id) < simrv::pipeline::OPERATION_NAME.size()) {
             op_mnem = simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(inst.op_id));
         }
-        std::string line = std::format("  0x{:0{}x} {:<5} |", inst.pc, addr_digits, op_mnem);
+        std::string mnem_5 =
+            (op_mnem.size() > 5) ? std::string(op_mnem.substr(0, 5)) : std::string(op_mnem);
+        std::string pc_str = hex_val(inst.pc);
+        std::string line = std::format("  {:>{}} {:<5} |", pc_str, max_pc_width, mnem_5);
 
         for (int i = start_idx; i < history_size; ++i) {
             auto const& snap = history.at(i);
@@ -814,7 +887,8 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
             if (snap.w.valid && snap.w.pc == inst.pc) {
                 stage_lbl = "\033[1;37m WB\033[0m  ";
             } else if (snap.m.valid && snap.m.pc == inst.pc) {
-                stage_lbl = snap.m.stalled ? "\033[38;5;203m ME*\033[0m " : "\033[1;34m ME\033[0m  ";
+                stage_lbl =
+                    snap.m.stalled ? "\033[38;5;203m MEM*\033[0m" : "\033[1;34m MEM\033[0m ";
             } else if (snap.e.valid && snap.e.pc == inst.pc) {
                 stage_lbl = snap.e.stalled ? "\033[38;5;203m EX*\033[0m " : "\033[1;31m EX\033[0m  ";
             } else if (snap.d.valid && snap.d.pc == inst.pc) {
@@ -832,6 +906,63 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
     }
 
     return format_to_width("", width);
+}
+
+auto LeftPane::get_pipeline_pc_at_row(int logical_row) const -> Register {
+    auto const& cpu = machine_.cpu;
+    auto const& ps = cpu.pipeline_sim;
+
+    // Execution Timeline instruction rows (logical rows 2..6)
+    if (logical_row >= 2 && logical_row <= 6) {
+        auto const history = ps.get_cycle_history_copy();
+        if (history.empty()) return 0;
+        int const history_size = static_cast<int>(history.size());
+
+        struct InstRef {
+            Register pc = 0;
+            isa::OperationId op_id = isa::OperationId::UNKNOWN;
+            auto operator==(const InstRef& o) const -> bool { return pc == o.pc; }
+        };
+        std::vector<InstRef> active_insts;
+        int const scan_start = std::max(0, history_size - 14);
+        for (int i = scan_start; i < history_size; ++i) {
+            auto const& snap = history.at(i);
+            std::array<simrv::pipeline::PipelineCycleSnapshot::StageInfo const*, 5> stages = {
+                &snap.w, &snap.m, &snap.e, &snap.d, &snap.f};
+            for (auto const* stage : stages) {
+                if (stage->valid && stage->pc != 0) {
+                    InstRef ref{.pc = stage->pc, .op_id = stage->op_id};
+                    if (std::ranges::find(active_insts, ref) == active_insts.end()) {
+                        active_insts.push_back(ref);
+                    }
+                }
+            }
+        }
+        constexpr int kMaxInstRows = 5;
+        if (static_cast<int>(active_insts.size()) > kMaxInstRows) {
+            active_insts.erase(active_insts.begin(),
+                               active_insts.begin() +
+                                   (static_cast<int>(active_insts.size()) - kMaxInstRows));
+        }
+
+        int const inst_row = logical_row - 2;
+        if (inst_row >= 0 && static_cast<std::size_t>(inst_row) < active_insts.size()) {
+            return active_insts.at(inst_row).pc;
+        }
+    }
+
+    // CA Stage Detail rows (logical rows 11..15 in CA mode)
+    if (machine_.s_cycle_accurate) {
+        switch (logical_row) {
+            case 11: return ps.f_reg().valid ? ps.f_reg().pc : 0;
+            case 12: return ps.d_reg().valid ? ps.d_reg().pc : 0;
+            case 13: return ps.e_reg().valid ? ps.e_reg().pc : 0;
+            case 14: return ps.m_reg().valid ? ps.m_reg().pc : 0;
+            case 15: return ps.w_reg().valid ? ps.w_reg().pc : 0;
+            default: break;
+        }
+    }
+    return 0;
 }
 
 // ═══════════════════════════════════════════════════════════════════════

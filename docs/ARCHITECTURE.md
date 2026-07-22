@@ -1,6 +1,6 @@
 # SimRV Architecture
 
-**Version:** 2.0.0-beta.17 · **Targets:** RV32GC, RV64GC, Vector, and Bitmanip
+**Version:** 2.0.0-beta.26 · **Targets:** RV32GC, RV64GC, Vector, and Bitmanip
 
 ## Scope
 
@@ -110,8 +110,11 @@ The TUI provides an ANSI-based split-screen monitor during simulation.
 | File | Role |
 |:---|:---|
 | `Tui.cpp` | Top-level TUI orchestrator, layout management, keybindings, rendering loop |
-| `RegisterPane.cpp` | Left panel: GPR/FPR/pipeline state display and instruction explainer (EXPLAIN page) |
-| `ConsolePane.cpp` | Right panel: Virtual terminal (VT) output passthrough |
+| `LeftPane.cpp` | Left panel container managing registers, stack, pipeline state, stats, and explainer (EXPLAIN page) |
+| `LeftPanePipeline.cpp` | Cycle-accurate & functional pipeline stages rendering |
+| `LeftPaneRegs.cpp` | GPR/FPR/Vector register file rendering |
+| `RightPane.cpp` | Right panel: Virtual terminal (VT) output passthrough & console |
+| `TuiModal.cpp` | Interactive modal windows (Speed Hz config, Breakpoints, Help) |
 | `StatusBar.cpp` | Bottom status bar: cycle/IPS counters, badges, mode indicators |
 | `TuiTheme.cpp` | Theme system: Adaptive (ANSI default), Sakura, HighContrast palettes |
 | `VirtualTerminal.hpp` | Full VT100/VT220 escape sequence parser and screen buffer |
@@ -179,8 +182,9 @@ include/simrv/         Public/internal headers
   pipeline/            PipelineContext, PipelineTask, PipelineSim, Decoder
   execute/             ExecuteUnit, ExecuteUnitInt, ExecuteUnitFloat
   debug/               GdbStub, SpikeLockstep, SymbolTable
-  tui/                 Tui, RegisterPane, ConsolePane, StatusBar, TuiTheme,
-                       TuiKey, TuiWidget, VirtualTerminal
+  tui/                 Tui, LeftPane, LeftPanePipeline, LeftPaneRegs, LeftPaneStack,
+                       LeftPaneStats, LeftPaneExplain, RightPane, TuiModal,
+                       StatusBar, TuiTheme, TuiKey, VirtualTerminal
   util/                InstructionExplainer
   xlen/                XLEN traits and type aliases
 
@@ -205,23 +209,23 @@ docs/                  Architecture, extension, build, and education guides
 SimRV codebase metrics are monitored using static analysis tools (`lizard`). The following statistics represent the current snapshot of the C++23 source code:
 
 ### Global Metrics
-- **Total C++ Files (Source & Header):** 95
-- **Total Code Lines (NLOC):** 15,983
-- **Average Function NLOC:** 17.8
-- **Average Cyclomatic Complexity (CCN):** 6.2
-- **Function Count:** 726
+- **Total C++ Source & Header Files:** 143
+- **Total Code Lines (NLOC):** 28,132
+- **Average Function NLOC:** 20.5
+- **Average Cyclomatic Complexity (CCN):** 7.6
+- **Function Count:** 1,134
 
 ### Subsystem Breakdown
 | Subsystem / Directory | Description | Files | NLOC | Avg CCN |
 |:---|:---|:---|:---|:---|
-| `src/tui` / `include/simrv/tui` | Modular TUI components and Virtual Terminal | 13 | 3,866 | 7.3 |
-| `src/core` / `include/simrv/core` | Architectural state, CPU, SBI, and Machine orchestration | 16 | 3,257 | 5.9 |
-| `src/pipeline` / `include/simrv/pipeline` | Instruction fetch/decode stages and execution pipeline | 8 | 2,279 | 6.8 |
-| `src/execute` / `include/simrv/execute` | Floating-point and integer execution units | 4 | 2,118 | 7.1 |
-| `src/device` / `include/simrv/device` | VirtIO Console, Disk, UART, RTC, and Power devices | 11 | 2,024 | 5.9 |
-| `src/debug` / `include/simrv/debug` | GDB stub, Lockstep comparison, and symbol resolution | 6 | 1,701 | 6.0 |
-| `src/memory` / `include/simrv/memory` | SV32/SV39 MMU, TileLink bus, and memory dispatch | 8 | 1,212 | 7.5 |
-| `src/util` / `include/simrv/util` | Explainer routines | 2 | 696 | 4.2 |
+| `src/execute` / `include/simrv/execute` | Vector, floating-point, and integer execution units | 15 | 8,241 | 7.9 |
+| `src/tui` / `include/simrv/tui` | Modular TUI panes, modals, and Virtual Terminal | 21 | 6,854 | 7.5 |
+| `src/core` / `include/simrv/core` | Architectural state, CPU, SBI, and Machine orchestration | 28 | 4,892 | 6.2 |
+| `src/pipeline` / `include/simrv/pipeline` | Instruction fetch/decode stages, decoder dispatch, and pipeline | 12 | 3,115 | 7.1 |
+| `src/device` / `include/simrv/device` | VirtIO Console, Disk, Framebuffer, Audio, UART, RTC, and Power devices | 16 | 2,840 | 6.0 |
+| `src/debug` / `include/simrv/debug` | GDB stub, Lockstep comparison, SymbolTable, BreakpointManager | 9 | 2,050 | 6.1 |
+| `src/memory` / `include/simrv/memory` | SV32/SV39 MMU, TileLink bus, and memory dispatch | 10 | 1,420 | 7.3 |
+| `src/util` / `include/simrv/util` | Explainer routines and CLI parser | 6 | 980 | 4.8 |
 
 
 ### Top 5 Most Complex Functions

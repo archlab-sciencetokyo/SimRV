@@ -5,6 +5,7 @@
 #include "simrv/tui/LeftPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/Machine.hpp"
 #include <format>
 #include <string>
 #include <array>
@@ -148,6 +149,29 @@ auto LeftPane::render_registers_or_pipeline(const simrv::core::CPU& cpu, const s
         }
     }
     return "";
+}
+
+auto LeftPane::get_register_value_at_row(int logical_row, int col_x, int pane_width) const -> std::optional<Register> {
+    const auto& st = machine_.cpu.state();
+    bool single_col = is_single_column(pane_width);
+    int reg = -1;
+    if (single_col) {
+        if (logical_row >= 0 && logical_row < 32) reg = logical_row;
+    } else {
+        if (logical_row >= 0 && logical_row < 16) {
+            reg = (col_x < pane_width / 2) ? logical_row : (logical_row + 16);
+        }
+    }
+
+    if (reg >= 0 && reg < 32) {
+        if (page_ == TuiRegPage::GPR) {
+            return st.regs.read(static_cast<RegId>(reg));
+        }
+        if (page_ == TuiRegPage::FPR) {
+            return static_cast<Register>(st.regs.read_fp(static_cast<RegId>(reg)));
+        }
+    }
+    return std::nullopt;
 }
 
 }  // namespace simrv::tui

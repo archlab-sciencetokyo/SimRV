@@ -508,19 +508,20 @@ auto LeftPane::get_explain_rows(int width) -> std::vector<std::string> {
     auto& st = cpu.state();
     auto& ctx = cpu.pipeline_context;
 
-    if (ctx.cpc != st.pc) {
-        auto& mutable_cpu = const_cast<simrv::core::CPU&>(cpu);
-        auto saved_pc = st.pc;
-        bool fetch_success = mutable_cpu.fetch_stage(machine_, st.pc);
-        if (fetch_success) {
-            (void)mutable_cpu.decode_stage(machine_);
-        }
-        st.pc = saved_pc;
+    Register const target_pc = (inspect_addr_ != 0) ? inspect_addr_ : st.pc;
+
+    auto& mutable_cpu = const_cast<simrv::core::CPU&>(cpu);
+    auto saved_pc = st.pc;
+    st.pc = target_pc;
+    bool fetch_success = mutable_cpu.fetch_stage(machine_, target_pc);
+    if (fetch_success) {
+        (void)mutable_cpu.decode_stage(machine_);
     }
+    st.pc = saved_pc;
 
     bool const is_compressed = (ctx.ir_org & 0x3) != 0x3;
     uint32_t decompressed_inst = ctx.ir;
-    
+
     InstFormat const fmt = simrv::isa::get_instruction_format(ctx.opcode);
     auto const [mnemonic, behavior_desc] = simrv::util::get_operation_details(ctx.op_id);
 
@@ -534,12 +535,29 @@ auto LeftPane::get_explain_rows(int width) -> std::vector<std::string> {
 
     std::string assembly = format_instruction_assembly(ctx, fmt, mnemonic, rd_name, rs1_name, rs2_name);
 
+    auto hex_addr = [](Register v) -> std::string {
+        if constexpr (sizeof(Register) <= 4) {
+            return std::format("0x{:08x}", v);
+        } else {
+            auto val = static_cast<uint64_t>(v);
+            if ((val >> 32) == 0) {
+                return std::format("0x{:08x}", static_cast<uint32_t>(val));
+            }
+            return std::format("0x{:016x}", val);
+        }
+    };
+
     std::vector<std::string> explain_rows;
+    if (previous_page_.has_value()) {
+        explain_rows.push_back(format_to_width(
+            std::format("  \033[1;36m← Back [{}]\033[0m  (Inspecting PC: {})", "ESC", hex_addr(target_pc)),
+            width));
+    }
     explain_rows.push_back(section_line("Instruction Explainer", width));
 
-    std::string sym = machine_.symbols.lookup(st.pc);
-    std::string pc_label = sym.empty() ? std::format("0x{:0{}x}", st.pc, simrv::xlen::kXLenHexDigits)
-                                       : std::format("0x{:0{}x} <{}>", st.pc, simrv::xlen::kXLenHexDigits, sym);
+    std::string sym = machine_.symbols.lookup(target_pc);
+    std::string pc_label = sym.empty() ? hex_addr(target_pc)
+                                       : std::format("{} <{}>", hex_addr(target_pc), sym);
     explain_rows.push_back(format_to_width(std::format("  {}PC     : {}{}\033[0m", kThemeText, kThemeMint, pc_label), width));
 
     std::string hex_str;

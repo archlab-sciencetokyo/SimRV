@@ -174,4 +174,16 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
     return format_to_width(full_row, width);
 }
 
+auto LeftPane::get_stack_addr_at_row(int logical_row) const -> std::optional<Register> {
+    if (page_ != TuiRegPage::STACK) return std::nullopt;
+    Register sp = machine_.cpu.state().regs.read(RegId::Sp);
+    if (sp == 0) return std::nullopt;
+    int word_size = static_cast<int>(machine_.cpu.state().regs.xlen) / 8;
+    if (logical_row >= 1 && logical_row <= 32) {
+        int offset = (logical_row - 1) * word_size;
+        return sp + static_cast<Register>(offset);
+    }
+    return std::nullopt;
+}
+
 } // namespace simrv::tui

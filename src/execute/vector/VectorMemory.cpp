@@ -35,64 +35,74 @@ void execute_vs_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId
     }
 }
 
-// Vector load helper
+// Vector load helper (supports unit-stride load vle and unit-stride segment load vlseg)
 template <typename T>
 void execute_vle(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd, Register base_addr, bool vm, uint32_t vl, isa::Funct3 mem_f3) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const uint32_t nf = (cpu.pipeline_context.ir >> 29) & 7;
+    const uint32_t nfields = nf + 1;
 
     for (uint32_t i = 0; i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
-        Address addr = base_addr + i * sizeof(T);
-        uint64_t val = 0;
-        if constexpr (sizeof(T) == 8) {
-            if constexpr (simrv::xlen::kIsXLen64) {
-                val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
-            } else {
-                if (simrv::compiler::unlikely((addr & 7) != 0)) {
-                    cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedLoad;
-                    cpu.pipeline_context.pending_tval = addr;
-                    return;
+        for (uint32_t f = 0; f < nfields; f++) {
+            Address addr = base_addr + (i * nfields + f) * sizeof(T);
+            uint64_t val = 0;
+            if constexpr (sizeof(T) == 8) {
+                if constexpr (simrv::xlen::kIsXLen64) {
+                    val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
+                } else {
+                    if (simrv::compiler::unlikely((addr & 7) != 0)) {
+                        cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedLoad;
+                        cpu.pipeline_context.pending_tval = addr;
+                        return;
+                    }
+                    Word lo = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, isa::Funct3::Lw);
+                    Word hi = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr + 4, isa::Funct3::Lw);
+                    val = static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32);
                 }
-                Word lo = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, isa::Funct3::Lw);
-                Word hi = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr + 4, isa::Funct3::Lw);
-                val = static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32);
+            } else {
+                val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
             }
-        } else {
-            val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
+            if (cpu.pipeline_context.pending_exception.has_value()) {
+                return;
+            }
+            RegId target_reg = static_cast<RegId>((static_cast<uint32_t>(rd) + f) % 32);
+            vector::set_group_element<T>(cpu.state().regs, target_reg, i, static_cast<T>(val));
         }
-        if (cpu.pipeline_context.pending_exception.has_value()) {
-            return;
-        }
-        vector::set_group_element<T>(cpu.state().regs, rd, i, static_cast<T>(val));
     }
 }
 
-// Vector store helper
+// Vector store helper (supports unit-stride store vse and unit-stride segment store vsseg)
 template <typename T>
 void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3, Register base_addr, bool vm, uint32_t vl, isa::Funct3 mem_f3) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const uint32_t nf = (cpu.pipeline_context.ir >> 29) & 7;
+    const uint32_t nfields = nf + 1;
 
     for (uint32_t i = 0; i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
-        Address addr = base_addr + i * sizeof(T);
-        T val = vector::get_group_element<T>(cpu.state().regs, vs3, i);
-        if constexpr (sizeof(T) == 8) {
-            if constexpr (simrv::xlen::kIsXLen64) {
-                simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val), mem_f3);
-            } else {
-                if (simrv::compiler::unlikely((addr & 7) != 0)) {
-                    cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedStore;
-                    cpu.pipeline_context.pending_tval = addr;
-                    return;
+        for (uint32_t f = 0; f < nfields; f++) {
+            Address addr = base_addr + (i * nfields + f) * sizeof(T);
+            RegId source_reg = static_cast<RegId>((static_cast<uint32_t>(vs3) + f) % 32);
+            T val = vector::get_group_element<T>(cpu.state().regs, source_reg, i);
+            if constexpr (sizeof(T) == 8) {
+                if constexpr (simrv::xlen::kIsXLen64) {
+                    simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val), mem_f3);
+                } else {
+                    if (simrv::compiler::unlikely((addr & 7) != 0)) {
+                        cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedStore;
+                        cpu.pipeline_context.pending_tval = addr;
+                        return;
+                    }
+                    simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val & 0xFFFFFFFFULL), isa::Funct3::Sw);
+                    simrv::memory::MemoryAccess::storeInt(mem, cpu, addr + 4, static_cast<Word>((val >> 32) & 0xFFFFFFFFULL), isa::Funct3::Sw);
                 }
-                simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val & 0xFFFFFFFFULL), isa::Funct3::Sw);
-                simrv::memory::MemoryAccess::storeInt(mem, cpu, addr + 4, static_cast<Word>((val >> 32) & 0xFFFFFFFFULL), isa::Funct3::Sw);
+            } else {
+                simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val), mem_f3);
             }
-        } else {
-            simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val), mem_f3);
-        }
-        if (cpu.pipeline_context.pending_exception.has_value()) {
-            return;
+            if (cpu.pipeline_context.pending_exception.has_value()) {
+                return;
+            }
         }
     }
 }

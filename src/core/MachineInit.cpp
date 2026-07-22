@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <print>
@@ -47,43 +48,24 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
         std::exit(EXIT_FAILURE);
     }
 
+    if (file_path.empty()) {
+        if (tuimode) {
+            simrv::log::info("No {} image specified upfront; launching TUI in idle state.", image_name);
+            return;
+        }
+        simrv::log::error("No {} image specified", image_name);
+        std::exit(EXIT_FAILURE);
+    }
+
     std::ifstream in(file_path, std::ios::binary | std::ios::ate);
     if (!in.is_open()) {
         if (tuimode) {
-            std::string temp_path = file_path;
-            while (true) {
-                simrv::log::warn("[TUI File Prompt] {} image '{}' is missing or cannot be opened.", image_name, temp_path);
-                std::print(stderr, "Please enter path to a valid {} image file (or press Enter/Ctrl+D to exit): ", image_name);
-                std::fflush(stderr);
-                std::string input;
-                std::getline(std::cin, input);
-                if (input.empty() && std::cin.eof()) {
-                    simrv::log::error("No valid {} image file provided. Exiting.", image_name);
-                    std::exit(EXIT_FAILURE);
-                }
-                if (std::cin.eof()) {
-                    std::cin.clear();
-                }
-                if (input.empty()) {
-                    simrv::log::error("No valid {} image file provided. Exiting.", image_name);
-                    std::exit(EXIT_FAILURE);
-                }
-                // Strip leading/trailing spaces and quotes
-                if ((input.front() == '"' && input.back() == '"') ||
-                    (input.front() == '\'' && input.back() == '\'')) {
-                    input = input.substr(1, input.size() - 2);
-                }
-                std::ifstream test_in(input, std::ios::binary | std::ios::ate);
-                if (test_in.is_open()) {
-                    file_path = input;
-                    in = std::move(test_in);
-                    break;
-                }
-            }
-        } else {
-            simrv::log::error("image_file {} cannot be found", file_path);
-            std::exit(EXIT_FAILURE);
+            simrv::log::warn("{} image file '{}' not found. Launching TUI in idle state.", image_name, file_path);
+            file_path.clear();
+            return;
         }
+        simrv::log::error("image_file {} cannot be found", file_path);
+        std::exit(EXIT_FAILURE);
     }
 
     const auto file_size = static_cast<std::size_t>(in.tellg());
@@ -259,10 +241,37 @@ auto Machine::initialize() -> int {
         symbols.load_from_elf(s_fn_memimg);
     }
 
+    // If launched without a binary in TUI mode, skip image-dependent init —
+    // the TUI will open the LoadBinary modal and call load_program_binary() later.
+    if (s_fn_memimg.empty() && s_tuimode) {
+        return 0;
+    }
+
+    if (s_fn_dvtree.empty() && linux_boot) {
+        std::string dtb_candidate = std::format("linux-images/rv{}/devicetree.dtb", simrv::xlen::kXLenBits);
+        if (std::filesystem::exists(dtb_candidate)) {
+            s_fn_dvtree = dtb_candidate;
+        } else if (!s_fn_memimg.empty()) {
+            std::filesystem::path bin_p(s_fn_memimg);
+            if (bin_p.has_parent_path()) {
+                auto dir_dtb = bin_p.parent_path() / "devicetree.dtb";
+                if (std::filesystem::exists(dir_dtb)) {
+                    s_fn_dvtree = dir_dtb.string();
+                }
+            }
+        }
+    }
+
     if (s_fn_dvtree.empty()) {
         if (linux_boot) {
-            simrv::log::error("device-tree file (-c) is required for Linux boot mode");
-            return 1;
+            if (s_tuimode) {
+                simrv::log::warn(
+                    "No device-tree file (-c) specified for Linux/RTOS boot mode; TUI launching "
+                    "in idle state.");
+            } else {
+                simrv::log::error("device-tree file (-c) is required for Linux boot mode");
+                return 1;
+            }
         }
     } else {
         if (dtb_offset >= simrv::memory::kDramSize) {
@@ -312,6 +321,70 @@ auto Machine::initialize() -> int {
     }
 
     return 0;
+}
+
+auto Machine::load_program_binary(const std::string& filepath) -> bool {
+    if (filepath.empty()) {
+        return false;
+    }
+    s_fn_memimg = filepath;
+    load_image_into_ram(s_fn_memimg, mmem, static_cast<std::size_t>(simrv::memory::kDramSize),
+                        "memory", s_tuimode);
+    if (s_tuimode || s_debug_mode || s_gdb_mode || s_lockstep_mode) {
+        symbols.load_from_elf(s_fn_memimg);
+    }
+    for (std::size_t r = 0; r < 32; ++r) {
+        cpu.state().regs.write(static_cast<RegId>(r), 0);
+    }
+    cpu.state().pc = s_start_pc;
+    cpu.state().priv = kPrivMachine;
+    cpu.state().regs.write(static_cast<RegId>(10), 0);
+    const bool linux_boot = !s_appmode;
+    const Address dtb_offset =
+        linux_boot
+            ? static_cast<Address>(simrv::memory::kDramSize - static_cast<Address>(0x00100000U))
+            : simrv::boot::kInitDataAddress;
+    cpu.state().regs.write(static_cast<RegId>(11),
+                           linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);
+
+    if (linux_boot) {
+        if (s_fn_dvtree.empty()) {
+            std::string dtb_candidate =
+                std::format("linux-images/rv{}/devicetree.dtb", simrv::xlen::kXLenBits);
+            if (std::filesystem::exists(dtb_candidate)) {
+                s_fn_dvtree = dtb_candidate;
+            } else {
+                std::filesystem::path bin_p(s_fn_memimg);
+                if (bin_p.has_parent_path()) {
+                    auto dir_dtb = bin_p.parent_path() / "devicetree.dtb";
+                    if (std::filesystem::exists(dir_dtb)) {
+                        s_fn_dvtree = dir_dtb.string();
+                    }
+                }
+            }
+        }
+        if (!s_fn_dvtree.empty()) {
+            const auto dt_cap = static_cast<std::size_t>(simrv::memory::kDramSize - dtb_offset);
+            load_image_into_ram(s_fn_dvtree, mmem + dtb_offset, dt_cap, "device-tree", s_tuimode);
+        }
+    }
+    cpu.TLB_flush();
+    return true;
+}
+
+auto Machine::load_disk_image(const std::string& filepath) -> bool {
+    if (filepath.empty() || !disk) {
+        return false;
+    }
+    if (disk->sector_storage_.empty()) {
+        disk->sector_storage_.resize(simrv::virtio::kDiskSize);
+        disk->sector = disk->sector_storage_.data();
+    }
+    s_fn_dskimg = filepath;
+    s_use_disk = true;
+    load_image_into_ram(s_fn_dskimg, disk->sector,
+                        static_cast<std::size_t>(simrv::virtio::kDiskSize), "disk", s_tuimode);
+    return true;
 }
 
 }  // namespace simrv::core

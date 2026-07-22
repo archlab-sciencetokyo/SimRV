@@ -58,10 +58,16 @@ class LeftPane : public TuiWidget {
     [[nodiscard]] auto get_inspect_addr() const -> Register { return inspect_addr_; }
     void set_trace_buffer(const std::vector<std::string>* trace_buf) { trace_buffer_ = trace_buf; }
     void set_log_lines(std::vector<std::string> log_lines) { log_lines_ = std::move(log_lines); }
+    void set_previous_page(TuiRegPage p) { previous_page_ = p; }
+    [[nodiscard]] auto get_previous_page() const -> std::optional<TuiRegPage> { return previous_page_; }
+    [[nodiscard]] auto get_pipeline_pc_at_row(int logical_row) const -> Register;
+    [[nodiscard]] auto get_register_value_at_row(int logical_row, int col_x, int pane_width) const -> std::optional<Register>;
+    [[nodiscard]] auto get_stack_addr_at_row(int logical_row) const -> std::optional<Register>;
 
     [[nodiscard]] auto get_tab_at_col(int col) const -> std::optional<TuiRegPage>;
 
    private:
+    std::optional<TuiRegPage> previous_page_;
     [[nodiscard]] auto render_tab_bar(int width) const -> std::string;
     [[nodiscard]] auto render_trace_row(int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_log_bottom_row(int row_idx, int num_rows, int width) -> std::string;

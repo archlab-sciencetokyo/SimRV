@@ -32,6 +32,13 @@ void TuiModal::open(ModalType type, LeftPane* left_pane, uint64_t step_granulari
         case ModalType::InspectAddress:
             input_ = std::format("0x{:08x}", left_pane ? left_pane->get_inspect_addr() : 0);
             break;
+        case ModalType::LoadBinary:
+            input_ = machine_.s_fn_memimg;
+            load_appmode_ = machine_.s_appmode;  // Pre-fill from current machine mode
+            break;
+        case ModalType::LoadDiskImage:
+            input_ = machine_.s_fn_dskimg;
+            break;
         default:
             break;
     }
@@ -42,12 +49,12 @@ void TuiModal::close() {
     input_.clear();
 }
 
-void TuiModal::submit(LeftPane* left_pane,
-                      std::atomic<uint64_t>& step_granularity,
+auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_granularity,
                       std::atomic<uint64_t>& step_delay_us,
                       const std::function<void(TuiRegPage)>& set_reg_page_cb,
-                      const std::function<void(const std::string&)>& set_status_override_cb) {
-    if (active_modal_ == ModalType::None) return;
+                      const std::function<void(const std::string&)>& set_status_override_cb,
+                      const std::function<void()>& on_speed_changed_cb) -> bool {
+    if (active_modal_ == ModalType::None) return false;
     std::string text = input_;
     while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front()))) text.erase(text.begin());
     while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back()))) text.pop_back();
@@ -93,6 +100,7 @@ void TuiModal::submit(LeftPane* left_pane,
                 uint64_t val = 0;
                 auto result = std::from_chars(text.data(), text.data() + text.size(), val);
                 if (result.ec == std::errc{}) {
+                    const uint64_t old_delay = step_delay_us.load(std::memory_order_relaxed);
                     if (val == 0) {
                         step_delay_us.store(0, std::memory_order_relaxed);
                         set_status_override_cb("Speed set to Max (no delay)");
@@ -100,6 +108,10 @@ void TuiModal::submit(LeftPane* left_pane,
                         uint64_t delay = 1000000 / val;
                         step_delay_us.store(delay, std::memory_order_relaxed);
                         set_status_override_cb(std::format("Speed set to {} Hz (delay: {}us)", val, delay));
+                    }
+                    if (on_speed_changed_cb &&
+                        old_delay != step_delay_us.load(std::memory_order_relaxed)) {
+                        on_speed_changed_cb();
                     }
                 } else {
                     set_status_override_cb(std::format("Invalid speed frequency: {}", text));
@@ -135,12 +147,123 @@ void TuiModal::submit(LeftPane* left_pane,
                 }
                 break;
             }
+            case ModalType::LoadBinary: {
+                bool const mode_change = (load_appmode_ != machine_.s_appmode);
+                // OS/RTOS mode may require an optional disk image, so stage the binary first.
+                if (!load_appmode_) {
+                    staged_binary_path_ = text;
+                    staged_mode_change_ = mode_change;
+                    staged_target_appmode_ = load_appmode_;
+                    active_modal_ = ModalType::LoadDiskImage;
+                    input_ = machine_.s_fn_dskimg;
+                    set_status_override_cb(
+                        "RTOS mode selected: optionally set disk image, or press Enter to skip");
+                    return false;
+                }
+
+                if (mode_change) {
+                    // App/OS mode differs: reboot into the selected image/mode.
+                    machine_.pending_binary_path = text;
+                    machine_.pending_appmode = load_appmode_;
+                    machine_.pending_disk_path =
+                        std::string{};  // App mode does not use a disk image.
+                    set_status_override_cb(std::format("Switching to {} mode with: {}",
+                                                       load_appmode_ ? "App" : "OS", text));
+                    active_modal_ = ModalType::None;
+                    input_.clear();
+                    staged_binary_path_.clear();
+                    machine_.request_reboot();
+                    return true;
+                }
+
+                if (machine_.load_program_binary(text)) {
+                    set_status_override_cb(
+                        std::format("Loaded binary: {} - press [c] to run", text));
+                    active_modal_ = ModalType::None;
+                    input_.clear();
+                    staged_binary_path_.clear();
+                    return false;
+                }
+                set_status_override_cb(std::format("Failed to load binary: {}", text));
+                // Keep modal open so user can try again
+                return false;
+            }
+            case ModalType::LoadDiskImage: {
+                const bool skip_disk = text.empty();
+
+                if (!staged_binary_path_.empty()) {
+                    if (staged_mode_change_) {
+                        machine_.pending_binary_path = staged_binary_path_;
+                        machine_.pending_appmode = staged_target_appmode_;
+                        machine_.pending_disk_path = skip_disk
+                                                         ? std::optional<std::string>(std::string{})
+                                                         : std::optional<std::string>(text);
+                        set_status_override_cb(std::format(
+                            "Switching to {} mode with: {}{}",
+                            staged_target_appmode_ ? "App" : "OS", staged_binary_path_,
+                            skip_disk ? " (disk skipped)" : std::format(", disk: {}", text)));
+                        active_modal_ = ModalType::None;
+                        input_.clear();
+                        staged_binary_path_.clear();
+                        staged_mode_change_ = false;
+                        machine_.request_reboot();
+                        return true;
+                    }
+
+                    if (!machine_.load_program_binary(staged_binary_path_)) {
+                        set_status_override_cb(
+                            std::format("Failed to load binary: {}", staged_binary_path_));
+                        active_modal_ = ModalType::LoadBinary;
+                        input_ = staged_binary_path_;
+                        staged_binary_path_.clear();
+                        staged_mode_change_ = false;
+                        return false;
+                    }
+
+                    if (!skip_disk) {
+                        if (machine_.load_disk_image(text)) {
+                            set_status_override_cb(
+                                std::format("Loaded binary: {} with disk: {} - press [c] to run",
+                                            staged_binary_path_, text));
+                        } else {
+                            set_status_override_cb(std::format(
+                                "Loaded binary: {} - disk load failed, continuing without disk",
+                                staged_binary_path_));
+                            machine_.s_use_disk = false;
+                            machine_.s_fn_dskimg.clear();
+                        }
+                    } else {
+                        machine_.s_use_disk = false;
+                        machine_.s_fn_dskimg.clear();
+                        set_status_override_cb(
+                            std::format("Loaded binary: {} (disk skipped) - press [c] to run",
+                                        staged_binary_path_));
+                    }
+                } else {
+                    if (!skip_disk && machine_.load_disk_image(text)) {
+                        set_status_override_cb(std::format("Disk image loaded: {}", text));
+                    } else if (skip_disk) {
+                        machine_.s_use_disk = false;
+                        machine_.s_fn_dskimg.clear();
+                        set_status_override_cb("Disk image skipped");
+                    } else {
+                        set_status_override_cb("Disk image load failed");
+                    }
+                }
+
+                active_modal_ = ModalType::None;
+                input_.clear();
+                staged_binary_path_.clear();
+                staged_mode_change_ = false;
+                return false;
+            }
             default:
                 break;
         }
     }
     active_modal_ = ModalType::None;
     input_.clear();
+    return false;
 }
 
 void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width, int term_height) const {
@@ -187,15 +310,40 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width, i
             add_row(std::format("{}Enter Target Address (hex) or Symbol:\033[0m", kThemeText));
             add_row(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, input_));
             break;
+        case ModalType::LoadBinary:
+            title = " LOAD PROGRAM BINARY ";
+            add_row(std::format("{}Enter binary image filepath:\033[0m", kThemeText));
+            add_row(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, input_));
+            add_row(std::format("{}e.g. img/hello.bin, linux-images/rv64/fw_payload.bin\033[0m",
+                                kThemeMuted));
+            add_row(std::format("{}[Tab]\033[0m {} Mode: {}{}{}\033[0m  {}← toggle\033[0m",
+                                kThemeSky, kThemeMuted, load_appmode_ ? kThemePeach : kThemeMint,
+                                load_appmode_ ? "App (Baremetal)" : "OS (Linux/RTOS)", "",
+                                kThemeMuted));
+            break;
+        case ModalType::LoadDiskImage:
+            title = " LOAD DISK IMAGE (Optional) ";
+            add_row(std::format("{}Enter disk image filepath:\033[0m", kThemeText));
+            add_row(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, input_));
+            add_row(std::format("{}e.g. linux-images/rv64/root.bin\033[0m", kThemeMuted));
+            if (!staged_binary_path_.empty()) {
+                add_row(std::format("{}Staged memory image: {}{}\033[0m", kThemeMuted, kThemeSky,
+                                    staged_binary_path_));
+            }
+            add_row(std::format(
+                "{}[Esc]\033[0m {} or {}[Enter]\033[0m{} with empty path to skip\033[0m", kThemeSky,
+                kThemeMuted, kThemeSky, kThemeMuted));
+            break;
         case ModalType::Help:
             title = " SIMULATOR KEYBOARD SHORTCUTS ";
             if (term_height < 32 && box_w >= 70) {
                 // Dual-column layout for small screen height
                 struct Shortcut { const char* key; const char* desc; };
-                static constexpr std::array<Shortcut, 23> help_items = {{
+                static constexpr std::array<Shortcut, 24> help_items = {{
                     {"[s] / [Space]", "Step 1 inst"},
                     {"[n]",          "Step N insts"},
-                    {"[b]",          "Undo step"},
+                    {"[b] / [Alt-b]", "Undo / Toggle Rollback"},
+                    {"[o] / [Alt-o]", "Load Binary / Disk"},
                     {"[:]",          "Set PC Breakpoint"},
                     {"[k]",          "Toggle PC Breakpoint"},
                     {"[g]",          "Set N Step Size"},
@@ -232,6 +380,7 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width, i
                 add_row(std::format(" {}{:<22}\033[0m {}Single instruction step\033[0m", kThemeSky, "[s] / [Space]", kThemeText));
                 add_row(std::format(" {}{:<22}\033[0m {}Step N instructions\033[0m", kThemeSky, "[n]", kThemeText));
                 add_row(std::format(" {}{:<22}\033[0m {}Undo / Step back 1 instruction\033[0m", kThemeSky, "[b]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Load Program Binary or Disk modal\033[0m", kThemeSky, "[o] / [Alt-o]", kThemeText));
                 add_row(std::format(" {}{:<22}\033[0m {}Set PC Breakpoint modal\033[0m", kThemeSky, "[:]", kThemeText));
                 add_row(std::format(" {}{:<22}\033[0m {}Toggle PC breakpoint at current PC\033[0m", kThemeSky, "[k]", kThemeText));
                 add_row(std::format(" {}{:<22}\033[0m {}Set Step Size (N) modal\033[0m", kThemeSky, "[g]", kThemeText));

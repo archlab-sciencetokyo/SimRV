@@ -27,6 +27,7 @@ enum class TuiFooterAction : uint8_t {
     SetStepSize,
     SetSpeed,
     InspectMem,
+    LoadBinary,
     ToggleHelp,
     RunPause,
     Quit,

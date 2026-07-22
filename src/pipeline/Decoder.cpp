@@ -83,6 +83,8 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "VWMUL_VV", "VWMUL_VX",
     "VNCLIP_WV", "VNCLIP_WX", "VNCLIP_WI",
     "VNCLIPU_WV", "VNCLIPU_WX", "VNCLIPU_WI",
+    "VNSRL_WV", "VNSRL_WX", "VNSRL_WI",
+    "VNSRA_WV", "VNSRA_WX", "VNSRA_WI",
     "VSLIDE1UP_VX", "VSLIDE1DOWN_VX",
     "VFADD_VV", "VFADD_VF",
     "VRSUB_VX", "VRSUB_VI",
@@ -756,13 +758,19 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operation
             if (funct3 == 4) return OperationId::VSSRA_VX;
             if (funct3 == 3) return OperationId::VSSRA_VI;
             break;
-        case 0x2D:
-            if (funct3 == 2) return OperationId::VMACC_VV;
-            if (funct3 == 6) return OperationId::VMACC_VX;
-            break;
         case 0x2C:
+            if (funct3 == 0) return OperationId::VNSRL_WV;
+            if (funct3 == 4) return OperationId::VNSRL_WX;
+            if (funct3 == 3) return OperationId::VNSRL_WI;
             if (funct3 == 1) return OperationId::VFMACC_VV;
             if (funct3 == 5) return OperationId::VFMACC_VF;
+            break;
+        case 0x2D:
+            if (funct3 == 0) return OperationId::VNSRA_WV;
+            if (funct3 == 4) return OperationId::VNSRA_WX;
+            if (funct3 == 3) return OperationId::VNSRA_WI;
+            if (funct3 == 2) return OperationId::VMACC_VV;
+            if (funct3 == 6) return OperationId::VMACC_VX;
             break;
         case 0x2F:
             if (funct3 == 2) return OperationId::VNMSAC_VV;

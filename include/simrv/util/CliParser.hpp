@@ -32,7 +32,7 @@ struct RuntimeOptions {
     unsigned int misa_xlen = 0;
 
     bool appmode = false;
-    bool tuimode = false;
+    bool tuimode = true;
     bool gui_mode = false;
     bool debugmode = false;
     bool dlog_mode = false;

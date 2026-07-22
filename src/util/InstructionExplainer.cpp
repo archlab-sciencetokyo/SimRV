@@ -484,6 +484,12 @@ auto get_description(OperationId op_id) -> std::pair<std::string_view, std::stri
         arr[VNCLIPU_WV] = {"VNCLIPU.WV", "Vector Narrowing Unsigned Fixed-Point Clip Vector-Vector. Shifts and clips double-width vs2 elements into narrower unsigned vd."};
         arr[VNCLIPU_WX] = {"VNCLIPU.WX", "Vector Narrowing Unsigned Fixed-Point Clip Vector-Scalar. Shifts and clips double-width vs2 elements into narrower unsigned vd."};
         arr[VNCLIPU_WI] = {"VNCLIPU.WI", "Vector Narrowing Unsigned Fixed-Point Clip Vector-Immediate. Shifts and clips double-width vs2 elements into narrower unsigned vd."};
+        arr[VNSRL_WV] = {"VNSRL.WV", "Vector Narrowing Logical Shift Right Vector-Vector. Logically shifts double-width vs2 elements right by vs1 shift amounts and writes narrower result to vd."};
+        arr[VNSRL_WX] = {"VNSRL.WX", "Vector Narrowing Logical Shift Right Vector-Scalar. Logically shifts double-width vs2 elements right by GPR rs1 shift amount and writes narrower result to vd."};
+        arr[VNSRL_WI] = {"VNSRL.WI", "Vector Narrowing Logical Shift Right Vector-Immediate. Logically shifts double-width vs2 elements right by immediate shift amount and writes narrower result to vd."};
+        arr[VNSRA_WV] = {"VNSRA.WV", "Vector Narrowing Arithmetic Shift Right Vector-Vector. Arithmetically shifts double-width vs2 elements right by vs1 shift amounts and writes narrower result to vd."};
+        arr[VNSRA_WX] = {"VNSRA.WX", "Vector Narrowing Arithmetic Shift Right Vector-Scalar. Arithmetically shifts double-width vs2 elements right by GPR rs1 shift amount and writes narrower result to vd."};
+        arr[VNSRA_WI] = {"VNSRA.WI", "Vector Narrowing Arithmetic Shift Right Vector-Immediate. Arithmetically shifts double-width vs2 elements right by immediate shift amount and writes narrower result to vd."};
         arr[VSLIDE1UP_VX] = {"VSLIDE1UP.VX", "Vector Slide 1 Up. Shifts vector elements of vs2 up by 1 and inserts GPR rs1 at index 0."};
         arr[VSLIDE1DOWN_VX] = {"VSLIDE1DOWN.VX", "Vector Slide 1 Down. Shifts vector elements of vs2 down by 1 and inserts GPR rs1 at index vl-1."};
         arr[VFADD_VV] = {"VFADD.VV", "Vector-Vector Floating-Point Addition. Adds vector elements of vs2 and vs1, writes to vector vd."};

@@ -80,6 +80,7 @@ class Tui {
     [[nodiscard]] auto is_sim_thread_sleeping() const -> bool { return sim_thread_is_sleeping_.load(std::memory_order_relaxed); }
     void update_cache();
     void on_cycle_completed();
+    void reset_speed_history();
 
     std::atomic<uint64_t> step_budget_{0};
     std::atomic<uint64_t> step_delay_us_{0};
@@ -94,10 +95,15 @@ class Tui {
     }
     void close_modal() { modal_.close(); render(true); }
     void submit_modal() {
-        modal_.submit(left_pane_.get(), step_granularity_, step_delay_us_,
-                      [this](TuiRegPage page) { set_reg_page(page); },
-                      [this](const std::string& status) { set_status_override(status); });
+        bool const should_resume = modal_.submit(
+            left_pane_.get(), step_granularity_, step_delay_us_,
+            [this](TuiRegPage page) { set_reg_page(page); },
+            [this](const std::string& status) { set_status_override(status); },
+            [this]() { reset_speed_history(); });
         render(true);
+        if (should_resume) {
+            tui_loop_paused_ = false;
+        }
     }
     [[nodiscard]] auto is_modal_active() const -> bool { return modal_.is_active(); }
     [[nodiscard]] auto get_active_modal() const -> ModalType { return modal_.get_type(); }

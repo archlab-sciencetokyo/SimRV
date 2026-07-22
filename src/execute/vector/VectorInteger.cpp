@@ -251,6 +251,86 @@ void execute_vwsub_wv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, u
     }
 }
 
+// Narrowing Logical Shift Right
+template <typename T_dest, typename T_src>
+void execute_vnsrl_wv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    constexpr uint32_t shift_mask = (sizeof(T_src) * 8) - 1;
+    for (uint32_t i = 0; i < vl; i++) {
+        if (!vector::is_element_active(mask_reg, i, vm)) continue;
+        T_src val2 = vector::get_group_element<T_src>(cpu.state().regs, rs2, i);
+        T_dest shift_amt = vector::get_group_element<T_dest>(cpu.state().regs, rs1, i);
+        T_dest res = static_cast<T_dest>(val2 >> (shift_amt & shift_mask));
+        vector::set_group_element<T_dest>(cpu.state().regs, rd, i, res);
+    }
+}
+
+template <typename T_dest, typename T_src>
+void execute_vnsrl_wx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    constexpr uint32_t shift_mask = (sizeof(T_src) * 8) - 1;
+    uint32_t shift_amt = static_cast<uint32_t>(rs1_val) & shift_mask;
+    for (uint32_t i = 0; i < vl; i++) {
+        if (!vector::is_element_active(mask_reg, i, vm)) continue;
+        T_src val2 = vector::get_group_element<T_src>(cpu.state().regs, rs2, i);
+        T_dest res = static_cast<T_dest>(val2 >> shift_amt);
+        vector::set_group_element<T_dest>(cpu.state().regs, rd, i, res);
+    }
+}
+
+template <typename T_dest, typename T_src>
+void execute_vnsrl_wi(core::CPU& cpu, RegId rd, uint32_t uimm5, RegId rs2, bool vm, uint32_t vl) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    constexpr uint32_t shift_mask = (sizeof(T_src) * 8) - 1;
+    uint32_t shift_amt = uimm5 & shift_mask;
+    for (uint32_t i = 0; i < vl; i++) {
+        if (!vector::is_element_active(mask_reg, i, vm)) continue;
+        T_src val2 = vector::get_group_element<T_src>(cpu.state().regs, rs2, i);
+        T_dest res = static_cast<T_dest>(val2 >> shift_amt);
+        vector::set_group_element<T_dest>(cpu.state().regs, rd, i, res);
+    }
+}
+
+// Narrowing Arithmetic Shift Right
+template <typename T_dest, typename T_src_signed>
+void execute_vnsra_wv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    constexpr uint32_t shift_mask = (sizeof(T_src_signed) * 8) - 1;
+    for (uint32_t i = 0; i < vl; i++) {
+        if (!vector::is_element_active(mask_reg, i, vm)) continue;
+        T_src_signed val2 = vector::get_group_element<T_src_signed>(cpu.state().regs, rs2, i);
+        T_dest shift_amt = vector::get_group_element<T_dest>(cpu.state().regs, rs1, i);
+        T_dest res = static_cast<T_dest>(val2 >> (shift_amt & shift_mask));
+        vector::set_group_element<T_dest>(cpu.state().regs, rd, i, res);
+    }
+}
+
+template <typename T_dest, typename T_src_signed>
+void execute_vnsra_wx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    constexpr uint32_t shift_mask = (sizeof(T_src_signed) * 8) - 1;
+    uint32_t shift_amt = static_cast<uint32_t>(rs1_val) & shift_mask;
+    for (uint32_t i = 0; i < vl; i++) {
+        if (!vector::is_element_active(mask_reg, i, vm)) continue;
+        T_src_signed val2 = vector::get_group_element<T_src_signed>(cpu.state().regs, rs2, i);
+        T_dest res = static_cast<T_dest>(val2 >> shift_amt);
+        vector::set_group_element<T_dest>(cpu.state().regs, rd, i, res);
+    }
+}
+
+template <typename T_dest, typename T_src_signed>
+void execute_vnsra_wi(core::CPU& cpu, RegId rd, uint32_t uimm5, RegId rs2, bool vm, uint32_t vl) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    constexpr uint32_t shift_mask = (sizeof(T_src_signed) * 8) - 1;
+    uint32_t shift_amt = uimm5 & shift_mask;
+    for (uint32_t i = 0; i < vl; i++) {
+        if (!vector::is_element_active(mask_reg, i, vm)) continue;
+        T_src_signed val2 = vector::get_group_element<T_src_signed>(cpu.state().regs, rs2, i);
+        T_dest res = static_cast<T_dest>(val2 >> shift_amt);
+        vector::set_group_element<T_dest>(cpu.state().regs, rd, i, res);
+    }
+}
+
 template <typename T_dest, typename T_src>
 void execute_vwsub_wx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
@@ -991,6 +1071,40 @@ void ExecuteUnit::execute_vector_integer(core::CPU& cpu, isa::OperationId op_id,
             else if (sew == 16) vector::perform_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, sra_f);
             else if (sew == 32) vector::perform_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, sra_f);
             else vector::perform_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, sra_f);
+            return;
+
+        // VNSRL
+        case isa::OperationId::VNSRL_WV:
+            if (sew == 8) execute_vnsrl_wv<uint8_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16) execute_vnsrl_wv<uint16_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 32) execute_vnsrl_wv<uint32_t, uint64_t>(cpu, rd, rs1, rs2, vm, vl);
+            return;
+        case isa::OperationId::VNSRL_WX:
+            if (sew == 8) execute_vnsrl_wx<uint8_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16) execute_vnsrl_wx<uint16_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 32) execute_vnsrl_wx<uint32_t, uint64_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            return;
+        case isa::OperationId::VNSRL_WI:
+            if (sew == 8) execute_vnsrl_wi<uint8_t, uint16_t>(cpu, rd, static_cast<uint32_t>(simm5 & 0x1F), rs2, vm, vl);
+            else if (sew == 16) execute_vnsrl_wi<uint16_t, uint32_t>(cpu, rd, static_cast<uint32_t>(simm5 & 0x1F), rs2, vm, vl);
+            else if (sew == 32) execute_vnsrl_wi<uint32_t, uint64_t>(cpu, rd, static_cast<uint32_t>(simm5 & 0x1F), rs2, vm, vl);
+            return;
+
+        // VNSRA
+        case isa::OperationId::VNSRA_WV:
+            if (sew == 8) execute_vnsra_wv<uint8_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16) execute_vnsra_wv<uint16_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 32) execute_vnsra_wv<uint32_t, int64_t>(cpu, rd, rs1, rs2, vm, vl);
+            return;
+        case isa::OperationId::VNSRA_WX:
+            if (sew == 8) execute_vnsra_wx<uint8_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16) execute_vnsra_wx<uint16_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 32) execute_vnsra_wx<uint32_t, int64_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            return;
+        case isa::OperationId::VNSRA_WI:
+            if (sew == 8) execute_vnsra_wi<uint8_t, int16_t>(cpu, rd, static_cast<uint32_t>(simm5 & 0x1F), rs2, vm, vl);
+            else if (sew == 16) execute_vnsra_wi<uint16_t, int32_t>(cpu, rd, static_cast<uint32_t>(simm5 & 0x1F), rs2, vm, vl);
+            else if (sew == 32) execute_vnsra_wi<uint32_t, int64_t>(cpu, rd, static_cast<uint32_t>(simm5 & 0x1F), rs2, vm, vl);
             return;
 
         // VMIN

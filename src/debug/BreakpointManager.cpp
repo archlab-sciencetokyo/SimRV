@@ -35,7 +35,7 @@ void BreakpointManager::add_watchpoint(Address addr, size_t size, WatchType type
 }
 
 void BreakpointManager::remove_watchpoint(Address addr) {
-    std::erase_if(watchpoints_, [addr](const Watchpoint& wp) { return wp.addr == addr; });
+    std::erase_if(watchpoints_, [addr](const Watchpoint& wp) -> bool { return wp.addr == addr; });
 }
 
 void BreakpointManager::clear_watchpoints() {

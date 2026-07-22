@@ -5,26 +5,27 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Tracer.hpp"
+#include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/debug/SymbolTable.hpp"
-#include "simrv/debug/BreakpointManager.hpp"
+#include "simrv/device/Audio.hpp"
 #include "simrv/device/Console.hpp"
 #include "simrv/device/Disk.hpp"
+#include "simrv/device/Framebuffer.hpp"
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/Virtio.hpp"
-#include "simrv/device/Framebuffer.hpp"
-#include "simrv/device/Audio.hpp"
-#include "simrv/util/SdlDisplay.hpp"
-#include "simrv/util/SdlAudio.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
+#include "simrv/util/SdlAudio.hpp"
+#include "simrv/util/SdlDisplay.hpp"
 
 namespace simrv::device {
 class PowerMmio;
@@ -60,6 +61,16 @@ class Machine {
      * @return 0 on success, non-zero on configuration error.
      */
     auto initialize() -> int;
+    /**
+     * @brief Load a program binary image dynamically into simulator DRAM and reset CPU state.
+     * @param filepath Path to the program binary image.
+     * @return true if successfully loaded, false otherwise.
+     */
+    auto load_program_binary(const std::string& filepath) -> bool;
+    /// Load a disk image into the virtio disk device (may be called from TUI modal).
+    /// @param filepath Path to the disk image file.
+    /// @return true if successfully loaded, false otherwise.
+    auto load_disk_image(const std::string& filepath) -> bool;
     /// Execute the main simulation loop until termination criteria are met.
     virtual void run() = 0;
     /// Finalize cycle for tohost checks only.
@@ -125,6 +136,14 @@ class Machine {
     std::string s_fn_traplog;                            // Trap/exception log filename
     std::string s_fn_cpuconfig;                           // CPU config filename
     std::chrono::steady_clock::time_point s_start_time;  // Simulation start timestamp
+
+    // ========== Mode-Switch Reboot State ==========
+    // When the TUI loads a binary with a different App/OS mode, these fields
+    // are populated and reboot_requested is set so Main.cpp recreates the machine.
+    std::string pending_binary_path;      // Binary path to apply on next boot
+    std::optional<bool> pending_appmode;  // If set, override appmode on next boot
+    std::optional<std::string>
+        pending_disk_path;  // Optional disk image path for next boot (empty => disable disk)
 
     // ========== CPU and Subsystems ==========
     simrv::core::CPU cpu;

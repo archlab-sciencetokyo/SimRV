@@ -9,6 +9,7 @@
 #include "simrv/xlen/Types.hpp"
 #include "simrv/util/FormatUtil.hpp"
 
+#include <unistd.h>
 #include <algorithm>
 #include <cctype>
 #include <charconv>
@@ -268,6 +269,10 @@ auto is_tui_option(std::string_view arg) -> bool {
     return arg == "--tui" || arg == "-u";
 }
 
+auto is_cli_option(std::string_view arg) -> bool {
+    return arg == "--cli" || arg == "-c" || arg == "--headless" || arg == "--no-tui";
+}
+
 auto is_gui_option(std::string_view arg) -> bool {
     return arg == "--gui" || arg == "-G";
 }
@@ -460,6 +465,10 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
     -> std::expected<bool, std::string> {
     if (is_tui_option(arg)) {
         result.options.tuimode = true;
+        return true;
+    }
+    if (is_cli_option(arg)) {
+        result.options.tuimode = false;
         return true;
     }
     if (is_gui_option(arg)) {
@@ -712,6 +721,7 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
     std::span<char* const> expanded_span(expanded_pointers.data(), expanded_pointers.size());
 
     ParseResult result{};
+    result.options.tuimode = (::isatty(STDIN_FILENO) != 0);
 
     for (std::size_t i = 1; i < expanded_span.size(); ++i) {
         std::string_view const arg = expanded_span[i];
