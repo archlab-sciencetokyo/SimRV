@@ -758,6 +758,20 @@ void Tui::toggle_sakura_theme() {
     render(true);
 }
 
+void Tui::toggle_cycle_accurate() {
+    machine_.s_cycle_accurate = !machine_.s_cycle_accurate;
+    set_status_override(std::format("Simulation mode switched to {}",
+                                   machine_.s_cycle_accurate ? "Cycle-Accurate (CA)" : "Instruction-Accurate (IA)"));
+    render(true);
+}
+
+void Tui::toggle_debug_mode() {
+    machine_.s_debug_mode = !machine_.s_debug_mode;
+    set_status_override(std::format("TUI mode switched to {}",
+                                   machine_.s_debug_mode ? "Debug mode" : "Normal mode"));
+    render(true);
+}
+
 void Tui::cycle_right_panel_mode() {
     TuiRightPanelMode current = right_panel_mode_.load(std::memory_order_relaxed);
     TuiRightPanelMode next = (current == TuiRightPanelMode::Terminal) ? TuiRightPanelMode::Display : TuiRightPanelMode::Terminal;
@@ -1245,7 +1259,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         // Double-click prevention: only register left clicks on press event ('M')
         if (esc_buf_.back() == 'M' && button == 0 && y == 2) {
             struct winsize w{};
-            ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+            ioctl(STDOUT_FILENO, TIOCGWINSZ, &w); // NOLINT(cppcoreguidelines-pro-type-vararg)
             int term_w = w.ws_col > 0 ? w.ws_col : 80;
             if (status_bar_) {
                 if (status_bar_->is_pos_on_status_badge(x, term_w)) {
@@ -1267,7 +1281,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         }
 
         struct winsize w_footer{};
-        ioctl(STDOUT_FILENO, TIOCGWINSZ, &w_footer);
+        ioctl(STDOUT_FILENO, TIOCGWINSZ, &w_footer); // NOLINT(cppcoreguidelines-pro-type-vararg)
         int term_h = w_footer.ws_row > 0 ? w_footer.ws_row : 24;
 
         if (esc_buf_.back() == 'M' && button == 0 && y == term_h - 1) {
@@ -1331,6 +1345,8 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                         case TuiFooterAction::CycleLayout: cycle_layout(); break;
                         case TuiFooterAction::TogglePanel: cycle_right_panel_mode(); break;
                         case TuiFooterAction::ToggleTrace: toggle_trace_enabled(); break;
+                        case TuiFooterAction::ToggleCycleAccurate: toggle_cycle_accurate(); break;
+                        case TuiFooterAction::ToggleDebugMode: toggle_debug_mode(); break;
                     }
                     return true;
                 }
@@ -1405,12 +1421,16 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             toggle_sakura_theme();
             return true;
         }
-        if (key == 'u' || key == 'U') {
-            scroll(5);
+        if (key == 'a' || key == 'A') {
+            toggle_cycle_accurate();
             return true;
         }
         if (key == 'd' || key == 'D') {
-            scroll(-5);
+            toggle_debug_mode();
+            return true;
+        }
+        if (key == 'u' || key == 'U') {
+            scroll(5);
             return true;
         }
         if (key == 'w' || key == 'W') {

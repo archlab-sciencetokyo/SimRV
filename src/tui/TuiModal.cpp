@@ -339,11 +339,13 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width, i
             if (term_height < 32 && box_w >= 70) {
                 // Dual-column layout for small screen height
                 struct Shortcut { const char* key; const char* desc; };
-                static constexpr std::array<Shortcut, 24> help_items = {{
+                static constexpr std::array<Shortcut, 26> help_items = {{
                     {"[s] / [Space]", "Step 1 inst"},
                     {"[n]",          "Step N insts"},
                     {"[b] / [Alt-b]", "Undo / Toggle Rollback"},
                     {"[o] / [Alt-o]", "Load Binary / Disk"},
+                    {"[Alt-a]",      "Toggle IA / CA Mode"},
+                    {"[Alt-d]",      "Toggle Debug Mode"},
                     {"[:]",          "Set PC Breakpoint"},
                     {"[k]",          "Toggle PC Breakpoint"},
                     {"[g]",          "Set N Step Size"},
