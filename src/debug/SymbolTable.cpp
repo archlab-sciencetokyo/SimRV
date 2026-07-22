@@ -17,6 +17,7 @@ namespace simrv::debug {
 
 auto SymbolTable::load_from_elf(const std::string& elf_path) -> bool {
     symbols_.clear();
+    entry_point_.reset();
     std::string path_to_load = elf_path;
 
     // Helper to check if file has ELF magic
@@ -76,6 +77,7 @@ auto SymbolTable::load_from_elf(const std::string& elf_path) -> bool {
     if (elf_class == ELFCLASS32) {
         Elf32_Ehdr ehdr;
         if (!fs.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr))) return false; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        entry_point_ = static_cast<Address>(ehdr.e_entry);
 
         std::vector<Elf32_Shdr> shdrs(ehdr.e_shnum);
         fs.seekg(ehdr.e_shoff, std::ios::beg);
@@ -113,6 +115,7 @@ auto SymbolTable::load_from_elf(const std::string& elf_path) -> bool {
     } else { // ELFCLASS64
         Elf64_Ehdr ehdr;
         if (!fs.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr))) return false; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        entry_point_ = static_cast<Address>(ehdr.e_entry);
 
         std::vector<Elf64_Shdr> shdrs(ehdr.e_shnum);
         fs.seekg(static_cast<std::streamoff>(ehdr.e_shoff), std::ios::beg);

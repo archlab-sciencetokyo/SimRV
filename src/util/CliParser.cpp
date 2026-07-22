@@ -255,7 +255,11 @@ auto is_dump_init_option(std::string_view arg) -> bool {
 }
 
 auto is_baremetal_option(std::string_view arg) -> bool {
-    return arg == "-b" || arg == "--baremetal" || arg == "-a";
+    return arg == "-b" || arg == "--baremetal" || arg == "-a" || arg == "--app";
+}
+
+auto is_os_option(std::string_view arg) -> bool {
+    return arg == "--linux" || arg == "--os" || arg == "-o";
 }
 
 auto is_ca_option(std::string_view arg) -> bool {
@@ -355,12 +359,14 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         if (!value) return std::unexpected(value.error());
         options.fn_dskimg = std::string(*value);
         options.use_disk = true;
+        options.appmode = false;
         return true;
     }
     if (is_fdt_option(arg)) {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         options.fn_dvtree = std::string(*value);
+        options.appmode = false;
         return true;
     }
     if (arg == "--cpu-config") {
@@ -446,6 +452,10 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
     }
     if (is_baremetal_option(arg)) {
         result.options.appmode = true;
+        return true;
+    }
+    if (is_os_option(arg)) {
+        result.options.appmode = false;
         return true;
     }
     if (is_ca_option(arg)) {
@@ -791,7 +801,8 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
 
     machine->s_appmode = options.appmode;
     simrv::memory::g_appmode = options.appmode;
-    simrv::memory::g_dram_base = options.appmode ? options.start_pc : simrv::memory::kDramBaseAddress;
+    machine->s_start_pc = options.start_pc;
+    simrv::memory::g_dram_base = simrv::memory::kDramBaseAddress;
     machine->s_tuimode = options.tuimode;
     machine->s_gui_mode = options.gui_mode;
     machine->s_high_contrast = options.high_contrast;
@@ -905,7 +916,11 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(
         stdout,
-        "  {}-b, -a, --baremetal{}         Binary mode (raw baremetal execution, start_pc=0)\n",
+        "  {}-b, -a, --baremetal, --app{} Binary mode (baremetal application execution, default)\n",
+        style(kBrightGreen), style(kReset));
+    std::print(
+        stdout,
+        "  {}-o, --linux, --os{}           OS mode (Linux kernel / RTOS boot mode)\n",
         style(kBrightGreen), style(kReset));
     std::print(
         stdout,

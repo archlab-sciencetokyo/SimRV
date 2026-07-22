@@ -35,7 +35,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     bool skip_banner = false;
     for (int i = 1; i < argc; ++i) {
         std::string_view const arg(argv[i]);
-        if (arg == "--cli" || arg == "-c" || arg == "--headless" || arg == "--no-tui") {
+        if (arg == "--cli" || arg == "-a" || arg == "-c" || arg == "--headless" || arg == "--no-tui") {
             is_tui = false;
         } else if (arg == "--tui" || arg == "-u") {
             is_tui = true;
@@ -53,6 +53,10 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     // Write startup entry to MMU debug log
     std::signal(SIGINT, SIG_IGN);  // ignore control+'C'
 
+    std::optional<bool> override_appmode;
+    std::optional<std::string> override_binary;
+    std::optional<std::string> override_disk;
+
     bool keep_running = true;
     int final_exit_code = 0;
     while (keep_running) {
@@ -60,6 +64,17 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         auto parsed = parse_command_line(args);
         if (!parsed) {
             option_error(parsed.error());
+        }
+
+        if (override_appmode.has_value()) {
+            parsed->options.appmode = *override_appmode;
+        }
+        if (override_binary.has_value()) {
+            parsed->options.fn_memimg = *override_binary;
+        }
+        if (override_disk.has_value()) {
+            parsed->options.fn_dskimg = *override_disk;
+            parsed->options.use_disk = !override_disk->empty();
         }
 
         switch (parsed->action) {
@@ -135,52 +150,12 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         if (sim_machine->reboot_requested) {
             simrv::log::info("Rebooting guest system...");
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            // If a mode-switch was requested, carry forward the binary and mode override
             if (!sim_machine->pending_binary_path.empty()) {
-                // Override argv to carry the new binary into the next parse
-                // We rewrite args inline — this is a TUI-initiated mode switch
-                for (int i = 1; i < argc; ++i) {
-                    std::string_view arg(argv[i]);
-                    if (arg == "-m" || arg == "--memory") {
-                        // Next arg is the old memimg; we'll set it via options after parse
-                        break;
-                    }
-                }
-                // Store for apply after parse
-                std::string next_binary = sim_machine->pending_binary_path;
-                std::optional<bool> next_appmode = sim_machine->pending_appmode;
-                std::optional<std::string> next_disk = sim_machine->pending_disk_path;
-                // Re-parse and apply
-                std::span<char* const> const args2(argv, static_cast<std::size_t>(argc));
-                auto parsed2 = parse_command_line(args2);
-                if (!parsed2) {
-                    option_error(parsed2.error());
-                }
-                if (next_appmode.has_value()) {
-                    parsed2->options.appmode = *next_appmode;
-                }
-                parsed2->options.fn_memimg = next_binary;
-                if (next_disk.has_value()) {
-                    parsed2->options.fn_dskimg = *next_disk;
-                    parsed2->options.use_disk = !next_disk->empty();
-                }
-                std::unique_ptr<simrv::core::Machine> next_machine;
-                if (parsed2->options.appmode) {
-                    next_machine = std::make_unique<simrv::core::BaremetalMachine>();
-                } else {
-                    next_machine = std::make_unique<simrv::core::OSMachine>();
-                }
-                auto applied2 = apply_runtime_options(next_machine.get(), parsed2->options);
-                if (!applied2) {
-                    option_error(applied2.error(), 0);
-                }
-                const int init2 = next_machine->initialize();
-                if (init2 != 0) {
-                    return init2;
-                }
-                sim_machine = std::move(next_machine);
-                continue;
+                override_binary = sim_machine->pending_binary_path;
+                override_appmode = sim_machine->pending_appmode;
+                override_disk = sim_machine->pending_disk_path;
             }
+            continue;
         } else {
             keep_running = false;
             final_exit_code = sim_machine->exit_code;

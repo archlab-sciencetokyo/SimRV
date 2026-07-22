@@ -5,6 +5,7 @@
 #include "simrv/core/Logger.hpp"
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
+#include <elf.h>
 #include <array>
 #include <cstdlib>
 #include <cstring>
@@ -30,8 +31,6 @@
 #include "simrv/xlen/Types.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
 
-
-
 namespace simrv::core {
 
 namespace {
@@ -40,6 +39,39 @@ constexpr size_t D_SIZE_DRAM = (size_t{9} * 1024U * 1024U);   // 9MB of bbl + ke
 constexpr size_t D_SIZE_DEVT = (size_t{4} * 1024U);           // 4KB of device tree
 constexpr size_t D_SIZE_DISK = (size_t{16} * 1024U * 1024U);  // 16MB of disk image
 constexpr Address D_DEVT_OFFSET = static_cast<Address>(16U * 1024U * 1024U);
+
+void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
+                                     const simrv::debug::SymbolTable& symbols) {
+    simrv::memory::g_dram_base = simrv::memory::kDramBaseAddress;
+
+    if (machine.s_start_pc == simrv::boot::kStartPc || machine.s_start_pc == 0) {
+        if (symbols.entry_point().has_value()) {
+            const Address entry = *symbols.entry_point();
+            if (entry >= simrv::memory::kDramBaseAddress &&
+                entry < simrv::memory::kDramBaseAddress + simrv::memory::kDramSize) {
+                machine.s_start_pc = entry;
+            } else if (entry < simrv::memory::kDramSize) {
+                machine.s_start_pc = simrv::memory::kDramBaseAddress + entry;
+            }
+        } else if (auto start_sym = symbols.lookup_name("_start"); start_sym.has_value()) {
+            const Address entry = *start_sym;
+            if (entry >= simrv::memory::kDramBaseAddress &&
+                entry < simrv::memory::kDramBaseAddress + simrv::memory::kDramSize) {
+                machine.s_start_pc = entry;
+            } else if (entry < simrv::memory::kDramSize) {
+                machine.s_start_pc = simrv::memory::kDramBaseAddress + entry;
+            }
+        } else {
+            machine.s_start_pc = simrv::boot::kStartPc;
+        }
+    }
+
+    machine.cpu.state().pc = machine.s_start_pc;
+    if (machine.cpu.state().regs.xlen == 32) {
+        machine.cpu.state().pc = static_cast<Register>(
+            static_cast<int64_t>(static_cast<int32_t>(machine.cpu.state().pc)));
+    }
+}
 
 void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity,
                          const char* image_name, bool tuimode) {
@@ -50,7 +82,6 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
 
     if (file_path.empty()) {
         if (tuimode) {
-            simrv::log::info("No {} image specified upfront; launching TUI in idle state.", image_name);
             return;
         }
         simrv::log::error("No {} image specified", image_name);
@@ -69,30 +100,111 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
     }
 
     const auto file_size = static_cast<std::size_t>(in.tellg());
-    if (file_size > capacity) {
-        simrv::log::error("{} image {} is too large ({} bytes > {} bytes capacity)",
-                     image_name, file_path, file_size, capacity);
-        std::exit(EXIT_FAILURE);
-    }
-
     in.seekg(0, std::ios::beg);
-    if (!in.read(reinterpret_cast<char*>(ram), static_cast<std::streamsize>(file_size))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-        simrv::log::error("Failed to read {} image {}", image_name, file_path);
-        std::exit(EXIT_FAILURE);
-    }
 
-    if (file_size >= 5 && std::to_integer<uint8_t>(ram[0]) == 0x7f && 
-        std::to_integer<char>(ram[1]) == 'E' && 
-        std::to_integer<char>(ram[2]) == 'L' && 
-        std::to_integer<char>(ram[3]) == 'F') {
-        if (std::strcmp(image_name, "memory") == 0) {
-            simrv::log::warn("Loaded image {} has ELF magic! SimRV does not parse ELF files directly for execution; it loads files raw starting at DRAM base (0x80000000). Executing ELF headers directly may cause unexpected behavior or hangs. Please use 'objcopy -O binary' to extract a raw binary first.", file_path);
+    std::array<char, 4> magic{};
+    bool is_elf = false;
+    if (file_size >= 4 && in.read(magic.data(), 4)) {
+        if (magic[0] == 0x7f && magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F') {
+            is_elf = true;
         }
-        const auto elf_class = std::to_integer<uint8_t>(ram[4]);
-        constexpr uint8_t expected_class = simrv::xlen::kXLenBits == 32 ? 1 : 2;
-        if (elf_class != expected_class) {
-            simrv::log::warn("Loaded ELF image {} is {}-bit but SimRV is compiled for {}-bit!", 
-                         file_path, elf_class == 1 ? 32 : 64, simrv::xlen::kXLenBits);
+    }
+    in.seekg(0, std::ios::beg);
+
+    if (is_elf) {
+        std::array<char, 5> ident{};
+        if (in.read(ident.data(), 5)) {
+            const auto elf_class = static_cast<uint8_t>(ident[4]);
+            constexpr uint8_t expected_class = simrv::xlen::kXLenBits == 32 ? 1 : 2;
+            if (elf_class != expected_class) {
+                simrv::log::warn("Loaded ELF image {} is {}-bit but SimRV is compiled for {}-bit!", 
+                             file_path, elf_class == 1 ? 32 : 64, simrv::xlen::kXLenBits);
+            }
+        }
+        in.seekg(0, std::ios::beg);
+
+        bool loaded_segment = false;
+        const char class_byte = ident[4];
+        if (class_byte == 1) { // 32-bit ELF
+            Elf32_Ehdr ehdr{};
+            if (in.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr))) {
+                std::vector<Elf32_Phdr> phdrs(ehdr.e_phnum);
+                in.seekg(ehdr.e_phoff, std::ios::beg);
+                if (in.read(reinterpret_cast<char*>(phdrs.data()), static_cast<std::streamsize>(static_cast<size_t>(ehdr.e_phnum) * sizeof(Elf32_Phdr)))) {
+                    for (const auto& phdr : phdrs) {
+                        if (phdr.p_type == PT_LOAD && phdr.p_filesz > 0) {
+                            const Address paddr = phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
+                            const Address dram_base = simrv::memory::kDramBaseAddress;
+                            Address dest_offset = 0;
+                            if (paddr >= dram_base && (paddr - dram_base) < capacity) {
+                                dest_offset = paddr - dram_base;
+                            } else if (paddr < capacity) {
+                                dest_offset = paddr;
+                            } else {
+                                continue;
+                            }
+                            const size_t copy_bytes = std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
+                            in.seekg(phdr.p_offset, std::ios::beg);
+                            if (in.read(reinterpret_cast<char*>(ram + dest_offset), static_cast<std::streamsize>(copy_bytes))) {
+                                loaded_segment = true;
+                                if (phdr.p_memsz > phdr.p_filesz && (dest_offset + phdr.p_filesz) < capacity) {
+                                    const size_t bss_bytes = std::min<size_t>(phdr.p_memsz - phdr.p_filesz, capacity - (dest_offset + phdr.p_filesz));
+                                    std::memset(ram + dest_offset + phdr.p_filesz, 0, bss_bytes);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (class_byte == 2) { // 64-bit ELF
+            Elf64_Ehdr ehdr{};
+            if (in.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr))) {
+                std::vector<Elf64_Phdr> phdrs(ehdr.e_phnum);
+                in.seekg(static_cast<std::streamoff>(ehdr.e_phoff), std::ios::beg);
+                if (in.read(reinterpret_cast<char*>(phdrs.data()), static_cast<std::streamsize>(static_cast<size_t>(ehdr.e_phnum) * sizeof(Elf64_Phdr)))) {
+                    for (const auto& phdr : phdrs) {
+                        if (phdr.p_type == PT_LOAD && phdr.p_filesz > 0) {
+                            const Address paddr = phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
+                            const Address dram_base = simrv::memory::kDramBaseAddress;
+                            Address dest_offset = 0;
+                            if (paddr >= dram_base && (paddr - dram_base) < capacity) {
+                                dest_offset = paddr - dram_base;
+                            } else if (paddr < capacity) {
+                                dest_offset = paddr;
+                            } else {
+                                continue;
+                            }
+                            const size_t copy_bytes = std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
+                            in.seekg(static_cast<std::streamoff>(phdr.p_offset), std::ios::beg);
+                            if (in.read(reinterpret_cast<char*>(ram + dest_offset), static_cast<std::streamsize>(copy_bytes))) {
+                                loaded_segment = true;
+                                if (phdr.p_memsz > phdr.p_filesz && (dest_offset + phdr.p_filesz) < capacity) {
+                                    const size_t bss_bytes = std::min<size_t>(phdr.p_memsz - phdr.p_filesz, capacity - (dest_offset + phdr.p_filesz));
+                                    std::memset(ram + dest_offset + phdr.p_filesz, 0, bss_bytes);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!loaded_segment) {
+            in.seekg(0, std::ios::beg);
+            if (!in.read(reinterpret_cast<char*>(ram), static_cast<std::streamsize>(std::min(file_size, capacity)))) {
+                simrv::log::error("Failed to read {} image {}", image_name, file_path);
+                std::exit(EXIT_FAILURE);
+            }
+        }
+    } else {
+        if (file_size > capacity) {
+            simrv::log::error("{} image {} is too large ({} bytes > {} bytes capacity)",
+                         image_name, file_path, file_size, capacity);
+            std::exit(EXIT_FAILURE);
+        }
+        if (!in.read(reinterpret_cast<char*>(ram), static_cast<std::streamsize>(file_size))) {
+            simrv::log::error("Failed to read {} image {}", image_name, file_path);
+            std::exit(EXIT_FAILURE);
         }
     }
 }
@@ -237,9 +349,9 @@ auto Machine::initialize() -> int {
 
     load_image_into_ram(s_fn_memimg, mmem, static_cast<std::size_t>(simrv::memory::kDramSize),
                         "memory", s_tuimode);
-    if (s_tuimode || s_debug_mode || s_gdb_mode || s_lockstep_mode) {
-        symbols.load_from_elf(s_fn_memimg);
-    }
+    symbols.load_from_elf(s_spike_elf.empty() ? s_fn_memimg : s_spike_elf);
+
+    resolve_start_pc_and_dram_base(*this, symbols);
 
     // If launched without a binary in TUI mode, skip image-dependent init —
     // the TUI will open the LoadBinary modal and call load_program_binary() later.
@@ -330,13 +442,80 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
     s_fn_memimg = filepath;
     load_image_into_ram(s_fn_memimg, mmem, static_cast<std::size_t>(simrv::memory::kDramSize),
                         "memory", s_tuimode);
-    if (s_tuimode || s_debug_mode || s_gdb_mode || s_lockstep_mode) {
-        symbols.load_from_elf(s_fn_memimg);
+    symbols.load_from_elf(s_spike_elf.empty() ? s_fn_memimg : s_spike_elf);
+
+    CSRValue initial_misa = isa::misa_with_mxl(s_misa_override ? s_misa_profile
+                                                                : isa::kMisaDefault);
+    if constexpr (simrv::xlen::kIsXLen64) {
+        bool is_32bit = false;
+        if (s_misa_override && s_misa_xlen == 32) {
+            is_32bit = true;
+        } else if (!s_misa_override || s_misa_xlen == 0) {
+            auto check_elf = [&](const std::string& path) -> void {
+                if (path.empty()) return;
+                std::ifstream file(path, std::ios::binary);
+                if (file.is_open()) {
+                    std::array<char, 5> header{};
+                    if (file.read(header.data(), 5)) {
+                        if (header[0] == 0x7f && header[1] == 'E' && header[2] == 'L' && header[3] == 'F') {
+                            if (header[4] == 1) { // ELFCLASS32
+                                is_32bit = true;
+                            }
+                        }
+                    }
+                }
+            };
+            check_elf(s_fn_memimg);
+            check_elf(s_spike_elf);
+            if (!is_32bit && !s_fn_memimg.empty()) {
+                std::string base_path = s_fn_memimg;
+                size_t last_dot = base_path.find_last_of('.');
+                size_t last_slash = base_path.find_last_of("/\\");
+                if (last_dot != std::string::npos && (last_slash == std::string::npos || last_dot > last_slash)) {
+                    base_path = base_path.substr(0, last_dot);
+                }
+                if (base_path != s_fn_memimg) {
+                    check_elf(base_path + ".elf");
+                    check_elf(base_path + ".ELF");
+                    check_elf(base_path + ".out");
+                    check_elf(base_path + ".OUT");
+                    check_elf(base_path + ".axf");
+                    check_elf(base_path + ".AXF");
+                    check_elf(base_path);
+                }
+            }
+            if (!is_32bit) {
+                if (s_fn_memimg.find("rv32") != std::string::npos ||
+                    s_spike_elf.find("rv32") != std::string::npos) {
+                    is_32bit = true;
+                }
+            }
+        }
+        if (is_32bit) {
+            initial_misa = (initial_misa & ~(3ull << 62)) | (1ull << 62);
+        }
     }
+
+    cpu.state().misa = initial_misa;
+    cpu.state().update_xlen();
+
+    resolve_start_pc_and_dram_base(*this, symbols);
+
+    cpu.soft_tlb_flush();
+    cpu.TLB_flush();
+    cpu.decode_cache.flush();
+    cpu.pipeline_context = simrv::pipeline::PipelineContext{};
+    cpu.undo_stack.clear();
+    cpu.trace_history_.clear();
+    cpu.state().load_res = 0;
+
     for (std::size_t r = 0; r < 32; ++r) {
         cpu.state().regs.write(static_cast<RegId>(r), 0);
     }
     cpu.state().pc = s_start_pc;
+    if (cpu.state().regs.xlen == 32) {
+        cpu.state().pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(cpu.state().pc)));
+    }
     cpu.state().priv = kPrivMachine;
     cpu.state().regs.write(static_cast<RegId>(10), 0);
     const bool linux_boot = !s_appmode;
@@ -346,6 +525,11 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
             : simrv::boot::kInitDataAddress;
     cpu.state().regs.write(static_cast<RegId>(11),
                            linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);
+
+    tohost = 0;
+    exit_code = 0;
+    is_shutdown_ = false;
+    is_running_ = true;
 
     if (linux_boot) {
         if (s_fn_dvtree.empty()) {
@@ -368,6 +552,7 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
             load_image_into_ram(s_fn_dvtree, mmem + dtb_offset, dt_cap, "device-tree", s_tuimode);
         }
     }
+    cpu.soft_tlb_flush();
     cpu.TLB_flush();
     return true;
 }

@@ -12,6 +12,21 @@
 
 namespace simrv::tui {
 
+namespace {
+
+struct Shortcut {
+    const char* key;
+    const char* desc;
+};
+
+struct SettingItem {
+    const char* key;
+    const char* name;
+    std::string val;
+};
+
+} // namespace
+
 TuiModal::TuiModal(simrv::core::Machine& machine) : machine_(machine) {}
 
 void TuiModal::open(ModalType type, LeftPane* left_pane, uint64_t step_granularity, uint64_t step_delay_us) {
@@ -403,13 +418,7 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width, i
             add_row(std::format("{}Use \033[1m[↑/↓/←/→]\033[0m or key \033[1m[1-9,0,a,g]\033[0m to toggle, \033[1m[Enter]\033[0m to apply:\033[0m", kThemeMuted));
             add_row("");
 
-            struct SettingItem {
-                const char* key;
-                const char* name;
-                std::string val;
-            };
-
-            std::array<SettingItem, 11> settings = {{
+            const auto settings = std::to_array<SettingItem>({
                 {" 1", "Simulation Mode",           settings_draft_.cycle_accurate ? "\033[1;36m[CA (Cycle-Accurate)]\033[0m" : "\033[1;33m[IA (Instruction-Accurate)]\033[0m"},
                 {" 2", "TUI Diagnostics View",      settings_draft_.debug_mode ? "\033[1;32m[Debug Mode (Diagnostics ON)]\033[0m" : "\033[90m[Normal Mode]\033[0m"},
                 {" 3", "Step Rollback History",     settings_draft_.rollback_enabled ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
@@ -421,7 +430,7 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width, i
                 {" 9", "High-Performance Engine",   settings_draft_.high_performance ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
                 {" a", "Co-Sim Spike Lockstep",     settings_draft_.lockstep_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
                 {" g", "GDB Server Stub (1234)",    settings_draft_.gdb_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-            }};
+            });
 
             for (std::size_t i = 0; i < settings.size(); ++i) {
                 bool is_sel = (static_cast<int>(i) == settings_cursor_);
@@ -438,8 +447,7 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width, i
             title = " SIMULATOR KEYBOARD SHORTCUTS ";
             if (term_height < 32 && box_w >= 70) {
                 // Dual-column layout for small screen height
-                struct Shortcut { const char* key; const char* desc; };
-                static constexpr std::array<Shortcut, 25> help_items = {{
+                static const auto help_items = std::to_array<Shortcut>({
                     {"[s] / [Space]", "Step 1 inst"},
                     {"[n]",          "Step N insts"},
                     {"[b] / [Alt-b]", "Undo / Toggle Rollback"},
@@ -465,7 +473,7 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width, i
                     {"[Alt-t]",      "Sakura Pastel"},
                     {"[Esc]",        "Close Modal"},
                     {"[Ctrl-Q]",     "Quit Simulator"}
-                }};
+                });
                 std::size_t half = (help_items.size() + 1) / 2;
                 for (std::size_t i = 0; i < half; ++i) {
                     std::string left_item = std::format("{}{:<17}\033[0m {}{:<18}\033[0m", kThemeSky, help_items[i].key, kThemeText, help_items[i].desc);

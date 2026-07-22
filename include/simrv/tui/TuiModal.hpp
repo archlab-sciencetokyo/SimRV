@@ -80,7 +80,7 @@ class TuiModal {
     int settings_cursor_ = 0;
     SettingsDraft settings_draft_;
     bool load_appmode_ =
-        false;  // Toggle for App (baremetal) vs OS (Linux) mode in LoadBinary modal
+        true;  // Toggle for App (baremetal) vs OS (Linux) mode in LoadBinary modal
     std::string staged_binary_path_;
     bool staged_mode_change_ = false;
     bool staged_target_appmode_ = false;

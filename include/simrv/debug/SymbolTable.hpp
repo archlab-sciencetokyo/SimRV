@@ -29,9 +29,11 @@ class SymbolTable {
      */
     [[nodiscard]] auto lookup(Address addr) const -> std::string;
     [[nodiscard]] auto lookup_name(const std::string& name) const -> std::optional<Address>;
+    [[nodiscard]] auto entry_point() const -> std::optional<Address> { return entry_point_; }
 
    private:
     std::map<Address, std::string> symbols_;
+    std::optional<Address> entry_point_;
 };
 
 }  // namespace simrv::debug

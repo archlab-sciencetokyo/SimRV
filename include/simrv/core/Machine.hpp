@@ -88,7 +88,7 @@ class Machine {
     std::atomic<bool> is_shutdown_ = false;     // System shutdown flag.
 
     // ========== Simulation Configuration Flags ==========
-    bool s_appmode = false;        // Binary mode (start_pc=0, no OS)
+    bool s_appmode = true;         // Baremetal/app mode (default)
     bool s_tuimode = false;        // Enable TUI monitor mode
     bool s_gui_mode = false;       // Enable GUI graphics window mode
     bool s_high_contrast = false;  // Enable high-contrast TUI mode

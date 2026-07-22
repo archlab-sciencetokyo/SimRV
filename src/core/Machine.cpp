@@ -19,7 +19,7 @@
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::memory {
-bool g_appmode = false; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+bool g_appmode = true; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 Address g_dram_base = kDramBaseAddress; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 }
 

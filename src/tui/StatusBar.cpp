@@ -83,7 +83,7 @@ auto StatusBar::get_footer_action_at_col(int col) const -> std::optional<TuiFoot
         TuiFooterAction action;
     };
 
-    static constexpr std::array<FooterItem, 15> paused_items = {{
+    static const auto paused_items = std::to_array<FooterItem>({
         {" [s] Step",      TuiFooterAction::Step},
         {"[b] Back",       TuiFooterAction::StepBack},
         {"[n] StepN",      TuiFooterAction::StepN},
@@ -99,9 +99,9 @@ auto StatusBar::get_footer_action_at_col(int col) const -> std::optional<TuiFoot
         {"[F1/?] Help",    TuiFooterAction::ToggleHelp},
         {"[c] Run",        TuiFooterAction::RunPause},
         {"[q] Quit",       TuiFooterAction::Quit},
-    }};
+    });
 
-    static constexpr std::array<FooterItem, 11> running_items = {{
+    static const auto running_items = std::to_array<FooterItem>({
         {" [Ctrl-P] Pause", TuiFooterAction::RunPause},
         {"[r] Regs",        TuiFooterAction::CycleRegs},
         {"[l] Tools",       TuiFooterAction::CycleTools},
@@ -113,7 +113,7 @@ auto StatusBar::get_footer_action_at_col(int col) const -> std::optional<TuiFoot
         {"[:] Set-BP",      TuiFooterAction::SetBreakpoint},
         {"[F1/?] Help",     TuiFooterAction::ToggleHelp},
         {"[Ctrl-Q] Quit",    TuiFooterAction::Quit},
-    }};
+    });
 
     int current_x = 0;
     if (paused_) {

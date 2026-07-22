@@ -8,24 +8,24 @@
  *   - Computation equations show what the EX stage computed
  *   - Memory access descriptions explain load/store behavior
  */
+#include <algorithm>
+#include <array>
+#include <format>
+#include <string>
+#include <vector>
+
+#include "simrv/Define.hpp"
+#include "simrv/core/Cpu.hpp"
+#include "simrv/core/Machine.hpp"
+#include "simrv/pipeline/Decoder.hpp"
+#include "simrv/pipeline/PipelineModel.hpp"
+#include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/tui/LeftPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
-#include "simrv/Define.hpp"
-#include "simrv/core/Cpu.hpp"
-#include "simrv/core/Machine.hpp"
-
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
-#include "simrv/pipeline/Decoder.hpp"
-#include "simrv/pipeline/PipelineSim.hpp"
-#include "simrv/pipeline/PipelineModel.hpp"
-#include <format>
-#include <string>
-#include <vector>
-#include <array>
-#include <algorithm>
 
 namespace simrv::tui {
 
@@ -79,26 +79,16 @@ auto short_op_name(const simrv::pipeline::PipelineReg& reg) -> std::string {
 }
 
 /// Is this opcode a load instruction?
-auto is_load_opcode(Opcode opc) -> bool {
-    return opc == Opcode::Load || opc == Opcode::LoadFp;
-}
+auto is_load_opcode(Opcode opc) -> bool { return opc == Opcode::Load || opc == Opcode::LoadFp; }
 
 /// Is this opcode a store instruction?
-auto is_store_opcode(Opcode opc) -> bool {
-    return opc == Opcode::Store || opc == Opcode::StoreFp;
-}
+auto is_store_opcode(Opcode opc) -> bool { return opc == Opcode::Store || opc == Opcode::StoreFp; }
 
 /// Is this opcode a branch?
-auto is_branch_opcode(Opcode opc) -> bool {
-    return opc == Opcode::Branch;
-}
-
-
+auto is_branch_opcode(Opcode opc) -> bool { return opc == Opcode::Branch; }
 
 /// Build a one-line description of what the EX stage computed.
-auto get_computation_desc(
-    const simrv::pipeline::PipelineContext& ctx
-) -> std::string {
+auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx) -> std::string {
     auto const opc = ctx.opcode;
     std::string_view op_name = "?";
     if (static_cast<std::size_t>(ctx.op_id) < simrv::pipeline::OPERATION_NAME.size()) {
@@ -106,99 +96,81 @@ auto get_computation_desc(
     }
 
     if (is_load_opcode(opc)) {
-        return std::format("  {}Computation : {}Memory[{} + {}] → {}\033[0m",
-            kThemeText, kThemeMint,
-            hex_val(ctx.rrs1), ctx.imm,
-            hex_val(ctx.mem_rdata));
+        return std::format(" {}Computation : {}Memory[{} + {}] → {}\033[0m", kThemeText, kThemeMint,
+                           hex_val(ctx.rrs1), ctx.imm, hex_val(ctx.mem_rdata));
     }
     if (is_store_opcode(opc)) {
-        return std::format("  {}Computation : {}{} → Memory[{} + {}]\033[0m",
-            kThemeText, kThemeMint,
-            hex_val(ctx.rrs2), hex_val(ctx.rrs1), ctx.imm);
+        return std::format(" {}Computation : {}{} → Memory[{} + {}]\033[0m", kThemeText, kThemeMint,
+                           hex_val(ctx.rrs2), hex_val(ctx.rrs1), ctx.imm);
     }
     if (is_branch_opcode(opc)) {
-        return std::format("  {}Computation : {}Compare {} vs {} → {}\033[0m",
-            kThemeText, kThemeMint,
-            hex_val(ctx.rrs1), hex_val(ctx.rrs2),
-            ctx.tkn ? "Taken" : "Not Taken");
+        return std::format(" {}Computation : {}Compare {} vs {} → {}\033[0m", kThemeText,
+                           kThemeMint, hex_val(ctx.rrs1), hex_val(ctx.rrs2),
+                           ctx.tkn ? "Taken" : "Not Taken");
     }
     if (opc == Opcode::Jal) {
-        return std::format("  {}Computation : {}Jump to {} (link {} in rd)\033[0m",
-            kThemeText, kThemeMint,
-            hex_val(ctx.jmp_pc), hex_val(ctx.cpc + 4));
+        return std::format(" {}Computation : {}Jump to {} (link {} in rd)\033[0m", kThemeText,
+                           kThemeMint, hex_val(ctx.jmp_pc), hex_val(ctx.cpc + 4));
     }
     if (opc == Opcode::Jalr) {
-        return std::format("  {}Computation : {}Jump to {} + {} = {} (link in rd)\033[0m",
-            kThemeText, kThemeMint,
-            hex_val(ctx.rrs1), ctx.imm, hex_val(ctx.jmp_pc));
+        return std::format(" {}Computation : {}Jump to {} + {} = {} (link in rd)\033[0m",
+                           kThemeText, kThemeMint, hex_val(ctx.rrs1), ctx.imm, hex_val(ctx.jmp_pc));
     }
     if (opc == Opcode::Lui) {
-        return std::format("  {}Computation : {}imm << 12 = {}\033[0m",
-            kThemeText, kThemeMint, hex_val(ctx.wb_data));
+        return std::format(" {}Computation : {}imm << 12 = {}\033[0m", kThemeText, kThemeMint,
+                           hex_val(ctx.wb_data));
     }
     if (opc == Opcode::Auipc) {
-        return std::format("  {}Computation : {}PC + (imm << 12) = {} + {} = {}\033[0m",
-            kThemeText, kThemeMint,
-            hex_val(ctx.cpc),
-            hex_val(static_cast<Register>(ctx.imm) << 12),
-            hex_val(ctx.wb_data));
+        return std::format(" {}Computation : {}PC + (imm << 12) = {} + {} = {}\033[0m", kThemeText,
+                           kThemeMint, hex_val(ctx.cpc),
+                           hex_val(static_cast<Register>(ctx.imm) << 12), hex_val(ctx.wb_data));
     }
     // System / CSR
     if (opc == Opcode::System) {
         if (ctx.op_id == ECALL) {
-            return std::format("  {}Computation : {}Environment call (trap to handler)\033[0m",
-                kThemeText, kThemePeach);
+            return std::format(" {}Computation : {}Environment call (trap to handler)\033[0m",
+                               kThemeText, kThemePeach);
         }
         if (ctx.op_id == EBREAK) {
-            return std::format("  {}Computation : {}Breakpoint (trap to debugger)\033[0m",
-                kThemeText, kThemePeach);
+            return std::format(" {}Computation : {}Breakpoint (trap to debugger)\033[0m",
+                               kThemeText, kThemePeach);
         }
-        return std::format("  {}Computation : {}CSR operation → {}\033[0m",
-            kThemeText, kThemeMint, hex_val(ctx.wb_data));
+        return std::format(" {}Computation : {}CSR operation → {}\033[0m", kThemeText, kThemeMint,
+                           hex_val(ctx.wb_data));
     }
     // Fence
     if (opc == Opcode::MiscMem) {
-        return std::format("  {}Computation : {}Memory fence (ordering barrier)\033[0m",
-            kThemeText, kThemeMuted);
+        return std::format(" {}Computation : {}Memory fence (ordering barrier)\033[0m", kThemeText,
+                           kThemeMuted);
     }
     // Default: ALU / FP / Atomic / Vector
     // Show: operand1 <op> operand2 = result
     InstFormat fmt = simrv::isa::get_instruction_format(opc);
     if (fmt == InstFormat::R || fmt == InstFormat::R4) {
-        return std::format("  {}Computation : {}{} {} {} = {}\033[0m",
-            kThemeText, kThemeMint,
-            hex_val(ctx.rrs1), op_name, hex_val(ctx.rrs2), hex_val(ctx.wb_data));
+        return std::format(" {}Computation : {}{} {} {} = {}\033[0m", kThemeText, kThemeMint,
+                           hex_val(ctx.rrs1), op_name, hex_val(ctx.rrs2), hex_val(ctx.wb_data));
     }
     // I-type ALU
-    return std::format("  {}Computation : {}{} {} {} = {}\033[0m",
-        kThemeText, kThemeMint,
-        hex_val(ctx.rrs1), op_name, ctx.imm, hex_val(ctx.wb_data));
+    return std::format(" {}Computation : {}{} {} {} = {}\033[0m", kThemeText, kThemeMint,
+                       hex_val(ctx.rrs1), op_name, ctx.imm, hex_val(ctx.wb_data));
 }
 
 /// Build a description for the MEM stage.
-auto get_mem_stage_desc(
-    const simrv::pipeline::PipelineContext& ctx
-) -> std::pair<std::string, std::string> {
+auto get_mem_stage_desc(const simrv::pipeline::PipelineContext& ctx)
+    -> std::pair<std::string, std::string> {
     if (is_load_opcode(ctx.opcode)) {
-        return {
-            std::format("Load from {}", hex_val(ctx.mem_addr)),
-            std::format("Read: {}", hex_val(ctx.mem_rdata))
-        };
+        return {std::format("Load from {}", hex_val(ctx.mem_addr)),
+                std::format("Read: {}", hex_val(ctx.mem_rdata))};
     }
     if (is_store_opcode(ctx.opcode)) {
-        return {
-            std::format("Store to {}", hex_val(ctx.mem_addr)),
-            std::format("Data: {}", hex_val(ctx.mem_wdata))
-        };
+        return {std::format("Store to {}", hex_val(ctx.mem_addr)),
+                std::format("Data: {}", hex_val(ctx.mem_wdata))};
     }
     return {"None (not a load/store)", "—"};
 }
 
 /// Format the Source 2 description based on instruction format.
-auto get_src2_desc(
-    const simrv::pipeline::PipelineContext& ctx,
-    InstFormat fmt
-) -> std::string {
+auto get_src2_desc(const simrv::pipeline::PipelineContext& ctx, InstFormat fmt) -> std::string {
     if (fmt == InstFormat::I || fmt == InstFormat::U || fmt == InstFormat::J) {
         return std::format("(none — uses imm)");
     }
@@ -243,11 +215,10 @@ auto is_raw_hazard_stalled(const simrv::pipeline::PipelineSim& ps) -> bool {
            has_stage_raw_hazard(ps, ps.d_reg(), ps.m_reg());
 }
 
-auto compact_hex(Register v) -> std::string {
-    return hex_val(v);
-}
+auto compact_hex(Register v) -> std::string { return hex_val(v); }
 
-auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem, const std::string& stall_type, bool raw_stall = false) -> std::string {
+auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem,
+                    const std::string& stall_type, bool raw_stall = false) -> std::string {
     if (!reg.valid) {
         return std::format("{}bubble (empty)\033[0m", kThemeMuted);
     }
@@ -281,10 +252,14 @@ auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem,
                                    compact_hex(reg.pc), "\033[0m", ops_info);
     if (stall_rem > 0) {
         std::string tag = stall_type;
-        if (tag == "I-Cache Miss") tag = "I-Cache";
-        else if (tag == "D-Cache Miss") tag = "D-Cache";
-        else if (tag == "TLB Miss") tag = "TLB";
-        else if (tag == "Divider Busy") tag = "Divider";
+        if (tag == "I-Cache Miss")
+            tag = "I-Cache";
+        else if (tag == "D-Cache Miss")
+            tag = "D-Cache";
+        else if (tag == "TLB Miss")
+            tag = "TLB";
+        else if (tag == "Divider Busy")
+            tag = "Divider";
         desc += std::format(" {}[{}: {}c]\033[0m", kThemeCoral, tag, stall_rem);
     } else if (raw_stall) {
         desc += std::format(" {}[RAW Stall]\033[0m", kThemeCoral);
@@ -310,10 +285,14 @@ auto get_bht_string(const simrv::pipeline::PipelineSim& ps, Register pc) -> std:
     }
     uint8_t counter = ps.get_model() ? ps.get_model()->get_bht_entry(pc) : 1;
     switch (counter) {
-        case 0: return "Strongly Not Taken (00)";
-        case 1: return "Weakly Not Taken (01)";
-        case 2: return "Weakly Taken (10)";
-        default: return "Strongly Taken (11)";
+        case 0:
+            return "Strongly Not Taken (00)";
+        case 1:
+            return "Weakly Not Taken (01)";
+        case 2:
+            return "Weakly Taken (10)";
+        default:
+            return "Strongly Taken (11)";
     }
 }
 
@@ -321,14 +300,16 @@ auto get_btb_string(const simrv::pipeline::PipelineSim& ps, Register pc) -> std:
     if (pc == 0) {
         return "No active branch";
     }
-    auto [valid, target] = ps.get_model() ? ps.get_model()->get_btb_target(pc) : std::pair<bool, Register>{false, 0};
+    auto [valid, target] =
+        ps.get_model() ? ps.get_model()->get_btb_target(pc) : std::pair<bool, Register>{false, 0};
     if (valid) {
         return std::format("Hit → cached target {}", hex_val(target));
     }
     return "Miss (no cached target)";
 }
 
-auto get_active_forwarding_paths(const simrv::pipeline::PipelineSim& ps) -> std::vector<std::string> {
+auto get_active_forwarding_paths(const simrv::pipeline::PipelineSim& ps)
+    -> std::vector<std::string> {
     std::vector<std::string> paths;
     if (!ps.config.enable_forwarding) return paths;
 
@@ -366,13 +347,14 @@ auto get_active_forwarding_paths(const simrv::pipeline::PipelineSim& ps) -> std:
     return paths;
 }
 
-} // namespace
+}  // namespace
 
 // ═══════════════════════════════════════════════════════════════════════
 // Top-level dispatch
 // ═══════════════════════════════════════════════════════════════════════
 
-auto LeftPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logical_row, int col_width,
+                                      int right_width) -> std::string {
     if (machine_.s_cycle_accurate) {
         // CA mode: rows 0-8 timeline, rows 9+ stage details
         if (logical_row < 9) {
@@ -388,7 +370,9 @@ auto LeftPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logical_r
 // Cycle-Accurate mode
 // ═══════════════════════════════════════════════════════════════════════
 
-auto LeftPane::render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu, int logical_row,
+                                                     int col_width, int right_width)
+    -> std::string {
     // Adjusted row index relative to the start of the non-timeline area.
     // Timeline occupies rows 0–8, so stage details begin at row 9.
     int const val = logical_row - 9;
@@ -401,7 +385,8 @@ auto LeftPane::render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu
     return render_pipeline_stages_ca_pred(cpu, val, col_width + right_width);
 }
 
-auto LeftPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int stage_idx, int width) -> std::string {
+auto LeftPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int stage_idx, int width)
+    -> std::string {
     auto& ps = cpu.pipeline_sim;
     bool is_raw_stalled = is_raw_hazard_stalled(ps);
 
@@ -411,14 +396,16 @@ auto LeftPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int s
         case 1: {
             // Compact stage diagram showing what's in each stage
             std::string diagram = std::format(
-                "  \033[1;36mIF:{}\033[0m → \033[1;33mID:{}\033[0m → \033[1;32mEX:{}\033[0m → \033[1;35mMEM:{}\033[0m → \033[1;34mWB:{}\033[0m",
+                "  \033[1;36mIF:{}\033[0m → \033[1;33mID:{}\033[0m → \033[1;32mEX:{}\033[0m → "
+                "\033[1;35mMEM:{}\033[0m → \033[1;34mWB:{}\033[0m",
                 short_op_name(ps.f_reg()), short_op_name(ps.d_reg()), short_op_name(ps.e_reg()),
                 short_op_name(ps.m_reg()), short_op_name(ps.w_reg()));
             return format_to_width(diagram, width);
         }
         case 2: {
             std::string stall_type = ps.tlb_stall_remaining() > 0 ? "TLB Miss" : "I-Cache Miss";
-            uint32_t stall_rem = ps.tlb_stall_remaining() > 0 ? ps.tlb_stall_remaining() : ps.icache_stall_remaining();
+            uint32_t stall_rem = ps.tlb_stall_remaining() > 0 ? ps.tlb_stall_remaining()
+                                                              : ps.icache_stall_remaining();
             return format_to_width(std::format("  \033[1m{}IF  (Fetch)\033[0m     : {}", kThemeSky,
                                                get_stage_desc(ps.f_reg(), stall_rem, stall_type)),
                                    width);
@@ -440,18 +427,22 @@ auto LeftPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int s
                     get_stage_desc(ps.m_reg(), ps.dcache_stall_remaining(), "D-Cache Miss")),
                 width);
         case 6:
-            return format_to_width(std::format("  \033[1m{}WB  (Write-Back)\033[0m: {}", kThemeSky, get_stage_desc(ps.w_reg(), 0, "")), width);
+            return format_to_width(std::format("  \033[1m{}WB  (Write-Back)\033[0m: {}", kThemeSky,
+                                               get_stage_desc(ps.w_reg(), 0, "")),
+                                   width);
         default:
             return format_to_width("", width);
     }
 }
 
-auto LeftPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu, int stage_idx, int col_width, int right_width) -> std::string {
+auto LeftPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu, int stage_idx,
+                                                 int col_width, int right_width) -> std::string {
     auto& ps = cpu.pipeline_sim;
     int const width = col_width + right_width;
     bool is_raw_stalled = is_raw_hazard_stalled(ps);
 
-    auto status_str = [](bool active, const char* active_msg = "Active") -> std::pair<const char*, const char*> {
+    auto status_str = [](bool active,
+                         const char* active_msg = "Active") -> std::pair<const char*, const char*> {
         return active ? std::pair{active_msg, kThemePeach} : std::pair{"None", kThemeMint};
     };
 
@@ -466,17 +457,14 @@ auto LeftPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu, in
         case 7:
             return section_line("Hazards & Forwarding", width);
         case 8:
-            return render_pair("Data Hazard (RAW)", raw_status, raw_color,
-                               "Long-Latency Op", div_status, div_color,
-                               col_width, right_width, 18);
+            return render_pair("Data Hazard (RAW)", raw_status, raw_color, "Long-Latency Op",
+                               div_status, div_color, col_width, right_width, 18);
         case 9:
-            return render_pair("I-Cache Miss", ic_status, ic_color,
-                               "D-Cache Miss", dc_status, dc_color,
-                               col_width, right_width, 18);
+            return render_pair("I-Cache Miss", ic_status, ic_color, "D-Cache Miss", dc_status,
+                               dc_color, col_width, right_width, 18);
         case 10:
-            return render_pair("TLB Miss", tlb_status, tlb_color,
-                               "Control Hazard", ctrl_status, ctrl_color,
-                               col_width, right_width, 18);
+            return render_pair("TLB Miss", tlb_status, tlb_color, "Control Hazard", ctrl_status,
+                               ctrl_color, col_width, right_width, 18);
         case 11: {
             if (!ps.config.enable_forwarding) {
                 return format_to_width(
@@ -503,7 +491,8 @@ auto LeftPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu, in
     }
 }
 
-auto LeftPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, int stage_idx, int width) -> std::string {
+auto LeftPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, int stage_idx, int width)
+    -> std::string {
     auto& ps = cpu.pipeline_sim;
 
     switch (stage_idx) {
@@ -519,7 +508,9 @@ auto LeftPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, int s
         case 15: {
             Register pc = get_active_branch_pc(ps);
             std::string btb_str = get_btb_string(ps, pc);
-            return format_to_width(std::format("  {}Target Buffer\033[0m  : {}{}\033[0m", kThemeText, kThemeVal, btb_str), width);
+            return format_to_width(std::format("  {}Target Buffer\033[0m  : {}{}\033[0m",
+                                               kThemeText, kThemeVal, btb_str),
+                                   width);
         }
         default:
             return format_to_width("", width);
@@ -530,25 +521,33 @@ auto LeftPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, int s
 // Functional (non-cycle-accurate) mode
 // ═══════════════════════════════════════════════════════════════════════
 
-auto LeftPane::render_pipeline_stages_functional(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_pipeline_stages_functional(const simrv::core::CPU& cpu, int logical_row,
+                                                 int col_width, int right_width) -> std::string {
     if (logical_row >= 0 && logical_row < 16) {
         return render_pipeline_stages_functional_low(cpu, logical_row, col_width, right_width);
     }
     return render_pipeline_stages_functional_high(cpu, logical_row, col_width, right_width);
 }
 
-auto LeftPane::render_pipeline_stages_functional_low(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_pipeline_stages_functional_low(const simrv::core::CPU& cpu, int logical_row,
+                                                     int col_width, int right_width)
+    -> std::string {
     if (logical_row >= 0 && logical_row <= 7) {
-        return render_pipeline_stages_functional_low_part1(cpu, logical_row, col_width, right_width);
+        return render_pipeline_stages_functional_low_part1(cpu, logical_row, col_width,
+                                                           right_width);
     }
     if (logical_row >= 8 && logical_row <= 15) {
-        return render_pipeline_stages_functional_low_part2(cpu, logical_row, col_width, right_width);
+        return render_pipeline_stages_functional_low_part2(cpu, logical_row, col_width,
+                                                           right_width);
     }
-    return format_to_width(std::format(" {}Pipeline page\033[0m", kThemeMuted), col_width + right_width);
+    return format_to_width(std::format(" {}Pipeline page\033[0m", kThemeMuted),
+                           col_width + right_width);
 }
 
 // Rows 0–7: Current Instruction overview + IF stage + ID stage header
-auto LeftPane::render_pipeline_stages_functional_low_part1(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_pipeline_stages_functional_low_part1(const simrv::core::CPU& cpu,
+                                                           int logical_row, int col_width,
+                                                           int right_width) -> std::string {
     int const width = col_width + right_width;
     auto& ctx = cpu.pipeline_context;
 
@@ -568,9 +567,8 @@ auto LeftPane::render_pipeline_stages_functional_low_part1(const simrv::core::CP
         case 1: {
             // PC with optional symbol + Assembly
             std::string sym = machine_.symbols.lookup(cpu.state().pc);
-            std::string pc_str = sym.empty()
-                ? hex_val(ctx.cpc)
-                : std::format("{} <{}>", hex_val(ctx.cpc), sym);
+            std::string pc_str =
+                sym.empty() ? hex_val(ctx.cpc) : std::format("{} <{}>", hex_val(ctx.cpc), sym);
 
             // Build assembly string from operation name
             bool is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
@@ -595,23 +593,22 @@ auto LeftPane::render_pipeline_stages_functional_low_part1(const simrv::core::CP
             } else if (fmt == InstFormat::B) {
                 asm_str = std::format("{} {}, {}, {}", op_name, rs1_n, rs2_n, ctx.imm);
             } else if (fmt == InstFormat::U) {
-                asm_str = std::format("{} {}, 0x{:X}", op_name, rd_n, static_cast<uint32_t>(ctx.imm));
+                asm_str =
+                    std::format("{} {}, 0x{:X}", op_name, rd_n, static_cast<uint32_t>(ctx.imm));
             } else if (fmt == InstFormat::J) {
                 asm_str = std::format("jal {}, {}", rd_n, ctx.imm);
             }
 
-            return render_pair("PC", pc_str, kThemeMint,
-                               "Asm", asm_str, kThemePeach,
-                               col_width, right_width, 10);
+            return render_pair("PC", pc_str, kThemeMint, "Asm", asm_str, kThemePeach, col_width,
+                               right_width, 10);
         }
         case 2: {
             // Hex encoding + Format name
             std::string hex_str = is_compressed
-                ? std::format("0x{:04X} (compressed)", ctx.ir_org & 0xFFFF)
-                : std::format("0x{:08X}", ctx.ir_org);
+                                      ? std::format("0x{:04X} (compressed)", ctx.ir_org & 0xFFFF)
+                                      : std::format("0x{:08X}", ctx.ir_org);
             std::string fmt_str = std::string(simrv::isa::get_instruction_format_name(fmt));
-            return render_pair("Encoding", hex_str, kThemeVal,
-                               "Format", fmt_str, kThemeVal,
+            return render_pair("Encoding", hex_str, kThemeVal, "Format", fmt_str, kThemeVal,
                                col_width, right_width, 10);
         }
 
@@ -619,14 +616,13 @@ auto LeftPane::render_pipeline_stages_functional_low_part1(const simrv::core::CP
         case 3:
             return section_line("── IF  Instruction Fetch", width);
         case 4:
-            return render_pair("Fetch PC", hex_val(ctx.cpc), kThemeMint,
-                               "Raw Word", std::format("0x{:08x}", ctx.ir_org), kThemeVal,
-                               col_width, right_width, 10);
+            return render_pair("Fetch PC", hex_val(ctx.cpc), kThemeMint, "Raw Word",
+                               std::format("0x{:08x}", ctx.ir_org), kThemeVal, col_width,
+                               right_width, 10);
         case 5: {
             std::string comp_str = is_compressed ? "Yes → decompressed" : "No";
-            return render_pair("Compressed?", comp_str, kThemeVal,
-                               "Phys Addr", hex_val(ctx.padr1), kThemeVal,
-                               col_width, right_width, 10);
+            return render_pair("Compressed", comp_str, kThemeVal, "Phys Addr", hex_val(ctx.padr1),
+                               kThemeVal, col_width, right_width, 10);
         }
 
         // ── ID (Decode & Operand Read) ────────────────────────────
@@ -636,10 +632,9 @@ auto LeftPane::render_pipeline_stages_functional_low_part1(const simrv::core::CP
             std::string op_str = std::format("{} ({})", op_name, isa_ext);
             bool is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
             std::string dst_str = (fmt == InstFormat::S || fmt == InstFormat::B)
-                ? "(none — no dest)"
-                : (is_dst_fp ? fp_reg_name(ctx.rd) : reg_with_x(ctx.rd));
-            return render_pair("Operation", op_str, kThemeVal,
-                               "Dest Reg", dst_str, kThemeMint,
+                                      ? "(none — no dest)"
+                                      : (is_dst_fp ? fp_reg_name(ctx.rd) : reg_with_x(ctx.rd));
+            return render_pair("Operation", op_str, kThemeVal, "Dest Reg", dst_str, kThemeMint,
                                col_width, right_width, 10);
         }
         default:
@@ -648,7 +643,9 @@ auto LeftPane::render_pipeline_stages_functional_low_part1(const simrv::core::CP
 }
 
 // Rows 8–15: Source operands + EX stage + MEM stage + WB header
-auto LeftPane::render_pipeline_stages_functional_low_part2(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_pipeline_stages_functional_low_part2(const simrv::core::CPU& cpu,
+                                                           int logical_row, int col_width,
+                                                           int right_width) -> std::string {
     int const width = col_width + right_width;
     auto& ctx = cpu.pipeline_context;
     InstFormat const fmt = simrv::isa::get_instruction_format(ctx.opcode);
@@ -676,8 +673,7 @@ auto LeftPane::render_pipeline_stages_functional_low_part2(const simrv::core::CP
                 src2_str = std::format("{} (0x{:X})", ctx.imm, static_cast<uint32_t>(ctx.imm));
             }
 
-            return render_pair("Source 1", src1_str, kThemeMint,
-                               src2_label, src2_str, kThemeMint,
+            return render_pair("Source 1", src1_str, kThemeMint, src2_label, src2_str, kThemeMint,
                                col_width, right_width, 10);
         }
 
@@ -687,14 +683,15 @@ auto LeftPane::render_pipeline_stages_functional_low_part2(const simrv::core::CP
         case 10:
             return format_to_width(get_computation_desc(ctx), width);
         case 11: {
-            std::string branch_str = is_branch_opcode(ctx.opcode)
-                ? (ctx.tkn ? std::format("{}Yes → {}\033[0m", kThemePeach, hex_val(ctx.jmp_pc))
-                           : std::format("{}No (fall through)\033[0m", kThemeMint))
-                : "No";
+            std::string branch_str =
+                is_branch_opcode(ctx.opcode)
+                    ? (ctx.tkn ? std::format("{}Yes → {}\033[0m", kThemePeach, hex_val(ctx.jmp_pc))
+                               : std::format("{}No (fall through)\033[0m", kThemeMint))
+                    : "No";
             std::string jump_str = (ctx.opcode == Opcode::Jal || ctx.opcode == Opcode::Jalr)
-                ? hex_val(ctx.jmp_pc) : "—";
-            return render_pair("Branch?", branch_str, kThemeVal,
-                               "Jump PC", jump_str, kThemeMint,
+                                       ? hex_val(ctx.jmp_pc)
+                                       : "—";
+            return render_pair("Branch?", branch_str, kThemeVal, "Jump PC", jump_str, kThemeMint,
                                col_width, right_width, 10);
         }
 
@@ -703,8 +700,7 @@ auto LeftPane::render_pipeline_stages_functional_low_part2(const simrv::core::CP
             return section_line("── MEM  Memory Access", width);
         case 13: {
             auto [access_str, data_str] = get_mem_stage_desc(ctx);
-            return render_pair("Access", access_str, kThemeMint,
-                               "Data", data_str, kThemeMint,
+            return render_pair("Access", access_str, kThemeMint, "Data", data_str, kThemeMint,
                                col_width, right_width, 10);
         }
 
@@ -714,18 +710,16 @@ auto LeftPane::render_pipeline_stages_functional_low_part2(const simrv::core::CP
         case 15: {
             bool is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
             InstFormat wr_fmt = simrv::isa::get_instruction_format(ctx.opcode);
-            bool has_dest = (wr_fmt == InstFormat::R || wr_fmt == InstFormat::I ||
-                             wr_fmt == InstFormat::U || wr_fmt == InstFormat::J ||
-                             wr_fmt == InstFormat::R4);
-            std::string dst_str = has_dest
-                ? (is_dst_fp ? fp_reg_name(ctx.rd) : reg_with_x(ctx.rd))
-                : "(none)";
+            bool has_dest =
+                (wr_fmt == InstFormat::R || wr_fmt == InstFormat::I || wr_fmt == InstFormat::U ||
+                 wr_fmt == InstFormat::J || wr_fmt == InstFormat::R4);
+            std::string dst_str =
+                has_dest ? (is_dst_fp ? fp_reg_name(ctx.rd) : reg_with_x(ctx.rd)) : "(none)";
             std::string result_str = has_dest ? hex_val(ctx.wb_data) : "—";
             if (ctx.fp_wb_enable) {
                 result_str = std::format("0x{:016x} (FP)", ctx.fp_wb_data);
             }
-            return render_pair("Writes To", dst_str, kThemeMint,
-                               "Result", result_str, kThemeMint,
+            return render_pair("Writes To", dst_str, kThemeMint, "Result", result_str, kThemeMint,
                                col_width, right_width, 10);
         }
         default:
@@ -734,7 +728,9 @@ auto LeftPane::render_pipeline_stages_functional_low_part2(const simrv::core::CP
 }
 
 // Rows 16–19: Exception / trap info + end marker
-auto LeftPane::render_pipeline_stages_functional_high(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_pipeline_stages_functional_high(const simrv::core::CPU& cpu, int logical_row,
+                                                      int col_width, int right_width)
+    -> std::string {
     int const width = col_width + right_width;
     auto& ctx = cpu.pipeline_context;
 
@@ -742,19 +738,23 @@ auto LeftPane::render_pipeline_stages_functional_high(const simrv::core::CPU& cp
         case 16: {
             if (ctx.pending_exception.has_value()) {
                 static constexpr std::array<const char*, 16> kCauseNames = {
-                    "Inst Addr Misaligned", "Inst Access Fault", "Illegal Instruction", "Breakpoint",
-                    "Load Addr Misaligned", "Load Access Fault", "Store Addr Misaligned", "Store Access Fault",
-                    "Env Call (U-Mode)", "Env Call (S-Mode)", "Reserved (10)", "Env Call (M-Mode)",
-                    "Inst Page Fault", "Load Page Fault", "Reserved (14)", "Store Page Fault"
-                };
+                    "Inst Addr Misaligned",  "Inst Access Fault",
+                    "Illegal Instruction",   "Breakpoint",
+                    "Load Addr Misaligned",  "Load Access Fault",
+                    "Store Addr Misaligned", "Store Access Fault",
+                    "Env Call (U-Mode)",     "Env Call (S-Mode)",
+                    "Reserved (10)",         "Env Call (M-Mode)",
+                    "Inst Page Fault",       "Load Page Fault",
+                    "Reserved (14)",         "Store Page Fault"};
                 auto cause = static_cast<uint64_t>(*ctx.pending_exception);
-                std::string cause_name = (cause < kCauseNames.size()) ? kCauseNames.at(cause) : std::format("Exception ({})", cause);
-                return render_pair("Exception", cause_name, kThemePeach,
-                                   "Trap Value", hex_val(ctx.pending_tval), kThemeVal,
-                                   col_width, right_width, 10);
+                std::string cause_name = (cause < kCauseNames.size())
+                                             ? kCauseNames.at(cause)
+                                             : std::format("Exception ({})", cause);
+                return render_pair("Exception", cause_name, kThemePeach, "Trap Value",
+                                   hex_val(ctx.pending_tval), kThemeVal, col_width, right_width,
+                                   10);
             }
-            return render_pair("Exception", "None", kThemeMint,
-                               "Trap Value", "—", kThemeVal,
+            return render_pair("Exception", "None", kThemeMint, "Trap Value", "—", kThemeVal,
                                col_width, right_width, 10);
         }
         case 17: {
@@ -763,9 +763,9 @@ auto LeftPane::render_pipeline_stages_functional_high(const simrv::core::CPU& cp
             if (is_csr) {
                 uint32_t csr_addr = ctx.imm & 0xFFF;
                 std::string csr_nm = simrv::util::csr_name(csr_addr);
-                return render_pair("CSR Target", std::format("{} (0x{:03X})", csr_nm, csr_addr), kThemeVal,
-                                   "CSR Read", hex_val(ctx.rcsr), kThemeVal,
-                                   col_width, right_width, 10);
+                return render_pair("CSR Target", std::format("{} (0x{:03X})", csr_nm, csr_addr),
+                                   kThemeVal, "CSR Read", hex_val(ctx.rcsr), kThemeVal, col_width,
+                                   right_width, 10);
             }
             return format_to_width("", width);
         }
@@ -782,7 +782,8 @@ auto LeftPane::render_pipeline_stages_functional_high(const simrv::core::CPU& cp
 // Pipeline Execution Timeline (cycle-accurate mode, rows 0–8)
 // ═══════════════════════════════════════════════════════════════════════
 
-auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical_row, int width) -> std::string {
+auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical_row, int width)
+    -> std::string {
     auto const& ps = cpu.pipeline_sim;
     auto const history = ps.get_cycle_history_copy();
 
@@ -792,7 +793,10 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
 
     if (history.empty()) {
         if (logical_row == 1) {
-            return format_to_width(std::format("  {}No cycle history yet — step the simulator to see instructions flow.\033[0m", kThemeMuted), width);
+            return format_to_width(std::format("  {}No cycle history yet — step the simulator to "
+                                               "see instructions flow.\033[0m",
+                                               kThemeMuted),
+                                   width);
         }
         return format_to_width("", width);
     }
@@ -825,9 +829,9 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
     // Keep only the 5 most-recently-seen instructions to avoid overflow
     constexpr int kMaxInstRows = 5;
     if (static_cast<int>(active_insts.size()) > kMaxInstRows) {
-        active_insts.erase(active_insts.begin(),
-                           active_insts.begin() +
-                               (static_cast<int>(active_insts.size()) - kMaxInstRows));
+        active_insts.erase(
+            active_insts.begin(),
+            active_insts.begin() + (static_cast<int>(active_insts.size()) - kMaxInstRows));
     }
 
     // Determine max PC width dynamically (10 for 8-digit hex e.g. 0x8000002a, 18 for full 64-bit)
@@ -837,8 +841,8 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
             max_pc_width = 18;
         }
     }
-    int const header_prefix_len = max_pc_width + 8; // e.g. 10 + 8 = 18
-    int const desc_width = header_prefix_len + 2;   // prefix + " |"
+    int const header_prefix_len = max_pc_width + 8;  // e.g. 10 + 8 = 18
+    int const desc_width = header_prefix_len + 2;    // prefix + " |"
     int const cycle_col_width = 5;
     constexpr int kMaxCycleColumns = 14;
     int const max_cycles = std::min(kMaxCycleColumns, (width - desc_width) / cycle_col_width);
@@ -890,11 +894,14 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
                 stage_lbl =
                     snap.m.stalled ? "\033[38;5;203m MEM*\033[0m" : "\033[1;34m MEM\033[0m ";
             } else if (snap.e.valid && snap.e.pc == inst.pc) {
-                stage_lbl = snap.e.stalled ? "\033[38;5;203m EX*\033[0m " : "\033[1;31m EX\033[0m  ";
+                stage_lbl =
+                    snap.e.stalled ? "\033[38;5;203m EX*\033[0m " : "\033[1;31m EX\033[0m  ";
             } else if (snap.d.valid && snap.d.pc == inst.pc) {
-                stage_lbl = snap.d.stalled ? "\033[38;5;203m ID*\033[0m " : "\033[1;33m ID\033[0m  ";
+                stage_lbl =
+                    snap.d.stalled ? "\033[38;5;203m ID*\033[0m " : "\033[1;33m ID\033[0m  ";
             } else if (snap.f.valid && snap.f.pc == inst.pc) {
-                stage_lbl = snap.f.stalled ? "\033[38;5;203m IF*\033[0m " : "\033[1;32m IF\033[0m  ";
+                stage_lbl =
+                    snap.f.stalled ? "\033[38;5;203m IF*\033[0m " : "\033[1;32m IF\033[0m  ";
             }
             line += stage_lbl;
         }
@@ -940,9 +947,9 @@ auto LeftPane::get_pipeline_pc_at_row(int logical_row) const -> Register {
         }
         constexpr int kMaxInstRows = 5;
         if (static_cast<int>(active_insts.size()) > kMaxInstRows) {
-            active_insts.erase(active_insts.begin(),
-                               active_insts.begin() +
-                                   (static_cast<int>(active_insts.size()) - kMaxInstRows));
+            active_insts.erase(
+                active_insts.begin(),
+                active_insts.begin() + (static_cast<int>(active_insts.size()) - kMaxInstRows));
         }
 
         int const inst_row = logical_row - 2;
@@ -954,12 +961,18 @@ auto LeftPane::get_pipeline_pc_at_row(int logical_row) const -> Register {
     // CA Stage Detail rows (logical rows 11..15 in CA mode)
     if (machine_.s_cycle_accurate) {
         switch (logical_row) {
-            case 11: return ps.f_reg().valid ? ps.f_reg().pc : 0;
-            case 12: return ps.d_reg().valid ? ps.d_reg().pc : 0;
-            case 13: return ps.e_reg().valid ? ps.e_reg().pc : 0;
-            case 14: return ps.m_reg().valid ? ps.m_reg().pc : 0;
-            case 15: return ps.w_reg().valid ? ps.w_reg().pc : 0;
-            default: break;
+            case 11:
+                return ps.f_reg().valid ? ps.f_reg().pc : 0;
+            case 12:
+                return ps.d_reg().valid ? ps.d_reg().pc : 0;
+            case 13:
+                return ps.e_reg().valid ? ps.e_reg().pc : 0;
+            case 14:
+                return ps.m_reg().valid ? ps.m_reg().pc : 0;
+            case 15:
+                return ps.w_reg().valid ? ps.w_reg().pc : 0;
+            default:
+                break;
         }
     }
     return 0;
@@ -969,7 +982,8 @@ auto LeftPane::get_pipeline_pc_at_row(int logical_row) const -> Register {
 // Cache Stats (separate tab, not part of pipeline rework)
 // ═══════════════════════════════════════════════════════════════════════
 
-auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, int col_width,
+                                  int right_width) -> std::string {
     int const width = col_width + right_width;
     if (!machine_.s_cycle_accurate) {
         switch (logical_row) {
@@ -977,11 +991,15 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
                 return section_line("Cache — Not Available", width);
             case 2:
                 return format_to_width(
-                    std::format("  {}Cache simulation is disabled in high-performance mode.\033[0m", kThemeMuted), width);
+                    std::format("  {}Cache simulation is disabled in high-performance mode.\033[0m",
+                                kThemeMuted),
+                    width);
             case 3:
                 return format_to_width(
-                    std::format("  {}Relaunch SimRV with {}--cycle-accurate\033[0m{} (-c) to enable.\033[0m",
-                                kThemeMuted, kThemeVal, kThemeMuted), width);
+                    std::format("  {}Relaunch SimRV with {}--cycle-accurate\033[0m{} (-c) to "
+                                "enable.\033[0m",
+                                kThemeMuted, kThemeVal, kThemeMuted),
+                    width);
             default:
                 return format_to_width("", width);
         }
@@ -989,7 +1007,6 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
 
     auto const& ic = cpu.icache;
     auto const& dc = cpu.dcache;
-
 
     auto make_bar = [](double ratio, int bar_width) -> std::string {
         int filled = static_cast<int>(ratio * bar_width);
@@ -1010,52 +1027,54 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
     switch (logical_row) {
         case 0:
             return section_line("L1 Instruction Cache", width);
-        case 1:
-            {
-                uint64_t h = ic.hit_count(), m = ic.miss_count();
-                uint64_t tot = h + m;
-                double mr = (tot == 0) ? 0.0 : 100.0 * static_cast<double>(m) / static_cast<double>(tot);
-                return format_to_width(std::format(
-                    "  {}Hits:\033[0m {:>12}   {}Misses:\033[0m {:>10}   {}Miss Rate:\033[0m {:>6.2f}%",
-                    kThemeText, simrv::util::format_with_commas(h),
-                    kThemeText, simrv::util::format_with_commas(m),
-                    kThemeText, mr), width);
-            }
-        case 2:
-            {
-                uint64_t h = ic.hit_count(), m = ic.miss_count();
-                uint64_t tot = h + m;
-                double ratio = (tot == 0) ? 1.0 : static_cast<double>(h) / static_cast<double>(tot);
-                int bar_w = std::max(5, width - 38);
-                std::string bar = make_bar(ratio, bar_w);
-                return format_to_width(std::format(
-                    "  {}Hit Rate\033[0m  [{}] {:>6.2f}%   {}32B / 4-way\033[0m",
-                    kThemeText, bar, ratio * 100.0, kThemeMuted), width);
-            }
+        case 1: {
+            uint64_t h = ic.hit_count(), m = ic.miss_count();
+            uint64_t tot = h + m;
+            double mr =
+                (tot == 0) ? 0.0 : 100.0 * static_cast<double>(m) / static_cast<double>(tot);
+            return format_to_width(
+                std::format("  {}Hits:\033[0m {:>12}   {}Misses:\033[0m {:>10}   {}Miss "
+                            "Rate:\033[0m {:>6.2f}%",
+                            kThemeText, simrv::util::format_with_commas(h), kThemeText,
+                            simrv::util::format_with_commas(m), kThemeText, mr),
+                width);
+        }
+        case 2: {
+            uint64_t h = ic.hit_count(), m = ic.miss_count();
+            uint64_t tot = h + m;
+            double ratio = (tot == 0) ? 1.0 : static_cast<double>(h) / static_cast<double>(tot);
+            int bar_w = std::max(5, width - 38);
+            std::string bar = make_bar(ratio, bar_w);
+            return format_to_width(
+                std::format("  {}Hit Rate\033[0m  [{}] {:>6.2f}%   {}32B / 4-way\033[0m",
+                            kThemeText, bar, ratio * 100.0, kThemeMuted),
+                width);
+        }
         case 3:
             return section_line("L1 Data Cache", width);
-        case 4:
-            {
-                uint64_t h = dc.hit_count(), m = dc.miss_count();
-                uint64_t tot = h + m;
-                double mr = (tot == 0) ? 0.0 : 100.0 * static_cast<double>(m) / static_cast<double>(tot);
-                return format_to_width(std::format(
-                    "  {}Hits:\033[0m {:>12}   {}Misses:\033[0m {:>10}   {}Miss Rate:\033[0m {:>6.2f}%",
-                    kThemeText, simrv::util::format_with_commas(h),
-                    kThemeText, simrv::util::format_with_commas(m),
-                    kThemeText, mr), width);
-            }
-        case 5:
-            {
-                uint64_t h = dc.hit_count(), m = dc.miss_count();
-                uint64_t tot = h + m;
-                double ratio = (tot == 0) ? 1.0 : static_cast<double>(h) / static_cast<double>(tot);
-                int bar_w = std::max(5, width - 38);
-                std::string bar = make_bar(ratio, bar_w);
-                return format_to_width(std::format(
-                    "  {}Hit Rate\033[0m  [{}] {:>6.2f}%   {}32B / 4-way\033[0m",
-                    kThemeText, bar, ratio * 100.0, kThemeMuted), width);
-            }
+        case 4: {
+            uint64_t h = dc.hit_count(), m = dc.miss_count();
+            uint64_t tot = h + m;
+            double mr =
+                (tot == 0) ? 0.0 : 100.0 * static_cast<double>(m) / static_cast<double>(tot);
+            return format_to_width(
+                std::format("  {}Hits:\033[0m {:>12}   {}Misses:\033[0m {:>10}   {}Miss "
+                            "Rate:\033[0m {:>6.2f}%",
+                            kThemeText, simrv::util::format_with_commas(h), kThemeText,
+                            simrv::util::format_with_commas(m), kThemeText, mr),
+                width);
+        }
+        case 5: {
+            uint64_t h = dc.hit_count(), m = dc.miss_count();
+            uint64_t tot = h + m;
+            double ratio = (tot == 0) ? 1.0 : static_cast<double>(h) / static_cast<double>(tot);
+            int bar_w = std::max(5, width - 38);
+            std::string bar = make_bar(ratio, bar_w);
+            return format_to_width(
+                std::format("  {}Hit Rate\033[0m  [{}] {:>6.2f}%   {}32B / 4-way\033[0m",
+                            kThemeText, bar, ratio * 100.0, kThemeMuted),
+                width);
+        }
         case 6:
             return section_line("Set Occupancy Map", width);
         case 7:
@@ -1065,63 +1084,65 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
         case 11:
         case 12:
         case 13:
-        case 14:
-            {
-                int const base_set = (logical_row - 7) * 2;
+        case 14: {
+            int const base_set = (logical_row - 7) * 2;
 
-                auto make_set_str = [](auto const& cache, int set_idx) -> std::string {
-                    bool const is_last = (static_cast<uint32_t>(set_idx) == cache.last_accessed_set());
-                    bool const was_hit = cache.last_access_was_hit();
+            auto make_set_str = [](auto const& cache, int set_idx) -> std::string {
+                bool const is_last = (static_cast<uint32_t>(set_idx) == cache.last_accessed_set());
+                bool const was_hit = cache.last_access_was_hit();
 
-                    std::string set_prefix;
-                    if (is_last) {
-                        if (was_hit) {
-                            set_prefix = std::format("\033[1m{}{:02d}:\033[0m[", kThemeMint, set_idx);
-                        } else {
-                            set_prefix = std::format("\033[1m{}{:02d}:\033[0m[", kThemeCoral, set_idx);
-                        }
+                std::string set_prefix;
+                if (is_last) {
+                    if (was_hit) {
+                        set_prefix = std::format("\033[1m{}{:02d}:\033[0m[", kThemeMint, set_idx);
                     } else {
-                        set_prefix = std::format("{}{:02d}:\033[0m[", kThemeMuted, set_idx);
+                        set_prefix = std::format("\033[1m{}{:02d}:\033[0m[", kThemeCoral, set_idx);
                     }
+                } else {
+                    set_prefix = std::format("{}{:02d}:\033[0m[", kThemeMuted, set_idx);
+                }
 
-                    std::string s = set_prefix;
-                    for (uint32_t w = 0; w < 4; ++w) {
-                        if (cache.is_line_valid(set_idx, w)) {
-                            if (is_last) {
-                                if (was_hit) {
-                                    s += std::format("\033[1m{}#\033[0m", kThemeMint);
-                                } else {
-                                    s += std::format("\033[1m{}#\033[0m", kThemeCoral);
-                                }
+                std::string s = set_prefix;
+                for (uint32_t w = 0; w < 4; ++w) {
+                    if (cache.is_line_valid(set_idx, w)) {
+                        if (is_last) {
+                            if (was_hit) {
+                                s += std::format("\033[1m{}#\033[0m", kThemeMint);
                             } else {
-                                s += std::format("{}#\033[0m", kThemeMint);
+                                s += std::format("\033[1m{}#\033[0m", kThemeCoral);
                             }
                         } else {
-                            s += std::format("{}.\033[0m", kThemeMuted);
+                            s += std::format("{}#\033[0m", kThemeMint);
                         }
+                    } else {
+                        s += std::format("{}.\033[0m", kThemeMuted);
                     }
-                    s += "]";
-                    return s;
-                };
+                }
+                s += "]";
+                return s;
+            };
 
-                std::string ic_left = make_set_str(ic, base_set);
-                std::string ic_right = make_set_str(ic, base_set + 1);
-                std::string dc_left = make_set_str(dc, base_set);
-                std::string dc_right = make_set_str(dc, base_set + 1);
+            std::string ic_left = make_set_str(ic, base_set);
+            std::string ic_right = make_set_str(ic, base_set + 1);
+            std::string dc_left = make_set_str(dc, base_set);
+            std::string dc_right = make_set_str(dc, base_set + 1);
 
-                std::string left_col = std::format(" IC {} {}", ic_left, ic_right);
-                std::string right_col = std::format(" DC {} {}", dc_left, dc_right);
+            std::string left_col = std::format(" IC {} {}", ic_left, ic_right);
+            std::string right_col = std::format(" DC {} {}", dc_left, dc_right);
 
-                return format_to_width(left_col, col_width) + format_to_width(right_col, right_width);
-            }
+            return format_to_width(left_col, col_width) + format_to_width(right_col, right_width);
+        }
         case 15:
-            return section_line("Cache Set Map [Tag | Set: 5b | Off: 5b (32B)] (# Valid, . Empty)", width);
+            return section_line("Cache Set Map [Tag | Set: 5b | Off: 5b (32B)] (# Valid, . Empty)",
+                                width);
         default:
             return format_to_width("", width);
     }
 }
 
-auto LeftPane::render_system_or_pipeline_extended(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width, bool single_column) -> std::string {
+auto LeftPane::render_system_or_pipeline_extended(const simrv::core::CPU& cpu, int logical_row,
+                                                  int col_width, int right_width,
+                                                  bool single_column) -> std::string {
     if (logical_row >= 16 && logical_row <= 24) {
         if (page_ == TuiRegPage::PIPELINE) {
             return render_pipeline_stages(cpu, logical_row, col_width, right_width);
@@ -1132,7 +1153,8 @@ auto LeftPane::render_system_or_pipeline_extended(const simrv::core::CPU& cpu, i
     return "";
 }
 
-auto LeftPane::render_system_state(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_system_state(const simrv::core::CPU& cpu, int logical_row, int col_width,
+                                   int right_width) -> std::string {
     auto const& st = cpu.state();
     int const width = col_width + right_width;
     int label_pad = (width < 50) ? 0 : ((width < 65) ? 5 : 8);
@@ -1145,50 +1167,49 @@ auto LeftPane::render_system_state(const simrv::core::CPU& cpu, int logical_row,
                                : (st.priv == PrivilegeLevel::Supervisor) ? "Supervisor"
                                                                          : "User";
         return render_pair("pc", std::format("0x{:0{}x}", st.pc, simrv::xlen::kXLenHexDigits),
-                           kThemeMint, "priv", priv_str, kThemePink, col_width, right_width, label_pad);
+                           kThemeMint, "priv", priv_str, kThemePink, col_width, right_width,
+                           label_pad);
     }
     if (logical_row == 18) {
         std::string misa_str = simrv::xlen::resolve_misa_string(st.misa);
-        return render_pair("mstatus",
-                           std::format("0x{:0{}x}", st.mstatus, simrv::xlen::kXLenHexDigits),
-                           kThemeVal, "misa", misa_str, kThemeVal, col_width, right_width, label_pad);
+        return render_pair(
+            "mstatus", std::format("0x{:0{}x}", st.mstatus, simrv::xlen::kXLenHexDigits), kThemeVal,
+            "misa", misa_str, kThemeVal, col_width, right_width, label_pad);
     }
     if (logical_row == 19) {
-        return render_pair(
-            "mie", std::format("0x{:0{}x}", st.mie, simrv::xlen::kXLenHexDigits), kThemeVal,
-            "mip", std::format("0x{:0{}x}", st.mip, simrv::xlen::kXLenHexDigits), kThemeVal,
-            col_width, right_width, label_pad);
+        return render_pair("mie", std::format("0x{:0{}x}", st.mie, simrv::xlen::kXLenHexDigits),
+                           kThemeVal, "mip",
+                           std::format("0x{:0{}x}", st.mip, simrv::xlen::kXLenHexDigits), kThemeVal,
+                           col_width, right_width, label_pad);
     }
     if (logical_row == 20) {
-        return render_pair(
-            "mtvec", std::format("0x{:0{}x}", st.mtvec, simrv::xlen::kXLenHexDigits),
-            kThemeVal, "mepc", std::format("0x{:0{}x}", st.mepc, simrv::xlen::kXLenHexDigits),
-            kThemeVal, col_width, right_width, label_pad);
+        return render_pair("mtvec", std::format("0x{:0{}x}", st.mtvec, simrv::xlen::kXLenHexDigits),
+                           kThemeVal, "mepc",
+                           std::format("0x{:0{}x}", st.mepc, simrv::xlen::kXLenHexDigits),
+                           kThemeVal, col_width, right_width, label_pad);
     }
     if (logical_row == 21) {
-        return render_pair(
-            "stvec", std::format("0x{:0{}x}", st.stvec, simrv::xlen::kXLenHexDigits),
-            kThemeVal, "sepc", std::format("0x{:0{}x}", st.sepc, simrv::xlen::kXLenHexDigits),
-            kThemeVal, col_width, right_width, label_pad);
+        return render_pair("stvec", std::format("0x{:0{}x}", st.stvec, simrv::xlen::kXLenHexDigits),
+                           kThemeVal, "sepc",
+                           std::format("0x{:0{}x}", st.sepc, simrv::xlen::kXLenHexDigits),
+                           kThemeVal, col_width, right_width, label_pad);
     }
     if (logical_row == 22) {
-        return render_pair(
-            "mtval", std::format("0x{:0{}x}", st.mtval, simrv::xlen::kXLenHexDigits),
-            kThemeVal, "satp", std::format("0x{:0{}x}", st.satp, simrv::xlen::kXLenHexDigits),
-            kThemeVal, col_width, right_width, label_pad);
+        return render_pair("mtval", std::format("0x{:0{}x}", st.mtval, simrv::xlen::kXLenHexDigits),
+                           kThemeVal, "satp",
+                           std::format("0x{:0{}x}", st.satp, simrv::xlen::kXLenHexDigits),
+                           kThemeVal, col_width, right_width, label_pad);
     }
     if (logical_row == 23) {
         return render_pair(
-            "scause", std::format("0x{:0{}x}", st.scause, simrv::xlen::kXLenHexDigits),
-            kThemeVal, "stval",
-            std::format("0x{:0{}x}", st.stval, simrv::xlen::kXLenHexDigits), kThemeVal,
+            "scause", std::format("0x{:0{}x}", st.scause, simrv::xlen::kXLenHexDigits), kThemeVal,
+            "stval", std::format("0x{:0{}x}", st.stval, simrv::xlen::kXLenHexDigits), kThemeVal,
             col_width, right_width, label_pad);
     }
     if (logical_row == 24) {
         return render_pair(
-            "medeleg", std::format("0x{:0{}x}", st.medeleg, simrv::xlen::kXLenHexDigits),
-            kThemeVal, "mideleg",
-            std::format("0x{:0{}x}", st.mideleg, simrv::xlen::kXLenHexDigits), kThemeVal,
+            "medeleg", std::format("0x{:0{}x}", st.medeleg, simrv::xlen::kXLenHexDigits), kThemeVal,
+            "mideleg", std::format("0x{:0{}x}", st.mideleg, simrv::xlen::kXLenHexDigits), kThemeVal,
             col_width, right_width, label_pad);
     }
     return format_to_width("", width);
