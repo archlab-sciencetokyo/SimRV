@@ -1496,11 +1496,21 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         return true;
     }
     if (esc_buf_ == "\033[C" || esc_buf_ == "\033OC") {
-        adjust_left_pane_width(2);
+        if (get_active_modal() == ModalType::Settings) {
+            modal_.toggle_setting_at_cursor();
+            render(true);
+            return true;
+        }
+        cycle_right_panel_mode();
         return true;
     }
     if (esc_buf_ == "\033[D" || esc_buf_ == "\033OD") {
-        adjust_left_pane_width(-2);
+        if (get_active_modal() == ModalType::Settings) {
+            modal_.toggle_setting_at_cursor();
+            render(true);
+            return true;
+        }
+        cycle_reg_page();
         return true;
     }
     if (esc_buf_ == "\033[5~") {
