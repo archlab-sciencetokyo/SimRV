@@ -39,8 +39,41 @@ void TuiModal::open(ModalType type, LeftPane* left_pane, uint64_t step_granulari
         case ModalType::LoadDiskImage:
             input_ = machine_.s_fn_dskimg;
             break;
+        case ModalType::Settings:
+            settings_cursor_ = 0;
+            break;
         default:
             break;
+    }
+}
+
+void TuiModal::move_settings_cursor(int delta) {
+    constexpr int kNumSettings = 12;
+    settings_cursor_ = (settings_cursor_ + delta + kNumSettings) % kNumSettings;
+}
+
+void TuiModal::toggle_setting_at_cursor() {
+    toggle_setting_by_index(settings_cursor_);
+}
+
+void TuiModal::toggle_setting_by_index(int index) {
+    switch (index) {
+        case 0: machine_.s_cycle_accurate = !machine_.s_cycle_accurate; break;
+        case 1: machine_.s_debug_mode = !machine_.s_debug_mode; break;
+        case 2: machine_.s_appmode = !machine_.s_appmode; break;
+        case 3:
+            machine_.s_rollback_enabled = !machine_.s_rollback_enabled;
+            if (!machine_.s_rollback_enabled) machine_.cpu.undo_stack.clear();
+            break;
+        case 4: machine_.s_high_contrast = !machine_.s_high_contrast; break;
+        case 5: machine_.s_use_mix = !machine_.s_use_mix; break;
+        case 6: machine_.s_bp_trace = !machine_.s_bp_trace; break;
+        case 7: machine_.s_traplog_mode = !machine_.s_traplog_mode; break;
+        case 8: machine_.s_dlog_mode = !machine_.s_dlog_mode; break;
+        case 9: machine_.s_high_performance = !machine_.s_high_performance; break;
+        case 10: machine_.s_lockstep_mode = !machine_.s_lockstep_mode; break;
+        case 11: machine_.s_gdb_mode = !machine_.s_gdb_mode; break;
+        default: break;
     }
 }
 
@@ -334,16 +367,54 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width, i
                 "{}[Esc]\033[0m {} or {}[Enter]\033[0m{} with empty path to skip\033[0m", kThemeSky,
                 kThemeMuted, kThemeSky, kThemeMuted));
             break;
+        case ModalType::Settings: {
+            title = " SIMULATOR SETTINGS ";
+            add_row(std::format("{}Use \033[1m[↑/↓]\033[0m + \033[1m[Enter/Space]\033[0m or key \033[1m[1-9,0,a,g]\033[0m to toggle:\033[0m", kThemeMuted));
+            add_row("");
+
+            struct SettingItem {
+                const char* key;
+                const char* name;
+                std::string val;
+            };
+
+            std::array<SettingItem, 12> settings = {{
+                {" 1", "Simulation Mode",           machine_.s_cycle_accurate ? "\033[1;36m[CA (Cycle-Accurate)]\033[0m" : "\033[1;33m[IA (Instruction-Accurate)]\033[0m"},
+                {" 2", "TUI Diagnostics View",      machine_.s_debug_mode ? "\033[1;32m[Debug Mode (Diagnostics ON)]\033[0m" : "\033[90m[Normal Mode]\033[0m"},
+                {" 3", "Target Environment",        machine_.s_appmode ? "\033[1;35m[App (Baremetal)]\033[0m" : "\033[1;32m[OS (Linux/RTOS)]\033[0m"},
+                {" 4", "Step Rollback History",     machine_.s_rollback_enabled ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 5", "High Contrast Theme",       machine_.s_high_contrast ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 6", "Instruction Mix Stats",     machine_.s_use_mix ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 7", "Branch Prediction Trace",   machine_.s_bp_trace ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 8", "Exception & Trap Log",      machine_.s_traplog_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 9", "Device MMIO Access Log",    machine_.s_dlog_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {"10", "High-Performance Engine",   machine_.s_high_performance ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" a", "Co-Sim Spike Lockstep",     machine_.s_lockstep_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" g", "GDB Server Stub (1234)",    machine_.s_gdb_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+            }};
+
+            for (std::size_t i = 0; i < settings.size(); ++i) {
+                bool is_sel = (static_cast<int>(i) == settings_cursor_);
+                std::string prefix = is_sel ? std::format("{}>\033[0m ", kThemeMint) : "  ";
+                std::string num_key = std::format("{}[{}]\033[0m", is_sel ? kThemeMint : kThemeSky, settings[i].key);
+                std::string name_str = std::format("{}{:<27}\033[0m", is_sel ? "\033[1;37m" : kThemeText, settings[i].name);
+                add_row(std::format("{}{} {} : {}", prefix, num_key, name_str, settings[i].val));
+            }
+            add_row("");
+            add_row(std::format("{}Press \033[1m[Esc]\033[0m or \033[1m[q]\033[0m to close\033[0m", kThemeMuted));
+            break;
+        }
         case ModalType::Help:
             title = " SIMULATOR KEYBOARD SHORTCUTS ";
             if (term_height < 32 && box_w >= 70) {
                 // Dual-column layout for small screen height
                 struct Shortcut { const char* key; const char* desc; };
-                static constexpr std::array<Shortcut, 26> help_items = {{
+                static constexpr std::array<Shortcut, 27> help_items = {{
                     {"[s] / [Space]", "Step 1 inst"},
                     {"[n]",          "Step N insts"},
                     {"[b] / [Alt-b]", "Undo / Toggle Rollback"},
                     {"[o] / [Alt-o]", "Load Binary / Disk"},
+                    {"[,] / [Alt-s]", "Simulator Settings"},
                     {"[Alt-a]",      "Toggle IA / CA Mode"},
                     {"[Alt-d]",      "Toggle Debug Mode"},
                     {"[:]",          "Set PC Breakpoint"},

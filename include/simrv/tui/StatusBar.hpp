@@ -35,7 +35,8 @@ enum class TuiFooterAction : uint8_t {
     TogglePanel,
     ToggleTrace,
     ToggleCycleAccurate,
-    ToggleDebugMode
+    ToggleDebugMode,
+    OpenSettings
 };
 
 class StatusBar : public TuiWidget {

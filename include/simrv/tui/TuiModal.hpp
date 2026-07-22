@@ -28,7 +28,8 @@ enum class ModalType : uint8_t {
     InspectAddress,
     LoadBinary,
     LoadDiskImage,
-    Help
+    Help,
+    Settings
 };
 
 class TuiModal {
@@ -52,12 +53,17 @@ class TuiModal {
     void toggle_load_mode() { load_appmode_ = !load_appmode_; }
     [[nodiscard]] auto get_load_appmode() const -> bool { return load_appmode_; }
 
+    void move_settings_cursor(int delta);
+    void toggle_setting_at_cursor();
+    void toggle_setting_by_index(int index);
+
     void render_overlay(std::vector<std::string>& lines, int term_width, int term_height) const;
 
    private:
     simrv::core::Machine& machine_;
     ModalType active_modal_ = ModalType::None;
     std::string input_;
+    int settings_cursor_ = 0;
     bool load_appmode_ =
         false;  // Toggle for App (baremetal) vs OS (Linux) mode in LoadBinary modal
     std::string staged_binary_path_;

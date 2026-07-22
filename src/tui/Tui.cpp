@@ -1067,6 +1067,28 @@ void Tui::pause_loop() {
 
             const auto key = static_cast<simrv::tui::TuiKey>(byte);
             if (is_modal_active()) {
+                if (get_active_modal() == ModalType::Settings) {
+                    if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
+                        close_modal();
+                    } else if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline || byte == ' ') {
+                        modal_.toggle_setting_at_cursor();
+                        render(true);
+                    } else if (byte >= '1' && byte <= '9') {
+                        modal_.toggle_setting_by_index(byte - '1');
+                        render(true);
+                    } else if (byte == '0') {
+                        modal_.toggle_setting_by_index(9);
+                        render(true);
+                    } else if (byte == 'a' || byte == 'A') {
+                        modal_.toggle_setting_by_index(10);
+                        render(true);
+                    } else if (byte == 'g' || byte == 'G') {
+                        modal_.toggle_setting_by_index(11);
+                        render(true);
+                    }
+                    continue;
+                }
+
                 if (byte == 27 || key == simrv::tui::TuiKey::Esc) {
                     // Dismiss modal — but only allow dismissing LoadBinary if a binary is already
                     // loaded
@@ -1125,6 +1147,8 @@ void Tui::pause_loop() {
                 open_modal(ModalType::InspectAddress);
             } else if (key == simrv::tui::TuiKey::QuestionMark || key == simrv::tui::TuiKey::h || key == simrv::tui::TuiKey::H) {
                 open_modal(ModalType::Help);
+            } else if (byte == ',' || key == simrv::tui::TuiKey::Comma) {
+                open_modal(ModalType::Settings);
             } else if (key == simrv::tui::TuiKey::LeftBracket) {
                 adjust_left_pane_width(-2);
             } else if (key == simrv::tui::TuiKey::RightBracket) {
@@ -1347,6 +1371,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                         case TuiFooterAction::ToggleTrace: toggle_trace_enabled(); break;
                         case TuiFooterAction::ToggleCycleAccurate: toggle_cycle_accurate(); break;
                         case TuiFooterAction::ToggleDebugMode: toggle_debug_mode(); break;
+                        case TuiFooterAction::OpenSettings: open_modal(ModalType::Settings); break;
                     }
                     return true;
                 }
@@ -1438,7 +1463,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             return true;
         }
         if (key == 's' || key == 'S') {
-            scroll_regs(2);
+            open_modal(ModalType::Settings);
             return true;
         }
         if (key == 'z' || key == 'Z') {
@@ -1453,10 +1478,20 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
 
     // 3. Arrow keys, Page Up/Down, Home, End
     if (esc_buf_ == "\033[A" || esc_buf_ == "\033OA") {
+        if (get_active_modal() == ModalType::Settings) {
+            modal_.move_settings_cursor(-1);
+            render(true);
+            return true;
+        }
         scroll(-1);
         return true;
     }
     if (esc_buf_ == "\033[B" || esc_buf_ == "\033OB") {
+        if (get_active_modal() == ModalType::Settings) {
+            modal_.move_settings_cursor(1);
+            render(true);
+            return true;
+        }
         scroll(1);
         return true;
     }
