@@ -92,6 +92,7 @@ auto StatusBar::get_footer_action_at_col(int col) const -> std::optional<TuiFoot
         {"[l] Tools",      TuiFooterAction::CycleTools},
         {"[o] Load",       TuiFooterAction::LoadBinary},
         {"[,] Settings",   TuiFooterAction::OpenSettings},
+        {"[Alt-m] MISA",   TuiFooterAction::ConfigureMisa},
         {"[:] Set-BP",     TuiFooterAction::SetBreakpoint},
         {"[k] Toggle-BP",  TuiFooterAction::TogglePcBreakpoint},
         {"[f] Speed",      TuiFooterAction::SetSpeed},
@@ -109,6 +110,7 @@ auto StatusBar::get_footer_action_at_col(int col) const -> std::optional<TuiFoot
         {"[p] Panel",       TuiFooterAction::TogglePanel},
         {"[v] Trace",       TuiFooterAction::ToggleTrace},
         {"[,] Settings",    TuiFooterAction::OpenSettings},
+        {"[Alt-m] MISA",    TuiFooterAction::ConfigureMisa},
         {"[f] Speed",       TuiFooterAction::SetSpeed},
         {"[:] Set-BP",      TuiFooterAction::SetBreakpoint},
         {"[F1/?] Help",     TuiFooterAction::ToggleHelp},
@@ -359,10 +361,10 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         std::string footer_text;
         if (paused_) {
             footer_text =
-                " [s] Step | [b] Back | [n] StepN | [g] N-Size | [r] Regs | [l] Tools | [o] Load | [,] Settings | [:] Set-BP | [k] Toggle-BP | [f] Speed | [m] Mem | [F1/?] Help | [c] Run | [q] Quit ";
+                " [s] Step | [b] Back | [n] StepN | [g] N-Size | [r] Regs | [l] Tools | [o] Load | [,] Settings | [Alt-m] MISA | [:] Set-BP | [k] Toggle-BP | [f] Speed | [m] Mem | [F1/?] Help | [c] Run | [q] Quit ";
         } else {
             footer_text =
-                " [Ctrl-P] Pause | [r] Regs | [l] Tools | [Tab] Layout | [p] Panel | [v] Trace | [,] Settings | [f] Speed | [:] Set-BP | [F1/?] Help | [Ctrl-Q] Quit ";
+                " [Ctrl-P] Pause | [r] Regs | [l] Tools | [Tab] Layout | [p] Panel | [v] Trace | [,] Settings | [Alt-m] MISA | [f] Speed | [:] Set-BP | [F1/?] Help | [Ctrl-Q] Quit ";
         }
         int footer_len = get_display_width(footer_text);
         int pad_foot = (width - 2) - footer_len;

@@ -1087,6 +1087,36 @@ void Tui::pause_loop() {
                     } else if (byte == 'g' || byte == 'G') {
                         modal_.toggle_setting_by_index(10);
                         render(true);
+                    } else if (byte == 'm' || byte == 'M') {
+                        open_modal(ModalType::ConfigureMisa);
+                        render(true);
+                    }
+                    continue;
+                }
+
+                if (get_active_modal() == ModalType::ConfigureMisa) {
+                    if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
+                        close_modal();
+                    } else if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+                        submit_modal();
+                    } else if (byte == ' ') {
+                        modal_.toggle_misa_at_cursor();
+                        render(true);
+                    } else if (byte >= '0' && byte <= '9') {
+                        modal_.toggle_misa_by_index(byte - '0');
+                        render(true);
+                    } else if (byte == 'a' || byte == 'A') {
+                        modal_.toggle_misa_by_index(10);
+                        render(true);
+                    } else if (byte == 'p' || byte == 'P') {
+                        modal_.apply_misa_profile(0);
+                        render(true);
+                    } else if (byte == 'i' || byte == 'I') {
+                        modal_.apply_misa_profile(1);
+                        render(true);
+                    } else if (byte == 'g' || byte == 'G') {
+                        modal_.apply_misa_profile(2);
+                        render(true);
                     }
                     continue;
                 }
@@ -1372,6 +1402,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                         case TuiFooterAction::TogglePanel: cycle_right_panel_mode(); break;
                         case TuiFooterAction::ToggleTrace: toggle_trace_enabled(); break;
                         case TuiFooterAction::OpenSettings: open_modal(ModalType::Settings); break;
+                        case TuiFooterAction::ConfigureMisa: open_modal(ModalType::ConfigureMisa); break;
                     }
                     return true;
                 }
@@ -1458,6 +1489,10 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             open_modal(ModalType::Settings);
             return true;
         }
+        if (key == 'm' || key == 'M') {
+            open_modal(ModalType::ConfigureMisa);
+            return true;
+        }
         if (key == 'z' || key == 'Z') {
             reset_scroll_regs();
             return true;
@@ -1475,12 +1510,22 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             render(true);
             return true;
         }
+        if (get_active_modal() == ModalType::ConfigureMisa) {
+            modal_.move_misa_cursor(-1);
+            render(true);
+            return true;
+        }
         scroll(-1);
         return true;
     }
     if (esc_buf_ == "\033[B" || esc_buf_ == "\033OB") {
         if (get_active_modal() == ModalType::Settings) {
             modal_.move_settings_cursor(1);
+            render(true);
+            return true;
+        }
+        if (get_active_modal() == ModalType::ConfigureMisa) {
+            modal_.move_misa_cursor(1);
             render(true);
             return true;
         }
@@ -1493,12 +1538,22 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             render(true);
             return true;
         }
+        if (get_active_modal() == ModalType::ConfigureMisa) {
+            modal_.toggle_misa_at_cursor();
+            render(true);
+            return true;
+        }
         cycle_right_panel_mode();
         return true;
     }
     if (esc_buf_ == "\033[D" || esc_buf_ == "\033OD") {
         if (get_active_modal() == ModalType::Settings) {
             modal_.toggle_setting_at_cursor();
+            render(true);
+            return true;
+        }
+        if (get_active_modal() == ModalType::ConfigureMisa) {
+            modal_.toggle_misa_at_cursor();
             render(true);
             return true;
         }

@@ -4,11 +4,14 @@
  */
 
 #include "simrv/tui/TuiModal.hpp"
+
 #include <charconv>
 #include <format>
+
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/LeftPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/xlen/Helpers.hpp"
 
 namespace simrv::tui {
 
@@ -25,11 +28,12 @@ struct SettingItem {
     std::string val;
 };
 
-} // namespace
+}  // namespace
 
 TuiModal::TuiModal(simrv::core::Machine& machine) : machine_(machine) {}
 
-void TuiModal::open(ModalType type, LeftPane* left_pane, uint64_t step_granularity, uint64_t step_delay_us) {
+void TuiModal::open(ModalType type, LeftPane* left_pane, uint64_t step_granularity,
+                    uint64_t step_delay_us) {
     active_modal_ = type;
     input_.clear();
     switch (type) {
@@ -68,6 +72,22 @@ void TuiModal::open(ModalType type, LeftPane* left_pane, uint64_t step_granulari
             settings_draft_.lockstep_mode = machine_.s_lockstep_mode;
             settings_draft_.gdb_mode = machine_.s_gdb_mode;
             break;
+        case ModalType::ConfigureMisa: {
+            misa_cursor_ = 0;
+            const uint64_t misa = machine_.cpu.state().misa;
+            misa_draft_.xlen_bits = static_cast<uint8_t>(machine_.cpu.state().regs.xlen);
+            misa_draft_.ext_a = (misa & (1ULL << ('a' - 'a'))) != 0;
+            misa_draft_.ext_b = (misa & (1ULL << ('b' - 'a'))) != 0;
+            misa_draft_.ext_c = (misa & (1ULL << ('c' - 'a'))) != 0;
+            misa_draft_.ext_d = (misa & (1ULL << ('d' - 'a'))) != 0;
+            misa_draft_.ext_f = (misa & (1ULL << ('f' - 'a'))) != 0;
+            misa_draft_.ext_i = (misa & (1ULL << ('i' - 'a'))) != 0;
+            misa_draft_.ext_m = (misa & (1ULL << ('m' - 'a'))) != 0;
+            misa_draft_.ext_s = (misa & (1ULL << ('s' - 'a'))) != 0;
+            misa_draft_.ext_u = (misa & (1ULL << ('u' - 'a'))) != 0;
+            misa_draft_.ext_v = (misa & (1ULL << ('v' - 'a'))) != 0;
+            break;
+        }
         default:
             break;
     }
@@ -78,24 +98,146 @@ void TuiModal::move_settings_cursor(int delta) {
     settings_cursor_ = (settings_cursor_ + delta + kNumSettings) % kNumSettings;
 }
 
-void TuiModal::toggle_setting_at_cursor() {
-    toggle_setting_by_index(settings_cursor_);
-}
+void TuiModal::toggle_setting_at_cursor() { toggle_setting_by_index(settings_cursor_); }
 
 void TuiModal::toggle_setting_by_index(int index) {
     switch (index) {
-        case 0: settings_draft_.cycle_accurate = !settings_draft_.cycle_accurate; break;
-        case 1: settings_draft_.debug_mode = !settings_draft_.debug_mode; break;
-        case 2: settings_draft_.rollback_enabled = !settings_draft_.rollback_enabled; break;
-        case 3: settings_draft_.high_contrast = !settings_draft_.high_contrast; break;
-        case 4: settings_draft_.use_mix = !settings_draft_.use_mix; break;
-        case 5: settings_draft_.bp_trace = !settings_draft_.bp_trace; break;
-        case 6: settings_draft_.traplog_mode = !settings_draft_.traplog_mode; break;
-        case 7: settings_draft_.dlog_mode = !settings_draft_.dlog_mode; break;
-        case 8: settings_draft_.high_performance = !settings_draft_.high_performance; break;
-        case 9: settings_draft_.lockstep_mode = !settings_draft_.lockstep_mode; break;
-        case 10: settings_draft_.gdb_mode = !settings_draft_.gdb_mode; break;
-        default: break;
+        case 0:
+            settings_draft_.cycle_accurate = !settings_draft_.cycle_accurate;
+            break;
+        case 1:
+            settings_draft_.debug_mode = !settings_draft_.debug_mode;
+            break;
+        case 2:
+            if (settings_draft_.high_performance) break;
+            settings_draft_.rollback_enabled = !settings_draft_.rollback_enabled;
+            break;
+        case 3:
+            settings_draft_.high_contrast = !settings_draft_.high_contrast;
+            break;
+        case 4:
+            settings_draft_.use_mix = !settings_draft_.use_mix;
+            break;
+        case 5:
+            if (!settings_draft_.cycle_accurate || settings_draft_.high_performance) break;
+            settings_draft_.bp_trace = !settings_draft_.bp_trace;
+            break;
+        case 6:
+            settings_draft_.traplog_mode = !settings_draft_.traplog_mode;
+            break;
+        case 7:
+            if (machine_.s_appmode) break;
+            settings_draft_.dlog_mode = !settings_draft_.dlog_mode;
+            break;
+        case 8:
+            settings_draft_.high_performance = !settings_draft_.high_performance;
+            if (settings_draft_.high_performance) {
+                settings_draft_.bp_trace = false;
+                settings_draft_.rollback_enabled = false;
+            }
+            break;
+        case 9:
+            if (machine_.s_spike_bin.empty()) break;
+            settings_draft_.lockstep_mode = !settings_draft_.lockstep_mode;
+            break;
+        case 10:
+            settings_draft_.gdb_mode = !settings_draft_.gdb_mode;
+            break;
+        default:
+            break;
+    }
+}
+
+void TuiModal::move_misa_cursor(int delta) {
+    constexpr int kNumMisaItems = 14;
+    misa_cursor_ = (misa_cursor_ + delta + kNumMisaItems) % kNumMisaItems;
+}
+
+void TuiModal::toggle_misa_at_cursor() { toggle_misa_by_index(misa_cursor_); }
+
+void TuiModal::toggle_misa_by_index(int index) {
+    switch (index) {
+        case 0:
+            misa_draft_.xlen_bits = (misa_draft_.xlen_bits == 32) ? 64 : 32;
+            break;
+        case 1:
+            misa_draft_.ext_a = !misa_draft_.ext_a;
+            break;
+        case 2:
+            misa_draft_.ext_b = !misa_draft_.ext_b;
+            break;
+        case 3:
+            misa_draft_.ext_c = !misa_draft_.ext_c;
+            break;
+        case 4:
+            misa_draft_.ext_d = !misa_draft_.ext_d;
+            break;
+        case 5:
+            misa_draft_.ext_f = !misa_draft_.ext_f;
+            break;
+        case 6:
+            misa_draft_.ext_i = !misa_draft_.ext_i;
+            break;
+        case 7:
+            misa_draft_.ext_m = !misa_draft_.ext_m;
+            break;
+        case 8:
+            misa_draft_.ext_s = !misa_draft_.ext_s;
+            break;
+        case 9:
+            misa_draft_.ext_u = !misa_draft_.ext_u;
+            break;
+        case 10:
+            misa_draft_.ext_v = !misa_draft_.ext_v;
+            break;
+        case 11:
+            apply_misa_profile(0);
+            break;  // Profile: Base (I)
+        case 12:
+            apply_misa_profile(1);
+            break;  // Profile: IMAC
+        case 13:
+            apply_misa_profile(2);
+            break;  // Profile: GC
+        default:
+            break;
+    }
+}
+
+void TuiModal::apply_misa_profile(int profile_idx) {
+    if (profile_idx == 0) {  // Base (I)
+        misa_draft_.ext_a = false;
+        misa_draft_.ext_b = false;
+        misa_draft_.ext_c = false;
+        misa_draft_.ext_d = false;
+        misa_draft_.ext_f = false;
+        misa_draft_.ext_i = true;
+        misa_draft_.ext_m = false;
+        misa_draft_.ext_s = false;
+        misa_draft_.ext_u = false;
+        misa_draft_.ext_v = false;
+    } else if (profile_idx == 1) {  // IMAC
+        misa_draft_.ext_a = true;
+        misa_draft_.ext_b = false;
+        misa_draft_.ext_c = true;
+        misa_draft_.ext_d = false;
+        misa_draft_.ext_f = false;
+        misa_draft_.ext_i = true;
+        misa_draft_.ext_m = true;
+        misa_draft_.ext_s = false;
+        misa_draft_.ext_u = false;
+        misa_draft_.ext_v = false;
+    } else if (profile_idx == 2) {  // GC (General-Purpose)
+        misa_draft_.ext_a = true;
+        misa_draft_.ext_b = false;
+        misa_draft_.ext_c = true;
+        misa_draft_.ext_d = true;
+        misa_draft_.ext_f = true;
+        misa_draft_.ext_i = true;
+        misa_draft_.ext_m = true;
+        misa_draft_.ext_s = true;
+        misa_draft_.ext_u = true;
+        misa_draft_.ext_v = false;
     }
 }
 
@@ -110,6 +252,22 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_granulari
                       const std::function<void(const std::string&)>& set_status_override_cb,
                       const std::function<void()>& on_speed_changed_cb) -> bool {
     if (active_modal_ == ModalType::None) return false;
+
+    if (active_modal_ == ModalType::ConfigureMisa) {
+        const uint64_t new_misa = misa_draft_.to_misa_val();
+        machine_.cpu.state().misa = new_misa;
+        machine_.s_misa_profile = new_misa;
+        machine_.s_misa_override = true;
+        machine_.s_misa_xlen = misa_draft_.xlen_bits;
+        machine_.cpu.state().update_xlen();
+        if (set_status_override_cb) {
+            set_status_override_cb(std::format("MISA updated to: {} (0x{:016x})",
+                                               misa_draft_.to_misa_string(), new_misa));
+        }
+        active_modal_ = ModalType::None;
+        input_.clear();
+        return false;
+    }
 
     if (active_modal_ == ModalType::Settings) {
         machine_.s_cycle_accurate = settings_draft_.cycle_accurate;
@@ -135,7 +293,8 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_granulari
     }
 
     std::string text = input_;
-    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front()))) text.erase(text.begin());
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())))
+        text.erase(text.begin());
     while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back()))) text.pop_back();
 
     if (!text.empty() && active_modal_ != ModalType::Help) {
@@ -144,7 +303,8 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_granulari
                 Address addr = 0;
                 bool ok = false;
                 if (text.starts_with("0x") || text.starts_with("0X")) {
-                    auto result = std::from_chars(text.data() + 2, text.data() + text.size(), addr, 16);
+                    auto result =
+                        std::from_chars(text.data() + 2, text.data() + text.size(), addr, 16);
                     ok = (result.ec == std::errc{});
                 } else if (std::all_of(text.begin(), text.end(), ::isxdigit)) {
                     auto result = std::from_chars(text.data(), text.data() + text.size(), addr, 16);
@@ -186,7 +346,8 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_granulari
                     } else {
                         uint64_t delay = 1000000 / val;
                         step_delay_us.store(delay, std::memory_order_relaxed);
-                        set_status_override_cb(std::format("Speed set to {} Hz (delay: {}us)", val, delay));
+                        set_status_override_cb(
+                            std::format("Speed set to {} Hz (delay: {}us)", val, delay));
                     }
                     if (on_speed_changed_cb &&
                         old_delay != step_delay_us.load(std::memory_order_relaxed)) {
@@ -201,7 +362,8 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_granulari
                 Address addr = 0;
                 bool ok = false;
                 if (text.starts_with("0x") || text.starts_with("0X")) {
-                    auto result = std::from_chars(text.data() + 2, text.data() + text.size(), addr, 16);
+                    auto result =
+                        std::from_chars(text.data() + 2, text.data() + text.size(), addr, 16);
                     ok = (result.ec == std::errc{});
                 } else if (std::all_of(text.begin(), text.end(), ::isxdigit)) {
                     auto result = std::from_chars(text.data(), text.data() + text.size(), addr, 16);
@@ -345,11 +507,15 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_granulari
     return false;
 }
 
-void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width, int term_height) const {
+void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
+                              int term_height) const {
     if (active_modal_ == ModalType::None || lines.empty()) return;
 
     bool is_help = (active_modal_ == ModalType::Help);
-    int box_w = is_help ? std::min(76, term_width - 4) : std::min(58, term_width - 4);
+    bool is_wide_modal = (is_help ||
+                          active_modal_ == ModalType::Settings ||
+                          active_modal_ == ModalType::ConfigureMisa);
+    int box_w = is_wide_modal ? std::min(78, term_width - 4) : std::min(58, term_width - 4);
     if (box_w < 35) return;
 
     std::string m_bg = kThemeModalBg;
@@ -415,100 +581,221 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width, i
             break;
         case ModalType::Settings: {
             title = " SIMULATOR SETTINGS ";
-            add_row(std::format("{}Use \033[1m[↑/↓/←/→]\033[0m or key \033[1m[1-9,0,a,g]\033[0m to toggle, \033[1m[Enter]\033[0m to apply:\033[0m", kThemeMuted));
+            add_row(
+                std::format("{}Use \033[1m[↑/↓/←/→]\033[0m or key \033[1m[1-9,0,a,g]\033[0m to "
+                            "toggle, \033[1m[Enter]\033[0m to apply:\033[0m",
+                            kThemeMuted));
             add_row("");
 
+            const bool bp_disabled =
+                !settings_draft_.cycle_accurate || settings_draft_.high_performance;
+            const bool rollback_disabled = settings_draft_.high_performance;
+            const bool dlog_disabled = machine_.s_appmode;
+            const bool lockstep_disabled = machine_.s_spike_bin.empty();
+
             const auto settings = std::to_array<SettingItem>({
-                {" 1", "Simulation Mode",           settings_draft_.cycle_accurate ? "\033[1;36m[CA (Cycle-Accurate)]\033[0m" : "\033[1;33m[IA (Instruction-Accurate)]\033[0m"},
-                {" 2", "TUI Diagnostics View",      settings_draft_.debug_mode ? "\033[1;32m[Debug Mode (Diagnostics ON)]\033[0m" : "\033[90m[Normal Mode]\033[0m"},
-                {" 3", "Step Rollback History",     settings_draft_.rollback_enabled ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-                {" 4", "High Contrast Theme",       settings_draft_.high_contrast ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-                {" 5", "Instruction Mix Stats",     settings_draft_.use_mix ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-                {" 6", "Branch Prediction Trace",   settings_draft_.bp_trace ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-                {" 7", "Exception & Trap Log",      settings_draft_.traplog_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-                {" 8", "Device MMIO Access Log",    settings_draft_.dlog_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-                {" 9", "High-Performance Engine",   settings_draft_.high_performance ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-                {" a", "Co-Sim Spike Lockstep",     settings_draft_.lockstep_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-                {" g", "GDB Server Stub (1234)",    settings_draft_.gdb_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 1", "Simulation Mode",
+                 settings_draft_.cycle_accurate ? "\033[1;36m[CA (Cycle-Accurate)]\033[0m"
+                                                : "\033[1;33m[IA (Instruction-Accurate)]\033[0m"},
+                {" 2", "TUI Diagnostics View",
+                 settings_draft_.debug_mode ? "\033[1;32m[Debug Mode (Diagnostics ON)]\033[0m"
+                                            : "\033[90m[Normal Mode]\033[0m"},
+                {" 3", "Step Rollback History",
+                 rollback_disabled ? "\033[90m[Disabled (High-Perf Mode)]\033[0m"
+                                   : (settings_draft_.rollback_enabled ? "\033[1;32m[ON]\033[0m"
+                                                                       : "\033[90m[OFF]\033[0m")},
+                {" 4", "High Contrast Theme",
+                 settings_draft_.high_contrast ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 5", "Instruction Mix Stats",
+                 settings_draft_.use_mix ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 6", "Branch Prediction Trace",
+                 bp_disabled ? "\033[90m[Disabled (N/A in IA Mode)]\033[0m"
+                             : (settings_draft_.bp_trace ? "\033[1;32m[ON]\033[0m"
+                                                         : "\033[90m[OFF]\033[0m")},
+                {" 7", "Exception & Trap Log",
+                 settings_draft_.traplog_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 8", "Device MMIO Access Log",
+                 dlog_disabled ? "\033[90m[Disabled in Baremetal Mode]\033[0m"
+                               : (settings_draft_.dlog_mode ? "\033[1;32m[ON]\033[0m"
+                                                            : "\033[90m[OFF]\033[0m")},
+                {" 9", "High-Performance Engine",
+                 settings_draft_.high_performance ? "\033[1;32m[ON]\033[0m"
+                                                  : "\033[90m[OFF]\033[0m"},
+                {" a", "Co-Sim Spike Lockstep",
+                 lockstep_disabled ? "\033[90m[Disabled (No Spike Bin)]\033[0m"
+                                   : (settings_draft_.lockstep_mode ? "\033[1;32m[ON]\033[0m"
+                                                                    : "\033[90m[OFF]\033[0m")},
+                {" g", "GDB Server Stub (1234)",
+                 settings_draft_.gdb_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
             });
 
             for (std::size_t i = 0; i < settings.size(); ++i) {
                 bool is_sel = (static_cast<int>(i) == settings_cursor_);
                 std::string prefix = is_sel ? std::format("{}>\033[0m ", kThemeMint) : "  ";
-                std::string num_key = std::format("{}[{}]\033[0m", is_sel ? kThemeMint : kThemeSky, settings[i].key);
-                std::string name_str = std::format("{}{:<27}\033[0m", is_sel ? "\033[1;37m" : kThemeText, settings[i].name);
+                std::string num_key =
+                    std::format("{}[{}]\033[0m", is_sel ? kThemeMint : kThemeSky, settings[i].key);
+                std::string name_str = std::format(
+                    "{}{:<27}\033[0m", is_sel ? "\033[1;37m" : kThemeText, settings[i].name);
                 add_row(std::format("{}{} {} : {}", prefix, num_key, name_str, settings[i].val));
             }
             add_row("");
-            add_row(std::format("{}Press \033[1m[Enter]\033[0m to apply settings, \033[1m[Esc]\033[0m or \033[1m[q]\033[0m to cancel\033[0m", kThemeMuted));
+            add_row(
+                std::format("{}Press \033[1m[Enter]\033[0m to apply settings, \033[1m[Esc]\033[0m "
+                            "or \033[1m[q]\033[0m to cancel\033[0m",
+                            kThemeMuted));
+            break;
+        }
+        case ModalType::ConfigureMisa: {
+            title = " CONFIGURE CPU MISA & EXTENSIONS ";
+            std::string live_misa = simrv::xlen::resolve_misa_string(machine_.cpu.state().misa);
+            std::string draft_misa = misa_draft_.to_misa_string();
+
+            add_row(
+                std::format("{}Current Live MISA  : \033[1;36m{}\033[0m", kThemeText, live_misa));
+            add_row(
+                std::format("{}Draft Preview MISA : \033[1;33m{}\033[0m  \033[90m(Changes applied "
+                            "ONLY on submit)\033[0m",
+                            kThemeText, draft_misa));
+            add_row("");
+
+            const auto misa_items = std::to_array<SettingItem>({
+                {" 0", "Base XLEN Mode",
+                 (misa_draft_.xlen_bits == 32) ? "\033[1;33m[RV32]\033[0m"
+                                               : "\033[1;36m[RV64]\033[0m"},
+                {" 1", "Extension A (Atomic)",
+                 misa_draft_.ext_a ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 2", "Extension B (Bitmanip)",
+                 misa_draft_.ext_b ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 3", "Extension C (Compressed)",
+                 misa_draft_.ext_c ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 4", "Extension D (Double FP)",
+                 misa_draft_.ext_d ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 5", "Extension F (Single FP)",
+                 misa_draft_.ext_f ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 6", "Extension I (Base Int)",
+                 misa_draft_.ext_i ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 7", "Extension M (Mul/Div)",
+                 misa_draft_.ext_m ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 8", "Extension S (Supervisor)",
+                 misa_draft_.ext_s ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" 9", "Extension U (User Mode)",
+                 misa_draft_.ext_u ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" a", "Extension V (Vector)",
+                 misa_draft_.ext_v ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+                {" p", "Preset: Base (I)", "\033[1;34m[Set Profile: Base]\033[0m"},
+                {" i", "Preset: IMAC", "\033[1;34m[Set Profile: IMAC]\033[0m"},
+                {" g", "Preset: GC (General)", "\033[1;34m[Set Profile: GC]\033[0m"},
+            });
+
+            for (std::size_t i = 0; i < misa_items.size(); ++i) {
+                bool is_sel = (static_cast<int>(i) == misa_cursor_);
+                std::string prefix = is_sel ? std::format("{}>\033[0m ", kThemeMint) : "  ";
+                std::string num_key = std::format("{}[{}]\033[0m", is_sel ? kThemeMint : kThemeSky,
+                                                  misa_items[i].key);
+                std::string name_str = std::format(
+                    "{}{:<27}\033[0m", is_sel ? "\033[1;37m" : kThemeText, misa_items[i].name);
+                add_row(std::format("{}{} {} : {}", prefix, num_key, name_str, misa_items[i].val));
+            }
+            add_row("");
+            add_row(
+                std::format("{}Press \033[1m[Enter]\033[0m to apply MISA CSR, \033[1m[Esc]\033[0m "
+                            "or \033[1m[q]\033[0m to cancel\033[0m",
+                            kThemeMuted));
             break;
         }
         case ModalType::Help:
             title = " SIMULATOR KEYBOARD SHORTCUTS ";
             if (term_height < 32 && box_w >= 70) {
                 // Dual-column layout for small screen height
-                static const auto help_items = std::to_array<Shortcut>({
-                    {"[s] / [Space]", "Step 1 inst"},
-                    {"[n]",          "Step N insts"},
-                    {"[b] / [Alt-b]", "Undo / Toggle Rollback"},
-                    {"[o] / [Alt-o]", "Load Binary / Disk"},
-                    {"[,] / [Alt-s]", "Simulator Settings"},
-                    {"[:]",          "Set PC Breakpoint"},
-                    {"[k]",          "Toggle PC Breakpoint"},
-                    {"[g]",          "Set N Step Size"},
-                    {"[f]",          "Set Frequency (Hz)"},
-                    {"[m]",          "Inspect Memory"},
-                    {"[c] / [Ctrl-P]", "Run / Pause"},
-                    {"[Tab]",        "Cycle Layout"},
-                    {"[r] / [Alt-r]", "Cycle Registers"},
-                    {"[l] / [Alt-l]", "Cycle Tool Tabs"},
-                    {"[p] / [Alt-p]", "Cycle Right Pane"},
-                    {"[e] / [Alt-e]", "Jump Explainer"},
-                    {"[v] / [Alt-v]", "Toggle Trace"},
-                    {"[u/d] / [PgUp/Dn]", "Scroll Logs"},
-                    {"[w/s] / [Alt-w/s]", "Scroll Regs"},
-                    {"[ [ / ] ]",     "Resize Pane"},
-                    {"[F1] / [h] / [?]", "Show Help"},
-                    {"[Alt-h]",      "High Contrast"},
-                    {"[Alt-t]",      "Sakura Pastel"},
-                    {"[Esc]",        "Close Modal"},
-                    {"[Ctrl-Q]",     "Quit Simulator"}
-                });
+                static const auto help_items =
+                    std::to_array<Shortcut>({{"[s] / [Space]", "Step 1 inst"},
+                                             {"[n]", "Step N insts"},
+                                             {"[b] / [Alt-b]", "Undo / Toggle Rollback"},
+                                             {"[o] / [Alt-o]", "Load Binary / Disk"},
+                                             {"[,] / [Alt-s]", "Simulator Settings"},
+                                             {"[:]", "Set PC Breakpoint"},
+                                             {"[k]", "Toggle PC Breakpoint"},
+                                             {"[g]", "Set N Step Size"},
+                                             {"[f]", "Set Frequency (Hz)"},
+                                             {"[m]", "Inspect Memory"},
+                                             {"[c] / [Ctrl-P]", "Run / Pause"},
+                                             {"[Tab]", "Cycle Layout"},
+                                             {"[r] / [Alt-r]", "Cycle Registers"},
+                                             {"[l] / [Alt-l]", "Cycle Tool Tabs"},
+                                             {"[p] / [Alt-p]", "Cycle Right Pane"},
+                                             {"[e] / [Alt-e]", "Jump Explainer"},
+                                             {"[v] / [Alt-v]", "Toggle Trace"},
+                                             {"[u/d] / [PgUp/Dn]", "Scroll Logs"},
+                                             {"[w/s] / [Alt-w/s]", "Scroll Regs"},
+                                             {"[ [ / ] ]", "Resize Pane"},
+                                             {"[F1] / [h] / [?]", "Show Help"},
+                                             {"[Alt-h]", "High Contrast"},
+                                             {"[Alt-t]", "Sakura Pastel"},
+                                             {"[Esc]", "Close Modal"},
+                                             {"[Ctrl-Q]", "Quit Simulator"}});
                 std::size_t half = (help_items.size() + 1) / 2;
                 for (std::size_t i = 0; i < half; ++i) {
-                    std::string left_item = std::format("{}{:<17}\033[0m {}{:<18}\033[0m", kThemeSky, help_items[i].key, kThemeText, help_items[i].desc);
+                    std::string left_item =
+                        std::format("{}{:<17}\033[0m {}{:<18}\033[0m", kThemeSky, help_items[i].key,
+                                    kThemeText, help_items[i].desc);
                     std::string right_item;
                     if (i + half < help_items.size()) {
                         const auto& r = help_items[i + half];
-                        right_item = std::format("{}{:<17}\033[0m {}{}\033[0m", kThemeSky, r.key, kThemeText, r.desc);
+                        right_item = std::format("{}{:<17}\033[0m {}{}\033[0m", kThemeSky, r.key,
+                                                 kThemeText, r.desc);
                     }
                     add_row(std::format("{} │ {}", left_item, right_item));
                 }
             } else {
                 // Full single-column layout for taller screens
-                add_row(std::format(" {}{:<22}\033[0m {}Single instruction step\033[0m", kThemeSky, "[s] / [Space]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Step N instructions\033[0m", kThemeSky, "[n]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Undo / Step back 1 instruction\033[0m", kThemeSky, "[b]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Load Program Binary or Disk modal\033[0m", kThemeSky, "[o] / [Alt-o]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Set PC Breakpoint modal\033[0m", kThemeSky, "[:]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Toggle PC breakpoint at current PC\033[0m", kThemeSky, "[k]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Set Step Size (N) modal\033[0m", kThemeSky, "[g]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Set Speed Frequency (Hz) modal\033[0m", kThemeSky, "[f]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Inspect Memory Address modal\033[0m", kThemeSky, "[m]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Run / Pause simulation loop\033[0m", kThemeSky, "[c] / [Ctrl-P]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Cycle TUI panel layout\033[0m", kThemeSky, "[Tab]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Cycle register sub-views (GPR/FPR/VEC)\033[0m", kThemeSky, "[r] / [Alt-r]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Cycle tool tabs (Pipe/Cache/Trace/Exp/Stack)\033[0m", kThemeSky, "[l] / [Alt-l]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Cycle Right Pane mode\033[0m", kThemeSky, "[p] / [Alt-p]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Jump to Explainer / Trap Details\033[0m", kThemeSky, "[e] / [Alt-e]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Toggle trace recording\033[0m", kThemeSky, "[v] / [Alt-v]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Scroll trace / log views\033[0m", kThemeSky, "[u/d] / [Up/Dn/PgUp/Dn]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Scroll registers view\033[0m", kThemeSky, "[w/s] / [Alt-w/s]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Adjust left pane width\033[0m", kThemeSky, "[ [ / ] ] / [Left/Right]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Show this help dialog\033[0m", kThemeSky, "[F1] / [h] / [?]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Toggle High Contrast theme\033[0m", kThemeSky, "[Alt-h]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Toggle Sakura Pastel theme\033[0m", kThemeSky, "[Alt-t]", kThemeText));
-                add_row(std::format(" {}{:<22}\033[0m {}Close modal dialog\033[0m", kThemeSky, "[Esc]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Single instruction step\033[0m", kThemeSky,
+                                    "[s] / [Space]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Step N instructions\033[0m", kThemeSky,
+                                    "[n]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Undo / Step back 1 instruction\033[0m",
+                                    kThemeSky, "[b]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Load Program Binary or Disk modal\033[0m",
+                                    kThemeSky, "[o] / [Alt-o]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Set PC Breakpoint modal\033[0m", kThemeSky,
+                                    "[:]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Toggle PC breakpoint at current PC\033[0m",
+                                    kThemeSky, "[k]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Set Step Size (N) modal\033[0m", kThemeSky,
+                                    "[g]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Set Speed Frequency (Hz) modal\033[0m",
+                                    kThemeSky, "[f]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Inspect Memory Address modal\033[0m",
+                                    kThemeSky, "[m]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Run / Pause simulation loop\033[0m",
+                                    kThemeSky, "[c] / [Ctrl-P]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Cycle TUI panel layout\033[0m", kThemeSky,
+                                    "[Tab]", kThemeText));
+                add_row(
+                    std::format(" {}{:<22}\033[0m {}Cycle register sub-views (GPR/FPR/VEC)\033[0m",
+                                kThemeSky, "[r] / [Alt-r]", kThemeText));
+                add_row(std::format(
+                    " {}{:<22}\033[0m {}Cycle tool tabs (Pipe/Cache/Trace/Exp/Stack)\033[0m",
+                    kThemeSky, "[l] / [Alt-l]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Cycle Right Pane mode\033[0m", kThemeSky,
+                                    "[p] / [Alt-p]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Jump to Explainer / Trap Details\033[0m",
+                                    kThemeSky, "[e] / [Alt-e]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Toggle trace recording\033[0m", kThemeSky,
+                                    "[v] / [Alt-v]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Scroll trace / log views\033[0m", kThemeSky,
+                                    "[u/d] / [Up/Dn/PgUp/Dn]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Scroll registers view\033[0m", kThemeSky,
+                                    "[w/s] / [Alt-w/s]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Adjust left pane width\033[0m", kThemeSky,
+                                    "[ [ / ] ] / [Left/Right]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Show this help dialog\033[0m", kThemeSky,
+                                    "[F1] / [h] / [?]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Toggle High Contrast theme\033[0m",
+                                    kThemeSky, "[Alt-h]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Toggle Sakura Pastel theme\033[0m",
+                                    kThemeSky, "[Alt-t]", kThemeText));
+                add_row(std::format(" {}{:<22}\033[0m {}Close modal dialog\033[0m", kThemeSky,
+                                    "[Esc]", kThemeText));
             }
             break;
         default:
@@ -523,7 +810,8 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width, i
         if (text_len >= width) return format_to_width(text, width);
         int pad_l = (width - text_len) / 2;
         int pad_r = width - text_len - pad_l;
-        return std::string(static_cast<size_t>(pad_l), ' ') + text + std::string(static_cast<size_t>(pad_r), ' ');
+        return std::string(static_cast<size_t>(pad_l), ' ') + text +
+               std::string(static_cast<size_t>(pad_r), ' ');
     };
 
     auto pad_left = [&](const std::string& text, int width) -> std::string {
@@ -532,21 +820,41 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width, i
         return text + std::string(static_cast<size_t>(width - text_len), ' ');
     };
 
-    std::string top_border = std::format("{}{}╔{}{}{}╗\033[0m", m_bg, kThemeBorder, pad_center(std::format("═ \033[1m{}{}{}{} ═", kThemeSky, title, m_rst, kThemeBorder), inner_w), m_bg, kThemeBorder);
+    std::string top_border = std::format(
+        "{}{}╔{}{}{}╗\033[0m", m_bg, kThemeBorder,
+        pad_center(std::format("═ \033[1m{}{}{}{} ═", kThemeSky, title, m_rst, kThemeBorder),
+                   inner_w),
+        m_bg, kThemeBorder);
     box_lines.push_back(top_border);
-    box_lines.push_back(std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder, pad_center("", inner_w), m_bg, kThemeBorder));
+    box_lines.push_back(std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder,
+                                    pad_center("", inner_w), m_bg, kThemeBorder));
 
     for (const auto& row : content_rows) {
-        box_lines.push_back(std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder, pad_left(" " + row, inner_w), m_bg, kThemeBorder));
+        box_lines.push_back(std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder,
+                                        pad_left(" " + row, inner_w), m_bg, kThemeBorder));
     }
 
-    box_lines.push_back(std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder, pad_center("", inner_w), m_bg, kThemeBorder));
+    box_lines.push_back(std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder,
+                                    pad_center("", inner_w), m_bg, kThemeBorder));
     if (!is_help) {
-        box_lines.push_back(std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder, pad_center(std::format("{}[Enter]\033[0m{} {}Submit  |  {}[Esc]\033[0m{} {}Cancel", kThemeVal, m_rst, kThemeMuted, kThemeVal, m_rst, kThemeMuted), inner_w), m_bg, kThemeBorder));
+        box_lines.push_back(std::format(
+            "{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder,
+            pad_center(std::format("{}[Enter]\033[0m{} {}Submit  |  {}[Esc]\033[0m{} {}Cancel",
+                                   kThemeVal, m_rst, kThemeMuted, kThemeVal, m_rst, kThemeMuted),
+                       inner_w),
+            m_bg, kThemeBorder));
     } else {
-        box_lines.push_back(std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder, pad_center(std::format("{}Press {}[Esc]\033[0m{}, {}[Enter]\033[0m{}, {}[h]\033[0m{} or {}[F1]\033[0m{} to close", kThemeMuted, kThemeVal, m_rst, kThemeVal, m_rst, kThemeVal, m_rst, kThemeVal, m_rst), inner_w), m_bg, kThemeBorder));
+        box_lines.push_back(
+            std::format("{}{}║{}{}{}║\033[0m", m_bg, kThemeBorder,
+                        pad_center(std::format("{}Press {}[Esc]\033[0m{}, {}[Enter]\033[0m{}, "
+                                               "{}[h]\033[0m{} or {}[F1]\033[0m{} to close",
+                                               kThemeMuted, kThemeVal, m_rst, kThemeVal, m_rst,
+                                               kThemeVal, m_rst, kThemeVal, m_rst),
+                                   inner_w),
+                        m_bg, kThemeBorder));
     }
-    box_lines.push_back(std::format("{}{}╚{}╝\033[0m", m_bg, kThemeBorder, make_repeated_string("═", inner_w)));
+    box_lines.push_back(
+        std::format("{}{}╚{}╝\033[0m", m_bg, kThemeBorder, make_repeated_string("═", inner_w)));
 
     int box_h = static_cast<int>(box_lines.size());
     int start_y = (static_cast<int>(lines.size()) - box_h) / 2;

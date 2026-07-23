@@ -103,8 +103,9 @@ auto SymbolTable::load_from_elf(const std::string& elf_path) -> bool {
             if (!fs.read(reinterpret_cast<char*>(syms.data()), static_cast<std::streamsize>(shdrs[symtab_idx].sh_size))) return false; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
             for (const auto& sym : syms) {
+                const auto type = ELF32_ST_TYPE(sym.st_info);
                 if (sym.st_name != 0 && sym.st_value != 0 &&
-                    (ELF32_ST_TYPE(sym.st_info) == STT_FUNC || ELF32_ST_TYPE(sym.st_info) == STT_NOTYPE)) {
+                    (type == STT_FUNC || type == STT_OBJECT || type == STT_NOTYPE)) {
                     std::string name = &strtab[sym.st_name];
                     if (!name.empty() && name.find('$') == std::string::npos) {
                         symbols_[sym.st_value] = name;
@@ -141,8 +142,9 @@ auto SymbolTable::load_from_elf(const std::string& elf_path) -> bool {
             if (!fs.read(reinterpret_cast<char*>(syms.data()), static_cast<std::streamsize>(shdrs[symtab_idx].sh_size))) return false; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
             for (const auto& sym : syms) {
+                const auto type = ELF64_ST_TYPE(sym.st_info);
                 if (sym.st_name != 0 && sym.st_value != 0 &&
-                    (ELF64_ST_TYPE(sym.st_info) == STT_FUNC || ELF64_ST_TYPE(sym.st_info) == STT_NOTYPE)) {
+                    (type == STT_FUNC || type == STT_OBJECT || type == STT_NOTYPE)) {
                     std::string name = &strtab[sym.st_name];
                     if (!name.empty() && name.find('$') == std::string::npos) {
                         symbols_[sym.st_value] = name;

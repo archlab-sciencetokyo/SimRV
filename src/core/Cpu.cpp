@@ -603,6 +603,9 @@ void CPU::execute_cached_jalr(CachedOp& op, Register rrs1) {
     Register const next_pc = state_.pc + (op.cinsn ? 2 : 4);
     pipeline_context.tkn = true;
     pipeline_context.jmp_pc = (rrs1 + op.imm) & ~static_cast<Register>(1);
+    if (state_.regs.xlen == 32) {
+        pipeline_context.jmp_pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(pipeline_context.jmp_pc)));
+    }
     if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, next_pc);
     }
@@ -619,9 +622,12 @@ void CPU::execute_cached_jalr(CachedOp& op, Register rrs1) {
 }
 
 void CPU::execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) {
-    bool const tkn = execute::ExecuteUnit::branchTaken(rrs1, rrs2, op.funct3);
+    bool const tkn = execute::ExecuteUnit::branchTaken(rrs1, rrs2, op.funct3, state_.regs.xlen);
     pipeline_context.tkn = tkn;
     pipeline_context.jmp_pc = state_.pc + op.imm;
+    if (state_.regs.xlen == 32) {
+        pipeline_context.jmp_pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(pipeline_context.jmp_pc)));
+    }
     Register const target_pc = tkn ? pipeline_context.jmp_pc : (state_.pc + (op.cinsn ? 2 : 4));
     if (tkn) {
         const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
@@ -638,7 +644,7 @@ void CPU::execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) {
 }
 
 void CPU::execute_cached_op(CachedOp& op, Register rrs1, Register rrs2) {
-    Register const wb_data = execute::ExecuteUnit::aluInt(rrs1, rrs2, op.op_id);
+    Register const wb_data = execute::ExecuteUnit::aluInt(rrs1, rrs2, op.op_id, state_.regs.xlen);
     if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, wb_data);
     }
@@ -649,7 +655,7 @@ void CPU::execute_cached_op(CachedOp& op, Register rrs1, Register rrs2) {
 }
 
 void CPU::execute_cached_op_imm(CachedOp& op, Register rrs1) {
-    Register const wb_data = execute::ExecuteUnit::aluInt(rrs1, op.imm, op.op_id);
+    Register const wb_data = execute::ExecuteUnit::aluInt(rrs1, op.imm, op.op_id, state_.regs.xlen);
     if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, wb_data);
     }

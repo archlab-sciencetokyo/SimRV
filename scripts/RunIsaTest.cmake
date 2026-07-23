@@ -9,36 +9,31 @@ get_filename_component(test_name "${ELF_PATH}" NAME)
 set(bin_path "${WORK_DIR}/${test_name}.bin")
 file(MAKE_DIRECTORY "${WORK_DIR}")
 
-# 1. Run objcopy to extract raw binary
-execute_process(
-  COMMAND ${OBJCOPY_BIN} -O binary ${ELF_PATH} ${bin_path}
-  RESULT_VARIABLE objcopy_res
-  ERROR_VARIABLE objcopy_err
-)
-if(NOT objcopy_res EQUAL 0)
-  message(FATAL_ERROR "objcopy failed for ${ELF_PATH}: ${objcopy_err}")
-endif()
-
-# 2. Run NM to lookup 'tohost' address
+# 1. Run NM to lookup 'tohost' address
 set(tohost_addr "${DEFAULT_TOHOST_ADDR}")
 if(EXISTS "${NM_BIN}")
   execute_process(
-    COMMAND ${NM_BIN} -g ${ELF_PATH}
+    COMMAND ${NM_BIN} ${ELF_PATH}
     OUTPUT_VARIABLE nm_out
     RESULT_VARIABLE nm_res
     ERROR_VARIABLE nm_err
   )
   if(nm_res EQUAL 0)
-    # Parse symbol table using regex
-    # Format of nm line: "80001000 D tohost" or similar
     if(nm_out MATCHES "([0-9a-fA-F]+)[ \t]+[DdTtGgBb][ \t]+tohost")
       set(tohost_addr "0x${CMAKE_MATCH_1}")
     endif()
   endif()
 endif()
 
-# 3. Run SimRV
-set(SIMRV_ARGS -a --cli -m ${bin_path} -e ${END_INSNS} -b -H ${tohost_addr})
+if(tohost_addr STREQUAL "${DEFAULT_TOHOST_ADDR}" AND EXISTS "${ELF_PATH}.dump")
+  file(READ "${ELF_PATH}.dump" dump_content)
+  if(dump_content MATCHES "([0-9a-fA-F]+)[ \t]+<tohost>")
+    set(tohost_addr "0x${CMAKE_MATCH_1}")
+  endif()
+endif()
+
+# 2. Run SimRV directly with ELF binary
+set(SIMRV_ARGS -a --cli -m ${ELF_PATH} -e ${END_INSNS} -b -H ${tohost_addr})
 if(LOCKSTEP)
   list(APPEND SIMRV_ARGS --lockstep)
   list(APPEND SIMRV_ARGS --spike-elf ${ELF_PATH})

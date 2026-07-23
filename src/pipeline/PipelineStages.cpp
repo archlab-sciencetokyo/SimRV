@@ -581,14 +581,17 @@ void CPU::execute_core(Machine& machine) {
             ctx.tkn = true;
             ctx.wb_data = state_.pc + ((ctx.cinsn != 0u) ? 2 : 4);
             ctx.jmp_pc = (ctx.rrs1 + ctx.imm) & ~static_cast<Register>(1);
+            if (state_.regs.xlen == 32) {
+                ctx.jmp_pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc)));
+            }
             break;
         case Opcode::Op:
             ctx.tkn = false;
-            ctx.wb_data = execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.rrs2, ctx.op_id);
+            ctx.wb_data = execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.rrs2, ctx.op_id, state_.regs.xlen);
             break;
         case Opcode::OpImm:
             ctx.tkn = false;
-            ctx.wb_data = execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.imm, ctx.op_id);
+            ctx.wb_data = execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.imm, ctx.op_id, state_.regs.xlen);
             break;
         case Opcode::OpImm32:
             ctx.tkn = false;
@@ -618,8 +621,11 @@ void CPU::execute_core(Machine& machine) {
             }
             break;
         case Opcode::Branch:
-            ctx.tkn = execute::ExecuteUnit::branchTaken(ctx.rrs1, ctx.rrs2, ctx.funct3);
+            ctx.tkn = execute::ExecuteUnit::branchTaken(ctx.rrs1, ctx.rrs2, ctx.funct3, state_.regs.xlen);
             ctx.jmp_pc = state_.pc + ctx.imm;
+            if (state_.regs.xlen == 32) {
+                ctx.jmp_pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc)));
+            }
             break;
         case Opcode::Amo:
             ctx.tkn = false;

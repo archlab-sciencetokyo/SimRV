@@ -34,7 +34,8 @@ enum class TuiFooterAction : uint8_t {
     CycleLayout,
     TogglePanel,
     ToggleTrace,
-    OpenSettings
+    OpenSettings,
+    ConfigureMisa
 };
 
 class StatusBar : public TuiWidget {

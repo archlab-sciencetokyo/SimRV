@@ -55,7 +55,7 @@ extern Address g_dram_base;
 
 /// Check if a physical address is within DRAM range
 inline auto is_dram_addr(Address p_addr) -> bool {
-    return (p_addr - g_dram_base) < simrv::memory::kDramSize;
+    return ((p_addr & 0xFFFFFFFFULL) - (g_dram_base & 0xFFFFFFFFULL)) < simrv::memory::kDramSize;
 }
 
 /// Check if a physical address is in a legacy reserved region (MMIO)

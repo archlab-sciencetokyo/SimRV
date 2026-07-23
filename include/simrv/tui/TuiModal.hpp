@@ -29,7 +29,8 @@ enum class ModalType : uint8_t {
     LoadBinary,
     LoadDiskImage,
     Help,
-    Settings
+    Settings,
+    ConfigureMisa
 };
 
 struct SettingsDraft {
@@ -44,6 +45,55 @@ struct SettingsDraft {
     bool high_performance = false;
     bool lockstep_mode = false;
     bool gdb_mode = false;
+};
+
+struct MisaDraft {
+    uint8_t xlen_bits = 64;
+    bool ext_a = true;
+    bool ext_b = true;
+    bool ext_c = true;
+    bool ext_d = true;
+    bool ext_f = true;
+    bool ext_i = true;
+    bool ext_m = true;
+    bool ext_s = true;
+    bool ext_u = true;
+    bool ext_v = false;
+
+    [[nodiscard]] auto to_misa_val() const -> uint64_t {
+        uint64_t val = 0;
+        if (xlen_bits == 32) {
+            val |= (1ULL << 30);
+        } else {
+            val |= (2ULL << 62);
+        }
+        if (ext_a) val |= (1ULL << ('a' - 'a'));
+        if (ext_b) val |= (1ULL << ('b' - 'a'));
+        if (ext_c) val |= (1ULL << ('c' - 'a'));
+        if (ext_d) val |= (1ULL << ('d' - 'a'));
+        if (ext_f) val |= (1ULL << ('f' - 'a'));
+        if (ext_i) val |= (1ULL << ('i' - 'a'));
+        if (ext_m) val |= (1ULL << ('m' - 'a'));
+        if (ext_s) val |= (1ULL << ('s' - 'a'));
+        if (ext_u) val |= (1ULL << ('u' - 'a'));
+        if (ext_v) val |= (1ULL << ('v' - 'a'));
+        return val;
+    }
+
+    [[nodiscard]] auto to_misa_string() const -> std::string {
+        std::string s = (xlen_bits == 32) ? "rv32" : "rv64";
+        if (ext_i) s += 'i';
+        if (ext_m) s += 'm';
+        if (ext_a) s += 'a';
+        if (ext_f) s += 'f';
+        if (ext_d) s += 'd';
+        if (ext_c) s += 'c';
+        if (ext_b) s += 'b';
+        if (ext_v) s += 'v';
+        if (ext_s) s += 's';
+        if (ext_u) s += 'u';
+        return s;
+    }
 };
 
 class TuiModal {
@@ -71,6 +121,11 @@ class TuiModal {
     void toggle_setting_at_cursor();
     void toggle_setting_by_index(int index);
 
+    void move_misa_cursor(int delta);
+    void toggle_misa_at_cursor();
+    void toggle_misa_by_index(int index);
+    void apply_misa_profile(int profile_idx);
+
     void render_overlay(std::vector<std::string>& lines, int term_width, int term_height) const;
 
    private:
@@ -79,6 +134,8 @@ class TuiModal {
     std::string input_;
     int settings_cursor_ = 0;
     SettingsDraft settings_draft_;
+    int misa_cursor_ = 0;
+    MisaDraft misa_draft_;
     bool load_appmode_ =
         true;  // Toggle for App (baremetal) vs OS (Linux) mode in LoadBinary modal
     std::string staged_binary_path_;

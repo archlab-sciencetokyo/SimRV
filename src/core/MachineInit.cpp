@@ -45,25 +45,16 @@ void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
     simrv::memory::g_dram_base = simrv::memory::kDramBaseAddress;
 
     if (machine.s_start_pc == simrv::boot::kStartPc || machine.s_start_pc == 0) {
-        if (symbols.entry_point().has_value()) {
-            const Address entry = *symbols.entry_point();
-            if (entry >= simrv::memory::kDramBaseAddress &&
-                entry < simrv::memory::kDramBaseAddress + simrv::memory::kDramSize) {
-                machine.s_start_pc = entry;
-            } else if (entry < simrv::memory::kDramSize) {
-                machine.s_start_pc = simrv::memory::kDramBaseAddress + entry;
-            }
-        } else if (auto start_sym = symbols.lookup_name("_start"); start_sym.has_value()) {
-            const Address entry = *start_sym;
-            if (entry >= simrv::memory::kDramBaseAddress &&
-                entry < simrv::memory::kDramBaseAddress + simrv::memory::kDramSize) {
-                machine.s_start_pc = entry;
-            } else if (entry < simrv::memory::kDramSize) {
-                machine.s_start_pc = simrv::memory::kDramBaseAddress + entry;
-            }
-        } else {
-            machine.s_start_pc = simrv::boot::kStartPc;
+        Address entry = symbols.entry_point().value_or(
+            symbols.lookup_name("_start").value_or(simrv::boot::kStartPc));
+        if (entry < simrv::memory::kDramBaseAddress) {
+            entry += simrv::memory::kDramBaseAddress;
         }
+        machine.s_start_pc = entry;
+    }
+
+    if (auto tohost_sym = symbols.lookup_name("tohost"); tohost_sym.has_value()) {
+        machine.s_isatest_tohost = *tohost_sym;
     }
 
     machine.cpu.state().pc = machine.s_start_pc;
