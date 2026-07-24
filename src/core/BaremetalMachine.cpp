@@ -49,7 +49,11 @@ void BaremetalMachine::run() {
                 continue;
             }
             tui->set_sim_thread_sleeping(false);
-            cpu.run_cycle_baremetal(*this);
+            if (s_cycle_accurate) {
+                cpu.run_cycle(*this);
+            } else {
+                cpu.run_cycle_baremetal(*this);
+            }
             tui->on_cycle_completed();
 
             if (simrv::compiler::unlikely(tracer.fp_trace.is_open())) {
@@ -90,7 +94,7 @@ void BaremetalMachine::run() {
                         tui->render();
                     }
                     static uint64_t last_tui_check_cycles = 0;
-                    if (cpu.e_icount - last_tui_check_cycles >= 500000) {
+                    if (cpu.e_icount - last_tui_check_cycles >= 1000 || tui->step_delay_us_.load(std::memory_order_relaxed) > 0) {
                         last_tui_check_cycles = cpu.e_icount;
                         static auto last_tui_update = std::chrono::steady_clock::now();
                         auto tui_now = std::chrono::steady_clock::now();

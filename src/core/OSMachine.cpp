@@ -175,7 +175,7 @@ void OSMachine::finalize_cycle() {
             tui->render();
         }
         static uint64_t last_tui_check_cycles = 0;
-        if (cpu.e_icount - last_tui_check_cycles >= 500000) {
+        if (cpu.e_icount - last_tui_check_cycles >= 1000 || tui->step_delay_us_.load(std::memory_order_relaxed) > 0) {
             last_tui_check_cycles = cpu.e_icount;
             static auto last_tui_update = std::chrono::steady_clock::now();
             auto now = std::chrono::steady_clock::now();

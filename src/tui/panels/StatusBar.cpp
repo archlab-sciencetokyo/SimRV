@@ -251,7 +251,7 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
                 continue;
             }
             if (e.category == FooterCategory::DebugExec && e.action != TuiFooterAction::RunPause &&
-                e.action != TuiFooterAction::SetSpeed) {
+                e.action != TuiFooterAction::SetSpeed && e.action != TuiFooterAction::Step) {
                 continue;
             }
         }

@@ -306,6 +306,10 @@ void Tui::render(bool force) {
 
     if (term_width < 40 || term_height < 10) return;
 
+    if (left_pane_) {
+        left_pane_->update_cache();
+    }
+
     // Track KIPS and notify RegisterPane
     now = std::chrono::steady_clock::now();
 
@@ -1292,10 +1296,7 @@ void Tui::pause_loop() {
                 }
                 render(true);
             } else if (key == simrv::tui::TuiKey::s || key == simrv::tui::TuiKey::S || key == simrv::tui::TuiKey::Space) {
-                if (!machine_.s_debug_mode) {
-                    set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
-                    render(true);
-                } else if (!machine_.is_shutdown_) {
+                if (!machine_.is_shutdown_) {
                     update_cache();
                     machine_.prepare_cycle();
                     machine_.cpu.run_cycle(machine_);
