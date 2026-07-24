@@ -271,7 +271,9 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
 
     const isa::OperationId op_id = simrv::pipeline::decoder(w_ir_tmp);
     if (simrv::compiler::unlikely(op_id == isa::UNKNOWN)) {
-        std::printf("[DECODER] Unknown instruction: PC=0x%lx, HEX=0x%x\n", (unsigned long)state_.pc, w_ir_tmp);
+        if (!machine.s_tuimode) {
+            simrv::log::warn("[DECODER] Unknown instruction: PC=0x{:x}, HEX=0x{:x}", state_.pc, w_ir_tmp);
+        }
         is_valid = false;
     }
 
@@ -314,7 +316,9 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
                               (op == Opcode::NMSub));
         if (is_vector) {
             if (simrv::compiler::unlikely((state_.mstatus & enum_mask(MstatusBit::Vs)) == 0)) {
-                std::printf("[VS CHECK] VS is 0! mstatus=0x%lx, Vs mask=0x%lx\n", (unsigned long)state_.mstatus, (unsigned long)enum_mask(MstatusBit::Vs));
+                if (!machine.s_tuimode) {
+                    simrv::log::warn("[VS CHECK] VS is 0! mstatus=0x{:x}, Vs mask=0x{:x}", state_.mstatus, enum_mask(MstatusBit::Vs));
+                }
                 is_valid = false;
             }
         } else if (is_fp_op) {

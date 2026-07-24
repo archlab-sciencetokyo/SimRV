@@ -1,8 +1,8 @@
 /**
- * @file RegisterPaneStack.cpp
+ * @file LeftPaneStack.cpp
  * @brief Stack memory view pane rendering for the TUI register panel.
  */
-#include "simrv/tui/LeftPane.hpp"
+#include "simrv/tui/panels/LeftPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"

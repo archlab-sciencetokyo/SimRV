@@ -4,7 +4,7 @@ project(SimRV LANGUAGES CXX)
 
 enable_testing()
 
-set(SIMRV_VERSION "2.0.0-beta.30")
+set(SIMRV_VERSION "2.0.0-beta.31")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -125,14 +125,21 @@ add_executable(SimRV
   src/tui/Tui.cpp
   src/tui/TuiModal.cpp
   src/tui/TuiTheme.cpp
-  src/tui/LeftPane.cpp
-  src/tui/LeftPaneRegs.cpp
-  src/tui/LeftPanePipeline.cpp
-  src/tui/LeftPaneStats.cpp
-  src/tui/LeftPaneExplain.cpp
-  src/tui/LeftPaneStack.cpp
-  src/tui/RightPane.cpp
-  src/tui/StatusBar.cpp
+  src/tui/modals/AddressModal.cpp
+  src/tui/modals/BreakpointModal.cpp
+  src/tui/modals/HelpModal.cpp
+  src/tui/modals/LoadModal.cpp
+  src/tui/modals/MisaModal.cpp
+  src/tui/modals/SettingsModal.cpp
+  src/tui/modals/StepModal.cpp
+  src/tui/panels/LeftPane.cpp
+  src/tui/panels/LeftPaneRegs.cpp
+  src/tui/panels/LeftPanePipeline.cpp
+  src/tui/panels/LeftPaneStats.cpp
+  src/tui/panels/LeftPaneExplain.cpp
+  src/tui/panels/LeftPaneStack.cpp
+  src/tui/panels/RightPane.cpp
+  src/tui/panels/StatusBar.cpp
   src/debug/GdbStub.cpp
   src/debug/SpikeLockstep.cpp
   src/debug/SymbolTable.cpp

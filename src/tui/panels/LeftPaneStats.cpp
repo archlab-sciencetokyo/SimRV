@@ -1,8 +1,8 @@
 /**
- * @file RegisterPaneStats.cpp
+ * @file LeftPaneStats.cpp
  * @brief Performance statistics and pipeline counters pane rendering.
  */
-#include "simrv/tui/LeftPane.hpp"
+#include "simrv/tui/panels/LeftPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/Define.hpp"

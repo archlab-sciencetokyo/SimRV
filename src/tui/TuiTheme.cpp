@@ -69,7 +69,7 @@ auto set_tui_theme(TuiTheme theme) -> void {
             g_theme_coral    = kSakuraCoralConst;
             g_theme_sky      = kSakuraSkyConst;
             g_theme_pink     = kSakuraPinkConst;
-            g_theme_modal_bg = "\033[48;5;53m";
+            g_theme_modal_bg = "\033[48;5;235m";
             g_theme_palette  = kSakuraPalette;
             g_theme_bg_palette = kSakuraBgPalette;
             break;
@@ -183,108 +183,112 @@ auto format_to_width(const std::string& colored_str, int target_width) -> std::s
     return result + "\033[0m";
 }
 
+static auto get_esc_seq_len(const std::string& str, std::size_t start) -> std::size_t {
+    if (start >= str.length() || str[start] != '\033') return 0;
+    std::size_t i = start + 1;
+    if (i >= str.length()) return 1;
+
+    char c = str[i];
+    if (c == '[') {
+        i++;
+        while (i < str.length()) {
+            char ch = str[i++];
+            if (ch >= 0x40 && ch <= 0x7E) break;
+        }
+        return i - start;
+    }
+    if (c == 'P' || c == ']' || c == '_' || c == '^') {
+        // DCS (Sixel graphics), OSC, APC, PM sequences — terminated by ST (\033\) or BEL (\007)
+        i++;
+        while (i < str.length()) {
+            if (str[i] == '\007') {
+                i++;
+                break;
+            }
+            if (str[i] == '\033' && i + 1 < str.length() && str[i + 1] == '\\') {
+                i += 2;
+                break;
+            }
+            i++;
+        }
+        return i - start;
+    }
+    if (c == '(' || c == ')') {
+        return std::min(start + 3, str.length()) - start;
+    }
+    return std::min(start + 2, str.length()) - start;
+}
+
+static auto get_utf8_char_len(const std::string& str, std::size_t start) -> std::size_t {
+    if (start >= str.length()) return 0;
+    const auto c = static_cast<unsigned char>(str[start]);
+    if (c < 0x80) return 1;
+    if ((c & 0xE0) == 0xC0) return 2;
+    if ((c & 0xF0) == 0xE0) return 3;
+    if ((c & 0xF8) == 0xF0) return 4;
+    return 1;
+}
+
 auto overlay_string(const std::string& base_line, const std::string& overlay_line, int start_x, int box_w) -> std::string {
     std::string result;
+    result.reserve(base_line.length() + overlay_line.length() + 32);
     int col = 0;
-    bool in_esc = false;
-    bool in_csi = false;
-    std::string current_esc;
     std::string active_style;
 
     std::size_t i = 0;
     while (i < base_line.length() && col < start_x) {
-        char ch = base_line[i];
-        if (ch == '\033') {
-            in_esc = true;
-            in_csi = false;
-            current_esc.clear();
-            current_esc += ch;
-            result += ch;
-            i++;
-        } else if (in_esc) {
-            current_esc += ch;
-            result += ch;
-            if (ch == '[') {
-                in_csi = true;
-            } else if (in_csi) {
-                if (ch >= 0x40 && ch <= 0x7E) {
-                    in_esc = false;
-                    in_csi = false;
-                    if (current_esc.back() == 'm') {
-                        if (current_esc == "\033[0m") {
-                            active_style.clear();
-                        } else {
-                            active_style += current_esc;
-                        }
-                    }
-                }
-            } else {
-                if (ch != '(' && ch != ')') {
-                    in_esc = false;
+        if (base_line[i] == '\033') {
+            std::size_t esc_len = get_esc_seq_len(base_line, i);
+            std::string_view esc(&base_line[i], esc_len);
+            result.append(esc);
+            if (esc.ends_with('m')) {
+                if (esc == "\033[0m") {
+                    active_style.clear();
+                } else {
+                    active_style.assign(esc);
                 }
             }
-            i++;
+            i += esc_len;
         } else {
-            const auto c = static_cast<unsigned char>(ch);
-            if (c < 0x80 || c >= 0xC0) {
-                col++;
-            }
-            result += ch;
-            i++;
+            std::size_t char_len = get_utf8_char_len(base_line, i);
+            result.append(&base_line[i], char_len);
+            col++;
+            i += char_len;
         }
     }
 
     if (col < start_x) {
-        result += std::string(static_cast<std::size_t>(start_x - col), ' ');
+        result.append(static_cast<std::size_t>(start_x - col), ' ');
+        col = start_x;
     }
 
     result += overlay_line;
 
     int target_end = start_x + box_w;
     while (i < base_line.length() && col < target_end) {
-        char ch = base_line[i];
-        if (ch == '\033') {
-            in_esc = true;
-            in_csi = false;
-            current_esc.clear();
-            i++;
-        } else if (in_esc) {
-            current_esc += ch;
-            if (ch == '[') {
-                in_csi = true;
-            } else if (in_csi) {
-                if (ch >= 0x40 && ch <= 0x7E) {
-                    in_esc = false;
-                    in_csi = false;
-                    if (current_esc.back() == 'm') {
-                        if (current_esc == "\033[0m") {
-                            active_style.clear();
-                        } else {
-                            active_style += current_esc;
-                        }
-                    }
-                }
-            } else {
-                if (ch != '(' && ch != ')') {
-                    in_esc = false;
+        if (base_line[i] == '\033') {
+            std::size_t esc_len = get_esc_seq_len(base_line, i);
+            std::string_view esc(&base_line[i], esc_len);
+            if (esc.ends_with('m')) {
+                if (esc == "\033[0m") {
+                    active_style.clear();
+                } else {
+                    active_style.assign(esc);
                 }
             }
-            i++;
+            i += esc_len;
         } else {
-            const auto c = static_cast<unsigned char>(ch);
-            if (c < 0x80 || c >= 0xC0) {
-                col++;
-            }
-            i++;
+            std::size_t char_len = get_utf8_char_len(base_line, i);
+            col++;
+            i += char_len;
         }
     }
 
     if (!active_style.empty()) {
         result += active_style;
     }
-    while (i < base_line.length()) {
-        result += base_line[i];
-        i++;
+    if (i < base_line.length()) {
+        result.append(&base_line[i], base_line.length() - i);
     }
 
     return result;

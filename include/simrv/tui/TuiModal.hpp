@@ -23,6 +23,7 @@ enum class TuiRegPage : uint8_t;
 enum class ModalType : uint8_t {
     None,
     SetBreakpoint,
+    SetWatchpoint,
     SetStepSize,
     SetSpeed,
     InspectAddress,

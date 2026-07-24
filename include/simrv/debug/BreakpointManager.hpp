@@ -38,6 +38,7 @@ class BreakpointManager {
     void add_pc_breakpoint(Address addr);
     void remove_pc_breakpoint(Address addr);
     void clear_pc_breakpoints();
+    [[nodiscard]] auto has_any() const -> bool { return active_; }
     [[nodiscard]] auto has_pc_breakpoint(Address addr) const -> bool;
     [[nodiscard]] auto get_pc_breakpoints() const -> const std::set<Address>& { return pc_breakpoints_; }
 
@@ -51,6 +52,8 @@ class BreakpointManager {
     [[nodiscard]] auto check_mem_read(Address paddr, size_t size) const -> std::optional<BreakpointHit>;
 
    private:
+    void update_active() { active_ = !pc_breakpoints_.empty() || !watchpoints_.empty(); }
+    bool active_ = false;
     std::set<Address> pc_breakpoints_;
     std::vector<Watchpoint> watchpoints_;
 };

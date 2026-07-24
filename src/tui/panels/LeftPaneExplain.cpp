@@ -1,8 +1,8 @@
 /**
- * @file RegisterPaneExplain.cpp
+ * @file LeftPaneExplain.cpp
  * @brief Instruction explainer pane rendering for the TUI register panel.
  */
-#include "simrv/tui/LeftPane.hpp"
+#include "simrv/tui/panels/LeftPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
 #include "simrv/Define.hpp"
@@ -510,6 +510,30 @@ auto LeftPane::get_explain_rows(int width) -> std::vector<std::string> {
 
     Register const target_pc = (inspect_addr_ != 0) ? inspect_addr_ : st.pc;
 
+    auto hex_addr = [](Register v) -> std::string {
+        if constexpr (sizeof(Register) <= 4) {
+            return std::format("0x{:08x}", v);
+        } else {
+            auto val = static_cast<uint64_t>(v);
+            if ((val >> 32) == 0) {
+                return std::format("0x{:08x}", static_cast<uint32_t>(val));
+            }
+            return std::format("0x{:016x}", val);
+        }
+    };
+
+    if (target_pc == 0) {
+        std::vector<std::string> explain_rows;
+        explain_rows.push_back(section_line("Instruction Explainer", width));
+        explain_rows.push_back(format_to_width(std::format("  {}PC     : {}0x00000000\033[0m", kThemeText, kThemeCoral), width));
+        explain_rows.push_back(format_to_width("", width));
+        explain_rows.push_back(format_to_width(std::format("  {}Status : {}No program image loaded (PC is 0x0)\033[0m", kThemeText, kThemePeach), width));
+        explain_rows.push_back(format_to_width(std::format("  {}Action : {}Press [o] to load a RISC-V ELF binary image.\033[0m", kThemeText, kThemeSky), width));
+        explain_rows.push_back(format_to_width("", width));
+        explain_rows.push_back(section_line("End Explainer", width));
+        return explain_rows;
+    }
+
     auto& mutable_cpu = const_cast<simrv::core::CPU&>(cpu);
     auto saved_pc = st.pc;
     st.pc = target_pc;
@@ -518,6 +542,18 @@ auto LeftPane::get_explain_rows(int width) -> std::vector<std::string> {
         (void)mutable_cpu.decode_stage(machine_);
     }
     st.pc = saved_pc;
+
+    if (!fetch_success) {
+        std::vector<std::string> explain_rows;
+        explain_rows.push_back(section_line("Instruction Explainer", width));
+        explain_rows.push_back(format_to_width(std::format("  {}PC     : {}{}\033[0m", kThemeText, kThemeCoral, hex_addr(target_pc)), width));
+        explain_rows.push_back(format_to_width("", width));
+        explain_rows.push_back(format_to_width(std::format("  {}Status : {}Instruction fetch failed / Unmapped memory address\033[0m", kThemeText, kThemePeach), width));
+        explain_rows.push_back(format_to_width(std::format("  {}Action : {}Inspect another address [m] or load a valid binary [o].\033[0m", kThemeText, kThemeSky), width));
+        explain_rows.push_back(format_to_width("", width));
+        explain_rows.push_back(section_line("End Explainer", width));
+        return explain_rows;
+    }
 
     bool const is_compressed = (ctx.ir_org & 0x3) != 0x3;
     uint32_t decompressed_inst = ctx.ir;
@@ -534,18 +570,6 @@ auto LeftPane::get_explain_rows(int width) -> std::vector<std::string> {
     std::string rs2_name = get_reg_name(ctx.rs2, is_rs2_fpr);
 
     std::string assembly = format_instruction_assembly(ctx, fmt, mnemonic, rd_name, rs1_name, rs2_name);
-
-    auto hex_addr = [](Register v) -> std::string {
-        if constexpr (sizeof(Register) <= 4) {
-            return std::format("0x{:08x}", v);
-        } else {
-            auto val = static_cast<uint64_t>(v);
-            if ((val >> 32) == 0) {
-                return std::format("0x{:08x}", static_cast<uint32_t>(val));
-            }
-            return std::format("0x{:016x}", val);
-        }
-    };
 
     std::vector<std::string> explain_rows;
     if (previous_page_.has_value()) {

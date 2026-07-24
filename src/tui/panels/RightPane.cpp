@@ -2,7 +2,7 @@
  * @file RightPane.cpp
  * @brief Implements RightPane widget rendering.
  */
-#include "simrv/tui/RightPane.hpp"
+#include "simrv/tui/panels/RightPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 
 namespace simrv::tui {

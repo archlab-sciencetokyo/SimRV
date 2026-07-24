@@ -61,7 +61,6 @@ void Uart::start_input_thread() {
             rx_fifo_.push(byte);
         }
     });
-    simrv::log::info("[Uart] Background input thread started.");
 }
 
 void Uart::stop_input_thread() {

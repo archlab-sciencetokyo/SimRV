@@ -10,14 +10,17 @@ namespace simrv::debug {
 
 void BreakpointManager::add_pc_breakpoint(Address addr) {
     pc_breakpoints_.insert(addr);
+    update_active();
 }
 
 void BreakpointManager::remove_pc_breakpoint(Address addr) {
     pc_breakpoints_.erase(addr);
+    update_active();
 }
 
 void BreakpointManager::clear_pc_breakpoints() {
     pc_breakpoints_.clear();
+    update_active();
 }
 
 auto BreakpointManager::has_pc_breakpoint(Address addr) const -> bool {
@@ -32,14 +35,17 @@ void BreakpointManager::add_watchpoint(Address addr, size_t size, WatchType type
         .type = type,
         .label = label
     });
+    update_active();
 }
 
 void BreakpointManager::remove_watchpoint(Address addr) {
     std::erase_if(watchpoints_, [addr](const Watchpoint& wp) -> bool { return wp.addr == addr; });
+    update_active();
 }
 
 void BreakpointManager::clear_watchpoints() {
     watchpoints_.clear();
+    update_active();
 }
 
 auto BreakpointManager::check_pc(Address pc) const -> std::optional<BreakpointHit> {

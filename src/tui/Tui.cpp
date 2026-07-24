@@ -32,7 +32,6 @@
 #include "simrv/tui/StatusBar.hpp"
 #include "simrv/xlen/Types.hpp"
 #include "simrv/pipeline/Decoder.hpp"
-#include "simrv/device/Framebuffer.hpp"
 
 namespace simrv::tui {
 
@@ -102,6 +101,10 @@ Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
 Tui::~Tui() { shutdown(); }
 
 void Tui::set_paused(bool p) {
+    if (!p && machine_.cpu.state().pc == 0) {
+        set_status_override("Cannot run: PC is 0x0. Load a program image first [o].");
+        return;
+    }
     if (paused_ != p) {
         paused_ = p;
         if (!p) {
@@ -199,8 +202,6 @@ void Tui::initialize() {
     sa.sa_flags = SA_RESTART;
     sigaction(SIGWINCH, &sa, nullptr);
 
-    print_log("SimRV RISC-V Interactive Environment initialized.\n");
-    print_log("Press [s] Step, [c] Run/Pause, [F1] Help.\n");
     simrv::log::set_tui_callback([this](const std::string& msg) -> void {
         print_log(msg);
     });
@@ -337,11 +338,14 @@ void Tui::render(bool force) {
         kips_ = 0;
     }
 
-    int left_pane_width = user_left_pane_width_ > 0 ? user_left_pane_width_ : ((term_width > 120) ? 75 : 62);
+    int left_pane_width = user_left_pane_width_ > 0
+                              ? user_left_pane_width_
+                              : ((term_width > 120) ? 75 : std::max(40, (term_width * 55) / 100));
     if (left_pane_width < 40) left_pane_width = 40;
-    if (left_pane_width > term_width - 10) left_pane_width = std::max(40, term_width - 10);
+    if (left_pane_width > term_width - 10) left_pane_width = std::max(20, term_width - 10);
     pane_width_cached_ = left_pane_width;
     int right_pane_width = term_width - left_pane_width - 3;
+    if (right_pane_width < 0) right_pane_width = 0;
     if (layout_ == TuiLayout::FullRight) {
         left_pane_width = 0;
         right_pane_width = term_width - 2;
@@ -350,8 +354,8 @@ void Tui::render(bool force) {
         right_pane_width = 0;
     }
 
-    // StatusBar renders 3 header lines + 2 footer lines, and we add 1 separator before footer.
-    int num_rows = term_height - 6;
+    // StatusBar renders 3 header lines + 3 footer lines, and we add 1 separator before footer.
+    int num_rows = term_height - 7;
 
     // Limit scrollback to the existing rows
     {
@@ -574,10 +578,12 @@ void Tui::render(bool force) {
         }
 
         // 2. Always rewrite/restore the left pane body text cells to columns 1..left_pane_width+2
-        // to overlay them on top of any cells cleared by the Sixel graphic draw.
-        for (int i = 0; i < num_rows; ++i) {
-            std::string left = left_pane_->render_row(i, left_pane_width);
-            update_cmds += std::format("\033[{};1H{}║\033[0m{}{}│\033[0m", i + 4, kThemeBorder, left, kThemeBorder);
+        // to overlay them on top of any cells cleared by the Sixel graphic draw, unless a modal is active.
+        if (!modal_.is_active()) {
+            for (int i = 0; i < num_rows; ++i) {
+                std::string left = left_pane_->render_row(i, left_pane_width);
+                update_cmds += std::format("\033[{};1H{}║\033[0m{}{}│\033[0m", i + 4, kThemeBorder, left, kThemeBorder);
+            }
         }
 
         update_cmds += std::format("\033[{};1H", term_height); // Park cursor
@@ -698,7 +704,11 @@ void Tui::cycle_tool_page() {
             rp = TuiRegPage::PIPELINE;
             break;
         case TuiRegPage::PIPELINE:
-            rp = TuiRegPage::CACHE;
+            if (machine_.s_cycle_accurate) {
+                rp = TuiRegPage::CACHE;
+            } else {
+                rp = TuiRegPage::TRACE;
+            }
             break;
         case TuiRegPage::CACHE:
             rp = TuiRegPage::TRACE;
@@ -983,10 +993,10 @@ void Tui::adjust_left_pane_width(int delta) {
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w); // NOLINT(cppcoreguidelines-pro-type-vararg)
     int term_width = w.ws_col;
 
-    int current = user_left_pane_width_ > 0 ? user_left_pane_width_ : ((term_width > 120) ? 75 : 62);
+    int current = user_left_pane_width_ > 0 ? user_left_pane_width_ : ((term_width > 120) ? 75 : std::max(40, (term_width * 55) / 100));
     current += delta;
     if (current < 40) current = 40;
-    if (current > term_width - 10) current = std::max(40, term_width - 10);
+    if (current > term_width - 10) current = std::max(20, term_width - 10);
     user_left_pane_width_ = current;
     render(true);
 }
@@ -1170,13 +1180,35 @@ void Tui::pause_loop() {
             } else if (key == simrv::tui::TuiKey::e || key == simrv::tui::TuiKey::E) {
                 toggle_explain();
             } else if (key == simrv::tui::TuiKey::Colon) {
-                open_modal(ModalType::SetBreakpoint);
+                if (!machine_.s_debug_mode) {
+                    set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
+                    render(true);
+                } else {
+                    open_modal(ModalType::SetBreakpoint);
+                }
+            } else if (key == simrv::tui::TuiKey::w || key == simrv::tui::TuiKey::W) {
+                if (!machine_.s_debug_mode) {
+                    set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
+                    render(true);
+                } else {
+                    open_modal(ModalType::SetWatchpoint);
+                }
             } else if (key == simrv::tui::TuiKey::g || key == simrv::tui::TuiKey::G) {
-                open_modal(ModalType::SetStepSize);
+                if (!machine_.s_debug_mode) {
+                    set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
+                    render(true);
+                } else {
+                    open_modal(ModalType::SetStepSize);
+                }
             } else if (key == simrv::tui::TuiKey::f || key == simrv::tui::TuiKey::F) {
                 open_modal(ModalType::SetSpeed);
             } else if (key == simrv::tui::TuiKey::m || key == simrv::tui::TuiKey::M) {
-                open_modal(ModalType::InspectAddress);
+                if (!machine_.s_debug_mode) {
+                    set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
+                    render(true);
+                } else {
+                    open_modal(ModalType::InspectAddress);
+                }
             } else if (key == simrv::tui::TuiKey::QuestionMark || key == simrv::tui::TuiKey::h || key == simrv::tui::TuiKey::H) {
                 open_modal(ModalType::Help);
             } else if (byte == ',' || key == simrv::tui::TuiKey::Comma) {
@@ -1196,26 +1228,37 @@ void Tui::pause_loop() {
             } else if (key == simrv::tui::TuiKey::d || key == simrv::tui::TuiKey::D) {
                 scroll(-5);
             } else if (key == simrv::tui::TuiKey::b || key == simrv::tui::TuiKey::B) {
-                if (machine_.cpu.perform_backstep()) {
+                if (!machine_.s_debug_mode) {
+                    set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
+                    render(true);
+                } else if (machine_.cpu.perform_backstep()) {
                     update_cache();
                     render(true);
                 }
             } else if (key == simrv::tui::TuiKey::n || key == simrv::tui::TuiKey::N) {
-                if (!machine_.is_shutdown_) {
+                if (!machine_.s_debug_mode) {
+                    set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
+                    render(true);
+                } else if (!machine_.is_shutdown_) {
                     uint64_t g = step_granularity_.load(std::memory_order_relaxed);
                     step_budget_.store(g, std::memory_order_relaxed);
                     tui_loop_paused_ = false;
                 }
             } else if (key == simrv::tui::TuiKey::k || key == simrv::tui::TuiKey::K) {
-                Address pc = machine_.cpu.state().pc;
-                if (machine_.breakpoints.has_pc_breakpoint(pc)) {
-                    machine_.breakpoints.remove_pc_breakpoint(pc);
-                    set_status_override(std::format("Removed breakpoint at 0x{:08x}", pc));
+                if (!machine_.s_debug_mode) {
+                    set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
+                    render(true);
                 } else {
-                    machine_.breakpoints.add_pc_breakpoint(pc);
-                    set_status_override(std::format("Breakpoint set at 0x{:08x}", pc));
+                    Address pc = machine_.cpu.state().pc;
+                    if (machine_.breakpoints.has_pc_breakpoint(pc)) {
+                        machine_.breakpoints.remove_pc_breakpoint(pc);
+                        set_status_override(std::format("Removed breakpoint at 0x{:08x}", pc));
+                    } else {
+                        machine_.breakpoints.add_pc_breakpoint(pc);
+                        set_status_override(std::format("Breakpoint set at 0x{:08x}", pc));
+                    }
+                    render(true);
                 }
-                render(true);
             } else if (key == simrv::tui::TuiKey::o || key == simrv::tui::TuiKey::O) {
                 open_modal(ModalType::LoadBinary);
             } else if (key == simrv::tui::TuiKey::Plus || key == simrv::tui::TuiKey::Equal || key == simrv::tui::TuiKey::Dot) {
@@ -1249,7 +1292,10 @@ void Tui::pause_loop() {
                 }
                 render(true);
             } else if (key == simrv::tui::TuiKey::s || key == simrv::tui::TuiKey::S || key == simrv::tui::TuiKey::Space) {
-                if (!machine_.is_shutdown_) {
+                if (!machine_.s_debug_mode) {
+                    set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
+                    render(true);
+                } else if (!machine_.is_shutdown_) {
                     update_cache();
                     machine_.prepare_cycle();
                     machine_.cpu.run_cycle(machine_);
@@ -1340,14 +1386,18 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         ioctl(STDOUT_FILENO, TIOCGWINSZ, &w_footer); // NOLINT(cppcoreguidelines-pro-type-vararg)
         int term_h = w_footer.ws_row > 0 ? w_footer.ws_row : 24;
 
-        if (esc_buf_.back() == 'M' && button == 0 && y == term_h - 1) {
+        if (esc_buf_.back() == 'M' && button == 0 && (y == term_h - 2 || y == term_h - 1)) {
             int col = x - 2;
+            int row_idx = (y == term_h - 2) ? 0 : 1;
             if (status_bar_) {
-                auto act_opt = status_bar_->get_footer_action_at_col(col);
+                auto act_opt = status_bar_->get_footer_action_at_col(col, row_idx);
                 if (act_opt.has_value()) {
                     switch (act_opt.value()) {
                         case TuiFooterAction::Step:
-                            if (!machine_.is_shutdown_) {
+                            if (machine_.cpu.state().pc == 0) {
+                                set_status_override("Cannot step: PC is 0x0. Load a program image first [o].");
+                                render(true);
+                            } else if (!machine_.is_shutdown_) {
                                 update_cache();
                                 machine_.prepare_cycle();
                                 machine_.cpu.run_cycle(machine_);
@@ -1362,15 +1412,29 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                             }
                             break;
                         case TuiFooterAction::StepN:
-                            if (!machine_.is_shutdown_) {
+                            if (machine_.cpu.state().pc == 0) {
+                                set_status_override("Cannot step: PC is 0x0. Load a program image first [o].");
+                                render(true);
+                            } else if (!machine_.is_shutdown_) {
                                 uint64_t g = step_granularity_.load(std::memory_order_relaxed);
                                 step_budget_.store(g, std::memory_order_relaxed);
                                 tui_loop_paused_ = false;
                             }
                             break;
+                        case TuiFooterAction::RunPause:
+                            if (paused_ && machine_.cpu.state().pc == 0) {
+                                set_status_override("Cannot run: PC is 0x0. Load a program image first [o].");
+                                render(true);
+                            } else if (tui_loop_paused_) {
+                                tui_loop_paused_ = false;
+                            } else {
+                                pause_loop();
+                            }
+                            break;
                         case TuiFooterAction::CycleRegs: cycle_reg_page(); break;
                         case TuiFooterAction::CycleTools: cycle_tool_page(); break;
                         case TuiFooterAction::SetBreakpoint: open_modal(ModalType::SetBreakpoint); break;
+                        case TuiFooterAction::SetWatchpoint: open_modal(ModalType::SetWatchpoint); break;
                         case TuiFooterAction::TogglePcBreakpoint: {
                             Address pc = machine_.cpu.state().pc;
                             if (machine_.breakpoints.has_pc_breakpoint(pc)) {
@@ -1390,9 +1454,6 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                             open_modal(ModalType::LoadBinary);
                             break;
                         case TuiFooterAction::ToggleHelp: open_modal(ModalType::Help); break;
-                        case TuiFooterAction::RunPause:
-                            if (tui_loop_paused_) { tui_loop_paused_ = false; } else { pause_loop(); }
-                            break;
                         case TuiFooterAction::Quit:
                             machine_.is_running_ = false;
                             machine_.is_shutdown_ = false;
@@ -1503,7 +1564,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         }
     }
 
-    // 3. Arrow keys, Page Up/Down, Home, End
+    // 3. Arrow keys (processed by interactive modals or forwarded to guest UART)
     if (esc_buf_ == "\033[A" || esc_buf_ == "\033OA") {
         if (get_active_modal() == ModalType::Settings) {
             modal_.move_settings_cursor(-1);
@@ -1515,8 +1576,6 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             render(true);
             return true;
         }
-        scroll(-1);
-        return true;
     }
     if (esc_buf_ == "\033[B" || esc_buf_ == "\033OB") {
         if (get_active_modal() == ModalType::Settings) {
@@ -1529,8 +1588,6 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             render(true);
             return true;
         }
-        scroll(1);
-        return true;
     }
     if (esc_buf_ == "\033[C" || esc_buf_ == "\033OC") {
         if (get_active_modal() == ModalType::Settings) {
@@ -1543,8 +1600,6 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             render(true);
             return true;
         }
-        cycle_right_panel_mode();
-        return true;
     }
     if (esc_buf_ == "\033[D" || esc_buf_ == "\033OD") {
         if (get_active_modal() == ModalType::Settings) {
@@ -1557,8 +1612,6 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             render(true);
             return true;
         }
-        cycle_reg_page();
-        return true;
     }
     if (esc_buf_ == "\033[5~") {
         scroll(-10);
@@ -1659,7 +1712,7 @@ void Tui::cycle_step_granularity(bool increase) {
     step_granularity_.store(kPresets[idx], std::memory_order_relaxed);
 }
 
-void Tui::on_cycle_completed() {
+void Tui::on_cycle_completed_slow() {
     uint64_t budget = step_budget_.load(std::memory_order_relaxed);
     while (budget > 0) {
         if (step_budget_.compare_exchange_weak(budget, budget - 1, std::memory_order_relaxed)) {

@@ -57,6 +57,8 @@ enum class TuiKey : uint8_t {
     QuestionMark = '?',
     f        = 'f',
     F        = 'F',
+    w        = 'w',
+    W        = 'W',
     g        = 'g',
     G        = 'G',
     Plus     = '+',

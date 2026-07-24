@@ -34,7 +34,10 @@ constexpr auto perform_amo_op(T reg_val, T mem_val, Funct5Amo funct5) -> T {
 auto ExecuteUnit::aluInt(Register in1, Register in2, isa::OperationId op_id, unsigned xlen) -> Register {
     using enum isa::OperationId;
 
-    if (xlen == 32) {
+    if constexpr (!simrv::xlen::kIsXLen64) {
+        xlen = 32;
+    }
+    if (simrv::compiler::unlikely(xlen == 32)) {
         const auto u1 = static_cast<uint32_t>(in1);
         const auto u2 = static_cast<uint32_t>(in2);
         const auto s1 = static_cast<int32_t>(in1);
@@ -324,7 +327,10 @@ auto ExecuteUnit::aluIntW(Register in1, Register in2, isa::OperationId op_id) ->
 }
 
 auto ExecuteUnit::branchTaken(Register in1, Register in2, Funct3 funct3, unsigned xlen) -> bool {
-    if (xlen == 32) {
+    if constexpr (!simrv::xlen::kIsXLen64) {
+        xlen = 32;
+    }
+    if (simrv::compiler::unlikely(xlen == 32)) {
         const auto u1 = static_cast<uint32_t>(in1);
         const auto u2 = static_cast<uint32_t>(in2);
         const auto s1 = static_cast<int32_t>(in1);

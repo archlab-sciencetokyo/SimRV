@@ -1,15 +1,14 @@
 /**
- * @file RegisterPaneRegs.cpp
+ * @file LeftPaneRegs.cpp
  * @brief GPR, FPR, and vector register rendering for the TUI register panel.
  */
-#include "simrv/tui/LeftPane.hpp"
+#include "simrv/tui/panels/LeftPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include <format>
 #include <string>
 #include <array>
-
 
 namespace simrv::tui {
 

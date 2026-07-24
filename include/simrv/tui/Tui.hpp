@@ -4,21 +4,22 @@
  */
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <csignal>
-#include <string>
-#include <vector>
 #include <memory>
-#include <queue>
 #include <mutex>
-#include <atomic>
+#include <queue>
+#include <string>
 #include <thread>
+#include <vector>
 
-#include "simrv/xlen/Types.hpp"
+#include "simrv/Define.hpp"
 #include "simrv/isa/Base.hpp"
 #include "simrv/isa/OperationId.hpp"
-#include "simrv/tui/VirtualTerminal.hpp"
 #include "simrv/tui/TuiModal.hpp"
+#include "simrv/tui/VirtualTerminal.hpp"
+#include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -26,7 +27,7 @@ class Machine;
 
 namespace simrv::tui {
 
-extern volatile std::sig_atomic_t g_resized;
+extern volatile std::sig_atomic_t g_resized;  // NOLINT(avoid-non-const-global-variables)
 
 enum class TuiLayout : uint8_t {
     Split,
@@ -79,7 +80,13 @@ class Tui {
     void set_sim_thread_sleeping(bool s) { sim_thread_is_sleeping_.store(s, std::memory_order_relaxed); }
     [[nodiscard]] auto is_sim_thread_sleeping() const -> bool { return sim_thread_is_sleeping_.load(std::memory_order_relaxed); }
     void update_cache();
-    void on_cycle_completed();
+    void on_cycle_completed_slow();
+    void on_cycle_completed() {
+        if (simrv::compiler::unlikely(step_budget_.load(std::memory_order_relaxed) > 0 ||
+                                      step_delay_us_.load(std::memory_order_relaxed) > 0)) {
+            on_cycle_completed_slow();
+        }
+    }
     void reset_speed_history();
 
     std::atomic<uint64_t> step_budget_{0};
@@ -95,15 +102,12 @@ class Tui {
     }
     void close_modal() { modal_.close(); render(true); }
     void submit_modal() {
-        bool const should_resume = modal_.submit(
+        modal_.submit(
             left_pane_.get(), step_granularity_, step_delay_us_,
             [this](TuiRegPage page) { set_reg_page(page); },
             [this](const std::string& status) { set_status_override(status); },
             [this]() { reset_speed_history(); });
         render(true);
-        if (should_resume) {
-            tui_loop_paused_ = false;
-        }
     }
     [[nodiscard]] auto is_modal_active() const -> bool { return modal_.is_active(); }
     [[nodiscard]] auto get_active_modal() const -> ModalType { return modal_.get_type(); }

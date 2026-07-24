@@ -2,7 +2,7 @@
  * @file LeftPane.cpp
  * @brief Implements LeftPane widget rendering base and infrastructure.
  */
-#include "simrv/tui/LeftPane.hpp"
+#include "simrv/tui/panels/LeftPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
@@ -144,15 +144,16 @@ auto LeftPane::render_tab_bar(int width) const -> std::string {
         line += std::format("{}Regs\033[0m", kThemeMuted);
     }
 
-    // Remaining 5 tool tabs
+    // Remaining tool tabs
     struct ToolTab { TuiRegPage page; const char* name; };
-    static constexpr std::array<ToolTab, 5> tool_tabs = {{
-        {.page = TuiRegPage::PIPELINE, .name = "Pipe"},
-        {.page = TuiRegPage::CACHE,    .name = "Cache"},
-        {.page = TuiRegPage::TRACE,    .name = "Trace"},
-        {.page = TuiRegPage::EXPLAIN,  .name = "Exp"},
-        {.page = TuiRegPage::STACK,    .name = "Stack"},
-    }};
+    std::vector<ToolTab> tool_tabs;
+    tool_tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Pipe"});
+    if (machine_.s_cycle_accurate) {
+        tool_tabs.push_back({.page = TuiRegPage::CACHE, .name = "Cache"});
+    }
+    tool_tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
+    tool_tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Exp"});
+    tool_tabs.push_back({.page = TuiRegPage::STACK, .name = "Stack"});
 
     for (auto const& tab : tool_tabs) {
         line += std::format("{}│\033[0m", kThemeBorder);
@@ -177,13 +178,14 @@ auto LeftPane::get_tab_at_col(int col) const -> std::optional<TuiRegPage> {
     current_x += regs_width + 1; // +1 for │
 
     struct ToolTab { TuiRegPage page; const char* name; };
-    static constexpr std::array<ToolTab, 5> tool_tabs = {{
-        {.page = TuiRegPage::PIPELINE, .name = "Pipe"},
-        {.page = TuiRegPage::CACHE,    .name = "Cache"},
-        {.page = TuiRegPage::TRACE,    .name = "Trace"},
-        {.page = TuiRegPage::EXPLAIN,  .name = "Exp"},
-        {.page = TuiRegPage::STACK,    .name = "Stack"},
-    }};
+    std::vector<ToolTab> tool_tabs;
+    tool_tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Pipe"});
+    if (machine_.s_cycle_accurate) {
+        tool_tabs.push_back({.page = TuiRegPage::CACHE, .name = "Cache"});
+    }
+    tool_tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
+    tool_tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Exp"});
+    tool_tabs.push_back({.page = TuiRegPage::STACK, .name = "Stack"});
 
     for (auto const& tab : tool_tabs) {
         int tab_width = (page_ == tab.page) ? (static_cast<int>(std::strlen(tab.name)) + 2) : static_cast<int>(std::strlen(tab.name));

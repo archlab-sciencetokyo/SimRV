@@ -121,15 +121,17 @@ void CPU::evaluate_timer_interrupt() {
 }
 
 void CPU::run_cycle(Machine& machine) {
-    prev_state_ = state_;
-    if (auto hit = machine.breakpoints.check_pc(state_.pc)) {
-        if (machine.tui) {
-            machine.tui->set_status_override(hit->description);
-            machine.tui->pause_loop();
+    if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
+        if (auto hit = machine.breakpoints.check_pc(state_.pc)) {
+            if (machine.tui) {
+                machine.tui->set_status_override(hit->description);
+                machine.tui->pause_loop();
+            }
         }
     }
     // If rollback support is active, record architectural and memory checkpoints before updating state.
-    if (machine.s_rollback_enabled) {
+    if (simrv::compiler::unlikely(machine.s_rollback_enabled)) {
+        prev_state_ = state_;
         push_undo_state();
     }
     uint32_t step_cycles = 1;
@@ -283,14 +285,16 @@ void CPU::record_trace_for_tui(Machine& machine) {
 }
 
 void CPU::run_cycle_baremetal(Machine& machine) {
-    prev_state_ = state_;
-    if (auto hit = machine.breakpoints.check_pc(state_.pc)) {
-        if (machine.tui) {
-            machine.tui->set_status_override(hit->description);
-            machine.tui->pause_loop();
+    if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
+        if (auto hit = machine.breakpoints.check_pc(state_.pc)) {
+            if (machine.tui) {
+                machine.tui->set_status_override(hit->description);
+                machine.tui->pause_loop();
+            }
         }
     }
-    if (machine.s_rollback_enabled) {
+    if (simrv::compiler::unlikely(machine.s_rollback_enabled)) {
+        prev_state_ = state_;
         push_undo_state();
     }
     pipeline_context.pending_exception = std::nullopt;

@@ -1,5 +1,5 @@
 /**
- * @file RegisterPanePipeline.cpp
+ * @file LeftPanePipeline.cpp
  * @brief Pipeline visualization pane rendering for the TUI register panel.
  *
  * Designed to be readable by students learning about pipelining:
@@ -20,7 +20,7 @@
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/PipelineModel.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
-#include "simrv/tui/LeftPane.hpp"
+#include "simrv/tui/panels/LeftPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
@@ -605,8 +605,8 @@ auto LeftPane::render_pipeline_stages_functional_low_part1(const simrv::core::CP
         case 2: {
             // Hex encoding + Format name
             std::string hex_str = is_compressed
-                                      ? std::format("0x{:04X} (compressed)", ctx.ir_org & 0xFFFF)
-                                      : std::format("0x{:08X}", ctx.ir_org);
+                                       ? std::format("0x{:04X} (compressed)", ctx.ir_org & 0xFFFF)
+                                       : std::format("0x{:08X}", ctx.ir_org);
             std::string fmt_str = std::string(simrv::isa::get_instruction_format_name(fmt));
             return render_pair("Encoding", hex_str, kThemeVal, "Format", fmt_str, kThemeVal,
                                col_width, right_width, 10);
@@ -729,7 +729,7 @@ auto LeftPane::render_pipeline_stages_functional_low_part2(const simrv::core::CP
 
 // Rows 16–19: Exception / trap info + end marker
 auto LeftPane::render_pipeline_stages_functional_high(const simrv::core::CPU& cpu, int logical_row,
-                                                      int col_width, int right_width)
+                                                       int col_width, int right_width)
     -> std::string {
     int const width = col_width + right_width;
     auto& ctx = cpu.pipeline_context;
@@ -1141,8 +1141,8 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
 }
 
 auto LeftPane::render_system_or_pipeline_extended(const simrv::core::CPU& cpu, int logical_row,
-                                                  int col_width, int right_width,
-                                                  bool single_column) -> std::string {
+                                                   int col_width, int right_width,
+                                                   bool single_column) -> std::string {
     if (logical_row >= 16 && logical_row <= 24) {
         if (page_ == TuiRegPage::PIPELINE) {
             return render_pipeline_stages(cpu, logical_row, col_width, right_width);
@@ -1154,7 +1154,7 @@ auto LeftPane::render_system_or_pipeline_extended(const simrv::core::CPU& cpu, i
 }
 
 auto LeftPane::render_system_state(const simrv::core::CPU& cpu, int logical_row, int col_width,
-                                   int right_width) -> std::string {
+                                    int right_width) -> std::string {
     auto const& st = cpu.state();
     int const width = col_width + right_width;
     int label_pad = (width < 50) ? 0 : ((width < 65) ? 5 : 8);
