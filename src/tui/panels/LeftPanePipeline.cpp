@@ -1072,7 +1072,7 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
         }
         case 5: {
             return format_to_width(
-                std::format("  {}Use \033[1m[↑/↓]\033[0m or \033[1m[j/k]\033[0m to change Set, \033[1m[←/→]\033[0m to toggle I/D-Cache\033[0m",
+                std::format("  {}Use \033[1m[↑/↓]\033[0m or \033[1m[j/k]\033[0m Set, \033[1m[←/→]\033[0m I/D-Cache, \033[1m[0-3]\033[0m or \033[1m[w]\033[0m Way\033[0m",
                             kThemeMuted),
                 width);
         }
@@ -1082,6 +1082,7 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
         case 9: {
             uint32_t way_idx = static_cast<uint32_t>(logical_row - 6);
             uint32_t set_idx = static_cast<uint32_t>(cache_inspect_set_);
+            bool is_selected_way = (static_cast<int>(way_idx) == cache_inspect_way_);
 
             bool is_icache = (cache_inspect_type_ == 0);
             bool valid = is_icache ? ic.is_line_valid(set_idx, way_idx) : dc.is_line_valid(set_idx, way_idx);
@@ -1103,8 +1104,11 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
                 status_tag = std::format("{}0x{:016x}\033[0m", kThemeVal, tag);
             }
 
-            std::string way_prefix = std::format("  {}Way #{}\033[0m [V:{}] Tag: {}",
-                                                 kThemeText, way_idx,
+            std::string cursor_marker = is_selected_way ? std::format("\033[1m{}▶\033[0m ", kThemeMint) : "  ";
+
+            std::string way_str = is_selected_way ? std::format("\033[1;7mWay #{}\033[0m", way_idx) : std::format("{}Way #{}\033[0m", kThemeText, way_idx);
+            std::string way_prefix = std::format("{} [V:{}] Tag: {}",
+                                                 way_str,
                                                  valid ? std::format("{}1\033[0m", kThemeMint) : std::format("{}0\033[0m", kThemeMuted),
                                                  status_tag);
 
@@ -1117,24 +1121,35 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
                 highlight = std::format("  \033[1m{}◄ MISS\033[0m", kThemeCoral);
             }
 
-            std::string line_str = std::format("{}  LRU:{:<8}{}", way_prefix, lru, highlight);
+            std::string line_str = std::format("{}{}  LRU:{:<8}{}", cursor_marker, way_prefix, lru, highlight);
             return format_to_width(line_str, width);
         }
         case 10: {
             uint32_t set_idx = static_cast<uint32_t>(cache_inspect_set_);
+            uint32_t way_idx = static_cast<uint32_t>(cache_inspect_way_);
             bool is_icache = (cache_inspect_type_ == 0);
-            const auto* line_data = is_icache ? ic.get_line_data(set_idx, 0) : dc.get_line_data(set_idx, 0);
+            const auto* line_data = is_icache ? ic.get_line_data(set_idx, way_idx) : dc.get_line_data(set_idx, way_idx);
+            bool valid = is_icache ? ic.is_line_valid(set_idx, way_idx) : dc.is_line_valid(set_idx, way_idx);
 
-            std::string data_preview = "  Data (Way#0): ";
-            if (line_data != nullptr && (is_icache ? ic.is_line_valid(set_idx, 0) : dc.is_line_valid(set_idx, 0))) {
-                for (size_t b = 0; b < 12 && b < line_data->size(); ++b) {
-                    data_preview += std::format("{}{:02x} ", kThemeVal, std::to_integer<unsigned int>(line_data->at(b)));
+            std::string hex_str;
+            std::string ascii_str;
+
+            if (line_data != nullptr && valid) {
+                for (size_t b = 0; b < 16 && b < line_data->size(); ++b) {
+                    uint8_t byte_val = std::to_integer<uint8_t>(line_data->at(b));
+                    hex_str += std::format("{}{:02x} ", kThemeVal, byte_val);
+                    ascii_str += (byte_val >= 32 && byte_val <= 126) ? static_cast<char>(byte_val) : '.';
                 }
-                data_preview += "\033[0m...";
+                return format_to_width(
+                    std::format("  {}Data (Way #{}): {}\033[0m │  {}{}\033[0m",
+                                kThemeText, way_idx, hex_str, kThemeMuted, ascii_str),
+                    width);
             } else {
-                data_preview += std::format("{}<Empty / Invalid Line>\033[0m", kThemeMuted);
+                return format_to_width(
+                    std::format("  {}Data (Way #{}): {}<Empty / Invalid Line>\033[0m",
+                                kThemeText, way_idx, kThemeMuted),
+                    width);
             }
-            return format_to_width(data_preview, width);
         }
         case 11:
             return section_line("Set Occupancy Map & Replacement Log", width);

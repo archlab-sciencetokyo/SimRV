@@ -71,8 +71,17 @@ class LeftPane : public TuiWidget {
     void toggle_cache_inspect_type() {
         cache_inspect_type_ = 1 - cache_inspect_type_;
     }
+    void select_cache_way(int way) {
+        if (way >= 0 && way < 4) {
+            cache_inspect_way_ = way;
+        }
+    }
+    void cycle_cache_way(int delta) {
+        cache_inspect_way_ = (cache_inspect_way_ + delta + 4) % 4;
+    }
     [[nodiscard]] auto get_cache_inspect_set() const -> int { return cache_inspect_set_; }
     [[nodiscard]] auto get_cache_inspect_type() const -> int { return cache_inspect_type_; }
+    [[nodiscard]] auto get_cache_inspect_way() const -> int { return cache_inspect_way_; }
 
     [[nodiscard]] auto get_tab_at_col(int col) const -> std::optional<TuiRegPage>;
 
@@ -143,6 +152,7 @@ class LeftPane : public TuiWidget {
     std::vector<std::string> log_lines_;
     int cache_inspect_type_ = 0; // 0: ICache, 1: DCache
     int cache_inspect_set_ = 0;  // 0 .. 15
+    int cache_inspect_way_ = 0;  // 0 .. 3
 };
 
 }  // namespace simrv::tui

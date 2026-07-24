@@ -26,7 +26,7 @@
 #include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/device/Uart.hpp"
-#include "simrv/tui/LeftPane.hpp"
+#include "simrv/tui/panels/LeftPane.hpp"
 #include "simrv/tui/RightPane.hpp"
 #include "simrv/device/Framebuffer.hpp"
 #include "simrv/tui/StatusBar.hpp"
@@ -1191,12 +1191,18 @@ void Tui::pause_loop() {
                     open_modal(ModalType::SetBreakpoint);
                 }
             } else if (key == simrv::tui::TuiKey::w || key == simrv::tui::TuiKey::W) {
-                if (!machine_.s_debug_mode) {
+                if (left_pane_ && left_pane_->get_page() == TuiRegPage::CACHE) {
+                    left_pane_->cycle_cache_way(1);
+                    render(true);
+                } else if (!machine_.s_debug_mode) {
                     set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
                     render(true);
                 } else {
                     open_modal(ModalType::SetWatchpoint);
                 }
+            } else if (left_pane_ && left_pane_->get_page() == TuiRegPage::CACHE && byte >= '0' && byte <= '3') {
+                left_pane_->select_cache_way(byte - '0');
+                render(true);
             } else if (key == simrv::tui::TuiKey::g || key == simrv::tui::TuiKey::G) {
                 if (!machine_.s_debug_mode) {
                     set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
