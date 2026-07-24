@@ -1249,7 +1249,10 @@ void Tui::pause_loop() {
                     tui_loop_paused_ = false;
                 }
             } else if (key == simrv::tui::TuiKey::k || key == simrv::tui::TuiKey::K) {
-                if (!machine_.s_debug_mode) {
+                if (left_pane_ && left_pane_->get_page() == TuiRegPage::CACHE) {
+                    left_pane_->select_next_cache_set(-1);
+                    render(true);
+                } else if (!machine_.s_debug_mode) {
                     set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
                     render(true);
                 } else {
@@ -1261,6 +1264,11 @@ void Tui::pause_loop() {
                         machine_.breakpoints.add_pc_breakpoint(pc);
                         set_status_override(std::format("Breakpoint set at 0x{:08x}", pc));
                     }
+                    render(true);
+                }
+            } else if (key == simrv::tui::TuiKey::j || key == simrv::tui::TuiKey::J) {
+                if (left_pane_ && left_pane_->get_page() == TuiRegPage::CACHE) {
+                    left_pane_->select_next_cache_set(1);
                     render(true);
                 }
             } else if (key == simrv::tui::TuiKey::o || key == simrv::tui::TuiKey::O) {
@@ -1577,6 +1585,11 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             render(true);
             return true;
         }
+        if (left_pane_ && left_pane_->get_page() == TuiRegPage::CACHE) {
+            left_pane_->select_next_cache_set(-1);
+            render(true);
+            return true;
+        }
     }
     if (esc_buf_ == "\033[B" || esc_buf_ == "\033OB") {
         if (get_active_modal() == ModalType::Settings) {
@@ -1586,6 +1599,11 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         }
         if (get_active_modal() == ModalType::ConfigureMisa) {
             modal_.move_misa_cursor(1);
+            render(true);
+            return true;
+        }
+        if (left_pane_ && left_pane_->get_page() == TuiRegPage::CACHE) {
+            left_pane_->select_next_cache_set(1);
             render(true);
             return true;
         }
@@ -1601,6 +1619,11 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             render(true);
             return true;
         }
+        if (left_pane_ && left_pane_->get_page() == TuiRegPage::CACHE) {
+            left_pane_->toggle_cache_inspect_type();
+            render(true);
+            return true;
+        }
     }
     if (esc_buf_ == "\033[D" || esc_buf_ == "\033OD") {
         if (get_active_modal() == ModalType::Settings) {
@@ -1610,6 +1633,11 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         }
         if (get_active_modal() == ModalType::ConfigureMisa) {
             modal_.toggle_misa_at_cursor();
+            render(true);
+            return true;
+        }
+        if (left_pane_ && left_pane_->get_page() == TuiRegPage::CACHE) {
+            left_pane_->toggle_cache_inspect_type();
             render(true);
             return true;
         }

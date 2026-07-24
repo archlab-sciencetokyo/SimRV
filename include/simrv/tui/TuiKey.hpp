@@ -43,6 +43,8 @@ enum class TuiKey : uint8_t {
     B        = 'B',
     n        = 'n',
     N        = 'N',
+    j        = 'j',
+    J        = 'J',
     k        = 'k',
     K        = 'K',
     l        = 'l',

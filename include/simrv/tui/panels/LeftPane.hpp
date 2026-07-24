@@ -64,6 +64,16 @@ class LeftPane : public TuiWidget {
     [[nodiscard]] auto get_register_value_at_row(int logical_row, int col_x, int pane_width) const -> std::optional<Register>;
     [[nodiscard]] auto get_stack_addr_at_row(int logical_row) const -> std::optional<Register>;
 
+    void select_next_cache_set(int delta) {
+        constexpr int kNumSets = 16;
+        cache_inspect_set_ = (cache_inspect_set_ + delta + kNumSets) % kNumSets;
+    }
+    void toggle_cache_inspect_type() {
+        cache_inspect_type_ = 1 - cache_inspect_type_;
+    }
+    [[nodiscard]] auto get_cache_inspect_set() const -> int { return cache_inspect_set_; }
+    [[nodiscard]] auto get_cache_inspect_type() const -> int { return cache_inspect_type_; }
+
     [[nodiscard]] auto get_tab_at_col(int col) const -> std::optional<TuiRegPage>;
 
    private:
@@ -131,6 +141,8 @@ class LeftPane : public TuiWidget {
     Register inspect_addr_ = 0;
     const std::vector<std::string>* trace_buffer_ = nullptr;
     std::vector<std::string> log_lines_;
+    int cache_inspect_type_ = 0; // 0: ICache, 1: DCache
+    int cache_inspect_set_ = 0;  // 0 .. 15
 };
 
 }  // namespace simrv::tui
