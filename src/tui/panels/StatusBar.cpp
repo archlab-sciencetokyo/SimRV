@@ -139,7 +139,7 @@ static const auto paused_row2_entries = std::to_array<FooterEntry>({
      .action = TuiFooterAction::InspectMem,
      .category = FooterCategory::DebugInspect},
     {.text = "  ", .action = std::nullopt, .category = FooterCategory::Spacer},
-    {.text = ":] SetBP",
+    {.text = "[:] SetBP",
      .action = TuiFooterAction::SetBreakpoint,
      .category = FooterCategory::DebugInspect},
     {.text = "  ", .action = std::nullopt, .category = FooterCategory::Spacer},

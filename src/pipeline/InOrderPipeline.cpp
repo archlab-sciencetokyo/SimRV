@@ -520,4 +520,58 @@ auto InOrderPipeline::get_btb_target(Register pc) const -> std::pair<bool, Regis
     return {false, 0};
 }
 
+auto InOrderPipeline::save_state() const -> PipelineSimState {
+    PipelineSimState state;
+    state.f_reg = f_reg_;
+    state.d_reg = d_reg_;
+    state.e_reg = e_reg_;
+    state.m_reg = m_reg_;
+    state.w_reg = w_reg_;
+    state.branch_history_table = branch_history_table_;
+    state.btb = btb_;
+    {
+        std::scoped_lock lock(history_mutex_);
+        state.cycle_history.assign(cycle_history_.begin(), cycle_history_.end());
+    }
+    state.control_bubble_remaining = control_bubble_remaining_;
+    state.tlb_stall_remaining = tlb_stall_remaining_;
+    state.icache_stall_remaining = icache_stall_remaining_;
+    state.dcache_stall_remaining = dcache_stall_remaining_;
+    state.div_busy_cycles_remaining = div_busy_cycles_remaining_;
+    state.stats = get_stats();
+    state.gshare_history = gshare_history_;
+    return state;
+}
+
+void InOrderPipeline::restore_state(const PipelineSimState& state) {
+    f_reg_ = state.f_reg;
+    d_reg_ = state.d_reg;
+    e_reg_ = state.e_reg;
+    m_reg_ = state.m_reg;
+    w_reg_ = state.w_reg;
+    branch_history_table_ = state.branch_history_table;
+    btb_ = state.btb;
+    {
+        std::scoped_lock lock(history_mutex_);
+        cycle_history_.assign(state.cycle_history.begin(), state.cycle_history.end());
+    }
+    control_bubble_remaining_ = state.control_bubble_remaining;
+    tlb_stall_remaining_ = state.tlb_stall_remaining;
+    icache_stall_remaining_ = state.icache_stall_remaining;
+    dcache_stall_remaining_ = state.dcache_stall_remaining;
+    div_busy_cycles_remaining_ = state.div_busy_cycles_remaining;
+
+    cycle_count_ = state.stats.cycle_count;
+    stall_cycles_ = state.stats.stall_cycles;
+    bubble_cycles_ = state.stats.bubble_cycles;
+    icache_stalls_ = state.stats.icache_stalls;
+    dcache_stalls_ = state.stats.dcache_stalls;
+    tlb_stalls_ = state.stats.tlb_stalls;
+    structural_stalls_ = state.stats.structural_stalls;
+    data_hazard_stalls_ = state.stats.data_hazard_stalls;
+    control_hazard_bubbles_ = state.stats.control_hazard_bubbles;
+
+    gshare_history_ = state.gshare_history;
+}
+
 } // namespace simrv::pipeline

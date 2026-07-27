@@ -127,7 +127,7 @@ void Tui::initialize() {
     right_pane_ = std::make_unique<RightPane>();
     status_bar_ = std::make_unique<StatusBar>(machine_);
 
-    set_high_contrast(machine_.s_high_contrast);
+    set_tui_theme(get_tui_theme());
 
     left_pane_->update_cache();
 
@@ -774,6 +774,12 @@ void Tui::toggle_sakura_theme() {
 
 void Tui::toggle_cycle_accurate() {
     machine_.s_cycle_accurate = !machine_.s_cycle_accurate;
+    if (machine_.s_cycle_accurate) {
+        machine_.s_high_performance = false;
+    } else {
+        machine_.s_high_performance = true;
+        machine_.s_use_mix = false;
+    }
     set_status_override(std::format("Simulation mode switched to {}",
                                    machine_.s_cycle_accurate ? "Cycle-Accurate (CA)" : "Instruction-Accurate (IA)"));
     render(true);
@@ -781,6 +787,22 @@ void Tui::toggle_cycle_accurate() {
 
 void Tui::toggle_debug_mode() {
     machine_.s_debug_mode = !machine_.s_debug_mode;
+    if (machine_.s_debug_mode) {
+        machine_.s_use_mix = machine_.s_cycle_accurate;
+        machine_.s_bp_trace = true;
+        machine_.s_rollback_enabled = true;
+        trace_enabled_.store(true, std::memory_order_relaxed);
+        update_trace_active_cache();
+        machine_.tracer.init_trace(true);
+    } else {
+        machine_.s_use_mix = false;
+        machine_.s_bp_trace = false;
+        machine_.s_rollback_enabled = false;
+        machine_.cpu.undo_stack.clear();
+        trace_enabled_.store(false, std::memory_order_relaxed);
+        update_trace_active_cache();
+        machine_.tracer.init_trace(false);
+    }
     set_status_override(std::format("TUI mode switched to {}",
                                    machine_.s_debug_mode ? "Debug mode" : "Normal mode"));
     render(true);

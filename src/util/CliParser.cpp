@@ -812,11 +812,22 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     machine->s_dlog_mode = options.dlog_mode;
     machine->s_traplog_mode = options.traplog_mode;
     machine->s_use_disk = options.use_disk;
-    machine->s_use_mix = options.use_mix;
-    machine->s_bp_trace = options.bp_trace;
+
+    if (options.debug_mode) {
+        machine->s_use_mix = true;
+        machine->s_bp_trace = true;
+        machine->s_rollback_enabled = true;
+    } else {
+        machine->s_use_mix = options.use_mix;
+        machine->s_bp_trace = options.bp_trace;
+    }
 
     machine->s_cycle_accurate = options.cycle_accurate;
-    machine->s_high_performance = options.high_performance;
+    if (options.cycle_accurate) {
+        machine->s_high_performance = false;
+    } else {
+        machine->s_high_performance = options.high_performance;
+    }
     machine->s_fn_cpuconfig = options.fn_cpuconfig;
     machine->cpu.pipeline_sim.config.enable_forwarding = !options.disable_forwarding;
     machine->cpu.pipeline_sim.config.enable_ex_forwarding = !options.disable_ex_forwarding;

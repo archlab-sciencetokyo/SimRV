@@ -4,7 +4,7 @@ project(SimRV LANGUAGES CXX)
 
 enable_testing()
 
-set(SIMRV_VERSION "2.0.0-beta.33")
+set(SIMRV_VERSION "2.0.0-beta.34")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -61,7 +61,10 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(CMAKE_CXX_CLANG_TIDY clang-tidy)
+option(SIMRV_ENABLE_CLANG_TIDY "Enable clang-tidy static analysis" OFF)
+if(SIMRV_ENABLE_CLANG_TIDY)
+  set(CMAKE_CXX_CLANG_TIDY clang-tidy)
+endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 

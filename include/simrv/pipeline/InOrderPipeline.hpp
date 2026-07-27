@@ -41,6 +41,10 @@ public:
     [[nodiscard]] auto get_bht_entry(Register pc) const -> uint8_t override;
     [[nodiscard]] auto get_btb_target(Register pc) const -> std::pair<bool, Register> override;
 
+    // Pipeline state checkpointing
+    [[nodiscard]] auto save_state() const -> PipelineSimState override;
+    void restore_state(const PipelineSimState& state) override;
+
 private:
     void tick_pipeline();
     void record_cycle_snapshot();

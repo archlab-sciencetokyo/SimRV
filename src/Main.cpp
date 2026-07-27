@@ -150,10 +150,29 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         if (sim_machine->reboot_requested) {
             simrv::log::info("Rebooting guest system...");
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            parsed->options.cycle_accurate = sim_machine->s_cycle_accurate;
+            parsed->options.high_performance = sim_machine->s_high_performance;
+            parsed->options.debug_mode = sim_machine->s_debug_mode;
+            parsed->options.rollback = sim_machine->s_rollback_enabled;
+            parsed->options.high_contrast = sim_machine->s_high_contrast;
+            parsed->options.use_mix = sim_machine->s_use_mix;
+            parsed->options.bp_trace = sim_machine->s_bp_trace;
+            parsed->options.traplog_mode = sim_machine->s_traplog_mode;
+            parsed->options.dlog_mode = sim_machine->s_dlog_mode;
+            parsed->options.lockstep_mode = sim_machine->s_lockstep_mode;
+            parsed->options.gdb_mode = sim_machine->s_gdb_mode;
+
             if (!sim_machine->pending_binary_path.empty()) {
                 override_binary = sim_machine->pending_binary_path;
                 override_appmode = sim_machine->pending_appmode;
                 override_disk = sim_machine->pending_disk_path;
+                parsed->options.fn_memimg = sim_machine->pending_binary_path;
+                if (override_appmode.has_value()) {
+                    parsed->options.appmode = *override_appmode;
+                }
+                if (override_disk.has_value() && !override_disk->empty()) {
+                    parsed->options.fn_dskimg = *override_disk;
+                }
             }
             continue;
         } else {

@@ -59,4 +59,17 @@ auto PipelineSim::dcache_stall_remaining() const -> uint32_t { return model_ ? m
 auto PipelineSim::tlb_stall_remaining() const -> uint32_t { return model_ ? model_->tlb_stall_remaining() : 0; }
 auto PipelineSim::control_bubble_remaining() const -> uint32_t { return model_ ? model_->control_bubble_remaining() : 0; }
 
+auto PipelineSim::save_state() const -> PipelineSimState {
+    return model_ ? model_->save_state() : PipelineSimState{};
+}
+
+void PipelineSim::restore_state(const PipelineSimState& state) {
+    if (!model_) {
+        init_model();
+    }
+    if (model_) {
+        model_->restore_state(state);
+    }
+}
+
 } // namespace simrv::pipeline

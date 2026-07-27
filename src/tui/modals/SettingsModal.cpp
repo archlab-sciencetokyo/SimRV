@@ -47,9 +47,24 @@ void SettingsModal::toggle_setting(SettingsDraft& draft, int index,
     switch (index) {
         case 0:
             draft.cycle_accurate = !draft.cycle_accurate;
+            if (draft.cycle_accurate) {
+                draft.high_performance = false;
+            } else {
+                draft.high_performance = true;
+                draft.use_mix = false;
+            }
             break;
         case 1:
             draft.debug_mode = !draft.debug_mode;
+            if (draft.debug_mode) {
+                draft.use_mix = draft.cycle_accurate;
+                draft.bp_trace = true;
+                draft.rollback_enabled = true;
+            } else {
+                draft.use_mix = false;
+                draft.bp_trace = false;
+                draft.rollback_enabled = false;
+            }
             break;
         case 2:
             if (draft.high_performance) break;
@@ -59,6 +74,7 @@ void SettingsModal::toggle_setting(SettingsDraft& draft, int index,
             draft.high_contrast = !draft.high_contrast;
             break;
         case 4:
+            if (!draft.cycle_accurate) break;
             draft.use_mix = !draft.use_mix;
             break;
         case 5:
@@ -99,8 +115,10 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
     if (!machine.s_rollback_enabled) {
         machine.cpu.undo_stack.clear();
     }
-    set_high_contrast(draft.high_contrast);
-    machine.s_high_contrast = draft.high_contrast;
+    if (draft.high_contrast != machine.s_high_contrast) {
+        set_high_contrast(draft.high_contrast);
+        machine.s_high_contrast = draft.high_contrast;
+    }
 
     machine.s_use_mix = draft.use_mix;
     machine.s_bp_trace = draft.bp_trace;
@@ -128,6 +146,7 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
     add_row_cb("");
 
     const bool bp_disabled = !draft.cycle_accurate || draft.high_performance;
+    const bool mix_disabled = !draft.cycle_accurate;
     const bool rollback_disabled = draft.high_performance;
     const bool dlog_disabled = machine.s_appmode;
     const bool lockstep_disabled = machine.s_spike_bin.empty();
@@ -146,7 +165,9 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
         {" 4", "High Contrast Theme",
          draft.high_contrast ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
         {" 5", "Instruction Mix Stats",
-         draft.use_mix ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+         mix_disabled ? "\033[90m[Disabled (N/A in IA Mode)]\033[0m"
+                      : (draft.use_mix ? "\033[1;32m[ON]\033[0m"
+                                       : "\033[90m[OFF]\033[0m")},
         {" 6", "Branch Prediction Trace",
          bp_disabled ? "\033[90m[Disabled (N/A in IA Mode)]\033[0m"
                      : (draft.bp_trace ? "\033[1;32m[ON]\033[0m"

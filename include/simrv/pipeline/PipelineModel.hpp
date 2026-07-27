@@ -6,24 +6,9 @@
 #include "simrv/Define.hpp"
 #include "simrv/xlen/Types.hpp"
 #include "simrv/isa/Base.hpp"
+#include "simrv/pipeline/PipelineSim.hpp"
 
 namespace simrv::pipeline {
-
-struct PipelineStats {
-    uint64_t cycle_count = 0;
-    uint64_t stall_cycles = 0;
-    uint64_t bubble_cycles = 0;
-    uint64_t icache_stalls = 0;
-    uint64_t dcache_stalls = 0;
-    uint64_t tlb_stalls = 0;
-    uint64_t structural_stalls = 0;
-    uint64_t data_hazard_stalls = 0;
-    uint64_t control_hazard_bubbles = 0;
-};
-
-// Forward declaration of PipelineCycleSnapshot and PipelineReg since they are defined in PipelineSim.hpp
-struct PipelineCycleSnapshot;
-struct PipelineReg;
 
 class PipelineModel {
 public:
@@ -55,6 +40,10 @@ public:
     // Predictor queries
     [[nodiscard]] virtual auto get_bht_entry(Register pc) const -> uint8_t = 0;
     [[nodiscard]] virtual auto get_btb_target(Register pc) const -> std::pair<bool, Register> = 0;
+
+    // Pipeline state checkpointing
+    [[nodiscard]] virtual auto save_state() const -> PipelineSimState = 0;
+    virtual void restore_state(const PipelineSimState& state) = 0;
 };
 
 } // namespace simrv::pipeline

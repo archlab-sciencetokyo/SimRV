@@ -124,9 +124,24 @@ struct MemWriteRecord {
     Instruction funct3 = 0;
 };
 
+struct ClintState {
+    Counter mtime = 0;
+    Counter mtimecmp = 0;
+    Counter mcycle = 0;
+    int rtc_divider = 0;
+    Counter last_mtime = 0;
+    Counter last_mtimecmp = 0;
+};
+
 struct UndoStep {
     simrv::core::ArchState state;
     std::vector<MemWriteRecord> mem_writes;
+    simrv::pipeline::PipelineContext pipeline_context;
+    std::optional<simrv::pipeline::PipelineSimState> pipeline_sim_state;
+    ClintState clint_state;
+    uint64_t e_icount = 0;
+    Counter e_ccount = 0;
+    std::array<uint64_t, isa::OperationIdCount> e_instmix{};
 };
 
 class CPU {

@@ -77,6 +77,36 @@ struct PipelineCycleSnapshot {
     StageInfo w;
 };
 
+struct PipelineStats {
+    uint64_t cycle_count = 0;
+    uint64_t stall_cycles = 0;
+    uint64_t bubble_cycles = 0;
+    uint64_t icache_stalls = 0;
+    uint64_t dcache_stalls = 0;
+    uint64_t tlb_stalls = 0;
+    uint64_t structural_stalls = 0;
+    uint64_t data_hazard_stalls = 0;
+    uint64_t control_hazard_bubbles = 0;
+};
+
+struct PipelineSimState {
+    PipelineReg f_reg;
+    PipelineReg d_reg;
+    PipelineReg e_reg;
+    PipelineReg m_reg;
+    PipelineReg w_reg;
+    std::array<uint8_t, 256> branch_history_table{};
+    std::vector<BtbEntry> btb;
+    std::vector<PipelineCycleSnapshot> cycle_history;
+    uint32_t control_bubble_remaining = 0;
+    uint32_t tlb_stall_remaining = 0;
+    uint32_t icache_stall_remaining = 0;
+    uint32_t dcache_stall_remaining = 0;
+    uint32_t div_busy_cycles_remaining = 0;
+    PipelineStats stats;
+    uint32_t gshare_history = 0;
+};
+
 class PipelineModel; // Forward declaration
 
 class PipelineSim {
@@ -124,6 +154,9 @@ public:
 
     [[nodiscard]] auto get_model() const -> const PipelineModel* { return model_.get(); }
     [[nodiscard]] auto get_model() -> PipelineModel* { return model_.get(); }
+
+    [[nodiscard]] auto save_state() const -> PipelineSimState;
+    void restore_state(const PipelineSimState& state);
 
 private:
     void init_model();

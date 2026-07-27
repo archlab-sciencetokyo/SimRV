@@ -943,6 +943,19 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
 void CPU::push_undo_state() {
     UndoStep step;
     step.state = state_;
+    step.pipeline_context = pipeline_context;
+    step.pipeline_sim_state = pipeline_sim.save_state();
+    step.clint_state = ClintState{
+        .mtime = clint_mmio.mtime,
+        .mtimecmp = clint_mmio.mtimecmp,
+        .mcycle = clint_mmio.mcycle,
+        .rtc_divider = clint_mmio.rtc_divider,
+        .last_mtime = clint_mmio.last_mtime,
+        .last_mtimecmp = clint_mmio.last_mtimecmp
+    };
+    step.e_icount = e_icount;
+    step.e_ccount = e_ccount;
+    step.e_instmix = e_instmix;
     undo_stack.push_front(std::move(step));
     if (undo_stack.size() > 1024) {
         undo_stack.pop_back();
@@ -969,9 +982,21 @@ auto CPU::perform_backstep() -> bool {
         }
     }
     state_ = step.state;
-    if (e_icount > 0) e_icount--;
+    pipeline_context = step.pipeline_context;
+    if (step.pipeline_sim_state.has_value()) {
+        pipeline_sim.restore_state(*step.pipeline_sim_state);
+    }
+    pipeline_task = {};
+    clint_mmio.mtime = step.clint_state.mtime;
+    clint_mmio.mtimecmp = step.clint_state.mtimecmp;
+    clint_mmio.mcycle = step.clint_state.mcycle;
+    clint_mmio.rtc_divider = step.clint_state.rtc_divider;
+    clint_mmio.last_mtime = step.clint_state.last_mtime;
+    clint_mmio.last_mtimecmp = step.clint_state.last_mtimecmp;
+    e_icount = step.e_icount;
+    e_ccount = step.e_ccount;
+    e_instmix = step.e_instmix;
     soft_tlb_flush();
-    pipeline_context = {};
     return true;
 }
 

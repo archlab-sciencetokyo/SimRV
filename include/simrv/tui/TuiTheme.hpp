@@ -5,12 +5,13 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <string>
 
 namespace simrv::tui {
 
 // Theme Enum
-enum class TuiTheme {
+enum class TuiTheme : std::uint8_t {
     Adaptive,
     Sakura,
     HighContrast
@@ -78,10 +79,10 @@ extern std::array<const char*, 16> g_theme_bg_palette;
 
 extern TuiTheme g_tui_theme;
 void set_tui_theme(TuiTheme theme);
-TuiTheme get_tui_theme();
+auto get_tui_theme() -> TuiTheme;
 
 void set_high_contrast(bool enable);
-bool is_high_contrast();
+auto is_high_contrast() -> bool;
 
 auto make_repeated_string(const std::string& pattern, int count) -> std::string;
 auto get_display_width(const std::string& s) -> int;

@@ -35,7 +35,7 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
         auto result =
             std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
         ok = (result.ec == std::errc{});
-    } else if (std::all_of(input.begin(), input.end(), ::isxdigit)) {
+    } else if (std::ranges::all_of(input, ::isxdigit)) {
         auto result = std::from_chars(input.data(), input.data() + input.size(), addr, 16);
         ok = (result.ec == std::errc{});
     } else {

@@ -83,7 +83,7 @@ auto get_tui_theme() -> TuiTheme {
 auto set_high_contrast(bool enable) -> void {
     if (enable) {
         set_tui_theme(TuiTheme::HighContrast);
-    } else {
+    } else if (g_tui_theme == TuiTheme::HighContrast) {
         set_tui_theme(TuiTheme::Adaptive);
     }
 }

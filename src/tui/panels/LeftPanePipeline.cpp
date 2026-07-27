@@ -1099,7 +1099,7 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
 
             std::string status_tag;
             if (!valid) {
-                status_tag = std::format("{}INVALID\033[0m            ", kThemeMuted);
+                status_tag = std::format("{}INVALID\033[0m           ", kThemeMuted);
             } else {
                 status_tag = std::format("{}0x{:016x}\033[0m", kThemeVal, tag);
             }
@@ -1125,24 +1125,21 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
             return format_to_width(line_str, width);
         }
         case 10: {
-            uint32_t set_idx = static_cast<uint32_t>(cache_inspect_set_);
-            uint32_t way_idx = static_cast<uint32_t>(cache_inspect_way_);
+            auto set_idx = static_cast<uint32_t>(cache_inspect_set_);
+            auto way_idx = static_cast<uint32_t>(cache_inspect_way_);
             bool is_icache = (cache_inspect_type_ == 0);
             const auto* line_data = is_icache ? ic.get_line_data(set_idx, way_idx) : dc.get_line_data(set_idx, way_idx);
             bool valid = is_icache ? ic.is_line_valid(set_idx, way_idx) : dc.is_line_valid(set_idx, way_idx);
 
             std::string hex_str;
-            std::string ascii_str;
 
             if (line_data != nullptr && valid) {
                 for (size_t b = 0; b < 16 && b < line_data->size(); ++b) {
                     uint8_t byte_val = std::to_integer<uint8_t>(line_data->at(b));
                     hex_str += std::format("{}{:02x} ", kThemeVal, byte_val);
-                    ascii_str += (byte_val >= 32 && byte_val <= 126) ? static_cast<char>(byte_val) : '.';
                 }
                 return format_to_width(
-                    std::format("  {}Data (Way #{}): {}\033[0m │  {}{}\033[0m",
-                                kThemeText, way_idx, hex_str, kThemeMuted, ascii_str),
+                    std::format("  {}Data (Way #{}): {}\033[0m", kThemeText, way_idx, hex_str),
                     width);
             } else {
                 return format_to_width(
