@@ -405,7 +405,8 @@ void Tui::render(bool force) {
     }
 
     // Prepare log lines for left_pane_
-    vt_log_.resize(300, num_rows);
+    int log_width = std::max(10, left_pane_width - 2);
+    vt_log_.resize(log_width, num_rows);
     std::vector<std::string> log_lines;
     int total_written = vt_log_.get_scrollback_size() + vt_log_.get_cursor_y();
     if (vt_log_.get_cursor_x() > 0) {
@@ -413,7 +414,7 @@ void Tui::render(bool force) {
     }
     int start_log = std::max(0, total_written - 20);
     for (int i = start_log; i < total_written; ++i) {
-        log_lines.push_back(vt_log_.get_line_as_string(i, 300, false));
+        log_lines.push_back(vt_log_.get_line_as_string(i, log_width, false));
     }
 
     // Update panes state
@@ -1111,21 +1112,28 @@ void Tui::pause_loop() {
                     } else if (byte == ' ') {
                         modal_.toggle_setting_at_cursor();
                         render(true);
-                    } else if (byte >= '1' && byte <= '9') {
+                    } else if (byte >= '1' && byte <= '8') {
                         modal_.toggle_setting_by_index(byte - '1');
                         render(true);
-                    } else if (byte == '0') {
+                    } else if (byte == '9') {
                         modal_.toggle_setting_by_index(8);
                         render(true);
                     } else if (byte == 'a' || byte == 'A') {
                         modal_.toggle_setting_by_index(9);
                         render(true);
-                    } else if (byte == 'g' || byte == 'G') {
+                    } else if (byte == 'b' || byte == 'B') {
                         modal_.toggle_setting_by_index(10);
                         render(true);
                     } else if (byte == 'm' || byte == 'M') {
                         open_modal(ModalType::ConfigureMisa);
                         render(true);
+                    } else if (byte == 'y' || byte == 'Y') {
+                        if (!machine_.s_cycle_accurate) {
+                            set_status_override("System Config is available in CA Mode only. Enable CA Mode in Settings [,]");
+                            render(true);
+                        } else {
+                            open_modal(ModalType::ConfigureSystem);
+                        }
                     }
                     continue;
                 }
@@ -1138,11 +1146,8 @@ void Tui::pause_loop() {
                     } else if (byte == ' ') {
                         modal_.toggle_misa_at_cursor();
                         render(true);
-                    } else if (byte >= '0' && byte <= '9') {
+                    } else if (byte >= '0' && byte <= '8') {
                         modal_.toggle_misa_by_index(byte - '0');
-                        render(true);
-                    } else if (byte == 'a' || byte == 'A') {
-                        modal_.toggle_misa_by_index(10);
                         render(true);
                     } else if (byte == 'p' || byte == 'P') {
                         modal_.apply_misa_profile(0);
@@ -1153,6 +1158,46 @@ void Tui::pause_loop() {
                     } else if (byte == 'g' || byte == 'G') {
                         modal_.apply_misa_profile(2);
                         render(true);
+                    }
+                    continue;
+                }
+
+                if (get_active_modal() == ModalType::ConfigureSystem) {
+                    if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
+                        close_modal();
+                    } else if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+                        submit_modal();
+                    } else if (byte == ' ') {
+                        modal_.toggle_sysconfig_at_cursor();
+                        render(true);
+                    } else if (byte >= '1' && byte <= '9') {
+                        modal_.toggle_sysconfig_by_index(byte - '1');
+                        render(true);
+                    } else if (byte == '0' || byte == 'a' || byte == 'A') {
+                        modal_.toggle_sysconfig_by_index(9);
+                        render(true);
+                    } else if (byte == 'b' || byte == 'B') {
+                        modal_.toggle_sysconfig_by_index(10);
+                        render(true);
+                    }
+                    continue;
+                }
+
+                if (get_active_modal() == ModalType::ManageBreakpoints) {
+                    if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
+                        close_modal();
+                    } else if (byte >= '1' && byte <= '9') {
+                        remove_breakpoint_or_watchpoint_by_index(byte - '1');
+                        render(true);
+                    } else if (byte == 'c' || byte == 'C') {
+                        machine_.breakpoints.clear_pc_breakpoints();
+                        machine_.breakpoints.clear_watchpoints();
+                        set_status_override("Cleared all breakpoints and watchpoints");
+                        render(true);
+                    } else if (byte == ':' || byte == 'a' || byte == 'A') {
+                        open_modal(ModalType::SetBreakpoint);
+                    } else if (byte == 'w' || byte == 'W') {
+                        open_modal(ModalType::SetWatchpoint);
                     }
                     continue;
                 }
@@ -1259,7 +1304,14 @@ void Tui::pause_loop() {
                 scroll(5);
             } else if (key == simrv::tui::TuiKey::d || key == simrv::tui::TuiKey::D) {
                 scroll(-5);
-            } else if (key == simrv::tui::TuiKey::b || key == simrv::tui::TuiKey::B) {
+            } else if (key == simrv::tui::TuiKey::B) {
+                if (!machine_.s_debug_mode) {
+                    set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
+                    render(true);
+                } else {
+                    open_modal(ModalType::ManageBreakpoints);
+                }
+            } else if (key == simrv::tui::TuiKey::b) {
                 if (!machine_.s_debug_mode) {
                     set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
                     render(true);
@@ -1298,6 +1350,13 @@ void Tui::pause_loop() {
                 if (left_pane_ && left_pane_->get_page() == TuiRegPage::CACHE) {
                     left_pane_->select_next_cache_set(1);
                     render(true);
+                }
+            } else if (byte == 'y' || byte == 'Y') {
+                if (!machine_.s_cycle_accurate) {
+                    set_status_override("System Config is available in CA Mode only. Enable CA Mode in Settings [,]");
+                    render(true);
+                } else {
+                    open_modal(ModalType::ConfigureSystem);
                 }
             } else if (key == simrv::tui::TuiKey::o || key == simrv::tui::TuiKey::O) {
                 open_modal(ModalType::LoadBinary);
@@ -1501,6 +1560,17 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                         case TuiFooterAction::ToggleTrace: toggle_trace_enabled(); break;
                         case TuiFooterAction::OpenSettings: open_modal(ModalType::Settings); break;
                         case TuiFooterAction::ConfigureMisa: open_modal(ModalType::ConfigureMisa); break;
+                        case TuiFooterAction::ConfigureSystem:
+                            if (!machine_.s_cycle_accurate) {
+                                set_status_override("System Config is available in CA Mode only. Enable CA Mode in Settings [,]");
+                                render(true);
+                            } else {
+                                open_modal(ModalType::ConfigureSystem);
+                            }
+                            break;
+                        case TuiFooterAction::ManageBreakpoints:
+                            open_modal(ModalType::ManageBreakpoints);
+                            break;
                     }
                     return true;
                 }
@@ -1613,6 +1683,11 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             render(true);
             return true;
         }
+        if (get_active_modal() == ModalType::ConfigureSystem) {
+            modal_.move_sysconfig_cursor(-1);
+            render(true);
+            return true;
+        }
         if (left_pane_ && left_pane_->get_page() == TuiRegPage::CACHE) {
             left_pane_->select_next_cache_set(-1);
             render(true);
@@ -1627,6 +1702,11 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         }
         if (get_active_modal() == ModalType::ConfigureMisa) {
             modal_.move_misa_cursor(1);
+            render(true);
+            return true;
+        }
+        if (get_active_modal() == ModalType::ConfigureSystem) {
+            modal_.move_sysconfig_cursor(1);
             render(true);
             return true;
         }
@@ -1647,6 +1727,11 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             render(true);
             return true;
         }
+        if (get_active_modal() == ModalType::ConfigureSystem) {
+            modal_.adjust_sysconfig_at_cursor(1);
+            render(true);
+            return true;
+        }
         if (left_pane_ && left_pane_->get_page() == TuiRegPage::CACHE) {
             left_pane_->toggle_cache_inspect_type();
             render(true);
@@ -1661,6 +1746,11 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         }
         if (get_active_modal() == ModalType::ConfigureMisa) {
             modal_.toggle_misa_at_cursor();
+            render(true);
+            return true;
+        }
+        if (get_active_modal() == ModalType::ConfigureSystem) {
+            modal_.adjust_sysconfig_at_cursor(-1);
             render(true);
             return true;
         }
@@ -1782,6 +1872,35 @@ void Tui::on_cycle_completed_slow() {
     uint64_t delay = step_delay_us_.load(std::memory_order_relaxed);
     if (delay > 0) {
         std::this_thread::sleep_for(std::chrono::microseconds(delay));
+    }
+}
+
+void Tui::remove_breakpoint_or_watchpoint_by_index(size_t target_idx) {
+    const auto& pc_bps = machine_.breakpoints.get_pc_breakpoints();
+    const auto& wps = machine_.breakpoints.get_watchpoints();
+
+    size_t current_idx = 0;
+    for (auto pc : pc_bps) {
+        if (current_idx == target_idx) {
+            machine_.breakpoints.remove_pc_breakpoint(pc);
+            set_status_override(std::format("Removed Breakpoint at 0x{:08x}", pc));
+            return;
+        }
+        current_idx++;
+    }
+
+    for (const auto& wp : wps) {
+        if (current_idx == target_idx) {
+            if (wp.target == simrv::debug::WatchTarget::Memory) {
+                machine_.breakpoints.remove_watchpoint(wp.addr);
+                set_status_override(std::format("Removed Memory Watchpoint at 0x{:08x}", wp.addr));
+            } else {
+                machine_.breakpoints.remove_reg_watchpoint(wp.reg_type, wp.reg_index);
+                set_status_override(std::format("Removed Register Watchpoint on {}", wp.reg_name));
+            }
+            return;
+        }
+        current_idx++;
     }
 }
 

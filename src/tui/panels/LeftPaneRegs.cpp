@@ -6,11 +6,56 @@
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/RegisterFile.hpp"
 #include <format>
 #include <string>
 #include <array>
+#include <algorithm>
 
 namespace simrv::tui {
+
+namespace {
+
+auto format_vec_value(const simrv::core::VectorRegister& val, unsigned vlen, int avail_w) -> std::string {
+    unsigned num_words = vlen / 64;
+    if (num_words == 0) num_words = 1;
+    if (num_words > kVlenMaxBytes / 8) num_words = kVlenMaxBytes / 8;
+
+    std::string full_hex = "0x";
+    for (int w = static_cast<int>(num_words) - 1; w >= 0; --w) {
+        full_hex += std::format("{:016x}", val.u64[static_cast<std::size_t>(w)]);
+        if (w > 0) full_hex += "_";
+    }
+
+    if (static_cast<int>(full_hex.length()) <= avail_w) {
+        return full_hex;
+    }
+
+    if (num_words > 1) {
+        std::string hi = std::format("{:016x}", val.u64[static_cast<std::size_t>(num_words - 1)]);
+        std::string lo = std::format("{:016x}", val.u64[0]);
+        std::string abbrev = std::format("0x{}..{}", hi.substr(0, 8), lo.substr(8));
+        if (static_cast<int>(abbrev.length()) <= avail_w) {
+            return abbrev;
+        }
+    }
+    return full_hex.substr(0, static_cast<std::size_t>(std::max(4, avail_w)));
+}
+
+auto vec_reg_changed(bool paused, const simrv::core::VectorRegister& cached, const simrv::core::VectorRegister& val, unsigned vlen) -> bool {
+    if (!paused) return false;
+    unsigned num_words = vlen / 64;
+    if (num_words == 0) num_words = 1;
+    if (num_words > kVlenMaxBytes / 8) num_words = kVlenMaxBytes / 8;
+    for (unsigned w = 0; w < num_words; ++w) {
+        if (cached.u64[w] != val.u64[w]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
 
 auto LeftPane::render_registers_single_column(const simrv::core::ArchState& st, int logical_row, int width) -> std::string {
     if (logical_row >= 0 && logical_row < 32) {
@@ -36,10 +81,11 @@ auto LeftPane::render_registers_single_column(const simrv::core::ArchState& st, 
             }
             case TuiRegPage::VEC: {
                 auto val = st.regs.read_vector(static_cast<RegId>(reg));
-                bool changed = paused_ && (cached_vec_.at(static_cast<std::size_t>(reg)) != val.u64[0]); // NOLINT(cppcoreguidelines-pro-type-union-access)
+                bool changed = vec_reg_changed(paused_, cached_vec_.at(static_cast<std::size_t>(reg)), val, st.regs.vlen);
                 std::string c = changed ? kThemePeach : kThemeMint;
-                std::string col_color = std::format(" {}v{:<2}\033[0m       : {}0x{:016x}\033[0m",
-                                                    kThemeText, reg, c, val.u64[0]); // NOLINT(cppcoreguidelines-pro-type-union-access)
+                std::string val_str = format_vec_value(val, st.regs.vlen, std::max(10, width - 6));
+                std::string col_color = std::format(" {}v{:<2}\033[0m: {}{}\033[0m",
+                                                    kThemeText, reg, c, val_str);
                 return format_to_width(col_color, width);
             }
             default:
@@ -103,16 +149,19 @@ auto LeftPane::render_registers_double_column(const simrv::core::ArchState& st, 
                 auto val1 = st.regs.read_vector(static_cast<RegId>(reg1));
                 auto val2 = st.regs.read_vector(static_cast<RegId>(reg2));
 
-                bool changed1 = paused_ && (cached_vec_.at(static_cast<std::size_t>(reg1)) != val1.u64[0]); // NOLINT(cppcoreguidelines-pro-type-union-access)
-                bool changed2 = paused_ && (cached_vec_.at(static_cast<std::size_t>(reg2)) != val2.u64[0]); // NOLINT(cppcoreguidelines-pro-type-union-access)
+                bool changed1 = vec_reg_changed(paused_, cached_vec_.at(static_cast<std::size_t>(reg1)), val1, st.regs.vlen);
+                bool changed2 = vec_reg_changed(paused_, cached_vec_.at(static_cast<std::size_t>(reg2)), val2, st.regs.vlen);
 
                 std::string c1 = changed1 ? kThemePeach : kThemeMint;
                 std::string c2 = changed2 ? kThemePeach : kThemeMint;
 
+                std::string val1_str = format_vec_value(val1, st.regs.vlen, std::max(10, col_width - 6));
+                std::string val2_str = format_vec_value(val2, st.regs.vlen, std::max(10, right_width - 6));
+
                 std::string col1_color = std::format(
-                    " {}v{:<2}\033[0m       : {}0x{:016x}\033[0m", kThemeText, reg1, c1, val1.u64[0]); // NOLINT(cppcoreguidelines-pro-type-union-access)
+                    " {}v{:<2}\033[0m: {}{}\033[0m", kThemeText, reg1, c1, val1_str);
                 std::string col2_color = std::format(
-                    " {}v{:<2}\033[0m       : {}0x{:016x}\033[0m", kThemeText, reg2, c2, val2.u64[0]); // NOLINT(cppcoreguidelines-pro-type-union-access)
+                    " {}v{:<2}\033[0m: {}{}\033[0m", kThemeText, reg2, c2, val2_str);
 
                 return format_to_width(col1_color, col_width) +
                        format_to_width(col2_color, right_width);
@@ -168,6 +217,9 @@ auto LeftPane::get_register_value_at_row(int logical_row, int col_x, int pane_wi
         }
         if (page_ == TuiRegPage::FPR) {
             return static_cast<Register>(st.regs.read_fp(static_cast<RegId>(reg)));
+        }
+        if (page_ == TuiRegPage::VEC) {
+            return static_cast<Register>(st.regs.read_vector(static_cast<RegId>(reg)).u64[0]);
         }
     }
     return std::nullopt;

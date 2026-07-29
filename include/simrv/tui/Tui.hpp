@@ -125,6 +125,7 @@ class Tui {
     void cycle_reg_page();
     void cycle_tool_page();
     void set_reg_page(TuiRegPage page);
+    void remove_breakpoint_or_watchpoint_by_index(size_t target_idx);
     void toggle_explain();
     void toggle_high_contrast();
     void toggle_sakura_theme();

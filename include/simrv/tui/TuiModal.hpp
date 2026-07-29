@@ -9,6 +9,7 @@
 #include <functional>
 #include <string>
 #include <vector>
+#include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
@@ -31,7 +32,9 @@ enum class ModalType : uint8_t {
     LoadDiskImage,
     Help,
     Settings,
-    ConfigureMisa
+    ConfigureMisa,
+    ConfigureSystem,
+    ManageBreakpoints
 };
 
 struct SettingsDraft {
@@ -46,6 +49,20 @@ struct SettingsDraft {
     bool high_performance = false;
     bool lockstep_mode = false;
     bool gdb_mode = false;
+};
+
+struct SysConfigDraft {
+    uint32_t icache_miss_penalty = 10;
+    uint32_t dcache_miss_penalty = 15;
+    uint32_t tlb_miss_penalty = 30;
+    uint32_t mul_latency = 3;
+    uint32_t div_latency = 20;
+    uint32_t branch_mispredict_penalty = 2;
+    bool enable_forwarding = true;
+    bool enable_ex_forwarding = true;
+    bool enable_mem_forwarding = true;
+    uint8_t bp_type = 3; // 0: Static-NT, 1: Static-T, 2: 1-Bit, 3: 2-Bit Bimodal, 4: Gshare
+    uint32_t btb_entries = 128;
 };
 
 struct MisaDraft {
@@ -68,32 +85,21 @@ struct MisaDraft {
         } else {
             val |= (2ULL << 62);
         }
-        if (ext_a) val |= (1ULL << ('a' - 'a'));
-        if (ext_b) val |= (1ULL << ('b' - 'a'));
-        if (ext_c) val |= (1ULL << ('c' - 'a'));
-        if (ext_d) val |= (1ULL << ('d' - 'a'));
-        if (ext_f) val |= (1ULL << ('f' - 'a'));
-        if (ext_i) val |= (1ULL << ('i' - 'a'));
+        val |= (1ULL << ('i' - 'a')); // Extension I is mandatory
         if (ext_m) val |= (1ULL << ('m' - 'a'));
+        if (ext_a) val |= (1ULL << ('a' - 'a'));
+        if (ext_f) val |= (1ULL << ('f' - 'a'));
+        if (ext_d) val |= (1ULL << ('d' - 'a'));
+        if (ext_c) val |= (1ULL << ('c' - 'a'));
+        if (ext_b) val |= (1ULL << ('b' - 'a'));
+        if (ext_v) val |= (1ULL << ('v' - 'a'));
         if (ext_s) val |= (1ULL << ('s' - 'a'));
         if (ext_u) val |= (1ULL << ('u' - 'a'));
-        if (ext_v) val |= (1ULL << ('v' - 'a'));
         return val;
     }
 
     [[nodiscard]] auto to_misa_string() const -> std::string {
-        std::string s = (xlen_bits == 32) ? "rv32" : "rv64";
-        if (ext_i) s += 'i';
-        if (ext_m) s += 'm';
-        if (ext_a) s += 'a';
-        if (ext_f) s += 'f';
-        if (ext_d) s += 'd';
-        if (ext_c) s += 'c';
-        if (ext_b) s += 'b';
-        if (ext_v) s += 'v';
-        if (ext_s) s += 's';
-        if (ext_u) s += 'u';
-        return s;
+        return simrv::xlen::resolve_misa_string(to_misa_val());
     }
 };
 
@@ -127,6 +133,11 @@ class TuiModal {
     void toggle_misa_by_index(int index);
     void apply_misa_profile(int profile_idx);
 
+    void move_sysconfig_cursor(int delta);
+    void adjust_sysconfig_at_cursor(int dir);
+    void toggle_sysconfig_at_cursor();
+    void toggle_sysconfig_by_index(int index);
+
     void render_overlay(std::vector<std::string>& lines, int term_width, int term_height) const;
 
    private:
@@ -137,6 +148,8 @@ class TuiModal {
     SettingsDraft settings_draft_;
     int misa_cursor_ = 0;
     MisaDraft misa_draft_;
+    int sysconfig_cursor_ = 0;
+    SysConfigDraft sysconfig_draft_;
     bool load_appmode_ =
         true;  // Toggle for App (baremetal) vs OS (Linux) mode in LoadBinary modal
     std::string staged_binary_path_;

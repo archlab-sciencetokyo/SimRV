@@ -20,6 +20,7 @@
 #include "simrv/tui/modals/MisaModal.hpp"
 #include "simrv/tui/modals/SettingsModal.hpp"
 #include "simrv/tui/modals/StepModal.hpp"
+#include "simrv/tui/modals/SystemConfigModal.hpp"
 #include "simrv/xlen/Helpers.hpp"
 
 namespace simrv::tui {
@@ -52,6 +53,9 @@ void TuiModal::open(ModalType type, LeftPane* left_pane, uint64_t step_granulari
         case ModalType::ConfigureMisa:
             modals::MisaModal::open(misa_draft_, misa_cursor_, machine_);
             break;
+        case ModalType::ConfigureSystem:
+            modals::SystemConfigModal::open(sysconfig_draft_, sysconfig_cursor_, machine_);
+            break;
         default:
             break;
     }
@@ -79,6 +83,22 @@ void TuiModal::toggle_misa_by_index(int index) {
 
 void TuiModal::apply_misa_profile(int profile_idx) {
     modals::MisaModal::apply_profile(misa_draft_, profile_idx);
+}
+
+void TuiModal::move_sysconfig_cursor(int delta) {
+    modals::SystemConfigModal::move_cursor(sysconfig_cursor_, delta);
+}
+
+void TuiModal::adjust_sysconfig_at_cursor(int dir) {
+    modals::SystemConfigModal::adjust_setting(sysconfig_draft_, sysconfig_cursor_, dir);
+}
+
+void TuiModal::toggle_sysconfig_at_cursor() {
+    modals::SystemConfigModal::toggle_setting(sysconfig_draft_, sysconfig_cursor_);
+}
+
+void TuiModal::toggle_sysconfig_by_index(int index) {
+    modals::SystemConfigModal::toggle_setting(sysconfig_draft_, index);
 }
 
 void TuiModal::close() {
@@ -134,6 +154,12 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_granulari
         case ModalType::ConfigureMisa:
             result = modals::MisaModal::submit(misa_draft_, machine_, set_status_override_cb);
             break;
+        case ModalType::ConfigureSystem:
+            result = modals::SystemConfigModal::submit(sysconfig_draft_, machine_);
+            if (result && set_status_override_cb) {
+                set_status_override_cb("CA system configuration saved and applied");
+            }
+            break;
         default:
             break;
     }
@@ -151,7 +177,8 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
 
     bool is_help = (active_modal_ == ModalType::Help);
     bool is_wide_modal = (is_help || active_modal_ == ModalType::Settings ||
-                          active_modal_ == ModalType::ConfigureMisa);
+                          active_modal_ == ModalType::ConfigureMisa ||
+                          active_modal_ == ModalType::ConfigureSystem);
     int box_w = is_wide_modal ? std::min(78, term_width - 4) : std::min(58, term_width - 4);
     if (box_w < 35) return;
 
@@ -174,11 +201,15 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
     switch (active_modal_) {
         case ModalType::SetBreakpoint:
             title = " SET BREAKPOINT ";
-            modals::BreakpointModal::render(active_modal_, content_rows, input_);
+            modals::BreakpointModal::render(active_modal_, content_rows, input_, &machine_);
             break;
         case ModalType::SetWatchpoint:
-            title = " SET MEMORY WATCHPOINT ";
-            modals::BreakpointModal::render(active_modal_, content_rows, input_);
+            title = " SET WATCHPOINT ";
+            modals::BreakpointModal::render(active_modal_, content_rows, input_, &machine_);
+            break;
+        case ModalType::ManageBreakpoints:
+            title = " MANAGE BREAKPOINTS & WATCHPOINTS ";
+            modals::BreakpointModal::render(active_modal_, content_rows, input_, &machine_);
             break;
         case ModalType::SetStepSize:
             title = " SET STEP SIZE (N) ";
@@ -210,6 +241,11 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
         case ModalType::ConfigureMisa:
             title = " CONFIGURE CPU MISA & EXTENSIONS ";
             modals::MisaModal::render(content_rows, add_row, misa_draft_, misa_cursor_, machine_);
+            break;
+        case ModalType::ConfigureSystem:
+            title = " CA SYSTEM CONFIGURATION ";
+            modals::SystemConfigModal::render(content_rows, add_row, sysconfig_draft_,
+                                              sysconfig_cursor_);
             break;
         case ModalType::Help:
             title = " SIMULATOR KEYBOARD SHORTCUTS ";

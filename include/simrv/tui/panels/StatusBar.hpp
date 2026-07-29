@@ -36,7 +36,9 @@ enum class TuiFooterAction : uint8_t {
     TogglePanel,
     ToggleTrace,
     OpenSettings,
-    ConfigureMisa
+    ConfigureMisa,
+    ConfigureSystem,
+    ManageBreakpoints
 };
 
 class StatusBar : public TuiWidget {

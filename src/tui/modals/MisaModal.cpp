@@ -40,7 +40,7 @@ void MisaModal::open(MisaDraft& draft, int& cursor, const simrv::core::Machine& 
 }
 
 void MisaModal::move_cursor(int& cursor, int delta) {
-    constexpr int kNumMisaItems = 13;
+    constexpr int kNumMisaItems = 12;
     cursor = (cursor + delta + kNumMisaItems) % kNumMisaItems;
 }
 
@@ -92,43 +92,46 @@ void MisaModal::toggle_item(MisaDraft& draft, int index) {
         case 0:
             draft.xlen_bits = (draft.xlen_bits == 32) ? 64 : 32;
             break;
-        case 1: {
+        case 1:
+            draft.ext_m = !draft.ext_m;
+            break;
+        case 2:
+            draft.ext_a = !draft.ext_a;
+            break;
+        case 3:
+            draft.ext_f = !draft.ext_f;
+            if (!draft.ext_f) {
+                draft.ext_d = false;  // D requires F
+            }
+            break;
+        case 4:
+            draft.ext_d = !draft.ext_d;
+            if (draft.ext_d) {
+                draft.ext_f = true;  // D requires F
+            }
+            break;
+        case 5:
+            draft.ext_c = !draft.ext_c;
+            break;
+        case 6:
+            draft.ext_b = !draft.ext_b;
+            break;
+        case 7:
+            draft.ext_v = !draft.ext_v;
+            break;
+        case 8: {
             bool curr = (draft.ext_s || draft.ext_u);
             draft.ext_s = !curr;
             draft.ext_u = !curr;
             break;
         }
-        case 2:
-            draft.ext_a = !draft.ext_a;
-            break;
-        case 3:
-            draft.ext_b = !draft.ext_b;
-            break;
-        case 4:
-            draft.ext_c = !draft.ext_c;
-            break;
-        case 5:
-            draft.ext_d = !draft.ext_d;
-            break;
-        case 6:
-            draft.ext_f = !draft.ext_f;
-            break;
-        case 7:
-            draft.ext_i = !draft.ext_i;
-            break;
-        case 8:
-            draft.ext_m = !draft.ext_m;
-            break;
         case 9:
-            draft.ext_v = !draft.ext_v;
-            break;
-        case 10:
             apply_profile(draft, 0);
             break;
-        case 11:
+        case 10:
             apply_profile(draft, 1);
             break;
-        case 12:
+        case 11:
             apply_profile(draft, 2);
             break;
         default:
@@ -172,34 +175,31 @@ void MisaModal::render(std::vector<std::string>& content_rows,
         {.key = " 0",
          .name = "Base XLEN Mode",
          .val = (draft.xlen_bits == 32) ? "\033[1;33m[RV32]\033[0m" : "\033[1;36m[RV64]\033[0m"},
-        {.key = " 8",
-         .name = "Privilege Modes (S & U)",
-         .val = (draft.ext_s && draft.ext_u) ? "\033[1;32m[ON (S+U)]\033[0m"
-                                             : "\033[90m[OFF (M-Only)]\033[0m"},
         {.key = " 1",
-         .name = "Extension A (Atomic)",
-         .val = draft.ext_a ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+         .name = "Extension M (Int Mul/Div)",
+         .val = draft.ext_m ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
         {.key = " 2",
-         .name = "Extension B (Bitmanip)",
-         .val = draft.ext_b ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+         .name = "Extension A (Atomic Ops)",
+         .val = draft.ext_a ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
         {.key = " 3",
-         .name = "Extension C (Compressed)",
-         .val = draft.ext_c ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {.key = " 4",
-         .name = "Extension D (Double FP)",
-         .val = draft.ext_d ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {.key = " 5",
          .name = "Extension F (Single FP)",
          .val = draft.ext_f ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+        {.key = " 4",
+         .name = "Extension D (Double FP)",
+         .val = draft.ext_d ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF (Requires F)]\033[0m"},
+        {.key = " 5",
+         .name = "Extension C (Compressed)",
+         .val = draft.ext_c ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
         {.key = " 6",
-         .name = "Extension I (Base Int)",
-         .val = draft.ext_i ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+         .name = "Extension B (Bitmanip)",
+         .val = draft.ext_b ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
         {.key = " 7",
-         .name = "Extension M (Mul/Div)",
-         .val = draft.ext_m ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {.key = " a",
          .name = "Extension V (Vector)",
          .val = draft.ext_v ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+        {.key = " 8",
+         .name = "Privilege Modes (S & U)",
+         .val = (draft.ext_s && draft.ext_u) ? "\033[1;32m[ON]\033[0m"
+                                             : "\033[90m[OFF (M-Only)]\033[0m"},
         {.key = " p", .name = "Preset: Base (I)", .val = "\033[1;34m[Set Profile: Base]\033[0m"},
         {.key = " i", .name = "Preset: IMAC", .val = "\033[1;34m[Set Profile: IMAC]\033[0m"},
         {.key = " g", .name = "Preset: GC (General)", .val = "\033[1;34m[Set Profile: GC]\033[0m"},
@@ -207,12 +207,11 @@ void MisaModal::render(std::vector<std::string>& content_rows,
 
     for (std::size_t i = 0; i < misa_items.size(); ++i) {
         if (i == 0) {
-            add_row_cb(std::format("{}\033[1;35m── Base Architecture & Privilege Modes ──\033[0m",
-                                   kThemeText));
-        } else if (i == 2) {
+            add_row_cb(std::format("{}\033[1;35m── Base Architecture Mode ──\033[0m", kThemeText));
+        } else if (i == 1) {
             add_row_cb("");
             add_row_cb(std::format("{}\033[1;35m── Standard ISA Extensions ──\033[0m", kThemeText));
-        } else if (i == 10) {
+        } else if (i == 9) {
             add_row_cb("");
             add_row_cb(std::format("{}\033[1;35m── Quick Presets ──\033[0m", kThemeText));
         }

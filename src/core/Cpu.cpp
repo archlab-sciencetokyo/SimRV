@@ -122,8 +122,10 @@ void CPU::evaluate_timer_interrupt() {
 
 void CPU::run_cycle(Machine& machine) {
     if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
+        prev_state_ = state_;
         if (auto hit = machine.breakpoints.check_pc(state_.pc)) {
             if (machine.tui) {
+                machine.breakpoints.set_skip_once_pc(state_.pc);
                 machine.tui->set_status_override(hit->description);
                 machine.tui->pause_loop();
             }
@@ -131,7 +133,9 @@ void CPU::run_cycle(Machine& machine) {
     }
     // If rollback support is active, record architectural and memory checkpoints before updating state.
     if (simrv::compiler::unlikely(machine.s_rollback_enabled)) {
-        prev_state_ = state_;
+        if (!machine.breakpoints.has_any()) {
+            prev_state_ = state_;
+        }
         push_undo_state();
     }
     uint32_t step_cycles = 1;
@@ -235,6 +239,15 @@ void CPU::run_cycle(Machine& machine) {
     if (machine.s_tuimode && machine.tui && machine.tui->is_trace_active()) {
         record_trace_for_tui(machine);
     }
+
+    if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
+        if (auto hit = machine.breakpoints.check_reg_changes(state_, prev_state_)) {
+            if (machine.tui) {
+                machine.tui->set_status_override(hit->description);
+                machine.tui->pause_loop();
+            }
+        }
+    }
 }
 
 void CPU::record_trace_for_tui(Machine& machine) {
@@ -286,6 +299,7 @@ void CPU::record_trace_for_tui(Machine& machine) {
 
 void CPU::run_cycle_baremetal(Machine& machine) {
     if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
+        prev_state_ = state_;
         if (auto hit = machine.breakpoints.check_pc(state_.pc)) {
             if (machine.tui) {
                 machine.tui->set_status_override(hit->description);
@@ -294,7 +308,9 @@ void CPU::run_cycle_baremetal(Machine& machine) {
         }
     }
     if (simrv::compiler::unlikely(machine.s_rollback_enabled)) {
-        prev_state_ = state_;
+        if (!machine.breakpoints.has_any()) {
+            prev_state_ = state_;
+        }
         push_undo_state();
     }
     pipeline_context.pending_exception = std::nullopt;
@@ -307,6 +323,14 @@ void CPU::run_cycle_baremetal(Machine& machine) {
             clint_mmio.mcycle++;
             if (machine.s_tuimode && machine.tui && machine.tui->is_trace_active()) {
                 record_trace_for_tui(machine);
+            }
+            if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
+                if (auto hit = machine.breakpoints.check_reg_changes(state_, prev_state_)) {
+                    if (machine.tui) {
+                        machine.tui->set_status_override(hit->description);
+                        machine.tui->pause_loop();
+                    }
+                }
             }
             return;
         }
@@ -339,6 +363,15 @@ void CPU::run_cycle_baremetal(Machine& machine) {
     clint_mmio.mcycle++;
     if (machine.s_tuimode && machine.tui && machine.tui->is_trace_active()) {
         record_trace_for_tui(machine);
+    }
+
+    if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
+        if (auto hit = machine.breakpoints.check_reg_changes(state_, prev_state_)) {
+            if (machine.tui) {
+                machine.tui->set_status_override(hit->description);
+                machine.tui->pause_loop();
+            }
+        }
     }
 }
 

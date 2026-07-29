@@ -134,6 +134,7 @@ add_executable(SimRV
   src/tui/modals/LoadModal.cpp
   src/tui/modals/MisaModal.cpp
   src/tui/modals/SettingsModal.cpp
+  src/tui/modals/SystemConfigModal.cpp
   src/tui/modals/StepModal.cpp
   src/tui/panels/LeftPane.cpp
   src/tui/panels/LeftPaneRegs.cpp

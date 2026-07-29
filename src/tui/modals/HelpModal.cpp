@@ -31,8 +31,10 @@ void HelpModal::render(std::vector<std::string>& content_rows,
                                      {"[b] / [Alt-b]", "Undo / Toggle Rollback"},
                                      {"[o] / [Alt-o]", "Load Binary / Disk"},
                                      {"[,] / [Alt-s]", "Simulator Settings"},
+                                     {"[y]", "CA System Config"},
                                      {"[:]", "Set PC Breakpoint"},
-                                     {"[w]", "Set Memory Watchpoint"},
+                                     {"[w]", "Set Watchpoint"},
+                                     {"[B]", "Manage Break/Watchpoints"},
                                      {"[k]", "Toggle PC Breakpoint"},
                                      {"[g]", "Set N Step Size"},
                                      {"[f]", "Set Frequency (Hz)"},
@@ -75,6 +77,10 @@ void HelpModal::render(std::vector<std::string>& content_rows,
                             kThemeSky, "[b]", kThemeText));
         add_row_cb(std::format(" {}{:<22}\033[0m {}Load Program Binary or Disk modal\033[0m",
                             kThemeSky, "[o] / [Alt-o]", kThemeText));
+        add_row_cb(std::format(" {}{:<22}\033[0m {}Simulator Settings modal\033[0m", kThemeSky,
+                            "[,]", kThemeText));
+        add_row_cb(std::format(" {}{:<22}\033[0m {}CA System Config modal\033[0m", kThemeSky,
+                            "[y]", kThemeText));
         add_row_cb(std::format(" {}{:<22}\033[0m {}Set PC Breakpoint modal\033[0m", kThemeSky,
                             "[:]", kThemeText));
         add_row_cb(std::format(" {}{:<22}\033[0m {}Set Memory Watchpoint modal\033[0m", kThemeSky,

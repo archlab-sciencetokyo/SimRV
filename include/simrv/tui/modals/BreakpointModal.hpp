@@ -1,6 +1,6 @@
 /**
  * @file BreakpointModal.hpp
- * @brief Modal dialog handler for SetBreakpoint and SetWatchpoint dialogs.
+ * @brief Modal dialog handler for SetBreakpoint, SetWatchpoint, and ManageBreakpoints dialogs.
  */
 #pragma once
 
@@ -27,7 +27,7 @@ class BreakpointModal {
                         const std::function<void(const std::string&)>& set_status_override_cb)
         -> bool;
     static void render(ModalType type, std::vector<std::string>& content_rows,
-                       const std::string& input);
+                       const std::string& input, const simrv::core::Machine* machine = nullptr);
 };
 
 }  // namespace simrv::tui::modals

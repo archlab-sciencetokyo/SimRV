@@ -58,11 +58,9 @@ void SettingsModal::toggle_setting(SettingsDraft& draft, int index,
             draft.debug_mode = !draft.debug_mode;
             if (draft.debug_mode) {
                 draft.use_mix = draft.cycle_accurate;
-                draft.bp_trace = true;
                 draft.rollback_enabled = true;
             } else {
                 draft.use_mix = false;
-                draft.bp_trace = false;
                 draft.rollback_enabled = false;
             }
             break;
@@ -78,29 +76,29 @@ void SettingsModal::toggle_setting(SettingsDraft& draft, int index,
             draft.use_mix = !draft.use_mix;
             break;
         case 5:
-            if (!draft.cycle_accurate || draft.high_performance) break;
-            draft.bp_trace = !draft.bp_trace;
-            break;
-        case 6:
-            draft.traplog_mode = !draft.traplog_mode;
-            break;
-        case 7:
-            if (machine.s_appmode) break;
-            draft.dlog_mode = !draft.dlog_mode;
-            break;
-        case 8:
             draft.high_performance = !draft.high_performance;
             if (draft.high_performance) {
                 draft.bp_trace = false;
                 draft.rollback_enabled = false;
             }
             break;
-        case 9:
+        case 6:
             if (machine.s_spike_bin.empty()) break;
             draft.lockstep_mode = !draft.lockstep_mode;
             break;
-        case 10:
+        case 7:
             draft.gdb_mode = !draft.gdb_mode;
+            break;
+        case 8:
+            if (!draft.cycle_accurate || draft.high_performance) break;
+            draft.bp_trace = !draft.bp_trace;
+            break;
+        case 9:
+            draft.traplog_mode = !draft.traplog_mode;
+            break;
+        case 10:
+            if (machine.s_appmode) break;
+            draft.dlog_mode = !draft.dlog_mode;
             break;
         default:
             break;
@@ -140,7 +138,7 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
                            const simrv::core::Machine& machine) {
     (void)content_rows;
     add_row_cb(
-        std::format("{}Use \033[1m[↑/↓/←/→]\033[0m or key \033[1m[1-9,0,a,g]\033[0m to "
+        std::format("{}Use \033[1m[↑/↓/←/→]\033[0m or key \033[1m[1-8,9,a,b]\033[0m to "
                     "toggle, \033[1m[Enter]\033[0m to apply:\033[0m",
                     kThemeMuted));
     add_row_cb("");
@@ -168,28 +166,38 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
          mix_disabled ? "\033[90m[Disabled (N/A in IA Mode)]\033[0m"
                       : (draft.use_mix ? "\033[1;32m[ON]\033[0m"
                                        : "\033[90m[OFF]\033[0m")},
-        {" 6", "Branch Prediction Trace",
-         bp_disabled ? "\033[90m[Disabled (N/A in IA Mode)]\033[0m"
-                     : (draft.bp_trace ? "\033[1;32m[ON]\033[0m"
-                                       : "\033[90m[OFF]\033[0m")},
-        {" 7", "Exception & Trap Log",
-         draft.traplog_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {" 8", "Device MMIO Access Log",
-         dlog_disabled ? "\033[90m[Disabled in Baremetal Mode]\033[0m"
-                       : (draft.dlog_mode ? "\033[1;32m[ON]\033[0m"
-                                          : "\033[90m[OFF]\033[0m")},
-        {" 9", "High-Performance Engine",
+        {" 6", "High-Performance Engine",
          draft.high_performance ? "\033[1;32m[ON]\033[0m"
                                 : "\033[90m[OFF]\033[0m"},
-        {" a", "Co-Sim Spike Lockstep",
+        {" 7", "Co-Sim Spike Lockstep",
          lockstep_disabled ? "\033[90m[Disabled (No Spike Bin)]\033[0m"
                            : (draft.lockstep_mode ? "\033[1;32m[ON]\033[0m"
                                                  : "\033[90m[OFF]\033[0m")},
-        {" g", "GDB Server Stub (1234)",
+        {" 8", "GDB Server Stub (1234)",
          draft.gdb_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+        {" 9", "Branch Prediction Trace",
+         bp_disabled ? "\033[90m[Disabled (N/A in IA Mode)]\033[0m"
+                     : (draft.bp_trace ? "\033[1;32m[ON (creates bptrace.txt)]\033[0m"
+                                       : "\033[90m[OFF (creates text file)]\033[0m")},
+        {" a", "Exception & Trap Log",
+         draft.traplog_mode ? "\033[1;32m[ON (creates traplog.txt)]\033[0m"
+                            : "\033[90m[OFF (creates text file)]\033[0m"},
+        {" b", "Device MMIO Access Log",
+         dlog_disabled ? "\033[90m[Disabled in Baremetal Mode]\033[0m"
+                       : (draft.dlog_mode ? "\033[1;32m[ON (creates devicelog.txt)]\033[0m"
+                                          : "\033[90m[OFF (creates text file)]\033[0m")},
     });
 
     for (std::size_t i = 0; i < settings.size(); ++i) {
+        if (i == 0) {
+            add_row_cb(std::format("{}\033[1;35m── Core Engine & Diagnostics ──\033[0m", kThemeText));
+        } else if (i == 6) {
+            add_row_cb("");
+            add_row_cb(std::format("{}\033[1;35m── External Integrations & Debug Stubs ──\033[0m", kThemeText));
+        } else if (i == 8) {
+            add_row_cb("");
+            add_row_cb(std::format("{}\033[1;35m── Traces & Logging (Creates Text Files) ──\033[0m", kThemeText));
+        }
         bool is_sel = (static_cast<int>(i) == cursor);
         std::string prefix = is_sel ? std::format("{}>\033[0m ", kThemeMint) : "  ";
         std::string num_key =

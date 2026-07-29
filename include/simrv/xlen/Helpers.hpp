@@ -15,25 +15,50 @@ inline constexpr Word kAddrMask = (kIsXLen64 ? UINT64_MAX : UINT32_MAX);
 inline constexpr Address maskAddress(Address a) noexcept { return a & kAddrMask; }
 
 inline auto resolve_misa_string(CSRValue misa) -> std::string {
-    std::string s = kIsXLen64 ? "RV64" : "RV32";
+    uint64_t misa64 = static_cast<uint64_t>(misa);
+    uint8_t mxl64 = static_cast<uint8_t>(misa64 >> 62);
+    uint8_t mxl32 = static_cast<uint8_t>((misa64 >> 30) & 3);
+    bool is_rv32 = (mxl32 == 1 && mxl64 == 0);
+    bool is_rv64 = (mxl64 == 2);
+    std::string s = is_rv32 ? "RV32" : (is_rv64 ? "RV64" : (kIsXLen64 ? "RV64" : "RV32"));
+
     bool has_i = (misa & (static_cast<CSRValue>(1) << ('i' - 'a'))) != 0;
     bool has_m = (misa & (static_cast<CSRValue>(1) << ('m' - 'a'))) != 0;
     bool has_a = (misa & (static_cast<CSRValue>(1) << ('a' - 'a'))) != 0;
     bool has_f = (misa & (static_cast<CSRValue>(1) << ('f' - 'a'))) != 0;
     bool has_d = (misa & (static_cast<CSRValue>(1) << ('d' - 'a'))) != 0;
+    bool has_c = (misa & (static_cast<CSRValue>(1) << ('c' - 'a'))) != 0;
+    bool has_b = (misa & (static_cast<CSRValue>(1) << ('b' - 'a'))) != 0;
+    bool has_v = (misa & (static_cast<CSRValue>(1) << ('v' - 'a'))) != 0;
+    bool has_s = (misa & (static_cast<CSRValue>(1) << ('s' - 'a'))) != 0;
+    bool has_u = (misa & (static_cast<CSRValue>(1) << ('u' - 'a'))) != 0;
+
     bool is_g = has_i && has_m && has_a && has_f && has_d;
 
     if (is_g) {
         s += "G";
+    } else {
+        if (has_i) s += "I";
+        if (has_m) s += "M";
+        if (has_a) s += "A";
+        if (has_f) s += "F";
+        if (has_d) s += "D";
     }
 
+    if (has_c) s += "C";
+    if (has_b) s += "B";
+    if (has_v) s += "V";
+    if (has_s) s += "S";
+    if (has_u) s += "U";
+
     for (int i = 0; i < 26; ++i) {
+        char ch = static_cast<char>('a' + i);
+        if (ch == 'i' || ch == 'm' || ch == 'a' || ch == 'f' || ch == 'd' ||
+            ch == 'c' || ch == 'b' || ch == 'v' || ch == 's' || ch == 'u') {
+            continue;
+        }
         if ((misa & (static_cast<CSRValue>(1) << i)) != 0) {
-            char c = static_cast<char>('a' + i);
-            if (is_g && (c == 'i' || c == 'm' || c == 'a' || c == 'f' || c == 'd')) {
-                continue;
-            }
-            s += static_cast<char>(c - 'a' + 'A');
+            s += static_cast<char>(ch - 'a' + 'A');
         }
     }
     return s;

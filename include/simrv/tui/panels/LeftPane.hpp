@@ -10,6 +10,7 @@
 #include <optional>
 #include "simrv/tui/TuiWidget.hpp"
 #include "simrv/tui/Tui.hpp"
+#include "simrv/core/RegisterFile.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -36,7 +37,7 @@ class LeftPane : public TuiWidget {
     explicit LeftPane(simrv::core::Machine& machine) : machine_(machine) {
         cached_gpr_.fill(0);
         cached_fpr_.fill(0);
-        cached_vec_.fill(0);
+        cached_vec_.fill({});
     }
     ~LeftPane() override = default;
 
@@ -136,9 +137,9 @@ class LeftPane : public TuiWidget {
     TuiRegPage page_ = TuiRegPage::GPR;
     bool paused_ = true;
     
-    std::array<Register, 32> cached_gpr_;
-    std::array<uint64_t, 32> cached_fpr_;
-    std::array<uint64_t, 32> cached_vec_;
+    std::array<Register, 32> cached_gpr_{};
+    std::array<uint64_t, 32> cached_fpr_{};
+    std::array<simrv::core::VectorRegister, 32> cached_vec_{};
     std::array<std::string, 80> cached_left_rows_;
     int last_width_ = 0;
     

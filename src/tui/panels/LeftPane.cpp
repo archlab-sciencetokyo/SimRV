@@ -23,6 +23,9 @@ auto LeftPane::is_single_column(int width) const -> bool {
     if (page_ == TuiRegPage::GPR) {
         return (simrv::xlen::kIsXLen64 && width < 58) || (!simrv::xlen::kIsXLen64 && width < 42);
     }
+    if (page_ == TuiRegPage::VEC) {
+        return width < 58;
+    }
     return width < 58;
 }
 
@@ -294,7 +297,7 @@ void LeftPane::update_cache() {
     for (int i = 0; i < 32; ++i) {
         cached_gpr_.at(static_cast<std::size_t>(i)) = st.regs.read(static_cast<RegId>(i));
         cached_fpr_.at(static_cast<std::size_t>(i)) = st.regs.read_fp(static_cast<RegId>(i));
-        cached_vec_.at(static_cast<std::size_t>(i)) = st.regs.read_vector(static_cast<RegId>(i)).u64[0]; // NOLINT(cppcoreguidelines-pro-type-union-access)
+        cached_vec_.at(static_cast<std::size_t>(i)) = st.regs.read_vector(static_cast<RegId>(i));
     }
 }
 

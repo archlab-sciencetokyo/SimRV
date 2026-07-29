@@ -56,6 +56,20 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     std::optional<bool> override_appmode;
     std::optional<std::string> override_binary;
     std::optional<std::string> override_disk;
+    std::optional<bool> override_cycle_accurate;
+    std::optional<bool> override_debug_mode;
+    std::optional<bool> override_high_performance;
+    std::optional<bool> override_rollback;
+    std::optional<bool> override_high_contrast;
+    std::optional<bool> override_use_mix;
+    std::optional<bool> override_bp_trace;
+    std::optional<bool> override_traplog_mode;
+    std::optional<bool> override_dlog_mode;
+    std::optional<bool> override_lockstep_mode;
+    std::optional<bool> override_gdb_mode;
+    std::optional<bool> override_misa_override;
+    std::optional<uint64_t> override_misa_profile;
+    std::optional<unsigned int> override_misa_xlen;
 
     bool keep_running = true;
     int final_exit_code = 0;
@@ -75,6 +89,39 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         if (override_disk.has_value()) {
             parsed->options.fn_dskimg = *override_disk;
             parsed->options.use_disk = !override_disk->empty();
+        }
+        if (override_cycle_accurate.has_value()) {
+            parsed->options.cycle_accurate = *override_cycle_accurate;
+        }
+        if (override_debug_mode.has_value()) {
+            parsed->options.debug_mode = *override_debug_mode;
+        }
+        if (override_high_performance.has_value()) {
+            parsed->options.high_performance = *override_high_performance;
+        }
+        if (override_rollback.has_value()) {
+            parsed->options.rollback = *override_rollback;
+        }
+        if (override_high_contrast.has_value()) {
+            parsed->options.high_contrast = *override_high_contrast;
+        }
+        if (override_use_mix.has_value()) {
+            parsed->options.use_mix = *override_use_mix;
+        }
+        if (override_bp_trace.has_value()) {
+            parsed->options.bp_trace = *override_bp_trace;
+        }
+        if (override_traplog_mode.has_value()) {
+            parsed->options.traplog_mode = *override_traplog_mode;
+        }
+        if (override_dlog_mode.has_value()) {
+            parsed->options.dlog_mode = *override_dlog_mode;
+        }
+        if (override_lockstep_mode.has_value()) {
+            parsed->options.lockstep_mode = *override_lockstep_mode;
+        }
+        if (override_gdb_mode.has_value()) {
+            parsed->options.gdb_mode = *override_gdb_mode;
         }
 
         switch (parsed->action) {
@@ -100,6 +147,17 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         auto applied = apply_runtime_options(sim_machine.get(), parsed->options);
         if (!applied) {
             option_error(applied.error(), 0);
+        }
+
+        if (override_misa_override.has_value() && *override_misa_override) {
+            sim_machine->s_misa_override = true;
+            if (override_misa_profile.has_value()) {
+                sim_machine->s_misa_profile = *override_misa_profile;
+                sim_machine->cpu.state().misa = *override_misa_profile;
+            }
+            if (override_misa_xlen.has_value()) {
+                sim_machine->s_misa_xlen = *override_misa_xlen;
+            }
         }
 
         const int init_result = sim_machine->initialize();
@@ -150,29 +208,28 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         if (sim_machine->reboot_requested) {
             simrv::log::info("Rebooting guest system...");
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            parsed->options.cycle_accurate = sim_machine->s_cycle_accurate;
-            parsed->options.high_performance = sim_machine->s_high_performance;
-            parsed->options.debug_mode = sim_machine->s_debug_mode;
-            parsed->options.rollback = sim_machine->s_rollback_enabled;
-            parsed->options.high_contrast = sim_machine->s_high_contrast;
-            parsed->options.use_mix = sim_machine->s_use_mix;
-            parsed->options.bp_trace = sim_machine->s_bp_trace;
-            parsed->options.traplog_mode = sim_machine->s_traplog_mode;
-            parsed->options.dlog_mode = sim_machine->s_dlog_mode;
-            parsed->options.lockstep_mode = sim_machine->s_lockstep_mode;
-            parsed->options.gdb_mode = sim_machine->s_gdb_mode;
+            override_cycle_accurate = sim_machine->s_cycle_accurate;
+            override_high_performance = sim_machine->s_high_performance;
+            override_debug_mode = sim_machine->s_debug_mode;
+            override_rollback = sim_machine->s_rollback_enabled;
+            override_high_contrast = sim_machine->s_high_contrast;
+            override_use_mix = sim_machine->s_use_mix;
+            override_bp_trace = sim_machine->s_bp_trace;
+            override_traplog_mode = sim_machine->s_traplog_mode;
+            override_dlog_mode = sim_machine->s_dlog_mode;
+            override_lockstep_mode = sim_machine->s_lockstep_mode;
+            override_gdb_mode = sim_machine->s_gdb_mode;
+
+            if (sim_machine->s_misa_override) {
+                override_misa_override = true;
+                override_misa_profile = sim_machine->s_misa_profile;
+                override_misa_xlen = sim_machine->s_misa_xlen;
+            }
 
             if (!sim_machine->pending_binary_path.empty()) {
                 override_binary = sim_machine->pending_binary_path;
                 override_appmode = sim_machine->pending_appmode;
                 override_disk = sim_machine->pending_disk_path;
-                parsed->options.fn_memimg = sim_machine->pending_binary_path;
-                if (override_appmode.has_value()) {
-                    parsed->options.appmode = *override_appmode;
-                }
-                if (override_disk.has_value() && !override_disk->empty()) {
-                    parsed->options.fn_dskimg = *override_disk;
-                }
             }
             continue;
         } else {
