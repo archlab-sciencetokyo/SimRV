@@ -1,0 +1,195 @@
+# SimRV Changelog
+
+All notable changes to SimRV are documented here.
+Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+
+## [v2.0.0-rc.1] — 2026-07-30
+
+Release candidate for v2.0.0. All major features are complete; this cycle focuses
+on inspector polish, correctness fixes, and CLI normalization.
+
+### TUI Inspectors
+- **Cache inspector**: per-way hit/miss markers (`◄ HIT` / `◄ MISS ▸ REPLACED`)
+  now correctly annotate only the exact hit way using `last_hit_way` tracking;
+  `[Cache:IC]` / `[Cache:DC]` tab click now correctly toggles IC ↔ DC (duplicate
+  `esc_buf_` handler that swallowed the toggle was fixed)
+- **MISA + VLEN modal**: added VLEN setting (32–1024 bits, power of 2, default 256)
+  to the MISA configuration modal; displayed on row 8; applied to `s_vlen` at reboot
+- **MMIO/Bus inspector**: live VirtIO status flags, IRQ state, Virtqueue 0 ring
+  physical addresses (Desc / Avail / Used), UART NS16550A settings
+- **Hazard inspector**: aligned stage labels (`IF `, `ID `, `EX `, `WB `) for
+  uniform column layout
+- **TLB, BP, Bus pages**: clamped to 36–46 visible characters per row; removed
+  overflow that was clipping text on narrow terminals
+
+### CLI
+- `--vlen <N>` / `--vector-len <N>`: VLEN can now be set from the command line;
+  the non-standard `-VLEN` alias has been replaced with `--vector-len`
+- Debug mode (`-d`) no longer implicitly enables branch prediction trace output;
+  use `--trace-bpred` explicitly
+
+### Bug Fixes
+- Stack inspector clicks no longer pollute the Explainer target PC
+  (`explain_pc_` is now separate from `inspect_addr_`)
+
+---
+
+## [v2.0.0-beta.36] — 2026-07-30
+
+### TUI
+- Cache section headers and `[Cache:IC]` / `[Cache:DC]` tab entries toggle between
+  ICache and DCache inspector views
+- Regs tab click cycles GPR → FPR → VEC → GPR
+
+---
+
+## [v2.0.0-beta.34] — 2026-07-29
+
+### TUI
+- Machine settings (cycle-accurate mode, debug mode, MISA profile, theme) persist
+  across simulator reloads and binary hot-swaps
+
+---
+
+## [v2.0.0-beta.33] — 2026-07-29
+
+### TUI — Cache Inspector
+- Individual Way cursor navigation inside cache sets
+- Full 32-byte hex + ASCII cache line data inspection for the selected way
+
+---
+
+## [v2.0.0-beta.32] — 2026-07-28
+
+### TUI — Cache Inspector
+- Interactive cache Set inspector with set selection (`j`/`k`), way selection
+  (`0`–`3`, `w`), and a live set occupancy map
+- Replacement tracking: last-evicted tag, last-replaced set/way displayed
+- Collision-free keybindings for cache navigation
+
+---
+
+## [v2.0.0-beta.31] — 2026-07-27
+
+### Performance & TUI
+- Optimized rendering throughput in high-speed simulation
+- Cache inspector tab hidden in high-performance (IA) mode
+- Debug keybindings hidden from status bar footer in normal mode
+
+---
+
+## [v2.0.0-beta.30] — 2026-07-26
+
+### TUI
+- **MISA CSR modal** (`Alt-M`): configure ISA extensions (A/B/C/D/F/M/V/S/U) and
+  XLEN mode interactively with draft preview and quick presets (Base / IMAC / GC)
+- Settings modal options are mode-aware (CA vs IA)
+
+---
+
+## [v2.0.0-beta.27] — 2026-07-25
+
+### ISA — RVV
+- Fixed several RVV vector memory and permute bugs
+
+### TUI
+- Interactive binary loading modal: browse and reload `.bin` images at runtime
+- Disambiguated conflicting key bindings
+
+---
+
+## [v2.0.0-beta.26] — 2026-07-24
+
+### TUI — Pipeline Inspector
+- Reworked pipeline page layout for improved student readability
+- Cleaner stage-slot display with stall/bubble indicators
+
+---
+
+## [v2.0.0-beta.25] — 2026-07-23
+
+### TUI — Education Tools
+- Overhauled pipeline visualizer with colour-coded in-flight instruction slots
+- Modularized `TuiModal` into separate per-modal handler files
+
+---
+
+## [v2.0.0-beta.24] — 2026-07-22
+
+### TUI
+- Simulation speed configurable by target frequency (Hz) via `[f]` key
+
+---
+
+## [v2.0.0-beta.22] — 2026-07-21
+
+### TUI
+- Grouped register tabs (GPR / FPR / VEC) under a single `Regs` tab entry
+- `[l]` / `Alt-L` cycles through tool inspector tabs
+- Cache page column alignment fixed across all themes
+
+---
+
+## [v2.0.0-beta.19] — 2026-07-20
+
+### TUI — Log & Trace
+- Execution log and instruction trace views integrated into the LeftPane tab system
+- Refactored pane class hierarchy to support pluggable inspector panels
+
+---
+
+## [v2.0.0-beta.17] — 2026-07-18
+
+### TUI — Educational Visualizers
+- Guest stack inspector with symbol-resolved frame layout
+- Cache heatmap with set occupancy heat levels
+- Data forwarding path diagram with active forwarding highlight
+
+---
+
+## [v2.0.0-beta.15] — 2026-07-17
+
+### TUI — Instruction Explainer
+- Complete FP (F/D) explanations: rounding modes, NaN semantics, exception flags
+- Complete RVV (V) explanations: LMUL, SEW, VLEN, element group layout
+- Fixed vector register multi-word display formatting for VLEN > 64
+
+---
+
+## [v2.0.0-beta.10] — 2026-07-10
+
+### Cycle-Accurate Core
+- Pipeline data hazard analysis (RAW / WAW / WAR) in the instruction explainer
+- Control hazard detection with branch misprediction penalty annotation
+
+---
+
+## [v2.0.0-beta.7] — 2026-07-07
+
+### Architecture
+- High-performance (IA) vs cycle-accurate (CA) simulation modes selectable at runtime
+- Modularized CLI argument parsing into logical groups
+- ISA test suite consolidated under the standard baremetal `appmode` runner
+
+---
+
+## [v2.0.0-beta.1] — 2026-07-01
+
+### Foundation
+- XLEN abstraction layer: unified RV32/RV64 register and CSR handling
+- Interactive TUI split-screen monitor with mouse and keyboard support
+- OpenSBI boot support for supervisor-mode Linux images
+- VirtIO console and disk block device models
+- MMU with TLB and page table walker (Sv39 / Sv32)
+
+---
+
+## [v2.0.0-alpha.4] — 2026-06-15
+
+- Performance benchmarks and initial release asset packaging
+
+## [v2.0.0-alpha.3] — 2026-06-14
+
+- Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
