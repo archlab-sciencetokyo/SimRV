@@ -508,7 +508,7 @@ auto LeftPane::get_explain_rows(int width) -> std::vector<std::string> {
     auto& st = cpu.state();
     auto& ctx = cpu.pipeline_context;
 
-    Register const target_pc = (inspect_addr_ != 0) ? inspect_addr_ : st.pc;
+    Register const target_pc = (explain_pc_ != 0) ? explain_pc_ : st.pc;
 
     auto hex_addr = [](Register v) -> std::string {
         if constexpr (sizeof(Register) <= 4) {

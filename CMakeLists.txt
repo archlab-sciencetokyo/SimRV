@@ -4,7 +4,7 @@ project(SimRV LANGUAGES CXX)
 
 enable_testing()
 
-set(SIMRV_VERSION "2.0.0-beta.35")
+set(SIMRV_VERSION "2.0.0-beta.36")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -139,6 +139,11 @@ add_executable(SimRV
   src/tui/panels/LeftPane.cpp
   src/tui/panels/LeftPaneRegs.cpp
   src/tui/panels/LeftPanePipeline.cpp
+  src/tui/panels/LeftPaneCache.cpp
+  src/tui/panels/LeftPaneTlb.cpp
+  src/tui/panels/LeftPaneBp.cpp
+  src/tui/panels/LeftPaneHazard.cpp
+  src/tui/panels/LeftPaneIo.cpp
   src/tui/panels/LeftPaneStats.cpp
   src/tui/panels/LeftPaneExplain.cpp
   src/tui/panels/LeftPaneStack.cpp

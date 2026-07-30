@@ -41,6 +41,10 @@ enum class TuiRegPage : uint8_t {
     VEC,
     PIPELINE,
     CACHE,
+    TLB,
+    BPRED,
+    HAZARD,
+    BUS,
     TRACE,
     EXPLAIN,
     STACK
@@ -96,6 +100,9 @@ class Tui {
     void cycle_step_granularity(bool increase = true);
 
     void open_modal(ModalType type) {
+        if (!tui_loop_paused_) {
+            pause_loop();
+        }
         modal_.open(type, left_pane_.get(), step_granularity_.load(std::memory_order_relaxed), step_delay_us_.load(std::memory_order_relaxed));
         set_paused(true);
         render(true);

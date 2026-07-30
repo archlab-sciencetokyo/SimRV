@@ -147,13 +147,22 @@ auto LeftPane::render_tab_bar(int width) const -> std::string {
         line += std::format("{}Regs\033[0m", kThemeMuted);
     }
 
+    std::string cache_name = "Cache";
+    if (page_ == TuiRegPage::CACHE) {
+        cache_name = (cache_inspect_type_ == 0) ? "Cache:IC" : "Cache:DC";
+    }
+
     // Remaining tool tabs
-    struct ToolTab { TuiRegPage page; const char* name; };
+    struct ToolTab { TuiRegPage page; std::string name; };
     std::vector<ToolTab> tool_tabs;
     tool_tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Pipe"});
     if (machine_.s_cycle_accurate) {
-        tool_tabs.push_back({.page = TuiRegPage::CACHE, .name = "Cache"});
+        tool_tabs.push_back({.page = TuiRegPage::CACHE, .name = cache_name});
+        tool_tabs.push_back({.page = TuiRegPage::BPRED, .name = "BBPtr"});
+        tool_tabs.push_back({.page = TuiRegPage::HAZARD, .name = "Haz"});
     }
+    tool_tabs.push_back({.page = TuiRegPage::TLB, .name = "TLB"});
+    tool_tabs.push_back({.page = TuiRegPage::BUS, .name = "Bus"});
     tool_tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
     tool_tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Exp"});
     tool_tabs.push_back({.page = TuiRegPage::STACK, .name = "Stack"});
@@ -180,18 +189,27 @@ auto LeftPane::get_tab_at_col(int col) const -> std::optional<TuiRegPage> {
     }
     current_x += regs_width + 1; // +1 for │
 
-    struct ToolTab { TuiRegPage page; const char* name; };
-    std::vector<ToolTab> tool_tabs;
-    tool_tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Pipe"});
-    if (machine_.s_cycle_accurate) {
-        tool_tabs.push_back({.page = TuiRegPage::CACHE, .name = "Cache"});
+    std::string cache_name = "Cache";
+    if (page_ == TuiRegPage::CACHE) {
+        cache_name = (cache_inspect_type_ == 0) ? "Cache:IC" : "Cache:DC";
     }
-    tool_tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
-    tool_tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Exp"});
-    tool_tabs.push_back({.page = TuiRegPage::STACK, .name = "Stack"});
 
-    for (auto const& tab : tool_tabs) {
-        int tab_width = (page_ == tab.page) ? (static_cast<int>(std::strlen(tab.name)) + 2) : static_cast<int>(std::strlen(tab.name));
+    struct ToolTab { TuiRegPage page; std::string name; };
+    std::vector<ToolTab> get_tabs;
+    get_tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Pipe"});
+    if (machine_.s_cycle_accurate) {
+        get_tabs.push_back({.page = TuiRegPage::CACHE, .name = cache_name});
+        get_tabs.push_back({.page = TuiRegPage::BPRED, .name = "BBPtr"});
+        get_tabs.push_back({.page = TuiRegPage::HAZARD, .name = "Haz"});
+    }
+    get_tabs.push_back({.page = TuiRegPage::TLB, .name = "TLB"});
+    get_tabs.push_back({.page = TuiRegPage::BUS, .name = "Bus"});
+    get_tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
+    get_tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Exp"});
+    get_tabs.push_back({.page = TuiRegPage::STACK, .name = "Stack"});
+
+    for (auto const& tab : get_tabs) {
+        int tab_width = (page_ == tab.page) ? (static_cast<int>(tab.name.length()) + 2) : static_cast<int>(tab.name.length());
         if (col < current_x + tab_width) {
             return tab.page;
         }

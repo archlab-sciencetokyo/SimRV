@@ -604,6 +604,10 @@ void Tui::handle_mouse(int x, int y, int b) {
     }
 
     if (x < pane_width_cached_) {
+        if (!paused_ || !tui_loop_paused_) {
+            pause_loop();
+            return;
+        }
         if (b == 0) {      // Left mouse click
             if (y == 4) {  // Left Pane Tab Bar (row 4 in 1-indexed terminal coords)
                 int const col = x - 2;
@@ -612,17 +616,37 @@ void Tui::handle_mouse(int x, int y, int b) {
                 }
                 auto tab = left_pane_->get_tab_at_col(col);
                 if (tab.has_value()) {
+                    if (*tab == TuiRegPage::CACHE && left_pane_->get_page() == TuiRegPage::CACHE) {
+                        left_pane_->toggle_cache_inspect_type();
+                        render(true);
+                        return;
+                    }
                     left_pane_->set_previous_page(left_pane_->get_page());
                     set_reg_page(*tab);
                     return;
+                } else {
+                    bool const is_regs = (left_pane_->get_page() == TuiRegPage::GPR ||
+                                          left_pane_->get_page() == TuiRegPage::FPR ||
+                                          left_pane_->get_page() == TuiRegPage::VEC);
+                    int regs_width = is_regs ? 10 : 4;
+                    if (col < regs_width) {
+                        cycle_reg_page();
+                        return;
+                    }
                 }
             } else if (y >= 5) {  // Left Pane Content Area (row 5+)
                 int logical_row = (y - 5) + left_pane_->get_scroll_offset();
-                if (left_pane_->get_page() == TuiRegPage::PIPELINE) {
+                if (left_pane_->get_page() == TuiRegPage::CACHE) {
+                    if (logical_row == 0 || logical_row == 4) {
+                        left_pane_->toggle_cache_inspect_type();
+                        render(true);
+                        return;
+                    }
+                } else if (left_pane_->get_page() == TuiRegPage::PIPELINE) {
                     Register clicked_pc = left_pane_->get_pipeline_pc_at_row(logical_row);
                     if (clicked_pc != 0) {
                         left_pane_->set_previous_page(TuiRegPage::PIPELINE);
-                        left_pane_->set_inspect_addr(clicked_pc);
+                        left_pane_->set_explain_pc(clicked_pc);
                         set_reg_page(TuiRegPage::EXPLAIN);
                         return;
                     }
@@ -647,9 +671,7 @@ void Tui::handle_mouse(int x, int y, int b) {
                     auto stack_addr = left_pane_->get_stack_addr_at_row(logical_row);
                     if (stack_addr.has_value()) {
                         left_pane_->set_inspect_addr(*stack_addr);
-                        set_status_override(
-                            std::format("Inspecting stack address 0x{:08x}", *stack_addr));
-                        render(true);
+                        open_modal(ModalType::InspectAddress);
                         return;
                     }
                 }
@@ -712,10 +734,22 @@ void Tui::cycle_tool_page() {
             if (machine_.s_cycle_accurate) {
                 rp = TuiRegPage::CACHE;
             } else {
-                rp = TuiRegPage::TRACE;
+                rp = TuiRegPage::TLB;
             }
             break;
         case TuiRegPage::CACHE:
+            rp = machine_.s_cycle_accurate ? TuiRegPage::BPRED : TuiRegPage::TLB;
+            break;
+        case TuiRegPage::BPRED:
+            rp = machine_.s_cycle_accurate ? TuiRegPage::HAZARD : TuiRegPage::TLB;
+            break;
+        case TuiRegPage::HAZARD:
+            rp = TuiRegPage::TLB;
+            break;
+        case TuiRegPage::TLB:
+            rp = TuiRegPage::BUS;
+            break;
+        case TuiRegPage::BUS:
             rp = TuiRegPage::TRACE;
             break;
         case TuiRegPage::TRACE:
@@ -735,6 +769,10 @@ void Tui::cycle_tool_page() {
 }
 
 void Tui::set_reg_page(TuiRegPage page) {
+    if (!machine_.s_cycle_accurate && (page == TuiRegPage::CACHE || page == TuiRegPage::BPRED || page == TuiRegPage::HAZARD)) {
+        set_status_override("CA Inspector Page disabled in Functional Mode (Enable Cycle-Accurate mode [,] or -ca)");
+        page = TuiRegPage::TLB;
+    }
     if (left_pane_) {
         left_pane_->set_page(page);
         update_trace_active_cache();

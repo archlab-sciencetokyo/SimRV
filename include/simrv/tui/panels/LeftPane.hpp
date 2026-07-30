@@ -57,6 +57,8 @@ class LeftPane : public TuiWidget {
     [[nodiscard]] auto get_scroll_offset() const -> int { return scroll_offset_; }
     void set_inspect_addr(Register addr) { inspect_addr_ = addr; }
     [[nodiscard]] auto get_inspect_addr() const -> Register { return inspect_addr_; }
+    void set_explain_pc(Register pc) { explain_pc_ = pc; }
+    [[nodiscard]] auto get_explain_pc() const -> Register { return explain_pc_; }
     void set_trace_buffer(const std::vector<std::string>* trace_buf) { trace_buffer_ = trace_buf; }
     void set_log_lines(std::vector<std::string> log_lines) { log_lines_ = std::move(log_lines); }
     void set_previous_page(TuiRegPage p) { previous_page_ = p; }
@@ -106,6 +108,10 @@ class LeftPane : public TuiWidget {
     [[nodiscard]] auto render_perf_or_debug(const simrv::core::CPU& cpu, int logical_row, int width, bool single_column) -> std::string;
     [[nodiscard]] auto render_pipeline_stages(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string;
     [[nodiscard]] auto render_cache_stats(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string;
+    [[nodiscard]] auto render_tlb_stats(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string;
+    [[nodiscard]] auto render_bp_stats(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string;
+    [[nodiscard]] auto render_hazard_stats(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string;
+    [[nodiscard]] auto render_io_stats(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string;
     [[nodiscard]] auto render_stack_frame(const simrv::core::CPU& cpu, int logical_row, int col_width, int right_width) -> std::string;
     [[nodiscard]] auto translate_safe(const simrv::core::CPU& cpu, Register vaddr) const -> std::optional<Register>;
     [[nodiscard]] auto render_pipeline_timeline(const simrv::core::CPU& cpu, int logical_row, int width) -> std::string;
@@ -149,6 +155,7 @@ class LeftPane : public TuiWidget {
     int scroll_offset_ = 0;
     double active_runtime_ = 0.0;
     Register inspect_addr_ = 0;
+    Register explain_pc_ = 0;
     const std::vector<std::string>* trace_buffer_ = nullptr;
     std::vector<std::string> log_lines_;
     int cache_inspect_type_ = 0; // 0: ICache, 1: DCache

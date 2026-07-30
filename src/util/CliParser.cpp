@@ -815,7 +815,7 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
 
     if (options.debug_mode) {
         machine->s_use_mix = true;
-        machine->s_bp_trace = true;
+        machine->s_bp_trace = options.bp_trace;
         machine->s_rollback_enabled = true;
     } else {
         machine->s_use_mix = options.use_mix;

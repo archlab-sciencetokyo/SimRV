@@ -66,7 +66,7 @@ auto LeftPane::render_registers_single_column(const simrv::core::ArchState& st, 
                 std::string name = kRegNames.at(static_cast<std::size_t>(reg));
                 bool changed = paused_ && (cached_gpr_.at(static_cast<std::size_t>(reg)) != val);
                 std::string c = changed ? kThemePeach : kThemeMint;
-                std::string col_color = std::format(" {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m",
+                std::string col_color = std::format("  {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m",
                                                     kThemeText, reg, kThemeVal, name, c, val, simrv::xlen::kXLenHexDigits);
                 return format_to_width(col_color, width);
             }
@@ -75,7 +75,7 @@ auto LeftPane::render_registers_single_column(const simrv::core::ArchState& st, 
                 std::string name = kFpRegNames.at(static_cast<std::size_t>(reg));
                 bool changed = paused_ && (cached_fpr_.at(static_cast<std::size_t>(reg)) != val);
                 std::string c = changed ? kThemePeach : kThemeMint;
-                std::string col_color = std::format(" {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m",
+                std::string col_color = std::format("  {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m",
                                                     kThemeText, reg, kThemeVal, name, c, val);
                 return format_to_width(col_color, width);
             }
@@ -84,7 +84,7 @@ auto LeftPane::render_registers_single_column(const simrv::core::ArchState& st, 
                 bool changed = vec_reg_changed(paused_, cached_vec_.at(static_cast<std::size_t>(reg)), val, st.regs.vlen);
                 std::string c = changed ? kThemePeach : kThemeMint;
                 std::string val_str = format_vec_value(val, st.regs.vlen, std::max(10, width - 6));
-                std::string col_color = std::format(" {}v{:<2}\033[0m: {}{}\033[0m",
+                std::string col_color = std::format("  {}v{:<2}\033[0m: {}{}\033[0m",
                                                     kThemeText, reg, c, val_str);
                 return format_to_width(col_color, width);
             }
@@ -114,10 +114,10 @@ auto LeftPane::render_registers_double_column(const simrv::core::ArchState& st, 
                 std::string c2 = changed2 ? kThemePeach : kThemeMint;
 
                 std::string col1_color =
-                    std::format(" {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m",
+                    std::format("  {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m",
                                 kThemeText, reg1, kThemeVal, name1, c1, val1, simrv::xlen::kXLenHexDigits);
                 std::string col2_color =
-                    std::format(" {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m",
+                    std::format("  {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m",
                                 kThemeText, reg2, kThemeVal, name2, c2, val2, simrv::xlen::kXLenHexDigits);
 
                 return format_to_width(col1_color, col_width) +
@@ -136,10 +136,10 @@ auto LeftPane::render_registers_double_column(const simrv::core::ArchState& st, 
                 std::string c2 = changed2 ? kThemePeach : kThemeMint;
 
                 std::string col1_color = std::format(
-                    " {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m", kThemeText, reg1,
+                    "  {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m", kThemeText, reg1,
                     kThemeVal, name1, c1, val1);
                 std::string col2_color = std::format(
-                    " {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m", kThemeText, reg2,
+                    "  {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m", kThemeText, reg2,
                     kThemeVal, name2, c2, val2);
 
                 return format_to_width(col1_color, col_width) +
@@ -189,6 +189,14 @@ auto LeftPane::render_registers_or_pipeline(const simrv::core::CPU& cpu, const s
                     return render_pipeline_stages(cpu, logical_row, col_width, right_width);
                 case TuiRegPage::CACHE:
                     return render_cache_stats(cpu, logical_row, col_width, right_width);
+                case TuiRegPage::TLB:
+                    return render_tlb_stats(cpu, logical_row, col_width, right_width);
+                case TuiRegPage::BPRED:
+                    return render_bp_stats(cpu, logical_row, col_width, right_width);
+                case TuiRegPage::HAZARD:
+                    return render_hazard_stats(cpu, logical_row, col_width, right_width);
+                case TuiRegPage::BUS:
+                    return render_io_stats(cpu, logical_row, col_width, right_width);
                 case TuiRegPage::STACK:
                     return render_stack_frame(cpu, logical_row, col_width, right_width);
                 default:
