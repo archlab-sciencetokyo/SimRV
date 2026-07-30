@@ -18,12 +18,14 @@ auto DCache::read(Address addr, Word& data, Instruction funct3) -> bool {
     const unsigned size_bytes = 1u << (funct3 & 0x3u);
     last_accessed_set_ = set_idx;
 
-    for (auto& line : sets_.at(set_idx)) {
+    for (uint32_t w = 0; w < kWays; ++w) {
+        auto& line = sets_.at(set_idx).at(w);
         if (line.valid && line.tag == tag) {
             const uint32_t byte_offset = addr & (kLineBytes - 1u);
             if (simrv::compiler::unlikely(byte_offset + size_bytes > kLineBytes)) {
                 ++misses_;
                 last_access_was_hit_ = false;
+                last_hit_way_ = 0xFFFFFFFF;
                 return false;
             }
 
@@ -39,11 +41,13 @@ auto DCache::read(Address addr, Word& data, Instruction funct3) -> bool {
             line.last_used = access_tick_;
             ++hits_;
             last_access_was_hit_ = true;
+            last_hit_way_ = w;
             return true;
         }
     }
     ++misses_;
     last_access_was_hit_ = false;
+    last_hit_way_ = 0xFFFFFFFF;
     return false;
 }
 
@@ -56,14 +60,18 @@ void DCache::write(Address addr, Word data, Instruction funct3) {
         const Address tag = get_tag(addr);
         last_accessed_set_ = set_idx;
         bool found = false;
-        for (auto& line : sets_.at(set_idx)) {
+        uint32_t found_way = 0xFFFFFFFF;
+        for (uint32_t w = 0; w < kWays; ++w) {
+            auto& line = sets_.at(set_idx).at(w);
             if (line.valid && line.tag == tag) {
                 std::memcpy(line.data.data() + byte_offset, &data, size_bytes);
                 found = true;
+                found_way = w;
                 break;
             }
         }
         last_access_was_hit_ = found;
+        last_hit_way_ = found ? found_way : 0xFFFFFFFF;
     } else {
         const Address tag1 = get_tag(addr);
         const uint32_t set_idx1 = get_set_index(addr);

@@ -93,25 +93,29 @@ auto LeftPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical_row,
 
     if (logical_row == 4) {
         return format_to_width(
-            std::format("  {}IF Stage:\033[0m {}PC {:08x}\033[0m │ {}Valid: {}\033[0m",
-                        kThemeText, kThemeVal, f_pc, kThemeText, (f_reg.valid ? "\033[38;5;120mYES\033[0m" : "\033[38;5;244mNO\033[0m")),
+            std::format("  {}IF  Stage:\033[0m {}PC {:08x}\033[0m │ {}Valid: {}\033[0m", kThemeText,
+                        kThemeVal, f_pc, kThemeText,
+                        (f_reg.valid ? "\033[38;5;120mYES\033[0m" : "\033[38;5;244mNO\033[0m")),
             width);
     }
     if (logical_row == 5) {
         return format_to_width(
-            std::format("  {}ID Stage:\033[0m {}PC {:08x}\033[0m │ {}rs1:\033[0mx{:<2} {}rs2:\033[0mx{:<2} {}rd:\033[0mx{:<2}",
-                        kThemeText, kThemeVal, d_pc,
-                        kThemeText, d_rs1, kThemeText, d_rs2, kThemeText, d_rd),
+            std::format("  {}ID  Stage:\033[0m {}PC {:08x}\033[0m │ {}rs1:\033[0mx{:<2} "
+                        "{}rs2:\033[0mx{:<2} {}rd:\033[0mx{:<2}",
+                        kThemeText, kThemeVal, d_pc, kThemeText, d_rs1, kThemeText, d_rs2,
+                        kThemeText, d_rd),
             width);
     }
     if (logical_row == 6) {
         bool fwd_rs1 = (e_reg.valid && e_rs1 != 0 && (e_rs1 == m_rd || e_rs1 == w_rd));
         bool fwd_rs2 = (e_reg.valid && e_rs2 != 0 && (e_rs2 == m_rd || e_rs2 == w_rd));
         return format_to_width(
-            std::format("  {}EX Stage:\033[0m {}PC {:08x}\033[0m │ {}Fwd rs1:\033[0m{}\033[0m {}rs2:\033[0m{}\033[0m",
-                        kThemeText, kThemeVal, e_pc,
-                        kThemeText, (fwd_rs1 ? "\033[38;5;120mYES\033[0m" : "\033[38;5;244mNO\033[0m"),
-                        kThemeText, (fwd_rs2 ? "\033[38;5;120mYES\033[0m" : "\033[38;5;244mNO\033[0m")),
+            std::format("  {}EX  Stage:\033[0m {}PC {:08x}\033[0m │ {}Fwd rs1:\033[0m{}\033[0m "
+                        "{}rs2:\033[0m{}\033[0m",
+                        kThemeText, kThemeVal, e_pc, kThemeText,
+                        (fwd_rs1 ? "\033[38;5;120mYES\033[0m" : "\033[38;5;244mNO\033[0m"),
+                        kThemeText,
+                        (fwd_rs2 ? "\033[38;5;120mYES\033[0m" : "\033[38;5;244mNO\033[0m")),
             width);
     }
     if (logical_row == 7) {
@@ -123,9 +127,11 @@ auto LeftPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical_row,
     }
     if (logical_row == 8) {
         return format_to_width(
-            std::format("  {}WB Stage:\033[0m  {}PC {:08x}\033[0m │ {}rd:\033[0mx{:<2} │ {}Bypass:\033[0m {}\033[0m",
-                        kThemeText, kThemeVal, w_pc,
-                        kThemeText, w_rd, kThemeText, (w_reg.valid && w_rd != 0 ? "\033[38;5;120mYES\033[0m" : "\033[38;5;244mNO\033[0m")),
+            std::format("  {}WB  Stage:\033[0m {}PC {:08x}\033[0m │ {}rd:\033[0mx{:<2} │ "
+                        "{}Bypass:\033[0m {}\033[0m",
+                        kThemeText, kThemeVal, w_pc, kThemeText, w_rd, kThemeText,
+                        (w_reg.valid && w_rd != 0 ? "\033[38;5;120mYES\033[0m"
+                                                  : "\033[38;5;244mNO\033[0m")),
             width);
     }
     if (logical_row == 9) {

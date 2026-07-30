@@ -77,7 +77,7 @@ struct MisaDraft {
     bool ext_s = true;
     bool ext_u = true;
     bool ext_v = false;
-
+    unsigned vlen = 256;  // VLEN for V extension (32–1024, power of 2)
     [[nodiscard]] auto to_misa_val() const -> uint64_t {
         uint64_t val = 0;
         if (xlen_bits == 32) {

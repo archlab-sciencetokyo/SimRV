@@ -1622,7 +1622,12 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                 if (left_pane_) {
                     auto tab_opt = left_pane_->get_tab_at_col(col);
                     if (tab_opt.has_value()) {
-                        set_reg_page(tab_opt.value());
+                        if (*tab_opt == TuiRegPage::CACHE && left_pane_->get_page() == TuiRegPage::CACHE) {
+                            left_pane_->toggle_cache_inspect_type();
+                            render(true);
+                        } else {
+                            set_reg_page(tab_opt.value());
+                        }
                     } else {
                         cycle_reg_page();
                     }

@@ -437,7 +437,7 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.misa_override = true;
         return true;
     }
-    if (arg == "--vlen" || arg == "-VLEN") {
+    if (arg == "--vlen" || arg == "--vector-len") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         uint32_t val = 0;
@@ -966,9 +966,13 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(
         stdout,
-        "  {}--misa {}{}<PROFILE>{}      Select CPU MISA profile: rv{}i | rv{}imac | rv{}gc\n\n",
+        "  {}--misa {}{}<PROFILE>{}      Select CPU MISA profile: rv{}i | rv{}imac | rv{}gc\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset), xlen_suffix,
         xlen_suffix, xlen_suffix);
+    std::print(
+        stdout,
+        "  {}--vlen, --vector-len {}{}<N>{}  Set vector register length in bits (32–1024, power of 2; default: 256)\n\n",
+        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
 
     // Tracing and Debug
     std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue),

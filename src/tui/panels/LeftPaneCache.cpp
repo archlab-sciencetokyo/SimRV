@@ -125,7 +125,6 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
             uint32_t last_repl_set = is_icache ? ic.last_replaced_set() : dc.last_replaced_set();
             uint32_t last_repl_way = is_icache ? ic.last_replaced_way() : dc.last_replaced_way();
 
-            bool is_last_accessed = (set_idx == last_set);
             bool is_replaced_way = (set_idx == last_repl_set && way_idx == last_repl_way);
 
             std::string status_tag;
@@ -143,13 +142,15 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
                                                  valid ? std::format("{}1\033[0m", kThemeMint) : std::format("{}0\033[0m", kThemeMuted),
                                                  status_tag);
 
+            uint32_t last_hit_way_idx = is_icache ? ic.last_hit_way() : dc.last_hit_way();
+            bool is_hit_way = (set_idx == last_set && last_hit && way_idx == last_hit_way_idx);
+
             std::string highlight;
             if (is_replaced_way) {
-                highlight = std::format("  \033[1m{}◄ REPLACED\033[0m", kThemePeach);
-            } else if (is_last_accessed && last_hit) {
+                // The replacement way after a miss — show MISS ► REPLACED together
+                highlight = std::format("  \033[1m{}◄ MISS\033[0m {}▸ REPLACED\033[0m", kThemeCoral, kThemePeach);
+            } else if (is_hit_way) {
                 highlight = std::format("  \033[1m{}◄ HIT\033[0m", kThemeMint);
-            } else if (is_last_accessed && !last_hit) {
-                highlight = std::format("  \033[1m{}◄ MISS\033[0m", kThemeCoral);
             }
 
             std::string line_str = std::format("{}{}  LRU:{:<8}{}", cursor_marker, way_prefix, lru, highlight);
