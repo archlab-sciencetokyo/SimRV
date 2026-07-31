@@ -7,9 +7,10 @@
 #include <algorithm>
 #include <charconv>
 #include <format>
+
 #include "simrv/core/Machine.hpp"
-#include "simrv/tui/LeftPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/panels/LeftPane.hpp"
 
 namespace simrv::tui::modals {
 

@@ -8,10 +8,8 @@
 #include <algorithm>
 #include <cctype>
 #include <format>
-#include <utility>
 
 #include "simrv/core/Machine.hpp"
-#include "simrv/tui/panels/LeftPane.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/modals/AddressModal.hpp"
 #include "simrv/tui/modals/BreakpointModal.hpp"
@@ -21,7 +19,7 @@
 #include "simrv/tui/modals/SettingsModal.hpp"
 #include "simrv/tui/modals/StepModal.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
-#include "simrv/xlen/Helpers.hpp"
+#include "simrv/tui/panels/LeftPane.hpp"
 
 namespace simrv::tui {
 

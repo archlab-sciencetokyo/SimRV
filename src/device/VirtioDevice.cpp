@@ -1,11 +1,10 @@
-#include <iostream>
 /**
  * @file VirtioDevice.cpp
  * @brief Common implementation for VirtIO MMIO device registers.
  */
 #include "simrv/device/VirtioDevice.hpp"
 
-#include <print>
+#include <ios>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
@@ -16,7 +15,6 @@ VirtioDevice::VirtioDevice(simrv::core::Machine& machine, Word irq, Word max_que
     : machine_(machine), irq_(irq), max_queues_(max_queues) {}
 
 auto VirtioDevice::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
-    // std::cout << "VirtIO Access: addr=" << std::hex << req.address << "\n";
     const Address offset = req.address - base_address();
     if (req.opcode == memory::TlOpcodeA::Get) {
         resp.data = mmio_read(offset);

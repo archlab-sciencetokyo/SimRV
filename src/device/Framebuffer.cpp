@@ -7,7 +7,6 @@
 
 #include <cstring>
 #include <format>
-#include <iostream>
 #include <utility>
 
 #include "simrv/core/Logger.hpp"

@@ -1,44 +1,34 @@
-/**
- * @file MachineInit.cpp
- * @brief Machine initialization and image loading routines.
- */
-#include "simrv/core/Logger.hpp"
-#include "simrv/debug/GdbStub.hpp"
-#include "simrv/debug/SpikeLockstep.hpp"
 #include <elf.h>
+
 #include <array>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
-#include <print>
 #include <string>
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Boot.hpp"
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/CpuConfigParser.hpp"
+#include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/debug/GdbStub.hpp"
+#include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/device/Console.hpp"
 #include "simrv/device/Disk.hpp"
+#include "simrv/device/InputDevice.hpp"
+#include "simrv/device/Power.hpp"
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/Virtio.hpp"
-#include "simrv/device/Power.hpp"
-#include "simrv/tui/Tui.hpp"
-#include "simrv/device/InputDevice.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Types.hpp"
-#include "simrv/core/CpuConfigParser.hpp"
 
 namespace simrv::core {
 
 namespace {
-
-constexpr size_t D_SIZE_DRAM = (size_t{9} * 1024U * 1024U);   // 9MB of bbl + kernel
-constexpr size_t D_SIZE_DEVT = (size_t{4} * 1024U);           // 4KB of device tree
-constexpr size_t D_SIZE_DISK = (size_t{16} * 1024U * 1024U);  // 16MB of disk image
-constexpr Address D_DEVT_OFFSET = static_cast<Address>(16U * 1024U * 1024U);
 
 void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
                                      const simrv::debug::SymbolTable& symbols) {
@@ -110,61 +100,62 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
 
             const char class_byte = ident[4];
             if (class_byte == 1) { // 32-bit ELF
-            Elf32_Ehdr ehdr{};
-            if (in.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr))) {
-                std::vector<Elf32_Phdr> phdrs(ehdr.e_phnum);
-                in.seekg(ehdr.e_phoff, std::ios::beg);
-                if (in.read(reinterpret_cast<char*>(phdrs.data()), static_cast<std::streamsize>(static_cast<size_t>(ehdr.e_phnum) * sizeof(Elf32_Phdr)))) {
-                    for (const auto& phdr : phdrs) {
-                        if (phdr.p_type == PT_LOAD && phdr.p_filesz > 0) {
-                            const Address paddr = phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
-                            const Address dram_base = simrv::memory::kDramBaseAddress;
-                            Address dest_offset = 0;
-                            if (paddr >= dram_base && (paddr - dram_base) < capacity) {
-                                dest_offset = paddr - dram_base;
-                            } else if (paddr < capacity) {
-                                dest_offset = paddr;
-                            } else {
-                                continue;
-                            }
-                            const size_t copy_bytes = std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
-                            in.seekg(phdr.p_offset, std::ios::beg);
-                            if (in.read(reinterpret_cast<char*>(ram + dest_offset), static_cast<std::streamsize>(copy_bytes))) {
-                                loaded_segment = true;
-                                if (phdr.p_memsz > phdr.p_filesz && (dest_offset + phdr.p_filesz) < capacity) {
-                                    const size_t bss_bytes = std::min<size_t>(phdr.p_memsz - phdr.p_filesz, capacity - (dest_offset + phdr.p_filesz));
-                                    std::memset(ram + dest_offset + phdr.p_filesz, 0, bss_bytes);
+                Elf32_Ehdr ehdr{};
+                if (in.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                    std::vector<Elf32_Phdr> phdrs(ehdr.e_phnum);
+                    in.seekg(ehdr.e_phoff, std::ios::beg);
+                    if (in.read(reinterpret_cast<char*>(phdrs.data()), static_cast<std::streamsize>(static_cast<size_t>(ehdr.e_phnum) * sizeof(Elf32_Phdr)))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                        for (const auto& phdr : phdrs) {
+                            if (phdr.p_type == PT_LOAD && phdr.p_filesz > 0) {
+                                const Address paddr = phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
+                                const Address dram_base = simrv::memory::kDramBaseAddress;
+                                Address dest_offset = 0;
+                                if (paddr >= dram_base && (paddr - dram_base) < capacity) {
+                                    dest_offset = paddr - dram_base;
+                                } else if (paddr < capacity) {
+                                    dest_offset = paddr;
+                                } else {
+                                    continue;
+                                }
+                                const size_t copy_bytes = std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
+                                in.seekg(phdr.p_offset, std::ios::beg);
+                                if (in.read(reinterpret_cast<char*>(ram + dest_offset), static_cast<std::streamsize>(copy_bytes))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                                    loaded_segment = true;
+                                    if (phdr.p_memsz > phdr.p_filesz && (dest_offset + phdr.p_filesz) < capacity) {
+                                        const size_t bss_bytes = std::min<size_t>(phdr.p_memsz - phdr.p_filesz, capacity - (dest_offset + phdr.p_filesz));
+                                        std::memset(ram + dest_offset + phdr.p_filesz, 0, bss_bytes);
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-        } else if (class_byte == 2) { // 64-bit ELF
-            Elf64_Ehdr ehdr{};
-            if (in.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr))) {
-                std::vector<Elf64_Phdr> phdrs(ehdr.e_phnum);
-                in.seekg(static_cast<std::streamoff>(ehdr.e_phoff), std::ios::beg);
-                if (in.read(reinterpret_cast<char*>(phdrs.data()), static_cast<std::streamsize>(static_cast<size_t>(ehdr.e_phnum) * sizeof(Elf64_Phdr)))) {
-                    for (const auto& phdr : phdrs) {
-                        if (phdr.p_type == PT_LOAD && phdr.p_filesz > 0) {
-                            const Address paddr = phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
-                            const Address dram_base = simrv::memory::kDramBaseAddress;
-                            Address dest_offset = 0;
-                            if (paddr >= dram_base && (paddr - dram_base) < capacity) {
-                                dest_offset = paddr - dram_base;
-                            } else if (paddr < capacity) {
-                                dest_offset = paddr;
-                            } else {
-                                continue;
-                            }
-                            const size_t copy_bytes = std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
-                            in.seekg(static_cast<std::streamoff>(phdr.p_offset), std::ios::beg);
-                            if (in.read(reinterpret_cast<char*>(ram + dest_offset), static_cast<std::streamsize>(copy_bytes))) {
-                                loaded_segment = true;
-                                if (phdr.p_memsz > phdr.p_filesz && (dest_offset + phdr.p_filesz) < capacity) {
-                                    const size_t bss_bytes = std::min<size_t>(phdr.p_memsz - phdr.p_filesz, capacity - (dest_offset + phdr.p_filesz));
-                                    std::memset(ram + dest_offset + phdr.p_filesz, 0, bss_bytes);
+            } else if (class_byte == 2) { // 64-bit ELF
+                Elf64_Ehdr ehdr{};
+                if (in.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                    std::vector<Elf64_Phdr> phdrs(ehdr.e_phnum);
+                    in.seekg(static_cast<std::streamoff>(ehdr.e_phoff), std::ios::beg);
+                    if (in.read(reinterpret_cast<char*>(phdrs.data()), static_cast<std::streamsize>(static_cast<size_t>(ehdr.e_phnum) * sizeof(Elf64_Phdr)))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                        for (const auto& phdr : phdrs) {
+                            if (phdr.p_type == PT_LOAD && phdr.p_filesz > 0) {
+                                const Address paddr = phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
+                                const Address dram_base = simrv::memory::kDramBaseAddress;
+                                Address dest_offset = 0;
+                                if (paddr >= dram_base && (paddr - dram_base) < capacity) {
+                                    dest_offset = paddr - dram_base;
+                                } else if (paddr < capacity) {
+                                    dest_offset = paddr;
+                                } else {
+                                    continue;
+                                }
+                                const size_t copy_bytes = std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
+                                in.seekg(static_cast<std::streamoff>(phdr.p_offset), std::ios::beg);
+                                if (in.read(reinterpret_cast<char*>(ram + dest_offset), static_cast<std::streamsize>(copy_bytes))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                                    loaded_segment = true;
+                                    if (phdr.p_memsz > phdr.p_filesz && (dest_offset + phdr.p_filesz) < capacity) {
+                                        const size_t bss_bytes = std::min<size_t>(phdr.p_memsz - phdr.p_filesz, capacity - (dest_offset + phdr.p_filesz));
+                                        std::memset(ram + dest_offset + phdr.p_filesz, 0, bss_bytes);
+                                    }
                                 }
                             }
                         }
@@ -172,12 +163,11 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
                 }
             }
         }
-    }
 
         if (!loaded_segment) {
             in.seekg(0, std::ios::beg);
-            if (!in.read(reinterpret_cast<char*>(ram), static_cast<std::streamsize>(std::min(file_size, capacity)))) {
-                simrv::log::error("Failed to read {} image {}", image_name, file_path);
+            if (!in.read(reinterpret_cast<char*>(ram), static_cast<std::streamsize>(std::min(file_size, capacity)))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                simrv::log::error("{} image file {} read failed", image_name, file_path);
                 std::exit(EXIT_FAILURE);
             }
         }
@@ -187,14 +177,12 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
                          image_name, file_path, file_size, capacity);
             std::exit(EXIT_FAILURE);
         }
-        if (!in.read(reinterpret_cast<char*>(ram), static_cast<std::streamsize>(file_size))) {
+        if (!in.read(reinterpret_cast<char*>(ram), static_cast<std::streamsize>(file_size))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
             simrv::log::error("Failed to read {} image {}", image_name, file_path);
             std::exit(EXIT_FAILURE);
         }
     }
 }
-
-
 
 }  // namespace
 

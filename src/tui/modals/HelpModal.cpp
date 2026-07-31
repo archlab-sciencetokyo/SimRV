@@ -6,9 +6,10 @@
 
 #include <array>
 #include <format>
+
 #include "simrv/core/BuildInfo.hpp"
 #include "simrv/tui/TuiTheme.hpp"
-#include "simrv/xlen/Helpers.hpp"
+#include "simrv/xlen/Types.hpp"
 
 namespace simrv::tui::modals {
 

@@ -1,17 +1,13 @@
-/**
- * @file Tui.cpp
- * @brief Interactive TUI console dashboard implementation with premium double-line borders and
- * resolved registers.
- */
+#include "simrv/tui/Tui.hpp"
+
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
 
+#include <array>
 #include <cctype>
 #include <charconv>
-#include <thread>
-#include <array>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -19,19 +15,19 @@
 #include <cstring>
 #include <format>
 #include <string>
+#include <thread>
 
-#include "simrv/core/Machine.hpp"
 #include "simrv/core/Logger.hpp"
-#include "simrv/tui/Tui.hpp"
+#include "simrv/core/Machine.hpp"
+#include "simrv/device/Framebuffer.hpp"
+#include "simrv/device/Uart.hpp"
+#include "simrv/pipeline/Decoder.hpp"
 #include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/TuiTheme.hpp"
-#include "simrv/device/Uart.hpp"
 #include "simrv/tui/panels/LeftPane.hpp"
-#include "simrv/tui/RightPane.hpp"
-#include "simrv/device/Framebuffer.hpp"
-#include "simrv/tui/StatusBar.hpp"
+#include "simrv/tui/panels/RightPane.hpp"
+#include "simrv/tui/panels/StatusBar.hpp"
 #include "simrv/xlen/Types.hpp"
-#include "simrv/pipeline/Decoder.hpp"
 
 namespace simrv::tui {
 
@@ -1874,7 +1870,5 @@ void Tui::on_cycle_completed_slow() {
         std::this_thread::sleep_for(std::chrono::microseconds(delay));
     }
 }
-
-
 
 }  // namespace simrv::tui
