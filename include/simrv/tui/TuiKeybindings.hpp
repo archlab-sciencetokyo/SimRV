@@ -21,7 +21,6 @@ enum class KeyAction : uint8_t {
     ManageBreakpoints,
     TogglePcBreakpoint,
     InspectAddress,
-    SetStepSize,
     SetSpeed,
     LoadBinary,
     Settings,

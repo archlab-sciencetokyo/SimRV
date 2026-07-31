@@ -25,7 +25,6 @@ enum class ModalType : uint8_t {
     None,
     SetBreakpoint,
     SetWatchpoint,
-    SetStepSize,
     SetSpeed,
     InspectAddress,
     LoadBinary,
@@ -112,10 +111,9 @@ class TuiModal {
     [[nodiscard]] auto get_type() const -> ModalType { return active_modal_; }
     [[nodiscard]] auto get_input() const -> const std::string& { return input_; }
 
-    void open(ModalType type, LeftPane* left_pane, uint64_t step_granularity, uint64_t step_delay_us);
+    void open(ModalType type, LeftPane* left_pane, uint64_t step_delay_us);
     void close();
-    auto submit(LeftPane* left_pane, std::atomic<uint64_t>& step_granularity,
-                std::atomic<uint64_t>& step_delay_us,
+    auto submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
                 const std::function<void(TuiRegPage)>& set_reg_page_cb,
                 const std::function<void(const std::string&)>& set_status_override_cb,
                 const std::function<void()>& on_speed_changed_cb) -> bool;

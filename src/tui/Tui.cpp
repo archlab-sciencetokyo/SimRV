@@ -1340,13 +1340,7 @@ void Tui::pause_loop() {
                 } else {
                     open_modal(ModalType::SetWatchpoint);
                 }
-            } else if (key == simrv::tui::TuiKey::g || key == simrv::tui::TuiKey::G) {
-                if (!machine_.s_debug_mode) {
-                    modal_.open_notice("DEBUG MODE REQUIRED", "Debug features are disabled in Normal Mode.\n\nPlease enable TUI Debug Mode in Simulator Settings [,] first.", false);
-                    render(true);
-                } else {
-                    open_modal(ModalType::SetStepSize);
-                }
+
             } else if (key == simrv::tui::TuiKey::f || key == simrv::tui::TuiKey::F) {
                 open_modal(ModalType::SetSpeed);
             } else if (key == simrv::tui::TuiKey::i || key == simrv::tui::TuiKey::I) {
@@ -1389,18 +1383,7 @@ void Tui::pause_loop() {
                 scroll(5);
             } else if (key == simrv::tui::TuiKey::d || key == simrv::tui::TuiKey::D) {
                 scroll(-5);
-            } else if (key == simrv::tui::TuiKey::n || key == simrv::tui::TuiKey::N) {
-                if (!machine_.s_debug_mode) {
-                    modal_.open_notice("DEBUG MODE REQUIRED", "Debug features are disabled in Normal Mode.\n\nPlease enable TUI Debug Mode in Simulator Settings [,] first.", false);
-                    render(true);
-                } else if (machine_.is_shutdown_) {
-                    machine_.request_reboot();
-                    tui_loop_paused_ = false;
-                } else {
-                    uint64_t g = step_granularity_.load(std::memory_order_relaxed);
-                    step_budget_.store(g, std::memory_order_relaxed);
-                    tui_loop_paused_ = false;
-                }
+
             } else if (key == simrv::tui::TuiKey::k || key == simrv::tui::TuiKey::K) {
                 if (!machine_.s_debug_mode) {
                     modal_.open_notice("DEBUG MODE REQUIRED", "Debug features are disabled in Normal Mode.\n\nPlease enable TUI Debug Mode in Simulator Settings [,] first.", false);
@@ -1578,19 +1561,6 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                                 render(true);
                             }
                             break;
-                        case TuiFooterAction::StepN:
-                            if (machine_.is_shutdown_) {
-                                machine_.request_reboot();
-                                tui_loop_paused_ = false;
-                            } else if (machine_.cpu.state().pc == 0) {
-                                modal_.open_notice("NO PROGRAM LOADED", "Cannot step: PC is 0x0.\n\nPlease load a program binary image first [o].", false);
-                                render(true);
-                            } else {
-                                uint64_t g = step_granularity_.load(std::memory_order_relaxed);
-                                step_budget_.store(g, std::memory_order_relaxed);
-                                tui_loop_paused_ = false;
-                            }
-                            break;
                         case TuiFooterAction::RunPause:
                             if (machine_.is_shutdown_) {
                                 machine_.request_reboot();
@@ -1620,7 +1590,6 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                             render(true);
                             break;
                         }
-                        case TuiFooterAction::SetStepSize: open_modal(ModalType::SetStepSize); break;
                         case TuiFooterAction::SetSpeed: open_modal(ModalType::SetSpeed); break;
                         case TuiFooterAction::InspectMem: open_modal(ModalType::InspectAddress); break;
                         case TuiFooterAction::LoadBinary:
@@ -1933,33 +1902,10 @@ auto Tui::parse_sgr_mouse(const std::string& seq, int& b, int& x, int& y) -> boo
     return true;
 }
 
-void Tui::cycle_step_granularity(bool increase) {
-    static constexpr std::array<uint64_t, 9> kPresets = {1, 5, 10, 50, 100, 500, 1000, 5000, 10000};
-    uint64_t cur = step_granularity_.load(std::memory_order_relaxed);
-    std::size_t idx = 3;
-    for (std::size_t i = 0; i < kPresets.size(); ++i) {
-        if (kPresets[i] == cur) {
-            idx = i;
-            break;
-        }
-    }
-    if (increase) {
-        if (idx + 1 < kPresets.size()) ++idx;
-    } else {
-        if (idx > 0) --idx;
-    }
-    step_granularity_.store(kPresets[idx], std::memory_order_relaxed);
-}
-
 void Tui::on_cycle_completed_slow() {
-    uint64_t budget = step_budget_.load(std::memory_order_relaxed);
-    while (budget > 0) {
-        if (step_budget_.compare_exchange_weak(budget, budget - 1, std::memory_order_relaxed)) {
-            if (budget == 1) {
-                pause_loop();
-            }
-            break;
-        }
+    uint64_t delay = step_delay_us_.load(std::memory_order_relaxed);
+    if (delay > 0) {
+        std::this_thread::sleep_for(std::chrono::microseconds(delay));
     }
 }
 

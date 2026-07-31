@@ -27,8 +27,7 @@ namespace simrv::tui {
 
 TuiModal::TuiModal(simrv::core::Machine& machine) : machine_(machine) {}
 
-void TuiModal::open(ModalType type, LeftPane* left_pane, uint64_t step_granularity,
-                    uint64_t step_delay_us) {
+void TuiModal::open(ModalType type, LeftPane* left_pane, uint64_t step_delay_us) {
     active_modal_ = type;
     input_.clear();
     bp_cursor_ = 0;
@@ -37,9 +36,8 @@ void TuiModal::open(ModalType type, LeftPane* left_pane, uint64_t step_granulari
         case ModalType::SetWatchpoint:
             modals::BreakpointModal::open(type, input_, machine_, left_pane);
             break;
-        case ModalType::SetStepSize:
         case ModalType::SetSpeed:
-            modals::StepModal::open(type, input_, step_granularity, step_delay_us);
+            modals::StepModal::open(type, input_, step_delay_us);
             break;
         case ModalType::InspectAddress:
             modals::AddressModal::open(input_, left_pane);
@@ -139,47 +137,36 @@ void TuiModal::close() {
     input_.clear();
 }
 
-auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_granularity,
-                      std::atomic<uint64_t>& step_delay_us,
-                      const std::function<void(TuiRegPage)>& set_reg_page_cb,
-                      const std::function<void(const std::string&)>& set_status_override_cb,
-                      const std::function<void()>& on_speed_changed_cb) -> bool {
-    if (active_modal_ == ModalType::None) return false;
-
+auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
+                    const std::function<void(TuiRegPage)>& set_reg_page_cb,
+                    const std::function<void(const std::string&)>& set_status_override_cb,
+                    const std::function<void()>& on_speed_changed_cb) -> bool {
     bool result = false;
     ModalType current_modal = active_modal_;
-    std::string err_msg;
-
-    auto notice_cb = [&](const std::string& msg) {
-        if (msg.find("not found") != std::string::npos || msg.find("invalid") != std::string::npos || msg.find("Error") != std::string::npos) {
-            err_msg = msg;
-        } else if (set_status_override_cb) {
-            set_status_override_cb(msg);
-        }
+    auto notice_cb = [this](const std::string& msg) {
+        open_notice("MODAL NOTICE", msg, false);
     };
-
     switch (current_modal) {
         case ModalType::SetBreakpoint:
         case ModalType::SetWatchpoint:
             {
-                std::string msg_text;
-                auto bp_cb = [&](const std::string& msg) {
-                    msg_text = msg;
+                std::string err_msg;
+                auto err_cb = [&](const std::string& msg) {
+                    err_msg = msg;
                 };
-                result = modals::BreakpointModal::submit(current_modal, input_, machine_, bp_cb);
+                result = modals::BreakpointModal::submit(current_modal, input_, machine_, err_cb);
                 if (result) {
-                    std::string title = (current_modal == ModalType::SetBreakpoint) ? "BREAKPOINT CREATED" : "WATCHPOINT CREATED";
-                    open_notice(title, msg_text.empty() ? "Watchpoint set successfully." : msg_text, false);
-                    return true;
-                } else if (!msg_text.empty()) {
+                    std::string target_type = (current_modal == ModalType::SetBreakpoint) ? "PC Breakpoint" : "Watchpoint";
+                    open_notice("ENTRY CREATED", std::format("Created {} for {}", target_type, input_), false);
+                } else if (!err_msg.empty()) {
+                    std::string msg_text = std::format("{}\n\nPlease enter a valid hex PC (0x...) or symbol name.", err_msg);
                     open_notice("INVALID TARGET", msg_text, true);
                     return false;
                 }
             }
             break;
-        case ModalType::SetStepSize:
         case ModalType::SetSpeed:
-            result = modals::StepModal::submit(current_modal, input_, step_granularity,
+            result = modals::StepModal::submit(current_modal, input_,
                                                step_delay_us, on_speed_changed_cb, notice_cb);
             break;
         case ModalType::InspectAddress:
@@ -241,11 +228,6 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_granulari
             break;
     }
 
-    if (!result && !err_msg.empty()) {
-        open_notice("ERROR", err_msg, true);
-        return false;
-    }
-
     if (active_modal_ == current_modal) {
         active_modal_ = ModalType::None;
         input_.clear();
@@ -302,10 +284,6 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             title = " MANAGE BREAKPOINTS & WATCHPOINTS ";
             modals::BreakpointModal::render(active_modal_, content_rows, input_, &machine_,
                                             bp_cursor_);
-            break;
-        case ModalType::SetStepSize:
-            title = " SET STEP SIZE (N) ";
-            modals::StepModal::render(active_modal_, content_rows, input_);
             break;
         case ModalType::SetSpeed:
             title = " SET SIMULATION FREQUENCY ";

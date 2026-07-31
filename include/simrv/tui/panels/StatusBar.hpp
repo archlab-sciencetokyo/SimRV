@@ -19,13 +19,11 @@ namespace simrv::tui {
 enum class TuiFooterAction : uint8_t {
     Step,
     StepBack,
-    StepN,
     CycleRegs,
     CycleTools,
     SetBreakpoint,
     SetWatchpoint,
     TogglePcBreakpoint,
-    SetStepSize,
     SetSpeed,
     InspectMem,
     LoadBinary,

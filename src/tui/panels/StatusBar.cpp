@@ -101,13 +101,7 @@ static const auto paused_row1_entries = std::to_array<FooterEntry>({
      .action = TuiFooterAction::StepBack,
      .category = FooterCategory::DebugExec},
     {.text = "  ", .action = std::nullopt, .category = FooterCategory::Spacer},
-    {.text = "[n] StepN", .action = TuiFooterAction::StepN, .category = FooterCategory::DebugExec},
-    {.text = "  ", .action = std::nullopt, .category = FooterCategory::Spacer},
     {.text = "[c] Run", .action = TuiFooterAction::RunPause, .category = FooterCategory::DebugExec},
-    {.text = "  ", .action = std::nullopt, .category = FooterCategory::Spacer},
-    {.text = "[g] Size",
-     .action = TuiFooterAction::SetStepSize,
-     .category = FooterCategory::DebugExec},
     {.text = "  ", .action = std::nullopt, .category = FooterCategory::Spacer},
     {.text = "[f] Speed",
      .action = TuiFooterAction::SetSpeed,
@@ -451,13 +445,9 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             } else {
                 speed_str = std::format("{:.1f} KIPS", static_cast<double>(kips_));
             }
-            uint64_t budget = 0;
             uint64_t delay = 0;
-            uint64_t gran = 50;
             if (machine_.tui) {
-                budget = machine_.tui->step_budget_.load(std::memory_order_relaxed);
                 delay = machine_.tui->step_delay_us_.load(std::memory_order_relaxed);
-                gran = machine_.tui->step_granularity_.load(std::memory_order_relaxed);
             }
             std::string dbg_info;
             const auto num_bp = machine_.breakpoints.get_pc_breakpoints().size();
@@ -467,10 +457,6 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             }
             if (machine_.s_rollback_enabled) {
                 dbg_info += "Rollback: ON | ";
-            }
-            dbg_info += std::format("StepN: {} | ", gran);
-            if (budget > 0) {
-                dbg_info += std::format("Steps: {} | ", budget);
             }
             if (delay > 0) {
                 double hz = 1000000.0 / static_cast<double>(delay);

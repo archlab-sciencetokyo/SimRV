@@ -8,8 +8,8 @@
 
 namespace simrv::tui {
 
-static const std::array<KeyBindingInfo, 23> kKeyBindings = {{
-    {.action = KeyAction::Step,               .key_display = "[n]",           .primary_char = 'n', .alt_char = 'N', .footer_label = "[n] Step",         .help_label = "Step N insts"},
+static const std::array<KeyBindingInfo, 22> kKeyBindings = {{
+    {.action = KeyAction::Step,               .key_display = "[s] / [Space]", .primary_char = 's', .alt_char = 'S', .footer_label = "[s] Step",         .help_label = "Step 1 instruction"},
     {.action = KeyAction::Backstep,           .key_display = "[b]",           .primary_char = 'b', .alt_char = 'B', .footer_label = "[b] Back",         .help_label = "Undo step / Backstep"},
     {.action = KeyAction::RunPause,           .key_display = "[c] / [Space]", .primary_char = 'c', .alt_char = 'C', .footer_label = "[Space] Run/Pause",.help_label = "Run / Pause simulation"},
     {.action = KeyAction::Reset,              .key_display = "[Ctrl-R]",      .primary_char = '\0',.alt_char = '\0',.footer_label = "[Ctrl-R] Reset",   .help_label = "Reset CPU / System"},
@@ -18,7 +18,6 @@ static const std::array<KeyBindingInfo, 23> kKeyBindings = {{
     {.action = KeyAction::ManageBreakpoints,  .key_display = "[m]",           .primary_char = 'm', .alt_char = 'M', .footer_label = "[m] ManageBP",     .help_label = "Manage Break/Watchpoints"},
     {.action = KeyAction::TogglePcBreakpoint, .key_display = "[k]",           .primary_char = 'k', .alt_char = 'K', .footer_label = "[k] TogBP",        .help_label = "Toggle PC Breakpoint"},
     {.action = KeyAction::InspectAddress,     .key_display = "[i]",           .primary_char = 'i', .alt_char = 'I', .footer_label = "[i] Mem",          .help_label = "Inspect Memory Address"},
-    {.action = KeyAction::SetStepSize,        .key_display = "[g]",           .primary_char = 'g', .alt_char = 'G', .footer_label = "[g] StepSize",     .help_label = "Set N Step Size"},
     {.action = KeyAction::SetSpeed,           .key_display = "[f]",           .primary_char = 'f', .alt_char = 'F', .footer_label = "[f] Speed",        .help_label = "Set Frequency (Hz)"},
     {.action = KeyAction::LoadBinary,         .key_display = "[o]",           .primary_char = 'o', .alt_char = 'O', .footer_label = "[o] Load",         .help_label = "Load Binary / Disk"},
     {.action = KeyAction::Settings,           .key_display = "[,]",           .primary_char = ',', .alt_char = ',', .footer_label = "[,] Settings",     .help_label = "Simulator Settings"},

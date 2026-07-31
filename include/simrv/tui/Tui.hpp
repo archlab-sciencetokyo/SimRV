@@ -86,31 +86,26 @@ class Tui {
     void update_cache();
     void on_cycle_completed_slow();
     void on_cycle_completed() {
-        if (simrv::compiler::unlikely(step_budget_.load(std::memory_order_relaxed) > 0 ||
-                                      step_delay_us_.load(std::memory_order_relaxed) > 0)) {
+        if (simrv::compiler::unlikely(step_delay_us_.load(std::memory_order_relaxed) > 0)) {
             on_cycle_completed_slow();
         }
     }
     void reset_speed_history();
 
-    std::atomic<uint64_t> step_budget_{0};
     std::atomic<uint64_t> step_delay_us_{0};
-    std::atomic<uint64_t> step_granularity_{50};
-
-    void cycle_step_granularity(bool increase = true);
 
     void open_modal(ModalType type) {
         if (!tui_loop_paused_) {
             pause_loop();
         }
-        modal_.open(type, left_pane_.get(), step_granularity_.load(std::memory_order_relaxed), step_delay_us_.load(std::memory_order_relaxed));
+        modal_.open(type, left_pane_.get(), step_delay_us_.load(std::memory_order_relaxed));
         set_paused(true);
         render(true);
     }
     void close_modal() { modal_.close(); render(true); }
     void submit_modal() {
         modal_.submit(
-            left_pane_.get(), step_granularity_, step_delay_us_,
+            left_pane_.get(), step_delay_us_,
             [this](TuiRegPage page) { set_reg_page(page); },
             [this](const std::string& status) { set_status_override(status); },
             [this]() { reset_speed_history(); });

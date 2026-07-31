@@ -31,7 +31,7 @@ void HelpModal::render(std::vector<std::string>& content_rows,
     if (term_height < 32 && box_w >= 70) {
         // Dual-column layout for small screen height
         static const auto help_items =
-            std::to_array<Shortcut>({{"[n]", "Step N insts"},
+            std::to_array<Shortcut>({{"[s] / [Space]", "Step 1 inst"},
                                      {"[b]", "Undo step / Backstep"},
                                      {"[c] / [Space]", "Run / Pause"},
                                      {"[o] / [Alt-o]", "Load Binary / Disk"},
@@ -41,7 +41,6 @@ void HelpModal::render(std::vector<std::string>& content_rows,
                                      {"[w]", "Set Watchpoint"},
                                      {"[m]", "Manage Break/Watchpoints"},
                                      {"[k]", "Toggle PC Breakpoint"},
-                                     {"[g]", "Set N Step Size"},
                                      {"[f]", "Set Frequency (Hz)"},
                                      {"[i]", "Inspect Memory"},
                                      {"[Tab]", "Cycle Layout"},
@@ -75,8 +74,6 @@ void HelpModal::render(std::vector<std::string>& content_rows,
         // Full single-column layout for taller screens
         add_row_cb(std::format(" \033[1m{}{:<22}\033[0m {}Single instruction step\033[0m", kThemeSky,
                             "[s] / [Space]", kThemeText));
-        add_row_cb(std::format(" \033[1m{}{:<22}\033[0m {}Step N instructions\033[0m", kThemeSky,
-                            "[n]", kThemeText));
         add_row_cb(std::format(" \033[1m{}{:<22}\033[0m {}Undo / Step back 1 instruction\033[0m",
                             kThemeSky, "[b]", kThemeText));
         add_row_cb(std::format(" \033[1m{}{:<22}\033[0m {}Load Program Binary or Disk modal\033[0m",
@@ -91,12 +88,10 @@ void HelpModal::render(std::vector<std::string>& content_rows,
                             "[w]", kThemeText));
         add_row_cb(std::format(" \033[1m{}{:<22}\033[0m {}Toggle PC breakpoint at current PC\033[0m",
                             kThemeSky, "[k]", kThemeText));
-        add_row_cb(std::format(" \033[1m{}{:<22}\033[0m {}Set Step Size (N) modal\033[0m", kThemeSky,
-                            "[g]", kThemeText));
         add_row_cb(std::format(" \033[1m{}{:<22}\033[0m {}Set Speed Frequency (Hz) modal\033[0m",
                             kThemeSky, "[f]", kThemeText));
         add_row_cb(std::format(" \033[1m{}{:<22}\033[0m {}Inspect Memory Address modal\033[0m",
-                            kThemeSky, "[m]", kThemeText));
+                            kThemeSky, "[i]", kThemeText));
         add_row_cb(std::format(" \033[1m{}{:<22}\033[0m {}Run / Pause simulation loop\033[0m",
                             kThemeSky, "[c] / [Ctrl-P]", kThemeText));
         add_row_cb(std::format(" \033[1m{}{:<22}\033[0m {}Cycle TUI panel layout\033[0m", kThemeSky,
