@@ -521,3 +521,29 @@ add_custom_target(run-linux
   USES_TERMINAL
 )
 
+find_program(CLANG_FORMAT_BIN NAMES clang-format DOC "Path to clang-format tool")
+if(CLANG_FORMAT_BIN)
+  file(GLOB_RECURSE ALL_SOURCE_FILES
+    "${CMAKE_SOURCE_DIR}/src/*.cpp"
+    "${CMAKE_SOURCE_DIR}/src/*.hpp"
+    "${CMAKE_SOURCE_DIR}/include/*.hpp"
+  )
+
+  add_custom_target(format
+    COMMAND ${CLANG_FORMAT_BIN} -i ${ALL_SOURCE_FILES}
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Formatting C++ codebase with clang-format"
+    VERBATIM
+    USES_TERMINAL
+  )
+
+  add_custom_target(format-check
+    COMMAND ${CLANG_FORMAT_BIN} --dry-run --Werror ${ALL_SOURCE_FILES}
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Checking C++ codebase formatting with clang-format"
+    VERBATIM
+    USES_TERMINAL
+  )
+endif()
+
+
