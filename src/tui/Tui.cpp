@@ -102,7 +102,7 @@ Tui::~Tui() { shutdown(); }
 
 void Tui::set_paused(bool p) {
     if (!p && machine_.cpu.state().pc == 0) {
-        set_status_override("Cannot run: PC is 0x0. Load a program image first \033[1m[o]\033[22m.");
+        modal_.open_notice("NO PROGRAM LOADED", "Cannot run simulation: PC is 0x0.\n\nPlease load a program binary image first [o].", false);
         return;
     }
     if (paused_ != p) {
@@ -867,8 +867,8 @@ void Tui::toggle_cycle_accurate() {
         machine_.s_high_performance = true;
         machine_.s_use_mix = false;
     }
-    set_status_override(std::format("Simulation mode switched to {}",
-                                   machine_.s_cycle_accurate ? "Cycle-Accurate (CA)" : "Instruction-Accurate (IA)"));
+    modal_.open_notice("SIMULATION MODE CHANGED", std::format("Simulation mode switched to {}",
+                       machine_.s_cycle_accurate ? "Cycle-Accurate (CA)" : "Instruction-Accurate (IA)"), false);
     render(true);
 }
 
@@ -890,8 +890,8 @@ void Tui::toggle_debug_mode() {
         update_trace_active_cache();
         machine_.tracer.init_trace(false);
     }
-    set_status_override(std::format("TUI mode switched to {}",
-                                   machine_.s_debug_mode ? "Debug mode" : "Normal mode"));
+    modal_.open_notice("TUI MODE CHANGED", std::format("TUI mode switched to {}",
+                       machine_.s_debug_mode ? "Debug mode" : "Normal mode"), false);
     render(true);
 }
 
@@ -1199,18 +1199,6 @@ void Tui::pause_loop() {
                         } else if (byte == ' ') {
                             modal_.toggle_setting_at_cursor();
                             render(true);
-                        } else if (byte >= '1' && byte <= '8') {
-                            modal_.toggle_setting_by_index(byte - '1');
-                            render(true);
-                        } else if (byte == '9') {
-                            modal_.toggle_setting_by_index(8);
-                            render(true);
-                        } else if (byte == 'a' || byte == 'A') {
-                            modal_.toggle_setting_by_index(9);
-                            render(true);
-                        } else if (byte == 'b' || byte == 'B') {
-                            modal_.toggle_setting_by_index(10);
-                            render(true);
                         } else if (byte == 'm' || byte == 'M') {
                             open_modal(ModalType::ConfigureMisa);
                             render(true);
@@ -1232,9 +1220,6 @@ void Tui::pause_loop() {
                         } else if (byte == ' ') {
                             modal_.toggle_misa_at_cursor();
                             render(true);
-                        } else if (byte >= '0' && byte <= '8') {
-                            modal_.toggle_misa_by_index(byte - '0');
-                            render(true);
                         } else if (byte == 'p' || byte == 'P') {
                             modal_.apply_misa_profile(0);
                             render(true);
@@ -1255,14 +1240,11 @@ void Tui::pause_loop() {
                         } else if (byte == ' ') {
                             modal_.toggle_sysconfig_at_cursor();
                             render(true);
-                        } else if (byte >= '1' && byte <= '9') {
-                            modal_.toggle_sysconfig_by_index(byte - '1');
+                        } else if (byte >= '0' && byte <= '9') {
+                            modal_.push_sysconfig_digit(static_cast<char>(byte));
                             render(true);
-                        } else if (byte == '0' || byte == 'a' || byte == 'A') {
-                            modal_.toggle_sysconfig_by_index(9);
-                            render(true);
-                        } else if (byte == 'b' || byte == 'B') {
-                            modal_.toggle_sysconfig_by_index(10);
+                        } else if (byte == 8 || byte == 127 || key == simrv::tui::TuiKey::Backspace) {
+                            modal_.pop_sysconfig_digit();
                             render(true);
                         }
                         break;
@@ -1270,18 +1252,27 @@ void Tui::pause_loop() {
                     case ModalType::ManageBreakpoints:
                         if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
                             close_modal();
-                        } else if (byte >= '1' && byte <= '9') {
-                            remove_breakpoint_or_watchpoint_by_index(byte - '1');
-                            render(true);
+                        } else if (byte == 8 || byte == 127 || key == simrv::tui::TuiKey::Backspace ||
+                                   byte == 'd' || byte == 'D' || key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+                            if (modal_.remove_bp_at_cursor([this](const std::string& msg) { set_status_override(msg); })) {
+                                render(true);
+                            }
                         } else if (byte == 'c' || byte == 'C') {
                             machine_.breakpoints.clear_pc_breakpoints();
                             machine_.breakpoints.clear_watchpoints();
-                            set_status_override("Cleared all breakpoints and watchpoints");
+                            modal_.open_notice("BREAKPOINTS CLEARED", "Cleared all breakpoints and watchpoints.", false);
                             render(true);
                         } else if (byte == ':' || byte == 'a' || byte == 'A') {
                             open_modal(ModalType::SetBreakpoint);
                         } else if (byte == 'w' || byte == 'W') {
                             open_modal(ModalType::SetWatchpoint);
+                        }
+                        break;
+
+                    case ModalType::Notice:
+                        if (byte == 27 || key == simrv::tui::TuiKey::Esc || key == simrv::tui::TuiKey::Enter ||
+                            key == simrv::tui::TuiKey::Newline || byte == ' ' || byte == 'q' || byte == 'Q') {
+                            close_modal();
                         }
                         break;
 
@@ -1313,9 +1304,10 @@ void Tui::pause_loop() {
             }
 
             if (key == simrv::tui::TuiKey::CtrlP || key == simrv::tui::TuiKey::c || key == simrv::tui::TuiKey::C) {
-                if (!machine_.is_shutdown_) {
-                    tui_loop_paused_ = false;
+                if (machine_.is_shutdown_) {
+                    machine_.request_reboot();
                 }
+                tui_loop_paused_ = false;
             } else if (key == simrv::tui::TuiKey::CtrlR) {
                 machine_.request_reboot();
                 tui_loop_paused_ = false;
@@ -1336,33 +1328,48 @@ void Tui::pause_loop() {
                 toggle_explain();
             } else if (key == simrv::tui::TuiKey::Colon) {
                 if (!machine_.s_debug_mode) {
-                    set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
+                    modal_.open_notice("DEBUG MODE REQUIRED", "Debug features are disabled in Normal Mode.\n\nPlease enable TUI Debug Mode in Simulator Settings [,] first.", false);
                     render(true);
                 } else {
                     open_modal(ModalType::SetBreakpoint);
                 }
             } else if (key == simrv::tui::TuiKey::w || key == simrv::tui::TuiKey::W) {
                 if (!machine_.s_debug_mode) {
-                    set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
+                    modal_.open_notice("DEBUG MODE REQUIRED", "Debug features are disabled in Normal Mode.\n\nPlease enable TUI Debug Mode in Simulator Settings [,] first.", false);
                     render(true);
                 } else {
                     open_modal(ModalType::SetWatchpoint);
                 }
             } else if (key == simrv::tui::TuiKey::g || key == simrv::tui::TuiKey::G) {
                 if (!machine_.s_debug_mode) {
-                    set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
+                    modal_.open_notice("DEBUG MODE REQUIRED", "Debug features are disabled in Normal Mode.\n\nPlease enable TUI Debug Mode in Simulator Settings [,] first.", false);
                     render(true);
                 } else {
                     open_modal(ModalType::SetStepSize);
                 }
             } else if (key == simrv::tui::TuiKey::f || key == simrv::tui::TuiKey::F) {
                 open_modal(ModalType::SetSpeed);
-            } else if (key == simrv::tui::TuiKey::m || key == simrv::tui::TuiKey::M) {
+            } else if (key == simrv::tui::TuiKey::i || key == simrv::tui::TuiKey::I) {
                 if (!machine_.s_debug_mode) {
-                    set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
+                    modal_.open_notice("DEBUG MODE REQUIRED", "Debug features are disabled in Normal Mode.\n\nPlease enable TUI Debug Mode in Simulator Settings [,] first.", false);
                     render(true);
                 } else {
                     open_modal(ModalType::InspectAddress);
+                }
+            } else if (key == simrv::tui::TuiKey::m || key == simrv::tui::TuiKey::M) {
+                if (!machine_.s_debug_mode) {
+                    modal_.open_notice("DEBUG MODE REQUIRED", "Debug features are disabled in Normal Mode.\n\nPlease enable TUI Debug Mode in Simulator Settings [,] first.", false);
+                    render(true);
+                } else {
+                    open_modal(ModalType::ManageBreakpoints);
+                }
+            } else if (key == simrv::tui::TuiKey::b || key == simrv::tui::TuiKey::B) {
+                if (!machine_.s_debug_mode) {
+                    modal_.open_notice("DEBUG MODE REQUIRED", "Debug features are disabled in Normal Mode.\n\nPlease enable TUI Debug Mode in Simulator Settings [,] first.", false);
+                    render(true);
+                } else if (machine_.cpu.perform_backstep()) {
+                    update_cache();
+                    render(true);
                 }
             } else if (key == simrv::tui::TuiKey::QuestionMark || key == simrv::tui::TuiKey::h || key == simrv::tui::TuiKey::H) {
                 open_modal(ModalType::Help);
@@ -1382,48 +1389,36 @@ void Tui::pause_loop() {
                 scroll(5);
             } else if (key == simrv::tui::TuiKey::d || key == simrv::tui::TuiKey::D) {
                 scroll(-5);
-            } else if (key == simrv::tui::TuiKey::B) {
-                if (!machine_.s_debug_mode) {
-                    set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
-                    render(true);
-                } else {
-                    open_modal(ModalType::ManageBreakpoints);
-                }
-            } else if (key == simrv::tui::TuiKey::b) {
-                if (!machine_.s_debug_mode) {
-                    set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
-                    render(true);
-                } else if (machine_.cpu.perform_backstep()) {
-                    update_cache();
-                    render(true);
-                }
             } else if (key == simrv::tui::TuiKey::n || key == simrv::tui::TuiKey::N) {
                 if (!machine_.s_debug_mode) {
-                    set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
+                    modal_.open_notice("DEBUG MODE REQUIRED", "Debug features are disabled in Normal Mode.\n\nPlease enable TUI Debug Mode in Simulator Settings [,] first.", false);
                     render(true);
-                } else if (!machine_.is_shutdown_) {
+                } else if (machine_.is_shutdown_) {
+                    machine_.request_reboot();
+                    tui_loop_paused_ = false;
+                } else {
                     uint64_t g = step_granularity_.load(std::memory_order_relaxed);
                     step_budget_.store(g, std::memory_order_relaxed);
                     tui_loop_paused_ = false;
                 }
             } else if (key == simrv::tui::TuiKey::k || key == simrv::tui::TuiKey::K) {
                 if (!machine_.s_debug_mode) {
-                    set_status_override("Debug feature disabled. Enable TUI Debug Mode in Settings [,]");
+                    modal_.open_notice("DEBUG MODE REQUIRED", "Debug features are disabled in Normal Mode.\n\nPlease enable TUI Debug Mode in Simulator Settings [,] first.", false);
                     render(true);
                 } else {
                     Address pc = machine_.cpu.state().pc;
                     if (machine_.breakpoints.has_pc_breakpoint(pc)) {
                         machine_.breakpoints.remove_pc_breakpoint(pc);
-                        set_status_override(std::format("Removed breakpoint at 0x{:08x}", pc));
+                        modal_.open_notice("BREAKPOINT REMOVED", std::format("Removed PC breakpoint at 0x{:08x}", pc), false);
                     } else {
                         machine_.breakpoints.add_pc_breakpoint(pc);
-                        set_status_override(std::format("Breakpoint set at 0x{:08x}", pc));
+                        modal_.open_notice("BREAKPOINT CREATED", std::format("PC breakpoint set at 0x{:08x}", pc), false);
                     }
                     render(true);
                 }
             } else if (byte == 'y' || byte == 'Y') {
                 if (!machine_.s_cycle_accurate) {
-                    set_status_override("System Config is available in CA Mode only. Enable CA Mode in Settings [,]");
+                    modal_.open_notice("CA MODE REQUIRED", "System Config is available in Cycle-Accurate (CA) Mode only.\n\nPlease enable CA Mode in Simulator Settings [,] first.", false);
                     render(true);
                 } else {
                     open_modal(ModalType::ConfigureSystem);
@@ -1445,7 +1440,7 @@ void Tui::pause_loop() {
                     reset_speed_history();
                 }
                 render(true);
-            } else if (key == simrv::tui::TuiKey::Minus || key == simrv::tui::TuiKey::Comma) {
+            } else if (key == simrv::tui::TuiKey::Minus) {
                 static constexpr std::array<uint64_t, 10> kSpeedLevels = {0, 10, 100, 1000, 5000, 10000, 50000, 100000, 500000, 1000000};
                 uint64_t cur_delay = step_delay_us_.load(std::memory_order_relaxed);
                 uint64_t next_delay = 1000000;
@@ -1461,7 +1456,10 @@ void Tui::pause_loop() {
                 }
                 render(true);
             } else if (key == simrv::tui::TuiKey::s || key == simrv::tui::TuiKey::S || key == simrv::tui::TuiKey::Space) {
-                if (!machine_.is_shutdown_) {
+                if (machine_.is_shutdown_) {
+                    machine_.request_reboot();
+                    tui_loop_paused_ = false;
+                } else {
                     update_cache();
                     machine_.prepare_cycle();
                     machine_.cpu.run_cycle(machine_);
@@ -1560,10 +1558,13 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                 if (act_opt.has_value()) {
                     switch (act_opt.value()) {
                         case TuiFooterAction::Step:
-                            if (machine_.cpu.state().pc == 0) {
-                                set_status_override("Cannot step: PC is 0x0. Load a program image first \033[1m[o]\033[22m.");
+                            if (machine_.is_shutdown_) {
+                                machine_.request_reboot();
+                                tui_loop_paused_ = false;
+                            } else if (machine_.cpu.state().pc == 0) {
+                                modal_.open_notice("NO PROGRAM LOADED", "Cannot step: PC is 0x0.\n\nPlease load a program binary image first [o].", false);
                                 render(true);
-                            } else if (!machine_.is_shutdown_) {
+                            } else {
                                 update_cache();
                                 machine_.prepare_cycle();
                                 machine_.cpu.run_cycle(machine_);
@@ -1578,18 +1579,24 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                             }
                             break;
                         case TuiFooterAction::StepN:
-                            if (machine_.cpu.state().pc == 0) {
-                                set_status_override("Cannot step: PC is 0x0. Load a program image first \033[1m[o]\033[22m.");
+                            if (machine_.is_shutdown_) {
+                                machine_.request_reboot();
+                                tui_loop_paused_ = false;
+                            } else if (machine_.cpu.state().pc == 0) {
+                                modal_.open_notice("NO PROGRAM LOADED", "Cannot step: PC is 0x0.\n\nPlease load a program binary image first [o].", false);
                                 render(true);
-                            } else if (!machine_.is_shutdown_) {
+                            } else {
                                 uint64_t g = step_granularity_.load(std::memory_order_relaxed);
                                 step_budget_.store(g, std::memory_order_relaxed);
                                 tui_loop_paused_ = false;
                             }
                             break;
                         case TuiFooterAction::RunPause:
-                            if (paused_ && machine_.cpu.state().pc == 0) {
-                                set_status_override("Cannot run: PC is 0x0. Load a program image first \033[1m[o]\033[22m.");
+                            if (machine_.is_shutdown_) {
+                                machine_.request_reboot();
+                                tui_loop_paused_ = false;
+                            } else if (paused_ && machine_.cpu.state().pc == 0) {
+                                modal_.open_notice("NO PROGRAM LOADED", "Cannot run simulation: PC is 0x0.\n\nPlease load a program binary image first [o].", false);
                                 render(true);
                             } else if (tui_loop_paused_) {
                                 tui_loop_paused_ = false;
@@ -1605,10 +1612,10 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                             Address pc = machine_.cpu.state().pc;
                             if (machine_.breakpoints.has_pc_breakpoint(pc)) {
                                 machine_.breakpoints.remove_pc_breakpoint(pc);
-                                set_status_override(std::format("Removed breakpoint at 0x{:08x}", pc));
+                                modal_.open_notice("BREAKPOINT REMOVED", std::format("Removed PC breakpoint at 0x{:08x}", pc), false);
                             } else {
                                 machine_.breakpoints.add_pc_breakpoint(pc);
-                                set_status_override(std::format("Breakpoint set at 0x{:08x}", pc));
+                                modal_.open_notice("BREAKPOINT CREATED", std::format("PC breakpoint set at 0x{:08x}", pc), false);
                             }
                             render(true);
                             break;
@@ -1763,6 +1770,11 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             render(true);
             return true;
         }
+        if (get_active_modal() == ModalType::ManageBreakpoints) {
+            modal_.move_bp_cursor(-1);
+            render(true);
+            return true;
+        }
         if ((paused_ || tui_loop_paused_) && left_pane_ && left_pane_->get_page() == TuiRegPage::CACHE) {
             left_pane_->cycle_cache_way(-1);
             render(true);
@@ -1782,6 +1794,11 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         }
         if (get_active_modal() == ModalType::ConfigureSystem) {
             modal_.move_sysconfig_cursor(1);
+            render(true);
+            return true;
+        }
+        if (get_active_modal() == ModalType::ManageBreakpoints) {
+            modal_.move_bp_cursor(1);
             render(true);
             return true;
         }
@@ -1944,10 +1961,6 @@ void Tui::on_cycle_completed_slow() {
             break;
         }
     }
-    uint64_t delay = step_delay_us_.load(std::memory_order_relaxed);
-    if (delay > 0) {
-        std::this_thread::sleep_for(std::chrono::microseconds(delay));
-    }
 }
 
 void Tui::remove_breakpoint_or_watchpoint_by_index(size_t target_idx) {
@@ -1958,7 +1971,7 @@ void Tui::remove_breakpoint_or_watchpoint_by_index(size_t target_idx) {
     for (auto pc : pc_bps) {
         if (current_idx == target_idx) {
             machine_.breakpoints.remove_pc_breakpoint(pc);
-            set_status_override(std::format("Removed Breakpoint at 0x{:08x}", pc));
+            modal_.open_notice("BREAKPOINT REMOVED", std::format("Removed Breakpoint at 0x{:08x}", pc), false);
             return;
         }
         current_idx++;
@@ -1968,10 +1981,10 @@ void Tui::remove_breakpoint_or_watchpoint_by_index(size_t target_idx) {
         if (current_idx == target_idx) {
             if (wp.target == simrv::debug::WatchTarget::Memory) {
                 machine_.breakpoints.remove_watchpoint(wp.addr);
-                set_status_override(std::format("Removed Memory Watchpoint at 0x{:08x}", wp.addr));
+                modal_.open_notice("WATCHPOINT REMOVED", std::format("Removed Memory Watchpoint at 0x{:08x}", wp.addr), false);
             } else {
                 machine_.breakpoints.remove_reg_watchpoint(wp.reg_type, wp.reg_index);
-                set_status_override(std::format("Removed Register Watchpoint on {}", wp.reg_name));
+                modal_.open_notice("WATCHPOINT REMOVED", std::format("Removed Register Watchpoint on {}", wp.reg_name), false);
             }
             return;
         }

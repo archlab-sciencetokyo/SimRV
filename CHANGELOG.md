@@ -3,6 +3,31 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.0-rc.3] — 2026-07-31
+
+Release candidate 3 for v2.0.0. Focuses on TUI keybinding centralization, Notice Modals UX enhancement, automatic reboot on post-shutdown resume, and licensing compliance.
+
+### TUI & Visualizers
+- **Centralized TUI Keybindings Registry (`TuiKeybindings`)**:
+  - Centralized all key action mappings, footer labels, and online help definitions in `TuiKeybindings.hpp` / `TuiKeybindings.cpp`.
+  - Re-assigned intuitive, semantic hotkeys: `[n]` for Next step, `[b]` for Backstep, `[m]` for Manage Break/Watchpoints, `[i]` for Inspect Memory, `[w]` for Set Watchpoint, and `[:]`/`[k]` for PC Breakpoint.
+  - Isolated comma (`[,]`) strictly to opening the Simulator Settings modal.
+- **Notice Modals & Modal Collision Safety**:
+  - Moved status notices, warnings, and settings confirmations to centered Notice Modals.
+  - Formatted multi-line text across Breakpoint and Watchpoint creation modals to prevent text clipping.
+  - Re-mapped Manage Breakpoints modal to `[a]`, leaving `[b]` dedicated strictly to reverse step execution (`perform_backstep`).
+- **Post-Shutdown Automatic System Reload**:
+  - Resuming or single-stepping after guest system shutdown (`machine_.is_shutdown_ == true`) now triggers `machine_.request_reboot()`, reloading the guest binary image cleanly instead of hanging.
+  - Re-enabled execution on `perform_backstep()` when stepping backward out of shutdown state.
+
+### License & Documentation
+- **MIT License & Third-Party Notices**:
+  - Added repository `LICENSE` file under the MIT License (Copyright (c) 2024-2026 ArchLab @ ScienceTokyo).
+  - Included third-party software notices for TinySoundFont (`tsf.h`, MIT License) and TinyMidiLoader (`tml.h`, zlib License).
+  - Updated `README.md` with a dedicated License section documenting core and third-party licenses.
+
+---
+
 ## [v2.0.0-rc.2] — 2026-07-31
 
 Release candidate 2 for v2.0.0. Focuses on TUI UX refinements, pipeline execution timeline correctness, hardware Sixel capability detection, and compiler prerequisite updates.

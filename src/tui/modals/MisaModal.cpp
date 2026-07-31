@@ -194,41 +194,36 @@ void MisaModal::render(std::vector<std::string>& content_rows,
         vlen_val = std::format("\033[90m[VLEN={}]  (enable V extension first)\033[0m", draft.vlen);
     }
 
-    const auto misa_items = std::to_array<SettingItem>({
-        {.key = " 0",
-         .name = "Base XLEN Mode",
+    struct ItemInfo {
+        const char* name;
+        std::string val;
+    };
+
+    const auto misa_items = std::to_array<ItemInfo>({
+        {.name = "Base XLEN Mode",
          .val = (draft.xlen_bits == 32) ? "\033[1;33m[RV32]\033[0m" : "\033[1;36m[RV64]\033[0m"},
-        {.key = " 1",
-         .name = "Extension M (Int Mul/Div)",
+        {.name = "Extension M (Int Mul/Div)",
          .val = draft.ext_m ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {.key = " 2",
-         .name = "Extension A (Atomic Ops)",
+        {.name = "Extension A (Atomic Ops)",
          .val = draft.ext_a ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {.key = " 3",
-         .name = "Extension F (Single FP)",
+        {.name = "Extension F (Single FP)",
          .val = draft.ext_f ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {.key = " 4",
-         .name = "Extension D (Double FP)",
+        {.name = "Extension D (Double FP)",
          .val = draft.ext_d ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF (Requires F)]\033[0m"},
-        {.key = " 5",
-         .name = "Extension C (Compressed)",
+        {.name = "Extension C (Compressed)",
          .val = draft.ext_c ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {.key = " 6",
-         .name = "Extension B (Bitmanip)",
+        {.name = "Extension B (Bitmanip)",
          .val = draft.ext_b ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {.key = " 7",
-         .name = "Extension V (Vector)",
+        {.name = "Extension V (Vector)",
          .val = draft.ext_v ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {.key = " 8",
-         .name = "Vector VLEN (bits)",
+        {.name = "Vector VLEN (bits)",
          .val = vlen_val},
-        {.key = " 9",
-         .name = "Privilege Modes (S & U)",
+        {.name = "Privilege Modes (S & U)",
          .val = (draft.ext_s && draft.ext_u) ? "\033[1;32m[ON]\033[0m"
                                              : "\033[90m[OFF (M-Only)]\033[0m"},
-        {.key = " p", .name = "Preset: Base (I)", .val = "\033[1;34m[Set Profile: Base]\033[0m"},
-        {.key = " i", .name = "Preset: IMAC", .val = "\033[1;34m[Set Profile: IMAC]\033[0m"},
-        {.key = " g", .name = "Preset: GC (General)", .val = "\033[1;34m[Set Profile: GC]\033[0m"},
+        {.name = "Preset: Base (I)", .val = "\033[1;34m[Set Profile: Base]\033[0m"},
+        {.name = "Preset: IMAC", .val = "\033[1;34m[Set Profile: IMAC]\033[0m"},
+        {.name = "Preset: GC (General)", .val = "\033[1;34m[Set Profile: GC]\033[0m"},
     });
 
     for (std::size_t i = 0; i < misa_items.size(); ++i) {
@@ -244,11 +239,9 @@ void MisaModal::render(std::vector<std::string>& content_rows,
 
         bool is_sel = (static_cast<int>(i) == cursor);
         std::string prefix = is_sel ? std::format("{}>", kThemeMint) + "\033[0m " : "  ";
-        std::string num_key =
-            std::format("{}[{}]\033[0m", is_sel ? kThemeMint : kThemeSky, misa_items[i].key);
         std::string name_str =
-            std::format("{}{:<27}\033[0m", is_sel ? "\033[1;37m" : kThemeText, misa_items[i].name);
-        add_row_cb(std::format("{}{} {} : {}", prefix, num_key, name_str, misa_items[i].val));
+            std::format("{}{:<29}\033[0m", is_sel ? "\033[1;37m" : kThemeText, misa_items[i].name);
+        add_row_cb(std::format("{}{} : {}", prefix, name_str, misa_items[i].val));
     }
     add_row_cb("");
     add_row_cb(

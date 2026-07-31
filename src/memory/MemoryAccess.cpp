@@ -58,10 +58,10 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                 return simrv::memory::ram_read_fast(eff_vaddr, funct3, mem.mmu()->mmem());
             }
         } else {
-            size_t tlb_idx = (v_addr >> 12) & 2047;
+            const size_t tlb_idx = (v_addr >> 12) & 2047;
+            const Address vpn = v_addr >> 12;
             const auto& entry = cpu.soft_tlb_read[tlb_idx];
-            if (entry.valid && entry.vpn == (v_addr >> 12) && entry.priv == eff_priv && 
-                entry.asid == current_asid) {
+            if (entry.matches(vpn, current_asid, eff_priv)) {
                 return simrv::memory::ram_read_fast(entry.paddr_base + (v_addr & 0xFFF), funct3, mem.mmu()->mmem());
             }
         }
@@ -218,14 +218,14 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
 
     if (!cpu.pipeline_context.pending_exception.has_value()) {
         if (cpu.machine_->s_high_performance && simrv::memory::is_dram_addr(p_addr)) {
-            size_t tlb_idx = (v_addr >> 12) & 2047;
-            auto& entry_soft = cpu.soft_tlb_read[tlb_idx];
-            entry_soft.vpn = v_addr >> 12;
-            entry_soft.paddr_base = p_addr & ~0xFFF;
-            entry_soft.host_ptr_base = mem.mmu()->mmem() + ((p_addr & ~0xFFF) & simrv::memory::kDramMask);
-            entry_soft.priv = eff_priv;
-            entry_soft.asid = translation_enabled ? current_asid : 0xFFFF'FFFF'FFFF'FFFFULL;
-            entry_soft.valid = true;
+            const size_t tlb_idx = (v_addr >> 12) & 2047;
+            const Address vpn = v_addr >> 12;
+            Byte* host_base = mem.mmu()->mmem() + ((p_addr & ~0xFFFULL) & simrv::memory::kDramMask);
+            cpu.soft_tlb_read[tlb_idx].set(vpn,
+                translation_enabled ? static_cast<uint64_t>(current_asid) : ~uint64_t{0},
+                eff_priv,
+                p_addr & ~0xFFFULL,
+                host_base);
         }
         return issue_read(p_addr);
     }
@@ -330,10 +330,10 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
                 return;
             }
         } else {
-            size_t tlb_idx = (v_addr >> 12) & 2047;
+            const size_t tlb_idx = (v_addr >> 12) & 2047;
+            const Address vpn = v_addr >> 12;
             const auto& entry = cpu.soft_tlb_write[tlb_idx];
-            if (entry.valid && entry.vpn == (v_addr >> 12) && entry.priv == eff_priv && 
-                entry.asid == current_asid) {
+            if (entry.matches(vpn, current_asid, eff_priv)) {
                 issue_write(entry.paddr_base + (v_addr & 0xFFF), wdata);
                 return;
             }
@@ -377,14 +377,14 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
 
     if (!cpu.pipeline_context.pending_exception.has_value()) {
         if (cpu.machine_->s_high_performance && simrv::memory::is_dram_addr(p_addr)) {
-            size_t tlb_idx = (v_addr >> 12) & 2047;
-            auto& entry_soft = cpu.soft_tlb_write[tlb_idx];
-            entry_soft.vpn = v_addr >> 12;
-            entry_soft.paddr_base = p_addr & ~0xFFF;
-            entry_soft.host_ptr_base = mem.mmu()->mmem() + ((p_addr & ~0xFFF) & simrv::memory::kDramMask);
-            entry_soft.priv = eff_priv;
-            entry_soft.asid = translation_enabled ? current_asid : 0xFFFF'FFFF'FFFF'FFFFULL;
-            entry_soft.valid = true;
+            const size_t tlb_idx = (v_addr >> 12) & 2047;
+            const Address vpn = v_addr >> 12;
+            Byte* host_base = mem.mmu()->mmem() + ((p_addr & ~0xFFFULL) & simrv::memory::kDramMask);
+            cpu.soft_tlb_write[tlb_idx].set(vpn,
+                translation_enabled ? static_cast<uint64_t>(current_asid) : ~uint64_t{0},
+                eff_priv,
+                p_addr & ~0xFFFULL,
+                host_base);
         }
         issue_write(p_addr, wdata);
     }

@@ -138,7 +138,7 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
                            const simrv::core::Machine& machine) {
     (void)content_rows;
     add_row_cb(
-        std::format("{}Use \033[1m[↑/↓/←/→]\033[0m or key \033[1m[1-8,9,a,b]\033[0m to "
+        std::format("{}Use \033[1m[↑/↓]\033[0m to navigate, \033[1m[←/→/Space]\033[0m to "
                     "toggle, \033[1m[Enter]\033[0m to apply:\033[0m",
                     kThemeMuted));
     add_row_cb("");
@@ -149,40 +149,45 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
     const bool dlog_disabled = machine.s_appmode;
     const bool lockstep_disabled = machine.s_spike_bin.empty();
 
-    const auto settings = std::to_array<SettingItem>({
-        {" 1", "Simulation Mode",
+    struct ItemInfo {
+        const char* name;
+        std::string val;
+    };
+
+    const auto settings = std::to_array<ItemInfo>({
+        {"Simulation Mode",
          draft.cycle_accurate ? "\033[1;36m[CA (Cycle-Accurate)]\033[0m"
                               : "\033[1;33m[IA (Instruction-Accurate)]\033[0m"},
-        {" 2", "TUI Diagnostics View",
+        {"TUI Diagnostics View",
          draft.debug_mode ? "\033[1;32m[Debug Mode (Diagnostics ON)]\033[0m"
                           : "\033[90m[Normal Mode]\033[0m"},
-        {" 3", "Step Rollback History",
+        {"Step Rollback History",
          rollback_disabled ? "\033[90m[Disabled (High-Perf Mode)]\033[0m"
                            : (draft.rollback_enabled ? "\033[1;32m[ON]\033[0m"
                                                      : "\033[90m[OFF]\033[0m")},
-        {" 4", "High Contrast Theme",
+        {"High Contrast Theme",
          draft.high_contrast ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {" 5", "Instruction Mix Stats",
+        {"Instruction Mix Stats",
          mix_disabled ? "\033[90m[Disabled (N/A in IA Mode)]\033[0m"
                       : (draft.use_mix ? "\033[1;32m[ON]\033[0m"
                                        : "\033[90m[OFF]\033[0m")},
-        {" 6", "High-Performance Engine",
+        {"High-Performance Engine",
          draft.high_performance ? "\033[1;32m[ON]\033[0m"
                                 : "\033[90m[OFF]\033[0m"},
-        {" 7", "Co-Sim Spike Lockstep",
+        {"Co-Sim Spike Lockstep",
          lockstep_disabled ? "\033[90m[Disabled (No Spike Bin)]\033[0m"
                            : (draft.lockstep_mode ? "\033[1;32m[ON]\033[0m"
                                                  : "\033[90m[OFF]\033[0m")},
-        {" 8", "GDB Server Stub (1234)",
+        {"GDB Server Stub (1234)",
          draft.gdb_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {" 9", "Branch Prediction Trace",
+        {"Branch Prediction Trace",
          bp_disabled ? "\033[90m[Disabled (N/A in IA Mode)]\033[0m"
                      : (draft.bp_trace ? "\033[1;32m[ON (creates bptrace.txt)]\033[0m"
                                        : "\033[90m[OFF (creates text file)]\033[0m")},
-        {" a", "Exception & Trap Log",
+        {"Exception & Trap Log",
          draft.traplog_mode ? "\033[1;32m[ON (creates traplog.txt)]\033[0m"
                             : "\033[90m[OFF (creates text file)]\033[0m"},
-        {" b", "Device MMIO Access Log",
+        {"Device MMIO Access Log",
          dlog_disabled ? "\033[90m[Disabled in Baremetal Mode]\033[0m"
                        : (draft.dlog_mode ? "\033[1;32m[ON (creates devicelog.txt)]\033[0m"
                                           : "\033[90m[OFF (creates text file)]\033[0m")},
@@ -200,11 +205,9 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
         }
         bool is_sel = (static_cast<int>(i) == cursor);
         std::string prefix = is_sel ? std::format("{}>\033[0m ", kThemeMint) : "  ";
-        std::string num_key =
-            std::format("{}[{}]\033[0m", is_sel ? kThemeMint : kThemeSky, settings[i].key);
         std::string name_str = std::format(
-            "{}{:<27}\033[0m", is_sel ? "\033[1;37m" : kThemeText, settings[i].name);
-        add_row_cb(std::format("{}{} {} : {}", prefix, num_key, name_str, settings[i].val));
+            "{}{:<29}\033[0m", is_sel ? "\033[1;37m" : kThemeText, settings[i].name);
+        add_row_cb(std::format("{}{} : {}", prefix, name_str, settings[i].val));
     }
     add_row_cb("");
     add_row_cb(

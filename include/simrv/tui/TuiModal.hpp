@@ -34,7 +34,8 @@ enum class ModalType : uint8_t {
     Settings,
     ConfigureMisa,
     ConfigureSystem,
-    ManageBreakpoints
+    ManageBreakpoints,
+    Notice
 };
 
 struct SettingsDraft {
@@ -137,6 +138,13 @@ class TuiModal {
     void adjust_sysconfig_at_cursor(int dir);
     void toggle_sysconfig_at_cursor();
     void toggle_sysconfig_by_index(int index);
+    void push_sysconfig_digit(char c);
+    void pop_sysconfig_digit();
+
+    void move_bp_cursor(int delta);
+    auto remove_bp_at_cursor(const std::function<void(const std::string&)>& set_status_override_cb) -> bool;
+
+    void open_notice(const std::string& title, const std::string& message, bool is_error = false);
 
     void render_overlay(std::vector<std::string>& lines, int term_width, int term_height) const;
 
@@ -144,6 +152,10 @@ class TuiModal {
     simrv::core::Machine& machine_;
     ModalType active_modal_ = ModalType::None;
     std::string input_;
+    std::string notice_title_;
+    std::string notice_message_;
+    bool notice_is_error_ = false;
+    int bp_cursor_ = 0;
     int settings_cursor_ = 0;
     SettingsDraft settings_draft_;
     int misa_cursor_ = 0;

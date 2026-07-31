@@ -109,13 +109,43 @@ struct ArchState {
 
 #include <deque>
 
+/**
+ * @struct SoftTlbEntry
+ * @brief Compact software TLB entry (32 bytes) for the fast-path translation cache.
+ *
+ * Packs vpn, asid, priv, and valid into a single 64-bit tag for efficient comparison.
+ * Tag layout (64-bit):
+ *   bits [63:16] = VPN (page-frame number, vaddr >> 12)
+ *   bits [15: 2] = ASID (14-bit ASID from satp)
+ *   bits [ 1: 0] = privilege (0=User, 1=Supervisor, 3=Machine)
+ * valid == false when tag == kInvalidTag.
+ */
 struct SoftTlbEntry {
-    Address vpn = 0;          // Tag: vaddr >> 12
-    Address paddr_base = 0;   // Physical base: paddr & ~0xFFF
-    Byte* host_ptr_base = nullptr; // Host memory base pointer
-    Address asid = 0;         // current_asid tag
-    PrivilegeLevel priv = kPrivUser; // privilege level under translation
-    bool valid = false;
+    static constexpr uint64_t kInvalidTag = ~uint64_t{0};
+
+    uint64_t tag = kInvalidTag;         ///< Packed VPN | ASID | priv; kInvalidTag when empty
+    Address paddr_base = 0;             ///< Physical page base (paddr & ~0xFFF)
+    Byte* host_ptr_base = nullptr;      ///< Direct host pointer base (nullptr = use paddr)
+
+    /// Build a lookup tag from the three key fields.
+    [[nodiscard]] static constexpr auto make_tag(uint64_t vpn, uint64_t asid, PrivilegeLevel priv) noexcept -> uint64_t {
+        return (vpn << 16)
+             | ((asid & 0x3FFFu) << 2)
+             | static_cast<uint64_t>(static_cast<uint8_t>(priv) & 0x3u);
+    }
+
+    [[nodiscard]] constexpr auto matches(uint64_t vpn, uint64_t asid, PrivilegeLevel priv) const noexcept -> bool {
+        return tag == make_tag(vpn, asid, priv);
+    }
+
+    void set(uint64_t vpn, uint64_t asid, PrivilegeLevel priv, Address paddr_base_in, Byte* host_ptr_base_in) noexcept {
+        tag = make_tag(vpn, asid, priv);
+        paddr_base = paddr_base_in;
+        host_ptr_base = host_ptr_base_in;
+    }
+
+    void invalidate() noexcept { tag = kInvalidTag; }
+    [[nodiscard]] bool valid() const noexcept { return tag != kInvalidTag; }
 };
 
 struct MemWriteRecord {
@@ -409,7 +439,18 @@ class CPU {
         Instruction inst = 0;
         std::string symbol;
     };
-    std::vector<TraceHistoryEntry> trace_history_;
+
+    /// Circular ring buffer for instruction trace history (TUI trace panel).
+    /// Fixed capacity of 50; O(1) push with no heap allocation after initialization.
+    static constexpr std::size_t kTraceHistoryCapacity = 50;
+    std::array<TraceHistoryEntry, kTraceHistoryCapacity> trace_history_buf_{};
+    std::size_t trace_history_head_ = 0;   ///< Next write position (wraps around)
+    std::size_t trace_history_size_ = 0;   ///< Number of valid entries (≤ capacity)
+
+    /// Provides a read-only view over trace history in chronological order.
+    /// Returned as a vector for backward compatibility with TUI consumers.
+    [[nodiscard]] auto trace_history_view() const -> std::vector<TraceHistoryEntry>;
+
     void push_trace_history(Address pc, Instruction inst, const std::string& symbol);
 
     /// Get the effective privilege level for data accesses (considering MPRV).

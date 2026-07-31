@@ -103,20 +103,13 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
     in.seekg(0, std::ios::beg);
 
     if (is_elf) {
+        bool loaded_segment = false;
         std::array<char, 5> ident{};
         if (in.read(ident.data(), 5)) {
-            const auto elf_class = static_cast<uint8_t>(ident[4]);
-            constexpr uint8_t expected_class = simrv::xlen::kXLenBits == 32 ? 1 : 2;
-            if (elf_class != expected_class) {
-                simrv::log::warn("Loaded ELF image {} is {}-bit but SimRV is compiled for {}-bit!", 
-                             file_path, elf_class == 1 ? 32 : 64, simrv::xlen::kXLenBits);
-            }
-        }
-        in.seekg(0, std::ios::beg);
+            in.seekg(0, std::ios::beg);
 
-        bool loaded_segment = false;
-        const char class_byte = ident[4];
-        if (class_byte == 1) { // 32-bit ELF
+            const char class_byte = ident[4];
+            if (class_byte == 1) { // 32-bit ELF
             Elf32_Ehdr ehdr{};
             if (in.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr))) {
                 std::vector<Elf32_Phdr> phdrs(ehdr.e_phnum);
@@ -179,6 +172,7 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
                 }
             }
         }
+    }
 
         if (!loaded_segment) {
             in.seekg(0, std::ios::beg);
@@ -499,7 +493,8 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
     cpu.decode_cache.flush();
     cpu.pipeline_context = simrv::pipeline::PipelineContext{};
     cpu.undo_stack.clear();
-    cpu.trace_history_.clear();
+    cpu.trace_history_head_ = 0;
+    cpu.trace_history_size_ = 0;
     cpu.state().load_res = 0;
 
     for (std::size_t r = 0; r < 32; ++r) {

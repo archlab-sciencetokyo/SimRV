@@ -93,15 +93,64 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
     return false;
 }
 
+void BreakpointModal::move_cursor(int& cursor, int delta, const simrv::core::Machine& machine) {
+    const auto& pc_bps = machine.breakpoints.get_pc_breakpoints();
+    const auto& wps = machine.breakpoints.get_watchpoints();
+    int count = static_cast<int>(pc_bps.size() + wps.size());
+    if (count == 0) {
+        cursor = 0;
+        return;
+    }
+    cursor = (cursor + delta + count) % count;
+}
+
+auto BreakpointModal::remove_at_cursor(int& cursor, simrv::core::Machine& machine,
+                                         const std::function<void(const std::string&)>& set_status_override_cb) -> bool {
+    const auto& pc_bps = machine.breakpoints.get_pc_breakpoints();
+    const auto& wps = machine.breakpoints.get_watchpoints();
+    int total = static_cast<int>(pc_bps.size() + wps.size());
+    if (total == 0 || cursor < 0 || cursor >= total) return false;
+
+    if (cursor < static_cast<int>(pc_bps.size())) {
+        auto it = std::next(pc_bps.begin(), cursor);
+        Address pc = *it;
+        machine.breakpoints.remove_pc_breakpoint(pc);
+        if (set_status_override_cb) {
+            set_status_override_cb(std::format("Removed breakpoint at 0x{:08x}", pc));
+        }
+    } else {
+        std::size_t wp_idx = static_cast<std::size_t>(cursor - static_cast<int>(pc_bps.size()));
+        const auto& wp = wps[wp_idx];
+        std::string name = (wp.target == simrv::debug::WatchTarget::Memory)
+                               ? std::format("0x{:08x}", wp.addr)
+                               : wp.reg_name;
+        machine.breakpoints.remove_watchpoint(wp_idx);
+        if (set_status_override_cb) {
+            set_status_override_cb(std::format("Removed watchpoint on {}", name));
+        }
+    }
+    const auto& new_pc_bps = machine.breakpoints.get_pc_breakpoints();
+    const auto& new_wps = machine.breakpoints.get_watchpoints();
+    int new_total = static_cast<int>(new_pc_bps.size() + new_wps.size());
+    if (new_total == 0) {
+        cursor = 0;
+    } else if (cursor >= new_total) {
+        cursor = new_total - 1;
+    }
+    return true;
+}
+
 void BreakpointModal::render(ModalType type, std::vector<std::string>& content_rows,
-                              const std::string& input, const simrv::core::Machine* machine) {
+                              const std::string& input, const simrv::core::Machine* machine,
+                              int bp_cursor) {
     if (type == ModalType::SetBreakpoint) {
-        content_rows.push_back(std::format("{}Enter PC Address (hex) or Symbol:\033[0m", kThemeText));
+        content_rows.push_back(std::format("{}Target PC Address (hex) or Symbol:\033[0m", kThemeText));
         content_rows.push_back(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, input));
     } else if (type == ModalType::SetWatchpoint) {
-        content_rows.push_back(std::format("{}Enter Target Address, Register, or Symbol:\033[0m", kThemeText));
+        content_rows.push_back(std::format("{}Target Register, Address, or Symbol:\033[0m", kThemeText));
         content_rows.push_back(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, input));
-        content_rows.push_back(std::format("{}Triggers simulation pause on memory write or register change\033[0m", kThemeMuted));
+        content_rows.push_back(std::format("{}Pauses simulation on memory write\033[0m", kThemeMuted));
+        content_rows.push_back(std::format("{}or register state change.\033[0m", kThemeMuted));
     } else if (type == ModalType::ManageBreakpoints) {
         content_rows.push_back(std::format("{}Active Breakpoints & Watchpoints:\033[0m", kThemeText));
         content_rows.push_back("");
@@ -110,28 +159,37 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
         const auto& pc_bps = machine->breakpoints.get_pc_breakpoints();
         const auto& wps = machine->breakpoints.get_watchpoints();
 
-        size_t idx = 1;
+        int item_idx = 0;
         if (pc_bps.empty() && wps.empty()) {
             content_rows.push_back(std::format("  {}No active breakpoints or watchpoints.\033[0m", kThemeMuted));
         } else {
             for (auto pc : pc_bps) {
+                bool is_sel = (item_idx == bp_cursor);
+                std::string prefix = is_sel ? std::format("{}>\033[0m ", kThemeMint) : "  ";
                 std::string sym = machine->symbols.lookup(pc);
                 std::string sym_str = sym.empty() ? "" : std::format(" ({})", sym);
-                content_rows.push_back(std::format("  \033[1;36m[{}]\033[0m  PC Breakpoint at \033[1;33m0x{:08x}\033[0m{}", idx++, pc, sym_str));
-                if (idx > 9) break;
+                content_rows.push_back(std::format("{}PC Breakpoint at \033[1;33m0x{:08x}\033[0m{}", prefix, pc, sym_str));
+                item_idx++;
+                if (item_idx >= 9) break;
             }
             for (const auto& wp : wps) {
-                if (idx > 9) break;
+                if (item_idx >= 9) break;
+                bool is_sel = (item_idx == bp_cursor);
+                std::string prefix = is_sel ? std::format("{}>\033[0m ", kThemeMint) : "  ";
                 if (wp.target == simrv::debug::WatchTarget::Memory) {
-                    content_rows.push_back(std::format("  \033[1;36m[{}]\033[0m  Memory Write Watchpoint at \033[1;33m0x{:08x}\033[0m", idx++, wp.addr));
+                    content_rows.push_back(std::format("{}Memory Watchpoint at \033[1;33m0x{:08x}\033[0m", prefix, wp.addr));
                 } else {
-                    content_rows.push_back(std::format("  \033[1;36m[{}]\033[0m  Register Watchpoint on \033[1;35m{}\033[0m", idx++, wp.reg_name));
+                    content_rows.push_back(std::format("{}Register Watchpoint on \033[1;35m{}\033[0m", prefix, wp.reg_name));
                 }
+                item_idx++;
             }
         }
 
         content_rows.push_back("");
-        content_rows.push_back(std::format("\033[90mShortcuts: [1-9] Remove  |  [c] Clear All  |  [:] Add BP  |  [w] Add WP  |  [Esc] Close\033[0m"));
+        content_rows.push_back(std::format("  \033[1;36m[↑/↓]\033[0m {}Nav  |  \033[1;36m[Backspace/d]\033[0m {}Del  |  \033[1;36m[c]\033[0m {}Clear  |  \033[1;36m[Esc]\033[0m {}Close\033[0m",
+                                           kThemeMuted, kThemeMuted, kThemeMuted, kThemeMuted));
+        content_rows.push_back(std::format("  \033[1;36m[:]\033[0m {}Add Breakpoint  |  \033[1;36m[w]\033[0m {}Add Watchpoint\033[0m",
+                                           kThemeMuted, kThemeMuted));
     }
 }
 

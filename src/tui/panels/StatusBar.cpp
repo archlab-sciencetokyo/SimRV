@@ -12,6 +12,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/Tui.hpp"
+#include "simrv/tui/TuiKeybindings.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/util/FormatUtil.hpp"
 
@@ -132,7 +133,7 @@ static const auto paused_row1_entries = std::to_array<FooterEntry>({
 
 static const auto paused_row2_entries = std::to_array<FooterEntry>({
     // Debug Inspection Group
-    {.text = "[m] Mem",
+    {.text = "[i] Mem",
      .action = TuiFooterAction::InspectMem,
      .category = FooterCategory::DebugInspect},
     {.text = "  ", .action = std::nullopt, .category = FooterCategory::Spacer},
@@ -148,7 +149,7 @@ static const auto paused_row2_entries = std::to_array<FooterEntry>({
      .action = TuiFooterAction::TogglePcBreakpoint,
      .category = FooterCategory::DebugInspect},
     {.text = "  ", .action = std::nullopt, .category = FooterCategory::Spacer},
-    {.text = "[B] ManageBP",
+    {.text = "[m] ManageBP",
      .action = TuiFooterAction::ManageBreakpoints,
      .category = FooterCategory::DebugInspect},
     {.text = "  │  ", .action = std::nullopt, .category = FooterCategory::Separator},

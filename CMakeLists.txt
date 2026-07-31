@@ -4,7 +4,7 @@ project(SimRV LANGUAGES CXX)
 
 enable_testing()
 
-set(SIMRV_VERSION "2.0.0-rc.2")
+set(SIMRV_VERSION "2.0.0-rc.3")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -126,6 +126,7 @@ add_executable(SimRV
   src/device/Uart.cpp
   src/device/Power.cpp
   src/tui/Tui.cpp
+  src/tui/TuiKeybindings.cpp
   src/tui/TuiModal.cpp
   src/tui/TuiTheme.cpp
   src/tui/modals/AddressModal.cpp

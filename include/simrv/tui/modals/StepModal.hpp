@@ -20,7 +20,8 @@ class StepModal {
     static auto submit(ModalType type, const std::string& input,
                         std::atomic<uint64_t>& step_granularity,
                         std::atomic<uint64_t>& step_delay_us,
-                        const std::function<void()>& on_speed_changed_cb) -> bool;
+                        const std::function<void()>& on_speed_changed_cb,
+                        const std::function<void(const std::string&)>& notice_cb = nullptr) -> bool;
     static void render(ModalType type, std::vector<std::string>& content_rows,
                        const std::string& input);
 };

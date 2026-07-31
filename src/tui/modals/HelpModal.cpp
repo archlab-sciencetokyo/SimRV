@@ -6,7 +6,9 @@
 
 #include <array>
 #include <format>
+#include "simrv/core/BuildInfo.hpp"
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/xlen/Helpers.hpp"
 
 namespace simrv::tui::modals {
 
@@ -23,23 +25,25 @@ void HelpModal::render(std::vector<std::string>& content_rows,
                        const std::function<void(const std::string&)>& add_row_cb,
                        int term_height, int box_w) {
     (void)content_rows;
+    add_row_cb(std::format(" \033[1mSimRV Version:\033[0m \033[1;36m{}\033[0m  \033[90m(RV{})\033[0m",
+                           simrv::buildinfo::kVersion, simrv::xlen::kXLenBits));
+    add_row_cb("");
     if (term_height < 32 && box_w >= 70) {
         // Dual-column layout for small screen height
         static const auto help_items =
-            std::to_array<Shortcut>({{"[s] / [Space]", "Step 1 inst"},
-                                     {"[n]", "Step N insts"},
-                                     {"[b] / [Alt-b]", "Undo / Toggle Rollback"},
+            std::to_array<Shortcut>({{"[n]", "Step N insts"},
+                                     {"[b]", "Undo step / Backstep"},
+                                     {"[c] / [Space]", "Run / Pause"},
                                      {"[o] / [Alt-o]", "Load Binary / Disk"},
                                      {"[,] / [Alt-s]", "Simulator Settings"},
                                      {"[y]", "CA System Config"},
                                      {"[:]", "Set PC Breakpoint"},
                                      {"[w]", "Set Watchpoint"},
-                                     {"[B]", "Manage Break/Watchpoints"},
+                                     {"[m]", "Manage Break/Watchpoints"},
                                      {"[k]", "Toggle PC Breakpoint"},
                                      {"[g]", "Set N Step Size"},
                                      {"[f]", "Set Frequency (Hz)"},
-                                     {"[m]", "Inspect Memory"},
-                                     {"[c] / [Ctrl-P]", "Run / Pause"},
+                                     {"[i]", "Inspect Memory"},
                                      {"[Tab]", "Cycle Layout"},
                                      {"[r] / [Alt-r]", "Cycle Registers"},
                                      {"[l] / [Alt-l]", "Cycle Tool Tabs"},
@@ -53,7 +57,7 @@ void HelpModal::render(std::vector<std::string>& content_rows,
                                      {"[Alt-h]", "High Contrast"},
                                      {"[Alt-t]", "Sakura Pastel"},
                                      {"[Esc]", "Close Modal"},
-                                     {"[Ctrl-Q]", "Quit Simulator"}});
+                                     {"[q] / [Ctrl-Q]", "Quit Simulator"}});
         std::size_t half = (help_items.size() + 1) / 2;
         for (std::size_t i = 0; i < half; ++i) {
             std::string left_item =

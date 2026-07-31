@@ -53,10 +53,10 @@ void CPU::TLB_flush(bool match_all_vaddr, Address vaddr, bool match_all_asid, Wo
 
 void CPU::soft_tlb_flush() {
     for (auto& entry : soft_tlb_read) {
-        entry.valid = false;
+        entry.invalidate();
     }
     for (auto& entry : soft_tlb_write) {
-        entry.valid = false;
+        entry.invalidate();
     }
 }
 
@@ -746,10 +746,10 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
         }
     } else {
         const Word current_asid = simrv::xlen::satp_asid(state_.satp);
-        size_t const tlb_idx = (mem_addr >> 12) & 2047;
+        const Address vpn = mem_addr >> 12;
+        const size_t tlb_idx = vpn & 2047u;
         const auto& entry = soft_tlb_read[tlb_idx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        if (simrv::compiler::likely(entry.valid && entry.vpn == (mem_addr >> 12) && entry.priv == eff_priv && 
-            entry.asid == current_asid)) {
+        if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv))) {
             if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
                 out_val = simrv::memory::host_read_fast(entry.host_ptr_base + (mem_addr & 0xFFF), static_cast<Instruction>(funct3));
                 return true;
@@ -791,10 +791,10 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
         }
     } else {
         const Word current_asid = simrv::xlen::satp_asid(state_.satp);
-        size_t const tlb_idx = (mem_addr >> 12) & 2047;
+        const Address vpn = mem_addr >> 12;
+        const size_t tlb_idx = vpn & 2047u;
         const auto& entry = soft_tlb_write[tlb_idx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        if (simrv::compiler::likely(entry.valid && entry.vpn == (mem_addr >> 12) && entry.priv == eff_priv && 
-            entry.asid == current_asid)) {
+        if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv))) {
             Address const paddr = entry.paddr_base + (mem_addr & 0xFFF);
             if (machine.s_rollback_enabled && simrv::memory::is_dram_addr(paddr)) {
                 Word old_val = simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(funct3), machine.memory_.mmu()->mmem());
@@ -901,25 +901,19 @@ void CPU::handle_cached_interrupts() {
 
 void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
     // 1. Copy metadata to pipeline_context to support tracers and lockstep only when needed
+    pipeline_context.pending_exception = std::nullopt;
     if (simrv::compiler::unlikely(machine.s_tuimode || machine.s_lockstep_mode || 
                                   machine.s_gdb_mode || machine.s_bp_trace || 
                                   (machine.s_strace != 0))) {
         pipeline_context.copy_from(op);
         pipeline_context.tlb_miss = false;
-        pipeline_context.pending_exception = std::nullopt;
         pipeline_context.pending_tval = 0;
-    } else {
-        pipeline_context.pending_exception = std::nullopt;
     }
 
     // Update instruction-mix statistics for cached execution when profiling or TUI is active
     if (simrv::compiler::unlikely(machine.s_use_mix || machine.s_tuimode)) {
         e_instmix[static_cast<std::size_t>(op.op_id)]++;
     }
-
-    // 2. Fetch operands
-    Register const rrs1 = state_.regs.read(op.rs1);
-    Register const rrs2 = state_.regs.read(op.rs2);
 
     // 3. Execute, Memory, Writeback, Commit in a monolithic fast path
     switch (op.opcode) {
@@ -933,38 +927,42 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
             execute_cached_jal(op);
             break;
         case Opcode::Jalr:
-            execute_cached_jalr(op, rrs1);
+            execute_cached_jalr(op, state_.regs.read(op.rs1));
             break;
         case Opcode::Branch:
-            execute_cached_branch(op, rrs1, rrs2);
+            execute_cached_branch(op, state_.regs.read(op.rs1), state_.regs.read(op.rs2));
             break;
         case Opcode::Op:
-            execute_cached_op(op, rrs1, rrs2);
+            execute_cached_op(op, state_.regs.read(op.rs1), state_.regs.read(op.rs2));
             break;
         case Opcode::OpImm:
-            execute_cached_op_imm(op, rrs1);
+            execute_cached_op_imm(op, state_.regs.read(op.rs1));
             break;
         case Opcode::OpImm32:
-            execute_cached_op_imm32(op, rrs1);
+            execute_cached_op_imm32(op, state_.regs.read(op.rs1));
             break;
         case Opcode::Op32:
-            execute_cached_op32(op, rrs1, rrs2);
+            execute_cached_op32(op, state_.regs.read(op.rs1), state_.regs.read(op.rs2));
             break;
         case Opcode::Load:
-            if (!execute_cached_load(machine, op, rrs1)) {
+            if (!execute_cached_load(machine, op, state_.regs.read(op.rs1))) {
                 return;
             }
             break;
         case Opcode::Store:
-            if (!execute_cached_store(machine, op, rrs1, rrs2)) {
+            if (!execute_cached_store(machine, op, state_.regs.read(op.rs1), state_.regs.read(op.rs2))) {
                 return;
             }
             break;
         default:
-            pipeline_context.copy_from(op);
-            pipeline_context.tlb_miss = false;
-            pipeline_context.pending_exception = std::nullopt;
-            pipeline_context.pending_tval = 0;
+            // Fallback needs pipeline_context populated; copy only if not already done by debug branch
+            if (simrv::compiler::likely(!machine.s_tuimode && !machine.s_lockstep_mode &&
+                                        !machine.s_gdb_mode && !machine.s_bp_trace &&
+                                        (machine.s_strace == 0))) {
+                pipeline_context.copy_from(op);
+                pipeline_context.tlb_miss = false;
+                pipeline_context.pending_tval = 0;
+            }
             execute_cached_fallback(machine);
             return;
     }
@@ -1010,6 +1008,8 @@ auto CPU::perform_backstep() -> bool {
     auto step = std::move(undo_stack.front());
     undo_stack.pop_front();
     if (machine_) {
+        machine_->is_shutdown_ = false;
+        machine_->is_running_ = true;
         for (auto it = step.mem_writes.rbegin(); it != step.mem_writes.rend(); ++it) {
             simrv::memory::ram_write_fast(it->addr, it->old_data, it->funct3, machine_->memory_.mmu()->mmem());
         }
@@ -1034,10 +1034,23 @@ auto CPU::perform_backstep() -> bool {
 }
 
 void CPU::push_trace_history(Address pc, Instruction inst, const std::string& symbol) {
-    if (trace_history_.size() >= 50) {
-        trace_history_.erase(trace_history_.begin());
+    // O(1) ring buffer write — no heap allocation, no shifting
+    trace_history_buf_[trace_history_head_] = TraceHistoryEntry{pc, inst, symbol};
+    trace_history_head_ = (trace_history_head_ + 1) % kTraceHistoryCapacity;
+    if (trace_history_size_ < kTraceHistoryCapacity) {
+        trace_history_size_++;
     }
-    trace_history_.push_back(TraceHistoryEntry{pc, inst, symbol});
+}
+
+auto CPU::trace_history_view() const -> std::vector<TraceHistoryEntry> {
+    std::vector<TraceHistoryEntry> result;
+    result.reserve(trace_history_size_);
+    // oldest entry is at (head - size) wrapping around
+    const std::size_t start = (trace_history_head_ + kTraceHistoryCapacity - trace_history_size_) % kTraceHistoryCapacity;
+    for (std::size_t i = 0; i < trace_history_size_; ++i) {
+        result.push_back(trace_history_buf_[(start + i) % kTraceHistoryCapacity]);
+    }
+    return result;
 }
 
 }  // namespace simrv::core

@@ -79,7 +79,8 @@ auto LeftPane::render_pair(const std::string& l1, const std::string& v1, const c
 
 auto LeftPane::get_running_label_start_row() const -> int {
     int const available_content_rows = (visible_rows_ >= 15) ? (visible_rows_ - 11) : std::max(3, visible_rows_ - 1);
-    return std::max(0, (available_content_rows - 3) / 2);
+    int const centered = (available_content_rows - 3) / 2;
+    return std::max(0, centered - 2);
 }
 
 auto LeftPane::render_active_spinner(int logical_row, int width) -> std::string {

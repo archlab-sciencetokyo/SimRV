@@ -59,9 +59,11 @@ class RegisterFile {
     [[nodiscard]] constexpr auto read(RegId idx) const -> Register { return reg_[std::to_underlying(idx)]; }
 
     constexpr void write(RegId idx, Register val) {
-        if (idx != RegId::Zero) {
-            if (xlen == 32) {
-                val = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(val)));
+        if (simrv::compiler::likely(idx != RegId::Zero)) {
+            if constexpr (simrv::xlen::kIsXLen64) {
+                if (simrv::compiler::unlikely(xlen == 32)) {
+                    val = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(val)));
+                }
             }
             reg_[std::to_underlying(idx)] = val;
         }

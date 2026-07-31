@@ -104,6 +104,51 @@ void SystemConfigModal::adjust_setting(SysConfigDraft& draft, int index, int dir
     }
 }
 
+void SystemConfigModal::push_digit(SysConfigDraft& draft, int cursor, std::string& input, char digit) {
+    if (digit < '0' || digit > '9') return;
+    if (cursor != 0 && cursor != 1 && cursor != 2 && cursor != 3 && cursor != 4 && cursor != 5 && cursor != 10) return;
+    if (input.size() >= 5) return;
+    input.push_back(digit);
+    uint32_t val = 0;
+    try {
+        val = static_cast<uint32_t>(std::stoul(input));
+    } catch (...) {
+        return;
+    }
+    switch (cursor) {
+        case 0: draft.icache_miss_penalty = std::clamp(val, 1u, 100u); break;
+        case 1: draft.dcache_miss_penalty = std::clamp(val, 1u, 100u); break;
+        case 2: draft.tlb_miss_penalty = std::clamp(val, 1u, 200u); break;
+        case 3: draft.mul_latency = std::clamp(val, 1u, 20u); break;
+        case 4: draft.div_latency = std::clamp(val, 1u, 100u); break;
+        case 5: draft.branch_mispredict_penalty = std::clamp(val, 1u, 20u); break;
+        case 10: draft.btb_entries = std::clamp(val, 1u, 4096u); break;
+        default: break;
+    }
+}
+
+void SystemConfigModal::pop_digit(SysConfigDraft& draft, int cursor, std::string& input) {
+    if (input.empty()) return;
+    input.pop_back();
+    if (input.empty()) return;
+    uint32_t val = 0;
+    try {
+        val = static_cast<uint32_t>(std::stoul(input));
+    } catch (...) {
+        return;
+    }
+    switch (cursor) {
+        case 0: draft.icache_miss_penalty = std::clamp(val, 1u, 100u); break;
+        case 1: draft.dcache_miss_penalty = std::clamp(val, 1u, 100u); break;
+        case 2: draft.tlb_miss_penalty = std::clamp(val, 1u, 200u); break;
+        case 3: draft.mul_latency = std::clamp(val, 1u, 20u); break;
+        case 4: draft.div_latency = std::clamp(val, 1u, 100u); break;
+        case 5: draft.branch_mispredict_penalty = std::clamp(val, 1u, 20u); break;
+        case 10: draft.btb_entries = std::clamp(val, 1u, 4096u); break;
+        default: break;
+    }
+}
+
 void SystemConfigModal::toggle_setting(SysConfigDraft& draft, int index) {
     adjust_setting(draft, index, 1);
 }
@@ -126,11 +171,11 @@ auto SystemConfigModal::submit(const SysConfigDraft& draft, simrv::core::Machine
 
 void SystemConfigModal::render(std::vector<std::string>& content_rows,
                                const std::function<void(const std::string&)>& add_row_cb,
-                               const SysConfigDraft& draft, int cursor) {
+                               const SysConfigDraft& draft, int cursor, const std::string& input) {
     (void)content_rows;
     add_row_cb(
-        std::format("{}Use \033[1m[↑/↓]\033[0m to navigate, \033[1m[←/→/Space]\033[0m or \033[1m[1-9,a,b]\033[0m to "
-                    "modify, \033[1m[Enter]\033[0m to apply:\033[0m",
+        std::format("{}Use \033[1m[↑/↓]\033[0m to navigate, \033[1m[←/→/Space/0-9]\033[0m to "
+                    "modify count, \033[1m[Enter]\033[0m to apply:\033[0m",
                     kThemeMuted));
     add_row_cb("");
 
@@ -139,28 +184,53 @@ void SystemConfigModal::render(std::vector<std::string>& content_rows,
     };
     std::string bp_str = (draft.bp_type < 5) ? kBpNames[draft.bp_type] : "Unknown";
 
-    const auto settings = std::to_array<SysSettingItem>({
-        {" 1", "I-Cache Miss Penalty", std::format("\033[1;36m{} cycles\033[0m", draft.icache_miss_penalty)},
-        {" 2", "D-Cache Miss Penalty", std::format("\033[1;36m{} cycles\033[0m", draft.dcache_miss_penalty)},
-        {" 3", "TLB Miss Penalty", std::format("\033[1;36m{} cycles\033[0m", draft.tlb_miss_penalty)},
-        {" 4", "Multiplier Latency", std::format("\033[1;33m{} cycles\033[0m", draft.mul_latency)},
-        {" 5", "Divider Latency", std::format("\033[1;33m{} cycles\033[0m", draft.div_latency)},
-        {" 6", "Branch Mispredict Penalty", std::format("\033[1;31m{} cycles\033[0m", draft.branch_mispredict_penalty)},
-        {" 7", "Full Operand Forwarding", draft.enable_forwarding ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {" 8", "EX-Stage Forwarding", draft.enable_ex_forwarding ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {" 9", "MEM-Stage Forwarding", draft.enable_mem_forwarding ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {" a", "Branch Predictor Strategy", std::format("\033[1;35m[{}]\033[0m", bp_str)},
-        {" b", "BTB Table Entries", std::format("\033[1;36m{} entries\033[0m", draft.btb_entries)},
+    struct ItemInfo {
+        const char* name;
+        std::string val;
+    };
+
+    std::string icache_val = (cursor == 0 && !input.empty())
+                                 ? std::format("\033[1;36m{} cycles\033[0m \033[90m(input: {})\033[0m", draft.icache_miss_penalty, input)
+                                 : std::format("\033[1;36m{} cycles\033[0m", draft.icache_miss_penalty);
+    std::string dcache_val = (cursor == 1 && !input.empty())
+                                 ? std::format("\033[1;36m{} cycles\033[0m \033[90m(input: {})\033[0m", draft.dcache_miss_penalty, input)
+                                 : std::format("\033[1;36m{} cycles\033[0m", draft.dcache_miss_penalty);
+    std::string tlb_val = (cursor == 2 && !input.empty())
+                               ? std::format("\033[1;36m{} cycles\033[0m \033[90m(input: {})\033[0m", draft.tlb_miss_penalty, input)
+                               : std::format("\033[1;36m{} cycles\033[0m", draft.tlb_miss_penalty);
+    std::string mul_val = (cursor == 3 && !input.empty())
+                               ? std::format("\033[1;33m{} cycles\033[0m \033[90m(input: {})\033[0m", draft.mul_latency, input)
+                               : std::format("\033[1;33m{} cycles\033[0m", draft.mul_latency);
+    std::string div_val = (cursor == 4 && !input.empty())
+                               ? std::format("\033[1;33m{} cycles\033[0m \033[90m(input: {})\033[0m", draft.div_latency, input)
+                               : std::format("\033[1;33m{} cycles\033[0m", draft.div_latency);
+    std::string branch_val = (cursor == 5 && !input.empty())
+                                  ? std::format("\033[1;31m{} cycles\033[0m \033[90m(input: {})\033[0m", draft.branch_mispredict_penalty, input)
+                                  : std::format("\033[1;31m{} cycles\033[0m", draft.branch_mispredict_penalty);
+    std::string btb_val = (cursor == 10 && !input.empty())
+                              ? std::format("\033[1;36m{} entries\033[0m \033[90m(input: {})\033[0m", draft.btb_entries, input)
+                              : std::format("\033[1;36m{} entries\033[0m", draft.btb_entries);
+
+    const auto settings = std::to_array<ItemInfo>({
+        {"I-Cache Miss Penalty", icache_val},
+        {"D-Cache Miss Penalty", dcache_val},
+        {"TLB Miss Penalty", tlb_val},
+        {"Multiplier Latency", mul_val},
+        {"Divider Latency", div_val},
+        {"Branch Mispredict Penalty", branch_val},
+        {"Full Operand Forwarding", draft.enable_forwarding ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+        {"EX-Stage Forwarding", draft.enable_ex_forwarding ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+        {"MEM-Stage Forwarding", draft.enable_mem_forwarding ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+        {"Branch Predictor Strategy", std::format("\033[1;35m[{}]\033[0m", bp_str)},
+        {"BTB Table Entries", btb_val},
     });
 
     for (std::size_t i = 0; i < settings.size(); ++i) {
         bool is_sel = (static_cast<int>(i) == cursor);
         std::string prefix = is_sel ? std::format("{}>\033[0m ", kThemeMint) : "  ";
-        std::string num_key =
-            std::format("{}[{}]\033[0m", is_sel ? kThemeMint : kThemeSky, settings[i].key);
         std::string name_str = std::format(
-            "{}{:<27}\033[0m", is_sel ? "\033[1;37m" : kThemeText, settings[i].name);
-        add_row_cb(std::format("{}{} {} : {}", prefix, num_key, name_str, settings[i].val));
+            "{}{:<29}\033[0m", is_sel ? "\033[1;37m" : kThemeText, settings[i].name);
+        add_row_cb(std::format("{}{} : {}", prefix, name_str, settings[i].val));
     }
     add_row_cb("");
     add_row_cb(
