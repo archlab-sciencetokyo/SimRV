@@ -803,12 +803,15 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
 
     int const history_size = static_cast<int>(history.size());
 
-    // Collect unique PCs in this window chronologically.
+    // Collect unique instruction instances in this window chronologically.
     struct InstRef {
+        uint64_t inst_id = 0;
         Register pc = 0;
         isa::OperationId op_id = isa::OperationId::UNKNOWN;
 
-        auto operator==(const InstRef& o) const -> bool { return pc == o.pc; }
+        auto operator==(const InstRef& o) const -> bool {
+            return (inst_id != 0 && o.inst_id != 0) ? (inst_id == o.inst_id) : (pc == o.pc);
+        }
     };
     std::vector<InstRef> active_insts;
     int const scan_start = std::max(0, history_size - 14);
@@ -818,7 +821,7 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
             &snap.w, &snap.m, &snap.e, &snap.d, &snap.f};
         for (auto const* stage : stages) {
             if (stage->valid && stage->pc != 0) {
-                InstRef ref{.pc = stage->pc, .op_id = stage->op_id};
+                InstRef ref{.inst_id = stage->inst_id, .pc = stage->pc, .op_id = stage->op_id};
                 if (std::ranges::find(active_insts, ref) == active_insts.end()) {
                     active_insts.push_back(ref);
                 }
@@ -887,19 +890,26 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
         for (int i = start_idx; i < history_size; ++i) {
             auto const& snap = history.at(i);
             std::string stage_lbl = " .   ";
-            // Check stages (check from latest to earliest for correct priority)
-            if (snap.w.valid && snap.w.pc == inst.pc) {
+            auto matches = [&](const simrv::pipeline::PipelineCycleSnapshot::StageInfo& stage) -> bool {
+                if (!stage.valid) return false;
+                if (inst.inst_id != 0 && stage.inst_id != 0) {
+                    return stage.inst_id == inst.inst_id;
+                }
+                return stage.pc == inst.pc;
+            };
+
+            if (matches(snap.w)) {
                 stage_lbl = "\033[1;37m WB\033[0m  ";
-            } else if (snap.m.valid && snap.m.pc == inst.pc) {
+            } else if (matches(snap.m)) {
                 stage_lbl =
                     snap.m.stalled ? "\033[38;5;203m MEM*\033[0m" : "\033[1;34m MEM\033[0m ";
-            } else if (snap.e.valid && snap.e.pc == inst.pc) {
+            } else if (matches(snap.e)) {
                 stage_lbl =
                     snap.e.stalled ? "\033[38;5;203m EX*\033[0m " : "\033[1;31m EX\033[0m  ";
-            } else if (snap.d.valid && snap.d.pc == inst.pc) {
+            } else if (matches(snap.d)) {
                 stage_lbl =
                     snap.d.stalled ? "\033[38;5;203m ID*\033[0m " : "\033[1;33m ID\033[0m  ";
-            } else if (snap.f.valid && snap.f.pc == inst.pc) {
+            } else if (matches(snap.f)) {
                 stage_lbl =
                     snap.f.stalled ? "\033[38;5;203m IF*\033[0m " : "\033[1;32m IF\033[0m  ";
             }
@@ -926,9 +936,12 @@ auto LeftPane::get_pipeline_pc_at_row(int logical_row) const -> Register {
         int const history_size = static_cast<int>(history.size());
 
         struct InstRef {
+            uint64_t inst_id = 0;
             Register pc = 0;
             isa::OperationId op_id = isa::OperationId::UNKNOWN;
-            auto operator==(const InstRef& o) const -> bool { return pc == o.pc; }
+            auto operator==(const InstRef& o) const -> bool {
+                return (inst_id != 0 && o.inst_id != 0) ? (inst_id == o.inst_id) : (pc == o.pc);
+            }
         };
         std::vector<InstRef> active_insts;
         int const scan_start = std::max(0, history_size - 14);
@@ -938,7 +951,7 @@ auto LeftPane::get_pipeline_pc_at_row(int logical_row) const -> Register {
                 &snap.w, &snap.m, &snap.e, &snap.d, &snap.f};
             for (auto const* stage : stages) {
                 if (stage->valid && stage->pc != 0) {
-                    InstRef ref{.pc = stage->pc, .op_id = stage->op_id};
+                    InstRef ref{.inst_id = stage->inst_id, .pc = stage->pc, .op_id = stage->op_id};
                     if (std::ranges::find(active_insts, ref) == active_insts.end()) {
                         active_insts.push_back(ref);
                     }

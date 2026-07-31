@@ -494,6 +494,8 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
 
     cpu.soft_tlb_flush();
     cpu.TLB_flush();
+    cpu.icache.flush(true);
+    cpu.dcache.flush(true);
     cpu.decode_cache.flush();
     cpu.pipeline_context = simrv::pipeline::PipelineContext{};
     cpu.undo_stack.clear();

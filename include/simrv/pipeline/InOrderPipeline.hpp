@@ -82,6 +82,7 @@ private:
     uint32_t div_busy_cycles_remaining_ = 0;
 
     uint64_t cycle_count_ = 0;
+    uint64_t next_inst_id_ = 0;
     uint64_t stall_cycles_ = 0;
     uint64_t bubble_cycles_ = 0;
     uint64_t icache_stalls_ = 0;

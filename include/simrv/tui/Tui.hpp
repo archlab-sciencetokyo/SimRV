@@ -177,9 +177,12 @@ class Tui {
     std::unique_ptr<StatusBar> status_bar_;
 
     int pane_width_cached_ = 62;
+    [[nodiscard]] auto is_sixel_supported() const -> bool { return sixel_supported_; }
+
     int user_left_pane_width_{-1};
     int cell_width_px_ = 8;
     int cell_height_px_ = 16;
+    bool sixel_supported_{false};
     VirtualTerminal vt_;
     VirtualTerminal vt_log_;
     std::vector<std::string> trace_buffer_;

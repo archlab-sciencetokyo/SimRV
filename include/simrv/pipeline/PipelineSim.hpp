@@ -19,6 +19,7 @@ struct BtbEntry {
 };
 
 struct PipelineReg {
+    uint64_t inst_id = 0;
     Register pc = 0;
     isa::Opcode opcode = static_cast<isa::Opcode>(0);
     RegId rd = static_cast<RegId>(0);
@@ -65,6 +66,7 @@ struct CpuConfig {
 struct PipelineCycleSnapshot {
     uint64_t cycle = 0;
     struct StageInfo {
+        uint64_t inst_id = 0;
         Register pc = 0;
         isa::OperationId op_id = isa::OperationId::UNKNOWN;
         bool valid = false;

@@ -77,40 +77,61 @@ auto LeftPane::render_pair(const std::string& l1, const std::string& v1, const c
            format_to_width(make_field(l2, v2, c2, label_pad), right_width);
 }
 
+auto LeftPane::get_running_label_start_row() const -> int {
+    int const available_content_rows = (visible_rows_ >= 15) ? (visible_rows_ - 11) : std::max(3, visible_rows_ - 1);
+    return std::max(0, (available_content_rows - 3) / 2);
+}
+
 auto LeftPane::render_active_spinner(int logical_row, int width) -> std::string {
     auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
     constexpr std::array<const char*, 10> spinner = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
     std::string spin = spinner.at((static_cast<std::size_t>(now_ms / 80)) % 10);
 
-    bool const is_reg_page = (page_ == TuiRegPage::GPR || page_ == TuiRegPage::FPR || page_ == TuiRegPage::VEC);
-    bool const single_column = is_reg_page && ([&]() -> bool {
-        if (page_ == TuiRegPage::GPR) {
-            return (simrv::xlen::kIsXLen64 && width < 58) || (!simrv::xlen::kIsXLen64 && width < 42);
-        }
-        return width < 58;
-    }());
+    int const start_row = get_running_label_start_row();
 
-    int target_row_offset = single_column ? 8 : 0;
-    if (logical_row == 10 + target_row_offset) {
+    if (logical_row == start_row) {
         std::string text = std::format("{}●\033[0m \033[1m{}SIMULATOR ACTIVE\033[0m", kThemePink, kThemePink);
         int spaces = std::max(0, (width - 18) / 2);
         std::string line = std::string(spaces, ' ') + text;
         return format_to_width(line, width);
     }
-    if (logical_row == 11 + target_row_offset) {
+    if (logical_row == start_row + 1) {
         std::string text = std::format("[  {}{}\033[0m  Executing instructions... ]", kThemeMint, spin);
         int spaces = std::max(0, (width - 33) / 2);
         std::string line = std::string(spaces, ' ') + text;
         return format_to_width(line, width);
     }
-    if (logical_row == 12 + target_row_offset) {
-        std::string text = std::format("Press {}[Ctrl-P]\033[0m or {}[Click Mouse]\033[0m to pause", kThemeSky, kThemeSky);
-        int spaces = std::max(0, (width - 38) / 2);
+    if (logical_row == start_row + 2) {
+        std::string text = std::format("Press \033[1m{}[Ctrl-P]\033[0m or \033[1m{}[Click Here]\033[0m to pause", kThemeSky, kThemeSky);
+        int spaces = std::max(0, (width - 39) / 2);
         std::string line = std::string(spaces, ' ') + text;
         return format_to_width(line, width);
     }
     return format_to_width("", width);
 }
+
+auto LeftPane::is_running_label_click(int logical_row, int col, int width) const -> bool {
+    int const start_row = get_running_label_start_row();
+
+    if (logical_row == start_row) {
+        int text_len = 18; // "● SIMULATOR ACTIVE"
+        int spaces = std::max(0, (width - text_len) / 2);
+        return col >= (spaces - 1) && col <= (spaces + text_len + 1);
+    }
+    if (logical_row == start_row + 1) {
+        int text_len = 33; // "[  ⠋  Executing instructions... ]"
+        int spaces = std::max(0, (width - text_len) / 2);
+        return col >= (spaces - 1) && col <= (spaces + text_len + 1);
+    }
+    if (logical_row == start_row + 2) {
+        int text_len = 39; // "Press [Ctrl-P] or [Click Here] to pause"
+        int spaces = std::max(0, (width - text_len) / 2);
+        return col >= (spaces - 1) && col <= (spaces + text_len + 1);
+    }
+    return false;
+}
+
+
 
 auto LeftPane::get_row_uncached(int logical_row, int width) -> std::string {
     auto const& cpu = machine_.cpu;

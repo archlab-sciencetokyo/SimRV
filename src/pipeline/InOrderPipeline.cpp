@@ -66,6 +66,7 @@ void InOrderPipeline::reset() {
     div_busy_cycles_remaining_ = 0;
 
     cycle_count_ = 0;
+    next_inst_id_ = 0;
     stall_cycles_ = 0;
     bubble_cycles_ = 0;
     icache_stalls_ = 0;
@@ -412,6 +413,7 @@ auto InOrderPipeline::step_instruction(Register pc, isa::Opcode opcode, RegId rd
         }
     }
 
+    f_reg_.inst_id = ++next_inst_id_;
     f_reg_.pc = pc;
     f_reg_.opcode = opcode;
     f_reg_.rd = rd;
@@ -450,26 +452,31 @@ void InOrderPipeline::record_cycle_snapshot() {
     PipelineCycleSnapshot snap;
     snap.cycle = cycle_count_;
 
+    snap.f.inst_id = f_reg_.inst_id;
     snap.f.pc = f_reg_.pc;
     snap.f.op_id = f_reg_.op_id;
     snap.f.valid = f_reg_.valid;
     snap.f.stalled = (icache_stall_remaining_ > 0 || tlb_stall_remaining_ > 0);
 
+    snap.d.inst_id = d_reg_.inst_id;
     snap.d.pc = d_reg_.pc;
     snap.d.op_id = d_reg_.op_id;
     snap.d.valid = d_reg_.valid;
     snap.d.stalled = check_stall_id();
 
+    snap.e.inst_id = e_reg_.inst_id;
     snap.e.pc = e_reg_.pc;
     snap.e.op_id = e_reg_.op_id;
     snap.e.valid = e_reg_.valid;
     snap.e.stalled = (div_busy_cycles_remaining_ > 0);
 
+    snap.m.inst_id = m_reg_.inst_id;
     snap.m.pc = m_reg_.pc;
     snap.m.op_id = m_reg_.op_id;
     snap.m.valid = m_reg_.valid;
     snap.m.stalled = (dcache_stall_remaining_ > 0);
 
+    snap.w.inst_id = w_reg_.inst_id;
     snap.w.pc = w_reg_.pc;
     snap.w.op_id = w_reg_.op_id;
     snap.w.valid = w_reg_.valid;

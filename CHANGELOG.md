@@ -3,6 +3,32 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.0-rc.2] — 2026-07-31
+
+Release candidate 2 for v2.0.0. Focuses on TUI UX refinements, pipeline execution timeline correctness, hardware Sixel capability detection, and compiler prerequisite updates.
+
+### TUI & Visualizers
+- **Pipeline Execution Timeline Overhaul**:
+  - Assigned a unique 64-bit dynamic instruction sequence ID (`inst_id`) to stage registers and cycle snapshots.
+  - Fixed a stage merging bug where instructions in a loop (sharing the same static PC) merged across iterations, producing repeating stage artifacts like `WB ID EX MEM WB ID EX MEM WB`.
+  - Dynamic instruction instances now render as distinct rows in chronological order, producing clean textbook pipeline execution diagrams (`IF → ID → EX → MEM → WB`).
+- **Arrows-Only Cache Inspector Navigation**:
+  - Simplified Cache Inspector navigation: Up/Down arrow keys (`[↑/↓]`) cycle Cache Ways (`0-3`), and Left/Right arrow keys (`[←/→]`) cycle Cache Sets (`0-15`).
+  - Removed redundant keybindings (`w`/`W`, `j`/`k`, number keys `0-3`) from the Cache page, leaving `[w]` dedicated strictly to the Set Watchpoint dialog.
+  - Arrow keys automatically pass through to the guest virtual terminal / UART when the simulator is running.
+- **High-Legibility Bold Key Badges & Styling**:
+  - Key shortcut brackets `[key]` across status bars, help modals, and inspector hints are now formatted in distinct ANSI bold (`\033[1m`) paired with vibrant theme accent colors (`kThemeSky` cyan).
+- **Automatic Sixel Terminal Query & ANSI Fallback**:
+  - Added Primary Device Attributes (DA1 - `\033[c`) query and environment checks (`TERM`, `TERM_PROGRAM`) to detect Sixel graphics support.
+  - Automatically falls back to clean standard ANSI text and diff cell rendering on unsupported terminals without producing escape artifacts.
+- **Cache Statistics Persistence**:
+  - Preserved cumulative cache hit, miss, and replacement statistics across `FENCE.I` cache line flushes (`BaseCache::flush()`).
+  - Performance counters now accumulate accurately throughout guest execution and only reset on explicit machine reset/reboot.
+
+### Build & Documentation
+- **Compiler Prerequisites**: Updated minimum compiler requirements in `README.md` to Clang 20+ and GCC 14+ for complete C++23 standard library compatibility.
+- **Release Assets Note**: Added guidance in `README.md` noting that GitHub release packed binaries contain standalone executables without supplementary test scripts or images.
+
 ---
 
 ## [v2.0.0-rc.1] — 2026-07-30

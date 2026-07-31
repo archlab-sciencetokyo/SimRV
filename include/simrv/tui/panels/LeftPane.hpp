@@ -66,6 +66,7 @@ class LeftPane : public TuiWidget {
     [[nodiscard]] auto get_pipeline_pc_at_row(int logical_row) const -> Register;
     [[nodiscard]] auto get_register_value_at_row(int logical_row, int col_x, int pane_width) const -> std::optional<Register>;
     [[nodiscard]] auto get_stack_addr_at_row(int logical_row) const -> std::optional<Register>;
+    [[nodiscard]] auto is_running_label_click(int logical_row, int col, int width) const -> bool;
 
     void select_next_cache_set(int delta) {
         constexpr int kNumSets = 16;
@@ -100,6 +101,7 @@ class LeftPane : public TuiWidget {
 
     [[nodiscard]] auto is_single_column(int width) const -> bool;
     [[nodiscard]] auto get_total_rows(int width) -> int;
+    [[nodiscard]] auto get_running_label_start_row() const -> int;
     [[nodiscard]] auto render_active_spinner(int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_registers_single_column(const simrv::core::ArchState& st, int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_registers_double_column(const simrv::core::ArchState& st, int logical_row, int col_width, int right_width) -> std::string;

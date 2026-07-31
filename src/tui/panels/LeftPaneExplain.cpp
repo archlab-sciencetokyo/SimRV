@@ -528,7 +528,7 @@ auto LeftPane::get_explain_rows(int width) -> std::vector<std::string> {
         explain_rows.push_back(format_to_width(std::format("  {}PC     : {}0x00000000\033[0m", kThemeText, kThemeCoral), width));
         explain_rows.push_back(format_to_width("", width));
         explain_rows.push_back(format_to_width(std::format("  {}Status : {}No program image loaded (PC is 0x0)\033[0m", kThemeText, kThemePeach), width));
-        explain_rows.push_back(format_to_width(std::format("  {}Action : {}Press [o] to load a RISC-V ELF binary image.\033[0m", kThemeText, kThemeSky), width));
+        explain_rows.push_back(format_to_width(std::format("  {}Action : {}Press \033[1m[o]\033[22m to load a RISC-V ELF binary image.\033[0m", kThemeText, kThemeSky), width));
         explain_rows.push_back(format_to_width("", width));
         explain_rows.push_back(section_line("End Explainer", width));
         return explain_rows;
@@ -549,7 +549,7 @@ auto LeftPane::get_explain_rows(int width) -> std::vector<std::string> {
         explain_rows.push_back(format_to_width(std::format("  {}PC     : {}{}\033[0m", kThemeText, kThemeCoral, hex_addr(target_pc)), width));
         explain_rows.push_back(format_to_width("", width));
         explain_rows.push_back(format_to_width(std::format("  {}Status : {}Instruction fetch failed / Unmapped memory address\033[0m", kThemeText, kThemePeach), width));
-        explain_rows.push_back(format_to_width(std::format("  {}Action : {}Inspect another address [m] or load a valid binary [o].\033[0m", kThemeText, kThemeSky), width));
+        explain_rows.push_back(format_to_width(std::format("  {}Action : {}Inspect another address \033[1m[m]\033[22m or load a valid binary \033[1m[o]\033[22m.\033[0m", kThemeText, kThemeSky), width));
         explain_rows.push_back(format_to_width("", width));
         explain_rows.push_back(section_line("End Explainer", width));
         return explain_rows;

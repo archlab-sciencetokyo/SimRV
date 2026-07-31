@@ -70,18 +70,24 @@ class BaseCache {
         std::memcpy(victim->data.data(), line_data, kLineBytes);
     }
 
-    void flush() {
+    void flush(bool clear_stats = false) {
         for (auto& set : sets_) {
             std::ranges::fill(set, CacheLine{});
         }
-        hits_ = 0;
-        misses_ = 0;
-        access_tick_ = 0;
-        replacements_ = 0;
         last_replaced_set_ = 0xFFFFFFFF;
         last_replaced_way_ = 0xFFFFFFFF;
         last_evicted_tag_ = ~Address{0};
         last_inserted_tag_ = ~Address{0};
+        if (clear_stats) {
+            reset_stats();
+        }
+    }
+
+    void reset_stats() {
+        hits_ = 0;
+        misses_ = 0;
+        access_tick_ = 0;
+        replacements_ = 0;
     }
 
     [[nodiscard]] auto hit_count() const -> uint64_t { return hits_; }

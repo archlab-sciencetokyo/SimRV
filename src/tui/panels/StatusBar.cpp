@@ -31,8 +31,6 @@ auto StatusBar::is_pos_on_status_badge(int x, int width) const -> bool {
         binary_name = "application";
     }
     std::string mode_str = machine_.s_appmode ? "Application" : "OS/RTOS";
-    std::string sim_mode = machine_.s_cycle_accurate ? "CA" : "IA";
-    std::string tui_mode = machine_.s_debug_mode ? "Debug" : "Normal";
     int target_width = layout_ == TuiLayout::Split ? left_width_ : width - 2;
     std::string prefix;
     if (target_width < 35) {
@@ -40,8 +38,7 @@ auto StatusBar::is_pos_on_status_badge(int x, int width) const -> bool {
     } else if (target_width < 50) {
         prefix = std::format(" SimRV [{}] | ", binary_name);
     } else {
-        prefix =
-            std::format(" SimRV [{}] ({}, {}, {}) | ", binary_name, mode_str, sim_mode, tui_mode);
+        prefix = std::format(" SimRV [{}] ({}) | ", binary_name, mode_str);
     }
 
     int prefix_len = get_display_width(prefix);
@@ -334,8 +331,18 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
         }
 
         if (color_tag != nullptr) {
-            row_str += color_tag;
-            row_str += e.text;
+            std::string_view text_sv{e.text};
+            std::size_t close_bracket = text_sv.find(']');
+            if (text_sv.starts_with('[') && close_bracket != std::string_view::npos) {
+                row_str += "\033[1m";
+                row_str += color_tag;
+                row_str += text_sv.substr(0, close_bracket + 1);
+                row_str += "\033[22m";
+                row_str += text_sv.substr(close_bracket + 1);
+            } else {
+                row_str += color_tag;
+                row_str += e.text;
+            }
             row_str += "\033[0m";
         } else {
             row_str += e.text;

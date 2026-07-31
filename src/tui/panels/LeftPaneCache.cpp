@@ -102,10 +102,10 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
             return section_line(std::format("Set & Way Inspector — {} Set #{:02d} (0-15)", target_name, cache_inspect_set_), width);
         }
         case 5: {
-            return format_to_width(
-                std::format("  {}Use \033[1m[↑/↓]\033[0m or \033[1m[j/k]\033[0m Set, \033[1m[←/→]\033[0m I/D-Cache, \033[1m[0-3]\033[0m or \033[1m[w]\033[0m Way\033[0m",
-                            kThemeMuted),
-                width);
+            return format_to_width(std::format("  {}Use \033[1m{}[↑/↓]\033[0m{} Way, "
+                                               "\033[1m{}[←/→]\033[0m{} Set\033[0m",
+                                               kThemeMuted, kThemeSky, kThemeMuted, kThemeSky, kThemeMuted),
+                                   width);
         }
         case 6:
         case 7:
