@@ -859,41 +859,7 @@ void Tui::toggle_sakura_theme() {
     render(true);
 }
 
-void Tui::toggle_cycle_accurate() {
-    machine_.s_cycle_accurate = !machine_.s_cycle_accurate;
-    if (machine_.s_cycle_accurate) {
-        machine_.s_high_performance = false;
-    } else {
-        machine_.s_high_performance = true;
-        machine_.s_use_mix = false;
-    }
-    modal_.open_notice("SIMULATION MODE CHANGED", std::format("Simulation mode switched to {}",
-                       machine_.s_cycle_accurate ? "Cycle-Accurate (CA)" : "Instruction-Accurate (IA)"), false);
-    render(true);
-}
 
-void Tui::toggle_debug_mode() {
-    machine_.s_debug_mode = !machine_.s_debug_mode;
-    if (machine_.s_debug_mode) {
-        machine_.s_use_mix = machine_.s_cycle_accurate;
-        machine_.s_bp_trace = true;
-        machine_.s_rollback_enabled = true;
-        trace_enabled_.store(true, std::memory_order_relaxed);
-        update_trace_active_cache();
-        machine_.tracer.init_trace(true);
-    } else {
-        machine_.s_use_mix = false;
-        machine_.s_bp_trace = false;
-        machine_.s_rollback_enabled = false;
-        machine_.cpu.undo_stack.clear();
-        trace_enabled_.store(false, std::memory_order_relaxed);
-        update_trace_active_cache();
-        machine_.tracer.init_trace(false);
-    }
-    modal_.open_notice("TUI MODE CHANGED", std::format("TUI mode switched to {}",
-                       machine_.s_debug_mode ? "Debug mode" : "Normal mode"), false);
-    render(true);
-}
 
 void Tui::cycle_right_panel_mode() {
     TuiRightPanelMode current = right_panel_mode_.load(std::memory_order_relaxed);
@@ -1909,33 +1875,6 @@ void Tui::on_cycle_completed_slow() {
     }
 }
 
-void Tui::remove_breakpoint_or_watchpoint_by_index(size_t target_idx) {
-    const auto& pc_bps = machine_.breakpoints.get_pc_breakpoints();
-    const auto& wps = machine_.breakpoints.get_watchpoints();
 
-    size_t current_idx = 0;
-    for (auto pc : pc_bps) {
-        if (current_idx == target_idx) {
-            machine_.breakpoints.remove_pc_breakpoint(pc);
-            modal_.open_notice("BREAKPOINT REMOVED", std::format("Removed Breakpoint at 0x{:08x}", pc), false);
-            return;
-        }
-        current_idx++;
-    }
-
-    for (const auto& wp : wps) {
-        if (current_idx == target_idx) {
-            if (wp.target == simrv::debug::WatchTarget::Memory) {
-                machine_.breakpoints.remove_watchpoint(wp.addr);
-                modal_.open_notice("WATCHPOINT REMOVED", std::format("Removed Memory Watchpoint at 0x{:08x}", wp.addr), false);
-            } else {
-                machine_.breakpoints.remove_reg_watchpoint(wp.reg_type, wp.reg_index);
-                modal_.open_notice("WATCHPOINT REMOVED", std::format("Removed Register Watchpoint on {}", wp.reg_name), false);
-            }
-            return;
-        }
-        current_idx++;
-    }
-}
 
 }  // namespace simrv::tui

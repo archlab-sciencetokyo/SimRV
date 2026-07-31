@@ -127,12 +127,9 @@ class Tui {
     void cycle_reg_page();
     void cycle_tool_page();
     void set_reg_page(TuiRegPage page);
-    void remove_breakpoint_or_watchpoint_by_index(size_t target_idx);
     void toggle_explain();
     void toggle_high_contrast();
     void toggle_sakura_theme();
-    void toggle_cycle_accurate();
-    void toggle_debug_mode();
     void cycle_right_panel_mode();
     void record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa::OperationId op_id, uint8_t rd, Register rd_val, uint8_t rs1, Register rs1_val, uint8_t rs2, Register rs2_val, int64_t imm);
     void toggle_trace_enabled();
