@@ -84,9 +84,9 @@ namespace simrv::debug {
  * @brief One instruction's committed effect as reported by Spike --log-commits.
  */
 struct SpikeCommitRecord {
-    Address pc{};                           ///< PC of retired instruction
-    std::array<Register, 32> gpr{};         ///< Full GPR snapshot after retire
-    std::array<bool, 32>     gpr_valid{};   ///< True for registers written this insn
+    Address pc{};                      ///< PC of retired instruction
+    std::array<Register, 32> gpr{};    ///< Full GPR snapshot after retire
+    std::array<bool, 32> gpr_valid{};  ///< True for registers written this insn
 };
 
 /**
@@ -105,12 +105,8 @@ class SpikeLockstep {
      *                    to derive automatically from the active MISA CSR.
      * @param halt_on_diverge  If true, set the halt flag on first mismatch.
      */
-    SpikeLockstep(std::string spike_bin,
-                  std::string mem_image,
-                  std::string disk_image,
-                  std::string dtb_file,
-                  std::string isa_string,
-                  bool        halt_on_diverge = true);
+    SpikeLockstep(std::string spike_bin, std::string mem_image, std::string disk_image,
+                  std::string dtb_file, std::string isa_string, bool halt_on_diverge = true);
 
     ~SpikeLockstep();
 
@@ -151,7 +147,8 @@ class SpikeLockstep {
      * @param icount  Instruction count (for diagnostics).
      * @return true if states match, false on divergence.
      */
-    auto compare_and_report(const simrv::core::ArchState& state, Address current_pc, uint64_t icount) -> bool;
+    auto compare_and_report(const simrv::core::ArchState& state, Address current_pc,
+                            uint64_t icount) -> bool;
 
     /** @return True if a divergence has been detected and simulation should halt. */
     [[nodiscard]] bool should_halt() const { return should_halt_; }
@@ -170,10 +167,10 @@ class SpikeLockstep {
     std::string isa_string_;
     bool halt_on_diverge_;
 
-    pid_t spike_pid_    = -1;
-    int   spike_stdout_ = -1;  ///< Read end of Spike's stdout pipe (--log-commits goes to stderr)
-    int   spike_stderr_ = -1;  ///< Read end of Spike's stderr pipe
-    bool  should_halt_  = false;
+    pid_t spike_pid_ = -1;
+    int spike_stdout_ = -1;  ///< Read end of Spike's stdout pipe (--log-commits goes to stderr)
+    int spike_stderr_ = -1;  ///< Read end of Spike's stderr pipe
+    bool should_halt_ = false;
 
     // Line-level buffered reader for spike_stderr_
     std::string line_buf_;
@@ -184,12 +181,11 @@ class SpikeLockstep {
     [[nodiscard]] auto read_line() -> std::string;
 
     /** Parse one Spike --log-commits line into a SpikeCommitRecord. */
-    [[nodiscard]] static auto
-    parse_commit_line(const std::string& line, SpikeCommitRecord& rec) -> std::optional<SpikeCommitRecord>;
+    [[nodiscard]] static auto parse_commit_line(const std::string& line, SpikeCommitRecord& rec)
+        -> std::optional<SpikeCommitRecord>;
 
     /** Print a coloured divergence report. */
-    void print_divergence(uint64_t icount, Address simrv_pc,
-                          Address spike_pc,
+    void print_divergence(uint64_t icount, Address simrv_pc, Address spike_pc,
                           const simrv::core::ArchState& simrv_state,
                           const SpikeCommitRecord& spike_rec);
 };

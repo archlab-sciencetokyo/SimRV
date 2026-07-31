@@ -38,7 +38,8 @@ class Tlb {
     void flush();
     void flush_selective(bool match_all_vaddr, Address vaddr, bool match_all_asid, Word asid);
 
-    [[nodiscard]] inline auto lookup_inst_r(Address vaddr, Word asid, PrivilegeLevel priv) -> TLBEntry* {
+    [[nodiscard]] inline auto lookup_inst_r(Address vaddr, Word asid, PrivilegeLevel priv)
+        -> TLBEntry* {
         size_t const set = (vaddr >> 12) & (kNumSets - 1);
         Address const vpage = vaddr & ~simrv::memory::kPageMask;
         for (int i = 0; i < 2; i++) {
@@ -51,7 +52,8 @@ class Tlb {
         return nullptr;
     }
 
-    inline auto insert_inst_r(Address vaddr, Address paddr, Word asid, PrivilegeLevel priv) -> TLBEntry* {
+    inline auto insert_inst_r(Address vaddr, Address paddr, Word asid, PrivilegeLevel priv)
+        -> TLBEntry* {
         size_t const set = (vaddr >> 12) & (kNumSets - 1);
         int const way = inst_r_lru[set];
         auto& entry = inst_r[set][way];
@@ -64,7 +66,8 @@ class Tlb {
         return &entry;
     }
 
-    [[nodiscard]] inline auto lookup_data_r(Address vaddr, Word asid, PrivilegeLevel priv) -> TLBEntry* {
+    [[nodiscard]] inline auto lookup_data_r(Address vaddr, Word asid, PrivilegeLevel priv)
+        -> TLBEntry* {
         size_t const set = (vaddr >> 12) & (kNumSets - 1);
         Address const vpage = vaddr & ~simrv::memory::kPageMask;
         for (int i = 0; i < 2; i++) {
@@ -77,7 +80,8 @@ class Tlb {
         return nullptr;
     }
 
-    inline auto insert_data_r(Address vaddr, Address paddr, Word asid, PrivilegeLevel priv) -> TLBEntry* {
+    inline auto insert_data_r(Address vaddr, Address paddr, Word asid, PrivilegeLevel priv)
+        -> TLBEntry* {
         size_t const set = (vaddr >> 12) & (kNumSets - 1);
         int const way = data_r_lru[set];
         auto& entry = data_r[set][way];
@@ -90,7 +94,8 @@ class Tlb {
         return &entry;
     }
 
-    [[nodiscard]] inline auto lookup_data_w(Address vaddr, Word asid, PrivilegeLevel priv) -> TLBEntry* {
+    [[nodiscard]] inline auto lookup_data_w(Address vaddr, Word asid, PrivilegeLevel priv)
+        -> TLBEntry* {
         size_t const set = (vaddr >> 12) & (kNumSets - 1);
         Address const vpage = vaddr & ~simrv::memory::kPageMask;
         for (int i = 0; i < 2; i++) {
@@ -103,7 +108,8 @@ class Tlb {
         return nullptr;
     }
 
-    inline auto insert_data_w(Address vaddr, Address paddr, Word asid, PrivilegeLevel priv) -> TLBEntry* {
+    inline auto insert_data_w(Address vaddr, Address paddr, Word asid, PrivilegeLevel priv)
+        -> TLBEntry* {
         size_t const set = (vaddr >> 12) & (kNumSets - 1);
         int const way = data_w_lru[set];
         auto& entry = data_w[set][way];

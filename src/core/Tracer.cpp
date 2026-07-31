@@ -3,9 +3,6 @@
  * @brief Architectural and simulation tracing facility implementation.
  */
 #include "simrv/core/Tracer.hpp"
-#include "simrv/core/Logger.hpp"
-#include "simrv/util/FormatUtil.hpp"
-
 
 #include <chrono>
 #include <cstddef>
@@ -21,12 +18,14 @@
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/pipeline/Decoder.hpp"
 #include "simrv/device/Console.hpp"
 #include "simrv/device/Disk.hpp"
 #include "simrv/device/Virtio.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/pipeline/Decoder.hpp"
+#include "simrv/util/FormatUtil.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -99,8 +98,8 @@ void Tracer::dump_init_artifacts() {
 
     write_xlen("p.pc", cpu->state().pc);
     for (uint8_t i = 1; i < 32; ++i) {
-        std::println(out, "p.regs.mem[{}]={}'h{:0{}x};", i, simrv::xlen::kXLenBits, cpu->state().regs.read(static_cast<RegId>(i)),
-                     kXLenHexDigits);
+        std::println(out, "p.regs.mem[{}]={}'h{:0{}x};", i, simrv::xlen::kXLenBits,
+                     cpu->state().regs.read(static_cast<RegId>(i)), kXLenHexDigits);
     }
     for (uint8_t i = 0; i < 32; ++i) {
         std::println(out, "p.fregs.mem[{}]={}'h{:016x};", i, simrv::xlen::kXLenBits,
@@ -134,36 +133,30 @@ void Tracer::dump_init_artifacts() {
 
     write_xlen("p.load_res    ", cpu->state().load_res);
     std::println(out, "p.reserved    = 1'h{:x};", cpu->state().reserved);
-    write_xlen("p.pending_exception   ", cpu->pipeline_context.pending_exception ? std::to_underlying(*cpu->pipeline_context.pending_exception) : simrv::xlen::kWordAllOnes);
+    write_xlen("p.pending_exception   ",
+               cpu->pipeline_context.pending_exception
+                   ? std::to_underlying(*cpu->pipeline_context.pending_exception)
+                   : simrv::xlen::kWordAllOnes);
     write_xlen("p.pending_tval", cpu->pipeline_context.pending_tval);
 
     const size_t kNumSets = simrv::core::Tlb::kNumSets;
     for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
         const auto& entry = cpu->tlb.inst_r.at(i % kNumSets).at(i / kNumSets);
-        std::println(out, "mmu.TLB_inst_r.r_valid[{}] ={};", i,
-                     static_cast<int>(entry.valid));
-        std::println(out, "mmu.TLB_inst_r.mem[{}][39:22] =18'h{:05x};", i,
-                     entry.v_addr >> 14);
-        std::println(out, "mmu.TLB_inst_r.mem[{}][21:0] =22'h{:06x};", i,
-                     entry.p_addr >> 10);
+        std::println(out, "mmu.TLB_inst_r.r_valid[{}] ={};", i, static_cast<int>(entry.valid));
+        std::println(out, "mmu.TLB_inst_r.mem[{}][39:22] =18'h{:05x};", i, entry.v_addr >> 14);
+        std::println(out, "mmu.TLB_inst_r.mem[{}][21:0] =22'h{:06x};", i, entry.p_addr >> 10);
     }
     for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
         const auto& entry = cpu->tlb.data_r.at(i % kNumSets).at(i / kNumSets);
-        std::println(out, "mmu.TLB_data_r.r_valid[{}] ={};", i,
-                     static_cast<int>(entry.valid));
-        std::println(out, "mmu.TLB_data_r.mem[{}][39:22] =18'h{:05x};", i,
-                     entry.v_addr >> 14);
-        std::println(out, "mmu.TLB_data_r.mem[{}][21:0] =22'h{:06x};", i,
-                     entry.p_addr >> 10);
+        std::println(out, "mmu.TLB_data_r.r_valid[{}] ={};", i, static_cast<int>(entry.valid));
+        std::println(out, "mmu.TLB_data_r.mem[{}][39:22] =18'h{:05x};", i, entry.v_addr >> 14);
+        std::println(out, "mmu.TLB_data_r.mem[{}][21:0] =22'h{:06x};", i, entry.p_addr >> 10);
     }
     for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
         const auto& entry = cpu->tlb.data_w.at(i % kNumSets).at(i / kNumSets);
-        std::println(out, "mmu.TLB_data_w.r_valid[{}] ={};", i,
-                     static_cast<int>(entry.valid));
-        std::println(out, "mmu.TLB_data_w.mem[{}][39:22] =18'h{:05x};", i,
-                     entry.v_addr >> 14);
-        std::println(out, "mmu.TLB_data_w.mem[{}][21:0] =22'h{:06x};", i,
-                     entry.p_addr >> 10);
+        std::println(out, "mmu.TLB_data_w.r_valid[{}] ={};", i, static_cast<int>(entry.valid));
+        std::println(out, "mmu.TLB_data_w.mem[{}][39:22] =18'h{:05x};", i, entry.v_addr >> 14);
+        std::println(out, "mmu.TLB_data_w.mem[{}][21:0] =22'h{:06x};", i, entry.p_addr >> 10);
     }
 
     write_32("mmu.console.QueueSel       ", console->QueueSel);
@@ -211,30 +204,35 @@ void Tracer::write_instruction_mix_report() {
     std::println(out, "INSTRUCTION MIX");
     uint64_t total = 0;
     for (auto const [i, count] : std::views::enumerate(machine_.cpu.e_instmix)) {
-        std::println(out, "{} : {:10}", simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(i)), count);
+        std::println(out, "{} : {:10}",
+                     simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(i)), count);
         total += count;
     }
     std::println(out, "TOTAL      : {:10}", total);
-    simrv::log::info("file instmix.txt was generated after {} cycle", machine_.cpu.clint_mmio.mtime);
+    simrv::log::info("file instmix.txt was generated after {} cycle",
+                     machine_.cpu.clint_mmio.mtime);
 }
 
 void Tracer::print_summary() {
-    using simrv::util::format_with_commas;
     using simrv::util::format_scaled;
+    using simrv::util::format_with_commas;
     const auto now = std::chrono::steady_clock::now();
     const auto elapsed =
         std::chrono::duration_cast<std::chrono::microseconds>(now - machine_.s_start_time).count();
     const auto etime = static_cast<Counter>(elapsed == 0 ? 1 : elapsed);
-    
+
     const auto mcycle = machine_.cpu.clint_mmio.mcycle;
     const auto icount = machine_.cpu.e_icount;
     const auto ccount = machine_.cpu.e_ccount;
-    
-    const double cpi = icount == 0 ? 0.0 : static_cast<double>(mcycle) / static_cast<double>(icount);
-    const double ipc = mcycle == 0 ? 0.0 : static_cast<double>(icount) / static_cast<double>(mcycle);
-    const double comp_ratio = icount == 0 ? 0.0 : (static_cast<double>(ccount) * 100.0) / static_cast<double>(icount);
+
+    const double cpi =
+        icount == 0 ? 0.0 : static_cast<double>(mcycle) / static_cast<double>(icount);
+    const double ipc =
+        mcycle == 0 ? 0.0 : static_cast<double>(icount) / static_cast<double>(mcycle);
+    const double comp_ratio =
+        icount == 0 ? 0.0 : (static_cast<double>(ccount) * 100.0) / static_cast<double>(icount);
     const double etime_sec = static_cast<double>(etime) / 1000000.0;
-    
+
     simrv::log::info("--------------------------------------------------");
     simrv::log::info("                Execution Summary                 ");
     simrv::log::info("--------------------------------------------------");
@@ -243,33 +241,44 @@ void Tracer::print_summary() {
     } else {
         simrv::log::info("Simulation Mode          :         Functional-Only");
     }
-    simrv::log::info("Elapsed cycles (clocks)  : {:>12}  ({})", format_scaled(mcycle), format_with_commas(mcycle));
-    simrv::log::info("Executed instructions    : {:>12}  ({})", format_scaled(icount), format_with_commas(icount));
-    simrv::log::info("Fetched compressed insns : {:>12}  ({})  [{:.1f}%]", format_scaled(ccount), format_with_commas(ccount), comp_ratio);
+    simrv::log::info("Elapsed cycles (clocks)  : {:>12}  ({})", format_scaled(mcycle),
+                     format_with_commas(mcycle));
+    simrv::log::info("Executed instructions    : {:>12}  ({})", format_scaled(icount),
+                     format_with_commas(icount));
+    simrv::log::info("Fetched compressed insns : {:>12}  ({})  [{:.1f}%]", format_scaled(ccount),
+                     format_with_commas(ccount), comp_ratio);
     simrv::log::info("Cycles Per Instr (CPI)   : {:>12.3f}", cpi);
     simrv::log::info("Instrs Per Cycle (IPC)   : {:>12.3f}", ipc);
-    
+
     if (machine_.s_cycle_accurate) {
         const auto& ps = machine_.cpu.pipeline_sim;
-        double stall_pct = mcycle == 0 ? 0.0 : (static_cast<double>(ps.stall_cycles()) * 100.0) / static_cast<double>(mcycle);
-        simrv::log::info("Total Stall/Bubble Cycles: {:>12}  [{:.1f}%]", format_with_commas(ps.stall_cycles()), stall_pct);
-        simrv::log::info(" - Data RAW Stalls       : {:>12}", format_with_commas(ps.data_hazard_stalls()));
-        simrv::log::info(" - Control Bubbles       : {:>12}", format_with_commas(ps.control_hazard_bubbles()));
-        simrv::log::info(" - ICache Miss Stalls    : {:>12}", format_with_commas(ps.icache_stalls()));
-        simrv::log::info(" - DCache Miss Stalls    : {:>12}", format_with_commas(ps.dcache_stalls()));
+        double stall_pct = mcycle == 0 ? 0.0
+                                       : (static_cast<double>(ps.stall_cycles()) * 100.0) /
+                                             static_cast<double>(mcycle);
+        simrv::log::info("Total Stall/Bubble Cycles: {:>12}  [{:.1f}%]",
+                         format_with_commas(ps.stall_cycles()), stall_pct);
+        simrv::log::info(" - Data RAW Stalls       : {:>12}",
+                         format_with_commas(ps.data_hazard_stalls()));
+        simrv::log::info(" - Control Bubbles       : {:>12}",
+                         format_with_commas(ps.control_hazard_bubbles()));
+        simrv::log::info(" - ICache Miss Stalls    : {:>12}",
+                         format_with_commas(ps.icache_stalls()));
+        simrv::log::info(" - DCache Miss Stalls    : {:>12}",
+                         format_with_commas(ps.dcache_stalls()));
     }
-    
+
     simrv::log::info("Elapsed time (real)      : {:>12.3f} sec", etime_sec);
-    
+
     const auto kips = icount * 1000UL / etime;
     const double mips = static_cast<double>(icount) / static_cast<double>(etime);
     if (mips >= 1.0) {
-        simrv::log::info("Simulation speed         : {:>12.2f} MIPS ({}/s)", mips, format_with_commas(kips * 1000));
+        simrv::log::info("Simulation speed         : {:>12.2f} MIPS ({}/s)", mips,
+                         format_with_commas(kips * 1000));
     } else {
         simrv::log::info("Simulation speed         : {:>12} KIPS", format_with_commas(kips));
     }
     simrv::log::info("--------------------------------------------------");
-    
+
     if (machine_.s_use_mix) {
         write_instruction_mix_report();
     }
@@ -298,13 +307,14 @@ void Tracer::emit_branch_prediction_trace(Counter mtime, Register cpc, Register 
 
     const auto opcode = r_opcode;
     const int ir_jb = static_cast<int>((opcode == Opcode::Jal) || (opcode == Opcode::Jalr) ||
-                                             (opcode == Opcode::Branch));
+                                       (opcode == Opcode::Branch));
     const int ir_jump = (opcode == Opcode::Jal) ? 2 : (opcode == Opcode::Jalr) ? 3 : 0;
     const int ir_branch = static_cast<int>(opcode == Opcode::Branch);
 
     const Word targ = ((ir_jump | ir_branch) != 0) ? jmp_pc : 0;
     std::println(fp_bpred_, "{:08} {:0{}x} {:0{}x} {} {} {} {}", static_cast<int>(mtime), cpc,
-                 D_TRACE_HEX_WIDTH, targ, D_TRACE_HEX_WIDTH, ir_jb, static_cast<int>(r_tkn), ir_jump, ir_branch);
+                 D_TRACE_HEX_WIDTH, targ, D_TRACE_HEX_WIDTH, ir_jb, static_cast<int>(r_tkn),
+                 ir_jump, ir_branch);
     fp_bpred_.flush();
 }
 
@@ -321,8 +331,8 @@ void Tracer::write_trace_snapshot() {
 
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 8; j++) {
-            std::print(fp_trace, "{:0{}x}{}", st.regs.read(static_cast<RegId>((i * 8) + j)), D_TRACE_HEX_WIDTH,
-                       (j != 7 ? " " : "\n"));
+            std::print(fp_trace, "{:0{}x}{}", st.regs.read(static_cast<RegId>((i * 8) + j)),
+                       D_TRACE_HEX_WIDTH, (j != 7 ? " " : "\n"));
         }
     }
 
@@ -337,29 +347,38 @@ void Tracer::write_trace_snapshot() {
                    st.mip, D_TRACE_HEX_WIDTH, st.medeleg, D_TRACE_HEX_WIDTH, st.mideleg,
                    D_TRACE_HEX_WIDTH, st.mcounteren, D_TRACE_HEX_WIDTH);
 
-        std::println(fp_trace, "{:0{}x} {:0{}x} {:0{}x}", st.stvec, D_TRACE_HEX_WIDTH,
-                     st.sscratch, D_TRACE_HEX_WIDTH, st.sepc, D_TRACE_HEX_WIDTH);
+        std::println(fp_trace, "{:0{}x} {:0{}x} {:0{}x}", st.stvec, D_TRACE_HEX_WIDTH, st.sscratch,
+                     D_TRACE_HEX_WIDTH, st.sepc, D_TRACE_HEX_WIDTH);
 
         std::print(fp_trace, "{:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x} ", st.scause,
                    D_TRACE_HEX_WIDTH, st.stval, D_TRACE_HEX_WIDTH, st.satp, D_TRACE_HEX_WIDTH,
                    st.scounteren, D_TRACE_HEX_WIDTH, st.load_res, D_TRACE_HEX_WIDTH);
-        std::println(fp_trace, "{:0{}x} {:0{}x} {:0{}x}", cpu.pipeline_context.pending_exception ? std::to_underlying(*cpu.pipeline_context.pending_exception) : simrv::xlen::kWordAllOnes,
+        std::println(fp_trace, "{:0{}x} {:0{}x} {:0{}x}",
+                     cpu.pipeline_context.pending_exception
+                         ? std::to_underlying(*cpu.pipeline_context.pending_exception)
+                         : simrv::xlen::kWordAllOnes,
                      D_TRACE_HEX_WIDTH, cpu.pipeline_context.pending_tval, D_TRACE_HEX_WIDTH,
                      std::to_underlying(st.priv), D_TRACE_HEX_WIDTH);
 
         for (int i = 0; i < 4; i++) {
-            std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.tlb.inst_r.at(static_cast<std::size_t>(i)).at(0).v_addr,
-                       D_TRACE_HEX_WIDTH, cpu.tlb.inst_r.at(static_cast<std::size_t>(i)).at(0).p_addr, D_TRACE_HEX_WIDTH);
+            std::print(
+                fp_trace, "{:0{}x} {:0{}x} ",
+                cpu.tlb.inst_r.at(static_cast<std::size_t>(i)).at(0).v_addr, D_TRACE_HEX_WIDTH,
+                cpu.tlb.inst_r.at(static_cast<std::size_t>(i)).at(0).p_addr, D_TRACE_HEX_WIDTH);
         }
         std::println(fp_trace, "");
         for (int i = 0; i < 4; i++) {
-            std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.tlb.data_r.at(static_cast<std::size_t>(i)).at(0).v_addr,
-                       D_TRACE_HEX_WIDTH, cpu.tlb.data_r.at(static_cast<std::size_t>(i)).at(0).p_addr, D_TRACE_HEX_WIDTH);
+            std::print(
+                fp_trace, "{:0{}x} {:0{}x} ",
+                cpu.tlb.data_r.at(static_cast<std::size_t>(i)).at(0).v_addr, D_TRACE_HEX_WIDTH,
+                cpu.tlb.data_r.at(static_cast<std::size_t>(i)).at(0).p_addr, D_TRACE_HEX_WIDTH);
         }
         std::println(fp_trace, "");
         for (int i = 0; i < 4; i++) {
-            std::print(fp_trace, "{:0{}x} {:0{}x} ", cpu.tlb.data_w.at(static_cast<std::size_t>(i)).at(0).v_addr,
-                       D_TRACE_HEX_WIDTH, cpu.tlb.data_w.at(static_cast<std::size_t>(i)).at(0).p_addr, D_TRACE_HEX_WIDTH);
+            std::print(
+                fp_trace, "{:0{}x} {:0{}x} ",
+                cpu.tlb.data_w.at(static_cast<std::size_t>(i)).at(0).v_addr, D_TRACE_HEX_WIDTH,
+                cpu.tlb.data_w.at(static_cast<std::size_t>(i)).at(0).p_addr, D_TRACE_HEX_WIDTH);
         }
         std::println(fp_trace, "");
     }

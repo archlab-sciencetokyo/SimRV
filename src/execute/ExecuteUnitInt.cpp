@@ -8,8 +8,8 @@
 namespace simrv::execute {
 
 using simrv::isa::Funct3;
-using simrv::isa::Opcode;
 using simrv::isa::Funct5Amo;
+using simrv::isa::Opcode;
 
 namespace {
 template <typename T>
@@ -17,21 +17,36 @@ constexpr auto perform_amo_op(T reg_val, T mem_val, Funct5Amo funct5) -> T {
     using SignedT = std::make_signed_t<T>;
     using UnsignedT = std::make_unsigned_t<T>;
     switch (enum_mask(funct5)) {
-        case 0x01: return reg_val; // SWAP
-        case 0x00: return mem_val + reg_val; // ADD
-        case 0x0c: return mem_val & reg_val; // AND
-        case 0x08: return mem_val | reg_val; // OR
-        case 0x04: return mem_val ^ reg_val; // XOR
-        case 0x10: return static_cast<T>(std::min(static_cast<SignedT>(reg_val), static_cast<SignedT>(mem_val))); // MIN
-        case 0x14: return static_cast<T>(std::max(static_cast<SignedT>(reg_val), static_cast<SignedT>(mem_val))); // MAX
-        case 0x18: return static_cast<T>(std::min(static_cast<UnsignedT>(reg_val), static_cast<UnsignedT>(mem_val))); // MINU
-        case 0x1c: return static_cast<T>(std::max(static_cast<UnsignedT>(reg_val), static_cast<UnsignedT>(mem_val))); // MAXU
-        default:   return mem_val;
+        case 0x01:
+            return reg_val;  // SWAP
+        case 0x00:
+            return mem_val + reg_val;  // ADD
+        case 0x0c:
+            return mem_val & reg_val;  // AND
+        case 0x08:
+            return mem_val | reg_val;  // OR
+        case 0x04:
+            return mem_val ^ reg_val;  // XOR
+        case 0x10:
+            return static_cast<T>(
+                std::min(static_cast<SignedT>(reg_val), static_cast<SignedT>(mem_val)));  // MIN
+        case 0x14:
+            return static_cast<T>(
+                std::max(static_cast<SignedT>(reg_val), static_cast<SignedT>(mem_val)));  // MAX
+        case 0x18:
+            return static_cast<T>(std::min(static_cast<UnsignedT>(reg_val),
+                                           static_cast<UnsignedT>(mem_val)));  // MINU
+        case 0x1c:
+            return static_cast<T>(std::max(static_cast<UnsignedT>(reg_val),
+                                           static_cast<UnsignedT>(mem_val)));  // MAXU
+        default:
+            return mem_val;
     }
 }
-} // namespace
+}  // namespace
 
-auto ExecuteUnit::aluInt(Register in1, Register in2, isa::OperationId op_id, unsigned xlen) -> Register {
+auto ExecuteUnit::aluInt(Register in1, Register in2, isa::OperationId op_id, unsigned xlen)
+    -> Register {
     using enum isa::OperationId;
 
     if constexpr (!simrv::xlen::kIsXLen64) {
@@ -91,31 +106,44 @@ auto ExecuteUnit::aluInt(Register in1, Register in2, isa::OperationId op_id, uns
                 res32 = static_cast<int32_t>(u1 * u2);
                 break;
             case MULH:
-                res32 = static_cast<int32_t>((static_cast<int64_t>(s1) * static_cast<int64_t>(s2)) >> 32);
+                res32 = static_cast<int32_t>(
+                    (static_cast<int64_t>(s1) * static_cast<int64_t>(s2)) >> 32);
                 break;
             case MULHSU:
-                res32 = static_cast<int32_t>((static_cast<int64_t>(s1) * static_cast<uint64_t>(u2)) >> 32);
+                res32 = static_cast<int32_t>(
+                    (static_cast<int64_t>(s1) * static_cast<uint64_t>(u2)) >> 32);
                 break;
             case MULHU:
-                res32 = static_cast<int32_t>((static_cast<uint64_t>(u1) * static_cast<uint64_t>(u2)) >> 32);
+                res32 = static_cast<int32_t>(
+                    (static_cast<uint64_t>(u1) * static_cast<uint64_t>(u2)) >> 32);
                 break;
             case DIV:
-                if (u2 == 0) res32 = -1;
-                else if (s1 == std::numeric_limits<int32_t>::min() && s2 == -1) res32 = s1;
-                else res32 = s1 / s2;
+                if (u2 == 0)
+                    res32 = -1;
+                else if (s1 == std::numeric_limits<int32_t>::min() && s2 == -1)
+                    res32 = s1;
+                else
+                    res32 = s1 / s2;
                 break;
             case DIVU:
-                if (u2 == 0) res32 = -1;
-                else res32 = static_cast<int32_t>(u1 / u2);
+                if (u2 == 0)
+                    res32 = -1;
+                else
+                    res32 = static_cast<int32_t>(u1 / u2);
                 break;
             case REM:
-                if (u2 == 0) res32 = s1;
-                else if (s1 == std::numeric_limits<int32_t>::min() && s2 == -1) res32 = 0;
-                else res32 = s1 % s2;
+                if (u2 == 0)
+                    res32 = s1;
+                else if (s1 == std::numeric_limits<int32_t>::min() && s2 == -1)
+                    res32 = 0;
+                else
+                    res32 = s1 % s2;
                 break;
             case REMU:
-                if (u2 == 0) res32 = static_cast<int32_t>(u1);
-                else res32 = static_cast<int32_t>(u1 % u2);
+                if (u2 == 0)
+                    res32 = static_cast<int32_t>(u1);
+                else
+                    res32 = static_cast<int32_t>(u1 % u2);
                 break;
 
             default:
@@ -136,7 +164,8 @@ auto ExecuteUnit::aluInt(Register in1, Register in2, isa::OperationId op_id, uns
             return in1 << (in2 & simrv::xlen::xlen_shift_mask());
         case SLT:
         case SLTI:
-            return static_cast<Register>(static_cast<SignedWord>(in1) < static_cast<SignedWord>(in2));
+            return static_cast<Register>(static_cast<SignedWord>(in1) <
+                                         static_cast<SignedWord>(in2));
         case SLTU:
         case SLTIU:
             return static_cast<Register>(in1 < in2);
@@ -148,7 +177,8 @@ auto ExecuteUnit::aluInt(Register in1, Register in2, isa::OperationId op_id, uns
             return in1 >> (in2 & simrv::xlen::xlen_shift_mask());
         case SRA:
         case SRAI:
-            return static_cast<Register>(static_cast<SignedWord>(in1) >> (in2 & simrv::xlen::xlen_shift_mask()));
+            return static_cast<Register>(static_cast<SignedWord>(in1) >>
+                                         (in2 & simrv::xlen::xlen_shift_mask()));
         case OR:
         case ORI:
             return in1 | in2;
@@ -336,13 +366,20 @@ auto ExecuteUnit::branchTaken(Register in1, Register in2, Funct3 funct3, unsigne
         const auto s1 = static_cast<int32_t>(in1);
         const auto s2 = static_cast<int32_t>(in2);
         switch (enum_mask(funct3)) {
-            case 0: return u1 == u2;  // BEQ
-            case 1: return u1 != u2;  // BNE
-            case 4: return s1 < s2;   // BLT
-            case 5: return s1 >= s2;  // BGE
-            case 6: return u1 < u2;   // BLTU
-            case 7: return u1 >= u2;  // BGEU
-            default: return false;
+            case 0:
+                return u1 == u2;  // BEQ
+            case 1:
+                return u1 != u2;  // BNE
+            case 4:
+                return s1 < s2;  // BLT
+            case 5:
+                return s1 >= s2;  // BGE
+            case 6:
+                return u1 < u2;  // BLTU
+            case 7:
+                return u1 >= u2;  // BGEU
+            default:
+                return false;
         }
     }
 
@@ -366,11 +403,10 @@ auto ExecuteUnit::branchTaken(Register in1, Register in2, Funct3 funct3, unsigne
 
 auto ExecuteUnit::aluAmo(Register in1, Register in2, Funct5Amo funct5, Funct3 funct3) -> Register {
     if constexpr (kIsXLen64) {
-        if (funct3 == static_cast<Funct3>(2)) { // AMO*W (32-bit)
+        if (funct3 == static_cast<Funct3>(2)) {  // AMO*W (32-bit)
             const auto res32 = perform_amo_op<int32_t>(static_cast<int32_t>(in1),
-                                                      static_cast<int32_t>(in2),
-                                                      funct5);
-            return static_cast<Register>(static_cast<int64_t>(res32)); // sign-extend to 64-bit
+                                                       static_cast<int32_t>(in2), funct5);
+            return static_cast<Register>(static_cast<int64_t>(res32));  // sign-extend to 64-bit
         }
     }
 

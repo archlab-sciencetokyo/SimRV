@@ -7,24 +7,22 @@
 #include <array>
 #include <deque>
 #include <expected>
-#include <vector>
-
 #include <fstream>
+#include <vector>
 
 #include "simrv/Define.hpp"
 #include "simrv/cache/DCache.hpp"
 #include "simrv/cache/ICache.hpp"
 #include "simrv/core/CsrFile.hpp"
-#include "simrv/pipeline/PipelineContext.hpp"
+#include "simrv/core/DecodeCache.hpp"
 #include "simrv/core/RegisterFile.hpp"
 #include "simrv/core/Sbi.hpp"
 #include "simrv/core/StateControl.hpp"
 #include "simrv/core/Tlb.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
-
-#include "simrv/pipeline/PipelineTask.hpp"
+#include "simrv/pipeline/PipelineContext.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
-#include "simrv/core/DecodeCache.hpp"
+#include "simrv/pipeline/PipelineTask.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -34,47 +32,56 @@ class Machine;
  * @brief Groups all architectural registers and CSRs into a cohesive block.
  */
 struct ArchState {
-    Register pc{};       ///< Program Counter (instruction address pointer)
-    RegisterFile regs{}; ///< General-purpose integer, FP, and vector registers
+    Register pc{};        ///< Program Counter (instruction address pointer)
+    RegisterFile regs{};  ///< General-purpose integer, FP, and vector registers
 
     /* Machine Mode CSRs */
-    CSRValue mstatus{};                 ///< Machine Status (tracks processor mode, interrupt states, extension states)
-    CSRValue mtvec{};                   ///< Machine Trap-Vector Base-Address (address of machine mode trap handler)
-    CSRValue mscratch{};                ///< Machine Scratch register (used for temporary context swapping)
-    CSRValue mepc{};                    ///< Machine Exception Program Counter (returns address on MRET)
-    TrapCause mcause{};                 ///< Machine Trap Cause (interrupt vs exception and exact code)
-    CSRValue mtval{};                   ///< Machine Trap Value (holds faulting addresses or instruction bytes)
-    CSRValue mhartid{};                 ///< Machine Hardware Thread ID (processor core identifier)
+    CSRValue
+        mstatus{};  ///< Machine Status (tracks processor mode, interrupt states, extension states)
+    CSRValue mtvec{};  ///< Machine Trap-Vector Base-Address (address of machine mode trap handler)
+    CSRValue mscratch{};  ///< Machine Scratch register (used for temporary context swapping)
+    CSRValue mepc{};      ///< Machine Exception Program Counter (returns address on MRET)
+    TrapCause mcause{};   ///< Machine Trap Cause (interrupt vs exception and exact code)
+    CSRValue mtval{};     ///< Machine Trap Value (holds faulting addresses or instruction bytes)
+    CSRValue mhartid{};   ///< Machine Hardware Thread ID (processor core identifier)
     CSRValue misa = isa::kMisaDefault;  ///< Machine ISA and extensions descriptor
     CSRValue mie{};                     ///< Machine Interrupt Enable
     CSRValue mip{};                     ///< Machine Interrupt Pending
-    CSRValue medeleg{};                 ///< Machine Exception Delegation (delegates trap handling to supervisor mode)
-    CSRValue mideleg{};                 ///< Machine Interrupt Delegation (delegates interrupts to supervisor mode)
-    CSRValue mcounteren{};              ///< Machine Counter Enable (controls user/supervisor access to performance counters)
+    CSRValue
+        medeleg{};  ///< Machine Exception Delegation (delegates trap handling to supervisor mode)
+    CSRValue mideleg{};  ///< Machine Interrupt Delegation (delegates interrupts to supervisor mode)
+    CSRValue mcounteren{};  ///< Machine Counter Enable (controls user/supervisor access to
+                            ///< performance counters)
 
     /* Supervisor Mode CSRs */
-    CSRValue stvec{};       ///< Supervisor Trap-Vector Base-Address (address of supervisor trap handler)
-    CSRValue sscratch{};    ///< Supervisor Scratch register
-    CSRValue sepc{};        ///< Supervisor Exception Program Counter (returns address on SRET)
-    TrapCause scause{};     ///< Supervisor Trap Cause
-    CSRValue stval{};       ///< Supervisor Trap Value
-    CSRValue satp{};        ///< Supervisor Address Translation and Protection (virtual memory mode and page table base physical address)
+    CSRValue stvec{};  ///< Supervisor Trap-Vector Base-Address (address of supervisor trap handler)
+    CSRValue sscratch{};  ///< Supervisor Scratch register
+    CSRValue sepc{};      ///< Supervisor Exception Program Counter (returns address on SRET)
+    TrapCause scause{};   ///< Supervisor Trap Cause
+    CSRValue stval{};     ///< Supervisor Trap Value
+    CSRValue satp{};  ///< Supervisor Address Translation and Protection (virtual memory mode and
+                      ///< page table base physical address)
     CSRValue scounteren{};  ///< Supervisor Counter Enable
 
     /* Floating-Point CSRs */
-    CSRValue fcsr{}; ///< Floating-Point Control and Status register (rounding mode and cumulative exception flags)
+    CSRValue fcsr{};  ///< Floating-Point Control and Status register (rounding mode and cumulative
+                      ///< exception flags)
 
     /* Vector Extension CSRs */
-    CSRValue vstart{}; ///< Vector Start Index (specifies the register element index to start vector execution)
-    CSRValue vxsat{};  ///< Vector Fixed-Point Saturation flag
-    CSRValue vxrm{};   ///< Vector Fixed-Point Rounding Mode selector
-    CSRValue vl{};     ///< Vector Length (active number of elements to process in a vector instruction)
-    CSRValue vtype{};  ///< Vector Type (contains element width VSEW, vector group multiplier LMUL, etc.)
+    CSRValue vstart{};  ///< Vector Start Index (specifies the register element index to start
+                        ///< vector execution)
+    CSRValue vxsat{};   ///< Vector Fixed-Point Saturation flag
+    CSRValue vxrm{};    ///< Vector Fixed-Point Rounding Mode selector
+    CSRValue
+        vl{};  ///< Vector Length (active number of elements to process in a vector instruction)
+    CSRValue
+        vtype{};  ///< Vector Type (contains element width VSEW, vector group multiplier LMUL, etc.)
 
-    PrivilegeLevel priv = kPrivMachine; ///< Current processor privilege level
+    PrivilegeLevel priv = kPrivMachine;  ///< Current processor privilege level
 
-    Address load_res{};  ///< Active memory physical address reservation for Load-Reserved / Store-Conditional (LR/SC)
-    CSRValue reserved{}; ///< Reserved for internal architectural extensions or tracking
+    Address load_res{};   ///< Active memory physical address reservation for Load-Reserved /
+                          ///< Store-Conditional (LR/SC)
+    CSRValue reserved{};  ///< Reserved for internal architectural extensions or tracking
 
     /**
      * @brief Determines the active XLEN (register width in bits: 32 or 64) based on the CPU state.
@@ -92,7 +99,7 @@ struct ArchState {
             } else if (priv == PrivilegeLevel::Supervisor) {
                 const unsigned sxl = (mstatus >> 34) & 3;
                 return (sxl == 1) ? 32 : 64;
-            } else { // User
+            } else {  // User
                 const unsigned uxl = (mstatus >> 32) & 3;
                 return (uxl == 1) ? 32 : 64;
             }
@@ -102,9 +109,7 @@ struct ArchState {
     /**
      * @brief Updates the active XLEN configurations in register file proxies.
      */
-    constexpr void update_xlen() {
-        regs.xlen = current_xlen();
-    }
+    constexpr void update_xlen() { regs.xlen = current_xlen(); }
 };
 
 #include <deque>
@@ -123,22 +128,24 @@ struct ArchState {
 struct SoftTlbEntry {
     static constexpr uint64_t kInvalidTag = ~uint64_t{0};
 
-    uint64_t tag = kInvalidTag;         ///< Packed VPN | ASID | priv; kInvalidTag when empty
-    Address paddr_base = 0;             ///< Physical page base (paddr & ~0xFFF)
-    Byte* host_ptr_base = nullptr;      ///< Direct host pointer base (nullptr = use paddr)
+    uint64_t tag = kInvalidTag;     ///< Packed VPN | ASID | priv; kInvalidTag when empty
+    Address paddr_base = 0;         ///< Physical page base (paddr & ~0xFFF)
+    Byte* host_ptr_base = nullptr;  ///< Direct host pointer base (nullptr = use paddr)
 
     /// Build a lookup tag from the three key fields.
-    [[nodiscard]] static constexpr auto make_tag(uint64_t vpn, uint64_t asid, PrivilegeLevel priv) noexcept -> uint64_t {
-        return (vpn << 16)
-             | ((asid & 0x3FFFu) << 2)
-             | static_cast<uint64_t>(static_cast<uint8_t>(priv) & 0x3u);
+    [[nodiscard]] static constexpr auto make_tag(uint64_t vpn, uint64_t asid,
+                                                 PrivilegeLevel priv) noexcept -> uint64_t {
+        return (vpn << 16) | ((asid & 0x3FFFu) << 2) |
+               static_cast<uint64_t>(static_cast<uint8_t>(priv) & 0x3u);
     }
 
-    [[nodiscard]] constexpr auto matches(uint64_t vpn, uint64_t asid, PrivilegeLevel priv) const noexcept -> bool {
+    [[nodiscard]] constexpr auto matches(uint64_t vpn, uint64_t asid,
+                                         PrivilegeLevel priv) const noexcept -> bool {
         return tag == make_tag(vpn, asid, priv);
     }
 
-    void set(uint64_t vpn, uint64_t asid, PrivilegeLevel priv, Address paddr_base_in, Byte* host_ptr_base_in) noexcept {
+    void set(uint64_t vpn, uint64_t asid, PrivilegeLevel priv, Address paddr_base_in,
+             Byte* host_ptr_base_in) noexcept {
         tag = make_tag(vpn, asid, priv);
         paddr_base = paddr_base_in;
         host_ptr_base = host_ptr_base_in;
@@ -177,18 +184,22 @@ struct UndoStep {
 class CPU {
    public:
     /**
-     * @brief Constructs a new CPU core, resetting GPRs, floating-point registers, and setting initial status values.
+     * @brief Constructs a new CPU core, resetting GPRs, floating-point registers, and setting
+     * initial status values.
      */
     CPU();
 
     /**
-     * @brief Flushes all instruction/data Translation Lookaside Buffer (TLB) entries and invalidates the decode cache.
+     * @brief Flushes all instruction/data Translation Lookaside Buffer (TLB) entries and
+     * invalidates the decode cache.
      */
     void TLB_flush();
 
     /**
-     * @brief Selectively flushes TLB entries matching virtual address and/or Address Space Identifier (ASID).
-     * @param match_all_vaddr If true, ignores the vaddr matching criteria (flushes all virtual addresses matching ASID).
+     * @brief Selectively flushes TLB entries matching virtual address and/or Address Space
+     * Identifier (ASID).
+     * @param match_all_vaddr If true, ignores the vaddr matching criteria (flushes all virtual
+     * addresses matching ASID).
      * @param vaddr The target virtual address to match.
      * @param match_all_asid If true, ignores the ASID matching criteria.
      * @param asid The target ASID to match.
@@ -196,7 +207,8 @@ class CPU {
     void TLB_flush(bool match_all_vaddr, Address vaddr, bool match_all_asid, Word asid);
 
     /**
-     * @brief Writes the `mstatus` CSR, applying any architectural side effects (such as flushing the TLB if configuration changes).
+     * @brief Writes the `mstatus` CSR, applying any architectural side effects (such as flushing
+     * the TLB if configuration changes).
      * @param val The new value to write to `mstatus`.
      */
     void set_mstatus(CSRValue val);
@@ -211,7 +223,8 @@ class CPU {
     /**
      * @brief Reads a value from a specified Control and Status Register (CSR).
      * @param addr The 12-bit address of the CSR.
-     * @return The CSR's value if successful, or an ExceptionCode if the access is unauthorized or invalid.
+     * @return The CSR's value if successful, or an ExceptionCode if the access is unauthorized or
+     * invalid.
      */
     [[nodiscard]] auto read_csr(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCode>;
 
@@ -236,7 +249,8 @@ class CPU {
     void sret();
 
     /**
-     * @brief Recomputes the MIP (Machine Interrupt Pending) register based on currently active external interrupts.
+     * @brief Recomputes the MIP (Machine Interrupt Pending) register based on currently active
+     * external interrupts.
      */
     void plic_update_mip();
 
@@ -248,9 +262,11 @@ class CPU {
     void plic_set_irq(int irq_num, int state);
 
     /**
-     * @brief Triggers an architectural exception or interrupt trap, transitioning privilege levels and saving return states.
+     * @brief Triggers an architectural exception or interrupt trap, transitioning privilege levels
+     * and saving return states.
      * @param cause The trap cause (exception code or interrupt bit).
-     * @param tval The trap-specific value (bad address, illegal instruction word, etc.) to save in `mtval`/`stval`.
+     * @param tval The trap-specific value (bad address, illegal instruction word, etc.) to save in
+     * `mtval`/`stval`.
      */
     void raise_exception(TrapCause cause, CSRValue tval);
 
@@ -261,7 +277,8 @@ class CPU {
     void evaluate_timer_interrupt();
 
     /**
-     * @brief Executes one full CPU cycle. Resolves all pipeline stages or steps coroutine execution.
+     * @brief Executes one full CPU cycle. Resolves all pipeline stages or steps coroutine
+     * execution.
      * @param machine Reference to the top-level machine orchestration unit.
      */
     void run_cycle(Machine& machine);
@@ -274,7 +291,8 @@ class CPU {
     void run_cycle_baremetal(Machine& machine);
 
     /**
-     * @brief Records active instruction details to the TUI (Text User Interface) trace buffer if enabled.
+     * @brief Records active instruction details to the TUI (Text User Interface) trace buffer if
+     * enabled.
      * @param machine Reference to the top-level machine orchestration unit.
      */
     void record_trace_for_tui(Machine& machine);
@@ -285,7 +303,7 @@ class CPU {
      * @param op Reference to the cached pre-decoded operation.
      */
     void execute_cached_op_fast(Machine& machine, CachedOp& op);
-    
+
     /**
      * @brief Coroutine generator for persistent zero-allocation pipeline simulation.
      * @param machine Pointer to the top-level machine orchestration unit.
@@ -409,8 +427,10 @@ class CPU {
     auto execute_cached_op_imm(CachedOp& op, Register rrs1) -> void;
     auto execute_cached_op_imm32(CachedOp& op, Register rrs1) -> void;
     auto execute_cached_op32(CachedOp& op, Register rrs1, Register rrs2) -> void;
-    auto try_fast_load(Machine& machine, Address mem_addr, isa::Funct3 funct3, Register& out_val) -> bool;
-    auto try_fast_store(Machine& machine, Address mem_addr, isa::Funct3 funct3, Register rrs2) -> bool;
+    auto try_fast_load(Machine& machine, Address mem_addr, isa::Funct3 funct3, Register& out_val)
+        -> bool;
+    auto try_fast_store(Machine& machine, Address mem_addr, isa::Funct3 funct3, Register rrs2)
+        -> bool;
     auto execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> bool;
     auto execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Register rrs2) -> bool;
     auto execute_cached_fallback(Machine& machine) -> void;
@@ -418,7 +438,8 @@ class CPU {
     inline void pc_sign_extend() {
         if constexpr (simrv::xlen::kIsXLen64) {
             if (simrv::compiler::unlikely(state_.regs.xlen == 32)) {
-                state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+                state_.pc =
+                    static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
             }
         }
     }
@@ -444,8 +465,8 @@ class CPU {
     /// Fixed capacity of 50; O(1) push with no heap allocation after initialization.
     static constexpr std::size_t kTraceHistoryCapacity = 50;
     std::array<TraceHistoryEntry, kTraceHistoryCapacity> trace_history_buf_{};
-    std::size_t trace_history_head_ = 0;   ///< Next write position (wraps around)
-    std::size_t trace_history_size_ = 0;   ///< Number of valid entries (≤ capacity)
+    std::size_t trace_history_head_ = 0;  ///< Next write position (wraps around)
+    std::size_t trace_history_size_ = 0;  ///< Number of valid entries (≤ capacity)
 
     /// Provides a read-only view over trace history in chronological order.
     /// Returned as a vector for backward compatibility with TUI consumers.
@@ -482,8 +503,8 @@ class CPU {
     void soft_tlb_flush();
 
     // ========== Execution Metrics ==========
-    uint64_t e_icount{0};                                // Total instruction count
-    Counter e_ccount = 0;                           // Compressed instructions executed
+    uint64_t e_icount{0};                                     // Total instruction count
+    Counter e_ccount = 0;                                     // Compressed instructions executed
     std::array<uint64_t, isa::OperationIdCount> e_instmix{};  // Instruction-mix statistics
 
     // ========== Reverse Stepping / Time-Travel Debugging ==========

@@ -2,15 +2,16 @@
  * @file LeftPaneTlb.cpp
  * @brief Implements TLB (Translation Lookaside Buffer) Inspector for TUI Left Pane.
  */
-#include "simrv/tui/panels/LeftPane.hpp"
-#include "simrv/tui/TuiTheme.hpp"
-#include "simrv/core/Cpu.hpp"
-#include "simrv/core/Machine.hpp"
-#include "simrv/core/Tlb.hpp"
-#include "simrv/xlen/Types.hpp"
 #include <format>
 #include <string>
 #include <vector>
+
+#include "simrv/core/Cpu.hpp"
+#include "simrv/core/Machine.hpp"
+#include "simrv/core/Tlb.hpp"
+#include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/xlen/Types.hpp"
 
 namespace simrv::tui {
 
@@ -30,9 +31,12 @@ auto LeftPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_row, in
         uint64_t mode = (satp_val >> 60) & 0xFULL;
         asid = (satp_val >> 44) & 0xFFFFULL;
         ppn = satp_val & 0xFFFFFFFFFFFULL;
-        if (mode == 8) mode_str = "Sv39";
-        else if (mode == 9) mode_str = "Sv48";
-        else if (mode != 0) mode_str = std::format("Mode {}", mode);
+        if (mode == 8)
+            mode_str = "Sv39";
+        else if (mode == 9)
+            mode_str = "Sv48";
+        else if (mode != 0)
+            mode_str = std::format("Mode {}", mode);
     } else {
         uint32_t mode = (satp_val >> 31) & 0x1U;
         asid = (satp_val >> 22) & 0x1FFU;
@@ -54,10 +58,14 @@ auto LeftPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_row, in
 
     auto priv_to_str = [](auto priv) -> const char* {
         switch (priv) {
-            case PrivilegeLevel::User: return "User";
-            case PrivilegeLevel::Supervisor: return "Super";
-            case PrivilegeLevel::Machine: return "Mach";
-            default: return "?";
+            case PrivilegeLevel::User:
+                return "User";
+            case PrivilegeLevel::Supervisor:
+                return "Super";
+            case PrivilegeLevel::Machine:
+                return "Mach";
+            default:
+                return "?";
         }
     };
 
@@ -65,15 +73,18 @@ auto LeftPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_row, in
         for (int way = 0; way < 2; ++way) {
             const auto& ie = tlb.inst_r[set][way];
             if (ie.valid) {
-                active_entries.push_back(RenderTlbEntry{"ITLB", set, way, ie.v_addr, ie.p_addr, ie.asid, priv_to_str(ie.priv)});
+                active_entries.push_back(RenderTlbEntry{"ITLB", set, way, ie.v_addr, ie.p_addr,
+                                                        ie.asid, priv_to_str(ie.priv)});
             }
             const auto& dr = tlb.data_r[set][way];
             if (dr.valid) {
-                active_entries.push_back(RenderTlbEntry{"DTLB-R", set, way, dr.v_addr, dr.p_addr, dr.asid, priv_to_str(dr.priv)});
+                active_entries.push_back(RenderTlbEntry{"DTLB-R", set, way, dr.v_addr, dr.p_addr,
+                                                        dr.asid, priv_to_str(dr.priv)});
             }
             const auto& dw = tlb.data_w[set][way];
             if (dw.valid) {
-                active_entries.push_back(RenderTlbEntry{"DTLB-W", set, way, dw.v_addr, dw.p_addr, dw.asid, priv_to_str(dw.priv)});
+                active_entries.push_back(RenderTlbEntry{"DTLB-W", set, way, dw.v_addr, dw.p_addr,
+                                                        dw.asid, priv_to_str(dw.priv)});
             }
         }
     }
@@ -82,12 +93,11 @@ auto LeftPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_row, in
         return section_line("Virtual Memory & TLB Inspector", width);
     }
     if (logical_row == 1) {
-        return format_to_width(
-            std::format("  {}SATP Mode:\033[0m {}{:<5}\033[0m │ {}ASID:\033[0m {}{:<2}\033[0m │ {}Root PPN:\033[0m {}0x{:x}\033[0m",
-                        kThemeText, kThemeMint, mode_str,
-                        kThemeText, kThemeVal, asid,
-                        kThemeText, kThemeSky, ppn),
-            width);
+        return format_to_width(std::format("  {}SATP Mode:\033[0m {}{:<5}\033[0m │ {}ASID:\033[0m "
+                                           "{}{:<2}\033[0m │ {}Root PPN:\033[0m {}0x{:x}\033[0m",
+                                           kThemeText, kThemeMint, mode_str, kThemeText, kThemeVal,
+                                           asid, kThemeText, kThemeSky, ppn),
+                               width);
     }
     if (logical_row == 2) {
         return section_line("Active TLB Translation Entries", width);
@@ -96,8 +106,9 @@ auto LeftPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_row, in
     if (active_entries.empty()) {
         if (logical_row == 3) {
             return format_to_width(
-                std::format("  {}<No active TLB entries cached (flush or direct physical mapping)>\033[0m",
-                            kThemeMuted),
+                std::format(
+                    "  {}<No active TLB entries cached (flush or direct physical mapping)>\033[0m",
+                    kThemeMuted),
                 width);
         }
         return format_to_width("", width);
@@ -108,17 +119,14 @@ auto LeftPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_row, in
         const auto& e = active_entries[static_cast<size_t>(entry_idx)];
         uint32_t v_trunc = static_cast<uint32_t>(e.vaddr & 0xFFFFFFFFULL);
         uint32_t p_trunc = static_cast<uint32_t>(e.paddr & 0xFFFFFFFFULL);
-        return format_to_width(
-            std::format("  {}Set{:02d}/Way{}\033[0m \033[1m{:<6}\033[0m {:08x} ➔ {:08x}  {}ASID:{:<2}\033[0m {}[{}]\033[0m",
-                        kThemeMuted, e.set, e.way,
-                        e.type,
-                        v_trunc, p_trunc,
-                        kThemeText, e.asid,
-                        kThemePink, e.priv_str),
-            width);
+        return format_to_width(std::format("  {}Set{:02d}/Way{}\033[0m \033[1m{:<6}\033[0m {:08x} "
+                                           "➔ {:08x}  {}ASID:{:<2}\033[0m {}[{}]\033[0m",
+                                           kThemeMuted, e.set, e.way, e.type, v_trunc, p_trunc,
+                                           kThemeText, e.asid, kThemePink, e.priv_str),
+                               width);
     }
 
     return format_to_width("", width);
 }
 
-} // namespace simrv::tui
+}  // namespace simrv::tui

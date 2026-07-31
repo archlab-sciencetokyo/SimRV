@@ -4,17 +4,17 @@
  */
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <queue>
 #include <string>
+#include <thread>
 
 #include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/xlen/Types.hpp"
-#include <mutex>
-#include <atomic>
-#include <thread>
 
 namespace simrv::core {
 class Machine;

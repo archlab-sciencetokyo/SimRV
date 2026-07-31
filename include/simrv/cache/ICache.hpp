@@ -30,4 +30,3 @@ class ICache : public BaseCache<64, 32, 4> {
 };
 
 }  // namespace simrv::cache
-

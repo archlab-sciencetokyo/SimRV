@@ -7,8 +7,9 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include "simrv/tui/TuiWidget.hpp"
+
 #include "simrv/tui/Tui.hpp"
+#include "simrv/tui/TuiWidget.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -50,13 +51,17 @@ class StatusBar : public TuiWidget {
     void set_active_page(TuiRegPage page) { active_page_ = page; }
     void set_scroll_offset(int offset) { scroll_offset_ = offset; }
     void set_layout(TuiLayout layout) { layout_ = layout; }
-    void set_pane_widths(int left, int right) { left_width_ = left; right_width_ = right; }
+    void set_pane_widths(int left, int right) {
+        left_width_ = left;
+        right_width_ = right;
+    }
     void set_right_panel_mode(TuiRightPanelMode mode) { right_panel_mode_ = mode; }
     void set_trace_enabled(bool enabled) { trace_enabled_ = enabled; }
 
     [[nodiscard]] auto is_pos_on_status_badge(int x, int width) const -> bool;
     [[nodiscard]] auto is_pos_on_right_panel_mode(int x) const -> bool;
-    [[nodiscard]] auto get_footer_action_at_col(int col, int row_idx = 0) const -> std::optional<TuiFooterAction>;
+    [[nodiscard]] auto get_footer_action_at_col(int col, int row_idx = 0) const
+        -> std::optional<TuiFooterAction>;
     [[nodiscard]] auto render_row(int row_idx, int width) -> std::string override;
 
    private:

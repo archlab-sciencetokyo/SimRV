@@ -1,12 +1,13 @@
 #pragma once
 
-#include <string>
-#include <fstream>
-#include <sstream>
 #include <algorithm>
 #include <cctype>
-#include "simrv/pipeline/PipelineSim.hpp"
+#include <fstream>
+#include <sstream>
+#include <string>
+
 #include "simrv/core/Logger.hpp"
+#include "simrv/pipeline/PipelineSim.hpp"
 
 namespace simrv::core {
 
@@ -56,11 +57,16 @@ inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuConfig&
             // Handle string-valued keys first
             if (key == "bp_type") {
                 using BPT = simrv::pipeline::BranchPredictorType;
-                if (val_str == "static-not-taken")  config.bp_type = BPT::StaticNotTaken;
-                else if (val_str == "static-taken") config.bp_type = BPT::StaticTaken;
-                else if (val_str == "1bit")         config.bp_type = BPT::OneBitBimodal;
-                else if (val_str == "gshare")       config.bp_type = BPT::Gshare;
-                else                                config.bp_type = BPT::TwoBitBimodal;
+                if (val_str == "static-not-taken")
+                    config.bp_type = BPT::StaticNotTaken;
+                else if (val_str == "static-taken")
+                    config.bp_type = BPT::StaticTaken;
+                else if (val_str == "1bit")
+                    config.bp_type = BPT::OneBitBimodal;
+                else if (val_str == "gshare")
+                    config.bp_type = BPT::Gshare;
+                else
+                    config.bp_type = BPT::TwoBitBimodal;
                 continue;
             }
 
@@ -97,4 +103,4 @@ inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuConfig&
     return true;
 }
 
-} // namespace simrv::core
+}  // namespace simrv::core

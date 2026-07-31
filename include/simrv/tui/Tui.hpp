@@ -29,11 +29,7 @@ namespace simrv::tui {
 
 extern volatile std::sig_atomic_t g_resized;  // NOLINT(avoid-non-const-global-variables)
 
-enum class TuiLayout : uint8_t {
-    Split,
-    FullRight,
-    FullLeft
-};
+enum class TuiLayout : uint8_t { Split, FullRight, FullLeft };
 
 enum class TuiRegPage : uint8_t {
     GPR,
@@ -50,10 +46,7 @@ enum class TuiRegPage : uint8_t {
     STACK
 };
 
-enum class TuiRightPanelMode : uint8_t {
-    Terminal,
-    Display
-};
+enum class TuiRightPanelMode : uint8_t { Terminal, Display };
 
 /**
  * @class Tui
@@ -77,12 +70,18 @@ class Tui {
 
     void update();
     void pause_loop();
-    [[nodiscard]] auto is_tui_paused() const -> bool { return tui_loop_paused_.load(std::memory_order_relaxed); }
+    [[nodiscard]] auto is_tui_paused() const -> bool {
+        return tui_loop_paused_.load(std::memory_order_relaxed);
+    }
 
     void set_paused(bool p);
     [[nodiscard]] auto is_paused() const -> bool { return paused_; }
-    void set_sim_thread_sleeping(bool s) { sim_thread_is_sleeping_.store(s, std::memory_order_relaxed); }
-    [[nodiscard]] auto is_sim_thread_sleeping() const -> bool { return sim_thread_is_sleeping_.load(std::memory_order_relaxed); }
+    void set_sim_thread_sleeping(bool s) {
+        sim_thread_is_sleeping_.store(s, std::memory_order_relaxed);
+    }
+    [[nodiscard]] auto is_sim_thread_sleeping() const -> bool {
+        return sim_thread_is_sleeping_.load(std::memory_order_relaxed);
+    }
     void update_cache();
     void on_cycle_completed_slow();
     void on_cycle_completed() {
@@ -102,11 +101,13 @@ class Tui {
         set_paused(true);
         render(true);
     }
-    void close_modal() { modal_.close(); render(true); }
+    void close_modal() {
+        modal_.close();
+        render(true);
+    }
     void submit_modal() {
         modal_.submit(
-            left_pane_.get(), step_delay_us_,
-            [this](TuiRegPage page) { set_reg_page(page); },
+            left_pane_.get(), step_delay_us_, [this](TuiRegPage page) { set_reg_page(page); },
             [this](const std::string& status) { set_status_override(status); },
             [this]() { reset_speed_history(); });
         render(true);
@@ -118,9 +119,12 @@ class Tui {
     void clear_status_override() { status_override_.clear(); }
 
     void cycle_layout() {
-        if (layout_ == TuiLayout::Split) layout_ = TuiLayout::FullRight;
-        else if (layout_ == TuiLayout::FullRight) layout_ = TuiLayout::FullLeft;
-        else layout_ = TuiLayout::Split;
+        if (layout_ == TuiLayout::Split)
+            layout_ = TuiLayout::FullRight;
+        else if (layout_ == TuiLayout::FullRight)
+            layout_ = TuiLayout::FullLeft;
+        else
+            layout_ = TuiLayout::Split;
         render(true);
     }
 
@@ -131,16 +135,24 @@ class Tui {
     void toggle_high_contrast();
     void toggle_sakura_theme();
     void cycle_right_panel_mode();
-    void record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa::OperationId op_id, uint8_t rd, Register rd_val, uint8_t rs1, Register rs1_val, uint8_t rs2, Register rs2_val, int64_t imm);
+    void record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa::OperationId op_id,
+                            uint8_t rd, Register rd_val, uint8_t rs1, Register rs1_val, uint8_t rs2,
+                            Register rs2_val, int64_t imm);
     void toggle_trace_enabled();
-    [[nodiscard]] auto is_trace_enabled() const -> bool { return trace_enabled_.load(std::memory_order_relaxed); }
-    [[nodiscard]] auto is_trace_active() const -> bool { return trace_or_livetrace_active_.load(std::memory_order_relaxed); }
+    [[nodiscard]] auto is_trace_enabled() const -> bool {
+        return trace_enabled_.load(std::memory_order_relaxed);
+    }
+    [[nodiscard]] auto is_trace_active() const -> bool {
+        return trace_or_livetrace_active_.load(std::memory_order_relaxed);
+    }
     void scroll(int lines);
     void reset_scroll();
     void scroll_regs(int lines);
     void reset_scroll_regs();
     [[nodiscard]] auto get_scroll_offset() const -> int { return scroll_offset_; }
-    [[nodiscard]] auto get_right_panel_mode() const -> TuiRightPanelMode { return right_panel_mode_.load(std::memory_order_relaxed); }
+    [[nodiscard]] auto get_right_panel_mode() const -> TuiRightPanelMode {
+        return right_panel_mode_.load(std::memory_order_relaxed);
+    }
     [[nodiscard]] auto get_pane_width() const -> int { return pane_width_cached_; }
     [[nodiscard]] auto get_layout() const -> TuiLayout { return layout_; }
     void adjust_left_pane_width(int delta);
@@ -163,7 +175,7 @@ class Tui {
 
     simrv::core::Machine& machine_;
     TuiModal modal_;
-    
+
     std::unique_ptr<LeftPane> left_pane_;
     std::unique_ptr<RightPane> right_pane_;
     std::unique_ptr<StatusBar> status_bar_;
@@ -224,4 +236,4 @@ class Tui {
     auto update_trace_active_cache() -> void;
 };
 
-} // namespace simrv::tui
+}  // namespace simrv::tui

@@ -7,6 +7,7 @@
 #include <functional>
 #include <string>
 #include <vector>
+
 #include "simrv/tui/TuiModal.hpp"
 
 namespace simrv::core {

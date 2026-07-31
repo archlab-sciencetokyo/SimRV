@@ -6,6 +6,7 @@
 
 #include <array>
 #include <format>
+
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiTheme.hpp"
@@ -43,7 +44,7 @@ void SettingsModal::move_cursor(int& cursor, int delta) {
 }
 
 void SettingsModal::toggle_setting(SettingsDraft& draft, int index,
-                                    const simrv::core::Machine& machine) {
+                                   const simrv::core::Machine& machine) {
     switch (index) {
         case 0:
             draft.cycle_accurate = !draft.cycle_accurate;
@@ -155,38 +156,33 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
     };
 
     const auto settings = std::to_array<ItemInfo>({
-        {"Simulation Mode",
-         draft.cycle_accurate ? "\033[1;36m[CA (Cycle-Accurate)]\033[0m"
-                              : "\033[1;33m[IA (Instruction-Accurate)]\033[0m"},
-        {"TUI Diagnostics View",
-         draft.debug_mode ? "\033[1;32m[Debug Mode (Diagnostics ON)]\033[0m"
-                          : "\033[90m[Normal Mode]\033[0m"},
+        {"Simulation Mode", draft.cycle_accurate ? "\033[1;36m[CA (Cycle-Accurate)]\033[0m"
+                                                 : "\033[1;33m[IA (Instruction-Accurate)]\033[0m"},
+        {"TUI Diagnostics View", draft.debug_mode ? "\033[1;32m[Debug Mode (Diagnostics ON)]\033[0m"
+                                                  : "\033[90m[Normal Mode]\033[0m"},
         {"Step Rollback History",
-         rollback_disabled ? "\033[90m[Disabled (High-Perf Mode)]\033[0m"
-                           : (draft.rollback_enabled ? "\033[1;32m[ON]\033[0m"
-                                                     : "\033[90m[OFF]\033[0m")},
+         rollback_disabled
+             ? "\033[90m[Disabled (High-Perf Mode)]\033[0m"
+             : (draft.rollback_enabled ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m")},
         {"High Contrast Theme",
          draft.high_contrast ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
         {"Instruction Mix Stats",
          mix_disabled ? "\033[90m[Disabled (N/A in IA Mode)]\033[0m"
-                      : (draft.use_mix ? "\033[1;32m[ON]\033[0m"
-                                       : "\033[90m[OFF]\033[0m")},
+                      : (draft.use_mix ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m")},
         {"High-Performance Engine",
-         draft.high_performance ? "\033[1;32m[ON]\033[0m"
-                                : "\033[90m[OFF]\033[0m"},
+         draft.high_performance ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
         {"Co-Sim Spike Lockstep",
-         lockstep_disabled ? "\033[90m[Disabled (No Spike Bin)]\033[0m"
-                           : (draft.lockstep_mode ? "\033[1;32m[ON]\033[0m"
-                                                 : "\033[90m[OFF]\033[0m")},
+         lockstep_disabled
+             ? "\033[90m[Disabled (No Spike Bin)]\033[0m"
+             : (draft.lockstep_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m")},
         {"GDB Server Stub (1234)",
          draft.gdb_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
         {"Branch Prediction Trace",
          bp_disabled ? "\033[90m[Disabled (N/A in IA Mode)]\033[0m"
                      : (draft.bp_trace ? "\033[1;32m[ON (creates bptrace.txt)]\033[0m"
                                        : "\033[90m[OFF (creates text file)]\033[0m")},
-        {"Exception & Trap Log",
-         draft.traplog_mode ? "\033[1;32m[ON (creates traplog.txt)]\033[0m"
-                            : "\033[90m[OFF (creates text file)]\033[0m"},
+        {"Exception & Trap Log", draft.traplog_mode ? "\033[1;32m[ON (creates traplog.txt)]\033[0m"
+                                                    : "\033[90m[OFF (creates text file)]\033[0m"},
         {"Device MMIO Access Log",
          dlog_disabled ? "\033[90m[Disabled in Baremetal Mode]\033[0m"
                        : (draft.dlog_mode ? "\033[1;32m[ON (creates devicelog.txt)]\033[0m"
@@ -195,18 +191,21 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
 
     for (std::size_t i = 0; i < settings.size(); ++i) {
         if (i == 0) {
-            add_row_cb(std::format("{}\033[1;35m── Core Engine & Diagnostics ──\033[0m", kThemeText));
+            add_row_cb(
+                std::format("{}\033[1;35m── Core Engine & Diagnostics ──\033[0m", kThemeText));
         } else if (i == 6) {
             add_row_cb("");
-            add_row_cb(std::format("{}\033[1;35m── External Integrations & Debug Stubs ──\033[0m", kThemeText));
+            add_row_cb(std::format("{}\033[1;35m── External Integrations & Debug Stubs ──\033[0m",
+                                   kThemeText));
         } else if (i == 8) {
             add_row_cb("");
-            add_row_cb(std::format("{}\033[1;35m── Traces & Logging (Creates Text Files) ──\033[0m", kThemeText));
+            add_row_cb(std::format("{}\033[1;35m── Traces & Logging (Creates Text Files) ──\033[0m",
+                                   kThemeText));
         }
         bool is_sel = (static_cast<int>(i) == cursor);
         std::string prefix = is_sel ? std::format("{}>\033[0m ", kThemeMint) : "  ";
-        std::string name_str = std::format(
-            "{}{:<29}\033[0m", is_sel ? "\033[1;37m" : kThemeText, settings[i].name);
+        std::string name_str =
+            std::format("{}{:<29}\033[0m", is_sel ? "\033[1;37m" : kThemeText, settings[i].name);
         add_row_cb(std::format("{}{} : {}", prefix, name_str, settings[i].val));
     }
     add_row_cb("");

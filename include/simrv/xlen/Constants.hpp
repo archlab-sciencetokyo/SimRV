@@ -69,7 +69,8 @@ template <unsigned XLen = kXLenBits>
 template <unsigned XLen = kXLenBits>
 [[nodiscard]] inline constexpr auto satp_mode_supported(Word mode) -> bool {
     if constexpr (XLen == 64) {
-        return mode == 0 || mode == 8 || mode == 9 || mode == 1;  // Bare, SV39, SV48, SV32 (compatibility)
+        return mode == 0 || mode == 8 || mode == 9 ||
+               mode == 1;  // Bare, SV39, SV48, SV32 (compatibility)
     } else {
         return mode == 0 || mode == 1;  // Bare, SV32
     }
@@ -110,7 +111,8 @@ template <unsigned XLen = kXLenBits>
     if constexpr (kXLenBits == 32) {
         return satp_translation_enabled<32>(satp);
     } else {
-        return (xlen == 64) ? satp_translation_enabled<64>(satp) : satp_translation_enabled<32>(satp);
+        return (xlen == 64) ? satp_translation_enabled<64>(satp)
+                            : satp_translation_enabled<32>(satp);
     }
 }
 

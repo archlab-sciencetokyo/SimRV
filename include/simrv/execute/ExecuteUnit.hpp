@@ -7,7 +7,7 @@
 namespace simrv::core {
 class CPU;
 class Machine;
-}
+}  // namespace simrv::core
 
 namespace simrv::execute {
 
@@ -29,14 +29,16 @@ struct FpExecResult {
 class ExecuteUnit {
    public:
     /// Execute integer ALU or M-extension or B-extension operation.
-    static auto aluInt(Register in1, Register in2, isa::OperationId op_id, unsigned xlen = simrv::xlen::kXLenBits)
-        -> Register;
+    static auto aluInt(Register in1, Register in2, isa::OperationId op_id,
+                       unsigned xlen = simrv::xlen::kXLenBits) -> Register;
     /// Execute RV64 W-class integer operations with 32-bit result semantics.
     static auto aluIntW(Register in1, Register in2, isa::OperationId op_id) -> Register;
     /// Evaluate branch condition and return taken flag.
-    static auto branchTaken(Register in1, Register in2, isa::Funct3 funct3, unsigned xlen = simrv::xlen::kXLenBits) -> bool;
+    static auto branchTaken(Register in1, Register in2, isa::Funct3 funct3,
+                            unsigned xlen = simrv::xlen::kXLenBits) -> bool;
     /// Execute AMO arithmetic/logic result function.
-    static auto aluAmo(Register in1, Register in2, isa::Funct5Amo funct5, isa::Funct3 funct3) -> Register;
+    static auto aluAmo(Register in1, Register in2, isa::Funct5Amo funct5, isa::Funct3 funct3)
+        -> Register;
     /// Compute CSR write value for CSR instruction variants.
     static auto csrWriteValue(CSRValue rcsr, Register rrs1, ImmValue imm, isa::Funct3 funct3)
         -> std::expected<CSRValue, TrapCause>;
@@ -47,31 +49,34 @@ class ExecuteUnit {
     static auto opFp(Word funct7, isa::Funct3 funct3, Word rs1, Word rs2, Register rrs1,
                      const FloatingRegister* freg, CSRValue& fcsr) -> FpExecResult;
     /// Execute vector instructions.
-    static void execute_vector(core::CPU& cpu, core::Machine& machine, isa::OperationId op_id, Instruction ir);
+    static void execute_vector(core::CPU& cpu, core::Machine& machine, isa::OperationId op_id,
+                               Instruction ir);
 
    private:
-    static auto aluIntB(Register in1, Register in2, isa::OperationId op_id, unsigned xlen = simrv::xlen::kXLenBits) -> Register;
+    static auto aluIntB(Register in1, Register in2, isa::OperationId op_id,
+                        unsigned xlen = simrv::xlen::kXLenBits) -> Register;
     static auto aluIntBW(Register in1, Register in2, isa::OperationId op_id) -> Register;
 
     static void execute_vector_config(core::CPU& cpu, isa::OperationId op_id, Instruction ir,
                                       RegId rd, RegId rs1, RegId rs2);
 
-    static void execute_vector_memory(core::CPU& cpu, core::Machine& machine, isa::OperationId op_id,
-                                      RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew);
+    static void execute_vector_memory(core::CPU& cpu, core::Machine& machine,
+                                      isa::OperationId op_id, RegId rd, RegId rs1, RegId rs2,
+                                      bool vm, uint32_t vl, uint32_t sew);
 
-    static void execute_vector_integer(core::CPU& cpu, isa::OperationId op_id,
-                                       RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew,
+    static void execute_vector_integer(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
+                                       RegId rs2, bool vm, uint32_t vl, uint32_t sew,
                                        Register rs1_val, int32_t simm5);
 
-    static void execute_vector_fixed_point(core::CPU& cpu, isa::OperationId op_id,
-                                           RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew,
+    static void execute_vector_fixed_point(core::CPU& cpu, isa::OperationId op_id, RegId rd,
+                                           RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew,
                                            Register rs1_val, int32_t simm5);
 
-    static void execute_vector_float(core::CPU& cpu, isa::OperationId op_id,
-                                     RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew);
+    static void execute_vector_float(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
+                                     RegId rs2, bool vm, uint32_t vl, uint32_t sew);
 
-    static void execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
-                                       RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew,
+    static void execute_vector_permute(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
+                                       RegId rs2, bool vm, uint32_t vl, uint32_t sew,
                                        Register rs1_val, int32_t simm5);
 };
 

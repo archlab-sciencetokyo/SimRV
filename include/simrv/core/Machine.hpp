@@ -30,12 +30,12 @@
 namespace simrv::device {
 class PowerMmio;
 class InputDevice;
-}
+}  // namespace simrv::device
 
 namespace simrv::tui {
 class Tui;
 class LeftPane;
-}
+}  // namespace simrv::tui
 
 namespace simrv::core {
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
@@ -76,43 +76,49 @@ class Machine {
     /// Finalize cycle for tohost checks only.
     void finalize_cycle_tohost();
     /// Stop the simulation loop.
-    void stop() { is_running_ = false; is_shutdown_ = true; }
+    void stop() {
+        is_running_ = false;
+        is_shutdown_ = true;
+    }
     /// Check if the simulation loop is running.
     [[nodiscard]] auto is_running() const -> bool { return is_running_; }
     /// Request system reboot.
-    void request_reboot() { reboot_requested = true; is_running_ = false; }
+    void request_reboot() {
+        reboot_requested = true;
+        is_running_ = false;
+    }
 
     uint64_t tohost = 0;  // Host communication register (always 64-bit for HTIF).
     std::atomic<bool> reboot_requested = false;  // Reboot requested flag.
-    int exit_code = 0;             // Exit/status code of the simulation.
-    std::atomic<bool> is_shutdown_ = false;     // System shutdown flag.
+    int exit_code = 0;                           // Exit/status code of the simulation.
+    std::atomic<bool> is_shutdown_ = false;      // System shutdown flag.
 
     // ========== Simulation Configuration Flags ==========
-    bool s_appmode = true;         // Baremetal/app mode (default)
-    bool s_tuimode = false;        // Enable TUI monitor mode
-    bool s_gui_mode = false;       // Enable GUI graphics window mode
-    bool s_high_contrast = false;  // Enable high-contrast TUI mode
-    bool s_debugmode = false;      // Enable debug logging in MMIO paths
-    bool s_debug_mode = false;     // Enable TUI debug diagnostics mode
-    bool s_dlog_mode = false;      // Enable device request/response logging
-    bool s_traplog_mode = false;   // Enable trap/SBI/exception logging
-    bool s_use_disk = false;       // Enable disk image simulation
-    bool s_use_mix = false;        // Enable instruction-mix statistics collection
-    bool s_bp_trace = false;       // Enable branch prediction tracing
-    bool s_misa_override = false;  // True when CLI explicitly selected MISA profile
-    bool s_cycle_accurate = false;  // Enable cycle-accurate performance simulation mode
-    bool s_high_performance = true; // Enable high-performance optimized simulation mode
-    bool s_mmu_ever_used = false;   // Latched true the first time satp enables translation
-    bool s_multithreaded = false;   // Run simulation in a background thread
-    bool s_rollback_enabled = false; // Enable instruction rollback tracking
-    double s_mouse_sensitivity = 1.0; // Mouse relative sensitivity factor
+    bool s_appmode = true;             // Baremetal/app mode (default)
+    bool s_tuimode = false;            // Enable TUI monitor mode
+    bool s_gui_mode = false;           // Enable GUI graphics window mode
+    bool s_high_contrast = false;      // Enable high-contrast TUI mode
+    bool s_debugmode = false;          // Enable debug logging in MMIO paths
+    bool s_debug_mode = false;         // Enable TUI debug diagnostics mode
+    bool s_dlog_mode = false;          // Enable device request/response logging
+    bool s_traplog_mode = false;       // Enable trap/SBI/exception logging
+    bool s_use_disk = false;           // Enable disk image simulation
+    bool s_use_mix = false;            // Enable instruction-mix statistics collection
+    bool s_bp_trace = false;           // Enable branch prediction tracing
+    bool s_misa_override = false;      // True when CLI explicitly selected MISA profile
+    bool s_cycle_accurate = false;     // Enable cycle-accurate performance simulation mode
+    bool s_high_performance = true;    // Enable high-performance optimized simulation mode
+    bool s_mmu_ever_used = false;      // Latched true the first time satp enables translation
+    bool s_multithreaded = false;      // Run simulation in a background thread
+    bool s_rollback_enabled = false;   // Enable instruction rollback tracking
+    double s_mouse_sensitivity = 1.0;  // Mouse relative sensitivity factor
 
     // ========== Debug / Co-Simulation Flags ==========
-    bool     s_gdb_mode      = false;      // Enable GDB RSP stub
-    uint16_t s_gdb_port      = 1234;       // GDB stub TCP port
-    bool     s_lockstep_mode = false;      // Enable Spike lockstep co-simulation
-    std::string s_spike_bin  = "spike";    // Path to Spike binary
-    std::string s_spike_elf;               // Path to Spike ELF image
+    bool s_gdb_mode = false;            // Enable GDB RSP stub
+    uint16_t s_gdb_port = 1234;         // GDB stub TCP port
+    bool s_lockstep_mode = false;       // Enable Spike lockstep co-simulation
+    std::string s_spike_bin = "spike";  // Path to Spike binary
+    std::string s_spike_elf;            // Path to Spike ELF image
 
     // ========== Simulation Control Parameters ==========
     Address s_start_pc = 0;                                  // Initial PC value
@@ -124,17 +130,17 @@ class Machine {
     Counter s_memimg = 0;                                         // Memory image dump cycle
 
     // ========== ISA/Privilege Configuration ==========
-    Address s_isatest_tohost = 0x80001000;   // ISA-test tohost RAM address
+    Address s_isatest_tohost = 0x80001000;        // ISA-test tohost RAM address
     CSRValue s_misa_profile = isa::kMisaDefault;  // Selected MISA profile (without MXL)
-    unsigned int s_misa_xlen = 0;            // Selected MISA XLEN (32 or 64, or 0 if default)
-    unsigned int s_vlen = 0;                 // Selected VLEN (bits, or 0 if default)
+    unsigned int s_misa_xlen = 0;                 // Selected MISA XLEN (32 or 64, or 0 if default)
+    unsigned int s_vlen = 0;                      // Selected VLEN (bits, or 0 if default)
 
     // ========== I/O and Logging ==========
     std::string s_fn_memimg;                             // Memory image filename
     std::string s_fn_dskimg;                             // Disk image filename
     std::string s_fn_dvtree;                             // Device-tree binary filename
     std::string s_fn_traplog;                            // Trap/exception log filename
-    std::string s_fn_cpuconfig;                           // CPU config filename
+    std::string s_fn_cpuconfig;                          // CPU config filename
     std::chrono::steady_clock::time_point s_start_time;  // Simulation start timestamp
 
     // ========== Mode-Switch Reboot State ==========
@@ -160,13 +166,13 @@ class Machine {
     std::unique_ptr<simrv::util::SdlAudio> sdl_audio;
 
     // ========== Debug Subsystems (null when disabled) ==========
-    std::unique_ptr<simrv::debug::GdbStub>       gdb_stub;
+    std::unique_ptr<simrv::debug::GdbStub> gdb_stub;
     std::unique_ptr<simrv::debug::SpikeLockstep> spike_lockstep;
     simrv::debug::BreakpointManager breakpoints;
 
     // ========== Memory and Interconnect ==========
-    Byte* mmem{};          // Pointer to main memory buffer
-    Tracer tracer{*this};  // Tracing facility
+    Byte* mmem{};                       // Pointer to main memory buffer
+    Tracer tracer{*this};               // Tracing facility
     simrv::debug::SymbolTable symbols;  // ELF debugging symbols
 
    protected:

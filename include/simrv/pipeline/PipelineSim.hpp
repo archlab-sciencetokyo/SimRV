@@ -1,14 +1,14 @@
 #pragma once
 
-#include <cstdint>
-#include <vector>
 #include <array>
+#include <cstdint>
 #include <deque>
-#include <mutex>
 #include <memory>
+#include <mutex>
 #include <simrv/Define.hpp>
-#include <simrv/xlen/Types.hpp>
 #include <simrv/isa/Base.hpp>
+#include <simrv/xlen/Types.hpp>
+#include <vector>
 
 namespace simrv::pipeline {
 
@@ -28,7 +28,7 @@ struct PipelineReg {
     isa::OperationId op_id = isa::OperationId::UNKNOWN;
     bool writes_reg = false;
     bool is_load = false;
-    int remaining_latency = 0; // Cycles until value is ready for forwarding
+    int remaining_latency = 0;  // Cycles until value is ready for forwarding
     bool valid = false;
     bool tlb_miss = false;
     bool icache_miss = false;
@@ -62,7 +62,7 @@ struct CpuConfig {
     bool enable_ex_forwarding = true;
     bool enable_mem_forwarding = true;
 };
- 
+
 struct PipelineCycleSnapshot {
     uint64_t cycle = 0;
     struct StageInfo {
@@ -109,10 +109,10 @@ struct PipelineSimState {
     uint32_t gshare_history = 0;
 };
 
-class PipelineModel; // Forward declaration
+class PipelineModel;  // Forward declaration
 
 class PipelineSim {
-public:
+   public:
     PipelineSim();
     ~PipelineSim();
 
@@ -127,7 +127,8 @@ public:
      */
     auto step_instruction(Register pc, isa::Opcode opcode, RegId rd, RegId rs1, RegId rs2,
                           isa::OperationId op_id, bool branched, bool is_branch, bool is_jump,
-                          bool icache_miss, bool dcache_miss, bool tlb_miss, Register target_pc) -> uint32_t;
+                          bool icache_miss, bool dcache_miss, bool tlb_miss, Register target_pc)
+        -> uint32_t;
 
     // Getters for statistics
     [[nodiscard]] auto cycle_count() const -> uint64_t;
@@ -160,10 +161,10 @@ public:
     [[nodiscard]] auto save_state() const -> PipelineSimState;
     void restore_state(const PipelineSimState& state);
 
-private:
+   private:
     void init_model();
 
     std::unique_ptr<PipelineModel> model_;
 };
 
-} // namespace simrv::pipeline
+}  // namespace simrv::pipeline

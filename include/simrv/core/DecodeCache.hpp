@@ -2,9 +2,10 @@
 
 #include <array>
 #include <optional>
+
 #include "simrv/Define.hpp"
-#include "simrv/xlen/Types.hpp"
 #include "simrv/pipeline/DecodedInstruction.hpp"
+#include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
 
@@ -13,7 +14,7 @@ struct CachedOp : public simrv::pipeline::DecodedInstruction {
 };
 
 class DecodeCache {
-public:
+   public:
     static constexpr size_t kCacheSize = 8192;
     static constexpr size_t kCacheMask = kCacheSize - 1;
 
@@ -39,8 +40,8 @@ public:
         cache_[index].valid = true;
     }
 
-private:
+   private:
     std::array<CachedOp, kCacheSize> cache_{};
 };
 
-} // namespace simrv::core
+}  // namespace simrv::core

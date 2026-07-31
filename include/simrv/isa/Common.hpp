@@ -5,13 +5,14 @@
 #pragma once
 
 #include <string_view>
-#include "simrv/xlen/Types.hpp" // IWYU pragma: export
-#include "simrv/isa/Base.hpp" // IWYU pragma: export
-#include "simrv/isa/Amo.hpp" // IWYU pragma: export
-#include "simrv/isa/Fp.hpp" // IWYU pragma: export
-#include "simrv/isa/Priv.hpp" // IWYU pragma: export
-#include "simrv/isa/Compressed.hpp" // IWYU pragma: export
-#include "simrv/isa/OperationId.hpp" // IWYU pragma: export
+
+#include "simrv/isa/Amo.hpp"          // IWYU pragma: export
+#include "simrv/isa/Base.hpp"         // IWYU pragma: export
+#include "simrv/isa/Compressed.hpp"   // IWYU pragma: export
+#include "simrv/isa/Fp.hpp"           // IWYU pragma: export
+#include "simrv/isa/OperationId.hpp"  // IWYU pragma: export
+#include "simrv/isa/Priv.hpp"         // IWYU pragma: export
+#include "simrv/xlen/Types.hpp"       // IWYU pragma: export
 
 namespace simrv::isa {
 
@@ -22,9 +23,7 @@ constexpr Instruction RV32_NOP = 0x00000013;
  * @param ir The raw instruction word.
  * @return Opcode enum representing bits [6:0].
  */
-constexpr auto opcode_of(Instruction ir) -> Opcode {
-    return static_cast<Opcode>(ir & 0x7F);
-}
+constexpr auto opcode_of(Instruction ir) -> Opcode { return static_cast<Opcode>(ir & 0x7F); }
 
 /**
  * @brief Extracts the 2-bit compressed opcode quadrant from a 16-bit compressed instruction.
@@ -40,27 +39,21 @@ constexpr auto compressed_opcode_of(CompressedInstruction ir) -> CompressedOpcod
  * @param ir The raw instruction word.
  * @return Funct3 enum representing bits [14:12].
  */
-constexpr auto funct3_of(Instruction ir) -> Funct3 {
-    return static_cast<Funct3>((ir >> 12) & 0x7);
-}
+constexpr auto funct3_of(Instruction ir) -> Funct3 { return static_cast<Funct3>((ir >> 12) & 0x7); }
 
 /**
  * @brief Extracts the 12-bit funct12 field from a system/privileged instruction.
  * @param ir The raw instruction word.
  * @return 12-bit value representing bits [31:20].
  */
-constexpr auto funct12_of(Instruction ir) -> Instruction {
-    return (ir >> 20) & 0xFFF;
-}
+constexpr auto funct12_of(Instruction ir) -> Instruction { return (ir >> 20) & 0xFFF; }
 
 /**
  * @brief Extracts the 7-bit funct7 field from a register-register instruction.
  * @param ir The raw instruction word.
  * @return 7-bit value representing bits [31:25].
  */
-constexpr auto funct7_of(Instruction ir) -> Instruction {
-    return (ir >> 25) & 0x7F;
-}
+constexpr auto funct7_of(Instruction ir) -> Instruction { return (ir >> 25) & 0x7F; }
 
 /**
  * @brief Extracts the 5-bit funct5 field from an atomic memory operation (AMO).
@@ -128,7 +121,8 @@ constexpr auto misa_mxl_field() -> CSRValue {
 }
 
 /**
- * @brief Integrates the target MXL field into an extensions mask to construct a valid MISA CSR value.
+ * @brief Integrates the target MXL field into an extensions mask to construct a valid MISA CSR
+ * value.
  * @param misa_extensions The mask of enabled extensions.
  * @return Combined CSRValue containing both extensions and MXL configuration.
  */
@@ -244,7 +238,8 @@ constexpr auto is_rs1_fp(Opcode opcode, OperationId op_id) -> bool {
     if (opcode == Opcode::StoreFp) {
         return true;
     }
-    if (opcode != Opcode::OpFp && opcode != Opcode::MAdd && opcode != Opcode::MSub && opcode != Opcode::NMSub && opcode != Opcode::NMAdd) {
+    if (opcode != Opcode::OpFp && opcode != Opcode::MAdd && opcode != Opcode::MSub &&
+        opcode != Opcode::NMSub && opcode != Opcode::NMAdd) {
         return false;
     }
     switch (op_id) {
@@ -274,7 +269,8 @@ constexpr auto is_rs2_fp(Opcode opcode, [[maybe_unused]] OperationId op_id) -> b
     if (opcode == Opcode::StoreFp) {
         return true;
     }
-    if (opcode != Opcode::OpFp && opcode != Opcode::MAdd && opcode != Opcode::MSub && opcode != Opcode::NMSub && opcode != Opcode::NMAdd) {
+    if (opcode != Opcode::OpFp && opcode != Opcode::MAdd && opcode != Opcode::MSub &&
+        opcode != Opcode::NMSub && opcode != Opcode::NMAdd) {
         return false;
     }
     return true;
@@ -328,14 +324,22 @@ constexpr auto get_instruction_format(Opcode op) -> InstFormat {
  */
 constexpr auto get_instruction_format_name(InstFormat fmt) -> std::string_view {
     switch (fmt) {
-        case InstFormat::R: return "R-Type (Register-Register)";
-        case InstFormat::I: return "I-Type (Register-Immediate / Load / Jump)";
-        case InstFormat::S: return "S-Type (Store)";
-        case InstFormat::B: return "B-Type (Branch)";
-        case InstFormat::U: return "U-Type (Upper Immediate)";
-        case InstFormat::J: return "J-Type (Unconditional Jump)";
-        case InstFormat::R4: return "R4-Type (Fused Multiply-Add)";
-        case InstFormat::Unknown: return "Unknown / Custom Format";
+        case InstFormat::R:
+            return "R-Type (Register-Register)";
+        case InstFormat::I:
+            return "I-Type (Register-Immediate / Load / Jump)";
+        case InstFormat::S:
+            return "S-Type (Store)";
+        case InstFormat::B:
+            return "B-Type (Branch)";
+        case InstFormat::U:
+            return "U-Type (Upper Immediate)";
+        case InstFormat::J:
+            return "J-Type (Unconditional Jump)";
+        case InstFormat::R4:
+            return "R4-Type (Fused Multiply-Add)";
+        case InstFormat::Unknown:
+            return "Unknown / Custom Format";
     }
     return "Unknown";
 }
@@ -380,4 +384,4 @@ constexpr auto requires_rv64(OperationId op_id) -> bool {
     }
 }
 
-} // namespace simrv::isa
+}  // namespace simrv::isa

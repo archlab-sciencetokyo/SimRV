@@ -4,9 +4,10 @@
  */
 #pragma once
 
-#include <string>
 #include <map>
 #include <optional>
+#include <string>
+
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::debug {
@@ -25,7 +26,8 @@ class SymbolTable {
     /**
      * @brief Look up a symbol name for a given address.
      * @param addr Memory address to lookup.
-     * @return Formatted string "symbol_name" or "symbol_name+0xoffset", or empty string if not found.
+     * @return Formatted string "symbol_name" or "symbol_name+0xoffset", or empty string if not
+     * found.
      */
     [[nodiscard]] auto lookup(Address addr) const -> std::string;
     [[nodiscard]] auto lookup_name(const std::string& name) const -> std::optional<Address>;

@@ -1,9 +1,10 @@
-#include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/core/Cpu.hpp"
+#include "simrv/execute/ExecuteUnit.hpp"
 
 namespace simrv::execute {
 
-void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::OperationId op_id, Instruction ir) {
+void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::OperationId op_id,
+                                 Instruction ir) {
     const auto rd = static_cast<RegId>((ir >> 7) & 0x1F);
     const auto rs1 = static_cast<RegId>((ir >> 15) & 0x1F);
     const auto rs2 = static_cast<RegId>((ir >> 20) & 0x1F);
@@ -113,7 +114,8 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::Op
         case isa::OperationId::VNCLIPU_WV:
         case isa::OperationId::VNCLIPU_WX:
         case isa::OperationId::VNCLIPU_WI:
-            execute_vector_fixed_point(cpu, op_id, rd, rs1, rs2, vm, vl, sew, cpu.state().regs.read(rs1), simm5);
+            execute_vector_fixed_point(cpu, op_id, rd, rs1, rs2, vm, vl, sew,
+                                       cpu.state().regs.read(rs1), simm5);
             break;
 
         // Permute and Move
@@ -140,14 +142,16 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::Op
         case isa::OperationId::VFMV_F_S:
         case isa::OperationId::VFMV_S_F:
         case isa::OperationId::VFMERGE_VFM:
-            execute_vector_permute(cpu, op_id, rd, rs1, rs2, vm, vl, sew, cpu.state().regs.read(rs1), simm5);
+            execute_vector_permute(cpu, op_id, rd, rs1, rs2, vm, vl, sew,
+                                   cpu.state().regs.read(rs1), simm5);
             break;
 
         // Integer Arithmetic (default/fallback for all remaining vector integer ops)
         default:
-            execute_vector_integer(cpu, op_id, rd, rs1, rs2, vm, vl, sew, cpu.state().regs.read(rs1), simm5);
+            execute_vector_integer(cpu, op_id, rd, rs1, rs2, vm, vl, sew,
+                                   cpu.state().regs.read(rs1), simm5);
             break;
     }
 }
 
-} // namespace simrv::execute
+}  // namespace simrv::execute

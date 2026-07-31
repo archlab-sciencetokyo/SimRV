@@ -21,13 +21,13 @@
 #include "simrv/debug/SpikeLockstep.hpp"
 
 #include <fcntl.h>
-#include <csignal>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include <array>
 #include <charconv>
+#include <csignal>
 #include <cstring>
 #include <format>
 #include <print>
@@ -44,31 +44,25 @@ namespace simrv::debug {
 // ---------------------------------------------------------------------------
 
 namespace {
-constexpr const char* kRed    = "\033[31m";
-constexpr const char* kGreen  = "\033[32m";
+constexpr const char* kRed = "\033[31m";
+constexpr const char* kGreen = "\033[32m";
 constexpr const char* kYellow = "\033[33m";
-constexpr const char* kBold   = "\033[1m";
-constexpr const char* kReset  = "\033[0m";
+constexpr const char* kBold = "\033[1m";
+constexpr const char* kReset = "\033[0m";
 
 // ABI register names for prettier output
 constexpr std::array<const char*, 32> kAbiNames = {
-    "zero","ra","sp","gp","tp","t0","t1","t2",
-    "s0","s1","a0","a1","a2","a3","a4","a5",
-    "a6","a7","s2","s3","s4","s5","s6","s7",
-    "s8","s9","s10","s11","t3","t4","t5","t6"
-};
+    "zero", "ra", "sp", "gp", "tp",  "t0",  "t1", "t2", "s0", "s1", "a0",
+    "a1",   "a2", "a3", "a4", "a5",  "a6",  "a7", "s2", "s3", "s4", "s5",
+    "s6",   "s7", "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6"};
 }  // namespace
 
 // ---------------------------------------------------------------------------
 // Constructor / Destructor
 // ---------------------------------------------------------------------------
 
-SpikeLockstep::SpikeLockstep(std::string spike_bin,
-                               std::string mem_image,
-                               std::string disk_image,
-                               std::string dtb_file,
-                               std::string isa_string,
-                               bool        halt_on_diverge)
+SpikeLockstep::SpikeLockstep(std::string spike_bin, std::string mem_image, std::string disk_image,
+                             std::string dtb_file, std::string isa_string, bool halt_on_diverge)
     : spike_bin_(std::move(spike_bin)),
       mem_image_(std::move(mem_image)),
       disk_image_(std::move(disk_image)),
@@ -105,7 +99,8 @@ auto SpikeLockstep::start() -> bool {
         ::close(stderr_pipe.at(1));
 
         // Redirect stdout to /dev/null (we don't want Spike console output)
-        const int devnull = ::open("/dev/null", O_WRONLY); // NOLINT(cppcoreguidelines-pro-type-vararg)
+        const int devnull =
+            ::open("/dev/null", O_WRONLY);  // NOLINT(cppcoreguidelines-pro-type-vararg)
         if (devnull >= 0) {
             ::dup2(devnull, STDOUT_FILENO);
             ::close(devnull);
@@ -134,15 +129,15 @@ auto SpikeLockstep::start() -> bool {
 
         ::execvp(spike_bin_.c_str(), argv.data());
         // execvp failed
-        simrv::log::error("SpikeLockstep: execvp '{}' failed: {}",
-                          spike_bin_, std::strerror(errno));
+        simrv::log::error("SpikeLockstep: execvp '{}' failed: {}", spike_bin_,
+                          std::strerror(errno));
         ::_exit(127);
     }
 
     // Parent
     ::close(stderr_pipe.at(1));
     spike_stderr_ = stderr_pipe.at(0);
-    spike_pid_    = pid;
+    spike_pid_ = pid;
 
     simrv::log::info("SpikeLockstep: Spike started (pid={})", spike_pid_);
     return true;
@@ -212,8 +207,8 @@ auto SpikeLockstep::read_line() -> std::string {
 //   core   0: 3 0x80000004 (0x00028593)
 // priv: 3=M, 1=S, 0=U
 
-auto SpikeLockstep::parse_commit_line(const std::string& line,
-                                      SpikeCommitRecord& rec) -> std::optional<SpikeCommitRecord> {
+auto SpikeLockstep::parse_commit_line(const std::string& line, SpikeCommitRecord& rec)
+    -> std::optional<SpikeCommitRecord> {
     // Must start with "core"
     if (!line.starts_with("core")) {
         return std::nullopt;
@@ -268,8 +263,8 @@ auto SpikeLockstep::parse_commit_line(const std::string& line,
     if (!reg_name.empty() && reg_name.at(0) == 'x') {
         // xN notation
         uint64_t n = 0;
-        const auto [p, ec] = std::from_chars(
-            reg_name.data() + 1, reg_name.data() + reg_name.size(), n, 10);
+        const auto [p, ec] =
+            std::from_chars(reg_name.data() + 1, reg_name.data() + reg_name.size(), n, 10);
         if (ec == std::errc{} && n < 32) {
             reg_idx = static_cast<int>(n);
         }
@@ -289,11 +284,9 @@ auto SpikeLockstep::parse_commit_line(const std::string& line,
         if (i + 2 < sv.size() && sv.at(i) == '0' && sv.at(i + 1) == 'x') {
             i += 2;
             uint64_t val = 0;
-            const auto [pv, ecv] =
-                std::from_chars(sv.data() + i, sv.data() + sv.size(), val, 16);
+            const auto [pv, ecv] = std::from_chars(sv.data() + i, sv.data() + sv.size(), val, 16);
             if (ecv == std::errc{}) {
-                rec.gpr.at(static_cast<std::size_t>(reg_idx)) =
-                    static_cast<Register>(val);
+                rec.gpr.at(static_cast<std::size_t>(reg_idx)) = static_cast<Register>(val);
                 rec.gpr_valid.at(static_cast<std::size_t>(reg_idx)) = true;
             }
         }
@@ -371,10 +364,9 @@ auto SpikeLockstep::determine_sc_success() -> std::optional<bool> {
 // Divergence reporting
 // ---------------------------------------------------------------------------
 
-void SpikeLockstep::print_divergence(uint64_t icount, Address simrv_pc,
-                                      Address spike_pc,
-                                      const simrv::core::ArchState& simrv_state,
-                                      const SpikeCommitRecord& spike_rec) {
+void SpikeLockstep::print_divergence(uint64_t icount, Address simrv_pc, Address spike_pc,
+                                     const simrv::core::ArchState& simrv_state,
+                                     const SpikeCommitRecord& spike_rec) {
     simrv::log::error("[LOCKSTEP] Divergence at instruction #{}", icount);
 
     simrv::log::error("  Spike commit history:");
@@ -383,23 +375,20 @@ void SpikeLockstep::print_divergence(uint64_t icount, Address simrv_pc,
     }
 
     if (simrv_pc != spike_pc) {
-        simrv::log::error("  PC:   SimRV=0x{:08x}  Spike=0x{:08x}",
-            static_cast<uint32_t>(simrv_pc),
-            static_cast<uint32_t>(spike_pc));
+        simrv::log::error("  PC:   SimRV=0x{:08x}  Spike=0x{:08x}", static_cast<uint32_t>(simrv_pc),
+                          static_cast<uint32_t>(spike_pc));
     } else {
-        simrv::log::error("  PC:   0x{:08x}  (match)",
-            static_cast<uint32_t>(simrv_pc));
+        simrv::log::error("  PC:   0x{:08x}  (match)", static_cast<uint32_t>(simrv_pc));
     }
 
     // Show mismatched GPRs that Spike reported as written
     for (std::size_t r = 0; r < 32; ++r) {
         if (!spike_rec.gpr_valid.at(r)) continue;
-        const auto simrv_val = static_cast<uint32_t>(
-            simrv_state.regs.read(static_cast<RegId>(r)));
+        const auto simrv_val = static_cast<uint32_t>(simrv_state.regs.read(static_cast<RegId>(r)));
         const auto spike_val = static_cast<uint32_t>(spike_rec.gpr.at(r));
         if (simrv_val != spike_val) {
-            simrv::log::error("  {}:  SimRV=0x{:08x}  Spike=0x{:08x}",
-                kAbiNames.at(r), simrv_val, spike_val);
+            simrv::log::error("  {}:  SimRV=0x{:08x}  Spike=0x{:08x}", kAbiNames.at(r), simrv_val,
+                              spike_val);
         }
     }
 }
@@ -408,8 +397,7 @@ void SpikeLockstep::print_divergence(uint64_t icount, Address simrv_pc,
 // compare_and_report
 // ---------------------------------------------------------------------------
 
-auto SpikeLockstep::compare_and_report(const simrv::core::ArchState& state,
-                                       Address current_pc,
+auto SpikeLockstep::compare_and_report(const simrv::core::ArchState& state, Address current_pc,
                                        uint64_t icount) -> bool {
     if (!is_running()) return true;
 
@@ -422,7 +410,8 @@ auto SpikeLockstep::compare_and_report(const simrv::core::ArchState& state,
         while (true) {
             const auto spike_rec_opt = next_commit();
             if (!spike_rec_opt) {
-                simrv::log::warn("SpikeLockstep: Spike EOF during alignment at instruction #{}", icount);
+                simrv::log::warn("SpikeLockstep: Spike EOF during alignment at instruction #{}",
+                                 icount);
                 should_halt_ = halt_on_diverge_;
                 return false;
             }
@@ -452,8 +441,7 @@ auto SpikeLockstep::compare_and_report(const simrv::core::ArchState& state,
     if (ok) {
         for (std::size_t r = 0; r < 32; ++r) {
             if (!spike_rec.gpr_valid.at(r)) continue;
-            const auto simrv_val = static_cast<uint32_t>(
-                state.regs.read(static_cast<RegId>(r)));
+            const auto simrv_val = static_cast<uint32_t>(state.regs.read(static_cast<RegId>(r)));
             const auto spike_val = static_cast<uint32_t>(spike_rec.gpr.at(r));
             if (simrv_val != spike_val) {
                 ok = false;

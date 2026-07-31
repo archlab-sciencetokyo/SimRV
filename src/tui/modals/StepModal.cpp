@@ -6,6 +6,7 @@
 
 #include <charconv>
 #include <format>
+
 #include "simrv/tui/TuiTheme.hpp"
 
 namespace simrv::tui::modals {
@@ -43,9 +44,10 @@ auto StepModal::submit(ModalType type, const std::string& input,
 }
 
 void StepModal::render(ModalType type, std::vector<std::string>& content_rows,
-                        const std::string& input) {
+                       const std::string& input) {
     if (type == ModalType::SetSpeed) {
-        content_rows.push_back(std::format("{}Enter Target Frequency (Hz, 0=Max):\033[0m", kThemeText));
+        content_rows.push_back(
+            std::format("{}Enter Target Frequency (Hz, 0=Max):\033[0m", kThemeText));
         content_rows.push_back(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, input));
     }
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+
 #include "simrv/Define.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -24,9 +25,7 @@ struct DecodedInstruction {
     std::optional<ExceptionCode> pending_exception;
     CSRValue pending_tval = 0;
 
-    constexpr void copy_from(const DecodedInstruction& other) {
-        *this = other;
-    }
+    constexpr void copy_from(const DecodedInstruction& other) { *this = other; }
 };
 
-} // namespace simrv::pipeline
+}  // namespace simrv::pipeline

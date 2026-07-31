@@ -53,4 +53,4 @@ class SdlDisplay {
 #endif
 };
 
-} // namespace simrv::util
+}  // namespace simrv::util

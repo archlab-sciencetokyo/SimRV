@@ -3,7 +3,9 @@
  * @brief Separate input device class for keyboard and mouse registers.
  */
 #include "simrv/device/InputDevice.hpp"
+
 #include <mutex>
+
 #include "simrv/core/Machine.hpp"
 
 namespace simrv::device {
@@ -28,7 +30,7 @@ auto InputDevice::handle_request(const memory::TlChannelA& req, memory::TlChanne
 
     if (req.opcode == memory::TlOpcodeA::Get) {
         switch (static_cast<InputRegister>(offset)) {
-            case InputRegister::KeyboardRead: // Keyboard read (0x30000010)
+            case InputRegister::KeyboardRead:  // Keyboard read (0x30000010)
             {
                 std::scoped_lock lock(key_mutex_);
                 if (!key_queue_.empty()) {
@@ -38,12 +40,12 @@ auto InputDevice::handle_request(const memory::TlChannelA& req, memory::TlChanne
                     resp.data = 0;
                 }
             } break;
-            case InputRegister::KeyboardStatus: // Keyboard status (0x30000014)
+            case InputRegister::KeyboardStatus:  // Keyboard status (0x30000014)
             {
                 std::scoped_lock lock(key_mutex_);
                 resp.data = key_queue_.empty() ? 0 : 1;
             } break;
-            case InputRegister::MouseRead: // Mouse read (0x30000018)
+            case InputRegister::MouseRead:  // Mouse read (0x30000018)
             {
                 std::scoped_lock lock(mouse_mutex_);
                 if (!mouse_queue_.empty()) {
@@ -58,7 +60,7 @@ auto InputDevice::handle_request(const memory::TlChannelA& req, memory::TlChanne
                     resp.data = 0;
                 }
             } break;
-            case InputRegister::MouseStatus: // Mouse status (0x3000001C)
+            case InputRegister::MouseStatus:  // Mouse status (0x3000001C)
             {
                 std::scoped_lock lock(mouse_mutex_);
                 resp.data = mouse_queue_.empty() ? 0 : 1;
@@ -85,4 +87,4 @@ void InputDevice::push_mouse(int dx, int dy, uint8_t buttons) {
     }
 }
 
-} // namespace simrv::device
+}  // namespace simrv::device

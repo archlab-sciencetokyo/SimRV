@@ -3,14 +3,16 @@
  * @brief OSMachine implementation unit.
  */
 #include "simrv/core/OSMachine.hpp"
-#include "simrv/tui/Tui.hpp"
-#include "simrv/core/Logger.hpp"
-#include "simrv/device/Uart.hpp"
-#include "simrv/xlen/Types.hpp"
+
 #include <array>
 #include <chrono>
 #include <limits>
 #include <utility>
+
+#include "simrv/core/Logger.hpp"
+#include "simrv/device/Uart.hpp"
+#include "simrv/tui/Tui.hpp"
+#include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
 
@@ -33,8 +35,7 @@ void OSMachine::run() {
     // In normal Linux/RTOS execution none of these fire, so the fast path
     // has zero per-cycle branches for GDB, lockstep, or TUI ebreak.
     const bool has_debug = (gdb_stub && gdb_stub->is_connected()) ||
-                           (spike_lockstep && spike_lockstep->is_running()) ||
-                           (s_tuimode && uart);
+                           (spike_lockstep && spike_lockstep->is_running()) || (s_tuimode && uart);
 
     if (has_debug) {
         // ---- Debug path: GDB / lockstep / TUI ebreak ----
@@ -57,8 +58,7 @@ void OSMachine::run() {
             if (gdb_stub && gdb_stub->is_connected()) {
                 const bool hit_ebreak =
                     (cpu.pipeline_context.opcode == Opcode::System) &&
-                    (cpu.pipeline_context.funct12 ==
-                        static_cast<Word>(Funct12Priv::Ebreak)) &&
+                    (cpu.pipeline_context.funct12 == static_cast<Word>(Funct12Priv::Ebreak)) &&
                     !cpu.pipeline_context.pending_exception.has_value();
                 if (gdb_stub->single_step() || hit_ebreak) {
                     gdb_stub->notify_breakpoint(*this);
@@ -68,7 +68,8 @@ void OSMachine::run() {
             }
 
             if (spike_lockstep && spike_lockstep->is_running()) {
-                spike_lockstep->compare_and_report(cpu.state(), cpu.pipeline_context.cpc, cpu.e_icount);
+                spike_lockstep->compare_and_report(cpu.state(), cpu.pipeline_context.cpc,
+                                                   cpu.e_icount);
                 if (spike_lockstep->should_halt()) {
                     simrv::log::error("Lockstep: halting on divergence");
                     is_running_ = false;
@@ -78,8 +79,7 @@ void OSMachine::run() {
             if (s_tuimode && tui) {
                 const bool hit_ebreak =
                     (cpu.pipeline_context.opcode == Opcode::System) &&
-                    (cpu.pipeline_context.funct12 ==
-                        static_cast<Word>(Funct12Priv::Ebreak));
+                    (cpu.pipeline_context.funct12 == static_cast<Word>(Funct12Priv::Ebreak));
                 if (simrv::compiler::unlikely(hit_ebreak)) {
                     tui->pause_loop();
                 }
@@ -149,19 +149,22 @@ void OSMachine::prepare_cycle() {
 }
 
 void OSMachine::finalize_cycle() {
-    const bool in_trace_window = (cpu.clint_mmio.mtime >= s_trace_begin && cpu.clint_mmio.mtime <= s_trace_end);
-    if (simrv::compiler::likely(s_high_performance && (!s_tuimode || s_multithreaded) && s_strace == 0 && 
-                                  !in_trace_window && !s_bp_trace)) {
+    const bool in_trace_window =
+        (cpu.clint_mmio.mtime >= s_trace_begin && cpu.clint_mmio.mtime <= s_trace_end);
+    if (simrv::compiler::likely(s_high_performance && (!s_tuimode || s_multithreaded) &&
+                                s_strace == 0 && !in_trace_window && !s_bp_trace)) {
         if (simrv::compiler::unlikely(tohost != 0)) {
             finalize_cycle_tohost();
         }
-        if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() && cpu.e_icount >= s_fincnt)) {
+        if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() &&
+                                      cpu.e_icount >= s_fincnt)) {
             simrv::log::info("finished by -e option");
             is_shutdown_ = true;
             is_running_ = false;
         }
         // SDL update only from main thread in multithreaded mode (optimisation 2)
-        if (!s_multithreaded && sdl_display && simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
+        if (!s_multithreaded && sdl_display &&
+            simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
             sdl_display->update(cpu.e_icount);
         }
         if (uart && simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
@@ -175,7 +178,8 @@ void OSMachine::finalize_cycle() {
             tui->render();
         }
         static uint64_t last_tui_check_cycles = 0;
-        if (cpu.e_icount - last_tui_check_cycles >= 1000 || tui->step_delay_us_.load(std::memory_order_relaxed) > 0) {
+        if (cpu.e_icount - last_tui_check_cycles >= 1000 ||
+            tui->step_delay_us_.load(std::memory_order_relaxed) > 0) {
             last_tui_check_cycles = cpu.e_icount;
             static auto last_tui_update = std::chrono::steady_clock::now();
             auto now = std::chrono::steady_clock::now();
@@ -200,10 +204,12 @@ void OSMachine::finalize_cycle() {
     if (simrv::compiler::unlikely(s_strace != 0 && cpu.clint_mmio.mtime >= s_strace)) {
         tracer.emit_periodic_pc_trace(cpu.clint_mmio.mtime, cpu.pipeline_context.cpc);
     }
-    if (simrv::compiler::unlikely(cpu.clint_mmio.mtime >= s_trace_begin && cpu.clint_mmio.mtime <= s_trace_end)) {
+    if (simrv::compiler::unlikely(cpu.clint_mmio.mtime >= s_trace_begin &&
+                                  cpu.clint_mmio.mtime <= s_trace_end)) {
         tracer.write_trace_snapshot();
     }
-    if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() && cpu.e_icount >= s_fincnt)) {
+    if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() &&
+                                  cpu.e_icount >= s_fincnt)) {
         simrv::log::info("finished by -e option");
         is_shutdown_ = true;
         if (s_tuimode && tui) {
@@ -213,11 +219,11 @@ void OSMachine::finalize_cycle() {
     }
     if (simrv::compiler::unlikely(s_bp_trace)) {
         tracer.emit_branch_prediction_trace(cpu.clint_mmio.mtime, cpu.pipeline_context.cpc,
-                                             cpu.pipeline_context.jmp_pc,
-                                             cpu.pipeline_context.opcode, cpu.pipeline_context.tkn);
+                                            cpu.pipeline_context.jmp_pc,
+                                            cpu.pipeline_context.opcode, cpu.pipeline_context.tkn);
     }
 
     finalize_cycle_tohost();
 }
 
-} // namespace simrv::core
+}  // namespace simrv::core

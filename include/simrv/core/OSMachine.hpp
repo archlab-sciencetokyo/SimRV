@@ -5,15 +5,15 @@
 namespace simrv::core {
 
 class OSMachine : public Machine {
-public:
+   public:
     OSMachine() = default;
     ~OSMachine() override = default;
 
     void run() override;
 
-protected:
+   protected:
     void prepare_cycle() override;
     void finalize_cycle() override;
 };
 
-} // namespace simrv::core
+}  // namespace simrv::core

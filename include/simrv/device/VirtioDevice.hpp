@@ -4,7 +4,6 @@
  */
 #pragma once
 
-
 #include "simrv/device/Virtio.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 
@@ -32,7 +31,7 @@ class VirtioDevice : public memory::TileLinkNode {
     Word QueueNum = 0;
 
    protected:
-    simrv::core::Machine& machine_; // NOLINT
+    simrv::core::Machine& machine_;  // NOLINT
     Word irq_;
     Word max_queues_ = 0;
 

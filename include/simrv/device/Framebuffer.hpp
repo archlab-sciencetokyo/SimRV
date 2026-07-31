@@ -4,12 +4,12 @@
  */
 #pragma once
 
-#include <vector>
 #include <atomic>
 #include <string>
+#include <vector>
 
-#include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/memory/Mmio.hpp"
+#include "simrv/memory/TileLinkNode.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -61,7 +61,9 @@ class Framebuffer : public memory::TileLinkNode {
         }
     }
     [[nodiscard]] auto is_dirty() const -> bool { return dirty_; }
-    [[nodiscard]] auto is_tui_dirty() const -> bool { return tui_dirty_.load(std::memory_order_relaxed); }
+    [[nodiscard]] auto is_tui_dirty() const -> bool {
+        return tui_dirty_.load(std::memory_order_relaxed);
+    }
 
     [[nodiscard]] auto get_width() const -> int { return width_; }
     [[nodiscard]] auto get_height() const -> int { return height_; }
@@ -82,7 +84,7 @@ class Framebuffer : public memory::TileLinkNode {
     // Framebuffer dimensions and format
     int width_ = 320;
     int height_ = 200;
-    int format_ = 0; // 0 = RGB565, 1 = RGBA8888
+    int format_ = 0;  // 0 = RGB565, 1 = RGBA8888
 
     // Backing store (2MB total capacity)
     std::vector<uint8_t> fb_mem_;

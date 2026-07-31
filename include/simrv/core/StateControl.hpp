@@ -5,6 +5,7 @@
 #pragma once
 
 #include <array>
+
 #include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 
@@ -57,11 +58,11 @@ class PlicMmio : public memory::TileLinkNode {
 
     // Backing storage for PLIC registers to support OpenSBI drivers
     std::array<Word, 1024> plic_priorities{};
-    
+
     // plic_enables[context][word_idx]. Support up to 2 contexts (M-mode, S-mode).
     std::array<std::array<Word, 32>, 2> plic_enables{};
     std::array<Word, 2> plic_threshold{};
-    std::array<Word, 2> plic_claim{}; // The current claim value per context
+    std::array<Word, 2> plic_claim{};  // The current claim value per context
 
    private:
     CPU& cpu_;
@@ -116,7 +117,8 @@ class TrapController {
     static void raiseException(CPU& cpu, TrapCause cause, CSRValue tval);
 
     /**
-     * @brief Validates if the current privilege level is sufficient to execute a given privileged instruction.
+     * @brief Validates if the current privilege level is sufficient to execute a given privileged
+     * instruction.
      *
      * Checks requirements for instruction variants like mret, sret, or sfence.vma based on current
      * privilege, MISA extensions, and TSR/TVM bits of mstatus.
@@ -129,8 +131,8 @@ class TrapController {
      * @return true if the instruction is allowed under current privilege, false otherwise.
      */
     static auto canExecutePrivilegedInstruction(PrivilegeLevel current_priv, CSRValue misa,
-                                                CSRValue mstatus, Instruction funct12,
-                                                Word funct7) -> bool;
+                                                CSRValue mstatus, Instruction funct12, Word funct7)
+        -> bool;
 
     /**
      * @brief Validates if the current privilege level has access to a specific CSR.
@@ -143,7 +145,8 @@ class TrapController {
      * @param is_write True if this is a write or read-write access to the CSR.
      * @return true if access is permitted, false if it triggers an illegal instruction exception.
      */
-    static auto canAccessCsr(PrivilegeLevel current_priv, CSRAddress csr_addr, bool is_write) -> bool;
+    static auto canAccessCsr(PrivilegeLevel current_priv, CSRAddress csr_addr, bool is_write)
+        -> bool;
 };
 
 }  // namespace simrv::core

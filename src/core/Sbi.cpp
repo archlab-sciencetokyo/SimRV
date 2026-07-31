@@ -3,7 +3,6 @@
  * @brief SBI handling implementation.
  */
 #include "simrv/core/Sbi.hpp"
-#include "simrv/core/Logger.hpp"
 
 #include <unistd.h>
 
@@ -12,9 +11,10 @@
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/tui/Tui.hpp"
 #include "simrv/device/Uart.hpp"
+#include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::sbi {
@@ -22,7 +22,6 @@ namespace simrv::sbi {
 using core::MipBit;
 
 namespace {
-
 
 enum class ExtId : std::uint32_t {
     Base = 0x10,
@@ -103,7 +102,6 @@ void Sbi::sbi_return(SignedWord error, Word value) {
     cpu_.state().regs.write(a1, value);
     cpu_.state().pc += 4;
 }
-
 
 auto Sbi::handle_base(Word func_id) -> bool {
     switch (static_cast<BaseFid>(func_id)) {
@@ -202,10 +200,10 @@ auto Sbi::handle_hsm(Word func_id) -> bool {
 }
 
 auto Sbi::handle_ipi(Word func_id) -> bool {
-    if (func_id == 0) { // send_ipi
+    if (func_id == 0) {  // send_ipi
         const Word hart_mask = cpu_.state().regs.read(RegId::A0);
         const Word hart_mask_base = cpu_.state().regs.read(RegId::A1);
-        
+
         const bool target_hart0 = (hart_mask == 0) || (hart_mask_base == 0 && (hart_mask & 1) != 0);
         if (target_hart0) {
             cpu_.state().mip |= enum_mask(MipBit::Ssip);
@@ -218,19 +216,21 @@ auto Sbi::handle_ipi(Word func_id) -> bool {
 }
 
 auto Sbi::handle_system_reset(Word func_id) -> bool {
-    if (func_id == 0) { // sbi_system_reset
+    if (func_id == 0) {  // sbi_system_reset
         const Word reset_type = cpu_.state().regs.read(RegId::A0);
         const Word reset_reason = cpu_.state().regs.read(RegId::A1);
-        
+
         if (reset_type == 0) {
-            simrv::log::info("[SBI] System Reset: Shutdown requested (reason: 0x{:x}).", reset_reason);
+            simrv::log::info("[SBI] System Reset: Shutdown requested (reason: 0x{:x}).",
+                             reset_reason);
             if (cpu_.machine_ != nullptr) {
                 cpu_.machine_->exit_code = static_cast<int>(reset_reason);
                 cpu_.machine_->stop();
             }
             sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
         } else if (reset_type == 1 || reset_type == 2) {
-            simrv::log::info("[SBI] System Reset: Reboot requested (reason: 0x{:x}).", reset_reason);
+            simrv::log::info("[SBI] System Reset: Reboot requested (reason: 0x{:x}).",
+                             reset_reason);
             if (cpu_.machine_ != nullptr) {
                 cpu_.machine_->request_reboot();
             }
@@ -269,7 +269,6 @@ auto Sbi::handle_ecall(TrapCause cause) -> bool {
             static_cast<uint64_t>(cpu_.state().pc), kLogHexWidth);
         cpu_.trap_log_stream->flush();
     }
-
 
     switch (static_cast<ExtId>(ext_id)) {
         case ExtId::Base:

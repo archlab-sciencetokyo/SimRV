@@ -5,7 +5,6 @@
 #pragma once
 
 #include <array>
-
 #include <simrv/Define.hpp>
 
 #include "simrv/xlen/Types.hpp"
@@ -14,16 +13,16 @@ namespace simrv::core {
 
 struct alignas(kVlenMaxBytes) VectorRegister {
     union {
-        uint8_t  u8[kVlenMaxBytes];
+        uint8_t u8[kVlenMaxBytes];
         uint16_t u16[kVlenMaxBytes / 2];
         uint32_t u32[kVlenMaxBytes / 4];
         uint64_t u64[kVlenMaxBytes / 8];
-        int8_t   i8[kVlenMaxBytes];
-        int16_t  i16[kVlenMaxBytes / 2];
-        int32_t  i32[kVlenMaxBytes / 4];
-        int64_t  i64[kVlenMaxBytes / 8];
-        float    f32[kVlenMaxBytes / 4];
-        double   f64[kVlenMaxBytes / 8];
+        int8_t i8[kVlenMaxBytes];
+        int16_t i16[kVlenMaxBytes / 2];
+        int32_t i32[kVlenMaxBytes / 4];
+        int64_t i64[kVlenMaxBytes / 8];
+        float f32[kVlenMaxBytes / 4];
+        double f64[kVlenMaxBytes / 8];
     };
 };
 
@@ -56,7 +55,9 @@ class RegisterFile {
     [[nodiscard]] constexpr auto operator[](RegId idx) -> RegisterProxy { return {this, idx}; }
     [[nodiscard]] constexpr auto operator[](RegId idx) const -> Register { return read(idx); }
 
-    [[nodiscard]] constexpr auto read(RegId idx) const -> Register { return reg_[std::to_underlying(idx)]; }
+    [[nodiscard]] constexpr auto read(RegId idx) const -> Register {
+        return reg_[std::to_underlying(idx)];
+    }
 
     constexpr void write(RegId idx, Register val) {
         if (simrv::compiler::likely(idx != RegId::Zero)) {
@@ -69,15 +70,25 @@ class RegisterFile {
         }
     }
 
-    [[nodiscard]] constexpr auto read_fp(RegId idx) const -> FloatingRegister { return freg_[std::to_underlying(idx)]; }
+    [[nodiscard]] constexpr auto read_fp(RegId idx) const -> FloatingRegister {
+        return freg_[std::to_underlying(idx)];
+    }
 
-    constexpr void write_fp(RegId idx, FloatingRegister val) { freg_[std::to_underlying(idx)] = val; }
+    constexpr void write_fp(RegId idx, FloatingRegister val) {
+        freg_[std::to_underlying(idx)] = val;
+    }
 
-    [[nodiscard]] constexpr auto read_vector(RegId idx) const -> const VectorRegister& { return vreg_[std::to_underlying(idx)]; }
+    [[nodiscard]] constexpr auto read_vector(RegId idx) const -> const VectorRegister& {
+        return vreg_[std::to_underlying(idx)];
+    }
 
-    [[nodiscard]] constexpr auto read_vector(RegId idx) -> VectorRegister& { return vreg_[std::to_underlying(idx)]; }
+    [[nodiscard]] constexpr auto read_vector(RegId idx) -> VectorRegister& {
+        return vreg_[std::to_underlying(idx)];
+    }
 
-    constexpr void write_vector(RegId idx, const VectorRegister& val) { vreg_[std::to_underlying(idx)] = val; }
+    constexpr void write_vector(RegId idx, const VectorRegister& val) {
+        vreg_[std::to_underlying(idx)] = val;
+    }
 
     constexpr void fill(Register val) {
         reg_.fill(val);

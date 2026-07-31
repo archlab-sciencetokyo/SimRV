@@ -15,7 +15,7 @@
 namespace simrv::tui::modals {
 
 void BreakpointModal::open(ModalType type, std::string& input, simrv::core::Machine& machine,
-                            LeftPane* left_pane) {
+                           LeftPane* left_pane) {
     input.clear();
     if (type == ModalType::SetBreakpoint) {
         input = std::format("0x{:08x}", machine.cpu.state().pc);
@@ -34,8 +34,7 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
         Address addr = 0;
         bool ok = false;
         if (input.starts_with("0x") || input.starts_with("0X")) {
-            auto result =
-                std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
+            auto result = std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
             ok = (result.ec == std::errc{});
         } else if (std::ranges::all_of(input, ::isxdigit)) {
             auto result = std::from_chars(input.data(), input.data() + input.size(), addr, 16);
@@ -60,16 +59,17 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
     } else if (type == ModalType::SetWatchpoint) {
         auto parsed_reg = simrv::debug::parse_register_name(input);
         if (parsed_reg.has_value()) {
-            machine.breakpoints.add_reg_watchpoint(parsed_reg->type, parsed_reg->index, parsed_reg->canonical_name);
-            set_status_override_cb(std::format("Register Watchpoint set on {}", parsed_reg->canonical_name));
+            machine.breakpoints.add_reg_watchpoint(parsed_reg->type, parsed_reg->index,
+                                                   parsed_reg->canonical_name);
+            set_status_override_cb(
+                std::format("Register Watchpoint set on {}", parsed_reg->canonical_name));
             return true;
         }
 
         Address addr = 0;
         bool ok = false;
         if (input.starts_with("0x") || input.starts_with("0X")) {
-            auto result =
-                std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
+            auto result = std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
             ok = (result.ec == std::errc{});
         } else if (std::ranges::all_of(input, ::isxdigit)) {
             auto result = std::from_chars(input.data(), input.data() + input.size(), addr, 16);
@@ -105,8 +105,9 @@ void BreakpointModal::move_cursor(int& cursor, int delta, const simrv::core::Mac
     cursor = (cursor + delta + count) % count;
 }
 
-auto BreakpointModal::remove_at_cursor(int& cursor, simrv::core::Machine& machine,
-                                         const std::function<void(const std::string&)>& set_status_override_cb) -> bool {
+auto BreakpointModal::remove_at_cursor(
+    int& cursor, simrv::core::Machine& machine,
+    const std::function<void(const std::string&)>& set_status_override_cb) -> bool {
     const auto& pc_bps = machine.breakpoints.get_pc_breakpoints();
     const auto& wps = machine.breakpoints.get_watchpoints();
     int total = static_cast<int>(pc_bps.size() + wps.size());
@@ -142,18 +143,22 @@ auto BreakpointModal::remove_at_cursor(int& cursor, simrv::core::Machine& machin
 }
 
 void BreakpointModal::render(ModalType type, std::vector<std::string>& content_rows,
-                              const std::string& input, const simrv::core::Machine* machine,
-                              int bp_cursor) {
+                             const std::string& input, const simrv::core::Machine* machine,
+                             int bp_cursor) {
     if (type == ModalType::SetBreakpoint) {
-        content_rows.push_back(std::format("{}Target PC Address (hex) or Symbol:\033[0m", kThemeText));
+        content_rows.push_back(
+            std::format("{}Target PC Address (hex) or Symbol:\033[0m", kThemeText));
         content_rows.push_back(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, input));
     } else if (type == ModalType::SetWatchpoint) {
-        content_rows.push_back(std::format("{}Target Register, Address, or Symbol:\033[0m", kThemeText));
+        content_rows.push_back(
+            std::format("{}Target Register, Address, or Symbol:\033[0m", kThemeText));
         content_rows.push_back(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, input));
-        content_rows.push_back(std::format("{}Pauses simulation on memory write\033[0m", kThemeMuted));
+        content_rows.push_back(
+            std::format("{}Pauses simulation on memory write\033[0m", kThemeMuted));
         content_rows.push_back(std::format("{}or register state change.\033[0m", kThemeMuted));
     } else if (type == ModalType::ManageBreakpoints) {
-        content_rows.push_back(std::format("{}Active Breakpoints & Watchpoints:\033[0m", kThemeText));
+        content_rows.push_back(
+            std::format("{}Active Breakpoints & Watchpoints:\033[0m", kThemeText));
         content_rows.push_back("");
 
         if (!machine) return;
@@ -162,14 +167,16 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
 
         int item_idx = 0;
         if (pc_bps.empty() && wps.empty()) {
-            content_rows.push_back(std::format("  {}No active breakpoints or watchpoints.\033[0m", kThemeMuted));
+            content_rows.push_back(
+                std::format("  {}No active breakpoints or watchpoints.\033[0m", kThemeMuted));
         } else {
             for (auto pc : pc_bps) {
                 bool is_sel = (item_idx == bp_cursor);
                 std::string prefix = is_sel ? std::format("{}>\033[0m ", kThemeMint) : "  ";
                 std::string sym = machine->symbols.lookup(pc);
                 std::string sym_str = sym.empty() ? "" : std::format(" ({})", sym);
-                content_rows.push_back(std::format("{}PC Breakpoint at \033[1;33m0x{:08x}\033[0m{}", prefix, pc, sym_str));
+                content_rows.push_back(std::format("{}PC Breakpoint at \033[1;33m0x{:08x}\033[0m{}",
+                                                   prefix, pc, sym_str));
                 item_idx++;
                 if (item_idx >= 9) break;
             }
@@ -178,19 +185,25 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
                 bool is_sel = (item_idx == bp_cursor);
                 std::string prefix = is_sel ? std::format("{}>\033[0m ", kThemeMint) : "  ";
                 if (wp.target == simrv::debug::WatchTarget::Memory) {
-                    content_rows.push_back(std::format("{}Memory Watchpoint at \033[1;33m0x{:08x}\033[0m", prefix, wp.addr));
+                    content_rows.push_back(std::format(
+                        "{}Memory Watchpoint at \033[1;33m0x{:08x}\033[0m", prefix, wp.addr));
                 } else {
-                    content_rows.push_back(std::format("{}Register Watchpoint on \033[1;35m{}\033[0m", prefix, wp.reg_name));
+                    content_rows.push_back(std::format(
+                        "{}Register Watchpoint on \033[1;35m{}\033[0m", prefix, wp.reg_name));
                 }
                 item_idx++;
             }
         }
 
         content_rows.push_back("");
-        content_rows.push_back(std::format("  \033[1;36m[↑/↓]\033[0m {}Nav  |  \033[1;36m[Backspace/d]\033[0m {}Del  |  \033[1;36m[c]\033[0m {}Clear  |  \033[1;36m[Esc]\033[0m {}Close\033[0m",
-                                           kThemeMuted, kThemeMuted, kThemeMuted, kThemeMuted));
-        content_rows.push_back(std::format("  \033[1;36m[:]\033[0m {}Add Breakpoint  |  \033[1;36m[w]\033[0m {}Add Watchpoint\033[0m",
-                                           kThemeMuted, kThemeMuted));
+        content_rows.push_back(
+            std::format("  \033[1;36m[↑/↓]\033[0m {}Nav  |  \033[1;36m[Backspace/d]\033[0m {}Del  "
+                        "|  \033[1;36m[c]\033[0m {}Clear  |  \033[1;36m[Esc]\033[0m {}Close\033[0m",
+                        kThemeMuted, kThemeMuted, kThemeMuted, kThemeMuted));
+        content_rows.push_back(
+            std::format("  \033[1;36m[:]\033[0m {}Add Breakpoint  |  \033[1;36m[w]\033[0m {}Add "
+                        "Watchpoint\033[0m",
+                        kThemeMuted, kThemeMuted));
     }
 }
 

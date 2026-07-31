@@ -1,6 +1,7 @@
-#include "simrv/execute/ExecuteUnit.hpp"
 #include <algorithm>
+
 #include "simrv/core/Cpu.hpp"
+#include "simrv/execute/ExecuteUnit.hpp"
 
 namespace simrv::execute {
 
@@ -39,14 +40,36 @@ void ExecuteUnit::execute_vector_config(core::CPU& cpu, isa::OperationId op_id, 
     uint32_t lmul_den = 1;
 
     switch (lmul_field) {
-        case 0: lmul_num = 1; lmul_den = 1; break;
-        case 1: lmul_num = 2; lmul_den = 1; break;
-        case 2: lmul_num = 4; lmul_den = 1; break;
-        case 3: lmul_num = 8; lmul_den = 1; break;
-        case 5: lmul_num = 1; lmul_den = 8; break;
-        case 6: lmul_num = 1; lmul_den = 4; break;
-        case 7: lmul_num = 1; lmul_den = 2; break;
-        default: break;
+        case 0:
+            lmul_num = 1;
+            lmul_den = 1;
+            break;
+        case 1:
+            lmul_num = 2;
+            lmul_den = 1;
+            break;
+        case 2:
+            lmul_num = 4;
+            lmul_den = 1;
+            break;
+        case 3:
+            lmul_num = 8;
+            lmul_den = 1;
+            break;
+        case 5:
+            lmul_num = 1;
+            lmul_den = 8;
+            break;
+        case 6:
+            lmul_num = 1;
+            lmul_den = 4;
+            break;
+        case 7:
+            lmul_num = 1;
+            lmul_den = 2;
+            break;
+        default:
+            break;
     }
 
     if (!vill && (lmul_num * 64 < req_sew * lmul_den)) {
@@ -84,4 +107,4 @@ void ExecuteUnit::execute_vector_config(core::CPU& cpu, isa::OperationId op_id, 
     cpu.state().mstatus |= enum_mask(core::MstatusBit::Vs);
 }
 
-} // namespace simrv::execute
+}  // namespace simrv::execute

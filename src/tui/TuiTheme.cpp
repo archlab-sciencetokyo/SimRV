@@ -3,82 +3,94 @@
  * @brief Implements theme handling logic and palette configurations.
  */
 #include "simrv/tui/TuiTheme.hpp"
+
 #include "simrv/tui/VirtualTerminal.hpp"
 
 namespace simrv::tui {
 
-const char* g_theme_border = kAdaptiveBorder; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-const char* g_theme_text   = kAdaptiveText; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-const char* g_theme_val    = kAdaptiveVal; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-const char* g_theme_muted  = kAdaptiveMuted; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-const char* g_theme_mint   = kAdaptiveMint; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-const char* g_theme_peach  = kAdaptivePeach; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-const char* g_theme_coral  = kAdaptiveCoral; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-const char* g_theme_sky    = kAdaptiveSky; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-const char* g_theme_pink   = kAdaptivePink; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-const char* g_theme_modal_bg = "\033[48;5;236m"; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+const char* g_theme_border =
+    kAdaptiveBorder;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+const char* g_theme_text =
+    kAdaptiveText;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+const char* g_theme_val =
+    kAdaptiveVal;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+const char* g_theme_muted =
+    kAdaptiveMuted;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+const char* g_theme_mint =
+    kAdaptiveMint;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+const char* g_theme_peach =
+    kAdaptivePeach;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+const char* g_theme_coral =
+    kAdaptiveCoral;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+const char* g_theme_sky =
+    kAdaptiveSky;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+const char* g_theme_pink =
+    kAdaptivePink;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+const char* g_theme_modal_bg =
+    "\033[48;5;236m";  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
-std::array<const char*, 16> g_theme_palette = kHighContrastPalette; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-std::array<const char*, 16> g_theme_bg_palette = kHighContrastBgPalette; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+std::array<const char*, 16> g_theme_palette =
+    kHighContrastPalette;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+std::array<const char*, 16> g_theme_bg_palette =
+    kHighContrastBgPalette;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
-bool g_high_contrast = false; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-TuiTheme g_tui_theme = TuiTheme::Adaptive; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+bool g_high_contrast = false;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+TuiTheme g_tui_theme =
+    TuiTheme::Adaptive;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 auto set_tui_theme(TuiTheme theme) -> void {
     g_tui_theme = theme;
     switch (theme) {
         case TuiTheme::HighContrast:
             g_high_contrast = true;
-            g_theme_border   = kContrastBorder;
-            g_theme_text     = kContrastText;
-            g_theme_val      = kContrastVal;
-            g_theme_muted    = kContrastMuted;
-            g_theme_mint     = kContrastMint;
-            g_theme_peach    = kContrastPeach;
-            g_theme_coral    = kContrastCoral;
-            g_theme_sky      = kContrastSky;
-            g_theme_pink     = kContrastPink;
+            g_theme_border = kContrastBorder;
+            g_theme_text = kContrastText;
+            g_theme_val = kContrastVal;
+            g_theme_muted = kContrastMuted;
+            g_theme_mint = kContrastMint;
+            g_theme_peach = kContrastPeach;
+            g_theme_coral = kContrastCoral;
+            g_theme_sky = kContrastSky;
+            g_theme_pink = kContrastPink;
             g_theme_modal_bg = "\033[40m";
-            g_theme_palette  = kHighContrastPalette;
+            g_theme_palette = kHighContrastPalette;
             g_theme_bg_palette = kHighContrastBgPalette;
             break;
         case TuiTheme::Adaptive:
             g_high_contrast = false;
-            g_theme_border   = kAdaptiveBorder;
-            g_theme_text     = kAdaptiveText;
-            g_theme_val      = kAdaptiveVal;
-            g_theme_muted    = kAdaptiveMuted;
-            g_theme_mint     = kAdaptiveMint;
-            g_theme_peach    = kAdaptivePeach;
-            g_theme_coral    = kAdaptiveCoral;
-            g_theme_sky      = kAdaptiveSky;
-            g_theme_pink     = kAdaptivePink;
+            g_theme_border = kAdaptiveBorder;
+            g_theme_text = kAdaptiveText;
+            g_theme_val = kAdaptiveVal;
+            g_theme_muted = kAdaptiveMuted;
+            g_theme_mint = kAdaptiveMint;
+            g_theme_peach = kAdaptivePeach;
+            g_theme_coral = kAdaptiveCoral;
+            g_theme_sky = kAdaptiveSky;
+            g_theme_pink = kAdaptivePink;
             g_theme_modal_bg = "\033[48;5;236m";
-            g_theme_palette  = kHighContrastPalette;
+            g_theme_palette = kHighContrastPalette;
             g_theme_bg_palette = kHighContrastBgPalette;
             break;
         case TuiTheme::Sakura:
         default:
             g_high_contrast = false;
-            g_theme_border   = kSakuraBorderConst;
-            g_theme_text     = kSakuraTextConst;
-            g_theme_val      = kSakuraValConst;
-            g_theme_muted    = kSakuraMutedConst;
-            g_theme_mint     = kSakuraMintConst;
-            g_theme_peach    = kSakuraPeachConst;
-            g_theme_coral    = kSakuraCoralConst;
-            g_theme_sky      = kSakuraSkyConst;
-            g_theme_pink     = kSakuraPinkConst;
+            g_theme_border = kSakuraBorderConst;
+            g_theme_text = kSakuraTextConst;
+            g_theme_val = kSakuraValConst;
+            g_theme_muted = kSakuraMutedConst;
+            g_theme_mint = kSakuraMintConst;
+            g_theme_peach = kSakuraPeachConst;
+            g_theme_coral = kSakuraCoralConst;
+            g_theme_sky = kSakuraSkyConst;
+            g_theme_pink = kSakuraPinkConst;
             g_theme_modal_bg = "\033[48;5;235m";
-            g_theme_palette  = kSakuraPalette;
+            g_theme_palette = kSakuraPalette;
             g_theme_bg_palette = kSakuraBgPalette;
             break;
     }
 }
 
-auto get_tui_theme() -> TuiTheme {
-    return g_tui_theme;
-}
+auto get_tui_theme() -> TuiTheme { return g_tui_theme; }
 
 auto set_high_contrast(bool enable) -> void {
     if (enable) {
@@ -229,7 +241,8 @@ static auto get_utf8_char_len(const std::string& str, std::size_t start) -> std:
     return 1;
 }
 
-auto overlay_string(const std::string& base_line, const std::string& overlay_line, int start_x, int box_w) -> std::string {
+auto overlay_string(const std::string& base_line, const std::string& overlay_line, int start_x,
+                    int box_w) -> std::string {
     std::string result;
     result.reserve(base_line.length() + overlay_line.length() + 32);
     int col = 0;

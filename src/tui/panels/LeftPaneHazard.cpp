@@ -2,14 +2,15 @@
  * @file LeftPaneHazard.cpp
  * @brief Implements Pipeline Hazard & Forwarding Unit Inspector for TUI Left Pane.
  */
-#include "simrv/tui/panels/LeftPane.hpp"
-#include "simrv/tui/TuiTheme.hpp"
+#include <format>
+#include <string>
+
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
+#include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/panels/LeftPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
-#include <format>
-#include <string>
 
 namespace simrv::tui {
 
@@ -45,26 +46,34 @@ auto LeftPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical_row,
     uint64_t control_bubbles = cpu.pipeline_sim.control_hazard_bubbles();
     uint64_t structural_stalls = cpu.pipeline_sim.structural_stalls();
 
-    double stall_pct = (total_cycles == 0) ? 0.0 : 100.0 * static_cast<double>(total_stalls) / static_cast<double>(total_cycles);
+    double stall_pct = (total_cycles == 0) ? 0.0
+                                           : 100.0 * static_cast<double>(total_stalls) /
+                                                 static_cast<double>(total_cycles);
 
     if (logical_row == 0) {
         return section_line("Pipeline Hazard & Forwarding Unit Inspector", width);
     }
     if (logical_row == 1) {
         return format_to_width(
-            std::format("  {}Stalls:\033[0m {}{} ({:4.1f}%)\033[0m │ {}RAW:\033[0m {}{}\033[0m │ {}Ctrl:\033[0m {}{}\033[0m",
-                        kThemeText, kThemeCoral, simrv::util::format_with_commas(total_stalls), stall_pct,
-                        kThemeText, kThemePeach, simrv::util::format_with_commas(data_hazards),
-                        kThemeText, kThemeCoral, simrv::util::format_with_commas(control_bubbles)),
+            std::format("  {}Stalls:\033[0m {}{} ({:4.1f}%)\033[0m │ {}RAW:\033[0m {}{}\033[0m │ "
+                        "{}Ctrl:\033[0m {}{}\033[0m",
+                        kThemeText, kThemeCoral, simrv::util::format_with_commas(total_stalls),
+                        stall_pct, kThemeText, kThemePeach,
+                        simrv::util::format_with_commas(data_hazards), kThemeText, kThemeCoral,
+                        simrv::util::format_with_commas(control_bubbles)),
             width);
     }
     if (logical_row == 2) {
         return format_to_width(
-            std::format("  {}Struct:\033[0m {}{}\033[0m │ {}IC:\033[0m {}{}\033[0m │ {}DC:\033[0m {}{}\033[0m │ {}TLB:\033[0m {}{}\033[0m",
+            std::format("  {}Struct:\033[0m {}{}\033[0m │ {}IC:\033[0m {}{}\033[0m │ {}DC:\033[0m "
+                        "{}{}\033[0m │ {}TLB:\033[0m {}{}\033[0m",
                         kThemeText, kThemeSky, simrv::util::format_with_commas(structural_stalls),
-                        kThemeText, kThemeMint, simrv::util::format_with_commas(cpu.pipeline_sim.icache_stalls()),
-                        kThemeText, kThemePeach, simrv::util::format_with_commas(cpu.pipeline_sim.dcache_stalls()),
-                        kThemeText, kThemeSky, simrv::util::format_with_commas(cpu.pipeline_sim.tlb_stalls())),
+                        kThemeText, kThemeMint,
+                        simrv::util::format_with_commas(cpu.pipeline_sim.icache_stalls()),
+                        kThemeText, kThemePeach,
+                        simrv::util::format_with_commas(cpu.pipeline_sim.dcache_stalls()),
+                        kThemeText, kThemeSky,
+                        simrv::util::format_with_commas(cpu.pipeline_sim.tlb_stalls())),
             width);
     }
     if (logical_row == 3) {
@@ -120,9 +129,11 @@ auto LeftPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical_row,
     }
     if (logical_row == 7) {
         return format_to_width(
-            std::format("  {}MEM Stage:\033[0m {}PC {:08x}\033[0m │ {}rd:\033[0mx{:<2} │ {}Bypass:\033[0m {}\033[0m",
-                        kThemeText, kThemeVal, m_pc,
-                        kThemeText, m_rd, kThemeText, (m_reg.valid && m_rd != 0 ? "\033[38;5;120mYES\033[0m" : "\033[38;5;244mNO\033[0m")),
+            std::format("  {}MEM Stage:\033[0m {}PC {:08x}\033[0m │ {}rd:\033[0mx{:<2} │ "
+                        "{}Bypass:\033[0m {}\033[0m",
+                        kThemeText, kThemeVal, m_pc, kThemeText, m_rd, kThemeText,
+                        (m_reg.valid && m_rd != 0 ? "\033[38;5;120mYES\033[0m"
+                                                  : "\033[38;5;244mNO\033[0m")),
             width);
     }
     if (logical_row == 8) {
@@ -141,4 +152,4 @@ auto LeftPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical_row,
     return format_to_width("", width);
 }
 
-} // namespace simrv::tui
+}  // namespace simrv::tui

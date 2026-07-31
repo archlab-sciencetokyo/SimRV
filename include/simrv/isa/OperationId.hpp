@@ -4,8 +4,8 @@
  */
 #pragma once
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 
 namespace simrv::isa {
 
@@ -536,4 +536,4 @@ constexpr OperationId kOpRangeRv32dEnd = FCVT_D_LU;
 /// @brief Unified count of all valid simulator operations
 constexpr size_t kOperationIdCount = static_cast<size_t>(OperationIdCount);
 
-} // namespace simrv::isa
+}  // namespace simrv::isa

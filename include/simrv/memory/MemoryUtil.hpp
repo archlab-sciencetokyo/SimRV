@@ -93,7 +93,8 @@ constexpr auto store_width_bytes(Instruction funct3) -> size_t {
 inline auto host_read_fast(const Byte* host_ptr, Instruction funct3) -> Word {
     switch (static_cast<isa::Funct3>(funct3 & 0x7u)) {
         case isa::Funct3::Lb:
-            return static_cast<Word>(static_cast<SignedWord>(*reinterpret_cast<const int8_t*>(host_ptr)));
+            return static_cast<Word>(
+                static_cast<SignedWord>(*reinterpret_cast<const int8_t*>(host_ptr)));
         case isa::Funct3::Lbu:
             return static_cast<Word>(*reinterpret_cast<const uint8_t*>(host_ptr));
         case isa::Funct3::Lh: {

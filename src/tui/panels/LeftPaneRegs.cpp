@@ -2,21 +2,23 @@
  * @file LeftPaneRegs.cpp
  * @brief GPR, FPR, and vector register rendering for the TUI register panel.
  */
-#include "simrv/tui/panels/LeftPane.hpp"
-#include "simrv/tui/TuiTheme.hpp"
+#include <algorithm>
+#include <array>
+#include <format>
+#include <string>
+
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/RegisterFile.hpp"
-#include <format>
-#include <string>
-#include <array>
-#include <algorithm>
+#include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/panels/LeftPane.hpp"
 
 namespace simrv::tui {
 
 namespace {
 
-auto format_vec_value(const simrv::core::VectorRegister& val, unsigned vlen, int avail_w) -> std::string {
+auto format_vec_value(const simrv::core::VectorRegister& val, unsigned vlen, int avail_w)
+    -> std::string {
     unsigned num_words = vlen / 64;
     if (num_words == 0) num_words = 1;
     if (num_words > kVlenMaxBytes / 8) num_words = kVlenMaxBytes / 8;
@@ -42,7 +44,8 @@ auto format_vec_value(const simrv::core::VectorRegister& val, unsigned vlen, int
     return full_hex.substr(0, static_cast<std::size_t>(std::max(4, avail_w)));
 }
 
-auto vec_reg_changed(bool paused, const simrv::core::VectorRegister& cached, const simrv::core::VectorRegister& val, unsigned vlen) -> bool {
+auto vec_reg_changed(bool paused, const simrv::core::VectorRegister& cached,
+                     const simrv::core::VectorRegister& val, unsigned vlen) -> bool {
     if (!paused) return false;
     unsigned num_words = vlen / 64;
     if (num_words == 0) num_words = 1;
@@ -57,7 +60,8 @@ auto vec_reg_changed(bool paused, const simrv::core::VectorRegister& cached, con
 
 }  // namespace
 
-auto LeftPane::render_registers_single_column(const simrv::core::ArchState& st, int logical_row, int width) -> std::string {
+auto LeftPane::render_registers_single_column(const simrv::core::ArchState& st, int logical_row,
+                                              int width) -> std::string {
     if (logical_row >= 0 && logical_row < 32) {
         int reg = logical_row;
         switch (page_) {
@@ -66,8 +70,9 @@ auto LeftPane::render_registers_single_column(const simrv::core::ArchState& st, 
                 std::string name = kRegNames.at(static_cast<std::size_t>(reg));
                 bool changed = paused_ && (cached_gpr_.at(static_cast<std::size_t>(reg)) != val);
                 std::string c = changed ? kThemePeach : kThemeMint;
-                std::string col_color = std::format("  {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m",
-                                                    kThemeText, reg, kThemeVal, name, c, val, simrv::xlen::kXLenHexDigits);
+                std::string col_color =
+                    std::format("  {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m", kThemeText,
+                                reg, kThemeVal, name, c, val, simrv::xlen::kXLenHexDigits);
                 return format_to_width(col_color, width);
             }
             case TuiRegPage::FPR: {
@@ -75,17 +80,19 @@ auto LeftPane::render_registers_single_column(const simrv::core::ArchState& st, 
                 std::string name = kFpRegNames.at(static_cast<std::size_t>(reg));
                 bool changed = paused_ && (cached_fpr_.at(static_cast<std::size_t>(reg)) != val);
                 std::string c = changed ? kThemePeach : kThemeMint;
-                std::string col_color = std::format("  {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m",
-                                                    kThemeText, reg, kThemeVal, name, c, val);
+                std::string col_color =
+                    std::format("  {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m", kThemeText,
+                                reg, kThemeVal, name, c, val);
                 return format_to_width(col_color, width);
             }
             case TuiRegPage::VEC: {
                 auto val = st.regs.read_vector(static_cast<RegId>(reg));
-                bool changed = vec_reg_changed(paused_, cached_vec_.at(static_cast<std::size_t>(reg)), val, st.regs.vlen);
+                bool changed = vec_reg_changed(
+                    paused_, cached_vec_.at(static_cast<std::size_t>(reg)), val, st.regs.vlen);
                 std::string c = changed ? kThemePeach : kThemeMint;
                 std::string val_str = format_vec_value(val, st.regs.vlen, std::max(10, width - 6));
-                std::string col_color = std::format("  {}v{:<2}\033[0m: {}{}\033[0m",
-                                                    kThemeText, reg, c, val_str);
+                std::string col_color =
+                    std::format("  {}v{:<2}\033[0m: {}{}\033[0m", kThemeText, reg, c, val_str);
                 return format_to_width(col_color, width);
             }
             default:
@@ -95,7 +102,8 @@ auto LeftPane::render_registers_single_column(const simrv::core::ArchState& st, 
     return format_to_width("", width);
 }
 
-auto LeftPane::render_registers_double_column(const simrv::core::ArchState& st, int logical_row, int col_width, int right_width) -> std::string {
+auto LeftPane::render_registers_double_column(const simrv::core::ArchState& st, int logical_row,
+                                              int col_width, int right_width) -> std::string {
     if (logical_row >= 0 && logical_row < 16) {
         int reg1 = logical_row;
         int reg2 = logical_row + 16;
@@ -114,11 +122,11 @@ auto LeftPane::render_registers_double_column(const simrv::core::ArchState& st, 
                 std::string c2 = changed2 ? kThemePeach : kThemeMint;
 
                 std::string col1_color =
-                    std::format("  {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m",
-                                kThemeText, reg1, kThemeVal, name1, c1, val1, simrv::xlen::kXLenHexDigits);
+                    std::format("  {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m", kThemeText,
+                                reg1, kThemeVal, name1, c1, val1, simrv::xlen::kXLenHexDigits);
                 std::string col2_color =
-                    std::format("  {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m",
-                                kThemeText, reg2, kThemeVal, name2, c2, val2, simrv::xlen::kXLenHexDigits);
+                    std::format("  {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m", kThemeText,
+                                reg2, kThemeVal, name2, c2, val2, simrv::xlen::kXLenHexDigits);
 
                 return format_to_width(col1_color, col_width) +
                        format_to_width(col2_color, right_width);
@@ -135,12 +143,12 @@ auto LeftPane::render_registers_double_column(const simrv::core::ArchState& st, 
                 bool changed2 = paused_ && (cached_fpr_.at(static_cast<std::size_t>(reg2)) != val2);
                 std::string c2 = changed2 ? kThemePeach : kThemeMint;
 
-                std::string col1_color = std::format(
-                    "  {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m", kThemeText, reg1,
-                    kThemeVal, name1, c1, val1);
-                std::string col2_color = std::format(
-                    "  {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m", kThemeText, reg2,
-                    kThemeVal, name2, c2, val2);
+                std::string col1_color =
+                    std::format("  {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m", kThemeText,
+                                reg1, kThemeVal, name1, c1, val1);
+                std::string col2_color =
+                    std::format("  {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m", kThemeText,
+                                reg2, kThemeVal, name2, c2, val2);
 
                 return format_to_width(col1_color, col_width) +
                        format_to_width(col2_color, right_width);
@@ -149,19 +157,23 @@ auto LeftPane::render_registers_double_column(const simrv::core::ArchState& st, 
                 auto val1 = st.regs.read_vector(static_cast<RegId>(reg1));
                 auto val2 = st.regs.read_vector(static_cast<RegId>(reg2));
 
-                bool changed1 = vec_reg_changed(paused_, cached_vec_.at(static_cast<std::size_t>(reg1)), val1, st.regs.vlen);
-                bool changed2 = vec_reg_changed(paused_, cached_vec_.at(static_cast<std::size_t>(reg2)), val2, st.regs.vlen);
+                bool changed1 = vec_reg_changed(
+                    paused_, cached_vec_.at(static_cast<std::size_t>(reg1)), val1, st.regs.vlen);
+                bool changed2 = vec_reg_changed(
+                    paused_, cached_vec_.at(static_cast<std::size_t>(reg2)), val2, st.regs.vlen);
 
                 std::string c1 = changed1 ? kThemePeach : kThemeMint;
                 std::string c2 = changed2 ? kThemePeach : kThemeMint;
 
-                std::string val1_str = format_vec_value(val1, st.regs.vlen, std::max(10, col_width - 6));
-                std::string val2_str = format_vec_value(val2, st.regs.vlen, std::max(10, right_width - 6));
+                std::string val1_str =
+                    format_vec_value(val1, st.regs.vlen, std::max(10, col_width - 6));
+                std::string val2_str =
+                    format_vec_value(val2, st.regs.vlen, std::max(10, right_width - 6));
 
-                std::string col1_color = std::format(
-                    " {}v{:<2}\033[0m: {}{}\033[0m", kThemeText, reg1, c1, val1_str);
-                std::string col2_color = std::format(
-                    " {}v{:<2}\033[0m: {}{}\033[0m", kThemeText, reg2, c2, val2_str);
+                std::string col1_color =
+                    std::format(" {}v{:<2}\033[0m: {}{}\033[0m", kThemeText, reg1, c1, val1_str);
+                std::string col2_color =
+                    std::format(" {}v{:<2}\033[0m: {}{}\033[0m", kThemeText, reg2, c2, val2_str);
 
                 return format_to_width(col1_color, col_width) +
                        format_to_width(col2_color, right_width);
@@ -173,7 +185,10 @@ auto LeftPane::render_registers_double_column(const simrv::core::ArchState& st, 
     return format_to_width("", col_width + right_width);
 }
 
-auto LeftPane::render_registers_or_pipeline(const simrv::core::CPU& cpu, const simrv::core::ArchState& st, int logical_row, int col_width, int right_width, int width, bool single_column) -> std::string {
+auto LeftPane::render_registers_or_pipeline(const simrv::core::CPU& cpu,
+                                            const simrv::core::ArchState& st, int logical_row,
+                                            int col_width, int right_width, int width,
+                                            bool single_column) -> std::string {
     if (single_column) {
         if (logical_row >= 0 && logical_row < 32) {
             return render_registers_single_column(st, logical_row, width);
@@ -207,7 +222,8 @@ auto LeftPane::render_registers_or_pipeline(const simrv::core::CPU& cpu, const s
     return "";
 }
 
-auto LeftPane::get_register_value_at_row(int logical_row, int col_x, int pane_width) const -> std::optional<Register> {
+auto LeftPane::get_register_value_at_row(int logical_row, int col_x, int pane_width) const
+    -> std::optional<Register> {
     const auto& st = machine_.cpu.state();
     bool single_col = is_single_column(pane_width);
     int reg = -1;

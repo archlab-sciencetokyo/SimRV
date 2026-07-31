@@ -9,7 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "simrv/xlen/Constants.hpp" // IWYU pragma: export
+#include "simrv/xlen/Constants.hpp"  // IWYU pragma: export
 #include "simrv/xlen/Types.hpp"
 
 #ifndef SIMRV_CORE_COUNT
@@ -92,7 +92,7 @@ constexpr PrivilegeLevel kPrivSupervisor = PrivilegeLevel::Supervisor;
 constexpr PrivilegeLevel kPrivMachine = PrivilegeLevel::Machine;
 
 // Include split domain headers
-#include "simrv/core/CsrTypes.hpp" // IWYU pragma: export
-#include "simrv/isa/Common.hpp" // IWYU pragma: export
-#include "simrv/memory/Mmu.hpp" // IWYU pragma: export
-#include "simrv/device/Virtio.hpp" // IWYU pragma: export
+#include "simrv/core/CsrTypes.hpp"  // IWYU pragma: export
+#include "simrv/device/Virtio.hpp"  // IWYU pragma: export
+#include "simrv/isa/Common.hpp"     // IWYU pragma: export
+#include "simrv/memory/Mmu.hpp"     // IWYU pragma: export

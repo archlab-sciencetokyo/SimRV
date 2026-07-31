@@ -31,7 +31,7 @@ namespace simrv::core {
 namespace {
 
 void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
-                                     const simrv::debug::SymbolTable& symbols) {
+                                    const simrv::debug::SymbolTable& symbols) {
     simrv::memory::g_dram_base = simrv::memory::kDramBaseAddress;
 
     if (machine.s_start_pc == simrv::boot::kStartPc || machine.s_start_pc == 0) {
@@ -72,7 +72,8 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
     std::ifstream in(file_path, std::ios::binary | std::ios::ate);
     if (!in.is_open()) {
         if (tuimode) {
-            simrv::log::warn("{} image file '{}' not found. Launching TUI in idle state.", image_name, file_path);
+            simrv::log::warn("{} image file '{}' not found. Launching TUI in idle state.",
+                             image_name, file_path);
             file_path.clear();
             return;
         }
@@ -99,15 +100,22 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
             in.seekg(0, std::ios::beg);
 
             const char class_byte = ident[4];
-            if (class_byte == 1) { // 32-bit ELF
+            if (class_byte == 1) {  // 32-bit ELF
                 Elf32_Ehdr ehdr{};
-                if (in.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                if (in.read(reinterpret_cast<char*>(&ehdr),
+                            sizeof(ehdr))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
                     std::vector<Elf32_Phdr> phdrs(ehdr.e_phnum);
                     in.seekg(ehdr.e_phoff, std::ios::beg);
-                    if (in.read(reinterpret_cast<char*>(phdrs.data()), static_cast<std::streamsize>(static_cast<size_t>(ehdr.e_phnum) * sizeof(Elf32_Phdr)))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                    if (in.read(
+                            reinterpret_cast<char*>(phdrs.data()),
+                            static_cast<std::streamsize>(
+                                static_cast<size_t>(ehdr.e_phnum) *
+                                sizeof(
+                                    Elf32_Phdr)))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
                         for (const auto& phdr : phdrs) {
                             if (phdr.p_type == PT_LOAD && phdr.p_filesz > 0) {
-                                const Address paddr = phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
+                                const Address paddr =
+                                    phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
                                 const Address dram_base = simrv::memory::kDramBaseAddress;
                                 Address dest_offset = 0;
                                 if (paddr >= dram_base && (paddr - dram_base) < capacity) {
@@ -117,28 +125,43 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
                                 } else {
                                     continue;
                                 }
-                                const size_t copy_bytes = std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
+                                const size_t copy_bytes =
+                                    std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
                                 in.seekg(phdr.p_offset, std::ios::beg);
-                                if (in.read(reinterpret_cast<char*>(ram + dest_offset), static_cast<std::streamsize>(copy_bytes))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                                if (in.read(
+                                        reinterpret_cast<char*>(ram + dest_offset),
+                                        static_cast<std::streamsize>(
+                                            copy_bytes))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
                                     loaded_segment = true;
-                                    if (phdr.p_memsz > phdr.p_filesz && (dest_offset + phdr.p_filesz) < capacity) {
-                                        const size_t bss_bytes = std::min<size_t>(phdr.p_memsz - phdr.p_filesz, capacity - (dest_offset + phdr.p_filesz));
-                                        std::memset(ram + dest_offset + phdr.p_filesz, 0, bss_bytes);
+                                    if (phdr.p_memsz > phdr.p_filesz &&
+                                        (dest_offset + phdr.p_filesz) < capacity) {
+                                        const size_t bss_bytes = std::min<size_t>(
+                                            phdr.p_memsz - phdr.p_filesz,
+                                            capacity - (dest_offset + phdr.p_filesz));
+                                        std::memset(ram + dest_offset + phdr.p_filesz, 0,
+                                                    bss_bytes);
                                     }
                                 }
                             }
                         }
                     }
                 }
-            } else if (class_byte == 2) { // 64-bit ELF
+            } else if (class_byte == 2) {  // 64-bit ELF
                 Elf64_Ehdr ehdr{};
-                if (in.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                if (in.read(reinterpret_cast<char*>(&ehdr),
+                            sizeof(ehdr))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
                     std::vector<Elf64_Phdr> phdrs(ehdr.e_phnum);
                     in.seekg(static_cast<std::streamoff>(ehdr.e_phoff), std::ios::beg);
-                    if (in.read(reinterpret_cast<char*>(phdrs.data()), static_cast<std::streamsize>(static_cast<size_t>(ehdr.e_phnum) * sizeof(Elf64_Phdr)))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                    if (in.read(
+                            reinterpret_cast<char*>(phdrs.data()),
+                            static_cast<std::streamsize>(
+                                static_cast<size_t>(ehdr.e_phnum) *
+                                sizeof(
+                                    Elf64_Phdr)))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
                         for (const auto& phdr : phdrs) {
                             if (phdr.p_type == PT_LOAD && phdr.p_filesz > 0) {
-                                const Address paddr = phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
+                                const Address paddr =
+                                    phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
                                 const Address dram_base = simrv::memory::kDramBaseAddress;
                                 Address dest_offset = 0;
                                 if (paddr >= dram_base && (paddr - dram_base) < capacity) {
@@ -148,13 +171,21 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
                                 } else {
                                     continue;
                                 }
-                                const size_t copy_bytes = std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
+                                const size_t copy_bytes =
+                                    std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
                                 in.seekg(static_cast<std::streamoff>(phdr.p_offset), std::ios::beg);
-                                if (in.read(reinterpret_cast<char*>(ram + dest_offset), static_cast<std::streamsize>(copy_bytes))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                                if (in.read(
+                                        reinterpret_cast<char*>(ram + dest_offset),
+                                        static_cast<std::streamsize>(
+                                            copy_bytes))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
                                     loaded_segment = true;
-                                    if (phdr.p_memsz > phdr.p_filesz && (dest_offset + phdr.p_filesz) < capacity) {
-                                        const size_t bss_bytes = std::min<size_t>(phdr.p_memsz - phdr.p_filesz, capacity - (dest_offset + phdr.p_filesz));
-                                        std::memset(ram + dest_offset + phdr.p_filesz, 0, bss_bytes);
+                                    if (phdr.p_memsz > phdr.p_filesz &&
+                                        (dest_offset + phdr.p_filesz) < capacity) {
+                                        const size_t bss_bytes = std::min<size_t>(
+                                            phdr.p_memsz - phdr.p_filesz,
+                                            capacity - (dest_offset + phdr.p_filesz));
+                                        std::memset(ram + dest_offset + phdr.p_filesz, 0,
+                                                    bss_bytes);
                                     }
                                 }
                             }
@@ -166,18 +197,23 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
 
         if (!loaded_segment) {
             in.seekg(0, std::ios::beg);
-            if (!in.read(reinterpret_cast<char*>(ram), static_cast<std::streamsize>(std::min(file_size, capacity)))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+            if (!in.read(reinterpret_cast<char*>(ram),
+                         static_cast<std::streamsize>(std::min(
+                             file_size,
+                             capacity)))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
                 simrv::log::error("{} image file {} read failed", image_name, file_path);
                 std::exit(EXIT_FAILURE);
             }
         }
     } else {
         if (file_size > capacity) {
-            simrv::log::error("{} image {} is too large ({} bytes > {} bytes capacity)",
-                         image_name, file_path, file_size, capacity);
+            simrv::log::error("{} image {} is too large ({} bytes > {} bytes capacity)", image_name,
+                              file_path, file_size, capacity);
             std::exit(EXIT_FAILURE);
         }
-        if (!in.read(reinterpret_cast<char*>(ram), static_cast<std::streamsize>(file_size))) { // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        if (!in.read(reinterpret_cast<char*>(ram),
+                     static_cast<std::streamsize>(
+                         file_size))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
             simrv::log::error("Failed to read {} image {}", image_name, file_path);
             std::exit(EXIT_FAILURE);
         }
@@ -187,7 +223,6 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
 }  // namespace
 
 auto Machine::initialize() -> int {
-
     if (!s_fn_cpuconfig.empty()) {
         if (!simrv::core::load_cpu_config(s_fn_cpuconfig, cpu.pipeline_sim.config)) {
             simrv::log::error("Failed to load CPU configuration file: {}", s_fn_cpuconfig);
@@ -215,10 +250,12 @@ auto Machine::initialize() -> int {
         tui = std::make_unique<simrv::tui::Tui>(*this);
         tui->initialize();
     }
-    mmem_owner_.reset(static_cast<Byte*>(std::calloc(simrv::memory::kDramSize, sizeof(Byte)))); // NOLINT(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory)
+    mmem_owner_.reset(static_cast<Byte*>(std::calloc(
+        simrv::memory::kDramSize,
+        sizeof(Byte))));  // NOLINT(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory)
     if (mmem_owner_ == nullptr) {
         simrv::log::error("Failed to allocate main memory ({} bytes)",
-                     static_cast<std::size_t>(simrv::memory::kDramSize));
+                          static_cast<std::size_t>(simrv::memory::kDramSize));
         return 1;
     }
     mmem = mmem_owner_.get();
@@ -257,8 +294,8 @@ auto Machine::initialize() -> int {
             ? static_cast<Address>(simrv::memory::kDramSize - static_cast<Address>(0x00100000U))
             : simrv::boot::kInitDataAddress;
 
-    CSRValue initial_misa = isa::misa_with_mxl(s_misa_override ? s_misa_profile
-                                                                : isa::kMisaDefault);
+    CSRValue initial_misa =
+        isa::misa_with_mxl(s_misa_override ? s_misa_profile : isa::kMisaDefault);
     if constexpr (simrv::xlen::kIsXLen64) {
         bool is_32bit = false;
         if (s_misa_override && s_misa_xlen == 32) {
@@ -270,8 +307,9 @@ auto Machine::initialize() -> int {
                 if (file.is_open()) {
                     std::array<char, 5> header{};
                     if (file.read(header.data(), 5)) {
-                        if (header[0] == 0x7f && header[1] == 'E' && header[2] == 'L' && header[3] == 'F') {
-                            if (header[4] == 1) { // ELFCLASS32
+                        if (header[0] == 0x7f && header[1] == 'E' && header[2] == 'L' &&
+                            header[3] == 'F') {
+                            if (header[4] == 1) {  // ELFCLASS32
                                 is_32bit = true;
                             }
                         }
@@ -284,7 +322,8 @@ auto Machine::initialize() -> int {
                 std::string base_path = s_fn_memimg;
                 size_t last_dot = base_path.find_last_of('.');
                 size_t last_slash = base_path.find_last_of("/\\");
-                if (last_dot != std::string::npos && (last_slash == std::string::npos || last_dot > last_slash)) {
+                if (last_dot != std::string::npos &&
+                    (last_slash == std::string::npos || last_dot > last_slash)) {
                     base_path = base_path.substr(0, last_dot);
                 }
                 if (base_path != s_fn_memimg) {
@@ -310,13 +349,15 @@ auto Machine::initialize() -> int {
     }
     cpu.state().pc = s_start_pc;
     cpu.state().regs.write(static_cast<RegId>(10), 0);  // a0 = hartid
-    cpu.state().regs.write(static_cast<RegId>(11), linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);  // a1 = dtb
+    cpu.state().regs.write(static_cast<RegId>(11),
+                           linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);  // a1 = dtb
     cpu.state().misa = initial_misa;
     cpu.state().priv = kPrivMachine;
     cpu.state().regs.vlen = s_vlen ? s_vlen : 256;
     cpu.state().update_xlen();
     if (cpu.state().regs.xlen == 32) {
-        cpu.state().pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(cpu.state().pc)));
+        cpu.state().pc =
+            static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(cpu.state().pc)));
     }
     cpu.TLB_flush();
 
@@ -333,7 +374,8 @@ auto Machine::initialize() -> int {
     }
 
     if (s_fn_dvtree.empty() && linux_boot) {
-        std::string dtb_candidate = std::format("linux-images/rv{}/devicetree.dtb", simrv::xlen::kXLenBits);
+        std::string dtb_candidate =
+            std::format("linux-images/rv{}/devicetree.dtb", simrv::xlen::kXLenBits);
         if (std::filesystem::exists(dtb_candidate)) {
             s_fn_dvtree = dtb_candidate;
         } else if (!s_fn_memimg.empty()) {
@@ -417,8 +459,8 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
                         "memory", s_tuimode);
     symbols.load_from_elf(s_spike_elf.empty() ? s_fn_memimg : s_spike_elf);
 
-    CSRValue initial_misa = isa::misa_with_mxl(s_misa_override ? s_misa_profile
-                                                                : isa::kMisaDefault);
+    CSRValue initial_misa =
+        isa::misa_with_mxl(s_misa_override ? s_misa_profile : isa::kMisaDefault);
     if constexpr (simrv::xlen::kIsXLen64) {
         bool is_32bit = false;
         if (s_misa_override && s_misa_xlen == 32) {
@@ -430,8 +472,9 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
                 if (file.is_open()) {
                     std::array<char, 5> header{};
                     if (file.read(header.data(), 5)) {
-                        if (header[0] == 0x7f && header[1] == 'E' && header[2] == 'L' && header[3] == 'F') {
-                            if (header[4] == 1) { // ELFCLASS32
+                        if (header[0] == 0x7f && header[1] == 'E' && header[2] == 'L' &&
+                            header[3] == 'F') {
+                            if (header[4] == 1) {  // ELFCLASS32
                                 is_32bit = true;
                             }
                         }
@@ -444,7 +487,8 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
                 std::string base_path = s_fn_memimg;
                 size_t last_dot = base_path.find_last_of('.');
                 size_t last_slash = base_path.find_last_of("/\\");
-                if (last_dot != std::string::npos && (last_slash == std::string::npos || last_dot > last_slash)) {
+                if (last_dot != std::string::npos &&
+                    (last_slash == std::string::npos || last_dot > last_slash)) {
                     base_path = base_path.substr(0, last_dot);
                 }
                 if (base_path != s_fn_memimg) {
@@ -490,7 +534,8 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
     }
     cpu.state().pc = s_start_pc;
     if (cpu.state().regs.xlen == 32) {
-        cpu.state().pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(cpu.state().pc)));
+        cpu.state().pc =
+            static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(cpu.state().pc)));
     }
     cpu.state().priv = kPrivMachine;
     cpu.state().regs.write(static_cast<RegId>(10), 0);

@@ -27,8 +27,7 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
     Address addr = 0;
     bool ok = false;
     if (input.starts_with("0x") || input.starts_with("0X")) {
-        auto result =
-            std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
+        auto result = std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
         ok = (result.ec == std::errc{});
     } else if (std::all_of(input.begin(), input.end(), ::isxdigit)) {
         auto result = std::from_chars(input.data(), input.data() + input.size(), addr, 16);
@@ -54,7 +53,8 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
 }
 
 void AddressModal::render(std::vector<std::string>& content_rows, const std::string& input) {
-    content_rows.push_back(std::format("{}Enter Target Address (hex) or Symbol:\033[0m", kThemeText));
+    content_rows.push_back(
+        std::format("{}Enter Target Address (hex) or Symbol:\033[0m", kThemeText));
     content_rows.push_back(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, input));
 }
 

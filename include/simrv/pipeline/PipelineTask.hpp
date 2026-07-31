@@ -1,8 +1,8 @@
 #pragma once
 
 #include <coroutine>
-#include <optional>
 #include <exception>
+#include <optional>
 
 #include "simrv/pipeline/PipelineContext.hpp"
 
@@ -32,7 +32,7 @@ struct PipelineTask {
         }
 
         void unhandled_exception() {
-            std::terminate(); // The pipeline shouldn't throw C++ exceptions
+            std::terminate();  // The pipeline shouldn't throw C++ exceptions
         }
 
         void return_void() noexcept {}
@@ -46,9 +46,7 @@ struct PipelineTask {
     PipelineTask(const PipelineTask&) = delete;
     PipelineTask& operator=(const PipelineTask&) = delete;
 
-    PipelineTask(PipelineTask&& other) noexcept : handle(other.handle) {
-        other.handle = nullptr;
-    }
+    PipelineTask(PipelineTask&& other) noexcept : handle(other.handle) { other.handle = nullptr; }
 
     PipelineTask& operator=(PipelineTask&& other) noexcept {
         if (this != &other) {
@@ -74,4 +72,4 @@ struct PipelineTask {
     }
 };
 
-} // namespace simrv::pipeline
+}  // namespace simrv::pipeline

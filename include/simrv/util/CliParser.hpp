@@ -5,6 +5,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+
 #include "simrv/Define.hpp"
 #include "simrv/core/Boot.hpp"
 #include "simrv/core/Machine.hpp"
@@ -73,9 +74,10 @@ struct ParseResult {
 };
 
 auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResult, std::string>;
-auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& options) -> std::expected<void, std::string>;
+auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& options)
+    -> std::expected<void, std::string>;
 [[noreturn]] auto usage(std::string_view prog_name, int status) -> void;
 [[noreturn]] auto option_error(std::string_view msg, int status = 1) -> void;
 auto needs_memory_image(const ParseResult& result) -> bool;
 
-} // namespace simrv::util
+}  // namespace simrv::util

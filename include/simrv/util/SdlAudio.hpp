@@ -30,7 +30,8 @@ class SdlAudio {
     void init_audio();
     void shutdown_audio();
 
-    void play_channel(int chan, Address phys_addr, Word length, Word rate, Word volume, Word panning);
+    void play_channel(int chan, Address phys_addr, Word length, Word rate, Word volume,
+                      Word panning);
     void stop_channel(int chan);
     void update_channel_params(int chan, Word volume);
 
@@ -43,14 +44,14 @@ class SdlAudio {
     bool audio_initialized_ = false;
 
 #ifdef HAVE_SDL3
-    SDL_AudioDeviceID              device_id_ = 0;
+    SDL_AudioDeviceID device_id_ = 0;
     std::array<SDL_AudioStream*, 8> streams_{{nullptr}};
 
     // Music runtime state
-    SDL_AudioStream*          music_stream_  = nullptr;
-    std::vector<float>        music_pcm_buf_;
-    std::thread               music_thread_;
-    std::atomic<bool>         music_stop_flag_{false};
+    SDL_AudioStream* music_stream_ = nullptr;
+    std::vector<float> music_pcm_buf_;
+    std::thread music_thread_;
+    std::atomic<bool> music_stop_flag_{false};
 #endif
 };
 

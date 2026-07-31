@@ -4,9 +4,10 @@
  */
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <string_view>
-#include <cstdint>
+
 #include "simrv/tui/TuiKey.hpp"
 
 namespace simrv::tui {
@@ -53,4 +54,4 @@ class Keybindings {
     static auto get_help_desc(KeyAction action) -> std::string;
 };
 
-} // namespace simrv::tui
+}  // namespace simrv::tui

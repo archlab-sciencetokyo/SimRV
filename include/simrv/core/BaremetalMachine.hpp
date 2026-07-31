@@ -5,11 +5,11 @@
 namespace simrv::core {
 
 class BaremetalMachine : public Machine {
-public:
+   public:
     BaremetalMachine() = default;
     ~BaremetalMachine() override = default;
 
     void run() override;
 };
 
-} // namespace simrv::core
+}  // namespace simrv::core

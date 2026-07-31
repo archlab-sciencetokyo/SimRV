@@ -9,8 +9,8 @@
 #include <print>
 
 #include "simrv/Define.hpp"
-#include "simrv/core/Machine.hpp"
 #include "simrv/core/Logger.hpp"
+#include "simrv/core/Machine.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -54,17 +54,19 @@ void TileLinkBus::tick() {
             }
         } else {
             resp.opcode = TlOpcodeD::AccessAck;
-            const bool is_tohost_write =
-                simrv::xlen::kIsXLen64 ? (funct3 == static_cast<Instruction>(Funct3::Sw) ||
-                                           funct3 == static_cast<Instruction>(Funct3::Sd))
-                                      : (funct3 == static_cast<Instruction>(Funct3::Sw));
+            const bool is_tohost_write = simrv::xlen::kIsXLen64
+                                             ? (funct3 == static_cast<Instruction>(Funct3::Sw) ||
+                                                funct3 == static_cast<Instruction>(Funct3::Sd))
+                                             : (funct3 == static_cast<Instruction>(Funct3::Sw));
             if (is_tohost_write) {
-                if (req.address == machine_.s_isatest_tohost || req.address == 0x80001000 || req.address == 0x40008000) {
+                if (req.address == machine_.s_isatest_tohost || req.address == 0x80001000 ||
+                    req.address == 0x40008000) {
                     machine_.tohost = simrv::xlen::kIsXLen64
                                           ? req.data
                                           : ((machine_.tohost & 0xFFFFFFFF00000000ULL) | req.data);
                 } else if (!simrv::xlen::kIsXLen64 &&
-                           (req.address == machine_.s_isatest_tohost + 4 || req.address == 0x80001004 || req.address == 0x40008004)) {
+                           (req.address == machine_.s_isatest_tohost + 4 ||
+                            req.address == 0x80001004 || req.address == 0x40008004)) {
                     machine_.tohost = (machine_.tohost & 0x00000000FFFFFFFFULL) |
                                       (static_cast<uint64_t>(req.data) << 32);
                 }

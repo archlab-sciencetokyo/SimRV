@@ -1,24 +1,26 @@
 #pragma once
 
 #include <cstdint>
-#include <vector>
 #include <utility>
+#include <vector>
+
 #include "simrv/Define.hpp"
-#include "simrv/xlen/Types.hpp"
 #include "simrv/isa/Base.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
+#include "simrv/xlen/Types.hpp"
 
 namespace simrv::pipeline {
 
 class PipelineModel {
-public:
+   public:
     virtual ~PipelineModel() = default;
 
     virtual void reset() = 0;
-    
+
     virtual auto step_instruction(Register pc, isa::Opcode opcode, RegId rd, RegId rs1, RegId rs2,
-                                  isa::OperationId op_id, bool branched, bool is_branch, bool is_jump,
-                                  bool icache_miss, bool dcache_miss, bool tlb_miss, Register target_pc) -> uint32_t = 0;
+                                  isa::OperationId op_id, bool branched, bool is_branch,
+                                  bool is_jump, bool icache_miss, bool dcache_miss, bool tlb_miss,
+                                  Register target_pc) -> uint32_t = 0;
 
     [[nodiscard]] virtual auto get_stats() const -> PipelineStats = 0;
     [[nodiscard]] virtual auto get_cycle_history() const -> std::vector<PipelineCycleSnapshot> = 0;
@@ -46,4 +48,4 @@ public:
     virtual void restore_state(const PipelineSimState& state) = 0;
 };
 
-} // namespace simrv::pipeline
+}  // namespace simrv::pipeline

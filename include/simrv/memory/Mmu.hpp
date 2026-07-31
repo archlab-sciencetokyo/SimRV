@@ -85,12 +85,13 @@ class Mmu {
      * @param xlen Current execution XLEN
      * @return true if the address is canonical, false otherwise
      */
-    [[nodiscard]] static constexpr auto is_canonical(Address v_addr, Word satp, unsigned xlen = xlen::kXLenBits) -> bool {
+    [[nodiscard]] static constexpr auto is_canonical(Address v_addr, Word satp,
+                                                     unsigned xlen = xlen::kXLenBits) -> bool {
         if (xlen == 32) {
             return true;
         } else {
             const Word mode = simrv::xlen::satp_mode(satp, 64);
-            if (mode == 1) { // SV32 compatibility mode under RV64
+            if (mode == 1) {  // SV32 compatibility mode under RV64
                 return true;
             } else if (mode == 8) {  // SV39
                 constexpr Word shift = 64 - 39;
@@ -137,10 +138,11 @@ class Mmu {
      * @param access Access type that triggered the update
      * @param pte_size Size of the PTE in bytes (4 or 8)
      */
-    void update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess access, unsigned pte_size);
+    void update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess access,
+                                unsigned pte_size);
 
     // Page table structure constants
-    static constexpr Word kPteShift = 10;             // PPN to PTE conversion shift
+    static constexpr Word kPteShift = 10;  // PPN to PTE conversion shift
 
     // Cached SATP configuration parameters to accelerate page walks
     Word cached_satp_ = ~Word{0};

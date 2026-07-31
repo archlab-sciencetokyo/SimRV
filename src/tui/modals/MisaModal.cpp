@@ -168,7 +168,8 @@ auto MisaModal::submit(const MisaDraft& draft, simrv::core::Machine& machine,
 
     std::string misa_str = draft.to_misa_string();
     set_status_override_cb(
-        std::format("Updated MISA CSR: {} (0x{:016x}) VLEN={} — reloading simulator", misa_str, new_misa, draft.vlen));
+        std::format("Updated MISA CSR: {} (0x{:016x}) VLEN={} — reloading simulator", misa_str,
+                    new_misa, draft.vlen));
     return true;
 }
 
@@ -189,7 +190,8 @@ void MisaModal::render(std::vector<std::string>& content_rows,
     // Build VLEN val string — greyed out when V is disabled
     std::string vlen_val;
     if (draft.ext_v) {
-        vlen_val = std::format("\033[1;36m[VLEN={}]\033[0m  \033[90m(bits per vector register)\033[0m", draft.vlen);
+        vlen_val = std::format(
+            "\033[1;36m[VLEN={}]\033[0m  \033[90m(bits per vector register)\033[0m", draft.vlen);
     } else {
         vlen_val = std::format("\033[90m[VLEN={}]  (enable V extension first)\033[0m", draft.vlen);
     }
@@ -216,8 +218,7 @@ void MisaModal::render(std::vector<std::string>& content_rows,
          .val = draft.ext_b ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
         {.name = "Extension V (Vector)",
          .val = draft.ext_v ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {.name = "Vector VLEN (bits)",
-         .val = vlen_val},
+        {.name = "Vector VLEN (bits)", .val = vlen_val},
         {.name = "Privilege Modes (S & U)",
          .val = (draft.ext_s && draft.ext_u) ? "\033[1;32m[ON]\033[0m"
                                              : "\033[90m[OFF (M-Only)]\033[0m"},

@@ -8,23 +8,21 @@
 #include <array>
 #include <fstream>
 
-#include "simrv/core/Machine.hpp"
 #include "simrv/core/Logger.hpp"
+#include "simrv/core/Machine.hpp"
 
 #ifdef HAVE_SDL3
 #define TSF_IMPLEMENTATION
 #define TML_IMPLEMENTATION
-#include "simrv/util/tsf.h"
 #include "simrv/util/tml.h"
+#include "simrv/util/tsf.h"
 #endif
 
 namespace simrv::util {
 
 SdlAudio::SdlAudio(simrv::core::Machine& machine) : machine_(machine) {}
 
-SdlAudio::~SdlAudio() {
-    shutdown_audio();
-}
+SdlAudio::~SdlAudio() { shutdown_audio(); }
 
 void SdlAudio::init_audio() {
 #ifdef HAVE_SDL3
@@ -33,7 +31,7 @@ void SdlAudio::init_audio() {
     if (!SDL_WasInit(SDL_INIT_AUDIO)) {
         if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
             simrv::log::error("[SdlAudio] Failed to initialize SDL3 Audio subsystem: {}",
-                               SDL_GetError());
+                              SDL_GetError());
             return;
         }
     }
@@ -69,7 +67,8 @@ void SdlAudio::shutdown_audio() {
 #endif
 }
 
-void SdlAudio::play_channel(int chan, Address phys_addr, Word length, Word rate, Word volume, Word panning) {
+void SdlAudio::play_channel(int chan, Address phys_addr, Word length, Word rate, Word volume,
+                            Word panning) {
 #ifdef HAVE_SDL3
     if (!audio_initialized_ || device_id_ == 0) return;
 
@@ -78,19 +77,24 @@ void SdlAudio::play_channel(int chan, Address phys_addr, Word length, Word rate,
     if (phys_addr < 0x80000000u || length == 0 || rate == 0) return;
 
     const auto* guest_src =
-        reinterpret_cast<const uint8_t*>(machine_.mmem) + (phys_addr - 0x80000000u); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        reinterpret_cast<const uint8_t*>(machine_.mmem) +
+        (phys_addr - 0x80000000u);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
     // Convert mono U8 → stereo U8 with panning
     std::vector<uint8_t> stereo_buf(static_cast<size_t>(length) * 2);
-    float left_gain  = 1.0f;
+    float left_gain = 1.0f;
     float right_gain = 1.0f;
-    if (panning <= 128) right_gain = static_cast<float>(panning) / 128.0f;
-    else            left_gain  = static_cast<float>(256 - panning) / 128.0f;
+    if (panning <= 128)
+        right_gain = static_cast<float>(panning) / 128.0f;
+    else
+        left_gain = static_cast<float>(256 - panning) / 128.0f;
 
     for (Word i = 0; i < length; ++i) {
         int s = static_cast<int>(guest_src[i]) - 128;
-        stereo_buf[static_cast<size_t>(i) * 2]     = static_cast<uint8_t>(std::clamp(static_cast<int>(left_gain  * static_cast<float>(s)) + 128, 0, 255));
-        stereo_buf[static_cast<size_t>(i) * 2 + 1] = static_cast<uint8_t>(std::clamp(static_cast<int>(right_gain * static_cast<float>(s)) + 128, 0, 255));
+        stereo_buf[static_cast<size_t>(i) * 2] = static_cast<uint8_t>(
+            std::clamp(static_cast<int>(left_gain * static_cast<float>(s)) + 128, 0, 255));
+        stereo_buf[static_cast<size_t>(i) * 2 + 1] = static_cast<uint8_t>(
+            std::clamp(static_cast<int>(right_gain * static_cast<float>(s)) + 128, 0, 255));
     }
 
     SDL_AudioSpec spec{.format = SDL_AUDIO_U8, .channels = 2, .freq = static_cast<int>(rate)};
@@ -106,8 +110,7 @@ void SdlAudio::play_channel(int chan, Address phys_addr, Word length, Word rate,
 
     float gain = std::clamp(static_cast<float>(volume) / 127.0f, 0.0f, 1.0f);
     SDL_SetAudioStreamGain(streams_[c_idx], gain);
-    SDL_PutAudioStreamData(streams_[c_idx], stereo_buf.data(),
-                           static_cast<int>(stereo_buf.size()));
+    SDL_PutAudioStreamData(streams_[c_idx], stereo_buf.data(), static_cast<int>(stereo_buf.size()));
     SDL_ResumeAudioStreamDevice(streams_[c_idx]);
     SDL_ResumeAudioDevice(device_id_);
 #endif
@@ -132,7 +135,8 @@ void SdlAudio::update_channel_params(int chan, Word volume) {
 #endif
 }
 
-void SdlAudio::play_music(Address music_addr, Word music_length, Word music_volume, Word music_looping) {
+void SdlAudio::play_music(Address music_addr, Word music_length, Word music_volume,
+                          Word music_looping) {
 #ifdef HAVE_SDL3
     if (!audio_initialized_ || music_addr == 0 || music_length == 0) return;
     if (music_addr < 0x80000000u) return;
@@ -141,7 +145,8 @@ void SdlAudio::play_music(Address music_addr, Word music_length, Word music_volu
 
     // --- 1. Load MIDI from guest DRAM memory directly using tml ---
     const auto* midi_src =
-        reinterpret_cast<const uint8_t*>(machine_.mmem) + (music_addr - 0x80000000u); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        reinterpret_cast<const uint8_t*>(machine_.mmem) +
+        (music_addr - 0x80000000u);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
     tml_message* midi = tml_load_memory(midi_src, static_cast<int>(music_length));
     if (!midi) {
@@ -151,13 +156,9 @@ void SdlAudio::play_music(Address music_addr, Word music_length, Word music_volu
 
     // --- 2. Find and load a SoundFont ---
     static const std::array<const char*, 6> sf2_paths = {
-        "share/soundfonts/TimGM6mb.sf2",
-        "./TimGM6mb.sf2",
-        "/usr/share/soundfonts/FluidR3_GM.sf2",
-        "/usr/share/sounds/sf2/FluidR3_GM.sf2",
-        "/usr/share/soundfonts/default.sf2",
-        "/usr/share/generaluser-gs/GeneralUser-GS.sf2"
-    };
+        "share/soundfonts/TimGM6mb.sf2",        "./TimGM6mb.sf2",
+        "/usr/share/soundfonts/FluidR3_GM.sf2", "/usr/share/sounds/sf2/FluidR3_GM.sf2",
+        "/usr/share/soundfonts/default.sf2",    "/usr/share/generaluser-gs/GeneralUser-GS.sf2"};
 
     tsf* synth = nullptr;
     for (const char* path : sf2_paths) {
@@ -171,9 +172,10 @@ void SdlAudio::play_music(Address music_addr, Word music_length, Word music_volu
     }
 
     if (!synth) {
-        simrv::log::warn("[SdlAudio] Music: no SoundFont (SF2) found. Install one of:\n"
-                         "  AlmaLinux/RHEL: sudo dnf install fluid-soundfont-gm\n"
-                         "  Debian/Ubuntu:  sudo apt install fluid-soundfont-gm");
+        simrv::log::warn(
+            "[SdlAudio] Music: no SoundFont (SF2) found. Install one of:\n"
+            "  AlmaLinux/RHEL: sudo dnf install fluid-soundfont-gm\n"
+            "  Debian/Ubuntu:  sudo apt install fluid-soundfont-gm");
         tml_free(midi);
         return;
     }
@@ -214,19 +216,30 @@ void SdlAudio::play_music(Address music_addr, Word music_length, Word music_volu
         while (curr && curr->time <= next_msec) {
             switch (curr->type) {
                 case TML_NOTE_ON:
-                    tsf_channel_note_on(synth, curr->channel, curr->key, static_cast<float>(curr->velocity) / 127.0f); // NOLINT(cppcoreguidelines-pro-type-union-access)
+                    tsf_channel_note_on(
+                        synth, curr->channel, curr->key,
+                        static_cast<float>(curr->velocity) /
+                            127.0f);  // NOLINT(cppcoreguidelines-pro-type-union-access)
                     break;
                 case TML_NOTE_OFF:
-                    tsf_channel_note_off(synth, curr->channel, curr->key); // NOLINT(cppcoreguidelines-pro-type-union-access)
+                    tsf_channel_note_off(
+                        synth, curr->channel,
+                        curr->key);  // NOLINT(cppcoreguidelines-pro-type-union-access)
                     break;
                 case TML_PROGRAM_CHANGE:
-                    tsf_channel_set_presetnumber(synth, curr->channel, curr->program, (curr->channel == 9)); // NOLINT(cppcoreguidelines-pro-type-union-access)
+                    tsf_channel_set_presetnumber(
+                        synth, curr->channel, curr->program,
+                        (curr->channel == 9));  // NOLINT(cppcoreguidelines-pro-type-union-access)
                     break;
                 case TML_PITCH_BEND:
-                    tsf_channel_set_pitchwheel(synth, curr->channel, curr->pitch_bend); // NOLINT(cppcoreguidelines-pro-type-union-access)
+                    tsf_channel_set_pitchwheel(
+                        synth, curr->channel,
+                        curr->pitch_bend);  // NOLINT(cppcoreguidelines-pro-type-union-access)
                     break;
                 case TML_CONTROL_CHANGE:
-                    tsf_channel_midi_control(synth, curr->channel, curr->control, curr->control_value); // NOLINT(cppcoreguidelines-pro-type-union-access)
+                    tsf_channel_midi_control(
+                        synth, curr->channel, curr->control,
+                        curr->control_value);  // NOLINT(cppcoreguidelines-pro-type-union-access)
                     break;
                 default:
                     break;
@@ -234,7 +247,8 @@ void SdlAudio::play_music(Address music_addr, Word music_length, Word music_volu
             curr = curr->next;
         }
 
-        tsf_render_float(synth, &music_pcm_buf_[static_cast<size_t>(current_frame) * 2], static_cast<int>(block_size), 0);
+        tsf_render_float(synth, &music_pcm_buf_[static_cast<size_t>(current_frame) * 2],
+                         static_cast<int>(block_size), 0);
 
         current_frame += block_size;
         msec = next_msec;

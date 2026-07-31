@@ -4,8 +4,8 @@
  */
 #pragma once
 
-#include "simrv/xlen/Types.hpp"
 #include "simrv/Define.hpp"
+#include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
 class CPU;

@@ -9,21 +9,21 @@
 #include <unistd.h>
 
 #include "simrv/core/Machine.hpp"
-#include "simrv/tui/Tui.hpp"
 #include "simrv/device/Virtio.hpp"
 #include "simrv/device/VirtioUtil.hpp"
+#include "simrv/tui/Tui.hpp"
 
 namespace simrv::device {
 
-Console::Console(simrv::core::Machine& machine) : VirtioDevice(machine, virtio::kConsoleIrq, virtio::kConsoleMaxQueueNum) {}
+Console::Console(simrv::core::Machine& machine)
+    : VirtioDevice(machine, virtio::kConsoleIrq, virtio::kConsoleMaxQueueNum) {}
 
 void Console::process_queue(Word q_idx) {
     if (q_idx >= virtio::kConsoleMaxQueueNum) return;
     if (q_idx == 1) {  // TX Queue
         virtio::QueueState& qs = Queue[q_idx];
         if (qs.Ready == 0) return;
-        const auto avail_idx =
-            virtio_detail::read_struct_from_ram<uint16_t>(qs.AvailLow + 2, mmem);
+        const auto avail_idx = virtio_detail::read_struct_from_ram<uint16_t>(qs.AvailLow + 2, mmem);
         bool written = false;
         while (qs.last_avail_idx != avail_idx) {
             const auto desc_idx = virtio_detail::next_avail_desc_idx(&qs, QueueNum, mmem);
@@ -41,7 +41,8 @@ void Console::process_queue(Word q_idx) {
                 }
             }
             written = true;
-            virtio_detail::update_descriptor(desc_idx, desc.len, static_cast<int>(QueueNum), &qs, mmem);
+            virtio_detail::update_descriptor(desc_idx, desc.len, static_cast<int>(QueueNum), &qs,
+                                             mmem);
             qs.last_avail_idx++;
         }
         if (written) {
@@ -76,7 +77,8 @@ auto Console::MC_receive_input(simrv::core::Machine& machine) -> int {
                         virtio_detail::read_struct_from_ram<virtio::Descriptor>(desc_addr, mmem);
 
                     virtio_detail::store_to_ram(desc.adr, static_cast<Word>(ch), 1, mmem);
-                    virtio_detail::update_descriptor(desc_idx, 1, static_cast<int>(QueueNum), &qs, mmem);
+                    virtio_detail::update_descriptor(desc_idx, 1, static_cast<int>(QueueNum), &qs,
+                                                     mmem);
                     qs.last_avail_idx++;
 
                     trigger_interrupt();
@@ -95,10 +97,12 @@ auto Console::MC_receive_input(simrv::core::Machine& machine) -> int {
             if (qs.last_avail_idx != avail_idx) {
                 const auto desc_idx = virtio_detail::next_avail_desc_idx(&qs, QueueNum, mmem);
                 const auto desc_addr = virtio_detail::get_desc_addr(desc_idx, &qs);
-                auto desc = virtio_detail::read_struct_from_ram<virtio::Descriptor>(desc_addr, mmem);
+                auto desc =
+                    virtio_detail::read_struct_from_ram<virtio::Descriptor>(desc_addr, mmem);
 
                 virtio_detail::store_to_ram(desc.adr, static_cast<Word>(cons_fifo), 1, mmem);
-                virtio_detail::update_descriptor(desc_idx, 1, static_cast<int>(QueueNum), &qs, mmem);
+                virtio_detail::update_descriptor(desc_idx, 1, static_cast<int>(QueueNum), &qs,
+                                                 mmem);
                 qs.last_avail_idx++;
 
                 fifo_en = static_cast<Byte>(0);

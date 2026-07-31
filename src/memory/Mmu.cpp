@@ -4,7 +4,6 @@
  */
 #include "simrv/memory/Mmu.hpp"
 
-
 #include <optional>
 #include <ranges>
 
@@ -13,11 +12,10 @@
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Helpers.hpp"
 
-
 namespace simrv {
 
-using isa::Funct3;
 using core::MstatusBit;
+using isa::Funct3;
 
 Mmu::Mmu(Byte* mmem) : mmem_(mmem) {}
 
@@ -32,7 +30,6 @@ auto Mmu::translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
     if (priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(satp, xlen)) {
         return v_addr;
     }
-
 
     // Translate through page tables
     return page_walk(v_addr, access, priv, mstatus, satp, xlen);
@@ -67,7 +64,8 @@ auto Mmu::validate_pte_permissions(Word pte, Word permission_bits, PteAccess acc
     return true;
 }
 
-void Mmu::update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess access, unsigned pte_size) {
+void Mmu::update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess access,
+                                 unsigned pte_size) {
     // Update A (accessed) and D (dirty) bits as per RISC-V spec
     Word updated_pte = pte_value | enum_mask(PteFlag::A);
     if (access == PteAccess::Write) {
@@ -80,7 +78,6 @@ void Mmu::update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess ac
         Instruction const store_op = (pte_size == 4) ? static_cast<Instruction>(Funct3::Sw)
                                                      : static_cast<Instruction>(Funct3::Sd);
         simrv::memory::ram_write_fast(pte_addr, updated_pte, store_op, mmem_);
-
     }
 }
 
@@ -185,8 +182,7 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
     const bool pte_w = (pte & enum_mask(PteFlag::W)) != 0u;
     const bool pte_x = (pte & enum_mask(PteFlag::X)) != 0u;
 
-    const Word permission_bits = (static_cast<Word>(pte_x) << 2) |
-                                 (static_cast<Word>(pte_w) << 1) |
+    const Word permission_bits = (static_cast<Word>(pte_x) << 2) | (static_cast<Word>(pte_w) << 1) |
                                  static_cast<Word>(pte_r | (mxr && pte_x));
 
     if (!validate_pte_permissions(pte, permission_bits, access, priv, mstatus)) {

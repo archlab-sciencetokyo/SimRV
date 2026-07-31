@@ -9,6 +9,7 @@
 #include <functional>
 #include <string>
 #include <vector>
+
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -61,7 +62,7 @@ struct SysConfigDraft {
     bool enable_forwarding = true;
     bool enable_ex_forwarding = true;
     bool enable_mem_forwarding = true;
-    uint8_t bp_type = 3; // 0: Static-NT, 1: Static-T, 2: 1-Bit, 3: 2-Bit Bimodal, 4: Gshare
+    uint8_t bp_type = 3;  // 0: Static-NT, 1: Static-T, 2: 1-Bit, 3: 2-Bit Bimodal, 4: Gshare
     uint32_t btb_entries = 128;
 };
 
@@ -85,7 +86,7 @@ struct MisaDraft {
         } else {
             val |= (2ULL << 62);
         }
-        val |= (1ULL << ('i' - 'a')); // Extension I is mandatory
+        val |= (1ULL << ('i' - 'a'));  // Extension I is mandatory
         if (ext_m) val |= (1ULL << ('m' - 'a'));
         if (ext_a) val |= (1ULL << ('a' - 'a'));
         if (ext_f) val |= (1ULL << ('f' - 'a'));
@@ -119,7 +120,9 @@ class TuiModal {
                 const std::function<void()>& on_speed_changed_cb) -> bool;
 
     void push_char(char c) { input_.push_back(c); }
-    void pop_char() { if (!input_.empty()) input_.pop_back(); }
+    void pop_char() {
+        if (!input_.empty()) input_.pop_back();
+    }
     void toggle_load_mode() { load_appmode_ = !load_appmode_; }
     [[nodiscard]] auto get_load_appmode() const -> bool { return load_appmode_; }
 
@@ -140,7 +143,8 @@ class TuiModal {
     void pop_sysconfig_digit();
 
     void move_bp_cursor(int delta);
-    auto remove_bp_at_cursor(const std::function<void(const std::string&)>& set_status_override_cb) -> bool;
+    auto remove_bp_at_cursor(const std::function<void(const std::string&)>& set_status_override_cb)
+        -> bool;
 
     void open_notice(const std::string& title, const std::string& message, bool is_error = false);
 
@@ -160,8 +164,7 @@ class TuiModal {
     MisaDraft misa_draft_;
     int sysconfig_cursor_ = 0;
     SysConfigDraft sysconfig_draft_;
-    bool load_appmode_ =
-        true;  // Toggle for App (baremetal) vs OS (Linux) mode in LoadBinary modal
+    bool load_appmode_ = true;  // Toggle for App (baremetal) vs OS (Linux) mode in LoadBinary modal
     std::string staged_binary_path_;
     bool staged_mode_change_ = false;
     bool staged_target_appmode_ = false;

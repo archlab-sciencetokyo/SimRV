@@ -1,4 +1,5 @@
 #include "simrv/pipeline/Decoder.hpp"
+
 #include <cstdio>
 
 namespace simrv::pipeline {
@@ -7,129 +8,478 @@ using simrv::isa::OperationId;
 using enum simrv::isa::OperationId;
 
 const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> OPERATION_NAME = {
-    "LUI",        "AUIPC",    "JAL",       "JALR",      "BEQ",       "BNE",      "BLT",
-    "BGE",        "BLTU",     "BGEU",      "LB",        "LH",        "LW",       "LD",
-    "LBU",        "LHU",      "LWU",       "SB",        "SH",        "SW",       "SD",
-    "ADDI",       "SLTI",     "SLTIU",     "XORI",      "ORI",       "ANDI",     "SLLI",
-    "SRLI",       "SRAI",     "ADDIW",     "SLLIW",     "SRLIW",     "SRAIW",    "ADD",
-    "SUB",        "SLL",      "SLT",       "SLTU",      "XOR",       "SRL",      "SRA",
-    "OR",         "AND",      "ADDW",      "SUBW",      "SLLW",      "SRLW",     "SRAW",
-    "FENCE",      "FENCE_I",  "ECALL",     "EBREAK",    "CSRRW",     "CSRRS",    "CSRRC",
-    "CSRRWI",     "CSRRSI",   "CSRRCI",    "URET",      "SRET",      "MRET",     "WFI",
-    "SFENCE_VMA", "MUL",      "MULH",      "MULHSU",    "MULHU",     "DIV",      "DIVU",
-    "REM",        "REMU",     "MULW",      "DIVW",      "DIVUW",     "REMW",     "REMUW",
-    "LR_W",       "SC_W",     "AMOSWAP_W", "AMOADD_W",  "AMOXOR_W",  "AMOAND_W", "AMOOR_W",
-    "AMOMIN_W",   "AMOMAX_W", "AMOMINU_W", "AMOMAXU_W",
-    "LR_D",       "SC_D",     "AMOSWAP_D", "AMOADD_D",  "AMOXOR_D",  "AMOAND_D", "AMOOR_D",
-    "AMOMIN_D",   "AMOMAX_D", "AMOMINU_D", "AMOMAXU_D",
-    "FLW",       "FSW",      "FMADD_S",
-    "FMSUB_S",    "FNMADD_S", "FNMSUB_S",  "FADD_S",    "FSUB_S",    "FMUL_S",   "FDIV_S",
-    "FSQRT_S",    "FSGNJ_S",  "FSGNJN_S",  "FSGNJX_S",  "FMIN_S",    "FMAX_S",   "FCVT_W_S",
-    "FCVT_WU_S",  "FMV_X_W",  "FEQ_S",     "FLT_S",     "FLE_S",     "FCLASS_S", "FCVT_S_W",
-    "FCVT_S_WU",  "FMV_W_X",  "FCVT_L_S",  "FCVT_LU_S", "FCVT_S_L",  "FCVT_S_LU", "FLD",
-    "FSD",        "FMADD_D",  "FMSUB_D",   "FNMSUB_D",  "FNMADD_D",  "FADD_D",   "FSUB_D",
-    "FMUL_D",     "FDIV_D",   "FSQRT_D",   "FSGNJ_D",   "FSGNJN_D",  "FSGNJX_D", "FMIN_D",
-    "FMAX_D",     "FCVT_S_D", "FCVT_D_S",  "FEQ_D",     "FLT_D",     "FLE_D",    "FCLASS_D",
-    "FCVT_W_D",   "FCVT_WU_D","FCVT_D_W",  "FCVT_D_WU", "FMV_X_D",   "FMV_D_X",  "FCVT_L_D",
-    "FCVT_LU_D",  "FCVT_D_L", "FCVT_D_LU",
-    "SH1ADD",     "SH2ADD",   "SH3ADD",    "SH1ADD.UW", "SH2ADD.UW", "SH3ADD.UW",
-    "ADD.UW",     "SLLI.UW",  "ANDN",      "ORN",       "XNOR",      "CLZ",
-    "CTZ",        "CPOP",     "MIN",       "MAX",       "MINU",      "MAXU",
-    "SEXT.B",     "SEXT.H",   "ZEXT.H",    "ROL",       "ROR",       "RORI",
-    "CLZW",       "CTZW",     "CPOPW",     "ROLW",      "RORW",      "RORIW",
-    "CLMUL",      "CLMULH",   "CLMULR",    "BSET",      "BSETI",     "BCLR",
-    "BCLRI",      "BINV",     "BINVI",     "BEXT",      "BEXTI",     "ORC.B",
-    "REV8",       "PACK",     "PACKW",
-    "VSETVLI",    "VSETIVLI", "VSETVL",
-    "VLE8_V",     "VLE16_V",  "VLE32_V",  "VLE64_V",
-    "VSE8_V",     "VSE16_V",  "VSE32_V",  "VSE64_V",
-    "VADD_VV",    "VADD_VX",  "VADD_VI",
-    "VSUB_VV",    "VSUB_VX",
-    "VMUL_VV",    "VMUL_VX",
-    "VDIV_VV",    "VDIV_VX",
-    "VDIVU_VV",   "VDIVU_VX",
-    "VAND_VV",    "VAND_VX",  "VAND_VI",
-    "VOR_VV",     "VOR_VX",   "VOR_VI",
-    "VXOR_VV",    "VXOR_VX",  "VXOR_VI",
-    "VSLL_VV",    "VSLL_VX",  "VSLL_VI",
-    "VSRL_VV",    "VSRL_VX",  "VSRL_VI",
-    "VSRA_VV",    "VSRA_VX",  "VSRA_VI",
-    "VMV_V_V",    "VMV_V_X",  "VMV_V_I",
-    "VMV_X_S",    "VMV_S_X",
-    "VMSEQ_VV",   "VMSEQ_VX", "VMSEQ_VI",
-    "VMSNE_VV",   "VMSNE_VX", "VMSNE_VI",
-    "VMSLT_VV",   "VMSLT_VX",
-    "VMSLTU_VV",  "VMSLTU_VX",
-    "VMSLE_VV",   "VMSLE_VX", "VMSLE_VI",
-    "VMSLEU_VV",  "VMSLEU_VX", "VMSLEU_VI",
-    "VMSGT_VX",   "VMSGT_VI",
-    "VMSGTU_VX",  "VMSGTU_VI",
-    "VMERGE_VVM", "VMERGE_VXM", "VMERGE_VIM",
-    "VMACC_VV", "VMACC_VX", "VMADD_VV", "VMADD_VX",
-    "VNMSAC_VV", "VNMSAC_VX", "VNSUB_VV", "VNSUB_VX",
-    "VWMACCU_VV", "VWMACCU_VX", "VWMACC_VV", "VWMACC_VX",
-    "VWMACCUS_VX", "VWMACCSU_VV", "VWMACCSU_VX",
-    "VMIN_VV", "VMIN_VX", "VMINU_VV", "VMINU_VX",
-    "VMAX_VV", "VMAX_VX", "VMAXU_VV", "VMAXU_VX",
-    "VLSE8_V", "VLSE16_V", "VLSE32_V", "VLSE64_V",
-    "VSSE8_V", "VSSE16_V", "VSSE32_V", "VSSE64_V",
-    "VLUXEI8_V", "VLUXEI16_V", "VLUXEI32_V", "VLUXEI64_V",
-    "VLOXEI8_V", "VLOXEI16_V", "VLOXEI32_V", "VLOXEI64_V",
-    "VSUXEI8_V", "VSUXEI16_V", "VSUXEI32_V", "VSUXEI64_V",
-    "VSOXEI8_V", "VSOXEI16_V", "VSOXEI32_V", "VSOXEI64_V",
+    "LUI",
+    "AUIPC",
+    "JAL",
+    "JALR",
+    "BEQ",
+    "BNE",
+    "BLT",
+    "BGE",
+    "BLTU",
+    "BGEU",
+    "LB",
+    "LH",
+    "LW",
+    "LD",
+    "LBU",
+    "LHU",
+    "LWU",
+    "SB",
+    "SH",
+    "SW",
+    "SD",
+    "ADDI",
+    "SLTI",
+    "SLTIU",
+    "XORI",
+    "ORI",
+    "ANDI",
+    "SLLI",
+    "SRLI",
+    "SRAI",
+    "ADDIW",
+    "SLLIW",
+    "SRLIW",
+    "SRAIW",
+    "ADD",
+    "SUB",
+    "SLL",
+    "SLT",
+    "SLTU",
+    "XOR",
+    "SRL",
+    "SRA",
+    "OR",
+    "AND",
+    "ADDW",
+    "SUBW",
+    "SLLW",
+    "SRLW",
+    "SRAW",
+    "FENCE",
+    "FENCE_I",
+    "ECALL",
+    "EBREAK",
+    "CSRRW",
+    "CSRRS",
+    "CSRRC",
+    "CSRRWI",
+    "CSRRSI",
+    "CSRRCI",
+    "URET",
+    "SRET",
+    "MRET",
+    "WFI",
+    "SFENCE_VMA",
+    "MUL",
+    "MULH",
+    "MULHSU",
+    "MULHU",
+    "DIV",
+    "DIVU",
+    "REM",
+    "REMU",
+    "MULW",
+    "DIVW",
+    "DIVUW",
+    "REMW",
+    "REMUW",
+    "LR_W",
+    "SC_W",
+    "AMOSWAP_W",
+    "AMOADD_W",
+    "AMOXOR_W",
+    "AMOAND_W",
+    "AMOOR_W",
+    "AMOMIN_W",
+    "AMOMAX_W",
+    "AMOMINU_W",
+    "AMOMAXU_W",
+    "LR_D",
+    "SC_D",
+    "AMOSWAP_D",
+    "AMOADD_D",
+    "AMOXOR_D",
+    "AMOAND_D",
+    "AMOOR_D",
+    "AMOMIN_D",
+    "AMOMAX_D",
+    "AMOMINU_D",
+    "AMOMAXU_D",
+    "FLW",
+    "FSW",
+    "FMADD_S",
+    "FMSUB_S",
+    "FNMADD_S",
+    "FNMSUB_S",
+    "FADD_S",
+    "FSUB_S",
+    "FMUL_S",
+    "FDIV_S",
+    "FSQRT_S",
+    "FSGNJ_S",
+    "FSGNJN_S",
+    "FSGNJX_S",
+    "FMIN_S",
+    "FMAX_S",
+    "FCVT_W_S",
+    "FCVT_WU_S",
+    "FMV_X_W",
+    "FEQ_S",
+    "FLT_S",
+    "FLE_S",
+    "FCLASS_S",
+    "FCVT_S_W",
+    "FCVT_S_WU",
+    "FMV_W_X",
+    "FCVT_L_S",
+    "FCVT_LU_S",
+    "FCVT_S_L",
+    "FCVT_S_LU",
+    "FLD",
+    "FSD",
+    "FMADD_D",
+    "FMSUB_D",
+    "FNMSUB_D",
+    "FNMADD_D",
+    "FADD_D",
+    "FSUB_D",
+    "FMUL_D",
+    "FDIV_D",
+    "FSQRT_D",
+    "FSGNJ_D",
+    "FSGNJN_D",
+    "FSGNJX_D",
+    "FMIN_D",
+    "FMAX_D",
+    "FCVT_S_D",
+    "FCVT_D_S",
+    "FEQ_D",
+    "FLT_D",
+    "FLE_D",
+    "FCLASS_D",
+    "FCVT_W_D",
+    "FCVT_WU_D",
+    "FCVT_D_W",
+    "FCVT_D_WU",
+    "FMV_X_D",
+    "FMV_D_X",
+    "FCVT_L_D",
+    "FCVT_LU_D",
+    "FCVT_D_L",
+    "FCVT_D_LU",
+    "SH1ADD",
+    "SH2ADD",
+    "SH3ADD",
+    "SH1ADD.UW",
+    "SH2ADD.UW",
+    "SH3ADD.UW",
+    "ADD.UW",
+    "SLLI.UW",
+    "ANDN",
+    "ORN",
+    "XNOR",
+    "CLZ",
+    "CTZ",
+    "CPOP",
+    "MIN",
+    "MAX",
+    "MINU",
+    "MAXU",
+    "SEXT.B",
+    "SEXT.H",
+    "ZEXT.H",
+    "ROL",
+    "ROR",
+    "RORI",
+    "CLZW",
+    "CTZW",
+    "CPOPW",
+    "ROLW",
+    "RORW",
+    "RORIW",
+    "CLMUL",
+    "CLMULH",
+    "CLMULR",
+    "BSET",
+    "BSETI",
+    "BCLR",
+    "BCLRI",
+    "BINV",
+    "BINVI",
+    "BEXT",
+    "BEXTI",
+    "ORC.B",
+    "REV8",
+    "PACK",
+    "PACKW",
+    "VSETVLI",
+    "VSETIVLI",
+    "VSETVL",
+    "VLE8_V",
+    "VLE16_V",
+    "VLE32_V",
+    "VLE64_V",
+    "VSE8_V",
+    "VSE16_V",
+    "VSE32_V",
+    "VSE64_V",
+    "VADD_VV",
+    "VADD_VX",
+    "VADD_VI",
+    "VSUB_VV",
+    "VSUB_VX",
+    "VMUL_VV",
+    "VMUL_VX",
+    "VDIV_VV",
+    "VDIV_VX",
+    "VDIVU_VV",
+    "VDIVU_VX",
+    "VAND_VV",
+    "VAND_VX",
+    "VAND_VI",
+    "VOR_VV",
+    "VOR_VX",
+    "VOR_VI",
+    "VXOR_VV",
+    "VXOR_VX",
+    "VXOR_VI",
+    "VSLL_VV",
+    "VSLL_VX",
+    "VSLL_VI",
+    "VSRL_VV",
+    "VSRL_VX",
+    "VSRL_VI",
+    "VSRA_VV",
+    "VSRA_VX",
+    "VSRA_VI",
+    "VMV_V_V",
+    "VMV_V_X",
+    "VMV_V_I",
+    "VMV_X_S",
+    "VMV_S_X",
+    "VMSEQ_VV",
+    "VMSEQ_VX",
+    "VMSEQ_VI",
+    "VMSNE_VV",
+    "VMSNE_VX",
+    "VMSNE_VI",
+    "VMSLT_VV",
+    "VMSLT_VX",
+    "VMSLTU_VV",
+    "VMSLTU_VX",
+    "VMSLE_VV",
+    "VMSLE_VX",
+    "VMSLE_VI",
+    "VMSLEU_VV",
+    "VMSLEU_VX",
+    "VMSLEU_VI",
+    "VMSGT_VX",
+    "VMSGT_VI",
+    "VMSGTU_VX",
+    "VMSGTU_VI",
+    "VMERGE_VVM",
+    "VMERGE_VXM",
+    "VMERGE_VIM",
+    "VMACC_VV",
+    "VMACC_VX",
+    "VMADD_VV",
+    "VMADD_VX",
+    "VNMSAC_VV",
+    "VNMSAC_VX",
+    "VNSUB_VV",
+    "VNSUB_VX",
+    "VWMACCU_VV",
+    "VWMACCU_VX",
+    "VWMACC_VV",
+    "VWMACC_VX",
+    "VWMACCUS_VX",
+    "VWMACCSU_VV",
+    "VWMACCSU_VX",
+    "VMIN_VV",
+    "VMIN_VX",
+    "VMINU_VV",
+    "VMINU_VX",
+    "VMAX_VV",
+    "VMAX_VX",
+    "VMAXU_VV",
+    "VMAXU_VX",
+    "VLSE8_V",
+    "VLSE16_V",
+    "VLSE32_V",
+    "VLSE64_V",
+    "VSSE8_V",
+    "VSSE16_V",
+    "VSSE32_V",
+    "VSSE64_V",
+    "VLUXEI8_V",
+    "VLUXEI16_V",
+    "VLUXEI32_V",
+    "VLUXEI64_V",
+    "VLOXEI8_V",
+    "VLOXEI16_V",
+    "VLOXEI32_V",
+    "VLOXEI64_V",
+    "VSUXEI8_V",
+    "VSUXEI16_V",
+    "VSUXEI32_V",
+    "VSUXEI64_V",
+    "VSOXEI8_V",
+    "VSOXEI16_V",
+    "VSOXEI32_V",
+    "VSOXEI64_V",
     "VID_V",
-    "VFMACC_VV", "VFMACC_VF",
+    "VFMACC_VV",
+    "VFMACC_VF",
     "VREDSUM_VS",
-    "VWMUL_VV", "VWMUL_VX",
-    "VNCLIP_WV", "VNCLIP_WX", "VNCLIP_WI",
-    "VNCLIPU_WV", "VNCLIPU_WX", "VNCLIPU_WI",
-    "VNSRL_WV", "VNSRL_WX", "VNSRL_WI",
-    "VNSRA_WV", "VNSRA_WX", "VNSRA_WI",
-    "VSLIDE1UP_VX", "VSLIDE1DOWN_VX",
-    "VFADD_VV", "VFADD_VF",
-    "VRSUB_VX", "VRSUB_VI",
-    "VSADD_VV", "VSADD_VX", "VSADD_VI",
-    "VSADDU_VV", "VSADDU_VX", "VSADDU_VI",
-    "VSBC_VVM", "VSBC_VXM",
-    "VSEXT_VF2", "VSEXT_VF4", "VSEXT_VF8",
-    "VZEXT_VF2", "VZEXT_VF4", "VZEXT_VF8",
-    "VSLIDEDOWN_VX", "VSLIDEDOWN_VI",
-    "VSLIDEUP_VX", "VSLIDEUP_VI",
-    "VSMUL_VV", "VSMUL_VX",
-    "VSSRA_VV", "VSSRA_VX", "VSSRA_VI",
-    "VSSRL_VV", "VSSRL_VX", "VSSRL_VI",
-    "VSSUB_VV", "VSSUB_VX",
-    "VSSUBU_VV", "VSSUBU_VX",
-    "VWADD_VV", "VWADD_VX", "VWADD_WV", "VWADD_WX",
-    "VWADDU_VV", "VWADDU_VX", "VWADDU_WV", "VWADDU_WX",
-    "VWSUB_VV", "VWSUB_VX", "VWSUB_WV", "VWSUB_WX",
-    "VWSUBU_VV", "VWSUBU_VX", "VWSUBU_WV", "VWSUBU_WX",
-    "VWMULU_VV", "VWMULU_VX",
-    "VWMULSU_VV", "VWMULSU_VX",
-    "VWREDSUM_VS", "VWREDSUMU_VS",
-    "VMV1R_V", "VMV2R_V", "VMV4R_V", "VMV8R_V",
-    "VL1RE8_V", "VL1RE16_V", "VL1RE32_V", "VL1RE64_V",
-    "VL2RE8_V", "VL2RE16_V", "VL2RE32_V", "VL2RE64_V",
-    "VL4RE8_V", "VL4RE16_V", "VL4RE32_V", "VL4RE64_V",
-    "VL8RE8_V", "VL8RE16_V", "VL8RE32_V", "VL8RE64_V",
-    "VS1R_V", "VS2R_V", "VS4R_V", "VS8R_V",
-    "VADC_VVM", "VADC_VXM", "VADC_VIM",
-    "VMADC_VV", "VMADC_VX", "VMADC_VI",
-    "VMADC_VVM", "VMADC_VXM", "VMADC_VIM",
-    "VMSBC_VV", "VMSBC_VX", "VMSBC_VVM", "VMSBC_VXM",
-    "VMSBF_M", "VMSIF_M", "VMSOF_M", "VFIRST_M", "VCPOP_M", "VIOTA_M", "VCOMPRESS_VM",
-    "VANDN_VV", "VANDN_VX",
-    "VROL_VV", "VROL_VX",
-    "VROR_VV", "VROR_VX", "VROR_VI",
-    "VCLZ_V", "VCTZ_V", "VCPOP_V",
-    "VBREV_V", "VBREV8_V", "VREV8_V",
-    "VCLMUL_VV", "VCLMUL_VX",
-    "VCLMULH_VV", "VCLMULH_VX",
-    "VMAND_MM", "VMNAND_MM", "VMANDN_MM",
-    "VMOR_MM", "VMNOR_MM", "VMORN_MM",
-    "VMXOR_MM", "VMXNOR_MM",
-    "VFMV_F_S", "VFMV_S_F", "VFMERGE_VFM",
-    "VWSLL_VV", "VWSLL_VX", "VWSLL_VI",
+    "VWMUL_VV",
+    "VWMUL_VX",
+    "VNCLIP_WV",
+    "VNCLIP_WX",
+    "VNCLIP_WI",
+    "VNCLIPU_WV",
+    "VNCLIPU_WX",
+    "VNCLIPU_WI",
+    "VNSRL_WV",
+    "VNSRL_WX",
+    "VNSRL_WI",
+    "VNSRA_WV",
+    "VNSRA_WX",
+    "VNSRA_WI",
+    "VSLIDE1UP_VX",
+    "VSLIDE1DOWN_VX",
+    "VFADD_VV",
+    "VFADD_VF",
+    "VRSUB_VX",
+    "VRSUB_VI",
+    "VSADD_VV",
+    "VSADD_VX",
+    "VSADD_VI",
+    "VSADDU_VV",
+    "VSADDU_VX",
+    "VSADDU_VI",
+    "VSBC_VVM",
+    "VSBC_VXM",
+    "VSEXT_VF2",
+    "VSEXT_VF4",
+    "VSEXT_VF8",
+    "VZEXT_VF2",
+    "VZEXT_VF4",
+    "VZEXT_VF8",
+    "VSLIDEDOWN_VX",
+    "VSLIDEDOWN_VI",
+    "VSLIDEUP_VX",
+    "VSLIDEUP_VI",
+    "VSMUL_VV",
+    "VSMUL_VX",
+    "VSSRA_VV",
+    "VSSRA_VX",
+    "VSSRA_VI",
+    "VSSRL_VV",
+    "VSSRL_VX",
+    "VSSRL_VI",
+    "VSSUB_VV",
+    "VSSUB_VX",
+    "VSSUBU_VV",
+    "VSSUBU_VX",
+    "VWADD_VV",
+    "VWADD_VX",
+    "VWADD_WV",
+    "VWADD_WX",
+    "VWADDU_VV",
+    "VWADDU_VX",
+    "VWADDU_WV",
+    "VWADDU_WX",
+    "VWSUB_VV",
+    "VWSUB_VX",
+    "VWSUB_WV",
+    "VWSUB_WX",
+    "VWSUBU_VV",
+    "VWSUBU_VX",
+    "VWSUBU_WV",
+    "VWSUBU_WX",
+    "VWMULU_VV",
+    "VWMULU_VX",
+    "VWMULSU_VV",
+    "VWMULSU_VX",
+    "VWREDSUM_VS",
+    "VWREDSUMU_VS",
+    "VMV1R_V",
+    "VMV2R_V",
+    "VMV4R_V",
+    "VMV8R_V",
+    "VL1RE8_V",
+    "VL1RE16_V",
+    "VL1RE32_V",
+    "VL1RE64_V",
+    "VL2RE8_V",
+    "VL2RE16_V",
+    "VL2RE32_V",
+    "VL2RE64_V",
+    "VL4RE8_V",
+    "VL4RE16_V",
+    "VL4RE32_V",
+    "VL4RE64_V",
+    "VL8RE8_V",
+    "VL8RE16_V",
+    "VL8RE32_V",
+    "VL8RE64_V",
+    "VS1R_V",
+    "VS2R_V",
+    "VS4R_V",
+    "VS8R_V",
+    "VADC_VVM",
+    "VADC_VXM",
+    "VADC_VIM",
+    "VMADC_VV",
+    "VMADC_VX",
+    "VMADC_VI",
+    "VMADC_VVM",
+    "VMADC_VXM",
+    "VMADC_VIM",
+    "VMSBC_VV",
+    "VMSBC_VX",
+    "VMSBC_VVM",
+    "VMSBC_VXM",
+    "VMSBF_M",
+    "VMSIF_M",
+    "VMSOF_M",
+    "VFIRST_M",
+    "VCPOP_M",
+    "VIOTA_M",
+    "VCOMPRESS_VM",
+    "VANDN_VV",
+    "VANDN_VX",
+    "VROL_VV",
+    "VROL_VX",
+    "VROR_VV",
+    "VROR_VX",
+    "VROR_VI",
+    "VCLZ_V",
+    "VCTZ_V",
+    "VCPOP_V",
+    "VBREV_V",
+    "VBREV8_V",
+    "VREV8_V",
+    "VCLMUL_VV",
+    "VCLMUL_VX",
+    "VCLMULH_VV",
+    "VCLMULH_VX",
+    "VMAND_MM",
+    "VMNAND_MM",
+    "VMANDN_MM",
+    "VMOR_MM",
+    "VMNOR_MM",
+    "VMORN_MM",
+    "VMXOR_MM",
+    "VMXNOR_MM",
+    "VFMV_F_S",
+    "VFMV_S_F",
+    "VFMERGE_VFM",
+    "VWSLL_VV",
+    "VWSLL_VX",
+    "VWSLL_VI",
     "VCHECK",
     "UNKNOWN"};
 
@@ -137,36 +487,56 @@ namespace {
 
 auto decode_branch(uint32_t funct3) -> OperationId {
     switch (funct3) {
-        case 0: return OperationId::BEQ;
-        case 1: return OperationId::BNE;
-        case 4: return OperationId::BLT;
-        case 5: return OperationId::BGE;
-        case 6: return OperationId::BLTU;
-        case 7: return OperationId::BGEU;
-        default: return OperationId::UNKNOWN;
+        case 0:
+            return OperationId::BEQ;
+        case 1:
+            return OperationId::BNE;
+        case 4:
+            return OperationId::BLT;
+        case 5:
+            return OperationId::BGE;
+        case 6:
+            return OperationId::BLTU;
+        case 7:
+            return OperationId::BGEU;
+        default:
+            return OperationId::UNKNOWN;
     }
 }
 
 auto decode_load(uint32_t funct3) -> OperationId {
     switch (funct3) {
-        case 0: return OperationId::LB;
-        case 1: return OperationId::LH;
-        case 2: return OperationId::LW;
-        case 3: return OperationId::LD;
-        case 4: return OperationId::LBU;
-        case 5: return OperationId::LHU;
-        case 6: return OperationId::LWU;
-        default: return OperationId::UNKNOWN;
+        case 0:
+            return OperationId::LB;
+        case 1:
+            return OperationId::LH;
+        case 2:
+            return OperationId::LW;
+        case 3:
+            return OperationId::LD;
+        case 4:
+            return OperationId::LBU;
+        case 5:
+            return OperationId::LHU;
+        case 6:
+            return OperationId::LWU;
+        default:
+            return OperationId::UNKNOWN;
     }
 }
 
 auto decode_store(uint32_t funct3) -> OperationId {
     switch (funct3) {
-        case 0: return OperationId::SB;
-        case 1: return OperationId::SH;
-        case 2: return OperationId::SW;
-        case 3: return OperationId::SD;
-        default: return OperationId::UNKNOWN;
+        case 0:
+            return OperationId::SB;
+        case 1:
+            return OperationId::SH;
+        case 2:
+            return OperationId::SW;
+        case 3:
+            return OperationId::SD;
+        default:
+            return OperationId::UNKNOWN;
     }
 }
 
@@ -174,7 +544,8 @@ auto decode_op_imm(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operatio
     const uint32_t imm12 = ir >> 20;
     const uint32_t imm6 = imm12 >> 6;
     switch (funct3) {
-        case 0: return OperationId::ADDI;
+        case 0:
+            return OperationId::ADDI;
         case 1:
             if (imm12 == 0x600) return OperationId::CLZ;
             if (imm12 == 0x601) return OperationId::CTZ;
@@ -186,9 +557,12 @@ auto decode_op_imm(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operatio
             if (imm6 == 0x1A) return OperationId::BINVI;
             if (funct7 == 0x00 || funct7 == 0x01) return OperationId::SLLI;
             return OperationId::UNKNOWN;
-        case 2: return OperationId::SLTI;
-        case 3: return OperationId::SLTIU;
-        case 4: return OperationId::XORI;
+        case 2:
+            return OperationId::SLTI;
+        case 3:
+            return OperationId::SLTIU;
+        case 4:
+            return OperationId::XORI;
         case 5:
             if (imm12 == 0x287) return OperationId::ORC_B;
             if (imm12 == 0x698 || imm12 == 0x6b8) return OperationId::REV8;
@@ -197,9 +571,12 @@ auto decode_op_imm(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operatio
             if (funct7 == 0x00 || funct7 == 0x01) return OperationId::SRLI;
             if (funct7 == 0x20 || funct7 == 0x21) return OperationId::SRAI;
             return OperationId::UNKNOWN;
-        case 6: return OperationId::ORI;
-        case 7: return OperationId::ANDI;
-        default: return OperationId::UNKNOWN;
+        case 6:
+            return OperationId::ORI;
+        case 7:
+            return OperationId::ANDI;
+        default:
+            return OperationId::UNKNOWN;
     }
 }
 
@@ -251,7 +628,8 @@ auto decode_op_standard(uint32_t funct3, uint32_t funct7) -> OperationId {
             if (funct7 == 0x05) return OperationId::MAXU;
             if (funct7 == 0x00) return OperationId::AND;
             return OperationId::UNKNOWN;
-        default: return OperationId::UNKNOWN;
+        default:
+            return OperationId::UNKNOWN;
     }
 }
 
@@ -259,7 +637,8 @@ auto decode_op_imm32(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operat
     const uint32_t imm12 = ir >> 20;
     const uint32_t imm6 = imm12 >> 6;
     switch (funct3) {
-        case 0: return OperationId::ADDIW;
+        case 0:
+            return OperationId::ADDIW;
         case 1:
             if (imm12 == 0x600) return OperationId::CLZW;
             if (imm12 == 0x601) return OperationId::CTZW;
@@ -272,7 +651,8 @@ auto decode_op_imm32(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operat
             if (funct7 == 0x00) return OperationId::SRLIW;
             if (funct7 == 0x20) return OperationId::SRAIW;
             return OperationId::UNKNOWN;
-        default: return OperationId::UNKNOWN;
+        default:
+            return OperationId::UNKNOWN;
     }
 }
 
@@ -302,19 +682,26 @@ auto decode_op32_standard(uint32_t funct3, uint32_t funct7) -> OperationId {
         case 6:
             if (funct7 == 0x10) return OperationId::SH3ADD_UW;
             return OperationId::UNKNOWN;
-        default: return OperationId::UNKNOWN;
+        default:
+            return OperationId::UNKNOWN;
     }
 }
 
 auto decode_system_priv(uint32_t funct7, Instruction ir) -> OperationId {
     const uint32_t f12 = ir >> 20;
     switch (f12) {
-        case 0x000: return OperationId::ECALL;
-        case 0x001: return OperationId::EBREAK;
-        case 0x002: return OperationId::URET;
-        case 0x102: return OperationId::SRET;
-        case 0x302: return OperationId::MRET;
-        case 0x105: return OperationId::WFI;
+        case 0x000:
+            return OperationId::ECALL;
+        case 0x001:
+            return OperationId::EBREAK;
+        case 0x002:
+            return OperationId::URET;
+        case 0x102:
+            return OperationId::SRET;
+        case 0x302:
+            return OperationId::MRET;
+        case 0x105:
+            return OperationId::WFI;
         default:
             if (funct7 == 0x09) return OperationId::SFENCE_VMA;
             break;
@@ -324,13 +711,20 @@ auto decode_system_priv(uint32_t funct7, Instruction ir) -> OperationId {
 
 auto decode_system_csr(uint32_t funct3) -> OperationId {
     switch (funct3) {
-        case 1: return OperationId::CSRRW;
-        case 2: return OperationId::CSRRS;
-        case 3: return OperationId::CSRRC;
-        case 5: return OperationId::CSRRWI;
-        case 6: return OperationId::CSRRSI;
-        case 7: return OperationId::CSRRCI;
-        default: return OperationId::UNKNOWN;
+        case 1:
+            return OperationId::CSRRW;
+        case 2:
+            return OperationId::CSRRS;
+        case 3:
+            return OperationId::CSRRC;
+        case 5:
+            return OperationId::CSRRWI;
+        case 6:
+            return OperationId::CSRRSI;
+        case 7:
+            return OperationId::CSRRCI;
+        default:
+            return OperationId::UNKNOWN;
     }
 }
 
@@ -343,48 +737,76 @@ auto decode_system(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operatio
 
 auto decode_ext_i(Opcode op, uint32_t funct3, uint32_t funct7, Instruction ir) -> OperationId {
     switch (op) {
-        case Opcode::Lui: return OperationId::LUI;
-        case Opcode::Auipc: return OperationId::AUIPC;
-        case Opcode::Jal: return OperationId::JAL;
-        case Opcode::Jalr: return OperationId::JALR;
-        case Opcode::Branch: return decode_branch(funct3);
-        case Opcode::Load: return decode_load(funct3);
-        case Opcode::Store: return decode_store(funct3);
-        case Opcode::OpImm: return decode_op_imm(funct3, funct7, ir);
-        case Opcode::OpImm32: return decode_op_imm32(funct3, funct7, ir);
-        case Opcode::Op: return decode_op_standard(funct3, funct7);
-        case Opcode::Op32: return decode_op32_standard(funct3, funct7);
+        case Opcode::Lui:
+            return OperationId::LUI;
+        case Opcode::Auipc:
+            return OperationId::AUIPC;
+        case Opcode::Jal:
+            return OperationId::JAL;
+        case Opcode::Jalr:
+            return OperationId::JALR;
+        case Opcode::Branch:
+            return decode_branch(funct3);
+        case Opcode::Load:
+            return decode_load(funct3);
+        case Opcode::Store:
+            return decode_store(funct3);
+        case Opcode::OpImm:
+            return decode_op_imm(funct3, funct7, ir);
+        case Opcode::OpImm32:
+            return decode_op_imm32(funct3, funct7, ir);
+        case Opcode::Op:
+            return decode_op_standard(funct3, funct7);
+        case Opcode::Op32:
+            return decode_op32_standard(funct3, funct7);
         case Opcode::MiscMem:
             if (funct3 == 0) return OperationId::FENCE;
             if (funct3 == 1) return OperationId::FENCE_I;
             return OperationId::UNKNOWN;
-        case Opcode::System: return decode_system(funct3, funct7, ir);
-        default: return OperationId::UNKNOWN;
+        case Opcode::System:
+            return decode_system(funct3, funct7, ir);
+        default:
+            return OperationId::UNKNOWN;
     }
 }
 
 auto decode_ext_m_op(uint32_t funct3) -> OperationId {
     switch (funct3) {
-        case 0: return OperationId::MUL;
-        case 1: return OperationId::MULH;
-        case 2: return OperationId::MULHSU;
-        case 3: return OperationId::MULHU;
-        case 4: return OperationId::DIV;
-        case 5: return OperationId::DIVU;
-        case 6: return OperationId::REM;
-        case 7: return OperationId::REMU;
-        default: return OperationId::UNKNOWN;
+        case 0:
+            return OperationId::MUL;
+        case 1:
+            return OperationId::MULH;
+        case 2:
+            return OperationId::MULHSU;
+        case 3:
+            return OperationId::MULHU;
+        case 4:
+            return OperationId::DIV;
+        case 5:
+            return OperationId::DIVU;
+        case 6:
+            return OperationId::REM;
+        case 7:
+            return OperationId::REMU;
+        default:
+            return OperationId::UNKNOWN;
     }
 }
 
 auto decode_ext_m_op32(uint32_t funct3) -> OperationId {
     switch (funct3) {
-        case 0: return OperationId::MULW;
-        case 4: return OperationId::DIVW;
-        case 5: return OperationId::DIVUW;
-        case 6: return OperationId::REMW;
-        case 7: return OperationId::REMUW;
-        default: return OperationId::UNKNOWN;
+        case 0:
+            return OperationId::MULW;
+        case 4:
+            return OperationId::DIVW;
+        case 5:
+            return OperationId::DIVUW;
+        case 6:
+            return OperationId::REMW;
+        case 7:
+            return OperationId::REMUW;
+        default:
+            return OperationId::UNKNOWN;
     }
 }
 
@@ -397,35 +819,59 @@ auto decode_ext_m(Opcode op, uint32_t funct3) -> OperationId {
 
 auto decode_ext_a(uint32_t funct7, uint32_t funct3) -> OperationId {
     const uint32_t funct5 = funct7 >> 2;
-    if (funct3 == 2) { // 32-bit AMO*W
+    if (funct3 == 2) {  // 32-bit AMO*W
         switch (funct5) {
-            case 0x02: return OperationId::LR_W;
-            case 0x03: return OperationId::SC_W;
-            case 0x01: return OperationId::AMOSWAP_W;
-            case 0x00: return OperationId::AMOADD_W;
-            case 0x04: return OperationId::AMOXOR_W;
-            case 0x0C: return OperationId::AMOAND_W;
-            case 0x08: return OperationId::AMOOR_W;
-            case 0x10: return OperationId::AMOMIN_W;
-            case 0x14: return OperationId::AMOMAX_W;
-            case 0x18: return OperationId::AMOMINU_W;
-            case 0x1C: return OperationId::AMOMAXU_W;
-            default: return OperationId::UNKNOWN;
+            case 0x02:
+                return OperationId::LR_W;
+            case 0x03:
+                return OperationId::SC_W;
+            case 0x01:
+                return OperationId::AMOSWAP_W;
+            case 0x00:
+                return OperationId::AMOADD_W;
+            case 0x04:
+                return OperationId::AMOXOR_W;
+            case 0x0C:
+                return OperationId::AMOAND_W;
+            case 0x08:
+                return OperationId::AMOOR_W;
+            case 0x10:
+                return OperationId::AMOMIN_W;
+            case 0x14:
+                return OperationId::AMOMAX_W;
+            case 0x18:
+                return OperationId::AMOMINU_W;
+            case 0x1C:
+                return OperationId::AMOMAXU_W;
+            default:
+                return OperationId::UNKNOWN;
         }
-    } else if (funct3 == 3) { // 64-bit AMO*D
+    } else if (funct3 == 3) {  // 64-bit AMO*D
         switch (funct5) {
-            case 0x02: return OperationId::LR_D;
-            case 0x03: return OperationId::SC_D;
-            case 0x01: return OperationId::AMOSWAP_D;
-            case 0x00: return OperationId::AMOADD_D;
-            case 0x04: return OperationId::AMOXOR_D;
-            case 0x0C: return OperationId::AMOAND_D;
-            case 0x08: return OperationId::AMOOR_D;
-            case 0x10: return OperationId::AMOMIN_D;
-            case 0x14: return OperationId::AMOMAX_D;
-            case 0x18: return OperationId::AMOMINU_D;
-            case 0x1C: return OperationId::AMOMAXU_D;
-            default: return OperationId::UNKNOWN;
+            case 0x02:
+                return OperationId::LR_D;
+            case 0x03:
+                return OperationId::SC_D;
+            case 0x01:
+                return OperationId::AMOSWAP_D;
+            case 0x00:
+                return OperationId::AMOADD_D;
+            case 0x04:
+                return OperationId::AMOXOR_D;
+            case 0x0C:
+                return OperationId::AMOAND_D;
+            case 0x08:
+                return OperationId::AMOOR_D;
+            case 0x10:
+                return OperationId::AMOMIN_D;
+            case 0x14:
+                return OperationId::AMOMAX_D;
+            case 0x18:
+                return OperationId::AMOMINU_D;
+            case 0x1C:
+                return OperationId::AMOMAXU_D;
+            default:
+                return OperationId::UNKNOWN;
         }
     }
     return OperationId::UNKNOWN;
@@ -434,20 +880,29 @@ auto decode_ext_a(uint32_t funct7, uint32_t funct3) -> OperationId {
 auto decode_fma(Opcode op, uint32_t funct7) -> OperationId {
     const bool is_double = ((funct7 & 0x03) == 1);
     switch (op) {
-        case Opcode::MAdd: return is_double ? OperationId::FMADD_D : OperationId::FMADD_S;
-        case Opcode::MSub: return is_double ? OperationId::FMSUB_D : OperationId::FMSUB_S;
-        case Opcode::NMSub: return is_double ? OperationId::FNMSUB_D : OperationId::FNMSUB_S;
-        case Opcode::NMAdd: return is_double ? OperationId::FNMADD_D : OperationId::FNMADD_S;
-        default: return OperationId::UNKNOWN;
+        case Opcode::MAdd:
+            return is_double ? OperationId::FMADD_D : OperationId::FMADD_S;
+        case Opcode::MSub:
+            return is_double ? OperationId::FMSUB_D : OperationId::FMSUB_S;
+        case Opcode::NMSub:
+            return is_double ? OperationId::FNMSUB_D : OperationId::FNMSUB_S;
+        case Opcode::NMAdd:
+            return is_double ? OperationId::FNMADD_D : OperationId::FNMADD_S;
+        default:
+            return OperationId::UNKNOWN;
     }
 }
 
 auto decode_op_fp_single_arith(uint32_t funct3, uint32_t f5) -> OperationId {
     switch (f5) {
-        case 0x00: return OperationId::FADD_S;
-        case 0x01: return OperationId::FSUB_S;
-        case 0x02: return OperationId::FMUL_S;
-        case 0x03: return OperationId::FDIV_S;
+        case 0x00:
+            return OperationId::FADD_S;
+        case 0x01:
+            return OperationId::FSUB_S;
+        case 0x02:
+            return OperationId::FMUL_S;
+        case 0x03:
+            return OperationId::FDIV_S;
         case 0x04:
             if (funct3 == 0) return OperationId::FSGNJ_S;
             if (funct3 == 1) return OperationId::FSGNJN_S;
@@ -457,16 +912,20 @@ auto decode_op_fp_single_arith(uint32_t funct3, uint32_t f5) -> OperationId {
             if (funct3 == 0) return OperationId::FMIN_S;
             if (funct3 == 1) return OperationId::FMAX_S;
             break;
-        case 0x0B: return OperationId::FSQRT_S;
-        case 0x1E: return OperationId::FMV_W_X;
-        default: break;
+        case 0x0B:
+            return OperationId::FSQRT_S;
+        case 0x1E:
+            return OperationId::FMV_W_X;
+        default:
+            break;
     }
     return OperationId::UNKNOWN;
 }
 
 auto decode_op_fp_single_fcvt(uint32_t f5, uint32_t rs2) -> OperationId {
     switch (f5) {
-        case 0x08: return (rs2 == 1) ? OperationId::FCVT_S_D : OperationId::UNKNOWN;
+        case 0x08:
+            return (rs2 == 1) ? OperationId::FCVT_S_D : OperationId::UNKNOWN;
         case 0x18:
             if (rs2 == 0) return OperationId::FCVT_W_S;
             if (rs2 == 1) return OperationId::FCVT_WU_S;
@@ -479,7 +938,8 @@ auto decode_op_fp_single_fcvt(uint32_t f5, uint32_t rs2) -> OperationId {
             if (rs2 == 2) return OperationId::FCVT_S_L;
             if (rs2 == 3) return OperationId::FCVT_S_LU;
             break;
-        default: break;
+        default:
+            break;
     }
     return OperationId::UNKNOWN;
 }
@@ -495,7 +955,8 @@ auto decode_op_fp_single_cmp(uint32_t funct3, uint32_t f5) -> OperationId {
             return (funct3 == 0)   ? OperationId::FMV_X_W
                    : (funct3 == 1) ? OperationId::FCLASS_S
                                    : OperationId::UNKNOWN;
-        default: break;
+        default:
+            break;
     }
     return OperationId::UNKNOWN;
 }
@@ -512,10 +973,14 @@ auto decode_op_fp_single(uint32_t funct3, uint32_t f5, uint32_t rs2) -> Operatio
 
 auto decode_op_fp_double_arith(uint32_t funct3, uint32_t f5) -> OperationId {
     switch (f5) {
-        case 0x00: return OperationId::FADD_D;
-        case 0x01: return OperationId::FSUB_D;
-        case 0x02: return OperationId::FMUL_D;
-        case 0x03: return OperationId::FDIV_D;
+        case 0x00:
+            return OperationId::FADD_D;
+        case 0x01:
+            return OperationId::FSUB_D;
+        case 0x02:
+            return OperationId::FMUL_D;
+        case 0x03:
+            return OperationId::FDIV_D;
         case 0x04:
             if (funct3 == 0) return OperationId::FSGNJ_D;
             if (funct3 == 1) return OperationId::FSGNJN_D;
@@ -525,15 +990,18 @@ auto decode_op_fp_double_arith(uint32_t funct3, uint32_t f5) -> OperationId {
             if (funct3 == 0) return OperationId::FMIN_D;
             if (funct3 == 1) return OperationId::FMAX_D;
             break;
-        case 0x0B: return OperationId::FSQRT_D;
-        default: break;
+        case 0x0B:
+            return OperationId::FSQRT_D;
+        default:
+            break;
     }
     return OperationId::UNKNOWN;
 }
 
 auto decode_op_fp_double_fcvt(uint32_t f5, uint32_t rs2) -> OperationId {
     switch (f5) {
-        case 0x08: return (rs2 == 0) ? OperationId::FCVT_D_S : OperationId::UNKNOWN;
+        case 0x08:
+            return (rs2 == 0) ? OperationId::FCVT_D_S : OperationId::UNKNOWN;
         case 0x18:
             if (rs2 == 0) return OperationId::FCVT_W_D;
             if (rs2 == 1) return OperationId::FCVT_WU_D;
@@ -546,7 +1014,8 @@ auto decode_op_fp_double_fcvt(uint32_t f5, uint32_t rs2) -> OperationId {
             if (rs2 == 2) return OperationId::FCVT_D_L;
             if (rs2 == 3) return OperationId::FCVT_D_LU;
             break;
-        default: break;
+        default:
+            break;
     }
     return OperationId::UNKNOWN;
 }
@@ -564,7 +1033,8 @@ auto decode_op_fp_double_cmp(uint32_t funct3, uint32_t f5) -> OperationId {
             break;
         case 0x1E:
             return (funct3 == 0) ? OperationId::FMV_D_X : OperationId::UNKNOWN;
-        default: break;
+        default:
+            break;
     }
     return OperationId::UNKNOWN;
 }
@@ -970,9 +1440,9 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operation
     return OperationId::UNKNOWN;
 }
 
-auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2, Instruction ir) -> OperationId {
+auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2, Instruction ir)
+    -> OperationId {
     switch (op) {
-
         case Opcode::LoadFp: {
             if (funct3 == 2) return OperationId::FLW;
             if (funct3 == 3) return OperationId::FLD;
@@ -1084,22 +1554,21 @@ auto make_r_type(uint32_t opcode, uint32_t funct3, uint32_t funct7, uint32_t rd,
     return opcode | (rd << 7) | (funct3 << 12) | (rs1 << 15) | (rs2 << 20) | (funct7 << 25);
 }
 
-auto make_i_type(uint32_t opcode, uint32_t funct3, uint32_t rd, uint32_t rs1,
-                 uint32_t imm) -> Instruction {
+auto make_i_type(uint32_t opcode, uint32_t funct3, uint32_t rd, uint32_t rs1, uint32_t imm)
+    -> Instruction {
     return opcode | (rd << 7) | (funct3 << 12) | (rs1 << 15) | ((imm & 0xFFF) << 20);
 }
 
-auto make_s_type(uint32_t opcode, uint32_t funct3, uint32_t rs1, uint32_t rs2,
-                 uint32_t imm) -> Instruction {
+auto make_s_type(uint32_t opcode, uint32_t funct3, uint32_t rs1, uint32_t rs2, uint32_t imm)
+    -> Instruction {
     return opcode | ((imm & 0x1F) << 7) | (funct3 << 12) | (rs1 << 15) | (rs2 << 20) |
            (((imm >> 5) & 0x7F) << 25);
 }
 
-auto make_b_type(uint32_t opcode, uint32_t funct3, uint32_t rs1, uint32_t rs2,
-                 uint32_t imm) -> Instruction {
+auto make_b_type(uint32_t opcode, uint32_t funct3, uint32_t rs1, uint32_t rs2, uint32_t imm)
+    -> Instruction {
     return opcode | (((imm >> 11) & 0x1) << 7) | (((imm >> 1) & 0xF) << 8) | (funct3 << 12) |
-           (rs1 << 15) | (rs2 << 20) | (((imm >> 5) & 0x3F) << 25) |
-           (((imm >> 12) & 0x1) << 31);
+           (rs1 << 15) | (rs2 << 20) | (((imm >> 5) & 0x3F) << 25) | (((imm >> 12) & 0x1) << 31);
 }
 
 auto make_u_type(uint32_t opcode, uint32_t rd, uint32_t imm) -> Instruction {
@@ -1111,7 +1580,8 @@ auto make_j_type(uint32_t opcode, uint32_t rd, uint32_t imm) -> Instruction {
            (((imm >> 1) & 0x3FF) << 21) | (((imm >> 20) & 0x1) << 31);
 }
 
-auto decompress_q0(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_p, uint32_t rs2_p) -> Instruction {
+auto decompress_q0(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_p, uint32_t rs2_p)
+    -> Instruction {
     switch (op) {
         case 0: {
             const uint32_t imm = ((ir >> 7) & 0xF) << 6 | ((ir >> 11) & 0x3) << 4 |
@@ -1177,17 +1647,25 @@ auto decompress_q1_op4(Instruction ir, uint32_t rs1_p, uint32_t rs2_p) -> Instru
     const uint32_t bit12 = (ir >> 12) & 0x1;
     if (bit12 == 0) {
         switch (funct_sub) {
-            case 0: return make_r_type(0x33, 0x0, 0x20, rs1_p, rs1_p, rs2_p);
-            case 1: return make_r_type(0x33, 0x4, 0x00, rs1_p, rs1_p, rs2_p);
-            case 2: return make_r_type(0x33, 0x6, 0x00, rs1_p, rs1_p, rs2_p);
-            case 3: return make_r_type(0x33, 0x7, 0x00, rs1_p, rs1_p, rs2_p);
-            default: break;
+            case 0:
+                return make_r_type(0x33, 0x0, 0x20, rs1_p, rs1_p, rs2_p);
+            case 1:
+                return make_r_type(0x33, 0x4, 0x00, rs1_p, rs1_p, rs2_p);
+            case 2:
+                return make_r_type(0x33, 0x6, 0x00, rs1_p, rs1_p, rs2_p);
+            case 3:
+                return make_r_type(0x33, 0x7, 0x00, rs1_p, rs1_p, rs2_p);
+            default:
+                break;
         }
     } else {
         switch (funct_sub) {
-            case 0: return make_r_type(0x3B, 0x0, 0x20, rs1_p, rs1_p, rs2_p);
-            case 1: return make_r_type(0x3B, 0x0, 0x00, rs1_p, rs1_p, rs2_p);
-            default: break;
+            case 0:
+                return make_r_type(0x3B, 0x0, 0x20, rs1_p, rs1_p, rs2_p);
+            case 1:
+                return make_r_type(0x3B, 0x0, 0x00, rs1_p, rs1_p, rs2_p);
+            default:
+                break;
         }
     }
     return 0;
@@ -1198,31 +1676,28 @@ auto decompress_q1_op1(Instruction ir, bool is_rv64, uint32_t rs1_rd) -> Instruc
         const uint32_t imm = ((ir >> 2) & 0x1F) | (((ir >> 12) & 0x1) ? 0xFFFFFFE0 : 0);
         return make_i_type(0x1B, 0x0, rs1_rd, rs1_rd, imm);
     } else {
-        const uint32_t imm =
-            ((ir >> 2) & 0x1) << 5 | ((ir >> 3) & 0x7) << 1 | ((ir >> 6) & 0x1) << 7 |
-            ((ir >> 7) & 0x1) << 6 | ((ir >> 8) & 0x1) << 10 | ((ir >> 9) & 0x3) << 8 |
-            ((ir >> 11) & 0x1) << 4 | (((ir >> 12) & 0x1) ? 0xFFFFF800 : 0);
+        const uint32_t imm = ((ir >> 2) & 0x1) << 5 | ((ir >> 3) & 0x7) << 1 |
+                             ((ir >> 6) & 0x1) << 7 | ((ir >> 7) & 0x1) << 6 |
+                             ((ir >> 8) & 0x1) << 10 | ((ir >> 9) & 0x3) << 8 |
+                             ((ir >> 11) & 0x1) << 4 | (((ir >> 12) & 0x1) ? 0xFFFFF800 : 0);
         return make_j_type(0x6F, 1, imm);
     }
 }
 
 auto decompress_q1_op3(Instruction ir, uint32_t rs1_rd) -> Instruction {
     if (rs1_rd == 2) {
-        const uint32_t imm = ((ir >> 2) & 0x1) << 5 |
-                             ((ir >> 3) & 0x3) << 7 |
-                             ((ir >> 5) & 0x1) << 6 |
-                             ((ir >> 6) & 0x1) << 4 |
+        const uint32_t imm = ((ir >> 2) & 0x1) << 5 | ((ir >> 3) & 0x3) << 7 |
+                             ((ir >> 5) & 0x1) << 6 | ((ir >> 6) & 0x1) << 4 |
                              (((ir >> 12) & 0x1) ? 0xFFFFFE00 : 0);
         return make_i_type(0x13, 0x0, 2, 2, imm);
     } else {
-        const uint32_t imm =
-            (((ir >> 2) & 0x1F) << 12) | (((ir >> 12) & 0x1) ? 0xFFFE0000 : 0);
+        const uint32_t imm = (((ir >> 2) & 0x1F) << 12) | (((ir >> 12) & 0x1) ? 0xFFFE0000 : 0);
         return make_u_type(0x37, rs1_rd, imm);
     }
 }
 
-auto decompress_q1(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_rd,
-                   uint32_t rs1_p, uint32_t rs2_p) -> Instruction {
+auto decompress_q1(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_rd, uint32_t rs1_p,
+                   uint32_t rs2_p) -> Instruction {
     switch (op) {
         case 0: {
             const uint32_t imm = ((ir >> 2) & 0x1F) | (((ir >> 12) & 0x1) ? 0xFFFFFFE0 : 0);
@@ -1239,10 +1714,10 @@ auto decompress_q1(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_rd,
         case 4:
             return decompress_q1_op4(ir, rs1_p, rs2_p);
         case 5: {
-            const uint32_t imm =
-                ((ir >> 2) & 0x1) << 5 | ((ir >> 3) & 0x7) << 1 | ((ir >> 6) & 0x1) << 7 |
-                ((ir >> 7) & 0x1) << 6 | ((ir >> 8) & 0x1) << 10 | ((ir >> 9) & 0x3) << 8 |
-                ((ir >> 11) & 0x1) << 4 | (((ir >> 12) & 0x1) ? 0xFFFFF800 : 0);
+            const uint32_t imm = ((ir >> 2) & 0x1) << 5 | ((ir >> 3) & 0x7) << 1 |
+                                 ((ir >> 6) & 0x1) << 7 | ((ir >> 7) & 0x1) << 6 |
+                                 ((ir >> 8) & 0x1) << 10 | ((ir >> 9) & 0x3) << 8 |
+                                 ((ir >> 11) & 0x1) << 4 | (((ir >> 12) & 0x1) ? 0xFFFFF800 : 0);
             return make_j_type(0x6F, 0, imm);
         }
         case 6:
@@ -1276,7 +1751,8 @@ auto decompress_q2_op4(Instruction ir, uint32_t rs1_rd, uint32_t rs2) -> Instruc
     }
 }
 
-auto decompress_q2(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_rd, uint32_t rs2) -> Instruction {
+auto decompress_q2(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_rd, uint32_t rs2)
+    -> Instruction {
     switch (op) {
         case 0: {
             const uint32_t shamt = ((ir >> 2) & 0x1F) | (((ir >> 12) & 0x1) << 5);
@@ -1328,7 +1804,7 @@ auto decompress_q2(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_rd, u
     return 0;
 }
 
-} // namespace
+}  // namespace
 
 auto decoder(Instruction ir) -> OperationId {
     simrv::pipeline::Decoder dec(ir);
@@ -1339,8 +1815,8 @@ auto decoder(Instruction ir) -> OperationId {
     if (op == Opcode::Amo) {
         return decode_ext_a(funct7, funct3);
     }
-    if (op == Opcode::LoadFp || op == Opcode::StoreFp || op == Opcode::OpFp ||
-        op == Opcode::MAdd || op == Opcode::MSub || op == Opcode::NMSub || op == Opcode::NMAdd) {
+    if (op == Opcode::LoadFp || op == Opcode::StoreFp || op == Opcode::OpFp || op == Opcode::MAdd ||
+        op == Opcode::MSub || op == Opcode::NMSub || op == Opcode::NMAdd) {
         return decode_ext_f_d(op, funct3, funct7, std::to_underlying(dec.rs2()), ir);
     }
     if (op == Opcode::OpV) {
@@ -1383,4 +1859,3 @@ auto decompressInstruction(Instruction ir, bool is_rv64) -> Instruction {
 }
 
 }  // namespace simrv::pipeline
-

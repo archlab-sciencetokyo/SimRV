@@ -3,7 +3,6 @@
  * @brief VirtIO block disk device implementation.
  */
 #include "simrv/device/Disk.hpp"
-#include "simrv/core/Logger.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -12,6 +11,7 @@
 #include <print>
 
 #include "simrv/Define.hpp"
+#include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/device/Virtio.hpp"
 #include "simrv/device/VirtioUtil.hpp"
@@ -31,15 +31,13 @@ void Disk::process_queue(Word q_idx) {
     while (qs.last_avail_idx != avail_idx) { /* header -> sector -> footer */
 
         // (1) header
-        const auto desc_idx_header =
-            simrv::virtio_detail::next_avail_desc_idx(&qs, QueueNum, mmem);
+        const auto desc_idx_header = simrv::virtio_detail::next_avail_desc_idx(&qs, QueueNum, mmem);
         const auto desc_adr_header = simrv::virtio_detail::get_desc_addr(desc_idx_header, &qs);
         auto desc =
             simrv::virtio_detail::read_struct_from_ram<virtio::Descriptor>(desc_adr_header, mmem);
 
-        const auto header =
-            simrv::virtio_detail::read_struct_from_ram<virtio::BlockRequestHeader>(
-                static_cast<Address>(desc.adr), mmem, desc.len);
+        const auto header = simrv::virtio_detail::read_struct_from_ram<virtio::BlockRequestHeader>(
+            static_cast<Address>(desc.adr), mmem, desc.len);
 
         if (desc.len != 16) {
             simrv::log::error("disk_request() desc.len!=16");

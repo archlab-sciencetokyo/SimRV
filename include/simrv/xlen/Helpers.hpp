@@ -53,8 +53,8 @@ inline auto resolve_misa_string(CSRValue misa) -> std::string {
 
     for (int i = 0; i < 26; ++i) {
         char ch = static_cast<char>('a' + i);
-        if (ch == 'i' || ch == 'm' || ch == 'a' || ch == 'f' || ch == 'd' ||
-            ch == 'c' || ch == 'b' || ch == 'v' || ch == 's' || ch == 'u') {
+        if (ch == 'i' || ch == 'm' || ch == 'a' || ch == 'f' || ch == 'd' || ch == 'c' ||
+            ch == 'b' || ch == 'v' || ch == 's' || ch == 'u') {
             continue;
         }
         if ((misa & (static_cast<CSRValue>(1) << i)) != 0) {

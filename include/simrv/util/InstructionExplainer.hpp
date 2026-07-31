@@ -5,9 +5,10 @@
 #pragma once
 
 #include <cstdint>
-#include <utility>
 #include <string>
 #include <string_view>
+#include <utility>
+
 #include "simrv/Define.hpp"
 
 namespace simrv::util {
@@ -38,7 +39,8 @@ auto extract_bitfields(uint32_t raw_inst) -> Bitfields;
 void explain_instruction(uint32_t raw_inst);
 
 /**
- * @brief Get the educational mnemonic and description/behavior of an instruction by its OperationId.
+ * @brief Get the educational mnemonic and description/behavior of an instruction by its
+ * OperationId.
  */
 auto get_operation_details(isa::OperationId op_id) -> std::pair<std::string_view, std::string_view>;
 
@@ -48,8 +50,9 @@ auto get_operation_details(isa::OperationId op_id) -> std::pair<std::string_view
 std::string csr_name(uint32_t csr_addr);
 
 /**
- * @brief Get the ISA extension name (e.g., RV32I, RV32M, Privileged) that an instruction belongs to.
+ * @brief Get the ISA extension name (e.g., RV32I, RV32M, Privileged) that an instruction belongs
+ * to.
  */
 auto get_isa_extension_name(isa::OperationId op_id) -> std::string_view;
 
-} // namespace simrv::util
+}  // namespace simrv::util

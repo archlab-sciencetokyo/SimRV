@@ -15,13 +15,13 @@
 
 namespace simrv::execute {
 
-using simrv::isa::Opcode;
-using simrv::isa::Funct3;
-using simrv::isa::FflagsBit;
-using simrv::isa::RoundingMode;
-using simrv::isa::Funct7Fp;
-using simrv::isa::Funct3Fp;
 using simrv::core::kFflagsMask;
+using simrv::isa::FflagsBit;
+using simrv::isa::Funct3;
+using simrv::isa::Funct3Fp;
+using simrv::isa::Funct7Fp;
+using simrv::isa::Opcode;
+using simrv::isa::RoundingMode;
 
 namespace fp {
 
@@ -605,16 +605,16 @@ auto ExecuteUnit::opFp(Word funct7, Funct3 funct3, Word rs1, Word rs2, Register 
         std::feclearexcept(FE_ALL_EXCEPT);
         const float a = read_f32(freg, rs1);
         const float b = read_f32(freg, rs2);
-        out.fp_wb_data =
-            (enum_mask(funct3) == enum_mask(Funct3Fp::Max)) ? fmax32_riscv(a, b) : fmin32_riscv(a, b);
+        out.fp_wb_data = (enum_mask(funct3) == enum_mask(Funct3Fp::Max)) ? fmax32_riscv(a, b)
+                                                                         : fmin32_riscv(a, b);
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
     } else if (funct7 == enum_mask(Funct7Fp::FminmaxD)) {
         std::feclearexcept(FE_ALL_EXCEPT);
         const double a = read_f64(freg, rs1);
         const double b = read_f64(freg, rs2);
-        out.fp_wb_data =
-            (enum_mask(funct3) == enum_mask(Funct3Fp::Max)) ? fmax64_riscv(a, b) : fmin64_riscv(a, b);
+        out.fp_wb_data = (enum_mask(funct3) == enum_mask(Funct3Fp::Max)) ? fmax64_riscv(a, b)
+                                                                         : fmin64_riscv(a, b);
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
     } else if (funct7 == enum_mask(Funct7Fp::FcvtSD)) {

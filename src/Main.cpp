@@ -35,7 +35,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     bool skip_banner = false;
     for (int i = 1; i < argc; ++i) {
         std::string_view const arg(argv[i]);
-        if (arg == "--cli" || arg == "-a" || arg == "-c" || arg == "--headless" || arg == "--no-tui") {
+        if (arg == "--cli" || arg == "-a" || arg == "-c" || arg == "--headless" ||
+            arg == "--no-tui") {
             is_tui = false;
         } else if (arg == "--tui" || arg == "-u") {
             is_tui = true;
@@ -180,9 +181,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 sim_machine->framebuffer->set_multithreaded(true);
             }
             auto* machine_ptr = sim_machine.get();
-            std::thread sim_thread([machine_ptr]() -> void {
-                machine_ptr->run();
-            });
+            std::thread sim_thread([machine_ptr]() -> void { machine_ptr->run(); });
 
             while (machine_ptr->is_running()) {
                 if (machine_ptr->s_tuimode) {
@@ -191,10 +190,10 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                     }
                     machine_ptr->tui->update();
                     machine_ptr->tui->render(false);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(33)); // ~30 FPS
+                    std::this_thread::sleep_for(std::chrono::milliseconds(33));  // ~30 FPS
                 } else {
                     machine_ptr->sdl_display->update_gui_only();
-                    std::this_thread::sleep_for(std::chrono::milliseconds(16)); // ~60 FPS
+                    std::this_thread::sleep_for(std::chrono::milliseconds(16));  // ~60 FPS
                 }
             }
 

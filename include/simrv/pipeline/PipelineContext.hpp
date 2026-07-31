@@ -16,7 +16,6 @@ struct StageError {
     CSRValue tval = 0;
 };
 
-
 /**
  * @struct PipelineContext
  * @brief Carries decoded instruction state and stage intermediates.

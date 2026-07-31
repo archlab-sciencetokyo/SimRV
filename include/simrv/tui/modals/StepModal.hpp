@@ -9,6 +9,7 @@
 #include <functional>
 #include <string>
 #include <vector>
+
 #include "simrv/tui/TuiModal.hpp"
 
 namespace simrv::tui::modals {
@@ -17,9 +18,9 @@ class StepModal {
    public:
     static void open(ModalType type, std::string& input, uint64_t step_delay_us);
     static auto submit(ModalType type, const std::string& input,
-                        std::atomic<uint64_t>& step_delay_us,
-                        const std::function<void()>& on_speed_changed_cb,
-                        const std::function<void(const std::string&)>& notice_cb = nullptr) -> bool;
+                       std::atomic<uint64_t>& step_delay_us,
+                       const std::function<void()>& on_speed_changed_cb,
+                       const std::function<void(const std::string&)>& notice_cb = nullptr) -> bool;
     static void render(ModalType type, std::vector<std::string>& content_rows,
                        const std::string& input);
 };

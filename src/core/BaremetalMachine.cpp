@@ -3,13 +3,14 @@
  * @brief BaremetalMachine implementation unit.
  */
 #include "simrv/core/BaremetalMachine.hpp"
-#include "simrv/tui/Tui.hpp"
-#include "simrv/core/Logger.hpp"
-#include "simrv/device/Uart.hpp"
-#include "simrv/xlen/Types.hpp"
-#include <limits>
 
 #include <chrono>
+#include <limits>
+
+#include "simrv/core/Logger.hpp"
+#include "simrv/device/Uart.hpp"
+#include "simrv/tui/Tui.hpp"
+#include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
 
@@ -63,8 +64,7 @@ void BaremetalMachine::run() {
             // Ebreak pause hook
             const bool hit_ebreak =
                 (cpu.pipeline_context.opcode == Opcode::System) &&
-                (cpu.pipeline_context.funct12 ==
-                    static_cast<Word>(Funct12Priv::Ebreak));
+                (cpu.pipeline_context.funct12 == static_cast<Word>(Funct12Priv::Ebreak));
             if (simrv::compiler::unlikely(hit_ebreak)) {
                 tui->pause_loop();
             }
@@ -73,7 +73,8 @@ void BaremetalMachine::run() {
                 finalize_cycle_tohost();
             }
 
-            if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() && cpu.e_icount >= s_fincnt)) {
+            if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() &&
+                                          cpu.e_icount >= s_fincnt)) {
                 simrv::log::info("finished by -e option");
                 is_running_ = false;
             }
@@ -84,7 +85,8 @@ void BaremetalMachine::run() {
 
                 auto now = std::chrono::high_resolution_clock::now();
                 uint64_t elapsed_ns = static_cast<uint64_t>(
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(now - last_mtime_update).count());
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(now - last_mtime_update)
+                        .count());
                 last_mtime_update = now;
                 cpu.clint_mmio.mtime += elapsed_ns / 100;
                 cpu.evaluate_timer_interrupt();
@@ -94,7 +96,8 @@ void BaremetalMachine::run() {
                         tui->render();
                     }
                     static uint64_t last_tui_check_cycles = 0;
-                    if (cpu.e_icount - last_tui_check_cycles >= 1000 || tui->step_delay_us_.load(std::memory_order_relaxed) > 0) {
+                    if (cpu.e_icount - last_tui_check_cycles >= 1000 ||
+                        tui->step_delay_us_.load(std::memory_order_relaxed) > 0) {
                         last_tui_check_cycles = cpu.e_icount;
                         static auto last_tui_update = std::chrono::steady_clock::now();
                         auto tui_now = std::chrono::steady_clock::now();
@@ -122,7 +125,8 @@ void BaremetalMachine::run() {
                 finalize_cycle_tohost();
             }
 
-            if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() && cpu.e_icount >= s_fincnt)) {
+            if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() &&
+                                          cpu.e_icount >= s_fincnt)) {
                 simrv::log::info("finished by -e option");
                 is_running_ = false;
             }
@@ -134,7 +138,8 @@ void BaremetalMachine::run() {
                 // Advance CLINT mtime from wall clock
                 auto now = std::chrono::high_resolution_clock::now();
                 uint64_t elapsed_ns = static_cast<uint64_t>(
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(now - last_mtime_update).count());
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(now - last_mtime_update)
+                        .count());
                 last_mtime_update = now;
                 cpu.clint_mmio.mtime += elapsed_ns / 100;
                 cpu.evaluate_timer_interrupt();
@@ -160,4 +165,4 @@ void BaremetalMachine::run() {
     }
 }
 
-} // namespace simrv::core
+}  // namespace simrv::core

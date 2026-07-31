@@ -3,6 +3,7 @@
  * @brief Implements RightPane widget rendering.
  */
 #include "simrv/tui/panels/RightPane.hpp"
+
 #include "simrv/tui/TuiTheme.hpp"
 
 namespace simrv::tui {

@@ -3,7 +3,9 @@
  * @brief Memory-mapped Audio device model.
  */
 #include "simrv/device/Audio.hpp"
+
 #include <algorithm>
+
 #include "simrv/core/Machine.hpp"
 #include "simrv/util/SdlAudio.hpp"
 
@@ -11,7 +13,7 @@ namespace simrv::device {
 
 Audio::Audio(simrv::core::Machine& machine) : machine_(machine) {
     for (int i = 0; i < 8; ++i) {
-        volume_[i]  = 127;  // Max volume
+        volume_[i] = 127;   // Max volume
         panning_[i] = 128;  // Center panning
     }
 }
@@ -20,13 +22,13 @@ Audio::~Audio() = default;
 
 auto Audio::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
     const Address offset = req.address - kBaseAddress;
-    const bool is_write  = (req.opcode == memory::TlOpcodeA::PutFullData ||
+    const bool is_write = (req.opcode == memory::TlOpcodeA::PutFullData ||
                            req.opcode == memory::TlOpcodeA::PutPartialData);
 
     resp.opcode = is_write ? memory::TlOpcodeD::AccessAck : memory::TlOpcodeD::AccessAckData;
-    resp.size   = req.size;
+    resp.size = req.size;
     resp.source = req.source;
-    resp.error  = false;
+    resp.error = false;
 
     if (is_write) {
         // ---- SFX registers (0x00 – 0xFF) ----
@@ -55,9 +57,12 @@ auto Audio::handle_request(const memory::TlChannelA& req, memory::TlChannelD& re
                     break;
                 case 0x18: {  // Command
                     Word cmd = static_cast<Word>(req.data);
-                    if (cmd == 1) play_channel(current_channel_);
-                    else if (cmd == 2) stop_channel(current_channel_);
-                    else if (cmd == 3) update_channel_params(current_channel_);
+                    if (cmd == 1)
+                        play_channel(current_channel_);
+                    else if (cmd == 2)
+                        stop_channel(current_channel_);
+                    else if (cmd == 3)
+                        update_channel_params(current_channel_);
                 } break;
                 default:
                     break;
@@ -74,8 +79,10 @@ auto Audio::handle_request(const memory::TlChannelA& req, memory::TlChannelD& re
                     break;
                 case 0x108: {  // Command
                     Word cmd = static_cast<Word>(req.data);
-                    if (cmd == 1) play_music();
-                    else if (cmd == 2) stop_music();
+                    if (cmd == 1)
+                        play_music();
+                    else if (cmd == 2)
+                        stop_music();
                     else if (cmd == 3) {
                         if (machine_.sdl_audio) {
                             machine_.sdl_audio->update_music_volume(music_volume_);
@@ -96,23 +103,47 @@ auto Audio::handle_request(const memory::TlChannelA& req, memory::TlChannelD& re
         // ---- SFX reads ----
         if (offset < 0x100u) {
             switch (offset) {
-                case 0x00: resp.data = static_cast<Word>(current_channel_); break;
-                case 0x04: resp.data = sample_address_[static_cast<size_t>(current_channel_)]; break;
-                case 0x08: resp.data = sample_length_[static_cast<size_t>(current_channel_)]; break;
-                case 0x0C: resp.data = sample_rate_[static_cast<size_t>(current_channel_)]; break;
-                case 0x10: resp.data = volume_[static_cast<size_t>(current_channel_)]; break;
-                case 0x14: resp.data = panning_[static_cast<size_t>(current_channel_)]; break;
-                default:   resp.data = 0; break;
+                case 0x00:
+                    resp.data = static_cast<Word>(current_channel_);
+                    break;
+                case 0x04:
+                    resp.data = sample_address_[static_cast<size_t>(current_channel_)];
+                    break;
+                case 0x08:
+                    resp.data = sample_length_[static_cast<size_t>(current_channel_)];
+                    break;
+                case 0x0C:
+                    resp.data = sample_rate_[static_cast<size_t>(current_channel_)];
+                    break;
+                case 0x10:
+                    resp.data = volume_[static_cast<size_t>(current_channel_)];
+                    break;
+                case 0x14:
+                    resp.data = panning_[static_cast<size_t>(current_channel_)];
+                    break;
+                default:
+                    resp.data = 0;
+                    break;
             }
         }
         // ---- Music reads ----
         else if (offset < 0x120u) {
             switch (offset) {
-                case 0x100: resp.data = static_cast<Word>(music_address_); break;
-                case 0x104: resp.data = music_length_; break;
-                case 0x10C: resp.data = music_volume_; break;
-                case 0x110: resp.data = music_looping_; break;
-                default:    resp.data = 0; break;
+                case 0x100:
+                    resp.data = static_cast<Word>(music_address_);
+                    break;
+                case 0x104:
+                    resp.data = music_length_;
+                    break;
+                case 0x10C:
+                    resp.data = music_volume_;
+                    break;
+                case 0x110:
+                    resp.data = music_looping_;
+                    break;
+                default:
+                    resp.data = 0;
+                    break;
             }
         } else {
             resp.data = 0;
@@ -144,7 +175,8 @@ void Audio::update_channel_params(int chan) {
 
 void Audio::play_music() {
     if (machine_.sdl_audio) {
-        machine_.sdl_audio->play_music(music_address_, music_length_, music_volume_, music_looping_);
+        machine_.sdl_audio->play_music(music_address_, music_length_, music_volume_,
+                                       music_looping_);
     }
 }
 

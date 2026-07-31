@@ -5,11 +5,12 @@
 #include "simrv/debug/SymbolTable.hpp"
 
 #include <elf.h>
+
 #include <array>
+#include <format>
 #include <fstream>
 #include <utility>
 #include <vector>
-#include <format>
 
 #include "simrv/core/Logger.hpp"
 
@@ -26,8 +27,8 @@ auto SymbolTable::load_from_elf(const std::string& elf_path) -> bool {
         if (!test_fs.is_open()) return false;
         std::array<char, 4> magic{};
         if (!test_fs.read(magic.data(), 4)) return false;
-        return (magic[0] == ELFMAG0 && magic[1] == ELFMAG1 &&
-                magic[2] == ELFMAG2 && magic[3] == ELFMAG3);
+        return (magic[0] == ELFMAG0 && magic[1] == ELFMAG1 && magic[2] == ELFMAG2 &&
+                magic[3] == ELFMAG3);
     };
 
     if (!is_valid_elf(path_to_load)) {
@@ -61,8 +62,8 @@ auto SymbolTable::load_from_elf(const std::string& elf_path) -> bool {
     }
 
     // Check magic
-    if (ident[EI_MAG0] != ELFMAG0 || ident[EI_MAG1] != ELFMAG1 ||
-        ident[EI_MAG2] != ELFMAG2 || ident[EI_MAG3] != ELFMAG3) {
+    if (ident[EI_MAG0] != ELFMAG0 || ident[EI_MAG1] != ELFMAG1 || ident[EI_MAG2] != ELFMAG2 ||
+        ident[EI_MAG3] != ELFMAG3) {
         return false;
     }
 
@@ -73,15 +74,18 @@ auto SymbolTable::load_from_elf(const std::string& elf_path) -> bool {
 
     fs.seekg(0, std::ios::beg);
 
-
     if (elf_class == ELFCLASS32) {
         Elf32_Ehdr ehdr;
-        if (!fs.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr))) return false; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        if (!fs.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr)))
+            return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
         entry_point_ = static_cast<Address>(ehdr.e_entry);
 
         std::vector<Elf32_Shdr> shdrs(ehdr.e_shnum);
         fs.seekg(ehdr.e_shoff, std::ios::beg);
-        if (!fs.read(reinterpret_cast<char*>(shdrs.data()), static_cast<std::streamsize>(static_cast<size_t>(ehdr.e_shnum) * sizeof(Elf32_Shdr)))) return false; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        if (!fs.read(reinterpret_cast<char*>(shdrs.data()),
+                     static_cast<std::streamsize>(static_cast<size_t>(ehdr.e_shnum) *
+                                                  sizeof(Elf32_Shdr))))
+            return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
         int symtab_idx = -1;
         int strtab_idx = -1;
@@ -95,12 +99,15 @@ auto SymbolTable::load_from_elf(const std::string& elf_path) -> bool {
         if (symtab_idx != -1 && strtab_idx != -1) {
             std::vector<char> strtab(shdrs[strtab_idx].sh_size);
             fs.seekg(shdrs[strtab_idx].sh_offset, std::ios::beg);
-            if (!fs.read(strtab.data(), static_cast<std::streamsize>(shdrs[strtab_idx].sh_size))) return false;
+            if (!fs.read(strtab.data(), static_cast<std::streamsize>(shdrs[strtab_idx].sh_size)))
+                return false;
 
             size_t num_syms = shdrs[symtab_idx].sh_size / sizeof(Elf32_Sym);
             std::vector<Elf32_Sym> syms(num_syms);
             fs.seekg(shdrs[symtab_idx].sh_offset, std::ios::beg);
-            if (!fs.read(reinterpret_cast<char*>(syms.data()), static_cast<std::streamsize>(shdrs[symtab_idx].sh_size))) return false; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+            if (!fs.read(reinterpret_cast<char*>(syms.data()),
+                         static_cast<std::streamsize>(shdrs[symtab_idx].sh_size)))
+                return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
             for (const auto& sym : syms) {
                 const auto type = ELF32_ST_TYPE(sym.st_info);
@@ -113,14 +120,18 @@ auto SymbolTable::load_from_elf(const std::string& elf_path) -> bool {
                 }
             }
         }
-    } else { // ELFCLASS64
+    } else {  // ELFCLASS64
         Elf64_Ehdr ehdr;
-        if (!fs.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr))) return false; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        if (!fs.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr)))
+            return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
         entry_point_ = static_cast<Address>(ehdr.e_entry);
 
         std::vector<Elf64_Shdr> shdrs(ehdr.e_shnum);
         fs.seekg(static_cast<std::streamoff>(ehdr.e_shoff), std::ios::beg);
-        if (!fs.read(reinterpret_cast<char*>(shdrs.data()), static_cast<std::streamsize>(static_cast<size_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr)))) return false; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        if (!fs.read(reinterpret_cast<char*>(shdrs.data()),
+                     static_cast<std::streamsize>(static_cast<size_t>(ehdr.e_shnum) *
+                                                  sizeof(Elf64_Shdr))))
+            return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
         int symtab_idx = -1;
         int strtab_idx = -1;
@@ -134,12 +145,15 @@ auto SymbolTable::load_from_elf(const std::string& elf_path) -> bool {
         if (symtab_idx != -1 && strtab_idx != -1) {
             std::vector<char> strtab(shdrs[strtab_idx].sh_size);
             fs.seekg(static_cast<std::streamoff>(shdrs[strtab_idx].sh_offset), std::ios::beg);
-            if (!fs.read(strtab.data(), static_cast<std::streamsize>(shdrs[strtab_idx].sh_size))) return false;
+            if (!fs.read(strtab.data(), static_cast<std::streamsize>(shdrs[strtab_idx].sh_size)))
+                return false;
 
             size_t num_syms = shdrs[symtab_idx].sh_size / sizeof(Elf64_Sym);
             std::vector<Elf64_Sym> syms(num_syms);
             fs.seekg(static_cast<std::streamoff>(shdrs[symtab_idx].sh_offset), std::ios::beg);
-            if (!fs.read(reinterpret_cast<char*>(syms.data()), static_cast<std::streamsize>(shdrs[symtab_idx].sh_size))) return false; // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+            if (!fs.read(reinterpret_cast<char*>(syms.data()),
+                         static_cast<std::streamsize>(shdrs[symtab_idx].sh_size)))
+                return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
             for (const auto& sym : syms) {
                 const auto type = ELF64_ST_TYPE(sym.st_info);
@@ -178,7 +192,7 @@ auto SymbolTable::lookup(Address addr) const -> std::string {
     Address offset = addr - sym_addr;
     if (offset == 0) {
         return name;
-    } else if (offset < 0x2000) { // Limit offset to prevent matching distant symbols
+    } else if (offset < 0x2000) {  // Limit offset to prevent matching distant symbols
         return std::format("{} + 0x{:x}", name, offset);
     }
     return "";

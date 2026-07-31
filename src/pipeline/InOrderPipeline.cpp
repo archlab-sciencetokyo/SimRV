@@ -36,10 +36,10 @@ auto is_div_rem_op(isa::OperationId op_id) -> bool {
     }
 }
 
-} // namespace
+}  // namespace
 
 InOrderPipeline::InOrderPipeline(const CpuConfig& cfg) : config(cfg) {
-    branch_history_table_.fill(1); // Default: Weakly Not Taken
+    branch_history_table_.fill(1);  // Default: Weakly Not Taken
     btb_.resize(config.btb_entries);
 }
 
@@ -98,7 +98,7 @@ auto InOrderPipeline::check_stall_mem() const -> bool {
 
 auto InOrderPipeline::check_stall_ex() const -> bool {
     if (!e_reg_.valid) return false;
-    if (e_reg_.op_id == OperationId::DIV || e_reg_.op_id == OperationId::DIVU || 
+    if (e_reg_.op_id == OperationId::DIV || e_reg_.op_id == OperationId::DIVU ||
         e_reg_.op_id == OperationId::REM || e_reg_.op_id == OperationId::REMU ||
         e_reg_.op_id == OperationId::DIVW || e_reg_.op_id == OperationId::DIVUW ||
         e_reg_.op_id == OperationId::REMW || e_reg_.op_id == OperationId::REMUW) {
@@ -107,7 +107,8 @@ auto InOrderPipeline::check_stall_ex() const -> bool {
     return false;
 }
 
-auto InOrderPipeline::check_hazard_with_stage(const PipelineReg& stage_reg, bool reads_rs1, bool reads_rs2) const -> bool {
+auto InOrderPipeline::check_hazard_with_stage(const PipelineReg& stage_reg, bool reads_rs1,
+                                              bool reads_rs2) const -> bool {
     if (!stage_reg.valid || !stage_reg.writes_reg || stage_reg.rd == static_cast<RegId>(0)) {
         return false;
     }
@@ -138,12 +139,12 @@ auto InOrderPipeline::check_stall_id() const -> bool {
 }
 
 auto InOrderPipeline::check_stall_if() const -> bool {
-    return f_reg_.valid && 
-           ((f_reg_.tlb_miss && tlb_stall_remaining_ > 0) || 
-            (f_reg_.icache_miss && icache_stall_remaining_ > 0));
+    return f_reg_.valid && ((f_reg_.tlb_miss && tlb_stall_remaining_ > 0) ||
+                            (f_reg_.icache_miss && icache_stall_remaining_ > 0));
 }
 
-auto InOrderPipeline::resolve_jump_ex(BtbEntry& btb_entry, Register pc, isa::Opcode opcode, Register target_pc) -> uint32_t {
+auto InOrderPipeline::resolve_jump_ex(BtbEntry& btb_entry, Register pc, isa::Opcode opcode,
+                                      Register target_pc) -> uint32_t {
     const bool btb_hit = (config.btb_entries > 0) && btb_entry.valid && (btb_entry.pc == pc);
     if (opcode == isa::Opcode::Jalr) {
         if (btb_hit && btb_entry.target == target_pc) {
@@ -168,10 +169,11 @@ auto InOrderPipeline::resolve_jump_ex(BtbEntry& btb_entry, Register pc, isa::Opc
     }
 }
 
-auto InOrderPipeline::resolve_branch_ex(BtbEntry& btb_entry, Register pc, Register target_pc, bool branched) -> uint32_t {
+auto InOrderPipeline::resolve_branch_ex(BtbEntry& btb_entry, Register pc, Register target_pc,
+                                        bool branched) -> uint32_t {
     bool predicted_taken = false;
     uint32_t bht_idx = 0;
-    
+
     switch (config.bp_type) {
         case BranchPredictorType::StaticNotTaken:
             predicted_taken = false;
@@ -229,7 +231,8 @@ auto InOrderPipeline::resolve_branch_ex(BtbEntry& btb_entry, Register pc, Regist
     }
 
     if (config.bp_type == BranchPredictorType::Gshare) {
-        gshare_history_ = ((gshare_history_ << 1) | (branched ? 1 : 0)) & ((1u << config.global_history_bits) - 1);
+        gshare_history_ = ((gshare_history_ << 1) | (branched ? 1 : 0)) &
+                          ((1u << config.global_history_bits) - 1);
     }
 
     // Update BTB
@@ -249,7 +252,7 @@ auto InOrderPipeline::resolve_branches_ex() -> bool {
         return false;
     }
     e_reg_.control_resolved = true;
-    
+
     BtbEntry dummy{};
     BtbEntry* entry_ptr = &dummy;
     if (config.btb_entries > 0 && !btb_.empty()) {
@@ -261,7 +264,8 @@ auto InOrderPipeline::resolve_branches_ex() -> bool {
     if (e_reg_.is_jump) {
         control_bubbles = resolve_jump_ex(*entry_ptr, e_reg_.pc, e_reg_.opcode, e_reg_.target_pc);
     } else if (e_reg_.is_branch) {
-        control_bubbles = resolve_branch_ex(*entry_ptr, e_reg_.pc, e_reg_.target_pc, e_reg_.branched);
+        control_bubbles =
+            resolve_branch_ex(*entry_ptr, e_reg_.pc, e_reg_.target_pc, e_reg_.branched);
     }
 
     if (control_bubbles > 0) {
@@ -273,7 +277,8 @@ auto InOrderPipeline::resolve_branches_ex() -> bool {
     return false;
 }
 
-void InOrderPipeline::update_stall_stats(bool stall_mem, bool stall_ex, bool stall_id, bool stall_if) {
+void InOrderPipeline::update_stall_stats(bool stall_mem, bool stall_ex, bool stall_id,
+                                         bool stall_if) {
     if (stall_mem) {
         dcache_stalls_++;
         stall_cycles_++;
@@ -306,7 +311,8 @@ void InOrderPipeline::decrement_latencies() {
     }
 }
 
-void InOrderPipeline::stage_register_transfers(bool MEM_stalled, bool EX_stalled, bool ID_stalled, bool IF_stalled) {
+void InOrderPipeline::stage_register_transfers(bool MEM_stalled, bool EX_stalled, bool ID_stalled,
+                                               bool IF_stalled) {
     if (!MEM_stalled) {
         w_reg_ = m_reg_;
     } else {
@@ -392,13 +398,16 @@ void InOrderPipeline::tick_pipeline() {
     record_cycle_snapshot();
 }
 
-auto InOrderPipeline::step_instruction(Register pc, isa::Opcode opcode, RegId rd, RegId rs1, RegId rs2,
-                                     isa::OperationId op_id, bool branched, bool is_branch, bool is_jump,
-                                     bool icache_miss, bool dcache_miss, bool tlb_miss, Register target_pc) -> uint32_t {
+auto InOrderPipeline::step_instruction(Register pc, isa::Opcode opcode, RegId rd, RegId rs1,
+                                       RegId rs2, isa::OperationId op_id, bool branched,
+                                       bool is_branch, bool is_jump, bool icache_miss,
+                                       bool dcache_miss, bool tlb_miss, Register target_pc)
+    -> uint32_t {
     uint32_t cycles_spent = 0;
 
     while (true) {
-        const bool IF_stalled = check_stall_mem() || check_stall_ex() || check_stall_id() || check_stall_if();
+        const bool IF_stalled =
+            check_stall_mem() || check_stall_ex() || check_stall_id() || check_stall_if();
 
         if (!IF_stalled && control_bubble_remaining_ == 0) {
             if (f_reg_.valid) {
@@ -420,10 +429,8 @@ auto InOrderPipeline::step_instruction(Register pc, isa::Opcode opcode, RegId rd
     f_reg_.rs1 = rs1;
     f_reg_.rs2 = rs2;
     f_reg_.op_id = op_id;
-    f_reg_.writes_reg = (rd != static_cast<RegId>(0)) && 
-                        (opcode != isa::Opcode::Branch) && 
-                        (opcode != isa::Opcode::Store) && 
-                        (opcode != isa::Opcode::StoreFp);
+    f_reg_.writes_reg = (rd != static_cast<RegId>(0)) && (opcode != isa::Opcode::Branch) &&
+                        (opcode != isa::Opcode::Store) && (opcode != isa::Opcode::StoreFp);
     f_reg_.is_load = (opcode == isa::Opcode::Load) || (opcode == isa::Opcode::LoadFp);
     f_reg_.tlb_miss = tlb_miss;
     f_reg_.icache_miss = icache_miss;
@@ -492,17 +499,15 @@ void InOrderPipeline::record_cycle_snapshot() {
 }
 
 auto InOrderPipeline::get_stats() const -> PipelineStats {
-    return PipelineStats{
-        .cycle_count = cycle_count_,
-        .stall_cycles = stall_cycles_,
-        .bubble_cycles = bubble_cycles_,
-        .icache_stalls = icache_stalls_,
-        .dcache_stalls = dcache_stalls_,
-        .tlb_stalls = tlb_stalls_,
-        .structural_stalls = structural_stalls_,
-        .data_hazard_stalls = data_hazard_stalls_,
-        .control_hazard_bubbles = control_hazard_bubbles_
-    };
+    return PipelineStats{.cycle_count = cycle_count_,
+                         .stall_cycles = stall_cycles_,
+                         .bubble_cycles = bubble_cycles_,
+                         .icache_stalls = icache_stalls_,
+                         .dcache_stalls = dcache_stalls_,
+                         .tlb_stalls = tlb_stalls_,
+                         .structural_stalls = structural_stalls_,
+                         .data_hazard_stalls = data_hazard_stalls_,
+                         .control_hazard_bubbles = control_hazard_bubbles_};
 }
 
 auto InOrderPipeline::get_cycle_history() const -> std::vector<PipelineCycleSnapshot> {
@@ -581,4 +586,4 @@ void InOrderPipeline::restore_state(const PipelineSimState& state) {
     gshare_history_ = state.gshare_history;
 }
 
-} // namespace simrv::pipeline
+}  // namespace simrv::pipeline

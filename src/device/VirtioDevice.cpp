@@ -49,7 +49,7 @@ auto VirtioDevice::mmio_read(Address offset) const -> Word {
             return get_vendor_id();
         case virtio::MmioOffset::DeviceFeatures:
             if (DeviceFeaturesSel == 1) {
-                return 1; // VIRTIO_F_VERSION_1 (bit 32)
+                return 1;  // VIRTIO_F_VERSION_1 (bit 32)
             }
             return get_device_features();
         case virtio::MmioOffset::QueueNumMax:

@@ -115,14 +115,18 @@ void TuiModal::move_bp_cursor(int delta) {
     modals::BreakpointModal::move_cursor(bp_cursor_, delta, machine_);
 }
 
-auto TuiModal::remove_bp_at_cursor(const std::function<void(const std::string&)>& set_status_override_cb) -> bool {
+auto TuiModal::remove_bp_at_cursor(
+    const std::function<void(const std::string&)>& set_status_override_cb) -> bool {
     std::string removed_msg;
-    bool removed = modals::BreakpointModal::remove_at_cursor(bp_cursor_, machine_, [&](const std::string& msg) {
-        removed_msg = msg;
-        if (set_status_override_cb) set_status_override_cb(msg);
-    });
+    bool removed = modals::BreakpointModal::remove_at_cursor(bp_cursor_, machine_,
+                                                             [&](const std::string& msg) {
+                                                                 removed_msg = msg;
+                                                                 if (set_status_override_cb)
+                                                                     set_status_override_cb(msg);
+                                                             });
     if (removed && !removed_msg.empty()) {
-        std::string title = (removed_msg.find("watchpoint") != std::string::npos || removed_msg.find("Watchpoint") != std::string::npos)
+        std::string title = (removed_msg.find("watchpoint") != std::string::npos ||
+                             removed_msg.find("Watchpoint") != std::string::npos)
                                 ? "WATCHPOINT REMOVED"
                                 : "BREAKPOINT REMOVED";
         open_notice(title, removed_msg, false);
@@ -136,56 +140,50 @@ void TuiModal::close() {
 }
 
 auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
-                    const std::function<void(TuiRegPage)>& set_reg_page_cb,
-                    const std::function<void(const std::string&)>& set_status_override_cb,
-                    const std::function<void()>& on_speed_changed_cb) -> bool {
+                      const std::function<void(TuiRegPage)>& set_reg_page_cb,
+                      const std::function<void(const std::string&)>& set_status_override_cb,
+                      const std::function<void()>& on_speed_changed_cb) -> bool {
     bool result = false;
     ModalType current_modal = active_modal_;
-    auto notice_cb = [this](const std::string& msg) {
-        open_notice("MODAL NOTICE", msg, false);
-    };
+    auto notice_cb = [this](const std::string& msg) { open_notice("MODAL NOTICE", msg, false); };
     switch (current_modal) {
         case ModalType::SetBreakpoint:
-        case ModalType::SetWatchpoint:
-            {
-                std::string err_msg;
-                auto err_cb = [&](const std::string& msg) {
-                    err_msg = msg;
-                };
-                result = modals::BreakpointModal::submit(current_modal, input_, machine_, err_cb);
-                if (result) {
-                    std::string target_type = (current_modal == ModalType::SetBreakpoint) ? "PC Breakpoint" : "Watchpoint";
-                    open_notice("ENTRY CREATED", std::format("Created {} for {}", target_type, input_), false);
-                } else if (!err_msg.empty()) {
-                    std::string msg_text = std::format("{}\n\nPlease enter a valid hex PC (0x...) or symbol name.", err_msg);
-                    open_notice("INVALID TARGET", msg_text, true);
-                    return false;
-                }
+        case ModalType::SetWatchpoint: {
+            std::string err_msg;
+            auto err_cb = [&](const std::string& msg) { err_msg = msg; };
+            result = modals::BreakpointModal::submit(current_modal, input_, machine_, err_cb);
+            if (result) {
+                std::string target_type =
+                    (current_modal == ModalType::SetBreakpoint) ? "PC Breakpoint" : "Watchpoint";
+                open_notice("ENTRY CREATED", std::format("Created {} for {}", target_type, input_),
+                            false);
+            } else if (!err_msg.empty()) {
+                std::string msg_text = std::format(
+                    "{}\n\nPlease enter a valid hex PC (0x...) or symbol name.", err_msg);
+                open_notice("INVALID TARGET", msg_text, true);
+                return false;
             }
-            break;
+        } break;
         case ModalType::SetSpeed:
-            result = modals::StepModal::submit(current_modal, input_,
-                                               step_delay_us, on_speed_changed_cb, notice_cb);
+            result = modals::StepModal::submit(current_modal, input_, step_delay_us,
+                                               on_speed_changed_cb, notice_cb);
             break;
-        case ModalType::InspectAddress:
-            {
-                std::string addr_msg;
-                auto addr_cb = [&](const std::string& msg) {
-                    addr_msg = msg;
-                };
-                result = modals::AddressModal::submit(input_, machine_, left_pane, addr_cb);
-                if (result && set_reg_page_cb) {
-                    set_reg_page_cb(TuiRegPage::STACK);
-                }
-                if (result) {
-                    open_notice("INSPECT MEMORY", addr_msg.empty() ? "Inspecting memory address." : addr_msg, false);
-                    return true;
-                } else if (!addr_msg.empty()) {
-                    open_notice("INVALID ADDRESS", addr_msg, true);
-                    return false;
-                }
+        case ModalType::InspectAddress: {
+            std::string addr_msg;
+            auto addr_cb = [&](const std::string& msg) { addr_msg = msg; };
+            result = modals::AddressModal::submit(input_, machine_, left_pane, addr_cb);
+            if (result && set_reg_page_cb) {
+                set_reg_page_cb(TuiRegPage::STACK);
             }
-            break;
+            if (result) {
+                open_notice("INSPECT MEMORY",
+                            addr_msg.empty() ? "Inspecting memory address." : addr_msg, false);
+                return true;
+            } else if (!addr_msg.empty()) {
+                open_notice("INVALID ADDRESS", addr_msg, true);
+                return false;
+            }
+        } break;
         case ModalType::LoadBinary:
         case ModalType::LoadDiskImage:
             result = modals::LoadModal::submit(current_modal, input_, load_appmode_, machine_,
@@ -197,28 +195,33 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
                 return false;
             }
             if (result) {
-                open_notice("PROGRAM LOADED", "Loaded program image. Resetting simulator system...", false);
+                open_notice("PROGRAM LOADED", "Loaded program image. Resetting simulator system...",
+                            false);
                 return true;
             }
             break;
         case ModalType::Settings:
             result = modals::SettingsModal::submit(settings_draft_, machine_, set_reg_page_cb);
             if (result) {
-                open_notice("SETTINGS SAVED", "Simulator settings saved and applied successfully.", false);
+                open_notice("SETTINGS SAVED", "Simulator settings saved and applied successfully.",
+                            false);
                 return true;
             }
             break;
         case ModalType::ConfigureMisa:
             result = modals::MisaModal::submit(misa_draft_, machine_, set_status_override_cb);
             if (result) {
-                open_notice("MISA CONFIGURATION SAVED", "CPU MISA extensions updated. Resetting simulator system...", false);
+                open_notice("MISA CONFIGURATION SAVED",
+                            "CPU MISA extensions updated. Resetting simulator system...", false);
                 return true;
             }
             break;
         case ModalType::ConfigureSystem:
             result = modals::SystemConfigModal::submit(sysconfig_draft_, machine_);
             if (result) {
-                open_notice("CA CONFIGURATION SAVED", "Cycle-Accurate system configuration saved and applied successfully.", false);
+                open_notice("CA CONFIGURATION SAVED",
+                            "Cycle-Accurate system configuration saved and applied successfully.",
+                            false);
                 return true;
             }
             break;
@@ -246,10 +249,10 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
     if (active_modal_ == ModalType::None || lines.empty()) return;
 
     bool is_help = (active_modal_ == ModalType::Help);
-    bool is_wide_modal = (is_help || active_modal_ == ModalType::Settings ||
-                          active_modal_ == ModalType::ConfigureMisa ||
-                          active_modal_ == ModalType::ConfigureSystem ||
-                          active_modal_ == ModalType::Notice);
+    bool is_wide_modal =
+        (is_help || active_modal_ == ModalType::Settings ||
+         active_modal_ == ModalType::ConfigureMisa || active_modal_ == ModalType::ConfigureSystem ||
+         active_modal_ == ModalType::Notice);
     int box_w = is_wide_modal ? std::min(78, term_width - 4) : std::min(58, term_width - 4);
     if (box_w < 35) return;
 
@@ -303,8 +306,8 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             break;
         case ModalType::Settings:
             title = " SIMULATOR SETTINGS ";
-            modals::SettingsModal::render(content_rows, add_row, settings_draft_,
-                                          settings_cursor_, machine_);
+            modals::SettingsModal::render(content_rows, add_row, settings_draft_, settings_cursor_,
+                                          machine_);
             break;
         case ModalType::ConfigureMisa:
             title = " CONFIGURE CPU MISA & EXTENSIONS ";
@@ -335,7 +338,10 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                 }
             }
             add_row("");
-            add_row(std::format("{}Press \033[1m[Enter]\033[0m, \033[1m[Space]\033[0m or \033[1m[Esc]\033[0m to dismiss\033[0m", kThemeMuted));
+            add_row(
+                std::format("{}Press \033[1m[Enter]\033[0m, \033[1m[Space]\033[0m or "
+                            "\033[1m[Esc]\033[0m to dismiss\033[0m",
+                            kThemeMuted));
             break;
         default:
             break;
@@ -355,17 +361,17 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
 
     // Render Box Top Border
     if (start_y < static_cast<int>(lines.size())) {
-        std::string title_fmt = std::format("\033[1m{}{}\033[0m{}", kThemeMint, title, kThemeBorder);
+        std::string title_fmt =
+            std::format("\033[1m{}{}\033[0m{}", kThemeMint, title, kThemeBorder);
         int title_len = get_display_width(title);
         int dash_len = inner_w - title_len;
         if (dash_len < 0) dash_len = 0;
         int left_dash = dash_len / 2;
         int right_dash = dash_len - left_dash;
 
-        std::string top_border =
-            std::format("{}{}\033[0m{}{}{}{}\033[0m", kThemeBorder,
-                        make_repeated_string("─", left_dash + 1), title_fmt, kThemeBorder,
-                        make_repeated_string("─", right_dash + 1), "\033[0m");
+        std::string top_border = std::format(
+            "{}{}\033[0m{}{}{}{}\033[0m", kThemeBorder, make_repeated_string("─", left_dash + 1),
+            title_fmt, kThemeBorder, make_repeated_string("─", right_dash + 1), "\033[0m");
 
         lines.at(static_cast<std::size_t>(start_y)) =
             overlay_string(lines.at(static_cast<std::size_t>(start_y)), top_border, start_x, box_w);
@@ -387,9 +393,8 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             }
         }
 
-        std::string row_str =
-            std::format("{}{}\033[0m{}{}{}{}\033[0m", kThemeBorder, "│", m_bg,
-                        format_to_width(content, inner_w), kThemeBorder, "│");
+        std::string row_str = std::format("{}{}\033[0m{}{}{}{}\033[0m", kThemeBorder, "│", m_bg,
+                                          format_to_width(content, inner_w), kThemeBorder, "│");
 
         lines.at(static_cast<std::size_t>(target_y)) =
             overlay_string(lines.at(static_cast<std::size_t>(target_y)), row_str, start_x, box_w);
@@ -398,8 +403,8 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
     // Render Box Bottom Border
     int bot_y = start_y + box_h - 1;
     if (bot_y < max_y && bot_y < static_cast<int>(lines.size())) {
-        std::string bot_border = std::format("{}{}{}\033[0m", kThemeBorder,
-                                            make_repeated_string("─", box_w), "\033[0m");
+        std::string bot_border =
+            std::format("{}{}{}\033[0m", kThemeBorder, make_repeated_string("─", box_w), "\033[0m");
         lines.at(static_cast<std::size_t>(bot_y)) =
             overlay_string(lines.at(static_cast<std::size_t>(bot_y)), bot_border, start_x, box_w);
     }

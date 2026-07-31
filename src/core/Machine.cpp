@@ -3,12 +3,6 @@
  * @brief Machine top-level orchestration and cycle-loop implementation.
  */
 #include "simrv/core/Machine.hpp"
-#include "simrv/tui/Tui.hpp"
-#include "simrv/core/Logger.hpp"
-#include "simrv/device/Power.hpp"
-#include "simrv/device/Uart.hpp"
-#include "simrv/device/InputDevice.hpp"
-#include "simrv/memory/MemoryUtil.hpp"
 
 #include <cstdint>
 #include <cstdio>
@@ -16,19 +10,22 @@
 #include <cstring>
 #include <print>
 
+#include "simrv/core/Logger.hpp"
+#include "simrv/device/InputDevice.hpp"
+#include "simrv/device/Power.hpp"
+#include "simrv/device/Uart.hpp"
+#include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::memory {
-bool g_appmode = true; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-Address g_dram_base = kDramBaseAddress; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-}
+bool g_appmode = true;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+Address g_dram_base =
+    kDramBaseAddress;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+}  // namespace simrv::memory
 
 namespace simrv::core {
-Machine::Machine() : memory_(*this) {
-    cpu.machine_ = this;
-}
-
-
+Machine::Machine() : memory_(*this) { cpu.machine_ = this; }
 
 void Machine::finalize_cycle_tohost() {
     if (tohost == 0) {
@@ -57,7 +54,7 @@ void Machine::finalize_cycle_tohost() {
     if (dev == 0 && cmd == 0) {
         const auto old_cmd = static_cast<uint16_t>(tohost >> 16);
         const auto old_payload = static_cast<uint16_t>(tohost & 0xffffULL);
-        if (old_cmd == 1) { // CMD_PRINT_CHAR
+        if (old_cmd == 1) {  // CMD_PRINT_CHAR
             const char ch = static_cast<char>(old_payload & 0xff);
             if (s_tuimode && tui) {
                 tui->handle_char_write(ch);
@@ -67,8 +64,9 @@ void Machine::finalize_cycle_tohost() {
             }
             tohost = 0;
             return;
-        } else if (old_cmd == 2) { // CMD_POWER_OFF
-            simrv::log::info("[Power] Compatibility: guest requested poweroff via tohost (old protocol).");
+        } else if (old_cmd == 2) {  // CMD_POWER_OFF
+            simrv::log::info(
+                "[Power] Compatibility: guest requested poweroff via tohost (old protocol).");
             exit_code = 0;
             is_running_ = false;
             tohost = 0;
@@ -87,7 +85,7 @@ void Machine::finalize_cycle_tohost() {
                 std::memcpy(&arg1, mmem + masked_payload + 16, 8);
                 std::memcpy(&arg2, mmem + masked_payload + 24, 8);
 
-                if (syscall_num == 64) { // SYS_write
+                if (syscall_num == 64) {  // SYS_write
                     const Address buf_masked = arg1 & simrv::memory::kDramMask;
                     for (uint64_t i = 0; i < arg2; ++i) {
                         char ch = static_cast<char>(mmem[buf_masked + i]);
@@ -102,13 +100,14 @@ void Machine::finalize_cycle_tohost() {
                     }
 
                     // Write success response (bytes written) to fromhost
-                    const Address fromhost_addr = (s_isatest_tohost != 0 ? s_isatest_tohost : 0x80001000) + 8;
+                    const Address fromhost_addr =
+                        (s_isatest_tohost != 0 ? s_isatest_tohost : 0x80001000) + 8;
                     const Address fromhost_masked = fromhost_addr & simrv::memory::kDramMask;
                     uint64_t resp = arg2;
                     std::memcpy(mmem + fromhost_masked, &resp, 8);
                     tohost = 0;
                     return;
-                } else if (syscall_num == 93) { // SYS_exit
+                } else if (syscall_num == 93) {  // SYS_exit
                     const int code = static_cast<int>(arg0);
                     if (s_appmode) {
                         if (code == 0) {
@@ -167,11 +166,7 @@ void Machine::finalize_cycle_tohost() {
         tohost = 0;
         return;
     }
-
-
 }
-
-
 
 Machine::~Machine() = default;
 

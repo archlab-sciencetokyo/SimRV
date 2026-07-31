@@ -3,7 +3,6 @@
  * @brief Memory-mapped Framebuffer device with SDL3 graphics and TUI fallbacks.
  */
 #include "simrv/device/Framebuffer.hpp"
-#include "simrv/device/InputDevice.hpp"
 
 #include <cstring>
 #include <format>
@@ -11,6 +10,7 @@
 
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/device/InputDevice.hpp"
 
 namespace simrv::device {
 
@@ -32,37 +32,34 @@ auto Framebuffer::handle_request(const memory::TlChannelA& req, memory::TlChanne
         if (offset < 0x1000) {
             // Control registers (0x30000000 - 0x30000FFF)
             switch (static_cast<FramebufferRegister>(offset)) {
-                case FramebufferRegister::Width:
-                {
+                case FramebufferRegister::Width: {
                     const int new_w = static_cast<int>(req.data);
                     if (new_w != width_ && new_w > 0 && new_w <= 2048) {
                         width_ = new_w;
                         recreate_display_resources_ = true;
                     }
                 } break;
-                case FramebufferRegister::Height:
-                {
+                case FramebufferRegister::Height: {
                     const int new_h = static_cast<int>(req.data);
                     if (new_h != height_ && new_h > 0 && new_h <= 2048) {
                         height_ = new_h;
                         recreate_display_resources_ = true;
                     }
                 } break;
-                case FramebufferRegister::Format:
-                {
+                case FramebufferRegister::Format: {
                     const int new_fmt = static_cast<int>(req.data);
                     if (new_fmt != format_ && (new_fmt == 0 || new_fmt == 1)) {
                         format_ = new_fmt;
                         recreate_display_resources_ = true;
                     }
                 } break;
-                case FramebufferRegister::Flush:
-                {
+                case FramebufferRegister::Flush: {
                     const Word val = req.data;
                     if (val == 1) {
                         dirty_ = true;
                         tui_dirty_ = true;
-                        if (machine_.sdl_display && !multithreaded_.load(std::memory_order_relaxed)) {
+                        if (machine_.sdl_display &&
+                            !multithreaded_.load(std::memory_order_relaxed)) {
                             machine_.sdl_display->update_gui_only();
                         }
                     }
@@ -115,8 +112,6 @@ auto Framebuffer::handle_request(const memory::TlChannelA& req, memory::TlChanne
     return true;
 }
 
-
-
 namespace {
 
 inline void append_uint8(std::string& s, uint8_t val) {
@@ -142,12 +137,13 @@ inline void append_color_escape(std::string& s, bool is_fg, uint8_t r, uint8_t g
     s.push_back('m');
 }
 
-} // namespace
+}  // namespace
 
 auto Framebuffer::get_tui_rows(int term_w, int term_h) -> std::vector<std::string> {
     if (term_w <= 0 || term_h <= 0) return {};
 
-    if (!tui_dirty_.load(std::memory_order_relaxed) && term_w == last_tui_w_ && term_h == last_tui_h_ && !cached_tui_rows_.empty()) {
+    if (!tui_dirty_.load(std::memory_order_relaxed) && term_w == last_tui_w_ &&
+        term_h == last_tui_h_ && !cached_tui_rows_.empty()) {
         return cached_tui_rows_;
     }
 
@@ -193,8 +189,7 @@ auto Framebuffer::get_tui_rows(int term_w, int term_h) -> std::vector<std::strin
                     b_bot = (pixel & 0x1F) * 255 / 31;
                 }
 
-                if (std::cmp_not_equal(r_top, prev_fg_r) ||
-                    std::cmp_not_equal(g_top, prev_fg_g) ||
+                if (std::cmp_not_equal(r_top, prev_fg_r) || std::cmp_not_equal(g_top, prev_fg_g) ||
                     std::cmp_not_equal(b_top, prev_fg_b)) {
                     append_color_escape(line, true, r_top, g_top, b_top);
                     prev_fg_r = r_top;
@@ -202,8 +197,7 @@ auto Framebuffer::get_tui_rows(int term_w, int term_h) -> std::vector<std::strin
                     prev_fg_b = b_top;
                 }
 
-                if (std::cmp_not_equal(r_bot, prev_bg_r) ||
-                    std::cmp_not_equal(g_bot, prev_bg_g) ||
+                if (std::cmp_not_equal(r_bot, prev_bg_r) || std::cmp_not_equal(g_bot, prev_bg_g) ||
                     std::cmp_not_equal(b_bot, prev_bg_b)) {
                     append_color_escape(line, false, r_bot, g_bot, b_bot);
                     prev_bg_r = r_bot;
@@ -248,8 +242,7 @@ auto Framebuffer::get_tui_rows(int term_w, int term_h) -> std::vector<std::strin
                     b_bot = fb_mem_[offset_bot];
                 }
 
-                if (std::cmp_not_equal(r_top, prev_fg_r) ||
-                    std::cmp_not_equal(g_top, prev_fg_g) ||
+                if (std::cmp_not_equal(r_top, prev_fg_r) || std::cmp_not_equal(g_top, prev_fg_g) ||
                     std::cmp_not_equal(b_top, prev_fg_b)) {
                     append_color_escape(line, true, r_top, g_top, b_top);
                     prev_fg_r = r_top;
@@ -257,8 +250,7 @@ auto Framebuffer::get_tui_rows(int term_w, int term_h) -> std::vector<std::strin
                     prev_fg_b = b_top;
                 }
 
-                if (std::cmp_not_equal(r_bot, prev_bg_r) ||
-                    std::cmp_not_equal(g_bot, prev_bg_g) ||
+                if (std::cmp_not_equal(r_bot, prev_bg_r) || std::cmp_not_equal(g_bot, prev_bg_g) ||
                     std::cmp_not_equal(b_bot, prev_bg_b)) {
                     append_color_escape(line, false, r_bot, g_bot, b_bot);
                     prev_bg_r = r_bot;
@@ -304,8 +296,7 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
         g = (g >> 2) << 2;
         b = (b >> 2) << 2;
         uint32_t key = ((static_cast<uint32_t>(r) >> 2) << 12) |
-                       ((static_cast<uint32_t>(g) >> 2) << 6) |
-                        (static_cast<uint32_t>(b) >> 2);
+                       ((static_cast<uint32_t>(g) >> 2) << 6) | (static_cast<uint32_t>(b) >> 2);
         if (lookup[key] != -1) {
             return lookup[key];
         }
@@ -328,7 +319,7 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
             int dr = static_cast<int>(r) - palette[i].r;
             int dg = static_cast<int>(g) - palette[i].g;
             int db = static_cast<int>(b) - palette[i].b;
-            int dist = dr*dr + dg*dg + db*db;
+            int dist = dr * dr + dg * dg + db * db;
             if (dist < min_dist) {
                 min_dist = dist;
                 best_idx = static_cast<int>(i);
@@ -347,7 +338,8 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
             uint8_t r = 0, g = 0, b = 0;
 
             if (format_ == 0) {
-                const size_t offset = (static_cast<size_t>(src_y) * sz_w + static_cast<size_t>(src_x)) * 2;
+                const size_t offset =
+                    (static_cast<size_t>(src_y) * sz_w + static_cast<size_t>(src_x)) * 2;
                 if (offset + 1 < fb_mem_.size()) {
                     uint16_t pixel = fb_mem_[offset] | (fb_mem_[offset + 1] << 8);
                     r = ((pixel >> 11) & 0x1F) * 255 / 31;
@@ -355,7 +347,8 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
                     b = (pixel & 0x1F) * 255 / 31;
                 }
             } else {
-                const size_t offset = (static_cast<size_t>(src_y) * sz_w + static_cast<size_t>(src_x)) * 4;
+                const size_t offset =
+                    (static_cast<size_t>(src_y) * sz_w + static_cast<size_t>(src_x)) * 4;
                 if (offset + 2 < fb_mem_.size()) {
                     r = fb_mem_[offset + 2];
                     g = fb_mem_[offset + 1];
@@ -414,7 +407,8 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
                 for (int dy = 0; dy < 6; ++dy) {
                     int y = y_band + dy;
                     if (y >= target_h) break;
-                    if (pixel_indices[static_cast<size_t>(y * target_w + x)] == static_cast<int>(c)) {
+                    if (pixel_indices[static_cast<size_t>(y * target_w + x)] ==
+                        static_cast<int>(c)) {
                         sixel_val |= (1 << dy);
                     }
                 }
@@ -440,7 +434,7 @@ auto Framebuffer::get_active_bounds(int& w, int& h) -> bool {
     int max_x = 0;
     int max_y = 0;
     bool found_x = false;
-    
+
     size_t expected_size = static_cast<size_t>(width_ * height_) * (format_ == 0 ? 2 : 4);
     if (fb_mem_.size() < expected_size) {
         w = width_;

@@ -10,8 +10,8 @@
 
 #include <thread>
 
-#include "simrv/core/Machine.hpp"
 #include "simrv/core/Logger.hpp"
+#include "simrv/core/Machine.hpp"
 #include "simrv/tui/Tui.hpp"
 
 namespace simrv::device {
@@ -31,9 +31,7 @@ void update_uart_irq(simrv::core::Machine& machine, bool uart_rx_ready, Word uar
 
 Uart::Uart(simrv::core::Machine& machine) : machine_(machine) {}
 
-Uart::~Uart() {
-    stop_input_thread();
-}
+Uart::~Uart() { stop_input_thread(); }
 
 void Uart::start_input_thread() {
     if (machine_.s_tuimode) return;  // TUI manages its own input
@@ -121,20 +119,19 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
             case simrv::mmio::kUartRegIerDlm:
                 resp.data = dlab_enabled ? uart_dlm_ : uart_ier_;
                 break;
-            case simrv::mmio::kUartRegIirFcr:
-                {
-                    const bool rx_ready = machine_.s_tuimode ? rx_ready_.load(std::memory_order_acquire) : uart_rx_ready_;
-                    if (rx_ready) {
-                        resp.data = static_cast<Word>(0x04U);
-                    } else if (tx_irq_pending_ && ((uart_ier_ & static_cast<Word>(0x2U)) != 0)) {
-                        resp.data = static_cast<Word>(0x02U);
-                        tx_irq_pending_ = false;
-                        update_uart_irq(machine_, rx_ready, uart_ier_, tx_irq_pending_);
-                    } else {
-                        resp.data = static_cast<Word>(0x01U);
-                    }
+            case simrv::mmio::kUartRegIirFcr: {
+                const bool rx_ready =
+                    machine_.s_tuimode ? rx_ready_.load(std::memory_order_acquire) : uart_rx_ready_;
+                if (rx_ready) {
+                    resp.data = static_cast<Word>(0x04U);
+                } else if (tx_irq_pending_ && ((uart_ier_ & static_cast<Word>(0x2U)) != 0)) {
+                    resp.data = static_cast<Word>(0x02U);
+                    tx_irq_pending_ = false;
+                    update_uart_irq(machine_, rx_ready, uart_ier_, tx_irq_pending_);
+                } else {
+                    resp.data = static_cast<Word>(0x01U);
                 }
-                break;
+            } break;
             case simrv::mmio::kUartRegLcr:
                 resp.data = uart_lcr_;
                 break;
@@ -145,7 +142,8 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                 if (machine_.s_tuimode) {
                     resp.data =
                         simrv::mmio::kUartLsrThreTemt |
-                        (rx_ready_.load(std::memory_order_acquire) ? simrv::mmio::kUartLsrDataReady : static_cast<Word>(0));
+                        (rx_ready_.load(std::memory_order_acquire) ? simrv::mmio::kUartLsrDataReady
+                                                                   : static_cast<Word>(0));
                 } else {
                     std::scoped_lock lock(rx_mutex_);
                     if (!uart_rx_ready_ && !rx_fifo_.empty()) {
@@ -180,7 +178,9 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                         (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
                     }
                     tx_irq_pending_ = true;
-                    const bool rx_ready = machine_.s_tuimode ? rx_ready_.load(std::memory_order_acquire) : uart_rx_ready_;
+                    const bool rx_ready = machine_.s_tuimode
+                                              ? rx_ready_.load(std::memory_order_acquire)
+                                              : uart_rx_ready_;
                     update_uart_irq(machine_, rx_ready, uart_ier_, tx_irq_pending_);
                 }
                 break;
@@ -192,7 +192,9 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                     if ((uart_ier_ & static_cast<Word>(0x2U)) != 0) {
                         tx_irq_pending_ = true;
                     }
-                    const bool rx_ready = machine_.s_tuimode ? rx_ready_.load(std::memory_order_acquire) : uart_rx_ready_;
+                    const bool rx_ready = machine_.s_tuimode
+                                              ? rx_ready_.load(std::memory_order_acquire)
+                                              : uart_rx_ready_;
                     update_uart_irq(machine_, rx_ready, uart_ier_, tx_irq_pending_);
                 }
                 break;

@@ -4,8 +4,9 @@
  */
 #pragma once
 
-#include <queue>
 #include <mutex>
+#include <queue>
+
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -57,4 +58,4 @@ class InputDevice : public memory::TileLinkNode {
     std::mutex mouse_mutex_;
 };
 
-} // namespace simrv::device
+}  // namespace simrv::device

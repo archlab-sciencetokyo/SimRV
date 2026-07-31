@@ -44,11 +44,7 @@ using CSRValue = Word;
 using CSRAddress = Address;
 using ImmValue = SignedWord;
 using TrapCause = Word;
-enum class PrivilegeLevel : uint8_t {
-    User = 0,
-    Supervisor = 1,
-    Machine = 3
-};
+enum class PrivilegeLevel : uint8_t { User = 0, Supervisor = 1, Machine = 3 };
 
 constexpr auto operator<(PrivilegeLevel lhs, PrivilegeLevel rhs) -> bool {
     return std::to_underlying(lhs) < std::to_underlying(rhs);

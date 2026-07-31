@@ -121,7 +121,7 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
                 (cpu_.state().mstatus & enum_mask(MstatusBit::Vs)) == 0) {
                 return std::unexpected(ExceptionCode::IllegalInstruction);
             }
-            rcsr = 32; // VLEN=256 bits -> 32 bytes
+            rcsr = 32;  // VLEN=256 bits -> 32 bytes
             break;
 
         case csr_addr(Csr::Sie):
@@ -151,7 +151,7 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
         case csr_addr(Csr::Satp):
             rcsr = cpu_.state().satp;
             break;
- 
+
         case csr_addr(Csr::Medeleg):
             rcsr = cpu_.state().medeleg;
             break;
@@ -243,8 +243,8 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
     return rcsr;
 }
 
-auto CsrFile::write(CSRAddress addr,
-                    CSRValue wdata) -> std::expected<void, ExceptionCode> {  // NOLINT(bugprone-easily-swappable-parameters)
+auto CsrFile::write(CSRAddress addr, CSRValue wdata)
+    -> std::expected<void, ExceptionCode> {  // NOLINT(bugprone-easily-swappable-parameters)
     CSRValue const mask1 =
         (static_cast<CSRValue>(1) << (enum_mask(ExceptionCode::StorePageFault) + 1)) - 1;
     CSRValue const mask2 =
@@ -269,7 +269,8 @@ auto CsrFile::write(CSRAddress addr,
 
         case csr_addr(Csr::Mcycle):
             if (cpu_.state().regs.xlen == 32) {
-                cpu_.clint_mmio.mcycle = (cpu_.clint_mmio.mcycle & 0xFFFFFFFF00000000ULL) | static_cast<uint32_t>(wdata);
+                cpu_.clint_mmio.mcycle =
+                    (cpu_.clint_mmio.mcycle & 0xFFFFFFFF00000000ULL) | static_cast<uint32_t>(wdata);
             } else {
                 cpu_.clint_mmio.mcycle = wdata;
             }
@@ -278,11 +279,13 @@ auto CsrFile::write(CSRAddress addr,
             if (cpu_.state().regs.xlen == 64) {
                 return std::unexpected(ExceptionCode::IllegalInstruction);
             }
-            cpu_.clint_mmio.mcycle = (cpu_.clint_mmio.mcycle & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(wdata) << 32);
+            cpu_.clint_mmio.mcycle = (cpu_.clint_mmio.mcycle & 0x00000000FFFFFFFFULL) |
+                                     (static_cast<uint64_t>(wdata) << 32);
             break;
         case csr_addr(Csr::Minstret):
             if (cpu_.state().regs.xlen == 32) {
-                cpu_.e_icount = (cpu_.e_icount & 0xFFFFFFFF00000000ULL) | static_cast<uint32_t>(wdata);
+                cpu_.e_icount =
+                    (cpu_.e_icount & 0xFFFFFFFF00000000ULL) | static_cast<uint32_t>(wdata);
             } else {
                 cpu_.e_icount = wdata;
             }
@@ -291,7 +294,8 @@ auto CsrFile::write(CSRAddress addr,
             if (cpu_.state().regs.xlen == 64) {
                 return std::unexpected(ExceptionCode::IllegalInstruction);
             }
-            cpu_.e_icount = (cpu_.e_icount & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(wdata) << 32);
+            cpu_.e_icount =
+                (cpu_.e_icount & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(wdata) << 32);
             break;
 
         case csr_addr(Csr::Fflags):

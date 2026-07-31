@@ -116,7 +116,8 @@ class BaseCache {
         }
         return 0;
     }
-    [[nodiscard]] auto get_line_data(uint32_t set_idx, uint32_t way_idx) const -> const std::array<Byte, kLineBytes>* {
+    [[nodiscard]] auto get_line_data(uint32_t set_idx, uint32_t way_idx) const
+        -> const std::array<Byte, kLineBytes>* {
         if (set_idx < kNumSets && way_idx < kWays) {
             return &sets_.at(set_idx).at(way_idx).data;
         }

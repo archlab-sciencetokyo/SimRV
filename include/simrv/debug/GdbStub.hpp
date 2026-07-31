@@ -111,8 +111,7 @@ class GdbStub {
      * @return true if execution should resume (continue or detach), false to
      *         keep processing commands.
      */
-    [[nodiscard]] auto handle_packet(const std::string& pkt,
-                                     simrv::core::Machine& machine) -> bool;
+    [[nodiscard]] auto handle_packet(const std::string& pkt, simrv::core::Machine& machine) -> bool;
 
     void handle_query(const std::string& pkt, simrv::core::Machine& machine);
 
@@ -150,8 +149,8 @@ class GdbStub {
     // Number of registers in the GDB RISC-V target description:
     // x0–x31 (32), pc (1), f0–f31 (32) each 64-bit
     // For RV32: x-regs and pc are 32-bit, f-regs are 64-bit.
-    static constexpr std::size_t kNumIntRegs = 33;   // x0..x31 + pc
-    static constexpr std::size_t kNumFpRegs  = 32;   // f0..f31
+    static constexpr std::size_t kNumIntRegs = 33;  // x0..x31 + pc
+    static constexpr std::size_t kNumFpRegs = 32;   // f0..f31
 };
 
 }  // namespace simrv::debug

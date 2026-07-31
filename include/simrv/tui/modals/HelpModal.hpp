@@ -13,8 +13,8 @@ namespace simrv::tui::modals {
 class HelpModal {
    public:
     static void render(std::vector<std::string>& content_rows,
-                       const std::function<void(const std::string&)>& add_row_cb,
-                       int term_height, int box_w);
+                       const std::function<void(const std::string&)>& add_row_cb, int term_height,
+                       int box_w);
 };
 
 }  // namespace simrv::tui::modals

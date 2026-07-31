@@ -18,7 +18,7 @@ class Sbi {
 
     auto handle_ecall(TrapCause cause) -> bool;
 
-    private:
+   private:
     // Modular sub-handlers for extensions
     auto handle_base(Word func_id) -> bool;
     auto handle_time(Word func_id) -> bool;

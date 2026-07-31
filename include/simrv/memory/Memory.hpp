@@ -5,7 +5,6 @@
 #pragma once
 
 #include "simrv/XLen.hpp"
-
 #include "simrv/memory/MemoryUtil.hpp"
 
 namespace simrv::memory {

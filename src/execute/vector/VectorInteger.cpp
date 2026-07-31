@@ -1,5 +1,5 @@
-#include "simrv/execute/ExecuteUnit.hpp"
 #include "VectorHelpers.hpp"
+#include "simrv/execute/ExecuteUnit.hpp"
 
 namespace simrv::execute {
 
@@ -126,13 +126,13 @@ T clmul_high(T val2, T val1) {
 template <typename T_dest, typename T_src>
 void execute_vsext(core::CPU& cpu, RegId rd, RegId rs2, bool vm, uint32_t vl) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    
+
     // Copy source elements first to handle potential register overlap
     std::vector<T_src> src_vals(vl);
     for (uint32_t i = 0; i < vl; i++) {
         src_vals[i] = vector::get_group_element<T_src>(cpu.state().regs, rs2, i);
     }
-    
+
     for (uint32_t i = 0; i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T_dest extended = static_cast<T_dest>(src_vals[i]);
@@ -357,7 +357,8 @@ void execute_vwmulsu_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm,
 }
 
 template <typename T_dest, typename T_src_signed, typename T_src_unsigned>
-void execute_vwmulsu_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl) {
+void execute_vwmulsu_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm,
+                        uint32_t vl) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
     T_src_unsigned val1 = static_cast<T_src_unsigned>(rs1_val);
     for (uint32_t i = 0; i < vl; i++) {
@@ -421,7 +422,8 @@ void execute_vwmul_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, boo
 }
 
 template <typename T>
-void perform_mac_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, bool overwrite_acc, bool subtract) {
+void perform_mac_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl,
+                    bool overwrite_acc, bool subtract) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
 
     for (uint32_t i = 0; i < vl; i++) {
@@ -443,7 +445,8 @@ void perform_mac_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uin
 }
 
 template <typename T>
-void perform_mac_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl, bool overwrite_acc, bool subtract) {
+void perform_mac_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl,
+                    bool overwrite_acc, bool subtract) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
     T val1 = static_cast<T>(rs1_val);
 
@@ -465,7 +468,8 @@ void perform_mac_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool 
 }
 
 template <typename T_dest, typename T_src1, typename T_src2>
-void perform_widening_mac_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, bool subtract = false) {
+void perform_widening_mac_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl,
+                             bool subtract = false) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
 
     for (uint32_t i = 0; i < vl; i++) {
@@ -481,7 +485,8 @@ void perform_widening_mac_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, boo
 }
 
 template <typename T_dest, typename T_src1, typename T_src2>
-void perform_widening_mac_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl, bool subtract = false) {
+void perform_widening_mac_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm,
+                             uint32_t vl, bool subtract = false) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
     auto val1 = static_cast<T_src1>(rs1_val);
 
@@ -595,7 +600,8 @@ void execute_viota_m(core::CPU& cpu, RegId rd, RegId rs2, bool vm, uint32_t vl) 
     }
 }
 
-void execute_mask_logical(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, uint32_t vl, isa::OperationId op_id) {
+void execute_mask_logical(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, uint32_t vl,
+                          isa::OperationId op_id) {
     const auto& src1_reg = cpu.state().regs.read_vector(rs1);
     const auto& src2_reg = cpu.state().regs.read_vector(rs2);
     auto& dest_reg = cpu.state().regs.read_vector(rd);
@@ -604,20 +610,36 @@ void execute_mask_logical(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, uint32
         bool bit2 = vector::get_mask_bit(src2_reg, i);
         bool res = false;
         switch (op_id) {
-            case isa::OperationId::VMAND_MM:   res = bit2 & bit1; break;
-            case isa::OperationId::VMNAND_MM:  res = !(bit2 & bit1); break;
-            case isa::OperationId::VMANDN_MM:  res = bit2 & !bit1; break;
-            case isa::OperationId::VMXOR_MM:   res = bit2 ^ bit1; break;
-            case isa::OperationId::VMOR_MM:    res = bit2 | bit1; break;
-            case isa::OperationId::VMNOR_MM:   res = !(bit2 | bit1); break;
-            case isa::OperationId::VMORN_MM:   res = bit2 | !bit1; break;
-            case isa::OperationId::VMXNOR_MM:  res = !(bit2 ^ bit1); break;
-            default: break;
+            case isa::OperationId::VMAND_MM:
+                res = bit2 & bit1;
+                break;
+            case isa::OperationId::VMNAND_MM:
+                res = !(bit2 & bit1);
+                break;
+            case isa::OperationId::VMANDN_MM:
+                res = bit2 & !bit1;
+                break;
+            case isa::OperationId::VMXOR_MM:
+                res = bit2 ^ bit1;
+                break;
+            case isa::OperationId::VMOR_MM:
+                res = bit2 | bit1;
+                break;
+            case isa::OperationId::VMNOR_MM:
+                res = !(bit2 | bit1);
+                break;
+            case isa::OperationId::VMORN_MM:
+                res = bit2 | !bit1;
+                break;
+            case isa::OperationId::VMXNOR_MM:
+                res = !(bit2 ^ bit1);
+                break;
+            default:
+                break;
         }
         vector::set_mask_bit(dest_reg, i, res);
     }
 }
-
 
 // Unary bitmanip implementations
 template <typename T>
@@ -829,10 +851,10 @@ void execute_vwsll_vi(core::CPU& cpu, RegId rd, int32_t simm5, RegId rs2, bool v
     }
 }
 
-} // namespace
+}  // namespace
 
-void ExecuteUnit::execute_vector_integer(core::CPU& cpu, isa::OperationId op_id,
-                                         RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew,
+void ExecuteUnit::execute_vector_integer(core::CPU& cpu, isa::OperationId op_id, RegId rd,
+                                         RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew,
                                          Register rs1_val, int32_t simm5) {
     // Arithmetic lambda operations
     auto add_f = []<typename T>(T a, T b) -> T { return a + b; };
@@ -848,9 +870,15 @@ void ExecuteUnit::execute_vector_integer(core::CPU& cpu, isa::OperationId op_id,
     auto and_f = []<typename T>(T a, T b) -> T { return a & b; };
     auto or_f = []<typename T>(T a, T b) -> T { return a | b; };
     auto xor_f = []<typename T>(T a, T b) -> T { return a ^ b; };
-    auto sll_f = []<typename T>(T a, T b) -> T { return static_cast<T>(a << (b & (sizeof(T) * 8 - 1))); };
-    auto srl_f = []<typename T>(T a, T b) -> T { return static_cast<T>(a >> (b & (sizeof(T) * 8 - 1))); };
-    auto sra_f = []<typename T>(T a, T b) -> T { return static_cast<T>(static_cast<std::make_signed_t<T>>(a) >> (b & (sizeof(T) * 8 - 1))); };
+    auto sll_f = []<typename T>(T a, T b) -> T {
+        return static_cast<T>(a << (b & (sizeof(T) * 8 - 1)));
+    };
+    auto srl_f = []<typename T>(T a, T b) -> T {
+        return static_cast<T>(a >> (b & (sizeof(T) * 8 - 1)));
+    };
+    auto sra_f = []<typename T>(T a, T b) -> T {
+        return static_cast<T>(static_cast<std::make_signed_t<T>>(a) >> (b & (sizeof(T) * 8 - 1)));
+    };
     auto minu_f = []<typename T>(T a, T b) -> T { return std::min(a, b); };
     auto min_f = []<typename T>(T a, T b) -> T {
         using S = std::make_signed_t<T>;
@@ -864,11 +892,17 @@ void ExecuteUnit::execute_vector_integer(core::CPU& cpu, isa::OperationId op_id,
 
     auto eq_f = []<typename T>(T a, T b) -> bool { return a == b; };
     auto ne_f = []<typename T>(T a, T b) -> bool { return a != b; };
-    auto lt_f = []<typename T>(T a, T b) -> bool { return static_cast<std::make_signed_t<T>>(a) < static_cast<std::make_signed_t<T>>(b); };
+    auto lt_f = []<typename T>(T a, T b) -> bool {
+        return static_cast<std::make_signed_t<T>>(a) < static_cast<std::make_signed_t<T>>(b);
+    };
     auto ltu_f = []<typename T>(T a, T b) -> bool { return a < b; };
-    auto le_f = []<typename T>(T a, T b) -> bool { return static_cast<std::make_signed_t<T>>(a) <= static_cast<std::make_signed_t<T>>(b); };
+    auto le_f = []<typename T>(T a, T b) -> bool {
+        return static_cast<std::make_signed_t<T>>(a) <= static_cast<std::make_signed_t<T>>(b);
+    };
     auto leu_f = []<typename T>(T a, T b) -> bool { return a <= b; };
-    auto gt_f = []<typename T>(T a, T b) -> bool { return static_cast<std::make_signed_t<T>>(a) > static_cast<std::make_signed_t<T>>(b); };
+    auto gt_f = []<typename T>(T a, T b) -> bool {
+        return static_cast<std::make_signed_t<T>>(a) > static_cast<std::make_signed_t<T>>(b);
+    };
     auto gtu_f = []<typename T>(T a, T b) -> bool { return a > b; };
     auto andn_f = []<typename T>(T a, T b) -> T { return a & ~b; };
     auto rol_f = []<typename T>(T a, T b) -> T { return rotl<T>(a, b); };
@@ -879,424 +913,676 @@ void ExecuteUnit::execute_vector_integer(core::CPU& cpu, isa::OperationId op_id,
     switch (op_id) {
         // VADD
         case isa::OperationId::VADD_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, add_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, add_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, add_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, add_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, add_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, add_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, add_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, add_f);
             return;
         case isa::OperationId::VADD_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, add_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, add_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, add_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, add_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, add_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, add_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, add_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, add_f);
             return;
         case isa::OperationId::VADD_VI:
-            if (sew == 8) vector::perform_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, add_f);
-            else if (sew == 16) vector::perform_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, add_f);
-            else if (sew == 32) vector::perform_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, add_f);
-            else vector::perform_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, add_f);
+            if (sew == 8)
+                vector::perform_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, add_f);
+            else if (sew == 16)
+                vector::perform_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, add_f);
+            else if (sew == 32)
+                vector::perform_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, add_f);
+            else
+                vector::perform_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, add_f);
             return;
 
         // VSUB
         case isa::OperationId::VSUB_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, sub_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, sub_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, sub_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, sub_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, sub_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, sub_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, sub_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, sub_f);
             return;
         case isa::OperationId::VSUB_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, sub_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, sub_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, sub_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, sub_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, sub_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, sub_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, sub_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, sub_f);
             return;
 
         // VMUL
         case isa::OperationId::VMUL_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, mul_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, mul_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, mul_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, mul_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, mul_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, mul_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, mul_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, mul_f);
             return;
         case isa::OperationId::VMUL_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, mul_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, mul_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, mul_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, mul_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, mul_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, mul_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, mul_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, mul_f);
             return;
 
         // VDIV
         case isa::OperationId::VDIV_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, div_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, div_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, div_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, div_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, div_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, div_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, div_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, div_f);
             return;
         case isa::OperationId::VDIV_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, div_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, div_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, div_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, div_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, div_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, div_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, div_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, div_f);
             return;
 
         // VDIVU
         case isa::OperationId::VDIVU_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, divu_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, divu_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, divu_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, divu_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, divu_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, divu_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, divu_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, divu_f);
             return;
         case isa::OperationId::VDIVU_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, divu_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, divu_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, divu_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, divu_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, divu_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, divu_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, divu_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, divu_f);
             return;
 
         // VAND
         case isa::OperationId::VAND_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, and_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, and_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, and_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, and_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, and_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, and_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, and_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, and_f);
             return;
         case isa::OperationId::VAND_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, and_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, and_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, and_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, and_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, and_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, and_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, and_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, and_f);
             return;
         case isa::OperationId::VAND_VI:
-            if (sew == 8) vector::perform_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, and_f);
-            else if (sew == 16) vector::perform_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, and_f);
-            else if (sew == 32) vector::perform_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, and_f);
-            else vector::perform_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, and_f);
+            if (sew == 8)
+                vector::perform_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, and_f);
+            else if (sew == 16)
+                vector::perform_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, and_f);
+            else if (sew == 32)
+                vector::perform_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, and_f);
+            else
+                vector::perform_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, and_f);
             return;
 
         // VOR
         case isa::OperationId::VOR_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, or_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, or_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, or_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, or_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, or_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, or_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, or_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, or_f);
             return;
         case isa::OperationId::VOR_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, or_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, or_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, or_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, or_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, or_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, or_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, or_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, or_f);
             return;
         case isa::OperationId::VOR_VI:
-            if (sew == 8) vector::perform_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, or_f);
-            else if (sew == 16) vector::perform_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, or_f);
-            else if (sew == 32) vector::perform_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, or_f);
-            else vector::perform_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, or_f);
+            if (sew == 8)
+                vector::perform_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, or_f);
+            else if (sew == 16)
+                vector::perform_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, or_f);
+            else if (sew == 32)
+                vector::perform_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, or_f);
+            else
+                vector::perform_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, or_f);
             return;
 
         // VXOR
         case isa::OperationId::VXOR_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, xor_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, xor_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, xor_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, xor_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, xor_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, xor_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, xor_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, xor_f);
             return;
         case isa::OperationId::VXOR_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, xor_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, xor_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, xor_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, xor_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, xor_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, xor_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, xor_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, xor_f);
             return;
         case isa::OperationId::VXOR_VI:
-            if (sew == 8) vector::perform_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, xor_f);
-            else if (sew == 16) vector::perform_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, xor_f);
-            else if (sew == 32) vector::perform_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, xor_f);
-            else vector::perform_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, xor_f);
+            if (sew == 8)
+                vector::perform_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, xor_f);
+            else if (sew == 16)
+                vector::perform_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, xor_f);
+            else if (sew == 32)
+                vector::perform_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, xor_f);
+            else
+                vector::perform_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, xor_f);
             return;
 
         // VSLL
         case isa::OperationId::VSLL_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, sll_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, sll_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, sll_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, sll_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, sll_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, sll_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, sll_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, sll_f);
             return;
         case isa::OperationId::VSLL_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, sll_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, sll_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, sll_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, sll_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, sll_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, sll_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, sll_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, sll_f);
             return;
         case isa::OperationId::VSLL_VI:
-            if (sew == 8) vector::perform_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, sll_f);
-            else if (sew == 16) vector::perform_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, sll_f);
-            else if (sew == 32) vector::perform_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, sll_f);
-            else vector::perform_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, sll_f);
+            if (sew == 8)
+                vector::perform_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, sll_f);
+            else if (sew == 16)
+                vector::perform_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, sll_f);
+            else if (sew == 32)
+                vector::perform_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, sll_f);
+            else
+                vector::perform_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, sll_f);
             return;
 
         // VSRL
         case isa::OperationId::VSRL_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, srl_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, srl_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, srl_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, srl_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, srl_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, srl_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, srl_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, srl_f);
             return;
         case isa::OperationId::VSRL_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, srl_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, srl_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, srl_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, srl_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, srl_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, srl_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, srl_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, srl_f);
             return;
         case isa::OperationId::VSRL_VI:
-            if (sew == 8) vector::perform_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, srl_f);
-            else if (sew == 16) vector::perform_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, srl_f);
-            else if (sew == 32) vector::perform_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, srl_f);
-            else vector::perform_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, srl_f);
+            if (sew == 8)
+                vector::perform_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, srl_f);
+            else if (sew == 16)
+                vector::perform_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, srl_f);
+            else if (sew == 32)
+                vector::perform_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, srl_f);
+            else
+                vector::perform_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, srl_f);
             return;
 
         // VSRA
         case isa::OperationId::VSRA_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, sra_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, sra_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, sra_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, sra_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, sra_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, sra_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, sra_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, sra_f);
             return;
         case isa::OperationId::VSRA_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, sra_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, sra_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, sra_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, sra_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, sra_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, sra_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, sra_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, sra_f);
             return;
         case isa::OperationId::VSRA_VI:
-            if (sew == 8) vector::perform_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, sra_f);
-            else if (sew == 16) vector::perform_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, sra_f);
-            else if (sew == 32) vector::perform_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, sra_f);
-            else vector::perform_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, sra_f);
+            if (sew == 8)
+                vector::perform_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, sra_f);
+            else if (sew == 16)
+                vector::perform_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, sra_f);
+            else if (sew == 32)
+                vector::perform_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, sra_f);
+            else
+                vector::perform_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, sra_f);
             return;
 
         // VNSRL
         case isa::OperationId::VNSRL_WV:
-            if (sew == 8) execute_vnsrl_wv<uint8_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vnsrl_wv<uint16_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 32) execute_vnsrl_wv<uint32_t, uint64_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vnsrl_wv<uint8_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vnsrl_wv<uint16_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 32)
+                execute_vnsrl_wv<uint32_t, uint64_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VNSRL_WX:
-            if (sew == 8) execute_vnsrl_wx<uint8_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) execute_vnsrl_wx<uint16_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 32) execute_vnsrl_wx<uint32_t, uint64_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                execute_vnsrl_wx<uint8_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vnsrl_wx<uint16_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 32)
+                execute_vnsrl_wx<uint32_t, uint64_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
         case isa::OperationId::VNSRL_WI:
-            if (sew == 8) execute_vnsrl_wi<uint8_t, uint16_t>(cpu, rd, static_cast<uint32_t>(simm5 & 0x1F), rs2, vm, vl);
-            else if (sew == 16) execute_vnsrl_wi<uint16_t, uint32_t>(cpu, rd, static_cast<uint32_t>(simm5 & 0x1F), rs2, vm, vl);
-            else if (sew == 32) execute_vnsrl_wi<uint32_t, uint64_t>(cpu, rd, static_cast<uint32_t>(simm5 & 0x1F), rs2, vm, vl);
+            if (sew == 8)
+                execute_vnsrl_wi<uint8_t, uint16_t>(cpu, rd, static_cast<uint32_t>(simm5 & 0x1F),
+                                                    rs2, vm, vl);
+            else if (sew == 16)
+                execute_vnsrl_wi<uint16_t, uint32_t>(cpu, rd, static_cast<uint32_t>(simm5 & 0x1F),
+                                                     rs2, vm, vl);
+            else if (sew == 32)
+                execute_vnsrl_wi<uint32_t, uint64_t>(cpu, rd, static_cast<uint32_t>(simm5 & 0x1F),
+                                                     rs2, vm, vl);
             return;
 
         // VNSRA
         case isa::OperationId::VNSRA_WV:
-            if (sew == 8) execute_vnsra_wv<uint8_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vnsra_wv<uint16_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 32) execute_vnsra_wv<uint32_t, int64_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vnsra_wv<uint8_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vnsra_wv<uint16_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 32)
+                execute_vnsra_wv<uint32_t, int64_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VNSRA_WX:
-            if (sew == 8) execute_vnsra_wx<uint8_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) execute_vnsra_wx<uint16_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 32) execute_vnsra_wx<uint32_t, int64_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                execute_vnsra_wx<uint8_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vnsra_wx<uint16_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 32)
+                execute_vnsra_wx<uint32_t, int64_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
         case isa::OperationId::VNSRA_WI:
-            if (sew == 8) execute_vnsra_wi<uint8_t, int16_t>(cpu, rd, static_cast<uint32_t>(simm5 & 0x1F), rs2, vm, vl);
-            else if (sew == 16) execute_vnsra_wi<uint16_t, int32_t>(cpu, rd, static_cast<uint32_t>(simm5 & 0x1F), rs2, vm, vl);
-            else if (sew == 32) execute_vnsra_wi<uint32_t, int64_t>(cpu, rd, static_cast<uint32_t>(simm5 & 0x1F), rs2, vm, vl);
+            if (sew == 8)
+                execute_vnsra_wi<uint8_t, int16_t>(cpu, rd, static_cast<uint32_t>(simm5 & 0x1F),
+                                                   rs2, vm, vl);
+            else if (sew == 16)
+                execute_vnsra_wi<uint16_t, int32_t>(cpu, rd, static_cast<uint32_t>(simm5 & 0x1F),
+                                                    rs2, vm, vl);
+            else if (sew == 32)
+                execute_vnsra_wi<uint32_t, int64_t>(cpu, rd, static_cast<uint32_t>(simm5 & 0x1F),
+                                                    rs2, vm, vl);
             return;
 
         // VMIN
         case isa::OperationId::VMIN_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, min_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, min_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, min_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, min_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, min_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, min_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, min_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, min_f);
             return;
         case isa::OperationId::VMIN_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, min_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, min_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, min_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, min_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, min_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, min_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, min_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, min_f);
             return;
 
         // VMINU
         case isa::OperationId::VMINU_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, minu_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, minu_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, minu_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, minu_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, minu_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, minu_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, minu_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, minu_f);
             return;
         case isa::OperationId::VMINU_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, minu_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, minu_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, minu_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, minu_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, minu_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, minu_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, minu_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, minu_f);
             return;
 
         // VMAX
         case isa::OperationId::VMAX_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, max_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, max_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, max_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, max_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, max_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, max_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, max_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, max_f);
             return;
         case isa::OperationId::VMAX_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, max_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, max_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, max_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, max_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, max_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, max_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, max_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, max_f);
             return;
 
         // VMAXU
         case isa::OperationId::VMAXU_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, maxu_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, maxu_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, maxu_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, maxu_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, maxu_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, maxu_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, maxu_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, maxu_f);
             return;
         case isa::OperationId::VMAXU_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, maxu_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, maxu_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, maxu_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, maxu_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, maxu_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, maxu_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, maxu_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, maxu_f);
             return;
 
         // VMSEQ
         case isa::OperationId::VMSEQ_VV:
-            if (sew == 8) vector::perform_compare_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, eq_f);
-            else if (sew == 16) vector::perform_compare_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, eq_f);
-            else if (sew == 32) vector::perform_compare_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, eq_f);
-            else vector::perform_compare_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, eq_f);
+            if (sew == 8)
+                vector::perform_compare_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, eq_f);
+            else if (sew == 16)
+                vector::perform_compare_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, eq_f);
+            else if (sew == 32)
+                vector::perform_compare_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, eq_f);
+            else
+                vector::perform_compare_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, eq_f);
             return;
         case isa::OperationId::VMSEQ_VX:
-            if (sew == 8) vector::perform_compare_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, eq_f);
-            else if (sew == 16) vector::perform_compare_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, eq_f);
-            else if (sew == 32) vector::perform_compare_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, eq_f);
-            else vector::perform_compare_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, eq_f);
+            if (sew == 8)
+                vector::perform_compare_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, eq_f);
+            else if (sew == 16)
+                vector::perform_compare_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, eq_f);
+            else if (sew == 32)
+                vector::perform_compare_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, eq_f);
+            else
+                vector::perform_compare_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, eq_f);
             return;
         case isa::OperationId::VMSEQ_VI:
-            if (sew == 8) vector::perform_compare_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, eq_f);
-            else if (sew == 16) vector::perform_compare_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, eq_f);
-            else if (sew == 32) vector::perform_compare_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, eq_f);
-            else vector::perform_compare_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, eq_f);
+            if (sew == 8)
+                vector::perform_compare_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, eq_f);
+            else if (sew == 16)
+                vector::perform_compare_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, eq_f);
+            else if (sew == 32)
+                vector::perform_compare_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, eq_f);
+            else
+                vector::perform_compare_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, eq_f);
             return;
 
         // VMSNE
         case isa::OperationId::VMSNE_VV:
-            if (sew == 8) vector::perform_compare_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, ne_f);
-            else if (sew == 16) vector::perform_compare_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, ne_f);
-            else if (sew == 32) vector::perform_compare_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, ne_f);
-            else vector::perform_compare_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, ne_f);
+            if (sew == 8)
+                vector::perform_compare_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, ne_f);
+            else if (sew == 16)
+                vector::perform_compare_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, ne_f);
+            else if (sew == 32)
+                vector::perform_compare_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, ne_f);
+            else
+                vector::perform_compare_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, ne_f);
             return;
         case isa::OperationId::VMSNE_VX:
-            if (sew == 8) vector::perform_compare_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, ne_f);
-            else if (sew == 16) vector::perform_compare_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, ne_f);
-            else if (sew == 32) vector::perform_compare_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, ne_f);
-            else vector::perform_compare_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, ne_f);
+            if (sew == 8)
+                vector::perform_compare_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, ne_f);
+            else if (sew == 16)
+                vector::perform_compare_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, ne_f);
+            else if (sew == 32)
+                vector::perform_compare_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, ne_f);
+            else
+                vector::perform_compare_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, ne_f);
             return;
         case isa::OperationId::VMSNE_VI:
-            if (sew == 8) vector::perform_compare_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, ne_f);
-            else if (sew == 16) vector::perform_compare_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, ne_f);
-            else if (sew == 32) vector::perform_compare_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, ne_f);
-            else vector::perform_compare_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, ne_f);
+            if (sew == 8)
+                vector::perform_compare_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, ne_f);
+            else if (sew == 16)
+                vector::perform_compare_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, ne_f);
+            else if (sew == 32)
+                vector::perform_compare_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, ne_f);
+            else
+                vector::perform_compare_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, ne_f);
             return;
 
         // VMSLT
         case isa::OperationId::VMSLT_VV:
-            if (sew == 8) vector::perform_compare_vv<int8_t>(cpu, rd, rs1, rs2, vm, vl, lt_f);
-            else if (sew == 16) vector::perform_compare_vv<int16_t>(cpu, rd, rs1, rs2, vm, vl, lt_f);
-            else if (sew == 32) vector::perform_compare_vv<int32_t>(cpu, rd, rs1, rs2, vm, vl, lt_f);
-            else vector::perform_compare_vv<int64_t>(cpu, rd, rs1, rs2, vm, vl, lt_f);
+            if (sew == 8)
+                vector::perform_compare_vv<int8_t>(cpu, rd, rs1, rs2, vm, vl, lt_f);
+            else if (sew == 16)
+                vector::perform_compare_vv<int16_t>(cpu, rd, rs1, rs2, vm, vl, lt_f);
+            else if (sew == 32)
+                vector::perform_compare_vv<int32_t>(cpu, rd, rs1, rs2, vm, vl, lt_f);
+            else
+                vector::perform_compare_vv<int64_t>(cpu, rd, rs1, rs2, vm, vl, lt_f);
             return;
         case isa::OperationId::VMSLT_VX:
-            if (sew == 8) vector::perform_compare_vx<int8_t>(cpu, rd, rs1_val, rs2, vm, vl, lt_f);
-            else if (sew == 16) vector::perform_compare_vx<int16_t>(cpu, rd, rs1_val, rs2, vm, vl, lt_f);
-            else if (sew == 32) vector::perform_compare_vx<int32_t>(cpu, rd, rs1_val, rs2, vm, vl, lt_f);
-            else vector::perform_compare_vx<int64_t>(cpu, rd, rs1_val, rs2, vm, vl, lt_f);
+            if (sew == 8)
+                vector::perform_compare_vx<int8_t>(cpu, rd, rs1_val, rs2, vm, vl, lt_f);
+            else if (sew == 16)
+                vector::perform_compare_vx<int16_t>(cpu, rd, rs1_val, rs2, vm, vl, lt_f);
+            else if (sew == 32)
+                vector::perform_compare_vx<int32_t>(cpu, rd, rs1_val, rs2, vm, vl, lt_f);
+            else
+                vector::perform_compare_vx<int64_t>(cpu, rd, rs1_val, rs2, vm, vl, lt_f);
             return;
 
         // VMSLTU
         case isa::OperationId::VMSLTU_VV:
-            if (sew == 8) vector::perform_compare_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, ltu_f);
-            else if (sew == 16) vector::perform_compare_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, ltu_f);
-            else if (sew == 32) vector::perform_compare_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, ltu_f);
-            else vector::perform_compare_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, ltu_f);
+            if (sew == 8)
+                vector::perform_compare_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, ltu_f);
+            else if (sew == 16)
+                vector::perform_compare_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, ltu_f);
+            else if (sew == 32)
+                vector::perform_compare_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, ltu_f);
+            else
+                vector::perform_compare_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, ltu_f);
             return;
         case isa::OperationId::VMSLTU_VX:
-            if (sew == 8) vector::perform_compare_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, ltu_f);
-            else if (sew == 16) vector::perform_compare_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, ltu_f);
-            else if (sew == 32) vector::perform_compare_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, ltu_f);
-            else vector::perform_compare_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, ltu_f);
+            if (sew == 8)
+                vector::perform_compare_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, ltu_f);
+            else if (sew == 16)
+                vector::perform_compare_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, ltu_f);
+            else if (sew == 32)
+                vector::perform_compare_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, ltu_f);
+            else
+                vector::perform_compare_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, ltu_f);
             return;
 
         // VMSLE
         case isa::OperationId::VMSLE_VV:
-            if (sew == 8) vector::perform_compare_vv<int8_t>(cpu, rd, rs1, rs2, vm, vl, le_f);
-            else if (sew == 16) vector::perform_compare_vv<int16_t>(cpu, rd, rs1, rs2, vm, vl, le_f);
-            else if (sew == 32) vector::perform_compare_vv<int32_t>(cpu, rd, rs1, rs2, vm, vl, le_f);
-            else vector::perform_compare_vv<int64_t>(cpu, rd, rs1, rs2, vm, vl, le_f);
+            if (sew == 8)
+                vector::perform_compare_vv<int8_t>(cpu, rd, rs1, rs2, vm, vl, le_f);
+            else if (sew == 16)
+                vector::perform_compare_vv<int16_t>(cpu, rd, rs1, rs2, vm, vl, le_f);
+            else if (sew == 32)
+                vector::perform_compare_vv<int32_t>(cpu, rd, rs1, rs2, vm, vl, le_f);
+            else
+                vector::perform_compare_vv<int64_t>(cpu, rd, rs1, rs2, vm, vl, le_f);
             return;
         case isa::OperationId::VMSLE_VX:
-            if (sew == 8) vector::perform_compare_vx<int8_t>(cpu, rd, rs1_val, rs2, vm, vl, le_f);
-            else if (sew == 16) vector::perform_compare_vx<int16_t>(cpu, rd, rs1_val, rs2, vm, vl, le_f);
-            else if (sew == 32) vector::perform_compare_vx<int32_t>(cpu, rd, rs1_val, rs2, vm, vl, le_f);
-            else vector::perform_compare_vx<int64_t>(cpu, rd, rs1_val, rs2, vm, vl, le_f);
+            if (sew == 8)
+                vector::perform_compare_vx<int8_t>(cpu, rd, rs1_val, rs2, vm, vl, le_f);
+            else if (sew == 16)
+                vector::perform_compare_vx<int16_t>(cpu, rd, rs1_val, rs2, vm, vl, le_f);
+            else if (sew == 32)
+                vector::perform_compare_vx<int32_t>(cpu, rd, rs1_val, rs2, vm, vl, le_f);
+            else
+                vector::perform_compare_vx<int64_t>(cpu, rd, rs1_val, rs2, vm, vl, le_f);
             return;
         case isa::OperationId::VMSLE_VI:
-            if (sew == 8) vector::perform_compare_vi<int8_t>(cpu, rd, simm5, rs2, vm, vl, le_f);
-            else if (sew == 16) vector::perform_compare_vi<int16_t>(cpu, rd, simm5, rs2, vm, vl, le_f);
-            else if (sew == 32) vector::perform_compare_vi<int32_t>(cpu, rd, simm5, rs2, vm, vl, le_f);
-            else vector::perform_compare_vi<int64_t>(cpu, rd, simm5, rs2, vm, vl, le_f);
+            if (sew == 8)
+                vector::perform_compare_vi<int8_t>(cpu, rd, simm5, rs2, vm, vl, le_f);
+            else if (sew == 16)
+                vector::perform_compare_vi<int16_t>(cpu, rd, simm5, rs2, vm, vl, le_f);
+            else if (sew == 32)
+                vector::perform_compare_vi<int32_t>(cpu, rd, simm5, rs2, vm, vl, le_f);
+            else
+                vector::perform_compare_vi<int64_t>(cpu, rd, simm5, rs2, vm, vl, le_f);
             return;
 
         // VMSLEU
         case isa::OperationId::VMSLEU_VV:
-            if (sew == 8) vector::perform_compare_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, leu_f);
-            else if (sew == 16) vector::perform_compare_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, leu_f);
-            else if (sew == 32) vector::perform_compare_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, leu_f);
-            else vector::perform_compare_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, leu_f);
+            if (sew == 8)
+                vector::perform_compare_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, leu_f);
+            else if (sew == 16)
+                vector::perform_compare_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, leu_f);
+            else if (sew == 32)
+                vector::perform_compare_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, leu_f);
+            else
+                vector::perform_compare_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, leu_f);
             return;
         case isa::OperationId::VMSLEU_VX:
-            if (sew == 8) vector::perform_compare_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, leu_f);
-            else if (sew == 16) vector::perform_compare_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, leu_f);
-            else if (sew == 32) vector::perform_compare_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, leu_f);
-            else vector::perform_compare_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, leu_f);
+            if (sew == 8)
+                vector::perform_compare_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, leu_f);
+            else if (sew == 16)
+                vector::perform_compare_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, leu_f);
+            else if (sew == 32)
+                vector::perform_compare_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, leu_f);
+            else
+                vector::perform_compare_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, leu_f);
             return;
         case isa::OperationId::VMSLEU_VI:
-            if (sew == 8) vector::perform_compare_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, leu_f);
-            else if (sew == 16) vector::perform_compare_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, leu_f);
-            else if (sew == 32) vector::perform_compare_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, leu_f);
-            else vector::perform_compare_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, leu_f);
+            if (sew == 8)
+                vector::perform_compare_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, leu_f);
+            else if (sew == 16)
+                vector::perform_compare_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, leu_f);
+            else if (sew == 32)
+                vector::perform_compare_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, leu_f);
+            else
+                vector::perform_compare_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, leu_f);
             return;
 
         // VMSGT
         case isa::OperationId::VMSGT_VX:
-            if (sew == 8) vector::perform_compare_vx<int8_t>(cpu, rd, rs1_val, rs2, vm, vl, gt_f);
-            else if (sew == 16) vector::perform_compare_vx<int16_t>(cpu, rd, rs1_val, rs2, vm, vl, gt_f);
-            else if (sew == 32) vector::perform_compare_vx<int32_t>(cpu, rd, rs1_val, rs2, vm, vl, gt_f);
-            else vector::perform_compare_vx<int64_t>(cpu, rd, rs1_val, rs2, vm, vl, gt_f);
+            if (sew == 8)
+                vector::perform_compare_vx<int8_t>(cpu, rd, rs1_val, rs2, vm, vl, gt_f);
+            else if (sew == 16)
+                vector::perform_compare_vx<int16_t>(cpu, rd, rs1_val, rs2, vm, vl, gt_f);
+            else if (sew == 32)
+                vector::perform_compare_vx<int32_t>(cpu, rd, rs1_val, rs2, vm, vl, gt_f);
+            else
+                vector::perform_compare_vx<int64_t>(cpu, rd, rs1_val, rs2, vm, vl, gt_f);
             return;
         case isa::OperationId::VMSGT_VI:
-            if (sew == 8) vector::perform_compare_vi<int8_t>(cpu, rd, simm5, rs2, vm, vl, gt_f);
-            else if (sew == 16) vector::perform_compare_vi<int16_t>(cpu, rd, simm5, rs2, vm, vl, gt_f);
-            else if (sew == 32) vector::perform_compare_vi<int32_t>(cpu, rd, simm5, rs2, vm, vl, gt_f);
-            else vector::perform_compare_vi<int64_t>(cpu, rd, simm5, rs2, vm, vl, gt_f);
+            if (sew == 8)
+                vector::perform_compare_vi<int8_t>(cpu, rd, simm5, rs2, vm, vl, gt_f);
+            else if (sew == 16)
+                vector::perform_compare_vi<int16_t>(cpu, rd, simm5, rs2, vm, vl, gt_f);
+            else if (sew == 32)
+                vector::perform_compare_vi<int32_t>(cpu, rd, simm5, rs2, vm, vl, gt_f);
+            else
+                vector::perform_compare_vi<int64_t>(cpu, rd, simm5, rs2, vm, vl, gt_f);
             return;
 
         // VMSGTU
         case isa::OperationId::VMSGTU_VX:
-            if (sew == 8) vector::perform_compare_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, gtu_f);
-            else if (sew == 16) vector::perform_compare_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, gtu_f);
-            else if (sew == 32) vector::perform_compare_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, gtu_f);
-            else vector::perform_compare_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, gtu_f);
+            if (sew == 8)
+                vector::perform_compare_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, gtu_f);
+            else if (sew == 16)
+                vector::perform_compare_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, gtu_f);
+            else if (sew == 32)
+                vector::perform_compare_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, gtu_f);
+            else
+                vector::perform_compare_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, gtu_f);
             return;
         case isa::OperationId::VMSGTU_VI:
-            if (sew == 8) vector::perform_compare_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, gtu_f);
-            else if (sew == 16) vector::perform_compare_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, gtu_f);
-            else if (sew == 32) vector::perform_compare_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, gtu_f);
-            else vector::perform_compare_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, gtu_f);
+            if (sew == 8)
+                vector::perform_compare_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, gtu_f);
+            else if (sew == 16)
+                vector::perform_compare_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, gtu_f);
+            else if (sew == 32)
+                vector::perform_compare_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, gtu_f);
+            else
+                vector::perform_compare_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, gtu_f);
             return;
 
         // VMACC / VMADD / VNMSAC / VNSUB (VV & VX)
@@ -1304,107 +1590,165 @@ void ExecuteUnit::execute_vector_integer(core::CPU& cpu, isa::OperationId op_id,
         case isa::OperationId::VMADD_VV:
         case isa::OperationId::VNMSAC_VV:
         case isa::OperationId::VNSUB_VV: {
-            bool overwrite_acc = (op_id == isa::OperationId::VMACC_VV || op_id == isa::OperationId::VNMSAC_VV);
-            bool subtract = (op_id == isa::OperationId::VNMSAC_VV || op_id == isa::OperationId::VNSUB_VV);
-            if (sew == 8) perform_mac_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, overwrite_acc, subtract);
-            else if (sew == 16) perform_mac_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, overwrite_acc, subtract);
-            else if (sew == 32) perform_mac_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, overwrite_acc, subtract);
-            else perform_mac_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, overwrite_acc, subtract);
+            bool overwrite_acc =
+                (op_id == isa::OperationId::VMACC_VV || op_id == isa::OperationId::VNMSAC_VV);
+            bool subtract =
+                (op_id == isa::OperationId::VNMSAC_VV || op_id == isa::OperationId::VNSUB_VV);
+            if (sew == 8)
+                perform_mac_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, overwrite_acc, subtract);
+            else if (sew == 16)
+                perform_mac_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, overwrite_acc, subtract);
+            else if (sew == 32)
+                perform_mac_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, overwrite_acc, subtract);
+            else
+                perform_mac_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, overwrite_acc, subtract);
             return;
         }
         case isa::OperationId::VMACC_VX:
         case isa::OperationId::VMADD_VX:
         case isa::OperationId::VNMSAC_VX:
         case isa::OperationId::VNSUB_VX: {
-            bool overwrite_acc = (op_id == isa::OperationId::VMACC_VX || op_id == isa::OperationId::VNMSAC_VX);
-            bool subtract = (op_id == isa::OperationId::VNMSAC_VX || op_id == isa::OperationId::VNSUB_VX);
-            if (sew == 8) perform_mac_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, overwrite_acc, subtract);
-            else if (sew == 16) perform_mac_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, overwrite_acc, subtract);
-            else if (sew == 32) perform_mac_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, overwrite_acc, subtract);
-            else perform_mac_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, overwrite_acc, subtract);
+            bool overwrite_acc =
+                (op_id == isa::OperationId::VMACC_VX || op_id == isa::OperationId::VNMSAC_VX);
+            bool subtract =
+                (op_id == isa::OperationId::VNMSAC_VX || op_id == isa::OperationId::VNSUB_VX);
+            if (sew == 8)
+                perform_mac_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, overwrite_acc, subtract);
+            else if (sew == 16)
+                perform_mac_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, overwrite_acc, subtract);
+            else if (sew == 32)
+                perform_mac_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, overwrite_acc, subtract);
+            else
+                perform_mac_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, overwrite_acc, subtract);
             return;
         }
 
         // VWMACCU / VWMACC / VWMACCUS / VWMACCSU
         case isa::OperationId::VWMACCU_VV:
-            if (sew == 8) perform_widening_mac_vv<uint16_t, uint8_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) perform_widening_mac_vv<uint32_t, uint16_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 32) perform_widening_mac_vv<uint64_t, uint32_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                perform_widening_mac_vv<uint16_t, uint8_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                perform_widening_mac_vv<uint32_t, uint16_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 32)
+                perform_widening_mac_vv<uint64_t, uint32_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VWMACCU_VX:
-            if (sew == 8) perform_widening_mac_vx<uint16_t, uint8_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) perform_widening_mac_vx<uint32_t, uint16_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 32) perform_widening_mac_vx<uint64_t, uint32_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                perform_widening_mac_vx<uint16_t, uint8_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                perform_widening_mac_vx<uint32_t, uint16_t, uint16_t>(cpu, rd, rs1_val, rs2, vm,
+                                                                      vl);
+            else if (sew == 32)
+                perform_widening_mac_vx<uint64_t, uint32_t, uint32_t>(cpu, rd, rs1_val, rs2, vm,
+                                                                      vl);
             return;
         case isa::OperationId::VWMACC_VV:
-            if (sew == 8) perform_widening_mac_vv<int16_t, int8_t, int8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) perform_widening_mac_vv<int32_t, int16_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 32) perform_widening_mac_vv<int64_t, int32_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                perform_widening_mac_vv<int16_t, int8_t, int8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                perform_widening_mac_vv<int32_t, int16_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 32)
+                perform_widening_mac_vv<int64_t, int32_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VWMACC_VX:
-            if (sew == 8) perform_widening_mac_vx<int16_t, int8_t, int8_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) perform_widening_mac_vx<int32_t, int16_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 32) perform_widening_mac_vx<int64_t, int32_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                perform_widening_mac_vx<int16_t, int8_t, int8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                perform_widening_mac_vx<int32_t, int16_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 32)
+                perform_widening_mac_vx<int64_t, int32_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
         case isa::OperationId::VWMACCUS_VX:
-            if (sew == 8) perform_widening_mac_vx<int16_t, uint8_t, int8_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) perform_widening_mac_vx<int32_t, uint16_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 32) perform_widening_mac_vx<int64_t, uint32_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                perform_widening_mac_vx<int16_t, uint8_t, int8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                perform_widening_mac_vx<int32_t, uint16_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 32)
+                perform_widening_mac_vx<int64_t, uint32_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
         case isa::OperationId::VWMACCSU_VV:
-            if (sew == 8) perform_widening_mac_vv<int16_t, int8_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) perform_widening_mac_vv<int32_t, int16_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 32) perform_widening_mac_vv<int64_t, int32_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                perform_widening_mac_vv<int16_t, int8_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                perform_widening_mac_vv<int32_t, int16_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 32)
+                perform_widening_mac_vv<int64_t, int32_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VWMACCSU_VX:
-            if (sew == 8) perform_widening_mac_vx<int16_t, int8_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) perform_widening_mac_vx<int32_t, int16_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 32) perform_widening_mac_vx<int64_t, int32_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                perform_widening_mac_vx<int16_t, int8_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                perform_widening_mac_vx<int32_t, int16_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 32)
+                perform_widening_mac_vx<int64_t, int32_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
 
         // VREDSUM
         case isa::OperationId::VREDSUM_VS:
-            if (sew == 8) execute_vredsum_vs<uint8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vredsum_vs<uint16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 32) execute_vredsum_vs<uint32_t>(cpu, rd, rs1, rs2, vm, vl);
-            else execute_vredsum_vs<uint64_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vredsum_vs<uint8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vredsum_vs<uint16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 32)
+                execute_vredsum_vs<uint32_t>(cpu, rd, rs1, rs2, vm, vl);
+            else
+                execute_vredsum_vs<uint64_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
 
         // VWMUL
         case isa::OperationId::VWMUL_VV:
-            if (sew == 8) execute_vwmul_vv<int16_t, int8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vwmul_vv<int32_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else execute_vwmul_vv<int64_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwmul_vv<int16_t, int8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwmul_vv<int32_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else
+                execute_vwmul_vv<int64_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VWMUL_VX:
-            if (sew == 8) execute_vwmul_vx<int16_t, int8_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) execute_vwmul_vx<int32_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else execute_vwmul_vx<int64_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwmul_vx<int16_t, int8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwmul_vx<int32_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else
+                execute_vwmul_vx<int64_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
 
         // VSBC
         case isa::OperationId::VSBC_VVM:
-            if (sew == 8) execute_vsbc_vv<uint8_t>(cpu, rd, rs1, rs2, vl);
-            else if (sew == 16) execute_vsbc_vv<uint16_t>(cpu, rd, rs1, rs2, vl);
-            else if (sew == 32) execute_vsbc_vv<uint32_t>(cpu, rd, rs1, rs2, vl);
-            else execute_vsbc_vv<uint64_t>(cpu, rd, rs1, rs2, vl);
+            if (sew == 8)
+                execute_vsbc_vv<uint8_t>(cpu, rd, rs1, rs2, vl);
+            else if (sew == 16)
+                execute_vsbc_vv<uint16_t>(cpu, rd, rs1, rs2, vl);
+            else if (sew == 32)
+                execute_vsbc_vv<uint32_t>(cpu, rd, rs1, rs2, vl);
+            else
+                execute_vsbc_vv<uint64_t>(cpu, rd, rs1, rs2, vl);
             return;
         case isa::OperationId::VSBC_VXM:
-            if (sew == 8) execute_vsbc_vx<uint8_t>(cpu, rd, rs1_val, rs2, vl);
-            else if (sew == 16) execute_vsbc_vx<uint16_t>(cpu, rd, rs1_val, rs2, vl);
-            else if (sew == 32) execute_vsbc_vx<uint32_t>(cpu, rd, rs1_val, rs2, vl);
-            else execute_vsbc_vx<uint64_t>(cpu, rd, rs1_val, rs2, vl);
+            if (sew == 8)
+                execute_vsbc_vx<uint8_t>(cpu, rd, rs1_val, rs2, vl);
+            else if (sew == 16)
+                execute_vsbc_vx<uint16_t>(cpu, rd, rs1_val, rs2, vl);
+            else if (sew == 32)
+                execute_vsbc_vx<uint32_t>(cpu, rd, rs1_val, rs2, vl);
+            else
+                execute_vsbc_vx<uint64_t>(cpu, rd, rs1_val, rs2, vl);
             return;
 
         // VSEXT
         case isa::OperationId::VSEXT_VF2:
-            if (sew == 16) execute_vsext<int16_t, int8_t>(cpu, rd, rs2, vm, vl);
-            else if (sew == 32) execute_vsext<int32_t, int16_t>(cpu, rd, rs2, vm, vl);
-            else if (sew == 64) execute_vsext<int64_t, int32_t>(cpu, rd, rs2, vm, vl);
+            if (sew == 16)
+                execute_vsext<int16_t, int8_t>(cpu, rd, rs2, vm, vl);
+            else if (sew == 32)
+                execute_vsext<int32_t, int16_t>(cpu, rd, rs2, vm, vl);
+            else if (sew == 64)
+                execute_vsext<int64_t, int32_t>(cpu, rd, rs2, vm, vl);
             return;
         case isa::OperationId::VSEXT_VF4:
-            if (sew == 32) execute_vsext<int32_t, int8_t>(cpu, rd, rs2, vm, vl);
-            else if (sew == 64) execute_vsext<int64_t, int16_t>(cpu, rd, rs2, vm, vl);
+            if (sew == 32)
+                execute_vsext<int32_t, int8_t>(cpu, rd, rs2, vm, vl);
+            else if (sew == 64)
+                execute_vsext<int64_t, int16_t>(cpu, rd, rs2, vm, vl);
             return;
         case isa::OperationId::VSEXT_VF8:
             if (sew == 64) execute_vsext<int64_t, int8_t>(cpu, rd, rs2, vm, vl);
@@ -1412,13 +1756,18 @@ void ExecuteUnit::execute_vector_integer(core::CPU& cpu, isa::OperationId op_id,
 
         // VZEXT
         case isa::OperationId::VZEXT_VF2:
-            if (sew == 16) execute_vsext<uint16_t, uint8_t>(cpu, rd, rs2, vm, vl);
-            else if (sew == 32) execute_vsext<uint32_t, uint16_t>(cpu, rd, rs2, vm, vl);
-            else if (sew == 64) execute_vsext<uint64_t, uint32_t>(cpu, rd, rs2, vm, vl);
+            if (sew == 16)
+                execute_vsext<uint16_t, uint8_t>(cpu, rd, rs2, vm, vl);
+            else if (sew == 32)
+                execute_vsext<uint32_t, uint16_t>(cpu, rd, rs2, vm, vl);
+            else if (sew == 64)
+                execute_vsext<uint64_t, uint32_t>(cpu, rd, rs2, vm, vl);
             return;
         case isa::OperationId::VZEXT_VF4:
-            if (sew == 32) execute_vsext<uint32_t, uint8_t>(cpu, rd, rs2, vm, vl);
-            else if (sew == 64) execute_vsext<uint64_t, uint16_t>(cpu, rd, rs2, vm, vl);
+            if (sew == 32)
+                execute_vsext<uint32_t, uint8_t>(cpu, rd, rs2, vm, vl);
+            else if (sew == 64)
+                execute_vsext<uint64_t, uint16_t>(cpu, rd, rs2, vm, vl);
             return;
         case isa::OperationId::VZEXT_VF8:
             if (sew == 64) execute_vsext<uint64_t, uint8_t>(cpu, rd, rs2, vm, vl);
@@ -1426,185 +1775,283 @@ void ExecuteUnit::execute_vector_integer(core::CPU& cpu, isa::OperationId op_id,
 
         // VWADD
         case isa::OperationId::VWADD_VV:
-            if (sew == 8) execute_vwadd_vv<int16_t, int8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vwadd_vv<int32_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else execute_vwadd_vv<int64_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwadd_vv<int16_t, int8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwadd_vv<int32_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else
+                execute_vwadd_vv<int64_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VWADD_VX:
-            if (sew == 8) execute_vwadd_vx<int16_t, int8_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) execute_vwadd_vx<int32_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else execute_vwadd_vx<int64_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwadd_vx<int16_t, int8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwadd_vx<int32_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else
+                execute_vwadd_vx<int64_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
         case isa::OperationId::VWADD_WV:
-            if (sew == 8) execute_vwadd_wv<int16_t, int8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vwadd_wv<int32_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else execute_vwadd_wv<int64_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwadd_wv<int16_t, int8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwadd_wv<int32_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else
+                execute_vwadd_wv<int64_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VWADD_WX:
-            if (sew == 8) execute_vwadd_wx<int16_t, int8_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) execute_vwadd_wx<int32_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else execute_vwadd_wx<int64_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwadd_wx<int16_t, int8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwadd_wx<int32_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else
+                execute_vwadd_wx<int64_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
 
         // VWADDU
         case isa::OperationId::VWADDU_VV:
-            if (sew == 8) execute_vwadd_vv<uint16_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vwadd_vv<uint32_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else execute_vwadd_vv<uint64_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwadd_vv<uint16_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwadd_vv<uint32_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else
+                execute_vwadd_vv<uint64_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VWADDU_VX:
-            if (sew == 8) execute_vwadd_vx<uint16_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) execute_vwadd_vx<uint32_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else execute_vwadd_vx<uint64_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwadd_vx<uint16_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwadd_vx<uint32_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else
+                execute_vwadd_vx<uint64_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
         case isa::OperationId::VWADDU_WV:
-            if (sew == 8) execute_vwadd_wv<uint16_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vwadd_wv<uint32_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else execute_vwadd_wv<uint64_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwadd_wv<uint16_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwadd_wv<uint32_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else
+                execute_vwadd_wv<uint64_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VWADDU_WX:
-            if (sew == 8) execute_vwadd_wx<uint16_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) execute_vwadd_wx<uint32_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else execute_vwadd_wx<uint64_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwadd_wx<uint16_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwadd_wx<uint32_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else
+                execute_vwadd_wx<uint64_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
 
         // VWSUB
         case isa::OperationId::VWSUB_VV:
-            if (sew == 8) execute_vwsub_vv<int16_t, int8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vwsub_vv<int32_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else execute_vwsub_vv<int64_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwsub_vv<int16_t, int8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwsub_vv<int32_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else
+                execute_vwsub_vv<int64_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VWSUB_VX:
-            if (sew == 8) execute_vwsub_vx<int16_t, int8_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) execute_vwsub_vx<int32_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else execute_vwsub_vx<int64_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwsub_vx<int16_t, int8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwsub_vx<int32_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else
+                execute_vwsub_vx<int64_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
         case isa::OperationId::VWSUB_WV:
-            if (sew == 8) execute_vwsub_wv<int16_t, int8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vwsub_wv<int32_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else execute_vwsub_wv<int64_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwsub_wv<int16_t, int8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwsub_wv<int32_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else
+                execute_vwsub_wv<int64_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VWSUB_WX:
-            if (sew == 8) execute_vwsub_wx<int16_t, int8_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) execute_vwsub_wx<int32_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else execute_vwsub_wx<int64_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwsub_wx<int16_t, int8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwsub_wx<int32_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else
+                execute_vwsub_wx<int64_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
 
         // VWSUBU
         case isa::OperationId::VWSUBU_VV:
-            if (sew == 8) execute_vwsub_vv<uint16_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vwsub_vv<uint32_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else execute_vwsub_vv<uint64_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwsub_vv<uint16_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwsub_vv<uint32_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else
+                execute_vwsub_vv<uint64_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VWSUBU_VX:
-            if (sew == 8) execute_vwsub_vx<uint16_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) execute_vwsub_vx<uint32_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else execute_vwsub_vx<uint64_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwsub_vx<uint16_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwsub_vx<uint32_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else
+                execute_vwsub_vx<uint64_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
         case isa::OperationId::VWSUBU_WV:
-            if (sew == 8) execute_vwsub_wv<uint16_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vwsub_wv<uint32_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else execute_vwsub_wv<uint64_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwsub_wv<uint16_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwsub_wv<uint32_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else
+                execute_vwsub_wv<uint64_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VWSUBU_WX:
-            if (sew == 8) execute_vwsub_wx<uint16_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) execute_vwsub_wx<uint32_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else execute_vwsub_wx<uint64_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwsub_wx<uint16_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwsub_wx<uint32_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else
+                execute_vwsub_wx<uint64_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
 
         // VWMULU
         case isa::OperationId::VWMULU_VV:
-            if (sew == 8) execute_vwmul_vv<uint16_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vwmul_vv<uint32_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 64) execute_vwmul_vv<uint64_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwmul_vv<uint16_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwmul_vv<uint32_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 64)
+                execute_vwmul_vv<uint64_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VWMULU_VX:
-            if (sew == 8) execute_vwmul_vx<uint16_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) execute_vwmul_vx<uint32_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 64) execute_vwmul_vx<uint64_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwmul_vx<uint16_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwmul_vx<uint32_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 64)
+                execute_vwmul_vx<uint64_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
 
         // VWMULSU
         case isa::OperationId::VWMULSU_VV:
-            if (sew == 8) execute_vwmulsu_vv<int16_t, int8_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vwmulsu_vv<int32_t, int16_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 64) execute_vwmulsu_vv<int64_t, int32_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwmulsu_vv<int16_t, int8_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwmulsu_vv<int32_t, int16_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 64)
+                execute_vwmulsu_vv<int64_t, int32_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VWMULSU_VX:
-            if (sew == 8) execute_vwmulsu_vx<int16_t, int8_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) execute_vwmulsu_vx<int32_t, int16_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 64) execute_vwmulsu_vx<int64_t, int32_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwmulsu_vx<int16_t, int8_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwmulsu_vx<int32_t, int16_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 64)
+                execute_vwmulsu_vx<int64_t, int32_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
 
         // VWREDSUM
         case isa::OperationId::VWREDSUM_VS:
-            if (sew == 8) execute_vwredsum_vs<int16_t, int8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vwredsum_vs<int32_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else execute_vwredsum_vs<int64_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwredsum_vs<int16_t, int8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwredsum_vs<int32_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else
+                execute_vwredsum_vs<int64_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VWREDSUMU_VS:
-            if (sew == 8) execute_vwredsum_vs<uint16_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vwredsum_vs<uint32_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else execute_vwredsum_vs<uint64_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwredsum_vs<uint16_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwredsum_vs<uint32_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else
+                execute_vwredsum_vs<uint64_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
 
         // VADC
         case isa::OperationId::VADC_VVM:
-            if (sew == 8) execute_vadc_vv<uint8_t>(cpu, rd, rs1, rs2, vl);
-            else if (sew == 16) execute_vadc_vv<uint16_t>(cpu, rd, rs1, rs2, vl);
-            else if (sew == 32) execute_vadc_vv<uint32_t>(cpu, rd, rs1, rs2, vl);
-            else execute_vadc_vv<uint64_t>(cpu, rd, rs1, rs2, vl);
+            if (sew == 8)
+                execute_vadc_vv<uint8_t>(cpu, rd, rs1, rs2, vl);
+            else if (sew == 16)
+                execute_vadc_vv<uint16_t>(cpu, rd, rs1, rs2, vl);
+            else if (sew == 32)
+                execute_vadc_vv<uint32_t>(cpu, rd, rs1, rs2, vl);
+            else
+                execute_vadc_vv<uint64_t>(cpu, rd, rs1, rs2, vl);
             return;
         case isa::OperationId::VADC_VXM:
-            if (sew == 8) execute_vadc_vx<uint8_t>(cpu, rd, rs1_val, rs2, vl);
-            else if (sew == 16) execute_vadc_vx<uint16_t>(cpu, rd, rs1_val, rs2, vl);
-            else if (sew == 32) execute_vadc_vx<uint32_t>(cpu, rd, rs1_val, rs2, vl);
-            else execute_vadc_vx<uint64_t>(cpu, rd, rs1_val, rs2, vl);
+            if (sew == 8)
+                execute_vadc_vx<uint8_t>(cpu, rd, rs1_val, rs2, vl);
+            else if (sew == 16)
+                execute_vadc_vx<uint16_t>(cpu, rd, rs1_val, rs2, vl);
+            else if (sew == 32)
+                execute_vadc_vx<uint32_t>(cpu, rd, rs1_val, rs2, vl);
+            else
+                execute_vadc_vx<uint64_t>(cpu, rd, rs1_val, rs2, vl);
             return;
         case isa::OperationId::VADC_VIM:
-            if (sew == 8) execute_vadc_vi<uint8_t>(cpu, rd, simm5, rs2, vl);
-            else if (sew == 16) execute_vadc_vi<uint16_t>(cpu, rd, simm5, rs2, vl);
-            else if (sew == 32) execute_vadc_vi<uint32_t>(cpu, rd, simm5, rs2, vl);
-            else execute_vadc_vi<uint64_t>(cpu, rd, simm5, rs2, vl);
+            if (sew == 8)
+                execute_vadc_vi<uint8_t>(cpu, rd, simm5, rs2, vl);
+            else if (sew == 16)
+                execute_vadc_vi<uint16_t>(cpu, rd, simm5, rs2, vl);
+            else if (sew == 32)
+                execute_vadc_vi<uint32_t>(cpu, rd, simm5, rs2, vl);
+            else
+                execute_vadc_vi<uint64_t>(cpu, rd, simm5, rs2, vl);
             return;
 
         // VMADC
         case isa::OperationId::VMADC_VV:
         case isa::OperationId::VMADC_VVM:
-            if (sew == 8) execute_vmadc_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vmadc_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 32) execute_vmadc_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl);
-            else execute_vmadc_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vmadc_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vmadc_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 32)
+                execute_vmadc_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl);
+            else
+                execute_vmadc_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VMADC_VX:
         case isa::OperationId::VMADC_VXM:
-            if (sew == 8) execute_vmadc_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) execute_vmadc_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 32) execute_vmadc_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else execute_vmadc_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                execute_vmadc_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vmadc_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 32)
+                execute_vmadc_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else
+                execute_vmadc_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
         case isa::OperationId::VMADC_VI:
         case isa::OperationId::VMADC_VIM:
-            if (sew == 8) execute_vmadc_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl);
-            else if (sew == 16) execute_vmadc_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl);
-            else if (sew == 32) execute_vmadc_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl);
-            else execute_vmadc_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl);
+            if (sew == 8)
+                execute_vmadc_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vmadc_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl);
+            else if (sew == 32)
+                execute_vmadc_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl);
+            else
+                execute_vmadc_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl);
             return;
 
         // VMSBC
         case isa::OperationId::VMSBC_VV:
         case isa::OperationId::VMSBC_VVM:
-            if (sew == 8) execute_vmsbc_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vmsbc_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 32) execute_vmsbc_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl);
-            else execute_vmsbc_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vmsbc_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vmsbc_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 32)
+                execute_vmsbc_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl);
+            else
+                execute_vmsbc_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VMSBC_VX:
         case isa::OperationId::VMSBC_VXM:
-            if (sew == 8) execute_vmsbc_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) execute_vmsbc_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 32) execute_vmsbc_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else execute_vmsbc_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                execute_vmsbc_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vmsbc_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 32)
+                execute_vmsbc_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else
+                execute_vmsbc_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
 
         // Mask instructions
@@ -1634,110 +2081,170 @@ void ExecuteUnit::execute_vector_integer(core::CPU& cpu, isa::OperationId op_id,
             execute_mask_logical(cpu, rd, rs1, rs2, vl, op_id);
             return;
         case isa::OperationId::VIOTA_M:
-            if (sew == 8) execute_viota_m<uint8_t>(cpu, rd, rs2, vm, vl);
-            else if (sew == 16) execute_viota_m<uint16_t>(cpu, rd, rs2, vm, vl);
-            else if (sew == 32) execute_viota_m<uint32_t>(cpu, rd, rs2, vm, vl);
-            else execute_viota_m<uint64_t>(cpu, rd, rs2, vm, vl);
+            if (sew == 8)
+                execute_viota_m<uint8_t>(cpu, rd, rs2, vm, vl);
+            else if (sew == 16)
+                execute_viota_m<uint16_t>(cpu, rd, rs2, vm, vl);
+            else if (sew == 32)
+                execute_viota_m<uint32_t>(cpu, rd, rs2, vm, vl);
+            else
+                execute_viota_m<uint64_t>(cpu, rd, rs2, vm, vl);
             return;
 
         // VANDN
         case isa::OperationId::VANDN_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, andn_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, andn_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, andn_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, andn_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, andn_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, andn_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, andn_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, andn_f);
             return;
         case isa::OperationId::VANDN_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, andn_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, andn_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, andn_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, andn_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, andn_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, andn_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, andn_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, andn_f);
             return;
 
         // VROL
         case isa::OperationId::VROL_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, rol_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, rol_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, rol_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, rol_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, rol_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, rol_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, rol_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, rol_f);
             return;
         case isa::OperationId::VROL_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, rol_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, rol_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, rol_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, rol_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, rol_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, rol_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, rol_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, rol_f);
             return;
 
         // VROR
         case isa::OperationId::VROR_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, ror_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, ror_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, ror_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, ror_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, ror_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, ror_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, ror_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, ror_f);
             return;
         case isa::OperationId::VROR_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, ror_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, ror_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, ror_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, ror_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, ror_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, ror_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, ror_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, ror_f);
             return;
         case isa::OperationId::VROR_VI:
-            if (sew == 8) vector::perform_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, ror_f);
-            else if (sew == 16) vector::perform_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, ror_f);
-            else if (sew == 32) vector::perform_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, ror_f);
-            else vector::perform_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, ror_f);
+            if (sew == 8)
+                vector::perform_vi<uint8_t>(cpu, rd, simm5, rs2, vm, vl, ror_f);
+            else if (sew == 16)
+                vector::perform_vi<uint16_t>(cpu, rd, simm5, rs2, vm, vl, ror_f);
+            else if (sew == 32)
+                vector::perform_vi<uint32_t>(cpu, rd, simm5, rs2, vm, vl, ror_f);
+            else
+                vector::perform_vi<uint64_t>(cpu, rd, simm5, rs2, vm, vl, ror_f);
             return;
 
         // VCLMUL
         case isa::OperationId::VCLMUL_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, clmul_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, clmul_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, clmul_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, clmul_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, clmul_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, clmul_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, clmul_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, clmul_f);
             return;
         case isa::OperationId::VCLMUL_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, clmul_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, clmul_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, clmul_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, clmul_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, clmul_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, clmul_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, clmul_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, clmul_f);
             return;
 
         // VCLMULH
         case isa::OperationId::VCLMULH_VV:
-            if (sew == 8) vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, clmulh_f);
-            else if (sew == 16) vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, clmulh_f);
-            else if (sew == 32) vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, clmulh_f);
-            else vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, clmulh_f);
+            if (sew == 8)
+                vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, clmulh_f);
+            else if (sew == 16)
+                vector::perform_vv<uint16_t>(cpu, rd, rs1, rs2, vm, vl, clmulh_f);
+            else if (sew == 32)
+                vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, vm, vl, clmulh_f);
+            else
+                vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, vm, vl, clmulh_f);
             return;
         case isa::OperationId::VCLMULH_VX:
-            if (sew == 8) vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, clmulh_f);
-            else if (sew == 16) vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, clmulh_f);
-            else if (sew == 32) vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, clmulh_f);
-            else vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, clmulh_f);
+            if (sew == 8)
+                vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, clmulh_f);
+            else if (sew == 16)
+                vector::perform_vx<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl, clmulh_f);
+            else if (sew == 32)
+                vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl, clmulh_f);
+            else
+                vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl, clmulh_f);
             return;
 
         // VCLZ
         case isa::OperationId::VCLZ_V:
-            if (sew == 8) execute_vclz<uint8_t>(cpu, rd, rs2, vm, vl);
-            else if (sew == 16) execute_vclz<uint16_t>(cpu, rd, rs2, vm, vl);
-            else if (sew == 32) execute_vclz<uint32_t>(cpu, rd, rs2, vm, vl);
-            else execute_vclz<uint64_t>(cpu, rd, rs2, vm, vl);
+            if (sew == 8)
+                execute_vclz<uint8_t>(cpu, rd, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vclz<uint16_t>(cpu, rd, rs2, vm, vl);
+            else if (sew == 32)
+                execute_vclz<uint32_t>(cpu, rd, rs2, vm, vl);
+            else
+                execute_vclz<uint64_t>(cpu, rd, rs2, vm, vl);
             return;
 
         // VCTZ
         case isa::OperationId::VCTZ_V:
-            if (sew == 8) execute_vctz<uint8_t>(cpu, rd, rs2, vm, vl);
-            else if (sew == 16) execute_vctz<uint16_t>(cpu, rd, rs2, vm, vl);
-            else if (sew == 32) execute_vctz<uint32_t>(cpu, rd, rs2, vm, vl);
-            else execute_vctz<uint64_t>(cpu, rd, rs2, vm, vl);
+            if (sew == 8)
+                execute_vctz<uint8_t>(cpu, rd, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vctz<uint16_t>(cpu, rd, rs2, vm, vl);
+            else if (sew == 32)
+                execute_vctz<uint32_t>(cpu, rd, rs2, vm, vl);
+            else
+                execute_vctz<uint64_t>(cpu, rd, rs2, vm, vl);
             return;
 
         // VCPOP.V
         case isa::OperationId::VCPOP_V:
-            if (sew == 8) execute_vcpop_v<uint8_t>(cpu, rd, rs2, vm, vl);
-            else if (sew == 16) execute_vcpop_v<uint16_t>(cpu, rd, rs2, vm, vl);
-            else if (sew == 32) execute_vcpop_v<uint32_t>(cpu, rd, rs2, vm, vl);
-            else execute_vcpop_v<uint64_t>(cpu, rd, rs2, vm, vl);
+            if (sew == 8)
+                execute_vcpop_v<uint8_t>(cpu, rd, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vcpop_v<uint16_t>(cpu, rd, rs2, vm, vl);
+            else if (sew == 32)
+                execute_vcpop_v<uint32_t>(cpu, rd, rs2, vm, vl);
+            else
+                execute_vcpop_v<uint64_t>(cpu, rd, rs2, vm, vl);
             return;
 
         // VBREV
@@ -1793,19 +2300,28 @@ void ExecuteUnit::execute_vector_integer(core::CPU& cpu, isa::OperationId op_id,
 
         // VWSLL
         case isa::OperationId::VWSLL_VV:
-            if (sew == 8) execute_vwsll_vv<int16_t, int8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16) execute_vwsll_vv<int32_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else execute_vwsll_vv<int64_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwsll_vv<int16_t, int8_t>(cpu, rd, rs1, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwsll_vv<int32_t, int16_t>(cpu, rd, rs1, rs2, vm, vl);
+            else
+                execute_vwsll_vv<int64_t, int32_t>(cpu, rd, rs1, rs2, vm, vl);
             return;
         case isa::OperationId::VWSLL_VX:
-            if (sew == 8) execute_vwsll_vx<int16_t, int8_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 16) execute_vwsll_vx<int32_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else execute_vwsll_vx<int64_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwsll_vx<int16_t, int8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwsll_vx<int32_t, int16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+            else
+                execute_vwsll_vx<int64_t, int32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return;
         case isa::OperationId::VWSLL_VI:
-            if (sew == 8) execute_vwsll_vi<int16_t, int8_t>(cpu, rd, simm5, rs2, vm, vl);
-            else if (sew == 16) execute_vwsll_vi<int32_t, int16_t>(cpu, rd, simm5, rs2, vm, vl);
-            else execute_vwsll_vi<int64_t, int32_t>(cpu, rd, simm5, rs2, vm, vl);
+            if (sew == 8)
+                execute_vwsll_vi<int16_t, int8_t>(cpu, rd, simm5, rs2, vm, vl);
+            else if (sew == 16)
+                execute_vwsll_vi<int32_t, int16_t>(cpu, rd, simm5, rs2, vm, vl);
+            else
+                execute_vwsll_vi<int64_t, int32_t>(cpu, rd, simm5, rs2, vm, vl);
             return;
 
         default:
@@ -1813,4 +2329,4 @@ void ExecuteUnit::execute_vector_integer(core::CPU& cpu, isa::OperationId op_id,
     }
 }
 
-} // namespace simrv::execute
+}  // namespace simrv::execute

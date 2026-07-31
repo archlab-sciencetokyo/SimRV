@@ -2,21 +2,22 @@
  * @file LeftPaneStats.cpp
  * @brief Performance statistics and pipeline counters pane rendering.
  */
-#include "simrv/tui/panels/LeftPane.hpp"
-#include "simrv/tui/TuiTheme.hpp"
-#include "simrv/util/FormatUtil.hpp"
-#include "simrv/Define.hpp"
-#include "simrv/core/Cpu.hpp"
-#include "simrv/core/Machine.hpp"
-#include "simrv/xlen/Helpers.hpp"
-#include "simrv/xlen/Types.hpp"
-#include "simrv/debug/GdbStub.hpp"
-#include "simrv/debug/SpikeLockstep.hpp"
+#include <algorithm>
+#include <array>
 #include <format>
 #include <string>
 #include <vector>
-#include <array>
-#include <algorithm>
+
+#include "simrv/Define.hpp"
+#include "simrv/core/Cpu.hpp"
+#include "simrv/core/Machine.hpp"
+#include "simrv/debug/GdbStub.hpp"
+#include "simrv/debug/SpikeLockstep.hpp"
+#include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/util/FormatUtil.hpp"
+#include "simrv/xlen/Helpers.hpp"
+#include "simrv/xlen/Types.hpp"
 
 namespace simrv::tui {
 
@@ -27,21 +28,20 @@ using simrv::isa::InstFormat;
 
 namespace {
 
-enum class InstCategory : uint8_t {
-    ALU, MEM, CTRL, SYS, VEC
-};
+enum class InstCategory : uint8_t { ALU, MEM, CTRL, SYS, VEC };
 
 auto get_inst_category(int i) -> InstCategory {
-    static constexpr std::array<InstCategory, 512> category_lut = []() -> std::array<InstCategory, 512> {
+    static constexpr std::array<InstCategory, 512> category_lut =
+        []() -> std::array<InstCategory, 512> {
         std::array<InstCategory, 512> lut{};
         lut.fill(InstCategory::ALU);
-        
+
         lut[OperationId::JAL] = InstCategory::CTRL;
         lut[OperationId::JALR] = InstCategory::CTRL;
         for (int op = OperationId::BEQ; op <= OperationId::BGEU; ++op) {
             lut[op] = InstCategory::CTRL;
         }
-        
+
         for (int op = OperationId::LB; op <= OperationId::SD; ++op) {
             lut[op] = InstCategory::MEM;
         }
@@ -50,7 +50,7 @@ auto get_inst_category(int i) -> InstCategory {
         for (int op = OperationId::AMOSWAP_W; op <= OperationId::AMOMAXU_W; ++op) {
             lut[op] = InstCategory::MEM;
         }
-        
+
         lut[OperationId::ECALL] = InstCategory::SYS;
         lut[OperationId::EBREAK] = InstCategory::SYS;
         lut[OperationId::URET] = InstCategory::SYS;
@@ -62,7 +62,7 @@ auto get_inst_category(int i) -> InstCategory {
         for (int op = OperationId::VSETVLI; op <= OperationId::VWSLL_VI; ++op) {
             lut[op] = InstCategory::VEC;
         }
-        
+
         return lut;
     }();
     if (i >= 0 && i < 512) {
@@ -101,36 +101,42 @@ auto make_progress_bar(double ratio, int width, const std::string& color_code) -
     return bar;
 }
 
-} // namespace
+}  // namespace
 
-auto LeftPane::render_machine_performance_stats(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
+auto LeftPane::render_machine_performance_stats(const simrv::core::CPU& cpu, int adj_logical_row,
+                                                int width) -> std::string {
     if (adj_logical_row >= 25 && adj_logical_row <= 30) {
         return render_machine_performance_stats_core(cpu, adj_logical_row, width);
     }
     return render_machine_performance_stats_sys(cpu, adj_logical_row, width);
 }
 
-auto LeftPane::render_machine_performance_stats_core(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
+auto LeftPane::render_machine_performance_stats_core(const simrv::core::CPU& cpu,
+                                                     int adj_logical_row, int width)
+    -> std::string {
     if (adj_logical_row == 25) {
         return section_line("Performance & Machine Stats", width);
     }
     if (adj_logical_row == 26) {
-        std::string insns = std::format("  Executed Insns : {}{}\033[0m", kThemeMint, simrv::util::format_with_commas(cpu.e_icount));
+        std::string insns = std::format("  Executed Insns : {}{}\033[0m", kThemeMint,
+                                        simrv::util::format_with_commas(cpu.e_icount));
         return format_to_width(insns, width);
     }
     if (adj_logical_row == 27) {
         double sim_time_seconds = static_cast<double>(cpu.clint_mmio.mtime) / 10000000.0;
-        std::string time = std::format("  Simulated Time : {}{:.6f} s\033[0m {}(0x{:x})\033[0m",
-                                       kThemeMint, sim_time_seconds, kThemeMuted, cpu.clint_mmio.mtime);
+        std::string time =
+            std::format("  Simulated Time : {}{:.6f} s\033[0m {}(0x{:x})\033[0m", kThemeMint,
+                        sim_time_seconds, kThemeMuted, cpu.clint_mmio.mtime);
         return format_to_width(time, width);
     }
     if (adj_logical_row == 28) {
-        std::string time = std::format("  Active Runtime : {}{:.6f} s\033[0m",
-                                       kThemeMint, active_runtime_);
+        std::string time =
+            std::format("  Active Runtime : {}{:.6f} s\033[0m", kThemeMint, active_runtime_);
         return format_to_width(time, width);
     }
     if (adj_logical_row == 29) {
-        std::string mode = std::format("  Simulation Mode: {}Functional (High-Perf)\033[0m", kThemeVal);
+        std::string mode =
+            std::format("  Simulation Mode: {}Functional (High-Perf)\033[0m", kThemeVal);
         return format_to_width(mode, width);
     }
     if (adj_logical_row == 30) {
@@ -141,7 +147,8 @@ auto LeftPane::render_machine_performance_stats_core(const simrv::core::CPU& cpu
     return format_to_width("", width);
 }
 
-auto LeftPane::render_machine_performance_stats_sys([[maybe_unused]] const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
+auto LeftPane::render_machine_performance_stats_sys([[maybe_unused]] const simrv::core::CPU& cpu,
+                                                    int adj_logical_row, int width) -> std::string {
     if (adj_logical_row == 31) {
         std::string mem_name = machine_.s_fn_memimg;
         auto pos = mem_name.find_last_of("/\\");
@@ -167,8 +174,8 @@ auto LeftPane::render_machine_performance_stats_sys([[maybe_unused]] const simrv
             if (val > max_val) max_val = val;
         }
 
-        std::string suffix =
-            std::format("] {} Max:{}", simrv::util::format_with_commas(kips_), simrv::util::format_with_commas(max_val));
+        std::string suffix = std::format("] {} Max:{}", simrv::util::format_with_commas(kips_),
+                                         simrv::util::format_with_commas(max_val));
         std::string prefix = "  Speed (KIPS)   : [";
         int spark_width =
             width - static_cast<int>(prefix.length()) - static_cast<int>(suffix.length());
@@ -176,8 +183,9 @@ auto LeftPane::render_machine_performance_stats_sys([[maybe_unused]] const simrv
 
         std::string spark = get_sparkline_string(spark_width);
         std::string color = std::format(
-            "  {}Speed (KIPS)\033[0m   : [{}{}\033[0m] {}{}\033[0m {}{}Max:{}\033[0m",
-            kThemeText, kThemeMint, spark, kThemeMint, simrv::util::format_with_commas(kips_), kThemeMuted, kThemeMuted, simrv::util::format_with_commas(max_val));
+            "  {}Speed (KIPS)\033[0m   : [{}{}\033[0m] {}{}\033[0m {}{}Max:{}\033[0m", kThemeText,
+            kThemeMint, spark, kThemeMint, simrv::util::format_with_commas(kips_), kThemeMuted,
+            kThemeMuted, simrv::util::format_with_commas(max_val));
 
         return format_to_width(color, width);
     }
@@ -187,7 +195,8 @@ auto LeftPane::render_machine_performance_stats_sys([[maybe_unused]] const simrv
     return format_to_width("", width);
 }
 
-auto LeftPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
+auto LeftPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int adj_logical_row,
+                                           int width) -> std::string {
     if (adj_logical_row >= 25 && adj_logical_row <= 29) {
         return render_cycle_accurate_core_stats(cpu, adj_logical_row, width);
     }
@@ -200,7 +209,8 @@ auto LeftPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int adj_
     return render_cycle_accurate_hw_info(cpu, adj_logical_row, width);
 }
 
-auto LeftPane::render_cycle_accurate_core_stats(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
+auto LeftPane::render_cycle_accurate_core_stats(const simrv::core::CPU& cpu, int adj_logical_row,
+                                                int width) -> std::string {
     if (adj_logical_row == 25) {
         return section_line("Statistics & Performance", width);
     }
@@ -216,9 +226,9 @@ auto LeftPane::render_cycle_accurate_core_stats(const simrv::core::CPU& cpu, int
         // report this explicitly instead of showing misleading 0% stats.
         const bool hp_mode = cpu.machine_ && cpu.machine_->s_high_performance;
         if (hp_mode && i_total == 0) {
-            std::string color = std::format(
-                "  {}L1-I Cache\033[0m     : {}bypassed (high-perf mode)\033[0m",
-                kThemeText, kThemeMuted);
+            std::string color =
+                std::format("  {}L1-I Cache\033[0m     : {}bypassed (high-perf mode)\033[0m",
+                            kThemeText, kThemeMuted);
             return format_to_width(color, width);
         }
 
@@ -230,9 +240,10 @@ auto LeftPane::render_cycle_accurate_core_stats(const simrv::core::CPU& cpu, int
         if (bar_width < 5) bar_width = 5;
 
         std::string bar = make_progress_bar(i_ratio, bar_width, kThemeSky);
-        std::string color = std::format(
-            "  {}L1-I Cache\033[0m     : [{}] {}{:5.1f}%\033[0m {}(H:{} M:{})\033[0m",
-            kThemeText, bar, kThemeSky, i_ratio * 100.0, kThemeMuted, format_compact(i_hits), format_compact(i_misses));
+        std::string color =
+            std::format("  {}L1-I Cache\033[0m     : [{}] {}{:5.1f}%\033[0m {}(H:{} M:{})\033[0m",
+                        kThemeText, bar, kThemeSky, i_ratio * 100.0, kThemeMuted,
+                        format_compact(i_hits), format_compact(i_misses));
 
         return format_to_width(color, width);
     }
@@ -252,9 +263,10 @@ auto LeftPane::render_cycle_accurate_core_stats(const simrv::core::CPU& cpu, int
         if (bar_width < 5) bar_width = 5;
 
         std::string bar = make_progress_bar(d_ratio, bar_width, kThemePink);
-        std::string color = std::format(
-            "  {}L1-D Cache\033[0m     : [{}] {}{:5.1f}%\033[0m {}(H:{} M:{})\033[0m",
-            kThemeText, bar, kThemePink, d_ratio * 100.0, kThemeMuted, format_compact(d_hits), format_compact(d_misses));
+        std::string color =
+            std::format("  {}L1-D Cache\033[0m     : [{}] {}{:5.1f}%\033[0m {}(H:{} M:{})\033[0m",
+                        kThemeText, bar, kThemePink, d_ratio * 100.0, kThemeMuted,
+                        format_compact(d_hits), format_compact(d_misses));
 
         return format_to_width(color, width);
     }
@@ -265,16 +277,18 @@ auto LeftPane::render_cycle_accurate_core_stats(const simrv::core::CPU& cpu, int
     double cpi = (icount == 0) ? 0.0 : static_cast<double>(cycles) / static_cast<double>(icount);
 
     if (adj_logical_row == 28) {
-        std::string color = std::format(
-            "  {}IPC / CPI\033[0m      : {}{:.2f} IPC\033[0m  /  {}{:.2f} CPI\033[0m",
-            kThemeText, kThemeMint, ipc, kThemePeach, cpi);
+        std::string color =
+            std::format("  {}IPC / CPI\033[0m      : {}{:.2f} IPC\033[0m  /  {}{:.2f} CPI\033[0m",
+                        kThemeText, kThemeMint, ipc, kThemePeach, cpi);
         return format_to_width(color, width);
     }
 
     uint64_t stalls = cpu.pipeline_sim.stall_cycles();
     uint64_t bubbles = cpu.pipeline_sim.bubble_cycles();
     uint64_t total_stalls_bubbles = stalls + bubbles;
-    double stall_pct = (cycles == 0) ? 0.0 : (static_cast<double>(total_stalls_bubbles) * 100.0) / static_cast<double>(cycles);
+    double stall_pct = (cycles == 0) ? 0.0
+                                     : (static_cast<double>(total_stalls_bubbles) * 100.0) /
+                                           static_cast<double>(cycles);
 
     if (adj_logical_row == 29) {
         std::string color = std::format(
@@ -286,7 +300,8 @@ auto LeftPane::render_cycle_accurate_core_stats(const simrv::core::CPU& cpu, int
     return format_to_width("", width);
 }
 
-auto LeftPane::render_cycle_accurate_hazard_stats(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
+auto LeftPane::render_cycle_accurate_hazard_stats(const simrv::core::CPU& cpu, int adj_logical_row,
+                                                  int width) -> std::string {
     uint64_t cycles = cpu.clint_mmio.mcycle;
     uint64_t data_stalls = cpu.pipeline_sim.data_hazard_stalls();
     uint64_t ctrl_bubbles = cpu.pipeline_sim.control_hazard_bubbles();
@@ -295,41 +310,48 @@ auto LeftPane::render_cycle_accurate_hazard_stats(const simrv::core::CPU& cpu, i
     uint64_t cache_stalls = ic_stalls + dc_stalls;
 
     if (adj_logical_row == 30) {
-        double data_pct = (cycles == 0) ? 0.0 : (static_cast<double>(data_stalls) * 100.0) / static_cast<double>(cycles);
+        double data_pct = (cycles == 0) ? 0.0
+                                        : (static_cast<double>(data_stalls) * 100.0) /
+                                              static_cast<double>(cycles);
         std::string color = std::format(
-            "    {}- Data RAW\033[0m   : {}{:>10}\033[0m clk {}({:5.1f}%)\033[0m",
-            kThemeMuted, kThemePeach, simrv::util::format_with_commas(data_stalls), kThemeMuted, data_pct);
+            "    {}- Data RAW\033[0m   : {}{:>10}\033[0m clk {}({:5.1f}%)\033[0m", kThemeMuted,
+            kThemePeach, simrv::util::format_with_commas(data_stalls), kThemeMuted, data_pct);
         return format_to_width(color, width);
     }
 
     if (adj_logical_row == 31) {
-        double ctrl_pct = (cycles == 0) ? 0.0 : (static_cast<double>(ctrl_bubbles) * 100.0) / static_cast<double>(cycles);
+        double ctrl_pct = (cycles == 0) ? 0.0
+                                        : (static_cast<double>(ctrl_bubbles) * 100.0) /
+                                              static_cast<double>(cycles);
         std::string color = std::format(
-            "    {}- Control\033[0m    : {}{:>10}\033[0m clk {}({:5.1f}%)\033[0m",
-            kThemeMuted, kThemePeach, simrv::util::format_with_commas(ctrl_bubbles), kThemeMuted, ctrl_pct);
+            "    {}- Control\033[0m    : {}{:>10}\033[0m clk {}({:5.1f}%)\033[0m", kThemeMuted,
+            kThemePeach, simrv::util::format_with_commas(ctrl_bubbles), kThemeMuted, ctrl_pct);
         return format_to_width(color, width);
     }
 
     if (adj_logical_row == 32) {
-        double cache_pct = (cycles == 0) ? 0.0 : (static_cast<double>(cache_stalls) * 100.0) / static_cast<double>(cycles);
+        double cache_pct = (cycles == 0) ? 0.0
+                                         : (static_cast<double>(cache_stalls) * 100.0) /
+                                               static_cast<double>(cycles);
         std::string color = std::format(
-            "    {}- Cache\033[0m      : {}{:>10}\033[0m clk {}({:5.1f}%)\033[0m",
-            kThemeMuted, kThemePeach, simrv::util::format_with_commas(cache_stalls), kThemeMuted, cache_pct);
+            "    {}- Cache\033[0m      : {}{:>10}\033[0m clk {}({:5.1f}%)\033[0m", kThemeMuted,
+            kThemePeach, simrv::util::format_with_commas(cache_stalls), kThemeMuted, cache_pct);
         return format_to_width(color, width);
     }
 
     return format_to_width("", width);
 }
 
-auto LeftPane::render_cycle_accurate_mix_stats(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
+auto LeftPane::render_cycle_accurate_mix_stats(const simrv::core::CPU& cpu, int adj_logical_row,
+                                               int width) -> std::string {
     if (adj_logical_row == 33) {
         uint64_t max_val = 1;
         for (auto val : kips_history_) {
             if (val > max_val) max_val = val;
         }
 
-        std::string suffix =
-            std::format("] {} Max:{}", simrv::util::format_with_commas(kips_), simrv::util::format_with_commas(max_val));
+        std::string suffix = std::format("] {} Max:{}", simrv::util::format_with_commas(kips_),
+                                         simrv::util::format_with_commas(max_val));
         std::string prefix = "  Speed (KIPS)   : [";
         int spark_width =
             width - static_cast<int>(prefix.length()) - static_cast<int>(suffix.length());
@@ -337,8 +359,9 @@ auto LeftPane::render_cycle_accurate_mix_stats(const simrv::core::CPU& cpu, int 
 
         std::string spark = get_sparkline_string(spark_width);
         std::string color = std::format(
-            "  {}Speed (KIPS)\033[0m   : [{}{}\033[0m] {}{}\033[0m {}{}Max:{}\033[0m",
-            kThemeText, kThemeMint, spark, kThemeMint, simrv::util::format_with_commas(kips_), kThemeMuted, kThemeMuted, simrv::util::format_with_commas(max_val));
+            "  {}Speed (KIPS)\033[0m   : [{}{}\033[0m] {}{}\033[0m {}{}Max:{}\033[0m", kThemeText,
+            kThemeMint, spark, kThemeMint, simrv::util::format_with_commas(kips_), kThemeMuted,
+            kThemeMuted, simrv::util::format_with_commas(max_val));
 
         return format_to_width(color, width);
     }
@@ -386,14 +409,14 @@ auto LeftPane::render_cycle_accurate_mix_stats(const simrv::core::CPU& cpu, int 
         // Build the inst mix line, suppressing zero-percentage categories
         std::string color = std::format("  {}Inst Mix\033[0m       :", kThemeText);
         auto append_cat = [&](const char* label, const char* col, double pct) -> void {
-            if (pct < 0.05) return; // suppress 0.0%
+            if (pct < 0.05) return;  // suppress 0.0%
             color += std::format(" {}{}: {:.1f}%\033[0m", col, label, pct);
         };
-        append_cat("ALU",  kThemeMint,  alu_p);
-        append_cat("MEM",  kThemeSky,   mem_p);
+        append_cat("ALU", kThemeMint, alu_p);
+        append_cat("MEM", kThemeSky, mem_p);
         append_cat("CTRL", kThemePeach, ctrl_p);
-        append_cat("SYS",  kThemePink,  sys_p);
-        append_cat("VEC",  kThemeCoral, vec_p);
+        append_cat("SYS", kThemePink, sys_p);
+        append_cat("VEC", kThemeCoral, vec_p);
 
         return format_to_width(color, width);
     }
@@ -401,21 +424,23 @@ auto LeftPane::render_cycle_accurate_mix_stats(const simrv::core::CPU& cpu, int 
     return format_to_width("", width);
 }
 
-auto LeftPane::render_cycle_accurate_hw_info(const simrv::core::CPU& cpu, int adj_logical_row, int width) -> std::string {
+auto LeftPane::render_cycle_accurate_hw_info(const simrv::core::CPU& cpu, int adj_logical_row,
+                                             int width) -> std::string {
     if (adj_logical_row == 35) {
         return section_line("Machine & Hardware Info", width);
     }
 
     if (adj_logical_row == 36) {
         double sim_time_seconds = static_cast<double>(cpu.clint_mmio.mtime) / 10000000.0;
-        std::string time = std::format("  Simulated Time : {}{:.6f} s\033[0m {}(0x{:x})\033[0m",
-                                       kThemeMint, sim_time_seconds, kThemeMuted, cpu.clint_mmio.mtime);
+        std::string time =
+            std::format("  Simulated Time : {}{:.6f} s\033[0m {}(0x{:x})\033[0m", kThemeMint,
+                        sim_time_seconds, kThemeMuted, cpu.clint_mmio.mtime);
         return format_to_width(time, width);
     }
 
     if (adj_logical_row == 37) {
-        std::string time = std::format("  Active Runtime : {}{:.6f} s\033[0m",
-                                       kThemeMint, active_runtime_);
+        std::string time =
+            std::format("  Active Runtime : {}{:.6f} s\033[0m", kThemeMint, active_runtime_);
         return format_to_width(time, width);
     }
 
@@ -477,7 +502,9 @@ auto LeftPane::render_debug_state(int debug_row, int width) -> std::string {
         } else {
             sym = "<" + sym + ">";
         }
-        return format_to_width(std::format(" {}{:<8}\033[0m: {}{}\033[0m", kThemeText, "symbol", kThemePeach, sym), width);
+        return format_to_width(
+            std::format(" {}{:<8}\033[0m: {}{}\033[0m", kThemeText, "symbol", kThemePeach, sym),
+            width);
     }
     if (debug_row == 2) {
         std::string gdb_status = "disabled";
@@ -486,20 +513,23 @@ auto LeftPane::render_debug_state(int debug_row, int width) -> std::string {
         }
         std::string lockstep_status = machine_.spike_lockstep ? "active" : "disabled";
         return render_pair("gdb_stub", gdb_status, machine_.gdb_stub ? kThemeMint : kThemeMuted,
-                           "lockstep", lockstep_status, machine_.spike_lockstep ? kThemeMint : kThemeMuted,
-                           col_width, right_width, 8);
+                           "lockstep", lockstep_status,
+                           machine_.spike_lockstep ? kThemeMint : kThemeMuted, col_width,
+                           right_width, 8);
     }
     if (debug_row == 3) {
         std::string tohost_str = std::format("0x{:x}", machine_.tohost);
         std::string traplog_status = machine_.s_traplog_mode ? "active" : "disabled";
         return render_pair("tohost", tohost_str, machine_.tohost != 0 ? kThemePeach : kThemeVal,
-                           "traplog", traplog_status, machine_.s_traplog_mode ? kThemeMint : kThemeMuted,
-                           col_width, right_width, 8);
+                           "traplog", traplog_status,
+                           machine_.s_traplog_mode ? kThemeMint : kThemeMuted, col_width,
+                           right_width, 8);
     }
     return format_to_width("", width);
 }
 
-auto LeftPane::render_perf_or_debug(const simrv::core::CPU& cpu, int logical_row, int width, bool single_column) -> std::string {
+auto LeftPane::render_perf_or_debug(const simrv::core::CPU& cpu, int logical_row, int width,
+                                    bool single_column) -> std::string {
     int const total_logical_rows = get_total_rows(width);
     int const adj_base_rows = total_logical_rows - (machine_.s_debug_mode ? 4 : 0);
 
@@ -507,7 +537,8 @@ auto LeftPane::render_perf_or_debug(const simrv::core::CPU& cpu, int logical_row
         return render_debug_state(logical_row - adj_base_rows, width);
     }
 
-    int const adj_logical_row = (single_column && logical_row >= 32) ? (logical_row - 16) : logical_row;
+    int const adj_logical_row =
+        (single_column && logical_row >= 32) ? (logical_row - 16) : logical_row;
 
     if (!machine_.s_cycle_accurate) {
         return render_machine_performance_stats(cpu, adj_logical_row, width);

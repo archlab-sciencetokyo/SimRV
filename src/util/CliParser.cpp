@@ -3,20 +3,22 @@
  * @brief Command-line parser implementations.
  */
 #include "simrv/util/CliParser.hpp"
-#include "simrv/core/Logger.hpp"
-#include "simrv/memory/MemoryUtil.hpp"
-#include "simrv/tui/Tui.hpp"
-#include "simrv/xlen/Types.hpp"
-#include "simrv/util/FormatUtil.hpp"
 
 #include <unistd.h>
+
 #include <algorithm>
 #include <cctype>
 #include <charconv>
 #include <format>
 #include <print>
-#include <string>
 #include <span>
+#include <string>
+
+#include "simrv/core/Logger.hpp"
+#include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/tui/Tui.hpp"
+#include "simrv/util/FormatUtil.hpp"
+#include "simrv/xlen/Types.hpp"
 
 namespace simrv::util {
 
@@ -218,17 +220,13 @@ auto is_image_option(std::string_view arg) -> bool {
     return arg == "-m" || arg == "-k" || arg == "-i" || arg == "--image" || arg == "--kernel";
 }
 
-auto is_disk_option(std::string_view arg) -> bool {
-    return arg == "-D" || arg == "--disk";
-}
+auto is_disk_option(std::string_view arg) -> bool { return arg == "-D" || arg == "--disk"; }
 
 auto is_fdt_option(std::string_view arg) -> bool {
     return arg == "-f" || arg == "--fdt" || arg == "--dtb" || arg == "-c";
 }
 
-auto is_traplog_option(std::string_view arg) -> bool {
-    return arg == "--trap-log" || arg == "-P";
-}
+auto is_traplog_option(std::string_view arg) -> bool { return arg == "--trap-log" || arg == "-P"; }
 
 auto is_steps_option(std::string_view arg) -> bool {
     return arg == "-s" || arg == "--steps" || arg == "-e";
@@ -263,23 +261,20 @@ auto is_os_option(std::string_view arg) -> bool {
 }
 
 auto is_ca_option(std::string_view arg) -> bool {
-    return arg == "--ca" || arg == "--cycle-accurate" || arg == "-C" || arg == "--high-accuracy" || arg == "--accuracy-mode";
+    return arg == "--ca" || arg == "--cycle-accurate" || arg == "-C" || arg == "--high-accuracy" ||
+           arg == "--accuracy-mode";
 }
 auto is_ia_option(std::string_view arg) -> bool {
     return arg == "--ia" || arg == "--high-performance" || arg == "--perf-mode";
 }
 
-auto is_tui_option(std::string_view arg) -> bool {
-    return arg == "--tui" || arg == "-u";
-}
+auto is_tui_option(std::string_view arg) -> bool { return arg == "--tui" || arg == "-u"; }
 
 auto is_cli_option(std::string_view arg) -> bool {
     return arg == "--cli" || arg == "-c" || arg == "--headless" || arg == "--no-tui";
 }
 
-auto is_gui_option(std::string_view arg) -> bool {
-    return arg == "--gui" || arg == "-G";
-}
+auto is_gui_option(std::string_view arg) -> bool { return arg == "--gui" || arg == "-G"; }
 
 auto is_high_contrast_option(std::string_view arg) -> bool {
     return arg == "--high-contrast" || arg == "--contrast";
@@ -289,9 +284,7 @@ auto is_no_forwarding_option(std::string_view arg) -> bool {
     return arg == "--no-forwarding" || arg == "--disable-forwarding";
 }
 
-auto is_bp_type_option(std::string_view arg) -> bool {
-    return arg == "--bp-type" || arg == "--bp";
-}
+auto is_bp_type_option(std::string_view arg) -> bool { return arg == "--bp-type" || arg == "--bp"; }
 
 auto is_btb_size_option(std::string_view arg) -> bool {
     return arg == "--btb-size" || arg == "--btb";
@@ -309,26 +302,19 @@ auto is_explain_inst_option(std::string_view arg) -> bool {
     return arg == "--explain-inst" || arg == "--explain";
 }
 
-auto is_opensbi_option(std::string_view arg) -> bool {
-    return arg == "-B" || arg == "--opensbi";
-}
+auto is_opensbi_option(std::string_view arg) -> bool { return arg == "-B" || arg == "--opensbi"; }
 
 auto is_debug_mode_option(std::string_view arg) -> bool {
     return arg == "-d" || arg == "--debug-mode";
 }
 
-auto is_log_mmio_option(std::string_view arg) -> bool {
-    return arg == "--log-mmio" || arg == "-M";
-}
+auto is_log_mmio_option(std::string_view arg) -> bool { return arg == "--log-mmio" || arg == "-M"; }
 
-auto is_instmix_option(std::string_view arg) -> bool {
-    return arg == "--instmix" || arg == "-x";
-}
+auto is_instmix_option(std::string_view arg) -> bool { return arg == "--instmix" || arg == "-x"; }
 
 auto is_trace_bpred_option(std::string_view arg) -> bool {
     return arg == "--trace-bpred" || arg == "-w";
 }
-
 
 auto is_debug_option(std::string_view arg) -> bool {
     return arg == "-g" || arg == "-v" || arg == "--debug" || arg == "--verbose";
@@ -338,16 +324,12 @@ auto is_gdb_port_option(std::string_view arg) -> bool {
     return arg == "--gdb-port" || arg == "--port" || arg == "-p";
 }
 
-auto is_gdb_option(std::string_view arg) -> bool {
-    return arg == "--gdb" || arg == "-G";
-}
+auto is_gdb_option(std::string_view arg) -> bool { return arg == "--gdb" || arg == "-G"; }
 
-auto is_help_option(std::string_view arg) -> bool {
-    return arg == "-h" || arg == "--help";
-}
+auto is_help_option(std::string_view arg) -> bool { return arg == "-h" || arg == "--help"; }
 
-auto parse_file_options(std::string_view arg, std::span<char* const> args, std::size_t& i, RuntimeOptions& options)
-    -> std::expected<bool, std::string> {
+auto parse_file_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
+                        RuntimeOptions& options) -> std::expected<bool, std::string> {
     if (is_image_option(arg)) {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -385,8 +367,8 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
     return false;
 }
 
-auto parse_execution_options(std::string_view arg, std::span<char* const> args, std::size_t& i, RuntimeOptions& options)
-    -> std::expected<bool, std::string> {
+auto parse_execution_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
+                             RuntimeOptions& options) -> std::expected<bool, std::string> {
     if (is_steps_option(arg)) {
         auto value = parse_scaled_required(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -425,8 +407,8 @@ auto parse_execution_options(std::string_view arg, std::span<char* const> args, 
     return false;
 }
 
-auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::size_t& i, ParseResult& result)
-    -> std::expected<bool, std::string> {
+auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
+                        ParseResult& result) -> std::expected<bool, std::string> {
     if (arg == "--misa") {
         auto value = next_argument(args, i, "--misa");
         if (!value) return std::unexpected(value.error());
@@ -445,7 +427,8 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
             return std::unexpected(std::format("invalid numeric value for {}", arg));
         }
         if (val < 32 || val > 1024 || (val & (val - 1)) != 0) {
-            return std::unexpected(std::format("VLEN must be a power of 2 between 32 and 1024 (got: {})", val));
+            return std::unexpected(
+                std::format("VLEN must be a power of 2 between 32 and 1024 (got: {})", val));
         }
         result.options.vlen = val;
         return true;
@@ -471,8 +454,8 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
     return false;
 }
 
-auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::size_t& i, ParseResult& result)
-    -> std::expected<bool, std::string> {
+auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
+                       ParseResult& result) -> std::expected<bool, std::string> {
     if (is_tui_option(arg)) {
         result.options.tuimode = true;
         return true;
@@ -507,10 +490,13 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
     if (is_bp_type_option(arg)) {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
-        std::string val_str{ *value };
-        if (val_str != "static-taken" && val_str != "static-not-taken" &&
-            val_str != "1bit" && val_str != "2bit" && val_str != "gshare") {
-            return std::unexpected(std::format("invalid branch predictor type: {}. Allowed: static-taken, static-not-taken, 1bit, 2bit, gshare", val_str));
+        std::string val_str{*value};
+        if (val_str != "static-taken" && val_str != "static-not-taken" && val_str != "1bit" &&
+            val_str != "2bit" && val_str != "gshare") {
+            return std::unexpected(
+                std::format("invalid branch predictor type: {}. Allowed: static-taken, "
+                            "static-not-taken, 1bit, 2bit, gshare",
+                            val_str));
         }
         result.options.bp_type = val_str;
         return true;
@@ -538,7 +524,8 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         if (!value) return std::unexpected(value.error());
         uint32_t raw_val = 0;
         if (!parse_u32_base0(*value, raw_val)) {
-            return std::unexpected(std::format("invalid hex instruction value for --explain-inst: {}", *value));
+            return std::unexpected(
+                std::format("invalid hex instruction value for --explain-inst: {}", *value));
         }
         result.action = CliAction::ExplainInstruction;
         result.options.explain_inst_val = raw_val;
@@ -546,7 +533,8 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
     }
     if (is_opensbi_option(arg)) {
         simrv::log::warn(
-            "Option '{}' is deprecated. OpenSBI is automatically enabled when a device tree is loaded.",
+            "Option '{}' is deprecated. OpenSBI is automatically enabled when a device tree is "
+            "loaded.",
             arg);
         return true;
     }
@@ -565,8 +553,8 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
     return false;
 }
 
-auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args, std::size_t& i, RuntimeOptions& options)
-    -> std::expected<bool, std::string> {
+auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
+                               RuntimeOptions& options) -> std::expected<bool, std::string> {
     if (is_trace_bpred_option(arg)) {
         options.bp_trace = true;
         return true;
@@ -624,18 +612,24 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
 
 auto is_known_short_flag(char c) -> bool {
     switch (c) {
-        case 'm': case 'k': case 'i':
+        case 'm':
+        case 'k':
+        case 'i':
         case 'D':
-        case 'f': case 'c':
+        case 'f':
+        case 'c':
         case 'P':
-        case 's': case 'e':
-        case 't': case 'l':
+        case 's':
+        case 'e':
+        case 't':
+        case 'l':
         case 'H':
         case 'r':
         case 'q':
         case 'I':
         case 'p':
-        case 'b': case 'a':
+        case 'b':
+        case 'a':
         case 'u':
         case 'G':
         case 'C':
@@ -643,7 +637,8 @@ auto is_known_short_flag(char c) -> bool {
         case 'M':
         case 'x':
         case 'w':
-        case 'g': case 'v':
+        case 'g':
+        case 'v':
         case 'B':
         case 'h':
             return true;
@@ -654,12 +649,17 @@ auto is_known_short_flag(char c) -> bool {
 
 auto short_flag_takes_argument(char c) -> bool {
     switch (c) {
-        case 'm': case 'k': case 'i':
+        case 'm':
+        case 'k':
+        case 'i':
         case 'D':
-        case 'f': case 'c':
+        case 'f':
+        case 'c':
         case 'P':
-        case 's': case 'e':
-        case 't': case 'l':
+        case 's':
+        case 'e':
+        case 't':
+        case 'l':
         case 'H':
         case 'r':
         case 'q':
@@ -713,7 +713,7 @@ auto expand_short_flags(const std::vector<std::string>& original_args) -> std::v
     return expanded;
 }
 
-} // namespace
+}  // namespace
 
 auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResult, std::string> {
     std::vector<std::string> original_args;
@@ -836,11 +836,16 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
 
     {
         using BPT = pipeline::BranchPredictorType;
-        if (options.bp_type == "static-not-taken")  machine->cpu.pipeline_sim.config.bp_type = BPT::StaticNotTaken;
-        else if (options.bp_type == "static-taken") machine->cpu.pipeline_sim.config.bp_type = BPT::StaticTaken;
-        else if (options.bp_type == "1bit")         machine->cpu.pipeline_sim.config.bp_type = BPT::OneBitBimodal;
-        else if (options.bp_type == "gshare")       machine->cpu.pipeline_sim.config.bp_type = BPT::Gshare;
-        else                                        machine->cpu.pipeline_sim.config.bp_type = BPT::TwoBitBimodal; // default "2bit"
+        if (options.bp_type == "static-not-taken")
+            machine->cpu.pipeline_sim.config.bp_type = BPT::StaticNotTaken;
+        else if (options.bp_type == "static-taken")
+            machine->cpu.pipeline_sim.config.bp_type = BPT::StaticTaken;
+        else if (options.bp_type == "1bit")
+            machine->cpu.pipeline_sim.config.bp_type = BPT::OneBitBimodal;
+        else if (options.bp_type == "gshare")
+            machine->cpu.pipeline_sim.config.bp_type = BPT::Gshare;
+        else
+            machine->cpu.pipeline_sim.config.bp_type = BPT::TwoBitBimodal;  // default "2bit"
     }
 
     machine->tracer.init_trace(options.trace_enabled);
@@ -873,8 +878,7 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
 
 auto needs_memory_image(const ParseResult& result) -> bool {
     return result.options.fn_memimg.empty() && !result.options.tuimode &&
-           result.action != CliAction::ExplainInstruction &&
-           result.action != CliAction::ShowHelp &&
+           result.action != CliAction::ExplainInstruction && result.action != CliAction::ShowHelp &&
            result.action != CliAction::ShowVersion;
 }
 
@@ -929,22 +933,19 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         stdout,
         "  {}-b, -a, --baremetal, --app{} Binary mode (baremetal application execution, default)\n",
         style(kBrightGreen), style(kReset));
-    std::print(
-        stdout,
-        "  {}-o, --linux, --os{}           OS mode (Linux kernel / RTOS boot mode)\n",
-        style(kBrightGreen), style(kReset));
+    std::print(stdout,
+               "  {}-o, --linux, --os{}           OS mode (Linux kernel / RTOS boot mode)\n",
+               style(kBrightGreen), style(kReset));
     std::print(
         stdout,
         "  {}-u, --tui{}                  Enable interactive TUI split-screen monitor mode\n",
         style(kBrightGreen), style(kReset));
-    std::print(
-        stdout,
-        "  {}-G, --gui{}                  Enable external SDL3 graphical window\n",
-        style(kBrightGreen), style(kReset));
-    std::print(
-        stdout,
-        "  {}--mouse-sensitivity, --mouse-speed {}{}<FACTOR>{} Adjust mouse relative speed scaling factor (default: 1.0)\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout, "  {}-G, --gui{}                  Enable external SDL3 graphical window\n",
+               style(kBrightGreen), style(kReset));
+    std::print(stdout,
+               "  {}--mouse-sensitivity, --mouse-speed {}{}<FACTOR>{} Adjust mouse relative speed "
+               "scaling factor (default: 1.0)\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--high-contrast, --contrast{} Toggle TUI colors to high-contrast palette\n",
                style(kBrightGreen), style(kReset));
@@ -969,10 +970,10 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         "  {}--misa {}{}<PROFILE>{}      Select CPU MISA profile: rv{}i | rv{}imac | rv{}gc\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset), xlen_suffix,
         xlen_suffix, xlen_suffix);
-    std::print(
-        stdout,
-        "  {}--vlen, --vector-len {}{}<N>{}  Set vector register length in bits (32–1024, power of 2; default: 256)\n\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--vlen, --vector-len {}{}<N>{}  Set vector register length in bits (32–1024, "
+               "power of 2; default: 256)\n\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
 
     // Tracing and Debug
     std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue),
@@ -1009,8 +1010,8 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBrightGreen), style(kReset));
 
     // Termination Control
-    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Termination Control", style(kReset),
-               style(kReset));
+    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Termination Control",
+               style(kReset), style(kReset));
     std::print(
         stdout,
         "  {}-H, --tohost-addr {}{}<AD>{} Custom tohost device MMIO address for termination\n\n",
@@ -1024,26 +1025,27 @@ auto needs_memory_image(const ParseResult& result) -> bool {
     std::print(stdout,
                "  {}-d, --debug-mode{}            Enable TUI debug diagnostics panel/symbol view\n",
                style(kBrightGreen), style(kReset));
-    std::print(stdout,
-               "  {}--explain-inst {}{}<HEX>{} Explain a hex instruction and exit (e.g., 0x005202b3)\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(
+        stdout,
+        "  {}--explain-inst {}{}<HEX>{} Explain a hex instruction and exit (e.g., 0x005202b3)\n",
+        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout, "  {}--version{}         Show compiler-injected version details and exit\n",
                style(kBrightGreen), style(kReset));
     std::print(stdout,
                "  {}--no-forwarding{}    Disable operand forwarding in cycle-accurate simulation\n",
                style(kBrightGreen), style(kReset));
-    std::print(stdout,
-               "  {}--no-ex-forwarding{}  Disable EX-to-EX forwarding path only\n",
+    std::print(stdout, "  {}--no-ex-forwarding{}  Disable EX-to-EX forwarding path only\n",
+               style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}--no-mem-forwarding{} Disable MEM-to-EX forwarding path only\n",
                style(kBrightGreen), style(kReset));
     std::print(stdout,
-               "  {}--no-mem-forwarding{} Disable MEM-to-EX forwarding path only\n",
-               style(kBrightGreen), style(kReset));
-    std::print(stdout,
-               "  {}--bp-type {}{}<TYPE>{}  Branch predictor type [static-not-taken|static-taken|1bit|2bit|gshare] (default: 2bit)\n",
+               "  {}--bp-type {}{}<TYPE>{}  Branch predictor type "
+               "[static-not-taken|static-taken|1bit|2bit|gshare] (default: 2bit)\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--btb-size {}{}<N>{}    Branch target buffer entries (default: 128, 0 = disabled)\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(
+        stdout,
+        "  {}--btb-size {}{}<N>{}    Branch target buffer entries (default: 128, 0 = disabled)\n",
+        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(
         stdout,
         "  {}-G, --gdb{}                  Enable GDB RSP stub (waits for client before running)\n",
@@ -1092,4 +1094,4 @@ auto option_error(std::string_view msg, int status) -> void {
     std::exit(status);
 }
 
-} // namespace simrv::util
+}  // namespace simrv::util

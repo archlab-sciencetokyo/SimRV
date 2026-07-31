@@ -2,14 +2,15 @@
  * @file LeftPaneBp.cpp
  * @brief Implements Branch Predictor Inspector for TUI Left Pane.
  */
-#include "simrv/tui/panels/LeftPane.hpp"
-#include "simrv/tui/TuiTheme.hpp"
+#include <format>
+#include <string>
+
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
+#include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/panels/LeftPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
-#include <format>
-#include <string>
 
 namespace simrv::tui {
 
@@ -42,17 +43,29 @@ auto LeftPane::render_bp_stats(const simrv::core::CPU& cpu, int logical_row, int
 
     std::string bp_type_str = "2-Bit Bimodal";
     switch (bp_type) {
-        case simrv::pipeline::BranchPredictorType::StaticNotTaken: bp_type_str = "Static NT"; break;
-        case simrv::pipeline::BranchPredictorType::StaticTaken: bp_type_str = "Static T"; break;
-        case simrv::pipeline::BranchPredictorType::OneBitBimodal: bp_type_str = "1-Bit Bimodal"; break;
-        case simrv::pipeline::BranchPredictorType::TwoBitBimodal: bp_type_str = "2-Bit Bimodal"; break;
-        case simrv::pipeline::BranchPredictorType::Gshare: bp_type_str = "Gshare"; break;
+        case simrv::pipeline::BranchPredictorType::StaticNotTaken:
+            bp_type_str = "Static NT";
+            break;
+        case simrv::pipeline::BranchPredictorType::StaticTaken:
+            bp_type_str = "Static T";
+            break;
+        case simrv::pipeline::BranchPredictorType::OneBitBimodal:
+            bp_type_str = "1-Bit Bimodal";
+            break;
+        case simrv::pipeline::BranchPredictorType::TwoBitBimodal:
+            bp_type_str = "2-Bit Bimodal";
+            break;
+        case simrv::pipeline::BranchPredictorType::Gshare:
+            bp_type_str = "Gshare";
+            break;
     }
 
     uint64_t total_branches = cpu.pipeline_sim.cycle_count();
     uint64_t mispredicted = state.stats.control_hazard_bubbles;
     uint64_t correct = (total_branches >= mispredicted) ? (total_branches - mispredicted) : 0;
-    double acc = (total_branches == 0) ? 100.0 : 100.0 * static_cast<double>(correct) / static_cast<double>(total_branches);
+    double acc = (total_branches == 0)
+                     ? 100.0
+                     : 100.0 * static_cast<double>(correct) / static_cast<double>(total_branches);
     uint64_t penalty_cycles = mispredicted * 2;
 
     if (logical_row == 0) {
@@ -60,15 +73,17 @@ auto LeftPane::render_bp_stats(const simrv::core::CPU& cpu, int logical_row, int
     }
     if (logical_row == 1) {
         return format_to_width(
-            std::format("  {}Type:\033[0m {}{:<13}\033[0m │ {}Acc:\033[0m {}{:5.1f}%\033[0m │ {}Pen:\033[0m {}{}\033[0m",
-                        kThemeText, kThemeMint, bp_type_str,
-                        kThemeText, (acc >= 90.0 ? kThemeMint : (acc >= 75.0 ? kThemePeach : kThemeCoral)), acc,
+            std::format("  {}Type:\033[0m {}{:<13}\033[0m │ {}Acc:\033[0m {}{:5.1f}%\033[0m │ "
+                        "{}Pen:\033[0m {}{}\033[0m",
+                        kThemeText, kThemeMint, bp_type_str, kThemeText,
+                        (acc >= 90.0 ? kThemeMint : (acc >= 75.0 ? kThemePeach : kThemeCoral)), acc,
                         kThemeText, kThemeCoral, simrv::util::format_with_commas(penalty_cycles)),
             width);
     }
     if (logical_row == 2) {
         return format_to_width(
-            std::format("  {}Branches:\033[0m {}{:<6}\033[0m │ {}Correct:\033[0m {}{:<6}\033[0m │ {}Mispred:\033[0m {}{}\033[0m",
+            std::format("  {}Branches:\033[0m {}{:<6}\033[0m │ {}Correct:\033[0m {}{:<6}\033[0m │ "
+                        "{}Mispred:\033[0m {}{}\033[0m",
                         kThemeText, kThemeVal, simrv::util::format_with_commas(total_branches),
                         kThemeText, kThemeMint, simrv::util::format_with_commas(correct),
                         kThemeText, kThemeCoral, simrv::util::format_with_commas(mispredicted)),
@@ -80,7 +95,7 @@ auto LeftPane::render_bp_stats(const simrv::core::CPU& cpu, int logical_row, int
 
     // Display 4 BHT entries per row to guarantee compact length (<44 chars)
     if (logical_row >= 4 && logical_row <= 12) {
-        int row_idx = logical_row - 4; // 0 to 8
+        int row_idx = logical_row - 4;  // 0 to 8
         int entries_per_row = 4;
         int start_idx = row_idx * entries_per_row;
         std::string line = "  ";
@@ -93,13 +108,27 @@ auto LeftPane::render_bp_stats(const simrv::core::CPU& cpu, int logical_row, int
             const char* color = kThemeMuted;
             const char* label = "00(SN)";
             switch (bht_val) {
-                case 0: color = kThemeMuted; label = "00(SN)"; break;
-                case 1: color = kThemePeach; label = "01(WN)"; break;
-                case 2: color = kThemeSky;   label = "10(WT)"; break;
-                case 3: color = kThemeMint;  label = "11(ST)"; break;
-                default: break;
+                case 0:
+                    color = kThemeMuted;
+                    label = "00(SN)";
+                    break;
+                case 1:
+                    color = kThemePeach;
+                    label = "01(WN)";
+                    break;
+                case 2:
+                    color = kThemeSky;
+                    label = "10(WT)";
+                    break;
+                case 3:
+                    color = kThemeMint;
+                    label = "11(ST)";
+                    break;
+                default:
+                    break;
             }
-            line += std::format("{}[{:02x}:{} {}{}\033[0m] ", kThemeText, bht_idx, kThemeText, color, label);
+            line += std::format("{}[{:02x}:{} {}{}\033[0m] ", kThemeText, bht_idx, kThemeText,
+                                color, label);
         }
         return format_to_width(line, width);
     }
@@ -111,4 +140,4 @@ auto LeftPane::render_bp_stats(const simrv::core::CPU& cpu, int logical_row, int
     return format_to_width("", width);
 }
 
-} // namespace simrv::tui
+}  // namespace simrv::tui

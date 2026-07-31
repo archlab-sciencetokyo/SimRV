@@ -3,22 +3,23 @@
  * @brief Decoupled SDL3 graphics and window event processor.
  */
 #include "simrv/util/SdlDisplay.hpp"
-#include "simrv/core/Machine.hpp"
-#include "simrv/device/Framebuffer.hpp"
-#include "simrv/device/InputDevice.hpp"
-#include "simrv/core/Logger.hpp"
 
 #include <cctype>
 
+#include "simrv/core/Logger.hpp"
+#include "simrv/core/Machine.hpp"
+#include "simrv/device/Framebuffer.hpp"
+#include "simrv/device/InputDevice.hpp"
+
 namespace simrv::util {
 
-SdlDisplay::SdlDisplay(simrv::core::Machine& machine)
-    : machine_(machine) {}
+SdlDisplay::SdlDisplay(simrv::core::Machine& machine) : machine_(machine) {}
 
 SdlDisplay::~SdlDisplay() {
     try {
         shutdown();
-    } catch (...) {} // NOLINT(bugprone-empty-catch)
+    } catch (...) {
+    }  // NOLINT(bugprone-empty-catch)
 }
 
 void SdlDisplay::init() {
@@ -69,7 +70,8 @@ void SdlDisplay::init() {
     }
 
     SDL_SetTextureScaleMode(texture_, SDL_SCALEMODE_NEAREST);
-    // simrv::log::info("[SdlDisplay] SDL3 graphics initialized ({}x{}, format: {}).", width, height, format);
+    // simrv::log::info("[SdlDisplay] SDL3 graphics initialized ({}x{}, format: {}).", width,
+    // height, format);
 #else
     simrv::log::warn("[SdlDisplay] SimRV compiled without SDL3 support. GUI window is disabled.");
 #endif
@@ -103,7 +105,8 @@ void SdlDisplay::update(uint64_t cycles) {
     process_sdl_events();
 
     auto now = std::chrono::steady_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_render_time_).count();
+    auto elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_render_time_).count();
 
     if (machine_.framebuffer->needs_recreate()) {
         recreate_sdl_properties();
@@ -159,7 +162,8 @@ void SdlDisplay::recreate_sdl_properties() {
         simrv::log::error("[SdlDisplay] Failed to recreate SDL3 texture: {}", SDL_GetError());
     } else {
         SDL_SetTextureScaleMode(texture_, SDL_SCALEMODE_NEAREST);
-        // simrv::log::info("[SdlDisplay] SDL3 texture recreated ({}x{}, format: {}).", width, height, format);
+        // simrv::log::info("[SdlDisplay] SDL3 texture recreated ({}x{}, format: {}).", width,
+        // height, format);
     }
 #endif
 }
@@ -192,14 +196,16 @@ void SdlDisplay::process_sdl_events() {
                 if (window_ && !mouse_grabbed_) {
                     SDL_SetWindowMouseGrab(window_, true);
                     mouse_grabbed_ = true;
-                    simrv::log::info("[SdlDisplay] Mouse joystick mode active. Press Ctrl+Alt to release.");
+                    simrv::log::info(
+                        "[SdlDisplay] Mouse joystick mode active. Press Ctrl+Alt to release.");
                 }
                 break;
             case SDL_EVENT_WINDOW_FOCUS_LOST:
                 if (window_ && mouse_grabbed_) {
                     SDL_SetWindowMouseGrab(window_, false);
                     mouse_grabbed_ = false;
-                    simrv::log::info("[SdlDisplay] Mouse joystick mode released due to focus loss.");
+                    simrv::log::info(
+                        "[SdlDisplay] Mouse joystick mode released due to focus loss.");
                 }
                 break;
             case SDL_EVENT_KEY_DOWN:
@@ -261,7 +267,8 @@ void SdlDisplay::process_sdl_events() {
 
                 // Pack pressed bit at bit 31, ASCII in low byte
                 Word pressed_bit = pressed ? 1ULL : 0ULL;
-                Word packed_key = (pressed_bit << 31) | (static_cast<Word>(key) << 8) | (ascii & 0xFFULL);
+                Word packed_key =
+                    (pressed_bit << 31) | (static_cast<Word>(key) << 8) | (ascii & 0xFFULL);
 
                 if (packed_key != 0 && machine_.input_device) {
                     machine_.input_device->push_key(packed_key);
@@ -277,16 +284,24 @@ void SdlDisplay::process_sdl_events() {
                     SDL_RaiseWindow(window_);
                     SDL_SetWindowMouseGrab(window_, true);
                     mouse_grabbed_ = true;
-                    simrv::log::info("[SdlDisplay] Mouse joystick mode active. Press Ctrl+Alt to release.");
+                    simrv::log::info(
+                        "[SdlDisplay] Mouse joystick mode active. Press Ctrl+Alt to release.");
                 }
 
                 const auto btn = event.button.button;
                 uint8_t bit = 0;
                 switch (btn) {
-                    case SDL_BUTTON_LEFT:   bit = 1; break;
-                    case SDL_BUTTON_RIGHT:  bit = 2; break;
-                    case SDL_BUTTON_MIDDLE: bit = 4; break;
-                    default: break;
+                    case SDL_BUTTON_LEFT:
+                        bit = 1;
+                        break;
+                    case SDL_BUTTON_RIGHT:
+                        bit = 2;
+                        break;
+                    case SDL_BUTTON_MIDDLE:
+                        bit = 4;
+                        break;
+                    default:
+                        break;
                 }
 
                 if (bit != 0) {
@@ -303,9 +318,12 @@ void SdlDisplay::process_sdl_events() {
             }
             case SDL_EVENT_MOUSE_MOTION:
                 if (mouse_grabbed_ && machine_.input_device) {
-                    // Accumulate relative movement from SDL events (works under X11/WSLg without warping)
-                    accumulated_x_ += static_cast<float>(event.motion.xrel) * static_cast<float>(machine_.s_mouse_sensitivity);
-                    accumulated_y_ += static_cast<float>(event.motion.yrel) * static_cast<float>(machine_.s_mouse_sensitivity);
+                    // Accumulate relative movement from SDL events (works under X11/WSLg without
+                    // warping)
+                    accumulated_x_ += static_cast<float>(event.motion.xrel) *
+                                      static_cast<float>(machine_.s_mouse_sensitivity);
+                    accumulated_y_ += static_cast<float>(event.motion.yrel) *
+                                      static_cast<float>(machine_.s_mouse_sensitivity);
                     int dx = static_cast<int>(accumulated_x_);
                     int dy = static_cast<int>(accumulated_y_);
                     accumulated_x_ -= static_cast<float>(dx);
@@ -322,4 +340,4 @@ void SdlDisplay::process_sdl_events() {
 #endif
 }
 
-} // namespace simrv::util
+}  // namespace simrv::util
