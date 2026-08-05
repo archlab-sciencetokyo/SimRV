@@ -8,7 +8,8 @@
 #include <optional>
 #include <string>
 
-#include "simrv/tui/Tui.hpp"
+#include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/TuiWidget.hpp"
 
 namespace simrv::core {
@@ -16,29 +17,6 @@ class Machine;
 }
 
 namespace simrv::tui {
-
-enum class TuiFooterAction : uint8_t {
-    Step,
-    StepBack,
-    CycleRegs,
-    CycleTools,
-    SetBreakpoint,
-    SetWatchpoint,
-    TogglePcBreakpoint,
-    SetSpeed,
-    InspectMem,
-    LoadBinary,
-    ToggleHelp,
-    RunPause,
-    Quit,
-    CycleLayout,
-    TogglePanel,
-    ToggleTrace,
-    OpenSettings,
-    ConfigureMisa,
-    ConfigureSystem,
-    ManageBreakpoints
-};
 
 class StatusBar : public TuiWidget {
    public:

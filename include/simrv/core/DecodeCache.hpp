@@ -1,7 +1,10 @@
+/**
+ * @file DecodeCache.hpp
+ * @brief Fast direct-mapped instruction decode cache for simulator acceleration.
+ */
 #pragma once
 
 #include <array>
-#include <optional>
 
 #include "simrv/Define.hpp"
 #include "simrv/pipeline/DecodedInstruction.hpp"
@@ -24,8 +27,12 @@ class DecodeCache {
         }
     }
 
-    [[nodiscard]] auto lookup(Register pc) -> CachedOp* {
-        size_t index = (pc >> 1) & kCacheMask;
+    [[nodiscard]] static constexpr inline auto calc_index(Register pc) noexcept -> size_t {
+        return ((pc >> 1) ^ (pc >> 13)) & kCacheMask;
+    }
+
+    [[nodiscard]] inline auto lookup(Register pc) -> CachedOp* {
+        size_t index = calc_index(pc);
         auto* entry = &cache_[index];
         if (entry->valid && entry->cpc == pc) {
             return entry;
@@ -33,8 +40,8 @@ class DecodeCache {
         return nullptr;
     }
 
-    void insert(Register pc, const CachedOp& op) {
-        size_t index = (pc >> 1) & kCacheMask;
+    inline void insert(Register pc, const CachedOp& op) {
+        size_t index = calc_index(pc);
         cache_[index] = op;
         cache_[index].cpc = pc;
         cache_[index].valid = true;

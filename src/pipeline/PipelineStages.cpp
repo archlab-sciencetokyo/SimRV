@@ -713,23 +713,41 @@ void CPU::execute_system(Machine& machine) {
                         const Word semihost_op = state_.regs.read(RegId::A0);
                         const Address arg_ptr = state_.regs.read(RegId::A1);
 
-                        if (semihost_op == 0x05) {
-                            const Instruction load_op = kIsXLen64
-                                                            ? static_cast<Instruction>(Funct3::Ld)
-                                                            : static_cast<Instruction>(Funct3::Lw);
-                            const Address fd =
-                                simrv::memory::ram_read_fast(arg_ptr, load_op, machine.mmem);
-                            const Address buf_addr = simrv::memory::ram_read_fast(
-                                arg_ptr + (kIsXLen64 ? 8 : 4), load_op, machine.mmem);
-                            const Address len = simrv::memory::ram_read_fast(
-                                arg_ptr + (kIsXLen64 ? 16 : 8), load_op, machine.mmem);
-                            (void)fd;
+                        switch (semihost_op) {
+                            case 0x05: {
+                                const Instruction load_op =
+                                    kIsXLen64 ? static_cast<Instruction>(Funct3::Ld)
+                                              : static_cast<Instruction>(Funct3::Lw);
+                                const Address fd =
+                                    simrv::memory::ram_read_fast(arg_ptr, load_op, machine.mmem);
+                                const Address buf_addr = simrv::memory::ram_read_fast(
+                                    arg_ptr + (kIsXLen64 ? 8 : 4), load_op, machine.mmem);
+                                const Address len = simrv::memory::ram_read_fast(
+                                    arg_ptr + (kIsXLen64 ? 16 : 8), load_op, machine.mmem);
+                                (void)fd;
 
-                            if (simrv::memory::is_dram_addr(buf_addr)) {
-                                for (Address i = 0; i < len; ++i) {
+                                if (simrv::memory::is_dram_addr(buf_addr)) {
+                                    for (Address i = 0; i < len; ++i) {
+                                        const auto ch = static_cast<uint8_t>(
+                                            simrv::memory::ram_read_fast(
+                                                buf_addr + i, static_cast<Instruction>(Funct3::Lb),
+                                                machine.mmem) &
+                                            0xFF);
+                                        if (machine.s_tuimode && machine.tui) {
+                                            machine.tui->handle_char_write(static_cast<char>(ch));
+                                        } else {
+                                            (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
+                                        }
+                                    }
+                                }
+                                state_.regs.write(RegId::A0, 0);
+                                break;
+                            }
+                            case 0x03: {
+                                if (simrv::memory::is_dram_addr(arg_ptr)) {
                                     const auto ch = static_cast<uint8_t>(
                                         simrv::memory::ram_read_fast(
-                                            buf_addr + i, static_cast<Instruction>(Funct3::Lb),
+                                            arg_ptr, static_cast<Instruction>(Funct3::Lb),
                                             machine.mmem) &
                                         0xFF);
                                     if (machine.s_tuimode && machine.tui) {
@@ -738,44 +756,35 @@ void CPU::execute_system(Machine& machine) {
                                         (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
                                     }
                                 }
+                                state_.regs.write(RegId::A0, 0);
+                                break;
                             }
-                            state_.regs.write(RegId::A0, 0);
-                        } else if (semihost_op == 0x03) {
-                            if (simrv::memory::is_dram_addr(arg_ptr)) {
-                                const auto ch = static_cast<uint8_t>(
-                                    simrv::memory::ram_read_fast(
-                                        arg_ptr, static_cast<Instruction>(Funct3::Lb),
-                                        machine.mmem) &
-                                    0xFF);
-                                if (machine.s_tuimode && machine.tui) {
-                                    machine.tui->handle_char_write(static_cast<char>(ch));
-                                } else {
-                                    (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
-                                }
-                            }
-                            state_.regs.write(RegId::A0, 0);
-                        } else if (semihost_op == 0x04) {
-                            Address ptr = arg_ptr;
-                            if (simrv::memory::is_dram_addr(ptr)) {
-                                while (true) {
-                                    const auto ch = static_cast<uint8_t>(
-                                        simrv::memory::ram_read_fast(
-                                            ptr, static_cast<Instruction>(Funct3::Lb),
-                                            machine.mmem) &
-                                        0xFF);
-                                    if (ch == 0) break;
-                                    if (machine.s_tuimode && machine.tui) {
-                                        machine.tui->handle_char_write(static_cast<char>(ch));
-                                    } else {
-                                        (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
+                            case 0x04: {
+                                Address ptr = arg_ptr;
+                                if (simrv::memory::is_dram_addr(ptr)) {
+                                    while (true) {
+                                        const auto ch = static_cast<uint8_t>(
+                                            simrv::memory::ram_read_fast(
+                                                ptr, static_cast<Instruction>(Funct3::Lb),
+                                                machine.mmem) &
+                                            0xFF);
+                                        if (ch == 0) break;
+                                        if (machine.s_tuimode && machine.tui) {
+                                            machine.tui->handle_char_write(static_cast<char>(ch));
+                                        } else {
+                                            (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
+                                        }
+                                        ptr++;
                                     }
-                                    ptr++;
                                 }
+                                state_.regs.write(RegId::A0, 0);
+                                break;
                             }
-                            state_.regs.write(RegId::A0, 0);
-                        } else {
-                            simrv::log::warn("__ Unhandled semihosting op: 0x{:02x}", semihost_op);
-                            state_.regs.write(RegId::A0, static_cast<Word>(-1));
+                            default:
+                                simrv::log::warn("__ Unhandled semihosting op: 0x{:02x}",
+                                                 semihost_op);
+                                state_.regs.write(RegId::A0, static_cast<Word>(-1));
+                                break;
                         }
 
                         ctx.tkn = true;
@@ -1053,7 +1062,6 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
                         const bool match_all_asid = (std::to_underlying(ctx.rs2) == 0);
                         TLB_flush(match_all_vaddr, ctx.rrs1, match_all_asid,
                                   static_cast<Word>(ctx.rrs2));
-                        dcache.flush();
                     }
                     break;
             }
@@ -1155,7 +1163,6 @@ void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
                         const bool match_all_asid = (std::to_underlying(ctx.rs2) == 0);
                         TLB_flush(match_all_vaddr, ctx.rrs1, match_all_asid,
                                   static_cast<Word>(ctx.rrs2));
-                        dcache.flush();
                     }
                     break;
             }

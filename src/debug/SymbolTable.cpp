@@ -16,6 +16,68 @@
 
 namespace simrv::debug {
 
+namespace {
+
+template <typename Ehdr, typename Shdr, typename Sym, typename StTypeFunc>
+auto parse_elf_symbols(std::ifstream& fs, std::map<Address, std::string>& out_symbols,
+                       std::optional<Address>& out_entry, StTypeFunc get_type) -> bool {
+    Ehdr ehdr{};
+    if (!fs.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr)))
+        return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    out_entry = static_cast<Address>(ehdr.e_entry);
+
+    std::vector<Shdr> shdrs(ehdr.e_shnum);
+    fs.seekg(static_cast<std::streamoff>(ehdr.e_shoff), std::ios::beg);
+    if (!fs.read(reinterpret_cast<char*>(shdrs.data()),
+                 static_cast<std::streamsize>(
+                     static_cast<size_t>(ehdr.e_shnum) *
+                     sizeof(Shdr)))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        return false;
+    }
+
+    int symtab_idx = -1;
+    int strtab_idx = -1;
+    for (int i = 0; std::cmp_less(i, ehdr.e_shnum); ++i) {
+        if (shdrs[i].sh_type == SHT_SYMTAB) {
+            symtab_idx = i;
+            strtab_idx = static_cast<int>(shdrs[i].sh_link);
+        }
+    }
+
+    if (symtab_idx != -1 && strtab_idx != -1) {
+        std::vector<char> strtab(shdrs[strtab_idx].sh_size);
+        fs.seekg(static_cast<std::streamoff>(shdrs[strtab_idx].sh_offset), std::ios::beg);
+        if (!fs.read(strtab.data(), static_cast<std::streamsize>(shdrs[strtab_idx].sh_size))) {
+            return false;
+        }
+
+        size_t num_syms = shdrs[symtab_idx].sh_size / sizeof(Sym);
+        std::vector<Sym> syms(num_syms);
+        fs.seekg(static_cast<std::streamoff>(shdrs[symtab_idx].sh_offset), std::ios::beg);
+        if (!fs.read(reinterpret_cast<char*>(syms.data()),
+                     static_cast<std::streamsize>(
+                         shdrs[symtab_idx]
+                             .sh_size))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+            return false;
+        }
+
+        for (const auto& sym : syms) {
+            const auto type = get_type(sym.st_info);
+            if (sym.st_name != 0 && static_cast<size_t>(sym.st_name) < strtab.size() &&
+                sym.st_value != 0 &&
+                (type == STT_FUNC || type == STT_OBJECT || type == STT_NOTYPE)) {
+                std::string name = &strtab[sym.st_name];
+                if (!name.empty() && name.find('$') == std::string::npos) {
+                    out_symbols[sym.st_value] = name;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+}  // namespace
+
 auto SymbolTable::load_from_elf(const std::string& elf_path) -> bool {
     symbols_.clear();
     entry_point_.reset();
@@ -75,96 +137,14 @@ auto SymbolTable::load_from_elf(const std::string& elf_path) -> bool {
     fs.seekg(0, std::ios::beg);
 
     if (elf_class == ELFCLASS32) {
-        Elf32_Ehdr ehdr;
-        if (!fs.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr)))
-            return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-        entry_point_ = static_cast<Address>(ehdr.e_entry);
-
-        std::vector<Elf32_Shdr> shdrs(ehdr.e_shnum);
-        fs.seekg(ehdr.e_shoff, std::ios::beg);
-        if (!fs.read(reinterpret_cast<char*>(shdrs.data()),
-                     static_cast<std::streamsize>(static_cast<size_t>(ehdr.e_shnum) *
-                                                  sizeof(Elf32_Shdr))))
-            return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-
-        int symtab_idx = -1;
-        int strtab_idx = -1;
-        for (int i = 0; std::cmp_less(i, ehdr.e_shnum); ++i) {
-            if (shdrs[i].sh_type == SHT_SYMTAB) {
-                symtab_idx = i;
-                strtab_idx = static_cast<int>(shdrs[i].sh_link);
-            }
+        if (!parse_elf_symbols<Elf32_Ehdr, Elf32_Shdr, Elf32_Sym>(
+                fs, symbols_, entry_point_, [](auto info) { return ELF32_ST_TYPE(info); })) {
+            return false;
         }
-
-        if (symtab_idx != -1 && strtab_idx != -1) {
-            std::vector<char> strtab(shdrs[strtab_idx].sh_size);
-            fs.seekg(shdrs[strtab_idx].sh_offset, std::ios::beg);
-            if (!fs.read(strtab.data(), static_cast<std::streamsize>(shdrs[strtab_idx].sh_size)))
-                return false;
-
-            size_t num_syms = shdrs[symtab_idx].sh_size / sizeof(Elf32_Sym);
-            std::vector<Elf32_Sym> syms(num_syms);
-            fs.seekg(shdrs[symtab_idx].sh_offset, std::ios::beg);
-            if (!fs.read(reinterpret_cast<char*>(syms.data()),
-                         static_cast<std::streamsize>(shdrs[symtab_idx].sh_size)))
-                return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-
-            for (const auto& sym : syms) {
-                const auto type = ELF32_ST_TYPE(sym.st_info);
-                if (sym.st_name != 0 && sym.st_value != 0 &&
-                    (type == STT_FUNC || type == STT_OBJECT || type == STT_NOTYPE)) {
-                    std::string name = &strtab[sym.st_name];
-                    if (!name.empty() && name.find('$') == std::string::npos) {
-                        symbols_[sym.st_value] = name;
-                    }
-                }
-            }
-        }
-    } else {  // ELFCLASS64
-        Elf64_Ehdr ehdr;
-        if (!fs.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr)))
-            return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-        entry_point_ = static_cast<Address>(ehdr.e_entry);
-
-        std::vector<Elf64_Shdr> shdrs(ehdr.e_shnum);
-        fs.seekg(static_cast<std::streamoff>(ehdr.e_shoff), std::ios::beg);
-        if (!fs.read(reinterpret_cast<char*>(shdrs.data()),
-                     static_cast<std::streamsize>(static_cast<size_t>(ehdr.e_shnum) *
-                                                  sizeof(Elf64_Shdr))))
-            return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-
-        int symtab_idx = -1;
-        int strtab_idx = -1;
-        for (int i = 0; std::cmp_less(i, ehdr.e_shnum); ++i) {
-            if (shdrs[i].sh_type == SHT_SYMTAB) {
-                symtab_idx = i;
-                strtab_idx = static_cast<int>(shdrs[i].sh_link);
-            }
-        }
-
-        if (symtab_idx != -1 && strtab_idx != -1) {
-            std::vector<char> strtab(shdrs[strtab_idx].sh_size);
-            fs.seekg(static_cast<std::streamoff>(shdrs[strtab_idx].sh_offset), std::ios::beg);
-            if (!fs.read(strtab.data(), static_cast<std::streamsize>(shdrs[strtab_idx].sh_size)))
-                return false;
-
-            size_t num_syms = shdrs[symtab_idx].sh_size / sizeof(Elf64_Sym);
-            std::vector<Elf64_Sym> syms(num_syms);
-            fs.seekg(static_cast<std::streamoff>(shdrs[symtab_idx].sh_offset), std::ios::beg);
-            if (!fs.read(reinterpret_cast<char*>(syms.data()),
-                         static_cast<std::streamsize>(shdrs[symtab_idx].sh_size)))
-                return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-
-            for (const auto& sym : syms) {
-                const auto type = ELF64_ST_TYPE(sym.st_info);
-                if (sym.st_name != 0 && sym.st_value != 0 &&
-                    (type == STT_FUNC || type == STT_OBJECT || type == STT_NOTYPE)) {
-                    std::string name = &strtab[sym.st_name];
-                    if (!name.empty() && name.find('$') == std::string::npos) {
-                        symbols_[sym.st_value] = name;
-                    }
-                }
-            }
+    } else {
+        if (!parse_elf_symbols<Elf64_Ehdr, Elf64_Shdr, Elf64_Sym>(
+                fs, symbols_, entry_point_, [](auto info) { return ELF64_ST_TYPE(info); })) {
+            return false;
         }
     }
 

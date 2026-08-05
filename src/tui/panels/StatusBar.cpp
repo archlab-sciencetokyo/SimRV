@@ -242,38 +242,39 @@ static const auto running_row2_entries = std::to_array<FooterEntry>({
      .category = FooterCategory::HelpQuit},
 });
 
-auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool is_debug_mode,
-                        std::optional<int> hit_col = std::nullopt)
-    -> std::pair<std::string, std::optional<TuiFooterAction>> {
-    std::vector<FooterEntry> active_entries;
-    active_entries.reserve(entries.size());
+namespace {
 
+auto filter_footer_entries(std::span<const FooterEntry> entries, bool is_debug_mode)
+    -> std::vector<FooterEntry> {
+    std::vector<FooterEntry> active;
+    active.reserve(entries.size());
     for (const auto& e : entries) {
         if (!is_debug_mode) {
-            if (e.category == FooterCategory::DebugInspect) {
-                continue;
-            }
+            if (e.category == FooterCategory::DebugInspect) continue;
             if (e.category == FooterCategory::DebugExec && e.action != TuiFooterAction::RunPause &&
                 e.action != TuiFooterAction::SetSpeed && e.action != TuiFooterAction::Step) {
                 continue;
             }
         }
-        active_entries.push_back(e);
+        active.push_back(e);
     }
+    while (!active.empty() && (active.front().category == FooterCategory::Spacer ||
+                               active.front().category == FooterCategory::Separator)) {
+        active.erase(active.begin());
+    }
+    while (!active.empty() && (active.back().category == FooterCategory::Spacer ||
+                               active.back().category == FooterCategory::Separator)) {
+        active.pop_back();
+    }
+    return active;
+}
 
-    // Trim leading spacers and separators
-    while (!active_entries.empty() &&
-           (active_entries.front().category == FooterCategory::Spacer ||
-            active_entries.front().category == FooterCategory::Separator)) {
-        active_entries.erase(active_entries.begin());
-    }
+}  // namespace
 
-    // Trim trailing spacers and separators
-    while (!active_entries.empty() &&
-           (active_entries.back().category == FooterCategory::Spacer ||
-            active_entries.back().category == FooterCategory::Separator)) {
-        active_entries.pop_back();
-    }
+auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool is_debug_mode,
+                        std::optional<int> hit_col = std::nullopt)
+    -> std::pair<std::string, std::optional<TuiFooterAction>> {
+    std::vector<FooterEntry> active_entries = filter_footer_entries(entries, is_debug_mode);
 
     int content_len = 0;
     for (const auto& e : active_entries) {
@@ -394,10 +395,16 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         if (status_badge.empty()) {
             bool use_ansi = (get_tui_theme() == TuiTheme::Adaptive ||
                              get_tui_theme() == TuiTheme::HighContrast);
-            status_badge = paused_ ? (use_ansi ? "\033[43;30m PAUSED \033[0m"
+            if (machine_.is_shutdown_) {
+                status_badge = use_ansi ? "\033[41;37m SHUTDOWN \033[0m"
+                                        : "\033[48;5;196m\033[38;5;231m SHUTDOWN \033[0m";
+            } else {
+                status_badge = paused_
+                                   ? (use_ansi ? "\033[43;30m PAUSED \033[0m"
                                                : "\033[48;5;223m\033[38;5;232m PAUSED \033[0m")
                                    : (use_ansi ? "\033[42;30m RUNNING \033[0m"
                                                : "\033[48;5;121m\033[38;5;232m RUNNING \033[0m");
+            }
         } else if (status_badge == "\033[1;38;5;234;48;5;210m TRAPPED \033[0m" &&
                    (get_tui_theme() == TuiTheme::HighContrast ||
                     get_tui_theme() == TuiTheme::Adaptive)) {
@@ -472,13 +479,27 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
 
             if (paused_) {
                 if (target_width_right >= 55) {
-                    if (machine_.s_cycle_accurate) {
-                        right_text = std::format("{}Cycles: {} | Insns: {} | CPI: {:.2f}", dbg_info,
-                                                 simrv::util::format_with_commas(cycles),
-                                                 simrv::util::format_with_commas(icount), cpi);
+                    if (kips_ > 0) {
+                        if (machine_.s_cycle_accurate) {
+                            right_text = std::format(
+                                "{}Cycles: {} | Insns: {} | CPI: {:.2f} | Speed: {}", dbg_info,
+                                simrv::util::format_with_commas(cycles),
+                                simrv::util::format_with_commas(icount), cpi, speed_str);
+                        } else {
+                            right_text =
+                                std::format("{}Insns: {} | Speed: {}", dbg_info,
+                                            simrv::util::format_with_commas(icount), speed_str);
+                        }
                     } else {
-                        right_text = std::format("{}Insns: {}", dbg_info,
-                                                 simrv::util::format_with_commas(icount));
+                        if (machine_.s_cycle_accurate) {
+                            right_text =
+                                std::format("{}Cycles: {} | Insns: {} | CPI: {:.2f}", dbg_info,
+                                            simrv::util::format_with_commas(cycles),
+                                            simrv::util::format_with_commas(icount), cpi);
+                        } else {
+                            right_text = std::format("{}Insns: {}", dbg_info,
+                                                     simrv::util::format_with_commas(icount));
+                        }
                     }
                 } else {
                     if (machine_.s_cycle_accurate) {

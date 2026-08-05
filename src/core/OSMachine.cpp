@@ -19,10 +19,6 @@ namespace simrv::core {
 using namespace simrv::isa;
 
 void OSMachine::run() {
-    if (s_tuimode && tui) {
-        tui->pause_loop();
-    }
-
     cpu.evaluate_timer_interrupt();
 
     // Start background stdin input thread (removes uart poll from hot path)
@@ -30,12 +26,9 @@ void OSMachine::run() {
         uart->start_input_thread();
     }
 
-    // --- Optimisation 1: two separate inner loops ---
-    // Check debug features once up-front and run the appropriate loop.
-    // In normal Linux/RTOS execution none of these fire, so the fast path
-    // has zero per-cycle branches for GDB, lockstep, or TUI ebreak.
+    // Select debug/lockstep/TUI path or direct execution loop
     const bool has_debug = (gdb_stub && gdb_stub->is_connected()) ||
-                           (spike_lockstep && spike_lockstep->is_running()) || (s_tuimode && uart);
+                           (spike_lockstep && spike_lockstep->is_running()) || (s_tuimode && tui);
 
     if (has_debug) {
         // ---- Debug path: GDB / lockstep / TUI ebreak ----
@@ -159,8 +152,7 @@ void OSMachine::finalize_cycle() {
         if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() &&
                                       cpu.e_icount >= s_fincnt)) {
             simrv::log::info("finished by -e option");
-            is_shutdown_ = true;
-            is_running_ = false;
+            stop();
         }
         // SDL update only from main thread in multithreaded mode (optimisation 2)
         if (!s_multithreaded && sdl_display &&
@@ -211,11 +203,7 @@ void OSMachine::finalize_cycle() {
     if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() &&
                                   cpu.e_icount >= s_fincnt)) {
         simrv::log::info("finished by -e option");
-        is_shutdown_ = true;
-        if (s_tuimode && tui) {
-            tui->pause_loop();
-        }
-        is_running_ = false;
+        stop();
     }
     if (simrv::compiler::unlikely(s_bp_trace)) {
         tracer.emit_branch_prediction_trace(cpu.clint_mmio.mtime, cpu.pipeline_context.cpc,

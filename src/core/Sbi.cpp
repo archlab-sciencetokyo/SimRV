@@ -24,6 +24,10 @@ using core::MipBit;
 namespace {
 
 enum class ExtId : std::uint32_t {
+    LegacySetTimer = 0x00,
+    LegacyConsolePutchar = 0x01,
+    LegacyConsoleGetchar = 0x02,
+    LegacyShutdown = 0x08,
     Base = 0x10,
     Time = 0x54494D45,
     Rfence = 0x52464E43,
@@ -271,6 +275,29 @@ auto Sbi::handle_ecall(TrapCause cause) -> bool {
     }
 
     switch (static_cast<ExtId>(ext_id)) {
+        case ExtId::LegacySetTimer:
+            return handle_time(0);
+        case ExtId::LegacyConsolePutchar: {
+            const auto ch = static_cast<char>(cpu_.state().regs.read(RegId::A0));
+            if (cpu_.machine_ && cpu_.machine_->s_tuimode && cpu_.machine_->tui) {
+                cpu_.machine_->tui->handle_char_write(ch);
+            } else {
+                (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
+            }
+            sbi_return(0, 0);
+            return true;
+        }
+        case ExtId::LegacyConsoleGetchar:
+            sbi_return(static_cast<SignedWord>(-1), 0);
+            return true;
+        case ExtId::LegacyShutdown:
+            simrv::log::info("[SBI] Legacy Shutdown requested (ext 0x08).");
+            if (cpu_.machine_ != nullptr) {
+                cpu_.machine_->exit_code = 0;
+                cpu_.machine_->stop();
+            }
+            sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
+            return true;
         case ExtId::Base:
             return handle_base(func_id);
         case ExtId::Time:

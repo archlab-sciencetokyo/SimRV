@@ -44,7 +44,7 @@ Run Linux OS image with disk & devicetree:
 Override MISA profile or Vector register length (VLEN):
 ```bash
 # Set MISA profile to RV64GC and VLEN to 512 bits
-./build/rv64-release/SimRV -m img/vector.bin --misa rv64gc --vector-len 512
+./build/rv64-release/SimRV -m img/vector.bin --misa rv64gcv --vector-len 512
 ```
 
 ---

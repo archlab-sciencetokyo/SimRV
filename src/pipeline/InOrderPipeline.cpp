@@ -98,10 +98,7 @@ auto InOrderPipeline::check_stall_mem() const -> bool {
 
 auto InOrderPipeline::check_stall_ex() const -> bool {
     if (!e_reg_.valid) return false;
-    if (e_reg_.op_id == OperationId::DIV || e_reg_.op_id == OperationId::DIVU ||
-        e_reg_.op_id == OperationId::REM || e_reg_.op_id == OperationId::REMU ||
-        e_reg_.op_id == OperationId::DIVW || e_reg_.op_id == OperationId::DIVUW ||
-        e_reg_.op_id == OperationId::REMW || e_reg_.op_id == OperationId::REMUW) {
+    if (is_div_rem_op(e_reg_.op_id)) {
         return div_busy_cycles_remaining_ > 0;
     }
     return false;

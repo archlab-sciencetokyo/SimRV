@@ -6,135 +6,132 @@
 
 namespace simrv::execute {
 
-auto ExecuteUnit::aluIntB(Register in1, Register in2, isa::OperationId op_id, unsigned xlen_param)
-    -> Register {
-    using enum isa::OperationId;
-    const int xlen = static_cast<int>(xlen_param);
-    if (xlen_param == 32) {
-        const auto u1 = static_cast<uint32_t>(in1);
-        const auto u2 = static_cast<uint32_t>(in2);
-        const auto s1 = static_cast<int32_t>(in1);
-        const auto s2 = static_cast<int32_t>(in2);
-        int32_t res32 = 0;
-        switch (op_id) {
-            case SH1ADD:
-                res32 = static_cast<int32_t>(u2 + (u1 << 1));
-                break;
-            case SH2ADD:
-                res32 = static_cast<int32_t>(u2 + (u1 << 2));
-                break;
-            case SH3ADD:
-                res32 = static_cast<int32_t>(u2 + (u1 << 3));
-                break;
-            case ANDN:
-                res32 = static_cast<int32_t>(u1 & ~u2);
-                break;
-            case ORN:
-                res32 = static_cast<int32_t>(u1 | ~u2);
-                break;
-            case XNOR:
-                res32 = static_cast<int32_t>(~(u1 ^ u2));
-                break;
-            case CLZ:
-                res32 = static_cast<int32_t>(std::countl_zero(u1));
-                break;
-            case CTZ:
-                res32 = static_cast<int32_t>(std::countr_zero(u1));
-                break;
-            case CPOP:
-                res32 = static_cast<int32_t>(std::popcount(u1));
-                break;
-            case MIN:
-                res32 = std::min(s1, s2);
-                break;
-            case MAX:
-                res32 = std::max(s1, s2);
-                break;
-            case MINU:
-                res32 = static_cast<int32_t>(std::min(u1, u2));
-                break;
-            case MAXU:
-                res32 = static_cast<int32_t>(std::max(u1, u2));
-                break;
-            case SEXT_B:
-                res32 = static_cast<int32_t>(static_cast<int8_t>(u1));
-                break;
-            case SEXT_H:
-                res32 = static_cast<int32_t>(static_cast<int16_t>(u1));
-                break;
-            case ZEXT_H:
-                res32 = static_cast<int32_t>(u1 & 0xFFFFu);
-                break;
-            case ROL:
-                res32 = static_cast<int32_t>(std::rotl(u1, static_cast<int>(u2 & 31)));
-                break;
-            case ROR:
-            case RORI:
-                res32 = static_cast<int32_t>(std::rotr(u1, static_cast<int>(u2 & 31)));
-                break;
-            case BSET:
-            case BSETI:
-                res32 = static_cast<int32_t>(u1 | (1u << (u2 & 31)));
-                break;
-            case BCLR:
-            case BCLRI:
-                res32 = static_cast<int32_t>(u1 & ~(1u << (u2 & 31)));
-                break;
-            case BINV:
-            case BINVI:
-                res32 = static_cast<int32_t>(u1 ^ (1u << (u2 & 31)));
-                break;
-            case BEXT:
-            case BEXTI:
-                res32 = static_cast<int32_t>((u1 >> (u2 & 31)) & 1u);
-                break;
-            case ORC_B: {
-                uint32_t r = 0;
-                for (int i = 0; i < 32; i += 8) {
-                    if ((u1 >> i) & 0xFF) r |= (0xFFu << i);
-                }
-                res32 = static_cast<int32_t>(r);
-                break;
-            }
-            case REV8: {
-                res32 =
-                    static_cast<int32_t>(((u1 & 0x000000FFu) << 24) | ((u1 & 0x0000FF00u) << 8) |
-                                         ((u1 & 0x00FF0000u) >> 8) | ((u1 & 0xFF000000u) >> 24));
-                break;
-            }
-            case PACK:
-                res32 = static_cast<int32_t>((u1 & 0xFFFFu) | ((u2 & 0xFFFFu) << 16));
-                break;
-            case CLMUL: {
-                uint32_t r = 0;
-                for (int i = 0; i < 32; i++) {
-                    if ((u2 >> i) & 1) r ^= (u1 << i);
-                }
-                res32 = static_cast<int32_t>(r);
-                break;
-            }
-            case CLMULH: {
-                uint32_t r = 0;
-                for (int i = 1; i < 32; i++) {
-                    if ((u2 >> i) & 1) r ^= (u1 >> (32 - i));
-                }
-                res32 = static_cast<int32_t>(r);
-                break;
-            }
-            case CLMULR: {
-                uint32_t r = 0;
-                for (int i = 0; i < 32; i++) {
-                    if ((u2 >> i) & 1) r ^= (u1 >> (31 - i));
-                }
-                res32 = static_cast<int32_t>(r);
-                break;
-            }
-            default:
-                break;
-        }
-        return static_cast<Register>(static_cast<int64_t>(res32));
-    }
+namespace {
 
+auto alu_int_b32(uint32_t u1, uint32_t u2, int32_t s1, int32_t s2, isa::OperationId op_id)
+    -> int32_t {
+    using enum isa::OperationId;
+    int32_t res32 = 0;
+    switch (op_id) {
+        case SH1ADD:
+            res32 = static_cast<int32_t>(u2 + (u1 << 1));
+            break;
+        case SH2ADD:
+            res32 = static_cast<int32_t>(u2 + (u1 << 2));
+            break;
+        case SH3ADD:
+            res32 = static_cast<int32_t>(u2 + (u1 << 3));
+            break;
+        case ANDN:
+            res32 = static_cast<int32_t>(u1 & ~u2);
+            break;
+        case ORN:
+            res32 = static_cast<int32_t>(u1 | ~u2);
+            break;
+        case XNOR:
+            res32 = static_cast<int32_t>(~(u1 ^ u2));
+            break;
+        case CLZ:
+            res32 = static_cast<int32_t>(std::countl_zero(u1));
+            break;
+        case CTZ:
+            res32 = static_cast<int32_t>(std::countr_zero(u1));
+            break;
+        case CPOP:
+            res32 = static_cast<int32_t>(std::popcount(u1));
+            break;
+        case MIN:
+            res32 = std::min(s1, s2);
+            break;
+        case MAX:
+            res32 = std::max(s1, s2);
+            break;
+        case MINU:
+            res32 = static_cast<int32_t>(std::min(u1, u2));
+            break;
+        case MAXU:
+            res32 = static_cast<int32_t>(std::max(u1, u2));
+            break;
+        case SEXT_B:
+            res32 = static_cast<int32_t>(static_cast<int8_t>(u1));
+            break;
+        case SEXT_H:
+            res32 = static_cast<int32_t>(static_cast<int16_t>(u1));
+            break;
+        case ZEXT_H:
+            res32 = static_cast<int32_t>(u1 & 0xFFFFu);
+            break;
+        case ROL:
+            res32 = static_cast<int32_t>(std::rotl(u1, static_cast<int>(u2 & 31)));
+            break;
+        case ROR:
+        case RORI:
+            res32 = static_cast<int32_t>(std::rotr(u1, static_cast<int>(u2 & 31)));
+            break;
+        case BSET:
+        case BSETI:
+            res32 = static_cast<int32_t>(u1 | (1u << (u2 & 31)));
+            break;
+        case BCLR:
+        case BCLRI:
+            res32 = static_cast<int32_t>(u1 & ~(1u << (u2 & 31)));
+            break;
+        case BINV:
+        case BINVI:
+            res32 = static_cast<int32_t>(u1 ^ (1u << (u2 & 31)));
+            break;
+        case BEXT:
+        case BEXTI:
+            res32 = static_cast<int32_t>((u1 >> (u2 & 31)) & 1u);
+            break;
+        case ORC_B: {
+            uint32_t r = 0;
+            for (int i = 0; i < 32; i += 8) {
+                if ((u1 >> i) & 0xFF) r |= (0xFFu << i);
+            }
+            res32 = static_cast<int32_t>(r);
+            break;
+        }
+        case REV8: {
+            res32 = static_cast<int32_t>(((u1 & 0x000000FFu) << 24) | ((u1 & 0x0000FF00u) << 8) |
+                                         ((u1 & 0x00FF0000u) >> 8) | ((u1 & 0xFF000000u) >> 24));
+            break;
+        }
+        case PACK:
+            res32 = static_cast<int32_t>((u1 & 0xFFFFu) | ((u2 & 0xFFFFu) << 16));
+            break;
+        case CLMUL: {
+            uint32_t r = 0;
+            for (int i = 0; i < 32; i++) {
+                if ((u2 >> i) & 1) r ^= (u1 << i);
+            }
+            res32 = static_cast<int32_t>(r);
+            break;
+        }
+        case CLMULH: {
+            uint32_t r = 0;
+            for (int i = 1; i < 32; i++) {
+                if ((u2 >> i) & 1) r ^= (u1 >> (32 - i));
+            }
+            res32 = static_cast<int32_t>(r);
+            break;
+        }
+        case CLMULR: {
+            uint32_t r = 0;
+            for (int i = 0; i < 32; i++) {
+                if ((u2 >> i) & 1) r ^= (u1 >> (31 - i));
+            }
+            res32 = static_cast<int32_t>(r);
+            break;
+        }
+        default:
+            break;
+    }
+    return res32;
+}
+
+auto alu_int_b64(Register in1, Register in2, isa::OperationId op_id, int xlen) -> Register {
+    using enum isa::OperationId;
     switch (op_id) {
         // B-Extension: Zba
         case SH1ADD:
@@ -251,6 +248,21 @@ auto ExecuteUnit::aluIntB(Register in1, Register in2, isa::OperationId op_id, un
         default:
             return 0;
     }
+}
+
+}  // namespace
+
+auto ExecuteUnit::aluIntB(Register in1, Register in2, isa::OperationId op_id, unsigned xlen_param)
+    -> Register {
+    if (xlen_param == 32) {
+        const auto u1 = static_cast<uint32_t>(in1);
+        const auto u2 = static_cast<uint32_t>(in2);
+        const auto s1 = static_cast<int32_t>(in1);
+        const auto s2 = static_cast<int32_t>(in2);
+        int32_t res32 = alu_int_b32(u1, u2, s1, s2, op_id);
+        return static_cast<Register>(static_cast<int64_t>(res32));
+    }
+    return alu_int_b64(in1, in2, op_id, static_cast<int>(xlen_param));
 }
 
 auto ExecuteUnit::aluIntBW(Register in1, Register in2, isa::OperationId op_id) -> Register {

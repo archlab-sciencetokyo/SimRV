@@ -57,12 +57,19 @@ auto Audio::handle_request(const memory::TlChannelA& req, memory::TlChannelD& re
                     break;
                 case 0x18: {  // Command
                     Word cmd = static_cast<Word>(req.data);
-                    if (cmd == 1)
-                        play_channel(current_channel_);
-                    else if (cmd == 2)
-                        stop_channel(current_channel_);
-                    else if (cmd == 3)
-                        update_channel_params(current_channel_);
+                    switch (cmd) {
+                        case 1:
+                            play_channel(current_channel_);
+                            break;
+                        case 2:
+                            stop_channel(current_channel_);
+                            break;
+                        case 3:
+                            update_channel_params(current_channel_);
+                            break;
+                        default:
+                            break;
+                    }
                 } break;
                 default:
                     break;
@@ -79,14 +86,20 @@ auto Audio::handle_request(const memory::TlChannelA& req, memory::TlChannelD& re
                     break;
                 case 0x108: {  // Command
                     Word cmd = static_cast<Word>(req.data);
-                    if (cmd == 1)
-                        play_music();
-                    else if (cmd == 2)
-                        stop_music();
-                    else if (cmd == 3) {
-                        if (machine_.sdl_audio) {
-                            machine_.sdl_audio->update_music_volume(music_volume_);
-                        }
+                    switch (cmd) {
+                        case 1:
+                            play_music();
+                            break;
+                        case 2:
+                            stop_music();
+                            break;
+                        case 3:
+                            if (machine_.sdl_audio) {
+                                machine_.sdl_audio->update_music_volume(music_volume_);
+                            }
+                            break;
+                        default:
+                            break;
                     }
                 } break;
                 case 0x10C:  // Volume

@@ -53,6 +53,7 @@ class ExecuteUnit {
                                Instruction ir);
 
    private:
+    static auto aluInt32(Register in1, Register in2, isa::OperationId op_id) -> Register;
     static auto aluIntB(Register in1, Register in2, isa::OperationId op_id,
                         unsigned xlen = simrv::xlen::kXLenBits) -> Register;
     static auto aluIntBW(Register in1, Register in2, isa::OperationId op_id) -> Register;

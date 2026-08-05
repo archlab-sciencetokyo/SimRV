@@ -458,10 +458,12 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
                        ParseResult& result) -> std::expected<bool, std::string> {
     if (is_tui_option(arg)) {
         result.options.tuimode = true;
+        result.options.explicit_tui_mode = true;
         return true;
     }
     if (is_cli_option(arg)) {
         result.options.tuimode = false;
+        result.options.explicit_cli_mode = true;
         return true;
     }
     if (is_gui_option(arg)) {
@@ -611,64 +613,13 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
 }
 
 auto is_known_short_flag(char c) -> bool {
-    switch (c) {
-        case 'm':
-        case 'k':
-        case 'i':
-        case 'D':
-        case 'f':
-        case 'c':
-        case 'P':
-        case 's':
-        case 'e':
-        case 't':
-        case 'l':
-        case 'H':
-        case 'r':
-        case 'q':
-        case 'I':
-        case 'p':
-        case 'b':
-        case 'a':
-        case 'u':
-        case 'G':
-        case 'C':
-        case 'd':
-        case 'M':
-        case 'x':
-        case 'w':
-        case 'g':
-        case 'v':
-        case 'B':
-        case 'h':
-            return true;
-        default:
-            return false;
-    }
+    static constexpr std::string_view kShortFlags = "mkiDfcPsetlHrqIpbauGCdMxwgvBh";
+    return kShortFlags.find(c) != std::string_view::npos;
 }
 
 auto short_flag_takes_argument(char c) -> bool {
-    switch (c) {
-        case 'm':
-        case 'k':
-        case 'i':
-        case 'D':
-        case 'f':
-        case 'c':
-        case 'P':
-        case 's':
-        case 'e':
-        case 't':
-        case 'l':
-        case 'H':
-        case 'r':
-        case 'q':
-        case 'I':
-        case 'p':
-            return true;
-        default:
-            return false;
-    }
+    static constexpr std::string_view kArgFlags = "mkiDfcPsetlHrqIpb";
+    return kArgFlags.find(c) != std::string_view::npos;
 }
 
 auto expand_short_flags(const std::vector<std::string>& original_args) -> std::vector<std::string> {
@@ -731,7 +682,6 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
     std::span<char* const> expanded_span(expanded_pointers.data(), expanded_pointers.size());
 
     ParseResult result{};
-    result.options.tuimode = (::isatty(STDIN_FILENO) != 0);
 
     for (std::size_t i = 1; i < expanded_span.size(); ++i) {
         std::string_view const arg = expanded_span[i];
@@ -770,6 +720,10 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
         if (*res_debug) continue;
 
         return std::unexpected(std::format("unknown option : {}", arg));
+    }
+
+    if (!result.options.explicit_cli_mode && !result.options.explicit_tui_mode) {
+        result.options.tuimode = (::isatty(STDIN_FILENO) != 0);
     }
 
     if (needs_memory_image(result)) {

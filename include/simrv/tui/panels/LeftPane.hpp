@@ -49,6 +49,7 @@ class LeftPane : public TuiWidget {
 
     void update_cache();
     void set_kips(uint64_t kips) { kips_ = kips; }
+    void set_max_kips(uint64_t max_kips) { max_kips_ = max_kips; }
     void set_kips_history(const std::vector<uint64_t>& history) { kips_history_ = history; }
     void set_paused(bool paused) { paused_ = paused; }
     void set_visible_rows(int rows) { visible_rows_ = rows; }
@@ -203,6 +204,7 @@ class LeftPane : public TuiWidget {
     int last_width_ = 0;
 
     uint64_t kips_ = 0;
+    uint64_t max_kips_ = 0;
     std::vector<uint64_t> kips_history_;
     int visible_rows_ = 25;
     int scroll_offset_ = 0;

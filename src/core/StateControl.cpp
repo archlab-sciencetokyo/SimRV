@@ -252,20 +252,26 @@ auto ClintMmio::mmio_read(Address offset) const -> Word {
 
 void ClintMmio::mmio_write(Address offset, Word wdata) {
     const Counter wdata_64 = static_cast<Counter>(wdata) & kWord32Mask;
-    if (offset == 0x0000) {  // msip for hart 0
-        if ((wdata & 1) != 0) {
-            cpu_.state().mip |= enum_mask(MipBit::Msip);
-        } else {
-            cpu_.state().mip &= ~enum_mask(MipBit::Msip);
-        }
-    } else if (offset == kClintMtimecmpOffset) {
-        mtimecmp = (mtimecmp & ~kWord32Mask) | wdata_64;
-        cpu_.state().mip &= ~enum_mask(MipBit::Mtip);
-        cpu_.evaluate_timer_interrupt();
-    } else if (offset == kClintMtimecmpOffset + 4) {
-        mtimecmp = (mtimecmp & kWord32Mask) | (wdata_64 << kWord32Shift);
-        cpu_.state().mip &= ~enum_mask(MipBit::Mtip);
-        cpu_.evaluate_timer_interrupt();
+    switch (offset) {
+        case 0x0000:  // msip for hart 0
+            if ((wdata & 1) != 0) {
+                cpu_.state().mip |= enum_mask(MipBit::Msip);
+            } else {
+                cpu_.state().mip &= ~enum_mask(MipBit::Msip);
+            }
+            break;
+        case kClintMtimecmpOffset:
+            mtimecmp = (mtimecmp & ~kWord32Mask) | wdata_64;
+            cpu_.state().mip &= ~enum_mask(MipBit::Mtip);
+            cpu_.evaluate_timer_interrupt();
+            break;
+        case kClintMtimecmpOffset + 4:
+            mtimecmp = (mtimecmp & kWord32Mask) | (wdata_64 << kWord32Shift);
+            cpu_.state().mip &= ~enum_mask(MipBit::Mtip);
+            cpu_.evaluate_timer_interrupt();
+            break;
+        default:
+            break;
     }
 }
 

@@ -4,7 +4,7 @@ project(SimRV LANGUAGES CXX)
 
 enable_testing()
 
-set(SIMRV_VERSION "2.0.0-rc.3")
+set(SIMRV_VERSION "2.0.0-rc.5")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -493,10 +493,21 @@ if(EXISTS "/var/archlab-modules/riscv-vector-tests/2026.07.06" AND RISCV_GCC)
     DEPENDS SimRV
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Running Full Vector validation gate"
-    VERBATIM
-    USES_TERMINAL
   )
 endif()
+
+include(GNUInstallDirs)
+
+install(TARGETS SimRV
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+install(DIRECTORY include/simrv
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  FILES_MATCHING PATTERN "*.hpp"
+)
 
 add_custom_target(run-tui
   COMMAND $<TARGET_FILE:SimRV> -m ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/fw_payload.bin

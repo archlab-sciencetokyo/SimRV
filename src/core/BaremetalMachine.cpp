@@ -17,29 +17,21 @@ namespace simrv::core {
 using namespace simrv::isa;
 
 void BaremetalMachine::run() {
-    if (s_tuimode && tui) {
-        tui->pause_loop();
-    }
-
     cpu.evaluate_timer_interrupt();
 
     // Wall-clock time reference for mtime advancement (10 MHz RTC = 10 ticks/µs = 1 tick/100ns)
     auto last_mtime_update = std::chrono::high_resolution_clock::now();
 
-    // --- Optimisation 4: start background stdin input thread ---
-    // This removes the per-batch uart poll from the hot path entirely.
+    // Start background stdin input thread for non-TUI mode
     if (uart && !s_tuimode) {
         uart->start_input_thread();
     }
 
-    // --- Optimisation 3: 65536-cycle batch instead of 1024 ---
-    // Reduces chrono::now() syscall and batch-check overhead by 64x.
+    // Execution batch size to balance timer update checks with throughput
     constexpr uint32_t kBatchSize = 65536;
     uint32_t cycle_count = 0;
 
-    // --- Optimisation 1: two separate inner loops ---
-    // The TUI ebreak check (previously per-cycle) is only compiled into
-    // the TUI path. The fast path has zero branches for TUI/ebreak.
+    // Fast-path execution branching between TUI interactive mode and baremetal mode
 
     if (s_tuimode && tui) {
         // ---- TUI / debug path (ebreak-aware, single-threaded) ----
@@ -76,7 +68,7 @@ void BaremetalMachine::run() {
             if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() &&
                                           cpu.e_icount >= s_fincnt)) {
                 simrv::log::info("finished by -e option");
-                is_running_ = false;
+                stop();
             }
 
             cycle_count++;

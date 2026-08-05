@@ -28,6 +28,12 @@ auto is_tohost_addr(const Machine& machine, Address addr) -> bool {
 }  // namespace
 
 CPU::CPU() : plic_mmio(*this), clint_mmio(*this), csr_file(*this), sbi(*this) {
+    reset();
+}
+
+void CPU::reset() {
+    state_ = ArchState{};
+    prev_state_ = ArchState{};
     state_.regs.fill(0);
     state_.regs.fill_fp(0);
     state_.regs.fill_vector(VectorRegister{});
@@ -37,6 +43,17 @@ CPU::CPU() : plic_mmio(*this), clint_mmio(*this), csr_file(*this), sbi(*this) {
         state_.mstatus |= (static_cast<CSRValue>(2) << 34) | (static_cast<CSRValue>(2) << 32);
     }
     state_.update_xlen();
+    TLB_flush();
+    e_icount = 0;
+    e_ccount = 0;
+    e_instmix.fill(0);
+    undo_stack.clear();
+    trace_history_head_ = 0;
+    trace_history_size_ = 0;
+    if (pipeline_task.handle) {
+        pipeline_task.handle.destroy();
+        pipeline_task.handle = nullptr;
+    }
 }
 
 void CPU::TLB_flush() {
@@ -62,31 +79,14 @@ void CPU::soft_tlb_flush() {
 
 auto CPU::get_mstatus(CSRValue mask) const -> CSRValue { return csr_file.getMstatus(mask); }
 
-void CPU::set_mstatus(CSRValue wdata) {
-    const CSRValue old_mstatus = state_.mstatus;
-    csr_file.setMstatus(wdata);
-    if (state_.mstatus != old_mstatus) {
-        TLB_flush();
-    }
-}
+void CPU::set_mstatus(CSRValue wdata) { csr_file.setMstatus(wdata); }
 
 auto CPU::read_csr(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCode> {
     return csr_file.read(addr);
 }
 
 auto CPU::write_csr(CSRAddress addr, CSRValue wdata) -> std::expected<void, ExceptionCode> {
-    const CSRValue old_mstatus = state_.mstatus;
-    const CSRValue old_satp = state_.satp;
-
-    auto result = csr_file.write(addr, wdata);
-    if (!result) {
-        return result;
-    }
-
-    if (state_.mstatus != old_mstatus || state_.satp != old_satp) {
-        TLB_flush();
-    }
-    return {};
+    return csr_file.write(addr, wdata);
 }
 
 void CPU::mret() { TrapController::mret(state_); }

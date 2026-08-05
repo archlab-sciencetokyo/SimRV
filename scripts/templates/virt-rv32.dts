@@ -106,5 +106,12 @@
             interrupt-parent = <&plic>;
             interrupts = <2>;
         };
+
+        rtc: rtc@70000000 {
+            compatible = "google,goldfish-rtc";
+            reg = <0x70000000 0x1000>;
+            interrupt-parent = <&plic>;
+            interrupts = <11>;
+        };
     };
 };

@@ -26,32 +26,40 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
         if (offset == 0 && req.size >= 2) {
             const Word wdata = req.data;
             const auto cmd = static_cast<PowerCommand>(wdata & 0xffffU);
-            if (cmd == PowerCommand::Poweroff) {
-                const int status = static_cast<int>(wdata >> 16);
-                simrv::log::info(
-                    "[Power] SiFive Test Finisher: System Poweroff requested (status: {}).",
-                    status);
-                machine_.exit_code = status;
-                machine_.stop();
-                if (machine_.s_tuimode && machine_.tui) {
-                    machine_.tui->pause_loop();
+            switch (cmd) {
+                case PowerCommand::Poweroff: {
+                    const int status = static_cast<int>(wdata >> 16);
+                    simrv::log::info(
+                        "[Power] SiFive Test Finisher: System Poweroff requested (status: {}).",
+                        status);
+                    machine_.exit_code = status;
+                    machine_.stop();
+                    if (machine_.s_tuimode && machine_.tui) {
+                        machine_.tui->pause_loop();
+                    }
+                    break;
                 }
-            } else if (cmd == PowerCommand::Crash) {
-                const int status = static_cast<int>(wdata >> 16);
-                simrv::log::info(
-                    "[Power] SiFive Test Finisher: System Fail/Crash requested (status: {}).",
-                    status);
-                machine_.exit_code = (status != 0) ? status : 1;
-                machine_.stop();
-                if (machine_.s_tuimode && machine_.tui) {
-                    machine_.tui->pause_loop();
+                case PowerCommand::Crash: {
+                    const int status = static_cast<int>(wdata >> 16);
+                    simrv::log::info(
+                        "[Power] SiFive Test Finisher: System Fail/Crash requested (status: {}).",
+                        status);
+                    machine_.exit_code = (status != 0) ? status : 1;
+                    machine_.stop();
+                    if (machine_.s_tuimode && machine_.tui) {
+                        machine_.tui->pause_loop();
+                    }
+                    break;
                 }
-            } else if (cmd == PowerCommand::Reboot) {
-                simrv::log::info("[Power] SiFive Test Finisher: System Reboot requested.");
-                machine_.request_reboot();
-            } else {
-                simrv::log::warn(
-                    "[Power] SiFive Test Finisher: Write offset 0, unknown value 0x{:08x}", wdata);
+                case PowerCommand::Reboot:
+                    simrv::log::info("[Power] SiFive Test Finisher: System Reboot requested.");
+                    machine_.request_reboot();
+                    break;
+                default:
+                    simrv::log::warn(
+                        "[Power] SiFive Test Finisher: Write offset 0, unknown value 0x{:08x}",
+                        wdata);
+                    break;
             }
         } else {
             simrv::log::warn(

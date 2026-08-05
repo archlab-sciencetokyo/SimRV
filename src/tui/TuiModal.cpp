@@ -362,7 +362,7 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
     // Render Box Top Border
     if (start_y < static_cast<int>(lines.size())) {
         std::string title_fmt =
-            std::format("\033[1m{}{}\033[0m{}", kThemeMint, title, kThemeBorder);
+            std::format("\033[1m{}{}\033[0m{}{}", kThemeMint, title, kThemeBorder, m_bg);
         int title_len = get_display_width(title);
         int dash_len = inner_w - title_len;
         if (dash_len < 0) dash_len = 0;
@@ -370,7 +370,7 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
         int right_dash = dash_len - left_dash;
 
         std::string top_border = std::format(
-            "{}{}\033[0m{}{}{}{}\033[0m", kThemeBorder, make_repeated_string("─", left_dash + 1),
+            "{}{}{}{}{}{}{}\033[0m", kThemeBorder, m_bg, make_repeated_string("─", left_dash + 1),
             title_fmt, kThemeBorder, make_repeated_string("─", right_dash + 1), "\033[0m");
 
         lines.at(static_cast<std::size_t>(start_y)) =
@@ -403,8 +403,8 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
     // Render Box Bottom Border
     int bot_y = start_y + box_h - 1;
     if (bot_y < max_y && bot_y < static_cast<int>(lines.size())) {
-        std::string bot_border =
-            std::format("{}{}{}\033[0m", kThemeBorder, make_repeated_string("─", box_w), "\033[0m");
+        std::string bot_border = std::format("{}{}{}{}\033[0m", kThemeBorder, m_bg,
+                                             make_repeated_string("─", box_w), "\033[0m");
         lines.at(static_cast<std::size_t>(bot_y)) =
             overlay_string(lines.at(static_cast<std::size_t>(bot_y)), bot_border, start_x, box_w);
     }

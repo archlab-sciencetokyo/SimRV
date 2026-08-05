@@ -160,11 +160,8 @@ void execute_vid(core::CPU& cpu, RegId rd, bool vm, uint32_t vl) {
     }
 }
 
-}  // namespace
-
-void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id, RegId rd,
-                                         RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew,
-                                         Register rs1_val, int32_t simm5) {
+bool execute_vector_permute_scalar(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
+                                   RegId rs2, uint32_t sew) {
     switch (op_id) {
         case isa::OperationId::VMV_X_S: {
             Register val = 0;
@@ -180,7 +177,7 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
             else
                 val = vector::get_group_element<uint64_t>(cpu.state().regs, rs2, 0);
             cpu.state().regs.write(rd, val);
-            break;
+            return true;
         }
         case isa::OperationId::VMV_S_X: {
             Register val = cpu.state().regs.read(rs1);
@@ -195,7 +192,7 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
                                                     static_cast<uint32_t>(val));
             else
                 vector::set_group_element<uint64_t>(cpu.state().regs, rd, 0, val);
-            break;
+            return true;
         }
         case isa::OperationId::VFMV_F_S: {
             uint64_t val = 0;
@@ -209,7 +206,7 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
                 val = vector::get_group_element<uint64_t>(cpu.state().regs, rs2, 0);
             }
             cpu.state().regs.write_fp(rd, val);
-            break;
+            return true;
         }
         case isa::OperationId::VFMV_S_F: {
             uint64_t val = cpu.state().regs.read_fp(rs1);
@@ -221,8 +218,17 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
                                                     static_cast<uint32_t>(val));
             else if (sew == 64)
                 vector::set_group_element<uint64_t>(cpu.state().regs, rd, 0, val);
-            break;
+            return true;
         }
+        default:
+            return false;
+    }
+}
+
+bool execute_vector_permute_merge(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
+                                  RegId rs2, uint32_t vl, uint32_t sew, Register rs1_val,
+                                  int32_t simm5) {
+    switch (op_id) {
         case isa::OperationId::VFMERGE_VFM: {
             uint64_t val = cpu.state().regs.read_fp(rs1);
             if (sew == 16)
@@ -231,9 +237,8 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
                 execute_vmerge_vx<uint32_t>(cpu, rd, val, rs2, vl);
             else if (sew == 64)
                 execute_vmerge_vx<uint64_t>(cpu, rd, val, rs2, vl);
-            break;
+            return true;
         }
-
         case isa::OperationId::VMERGE_VVM:
             if (sew == 8)
                 execute_vmerge_vv<uint8_t>(cpu, rd, rs1, rs2, vl);
@@ -243,7 +248,7 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
                 execute_vmerge_vv<uint32_t>(cpu, rd, rs1, rs2, vl);
             else
                 execute_vmerge_vv<uint64_t>(cpu, rd, rs1, rs2, vl);
-            break;
+            return true;
         case isa::OperationId::VMERGE_VXM:
             if (sew == 8)
                 execute_vmerge_vx<uint8_t>(cpu, rd, rs1_val, rs2, vl);
@@ -253,7 +258,7 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
                 execute_vmerge_vx<uint32_t>(cpu, rd, rs1_val, rs2, vl);
             else
                 execute_vmerge_vx<uint64_t>(cpu, rd, rs1_val, rs2, vl);
-            break;
+            return true;
         case isa::OperationId::VMERGE_VIM:
             if (sew == 8)
                 execute_vmerge_vi<uint8_t>(cpu, rd, simm5, rs2, vl);
@@ -263,21 +268,45 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
                 execute_vmerge_vi<uint32_t>(cpu, rd, simm5, rs2, vl);
             else
                 execute_vmerge_vi<uint64_t>(cpu, rd, simm5, rs2, vl);
-            break;
+            return true;
+        default:
+            return false;
+    }
+}
 
-        case isa::OperationId::VID_V:
-            if (sew == 8)
-                execute_vid<uint8_t>(cpu, rd, vm, vl);
-            else if (sew == 16)
-                execute_vid<uint16_t>(cpu, rd, vm, vl);
-            else if (sew == 32)
-                execute_vid<uint32_t>(cpu, rd, vm, vl);
-            else
-                execute_vid<uint64_t>(cpu, rd, vm, vl);
-            break;
+bool execute_vector_permute_vid(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
+                                RegId rs2, bool vm, uint32_t vl, uint32_t sew) {
+    if (op_id == isa::OperationId::VID_V) {
+        if (sew == 8)
+            execute_vid<uint8_t>(cpu, rd, vm, vl);
+        else if (sew == 16)
+            execute_vid<uint16_t>(cpu, rd, vm, vl);
+        else if (sew == 32)
+            execute_vid<uint32_t>(cpu, rd, vm, vl);
+        else
+            execute_vid<uint64_t>(cpu, rd, vm, vl);
+        return true;
+    }
+    if (op_id == isa::OperationId::VCOMPRESS_VM) {
+        if (sew == 8)
+            execute_vcompress<uint8_t>(cpu, rd, rs2, rs1, vl);
+        else if (sew == 16)
+            execute_vcompress<uint16_t>(cpu, rd, rs2, rs1, vl);
+        else if (sew == 32)
+            execute_vcompress<uint32_t>(cpu, rd, rs2, rs1, vl);
+        else
+            execute_vcompress<uint64_t>(cpu, rd, rs2, rs1, vl);
+        return true;
+    }
+    return false;
+}
 
+bool execute_vector_permute_mv(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
+                               RegId rs2, uint32_t vl, uint32_t sew, Register rs1_val,
+                               int32_t simm5) {
+    switch (op_id) {
         case isa::OperationId::VMV_V_V: {
-            auto add_f = []<typename T>(T /*a*/, T b) -> T { return b; };
+            auto add_f = []<typename T>(T, T b) -> T { return b; };
             if (sew == 8)
                 vector::perform_vv<uint8_t>(cpu, rd, rs1, rs2, true, vl, add_f);
             else if (sew == 16)
@@ -286,10 +315,10 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
                 vector::perform_vv<uint32_t>(cpu, rd, rs1, rs2, true, vl, add_f);
             else
                 vector::perform_vv<uint64_t>(cpu, rd, rs1, rs2, true, vl, add_f);
-            break;
+            return true;
         }
         case isa::OperationId::VMV_V_X: {
-            auto add_f = []<typename T>(T /*a*/, T b) -> T { return b; };
+            auto add_f = []<typename T>(T, T b) -> T { return b; };
             if (sew == 8)
                 vector::perform_vx<uint8_t>(cpu, rd, rs1_val, rs2, true, vl, add_f);
             else if (sew == 16)
@@ -298,10 +327,10 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
                 vector::perform_vx<uint32_t>(cpu, rd, rs1_val, rs2, true, vl, add_f);
             else
                 vector::perform_vx<uint64_t>(cpu, rd, rs1_val, rs2, true, vl, add_f);
-            break;
+            return true;
         }
         case isa::OperationId::VMV_V_I: {
-            auto add_f = []<typename T>(T /*a*/, T b) -> T { return b; };
+            auto add_f = []<typename T>(T, T b) -> T { return b; };
             if (sew == 8)
                 vector::perform_vi<uint8_t>(cpu, rd, simm5, rs2, true, vl, add_f);
             else if (sew == 16)
@@ -310,9 +339,28 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
                 vector::perform_vi<uint32_t>(cpu, rd, simm5, rs2, true, vl, add_f);
             else
                 vector::perform_vi<uint64_t>(cpu, rd, simm5, rs2, true, vl, add_f);
-            break;
+            return true;
         }
+        case isa::OperationId::VMV1R_V:
+            execute_vmv_whole(cpu, rd, rs2, 1);
+            return true;
+        case isa::OperationId::VMV2R_V:
+            execute_vmv_whole(cpu, rd, rs2, 2);
+            return true;
+        case isa::OperationId::VMV4R_V:
+            execute_vmv_whole(cpu, rd, rs2, 4);
+            return true;
+        case isa::OperationId::VMV8R_V:
+            execute_vmv_whole(cpu, rd, rs2, 8);
+            return true;
+        default:
+            return false;
+    }
+}
 
+bool execute_vector_permute_slide1(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs2,
+                                   bool vm, uint32_t vl, uint32_t sew, Register rs1_val) {
+    switch (op_id) {
         case isa::OperationId::VSLIDE1UP_VX:
             if (sew == 8)
                 execute_vslide1up<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
@@ -322,7 +370,7 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
                 execute_vslide1up<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             else
                 execute_vslide1up<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            break;
+            return true;
         case isa::OperationId::VSLIDE1DOWN_VX:
             if (sew == 8)
                 execute_vslide1down<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
@@ -332,8 +380,16 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
                 execute_vslide1down<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             else
                 execute_vslide1down<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            break;
+            return true;
+        default:
+            return false;
+    }
+}
 
+bool execute_vector_permute_slidedown_up(core::CPU& cpu, isa::OperationId op_id, RegId rd,
+                                         RegId rs2, bool vm, uint32_t vl, uint32_t sew,
+                                         Register rs1_val, int32_t simm5) {
+    switch (op_id) {
         case isa::OperationId::VSLIDEDOWN_VX: {
             auto offset = static_cast<uint32_t>(rs1_val);
             if (sew == 8)
@@ -344,7 +400,7 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
                 execute_vslidedown<uint32_t>(cpu, rd, offset, rs2, vm, vl);
             else
                 execute_vslidedown<uint64_t>(cpu, rd, offset, rs2, vm, vl);
-            break;
+            return true;
         }
         case isa::OperationId::VSLIDEDOWN_VI: {
             auto offset = static_cast<uint32_t>(simm5 & 0x1F);
@@ -356,7 +412,7 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
                 execute_vslidedown<uint32_t>(cpu, rd, offset, rs2, vm, vl);
             else
                 execute_vslidedown<uint64_t>(cpu, rd, offset, rs2, vm, vl);
-            break;
+            return true;
         }
         case isa::OperationId::VSLIDEUP_VX: {
             auto offset = static_cast<uint32_t>(rs1_val);
@@ -368,7 +424,7 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
                 execute_vslideup<uint32_t>(cpu, rd, offset, rs2, vm, vl);
             else
                 execute_vslideup<uint64_t>(cpu, rd, offset, rs2, vm, vl);
-            break;
+            return true;
         }
         case isa::OperationId::VSLIDEUP_VI: {
             auto offset = static_cast<uint32_t>(simm5 & 0x1F);
@@ -380,33 +436,25 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
                 execute_vslideup<uint32_t>(cpu, rd, offset, rs2, vm, vl);
             else
                 execute_vslideup<uint64_t>(cpu, rd, offset, rs2, vm, vl);
-            break;
+            return true;
         }
-        case isa::OperationId::VMV1R_V:
-            execute_vmv_whole(cpu, rd, rs2, 1);
-            break;
-        case isa::OperationId::VMV2R_V:
-            execute_vmv_whole(cpu, rd, rs2, 2);
-            break;
-        case isa::OperationId::VMV4R_V:
-            execute_vmv_whole(cpu, rd, rs2, 4);
-            break;
-        case isa::OperationId::VMV8R_V:
-            execute_vmv_whole(cpu, rd, rs2, 8);
-            break;
-        case isa::OperationId::VCOMPRESS_VM:
-            if (sew == 8)
-                execute_vcompress<uint8_t>(cpu, rd, rs2, rs1, vl);
-            else if (sew == 16)
-                execute_vcompress<uint16_t>(cpu, rd, rs2, rs1, vl);
-            else if (sew == 32)
-                execute_vcompress<uint32_t>(cpu, rd, rs2, rs1, vl);
-            else
-                execute_vcompress<uint64_t>(cpu, rd, rs2, rs1, vl);
-            break;
         default:
-            break;
+            return false;
     }
+}
+
+}  // namespace
+
+void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id, RegId rd,
+                                         RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew,
+                                         Register rs1_val, int32_t simm5) {
+    if (execute_vector_permute_scalar(cpu, op_id, rd, rs1, rs2, sew)) return;
+    if (execute_vector_permute_merge(cpu, op_id, rd, rs1, rs2, vl, sew, rs1_val, simm5)) return;
+    if (execute_vector_permute_vid(cpu, op_id, rd, rs1, rs2, vm, vl, sew)) return;
+    if (execute_vector_permute_mv(cpu, op_id, rd, rs1, rs2, vl, sew, rs1_val, simm5)) return;
+    if (execute_vector_permute_slide1(cpu, op_id, rd, rs2, vm, vl, sew, rs1_val)) return;
+    if (execute_vector_permute_slidedown_up(cpu, op_id, rd, rs2, vm, vl, sew, rs1_val, simm5))
+        return;
 }
 
 }  // namespace simrv::execute

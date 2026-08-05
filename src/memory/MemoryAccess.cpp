@@ -60,10 +60,10 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                 return simrv::memory::ram_read_fast(eff_vaddr, funct3, mem.mmu()->mmem());
             }
         } else {
-            const size_t tlb_idx = (v_addr >> 12) & 2047;
             const Address vpn = v_addr >> 12;
+            const size_t tlb_idx = static_cast<size_t>(vpn) & 2047u;
             const auto& entry = cpu.soft_tlb_read[tlb_idx];
-            if (entry.matches(vpn, current_asid, eff_priv)) {
+            if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv))) {
                 return simrv::memory::ram_read_fast(entry.paddr_base + (v_addr & 0xFFF), funct3,
                                                     mem.mmu()->mmem());
             }
@@ -338,10 +338,10 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
                 return;
             }
         } else {
-            const size_t tlb_idx = (v_addr >> 12) & 2047;
             const Address vpn = v_addr >> 12;
+            const size_t tlb_idx = static_cast<size_t>(vpn) & 2047u;
             const auto& entry = cpu.soft_tlb_write[tlb_idx];
-            if (entry.matches(vpn, current_asid, eff_priv)) {
+            if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv))) {
                 issue_write(entry.paddr_base + (v_addr & 0xFFF), wdata);
                 return;
             }

@@ -27,6 +27,38 @@ Address g_dram_base =
 namespace simrv::core {
 Machine::Machine() : memory_(*this) { cpu.machine_ = this; }
 
+void Machine::reset_state() {
+    tohost = 0;
+    reboot_requested = false;
+    exit_code = 0;
+    is_shutdown_ = false;
+    is_running_ = true;
+    cpu.reset();
+}
+
+auto Machine::is_paused() const -> bool { return s_tuimode && tui && tui->is_paused(); }
+
+void Machine::pause() {
+    if (s_tuimode && tui) {
+        tui->pause_loop();
+    }
+}
+
+void Machine::resume() {
+    if (s_tuimode && tui) {
+        tui->unpause_loop();
+    }
+}
+
+void Machine::stop() {
+    is_shutdown_ = true;
+    if (s_tuimode && tui) {
+        tui->pause_loop();
+    } else {
+        is_running_ = false;
+    }
+}
+
 void Machine::finalize_cycle_tohost() {
     if (tohost == 0) {
         return;
@@ -68,7 +100,7 @@ void Machine::finalize_cycle_tohost() {
             simrv::log::info(
                 "[Power] Compatibility: guest requested poweroff via tohost (old protocol).");
             exit_code = 0;
-            is_running_ = false;
+            stop();
             tohost = 0;
             return;
         } else {
@@ -123,11 +155,7 @@ void Machine::finalize_cycle_tohost() {
                         }
                     }
                     exit_code = code;
-                    is_shutdown_ = true;
-                    if (s_tuimode && tui) {
-                        tui->pause_loop();
-                    }
-                    is_running_ = false;
+                    stop();
                     tohost = 0;
                     return;
                 }
@@ -143,11 +171,7 @@ void Machine::finalize_cycle_tohost() {
             simrv::log::info("Program Halted (SUCCESS / PASS)");
         }
         exit_code = 0;
-        is_shutdown_ = true;
-        if (s_tuimode && tui) {
-            tui->pause_loop();
-        }
-        is_running_ = false;
+        stop();
         tohost = 0;
         return;
     } else if ((tohost & 1) != 0u) {
@@ -158,11 +182,7 @@ void Machine::finalize_cycle_tohost() {
             simrv::log::error("Program Halted (FAIL / EXIT code={})", code);
         }
         exit_code = code == 0 ? 1 : code;
-        is_shutdown_ = true;
-        if (s_tuimode && tui) {
-            tui->pause_loop();
-        }
-        is_running_ = false;
+        stop();
         tohost = 0;
         return;
     }

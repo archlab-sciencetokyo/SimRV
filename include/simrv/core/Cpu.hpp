@@ -190,6 +190,11 @@ class CPU {
     CPU();
 
     /**
+     * @brief Resets CPU architectural state, TLB entries, decode caches, and execution metrics.
+     */
+    void reset();
+
+    /**
      * @brief Flushes all instruction/data Translation Lookaside Buffer (TLB) entries and
      * invalidates the decode cache.
      */

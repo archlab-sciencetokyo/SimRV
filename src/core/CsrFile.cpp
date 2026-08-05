@@ -425,7 +425,10 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
             const unsigned xlen = cpu_.state().regs.xlen;
             const Word mode = simrv::xlen::satp_mode(wdata, xlen);
             if (simrv::xlen::satp_mode_supported(mode, xlen)) {
-                cpu_.state().satp = wdata;
+                if (cpu_.state().satp != wdata) {
+                    cpu_.state().satp = wdata;
+                    cpu_.TLB_flush();
+                }
                 // Latch: once translation is enabled it is never "un-seen"
                 if (mode != 0) {
                     cpu_.machine_->s_mmu_ever_used = true;

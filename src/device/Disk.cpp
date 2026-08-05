@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <print>
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Logger.hpp"
@@ -67,30 +66,40 @@ void Disk::process_queue(Word q_idx) {
                 request_size = sector_len + 1;
                 const auto disk_offset =
                     static_cast<Address>(header.sector_num * simrv::virtio::kDiskSectorSize);
-                const auto start_idx = sector_adr & simrv::memory::kDramMask;
-                if (start_idx + sector_len <= simrv::memory::kDramSize) {
-                    std::memcpy(mmem + start_idx, sector + disk_offset, sector_len);
+                if (sector && disk_offset + sector_len <= sector_storage_.size()) {
+                    const auto start_idx = sector_adr & simrv::memory::kDramMask;
+                    if (start_idx + sector_len <= simrv::memory::kDramSize) {
+                        std::memcpy(mmem + start_idx, sector + disk_offset, sector_len);
+                    } else {
+                        const std::size_t first_part = simrv::memory::kDramSize - start_idx;
+                        std::memcpy(mmem + start_idx, sector + disk_offset, first_part);
+                        std::memcpy(mmem, sector + disk_offset + first_part,
+                                    sector_len - first_part);
+                    }
+                    store_to_ram(footer_adr, 0, 1, mmem);  //  VIRTIO_BLK_S_OK
                 } else {
-                    const std::size_t first_part = simrv::memory::kDramSize - start_idx;
-                    std::memcpy(mmem + start_idx, sector + disk_offset, first_part);
-                    std::memcpy(mmem, sector + disk_offset + first_part, sector_len - first_part);
+                    store_to_ram(footer_adr, 1, 1, mmem);  //  VIRTIO_BLK_S_IOERR
                 }
-                store_to_ram(footer_adr, 0, 1, mmem);  //  VIRTIO_BLK_S_OK
                 break;
             }
             case enum_mask(virtio::VirtioBlkType::Out): {  ///// dram -> disk
                 request_size = 1;
                 const auto disk_offset =
                     static_cast<Address>(header.sector_num * simrv::virtio::kDiskSectorSize);
-                const auto start_idx = sector_adr & simrv::memory::kDramMask;
-                if (start_idx + sector_len <= simrv::memory::kDramSize) {
-                    std::memcpy(sector + disk_offset, mmem + start_idx, sector_len);
+                if (sector && disk_offset + sector_len <= sector_storage_.size()) {
+                    const auto start_idx = sector_adr & simrv::memory::kDramMask;
+                    if (start_idx + sector_len <= simrv::memory::kDramSize) {
+                        std::memcpy(sector + disk_offset, mmem + start_idx, sector_len);
+                    } else {
+                        const std::size_t first_part = simrv::memory::kDramSize - start_idx;
+                        std::memcpy(sector + disk_offset, mmem + start_idx, first_part);
+                        std::memcpy(sector + disk_offset + first_part, mmem,
+                                    sector_len - first_part);
+                    }
+                    store_to_ram(footer_adr, 0, 1, mmem);  //  VIRTIO_BLK_S_OK
                 } else {
-                    const std::size_t first_part = simrv::memory::kDramSize - start_idx;
-                    std::memcpy(sector + disk_offset, mmem + start_idx, first_part);
-                    std::memcpy(sector + disk_offset + first_part, mmem, sector_len - first_part);
+                    store_to_ram(footer_adr, 1, 1, mmem);  //  VIRTIO_BLK_S_IOERR
                 }
-                store_to_ram(footer_adr, 0, 1, mmem);  //  VIRTIO_BLK_S_OK
                 break;
             }
             default: {

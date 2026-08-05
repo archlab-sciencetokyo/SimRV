@@ -37,6 +37,9 @@ class Rtc : public memory::TileLinkNode {
 
    private:
     simrv::core::Machine& machine_;
+    uint64_t alarm_time_{0};
+    bool alarm_enabled_{false};
+    bool alarm_status_{false};
 };
 
 }  // namespace simrv

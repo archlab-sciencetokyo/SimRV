@@ -76,10 +76,13 @@ class Machine {
     /// Finalize cycle for tohost checks only.
     void finalize_cycle_tohost();
     /// Stop the simulation loop.
-    void stop() {
-        is_running_ = false;
-        is_shutdown_ = true;
-    }
+    void stop();
+    /// Check if machine execution is currently paused.
+    [[nodiscard]] auto is_paused() const -> bool;
+    /// Pause machine execution.
+    void pause();
+    /// Resume machine execution.
+    void resume();
     /// Check if the simulation loop is running.
     [[nodiscard]] auto is_running() const -> bool { return is_running_; }
     /// Request system reboot.
@@ -87,6 +90,8 @@ class Machine {
         reboot_requested = true;
         is_running_ = false;
     }
+    /// Reset runtime state flags and CPU state.
+    void reset_state();
 
     uint64_t tohost = 0;  // Host communication register (always 64-bit for HTIF).
     std::atomic<bool> reboot_requested = false;  // Reboot requested flag.

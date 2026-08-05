@@ -45,6 +45,107 @@ constexpr auto perform_amo_op(T reg_val, T mem_val, Funct5Amo funct5) -> T {
 }
 }  // namespace
 
+auto ExecuteUnit::aluInt32(Register in1, Register in2, isa::OperationId op_id) -> Register {
+    using enum isa::OperationId;
+    const auto u1 = static_cast<uint32_t>(in1);
+    const auto u2 = static_cast<uint32_t>(in2);
+    const auto s1 = static_cast<int32_t>(in1);
+    const auto s2 = static_cast<int32_t>(in2);
+    int32_t res32 = 0;
+
+    switch (op_id) {
+        // Base Arithmetic
+        case ADD:
+        case ADDI:
+            res32 = static_cast<int32_t>(u1 + u2);
+            break;
+        case SUB:
+            res32 = static_cast<int32_t>(u1 - u2);
+            break;
+        case SLL:
+        case SLLI:
+            res32 = static_cast<int32_t>(u1 << (u2 & 0x1F));
+            break;
+        case SLT:
+        case SLTI:
+            res32 = (s1 < s2) ? 1 : 0;
+            break;
+        case SLTU:
+        case SLTIU:
+            res32 = (u1 < u2) ? 1 : 0;
+            break;
+        case XOR:
+        case XORI:
+            res32 = static_cast<int32_t>(u1 ^ u2);
+            break;
+        case SRL:
+        case SRLI:
+            res32 = static_cast<int32_t>(u1 >> (u2 & 0x1F));
+            break;
+        case SRA:
+        case SRAI:
+            res32 = s1 >> (u2 & 0x1F);
+            break;
+        case OR:
+        case ORI:
+            res32 = static_cast<int32_t>(u1 | u2);
+            break;
+        case AND:
+        case ANDI:
+            res32 = static_cast<int32_t>(u1 & u2);
+            break;
+
+        // M-Extension
+        case MUL:
+            res32 = static_cast<int32_t>(u1 * u2);
+            break;
+        case MULH:
+            res32 =
+                static_cast<int32_t>((static_cast<int64_t>(s1) * static_cast<int64_t>(s2)) >> 32);
+            break;
+        case MULHSU:
+            res32 =
+                static_cast<int32_t>((static_cast<int64_t>(s1) * static_cast<uint64_t>(u2)) >> 32);
+            break;
+        case MULHU:
+            res32 =
+                static_cast<int32_t>((static_cast<uint64_t>(u1) * static_cast<uint64_t>(u2)) >> 32);
+            break;
+        case DIV:
+            if (u2 == 0)
+                res32 = -1;
+            else if (s1 == std::numeric_limits<int32_t>::min() && s2 == -1)
+                res32 = s1;
+            else
+                res32 = s1 / s2;
+            break;
+        case DIVU:
+            if (u2 == 0)
+                res32 = -1;
+            else
+                res32 = static_cast<int32_t>(u1 / u2);
+            break;
+        case REM:
+            if (u2 == 0)
+                res32 = s1;
+            else if (s1 == std::numeric_limits<int32_t>::min() && s2 == -1)
+                res32 = 0;
+            else
+                res32 = s1 % s2;
+            break;
+        case REMU:
+            if (u2 == 0)
+                res32 = static_cast<int32_t>(u1);
+            else
+                res32 = static_cast<int32_t>(u1 % u2);
+            break;
+
+        default:
+            return ExecuteUnit::aluIntB(in1, in2, op_id, 32);
+    }
+    return static_cast<Register>(static_cast<int64_t>(res32));
+}
+
 auto ExecuteUnit::aluInt(Register in1, Register in2, isa::OperationId op_id, unsigned xlen)
     -> Register {
     using enum isa::OperationId;
@@ -53,103 +154,7 @@ auto ExecuteUnit::aluInt(Register in1, Register in2, isa::OperationId op_id, uns
         xlen = 32;
     }
     if (simrv::compiler::unlikely(xlen == 32)) {
-        const auto u1 = static_cast<uint32_t>(in1);
-        const auto u2 = static_cast<uint32_t>(in2);
-        const auto s1 = static_cast<int32_t>(in1);
-        const auto s2 = static_cast<int32_t>(in2);
-        int32_t res32 = 0;
-
-        switch (op_id) {
-            // Base Arithmetic
-            case ADD:
-            case ADDI:
-                res32 = static_cast<int32_t>(u1 + u2);
-                break;
-            case SUB:
-                res32 = static_cast<int32_t>(u1 - u2);
-                break;
-            case SLL:
-            case SLLI:
-                res32 = static_cast<int32_t>(u1 << (u2 & 0x1F));
-                break;
-            case SLT:
-            case SLTI:
-                res32 = (s1 < s2) ? 1 : 0;
-                break;
-            case SLTU:
-            case SLTIU:
-                res32 = (u1 < u2) ? 1 : 0;
-                break;
-            case XOR:
-            case XORI:
-                res32 = static_cast<int32_t>(u1 ^ u2);
-                break;
-            case SRL:
-            case SRLI:
-                res32 = static_cast<int32_t>(u1 >> (u2 & 0x1F));
-                break;
-            case SRA:
-            case SRAI:
-                res32 = s1 >> (u2 & 0x1F);
-                break;
-            case OR:
-            case ORI:
-                res32 = static_cast<int32_t>(u1 | u2);
-                break;
-            case AND:
-            case ANDI:
-                res32 = static_cast<int32_t>(u1 & u2);
-                break;
-
-            // M-Extension
-            case MUL:
-                res32 = static_cast<int32_t>(u1 * u2);
-                break;
-            case MULH:
-                res32 = static_cast<int32_t>(
-                    (static_cast<int64_t>(s1) * static_cast<int64_t>(s2)) >> 32);
-                break;
-            case MULHSU:
-                res32 = static_cast<int32_t>(
-                    (static_cast<int64_t>(s1) * static_cast<uint64_t>(u2)) >> 32);
-                break;
-            case MULHU:
-                res32 = static_cast<int32_t>(
-                    (static_cast<uint64_t>(u1) * static_cast<uint64_t>(u2)) >> 32);
-                break;
-            case DIV:
-                if (u2 == 0)
-                    res32 = -1;
-                else if (s1 == std::numeric_limits<int32_t>::min() && s2 == -1)
-                    res32 = s1;
-                else
-                    res32 = s1 / s2;
-                break;
-            case DIVU:
-                if (u2 == 0)
-                    res32 = -1;
-                else
-                    res32 = static_cast<int32_t>(u1 / u2);
-                break;
-            case REM:
-                if (u2 == 0)
-                    res32 = s1;
-                else if (s1 == std::numeric_limits<int32_t>::min() && s2 == -1)
-                    res32 = 0;
-                else
-                    res32 = s1 % s2;
-                break;
-            case REMU:
-                if (u2 == 0)
-                    res32 = static_cast<int32_t>(u1);
-                else
-                    res32 = static_cast<int32_t>(u1 % u2);
-                break;
-
-            default:
-                return aluIntB(in1, in2, op_id, 32);
-        }
-        return static_cast<Register>(static_cast<int64_t>(res32));
+        return aluInt32(in1, in2, op_id);
     }
 
     switch (op_id) {

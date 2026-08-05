@@ -27,7 +27,7 @@ const char* g_theme_sky =
 const char* g_theme_pink =
     kAdaptivePink;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 const char* g_theme_modal_bg =
-    "\033[48;5;236m";  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+    "\033[40m";  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 std::array<const char*, 16> g_theme_palette =
     kHighContrastPalette;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -67,7 +67,7 @@ auto set_tui_theme(TuiTheme theme) -> void {
             g_theme_coral = kAdaptiveCoral;
             g_theme_sky = kAdaptiveSky;
             g_theme_pink = kAdaptivePink;
-            g_theme_modal_bg = "\033[48;5;236m";
+            g_theme_modal_bg = "\033[40m";
             g_theme_palette = kHighContrastPalette;
             g_theme_bg_palette = kHighContrastBgPalette;
             break;
@@ -83,7 +83,7 @@ auto set_tui_theme(TuiTheme theme) -> void {
             g_theme_coral = kSakuraCoralConst;
             g_theme_sky = kSakuraSkyConst;
             g_theme_pink = kSakuraPinkConst;
-            g_theme_modal_bg = "\033[48;5;235m";
+            g_theme_modal_bg = "\033[40m";
             g_theme_palette = kSakuraPalette;
             g_theme_bg_palette = kSakuraBgPalette;
             break;
