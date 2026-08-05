@@ -88,7 +88,7 @@ void TileLinkBus::tick() {
                             if (mmio_log_count < 64) {
                                 simrv::log::info(
                                     "__ {:10} MMIO {:5} {:7} addr={:08x} data={:08x} f3={}",
-                                    machine_.cpu.clint_mmio.mtime,
+                                    static_cast<Counter>(machine_.cpu.clint_mmio.mtime.load()),
                                     req.opcode == TlOpcodeA::Get ? "read" : "write", node->name(),
                                     static_cast<unsigned>(req.address),
                                     static_cast<unsigned>(req.opcode == TlOpcodeA::Get ? resp.data

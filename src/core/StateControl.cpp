@@ -403,7 +403,7 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
             "a0={:0{}x} "
             "a1={:0{}x} mtvec={:0{}x} stvec={:0{}x} mepc={:0{}x} sepc={:0{}x} satp={:0{}x} "
             "tval={:0{}x}",
-            cpu.clint_mmio.mtime, static_cast<uint64_t>(cause), kLogHexWidth,
+            static_cast<Counter>(cpu.clint_mmio.mtime.load()), static_cast<uint64_t>(cause), kLogHexWidth,
             trap_cause_name(cause), static_cast<uint64_t>(trap_pc), kLogHexWidth,
             static_cast<unsigned>(state.priv), static_cast<uint64_t>(state.regs.read(RegId::Ra)),
             kLogHexWidth, static_cast<uint64_t>(state.regs.read(RegId::Sp)), kLogHexWidth,

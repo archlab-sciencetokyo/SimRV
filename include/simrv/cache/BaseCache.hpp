@@ -25,11 +25,12 @@ class BaseCache {
     static constexpr uint32_t kNumSets = kNumLines / kWays;
     static constexpr uint32_t kSetMask = kNumSets - 1;
 
-    struct CacheLine {
-        Address tag = ~Address{0};  // Invalid tag initially
-        std::array<Byte, kLineBytes> data{};
-        uint64_t last_used = 0;  // LRU access tick
-        bool valid = false;
+    struct alignas(64) CacheLine {
+        Address tag = ~Address{0};            // 8 bytes (offset 0)
+        uint64_t last_used = 0;             // 8 bytes (offset 8)
+        bool valid = false;                 // 1 byte  (offset 16)
+        std::array<uint8_t, 15> padding{};   // 15 bytes padding (offset 17..32)
+        std::array<Byte, kLineBytes> data{}; // 32 bytes (offset 32..64)
     };
 
     BaseCache() = default;
@@ -38,11 +39,11 @@ class BaseCache {
         ++access_tick_;
         const uint32_t set_idx = get_set_index(base_addr);
         const Address tag = get_tag(base_addr);
-        auto& set = sets_.at(set_idx);
-        CacheLine* victim = &set.at(0);
+        auto& set = sets_[set_idx];
+        CacheLine* victim = &set[0];
         uint32_t victim_way = 0;
         for (uint32_t w = 0; w < kWays; ++w) {
-            auto& line = set.at(w);
+            auto& line = set[w];
             if (!line.valid) {
                 victim = &line;
                 victim_way = w;
@@ -100,26 +101,26 @@ class BaseCache {
 
     [[nodiscard]] auto is_line_valid(uint32_t set_idx, uint32_t way_idx) const -> bool {
         if (set_idx < kNumSets && way_idx < kWays) {
-            return sets_.at(set_idx).at(way_idx).valid;
+            return sets_[set_idx][way_idx].valid;
         }
         return false;
     }
     [[nodiscard]] auto get_line_tag(uint32_t set_idx, uint32_t way_idx) const -> Address {
         if (set_idx < kNumSets && way_idx < kWays) {
-            return sets_.at(set_idx).at(way_idx).tag;
+            return sets_[set_idx][way_idx].tag;
         }
         return ~Address{0};
     }
     [[nodiscard]] auto get_line_last_used(uint32_t set_idx, uint32_t way_idx) const -> uint64_t {
         if (set_idx < kNumSets && way_idx < kWays) {
-            return sets_.at(set_idx).at(way_idx).last_used;
+            return sets_[set_idx][way_idx].last_used;
         }
         return 0;
     }
     [[nodiscard]] auto get_line_data(uint32_t set_idx, uint32_t way_idx) const
         -> const std::array<Byte, kLineBytes>* {
         if (set_idx < kNumSets && way_idx < kWays) {
-            return &sets_.at(set_idx).at(way_idx).data;
+            return &sets_[set_idx][way_idx].data;
         }
         return nullptr;
     }

@@ -63,7 +63,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             const Address vpn = v_addr >> 12;
             const size_t tlb_idx = static_cast<size_t>(vpn) & 2047u;
             const auto& entry = cpu.soft_tlb_read[tlb_idx];
-            if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv))) {
+            if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
                 return simrv::memory::ram_read_fast(entry.paddr_base + (v_addr & 0xFFF), funct3,
                                                     mem.mmu()->mmem());
             }
@@ -227,7 +227,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             Byte* host_base = mem.mmu()->mmem() + ((p_addr & ~0xFFFULL) & simrv::memory::kDramMask);
             cpu.soft_tlb_read[tlb_idx].set(
                 vpn, translation_enabled ? static_cast<uint64_t>(current_asid) : ~uint64_t{0},
-                eff_priv, p_addr & ~0xFFFULL, host_base);
+                eff_priv, cpu.soft_tlb_epoch, p_addr & ~0xFFFULL, host_base);
         }
         return issue_read(p_addr);
     }
@@ -341,7 +341,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             const Address vpn = v_addr >> 12;
             const size_t tlb_idx = static_cast<size_t>(vpn) & 2047u;
             const auto& entry = cpu.soft_tlb_write[tlb_idx];
-            if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv))) {
+            if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
                 issue_write(entry.paddr_base + (v_addr & 0xFFF), wdata);
                 return;
             }
@@ -391,7 +391,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             Byte* host_base = mem.mmu()->mmem() + ((p_addr & ~0xFFFULL) & simrv::memory::kDramMask);
             cpu.soft_tlb_write[tlb_idx].set(
                 vpn, translation_enabled ? static_cast<uint64_t>(current_asid) : ~uint64_t{0},
-                eff_priv, p_addr & ~0xFFFULL, host_base);
+                eff_priv, cpu.soft_tlb_epoch, p_addr & ~0xFFFULL, host_base);
         }
         issue_write(p_addr, wdata);
     }

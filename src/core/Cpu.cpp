@@ -65,16 +65,36 @@ void CPU::TLB_flush() {
 void CPU::TLB_flush(bool match_all_vaddr, Address vaddr, bool match_all_asid, Word asid) {
     tlb.flush_selective(match_all_vaddr, vaddr, match_all_asid, asid);
     decode_cache.flush();
-    soft_tlb_flush();
+    soft_tlb_flush_selective(match_all_vaddr, vaddr, match_all_asid, asid);
 }
 
 void CPU::soft_tlb_flush() {
-    for (auto& entry : soft_tlb_read) {
-        entry.invalidate();
+    if (simrv::compiler::unlikely(++soft_tlb_epoch == 0)) {
+        soft_tlb_epoch = 1;
+        for (auto& entry : soft_tlb_read) {
+            entry.invalidate();
+        }
+        for (auto& entry : soft_tlb_write) {
+            entry.invalidate();
+        }
     }
-    for (auto& entry : soft_tlb_write) {
-        entry.invalidate();
+}
+
+void CPU::soft_tlb_flush_selective(bool match_all_vaddr, Address vaddr, bool match_all_asid,
+                                   Word /*asid*/) {
+    if (match_all_vaddr && match_all_asid) {
+        soft_tlb_flush();
+        return;
     }
+
+    if (!match_all_vaddr) {
+        const size_t tlb_idx = static_cast<size_t>(vaddr >> 12) & 2047u;
+        soft_tlb_read[tlb_idx].invalidate();
+        soft_tlb_write[tlb_idx].invalidate();
+        return;
+    }
+
+    soft_tlb_flush();
 }
 
 auto CPU::get_mstatus(CSRValue mask) const -> CSRValue { return csr_file.getMstatus(mask); }
@@ -792,7 +812,7 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
         const size_t tlb_idx = vpn & 2047u;
         const auto& entry = soft_tlb_read
             [tlb_idx];  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv))) {
+        if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
             if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
                 out_val = simrv::memory::host_read_fast(entry.host_ptr_base + (mem_addr & 0xFFF),
                                                         static_cast<Instruction>(funct3));
@@ -848,7 +868,7 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
         const size_t tlb_idx = vpn & 2047u;
         const auto& entry = soft_tlb_write
             [tlb_idx];  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv))) {
+        if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
             Address const paddr = entry.paddr_base + (mem_addr & 0xFFF);
             if (machine.s_rollback_enabled && simrv::memory::is_dram_addr(paddr)) {
                 Word old_val = simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(funct3),

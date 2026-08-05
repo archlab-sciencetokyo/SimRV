@@ -11,12 +11,13 @@
 
 namespace simrv::core {
 
-struct TLBEntry {
-    Address v_addr{};
-    Address p_addr{};
-    Word asid{};
-    PrivilegeLevel priv = PrivilegeLevel::User;
-    bool valid{false};
+struct alignas(32) TLBEntry {
+    Address v_addr{};              ///< 8 bytes
+    Address p_addr{};              ///< 8 bytes
+    Word asid{};                   ///< 8 bytes
+    PrivilegeLevel priv = PrivilegeLevel::User; ///< 1 byte
+    bool valid{false};             ///< 1 byte
+    std::array<uint8_t, 6> padding{}; ///< 6 bytes padding -> 32 bytes total!
 };
 
 /**

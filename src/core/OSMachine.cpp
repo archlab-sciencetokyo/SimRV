@@ -32,10 +32,13 @@ void OSMachine::run() {
 
     if (has_debug) {
         // ---- Debug path: GDB / lockstep / TUI ebreak ----
-        while (is_running_) {
+        while (is_running() && execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
             if (s_tuimode && tui && tui->is_tui_paused()) {
                 tui->set_sim_thread_sleeping(true);
-                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                execution_state_.wait(ExecutionState::Paused, std::memory_order_relaxed);
+                if (execution_state_.load(std::memory_order_relaxed) == ExecutionState::Paused) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                }
                 continue;
             }
             if (s_tuimode && tui) {
@@ -46,6 +49,13 @@ void OSMachine::run() {
             finalize_cycle();
             if (s_tuimode && tui) {
                 tui->on_cycle_completed();
+            }
+
+            if (is_stepping()) {
+                execution_state_.store(ExecutionState::Paused, std::memory_order_release);
+                if (s_tuimode && tui) {
+                    tui->set_paused(true);
+                }
             }
 
             if (gdb_stub && gdb_stub->is_connected()) {
@@ -65,7 +75,7 @@ void OSMachine::run() {
                                                    cpu.e_icount);
                 if (spike_lockstep->should_halt()) {
                     simrv::log::error("Lockstep: halting on divergence");
-                    is_running_ = false;
+                    stop();
                 }
             }
 
@@ -81,7 +91,7 @@ void OSMachine::run() {
     } else {
         // ---- Fast path: normal Linux/RTOS execution ----
         // No per-cycle GDB/lockstep/TUI branches.
-        while (is_running_) {
+        while (is_running_ && execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
             prepare_cycle();
             cpu.run_cycle(*this);
             finalize_cycle();

@@ -21,10 +21,7 @@ auto Rtc::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp
     const Address offset = req.address - kBaseAddress;
 
     if (!is_write) {
-        auto now = std::chrono::steady_clock::now();
-        uint64_t rtc_ns = static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(now - machine_.s_start_time)
-                .count());
+        uint64_t rtc_ns = machine_.cpu.clint_mmio.mtime.load() * 100ULL;
 
         switch (offset) {
             case kRtcOffset:  // TIME_LOW (0x00)

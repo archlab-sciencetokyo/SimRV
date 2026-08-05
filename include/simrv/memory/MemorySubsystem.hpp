@@ -15,6 +15,9 @@ class Machine;
 
 namespace simrv::memory {
 
+/**
+ * @brief Top-level memory subsystem containing MMU and system bus integrations.
+ */
 class MemorySubsystem {
    public:
     explicit MemorySubsystem(simrv::core::Machine& machine)
@@ -22,10 +25,12 @@ class MemorySubsystem {
 
     ~MemorySubsystem() = default;
 
-    /// Initialize MMU after CPU is constructed
+    /// Initialize MMU instance bound to machine CPU state
     void initialize_mmu();
 
+    /// Get raw pointer to MMU (nullptr if uninitialized)
     [[nodiscard]] auto mmu() const -> simrv::Mmu* { return mmu_.get(); }
+    /// Access system TileLink interconnect bus
     [[nodiscard]] auto system_bus() -> simrv::memory::TileLinkBus& { return system_bus_; }
 
    private:

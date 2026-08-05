@@ -34,9 +34,6 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
                         status);
                     machine_.exit_code = status;
                     machine_.stop();
-                    if (machine_.s_tuimode && machine_.tui) {
-                        machine_.tui->pause_loop();
-                    }
                     break;
                 }
                 case PowerCommand::Crash: {
@@ -46,9 +43,6 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
                         status);
                     machine_.exit_code = (status != 0) ? status : 1;
                     machine_.stop();
-                    if (machine_.s_tuimode && machine_.tui) {
-                        machine_.tui->pause_loop();
-                    }
                     break;
                 }
                 case PowerCommand::Reboot:

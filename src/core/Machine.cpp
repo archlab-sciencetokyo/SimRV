@@ -33,30 +33,60 @@ void Machine::reset_state() {
     exit_code = 0;
     is_shutdown_ = false;
     is_running_ = true;
+    execution_state_.store(ExecutionState::Running, std::memory_order_release);
+    execution_state_.notify_all();
     cpu.reset();
 }
 
-auto Machine::is_paused() const -> bool { return s_tuimode && tui && tui->is_paused(); }
+auto Machine::is_paused() const -> bool {
+    return execution_state_.load(std::memory_order_relaxed) == ExecutionState::Paused ||
+           (s_tuimode && tui && tui->is_paused());
+}
 
 void Machine::pause() {
+    execution_state_.store(ExecutionState::Paused, std::memory_order_release);
+    execution_state_.notify_all();
     if (s_tuimode && tui) {
         tui->pause_loop();
     }
 }
 
 void Machine::resume() {
+    if (is_shutdown_) {
+        return;
+    }
+    execution_state_.store(ExecutionState::Running, std::memory_order_release);
+    execution_state_.notify_all();
     if (s_tuimode && tui) {
         tui->unpause_loop();
     }
 }
 
+void Machine::step() {
+    if (is_shutdown_) {
+        return;
+    }
+    execution_state_.store(ExecutionState::Stepping, std::memory_order_release);
+    execution_state_.notify_all();
+}
+
 void Machine::stop() {
     is_shutdown_ = true;
-    if (s_tuimode && tui) {
-        tui->pause_loop();
-    } else {
+    execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
+    execution_state_.notify_all();
+    if (!s_tuimode && !s_gui_mode) {
         is_running_ = false;
     }
+    if (s_tuimode && tui) {
+        tui->pause_loop();
+    }
+}
+
+void Machine::request_reboot() {
+    reboot_requested = true;
+    is_running_ = false;
+    execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
+    execution_state_.notify_all();
 }
 
 void Machine::finalize_cycle_tohost() {
@@ -177,7 +207,7 @@ void Machine::finalize_cycle_tohost() {
     } else if ((tohost & 1) != 0u) {
         const int code = static_cast<int>(tohost >> 1);
         if (s_appmode) {
-            simrv::log::error("ISA TEST FAIL code={} (tohost=0x{:016x})", code, tohost);
+            simrv::log::error("ISA TEST FAIL code={} (tohost=0x{:016x})", code, tohost.load());
         } else {
             simrv::log::error("Program Halted (FAIL / EXIT code={})", code);
         }

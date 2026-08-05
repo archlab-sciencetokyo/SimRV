@@ -3,6 +3,41 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.0-rc.6] — 2026-08-05
+
+Release candidate 6 for v2.0.0. Focuses on atomic state synchronization, $O(1)$ TLB generation epoch flushes, selective hardware/soft TLB invalidation, deterministic CLINT timer integration, devicetree syscon-poweroff standard bindings, and post-shutdown execution retention.
+
+### Performance & Cache / TLB Optimizations
+- **$O(1)$ Soft TLB Generation Epoch Flushing**:
+  - Replaced $O(N)$ 4096-entry memory loops during `soft_tlb_flush()` with a single-instruction `++soft_tlb_epoch` generation increment.
+- **Selective Hardware & Soft TLB Invalidation**:
+  - Implemented page-level selective invalidation in `Tlb::flush_selective` and `soft_tlb_flush_selective`, ensuring `SFENCE.VMA vaddr` invalidates only target page entries rather than wiping the entire 2048-entry TLB.
+- **Cache & TLB Struct Compaction**:
+  - Aligned `CacheLine` to 64 bytes (`alignas(64)`) to match host L1 CPU cache line boundaries.
+  - Aligned `SoftTlbEntry` and `TLBEntry` to 32 bytes (`alignas(32)`), enabling power-of-two bit-shift indexing (`shl rax, 5`).
+  - Replaced bounds-checked `.at()` array accesses with direct subscript indexing across `BaseCache`, `ICache`, and `DCache`.
+
+### State Atomization & Synchronization
+- **Lock-Free Execution State Machine**:
+  - Atomized `ExecutionState` and cross-thread shared state (`tohost`, `mtime`, `mtimecmp`, `e_icount`) with `std::atomic<T>`.
+  - Eliminates data races and torn 32-bit reads across simulation, TUI rendering, and GDB control threads.
+
+### Devices & Devicetree Standard Compliance
+- **Deterministic CLINT MMIO Time Advancement**:
+  - Derived simulated clock time strictly from `clint_mmio.mtime`, guaranteeing deterministic cycle progress and freezing time advancement during simulation pause.
+- **Standard Devicetree Syscon Poweroff & Reboot Bindings**:
+  - Added `regmap = <&test>;` links to `poweroff` and `reboot` nodes in `virt-rv64.dts` and `virt-rv32.dts`.
+  - Recompiled `linux-images/rv64/devicetree.dtb` and `linux-images/rv32/devicetree.dtb` for native OpenSBI `sifive_test` / `syscon-poweroff` reset driver parsing.
+
+### TUI & System Lifecycle UX
+- **Post-Shutdown Execution Safety & Window Retention**:
+  - Halting or shutting down the guest system (`poweroff` / `halt`) pauses execution and renders `[SHUTDOWN]` badge while keeping the TUI window open for full inspection of registers, memory, stats, and logs.
+  - Prohibits stepping or unpausing from a shut-down state, presenting a clear guidance modal (`"SYSTEM SHUTDOWN - Please reboot [Ctrl-R], load [o], or quit [q]"`).
+- **Simulator Reload on Guest Reboot**:
+  - Updated `request_reboot()` and `[Ctrl-R]` keybinding to signal simulation loop exit, cleanly re-instantiating the simulator with preserved settings.
+
+---
+
 ## [v2.0.0-rc.3] — 2026-07-31
 
 Release candidate 3 for v2.0.0. Focuses on TUI keybinding centralization, Notice Modals UX enhancement, automatic reboot on post-shutdown resume, and licensing compliance.

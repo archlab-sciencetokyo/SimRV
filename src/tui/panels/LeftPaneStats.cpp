@@ -119,23 +119,14 @@ auto LeftPane::render_machine_performance_stats_core(const simrv::core::CPU& cpu
     }
     if (adj_logical_row == 26) {
         std::string insns = std::format("  Executed Insns : {}{}\033[0m", kThemeMint,
-                                        simrv::util::format_with_commas(cpu.e_icount));
+                                        simrv::util::format_with_commas(cpu.e_icount.load()));
         return format_to_width(insns, width);
     }
     if (adj_logical_row == 27) {
-        double rtc_seconds = 0.0;
-        if (cpu.machine_) {
-            auto now = std::chrono::steady_clock::now();
-            rtc_seconds = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(
-                                                  now - cpu.machine_->s_start_time)
-                                                  .count()) /
-                          1000000.0;
-        } else {
-            rtc_seconds = static_cast<double>(cpu.clint_mmio.mtime) / 10000000.0;
-        }
+        double rtc_seconds = static_cast<double>(cpu.clint_mmio.mtime.load()) / 10000000.0;
         std::string time =
             std::format("  Simulated Time : {}{:.6f} s\033[0m {}(mtime: 0x{:x})\033[0m", kThemeMint,
-                        rtc_seconds, kThemeMuted, cpu.clint_mmio.mtime);
+                        rtc_seconds, kThemeMuted, cpu.clint_mmio.mtime.load());
         return format_to_width(time, width);
     }
     if (adj_logical_row == 28) {
@@ -450,10 +441,10 @@ auto LeftPane::render_cycle_accurate_hw_info(const simrv::core::CPU& cpu, int ad
     }
 
     if (adj_logical_row == 36) {
-        double sim_time_seconds = static_cast<double>(cpu.clint_mmio.mtime) / 10000000.0;
+        double sim_time_seconds = static_cast<double>(cpu.clint_mmio.mtime.load()) / 10000000.0;
         std::string time =
             std::format("  Simulated Time : {}{:.6f} s\033[0m {}(0x{:x})\033[0m", kThemeMint,
-                        sim_time_seconds, kThemeMuted, cpu.clint_mmio.mtime);
+                        sim_time_seconds, kThemeMuted, cpu.clint_mmio.mtime.load());
         return format_to_width(time, width);
     }
 
@@ -537,9 +528,9 @@ auto LeftPane::render_debug_state(int debug_row, int width) -> std::string {
                            right_width, 8);
     }
     if (debug_row == 3) {
-        std::string tohost_str = std::format("0x{:x}", machine_.tohost);
+        std::string tohost_str = std::format("0x{:x}", machine_.tohost.load());
         std::string traplog_status = machine_.s_traplog_mode ? "active" : "disabled";
-        return render_pair("tohost", tohost_str, machine_.tohost != 0 ? kThemePeach : kThemeVal,
+        return render_pair("tohost", tohost_str, machine_.tohost.load() != 0 ? kThemePeach : kThemeVal,
                            "traplog", traplog_status,
                            machine_.s_traplog_mode ? kThemeMint : kThemeMuted, col_width,
                            right_width, 8);

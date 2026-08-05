@@ -19,9 +19,6 @@ using namespace simrv::isa;
 void BaremetalMachine::run() {
     cpu.evaluate_timer_interrupt();
 
-    // Wall-clock time reference for mtime advancement (10 MHz RTC = 10 ticks/µs = 1 tick/100ns)
-    auto last_mtime_update = std::chrono::high_resolution_clock::now();
-
     // Start background stdin input thread for non-TUI mode
     if (uart && !s_tuimode) {
         uart->start_input_thread();
@@ -35,10 +32,13 @@ void BaremetalMachine::run() {
 
     if (s_tuimode && tui) {
         // ---- TUI / debug path (ebreak-aware, single-threaded) ----
-        while (is_running_) {
+        while (is_running() && execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
             if (tui->is_tui_paused()) {
                 tui->set_sim_thread_sleeping(true);
-                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                execution_state_.wait(ExecutionState::Paused, std::memory_order_relaxed);
+                if (execution_state_.load(std::memory_order_relaxed) == ExecutionState::Paused) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                }
                 continue;
             }
             tui->set_sim_thread_sleeping(false);
@@ -48,6 +48,11 @@ void BaremetalMachine::run() {
                 cpu.run_cycle_baremetal(*this);
             }
             tui->on_cycle_completed();
+
+            if (is_stepping()) {
+                execution_state_.store(ExecutionState::Paused, std::memory_order_release);
+                tui->set_paused(true);
+            }
 
             if (simrv::compiler::unlikely(tracer.fp_trace.is_open())) {
                 tracer.write_trace_snapshot();
@@ -75,14 +80,6 @@ void BaremetalMachine::run() {
             if (simrv::compiler::unlikely(cycle_count >= kBatchSize)) {
                 cycle_count = 0;
 
-                auto now = std::chrono::high_resolution_clock::now();
-                uint64_t elapsed_ns = static_cast<uint64_t>(
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(now - last_mtime_update)
-                        .count());
-                last_mtime_update = now;
-                cpu.clint_mmio.mtime += elapsed_ns / 100;
-                cpu.evaluate_timer_interrupt();
-
                 if (!s_multithreaded && tui) {
                     if (simrv::tui::g_resized) {
                         tui->render();
@@ -106,7 +103,7 @@ void BaremetalMachine::run() {
         // ---- Fast path: GUI / ISA-test / no-TUI ----
         // No ebreak check, no TUI branches, no uart poll in hot path.
         // SDL rendering stays entirely in the main thread (optimisation 2).
-        while (is_running_) {
+        while (is_running_ && execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
             cpu.run_cycle_baremetal(*this);
 
             if (simrv::compiler::unlikely(tracer.fp_trace.is_open())) {
@@ -126,15 +123,6 @@ void BaremetalMachine::run() {
             cycle_count++;
             if (simrv::compiler::unlikely(cycle_count >= kBatchSize)) {
                 cycle_count = 0;
-
-                // Advance CLINT mtime from wall clock
-                auto now = std::chrono::high_resolution_clock::now();
-                uint64_t elapsed_ns = static_cast<uint64_t>(
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(now - last_mtime_update)
-                        .count());
-                last_mtime_update = now;
-                cpu.clint_mmio.mtime += elapsed_ns / 100;
-                cpu.evaluate_timer_interrupt();
 
                 if (uart) {
                     uart->non_tui_poll_input();

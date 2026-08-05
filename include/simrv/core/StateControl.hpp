@@ -5,6 +5,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 
 #include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
@@ -95,8 +96,8 @@ class ClintMmio : public memory::TileLinkNode {
     [[nodiscard]] auto mmio_read(Address offset) const -> Word;
     void mmio_write(Address offset, Word wdata);
 
-    Counter mtime{1};
-    Counter mtimecmp{};
+    std::atomic<Counter> mtime{1};
+    std::atomic<Counter> mtimecmp{0};
     Counter mcycle{1};
     int rtc_divider{0};
     Counter last_mtime{0};

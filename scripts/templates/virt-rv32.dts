@@ -54,12 +54,14 @@
 
             poweroff {
                 compatible = "syscon-poweroff";
+                regmap = <&test>;
                 offset = <0x0>;
                 value = <0x5555>;
             };
 
             reboot {
                 compatible = "syscon-reboot";
+                regmap = <&test>;
                 offset = <0x0>;
                 value = <0x7777>;
             };

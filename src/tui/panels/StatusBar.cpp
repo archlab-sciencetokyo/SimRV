@@ -151,6 +151,10 @@ static const auto paused_row2_entries = std::to_array<FooterEntry>({
      .action = TuiFooterAction::LoadBinary,
      .category = FooterCategory::SettingsConfig},
     {.text = "  ", .action = std::nullopt, .category = FooterCategory::Spacer},
+    {.text = "[Ctrl-R] Reboot",
+     .action = TuiFooterAction::Reboot,
+     .category = FooterCategory::SettingsConfig},
+    {.text = "  ", .action = std::nullopt, .category = FooterCategory::Spacer},
     {.text = "[,] Settings",
      .action = TuiFooterAction::OpenSettings,
      .category = FooterCategory::SettingsConfig},
@@ -395,15 +399,19 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         if (status_badge.empty()) {
             bool use_ansi = (get_tui_theme() == TuiTheme::Adaptive ||
                              get_tui_theme() == TuiTheme::HighContrast);
-            if (machine_.is_shutdown_) {
+            const auto st = machine_.execution_state();
+            if (machine_.is_shutdown_ || st == simrv::core::ExecutionState::Stopped) {
                 status_badge = use_ansi ? "\033[41;37m SHUTDOWN \033[0m"
                                         : "\033[48;5;196m\033[38;5;231m SHUTDOWN \033[0m";
+            } else if (st == simrv::core::ExecutionState::Stepping) {
+                status_badge = use_ansi ? "\033[46;30m STEPPING \033[0m"
+                                        : "\033[48;5;117m\033[38;5;232m STEPPING \033[0m";
+            } else if (paused_ || st == simrv::core::ExecutionState::Paused) {
+                status_badge = use_ansi ? "\033[43;30m PAUSED \033[0m"
+                                        : "\033[48;5;223m\033[38;5;232m PAUSED \033[0m";
             } else {
-                status_badge = paused_
-                                   ? (use_ansi ? "\033[43;30m PAUSED \033[0m"
-                                               : "\033[48;5;223m\033[38;5;232m PAUSED \033[0m")
-                                   : (use_ansi ? "\033[42;30m RUNNING \033[0m"
-                                               : "\033[48;5;121m\033[38;5;232m RUNNING \033[0m");
+                status_badge = use_ansi ? "\033[42;30m RUNNING \033[0m"
+                                        : "\033[48;5;121m\033[38;5;232m RUNNING \033[0m";
             }
         } else if (status_badge == "\033[1;38;5;234;48;5;210m TRAPPED \033[0m" &&
                    (get_tui_theme() == TuiTheme::HighContrast ||
@@ -438,7 +446,7 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                 " ═══ SCROLLBACK (Offset: -{}) [Press 'c'/'Enter' to Live] ═══ ", scroll_offset_);
         } else {
             const auto cycles = machine_.cpu.clint_mmio.mcycle;
-            const auto icount = machine_.cpu.e_icount;
+            const auto icount = machine_.cpu.e_icount.load();
             const double cpi =
                 icount == 0 ? 0.0 : static_cast<double>(cycles) / static_cast<double>(icount);
 

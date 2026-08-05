@@ -20,12 +20,20 @@ class ICache : public BaseCache<64, 32, 4> {
     /// Initialize cache to empty state
     ICache() = default;
 
-    /// Attempt to read a word from cache
-    /// Returns true if hit, false if miss
+    /**
+     * @brief Attempt to read a 32-bit instruction word from cache.
+     * @param addr Physical address to read from.
+     * @param[out] data Output parameter filled with instruction word on cache hit.
+     * @return true on cache hit, false on cache miss.
+     */
     [[nodiscard]] auto read(Address addr, uint32_t& data) -> bool;
 
-    /// Attempt to read a halfword from cache
-    /// Returns true if hit, false if miss
+    /**
+     * @brief Attempt to read a 16-bit instruction halfword from cache.
+     * @param addr Physical address to read from.
+     * @param[out] data Output parameter filled with compressed instruction halfword on hit.
+     * @return true on cache hit, false on cache miss.
+     */
     [[nodiscard]] auto read16(Address addr, uint16_t& data) -> bool;
 };
 

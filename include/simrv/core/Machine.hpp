@@ -39,6 +39,13 @@ class LeftPane;
 
 namespace simrv::core {
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
+enum class ExecutionState : uint8_t {
+    Stopped = 0,
+    Running = 1,
+    Paused = 2,
+    Stepping = 3,
+};
+
 /**
  * @class Machine
  * @brief Owns and orchestrates CPU, memory subsystem, and MMIO devices.
@@ -77,23 +84,36 @@ class Machine {
     void finalize_cycle_tohost();
     /// Stop the simulation loop.
     void stop();
+    /// Get current atomic execution state.
+    [[nodiscard]] auto execution_state() const -> ExecutionState {
+        return execution_state_.load(std::memory_order_relaxed);
+    }
     /// Check if machine execution is currently paused.
     [[nodiscard]] auto is_paused() const -> bool;
+    /// Check if machine execution is currently stopped.
+    [[nodiscard]] auto is_stopped() const -> bool {
+        return execution_state_.load(std::memory_order_relaxed) == ExecutionState::Stopped;
+    }
+    /// Check if machine execution is in single-stepping state.
+    [[nodiscard]] auto is_stepping() const -> bool {
+        return execution_state_.load(std::memory_order_relaxed) == ExecutionState::Stepping;
+    }
     /// Pause machine execution.
     void pause();
     /// Resume machine execution.
     void resume();
+    /// Request execution of a single instruction cycle.
+    void step();
     /// Check if the simulation loop is running.
-    [[nodiscard]] auto is_running() const -> bool { return is_running_; }
-    /// Request system reboot.
-    void request_reboot() {
-        reboot_requested = true;
-        is_running_ = false;
+    [[nodiscard]] auto is_running() const -> bool {
+        return is_running_.load(std::memory_order_relaxed);
     }
+    /// Request system reboot.
+    void request_reboot();
     /// Reset runtime state flags and CPU state.
     void reset_state();
 
-    uint64_t tohost = 0;  // Host communication register (always 64-bit for HTIF).
+    std::atomic<uint64_t> tohost{0};  // Host communication register (always 64-bit for HTIF).
     std::atomic<bool> reboot_requested = false;  // Reboot requested flag.
     int exit_code = 0;                           // Exit/status code of the simulation.
     std::atomic<bool> is_shutdown_ = false;      // System shutdown flag.
@@ -195,6 +215,7 @@ class Machine {
     /// Perform per-cycle finalization and completion checks.
     virtual void finalize_cycle() {}
     std::atomic<bool> is_running_ = true;  // Main-loop run flag.
+    std::atomic<ExecutionState> execution_state_{ExecutionState::Running};
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes)
 }  // namespace simrv::core

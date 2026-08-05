@@ -74,7 +74,8 @@ void Tracer::dump_init_artifacts() {
         for (Address i = 0; i < simrv::memory::kDramSize; ++i) {
             out << std::hex << static_cast<unsigned>(std::to_integer<uint8_t>(ram[i])) << '\n';
         }
-        simrv::log::info("file init_mem.txt was generated after {} cycle", cpu->clint_mmio.mtime);
+        simrv::log::info("file init_mem.txt was generated after {} cycle",
+                         static_cast<Counter>(cpu->clint_mmio.mtime.load()));
     }
 
     if (sector != nullptr) {
@@ -82,7 +83,8 @@ void Tracer::dump_init_artifacts() {
         for (Word i = 0; i < simrv::virtio::kDiskSize; ++i) {
             out << std::hex << static_cast<unsigned>(std::to_integer<uint8_t>(sector[i])) << '\n';
         }
-        simrv::log::info("file init_dsk.txt was generated after {} cycle", cpu->clint_mmio.mtime);
+        simrv::log::info("file init_dsk.txt was generated after {} cycle",
+                         static_cast<Counter>(cpu->clint_mmio.mtime.load()));
     }
 
     std::ofstream out("trace/init_reg.txt");
@@ -192,7 +194,8 @@ void Tracer::dump_init_artifacts() {
     write_32("mmu.disk.InterruptStatus", disk->InterruptStatus);
     write_32("mmu.disk.Status         ", disk->Status);
 
-    simrv::log::info("file init_reg.txt was generated after {} cycle", cpu->clint_mmio.mtime);
+    simrv::log::info("file init_reg.txt was generated after {} cycle",
+                     static_cast<Counter>(cpu->clint_mmio.mtime.load()));
 }
 
 void Tracer::write_instruction_mix_report() {
@@ -210,7 +213,7 @@ void Tracer::write_instruction_mix_report() {
     }
     std::println(out, "TOTAL      : {:10}", total);
     simrv::log::info("file instmix.txt was generated after {} cycle",
-                     machine_.cpu.clint_mmio.mtime);
+                     static_cast<Counter>(machine_.cpu.clint_mmio.mtime.load()));
 }
 
 void Tracer::print_summary() {
@@ -222,7 +225,7 @@ void Tracer::print_summary() {
     const auto etime = static_cast<Counter>(elapsed == 0 ? 1 : elapsed);
 
     const auto mcycle = machine_.cpu.clint_mmio.mcycle;
-    const auto icount = machine_.cpu.e_icount;
+    const auto icount = machine_.cpu.e_icount.load();
     const auto ccount = machine_.cpu.e_ccount;
 
     const double cpi =
@@ -325,7 +328,8 @@ void Tracer::write_trace_snapshot() {
     const auto& cpu = machine_.cpu;
     const auto& st = cpu.state();
 
-    std::print(fp_trace, "{:08} {:0{}x} {:08x}", cpu.clint_mmio.mtime, cpu.pipeline_context.cpc,
+    std::print(fp_trace, "{:08} {:0{}x} {:08x}", static_cast<Counter>(cpu.clint_mmio.mtime.load()),
+               cpu.pipeline_context.cpc,
                D_TRACE_HEX_WIDTH, static_cast<uint32_t>(cpu.pipeline_context.ir));
     std::println(fp_trace, "");
 

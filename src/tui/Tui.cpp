@@ -105,6 +105,13 @@ Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
 Tui::~Tui() { shutdown(); }
 
 void Tui::set_paused(bool p) {
+    if (!p && machine_.is_shutdown_) {
+        modal_.open_notice(
+            "SYSTEM SHUTDOWN",
+            "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a binary [o], or quit [q].",
+            false);
+        return;
+    }
     if (!p && machine_.cpu.state().pc == 0) {
         modal_.open_notice(
             "NO PROGRAM LOADED",
@@ -114,7 +121,7 @@ void Tui::set_paused(bool p) {
     }
     const bool cur_paused = paused_.load(std::memory_order_relaxed);
     if (cur_paused != p) {
-        paused_.store(p, std::memory_order_relaxed);
+        paused_.store(p, std::memory_order_release);
         if (!p) {
             status_override_.clear();
             last_runtime_tick_ = std::chrono::steady_clock::now();
@@ -124,9 +131,10 @@ void Tui::set_paused(bool p) {
             if (last_runtime_tick_ != std::chrono::steady_clock::time_point{}) {
                 runtime_duration_ += std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now() - last_runtime_tick_);
-                last_runtime_tick_ = std::chrono::steady_clock::time_point{};
+                last_runtime_tick_ = {};
             }
         }
+        update_trace_active_cache();
     }
 }
 
@@ -1369,6 +1377,14 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
 auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
     if (key == simrv::tui::TuiKey::CtrlP || key == simrv::tui::TuiKey::c ||
         key == simrv::tui::TuiKey::C) {
+        if (machine_.is_shutdown_) {
+            modal_.open_notice(
+                "SYSTEM SHUTDOWN",
+                "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a binary [o], or quit [q].",
+                false);
+            render(true);
+            return;
+        }
         if (machine_.s_fn_memimg.empty() && machine_.cpu.state().pc == 0) {
             modal_.open_notice("NO PROGRAM LOADED",
                                "Cannot run simulation: PC is 0x0.\n\nPlease load a program binary "
@@ -1377,13 +1393,12 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
             render(true);
             return;
         }
-        if (machine_.is_shutdown_) machine_.request_reboot();
         unpause_loop();
         return;
     }
-    if (key == simrv::tui::TuiKey::CtrlR) {
+    if (key == simrv::tui::TuiKey::CtrlR || key == simrv::tui::TuiKey::r ||
+        key == simrv::tui::TuiKey::R) {
         machine_.request_reboot();
-        unpause_loop();
         return;
     }
     if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
@@ -1441,10 +1456,16 @@ void Tui::unpause_loop() { set_paused(false); }
 
 void Tui::execute_footer_action(TuiFooterAction action) {
     switch (action) {
+        case TuiFooterAction::Reboot:
+            machine_.request_reboot();
+            break;
         case TuiFooterAction::Step:
             if (machine_.is_shutdown_) {
-                machine_.request_reboot();
-                unpause_loop();
+                modal_.open_notice(
+                    "SYSTEM SHUTDOWN",
+                    "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a binary [o], or quit [q].",
+                    false);
+                render(true);
             } else if (machine_.cpu.state().pc == 0) {
                 modal_.open_notice(
                     "NO PROGRAM LOADED",
@@ -1467,8 +1488,11 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             break;
         case TuiFooterAction::RunPause:
             if (machine_.is_shutdown_) {
-                machine_.request_reboot();
-                unpause_loop();
+                modal_.open_notice(
+                    "SYSTEM SHUTDOWN",
+                    "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a binary [o], or quit [q].",
+                    false);
+                render(true);
             } else if (paused_ && machine_.cpu.state().pc == 0) {
                 modal_.open_notice("NO PROGRAM LOADED",
                                    "Cannot run simulation: PC is 0x0.\n\nPlease load a program "

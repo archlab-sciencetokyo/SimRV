@@ -5,6 +5,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <deque>
 #include <expected>
 #include <fstream>
@@ -125,12 +126,14 @@ struct ArchState {
  *   bits [ 1: 0] = privilege (0=User, 1=Supervisor, 3=Machine)
  * valid == false when tag == kInvalidTag.
  */
-struct SoftTlbEntry {
+struct alignas(32) SoftTlbEntry {
     static constexpr uint64_t kInvalidTag = ~uint64_t{0};
 
-    uint64_t tag = kInvalidTag;     ///< Packed VPN | ASID | priv; kInvalidTag when empty
-    Address paddr_base = 0;         ///< Physical page base (paddr & ~0xFFF)
-    Byte* host_ptr_base = nullptr;  ///< Direct host pointer base (nullptr = use paddr)
+    uint64_t tag = kInvalidTag;     ///< Packed VPN | ASID | priv; kInvalidTag when empty (8 bytes)
+    Address paddr_base = 0;         ///< Physical page base (paddr & ~0xFFF) (8 bytes)
+    Byte* host_ptr_base = nullptr;  ///< Direct host pointer base (nullptr = use paddr) (8 bytes)
+    uint32_t epoch = 0;             ///< TLB generation epoch (4 bytes)
+    uint32_t reserved = 0;          ///< Padding to 32 bytes (4 bytes)
 
     /// Build a lookup tag from the three key fields.
     [[nodiscard]] static constexpr auto make_tag(uint64_t vpn, uint64_t asid,
@@ -139,20 +142,23 @@ struct SoftTlbEntry {
                static_cast<uint64_t>(static_cast<uint8_t>(priv) & 0x3u);
     }
 
-    [[nodiscard]] constexpr auto matches(uint64_t vpn, uint64_t asid,
-                                         PrivilegeLevel priv) const noexcept -> bool {
-        return tag == make_tag(vpn, asid, priv);
+    [[nodiscard]] constexpr auto matches(uint64_t vpn, uint64_t asid, PrivilegeLevel priv,
+                                         uint32_t current_epoch) const noexcept -> bool {
+        return epoch == current_epoch && tag == make_tag(vpn, asid, priv);
     }
 
-    void set(uint64_t vpn, uint64_t asid, PrivilegeLevel priv, Address paddr_base_in,
-             Byte* host_ptr_base_in) noexcept {
+    void set(uint64_t vpn, uint64_t asid, PrivilegeLevel priv, uint32_t current_epoch,
+             Address paddr_base_in, Byte* host_ptr_base_in) noexcept {
         tag = make_tag(vpn, asid, priv);
+        epoch = current_epoch;
         paddr_base = paddr_base_in;
         host_ptr_base = host_ptr_base_in;
     }
 
     void invalidate() noexcept { tag = kInvalidTag; }
-    [[nodiscard]] bool valid() const noexcept { return tag != kInvalidTag; }
+    [[nodiscard]] bool valid(uint32_t current_epoch) const noexcept {
+        return epoch == current_epoch && tag != kInvalidTag;
+    }
 };
 
 struct MemWriteRecord {
@@ -505,10 +511,12 @@ class CPU {
     DecodeCache decode_cache;
     std::array<SoftTlbEntry, 2048> soft_tlb_read{};
     std::array<SoftTlbEntry, 2048> soft_tlb_write{};
+    uint32_t soft_tlb_epoch = 1;
     void soft_tlb_flush();
+    void soft_tlb_flush_selective(bool match_all_vaddr, Address vaddr, bool match_all_asid, Word asid);
 
     // ========== Execution Metrics ==========
-    uint64_t e_icount{0};                                     // Total instruction count
+    std::atomic<uint64_t> e_icount{0};                        // Total instruction count
     Counter e_ccount = 0;                                     // Compressed instructions executed
     std::array<uint64_t, isa::OperationIdCount> e_instmix{};  // Instruction-mix statistics
 
