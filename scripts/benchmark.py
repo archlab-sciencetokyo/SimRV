@@ -314,9 +314,12 @@ def main():
         print(f"  [RUN] SimRV iter {i}/{args.runs}")
         log_file = os.path.join(log_dir, f"bench_simrv_{i}.log")
         
+        # Construct SimRV benchmarking execution command (-a appmode, --cli non-interactive, -m memory ELF, -e instruction limit, -b baremetal, -H tohost symbol)
         simrv_cmd = [
             simrv_bin,
-            "-m", bin_path,
+            "-a",
+            "--cli",
+            "-m", elf_path,
             "-e", str(args.limit),
             "-b",
             "-H", tohost_addr
