@@ -225,7 +225,7 @@ void Tracer::print_summary() {
     const auto etime = static_cast<Counter>(elapsed == 0 ? 1 : elapsed);
 
     const auto mcycle = machine_.cpu.clint_mmio.mcycle;
-    const auto icount = machine_.cpu.e_icount.load();
+    const auto icount = machine_.cpu.e_icount;
     const auto ccount = machine_.cpu.e_ccount;
 
     const double cpi =
@@ -329,8 +329,8 @@ void Tracer::write_trace_snapshot() {
     const auto& st = cpu.state();
 
     std::print(fp_trace, "{:08} {:0{}x} {:08x}", static_cast<Counter>(cpu.clint_mmio.mtime.load()),
-               cpu.pipeline_context.cpc,
-               D_TRACE_HEX_WIDTH, static_cast<uint32_t>(cpu.pipeline_context.ir));
+               cpu.pipeline_context.cpc, D_TRACE_HEX_WIDTH,
+               static_cast<uint32_t>(cpu.pipeline_context.ir));
     std::println(fp_trace, "");
 
     for (int i = 0; i < 4; i++) {

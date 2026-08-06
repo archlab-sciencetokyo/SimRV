@@ -20,16 +20,15 @@ void Tlb::flush() {
     data_w_lru.fill(0);
 }
 
-void Tlb::flush_selective(bool match_all_vaddr, Address vaddr, bool match_all_asid,
-                          Word asid) {
+void Tlb::flush_selective(bool match_all_vaddr, Address vaddr, bool match_all_asid, Word asid) {
     if (match_all_vaddr && match_all_asid) {
         flush();
         return;
     }
 
     if (!match_all_vaddr) {
-        const size_t set = (vaddr >> 12) & (kNumSets - 1);
-        const Address vpage = vaddr & ~simrv::memory::kPageMask;
+        const size_t set = calc_set(vaddr);
+        const Address vpage = calc_vpage(vaddr);
         for (int i = 0; i < 2; ++i) {
             if (match_all_asid || inst_r[set][i].asid == asid) {
                 if (inst_r[set][i].v_addr == vpage) {

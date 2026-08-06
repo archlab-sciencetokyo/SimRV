@@ -106,10 +106,10 @@ Tui::~Tui() { shutdown(); }
 
 void Tui::set_paused(bool p) {
     if (!p && machine_.is_shutdown_) {
-        modal_.open_notice(
-            "SYSTEM SHUTDOWN",
-            "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a binary [o], or quit [q].",
-            false);
+        modal_.open_notice("SYSTEM SHUTDOWN",
+                           "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a binary "
+                           "[o], or quit [q].",
+                           false);
         return;
     }
     if (!p && machine_.cpu.state().pc == 0) {
@@ -509,7 +509,6 @@ void Tui::render(bool force) {
     int term_height = w.ws_row;
     if (term_width < 40 || term_height < 10) return;
 
-    if (left_pane_) left_pane_->update_cache();
     render_update_speed(now);
 
     int left_pane_width = user_left_pane_width_ > 0
@@ -1378,10 +1377,10 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
     if (key == simrv::tui::TuiKey::CtrlP || key == simrv::tui::TuiKey::c ||
         key == simrv::tui::TuiKey::C) {
         if (machine_.is_shutdown_) {
-            modal_.open_notice(
-                "SYSTEM SHUTDOWN",
-                "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a binary [o], or quit [q].",
-                false);
+            modal_.open_notice("SYSTEM SHUTDOWN",
+                               "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a "
+                               "binary [o], or quit [q].",
+                               false);
             render(true);
             return;
         }
@@ -1461,10 +1460,10 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             break;
         case TuiFooterAction::Step:
             if (machine_.is_shutdown_) {
-                modal_.open_notice(
-                    "SYSTEM SHUTDOWN",
-                    "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a binary [o], or quit [q].",
-                    false);
+                modal_.open_notice("SYSTEM SHUTDOWN",
+                                   "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a "
+                                   "binary [o], or quit [q].",
+                                   false);
                 render(true);
             } else if (machine_.cpu.state().pc == 0) {
                 modal_.open_notice(
@@ -1488,10 +1487,10 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             break;
         case TuiFooterAction::RunPause:
             if (machine_.is_shutdown_) {
-                modal_.open_notice(
-                    "SYSTEM SHUTDOWN",
-                    "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a binary [o], or quit [q].",
-                    false);
+                modal_.open_notice("SYSTEM SHUTDOWN",
+                                   "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a "
+                                   "binary [o], or quit [q].",
+                                   false);
                 render(true);
             } else if (paused_ && machine_.cpu.state().pc == 0) {
                 modal_.open_notice("NO PROGRAM LOADED",

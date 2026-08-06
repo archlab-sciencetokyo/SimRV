@@ -403,8 +403,8 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
             "a0={:0{}x} "
             "a1={:0{}x} mtvec={:0{}x} stvec={:0{}x} mepc={:0{}x} sepc={:0{}x} satp={:0{}x} "
             "tval={:0{}x}",
-            static_cast<Counter>(cpu.clint_mmio.mtime.load()), static_cast<uint64_t>(cause), kLogHexWidth,
-            trap_cause_name(cause), static_cast<uint64_t>(trap_pc), kLogHexWidth,
+            static_cast<Counter>(cpu.clint_mmio.mtime.load()), static_cast<uint64_t>(cause),
+            kLogHexWidth, trap_cause_name(cause), static_cast<uint64_t>(trap_pc), kLogHexWidth,
             static_cast<unsigned>(state.priv), static_cast<uint64_t>(state.regs.read(RegId::Ra)),
             kLogHexWidth, static_cast<uint64_t>(state.regs.read(RegId::Sp)), kLogHexWidth,
             static_cast<uint64_t>(state.regs.read(RegId::Tp)), kLogHexWidth,
@@ -494,7 +494,7 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
     cpu.pipeline_context.pending_tval = 0;
 
     if (cpu.machine_ && cpu.machine_->s_tuimode && cpu.machine_->tui &&
-        cause == static_cast<TrapCause>(ExceptionCode::Breakpoint)) {
+        cause == static_cast<TrapCause>(std::to_underlying(ExceptionCode::Breakpoint))) {
         cpu.machine_->tui->set_status_override("\033[1;38;5;234;48;5;210m TRAPPED \033[0m");
         if constexpr (simrv::xlen::kIsXLen64) {
             simrv::log::warn("Breakpoint: cause=0x{:016x} pc=0x{:016x} tval=0x{:016x}",

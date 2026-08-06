@@ -6,6 +6,7 @@
 
 #include <optional>
 #include <ranges>
+#include <utility>
 
 #include "simrv/Define.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
@@ -57,7 +58,7 @@ auto Mmu::validate_pte_permissions(Word pte, Word permission_bits, PteAccess acc
     }
 
     // Check access permissions
-    if (((permission_bits >> static_cast<Word>(access)) & 1) == 0) {
+    if (((permission_bits >> std::to_underlying(access)) & 1) == 0) {
         return false;
     }
 

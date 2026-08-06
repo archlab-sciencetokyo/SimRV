@@ -30,7 +30,22 @@ inline constexpr Word kTlbSize = 2048;
 inline constexpr Word kPageShift = 12;
 inline constexpr Word kPageMask = (1u << kPageShift) - 1;
 
-// ========== C++20 Concepts for Type-Safe Memory Access ==========
+/**
+ * @brief Check if an address or integer value is aligned to an N-byte boundary.
+ * @tparam T Integral or pointer type.
+ * @param val Address or integer value to check.
+ * @param alignment Alignment boundary in bytes (must be a power of 2).
+ * @return True if aligned, false otherwise.
+ */
+template <typename T>
+    requires std::is_integral_v<T> || std::is_pointer_v<T>
+[[nodiscard]] constexpr auto is_aligned(T val, size_t alignment) -> bool {
+    if constexpr (std::is_pointer_v<T>) {
+        return (std::bit_cast<uintptr_t>(val) & (alignment - 1)) == 0;
+    } else {
+        return (static_cast<uintptr_t>(val) & (alignment - 1)) == 0;
+    }
+}
 
 /// Concept: Type represents a valid memory address
 template <typename T>
@@ -97,31 +112,18 @@ inline auto host_read_fast(const Byte* host_ptr, Instruction funct3) -> Word {
                 static_cast<SignedWord>(*reinterpret_cast<const int8_t*>(host_ptr)));
         case isa::Funct3::Lbu:
             return static_cast<Word>(*reinterpret_cast<const uint8_t*>(host_ptr));
-        case isa::Funct3::Lh: {
-            int16_t val = 0;
-            std::memcpy(&val, host_ptr, sizeof(val));
-            return static_cast<Word>(static_cast<SignedWord>(val));
-        }
-        case isa::Funct3::Lhu: {
-            uint16_t val = 0;
-            std::memcpy(&val, host_ptr, sizeof(val));
-            return static_cast<Word>(val);
-        }
-        case isa::Funct3::Lw: {
-            int32_t val = 0;
-            std::memcpy(&val, host_ptr, sizeof(val));
-            return static_cast<Word>(val);
-        }
-        case isa::Funct3::Lwu: {
-            uint32_t val = 0;
-            std::memcpy(&val, host_ptr, sizeof(val));
-            return static_cast<Word>(val);
-        }
-        case isa::Funct3::Ld: {
-            uint64_t val = 0;
-            std::memcpy(&val, host_ptr, sizeof(val));
-            return static_cast<Word>(val);
-        }
+        case isa::Funct3::Lh:
+            return static_cast<Word>(
+                static_cast<SignedWord>(*reinterpret_cast<const int16_t*>(host_ptr)));
+        case isa::Funct3::Lhu:
+            return static_cast<Word>(*reinterpret_cast<const uint16_t*>(host_ptr));
+        case isa::Funct3::Lw:
+            return static_cast<Word>(
+                static_cast<SignedWord>(*reinterpret_cast<const int32_t*>(host_ptr)));
+        case isa::Funct3::Lwu:
+            return static_cast<Word>(*reinterpret_cast<const uint32_t*>(host_ptr));
+        case isa::Funct3::Ld:
+            return static_cast<Word>(*reinterpret_cast<const uint64_t*>(host_ptr));
         default:
             return 0;
     }
@@ -132,143 +134,26 @@ inline void host_write_fast(Byte* host_ptr, Register val, Instruction funct3) {
         case isa::Funct3::Sb:
             *reinterpret_cast<uint8_t*>(host_ptr) = static_cast<uint8_t>(val);
             break;
-        case isa::Funct3::Sh: {
-            uint16_t const tmp = static_cast<uint16_t>(val);
-            std::memcpy(host_ptr, &tmp, sizeof(tmp));
+        case isa::Funct3::Sh:
+            *reinterpret_cast<uint16_t*>(host_ptr) = static_cast<uint16_t>(val);
             break;
-        }
-        case isa::Funct3::Sw: {
-            uint32_t const tmp = static_cast<uint32_t>(val);
-            std::memcpy(host_ptr, &tmp, sizeof(tmp));
+        case isa::Funct3::Sw:
+            *reinterpret_cast<uint32_t*>(host_ptr) = static_cast<uint32_t>(val);
             break;
-        }
-        case isa::Funct3::Sd: {
-            uint64_t const tmp = static_cast<uint64_t>(val);
-            std::memcpy(host_ptr, &tmp, sizeof(tmp));
+        case isa::Funct3::Sd:
+            *reinterpret_cast<uint64_t*>(host_ptr) = static_cast<uint64_t>(val);
             break;
-        }
         default:
             break;
     }
 }
 
-// ========== Fast RAM Read Operations ==========
+/// ========== Fast RAM Read Operations ==========
 
 /// Fast inline RAM read with support for various load formats
 /// Requires: addr to be valid DRAM address; ram pointer must be non-null
 inline auto ram_read_fast(Address addr, Instruction funct3, Byte* ram) -> Word {
-    constexpr auto kFunct3Mask = static_cast<Instruction>(0x7u);
-    const Address masked = addr & simrv::memory::kDramMask;
-
-    switch (funct3 & kFunct3Mask) {
-        case static_cast<Instruction>(isa::Funct3::Lb): {
-            const auto b = static_cast<int8_t>(std::to_integer<uint8_t>(ram[masked]));
-            return static_cast<Word>(static_cast<SignedWord>(b));
-        }
-        case static_cast<Instruction>(isa::Funct3::Lbu):
-            return static_cast<Word>(std::to_integer<uint8_t>(ram[masked]));
-        case static_cast<Instruction>(isa::Funct3::Lh): {
-            int16_t val;
-            if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 1))) {
-                std::memcpy(&val, ram + masked, sizeof(val));
-            } else {
-                const Address m1 = (addr + 1) & simrv::memory::kDramMask;
-                val = static_cast<int16_t>(
-                    static_cast<uint16_t>(std::to_integer<uint8_t>(ram[masked])) |
-                    (static_cast<uint16_t>(std::to_integer<uint8_t>(ram[m1])) << 8));
-            }
-            return static_cast<Word>(static_cast<SignedWord>(val));
-        }
-        case static_cast<Instruction>(isa::Funct3::Lhu): {
-            uint16_t val;
-            if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 1))) {
-                std::memcpy(&val, ram + masked, sizeof(val));
-            } else {
-                const Address m1 = (addr + 1) & simrv::memory::kDramMask;
-                val = static_cast<uint16_t>(std::to_integer<uint8_t>(ram[masked])) |
-                      (static_cast<uint16_t>(std::to_integer<uint8_t>(ram[m1])) << 8);
-            }
-            return static_cast<Word>(val);
-        }
-        case static_cast<Instruction>(isa::Funct3::Lw): {
-            int32_t val;
-            if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 3))) {
-                std::memcpy(&val, ram + masked, sizeof(val));
-            } else {
-                const Address m1 = (addr + 1) & simrv::memory::kDramMask;
-                const Address m2 = (addr + 2) & simrv::memory::kDramMask;
-                const Address m3 = (addr + 3) & simrv::memory::kDramMask;
-                val = static_cast<int32_t>(
-                    static_cast<uint32_t>(std::to_integer<uint8_t>(ram[masked])) |
-                    (static_cast<uint32_t>(std::to_integer<uint8_t>(ram[m1])) << 8) |
-                    (static_cast<uint32_t>(std::to_integer<uint8_t>(ram[m2])) << 16) |
-                    (static_cast<uint32_t>(std::to_integer<uint8_t>(ram[m3])) << 24));
-            }
-            return static_cast<Word>(static_cast<SignedWord>(val));
-        }
-        // RV64 LD (load double-word) instruction
-        case static_cast<Instruction>(isa::Funct3::Ld): {
-            if constexpr (simrv::xlen::kIsXLen64) {
-                uint64_t val;
-                if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 7))) {
-                    std::memcpy(&val, ram + masked, sizeof(val));
-                } else {
-                    val = 0;
-                    for (int offset : std::views::iota(0, 8)) {
-                        val |= static_cast<uint64_t>(std::to_integer<uint8_t>(
-                                   ram[(addr + offset) & simrv::memory::kDramMask]))
-                               << (8 * offset);
-                    }
-                }
-                return static_cast<Word>(val);
-            } else {
-                // In RV32, LD is not defined; treat as reserved
-                return 0;
-            }
-        }
-        // RV64 LWU (load word unsigned) instruction
-        case static_cast<Instruction>(isa::Funct3::Lwu): {
-            if constexpr (simrv::xlen::kIsXLen64) {
-                uint32_t val = 0;
-                if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 3))) {
-                    std::memcpy(&val, ram + masked, sizeof(val));
-                } else {
-                    const Address m1 = (addr + 1) & simrv::memory::kDramMask;
-                    const Address m2 = (addr + 2) & simrv::memory::kDramMask;
-                    const Address m3 = (addr + 3) & simrv::memory::kDramMask;
-                    val = static_cast<uint32_t>(std::to_integer<uint8_t>(ram[masked])) |
-                          (static_cast<uint32_t>(std::to_integer<uint8_t>(ram[m1])) << 8) |
-                          (static_cast<uint32_t>(std::to_integer<uint8_t>(ram[m2])) << 16) |
-                          (static_cast<uint32_t>(std::to_integer<uint8_t>(ram[m3])) << 24);
-                }
-                return static_cast<Word>(val);
-            } else {
-                // In RV32, LWU is not defined; treat as reserved
-                return 0;
-            }
-        }
-        default: {
-            Word rdata = 0;
-            constexpr auto kSizeBits = 0x3;
-            const int byte_count = (1 << (funct3 & kSizeBits));
-            for (int offset : std::views::iota(0, byte_count)) {
-                rdata |= static_cast<Word>(std::to_integer<uint8_t>(
-                             ram[(addr + offset) & simrv::memory::kDramMask]))
-                         << (8 * offset);
-            }
-            constexpr auto kSignExtendBit = 0x4;
-            if ((funct3 & kSignExtendBit) == 0) {
-                const unsigned bits = 8 * byte_count;
-                const Word sign_bit = static_cast<Word>(1) << (bits - 1);
-                if ((rdata & sign_bit) != 0) {
-                    const Word extend_mask =
-                        kXLenMask & (~((static_cast<Word>(1) << bits) - static_cast<Word>(1)));
-                    rdata |= extend_mask;
-                }
-            }
-            return rdata;
-        }
-    }
+    return host_read_fast(ram + (addr & simrv::memory::kDramMask), funct3);
 }
 
 // ========== Fast RAM Write Operations ==========
@@ -276,77 +161,7 @@ inline auto ram_read_fast(Address addr, Instruction funct3, Byte* ram) -> Word {
 /// Fast inline RAM write with support for various store formats
 /// Supports: SB (1 byte), SH (2 bytes), SW (4 bytes), SD (8 bytes on RV64)
 inline void ram_write_fast(Address addr, Word wdata, Instruction funct3, Byte* ram) {
-    constexpr auto kFunct3WriteMask = static_cast<Instruction>(0x3u);
-    const Address masked = addr & simrv::memory::kDramMask;
-
-    switch (funct3 & kFunct3WriteMask) {
-        case 0: {  // SB: Store Byte
-            ram[masked] = static_cast<Byte>(static_cast<uint8_t>(wdata & 0xFF));
-            break;
-        }
-        case 1: {  // SH: Store Halfword (2 bytes)
-            if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 1))) {
-                uint16_t val = static_cast<uint16_t>(wdata);
-                std::memcpy(ram + masked, &val, sizeof(val));
-            } else {
-                const Address m1 = (addr + 1) & simrv::memory::kDramMask;
-                ram[masked] = static_cast<Byte>(static_cast<uint8_t>(wdata & 0xFF));
-                ram[m1] = static_cast<Byte>(static_cast<uint8_t>((wdata >> 8) & 0xFF));
-            }
-            break;
-        }
-        case 2: {  // SW: Store Word (4 bytes)
-            if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 3))) {
-                uint32_t val = static_cast<uint32_t>(wdata);
-                std::memcpy(ram + masked, &val, sizeof(val));
-            } else {
-                const Address m1 = (addr + 1) & simrv::memory::kDramMask;
-                const Address m2 = (addr + 2) & simrv::memory::kDramMask;
-                const Address m3 = (addr + 3) & simrv::memory::kDramMask;
-                ram[masked] = static_cast<Byte>(static_cast<uint8_t>(wdata & 0xFF));
-                ram[m1] = static_cast<Byte>(static_cast<uint8_t>((wdata >> 8) & 0xFF));
-                ram[m2] = static_cast<Byte>(static_cast<uint8_t>((wdata >> 16) & 0xFF));
-                ram[m3] = static_cast<Byte>(static_cast<uint8_t>((wdata >> 24) & 0xFF));
-            }
-            break;
-        }
-        case 3: {  // SD: Store Doubleword (8 bytes, RV64 only)
-            if constexpr (simrv::xlen::kIsXLen64) {
-                if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 7))) {
-                    uint64_t val = static_cast<uint64_t>(wdata);
-                    std::memcpy(ram + masked, &val, sizeof(val));
-                } else {
-                    for (int offset : std::views::iota(0, 8)) {
-                        ram[(addr + offset) & simrv::memory::kDramMask] =
-                            static_cast<Byte>(static_cast<uint8_t>((wdata >> (8 * offset)) & 0xFF));
-                    }
-                }
-            } else {
-                // In RV32, funct3=3 is reserved; treat as SW (4 bytes)
-                if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 3))) {
-                    uint32_t val = static_cast<uint32_t>(wdata);
-                    std::memcpy(ram + masked, &val, sizeof(val));
-                } else {
-                    const Address m1 = (addr + 1) & simrv::memory::kDramMask;
-                    const Address m2 = (addr + 2) & simrv::memory::kDramMask;
-                    const Address m3 = (addr + 3) & simrv::memory::kDramMask;
-                    ram[masked] = static_cast<Byte>(static_cast<uint8_t>(wdata & 0xFF));
-                    ram[m1] = static_cast<Byte>(static_cast<uint8_t>((wdata >> 8) & 0xFF));
-                    ram[m2] = static_cast<Byte>(static_cast<uint8_t>((wdata >> 16) & 0xFF));
-                    ram[m3] = static_cast<Byte>(static_cast<uint8_t>((wdata >> 24) & 0xFF));
-                }
-            }
-            break;
-        }
-        default: {
-            const int byte_count = (1 << funct3);
-            for (int offset : std::views::iota(0, byte_count)) {
-                ram[(addr + offset) & simrv::memory::kDramMask] =
-                    static_cast<Byte>(static_cast<uint8_t>((wdata >> (8 * offset)) & 0xFF));
-            }
-            break;
-        }
-    }
+    host_write_fast(ram + (addr & simrv::memory::kDramMask), wdata, funct3);
 }
 
 }  // namespace simrv::memory

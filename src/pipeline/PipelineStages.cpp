@@ -4,6 +4,7 @@
  */
 #include <bit>
 #include <cstdint>
+#include <utility>
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"

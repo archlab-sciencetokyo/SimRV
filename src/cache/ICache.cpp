@@ -5,6 +5,7 @@
 #include "simrv/cache/ICache.hpp"
 
 #include <cstring>
+#include <utility>
 
 #include "simrv/Define.hpp"
 

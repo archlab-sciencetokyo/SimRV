@@ -6,6 +6,7 @@
 
 #include <array>
 #include <atomic>
+#include <utility>
 
 #include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
@@ -113,8 +114,37 @@ class ClintMmio : public memory::TileLinkNode {
  */
 class TrapController {
    public:
+    /**
+     * @brief Executes Machine-mode trap return (MRET).
+     *
+     * Restores privilege level from MPP, re-enables interrupt enabling bit MIE from MPIE,
+     * resets MPIE to 1, sets MPP to U-mode, and updates program counter from MEPC.
+     *
+     * @param state Reference to architectural state.
+     */
     static void mret(ArchState& state);
+
+    /**
+     * @brief Executes Supervisor-mode trap return (SRET).
+     *
+     * Restores privilege level from SPP, re-enables SIE from SPIE, resets SPIE to 1,
+     * sets SPP to U-mode, clears MPRV, and updates program counter from SEPC.
+     *
+     * @param state Reference to architectural state.
+     */
     static void sret(ArchState& state);
+
+    /**
+     * @brief Traps CPU execution to machine or supervisor handler for an exception or interrupt.
+     *
+     * Evaluates delegation vectors (medeleg/mideleg), populates cause (mcause/scause),
+     * faulting address or payload (mtval/stval), saves return address (mepc/sepc), and updates
+     * privilege level to handler target mode.
+     *
+     * @param cpu Reference to CPU instance.
+     * @param cause Hardware trap cause code (interrupt or exception).
+     * @param tval Auxiliary trap value (e.g. faulting virtual address or instruction encoding).
+     */
     static void raiseException(CPU& cpu, TrapCause cause, CSRValue tval);
 
     /**

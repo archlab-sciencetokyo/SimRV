@@ -11,30 +11,38 @@
 
 namespace simrv::core {
 
+/**
+ * @struct VectorRegister
+ * @brief Represents a single RISC-V Vector Extension register (VLEN up to 512 bits).
+ *
+ * Aligned to maximum vector register boundary (kVlenMaxBytes) and union-castable into
+ * signed/unsigned integer or floating-point element slices.
+ */
 struct alignas(kVlenMaxBytes) VectorRegister {
-    union {
-        uint8_t u8[kVlenMaxBytes];
-        uint16_t u16[kVlenMaxBytes / 2];
-        uint32_t u32[kVlenMaxBytes / 4];
-        uint64_t u64[kVlenMaxBytes / 8];
-        int8_t i8[kVlenMaxBytes];
-        int16_t i16[kVlenMaxBytes / 2];
-        int32_t i32[kVlenMaxBytes / 4];
-        int64_t i64[kVlenMaxBytes / 8];
-        float f32[kVlenMaxBytes / 4];
-        double f64[kVlenMaxBytes / 8];
+    union {  // NOLINT(cppcoreguidelines-pro-type-union-access)
+        std::array<uint8_t, kVlenMaxBytes> u8;
+        std::array<uint16_t, kVlenMaxBytes / 2> u16;
+        std::array<uint32_t, kVlenMaxBytes / 4> u32;
+        std::array<uint64_t, kVlenMaxBytes / 8> u64;
+        std::array<int8_t, kVlenMaxBytes> i8;
+        std::array<int16_t, kVlenMaxBytes / 2> i16;
+        std::array<int32_t, kVlenMaxBytes / 4> i32;
+        std::array<int64_t, kVlenMaxBytes / 8> i64;
+        std::array<float, kVlenMaxBytes / 4> f32;
+        std::array<double, kVlenMaxBytes / 8> f64;
     };
 };
 
 /**
  * @class RegisterFile
- * @brief Manages integer, floating-point, and vector architectural registers.
+ * @brief Architectural register file container for RISC-V GPRs, FPRs, and VRs.
  *
- * Encapsulates the hardwired x0 == 0 behavior and provides a unified
- * state block for the register arrays.
+ * Encapsulates hardwired x0 == 0 zero-register semantics, sign-extension rules for
+ * 32-bit execution mode on RV64, and cache-line aligned storage arrays.
  */
 class RegisterFile {
    public:
+    /// Number of architectural GPRs, FPRs, and vector registers (32)
     static constexpr std::size_t kNumRegisters = 32;
 
     struct RegisterProxy {
@@ -104,9 +112,9 @@ class RegisterFile {
     }
 
    private:
-    std::array<Register, kNumRegisters> reg_{};
-    std::array<FloatingRegister, kNumRegisters> freg_{};
-    std::array<VectorRegister, kNumRegisters> vreg_{};
+    alignas(64) std::array<Register, kNumRegisters> reg_{};
+    alignas(64) std::array<FloatingRegister, kNumRegisters> freg_{};
+    alignas(kVlenMaxBytes) std::array<VectorRegister, kNumRegisters> vreg_{};
 };
 
 }  // namespace simrv::core

@@ -32,7 +32,7 @@ class Machine;
  * @struct ArchState
  * @brief Groups all architectural registers and CSRs into a cohesive block.
  */
-struct ArchState {
+struct alignas(128) ArchState {
     Register pc{};        ///< Program Counter (instruction address pointer)
     RegisterFile regs{};  ///< General-purpose integer, FP, and vector registers
 
@@ -316,6 +316,13 @@ class CPU {
     void execute_cached_op_fast(Machine& machine, CachedOp& op);
 
     /**
+     * @brief Executes a batch of cached operations in a tight inlined loop for baremetal acceleration.
+     * @param machine Reference to top-level Machine.
+     * @param batch_size Maximum number of instructions to execute in the batch.
+     */
+    void run_fast_baremetal_batch(Machine& machine, uint32_t batch_size);
+
+    /**
      * @brief Coroutine generator for persistent zero-allocation pipeline simulation.
      * @param machine Pointer to the top-level machine orchestration unit.
      * @return PipelineTask handle.
@@ -438,9 +445,9 @@ class CPU {
     auto execute_cached_op_imm(CachedOp& op, Register rrs1) -> void;
     auto execute_cached_op_imm32(CachedOp& op, Register rrs1) -> void;
     auto execute_cached_op32(CachedOp& op, Register rrs1, Register rrs2) -> void;
-    auto try_fast_load(Machine& machine, Address mem_addr, isa::Funct3 funct3, Register& out_val)
+    SIMRV_ALWAYS_INLINE auto try_fast_load(Machine& machine, Address mem_addr, isa::Funct3 funct3, Register& out_val)
         -> bool;
-    auto try_fast_store(Machine& machine, Address mem_addr, isa::Funct3 funct3, Register rrs2)
+    SIMRV_ALWAYS_INLINE auto try_fast_store(Machine& machine, Address mem_addr, isa::Funct3 funct3, Register rrs2)
         -> bool;
     auto execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> bool;
     auto execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Register rrs2) -> bool;
@@ -509,14 +516,15 @@ class CPU {
     simrv::pipeline::PipelineTask pipeline_task;
     simrv::pipeline::PipelineSim pipeline_sim;
     DecodeCache decode_cache;
-    std::array<SoftTlbEntry, 2048> soft_tlb_read{};
-    std::array<SoftTlbEntry, 2048> soft_tlb_write{};
+    alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_read{};
+    alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_write{};
     uint32_t soft_tlb_epoch = 1;
     void soft_tlb_flush();
-    void soft_tlb_flush_selective(bool match_all_vaddr, Address vaddr, bool match_all_asid, Word asid);
+    void soft_tlb_flush_selective(bool match_all_vaddr, Address vaddr, bool match_all_asid,
+                                  Word asid);
 
     // ========== Execution Metrics ==========
-    std::atomic<uint64_t> e_icount{0};                        // Total instruction count
+    uint64_t e_icount{0};                                     // Total instruction count
     Counter e_ccount = 0;                                     // Compressed instructions executed
     std::array<uint64_t, isa::OperationIdCount> e_instmix{};  // Instruction-mix statistics
 

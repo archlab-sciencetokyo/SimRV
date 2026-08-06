@@ -223,22 +223,24 @@ void Uart::push_rx_byte(uint8_t byte) {
 }
 
 void Uart::non_tui_poll_input() {
-    std::scoped_lock lock(rx_mutex_);
     if (machine_.s_tuimode) {
         bool has_data = rx_ready_.load(std::memory_order_acquire);
         update_uart_irq(machine_, has_data, uart_ier_, tx_irq_pending_);
         return;
     }
 
-    if (!uart_rx_ready_ && !rx_fifo_.empty()) {
-        uart_rx_byte_ = rx_fifo_.front();
-        rx_fifo_.pop();
-        uart_rx_ready_ = true;
-        update_uart_irq(machine_, true, uart_ier_, tx_irq_pending_);
-    }
+    if (simrv::compiler::unlikely(rx_ready_.load(std::memory_order_relaxed) || !rx_fifo_.empty() || uart_rx_ready_)) {
+        std::scoped_lock lock(rx_mutex_);
+        if (!uart_rx_ready_ && !rx_fifo_.empty()) {
+            uart_rx_byte_ = rx_fifo_.front();
+            rx_fifo_.pop();
+            uart_rx_ready_ = true;
+            update_uart_irq(machine_, true, uart_ier_, tx_irq_pending_);
+        }
 
-    if (uart_rx_ready_ && uart_rx_byte_ == 17) {
-        machine_.is_running_ = false;
+        if (uart_rx_ready_ && uart_rx_byte_ == 17) {
+            machine_.is_running_ = false;
+        }
     }
 }
 

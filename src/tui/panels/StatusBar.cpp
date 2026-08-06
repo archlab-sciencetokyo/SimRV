@@ -446,7 +446,7 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                 " ═══ SCROLLBACK (Offset: -{}) [Press 'c'/'Enter' to Live] ═══ ", scroll_offset_);
         } else {
             const auto cycles = machine_.cpu.clint_mmio.mcycle;
-            const auto icount = machine_.cpu.e_icount.load();
+            const auto icount = machine_.cpu.e_icount;
             const double cpi =
                 icount == 0 ? 0.0 : static_cast<double>(cycles) / static_cast<double>(icount);
 

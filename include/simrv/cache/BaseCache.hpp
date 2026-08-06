@@ -9,6 +9,7 @@
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <utility>
 
 #include "simrv/Define.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -25,12 +26,17 @@ class BaseCache {
     static constexpr uint32_t kNumSets = kNumLines / kWays;
     static constexpr uint32_t kSetMask = kNumSets - 1;
 
+    /**
+     * @struct CacheLine
+     * @brief Aligned L1 cache line entry (64 bytes total layout).
+     */
     struct alignas(64) CacheLine {
-        Address tag = ~Address{0};            // 8 bytes (offset 0)
-        uint64_t last_used = 0;             // 8 bytes (offset 8)
-        bool valid = false;                 // 1 byte  (offset 16)
-        std::array<uint8_t, 15> padding{};   // 15 bytes padding (offset 17..32)
-        std::array<Byte, kLineBytes> data{}; // 32 bytes (offset 32..64)
+        Address tag = ~Address{0};          ///< Tag bits for address matching (8 bytes, offset 0)
+        uint64_t last_used = 0;             ///< Timestamp tick for LRU eviction (8 bytes, offset 8)
+        bool valid = false;                 ///< Cache line validity bit (1 byte, offset 16)
+        std::array<uint8_t, 15> padding{};  ///< Explicit 15-byte padding (offset 17..32)
+        alignas(16) std::array<Byte, kLineBytes> data{};  ///< 16-byte aligned payload buffer (32
+                                                          ///< bytes, offset 32..64)
     };
 
     BaseCache() = default;

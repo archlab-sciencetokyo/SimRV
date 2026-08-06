@@ -1,5 +1,7 @@
 #include "simrv/pipeline/InOrderPipeline.hpp"
 
+#include <utility>
+
 namespace simrv::pipeline {
 
 using simrv::isa::OperationId;
@@ -190,6 +192,8 @@ auto InOrderPipeline::resolve_branch_ex(BtbEntry& btb_entry, Register pc, Regist
             bht_idx = ((pc >> 1) ^ gshare_history_) & 0xFF;
             predicted_taken = (branch_history_table_.at(bht_idx) >= 2);
             break;
+        default:
+            std::unreachable();
     }
 
     const bool btb_hit = (config.btb_entries > 0) && btb_entry.valid && (btb_entry.pc == pc);

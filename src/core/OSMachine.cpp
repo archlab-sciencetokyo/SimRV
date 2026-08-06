@@ -32,7 +32,8 @@ void OSMachine::run() {
 
     if (has_debug) {
         // ---- Debug path: GDB / lockstep / TUI ebreak ----
-        while (is_running() && execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
+        while (is_running() &&
+               execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
             if (s_tuimode && tui && tui->is_tui_paused()) {
                 tui->set_sim_thread_sleeping(true);
                 execution_state_.wait(ExecutionState::Paused, std::memory_order_relaxed);
@@ -91,7 +92,8 @@ void OSMachine::run() {
     } else {
         // ---- Fast path: normal Linux/RTOS execution ----
         // No per-cycle GDB/lockstep/TUI branches.
-        while (is_running_ && execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
+        while (is_running_ &&
+               execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
             prepare_cycle();
             cpu.run_cycle(*this);
             finalize_cycle();
@@ -164,7 +166,7 @@ void OSMachine::finalize_cycle() {
             simrv::log::info("finished by -e option");
             stop();
         }
-        // SDL update only from main thread in multithreaded mode (optimisation 2)
+        // SDL update only from main thread in multithreaded mode
         if (!s_multithreaded && sdl_display &&
             simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
             sdl_display->update(cpu.e_icount);
@@ -196,7 +198,7 @@ void OSMachine::finalize_cycle() {
             uart->non_tui_poll_input();
         }
     }
-    // SDL update only from main thread in multithreaded mode (optimisation 2)
+    // SDL update only from main thread in multithreaded mode
     if (!s_multithreaded && sdl_display) {
         if (simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
             sdl_display->update(cpu.e_icount);

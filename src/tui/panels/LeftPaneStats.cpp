@@ -28,8 +28,14 @@ using simrv::isa::InstFormat;
 
 namespace {
 
+/// Instruction categories for TUI statistical distribution breakdown
 enum class InstCategory : uint8_t { ALU, MEM, CTRL, SYS, VEC };
 
+/**
+ * @brief Classifies a RISC-V operation ID into a high-level architectural instruction category.
+ * @param i OperationId integer value.
+ * @return InstCategory classification.
+ */
 auto get_inst_category(int i) -> InstCategory {
     static constexpr std::array<InstCategory, 512> category_lut =
         []() -> std::array<InstCategory, 512> {
@@ -119,7 +125,7 @@ auto LeftPane::render_machine_performance_stats_core(const simrv::core::CPU& cpu
     }
     if (adj_logical_row == 26) {
         std::string insns = std::format("  Executed Insns : {}{}\033[0m", kThemeMint,
-                                        simrv::util::format_with_commas(cpu.e_icount.load()));
+                                        simrv::util::format_with_commas(cpu.e_icount));
         return format_to_width(insns, width);
     }
     if (adj_logical_row == 27) {
@@ -530,10 +536,10 @@ auto LeftPane::render_debug_state(int debug_row, int width) -> std::string {
     if (debug_row == 3) {
         std::string tohost_str = std::format("0x{:x}", machine_.tohost.load());
         std::string traplog_status = machine_.s_traplog_mode ? "active" : "disabled";
-        return render_pair("tohost", tohost_str, machine_.tohost.load() != 0 ? kThemePeach : kThemeVal,
-                           "traplog", traplog_status,
-                           machine_.s_traplog_mode ? kThemeMint : kThemeMuted, col_width,
-                           right_width, 8);
+        return render_pair("tohost", tohost_str,
+                           machine_.tohost.load() != 0 ? kThemePeach : kThemeVal, "traplog",
+                           traplog_status, machine_.s_traplog_mode ? kThemeMint : kThemeMuted,
+                           col_width, right_width, 8);
     }
     return format_to_width("", width);
 }

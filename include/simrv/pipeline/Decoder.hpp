@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <string_view>
+#include <utility>
 
 #include "simrv/Define.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -100,9 +101,7 @@ class Decoder {
     [[nodiscard]] constexpr auto csr() const -> uint32_t { return (inst_ >> 20) & 0xFFF; }
 
     /// Extract zero-extended 5-bit immediate field stored in rs1 for CSR imm instructions
-    [[nodiscard]] constexpr auto zimm() const -> uint32_t {
-        return std::to_underlying(rs1());
-    }
+    [[nodiscard]] constexpr auto zimm() const -> uint32_t { return std::to_underlying(rs1()); }
 
     // =========================================================================
     // Compressed Instruction Decoding Base Hooks (C Extension)

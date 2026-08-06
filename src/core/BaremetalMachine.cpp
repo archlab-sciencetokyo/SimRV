@@ -32,7 +32,8 @@ void BaremetalMachine::run() {
 
     if (s_tuimode && tui) {
         // ---- TUI / debug path (ebreak-aware, single-threaded) ----
-        while (is_running() && execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
+        while (is_running() &&
+               execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
             if (tui->is_tui_paused()) {
                 tui->set_sim_thread_sleeping(true);
                 execution_state_.wait(ExecutionState::Paused, std::memory_order_relaxed);
@@ -100,11 +101,16 @@ void BaremetalMachine::run() {
             }
         }
     } else {
-        // ---- Fast path: GUI / ISA-test / no-TUI ----
-        // No ebreak check, no TUI branches, no uart poll in hot path.
-        // SDL rendering stays entirely in the main thread (optimisation 2).
-        while (is_running_ && execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
-            cpu.run_cycle_baremetal(*this);
+        // Fast path: GUI / ISA-test / non-TUI mode
+        while (simrv::compiler::likely(is_running_.load(std::memory_order_relaxed)) &&
+               execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
+            if (simrv::compiler::likely(s_high_performance && !s_tuimode && !s_lockstep_mode &&
+                                        !s_gdb_mode && !s_bp_trace && s_strace == 0 &&
+                                        !breakpoints.has_any() && !s_rollback_enabled)) {
+                cpu.run_fast_baremetal_batch(*this, kBatchSize);
+            } else {
+                cpu.run_cycle_baremetal(*this);
+            }
 
             if (simrv::compiler::unlikely(tracer.fp_trace.is_open())) {
                 tracer.write_trace_snapshot();
@@ -120,21 +126,12 @@ void BaremetalMachine::run() {
                 is_running_ = false;
             }
 
-            cycle_count++;
-            if (simrv::compiler::unlikely(cycle_count >= kBatchSize)) {
-                cycle_count = 0;
+            if (uart) {
+                uart->non_tui_poll_input();
+            }
 
-                if (uart) {
-                    uart->non_tui_poll_input();
-                }
-
-                // --- Optimisation 2: SDL update only from main thread in MT mode ---
-                // In multithreaded mode the main thread calls update_gui_only() at
-                // 60 fps; we must not touch SDL from the sim thread.
-                // In single-threaded mode (e.g. ISA tests with -g) we still need it.
-                if (!s_multithreaded && sdl_display) {
-                    sdl_display->update(cpu.e_icount);
-                }
+            if (!s_multithreaded && sdl_display) {
+                sdl_display->update(cpu.e_icount);
             }
         }
     }

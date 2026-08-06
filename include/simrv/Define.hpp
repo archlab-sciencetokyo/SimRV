@@ -64,6 +64,12 @@ constexpr auto unlikely(T value) -> bool {
 }
 }  // namespace simrv::compiler
 
+#if defined(__GNUC__) || defined(__clang__)
+#define SIMRV_ALWAYS_INLINE inline __attribute__((always_inline))
+#else
+#define SIMRV_ALWAYS_INLINE inline
+#endif
+
 /// Flag bit distinguishing interrupts from synchronous exceptions.
 enum class TrapFlag : TrapCause {
     Interrupt = static_cast<TrapCause>(Word{1} << (simrv::xlen::kXLenBits - 1u)),
