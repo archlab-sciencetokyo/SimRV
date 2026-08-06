@@ -1,7 +1,6 @@
 #pragma once
 
 #include <expected>
-#include <optional>
 #include <simrv/Define.hpp>
 #include <simrv/pipeline/DecodedInstruction.hpp>
 

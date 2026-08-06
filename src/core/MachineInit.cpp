@@ -259,6 +259,10 @@ auto Machine::initialize() -> int {
         return 1;
     }
     mmem = mmem_owner_.get();
+    mmem_base_offset = mmem - simrv::memory::kDramBaseAddress;
+    s_fast_copy_context =
+        s_tuimode || s_lockstep_mode || s_gdb_mode || s_bp_trace || (s_strace != 0);
+    s_fast_instmix = s_use_mix || s_tuimode;
     console->mmem = mmem;
     disk->mmem = mmem;
 

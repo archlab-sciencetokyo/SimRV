@@ -22,6 +22,9 @@ using namespace simrv::isa;
 
 namespace {
 SIMRV_ALWAYS_INLINE auto is_tohost_addr(const Machine& machine, Address addr) -> bool {
+    if (simrv::compiler::likely((addr & 0xFFFu) >= 8u)) {
+        return false;
+    }
     return (addr - machine.s_isatest_tohost < 8) || (addr - 0x80001000ULL < 8) ||
            (addr - 0x40008000ULL < 8);
 }
@@ -196,7 +199,8 @@ void CPU::run_cycle(Machine& machine) {
             // Bypasses pipeline orchestration and fetches from direct lookup cache if available.
             auto* cached = decode_cache.lookup(state_.pc);
             if (simrv::compiler::likely(cached != nullptr)) {
-                execute_cached_op_fast(machine, *cached);
+                size_t dummy_idx = 0;
+                execute_cached_op_fast(machine, *cached, dummy_idx);
             } else {
                 // Decode cache miss: run basic functional stages sequentially and cache the decoded
                 // op.
@@ -333,7 +337,8 @@ void CPU::run_cycle_baremetal(Machine& machine) {
     if (machine.s_high_performance) {
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
-            execute_cached_op_fast(machine, *cached);
+            size_t dummy_idx = 0;
+            execute_cached_op_fast(machine, *cached, dummy_idx);
             clint_mmio.mcycle++;
             if (machine.s_tuimode && machine.tui && machine.tui->is_trace_active()) {
                 record_trace_for_tui(machine);
@@ -659,21 +664,13 @@ auto CPU::commit_stage(Machine& machine) -> bool {
 }
 
 void CPU::execute_cached_lui(CachedOp& op) {
-    if (op.rd != RegId::Zero) {
-        state_.regs.write(op.rd, op.imm);
-    }
-    e_icount++;
-    if (op.cinsn) e_ccount++;
+    state_.regs.write(op.rd, op.imm);
     state_.pc += op.len;
     pc_sign_extend();
 }
 
 void CPU::execute_cached_auipc(CachedOp& op) {
-    if (op.rd != RegId::Zero) {
-        state_.regs.write(op.rd, state_.pc + op.imm);
-    }
-    e_icount++;
-    if (op.cinsn) e_ccount++;
+    state_.regs.write(op.rd, state_.pc + op.imm);
     state_.pc += op.len;
     pc_sign_extend();
 }
@@ -682,19 +679,15 @@ void CPU::execute_cached_jal(CachedOp& op) {
     Register const next_pc = state_.pc + op.len;
     pipeline_context.tkn = true;
     pipeline_context.jmp_pc = state_.pc + op.imm;
-    if (op.rd != RegId::Zero) {
-        state_.regs.write(op.rd, next_pc);
-    }
+    state_.regs.write(op.rd, next_pc);
     const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
     const Word alignment_mask = has_c ? 1u : 3u;
-    if ((pipeline_context.jmp_pc & alignment_mask) != 0) {
+    if (simrv::compiler::unlikely((pipeline_context.jmp_pc & alignment_mask) != 0)) {
         raise_exception(static_cast<TrapCause>(ExceptionCode::MisalignedFetch),
                         pipeline_context.jmp_pc);
         return;
     }
     state_.pc = pipeline_context.jmp_pc;
-    e_icount++;
-    if (op.cinsn) e_ccount++;
     pc_sign_extend();
 }
 
@@ -702,65 +695,94 @@ void CPU::execute_cached_jalr(CachedOp& op, Register rrs1) {
     Register const next_pc = state_.pc + op.len;
     pipeline_context.tkn = true;
     pipeline_context.jmp_pc = (rrs1 + op.imm) & ~static_cast<Register>(1);
-    if (state_.regs.xlen == 32) {
-        pipeline_context.jmp_pc = static_cast<Register>(
-            static_cast<int64_t>(static_cast<int32_t>(pipeline_context.jmp_pc)));
+    if constexpr (simrv::xlen::kIsXLen64) {
+        if (simrv::compiler::unlikely(state_.regs.xlen == 32)) {
+            pipeline_context.jmp_pc = static_cast<Register>(
+                static_cast<int64_t>(static_cast<int32_t>(pipeline_context.jmp_pc)));
+        }
     }
-    if (op.rd != RegId::Zero) {
-        state_.regs.write(op.rd, next_pc);
-    }
+    state_.regs.write(op.rd, next_pc);
     const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
     const Word alignment_mask = has_c ? 1u : 3u;
-    if ((pipeline_context.jmp_pc & alignment_mask) != 0) {
+    if (simrv::compiler::unlikely((pipeline_context.jmp_pc & alignment_mask) != 0)) {
         raise_exception(static_cast<TrapCause>(ExceptionCode::MisalignedFetch),
                         pipeline_context.jmp_pc);
         return;
     }
     state_.pc = pipeline_context.jmp_pc;
-    e_icount++;
-    if (op.cinsn) e_ccount++;
     pc_sign_extend();
 }
 
 void CPU::execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) {
     bool tkn = false;
     switch (op.funct3) {
-        case isa::Funct3::Beq:  tkn = (rrs1 == rrs2); break;
-        case isa::Funct3::Bne:  tkn = (rrs1 != rrs2); break;
-        case isa::Funct3::Blt:  tkn = (static_cast<SignedWord>(rrs1) < static_cast<SignedWord>(rrs2)); break;
-        case isa::Funct3::Bge:  tkn = (static_cast<SignedWord>(rrs1) >= static_cast<SignedWord>(rrs2)); break;
-        case isa::Funct3::Bltu: tkn = (rrs1 < rrs2); break;
-        case isa::Funct3::Bgeu: tkn = (rrs1 >= rrs2); break;
-        default:                tkn = execute::ExecuteUnit::branchTaken(rrs1, rrs2, op.funct3, state_.regs.xlen); break;
+        case isa::Funct3::Beq:
+            tkn = (rrs1 == rrs2);
+            break;
+        case isa::Funct3::Bne:
+            tkn = (rrs1 != rrs2);
+            break;
+        case isa::Funct3::Blt:
+            tkn = (static_cast<SignedWord>(rrs1) < static_cast<SignedWord>(rrs2));
+            break;
+        case isa::Funct3::Bge:
+            tkn = (static_cast<SignedWord>(rrs1) >= static_cast<SignedWord>(rrs2));
+            break;
+        case isa::Funct3::Bltu:
+            tkn = (rrs1 < rrs2);
+            break;
+        case isa::Funct3::Bgeu:
+            tkn = (rrs1 >= rrs2);
+            break;
+        default:
+            tkn = execute::ExecuteUnit::branchTaken(rrs1, rrs2, op.funct3, state_.regs.xlen);
+            break;
     }
-    pipeline_context.tkn = tkn;
     Register const target_pc = tkn ? (state_.pc + op.imm) : (state_.pc + op.len);
     state_.pc = target_pc;
-    e_icount++;
-    if (op.cinsn) e_ccount++;
     pc_sign_extend();
 }
 
 void CPU::execute_cached_op(CachedOp& op, Register rrs1, Register rrs2) {
     Register wb_data = 0;
     switch (op.op_id) {
-        case isa::ADD:  wb_data = rrs1 + rrs2; break;
-        case isa::SUB:  wb_data = rrs1 - rrs2; break;
-        case isa::AND:  wb_data = rrs1 & rrs2; break;
-        case isa::OR:   wb_data = rrs1 | rrs2; break;
-        case isa::XOR:  wb_data = rrs1 ^ rrs2; break;
-        case isa::SLL:  wb_data = rrs1 << (rrs2 & simrv::xlen::xlen_shift_mask()); break;
-        case isa::SRL:  wb_data = rrs1 >> (rrs2 & simrv::xlen::xlen_shift_mask()); break;
-        case isa::SRA:  wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >> (rrs2 & simrv::xlen::xlen_shift_mask())); break;
-        case isa::SLT:  wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) < static_cast<SignedWord>(rrs2)); break;
-        case isa::SLTU: wb_data = static_cast<Register>(rrs1 < rrs2); break;
-        default:        wb_data = execute::ExecuteUnit::aluInt(rrs1, rrs2, op.op_id, state_.regs.xlen); break;
+        case isa::ADD:
+            wb_data = rrs1 + rrs2;
+            break;
+        case isa::SUB:
+            wb_data = rrs1 - rrs2;
+            break;
+        case isa::AND:
+            wb_data = rrs1 & rrs2;
+            break;
+        case isa::OR:
+            wb_data = rrs1 | rrs2;
+            break;
+        case isa::XOR:
+            wb_data = rrs1 ^ rrs2;
+            break;
+        case isa::SLL:
+            wb_data = rrs1 << (rrs2 & simrv::xlen::xlen_shift_mask());
+            break;
+        case isa::SRL:
+            wb_data = rrs1 >> (rrs2 & simrv::xlen::xlen_shift_mask());
+            break;
+        case isa::SRA:
+            wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >>
+                                            (rrs2 & simrv::xlen::xlen_shift_mask()));
+            break;
+        case isa::SLT:
+            wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) <
+                                            static_cast<SignedWord>(rrs2));
+            break;
+        case isa::SLTU:
+            wb_data = static_cast<Register>(rrs1 < rrs2);
+            break;
+        default:
+            wb_data = execute::ExecuteUnit::aluInt(rrs1, rrs2, op.op_id, state_.regs.xlen);
+            break;
     }
-    if (op.rd != RegId::Zero) {
-        state_.regs.write(op.rd, wb_data);
-    }
-    e_icount++;
-    if (op.cinsn) e_ccount++;
+    state_.regs.write(op.rd, wb_data);
     state_.pc += op.len;
     pc_sign_extend();
 }
@@ -768,22 +790,40 @@ void CPU::execute_cached_op(CachedOp& op, Register rrs1, Register rrs2) {
 void CPU::execute_cached_op_imm(CachedOp& op, Register rrs1) {
     Register wb_data = 0;
     switch (op.op_id) {
-        case isa::ADDI:  wb_data = rrs1 + op.imm; break;
-        case isa::ANDI:  wb_data = rrs1 & op.imm; break;
-        case isa::ORI:   wb_data = rrs1 | op.imm; break;
-        case isa::XORI:  wb_data = rrs1 ^ op.imm; break;
-        case isa::SLLI:  wb_data = rrs1 << (op.imm & simrv::xlen::xlen_shift_mask()); break;
-        case isa::SRLI:  wb_data = rrs1 >> (op.imm & simrv::xlen::xlen_shift_mask()); break;
-        case isa::SRAI:  wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >> (op.imm & simrv::xlen::xlen_shift_mask())); break;
-        case isa::SLTI:  wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) < static_cast<SignedWord>(op.imm)); break;
-        case isa::SLTIU: wb_data = static_cast<Register>(rrs1 < static_cast<Register>(op.imm)); break;
-        default:         wb_data = execute::ExecuteUnit::aluInt(rrs1, op.imm, op.op_id, state_.regs.xlen); break;
+        case isa::ADDI:
+            wb_data = rrs1 + op.imm;
+            break;
+        case isa::ANDI:
+            wb_data = rrs1 & op.imm;
+            break;
+        case isa::ORI:
+            wb_data = rrs1 | op.imm;
+            break;
+        case isa::XORI:
+            wb_data = rrs1 ^ op.imm;
+            break;
+        case isa::SLLI:
+            wb_data = rrs1 << (op.imm & simrv::xlen::xlen_shift_mask());
+            break;
+        case isa::SRLI:
+            wb_data = rrs1 >> (op.imm & simrv::xlen::xlen_shift_mask());
+            break;
+        case isa::SRAI:
+            wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >>
+                                            (op.imm & simrv::xlen::xlen_shift_mask()));
+            break;
+        case isa::SLTI:
+            wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) <
+                                            static_cast<SignedWord>(op.imm));
+            break;
+        case isa::SLTIU:
+            wb_data = static_cast<Register>(rrs1 < static_cast<Register>(op.imm));
+            break;
+        default:
+            wb_data = execute::ExecuteUnit::aluInt(rrs1, op.imm, op.op_id, state_.regs.xlen);
+            break;
     }
-    if (op.rd != RegId::Zero) {
-        state_.regs.write(op.rd, wb_data);
-    }
-    e_icount++;
-    if (op.cinsn) e_ccount++;
+    state_.regs.write(op.rd, wb_data);
     state_.pc += op.len;
     pc_sign_extend();
 }
@@ -791,17 +831,27 @@ void CPU::execute_cached_op_imm(CachedOp& op, Register rrs1) {
 void CPU::execute_cached_op_imm32(CachedOp& op, Register rrs1) {
     Register wb_data = 0;
     switch (op.op_id) {
-        case isa::ADDIW: wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + op.imm))); break;
-        case isa::SLLIW: wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (op.imm & 0x1f)))); break;
-        case isa::SRLIW: wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(rrs1) >> (op.imm & 0x1f)))); break;
-        case isa::SRAIW: wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1) >> (op.imm & 0x1f))); break;
-        default:         wb_data = execute::ExecuteUnit::aluIntW(rrs1, op.imm, op.op_id); break;
+        case isa::ADDIW:
+            wb_data =
+                static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + op.imm)));
+            break;
+        case isa::SLLIW:
+            wb_data = static_cast<Register>(static_cast<int64_t>(
+                static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (op.imm & 0x1f))));
+            break;
+        case isa::SRLIW:
+            wb_data = static_cast<Register>(static_cast<int64_t>(
+                static_cast<int32_t>(static_cast<uint32_t>(rrs1) >> (op.imm & 0x1f))));
+            break;
+        case isa::SRAIW:
+            wb_data = static_cast<Register>(
+                static_cast<int64_t>(static_cast<int32_t>(rrs1) >> (op.imm & 0x1f)));
+            break;
+        default:
+            wb_data = execute::ExecuteUnit::aluIntW(rrs1, op.imm, op.op_id);
+            break;
     }
-    if (op.rd != RegId::Zero) {
-        state_.regs.write(op.rd, wb_data);
-    }
-    e_icount++;
-    if (op.cinsn) e_ccount++;
+    state_.regs.write(op.rd, wb_data);
     state_.pc += op.len;
     pc_sign_extend();
 }
@@ -809,16 +859,23 @@ void CPU::execute_cached_op_imm32(CachedOp& op, Register rrs1) {
 void CPU::execute_cached_op32(CachedOp& op, Register rrs1, Register rrs2) {
     Register wb_data = 0;
     switch (op.op_id) {
-        case isa::ADDW: wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + rrs2))); break;
-        case isa::SUBW: wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 - rrs2))); break;
-        case isa::SLLW: wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (rrs2 & 0x1f)))); break;
-        default:        wb_data = execute::ExecuteUnit::aluIntW(rrs1, rrs2, op.op_id); break;
+        case isa::ADDW:
+            wb_data =
+                static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + rrs2)));
+            break;
+        case isa::SUBW:
+            wb_data =
+                static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 - rrs2)));
+            break;
+        case isa::SLLW:
+            wb_data = static_cast<Register>(static_cast<int64_t>(
+                static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (rrs2 & 0x1f))));
+            break;
+        default:
+            wb_data = execute::ExecuteUnit::aluIntW(rrs1, rrs2, op.op_id);
+            break;
     }
-    if (op.rd != RegId::Zero) {
-        state_.regs.write(op.rd, wb_data);
-    }
-    e_icount++;
-    if (op.cinsn) e_ccount++;
+    state_.regs.write(op.rd, wb_data);
     state_.pc += op.len;
     pc_sign_extend();
 }
@@ -843,8 +900,8 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
         (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp));
     if (!translation_enabled) {
         if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr))) {
-            out_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3),
-                                                   machine.mmem);
+            const Byte* host_ptr = machine.mmem_base_offset + mem_addr;
+            out_val = simrv::memory::host_read_fast(host_ptr, static_cast<Instruction>(funct3));
             return true;
         }
     } else {
@@ -860,8 +917,7 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
                 return true;
             }
             out_val = simrv::memory::ram_read_fast(entry.paddr_base + (mem_addr & 0xFFF),
-                                                   static_cast<Instruction>(funct3),
-                                                   machine.mmem);
+                                                   static_cast<Instruction>(funct3), machine.mmem);
             return true;
         }
     }
@@ -899,8 +955,8 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
                     mem_addr, static_cast<Instruction>(funct3), machine.mmem);
                 record_mem_write(mem_addr, old_val, static_cast<Instruction>(funct3));
             }
-            simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3),
-                                          machine.mmem);
+            Byte* host_ptr = machine.mmem_base_offset + mem_addr;
+            simrv::memory::host_write_fast(host_ptr, rrs2, static_cast<Instruction>(funct3));
             return true;
         }
     } else {
@@ -911,7 +967,8 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
             [tlb_idx];  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
             Address const paddr = entry.paddr_base + (mem_addr & 0xFFF);
-            if (simrv::compiler::unlikely(machine.s_rollback_enabled) && simrv::memory::is_dram_addr(paddr)) {
+            if (simrv::compiler::unlikely(machine.s_rollback_enabled) &&
+                simrv::memory::is_dram_addr(paddr)) {
                 Word old_val = simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(funct3),
                                                             machine.mmem);
                 record_mem_write(paddr, old_val, static_cast<Instruction>(funct3));
@@ -934,8 +991,19 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
 
 auto CPU::execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> bool {
     Address const mem_addr = rrs1 + op.imm;
-    if (simrv::compiler::unlikely(machine.s_tuimode || machine.s_bp_trace)) {
-        pipeline_context.mem_addr = mem_addr;
+    if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr))) {
+        const Byte* host_ptr = machine.mmem_base_offset + mem_addr;
+        Register val = 0;
+        if (simrv::compiler::likely(op.funct3 == isa::Funct3::Ld)) {
+            val = *reinterpret_cast<const uint64_t*>(host_ptr);
+        } else if (op.funct3 == isa::Funct3::Lw) {
+            val = static_cast<Register>(*reinterpret_cast<const int32_t*>(host_ptr));
+        } else {
+            val = simrv::memory::host_read_fast(host_ptr, static_cast<Instruction>(op.funct3));
+        }
+        state_.regs.write(op.rd, val);
+        state_.pc += op.len;
+        return true;
     }
     Register mem_rdata = 0;
     if (!try_fast_load(machine, mem_addr, op.funct3, mem_rdata)) {
@@ -947,22 +1015,32 @@ auto CPU::execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> 
             return false;
         }
     }
-
-    if (op.rd != RegId::Zero) {
-        state_.regs.write(op.rd, mem_rdata);
-    }
-    e_icount++;
-    if (op.cinsn) e_ccount++;
+    state_.regs.write(op.rd, mem_rdata);
     state_.pc += op.len;
-    pc_sign_extend();
     return true;
 }
 
 auto CPU::execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Register rrs2)
     -> bool {
     Address const mem_addr = rrs1 + op.imm;
-    if (simrv::compiler::unlikely(machine.s_tuimode || machine.s_bp_trace)) {
-        pipeline_context.mem_addr = mem_addr;
+    if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr) &&
+                                !is_tohost_addr(machine, mem_addr))) {
+        if (simrv::compiler::unlikely(machine.s_rollback_enabled)) {
+            Word old_val = simrv::memory::ram_read_fast(
+                mem_addr, static_cast<Instruction>(op.funct3), machine.mmem);
+            record_mem_write(mem_addr, old_val, static_cast<Instruction>(op.funct3));
+        }
+        Byte* host_ptr = machine.mmem_base_offset + mem_addr;
+        if (simrv::compiler::likely(op.funct3 == isa::Funct3::Sd)) {
+            *reinterpret_cast<uint64_t*>(host_ptr) = rrs2;
+        } else if (op.funct3 == isa::Funct3::Sw) {
+            *reinterpret_cast<uint32_t*>(host_ptr) = static_cast<uint32_t>(rrs2);
+        } else {
+            simrv::memory::host_write_fast(host_ptr, rrs2, static_cast<Instruction>(op.funct3));
+        }
+        state_.reserved = 0;
+        state_.pc += op.len;
+        return true;
     }
     if (!try_fast_store(machine, mem_addr, op.funct3, rrs2)) {
         simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, mem_addr, rrs2, op.funct3);
@@ -972,12 +1050,8 @@ auto CPU::execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Re
             return false;
         }
     }
-
     state_.reserved = 0;
-    e_icount++;
-    if (op.cinsn) e_ccount++;
     state_.pc += op.len;
-    pc_sign_extend();
     return true;
 }
 
@@ -1025,93 +1099,403 @@ void CPU::handle_cached_interrupts() {
     }
 }
 
-void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
-    // 1. Copy metadata to pipeline_context to support tracers and lockstep only when needed
-    pipeline_context.pending_exception = std::nullopt;
-    if (simrv::compiler::unlikely(machine.s_tuimode || machine.s_lockstep_mode ||
-                                  machine.s_gdb_mode || machine.s_bp_trace ||
-                                  (machine.s_strace != 0))) {
-        pipeline_context.copy_from(op);
+template <bool kCopyContext, bool kInstMix>
+void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op, size_t& next_idx) {
+    if constexpr (kCopyContext) {
+        op.copy_to(pipeline_context);
         pipeline_context.tlb_miss = false;
         pipeline_context.pending_tval = 0;
     }
 
-    // Update instruction-mix statistics for cached execution when profiling or TUI is active
-    if (simrv::compiler::unlikely(machine.s_use_mix || machine.s_tuimode)) {
+    if constexpr (kInstMix) {
         e_instmix[static_cast<std::size_t>(op.op_id)]++;
     }
 
-    // 3. Execute, Memory, Writeback, Commit in a monolithic fast path
-    switch (op.opcode) {
-        case Opcode::Lui:
-            execute_cached_lui(op);
+    const Register rrs1 = state_.regs.read(op.rs1);
+    switch (op.op_id) {
+        case isa::ADDI:
+            state_.regs.write(op.rd, rrs1 + op.imm);
+            state_.pc += op.len;
             break;
-        case Opcode::Auipc:
-            execute_cached_auipc(op);
+        case isa::ADD:
+            state_.regs.write(op.rd, rrs1 + state_.regs.read(op.rs2));
+            state_.pc += op.len;
             break;
-        case Opcode::Jal:
-            execute_cached_jal(op);
+        case isa::SUB:
+            state_.regs.write(op.rd, rrs1 - state_.regs.read(op.rs2));
+            state_.pc += op.len;
             break;
-        case Opcode::Jalr:
-            execute_cached_jalr(op, state_.regs.read(op.rs1));
+        case isa::ANDI:
+            state_.regs.write(op.rd, rrs1 & op.imm);
+            state_.pc += op.len;
             break;
-        case Opcode::Branch:
-            execute_cached_branch(op, state_.regs.read(op.rs1), state_.regs.read(op.rs2));
+        case isa::ORI:
+            state_.regs.write(op.rd, rrs1 | op.imm);
+            state_.pc += op.len;
             break;
-        case Opcode::Op:
-            execute_cached_op(op, state_.regs.read(op.rs1), state_.regs.read(op.rs2));
+        case isa::XORI:
+            state_.regs.write(op.rd, rrs1 ^ op.imm);
+            state_.pc += op.len;
             break;
-        case Opcode::OpImm:
-            execute_cached_op_imm(op, state_.regs.read(op.rs1));
+        case isa::SLLI:
+            state_.regs.write(op.rd, rrs1 << (op.imm & 63));
+            state_.pc += op.len;
             break;
-        case Opcode::OpImm32:
-            execute_cached_op_imm32(op, state_.regs.read(op.rs1));
+        case isa::SRLI:
+            state_.regs.write(op.rd, rrs1 >> (op.imm & 63));
+            state_.pc += op.len;
             break;
-        case Opcode::Op32:
-            execute_cached_op32(op, state_.regs.read(op.rs1), state_.regs.read(op.rs2));
+        case isa::SRAI:
+            state_.regs.write(
+                op.rd, static_cast<Register>(static_cast<SignedWord>(rrs1) >> (op.imm & 63)));
+            state_.pc += op.len;
             break;
-        case Opcode::Load:
-            if (!execute_cached_load(machine, op, state_.regs.read(op.rs1))) {
-                return;
+        case isa::AND:
+            state_.regs.write(op.rd, rrs1 & state_.regs.read(op.rs2));
+            state_.pc += op.len;
+            break;
+        case isa::OR:
+            state_.regs.write(op.rd, rrs1 | state_.regs.read(op.rs2));
+            state_.pc += op.len;
+            break;
+        case isa::LUI:
+            state_.regs.write(op.rd, op.imm);
+            state_.pc += op.len;
+            break;
+        case isa::AUIPC:
+            state_.regs.write(op.rd, state_.pc + op.imm);
+            state_.pc += op.len;
+            break;
+        case isa::JAL: {
+            const Register link_pc = state_.pc + op.len;
+            state_.regs.write(op.rd, link_pc);
+            state_.pc += op.imm;
+            next_idx = decode_cache.calc_index(state_.pc);
+            break;
+        }
+        case isa::JALR: {
+            const Register link_pc = state_.pc + op.len;
+            const Register target_pc = (rrs1 + op.imm) & ~Register{1};
+            state_.regs.write(op.rd, link_pc);
+            state_.pc = target_pc;
+            pc_sign_extend();
+            next_idx = decode_cache.calc_index(state_.pc);
+            break;
+        }
+        case isa::SLT:
+            state_.regs.write(
+                op.rd, static_cast<Register>(static_cast<SignedWord>(rrs1) <
+                                             static_cast<SignedWord>(state_.regs.read(op.rs2))));
+            state_.pc += op.len;
+            break;
+        case isa::SLTU:
+            state_.regs.write(op.rd, static_cast<Register>(rrs1 < state_.regs.read(op.rs2)));
+            state_.pc += op.len;
+            break;
+        case isa::SLTI:
+            state_.regs.write(op.rd, static_cast<Register>(static_cast<SignedWord>(rrs1) <
+                                                           static_cast<SignedWord>(op.imm)));
+            state_.pc += op.len;
+            break;
+        case isa::SLTIU:
+            state_.regs.write(op.rd, static_cast<Register>(rrs1 < static_cast<Register>(op.imm)));
+            state_.pc += op.len;
+            break;
+        case isa::XOR:
+            state_.regs.write(op.rd, rrs1 ^ state_.regs.read(op.rs2));
+            state_.pc += op.len;
+            break;
+        case isa::BNE: {
+            if (rrs1 != state_.regs.read(op.rs2)) {
+                state_.pc += op.imm;
+                next_idx = decode_cache.calc_index(state_.pc);
+            } else {
+                state_.pc += op.len;
             }
             break;
-        case Opcode::Store:
-            if (!execute_cached_store(machine, op, state_.regs.read(op.rs1),
-                                      state_.regs.read(op.rs2))) {
-                return;
+        }
+        case isa::BEQ: {
+            if (rrs1 == state_.regs.read(op.rs2)) {
+                state_.pc += op.imm;
+                next_idx = decode_cache.calc_index(state_.pc);
+            } else {
+                state_.pc += op.len;
             }
+            break;
+        }
+        case isa::BGE: {
+            if (static_cast<SignedWord>(rrs1) >=
+                static_cast<SignedWord>(state_.regs.read(op.rs2))) {
+                state_.pc += op.imm;
+                next_idx = decode_cache.calc_index(state_.pc);
+            } else {
+                state_.pc += op.len;
+            }
+            break;
+        }
+        case isa::BLT: {
+            if (static_cast<SignedWord>(rrs1) < static_cast<SignedWord>(state_.regs.read(op.rs2))) {
+                state_.pc += op.imm;
+                next_idx = decode_cache.calc_index(state_.pc);
+            } else {
+                state_.pc += op.len;
+            }
+            break;
+        }
+        case isa::BGEU: {
+            if (rrs1 >= state_.regs.read(op.rs2)) {
+                state_.pc += op.imm;
+                next_idx = decode_cache.calc_index(state_.pc);
+            } else {
+                state_.pc += op.len;
+            }
+            break;
+        }
+        case isa::BLTU: {
+            if (rrs1 < state_.regs.read(op.rs2)) {
+                state_.pc += op.imm;
+                next_idx = decode_cache.calc_index(state_.pc);
+            } else {
+                state_.pc += op.len;
+            }
+            break;
+        }
+        case isa::LD: {
+            const Address mem_addr = rrs1 + op.imm;
+            if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr))) {
+                state_.regs.write(
+                    op.rd, *reinterpret_cast<const uint64_t*>(machine.mmem_base_offset + mem_addr));
+                state_.pc += op.len;
+                break;
+            }
+            if (!execute_cached_load(machine, op, rrs1)) return;
+            break;
+        }
+        case isa::SD: {
+            const Address mem_addr = rrs1 + op.imm;
+            if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr) &&
+                                        !is_tohost_addr(machine, mem_addr))) {
+                *reinterpret_cast<uint64_t*>(machine.mmem_base_offset + mem_addr) =
+                    state_.regs.read(op.rs2);
+                state_.pc += op.len;
+                break;
+            }
+            if (!execute_cached_store(machine, op, rrs1, state_.regs.read(op.rs2))) return;
+            break;
+        }
+        case isa::LW: {
+            const Address mem_addr = rrs1 + op.imm;
+            if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr))) {
+                const uint32_t raw =
+                    *reinterpret_cast<const uint32_t*>(machine.mmem_base_offset + mem_addr);
+                state_.regs.write(
+                    op.rd, static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(raw))));
+                state_.pc += op.len;
+                break;
+            }
+            if (!execute_cached_load(machine, op, rrs1)) return;
+            break;
+        }
+        case isa::SW: {
+            const Address mem_addr = rrs1 + op.imm;
+            if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr) &&
+                                        !is_tohost_addr(machine, mem_addr))) {
+                *reinterpret_cast<uint32_t*>(machine.mmem_base_offset + mem_addr) =
+                    static_cast<uint32_t>(state_.regs.read(op.rs2));
+                state_.pc += op.len;
+                break;
+            }
+            if (!execute_cached_store(machine, op, rrs1, state_.regs.read(op.rs2))) return;
+            break;
+        }
+        case isa::ADDIW:
+            state_.regs.write(
+                op.rd,
+                static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + op.imm))));
+            state_.pc += op.len;
+            break;
+        case isa::ADDW:
+            state_.regs.write(op.rd, static_cast<Register>(static_cast<int64_t>(
+                                         static_cast<int32_t>(rrs1 + state_.regs.read(op.rs2)))));
+            state_.pc += op.len;
+            break;
+        case isa::SUBW:
+            state_.regs.write(op.rd, static_cast<Register>(static_cast<int64_t>(
+                                         static_cast<int32_t>(rrs1 - state_.regs.read(op.rs2)))));
+            state_.pc += op.len;
+            break;
+        case isa::SLLIW:
+            state_.regs.write(
+                op.rd, static_cast<Register>(static_cast<int64_t>(
+                           static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (op.imm & 31)))));
+            state_.pc += op.len;
+            break;
+        case isa::SRLIW:
+            state_.regs.write(
+                op.rd, static_cast<Register>(static_cast<int64_t>(
+                           static_cast<int32_t>(static_cast<uint32_t>(rrs1) >> (op.imm & 31)))));
+            state_.pc += op.len;
+            break;
+        case isa::SRAIW:
+            state_.regs.write(op.rd, static_cast<Register>(static_cast<int64_t>(
+                                         static_cast<int32_t>(rrs1) >> (op.imm & 31))));
+            state_.pc += op.len;
             break;
         default:
-            // Fallback needs pipeline_context populated; copy only if not already done by debug
-            // branch
-            if (simrv::compiler::likely(!machine.s_tuimode && !machine.s_lockstep_mode &&
-                                        !machine.s_gdb_mode && !machine.s_bp_trace &&
-                                        (machine.s_strace == 0))) {
-                pipeline_context.copy_from(op);
-                pipeline_context.tlb_miss = false;
-                pipeline_context.pending_tval = 0;
+            switch (op.opcode) {
+                case Opcode::Lui:
+                    execute_cached_lui(op);
+                    break;
+                case Opcode::Auipc:
+                    execute_cached_auipc(op);
+                    break;
+                case Opcode::Jal:
+                    execute_cached_jal(op);
+                    next_idx = decode_cache.calc_index(state_.pc);
+                    break;
+                case Opcode::Jalr:
+                    execute_cached_jalr(op, rrs1);
+                    next_idx = decode_cache.calc_index(state_.pc);
+                    break;
+                case Opcode::Branch:
+                    execute_cached_branch(op, rrs1, state_.regs.read(op.rs2));
+                    next_idx = decode_cache.calc_index(state_.pc);
+                    break;
+                case Opcode::Op:
+                    execute_cached_op(op, rrs1, state_.regs.read(op.rs2));
+                    break;
+                case Opcode::OpImm:
+                    execute_cached_op_imm(op, rrs1);
+                    break;
+                case Opcode::OpImm32:
+                    execute_cached_op_imm32(op, rrs1);
+                    break;
+                case Opcode::Op32:
+                    execute_cached_op32(op, rrs1, state_.regs.read(op.rs2));
+                    break;
+                case Opcode::Load:
+                    if (!execute_cached_load(machine, op, rrs1)) {
+                        return;
+                    }
+                    break;
+                case Opcode::Store:
+                    if (!execute_cached_store(machine, op, rrs1, state_.regs.read(op.rs2))) {
+                        return;
+                    }
+                    break;
+                case Opcode::MiscMem:
+                    if (op.funct3 == isa::Funct3::FenceI) {
+                        icache.flush();
+                        dcache.flush();
+                        decode_cache.flush();
+                    }
+                    state_.pc += op.len;
+                    pc_sign_extend();
+                    break;
+                case Opcode::LoadFp:
+                    if (op.funct3 == isa::Funct3::Lw) {
+                        Address const mem_addr = state_.regs.read(op.rs1) + op.imm;
+                        if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr))) {
+                            uint32_t const bits = simrv::memory::ram_read_fast(
+                                mem_addr, static_cast<Instruction>(isa::Funct3::Lw), machine.mmem);
+                            state_.regs.write_fp(
+                                op.rd, 0xFFFFFFFF00000000ULL | static_cast<uint64_t>(bits));
+                            state_.pc += op.len;
+                            break;
+                        }
+                    } else if (op.funct3 == isa::Funct3::Ld) {
+                        Address const mem_addr = state_.regs.read(op.rs1) + op.imm;
+                        if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr))) {
+                            uint64_t const bits = simrv::memory::ram_read_fast(
+                                mem_addr, static_cast<Instruction>(isa::Funct3::Ld), machine.mmem);
+                            state_.regs.write_fp(op.rd, bits);
+                            state_.pc += op.len;
+                            break;
+                        }
+                    }
+                    op.copy_to(pipeline_context);
+                    execute_cached_fallback(machine);
+                    return;
+                case Opcode::StoreFp:
+                    if (op.funct3 == isa::Funct3::Sw) {
+                        Address const mem_addr = state_.regs.read(op.rs1) + op.imm;
+                        if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr) &&
+                                                    !is_tohost_addr(machine, mem_addr))) {
+                            uint32_t const bits =
+                                static_cast<uint32_t>(state_.regs.read_fp(op.rs2));
+                            simrv::memory::ram_write_fast(mem_addr, bits,
+                                                          static_cast<Instruction>(isa::Funct3::Sw),
+                                                          machine.mmem);
+                            state_.pc += op.len;
+                            break;
+                        }
+                    } else if (op.funct3 == isa::Funct3::Sd) {
+                        Address const mem_addr = state_.regs.read(op.rs1) + op.imm;
+                        if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr) &&
+                                                    !is_tohost_addr(machine, mem_addr))) {
+                            uint64_t const bits = state_.regs.read_fp(op.rs2);
+                            simrv::memory::ram_write_fast(mem_addr, bits,
+                                                          static_cast<Instruction>(isa::Funct3::Sd),
+                                                          machine.mmem);
+                            state_.pc += op.len;
+                            break;
+                        }
+                    }
+                    op.copy_to(pipeline_context);
+                    execute_cached_fallback(machine);
+                    return;
+                default:
+                    if constexpr (!kCopyContext) {
+                        op.copy_to(pipeline_context);
+                        pipeline_context.tlb_miss = false;
+                        pipeline_context.pending_tval = 0;
+                    }
+                    execute_cached_fallback(machine);
+                    return;
             }
-            execute_cached_fallback(machine);
-            return;
+            break;
     }
-
-    // 4. Handle pending interrupts (same check as commit_stage)
-    handle_cached_interrupts();
 }
 
 void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
-    for (uint32_t b = 0; b < batch_size; ++b) {
-        auto* cached = decode_cache.lookup(state_.pc);
-        if (simrv::compiler::likely(cached != nullptr)) {
-            execute_cached_op_fast(machine, *cached);
-        } else {
-            run_cycle_baremetal(machine);
+    size_t next_idx = decode_cache.calc_index(state_.pc);
+    uint32_t ccount_batch = 0;
+    uint32_t executed_batch = 0;
+    const uint32_t blocks = (batch_size + 255u) / 256u;
+    for (uint32_t blk = 0; blk < blocks; ++blk) {
+        for (uint32_t i = 0; i < 256; ++i) {
+            auto* cached = decode_cache.lookup_at(next_idx, state_.pc);
+            if (simrv::compiler::likely(cached != nullptr)) {
+                next_idx = cached->next_op_idx;
+                ccount_batch += cached->cinsn ? 1 : 0;
+                executed_batch++;
+                execute_cached_op_fast(machine, *cached, next_idx);
+            } else {
+                run_cycle_baremetal(machine);
+                next_idx = decode_cache.calc_index(state_.pc);
+            }
         }
-        if (simrv::compiler::unlikely(machine.tohost != 0)) {
+
+        if (machine.tohost.load(std::memory_order_relaxed) != 0) {
             break;
         }
+        clint_mmio.mcycle += 256;
+        clint_mmio.rtc_divider += 256;
+        if (clint_mmio.rtc_divider >= 10) {
+            clint_mmio.mtime += clint_mmio.rtc_divider / 10;
+            clint_mmio.rtc_divider %= 10;
+            evaluate_timer_interrupt();
+        }
+        handle_cached_interrupts();
     }
+    e_icount += executed_batch;
+    e_ccount += ccount_batch;
 }
+
+template void CPU::execute_cached_op_fast<false, false>(Machine&, CachedOp&, size_t&);
+template void CPU::execute_cached_op_fast<true, false>(Machine&, CachedOp&, size_t&);
+template void CPU::execute_cached_op_fast<false, true>(Machine&, CachedOp&, size_t&);
+template void CPU::execute_cached_op_fast<true, true>(Machine&, CachedOp&, size_t&);
 
 void CPU::push_undo_state() {
     UndoStep step;

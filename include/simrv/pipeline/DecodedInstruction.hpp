@@ -12,16 +12,50 @@
 namespace simrv::pipeline {
 
 /**
+ * @struct PendingException
+ * @brief Lightweight drop-in replacement for std::optional<ExceptionCode>.
+ *
+ * Provides the same API surface (has_value, operator*, value_or, assignment
+ * from ExceptionCode and std::nullopt_t) but avoids the overhead of
+ * std::optional in this performance-critical struct.
+ */
+struct PendingException {
+    ExceptionCode code_{};
+    bool valid_ = false;
+
+    constexpr PendingException() noexcept = default;
+    constexpr PendingException(std::nullopt_t) noexcept : valid_(false) {}            // NOLINT
+    constexpr PendingException(ExceptionCode c) noexcept : code_(c), valid_(true) {}  // NOLINT
+
+    constexpr auto operator=(std::nullopt_t) noexcept -> PendingException& {
+        valid_ = false;
+        return *this;
+    }
+    constexpr auto operator=(ExceptionCode c) noexcept -> PendingException& {
+        code_ = c;
+        valid_ = true;
+        return *this;
+    }
+
+    [[nodiscard]] constexpr auto has_value() const noexcept -> bool { return valid_; }
+    constexpr explicit operator bool() const noexcept { return valid_; }
+    [[nodiscard]] constexpr auto operator*() const noexcept -> ExceptionCode { return code_; }
+    [[nodiscard]] constexpr auto value() const noexcept -> ExceptionCode { return code_; }
+    [[nodiscard]] constexpr auto value_or(ExceptionCode fallback) const noexcept -> ExceptionCode {
+        return valid_ ? code_ : fallback;
+    }
+};
+
+/**
  * @struct DecodedInstruction
  * @brief Represents a fully decoded RISC-V instruction with pre-extracted operands and control
  * signals.
  */
 struct DecodedInstruction {
-    Register cpc = 0;           ///< Current Program Counter of this instruction
-    ImmValue imm = 0;           ///< Sign-extended immediate value
-    CSRValue pending_tval = 0;  ///< Trap value / faulting address for pending exception
-    std::optional<ExceptionCode>
-        pending_exception;  ///< Pending exception code (if decode/fetch raised exception)
+    Register cpc = 0;                    ///< Current Program Counter of this instruction
+    ImmValue imm = 0;                    ///< Sign-extended immediate value
+    CSRValue pending_tval = 0;           ///< Trap value / faulting address for pending exception
+    PendingException pending_exception;  ///< Pending exception (lightweight, no std::optional)
 
     Instruction ir = 0;      ///< Raw 32-bit (or decompressed) instruction word
     Instruction ir_org = 0;  ///< Original uncompressed 16-bit or 32-bit instruction word

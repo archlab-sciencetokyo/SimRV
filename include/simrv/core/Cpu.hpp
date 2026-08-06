@@ -313,10 +313,13 @@ class CPU {
      * @param machine Reference to the top-level machine orchestration.
      * @param op Reference to the cached pre-decoded operation.
      */
-    void execute_cached_op_fast(Machine& machine, CachedOp& op);
+    template <bool kCopyContext = false, bool kInstMix = false>
+    SIMRV_ALWAYS_INLINE void execute_cached_op_fast(Machine& machine, CachedOp& op,
+                                                    size_t& next_idx);
 
     /**
-     * @brief Executes a batch of cached operations in a tight inlined loop for baremetal acceleration.
+     * @brief Executes a batch of cached operations in a tight inlined loop for baremetal
+     * acceleration.
      * @param machine Reference to top-level Machine.
      * @param batch_size Maximum number of instructions to execute in the batch.
      */
@@ -436,24 +439,28 @@ class CPU {
     void commit_control_flow_and_traps(Machine& machine);
 
    private:
-    auto execute_cached_lui(CachedOp& op) -> void;
-    auto execute_cached_auipc(CachedOp& op) -> void;
-    auto execute_cached_jal(CachedOp& op) -> void;
-    auto execute_cached_jalr(CachedOp& op, Register rrs1) -> void;
-    auto execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) -> void;
-    auto execute_cached_op(CachedOp& op, Register rrs1, Register rrs2) -> void;
-    auto execute_cached_op_imm(CachedOp& op, Register rrs1) -> void;
-    auto execute_cached_op_imm32(CachedOp& op, Register rrs1) -> void;
-    auto execute_cached_op32(CachedOp& op, Register rrs1, Register rrs2) -> void;
-    SIMRV_ALWAYS_INLINE auto try_fast_load(Machine& machine, Address mem_addr, isa::Funct3 funct3, Register& out_val)
+    SIMRV_ALWAYS_INLINE auto execute_cached_lui(CachedOp& op) -> void;
+    SIMRV_ALWAYS_INLINE auto execute_cached_auipc(CachedOp& op) -> void;
+    SIMRV_ALWAYS_INLINE auto execute_cached_jal(CachedOp& op) -> void;
+    SIMRV_ALWAYS_INLINE auto execute_cached_jalr(CachedOp& op, Register rrs1) -> void;
+    SIMRV_ALWAYS_INLINE auto execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2)
+        -> void;
+    SIMRV_ALWAYS_INLINE auto execute_cached_op(CachedOp& op, Register rrs1, Register rrs2) -> void;
+    SIMRV_ALWAYS_INLINE auto execute_cached_op_imm(CachedOp& op, Register rrs1) -> void;
+    SIMRV_ALWAYS_INLINE auto execute_cached_op_imm32(CachedOp& op, Register rrs1) -> void;
+    SIMRV_ALWAYS_INLINE auto execute_cached_op32(CachedOp& op, Register rrs1, Register rrs2)
+        -> void;
+    SIMRV_ALWAYS_INLINE auto try_fast_load(Machine& machine, Address mem_addr, isa::Funct3 funct3,
+                                           Register& out_val) -> bool;
+    SIMRV_ALWAYS_INLINE auto try_fast_store(Machine& machine, Address mem_addr, isa::Funct3 funct3,
+                                            Register rrs2) -> bool;
+    SIMRV_ALWAYS_INLINE auto execute_cached_load(Machine& machine, CachedOp& op, Register rrs1)
         -> bool;
-    SIMRV_ALWAYS_INLINE auto try_fast_store(Machine& machine, Address mem_addr, isa::Funct3 funct3, Register rrs2)
-        -> bool;
-    auto execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> bool;
-    auto execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Register rrs2) -> bool;
+    SIMRV_ALWAYS_INLINE auto execute_cached_store(Machine& machine, CachedOp& op, Register rrs1,
+                                                  Register rrs2) -> bool;
     auto execute_cached_fallback(Machine& machine) -> void;
-    auto handle_cached_interrupts() -> void;
-    inline void pc_sign_extend() {
+    SIMRV_ALWAYS_INLINE auto handle_cached_interrupts() -> void;
+    SIMRV_ALWAYS_INLINE void pc_sign_extend() {
         if constexpr (simrv::xlen::kIsXLen64) {
             if (simrv::compiler::unlikely(state_.regs.xlen == 32)) {
                 state_.pc =

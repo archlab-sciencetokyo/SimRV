@@ -226,7 +226,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
         if (cpu.machine_->s_high_performance && simrv::memory::is_dram_addr(p_addr)) {
             const size_t tlb_idx = (v_addr >> 12) & 2047;
             const Address vpn = v_addr >> 12;
-            Byte* host_base = mem.mmu()->mmem() + ((p_addr & ~0xFFFULL) & simrv::memory::kDramMask);
+            Byte* host_base = cpu.machine_->mmem_base_offset + (p_addr & ~0xFFFULL);
             cpu.soft_tlb_read[tlb_idx].set(
                 vpn, translation_enabled ? static_cast<uint64_t>(current_asid) : ~uint64_t{0},
                 eff_priv, cpu.soft_tlb_epoch, p_addr & ~0xFFFULL, host_base);
@@ -258,9 +258,9 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
     }
 
     const PrivilegeLevel eff_priv = cpu.effective_data_privilege();
-    const Word current_asid = simrv::xlen::satp_asid(cpu.state().satp);
     const bool translation_enabled =
         (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(cpu.state().satp));
+    const Word current_asid = simrv::xlen::satp_asid(cpu.state().satp);
 
     if constexpr (simrv::xlen::kIsXLen64) {
         if (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(cpu.state().satp)) {
@@ -391,7 +391,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
         if (cpu.machine_->s_high_performance && simrv::memory::is_dram_addr(p_addr)) {
             const size_t tlb_idx = (v_addr >> 12) & 2047;
             const Address vpn = v_addr >> 12;
-            Byte* host_base = mem.mmu()->mmem() + ((p_addr & ~0xFFFULL) & simrv::memory::kDramMask);
+            Byte* host_base = cpu.machine_->mmem_base_offset + (p_addr & ~0xFFFULL);
             cpu.soft_tlb_write[tlb_idx].set(
                 vpn, translation_enabled ? static_cast<uint64_t>(current_asid) : ~uint64_t{0},
                 eff_priv, cpu.soft_tlb_epoch, p_addr & ~0xFFFULL, host_base);

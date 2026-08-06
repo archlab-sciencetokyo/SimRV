@@ -229,7 +229,8 @@ void Uart::non_tui_poll_input() {
         return;
     }
 
-    if (simrv::compiler::unlikely(rx_ready_.load(std::memory_order_relaxed) || !rx_fifo_.empty() || uart_rx_ready_)) {
+    if (simrv::compiler::unlikely(rx_ready_.load(std::memory_order_relaxed) || !rx_fifo_.empty() ||
+                                  uart_rx_ready_)) {
         std::scoped_lock lock(rx_mutex_);
         if (!uart_rx_ready_ && !rx_fifo_.empty()) {
             uart_rx_byte_ = rx_fifo_.front();

@@ -63,19 +63,23 @@ class RegisterFile {
     [[nodiscard]] constexpr auto operator[](RegId idx) -> RegisterProxy { return {this, idx}; }
     [[nodiscard]] constexpr auto operator[](RegId idx) const -> Register { return read(idx); }
 
+    [[nodiscard]] constexpr auto raw_regs() const noexcept -> const Register* {
+        return reg_.data();
+    }
+    [[nodiscard]] constexpr auto raw_regs() noexcept -> Register* { return reg_.data(); }
+
     [[nodiscard]] constexpr auto read(RegId idx) const -> Register {
         return reg_[std::to_underlying(idx)];
     }
 
     constexpr void write(RegId idx, Register val) {
-        if (simrv::compiler::likely(idx != RegId::Zero)) {
-            if constexpr (simrv::xlen::kIsXLen64) {
-                if (simrv::compiler::unlikely(xlen == 32)) {
-                    val = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(val)));
-                }
+        if constexpr (simrv::xlen::kIsXLen64) {
+            if (simrv::compiler::unlikely(xlen == 32)) {
+                val = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(val)));
             }
-            reg_[std::to_underlying(idx)] = val;
         }
+        reg_[std::to_underlying(idx)] = val;
+        reg_[0] = 0;
     }
 
     [[nodiscard]] constexpr auto read_fp(RegId idx) const -> FloatingRegister {

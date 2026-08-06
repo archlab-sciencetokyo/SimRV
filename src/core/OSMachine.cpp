@@ -154,10 +154,13 @@ void OSMachine::prepare_cycle() {
 }
 
 void OSMachine::finalize_cycle() {
-    const bool in_trace_window =
-        (cpu.clint_mmio.mtime >= s_trace_begin && cpu.clint_mmio.mtime <= s_trace_end);
     if (simrv::compiler::likely(s_high_performance && (!s_tuimode || s_multithreaded) &&
-                                s_strace == 0 && !in_trace_window && !s_bp_trace)) {
+                                s_strace == 0 && !s_bp_trace)) {
+        const bool in_trace_window = simrv::compiler::unlikely(
+            cpu.clint_mmio.mtime >= s_trace_begin && cpu.clint_mmio.mtime <= s_trace_end);
+        if (simrv::compiler::unlikely(in_trace_window)) {
+            tracer.write_trace_snapshot();
+        }
         if (simrv::compiler::unlikely(tohost != 0)) {
             finalize_cycle_tohost();
         }

@@ -1,76 +1,65 @@
 /**
  * @file MemoryUtil.hpp
- * @brief Memory utility functions for RAM access and device translation.
- *
- * Provides inline memory access helpers used by both MemorySubsystem and MMU
- * for efficient address translation and memory operations. Supports both RV32
- * and RV64 address widths with C++20 concepts for type safety.
+ * @brief Memory subsystem helper functions and address region utilities.
  */
 #pragma once
 
-#include <cstddef>
-#include <cstring>
-#include <ranges>
+#include <cstdint>
 
 #include "simrv/Define.hpp"
-#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::memory {
 
-#ifndef SIMRV_DRAM_SIZE_MB
-#define SIMRV_DRAM_SIZE_MB 256
-#endif
+// ========== Physical Memory Size Constants ==========
 
-inline constexpr Address kDramBaseAddress = static_cast<Address>(0x80000000u);
-inline constexpr Address kDramSize = static_cast<Address>(SIMRV_DRAM_SIZE_MB * 1024u * 1024u);
-inline constexpr Address kDramMask = kDramSize - 1;
+/// Primary DRAM memory size: 128 MB (0x08000000)
+constexpr uint64_t kDramSize = 0x08000000ULL;
+
+/// DRAM address mask for 128MB region
+constexpr Address kDramMask = kDramSize - 1ULL;
+
+/// Default DRAM base physical address (matching QEMU/Spike virt machine)
+constexpr Address kDramBaseAddress = 0x80000000ULL;
 
 inline constexpr Word kTlbSize = 2048;
 inline constexpr Word kPageShift = 12;
 inline constexpr Word kPageMask = (1u << kPageShift) - 1;
 
-/**
- * @brief Check if an address or integer value is aligned to an N-byte boundary.
- * @tparam T Integral or pointer type.
- * @param val Address or integer value to check.
- * @param alignment Alignment boundary in bytes (must be a power of 2).
- * @return True if aligned, false otherwise.
- */
-template <typename T>
-    requires std::is_integral_v<T> || std::is_pointer_v<T>
-[[nodiscard]] constexpr auto is_aligned(T val, size_t alignment) -> bool {
-    if constexpr (std::is_pointer_v<T>) {
-        return (std::bit_cast<uintptr_t>(val) & (alignment - 1)) == 0;
-    } else {
-        return (static_cast<uintptr_t>(val) & (alignment - 1)) == 0;
-    }
+// ========== Alignment Helpers ==========
+
+/// Check if address is 2-byte aligned (RVC instruction boundary)
+constexpr auto is_aligned2(Address addr) -> bool { return (addr & 0x1u) == 0; }
+
+/// Check if address is 4-byte aligned (32-bit instruction boundary)
+constexpr auto is_aligned4(Address addr) -> bool { return (addr & 0x3u) == 0; }
+
+/// Check if address is 8-byte aligned (64-bit word boundary)
+constexpr auto is_aligned8(Address addr) -> bool { return (addr & 0x7u) == 0; }
+
+/// Align address down to 4KB page boundary
+constexpr auto page_align_down(Address addr) -> Address {
+    return addr & ~static_cast<Address>(0xFFFu);
 }
 
-/// Concept: Type represents a valid memory address
-template <typename T>
-concept AddressLike = std::unsigned_integral<T> && requires(T addr) {
-    { addr & T{} } -> std::convertible_to<T>;  // Supports bitwise AND
-};
+/// Align address up to 4KB page boundary
+constexpr auto page_align_up(Address addr) -> Address {
+    return (addr + 0xFFFu) & ~static_cast<Address>(0xFFFu);
+}
 
-/// Concept: Type represents a valid instruction/word for memory operations
-template <typename T>
-concept WordLike = std::integral<T> && requires(T w) {
-    { w >> 8 } -> std::convertible_to<T>;  // Supports bit shifts
-};
-
-/// Concept: Type represents a valid RISC-V load/store funct3 field
-template <typename T>
-concept StoreFunct3Like = std::unsigned_integral<T>;
+/// Calculate page offset (bottom 12 bits)
+constexpr auto page_offset(Address addr) -> uint32_t {
+    return static_cast<uint32_t>(addr & 0xFFFu);
+}
 
 // ========== Memory Region Classification ==========
 
 extern bool g_appmode;
 extern Address g_dram_base;
 
-/// Check if a physical address is within DRAM range
+/// Check if a physical address is within DRAM range (fast single-subtraction path)
 inline auto is_dram_addr(Address p_addr) -> bool {
-    return ((p_addr & 0xFFFFFFFFULL) - (g_dram_base & 0xFFFFFFFFULL)) < simrv::memory::kDramSize;
+    return (p_addr - kDramBaseAddress) < simrv::memory::kDramSize;
 }
 
 /// Check if a physical address is in a legacy reserved region (MMIO)
@@ -79,7 +68,6 @@ inline auto is_legacy_reserved_region(Address p_addr) -> bool {
         case static_cast<Address>(0x10000000u):
         case static_cast<Address>(0x20000000u):
         case static_cast<Address>(0x30000000u):
-        case static_cast<Address>(0x70000000u):
             return true;
         default:
             return false;
@@ -94,7 +82,6 @@ constexpr auto store_width_bytes(Instruction funct3) -> size_t {
     constexpr auto kStoreSizeMask = static_cast<Instruction>(0x3u);
     const auto base_width = static_cast<size_t>(1u << (funct3 & kStoreSizeMask));
 
-    // In RV64, SD (funct3=3) is 8 bytes; in RV32, it's treated as word (4 bytes)
     if constexpr (simrv::xlen::kIsXLen64) {
         if ((funct3 & kStoreSizeMask) == 3u) {
             return 8u;  // SD instruction in RV64
@@ -148,18 +135,12 @@ inline void host_write_fast(Byte* host_ptr, Register val, Instruction funct3) {
     }
 }
 
-/// ========== Fast RAM Read Operations ==========
-
 /// Fast inline RAM read with support for various load formats
-/// Requires: addr to be valid DRAM address; ram pointer must be non-null
 inline auto ram_read_fast(Address addr, Instruction funct3, Byte* ram) -> Word {
     return host_read_fast(ram + (addr & simrv::memory::kDramMask), funct3);
 }
 
-// ========== Fast RAM Write Operations ==========
-
 /// Fast inline RAM write with support for various store formats
-/// Supports: SB (1 byte), SH (2 bytes), SW (4 bytes), SD (8 bytes on RV64)
 inline void ram_write_fast(Address addr, Word wdata, Instruction funct3, Byte* ram) {
     host_write_fast(ram + (addr & simrv::memory::kDramMask), wdata, funct3);
 }

@@ -142,6 +142,8 @@ class Machine {
     bool s_gdb_mode = false;            // Enable GDB RSP stub
     uint16_t s_gdb_port = 1234;         // GDB stub TCP port
     bool s_lockstep_mode = false;       // Enable Spike lockstep co-simulation
+    bool s_fast_copy_context = false;   // Consolidated pipeline context copy flag
+    bool s_fast_instmix = false;        // Consolidated instruction mix tracking flag
     std::string s_spike_bin = "spike";  // Path to Spike binary
     std::string s_spike_elf;            // Path to Spike ELF image
 
@@ -197,6 +199,7 @@ class Machine {
 
     // ========== Memory and Interconnect ==========
     Byte* mmem{};                       // Pointer to main memory buffer
+    Byte* mmem_base_offset{};           // Pre-calculated pointer offset: mmem - kDramBaseAddress
     Tracer tracer{*this};               // Tracing facility
     simrv::debug::SymbolTable symbols;  // ELF debugging symbols
 

@@ -107,7 +107,7 @@ void BaremetalMachine::run() {
             if (simrv::compiler::likely(s_high_performance && !s_tuimode && !s_lockstep_mode &&
                                         !s_gdb_mode && !s_bp_trace && s_strace == 0 &&
                                         !breakpoints.has_any() && !s_rollback_enabled)) {
-                cpu.run_fast_baremetal_batch(*this, kBatchSize);
+                cpu.run_fast_baremetal_batch(*this, 4096);
             } else {
                 cpu.run_cycle_baremetal(*this);
             }
