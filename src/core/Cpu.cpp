@@ -196,7 +196,19 @@ void CPU::run_cycle(Machine& machine) {
             // Bypasses pipeline orchestration and fetches from direct lookup cache if available.
             auto* cached = decode_cache.lookup(state_.pc);
             if (simrv::compiler::likely(cached != nullptr)) {
-                execute_cached_op_fast(machine, *cached);
+                const bool copy_ctx = machine.s_tuimode || machine.s_lockstep_mode ||
+                                      machine.s_gdb_mode || machine.s_bp_trace ||
+                                      (machine.s_strace != 0);
+                const bool inst_mix = machine.s_use_mix || machine.s_tuimode;
+                if (simrv::compiler::unlikely(copy_ctx && inst_mix)) {
+                    execute_cached_op_fast<true, true>(machine, *cached);
+                } else if (simrv::compiler::unlikely(copy_ctx)) {
+                    execute_cached_op_fast<true, false>(machine, *cached);
+                } else if (simrv::compiler::unlikely(inst_mix)) {
+                    execute_cached_op_fast<false, true>(machine, *cached);
+                } else {
+                    execute_cached_op_fast<false, false>(machine, *cached);
+                }
             } else {
                 // Decode cache miss: run basic functional stages sequentially and cache the decoded
                 // op.
@@ -333,7 +345,19 @@ void CPU::run_cycle_baremetal(Machine& machine) {
     if (machine.s_high_performance) {
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
-            execute_cached_op_fast(machine, *cached);
+            const bool copy_ctx = machine.s_tuimode || machine.s_lockstep_mode ||
+                                  machine.s_gdb_mode || machine.s_bp_trace ||
+                                  (machine.s_strace != 0);
+            const bool inst_mix = machine.s_use_mix || machine.s_tuimode;
+            if (simrv::compiler::unlikely(copy_ctx && inst_mix)) {
+                execute_cached_op_fast<true, true>(machine, *cached);
+            } else if (simrv::compiler::unlikely(copy_ctx)) {
+                execute_cached_op_fast<true, false>(machine, *cached);
+            } else if (simrv::compiler::unlikely(inst_mix)) {
+                execute_cached_op_fast<false, true>(machine, *cached);
+            } else {
+                execute_cached_op_fast<false, false>(machine, *cached);
+            }
             clint_mmio.mcycle++;
             if (machine.s_tuimode && machine.tui && machine.tui->is_trace_active()) {
                 record_trace_for_tui(machine);
@@ -1025,19 +1049,17 @@ void CPU::handle_cached_interrupts() {
     }
 }
 
+template <bool kCopyContext, bool kInstMix>
 void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
-    // 1. Copy metadata to pipeline_context to support tracers and lockstep only when needed
-    pipeline_context.pending_exception = std::nullopt;
-    if (simrv::compiler::unlikely(machine.s_tuimode || machine.s_lockstep_mode ||
-                                  machine.s_gdb_mode || machine.s_bp_trace ||
-                                  (machine.s_strace != 0))) {
+    if constexpr (kCopyContext) {
         pipeline_context.copy_from(op);
         pipeline_context.tlb_miss = false;
         pipeline_context.pending_tval = 0;
+    } else {
+        pipeline_context.pending_exception = std::nullopt;
     }
 
-    // Update instruction-mix statistics for cached execution when profiling or TUI is active
-    if (simrv::compiler::unlikely(machine.s_use_mix || machine.s_tuimode)) {
+    if constexpr (kInstMix) {
         e_instmix[static_cast<std::size_t>(op.op_id)]++;
     }
 
@@ -1100,10 +1122,23 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
 }
 
 void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
+    const bool copy_ctx = machine.s_tuimode || machine.s_lockstep_mode ||
+                          machine.s_gdb_mode || machine.s_bp_trace ||
+                          (machine.s_strace != 0);
+    const bool inst_mix = machine.s_use_mix || machine.s_tuimode;
+
     for (uint32_t b = 0; b < batch_size; ++b) {
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
-            execute_cached_op_fast(machine, *cached);
+            if (simrv::compiler::unlikely(copy_ctx && inst_mix)) {
+                execute_cached_op_fast<true, true>(machine, *cached);
+            } else if (simrv::compiler::unlikely(copy_ctx)) {
+                execute_cached_op_fast<true, false>(machine, *cached);
+            } else if (simrv::compiler::unlikely(inst_mix)) {
+                execute_cached_op_fast<false, true>(machine, *cached);
+            } else {
+                execute_cached_op_fast<false, false>(machine, *cached);
+            }
         } else {
             run_cycle_baremetal(machine);
         }
@@ -1112,6 +1147,11 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
         }
     }
 }
+
+template void CPU::execute_cached_op_fast<false, false>(Machine& machine, CachedOp& op);
+template void CPU::execute_cached_op_fast<true, false>(Machine& machine, CachedOp& op);
+template void CPU::execute_cached_op_fast<false, true>(Machine& machine, CachedOp& op);
+template void CPU::execute_cached_op_fast<true, true>(Machine& machine, CachedOp& op);
 
 void CPU::push_undo_state() {
     UndoStep step;

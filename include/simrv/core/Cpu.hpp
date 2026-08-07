@@ -5,7 +5,6 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <deque>
 #include <expected>
 #include <fstream>
@@ -313,7 +312,8 @@ class CPU {
      * @param machine Reference to the top-level machine orchestration.
      * @param op Reference to the cached pre-decoded operation.
      */
-    void execute_cached_op_fast(Machine& machine, CachedOp& op);
+    template <bool kCopyContext = false, bool kInstMix = false>
+    SIMRV_ALWAYS_INLINE void execute_cached_op_fast(Machine& machine, CachedOp& op);
 
     /**
      * @brief Executes a batch of cached operations in a tight inlined loop for baremetal acceleration.
