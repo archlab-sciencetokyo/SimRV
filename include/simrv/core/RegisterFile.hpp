@@ -78,6 +78,18 @@ class RegisterFile {
         }
     }
 
+    /// Branchless GPR write: always writes to rd, then re-zeros x0.
+    /// In RV64-mode, sign-extends to 64-bit for 32-bit execution mode.
+    SIMRV_ALWAYS_INLINE constexpr void write_branchless(RegId idx, Register val) {
+        if constexpr (simrv::xlen::kIsXLen64) {
+            if (simrv::compiler::unlikely(xlen == 32)) {
+                val = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(val)));
+            }
+        }
+        reg_[std::to_underlying(idx)] = val;
+        reg_[0] = 0;
+    }
+
     [[nodiscard]] constexpr auto read_fp(RegId idx) const -> FloatingRegister {
         return freg_[std::to_underlying(idx)];
     }

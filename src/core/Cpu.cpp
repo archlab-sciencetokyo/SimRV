@@ -1063,52 +1063,81 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         e_instmix[static_cast<std::size_t>(op.op_id)]++;
     }
 
-    // 3. Execute, Memory, Writeback, Commit in a monolithic fast path
-    switch (op.opcode) {
-        case Opcode::Lui:
-            execute_cached_lui(op);
-            break;
-        case Opcode::Auipc:
-            execute_cached_auipc(op);
-            break;
-        case Opcode::Jal:
-            execute_cached_jal(op);
-            break;
-        case Opcode::Jalr:
-            execute_cached_jalr(op, state_.regs.read(op.rs1));
-            break;
-        case Opcode::Branch:
-            execute_cached_branch(op, state_.regs.read(op.rs1), state_.regs.read(op.rs2));
-            break;
-        case Opcode::Op:
-            execute_cached_op(op, state_.regs.read(op.rs1), state_.regs.read(op.rs2));
-            break;
-        case Opcode::OpImm:
-            execute_cached_op_imm(op, state_.regs.read(op.rs1));
-            break;
-        case Opcode::OpImm32:
-            execute_cached_op_imm32(op, state_.regs.read(op.rs1));
-            break;
-        case Opcode::Op32:
-            execute_cached_op32(op, state_.regs.read(op.rs1), state_.regs.read(op.rs2));
-            break;
-        case Opcode::Load:
-            if (!execute_cached_load(machine, op, state_.regs.read(op.rs1))) {
-                return;
-            }
-            break;
-        case Opcode::Store:
-            if (!execute_cached_store(machine, op, state_.regs.read(op.rs1),
-                                      state_.regs.read(op.rs2))) {
-                return;
-            }
-            break;
+    // 3. Execute, Memory, Writeback, Commit — single flat op_id dispatch (no double switch).
+    // Common base integer ops are inlined; rare/complex ops fall through to opcode-based helpers.
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables) — all paths assign before wb_reg_pc_inc
+    Register rrs1 = 0, rrs2 = 0;
+    Register wb_data = 0;
+    switch (op.op_id) {
+        // ---- Scalar ALU with two register operands ----
+        case isa::ADD:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = rrs1 + rrs2; goto wb_reg_pc_inc;
+        case isa::SUB:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = rrs1 - rrs2; goto wb_reg_pc_inc;
+        case isa::AND:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = rrs1 & rrs2; goto wb_reg_pc_inc;
+        case isa::OR:    rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = rrs1 | rrs2; goto wb_reg_pc_inc;
+        case isa::XOR:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = rrs1 ^ rrs2; goto wb_reg_pc_inc;
+        case isa::SLL:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = rrs1 << (rrs2 & simrv::xlen::xlen_shift_mask()); goto wb_reg_pc_inc;
+        case isa::SRL:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = rrs1 >> (rrs2 & simrv::xlen::xlen_shift_mask()); goto wb_reg_pc_inc;
+        case isa::SRA:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >> (rrs2 & simrv::xlen::xlen_shift_mask())); goto wb_reg_pc_inc;
+        case isa::SLT:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) < static_cast<SignedWord>(rrs2)); goto wb_reg_pc_inc;
+        case isa::SLTU:  rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = static_cast<Register>(rrs1 < rrs2); goto wb_reg_pc_inc;
+        // ---- 32-bit (W) register ops (RV64 only) ----
+        case isa::ADDW:  rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + rrs2))); goto wb_reg_pc_inc;
+        case isa::SUBW:  rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 - rrs2))); goto wb_reg_pc_inc;
+        case isa::SLLW:  rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (rrs2 & 0x1f)))); goto wb_reg_pc_inc;
+        case isa::SRLW:  rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(rrs1) >> (rrs2 & 0x1f)))); goto wb_reg_pc_inc;
+        case isa::SRAW:  rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1) >> (rrs2 & 0x1f))); goto wb_reg_pc_inc;
+        // ---- Scalar ALU with immediate ----
+        case isa::ADDI:  rrs1 = state_.regs.read(op.rs1); wb_data = rrs1 + op.imm; goto wb_reg_pc_inc;
+        case isa::ANDI:  rrs1 = state_.regs.read(op.rs1); wb_data = rrs1 & op.imm; goto wb_reg_pc_inc;
+        case isa::ORI:   rrs1 = state_.regs.read(op.rs1); wb_data = rrs1 | op.imm; goto wb_reg_pc_inc;
+        case isa::XORI:  rrs1 = state_.regs.read(op.rs1); wb_data = rrs1 ^ op.imm; goto wb_reg_pc_inc;
+        case isa::SLLI:  rrs1 = state_.regs.read(op.rs1); wb_data = rrs1 << (op.imm & simrv::xlen::xlen_shift_mask()); goto wb_reg_pc_inc;
+        case isa::SRLI:  rrs1 = state_.regs.read(op.rs1); wb_data = rrs1 >> (op.imm & simrv::xlen::xlen_shift_mask()); goto wb_reg_pc_inc;
+        case isa::SRAI:  rrs1 = state_.regs.read(op.rs1); wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >> (op.imm & simrv::xlen::xlen_shift_mask())); goto wb_reg_pc_inc;
+        case isa::SLTI:  rrs1 = state_.regs.read(op.rs1); wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) < static_cast<SignedWord>(op.imm)); goto wb_reg_pc_inc;
+        case isa::SLTIU: rrs1 = state_.regs.read(op.rs1); wb_data = static_cast<Register>(rrs1 < static_cast<Register>(op.imm)); goto wb_reg_pc_inc;
+        // ---- 32-bit immediate ops (RV64 only) ----
+        case isa::ADDIW: rrs1 = state_.regs.read(op.rs1); wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + op.imm))); goto wb_reg_pc_inc;
+        case isa::SLLIW: rrs1 = state_.regs.read(op.rs1); wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (op.imm & 0x1f)))); goto wb_reg_pc_inc;
+        case isa::SRLIW: rrs1 = state_.regs.read(op.rs1); wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(rrs1) >> (op.imm & 0x1f)))); goto wb_reg_pc_inc;
+        case isa::SRAIW: rrs1 = state_.regs.read(op.rs1); wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1) >> (op.imm & 0x1f))); goto wb_reg_pc_inc;
+        // ---- Upper-immediate (no rs1) ----
+        case isa::LUI:   wb_data = op.imm; goto wb_reg_pc_inc;
+        case isa::AUIPC: wb_data = state_.pc + op.imm; goto wb_reg_pc_inc;
+        // ---- Branches ----
+        case isa::BEQ:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); execute_cached_branch(op, rrs1, rrs2); goto done;
+        case isa::BNE:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); execute_cached_branch(op, rrs1, rrs2); goto done;
+        case isa::BLT:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); execute_cached_branch(op, rrs1, rrs2); goto done;
+        case isa::BGE:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); execute_cached_branch(op, rrs1, rrs2); goto done;
+        case isa::BLTU:  rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); execute_cached_branch(op, rrs1, rrs2); goto done;
+        case isa::BGEU:  rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); execute_cached_branch(op, rrs1, rrs2); goto done;
+        // ---- Jump instructions ----
+        case isa::JAL:  execute_cached_jal(op); goto done;
+        case isa::JALR: execute_cached_jalr(op, state_.regs.read(op.rs1)); goto done;
+        // ---- Loads ----
+        case isa::LB:
+        case isa::LH:
+        case isa::LW:
+        case isa::LD:
+        case isa::LBU:
+        case isa::LHU:
+        case isa::LWU:
+        case isa::FLW:
+        case isa::FLD:
+            if (!execute_cached_load(machine, op, state_.regs.read(op.rs1))) return;
+            goto done;
+        // ---- Stores ----
+        case isa::SB:
+        case isa::SH:
+        case isa::SW:
+        case isa::SD:
+        case isa::FSW:
+        case isa::FSD:
+            if (!execute_cached_store(machine, op, state_.regs.read(op.rs1), state_.regs.read(op.rs2))) return;
+            goto done;
+        // ---- Everything else: fallback to full pipeline stages ----
         default:
-            // Fallback needs pipeline_context populated; copy only if not already done by debug
-            // branch
-            if (simrv::compiler::likely(!machine.s_tuimode && !machine.s_lockstep_mode &&
-                                        !machine.s_gdb_mode && !machine.s_bp_trace &&
-                                        (machine.s_strace == 0))) {
+            if constexpr (!kCopyContext) {
                 pipeline_context.copy_from(op);
                 pipeline_context.tlb_miss = false;
                 pipeline_context.pending_tval = 0;
@@ -1117,6 +1146,15 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
             return;
     }
 
+wb_reg_pc_inc:
+    // Branchless GPR write: write rd unconditionally, then re-zero x0.
+    state_.regs.write_branchless(op.rd, wb_data);
+    e_icount++;
+    if (op.cinsn) e_ccount++;
+    state_.pc += op.len;
+    pc_sign_extend();
+
+done:
     // 4. Handle pending interrupts (same check as commit_stage)
     handle_cached_interrupts();
 }
