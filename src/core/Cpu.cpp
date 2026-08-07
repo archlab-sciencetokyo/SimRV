@@ -749,13 +749,27 @@ void CPU::execute_cached_jalr(CachedOp& op, Register rrs1) {
 void CPU::execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) {
     bool tkn = false;
     switch (op.funct3) {
-        case isa::Funct3::Beq:  tkn = (rrs1 == rrs2); break;
-        case isa::Funct3::Bne:  tkn = (rrs1 != rrs2); break;
-        case isa::Funct3::Blt:  tkn = (static_cast<SignedWord>(rrs1) < static_cast<SignedWord>(rrs2)); break;
-        case isa::Funct3::Bge:  tkn = (static_cast<SignedWord>(rrs1) >= static_cast<SignedWord>(rrs2)); break;
-        case isa::Funct3::Bltu: tkn = (rrs1 < rrs2); break;
-        case isa::Funct3::Bgeu: tkn = (rrs1 >= rrs2); break;
-        default:                tkn = execute::ExecuteUnit::branchTaken(rrs1, rrs2, op.funct3, state_.regs.xlen); break;
+        case isa::Funct3::Beq:
+            tkn = (rrs1 == rrs2);
+            break;
+        case isa::Funct3::Bne:
+            tkn = (rrs1 != rrs2);
+            break;
+        case isa::Funct3::Blt:
+            tkn = (static_cast<SignedWord>(rrs1) < static_cast<SignedWord>(rrs2));
+            break;
+        case isa::Funct3::Bge:
+            tkn = (static_cast<SignedWord>(rrs1) >= static_cast<SignedWord>(rrs2));
+            break;
+        case isa::Funct3::Bltu:
+            tkn = (rrs1 < rrs2);
+            break;
+        case isa::Funct3::Bgeu:
+            tkn = (rrs1 >= rrs2);
+            break;
+        default:
+            tkn = execute::ExecuteUnit::branchTaken(rrs1, rrs2, op.funct3, state_.regs.xlen);
+            break;
     }
     pipeline_context.tkn = tkn;
     Register const target_pc = tkn ? (state_.pc + op.imm) : (state_.pc + op.len);
@@ -768,17 +782,41 @@ void CPU::execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) {
 void CPU::execute_cached_op(CachedOp& op, Register rrs1, Register rrs2) {
     Register wb_data = 0;
     switch (op.op_id) {
-        case isa::ADD:  wb_data = rrs1 + rrs2; break;
-        case isa::SUB:  wb_data = rrs1 - rrs2; break;
-        case isa::AND:  wb_data = rrs1 & rrs2; break;
-        case isa::OR:   wb_data = rrs1 | rrs2; break;
-        case isa::XOR:  wb_data = rrs1 ^ rrs2; break;
-        case isa::SLL:  wb_data = rrs1 << (rrs2 & simrv::xlen::xlen_shift_mask()); break;
-        case isa::SRL:  wb_data = rrs1 >> (rrs2 & simrv::xlen::xlen_shift_mask()); break;
-        case isa::SRA:  wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >> (rrs2 & simrv::xlen::xlen_shift_mask())); break;
-        case isa::SLT:  wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) < static_cast<SignedWord>(rrs2)); break;
-        case isa::SLTU: wb_data = static_cast<Register>(rrs1 < rrs2); break;
-        default:        wb_data = execute::ExecuteUnit::aluInt(rrs1, rrs2, op.op_id, state_.regs.xlen); break;
+        case isa::ADD:
+            wb_data = rrs1 + rrs2;
+            break;
+        case isa::SUB:
+            wb_data = rrs1 - rrs2;
+            break;
+        case isa::AND:
+            wb_data = rrs1 & rrs2;
+            break;
+        case isa::OR:
+            wb_data = rrs1 | rrs2;
+            break;
+        case isa::XOR:
+            wb_data = rrs1 ^ rrs2;
+            break;
+        case isa::SLL:
+            wb_data = rrs1 << (rrs2 & simrv::xlen::xlen_shift_mask());
+            break;
+        case isa::SRL:
+            wb_data = rrs1 >> (rrs2 & simrv::xlen::xlen_shift_mask());
+            break;
+        case isa::SRA:
+            wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >>
+                                            (rrs2 & simrv::xlen::xlen_shift_mask()));
+            break;
+        case isa::SLT:
+            wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) <
+                                            static_cast<SignedWord>(rrs2));
+            break;
+        case isa::SLTU:
+            wb_data = static_cast<Register>(rrs1 < rrs2);
+            break;
+        default:
+            wb_data = execute::ExecuteUnit::aluInt(rrs1, rrs2, op.op_id, state_.regs.xlen);
+            break;
     }
     if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, wb_data);
@@ -792,16 +830,38 @@ void CPU::execute_cached_op(CachedOp& op, Register rrs1, Register rrs2) {
 void CPU::execute_cached_op_imm(CachedOp& op, Register rrs1) {
     Register wb_data = 0;
     switch (op.op_id) {
-        case isa::ADDI:  wb_data = rrs1 + op.imm; break;
-        case isa::ANDI:  wb_data = rrs1 & op.imm; break;
-        case isa::ORI:   wb_data = rrs1 | op.imm; break;
-        case isa::XORI:  wb_data = rrs1 ^ op.imm; break;
-        case isa::SLLI:  wb_data = rrs1 << (op.imm & simrv::xlen::xlen_shift_mask()); break;
-        case isa::SRLI:  wb_data = rrs1 >> (op.imm & simrv::xlen::xlen_shift_mask()); break;
-        case isa::SRAI:  wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >> (op.imm & simrv::xlen::xlen_shift_mask())); break;
-        case isa::SLTI:  wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) < static_cast<SignedWord>(op.imm)); break;
-        case isa::SLTIU: wb_data = static_cast<Register>(rrs1 < static_cast<Register>(op.imm)); break;
-        default:         wb_data = execute::ExecuteUnit::aluInt(rrs1, op.imm, op.op_id, state_.regs.xlen); break;
+        case isa::ADDI:
+            wb_data = rrs1 + op.imm;
+            break;
+        case isa::ANDI:
+            wb_data = rrs1 & op.imm;
+            break;
+        case isa::ORI:
+            wb_data = rrs1 | op.imm;
+            break;
+        case isa::XORI:
+            wb_data = rrs1 ^ op.imm;
+            break;
+        case isa::SLLI:
+            wb_data = rrs1 << (op.imm & simrv::xlen::xlen_shift_mask());
+            break;
+        case isa::SRLI:
+            wb_data = rrs1 >> (op.imm & simrv::xlen::xlen_shift_mask());
+            break;
+        case isa::SRAI:
+            wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >>
+                                            (op.imm & simrv::xlen::xlen_shift_mask()));
+            break;
+        case isa::SLTI:
+            wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) <
+                                            static_cast<SignedWord>(op.imm));
+            break;
+        case isa::SLTIU:
+            wb_data = static_cast<Register>(rrs1 < static_cast<Register>(op.imm));
+            break;
+        default:
+            wb_data = execute::ExecuteUnit::aluInt(rrs1, op.imm, op.op_id, state_.regs.xlen);
+            break;
     }
     if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, wb_data);
@@ -815,11 +875,25 @@ void CPU::execute_cached_op_imm(CachedOp& op, Register rrs1) {
 void CPU::execute_cached_op_imm32(CachedOp& op, Register rrs1) {
     Register wb_data = 0;
     switch (op.op_id) {
-        case isa::ADDIW: wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + op.imm))); break;
-        case isa::SLLIW: wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (op.imm & 0x1f)))); break;
-        case isa::SRLIW: wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(rrs1) >> (op.imm & 0x1f)))); break;
-        case isa::SRAIW: wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1) >> (op.imm & 0x1f))); break;
-        default:         wb_data = execute::ExecuteUnit::aluIntW(rrs1, op.imm, op.op_id); break;
+        case isa::ADDIW:
+            wb_data =
+                static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + op.imm)));
+            break;
+        case isa::SLLIW:
+            wb_data = static_cast<Register>(static_cast<int64_t>(
+                static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (op.imm & 0x1f))));
+            break;
+        case isa::SRLIW:
+            wb_data = static_cast<Register>(static_cast<int64_t>(
+                static_cast<int32_t>(static_cast<uint32_t>(rrs1) >> (op.imm & 0x1f))));
+            break;
+        case isa::SRAIW:
+            wb_data = static_cast<Register>(
+                static_cast<int64_t>(static_cast<int32_t>(rrs1) >> (op.imm & 0x1f)));
+            break;
+        default:
+            wb_data = execute::ExecuteUnit::aluIntW(rrs1, op.imm, op.op_id);
+            break;
     }
     if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, wb_data);
@@ -833,10 +907,21 @@ void CPU::execute_cached_op_imm32(CachedOp& op, Register rrs1) {
 void CPU::execute_cached_op32(CachedOp& op, Register rrs1, Register rrs2) {
     Register wb_data = 0;
     switch (op.op_id) {
-        case isa::ADDW: wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + rrs2))); break;
-        case isa::SUBW: wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 - rrs2))); break;
-        case isa::SLLW: wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (rrs2 & 0x1f)))); break;
-        default:        wb_data = execute::ExecuteUnit::aluIntW(rrs1, rrs2, op.op_id); break;
+        case isa::ADDW:
+            wb_data =
+                static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + rrs2)));
+            break;
+        case isa::SUBW:
+            wb_data =
+                static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 - rrs2)));
+            break;
+        case isa::SLLW:
+            wb_data = static_cast<Register>(static_cast<int64_t>(
+                static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (rrs2 & 0x1f))));
+            break;
+        default:
+            wb_data = execute::ExecuteUnit::aluIntW(rrs1, rrs2, op.op_id);
+            break;
     }
     if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, wb_data);
@@ -884,8 +969,7 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
                 return true;
             }
             out_val = simrv::memory::ram_read_fast(entry.paddr_base + (mem_addr & 0xFFF),
-                                                   static_cast<Instruction>(funct3),
-                                                   machine.mmem);
+                                                   static_cast<Instruction>(funct3), machine.mmem);
             return true;
         }
     }
@@ -935,7 +1019,8 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
             [tlb_idx];  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
             Address const paddr = entry.paddr_base + (mem_addr & 0xFFF);
-            if (simrv::compiler::unlikely(machine.s_rollback_enabled) && simrv::memory::is_dram_addr(paddr)) {
+            if (simrv::compiler::unlikely(machine.s_rollback_enabled) &&
+                simrv::memory::is_dram_addr(paddr)) {
                 Word old_val = simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(funct3),
                                                             machine.mmem);
                 record_mem_write(paddr, old_val, static_cast<Instruction>(funct3));
@@ -1070,40 +1155,156 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
     Register wb_data = 0;
     switch (op.op_id) {
         // ---- Scalar ALU with two register operands ----
-        case isa::ADD:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = rrs1 + rrs2; break;
-        case isa::SUB:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = rrs1 - rrs2; break;
-        case isa::AND:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = rrs1 & rrs2; break;
-        case isa::OR:    rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = rrs1 | rrs2; break;
-        case isa::XOR:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = rrs1 ^ rrs2; break;
-        case isa::SLL:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = rrs1 << (rrs2 & simrv::xlen::xlen_shift_mask()); break;
-        case isa::SRL:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = rrs1 >> (rrs2 & simrv::xlen::xlen_shift_mask()); break;
-        case isa::SRA:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >> (rrs2 & simrv::xlen::xlen_shift_mask())); break;
-        case isa::SLT:   rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) < static_cast<SignedWord>(rrs2)); break;
-        case isa::SLTU:  rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = static_cast<Register>(rrs1 < rrs2); break;
+        case isa::ADD:
+            rrs1 = state_.regs.read(op.rs1);
+            rrs2 = state_.regs.read(op.rs2);
+            wb_data = rrs1 + rrs2;
+            break;
+        case isa::SUB:
+            rrs1 = state_.regs.read(op.rs1);
+            rrs2 = state_.regs.read(op.rs2);
+            wb_data = rrs1 - rrs2;
+            break;
+        case isa::AND:
+            rrs1 = state_.regs.read(op.rs1);
+            rrs2 = state_.regs.read(op.rs2);
+            wb_data = rrs1 & rrs2;
+            break;
+        case isa::OR:
+            rrs1 = state_.regs.read(op.rs1);
+            rrs2 = state_.regs.read(op.rs2);
+            wb_data = rrs1 | rrs2;
+            break;
+        case isa::XOR:
+            rrs1 = state_.regs.read(op.rs1);
+            rrs2 = state_.regs.read(op.rs2);
+            wb_data = rrs1 ^ rrs2;
+            break;
+        case isa::SLL:
+            rrs1 = state_.regs.read(op.rs1);
+            rrs2 = state_.regs.read(op.rs2);
+            wb_data = rrs1 << (rrs2 & simrv::xlen::xlen_shift_mask());
+            break;
+        case isa::SRL:
+            rrs1 = state_.regs.read(op.rs1);
+            rrs2 = state_.regs.read(op.rs2);
+            wb_data = rrs1 >> (rrs2 & simrv::xlen::xlen_shift_mask());
+            break;
+        case isa::SRA:
+            rrs1 = state_.regs.read(op.rs1);
+            rrs2 = state_.regs.read(op.rs2);
+            wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >>
+                                            (rrs2 & simrv::xlen::xlen_shift_mask()));
+            break;
+        case isa::SLT:
+            rrs1 = state_.regs.read(op.rs1);
+            rrs2 = state_.regs.read(op.rs2);
+            wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) <
+                                            static_cast<SignedWord>(rrs2));
+            break;
+        case isa::SLTU:
+            rrs1 = state_.regs.read(op.rs1);
+            rrs2 = state_.regs.read(op.rs2);
+            wb_data = static_cast<Register>(rrs1 < rrs2);
+            break;
         // ---- 32-bit (W) register ops (RV64 only) ----
-        case isa::ADDW:  rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + rrs2))); break;
-        case isa::SUBW:  rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 - rrs2))); break;
-        case isa::SLLW:  rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (rrs2 & 0x1f)))); break;
-        case isa::SRLW:  rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(rrs1) >> (rrs2 & 0x1f)))); break;
-        case isa::SRAW:  rrs1 = state_.regs.read(op.rs1); rrs2 = state_.regs.read(op.rs2); wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1) >> (rrs2 & 0x1f))); break;
+        case isa::ADDW:
+            rrs1 = state_.regs.read(op.rs1);
+            rrs2 = state_.regs.read(op.rs2);
+            wb_data =
+                static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + rrs2)));
+            break;
+        case isa::SUBW:
+            rrs1 = state_.regs.read(op.rs1);
+            rrs2 = state_.regs.read(op.rs2);
+            wb_data =
+                static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 - rrs2)));
+            break;
+        case isa::SLLW:
+            rrs1 = state_.regs.read(op.rs1);
+            rrs2 = state_.regs.read(op.rs2);
+            wb_data = static_cast<Register>(static_cast<int64_t>(
+                static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (rrs2 & 0x1f))));
+            break;
+        case isa::SRLW:
+            rrs1 = state_.regs.read(op.rs1);
+            rrs2 = state_.regs.read(op.rs2);
+            wb_data = static_cast<Register>(static_cast<int64_t>(
+                static_cast<int32_t>(static_cast<uint32_t>(rrs1) >> (rrs2 & 0x1f))));
+            break;
+        case isa::SRAW:
+            rrs1 = state_.regs.read(op.rs1);
+            rrs2 = state_.regs.read(op.rs2);
+            wb_data = static_cast<Register>(
+                static_cast<int64_t>(static_cast<int32_t>(rrs1) >> (rrs2 & 0x1f)));
+            break;
         // ---- Scalar ALU with immediate ----
-        case isa::ADDI:  rrs1 = state_.regs.read(op.rs1); wb_data = rrs1 + op.imm; break;
-        case isa::ANDI:  rrs1 = state_.regs.read(op.rs1); wb_data = rrs1 & op.imm; break;
-        case isa::ORI:   rrs1 = state_.regs.read(op.rs1); wb_data = rrs1 | op.imm; break;
-        case isa::XORI:  rrs1 = state_.regs.read(op.rs1); wb_data = rrs1 ^ op.imm; break;
-        case isa::SLLI:  rrs1 = state_.regs.read(op.rs1); wb_data = rrs1 << (op.imm & simrv::xlen::xlen_shift_mask()); break;
-        case isa::SRLI:  rrs1 = state_.regs.read(op.rs1); wb_data = rrs1 >> (op.imm & simrv::xlen::xlen_shift_mask()); break;
-        case isa::SRAI:  rrs1 = state_.regs.read(op.rs1); wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >> (op.imm & simrv::xlen::xlen_shift_mask())); break;
-        case isa::SLTI:  rrs1 = state_.regs.read(op.rs1); wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) < static_cast<SignedWord>(op.imm)); break;
-        case isa::SLTIU: rrs1 = state_.regs.read(op.rs1); wb_data = static_cast<Register>(rrs1 < static_cast<Register>(op.imm)); break;
+        case isa::ADDI:
+            rrs1 = state_.regs.read(op.rs1);
+            wb_data = rrs1 + op.imm;
+            break;
+        case isa::ANDI:
+            rrs1 = state_.regs.read(op.rs1);
+            wb_data = rrs1 & op.imm;
+            break;
+        case isa::ORI:
+            rrs1 = state_.regs.read(op.rs1);
+            wb_data = rrs1 | op.imm;
+            break;
+        case isa::XORI:
+            rrs1 = state_.regs.read(op.rs1);
+            wb_data = rrs1 ^ op.imm;
+            break;
+        case isa::SLLI:
+            rrs1 = state_.regs.read(op.rs1);
+            wb_data = rrs1 << (op.imm & simrv::xlen::xlen_shift_mask());
+            break;
+        case isa::SRLI:
+            rrs1 = state_.regs.read(op.rs1);
+            wb_data = rrs1 >> (op.imm & simrv::xlen::xlen_shift_mask());
+            break;
+        case isa::SRAI:
+            rrs1 = state_.regs.read(op.rs1);
+            wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >>
+                                            (op.imm & simrv::xlen::xlen_shift_mask()));
+            break;
+        case isa::SLTI:
+            rrs1 = state_.regs.read(op.rs1);
+            wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) <
+                                            static_cast<SignedWord>(op.imm));
+            break;
+        case isa::SLTIU:
+            rrs1 = state_.regs.read(op.rs1);
+            wb_data = static_cast<Register>(rrs1 < static_cast<Register>(op.imm));
+            break;
         // ---- 32-bit immediate ops (RV64 only) ----
-        case isa::ADDIW: rrs1 = state_.regs.read(op.rs1); wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + op.imm))); break;
-        case isa::SLLIW: rrs1 = state_.regs.read(op.rs1); wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (op.imm & 0x1f)))); break;
-        case isa::SRLIW: rrs1 = state_.regs.read(op.rs1); wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(static_cast<uint32_t>(rrs1) >> (op.imm & 0x1f)))); break;
-        case isa::SRAIW: rrs1 = state_.regs.read(op.rs1); wb_data = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1) >> (op.imm & 0x1f))); break;
+        case isa::ADDIW:
+            rrs1 = state_.regs.read(op.rs1);
+            wb_data =
+                static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + op.imm)));
+            break;
+        case isa::SLLIW:
+            rrs1 = state_.regs.read(op.rs1);
+            wb_data = static_cast<Register>(static_cast<int64_t>(
+                static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (op.imm & 0x1f))));
+            break;
+        case isa::SRLIW:
+            rrs1 = state_.regs.read(op.rs1);
+            wb_data = static_cast<Register>(static_cast<int64_t>(
+                static_cast<int32_t>(static_cast<uint32_t>(rrs1) >> (op.imm & 0x1f))));
+            break;
+        case isa::SRAIW:
+            rrs1 = state_.regs.read(op.rs1);
+            wb_data = static_cast<Register>(
+                static_cast<int64_t>(static_cast<int32_t>(rrs1) >> (op.imm & 0x1f)));
+            break;
         // ---- Upper-immediate (no rs1) ----
-        case isa::LUI:   wb_data = op.imm; break;
-        case isa::AUIPC: wb_data = state_.pc + op.imm; break;
+        case isa::LUI:
+            wb_data = op.imm;
+            break;
+        case isa::AUIPC:
+            wb_data = state_.pc + op.imm;
+            break;
         // ---- Branches: handle internally, then return ----
         case isa::BEQ:
         case isa::BNE:
@@ -1143,7 +1344,9 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         case isa::SD:
         case isa::FSW:
         case isa::FSD:
-            if (!execute_cached_store(machine, op, state_.regs.read(op.rs1), state_.regs.read(op.rs2))) return;
+            if (!execute_cached_store(machine, op, state_.regs.read(op.rs1),
+                                      state_.regs.read(op.rs2)))
+                return;
             handle_cached_interrupts();
             return;
         // ---- Everything else: fallback to full pipeline stages ----
@@ -1170,9 +1373,8 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
 }
 
 void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
-    const bool copy_ctx = machine.s_tuimode || machine.s_lockstep_mode ||
-                          machine.s_gdb_mode || machine.s_bp_trace ||
-                          (machine.s_strace != 0);
+    const bool copy_ctx = machine.s_tuimode || machine.s_lockstep_mode || machine.s_gdb_mode ||
+                          machine.s_bp_trace || (machine.s_strace != 0);
     const bool inst_mix = machine.s_use_mix || machine.s_tuimode;
 
     for (uint32_t b = 0; b < batch_size; ++b) {
