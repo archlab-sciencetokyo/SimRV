@@ -37,6 +37,18 @@ extern volatile std::sig_atomic_t g_resized;  // NOLINT(avoid-non-const-global-v
  * @class Tui
  * @brief Handles ANSI-based split-screen rendering, scrolling, and status display for RTOS mode.
  */
+enum class SelectionPane { None, LeftPane, RightPane };
+
+struct SelectionState {
+    SelectionPane pane = SelectionPane::None;
+    int start_x = -1;
+    int start_y = -1;
+    int end_x = -1;
+    int end_y = -1;
+    bool is_selecting = false;
+    bool is_active = false;
+};
+
 class LeftPane;
 class RightPane;
 class StatusBar;
@@ -46,6 +58,11 @@ class Tui {
     static constexpr size_t kTraceBufferSize = 200;
     explicit Tui(simrv::core::Machine& machine);
     ~Tui();
+
+    void clear_selection();
+    void copy_active_selection();
+    void copy_to_clipboard(std::string_view text);
+    [[nodiscard]] auto get_selection_state() const -> const SelectionState& { return selection_; }
 
     void initialize();
     void shutdown();
@@ -185,6 +202,7 @@ class Tui {
     std::atomic<bool> trace_or_livetrace_active_{false};
     std::string status_override_;
     int scroll_offset_{0};
+    SelectionState selection_;
 
     // Performance tracking
     std::chrono::steady_clock::time_point last_speed_update_;

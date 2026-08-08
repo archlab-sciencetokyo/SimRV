@@ -256,7 +256,7 @@ void Tui::initialize() {
 
     g_tui_active = true;
 
-    const char* init_seq = "\033[?1049h\033[2J\033[H\033[?1000h\033[?1006h\033[?25l";
+    const char* init_seq = "\033[?1049h\033[2J\033[H\033[?1000h\033[?1002h\033[?1006h\033[?25l";
     (void)(::write(STDOUT_FILENO, init_seq, strlen(init_seq)) == 0);
 
     struct sigaction sa{};
@@ -362,7 +362,36 @@ void Tui::render_build_lines(int left_pane_width, int right_pane_width, int num_
             bool is_live = (scroll_offset_ == 0);
             for (int i = start; i < end_exclusive; ++i) {
                 bool draw_cursor = is_live && (i == cursor_abs_line) && vt_.is_cursor_visible();
-                lines_to_draw_.push_back(vt_.get_line_as_string(i, right_pane_width, draw_cursor));
+                int sel_start_x = -1;
+                int sel_end_x = -1;
+                if (selection_.is_active && selection_.pane == SelectionPane::RightPane) {
+                    int sy1 = selection_.start_y - 4 + scroll_offset_;
+                    int sy2 = selection_.end_y - 4 + scroll_offset_;
+                    int sx1 = selection_.start_x;
+                    int sx2 = selection_.end_x;
+                    if (sy1 > sy2 || (sy1 == sy2 && sx1 > sx2)) {
+                        std::swap(sy1, sy2);
+                        std::swap(sx1, sx2);
+                    }
+                    int row_in_screen = i - start;
+                    int row_abs = row_in_screen + scroll_offset_;
+                    if (row_abs >= sy1 && row_abs <= sy2) {
+                        if (sy1 == sy2) {
+                            sel_start_x = sx1;
+                            sel_end_x = sx2;
+                        } else if (row_abs == sy1) {
+                            sel_start_x = sx1;
+                            sel_end_x = right_pane_width - 1;
+                        } else if (row_abs == sy2) {
+                            sel_start_x = 0;
+                            sel_end_x = sx2;
+                        } else {
+                            sel_start_x = 0;
+                            sel_end_x = right_pane_width - 1;
+                        }
+                    }
+                }
+                lines_to_draw_.push_back(vt_.get_line_as_string(i, right_pane_width, draw_cursor, sel_start_x, sel_end_x));
             }
         } else if (panel_mode == TuiRightPanelMode::Display) {
             for (int i = 0; i < num_rows; ++i)
@@ -445,6 +474,19 @@ void Tui::render_draw_sixel(int left_pane_width, int right_pane_width, int num_r
     if (!modal_.is_active()) {
         for (int i = 0; i < num_rows; ++i) {
             std::string left = left_pane_->render_row(i, left_pane_width);
+            if (selection_.is_active && selection_.pane == SelectionPane::LeftPane) {
+                int sy1 = selection_.start_y - 4;
+                int sy2 = selection_.end_y - 4;
+                int sx1 = selection_.start_x;
+                int sx2 = selection_.end_x;
+                if (sy1 > sy2 || (sy1 == sy2 && sx1 > sx2)) {
+                    std::swap(sy1, sy2);
+                    std::swap(sx1, sx2);
+                }
+                if (i >= sy1 && i <= sy2) {
+                    left = std::format("\033[7m{}\033[0m", left);
+                }
+            }
             update_cmds += std::format("\033[{};1H{}║\033[0m{}{}│\033[0m", i + 4, kThemeBorder,
                                        left, kThemeBorder);
         }
@@ -668,8 +710,139 @@ void Tui::handle_mouse_left_pane(int x, int y, int b) {
         scroll_regs(2);
 }
 
+static auto base64_encode(std::string_view input) -> std::string {
+    static constexpr char kTable[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve(((input.size() + 2) / 3) * 4);
+    uint32_t val = 0;
+    int valb = -6;
+    for (uint8_t c : input) {
+        val = (val << 8) + c;
+        valb += 8;
+        while (valb >= 0) {
+            out.push_back(kTable[(val >> valb) & 0x3F]);
+            valb -= 6;
+        }
+    }
+    if (valb > -6) {
+        out.push_back(kTable[((val << 8) >> (valb + 8)) & 0x3F]);
+    }
+    while (out.size() % 4 != 0) {
+        out.push_back('=');
+    }
+    return out;
+}
+
+void Tui::copy_to_clipboard(std::string_view text) {
+    if (text.empty()) return;
+    std::string b64 = base64_encode(text);
+    std::string seq = "\033]52;c;" + b64 + "\a";
+    (void)(::write(STDOUT_FILENO, seq.data(), seq.size()) == 0);
+    ::fflush(stdout);
+}
+
+void Tui::clear_selection() {
+    selection_ = SelectionState{};
+    render(true);
+}
+
+void Tui::copy_active_selection() {
+    if (!selection_.is_active) return;
+    std::string text;
+
+    if (selection_.pane == SelectionPane::RightPane && right_pane_) {
+        int start_r = (selection_.start_y - 4) + scroll_offset_;
+        int end_r = (selection_.end_y - 4) + scroll_offset_;
+        text = vt_.get_text_in_range(start_r, selection_.start_x, end_r, selection_.end_x);
+    } else if (selection_.pane == SelectionPane::LeftPane && left_pane_) {
+        int start_r = selection_.start_y - 4;
+        int end_r = selection_.end_y - 4;
+        text = left_pane_->get_text_in_range(start_r, selection_.start_x, end_r, selection_.end_x, pane_width_cached_);
+    }
+
+    if (!text.empty()) {
+        copy_to_clipboard(text);
+        set_status_override(std::format("COPIED {} B TO CLIPBOARD", text.size()));
+    }
+}
+
 void Tui::handle_mouse(int x, int y, int b) {
     if (!right_pane_ || !left_pane_) return;
+
+    struct winsize w{};
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+    int term_width = w.ws_col > 0 ? w.ws_col : 80;
+    int right_pane_width = std::max(0, term_width - pane_width_cached_ - 3);
+
+    int const left_content_x = std::clamp(x - 2, 0, std::max(0, pane_width_cached_ - 1));
+    int const right_content_x = std::clamp(x - (pane_width_cached_ + 3), 0, std::max(0, right_pane_width - 1));
+
+    int const y_clamped = std::max(4, y);
+
+    // Handle mouse drag selection (b == 32)
+    if (b == 32 && selection_.is_selecting) {
+        if (selection_.pane == SelectionPane::LeftPane) {
+            selection_.end_x = left_content_x;
+            selection_.end_y = y_clamped;
+        } else if (selection_.pane == SelectionPane::RightPane) {
+            selection_.end_x = right_content_x;
+            selection_.end_y = y_clamped;
+        }
+        render(true);
+        return;
+    }
+
+    // Right-click copy (b == 2)
+    if (b == 2) {
+        if (selection_.is_active) {
+            copy_active_selection();
+            clear_selection();
+        } else {
+            clear_selection();
+            if (x >= 2 && x <= pane_width_cached_ + 1) {
+                selection_.pane = SelectionPane::LeftPane;
+                selection_.start_x = 0;
+                selection_.start_y = y_clamped;
+                selection_.end_x = std::max(0, pane_width_cached_ - 1);
+                selection_.end_y = y_clamped;
+                selection_.is_active = true;
+            } else if (x >= pane_width_cached_ + 3) {
+                selection_.pane = SelectionPane::RightPane;
+                selection_.start_x = 0;
+                selection_.start_y = y_clamped;
+                selection_.end_x = std::max(0, right_pane_width - 1);
+                selection_.end_y = y_clamped;
+                selection_.is_active = true;
+            }
+            if (selection_.is_active) {
+                copy_active_selection();
+                clear_selection();
+            }
+        }
+        return;
+    }
+
+    if (b == 0) { // Mouse down
+        clear_selection();
+        if (x >= 2 && x <= pane_width_cached_ + 1) {
+            selection_.pane = SelectionPane::LeftPane;
+            selection_.start_x = left_content_x;
+            selection_.start_y = y_clamped;
+            selection_.end_x = selection_.start_x;
+            selection_.end_y = y_clamped;
+            selection_.is_selecting = true;
+            selection_.is_active = true;
+        } else if (x >= pane_width_cached_ + 3) {
+            selection_.pane = SelectionPane::RightPane;
+            selection_.start_x = right_content_x;
+            selection_.start_y = y_clamped;
+            selection_.end_x = selection_.start_x;
+            selection_.end_y = y_clamped;
+            selection_.is_selecting = true;
+            selection_.is_active = true;
+        }
+    }
 
     if (x < pane_width_cached_) {
         if (!paused_) {
@@ -1374,6 +1547,12 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
 }
 
 auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
+    if (selection_.is_active && (byte == 3 || byte == 'y')) {
+        copy_active_selection();
+        clear_selection();
+        return;
+    }
+
     if (key == simrv::tui::TuiKey::CtrlP || key == simrv::tui::TuiKey::c ||
         key == simrv::tui::TuiKey::C) {
         if (machine_.is_shutdown_) {
@@ -1793,6 +1972,17 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
     int x = 0;
     int y = 0;
     if (parse_sgr_mouse(esc_buf_, button, x, y)) {
+        if (esc_buf_.back() == 'm') {
+            if (selection_.is_selecting) {
+                selection_.is_selecting = false;
+                if (selection_.start_x != selection_.end_x || selection_.start_y != selection_.end_y) {
+                    copy_active_selection();
+                }
+                render(true);
+            }
+            return true;
+        }
+
         if (esc_buf_.back() == 'M' && (button == 0 || button == 1 || button == 2)) {
             if (is_modal_active()) {
                 close_modal();

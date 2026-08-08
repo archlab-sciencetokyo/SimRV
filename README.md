@@ -158,7 +158,7 @@ Pre-compiled standalone binaries (`SimRV`) are available under GitHub Releases f
 
 ## License
 
-SimRV is licensed under the [MIT License](file:///home/archlab/ltrunk/workspace/tools/SimRV/LICENSE).
+SimRV is licensed under the [MIT License](LICENSE).
 
 ### Third-Party Component Licenses
 

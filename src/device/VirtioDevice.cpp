@@ -97,8 +97,8 @@ void VirtioDevice::mmio_write(Address offset, Word wdata) {
             }
             break;
         case virtio::MmioOffset::QueueNotify:
-            if (QueueSel < max_queues_ && wdata < max_queues_) {
-                Queue[QueueSel].Notify = wdata;
+            if (wdata < max_queues_) {
+                Queue[wdata].Notify = 1;
                 process_queue(wdata);
             }
             break;

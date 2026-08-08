@@ -204,6 +204,12 @@ target_compile_options(SimRV PRIVATE
   -Wpedantic
 )
 
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-frounding-math" COMPILER_SUPPORTS_FROUNDING_MATH)
+if(COMPILER_SUPPORTS_FROUNDING_MATH)
+  target_compile_options(SimRV PRIVATE -frounding-math)
+endif()
+
 # Release optimizations and Link-Time Optimization (LTO/IPO)
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
   target_compile_options(SimRV PRIVATE -O3)

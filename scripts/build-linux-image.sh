@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @file build-linux-image.sh
 # @brief Modernized, high-speed boot image compiler for SimRV.
-# Packages OpenSBI v1.8.1 and Linux v7.1.2 with embedded initramfs.
+# Packages OpenSBI v1.9 and Linux v7.1.7 with embedded initramfs.
 
 set -euo pipefail
 
@@ -12,9 +12,9 @@ ARCH="${ARCH:-rv64}"
 IMAGES_DIR="$ROOT_DIR/linux-images/$ARCH"
 
 # Versions
-OPENSBI_VER="1.8.1"
-LINUX_VER="7.1.2"
-BUSYBOX_VER="1.36.1"
+OPENSBI_VER="1.9"
+LINUX_VER="7.1.7"
+BUSYBOX_VER="1.38.0"
 ALPINE_VER="3.24.1"
 
 # Colors
@@ -27,11 +27,22 @@ print_step() { echo -e "${GREEN}[STEP]${NC} $1"; }
 print_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+LIBC="${LIBC:-auto}"
+CROSS_COMPILE="${CROSS_COMPILE:-}"
+
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --arch)
             ARCH="$2"
+            shift
+            ;;
+        --libc)
+            LIBC="$2"
+            shift
+            ;;
+        --cross-compile)
+            CROSS_COMPILE="$2"
             shift
             ;;
         --clean)
@@ -49,17 +60,34 @@ done
 
 mkdir -p "$BUILD_DIR/sources" "$IMAGES_DIR"
 
-# Verify cross compiler
-CROSS_COMPILE="riscv64-unknown-linux-gnu-"
-if ! command -v "${CROSS_COMPILE}gcc" >/dev/null 2>&1; then
-    print_error "Cross compiler ${CROSS_COMPILE}gcc not found on PATH."
+# Auto-detect cross compiler if not set
+if [[ -z "$CROSS_COMPILE" ]]; then
+    if [[ "$LIBC" == "musl" ]]; then
+        CANDIDATES=("riscv64-unknown-linux-musl-" "riscv64-linux-musl-" "riscv64-alpine-linux-musl-")
+    elif [[ "$LIBC" == "glibc" ]]; then
+        CANDIDATES=("riscv64-unknown-linux-gnu-" "riscv64-linux-gnu-")
+    else
+        # auto: preference order (musl -> glibc)
+        CANDIDATES=("riscv64-unknown-linux-musl-" "riscv64-linux-musl-" "riscv64-unknown-linux-gnu-" "riscv64-linux-gnu-")
+    fi
+
+    for c in "${CANDIDATES[@]}"; do
+        if command -v "${c}gcc" >/dev/null 2>&1; then
+            CROSS_COMPILE="$c"
+            break
+        fi
+    done
+fi
+
+if [[ -z "$CROSS_COMPILE" ]] || ! command -v "${CROSS_COMPILE}gcc" >/dev/null 2>&1; then
+    print_error "Cross compiler '${CROSS_COMPILE}gcc' not found on PATH."
     exit 1
 fi
 
 # Set architecture specifics
 if [[ "$ARCH" == "rv64" ]]; then
     XLEN=64
-    M_ARCH="rv64gcbv"
+    M_ARCH="rv64gc"
     M_ABI="lp64d"
     LINUX_DEFCONFIG="defconfig"
 else
@@ -164,7 +192,7 @@ fi
 
 # Compile custom Snake game
 print_step "Compiling custom Snake game..."
-if [[ "$ARCH" == "rv64" ]]; then
+if [[ "$ARCH" == "rv64" ]] && [[ -f "$INITRAMFS_DIR/lib/libc.musl-riscv64.so.1" ]]; then
     "${CROSS_COMPILE}gcc" -O2 -march="${M_ARCH}" -mabi="${M_ABI}" -Wl,-dynamic-linker=/lib/ld-musl-riscv64.so.1 -nodefaultlibs "$SCRIPT_DIR/snake.c" "$INITRAMFS_DIR/lib/libc.musl-riscv64.so.1" -lgcc -o "$INITRAMFS_DIR/usr/bin/snake"
 else
     "${CROSS_COMPILE}gcc" -static -O2 -march="${M_ARCH}" -mabi="${M_ABI}" "$SCRIPT_DIR/snake.c" -o "$INITRAMFS_DIR/usr/bin/snake"
@@ -181,14 +209,20 @@ echo "SimRV" > "$INITRAMFS_DIR/etc/hostname"
 
 cat > "$INITRAMFS_DIR/init" <<'EOF'
 #!/bin/sh
-/bin/mount -t proc proc /proc
-/bin/mount -t sysfs sysfs /sys
-/bin/mount -t devtmpfs devtmpfs /dev || true
-[ -f /etc/hostname ] && hostname -F /etc/hostname
-exec 0</dev/ttyS0
-exec 1>/dev/ttyS0
-exec 2>/dev/ttyS0
-clear
+mkdir -p /dev /proc /sys /etc /tmp /run
+/bin/mount -t proc proc /proc 2>/dev/null || true
+/bin/mount -t sysfs sysfs /sys 2>/dev/null || true
+/bin/mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+
+# Fallback device nodes if devtmpfs is absent
+[ -c /dev/console ] || mknod -m 600 /dev/console c 5 1 2>/dev/null || true
+[ -c /dev/ttyS0 ] || mknod -m 666 /dev/ttyS0 c 4 64 2>/dev/null || true
+[ -c /dev/null ] || mknod -m 666 /dev/null c 1 3 2>/dev/null || true
+[ -c /dev/zero ] || mknod -m 666 /dev/zero c 1 5 2>/dev/null || true
+
+[ -f /etc/hostname ] && hostname -F /etc/hostname 2>/dev/null || true
+
+echo ""
 echo "=================================================="
 echo "          Welcome to SimRV Linux Boot             "
 echo "=================================================="
@@ -197,8 +231,11 @@ if [ -f /etc/alpine-release ]; then
 else
     echo "Minimal BusyBox Linux (riscv32)"
 fi
-echo "=========================================="
-exec /sbin/init
+echo "=================================================="
+echo ""
+
+# Launch interactive shell
+exec /bin/sh
 EOF
 chmod +x "$INITRAMFS_DIR/init"
 
@@ -224,6 +261,34 @@ if [[ ! -f .config ]]; then
     
     # Disable modules (keep single static kernel)
     ./scripts/config --disable CONFIG_MODULES
+
+    # Built-in essential serial, console, virtio, and devtmpfs drivers
+    ./scripts/config --enable CONFIG_SERIAL_8250
+    ./scripts/config --enable CONFIG_SERIAL_8250_CONSOLE
+    ./scripts/config --enable CONFIG_SERIAL_8250_MMIO
+    ./scripts/config --enable CONFIG_SERIAL_OF_PLATFORM
+    ./scripts/config --enable CONFIG_VIRTIO
+    ./scripts/config --enable CONFIG_VIRTIO_MENU
+    ./scripts/config --enable CONFIG_VIRTIO_MMIO
+    ./scripts/config --enable CONFIG_VIRTIO_BLK
+    ./scripts/config --enable CONFIG_VIRTIO_CONSOLE
+    ./scripts/config --enable CONFIG_POWER_RESET
+    ./scripts/config --enable CONFIG_POWER_RESET_SYSCON
+    ./scripts/config --enable CONFIG_POWER_RESET_SYSCON_POWEROFF
+    ./scripts/config --enable CONFIG_DEVTMPFS
+    ./scripts/config --enable CONFIG_DEVTMPFS_MOUNT
+    ./scripts/config --enable CONFIG_TTY
+    ./scripts/config --enable CONFIG_VT
+
+    # High-speed boot optimizations: disable heavy debug features and unused subsystems
+    ./scripts/config --disable CONFIG_SLUB_DEBUG
+    ./scripts/config --disable CONFIG_DEBUG_KERNEL
+    ./scripts/config --disable CONFIG_PROFILING
+    ./scripts/config --disable CONFIG_DRM
+    ./scripts/config --disable CONFIG_SOUND
+    ./scripts/config --disable CONFIG_ETHERNET
+    ./scripts/config --disable CONFIG_WLAN
+    ./scripts/config --enable CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
 fi
 
 # Always resolve new configs non-interactively to prevent prompt hangs

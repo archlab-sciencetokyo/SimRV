@@ -46,6 +46,7 @@ class Disk : public VirtioDevice {
         return virtio::kDiskConfigGeneration;
     }
 
+    [[nodiscard]] auto read_config(Address offset) const -> Word override;
     void process_queue(Word q_idx) override;
 };
 

@@ -1,6 +1,6 @@
 # SimRV Architecture
 
-**Version:** 2.0.0-beta.26 · **Targets:** RV32GC, RV64GC, Vector, and Bitmanip
+**Version:** 2.0.0-rc.8 · **Targets:** RV32GC, RV64GC, Vector, and Bitmanip
 
 ## Scope
 

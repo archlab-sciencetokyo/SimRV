@@ -72,6 +72,7 @@ class LeftPane : public TuiWidget {
         -> std::optional<Register>;
     [[nodiscard]] auto get_stack_addr_at_row(int logical_row) const -> std::optional<Register>;
     [[nodiscard]] auto is_running_label_click(int logical_row, int col, int width) const -> bool;
+    [[nodiscard]] auto get_text_in_range(int start_row, int start_col, int end_row, int end_col, int width) -> std::string;
 
     void select_next_cache_set(int delta) {
         constexpr int kNumSets = 16;

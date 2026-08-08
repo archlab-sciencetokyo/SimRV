@@ -23,7 +23,12 @@ building them from source.
 ### One-Command Build
 
 ```bash
+# Default build (auto-detects musl / glibc toolchain)
 ./scripts/build-linux-image.sh
+
+# Build with explicit C library target & cross compiler prefix
+./scripts/build-linux-image.sh --libc musl --cross-compile riscv64-unknown-linux-musl-
+./scripts/build-linux-image.sh --libc glibc --cross-compile riscv64-unknown-linux-gnu-
 ```
 
 This will:

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <format>
+
 #include "simrv/Define.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"

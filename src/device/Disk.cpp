@@ -118,4 +118,19 @@ void Disk::process_queue(Word q_idx) {
 Disk::Disk(simrv::core::Machine& machine)
     : VirtioDevice(machine, virtio::kDiskIrq, virtio::kDiskMaxQueueNum) {}
 
+auto Disk::read_config(Address offset) const -> Word {
+    Address const config_offset = offset - static_cast<Address>(virtio::MmioOffset::Config);
+    uint64_t const capacity_sectors =
+        sector_storage_.empty()
+            ? (static_cast<uint64_t>(simrv::virtio::kDiskSize) / simrv::virtio::kDiskSectorSize)
+            : (static_cast<uint64_t>(sector_storage_.size()) / simrv::virtio::kDiskSectorSize);
+    if (config_offset == 0) {
+        return static_cast<Word>(capacity_sectors & 0xFFFFFFFFU);
+    }
+    if (config_offset == 4) {
+        return static_cast<Word>((capacity_sectors >> 32) & 0xFFFFFFFFU);
+    }
+    return 0;
+}
+
 }  // namespace simrv::device

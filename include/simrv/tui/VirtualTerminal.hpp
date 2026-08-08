@@ -238,7 +238,9 @@ class VirtualTerminal {
     }
 
     [[nodiscard]] auto get_line_as_string(int idx, int width_limit,
-                                          bool draw_cursor_at_x = false) const -> std::string {
+                                          bool draw_cursor_at_x = false,
+                                          int sel_start_x = -1,
+                                          int sel_end_x = -1) const -> std::string {
         const std::vector<Cell>* row_ptr = nullptr;
         int s_size = static_cast<int>(scrollback_.size());
         if (idx < s_size) {
@@ -264,6 +266,9 @@ class VirtualTerminal {
         for (int x = 0; x < limit; ++x) {
             Cell cell = row[x];
             if (draw_cursor_at_x && x == cursor_x_) {
+                cell.reverse = !cell.reverse;
+            }
+            if (sel_start_x >= 0 && sel_end_x >= 0 && x >= sel_start_x && x <= sel_end_x) {
                 cell.reverse = !cell.reverse;
             }
 
@@ -304,6 +309,63 @@ class VirtualTerminal {
         }
 
         res += "\033[0m";
+        return res;
+    }
+
+    [[nodiscard]] auto get_text_in_range(int start_y, int start_x, int end_y,
+                                         int end_x) const -> std::string {
+        int sy1 = start_y;
+        int sx1 = start_x;
+        int sy2 = end_y;
+        int sx2 = end_x;
+        if (sy1 > sy2 || (sy1 == sy2 && sx1 > sx2)) {
+            std::swap(sy1, sy2);
+            std::swap(sx1, sx2);
+        }
+        std::string res;
+        for (int r = sy1; r <= sy2; ++r) {
+            const std::vector<Cell>* row_ptr = nullptr;
+            int s_size = static_cast<int>(scrollback_.size());
+            if (r >= 0 && r < s_size) {
+                row_ptr = &scrollback_[r];
+            } else {
+                int cells_idx = r - s_size;
+                if (cells_idx >= 0 && cells_idx < static_cast<int>(cells_.size())) {
+                    row_ptr = &cells_[cells_idx];
+                }
+            }
+            if (row_ptr) {
+                int line_w = static_cast<int>(row_ptr->size());
+                int col_from = 0;
+                int col_to = 0;
+                if (sy1 == sy2) {
+                    col_from = sx1;
+                    col_to = sx2;
+                } else if (r == sy1) {
+                    col_from = sx1;
+                    col_to = line_w - 1;
+                } else if (r == sy2) {
+                    col_from = 0;
+                    col_to = sx2;
+                } else {
+                    col_from = 0;
+                    col_to = line_w - 1;
+                }
+                col_from = std::clamp(col_from, 0, line_w - 1);
+                col_to = std::clamp(col_to, 0, line_w - 1);
+                std::string line;
+                for (int c = col_from; c <= col_to; ++c) {
+                    line += (*row_ptr)[c].ch;
+                }
+                while (!line.empty() && line.back() == ' ') {
+                    line.pop_back();
+                }
+                res += line;
+            }
+            if (r < sy2) {
+                res += "\n";
+            }
+        }
         return res;
     }
 

@@ -378,4 +378,39 @@ void LeftPane::scroll(int lines) {
     }
 }
 
+auto LeftPane::get_text_in_range(int start_row, int start_col, int end_row, int end_col, int width) -> std::string {
+    if (start_row > end_row || (start_row == end_row && start_col > end_col)) {
+        std::swap(start_row, end_row);
+        std::swap(start_col, end_col);
+    }
+    std::string res;
+    for (int r = start_row; r <= end_row; ++r) {
+        std::string raw_row = render_row(r, width);
+        // Strip ANSI escape sequences to get plain text
+        std::string plain;
+        bool in_esc = false;
+        for (char c : raw_row) {
+            if (c == '\033') in_esc = true;
+            else if (in_esc) {
+                if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == 'm') in_esc = false;
+            } else {
+                plain += c;
+            }
+        }
+        int col_from = (r == start_row) ? start_col : 0;
+        int col_to = (r == end_row) ? end_col : static_cast<int>(plain.size()) - 1;
+        col_from = std::clamp(col_from, 0, static_cast<int>(plain.size()) - 1);
+        col_to = std::clamp(col_to, 0, static_cast<int>(plain.size()) - 1);
+        std::string line = (col_from <= col_to && col_from < static_cast<int>(plain.size())) ? plain.substr(col_from, col_to - col_from + 1) : "";
+        while (!line.empty() && line.back() == ' ') {
+            line.pop_back();
+        }
+        res += line;
+        if (r < end_row) {
+            res += "\n";
+        }
+    }
+    return res;
+}
+
 }  // namespace simrv::tui

@@ -5,22 +5,25 @@ import subprocess
 import json
 import argparse
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+TESTS_DIR = os.environ.get("TESTS_DIR", os.path.abspath(os.path.join(SCRIPT_DIR, "../../../tests")))
+
 DEFAULT_BENCHMARKS_RV64 = [
-    ("CoreMark (RV64)", "/home/archlab/ltrunk/workspace/tests/coremark/coremark64.riscv", "rv64gc"),
-    ("Dhrystone", "/home/archlab/ltrunk/workspace/tests/riscv-tests/benchmarks/dhrystone.riscv", "rv64gc"),
-    ("Median Filter", "/home/archlab/ltrunk/workspace/tests/riscv-tests/benchmarks/median.riscv", "rv64gc"),
-    ("Memcpy", "/home/archlab/ltrunk/workspace/tests/riscv-tests/benchmarks/memcpy.riscv", "rv64gc"),
-    ("Matrix Multiply", "/home/archlab/ltrunk/workspace/tests/riscv-tests/benchmarks/mm.riscv", "rv64gc"),
-    ("Multiply", "/home/archlab/ltrunk/workspace/tests/riscv-tests/benchmarks/multiply.riscv", "rv64gc"),
-    ("Quicksort", "/home/archlab/ltrunk/workspace/tests/riscv-tests/benchmarks/qsort.riscv", "rv64gc"),
-    ("Radix Sort", "/home/archlab/ltrunk/workspace/tests/riscv-tests/benchmarks/rsort.riscv", "rv64gc"),
-    ("SPMV", "/home/archlab/ltrunk/workspace/tests/riscv-tests/benchmarks/spmv.riscv", "rv64gc"),
-    ("Towers of Hanoi", "/home/archlab/ltrunk/workspace/tests/riscv-tests/benchmarks/towers.riscv", "rv64gc"),
-    ("Vector Add", "/home/archlab/ltrunk/workspace/tests/riscv-tests/benchmarks/vvadd.riscv", "rv64gc"),
+    ("CoreMark (RV64)", os.path.join(TESTS_DIR, "coremark/coremark64.riscv"), "rv64gc"),
+    ("Dhrystone", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/dhrystone.riscv"), "rv64gc"),
+    ("Median Filter", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/median.riscv"), "rv64gc"),
+    ("Memcpy", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/memcpy.riscv"), "rv64gc"),
+    ("Matrix Multiply", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/mm.riscv"), "rv64gc"),
+    ("Multiply", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/multiply.riscv"), "rv64gc"),
+    ("Quicksort", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/qsort.riscv"), "rv64gc"),
+    ("Radix Sort", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/rsort.riscv"), "rv64gc"),
+    ("SPMV", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/spmv.riscv"), "rv64gc"),
+    ("Towers of Hanoi", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/towers.riscv"), "rv64gc"),
+    ("Vector Add", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/vvadd.riscv"), "rv64gc"),
 ]
 
 DEFAULT_BENCHMARKS_RV32 = [
-    ("CoreMark (RV32)", "/home/archlab/ltrunk/workspace/tests/coremark/coremark32.riscv", "rv32imac"),
+    ("CoreMark (RV32)", os.path.join(TESTS_DIR, "coremark/coremark32.riscv"), "rv32imac"),
 ]
 
 def run_suite(benchmarks, simrv_bin, spike_bin, runs=3, limit=50000000, timeout=60):
