@@ -57,6 +57,8 @@ void CPU::reset() {
 void CPU::TLB_flush() {
     tlb.flush();
     decode_cache.flush();
+    icache.flush();
+    dcache.flush();
     soft_tlb_flush();
 }
 
@@ -78,20 +80,8 @@ void CPU::soft_tlb_flush() {
     }
 }
 
-void CPU::soft_tlb_flush_selective(bool match_all_vaddr, Address vaddr, bool match_all_asid,
-                                   Word /*asid*/) {
-    if (match_all_vaddr && match_all_asid) {
-        soft_tlb_flush();
-        return;
-    }
-
-    if (!match_all_vaddr) {
-        const size_t tlb_idx = static_cast<size_t>(vaddr >> 12) & 2047u;
-        soft_tlb_read[tlb_idx].invalidate();
-        soft_tlb_write[tlb_idx].invalidate();
-        return;
-    }
-
+void CPU::soft_tlb_flush_selective(bool /*match_all_vaddr*/, Address /*vaddr*/,
+                                   bool /*match_all_asid*/, Word /*asid*/) {
     soft_tlb_flush();
 }
 
@@ -934,14 +924,6 @@ void CPU::execute_cached_op32(CachedOp& op, Register rrs1, Register rrs2) {
 
 auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Register& out_val)
     -> bool {
-    if (simrv::compiler::likely(state_.priv == kPrivMachine || machine.s_appmode)) {
-        if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr))) {
-            out_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3),
-                                                   machine.mmem);
-            return true;
-        }
-        return false;
-    }
     const unsigned size_bytes = 1u << (static_cast<unsigned>(funct3) & 0x3u);
     const unsigned alignment_mask = size_bytes - 1u;
     if (simrv::compiler::unlikely((mem_addr & alignment_mask) != 0)) {
@@ -977,20 +959,6 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
 }
 
 auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Register rrs2) -> bool {
-    if (simrv::compiler::likely(state_.priv == kPrivMachine || machine.s_appmode)) {
-        if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr) &&
-                                    !is_tohost_addr(machine, mem_addr))) {
-            if (simrv::compiler::unlikely(machine.s_rollback_enabled)) {
-                Word old_val = simrv::memory::ram_read_fast(
-                    mem_addr, static_cast<Instruction>(funct3), machine.mmem);
-                record_mem_write(mem_addr, old_val, static_cast<Instruction>(funct3));
-            }
-            simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3),
-                                          machine.mmem);
-            return true;
-        }
-        return false;
-    }
     const unsigned size_bytes = 1u << (static_cast<unsigned>(funct3) & 0x3u);
     const unsigned alignment_mask = size_bytes - 1u;
     if (simrv::compiler::unlikely((mem_addr & alignment_mask) != 0)) {
@@ -1128,7 +1096,7 @@ void CPU::handle_cached_interrupts() {
         }
         Word const mask = pending_interrupts & enable_interrupts;
         if (mask != 0u) {
-            Word const irq_num = static_cast<Word>(std::bit_width(mask) - 1);
+            Word const irq_num = select_highest_priority_interrupt(mask);
             raise_exception(kInterruptCauseBit | irq_num, 0);
         }
     }
@@ -1146,6 +1114,25 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
 
     if constexpr (kInstMix) {
         e_instmix[static_cast<std::size_t>(op.op_id)]++;
+    }
+
+    const auto cached_opc = static_cast<Opcode>(op.opcode);
+    const bool is_fp_cached = (cached_opc == Opcode::LoadFp) || (cached_opc == Opcode::StoreFp) ||
+                              (cached_opc == Opcode::OpFp) || (cached_opc == Opcode::MAdd) ||
+                              (cached_opc == Opcode::MSub) || (cached_opc == Opcode::NMAdd) ||
+                              (cached_opc == Opcode::NMSub);
+    const bool is_vec_cached = (cached_opc == Opcode::OpV);
+
+    if (simrv::compiler::unlikely(
+            (is_fp_cached && (state_.mstatus & enum_mask(MstatusBit::Fs)) == 0) ||
+            (is_vec_cached && (state_.mstatus & enum_mask(MstatusBit::Vs)) == 0))) {
+        if constexpr (!kCopyContext) {
+            pipeline_context.copy_from(op);
+            pipeline_context.tlb_miss = false;
+            pipeline_context.pending_tval = 0;
+        }
+        execute_cached_fallback(machine);
+        return;
     }
 
     // 3. Execute, Memory, Writeback, Commit — single flat op_id dispatch (no double switch).

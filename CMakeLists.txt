@@ -117,6 +117,7 @@ add_executable(SimRV
   src/cache/DCache.cpp
   src/memory/MemoryAccess.cpp
   src/memory/MemorySubsystem.cpp
+  src/memory/MmioRouter.cpp
   src/memory/Mmu.cpp
   src/memory/TileLinkBus.cpp
   src/device/Console.cpp
@@ -297,6 +298,22 @@ if(DEFINED ENV{SIMRV_LINUX_MEM_IMG} AND DEFINED ENV{SIMRV_LINUX_DISK_IMG})
   set_tests_properties(linux-boot PROPERTIES
     TIMEOUT 60
     LABELS "gate;regress;linux"
+  )
+endif()
+
+set(TEST_IMAGES_DIR "${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}")
+if(EXISTS "${TEST_IMAGES_DIR}/fw_payload.bin")
+  find_program(PYTHON_BIN NAMES "python3" "python" DOC "Path to python3 interpreter")
+  if(NOT PYTHON_BIN)
+    set(PYTHON_BIN "python3")
+  endif()
+  add_test(NAME linux-boot-pty
+    COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py
+  )
+  set_tests_properties(linux-boot-pty PROPERTIES
+    ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR}"
+    TIMEOUT 120
+    LABELS "gate;regress;linux;pty"
   )
 endif()
 

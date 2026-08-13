@@ -640,6 +640,8 @@ void CPU::execute_core(Machine& machine) {
                 icache.flush();
                 dcache.flush();
                 decode_cache.flush();
+            } else if (ctx.ir == 0x0100000f) {
+                // RISC-V PAUSE (Zihintpause / cpu_relax): architectural NOP pipeline hint
             }
             break;
         case Opcode::Branch:
@@ -807,9 +809,21 @@ void CPU::execute_system(Machine& machine) {
                 ctx.tkn = true;
                 ctx.jmp_pc = ctx.rcsr;
                 break;
-            case Funct12Priv::Wfi:
+            case Funct12Priv::Wfi: {
                 ctx.tkn = false;
+                const CSRValue pending_enabled_irqs = state_.mip & state_.mie;
+                if (pending_enabled_irqs == 0) {
+                    const Counter target_mtimecmp = clint_mmio.mtimecmp.load(std::memory_order_relaxed);
+                    const Counter current_mtime = clint_mmio.mtime.load(std::memory_order_relaxed);
+                    if (target_mtimecmp > current_mtime) {
+                        clint_mmio.mtime.store(target_mtimecmp, std::memory_order_release);
+                    } else {
+                        clint_mmio.mtime.store(current_mtime + 100, std::memory_order_release);
+                    }
+                    evaluate_timer_interrupt();
+                }
                 break;
+            }
             default:
                 if (ctx.funct7 == static_cast<Instruction>(Funct7Priv::SfenceVma)) {
                     ctx.tkn = false;
@@ -1106,7 +1120,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
         }
         mask = pending_interrupts & enable_interrupts;
         if (mask != 0) {
-            irq_num = static_cast<Word>(std::bit_width(mask) - 1);
+            irq_num = select_highest_priority_interrupt(mask);
         }
     }
     if (ctx.pending_exception.has_value()) {
@@ -1130,7 +1144,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
                 static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
         }
         if (mask != 0) {
-            raise_exception(kInterruptCauseBit | irq_num, ctx.pending_tval);
+            raise_exception(kInterruptCauseBit | irq_num, 0);
         }
     }
 }
@@ -1207,7 +1221,7 @@ void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
         }
         mask = pending_interrupts & enable_interrupts;
         if (mask != 0) {
-            irq_num = static_cast<Word>(std::bit_width(mask) - 1);
+            irq_num = select_highest_priority_interrupt(mask);
         }
     }
 
@@ -1232,7 +1246,7 @@ void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
                 static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
         }
         if (simrv::compiler::unlikely(mask != 0)) {
-            raise_exception(kInterruptCauseBit | irq_num, ctx.pending_tval);
+            raise_exception(kInterruptCauseBit | irq_num, 0);
         }
     }
 }

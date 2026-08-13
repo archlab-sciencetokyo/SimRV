@@ -30,7 +30,6 @@
 #include <csignal>
 #include <cstring>
 #include <format>
-#include <print>
 #include <string_view>
 
 #include "simrv/core/Cpu.hpp"
@@ -44,11 +43,11 @@ namespace simrv::debug {
 // ---------------------------------------------------------------------------
 
 namespace {
-constexpr const char* kRed = "\033[31m";
-constexpr const char* kGreen = "\033[32m";
-constexpr const char* kYellow = "\033[33m";
-constexpr const char* kBold = "\033[1m";
-constexpr const char* kReset = "\033[0m";
+[[maybe_unused]] constexpr const char* kRed = "\033[31m";
+[[maybe_unused]] constexpr const char* kGreen = "\033[32m";
+[[maybe_unused]] constexpr const char* kYellow = "\033[33m";
+[[maybe_unused]] constexpr const char* kBold = "\033[1m";
+[[maybe_unused]] constexpr const char* kReset = "\033[0m";
 
 // ABI register names for prettier output
 constexpr std::array<const char*, 32> kAbiNames = {

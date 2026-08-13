@@ -91,7 +91,7 @@ class Framebuffer : public memory::TileLinkNode {
 
     // Performance & render control
     std::atomic<bool> dirty_{false};
-    uint64_t last_tick_cycles_ = 0;
+    [[maybe_unused]] uint64_t last_tick_cycles_ = 0;
     std::atomic<bool> tui_dirty_{true};
     int last_tui_w_ = -1;
     int last_tui_h_ = -1;

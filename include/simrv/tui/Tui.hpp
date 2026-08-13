@@ -17,9 +17,8 @@
 #include "simrv/Define.hpp"
 #include "simrv/isa/Base.hpp"
 #include "simrv/isa/OperationId.hpp"
-#include "simrv/tui/TuiKeybindings.hpp"
+#include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/TuiModal.hpp"
-#include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
 #include "simrv/tui/panels/StatusBar.hpp"
@@ -37,7 +36,7 @@ extern volatile std::sig_atomic_t g_resized;  // NOLINT(avoid-non-const-global-v
  * @class Tui
  * @brief Handles ANSI-based split-screen rendering, scrolling, and status display for RTOS mode.
  */
-enum class SelectionPane { None, LeftPane, RightPane };
+enum class SelectionPane : uint8_t { None, LeftPane, RightPane };
 
 struct SelectionState {
     SelectionPane pane = SelectionPane::None;
@@ -160,6 +159,10 @@ class Tui {
     [[nodiscard]] auto get_layout() const -> TuiLayout { return layout_; }
     void adjust_left_pane_width(int delta);
 
+    /// Toggle keyboard input routing between guest VirtIO console and TUI navigation.
+    void toggle_terminal_focus();
+    [[nodiscard]] auto is_terminal_focused() const -> bool { return is_terminal_focused_; }
+
     void handle_mouse(int x, int y, int b);
 
    private:
@@ -184,6 +187,8 @@ class Tui {
     std::unique_ptr<StatusBar> status_bar_;
 
     int pane_width_cached_ = 62;
+    int cached_num_rows_ = 20;
+    [[nodiscard]] auto get_right_pane_start_line(int num_rows) const -> int;
     [[nodiscard]] auto is_sixel_supported() const -> bool { return sixel_supported_; }
 
     int user_left_pane_width_{-1};
@@ -232,6 +237,7 @@ class Tui {
     std::string esc_buf_;
     std::atomic<bool> sim_thread_is_sleeping_{false};
     std::thread::id main_thread_id_;
+    bool is_terminal_focused_{false};  // True when Ctrl-A routes keys to guest console
 
     auto consume_control_sequence(uint8_t first_byte) -> bool;
     auto parse_sgr_mouse(const std::string& seq, int& b, int& x, int& y) -> bool;

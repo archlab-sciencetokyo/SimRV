@@ -7,7 +7,6 @@
 #include <array>
 #include <chrono>
 #include <limits>
-#include <utility>
 
 #include "simrv/core/Logger.hpp"
 #include "simrv/device/Uart.hpp"
@@ -18,8 +17,11 @@ namespace simrv::core {
 
 using namespace simrv::isa;
 
+void OSMachine::reset_synthetic_input() { synthetic_input_idx_ = 0; }
+
 void OSMachine::run() {
     cpu.evaluate_timer_interrupt();
+    reset_synthetic_input();
 
     // Start background stdin input thread (removes uart poll from hot path)
     if (uart && !s_tuimode) {
@@ -125,26 +127,45 @@ void OSMachine::prepare_cycle() {
         static_cast<Byte>('r'), static_cast<Byte>('o'),  static_cast<Byte>('o'),
         static_cast<Byte>('t'), static_cast<Byte>('\n'), static_cast<Byte>('t'),
         static_cast<Byte>('o'), static_cast<Byte>('p'),  static_cast<Byte>('\n')};
-    static int adr = 0;
 
     if (cpu.clint_mmio.mtime > s_enabletimer) { /* enable timer after linux boot */
-        if (std::cmp_less(adr, kSyntheticInput.size())) {
-            console->fifo_en = static_cast<Byte>(1);
-            console->cons_fifo = kSyntheticInput.at(static_cast<std::size_t>(adr));
-        } else {
-            console->fifo_en = static_cast<Byte>(0);
-        }
+        if (console) {
+            // Fast path: drain one TUI-pushed interactive byte every ~1024 ticks (~0.1ms).
+            // This ensures Ctrl-A terminal input is responsive for interactive Linux login.
+            if (s_tuimode && ((cpu.clint_mmio.mtime & static_cast<Counter>(0x3ff)) == 0)) {
+                if (console->pop_pending_input()) {
+                    int const ret = console->MC_receive_input(*this);
+                    if (ret > 0) {
+                        cpu.plic_set_irq(simrv::virtio::kConsoleIrq, 1);
+                    }
+                    if (ret == -1) {
+                        is_running_ = false;
+                    }
+                }
+            }
 
-        if ((cpu.clint_mmio.mtime & static_cast<Counter>(0xfffff)) == 0) {
-            int const ret = console->MC_receive_input(*this); /* Keyboard */
-            if (ret > 0) {
-                cpu.plic_set_irq(simrv::virtio::kConsoleIrq, 1);
-            }
-            if (ret == -1) {
-                is_running_ = false; /* break by Ctrl+q */
-            }
-            if (std::cmp_less(adr, kSyntheticInput.size())) {
-                adr++;
+            // Slow path (~100ms): CLI stdin poll + synthetic login injection for non-TUI mode.
+            if ((cpu.clint_mmio.mtime & static_cast<Counter>(0xfffff)) == 0) {
+                if (!s_tuimode) {
+                    if (synthetic_input_idx_ < kSyntheticInput.size()) {
+                        console->fifo_en = static_cast<Byte>(1);
+                        console->cons_fifo = kSyntheticInput.at(synthetic_input_idx_);
+                        if (uart) {
+                            uart->push_rx_byte(
+                                static_cast<uint8_t>(kSyntheticInput.at(synthetic_input_idx_)));
+                        }
+                        synthetic_input_idx_++;
+                    } else {
+                        console->fifo_en = static_cast<Byte>(0);
+                    }
+                    int const ret = console->MC_receive_input(*this); /* Keyboard / VirtIO RX */
+                    if (ret > 0) {
+                        cpu.plic_set_irq(simrv::virtio::kConsoleIrq, 1);
+                    }
+                    if (ret == -1) {
+                        is_running_ = false; /* break by Ctrl+q */
+                    }
+                }
             }
         }
     }
@@ -171,7 +192,8 @@ void OSMachine::finalize_cycle() {
             simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
             sdl_display->update(cpu.e_icount);
         }
-        if (uart && simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
+        if (uart && !uart->is_input_thread_running() &&
+            simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
             uart->non_tui_poll_input();
         }
         return;
@@ -193,7 +215,7 @@ void OSMachine::finalize_cycle() {
                 last_tui_update = now;
             }
         }
-    } else if (uart) {
+    } else if (uart && !uart->is_input_thread_running()) {
         if (simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
             uart->non_tui_poll_input();
         }

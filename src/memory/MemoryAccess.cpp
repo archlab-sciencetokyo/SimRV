@@ -39,12 +39,36 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     const bool crosses_page =
         ((v_addr & simrv::memory::kPageMask) + size_bytes) > (1u << simrv::memory::kPageShift);
     if (simrv::compiler::unlikely((v_addr & (size_bytes - 1u)) != 0)) {
-        if (is_amo || crosses_page) {
+        if (is_amo) {
             cpu.pipeline_context.pending_exception =
-                (is_amo && !is_lr) ? ExceptionCode::MisalignedStore : ExceptionCode::MisalignedLoad;
+                (!is_lr) ? ExceptionCode::MisalignedStore : ExceptionCode::MisalignedLoad;
             cpu.pipeline_context.pending_tval = v_addr;
             return 0;
         }
+    }
+    if (simrv::compiler::unlikely(crosses_page)) {
+        Word result = 0;
+        for (unsigned b = 0; b < size_bytes; ++b) {
+            Address byte_vaddr = v_addr + b;
+            Word byte_val = target_read(mem, cpu, byte_vaddr, static_cast<Instruction>(isa::Funct3::Lbu));
+            if (cpu.pipeline_context.pending_exception.has_value()) {
+                return 0;
+            }
+            result |= (byte_val & 0xFFULL) << (8 * b);
+        }
+        const unsigned bits = 8 * size_bytes;
+        if (bits < simrv::xlen::kXLenBits) {
+            const Word mask = (static_cast<Word>(1) << bits) - 1;
+            result &= mask;
+            constexpr auto kSignExtendBit = 0x4u;
+            if ((funct3 & kSignExtendBit) == 0) {
+                const Word sign_bit = static_cast<Word>(1) << (bits - 1);
+                if ((result & sign_bit) != 0) {
+                    result |= ~mask;
+                }
+            }
+        }
+        return static_cast<Word>(result & simrv::xlen::kXLenMask);
     }
 
     const PrivilegeLevel eff_priv = cpu.effective_data_privilege();
@@ -230,6 +254,9 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             cpu.soft_tlb_read[tlb_idx].set(
                 vpn, translation_enabled ? static_cast<uint64_t>(current_asid) : ~uint64_t{0},
                 eff_priv, cpu.soft_tlb_epoch, p_addr & ~0xFFFULL, host_base);
+            if (cpu.soft_tlb_write[tlb_idx].paddr_base != (p_addr & ~0xFFFULL)) {
+                cpu.soft_tlb_write[tlb_idx].invalidate();
+            }
         }
         return issue_read(p_addr);
     }
@@ -249,12 +276,24 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
 
     const bool crosses_page =
         ((v_addr & simrv::memory::kPageMask) + size_bytes) > (1u << simrv::memory::kPageShift);
+    const bool is_amo = (static_cast<Opcode>(cpu.pipeline_context.opcode) == Opcode::Amo);
     if (simrv::compiler::unlikely((v_addr & (size_bytes - 1u)) != 0)) {
-        if (crosses_page) {
+        if (is_amo) {
             cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedStore;
             cpu.pipeline_context.pending_tval = v_addr;
             return;
         }
+    }
+    if (simrv::compiler::unlikely(crosses_page)) {
+        for (unsigned b = 0; b < size_bytes; ++b) {
+            Address byte_vaddr = v_addr + b;
+            Word byte_val = (wdata >> (8 * b)) & 0xFFULL;
+            target_write(mem, cpu, byte_vaddr, byte_val, static_cast<Instruction>(isa::Funct3::Sb));
+            if (cpu.pipeline_context.pending_exception.has_value()) {
+                return;
+            }
+        }
+        return;
     }
 
     const PrivilegeLevel eff_priv = cpu.effective_data_privilege();
@@ -395,6 +434,9 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             cpu.soft_tlb_write[tlb_idx].set(
                 vpn, translation_enabled ? static_cast<uint64_t>(current_asid) : ~uint64_t{0},
                 eff_priv, cpu.soft_tlb_epoch, p_addr & ~0xFFFULL, host_base);
+            if (cpu.soft_tlb_read[tlb_idx].paddr_base != (p_addr & ~0xFFFULL)) {
+                cpu.soft_tlb_read[tlb_idx].invalidate();
+            }
         }
         issue_write(p_addr, wdata);
     }
@@ -416,11 +458,6 @@ auto MemoryAccess::loadFp(MemorySubsystem& mem, core::CPU& cpu, Address addr, is
             return static_cast<FloatingRegister>(
                 target_read(mem, cpu, addr, static_cast<Instruction>(Funct3::Ld)));
         } else {
-            if (simrv::compiler::unlikely((addr & 7) != 0)) {
-                cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedLoad;
-                cpu.pipeline_context.pending_tval = addr;
-                return 0;
-            }
             const Word lo = target_read(mem, cpu, addr, static_cast<Instruction>(Funct3::Lw));
             const Word hi = target_read(mem, cpu, addr + 4, static_cast<Instruction>(Funct3::Lw));
             return static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32);
@@ -446,11 +483,6 @@ void MemoryAccess::storeFp(MemorySubsystem& mem, core::CPU& cpu, Address addr,
             target_write(mem, cpu, addr, static_cast<Word>(data),
                          static_cast<Instruction>(Funct3::Sd));
         } else {
-            if (simrv::compiler::unlikely((addr & 7) != 0)) {
-                cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedStore;
-                cpu.pipeline_context.pending_tval = addr;
-                return;
-            }
             target_write(mem, cpu, addr,
                          static_cast<Word>(data & static_cast<FloatingRegister>(kLower32Mask)),
                          static_cast<Instruction>(Funct3::Sw));

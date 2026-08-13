@@ -21,19 +21,47 @@ using isa::Funct3;
 Mmu::Mmu(Byte* mmem) : mmem_(mmem) {}
 
 auto Mmu::translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
-                    Word satp, unsigned xlen) -> std::expected<Address, TrapCause> {
-    // Ensure virtual address fits within XLEN mask
-    if (simrv::compiler::unlikely((v_addr & ~simrv::xlen::kAddrMask) != 0)) {
-        // Optionally abort translation in debug builds
-        // std::terminate();
-    }
+                    Word satp, unsigned xlen, bool update_access_bits)
+    -> std::expected<Address, TrapCause> {
     // Machine mode or MMU disabled: use physical addressing
     if (priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(satp, xlen)) {
         return v_addr;
     }
 
+    // Validate Sv39 / Sv48 canonical addresses for RV64
+    if (xlen == 64) {
+        Word const satp_mode = simrv::xlen::satp_mode(satp, 64);
+        if (satp_mode == 8) {  // Sv39 (39-bit VAs: bits 63..38 must match bit 38)
+            int64_t const signed_vaddr = static_cast<int64_t>(v_addr << 25) >> 25;
+            if (simrv::compiler::unlikely(static_cast<uint64_t>(signed_vaddr) != v_addr)) {
+                switch (access) {
+                    case PteAccess::Code:
+                        return std::unexpected(enum_mask(ExceptionCode::FetchPageFault));
+                    case PteAccess::Write:
+                        return std::unexpected(enum_mask(ExceptionCode::StorePageFault));
+                    case PteAccess::Read:
+                    default:
+                        return std::unexpected(enum_mask(ExceptionCode::LoadPageFault));
+                }
+            }
+        } else if (satp_mode == 9) {  // Sv48 (48-bit VAs: bits 63..47 must match bit 47)
+            int64_t const signed_vaddr = static_cast<int64_t>(v_addr << 16) >> 16;
+            if (simrv::compiler::unlikely(static_cast<uint64_t>(signed_vaddr) != v_addr)) {
+                switch (access) {
+                    case PteAccess::Code:
+                        return std::unexpected(enum_mask(ExceptionCode::FetchPageFault));
+                    case PteAccess::Write:
+                        return std::unexpected(enum_mask(ExceptionCode::StorePageFault));
+                    case PteAccess::Read:
+                    default:
+                        return std::unexpected(enum_mask(ExceptionCode::LoadPageFault));
+                }
+            }
+        }
+    }
+
     // Translate through page tables
-    return page_walk(v_addr, access, priv, mstatus, satp, xlen);
+    return page_walk(v_addr, access, priv, mstatus, satp, xlen, update_access_bits);
 }
 
 auto Mmu::validate_pte_permissions(Word pte, Word permission_bits, PteAccess access,
@@ -46,10 +74,15 @@ auto Mmu::validate_pte_permissions(Word pte, Word permission_bits, PteAccess acc
         return false;
     }
 
-    // Supervisor access to user-only page without SUM
-    if (priv == kPrivSupervisor && ((pte & enum_mask(PteFlag::U)) != 0u) &&
-        ((mstatus & enum_mask(MstatusBit::Sum)) == 0u)) {
-        return false;
+    // Supervisor access to user-only page (U=1)
+    if (priv == kPrivSupervisor && ((pte & enum_mask(PteFlag::U)) != 0u)) {
+        if (access == PteAccess::Code) {
+            // Executing code from a U=1 page in Supervisor mode raises a Page Fault regardless of SUM
+            return false;
+        }
+        if ((mstatus & enum_mask(MstatusBit::Sum)) == 0u) {
+            return false;
+        }
     }
 
     // User accessing supervisor page
@@ -83,7 +116,8 @@ void Mmu::update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess ac
 }
 
 auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
-                    Word satp, unsigned xlen) -> std::expected<Address, TrapCause> {
+                    Word satp, unsigned xlen, bool update_access_bits)
+    -> std::expected<Address, TrapCause> {
     auto make_fault = [access]() -> TrapCause {
         switch (access) {
             case PteAccess::Code:
@@ -203,7 +237,9 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
     const Word offset_mask = (static_cast<Word>(1) << offset_bits) - 1;
     const Word phys_addr = (v_addr & offset_mask) | ((ppn << 12) & ~offset_mask);
 
-    update_pte_access_bits(pte_addr, pte, access, pte_size);
+    if (update_access_bits) {
+        update_pte_access_bits(pte_addr, pte, access, pte_size);
+    }
     return phys_addr;
 }
 

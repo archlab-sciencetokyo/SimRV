@@ -8,7 +8,7 @@
 
     chosen {
         stdout-path = "serial0:115200n8";
-        bootargs = "console=ttyS0,115200 earlycon=uart8250,mmio,0x10000000 root=/dev/vda rw ignore_loglevel loglevel=8";
+        bootargs = "console=ttyS0,115200 earlycon=sbi rdinit=/init rw loglevel=7";
     };
 
     aliases {
@@ -29,7 +29,9 @@
             compatible = "riscv";
             device_type = "cpu";
             reg = <0>;
-            riscv,isa = "rv32gc";
+            riscv,isa = "rv32imafdcbv";
+            riscv,isa-base = "rv32i";
+            riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "b", "v", "zicntr", "zicsr", "zifencei", "zihintpause";
             mmu-type = "riscv,sv32";
             clock-frequency = <1000000000>;
 

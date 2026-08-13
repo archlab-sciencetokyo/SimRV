@@ -6,10 +6,8 @@
 
 #include <atomic>
 #include <cstdint>
-#include <memory>
 #include <mutex>
 #include <queue>
-#include <string>
 #include <thread>
 
 #include "simrv/memory/Mmio.hpp"
@@ -40,6 +38,8 @@ class Uart : public memory::TileLinkNode {
     void non_tui_poll_input();
     void start_input_thread();
     void stop_input_thread();
+    [[nodiscard]] auto is_input_thread_running() const -> bool { return input_thread_.joinable(); }
+    [[nodiscard]] auto is_interrupt_pending() const -> bool;
     void push_rx_byte(uint8_t byte);
 
    private:
@@ -53,6 +53,7 @@ class Uart : public memory::TileLinkNode {
     Word uart_dlm_ = 0;
     bool uart_rx_ready_ = false;
     bool tx_irq_pending_ = false;
+    bool fcr_fifo_enabled_ = true;
     uint8_t uart_rx_byte_ = 0;
 
     std::queue<uint8_t> rx_fifo_;

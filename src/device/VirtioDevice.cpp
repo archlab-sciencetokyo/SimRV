@@ -106,6 +106,8 @@ void VirtioDevice::mmio_write(Address offset, Word wdata) {
             InterruptStatus &= ~wdata;
             if (InterruptStatus == 0) {
                 machine_.cpu.plic_set_irq(static_cast<int>(irq_), 0);
+            } else {
+                machine_.cpu.plic_set_irq(static_cast<int>(irq_), 1);
             }
             break;
         case virtio::MmioOffset::Status:

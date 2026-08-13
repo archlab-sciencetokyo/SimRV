@@ -135,7 +135,7 @@ void Machine::finalize_cycle_tohost() {
             return;
         } else {
             // HTIF Syscall handling: payload is a pointer to the syscall block in guest DRAM
-            if (payload >= 0x80000000ULL && payload < (0x80000000ULL + memory::kDramSize)) {
+            if (simrv::memory::is_dram_addr(payload)) {
                 const Address masked_payload = payload & simrv::memory::kDramMask;
                 uint64_t syscall_num = 0;
                 uint64_t arg0 = 0;
@@ -189,6 +189,8 @@ void Machine::finalize_cycle_tohost() {
                     tohost = 0;
                     return;
                 }
+                tohost = 0;
+                return;
             }
         }
     }

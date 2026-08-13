@@ -57,7 +57,8 @@ class Mmu {
      * @return Translated physical address or TrapCause on fault
      */
     auto page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
-                   Word satp, unsigned xlen = xlen::kXLenBits) -> std::expected<Address, TrapCause>;
+                   Word satp, unsigned xlen = xlen::kXLenBits, bool update_access_bits = true)
+        -> std::expected<Address, TrapCause>;
 
     /**
      * @brief Translate address without performing page walk.
@@ -72,10 +73,12 @@ class Mmu {
      * @param mstatus Current CPU mstatus register
      * @param satp Current CPU satp register
      * @param xlen Current execution XLEN
+     * @param update_access_bits Whether to update hardware A/D bits in PTE
      * @return Translated physical address or TrapCause on fault
      */
     auto translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
-                   Word satp, unsigned xlen = xlen::kXLenBits) -> std::expected<Address, TrapCause>;
+                   Word satp, unsigned xlen = xlen::kXLenBits, bool update_access_bits = true)
+        -> std::expected<Address, TrapCause>;
 
     /**
      * @brief Verify if a virtual address is canonical according to the active SV mode.

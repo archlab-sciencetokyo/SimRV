@@ -60,7 +60,7 @@ class DecodeCache {
     [[nodiscard]] inline auto lookup(Register pc) noexcept -> CachedOp* {
         size_t index = calc_index(pc);
         auto* entry = &cache_[index];
-        if (simrv::compiler::likely(entry->cpc == pc)) {
+        if (simrv::compiler::likely(entry->valid && entry->cpc == pc)) {
             return entry;
         }
         return nullptr;

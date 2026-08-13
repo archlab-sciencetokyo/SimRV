@@ -23,7 +23,7 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
     if (is_write) {
         const Address offset = req.address - kBaseAddress;
         // The finisher has a single 32-bit register at offset 0
-        if (offset == 0 && req.size >= 2) {
+        if (offset == 0 && req.size >= 1) {
             const Word wdata = req.data;
             const auto cmd = static_cast<PowerCommand>(wdata & 0xffffU);
             switch (cmd) {

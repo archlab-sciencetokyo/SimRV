@@ -187,6 +187,10 @@ static const auto running_row1_entries = std::to_array<FooterEntry>({
     {.text = "[v] Trace",
      .action = TuiFooterAction::ToggleTrace,
      .category = FooterCategory::DebugExec},
+    {.text = "  ", .action = std::nullopt, .category = FooterCategory::Spacer},
+    {.text = "[Ctrl-A] Focus",
+     .action = std::nullopt,
+     .category = FooterCategory::DebugExec},
     {.text = "  │  ", .action = std::nullopt, .category = FooterCategory::Separator},
     // Panel Actions Group
     {.text = "[r] Regs",
@@ -400,6 +404,7 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             bool use_ansi = (get_tui_theme() == TuiTheme::Adaptive ||
                              get_tui_theme() == TuiTheme::HighContrast);
             const auto st = machine_.execution_state();
+            const bool term_focused = machine_.tui && machine_.tui->is_terminal_focused();
             if (machine_.is_shutdown_ || st == simrv::core::ExecutionState::Stopped) {
                 status_badge = use_ansi ? "\033[41;37m SHUTDOWN \033[0m"
                                         : "\033[48;5;196m\033[38;5;231m SHUTDOWN \033[0m";
@@ -409,6 +414,10 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             } else if (paused_ || st == simrv::core::ExecutionState::Paused) {
                 status_badge = use_ansi ? "\033[43;30m PAUSED \033[0m"
                                         : "\033[48;5;223m\033[38;5;232m PAUSED \033[0m";
+            } else if (term_focused) {
+                // Terminal focus active: show [TERM] badge to indicate guest input mode
+                status_badge = use_ansi ? "\033[1;44;37m TERM \033[0m"
+                                        : "\033[1;48;5;117m\033[38;5;232m TERM \033[0m";
             } else {
                 status_badge = use_ansi ? "\033[42;30m RUNNING \033[0m"
                                         : "\033[48;5;121m\033[38;5;232m RUNNING \033[0m";

@@ -137,7 +137,7 @@ struct alignas(32) SoftTlbEntry {
     /// Build a lookup tag from the three key fields.
     [[nodiscard]] static constexpr auto make_tag(uint64_t vpn, uint64_t asid,
                                                  PrivilegeLevel priv) noexcept -> uint64_t {
-        return (vpn << 16) | ((asid & 0x3FFFu) << 2) |
+        return ((vpn & 0xFFFFFFFFFFULL) << 18) | ((asid & 0xFFFFu) << 2) |
                static_cast<uint64_t>(static_cast<uint8_t>(priv) & 0x3u);
     }
 
@@ -154,7 +154,11 @@ struct alignas(32) SoftTlbEntry {
         host_ptr_base = host_ptr_base_in;
     }
 
-    void invalidate() noexcept { tag = kInvalidTag; }
+    void invalidate() noexcept {
+        tag = kInvalidTag;
+        paddr_base = 0;
+        host_ptr_base = nullptr;
+    }
     [[nodiscard]] bool valid(uint32_t current_epoch) const noexcept {
         return epoch == current_epoch && tag != kInvalidTag;
     }

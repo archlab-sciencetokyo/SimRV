@@ -34,7 +34,8 @@ enum class KeyAction : uint8_t {
     CycleToolPage,
     CycleRightPanel,
     ToggleExplain,
-    ToggleTrace
+    ToggleTrace,
+    ToggleTerminalFocus
 };
 
 struct KeyBindingInfo {

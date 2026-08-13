@@ -54,7 +54,7 @@ class StatusBar : public TuiWidget {
     int left_width_ = 0;
     int right_width_ = 0;
 
-    uint64_t last_icount_ = 0;
+    [[maybe_unused]] uint64_t last_icount_ = 0;
     uint64_t kips_ = 0;
 };
 

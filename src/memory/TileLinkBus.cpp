@@ -4,9 +4,9 @@
  */
 #include "simrv/memory/TileLinkBus.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <format>
-#include <print>
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Logger.hpp"
@@ -21,9 +21,7 @@ using simrv::isa::Funct3;
 TileLinkBus::TileLinkBus(simrv::core::Machine& machine) : machine_(machine) {}
 
 void TileLinkBus::add_node(TileLinkNode* node) {
-    if (node != nullptr) {
-        nodes_.push_back(node);
-    }
+    router_.register_device(node);
 }
 
 auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
@@ -35,6 +33,10 @@ void TileLinkBus::tick() {
     if (!req_queue_.empty()) {
         auto req = req_queue_.front();
         req_queue_.pop();
+
+        if (req.mask == 0) {
+            req.mask = TlChannelA::compute_mask(req.size, req.address);
+        }
 
         TlChannelD resp{};
         resp.source = req.source;
@@ -80,32 +82,7 @@ void TileLinkBus::tick() {
         }
 
         if (!handled) {
-            for (auto* node : nodes_) {
-                if (node->contains(req.address)) {
-                    if (node->handle_request(req, resp)) {
-                        if (machine_.s_debugmode) {
-                            static int mmio_log_count = 0;
-                            if (mmio_log_count < 64) {
-                                simrv::log::info(
-                                    "__ {:10} MMIO {:5} {:7} addr={:08x} data={:08x} f3={}",
-                                    static_cast<Counter>(machine_.cpu.clint_mmio.mtime.load()),
-                                    req.opcode == TlOpcodeA::Get ? "read" : "write", node->name(),
-                                    static_cast<unsigned>(req.address),
-                                    static_cast<unsigned>(req.opcode == TlOpcodeA::Get ? resp.data
-                                                                                       : req.data),
-                                    static_cast<unsigned>(req.size));
-                                ++mmio_log_count;
-                            }
-                        }
-                        if (req.opcode == TlOpcodeA::Get)
-                            ++read_count_;
-                        else
-                            ++write_count_;
-                        handled = true;
-                        break;
-                    }
-                }
-            }
+            handled = router_.route_request(req, resp);
         }
 
         if (!handled) {

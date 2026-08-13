@@ -152,7 +152,7 @@ class Machine {
     Counter s_trace_begin = std::numeric_limits<Counter>::max();  // Trace begin cycle
     Counter s_trace_end = std::numeric_limits<Counter>::max();    // Trace end cycle
     Counter s_enabletimer = std::numeric_limits<Counter>::max();  // Timer enable cycle
-    Counter s_memimg = 0;                                         // Memory image dump cycle
+    Counter s_memimg = std::numeric_limits<Counter>::max();      // Memory image dump cycle
 
     // ========== ISA/Privilege Configuration ==========
     Address s_isatest_tohost = 0x80001000;        // ISA-test tohost RAM address

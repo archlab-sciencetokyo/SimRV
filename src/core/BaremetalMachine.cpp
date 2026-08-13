@@ -126,7 +126,7 @@ void BaremetalMachine::run() {
                 is_running_ = false;
             }
 
-            if (uart) {
+            if (uart && !uart->is_input_thread_running()) {
                 uart->non_tui_poll_input();
             }
 

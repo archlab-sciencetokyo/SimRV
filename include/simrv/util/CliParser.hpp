@@ -22,11 +22,11 @@ struct RuntimeOptions {
 
     Address start_pc = simrv::boot::kStartPc;
     Counter fincnt = std::numeric_limits<Counter>::max();
-    Counter memimg = 0;
+    Counter memimg = std::numeric_limits<Counter>::max();
     Counter strace = 0;
     Counter trace_begin = std::numeric_limits<Counter>::max();
     Counter trace_end = std::numeric_limits<Counter>::max();
-    Counter enabletimer = 70000000UL;
+    Counter enabletimer = 0UL;
     Address isatest_tohost = 0x80001000;
     isa::MisaProfile misa_profile = isa::MisaProfile::GC;
     bool misa_override = false;

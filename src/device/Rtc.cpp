@@ -12,7 +12,18 @@ namespace simrv {
 
 Rtc::Rtc(simrv::core::Machine& machine) : machine_(machine) {}
 
+void Rtc::evaluate_alarm() {
+    if (alarm_enabled_ && !alarm_status_) {
+        const uint64_t rtc_ns = machine_.cpu.clint_mmio.mtime.load() * 100ULL;
+        if (rtc_ns >= alarm_time_) {
+            alarm_status_ = true;
+            machine_.cpu.plic_set_irq(static_cast<int>(kRtcIrq), 1);
+        }
+    }
+}
+
 auto Rtc::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
+    evaluate_alarm();
     resp.error = false;
     resp.data = 0;
 
@@ -55,9 +66,11 @@ auto Rtc::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp
             case 0x14:  // CLEAR_ALARM
                 alarm_enabled_ = false;
                 alarm_status_ = false;
+                machine_.cpu.plic_set_irq(static_cast<int>(kRtcIrq), 0);
                 break;
             case 0x1c:  // CLEAR_INTERRUPT
                 alarm_status_ = false;
+                machine_.cpu.plic_set_irq(static_cast<int>(kRtcIrq), 0);
                 break;
             default:
                 break;

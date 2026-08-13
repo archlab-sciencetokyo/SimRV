@@ -24,7 +24,7 @@ auto LeftPane::translate_safe(const simrv::core::CPU& cpu, Register vaddr) const
     }
     auto* mmu = const_cast<Mmu*>(machine_.memory_.mmu());
     auto res = mmu->translate(vaddr, PteAccess::Read, eff_priv, cpu.state().mstatus,
-                              cpu.state().satp, cpu.state().regs.xlen);
+                              cpu.state().satp, cpu.state().regs.xlen, /*update_access_bits=*/false);
     if (res.has_value()) {
         return res.value();
     }

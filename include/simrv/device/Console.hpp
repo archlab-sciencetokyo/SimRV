@@ -4,6 +4,9 @@
  */
 #pragma once
 
+#include <mutex>
+#include <queue>
+
 #include "simrv/Define.hpp"
 #include "simrv/device/VirtioDevice.hpp"
 #include "simrv/memory/Mmio.hpp"
@@ -31,9 +34,21 @@ class Console : public VirtioDevice {
 
     auto MC_receive_input(simrv::core::Machine& machine) -> int;
 
+    /// Enqueue a single byte from an external thread (e.g. TUI keyboard input)
+    /// for injection into the VirtIO RX ring during the next simulation cycle.
+    void push_input_byte(uint8_t byte);
+
+    /// Dequeue one pending byte into fifo_en/cons_fifo for sim-thread injection.
+    /// Returns true if a byte was made available.
+    auto pop_pending_input() -> bool;
+
     Byte* mmem = nullptr;
     Byte fifo_en = static_cast<Byte>(0);
     Byte cons_fifo = static_cast<Byte>(0);
+
+   private:
+    std::queue<uint8_t> rx_pending_;  // Protected by rx_pending_mutex_
+    std::mutex rx_pending_mutex_;
 
    protected:
     [[nodiscard]] auto get_device_id() const -> Word override { return 3; }

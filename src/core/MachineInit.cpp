@@ -248,7 +248,6 @@ auto Machine::initialize() -> int {
     }
     if (s_tuimode) {
         tui = std::make_unique<simrv::tui::Tui>(*this);
-        tui->initialize();
     }
     mmem_owner_.reset(static_cast<Byte*>(std::calloc(
         simrv::memory::kDramSize,
@@ -289,6 +288,9 @@ auto Machine::initialize() -> int {
     memory_.system_bus().add_node(&cpu.plic_mmio);
     memory_.system_bus().add_node(&cpu.clint_mmio);
     const bool linux_boot = !s_appmode;
+    if (s_appmode) {
+        s_enabletimer = 0;
+    }
     const Address dtb_offset =
         linux_boot
             ? static_cast<Address>(simrv::memory::kDramSize - static_cast<Address>(0x00100000U))
@@ -410,10 +412,14 @@ auto Machine::initialize() -> int {
     }
 
     if (s_use_disk) {
-        disk->sector_storage_.resize(simrv::virtio::kDiskSize);
+        std::error_code ec;
+        const auto fsize = std::filesystem::file_size(s_fn_dskimg, ec);
+        const auto disk_capacity = (!ec && fsize > 0)
+                                       ? static_cast<std::size_t>(fsize)
+                                       : static_cast<std::size_t>(simrv::virtio::kDiskSize);
+        disk->sector_storage_.resize(disk_capacity);
         disk->sector = disk->sector_storage_.data();
-        load_image_into_ram(s_fn_dskimg, disk->sector,
-                            static_cast<std::size_t>(simrv::virtio::kDiskSize), "disk", s_tuimode);
+        load_image_into_ram(s_fn_dskimg, disk->sector, disk_capacity, "disk", s_tuimode);
     }
 
     if (s_use_mix) {
@@ -445,6 +451,10 @@ auto Machine::initialize() -> int {
             simrv::log::error("Failed to launch Spike for lockstep verification");
             return 1;
         }
+    }
+
+    if (s_tuimode && tui) {
+        tui->initialize();
     }
 
     return 0;

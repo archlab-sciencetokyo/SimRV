@@ -7,6 +7,7 @@
 #include <elf.h>
 
 #include <array>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <utility>
@@ -78,9 +79,15 @@ auto parse_elf_symbols(std::ifstream& fs, std::map<Address, std::string>& out_sy
 
 }  // namespace
 
-auto SymbolTable::load_from_elf(const std::string& elf_path) -> bool {
-    symbols_.clear();
-    entry_point_.reset();
+auto SymbolTable::append_from_elf(const std::string& elf_path) -> bool {
+    return load_from_elf(elf_path, false);
+}
+
+auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing) -> bool {
+    if (clear_existing) {
+        symbols_.clear();
+        entry_point_.reset();
+    }
     std::string path_to_load = elf_path;
 
     // Helper to check if file has ELF magic
@@ -136,15 +143,46 @@ auto SymbolTable::load_from_elf(const std::string& elf_path) -> bool {
 
     fs.seekg(0, std::ios::beg);
 
+    std::optional<Address> ep;
     if (elf_class == ELFCLASS32) {
         if (!parse_elf_symbols<Elf32_Ehdr, Elf32_Shdr, Elf32_Sym>(
-                fs, symbols_, entry_point_, [](auto info) { return ELF32_ST_TYPE(info); })) {
+                fs, symbols_, ep, [](auto info) { return ELF32_ST_TYPE(info); })) {
             return false;
         }
     } else {
         if (!parse_elf_symbols<Elf64_Ehdr, Elf64_Shdr, Elf64_Sym>(
-                fs, symbols_, entry_point_, [](auto info) { return ELF64_ST_TYPE(info); })) {
+                fs, symbols_, ep, [](auto info) { return ELF64_ST_TYPE(info); })) {
             return false;
+        }
+    }
+    if (!entry_point_.has_value() && ep.has_value()) {
+        entry_point_ = ep;
+    }
+
+    // Check for companion kernel ELF (e.g. vmlinux) in the same directory
+    std::filesystem::path loaded_p(path_to_load);
+    if (loaded_p.has_parent_path()) {
+        auto dir = loaded_p.parent_path();
+        for (const auto& fname : {"vmlinux", "vmlinux.elf", "kernel.elf"}) {
+            auto kpath = (dir / fname).string();
+            if (kpath != path_to_load && is_valid_elf(kpath)) {
+                std::ifstream kfs(kpath, std::ios::binary);
+                if (kfs.is_open()) {
+                    std::array<char, EI_NIDENT> kident{};
+                    if (kfs.read(kident.data(), EI_NIDENT)) {
+                        const auto k_class = static_cast<uint8_t>(kident[EI_CLASS]);
+                        kfs.seekg(0, std::ios::beg);
+                        std::optional<Address> kep;
+                        if (k_class == ELFCLASS32) {
+                            (void)parse_elf_symbols<Elf32_Ehdr, Elf32_Shdr, Elf32_Sym>(
+                                kfs, symbols_, kep, [](auto info) { return ELF32_ST_TYPE(info); });
+                        } else if (k_class == ELFCLASS64) {
+                            (void)parse_elf_symbols<Elf64_Ehdr, Elf64_Shdr, Elf64_Sym>(
+                                kfs, symbols_, kep, [](auto info) { return ELF64_ST_TYPE(info); });
+                        }
+                    }
+                }
+            }
         }
     }
 

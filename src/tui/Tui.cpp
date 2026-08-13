@@ -127,12 +127,18 @@ void Tui::set_paused(bool p) {
             last_runtime_tick_ = std::chrono::steady_clock::now();
             last_speed_update_ = std::chrono::steady_clock::now();
             last_icount_ = machine_.cpu.e_icount;
+            machine_.execution_state_.store(simrv::core::ExecutionState::Running,
+                                            std::memory_order_release);
+            machine_.execution_state_.notify_all();
         } else {
             if (last_runtime_tick_ != std::chrono::steady_clock::time_point{}) {
                 runtime_duration_ += std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now() - last_runtime_tick_);
                 last_runtime_tick_ = {};
             }
+            machine_.execution_state_.store(simrv::core::ExecutionState::Paused,
+                                            std::memory_order_release);
+            machine_.execution_state_.notify_all();
         }
         update_trace_active_cache();
     }
@@ -286,6 +292,33 @@ void Tui::shutdown() {
 void Tui::handle_char_write(char ch) {
     std::scoped_lock lock(io_mutex_);
     tx_fifo_.push(ch);
+    static std::string recent_output;
+    static bool pending_panic = false;
+    static int panic_chars_remaining = 0;
+
+    recent_output += ch;
+    if (recent_output.size() > 512) {
+        recent_output.erase(0, recent_output.size() - 512);
+    }
+
+    if (!pending_panic) {
+        if (recent_output.contains("Oops [#") || recent_output.contains("Kernel panic") ||
+            recent_output.contains("sbi_trap_error") || recent_output.contains("Unhandled exception")) {
+            pending_panic = true;
+            panic_chars_remaining = 1200;  // Allow full Oops trace & register dump to render
+        }
+    } else {
+        panic_chars_remaining--;
+        // Pause cleanly after trace end marker finishes a line or char budget expires
+        if (recent_output.contains("---[ end trace") || recent_output.contains("---[ end Kernel panic") ||
+            panic_chars_remaining <= 0) {
+            if (ch == '\n' || panic_chars_remaining <= 0) {
+                pending_panic = false;
+                set_status_override("\033[1;41;37m KERNEL PANIC \033[0m");
+                set_paused(true);
+            }
+        }
+    }
 }
 
 void Tui::print_log(const std::string& msg) {
@@ -349,40 +382,48 @@ void Tui::render_update_speed(std::chrono::steady_clock::time_point now) {
     }
 }
 
+auto Tui::get_right_pane_start_line(int num_rows) const -> int {
+    int total_lines =
+        vt_.get_scrollback_size() + vt_.get_cursor_y() + (vt_.get_cursor_x() > 0 ? 1 : 0);
+    int end_exclusive = std::max(0, total_lines - scroll_offset_);
+    return std::max(0, end_exclusive - num_rows);
+}
+
 void Tui::render_build_lines(int left_pane_width, int right_pane_width, int num_rows,
                              TuiRightPanelMode panel_mode) {
+    cached_num_rows_ = num_rows;
     lines_to_draw_.clear();
     if (right_pane_width > 0 && num_rows > 0) {
         if (panel_mode == TuiRightPanelMode::Terminal) {
             vt_.resize(right_pane_width, num_rows);
             int total = vt_.get_lines_count();
-            int end_exclusive = std::max(0, total - scroll_offset_);
-            int start = std::max(0, end_exclusive - num_rows);
+            int start = get_right_pane_start_line(num_rows);
+            int end_exclusive = std::min(total, start + num_rows);
             int cursor_abs_line = vt_.get_scrollback_size() + vt_.get_cursor_y();
             bool is_live = (scroll_offset_ == 0);
+
+            int vt_sel_start = start + (selection_.start_y - 4);
+            int vt_sel_end = start + (selection_.end_y - 4);
+            int sx1 = selection_.start_x;
+            int sx2 = selection_.end_x;
+            if (vt_sel_start > vt_sel_end || (vt_sel_start == vt_sel_end && sx1 > sx2)) {
+                std::swap(vt_sel_start, vt_sel_end);
+                std::swap(sx1, sx2);
+            }
+
             for (int i = start; i < end_exclusive; ++i) {
                 bool draw_cursor = is_live && (i == cursor_abs_line) && vt_.is_cursor_visible();
                 int sel_start_x = -1;
                 int sel_end_x = -1;
                 if (selection_.is_active && selection_.pane == SelectionPane::RightPane) {
-                    int sy1 = selection_.start_y - 4 + scroll_offset_;
-                    int sy2 = selection_.end_y - 4 + scroll_offset_;
-                    int sx1 = selection_.start_x;
-                    int sx2 = selection_.end_x;
-                    if (sy1 > sy2 || (sy1 == sy2 && sx1 > sx2)) {
-                        std::swap(sy1, sy2);
-                        std::swap(sx1, sx2);
-                    }
-                    int row_in_screen = i - start;
-                    int row_abs = row_in_screen + scroll_offset_;
-                    if (row_abs >= sy1 && row_abs <= sy2) {
-                        if (sy1 == sy2) {
+                    if (i >= vt_sel_start && i <= vt_sel_end) {
+                        if (vt_sel_start == vt_sel_end) {
                             sel_start_x = sx1;
                             sel_end_x = sx2;
-                        } else if (row_abs == sy1) {
+                        } else if (i == vt_sel_start) {
                             sel_start_x = sx1;
                             sel_end_x = right_pane_width - 1;
-                        } else if (row_abs == sy2) {
+                        } else if (i == vt_sel_end) {
                             sel_start_x = 0;
                             sel_end_x = sx2;
                         } else {
@@ -391,7 +432,8 @@ void Tui::render_build_lines(int left_pane_width, int right_pane_width, int num_
                         }
                     }
                 }
-                lines_to_draw_.push_back(vt_.get_line_as_string(i, right_pane_width, draw_cursor, sel_start_x, sel_end_x));
+                lines_to_draw_.push_back(vt_.get_line_as_string(i, right_pane_width, draw_cursor,
+                                                                sel_start_x, sel_end_x));
             }
         } else if (panel_mode == TuiRightPanelMode::Display) {
             for (int i = 0; i < num_rows; ++i)
@@ -553,9 +595,10 @@ void Tui::render(bool force) {
 
     render_update_speed(now);
 
-    int left_pane_width = user_left_pane_width_ > 0
-                              ? user_left_pane_width_
-                              : ((term_width > 120) ? 75 : std::max(40, (term_width * 55) / 100));
+    int default_left_width = (term_width <= 120)
+                                 ? std::max(40, (term_width * 33) / 100)
+                                 : std::min(75, std::max(40, (term_width * 40) / 100));
+    int left_pane_width = user_left_pane_width_ > 0 ? user_left_pane_width_ : default_left_width;
     left_pane_width = std::clamp(left_pane_width, 40, std::max(20, term_width - 10));
     pane_width_cached_ = left_pane_width;
     int right_pane_width = std::max(0, term_width - left_pane_width - 3);
@@ -752,13 +795,15 @@ void Tui::copy_active_selection() {
     std::string text;
 
     if (selection_.pane == SelectionPane::RightPane && right_pane_) {
-        int start_r = (selection_.start_y - 4) + scroll_offset_;
-        int end_r = (selection_.end_y - 4) + scroll_offset_;
+        int start_line = get_right_pane_start_line(cached_num_rows_);
+        int start_r = start_line + (selection_.start_y - 4);
+        int end_r = start_line + (selection_.end_y - 4);
         text = vt_.get_text_in_range(start_r, selection_.start_x, end_r, selection_.end_x);
     } else if (selection_.pane == SelectionPane::LeftPane && left_pane_) {
         int start_r = selection_.start_y - 4;
         int end_r = selection_.end_y - 4;
-        text = left_pane_->get_text_in_range(start_r, selection_.start_x, end_r, selection_.end_x, pane_width_cached_);
+        text = left_pane_->get_text_in_range(start_r, selection_.start_x, end_r, selection_.end_x,
+                                             pane_width_cached_);
     }
 
     if (!text.empty()) {
@@ -776,7 +821,8 @@ void Tui::handle_mouse(int x, int y, int b) {
     int right_pane_width = std::max(0, term_width - pane_width_cached_ - 3);
 
     int const left_content_x = std::clamp(x - 2, 0, std::max(0, pane_width_cached_ - 1));
-    int const right_content_x = std::clamp(x - (pane_width_cached_ + 3), 0, std::max(0, right_pane_width - 1));
+    int const right_content_x =
+        std::clamp(x - (pane_width_cached_ + 3), 0, std::max(0, right_pane_width - 1));
 
     int const y_clamped = std::max(4, y);
 
@@ -823,7 +869,7 @@ void Tui::handle_mouse(int x, int y, int b) {
         return;
     }
 
-    if (b == 0) { // Mouse down
+    if (b == 0) {  // Mouse down
         clear_selection();
         if (x >= 2 && x <= pane_width_cached_ + 1) {
             selection_.pane = SelectionPane::LeftPane;
@@ -1004,6 +1050,18 @@ void Tui::toggle_trace_enabled() {
     trace_enabled_.store(!trace_enabled_.load(std::memory_order_relaxed),
                          std::memory_order_relaxed);
     update_trace_active_cache();
+    render(true);
+}
+
+void Tui::toggle_terminal_focus() {
+    is_terminal_focused_ = !is_terminal_focused_;
+    if (is_terminal_focused_) {
+        set_status_override(
+            "\033[1m[TERM]\033[22m keyboard \u2192 guest VirtIO console  (Ctrl-A to release)");
+    } else {
+        set_status_override(
+            "\033[1m[TUI]\033[22m keyboard \u2192 TUI navigation  (Ctrl-A to attach)");
+    }
     render(true);
 }
 
@@ -1200,9 +1258,10 @@ void Tui::adjust_left_pane_width(int delta) {
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);  // NOLINT(cppcoreguidelines-pro-type-vararg)
     int term_width = w.ws_col;
 
-    int current = user_left_pane_width_ > 0
-                      ? user_left_pane_width_
-                      : ((term_width > 120) ? 75 : std::max(40, (term_width * 55) / 100));
+    int default_left_width = (term_width <= 120)
+                                 ? std::max(40, (term_width * 33) / 100)
+                                 : std::min(75, std::max(40, (term_width * 40) / 100));
+    int current = user_left_pane_width_ > 0 ? user_left_pane_width_ : default_left_width;
     current += delta;
     if (current < 40) current = 40;
     if (current > term_width - 10) current = std::max(20, term_width - 10);
@@ -1233,6 +1292,12 @@ auto Tui::poll_keyboard(uint8_t& byte_out) -> bool {
 void Tui::update() {
     uint8_t byte = 0;
     while (poll_keyboard(byte)) {
+        // Ctrl-A toggles terminal focus in all states (running and paused).
+        if (byte == 0x01) {
+            toggle_terminal_focus();
+            continue;
+        }
+
         if (consume_control_sequence(byte)) {
             continue;
         }
@@ -1242,10 +1307,10 @@ void Tui::update() {
             continue;
         }
 
-        if (paused_.load(std::memory_order_relaxed)) {
+        if (paused_.load(std::memory_order_relaxed) || !is_terminal_focused_) {
             handle_normal_keyboard_input(byte, key);
         } else {
-            if (key == simrv::tui::TuiKey::CtrlQ) {
+            if (key == simrv::tui::TuiKey::CtrlQ || byte == 0x03) {
                 machine_.is_running_ = false;
                 return;
             }
@@ -1257,7 +1322,11 @@ void Tui::update() {
             if (machine_.uart) {
                 machine_.uart->push_rx_byte(byte);
             }
+            if (machine_.console) {
+                machine_.console->push_input_byte(static_cast<uint8_t>(byte));
+            }
         }
+
     }
 }
 
@@ -1553,6 +1622,11 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
         return;
     }
 
+    // Ctrl-A toggles terminal focus (handled in update() too, but keep here for consistency)
+    if (byte == 0x01) {
+        toggle_terminal_focus();
+        return;
+    }
     if (key == simrv::tui::TuiKey::CtrlP || key == simrv::tui::TuiKey::c ||
         key == simrv::tui::TuiKey::C) {
         if (machine_.is_shutdown_) {
@@ -1975,7 +2049,8 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         if (esc_buf_.back() == 'm') {
             if (selection_.is_selecting) {
                 selection_.is_selecting = false;
-                if (selection_.start_x != selection_.end_x || selection_.start_y != selection_.end_y) {
+                if (selection_.start_x != selection_.end_x ||
+                    selection_.start_y != selection_.end_y) {
                     copy_active_selection();
                 }
                 render(true);

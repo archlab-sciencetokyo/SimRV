@@ -9,7 +9,7 @@
 
 namespace simrv::tui {
 
-static const std::array<KeyBindingInfo, 22> kKeyBindings = {
+static const std::array<KeyBindingInfo, 23> kKeyBindings = {
     {{.action = KeyAction::Step,
       .key_display = "[s] / [Space]",
       .primary_char = 's',
@@ -141,7 +141,13 @@ static const std::array<KeyBindingInfo, 22> kKeyBindings = {
       .primary_char = 'v',
       .alt_char = 'V',
       .footer_label = "[v] Trace",
-      .help_label = "Toggle Trace Logging"}}};
+      .help_label = "Toggle Trace Logging"},
+     {.action = KeyAction::ToggleTerminalFocus,
+      .key_display = "[Ctrl-A]",
+      .primary_char = '\01',
+      .alt_char = '\01',
+      .footer_label = "[Ctrl-A] Terminal Focus",
+      .help_label = "Attach/Detach Keyboard Terminal Focus"}}};
 
 auto Keybindings::get(KeyAction action) -> const KeyBindingInfo& {
     for (const auto& binding : kKeyBindings) {

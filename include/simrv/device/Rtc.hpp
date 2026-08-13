@@ -28,15 +28,17 @@ class Rtc : public memory::TileLinkNode {
     static constexpr Address kBaseAddress = static_cast<Address>(0x70000000u);
     static constexpr Address kSize = static_cast<Address>(0x00001000u);
     static constexpr Address kRtcOffset = static_cast<Address>(0x0u);
+    static constexpr uint32_t kRtcIrq = 3;
 
     [[nodiscard]] auto name() const -> const char* override { return "rtc"; }
     [[nodiscard]] auto base_address() const -> Address override { return kBaseAddress; }
     [[nodiscard]] auto size() const -> Address override { return kSize; }
 
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool override;
+    void evaluate_alarm();
 
    private:
-    simrv::core::Machine& machine_;
+    simrv::core::Machine& machine_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     uint64_t alarm_time_{0};
     bool alarm_enabled_{false};
     bool alarm_status_{false};

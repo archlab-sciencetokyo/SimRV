@@ -18,6 +18,20 @@ namespace simrv::device {
 Console::Console(simrv::core::Machine& machine)
     : VirtioDevice(machine, virtio::kConsoleIrq, virtio::kConsoleMaxQueueNum) {}
 
+void Console::push_input_byte(uint8_t byte) {
+    std::scoped_lock lock(rx_pending_mutex_);
+    rx_pending_.push(byte);
+}
+
+auto Console::pop_pending_input() -> bool {
+    std::scoped_lock lock(rx_pending_mutex_);
+    if (rx_pending_.empty()) return false;
+    cons_fifo = static_cast<Byte>(rx_pending_.front());
+    rx_pending_.pop();
+    fifo_en = static_cast<Byte>(1);
+    return true;
+}
+
 void Console::process_queue(Word q_idx) {
     if (q_idx >= virtio::kConsoleMaxQueueNum) return;
     if (q_idx == 1) {  // TX Queue
@@ -25,7 +39,7 @@ void Console::process_queue(Word q_idx) {
         if (qs.Ready == 0) return;
         const auto avail_idx = virtio_detail::read_struct_from_ram<uint16_t>(qs.AvailLow + 2, mmem);
         bool written = false;
-        while (qs.last_avail_idx != avail_idx) {
+        while (static_cast<uint16_t>(qs.last_avail_idx) != avail_idx) {
             const auto desc_idx = virtio_detail::next_avail_desc_idx(&qs, QueueNum, mmem);
             const auto desc_addr = virtio_detail::get_desc_addr(desc_idx, &qs);
             auto desc = virtio_detail::read_struct_from_ram<virtio::Descriptor>(desc_addr, mmem);
@@ -70,7 +84,7 @@ auto Console::MC_receive_input(simrv::core::Machine& machine) -> int {
                     virtio_detail::read_struct_from_ram<uint16_t>(qs.AvailLow + 2, mmem);
 
                 // If the guest OS has supplied RX buffers, fill one.
-                if (qs.last_avail_idx != avail_idx) {
+                if (static_cast<uint16_t>(qs.last_avail_idx) != avail_idx) {
                     const auto desc_idx = virtio_detail::next_avail_desc_idx(&qs, QueueNum, mmem);
                     const auto desc_addr = virtio_detail::get_desc_addr(desc_idx, &qs);
                     auto desc =
@@ -94,7 +108,7 @@ auto Console::MC_receive_input(simrv::core::Machine& machine) -> int {
         if (qs.Ready != 0) {
             const auto avail_idx =
                 virtio_detail::read_struct_from_ram<uint16_t>(qs.AvailLow + 2, mmem);
-            if (qs.last_avail_idx != avail_idx) {
+            if (static_cast<uint16_t>(qs.last_avail_idx) != avail_idx) {
                 const auto desc_idx = virtio_detail::next_avail_desc_idx(&qs, QueueNum, mmem);
                 const auto desc_addr = virtio_detail::get_desc_addr(desc_idx, &qs);
                 auto desc =

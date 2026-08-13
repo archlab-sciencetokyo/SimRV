@@ -238,6 +238,18 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
             break;
 
         default:
+            if (addr >= 0x3A0 && addr <= 0x3EF) {  // pmpcfg0..15, pmpaddr0..63
+                rcsr = 0;
+                break;
+            }
+            if ((addr >= 0x323 && addr <= 0x33F) || (addr >= 0xB03 && addr <= 0xB1F) ||
+                (addr >= 0xB83 && addr <= 0xB9F) || (addr >= 0xC03 && addr <= 0xC1F) ||
+                (addr >= 0xC83 && addr <= 0xC9F) || (addr >= 0x7A0 && addr <= 0x7AA) ||
+                addr == 0x320 || addr == 0x30A || addr == 0x31A || addr == 0x10A ||
+                addr == 0x60A || addr == 0x61A) {
+                rcsr = 0;
+                break;
+            }
             return std::unexpected(ExceptionCode::IllegalInstruction);
     }
     return rcsr;
@@ -428,6 +440,7 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
                 if (cpu_.state().satp != wdata) {
                     cpu_.state().satp = wdata;
                     cpu_.TLB_flush();
+                    cpu_.decode_cache.flush();
                 }
                 // Latch: once translation is enabled it is never "un-seen"
                 if (mode != 0) {
@@ -444,6 +457,16 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
             setMstatus((cpu_.state().mstatus & ~kSstatusMask) | (wdata & kSstatusMask));
             break;
         default:
+            if (addr >= 0x3A0 && addr <= 0x3EF) {  // pmpcfg0..15, pmpaddr0..63
+                break;
+            }
+            if ((addr >= 0x323 && addr <= 0x33F) || (addr >= 0xB03 && addr <= 0xB1F) ||
+                (addr >= 0xB83 && addr <= 0xB9F) || (addr >= 0xC03 && addr <= 0xC1F) ||
+                (addr >= 0xC83 && addr <= 0xC9F) || (addr >= 0x7A0 && addr <= 0x7AA) ||
+                addr == 0x320 || addr == 0x30A || addr == 0x31A || addr == 0x10A ||
+                addr == 0x60A || addr == 0x61A) {
+                break;
+            }
             return std::unexpected(ExceptionCode::IllegalInstruction);
     }
     return {};

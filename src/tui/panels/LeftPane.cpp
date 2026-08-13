@@ -82,10 +82,8 @@ auto LeftPane::render_pair(const std::string& l1, const std::string& v1, const c
 }
 
 auto LeftPane::get_running_label_start_row() const -> int {
-    int const available_content_rows =
-        (visible_rows_ >= 15) ? (visible_rows_ - 11) : std::max(3, visible_rows_ - 1);
-    int const centered = (available_content_rows - 3) / 2;
-    return std::max(0, centered - 2);
+    int const top_view_height = (visible_rows_ > 12) ? std::min(24, visible_rows_ - 12) : 10;
+    return std::max(0, (top_view_height - 3) / 2);
 }
 
 auto LeftPane::render_active_spinner(int logical_row, int width) -> std::string {
@@ -378,7 +376,8 @@ void LeftPane::scroll(int lines) {
     }
 }
 
-auto LeftPane::get_text_in_range(int start_row, int start_col, int end_row, int end_col, int width) -> std::string {
+auto LeftPane::get_text_in_range(int start_row, int start_col, int end_row, int end_col, int width)
+    -> std::string {
     if (start_row > end_row || (start_row == end_row && start_col > end_col)) {
         std::swap(start_row, end_row);
         std::swap(start_col, end_col);
@@ -390,7 +389,8 @@ auto LeftPane::get_text_in_range(int start_row, int start_col, int end_row, int 
         std::string plain;
         bool in_esc = false;
         for (char c : raw_row) {
-            if (c == '\033') in_esc = true;
+            if (c == '\033')
+                in_esc = true;
             else if (in_esc) {
                 if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == 'm') in_esc = false;
             } else {
@@ -401,7 +401,9 @@ auto LeftPane::get_text_in_range(int start_row, int start_col, int end_row, int 
         int col_to = (r == end_row) ? end_col : static_cast<int>(plain.size()) - 1;
         col_from = std::clamp(col_from, 0, static_cast<int>(plain.size()) - 1);
         col_to = std::clamp(col_to, 0, static_cast<int>(plain.size()) - 1);
-        std::string line = (col_from <= col_to && col_from < static_cast<int>(plain.size())) ? plain.substr(col_from, col_to - col_from + 1) : "";
+        std::string line = (col_from <= col_to && col_from < static_cast<int>(plain.size()))
+                               ? plain.substr(col_from, col_to - col_from + 1)
+                               : "";
         while (!line.empty() && line.back() == ' ') {
             line.pop_back();
         }

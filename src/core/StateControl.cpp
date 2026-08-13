@@ -12,6 +12,8 @@
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Sbi.hpp"
+#include "simrv/device/Console.hpp"
+#include "simrv/device/Disk.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Constants.hpp"
@@ -165,6 +167,19 @@ void PlicMmio::mmio_write(Address offset, Word wdata) {
                 // Complete: indicates the handler has finished with the IRQ
                 if (plic_claim.at(ctx_idx) == wdata && wdata != 0) {
                     plic_claim.at(ctx_idx) = 0;
+                    if (cpu_.machine_) {
+                        if (wdata == static_cast<Word>(simrv::virtio::kDiskIrq) &&
+                            cpu_.machine_->disk && cpu_.machine_->disk->InterruptStatus != 0) {
+                            InterruptController::setIrq(*this, static_cast<int>(wdata), 1);
+                        } else if (wdata == static_cast<Word>(simrv::virtio::kConsoleIrq) &&
+                                   cpu_.machine_->console &&
+                                   cpu_.machine_->console->InterruptStatus != 0) {
+                            InterruptController::setIrq(*this, static_cast<int>(wdata), 1);
+                        } else if (wdata == 3 && cpu_.machine_->uart &&
+                                   cpu_.machine_->uart->is_interrupt_pending()) {
+                            InterruptController::setIrq(*this, static_cast<int>(wdata), 1);
+                        }
+                    }
                 }
             }
         }
@@ -486,6 +501,10 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
             "Halting simulator.",
             trap_cause_name(cause), static_cast<uint64_t>(cause), static_cast<uint64_t>(trap_pc));
         if (cpu.machine_) {
+            if (cpu.machine_->s_tuimode && cpu.machine_->tui) {
+                cpu.machine_->tui->set_status_override("\033[1;31m UNHANDLED TRAP \033[0m");
+                cpu.machine_->tui->pause_loop();
+            }
             cpu.machine_->stop();
         }
     }
