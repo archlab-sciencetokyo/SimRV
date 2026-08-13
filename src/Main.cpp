@@ -225,15 +225,16 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 override_misa_xlen = sim_machine->s_misa_xlen;
             }
 
-            if (!sim_machine->pending_binary_path.empty()) {
-                override_binary = sim_machine->pending_binary_path;
-                override_appmode = sim_machine->pending_appmode;
-                override_disk = sim_machine->pending_disk_path;
+            auto pending = sim_machine->get_pending_reboot();
+            if (!pending.binary_path.empty()) {
+                override_binary = pending.binary_path;
+                override_appmode = pending.appmode;
+                override_disk = pending.disk_path;
             }
             continue;
         } else {
             keep_running = false;
-            final_exit_code = sim_machine->exit_code;
+            final_exit_code = sim_machine->exit_code.load();
             if (!sim_machine->s_tuimode) {
                 sim_machine->tracer.print_summary();
             }

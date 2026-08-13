@@ -101,8 +101,6 @@ class ClintMmio : public memory::TileLinkNode {
     std::atomic<Counter> mtimecmp{0};
     Counter mcycle{1};
     int rtc_divider{0};
-    Counter last_mtime{0};
-    Counter last_mtimecmp{0};
 
    private:
     CPU& cpu_;

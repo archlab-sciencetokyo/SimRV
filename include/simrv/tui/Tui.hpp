@@ -237,7 +237,7 @@ class Tui {
     std::string esc_buf_;
     std::atomic<bool> sim_thread_is_sleeping_{false};
     std::thread::id main_thread_id_;
-    bool is_terminal_focused_{false};  // True when Ctrl-A routes keys to guest console
+    std::atomic<bool> is_terminal_focused_{false};  // True when Ctrl-A routes keys to guest console
 
     auto consume_control_sequence(uint8_t first_byte) -> bool;
     auto parse_sgr_mouse(const std::string& seq, int& b, int& x, int& y) -> bool;

@@ -112,13 +112,6 @@ void CPU::raise_exception(TrapCause cause, CSRValue tval) {
 }
 
 void CPU::evaluate_timer_interrupt() {
-    if (clint_mmio.mtime == clint_mmio.last_mtime &&
-        clint_mmio.mtimecmp == clint_mmio.last_mtimecmp) {
-        return;
-    }
-    clint_mmio.last_mtime = clint_mmio.mtime;
-    clint_mmio.last_mtimecmp = clint_mmio.mtimecmp;
-
     const CSRValue mask = enum_mask(MipBit::Mtip) | enum_mask(MipBit::Stip);
     if (clint_mmio.mtime >= clint_mmio.mtimecmp) {
         if ((state_.mip & mask) != mask) {
@@ -1319,8 +1312,6 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         case isa::LBU:
         case isa::LHU:
         case isa::LWU:
-        case isa::FLW:
-        case isa::FLD:
             if (!execute_cached_load(machine, op, state_.regs.read(op.rs1))) return;
             handle_cached_interrupts();
             return;
@@ -1329,8 +1320,6 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         case isa::SH:
         case isa::SW:
         case isa::SD:
-        case isa::FSW:
-        case isa::FSD:
             if (!execute_cached_store(machine, op, state_.regs.read(op.rs1),
                                       state_.regs.read(op.rs2)))
                 return;
@@ -1398,9 +1387,7 @@ void CPU::push_undo_state() {
     step.clint_state = ClintState{.mtime = clint_mmio.mtime,
                                   .mtimecmp = clint_mmio.mtimecmp,
                                   .mcycle = clint_mmio.mcycle,
-                                  .rtc_divider = clint_mmio.rtc_divider,
-                                  .last_mtime = clint_mmio.last_mtime,
-                                  .last_mtimecmp = clint_mmio.last_mtimecmp};
+                                  .rtc_divider = clint_mmio.rtc_divider};
     step.e_icount = e_icount;
     step.e_ccount = e_ccount;
     step.e_instmix = e_instmix;
@@ -1439,8 +1426,6 @@ auto CPU::perform_backstep() -> bool {
     clint_mmio.mtimecmp = step.clint_state.mtimecmp;
     clint_mmio.mcycle = step.clint_state.mcycle;
     clint_mmio.rtc_divider = step.clint_state.rtc_divider;
-    clint_mmio.last_mtime = step.clint_state.last_mtime;
-    clint_mmio.last_mtimecmp = step.clint_state.last_mtimecmp;
     e_icount = step.e_icount;
     e_ccount = step.e_ccount;
     e_instmix = step.e_instmix;

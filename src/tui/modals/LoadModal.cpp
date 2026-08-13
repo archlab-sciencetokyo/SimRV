@@ -39,9 +39,7 @@ auto LoadModal::submit(ModalType type, const std::string& input, bool load_appmo
         staged_mode_change = true;
         staged_target_appmode = load_appmode;
         if (load_appmode) {
-            machine.pending_binary_path = input;
-            machine.pending_appmode = true;
-            machine.pending_disk_path = "";
+            machine.set_pending_reboot(input, true, "");
             staged_binary_path.clear();
             staged_mode_change = false;
             if (set_status_override_cb) {
@@ -63,9 +61,7 @@ auto LoadModal::submit(ModalType type, const std::string& input, bool load_appmo
         staged_binary_path.clear();
         staged_mode_change = false;
 
-        machine.pending_binary_path = bin_to_load;
-        machine.pending_appmode = target_appmode;
-        machine.pending_disk_path = input;
+        machine.set_pending_reboot(bin_to_load, target_appmode, input);
 
         if (set_status_override_cb) {
             set_status_override_cb("Loaded binary and disk image. Resetting system...");

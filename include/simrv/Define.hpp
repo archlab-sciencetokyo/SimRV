@@ -47,7 +47,7 @@ constexpr Address DISK_MASK = static_cast<Address>(0x03ffffffu);
 namespace simrv::compiler {
 /// Branch prediction hint for likely true conditions.
 template <typename T>
-constexpr auto likely(T value) -> bool {
+constexpr auto likely(const T& value) -> bool {
 #if defined(__GNUC__) || defined(__clang__)
     return __builtin_expect(static_cast<bool>(value), true);
 #else
@@ -57,7 +57,7 @@ constexpr auto likely(T value) -> bool {
 
 /// Branch prediction hint for unlikely true conditions.
 template <typename T>
-constexpr auto unlikely(T value) -> bool {
+constexpr auto unlikely(const T& value) -> bool {
 #if defined(__GNUC__) || defined(__clang__)
     return __builtin_expect(static_cast<bool>(value), false);
 #else

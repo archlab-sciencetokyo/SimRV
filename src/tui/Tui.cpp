@@ -292,33 +292,6 @@ void Tui::shutdown() {
 void Tui::handle_char_write(char ch) {
     std::scoped_lock lock(io_mutex_);
     tx_fifo_.push(ch);
-    static std::string recent_output;
-    static bool pending_panic = false;
-    static int panic_chars_remaining = 0;
-
-    recent_output += ch;
-    if (recent_output.size() > 512) {
-        recent_output.erase(0, recent_output.size() - 512);
-    }
-
-    if (!pending_panic) {
-        if (recent_output.contains("Oops [#") || recent_output.contains("Kernel panic") ||
-            recent_output.contains("sbi_trap_error") || recent_output.contains("Unhandled exception")) {
-            pending_panic = true;
-            panic_chars_remaining = 1200;  // Allow full Oops trace & register dump to render
-        }
-    } else {
-        panic_chars_remaining--;
-        // Pause cleanly after trace end marker finishes a line or char budget expires
-        if (recent_output.contains("---[ end trace") || recent_output.contains("---[ end Kernel panic") ||
-            panic_chars_remaining <= 0) {
-            if (ch == '\n' || panic_chars_remaining <= 0) {
-                pending_panic = false;
-                set_status_override("\033[1;41;37m KERNEL PANIC \033[0m");
-                set_paused(true);
-            }
-        }
-    }
 }
 
 void Tui::print_log(const std::string& msg) {
@@ -391,6 +364,7 @@ auto Tui::get_right_pane_start_line(int num_rows) const -> int {
 
 void Tui::render_build_lines(int left_pane_width, int right_pane_width, int num_rows,
                              TuiRightPanelMode panel_mode) {
+    if (!left_pane_ || !right_pane_ || !status_bar_) return;
     cached_num_rows_ = num_rows;
     lines_to_draw_.clear();
     if (right_pane_width > 0 && num_rows > 0) {
@@ -1054,14 +1028,8 @@ void Tui::toggle_trace_enabled() {
 }
 
 void Tui::toggle_terminal_focus() {
-    is_terminal_focused_ = !is_terminal_focused_;
-    if (is_terminal_focused_) {
-        set_status_override(
-            "\033[1m[TERM]\033[22m keyboard \u2192 guest VirtIO console  (Ctrl-A to release)");
-    } else {
-        set_status_override(
-            "\033[1m[TUI]\033[22m keyboard \u2192 TUI navigation  (Ctrl-A to attach)");
-    }
+    is_terminal_focused_.store(!is_terminal_focused_.load(std::memory_order_relaxed),
+                               std::memory_order_relaxed);
     render(true);
 }
 
@@ -1307,15 +1275,16 @@ void Tui::update() {
             continue;
         }
 
-        if (paused_.load(std::memory_order_relaxed) || !is_terminal_focused_) {
+        if (paused_.load(std::memory_order_relaxed) ||
+            !is_terminal_focused_.load(std::memory_order_relaxed)) {
             handle_normal_keyboard_input(byte, key);
         } else {
-            if (key == simrv::tui::TuiKey::CtrlQ || byte == 0x03) {
-                machine_.is_running_ = false;
+            if (key == simrv::tui::TuiKey::CtrlP || byte == 0x10) {
+                pause_loop();
                 return;
             }
-            if (key == simrv::tui::TuiKey::CtrlP) {
-                pause_loop();
+            if (key == simrv::tui::TuiKey::CtrlQ || byte == 0x03) {
+                machine_.is_running_ = false;
                 return;
             }
 
@@ -2078,6 +2047,8 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                     } else {
                         pause_loop();
                     }
+                } else if (status_bar_->is_pos_on_right_panel_attached(x)) {
+                    toggle_terminal_focus();
                 } else if (status_bar_->is_pos_on_right_panel_mode(x)) {
                     cycle_right_panel_mode();
                 }

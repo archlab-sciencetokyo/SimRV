@@ -19,93 +19,8 @@ using namespace simrv::isa;
 
 void OSMachine::reset_synthetic_input() { synthetic_input_idx_ = 0; }
 
-void OSMachine::run() {
-    cpu.evaluate_timer_interrupt();
-    reset_synthetic_input();
-
-    // Start background stdin input thread (removes uart poll from hot path)
-    if (uart && !s_tuimode) {
-        uart->start_input_thread();
-    }
-
-    // Select debug/lockstep/TUI path or direct execution loop
-    const bool has_debug = (gdb_stub && gdb_stub->is_connected()) ||
-                           (spike_lockstep && spike_lockstep->is_running()) || (s_tuimode && tui);
-
-    if (has_debug) {
-        // ---- Debug path: GDB / lockstep / TUI ebreak ----
-        while (is_running() &&
-               execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
-            if (s_tuimode && tui && tui->is_tui_paused()) {
-                tui->set_sim_thread_sleeping(true);
-                execution_state_.wait(ExecutionState::Paused, std::memory_order_relaxed);
-                if (execution_state_.load(std::memory_order_relaxed) == ExecutionState::Paused) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
-                }
-                continue;
-            }
-            if (s_tuimode && tui) {
-                tui->set_sim_thread_sleeping(false);
-            }
-            prepare_cycle();
-            cpu.run_cycle(*this);
-            finalize_cycle();
-            if (s_tuimode && tui) {
-                tui->on_cycle_completed();
-            }
-
-            if (is_stepping()) {
-                execution_state_.store(ExecutionState::Paused, std::memory_order_release);
-                if (s_tuimode && tui) {
-                    tui->set_paused(true);
-                }
-            }
-
-            if (gdb_stub && gdb_stub->is_connected()) {
-                const bool hit_ebreak =
-                    (cpu.pipeline_context.opcode == Opcode::System) &&
-                    (cpu.pipeline_context.funct12 == static_cast<Word>(Funct12Priv::Ebreak)) &&
-                    !cpu.pipeline_context.pending_exception.has_value();
-                if (gdb_stub->single_step() || hit_ebreak) {
-                    gdb_stub->notify_breakpoint(*this);
-                } else {
-                    gdb_stub->poll(*this);
-                }
-            }
-
-            if (spike_lockstep && spike_lockstep->is_running()) {
-                spike_lockstep->compare_and_report(cpu.state(), cpu.pipeline_context.cpc,
-                                                   cpu.e_icount);
-                if (spike_lockstep->should_halt()) {
-                    simrv::log::error("Lockstep: halting on divergence");
-                    stop();
-                }
-            }
-
-            if (s_tuimode && tui) {
-                const bool hit_ebreak =
-                    (cpu.pipeline_context.opcode == Opcode::System) &&
-                    (cpu.pipeline_context.funct12 == static_cast<Word>(Funct12Priv::Ebreak));
-                if (simrv::compiler::unlikely(hit_ebreak)) {
-                    tui->pause_loop();
-                }
-            }
-        }
-    } else {
-        // ---- Fast path: normal Linux/RTOS execution ----
-        // No per-cycle GDB/lockstep/TUI branches.
-        while (is_running_ &&
-               execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
-            prepare_cycle();
-            cpu.run_cycle(*this);
-            finalize_cycle();
-        }
-    }
-
-    // Clean up background input thread
-    if (uart && !s_tuimode) {
-        uart->stop_input_thread();
-    }
+void OSMachine::execute_cycle() {
+    cpu.run_cycle(*this);
 }
 
 void OSMachine::prepare_cycle() {
@@ -139,7 +54,7 @@ void OSMachine::prepare_cycle() {
                         cpu.plic_set_irq(simrv::virtio::kConsoleIrq, 1);
                     }
                     if (ret == -1) {
-                        is_running_ = false;
+                        stop();
                     }
                 }
             }
@@ -163,7 +78,7 @@ void OSMachine::prepare_cycle() {
                         cpu.plic_set_irq(simrv::virtio::kConsoleIrq, 1);
                     }
                     if (ret == -1) {
-                        is_running_ = false; /* break by Ctrl+q */
+                        stop(); /* break by Ctrl+q */
                     }
                 }
             }
@@ -203,16 +118,15 @@ void OSMachine::finalize_cycle() {
         if (simrv::tui::g_resized) {
             tui->render();
         }
-        static uint64_t last_tui_check_cycles = 0;
-        if (cpu.e_icount - last_tui_check_cycles >= 1000 ||
+        if (cpu.e_icount - last_tui_check_cycles_ >= 1000 ||
             tui->step_delay_us_.load(std::memory_order_relaxed) > 0) {
-            last_tui_check_cycles = cpu.e_icount;
-            static auto last_tui_update = std::chrono::steady_clock::now();
+            last_tui_check_cycles_ = cpu.e_icount;
             auto now = std::chrono::steady_clock::now();
-            if (now - last_tui_update >= std::chrono::milliseconds(33)) {
+            if (now - last_tui_update_ >= std::chrono::milliseconds(33)) {
                 tui->update();
+                tui->update_cache();
                 tui->render();
-                last_tui_update = now;
+                last_tui_update_ = now;
             }
         }
     } else if (uart && !uart->is_input_thread_running()) {

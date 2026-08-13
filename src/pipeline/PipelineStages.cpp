@@ -811,17 +811,6 @@ void CPU::execute_system(Machine& machine) {
                 break;
             case Funct12Priv::Wfi: {
                 ctx.tkn = false;
-                const CSRValue pending_enabled_irqs = state_.mip & state_.mie;
-                if (pending_enabled_irqs == 0) {
-                    const Counter target_mtimecmp = clint_mmio.mtimecmp.load(std::memory_order_relaxed);
-                    const Counter current_mtime = clint_mmio.mtime.load(std::memory_order_relaxed);
-                    if (target_mtimecmp > current_mtime) {
-                        clint_mmio.mtime.store(target_mtimecmp, std::memory_order_release);
-                    } else {
-                        clint_mmio.mtime.store(current_mtime + 100, std::memory_order_release);
-                    }
-                    evaluate_timer_interrupt();
-                }
                 break;
             }
             default:

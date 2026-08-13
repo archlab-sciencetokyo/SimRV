@@ -38,6 +38,7 @@ class StatusBar : public TuiWidget {
 
     [[nodiscard]] auto is_pos_on_status_badge(int x, int width) const -> bool;
     [[nodiscard]] auto is_pos_on_right_panel_mode(int x) const -> bool;
+    [[nodiscard]] auto is_pos_on_right_panel_attached(int x) const -> bool;
     [[nodiscard]] auto get_footer_action_at_col(int col, int row_idx = 0) const
         -> std::optional<TuiFooterAction>;
     [[nodiscard]] auto render_row(int row_idx, int width) -> std::string override;

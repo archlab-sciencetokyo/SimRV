@@ -52,6 +52,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             Address byte_vaddr = v_addr + b;
             Word byte_val = target_read(mem, cpu, byte_vaddr, static_cast<Instruction>(isa::Funct3::Lbu));
             if (cpu.pipeline_context.pending_exception.has_value()) {
+                cpu.pipeline_context.pending_tval = v_addr;
                 return 0;
             }
             result |= (byte_val & 0xFFULL) << (8 * b);
@@ -76,6 +77,17 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     const bool translation_enabled =
         (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(cpu.state().satp));
 
+    if constexpr (simrv::xlen::kIsXLen64) {
+        if (translation_enabled) {
+            if (simrv::compiler::unlikely(!simrv::Mmu::is_canonical(v_addr, cpu.state().satp))) {
+                cpu.pipeline_context.pending_exception =
+                    is_amo ? ExceptionCode::StorePageFault : ExceptionCode::LoadPageFault;
+                cpu.pipeline_context.pending_tval = v_addr;
+                return 0;
+            }
+        }
+    }
+
     if (cpu.machine_->s_high_performance && !crosses_page) {
         if (!translation_enabled) {
             // Bypass soft TLB lookup if translation is disabled (direct DRAM access)
@@ -90,19 +102,12 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             const auto& entry = cpu.soft_tlb_read[tlb_idx];
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
+                if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
+                    return simrv::memory::host_read_fast(entry.host_ptr_base + (v_addr & 0xFFF),
+                                                         funct3);
+                }
                 return simrv::memory::ram_read_fast(entry.paddr_base + (v_addr & 0xFFF), funct3,
                                                     mem.mmu()->mmem());
-            }
-        }
-    }
-
-    if constexpr (simrv::xlen::kIsXLen64) {
-        if (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(cpu.state().satp)) {
-            if (simrv::compiler::unlikely(!simrv::Mmu::is_canonical(v_addr, cpu.state().satp))) {
-                cpu.pipeline_context.pending_exception =
-                    is_amo ? ExceptionCode::StorePageFault : ExceptionCode::LoadPageFault;
-                cpu.pipeline_context.pending_tval = v_addr;
-                return 0;
             }
         }
     }
@@ -290,6 +295,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             Word byte_val = (wdata >> (8 * b)) & 0xFFULL;
             target_write(mem, cpu, byte_vaddr, byte_val, static_cast<Instruction>(isa::Funct3::Sb));
             if (cpu.pipeline_context.pending_exception.has_value()) {
+                cpu.pipeline_context.pending_tval = v_addr;
                 return;
             }
         }
@@ -302,7 +308,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
         (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(cpu.state().satp));
 
     if constexpr (simrv::xlen::kIsXLen64) {
-        if (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(cpu.state().satp)) {
+        if (translation_enabled) {
             if (simrv::compiler::unlikely(!simrv::Mmu::is_canonical(v_addr, cpu.state().satp))) {
                 cpu.pipeline_context.pending_exception = ExceptionCode::StorePageFault;
                 cpu.pipeline_context.pending_tval = v_addr;
@@ -347,6 +353,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
         }
         if (simrv::memory::is_dram_addr(addr)) {
             cpu.dcache.write(addr, data, funct3);
+            simrv::memory::ram_write_fast(addr, data, funct3, mem.mmu()->mmem());
+            return;
         }
 
         TlChannelA req{};
@@ -384,6 +392,17 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             const auto& entry = cpu.soft_tlb_write[tlb_idx];
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
+                if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
+                    const Address paddr = entry.paddr_base + (v_addr & 0xFFF);
+                    if (cpu.machine_->s_rollback_enabled) {
+                        Word old_val = simrv::memory::host_read_fast(
+                            entry.host_ptr_base + (v_addr & 0xFFF), funct3);
+                        cpu.record_mem_write(paddr, old_val, funct3);
+                    }
+                    simrv::memory::host_write_fast(entry.host_ptr_base + (v_addr & 0xFFF), wdata,
+                                                   funct3);
+                    return;
+                }
                 issue_write(entry.paddr_base + (v_addr & 0xFFF), wdata);
                 return;
             }

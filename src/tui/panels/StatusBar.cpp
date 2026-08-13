@@ -76,6 +76,24 @@ auto StatusBar::is_pos_on_right_panel_mode(int x) const -> bool {
     return (x >= x_start && x <= x_end);
 }
 
+auto StatusBar::is_pos_on_right_panel_attached(int x) const -> bool {
+    if (right_panel_mode_ != TuiRightPanelMode::Terminal) {
+        return false;
+    }
+    if (layout_ != TuiLayout::Split && layout_ != TuiLayout::FullRight) {
+        return false;
+    }
+
+    int x_start = (layout_ == TuiLayout::Split) ? (left_width_ + 2) : 2;
+    std::string const term_title = trace_enabled_ ? "Terminal [Trace ON]" : "Terminal";
+    int mode_len = 2 + static_cast<int>(term_title.length());  // "[" + term_title + "]"
+
+    int badge_start = x_start + mode_len + 1;
+    int badge_end = badge_start + 8;  // ATTACHED / DETACHED (8 chars)
+
+    return (x >= badge_start && x <= badge_end);
+}
+
 enum class FooterCategory : uint8_t {
     DebugExec,
     DebugInspect,
@@ -404,7 +422,6 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             bool use_ansi = (get_tui_theme() == TuiTheme::Adaptive ||
                              get_tui_theme() == TuiTheme::HighContrast);
             const auto st = machine_.execution_state();
-            const bool term_focused = machine_.tui && machine_.tui->is_terminal_focused();
             if (machine_.is_shutdown_ || st == simrv::core::ExecutionState::Stopped) {
                 status_badge = use_ansi ? "\033[41;37m SHUTDOWN \033[0m"
                                         : "\033[48;5;196m\033[38;5;231m SHUTDOWN \033[0m";
@@ -414,10 +431,6 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             } else if (paused_ || st == simrv::core::ExecutionState::Paused) {
                 status_badge = use_ansi ? "\033[43;30m PAUSED \033[0m"
                                         : "\033[48;5;223m\033[38;5;232m PAUSED \033[0m";
-            } else if (term_focused) {
-                // Terminal focus active: show [TERM] badge to indicate guest input mode
-                status_badge = use_ansi ? "\033[1;44;37m TERM \033[0m"
-                                        : "\033[1;48;5;117m\033[38;5;232m TERM \033[0m";
             } else {
                 status_badge = use_ansi ? "\033[42;30m RUNNING \033[0m"
                                         : "\033[48;5;121m\033[38;5;232m RUNNING \033[0m";
@@ -573,17 +586,22 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         int target_right_width = layout_ == TuiLayout::Split ? right_width_ : width - 2;
         std::string right_render;
 
-        std::string mode_label;
+        std::string mode_prefix;
         switch (right_panel_mode_) {
-            case TuiRightPanelMode::Terminal:
-                mode_label = trace_enabled_ ? "Terminal [Trace ON]" : "Terminal";
+            case TuiRightPanelMode::Terminal: {
+                const bool term_focused = machine_.tui && machine_.tui->is_terminal_focused();
+                std::string const focus_badge =
+                    term_focused ? std::format(" \033[1m{}ATTACHED\033[0m", kThemeMint)
+                                 : std::format(" \033[1m{}DETACHED\033[0m", kThemeMuted);
+                std::string const term_title = trace_enabled_ ? "Terminal [Trace ON]" : "Terminal";
+                mode_prefix = std::format("{}[{}]\033[0m{}", kThemeSky, term_title, focus_badge);
                 break;
+            }
             case TuiRightPanelMode::Display:
             default:
-                mode_label = "Display";
+                mode_prefix = std::format("{}[Display]\033[0m", kThemeSky);
                 break;
         }
-        std::string mode_prefix = std::format("{}[{}]\033[0m", kThemeSky, mode_label);
         int mode_len = get_display_width(mode_prefix);
 
         if (scroll_offset_ > 0) {

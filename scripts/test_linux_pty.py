@@ -5,6 +5,7 @@
 """
 import os
 import sys
+import pty
 import subprocess
 import time
 
@@ -22,7 +23,8 @@ def main():
         images_dir = os.path.join(repo_root, "linux-images", "rv64")
 
     mem_img = os.environ.get("SIMRV_LINUX_MEM_IMG", os.path.join(images_dir, "fw_payload.bin"))
-    disk_img = os.environ.get("SIMRV_LINUX_DISK_IMG", os.path.join(images_dir, "root.img"))
+    disk_img_default = os.path.join(images_dir, "root.bin") if os.path.exists(os.path.join(images_dir, "root.bin")) else os.path.join(images_dir, "root.img")
+    disk_img = os.environ.get("SIMRV_LINUX_DISK_IMG", disk_img_default)
     dtb_img = os.environ.get("SIMRV_LINUX_DTB", os.path.join(images_dir, "devicetree.dtb"))
     timeout_secs = int(os.environ.get("SIMRV_TEST_TIMEOUT", "60"))
 
@@ -40,45 +42,53 @@ def main():
         "-D", disk_img,
         "-c", dtb_img,
         "--cli",
-        "-e", "500000000"  # 500M instruction cap for fast automated testing
+        "-e", "3000000000"  # 3B instruction cap to reach init welcome banner
     ]
 
     print(f"Running Linux PTY boot test: {' '.join(cmd)}")
     start_time = time.time()
 
+    master_fd, slave_fd = pty.openpty()
+
     proc = subprocess.Popen(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=slave_fd,
+        close_fds=True
     )
+    os.close(slave_fd)
 
     boot_markers = [
-        "OpenSBI",
-        "Booting Linux on hartid",
-        "Linux version"
+        "Welcome to SimRV Linux Boot",
+        "Run /init as init process",
+        "Booting Linux on hartid"
     ]
 
     found_markers = set()
+    buffer = ""
 
     try:
         while True:
             if proc.poll() is not None:
-                remaining_output, _ = proc.communicate(timeout=2)
-                for line in remaining_output.splitlines():
-                    print(line)
-                    for marker in boot_markers:
-                        if marker in line:
-                            found_markers.add(marker)
                 break
 
-            line = proc.stdout.readline()
-            if line:
-                print(line, end="")
+            try:
+                data = os.read(master_fd, 1024)
+                if not data:
+                    break
+                text = data.decode("utf-8", errors="replace")
+                sys.stdout.write(text)
+                sys.stdout.flush()
+                buffer += text
                 for marker in boot_markers:
-                    if marker in line:
+                    if marker in buffer:
                         found_markers.add(marker)
+                if "Welcome to SimRV Linux Boot" in found_markers:
+                    # Target welcome banner reached!
+                    break
+            except OSError:
+                break
 
             if time.time() - start_time > timeout_secs:
                 proc.kill()
@@ -89,11 +99,15 @@ def main():
         proc.kill()
         print(f"\nExecution error: {e}", file=sys.stderr)
         sys.exit(1)
+    finally:
+        os.close(master_fd)
+        if proc.poll() is None:
+            proc.terminate()
 
     elapsed = time.time() - start_time
     print(f"\nBoot completed in {elapsed:.2f}s. Detected markers: {found_markers}")
 
-    if len(found_markers) >= 2:
+    if "Welcome to SimRV Linux Boot" in found_markers or "Run /init as init process" in found_markers:
         print("[PASS] Linux boot reachability verified.")
         sys.exit(0)
     else:

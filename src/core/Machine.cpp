@@ -33,9 +33,35 @@ void Machine::reset_state() {
     exit_code = 0;
     is_shutdown_ = false;
     is_running_ = true;
+    last_tui_check_cycles_ = 0;
+    last_tui_update_ = {};
     execution_state_.store(ExecutionState::Running, std::memory_order_release);
     execution_state_.notify_all();
     cpu.reset();
+}
+
+void Machine::set_pending_reboot(const std::string& binary_path, std::optional<bool> appmode,
+                                 std::optional<std::string> disk_path) {
+    std::lock_guard<std::mutex> lock(pending_reboot_mutex_);
+    pending_binary_path_ = binary_path;
+    pending_appmode_ = appmode;
+    pending_disk_path_ = disk_path;
+}
+
+auto Machine::get_pending_reboot() const -> PendingRebootState {
+    std::lock_guard<std::mutex> lock(pending_reboot_mutex_);
+    return PendingRebootState{
+        .binary_path = pending_binary_path_,
+        .appmode = pending_appmode_,
+        .disk_path = pending_disk_path_,
+    };
+}
+
+void Machine::clear_pending_reboot() {
+    std::lock_guard<std::mutex> lock(pending_reboot_mutex_);
+    pending_binary_path_.clear();
+    pending_appmode_.reset();
+    pending_disk_path_.reset();
 }
 
 auto Machine::is_paused() const -> bool {
@@ -87,6 +113,103 @@ void Machine::request_reboot() {
     is_running_ = false;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
     execution_state_.notify_all();
+}
+
+void Machine::run() {
+    cpu.evaluate_timer_interrupt();
+
+    // Start background stdin input thread for non-TUI mode
+    if (uart && !s_tuimode) {
+        uart->start_input_thread();
+    }
+
+    constexpr uint32_t kBatchSize = 65536;
+
+    while (is_running() &&
+           execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
+        if (s_tuimode && tui && tui->is_tui_paused()) {
+            tui->set_sim_thread_sleeping(true);
+            execution_state_.wait(ExecutionState::Paused, std::memory_order_relaxed);
+            if (execution_state_.load(std::memory_order_relaxed) == ExecutionState::Paused) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+            continue;
+        }
+        if (s_tuimode && tui) {
+            tui->set_sim_thread_sleeping(false);
+        }
+
+        if (execute_fast_batch(kBatchSize)) {
+            if (simrv::compiler::unlikely(tracer.fp_trace.is_open())) {
+                tracer.write_trace_snapshot();
+            }
+            if (simrv::compiler::unlikely(tohost != 0)) {
+                finalize_cycle_tohost();
+            }
+            if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() &&
+                                          cpu.e_icount >= s_fincnt)) {
+                simrv::log::info("finished by -e option");
+                is_running_ = false;
+            }
+            if (uart && !uart->is_input_thread_running()) {
+                uart->non_tui_poll_input();
+            }
+            if (!s_multithreaded && sdl_display) {
+                sdl_display->update(cpu.e_icount);
+            }
+            continue;
+        }
+
+        prepare_cycle();
+        execute_cycle();
+        finalize_cycle();
+
+        if (s_tuimode && tui) {
+            tui->on_cycle_completed();
+        }
+
+        if (is_stepping()) {
+            execution_state_.store(ExecutionState::Paused, std::memory_order_release);
+            if (s_tuimode && tui) {
+                tui->set_paused(true);
+            }
+        }
+
+        if (gdb_stub && gdb_stub->is_connected()) {
+            const bool hit_ebreak =
+                (cpu.pipeline_context.opcode == simrv::isa::Opcode::System) &&
+                (cpu.pipeline_context.funct12 == static_cast<Word>(simrv::isa::Funct12Priv::Ebreak)) &&
+                !cpu.pipeline_context.pending_exception.has_value();
+            if (gdb_stub->single_step() || hit_ebreak) {
+                gdb_stub->notify_breakpoint(*this);
+            } else {
+                gdb_stub->poll(*this);
+            }
+        }
+
+        if (!s_appmode && spike_lockstep && spike_lockstep->is_running()) {
+            spike_lockstep->compare_and_report(cpu.state(), cpu.pipeline_context.cpc,
+                                               cpu.e_icount);
+            if (spike_lockstep->should_halt()) {
+                simrv::log::error("Lockstep: halting on divergence");
+                stop();
+            }
+        }
+
+        if (s_tuimode && tui) {
+            const bool hit_ebreak =
+                (cpu.pipeline_context.opcode == simrv::isa::Opcode::System) &&
+                (cpu.pipeline_context.funct12 == static_cast<Word>(simrv::isa::Funct12Priv::Ebreak));
+            if (simrv::compiler::unlikely(hit_ebreak)) {
+                tui->pause_loop();
+            }
+        }
+    }
+
+    // Clean up background input thread
+    if (uart && !s_tuimode) {
+        uart->stop_input_thread();
+    }
 }
 
 void Machine::finalize_cycle_tohost() {

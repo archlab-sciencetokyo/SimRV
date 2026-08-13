@@ -194,10 +194,24 @@ fi
 
 # Set up init script and inittab
 mkdir -p "$INITRAMFS_DIR/proc" "$INITRAMFS_DIR/sys" "$INITRAMFS_DIR/dev" "$INITRAMFS_DIR/etc" "$INITRAMFS_DIR/tmp"
-mknod -m 600 "$INITRAMFS_DIR/dev/console" c 5 1 2>/dev/null || true
-mknod -m 666 "$INITRAMFS_DIR/dev/ttyS0" c 4 64 2>/dev/null || true
-mknod -m 666 "$INITRAMFS_DIR/dev/null" c 1 3 2>/dev/null || true
-mknod -m 666 "$INITRAMFS_DIR/dev/tty" c 5 0 2>/dev/null || true
+# Use fakeroot so mknod succeeds without real root, giving the initramfs proper
+# /dev/console and /dev/ttyS0 nodes at kernel boot time (prevents the kernel
+# warning "unable to open an initial console" and the subsequent sh-exits-immediately panic).
+if command -v fakeroot >/dev/null 2>&1; then
+    fakeroot -- bash -c "
+        mknod -m 600 '$INITRAMFS_DIR/dev/console' c 5 1
+        mknod -m 666 '$INITRAMFS_DIR/dev/ttyS0'   c 4 64
+        mknod -m 666 '$INITRAMFS_DIR/dev/null'     c 1 3
+        mknod -m 666 '$INITRAMFS_DIR/dev/tty'      c 5 0
+        mknod -m 666 '$INITRAMFS_DIR/dev/zero'     c 1 5
+    " 2>/dev/null || true
+else
+    mknod -m 600 "$INITRAMFS_DIR/dev/console" c 5 1 2>/dev/null || true
+    mknod -m 666 "$INITRAMFS_DIR/dev/ttyS0" c 4 64 2>/dev/null || true
+    mknod -m 666 "$INITRAMFS_DIR/dev/null" c 1 3 2>/dev/null || true
+    mknod -m 666 "$INITRAMFS_DIR/dev/tty" c 5 0 2>/dev/null || true
+    mknod -m 666 "$INITRAMFS_DIR/dev/zero" c 1 5 2>/dev/null || true
+fi
 
 cat > "$INITRAMFS_DIR/etc/inittab" <<'EOF'
 ttyS0::respawn:-/bin/sh
@@ -225,21 +239,93 @@ echo "=================================================="
 echo "          Welcome to SimRV Linux Boot             "
 echo "=================================================="
 if [ -f /etc/alpine-release ]; then
-    echo "Alpine Linux (riscv64) version $(cat /etc/alpine-release)"
+    echo "Alpine Linux (riscv64) version $(cat /etc/alpine-release 2>/dev/null || echo "3.24")"
 else
     echo "Minimal BusyBox Linux (riscv32)"
 fi
 echo "=================================================="
 echo ""
 
-# Launch interactive shell
-exec /bin/sh
+# Explicitly connect the shell to the serial console.
+# This is critical: when the kernel cannot open /dev/console before launching
+# /init (e.g. because the initramfs cpio lacks a pre-built console node),
+# the shell inherits fd 0/1/2 pointing to /dev/null and exits immediately on
+# EOF. Redirecting here guarantees a working interactive TTY regardless.
+exec /bin/sh < /dev/ttyS0 > /dev/ttyS0 2>&1
 EOF
 chmod +x "$INITRAMFS_DIR/init"
 
-# Generate cpio archive
-cd "$INITRAMFS_DIR"
-find . -print0 | cpio --null -ov --format=newc > "$BUILD_DIR/initramfs_${ARCH}.cpio"
+# Generate cpio archive using gen_init_cpio (built from the kernel source).
+# This tool accepts a plain-text manifest with explicit 'nod' entries so device
+# nodes are embedded with the correct major:minor numbers without needing root
+# or fakeroot at all.
+GEN_INIT_CPIO_BIN="$BUILD_DIR/gen_init_cpio"
+GEN_INIT_CPIO_SRC="$BUILD_DIR/linux-${LINUX_VER}/usr/gen_init_cpio.c"
+if [[ ! -x "$GEN_INIT_CPIO_BIN" && -f "$GEN_INIT_CPIO_SRC" ]]; then
+    print_step "Building gen_init_cpio..."
+    gcc -O2 -o "$GEN_INIT_CPIO_BIN" "$GEN_INIT_CPIO_SRC"
+fi
+
+CPIO_LIST="$BUILD_DIR/initramfs_list_${ARCH}.txt"
+print_step "Generating initramfs manifest..."
+
+# Fixed device nodes — must come first, before any directory walk
+cat > "$CPIO_LIST" <<'LISTEOF'
+# Mandatory device nodes (no root required via gen_init_cpio)
+dir /dev 0755 0 0
+nod /dev/console 0600 0 0 c 5 1
+nod /dev/ttyS0   0666 0 0 c 4 64
+nod /dev/null    0666 0 0 c 1 3
+nod /dev/tty     0666 0 0 c 5 0
+nod /dev/zero    0666 0 0 c 1 5
+nod /dev/urandom 0666 0 0 c 1 9
+nod /dev/random  0666 0 0 c 1 8
+LISTEOF
+
+# Walk the initramfs dir and emit the rest of the manifest entries
+python3 - "$INITRAMFS_DIR" >> "$CPIO_LIST" <<'PYEOF'
+import os, stat, sys
+initramfs_dir = sys.argv[1]
+for root, dirs, files in os.walk(initramfs_dir, followlinks=False):
+    dirs.sort(); files.sort()
+    rel_root = os.path.relpath(root, initramfs_dir)
+    if rel_root == ".":
+        rel_root = ""
+    # Skip /dev — already handled by hardcoded nod entries above
+    if rel_root == "dev" or rel_root.startswith("dev/"):
+        dirs.clear()
+        continue
+    if rel_root:
+        st = os.stat(root)
+        print(f"dir /{rel_root} 0{oct(stat.S_IMODE(st.st_mode))[2:]} 0 0")
+    for fname in sorted(files):
+        fpath = os.path.join(root, fname)
+        rel_path = os.path.relpath(fpath, initramfs_dir)
+        if rel_path.startswith("dev/"): continue
+        try:
+            st = os.lstat(fpath)
+        except OSError:
+            continue
+        mode = f"0{oct(stat.S_IMODE(st.st_mode))[2:]}"
+        if stat.S_ISLNK(st.st_mode):
+            print(f"slink /{rel_path} {os.readlink(fpath)} {mode} 0 0")
+        elif stat.S_ISREG(st.st_mode):
+            print(f"file /{rel_path} {fpath} {mode} 0 0")
+        elif stat.S_ISCHR(st.st_mode):
+            print(f"nod /{rel_path} {mode} 0 0 c {os.major(st.st_rdev)} {os.minor(st.st_rdev)}")
+        elif stat.S_ISBLK(st.st_mode):
+            print(f"nod /{rel_path} {mode} 0 0 b {os.major(st.st_rdev)} {os.minor(st.st_rdev)}")
+PYEOF
+
+if [[ -x "$GEN_INIT_CPIO_BIN" ]]; then
+    print_step "Generating initramfs cpio via gen_init_cpio..."
+    "$GEN_INIT_CPIO_BIN" "$CPIO_LIST" > "$BUILD_DIR/initramfs_${ARCH}.cpio"
+else
+    # Fallback: standard cpio (device nodes will be missing without root)
+    print_step "WARNING: gen_init_cpio not built; falling back to cpio (device nodes require root)"
+    cd "$INITRAMFS_DIR"
+    find . -print0 | cpio --null --create --format=newc --quiet > "$BUILD_DIR/initramfs_${ARCH}.cpio"
+fi
 
 # ----------------------------------------------------------------------------
 # Step 4: Compile Linux Kernel with Built-in Initramfs
@@ -390,7 +476,8 @@ echo "Alpine Linux (riscv64) version $(cat /etc/alpine-release 2>/dev/null || ec
 echo "=================================================="
 echo ""
 
-exec /bin/sh
+# Connect the shell to the serial console (see initramfs init for rationale).
+exec /bin/sh < /dev/ttyS0 > /dev/ttyS0 2>&1
 EOF
     chmod +x "$ROOTFS_DISK_DIR/init"
     dd if=/dev/zero of="$IMAGES_DIR/root.img" bs=1M count=64 status=none

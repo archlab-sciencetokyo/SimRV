@@ -24,8 +24,8 @@
 SimRV
 
 # Build system outputs
-build*/
-linux-build/
+build*
+linux-build
 linux-images/
 CMakeUserPresets.json
 compile_commands.json

@@ -194,55 +194,28 @@ auto ClintMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
     if (req.opcode == memory::TlOpcodeA::Get) {
         if (req_bytes == 8) {
             if (off == kClintMtimeOffset) {
-                resp.data = static_cast<Word>(mtime);
+                resp.data = static_cast<Word>(mtime.load(std::memory_order_relaxed));
             } else if (off == kClintMtimecmpOffset) {
-                resp.data = static_cast<Word>(mtimecmp);
+                resp.data = static_cast<Word>(mtimecmp.load(std::memory_order_relaxed));
             } else {
                 resp.data = mmio_read(off);
             }
         } else {
-            // For 32-bit reads, if offset aligns with 64-bit register halves
-            if (off == kClintMtimeOffset) {
-                resp.data = static_cast<Word>(mtime & 0xFFFFFFFF);
-            } else if (off == kClintMtimeOffset + 4) {
-                resp.data = static_cast<Word>(mtime >> 32);
-            } else if (off == kClintMtimecmpOffset) {
-                resp.data = static_cast<Word>(mtimecmp & 0xFFFFFFFF);
-            } else if (off == kClintMtimecmpOffset + 4) {
-                resp.data = static_cast<Word>(mtimecmp >> 32);
-            } else {
-                resp.data = mmio_read(off);
-            }
+            resp.data = mmio_read(off);
         }
     } else {
-        const Word wdata = req.data;
         if (req_bytes == 8) {
             if (off == kClintMtimecmpOffset) {
-                mtimecmp = static_cast<Counter>(wdata);
+                mtimecmp.store(static_cast<Counter>(req.data), std::memory_order_release);
                 cpu_.evaluate_timer_interrupt();
             } else if (off == kClintMtimeOffset) {
-                mtime = static_cast<Counter>(wdata);
+                mtime.store(static_cast<Counter>(req.data), std::memory_order_release);
                 cpu_.evaluate_timer_interrupt();
             } else {
-                mmio_write(off, wdata);
+                mmio_write(off, req.data);
             }
         } else {
-            if (off == kClintMtimecmpOffset) {
-                mtimecmp =
-                    (mtimecmp & ~static_cast<Counter>(0xFFFFFFFFull)) | (wdata & 0xFFFFFFFFull);
-                cpu_.evaluate_timer_interrupt();
-            } else if (off == kClintMtimecmpOffset + 4) {
-                mtimecmp = (mtimecmp & 0xFFFFFFFFull) | (static_cast<Counter>(wdata) << 32);
-                cpu_.evaluate_timer_interrupt();
-            } else if (off == kClintMtimeOffset) {
-                mtime = (mtime & ~static_cast<Counter>(0xFFFFFFFFull)) | (wdata & 0xFFFFFFFFull);
-                cpu_.evaluate_timer_interrupt();
-            } else if (off == kClintMtimeOffset + 4) {
-                mtime = (mtime & 0xFFFFFFFFull) | (static_cast<Counter>(wdata) << 32);
-                cpu_.evaluate_timer_interrupt();
-            } else {
-                mmio_write(off, wdata);
-            }
+            mmio_write(off, req.data);
         }
     }
     return true;
@@ -253,13 +226,13 @@ auto ClintMmio::mmio_read(Address offset) const -> Word {
         case 0x0000:  // msip for hart 0
             return (cpu_.state().mip & enum_mask(MipBit::Msip)) != 0 ? 1 : 0;
         case kClintMtimeOffset:
-            return static_cast<Word>(mtime);
+            return static_cast<Word>(mtime.load(std::memory_order_relaxed) & kWord32Mask);
         case kClintMtimeOffset + 4:
-            return static_cast<Word>(mtime >> 32);
+            return static_cast<Word>((mtime.load(std::memory_order_relaxed) >> 32) & kWord32Mask);
         case kClintMtimecmpOffset:
-            return static_cast<Word>(mtimecmp);
+            return static_cast<Word>(mtimecmp.load(std::memory_order_relaxed) & kWord32Mask);
         case kClintMtimecmpOffset + 4:
-            return static_cast<Word>(mtimecmp >> 32);
+            return static_cast<Word>((mtimecmp.load(std::memory_order_relaxed) >> 32) & kWord32Mask);
         default:
             return 0;
     }
@@ -275,16 +248,32 @@ void ClintMmio::mmio_write(Address offset, Word wdata) {
                 cpu_.state().mip &= ~enum_mask(MipBit::Msip);
             }
             break;
-        case kClintMtimecmpOffset:
-            mtimecmp = (mtimecmp & ~kWord32Mask) | wdata_64;
-            cpu_.state().mip &= ~enum_mask(MipBit::Mtip);
+        case kClintMtimecmpOffset: {
+            const Counter cur = mtimecmp.load(std::memory_order_relaxed);
+            mtimecmp.store((cur & ~kWord32Mask) | wdata_64, std::memory_order_release);
             cpu_.evaluate_timer_interrupt();
             break;
-        case kClintMtimecmpOffset + 4:
-            mtimecmp = (mtimecmp & kWord32Mask) | (wdata_64 << kWord32Shift);
-            cpu_.state().mip &= ~enum_mask(MipBit::Mtip);
+        }
+        case kClintMtimecmpOffset + 4: {
+            const Counter cur = mtimecmp.load(std::memory_order_relaxed);
+            mtimecmp.store((cur & kWord32Mask) | (wdata_64 << kWord32Shift),
+                           std::memory_order_release);
             cpu_.evaluate_timer_interrupt();
             break;
+        }
+        case kClintMtimeOffset: {
+            const Counter cur = mtime.load(std::memory_order_relaxed);
+            mtime.store((cur & ~kWord32Mask) | wdata_64, std::memory_order_release);
+            cpu_.evaluate_timer_interrupt();
+            break;
+        }
+        case kClintMtimeOffset + 4: {
+            const Counter cur = mtime.load(std::memory_order_relaxed);
+            mtime.store((cur & kWord32Mask) | (wdata_64 << kWord32Shift),
+                        std::memory_order_release);
+            cpu_.evaluate_timer_interrupt();
+            break;
+        }
         default:
             break;
     }

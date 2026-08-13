@@ -175,8 +175,6 @@ struct ClintState {
     Counter mtimecmp = 0;
     Counter mcycle = 0;
     int rtc_divider = 0;
-    Counter last_mtime = 0;
-    Counter last_mtimecmp = 0;
 };
 
 struct UndoStep {

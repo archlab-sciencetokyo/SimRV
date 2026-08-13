@@ -372,6 +372,9 @@ auto Machine::initialize() -> int {
     // If launched without a binary in TUI mode, skip image-dependent init —
     // the TUI will open the LoadBinary modal and call load_program_binary() later.
     if (s_fn_memimg.empty() && s_tuimode) {
+        if (tui) {
+            tui->initialize();
+        }
         return 0;
     }
 
