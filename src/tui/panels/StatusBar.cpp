@@ -206,9 +206,6 @@ static const auto running_row1_entries = std::to_array<FooterEntry>({
      .action = TuiFooterAction::ToggleTrace,
      .category = FooterCategory::DebugExec},
     {.text = "  ", .action = std::nullopt, .category = FooterCategory::Spacer},
-    {.text = "[Ctrl-A] Focus",
-     .action = std::nullopt,
-     .category = FooterCategory::DebugExec},
     {.text = "  │  ", .action = std::nullopt, .category = FooterCategory::Separator},
     // Panel Actions Group
     {.text = "[r] Regs",
@@ -589,7 +586,7 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         std::string mode_prefix;
         switch (right_panel_mode_) {
             case TuiRightPanelMode::Terminal: {
-                const bool term_focused = machine_.tui && machine_.tui->is_terminal_focused();
+                const bool term_focused = machine_.tui && machine_.tui->is_terminal_attached();
                 std::string const focus_badge =
                     term_focused ? std::format(" \033[1m{}ATTACHED\033[0m", kThemeMint)
                                  : std::format(" \033[1m{}DETACHED\033[0m", kThemeMuted);

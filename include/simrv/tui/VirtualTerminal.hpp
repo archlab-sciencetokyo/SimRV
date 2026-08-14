@@ -237,10 +237,9 @@ class VirtualTerminal {
         return static_cast<int>(scrollback_.size());
     }
 
-    [[nodiscard]] auto get_line_as_string(int idx, int width_limit,
-                                          bool draw_cursor_at_x = false,
-                                          int sel_start_x = -1,
-                                          int sel_end_x = -1) const -> std::string {
+    [[nodiscard]] auto get_line_as_string(int idx, int width_limit, bool draw_cursor_at_x = false,
+                                          int sel_start_x = -1, int sel_end_x = -1) const
+        -> std::string {
         const std::vector<Cell>* row_ptr = nullptr;
         int s_size = static_cast<int>(scrollback_.size());
         if (idx < s_size) {
@@ -312,8 +311,8 @@ class VirtualTerminal {
         return res;
     }
 
-    [[nodiscard]] auto get_text_in_range(int start_y, int start_x, int end_y,
-                                         int end_x) const -> std::string {
+    [[nodiscard]] auto get_text_in_range(int start_y, int start_x, int end_y, int end_x) const
+        -> std::string {
         int sy1 = start_y;
         int sx1 = start_x;
         int sy2 = end_y;
@@ -370,6 +369,9 @@ class VirtualTerminal {
     }
 
     void set_scroll_offset_callback(std::function<void(int)> cb) { scroll_offset_cb_ = cb; }
+    void set_response_callback(std::function<void(std::string_view)> cb) {
+        response_cb_ = std::move(cb);
+    }
 
    private:
     enum class AnsiState { Normal, Esc, G0G1, Csi };
@@ -578,6 +580,15 @@ class VirtualTerminal {
                 std::fill(cells_[cursor_y_].begin(), cells_[cursor_y_].end(),
                           Cell{.ch = " ", .fg = 7, .bg = current_attr_.bg});
             }
+        } else if (cmd == 'n' && !is_private && response_cb_) {  // Device Status Report
+            const int request = params.empty() ? 0 : params[0];
+            if (request == 5) {
+                response_cb_("\033[0n");
+            } else if (request == 6) {
+                const std::string response =
+                    std::format("\033[{};{}R", cursor_y_ + 1, cursor_x_ + 1);
+                response_cb_(response);
+            }
         } else if (cmd == 'h' && is_private) {
             for (int p : params) {
                 if (p == 25) cursor_visible_ = true;
@@ -625,6 +636,7 @@ class VirtualTerminal {
     std::size_t utf8_len_ = 0;
 
     std::function<void(int)> scroll_offset_cb_;
+    std::function<void(std::string_view)> response_cb_;
 };
 
 }  // namespace simrv::tui

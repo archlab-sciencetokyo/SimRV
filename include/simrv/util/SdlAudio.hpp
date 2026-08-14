@@ -40,8 +40,8 @@ class SdlAudio {
     void update_music_volume(Word volume);
 
    private:
-    simrv::core::Machine& machine_;
-    bool audio_initialized_ = false;
+    [[maybe_unused]] simrv::core::Machine& machine_;
+    [[maybe_unused]] bool audio_initialized_ = false;
 
 #ifdef HAVE_SDL3
     SDL_AudioDeviceID device_id_ = 0;

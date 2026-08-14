@@ -86,15 +86,15 @@ riscv64-unknown-elf-objcopy -O binary program.elf program.bin
 
 ### 4. Running the Program
 
-Run the resulting binary image in SimRV with baremetal/raw binary execution mode (`-a` option):
+Run the resulting binary image in SimRV with baremetal/raw binary execution mode (`-b` option):
 
 ```bash
-./build/rv32-release/SimRV -m program.bin -a
+./build/rv32-release/SimRV -m program.bin -b
 ```
 
 To run with the interactive TUI dashboard:
 ```bash
-./build/rv32-release/SimRV -m program.bin -a --tui
+./build/rv32-release/SimRV -m program.bin -b --tui
 ```
 
 ---

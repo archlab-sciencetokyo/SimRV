@@ -43,6 +43,7 @@ class PlicMmio : public memory::TileLinkNode {
     [[nodiscard]] auto name() const -> const char* final { return "plic"; }
     [[nodiscard]] auto base_address() const -> Address final { return kBaseAddress; }
     [[nodiscard]] auto size() const -> Address final { return kSize; }
+    void reset() final;
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool final;
 
     [[nodiscard]] constexpr auto contains(Address addr) const -> bool {
@@ -85,6 +86,7 @@ class ClintMmio : public memory::TileLinkNode {
     [[nodiscard]] auto name() const -> const char* final { return "clint"; }
     [[nodiscard]] auto base_address() const -> Address final { return kBaseAddress; }
     [[nodiscard]] auto size() const -> Address final { return kSize; }
+    void reset() final;
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool final;
 
     [[nodiscard]] constexpr auto contains(Address addr) const -> bool {
@@ -99,6 +101,7 @@ class ClintMmio : public memory::TileLinkNode {
 
     std::atomic<Counter> mtime{1};
     std::atomic<Counter> mtimecmp{0};
+    std::atomic<bool> supervisor_timer{false};
     Counter mcycle{1};
     int rtc_divider{0};
 

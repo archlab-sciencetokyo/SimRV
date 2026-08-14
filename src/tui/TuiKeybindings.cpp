@@ -9,7 +9,7 @@
 
 namespace simrv::tui {
 
-static const std::array<KeyBindingInfo, 23> kKeyBindings = {
+static const std::array<KeyBindingInfo, 22> kKeyBindings = {
     {{.action = KeyAction::Step,
       .key_display = "[s] / [Space]",
       .primary_char = 's',
@@ -141,13 +141,7 @@ static const std::array<KeyBindingInfo, 23> kKeyBindings = {
       .primary_char = 'v',
       .alt_char = 'V',
       .footer_label = "[v] Trace",
-      .help_label = "Toggle Trace Logging"},
-     {.action = KeyAction::ToggleTerminalFocus,
-      .key_display = "[Ctrl-A]",
-      .primary_char = '\01',
-      .alt_char = '\01',
-      .footer_label = "[Ctrl-A] Terminal Focus",
-      .help_label = "Attach/Detach Keyboard Terminal Focus"}}};
+      .help_label = "Toggle Trace Logging"}}};
 
 auto Keybindings::get(KeyAction action) -> const KeyBindingInfo& {
     for (const auto& binding : kKeyBindings) {
@@ -155,7 +149,7 @@ auto Keybindings::get(KeyAction action) -> const KeyBindingInfo& {
             return binding;
         }
     }
-    return kKeyBindings[0];
+    throw std::out_of_range("unknown TUI key action");
 }
 
 auto Keybindings::get_footer_text(KeyAction action) -> std::string {
@@ -165,5 +159,63 @@ auto Keybindings::get_footer_text(KeyAction action) -> std::string {
 auto Keybindings::get_help_key(KeyAction action) -> std::string { return get(action).key_display; }
 
 auto Keybindings::get_help_desc(KeyAction action) -> std::string { return get(action).help_label; }
+
+auto Keybindings::all() -> std::span<const KeyBindingInfo> { return kKeyBindings; }
+
+auto Keybindings::unavailable_reason(KeyAction action, const ActionContext& context)
+    -> std::string_view {
+    if (context.modal_active && action != KeyAction::Quit && action != KeyAction::Help) {
+        return "Close the active dialog first";
+    }
+    if (context.shutdown && action != KeyAction::Reset && action != KeyAction::LoadBinary &&
+        action != KeyAction::Quit && action != KeyAction::Help) {
+        return "The target is shut down";
+    }
+    switch (action) {
+        case KeyAction::Step:
+        case KeyAction::Backstep:
+        case KeyAction::SetBreakpoint:
+        case KeyAction::SetWatchpoint:
+        case KeyAction::ManageBreakpoints:
+        case KeyAction::TogglePcBreakpoint:
+        case KeyAction::InspectAddress:
+        case KeyAction::Settings:
+        case KeyAction::ConfigureSystem:
+        case KeyAction::ConfigureMisa:
+            if (!context.paused) return "Pause the simulator first";
+            break;
+        default:
+            break;
+    }
+    if ((action == KeyAction::Step || action == KeyAction::Backstep ||
+         action == KeyAction::RunPause || action == KeyAction::ToggleExplain) &&
+        !context.image_loaded) {
+        return "Load a program image first";
+    }
+    if ((action == KeyAction::Backstep) && !context.rollback_enabled) {
+        return "Enable rollback tracking first";
+    }
+    if ((action == KeyAction::SetBreakpoint || action == KeyAction::SetWatchpoint ||
+         action == KeyAction::ManageBreakpoints || action == KeyAction::TogglePcBreakpoint) &&
+        !context.debug_mode) {
+        return "Enable debug mode first";
+    }
+    if (action == KeyAction::ConfigureSystem && !context.cycle_accurate) {
+        return "Enable cycle-accurate mode first";
+    }
+    return {};
+}
+
+auto Keybindings::is_available(KeyAction action, const ActionContext& context) -> bool {
+    return unavailable_reason(action, context).empty();
+}
+
+auto Keybindings::available(const ActionContext& context) -> std::vector<const KeyBindingInfo*> {
+    std::vector<const KeyBindingInfo*> result;
+    for (const auto& binding : kKeyBindings) {
+        if (is_available(binding.action, context)) result.push_back(&binding);
+    }
+    return result;
+}
 
 }  // namespace simrv::tui

@@ -38,13 +38,13 @@ Run in interactive TUI mode:
 
 Run Linux OS image with disk & devicetree:
 ```bash
-./build/rv64-release/SimRV -m linux-images/rv64/fw_payload.bin -D linux-images/rv64/root.bin -c linux-images/rv64/devicetree.dtb
+./build/rv64-release/SimRV --os -m linux-images/rv64/fw_payload.bin -D linux-images/rv64/root.bin -f linux-images/rv64/devicetree.dtb
 ```
 
 Override MISA profile or Vector register length (VLEN):
 ```bash
 # Set MISA profile to RV64GC and VLEN to 512 bits
-./build/rv64-release/SimRV -m img/vector.bin --misa rv64gcv --vector-len 512
+./build/rv64-release/SimRV -m img/vector.bin --misa rv64gcv --vlen 512
 ```
 
 ---
@@ -153,6 +153,8 @@ Pre-compiled standalone binaries (`SimRV`) are available under GitHub Releases f
 - `scripts/`: Regression, ISA testing, and Linux image build helpers
 - `docs/`: Architecture and design notes (`docs/ARCHITECTURE.md`, `docs/BAREMETAL_GUIDE.md`)
 - `CHANGELOG.md`: Version release log
+- `docs/RELEASE.md`: 2.0 support contract, validation matrix, and publishing checklist
+- `docs/TUI.md`: TUI input focus, rendering layers, and test coverage
 
 ---
 
@@ -164,5 +166,3 @@ SimRV is licensed under the [MIT License](LICENSE).
 
 - **TinySoundFont** (`include/simrv/util/tsf.h`): MIT License (Copyright (C) Bernhard Schelling & Steve Folta)
 - **TinyMidiLoader** (`include/simrv/util/tml.h`): zlib License (Copyright (C) Bernhard Schelling)
-
-

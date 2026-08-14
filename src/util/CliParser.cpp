@@ -216,15 +216,11 @@ auto effective_misa_profile(const RuntimeOptions& options) -> MisaProfile {
     return MisaProfile::GC;
 }
 
-auto is_image_option(std::string_view arg) -> bool {
-    return arg == "-m" || arg == "-k" || arg == "-i" || arg == "--image" || arg == "--kernel";
-}
+auto is_image_option(std::string_view arg) -> bool { return arg == "-m" || arg == "--image"; }
 
 auto is_disk_option(std::string_view arg) -> bool { return arg == "-D" || arg == "--disk"; }
 
-auto is_fdt_option(std::string_view arg) -> bool {
-    return arg == "-f" || arg == "--fdt" || arg == "--dtb" || arg == "-c";
-}
+auto is_fdt_option(std::string_view arg) -> bool { return arg == "-f" || arg == "--fdt"; }
 
 auto is_traplog_option(std::string_view arg) -> bool { return arg == "--trap-log" || arg == "-P"; }
 
@@ -253,36 +249,27 @@ auto is_dump_init_option(std::string_view arg) -> bool {
 }
 
 auto is_baremetal_option(std::string_view arg) -> bool {
-    return arg == "-b" || arg == "--baremetal" || arg == "-a" || arg == "--app";
+    return arg == "-b" || arg == "--baremetal";
 }
 
-auto is_os_option(std::string_view arg) -> bool {
-    return arg == "--linux" || arg == "--os" || arg == "-o";
-}
+auto is_os_option(std::string_view arg) -> bool { return arg == "--os"; }
 
 auto is_ca_option(std::string_view arg) -> bool {
-    return arg == "--ca" || arg == "--cycle-accurate" || arg == "-C" || arg == "--high-accuracy" ||
-           arg == "--accuracy-mode";
+    return arg == "--ca" || arg == "--cycle-accurate" || arg == "-C";
 }
 auto is_ia_option(std::string_view arg) -> bool {
-    return arg == "--ia" || arg == "--high-performance" || arg == "--perf-mode";
+    return arg == "--ia" || arg == "--high-performance";
 }
 
 auto is_tui_option(std::string_view arg) -> bool { return arg == "--tui" || arg == "-u"; }
 
-auto is_cli_option(std::string_view arg) -> bool {
-    return arg == "--cli" || arg == "-c" || arg == "--headless" || arg == "--no-tui";
-}
+auto is_cli_option(std::string_view arg) -> bool { return arg == "--cli" || arg == "-c"; }
 
 auto is_gui_option(std::string_view arg) -> bool { return arg == "--gui" || arg == "-G"; }
 
-auto is_high_contrast_option(std::string_view arg) -> bool {
-    return arg == "--high-contrast" || arg == "--contrast";
-}
+auto is_high_contrast_option(std::string_view arg) -> bool { return arg == "--high-contrast"; }
 
-auto is_no_forwarding_option(std::string_view arg) -> bool {
-    return arg == "--no-forwarding" || arg == "--disable-forwarding";
-}
+auto is_no_forwarding_option(std::string_view arg) -> bool { return arg == "--no-forwarding"; }
 
 auto is_bp_type_option(std::string_view arg) -> bool { return arg == "--bp-type" || arg == "--bp"; }
 
@@ -301,8 +288,6 @@ auto is_disable_mem_forwarding_option(std::string_view arg) -> bool {
 auto is_explain_inst_option(std::string_view arg) -> bool {
     return arg == "--explain-inst" || arg == "--explain";
 }
-
-auto is_opensbi_option(std::string_view arg) -> bool { return arg == "-B" || arg == "--opensbi"; }
 
 auto is_debug_mode_option(std::string_view arg) -> bool {
     return arg == "-d" || arg == "--debug-mode";
@@ -324,7 +309,23 @@ auto is_gdb_port_option(std::string_view arg) -> bool {
     return arg == "--gdb-port" || arg == "--port" || arg == "-p";
 }
 
-auto is_gdb_option(std::string_view arg) -> bool { return arg == "--gdb" || arg == "-G"; }
+auto is_gdb_option(std::string_view arg) -> bool { return arg == "--gdb"; }
+
+auto removed_option_replacement(std::string_view arg) -> std::string_view {
+    if (arg == "-k" || arg == "-i" || arg == "--kernel") return "--image";
+    if (arg == "--dtb") return "--fdt";
+    if (arg == "-a" || arg == "--app") return "--baremetal";
+    if (arg == "-o" || arg == "--linux") return "--os";
+    if (arg == "--high-accuracy" || arg == "--accuracy-mode") return "--cycle-accurate";
+    if (arg == "--perf-mode") return "--high-performance";
+    if (arg == "--headless" || arg == "--no-tui") return "--cli";
+    if (arg == "--contrast") return "--high-contrast";
+    if (arg == "--disable-forwarding") return "--no-forwarding";
+    if (arg == "--mouse-speed") return "--mouse-sensitivity";
+    if (arg == "--vector-len") return "--vlen";
+    if (arg == "-B" || arg == "--opensbi") return "remove it; OpenSBI is automatic with --fdt";
+    return {};
+}
 
 auto is_help_option(std::string_view arg) -> bool { return arg == "-h" || arg == "--help"; }
 
@@ -419,7 +420,7 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.misa_override = true;
         return true;
     }
-    if (arg == "--vlen" || arg == "--vector-len") {
+    if (arg == "--vlen") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         uint32_t val = 0;
@@ -470,7 +471,7 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.gui_mode = true;
         return true;
     }
-    if (arg == "--mouse-sensitivity" || arg == "--mouse-speed") {
+    if (arg == "--mouse-sensitivity") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         try {
@@ -531,13 +532,6 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         }
         result.action = CliAction::ExplainInstruction;
         result.options.explain_inst_val = raw_val;
-        return true;
-    }
-    if (is_opensbi_option(arg)) {
-        simrv::log::warn(
-            "Option '{}' is deprecated. OpenSBI is automatically enabled when a device tree is "
-            "loaded.",
-            arg);
         return true;
     }
     if (is_debug_mode_option(arg)) {
@@ -685,6 +679,10 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
 
     for (std::size_t i = 1; i < expanded_span.size(); ++i) {
         std::string_view const arg = expanded_span[i];
+        if (const auto replacement = removed_option_replacement(arg); !replacement.empty()) {
+            return std::unexpected(
+                std::format("option '{}' was removed in SimRV 2.0; use {}", arg, replacement));
+        }
         if (is_help_option(arg)) {
             result.action = CliAction::ShowHelp;
             return result;
@@ -857,8 +855,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
     // Required
     std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Required", style(kReset),
                style(kReset));
-    std::print(stdout,
-               "  {}-m, -k, -i, --image, --kernel {}{}<FILE>{} Memory image file to load\n\n",
+    std::print(stdout, "  {}-m, --image {}{}<FILE>{}      Memory image file to load\n\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
 
     // Devices & Files
@@ -869,7 +866,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         "  {}-D, --disk {}{}<FILE>{}      Disk image file (enables block storage virtio-disk)\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
-               "  {}-f, -c, --fdt, --dtb {}{}<FILE>{} Device-tree binary file (FDT / DTB "
+               "  {}-f, --fdt {}{}<FILE>{}       Device-tree binary file (FDT / DTB "
                "configuration)\n\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
 
@@ -885,10 +882,9 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(
         stdout,
-        "  {}-b, -a, --baremetal, --app{} Binary mode (baremetal application execution, default)\n",
+        "  {}-b, --baremetal{}          Binary mode (baremetal application execution, default)\n",
         style(kBrightGreen), style(kReset));
-    std::print(stdout,
-               "  {}-o, --linux, --os{}           OS mode (Linux kernel / RTOS boot mode)\n",
+    std::print(stdout, "  {}--os{}                      OS mode (Linux, BSD, or RTOS boot mode)\n",
                style(kBrightGreen), style(kReset));
     std::print(
         stdout,
@@ -897,23 +893,19 @@ auto needs_memory_image(const ParseResult& result) -> bool {
     std::print(stdout, "  {}-G, --gui{}                  Enable external SDL3 graphical window\n",
                style(kBrightGreen), style(kReset));
     std::print(stdout,
-               "  {}--mouse-sensitivity, --mouse-speed {}{}<FACTOR>{} Adjust mouse relative speed "
+               "  {}--mouse-sensitivity {}{}<FACTOR>{} Adjust mouse relative speed "
                "scaling factor (default: 1.0)\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
-               "  {}--high-contrast, --contrast{} Toggle TUI colors to high-contrast palette\n",
+               "  {}--high-contrast{}          Toggle TUI colors to high-contrast palette\n",
                style(kBrightGreen), style(kReset));
 
     std::print(stdout,
                "  {}-C, --cycle-accurate, --ca{} Enable structural cycle-accurate performance "
                "simulation mode\n",
                style(kBrightGreen), style(kReset));
-    std::print(
-        stdout,
-        "  {}--high-accuracy, --accuracy-mode{} Alias for --cycle-accurate (High-Accuracy Mode)\n",
-        style(kBrightGreen), style(kReset));
     std::print(stdout,
-               "  {}--high-performance, --perf-mode, --ia{} Enable optimized simulation mode "
+               "  {}--high-performance, --ia{} Enable optimized simulation mode "
                "bypassing caches/coroutines (default)\n",
                style(kBrightGreen), style(kReset));
     std::print(stdout,
@@ -925,7 +917,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset), xlen_suffix,
         xlen_suffix, xlen_suffix);
     std::print(stdout,
-               "  {}--vlen, --vector-len {}{}<N>{}  Set vector register length in bits (32–1024, "
+               "  {}--vlen {}{}<N>{}              Set vector register length in bits (32–1024, "
                "power of 2; default: 256)\n\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
 
@@ -1002,7 +994,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(
         stdout,
-        "  {}-G, --gdb{}                  Enable GDB RSP stub (waits for client before running)\n",
+        "  {}--gdb{}                      Enable GDB RSP stub (waits for client before running)\n",
         style(kBrightGreen), style(kReset));
     std::print(
         stdout,

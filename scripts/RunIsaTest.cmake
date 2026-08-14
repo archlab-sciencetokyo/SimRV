@@ -33,7 +33,7 @@ if(tohost_addr STREQUAL "${DEFAULT_TOHOST_ADDR}" AND EXISTS "${ELF_PATH}.dump")
 endif()
 
 # 2. Run SimRV directly with ELF binary
-set(SIMRV_ARGS -a --cli -m ${ELF_PATH} -e ${END_INSNS} -b -H ${tohost_addr})
+set(SIMRV_ARGS --cli -m ${ELF_PATH} -e ${END_INSNS} -b -H ${tohost_addr})
 if(LOCKSTEP)
   list(APPEND SIMRV_ARGS --lockstep)
   list(APPEND SIMRV_ARGS --spike-elf ${ELF_PATH})

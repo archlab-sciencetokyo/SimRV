@@ -9,6 +9,7 @@ import csv
 import json
 import math
 import os
+import platform
 import re
 import statistics
 import subprocess
@@ -17,7 +18,6 @@ import time
 from shutil import which
 
 REALWORLD_BENCHMARKS = [
-    "coremark",
     "dhrystone",
     "median",
     "memcpy",
@@ -571,6 +571,7 @@ def run_benchmark_single(
     nm_tool,
     objcopy_tool,
     isa_override,
+    warmups,
 ):
     # Resolve ELF path
     elf_path = test_target
@@ -619,7 +620,7 @@ def run_benchmark_single(
             simrv_bin = alt_bin
 
     xlen = detect_xlen(simrv_bin, elf_path)
-    isa = isa_override or (f"rv{xlen}gc_zicntr_zihpm" if xlen else "rv32gc_zicntr_zihpm")
+    isa = isa_override or f"rv{xlen}gc"
 
     simrv_times = []
     simrv_sim_times = []
@@ -631,12 +632,23 @@ def run_benchmark_single(
     print(f"  ELF path     : {elf_path}")
     print(f"  Tohost addr  : {tohost_addr}")
 
+    for _ in range(warmups):
+        warmup = subprocess.run(
+            [simrv_bin, "--cli", "-m", elf_path, "-e", str(limit), "-b", "-H", tohost_addr],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout,
+            stdin=subprocess.DEVNULL,
+        )
+        if warmup.returncode != 0:
+            print(f"  [ERROR] SimRV warmup failed on {test_basename}", file=sys.stderr)
+            return None
+
     # SimRV runs
     for i in range(1, runs + 1):
         log_file = os.path.join(log_dir, f"bench_simrv_{test_basename}_{i}.log")
         simrv_cmd = [
             simrv_bin,
-            "-a",
             "--cli",
             "-m",
             elf_path,
@@ -695,13 +707,11 @@ def run_benchmark_single(
     # Spike runs
     spike_times = []
     spike_speeds = []
-    spike_available = is_executable(spike_bin) or which(spike_bin)
+    spike_available = spike_bin and (is_executable(spike_bin) or which(spike_bin))
 
     if spike_available:
         for i in range(1, runs + 1):
             spike_cmd = [spike_bin, f"--isa={isa}"]
-            if simrv_instrs:
-                spike_cmd.append(f"--instructions={simrv_instrs}")
             spike_cmd.append(elf_path)
             start_t = time.perf_counter()
             try:
@@ -718,9 +728,7 @@ def run_benchmark_single(
                         f"  [ERROR] Spike failed on {test_basename} (code {res.returncode}): {err_msg}",
                         file=sys.stderr,
                     )
-                    spike_times.append(0.0)
-                    spike_speeds.append(0.0)
-                    continue
+                    return None
 
                 elapsed = end_t - start_t
                 spike_times.append(elapsed)
@@ -735,8 +743,7 @@ def run_benchmark_single(
                     f"  [ERROR] Spike timed out on {test_basename} (iter {i})",
                     file=sys.stderr,
                 )
-                spike_times.append(0.0)
-                spike_speeds.append(0.0)
+                return None
 
     simrv_wall_speeds = (
         [(simrv_instrs / t) / 1000.0 for t in simrv_times]
@@ -784,9 +791,14 @@ def main():
         description="SimRV & Spike Publication-Ready Benchmarking Suite"
     )
     parser.add_argument("--simrv", help="Path to SimRV executable")
-    parser.add_argument("--spike", default="spike", help="Path to Spike executable")
+    parser.add_argument(
+        "--spike", help="Optional path to a compatible Spike executable"
+    )
     parser.add_argument(
         "-n", "--runs", type=int, default=5, help="Number of benchmark iterations"
+    )
+    parser.add_argument(
+        "--warmups", type=int, default=1, help="Unmeasured warmup runs per benchmark"
     )
     parser.add_argument(
         "-t",
@@ -839,6 +851,9 @@ def main():
 
     if args.runs <= 0:
         print("ERROR: --runs must be a positive integer", file=sys.stderr)
+        sys.exit(1)
+    if args.warmups < 0:
+        print("ERROR: --warmups cannot be negative", file=sys.stderr)
         sys.exit(1)
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -913,6 +928,7 @@ def main():
             nm_tool,
             objcopy_tool,
             args.isa,
+            args.warmups,
         )
         if result:
             suite_results.append(result)
@@ -924,6 +940,13 @@ def main():
                     args.runs,
                     result["instructions"],
                 )
+
+    if len(suite_results) != len(targets):
+        print(
+            f"ERROR: benchmark suite incomplete ({len(suite_results)}/{len(targets)} targets succeeded)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     if len(targets) > 1 and suite_results:
         print_suite_stats_table(suite_results)
@@ -943,7 +966,17 @@ def main():
         report_data = (
             suite_results[0]
             if len(suite_results) == 1
-            else {"suite_results": suite_results}
+            else {
+                "environment": {
+                    "platform": platform.platform(),
+                    "processor": platform.processor(),
+                    "python": platform.python_version(),
+                    "runs": args.runs,
+                    "warmups": args.warmups,
+                    "instruction_limit": args.limit,
+                },
+                "suite_results": suite_results,
+            }
         )
         with open(args.json, "w") as jf:
             json.dump(report_data, jf, indent=2)

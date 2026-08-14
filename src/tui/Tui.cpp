@@ -92,6 +92,9 @@ Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
             scroll_offset_ += lines;
         }
     });
+    vt_.set_response_callback([this](std::string_view response) -> void {
+        for (const char byte : response) write_guest_input(static_cast<uint8_t>(byte));
+    });
     vt_log_.set_scroll_offset_callback([this](int lines) -> void {
         if (scroll_offset_ > 0) {
             scroll_offset_ += lines;
@@ -571,20 +574,10 @@ void Tui::render(bool force) {
 
     render_update_speed(now);
 
-    int default_left_width = (term_width <= 120)
-                                 ? std::max(40, (term_width * 33) / 100)
-                                 : std::min(75, std::max(40, (term_width * 40) / 100));
-    int left_pane_width = user_left_pane_width_ > 0 ? user_left_pane_width_ : default_left_width;
-    left_pane_width = std::clamp(left_pane_width, 40, std::max(20, term_width - 10));
+    const PaneWidths panes = calculate_pane_widths(term_width, layout_, user_left_pane_width_);
+    const int left_pane_width = panes.left;
+    const int right_pane_width = panes.right;
     pane_width_cached_ = left_pane_width;
-    int right_pane_width = std::max(0, term_width - left_pane_width - 3);
-    if (layout_ == TuiLayout::FullRight) {
-        left_pane_width = 0;
-        right_pane_width = term_width - 2;
-    } else if (layout_ == TuiLayout::FullLeft) {
-        left_pane_width = term_width - 2;
-        right_pane_width = 0;
-    }
 
     int num_rows = term_height - 7;
     int total = (panel_mode == TuiRightPanelMode::Terminal) ? vt_.get_lines_count() : 0;
@@ -1029,15 +1022,18 @@ void Tui::toggle_trace_enabled() {
     render(true);
 }
 
-void Tui::set_terminal_focused(bool focused) {
-    bool const prev = is_terminal_focused_.exchange(focused, std::memory_order_relaxed);
-    if (prev != focused) {
-        render(true);
-    }
+void Tui::toggle_run_state() {
+    if (paused_.load(std::memory_order_relaxed))
+        unpause_loop();
+    else
+        pause_loop();
 }
 
-void Tui::toggle_terminal_focus() {
-    set_terminal_focused(!is_terminal_focused_.load(std::memory_order_relaxed));
+void Tui::write_guest_input(uint8_t byte) {
+    // The platform's chosen console is the 16550 UART (ttyS0). Do not duplicate input into the
+    // optional VirtIO console: doing so makes one keyboard appear as two independent terminals and
+    // leaves stale input queued if a VirtIO driver is enabled later.
+    if (machine_.uart) machine_.uart->push_rx_byte(normalize_guest_terminal_byte(byte));
 }
 
 void Tui::update_trace_active_cache() {
@@ -1233,14 +1229,10 @@ void Tui::adjust_left_pane_width(int delta) {
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);  // NOLINT(cppcoreguidelines-pro-type-vararg)
     int term_width = w.ws_col;
 
-    int default_left_width = (term_width <= 120)
-                                 ? std::max(40, (term_width * 33) / 100)
-                                 : std::min(75, std::max(40, (term_width * 40) / 100));
-    int current = user_left_pane_width_ > 0 ? user_left_pane_width_ : default_left_width;
-    current += delta;
-    if (current < 40) current = 40;
-    if (current > term_width - 10) current = std::max(20, term_width - 10);
-    user_left_pane_width_ = current;
+    const PaneWidths current =
+        calculate_pane_widths(term_width, TuiLayout::Split, user_left_pane_width_);
+    user_left_pane_width_ =
+        calculate_pane_widths(term_width, TuiLayout::Split, current.left + delta).left;
     render(true);
 }
 
@@ -1267,42 +1259,37 @@ auto Tui::poll_keyboard(uint8_t& byte_out) -> bool {
 void Tui::update() {
     uint8_t byte = 0;
     while (poll_keyboard(byte)) {
-        // Ctrl-A toggles terminal focus in all states (running and paused).
-        if (byte == 0x01) {
-            toggle_terminal_focus();
-            continue;
-        }
-
-        if (consume_control_sequence(byte)) {
-            continue;
-        }
-
+        const InputContext context{
+            .modal_active = is_modal_active(),
+            .paused = paused_.load(std::memory_order_relaxed),
+        };
+        const InputRoute route = route_input(byte, context);
         const auto key = static_cast<simrv::tui::TuiKey>(byte);
-        if (handle_modal_keyboard_input(byte, key)) {
-            continue;
-        }
-
-        if (paused_.load(std::memory_order_relaxed) ||
-            !is_terminal_focused_.load(std::memory_order_relaxed)) {
-            handle_normal_keyboard_input(byte, key);
-        } else {
-            if (key == simrv::tui::TuiKey::CtrlP || byte == 0x10) {
+        switch (route) {
+            case InputRoute::ControlSequence:
+                if (!consume_control_sequence(byte)) {
+                    (void)handle_modal_keyboard_input(byte, key);
+                }
+                break;
+            case InputRoute::Modal:
+                (void)handle_modal_keyboard_input(byte, key);
+                break;
+            case InputRoute::Navigation:
+                handle_normal_keyboard_input(byte, key);
+                break;
+            case InputRoute::Pause:
                 pause_loop();
                 return;
-            }
-            if (key == simrv::tui::TuiKey::CtrlQ || byte == 0x11) {
+            case InputRoute::Quit:
                 machine_.is_running_ = false;
+                // Wake a paused simulation thread so shutdown can join it cleanly.
+                unpause_loop();
                 return;
-            }
-
-            // The integrated TUI is itself a terminal endpoint. Feed the UART directly;
-            // the PTY master is reserved for independent programs attached to its slave.
-            if (machine_.uart) {
-                machine_.uart->push_rx_byte(byte);
-            }
-            if (machine_.console) {
-                machine_.console->push_input_byte(byte);
-            }
+            case InputRoute::Guest:
+                // The integrated terminal is an attached UART endpoint. The external PTY slave is
+                // another endpoint for the same UART and remains available to independent tools.
+                write_guest_input(byte);
+                break;
         }
     }
 }
@@ -1599,11 +1586,6 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
         return;
     }
 
-    // Ctrl-A toggles terminal focus (handled in update() too, but keep here for consistency)
-    if (byte == 0x01) {
-        toggle_terminal_focus();
-        return;
-    }
     if (key == simrv::tui::TuiKey::CtrlP || key == simrv::tui::TuiKey::c ||
         key == simrv::tui::TuiKey::C) {
         if (machine_.is_shutdown_) {
@@ -1677,17 +1659,11 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
 
 void Tui::pause_loop() {
     set_paused(true);
-    set_terminal_focused(false);
     update_cache();
     render(true);
 }
 
-void Tui::unpause_loop() {
-    set_paused(false);
-    if (machine_.is_running_ && !machine_.is_shutdown_) {
-        set_terminal_focused(true);
-    }
-}
+void Tui::unpause_loop() { set_paused(false); }
 
 void Tui::execute_footer_action(TuiFooterAction action) {
     switch (action) {
@@ -2062,7 +2038,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                         pause_loop();
                     }
                 } else if (status_bar_->is_pos_on_right_panel_attached(x)) {
-                    toggle_terminal_focus();
+                    toggle_run_state();
                 } else if (status_bar_->is_pos_on_right_panel_mode(x)) {
                     cycle_right_panel_mode();
                 }
@@ -2139,9 +2115,9 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         }
     }
 
-    if (machine_.uart) {
+    if (!paused_.load(std::memory_order_relaxed)) {
         for (char c : esc_buf_) {
-            machine_.uart->push_rx_byte(static_cast<uint8_t>(c));
+            write_guest_input(static_cast<uint8_t>(c));
         }
     }
     return true;

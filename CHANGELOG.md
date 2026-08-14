@@ -3,6 +3,52 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — v2.0.0 release hardening
+
+### Breaking CLI cleanup
+
+SimRV 2.0 removes ambiguous and deprecated aliases. Removed options fail with an explicit
+replacement instead of silently changing behavior.
+
+| Removed | Replacement |
+|---|---|
+| `-k`, `-i`, `--kernel` | `-m`, `--image` |
+| `--dtb` | `-f`, `--fdt` |
+| `-a`, `--app` | `-b`, `--baremetal` |
+| `-o`, `--linux` | `--os` |
+| `--headless`, `--no-tui` | `-c`, `--cli` |
+| `--high-accuracy`, `--accuracy-mode` | `-C`, `--cycle-accurate` |
+| `--perf-mode` | `--high-performance`, `--ia` |
+| `--vector-len` | `--vlen` |
+| `--mouse-speed` | `--mouse-sensitivity` |
+| `--contrast` | `--high-contrast` |
+| `--disable-forwarding` | `--no-forwarding` |
+| `-B`, `--opensbi` | Remove it; OpenSBI is automatic with `--fdt` |
+
+The conflicting `-G` alias is now GUI-only; use `--gdb` for the GDB server. The conflicting `-c`
+alias is now CLI-only; use `-f` or `--fdt` for a device tree.
+
+### TUI framework hardening
+
+- Split byte-routing policy from terminal I/O so focused guest input, modal input, and paused
+  navigation have deterministic behavior and native test coverage.
+- Added native tests for Enter routing, ANSI/UTF-8 parsing, scrollback, selection, resize/reset,
+  themes, and keybinding registry integrity.
+- Invalid TUI keybinding actions now report an error instead of silently resolving to Step.
+
+### Machine, interrupt, and memory correctness
+
+- Reset now clears PLIC, CLINT, pipeline, timer-target, and interrupt-controller state instead of
+  carrying device state across a reboot.
+- CLINT timer writes generate machine timer interrupts; directly emulated SBI timers generate
+  supervisor timer interrupts without asserting both causes simultaneously.
+- PLIC claims now honor context thresholds.
+- MMIO registration rejects empty, wrapping, overlapping, and containing ranges; transactions that
+  cross a device boundary or use unsupported opcodes return bus errors.
+- Unaligned guest RAM accesses no longer rely on undefined host pointer casts, and framebuffer
+  accesses are checked across their complete width.
+- Bare-metal fast batches honor instruction limits exactly and stop promptly after a halt request.
+
 ## [v2.0.0-rc.8] — 2026-08-08
 
 Release candidate 8 for v2.0.0. Focuses on CMake user presets modularization, scrubbing hardcoded workspace paths, floating-point rounding precision under Clang, dual-architecture `riscv-tests` integration, and repository documentation polish.

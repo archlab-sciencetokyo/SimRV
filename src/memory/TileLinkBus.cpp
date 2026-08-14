@@ -20,9 +20,7 @@ using simrv::isa::Funct3;
 
 TileLinkBus::TileLinkBus(simrv::core::Machine& machine) : machine_(machine) {}
 
-void TileLinkBus::add_node(TileLinkNode* node) {
-    router_.register_device(node);
-}
+void TileLinkBus::add_node(TileLinkNode* node) { router_.register_device(node); }
 
 auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
     req_queue_.push(req);
@@ -54,7 +52,8 @@ void TileLinkBus::tick() {
                 ++read_count_;
                 handled = true;
             }
-        } else {
+        } else if (req.opcode == TlOpcodeA::PutFullData ||
+                   req.opcode == TlOpcodeA::PutPartialData) {
             resp.opcode = TlOpcodeD::AccessAck;
             const bool is_tohost_write = simrv::xlen::kIsXLen64
                                              ? (funct3 == static_cast<Instruction>(Funct3::Sw) ||
@@ -79,6 +78,9 @@ void TileLinkBus::tick() {
                 ++write_count_;
                 handled = true;
             }
+        } else {
+            resp.error = true;
+            handled = true;
         }
 
         if (!handled) {

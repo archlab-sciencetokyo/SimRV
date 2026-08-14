@@ -16,8 +16,10 @@ jobs:
       image: almalinux:10
 
     strategy:
+      fail-fast: false
       matrix:
         arch: [rv32, rv64]
+        compiler: [gcc, clang]
 
     steps:
     - uses: actions/checkout@v6
@@ -61,10 +63,20 @@ jobs:
     - name: Configure CMake
       env:
         RISCV_TESTS_DIR: ${{ runner.temp }}/riscv-tests
-      run: >-
-        cmake --preset ${{ matrix.arch }}-release
-        -DCMAKE_C_COMPILER=gcc
-        -DCMAKE_CXX_COMPILER=g++
+      shell: bash
+      run: |
+        if [[ "${{ matrix.compiler }}" == "clang" ]]; then
+          CC=clang
+          CXX=clang++
+        else
+          CC=gcc
+          CXX=g++
+        fi
+        cmake --preset ${{ matrix.arch }}-release \
+          -DCMAKE_C_COMPILER="$CC" \
+          -DCMAKE_CXX_COMPILER="$CXX" \
+          -DSIMRV_WARNINGS_AS_ERRORS=ON \
+          -DSIMRV_ENABLE_SDL=OFF
 
     - name: Build
       run: cmake --build --preset ${{ matrix.arch }}-release
@@ -73,3 +85,60 @@ jobs:
       env:
         RISCV_TESTS_DIR: ${{ runner.temp }}/riscv-tests
       run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L gate
+
+  quality:
+    runs-on: ubuntu-latest
+    container:
+      image: almalinux:10
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Install quality tools
+      run: dnf install -y cmake ninja-build gcc gcc-c++ clang clang-tools-extra python3
+    - name: Check release metadata
+      run: python3 scripts/release_check.py
+    - name: Check formatting
+      shell: bash
+      run: |
+        if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          BASE="${{ github.event.pull_request.base.sha }}"
+        else
+          BASE="${{ github.event.before }}"
+        fi
+        mapfile -t FILES < <(git diff --name-only --diff-filter=ACMR "$BASE" -- '*.cpp' '*.hpp')
+        if (( ${#FILES[@]} )); then
+          clang-format --dry-run --Werror "${FILES[@]}"
+        fi
+    - name: Configure ASan and UBSan
+      run: >-
+        cmake -S . -B build/asan -G Ninja
+        -DCMAKE_BUILD_TYPE=Debug -DSIMRV_XLEN=64 -DSIMRV_ENABLE_SDL=OFF
+        -DSIMRV_WARNINGS_AS_ERRORS=ON -DSIMRV_ENABLE_ASAN=ON -DSIMRV_ENABLE_UBSAN=ON
+    - name: Build ASan and UBSan
+      run: cmake --build build/asan
+    - name: Run sanitizer regressions
+      env:
+        ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1
+        UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      run: ctest --test-dir build/asan --output-on-failure -L regress
+
+  thread-sanitizer:
+    runs-on: ubuntu-latest
+    container:
+      image: almalinux:10
+    steps:
+    - uses: actions/checkout@v6
+    - name: Install build tools
+      run: dnf install -y cmake ninja-build gcc gcc-c++ python3
+    - name: Configure TSan
+      run: >-
+        cmake -S . -B build/tsan -G Ninja
+        -DCMAKE_BUILD_TYPE=Debug -DSIMRV_XLEN=64 -DSIMRV_ENABLE_SDL=OFF
+        -DSIMRV_ENABLE_TSAN=ON
+    - name: Build TSan
+      run: cmake --build build/tsan
+    - name: Run thread-focused smoke tests
+      env:
+        TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+      run: ctest --test-dir build/tsan --output-on-failure -R 'tui-framework|cli-|release-metadata'

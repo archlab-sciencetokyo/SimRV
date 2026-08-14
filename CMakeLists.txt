@@ -3,6 +3,10 @@ cmake_minimum_required(VERSION 3.20)
 project(SimRV LANGUAGES CXX)
 
 enable_testing()
+find_program(PYTHON_BIN NAMES "python3" "python" DOC "Path to Python interpreter")
+if(NOT PYTHON_BIN)
+  set(PYTHON_BIN "python3")
+endif()
 
 set(SIMRV_VERSION "2.0.0-rc.8")
 set(SIMRV_GIT_BRANCH "unknown")
@@ -66,6 +70,16 @@ if(SIMRV_ENABLE_CLANG_TIDY)
   set(CMAKE_CXX_CLANG_TIDY clang-tidy)
 endif()
 
+option(SIMRV_WARNINGS_AS_ERRORS "Treat project compiler warnings as errors" OFF)
+option(SIMRV_ENABLE_ASAN "Enable AddressSanitizer" OFF)
+option(SIMRV_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
+option(SIMRV_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
+option(SIMRV_ENABLE_SDL "Enable optional SDL3 graphics and audio" ON)
+
+if(SIMRV_ENABLE_TSAN AND (SIMRV_ENABLE_ASAN OR SIMRV_ENABLE_UBSAN))
+  message(FATAL_ERROR "ThreadSanitizer must use a separate build from ASan/UBSan")
+endif()
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT "cxx_std_23" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
@@ -127,6 +141,7 @@ add_executable(SimRV
   src/device/Uart.cpp
   src/device/Power.cpp
   src/tui/Tui.cpp
+  src/tui/TuiGuidance.cpp
   src/tui/TuiKeybindings.cpp
   src/tui/TuiModal.cpp
   src/tui/TuiTheme.cpp
@@ -177,15 +192,17 @@ target_include_directories(SimRV PRIVATE
   ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 
-find_package(SDL3 QUIET)
-if(NOT SDL3_FOUND)
+if(SIMRV_ENABLE_SDL)
+  find_package(SDL3 QUIET)
+endif()
+if(SIMRV_ENABLE_SDL AND NOT SDL3_FOUND)
   find_package(PkgConfig QUIET)
   if(PKG_CONFIG_FOUND)
     pkg_check_modules(SDL3 sdl3)
   endif()
 endif()
 
-if(SDL3_FOUND)
+if(SIMRV_ENABLE_SDL AND SDL3_FOUND)
   message(STATUS "SDL3 found: compiling with SDL3 graphics support")
   target_compile_definitions(SimRV PRIVATE HAVE_SDL3)
   if(TARGET SDL3::SDL3)
@@ -204,6 +221,23 @@ target_compile_options(SimRV PRIVATE
   -Wextra
   -Wpedantic
 )
+
+if(SIMRV_WARNINGS_AS_ERRORS)
+  target_compile_options(SimRV PRIVATE -Werror)
+endif()
+
+if(SIMRV_ENABLE_ASAN)
+  target_compile_options(SimRV PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+  target_link_options(SimRV PRIVATE -fsanitize=address)
+endif()
+if(SIMRV_ENABLE_UBSAN)
+  target_compile_options(SimRV PRIVATE -fsanitize=undefined -fno-omit-frame-pointer)
+  target_link_options(SimRV PRIVATE -fsanitize=undefined)
+endif()
+if(SIMRV_ENABLE_TSAN)
+  target_compile_options(SimRV PRIVATE -fsanitize=thread -fno-omit-frame-pointer)
+  target_link_options(SimRV PRIVATE -fsanitize=thread)
+endif()
 
 include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-frounding-math" COMPILER_SUPPORTS_FROUNDING_MATH)
@@ -267,6 +301,59 @@ find_program(SPIKE_BIN spike DOC "Path to Spike binary for lockstep co-simulatio
 set(ISA_WORK_DIR "${CMAKE_CURRENT_BINARY_DIR}/.isa_tmp")
 file(MAKE_DIRECTORY "${ISA_WORK_DIR}")
 
+# Fast, deterministic tests for the terminal parser, theme helpers, and key registry.
+add_executable(simrv-tui-tests
+  tests/TuiFrameworkTests.cpp
+  src/tui/TuiGuidance.cpp
+  src/tui/TuiKeybindings.cpp
+  src/tui/TuiTheme.cpp
+)
+target_compile_features(simrv-tui-tests PRIVATE cxx_std_23)
+target_include_directories(simrv-tui-tests PRIVATE include)
+target_compile_options(simrv-tui-tests PRIVATE -Wall -Wextra -Wpedantic)
+if(SIMRV_WARNINGS_AS_ERRORS)
+  target_compile_options(simrv-tui-tests PRIVATE -Werror)
+endif()
+if(SIMRV_ENABLE_ASAN)
+  target_compile_options(simrv-tui-tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+  target_link_options(simrv-tui-tests PRIVATE -fsanitize=address)
+endif()
+if(SIMRV_ENABLE_UBSAN)
+  target_compile_options(simrv-tui-tests PRIVATE -fsanitize=undefined -fno-omit-frame-pointer)
+  target_link_options(simrv-tui-tests PRIVATE -fsanitize=undefined)
+endif()
+if(SIMRV_ENABLE_TSAN)
+  target_compile_options(simrv-tui-tests PRIVATE -fsanitize=thread -fno-omit-frame-pointer)
+  target_link_options(simrv-tui-tests PRIVATE -fsanitize=thread)
+endif()
+
+add_test(NAME tui-framework COMMAND simrv-tui-tests)
+set_tests_properties(tui-framework PROPERTIES LABELS "gate;regress;tui")
+
+add_executable(simrv-core-semantics-tests
+  tests/CoreSemanticsTests.cpp
+  src/core/Logger.cpp
+  src/memory/MmioRouter.cpp
+)
+target_compile_features(simrv-core-semantics-tests PRIVATE cxx_std_23)
+target_compile_definitions(simrv-core-semantics-tests PRIVATE SIMRV_XLEN=${SIMRV_XLEN})
+target_include_directories(simrv-core-semantics-tests PRIVATE include)
+target_compile_options(simrv-core-semantics-tests PRIVATE -Wall -Wextra -Wpedantic)
+if(SIMRV_WARNINGS_AS_ERRORS)
+  target_compile_options(simrv-core-semantics-tests PRIVATE -Werror)
+endif()
+if(SIMRV_ENABLE_ASAN)
+  target_compile_options(simrv-core-semantics-tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+  target_link_options(simrv-core-semantics-tests PRIVATE -fsanitize=address)
+endif()
+if(SIMRV_ENABLE_UBSAN)
+  target_compile_options(simrv-core-semantics-tests PRIVATE -fsanitize=undefined -fno-omit-frame-pointer)
+  target_link_options(simrv-core-semantics-tests PRIVATE -fsanitize=undefined)
+endif()
+
+add_test(NAME core-semantics COMMAND simrv-core-semantics-tests)
+set_tests_properties(core-semantics PROPERTIES LABELS "gate;regress;memory;mmio")
+
 # Native CLI tests
 add_test(NAME cli-help COMMAND $<TARGET_FILE:SimRV> -h)
 set_tests_properties(cli-help PROPERTIES
@@ -280,9 +367,26 @@ set_tests_properties(cli-invalid-option PROPERTIES
   LABELS "gate;regress;cli"
 )
 
+add_test(NAME cli-removed-option COMMAND $<TARGET_FILE:SimRV> --headless)
+set_tests_properties(cli-removed-option PROPERTIES
+  PASS_REGULAR_EXPRESSION "removed in SimRV 2.0; use --cli"
+  LABELS "gate;regress;cli"
+)
+
+add_test(NAME cli-removed-linux-option COMMAND $<TARGET_FILE:SimRV> --linux)
+set_tests_properties(cli-removed-linux-option PROPERTIES
+  PASS_REGULAR_EXPRESSION "removed in SimRV 2.0; use --os"
+  LABELS "gate;regress;cli"
+)
+
+add_test(NAME release-metadata
+  COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/release_check.py
+)
+set_tests_properties(release-metadata PROPERTIES LABELS "gate;regress;release")
+
 # Optional App/Linux smoke tests
 if(DEFINED ENV{SIMRV_APP_IMG})
-  add_test(NAME app-smoke COMMAND $<TARGET_FILE:SimRV> -m $ENV{SIMRV_APP_IMG} -a -e 200000)
+  add_test(NAME app-smoke COMMAND $<TARGET_FILE:SimRV> -m $ENV{SIMRV_APP_IMG} -b -e 200000)
   set_tests_properties(app-smoke PROPERTIES
     TIMEOUT 20
     LABELS "gate;regress;app"
@@ -292,7 +396,7 @@ endif()
 if(DEFINED ENV{SIMRV_LINUX_MEM_IMG} AND DEFINED ENV{SIMRV_LINUX_DISK_IMG})
   set(LINUX_BOOT_CMD $<TARGET_FILE:SimRV> -m $ENV{SIMRV_LINUX_MEM_IMG} -D $ENV{SIMRV_LINUX_DISK_IMG} -e 1000000)
   if(DEFINED ENV{SIMRV_LINUX_DTB})
-    list(APPEND LINUX_BOOT_CMD -c $ENV{SIMRV_LINUX_DTB})
+    list(APPEND LINUX_BOOT_CMD -f $ENV{SIMRV_LINUX_DTB})
   endif()
   add_test(NAME linux-boot COMMAND ${LINUX_BOOT_CMD})
   set_tests_properties(linux-boot PROPERTIES
@@ -504,6 +608,15 @@ add_custom_target(isa-gate
   USES_TERMINAL
 )
 
+add_custom_target(release-check
+  COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/release_check.py
+    --binary $<TARGET_FILE:SimRV>
+  DEPENDS SimRV
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  COMMENT "Validating SimRV release metadata and binary"
+  VERBATIM
+)
+
 if(EXISTS "/var/archlab-modules/riscv-vector-tests/2026.07.06" AND RISCV_GCC)
   add_custom_target(vector-gate
     COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/run_vector_tests.py
@@ -535,7 +648,7 @@ install(DIRECTORY include/simrv
 add_custom_target(run-tui
   COMMAND $<TARGET_FILE:SimRV> -m ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/fw_payload.bin
                                -D ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/root.bin
-                               -c ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/devicetree.dtb
+                               -f ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/devicetree.dtb
                                -u
   DEPENDS SimRV
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -547,7 +660,7 @@ add_custom_target(run-tui
 add_custom_target(run-linux
   COMMAND $<TARGET_FILE:SimRV> -m ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/fw_payload.bin
                                -D ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/root.bin
-                               -c ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/devicetree.dtb
+                               -f ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/devicetree.dtb
   DEPENDS SimRV
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
   COMMENT "Booting RV${SIMRV_XLEN} Linux in standard console mode..."
@@ -579,5 +692,3 @@ if(CLANG_FORMAT_BIN)
     USES_TERMINAL
   )
 endif()
-
-

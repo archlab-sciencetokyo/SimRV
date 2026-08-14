@@ -5,6 +5,7 @@
 #include "simrv/memory/MmioRouter.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <string_view>
 
 #include "simrv/core/Logger.hpp"
@@ -17,6 +18,10 @@ auto MmioRouter::register_device(TileLinkNode* node) -> bool {
     }
 
     const Address base = node->base_address();
+    if (node->size() == 0 || node->size() > std::numeric_limits<Address>::max() - base) {
+        simrv::log::warn("Rejecting invalid MMIO range for '{}'", node->name());
+        return false;
+    }
     const Address end = base + node->size();
 
     // Check for range overlaps with existing registered devices
@@ -25,22 +30,31 @@ auto MmioRouter::register_device(TileLinkNode* node) -> bool {
             return true;  // Already registered
         }
         const Address ex_base = existing->base_address();
+        if (existing->size() > std::numeric_limits<Address>::max() - ex_base) return false;
         const Address ex_end = ex_base + existing->size();
-        if ((existing->contains(base) || (end > base && existing->contains(end - 1))) &&
-            (node->contains(base) || (end > base && node->contains(end - 1)))) {
-            simrv::log::warn("MMIO address range collision detected: '{}' [{:#x}, {:#x}) conflicts with '{}' [{:#x}, {:#x})",
-                             node->name(), static_cast<unsigned long long>(base),
-                             static_cast<unsigned long long>(end), existing->name(),
-                             static_cast<unsigned long long>(ex_base),
-                             static_cast<unsigned long long>(ex_end));
+        const Address overlap_begin = std::max(base, ex_base);
+        const Address overlap_end = std::min(end, ex_end);
+        bool owns_same_byte = false;
+        for (Address address = overlap_begin; address < overlap_end; ++address) {
+            if (node->contains(address) && existing->contains(address)) {
+                owns_same_byte = true;
+                break;
+            }
+        }
+        if (owns_same_byte) {
+            simrv::log::warn(
+                "MMIO address range collision detected: '{}' [{:#x}, {:#x}) conflicts with '{}' "
+                "[{:#x}, {:#x})",
+                node->name(), static_cast<unsigned long long>(base),
+                static_cast<unsigned long long>(end), existing->name(),
+                static_cast<unsigned long long>(ex_base), static_cast<unsigned long long>(ex_end));
             return false;
         }
     }
 
     nodes_.push_back(node);
-    std::ranges::sort(nodes_, [](const auto* a, const auto* b) {
-        return a->base_address() < b->base_address();
-    });
+    std::ranges::sort(
+        nodes_, [](const auto* a, const auto* b) { return a->base_address() < b->base_address(); });
     return true;
 }
 
@@ -56,9 +70,7 @@ auto MmioRouter::unregister_device(TileLinkNode* node) -> bool {
     return false;
 }
 
-void MmioRouter::clear() {
-    nodes_.clear();
-}
+void MmioRouter::clear() { nodes_.clear(); }
 
 auto MmioRouter::resolve_device(Address addr) const -> TileLinkNode* {
     if (nodes_.empty()) {
@@ -66,9 +78,8 @@ auto MmioRouter::resolve_device(Address addr) const -> TileLinkNode* {
     }
 
     // Binary search over sorted base addresses
-    auto it = std::ranges::upper_bound(nodes_, addr, {}, [](const auto* node) {
-        return node->base_address();
-    });
+    auto it = std::ranges::upper_bound(nodes_, addr, {},
+                                       [](const auto* node) { return node->base_address(); });
 
     if (it != nodes_.begin()) {
         --it;
@@ -105,7 +116,22 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
     }
 
     const bool is_read = (req.opcode == TlOpcodeA::Get);
-    const bool is_write = (req.opcode == TlOpcodeA::PutFullData || req.opcode == TlOpcodeA::PutPartialData);
+    const bool is_write =
+        (req.opcode == TlOpcodeA::PutFullData || req.opcode == TlOpcodeA::PutPartialData);
+
+    if (!is_read && !is_write) {
+        resp.error = true;
+        ++bus_error_count_;
+        return true;
+    }
+
+    const Address request_bytes = static_cast<Address>(1u << (req.size & 0x3u));
+    if (request_bytes - 1 > std::numeric_limits<Address>::max() - req.address ||
+        !device->contains(req.address + request_bytes - 1)) {
+        resp.error = true;
+        ++bus_error_count_;
+        return true;
+    }
 
     if (is_write && device->is_read_only()) {
         resp.error = true;

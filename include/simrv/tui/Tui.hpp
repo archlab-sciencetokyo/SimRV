@@ -17,7 +17,9 @@
 #include "simrv/Define.hpp"
 #include "simrv/isa/Base.hpp"
 #include "simrv/isa/OperationId.hpp"
+#include "simrv/tui/TuiInputRouter.hpp"
 #include "simrv/tui/TuiKey.hpp"
+#include "simrv/tui/TuiLayoutPolicy.hpp"
 #include "simrv/tui/TuiModal.hpp"
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
@@ -159,11 +161,9 @@ class Tui {
     [[nodiscard]] auto get_layout() const -> TuiLayout { return layout_; }
     void adjust_left_pane_width(int delta);
 
-    /// Set keyboard input routing between guest VirtIO console and TUI navigation.
-    void set_terminal_focused(bool focused);
-    /// Toggle keyboard input routing between guest VirtIO console and TUI navigation.
-    void toggle_terminal_focus();
-    [[nodiscard]] auto is_terminal_focused() const -> bool { return is_terminal_focused_; }
+    /// Toggle the unified run/terminal-attachment state.
+    void toggle_run_state();
+    [[nodiscard]] auto is_terminal_attached() const -> bool { return !is_paused(); }
 
     void handle_mouse(int x, int y, int b);
 
@@ -182,6 +182,9 @@ class Tui {
     };
 
     simrv::core::Machine& machine_;
+
+    /// Deliver one terminal byte to the configured guest console endpoint.
+    void write_guest_input(uint8_t byte);
     TuiModal modal_;
 
     std::unique_ptr<LeftPane> left_pane_;
@@ -239,7 +242,6 @@ class Tui {
     std::string esc_buf_;
     std::atomic<bool> sim_thread_is_sleeping_{false};
     std::thread::id main_thread_id_;
-    std::atomic<bool> is_terminal_focused_{true};  // True when Ctrl-A routes keys to guest console
 
     auto consume_control_sequence(uint8_t first_byte) -> bool;
     auto parse_sgr_mouse(const std::string& seq, int& b, int& x, int& y) -> bool;

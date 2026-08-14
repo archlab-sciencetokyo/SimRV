@@ -87,6 +87,14 @@ void InterruptController::setIrq(PlicMmio& plic, int irq_num, int state_val) {
     plic.cpu_.plic_update_mip();
 }
 
+void PlicMmio::reset() {
+    plic_pending.fill(0);
+    plic_priorities.fill(0);
+    for (auto& enables : plic_enables) enables.fill(0);
+    plic_threshold.fill(0);
+    plic_claim.fill(0);
+}
+
 auto PlicMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
     if (req.opcode == memory::TlOpcodeA::Get) {
         resp.data = mmio_read(offset(req.address));
@@ -136,6 +144,9 @@ auto PlicMmio::mmio_read(Address offset) -> Word {
                         claim_id = i;
                     }
                 }
+            }
+            if (max_prio <= plic_threshold.at(ctx_idx)) {
+                claim_id = 0;
             }
             if (claim_id > 0) {
                 // Clear the pending bit on claim
@@ -206,9 +217,11 @@ auto ClintMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
     } else {
         if (req_bytes == 8) {
             if (off == kClintMtimecmpOffset) {
+                supervisor_timer.store(false, std::memory_order_release);
                 mtimecmp.store(static_cast<Counter>(req.data), std::memory_order_release);
                 cpu_.evaluate_timer_interrupt();
             } else if (off == kClintMtimeOffset) {
+                supervisor_timer.store(false, std::memory_order_release);
                 mtime.store(static_cast<Counter>(req.data), std::memory_order_release);
                 cpu_.evaluate_timer_interrupt();
             } else {
@@ -219,6 +232,14 @@ auto ClintMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
         }
     }
     return true;
+}
+
+void ClintMmio::reset() {
+    mtime.store(1, std::memory_order_release);
+    mtimecmp.store(0, std::memory_order_release);
+    supervisor_timer.store(false, std::memory_order_release);
+    mcycle = 1;
+    rtc_divider = 0;
 }
 
 auto ClintMmio::mmio_read(Address offset) const -> Word {
@@ -232,7 +253,8 @@ auto ClintMmio::mmio_read(Address offset) const -> Word {
         case kClintMtimecmpOffset:
             return static_cast<Word>(mtimecmp.load(std::memory_order_relaxed) & kWord32Mask);
         case kClintMtimecmpOffset + 4:
-            return static_cast<Word>((mtimecmp.load(std::memory_order_relaxed) >> 32) & kWord32Mask);
+            return static_cast<Word>((mtimecmp.load(std::memory_order_relaxed) >> 32) &
+                                     kWord32Mask);
         default:
             return 0;
     }
@@ -249,12 +271,14 @@ void ClintMmio::mmio_write(Address offset, Word wdata) {
             }
             break;
         case kClintMtimecmpOffset: {
+            supervisor_timer.store(false, std::memory_order_release);
             const Counter cur = mtimecmp.load(std::memory_order_relaxed);
             mtimecmp.store((cur & ~kWord32Mask) | wdata_64, std::memory_order_release);
             cpu_.evaluate_timer_interrupt();
             break;
         }
         case kClintMtimecmpOffset + 4: {
+            supervisor_timer.store(false, std::memory_order_release);
             const Counter cur = mtimecmp.load(std::memory_order_relaxed);
             mtimecmp.store((cur & kWord32Mask) | (wdata_64 << kWord32Shift),
                            std::memory_order_release);
@@ -262,12 +286,14 @@ void ClintMmio::mmio_write(Address offset, Word wdata) {
             break;
         }
         case kClintMtimeOffset: {
+            supervisor_timer.store(false, std::memory_order_release);
             const Counter cur = mtime.load(std::memory_order_relaxed);
             mtime.store((cur & ~kWord32Mask) | wdata_64, std::memory_order_release);
             cpu_.evaluate_timer_interrupt();
             break;
         }
         case kClintMtimeOffset + 4: {
+            supervisor_timer.store(false, std::memory_order_release);
             const Counter cur = mtime.load(std::memory_order_relaxed);
             mtime.store((cur & kWord32Mask) | (wdata_64 << kWord32Shift),
                         std::memory_order_release);

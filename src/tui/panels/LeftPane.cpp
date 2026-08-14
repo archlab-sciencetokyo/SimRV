@@ -14,6 +14,7 @@
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/tui/TuiGuidance.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -294,6 +295,25 @@ auto LeftPane::render_log_bottom_row(int row_idx, int num_rows, int width) -> st
     return format_to_width(" " + log_lines_.at(static_cast<std::size_t>(log_idx)), width);
 }
 
+auto LeftPane::render_guidance_row(int row_idx, int width) -> std::string {
+    auto const guidance = guidance_for_page(page_, machine_.s_cycle_accurate);
+    switch (row_idx) {
+        case 0:
+            return section_line("Learn · " + std::string(guidance.title), width);
+        case 1:
+            return format_to_width(" Meaning: " + std::string(guidance.meaning), width);
+        case 2:
+            return format_to_width(" Connect: " + std::string(guidance.relationship), width);
+        case 3: {
+            auto const& binding = Keybindings::get(guidance.next_action);
+            return format_to_width(
+                " Next: " + binding.key_display + " " + std::string(guidance.next_hint), width);
+        }
+        default:
+            return format_to_width("", width);
+    }
+}
+
 auto LeftPane::render_row(int row_idx, int width) -> std::string {
     last_width_ = width;
 
@@ -301,7 +321,13 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
         return render_tab_bar(width);
     }
 
-    constexpr int kLogAreaHeight = 10;
+    constexpr int kGuidanceHeight = 4;
+    constexpr int kLogAreaHeight = 6;
+    bool const show_guidance = paused_ && visible_rows_ >= 16;
+    int const guidance_start = visible_rows_ - kLogAreaHeight - kGuidanceHeight;
+    if (show_guidance && row_idx >= guidance_start && row_idx < guidance_start + kGuidanceHeight) {
+        return render_guidance_row(row_idx - guidance_start, width);
+    }
     if (visible_rows_ >= 15 && row_idx >= visible_rows_ - kLogAreaHeight) {
         int log_row_idx = row_idx - (visible_rows_ - kLogAreaHeight);
         return render_log_bottom_row(log_row_idx, kLogAreaHeight, width);

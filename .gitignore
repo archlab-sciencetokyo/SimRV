@@ -9,6 +9,8 @@
 *.o
 *.obj
 *.pch
+__pycache__/
+*.pyc
 *.slo
 *.smod
 
@@ -46,13 +48,17 @@ perf*.data*
 .isa_tmp/
 isa_logs/
 regression_logs/
+release-report.json
 Testing/
 repro/
 
-# Generated documentation
-docs/
-# Unignore markdown documentation files (except NOTEBOOK_LM.md)
+# Generated documentation (source Markdown remains tracked)
+docs/*
 !docs/*.md
+docs/api/
+docs/NOTEBOOKLM_SUMMARY.md
+docs/ORIGINALITY.md
+docs/simrv_performance_optimizations.md
 trace/
 log/
 .clangd

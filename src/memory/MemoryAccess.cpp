@@ -12,6 +12,7 @@
 #include "simrv/device/Framebuffer.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/Mmu.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Helpers.hpp"
@@ -50,7 +51,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
         Word result = 0;
         for (unsigned b = 0; b < size_bytes; ++b) {
             Address byte_vaddr = v_addr + b;
-            Word byte_val = target_read(mem, cpu, byte_vaddr, static_cast<Instruction>(isa::Funct3::Lbu));
+            Word byte_val =
+                target_read(mem, cpu, byte_vaddr, static_cast<Instruction>(isa::Funct3::Lbu));
             if (cpu.pipeline_context.pending_exception.has_value()) {
                 cpu.pipeline_context.pending_tval = v_addr;
                 return 0;
@@ -113,11 +115,19 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     }
 
     auto issue_read = [&](Address addr) -> Word {
-        if (addr >= 0x30001000u && addr < 0x30200000u && cpu.machine_->framebuffer) {
-            uint8_t* fb_ptr = cpu.machine_->framebuffer->get_fb_ptr();
-            size_t fb_offset = addr - 0x30001000u;
-            uint64_t raw_val = 0;
+        constexpr Address kFramebufferDataBase = simrv::mmio::kFramebufferBaseAddress + 0x1000u;
+        constexpr Address kFramebufferEnd =
+            simrv::mmio::kFramebufferBaseAddress + simrv::mmio::kFramebufferSize;
+        if (addr >= kFramebufferDataBase && addr < kFramebufferEnd && cpu.machine_->framebuffer) {
             const unsigned req_size_bytes = 1u << (funct3 & 0x3u);
+            if (req_size_bytes > kFramebufferEnd - addr) {
+                cpu.pipeline_context.pending_exception = ExceptionCode::FaultLoad;
+                cpu.pipeline_context.pending_tval = v_addr;
+                return 0;
+            }
+            uint8_t* fb_ptr = cpu.machine_->framebuffer->get_fb_ptr();
+            size_t fb_offset = addr - kFramebufferDataBase;
+            uint64_t raw_val = 0;
             std::memcpy(&raw_val, fb_ptr + fb_offset, req_size_bytes);
 
             Word rdata = raw_val;
@@ -322,10 +332,18 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             Word old_val = simrv::memory::ram_read_fast(addr, funct3, mem.mmu()->mmem());
             cpu.record_mem_write(addr, old_val, funct3);
         }
-        if (addr >= 0x30001000u && addr < 0x30200000u && cpu.machine_->framebuffer) {
-            uint8_t* fb_ptr = cpu.machine_->framebuffer->get_fb_ptr();
-            size_t fb_offset = addr - 0x30001000u;
+        constexpr Address kFramebufferDataBase = simrv::mmio::kFramebufferBaseAddress + 0x1000u;
+        constexpr Address kFramebufferEnd =
+            simrv::mmio::kFramebufferBaseAddress + simrv::mmio::kFramebufferSize;
+        if (addr >= kFramebufferDataBase && addr < kFramebufferEnd && cpu.machine_->framebuffer) {
             const unsigned req_size_bytes = 1u << (funct3 & 0x3u);
+            if (req_size_bytes > kFramebufferEnd - addr) {
+                cpu.pipeline_context.pending_exception = ExceptionCode::FaultStore;
+                cpu.pipeline_context.pending_tval = v_addr;
+                return;
+            }
+            uint8_t* fb_ptr = cpu.machine_->framebuffer->get_fb_ptr();
+            size_t fb_offset = addr - kFramebufferDataBase;
             std::memcpy(fb_ptr + fb_offset, &data, req_size_bytes);
             cpu.machine_->framebuffer->set_dirty(true);
             return;

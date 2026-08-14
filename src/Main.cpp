@@ -35,8 +35,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     bool skip_banner = false;
     for (int i = 1; i < argc; ++i) {
         std::string_view const arg(argv[i]);
-        if (arg == "--cli" || arg == "-a" || arg == "-c" || arg == "--headless" ||
-            arg == "--no-tui") {
+        if (arg == "--cli" || arg == "-c") {
             is_tui = false;
         } else if (arg == "--tui" || arg == "-u") {
             is_tui = true;

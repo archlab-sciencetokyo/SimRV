@@ -17,11 +17,7 @@ namespace simrv::core {
 
 using namespace simrv::isa;
 
-void OSMachine::reset_synthetic_input() { synthetic_input_idx_ = 0; }
-
-void OSMachine::execute_cycle() {
-    cpu.run_cycle(*this);
-}
+void OSMachine::execute_cycle() { cpu.run_cycle(*this); }
 
 void OSMachine::prepare_cycle() {
     if (simrv::compiler::likely(s_high_performance && cpu.clint_mmio.mtime <= s_enabletimer)) {

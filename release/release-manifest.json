@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "version": "2.0.0-rc.8",
+  "release_tag": "v2.0.0-rc.8",
+  "host_support": {
+    "os": "Linux",
+    "architecture": "x86_64",
+    "compilers": {
+      "gcc": "14+",
+      "clang": "20+"
+    }
+  },
+  "guest_profiles": ["RV32GCBV", "RV64GCBV"],
+  "optional_features": ["SDL3 graphics and audio", "Spike lockstep", "GDB RSP"],
+  "release_blockers": [
+    "GCC and Clang RV32/RV64 release builds",
+    "RV32/RV64 gate and advertised ISA suites",
+    "RV32/RV64 vector suites",
+    "Linux boot and PTY regression",
+    "release archive extraction, checksum, version, and smoke checks"
+  ],
+  "performance": {
+    "minimum_geomean_improvement_percent": 5.0,
+    "maximum_individual_regression_percent": 3.0,
+    "minimum_samples": 5,
+    "statistic": "median"
+  },
+  "artifacts": [
+    "SimRV-rv32-linux-x86_64-v2.0.0-rc.8.tar.gz",
+    "SimRV-rv64-linux-x86_64-v2.0.0-rc.8.tar.gz",
+    "SimRV-docs-v2.0.0-rc.8.tar.gz"
+  ]
+}

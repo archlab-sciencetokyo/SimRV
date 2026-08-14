@@ -140,6 +140,7 @@ auto Sbi::handle_base(Word func_id) -> bool {
 
 auto Sbi::handle_time(Word func_id) -> bool {
     if (static_cast<TimeFid>(func_id) == TimeFid::SetTimer) {
+        cpu_.clint_mmio.supervisor_timer.store(true, std::memory_order_release);
         cpu_.clint_mmio.mtimecmp = timer_value();
         cpu_.state().mip &= ~enum_mask(MipBit::Mtip);
         cpu_.state().mip &= ~enum_mask(MipBit::Stip);

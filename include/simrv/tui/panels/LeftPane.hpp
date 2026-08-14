@@ -72,7 +72,8 @@ class LeftPane : public TuiWidget {
         -> std::optional<Register>;
     [[nodiscard]] auto get_stack_addr_at_row(int logical_row) const -> std::optional<Register>;
     [[nodiscard]] auto is_running_label_click(int logical_row, int col, int width) const -> bool;
-    [[nodiscard]] auto get_text_in_range(int start_row, int start_col, int end_row, int end_col, int width) -> std::string;
+    [[nodiscard]] auto get_text_in_range(int start_row, int start_col, int end_row, int end_col,
+                                         int width) -> std::string;
 
     void select_next_cache_set(int delta) {
         constexpr int kNumSets = 16;
@@ -96,6 +97,7 @@ class LeftPane : public TuiWidget {
     [[nodiscard]] auto render_tab_bar(int width) const -> std::string;
     [[nodiscard]] auto render_trace_row(int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_log_bottom_row(int row_idx, int num_rows, int width) -> std::string;
+    [[nodiscard]] auto render_guidance_row(int row_idx, int width) -> std::string;
 
     [[nodiscard]] auto get_sparkline_string(int width) -> std::string;
     [[nodiscard]] auto get_row_uncached(int logical_row, int width) -> std::string;

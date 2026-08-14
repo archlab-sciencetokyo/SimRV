@@ -67,8 +67,9 @@ void SdlAudio::shutdown_audio() {
 #endif
 }
 
-void SdlAudio::play_channel(int chan, Address phys_addr, Word length, Word rate, Word volume,
-                            Word panning) {
+void SdlAudio::play_channel([[maybe_unused]] int chan, [[maybe_unused]] Address phys_addr,
+                            [[maybe_unused]] Word length, [[maybe_unused]] Word rate,
+                            [[maybe_unused]] Word volume, [[maybe_unused]] Word panning) {
 #ifdef HAVE_SDL3
     if (!audio_initialized_ || device_id_ == 0) return;
 
@@ -116,7 +117,7 @@ void SdlAudio::play_channel(int chan, Address phys_addr, Word length, Word rate,
 #endif
 }
 
-void SdlAudio::stop_channel(int chan) {
+void SdlAudio::stop_channel([[maybe_unused]] int chan) {
 #ifdef HAVE_SDL3
     const auto c_idx = static_cast<size_t>(chan);
     if (streams_[c_idx]) {
@@ -126,7 +127,7 @@ void SdlAudio::stop_channel(int chan) {
 #endif
 }
 
-void SdlAudio::update_channel_params(int chan, Word volume) {
+void SdlAudio::update_channel_params([[maybe_unused]] int chan, [[maybe_unused]] Word volume) {
 #ifdef HAVE_SDL3
     const auto c_idx = static_cast<size_t>(chan);
     if (!audio_initialized_ || !streams_[c_idx]) return;
@@ -135,8 +136,8 @@ void SdlAudio::update_channel_params(int chan, Word volume) {
 #endif
 }
 
-void SdlAudio::play_music(Address music_addr, Word music_length, Word music_volume,
-                          Word music_looping) {
+void SdlAudio::play_music([[maybe_unused]] Address music_addr, [[maybe_unused]] Word music_length,
+                          [[maybe_unused]] Word music_volume, [[maybe_unused]] Word music_looping) {
 #ifdef HAVE_SDL3
     if (!audio_initialized_ || music_addr == 0 || music_length == 0) return;
     if (music_addr < 0x80000000u) return;
@@ -313,7 +314,7 @@ void SdlAudio::stop_music() {
 #endif
 }
 
-void SdlAudio::update_music_volume(Word volume) {
+void SdlAudio::update_music_volume([[maybe_unused]] Word volume) {
 #ifdef HAVE_SDL3
     if (music_stream_) {
         float g = std::clamp(static_cast<float>(volume) / 127.0f, 0.0f, 1.0f);

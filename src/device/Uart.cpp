@@ -64,7 +64,6 @@ void Uart::start_input_thread() {
             }
             const bool has_rx = !rx_fifo_.empty();
             rx_ready_.store(has_rx, std::memory_order_release);
-            update_uart_irq(machine_, has_rx, uart_ier_, tx_irq_pending_);
         }
     });
 }
@@ -104,7 +103,6 @@ auto Uart::start_pty() -> bool {
                 }
             }
             rx_ready_.store(true, std::memory_order_release);
-            update_uart_irq(machine_, true, uart_ier_, tx_irq_pending_);
         }
     });
     return true;
@@ -256,9 +254,10 @@ void Uart::push_rx_byte(uint8_t byte) {
     std::scoped_lock lock(rx_mutex_);
     if (rx_fifo_.size() < kMaxRxFifoSize) {
         rx_fifo_.push(byte);
+        // Input can arrive on the TUI or PTY reader thread. Only publish readiness here; the
+        // simulation thread owns PLIC mutation in non_tui_poll_input().
+        rx_ready_.store(true, std::memory_order_release);
     }
-    rx_ready_.store(true, std::memory_order_release);
-    update_uart_irq(machine_, true, uart_ier_, tx_irq_pending_);
 }
 
 void Uart::non_tui_poll_input() {

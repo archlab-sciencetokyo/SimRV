@@ -32,6 +32,9 @@ CPU::CPU() : plic_mmio(*this), clint_mmio(*this), csr_file(*this), sbi(*this) { 
 void CPU::reset() {
     state_ = ArchState{};
     prev_state_ = ArchState{};
+    pipeline_context = simrv::pipeline::PipelineContext{};
+    plic_mmio.reset();
+    clint_mmio.reset();
     state_.regs.fill(0);
     state_.regs.fill_fp(0);
     state_.regs.fill_vector(VectorRegister{});
@@ -112,15 +115,16 @@ void CPU::raise_exception(TrapCause cause, CSRValue tval) {
 }
 
 void CPU::evaluate_timer_interrupt() {
-    const CSRValue mask = enum_mask(MipBit::Mtip) | enum_mask(MipBit::Stip);
+    const CSRValue target = clint_mmio.supervisor_timer.load(std::memory_order_relaxed)
+                                ? enum_mask(MipBit::Stip)
+                                : enum_mask(MipBit::Mtip);
+    const CSRValue other =
+        target == enum_mask(MipBit::Stip) ? enum_mask(MipBit::Mtip) : enum_mask(MipBit::Stip);
+    state_.mip &= ~other;
     if (clint_mmio.mtime >= clint_mmio.mtimecmp) {
-        if ((state_.mip & mask) != mask) {
-            state_.mip |= mask;
-        }
+        state_.mip |= target;
     } else {
-        if ((state_.mip & mask) != 0) {
-            state_.mip &= ~mask;
-        }
+        state_.mip &= ~target;
     }
 }
 
@@ -1368,7 +1372,7 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
         } else {
             run_cycle_baremetal(machine);
         }
-        if (simrv::compiler::unlikely(machine.tohost != 0)) {
+        if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running())) {
             break;
         }
     }

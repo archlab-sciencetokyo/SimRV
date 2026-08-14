@@ -33,17 +33,17 @@ class SdlDisplay {
     void render_sdl_frame();
     void recreate_sdl_properties();
 
-    simrv::core::Machine& machine_;
+    [[maybe_unused]] simrv::core::Machine& machine_;
     bool gui_enabled_ = false;
-    bool mouse_grabbed_ = false;
+    [[maybe_unused]] bool mouse_grabbed_ = false;
 
     // Mouse input state & accumulators
-    uint8_t mouse_buttons_ = 0;
-    float accumulated_x_ = 0.0f;
-    float accumulated_y_ = 0.0f;
+    [[maybe_unused]] uint8_t mouse_buttons_ = 0;
+    [[maybe_unused]] float accumulated_x_ = 0.0f;
+    [[maybe_unused]] float accumulated_y_ = 0.0f;
 
     // Tick/render rate controls
-    uint64_t last_tick_cycles_ = 0;
+    [[maybe_unused]] uint64_t last_tick_cycles_ = 0;
     std::chrono::steady_clock::time_point last_render_time_;
 
 #ifdef HAVE_SDL3

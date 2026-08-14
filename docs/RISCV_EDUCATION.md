@@ -161,7 +161,7 @@ riscv64-unknown-elf-objcopy -O binary program.elf program.bin
 ./build/rv64-release/SimRV -m program.bin
 ```
 
-Use `-u` to open the TUI monitor, or `-a` for application (bare-metal) mode.
+Use `-u` to open the TUI monitor, or `-b` for bare-metal mode.
 
 ---
 
