@@ -29,7 +29,7 @@ jobs:
         dnf update -y
         dnf install -y dnf-plugins-core
         dnf config-manager --enable crb || dnf config-manager --set-enabled crb || true
-        dnf install -y git cmake ninja-build gcc gcc-c++ clang-tools-extra wget tar xz autoconf make which
+        dnf install -y git cmake ninja-build gcc gcc-c++ clang clang-tools-extra wget tar xz autoconf make which
 
     - name: Fetch and compile riscv-tests
       run: |
@@ -95,7 +95,7 @@ jobs:
       with:
         fetch-depth: 0
     - name: Install quality tools
-      run: dnf install -y cmake ninja-build gcc gcc-c++ clang clang-tools-extra python3
+      run: dnf install -y cmake ninja-build gcc gcc-c++ libasan libtsan clang clang-tools-extra python3
     - name: Check release metadata
       run: python3 scripts/release_check.py
     - name: Check formatting
@@ -130,7 +130,7 @@ jobs:
     steps:
     - uses: actions/checkout@v6
     - name: Install build tools
-      run: dnf install -y cmake ninja-build gcc gcc-c++ python3
+      run: dnf install -y cmake ninja-build gcc gcc-c++ libtsan python3
     - name: Configure TSan
       run: >-
         cmake -S . -B build/tsan -G Ninja

@@ -4,8 +4,12 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to package (for example, v2.0.0-rc.9)
+        required: true
+        type: string
   push:
-    branches: [dev]
     tags: ['v*']
 
 permissions:
@@ -24,6 +28,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
       - name: Install build tools
         run: |
@@ -88,6 +94,9 @@ jobs:
 
           VERSION_TAG="v${SIMRV_VERSION}"
           TAG="${GITHUB_REF_NAME}"
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            TAG="${{ inputs.tag }}"
+          fi
           if [[ -n "${{ github.event.release.tag_name }}" ]]; then
             TAG="${{ github.event.release.tag_name }}"
           fi
@@ -131,7 +140,7 @@ jobs:
             ${{ steps.names.outputs.asset_base }}.sha256
 
       - name: Upload release assets
-        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/dev'
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -147,6 +156,8 @@ jobs:
       image: almalinux:10
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
       - name: Install documentation tools
         run: dnf install -y doxygen graphviz tar gzip python3
       - name: Validate release metadata
@@ -163,7 +174,7 @@ jobs:
           name: SimRV-documentation
           path: SimRV-docs-*.tar.gz
       - name: Upload documentation release asset
-        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: SimRV-docs-*.tar.gz
