@@ -123,6 +123,16 @@ void Machine::run() {
         uart->start_input_thread();
     }
 
+    // In TUI mode open a POSIX PTY for the UART so the guest serial line discipline
+    // runs natively without any CR/LF normalisation on the simulator side.
+    if (uart && s_tuimode) {
+        if (uart->start_pty()) {
+            simrv::log::info("[UART] PTY slave: {}", uart->pty_slave_path());
+        } else {
+            simrv::log::warn("[UART] openpty() failed – falling back to direct push_rx_byte");
+        }
+    }
+
     constexpr uint32_t kBatchSize = 65536;
 
     while (is_running() &&
@@ -209,6 +219,10 @@ void Machine::run() {
     // Clean up background input thread
     if (uart && !s_tuimode) {
         uart->stop_input_thread();
+    }
+    // Clean up PTY
+    if (uart && s_tuimode) {
+        uart->stop_pty();
     }
 }
 

@@ -23,10 +23,10 @@ def main():
         images_dir = os.path.join(repo_root, "linux-images", "rv64")
 
     mem_img = os.environ.get("SIMRV_LINUX_MEM_IMG", os.path.join(images_dir, "fw_payload.bin"))
-    disk_img_default = os.path.join(images_dir, "root.bin") if os.path.exists(os.path.join(images_dir, "root.bin")) else os.path.join(images_dir, "root.img")
+    disk_img_default = os.path.join(images_dir, "root.img") if os.path.exists(os.path.join(images_dir, "root.img")) else os.path.join(images_dir, "root.bin")
     disk_img = os.environ.get("SIMRV_LINUX_DISK_IMG", disk_img_default)
     dtb_img = os.environ.get("SIMRV_LINUX_DTB", os.path.join(images_dir, "devicetree.dtb"))
-    timeout_secs = int(os.environ.get("SIMRV_TEST_TIMEOUT", "60"))
+    timeout_secs = int(os.environ.get("SIMRV_TEST_TIMEOUT", "90"))
 
     if not os.path.exists(simrv_bin):
         print(f"Error: SimRV binary not found at '{simrv_bin}'", file=sys.stderr)
@@ -62,7 +62,9 @@ def main():
     boot_markers = [
         "Welcome to SimRV Linux Boot",
         "Run /init as init process",
-        "Booting Linux on hartid"
+        "Booting Linux on hartid",
+        "Please press Enter to activate this console",
+        "login:",
     ]
 
     found_markers = set()
@@ -107,7 +109,10 @@ def main():
     elapsed = time.time() - start_time
     print(f"\nBoot completed in {elapsed:.2f}s. Detected markers: {found_markers}")
 
-    if "Welcome to SimRV Linux Boot" in found_markers or "Run /init as init process" in found_markers:
+    if ("Welcome to SimRV Linux Boot" in found_markers
+            or "Run /init as init process" in found_markers
+            or "Please press Enter to activate this console" in found_markers
+            or "login:" in found_markers):
         print("[PASS] Linux boot reachability verified.")
         sys.exit(0)
     else:

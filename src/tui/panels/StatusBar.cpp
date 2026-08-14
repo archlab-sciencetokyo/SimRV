@@ -59,7 +59,7 @@ auto StatusBar::is_pos_on_right_panel_mode(int x) const -> bool {
         return false;
     }
 
-    int x_start = (layout_ == TuiLayout::Split) ? (left_width_ + 2) : 2;
+    int const right_x0 = (layout_ == TuiLayout::Split) ? (left_width_ + 3) : 2;
     std::string mode_label;
     switch (right_panel_mode_) {
         case TuiRightPanelMode::Terminal:
@@ -70,10 +70,10 @@ auto StatusBar::is_pos_on_right_panel_mode(int x) const -> bool {
             mode_label = "Display";
             break;
     }
-    int mode_len = 2 + static_cast<int>(mode_label.length());  // "[" + mode_label + "]"
-    int x_end = x_start + mode_len - 1;
+    int const mode_len = 2 + static_cast<int>(mode_label.length());  // "[" + mode_label + "]"
+    int const x_end = right_x0 + mode_len - 1;
 
-    return (x >= x_start && x <= x_end);
+    return (x >= right_x0 && x <= x_end);
 }
 
 auto StatusBar::is_pos_on_right_panel_attached(int x) const -> bool {
@@ -84,12 +84,12 @@ auto StatusBar::is_pos_on_right_panel_attached(int x) const -> bool {
         return false;
     }
 
-    int x_start = (layout_ == TuiLayout::Split) ? (left_width_ + 2) : 2;
+    int const right_x0 = (layout_ == TuiLayout::Split) ? (left_width_ + 3) : 2;
     std::string const term_title = trace_enabled_ ? "Terminal [Trace ON]" : "Terminal";
-    int mode_len = 2 + static_cast<int>(term_title.length());  // "[" + term_title + "]"
+    int const mode_len = 2 + static_cast<int>(term_title.length());  // "[" + term_title + "]"
 
-    int badge_start = x_start + mode_len + 1;
-    int badge_end = badge_start + 8;  // ATTACHED / DETACHED (8 chars)
+    int const badge_start = right_x0 + mode_len + 1;
+    int const badge_end = badge_start + 8 - 1;  // ATTACHED / DETACHED (8 chars)
 
     return (x >= badge_start && x <= badge_end);
 }

@@ -214,7 +214,7 @@ else
 fi
 
 cat > "$INITRAMFS_DIR/etc/inittab" <<'EOF'
-ttyS0::respawn:-/bin/sh
+ttyS0::respawn:/sbin/getty -n -l /bin/sh 115200 ttyS0
 EOF
 
 echo "SimRV" > "$INITRAMFS_DIR/etc/hostname"
@@ -228,6 +228,7 @@ mkdir -p /dev /proc /sys /etc /tmp /run
 
 # Fallback device nodes if devtmpfs is absent
 [ -c /dev/console ] || mknod -m 600 /dev/console c 5 1 2>/dev/null || true
+[ -c /dev/tty ] || mknod -m 666 /dev/tty c 5 0 2>/dev/null || true
 [ -c /dev/ttyS0 ] || mknod -m 666 /dev/ttyS0 c 4 64 2>/dev/null || true
 [ -c /dev/null ] || mknod -m 666 /dev/null c 1 3 2>/dev/null || true
 [ -c /dev/zero ] || mknod -m 666 /dev/zero c 1 5 2>/dev/null || true
@@ -246,12 +247,9 @@ fi
 echo "=================================================="
 echo ""
 
-# Explicitly connect the shell to the serial console.
-# This is critical: when the kernel cannot open /dev/console before launching
-# /init (e.g. because the initramfs cpio lacks a pre-built console node),
-# the shell inherits fd 0/1/2 pointing to /dev/null and exits immediately on
-# EOF. Redirecting here guarantees a working interactive TTY regardless.
-exec /bin/sh < /dev/ttyS0 > /dev/ttyS0 2>&1
+# Hand off to BusyBox init as PID 1 so it can fork children with setsid()
+# (PID 1 itself cannot call setsid — EPERM; init forks children that can)
+exec /sbin/init
 EOF
 chmod +x "$INITRAMFS_DIR/init"
 
@@ -430,7 +428,7 @@ cat > "$IMAGES_DIR/setup.sh" <<EOF
 #!/bin/bash
 IMAGES_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 export SIMRV_LINUX_MEM_IMG="\$IMAGES_DIR/fw_payload.bin"
-export SIMRV_LINUX_DISK_IMG="\$IMAGES_DIR/root.bin"
+export SIMRV_LINUX_DISK_IMG="\$IMAGES_DIR/root.img"
 export SIMRV_LINUX_DTB="\$IMAGES_DIR/devicetree.dtb"
 export SIMRV_LINUX_TIMEOUT=60
 export SIMRV_LINUX_END=1200000
@@ -451,7 +449,7 @@ if [[ "$XLEN" == "64" ]]; then
     tar -xf "$BUILD_DIR/sources/alpine-minirootfs-${ALPINE_VER}-riscv64.tar.gz" -C "$ROOTFS_DISK_DIR"
     mkdir -p "$ROOTFS_DISK_DIR/proc" "$ROOTFS_DISK_DIR/sys" "$ROOTFS_DISK_DIR/dev" "$ROOTFS_DISK_DIR/etc" "$ROOTFS_DISK_DIR/tmp" "$ROOTFS_DISK_DIR/run"
     cat > "$ROOTFS_DISK_DIR/etc/inittab" <<'EOF'
-ttyS0::respawn:-/bin/sh
+ttyS0::respawn:/sbin/getty -n -l /bin/sh 115200 ttyS0
 EOF
     echo "SimRV" > "$ROOTFS_DISK_DIR/etc/hostname"
     cat > "$ROOTFS_DISK_DIR/init" <<'EOF'
@@ -462,6 +460,7 @@ mkdir -p /dev /proc /sys /etc /tmp /run
 /bin/mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
 
 [ -c /dev/console ] || mknod -m 600 /dev/console c 5 1 2>/dev/null || true
+[ -c /dev/tty ] || mknod -m 666 /dev/tty c 5 0 2>/dev/null || true
 [ -c /dev/ttyS0 ] || mknod -m 666 /dev/ttyS0 c 4 64 2>/dev/null || true
 [ -c /dev/null ] || mknod -m 666 /dev/null c 1 3 2>/dev/null || true
 [ -c /dev/zero ] || mknod -m 666 /dev/zero c 1 5 2>/dev/null || true
@@ -476,8 +475,9 @@ echo "Alpine Linux (riscv64) version $(cat /etc/alpine-release 2>/dev/null || ec
 echo "=================================================="
 echo ""
 
-# Connect the shell to the serial console (see initramfs init for rationale).
-exec /bin/sh < /dev/ttyS0 > /dev/ttyS0 2>&1
+# Hand off to BusyBox init as PID 1 so it can fork children with setsid()
+# (PID 1 itself cannot call setsid — EPERM; init forks children that can)
+exec /sbin/init
 EOF
     chmod +x "$ROOTFS_DISK_DIR/init"
     dd if=/dev/zero of="$IMAGES_DIR/root.img" bs=1M count=64 status=none

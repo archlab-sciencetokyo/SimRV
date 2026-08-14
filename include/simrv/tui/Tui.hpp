@@ -159,6 +159,8 @@ class Tui {
     [[nodiscard]] auto get_layout() const -> TuiLayout { return layout_; }
     void adjust_left_pane_width(int delta);
 
+    /// Set keyboard input routing between guest VirtIO console and TUI navigation.
+    void set_terminal_focused(bool focused);
     /// Toggle keyboard input routing between guest VirtIO console and TUI navigation.
     void toggle_terminal_focus();
     [[nodiscard]] auto is_terminal_focused() const -> bool { return is_terminal_focused_; }
@@ -237,7 +239,7 @@ class Tui {
     std::string esc_buf_;
     std::atomic<bool> sim_thread_is_sleeping_{false};
     std::thread::id main_thread_id_;
-    std::atomic<bool> is_terminal_focused_{false};  // True when Ctrl-A routes keys to guest console
+    std::atomic<bool> is_terminal_focused_{true};  // True when Ctrl-A routes keys to guest console
 
     auto consume_control_sequence(uint8_t first_byte) -> bool;
     auto parse_sgr_mouse(const std::string& seq, int& b, int& x, int& y) -> bool;

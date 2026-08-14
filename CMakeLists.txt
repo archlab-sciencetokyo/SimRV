@@ -312,7 +312,7 @@ if(EXISTS "${TEST_IMAGES_DIR}/fw_payload.bin")
   )
   set_tests_properties(linux-boot-pty PROPERTIES
     ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR}"
-    TIMEOUT 120
+    TIMEOUT 110
     LABELS "gate;regress;linux;pty"
   )
 endif()

@@ -38,48 +38,15 @@ void OSMachine::prepare_cycle() {
         tracer.dump_init_artifacts();
     }
 
-    static constexpr std::array<Byte, 9> kSyntheticInput = {
-        static_cast<Byte>('r'), static_cast<Byte>('o'),  static_cast<Byte>('o'),
-        static_cast<Byte>('t'), static_cast<Byte>('\n'), static_cast<Byte>('t'),
-        static_cast<Byte>('o'), static_cast<Byte>('p'),  static_cast<Byte>('\n')};
-
     if (cpu.clint_mmio.mtime > s_enabletimer) { /* enable timer after linux boot */
         if (console) {
-            // Fast path: drain one TUI-pushed interactive byte every ~1024 ticks (~0.1ms).
-            // This ensures Ctrl-A terminal input is responsive for interactive Linux login.
-            if (s_tuimode && ((cpu.clint_mmio.mtime & static_cast<Counter>(0x3ff)) == 0)) {
-                if (console->pop_pending_input()) {
-                    int const ret = console->MC_receive_input(*this);
-                    if (ret > 0) {
-                        cpu.plic_set_irq(simrv::virtio::kConsoleIrq, 1);
-                    }
-                    if (ret == -1) {
-                        stop();
-                    }
+            if (console->pop_pending_input()) {
+                int const ret = console->MC_receive_input(*this);
+                if (ret > 0) {
+                    cpu.plic_set_irq(simrv::virtio::kConsoleIrq, 1);
                 }
-            }
-
-            // Slow path (~100ms): CLI stdin poll + synthetic login injection for non-TUI mode.
-            if ((cpu.clint_mmio.mtime & static_cast<Counter>(0xfffff)) == 0) {
-                if (!s_tuimode) {
-                    if (synthetic_input_idx_ < kSyntheticInput.size()) {
-                        console->fifo_en = static_cast<Byte>(1);
-                        console->cons_fifo = kSyntheticInput.at(synthetic_input_idx_);
-                        if (uart) {
-                            uart->push_rx_byte(
-                                static_cast<uint8_t>(kSyntheticInput.at(synthetic_input_idx_)));
-                        }
-                        synthetic_input_idx_++;
-                    } else {
-                        console->fifo_en = static_cast<Byte>(0);
-                    }
-                    int const ret = console->MC_receive_input(*this); /* Keyboard / VirtIO RX */
-                    if (ret > 0) {
-                        cpu.plic_set_irq(simrv::virtio::kConsoleIrq, 1);
-                    }
-                    if (ret == -1) {
-                        stop(); /* break by Ctrl+q */
-                    }
+                if (ret == -1) {
+                    stop();
                 }
             }
         }

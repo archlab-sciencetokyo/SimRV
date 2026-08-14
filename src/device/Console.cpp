@@ -66,12 +66,12 @@ void Console::process_queue(Word q_idx) {
 }
 
 auto Console::MC_receive_input(simrv::core::Machine& machine) -> int {
-    if (machine.s_tuimode) return 0;
     if (Status == 0) return 0;
 
-    // Check if terminal data is available via poll without blocking
-    struct pollfd pfd = {.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
-    if (poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN)) {
+    // Check if terminal data is available via poll without blocking (non-TUI mode)
+    if (!machine.s_tuimode) {
+        struct pollfd pfd = {.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
+        if (poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN)) {
         char ch = 0;
         if (::read(STDIN_FILENO, &ch, 1) > 0) {
             if (ch == 0x11) {  // Ctrl+Q break sequence
@@ -100,6 +100,7 @@ auto Console::MC_receive_input(simrv::core::Machine& machine) -> int {
                 }
             }
         }
+    }
     }
 
     // If synthetic input (cons_fifo) was populated via test automation, process it

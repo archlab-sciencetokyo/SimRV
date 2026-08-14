@@ -172,6 +172,7 @@ void Tui::initialize() {
     term.c_lflag &= ~ICANON;
     term.c_lflag &= ~ECHO;
     term.c_lflag &= ~ISIG;
+    term.c_iflag &= ~(ICRNL | INLCR | IGNCR);
     term.c_cc[VMIN] = 1;
     term.c_cc[VTIME] = 0;
     tcsetattr(STDIN_FILENO, TCSANOW, &term);
@@ -526,6 +527,19 @@ void Tui::render(bool force) {
         vt_.write_char(local_tx.front());
         local_tx.pop();
     }
+
+    // If the UART has a PTY, drain guest output from the PTY master fd into the virtual terminal.
+    bool has_pty_data = false;
+    if (machine_.uart && machine_.uart->has_pty()) {
+        uint8_t pty_buf[4096];
+        ssize_t n = machine_.uart->pty().read_from_master(pty_buf, sizeof(pty_buf));
+        if (n > 0) {
+            has_pty_data = true;
+            for (ssize_t i = 0; i < n; ++i) {
+                vt_.write_char(static_cast<char>(pty_buf[i]));
+            }
+        }
+    }
     while (!local_log.empty()) {
         vt_log_.write_string(local_log.front());
         local_log.pop();
@@ -540,7 +554,7 @@ void Tui::render(bool force) {
         std::chrono::duration_cast<std::chrono::milliseconds>(now - last_draw_time).count();
 
     if (!force && !g_resized) {
-        bool const is_active = !paused_ || has_tx || has_log;
+        bool const is_active = !paused_ || has_tx || has_log || has_pty_data;
         if ((is_active && elapsed_ms < 16) || (!is_active && elapsed_ms < 200)) return;
     }
     last_draw_time = now;
@@ -1027,10 +1041,15 @@ void Tui::toggle_trace_enabled() {
     render(true);
 }
 
+void Tui::set_terminal_focused(bool focused) {
+    bool const prev = is_terminal_focused_.exchange(focused, std::memory_order_relaxed);
+    if (prev != focused) {
+        render(true);
+    }
+}
+
 void Tui::toggle_terminal_focus() {
-    is_terminal_focused_.store(!is_terminal_focused_.load(std::memory_order_relaxed),
-                               std::memory_order_relaxed);
-    render(true);
+    set_terminal_focused(!is_terminal_focused_.load(std::memory_order_relaxed));
 }
 
 void Tui::update_trace_active_cache() {
@@ -1283,16 +1302,20 @@ void Tui::update() {
                 pause_loop();
                 return;
             }
-            if (key == simrv::tui::TuiKey::CtrlQ || byte == 0x03) {
+            if (key == simrv::tui::TuiKey::CtrlQ || byte == 0x11) {
                 machine_.is_running_ = false;
                 return;
             }
 
-            if (machine_.uart) {
-                machine_.uart->push_rx_byte(byte);
-            }
-            if (machine_.console) {
-                machine_.console->push_input_byte(static_cast<uint8_t>(byte));
+            uint8_t guest_byte = byte;
+
+            // If UART has a PTY, write the raw host byte straight to the PTY master fd.
+            // The PTY's own line discipline handles CR/LF, echo, Ctrl-C signals, etc.
+            if (machine_.uart && machine_.uart->has_pty()) {
+                ::write(machine_.uart->pty().master_fd(), &guest_byte, 1);
+            } else if (machine_.uart) {
+                // Fallback (no PTY): send raw byte directly
+                machine_.uart->push_rx_byte(guest_byte);
             }
         }
 
@@ -1669,11 +1692,17 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
 
 void Tui::pause_loop() {
     set_paused(true);
+    set_terminal_focused(false);
     update_cache();
     render(true);
 }
 
-void Tui::unpause_loop() { set_paused(false); }
+void Tui::unpause_loop() {
+    set_paused(false);
+    if (machine_.is_running_ && !machine_.is_shutdown_) {
+        set_terminal_focused(true);
+    }
+}
 
 void Tui::execute_footer_action(TuiFooterAction action) {
     switch (action) {
