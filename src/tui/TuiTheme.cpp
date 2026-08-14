@@ -110,6 +110,73 @@ auto make_repeated_string(const std::string& pattern, int count) -> std::string 
     return s;
 }
 
+namespace {
+
+struct Utf8Cell {
+    char32_t codepoint = 0xFFFDU;
+    std::size_t bytes = 1;
+};
+
+[[nodiscard]] auto decode_utf8_cell(std::string_view text, std::size_t offset) -> Utf8Cell {
+    const auto lead = static_cast<unsigned char>(text[offset]);
+    if (lead < 0x80U) return {.codepoint = lead, .bytes = 1};
+
+    std::size_t count = 0;
+    char32_t codepoint = 0;
+    char32_t minimum = 0;
+    if ((lead & 0xE0U) == 0xC0U) {
+        count = 2;
+        codepoint = lead & 0x1FU;
+        minimum = 0x80U;
+    } else if ((lead & 0xF0U) == 0xE0U) {
+        count = 3;
+        codepoint = lead & 0x0FU;
+        minimum = 0x800U;
+    } else if ((lead & 0xF8U) == 0xF0U) {
+        count = 4;
+        codepoint = lead & 0x07U;
+        minimum = 0x10000U;
+    } else {
+        return {};
+    }
+    if (offset + count > text.size()) return {};
+    for (std::size_t i = 1; i < count; ++i) {
+        const auto continuation = static_cast<unsigned char>(text[offset + i]);
+        if ((continuation & 0xC0U) != 0x80U) return {};
+        codepoint = (codepoint << 6U) | (continuation & 0x3FU);
+    }
+    if (codepoint < minimum || codepoint > 0x10FFFFU ||
+        (codepoint >= 0xD800U && codepoint <= 0xDFFFU)) {
+        return {};
+    }
+    return {.codepoint = codepoint, .bytes = count};
+}
+
+[[nodiscard]] constexpr auto in_range(char32_t cp, char32_t first, char32_t last) -> bool {
+    return cp >= first && cp <= last;
+}
+
+[[nodiscard]] constexpr auto terminal_cell_width(char32_t cp) -> int {
+    if (cp == 0 || cp < 0x20U || in_range(cp, 0x7FU, 0x9FU)) return 0;
+    if (in_range(cp, 0x0300U, 0x036FU) || in_range(cp, 0x1AB0U, 0x1AFFU) ||
+        in_range(cp, 0x1DC0U, 0x1DFFU) || in_range(cp, 0x20D0U, 0x20FFU) ||
+        in_range(cp, 0xFE00U, 0xFE0FU) || in_range(cp, 0xFE20U, 0xFE2FU) ||
+        in_range(cp, 0xE0100U, 0xE01EFU)) {
+        return 0;
+    }
+    if (in_range(cp, 0x1100U, 0x115FU) || in_range(cp, 0x2329U, 0x232AU) ||
+        in_range(cp, 0x2E80U, 0xA4CFU) || in_range(cp, 0xAC00U, 0xD7A3U) ||
+        in_range(cp, 0xF900U, 0xFAFFU) || in_range(cp, 0xFE10U, 0xFE19U) ||
+        in_range(cp, 0xFE30U, 0xFE6FU) || in_range(cp, 0xFF00U, 0xFF60U) ||
+        in_range(cp, 0xFFE0U, 0xFFE6U) || in_range(cp, 0x1F000U, 0x1FAFFU) ||
+        in_range(cp, 0x20000U, 0x3FFFD)) {
+        return 2;
+    }
+    return 1;
+}
+
+}  // namespace
+
 auto get_display_width(const std::string& s) -> int {
     int len = 0;
     bool in_esc = false;
@@ -134,10 +201,9 @@ auto get_display_width(const std::string& s) -> int {
                 }
             }
         } else {
-            const auto c = static_cast<unsigned char>(s.at(i));
-            if (c < 0x80 || c >= 0xC0) {
-                len++;
-            }
+            const Utf8Cell cell = decode_utf8_cell(s, i);
+            len += terminal_cell_width(cell.codepoint);
+            i += cell.bytes - 1;
         }
     }
     return len;
@@ -172,19 +238,14 @@ auto format_to_width(const std::string& colored_str, int target_width) -> std::s
                 }
             }
         } else {
-            const auto c = static_cast<unsigned char>(colored_str.at(i));
-            bool is_lead = (c < 0x80 || c >= 0xC0);
-            if (is_lead) {
-                if (current_width >= target_width) {
-                    skipping = true;
-                } else {
-                    skipping = false;
-                    current_width++;
-                }
-            }
+            const Utf8Cell cell = decode_utf8_cell(colored_str, i);
+            const int cell_width = terminal_cell_width(cell.codepoint);
+            skipping = current_width + cell_width > target_width;
             if (!skipping) {
-                result += colored_str.at(i);
+                result.append(colored_str, i, cell.bytes);
+                current_width += cell_width;
             }
+            i += cell.bytes - 1;
         }
     }
 
@@ -231,16 +292,6 @@ static auto get_esc_seq_len(const std::string& str, std::size_t start) -> std::s
     return std::min(start + 2, str.length()) - start;
 }
 
-static auto get_utf8_char_len(const std::string& str, std::size_t start) -> std::size_t {
-    if (start >= str.length()) return 0;
-    const auto c = static_cast<unsigned char>(str[start]);
-    if (c < 0x80) return 1;
-    if ((c & 0xE0) == 0xC0) return 2;
-    if ((c & 0xF0) == 0xE0) return 3;
-    if ((c & 0xF8) == 0xF0) return 4;
-    return 1;
-}
-
 auto overlay_string(const std::string& base_line, const std::string& overlay_line, int start_x,
                     int box_w) -> std::string {
     std::string result;
@@ -263,10 +314,17 @@ auto overlay_string(const std::string& base_line, const std::string& overlay_lin
             }
             i += esc_len;
         } else {
-            std::size_t char_len = get_utf8_char_len(base_line, i);
-            result.append(&base_line[i], char_len);
-            col++;
-            i += char_len;
+            const Utf8Cell cell = decode_utf8_cell(base_line, i);
+            const int cell_width = terminal_cell_width(cell.codepoint);
+            if (col + cell_width > start_x) {
+                result.append(static_cast<std::size_t>(start_x - col), ' ');
+                col += cell_width;
+                i += cell.bytes;
+                break;
+            }
+            result.append(base_line, i, cell.bytes);
+            col += cell_width;
+            i += cell.bytes;
         }
     }
 
@@ -291,14 +349,17 @@ auto overlay_string(const std::string& base_line, const std::string& overlay_lin
             }
             i += esc_len;
         } else {
-            std::size_t char_len = get_utf8_char_len(base_line, i);
-            col++;
-            i += char_len;
+            const Utf8Cell cell = decode_utf8_cell(base_line, i);
+            col += terminal_cell_width(cell.codepoint);
+            i += cell.bytes;
         }
     }
 
     if (!active_style.empty()) {
         result += active_style;
+    }
+    if (col > target_end) {
+        result.append(static_cast<std::size_t>(col - target_end), ' ');
     }
     if (i < base_line.length()) {
         result.append(&base_line[i], base_line.length() - i);

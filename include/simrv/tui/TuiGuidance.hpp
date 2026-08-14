@@ -21,4 +21,10 @@ struct PageGuidance {
 
 [[nodiscard]] auto guidance_for_page(TuiRegPage page, bool cycle_accurate) -> PageGuidance;
 
+/// Educational guidance is opt-in and only displaces pane content when sufficient room exists.
+[[nodiscard]] constexpr auto should_show_guidance(bool paused, bool learn_enabled, int visible_rows)
+    -> bool {
+    return paused && learn_enabled && visible_rows >= 16;
+}
+
 }  // namespace simrv::tui

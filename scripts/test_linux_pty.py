@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 @file test_linux_pty.py
-@brief Verify that the TUI terminal can activate and drive the Linux UART shell.
+@brief Verify TUI/UART interaction and Linux power lifecycle requests.
 """
 import fcntl
 import os
 import pty
 import re
 import select
+import shlex
 import struct
 import subprocess
 import sys
@@ -53,6 +54,10 @@ def main():
     disk_img = os.environ.get("SIMRV_LINUX_DISK_IMG", disk_img_default)
     dtb_img = os.environ.get("SIMRV_LINUX_DTB", os.path.join(images_dir, "devicetree.dtb"))
     timeout_secs = int(os.environ.get("SIMRV_TEST_TIMEOUT", "90"))
+    lifecycle_action = os.environ.get("SIMRV_TEST_LIFECYCLE", "shell")
+    if lifecycle_action not in ("shell", "poweroff", "reboot", "poweroff-reboot"):
+        print(f"Error: unsupported SIMRV_TEST_LIFECYCLE '{lifecycle_action}'", file=sys.stderr)
+        sys.exit(2)
 
     if not os.path.exists(simrv_bin):
         print(f"Error: SimRV binary not found at '{simrv_bin}'", file=sys.stderr)
@@ -71,6 +76,7 @@ def main():
         "--tui",
         "-e", "10000000000"  # Leave enough execution time to interact after boot.
     ]
+    cmd.extend(shlex.split(os.environ.get("SIMRV_TEST_EXTRA_ARGS", "")))
 
     print(f"Running Linux PTY boot test: {' '.join(cmd)}")
     start_time = time.time()
@@ -97,10 +103,15 @@ def main():
     command_sent = False
     passed = False
     run_sent = False
+    lifecycle_sent = False
+    shutdown_control_sent = False
+    shutdown_control_boundary = 0
 
     try:
         while True:
             if proc.poll() is not None:
+                if lifecycle_action == "poweroff" and shutdown_control_sent:
+                    passed = True
                 break
 
             try:
@@ -153,9 +164,36 @@ def main():
                     time.sleep(0.1)
                     os.write(master_fd, b"echo __SIMRV_TUI_ENTER_\"OK__\"\r")
                     command_sent = True
-                if command_sent and SHELL_TOKEN in guest_buffer:
-                    passed = True
-                    break
+                if command_sent and SHELL_TOKEN in guest_buffer and not lifecycle_sent:
+                    if lifecycle_action == "shell":
+                        passed = True
+                        break
+                    token_end = guest_buffer.find(SHELL_TOKEN) + len(SHELL_TOKEN)
+                    if "~ #" not in guest_buffer[token_end:]:
+                        continue
+                    # The shell emits a cursor-position query after drawing its prompt. Give the
+                    # terminal response a render interval to reach UART before the next command.
+                    time.sleep(0.1)
+                    guest_action = "poweroff" if lifecycle_action == "poweroff-reboot" else lifecycle_action
+                    command = guest_action + " -f"
+                    command = os.environ.get("SIMRV_TEST_LIFECYCLE_COMMAND", command)
+                    if os.environ.get("SIMRV_TEST_LIFECYCLE_DIAGNOSTICS") == "1":
+                        command = "dmesg | grep -Ei 'sbi|reset|reboot|power|syscon'; " + command
+                    os.write(master_fd, (command + "\r").encode("ascii"))
+                    lifecycle_sent = True
+                if lifecycle_sent:
+                    if lifecycle_action in ("poweroff", "poweroff-reboot") and "SHUTDOWN" in buffer and not shutdown_control_sent:
+                        shutdown_control_boundary = len(buffer)
+                        control = b"\x11" if lifecycle_action == "poweroff" else b"\x12"
+                        os.write(master_fd, control)
+                        shutdown_control_sent = True
+                    if (lifecycle_action == "poweroff-reboot" and shutdown_control_sent and
+                            "[UART] PTY slave:" in buffer[shutdown_control_boundary:]):
+                        passed = True
+                        break
+                    if lifecycle_action == "reboot" and "Rebooting guest system" in buffer:
+                        passed = True
+                        break
             except OSError:
                 break
 
@@ -182,10 +220,14 @@ def main():
     print(f"\nTUI interaction completed in {elapsed:.2f}s.")
 
     if passed:
-        print("[PASS] Enter activated ttyS0 and the guest shell executed a command.")
+        print(f"[PASS] Linux TUI lifecycle action completed: {lifecycle_action}.")
         sys.exit(0)
     print(f"[FAIL] run_sent={run_sent}, enter_sent={enter_sent}, "
-          f"command_sent={command_sent}, token_seen={passed}", file=sys.stderr)
+          f"command_sent={command_sent}, lifecycle_sent={lifecycle_sent}, "
+          f"shutdown_control_sent={shutdown_control_sent}, passed={passed}",
+          file=sys.stderr)
+    print("Guest UART tail:\n" + guest_buffer[-2000:], file=sys.stderr)
+    print("TUI tail:\n" + buffer[-4000:], file=sys.stderr)
     sys.exit(1)
 
 if __name__ == "__main__":

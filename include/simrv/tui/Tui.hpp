@@ -143,6 +143,9 @@ class Tui {
                             uint8_t rd, Register rd_val, uint8_t rs1, Register rs1_val, uint8_t rs2,
                             Register rs2_val, int64_t imm);
     void toggle_trace_enabled();
+    /// Toggle the opt-in educational guidance strip used while paused.
+    void toggle_learn_mode();
+    [[nodiscard]] auto is_learn_mode_enabled() const -> bool { return learn_mode_enabled_; }
     [[nodiscard]] auto is_trace_enabled() const -> bool {
         return trace_enabled_.load(std::memory_order_relaxed);
     }
@@ -207,6 +210,7 @@ class Tui {
     std::vector<std::string> last_screen_lines_;
     std::atomic<bool> paused_{true};
     std::atomic<bool> trace_enabled_{false};
+    bool learn_mode_enabled_{false};
     TuiLayout layout_ = TuiLayout::Split;
     std::atomic<TuiRightPanelMode> right_panel_mode_{TuiRightPanelMode::Terminal};
     std::atomic<bool> trace_or_livetrace_active_{false};

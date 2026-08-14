@@ -23,7 +23,7 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
     if (is_write) {
         const Address offset = req.address - kBaseAddress;
         // The finisher has a single 32-bit register at offset 0
-        if (offset == 0 && req.size >= 1) {
+        if (offset == 0 && req.size == 2) {
             const Word wdata = req.data;
             const auto cmd = static_cast<PowerCommand>(wdata & 0xffffU);
             switch (cmd) {
@@ -49,6 +49,13 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
                     simrv::log::info("[Power] SiFive Test Finisher: System Reboot requested.");
                     machine_.request_reboot();
                     break;
+                case PowerCommand::Exit: {
+                    const int status = static_cast<int>(wdata >> 16);
+                    simrv::log::info("[Power] SimRV: Simulator exit requested (status: {}).",
+                                     status);
+                    machine_.request_exit(status);
+                    break;
+                }
                 default:
                     simrv::log::warn(
                         "[Power] SiFive Test Finisher: Write offset 0, unknown value 0x{:08x}",
@@ -57,13 +64,14 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
             }
         } else {
             simrv::log::warn(
-                "[Power] SiFive Test Finisher: Out-of-bounds or misaligned write to offset 0x{:x}",
-                offset);
+                "[Power] SiFive Test Finisher: Expected a 32-bit write at offset 0; got offset "
+                "0x{:x}, size 2^{}",
+                offset, req.size);
             resp.error = true;
         }
     } else if (req.opcode == memory::TlOpcodeA::Get) {
         const Address offset = req.address - kBaseAddress;
-        if (offset == 0) {
+        if (offset == 0 && req.size == 2) {
             // Read from test register always returns 0
             resp.data = 0;
         } else {

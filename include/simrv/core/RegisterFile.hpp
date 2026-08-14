@@ -13,7 +13,7 @@ namespace simrv::core {
 
 /**
  * @struct VectorRegister
- * @brief Represents a single RISC-V Vector Extension register (VLEN up to 512 bits).
+ * @brief Represents a single RISC-V Vector Extension register (VLEN up to 1024 bits).
  *
  * Aligned to maximum vector register boundary (kVlenMaxBytes) and union-castable into
  * signed/unsigned integer or floating-point element slices.
@@ -56,9 +56,21 @@ class RegisterFile {
     };
 
     unsigned xlen = 64;
+    /// Architectural VLEN in bits; configured to a power of two in the supported 32–1024 range.
     unsigned vlen = 256;
 
+    /// Value exposed by the read-only RISC-V Vector `vlenb` CSR.
     [[nodiscard]] constexpr auto vlen_bytes() const -> unsigned { return vlen / 8; }
+
+    /**
+     * @brief WARL mask for `vstart`, sized for VLMAX at LMUL=8 and SEW=8.
+     *
+     * Vector 1.0 defines maximum VLMAX as VLEN, so a power-of-two VLEN requires writable bits
+     * capable of representing element indices 0 through VLEN-1.
+     */
+    [[nodiscard]] constexpr auto vstart_mask() const -> CSRValue {
+        return static_cast<CSRValue>(vlen - 1U);
+    }
 
     [[nodiscard]] constexpr auto operator[](RegId idx) -> RegisterProxy { return {this, idx}; }
     [[nodiscard]] constexpr auto operator[](RegId idx) const -> Register { return read(idx); }

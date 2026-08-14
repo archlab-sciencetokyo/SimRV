@@ -56,7 +56,7 @@ plus `InterruptController` helpers for PLIC line bookkeeping.
 |:---|:---|:---|
 | `CsrFile` | `core/CsrFile.cpp` | CSR read/write, access control, mstatus side effects |
 | `Tlb` | `core/Tlb.cpp` | Hardware TLB state and flush behavior |
-| `Sbi` | `core/Sbi.cpp` | M-mode SBI call dispatch |
+| `Sbi` | `core/Sbi.cpp` | Optional direct supervisor-ECALL SBI environment when guest M-mode firmware is absent |
 | `ExecuteUnit` | `execute/ExecuteUnit.cpp` | Integer ALU, branch, AMO, CSR value helpers |
 | `ExecuteUnitInt` | `execute/ExecuteUnitInt.cpp` | Integer arithmetic execute |
 | `ExecuteUnitFloat` | `execute/ExecuteUnitFloat.cpp` | Floating-point execute |
@@ -237,5 +237,4 @@ The cyclomatic complexity (CCN) hot-spots in the simulator are:
 5. `simrv::core::CPU::run_cycle` (in `Cpu.cpp`) - **CCN: 65**, NLOC: 138 (Main CPU pipeline run loop)
 
 These metrics provide guidelines for identifying components that could benefit from future refactoring and simplification.
-
 

@@ -8,7 +8,7 @@ if(NOT PYTHON_BIN)
   set(PYTHON_BIN "python3")
 endif()
 
-set(SIMRV_VERSION "2.0.0-rc.8")
+set(SIMRV_VERSION "2.0.0-rc.9")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -141,6 +141,7 @@ add_executable(SimRV
   src/device/Uart.cpp
   src/device/Power.cpp
   src/tui/Tui.cpp
+  src/tui/TuiFrameRenderer.cpp
   src/tui/TuiGuidance.cpp
   src/tui/TuiKeybindings.cpp
   src/tui/TuiModal.cpp
@@ -304,12 +305,14 @@ file(MAKE_DIRECTORY "${ISA_WORK_DIR}")
 # Fast, deterministic tests for the terminal parser, theme helpers, and key registry.
 add_executable(simrv-tui-tests
   tests/TuiFrameworkTests.cpp
+  src/tui/TuiFrameRenderer.cpp
   src/tui/TuiGuidance.cpp
   src/tui/TuiKeybindings.cpp
   src/tui/TuiTheme.cpp
+  src/tui/modals/HelpModal.cpp
 )
 target_compile_features(simrv-tui-tests PRIVATE cxx_std_23)
-target_include_directories(simrv-tui-tests PRIVATE include)
+target_include_directories(simrv-tui-tests PRIVATE include ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_compile_options(simrv-tui-tests PRIVATE -Wall -Wextra -Wpedantic)
 if(SIMRV_WARNINGS_AS_ERRORS)
   target_compile_options(simrv-tui-tests PRIVATE -Werror)
@@ -333,7 +336,9 @@ set_tests_properties(tui-framework PROPERTIES LABELS "gate;regress;tui")
 add_executable(simrv-core-semantics-tests
   tests/CoreSemanticsTests.cpp
   src/core/Logger.cpp
+  src/memory/Mmu.cpp
   src/memory/MmioRouter.cpp
+  src/pipeline/Decoder.cpp
 )
 target_compile_features(simrv-core-semantics-tests PRIVATE cxx_std_23)
 target_compile_definitions(simrv-core-semantics-tests PRIVATE SIMRV_XLEN=${SIMRV_XLEN})
@@ -418,6 +423,22 @@ if(EXISTS "${TEST_IMAGES_DIR}/fw_payload.bin")
     ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR}"
     TIMEOUT 110
     LABELS "gate;regress;linux;pty"
+  )
+  add_test(NAME linux-poweroff-quit-pty
+    COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py
+  )
+  set_tests_properties(linux-poweroff-quit-pty PROPERTIES
+    ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_TEST_LIFECYCLE=poweroff"
+    TIMEOUT 110
+    LABELS "gate;regress;linux;pty;lifecycle"
+  )
+  add_test(NAME linux-poweroff-reboot-pty
+    COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py
+  )
+  set_tests_properties(linux-poweroff-reboot-pty PROPERTIES
+    ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_TEST_LIFECYCLE=poweroff-reboot"
+    TIMEOUT 110
+    LABELS "gate;regress;linux;pty;lifecycle"
   )
 endif()
 

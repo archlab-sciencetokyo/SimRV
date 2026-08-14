@@ -1,19 +1,32 @@
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
+#include "simrv/tui/TuiFrameRenderer.hpp"
 #include "simrv/tui/TuiGuidance.hpp"
 #include "simrv/tui/TuiInputRouter.hpp"
 #include "simrv/tui/TuiKeybindings.hpp"
 #include "simrv/tui/TuiLayoutPolicy.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
+#include "simrv/tui/modals/HelpModal.hpp"
 
 namespace {
 
 auto failures = 0;
+
+[[nodiscard]] auto fnv1a64(std::string_view text) -> std::uint64_t {
+    std::uint64_t hash = 14695981039346656037ULL;
+    for (const unsigned char byte : text) {
+        hash ^= byte;
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
 
 void expect(bool condition, const std::string& message) {
     if (!condition) {
@@ -22,8 +35,7 @@ void expect(bool condition, const std::string& message) {
     }
 }
 
-auto plain_line(const simrv::tui::VirtualTerminal& terminal, int row, int width) -> std::string {
-    const std::string rendered = terminal.get_line_as_string(row, width);
+auto strip_ansi(const std::string& rendered) -> std::string {
     std::string plain;
     bool in_escape = false;
     bool in_csi = false;
@@ -45,6 +57,10 @@ auto plain_line(const simrv::tui::VirtualTerminal& terminal, int row, int width)
     return plain;
 }
 
+auto plain_line(const simrv::tui::VirtualTerminal& terminal, int row, int width) -> std::string {
+    return strip_ansi(terminal.get_line_as_string(row, width));
+}
+
 void test_terminal_controls() {
     simrv::tui::VirtualTerminal terminal(8, 3);
     std::string response;
@@ -63,6 +79,10 @@ void test_terminal_controls() {
     expect(terminal.is_cursor_visible(), "private CSI shows the cursor");
     terminal.write_string("\033[6n");
     expect(response == "\033[2;5R", "cursor-position query returns a PTY-style response");
+    response.clear();
+    terminal.write_string("\033[c\033[18t");
+    expect(response == "\033[?1;2c\033[8;3;8t",
+           "terminal capability and window-size queries receive deterministic replies");
 }
 
 void test_terminal_scrollback_and_selection() {
@@ -91,6 +111,24 @@ void test_utf8_and_theme_helpers() {
     expect(simrv::tui::get_display_width("A\xE2\x98\x83"
                                          "B") == 3,
            "display width counts UTF-8 code points");
+    expect(simrv::tui::get_display_width("A界B") == 4,
+           "display width counts East Asian wide characters as two cells");
+    expect(simrv::tui::get_display_width("e\xCC\x81") == 1,
+           "combining marks do not shift following columns");
+    expect(simrv::tui::get_display_width("🙂") == 2,
+           "emoji occupy the two cells used by supported terminals");
+    const std::string clipped_wide = simrv::tui::format_to_width("A界B", 2);
+    expect(simrv::tui::get_display_width(clipped_wide) == 2,
+           "wide-character truncation preserves the requested row width");
+    expect(clipped_wide.find("界") == std::string::npos,
+           "truncation never emits half of a two-cell character");
+    const std::string over_wide = simrv::tui::overlay_string("A界BC", "XX", 1, 2);
+    expect(simrv::tui::get_display_width(over_wide) == 5 &&
+               over_wide.find("AXXBC") != std::string::npos,
+           "overlay replacement preserves width across a complete wide character");
+    const std::string inside_wide = simrv::tui::overlay_string("A界BC", "XX", 2, 2);
+    expect(simrv::tui::get_display_width(inside_wide) == 5,
+           "overlay replacement preserves width when its edge crosses a wide character");
     expect(simrv::tui::make_repeated_string("═", 3) == "═══", "border repetition is exact");
 
     simrv::tui::set_tui_theme(simrv::tui::TuiTheme::HighContrast);
@@ -101,16 +139,60 @@ void test_utf8_and_theme_helpers() {
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 22, "all key actions have registry entries");
+    expect(bindings.size() == 23, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
+    std::set<char> claimed_chars;
     for (const auto& binding : bindings) {
         actions.insert(binding.action);
         expect(!binding.key_display.empty(), "key display is not empty");
         expect(!binding.help_label.empty(), "help description is not empty");
         expect(&simrv::tui::Keybindings::get(binding.action) == &binding,
                "action lookup returns the canonical registry entry");
+        if (binding.primary_char != '\0') {
+            expect(claimed_chars.insert(binding.primary_char).second,
+                   "canonical primary bindings do not collide");
+        }
+        if (binding.alt_char != '\0' && binding.alt_char != binding.primary_char) {
+            expect(claimed_chars.insert(binding.alt_char).second,
+                   "canonical alternate bindings do not collide");
+        }
     }
     expect(actions.size() == bindings.size(), "key actions are unique");
+    expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::Quit).find("Ctrl-Q") !=
+               std::string::npos,
+           "global quit is documented by the canonical help descriptor");
+    expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::RunPause).find("Ctrl-P") !=
+               std::string::npos,
+           "global pause is documented by the canonical help descriptor");
+
+    constexpr simrv::tui::TuiFooterAction footer_actions[] = {
+        simrv::tui::TuiFooterAction::Step,
+        simrv::tui::TuiFooterAction::StepBack,
+        simrv::tui::TuiFooterAction::CycleRegs,
+        simrv::tui::TuiFooterAction::CycleTools,
+        simrv::tui::TuiFooterAction::SetBreakpoint,
+        simrv::tui::TuiFooterAction::SetWatchpoint,
+        simrv::tui::TuiFooterAction::TogglePcBreakpoint,
+        simrv::tui::TuiFooterAction::SetSpeed,
+        simrv::tui::TuiFooterAction::InspectMem,
+        simrv::tui::TuiFooterAction::LoadBinary,
+        simrv::tui::TuiFooterAction::ToggleHelp,
+        simrv::tui::TuiFooterAction::RunPause,
+        simrv::tui::TuiFooterAction::Quit,
+        simrv::tui::TuiFooterAction::CycleLayout,
+        simrv::tui::TuiFooterAction::TogglePanel,
+        simrv::tui::TuiFooterAction::ToggleTrace,
+        simrv::tui::TuiFooterAction::OpenSettings,
+        simrv::tui::TuiFooterAction::ConfigureMisa,
+        simrv::tui::TuiFooterAction::ConfigureSystem,
+        simrv::tui::TuiFooterAction::ManageBreakpoints,
+        simrv::tui::TuiFooterAction::Reboot,
+    };
+    for (const auto footer_action : footer_actions) {
+        const auto key_action = simrv::tui::key_action_for_footer(footer_action);
+        expect(!simrv::tui::Keybindings::get_footer_text(key_action).empty(),
+               "every clickable footer action has a canonical label");
+    }
 
     bool threw = false;
     try {
@@ -133,6 +215,10 @@ void test_key_registry() {
     running.paused = false;
     expect(!simrv::tui::Keybindings::is_available(KeyAction::InspectAddress, running),
            "inspection requires a paused machine");
+    expect(!simrv::tui::Keybindings::is_available(KeyAction::ToggleLearn, running),
+           "guided inspection can only be changed while navigating the paused TUI");
+    expect(simrv::tui::Keybindings::get(KeyAction::ToggleLearn).primary_char == 'g',
+           "guided inspection uses the canonical g binding");
     expect(simrv::tui::Keybindings::unavailable_reason(KeyAction::InspectAddress, running) ==
                "Pause the simulator first",
            "disabled actions explain how to become available");
@@ -162,6 +248,36 @@ void test_page_guidance() {
         expect(!simrv::tui::Keybindings::get(guidance.next_action).key_display.empty(),
                "each inspection page links to a canonical action");
     }
+    expect(!simrv::tui::should_show_guidance(true, false, 24),
+           "guidance is hidden by default until learn mode is enabled");
+    expect(simrv::tui::should_show_guidance(true, true, 24),
+           "learn mode shows guidance while paused when space permits");
+    expect(!simrv::tui::should_show_guidance(false, true, 24),
+           "guidance does not replace guest-terminal content while running");
+    expect(!simrv::tui::should_show_guidance(true, true, 15),
+           "architectural data wins over guidance in short terminals");
+}
+
+void test_help_uses_canonical_registry() {
+    std::vector<std::string> rows;
+    simrv::tui::modals::HelpModal::render(
+        rows, [&rows](const std::string& row) { rows.push_back(row); }, 48, 78);
+    std::string rendered;
+    for (const auto& row : rows) rendered += row + '\n';
+    for (const auto& binding : simrv::tui::Keybindings::all()) {
+        expect(rendered.find(binding.key_display) != std::string::npos,
+               "help renders every canonical action binding");
+        expect(rendered.find(binding.help_label) != std::string::npos,
+               "help renders every canonical action description");
+    }
+    std::vector<std::string> compact_rows;
+    simrv::tui::modals::HelpModal::render(
+        compact_rows, [&compact_rows](const std::string& row) { compact_rows.push_back(row); }, 24,
+        78);
+    for (std::size_t i = 2; i < compact_rows.size(); ++i) {
+        expect(simrv::tui::get_display_width(compact_rows[i]) == 76,
+               "each dual-column help row exactly fills the modal interior");
+    }
 }
 
 void test_input_routing() {
@@ -176,6 +292,8 @@ void test_input_routing() {
     expect(route_input('\n', focused) == InputRoute::Guest,
            "newline reaches the guest while its terminal is focused");
     expect(route_input(0x10, focused) == InputRoute::Pause, "Ctrl-P pauses a running guest");
+    expect(route_input(0x12, focused) == InputRoute::Reboot,
+           "Ctrl-R requests reboot instead of reaching a running guest");
     expect(route_input(0x11, focused) == InputRoute::Quit, "Ctrl-Q quits a running guest");
     expect(route_input(0x01, focused) == InputRoute::Guest,
            "Ctrl-A is passed through when the guest is running");
@@ -187,6 +305,8 @@ void test_input_routing() {
     expect(route_input('\r', modal) == InputRoute::Modal, "Enter submits the active modal");
     expect(route_input(0x01, modal) == InputRoute::Modal, "Ctrl-A has no global binding");
     expect(route_input(0x11, modal) == InputRoute::Quit, "Ctrl-Q remains globally available");
+    expect(route_input(0x12, modal) == InputRoute::Reboot,
+           "Ctrl-R remains globally available after shutdown notices and other modals");
     expect(route_input(0x1B, modal) == InputRoute::ControlSequence,
            "Escape is parsed before modal dispatch");
     expect(normalize_guest_terminal_byte('\r') == '\n',
@@ -195,6 +315,8 @@ void test_input_routing() {
 }
 
 void test_responsive_layout() {
+    using simrv::tui::calculate_frame_geometry;
+    using simrv::tui::calculate_overlay_geometry;
     using simrv::tui::calculate_pane_widths;
     using simrv::tui::TuiLayout;
 
@@ -211,6 +333,98 @@ void test_responsive_layout() {
     const auto full_right = calculate_pane_widths(80, TuiLayout::FullRight, 60);
     expect(full_right.left == 0 && full_right.right == 78,
            "full-right resize ignores stale split-pane width");
+
+    struct FrameCase {
+        int width;
+        int height;
+        TuiLayout layout;
+    };
+    constexpr FrameCase frames[] = {
+        {40, 10, TuiLayout::Split},     {80, 24, TuiLayout::Split},
+        {120, 32, TuiLayout::Split},    {160, 48, TuiLayout::Split},
+        {120, 32, TuiLayout::FullLeft}, {120, 32, TuiLayout::FullRight},
+    };
+    for (const auto& frame_case : frames) {
+        const auto frame =
+            calculate_frame_geometry(frame_case.width, frame_case.height, frame_case.layout);
+        expect(frame.renderable, "representative terminal geometry is renderable");
+        expect(frame.frame_rows == frame_case.height,
+               "header, content, divider, and footer consume the exact terminal height");
+        const int separators = frame_case.layout == TuiLayout::Split ? 3 : 2;
+        expect(frame.panes.left + frame.panes.right + separators == frame_case.width,
+               "pane widths and vertical borders consume the exact terminal width");
+    }
+    expect(!calculate_frame_geometry(39, 24, TuiLayout::Split).renderable,
+           "sub-minimum width is rejected by the shared geometry policy");
+    expect(!calculate_frame_geometry(80, 9, TuiLayout::Split).renderable,
+           "sub-minimum height is rejected by the shared geometry policy");
+
+    const auto short_modal = calculate_overlay_geometry(40, 10, 78, 30);
+    expect(short_modal.renderable && short_modal.width == 36 && short_modal.height == 10,
+           "a tall modal is constrained to the minimum terminal frame");
+    expect(short_modal.start_x == 2 && short_modal.start_y == 0 &&
+               short_modal.visible_content_rows == 8,
+           "constrained modal geometry remains centered with two visible borders");
+    const auto desktop_modal = calculate_overlay_geometry(120, 32, 78, 12);
+    expect(desktop_modal.width == 78 && desktop_modal.height == 14 && desktop_modal.start_x == 21 &&
+               desktop_modal.start_y == 9,
+           "desktop modals retain their intended centered dimensions");
+}
+
+void test_frame_composition() {
+    using simrv::tui::calculate_frame_geometry;
+    using simrv::tui::compose_frame_lines;
+    using simrv::tui::format_to_width;
+    using simrv::tui::TuiLayout;
+
+    struct FrameCase {
+        int width;
+        int height;
+        TuiLayout layout;
+        std::uint64_t golden_hash;
+    };
+    constexpr FrameCase cases[] = {
+        {40, 10, TuiLayout::Split, 1195331755914945392ULL},
+        {80, 24, TuiLayout::Split, 5102364040892133744ULL},
+        {120, 32, TuiLayout::Split, 13989743370693611914ULL},
+        {160, 48, TuiLayout::Split, 11898988648789430246ULL},
+        {120, 32, TuiLayout::FullLeft, 17252040885446061950ULL},
+        {120, 32, TuiLayout::FullRight, 3818806389424029207ULL},
+    };
+    for (const auto& frame_case : cases) {
+        const auto frame =
+            calculate_frame_geometry(frame_case.width, frame_case.height, frame_case.layout);
+        const std::string header = format_to_width("header-0", frame_case.width) + "\n" +
+                                   format_to_width("header-1", frame_case.width) + "\n" +
+                                   format_to_width("header-2", frame_case.width);
+        const std::string footer = format_to_width("footer-0", frame_case.width) + "\n" +
+                                   format_to_width("footer-1", frame_case.width) + "\n" +
+                                   format_to_width("footer-2", frame_case.width);
+        const auto lines = compose_frame_lines(
+            frame, frame_case.width, frame_case.layout, header, footer,
+            [](int row, int) { return "left-" + std::to_string(row); },
+            [](int row, int) { return "right-" + std::to_string(row); });
+        expect(static_cast<int>(lines.size()) == frame_case.height,
+               "composed frame has exactly one row per terminal row");
+        for (const auto& line : lines) {
+            expect(simrv::tui::get_display_width(line) == frame_case.width,
+                   "every composed frame row exactly matches terminal width");
+        }
+        const std::string body = strip_ansi(lines.at(3));
+        expect(body.starts_with("║") && body.ends_with("║"),
+               "composed body retains both outer borders");
+        expect((body.find("│") != std::string::npos) == (frame_case.layout == TuiLayout::Split),
+               "center divider appears only in split layout");
+        std::string ansi_screen;
+        for (const auto& line : lines) ansi_screen += line + '\n';
+        const auto golden_hash = fnv1a64(ansi_screen);
+        // Deliberate updates are surfaced by the failing ctest message with the new hash.
+        expect(golden_hash == frame_case.golden_hash,
+               "exact ANSI frame golden changed for " + std::to_string(frame_case.width) + "x" +
+                   std::to_string(frame_case.height) + " layout " +
+                   std::to_string(static_cast<int>(frame_case.layout)) + ": " +
+                   std::to_string(golden_hash));
+    }
 }
 
 }  // namespace
@@ -221,8 +435,10 @@ int main() {
     test_utf8_and_theme_helpers();
     test_key_registry();
     test_page_guidance();
+    test_help_uses_canonical_registry();
     test_input_routing();
     test_responsive_layout();
+    test_frame_composition();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;

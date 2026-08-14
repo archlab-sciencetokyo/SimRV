@@ -34,13 +34,6 @@ enum class DumpFlag : DumpFlags {
     Csr = (1u << 2),
 };
 
-/// Page table levels for Sv32/Sv39 virtual memory translation.
-constexpr uint32_t LEVELS = 2;
-/// Page table entry size in bytes.
-constexpr uint32_t PTE_SIZE = 4;
-/// Standard page size in bytes (4 KiB).
-constexpr uint32_t PAGE_SIZE = (1u << 12);
-
 /// Bitmask for disk controller MMIO offset addressing.
 constexpr Address DISK_MASK = static_cast<Address>(0x03ffffffu);
 
@@ -111,9 +104,10 @@ constexpr auto trap_is_interrupt(TrapCause cause) -> bool {
     return (cause & kInterruptCauseBit) != 0u;
 }
 
-/// Select the highest priority pending & enabled interrupt according to RISC-V Spec 1.12 Section 3.1.9.
+/// Select the highest-priority pending standard interrupt per Privileged ISA 1.13 section 2.1.1.9.
 constexpr auto select_highest_priority_interrupt(Word mask) -> Word {
-    // Fixed priority order: MEIP (11) -> MSIP (3) -> MTIP (7) -> SEIP (9) -> SSIP (1) -> STIP (5)
+    // Fixed priority: MEI -> MSI -> MTI -> SEI -> SSI -> STI. Platform interrupt
+    // bits (16+) fall back to descending cause number, SimRV's documented custom ordering.
     constexpr std::array<Word, 6> kPriorityOrder = {11u, 3u, 7u, 9u, 1u, 5u};
     for (Word const irq : kPriorityOrder) {
         if ((mask & (1u << irq)) != 0u) {

@@ -31,7 +31,6 @@ enum class ExtId : std::uint32_t {
     Base = 0x10,
     Time = 0x54494D45,
     Rfence = 0x52464E43,
-    Hsm = 0x48534D,
     Ipi = 0x735049,
     SystemReset = 0x53525354,
 };
@@ -59,13 +58,6 @@ enum class RfenceFid : std::uint8_t {
     RemoteHfenceVvmaAsid = 0x5,
 };
 
-enum class HsmFid : std::uint8_t {
-    HartStart = 0x0,
-    HartStop = 0x1,
-    HartStatus = 0x2,
-    HartSuspend = 0x3,
-};
-
 enum class SbiError : std::int8_t {
     Success = 0,
     Failed = -1,
@@ -79,7 +71,9 @@ enum class SbiError : std::int8_t {
 };
 
 constexpr Word kSpecVersion_0_3 = 0x00000003U;
-constexpr Word kImplId_SimRV = 0x1U;
+// Project-specific ID (ASCII "SIM"). ID 1 is reserved for OpenSBI and must not be reported by
+// SimRV's direct execution environment. An official SBI implementation ID has not been assigned.
+constexpr Word kImplId_SimRV = 0x53494DU;
 constexpr Word kImplVersion = 0x1U;
 constexpr unsigned kWord32Shift = 32u;
 constexpr auto kLogHexWidth = static_cast<int>(kXLenHexDigits);
@@ -122,8 +116,8 @@ auto Sbi::handle_base(Word func_id) -> bool {
             const Word probed = cpu_.state().regs.read(RegId::A0);
             const bool supported =
                 (probed == enum_mask(ExtId::Base)) || (probed == enum_mask(ExtId::Time)) ||
-                (probed == enum_mask(ExtId::Rfence)) || (probed == enum_mask(ExtId::Hsm)) ||
-                (probed == enum_mask(ExtId::Ipi)) || (probed == enum_mask(ExtId::SystemReset));
+                (probed == enum_mask(ExtId::Rfence)) || (probed == enum_mask(ExtId::Ipi)) ||
+                (probed == enum_mask(ExtId::SystemReset));
             sbi_return(static_cast<SignedWord>(SbiError::Success), supported ? 1U : 0U);
             return true;
         }
@@ -143,7 +137,8 @@ auto Sbi::handle_time(Word func_id) -> bool {
         cpu_.clint_mmio.supervisor_timer.store(true, std::memory_order_release);
         cpu_.clint_mmio.mtimecmp = timer_value();
         cpu_.state().mip &= ~enum_mask(MipBit::Mtip);
-        cpu_.state().mip &= ~enum_mask(MipBit::Stip);
+        cpu_.state().stip_timer = false;
+        cpu_.state().refresh_supervisor_pending();
         cpu_.evaluate_timer_interrupt();
         sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
     } else {
@@ -153,49 +148,28 @@ auto Sbi::handle_time(Word func_id) -> bool {
 }
 
 auto Sbi::handle_rfence(Word func_id) -> bool {
+    const auto selection = detail::select_local_hart(
+        cpu_.state().regs.read(RegId::A0), cpu_.state().regs.read(RegId::A1), cpu_.state().mhartid);
+    if (selection == detail::HartMaskSelection::Invalid) {
+        sbi_return(static_cast<SignedWord>(SbiError::InvalidParam), 0);
+        return true;
+    }
+
     switch (static_cast<RfenceFid>(func_id)) {
         case RfenceFid::RemoteFenceI:
-            cpu_.icache.flush();
-            cpu_.dcache.flush();
-            cpu_.decode_cache.flush();
+            if (selection == detail::HartMaskSelection::Local) {
+                cpu_.icache.flush();
+                cpu_.dcache.flush();
+                cpu_.decode_cache.flush();
+            }
             sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
             return true;
         case RfenceFid::RemoteSfenceVma:
         case RfenceFid::RemoteSfenceVmaAsid:
-            cpu_.TLB_flush();
-            cpu_.dcache.flush();
-            sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
-            return true;
-        default:
-            if (func_id <= enum_mask(RfenceFid::RemoteHfenceVvmaAsid)) {
-                sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
-            } else {
-                sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);
+            if (selection == detail::HartMaskSelection::Local) {
+                cpu_.TLB_flush();
+                cpu_.dcache.flush();
             }
-            return true;
-    }
-}
-
-auto Sbi::handle_hsm(Word func_id) -> bool {
-    switch (static_cast<HsmFid>(func_id)) {
-        case HsmFid::HartStart: {
-            const Word hartid = cpu_.state().regs.read(RegId::A0);
-            sbi_return(
-                static_cast<SignedWord>(hartid == cpu_.state().mhartid ? SbiError::Success
-                                                                       : SbiError::NotSupported),
-                0);
-            return true;
-        }
-        case HsmFid::HartStop:
-            sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);
-            return true;
-        case HsmFid::HartStatus: {
-            const Word hartid = cpu_.state().regs.read(RegId::A0);
-            sbi_return(static_cast<SignedWord>(SbiError::Success),
-                       hartid == cpu_.state().mhartid ? 0U : 1U);
-            return true;
-        }
-        case HsmFid::HartSuspend:
             sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
             return true;
         default:
@@ -208,9 +182,13 @@ auto Sbi::handle_ipi(Word func_id) -> bool {
     if (func_id == 0) {  // send_ipi
         const Word hart_mask = cpu_.state().regs.read(RegId::A0);
         const Word hart_mask_base = cpu_.state().regs.read(RegId::A1);
-
-        const bool target_hart0 = (hart_mask == 0) || (hart_mask_base == 0 && (hart_mask & 1) != 0);
-        if (target_hart0) {
+        const auto selection =
+            detail::select_local_hart(hart_mask, hart_mask_base, cpu_.state().mhartid);
+        if (selection == detail::HartMaskSelection::Invalid) {
+            sbi_return(static_cast<SignedWord>(SbiError::InvalidParam), 0);
+            return true;
+        }
+        if (selection == detail::HartMaskSelection::Local) {
             cpu_.state().mip |= enum_mask(MipBit::Ssip);
         }
         sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
@@ -254,8 +232,7 @@ auto Sbi::handle_ecall(TrapCause cause) -> bool {
         return false;
     }
 
-    if (cause != enum_mask(ExceptionCode::SupervisorEcall) &&
-        cause != enum_mask(ExceptionCode::MachineEcall)) {
+    if (!detail::is_direct_sbi_ecall(cause)) {
         return false;
     }
 
@@ -305,8 +282,6 @@ auto Sbi::handle_ecall(TrapCause cause) -> bool {
             return handle_time(func_id);
         case ExtId::Rfence:
             return handle_rfence(func_id);
-        case ExtId::Hsm:
-            return handle_hsm(func_id);
         case ExtId::Ipi:
             return handle_ipi(func_id);
         case ExtId::SystemReset:

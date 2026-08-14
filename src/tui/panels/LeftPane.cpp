@@ -323,7 +323,7 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
 
     constexpr int kGuidanceHeight = 4;
     constexpr int kLogAreaHeight = 6;
-    bool const show_guidance = paused_ && visible_rows_ >= 16;
+    bool const show_guidance = should_show_guidance(paused_, learn_enabled_, visible_rows_);
     int const guidance_start = visible_rows_ - kLogAreaHeight - kGuidanceHeight;
     if (show_guidance && row_idx >= guidance_start && row_idx < guidance_start + kGuidanceHeight) {
         return render_guidance_row(row_idx - guidance_start, width);

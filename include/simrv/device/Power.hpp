@@ -17,13 +17,16 @@ enum class PowerCommand : Word {
     Poweroff = 0x5555U,
     Crash = 0x3333U,
     Reboot = 0x7777U,
+    /// SimRV extension: leave the simulator instead of retaining a shut-down TUI.
+    Exit = 0x8888U,
 };
 
 /**
  * @class PowerMmio
  * @brief SiFive Test Finisher syscon power device emulation.
  *
- * Intercepts writes to trigger cleanly managed guest reboots or shutdowns.
+ * Intercepts 32-bit writes at offset zero to trigger cleanly managed guest lifecycle changes.
+ * Poweroff, crash, and reboot use the SiFive test-finisher convention; Exit is a SimRV extension.
  */
 class PowerMmio : public memory::TileLinkNode {
    public:

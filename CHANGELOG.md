@@ -3,7 +3,10 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — v2.0.0 release hardening
+## [v2.0.0-rc.9] — 2026-08-14
+
+Release candidate 9 focuses on architectural compliance, trap and interrupt correctness,
+OS lifecycle control, MMIO safety, and TUI/UART stability ahead of v2.0.0.
 
 ### Breaking CLI cleanup
 
@@ -30,6 +33,16 @@ alias is now CLI-only; use `-f` or `--fdt` for a device tree.
 
 ### TUI framework hardening
 
+- Corrected Unicode display-cell accounting for wide and combining characters, centralized frame
+  and modal resize geometry, and kept constrained modal borders closed with a clipping notice.
+- Generated footer labels and online action help from the canonical keybinding registry, with
+  exact-width two-column help rows and resize-stable mouse hit-testing.
+- Extracted full-frame composition into a pure tested renderer and removed the stale `k` alias for
+  setting breakpoints; `[:]` sets a breakpoint and `[k]` toggles one at the current PC.
+- Kept `Ctrl-R` reboot and `Ctrl-Q` quit globally available after shutdown and over modals; quit
+  now uses the machine exit request without transiently resuming stopped execution.
+- Made the educational guidance strip opt-in with `[g]`; it remains hidden while running and in
+  terminals too short to show it without displacing architectural state.
 - Split byte-routing policy from terminal I/O so focused guest input, modal input, and paused
   navigation have deterministic behavior and native test coverage.
 - Added native tests for Enter routing, ANSI/UTF-8 parsing, scrollback, selection, resize/reset,
@@ -48,6 +61,10 @@ alias is now CLI-only; use `-f` or `--fdt` for a device tree.
 - Unaligned guest RAM accesses no longer rely on undefined host pointer casts, and framebuffer
   accesses are checked across their complete width.
 - Bare-metal fast batches honor instruction limits exactly and stop promptly after a halt request.
+- Generated Linux images include a root-only `simrv-power` `/dev/mem` helper for direct poweroff,
+  reboot, crash, and simulator-exit requests when the normal OS lifecycle path is unavailable.
+  Its SimRV-specific `exit` request terminates the monitor as well as guest execution, while
+  poweroff retains the shut-down machine for TUI inspection.
 
 ## [v2.0.0-rc.8] — 2026-08-08
 
@@ -352,6 +369,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
+[v2.0.0-rc.9]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.9
 [v2.0.0-rc.8]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.8
 [v2.0.0-rc.6]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.6
 [v2.0.0-rc.3]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.3

@@ -52,6 +52,7 @@ class LeftPane : public TuiWidget {
     void set_max_kips(uint64_t max_kips) { max_kips_ = max_kips; }
     void set_kips_history(const std::vector<uint64_t>& history) { kips_history_ = history; }
     void set_paused(bool paused) { paused_ = paused; }
+    void set_learn_enabled(bool enabled) { learn_enabled_ = enabled; }
     void set_visible_rows(int rows) { visible_rows_ = rows; }
     void set_active_runtime(double secs) { active_runtime_ = secs; }
     void scroll(int lines);
@@ -199,6 +200,7 @@ class LeftPane : public TuiWidget {
     simrv::core::Machine& machine_;
     TuiRegPage page_ = TuiRegPage::GPR;
     bool paused_ = true;
+    bool learn_enabled_ = false;
 
     std::array<Register, 32> cached_gpr_{};
     std::array<uint64_t, 32> cached_fpr_{};

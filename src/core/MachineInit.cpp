@@ -356,7 +356,7 @@ auto Machine::initialize() -> int {
     cpu.state().misa = initial_misa;
     cpu.state().priv = kPrivMachine;
     cpu.state().regs.vlen = s_vlen ? s_vlen : 256;
-    cpu.state().update_xlen();
+    cpu.state().initialize_lower_xlen_fields();
     if (cpu.state().regs.xlen == 32) {
         cpu.state().pc =
             static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(cpu.state().pc)));
@@ -527,7 +527,7 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
     }
 
     cpu.state().misa = initial_misa;
-    cpu.state().update_xlen();
+    cpu.state().initialize_lower_xlen_fields();
 
     resolve_start_pc_and_dram_base(*this, symbols);
 

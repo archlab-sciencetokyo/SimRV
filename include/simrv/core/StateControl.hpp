@@ -177,8 +177,8 @@ class TrapController {
      * @param is_write True if this is a write or read-write access to the CSR.
      * @return true if access is permitted, false if it triggers an illegal instruction exception.
      */
-    static auto canAccessCsr(PrivilegeLevel current_priv, CSRAddress csr_addr, bool is_write)
-        -> bool;
+    static auto canAccessCsr(PrivilegeLevel current_priv, CSRValue misa, CSRAddress csr_addr,
+                             bool is_write) -> bool;
 };
 
 }  // namespace simrv::core

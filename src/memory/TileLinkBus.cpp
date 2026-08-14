@@ -43,11 +43,17 @@ void TileLinkBus::tick() {
         resp.data = 0;
 
         const Instruction funct3 = req.size;
+        const bool valid_size = req.size <= 3;
+        const size_t transfer_bytes = valid_size ? (size_t{1} << req.size) : 0;
         bool handled = false;
 
-        if (req.opcode == TlOpcodeA::Get) {
+        if (!valid_size) {
+            resp.error = true;
+            handled = true;
+        } else if (req.opcode == TlOpcodeA::Get) {
             resp.opcode = TlOpcodeD::AccessAckData;
-            if (simrv::memory::is_dram_addr(req.address) && machine_.mmem != nullptr) {
+            if (simrv::memory::is_dram_access(req.address, transfer_bytes) &&
+                machine_.mmem != nullptr) {
                 resp.data = simrv::memory::ram_read_fast(req.address, funct3, machine_.mmem);
                 ++read_count_;
                 handled = true;
@@ -73,7 +79,8 @@ void TileLinkBus::tick() {
                 }
             }
 
-            if (simrv::memory::is_dram_addr(req.address) && machine_.mmem != nullptr) {
+            if (simrv::memory::is_dram_access(req.address, transfer_bytes) &&
+                machine_.mmem != nullptr) {
                 simrv::memory::ram_write_fast(req.address, req.data, funct3, machine_.mmem);
                 ++write_count_;
                 handled = true;

@@ -26,6 +26,7 @@
 #include "simrv/device/Framebuffer.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/pipeline/Decoder.hpp"
+#include "simrv/tui/TuiFrameRenderer.hpp"
 #include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/LeftPane.hpp"
@@ -436,6 +437,7 @@ void Tui::render_build_lines(int left_pane_width, int right_pane_width, int num_
     left_pane_->set_max_kips(max_kips_);
     left_pane_->set_kips_history(kips_history_);
     left_pane_->set_paused(paused_);
+    left_pane_->set_learn_enabled(learn_mode_enabled_);
     left_pane_->set_visible_rows(num_rows);
     left_pane_->set_active_runtime(static_cast<double>(runtime_duration_.count()) / 1000000.0);
     left_pane_->set_trace_buffer(&trace_buffer_);
@@ -570,65 +572,28 @@ void Tui::render(bool force) {
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
     int term_width = w.ws_col;
     int term_height = w.ws_row;
-    if (term_width < 40 || term_height < 10) return;
+    const FrameGeometry frame =
+        calculate_frame_geometry(term_width, term_height, layout_, user_left_pane_width_);
+    if (!frame.renderable) return;
 
     render_update_speed(now);
 
-    const PaneWidths panes = calculate_pane_widths(term_width, layout_, user_left_pane_width_);
-    const int left_pane_width = panes.left;
-    const int right_pane_width = panes.right;
+    const int left_pane_width = frame.panes.left;
+    const int right_pane_width = frame.panes.right;
     pane_width_cached_ = left_pane_width;
 
-    int num_rows = term_height - 7;
+    const int num_rows = frame.content_rows;
     int total = (panel_mode == TuiRightPanelMode::Terminal) ? vt_.get_lines_count() : 0;
     scroll_offset_ = std::min(scroll_offset_, std::max(0, total - num_rows));
 
     render_build_lines(left_pane_width, right_pane_width, num_rows, panel_mode);
     lock.unlock();
 
-    std::vector<std::string> new_lines;
-    new_lines.reserve(static_cast<size_t>(num_rows) + 6);
-    auto append_split_lines = [&](const std::string& str) {
-        size_t start = 0;
-        while (start < str.size()) {
-            size_t pos = str.find('\n', start);
-            if (pos == std::string::npos) {
-                new_lines.push_back(str.substr(start));
-                break;
-            }
-            new_lines.push_back(str.substr(start, pos - start));
-            start = pos + 1;
-        }
-    };
-
-    append_split_lines(status_bar_->render_row(0, term_width));
-    for (int i = 0; i < num_rows; ++i) {
-        if (layout_ == TuiLayout::Split) {
-            new_lines.push_back(
-                std::format("{}║\033[0m{}{}│\033[0m{}{}║\033[0m", kThemeBorder,
-                            left_pane_->render_row(i, left_pane_width), kThemeBorder,
-                            right_pane_->render_row(i, right_pane_width), kThemeBorder));
-        } else if (layout_ == TuiLayout::FullRight) {
-            new_lines.push_back(std::format("{}║\033[0m{}{}║\033[0m", kThemeBorder,
-                                            right_pane_->render_row(i, right_pane_width),
-                                            kThemeBorder));
-        } else {
-            new_lines.push_back(std::format("{}║\033[0m{}{}║\033[0m", kThemeBorder,
-                                            left_pane_->render_row(i, left_pane_width),
-                                            kThemeBorder));
-        }
-    }
-
-    if (layout_ == TuiLayout::Split) {
-        new_lines.push_back(std::format("{}╠{}╧{}╣\033[0m", kThemeBorder,
-                                        make_repeated_string("═", left_pane_width),
-                                        make_repeated_string("═", right_pane_width)));
-    } else {
-        new_lines.push_back(
-            std::format("{}╠{}╣\033[0m", kThemeBorder, make_repeated_string("═", term_width - 2)));
-    }
-
-    append_split_lines(status_bar_->render_row(1, term_width));
+    std::vector<std::string> new_lines = compose_frame_lines(
+        frame, term_width, layout_, status_bar_->render_row(0, term_width),
+        status_bar_->render_row(1, term_width),
+        [this](int row, int width) { return left_pane_->render_row(row, width); },
+        [this](int row, int width) { return right_pane_->render_row(row, width); });
     modal_.render_overlay(new_lines, term_width, term_height);
 
     std::string update_cmds = "\033[?25l";
@@ -965,7 +930,7 @@ void Tui::set_reg_page(TuiRegPage page) {
         (page == TuiRegPage::CACHE || page == TuiRegPage::BPRED || page == TuiRegPage::HAZARD)) {
         set_status_override(
             "CA Inspector Page disabled in Functional Mode (Enable Cycle-Accurate mode "
-            "\033[1m[,]\033[22m or -ca)");
+            "\033[1m[,]\033[22m or --cycle-accurate)");
         page = TuiRegPage::TLB;
     }
     if (left_pane_) {
@@ -1280,10 +1245,11 @@ void Tui::update() {
             case InputRoute::Pause:
                 pause_loop();
                 return;
+            case InputRoute::Reboot:
+                machine_.request_reboot();
+                return;
             case InputRoute::Quit:
-                machine_.is_running_ = false;
-                // Wake a paused simulation thread so shutdown can join it cleanly.
-                unpause_loop();
+                machine_.request_exit();
                 return;
             case InputRoute::Guest:
                 // The integrated terminal is an attached UART endpoint. The external PTY slave is
@@ -1542,6 +1508,10 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         case simrv::tui::TuiKey::P:
             cycle_right_panel_mode();
             return true;
+        case simrv::tui::TuiKey::g:
+        case simrv::tui::TuiKey::G:
+            toggle_learn_mode();
+            return true;
         case simrv::tui::TuiKey::v:
         case simrv::tui::TuiKey::V:
             toggle_trace_enabled();
@@ -1607,8 +1577,7 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
         unpause_loop();
         return;
     }
-    if (key == simrv::tui::TuiKey::CtrlR || key == simrv::tui::TuiKey::r ||
-        key == simrv::tui::TuiKey::R) {
+    if (key == simrv::tui::TuiKey::CtrlR) {
         machine_.request_reboot();
         return;
     }
@@ -1618,9 +1587,7 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
     }
     if (key == simrv::tui::TuiKey::CtrlQ || key == simrv::tui::TuiKey::CtrlC ||
         key == simrv::tui::TuiKey::q || key == simrv::tui::TuiKey::Q) {
-        machine_.is_running_ = false;
-        machine_.is_shutdown_ = false;
-        unpause_loop();
+        machine_.request_exit();
         return;
     }
 
@@ -1664,6 +1631,13 @@ void Tui::pause_loop() {
 }
 
 void Tui::unpause_loop() { set_paused(false); }
+
+void Tui::toggle_learn_mode() {
+    learn_mode_enabled_ = !learn_mode_enabled_;
+    set_status_override(
+        std::format("Guided inspection {}", learn_mode_enabled_ ? "enabled" : "hidden"));
+    render(true);
+}
 
 void Tui::execute_footer_action(TuiFooterAction action) {
     switch (action) {
@@ -1755,9 +1729,7 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             open_modal(ModalType::Help);
             break;
         case TuiFooterAction::Quit:
-            machine_.is_running_ = false;
-            machine_.is_shutdown_ = false;
-            unpause_loop();
+            machine_.request_exit();
             break;
         case TuiFooterAction::CycleLayout:
             cycle_layout();
@@ -2031,7 +2003,6 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                 if (status_bar_->is_pos_on_status_badge(x, term_w)) {
                     if (machine_.is_shutdown_) {
                         machine_.request_reboot();
-                        unpause_loop();
                     } else if (paused_) {
                         unpause_loop();
                     } else {
@@ -2048,13 +2019,14 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
 
         struct winsize w_footer{};
         ioctl(STDOUT_FILENO, TIOCGWINSZ, &w_footer);
+        int term_w = w_footer.ws_col > 0 ? w_footer.ws_col : 80;
         int term_h = w_footer.ws_row > 0 ? w_footer.ws_row : 24;
 
         if (esc_buf_.back() == 'M' && button == 0 && (y == term_h - 2 || y == term_h - 1)) {
             int col = x - 2;
             int row_idx = (y == term_h - 2) ? 0 : 1;
             if (status_bar_) {
-                auto act_opt = status_bar_->get_footer_action_at_col(col, row_idx);
+                auto act_opt = status_bar_->get_footer_action_at_col(col, row_idx, term_w);
                 if (act_opt.has_value()) {
                     execute_footer_action(act_opt.value());
                     return true;

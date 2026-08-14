@@ -115,6 +115,14 @@ void Machine::request_reboot() {
     execution_state_.notify_all();
 }
 
+void Machine::request_exit(int status) {
+    exit_code = status;
+    is_shutdown_ = true;
+    is_running_ = false;
+    execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
+    execution_state_.notify_all();
+}
+
 void Machine::run() {
     cpu.evaluate_timer_interrupt();
 

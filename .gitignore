@@ -51,6 +51,7 @@ regression_logs/
 release-report.json
 Testing/
 repro/
+Makefrag
 
 # Generated documentation (source Markdown remains tracked)
 docs/*

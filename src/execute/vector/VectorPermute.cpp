@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "VectorHelpers.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 
@@ -6,9 +8,10 @@ namespace simrv::execute {
 namespace {
 
 // Whole register move helper
-void execute_vmv_whole(core::CPU& cpu, RegId rd, RegId rs2, uint32_t nr) {
+void execute_vmv_whole(core::CPU& cpu, RegId rd, RegId rs2, uint32_t nr, uint32_t sew) {
     uint32_t total_bytes = nr * cpu.state().regs.vlen_bytes();
-    for (uint32_t i = 0; i < total_bytes; i++) {
+    const uint32_t first_byte = static_cast<uint32_t>(cpu.state().vstart) * (sew / 8U);
+    for (uint32_t i = first_byte; i < total_bytes; i++) {
         uint32_t src_reg = (static_cast<uint32_t>(rs2) + (i / cpu.state().regs.vlen_bytes())) % 32;
         uint32_t dst_reg = (static_cast<uint32_t>(rd) + (i / cpu.state().regs.vlen_bytes())) % 32;
         uint8_t val = cpu.state()
@@ -26,7 +29,7 @@ void execute_vcompress(core::CPU& cpu, RegId rd, RegId rs2, RegId rs1, uint32_t 
     const auto& mask_reg = cpu.state().regs.read_vector(rs1);
     std::vector<T> src_vals;
     src_vals.reserve(vl);
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (vector::is_element_active(mask_reg, i, false)) {
             src_vals.push_back(vector::get_group_element<T>(cpu.state().regs, rs2, i));
         }
@@ -46,7 +49,7 @@ void execute_vslideup(core::CPU& cpu, RegId rd, uint32_t offset, RegId rs2, bool
         src_vals[i] = vector::get_group_element<T>(cpu.state().regs, rs2, i);
     }
 
-    for (uint32_t i = offset; i < vl; i++) {
+    for (uint32_t i = std::max(offset, static_cast<uint32_t>(cpu.state().vstart)); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T val = src_vals[i - offset];
         vector::set_group_element<T>(cpu.state().regs, rd, i, val);
@@ -64,7 +67,7 @@ void execute_vslidedown(core::CPU& cpu, RegId rd, uint32_t offset, RegId rs2, bo
         src_vals[i] = vector::get_group_element<T>(cpu.state().regs, rs2, i);
     }
 
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T val = (i + offset < vl) ? src_vals[i + offset] : 0;
         vector::set_group_element<T>(cpu.state().regs, rd, i, val);
@@ -87,7 +90,7 @@ void execute_vslide1down(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, 
         }
     }
 
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         vector::set_group_element<T>(cpu.state().regs, rd, i, temp[i]);
     }
@@ -109,7 +112,7 @@ void execute_vslide1up(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bo
         }
     }
 
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         vector::set_group_element<T>(cpu.state().regs, rd, i, temp[i]);
     }
@@ -119,7 +122,7 @@ template <typename T>
 void execute_vmerge_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, uint32_t vl) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
 
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         bool mask_bit = vector::is_element_active(mask_reg, i, false);
         T val = mask_bit ? vector::get_group_element<T>(cpu.state().regs, rs1, i)
                          : vector::get_group_element<T>(cpu.state().regs, rs2, i);
@@ -132,7 +135,7 @@ void execute_vmerge_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, ui
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
     T val1 = static_cast<T>(rs1_val);
 
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         bool mask_bit = vector::is_element_active(mask_reg, i, false);
         T val = mask_bit ? val1 : vector::get_group_element<T>(cpu.state().regs, rs2, i);
         vector::set_group_element<T>(cpu.state().regs, rd, i, val);
@@ -144,7 +147,7 @@ void execute_vmerge_vi(core::CPU& cpu, RegId rd, int32_t imm, RegId rs2, uint32_
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
     T val1 = static_cast<T>(imm);
 
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         bool mask_bit = vector::is_element_active(mask_reg, i, false);
         T val = mask_bit ? val1 : vector::get_group_element<T>(cpu.state().regs, rs2, i);
         vector::set_group_element<T>(cpu.state().regs, rd, i, val);
@@ -154,7 +157,7 @@ void execute_vmerge_vi(core::CPU& cpu, RegId rd, int32_t imm, RegId rs2, uint32_
 template <typename T>
 void execute_vid(core::CPU& cpu, RegId rd, bool vm, uint32_t vl) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         vector::set_group_element<T>(cpu.state().regs, rd, i, static_cast<T>(i));
     }
@@ -342,16 +345,16 @@ bool execute_vector_permute_mv(core::CPU& cpu, isa::OperationId op_id, RegId rd,
             return true;
         }
         case isa::OperationId::VMV1R_V:
-            execute_vmv_whole(cpu, rd, rs2, 1);
+            execute_vmv_whole(cpu, rd, rs2, 1, sew);
             return true;
         case isa::OperationId::VMV2R_V:
-            execute_vmv_whole(cpu, rd, rs2, 2);
+            execute_vmv_whole(cpu, rd, rs2, 2, sew);
             return true;
         case isa::OperationId::VMV4R_V:
-            execute_vmv_whole(cpu, rd, rs2, 4);
+            execute_vmv_whole(cpu, rd, rs2, 4, sew);
             return true;
         case isa::OperationId::VMV8R_V:
-            execute_vmv_whole(cpu, rd, rs2, 8);
+            execute_vmv_whole(cpu, rd, rs2, 8, sew);
             return true;
         default:
             return false;

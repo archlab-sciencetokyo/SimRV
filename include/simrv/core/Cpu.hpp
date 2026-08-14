@@ -47,6 +47,10 @@ struct alignas(128) ArchState {
     CSRValue misa = isa::kMisaDefault;  ///< Machine ISA and extensions descriptor
     CSRValue mie{};                     ///< Machine Interrupt Enable
     CSRValue mip{};                     ///< Machine Interrupt Pending
+    bool seip_software{};  ///< Software-writable component of mip.SEIP (ORed with PLIC signal).
+    bool seip_external{};  ///< PLIC-driven component of mip.SEIP.
+    bool stip_software{};  ///< M-mode software-posted component of writable mip.STIP.
+    bool stip_timer{};     ///< Direct-SBI timer signal component of mip.STIP.
     CSRValue
         medeleg{};  ///< Machine Exception Delegation (delegates trap handling to supervisor mode)
     CSRValue mideleg{};  ///< Machine Interrupt Delegation (delegates interrupts to supervisor mode)
@@ -83,10 +87,22 @@ struct alignas(128) ArchState {
                           ///< Store-Conditional (LR/SC)
     CSRValue reserved{};  ///< Reserved for internal architectural extensions or tracking
 
+    /** Recompute supervisor pending bits that combine independent software/device sources. */
+    constexpr void refresh_supervisor_pending() {
+        if (seip_software || seip_external)
+            mip |= enum_mask(MipBit::Seip);
+        else
+            mip &= ~enum_mask(MipBit::Seip);
+        if (stip_software || stip_timer)
+            mip |= enum_mask(MipBit::Stip);
+        else
+            mip &= ~enum_mask(MipBit::Stip);
+    }
+
     /**
      * @brief Determines the active XLEN (register width in bits: 32 or 64) based on the CPU state.
      */
-    [[nodiscard]] constexpr auto current_xlen() const -> unsigned {
+    [[nodiscard]] constexpr auto xlen_for_privilege(PrivilegeLevel level) const -> unsigned {
         if constexpr (!simrv::xlen::kIsXLen64) {
             return 32;
         } else {
@@ -94,9 +110,9 @@ struct alignas(128) ArchState {
             if (mxl == 1) {
                 return 32;
             }
-            if (priv == PrivilegeLevel::Machine) {
+            if (level == PrivilegeLevel::Machine) {
                 return 64;
-            } else if (priv == PrivilegeLevel::Supervisor) {
+            } else if (level == PrivilegeLevel::Supervisor) {
                 const unsigned sxl = (mstatus >> 34) & 3;
                 return (sxl == 1) ? 32 : 64;
             } else {  // User
@@ -106,10 +122,39 @@ struct alignas(128) ArchState {
         }
     }
 
+    [[nodiscard]] constexpr auto current_xlen() const -> unsigned {
+        return xlen_for_privilege(priv);
+    }
+
     /**
      * @brief Updates the active XLEN configurations in register file proxies.
      */
     constexpr void update_xlen() { regs.xlen = current_xlen(); }
+
+    /**
+     * @brief Initialize SXL/UXL consistently with the selected machine XLEN.
+     *
+     * An RV64 simulator binary may host an RV32 machine personality. In that
+     * case lower privilege modes must remain RV32 when a trap enters S/U mode.
+     */
+    constexpr void initialize_lower_xlen_fields() {
+        const bool has_s = isa::misa_has_extension(misa, isa::IsaExtension::S);
+        const bool has_u = isa::misa_has_extension(misa, isa::IsaExtension::U);
+        const bool has_f = isa::misa_has_extension(misa, isa::IsaExtension::F);
+        const bool has_v = isa::misa_has_extension(misa, isa::IsaExtension::V);
+        if constexpr (simrv::xlen::kIsXLen64) {
+            constexpr uint64_t kLowerXlenMask = uint64_t{0xFU} << 32U;
+            const unsigned mxl = static_cast<unsigned>((static_cast<uint64_t>(misa) >> 62U) & 0x3U);
+            const uint64_t lower_xlen = (mxl == 1U) ? 1U : 2U;
+            const uint64_t updated = (static_cast<uint64_t>(mstatus) & ~kLowerXlenMask) |
+                                     (has_u ? (lower_xlen << 32U) : 0U) |
+                                     (has_s ? (lower_xlen << 34U) : 0U);
+            mstatus = static_cast<CSRValue>(updated);
+        }
+        mstatus = mstatus_legalize_mpp(mstatus, has_s, has_u);
+        mstatus &= mstatus_writable_mask(has_s, has_u, has_f, has_v);
+        update_xlen();
+    }
 };
 
 #include <deque>
@@ -501,6 +546,16 @@ class CPU {
             return static_cast<PrivilegeLevel>((state_.mstatus & enum_mask(MstatusBit::Mpp)) >> 11);
         }
         return state_.priv;
+    }
+
+    /**
+     * @brief XLEN governing explicit loads/stores, including MPRV/MPP.
+     *
+     * The privileged architecture requires MPRV accesses to use MPP's XLEN,
+     * which can differ from the currently executing M-mode XLEN.
+     */
+    [[nodiscard]] constexpr auto effective_data_xlen() const -> unsigned {
+        return state_.xlen_for_privilege(effective_data_privilege());
     }
 
     Tlb tlb;

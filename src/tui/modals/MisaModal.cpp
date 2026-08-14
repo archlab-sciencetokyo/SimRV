@@ -160,7 +160,7 @@ auto MisaModal::submit(const MisaDraft& draft, simrv::core::Machine& machine,
     machine.s_misa_profile = new_misa;
     machine.s_misa_override = true;
     machine.s_misa_xlen = draft.xlen_bits;
-    machine.cpu.state().update_xlen();
+    machine.cpu.state().initialize_lower_xlen_fields();
     // Apply VLEN setting (only meaningful when V extension is enabled)
     machine.s_vlen = draft.vlen;
 

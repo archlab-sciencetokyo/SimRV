@@ -1,6 +1,6 @@
 /**
  * @file Mmu.cpp
- * @brief Memory Management Unit implementation for SV32 virtual memory.
+ * @brief Memory Management Unit implementation for Sv32, Sv39, and Sv48.
  */
 #include "simrv/memory/Mmu.hpp"
 
@@ -18,7 +18,15 @@ namespace simrv {
 using core::MstatusBit;
 using isa::Funct3;
 
-Mmu::Mmu(Byte* mmem) : mmem_(mmem) {}
+Mmu::Mmu(Byte* mmem, Address dram_base, Address dram_size)
+    : mmem_(mmem), dram_base_(dram_base), dram_size_(dram_size) {}
+
+auto Mmu::pte_access_valid(Address address, unsigned size) const -> bool {
+    if (mmem_ == nullptr || size == 0 || dram_size_ < size || address < dram_base_) {
+        return false;
+    }
+    return address - dram_base_ <= dram_size_ - size;
+}
 
 auto Mmu::translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
                     Word satp, unsigned xlen, bool update_access_bits)
@@ -77,7 +85,8 @@ auto Mmu::validate_pte_permissions(Word pte, Word permission_bits, PteAccess acc
     // Supervisor access to user-only page (U=1)
     if (priv == kPrivSupervisor && ((pte & enum_mask(PteFlag::U)) != 0u)) {
         if (access == PteAccess::Code) {
-            // Executing code from a U=1 page in Supervisor mode raises a Page Fault regardless of SUM
+            // Executing code from a U=1 page in Supervisor mode raises a Page Fault regardless of
+            // SUM
             return false;
         }
         if ((mstatus & enum_mask(MstatusBit::Sum)) == 0u) {
@@ -111,7 +120,7 @@ void Mmu::update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess ac
         pte_value = updated_pte;
         Instruction const store_op = (pte_size == 4) ? static_cast<Instruction>(Funct3::Sw)
                                                      : static_cast<Instruction>(Funct3::Sd);
-        simrv::memory::ram_write_fast(pte_addr, updated_pte, store_op, mmem_);
+        simrv::memory::host_write_fast(mmem_ + (pte_addr - dram_base_), updated_pte, store_op);
     }
 }
 
@@ -129,6 +138,17 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
                 return enum_mask(ExceptionCode::LoadPageFault);
         }
     };
+    auto make_access_fault = [access]() -> TrapCause {
+        switch (access) {
+            case PteAccess::Code:
+                return enum_mask(ExceptionCode::FaultFetch);
+            case PteAccess::Write:
+                return enum_mask(ExceptionCode::FaultStore);
+            case PteAccess::Read:
+            default:
+                return enum_mask(ExceptionCode::FaultLoad);
+        }
+    };
 
     if (simrv::compiler::unlikely(!cached_valid_ || cached_satp_ != satp || cached_xlen_ != xlen)) {
         cached_satp_ = satp;
@@ -143,10 +163,6 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
                 cached_levels_ = 4;
                 cached_pte_size_ = 8;
                 cached_vpn_bits_per_level_ = 9;
-            } else if (cached_satp_mode_ == 1) {  // SV32 compatibility mode under RV64
-                cached_levels_ = 2;
-                cached_pte_size_ = 4;
-                cached_vpn_bits_per_level_ = 10;
             } else {
                 cached_valid_ = false;
                 return std::unexpected(make_fault());
@@ -183,7 +199,10 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
         const Word vpn_i = (v_addr >> (vpn_shift_base + i * vpn_bits_per_level)) & vpn_mask;
 
         pte_addr = root_pt_addr + (vpn_i * pte_size);
-        pte = simrv::memory::ram_read_fast(pte_addr, pte_load_op, mmem_);
+        if (simrv::compiler::unlikely(!pte_access_valid(pte_addr, pte_size))) {
+            return std::unexpected(make_access_fault());
+        }
+        pte = simrv::memory::host_read_fast(mmem_ + (pte_addr - dram_base_), pte_load_op);
         if (pte_size == 4) {
             pte &= 0xFFFFFFFFu;
         }
@@ -195,7 +214,19 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
 
         const Word original_rwx = (pte >> 1) & 0x7;
 
+        // Svnapot and Svpbmt are not implemented, so Sv39/Sv48 PTE bits
+        // 63:54 are reserved and must be zero.
+        if (pte_size == 8 && simrv::compiler::unlikely((static_cast<uint64_t>(pte) >> 54U) != 0)) {
+            return std::unexpected(make_fault());
+        }
+
         if (original_rwx == 0) {
+            // U, A, and D are reserved in a non-leaf PTE.
+            constexpr Word kNonLeafReserved =
+                enum_mask(PteFlag::U) | enum_mask(PteFlag::A) | enum_mask(PteFlag::D);
+            if (simrv::compiler::unlikely((pte & kNonLeafReserved) != 0)) {
+                return std::unexpected(make_fault());
+            }
             // Pointer to next level
             root_pt_addr = static_cast<Address>((pte >> kPteShift) << 12);
         } else {

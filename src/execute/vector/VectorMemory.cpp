@@ -9,12 +9,14 @@ namespace {
 
 // Whole vector load helper
 void execute_vl_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd,
-                      Register base_addr, uint32_t nr) {
+                      Register base_addr, uint32_t nr, uint32_t element_bytes) {
     uint32_t total_bytes = nr * cpu.state().regs.vlen_bytes();
-    for (uint32_t i = 0; i < total_bytes; i++) {
+    const uint32_t first_byte = static_cast<uint32_t>(cpu.state().vstart) * element_bytes;
+    for (uint32_t i = first_byte; i < total_bytes; i++) {
         Address addr = base_addr + i;
         uint64_t val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, isa::Funct3::Lbu);
         if (cpu.pipeline_context.pending_exception.has_value()) {
+            cpu.state().vstart = i / element_bytes;
             return;
         }
         uint32_t reg_idx = (static_cast<uint32_t>(rd) + (i / cpu.state().regs.vlen_bytes())) % 32;
@@ -28,7 +30,7 @@ void execute_vl_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId
 void execute_vs_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3,
                       Register base_addr, uint32_t nr) {
     uint32_t total_bytes = nr * cpu.state().regs.vlen_bytes();
-    for (uint32_t i = 0; i < total_bytes; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < total_bytes; i++) {
         Address addr = base_addr + i;
         uint32_t reg_idx = (static_cast<uint32_t>(vs3) + (i / cpu.state().regs.vlen_bytes())) % 32;
         uint8_t val = cpu.state()
@@ -37,6 +39,7 @@ void execute_vs_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId
         simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val),
                                               isa::Funct3::Sb);
         if (cpu.pipeline_context.pending_exception.has_value()) {
+            cpu.state().vstart = i;
             return;
         }
     }
@@ -50,7 +53,7 @@ void execute_vle(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd, 
     const uint32_t nf = (cpu.pipeline_context.ir >> 29) & 7;
     const uint32_t nfields = nf + 1;
 
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         for (uint32_t f = 0; f < nfields; f++) {
             Address addr = base_addr + (i * nfields + f) * sizeof(T);
@@ -62,6 +65,7 @@ void execute_vle(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd, 
                     if (simrv::compiler::unlikely((addr & 7) != 0)) {
                         cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedLoad;
                         cpu.pipeline_context.pending_tval = addr;
+                        cpu.state().vstart = i;
                         return;
                     }
                     Word lo = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, isa::Funct3::Lw);
@@ -73,6 +77,7 @@ void execute_vle(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd, 
                 val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
             }
             if (cpu.pipeline_context.pending_exception.has_value()) {
+                cpu.state().vstart = i;
                 return;
             }
             auto target_reg = static_cast<RegId>((static_cast<uint32_t>(rd) + f) % 32);
@@ -89,7 +94,7 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3,
     const uint32_t nf = (cpu.pipeline_context.ir >> 29) & 7;
     const uint32_t nfields = nf + 1;
 
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         for (uint32_t f = 0; f < nfields; f++) {
             Address addr = base_addr + (i * nfields + f) * sizeof(T);
@@ -103,6 +108,7 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3,
                     if (simrv::compiler::unlikely((addr & 7) != 0)) {
                         cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedStore;
                         cpu.pipeline_context.pending_tval = addr;
+                        cpu.state().vstart = i;
                         return;
                     }
                     simrv::memory::MemoryAccess::storeInt(
@@ -116,6 +122,7 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3,
                                                       mem_f3);
             }
             if (cpu.pipeline_context.pending_exception.has_value()) {
+                cpu.state().vstart = i;
                 return;
             }
         }
@@ -129,7 +136,7 @@ void execute_vlse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd,
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
     auto stride = static_cast<int64_t>(static_cast<std::make_signed_t<Register>>(stride_reg_val));
 
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         Address addr = base_addr + i * stride;
         uint64_t val = 0;
@@ -140,6 +147,7 @@ void execute_vlse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd,
                 if (simrv::compiler::unlikely((addr & 7) != 0)) {
                     cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedLoad;
                     cpu.pipeline_context.pending_tval = addr;
+                    cpu.state().vstart = i;
                     return;
                 }
                 Word lo = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, isa::Funct3::Lw);
@@ -150,6 +158,7 @@ void execute_vlse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd,
             val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
         }
         if (cpu.pipeline_context.pending_exception.has_value()) {
+            cpu.state().vstart = i;
             return;
         }
         vector::set_group_element<T>(cpu.state().regs, rd, i, static_cast<T>(val));
@@ -164,7 +173,7 @@ void execute_vsse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
     auto stride = static_cast<int64_t>(static_cast<std::make_signed_t<Register>>(stride_reg_val));
 
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         Address addr = base_addr + i * stride;
         T val = vector::get_group_element<T>(cpu.state().regs, vs3, i);
@@ -176,6 +185,7 @@ void execute_vsse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3
                 if (simrv::compiler::unlikely((addr & 7) != 0)) {
                     cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedStore;
                     cpu.pipeline_context.pending_tval = addr;
+                    cpu.state().vstart = i;
                     return;
                 }
                 simrv::memory::MemoryAccess::storeInt(
@@ -188,6 +198,7 @@ void execute_vsse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3
             simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val), mem_f3);
         }
         if (cpu.pipeline_context.pending_exception.has_value()) {
+            cpu.state().vstart = i;
             return;
         }
     }
@@ -199,7 +210,7 @@ void execute_vluxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId r
                     Register base_addr, RegId vs2, bool vm, uint32_t vl, isa::Funct3 mem_f3) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
 
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         auto offset = vector::get_group_element<T_idx>(cpu.state().regs, vs2, i);
         Address addr = base_addr + static_cast<int64_t>(offset);
@@ -212,6 +223,7 @@ void execute_vluxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId r
                 if (simrv::compiler::unlikely((addr & 7) != 0)) {
                     cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedLoad;
                     cpu.pipeline_context.pending_tval = addr;
+                    cpu.state().vstart = i;
                     return;
                 }
                 Word lo = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, isa::Funct3::Lw);
@@ -222,6 +234,7 @@ void execute_vluxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId r
             val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
         }
         if (cpu.pipeline_context.pending_exception.has_value()) {
+            cpu.state().vstart = i;
             return;
         }
         vector::set_group_element<T_data>(cpu.state().regs, rd, i, static_cast<T_data>(val));
@@ -248,7 +261,7 @@ void execute_vsuxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId v
                     Register base_addr, RegId vs2, bool vm, uint32_t vl, isa::Funct3 mem_f3) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
 
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         auto offset = vector::get_group_element<T_idx>(cpu.state().regs, vs2, i);
         Address addr = base_addr + static_cast<int64_t>(offset);
@@ -261,6 +274,7 @@ void execute_vsuxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId v
                 if (simrv::compiler::unlikely((addr & 7) != 0)) {
                     cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedStore;
                     cpu.pipeline_context.pending_tval = addr;
+                    cpu.state().vstart = i;
                     return;
                 }
                 simrv::memory::MemoryAccess::storeInt(
@@ -273,6 +287,7 @@ void execute_vsuxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId v
             simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val), mem_f3);
         }
         if (cpu.pipeline_context.pending_exception.has_value()) {
+            cpu.state().vstart = i;
             return;
         }
     }
@@ -409,28 +424,52 @@ void ExecuteUnit::execute_vector_memory(core::CPU& cpu, core::Machine& machine,
 
         // Whole loads
         case isa::OperationId::VL1RE8_V:
+            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 1, 1);
+            break;
         case isa::OperationId::VL1RE16_V:
+            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 1, 2);
+            break;
         case isa::OperationId::VL1RE32_V:
+            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 1, 4);
+            break;
         case isa::OperationId::VL1RE64_V:
-            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 1);
+            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 1, 8);
             break;
         case isa::OperationId::VL2RE8_V:
+            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 2, 1);
+            break;
         case isa::OperationId::VL2RE16_V:
+            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 2, 2);
+            break;
         case isa::OperationId::VL2RE32_V:
+            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 2, 4);
+            break;
         case isa::OperationId::VL2RE64_V:
-            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 2);
+            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 2, 8);
             break;
         case isa::OperationId::VL4RE8_V:
+            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 4, 1);
+            break;
         case isa::OperationId::VL4RE16_V:
+            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 4, 2);
+            break;
         case isa::OperationId::VL4RE32_V:
+            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 4, 4);
+            break;
         case isa::OperationId::VL4RE64_V:
-            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 4);
+            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 4, 8);
             break;
         case isa::OperationId::VL8RE8_V:
+            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 8, 1);
+            break;
         case isa::OperationId::VL8RE16_V:
+            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 8, 2);
+            break;
         case isa::OperationId::VL8RE32_V:
+            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 8, 4);
+            break;
         case isa::OperationId::VL8RE64_V:
-            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 8);
+            execute_vl_whole(cpu, machine.memory_, rd, cpu.state().regs.read(rs1), 8, 8);
             break;
 
         // Whole stores

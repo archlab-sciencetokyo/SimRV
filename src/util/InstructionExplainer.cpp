@@ -31,14 +31,6 @@ using enum simrv::core::Csr;
 
 auto csr_name(uint32_t csr_addr) -> std::string {
     static const std::unordered_map<Csr, std::string_view> kCsrNames = {
-        {Csr::Ustatus, "ustatus"},
-        {Csr::Uie, "uie"},
-        {Csr::Utvec, "utvec"},
-        {Csr::Uscratch, "uscratch"},
-        {Csr::Uepc, "uepc"},
-        {Csr::Ucause, "ucause"},
-        {Csr::Utval, "utval"},
-        {Csr::Uip, "uip"},
         {Csr::Fflags, "fflags"},
         {Csr::Frm, "frm"},
         {Csr::Fcsr, "fcsr"},
@@ -48,8 +40,6 @@ auto csr_name(uint32_t csr_addr) -> std::string {
         {Csr::Time, "time"},
         {Csr::Instret, "instret"},
         {Csr::Sstatus, "sstatus"},
-        {Csr::Sedeleg, "sedeleg"},
-        {Csr::Sideleg, "sideleg"},
         {Csr::Sie, "sie"},
         {Csr::Stvec, "stvec"},
         {Csr::Scounteren, "scounteren"},

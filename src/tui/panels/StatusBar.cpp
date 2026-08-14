@@ -4,14 +4,12 @@
  */
 #include "simrv/tui/panels/StatusBar.hpp"
 
-#include <sys/ioctl.h>
-#include <unistd.h>
-
 #include <format>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/Tui.hpp"
+#include "simrv/tui/TuiKeybindings.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/util/FormatUtil.hpp"
 
@@ -267,6 +265,13 @@ static const auto running_row2_entries = std::to_array<FooterEntry>({
 
 namespace {
 
+[[nodiscard]] auto footer_entry_text(const FooterEntry& entry) -> std::string {
+    if (entry.action.has_value()) {
+        return Keybindings::get_footer_text(key_action_for_footer(*entry.action));
+    }
+    return entry.text;
+}
+
 auto filter_footer_entries(std::span<const FooterEntry> entries, bool is_debug_mode)
     -> std::vector<FooterEntry> {
     std::vector<FooterEntry> active;
@@ -301,7 +306,7 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
 
     int content_len = 0;
     for (const auto& e : active_entries) {
-        content_len += static_cast<int>(get_display_width(e.text));
+        content_len += get_display_width(footer_entry_text(e));
     }
     int pad = inner_w - content_len;
     int left_pad = (pad > 0) ? (pad / 2) : 0;
@@ -316,7 +321,8 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
     int current_col = left_pad;
 
     for (const auto& e : active_entries) {
-        int item_len = get_display_width(e.text);
+        const std::string text = footer_entry_text(e);
+        int item_len = get_display_width(text);
         if (hit_col.has_value() && e.action.has_value()) {
             if (*hit_col >= current_col && *hit_col < current_col + item_len) {
                 hit_action = e.action;
@@ -349,7 +355,7 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
         }
 
         if (color_tag != nullptr) {
-            std::string_view text_sv{e.text};
+            std::string_view text_sv{text};
             std::size_t close_bracket = text_sv.find(']');
             if (text_sv.starts_with('[') && close_bracket != std::string_view::npos) {
                 row_str += "\033[1m";
@@ -359,11 +365,11 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
                 row_str += text_sv.substr(close_bracket + 1);
             } else {
                 row_str += color_tag;
-                row_str += e.text;
+                row_str += text;
             }
             row_str += "\033[0m";
         } else {
-            row_str += e.text;
+            row_str += text;
         }
         current_col += item_len;
     }
@@ -378,25 +384,21 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
     return {row_str, hit_action};
 }
 
-auto StatusBar::get_footer_action_at_col(int col, int row_idx) const
+auto StatusBar::get_footer_action_at_col(int col, int row_idx, int terminal_width) const
     -> std::optional<TuiFooterAction> {
-    if (col < 0) return std::nullopt;
-
-    struct winsize w{};
-    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);  // NOLINT(cppcoreguidelines-pro-type-vararg)
-    int term_w = w.ws_col > 0 ? w.ws_col : 80;
+    if (col < 0 || terminal_width < 2) return std::nullopt;
 
     bool is_dbg = machine_.s_debug_mode;
     if (paused_) {
         if (row_idx == 0)
-            return process_footer_row(paused_row1_entries, term_w - 2, is_dbg, col).second;
+            return process_footer_row(paused_row1_entries, terminal_width - 2, is_dbg, col).second;
         if (row_idx == 1)
-            return process_footer_row(paused_row2_entries, term_w - 2, is_dbg, col).second;
+            return process_footer_row(paused_row2_entries, terminal_width - 2, is_dbg, col).second;
     } else {
         if (row_idx == 0)
-            return process_footer_row(running_row1_entries, term_w - 2, is_dbg, col).second;
+            return process_footer_row(running_row1_entries, terminal_width - 2, is_dbg, col).second;
         if (row_idx == 1)
-            return process_footer_row(running_row2_entries, term_w - 2, is_dbg, col).second;
+            return process_footer_row(running_row2_entries, terminal_width - 2, is_dbg, col).second;
     }
 
     return std::nullopt;

@@ -192,6 +192,14 @@ else
     "${CROSS_COMPILE}gcc" -static -O2 -march="${M_ARCH}" -mabi="${M_ABI}" "$SCRIPT_DIR/snake.c" -o "$INITRAMFS_DIR/usr/bin/snake"
 fi
 
+# Install a small fallback for testing the platform power device directly.  Native
+# reboot(2)/poweroff remains the preferred path; this helper is useful when an
+# init system or kernel reset driver is unavailable.
+print_step "Compiling SimRV /dev/mem power helper..."
+mkdir -p "$INITRAMFS_DIR/usr/sbin"
+"${CROSS_COMPILE}gcc" -static -s -Os -Wall -Wextra -Werror -march="${M_ARCH}" -mabi="${M_ABI}" \
+    "$SCRIPT_DIR/simrv-power.c" -o "$INITRAMFS_DIR/usr/sbin/simrv-power"
+
 # Set up init script and inittab
 mkdir -p "$INITRAMFS_DIR/proc" "$INITRAMFS_DIR/sys" "$INITRAMFS_DIR/dev" "$INITRAMFS_DIR/etc" "$INITRAMFS_DIR/tmp"
 # Use fakeroot so mknod succeeds without real root, giving the initramfs proper
@@ -204,6 +212,7 @@ if command -v fakeroot >/dev/null 2>&1; then
         mknod -m 666 '$INITRAMFS_DIR/dev/null'     c 1 3
         mknod -m 666 '$INITRAMFS_DIR/dev/tty'      c 5 0
         mknod -m 666 '$INITRAMFS_DIR/dev/zero'     c 1 5
+        mknod -m 600 '$INITRAMFS_DIR/dev/mem'      c 1 1
     " 2>/dev/null || true
 else
     mknod -m 600 "$INITRAMFS_DIR/dev/console" c 5 1 2>/dev/null || true
@@ -211,10 +220,11 @@ else
     mknod -m 666 "$INITRAMFS_DIR/dev/null" c 1 3 2>/dev/null || true
     mknod -m 666 "$INITRAMFS_DIR/dev/tty" c 5 0 2>/dev/null || true
     mknod -m 666 "$INITRAMFS_DIR/dev/zero" c 1 5 2>/dev/null || true
+    mknod -m 600 "$INITRAMFS_DIR/dev/mem" c 1 1 2>/dev/null || true
 fi
 
 cat > "$INITRAMFS_DIR/etc/inittab" <<'EOF'
-ttyS0::respawn:/sbin/getty -n -l /bin/sh 115200 ttyS0
+ttyS0::respawn:/sbin/getty -n -l /bin/sh 115200 ttyS0 vt100
 EOF
 
 echo "SimRV" > "$INITRAMFS_DIR/etc/hostname"
@@ -232,6 +242,7 @@ mkdir -p /dev /proc /sys /etc /tmp /run
 [ -c /dev/ttyS0 ] || mknod -m 666 /dev/ttyS0 c 4 64 2>/dev/null || true
 [ -c /dev/null ] || mknod -m 666 /dev/null c 1 3 2>/dev/null || true
 [ -c /dev/zero ] || mknod -m 666 /dev/zero c 1 5 2>/dev/null || true
+[ -c /dev/mem ] || mknod -m 600 /dev/mem c 1 1 2>/dev/null || true
 
 [ -f /etc/hostname ] && hostname -F /etc/hostname 2>/dev/null || true
 
@@ -278,6 +289,7 @@ nod /dev/tty     0666 0 0 c 5 0
 nod /dev/zero    0666 0 0 c 1 5
 nod /dev/urandom 0666 0 0 c 1 9
 nod /dev/random  0666 0 0 c 1 8
+nod /dev/mem     0600 0 0 c 1 1
 LISTEOF
 
 # Walk the initramfs dir and emit the rest of the manifest entries
@@ -359,6 +371,7 @@ make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" "$LINUX_DEFCONFIG"
 ./scripts/config --enable CONFIG_POWER_RESET_SYSCON_POWEROFF
 ./scripts/config --enable CONFIG_DEVTMPFS
 ./scripts/config --enable CONFIG_DEVTMPFS_MOUNT
+./scripts/config --enable CONFIG_DEVMEM
 ./scripts/config --enable CONFIG_TTY
 ./scripts/config --enable CONFIG_VT
 
@@ -448,8 +461,10 @@ if [[ "$XLEN" == "64" ]]; then
     print_step "Extracting Alpine Linux minirootfs into ext4 root disk..."
     tar -xf "$BUILD_DIR/sources/alpine-minirootfs-${ALPINE_VER}-riscv64.tar.gz" -C "$ROOTFS_DISK_DIR"
     mkdir -p "$ROOTFS_DISK_DIR/proc" "$ROOTFS_DISK_DIR/sys" "$ROOTFS_DISK_DIR/dev" "$ROOTFS_DISK_DIR/etc" "$ROOTFS_DISK_DIR/tmp" "$ROOTFS_DISK_DIR/run"
+    mkdir -p "$ROOTFS_DISK_DIR/usr/sbin"
+    cp "$INITRAMFS_DIR/usr/sbin/simrv-power" "$ROOTFS_DISK_DIR/usr/sbin/simrv-power"
     cat > "$ROOTFS_DISK_DIR/etc/inittab" <<'EOF'
-ttyS0::respawn:/sbin/getty -n -l /bin/sh 115200 ttyS0
+ttyS0::respawn:/sbin/getty -n -l /bin/sh 115200 ttyS0 vt100
 EOF
     echo "SimRV" > "$ROOTFS_DISK_DIR/etc/hostname"
     cat > "$ROOTFS_DISK_DIR/init" <<'EOF'
@@ -464,6 +479,7 @@ mkdir -p /dev /proc /sys /etc /tmp /run
 [ -c /dev/ttyS0 ] || mknod -m 666 /dev/ttyS0 c 4 64 2>/dev/null || true
 [ -c /dev/null ] || mknod -m 666 /dev/null c 1 3 2>/dev/null || true
 [ -c /dev/zero ] || mknod -m 666 /dev/zero c 1 5 2>/dev/null || true
+[ -c /dev/mem ] || mknod -m 600 /dev/mem c 1 1 2>/dev/null || true
 
 [ -f /etc/hostname ] && hostname -F /etc/hostname 2>/dev/null || true
 

@@ -690,21 +690,25 @@ auto decode_op32_standard(uint32_t funct3, uint32_t funct7) -> OperationId {
 
 auto decode_system_priv(uint32_t funct7, Instruction ir) -> OperationId {
     const uint32_t f12 = ir >> 20;
+    const bool rd_is_zero = ((ir >> 7U) & 0x1FU) == 0;
+    const bool rs1_is_zero = ((ir >> 15U) & 0x1FU) == 0;
     switch (f12) {
         case 0x000:
-            return OperationId::ECALL;
+            return (rd_is_zero && rs1_is_zero) ? OperationId::ECALL : OperationId::UNKNOWN;
         case 0x001:
-            return OperationId::EBREAK;
+            return (rd_is_zero && rs1_is_zero) ? OperationId::EBREAK : OperationId::UNKNOWN;
         case 0x002:
-            return OperationId::URET;
+            // URET belonged to the abandoned draft N extension.
+            return OperationId::UNKNOWN;
         case 0x102:
-            return OperationId::SRET;
+            return (rd_is_zero && rs1_is_zero) ? OperationId::SRET : OperationId::UNKNOWN;
         case 0x302:
-            return OperationId::MRET;
+            return (rd_is_zero && rs1_is_zero) ? OperationId::MRET : OperationId::UNKNOWN;
         case 0x105:
-            return OperationId::WFI;
+            return (rd_is_zero && rs1_is_zero) ? OperationId::WFI : OperationId::UNKNOWN;
         default:
-            if (funct7 == 0x09) return OperationId::SFENCE_VMA;
+            // SFENCE.VMA uses rs1/rs2 operands but reserves rd=x0.
+            if (funct7 == 0x09 && rd_is_zero) return OperationId::SFENCE_VMA;
             break;
     }
     return OperationId::UNKNOWN;
@@ -818,8 +822,15 @@ auto decode_ext_m(Opcode op, uint32_t funct3) -> OperationId {
     return decode_ext_m_op(funct3);
 }
 
-auto decode_ext_a(uint32_t funct7, uint32_t funct3) -> OperationId {
+auto decode_ext_a(uint32_t funct7, uint32_t funct3, uint32_t rs2) -> OperationId {
+    if (!isa::amo_width_supported(static_cast<isa::Funct3>(funct3))) {
+        return OperationId::UNKNOWN;
+    }
     const uint32_t funct5 = funct7 >> 2;
+    // LR.W/LR.D reserve rs2=0; nonzero rs2 is a reserved instruction encoding.
+    if (funct5 == enum_mask(isa::Funct5Amo::Lr) && rs2 != 0) {
+        return OperationId::UNKNOWN;
+    }
     if (funct3 == 2) {  // 32-bit AMO*W
         switch (funct5) {
             case 0x02:
@@ -879,7 +890,11 @@ auto decode_ext_a(uint32_t funct7, uint32_t funct3) -> OperationId {
 }
 
 auto decode_fma(Opcode op, uint32_t funct7) -> OperationId {
-    const bool is_double = ((funct7 & 0x03) == 1);
+    const uint32_t fmt = funct7 & 0x03;
+    if (fmt > 1) {
+        return OperationId::UNKNOWN;
+    }
+    const bool is_double = (fmt == 1);
     switch (op) {
         case Opcode::MAdd:
             return is_double ? OperationId::FMADD_D : OperationId::FMADD_S;
@@ -894,7 +909,7 @@ auto decode_fma(Opcode op, uint32_t funct7) -> OperationId {
     }
 }
 
-auto decode_op_fp_single_arith(uint32_t funct3, uint32_t f5) -> OperationId {
+auto decode_op_fp_single_arith(uint32_t funct3, uint32_t f5, uint32_t rs2) -> OperationId {
     switch (f5) {
         case 0x00:
             return OperationId::FADD_S;
@@ -914,9 +929,9 @@ auto decode_op_fp_single_arith(uint32_t funct3, uint32_t f5) -> OperationId {
             if (funct3 == 1) return OperationId::FMAX_S;
             break;
         case 0x0B:
-            return OperationId::FSQRT_S;
+            return (rs2 == 0) ? OperationId::FSQRT_S : OperationId::UNKNOWN;
         case 0x1E:
-            return OperationId::FMV_W_X;
+            return (rs2 == 0 && funct3 == 0) ? OperationId::FMV_W_X : OperationId::UNKNOWN;
         default:
             break;
     }
@@ -966,13 +981,16 @@ auto decode_op_fp_single(uint32_t funct3, uint32_t f5, uint32_t rs2) -> Operatio
     if (f5 == 0x08 || f5 == 0x18 || f5 == 0x1A) {
         return decode_op_fp_single_fcvt(f5, rs2);
     }
+    if (f5 == 0x1C && rs2 != 0) {
+        return OperationId::UNKNOWN;
+    }
     if (f5 == 0x14 || f5 == 0x1C) {
         return decode_op_fp_single_cmp(funct3, f5);
     }
-    return decode_op_fp_single_arith(funct3, f5);
+    return decode_op_fp_single_arith(funct3, f5, rs2);
 }
 
-auto decode_op_fp_double_arith(uint32_t funct3, uint32_t f5) -> OperationId {
+auto decode_op_fp_double_arith(uint32_t funct3, uint32_t f5, uint32_t rs2) -> OperationId {
     switch (f5) {
         case 0x00:
             return OperationId::FADD_D;
@@ -992,17 +1010,18 @@ auto decode_op_fp_double_arith(uint32_t funct3, uint32_t f5) -> OperationId {
             if (funct3 == 1) return OperationId::FMAX_D;
             break;
         case 0x0B:
-            return OperationId::FSQRT_D;
+            return (rs2 == 0) ? OperationId::FSQRT_D : OperationId::UNKNOWN;
         default:
             break;
     }
     return OperationId::UNKNOWN;
 }
 
-auto decode_op_fp_double_fcvt(uint32_t f5, uint32_t rs2) -> OperationId {
+auto decode_op_fp_double_fcvt(uint32_t funct3, uint32_t f5, uint32_t rs2) -> OperationId {
     switch (f5) {
         case 0x08:
-            return (rs2 == 0) ? OperationId::FCVT_D_S : OperationId::UNKNOWN;
+            // Widening FCVT.D.S is exact and reserves the rm field as zero.
+            return (rs2 == 0 && funct3 == 0) ? OperationId::FCVT_D_S : OperationId::UNKNOWN;
         case 0x18:
             if (rs2 == 0) return OperationId::FCVT_W_D;
             if (rs2 == 1) return OperationId::FCVT_WU_D;
@@ -1042,12 +1061,15 @@ auto decode_op_fp_double_cmp(uint32_t funct3, uint32_t f5) -> OperationId {
 
 auto decode_op_fp_double(uint32_t funct3, uint32_t f5, uint32_t rs2) -> OperationId {
     if (f5 == 0x08 || f5 == 0x18 || f5 == 0x1A) {
-        return decode_op_fp_double_fcvt(f5, rs2);
+        return decode_op_fp_double_fcvt(funct3, f5, rs2);
+    }
+    if ((f5 == 0x1C || f5 == 0x1E) && rs2 != 0) {
+        return OperationId::UNKNOWN;
     }
     if (f5 == 0x14 || f5 == 0x1C || f5 == 0x1E) {
         return decode_op_fp_double_cmp(funct3, f5);
     }
-    return decode_op_fp_double_arith(funct3, f5);
+    return decode_op_fp_double_arith(funct3, f5, rs2);
 }
 
 auto decode_op_fp(uint32_t funct3, uint32_t funct7, uint32_t rs2) -> OperationId {
@@ -1845,11 +1867,18 @@ auto decoder(Instruction ir) -> OperationId {
     const auto funct7 = dec.funct7();
 
     if (op == Opcode::Amo) {
-        return decode_ext_a(funct7, funct3);
+        return decode_ext_a(funct7, funct3, std::to_underlying(dec.rs2()));
     }
     if (op == Opcode::LoadFp || op == Opcode::StoreFp || op == Opcode::OpFp || op == Opcode::MAdd ||
         op == Opcode::MSub || op == Opcode::NMSub || op == Opcode::NMAdd) {
-        return decode_ext_f_d(op, funct3, funct7, std::to_underlying(dec.rs2()), ir);
+        const OperationId decoded =
+            decode_ext_f_d(op, funct3, funct7, std::to_underlying(dec.rs2()), ir);
+        if constexpr (!simrv::xlen::kIsXLen64) {
+            if (isa::requires_rv64(decoded)) {
+                return OperationId::UNKNOWN;
+            }
+        }
+        return decoded;
     }
     if (op == Opcode::OpV) {
         return decode_ext_v(funct3, funct7, ir);

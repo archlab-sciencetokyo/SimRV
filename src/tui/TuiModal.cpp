@@ -10,6 +10,7 @@
 #include <format>
 
 #include "simrv/core/Machine.hpp"
+#include "simrv/tui/TuiLayoutPolicy.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/modals/AddressModal.hpp"
 #include "simrv/tui/modals/BreakpointModal.hpp"
@@ -253,8 +254,9 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
         (is_help || active_modal_ == ModalType::Settings ||
          active_modal_ == ModalType::ConfigureMisa || active_modal_ == ModalType::ConfigureSystem ||
          active_modal_ == ModalType::Notice);
-    int box_w = is_wide_modal ? std::min(78, term_width - 4) : std::min(58, term_width - 4);
-    if (box_w < 35) return;
+    const int maximum_width = is_wide_modal ? 78 : 58;
+    const int provisional_width = std::min(maximum_width, term_width - 4);
+    if (provisional_width < 35) return;
 
     std::string m_bg = kThemeModalBg;
     std::string m_rst = std::string("\033[0m") + m_bg;
@@ -320,7 +322,7 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             break;
         case ModalType::Help:
             title = " SIMULATOR KEYBOARD SHORTCUTS ";
-            modals::HelpModal::render(content_rows, add_row, term_height, box_w);
+            modals::HelpModal::render(content_rows, add_row, term_height, provisional_width);
             break;
         case ModalType::Notice:
             title = notice_is_error_ ? std::format(" ❌ {} ", notice_title_)
@@ -349,14 +351,14 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
 
     if (content_rows.empty()) return;
 
-    int box_h = static_cast<int>(content_rows.size()) + 2;  // top/bottom borders
-    int start_y = (term_height - box_h) / 2;
-    int start_x = (term_width - box_w) / 2;
-
-    if (start_y < 0) start_y = 0;
-    if (start_x < 0) start_x = 0;
-
-    int max_y = std::min(term_height, start_y + box_h);
+    const int available_height = std::min(term_height, static_cast<int>(lines.size()));
+    const OverlayGeometry overlay = calculate_overlay_geometry(
+        term_width, available_height, maximum_width, static_cast<int>(content_rows.size()));
+    if (!overlay.renderable) return;
+    const int box_w = overlay.width;
+    const int box_h = overlay.height;
+    const int start_y = overlay.start_y;
+    const int start_x = overlay.start_x;
     int inner_w = box_w - 2;
 
     // Render Box Top Border
@@ -378,11 +380,18 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
     }
 
     // Render Box Content Rows with background color persistence
-    for (int i = 0; i < static_cast<int>(content_rows.size()); ++i) {
+    const bool content_clipped =
+        static_cast<int>(content_rows.size()) > overlay.visible_content_rows;
+    for (int i = 0; i < overlay.visible_content_rows; ++i) {
         int target_y = start_y + 1 + i;
-        if (target_y >= max_y || target_y >= static_cast<int>(lines.size())) break;
 
-        std::string content = content_rows.at(static_cast<std::size_t>(i));
+        std::string content;
+        if (content_clipped && i == overlay.visible_content_rows - 1) {
+            content =
+                std::format("{}… resize terminal to show remaining content\033[0m", kThemeMuted);
+        } else {
+            content = content_rows.at(static_cast<std::size_t>(i));
+        }
         if (!m_bg.empty() && m_bg != "\033[49m") {
             std::string target = "\033[0m";
             std::string replacement = "\033[0m" + std::string(m_bg);
@@ -402,7 +411,7 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
 
     // Render Box Bottom Border
     int bot_y = start_y + box_h - 1;
-    if (bot_y < max_y && bot_y < static_cast<int>(lines.size())) {
+    if (bot_y < static_cast<int>(lines.size())) {
         std::string bot_border = std::format("{}{}{}{}\033[0m", kThemeBorder, m_bg,
                                              make_repeated_string("─", box_w), "\033[0m");
         lines.at(static_cast<std::size_t>(bot_y)) =

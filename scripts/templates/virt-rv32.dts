@@ -53,20 +53,6 @@
         test: test@100000 {
             compatible = "sifive,test1", "sifive,test0", "syscon";
             reg = <0x100000 0x1000>;
-
-            poweroff {
-                compatible = "syscon-poweroff";
-                regmap = <&test>;
-                offset = <0x0>;
-                value = <0x5555>;
-            };
-
-            reboot {
-                compatible = "syscon-reboot";
-                regmap = <&test>;
-                offset = <0x0>;
-                value = <0x7777>;
-            };
         };
 
         plic: interrupt-controller@50000000 {
@@ -117,5 +103,19 @@
             interrupt-parent = <&plic>;
             interrupts = <11>;
         };
+    };
+
+    poweroff {
+        compatible = "syscon-poweroff";
+        regmap = <&test>;
+        offset = <0x0>;
+        value = <0x5555>;
+    };
+
+    reboot {
+        compatible = "syscon-reboot";
+        regmap = <&test>;
+        offset = <0x0>;
+        value = <0x7777>;
     };
 };

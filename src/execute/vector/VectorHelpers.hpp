@@ -97,7 +97,7 @@ inline void perform_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, 
                        Op op) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
 
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
         T val1 = get_group_element<T>(cpu.state().regs, rs1, i);
         T val2 = get_group_element<T>(cpu.state().regs, rs2, i);
@@ -111,7 +111,7 @@ inline void perform_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bo
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
     T val1 = static_cast<T>(rs1_val);
 
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
         T val2 = get_group_element<T>(cpu.state().regs, rs2, i);
         set_group_element<T>(cpu.state().regs, rd, i, op(val2, val1));
@@ -124,7 +124,7 @@ inline void perform_vi(core::CPU& cpu, RegId rd, int32_t imm, RegId rs2, bool vm
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
     T val1 = static_cast<T>(imm);
 
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
         T val2 = get_group_element<T>(cpu.state().regs, rs2, i);
         set_group_element<T>(cpu.state().regs, rd, i, op(val2, val1));
@@ -138,7 +138,7 @@ inline void perform_compare_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, b
     auto& dest = cpu.state().regs.read_vector(rd);
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
 
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
         T val1 = get_group_element<T>(cpu.state().regs, rs1, i);
         T val2 = get_group_element<T>(cpu.state().regs, rs2, i);
@@ -154,7 +154,7 @@ inline void perform_compare_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
     T val1 = static_cast<T>(rs1_val);
 
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
         T val2 = get_group_element<T>(cpu.state().regs, rs2, i);
         bool res = op(val2, val1);
@@ -169,7 +169,7 @@ inline void perform_compare_vi(core::CPU& cpu, RegId rd, int32_t imm, RegId rs2,
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
     T val1 = static_cast<T>(imm);
 
-    for (uint32_t i = 0; i < vl; i++) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
         T val2 = get_group_element<T>(cpu.state().regs, rs2, i);
         bool res = op(val2, val1);

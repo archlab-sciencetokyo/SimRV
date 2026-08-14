@@ -68,10 +68,19 @@ concept StoreFunct3Like = std::unsigned_integral<T>;
 extern bool g_appmode;
 extern Address g_dram_base;
 
-/// Check if a physical address is within DRAM range
-inline auto is_dram_addr(Address p_addr) -> bool {
-    return ((p_addr & 0xFFFFFFFFULL) - (g_dram_base & 0xFFFFFFFFULL)) < simrv::memory::kDramSize;
+/// Overflow-safe containment test for a physical memory region.
+[[nodiscard]] constexpr auto address_range_contains(Address base, Address extent, Address address,
+                                                    size_t size) -> bool {
+    return size != 0 && size <= extent && address >= base && address - base <= extent - size;
 }
+
+/// Check whether the complete physical byte range is backed by DRAM.
+inline auto is_dram_access(Address p_addr, size_t size) -> bool {
+    return address_range_contains(g_dram_base, simrv::memory::kDramSize, p_addr, size);
+}
+
+/// Check if one physical byte is within the implemented DRAM range.
+inline auto is_dram_addr(Address p_addr) -> bool { return is_dram_access(p_addr, 1); }
 
 /// Check if a physical address is in a legacy reserved region (MMIO)
 inline auto is_legacy_reserved_region(Address p_addr) -> bool {

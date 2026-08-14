@@ -117,6 +117,8 @@ class Machine {
     }
     /// Request system reboot.
     void request_reboot();
+    /// Request termination of the simulator process with the supplied status.
+    void request_exit(int status = 0);
     /// Reset runtime state flags and CPU state.
     void reset_state();
 

@@ -55,6 +55,26 @@ source ./linux-images/rv32/setup.sh
 
 This exports `SIMRV_LINUX_MEM_IMG`, `SIMRV_LINUX_DISK_IMG`, and `SIMRV_LINUX_DTB`.
 
+### Direct lifecycle helper
+
+Generated root filesystems include `simrv-power`, a small root-only `/dev/mem`
+fallback for directly exercising SimRV's power MMIO device:
+
+```sh
+simrv-power poweroff
+simrv-power reboot
+simrv-power exit 7
+simrv-power crash 1
+```
+
+Normal OS `poweroff` and `reboot` commands remain preferred because they sync
+filesystems and stop services first. The helper writes the SiFive test-finisher
+register at physical address `0x00100000`; use it only on SimRV and only as root.
+The shell builtin `exit` merely ends the current login shell, after which init may
+spawn another login. Use `simrv-power exit [status]` to terminate the simulator,
+including its TUI. This `exit` request is a SimRV extension; the other requests use
+the platform's SiFive test-finisher protocol.
+
 ### Run Linux Boot Test
 
 **Direct invocation:**

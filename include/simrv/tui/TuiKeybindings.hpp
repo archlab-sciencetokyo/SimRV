@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "simrv/tui/TuiKey.hpp"
+#include "simrv/tui/TuiTypes.hpp"
 
 namespace simrv::tui {
 
@@ -35,6 +36,7 @@ enum class KeyAction : uint8_t {
     CycleRegPage,
     CycleToolPage,
     CycleRightPanel,
+    ToggleLearn,
     ToggleExplain,
     ToggleTrace
 };
@@ -80,5 +82,8 @@ class Keybindings {
     [[nodiscard]] static auto available(const ActionContext& context)
         -> std::vector<const KeyBindingInfo*>;
 };
+
+/// Map clickable footer actions back to their canonical key/action descriptor.
+[[nodiscard]] auto key_action_for_footer(TuiFooterAction action) -> KeyAction;
 
 }  // namespace simrv::tui

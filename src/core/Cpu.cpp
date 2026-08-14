@@ -43,7 +43,7 @@ void CPU::reset() {
     if constexpr (simrv::xlen::kIsXLen64) {
         state_.mstatus |= (static_cast<CSRValue>(2) << 34) | (static_cast<CSRValue>(2) << 32);
     }
-    state_.update_xlen();
+    state_.initialize_lower_xlen_fields();
     TLB_flush();
     e_icount = 0;
     e_ccount = 0;
@@ -115,17 +115,18 @@ void CPU::raise_exception(TrapCause cause, CSRValue tval) {
 }
 
 void CPU::evaluate_timer_interrupt() {
-    const CSRValue target = clint_mmio.supervisor_timer.load(std::memory_order_relaxed)
-                                ? enum_mask(MipBit::Stip)
-                                : enum_mask(MipBit::Mtip);
-    const CSRValue other =
-        target == enum_mask(MipBit::Stip) ? enum_mask(MipBit::Mtip) : enum_mask(MipBit::Stip);
-    state_.mip &= ~other;
-    if (clint_mmio.mtime >= clint_mmio.mtimecmp) {
-        state_.mip |= target;
+    const bool pending = clint_mmio.mtime >= clint_mmio.mtimecmp;
+    if (clint_mmio.supervisor_timer.load(std::memory_order_relaxed)) {
+        state_.mip &= ~enum_mask(MipBit::Mtip);
+        state_.stip_timer = pending;
     } else {
-        state_.mip &= ~target;
+        state_.stip_timer = false;
+        if (pending)
+            state_.mip |= enum_mask(MipBit::Mtip);
+        else
+            state_.mip &= ~enum_mask(MipBit::Mtip);
     }
+    state_.refresh_supervisor_pending();
 }
 
 void CPU::run_cycle(Machine& machine) {
@@ -416,10 +417,11 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     const auto opcode = static_cast<Opcode>(ctx.opcode);
     const auto funct5 = static_cast<Funct5Amo>(ctx.funct5);
     const auto addr = ctx.mem_addr;
+    const size_t access_size = size_t{1} << (static_cast<unsigned>(ctx.funct3) & 0x3u);
 
     // Load Phase
     if (opcode == Opcode::Load || (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc)) {
-        if (simrv::compiler::likely(simrv::memory::is_dram_addr(addr))) {
+        if (simrv::compiler::likely(simrv::memory::is_dram_access(addr, access_size))) {
             ctx.mem_rdata = simrv::memory::ram_read_fast(addr, static_cast<Instruction>(ctx.funct3),
                                                          machine.mmem);
         } else {
@@ -429,7 +431,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     }
 
     if (opcode == Opcode::LoadFp) {
-        if (simrv::compiler::likely(simrv::memory::is_dram_addr(addr))) {
+        if (simrv::compiler::likely(simrv::memory::is_dram_access(addr, access_size))) {
             const auto f3 = ctx.funct3;
             switch (f3) {
                 case Funct3::Flw: {
@@ -483,7 +485,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         (opcode == Opcode::Amo &&
          (funct5 == Funct5Amo::Sc && (ctx.wb_data == 0u) && (state_.reserved != 0u))) ||
         (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr && funct5 != Funct5Amo::Sc)) {
-        if (simrv::compiler::likely(simrv::memory::is_dram_addr(addr))) {
+        if (simrv::compiler::likely(simrv::memory::is_dram_access(addr, access_size))) {
             // Check tohost writes (fast filter for 0x80000000 or 0x40000000 regions)
             if (simrv::compiler::unlikely((addr & 0xC0000000ULL) != 0)) {
                 if (simrv::compiler::unlikely(addr == machine.s_isatest_tohost ||
@@ -528,7 +530,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     }
 
     if (opcode == Opcode::StoreFp) {
-        if (simrv::compiler::likely(simrv::memory::is_dram_addr(addr))) {
+        if (simrv::compiler::likely(simrv::memory::is_dram_access(addr, access_size))) {
             const auto f3 = ctx.funct3;
             switch (f3) {
                 case Funct3::Fsw:
@@ -921,6 +923,8 @@ void CPU::execute_cached_op32(CachedOp& op, Register rrs1, Register rrs2) {
 
 auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Register& out_val)
     -> bool {
+    const unsigned active_xlen = effective_data_xlen();
+    if (active_xlen == 32) mem_addr &= 0xFFFFFFFFULL;
     const unsigned size_bytes = 1u << (static_cast<unsigned>(funct3) & 0x3u);
     const unsigned alignment_mask = size_bytes - 1u;
     if (simrv::compiler::unlikely((mem_addr & alignment_mask) != 0)) {
@@ -928,15 +932,16 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
     }
     const PrivilegeLevel eff_priv = effective_data_privilege();
     const bool translation_enabled =
-        (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp));
+        (eff_priv != kPrivMachine &&
+         simrv::xlen::satp_translation_enabled(state_.satp, active_xlen));
     if (!translation_enabled) {
-        if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr))) {
+        if (simrv::compiler::likely(simrv::memory::is_dram_access(mem_addr, size_bytes))) {
             out_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3),
                                                    machine.mmem);
             return true;
         }
     } else {
-        const Word current_asid = simrv::xlen::satp_asid(state_.satp);
+        const Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
         const Address vpn = mem_addr >> 12;
         const size_t tlb_idx = vpn & 2047u;
         const auto& entry = soft_tlb_read
@@ -956,6 +961,8 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
 }
 
 auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Register rrs2) -> bool {
+    const unsigned active_xlen = effective_data_xlen();
+    if (active_xlen == 32) mem_addr &= 0xFFFFFFFFULL;
     const unsigned size_bytes = 1u << (static_cast<unsigned>(funct3) & 0x3u);
     const unsigned alignment_mask = size_bytes - 1u;
     if (simrv::compiler::unlikely((mem_addr & alignment_mask) != 0)) {
@@ -963,9 +970,10 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
     }
     const PrivilegeLevel eff_priv = effective_data_privilege();
     const bool translation_enabled =
-        (eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(state_.satp));
+        (eff_priv != kPrivMachine &&
+         simrv::xlen::satp_translation_enabled(state_.satp, active_xlen));
     if (!translation_enabled) {
-        if (simrv::compiler::likely(simrv::memory::is_dram_addr(mem_addr) &&
+        if (simrv::compiler::likely(simrv::memory::is_dram_access(mem_addr, size_bytes) &&
                                     !is_tohost_addr(machine, mem_addr))) {
             if (simrv::compiler::unlikely(machine.s_rollback_enabled)) {
                 Word old_val = simrv::memory::ram_read_fast(
@@ -977,7 +985,7 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
             return true;
         }
     } else {
-        const Word current_asid = simrv::xlen::satp_asid(state_.satp);
+        const Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
         const Address vpn = mem_addr >> 12;
         const size_t tlb_idx = vpn & 2047u;
         const auto& entry = soft_tlb_write
@@ -985,7 +993,7 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
         if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
             Address const paddr = entry.paddr_base + (mem_addr & 0xFFF);
             if (simrv::compiler::unlikely(machine.s_rollback_enabled) &&
-                simrv::memory::is_dram_addr(paddr)) {
+                simrv::memory::is_dram_access(paddr, size_bytes)) {
                 Word old_val = simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(funct3),
                                                             machine.mmem);
                 record_mem_write(paddr, old_val, static_cast<Instruction>(funct3));
@@ -995,7 +1003,7 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
                                                static_cast<Instruction>(funct3));
                 return true;
             }
-            if (simrv::compiler::likely(simrv::memory::is_dram_addr(paddr) &&
+            if (simrv::compiler::likely(simrv::memory::is_dram_access(paddr, size_bytes) &&
                                         !is_tohost_addr(machine, paddr))) {
                 simrv::memory::ram_write_fast(paddr, rrs2, static_cast<Instruction>(funct3),
                                               machine.mmem);

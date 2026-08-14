@@ -589,6 +589,16 @@ class VirtualTerminal {
                     std::format("\033[{};{}R", cursor_y_ + 1, cursor_x_ + 1);
                 response_cb_(response);
             }
+        } else if (cmd == 'c' && response_cb_) {  // Device Attributes
+            // Identify as a VT100 with the advanced-video option. Full-screen programs use this
+            // reply to finish terminal capability discovery before drawing their first frame.
+            response_cb_(is_private ? "\033[>0;0;0c" : "\033[?1;2c");
+        } else if (cmd == 't' && !is_private && response_cb_) {  // Window manipulation/report
+            const int request = params.empty() ? 0 : params[0];
+            if (request == 18) {
+                const std::string response = std::format("\033[8;{};{}t", height_, width_);
+                response_cb_(response);
+            }
         } else if (cmd == 'h' && is_private) {
             for (int p : params) {
                 if (p == 25) cursor_visible_ = true;

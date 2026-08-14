@@ -70,10 +70,8 @@ void InterruptController::updateMip(PlicMmio& plic, ArchState& state) {
     else
         state.mip &= ~enum_mask(MipBit::Meip);
 
-    if (s_ext)
-        state.mip |= enum_mask(MipBit::Seip);
-    else
-        state.mip &= ~enum_mask(MipBit::Seip);
+    state.seip_external = s_ext;
+    state.refresh_supervisor_pending();
 }
 
 void InterruptController::setIrq(PlicMmio& plic, int irq_num, int state_val) {
@@ -112,16 +110,22 @@ auto PlicMmio::get_context_for_offset(Address offset) const -> int {
 
 auto PlicMmio::mmio_read(Address offset) -> Word {
     if (offset < 0x1000) {
+        // PLIC interrupt source zero is reserved and its priority is hardwired to zero.
+        if (offset == 0) return 0;
         return plic_priorities.at(offset / 4);
     }
     if (offset >= 0x1000 && offset < 0x1080) {
         return plic_pending.at((offset - 0x1000) / 4);
     }
     if (offset >= 0x2000 && offset < 0x2080) {
-        return plic_enables.at(0).at((offset - 0x2000) / 4);
+        const auto word = (offset - 0x2000) / 4;
+        const Word value = plic_enables.at(0).at(word);
+        return (word == 0) ? (value & ~Word{1}) : value;
     }
     if (offset >= 0x2080 && offset < 0x2100) {
-        return plic_enables.at(1).at((offset - 0x2080) / 4);
+        const auto word = (offset - 0x2080) / 4;
+        const Word value = plic_enables.at(1).at(word);
+        return (word == 0) ? (value & ~Word{1}) : value;
     }
 
     int context = get_context_for_offset(offset);
@@ -162,11 +166,14 @@ auto PlicMmio::mmio_read(Address offset) -> Word {
 
 void PlicMmio::mmio_write(Address offset, Word wdata) {
     if (offset < 0x1000) {
-        plic_priorities.at(offset / 4) = wdata;
+        // Source zero means "no interrupt" and is not configurable.
+        if (offset != 0) plic_priorities.at(offset / 4) = wdata;
     } else if (offset >= 0x2000 && offset < 0x2080) {
-        plic_enables.at(0).at((offset - 0x2000) / 4) = wdata;
+        const auto word = (offset - 0x2000) / 4;
+        plic_enables.at(0).at(word) = (word == 0) ? (wdata & ~Word{1}) : wdata;
     } else if (offset >= 0x2080 && offset < 0x2100) {
-        plic_enables.at(1).at((offset - 0x2080) / 4) = wdata;
+        const auto word = (offset - 0x2080) / 4;
+        plic_enables.at(1).at(word) = (word == 0) ? (wdata & ~Word{1}) : wdata;
     } else {
         int context = get_context_for_offset(offset);
         if (context >= 0) {
@@ -318,8 +325,10 @@ void TrapController::mret(ArchState& state) {
     }
     // Set MPIE (bit 7) to 1
     mstatus |= enum_mask(MstatusBit::Mpie);
-    // Clear MPP (bits [12:11]) to U-mode (0)
-    mstatus &= ~enum_mask(MstatusBit::Mpp);
+    // xRET resets xPP to the least-privileged supported mode.
+    const bool has_s = isa::misa_has_extension(state.misa, isa::IsaExtension::S);
+    const bool has_u = isa::misa_has_extension(state.misa, isa::IsaExtension::U);
+    mstatus = (mstatus & ~enum_mask(MstatusBit::Mpp)) | (least_supported_mpp(has_s, has_u) << 11U);
 
     if (static_cast<PrivilegeLevel>(mpp) < kPrivMachine) {
         mstatus &= ~enum_mask(MstatusBit::Mprv);
@@ -328,7 +337,7 @@ void TrapController::mret(ArchState& state) {
     state.mstatus = mstatus;
     state.priv = static_cast<PrivilegeLevel>(mpp);
     state.update_xlen();
-    state.pc = state.mepc;
+    state.pc = isa::epc_read_value(state.mepc, state.misa);
     if (state.regs.xlen == 32) {
         state.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state.pc)));
     }
@@ -357,7 +366,7 @@ void TrapController::sret(ArchState& state) {
     state.mstatus = mstatus;
     state.priv = static_cast<PrivilegeLevel>(spp);
     state.update_xlen();
-    state.pc = state.sepc;
+    state.pc = isa::epc_read_value(state.sepc, state.misa);
     if (state.regs.xlen == 32) {
         state.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state.pc)));
     }
@@ -568,18 +577,13 @@ auto TrapController::canExecutePrivilegedInstruction(PrivilegeLevel current_priv
     return true;
 }
 
-auto TrapController::canAccessCsr(PrivilegeLevel current_priv, CSRAddress csr_addr, bool is_write)
-    -> bool {
-    const Word csr_priv = (csr_addr >> 8) & 0x3u;
-    const bool is_read_only = ((csr_addr >> 10) & 0x3u) == 0x3u;
-
-    if (current_priv < static_cast<PrivilegeLevel>(csr_priv)) {
-        return false;
-    }
-    if (is_write && is_read_only) {
-        return false;
-    }
-    return true;
+auto TrapController::canAccessCsr(PrivilegeLevel current_priv, CSRValue misa, CSRAddress csr_addr,
+                                  bool is_write) -> bool {
+    // Debug CSRs require architectural Debug Mode, which the guest execution
+    // engine does not implement. M-mode also cannot override CSR nonexistence.
+    return csr_access_permitted(current_priv, isa::misa_has_extension(misa, isa::IsaExtension::S),
+                                isa::misa_has_extension(misa, isa::IsaExtension::U), csr_addr,
+                                is_write);
 }
 
 }  // namespace simrv::core

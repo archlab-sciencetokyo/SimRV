@@ -12,7 +12,9 @@ The TUI is divided into four layers:
 When the guest terminal is focused and running, ordinary bytes—including carriage return and
 newline—are delivered directly to the platform UART (`ttyS0`). `Ctrl-P` pauses and `Ctrl-Q` quits.
 While paused, keys control TUI navigation. An active modal
-receives input before navigation. The optional VirtIO console is a separate device and does not
+receives input before navigation, except global `Ctrl-R` reboot and `Ctrl-Q` quit. These controls
+remain available after guest shutdown and wake the stopped simulation loop for clean teardown or
+restart. The optional VirtIO console is a separate device and does not
 receive copies of UART keystrokes.
 
 The host terminal's carriage-return Enter byte is normalized to newline at the virtual-terminal
@@ -22,6 +24,21 @@ Sessions start paused with TUI navigation owning the keyboard. Starting the simu
 also attaches the guest terminal; pausing detaches it. There is no independent focus state, so a
 paused-but-attached or running-but-detached combination cannot occur. The terminal badge remains a
 clickable state indicator.
+
+Educational guidance is hidden by default. While paused, press `g` to toggle the compact guided
+inspection strip. It remains hidden in short terminals so architectural state keeps priority.
+
+Frame and modal geometry share one resize policy across split and full-pane layouts. Modal borders
+remain closed at the 40×10 minimum; when content cannot fit, the last visible row reports that the
+terminal should be resized instead of silently rendering an open or torn overlay.
+
+Clickable footer labels and the action portion of online help are generated from the canonical
+keybinding registry. Rendering and hit-testing use the same captured terminal dimensions, avoiding
+stale labels or mouse targets after a resize.
+
+Full-screen border composition is a pure render step shared by the live TUI and native tests.
+Representative 40×10, 80×24, 120×32, and 160×48 split/full layouts assert exact row width, row
+count, outer borders, and center-divider presence.
 
 Escape starts ANSI/control-sequence parsing in every state. A standalone Escape closes a modal when
 that modal permits cancellation.

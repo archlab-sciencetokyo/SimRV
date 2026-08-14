@@ -160,9 +160,12 @@ auto parse_misa_profile(std::string_view value) -> std::expected<ParsedMisa, std
     if (iequals(value, "gc")) {
         return ParsedMisa{.profile = MisaProfile::GC, .xlen = 0};
     }
+    if (iequals(value, "gcbv")) {
+        return ParsedMisa{.profile = MisaProfile::GCBV, .xlen = 0};
+    }
 
     unsigned int parsed_xlen = 0;
-    MisaProfile profile = MisaProfile::GC;
+    MisaProfile profile = MisaProfile::GCBV;
     bool valid = false;
 
     if (iequals(value, "rv32i")) {
@@ -189,6 +192,14 @@ auto parse_misa_profile(std::string_view value) -> std::expected<ParsedMisa, std
         parsed_xlen = 64;
         profile = MisaProfile::GC;
         valid = true;
+    } else if (iequals(value, "rv32gcbv")) {
+        parsed_xlen = 32;
+        profile = MisaProfile::GCBV;
+        valid = true;
+    } else if (iequals(value, "rv64gcbv")) {
+        parsed_xlen = 64;
+        profile = MisaProfile::GCBV;
+        valid = true;
     }
 
     if (valid) {
@@ -200,10 +211,10 @@ auto parse_misa_profile(std::string_view value) -> std::expected<ParsedMisa, std
     }
 
     const auto xlen_suffix = simrv::xlen::kIsXLen64 ? "64" : "32";
-    auto supported =
-        std::format("i, imac, gc, rv{}i, rv{}imac, rv{}gc", xlen_suffix, xlen_suffix, xlen_suffix);
+    auto supported = std::format("i, imac, gc, gcbv, rv{}i, rv{}imac, rv{}gc, rv{}gcbv",
+                                 xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix);
     if constexpr (simrv::xlen::kIsXLen64) {
-        supported += ", rv32i, rv32imac, rv32gc";
+        supported += ", rv32i, rv32imac, rv32gc, rv32gcbv";
     }
     return std::unexpected(
         std::format("unsupported MISA profile '{}' (supported: {})", value, supported));
@@ -213,7 +224,7 @@ auto effective_misa_profile(const RuntimeOptions& options) -> MisaProfile {
     if (options.misa_override) {
         return options.misa_profile;
     }
-    return MisaProfile::GC;
+    return MisaProfile::GCBV;
 }
 
 auto is_image_option(std::string_view arg) -> bool { return arg == "-m" || arg == "--image"; }
@@ -913,9 +924,10 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(
         stdout,
-        "  {}--misa {}{}<PROFILE>{}      Select CPU MISA profile: rv{}i | rv{}imac | rv{}gc\n",
+        "  {}--misa {}{}<PROFILE>{}      Select CPU MISA profile: rv{}i | rv{}imac | rv{}gc | "
+        "rv{}gcbv\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset), xlen_suffix,
-        xlen_suffix, xlen_suffix);
+        xlen_suffix, xlen_suffix, xlen_suffix);
     std::print(stdout,
                "  {}--vlen {}{}<N>{}              Set vector register length in bits (32–1024, "
                "power of 2; default: 256)\n\n",

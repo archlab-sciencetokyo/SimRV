@@ -43,8 +43,8 @@ Run Linux OS image with disk & devicetree:
 
 Override MISA profile or Vector register length (VLEN):
 ```bash
-# Set MISA profile to RV64GC and VLEN to 512 bits
-./build/rv64-release/SimRV -m img/vector.bin --misa rv64gcv --vlen 512
+# Select the explicit RV64GCBV target profile and a 512-bit VLEN
+./build/rv64-release/SimRV -m img/vector.bin --misa rv64gcbv --vlen 512
 ```
 
 ---
@@ -58,7 +58,6 @@ SimRV includes a rich terminal user interface (TUI) for hardware inspection, ste
 | Hotkey | Action |
 | --- | --- |
 | `[s]` / `[Space]` | Single instruction step |
-| `[n]` | Step N instructions |
 | `[c]` / `[Ctrl-P]` | Run / Pause simulation loop |
 | `[Click Label]` / `[Click Badge]` | Click active running badge to pause |
 | `[b]` | Step back 1 instruction (Rollback tracking) |
@@ -66,9 +65,11 @@ SimRV includes a rich terminal user interface (TUI) for hardware inspection, ste
 | `[,]` / `[Alt-S]` | Simulator Settings modal (CA/IA mode, rollback, logging) |
 | `[Alt-M]` | Configure MISA CSR modal (Extensions A/B/C/D/F/M/V/S/U & VLEN) |
 | `[y]` | Cycle-Accurate System Config modal |
-| `[m]` | Memory / Stack inspector modal |
+| `[i]` | Memory inspector modal |
+| `[m]` | Manage breakpoints and watchpoints |
 | `[l]` / `[Alt-L]` | Cycle tool inspector tab (Pipe / Cache / BP / Hazard / TLB / Bus) |
 | `[r]` / `[Alt-R]` | Cycle register tab (GPR / FPR / VEC) |
+| `[g]` | Toggle guided inspection hints while paused |
 | `[Tab]` | Cycle TUI layout |
 | `[F1]` / `[h]` / `[?]` | Display online help shortcuts |
 | `[Esc]` | Close active modal |
@@ -79,14 +80,18 @@ SimRV includes a rich terminal user interface (TUI) for hardware inspection, ste
 
 Both RV32GCBV and RV64GCBV instruction sets are supported.
 
+See [RISC-V compliance scope](docs/RISCV_COMPLIANCE.md) for the precise architectural boundary,
+SBI/OpenSBI distinction, and the evidence required before treating a feature as verified. The
+profile names are implementation targets and do not by themselves claim RISC-V certification.
+
 | Extension | Status | Description & Features |
 | --- | --- | --- |
 | **I** | ✅ Supported | Base integer instruction set (RV32I / RV64I) |
 | **M** | ✅ Supported | Integer multiplication, division, and remainder |
 | **A** | ✅ Supported | Atomic memory operations (LR/SC, AMO word/doubleword) |
 | **C** | ✅ Supported | Compressed instruction decode and execution |
-| **F / D** | ✅ Supported | Single- and double-precision floating-point (FP CSRs included) |
-| **V** | ✅ Supported | Vector Extension (RVV 1.0) with configurable VLEN (32–1024 bits) |
+| **F / D** | ⚠️ Qualification ongoing | Single/double precision and FP CSRs; RMM arithmetic remains a documented gap |
+| **V** | ⚠️ Partial | Substantial RVV 1.0 subset with configurable VLEN (32–1024 bits); see compliance scope |
 | **B** | ✅ Supported | Bit manipulation extension (Zba, Zbb, Zbc, Zbs) |
 | **Privileged** | ✅ Supported | Machine, Supervisor, User modes (M/S/U), CSR access, traps |
 | **SV32 / SV39 / SV48** | ✅ Supported | Hardware MMU page table walker & TLB translation |
