@@ -528,18 +528,6 @@ void Tui::render(bool force) {
         local_tx.pop();
     }
 
-    // If the UART has a PTY, drain guest output from the PTY master fd into the virtual terminal.
-    bool has_pty_data = false;
-    if (machine_.uart && machine_.uart->has_pty()) {
-        uint8_t pty_buf[4096];
-        ssize_t n = machine_.uart->pty().read_from_master(pty_buf, sizeof(pty_buf));
-        if (n > 0) {
-            has_pty_data = true;
-            for (ssize_t i = 0; i < n; ++i) {
-                vt_.write_char(static_cast<char>(pty_buf[i]));
-            }
-        }
-    }
     while (!local_log.empty()) {
         vt_log_.write_string(local_log.front());
         local_log.pop();
@@ -554,7 +542,7 @@ void Tui::render(bool force) {
         std::chrono::duration_cast<std::chrono::milliseconds>(now - last_draw_time).count();
 
     if (!force && !g_resized) {
-        bool const is_active = !paused_ || has_tx || has_log || has_pty_data;
+        bool const is_active = !paused_ || has_tx || has_log;
         if ((is_active && elapsed_ms < 16) || (!is_active && elapsed_ms < 200)) return;
     }
     last_draw_time = now;
@@ -1307,18 +1295,15 @@ void Tui::update() {
                 return;
             }
 
-            uint8_t guest_byte = byte;
-
-            // If UART has a PTY, write the raw host byte straight to the PTY master fd.
-            // The PTY's own line discipline handles CR/LF, echo, Ctrl-C signals, etc.
-            if (machine_.uart && machine_.uart->has_pty()) {
-                ::write(machine_.uart->pty().master_fd(), &guest_byte, 1);
-            } else if (machine_.uart) {
-                // Fallback (no PTY): send raw byte directly
-                machine_.uart->push_rx_byte(guest_byte);
+            // The integrated TUI is itself a terminal endpoint. Feed the UART directly;
+            // the PTY master is reserved for independent programs attached to its slave.
+            if (machine_.uart) {
+                machine_.uart->push_rx_byte(byte);
+            }
+            if (machine_.console) {
+                machine_.console->push_input_byte(byte);
             }
         }
-
     }
 }
 

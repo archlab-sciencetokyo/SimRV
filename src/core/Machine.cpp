@@ -123,8 +123,7 @@ void Machine::run() {
         uart->start_input_thread();
     }
 
-    // In TUI mode open a POSIX PTY for the UART so the guest serial line discipline
-    // runs natively without any CR/LF normalisation on the simulator side.
+    // In TUI mode expose the UART through a PTY for optional external terminals.
     if (uart && s_tuimode) {
         if (uart->start_pty()) {
             simrv::log::info("[UART] PTY slave: {}", uart->pty_slave_path());

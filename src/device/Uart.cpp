@@ -80,23 +80,22 @@ auto Uart::start_pty() -> bool {
     if (pty_.is_open()) return true;
     if (!pty_.open()) return false;
 
-    // Background thread: read bytes typed at the PTY slave (or TUI forwarding)
-    // and inject them into the guest UART RX FIFO.
+    // Background thread: read bytes typed at the PTY slave and inject them into
+    // the guest UART RX FIFO.
     pty_reader_stop_.store(false, std::memory_order_relaxed);
     pty_reader_thread_ = std::thread([this]() -> void {
-        uint8_t buf[64];
+        uint8_t buf[256];
         while (!pty_reader_stop_.load(std::memory_order_relaxed)) {
-            // Wait for keyboard data on slave_fd.
-            // Host writes to master_fd; PTY routes it to slave_fd for us to read.
+            // External terminal input written to the slave is read from the master.
             fd_set fds;
             FD_ZERO(&fds);
-            int sfd = pty_.slave_fd();
-            if (sfd < 0) break;
-            FD_SET(sfd, &fds);
+            int const master_fd = pty_.master_fd();
+            if (master_fd < 0) break;
+            FD_SET(master_fd, &fds);
             struct timeval tv{0, 20000};
-            int ret = ::select(sfd + 1, &fds, nullptr, nullptr, &tv);
+            int const ret = ::select(master_fd + 1, &fds, nullptr, nullptr, &tv);
             if (ret <= 0) continue;
-            ssize_t n = pty_.read_from_slave(buf, sizeof(buf));
+            ssize_t const n = pty_.read_from_master(buf, sizeof(buf));
             if (n <= 0) continue;
             std::scoped_lock lock(rx_mutex_);
             for (ssize_t i = 0; i < n; ++i) {
@@ -193,12 +192,13 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                     uart_dll_ = wdata & static_cast<Word>(0xffU);
                 } else {
                     const auto ch = static_cast<uint8_t>(wdata & static_cast<Word>(0xffU));
-                    // Send guest output to PTY slave → appears on master for render()/external tools
+                    // Mirror output to both the built-in TUI and an attached PTY terminal.
                     if (pty_.is_open()) {
-                        pty_.write_byte_to_slave(ch);
-                    } else if (machine_.s_tuimode && machine_.tui) {
+                        (void)pty_.write_byte_to_master(ch);
+                    }
+                    if (machine_.s_tuimode && machine_.tui) {
                         machine_.tui->handle_char_write(static_cast<char>(ch));
-                    } else {
+                    } else if (!pty_.is_open()) {
                         (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
                     }
                     tx_irq_pending_ = true;
