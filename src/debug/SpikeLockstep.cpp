@@ -30,6 +30,7 @@
 #include <csignal>
 #include <cstring>
 #include <format>
+#include <limits>
 #include <string_view>
 
 #include "simrv/core/Cpu.hpp"
@@ -400,7 +401,7 @@ auto SpikeLockstep::compare_and_report(const simrv::core::ArchState& state, Addr
                                        uint64_t icount) -> bool {
     if (!is_running()) return true;
 
-    const Address pc_mask = (state.regs.xlen == 32) ? 0xFFFFFFFFULL : ~0ULL;
+    constexpr Address pc_mask = std::numeric_limits<Address>::max();
     const Address masked_current_pc = current_pc & pc_mask;
 
     SpikeCommitRecord spike_rec{};
