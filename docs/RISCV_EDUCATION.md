@@ -227,7 +227,7 @@ Description (Behavior):
    ./build/rv32-release/SimRV -b -m program.bin
    ```
 2. The simulation starts paused (`[PAUSED]`). Press `c` to unpause and run continuously, or press `s` / `Space` to single-step instructions.
-3. Press `e` to switch directly to the **EXPLAIN** pane, or press `r` to cycle through left pane views (GPRs $\rightarrow$ FPRs $\rightarrow$ Pipeline $\rightarrow$ Cache $\rightarrow$ TLB $\rightarrow$ Breakpoints $\rightarrow$ Hazards $\rightarrow$ I/O $\rightarrow$ Stats $\rightarrow$ Stack $\rightarrow$ Explain).
+3. Press `e` to switch directly to the **EXPLAIN** pane, or press `r` to cycle through left pane views (GPRs → FPRs → Pipeline → Cache → TLB → Breakpoints → Hazards → I/O → Stats → Stack → Explain).
 4. The EXPLAIN pane displays:
    - Current PC and symbolic function name.
    - Instruction hex value and disassembled mnemonic.
