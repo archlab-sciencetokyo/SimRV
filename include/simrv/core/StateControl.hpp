@@ -173,6 +173,7 @@ class TrapController {
      * including read-only restrictions.
      *
      * @param current_priv The CPU's current privilege level.
+     * @param misa The current machine ISA register (misa).
      * @param csr_addr The address of the CSR.
      * @param is_write True if this is a write or read-write access to the CSR.
      * @return true if access is permitted, false if it triggers an illegal instruction exception.

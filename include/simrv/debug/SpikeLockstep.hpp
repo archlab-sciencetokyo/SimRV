@@ -143,8 +143,9 @@ class SpikeLockstep {
      * GPR values that Spike reported as written.  Prints a coloured diff on
      * mismatch.
      *
-     * @param state   SimRV's ArchState after the just-committed instruction.
-     * @param icount  Instruction count (for diagnostics).
+     * @param state      SimRV's ArchState after the just-committed instruction.
+     * @param current_pc Current instruction program counter.
+     * @param icount     Instruction count (for diagnostics).
      * @return true if states match, false on divergence.
      */
     auto compare_and_report(const simrv::core::ArchState& state, Address current_pc,

@@ -51,11 +51,12 @@ class Mmu {
      * @brief Perform a page walk using the active supported satp mode.
      *
      * @param v_addr Virtual address to translate
-     * @param p_addr Output: translated physical address
      * @param access Access type (read/write/execute)
      * @param priv Current CPU privilege level
      * @param mstatus Current CPU mstatus register
      * @param satp Current CPU satp register
+     * @param xlen Execution width (32 or 64)
+     * @param update_access_bits Whether to update page table A/D bits
      * @return Translated physical address or TrapCause on fault
      */
     auto page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
@@ -69,13 +70,12 @@ class Mmu {
      * otherwise performs full page walk.
      *
      * @param v_addr Virtual address
-     * @param p_addr Output: physical address
      * @param access Access type
      * @param priv Current CPU privilege level
      * @param mstatus Current CPU mstatus register
      * @param satp Current CPU satp register
-     * @param xlen Current execution XLEN
-     * @param update_access_bits Whether to update hardware A/D bits in PTE
+     * @param xlen Execution width (32 or 64)
+     * @param update_access_bits Whether to update page table A/D bits
      * @return Translated physical address or TrapCause on fault
      */
     auto translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,

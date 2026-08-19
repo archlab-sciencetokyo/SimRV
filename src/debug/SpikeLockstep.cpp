@@ -3,7 +3,9 @@
  * @brief Spike co-simulation lockstep implementation.
  *
  * Spike is launched with:
+ * @code
  *   spike --isa=<isa> -l [--dtb=<dtb>] <image>
+ * @endcode
  *
  * With --log-commits Spike writes one line per committed instruction to
  * stderr in the format:
@@ -12,8 +14,10 @@
  *   core   0: 3 0x80000004 (0x00028593)
  *
  * Fields:
+ * @code
  *   "core"  <hart>  ":"  <priv>  <pc_hex>  "(" <insn_hex> ")"
  *   [<reg_name>  <reg_value_hex>]
+ * @endcode
  *
  * We parse the PC and the optional register write, accumulate into a
  * SpikeCommitRecord, then compare against SimRV's ArchState.
