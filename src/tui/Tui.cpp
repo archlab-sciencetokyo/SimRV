@@ -488,7 +488,7 @@ void Tui::render_draw_sixel(int left_pane_width, int right_pane_width, int num_r
                 int img_col = right_pane_active_col + std::max(0, rem_cols / 2);
                 int img_row = 5 + std::max(0, rem_rows / 2);
                 update_cmds +=
-                    std::format("\0337\033[{};{}H{}\0338", img_row, img_col,
+                    std::format("\033[{};{}H{}", img_row, img_col,
                                 machine_.framebuffer->get_sixel_escape(target_w, target_h));
             }
         }

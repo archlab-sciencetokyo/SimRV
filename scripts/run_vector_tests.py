@@ -149,10 +149,24 @@ def main():
         "-stage1output", args.work_dir,
         "-march", "gcv_zvbb_zvbc"
     ]
-    res = run_cmd(gen_cmd)
-    if res.returncode != 0:
-        print(f"Failed to generate vector tests: {res.stderr}")
-        sys.exit(1)
+    try:
+        res = run_cmd(gen_cmd)
+    except Exception:
+        res = None
+
+    if res is None or res.returncode != 0:
+        go_gen_cmd = [
+            "go", "run", "./generator",
+            "-XLEN", str(args.xlen),
+            "-VLEN", str(args.vlen),
+            "-configs", configs_path,
+            "-stage1output", args.work_dir,
+            "-march", "gcv_zvbb_zvbc"
+        ]
+        res = run_cmd(go_gen_cmd, cwd=args.vector_tests_dir)
+        if res.returncode != 0:
+            print(f"Failed to generate vector tests: {res.stderr}")
+            sys.exit(1)
 
     # Load supported operation IDs from OperationId.hpp
     supported_ops = set()
