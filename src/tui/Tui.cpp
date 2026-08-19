@@ -459,11 +459,10 @@ void Tui::render_build_lines(int left_pane_width, int right_pane_width, int num_
 
 void Tui::render_draw_sixel(int left_pane_width, int right_pane_width, int num_rows,
                             std::string& update_cmds) {
-    if (machine_.framebuffer && (true || machine_.framebuffer->is_tui_dirty())) {
-        int active_w = 0;
-        int active_h = 0;
-        if (machine_.framebuffer->get_active_bounds(active_w, active_h) && active_w > 1 &&
-            active_h > 1) {
+    if (machine_.framebuffer) {
+        int active_w = machine_.framebuffer->get_width();
+        int active_h = machine_.framebuffer->get_height();
+        if (active_w > 1 && active_h > 1) {
             int avail_cols = right_pane_width - 4;
             int avail_rows = num_rows - 2;
             if (avail_cols >= 4 && avail_rows >= 4) {

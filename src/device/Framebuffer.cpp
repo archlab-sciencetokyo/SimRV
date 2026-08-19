@@ -273,7 +273,6 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
 
     int active_w = width_;
     int active_h = height_;
-    get_active_bounds(active_w, active_h);
 
     const auto sz_w = static_cast<size_t>(width_);
 
