@@ -283,9 +283,11 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
 
     std::vector<SixelColor> palette;
     palette.reserve(256);
+    palette.push_back({0, 0, 0});
 
     static thread_local std::array<int16_t, 262144> lookup;
     lookup.fill(-1);
+    lookup[0] = 0;
     auto get_palette_index = [&](uint8_t r, uint8_t g, uint8_t b) -> int {
         r = (r >> 2) << 2;
         g = (g >> 2) << 2;
@@ -354,7 +356,7 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
         }
     }
 
-    std::string sixel = std::format("\033Pq\"1;1;{};{}", target_w, target_h);
+    std::string sixel = std::format("\033P7;2;0q\"1;1;{};{}", target_w, target_h);
     for (size_t i = 0; i < palette.size(); ++i) {
         int r_pct = static_cast<int>(palette[i].r) * 100 / 255;
         int g_pct = static_cast<int>(palette[i].g) * 100 / 255;
