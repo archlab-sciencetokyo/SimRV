@@ -58,10 +58,6 @@ auto Framebuffer::handle_request(const memory::TlChannelA& req, memory::TlChanne
                     if (val == 1) {
                         dirty_ = true;
                         tui_dirty_ = true;
-                        if (machine_.sdl_display &&
-                            !multithreaded_.load(std::memory_order_relaxed)) {
-                            machine_.sdl_display->update_gui_only();
-                        }
                     }
                 } break;
                 default:

@@ -189,11 +189,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                     }
                     machine_ptr->tui->update();
                     machine_ptr->tui->render(false);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(33));  // ~30 FPS
-                } else {
-                    machine_ptr->sdl_display->update_gui_only();
-                    std::this_thread::sleep_for(std::chrono::milliseconds(16));  // ~60 FPS
                 }
+                std::this_thread::sleep_for(std::chrono::milliseconds(33));  // ~30 FPS
             }
 
             if (sim_thread.joinable()) {

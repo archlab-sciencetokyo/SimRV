@@ -76,12 +76,6 @@ void BaremetalMachine::finalize_cycle() {
             uart->non_tui_poll_input();
         }
     }
-
-    if (!s_multithreaded && sdl_display) {
-        if (simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
-            sdl_display->update(cpu.e_icount);
-        }
-    }
 }
 
 }  // namespace simrv::core

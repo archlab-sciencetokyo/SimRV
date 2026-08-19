@@ -13,10 +13,6 @@ namespace simrv::core {
 class Machine;
 }
 
-namespace simrv::util {
-class SdlAudio;
-}
-
 namespace simrv::device {
 
 class Audio : public memory::TileLinkNode {

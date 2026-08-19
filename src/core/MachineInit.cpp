@@ -237,15 +237,7 @@ auto Machine::initialize() -> int {
     power = std::make_unique<simrv::device::PowerMmio>(*this);
     framebuffer = std::make_unique<simrv::device::Framebuffer>(*this);
     input_device = std::make_unique<simrv::device::InputDevice>(*this);
-    sdl_display = std::make_unique<simrv::util::SdlDisplay>(*this);
-    if (s_gui_mode) {
-        sdl_display->init();
-    }
     audio = std::make_unique<simrv::device::Audio>(*this);
-    sdl_audio = std::make_unique<simrv::util::SdlAudio>(*this);
-    if (s_gui_mode) {
-        sdl_audio->init_audio();
-    }
     if (s_tuimode) {
         tui = std::make_unique<simrv::tui::Tui>(*this);
     }

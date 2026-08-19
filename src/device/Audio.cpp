@@ -7,7 +7,6 @@
 #include <algorithm>
 
 #include "simrv/core/Machine.hpp"
-#include "simrv/util/SdlAudio.hpp"
 
 namespace simrv::device {
 
@@ -94,9 +93,6 @@ auto Audio::handle_request(const memory::TlChannelA& req, memory::TlChannelD& re
                             stop_music();
                             break;
                         case 3:
-                            if (machine_.sdl_audio) {
-                                machine_.sdl_audio->update_music_volume(music_volume_);
-                            }
                             break;
                         default:
                             break;
@@ -166,37 +162,14 @@ auto Audio::handle_request(const memory::TlChannelA& req, memory::TlChannelD& re
     return true;
 }
 
-void Audio::play_channel(int chan) {
-    if (machine_.sdl_audio) {
-        const auto c_idx = static_cast<size_t>(chan);
-        machine_.sdl_audio->play_channel(chan, sample_address_[c_idx], sample_length_[c_idx],
-                                         sample_rate_[c_idx], volume_[c_idx], panning_[c_idx]);
-    }
-}
+void Audio::play_channel([[maybe_unused]] int chan) {}
 
-void Audio::stop_channel(int chan) {
-    if (machine_.sdl_audio) {
-        machine_.sdl_audio->stop_channel(chan);
-    }
-}
+void Audio::stop_channel([[maybe_unused]] int chan) {}
 
-void Audio::update_channel_params(int chan) {
-    if (machine_.sdl_audio) {
-        machine_.sdl_audio->update_channel_params(chan, volume_[static_cast<size_t>(chan)]);
-    }
-}
+void Audio::update_channel_params([[maybe_unused]] int chan) {}
 
-void Audio::play_music() {
-    if (machine_.sdl_audio) {
-        machine_.sdl_audio->play_music(music_address_, music_length_, music_volume_,
-                                       music_looping_);
-    }
-}
+void Audio::play_music() {}
 
-void Audio::stop_music() {
-    if (machine_.sdl_audio) {
-        machine_.sdl_audio->stop_music();
-    }
-}
+void Audio::stop_music() {}
 
 }  // namespace simrv::device

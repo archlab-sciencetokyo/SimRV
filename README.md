@@ -2,7 +2,16 @@
 
 [![C/C++ CI](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=dev)](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml)
 
-SimRV is a high-performance RISC-V functional and cycle-accurate simulator written in modern C++23, supporting both **RV64GCBV** and **RV32GCBV**. It features interactive TUI split-screen visualizers, guest stack frame analysis, interactive cache set/way inspectors, configurable MISA CSRs, and VirtIO-style console and disk models for booting Linux or running baremetal binaries.
+SimRV is a C++23 research simulator for studying RISC-V functional behavior, in-order pipeline
+timing, memory-system behavior, and interactive architecture education. It provides functional and
+cycle-accurate modes for the **RV64GCBV** and **RV32GCBV** implementation targets, plus a TUI,
+guest stack analysis, cache inspectors, configurable MISA state, and a small virtual platform.
+
+The intended audience is computer-architecture researchers, students, and simulator developers.
+SimRV is suitable for reproducible experiments and teaching when the documented model matches the
+research question. It is not RISC-V certified, a production hypervisor, or a security boundary.
+The `GCBV` names are implementation targets; floating-point RMM arithmetic and parts of RVV 1.0
+remain qualification gaps documented in [the compliance scope](docs/RISCV_COMPLIANCE.md).
 
 ---
 
@@ -83,6 +92,7 @@ Both RV32GCBV and RV64GCBV instruction sets are supported.
 See [RISC-V compliance scope](docs/RISCV_COMPLIANCE.md) for the precise architectural boundary,
 SBI/OpenSBI distinction, and the evidence required before treating a feature as verified. The
 profile names are implementation targets and do not by themselves claim RISC-V certification.
+The cross-subsystem qualification status is summarized in the [2.0 support matrix](docs/SUPPORT_MATRIX.md).
 
 | Extension | Status | Description & Features |
 | --- | --- | --- |
@@ -117,6 +127,19 @@ For running the `riscv-tests` suite, set `RISCV_TESTS_DIR`:
 RISCV_TESTS_DIR=/path/to/riscv-tests ctest --test-dir build/rv64-release --output-on-failure -L rv64gc
 RISCV_TESTS_DIR=/path/to/riscv-tests ctest --test-dir build/rv32-release --output-on-failure -L rv32gc
 ```
+
+### Reproducing research evidence
+
+Quick local validation uses installed dependencies and takes minutes after a build:
+
+```bash
+python3 scripts/reproduce.py --mode quick --output repro/results
+```
+
+The full RV32/RV64 correctness, Linux, vector, sanitizer, and performance workflow can take hours
+and requires substantial build storage. It downloads pinned upstream sources into `.cache/repro`
+but does not redistribute them. Exact preparation commands, schemas, and output contents are in
+[the research companion guide](repro/README.md).
 
 ---
 
@@ -160,14 +183,11 @@ Pre-compiled standalone binaries (`SimRV`) are available under GitHub Releases f
 - `CHANGELOG.md`: Version release log
 - `docs/RELEASE.md`: 2.0 support contract, validation matrix, and publishing checklist
 - `docs/TUI.md`: TUI input focus, rendering layers, and test coverage
+- `repro/`: Versioned experiment manifest and research-companion instructions
+- `release/schemas/`: Machine-readable release and experiment interfaces
 
 ---
 
 ## License
 
 SimRV is licensed under the [MIT License](LICENSE).
-
-### Third-Party Component Licenses
-
-- **TinySoundFont** (`include/simrv/util/tsf.h`): MIT License (Copyright (C) Bernhard Schelling & Steve Folta)
-- **TinyMidiLoader** (`include/simrv/util/tml.h`): zlib License (Copyright (C) Bernhard Schelling)

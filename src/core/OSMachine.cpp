@@ -65,11 +65,6 @@ void OSMachine::finalize_cycle() {
             simrv::log::info("finished by -e option");
             stop();
         }
-        // SDL update only from main thread in multithreaded mode
-        if (!s_multithreaded && sdl_display &&
-            simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
-            sdl_display->update(cpu.e_icount);
-        }
         if (uart && !uart->is_input_thread_running() &&
             simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
             uart->non_tui_poll_input();
@@ -95,12 +90,6 @@ void OSMachine::finalize_cycle() {
     } else if (uart && !uart->is_input_thread_running()) {
         if (simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
             uart->non_tui_poll_input();
-        }
-    }
-    // SDL update only from main thread in multithreaded mode
-    if (!s_multithreaded && sdl_display) {
-        if (simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
-            sdl_display->update(cpu.e_icount);
         }
     }
 

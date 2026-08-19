@@ -23,10 +23,7 @@
 #include "simrv/device/Framebuffer.hpp"
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
-#include "simrv/device/Virtio.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
-#include "simrv/util/SdlAudio.hpp"
-#include "simrv/util/SdlDisplay.hpp"
 
 namespace simrv::device {
 class PowerMmio;
@@ -124,8 +121,8 @@ class Machine {
 
     /// Thread-safe getter and setter for pending reboot configuration
     void set_pending_reboot(const std::string& binary_path,
-                           std::optional<bool> appmode = std::nullopt,
-                           std::optional<std::string> disk_path = std::nullopt);
+                            std::optional<bool> appmode = std::nullopt,
+                            std::optional<std::string> disk_path = std::nullopt);
     [[nodiscard]] auto get_pending_reboot() const -> PendingRebootState;
     void clear_pending_reboot();
 
@@ -148,18 +145,20 @@ class Machine {
     std::atomic<bool> s_bp_trace{false};        // Enable branch prediction tracing
     std::atomic<bool> s_misa_override{false};   // True when CLI explicitly selected MISA profile
     std::atomic<bool> s_cycle_accurate{false};  // Enable cycle-accurate performance simulation mode
-    std::atomic<bool> s_high_performance{true}; // Enable high-performance optimized simulation mode
-    std::atomic<bool> s_mmu_ever_used{false};   // Latched true the first time satp enables translation
-    std::atomic<bool> s_multithreaded{false};   // Run simulation in a background thread
-    std::atomic<bool> s_rollback_enabled{false};// Enable instruction rollback tracking
-    double s_mouse_sensitivity = 1.0;           // Mouse relative sensitivity factor
+    std::atomic<bool> s_high_performance{
+        true};  // Enable high-performance optimized simulation mode
+    std::atomic<bool> s_mmu_ever_used{
+        false};  // Latched true the first time satp enables translation
+    std::atomic<bool> s_multithreaded{false};     // Run simulation in a background thread
+    std::atomic<bool> s_rollback_enabled{false};  // Enable instruction rollback tracking
+    double s_mouse_sensitivity = 1.0;             // Mouse relative sensitivity factor
 
     // ========== Debug / Co-Simulation Flags ==========
-    std::atomic<bool> s_gdb_mode{false};        // Enable GDB RSP stub
-    uint16_t s_gdb_port = 1234;                 // GDB stub TCP port
-    std::atomic<bool> s_lockstep_mode{false};   // Enable Spike lockstep co-simulation
-    std::string s_spike_bin = "spike";          // Path to Spike binary
-    std::string s_spike_elf;                    // Path to Spike ELF image
+    std::atomic<bool> s_gdb_mode{false};       // Enable GDB RSP stub
+    uint16_t s_gdb_port = 1234;                // GDB stub TCP port
+    std::atomic<bool> s_lockstep_mode{false};  // Enable Spike lockstep co-simulation
+    std::string s_spike_bin = "spike";         // Path to Spike binary
+    std::string s_spike_elf;                   // Path to Spike ELF image
 
     // ========== Simulation Control Parameters ==========
     Address s_start_pc = 0;                                  // Initial PC value
@@ -168,7 +167,7 @@ class Machine {
     Counter s_trace_begin = std::numeric_limits<Counter>::max();  // Trace begin cycle
     Counter s_trace_end = std::numeric_limits<Counter>::max();    // Trace end cycle
     Counter s_enabletimer = std::numeric_limits<Counter>::max();  // Timer enable cycle
-    Counter s_memimg = std::numeric_limits<Counter>::max();      // Memory image dump cycle
+    Counter s_memimg = std::numeric_limits<Counter>::max();       // Memory image dump cycle
 
     // ========== ISA/Privilege Configuration ==========
     Address s_isatest_tohost = 0x80001000;        // ISA-test tohost RAM address
@@ -195,8 +194,6 @@ class Machine {
     std::unique_ptr<simrv::device::Framebuffer> framebuffer;
     std::unique_ptr<simrv::device::InputDevice> input_device;
     std::unique_ptr<simrv::device::Audio> audio;
-    std::unique_ptr<simrv::util::SdlDisplay> sdl_display;
-    std::unique_ptr<simrv::util::SdlAudio> sdl_audio;
 
     // ========== Debug Subsystems (null when disabled) ==========
     std::unique_ptr<simrv::debug::GdbStub> gdb_stub;
