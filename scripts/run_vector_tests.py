@@ -21,8 +21,8 @@ def parse_args():
     parser.add_argument("--jobs", type=int, default=multiprocessing.cpu_count(), help="Number of parallel jobs to run")
     return parser.parse_args()
 
-def run_cmd(cmd, shell=False):
-    res = subprocess.run(cmd, shell=shell, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+def run_cmd(cmd, shell=False, cwd=None):
+    res = subprocess.run(cmd, shell=shell, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     return res
 
 def get_tohost_addr(nm_bin, elf_path):
