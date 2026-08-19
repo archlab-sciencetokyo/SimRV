@@ -126,7 +126,7 @@ def main():
             gen_env = os.environ.copy()
             gen_env["CC"] = "/usr/bin/gcc"
             gen_env["CGO_ENABLED"] = "1"
-            subprocess.run(["go", "build", "-o", generator_path, "./generator"], cwd=vector_tests_dir, env=gen_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            subprocess.run(["go", "build", "-o", generator_path, "."], cwd=vector_tests_dir, env=gen_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     if not os.path.exists(generator_path):
         print(f"Error: Vector test generator not found at '{generator_path}'")
@@ -156,7 +156,7 @@ def main():
 
     if res is None or res.returncode != 0:
         go_gen_cmd = [
-            "go", "run", "./generator",
+            "go", "run", ".",
             "-XLEN", str(args.xlen),
             "-VLEN", str(args.vlen),
             "-configs", configs_path,
