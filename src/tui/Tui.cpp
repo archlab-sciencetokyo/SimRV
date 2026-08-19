@@ -24,6 +24,7 @@
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/device/Framebuffer.hpp"
+#include "simrv/device/InputDevice.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/tui/TuiFrameRenderer.hpp"
@@ -999,6 +1000,10 @@ void Tui::write_guest_input(uint8_t byte) {
     // optional VirtIO console: doing so makes one keyboard appear as two independent terminals and
     // leaves stale input queued if a VirtIO driver is enabled later.
     if (machine_.uart) machine_.uart->push_rx_byte(normalize_guest_terminal_byte(byte));
+    if (machine_.input_device) {
+        machine_.input_device->push_key(static_cast<Word>(byte) | (1u << 31));
+        machine_.input_device->push_key(static_cast<Word>(byte));
+    }
 }
 
 void Tui::update_trace_active_cache() {
