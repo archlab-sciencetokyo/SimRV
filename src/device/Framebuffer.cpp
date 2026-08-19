@@ -346,9 +346,9 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
                 const size_t offset =
                     (static_cast<size_t>(src_y) * sz_w + static_cast<size_t>(src_x)) * 4;
                 if (offset + 2 < fb_mem_.size()) {
-                    r = fb_mem_[offset];
+                    r = fb_mem_[offset + 2];
                     g = fb_mem_[offset + 1];
-                    b = fb_mem_[offset + 2];
+                    b = fb_mem_[offset];
                 }
             }
             pixel_indices[static_cast<size_t>(y * target_w + x)] = get_palette_index(r, g, b);
