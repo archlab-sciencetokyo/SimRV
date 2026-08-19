@@ -16,6 +16,8 @@ def parse_args():
     parser.add_argument("--objcopy", required=True, help="Path to objcopy binary")
     parser.add_argument("--nm", required=True, help="Path to nm binary")
     parser.add_argument("--work-dir", required=True, help="Path to directory for generated/compiled artifacts")
+    parser.add_argument("--vector-tests-dir", required=True, help="Checked-out chipsalliance/riscv-vector-tests directory")
+    parser.add_argument("--vlen", type=int, default=256, help="Vector register length used by generated tests")
     parser.add_argument("--jobs", type=int, default=multiprocessing.cpu_count(), help="Number of parallel jobs to run")
     return parser.parse_args()
 
@@ -66,11 +68,11 @@ def compile_and_run_test(test_ctx):
         "-fvisibility=hidden",
         "-nostdlib",
         "-nostartfiles",
-        "-I", "/var/archlab-modules/riscv-vector-tests/2026.07.06/env/riscv-test-env",
-        "-I", "/var/archlab-modules/riscv-vector-tests/2026.07.06/env/riscv-test-env/p",
-        "-I", "/var/archlab-modules/riscv-vector-tests/2026.07.06/env",
-        "-I", "/var/archlab-modules/riscv-vector-tests/2026.07.06/macros/general",
-        "-T", "/var/archlab-modules/riscv-vector-tests/2026.07.06/env/riscv-test-env/p/link.ld",
+        "-I", os.path.join(test_ctx["vector_tests_dir"], "env", "riscv-test-env"),
+        "-I", os.path.join(test_ctx["vector_tests_dir"], "env", "riscv-test-env", "p"),
+        "-I", os.path.join(test_ctx["vector_tests_dir"], "env"),
+        "-I", os.path.join(test_ctx["vector_tests_dir"], "macros", "general"),
+        "-T", os.path.join(test_ctx["vector_tests_dir"], "env", "riscv-test-env", "p", "link.ld"),
         s_file,
         "-o", elf_file
     ]
@@ -91,6 +93,7 @@ def compile_and_run_test(test_ctx):
     # 4. Run SimRV
     sim_cmd = [
         simrv,
+        "--cli",
         "-m", bin_file,
         "-e", "2000000",
         "-b",
@@ -112,8 +115,9 @@ def compile_and_run_test(test_ctx):
 def main():
     args = parse_args()
 
-    generator_path = "/var/archlab-modules/riscv-vector-tests/2026.07.06/bin/riscv-vector-tests-generator"
-    configs_path = "/var/archlab-modules/riscv-vector-tests/2026.07.06/configs"
+    vector_tests_dir = os.path.abspath(args.vector_tests_dir)
+    generator_path = os.path.join(vector_tests_dir, "bin", "riscv-vector-tests-generator")
+    configs_path = os.path.join(vector_tests_dir, "configs")
 
     if not os.path.exists(generator_path):
         print(f"Error: Vector test generator not found at '{generator_path}'")
@@ -126,7 +130,7 @@ def main():
     gen_cmd = [
         generator_path,
         "-XLEN", str(args.xlen),
-        "-VLEN", "256",
+        "-VLEN", str(args.vlen),
         "-configs", configs_path,
         "-stage1output", args.work_dir,
         "-march", "gcv_zvbb_zvbc"
@@ -192,7 +196,8 @@ def main():
             "nm": args.nm,
             "simrv": args.simrv,
             "work_dir": args.work_dir,
-            "xlen": args.xlen
+            "xlen": args.xlen,
+            "vector_tests_dir": vector_tests_dir,
         })
 
     passed = 0

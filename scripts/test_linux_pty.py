@@ -195,6 +195,11 @@ def main():
                         passed = True
                         break
             except OSError:
+                # A clean Ctrl-Q shutdown can close the PTY before poll() observes
+                # the child exit. Once the guest poweroff and host shutdown control
+                # were both observed, that close is the expected terminal state.
+                if lifecycle_action == "poweroff" and shutdown_control_sent:
+                    passed = True
                 break
 
             if time.time() - start_time > timeout_secs:
