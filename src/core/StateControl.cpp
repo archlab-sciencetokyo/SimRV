@@ -243,7 +243,7 @@ auto ClintMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
 
 void ClintMmio::reset() {
     mtime.store(1, std::memory_order_release);
-    mtimecmp.store(0, std::memory_order_release);
+    mtimecmp.store(std::numeric_limits<Counter>::max(), std::memory_order_release);
     supervisor_timer.store(false, std::memory_order_release);
     mcycle = 1;
     rtc_divider = 0;
