@@ -14,8 +14,7 @@
 
 namespace simrv::device {
 
-Framebuffer::Framebuffer(simrv::core::Machine& machine)
-    : machine_(machine), fb_mem_(kSize - 0x1000, 0) {}
+Framebuffer::Framebuffer(simrv::core::Machine& /*machine*/) : fb_mem_(kSize - 0x1000, 0) {}
 
 Framebuffer::~Framebuffer() = default;
 

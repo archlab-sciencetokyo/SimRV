@@ -38,8 +38,6 @@ class Audio : public memory::TileLinkNode {
     void play_music();
     void stop_music();
 
-    simrv::core::Machine& machine_;
-
     // ---- SFX Hardware Registers (8 channels) ----
     int current_channel_ = 0;
     std::array<Address, 8> sample_address_{{0}};

@@ -10,7 +10,7 @@
 
 namespace simrv::device {
 
-Audio::Audio(simrv::core::Machine& machine) : machine_(machine) {
+Audio::Audio(simrv::core::Machine& /*machine*/) {
     for (int i = 0; i < 8; ++i) {
         volume_[i] = 127;   // Max volume
         panning_[i] = 128;  // Center panning

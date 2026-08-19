@@ -78,7 +78,6 @@ class Framebuffer : public memory::TileLinkNode {
     auto get_active_bounds(int& w, int& h) -> bool;
 
    private:
-    simrv::core::Machine& machine_;
     bool recreate_display_resources_ = false;
 
     // Framebuffer dimensions and format
