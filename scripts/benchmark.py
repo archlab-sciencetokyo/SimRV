@@ -18,6 +18,7 @@ import time
 from shutil import which
 
 REALWORLD_BENCHMARKS = [
+    "coremark",
     "dhrystone",
     "median",
     "memcpy",
@@ -28,14 +29,6 @@ REALWORLD_BENCHMARKS = [
     "spmv",
     "towers",
     "vvadd",
-]
-
-ISA_SMOKE_BENCHMARKS = [
-    "rv64ui-p-add",
-    "rv64ui-p-sub",
-    "rv64ui-p-mul",
-    "rv64um-p-mul",
-    "rv64ua-p-amoadd_w",
 ]
 
 
@@ -581,6 +574,11 @@ def run_benchmark_single(
             os.path.join(riscv_tests_dir, "isa", test_target),
             os.path.join(riscv_tests_dir, test_target),
             os.path.join(riscv_tests_dir, f"{test_target}.riscv"),
+            os.path.join(riscv_tests_dir, "..", "coremark", f"{test_target}.riscv"),
+            os.path.join(riscv_tests_dir, "..", "coremark", f"{test_target}64.riscv"),
+            os.path.join(riscv_tests_dir, "coremark", f"{test_target}.riscv"),
+            os.path.join(riscv_tests_dir, "coremark", f"{test_target}64.riscv"),
+            "/home/archlab/ltrunk/workspace/tests/coremark/coremark64.riscv",
         ]
         for cand in candidates:
             if os.path.isfile(cand):
@@ -806,8 +804,8 @@ def main():
     )
     parser.add_argument(
         "--suite",
-        choices=["realworld", "isa", "all"],
-        help="Run an entire benchmark suite",
+        choices=["realworld"],
+        help="Run the real-world benchmark suite",
     )
     parser.add_argument(
         "--list-benchmarks",
@@ -841,9 +839,6 @@ def main():
     if args.list_benchmarks:
         print("Available Real-World Benchmarks:")
         for bm in REALWORLD_BENCHMARKS:
-            print(f"  - {bm}")
-        print("\nAvailable ISA Smoke Benchmarks:")
-        for bm in ISA_SMOKE_BENCHMARKS:
             print(f"  - {bm}")
         sys.exit(0)
 
@@ -903,10 +898,6 @@ def main():
     targets = []
     if args.suite == "realworld":
         targets = REALWORLD_BENCHMARKS
-    elif args.suite == "isa":
-        targets = ISA_SMOKE_BENCHMARKS
-    elif args.suite == "all":
-        targets = REALWORLD_BENCHMARKS + ISA_SMOKE_BENCHMARKS
     else:
         targets = [args.test]
 
