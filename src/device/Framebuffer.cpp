@@ -285,7 +285,8 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
     std::vector<SixelColor> palette;
     palette.reserve(256);
 
-    std::vector<int16_t> lookup(262144, -1);
+    static thread_local std::array<int16_t, 262144> lookup;
+    lookup.fill(-1);
     auto get_palette_index = [&](uint8_t r, uint8_t g, uint8_t b) -> int {
         r = (r >> 2) << 2;
         g = (g >> 2) << 2;
@@ -345,9 +346,9 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
                 const size_t offset =
                     (static_cast<size_t>(src_y) * sz_w + static_cast<size_t>(src_x)) * 4;
                 if (offset + 2 < fb_mem_.size()) {
-                    r = fb_mem_[offset + 2];
+                    r = fb_mem_[offset];
                     g = fb_mem_[offset + 1];
-                    b = fb_mem_[offset];
+                    b = fb_mem_[offset + 2];
                 }
             }
             pixel_indices[static_cast<size_t>(y * target_w + x)] = get_palette_index(r, g, b);
