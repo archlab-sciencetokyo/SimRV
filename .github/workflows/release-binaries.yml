@@ -15,6 +15,9 @@ on:
 permissions:
   contents: write
 
+env:
+  RISCV_TESTS_REVISION: 933a897d8631773f385d45938facc466dddc7514
+
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
@@ -52,8 +55,9 @@ jobs:
           export PATH="/opt/riscv/bin:$PATH"
 
           # Clone and build riscv-tests
-          git clone --depth 1 https://github.com/riscv-software-src/riscv-tests.git "$RUNNER_TEMP/riscv-tests"
+          git clone https://github.com/riscv-software-src/riscv-tests.git "$RUNNER_TEMP/riscv-tests"
           cd "$RUNNER_TEMP/riscv-tests"
+          git checkout --detach "$RISCV_TESTS_REVISION"
           git submodule update --init --recursive
           autoconf
           ./configure
@@ -79,7 +83,9 @@ jobs:
         run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L gate
 
       - name: Validate source release metadata
-        run: python3 scripts/release_check.py
+        run: |
+          python3 scripts/release_check.py
+          python3 tests/ReleaseToolTests.py
 
       - name: Compute asset names
         id: names
@@ -161,7 +167,9 @@ jobs:
       - name: Install documentation tools
         run: dnf install -y doxygen graphviz tar gzip python3
       - name: Validate release metadata
-        run: python3 scripts/release_check.py
+        run: |
+          python3 scripts/release_check.py
+          python3 tests/ReleaseToolTests.py
       - name: Build documentation
         run: doxygen Doxyfile
       - name: Package documentation
@@ -178,3 +186,35 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: SimRV-docs-*.tar.gz
+
+  reproducibility-framework:
+    runs-on: ubuntu-latest
+    container:
+      image: almalinux:10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+      - name: Install Python
+        run: dnf install -y python3
+      - name: Validate research interfaces
+        run: |
+          python3 scripts/release_check.py
+          python3 tests/ReleaseToolTests.py
+          mkdir -p repro/results
+          python3 -c 'import json,pathlib; pathlib.Path("repro/results/index.json").write_text(json.dumps({"schema_version":1,"status":"framework-only","note":"Raw results and complete evidence are published only after the full release matrix passes."},indent=2)+"\n")'
+      - name: Package reproducibility framework
+        run: python3 scripts/package_repro.py --results repro/results
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SimRV-reproducibility-framework
+          path: |
+            SimRV-repro-*.tar.gz
+            SimRV-repro-*.sha256
+      - name: Upload reproducibility release asset
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            SimRV-repro-*.tar.gz
+            SimRV-repro-*.sha256

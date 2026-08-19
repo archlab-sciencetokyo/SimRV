@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/archlab-sciencetokyo/SimRV/release/schemas/evidence.schema.json",
+  "title": "SimRV release evidence",
+  "type": "object",
+  "required": ["schema_version", "simrv", "host", "dependencies", "configurations", "summary"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "simrv": {"type": "object", "required": ["version", "revision"]},
+    "host": {"type": "object", "required": ["system", "machine"]},
+    "dependencies": {"type": "object"},
+    "configurations": {"type": "array"},
+    "summary": {
+      "type": "object", "required": ["status", "passed", "failed", "skipped", "unavailable"],
+      "properties": {"status": {"enum": ["passed", "failed"]}}
+    }
+  }
+}

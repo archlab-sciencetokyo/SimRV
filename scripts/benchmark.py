@@ -49,9 +49,6 @@ def get_riscv_prefix():
         return prefix
     if which("riscv64-unknown-elf-gcc"):
         return "riscv64-unknown-elf-"
-    var_path = "/var/archlab-modules/riscv/2026.03.13/bin/riscv64-unknown-elf-"
-    if os.path.exists(var_path + "gcc"):
-        return var_path
     return ""
 
 

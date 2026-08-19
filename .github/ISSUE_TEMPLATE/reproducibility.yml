@@ -1,0 +1,20 @@
+name: Reproducibility failure
+description: Report a failure to reproduce release or experiment evidence
+title: "[repro]: "
+labels: ["reproducibility"]
+body:
+  - type: textarea
+    attributes:
+      label: Expected evidence
+      description: Name the release, table, figure, suite, or claim.
+    validations: {required: true}
+  - type: textarea
+    attributes:
+      label: Command and result
+      description: Include the exact command, error, and relevant log excerpt.
+    validations: {required: true}
+  - type: textarea
+    attributes:
+      label: Provenance
+      description: Attach evidence JSON or list SimRV revision, host, compiler, XLEN, MISA, VLEN, and dependency revisions.
+    validations: {required: true}

@@ -50,7 +50,7 @@ isa_logs/
 regression_logs/
 release-report.json
 Testing/
-repro/
+repro/results/
 Makefrag
 
 # Generated documentation (source Markdown remains tracked)

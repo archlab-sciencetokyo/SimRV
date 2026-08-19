@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+env:
+  RISCV_TESTS_REVISION: 933a897d8631773f385d45938facc466dddc7514
+  VECTOR_TESTS_REVISION: f76bff121dce91b6b23e1d37be77a5e44af914c3
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -29,7 +33,7 @@ jobs:
         dnf update -y
         dnf install -y dnf-plugins-core
         dnf config-manager --enable crb || dnf config-manager --set-enabled crb || true
-        dnf install -y git cmake ninja-build gcc gcc-c++ clang clang-tools-extra wget tar xz autoconf make which
+        dnf install -y git cmake ninja-build gcc gcc-c++ clang clang-tools-extra wget tar xz autoconf make which golang
 
     - name: Fetch and compile riscv-tests
       run: |
@@ -45,13 +49,23 @@ jobs:
         export PATH="/opt/riscv/bin:$PATH"
 
         # Clone and build riscv-tests
-        git clone --depth 1 https://github.com/riscv-software-src/riscv-tests.git "$RUNNER_TEMP/riscv-tests"
+        git clone https://github.com/riscv-software-src/riscv-tests.git "$RUNNER_TEMP/riscv-tests"
         cd "$RUNNER_TEMP/riscv-tests"
+        git checkout --detach "$RISCV_TESTS_REVISION"
         git submodule update --init --recursive
         autoconf
         ./configure
         ARCH="${{ matrix.arch }}"
         make -C isa -j$(nproc) RISCV_PREFIX=riscv-none-elf- XLEN="${ARCH#rv}"
+
+    - name: Fetch and build pinned vector tests
+      if: matrix.compiler == 'gcc'
+      run: |
+        git clone https://github.com/chipsalliance/riscv-vector-tests.git "$RUNNER_TEMP/riscv-vector-tests"
+        cd "$RUNNER_TEMP/riscv-vector-tests"
+        git checkout --detach "$VECTOR_TESTS_REVISION"
+        git submodule update --init --recursive
+        make -j2
 
     - name: Show toolchain versions
       run: |
@@ -72,11 +86,16 @@ jobs:
           CC=gcc
           CXX=g++
         fi
+        VECTOR_ARGS=()
+        if [[ "${{ matrix.compiler }}" == "gcc" ]]; then
+          VECTOR_ARGS+=("-DSIMRV_VECTOR_TESTS_DIR=${RUNNER_TEMP}/riscv-vector-tests")
+        fi
         cmake --preset ${{ matrix.arch }}-release \
           -DCMAKE_C_COMPILER="$CC" \
           -DCMAKE_CXX_COMPILER="$CXX" \
           -DSIMRV_WARNINGS_AS_ERRORS=ON \
-          -DSIMRV_ENABLE_SDL=OFF
+          -DSIMRV_ENABLE_SDL=OFF \
+          "${VECTOR_ARGS[@]}"
 
     - name: Build
       run: cmake --build --preset ${{ matrix.arch }}-release
@@ -85,6 +104,22 @@ jobs:
       env:
         RISCV_TESTS_DIR: ${{ runner.temp }}/riscv-tests
       run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L gate
+
+    - name: Record required-suite evidence
+      run: >-
+        python3 scripts/release_evidence.py
+        --build-dir build/${{ matrix.arch }}-release
+        --arch ${{ matrix.arch == 'rv32' && '32' || '64' }}
+        --compiler ${{ matrix.compiler }}
+        --suite native --suite isa
+        --dependency riscv_tests=${{ runner.temp }}/riscv-tests
+        --output evidence-${{ matrix.compiler }}-${{ matrix.arch }}.json
+
+    - name: Upload evidence
+      uses: actions/upload-artifact@v7
+      with:
+        name: evidence-${{ matrix.compiler }}-${{ matrix.arch }}
+        path: evidence-${{ matrix.compiler }}-${{ matrix.arch }}.json
 
   quality:
     runs-on: ubuntu-latest
@@ -98,6 +133,8 @@ jobs:
       run: dnf install -y cmake ninja-build gcc gcc-c++ libasan libtsan libubsan clang clang-tools-extra python3
     - name: Check release metadata
       run: python3 scripts/release_check.py
+    - name: Test release tooling
+      run: python3 tests/ReleaseToolTests.py
     - name: Check formatting
       shell: bash
       run: |

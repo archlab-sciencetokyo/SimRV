@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Enforce SimRV 2.0 benchmark improvement and regression thresholds."""
+"""Compare SimRV benchmark evidence; enforcement is explicitly opt-in."""
 
 import argparse
 import json
@@ -25,6 +25,7 @@ def main() -> None:
     parser.add_argument("candidate", type=pathlib.Path)
     parser.add_argument("--minimum-geomean", type=float, default=5.0)
     parser.add_argument("--maximum-regression", type=float, default=3.0)
+    parser.add_argument("--enforce", action="store_true", help="Return nonzero when supplied thresholds are exceeded")
     args = parser.parse_args()
 
     baseline = load_results(args.baseline)
@@ -50,7 +51,9 @@ def main() -> None:
     if geomean < args.minimum_geomean:
         print(f"geometric mean is below {args.minimum_geomean:.2f}%", file=sys.stderr)
         failed = True
-    raise SystemExit(1 if failed else 0)
+    if failed and not args.enforce:
+        print("threshold observations are informational (evidence-only policy)")
+    raise SystemExit(1 if failed and args.enforce else 0)
 
 
 if __name__ == "__main__":

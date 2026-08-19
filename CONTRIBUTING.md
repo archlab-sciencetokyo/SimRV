@@ -37,6 +37,10 @@ git rebase origin/dev
 - Keep commit messages short and imperative.
 - Prefer one concern per commit.
 - Include build/test context in PR descriptions.
+- Add semantic tests for new behavior and update the support/compliance matrix.
+- State whether a change affects reproducibility, experiment outputs, CLI behavior, or schemas.
+- Treat new skips, sanitizer findings, undocumented behavior changes, and unsupported headline
+  claims as blockers.
 
 ## Validation Guidance
 
@@ -53,3 +57,7 @@ cmake --preset rv32-release
 cmake --build --preset rv32-release
 cmake --build --preset rv32-release --target isa-gate
 ```
+
+During the final 2.0 candidate window, CLI names, automation output, schemas, and asset names are
+frozen. Changes to CPU semantics, MMU/CSR behavior, devices, concurrency, test infrastructure, or
+experiment results restart the two-clean-run stabilization requirement.
