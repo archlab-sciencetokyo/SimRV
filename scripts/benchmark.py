@@ -580,6 +580,7 @@ def run_benchmark_single(
             ),
             os.path.join(riscv_tests_dir, "isa", test_target),
             os.path.join(riscv_tests_dir, test_target),
+            os.path.join(riscv_tests_dir, f"{test_target}.riscv"),
         ]
         for cand in candidates:
             if os.path.isfile(cand):
