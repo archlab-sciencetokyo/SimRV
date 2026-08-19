@@ -3,6 +3,159 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.0] — 2026-08-19
+
+General Availability release of SimRV 2.0: A dual-width explainable RISC-V full-system simulator written in modern ISO C++23, providing high-throughput functional simulation, in-terminal visual inspection, and multi-OS/RTOS execution.
+
+### Architectural Highlights & Major Capabilities
+
+- **Dual-Width Parametric Engine**: Compile-time parameterization (`SIMRV_XLEN`) for RV32GCBV and RV64GCBV with zero runtime virtualization overhead.
+- **High-Throughput Execution**: Optimized fast-path functional engine delivering 195+ MIPS on CoreMark with an overall 1.66x geometric mean speedup over Spike across 20-run statistical benchmark evaluation.
+- **Microarchitectural Explainability**: 5-stage structural pipeline modeling with dynamic inter-stage RAW/WAR/WAW hazard attribution, forwarding analysis, and natural-language causal event synthesis.
+- **In-Terminal Visual Inspection**: Split-screen TUI powered by an internal ANSI/VT100 Virtual Terminal and hardware Sixel graphics protocol, streaming guest graphical framebuffers over headless SSH text sessions with zero host GUI dependencies.
+- **Full-Stack OS & RTOS Platform**: Direct execution of upstream RISC-V Linux kernels (v6.x/v7.x), μT-Kernel 3.0, and embedded RTOS payloads over standard MMIO peripherals (VirtIO Block, NS16550 UART, CLINT, PLIC, RTC, and TileLink crossbar).
+- **Correctness & Research Reproducibility**: 100% CTest gate pass rate across RV32 (274/274) and RV64 (368/368), real-time differential Spike lockstep verification (`SpikeLockstep`), and ACM/IEEE open-science reproducibility tooling.
+
+## [v2.0.0-rc.10] — 2026-08-19
+
+Release candidate 10 hardens release engineering workflows, adds strict required-suite schemas, streamlines dependencies by removing host SDL bridges while preserving simulated MMIO devices, and fixes headless execution across the vector test suite.
+
+### Release engineering and reproducibility
+
+- Added versioned release, evidence, and experiment schemas with strict required-suite coverage.
+- Added portable dependency inputs, machine-readable evidence, deterministic aggregation/plotting,
+  and reproducibility archive tooling.
+- Changed performance qualification to an evidence-only policy and retained explicit FP/RVV gaps.
+- Added citation metadata, a support matrix, research-companion documentation, and academic support
+  and security boundaries.
+- Hardened Linux PTY shutdown validation against the expected terminal-close race.
+- Fixed vector test runner to execute in headless `--cli` mode, achieving 100% pass across all 1,067 tests.
+- Removed experimental SDL3 host audio/display bridges and third-party soundfont headers (`tsf.h`, `tml.h`) while preserving simulated MMIO device models (`Audio`, `Framebuffer`, `InputDevice`).
+
+## [v2.0.0-rc.9] — 2026-08-14
+
+Release candidate 9 focuses on architectural compliance, trap and interrupt correctness,
+OS lifecycle control, MMIO safety, and TUI/UART stability ahead of v2.0.0.
+
+### Breaking CLI cleanup
+
+SimRV 2.0 removes ambiguous and deprecated aliases. Removed options fail with an explicit
+replacement instead of silently changing behavior.
+
+| Removed | Replacement |
+|---|---|
+| `-k`, `-i`, `--kernel` | `-m`, `--image` |
+| `--dtb` | `-f`, `--fdt` |
+| `-a`, `--app` | `-b`, `--baremetal` |
+| `-o`, `--linux` | `--os` |
+| `--headless`, `--no-tui` | `-c`, `--cli` |
+| `--high-accuracy`, `--accuracy-mode` | `-C`, `--cycle-accurate` |
+| `--perf-mode` | `--high-performance`, `--ia` |
+| `--vector-len` | `--vlen` |
+| `--mouse-speed` | `--mouse-sensitivity` |
+| `--contrast` | `--high-contrast` |
+| `--disable-forwarding` | `--no-forwarding` |
+| `-B`, `--opensbi` | Remove it; OpenSBI is automatic with `--fdt` |
+
+The conflicting `-G` alias is now GUI-only; use `--gdb` for the GDB server. The conflicting `-c`
+alias is now CLI-only; use `-f` or `--fdt` for a device tree.
+
+### TUI framework hardening
+
+- Corrected Unicode display-cell accounting for wide and combining characters, centralized frame
+  and modal resize geometry, and kept constrained modal borders closed with a clipping notice.
+- Generated footer labels and online action help from the canonical keybinding registry, with
+  exact-width two-column help rows and resize-stable mouse hit-testing.
+- Extracted full-frame composition into a pure tested renderer and removed the stale `k` alias for
+  setting breakpoints; `[:]` sets a breakpoint and `[k]` toggles one at the current PC.
+- Kept `Ctrl-R` reboot and `Ctrl-Q` quit globally available after shutdown and over modals; quit
+  now uses the machine exit request without transiently resuming stopped execution.
+- Made the educational guidance strip opt-in with `[g]`; it remains hidden while running and in
+  terminals too short to show it without displacing architectural state.
+- Split byte-routing policy from terminal I/O so focused guest input, modal input, and paused
+  navigation have deterministic behavior and native test coverage.
+- Added native tests for Enter routing, ANSI/UTF-8 parsing, scrollback, selection, resize/reset,
+  themes, and keybinding registry integrity.
+- Invalid TUI keybinding actions now report an error instead of silently resolving to Step.
+
+### Machine, interrupt, and memory correctness
+
+- Reset now clears PLIC, CLINT, pipeline, timer-target, and interrupt-controller state instead of
+  carrying device state across a reboot.
+- CLINT timer writes generate machine timer interrupts; directly emulated SBI timers generate
+  supervisor timer interrupts without asserting both causes simultaneously.
+- PLIC claims now honor context thresholds.
+- MMIO registration rejects empty, wrapping, overlapping, and containing ranges; transactions that
+  cross a device boundary or use unsupported opcodes return bus errors.
+- Unaligned guest RAM accesses no longer rely on undefined host pointer casts, and framebuffer
+  accesses are checked across their complete width.
+- Bare-metal fast batches honor instruction limits exactly and stop promptly after a halt request.
+- Generated Linux images include a root-only `simrv-power` `/dev/mem` helper for direct poweroff,
+  reboot, crash, and simulator-exit requests when the normal OS lifecycle path is unavailable.
+  Its SimRV-specific `exit` request terminates the monitor as well as guest execution, while
+  poweroff retains the shut-down machine for TUI inspection.
+
+## [v2.0.0-rc.8] — 2026-08-08
+
+Release candidate 8 for v2.0.0. Focuses on CMake user presets modularization, scrubbing hardcoded workspace paths, floating-point rounding precision under Clang, dual-architecture `riscv-tests` integration, and repository documentation polish.
+
+### Build System & Developer Presets
+- **Preset Modularization**:
+  - Reverted `CMakePresets.json` to general, portable presets without hardcoded compiler binaries.
+  - Added local-only `CMakeUserPresets.json` (gitignored) for developer-specific Clang/GCC configuration (`CMAKE_C_COMPILER` and `CMAKE_CXX_COMPILER`).
+- **Floating-Point Rounding & Exception Semantics**:
+  - Added `-frounding-math` compiler flag check to preserve floating-point rounding mode semantics (`std::fesetround`) and exception raising under Clang `-O3` / ThinLTO optimization passes.
+
+### Test Automation & ISA Verification
+- **Dual-Architecture `riscv-tests` Integration**:
+  - Built 64-bit (`make`) and 32-bit (`make XLEN=32`) `riscv-tests` test suites in `../../tests/riscv-tests`.
+  - Achieved 100% CTest gate pass rate (230 test cases) across both `rv64-release` and `rv32-release` targets.
+
+### Repository Polish & Cleanups
+- **Hardcoded Path Scrubbing**:
+  - Replaced absolute `/home/archlab/` paths in `scripts/run_benchmarks.py` with dynamic `TESTS_DIR` path resolution relative to `script_dir`.
+  - Fixed hardcoded absolute file link to `LICENSE` in `README.md`.
+- **Legacy File Cleanups & Script Updates**:
+  - Updated `scripts/build-linux-image.sh` to target latest OpenSBI v1.9, Linux Kernel v7.1.7, and BusyBox v1.38.0.
+  - Added `--libc (musl|glibc)` and `--cross-compile` flags with auto-detection for both `musl` (`riscv64-unknown-linux-musl-`) and `glibc` (`riscv64-unknown-linux-gnu-`) toolchains.
+  - Removed obsolete `help.txt` and `Makefrag` files from repository root.
+  - Updated documentation version headers (`ARCHITECTURE.md`).
+
+## [v2.0.0-rc.6] — 2026-08-05
+
+Release candidate 6 for v2.0.0. Focuses on atomic state synchronization, $O(1)$ TLB generation epoch flushes, selective hardware/soft TLB invalidation, deterministic CLINT timer integration, devicetree syscon-poweroff standard bindings, and post-shutdown execution retention.
+
+### Performance & Cache / TLB Optimizations
+- **$O(1)$ Soft TLB Generation Epoch Flushing**:
+  - Replaced $O(N)$ 4096-entry memory loops during `soft_tlb_flush()` with a single-instruction `++soft_tlb_epoch` generation increment.
+- **Selective Hardware & Soft TLB Invalidation**:
+  - Implemented page-level selective invalidation in `Tlb::flush_selective` and `soft_tlb_flush_selective`, ensuring `SFENCE.VMA vaddr` invalidates only target page entries rather than wiping the entire 2048-entry TLB.
+- **Cache & TLB Struct Compaction**:
+  - Aligned `CacheLine` to 64 bytes (`alignas(64)`) to match host L1 CPU cache line boundaries.
+  - Aligned `SoftTlbEntry` and `TLBEntry` to 32 bytes (`alignas(32)`), enabling power-of-two bit-shift indexing (`shl rax, 5`).
+  - Replaced bounds-checked `.at()` array accesses with direct subscript indexing across `BaseCache`, `ICache`, and `DCache`.
+
+### State Atomization & Synchronization
+- **Lock-Free Execution State Machine**:
+  - Atomized `ExecutionState` and cross-thread shared state (`tohost`, `mtime`, `mtimecmp`, `e_icount`) with `std::atomic<T>`.
+  - Eliminates data races and torn 32-bit reads across simulation, TUI rendering, and GDB control threads.
+
+### Devices & Devicetree Standard Compliance
+- **Deterministic CLINT MMIO Time Advancement**:
+  - Derived simulated clock time strictly from `clint_mmio.mtime`, guaranteeing deterministic cycle progress and freezing time advancement during simulation pause.
+- **Standard Devicetree Syscon Poweroff & Reboot Bindings**:
+  - Added `regmap = <&test>;` links to `poweroff` and `reboot` nodes in `virt-rv64.dts` and `virt-rv32.dts`.
+  - Recompiled `linux-images/rv64/devicetree.dtb` and `linux-images/rv32/devicetree.dtb` for native OpenSBI `sifive_test` / `syscon-poweroff` reset driver parsing.
+
+### TUI & System Lifecycle UX
+- **Post-Shutdown Execution Safety & Window Retention**:
+  - Halting or shutting down the guest system (`poweroff` / `halt`) pauses execution and renders `[SHUTDOWN]` badge while keeping the TUI window open for full inspection of registers, memory, stats, and logs.
+  - Prohibits stepping or unpausing from a shut-down state, presenting a clear guidance modal (`"SYSTEM SHUTDOWN - Please reboot [Ctrl-R], load [o], or quit [q]"`).
+- **Simulator Reload on Guest Reboot**:
+  - Updated `request_reboot()` and `[Ctrl-R]` keybinding to signal simulation loop exit, cleanly re-instantiating the simulator with preserved settings.
+
+---
+
 ## [v2.0.0-rc.3] — 2026-07-31
 
 Release candidate 3 for v2.0.0. Focuses on TUI keybinding centralization, Notice Modals UX enhancement, automatic reboot on post-shutdown resume, and licensing compliance.
@@ -244,3 +397,31 @@ on inspector polish, correctness fixes, and CLI normalization.
 ## [v2.0.0-alpha.3] — 2026-06-14
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
+
+[v2.0.0]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0
+[v2.0.0-rc.10]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.10
+[v2.0.0-rc.9]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.9
+[v2.0.0-rc.8]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.8
+[v2.0.0-rc.6]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.6
+[v2.0.0-rc.3]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.3
+[v2.0.0-rc.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.2
+[v2.0.0-rc.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.1
+[v2.0.0-beta.36]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-beta.36
+[v2.0.0-beta.34]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-beta.34
+[v2.0.0-beta.33]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-beta.33
+[v2.0.0-beta.32]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-beta.32
+[v2.0.0-beta.31]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-beta.31
+[v2.0.0-beta.30]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-beta.30
+[v2.0.0-beta.27]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-beta.27
+[v2.0.0-beta.26]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-beta.26
+[v2.0.0-beta.25]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-beta.25
+[v2.0.0-beta.24]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-beta.24
+[v2.0.0-beta.22]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-beta.22
+[v2.0.0-beta.19]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-beta.19
+[v2.0.0-beta.17]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-beta.17
+[v2.0.0-beta.15]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-beta.15
+[v2.0.0-beta.10]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-beta.10
+[v2.0.0-beta.7]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-beta.7
+[v2.0.0-beta.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-beta.1
+[v2.0.0-alpha.4]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-alpha.4
+[v2.0.0-alpha.3]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-alpha.3

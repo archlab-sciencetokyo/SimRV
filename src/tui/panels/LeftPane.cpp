@@ -14,6 +14,7 @@
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/tui/TuiGuidance.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -82,10 +83,8 @@ auto LeftPane::render_pair(const std::string& l1, const std::string& v1, const c
 }
 
 auto LeftPane::get_running_label_start_row() const -> int {
-    int const available_content_rows =
-        (visible_rows_ >= 15) ? (visible_rows_ - 11) : std::max(3, visible_rows_ - 1);
-    int const centered = (available_content_rows - 3) / 2;
-    return std::max(0, centered - 2);
+    int const top_view_height = (visible_rows_ > 12) ? std::min(24, visible_rows_ - 12) : 10;
+    return std::max(0, (top_view_height - 3) / 2);
 }
 
 auto LeftPane::render_active_spinner(int logical_row, int width) -> std::string {
@@ -296,6 +295,25 @@ auto LeftPane::render_log_bottom_row(int row_idx, int num_rows, int width) -> st
     return format_to_width(" " + log_lines_.at(static_cast<std::size_t>(log_idx)), width);
 }
 
+auto LeftPane::render_guidance_row(int row_idx, int width) -> std::string {
+    auto const guidance = guidance_for_page(page_, machine_.s_cycle_accurate);
+    switch (row_idx) {
+        case 0:
+            return section_line("Learn · " + std::string(guidance.title), width);
+        case 1:
+            return format_to_width(" Meaning: " + std::string(guidance.meaning), width);
+        case 2:
+            return format_to_width(" Connect: " + std::string(guidance.relationship), width);
+        case 3: {
+            auto const& binding = Keybindings::get(guidance.next_action);
+            return format_to_width(
+                " Next: " + binding.key_display + " " + std::string(guidance.next_hint), width);
+        }
+        default:
+            return format_to_width("", width);
+    }
+}
+
 auto LeftPane::render_row(int row_idx, int width) -> std::string {
     last_width_ = width;
 
@@ -303,7 +321,13 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
         return render_tab_bar(width);
     }
 
-    constexpr int kLogAreaHeight = 10;
+    constexpr int kGuidanceHeight = 4;
+    constexpr int kLogAreaHeight = 6;
+    bool const show_guidance = should_show_guidance(paused_, learn_enabled_, visible_rows_);
+    int const guidance_start = visible_rows_ - kLogAreaHeight - kGuidanceHeight;
+    if (show_guidance && row_idx >= guidance_start && row_idx < guidance_start + kGuidanceHeight) {
+        return render_guidance_row(row_idx - guidance_start, width);
+    }
     if (visible_rows_ >= 15 && row_idx >= visible_rows_ - kLogAreaHeight) {
         int log_row_idx = row_idx - (visible_rows_ - kLogAreaHeight);
         return render_log_bottom_row(log_row_idx, kLogAreaHeight, width);
@@ -376,6 +400,45 @@ void LeftPane::scroll(int lines) {
     if (scroll_offset_ < 0) {
         scroll_offset_ = 0;
     }
+}
+
+auto LeftPane::get_text_in_range(int start_row, int start_col, int end_row, int end_col, int width)
+    -> std::string {
+    if (start_row > end_row || (start_row == end_row && start_col > end_col)) {
+        std::swap(start_row, end_row);
+        std::swap(start_col, end_col);
+    }
+    std::string res;
+    for (int r = start_row; r <= end_row; ++r) {
+        std::string raw_row = render_row(r, width);
+        // Strip ANSI escape sequences to get plain text
+        std::string plain;
+        bool in_esc = false;
+        for (char c : raw_row) {
+            if (c == '\033')
+                in_esc = true;
+            else if (in_esc) {
+                if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == 'm') in_esc = false;
+            } else {
+                plain += c;
+            }
+        }
+        int col_from = (r == start_row) ? start_col : 0;
+        int col_to = (r == end_row) ? end_col : static_cast<int>(plain.size()) - 1;
+        col_from = std::clamp(col_from, 0, static_cast<int>(plain.size()) - 1);
+        col_to = std::clamp(col_to, 0, static_cast<int>(plain.size()) - 1);
+        std::string line = (col_from <= col_to && col_from < static_cast<int>(plain.size()))
+                               ? plain.substr(col_from, col_to - col_from + 1)
+                               : "";
+        while (!line.empty() && line.back() == ' ') {
+            line.pop_back();
+        }
+        res += line;
+        if (r < end_row) {
+            res += "\n";
+        }
+    }
+    return res;
 }
 
 }  // namespace simrv::tui

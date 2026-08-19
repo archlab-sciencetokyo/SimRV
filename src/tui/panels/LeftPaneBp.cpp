@@ -28,7 +28,7 @@ auto LeftPane::render_bp_stats(const simrv::core::CPU& cpu, int logical_row, int
             return format_to_width(std::string(spaces, ' ') + text, width);
         }
         if (logical_row == 6) {
-            std::string text = "Enable Cycle-Accurate mode [,] or -ca";
+            std::string text = "Enable Cycle-Accurate mode [,] or --cycle-accurate";
             int spaces = std::max(0, (width - static_cast<int>(text.length())) / 2);
             return format_to_width(std::string(spaces, ' ') + text, width);
         }

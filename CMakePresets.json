@@ -8,7 +8,7 @@
     "configurePresets": [
         {
             "name": "rv32-release",
-            "displayName": "RV32 Release (Ninja + Clang)",
+            "displayName": "RV32 Release (Ninja)",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/rv32-release",
             "cacheVariables": {
@@ -19,7 +19,7 @@
         },
         {
             "name": "rv64-release",
-            "displayName": "RV64 Release (Ninja + Clang)",
+            "displayName": "RV64 Release (Ninja)",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/rv64-release",
             "cacheVariables": {
@@ -30,7 +30,7 @@
         },
         {
             "name": "rv32-debug",
-            "displayName": "RV32 Debug (Ninja + Clang)",
+            "displayName": "RV32 Debug (Ninja)",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/rv32-debug",
             "cacheVariables": {
@@ -41,7 +41,7 @@
         },
         {
             "name": "rv64-debug",
-            "displayName": "RV64 Debug (Ninja + Clang)",
+            "displayName": "RV64 Debug (Ninja)",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/rv64-debug",
             "cacheVariables": {

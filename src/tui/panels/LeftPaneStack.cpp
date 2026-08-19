@@ -17,14 +17,16 @@ namespace simrv::tui {
 auto LeftPane::translate_safe(const simrv::core::CPU& cpu, Register vaddr) const
     -> std::optional<Register> {
     const auto eff_priv = cpu.effective_data_privilege();
-    const bool translation_enabled = (eff_priv != PrivilegeLevel::Machine &&
-                                      simrv::xlen::satp_translation_enabled(cpu.state().satp));
+    const bool translation_enabled =
+        (eff_priv != PrivilegeLevel::Machine &&
+         simrv::xlen::satp_translation_enabled(cpu.state().satp, cpu.state().regs.xlen));
     if (!translation_enabled) {
         return (cpu.state().regs.xlen == 32) ? (vaddr & 0xFFFFFFFFULL) : vaddr;
     }
     auto* mmu = const_cast<Mmu*>(machine_.memory_.mmu());
-    auto res = mmu->translate(vaddr, PteAccess::Read, eff_priv, cpu.state().mstatus,
-                              cpu.state().satp, cpu.state().regs.xlen);
+    auto res =
+        mmu->translate(vaddr, PteAccess::Read, eff_priv, cpu.state().mstatus, cpu.state().satp,
+                       cpu.state().regs.xlen, /*update_access_bits=*/false);
     if (res.has_value()) {
         return res.value();
     }

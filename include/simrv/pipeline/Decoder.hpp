@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <string_view>
+#include <utility>
 
 #include "simrv/Define.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -27,25 +28,37 @@ class Decoder {
     }
 
     // =========================================================================
+    // =========================================================================
     // Standard R-Type & Base Fields
     // =========================================================================
 
+    /// Extract destination register specifier (rd)
     [[nodiscard]] constexpr auto rd() const -> RegId {
         return static_cast<RegId>((inst_ >> 7) & 0x1F);
     }
+
+    /// Extract 3-bit function field (funct3)
     [[nodiscard]] constexpr auto funct3() const -> isa::Funct3 {
         return static_cast<isa::Funct3>((inst_ >> 12) & 0x7);
     }
+
+    /// Extract first source register specifier (rs1)
     [[nodiscard]] constexpr auto rs1() const -> RegId {
         return static_cast<RegId>((inst_ >> 15) & 0x1F);
     }
+
+    /// Extract second source register specifier (rs2)
     [[nodiscard]] constexpr auto rs2() const -> RegId {
         return static_cast<RegId>((inst_ >> 20) & 0x1F);
     }
+
+    /// Extract 7-bit function field (funct7)
     [[nodiscard]] constexpr auto funct7() const -> uint32_t { return (inst_ >> 25) & 0x7F; }
+
+    /// Extract third source register specifier (rs3, used for floating-point FMA)
     [[nodiscard]] constexpr auto rs3() const -> RegId {
         return static_cast<RegId>((inst_ >> 27) & 0x1F);
-    }  // For FP FMA
+    }
 
     // =========================================================================
     // Standard Immediate Decoding
@@ -84,30 +97,38 @@ class Decoder {
     // CSR & System Instructions
     // =========================================================================
 
+    /// Extract 12-bit CSR address field
     [[nodiscard]] constexpr auto csr() const -> uint32_t { return (inst_ >> 20) & 0xFFF; }
-    [[nodiscard]] constexpr auto zimm() const -> uint32_t {
-        return std::to_underlying(rs1());
-    }  // CSR uimm is in the rs1 field
+
+    /// Extract zero-extended 5-bit immediate field stored in rs1 for CSR imm instructions
+    [[nodiscard]] constexpr auto zimm() const -> uint32_t { return std::to_underlying(rs1()); }
 
     // =========================================================================
     // Compressed Instruction Decoding Base Hooks (C Extension)
     // =========================================================================
 
+    /// Extract compressed instruction opcode / funct3 field (bits 15-13)
     [[nodiscard]] constexpr auto c_op() const -> uint32_t { return (inst_ >> 13) & 0x7; }
+
+    /// Extract compressed instruction 4-bit funct field (bits 15-12)
     [[nodiscard]] constexpr auto c_funct4() const -> uint32_t { return (inst_ >> 12) & 0xF; }
 
-    // Standard C register mappings
+    /// Standard C register mapping for rs1 / rd (bits 11-7)
     [[nodiscard]] constexpr auto c_rs1_rd() const -> RegId {
         return static_cast<RegId>((inst_ >> 7) & 0x1F);
     }
+
+    /// Standard C register mapping for rs2 (bits 6-2)
     [[nodiscard]] constexpr auto c_rs2() const -> RegId {
         return static_cast<RegId>((inst_ >> 2) & 0x1F);
     }
 
-    // Compressed 'prime' register mappings (x8-x15 limiters)
+    /// Compressed prime register mapping for rs1 / rd (maps to x8-x15)
     [[nodiscard]] constexpr auto c_rs1_rd_p() const -> RegId {
         return static_cast<RegId>(8 + ((inst_ >> 7) & 0x7));
     }
+
+    /// Compressed prime register mapping for rs2 (maps to x8-x15)
     [[nodiscard]] constexpr auto c_rs2_p() const -> RegId {
         return static_cast<RegId>(8 + ((inst_ >> 2) & 0x7));
     }
@@ -116,10 +137,10 @@ class Decoder {
     uint32_t inst_;
 };
 
-// Instruction-mix identification helper (currently stubbed)
+/// Decode instruction word to internal OperationId enum
 auto decoder(Instruction ir) -> isa::OperationId;
 
-// Expand 16-bit C-extension instructions to canonical 32-bit forms
+/// Expand 16-bit C-extension instructions to canonical 32-bit forms
 auto decompressInstruction(Instruction ir, bool is_rv64) -> Instruction;
 
 /// String mapping for instruction mix profiling

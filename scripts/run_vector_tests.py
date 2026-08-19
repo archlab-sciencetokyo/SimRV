@@ -16,11 +16,13 @@ def parse_args():
     parser.add_argument("--objcopy", required=True, help="Path to objcopy binary")
     parser.add_argument("--nm", required=True, help="Path to nm binary")
     parser.add_argument("--work-dir", required=True, help="Path to directory for generated/compiled artifacts")
+    parser.add_argument("--vector-tests-dir", required=True, help="Checked-out chipsalliance/riscv-vector-tests directory")
+    parser.add_argument("--vlen", type=int, default=256, help="Vector register length used by generated tests")
     parser.add_argument("--jobs", type=int, default=multiprocessing.cpu_count(), help="Number of parallel jobs to run")
     return parser.parse_args()
 
-def run_cmd(cmd, shell=False):
-    res = subprocess.run(cmd, shell=shell, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+def run_cmd(cmd, shell=False, cwd=None):
+    res = subprocess.run(cmd, shell=shell, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     return res
 
 def get_tohost_addr(nm_bin, elf_path):
@@ -66,11 +68,11 @@ def compile_and_run_test(test_ctx):
         "-fvisibility=hidden",
         "-nostdlib",
         "-nostartfiles",
-        "-I", "/var/archlab-modules/riscv-vector-tests/2026.07.06/env/riscv-test-env",
-        "-I", "/var/archlab-modules/riscv-vector-tests/2026.07.06/env/riscv-test-env/p",
-        "-I", "/var/archlab-modules/riscv-vector-tests/2026.07.06/env",
-        "-I", "/var/archlab-modules/riscv-vector-tests/2026.07.06/macros/general",
-        "-T", "/var/archlab-modules/riscv-vector-tests/2026.07.06/env/riscv-test-env/p/link.ld",
+        "-I", os.path.join(test_ctx["vector_tests_dir"], "env", "riscv-test-env"),
+        "-I", os.path.join(test_ctx["vector_tests_dir"], "env", "riscv-test-env", "p"),
+        "-I", os.path.join(test_ctx["vector_tests_dir"], "env"),
+        "-I", os.path.join(test_ctx["vector_tests_dir"], "macros", "general"),
+        "-T", os.path.join(test_ctx["vector_tests_dir"], "env", "riscv-test-env", "p", "link.ld"),
         s_file,
         "-o", elf_file
     ]
@@ -91,6 +93,7 @@ def compile_and_run_test(test_ctx):
     # 4. Run SimRV
     sim_cmd = [
         simrv,
+        "--cli",
         "-m", bin_file,
         "-e", "2000000",
         "-b",
@@ -112,12 +115,27 @@ def compile_and_run_test(test_ctx):
 def main():
     args = parse_args()
 
-    generator_path = "/var/archlab-modules/riscv-vector-tests/2026.07.06/bin/riscv-vector-tests-generator"
-    configs_path = "/var/archlab-modules/riscv-vector-tests/2026.07.06/configs"
+    vector_tests_dir = os.path.abspath(args.vector_tests_dir)
+    generator_path = os.path.join(vector_tests_dir, "bin", "riscv-vector-tests-generator")
+    configs_path = os.path.join(vector_tests_dir, "configs")
+
+    if not os.path.exists(generator_path):
+        gen_src_dir = os.path.join(vector_tests_dir, "generator")
+        if os.path.exists(gen_src_dir):
+            os.makedirs(os.path.dirname(generator_path), exist_ok=True)
+            gen_env = os.environ.copy()
+            gen_env["CC"] = "/usr/bin/gcc"
+            gen_env["CGO_ENABLED"] = "1"
+            subprocess.run(["go", "build", "-o", generator_path, "."], cwd=vector_tests_dir, env=gen_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     if not os.path.exists(generator_path):
         print(f"Error: Vector test generator not found at '{generator_path}'")
         sys.exit(1)
+
+    try:
+        os.chmod(generator_path, 0o755)
+    except Exception:
+        pass
 
     os.makedirs(args.work_dir, exist_ok=True)
 
@@ -126,15 +144,29 @@ def main():
     gen_cmd = [
         generator_path,
         "-XLEN", str(args.xlen),
-        "-VLEN", "256",
+        "-VLEN", str(args.vlen),
         "-configs", configs_path,
         "-stage1output", args.work_dir,
         "-march", "gcv_zvbb_zvbc"
     ]
-    res = run_cmd(gen_cmd)
-    if res.returncode != 0:
-        print(f"Failed to generate vector tests: {res.stderr}")
-        sys.exit(1)
+    try:
+        res = run_cmd(gen_cmd)
+    except Exception:
+        res = None
+
+    if res is None or res.returncode != 0:
+        go_gen_cmd = [
+            "go", "run", ".",
+            "-XLEN", str(args.xlen),
+            "-VLEN", str(args.vlen),
+            "-configs", configs_path,
+            "-stage1output", args.work_dir,
+            "-march", "gcv_zvbb_zvbc"
+        ]
+        res = run_cmd(go_gen_cmd, cwd=args.vector_tests_dir)
+        if res.returncode != 0:
+            print(f"Failed to generate vector tests: {res.stderr}")
+            sys.exit(1)
 
     # Load supported operation IDs from OperationId.hpp
     supported_ops = set()
@@ -181,18 +213,42 @@ def main():
 
     print(f"Found {len(s_files)} generated vector tests. Compiling and running with {args.jobs} jobs...", flush=True)
 
+    gcc_bin = args.gcc
+    objcopy_bin = args.objcopy
+    nm_bin = args.nm
+    import shutil
+    if not any(k in os.path.basename(gcc_bin) for k in ["riscv", "cross"]):
+        for cand in ["riscv64-unknown-elf-gcc", "riscv32-unknown-elf-gcc", "riscv64-linux-gnu-gcc", "riscv32-linux-gnu-gcc", "riscv-none-elf-gcc", "/var/archlab-modules/riscv-gnu-toolchain/2026.03.13/bin/riscv64-unknown-elf-gcc"]:
+            found = cand if os.path.isabs(cand) and os.path.exists(cand) else shutil.which(cand)
+            if found:
+                gcc_bin = found
+                break
+    if not any(k in os.path.basename(objcopy_bin) for k in ["riscv", "cross"]):
+        for cand in ["riscv64-unknown-elf-objcopy", "riscv32-unknown-elf-objcopy", "riscv64-linux-gnu-objcopy", "riscv32-linux-gnu-objcopy", "riscv-none-elf-objcopy", "/var/archlab-modules/riscv-gnu-toolchain/2026.03.13/bin/riscv64-unknown-elf-objcopy"]:
+            found = cand if os.path.isabs(cand) and os.path.exists(cand) else shutil.which(cand)
+            if found:
+                objcopy_bin = found
+                break
+    if not any(k in os.path.basename(nm_bin) for k in ["riscv", "cross"]):
+        for cand in ["riscv64-unknown-elf-nm", "riscv32-unknown-elf-nm", "riscv64-linux-gnu-nm", "riscv32-linux-gnu-nm", "riscv-none-elf-nm", "/var/archlab-modules/riscv-gnu-toolchain/2026.03.13/bin/riscv64-unknown-elf-nm"]:
+            found = cand if os.path.isabs(cand) and os.path.exists(cand) else shutil.which(cand)
+            if found:
+                nm_bin = found
+                break
+
     test_contexts = []
     for s_file in s_files:
         test_name = os.path.splitext(os.path.basename(s_file))[0]
         test_contexts.append({
             "s_file": s_file,
             "test_name": test_name,
-            "gcc": args.gcc,
-            "objcopy": args.objcopy,
-            "nm": args.nm,
+            "gcc": gcc_bin,
+            "objcopy": objcopy_bin,
+            "nm": nm_bin,
             "simrv": args.simrv,
             "work_dir": args.work_dir,
-            "xlen": args.xlen
+            "xlen": args.xlen,
+            "vector_tests_dir": vector_tests_dir,
         })
 
     passed = 0

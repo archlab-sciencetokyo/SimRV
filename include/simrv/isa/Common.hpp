@@ -65,6 +65,29 @@ constexpr auto funct5_of(Instruction ir) -> Funct5Amo {
 }
 
 /**
+ * @brief Return the natural access size encoded by an A-extension instruction.
+ *
+ * The standard encodes AMO.W with funct3=010 and AMO.D with funct3=011. Other encodings are
+ * reserved and return zero so callers can reject them.
+ */
+constexpr auto amo_operand_bytes(Funct3 funct3) -> unsigned {
+    if (funct3 == Funct3::Lw) return 4;
+    if (funct3 == Funct3::Ld) return 8;
+    return 0;
+}
+
+/** Return whether the AMO width exists for the build's architectural XLEN. */
+constexpr auto amo_width_supported(Funct3 funct3) -> bool {
+    return funct3 == Funct3::Lw || (simrv::xlen::kIsXLen64 && funct3 == Funct3::Ld);
+}
+
+/** Return whether an LR/SC/AMO effective address meets the A-extension alignment rule. */
+constexpr auto amo_address_aligned(Address address, Funct3 funct3) -> bool {
+    const unsigned bytes = amo_operand_bytes(funct3);
+    return bytes != 0 && (address & static_cast<Address>(bytes - 1U)) == 0;
+}
+
+/**
  * @brief Computes the bit mask for a specific ISA extension in the MISA CSR.
  * @param ext The target ISA extension.
  * @return CSRValue containing a single set bit at the extension position.
@@ -87,7 +110,7 @@ constexpr auto misa_base_bits() -> CSRValue {
 
 /**
  * @brief Decodes the extension set mask matching a specified MISA profile.
- * @param profile The profile definition (I, IMAC, GC).
+ * @param profile The profile definition (I, IMAC, GC, or GCBV).
  * @return CSRValue bitmask containing the profile's extensions.
  */
 constexpr auto misa_profile_bits(MisaProfile profile) -> CSRValue {
@@ -98,6 +121,11 @@ constexpr auto misa_profile_bits(MisaProfile profile) -> CSRValue {
             return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
                    misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::C);
         case MisaProfile::GC:
+            return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
+                   misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::F) |
+                   misa_extension_bit(IsaExtension::D) | misa_extension_bit(IsaExtension::C) |
+                   misa_extension_bit(IsaExtension::S) | misa_extension_bit(IsaExtension::U);
+        case MisaProfile::GCBV:
             return misa_base_bits();
         default:
             return misa_extension_bit(IsaExtension::I);
@@ -130,7 +158,9 @@ constexpr auto misa_with_mxl(CSRValue misa_extensions) -> CSRValue {
     return misa_extensions | misa_mxl_field();
 }
 
-constexpr CSRValue kMisaDefault = misa_profile_bits(MisaProfile::GC);
+/** Default advertised target; V remains subject to the qualification limits documented separately.
+ */
+constexpr CSRValue kMisaDefault = misa_profile_bits(MisaProfile::GCBV);
 
 /**
  * @brief Checks if a specific extension bit is set in a MISA CSR value.
@@ -140,6 +170,18 @@ constexpr CSRValue kMisaDefault = misa_profile_bits(MisaProfile::GC);
  */
 constexpr auto misa_has_extension(CSRValue misa, IsaExtension ext) -> bool {
     return (misa & misa_extension_bit(ext)) != 0;
+}
+
+/**
+ * @brief Apply the architectural IALIGN read mask to an exception PC.
+ *
+ * xepc[0] is always zero. When C is disabled and IALIGN is therefore 32,
+ * xepc[1] also reads as zero (including the implicit read by xRET), while its
+ * underlying writable value may be retained for a later IALIGN=16 setting.
+ */
+constexpr auto epc_read_value(CSRValue epc, CSRValue misa) -> CSRValue {
+    const CSRValue alignment_mask = misa_has_extension(misa, IsaExtension::C) ? 1U : 3U;
+    return epc & ~alignment_mask;
 }
 
 /**
@@ -172,8 +214,14 @@ constexpr auto required_extension_for_instruction(Instruction ir, bool compresse
         case Opcode::MAdd:
         case Opcode::MSub:
         case Opcode::NMAdd:
-        case Opcode::NMSub:
+        case Opcode::NMSub: {
+            // FCVT.S.D has a single-precision destination encoding (fmt=00)
+            // but consumes a double-precision source and therefore requires D.
+            if (opcode_of(ir) == Opcode::OpFp && funct7_of(ir) == 0x20) {
+                return IsaExtension::D;
+            }
             return (((ir >> 25) & 0x3u) == 0x1u) ? IsaExtension::D : IsaExtension::F;
+        }
         default:
             return IsaExtension::I;
     }

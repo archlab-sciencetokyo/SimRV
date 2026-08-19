@@ -4,14 +4,12 @@
  */
 #include "simrv/tui/panels/StatusBar.hpp"
 
-#include <sys/ioctl.h>
-#include <unistd.h>
-
 #include <format>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/Tui.hpp"
+#include "simrv/tui/TuiKeybindings.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/util/FormatUtil.hpp"
 
@@ -59,7 +57,7 @@ auto StatusBar::is_pos_on_right_panel_mode(int x) const -> bool {
         return false;
     }
 
-    int x_start = (layout_ == TuiLayout::Split) ? (left_width_ + 2) : 2;
+    int const right_x0 = (layout_ == TuiLayout::Split) ? (left_width_ + 3) : 2;
     std::string mode_label;
     switch (right_panel_mode_) {
         case TuiRightPanelMode::Terminal:
@@ -70,10 +68,28 @@ auto StatusBar::is_pos_on_right_panel_mode(int x) const -> bool {
             mode_label = "Display";
             break;
     }
-    int mode_len = 2 + static_cast<int>(mode_label.length());  // "[" + mode_label + "]"
-    int x_end = x_start + mode_len - 1;
+    int const mode_len = 2 + static_cast<int>(mode_label.length());  // "[" + mode_label + "]"
+    int const x_end = right_x0 + mode_len - 1;
 
-    return (x >= x_start && x <= x_end);
+    return (x >= right_x0 && x <= x_end);
+}
+
+auto StatusBar::is_pos_on_right_panel_attached(int x) const -> bool {
+    if (right_panel_mode_ != TuiRightPanelMode::Terminal) {
+        return false;
+    }
+    if (layout_ != TuiLayout::Split && layout_ != TuiLayout::FullRight) {
+        return false;
+    }
+
+    int const right_x0 = (layout_ == TuiLayout::Split) ? (left_width_ + 3) : 2;
+    std::string const term_title = trace_enabled_ ? "Terminal [Trace ON]" : "Terminal";
+    int const mode_len = 2 + static_cast<int>(term_title.length());  // "[" + term_title + "]"
+
+    int const badge_start = right_x0 + mode_len + 1;
+    int const badge_end = badge_start + 8 - 1;  // ATTACHED / DETACHED (8 chars)
+
+    return (x >= badge_start && x <= badge_end);
 }
 
 enum class FooterCategory : uint8_t {
@@ -151,6 +167,10 @@ static const auto paused_row2_entries = std::to_array<FooterEntry>({
      .action = TuiFooterAction::LoadBinary,
      .category = FooterCategory::SettingsConfig},
     {.text = "  ", .action = std::nullopt, .category = FooterCategory::Spacer},
+    {.text = "[Ctrl-R] Reboot",
+     .action = TuiFooterAction::Reboot,
+     .category = FooterCategory::SettingsConfig},
+    {.text = "  ", .action = std::nullopt, .category = FooterCategory::Spacer},
     {.text = "[,] Settings",
      .action = TuiFooterAction::OpenSettings,
      .category = FooterCategory::SettingsConfig},
@@ -183,6 +203,7 @@ static const auto running_row1_entries = std::to_array<FooterEntry>({
     {.text = "[v] Trace",
      .action = TuiFooterAction::ToggleTrace,
      .category = FooterCategory::DebugExec},
+    {.text = "  ", .action = std::nullopt, .category = FooterCategory::Spacer},
     {.text = "  │  ", .action = std::nullopt, .category = FooterCategory::Separator},
     // Panel Actions Group
     {.text = "[r] Regs",
@@ -242,42 +263,50 @@ static const auto running_row2_entries = std::to_array<FooterEntry>({
      .category = FooterCategory::HelpQuit},
 });
 
-auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool is_debug_mode,
-                        std::optional<int> hit_col = std::nullopt)
-    -> std::pair<std::string, std::optional<TuiFooterAction>> {
-    std::vector<FooterEntry> active_entries;
-    active_entries.reserve(entries.size());
+namespace {
 
+[[nodiscard]] auto footer_entry_text(const FooterEntry& entry) -> std::string {
+    if (entry.action.has_value()) {
+        return Keybindings::get_footer_text(key_action_for_footer(*entry.action));
+    }
+    return entry.text;
+}
+
+auto filter_footer_entries(std::span<const FooterEntry> entries, bool is_debug_mode)
+    -> std::vector<FooterEntry> {
+    std::vector<FooterEntry> active;
+    active.reserve(entries.size());
     for (const auto& e : entries) {
         if (!is_debug_mode) {
-            if (e.category == FooterCategory::DebugInspect) {
-                continue;
-            }
+            if (e.category == FooterCategory::DebugInspect) continue;
             if (e.category == FooterCategory::DebugExec && e.action != TuiFooterAction::RunPause &&
                 e.action != TuiFooterAction::SetSpeed && e.action != TuiFooterAction::Step) {
                 continue;
             }
         }
-        active_entries.push_back(e);
+        active.push_back(e);
     }
+    while (!active.empty() && (active.front().category == FooterCategory::Spacer ||
+                               active.front().category == FooterCategory::Separator)) {
+        active.erase(active.begin());
+    }
+    while (!active.empty() && (active.back().category == FooterCategory::Spacer ||
+                               active.back().category == FooterCategory::Separator)) {
+        active.pop_back();
+    }
+    return active;
+}
 
-    // Trim leading spacers and separators
-    while (!active_entries.empty() &&
-           (active_entries.front().category == FooterCategory::Spacer ||
-            active_entries.front().category == FooterCategory::Separator)) {
-        active_entries.erase(active_entries.begin());
-    }
+}  // namespace
 
-    // Trim trailing spacers and separators
-    while (!active_entries.empty() &&
-           (active_entries.back().category == FooterCategory::Spacer ||
-            active_entries.back().category == FooterCategory::Separator)) {
-        active_entries.pop_back();
-    }
+auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool is_debug_mode,
+                        std::optional<int> hit_col = std::nullopt)
+    -> std::pair<std::string, std::optional<TuiFooterAction>> {
+    std::vector<FooterEntry> active_entries = filter_footer_entries(entries, is_debug_mode);
 
     int content_len = 0;
     for (const auto& e : active_entries) {
-        content_len += static_cast<int>(get_display_width(e.text));
+        content_len += get_display_width(footer_entry_text(e));
     }
     int pad = inner_w - content_len;
     int left_pad = (pad > 0) ? (pad / 2) : 0;
@@ -292,7 +321,8 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
     int current_col = left_pad;
 
     for (const auto& e : active_entries) {
-        int item_len = get_display_width(e.text);
+        const std::string text = footer_entry_text(e);
+        int item_len = get_display_width(text);
         if (hit_col.has_value() && e.action.has_value()) {
             if (*hit_col >= current_col && *hit_col < current_col + item_len) {
                 hit_action = e.action;
@@ -325,7 +355,7 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
         }
 
         if (color_tag != nullptr) {
-            std::string_view text_sv{e.text};
+            std::string_view text_sv{text};
             std::size_t close_bracket = text_sv.find(']');
             if (text_sv.starts_with('[') && close_bracket != std::string_view::npos) {
                 row_str += "\033[1m";
@@ -335,11 +365,11 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
                 row_str += text_sv.substr(close_bracket + 1);
             } else {
                 row_str += color_tag;
-                row_str += e.text;
+                row_str += text;
             }
             row_str += "\033[0m";
         } else {
-            row_str += e.text;
+            row_str += text;
         }
         current_col += item_len;
     }
@@ -354,25 +384,21 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
     return {row_str, hit_action};
 }
 
-auto StatusBar::get_footer_action_at_col(int col, int row_idx) const
+auto StatusBar::get_footer_action_at_col(int col, int row_idx, int terminal_width) const
     -> std::optional<TuiFooterAction> {
-    if (col < 0) return std::nullopt;
-
-    struct winsize w{};
-    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);  // NOLINT(cppcoreguidelines-pro-type-vararg)
-    int term_w = w.ws_col > 0 ? w.ws_col : 80;
+    if (col < 0 || terminal_width < 2) return std::nullopt;
 
     bool is_dbg = machine_.s_debug_mode;
     if (paused_) {
         if (row_idx == 0)
-            return process_footer_row(paused_row1_entries, term_w - 2, is_dbg, col).second;
+            return process_footer_row(paused_row1_entries, terminal_width - 2, is_dbg, col).second;
         if (row_idx == 1)
-            return process_footer_row(paused_row2_entries, term_w - 2, is_dbg, col).second;
+            return process_footer_row(paused_row2_entries, terminal_width - 2, is_dbg, col).second;
     } else {
         if (row_idx == 0)
-            return process_footer_row(running_row1_entries, term_w - 2, is_dbg, col).second;
+            return process_footer_row(running_row1_entries, terminal_width - 2, is_dbg, col).second;
         if (row_idx == 1)
-            return process_footer_row(running_row2_entries, term_w - 2, is_dbg, col).second;
+            return process_footer_row(running_row2_entries, terminal_width - 2, is_dbg, col).second;
     }
 
     return std::nullopt;
@@ -394,10 +420,20 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         if (status_badge.empty()) {
             bool use_ansi = (get_tui_theme() == TuiTheme::Adaptive ||
                              get_tui_theme() == TuiTheme::HighContrast);
-            status_badge = paused_ ? (use_ansi ? "\033[43;30m PAUSED \033[0m"
-                                               : "\033[48;5;223m\033[38;5;232m PAUSED \033[0m")
-                                   : (use_ansi ? "\033[42;30m RUNNING \033[0m"
-                                               : "\033[48;5;121m\033[38;5;232m RUNNING \033[0m");
+            const auto st = machine_.execution_state();
+            if (machine_.is_shutdown_ || st == simrv::core::ExecutionState::Stopped) {
+                status_badge = use_ansi ? "\033[41;37m SHUTDOWN \033[0m"
+                                        : "\033[48;5;196m\033[38;5;231m SHUTDOWN \033[0m";
+            } else if (st == simrv::core::ExecutionState::Stepping) {
+                status_badge = use_ansi ? "\033[46;30m STEPPING \033[0m"
+                                        : "\033[48;5;117m\033[38;5;232m STEPPING \033[0m";
+            } else if (paused_ || st == simrv::core::ExecutionState::Paused) {
+                status_badge = use_ansi ? "\033[43;30m PAUSED \033[0m"
+                                        : "\033[48;5;223m\033[38;5;232m PAUSED \033[0m";
+            } else {
+                status_badge = use_ansi ? "\033[42;30m RUNNING \033[0m"
+                                        : "\033[48;5;121m\033[38;5;232m RUNNING \033[0m";
+            }
         } else if (status_badge == "\033[1;38;5;234;48;5;210m TRAPPED \033[0m" &&
                    (get_tui_theme() == TuiTheme::HighContrast ||
                     get_tui_theme() == TuiTheme::Adaptive)) {
@@ -472,13 +508,27 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
 
             if (paused_) {
                 if (target_width_right >= 55) {
-                    if (machine_.s_cycle_accurate) {
-                        right_text = std::format("{}Cycles: {} | Insns: {} | CPI: {:.2f}", dbg_info,
-                                                 simrv::util::format_with_commas(cycles),
-                                                 simrv::util::format_with_commas(icount), cpi);
+                    if (kips_ > 0) {
+                        if (machine_.s_cycle_accurate) {
+                            right_text = std::format(
+                                "{}Cycles: {} | Insns: {} | CPI: {:.2f} | Speed: {}", dbg_info,
+                                simrv::util::format_with_commas(cycles),
+                                simrv::util::format_with_commas(icount), cpi, speed_str);
+                        } else {
+                            right_text =
+                                std::format("{}Insns: {} | Speed: {}", dbg_info,
+                                            simrv::util::format_with_commas(icount), speed_str);
+                        }
                     } else {
-                        right_text = std::format("{}Insns: {}", dbg_info,
-                                                 simrv::util::format_with_commas(icount));
+                        if (machine_.s_cycle_accurate) {
+                            right_text =
+                                std::format("{}Cycles: {} | Insns: {} | CPI: {:.2f}", dbg_info,
+                                            simrv::util::format_with_commas(cycles),
+                                            simrv::util::format_with_commas(icount), cpi);
+                        } else {
+                            right_text = std::format("{}Insns: {}", dbg_info,
+                                                     simrv::util::format_with_commas(icount));
+                        }
                     }
                 } else {
                     if (machine_.s_cycle_accurate) {
@@ -535,17 +585,22 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         int target_right_width = layout_ == TuiLayout::Split ? right_width_ : width - 2;
         std::string right_render;
 
-        std::string mode_label;
+        std::string mode_prefix;
         switch (right_panel_mode_) {
-            case TuiRightPanelMode::Terminal:
-                mode_label = trace_enabled_ ? "Terminal [Trace ON]" : "Terminal";
+            case TuiRightPanelMode::Terminal: {
+                const bool term_focused = machine_.tui && machine_.tui->is_terminal_attached();
+                std::string const focus_badge =
+                    term_focused ? std::format(" \033[1m{}ATTACHED\033[0m", kThemeMint)
+                                 : std::format(" \033[1m{}DETACHED\033[0m", kThemeMuted);
+                std::string const term_title = trace_enabled_ ? "Terminal [Trace ON]" : "Terminal";
+                mode_prefix = std::format("{}[{}]\033[0m{}", kThemeSky, term_title, focus_badge);
                 break;
+            }
             case TuiRightPanelMode::Display:
             default:
-                mode_label = "Display";
+                mode_prefix = std::format("{}[Display]\033[0m", kThemeSky);
                 break;
         }
-        std::string mode_prefix = std::format("{}[{}]\033[0m", kThemeSky, mode_label);
         int mode_len = get_display_width(mode_prefix);
 
         if (scroll_offset_ > 0) {

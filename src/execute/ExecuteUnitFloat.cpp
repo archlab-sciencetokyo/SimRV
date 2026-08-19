@@ -449,132 +449,141 @@ auto ExecuteUnit::fusedFp(Opcode opcode, Word fmt, Word rs1, Word rs2, Word rs3,
     return out;
 }
 
-auto ExecuteUnit::opFp(Word funct7, Funct3 funct3, Word rs1, Word rs2, Register rrs1,
-                       const FloatingRegister* freg, CSRValue& fcsr) -> FpExecResult {
-    FpExecResult out;
-    const Word rm = enum_mask(funct3);
+namespace fp {
 
+bool fp_exec_add_sub(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2,
+                     const FloatingRegister* freg, CSRValue& fcsr) {
     if (funct7 == enum_mask(Funct7Fp::FaddS)) {
         std::feclearexcept(FE_ALL_EXCEPT);
         {
             ScopedRoundingMode const scope(rm, fcsr);
             float result = read_f32(freg, rs1) + read_f32(freg, rs2);
-            if (std::isnan(result)) {
-                result = f32_from_bits(simrv::xlen::kF32Qnan);
-            }
+            if (std::isnan(result)) result = f32_from_bits(simrv::xlen::kF32Qnan);
             out.fp_wb_data = write_f32_boxed(result);
         }
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
-    } else if (funct7 == enum_mask(Funct7Fp::FaddD)) {
+        return true;
+    }
+    if (funct7 == enum_mask(Funct7Fp::FaddD)) {
         std::feclearexcept(FE_ALL_EXCEPT);
         {
             ScopedRoundingMode const scope(rm, fcsr);
             double result = read_f64(freg, rs1) + read_f64(freg, rs2);
-            if (std::isnan(result)) {
-                result = f64_from_bits(simrv::xlen::kF64Qnan);
-            }
+            if (std::isnan(result)) result = f64_from_bits(simrv::xlen::kF64Qnan);
             out.fp_wb_data = f64_bits(result);
         }
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
-    } else if (funct7 == enum_mask(Funct7Fp::FsubS)) {
+        return true;
+    }
+    if (funct7 == enum_mask(Funct7Fp::FsubS)) {
         std::feclearexcept(FE_ALL_EXCEPT);
         {
             ScopedRoundingMode const scope(rm, fcsr);
             float result = read_f32(freg, rs1) - read_f32(freg, rs2);
-            if (std::isnan(result)) {
-                result = f32_from_bits(simrv::xlen::kF32Qnan);
-            }
+            if (std::isnan(result)) result = f32_from_bits(simrv::xlen::kF32Qnan);
             out.fp_wb_data = write_f32_boxed(result);
         }
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
-    } else if (funct7 == enum_mask(Funct7Fp::FsubD)) {
+        return true;
+    }
+    if (funct7 == enum_mask(Funct7Fp::FsubD)) {
         std::feclearexcept(FE_ALL_EXCEPT);
         {
             ScopedRoundingMode const scope(rm, fcsr);
             double result = read_f64(freg, rs1) - read_f64(freg, rs2);
-            if (std::isnan(result)) {
-                result = f64_from_bits(simrv::xlen::kF64Qnan);
-            }
+            if (std::isnan(result)) result = f64_from_bits(simrv::xlen::kF64Qnan);
             out.fp_wb_data = f64_bits(result);
         }
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
-    } else if (funct7 == enum_mask(Funct7Fp::FmulS)) {
+        return true;
+    }
+    return false;
+}
+
+bool fp_exec_mul_div_sqrt(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2,
+                          const FloatingRegister* freg, CSRValue& fcsr) {
+    if (funct7 == enum_mask(Funct7Fp::FmulS)) {
         std::feclearexcept(FE_ALL_EXCEPT);
         {
             ScopedRoundingMode const scope(rm, fcsr);
             float result = read_f32(freg, rs1) * read_f32(freg, rs2);
-            if (std::isnan(result)) {
-                result = f32_from_bits(simrv::xlen::kF32Qnan);
-            }
+            if (std::isnan(result)) result = f32_from_bits(simrv::xlen::kF32Qnan);
             out.fp_wb_data = write_f32_boxed(result);
         }
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
-    } else if (funct7 == enum_mask(Funct7Fp::FmulD)) {
+        return true;
+    }
+    if (funct7 == enum_mask(Funct7Fp::FmulD)) {
         std::feclearexcept(FE_ALL_EXCEPT);
         {
             ScopedRoundingMode const scope(rm, fcsr);
             double result = read_f64(freg, rs1) * read_f64(freg, rs2);
-            if (std::isnan(result)) {
-                result = f64_from_bits(simrv::xlen::kF64Qnan);
-            }
+            if (std::isnan(result)) result = f64_from_bits(simrv::xlen::kF64Qnan);
             out.fp_wb_data = f64_bits(result);
         }
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
-    } else if (funct7 == enum_mask(Funct7Fp::FdivS)) {
+        return true;
+    }
+    if (funct7 == enum_mask(Funct7Fp::FdivS)) {
         std::feclearexcept(FE_ALL_EXCEPT);
         {
             ScopedRoundingMode const scope(rm, fcsr);
             float result = read_f32(freg, rs1) / read_f32(freg, rs2);
-            if (std::isnan(result)) {
-                result = f32_from_bits(simrv::xlen::kF32Qnan);
-            }
+            if (std::isnan(result)) result = f32_from_bits(simrv::xlen::kF32Qnan);
             out.fp_wb_data = write_f32_boxed(result);
         }
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
-    } else if (funct7 == enum_mask(Funct7Fp::FdivD)) {
+        return true;
+    }
+    if (funct7 == enum_mask(Funct7Fp::FdivD)) {
         std::feclearexcept(FE_ALL_EXCEPT);
         {
             ScopedRoundingMode const scope(rm, fcsr);
             double result = read_f64(freg, rs1) / read_f64(freg, rs2);
-            if (std::isnan(result)) {
-                result = f64_from_bits(simrv::xlen::kF64Qnan);
-            }
+            if (std::isnan(result)) result = f64_from_bits(simrv::xlen::kF64Qnan);
             out.fp_wb_data = f64_bits(result);
         }
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
-    } else if (funct7 == enum_mask(Funct7Fp::FsqrtS)) {
+        return true;
+    }
+    if (funct7 == enum_mask(Funct7Fp::FsqrtS)) {
         std::feclearexcept(FE_ALL_EXCEPT);
         {
             ScopedRoundingMode const scope(rm, fcsr);
             float result = std::sqrt(read_f32(freg, rs1));
-            if (std::isnan(result)) {
-                result = f32_from_bits(simrv::xlen::kF32Qnan);
-            }
+            if (std::isnan(result)) result = f32_from_bits(simrv::xlen::kF32Qnan);
             out.fp_wb_data = write_f32_boxed(result);
         }
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
-    } else if (funct7 == enum_mask(Funct7Fp::FsqrtD)) {
+        return true;
+    }
+    if (funct7 == enum_mask(Funct7Fp::FsqrtD)) {
         std::feclearexcept(FE_ALL_EXCEPT);
         {
             ScopedRoundingMode const scope(rm, fcsr);
             double result = std::sqrt(read_f64(freg, rs1));
-            if (std::isnan(result)) {
-                result = f64_from_bits(simrv::xlen::kF64Qnan);
-            }
+            if (std::isnan(result)) result = f64_from_bits(simrv::xlen::kF64Qnan);
             out.fp_wb_data = f64_bits(result);
         }
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
-    } else if (funct7 == enum_mask(Funct7Fp::FsgnjS) || funct7 == enum_mask(Funct7Fp::FsgnjD)) {
+        return true;
+    }
+    return false;
+}
+
+bool fp_exec_sgnj_minmax(FpExecResult& out, Word funct7, Funct3 funct3, Word rs1, Word rs2,
+                         const FloatingRegister* freg, CSRValue& fcsr) {
+    if (funct7 == enum_mask(Funct7Fp::FsgnjS) || funct7 == enum_mask(Funct7Fp::FsgnjD)) {
         const bool is_d = (funct7 == enum_mask(Funct7Fp::FsgnjD));
         FloatingRegister a = freg[rs1];
         FloatingRegister b = freg[rs2];
@@ -588,20 +597,16 @@ auto ExecuteUnit::opFp(Word funct7, Funct3 funct3, Word rs1, Word rs2, Register 
         }
         FloatingRegister value = 0;
         const uint64_t sign_bit = is_d ? (1ULL << 63U) : (1ULL << 31U);
-        if (enum_mask(funct3) == 0) {
-            value = (a & (~sign_bit)) | (b & sign_bit);
-        }
-        if (enum_mask(funct3) == 1) {
-            value = (a & (~sign_bit)) | ((~b) & sign_bit);
-        }
-        if (enum_mask(funct3) == 2) {
-            value = a ^ (b & sign_bit);
-        }
+        if (enum_mask(funct3) == 0) value = (a & (~sign_bit)) | (b & sign_bit);
+        if (enum_mask(funct3) == 1) value = (a & (~sign_bit)) | ((~b) & sign_bit);
+        if (enum_mask(funct3) == 2) value = a ^ (b & sign_bit);
         out.fp_wb_data = is_d ? value
                               : (static_cast<FloatingRegister>(simrv::xlen::kF32BoxerBits) |
                                  (value & static_cast<FloatingRegister>(kLower32Mask)));
         out.fp_wb_enable = true;
-    } else if (funct7 == enum_mask(Funct7Fp::FminmaxS)) {
+        return true;
+    }
+    if (funct7 == enum_mask(Funct7Fp::FminmaxS)) {
         std::feclearexcept(FE_ALL_EXCEPT);
         const float a = read_f32(freg, rs1);
         const float b = read_f32(freg, rs2);
@@ -609,7 +614,9 @@ auto ExecuteUnit::opFp(Word funct7, Funct3 funct3, Word rs1, Word rs2, Register 
                                                                          : fmin32_riscv(a, b);
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
-    } else if (funct7 == enum_mask(Funct7Fp::FminmaxD)) {
+        return true;
+    }
+    if (funct7 == enum_mask(Funct7Fp::FminmaxD)) {
         std::feclearexcept(FE_ALL_EXCEPT);
         const double a = read_f64(freg, rs1);
         const double b = read_f64(freg, rs2);
@@ -617,83 +624,40 @@ auto ExecuteUnit::opFp(Word funct7, Funct3 funct3, Word rs1, Word rs2, Register 
                                                                          : fmin64_riscv(a, b);
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
-    } else if (funct7 == enum_mask(Funct7Fp::FcvtSD)) {
+        return true;
+    }
+    return false;
+}
+
+bool fp_exec_cvt(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2, Register rrs1,
+                 const FloatingRegister* freg, CSRValue& fcsr) {
+    if (funct7 == enum_mask(Funct7Fp::FcvtSD)) {
         std::feclearexcept(FE_ALL_EXCEPT);
         {
             ScopedRoundingMode const scope(rm, fcsr);
             const double src = read_f64(freg, rs1);
-            if (is_snan64(src)) {
-                std::feraiseexcept(FE_INVALID);
-            }
-            if (std::isnan(src)) {
-                out.fp_wb_data = write_f32_boxed(f32_from_bits(simrv::xlen::kF32Qnan));
-            } else {
-                out.fp_wb_data = write_f32_boxed(static_cast<float>(src));
-            }
+            if (is_snan64(src)) std::feraiseexcept(FE_INVALID);
+            out.fp_wb_data = std::isnan(src) ? write_f32_boxed(f32_from_bits(simrv::xlen::kF32Qnan))
+                                             : write_f32_boxed(static_cast<float>(src));
         }
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
-    } else if (funct7 == enum_mask(Funct7Fp::FcvtDS)) {
+        return true;
+    }
+    if (funct7 == enum_mask(Funct7Fp::FcvtDS)) {
         std::feclearexcept(FE_ALL_EXCEPT);
         {
             ScopedRoundingMode const scope(rm, fcsr);
             const float src = read_f32(freg, rs1);
-            if (is_snan32(src)) {
-                std::feraiseexcept(FE_INVALID);
-            }
-            if (std::isnan(src)) {
-                out.fp_wb_data = static_cast<FloatingRegister>(simrv::xlen::kF64Qnan);
-            } else {
-                out.fp_wb_data = f64_bits(static_cast<double>(src));
-            }
+            if (is_snan32(src)) std::feraiseexcept(FE_INVALID);
+            out.fp_wb_data = std::isnan(src) ? static_cast<FloatingRegister>(simrv::xlen::kF64Qnan)
+                                             : f64_bits(static_cast<double>(src));
         }
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
-    } else if (funct7 == enum_mask(Funct7Fp::FcmpS) || funct7 == enum_mask(Funct7Fp::FcmpD)) {
-        const bool is_d = (funct7 == enum_mask(Funct7Fp::FcmpD));
-        std::feclearexcept(FE_ALL_EXCEPT);
-        if (!is_d) {
-            const float a = read_f32(freg, rs1);
-            const float b = read_f32(freg, rs2);
-            if (std::isnan(a) || std::isnan(b)) {
-                if (enum_mask(funct3) != enum_mask(Funct3Fp::Eq) || is_snan32(a) || is_snan32(b)) {
-                    std::feraiseexcept(FE_INVALID);
-                }
-                out.int_wb_data = 0;
-            } else {
-                if (enum_mask(funct3) == enum_mask(Funct3Fp::Eq)) {
-                    out.int_wb_data = static_cast<Register>(a == b);
-                }
-                if (enum_mask(funct3) == enum_mask(Funct3Fp::Lt)) {
-                    out.int_wb_data = static_cast<Register>(a < b);
-                }
-                if (enum_mask(funct3) == enum_mask(Funct3Fp::Leq)) {
-                    out.int_wb_data = static_cast<Register>(a <= b);
-                }
-            }
-        } else {
-            const double a = read_f64(freg, rs1);
-            const double b = read_f64(freg, rs2);
-            if (std::isnan(a) || std::isnan(b)) {
-                if (enum_mask(funct3) != enum_mask(Funct3Fp::Eq) || is_snan64(a) || is_snan64(b)) {
-                    std::feraiseexcept(FE_INVALID);
-                }
-                out.int_wb_data = 0;
-            } else {
-                if (enum_mask(funct3) == enum_mask(Funct3Fp::Eq)) {
-                    out.int_wb_data = static_cast<Register>(a == b);
-                }
-                if (enum_mask(funct3) == enum_mask(Funct3Fp::Lt)) {
-                    out.int_wb_data = static_cast<Register>(a < b);
-                }
-                if (enum_mask(funct3) == enum_mask(Funct3Fp::Leq)) {
-                    out.int_wb_data = static_cast<Register>(a <= b);
-                }
-            }
-        }
-        out.int_wb_enable = true;
-        accumulate_fp_flags(fcsr);
-    } else if (funct7 == enum_mask(Funct7Fp::FcvtWS) || funct7 == enum_mask(Funct7Fp::FcvtWD)) {
+        return true;
+    }
+    if (funct7 == enum_mask(Funct7Fp::FcvtWS) || funct7 == enum_mask(Funct7Fp::FcvtWD)) {
         const bool is_d = (funct7 == enum_mask(Funct7Fp::FcvtWD));
         std::feclearexcept(FE_ALL_EXCEPT);
         {
@@ -707,55 +671,118 @@ auto ExecuteUnit::opFp(Word funct7, Funct3 funct3, Word rs1, Word rs2, Register 
         }
         out.int_wb_enable = true;
         accumulate_fp_flags(fcsr);
-    } else if (funct7 == enum_mask(Funct7Fp::FcvtSW) || funct7 == enum_mask(Funct7Fp::FcvtDW)) {
+        return true;
+    }
+    if (funct7 == enum_mask(Funct7Fp::FcvtSW) || funct7 == enum_mask(Funct7Fp::FcvtDW)) {
         const bool is_d = (funct7 == enum_mask(Funct7Fp::FcvtDW));
         std::feclearexcept(FE_ALL_EXCEPT);
         {
             ScopedRoundingMode const scope(rm, fcsr);
             double val = 0;
-            if (rs2 == 0) {
+            if (rs2 == 0)
                 val = static_cast<double>(static_cast<int32_t>(rrs1));
-            } else if (rs2 == 1) {
+            else if (rs2 == 1)
                 val = static_cast<double>(static_cast<uint32_t>(rrs1));
-            } else if (rs2 == 2) {
+            else if (rs2 == 2)
                 val = static_cast<double>(static_cast<int64_t>(rrs1));
-            } else if (rs2 == 3) {
+            else if (rs2 == 3)
                 val = static_cast<double>(static_cast<uint64_t>(rrs1));
-            }
 
-            if (is_d) {
-                out.fp_wb_data = f64_bits(val);
-            } else {
-                out.fp_wb_data = write_f32_boxed(static_cast<float>(val));
-            }
+            out.fp_wb_data = is_d ? f64_bits(val) : write_f32_boxed(static_cast<float>(val));
         }
         out.fp_wb_enable = true;
         accumulate_fp_flags(fcsr);
-    } else if (funct7 == enum_mask(Funct7Fp::FmvXW) || funct7 == enum_mask(Funct7Fp::FmvXD)) {
+        return true;
+    }
+    return false;
+}
+
+bool fp_exec_cmp(FpExecResult& out, Word funct7, Funct3 funct3, Word rs1, Word rs2,
+                 const FloatingRegister* freg, CSRValue& fcsr) {
+    if (funct7 == enum_mask(Funct7Fp::FcmpS) || funct7 == enum_mask(Funct7Fp::FcmpD)) {
+        const bool is_d = (funct7 == enum_mask(Funct7Fp::FcmpD));
+        std::feclearexcept(FE_ALL_EXCEPT);
+        if (!is_d) {
+            const float a = read_f32(freg, rs1);
+            const float b = read_f32(freg, rs2);
+            if (std::isnan(a) || std::isnan(b)) {
+                if (enum_mask(funct3) != enum_mask(Funct3Fp::Eq) || is_snan32(a) || is_snan32(b)) {
+                    std::feraiseexcept(FE_INVALID);
+                }
+                out.int_wb_data = 0;
+            } else {
+                if (enum_mask(funct3) == enum_mask(Funct3Fp::Eq))
+                    out.int_wb_data = static_cast<Register>(a == b);
+                if (enum_mask(funct3) == enum_mask(Funct3Fp::Lt))
+                    out.int_wb_data = static_cast<Register>(a < b);
+                if (enum_mask(funct3) == enum_mask(Funct3Fp::Leq))
+                    out.int_wb_data = static_cast<Register>(a <= b);
+            }
+        } else {
+            const double a = read_f64(freg, rs1);
+            const double b = read_f64(freg, rs2);
+            if (std::isnan(a) || std::isnan(b)) {
+                if (enum_mask(funct3) != enum_mask(Funct3Fp::Eq) || is_snan64(a) || is_snan64(b)) {
+                    std::feraiseexcept(FE_INVALID);
+                }
+                out.int_wb_data = 0;
+            } else {
+                if (enum_mask(funct3) == enum_mask(Funct3Fp::Eq))
+                    out.int_wb_data = static_cast<Register>(a == b);
+                if (enum_mask(funct3) == enum_mask(Funct3Fp::Lt))
+                    out.int_wb_data = static_cast<Register>(a < b);
+                if (enum_mask(funct3) == enum_mask(Funct3Fp::Leq))
+                    out.int_wb_data = static_cast<Register>(a <= b);
+            }
+        }
+        out.int_wb_enable = true;
+        accumulate_fp_flags(fcsr);
+        return true;
+    }
+    return false;
+}
+
+bool fp_exec_mv_class(FpExecResult& out, Word funct7, Funct3 funct3, Word rs1, Register rrs1,
+                      const FloatingRegister* freg) {
+    if (funct7 == enum_mask(Funct7Fp::FmvXW) || funct7 == enum_mask(Funct7Fp::FmvXD)) {
         const bool is_d = (funct7 == enum_mask(Funct7Fp::FmvXD));
         if (enum_mask(funct3) == enum_mask(Funct3Fp::FmvXW)) {
-            if (is_d) {
-                out.int_wb_data = static_cast<Register>(freg[rs1]);
-            } else {
-                out.int_wb_data =
-                    static_cast<Register>(static_cast<SignedWord>(static_cast<int32_t>(freg[rs1])));
-            }
+            out.int_wb_data = is_d ? static_cast<Register>(freg[rs1])
+                                   : static_cast<Register>(
+                                         static_cast<SignedWord>(static_cast<int32_t>(freg[rs1])));
             out.int_wb_enable = true;
         } else if (enum_mask(funct3) == enum_mask(Funct3Fp::Fclass)) {
             out.int_wb_data = is_d ? fclass64(read_f64(freg, rs1)) : fclass32(read_f32(freg, rs1));
             out.int_wb_enable = true;
         }
-    } else if (funct7 == enum_mask(Funct7Fp::FmvWX) || funct7 == enum_mask(Funct7Fp::FmvDX)) {
-        const bool is_d = (funct7 == enum_mask(Funct7Fp::FmvDX));
-        if (is_d) {
-            out.fp_wb_data = static_cast<FloatingRegister>(rrs1);
-        } else {
-            out.fp_wb_data =
-                static_cast<FloatingRegister>(simrv::xlen::kF32BoxerBits) |
-                static_cast<FloatingRegister>(rrs1 & static_cast<Register>(kLower32Mask));
-        }
-        out.fp_wb_enable = true;
+        return true;
     }
+    if (funct7 == enum_mask(Funct7Fp::FmvWX) || funct7 == enum_mask(Funct7Fp::FmvDX)) {
+        const bool is_d = (funct7 == enum_mask(Funct7Fp::FmvDX));
+        out.fp_wb_data =
+            is_d ? static_cast<FloatingRegister>(rrs1)
+                 : (static_cast<FloatingRegister>(simrv::xlen::kF32BoxerBits) |
+                    static_cast<FloatingRegister>(rrs1 & static_cast<Register>(kLower32Mask)));
+        out.fp_wb_enable = true;
+        return true;
+    }
+    return false;
+}
+
+}  // namespace fp
+
+auto ExecuteUnit::opFp(Word funct7, Funct3 funct3, Word rs1, Word rs2, Register rrs1,
+                       const FloatingRegister* freg, CSRValue& fcsr) -> FpExecResult {
+    FpExecResult out;
+    const Word rm = enum_mask(funct3);
+
+    if (fp::fp_exec_add_sub(out, funct7, rm, rs1, rs2, freg, fcsr)) return out;
+    if (fp::fp_exec_mul_div_sqrt(out, funct7, rm, rs1, rs2, freg, fcsr)) return out;
+    if (fp::fp_exec_sgnj_minmax(out, funct7, funct3, rs1, rs2, freg, fcsr)) return out;
+    if (fp::fp_exec_cvt(out, funct7, rm, rs1, rs2, rrs1, freg, fcsr)) return out;
+    if (fp::fp_exec_cmp(out, funct7, funct3, rs1, rs2, freg, fcsr)) return out;
+    if (fp::fp_exec_mv_class(out, funct7, funct3, rs1, rrs1, freg)) return out;
+
     return out;
 }
 }  // namespace simrv::execute

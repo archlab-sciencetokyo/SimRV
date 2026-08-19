@@ -1,5 +1,7 @@
 #include "simrv/pipeline/InOrderPipeline.hpp"
 
+#include <utility>
+
 namespace simrv::pipeline {
 
 using simrv::isa::OperationId;
@@ -98,10 +100,7 @@ auto InOrderPipeline::check_stall_mem() const -> bool {
 
 auto InOrderPipeline::check_stall_ex() const -> bool {
     if (!e_reg_.valid) return false;
-    if (e_reg_.op_id == OperationId::DIV || e_reg_.op_id == OperationId::DIVU ||
-        e_reg_.op_id == OperationId::REM || e_reg_.op_id == OperationId::REMU ||
-        e_reg_.op_id == OperationId::DIVW || e_reg_.op_id == OperationId::DIVUW ||
-        e_reg_.op_id == OperationId::REMW || e_reg_.op_id == OperationId::REMUW) {
+    if (is_div_rem_op(e_reg_.op_id)) {
         return div_busy_cycles_remaining_ > 0;
     }
     return false;
@@ -193,6 +192,8 @@ auto InOrderPipeline::resolve_branch_ex(BtbEntry& btb_entry, Register pc, Regist
             bht_idx = ((pc >> 1) ^ gshare_history_) & 0xFF;
             predicted_taken = (branch_history_table_.at(bht_idx) >= 2);
             break;
+        default:
+            std::unreachable();
     }
 
     const bool btb_hit = (config.btb_entries > 0) && btb_entry.valid && (btb_entry.pc == pc);

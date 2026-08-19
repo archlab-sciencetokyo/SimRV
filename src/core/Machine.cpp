@@ -27,6 +27,219 @@ Address g_dram_base =
 namespace simrv::core {
 Machine::Machine() : memory_(*this) { cpu.machine_ = this; }
 
+void Machine::reset_state() {
+    tohost = 0;
+    reboot_requested = false;
+    exit_code = 0;
+    is_shutdown_ = false;
+    is_running_ = true;
+    last_tui_check_cycles_ = 0;
+    last_tui_update_ = {};
+    execution_state_.store(ExecutionState::Running, std::memory_order_release);
+    execution_state_.notify_all();
+    cpu.reset();
+}
+
+void Machine::set_pending_reboot(const std::string& binary_path, std::optional<bool> appmode,
+                                 std::optional<std::string> disk_path) {
+    std::lock_guard<std::mutex> lock(pending_reboot_mutex_);
+    pending_binary_path_ = binary_path;
+    pending_appmode_ = appmode;
+    pending_disk_path_ = disk_path;
+}
+
+auto Machine::get_pending_reboot() const -> PendingRebootState {
+    std::lock_guard<std::mutex> lock(pending_reboot_mutex_);
+    return PendingRebootState{
+        .binary_path = pending_binary_path_,
+        .appmode = pending_appmode_,
+        .disk_path = pending_disk_path_,
+    };
+}
+
+void Machine::clear_pending_reboot() {
+    std::lock_guard<std::mutex> lock(pending_reboot_mutex_);
+    pending_binary_path_.clear();
+    pending_appmode_.reset();
+    pending_disk_path_.reset();
+}
+
+auto Machine::is_paused() const -> bool {
+    return execution_state_.load(std::memory_order_relaxed) == ExecutionState::Paused ||
+           (s_tuimode && tui && tui->is_paused());
+}
+
+void Machine::pause() {
+    execution_state_.store(ExecutionState::Paused, std::memory_order_release);
+    execution_state_.notify_all();
+    if (s_tuimode && tui) {
+        tui->pause_loop();
+    }
+}
+
+void Machine::resume() {
+    if (is_shutdown_) {
+        return;
+    }
+    execution_state_.store(ExecutionState::Running, std::memory_order_release);
+    execution_state_.notify_all();
+    if (s_tuimode && tui) {
+        tui->unpause_loop();
+    }
+}
+
+void Machine::step() {
+    if (is_shutdown_) {
+        return;
+    }
+    execution_state_.store(ExecutionState::Stepping, std::memory_order_release);
+    execution_state_.notify_all();
+}
+
+void Machine::stop() {
+    is_shutdown_ = true;
+    execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
+    execution_state_.notify_all();
+    if (!s_tuimode && !s_gui_mode) {
+        is_running_ = false;
+    }
+    if (s_tuimode && tui) {
+        tui->pause_loop();
+    }
+}
+
+void Machine::request_reboot() {
+    reboot_requested = true;
+    is_running_ = false;
+    execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
+    execution_state_.notify_all();
+}
+
+void Machine::request_exit(int status) {
+    exit_code = status;
+    is_shutdown_ = true;
+    is_running_ = false;
+    execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
+    execution_state_.notify_all();
+}
+
+void Machine::run() {
+    cpu.evaluate_timer_interrupt();
+
+    // Start background stdin input thread for non-TUI mode
+    if (uart && !s_tuimode) {
+        uart->start_input_thread();
+    }
+
+    // In TUI mode expose the UART through a PTY for optional external terminals.
+    if (uart && s_tuimode) {
+        if (uart->start_pty()) {
+            simrv::log::info("[UART] PTY slave: {}", uart->pty_slave_path());
+        } else {
+            simrv::log::warn("[UART] openpty() failed – falling back to direct push_rx_byte");
+        }
+    }
+
+    constexpr uint32_t kBatchSize = 65536;
+
+    while (is_running() &&
+           execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
+        if (s_tuimode && tui && tui->is_tui_paused()) {
+            tui->set_sim_thread_sleeping(true);
+            execution_state_.wait(ExecutionState::Paused, std::memory_order_relaxed);
+            if (execution_state_.load(std::memory_order_relaxed) == ExecutionState::Paused) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+            continue;
+        }
+        if (s_tuimode && tui) {
+            tui->set_sim_thread_sleeping(false);
+        }
+
+        if (execute_fast_batch(kBatchSize)) {
+            if (simrv::compiler::unlikely(tracer.fp_trace.is_open())) {
+                tracer.write_trace_snapshot();
+            }
+            if (simrv::compiler::unlikely(tohost != 0)) {
+                finalize_cycle_tohost();
+            }
+            if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() &&
+                                          cpu.e_icount >= s_fincnt)) {
+                simrv::log::info("finished by -e option");
+                is_running_ = false;
+            }
+            if (s_tuimode && tui) {
+                if (simrv::tui::g_resized) {
+                    tui->render();
+                }
+                auto now = std::chrono::steady_clock::now();
+                if (now - last_tui_update_ >= std::chrono::milliseconds(33)) {
+                    tui->update();
+                    tui->update_cache();
+                    tui->render();
+                    last_tui_update_ = now;
+                }
+            } else if (uart && !uart->is_input_thread_running()) {
+                uart->non_tui_poll_input();
+            }
+            continue;
+        }
+
+        prepare_cycle();
+        execute_cycle();
+        finalize_cycle();
+
+        if (s_tuimode && tui) {
+            tui->on_cycle_completed();
+        }
+
+        if (is_stepping()) {
+            execution_state_.store(ExecutionState::Paused, std::memory_order_release);
+            if (s_tuimode && tui) {
+                tui->set_paused(true);
+            }
+        }
+
+        if (gdb_stub && gdb_stub->is_connected()) {
+            const bool hit_ebreak = (cpu.pipeline_context.opcode == simrv::isa::Opcode::System) &&
+                                    (cpu.pipeline_context.funct12 ==
+                                     static_cast<Word>(simrv::isa::Funct12Priv::Ebreak)) &&
+                                    !cpu.pipeline_context.pending_exception.has_value();
+            if (gdb_stub->single_step() || hit_ebreak) {
+                gdb_stub->notify_breakpoint(*this);
+            } else {
+                gdb_stub->poll(*this);
+            }
+        }
+
+        if (!s_appmode && spike_lockstep && spike_lockstep->is_running()) {
+            spike_lockstep->compare_and_report(cpu.state(), cpu.pipeline_context.cpc, cpu.e_icount);
+            if (spike_lockstep->should_halt()) {
+                simrv::log::error("Lockstep: halting on divergence");
+                stop();
+            }
+        }
+
+        if (s_tuimode && tui) {
+            const bool hit_ebreak = (cpu.pipeline_context.opcode == simrv::isa::Opcode::System) &&
+                                    (cpu.pipeline_context.funct12 ==
+                                     static_cast<Word>(simrv::isa::Funct12Priv::Ebreak));
+            if (simrv::compiler::unlikely(hit_ebreak)) {
+                tui->pause_loop();
+            }
+        }
+    }
+
+    // Clean up background input thread
+    if (uart && !s_tuimode) {
+        uart->stop_input_thread();
+    }
+    // Clean up PTY
+    if (uart && s_tuimode) {
+        uart->stop_pty();
+    }
+}
+
 void Machine::finalize_cycle_tohost() {
     if (tohost == 0) {
         return;
@@ -68,12 +281,12 @@ void Machine::finalize_cycle_tohost() {
             simrv::log::info(
                 "[Power] Compatibility: guest requested poweroff via tohost (old protocol).");
             exit_code = 0;
-            is_running_ = false;
+            stop();
             tohost = 0;
             return;
         } else {
             // HTIF Syscall handling: payload is a pointer to the syscall block in guest DRAM
-            if (payload >= 0x80000000ULL && payload < (0x80000000ULL + memory::kDramSize)) {
+            if (simrv::memory::is_dram_addr(payload)) {
                 const Address masked_payload = payload & simrv::memory::kDramMask;
                 uint64_t syscall_num = 0;
                 uint64_t arg0 = 0;
@@ -123,14 +336,12 @@ void Machine::finalize_cycle_tohost() {
                         }
                     }
                     exit_code = code;
-                    is_shutdown_ = true;
-                    if (s_tuimode && tui) {
-                        tui->pause_loop();
-                    }
-                    is_running_ = false;
+                    stop();
                     tohost = 0;
                     return;
                 }
+                tohost = 0;
+                return;
             }
         }
     }
@@ -143,26 +354,18 @@ void Machine::finalize_cycle_tohost() {
             simrv::log::info("Program Halted (SUCCESS / PASS)");
         }
         exit_code = 0;
-        is_shutdown_ = true;
-        if (s_tuimode && tui) {
-            tui->pause_loop();
-        }
-        is_running_ = false;
+        stop();
         tohost = 0;
         return;
     } else if ((tohost & 1) != 0u) {
         const int code = static_cast<int>(tohost >> 1);
         if (s_appmode) {
-            simrv::log::error("ISA TEST FAIL code={} (tohost=0x{:016x})", code, tohost);
+            simrv::log::error("ISA TEST FAIL code={} (tohost=0x{:016x})", code, tohost.load());
         } else {
             simrv::log::error("Program Halted (FAIL / EXIT code={})", code);
         }
         exit_code = code == 0 ? 1 : code;
-        is_shutdown_ = true;
-        if (s_tuimode && tui) {
-            tui->pause_loop();
-        }
-        is_running_ = false;
+        stop();
         tohost = 0;
         return;
     }

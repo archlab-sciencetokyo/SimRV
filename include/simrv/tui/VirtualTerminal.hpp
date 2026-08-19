@@ -237,8 +237,9 @@ class VirtualTerminal {
         return static_cast<int>(scrollback_.size());
     }
 
-    [[nodiscard]] auto get_line_as_string(int idx, int width_limit,
-                                          bool draw_cursor_at_x = false) const -> std::string {
+    [[nodiscard]] auto get_line_as_string(int idx, int width_limit, bool draw_cursor_at_x = false,
+                                          int sel_start_x = -1, int sel_end_x = -1) const
+        -> std::string {
         const std::vector<Cell>* row_ptr = nullptr;
         int s_size = static_cast<int>(scrollback_.size());
         if (idx < s_size) {
@@ -264,6 +265,9 @@ class VirtualTerminal {
         for (int x = 0; x < limit; ++x) {
             Cell cell = row[x];
             if (draw_cursor_at_x && x == cursor_x_) {
+                cell.reverse = !cell.reverse;
+            }
+            if (sel_start_x >= 0 && sel_end_x >= 0 && x >= sel_start_x && x <= sel_end_x) {
                 cell.reverse = !cell.reverse;
             }
 
@@ -307,7 +311,67 @@ class VirtualTerminal {
         return res;
     }
 
+    [[nodiscard]] auto get_text_in_range(int start_y, int start_x, int end_y, int end_x) const
+        -> std::string {
+        int sy1 = start_y;
+        int sx1 = start_x;
+        int sy2 = end_y;
+        int sx2 = end_x;
+        if (sy1 > sy2 || (sy1 == sy2 && sx1 > sx2)) {
+            std::swap(sy1, sy2);
+            std::swap(sx1, sx2);
+        }
+        std::string res;
+        for (int r = sy1; r <= sy2; ++r) {
+            const std::vector<Cell>* row_ptr = nullptr;
+            int s_size = static_cast<int>(scrollback_.size());
+            if (r >= 0 && r < s_size) {
+                row_ptr = &scrollback_[r];
+            } else {
+                int cells_idx = r - s_size;
+                if (cells_idx >= 0 && cells_idx < static_cast<int>(cells_.size())) {
+                    row_ptr = &cells_[cells_idx];
+                }
+            }
+            if (row_ptr) {
+                int line_w = static_cast<int>(row_ptr->size());
+                int col_from = 0;
+                int col_to = 0;
+                if (sy1 == sy2) {
+                    col_from = sx1;
+                    col_to = sx2;
+                } else if (r == sy1) {
+                    col_from = sx1;
+                    col_to = line_w - 1;
+                } else if (r == sy2) {
+                    col_from = 0;
+                    col_to = sx2;
+                } else {
+                    col_from = 0;
+                    col_to = line_w - 1;
+                }
+                col_from = std::clamp(col_from, 0, line_w - 1);
+                col_to = std::clamp(col_to, 0, line_w - 1);
+                std::string line;
+                for (int c = col_from; c <= col_to; ++c) {
+                    line += (*row_ptr)[c].ch;
+                }
+                while (!line.empty() && line.back() == ' ') {
+                    line.pop_back();
+                }
+                res += line;
+            }
+            if (r < sy2) {
+                res += "\n";
+            }
+        }
+        return res;
+    }
+
     void set_scroll_offset_callback(std::function<void(int)> cb) { scroll_offset_cb_ = cb; }
+    void set_response_callback(std::function<void(std::string_view)> cb) {
+        response_cb_ = std::move(cb);
+    }
 
    private:
     enum class AnsiState { Normal, Esc, G0G1, Csi };
@@ -516,6 +580,25 @@ class VirtualTerminal {
                 std::fill(cells_[cursor_y_].begin(), cells_[cursor_y_].end(),
                           Cell{.ch = " ", .fg = 7, .bg = current_attr_.bg});
             }
+        } else if (cmd == 'n' && !is_private && response_cb_) {  // Device Status Report
+            const int request = params.empty() ? 0 : params[0];
+            if (request == 5) {
+                response_cb_("\033[0n");
+            } else if (request == 6) {
+                const std::string response =
+                    std::format("\033[{};{}R", cursor_y_ + 1, cursor_x_ + 1);
+                response_cb_(response);
+            }
+        } else if (cmd == 'c' && response_cb_) {  // Device Attributes
+            // Identify as a VT100 with the advanced-video option. Full-screen programs use this
+            // reply to finish terminal capability discovery before drawing their first frame.
+            response_cb_(is_private ? "\033[>0;0;0c" : "\033[?1;2c");
+        } else if (cmd == 't' && !is_private && response_cb_) {  // Window manipulation/report
+            const int request = params.empty() ? 0 : params[0];
+            if (request == 18) {
+                const std::string response = std::format("\033[8;{};{}t", height_, width_);
+                response_cb_(response);
+            }
         } else if (cmd == 'h' && is_private) {
             for (int p : params) {
                 if (p == 25) cursor_visible_ = true;
@@ -563,6 +646,7 @@ class VirtualTerminal {
     std::size_t utf8_len_ = 0;
 
     std::function<void(int)> scroll_offset_cb_;
+    std::function<void(std::string_view)> response_cb_;
 };
 
 }  // namespace simrv::tui

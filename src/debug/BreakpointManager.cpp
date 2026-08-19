@@ -14,17 +14,9 @@
 
 namespace simrv::debug {
 
-auto parse_register_name(std::string_view input) -> std::optional<ParsedReg> {
-    if (input.empty()) return std::nullopt;
+namespace {
 
-    std::string str(input);
-    std::ranges::transform(str, str.begin(), [](unsigned char c) { return std::tolower(c); });
-
-    if (str == "pc") {
-        return ParsedReg{.type = RegType::PC, .index = 0, .canonical_name = "pc"};
-    }
-
-    // Check GPR x0..x31 or r0..r31
+auto parse_gpr_reg(const std::string& str) -> std::optional<ParsedReg> {
     if ((str.starts_with('x') || str.starts_with('r')) && str.size() > 1 &&
         std::all_of(str.begin() + 1, str.end(), ::isdigit)) {
         int idx = std::stoi(str.substr(1));
@@ -34,8 +26,6 @@ auto parse_register_name(std::string_view input) -> std::optional<ParsedReg> {
                              .canonical_name = std::format("x{}", idx)};
         }
     }
-
-    // Check GPR ABI names
     static constexpr std::array<const char*, 32> kGprAbi = {
         "zero", "ra", "sp", "gp", "tp",  "t0",  "t1", "t2", "s0", "s1", "a0",
         "a1",   "a2", "a3", "a4", "a5",  "a6",  "a7", "s2", "s3", "s4", "s5",
@@ -50,8 +40,10 @@ auto parse_register_name(std::string_view input) -> std::optional<ParsedReg> {
     if (str == "fp") {
         return ParsedReg{.type = RegType::GPR, .index = 8, .canonical_name = "x8 (s0/fp)"};
     }
+    return std::nullopt;
+}
 
-    // Check FPR f0..f31
+auto parse_fpr_reg(const std::string& str) -> std::optional<ParsedReg> {
     if (str.starts_with('f') && str.size() > 1 &&
         std::all_of(str.begin() + 1, str.end(), ::isdigit)) {
         int idx = std::stoi(str.substr(1));
@@ -61,8 +53,6 @@ auto parse_register_name(std::string_view input) -> std::optional<ParsedReg> {
                              .canonical_name = std::format("f{}", idx)};
         }
     }
-
-    // Check FPR ABI names
     static constexpr std::array<const char*, 32> kFprAbi = {
         "ft0", "ft1", "ft2", "ft3", "ft4",  "ft5",  "ft6", "ft7", "fs0",  "fs1", "fa0",
         "fa1", "fa2", "fa3", "fa4", "fa5",  "fa6",  "fa7", "fs2", "fs3",  "fs4", "fs5",
@@ -74,8 +64,10 @@ auto parse_register_name(std::string_view input) -> std::optional<ParsedReg> {
                              .canonical_name = std::format("f{} ({})", i, kFprAbi[i])};
         }
     }
+    return std::nullopt;
+}
 
-    // Check VEC v0..v31
+auto parse_vec_reg(const std::string& str) -> std::optional<ParsedReg> {
     if (str.starts_with('v') && str.size() > 1 &&
         std::all_of(str.begin() + 1, str.end(), ::isdigit)) {
         int idx = std::stoi(str.substr(1));
@@ -85,6 +77,23 @@ auto parse_register_name(std::string_view input) -> std::optional<ParsedReg> {
                              .canonical_name = std::format("v{}", idx)};
         }
     }
+    return std::nullopt;
+}
+
+}  // namespace
+
+auto parse_register_name(std::string_view input) -> std::optional<ParsedReg> {
+    if (input.empty()) return std::nullopt;
+
+    std::string str(input);
+    std::ranges::transform(str, str.begin(), [](unsigned char c) { return std::tolower(c); });
+
+    if (str == "pc") {
+        return ParsedReg{.type = RegType::PC, .index = 0, .canonical_name = "pc"};
+    }
+    if (auto res = parse_gpr_reg(str); res.has_value()) return res;
+    if (auto res = parse_fpr_reg(str); res.has_value()) return res;
+    if (auto res = parse_vec_reg(str); res.has_value()) return res;
 
     return std::nullopt;
 }
@@ -216,57 +225,68 @@ auto BreakpointManager::check_reg_changes(const simrv::core::ArchState& state,
     for (const auto& wp : watchpoints_) {
         if (wp.target != WatchTarget::Register) continue;
 
-        if (wp.reg_type == RegType::GPR) {
-            auto old_val = prev_state.regs.read(static_cast<RegId>(wp.reg_index));
-            auto new_val = state.regs.read(static_cast<RegId>(wp.reg_index));
-            if (old_val != new_val) {
-                return BreakpointHit{
-                    .reason = BreakpointHit::Reason::Watchpoint,
-                    .addr = static_cast<Address>(wp.reg_index),
-                    .description = std::format(
-                        "Register Watchpoint hit: {} changed from 0x{:x} to 0x{:x}",
-                        wp.reg_name.empty() ? std::format("x{}", wp.reg_index) : wp.reg_name,
-                        old_val, new_val)};
-            }
-        } else if (wp.reg_type == RegType::FPR) {
-            auto old_val = prev_state.regs.read_fp(static_cast<RegId>(wp.reg_index));
-            auto new_val = state.regs.read_fp(static_cast<RegId>(wp.reg_index));
-            if (old_val != new_val) {
-                return BreakpointHit{
-                    .reason = BreakpointHit::Reason::Watchpoint,
-                    .addr = static_cast<Address>(wp.reg_index),
-                    .description = std::format(
-                        "Register Watchpoint hit: {} changed from 0x{:016x} to 0x{:016x}",
-                        wp.reg_name.empty() ? std::format("f{}", wp.reg_index) : wp.reg_name,
-                        old_val, new_val)};
-            }
-        } else if (wp.reg_type == RegType::VEC) {
-            const auto& old_v = prev_state.regs.read_vector(static_cast<RegId>(wp.reg_index));
-            const auto& new_v = state.regs.read_vector(static_cast<RegId>(wp.reg_index));
-            bool vec_changed = false;
-            for (size_t i = 0; i < std::size(old_v.u64); ++i) {
-                if (old_v.u64[i] != new_v.u64[i]) {
-                    vec_changed = true;
-                    break;
+        switch (wp.reg_type) {
+            case RegType::GPR: {
+                auto old_val = prev_state.regs.read(static_cast<RegId>(wp.reg_index));
+                auto new_val = state.regs.read(static_cast<RegId>(wp.reg_index));
+                if (old_val != new_val) {
+                    return BreakpointHit{
+                        .reason = BreakpointHit::Reason::Watchpoint,
+                        .addr = static_cast<Address>(wp.reg_index),
+                        .description = std::format(
+                            "Register Watchpoint hit: {} changed from 0x{:x} to 0x{:x}",
+                            wp.reg_name.empty() ? std::format("x{}", wp.reg_index) : wp.reg_name,
+                            old_val, new_val)};
                 }
+                break;
             }
-            if (vec_changed) {
-                return BreakpointHit{
-                    .reason = BreakpointHit::Reason::Watchpoint,
-                    .addr = static_cast<Address>(wp.reg_index),
-                    .description = std::format(
-                        "Register Watchpoint hit: {} (Vector) value modified",
-                        wp.reg_name.empty() ? std::format("v{}", wp.reg_index) : wp.reg_name)};
+            case RegType::FPR: {
+                auto old_val = prev_state.regs.read_fp(static_cast<RegId>(wp.reg_index));
+                auto new_val = state.regs.read_fp(static_cast<RegId>(wp.reg_index));
+                if (old_val != new_val) {
+                    return BreakpointHit{
+                        .reason = BreakpointHit::Reason::Watchpoint,
+                        .addr = static_cast<Address>(wp.reg_index),
+                        .description = std::format(
+                            "Register Watchpoint hit: {} changed from 0x{:016x} to 0x{:016x}",
+                            wp.reg_name.empty() ? std::format("f{}", wp.reg_index) : wp.reg_name,
+                            old_val, new_val)};
+                }
+                break;
             }
-        } else if (wp.reg_type == RegType::PC) {
-            if (prev_state.pc != state.pc) {
-                return BreakpointHit{
-                    .reason = BreakpointHit::Reason::Watchpoint,
-                    .addr = state.pc,
-                    .description =
-                        std::format("Register Watchpoint hit: PC changed from 0x{:08x} to 0x{:08x}",
-                                    prev_state.pc, state.pc)};
+            case RegType::VEC: {
+                const auto& old_v = prev_state.regs.read_vector(static_cast<RegId>(wp.reg_index));
+                const auto& new_v = state.regs.read_vector(static_cast<RegId>(wp.reg_index));
+                bool vec_changed = false;
+                for (size_t i = 0; i < std::size(old_v.u64); ++i) {
+                    if (old_v.u64[i] != new_v.u64[i]) {
+                        vec_changed = true;
+                        break;
+                    }
+                }
+                if (vec_changed) {
+                    return BreakpointHit{
+                        .reason = BreakpointHit::Reason::Watchpoint,
+                        .addr = static_cast<Address>(wp.reg_index),
+                        .description = std::format(
+                            "Register Watchpoint hit: {} (Vector) value modified",
+                            wp.reg_name.empty() ? std::format("v{}", wp.reg_index) : wp.reg_name)};
+                }
+                break;
             }
+            case RegType::PC: {
+                if (prev_state.pc != state.pc) {
+                    return BreakpointHit{
+                        .reason = BreakpointHit::Reason::Watchpoint,
+                        .addr = state.pc,
+                        .description = std::format(
+                            "Register Watchpoint hit: PC changed from 0x{:08x} to 0x{:08x}",
+                            prev_state.pc, state.pc)};
+                }
+                break;
+            }
+            default:
+                break;
         }
     }
     return std::nullopt;

@@ -4,12 +4,19 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to package (for example, v2.0.0-rc.9)
+        required: true
+        type: string
   push:
-    branches: [dev]
     tags: ['v*']
 
 permissions:
   contents: write
+
+env:
+  RISCV_TESTS_REVISION: 933a897d8631773f385d45938facc466dddc7514
 
 jobs:
   build-and-upload:
@@ -24,6 +31,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
       - name: Install build tools
         run: |
@@ -46,8 +55,9 @@ jobs:
           export PATH="/opt/riscv/bin:$PATH"
 
           # Clone and build riscv-tests
-          git clone --depth 1 https://github.com/riscv-software-src/riscv-tests.git "$RUNNER_TEMP/riscv-tests"
+          git clone https://github.com/riscv-software-src/riscv-tests.git "$RUNNER_TEMP/riscv-tests"
           cd "$RUNNER_TEMP/riscv-tests"
+          git checkout --detach "$RISCV_TESTS_REVISION"
           git submodule update --init --recursive
           autoconf
           ./configure
@@ -61,6 +71,8 @@ jobs:
           cmake --preset ${{ matrix.arch }}-release
           -DCMAKE_C_COMPILER=gcc
           -DCMAKE_CXX_COMPILER=g++
+          -DSIMRV_WARNINGS_AS_ERRORS=ON
+          -DSIMRV_ENABLE_SDL=OFF
 
       - name: Build
         run: cmake --build --preset ${{ matrix.arch }}-release
@@ -69,6 +81,11 @@ jobs:
         env:
           RISCV_TESTS_DIR: ${{ runner.temp }}/riscv-tests
         run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L gate
+
+      - name: Validate source release metadata
+        run: |
+          python3 scripts/release_check.py
+          python3 tests/ReleaseToolTests.py
 
       - name: Compute asset names
         id: names
@@ -83,12 +100,16 @@ jobs:
 
           VERSION_TAG="v${SIMRV_VERSION}"
           TAG="${GITHUB_REF_NAME}"
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            TAG="${{ inputs.tag }}"
+          fi
           if [[ -n "${{ github.event.release.tag_name }}" ]]; then
             TAG="${{ github.event.release.tag_name }}"
           fi
 
           if [[ "${TAG}" != "${VERSION_TAG}" ]]; then
-            echo "Warning: release tag ${TAG} does not match CMake version tag ${VERSION_TAG}" >&2
+            echo "Release tag ${TAG} does not match CMake version tag ${VERSION_TAG}" >&2
+            exit 1
           fi
 
           ASSET_BASE="SimRV-${{ matrix.arch }}-linux-x86_64-${VERSION_TAG}"
@@ -108,6 +129,13 @@ jobs:
           sha256sum "${{ steps.names.outputs.asset_base }}.tar.gz" > "${{ steps.names.outputs.asset_base }}.sha256"
           sha256sum "${{ steps.names.outputs.asset_base }}.bin" >> "${{ steps.names.outputs.asset_base }}.sha256"
 
+      - name: Validate packaged release
+        run: >-
+          python3 scripts/release_check.py
+          --binary "${{ steps.names.outputs.asset_base }}.bin"
+          --archive "${{ steps.names.outputs.asset_base }}.tar.gz"
+          --checksum "${{ steps.names.outputs.asset_base }}.sha256"
+
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -118,7 +146,7 @@ jobs:
             ${{ steps.names.outputs.asset_base }}.sha256
 
       - name: Upload release assets
-        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/dev'
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -128,3 +156,65 @@ jobs:
           tag_name: ${{ steps.names.outputs.version_tag }}
           prerelease: ${{ github.ref_name == 'dev' || github.event.release.target_commitish == 'dev' || contains(steps.names.outputs.version_tag, '-') }}
 
+  documentation:
+    runs-on: ubuntu-latest
+    container:
+      image: almalinux:10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+      - name: Install documentation tools
+        run: dnf install -y doxygen graphviz tar gzip python3
+      - name: Validate release metadata
+        run: |
+          python3 scripts/release_check.py
+          python3 tests/ReleaseToolTests.py
+      - name: Build documentation
+        run: doxygen Doxyfile
+      - name: Package documentation
+        shell: bash
+        run: |
+          VERSION="$(python3 -c 'import json; print(json.load(open("release/release-manifest.json"))["version"])')"
+          tar -C docs/api -czf "SimRV-docs-v${VERSION}.tar.gz" html
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SimRV-documentation
+          path: SimRV-docs-*.tar.gz
+      - name: Upload documentation release asset
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: SimRV-docs-*.tar.gz
+
+  reproducibility-framework:
+    runs-on: ubuntu-latest
+    container:
+      image: almalinux:10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+      - name: Install Python
+        run: dnf install -y python3
+      - name: Validate research interfaces
+        run: |
+          python3 scripts/release_check.py
+          python3 tests/ReleaseToolTests.py
+          mkdir -p repro/results
+          python3 -c 'import json,pathlib; pathlib.Path("repro/results/index.json").write_text(json.dumps({"schema_version":1,"status":"framework-only","note":"Raw results and complete evidence are published only after the full release matrix passes."},indent=2)+"\n")'
+      - name: Package reproducibility framework
+        run: python3 scripts/package_repro.py --results repro/results
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SimRV-reproducibility-framework
+          path: |
+            SimRV-repro-*.tar.gz
+            SimRV-repro-*.sha256
+      - name: Upload reproducibility release asset
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            SimRV-repro-*.tar.gz
+            SimRV-repro-*.sha256

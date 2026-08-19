@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <print>
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Logger.hpp"
@@ -28,7 +27,7 @@ void Disk::process_queue(Word q_idx) {
     virtio::QueueState& qs = Queue[q_idx];
     if (qs.Ready == 0) return;
     const auto avail_idx = static_cast<uint16_t>(load_from_ram(qs.AvailLow + 2, 2, mmem));
-    while (qs.last_avail_idx != avail_idx) { /* header -> sector -> footer */
+    while (static_cast<uint16_t>(qs.last_avail_idx) != avail_idx) { /* header -> sector -> footer */
 
         // (1) header
         const auto desc_idx_header = simrv::virtio_detail::next_avail_desc_idx(&qs, QueueNum, mmem);
@@ -39,63 +38,133 @@ void Disk::process_queue(Word q_idx) {
         const auto header = simrv::virtio_detail::read_struct_from_ram<virtio::BlockRequestHeader>(
             static_cast<Address>(desc.adr), mmem, desc.len);
 
-        if (desc.len != 16) {
-            simrv::log::error("disk_request() desc.len!=16");
-            std::exit(EXIT_FAILURE);
-        }
-
-        // (2) sector
-        const auto desc_idx_sector = desc.next;
-        const auto desc_adr_sector = simrv::virtio_detail::get_desc_addr(desc_idx_sector, &qs);
-        desc =
-            simrv::virtio_detail::read_struct_from_ram<virtio::Descriptor>(desc_adr_sector, mmem);
-
-        const auto sector_len = desc.len;
-        const auto sector_adr = static_cast<Address>(desc.adr);
-
-        // (3) footer
-        const auto desc_idx_footer = desc.next;
-        const auto desc_adr_footer = simrv::virtio_detail::get_desc_addr(desc_idx_footer, &qs);
-        desc =
-            simrv::virtio_detail::read_struct_from_ram<virtio::Descriptor>(desc_adr_footer, mmem);
-
-        const auto footer_adr = static_cast<Address>(desc.adr);
-
         Word request_size = 0;
         switch (header.type) {
             case enum_mask(virtio::VirtioBlkType::In): {  /////  disk -> dram
+                // (2) sector
+                const auto desc_idx_sector = desc.next;
+                const auto desc_adr_sector =
+                    simrv::virtio_detail::get_desc_addr(desc_idx_sector, &qs);
+                desc = simrv::virtio_detail::read_struct_from_ram<virtio::Descriptor>(
+                    desc_adr_sector, mmem);
+                const auto sector_len = desc.len;
+                const auto sector_adr = static_cast<Address>(desc.adr);
+
+                // (3) footer
+                const auto desc_idx_footer = desc.next;
+                const auto desc_adr_footer =
+                    simrv::virtio_detail::get_desc_addr(desc_idx_footer, &qs);
+                desc = simrv::virtio_detail::read_struct_from_ram<virtio::Descriptor>(
+                    desc_adr_footer, mmem);
+                const auto footer_adr = static_cast<Address>(desc.adr);
+
                 request_size = sector_len + 1;
                 const auto disk_offset =
                     static_cast<Address>(header.sector_num * simrv::virtio::kDiskSectorSize);
-                const auto start_idx = sector_adr & simrv::memory::kDramMask;
-                if (start_idx + sector_len <= simrv::memory::kDramSize) {
-                    std::memcpy(mmem + start_idx, sector + disk_offset, sector_len);
+                if (sector && disk_offset + sector_len <= sector_storage_.size()) {
+                    const auto start_idx = sector_adr & simrv::memory::kDramMask;
+                    if (start_idx + sector_len <= simrv::memory::kDramSize) {
+                        std::memcpy(mmem + start_idx, sector + disk_offset, sector_len);
+                    } else {
+                        const std::size_t first_part = simrv::memory::kDramSize - start_idx;
+                        std::memcpy(mmem + start_idx, sector + disk_offset, first_part);
+                        std::memcpy(mmem, sector + disk_offset + first_part,
+                                    sector_len - first_part);
+                    }
+                    store_to_ram(footer_adr, 0, 1, mmem);  //  VIRTIO_BLK_S_OK
+                    machine_.cpu.soft_tlb_flush();
+                    machine_.cpu.decode_cache.flush();
                 } else {
-                    const std::size_t first_part = simrv::memory::kDramSize - start_idx;
-                    std::memcpy(mmem + start_idx, sector + disk_offset, first_part);
-                    std::memcpy(mmem, sector + disk_offset + first_part, sector_len - first_part);
+                    store_to_ram(footer_adr, 1, 1, mmem);  //  VIRTIO_BLK_S_IOERR
                 }
-                store_to_ram(footer_adr, 0, 1, mmem);  //  VIRTIO_BLK_S_OK
                 break;
             }
             case enum_mask(virtio::VirtioBlkType::Out): {  ///// dram -> disk
+                // (2) sector
+                const auto desc_idx_sector = desc.next;
+                const auto desc_adr_sector =
+                    simrv::virtio_detail::get_desc_addr(desc_idx_sector, &qs);
+                desc = simrv::virtio_detail::read_struct_from_ram<virtio::Descriptor>(
+                    desc_adr_sector, mmem);
+                const auto sector_len = desc.len;
+                const auto sector_adr = static_cast<Address>(desc.adr);
+
+                // (3) footer
+                const auto desc_idx_footer = desc.next;
+                const auto desc_adr_footer =
+                    simrv::virtio_detail::get_desc_addr(desc_idx_footer, &qs);
+                desc = simrv::virtio_detail::read_struct_from_ram<virtio::Descriptor>(
+                    desc_adr_footer, mmem);
+                const auto footer_adr = static_cast<Address>(desc.adr);
+
                 request_size = 1;
                 const auto disk_offset =
                     static_cast<Address>(header.sector_num * simrv::virtio::kDiskSectorSize);
-                const auto start_idx = sector_adr & simrv::memory::kDramMask;
-                if (start_idx + sector_len <= simrv::memory::kDramSize) {
-                    std::memcpy(sector + disk_offset, mmem + start_idx, sector_len);
+                if (sector && disk_offset + sector_len <= sector_storage_.size()) {
+                    const auto start_idx = sector_adr & simrv::memory::kDramMask;
+                    if (start_idx + sector_len <= simrv::memory::kDramSize) {
+                        std::memcpy(sector + disk_offset, mmem + start_idx, sector_len);
+                    } else {
+                        const std::size_t first_part = simrv::memory::kDramSize - start_idx;
+                        std::memcpy(sector + disk_offset, mmem + start_idx, first_part);
+                        std::memcpy(sector + disk_offset + first_part, mmem,
+                                    sector_len - first_part);
+                    }
+                    store_to_ram(footer_adr, 0, 1, mmem);  //  VIRTIO_BLK_S_OK
                 } else {
-                    const std::size_t first_part = simrv::memory::kDramSize - start_idx;
-                    std::memcpy(sector + disk_offset, mmem + start_idx, first_part);
-                    std::memcpy(sector + disk_offset + first_part, mmem, sector_len - first_part);
+                    store_to_ram(footer_adr, 1, 1, mmem);  //  VIRTIO_BLK_S_IOERR
                 }
-                store_to_ram(footer_adr, 0, 1, mmem);  //  VIRTIO_BLK_S_OK
+                break;
+            }
+            case 0x04: {  // VIRTIO_BLK_T_FLUSH
+                if ((desc.flags & enum_mask(virtio::VringDescFlag::Next)) != 0) {
+                    const auto desc_idx_footer = desc.next;
+                    const auto desc_adr_footer =
+                        simrv::virtio_detail::get_desc_addr(desc_idx_footer, &qs);
+                    desc = simrv::virtio_detail::read_struct_from_ram<virtio::Descriptor>(
+                        desc_adr_footer, mmem);
+                    store_to_ram(static_cast<Address>(desc.adr), 0, 1, mmem);  // VIRTIO_BLK_S_OK
+                }
+                request_size = 1;
+                break;
+            }
+            case 0x08: {  // VIRTIO_BLK_T_GET_ID
+                if ((desc.flags & enum_mask(virtio::VringDescFlag::Next)) != 0) {
+                    const auto desc_idx_sector = desc.next;
+                    const auto desc_adr_sector =
+                        simrv::virtio_detail::get_desc_addr(desc_idx_sector, &qs);
+                    desc = simrv::virtio_detail::read_struct_from_ram<virtio::Descriptor>(
+                        desc_adr_sector, mmem);
+                    static constexpr std::string_view kDiskId = "SimRV_VirtIO_Disk";
+                    const std::size_t len = std::min<std::size_t>(desc.len, kDiskId.size());
+                    std::memcpy(mmem + (desc.adr & simrv::memory::kDramMask), kDiskId.data(), len);
+
+                    if ((desc.flags & enum_mask(virtio::VringDescFlag::Next)) != 0) {
+                        const auto desc_idx_footer = desc.next;
+                        const auto desc_adr_footer =
+                            simrv::virtio_detail::get_desc_addr(desc_idx_footer, &qs);
+                        desc = simrv::virtio_detail::read_struct_from_ram<virtio::Descriptor>(
+                            desc_adr_footer, mmem);
+                        store_to_ram(static_cast<Address>(desc.adr), 0, 1,
+                                     mmem);  // VIRTIO_BLK_S_OK
+                    }
+                }
+                request_size = 1;
                 break;
             }
             default: {
-                simrv::log::error("disk unknown header {:x}", header.type);
-                std::exit(EXIT_FAILURE);
+                simrv::log::warn("disk unknown header type 0x{:x}", header.type);
+                if ((desc.flags & enum_mask(virtio::VringDescFlag::Next)) != 0) {
+                    const auto desc_idx_footer = desc.next;
+                    const auto desc_adr_footer =
+                        simrv::virtio_detail::get_desc_addr(desc_idx_footer, &qs);
+                    desc = simrv::virtio_detail::read_struct_from_ram<virtio::Descriptor>(
+                        desc_adr_footer, mmem);
+                    store_to_ram(static_cast<Address>(desc.adr), 2, 1,
+                                 mmem);  // VIRTIO_BLK_S_UNSUPP
+                }
+                request_size = 1;
+                break;
             }
         }
 
@@ -108,5 +177,20 @@ void Disk::process_queue(Word q_idx) {
 
 Disk::Disk(simrv::core::Machine& machine)
     : VirtioDevice(machine, virtio::kDiskIrq, virtio::kDiskMaxQueueNum) {}
+
+auto Disk::read_config(Address offset) const -> Word {
+    Address const config_offset = offset - static_cast<Address>(virtio::MmioOffset::Config);
+    uint64_t const capacity_sectors =
+        sector_storage_.empty()
+            ? (static_cast<uint64_t>(simrv::virtio::kDiskSize) / simrv::virtio::kDiskSectorSize)
+            : (static_cast<uint64_t>(sector_storage_.size()) / simrv::virtio::kDiskSectorSize);
+    if (config_offset == 0) {
+        return static_cast<Word>(capacity_sectors & 0xFFFFFFFFU);
+    }
+    if (config_offset == 4) {
+        return static_cast<Word>((capacity_sectors >> 32) & 0xFFFFFFFFU);
+    }
+    return 0;
+}
 
 }  // namespace simrv::device

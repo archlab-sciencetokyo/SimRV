@@ -102,6 +102,7 @@ void ExecuteUnit::execute_vector_config(core::CPU& cpu, isa::OperationId op_id, 
 
     cpu.state().vl = new_vl;
     cpu.state().vtype = vtype;
+    cpu.state().vstart = 0;
     cpu.state().regs.write(rd, new_vl);
 
     cpu.state().mstatus |= enum_mask(core::MstatusBit::Vs);

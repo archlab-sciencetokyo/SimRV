@@ -5,6 +5,8 @@
 #pragma once
 
 #include <array>
+#include <atomic>
+#include <utility>
 
 #include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
@@ -41,6 +43,7 @@ class PlicMmio : public memory::TileLinkNode {
     [[nodiscard]] auto name() const -> const char* final { return "plic"; }
     [[nodiscard]] auto base_address() const -> Address final { return kBaseAddress; }
     [[nodiscard]] auto size() const -> Address final { return kSize; }
+    void reset() final;
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool final;
 
     [[nodiscard]] constexpr auto contains(Address addr) const -> bool {
@@ -83,6 +86,7 @@ class ClintMmio : public memory::TileLinkNode {
     [[nodiscard]] auto name() const -> const char* final { return "clint"; }
     [[nodiscard]] auto base_address() const -> Address final { return kBaseAddress; }
     [[nodiscard]] auto size() const -> Address final { return kSize; }
+    void reset() final;
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool final;
 
     [[nodiscard]] constexpr auto contains(Address addr) const -> bool {
@@ -95,12 +99,11 @@ class ClintMmio : public memory::TileLinkNode {
     [[nodiscard]] auto mmio_read(Address offset) const -> Word;
     void mmio_write(Address offset, Word wdata);
 
-    Counter mtime{1};
-    Counter mtimecmp{};
+    std::atomic<Counter> mtime{1};
+    std::atomic<Counter> mtimecmp{0};
+    std::atomic<bool> supervisor_timer{false};
     Counter mcycle{1};
     int rtc_divider{0};
-    Counter last_mtime{0};
-    Counter last_mtimecmp{0};
 
    private:
     CPU& cpu_;
@@ -112,8 +115,37 @@ class ClintMmio : public memory::TileLinkNode {
  */
 class TrapController {
    public:
+    /**
+     * @brief Executes Machine-mode trap return (MRET).
+     *
+     * Restores privilege level from MPP, re-enables interrupt enabling bit MIE from MPIE,
+     * resets MPIE to 1, sets MPP to U-mode, and updates program counter from MEPC.
+     *
+     * @param state Reference to architectural state.
+     */
     static void mret(ArchState& state);
+
+    /**
+     * @brief Executes Supervisor-mode trap return (SRET).
+     *
+     * Restores privilege level from SPP, re-enables SIE from SPIE, resets SPIE to 1,
+     * sets SPP to U-mode, clears MPRV, and updates program counter from SEPC.
+     *
+     * @param state Reference to architectural state.
+     */
     static void sret(ArchState& state);
+
+    /**
+     * @brief Traps CPU execution to machine or supervisor handler for an exception or interrupt.
+     *
+     * Evaluates delegation vectors (medeleg/mideleg), populates cause (mcause/scause),
+     * faulting address or payload (mtval/stval), saves return address (mepc/sepc), and updates
+     * privilege level to handler target mode.
+     *
+     * @param cpu Reference to CPU instance.
+     * @param cause Hardware trap cause code (interrupt or exception).
+     * @param tval Auxiliary trap value (e.g. faulting virtual address or instruction encoding).
+     */
     static void raiseException(CPU& cpu, TrapCause cause, CSRValue tval);
 
     /**
@@ -145,8 +177,8 @@ class TrapController {
      * @param is_write True if this is a write or read-write access to the CSR.
      * @return true if access is permitted, false if it triggers an illegal instruction exception.
      */
-    static auto canAccessCsr(PrivilegeLevel current_priv, CSRAddress csr_addr, bool is_write)
-        -> bool;
+    static auto canAccessCsr(PrivilegeLevel current_priv, CSRValue misa, CSRAddress csr_addr,
+                             bool is_write) -> bool;
 };
 
 }  // namespace simrv::core

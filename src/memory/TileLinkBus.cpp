@@ -4,9 +4,9 @@
  */
 #include "simrv/memory/TileLinkBus.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <format>
-#include <print>
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Logger.hpp"
@@ -20,11 +20,7 @@ using simrv::isa::Funct3;
 
 TileLinkBus::TileLinkBus(simrv::core::Machine& machine) : machine_(machine) {}
 
-void TileLinkBus::add_node(TileLinkNode* node) {
-    if (node != nullptr) {
-        nodes_.push_back(node);
-    }
-}
+void TileLinkBus::add_node(TileLinkNode* node) { router_.register_device(node); }
 
 auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
     req_queue_.push(req);
@@ -36,6 +32,10 @@ void TileLinkBus::tick() {
         auto req = req_queue_.front();
         req_queue_.pop();
 
+        if (req.mask == 0) {
+            req.mask = TlChannelA::compute_mask(req.size, req.address);
+        }
+
         TlChannelD resp{};
         resp.source = req.source;
         resp.size = req.size;
@@ -43,16 +43,23 @@ void TileLinkBus::tick() {
         resp.data = 0;
 
         const Instruction funct3 = req.size;
+        const bool valid_size = req.size <= 3;
+        const size_t transfer_bytes = valid_size ? (size_t{1} << req.size) : 0;
         bool handled = false;
 
-        if (req.opcode == TlOpcodeA::Get) {
+        if (!valid_size) {
+            resp.error = true;
+            handled = true;
+        } else if (req.opcode == TlOpcodeA::Get) {
             resp.opcode = TlOpcodeD::AccessAckData;
-            if (simrv::memory::is_dram_addr(req.address) && machine_.mmem != nullptr) {
+            if (simrv::memory::is_dram_access(req.address, transfer_bytes) &&
+                machine_.mmem != nullptr) {
                 resp.data = simrv::memory::ram_read_fast(req.address, funct3, machine_.mmem);
                 ++read_count_;
                 handled = true;
             }
-        } else {
+        } else if (req.opcode == TlOpcodeA::PutFullData ||
+                   req.opcode == TlOpcodeA::PutPartialData) {
             resp.opcode = TlOpcodeD::AccessAck;
             const bool is_tohost_write = simrv::xlen::kIsXLen64
                                              ? (funct3 == static_cast<Instruction>(Funct3::Sw) ||
@@ -72,40 +79,19 @@ void TileLinkBus::tick() {
                 }
             }
 
-            if (simrv::memory::is_dram_addr(req.address) && machine_.mmem != nullptr) {
+            if (simrv::memory::is_dram_access(req.address, transfer_bytes) &&
+                machine_.mmem != nullptr) {
                 simrv::memory::ram_write_fast(req.address, req.data, funct3, machine_.mmem);
                 ++write_count_;
                 handled = true;
             }
+        } else {
+            resp.error = true;
+            handled = true;
         }
 
         if (!handled) {
-            for (auto* node : nodes_) {
-                if (node->contains(req.address)) {
-                    if (node->handle_request(req, resp)) {
-                        if (machine_.s_debugmode) {
-                            static int mmio_log_count = 0;
-                            if (mmio_log_count < 64) {
-                                simrv::log::info(
-                                    "__ {:10} MMIO {:5} {:7} addr={:08x} data={:08x} f3={}",
-                                    machine_.cpu.clint_mmio.mtime,
-                                    req.opcode == TlOpcodeA::Get ? "read" : "write", node->name(),
-                                    static_cast<unsigned>(req.address),
-                                    static_cast<unsigned>(req.opcode == TlOpcodeA::Get ? resp.data
-                                                                                       : req.data),
-                                    static_cast<unsigned>(req.size));
-                                ++mmio_log_count;
-                            }
-                        }
-                        if (req.opcode == TlOpcodeA::Get)
-                            ++read_count_;
-                        else
-                            ++write_count_;
-                        handled = true;
-                        break;
-                    }
-                }
-            }
+            handled = router_.route_request(req, resp);
         }
 
         if (!handled) {

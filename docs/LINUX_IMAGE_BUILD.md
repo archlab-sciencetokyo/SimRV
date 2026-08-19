@@ -23,7 +23,12 @@ building them from source.
 ### One-Command Build
 
 ```bash
+# Default build (auto-detects musl / glibc toolchain)
 ./scripts/build-linux-image.sh
+
+# Build with explicit C library target & cross compiler prefix
+./scripts/build-linux-image.sh --libc musl --cross-compile riscv64-unknown-linux-musl-
+./scripts/build-linux-image.sh --libc glibc --cross-compile riscv64-unknown-linux-gnu-
 ```
 
 This will:
@@ -50,6 +55,26 @@ source ./linux-images/rv32/setup.sh
 
 This exports `SIMRV_LINUX_MEM_IMG`, `SIMRV_LINUX_DISK_IMG`, and `SIMRV_LINUX_DTB`.
 
+### Direct lifecycle helper
+
+Generated root filesystems include `simrv-power`, a small root-only `/dev/mem`
+fallback for directly exercising SimRV's power MMIO device:
+
+```sh
+simrv-power poweroff
+simrv-power reboot
+simrv-power exit 7
+simrv-power crash 1
+```
+
+Normal OS `poweroff` and `reboot` commands remain preferred because they sync
+filesystems and stop services first. The helper writes the SiFive test-finisher
+register at physical address `0x00100000`; use it only on SimRV and only as root.
+The shell builtin `exit` merely ends the current login shell, after which init may
+spawn another login. Use `simrv-power exit [status]` to terminate the simulator,
+including its TUI. This `exit` request is a SimRV extension; the other requests use
+the platform's SiFive test-finisher protocol.
+
 ### Run Linux Boot Test
 
 **Direct invocation:**
@@ -59,7 +84,7 @@ source ./linux-images/rv32/setup.sh
 ./build/rv32-release/SimRV \
     -m $SIMRV_LINUX_MEM_IMG \
     -D $SIMRV_LINUX_DISK_IMG \
-    -c $SIMRV_LINUX_DTB
+    -f $SIMRV_LINUX_DTB
 ```
 
 **TUI mode:**
@@ -347,6 +372,6 @@ in `integration-gate`.
 After images are ready:
 
 1. ✅ Export environment: `source linux-images/rv32/setup.sh`
-2. ✅ Manual boot test: `./build/rv32-release/SimRV -m $SIMRV_LINUX_MEM_IMG -D $SIMRV_LINUX_DISK_IMG -c $SIMRV_LINUX_DTB`
+2. ✅ Manual boot test: `./build/rv32-release/SimRV -m $SIMRV_LINUX_MEM_IMG -D $SIMRV_LINUX_DISK_IMG -f $SIMRV_LINUX_DTB`
 3. ✅ TUI boot: `cmake --build --preset rv32-release --target run-tui`
 4. ✅ Full validation: `cmake --build --preset rv32-release --target integration-gate`

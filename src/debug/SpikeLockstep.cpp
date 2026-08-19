@@ -30,7 +30,7 @@
 #include <csignal>
 #include <cstring>
 #include <format>
-#include <print>
+#include <limits>
 #include <string_view>
 
 #include "simrv/core/Cpu.hpp"
@@ -44,11 +44,11 @@ namespace simrv::debug {
 // ---------------------------------------------------------------------------
 
 namespace {
-constexpr const char* kRed = "\033[31m";
-constexpr const char* kGreen = "\033[32m";
-constexpr const char* kYellow = "\033[33m";
-constexpr const char* kBold = "\033[1m";
-constexpr const char* kReset = "\033[0m";
+[[maybe_unused]] constexpr const char* kRed = "\033[31m";
+[[maybe_unused]] constexpr const char* kGreen = "\033[32m";
+[[maybe_unused]] constexpr const char* kYellow = "\033[33m";
+[[maybe_unused]] constexpr const char* kBold = "\033[1m";
+[[maybe_unused]] constexpr const char* kReset = "\033[0m";
 
 // ABI register names for prettier output
 constexpr std::array<const char*, 32> kAbiNames = {
@@ -401,7 +401,7 @@ auto SpikeLockstep::compare_and_report(const simrv::core::ArchState& state, Addr
                                        uint64_t icount) -> bool {
     if (!is_running()) return true;
 
-    const Address pc_mask = (state.regs.xlen == 32) ? 0xFFFFFFFFULL : ~0ULL;
+    constexpr Address pc_mask = std::numeric_limits<Address>::max();
     const Address masked_current_pc = current_pc & pc_mask;
 
     SpikeCommitRecord spike_rec{};

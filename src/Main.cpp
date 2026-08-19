@@ -35,8 +35,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     bool skip_banner = false;
     for (int i = 1; i < argc; ++i) {
         std::string_view const arg(argv[i]);
-        if (arg == "--cli" || arg == "-a" || arg == "-c" || arg == "--headless" ||
-            arg == "--no-tui") {
+        if (arg == "--cli" || arg == "-c") {
             is_tui = false;
         } else if (arg == "--tui" || arg == "-u") {
             is_tui = true;
@@ -190,11 +189,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                     }
                     machine_ptr->tui->update();
                     machine_ptr->tui->render(false);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(33));  // ~30 FPS
-                } else {
-                    machine_ptr->sdl_display->update_gui_only();
-                    std::this_thread::sleep_for(std::chrono::milliseconds(16));  // ~60 FPS
                 }
+                std::this_thread::sleep_for(std::chrono::milliseconds(33));  // ~30 FPS
             }
 
             if (sim_thread.joinable()) {
@@ -225,15 +221,16 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 override_misa_xlen = sim_machine->s_misa_xlen;
             }
 
-            if (!sim_machine->pending_binary_path.empty()) {
-                override_binary = sim_machine->pending_binary_path;
-                override_appmode = sim_machine->pending_appmode;
-                override_disk = sim_machine->pending_disk_path;
+            auto pending = sim_machine->get_pending_reboot();
+            if (!pending.binary_path.empty()) {
+                override_binary = pending.binary_path;
+                override_appmode = pending.appmode;
+                override_disk = pending.disk_path;
             }
             continue;
         } else {
             keep_running = false;
-            final_exit_code = sim_machine->exit_code;
+            final_exit_code = sim_machine->exit_code.load();
             if (!sim_machine->s_tuimode) {
                 sim_machine->tracer.print_summary();
             }

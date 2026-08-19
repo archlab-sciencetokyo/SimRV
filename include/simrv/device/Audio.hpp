@@ -13,10 +13,6 @@ namespace simrv::core {
 class Machine;
 }
 
-namespace simrv::util {
-class SdlAudio;
-}
-
 namespace simrv::device {
 
 class Audio : public memory::TileLinkNode {
@@ -41,8 +37,6 @@ class Audio : public memory::TileLinkNode {
 
     void play_music();
     void stop_music();
-
-    simrv::core::Machine& machine_;
 
     // ---- SFX Hardware Registers (8 channels) ----
     int current_channel_ = 0;

@@ -3,6 +3,7 @@
 #include <coroutine>
 #include <exception>
 #include <optional>
+#include <utility>
 
 #include "simrv/pipeline/PipelineContext.hpp"
 
@@ -10,10 +11,10 @@ namespace simrv::pipeline {
 
 /**
  * @struct PipelineTask
- * @brief C++20 Coroutine generator type for the CPU execution pipeline.
+ * @brief C++20/C++23 Coroutine generator type for the CPU execution pipeline.
  *
- * This task yields std::optional<StageError> on every cycle.
- * It is designed to be allocated once and resumed continuously.
+ * Yields std::optional<StageError> on every cycle. Designed to be allocated once and resumed
+ * continuously.
  */
 struct PipelineTask {
     struct promise_type {
@@ -31,8 +32,9 @@ struct PipelineTask {
             return {};
         }
 
-        void unhandled_exception() {
-            std::terminate();  // The pipeline shouldn't throw C++ exceptions
+        [[noreturn]] void unhandled_exception() {
+            std::terminate();
+            std::unreachable();
         }
 
         void return_void() noexcept {}
@@ -46,15 +48,14 @@ struct PipelineTask {
     PipelineTask(const PipelineTask&) = delete;
     PipelineTask& operator=(const PipelineTask&) = delete;
 
-    PipelineTask(PipelineTask&& other) noexcept : handle(other.handle) { other.handle = nullptr; }
+    PipelineTask(PipelineTask&& other) noexcept : handle(std::exchange(other.handle, nullptr)) {}
 
     PipelineTask& operator=(PipelineTask&& other) noexcept {
         if (this != &other) {
             if (handle) {
                 handle.destroy();
             }
-            handle = other.handle;
-            other.handle = nullptr;
+            handle = std::exchange(other.handle, nullptr);
         }
         return *this;
     }

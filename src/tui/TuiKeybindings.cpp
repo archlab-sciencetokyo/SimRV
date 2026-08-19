@@ -9,7 +9,7 @@
 
 namespace simrv::tui {
 
-static const std::array<KeyBindingInfo, 22> kKeyBindings = {
+static const std::array<KeyBindingInfo, 23> kKeyBindings = {
     {{.action = KeyAction::Step,
       .key_display = "[s] / [Space]",
       .primary_char = 's',
@@ -23,21 +23,21 @@ static const std::array<KeyBindingInfo, 22> kKeyBindings = {
       .footer_label = "[b] Back",
       .help_label = "Undo step / Backstep"},
      {.action = KeyAction::RunPause,
-      .key_display = "[c] / [Space]",
+      .key_display = "[c] / [Space] / [Ctrl-P]",
       .primary_char = 'c',
       .alt_char = 'C',
-      .footer_label = "[Space] Run/Pause",
+      .footer_label = "[c] Run/Pause",
       .help_label = "Run / Pause simulation"},
      {.action = KeyAction::Reset,
       .key_display = "[Ctrl-R]",
       .primary_char = '\0',
       .alt_char = '\0',
-      .footer_label = "[Ctrl-R] Reset",
-      .help_label = "Reset CPU / System"},
+      .footer_label = "[Ctrl-R] Reboot",
+      .help_label = "Reboot CPU / System"},
      {.action = KeyAction::SetBreakpoint,
       .key_display = "[:]",
       .primary_char = ':',
-      .alt_char = 'k',
+      .alt_char = '\0',
       .footer_label = "[:] SetBP",
       .help_label = "Set PC Breakpoint"},
      {.action = KeyAction::SetWatchpoint,
@@ -101,10 +101,10 @@ static const std::array<KeyBindingInfo, 22> kKeyBindings = {
       .footer_label = "[F1/?] Help",
       .help_label = "Show Help modal"},
      {.action = KeyAction::Quit,
-      .key_display = "[q]",
+      .key_display = "[q] / [Ctrl-Q]",
       .primary_char = 'q',
       .alt_char = 'Q',
-      .footer_label = "[q] Quit",
+      .footer_label = "[Ctrl-Q] Quit",
       .help_label = "Quit Simulator"},
      {.action = KeyAction::CycleLayout,
       .key_display = "[Tab]",
@@ -130,6 +130,12 @@ static const std::array<KeyBindingInfo, 22> kKeyBindings = {
       .alt_char = 'P',
       .footer_label = "[p] RightPane",
       .help_label = "Cycle Right Pane"},
+     {.action = KeyAction::ToggleLearn,
+      .key_display = "[g]",
+      .primary_char = 'g',
+      .alt_char = 'G',
+      .footer_label = "[g] Learn",
+      .help_label = "Toggle Guided Inspection"},
      {.action = KeyAction::ToggleExplain,
       .key_display = "[e]",
       .primary_char = 'e',
@@ -149,7 +155,7 @@ auto Keybindings::get(KeyAction action) -> const KeyBindingInfo& {
             return binding;
         }
     }
-    return kKeyBindings[0];
+    throw std::out_of_range("unknown TUI key action");
 }
 
 auto Keybindings::get_footer_text(KeyAction action) -> std::string {
@@ -159,5 +165,113 @@ auto Keybindings::get_footer_text(KeyAction action) -> std::string {
 auto Keybindings::get_help_key(KeyAction action) -> std::string { return get(action).key_display; }
 
 auto Keybindings::get_help_desc(KeyAction action) -> std::string { return get(action).help_label; }
+
+auto Keybindings::all() -> std::span<const KeyBindingInfo> { return kKeyBindings; }
+
+auto Keybindings::unavailable_reason(KeyAction action, const ActionContext& context)
+    -> std::string_view {
+    if (context.modal_active && action != KeyAction::Quit && action != KeyAction::Help) {
+        return "Close the active dialog first";
+    }
+    if (context.shutdown && action != KeyAction::Reset && action != KeyAction::LoadBinary &&
+        action != KeyAction::Quit && action != KeyAction::Help &&
+        action != KeyAction::ToggleLearn) {
+        return "The target is shut down";
+    }
+    switch (action) {
+        case KeyAction::Step:
+        case KeyAction::Backstep:
+        case KeyAction::SetBreakpoint:
+        case KeyAction::SetWatchpoint:
+        case KeyAction::ManageBreakpoints:
+        case KeyAction::TogglePcBreakpoint:
+        case KeyAction::InspectAddress:
+        case KeyAction::Settings:
+        case KeyAction::ConfigureSystem:
+        case KeyAction::ConfigureMisa:
+        case KeyAction::ToggleLearn:
+            if (!context.paused) return "Pause the simulator first";
+            break;
+        default:
+            break;
+    }
+    if ((action == KeyAction::Step || action == KeyAction::Backstep ||
+         action == KeyAction::RunPause || action == KeyAction::ToggleExplain) &&
+        !context.image_loaded) {
+        return "Load a program image first";
+    }
+    if ((action == KeyAction::Backstep) && !context.rollback_enabled) {
+        return "Enable rollback tracking first";
+    }
+    if ((action == KeyAction::SetBreakpoint || action == KeyAction::SetWatchpoint ||
+         action == KeyAction::ManageBreakpoints || action == KeyAction::TogglePcBreakpoint) &&
+        !context.debug_mode) {
+        return "Enable debug mode first";
+    }
+    if (action == KeyAction::ConfigureSystem && !context.cycle_accurate) {
+        return "Enable cycle-accurate mode first";
+    }
+    return {};
+}
+
+auto Keybindings::is_available(KeyAction action, const ActionContext& context) -> bool {
+    return unavailable_reason(action, context).empty();
+}
+
+auto Keybindings::available(const ActionContext& context) -> std::vector<const KeyBindingInfo*> {
+    std::vector<const KeyBindingInfo*> result;
+    for (const auto& binding : kKeyBindings) {
+        if (is_available(binding.action, context)) result.push_back(&binding);
+    }
+    return result;
+}
+
+auto key_action_for_footer(TuiFooterAction action) -> KeyAction {
+    switch (action) {
+        case TuiFooterAction::Step:
+            return KeyAction::Step;
+        case TuiFooterAction::StepBack:
+            return KeyAction::Backstep;
+        case TuiFooterAction::CycleRegs:
+            return KeyAction::CycleRegPage;
+        case TuiFooterAction::CycleTools:
+            return KeyAction::CycleToolPage;
+        case TuiFooterAction::SetBreakpoint:
+            return KeyAction::SetBreakpoint;
+        case TuiFooterAction::SetWatchpoint:
+            return KeyAction::SetWatchpoint;
+        case TuiFooterAction::TogglePcBreakpoint:
+            return KeyAction::TogglePcBreakpoint;
+        case TuiFooterAction::SetSpeed:
+            return KeyAction::SetSpeed;
+        case TuiFooterAction::InspectMem:
+            return KeyAction::InspectAddress;
+        case TuiFooterAction::LoadBinary:
+            return KeyAction::LoadBinary;
+        case TuiFooterAction::ToggleHelp:
+            return KeyAction::Help;
+        case TuiFooterAction::RunPause:
+            return KeyAction::RunPause;
+        case TuiFooterAction::Quit:
+            return KeyAction::Quit;
+        case TuiFooterAction::CycleLayout:
+            return KeyAction::CycleLayout;
+        case TuiFooterAction::TogglePanel:
+            return KeyAction::CycleRightPanel;
+        case TuiFooterAction::ToggleTrace:
+            return KeyAction::ToggleTrace;
+        case TuiFooterAction::OpenSettings:
+            return KeyAction::Settings;
+        case TuiFooterAction::ConfigureMisa:
+            return KeyAction::ConfigureMisa;
+        case TuiFooterAction::ConfigureSystem:
+            return KeyAction::ConfigureSystem;
+        case TuiFooterAction::ManageBreakpoints:
+            return KeyAction::ManageBreakpoints;
+        case TuiFooterAction::Reboot:
+            return KeyAction::Reset;
+    }
+    throw std::out_of_range("unknown TUI footer action");
+}
 
 }  // namespace simrv::tui

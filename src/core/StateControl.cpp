@@ -12,6 +12,8 @@
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Sbi.hpp"
+#include "simrv/device/Console.hpp"
+#include "simrv/device/Disk.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Constants.hpp"
@@ -68,10 +70,8 @@ void InterruptController::updateMip(PlicMmio& plic, ArchState& state) {
     else
         state.mip &= ~enum_mask(MipBit::Meip);
 
-    if (s_ext)
-        state.mip |= enum_mask(MipBit::Seip);
-    else
-        state.mip &= ~enum_mask(MipBit::Seip);
+    state.seip_external = s_ext;
+    state.refresh_supervisor_pending();
 }
 
 void InterruptController::setIrq(PlicMmio& plic, int irq_num, int state_val) {
@@ -83,6 +83,14 @@ void InterruptController::setIrq(PlicMmio& plic, int irq_num, int state_val) {
         plic.plic_pending.at(0) &= ~mask;
     }
     plic.cpu_.plic_update_mip();
+}
+
+void PlicMmio::reset() {
+    plic_pending.fill(0);
+    plic_priorities.fill(0);
+    for (auto& enables : plic_enables) enables.fill(0);
+    plic_threshold.fill(0);
+    plic_claim.fill(0);
 }
 
 auto PlicMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
@@ -102,16 +110,22 @@ auto PlicMmio::get_context_for_offset(Address offset) const -> int {
 
 auto PlicMmio::mmio_read(Address offset) -> Word {
     if (offset < 0x1000) {
+        // PLIC interrupt source zero is reserved and its priority is hardwired to zero.
+        if (offset == 0) return 0;
         return plic_priorities.at(offset / 4);
     }
     if (offset >= 0x1000 && offset < 0x1080) {
         return plic_pending.at((offset - 0x1000) / 4);
     }
     if (offset >= 0x2000 && offset < 0x2080) {
-        return plic_enables.at(0).at((offset - 0x2000) / 4);
+        const auto word = (offset - 0x2000) / 4;
+        const Word value = plic_enables.at(0).at(word);
+        return (word == 0) ? (value & ~Word{1}) : value;
     }
     if (offset >= 0x2080 && offset < 0x2100) {
-        return plic_enables.at(1).at((offset - 0x2080) / 4);
+        const auto word = (offset - 0x2080) / 4;
+        const Word value = plic_enables.at(1).at(word);
+        return (word == 0) ? (value & ~Word{1}) : value;
     }
 
     int context = get_context_for_offset(offset);
@@ -135,6 +149,9 @@ auto PlicMmio::mmio_read(Address offset) -> Word {
                     }
                 }
             }
+            if (max_prio <= plic_threshold.at(ctx_idx)) {
+                claim_id = 0;
+            }
             if (claim_id > 0) {
                 // Clear the pending bit on claim
                 plic_pending.at(0) &= ~(1u << claim_id);
@@ -149,11 +166,14 @@ auto PlicMmio::mmio_read(Address offset) -> Word {
 
 void PlicMmio::mmio_write(Address offset, Word wdata) {
     if (offset < 0x1000) {
-        plic_priorities.at(offset / 4) = wdata;
+        // Source zero means "no interrupt" and is not configurable.
+        if (offset != 0) plic_priorities.at(offset / 4) = wdata;
     } else if (offset >= 0x2000 && offset < 0x2080) {
-        plic_enables.at(0).at((offset - 0x2000) / 4) = wdata;
+        const auto word = (offset - 0x2000) / 4;
+        plic_enables.at(0).at(word) = (word == 0) ? (wdata & ~Word{1}) : wdata;
     } else if (offset >= 0x2080 && offset < 0x2100) {
-        plic_enables.at(1).at((offset - 0x2080) / 4) = wdata;
+        const auto word = (offset - 0x2080) / 4;
+        plic_enables.at(1).at(word) = (word == 0) ? (wdata & ~Word{1}) : wdata;
     } else {
         int context = get_context_for_offset(offset);
         if (context >= 0) {
@@ -165,6 +185,19 @@ void PlicMmio::mmio_write(Address offset, Word wdata) {
                 // Complete: indicates the handler has finished with the IRQ
                 if (plic_claim.at(ctx_idx) == wdata && wdata != 0) {
                     plic_claim.at(ctx_idx) = 0;
+                    if (cpu_.machine_) {
+                        if (wdata == static_cast<Word>(simrv::virtio::kDiskIrq) &&
+                            cpu_.machine_->disk && cpu_.machine_->disk->InterruptStatus != 0) {
+                            InterruptController::setIrq(*this, static_cast<int>(wdata), 1);
+                        } else if (wdata == static_cast<Word>(simrv::virtio::kConsoleIrq) &&
+                                   cpu_.machine_->console &&
+                                   cpu_.machine_->console->InterruptStatus != 0) {
+                            InterruptController::setIrq(*this, static_cast<int>(wdata), 1);
+                        } else if (wdata == 3 && cpu_.machine_->uart &&
+                                   cpu_.machine_->uart->is_interrupt_pending()) {
+                            InterruptController::setIrq(*this, static_cast<int>(wdata), 1);
+                        }
+                    }
                 }
             }
         }
@@ -179,58 +212,41 @@ auto ClintMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
     if (req.opcode == memory::TlOpcodeA::Get) {
         if (req_bytes == 8) {
             if (off == kClintMtimeOffset) {
-                resp.data = static_cast<Word>(mtime);
+                resp.data = static_cast<Word>(mtime.load(std::memory_order_relaxed));
             } else if (off == kClintMtimecmpOffset) {
-                resp.data = static_cast<Word>(mtimecmp);
+                resp.data = static_cast<Word>(mtimecmp.load(std::memory_order_relaxed));
             } else {
                 resp.data = mmio_read(off);
             }
         } else {
-            // For 32-bit reads, if offset aligns with 64-bit register halves
-            if (off == kClintMtimeOffset) {
-                resp.data = static_cast<Word>(mtime & 0xFFFFFFFF);
-            } else if (off == kClintMtimeOffset + 4) {
-                resp.data = static_cast<Word>(mtime >> 32);
-            } else if (off == kClintMtimecmpOffset) {
-                resp.data = static_cast<Word>(mtimecmp & 0xFFFFFFFF);
-            } else if (off == kClintMtimecmpOffset + 4) {
-                resp.data = static_cast<Word>(mtimecmp >> 32);
-            } else {
-                resp.data = mmio_read(off);
-            }
+            resp.data = mmio_read(off);
         }
     } else {
-        const Word wdata = req.data;
         if (req_bytes == 8) {
             if (off == kClintMtimecmpOffset) {
-                mtimecmp = static_cast<Counter>(wdata);
+                supervisor_timer.store(false, std::memory_order_release);
+                mtimecmp.store(static_cast<Counter>(req.data), std::memory_order_release);
                 cpu_.evaluate_timer_interrupt();
             } else if (off == kClintMtimeOffset) {
-                mtime = static_cast<Counter>(wdata);
+                supervisor_timer.store(false, std::memory_order_release);
+                mtime.store(static_cast<Counter>(req.data), std::memory_order_release);
                 cpu_.evaluate_timer_interrupt();
             } else {
-                mmio_write(off, wdata);
+                mmio_write(off, req.data);
             }
         } else {
-            if (off == kClintMtimecmpOffset) {
-                mtimecmp =
-                    (mtimecmp & ~static_cast<Counter>(0xFFFFFFFFull)) | (wdata & 0xFFFFFFFFull);
-                cpu_.evaluate_timer_interrupt();
-            } else if (off == kClintMtimecmpOffset + 4) {
-                mtimecmp = (mtimecmp & 0xFFFFFFFFull) | (static_cast<Counter>(wdata) << 32);
-                cpu_.evaluate_timer_interrupt();
-            } else if (off == kClintMtimeOffset) {
-                mtime = (mtime & ~static_cast<Counter>(0xFFFFFFFFull)) | (wdata & 0xFFFFFFFFull);
-                cpu_.evaluate_timer_interrupt();
-            } else if (off == kClintMtimeOffset + 4) {
-                mtime = (mtime & 0xFFFFFFFFull) | (static_cast<Counter>(wdata) << 32);
-                cpu_.evaluate_timer_interrupt();
-            } else {
-                mmio_write(off, wdata);
-            }
+            mmio_write(off, req.data);
         }
     }
     return true;
+}
+
+void ClintMmio::reset() {
+    mtime.store(1, std::memory_order_release);
+    mtimecmp.store(std::numeric_limits<Counter>::max(), std::memory_order_release);
+    supervisor_timer.store(false, std::memory_order_release);
+    mcycle = 1;
+    rtc_divider = 0;
 }
 
 auto ClintMmio::mmio_read(Address offset) const -> Word {
@@ -238,13 +254,14 @@ auto ClintMmio::mmio_read(Address offset) const -> Word {
         case 0x0000:  // msip for hart 0
             return (cpu_.state().mip & enum_mask(MipBit::Msip)) != 0 ? 1 : 0;
         case kClintMtimeOffset:
-            return static_cast<Word>(mtime);
+            return static_cast<Word>(mtime.load(std::memory_order_relaxed) & kWord32Mask);
         case kClintMtimeOffset + 4:
-            return static_cast<Word>(mtime >> 32);
+            return static_cast<Word>((mtime.load(std::memory_order_relaxed) >> 32) & kWord32Mask);
         case kClintMtimecmpOffset:
-            return static_cast<Word>(mtimecmp);
+            return static_cast<Word>(mtimecmp.load(std::memory_order_relaxed) & kWord32Mask);
         case kClintMtimecmpOffset + 4:
-            return static_cast<Word>(mtimecmp >> 32);
+            return static_cast<Word>((mtimecmp.load(std::memory_order_relaxed) >> 32) &
+                                     kWord32Mask);
         default:
             return 0;
     }
@@ -252,20 +269,46 @@ auto ClintMmio::mmio_read(Address offset) const -> Word {
 
 void ClintMmio::mmio_write(Address offset, Word wdata) {
     const Counter wdata_64 = static_cast<Counter>(wdata) & kWord32Mask;
-    if (offset == 0x0000) {  // msip for hart 0
-        if ((wdata & 1) != 0) {
-            cpu_.state().mip |= enum_mask(MipBit::Msip);
-        } else {
-            cpu_.state().mip &= ~enum_mask(MipBit::Msip);
+    switch (offset) {
+        case 0x0000:  // msip for hart 0
+            if ((wdata & 1) != 0) {
+                cpu_.state().mip |= enum_mask(MipBit::Msip);
+            } else {
+                cpu_.state().mip &= ~enum_mask(MipBit::Msip);
+            }
+            break;
+        case kClintMtimecmpOffset: {
+            supervisor_timer.store(false, std::memory_order_release);
+            const Counter cur = mtimecmp.load(std::memory_order_relaxed);
+            mtimecmp.store((cur & ~kWord32Mask) | wdata_64, std::memory_order_release);
+            cpu_.evaluate_timer_interrupt();
+            break;
         }
-    } else if (offset == kClintMtimecmpOffset) {
-        mtimecmp = (mtimecmp & ~kWord32Mask) | wdata_64;
-        cpu_.state().mip &= ~enum_mask(MipBit::Mtip);
-        cpu_.evaluate_timer_interrupt();
-    } else if (offset == kClintMtimecmpOffset + 4) {
-        mtimecmp = (mtimecmp & kWord32Mask) | (wdata_64 << kWord32Shift);
-        cpu_.state().mip &= ~enum_mask(MipBit::Mtip);
-        cpu_.evaluate_timer_interrupt();
+        case kClintMtimecmpOffset + 4: {
+            supervisor_timer.store(false, std::memory_order_release);
+            const Counter cur = mtimecmp.load(std::memory_order_relaxed);
+            mtimecmp.store((cur & kWord32Mask) | (wdata_64 << kWord32Shift),
+                           std::memory_order_release);
+            cpu_.evaluate_timer_interrupt();
+            break;
+        }
+        case kClintMtimeOffset: {
+            supervisor_timer.store(false, std::memory_order_release);
+            const Counter cur = mtime.load(std::memory_order_relaxed);
+            mtime.store((cur & ~kWord32Mask) | wdata_64, std::memory_order_release);
+            cpu_.evaluate_timer_interrupt();
+            break;
+        }
+        case kClintMtimeOffset + 4: {
+            supervisor_timer.store(false, std::memory_order_release);
+            const Counter cur = mtime.load(std::memory_order_relaxed);
+            mtime.store((cur & kWord32Mask) | (wdata_64 << kWord32Shift),
+                        std::memory_order_release);
+            cpu_.evaluate_timer_interrupt();
+            break;
+        }
+        default:
+            break;
     }
 }
 
@@ -282,8 +325,10 @@ void TrapController::mret(ArchState& state) {
     }
     // Set MPIE (bit 7) to 1
     mstatus |= enum_mask(MstatusBit::Mpie);
-    // Clear MPP (bits [12:11]) to U-mode (0)
-    mstatus &= ~enum_mask(MstatusBit::Mpp);
+    // xRET resets xPP to the least-privileged supported mode.
+    const bool has_s = isa::misa_has_extension(state.misa, isa::IsaExtension::S);
+    const bool has_u = isa::misa_has_extension(state.misa, isa::IsaExtension::U);
+    mstatus = (mstatus & ~enum_mask(MstatusBit::Mpp)) | (least_supported_mpp(has_s, has_u) << 11U);
 
     if (static_cast<PrivilegeLevel>(mpp) < kPrivMachine) {
         mstatus &= ~enum_mask(MstatusBit::Mprv);
@@ -292,7 +337,7 @@ void TrapController::mret(ArchState& state) {
     state.mstatus = mstatus;
     state.priv = static_cast<PrivilegeLevel>(mpp);
     state.update_xlen();
-    state.pc = state.mepc;
+    state.pc = isa::epc_read_value(state.mepc, state.misa);
     if (state.regs.xlen == 32) {
         state.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state.pc)));
     }
@@ -321,7 +366,7 @@ void TrapController::sret(ArchState& state) {
     state.mstatus = mstatus;
     state.priv = static_cast<PrivilegeLevel>(spp);
     state.update_xlen();
-    state.pc = state.sepc;
+    state.pc = isa::epc_read_value(state.sepc, state.misa);
     if (state.regs.xlen == 32) {
         state.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state.pc)));
     }
@@ -397,8 +442,8 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
             "a0={:0{}x} "
             "a1={:0{}x} mtvec={:0{}x} stvec={:0{}x} mepc={:0{}x} sepc={:0{}x} satp={:0{}x} "
             "tval={:0{}x}",
-            cpu.clint_mmio.mtime, static_cast<uint64_t>(cause), kLogHexWidth,
-            trap_cause_name(cause), static_cast<uint64_t>(trap_pc), kLogHexWidth,
+            static_cast<Counter>(cpu.clint_mmio.mtime.load()), static_cast<uint64_t>(cause),
+            kLogHexWidth, trap_cause_name(cause), static_cast<uint64_t>(trap_pc), kLogHexWidth,
             static_cast<unsigned>(state.priv), static_cast<uint64_t>(state.regs.read(RegId::Ra)),
             kLogHexWidth, static_cast<uint64_t>(state.regs.read(RegId::Sp)), kLogHexWidth,
             static_cast<uint64_t>(state.regs.read(RegId::Tp)), kLogHexWidth,
@@ -480,6 +525,10 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
             "Halting simulator.",
             trap_cause_name(cause), static_cast<uint64_t>(cause), static_cast<uint64_t>(trap_pc));
         if (cpu.machine_) {
+            if (cpu.machine_->s_tuimode && cpu.machine_->tui) {
+                cpu.machine_->tui->set_status_override("\033[1;31m UNHANDLED TRAP \033[0m");
+                cpu.machine_->tui->pause_loop();
+            }
             cpu.machine_->stop();
         }
     }
@@ -488,7 +537,7 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
     cpu.pipeline_context.pending_tval = 0;
 
     if (cpu.machine_ && cpu.machine_->s_tuimode && cpu.machine_->tui &&
-        cause == static_cast<TrapCause>(ExceptionCode::Breakpoint)) {
+        cause == static_cast<TrapCause>(std::to_underlying(ExceptionCode::Breakpoint))) {
         cpu.machine_->tui->set_status_override("\033[1;38;5;234;48;5;210m TRAPPED \033[0m");
         if constexpr (simrv::xlen::kIsXLen64) {
             simrv::log::warn("Breakpoint: cause=0x{:016x} pc=0x{:016x} tval=0x{:016x}",
@@ -528,18 +577,13 @@ auto TrapController::canExecutePrivilegedInstruction(PrivilegeLevel current_priv
     return true;
 }
 
-auto TrapController::canAccessCsr(PrivilegeLevel current_priv, CSRAddress csr_addr, bool is_write)
-    -> bool {
-    const Word csr_priv = (csr_addr >> 8) & 0x3u;
-    const bool is_read_only = ((csr_addr >> 10) & 0x3u) == 0x3u;
-
-    if (current_priv < static_cast<PrivilegeLevel>(csr_priv)) {
-        return false;
-    }
-    if (is_write && is_read_only) {
-        return false;
-    }
-    return true;
+auto TrapController::canAccessCsr(PrivilegeLevel current_priv, CSRValue misa, CSRAddress csr_addr,
+                                  bool is_write) -> bool {
+    // Debug CSRs require architectural Debug Mode, which the guest execution
+    // engine does not implement. M-mode also cannot override CSR nonexistence.
+    return csr_access_permitted(current_priv, isa::misa_has_extension(misa, isa::IsaExtension::S),
+                                isa::misa_has_extension(misa, isa::IsaExtension::U), csr_addr,
+                                is_write);
 }
 
 }  // namespace simrv::core

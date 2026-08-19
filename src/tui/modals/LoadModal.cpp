@@ -39,9 +39,7 @@ auto LoadModal::submit(ModalType type, const std::string& input, bool load_appmo
         staged_mode_change = true;
         staged_target_appmode = load_appmode;
         if (load_appmode) {
-            machine.pending_binary_path = input;
-            machine.pending_appmode = true;
-            machine.pending_disk_path = "";
+            machine.set_pending_reboot(input, true, "");
             staged_binary_path.clear();
             staged_mode_change = false;
             if (set_status_override_cb) {
@@ -63,9 +61,7 @@ auto LoadModal::submit(ModalType type, const std::string& input, bool load_appmo
         staged_binary_path.clear();
         staged_mode_change = false;
 
-        machine.pending_binary_path = bin_to_load;
-        machine.pending_appmode = target_appmode;
-        machine.pending_disk_path = input;
+        machine.set_pending_reboot(bin_to_load, target_appmode, input);
 
         if (set_status_override_cb) {
             set_status_override_cb("Loaded binary and disk image. Resetting system...");
@@ -91,8 +87,8 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
     } else if (type == ModalType::LoadDiskImage) {
         content_rows.push_back(std::format("{}Enter disk image filepath:\033[0m", kThemeText));
         content_rows.push_back(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, input));
-        content_rows.push_back(
-            std::format("{}e.g. linux-images/rv64/root.bin\033[0m", kThemeMuted));
+        content_rows.push_back(std::format(
+            "{}e.g. linux-images/rv64/root.img, root.ext4, root.bin\033[0m", kThemeMuted));
         if (!staged_binary_path.empty()) {
             content_rows.push_back(std::format("{}Staged memory image: {}{}\033[0m", kThemeMuted,
                                                kThemeSky, staged_binary_path));

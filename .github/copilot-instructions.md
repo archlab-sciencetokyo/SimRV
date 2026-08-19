@@ -115,3 +115,10 @@ Run: `bash scripts/phase2-gate.sh` or `cmake --build --preset ninja-clang-releas
 - Linux boot test in Slice 5 requires SIMRV_LINUX_MEM_IMG and SIMRV_LINUX_DISK_IMG to be set.
 - `isa-ext-rv32gc-experimental` tracks bring-up behavior and is not equivalent to stable gate coverage.
 - Slice 5 comprehensive testing is "no-skip" - all available tests are attempted.
+
+<!-- mermaid-ai-skills:start -->
+## Mermaid Diagrams
+
+When the user asks to create, edit, or visualize a diagram, follow the
+instructions in `.github/instructions/mermaid.instructions.md`.
+<!-- mermaid-ai-skills:end -->

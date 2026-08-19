@@ -237,18 +237,9 @@ auto Machine::initialize() -> int {
     power = std::make_unique<simrv::device::PowerMmio>(*this);
     framebuffer = std::make_unique<simrv::device::Framebuffer>(*this);
     input_device = std::make_unique<simrv::device::InputDevice>(*this);
-    sdl_display = std::make_unique<simrv::util::SdlDisplay>(*this);
-    if (s_gui_mode) {
-        sdl_display->init();
-    }
     audio = std::make_unique<simrv::device::Audio>(*this);
-    sdl_audio = std::make_unique<simrv::util::SdlAudio>(*this);
-    if (s_gui_mode) {
-        sdl_audio->init_audio();
-    }
     if (s_tuimode) {
         tui = std::make_unique<simrv::tui::Tui>(*this);
-        tui->initialize();
     }
     mmem_owner_.reset(static_cast<Byte*>(std::calloc(
         simrv::memory::kDramSize,
@@ -289,6 +280,9 @@ auto Machine::initialize() -> int {
     memory_.system_bus().add_node(&cpu.plic_mmio);
     memory_.system_bus().add_node(&cpu.clint_mmio);
     const bool linux_boot = !s_appmode;
+    if (s_appmode) {
+        s_enabletimer = 0;
+    }
     const Address dtb_offset =
         linux_boot
             ? static_cast<Address>(simrv::memory::kDramSize - static_cast<Address>(0x00100000U))
@@ -354,7 +348,7 @@ auto Machine::initialize() -> int {
     cpu.state().misa = initial_misa;
     cpu.state().priv = kPrivMachine;
     cpu.state().regs.vlen = s_vlen ? s_vlen : 256;
-    cpu.state().update_xlen();
+    cpu.state().initialize_lower_xlen_fields();
     if (cpu.state().regs.xlen == 32) {
         cpu.state().pc =
             static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(cpu.state().pc)));
@@ -370,6 +364,9 @@ auto Machine::initialize() -> int {
     // If launched without a binary in TUI mode, skip image-dependent init —
     // the TUI will open the LoadBinary modal and call load_program_binary() later.
     if (s_fn_memimg.empty() && s_tuimode) {
+        if (tui) {
+            tui->initialize();
+        }
         return 0;
     }
 
@@ -410,10 +407,14 @@ auto Machine::initialize() -> int {
     }
 
     if (s_use_disk) {
-        disk->sector_storage_.resize(simrv::virtio::kDiskSize);
+        std::error_code ec;
+        const auto fsize = std::filesystem::file_size(s_fn_dskimg, ec);
+        const auto disk_capacity = (!ec && fsize > 0)
+                                       ? static_cast<std::size_t>(fsize)
+                                       : static_cast<std::size_t>(simrv::virtio::kDiskSize);
+        disk->sector_storage_.resize(disk_capacity);
         disk->sector = disk->sector_storage_.data();
-        load_image_into_ram(s_fn_dskimg, disk->sector,
-                            static_cast<std::size_t>(simrv::virtio::kDiskSize), "disk", s_tuimode);
+        load_image_into_ram(s_fn_dskimg, disk->sector, disk_capacity, "disk", s_tuimode);
     }
 
     if (s_use_mix) {
@@ -445,6 +446,10 @@ auto Machine::initialize() -> int {
             simrv::log::error("Failed to launch Spike for lockstep verification");
             return 1;
         }
+    }
+
+    if (s_tuimode && tui) {
+        tui->initialize();
     }
 
     return 0;
@@ -514,7 +519,7 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
     }
 
     cpu.state().misa = initial_misa;
-    cpu.state().update_xlen();
+    cpu.state().initialize_lower_xlen_fields();
 
     resolve_start_pc_and_dram_base(*this, symbols);
 

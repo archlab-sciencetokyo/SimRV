@@ -1,6 +1,6 @@
 /**
  * @file Mmu.hpp
- * @brief Memory Management Unit (MMU) for SV32 virtual memory translation.
+ * @brief Memory Management Unit (MMU) for Sv32, Sv39, and Sv48 translation.
  *
  * Provides address translation, page table walking, and virtual memory support
  * for both Linux and RTOS workloads.
@@ -30,7 +30,7 @@ enum class PteAccess : uint8_t { Read = 0, Write = 1, Code = 2 };
 
 /**
  * @class Mmu
- * @brief Handles SV32 page translation and virtual memory management.
+ * @brief Handles Sv32, Sv39, and Sv48 page translation.
  *
  * Supports supervisor and user privilege levels, implements correct page table
  * access control, and provides identity-mapping support for early Linux boot.
@@ -40,13 +40,15 @@ class Mmu {
     /**
      * @brief Construct an MMU instance.
      * @param mmem Pointer to machine memory
+     * @param dram_base Guest physical base of the backing memory
+     * @param dram_size Size in bytes of the backing memory
      */
-    explicit Mmu(Byte* mmem);
+    explicit Mmu(Byte* mmem, Address dram_base, Address dram_size);
 
     [[nodiscard]] auto mmem() const -> Byte* { return mmem_; }
 
     /**
-     * @brief Perform SV32 page walk and address translation.
+     * @brief Perform a page walk using the active supported satp mode.
      *
      * @param v_addr Virtual address to translate
      * @param p_addr Output: translated physical address
@@ -57,7 +59,8 @@ class Mmu {
      * @return Translated physical address or TrapCause on fault
      */
     auto page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
-                   Word satp, unsigned xlen = xlen::kXLenBits) -> std::expected<Address, TrapCause>;
+                   Word satp, unsigned xlen, bool update_access_bits = true)
+        -> std::expected<Address, TrapCause>;
 
     /**
      * @brief Translate address without performing page walk.
@@ -72,10 +75,12 @@ class Mmu {
      * @param mstatus Current CPU mstatus register
      * @param satp Current CPU satp register
      * @param xlen Current execution XLEN
+     * @param update_access_bits Whether to update hardware A/D bits in PTE
      * @return Translated physical address or TrapCause on fault
      */
     auto translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
-                   Word satp, unsigned xlen = xlen::kXLenBits) -> std::expected<Address, TrapCause>;
+                   Word satp, unsigned xlen, bool update_access_bits = true)
+        -> std::expected<Address, TrapCause>;
 
     /**
      * @brief Verify if a virtual address is canonical according to the active SV mode.
@@ -85,19 +90,17 @@ class Mmu {
      * @param xlen Current execution XLEN
      * @return true if the address is canonical, false otherwise
      */
-    [[nodiscard]] static constexpr auto is_canonical(Address v_addr, Word satp,
-                                                     unsigned xlen = xlen::kXLenBits) -> bool {
+    [[nodiscard]] static constexpr auto is_canonical(Address v_addr, Word satp, unsigned xlen)
+        -> bool {
         if (xlen == 32) {
             return true;
         } else {
             const Word mode = simrv::xlen::satp_mode(satp, 64);
-            if (mode == 1) {  // SV32 compatibility mode under RV64
-                return true;
-            } else if (mode == 8) {  // SV39
+            if (mode == 8) {  // Sv39
                 constexpr Word shift = 64 - 39;
                 return (static_cast<SignedWord>(v_addr << shift) >> shift) ==
                        static_cast<SignedWord>(v_addr);
-            } else if (mode == 9) {  // SV48
+            } else if (mode == 9) {  // Sv48
                 constexpr Word shift = 64 - 48;
                 return (static_cast<SignedWord>(v_addr << shift) >> shift) ==
                        static_cast<SignedWord>(v_addr);
@@ -108,6 +111,18 @@ class Mmu {
 
    private:
     Byte* mmem_;
+    Address dram_base_;
+    Address dram_size_;
+
+    /**
+     * @brief Test whether an implicit page-table access is backed by RAM.
+     *
+     * RISC-V page-table walks are physical memory accesses. A PMA/PMP or bus
+     * failure during the implicit PTE access raises the access-fault exception
+     * corresponding to the original instruction, load, or store—not a page
+     * fault. SimRV has no PMP yet, so the implemented RAM extent is its PMA.
+     */
+    [[nodiscard]] auto pte_access_valid(Address address, unsigned size) const -> bool;
 
     // Per-address-space translation helpers
     /**

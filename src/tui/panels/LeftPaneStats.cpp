@@ -28,8 +28,14 @@ using simrv::isa::InstFormat;
 
 namespace {
 
+/// Instruction categories for TUI statistical distribution breakdown
 enum class InstCategory : uint8_t { ALU, MEM, CTRL, SYS, VEC };
 
+/**
+ * @brief Classifies a RISC-V operation ID into a high-level architectural instruction category.
+ * @param i OperationId integer value.
+ * @return InstCategory classification.
+ */
 auto get_inst_category(int i) -> InstCategory {
     static constexpr std::array<InstCategory, 512> category_lut =
         []() -> std::array<InstCategory, 512> {
@@ -123,10 +129,10 @@ auto LeftPane::render_machine_performance_stats_core(const simrv::core::CPU& cpu
         return format_to_width(insns, width);
     }
     if (adj_logical_row == 27) {
-        double sim_time_seconds = static_cast<double>(cpu.clint_mmio.mtime) / 10000000.0;
+        double rtc_seconds = static_cast<double>(cpu.clint_mmio.mtime.load()) / 10000000.0;
         std::string time =
-            std::format("  Simulated Time : {}{:.6f} s\033[0m {}(0x{:x})\033[0m", kThemeMint,
-                        sim_time_seconds, kThemeMuted, cpu.clint_mmio.mtime);
+            std::format("  Simulated Time : {}{:.6f} s\033[0m {}(mtime: 0x{:x})\033[0m", kThemeMint,
+                        rtc_seconds, kThemeMuted, cpu.clint_mmio.mtime.load());
         return format_to_width(time, width);
     }
     if (adj_logical_row == 28) {
@@ -169,28 +175,38 @@ auto LeftPane::render_machine_performance_stats_sys([[maybe_unused]] const simrv
         return format_to_width(dsk, width);
     }
     if (adj_logical_row == 33) {
-        uint64_t max_val = 1;
-        for (auto val : kips_history_) {
-            if (val > max_val) max_val = val;
-        }
-
-        std::string suffix = std::format("] {} Max:{}", simrv::util::format_with_commas(kips_),
-                                         simrv::util::format_with_commas(max_val));
-        std::string prefix = "  Speed (KIPS)   : [";
+        std::string suffix = std::format("] {:.1f} KIPS", static_cast<double>(kips_));
+        std::string prefix = "  Current Speed  : [";
         int spark_width =
             width - static_cast<int>(prefix.length()) - static_cast<int>(suffix.length());
         if (spark_width < 5) spark_width = 5;
 
         std::string spark = get_sparkline_string(spark_width);
-        std::string color = std::format(
-            "  {}Speed (KIPS)\033[0m   : [{}{}\033[0m] {}{}\033[0m {}{}Max:{}\033[0m", kThemeText,
-            kThemeMint, spark, kThemeMint, simrv::util::format_with_commas(kips_), kThemeMuted,
-            kThemeMuted, simrv::util::format_with_commas(max_val));
+        std::string color =
+            std::format("  {}Current Speed\033[0m  : [{}{}\033[0m] {}{:.1f} KIPS\033[0m",
+                        kThemeText, kThemeMint, spark, kThemeMint, static_cast<double>(kips_));
 
         return format_to_width(color, width);
     }
     if (adj_logical_row == 34) {
-        return format_to_width("", width);
+        uint64_t max_val = max_kips_;
+        for (auto val : kips_history_) {
+            if (val > max_val) max_val = val;
+        }
+        double top_kips = static_cast<double>(max_val);
+        double avg_kips = (active_runtime_ > 0.0)
+                              ? (static_cast<double>(cpu.e_icount) / 1000.0 / active_runtime_)
+                              : 0.0;
+        std::string top_str = (top_kips >= 1000.0) ? std::format("{:.2f} MIPS", top_kips / 1000.0)
+                                                   : std::format("{:.1f} KIPS", top_kips);
+        std::string avg_str = (avg_kips >= 1000.0) ? std::format("{:.2f} MIPS", avg_kips / 1000.0)
+                                                   : std::format("{:.1f} KIPS", avg_kips);
+
+        std::string color =
+            std::format("  {}Overall Speed\033[0m  : {}Top: {}\033[0m  │  {}Avg: {}\033[0m",
+                        kThemeText, kThemeMint, top_str, kThemeMint, avg_str);
+
+        return format_to_width(color, width);
     }
     return format_to_width("", width);
 }
@@ -431,10 +447,10 @@ auto LeftPane::render_cycle_accurate_hw_info(const simrv::core::CPU& cpu, int ad
     }
 
     if (adj_logical_row == 36) {
-        double sim_time_seconds = static_cast<double>(cpu.clint_mmio.mtime) / 10000000.0;
+        double sim_time_seconds = static_cast<double>(cpu.clint_mmio.mtime.load()) / 10000000.0;
         std::string time =
             std::format("  Simulated Time : {}{:.6f} s\033[0m {}(0x{:x})\033[0m", kThemeMint,
-                        sim_time_seconds, kThemeMuted, cpu.clint_mmio.mtime);
+                        sim_time_seconds, kThemeMuted, cpu.clint_mmio.mtime.load());
         return format_to_width(time, width);
     }
 
@@ -518,12 +534,12 @@ auto LeftPane::render_debug_state(int debug_row, int width) -> std::string {
                            right_width, 8);
     }
     if (debug_row == 3) {
-        std::string tohost_str = std::format("0x{:x}", machine_.tohost);
+        std::string tohost_str = std::format("0x{:x}", machine_.tohost.load());
         std::string traplog_status = machine_.s_traplog_mode ? "active" : "disabled";
-        return render_pair("tohost", tohost_str, machine_.tohost != 0 ? kThemePeach : kThemeVal,
-                           "traplog", traplog_status,
-                           machine_.s_traplog_mode ? kThemeMint : kThemeMuted, col_width,
-                           right_width, 8);
+        return render_pair("tohost", tohost_str,
+                           machine_.tohost.load() != 0 ? kThemePeach : kThemeVal, "traplog",
+                           traplog_status, machine_.s_traplog_mode ? kThemeMint : kThemeMuted,
+                           col_width, right_width, 8);
     }
     return format_to_width("", width);
 }

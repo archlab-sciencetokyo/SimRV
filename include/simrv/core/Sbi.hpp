@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include "simrv/Define.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
@@ -12,6 +13,39 @@ class CPU;
 
 namespace simrv::sbi {
 
+namespace detail {
+
+enum class HartMaskSelection : std::uint8_t { Empty, Local, Invalid };
+
+/** Direct SBI handles only supervisor ECALLs; M-mode ECALL remains an architectural trap. */
+constexpr auto is_direct_sbi_ecall(TrapCause cause) -> bool {
+    return cause == enum_mask(ExceptionCode::SupervisorEcall);
+}
+
+/** Interpret an SBI hart-mask pair for SimRV's single supervisor-visible hart. */
+constexpr auto select_local_hart(Word hart_mask, Word hart_mask_base, Word hart_id)
+    -> HartMaskSelection {
+    if (hart_mask_base == static_cast<Word>(-1)) {
+        return HartMaskSelection::Local;
+    }
+    if (hart_mask == 0) {
+        return HartMaskSelection::Empty;
+    }
+    if (hart_id < hart_mask_base || (hart_id - hart_mask_base) >= simrv::xlen::kXLenBits) {
+        return HartMaskSelection::Invalid;
+    }
+    const Word local_bit = static_cast<Word>(1) << (hart_id - hart_mask_base);
+    return hart_mask == local_bit ? HartMaskSelection::Local : HartMaskSelection::Invalid;
+}
+
+}  // namespace detail
+
+/**
+ * @brief Direct single-hart SBI execution environment used when no M-mode firmware is loaded.
+ *
+ * Only extensions whose semantics can be provided by the simulator are advertised. When OpenSBI
+ * is present, ECALLs are delivered architecturally to that firmware instead of being handled here.
+ */
 class Sbi {
    public:
     explicit Sbi(core::CPU& cpu);
@@ -23,7 +57,6 @@ class Sbi {
     auto handle_base(Word func_id) -> bool;
     auto handle_time(Word func_id) -> bool;
     auto handle_rfence(Word func_id) -> bool;
-    auto handle_hsm(Word func_id) -> bool;
     auto handle_ipi(Word func_id) -> bool;
     auto handle_system_reset(Word func_id) -> bool;
 

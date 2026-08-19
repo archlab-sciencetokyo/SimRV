@@ -5,6 +5,7 @@
 #include "simrv/cache/ICache.hpp"
 
 #include <cstring>
+#include <utility>
 
 #include "simrv/Define.hpp"
 
@@ -17,7 +18,7 @@ auto ICache::read(Address addr, uint32_t& data) -> bool {
     last_accessed_set_ = set_idx;
 
     for (uint32_t w = 0; w < kWays; ++w) {
-        auto& line = sets_.at(set_idx).at(w);
+        auto& line = sets_[set_idx][w];
         if (line.valid && line.tag == tag) {
             const uint32_t byte_offset = addr & (kLineBytes - 1u);
             if (simrv::compiler::unlikely(byte_offset + sizeof(uint32_t) > kLineBytes)) {
@@ -48,7 +49,7 @@ auto ICache::read16(Address addr, uint16_t& data) -> bool {
     last_accessed_set_ = set_idx;
 
     for (uint32_t w = 0; w < kWays; ++w) {
-        auto& line = sets_.at(set_idx).at(w);
+        auto& line = sets_[set_idx][w];
         if (line.valid && line.tag == tag) {
             const uint32_t byte_offset = addr & (kLineBytes - 1u);
             if (simrv::compiler::unlikely(byte_offset + sizeof(uint16_t) > kLineBytes)) {

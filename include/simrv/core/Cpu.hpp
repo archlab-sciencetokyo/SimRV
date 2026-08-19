@@ -31,7 +31,7 @@ class Machine;
  * @struct ArchState
  * @brief Groups all architectural registers and CSRs into a cohesive block.
  */
-struct ArchState {
+struct alignas(128) ArchState {
     Register pc{};        ///< Program Counter (instruction address pointer)
     RegisterFile regs{};  ///< General-purpose integer, FP, and vector registers
 
@@ -47,6 +47,10 @@ struct ArchState {
     CSRValue misa = isa::kMisaDefault;  ///< Machine ISA and extensions descriptor
     CSRValue mie{};                     ///< Machine Interrupt Enable
     CSRValue mip{};                     ///< Machine Interrupt Pending
+    bool seip_software{};  ///< Software-writable component of mip.SEIP (ORed with PLIC signal).
+    bool seip_external{};  ///< PLIC-driven component of mip.SEIP.
+    bool stip_software{};  ///< M-mode software-posted component of writable mip.STIP.
+    bool stip_timer{};     ///< Direct-SBI timer signal component of mip.STIP.
     CSRValue
         medeleg{};  ///< Machine Exception Delegation (delegates trap handling to supervisor mode)
     CSRValue mideleg{};  ///< Machine Interrupt Delegation (delegates interrupts to supervisor mode)
@@ -83,10 +87,22 @@ struct ArchState {
                           ///< Store-Conditional (LR/SC)
     CSRValue reserved{};  ///< Reserved for internal architectural extensions or tracking
 
+    /** Recompute supervisor pending bits that combine independent software/device sources. */
+    constexpr void refresh_supervisor_pending() {
+        if (seip_software || seip_external)
+            mip |= enum_mask(MipBit::Seip);
+        else
+            mip &= ~enum_mask(MipBit::Seip);
+        if (stip_software || stip_timer)
+            mip |= enum_mask(MipBit::Stip);
+        else
+            mip &= ~enum_mask(MipBit::Stip);
+    }
+
     /**
      * @brief Determines the active XLEN (register width in bits: 32 or 64) based on the CPU state.
      */
-    [[nodiscard]] constexpr auto current_xlen() const -> unsigned {
+    [[nodiscard]] constexpr auto xlen_for_privilege(PrivilegeLevel level) const -> unsigned {
         if constexpr (!simrv::xlen::kIsXLen64) {
             return 32;
         } else {
@@ -94,9 +110,9 @@ struct ArchState {
             if (mxl == 1) {
                 return 32;
             }
-            if (priv == PrivilegeLevel::Machine) {
+            if (level == PrivilegeLevel::Machine) {
                 return 64;
-            } else if (priv == PrivilegeLevel::Supervisor) {
+            } else if (level == PrivilegeLevel::Supervisor) {
                 const unsigned sxl = (mstatus >> 34) & 3;
                 return (sxl == 1) ? 32 : 64;
             } else {  // User
@@ -106,10 +122,39 @@ struct ArchState {
         }
     }
 
+    [[nodiscard]] constexpr auto current_xlen() const -> unsigned {
+        return xlen_for_privilege(priv);
+    }
+
     /**
      * @brief Updates the active XLEN configurations in register file proxies.
      */
     constexpr void update_xlen() { regs.xlen = current_xlen(); }
+
+    /**
+     * @brief Initialize SXL/UXL consistently with the selected machine XLEN.
+     *
+     * An RV64 simulator binary may host an RV32 machine personality. In that
+     * case lower privilege modes must remain RV32 when a trap enters S/U mode.
+     */
+    constexpr void initialize_lower_xlen_fields() {
+        const bool has_s = isa::misa_has_extension(misa, isa::IsaExtension::S);
+        const bool has_u = isa::misa_has_extension(misa, isa::IsaExtension::U);
+        const bool has_f = isa::misa_has_extension(misa, isa::IsaExtension::F);
+        const bool has_v = isa::misa_has_extension(misa, isa::IsaExtension::V);
+        if constexpr (simrv::xlen::kIsXLen64) {
+            constexpr uint64_t kLowerXlenMask = uint64_t{0xFU} << 32U;
+            const unsigned mxl = static_cast<unsigned>((static_cast<uint64_t>(misa) >> 62U) & 0x3U);
+            const uint64_t lower_xlen = (mxl == 1U) ? 1U : 2U;
+            const uint64_t updated = (static_cast<uint64_t>(mstatus) & ~kLowerXlenMask) |
+                                     (has_u ? (lower_xlen << 32U) : 0U) |
+                                     (has_s ? (lower_xlen << 34U) : 0U);
+            mstatus = static_cast<CSRValue>(updated);
+        }
+        mstatus = mstatus_legalize_mpp(mstatus, has_s, has_u);
+        mstatus &= mstatus_writable_mask(has_s, has_u, has_f, has_v);
+        update_xlen();
+    }
 };
 
 #include <deque>
@@ -125,34 +170,43 @@ struct ArchState {
  *   bits [ 1: 0] = privilege (0=User, 1=Supervisor, 3=Machine)
  * valid == false when tag == kInvalidTag.
  */
-struct SoftTlbEntry {
+struct alignas(32) SoftTlbEntry {
     static constexpr uint64_t kInvalidTag = ~uint64_t{0};
 
-    uint64_t tag = kInvalidTag;     ///< Packed VPN | ASID | priv; kInvalidTag when empty
-    Address paddr_base = 0;         ///< Physical page base (paddr & ~0xFFF)
-    Byte* host_ptr_base = nullptr;  ///< Direct host pointer base (nullptr = use paddr)
+    uint64_t tag = kInvalidTag;     ///< Packed VPN | ASID | priv; kInvalidTag when empty (8 bytes)
+    Address paddr_base = 0;         ///< Physical page base (paddr & ~0xFFF) (8 bytes)
+    Byte* host_ptr_base = nullptr;  ///< Direct host pointer base (nullptr = use paddr) (8 bytes)
+    uint32_t epoch = 0;             ///< TLB generation epoch (4 bytes)
+    uint32_t reserved = 0;          ///< Padding to 32 bytes (4 bytes)
 
     /// Build a lookup tag from the three key fields.
     [[nodiscard]] static constexpr auto make_tag(uint64_t vpn, uint64_t asid,
                                                  PrivilegeLevel priv) noexcept -> uint64_t {
-        return (vpn << 16) | ((asid & 0x3FFFu) << 2) |
+        return ((vpn & 0xFFFFFFFFFFULL) << 18) | ((asid & 0xFFFFu) << 2) |
                static_cast<uint64_t>(static_cast<uint8_t>(priv) & 0x3u);
     }
 
-    [[nodiscard]] constexpr auto matches(uint64_t vpn, uint64_t asid,
-                                         PrivilegeLevel priv) const noexcept -> bool {
-        return tag == make_tag(vpn, asid, priv);
+    [[nodiscard]] constexpr auto matches(uint64_t vpn, uint64_t asid, PrivilegeLevel priv,
+                                         uint32_t current_epoch) const noexcept -> bool {
+        return epoch == current_epoch && tag == make_tag(vpn, asid, priv);
     }
 
-    void set(uint64_t vpn, uint64_t asid, PrivilegeLevel priv, Address paddr_base_in,
-             Byte* host_ptr_base_in) noexcept {
+    void set(uint64_t vpn, uint64_t asid, PrivilegeLevel priv, uint32_t current_epoch,
+             Address paddr_base_in, Byte* host_ptr_base_in) noexcept {
         tag = make_tag(vpn, asid, priv);
+        epoch = current_epoch;
         paddr_base = paddr_base_in;
         host_ptr_base = host_ptr_base_in;
     }
 
-    void invalidate() noexcept { tag = kInvalidTag; }
-    [[nodiscard]] bool valid() const noexcept { return tag != kInvalidTag; }
+    void invalidate() noexcept {
+        tag = kInvalidTag;
+        paddr_base = 0;
+        host_ptr_base = nullptr;
+    }
+    [[nodiscard]] bool valid(uint32_t current_epoch) const noexcept {
+        return epoch == current_epoch && tag != kInvalidTag;
+    }
 };
 
 struct MemWriteRecord {
@@ -166,8 +220,6 @@ struct ClintState {
     Counter mtimecmp = 0;
     Counter mcycle = 0;
     int rtc_divider = 0;
-    Counter last_mtime = 0;
-    Counter last_mtimecmp = 0;
 };
 
 struct UndoStep {
@@ -188,6 +240,11 @@ class CPU {
      * initial status values.
      */
     CPU();
+
+    /**
+     * @brief Resets CPU architectural state, TLB entries, decode caches, and execution metrics.
+     */
+    void reset();
 
     /**
      * @brief Flushes all instruction/data Translation Lookaside Buffer (TLB) entries and
@@ -302,7 +359,16 @@ class CPU {
      * @param machine Reference to the top-level machine orchestration.
      * @param op Reference to the cached pre-decoded operation.
      */
-    void execute_cached_op_fast(Machine& machine, CachedOp& op);
+    template <bool kCopyContext = false, bool kInstMix = false>
+    SIMRV_ALWAYS_INLINE void execute_cached_op_fast(Machine& machine, CachedOp& op);
+
+    /**
+     * @brief Executes a batch of cached operations in a tight inlined loop for baremetal
+     * acceleration.
+     * @param machine Reference to top-level Machine.
+     * @param batch_size Maximum number of instructions to execute in the batch.
+     */
+    void run_fast_baremetal_batch(Machine& machine, uint32_t batch_size);
 
     /**
      * @brief Coroutine generator for persistent zero-allocation pipeline simulation.
@@ -418,23 +484,22 @@ class CPU {
     void commit_control_flow_and_traps(Machine& machine);
 
    private:
-    auto execute_cached_lui(CachedOp& op) -> void;
-    auto execute_cached_auipc(CachedOp& op) -> void;
     auto execute_cached_jal(CachedOp& op) -> void;
     auto execute_cached_jalr(CachedOp& op, Register rrs1) -> void;
     auto execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) -> void;
-    auto execute_cached_op(CachedOp& op, Register rrs1, Register rrs2) -> void;
-    auto execute_cached_op_imm(CachedOp& op, Register rrs1) -> void;
-    auto execute_cached_op_imm32(CachedOp& op, Register rrs1) -> void;
-    auto execute_cached_op32(CachedOp& op, Register rrs1, Register rrs2) -> void;
-    auto try_fast_load(Machine& machine, Address mem_addr, isa::Funct3 funct3, Register& out_val)
-        -> bool;
-    auto try_fast_store(Machine& machine, Address mem_addr, isa::Funct3 funct3, Register rrs2)
-        -> bool;
+    SIMRV_ALWAYS_INLINE auto try_fast_load(Machine& machine, Address mem_addr, isa::Funct3 funct3,
+                                           Register& out_val) -> bool;
+    SIMRV_ALWAYS_INLINE auto try_fast_store(Machine& machine, Address mem_addr, isa::Funct3 funct3,
+                                            Register rrs2) -> bool;
     auto execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> bool;
     auto execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Register rrs2) -> bool;
     auto execute_cached_fallback(Machine& machine) -> void;
-    auto handle_cached_interrupts() -> void;
+    auto dispatch_pending_interrupts() -> void;
+    SIMRV_ALWAYS_INLINE auto handle_cached_interrupts() -> void {
+        if (simrv::compiler::unlikely((state_.mip & state_.mie) != 0u)) {
+            dispatch_pending_interrupts();
+        }
+    }
     inline void pc_sign_extend() {
         if constexpr (simrv::xlen::kIsXLen64) {
             if (simrv::compiler::unlikely(state_.regs.xlen == 32)) {
@@ -442,6 +507,24 @@ class CPU {
                     static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
             }
         }
+    }
+
+    /// Advance PC by op.len, update instruction counters, sign-extend PC, and process interrupts.
+    SIMRV_ALWAYS_INLINE void advance_cached_pc(const CachedOp& op) {
+        state_.pc += op.len;
+        e_icount++;
+        if (op.cinsn) e_ccount++;
+        pc_sign_extend();
+        handle_cached_interrupts();
+    }
+
+    /// Set PC to target_pc, update instruction counters, sign-extend PC, and process interrupts.
+    SIMRV_ALWAYS_INLINE void commit_cached_branch_target(const CachedOp& op, Register target_pc) {
+        state_.pc = target_pc;
+        e_icount++;
+        if (op.cinsn) e_ccount++;
+        pc_sign_extend();
+        handle_cached_interrupts();
     }
 
     ArchState state_;
@@ -482,6 +565,16 @@ class CPU {
         return state_.priv;
     }
 
+    /**
+     * @brief XLEN governing explicit loads/stores, including MPRV/MPP.
+     *
+     * The privileged architecture requires MPRV accesses to use MPP's XLEN,
+     * which can differ from the currently executing M-mode XLEN.
+     */
+    [[nodiscard]] constexpr auto effective_data_xlen() const -> unsigned {
+        return state_.xlen_for_privilege(effective_data_privilege());
+    }
+
     Tlb tlb;
 
     PlicMmio plic_mmio;
@@ -498,9 +591,12 @@ class CPU {
     simrv::pipeline::PipelineTask pipeline_task;
     simrv::pipeline::PipelineSim pipeline_sim;
     DecodeCache decode_cache;
-    std::array<SoftTlbEntry, 2048> soft_tlb_read{};
-    std::array<SoftTlbEntry, 2048> soft_tlb_write{};
+    alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_read{};
+    alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_write{};
+    uint32_t soft_tlb_epoch = 1;
     void soft_tlb_flush();
+    void soft_tlb_flush_selective(bool match_all_vaddr, Address vaddr, bool match_all_asid,
+                                  Word asid);
 
     // ========== Execution Metrics ==========
     uint64_t e_icount{0};                                     // Total instruction count

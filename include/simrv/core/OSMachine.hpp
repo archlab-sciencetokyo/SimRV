@@ -9,7 +9,7 @@ class OSMachine : public Machine {
     OSMachine() = default;
     ~OSMachine() override = default;
 
-    void run() override;
+    void execute_cycle() override;
 
    protected:
     void prepare_cycle() override;

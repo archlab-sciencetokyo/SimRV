@@ -69,8 +69,8 @@ template <unsigned XLen = kXLenBits>
 template <unsigned XLen = kXLenBits>
 [[nodiscard]] inline constexpr auto satp_mode_supported(Word mode) -> bool {
     if constexpr (XLen == 64) {
-        return mode == 0 || mode == 8 || mode == 9 ||
-               mode == 1;  // Bare, SV39, SV48, SV32 (compatibility)
+        // RV64 MODE=1 is reserved; Sv32 is an RV32 translation scheme.
+        return mode == 0 || mode == 8 || mode == 9;  // Bare, Sv39, Sv48
     } else {
         return mode == 0 || mode == 1;  // Bare, SV32
     }
@@ -88,11 +88,7 @@ template <unsigned XLen = kXLenBits>
 template <unsigned XLen = kXLenBits>
 [[nodiscard]] inline constexpr auto satp_root_ppn(Word satp) -> Word {
     if constexpr (XLen == 64) {
-        // Under SV32 mode on a 64-bit machine, we extract the 22-bit PPN.
-        // Otherwise, SV39/SV48 uses a 44-bit PPN.
-        if (satp_mode<64>(satp) == 1) {
-            return satp & 0x003fffffu;
-        }
+        // Sv39 and Sv48 use the common RV64 satp PPN field.
         return static_cast<Word>(static_cast<uint64_t>(satp) & 0x00000fffffffffffULL);
     } else {
         return satp & 0x003fffffu;

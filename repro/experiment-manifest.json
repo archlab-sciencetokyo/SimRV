@@ -1,0 +1,19 @@
+{
+  "$schema": "../release/schemas/experiment.schema.json",
+  "schema_version": 1,
+  "name": "SimRV 2.0 research companion",
+  "repetitions": 5,
+  "warmups": 1,
+  "timeout_seconds": 120,
+  "configurations": [
+    {"id": "rv32", "xlen": 32, "misa": "rv32gcbv", "vlen": 256, "preset": "rv32-release"},
+    {"id": "rv64", "xlen": 64, "misa": "rv64gcbv", "vlen": 256, "preset": "rv64-release"}
+  ],
+  "correctness_suites": ["regress", "isa", "vector", "linux"],
+  "performance": {
+    "policy": "evidence-only",
+    "workloads": ["dhrystone", "median", "memcpy", "mm", "multiply", "qsort", "rsort", "spmv", "towers", "vvadd"],
+    "reference": "spike"
+  },
+  "outputs": {"raw": "results/raw", "aggregate": "results/aggregate.json", "table": "results/table.md", "plot": "results/throughput.svg"}
+}

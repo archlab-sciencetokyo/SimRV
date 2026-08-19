@@ -1,0 +1,20 @@
+name: Architectural correctness discrepancy
+description: Report behavior that differs from a RISC-V specification or reference model
+title: "[correctness]: "
+labels: ["correctness"]
+body:
+  - type: textarea
+    attributes:
+      label: Observed and expected behavior
+      description: Cite the relevant specification section or reference-model result.
+    validations: {required: true}
+  - type: textarea
+    attributes:
+      label: Minimal reproducer
+      description: Include the guest, command line, instruction trace, and exit status.
+    validations: {required: true}
+  - type: textarea
+    attributes:
+      label: Configuration
+      description: Include SimRV revision, host/compiler, XLEN, MISA, VLEN, privilege mode, and evidence report.
+    validations: {required: true}

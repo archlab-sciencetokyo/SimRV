@@ -8,7 +8,8 @@
 #include <optional>
 #include <string>
 
-#include "simrv/tui/Tui.hpp"
+#include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/TuiWidget.hpp"
 
 namespace simrv::core {
@@ -16,29 +17,6 @@ class Machine;
 }
 
 namespace simrv::tui {
-
-enum class TuiFooterAction : uint8_t {
-    Step,
-    StepBack,
-    CycleRegs,
-    CycleTools,
-    SetBreakpoint,
-    SetWatchpoint,
-    TogglePcBreakpoint,
-    SetSpeed,
-    InspectMem,
-    LoadBinary,
-    ToggleHelp,
-    RunPause,
-    Quit,
-    CycleLayout,
-    TogglePanel,
-    ToggleTrace,
-    OpenSettings,
-    ConfigureMisa,
-    ConfigureSystem,
-    ManageBreakpoints
-};
 
 class StatusBar : public TuiWidget {
    public:
@@ -60,7 +38,8 @@ class StatusBar : public TuiWidget {
 
     [[nodiscard]] auto is_pos_on_status_badge(int x, int width) const -> bool;
     [[nodiscard]] auto is_pos_on_right_panel_mode(int x) const -> bool;
-    [[nodiscard]] auto get_footer_action_at_col(int col, int row_idx = 0) const
+    [[nodiscard]] auto is_pos_on_right_panel_attached(int x) const -> bool;
+    [[nodiscard]] auto get_footer_action_at_col(int col, int row_idx, int terminal_width) const
         -> std::optional<TuiFooterAction>;
     [[nodiscard]] auto render_row(int row_idx, int width) -> std::string override;
 
@@ -76,7 +55,7 @@ class StatusBar : public TuiWidget {
     int left_width_ = 0;
     int right_width_ = 0;
 
-    uint64_t last_icount_ = 0;
+    [[maybe_unused]] uint64_t last_icount_ = 0;
     uint64_t kips_ = 0;
 };
 

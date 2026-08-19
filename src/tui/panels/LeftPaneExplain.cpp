@@ -639,7 +639,7 @@ auto LeftPane::get_explain_rows(int width) -> std::vector<std::string> {
                         kThemeText, kThemePeach),
             width));
         explain_rows.push_back(
-            format_to_width(std::format("  {}Action : {}Inspect another address \033[1m[m]\033[22m "
+            format_to_width(std::format("  {}Action : {}Inspect another address \033[1m[i]\033[22m "
                                         "or load a valid binary \033[1m[o]\033[22m.\033[0m",
                                         kThemeText, kThemeSky),
                             width));

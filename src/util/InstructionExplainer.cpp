@@ -11,6 +11,7 @@
 #include <print>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 
 #include "simrv/Define.hpp"
@@ -29,114 +30,54 @@ using simrv::isa::Opcode;
 using enum simrv::core::Csr;
 
 auto csr_name(uint32_t csr_addr) -> std::string {
-    switch (static_cast<Csr>(csr_addr)) {
-        case Csr::Ustatus:
-            return "ustatus";
-        case Csr::Uie:
-            return "uie";
-        case Csr::Utvec:
-            return "utvec";
-        case Csr::Uscratch:
-            return "uscratch";
-        case Csr::Uepc:
-            return "uepc";
-        case Csr::Ucause:
-            return "ucause";
-        case Csr::Utval:
-            return "utval";
-        case Csr::Uip:
-            return "uip";
-        case Csr::Fflags:
-            return "fflags";
-        case Csr::Frm:
-            return "frm";
-        case Csr::Fcsr:
-            return "fcsr";
-        case Csr::Pmpcfg0:
-            return "pmpcfg0";
-        case Csr::Pmpaddr0:
-            return "pmpaddr0";
-        case Csr::Cycle:
-            return "cycle";
-        case Csr::Time:
-            return "time";
-        case Csr::Instret:
-            return "instret";
-        case Csr::Sstatus:
-            return "sstatus";
-        case Csr::Sedeleg:
-            return "sedeleg";
-        case Csr::Sideleg:
-            return "sideleg";
-        case Csr::Sie:
-            return "sie";
-        case Csr::Stvec:
-            return "stvec";
-        case Csr::Scounteren:
-            return "scounteren";
-        case Csr::Sscratch:
-            return "sscratch";
-        case Csr::Sepc:
-            return "sepc";
-        case Csr::Scause:
-            return "scause";
-        case Csr::Stval:
-            return "stval";
-        case Csr::Sip:
-            return "sip";
-        case Csr::Satp:
-            return "satp";
-        case Csr::Mvendorid:
-            return "mvendorid";
-        case Csr::Marchid:
-            return "marchid";
-        case Csr::Mimpid:
-            return "mimpid";
-        case Csr::Mhartid:
-            return "mhartid";
-        case Csr::Mconfigptr:
-            return "mconfigptr";
-        case Csr::Mstatus:
-            return "mstatus";
-        case Csr::Misa:
-            return "misa";
-        case Csr::Medeleg:
-            return "medeleg";
-        case Csr::Mideleg:
-            return "mideleg";
-        case Csr::Mie:
-            return "mie";
-        case Csr::Mtvec:
-            return "mtvec";
-        case Csr::Mcounteren:
-            return "mcounteren";
-        case Csr::Mscratch:
-            return "mscratch";
-        case Csr::Mepc:
-            return "mepc";
-        case Csr::Mcause:
-            return "mcause";
-        case Csr::Mtval:
-            return "mtval";
-        case Csr::Mip:
-            return "mip";
-        case Csr::Mcycle:
-            return "mcycle";
-        case Csr::Minstret:
-            return "minstret";
-        case Csr::Mcycleh:
-            return "mcycleh";
-        case Csr::Minstreth:
-            return "minstreth";
-        case Csr::Cycleh:
-            return "cycleh";
-        case Csr::Timeh:
-            return "timeh";
-        case Csr::Instreth:
-            return "instreth";
-        default:
-            return std::format("0x{:03X}", csr_addr);
+    static const std::unordered_map<Csr, std::string_view> kCsrNames = {
+        {Csr::Fflags, "fflags"},
+        {Csr::Frm, "frm"},
+        {Csr::Fcsr, "fcsr"},
+        {Csr::Pmpcfg0, "pmpcfg0"},
+        {Csr::Pmpaddr0, "pmpaddr0"},
+        {Csr::Cycle, "cycle"},
+        {Csr::Time, "time"},
+        {Csr::Instret, "instret"},
+        {Csr::Sstatus, "sstatus"},
+        {Csr::Sie, "sie"},
+        {Csr::Stvec, "stvec"},
+        {Csr::Scounteren, "scounteren"},
+        {Csr::Sscratch, "sscratch"},
+        {Csr::Sepc, "sepc"},
+        {Csr::Scause, "scause"},
+        {Csr::Stval, "stval"},
+        {Csr::Sip, "sip"},
+        {Csr::Satp, "satp"},
+        {Csr::Mvendorid, "mvendorid"},
+        {Csr::Marchid, "marchid"},
+        {Csr::Mimpid, "mimpid"},
+        {Csr::Mhartid, "mhartid"},
+        {Csr::Mconfigptr, "mconfigptr"},
+        {Csr::Mstatus, "mstatus"},
+        {Csr::Misa, "misa"},
+        {Csr::Medeleg, "medeleg"},
+        {Csr::Mideleg, "mideleg"},
+        {Csr::Mie, "mie"},
+        {Csr::Mtvec, "mtvec"},
+        {Csr::Mcounteren, "mcounteren"},
+        {Csr::Mscratch, "mscratch"},
+        {Csr::Mepc, "mepc"},
+        {Csr::Mcause, "mcause"},
+        {Csr::Mtval, "mtval"},
+        {Csr::Mip, "mip"},
+        {Csr::Mcycle, "mcycle"},
+        {Csr::Minstret, "minstret"},
+        {Csr::Mcycleh, "mcycleh"},
+        {Csr::Minstreth, "minstreth"},
+        {Csr::Cycleh, "cycleh"},
+        {Csr::Timeh, "timeh"},
+        {Csr::Instreth, "instreth"}};
+
+    if (auto it = kCsrNames.find(static_cast<Csr>(csr_addr)); it != kCsrNames.end()) {
+        return std::string(it->second);
     }
+    return std::format("0x{:03X}", csr_addr);
 }
 
 namespace {
@@ -1627,37 +1568,65 @@ auto format_r_type(OperationId op_id, std::string_view mnemonic, uint32_t rd_val
     if (op_id == SFENCE_VMA) {
         return std::format("sfence.vma {}, {}", rs1_str, rs2_str);
     } else if ((op_id >= LR_W && op_id <= SC_W) || (op_id >= LR_D && op_id <= SC_D)) {
-        if (op_id == LR_W) {
-            return std::format("lr.w {}, ({})", rd_str, rs1_str);
-        } else if (op_id == LR_D) {
-            return std::format("lr.d {}, ({})", rd_str, rs1_str);
-        } else if (op_id == SC_W) {
-            return std::format("sc.w {}, {}, ({})", rd_str, rs2_str, rs1_str);
-        } else {
-            return std::format("sc.d {}, {}, ({})", rd_str, rs2_str, rs1_str);
+        switch (op_id) {
+            case LR_W:
+                return std::format("lr.w {}, ({})", rd_str, rs1_str);
+            case LR_D:
+                return std::format("lr.d {}, ({})", rd_str, rs1_str);
+            case SC_W:
+                return std::format("sc.w {}, {}, ({})", rd_str, rs2_str, rs1_str);
+            case SC_D:
+                return std::format("sc.d {}, {}, ({})", rd_str, rs2_str, rs1_str);
+            default:
+                break;
         }
     } else if ((op_id >= AMOSWAP_W && op_id <= AMOMAXU_W) ||
                (op_id >= AMOSWAP_D && op_id <= AMOMAXU_D)) {
         return std::format("{}.aqrl {}, {}, ({})", mnemonic, rd_str, rs2_str, rs1_str);
     } else if (is_fp_sys) {
         // Conversions and Moves
-        if ((op_id == FMV_X_W || op_id == FMV_X_D) || (op_id == FCLASS_S || op_id == FCLASS_D) ||
-            (op_id >= FCVT_W_S && op_id <= FCVT_LU_S) ||
-            (op_id >= FCVT_W_D && op_id <= FCVT_LU_D)) {
-            return std::format("{} {}, {}", mnemonic, rd_str, frs1_str);
-        } else if ((op_id == FMV_W_X || op_id == FMV_D_X) ||
-                   (op_id >= FCVT_S_W && op_id <= FCVT_S_LU) ||
-                   (op_id >= FCVT_D_W && op_id <= FCVT_D_LU)) {
-            return std::format("{} {}, {}", mnemonic, frd_str, rs1_str);
+        switch (op_id) {
+            case FMV_X_W:
+            case FMV_X_D:
+            case FCLASS_S:
+            case FCLASS_D:
+            case FCVT_W_S:
+            case FCVT_WU_S:
+            case FCVT_L_S:
+            case FCVT_LU_S:
+            case FCVT_W_D:
+            case FCVT_WU_D:
+            case FCVT_L_D:
+            case FCVT_LU_D:
+                return std::format("{} {}, {}", mnemonic, rd_str, frs1_str);
+            case FMV_W_X:
+            case FMV_D_X:
+            case FCVT_S_W:
+            case FCVT_S_WU:
+            case FCVT_S_L:
+            case FCVT_S_LU:
+            case FCVT_D_W:
+            case FCVT_D_WU:
+            case FCVT_D_L:
+            case FCVT_D_LU:
+                return std::format("{} {}, {}", mnemonic, frd_str, rs1_str);
+            default:
+                break;
         }
     } else if (is_dst_fp || is_src_fp) {
-        if (op_id == FSQRT_S || op_id == FSQRT_D) {
-            return std::format("{} {}, {}", mnemonic, frd_str, frs1_str);
-        } else if (op_id == FEQ_S || op_id == FLT_S || op_id == FLE_S || op_id == FEQ_D ||
-                   op_id == FLT_D || op_id == FLE_D) {
-            return std::format("{} {}, {}, {}", mnemonic, rd_str, frs1_str, frs2_str);
-        } else {
-            return std::format("{} {}, {}, {}", mnemonic, frd_str, frs1_str, frs2_str);
+        switch (op_id) {
+            case FSQRT_S:
+            case FSQRT_D:
+                return std::format("{} {}, {}", mnemonic, frd_str, frs1_str);
+            case FEQ_S:
+            case FLT_S:
+            case FLE_S:
+            case FEQ_D:
+            case FLT_D:
+            case FLE_D:
+                return std::format("{} {}, {}, {}", mnemonic, rd_str, frs1_str, frs2_str);
+            default:
+                return std::format("{} {}, {}, {}", mnemonic, frd_str, frs1_str, frs2_str);
         }
     }
     return std::format("{} {}, {}, {}", mnemonic, rd_str, rs1_str, rs2_str);
@@ -1756,6 +1725,174 @@ auto get_reg_name(uint32_t idx, bool is_fp) -> std::string {
     }
 }
 
+namespace {
+
+struct HazardOperandsInfo {
+    bool writes_rd{false};
+    bool rd_is_fp{false};
+    bool reads_rs1{false};
+    bool rs1_is_fp{false};
+    bool reads_rs2{false};
+    bool rs2_is_fp{false};
+    bool reads_rs3{false};
+    bool rs3_is_fp{false};
+};
+
+auto get_operand_hazard_info(OperationId op_id, InstFormat fmt, Opcode op) -> HazardOperandsInfo {
+    HazardOperandsInfo info;
+
+    if (fmt == InstFormat::R || fmt == InstFormat::I || fmt == InstFormat::U ||
+        fmt == InstFormat::J || fmt == InstFormat::R4) {
+        info.writes_rd = true;
+    }
+    switch (op_id) {
+        case ECALL:
+        case EBREAK:
+        case FENCE:
+        case FENCE_I:
+        case WFI:
+        case SRET:
+        case MRET:
+        case SFENCE_VMA:
+        case UNKNOWN:
+            info.writes_rd = false;
+            break;
+        default:
+            break;
+    }
+
+    if (info.writes_rd) {
+        if (op == Opcode::LoadFp) {
+            info.rd_is_fp = true;
+        } else if (op == Opcode::OpFp || op == Opcode::MAdd || op == Opcode::MSub ||
+                   op == Opcode::NMSub || op == Opcode::NMAdd) {
+            switch (op_id) {
+                case FEQ_S:
+                case FLT_S:
+                case FLE_S:
+                case FEQ_D:
+                case FLT_D:
+                case FLE_D:
+                case FCLASS_S:
+                case FCLASS_D:
+                case FMV_X_W:
+                case FMV_X_D:
+                case FCVT_W_S:
+                case FCVT_WU_S:
+                case FCVT_L_S:
+                case FCVT_LU_S:
+                case FCVT_W_D:
+                case FCVT_WU_D:
+                case FCVT_L_D:
+                case FCVT_LU_D:
+                    info.rd_is_fp = false;
+                    break;
+                default:
+                    info.rd_is_fp = true;
+                    break;
+            }
+        }
+    }
+
+    if (fmt == InstFormat::R || fmt == InstFormat::I || fmt == InstFormat::S ||
+        fmt == InstFormat::B || fmt == InstFormat::R4) {
+        info.reads_rs1 = true;
+    }
+    switch (op_id) {
+        case ECALL:
+        case EBREAK:
+        case FENCE:
+        case FENCE_I:
+        case WFI:
+        case SRET:
+        case MRET:
+        case CSRRWI:
+        case CSRRSI:
+        case CSRRCI:
+        case UNKNOWN:
+            info.reads_rs1 = false;
+            break;
+        default:
+            break;
+    }
+
+    if (info.reads_rs1) {
+        if (op == Opcode::OpFp || op == Opcode::MAdd || op == Opcode::MSub || op == Opcode::NMSub ||
+            op == Opcode::NMAdd) {
+            switch (op_id) {
+                case FCVT_S_W:
+                case FCVT_S_WU:
+                case FCVT_S_L:
+                case FCVT_S_LU:
+                case FCVT_D_W:
+                case FCVT_D_WU:
+                case FCVT_D_L:
+                case FCVT_D_LU:
+                case FMV_W_X:
+                case FMV_D_X:
+                    info.rs1_is_fp = false;
+                    break;
+                default:
+                    info.rs1_is_fp = true;
+                    break;
+            }
+        }
+    }
+
+    if (fmt == InstFormat::R || fmt == InstFormat::S || fmt == InstFormat::B ||
+        fmt == InstFormat::R4) {
+        info.reads_rs2 = true;
+    }
+    if (op_id == UNKNOWN) {
+        info.reads_rs2 = false;
+    }
+
+    if (info.reads_rs2) {
+        if (op == Opcode::StoreFp) {
+            info.rs2_is_fp = true;
+        } else if (op == Opcode::OpFp || op == Opcode::MAdd || op == Opcode::MSub ||
+                   op == Opcode::NMSub || op == Opcode::NMAdd) {
+            switch (op_id) {
+                case FSQRT_S:
+                case FSQRT_D:
+                case FCLASS_S:
+                case FCLASS_D:
+                case FCVT_W_S:
+                case FCVT_WU_S:
+                case FCVT_L_S:
+                case FCVT_LU_S:
+                case FCVT_W_D:
+                case FCVT_WU_D:
+                case FCVT_L_D:
+                case FCVT_LU_D:
+                case FCVT_S_W:
+                case FCVT_S_WU:
+                case FCVT_S_L:
+                case FCVT_S_LU:
+                case FCVT_D_W:
+                case FCVT_D_WU:
+                case FCVT_D_L:
+                case FCVT_D_LU:
+                case FMV_X_W:
+                case FMV_X_D:
+                case FMV_W_X:
+                case FMV_D_X:
+                    info.reads_rs2 = false;
+                    break;
+                default:
+                    info.rs2_is_fp = true;
+                    break;
+            }
+        }
+    }
+
+    info.reads_rs3 = (fmt == InstFormat::R4);
+    info.rs3_is_fp = info.reads_rs3;
+    return info;
+}
+
+}  // namespace
+
 void explain_pipeline_hazards(OperationId op_id, InstFormat fmt, uint32_t rd_val, uint32_t rs1_val,
                               uint32_t rs2_val, uint32_t rs3_val, Opcode op, bool use_color) {
     auto c = [use_color](std::string_view ansi_code) -> std::string_view {
@@ -1763,93 +1900,15 @@ void explain_pipeline_hazards(OperationId op_id, InstFormat fmt, uint32_t rd_val
     };
     constexpr std::string_view kItalic = "\033[3m";
 
-    bool writes_rd = false;
-    bool rd_is_fp = false;
-
-    if (fmt == InstFormat::R || fmt == InstFormat::I || fmt == InstFormat::U ||
-        fmt == InstFormat::J || fmt == InstFormat::R4) {
-        writes_rd = true;
-    }
-
-    if (op_id == ECALL || op_id == EBREAK || op_id == FENCE || op_id == FENCE_I || op_id == WFI ||
-        op_id == SRET || op_id == MRET || op_id == SFENCE_VMA || op_id == UNKNOWN) {
-        writes_rd = false;
-    }
-
-    if (writes_rd) {
-        if (op == Opcode::LoadFp) {
-            rd_is_fp = true;
-        } else if (op == Opcode::OpFp || op == Opcode::MAdd || op == Opcode::MSub ||
-                   op == Opcode::NMSub || op == Opcode::NMAdd) {
-            if (op_id == FEQ_S || op_id == FLT_S || op_id == FLE_S || op_id == FEQ_D ||
-                op_id == FLT_D || op_id == FLE_D || op_id == FCLASS_S || op_id == FCLASS_D ||
-                (op_id >= FCVT_W_S && op_id <= FCVT_LU_S) ||
-                (op_id >= FCVT_W_D && op_id <= FCVT_LU_D) || op_id == FMV_X_W || op_id == FMV_X_D) {
-                rd_is_fp = false;
-            } else {
-                rd_is_fp = true;
-            }
-        }
-    }
-
-    bool reads_rs1 = false;
-    bool rs1_is_fp = false;
-
-    if (fmt == InstFormat::R || fmt == InstFormat::I || fmt == InstFormat::S ||
-        fmt == InstFormat::B || fmt == InstFormat::R4) {
-        reads_rs1 = true;
-    }
-
-    if (op_id == ECALL || op_id == EBREAK || op_id == FENCE || op_id == FENCE_I || op_id == WFI ||
-        op_id == SRET || op_id == MRET || op_id == CSRRWI || op_id == CSRRSI || op_id == CSRRCI ||
-        op_id == UNKNOWN) {
-        reads_rs1 = false;
-    }
-
-    if (reads_rs1) {
-        if (op == Opcode::OpFp || op == Opcode::MAdd || op == Opcode::MSub || op == Opcode::NMSub ||
-            op == Opcode::NMAdd) {
-            if ((op_id >= FCVT_S_W && op_id <= FCVT_S_LU) ||
-                (op_id >= FCVT_D_W && op_id <= FCVT_D_LU) || op_id == FMV_W_X || op_id == FMV_D_X) {
-                rs1_is_fp = false;
-            } else {
-                rs1_is_fp = true;
-            }
-        }
-    }
-
-    bool reads_rs2 = false;
-    bool rs2_is_fp = false;
-
-    if (fmt == InstFormat::R || fmt == InstFormat::S || fmt == InstFormat::B ||
-        fmt == InstFormat::R4) {
-        reads_rs2 = true;
-    }
-
-    if (op_id == UNKNOWN) {
-        reads_rs2 = false;
-    }
-
-    if (reads_rs2) {
-        if (op == Opcode::StoreFp) {
-            rs2_is_fp = true;
-        } else if (op == Opcode::OpFp || op == Opcode::MAdd || op == Opcode::MSub ||
-                   op == Opcode::NMSub || op == Opcode::NMAdd) {
-            if (op_id == FSQRT_S || op_id == FSQRT_D || op_id == FCLASS_S || op_id == FCLASS_D ||
-                (op_id >= FCVT_W_S && op_id <= FCVT_LU_S) ||
-                (op_id >= FCVT_W_D && op_id <= FCVT_LU_D) ||
-                (op_id >= FCVT_S_W && op_id <= FCVT_S_LU) ||
-                (op_id >= FCVT_D_W && op_id <= FCVT_D_LU) || op_id == FMV_X_W || op_id == FMV_X_D ||
-                op_id == FMV_W_X || op_id == FMV_D_X) {
-                reads_rs2 = false;
-            } else {
-                rs2_is_fp = true;
-            }
-        }
-    }
-
-    bool reads_rs3 = (fmt == InstFormat::R4);
-    bool rs3_is_fp = reads_rs3;
+    HazardOperandsInfo const h = get_operand_hazard_info(op_id, fmt, op);
+    bool const writes_rd = h.writes_rd;
+    bool const rd_is_fp = h.rd_is_fp;
+    bool const reads_rs1 = h.reads_rs1;
+    bool const rs1_is_fp = h.rs1_is_fp;
+    bool const reads_rs2 = h.reads_rs2;
+    bool const rs2_is_fp = h.rs2_is_fp;
+    bool const reads_rs3 = h.reads_rs3;
+    bool const rs3_is_fp = h.rs3_is_fp;
 
     std::println("{}Pipeline Hazard Analysis:{}", c(kBold), c(kReset));
 
@@ -2247,21 +2306,38 @@ auto get_operation_details(OperationId op_id) -> std::pair<std::string_view, std
 
 auto get_isa_extension_name(OperationId op_id) -> std::string_view {
     if (op_id >= LUI && op_id <= CSRRCI) {
-        if (op_id == LWU || op_id == LD || op_id == SD || op_id == ADDIW || op_id == SLLIW ||
-            op_id == SRLIW || op_id == SRAIW || op_id == ADDW || op_id == SUBW || op_id == SLLW ||
-            op_id == SRLW || op_id == SRAW) {
-            return "RV64I";
+        switch (op_id) {
+            case LWU:
+            case LD:
+            case SD:
+            case ADDIW:
+            case SLLIW:
+            case SRLIW:
+            case SRAIW:
+            case ADDW:
+            case SUBW:
+            case SLLW:
+            case SRLW:
+            case SRAW:
+                return "RV64I";
+            default:
+                return "RV32I";
         }
-        return "RV32I";
     }
     if (op_id >= URET && op_id <= SFENCE_VMA) {
         return "Privileged";
     }
     if (op_id >= MUL && op_id <= REMUW) {
-        if (op_id == MULW || op_id == DIVW || op_id == DIVUW || op_id == REMW || op_id == REMUW) {
-            return "RV64M";
+        switch (op_id) {
+            case MULW:
+            case DIVW:
+            case DIVUW:
+            case REMW:
+            case REMUW:
+                return "RV64M";
+            default:
+                return "RV32M";
         }
-        return "RV32M";
     }
     if (op_id >= LR_W && op_id <= AMOMAXU_W) {
         return "RV32A";
@@ -2276,18 +2352,32 @@ auto get_isa_extension_name(OperationId op_id) -> std::string_view {
         return "RV32D";
     }
     if (op_id >= SH1ADD && op_id <= PACKW) {
-        if (op_id == SH1ADD || op_id == SH2ADD || op_id == SH3ADD || op_id == ADD_UW ||
-            op_id == SLLI_UW || op_id == SH1ADD_UW || op_id == SH2ADD_UW || op_id == SH3ADD_UW) {
-            return "Zba";
+        switch (op_id) {
+            case SH1ADD:
+            case SH2ADD:
+            case SH3ADD:
+            case ADD_UW:
+            case SLLI_UW:
+            case SH1ADD_UW:
+            case SH2ADD_UW:
+            case SH3ADD_UW:
+                return "Zba";
+            case CLMUL:
+            case CLMULH:
+            case CLMULR:
+                return "Zbc";
+            case BSET:
+            case BSETI:
+            case BCLR:
+            case BCLRI:
+            case BINV:
+            case BINVI:
+            case BEXT:
+            case BEXTI:
+                return "Zbs";
+            default:
+                return "Zbb";
         }
-        if (op_id == CLMUL || op_id == CLMULH || op_id == CLMULR) {
-            return "Zbc";
-        }
-        if (op_id == BSET || op_id == BSETI || op_id == BCLR || op_id == BCLRI || op_id == BINV ||
-            op_id == BINVI || op_id == BEXT || op_id == BEXTI) {
-            return "Zbs";
-        }
-        return "Zbb";
     }
     if (op_id >= VSETVLI && op_id <= VWSLL_VI) {
         return "RV32V";

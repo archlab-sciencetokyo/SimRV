@@ -49,8 +49,10 @@ class LeftPane : public TuiWidget {
 
     void update_cache();
     void set_kips(uint64_t kips) { kips_ = kips; }
+    void set_max_kips(uint64_t max_kips) { max_kips_ = max_kips; }
     void set_kips_history(const std::vector<uint64_t>& history) { kips_history_ = history; }
     void set_paused(bool paused) { paused_ = paused; }
+    void set_learn_enabled(bool enabled) { learn_enabled_ = enabled; }
     void set_visible_rows(int rows) { visible_rows_ = rows; }
     void set_active_runtime(double secs) { active_runtime_ = secs; }
     void scroll(int lines);
@@ -71,6 +73,8 @@ class LeftPane : public TuiWidget {
         -> std::optional<Register>;
     [[nodiscard]] auto get_stack_addr_at_row(int logical_row) const -> std::optional<Register>;
     [[nodiscard]] auto is_running_label_click(int logical_row, int col, int width) const -> bool;
+    [[nodiscard]] auto get_text_in_range(int start_row, int start_col, int end_row, int end_col,
+                                         int width) -> std::string;
 
     void select_next_cache_set(int delta) {
         constexpr int kNumSets = 16;
@@ -94,6 +98,7 @@ class LeftPane : public TuiWidget {
     [[nodiscard]] auto render_tab_bar(int width) const -> std::string;
     [[nodiscard]] auto render_trace_row(int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_log_bottom_row(int row_idx, int num_rows, int width) -> std::string;
+    [[nodiscard]] auto render_guidance_row(int row_idx, int width) -> std::string;
 
     [[nodiscard]] auto get_sparkline_string(int width) -> std::string;
     [[nodiscard]] auto get_row_uncached(int logical_row, int width) -> std::string;
@@ -195,6 +200,7 @@ class LeftPane : public TuiWidget {
     simrv::core::Machine& machine_;
     TuiRegPage page_ = TuiRegPage::GPR;
     bool paused_ = true;
+    bool learn_enabled_ = false;
 
     std::array<Register, 32> cached_gpr_{};
     std::array<uint64_t, 32> cached_fpr_{};
@@ -203,6 +209,7 @@ class LeftPane : public TuiWidget {
     int last_width_ = 0;
 
     uint64_t kips_ = 0;
+    uint64_t max_kips_ = 0;
     std::vector<uint64_t> kips_history_;
     int visible_rows_ = 25;
     int scroll_offset_ = 0;

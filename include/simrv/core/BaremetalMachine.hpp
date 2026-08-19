@@ -9,7 +9,9 @@ class BaremetalMachine : public Machine {
     BaremetalMachine() = default;
     ~BaremetalMachine() override = default;
 
-    void run() override;
+    void execute_cycle() override;
+    auto execute_fast_batch(uint32_t batch_size) -> bool override;
+    void finalize_cycle() override;
 };
 
 }  // namespace simrv::core

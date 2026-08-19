@@ -4,21 +4,76 @@
  */
 #include "simrv/device/Rtc.hpp"
 
+#include <chrono>
+
 #include "simrv/core/Machine.hpp"
 
 namespace simrv {
 
 Rtc::Rtc(simrv::core::Machine& machine) : machine_(machine) {}
 
+void Rtc::evaluate_alarm() {
+    if (alarm_enabled_ && !alarm_status_) {
+        const uint64_t rtc_ns = machine_.cpu.clint_mmio.mtime.load() * 100ULL;
+        if (rtc_ns >= alarm_time_) {
+            alarm_status_ = true;
+            machine_.cpu.plic_set_irq(static_cast<int>(kRtcIrq), 1);
+        }
+    }
+}
+
 auto Rtc::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
-    if (req.opcode == memory::TlOpcodeA::Get) {
-        const Address offset = req.address - kBaseAddress;
-        if (offset == kRtcOffset) {
-            resp.data = static_cast<Word>(machine_.cpu.clint_mmio.mtime);
-        } else if (offset == kRtcOffset + 4) {
-            resp.data = static_cast<Word>(machine_.cpu.clint_mmio.mtime >> 32);
-        } else {
-            resp.data = 0;
+    evaluate_alarm();
+    resp.error = false;
+    resp.data = 0;
+
+    const bool is_write = (req.opcode == memory::TlOpcodeA::PutFullData ||
+                           req.opcode == memory::TlOpcodeA::PutPartialData);
+    const Address offset = req.address - kBaseAddress;
+
+    if (!is_write) {
+        uint64_t rtc_ns = machine_.cpu.clint_mmio.mtime.load() * 100ULL;
+
+        switch (offset) {
+            case kRtcOffset:  // TIME_LOW (0x00)
+                resp.data = static_cast<Word>(rtc_ns & 0xffffffffULL);
+                break;
+            case kRtcOffset + 4:  // TIME_HIGH (0x04)
+                resp.data = static_cast<Word>(rtc_ns >> 32);
+                break;
+            case 0x10:  // IRQ_ENABLED
+                resp.data = alarm_enabled_ ? 1 : 0;
+                break;
+            case 0x18:  // ALARM_STATUS
+                resp.data = alarm_status_ ? 1 : 0;
+                break;
+            default:
+                resp.data = 0;
+                break;
+        }
+    } else {
+        switch (offset) {
+            case 0x08:  // ALARM_LOW
+                alarm_time_ = (alarm_time_ & 0xffffffff00000000ULL) | req.data;
+                break;
+            case 0x0c:  // ALARM_HIGH
+                alarm_time_ =
+                    (alarm_time_ & 0x00000000ffffffffULL) | (static_cast<uint64_t>(req.data) << 32);
+                break;
+            case 0x10:  // IRQ_ENABLED
+                alarm_enabled_ = (req.data != 0);
+                break;
+            case 0x14:  // CLEAR_ALARM
+                alarm_enabled_ = false;
+                alarm_status_ = false;
+                machine_.cpu.plic_set_irq(static_cast<int>(kRtcIrq), 0);
+                break;
+            case 0x1c:  // CLEAR_INTERRUPT
+                alarm_status_ = false;
+                machine_.cpu.plic_set_irq(static_cast<int>(kRtcIrq), 0);
+                break;
+            default:
+                break;
         }
     }
     return true;

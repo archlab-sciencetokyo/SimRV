@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -22,10 +23,7 @@
 #include "simrv/device/Framebuffer.hpp"
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
-#include "simrv/device/Virtio.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
-#include "simrv/util/SdlAudio.hpp"
-#include "simrv/util/SdlDisplay.hpp"
 
 namespace simrv::device {
 class PowerMmio;
@@ -39,6 +37,19 @@ class LeftPane;
 
 namespace simrv::core {
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
+enum class ExecutionState : uint8_t {
+    Stopped = 0,
+    Running = 1,
+    Paused = 2,
+    Stepping = 3,
+};
+
+struct PendingRebootState {
+    std::string binary_path;
+    std::optional<bool> appmode;
+    std::optional<std::string> disk_path;
+};
+
 /**
  * @class Machine
  * @brief Owns and orchestrates CPU, memory subsystem, and MMIO devices.
@@ -72,53 +83,82 @@ class Machine {
     /// @return true if successfully loaded, false otherwise.
     auto load_disk_image(const std::string& filepath) -> bool;
     /// Execute the main simulation loop until termination criteria are met.
-    virtual void run() = 0;
+    void run();
     /// Finalize cycle for tohost checks only.
     void finalize_cycle_tohost();
     /// Stop the simulation loop.
-    void stop() {
-        is_running_ = false;
-        is_shutdown_ = true;
+    void stop();
+    /// Get current atomic execution state.
+    [[nodiscard]] auto execution_state() const -> ExecutionState {
+        return execution_state_.load(std::memory_order_relaxed);
     }
+    /// Check if machine execution is currently paused.
+    [[nodiscard]] auto is_paused() const -> bool;
+    /// Check if machine execution is currently stopped.
+    [[nodiscard]] auto is_stopped() const -> bool {
+        return execution_state_.load(std::memory_order_relaxed) == ExecutionState::Stopped;
+    }
+    /// Check if machine execution is in single-stepping state.
+    [[nodiscard]] auto is_stepping() const -> bool {
+        return execution_state_.load(std::memory_order_relaxed) == ExecutionState::Stepping;
+    }
+    /// Pause machine execution.
+    void pause();
+    /// Resume machine execution.
+    void resume();
+    /// Request execution of a single instruction cycle.
+    void step();
     /// Check if the simulation loop is running.
-    [[nodiscard]] auto is_running() const -> bool { return is_running_; }
-    /// Request system reboot.
-    void request_reboot() {
-        reboot_requested = true;
-        is_running_ = false;
+    [[nodiscard]] auto is_running() const -> bool {
+        return is_running_.load(std::memory_order_relaxed);
     }
+    /// Request system reboot.
+    void request_reboot();
+    /// Request termination of the simulator process with the supplied status.
+    void request_exit(int status = 0);
+    /// Reset runtime state flags and CPU state.
+    void reset_state();
 
-    uint64_t tohost = 0;  // Host communication register (always 64-bit for HTIF).
+    /// Thread-safe getter and setter for pending reboot configuration
+    void set_pending_reboot(const std::string& binary_path,
+                            std::optional<bool> appmode = std::nullopt,
+                            std::optional<std::string> disk_path = std::nullopt);
+    [[nodiscard]] auto get_pending_reboot() const -> PendingRebootState;
+    void clear_pending_reboot();
+
+    std::atomic<uint64_t> tohost{0};  // Host communication register (always 64-bit for HTIF).
     std::atomic<bool> reboot_requested = false;  // Reboot requested flag.
-    int exit_code = 0;                           // Exit/status code of the simulation.
+    std::atomic<int> exit_code{0};               // Exit/status code of the simulation.
     std::atomic<bool> is_shutdown_ = false;      // System shutdown flag.
 
     // ========== Simulation Configuration Flags ==========
-    bool s_appmode = true;             // Baremetal/app mode (default)
-    bool s_tuimode = false;            // Enable TUI monitor mode
-    bool s_gui_mode = false;           // Enable GUI graphics window mode
-    bool s_high_contrast = false;      // Enable high-contrast TUI mode
-    bool s_debugmode = false;          // Enable debug logging in MMIO paths
-    bool s_debug_mode = false;         // Enable TUI debug diagnostics mode
-    bool s_dlog_mode = false;          // Enable device request/response logging
-    bool s_traplog_mode = false;       // Enable trap/SBI/exception logging
-    bool s_use_disk = false;           // Enable disk image simulation
-    bool s_use_mix = false;            // Enable instruction-mix statistics collection
-    bool s_bp_trace = false;           // Enable branch prediction tracing
-    bool s_misa_override = false;      // True when CLI explicitly selected MISA profile
-    bool s_cycle_accurate = false;     // Enable cycle-accurate performance simulation mode
-    bool s_high_performance = true;    // Enable high-performance optimized simulation mode
-    bool s_mmu_ever_used = false;      // Latched true the first time satp enables translation
-    bool s_multithreaded = false;      // Run simulation in a background thread
-    bool s_rollback_enabled = false;   // Enable instruction rollback tracking
-    double s_mouse_sensitivity = 1.0;  // Mouse relative sensitivity factor
+    std::atomic<bool> s_appmode{true};          // Baremetal/app mode (default)
+    std::atomic<bool> s_tuimode{false};         // Enable TUI monitor mode
+    std::atomic<bool> s_gui_mode{false};        // Enable GUI graphics window mode
+    std::atomic<bool> s_high_contrast{false};   // Enable high-contrast TUI mode
+    std::atomic<bool> s_debugmode{false};       // Enable debug logging in MMIO paths
+    std::atomic<bool> s_debug_mode{false};      // Enable TUI debug diagnostics mode
+    std::atomic<bool> s_dlog_mode{false};       // Enable device request/response logging
+    std::atomic<bool> s_traplog_mode{false};    // Enable trap/SBI/exception logging
+    std::atomic<bool> s_use_disk{false};        // Enable disk image simulation
+    std::atomic<bool> s_use_mix{false};         // Enable instruction-mix statistics collection
+    std::atomic<bool> s_bp_trace{false};        // Enable branch prediction tracing
+    std::atomic<bool> s_misa_override{false};   // True when CLI explicitly selected MISA profile
+    std::atomic<bool> s_cycle_accurate{false};  // Enable cycle-accurate performance simulation mode
+    std::atomic<bool> s_high_performance{
+        true};  // Enable high-performance optimized simulation mode
+    std::atomic<bool> s_mmu_ever_used{
+        false};  // Latched true the first time satp enables translation
+    std::atomic<bool> s_multithreaded{false};     // Run simulation in a background thread
+    std::atomic<bool> s_rollback_enabled{false};  // Enable instruction rollback tracking
+    double s_mouse_sensitivity = 1.0;             // Mouse relative sensitivity factor
 
     // ========== Debug / Co-Simulation Flags ==========
-    bool s_gdb_mode = false;            // Enable GDB RSP stub
-    uint16_t s_gdb_port = 1234;         // GDB stub TCP port
-    bool s_lockstep_mode = false;       // Enable Spike lockstep co-simulation
-    std::string s_spike_bin = "spike";  // Path to Spike binary
-    std::string s_spike_elf;            // Path to Spike ELF image
+    std::atomic<bool> s_gdb_mode{false};       // Enable GDB RSP stub
+    uint16_t s_gdb_port = 1234;                // GDB stub TCP port
+    std::atomic<bool> s_lockstep_mode{false};  // Enable Spike lockstep co-simulation
+    std::string s_spike_bin = "spike";         // Path to Spike binary
+    std::string s_spike_elf;                   // Path to Spike ELF image
 
     // ========== Simulation Control Parameters ==========
     Address s_start_pc = 0;                                  // Initial PC value
@@ -127,7 +167,7 @@ class Machine {
     Counter s_trace_begin = std::numeric_limits<Counter>::max();  // Trace begin cycle
     Counter s_trace_end = std::numeric_limits<Counter>::max();    // Trace end cycle
     Counter s_enabletimer = std::numeric_limits<Counter>::max();  // Timer enable cycle
-    Counter s_memimg = 0;                                         // Memory image dump cycle
+    Counter s_memimg = std::numeric_limits<Counter>::max();       // Memory image dump cycle
 
     // ========== ISA/Privilege Configuration ==========
     Address s_isatest_tohost = 0x80001000;        // ISA-test tohost RAM address
@@ -143,14 +183,6 @@ class Machine {
     std::string s_fn_cpuconfig;                          // CPU config filename
     std::chrono::steady_clock::time_point s_start_time;  // Simulation start timestamp
 
-    // ========== Mode-Switch Reboot State ==========
-    // When the TUI loads a binary with a different App/OS mode, these fields
-    // are populated and reboot_requested is set so Main.cpp recreates the machine.
-    std::string pending_binary_path;      // Binary path to apply on next boot
-    std::optional<bool> pending_appmode;  // If set, override appmode on next boot
-    std::optional<std::string>
-        pending_disk_path;  // Optional disk image path for next boot (empty => disable disk)
-
     // ========== CPU and Subsystems ==========
     simrv::core::CPU cpu;
     std::unique_ptr<simrv::device::Disk> disk;
@@ -162,8 +194,6 @@ class Machine {
     std::unique_ptr<simrv::device::Framebuffer> framebuffer;
     std::unique_ptr<simrv::device::InputDevice> input_device;
     std::unique_ptr<simrv::device::Audio> audio;
-    std::unique_ptr<simrv::util::SdlDisplay> sdl_display;
-    std::unique_ptr<simrv::util::SdlAudio> sdl_audio;
 
     // ========== Debug Subsystems (null when disabled) ==========
     std::unique_ptr<simrv::debug::GdbStub> gdb_stub;
@@ -185,11 +215,28 @@ class Machine {
     friend class simrv::tui::Tui;
     friend class simrv::tui::LeftPane;
     simrv::memory::MemorySubsystem memory_;
+
+    /// Virtual hooks for template method execution loop
+    virtual void execute_cycle() = 0;
+    virtual auto execute_fast_batch(uint32_t batch_size) -> bool {
+        (void)batch_size;
+        return false;
+    }
     /// Perform per-cycle initialization before CPU stage execution.
     virtual void prepare_cycle() {}
     /// Perform per-cycle finalization and completion checks.
     virtual void finalize_cycle() {}
+
+    mutable std::mutex pending_reboot_mutex_;
+    std::string pending_binary_path_;
+    std::optional<bool> pending_appmode_;
+    std::optional<std::string> pending_disk_path_;
+
+    uint64_t last_tui_check_cycles_ = 0;
+    std::chrono::steady_clock::time_point last_tui_update_{};
+
     std::atomic<bool> is_running_ = true;  // Main-loop run flag.
+    std::atomic<ExecutionState> execution_state_{ExecutionState::Running};
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes)
 }  // namespace simrv::core

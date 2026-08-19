@@ -45,6 +45,7 @@ inline constexpr Address kUartRegIirFcr = static_cast<Address>(0x02U);
 inline constexpr Address kUartRegLcr = static_cast<Address>(0x03U);
 inline constexpr Address kUartRegMcr = static_cast<Address>(0x04U);
 inline constexpr Address kUartRegLsr = static_cast<Address>(0x05U);
+inline constexpr Address kUartRegMsr = static_cast<Address>(0x06U);
 inline constexpr Address kUartRegScr = static_cast<Address>(0x07U);
 inline constexpr Address kUartRegInvalid = static_cast<Address>(~Address{0});
 
@@ -66,6 +67,8 @@ inline constexpr auto uart_reg_byte(Address raw) -> Address {
             return kUartRegMcr;
         case kUartRegLsr:
             return kUartRegLsr;
+        case kUartRegMsr:
+            return kUartRegMsr;
         case kUartRegScr:
             return kUartRegScr;
         default:
@@ -87,6 +90,8 @@ inline constexpr auto uart_reg_word(Address raw) -> Address {
             return kUartRegMcr;
         case static_cast<Address>(0x14U):
             return kUartRegLsr;
+        case static_cast<Address>(0x18U):
+            return kUartRegMsr;
         case static_cast<Address>(0x1CU):
             return kUartRegScr;
         default:
@@ -99,13 +104,13 @@ inline auto uart_reg(Address p_addr, int8_t& reg_shift_mode) -> Address {
     if (reg_shift_mode < 0) {
         if (raw == static_cast<Address>(0x01U) || raw == static_cast<Address>(0x02U) ||
             raw == static_cast<Address>(0x03U) || raw == static_cast<Address>(0x05U) ||
-            raw == static_cast<Address>(0x07U)) {
+            raw == static_cast<Address>(0x06U) || raw == static_cast<Address>(0x07U)) {
             reg_shift_mode = 0;
         }
 
         if (raw == static_cast<Address>(0x08U) || raw == static_cast<Address>(0x0CU) ||
             raw == static_cast<Address>(0x10U) || raw == static_cast<Address>(0x14U) ||
-            raw == static_cast<Address>(0x1CU)) {
+            raw == static_cast<Address>(0x18U) || raw == static_cast<Address>(0x1CU)) {
             reg_shift_mode = 2;
         }
 

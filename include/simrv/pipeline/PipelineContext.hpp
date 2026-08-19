@@ -32,6 +32,7 @@ struct PipelineContext : public DecodedInstruction {
     Register rrs1 = 0;
     Register rrs2 = 0;
     CSRValue rcsr = 0;
+    CSRValue rcsr_write = 0;  ///< RMW base, excluding hardware-only mip.SEIP contribution.
 
     // EX1 stage results and controls
     bool tkn = false;

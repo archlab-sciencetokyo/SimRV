@@ -14,8 +14,7 @@
 
 namespace simrv::device {
 
-Framebuffer::Framebuffer(simrv::core::Machine& machine)
-    : machine_(machine), fb_mem_(kSize - 0x1000, 0) {}
+Framebuffer::Framebuffer(simrv::core::Machine& /*machine*/) : fb_mem_(kSize - 0x1000, 0) {}
 
 Framebuffer::~Framebuffer() = default;
 
@@ -58,10 +57,6 @@ auto Framebuffer::handle_request(const memory::TlChannelA& req, memory::TlChanne
                     if (val == 1) {
                         dirty_ = true;
                         tui_dirty_ = true;
-                        if (machine_.sdl_display &&
-                            !multithreaded_.load(std::memory_order_relaxed)) {
-                            machine_.sdl_display->update_gui_only();
-                        }
                     }
                 } break;
                 default:
@@ -278,7 +273,6 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
 
     int active_w = width_;
     int active_h = height_;
-    get_active_bounds(active_w, active_h);
 
     const auto sz_w = static_cast<size_t>(width_);
 
@@ -289,8 +283,11 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
 
     std::vector<SixelColor> palette;
     palette.reserve(256);
+    palette.push_back({0, 0, 0});
 
-    std::vector<int16_t> lookup(262144, -1);
+    static thread_local std::array<int16_t, 262144> lookup;
+    lookup.fill(-1);
+    lookup[0] = 0;
     auto get_palette_index = [&](uint8_t r, uint8_t g, uint8_t b) -> int {
         r = (r >> 2) << 2;
         g = (g >> 2) << 2;
@@ -329,17 +326,12 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
         return best_idx;
     };
 
-    std::vector<int> pixel_indices(static_cast<size_t>(target_w * target_h), 0);
-
-    for (int y = 0; y < target_h; ++y) {
-        const int src_y = y * active_h / target_h;
-        for (int x = 0; x < target_w; ++x) {
-            const int src_x = x * active_w / target_w;
+    std::vector<int> src_indices(static_cast<size_t>(active_w * active_h), 0);
+    for (int y = 0; y < active_h; ++y) {
+        for (int x = 0; x < active_w; ++x) {
             uint8_t r = 0, g = 0, b = 0;
-
             if (format_ == 0) {
-                const size_t offset =
-                    (static_cast<size_t>(src_y) * sz_w + static_cast<size_t>(src_x)) * 2;
+                const size_t offset = (static_cast<size_t>(y) * sz_w + static_cast<size_t>(x)) * 2;
                 if (offset + 1 < fb_mem_.size()) {
                     uint16_t pixel = fb_mem_[offset] | (fb_mem_[offset + 1] << 8);
                     r = ((pixel >> 11) & 0x1F) * 255 / 31;
@@ -347,15 +339,24 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
                     b = (pixel & 0x1F) * 255 / 31;
                 }
             } else {
-                const size_t offset =
-                    (static_cast<size_t>(src_y) * sz_w + static_cast<size_t>(src_x)) * 4;
+                const size_t offset = (static_cast<size_t>(y) * sz_w + static_cast<size_t>(x)) * 4;
                 if (offset + 2 < fb_mem_.size()) {
                     r = fb_mem_[offset + 2];
                     g = fb_mem_[offset + 1];
                     b = fb_mem_[offset];
                 }
             }
-            pixel_indices[static_cast<size_t>(y * target_w + x)] = get_palette_index(r, g, b);
+            src_indices[static_cast<size_t>(y * active_w + x)] = get_palette_index(r, g, b);
+        }
+    }
+
+    std::vector<int> pixel_indices(static_cast<size_t>(target_w * target_h), 0);
+    for (int y = 0; y < target_h; ++y) {
+        const int src_y = y * active_h / target_h;
+        for (int x = 0; x < target_w; ++x) {
+            const int src_x = x * active_w / target_w;
+            pixel_indices[static_cast<size_t>(y * target_w + x)] =
+                src_indices[static_cast<size_t>(src_y * active_w + src_x)];
         }
     }
 
@@ -368,19 +369,20 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
     }
 
     for (int y_band = 0; y_band < target_h; y_band += 6) {
-        std::vector<bool> color_present(palette.size(), false);
+        std::vector<int> max_x_for_color(palette.size(), -1);
         for (int x = 0; x < target_w; ++x) {
             for (int dy = 0; dy < 6; ++dy) {
                 int y = y_band + dy;
                 if (y >= target_h) break;
                 int color_idx = pixel_indices[static_cast<size_t>(y * target_w + x)];
-                color_present[static_cast<size_t>(color_idx)] = true;
+                max_x_for_color[static_cast<size_t>(color_idx)] = x;
             }
         }
 
         bool first_color = true;
         for (size_t c = 0; c < palette.size(); ++c) {
-            if (!color_present[c]) continue;
+            int last_x = max_x_for_color[c];
+            if (last_x < 0) continue;
 
             if (!first_color) {
                 sixel += "$";
@@ -402,7 +404,7 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
                 }
             };
 
-            for (int x = 0; x < target_w; ++x) {
+            for (int x = 0; x <= last_x; ++x) {
                 uint8_t sixel_val = 0;
                 for (int dy = 0; dy < 6; ++dy) {
                     int y = y_band + dy;

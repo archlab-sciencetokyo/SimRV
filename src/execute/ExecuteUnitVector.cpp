@@ -3,8 +3,57 @@
 
 namespace simrv::execute {
 
+namespace {
+/** RVV 1.0 operations whose traps are always reported with vstart=0. */
+constexpr auto requires_zero_vstart(isa::OperationId op_id) -> bool {
+    switch (op_id) {
+        case isa::OperationId::VREDSUM_VS:
+        case isa::OperationId::VWREDSUM_VS:
+        case isa::OperationId::VWREDSUMU_VS:
+        case isa::OperationId::VCPOP_M:
+        case isa::OperationId::VFIRST_M:
+        case isa::OperationId::VMSBF_M:
+        case isa::OperationId::VMSIF_M:
+        case isa::OperationId::VMSOF_M:
+        case isa::OperationId::VIOTA_M:
+        case isa::OperationId::VCOMPRESS_VM:
+            return true;
+        default:
+            return false;
+    }
+}
+
+/** Vector operations that consume or produce scalar/vector floating-point state. */
+constexpr auto is_vector_fp(isa::OperationId op_id) -> bool {
+    switch (op_id) {
+        case isa::OperationId::VFADD_VV:
+        case isa::OperationId::VFADD_VF:
+        case isa::OperationId::VFMACC_VV:
+        case isa::OperationId::VFMACC_VF:
+        case isa::OperationId::VFMV_F_S:
+        case isa::OperationId::VFMV_S_F:
+        case isa::OperationId::VFMERGE_VFM:
+            return true;
+        default:
+            return false;
+    }
+}
+
+/** Implemented vector FP arithmetic operations that consult frm and accrue fflags. */
+constexpr auto is_vector_fp_arithmetic(isa::OperationId op_id) -> bool {
+    return op_id == isa::OperationId::VFADD_VV || op_id == isa::OperationId::VFADD_VF ||
+           op_id == isa::OperationId::VFMACC_VV || op_id == isa::OperationId::VFMACC_VF;
+}
+}  // namespace
+
 void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::OperationId op_id,
                                  Instruction ir) {
+    if (cpu.state().vstart != 0 && requires_zero_vstart(op_id)) {
+        cpu.pipeline_context.pending_exception = ExceptionCode::IllegalInstruction;
+        cpu.pipeline_context.pending_tval = ir;
+        return;
+    }
+
     const auto rd = static_cast<RegId>((ir >> 7) & 0x1F);
     const auto rs1 = static_cast<RegId>((ir >> 15) & 0x1F);
     const auto rs2 = static_cast<RegId>((ir >> 20) & 0x1F);
@@ -18,6 +67,21 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::Op
 
     uint32_t vl = cpu.state().vl;
     uint32_t sew = 8 << ((cpu.state().vtype >> 3) & 0x7);
+
+    if (is_vector_fp(op_id)) {
+        const bool scalar_fp_enabled =
+            (sew == 32 && isa::misa_has_extension(cpu.state().misa, isa::IsaExtension::F)) ||
+            (sew == 64 && isa::misa_has_extension(cpu.state().misa, isa::IsaExtension::D));
+        const bool fs_enabled =
+            (cpu.state().mstatus & enum_mask(core::MstatusBit::Fs)) != static_cast<CSRValue>(0);
+        const Word frm = (cpu.state().fcsr >> 5U) & 0x7U;
+        if (!scalar_fp_enabled || !fs_enabled || (is_vector_fp_arithmetic(op_id) && frm >= 5U)) {
+            // SEW=16 vector FP belongs to Zvfh, which SimRV does not advertise.
+            cpu.pipeline_context.pending_exception = ExceptionCode::IllegalInstruction;
+            cpu.pipeline_context.pending_tval = ir;
+            return;
+        }
+    }
 
     switch (op_id) {
         // Configuration
@@ -151,6 +215,17 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::Op
             execute_vector_integer(cpu, op_id, rd, rs1, rs2, vm, vl, sew,
                                    cpu.state().regs.read(rs1), simm5);
             break;
+    }
+
+    // Vector 1.0 requires every successfully completed vector instruction, including vset*vl*, to
+    // reset vstart. Faulting vector memory operations leave the faulting element index for resume.
+    if (!cpu.pipeline_context.pending_exception.has_value()) {
+        if (is_vector_fp(op_id)) {
+            // Vector FP may update scalar FP registers or fflags. Setting FS Dirty
+            // conservatively is permitted even when a particular result is exact.
+            cpu.state().mstatus |= enum_mask(core::MstatusBit::Fs);
+        }
+        cpu.state().vstart = 0;
     }
 }
 

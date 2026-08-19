@@ -42,7 +42,7 @@ class InputDevice : public memory::TileLinkNode {
     void push_mouse(int dx, int dy, uint8_t buttons);
 
    private:
-    simrv::core::Machine& machine_;
+    [[maybe_unused]] simrv::core::Machine& machine_;
 
     // Keyboard event queue
     std::queue<Word> key_queue_;
