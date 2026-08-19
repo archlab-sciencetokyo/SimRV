@@ -678,8 +678,8 @@ namespace {
     return (addr & alignment_mask) == 0;
 }
 
-[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto access_size_for_funct3(
-    isa::Funct3 funct3) noexcept -> unsigned {
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto access_size_for_funct3(isa::Funct3 funct3) noexcept
+    -> unsigned {
     return 1u << (static_cast<unsigned>(funct3) & 0x3u);
 }
 }  // namespace

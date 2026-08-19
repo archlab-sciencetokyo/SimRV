@@ -155,13 +155,24 @@ def parse_simrv_output(output):
 
 def calculate_stats(data_list):
     if not data_list:
-        return {"mean": 0.0, "median": 0.0, "min": 0.0, "max": 0.0, "stddev": 0.0}
+        return {
+            "mean": 0.0,
+            "median": 0.0,
+            "min": 0.0,
+            "max": 0.0,
+            "stddev": 0.0,
+            "ci95": 0.0,
+            "cv": 0.0,
+        }
 
+    n = len(data_list)
     mean = statistics.mean(data_list)
     median = statistics.median(data_list)
     minimum = min(data_list)
     maximum = max(data_list)
-    stddev = statistics.stdev(data_list) if len(data_list) > 1 else 0.0
+    stddev = statistics.stdev(data_list) if n > 1 else 0.0
+    ci95 = 1.96 * (stddev / math.sqrt(n)) if n > 1 else 0.0
+    cv = (stddev / mean * 100.0) if mean > 0 else 0.0
 
     return {
         "mean": mean,
@@ -169,6 +180,8 @@ def calculate_stats(data_list):
         "min": minimum,
         "max": maximum,
         "stddev": stddev,
+        "ci95": ci95,
+        "cv": cv,
     }
 
 
@@ -192,8 +205,8 @@ def print_single_stats_table(simrv_stats, spike_stats, test_name, runs, insts):
     YELLOW = "\033[33m" if use_color else ""
 
     col_w1 = 28
-    col_w2 = 18
-    col_w3 = 18
+    col_w2 = 22
+    col_w3 = 22
     col_w4 = 18
     total_w = col_w1 + col_w2 + col_w3 + col_w4 + 9
 
@@ -214,7 +227,9 @@ def print_single_stats_table(simrv_stats, spike_stats, test_name, runs, insts):
 
     # Real Time
     s_mean = simrv_stats["time"]["mean"]
+    s_ci = simrv_stats["time"]["ci95"]
     sp_mean = spike_stats["time"]["mean"]
+    sp_ci = spike_stats["time"]["ci95"]
     speedup_str = (
         f"{sp_mean / s_mean:.2f}x" if s_mean > 0 and sp_mean > 0 else "N/A"
     )
@@ -222,9 +237,9 @@ def print_single_stats_table(simrv_stats, spike_stats, test_name, runs, insts):
     print(row("Real Time (seconds)", "", "", ""))
     print(
         row(
-            "  Mean",
-            f"{simrv_stats['time']['mean']:.4f} s",
-            f"{spike_stats['time']['mean']:.4f} s" if sp_mean > 0 else "N/A",
+            "  Mean (±95% CI)",
+            f"{s_mean:.4f} ± {s_ci:.4f} s",
+            f"{sp_mean:.4f} ± {sp_ci:.4f} s" if sp_mean > 0 else "N/A",
             speedup_str,
         )
     )
@@ -254,10 +269,10 @@ def print_single_stats_table(simrv_stats, spike_stats, test_name, runs, insts):
     )
     print(
         row(
-            "  Std Dev",
-            f"{simrv_stats['time']['stddev']:.4f} s",
+            "  Std Dev (CV%)",
+            f"{simrv_stats['time']['stddev']:.4f} s ({simrv_stats['time']['cv']:.1f}%)",
             (
-                f"{spike_stats['time']['stddev']:.4f} s"
+                f"{spike_stats['time']['stddev']:.4f} s ({spike_stats['time']['cv']:.1f}%)"
                 if sp_mean > 0
                 else "N/A"
             ),
@@ -308,18 +323,22 @@ def print_single_stats_table(simrv_stats, spike_stats, test_name, runs, insts):
             "",
         )
     )
-    print(
-        row(
-            "  Std Dev",
-            f"{simrv_stats['wall_speed']['stddev']:,.1f} KIPS",
-            (
-                f"{spike_stats['wall_speed']['stddev']:,.1f} KIPS"
-                if sp_wall_kips > 0
-                else "N/A"
-            ),
-            "",
+
+    # Peak RSS (MB)
+    if "rss" in simrv_stats and simrv_stats["rss"]["mean"] > 0:
+        print(f"{'-' * col_w1}-+-{'-' * col_w2}-+-{'-' * col_w3}-+-{'-' * col_w4}")
+        print(row("Memory Footprint", "", "", ""))
+        s_rss = simrv_stats["rss"]["mean"]
+        sp_rss = spike_stats.get("rss", {}).get("mean", 0.0)
+        sp_rss_str = f"{sp_rss:.2f} MB" if sp_rss > 0 else "N/A"
+        print(
+            row(
+                "  Peak RSS (MB)",
+                f"{s_rss:.2f} MB",
+                sp_rss_str,
+                "",
+            )
         )
-    )
 
     # Core Sim Speed
     if "sim_speed" in simrv_stats and simrv_stats["sim_speed"]["mean"] > 0:
@@ -354,22 +373,24 @@ def print_suite_stats_table(suite_results):
     RESET = "\033[0m" if use_color else ""
     GREEN = "\033[32m" if use_color else ""
 
-    col_w1 = 20
-    col_w2 = 14
-    col_w3 = 14
-    col_w4 = 14
-    col_w5 = 16
+    col_w1 = 18
+    col_w2 = 12
+    col_w3 = 18
+    col_w4 = 18
+    col_w5 = 14
     col_w6 = 12
-    total_w = col_w1 + col_w2 + col_w3 + col_w4 + col_w5 + col_w6 + 15
+    col_w7 = 12
+    col_w8 = 10
+    total_w = col_w1 + col_w2 + col_w3 + col_w4 + col_w5 + col_w6 + col_w7 + col_w8 + 21
 
     print(f"\n{BOLD}{'=' * total_w}{RESET}")
     print(f"{BOLD}{'SIMRV BENCHMARK SUITE PAPER SUMMARY':^{total_w}}{RESET}")
     print(f"{BOLD}{'=' * total_w}{RESET}")
 
-    header = f"{'Benchmark':<{col_w1}} | {'Instructions':^{col_w2}} | {'SimRV (s)':^{col_w3}} | {'Spike (s)':^{col_w4}} | {'SimRV (MIPS)':^{col_w5}} | {'Speedup':^{col_w6}}"
+    header = f"{'Benchmark':<{col_w1}} | {'Instructions':^{col_w2}} | {'SimRV (s)':^{col_w3}} | {'Spike (s)':^{col_w4}} | {'SimRV (MIPS)':^{col_w5}} | {'SimRV RSS':^{col_w6}} | {'Spike RSS':^{col_w7}} | {'Speedup':^{col_w8}}"
     print(f"{BOLD}{header}{RESET}")
     print(
-        f"{'-' * col_w1}-+-{'-' * col_w2}-+-{'-' * col_w3}-+-{'-' * col_w4}-+-{'-' * col_w5}-+-{'-' * col_w6}"
+        f"{'-' * col_w1}-+-{'-' * col_w2}-+-{'-' * col_w3}-+-{'-' * col_w4}-+-{'-' * col_w5}-+-{'-' * col_w6}-+-{'-' * col_w7}-+-{'-' * col_w8}"
     )
 
     speedups = []
@@ -377,8 +398,12 @@ def print_suite_stats_table(suite_results):
         name = res["test_name"]
         insts = format_instrs(res["instructions"])
         s_time = res["simrv"]["stats"]["time"]["mean"]
+        s_ci = res["simrv"]["stats"]["time"]["ci95"]
         sp_time = res["spike"]["stats"]["time"]["mean"]
+        sp_ci = res["spike"]["stats"]["time"]["ci95"]
         s_mips = res["simrv"]["stats"]["wall_speed"]["mean"] / 1000.0
+        s_rss = res["simrv"]["stats"].get("rss", {}).get("mean", 0.0)
+        sp_rss = res["spike"]["stats"].get("rss", {}).get("mean", 0.0)
 
         if s_time > 0 and sp_time > 0:
             spdup_val = sp_time / s_time
@@ -387,18 +412,22 @@ def print_suite_stats_table(suite_results):
         else:
             spdup_str = "N/A"
 
-        sp_time_str = f"{sp_time:.4f}" if sp_time > 0 else "N/A"
+        s_time_str = f"{s_time:.4f}±{s_ci:.4f}" if s_ci > 0 else f"{s_time:.4f}"
+        sp_time_str = f"{sp_time:.4f}±{sp_ci:.4f}" if sp_time > 0 else "N/A"
+        s_rss_str = f"{s_rss:.1f} MB" if s_rss > 0 else "--"
+        sp_rss_str = f"{sp_rss:.1f} MB" if sp_rss > 0 else "--"
+
         print(
-            f"{name:<{col_w1}} | {insts:>{col_w2}} | {s_time:>{col_w3}.4f} | {sp_time_str:>{col_w4}} | {s_mips:>{col_w5}.2f} | {spdup_str:>{col_w6}}"
+            f"{name:<{col_w1}} | {insts:>{col_w2}} | {s_time_str:>{col_w3}} | {sp_time_str:>{col_w4}} | {s_mips:>{col_w5}.2f} | {s_rss_str:>{col_w6}} | {sp_rss_str:>{col_w7}} | {spdup_str:>{col_w8}}"
         )
 
     print(
-        f"{'-' * col_w1}-+-{'-' * col_w2}-+-{'-' * col_w3}-+-{'-' * col_w4}-+-{'-' * col_w5}-+-{'-' * col_w6}"
+        f"{'-' * col_w1}-+-{'-' * col_w2}-+-{'-' * col_w3}-+-{'-' * col_w4}-+-{'-' * col_w5}-+-{'-' * col_w6}-+-{'-' * col_w7}-+-{'-' * col_w8}"
     )
     geomean_speedup = calculate_geomean(speedups)
     geomean_str = f"{geomean_speedup:.2f}x" if geomean_speedup > 0 else "N/A"
     print(
-        f"{BOLD}{'Geometric Mean':<{col_w1}} | {'--':>{col_w2}} | {'--':>{col_w3}} | {'--':>{col_w4}} | {'--':>{col_w5}} | {geomean_str:>{col_w6}}{RESET}"
+        f"{BOLD}{'Geometric Mean':<{col_w1}} | {'--':>{col_w2}} | {'--':>{col_w3}} | {'--':>{col_w4}} | {'--':>{col_w5}} | {'--':>{col_w6}} | {'--':>{col_w7}} | {geomean_str:>{col_w8}}{RESET}"
     )
     print(f"{BOLD}{'=' * total_w}{RESET}")
     if geomean_speedup > 0:
@@ -413,11 +442,12 @@ def generate_latex_table(suite_results, filepath):
     lines = [
         r"\begin{table}[htbp]",
         r"\centering",
-        r"\caption{Performance Evaluation of SimRV vs. Spike across RISC-V Benchmarks}",
+        r"\small",
+        r"\caption{Comprehensive Multi-Metric Performance and Memory Evaluation: SimRV vs. Spike}",
         r"\label{tab:simrv_benchmark_results}",
-        r"\begin{tabular}{lrrccr}",
+        r"\begin{tabular}{lrrrrrrr}",
         r"\toprule",
-        r"\textbf{Benchmark} & \textbf{Instructions} & \textbf{SimRV (s)} & \textbf{Spike (s)} & \textbf{SimRV (MIPS)} & \textbf{Speedup} \\",
+        r"\textbf{Benchmark} & \textbf{Instructions} & \textbf{SimRV (s)} & \textbf{Spike (s)} & \textbf{SimRV (MIPS)} & \textbf{SimRV RSS} & \textbf{Spike RSS} & \textbf{Speedup} \\",
         r"\midrule",
     ]
 
@@ -425,19 +455,27 @@ def generate_latex_table(suite_results, filepath):
         name = res["test_name"].replace("_", r"\_")
         insts = format_instrs(res["instructions"])
         s_time = res["simrv"]["stats"]["time"]["mean"]
+        s_ci = res["simrv"]["stats"]["time"]["ci95"]
         sp_time = res["spike"]["stats"]["time"]["mean"]
+        sp_ci = res["spike"]["stats"]["time"]["ci95"]
         s_mips = res["simrv"]["stats"]["wall_speed"]["mean"] / 1000.0
+        s_rss = res["simrv"]["stats"].get("rss", {}).get("mean", 0.0)
+        sp_rss = res["spike"]["stats"].get("rss", {}).get("mean", 0.0)
 
         if s_time > 0 and sp_time > 0:
             spdup_val = sp_time / s_time
             speedups.append(spdup_val)
-            spdup_str = f"{spdup_val:.2f}\\times"
+            spdup_str = f"\\textbf{{{spdup_val:.2f}\\times}}"
         else:
             spdup_str = r"\text{N/A}"
 
+        s_time_str = f"{s_time:.4f}"
         sp_time_str = f"{sp_time:.4f}" if sp_time > 0 else r"\text{N/A}"
+        s_rss_str = f"{s_rss:.1f}\\,MB" if s_rss > 0 else "--"
+        sp_rss_str = f"{sp_rss:.1f}\\,MB" if sp_rss > 0 else "--"
+
         lines.append(
-            f"{name} & {insts} & {s_time:.4f} & {sp_time_str} & {s_mips:.2f} & {spdup_str} \\\\"
+            f"{name} & {insts} & {s_time_str} & {sp_time_str} & {s_mips:.2f} & {s_rss_str} & {sp_rss_str} & {spdup_str} \\\\"
         )
 
     geomean_speedup = calculate_geomean(speedups)
@@ -450,7 +488,7 @@ def generate_latex_table(suite_results, filepath):
     lines.extend(
         [
             r"\midrule",
-            f"\\textbf{{Geometric Mean}} & -- & -- & -- & -- & {geomean_str} \\\\",
+            f"\\textbf{{Geometric Mean}} & -- & -- & -- & -- & -- & -- & {geomean_str} \\\\",
             r"\bottomrule",
             r"\end{tabular}",
             r"\end{table}",
@@ -466,33 +504,41 @@ def generate_latex_table(suite_results, filepath):
 def generate_markdown_table(suite_results, filepath):
     speedups = []
     lines = [
-        "| Benchmark | Instructions | SimRV Time (s) | Spike Time (s) | SimRV Speed (MIPS) | Speedup |",
-        "| :--- | ---: | ---: | ---: | ---: | ---: |",
+        "| Benchmark | Instructions | SimRV Time (s) | Spike Time (s) | SimRV Speed (MIPS) | SimRV RSS | Spike RSS | Speedup |",
+        "| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
 
     for res in suite_results:
         name = res["test_name"]
         insts = format_instrs(res["instructions"])
         s_time = res["simrv"]["stats"]["time"]["mean"]
+        s_ci = res["simrv"]["stats"]["time"]["ci95"]
         sp_time = res["spike"]["stats"]["time"]["mean"]
+        sp_ci = res["spike"]["stats"]["time"]["ci95"]
         s_mips = res["simrv"]["stats"]["wall_speed"]["mean"] / 1000.0
+        s_rss = res["simrv"]["stats"].get("rss", {}).get("mean", 0.0)
+        sp_rss = res["spike"]["stats"].get("rss", {}).get("mean", 0.0)
 
         if s_time > 0 and sp_time > 0:
             spdup_val = sp_time / s_time
             speedups.append(spdup_val)
-            spdup_str = f"{spdup_val:.2f}x"
+            spdup_str = f"**{spdup_val:.2f}x**"
         else:
             spdup_str = "N/A"
 
-        sp_time_str = f"{sp_time:.4f}" if sp_time > 0 else "N/A"
+        s_time_str = f"{s_time:.4f} ± {s_ci:.4f}" if s_ci > 0 else f"{s_time:.4f}"
+        sp_time_str = f"{sp_time:.4f} ± {sp_ci:.4f}" if sp_time > 0 else "N/A"
+        s_rss_str = f"{s_rss:.1f} MB" if s_rss > 0 else "--"
+        sp_rss_str = f"{sp_rss:.1f} MB" if sp_rss > 0 else "--"
+
         lines.append(
-            f"| {name} | {insts} | {s_time:.4f} | {sp_time_str} | {s_mips:.2f} | {spdup_str} |"
+            f"| `{name}` | {insts} | **{s_time_str}** | {sp_time_str} | **{s_mips:.2f} MIPS** | {s_rss_str} | {sp_rss_str} | {spdup_str} |"
         )
 
     geomean_speedup = calculate_geomean(speedups)
     geomean_str = f"**{geomean_speedup:.2f}x**" if geomean_speedup > 0 else "N/A"
     lines.append(
-        f"| **Geometric Mean** | **--** | **--** | **--** | **--** | {geomean_str} |"
+        f"| **Geometric Mean** | **--** | **--** | **--** | **--** | **--** | **--** | {geomean_str} |"
     )
 
     os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
@@ -511,11 +557,15 @@ def generate_csv_report(suite_results, filepath):
                 "Instructions",
                 "SimRV_Time_Mean_s",
                 "SimRV_Time_StdDev_s",
+                "SimRV_Time_CI95_s",
                 "Spike_Time_Mean_s",
                 "Spike_Time_StdDev_s",
+                "Spike_Time_CI95_s",
                 "SimRV_Wall_KIPS",
                 "SimRV_MIPS",
                 "Spike_Wall_KIPS",
+                "SimRV_Peak_RSS_MB",
+                "Spike_Peak_RSS_MB",
                 "Speedup_Ratio",
             ]
         )
@@ -525,10 +575,14 @@ def generate_csv_report(suite_results, filepath):
             insts = res["instructions"] or 0
             s_time = res["simrv"]["stats"]["time"]["mean"]
             s_time_sd = res["simrv"]["stats"]["time"]["stddev"]
+            s_time_ci = res["simrv"]["stats"]["time"]["ci95"]
             sp_time = res["spike"]["stats"]["time"]["mean"]
             sp_time_sd = res["spike"]["stats"]["time"]["stddev"]
+            sp_time_ci = res["spike"]["stats"]["time"]["ci95"]
             s_kips = res["simrv"]["stats"]["wall_speed"]["mean"]
             sp_kips = res["spike"]["stats"]["wall_speed"]["mean"]
+            s_rss = res["simrv"]["stats"].get("rss", {}).get("mean", 0.0)
+            sp_rss = res["spike"]["stats"].get("rss", {}).get("mean", 0.0)
             spdup = sp_time / s_time if s_time > 0 and sp_time > 0 else 0.0
 
             writer.writerow(
@@ -537,11 +591,15 @@ def generate_csv_report(suite_results, filepath):
                     insts,
                     f"{s_time:.6f}",
                     f"{s_time_sd:.6f}",
+                    f"{s_time_ci:.6f}",
                     f"{sp_time:.6f}",
                     f"{sp_time_sd:.6f}",
+                    f"{sp_time_ci:.6f}",
                     f"{s_kips:.2f}",
                     f"{s_kips / 1000.0:.2f}",
                     f"{sp_kips:.2f}",
+                    f"{s_rss:.2f}",
+                    f"{sp_rss:.2f}",
                     f"{spdup:.4f}",
                 ]
             )
@@ -621,7 +679,12 @@ def run_benchmark_single(
     simrv_times = []
     simrv_sim_times = []
     simrv_speeds = []
+    simrv_rss = []
     simrv_instrs = None
+
+    has_time_wrapper = os.path.isfile("/usr/bin/time") and os.access(
+        "/usr/bin/time", os.X_OK
+    )
 
     print(f"\n--- Running Benchmark Target: {test_basename} ---")
     print(f"  SimRV binary : {simrv_bin} (RV{xlen})")
@@ -654,6 +717,8 @@ def run_benchmark_single(
             "-H",
             tohost_addr,
         ]
+        if has_time_wrapper:
+            simrv_cmd = ["/usr/bin/time", "-f", "__MAX_RSS_KB__:%M"] + simrv_cmd
 
         start_t = time.perf_counter()
         try:
@@ -687,6 +752,10 @@ def run_benchmark_single(
                 )
                 return None
 
+            rss_match = re.search(r"__MAX_RSS_KB__:(\d+)", res.stderr)
+            if rss_match:
+                simrv_rss.append(int(rss_match.group(1)) / 1024.0)
+
             elapsed = end_t - start_t
             simrv_times.append(elapsed)
             simrv_speeds.append(kips)
@@ -703,12 +772,15 @@ def run_benchmark_single(
     # Spike runs
     spike_times = []
     spike_speeds = []
+    spike_rss = []
     spike_available = spike_bin and (is_executable(spike_bin) or which(spike_bin))
 
     if spike_available:
         for i in range(1, runs + 1):
-            spike_cmd = [spike_bin, f"--isa={isa}"]
-            spike_cmd.append(elf_path)
+            spike_cmd = [spike_bin, f"--isa={isa}", elf_path]
+            if has_time_wrapper:
+                spike_cmd = ["/usr/bin/time", "-f", "__MAX_RSS_KB__:%M"] + spike_cmd
+
             start_t = time.perf_counter()
             try:
                 res = subprocess.run(
@@ -725,6 +797,11 @@ def run_benchmark_single(
                         file=sys.stderr,
                     )
                     return None
+
+                stderr_str = res.stderr.decode("utf-8", errors="ignore")
+                rss_match = re.search(r"__MAX_RSS_KB__:(\d+)", stderr_str)
+                if rss_match:
+                    spike_rss.append(int(rss_match.group(1)) / 1024.0)
 
                 elapsed = end_t - start_t
                 spike_times.append(elapsed)
@@ -752,6 +829,7 @@ def run_benchmark_single(
         "sim_time": calculate_stats(simrv_sim_times),
         "sim_speed": calculate_stats(simrv_speeds),
         "wall_speed": calculate_stats(simrv_wall_speeds),
+        "rss": calculate_stats(simrv_rss),
         "overhead": calculate_stats(
             [wall - sim for wall, sim in zip(simrv_times, simrv_sim_times)]
         ),
@@ -760,6 +838,7 @@ def run_benchmark_single(
     spike_stats = {
         "time": calculate_stats(spike_times),
         "wall_speed": calculate_stats(spike_speeds),
+        "rss": calculate_stats(spike_rss),
     }
 
     return {
@@ -772,11 +851,13 @@ def run_benchmark_single(
             "runs_time": simrv_times,
             "runs_sim_speed_kips": simrv_speeds,
             "runs_wall_speed_kips": simrv_wall_speeds,
+            "runs_rss_mb": simrv_rss,
             "stats": simrv_stats,
         },
         "spike": {
             "runs_time": spike_times,
             "runs_wall_speed_kips": spike_speeds,
+            "runs_rss_mb": spike_rss,
             "stats": spike_stats,
         },
     }
