@@ -171,9 +171,6 @@ void Machine::run() {
             if (uart && !uart->is_input_thread_running()) {
                 uart->non_tui_poll_input();
             }
-            if (!s_multithreaded && sdl_display) {
-                sdl_display->update(cpu.e_icount);
-            }
             continue;
         }
 
@@ -193,10 +190,10 @@ void Machine::run() {
         }
 
         if (gdb_stub && gdb_stub->is_connected()) {
-            const bool hit_ebreak =
-                (cpu.pipeline_context.opcode == simrv::isa::Opcode::System) &&
-                (cpu.pipeline_context.funct12 == static_cast<Word>(simrv::isa::Funct12Priv::Ebreak)) &&
-                !cpu.pipeline_context.pending_exception.has_value();
+            const bool hit_ebreak = (cpu.pipeline_context.opcode == simrv::isa::Opcode::System) &&
+                                    (cpu.pipeline_context.funct12 ==
+                                     static_cast<Word>(simrv::isa::Funct12Priv::Ebreak)) &&
+                                    !cpu.pipeline_context.pending_exception.has_value();
             if (gdb_stub->single_step() || hit_ebreak) {
                 gdb_stub->notify_breakpoint(*this);
             } else {
@@ -205,8 +202,7 @@ void Machine::run() {
         }
 
         if (!s_appmode && spike_lockstep && spike_lockstep->is_running()) {
-            spike_lockstep->compare_and_report(cpu.state(), cpu.pipeline_context.cpc,
-                                               cpu.e_icount);
+            spike_lockstep->compare_and_report(cpu.state(), cpu.pipeline_context.cpc, cpu.e_icount);
             if (spike_lockstep->should_halt()) {
                 simrv::log::error("Lockstep: halting on divergence");
                 stop();
@@ -214,9 +210,9 @@ void Machine::run() {
         }
 
         if (s_tuimode && tui) {
-            const bool hit_ebreak =
-                (cpu.pipeline_context.opcode == simrv::isa::Opcode::System) &&
-                (cpu.pipeline_context.funct12 == static_cast<Word>(simrv::isa::Funct12Priv::Ebreak));
+            const bool hit_ebreak = (cpu.pipeline_context.opcode == simrv::isa::Opcode::System) &&
+                                    (cpu.pipeline_context.funct12 ==
+                                     static_cast<Word>(simrv::isa::Funct12Priv::Ebreak));
             if (simrv::compiler::unlikely(hit_ebreak)) {
                 tui->pause_loop();
             }

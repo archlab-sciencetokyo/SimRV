@@ -17,7 +17,8 @@ class SymbolTable {
     SymbolTable() = default;
 
     /**
-     * @brief Load symbols from a 32-bit or 64-bit ELF file and optional companion ELFs (e.g. vmlinux).
+     * @brief Load symbols from a 32-bit or 64-bit ELF file and optional companion ELFs (e.g.
+     * vmlinux).
      * @param elf_path Path to the ELF file or image directory.
      * @param clear_existing Whether to clear pre-existing symbols before loading.
      * @return true if symbols were successfully loaded, false otherwise.

@@ -87,8 +87,8 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
     } else if (type == ModalType::LoadDiskImage) {
         content_rows.push_back(std::format("{}Enter disk image filepath:\033[0m", kThemeText));
         content_rows.push_back(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, input));
-        content_rows.push_back(
-            std::format("{}e.g. linux-images/rv64/root.img, root.ext4, root.bin\033[0m", kThemeMuted));
+        content_rows.push_back(std::format(
+            "{}e.g. linux-images/rv64/root.img, root.ext4, root.bin\033[0m", kThemeMuted));
         if (!staged_binary_path.empty()) {
             content_rows.push_back(std::format("{}Staged memory image: {}{}\033[0m", kThemeMuted,
                                                kThemeSky, staged_binary_path));

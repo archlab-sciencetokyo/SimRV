@@ -30,7 +30,8 @@ struct alignas(64) CachedOp : public simrv::pipeline::DecodedInstruction {
  */
 class DecodeCache {
    public:
-    static constexpr size_t kCacheSize = 4096;  ///< Number of entries in direct-mapped cache (256KB fits in L2)
+    static constexpr size_t kCacheSize =
+        4096;  ///< Number of entries in direct-mapped cache (256KB fits in L2)
     static constexpr size_t kCacheMask = kCacheSize - 1;  ///< Bitmask for index calculation
 
     /**

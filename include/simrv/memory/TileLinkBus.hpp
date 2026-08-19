@@ -30,8 +30,12 @@ class TileLinkBus : public Bus {
     auto send_request(const TlChannelA& req) -> bool override;
     auto get_response(uint8_t source_id, TlChannelD& resp) -> bool override;
 
-    [[nodiscard]] auto read_count() const -> uint64_t override { return read_count_ + router_.mmio_read_count(); }
-    [[nodiscard]] auto write_count() const -> uint64_t override { return write_count_ + router_.mmio_write_count(); }
+    [[nodiscard]] auto read_count() const -> uint64_t override {
+        return read_count_ + router_.mmio_read_count();
+    }
+    [[nodiscard]] auto write_count() const -> uint64_t override {
+        return write_count_ + router_.mmio_write_count();
+    }
 
    private:
     void tick();

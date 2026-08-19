@@ -34,7 +34,8 @@ struct TlChannelA {
     Word mask{0};
     Word data{0};
 
-    [[nodiscard]] static constexpr auto compute_mask(uint8_t size, [[maybe_unused]] Address addr) -> Word {
+    [[nodiscard]] static constexpr auto compute_mask(uint8_t size, [[maybe_unused]] Address addr)
+        -> Word {
         const auto size_bytes = static_cast<unsigned>(1u << (size & 0x3u));
         const Word base_mask = (size_bytes >= sizeof(Word))
                                    ? static_cast<Word>(~Word{0})
