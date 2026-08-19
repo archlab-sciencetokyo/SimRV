@@ -477,8 +477,6 @@ void Tui::render_draw_sixel(int left_pane_width, int right_pane_width, int num_r
                     target_w = static_cast<int>(target_h * aspect);
                 else
                     target_h = fit_h;
-                target_w = std::min(active_w, target_w);
-                target_h = std::min(active_h, target_h);
                 target_h = std::max(6, (target_h / 6) * 6);
                 target_w = std::max(6, target_w);
                 int img_w_cells = (target_w + cell_w - 1) / cell_w;

@@ -24,8 +24,9 @@ void BaremetalMachine::execute_cycle() {
 }
 
 auto BaremetalMachine::execute_fast_batch(uint32_t batch_size) -> bool {
-    if (simrv::compiler::likely(s_high_performance && !s_tuimode && !s_lockstep_mode &&
-                                !s_gdb_mode && !s_bp_trace && s_strace == 0 &&
+    if (simrv::compiler::likely(s_high_performance &&
+                                (!s_tuimode || (tui && !tui->is_trace_active())) &&
+                                !s_lockstep_mode && !s_gdb_mode && !s_bp_trace && s_strace == 0 &&
                                 !breakpoints.has_any() && !s_rollback_enabled)) {
         if (s_fincnt != std::numeric_limits<Counter>::max()) {
             if (cpu.e_icount >= s_fincnt) {

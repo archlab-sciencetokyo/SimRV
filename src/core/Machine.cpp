@@ -168,7 +168,18 @@ void Machine::run() {
                 simrv::log::info("finished by -e option");
                 is_running_ = false;
             }
-            if (uart && !uart->is_input_thread_running()) {
+            if (s_tuimode && tui) {
+                if (simrv::tui::g_resized) {
+                    tui->render();
+                }
+                auto now = std::chrono::steady_clock::now();
+                if (now - last_tui_update_ >= std::chrono::milliseconds(33)) {
+                    tui->update();
+                    tui->update_cache();
+                    tui->render();
+                    last_tui_update_ = now;
+                }
+            } else if (uart && !uart->is_input_thread_running()) {
                 uart->non_tui_poll_input();
             }
             continue;
