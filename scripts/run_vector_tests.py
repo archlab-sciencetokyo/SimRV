@@ -124,8 +124,8 @@ def main():
         if os.path.exists(gen_src_dir):
             os.makedirs(os.path.dirname(generator_path), exist_ok=True)
             gen_env = os.environ.copy()
-            gen_env["CGO_ENABLED"] = "0"
             gen_env["CC"] = "/usr/bin/gcc"
+            gen_env["CGO_ENABLED"] = "1"
             subprocess.run(["go", "build", "-o", generator_path, "./generator"], cwd=vector_tests_dir, env=gen_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     if not os.path.exists(generator_path):
