@@ -365,19 +365,20 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
     }
 
     for (int y_band = 0; y_band < target_h; y_band += 6) {
-        std::vector<bool> color_present(palette.size(), false);
+        std::vector<int> max_x_for_color(palette.size(), -1);
         for (int x = 0; x < target_w; ++x) {
             for (int dy = 0; dy < 6; ++dy) {
                 int y = y_band + dy;
                 if (y >= target_h) break;
                 int color_idx = pixel_indices[static_cast<size_t>(y * target_w + x)];
-                color_present[static_cast<size_t>(color_idx)] = true;
+                max_x_for_color[static_cast<size_t>(color_idx)] = x;
             }
         }
 
         bool first_color = true;
         for (size_t c = 0; c < palette.size(); ++c) {
-            if (!color_present[c]) continue;
+            int last_x = max_x_for_color[c];
+            if (last_x < 0) continue;
 
             if (!first_color) {
                 sixel += "$";
@@ -399,7 +400,7 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
                 }
             };
 
-            for (int x = 0; x < target_w; ++x) {
+            for (int x = 0; x <= last_x; ++x) {
                 uint8_t sixel_val = 0;
                 for (int dy = 0; dy < 6; ++dy) {
                     int y = y_band + dy;
