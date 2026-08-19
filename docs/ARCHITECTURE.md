@@ -1,12 +1,12 @@
 # SimRV Architecture
 
-**Version:** 2.0.0-rc.10 · **Targets:** RV32GC, RV64GC, qualified Vector subset, and Bitmanip
+**Version:** 2.0.0 · **Targets:** RV32GC, RV64GC, qualified Vector subset, and Bitmanip
 
 ## Scope
 
 This document describes the current high-level structure of SimRV. The simulator
-is a cycle-oriented RISC-V functional simulator written in C++23, supporting both
-application-level and full Linux OS execution.
+is a cycle-oriented RISC-V functional simulator written in C++23, supporting bare-metal
+applications, real-time operating systems (e.g., μT-Kernel 3.0), and full Linux OS execution.
 
 ---
 

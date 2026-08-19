@@ -3,6 +3,19 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.0] — 2026-08-19
+
+General Availability release of SimRV 2.0: A dual-width explainable RISC-V full-system simulator written in modern ISO C++23, providing high-throughput functional simulation, in-terminal visual inspection, and multi-OS/RTOS execution.
+
+### Architectural Highlights & Major Capabilities
+
+- **Dual-Width Parametric Engine**: Compile-time parameterization (`SIMRV_XLEN`) for RV32GCBV and RV64GCBV with zero runtime virtualization overhead.
+- **High-Throughput Execution**: Optimized fast-path functional engine delivering 195+ MIPS on CoreMark with an overall 1.66x geometric mean speedup over Spike across 20-run statistical benchmark evaluation.
+- **Microarchitectural Explainability**: 5-stage structural pipeline modeling with dynamic inter-stage RAW/WAR/WAW hazard attribution, forwarding analysis, and natural-language causal event synthesis.
+- **In-Terminal Visual Inspection**: Split-screen TUI powered by an internal ANSI/VT100 Virtual Terminal and hardware Sixel graphics protocol, streaming guest graphical framebuffers over headless SSH text sessions with zero host GUI dependencies.
+- **Full-Stack OS & RTOS Platform**: Direct execution of upstream RISC-V Linux kernels (v6.x/v7.x), μT-Kernel 3.0, and embedded RTOS payloads over standard MMIO peripherals (VirtIO Block, NS16550 UART, CLINT, PLIC, RTC, and TileLink crossbar).
+- **Correctness & Research Reproducibility**: 100% CTest gate pass rate across RV32 (274/274) and RV64 (368/368), real-time differential Spike lockstep verification (`SpikeLockstep`), and ACM/IEEE open-science reproducibility tooling.
+
 ## [v2.0.0-rc.10] — 2026-08-19
 
 Release candidate 10 hardens release engineering workflows, adds strict required-suite schemas, streamlines dependencies by removing host SDL bridges while preserving simulated MMIO devices, and fixes headless execution across the vector test suite.
@@ -385,6 +398,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
+[v2.0.0]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0
 [v2.0.0-rc.10]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.10
 [v2.0.0-rc.9]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.9
 [v2.0.0-rc.8]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.8
