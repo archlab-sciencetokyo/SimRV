@@ -459,6 +459,26 @@ void Tui::render_build_lines(int left_pane_width, int right_pane_width, int num_
 
 void Tui::render_draw_sixel(int left_pane_width, int right_pane_width, int num_rows,
                             std::string& update_cmds) {
+    if (!modal_.is_active()) {
+        for (int i = 0; i < num_rows; ++i) {
+            std::string left = left_pane_->render_row(i, left_pane_width);
+            if (selection_.is_active && selection_.pane == SelectionPane::LeftPane) {
+                int sy1 = selection_.start_y - 4;
+                int sy2 = selection_.end_y - 4;
+                int sx1 = selection_.start_x;
+                int sx2 = selection_.end_x;
+                if (sy1 > sy2 || (sy1 == sy2 && sx1 > sx2)) {
+                    std::swap(sy1, sy2);
+                    std::swap(sx1, sx2);
+                }
+                if (i >= sy1 && i <= sy2) {
+                    left = std::format("\033[7m{}\033[0m", left);
+                }
+            }
+            update_cmds += std::format("\033[{};1H{}║\033[0m{}{}│\033[0m", i + 4, kThemeBorder,
+                                       left, kThemeBorder);
+        }
+    }
     if (machine_.framebuffer) {
         int active_w = machine_.framebuffer->get_width();
         int active_h = machine_.framebuffer->get_height();
@@ -491,26 +511,6 @@ void Tui::render_draw_sixel(int left_pane_width, int right_pane_width, int num_r
                     std::format("\033[{};{}H{}", img_row, img_col,
                                 machine_.framebuffer->get_sixel_escape(target_w, target_h));
             }
-        }
-    }
-    if (!modal_.is_active()) {
-        for (int i = 0; i < num_rows; ++i) {
-            std::string left = left_pane_->render_row(i, left_pane_width);
-            if (selection_.is_active && selection_.pane == SelectionPane::LeftPane) {
-                int sy1 = selection_.start_y - 4;
-                int sy2 = selection_.end_y - 4;
-                int sx1 = selection_.start_x;
-                int sx2 = selection_.end_x;
-                if (sy1 > sy2 || (sy1 == sy2 && sx1 > sx2)) {
-                    std::swap(sy1, sy2);
-                    std::swap(sx1, sx2);
-                }
-                if (i >= sy1 && i <= sy2) {
-                    left = std::format("\033[7m{}\033[0m", left);
-                }
-            }
-            update_cmds += std::format("\033[{};1H{}║\033[0m{}{}│\033[0m", i + 4, kThemeBorder,
-                                       left, kThemeBorder);
         }
     }
 }

@@ -326,17 +326,12 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
         return best_idx;
     };
 
-    std::vector<int> pixel_indices(static_cast<size_t>(target_w * target_h), 0);
-
-    for (int y = 0; y < target_h; ++y) {
-        const int src_y = y * active_h / target_h;
-        for (int x = 0; x < target_w; ++x) {
-            const int src_x = x * active_w / target_w;
+    std::vector<int> src_indices(static_cast<size_t>(active_w * active_h), 0);
+    for (int y = 0; y < active_h; ++y) {
+        for (int x = 0; x < active_w; ++x) {
             uint8_t r = 0, g = 0, b = 0;
-
             if (format_ == 0) {
-                const size_t offset =
-                    (static_cast<size_t>(src_y) * sz_w + static_cast<size_t>(src_x)) * 2;
+                const size_t offset = (static_cast<size_t>(y) * sz_w + static_cast<size_t>(x)) * 2;
                 if (offset + 1 < fb_mem_.size()) {
                     uint16_t pixel = fb_mem_[offset] | (fb_mem_[offset + 1] << 8);
                     r = ((pixel >> 11) & 0x1F) * 255 / 31;
@@ -344,19 +339,28 @@ auto Framebuffer::get_sixel_escape(int target_w, int target_h) -> std::string {
                     b = (pixel & 0x1F) * 255 / 31;
                 }
             } else {
-                const size_t offset =
-                    (static_cast<size_t>(src_y) * sz_w + static_cast<size_t>(src_x)) * 4;
+                const size_t offset = (static_cast<size_t>(y) * sz_w + static_cast<size_t>(x)) * 4;
                 if (offset + 2 < fb_mem_.size()) {
                     r = fb_mem_[offset + 2];
                     g = fb_mem_[offset + 1];
                     b = fb_mem_[offset];
                 }
             }
-            pixel_indices[static_cast<size_t>(y * target_w + x)] = get_palette_index(r, g, b);
+            src_indices[static_cast<size_t>(y * active_w + x)] = get_palette_index(r, g, b);
         }
     }
 
-    std::string sixel = std::format("\033P7;2;0q\"1;1;{};{}", target_w, target_h);
+    std::vector<int> pixel_indices(static_cast<size_t>(target_w * target_h), 0);
+    for (int y = 0; y < target_h; ++y) {
+        const int src_y = y * active_h / target_h;
+        for (int x = 0; x < target_w; ++x) {
+            const int src_x = x * active_w / target_w;
+            pixel_indices[static_cast<size_t>(y * target_w + x)] =
+                src_indices[static_cast<size_t>(src_y * active_w + src_x)];
+        }
+    }
+
+    std::string sixel = std::format("\033Pq\"1;1;{};{}", target_w, target_h);
     for (size_t i = 0; i < palette.size(); ++i) {
         int r_pct = static_cast<int>(palette[i].r) * 100 / 255;
         int g_pct = static_cast<int>(palette[i].g) * 100 / 255;
