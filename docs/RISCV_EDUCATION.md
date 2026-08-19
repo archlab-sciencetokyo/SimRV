@@ -153,15 +153,18 @@ riscv64-unknown-elf-objcopy -O binary program.elf program.bin
 
 ### Step 4: Run on SimRV
 
+SimRV 2.0 launches in interactive visual TUI mode by default:
+
 ```bash
-# RV32 build
-./build/rv32-release/SimRV -m program.bin
+# RV32 build (Bare-metal mode)
+./build/rv32-release/SimRV -b -m program.bin
 
-# RV64 build
-./build/rv64-release/SimRV -m program.bin
+# RV64 build (Bare-metal mode)
+./build/rv64-release/SimRV -b -m program.bin
+
+# Headless / CLI-only mode
+./build/rv64-release/SimRV -b -m program.bin -c
 ```
-
-Use `-u` to open the TUI monitor, or `-b` for bare-metal mode.
 
 ---
 
@@ -219,43 +222,33 @@ Description (Behavior):
 
 ### Interactive TUI Mode
 
-1. Run a binary in TUI mode:
+1. Run your binary on SimRV:
    ```bash
-   ./build/rv32-release/SimRV -m program.bin -u
+   ./build/rv32-release/SimRV -b -m program.bin
    ```
-2. The simulation starts paused. Press `Space` or `S` to single-step, or `P`
-   to pause/resume continuous execution.
-3. Press `E` to toggle the left Register Pane to the **EXPLAIN** page. Pressing
-   `E` again returns to the previous register view.
+2. The simulation starts paused (`[PAUSED]`). Press `c` to unpause and run continuously, or press `s` / `Space` to single-step instructions.
+3. Press `e` to switch directly to the **EXPLAIN** pane, or press `r` to cycle through left pane views (GPRs $\rightarrow$ FPRs $\rightarrow$ Pipeline $\rightarrow$ Cache $\rightarrow$ TLB $\rightarrow$ Breakpoints $\rightarrow$ Hazards $\rightarrow$ I/O $\rightarrow$ Stats $\rightarrow$ Stack $\rightarrow$ Explain).
 4. The EXPLAIN pane displays:
-   - Current PC and its symbolic name (if a symbol table was loaded).
-   - Instruction hex value (with decompression notation for 16-bit RVC instructions).
-   - Decoded assembly mnemonic and operands.
-   - Visual bit-field layout grid highlighting opcode, register specifiers, and
-     function fields.
-   - Decoded field values showing source/destination register names and their
-     current architectural values.
-   - A short educational description of what the instruction does, including
-     which ISA extension it belongs to.
-5. Step through instructions with `S` or `Space` to watch each instruction get
-   decoded and explained in real time.
+   - Current PC and symbolic function name.
+   - Instruction hex value and disassembled mnemonic.
+   - Visual bit-field layout grid identifying opcode, register specifiers, and immediate encodings.
+   - Architectural values before and after execution.
+   - Educational prose explaining microarchitectural effects and hazards.
+5. Press `g` to toggle the compact **Guided Inspection** assistant ribbon for contextual advice.
 
-### TUI Keybindings Reference
+### TUI Keybindings Reference (SimRV 2.0)
 
-| Key | Action |
-|:---|:---|
-| `P` | Pause / Resume simulation |
-| `S` / `Space` | Single step one instruction |
-| `E` | Toggle EXPLAIN pane |
-| `R` | Cycle register page (GPR → FPR → PIPELINE) |
-| `L` | Cycle layout (Split → Full Console → Full Register) |
-| `H` | Toggle High-Contrast theme |
-| `T` | Toggle Sakura theme |
-| `V` | Toggle background instruction tracing |
-| `[` / `]` | Adjust left pane width |
-| `↑` / `↓` | Scroll console |
-| `B` | Step backward one instruction (requires Rollback to be ON) |
-| `O` | Toggle instruction rollback tracking (ON/OFF) |
-| `N` | Run next 50 instructions and pause |
-| `+` / `-` | Increase/decrease stepping speed (slow-mo execution) |
-| `Q` / `Ctrl-C` | Quit simulator |
+| Key | Context | Action |
+|:---|:---|:---|
+| `c` | Paused | Unpause / Continue continuous simulation |
+| `p` / `Ctrl-P` | Running | Pause execution and enter interactive inspection mode |
+| `s` / `Space` | Paused | Single-step one instruction |
+| `e` | Paused | Jump directly to EXPLAIN inspection view |
+| `r` | Paused | Cycle left panel view (GPR, FPR, Pipeline, Cache, TLB, BP, Hazard, IO, Stats, Stack, Explain) |
+| `Tab` / `Shift-Tab` | All | Switch between right pane tabs (PTY, Display, Stats, Logs) |
+| `g` | Paused | Toggle Guided Inspection ribbon |
+| `b` | Paused | Open Breakpoint Management modal |
+| `m` | Paused | Open MISA / Extension Configuration modal |
+| `?` | Paused | Open Help & Keybindings reference modal |
+| `q` / `Ctrl-Q` | All | Cleanly terminate simulation |
+| `Ctrl-R` | All | Soft-reboot guest simulation |

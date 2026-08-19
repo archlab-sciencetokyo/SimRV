@@ -86,15 +86,17 @@ riscv64-unknown-elf-objcopy -O binary program.elf program.bin
 
 ### 4. Running the Program
 
-Run the resulting binary image in SimRV with baremetal/raw binary execution mode (`-b` option):
+Run the resulting binary image in SimRV in baremetal mode (`-b` / `--baremetal`). SimRV starts in interactive TUI mode by default:
 
 ```bash
-./build/rv32-release/SimRV -m program.bin -b
-```
+# Interactive TUI mode (Default)
+./build/rv32-release/SimRV -b -m program.bin
 
-To run with the interactive TUI dashboard:
-```bash
-./build/rv32-release/SimRV -m program.bin -b --tui
+# Headless / CLI-only mode
+./build/rv32-release/SimRV -b -m program.bin -c
+
+# Cycle-accurate 5-stage pipeline simulation
+./build/rv32-release/SimRV -b -m program.bin -C
 ```
 
 ---

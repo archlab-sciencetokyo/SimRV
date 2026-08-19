@@ -35,14 +35,14 @@ cmake --build --preset rv32-release
 
 ### Running Applications
 
-Run a baremetal binary:
+Run a baremetal binary in interactive TUI mode (Default):
 ```bash
-./build/rv64-release/SimRV -m img/hello.bin
+./build/rv64-release/SimRV -b -m img/hello.bin
 ```
 
-Run in interactive TUI mode:
+Run headless in CLI-only mode:
 ```bash
-./build/rv64-release/SimRV -m img/hello.bin -u
+./build/rv64-release/SimRV -b -m img/hello.bin -c
 ```
 
 Run Linux OS image with disk & devicetree:

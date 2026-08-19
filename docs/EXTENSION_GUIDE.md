@@ -123,33 +123,23 @@ To maintain full observability:
 1. **Tracer:** Ensure `OPERATION_NAME` strings are populated for all new `OperationId`
    values so instruction-mix output and trace files work correctly.
 
-2. **TUI Register Pane:** The TUI is split into modular components under `src/tui/`:
+2. **TUI Register & Subsystem Panes:** The TUI is split into modular components under `src/tui/panels/`:
    - If you add new architectural state (e.g., vector registers), update
-     [`src/tui/LeftPaneRegs.cpp`](../src/tui/LeftPaneRegs.cpp) to display the new
-     register page. Add a new `TuiRegPage` enum value in
-     [`include/simrv/tui/Tui.hpp`](../include/simrv/tui/Tui.hpp) and wire it into
-     `Tui::cycle_reg_page()`.
-   - Use the theme variables (`g_theme_val`, `g_theme_muted`, etc.) from
-     `TuiTheme.hpp` — never hardcode ANSI escape sequences.
+     [`src/tui/panels/LeftPaneRegs.cpp`](../src/tui/panels/LeftPaneRegs.cpp) or create a dedicated panel view. Add a new view type in
+     [`include/simrv/tui/panels/LeftPane.hpp`](../include/simrv/tui/panels/LeftPane.hpp) and wire it into the pane cycler.
+   - Use the centralized theme helpers from `TuiTheme.hpp` — never hardcode raw ANSI escape sequences.
 
 ---
 
 ## 7. Testing and Validation
 
-1. **ISA Tests:** Point `RISCV_TESTS_DIR` at a `riscv-tests` build that includes
-   the new extension's ISA test suite. Smoke tests and the full ISA gate will
-   automatically pick up matching `rv32*/rv64*` binaries via CMake glob.
+1. **ISA Tests:** Set `RISCV_TESTS_DIR=/path/to/riscv-tests` at CMake configuration time. ISA tests and lockstep checks will automatically register matching targets.
 
-2. **Gate Suite:** Run the full ISA gate to ensure no regression:
+2. **Vector Tests:** For vector extensions, set `SIMRV_VECTOR_TESTS_DIR=/path/to/riscv-vector-tests` or `--vector-tests-dir`.
 
-   ```bash
-   cmake --build --preset rv32-release
-   cmake --build --preset rv32-release --target isa-gate
-   ```
-
-3. **Lockstep (optional):** If Spike supports your extension, run lockstep to
-   verify cycle-by-cycle architectural equivalence:
+3. **Gate Suite:** Run the CTest gate suite to validate regression coverage across both architectures:
 
    ```bash
-   cmake --build --preset rv32-release --target lockstep-gate
+   ctest --test-dir build/rv64-release --output-on-failure -L gate
+   ctest --test-dir build/rv32-release --output-on-failure -L gate
    ```
