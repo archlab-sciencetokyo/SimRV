@@ -545,7 +545,12 @@ endforeach()
 
 # Register vector tests wrapper if an explicit vector test package is available.
 if(SIMRV_VECTOR_TESTS_DIR AND EXISTS "${SIMRV_VECTOR_TESTS_DIR}")
-  find_program(RISCV_GCC NAMES "${RISCV_PREFIX}gcc" "riscv64-unknown-elf-gcc" "riscv32-unknown-elf-gcc"
+  set(RISCV_GCC_NAMES)
+  if(NOT "${RISCV_PREFIX}" STREQUAL "")
+    list(APPEND RISCV_GCC_NAMES "${RISCV_PREFIX}gcc")
+  endif()
+  list(APPEND RISCV_GCC_NAMES "riscv64-unknown-elf-gcc" "riscv32-unknown-elf-gcc" "riscv64-linux-gnu-gcc" "riscv32-linux-gnu-gcc" "riscv-none-elf-gcc")
+  find_program(RISCV_GCC NAMES ${RISCV_GCC_NAMES}
                DOC "Path to RISC-V GCC cross-compiler for compiling vector tests")
   find_program(PYTHON_BIN NAMES "python3" "python" DOC "Path to python3 interpreter")
   if(NOT PYTHON_BIN)

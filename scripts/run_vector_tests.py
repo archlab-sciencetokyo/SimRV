@@ -213,15 +213,38 @@ def main():
 
     print(f"Found {len(s_files)} generated vector tests. Compiling and running with {args.jobs} jobs...", flush=True)
 
+    gcc_bin = args.gcc
+    objcopy_bin = args.objcopy
+    nm_bin = args.nm
+    import shutil
+    if not any(k in os.path.basename(gcc_bin) for k in ["riscv", "cross"]):
+        for cand in ["riscv64-unknown-elf-gcc", "riscv32-unknown-elf-gcc", "riscv64-linux-gnu-gcc", "riscv32-linux-gnu-gcc", "riscv-none-elf-gcc", "/var/archlab-modules/riscv-gnu-toolchain/2026.03.13/bin/riscv64-unknown-elf-gcc"]:
+            found = cand if os.path.isabs(cand) and os.path.exists(cand) else shutil.which(cand)
+            if found:
+                gcc_bin = found
+                break
+    if not any(k in os.path.basename(objcopy_bin) for k in ["riscv", "cross"]):
+        for cand in ["riscv64-unknown-elf-objcopy", "riscv32-unknown-elf-objcopy", "riscv64-linux-gnu-objcopy", "riscv32-linux-gnu-objcopy", "riscv-none-elf-objcopy", "/var/archlab-modules/riscv-gnu-toolchain/2026.03.13/bin/riscv64-unknown-elf-objcopy"]:
+            found = cand if os.path.isabs(cand) and os.path.exists(cand) else shutil.which(cand)
+            if found:
+                objcopy_bin = found
+                break
+    if not any(k in os.path.basename(nm_bin) for k in ["riscv", "cross"]):
+        for cand in ["riscv64-unknown-elf-nm", "riscv32-unknown-elf-nm", "riscv64-linux-gnu-nm", "riscv32-linux-gnu-nm", "riscv-none-elf-nm", "/var/archlab-modules/riscv-gnu-toolchain/2026.03.13/bin/riscv64-unknown-elf-nm"]:
+            found = cand if os.path.isabs(cand) and os.path.exists(cand) else shutil.which(cand)
+            if found:
+                nm_bin = found
+                break
+
     test_contexts = []
     for s_file in s_files:
         test_name = os.path.splitext(os.path.basename(s_file))[0]
         test_contexts.append({
             "s_file": s_file,
             "test_name": test_name,
-            "gcc": args.gcc,
-            "objcopy": args.objcopy,
-            "nm": args.nm,
+            "gcc": gcc_bin,
+            "objcopy": objcopy_bin,
+            "nm": nm_bin,
             "simrv": args.simrv,
             "work_dir": args.work_dir,
             "xlen": args.xlen,
