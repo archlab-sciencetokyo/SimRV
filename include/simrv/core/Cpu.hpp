@@ -484,15 +484,9 @@ class CPU {
     void commit_control_flow_and_traps(Machine& machine);
 
    private:
-    auto execute_cached_lui(CachedOp& op) -> void;
-    auto execute_cached_auipc(CachedOp& op) -> void;
     auto execute_cached_jal(CachedOp& op) -> void;
     auto execute_cached_jalr(CachedOp& op, Register rrs1) -> void;
     auto execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) -> void;
-    auto execute_cached_op(CachedOp& op, Register rrs1, Register rrs2) -> void;
-    auto execute_cached_op_imm(CachedOp& op, Register rrs1) -> void;
-    auto execute_cached_op_imm32(CachedOp& op, Register rrs1) -> void;
-    auto execute_cached_op32(CachedOp& op, Register rrs1, Register rrs2) -> void;
     SIMRV_ALWAYS_INLINE auto try_fast_load(Machine& machine, Address mem_addr, isa::Funct3 funct3,
                                            Register& out_val) -> bool;
     SIMRV_ALWAYS_INLINE auto try_fast_store(Machine& machine, Address mem_addr, isa::Funct3 funct3,
@@ -500,7 +494,12 @@ class CPU {
     auto execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> bool;
     auto execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Register rrs2) -> bool;
     auto execute_cached_fallback(Machine& machine) -> void;
-    auto handle_cached_interrupts() -> void;
+    auto dispatch_pending_interrupts() -> void;
+    SIMRV_ALWAYS_INLINE auto handle_cached_interrupts() -> void {
+        if (simrv::compiler::unlikely((state_.mip & state_.mie) != 0u)) {
+            dispatch_pending_interrupts();
+        }
+    }
     inline void pc_sign_extend() {
         if constexpr (simrv::xlen::kIsXLen64) {
             if (simrv::compiler::unlikely(state_.regs.xlen == 32)) {
@@ -508,6 +507,24 @@ class CPU {
                     static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
             }
         }
+    }
+
+    /// Advance PC by op.len, update instruction counters, sign-extend PC, and process interrupts.
+    SIMRV_ALWAYS_INLINE void advance_cached_pc(const CachedOp& op) {
+        state_.pc += op.len;
+        e_icount++;
+        if (op.cinsn) e_ccount++;
+        pc_sign_extend();
+        handle_cached_interrupts();
+    }
+
+    /// Set PC to target_pc, update instruction counters, sign-extend PC, and process interrupts.
+    SIMRV_ALWAYS_INLINE void commit_cached_branch_target(const CachedOp& op, Register target_pc) {
+        state_.pc = target_pc;
+        e_icount++;
+        if (op.cinsn) e_ccount++;
+        pc_sign_extend();
+        handle_cached_interrupts();
     }
 
     ArchState state_;

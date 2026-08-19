@@ -4,8 +4,6 @@
  */
 #include "simrv/core/Cpu.hpp"
 
-#include <bit>
-
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/device/Uart.hpp"
@@ -671,25 +669,20 @@ auto CPU::commit_stage(Machine& machine) -> bool {
     return !pipeline_context.pending_exception.has_value();
 }
 
-void CPU::execute_cached_lui(CachedOp& op) {
-    if (op.rd != RegId::Zero) {
-        state_.regs.write(op.rd, op.imm);
-    }
-    e_icount++;
-    if (op.cinsn) e_ccount++;
-    state_.pc += op.len;
-    pc_sign_extend();
+namespace {
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto is_aligned_for_funct3(Address addr,
+                                                                       isa::Funct3 funct3) noexcept
+    -> bool {
+    const unsigned size_bytes = 1u << (static_cast<unsigned>(funct3) & 0x3u);
+    const unsigned alignment_mask = size_bytes - 1u;
+    return (addr & alignment_mask) == 0;
 }
 
-void CPU::execute_cached_auipc(CachedOp& op) {
-    if (op.rd != RegId::Zero) {
-        state_.regs.write(op.rd, state_.pc + op.imm);
-    }
-    e_icount++;
-    if (op.cinsn) e_ccount++;
-    state_.pc += op.len;
-    pc_sign_extend();
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto access_size_for_funct3(
+    isa::Funct3 funct3) noexcept -> unsigned {
+    return 1u << (static_cast<unsigned>(funct3) & 0x3u);
 }
+}  // namespace
 
 void CPU::execute_cached_jal(CachedOp& op) {
     Register const next_pc = state_.pc + op.len;
@@ -705,10 +698,7 @@ void CPU::execute_cached_jal(CachedOp& op) {
                         pipeline_context.jmp_pc);
         return;
     }
-    state_.pc = pipeline_context.jmp_pc;
-    e_icount++;
-    if (op.cinsn) e_ccount++;
-    pc_sign_extend();
+    commit_cached_branch_target(op, pipeline_context.jmp_pc);
 }
 
 void CPU::execute_cached_jalr(CachedOp& op, Register rrs1) {
@@ -729,10 +719,7 @@ void CPU::execute_cached_jalr(CachedOp& op, Register rrs1) {
                         pipeline_context.jmp_pc);
         return;
     }
-    state_.pc = pipeline_context.jmp_pc;
-    e_icount++;
-    if (op.cinsn) e_ccount++;
-    pc_sign_extend();
+    commit_cached_branch_target(op, pipeline_context.jmp_pc);
 }
 
 void CPU::execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) {
@@ -762,174 +749,30 @@ void CPU::execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) {
     }
     pipeline_context.tkn = tkn;
     Register const target_pc = tkn ? (state_.pc + op.imm) : (state_.pc + op.len);
-    state_.pc = target_pc;
-    e_icount++;
-    if (op.cinsn) e_ccount++;
-    pc_sign_extend();
-}
-
-void CPU::execute_cached_op(CachedOp& op, Register rrs1, Register rrs2) {
-    Register wb_data = 0;
-    switch (op.op_id) {
-        case isa::ADD:
-            wb_data = rrs1 + rrs2;
-            break;
-        case isa::SUB:
-            wb_data = rrs1 - rrs2;
-            break;
-        case isa::AND:
-            wb_data = rrs1 & rrs2;
-            break;
-        case isa::OR:
-            wb_data = rrs1 | rrs2;
-            break;
-        case isa::XOR:
-            wb_data = rrs1 ^ rrs2;
-            break;
-        case isa::SLL:
-            wb_data = rrs1 << (rrs2 & simrv::xlen::xlen_shift_mask());
-            break;
-        case isa::SRL:
-            wb_data = rrs1 >> (rrs2 & simrv::xlen::xlen_shift_mask());
-            break;
-        case isa::SRA:
-            wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >>
-                                            (rrs2 & simrv::xlen::xlen_shift_mask()));
-            break;
-        case isa::SLT:
-            wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) <
-                                            static_cast<SignedWord>(rrs2));
-            break;
-        case isa::SLTU:
-            wb_data = static_cast<Register>(rrs1 < rrs2);
-            break;
-        default:
-            wb_data = execute::ExecuteUnit::aluInt(rrs1, rrs2, op.op_id, state_.regs.xlen);
-            break;
-    }
-    if (op.rd != RegId::Zero) {
-        state_.regs.write(op.rd, wb_data);
-    }
-    e_icount++;
-    if (op.cinsn) e_ccount++;
-    state_.pc += op.len;
-    pc_sign_extend();
-}
-
-void CPU::execute_cached_op_imm(CachedOp& op, Register rrs1) {
-    Register wb_data = 0;
-    switch (op.op_id) {
-        case isa::ADDI:
-            wb_data = rrs1 + op.imm;
-            break;
-        case isa::ANDI:
-            wb_data = rrs1 & op.imm;
-            break;
-        case isa::ORI:
-            wb_data = rrs1 | op.imm;
-            break;
-        case isa::XORI:
-            wb_data = rrs1 ^ op.imm;
-            break;
-        case isa::SLLI:
-            wb_data = rrs1 << (op.imm & simrv::xlen::xlen_shift_mask());
-            break;
-        case isa::SRLI:
-            wb_data = rrs1 >> (op.imm & simrv::xlen::xlen_shift_mask());
-            break;
-        case isa::SRAI:
-            wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >>
-                                            (op.imm & simrv::xlen::xlen_shift_mask()));
-            break;
-        case isa::SLTI:
-            wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) <
-                                            static_cast<SignedWord>(op.imm));
-            break;
-        case isa::SLTIU:
-            wb_data = static_cast<Register>(rrs1 < static_cast<Register>(op.imm));
-            break;
-        default:
-            wb_data = execute::ExecuteUnit::aluInt(rrs1, op.imm, op.op_id, state_.regs.xlen);
-            break;
-    }
-    if (op.rd != RegId::Zero) {
-        state_.regs.write(op.rd, wb_data);
-    }
-    e_icount++;
-    if (op.cinsn) e_ccount++;
-    state_.pc += op.len;
-    pc_sign_extend();
-}
-
-void CPU::execute_cached_op_imm32(CachedOp& op, Register rrs1) {
-    Register wb_data = 0;
-    switch (op.op_id) {
-        case isa::ADDIW:
-            wb_data =
-                static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + op.imm)));
-            break;
-        case isa::SLLIW:
-            wb_data = static_cast<Register>(static_cast<int64_t>(
-                static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (op.imm & 0x1f))));
-            break;
-        case isa::SRLIW:
-            wb_data = static_cast<Register>(static_cast<int64_t>(
-                static_cast<int32_t>(static_cast<uint32_t>(rrs1) >> (op.imm & 0x1f))));
-            break;
-        case isa::SRAIW:
-            wb_data = static_cast<Register>(
-                static_cast<int64_t>(static_cast<int32_t>(rrs1) >> (op.imm & 0x1f)));
-            break;
-        default:
-            wb_data = execute::ExecuteUnit::aluIntW(rrs1, op.imm, op.op_id);
-            break;
-    }
-    if (op.rd != RegId::Zero) {
-        state_.regs.write(op.rd, wb_data);
-    }
-    e_icount++;
-    if (op.cinsn) e_ccount++;
-    state_.pc += op.len;
-    pc_sign_extend();
-}
-
-void CPU::execute_cached_op32(CachedOp& op, Register rrs1, Register rrs2) {
-    Register wb_data = 0;
-    switch (op.op_id) {
-        case isa::ADDW:
-            wb_data =
-                static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + rrs2)));
-            break;
-        case isa::SUBW:
-            wb_data =
-                static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 - rrs2)));
-            break;
-        case isa::SLLW:
-            wb_data = static_cast<Register>(static_cast<int64_t>(
-                static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (rrs2 & 0x1f))));
-            break;
-        default:
-            wb_data = execute::ExecuteUnit::aluIntW(rrs1, rrs2, op.op_id);
-            break;
-    }
-    if (op.rd != RegId::Zero) {
-        state_.regs.write(op.rd, wb_data);
-    }
-    e_icount++;
-    if (op.cinsn) e_ccount++;
-    state_.pc += op.len;
-    pc_sign_extend();
+    commit_cached_branch_target(op, target_pc);
 }
 
 auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Register& out_val)
     -> bool {
-    const unsigned active_xlen = effective_data_xlen();
-    if (active_xlen == 32) mem_addr &= 0xFFFFFFFFULL;
-    const unsigned size_bytes = 1u << (static_cast<unsigned>(funct3) & 0x3u);
-    const unsigned alignment_mask = size_bytes - 1u;
-    if (simrv::compiler::unlikely((mem_addr & alignment_mask) != 0)) {
+    if (simrv::compiler::unlikely(!is_aligned_for_funct3(mem_addr, funct3))) {
         return false;
     }
+
+    if (simrv::compiler::likely(state_.priv == kPrivMachine &&
+                                (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+        const unsigned size_bytes = access_size_for_funct3(funct3);
+        if (simrv::compiler::likely(simrv::memory::is_dram_access(mem_addr, size_bytes))) {
+            out_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3),
+                                                   machine.mmem);
+            return true;
+        }
+        return false;
+    }
+
+    const unsigned active_xlen = effective_data_xlen();
+    if (active_xlen == 32) mem_addr &= 0xFFFFFFFFULL;
+    const unsigned size_bytes = access_size_for_funct3(funct3);
+
     const PrivilegeLevel eff_priv = effective_data_privilege();
     const bool translation_enabled =
         (eff_priv != kPrivMachine &&
@@ -961,13 +804,31 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
 }
 
 auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Register rrs2) -> bool {
-    const unsigned active_xlen = effective_data_xlen();
-    if (active_xlen == 32) mem_addr &= 0xFFFFFFFFULL;
-    const unsigned size_bytes = 1u << (static_cast<unsigned>(funct3) & 0x3u);
-    const unsigned alignment_mask = size_bytes - 1u;
-    if (simrv::compiler::unlikely((mem_addr & alignment_mask) != 0)) {
+    if (simrv::compiler::unlikely(!is_aligned_for_funct3(mem_addr, funct3))) {
         return false;
     }
+
+    if (simrv::compiler::likely(state_.priv == kPrivMachine &&
+                                (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+        const unsigned size_bytes = access_size_for_funct3(funct3);
+        if (simrv::compiler::likely(simrv::memory::is_dram_access(mem_addr, size_bytes) &&
+                                    !is_tohost_addr(machine, mem_addr))) {
+            if (simrv::compiler::unlikely(machine.s_rollback_enabled)) {
+                Word old_val = simrv::memory::ram_read_fast(
+                    mem_addr, static_cast<Instruction>(funct3), machine.mmem);
+                record_mem_write(mem_addr, old_val, static_cast<Instruction>(funct3));
+            }
+            simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3),
+                                          machine.mmem);
+            return true;
+        }
+        return false;
+    }
+
+    const unsigned active_xlen = effective_data_xlen();
+    if (active_xlen == 32) mem_addr &= 0xFFFFFFFFULL;
+    const unsigned size_bytes = access_size_for_funct3(funct3);
+
     const PrivilegeLevel eff_priv = effective_data_privilege();
     const bool translation_enabled =
         (eff_priv != kPrivMachine &&
@@ -1030,13 +891,8 @@ auto CPU::execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> 
         }
     }
 
-    if (op.rd != RegId::Zero) {
-        state_.regs.write(op.rd, mem_rdata);
-    }
-    e_icount++;
-    if (op.cinsn) e_ccount++;
-    state_.pc += op.len;
-    pc_sign_extend();
+    state_.regs.write_branchless(op.rd, mem_rdata);
+    advance_cached_pc(op);
     return true;
 }
 
@@ -1056,10 +912,7 @@ auto CPU::execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Re
     }
 
     state_.reserved = 0;
-    e_icount++;
-    if (op.cinsn) e_ccount++;
-    state_.pc += op.len;
-    pc_sign_extend();
+    advance_cached_pc(op);
     return true;
 }
 
@@ -1074,7 +927,7 @@ auto CPU::execute_cached_fallback(Machine& machine) -> void {
     }
 }
 
-void CPU::handle_cached_interrupts() {
+void CPU::dispatch_pending_interrupts() {
     Word const pending_interrupts = state_.mip & state_.mie;
     if (simrv::compiler::unlikely(pending_interrupts != 0u)) {
         Word enable_interrupts = 0;
@@ -1119,25 +972,6 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
 
     if constexpr (kInstMix) {
         e_instmix[static_cast<std::size_t>(op.op_id)]++;
-    }
-
-    const auto cached_opc = static_cast<Opcode>(op.opcode);
-    const bool is_fp_cached = (cached_opc == Opcode::LoadFp) || (cached_opc == Opcode::StoreFp) ||
-                              (cached_opc == Opcode::OpFp) || (cached_opc == Opcode::MAdd) ||
-                              (cached_opc == Opcode::MSub) || (cached_opc == Opcode::NMAdd) ||
-                              (cached_opc == Opcode::NMSub);
-    const bool is_vec_cached = (cached_opc == Opcode::OpV);
-
-    if (simrv::compiler::unlikely(
-            (is_fp_cached && (state_.mstatus & enum_mask(MstatusBit::Fs)) == 0) ||
-            (is_vec_cached && (state_.mstatus & enum_mask(MstatusBit::Vs)) == 0))) {
-        if constexpr (!kCopyContext) {
-            pipeline_context.copy_from(op);
-            pipeline_context.tlb_miss = false;
-            pipeline_context.pending_tval = 0;
-        }
-        execute_cached_fallback(machine);
-        return;
     }
 
     // 3. Execute, Memory, Writeback, Commit — single flat op_id dispatch (no double switch).
@@ -1305,16 +1139,13 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         case isa::BLTU:
         case isa::BGEU:
             execute_cached_branch(op, state_.regs.read(op.rs1), state_.regs.read(op.rs2));
-            handle_cached_interrupts();
             return;
         // ---- Jump instructions ----
         case isa::JAL:
             execute_cached_jal(op);
-            handle_cached_interrupts();
             return;
         case isa::JALR:
             execute_cached_jalr(op, state_.regs.read(op.rs1));
-            handle_cached_interrupts();
             return;
         // ---- Loads ----
         case isa::LB:
@@ -1324,18 +1155,14 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         case isa::LBU:
         case isa::LHU:
         case isa::LWU:
-            if (!execute_cached_load(machine, op, state_.regs.read(op.rs1))) return;
-            handle_cached_interrupts();
+            execute_cached_load(machine, op, state_.regs.read(op.rs1));
             return;
         // ---- Stores ----
         case isa::SB:
         case isa::SH:
         case isa::SW:
         case isa::SD:
-            if (!execute_cached_store(machine, op, state_.regs.read(op.rs1),
-                                      state_.regs.read(op.rs2)))
-                return;
-            handle_cached_interrupts();
+            execute_cached_store(machine, op, state_.regs.read(op.rs1), state_.regs.read(op.rs2));
             return;
         // ---- Everything else: fallback to full pipeline stages ----
         default:
@@ -1351,13 +1178,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
     // Shared writeback tail — only ALU arms (those that break) reach here.
     // Branchless GPR write: write rd unconditionally, then re-zero x0.
     state_.regs.write_branchless(op.rd, wb_data);
-    e_icount++;
-    if (op.cinsn) e_ccount++;
-    state_.pc += op.len;
-    pc_sign_extend();
-
-    // 4. Handle pending interrupts (same check as commit_stage)
-    handle_cached_interrupts();
+    advance_cached_pc(op);
 }
 
 void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
@@ -1365,23 +1186,56 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
                           machine.s_bp_trace || (machine.s_strace != 0);
     const bool inst_mix = machine.s_use_mix || machine.s_tuimode;
 
-    for (uint32_t b = 0; b < batch_size; ++b) {
-        auto* cached = decode_cache.lookup(state_.pc);
-        if (simrv::compiler::likely(cached != nullptr)) {
-            if (simrv::compiler::unlikely(copy_ctx && inst_mix)) {
+    if (simrv::compiler::likely(!copy_ctx && !inst_mix)) {
+        for (uint32_t b = 0; b < batch_size; ++b) {
+            auto* cached = decode_cache.lookup(state_.pc);
+            if (simrv::compiler::likely(cached != nullptr)) {
+                execute_cached_op_fast<false, false>(machine, *cached);
+            } else {
+                run_cycle_baremetal(machine);
+            }
+            if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running())) {
+                break;
+            }
+        }
+        return;
+    }
+
+    if (copy_ctx && inst_mix) {
+        for (uint32_t b = 0; b < batch_size; ++b) {
+            auto* cached = decode_cache.lookup(state_.pc);
+            if (simrv::compiler::likely(cached != nullptr)) {
                 execute_cached_op_fast<true, true>(machine, *cached);
-            } else if (simrv::compiler::unlikely(copy_ctx)) {
+            } else {
+                run_cycle_baremetal(machine);
+            }
+            if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running())) {
+                break;
+            }
+        }
+    } else if (copy_ctx) {
+        for (uint32_t b = 0; b < batch_size; ++b) {
+            auto* cached = decode_cache.lookup(state_.pc);
+            if (simrv::compiler::likely(cached != nullptr)) {
                 execute_cached_op_fast<true, false>(machine, *cached);
-            } else if (simrv::compiler::unlikely(inst_mix)) {
+            } else {
+                run_cycle_baremetal(machine);
+            }
+            if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running())) {
+                break;
+            }
+        }
+    } else {
+        for (uint32_t b = 0; b < batch_size; ++b) {
+            auto* cached = decode_cache.lookup(state_.pc);
+            if (simrv::compiler::likely(cached != nullptr)) {
                 execute_cached_op_fast<false, true>(machine, *cached);
             } else {
-                execute_cached_op_fast<false, false>(machine, *cached);
+                run_cycle_baremetal(machine);
             }
-        } else {
-            run_cycle_baremetal(machine);
-        }
-        if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running())) {
-            break;
+            if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running())) {
+                break;
+            }
         }
     }
 }
