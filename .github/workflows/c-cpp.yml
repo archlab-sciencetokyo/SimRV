@@ -67,6 +67,7 @@ jobs:
         git submodule update --init --recursive
         mkdir -p bin
         go build -o bin/riscv-vector-tests-generator ./generator || make -j2 generator || true
+        chmod +x bin/riscv-vector-tests-generator || true
 
     - name: Show toolchain versions
       run: |

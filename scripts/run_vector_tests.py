@@ -129,6 +129,11 @@ def main():
         print(f"Error: Vector test generator not found at '{generator_path}'")
         sys.exit(1)
 
+    try:
+        os.chmod(generator_path, 0o755)
+    except Exception:
+        pass
+
     os.makedirs(args.work_dir, exist_ok=True)
 
     # 1. Run Generator
