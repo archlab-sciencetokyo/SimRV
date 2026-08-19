@@ -345,6 +345,12 @@ void CPU::run_cycle_baremetal(Machine& machine) {
                 execute_cached_op_fast<false, false>(machine, *cached);
             }
             clint_mmio.mcycle++;
+            clint_mmio.rtc_divider++;
+            if (clint_mmio.rtc_divider == 10) {
+                clint_mmio.mtime++;
+                clint_mmio.rtc_divider = 0;
+                evaluate_timer_interrupt();
+            }
             if (machine.s_tuimode && machine.tui && machine.tui->is_trace_active()) {
                 record_trace_for_tui(machine);
             }
@@ -388,6 +394,12 @@ void CPU::run_cycle_baremetal(Machine& machine) {
     }
 
     clint_mmio.mcycle++;
+    clint_mmio.rtc_divider++;
+    if (clint_mmio.rtc_divider == 10) {
+        clint_mmio.mtime++;
+        clint_mmio.rtc_divider = 0;
+        evaluate_timer_interrupt();
+    }
     if (machine.s_tuimode && machine.tui && machine.tui->is_trace_active()) {
         record_trace_for_tui(machine);
     }
@@ -1185,12 +1197,14 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
     const bool copy_ctx = machine.s_tuimode || machine.s_lockstep_mode || machine.s_gdb_mode ||
                           machine.s_bp_trace || (machine.s_strace != 0);
     const bool inst_mix = machine.s_use_mix || machine.s_tuimode;
+    uint32_t cached_ops = 0;
 
     if (simrv::compiler::likely(!copy_ctx && !inst_mix)) {
         for (uint32_t b = 0; b < batch_size; ++b) {
             auto* cached = decode_cache.lookup(state_.pc);
             if (simrv::compiler::likely(cached != nullptr)) {
                 execute_cached_op_fast<false, false>(machine, *cached);
+                cached_ops++;
             } else {
                 run_cycle_baremetal(machine);
             }
@@ -1198,14 +1212,12 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
                 break;
             }
         }
-        return;
-    }
-
-    if (copy_ctx && inst_mix) {
+    } else if (copy_ctx && inst_mix) {
         for (uint32_t b = 0; b < batch_size; ++b) {
             auto* cached = decode_cache.lookup(state_.pc);
             if (simrv::compiler::likely(cached != nullptr)) {
                 execute_cached_op_fast<true, true>(machine, *cached);
+                cached_ops++;
             } else {
                 run_cycle_baremetal(machine);
             }
@@ -1218,6 +1230,7 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
             auto* cached = decode_cache.lookup(state_.pc);
             if (simrv::compiler::likely(cached != nullptr)) {
                 execute_cached_op_fast<true, false>(machine, *cached);
+                cached_ops++;
             } else {
                 run_cycle_baremetal(machine);
             }
@@ -1230,12 +1243,23 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
             auto* cached = decode_cache.lookup(state_.pc);
             if (simrv::compiler::likely(cached != nullptr)) {
                 execute_cached_op_fast<false, true>(machine, *cached);
+                cached_ops++;
             } else {
                 run_cycle_baremetal(machine);
             }
             if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running())) {
                 break;
             }
+        }
+    }
+
+    if (cached_ops > 0) {
+        clint_mmio.mcycle += cached_ops;
+        clint_mmio.rtc_divider += static_cast<int>(cached_ops);
+        if (clint_mmio.rtc_divider >= 10) {
+            clint_mmio.mtime += clint_mmio.rtc_divider / 10;
+            clint_mmio.rtc_divider %= 10;
+            evaluate_timer_interrupt();
         }
     }
 }
