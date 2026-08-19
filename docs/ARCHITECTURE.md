@@ -1,6 +1,6 @@
 # SimRV Architecture
 
-**Version:** 2.0.0-rc.8 · **Targets:** RV32GC, RV64GC, Vector, and Bitmanip
+**Version:** 2.0.0-rc.10 · **Targets:** RV32GC, RV64GC, qualified Vector subset, and Bitmanip
 
 ## Scope
 
@@ -237,4 +237,3 @@ The cyclomatic complexity (CCN) hot-spots in the simulator are:
 5. `simrv::core::CPU::run_cycle` (in `Cpu.cpp`) - **CCN: 65**, NLOC: 138 (Main CPU pipeline run loop)
 
 These metrics provide guidelines for identifying components that could benefit from future refactoring and simplification.
-

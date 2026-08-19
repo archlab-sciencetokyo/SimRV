@@ -8,7 +8,7 @@ if(NOT PYTHON_BIN)
   set(PYTHON_BIN "python3")
 endif()
 
-set(SIMRV_VERSION "2.0.0-rc.9")
+set(SIMRV_VERSION "2.0.0-rc.10")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -74,7 +74,7 @@ option(SIMRV_WARNINGS_AS_ERRORS "Treat project compiler warnings as errors" OFF)
 option(SIMRV_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(SIMRV_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(SIMRV_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
-option(SIMRV_ENABLE_SDL "Enable optional SDL3 graphics and audio" ON)
+set(SIMRV_VECTOR_TESTS_DIR "" CACHE PATH "Path to a built chipsalliance/riscv-vector-tests checkout")
 
 if(SIMRV_ENABLE_TSAN AND (SIMRV_ENABLE_ASAN OR SIMRV_ENABLE_UBSAN))
   message(FATAL_ERROR "ThreadSanitizer must use a separate build from ASan/UBSan")
@@ -92,6 +92,7 @@ set_property(CACHE SIMRV_XLEN PROPERTY STRINGS 32 64)
 if(NOT SIMRV_XLEN STREQUAL "32" AND NOT SIMRV_XLEN STREQUAL "64")
   message(FATAL_ERROR "SIMRV_XLEN must be 32 or 64 (got: ${SIMRV_XLEN})")
 endif()
+set(SIMRV_LINUX_IMAGES_DIR "${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}" CACHE PATH "Path to reproducible Linux test images")
 
 set(SIMRV_DRAM_SIZE_MB "256" CACHE STRING "DRAM size in megabytes (must be power of 2)")
 set(SIMRV_DISK_SIZE_MB "256" CACHE STRING "Disk size in megabytes")
@@ -173,9 +174,7 @@ add_executable(SimRV
   src/debug/BreakpointManager.cpp
   src/util/InstructionExplainer.cpp
   src/device/Framebuffer.cpp
-  src/util/SdlDisplay.cpp
   src/device/Audio.cpp
-  src/util/SdlAudio.cpp
   src/device/InputDevice.cpp
  )
 
@@ -192,29 +191,6 @@ target_include_directories(SimRV PRIVATE
   include
   ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
-
-if(SIMRV_ENABLE_SDL)
-  find_package(SDL3 QUIET)
-endif()
-if(SIMRV_ENABLE_SDL AND NOT SDL3_FOUND)
-  find_package(PkgConfig QUIET)
-  if(PKG_CONFIG_FOUND)
-    pkg_check_modules(SDL3 sdl3)
-  endif()
-endif()
-
-if(SIMRV_ENABLE_SDL AND SDL3_FOUND)
-  message(STATUS "SDL3 found: compiling with SDL3 graphics support")
-  target_compile_definitions(SimRV PRIVATE HAVE_SDL3)
-  if(TARGET SDL3::SDL3)
-    target_link_libraries(SimRV PRIVATE SDL3::SDL3)
-  else()
-    target_include_directories(SimRV PRIVATE ${SDL3_INCLUDE_DIRS})
-    target_link_libraries(SimRV PRIVATE ${SDL3_LIBRARIES})
-  endif()
-else()
-  message(STATUS "SDL3 not found: compiling without SDL3 graphics support")
-endif()
 
 
 target_compile_options(SimRV PRIVATE
@@ -269,18 +245,13 @@ endif()
 
 # Standard compilation optimization options are handled via build types (e.g., -O3 in Release mode)
 
-# Toolchain detection for testing
+# Toolchain detection for testing. Host-specific defaults are intentionally
+# avoided: release dependencies must be supplied through cache variables or PATH.
 if(NOT DEFINED RISCV_PREFIX)
   if(DEFINED ENV{RISCV_PREFIX})
     set(RISCV_PREFIX "$ENV{RISCV_PREFIX}")
   else()
-    if(EXISTS "/var/archlab-modules/riscv-gnu-toolchain/2026.03.13/bin/riscv64-unknown-elf-gcc")
-      set(RISCV_PREFIX "/var/archlab-modules/riscv-gnu-toolchain/2026.03.13/bin/riscv64-unknown-elf-")
-    elseif(EXISTS "/var/archlab-modules/riscv/2026.03.13/bin/riscv64-unknown-elf-gcc")
-      set(RISCV_PREFIX "/var/archlab-modules/riscv/2026.03.13/bin/riscv64-unknown-elf-")
-    else()
-      set(RISCV_PREFIX "")
-    endif()
+    set(RISCV_PREFIX "")
   endif()
 endif()
 
@@ -332,6 +303,9 @@ endif()
 
 add_test(NAME tui-framework COMMAND simrv-tui-tests)
 set_tests_properties(tui-framework PROPERTIES LABELS "gate;regress;tui")
+if(SIMRV_ENABLE_TSAN)
+  set_property(TEST tui-framework APPEND PROPERTY LABELS "thread")
+endif()
 
 add_executable(simrv-core-semantics-tests
   tests/CoreSemanticsTests.cpp
@@ -388,6 +362,10 @@ add_test(NAME release-metadata
   COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/release_check.py
 )
 set_tests_properties(release-metadata PROPERTIES LABELS "gate;regress;release")
+add_test(NAME release-tools
+  COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/ReleaseToolTests.py
+)
+set_tests_properties(release-tools PROPERTIES LABELS "gate;regress;release")
 
 # Optional App/Linux smoke tests
 if(DEFINED ENV{SIMRV_APP_IMG})
@@ -410,7 +388,7 @@ if(DEFINED ENV{SIMRV_LINUX_MEM_IMG} AND DEFINED ENV{SIMRV_LINUX_DISK_IMG})
   )
 endif()
 
-set(TEST_IMAGES_DIR "${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}")
+set(TEST_IMAGES_DIR "${SIMRV_LINUX_IMAGES_DIR}")
 if(EXISTS "${TEST_IMAGES_DIR}/fw_payload.bin")
   find_program(PYTHON_BIN NAMES "python3" "python" DOC "Path to python3 interpreter")
   if(NOT PYTHON_BIN)
@@ -422,7 +400,7 @@ if(EXISTS "${TEST_IMAGES_DIR}/fw_payload.bin")
   set_tests_properties(linux-boot-pty PROPERTIES
     ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR}"
     TIMEOUT 110
-    LABELS "gate;regress;linux;pty"
+    LABELS "gate;regress;linux;pty;required"
   )
   add_test(NAME linux-poweroff-quit-pty
     COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py
@@ -430,7 +408,7 @@ if(EXISTS "${TEST_IMAGES_DIR}/fw_payload.bin")
   set_tests_properties(linux-poweroff-quit-pty PROPERTIES
     ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_TEST_LIFECYCLE=poweroff"
     TIMEOUT 110
-    LABELS "gate;regress;linux;pty;lifecycle"
+    LABELS "gate;regress;linux;pty;lifecycle;required"
   )
   add_test(NAME linux-poweroff-reboot-pty
     COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py
@@ -438,13 +416,15 @@ if(EXISTS "${TEST_IMAGES_DIR}/fw_payload.bin")
   set_tests_properties(linux-poweroff-reboot-pty PROPERTIES
     ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_TEST_LIFECYCLE=poweroff-reboot"
     TIMEOUT 110
-    LABELS "gate;regress;linux;pty;lifecycle"
+    LABELS "gate;regress;linux;pty;lifecycle;required"
   )
 endif()
 
 # Glob available ISA tests from riscv-tests at configure time
 set(DEFAULT_RISCV_TESTS_DIR "${CMAKE_SOURCE_DIR}/../../tests/riscv-tests")
-if(EXISTS "${DEFAULT_RISCV_TESTS_DIR}" AND IS_DIRECTORY "${DEFAULT_RISCV_TESTS_DIR}")
+if(DEFINED RISCV_TESTS_DIR AND NOT "${RISCV_TESTS_DIR}" STREQUAL "")
+  set(RISCV_TESTS_DIR "${RISCV_TESTS_DIR}")
+elseif(EXISTS "${DEFAULT_RISCV_TESTS_DIR}" AND IS_DIRECTORY "${DEFAULT_RISCV_TESTS_DIR}")
   set(RISCV_TESTS_DIR "${DEFAULT_RISCV_TESTS_DIR}")
 elseif(DEFINED ENV{RISCV_TESTS_DIR})
   set(RISCV_TESTS_DIR "$ENV{RISCV_TESTS_DIR}")
@@ -563,8 +543,8 @@ foreach(test_name IN LISTS ALL_ISA_TESTS)
   endif()
 endforeach()
 
-# Register vector tests wrapper if toolchain and vector test package are available
-if(EXISTS "/var/archlab-modules/riscv-vector-tests/2026.07.06")
+# Register vector tests wrapper if an explicit vector test package is available.
+if(SIMRV_VECTOR_TESTS_DIR AND EXISTS "${SIMRV_VECTOR_TESTS_DIR}")
   find_program(RISCV_GCC NAMES "${RISCV_PREFIX}gcc" "riscv64-unknown-elf-gcc" "riscv32-unknown-elf-gcc"
                DOC "Path to RISC-V GCC cross-compiler for compiling vector tests")
   find_program(PYTHON_BIN NAMES "python3" "python" DOC "Path to python3 interpreter")
@@ -581,10 +561,11 @@ if(EXISTS "/var/archlab-modules/riscv-vector-tests/2026.07.06")
         --objcopy ${RISCV_OBJCOPY}
         --nm ${RISCV_NM}
         --work-dir ${CMAKE_CURRENT_BINARY_DIR}/vector-tests-gen
+        --vector-tests-dir ${SIMRV_VECTOR_TESTS_DIR}
     )
     set_tests_properties(vector-suite PROPERTIES
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-      LABELS "vector"
+      LABELS "gate;vector;required"
       TIMEOUT 600
     )
   endif()
@@ -638,7 +619,7 @@ add_custom_target(release-check
   VERBATIM
 )
 
-if(EXISTS "/var/archlab-modules/riscv-vector-tests/2026.07.06" AND RISCV_GCC)
+if(SIMRV_VECTOR_TESTS_DIR AND EXISTS "${SIMRV_VECTOR_TESTS_DIR}" AND RISCV_GCC)
   add_custom_target(vector-gate
     COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/run_vector_tests.py
       --simrv $<TARGET_FILE:SimRV>
@@ -647,6 +628,7 @@ if(EXISTS "/var/archlab-modules/riscv-vector-tests/2026.07.06" AND RISCV_GCC)
       --objcopy ${RISCV_OBJCOPY}
       --nm ${RISCV_NM}
       --work-dir ${CMAKE_CURRENT_BINARY_DIR}/vector-tests-gen
+      --vector-tests-dir ${SIMRV_VECTOR_TESTS_DIR}
     DEPENDS SimRV
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Running Full Vector validation gate"

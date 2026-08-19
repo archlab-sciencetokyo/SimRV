@@ -3,6 +3,22 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.0-rc.10] — 2026-08-19
+
+Release candidate 10 hardens release engineering workflows, adds strict required-suite schemas, streamlines dependencies by removing host SDL bridges while preserving simulated MMIO devices, and fixes headless execution across the vector test suite.
+
+### Release engineering and reproducibility
+
+- Added versioned release, evidence, and experiment schemas with strict required-suite coverage.
+- Added portable dependency inputs, machine-readable evidence, deterministic aggregation/plotting,
+  and reproducibility archive tooling.
+- Changed performance qualification to an evidence-only policy and retained explicit FP/RVV gaps.
+- Added citation metadata, a support matrix, research-companion documentation, and academic support
+  and security boundaries.
+- Hardened Linux PTY shutdown validation against the expected terminal-close race.
+- Fixed vector test runner to execute in headless `--cli` mode, achieving 100% pass across all 1,067 tests.
+- Removed experimental SDL3 host audio/display bridges and third-party soundfont headers (`tsf.h`, `tml.h`) while preserving simulated MMIO device models (`Audio`, `Framebuffer`, `InputDevice`).
+
 ## [v2.0.0-rc.9] — 2026-08-14
 
 Release candidate 9 focuses on architectural compliance, trap and interrupt correctness,
@@ -369,6 +385,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
+[v2.0.0-rc.10]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.10
 [v2.0.0-rc.9]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.9
 [v2.0.0-rc.8]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.8
 [v2.0.0-rc.6]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.6
