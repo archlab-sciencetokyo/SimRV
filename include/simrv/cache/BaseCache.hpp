@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "simrv/Define.hpp"
+#include "simrv/memory/Bus.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::cache {
@@ -28,36 +29,53 @@ class BaseCache {
 
     /**
      * @struct CacheLine
-     * @brief Aligned L1 cache line entry (64 bytes total layout).
+     * @brief Aligned L1 cache line entry with TileLink-C CoherenceState.
      */
     struct alignas(64) CacheLine {
         Address tag = ~Address{0};          ///< Tag bits for address matching (8 bytes, offset 0)
         uint64_t last_used = 0;             ///< Timestamp tick for LRU eviction (8 bytes, offset 8)
         bool valid = false;                 ///< Cache line validity bit (1 byte, offset 16)
-        std::array<uint8_t, 15> padding{};  ///< Explicit 15-byte padding (offset 17..32)
-        alignas(16) std::array<Byte, kLineBytes> data{};  ///< 16-byte aligned payload buffer (32
-                                                          ///< bytes, offset 32..64)
+        simrv::memory::CoherenceState state = simrv::memory::CoherenceState::None;  ///< TL-C state (offset 17)
+        bool dirty = false;                 ///< Modified dirty flag (offset 18)
+        std::array<uint8_t, 13> padding{};  ///< Explicit padding (offset 19..32)
+        alignas(16) std::array<Byte, kLineBytes> data{};  ///< 16-byte aligned payload buffer (32 bytes, offset 32..64)
     };
 
     BaseCache() = default;
 
-    void insert(Address base_addr, const Byte* line_data) {
+    void insert(Address base_addr, const Byte* line_data,
+                simrv::memory::CoherenceState init_state = simrv::memory::CoherenceState::Trunk,
+                bool is_dirty = false) {
         ++access_tick_;
         const uint32_t set_idx = get_set_index(base_addr);
         const Address tag = get_tag(base_addr);
         auto& set = sets_[set_idx];
         CacheLine* victim = &set[0];
         uint32_t victim_way = 0;
+        bool found_exact_tag = false;
+
         for (uint32_t w = 0; w < kWays; ++w) {
             auto& line = set[w];
-            if (!line.valid) {
+            if (line.valid && line.tag == tag) {
                 victim = &line;
                 victim_way = w;
+                found_exact_tag = true;
                 break;
             }
-            if (line.last_used < victim->last_used) {
-                victim = &line;
-                victim_way = w;
+        }
+
+        if (!found_exact_tag) {
+            for (uint32_t w = 0; w < kWays; ++w) {
+                auto& line = set[w];
+                if (!line.valid) {
+                    victim = &line;
+                    victim_way = w;
+                    break;
+                }
+                if (line.last_used < victim->last_used) {
+                    victim = &line;
+                    victim_way = w;
+                }
             }
         }
 
@@ -72,7 +90,9 @@ class BaseCache {
         last_inserted_tag_ = tag;
 
         victim->tag = tag;
-        victim->valid = true;
+        victim->valid = (init_state != simrv::memory::CoherenceState::None);
+        victim->state = init_state;
+        victim->dirty = is_dirty;
         victim->last_used = access_tick_;
         std::memcpy(victim->data.data(), line_data, kLineBytes);
     }
@@ -117,6 +137,19 @@ class BaseCache {
         }
         return ~Address{0};
     }
+    [[nodiscard]] auto get_line_state(uint32_t set_idx, uint32_t way_idx) const
+        -> simrv::memory::CoherenceState {
+        if (set_idx < kNumSets && way_idx < kWays) {
+            return sets_[set_idx][way_idx].state;
+        }
+        return simrv::memory::CoherenceState::None;
+    }
+    [[nodiscard]] auto is_line_dirty(uint32_t set_idx, uint32_t way_idx) const -> bool {
+        if (set_idx < kNumSets && way_idx < kWays) {
+            return sets_[set_idx][way_idx].dirty;
+        }
+        return false;
+    }
     [[nodiscard]] auto get_line_last_used(uint32_t set_idx, uint32_t way_idx) const -> uint64_t {
         if (set_idx < kNumSets && way_idx < kWays) {
             return sets_[set_idx][way_idx].last_used;
@@ -129,6 +162,29 @@ class BaseCache {
             return &sets_[set_idx][way_idx].data;
         }
         return nullptr;
+    }
+
+    auto probe_line(Address base_addr, simrv::memory::CoherenceState target_state,
+                    std::array<Byte, kLineBytes>* out_dirty_data = nullptr) -> bool {
+        const uint32_t set_idx = get_set_index(base_addr);
+        const Address tag = get_tag(base_addr);
+        for (uint32_t w = 0; w < kWays; ++w) {
+            auto& line = sets_[set_idx][w];
+            if (line.valid && line.tag == tag) {
+                if (line.dirty && out_dirty_data != nullptr) {
+                    std::memcpy(out_dirty_data->data(), line.data.data(), kLineBytes);
+                }
+                line.state = target_state;
+                if (target_state == simrv::memory::CoherenceState::None) {
+                    line.valid = false;
+                    line.dirty = false;
+                } else if (target_state == simrv::memory::CoherenceState::Branch) {
+                    line.dirty = false;
+                }
+                return true;
+            }
+        }
+        return false;
     }
 
     [[nodiscard]] auto last_accessed_set() const -> uint32_t { return last_accessed_set_; }

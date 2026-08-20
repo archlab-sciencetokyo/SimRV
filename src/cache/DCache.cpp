@@ -20,7 +20,7 @@ auto DCache::read(Address addr, Word& data, Instruction funct3) -> bool {
 
     for (uint32_t w = 0; w < kWays; ++w) {
         auto& line = sets_[set_idx][w];
-        if (line.valid && line.tag == tag) {
+        if (line.valid && line.tag == tag && line.state != simrv::memory::CoherenceState::None) {
             const uint32_t byte_offset = addr & (kLineBytes - 1u);
             if (simrv::compiler::unlikely(byte_offset + size_bytes > kLineBytes)) {
                 ++misses_;
@@ -51,7 +51,7 @@ auto DCache::read(Address addr, Word& data, Instruction funct3) -> bool {
     return false;
 }
 
-void DCache::write(Address addr, Word data, Instruction funct3) {
+auto DCache::write(Address addr, Word data, Instruction funct3) -> bool {
     const unsigned size_bytes = 1u << (funct3 & 0x3u);
     const uint32_t byte_offset = addr & (kLineBytes - 1u);
 
@@ -59,41 +59,69 @@ void DCache::write(Address addr, Word data, Instruction funct3) {
         const uint32_t set_idx = get_set_index(addr);
         const Address tag = get_tag(addr);
         last_accessed_set_ = set_idx;
-        bool found = false;
-        uint32_t found_way = 0xFFFFFFFF;
         for (uint32_t w = 0; w < kWays; ++w) {
             auto& line = sets_[set_idx][w];
             if (line.valid && line.tag == tag) {
-                std::memcpy(line.data.data() + byte_offset, &data, size_bytes);
-                found = true;
-                found_way = w;
+                // Must be in Trunk state to write directly without bus transaction
+                if (line.state == simrv::memory::CoherenceState::Trunk) {
+                    std::memcpy(line.data.data() + byte_offset, &data, size_bytes);
+                    line.dirty = true;
+                    line.last_used = ++access_tick_;
+                    last_access_was_hit_ = true;
+                    last_hit_way_ = w;
+                    return true;
+                }
+                // Line is in Branch state; requires AcquirePerm upgrade to Trunk
                 break;
             }
         }
-        last_access_was_hit_ = found;
-        last_hit_way_ = found ? found_way : 0xFFFFFFFF;
-    } else {
-        const Address tag1 = get_tag(addr);
-        const uint32_t set_idx1 = get_set_index(addr);
-        last_accessed_set_ = set_idx1;
         last_access_was_hit_ = false;
-        for (auto& line : sets_[set_idx1]) {
-            if (line.valid && line.tag == tag1) {
-                line.valid = false;
-                break;
-            }
-        }
+        last_hit_way_ = 0xFFFFFFFF;
+        return false;
+    }
 
-        const Address addr2 = addr + (kLineBytes - byte_offset);
-        const Address tag2 = get_tag(addr2);
-        const uint32_t set_idx2 = get_set_index(addr2);
-        for (auto& line : sets_[set_idx2]) {
-            if (line.valid && line.tag == tag2) {
-                line.valid = false;
-                break;
+    // Crosses cache line boundary
+    last_access_was_hit_ = false;
+    last_hit_way_ = 0xFFFFFFFF;
+    return false;
+}
+
+auto DCache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp,
+                          std::array<Byte, kLineBytes>& dirty_data) -> bool {
+    const auto target_state = static_cast<simrv::memory::CoherenceState>(req.param);
+    const Address line_base = req.address & ~(static_cast<Address>(kLineBytes - 1u));
+    const uint32_t set_idx = get_set_index(line_base);
+    const Address tag = get_tag(line_base);
+
+    for (uint32_t w = 0; w < kWays; ++w) {
+        auto& line = sets_[set_idx][w];
+        if (line.valid && line.tag == tag) {
+            const bool was_dirty = line.dirty;
+            if (was_dirty) {
+                std::memcpy(dirty_data.data(), line.data.data(), kLineBytes);
+                resp.opcode = simrv::memory::TlOpcodeC::ProbeAckData;
+            } else {
+                resp.opcode = simrv::memory::TlOpcodeC::ProbeAck;
             }
+            resp.address = line_base;
+            resp.param = static_cast<uint8_t>(line.state);
+
+            line.state = target_state;
+            if (target_state == simrv::memory::CoherenceState::None) {
+                line.valid = false;
+                line.dirty = false;
+            } else if (target_state == simrv::memory::CoherenceState::Branch) {
+                line.dirty = false;
+            }
+            return true;
         }
     }
+
+    // Line was not present in cache
+    resp.opcode = simrv::memory::TlOpcodeC::ProbeAck;
+    resp.address = line_base;
+    resp.param = static_cast<uint8_t>(simrv::memory::CoherenceState::None);
+    return false;
 }
 
 }  // namespace simrv::cache

@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "simrv/Define.hpp"
+#include "simrv/core/Logger.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Helpers.hpp"
@@ -208,7 +209,6 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
         }
 
         if (simrv::compiler::unlikely((pte & enum_mask(PteFlag::V)) == 0u)) {
-            // PTE invalid: page fault
             return std::unexpected(make_fault());
         }
 
@@ -221,10 +221,8 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
         }
 
         if (original_rwx == 0) {
-            // U, A, and D are reserved in a non-leaf PTE.
-            constexpr Word kNonLeafReserved =
-                enum_mask(PteFlag::U) | enum_mask(PteFlag::A) | enum_mask(PteFlag::D);
-            if (simrv::compiler::unlikely((pte & kNonLeafReserved) != 0)) {
+            // In a non-leaf PTE (R=0, W=0, X=0), D=1 is reserved and raises page fault.
+            if (simrv::compiler::unlikely((pte & enum_mask(PteFlag::D)) != 0u)) {
                 return std::unexpected(make_fault());
             }
             // Pointer to next level
@@ -237,7 +235,6 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
     }
 
     if (!leaf_level.has_value()) {
-        // Leaf PTE not found after traversing all levels
         return std::unexpected(make_fault());
     }
 

@@ -44,6 +44,7 @@ using CSRValue = Word;
 using CSRAddress = Address;
 using ImmValue = SignedWord;
 using TrapCause = Word;
+using HartId = uint32_t;
 enum class PrivilegeLevel : uint8_t { User = 0, Supervisor = 1, Machine = 3 };
 
 constexpr auto operator<(PrivilegeLevel lhs, PrivilegeLevel rhs) -> bool {

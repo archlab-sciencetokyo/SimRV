@@ -198,37 +198,25 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             addr & ~(static_cast<Address>(simrv::cache::DCache::kLineBytes - 1u));
         std::array<Byte, simrv::cache::DCache::kLineBytes> line_data{};
 
-        constexpr unsigned fetch_size = xlen::kFetchSize;
-        const auto fetch_funct3 =
-            static_cast<Instruction>(xlen::kIsXLen64 ? isa::Funct3::Sd : isa::Funct3::Sw);
+        TlChannelA req{};
+        req.opcode = TlOpcodeA::AcquireBlock;
+        req.param = static_cast<uint8_t>(CoherenceState::Branch);
+        req.size = simrv::cache::DCache::kLineShift;
+        req.source = static_cast<uint8_t>(cpu.state().mhartid);
+        req.address = line_base;
 
-        for (uint32_t i = 0; i < simrv::cache::DCache::kLineBytes; i += fetch_size) {
-            TlChannelA req{};
-            req.opcode = TlOpcodeA::Get;
-            req.size = static_cast<uint8_t>(fetch_funct3 & 0x3);
-            req.source = 0;  // CPU Data Bus source ID
-            req.address = line_base + i;
-            mem.system_bus().send_request(req);
+        TlChannelD resp{};
+        if (mem.system_bus().acquire_block(req, resp, line_data)) {
+            cpu.dcache.insert(line_base, line_data.data(), CoherenceState::Branch, false);
+            TlChannelE ack{};
+            ack.sink = resp.sink;
+            mem.system_bus().grant_ack(ack);
 
-            TlChannelD resp{};
-            const bool received = mem.system_bus().get_response(0, resp);
-            const bool overlaps_requested_access =
-                addr < req.address + fetch_size && req.address < addr + size_bytes;
-            if ((!received || resp.error) && overlaps_requested_access) {
-                cpu.pipeline_context.pending_exception = ExceptionCode::FaultLoad;
-                cpu.pipeline_context.pending_tval = v_addr;
-                return 0;
-            }
-            if (received && !resp.error) {
-                std::memcpy(line_data.data() + i, &resp.data, fetch_size);
+            if (cpu.dcache.read(addr, cached_data, funct3)) {
+                return cached_data;
             }
         }
-
-        cpu.dcache.insert(line_base, line_data.data());
-        if (cpu.dcache.read(addr, cached_data, funct3)) {
-            return cached_data;
-        }
-        return 0;
+        return simrv::memory::ram_read_fast(addr, funct3, mem.mmu()->mmem());
     };
 
     const Address eff_vaddr = (active_xlen == 32) ? (v_addr & 0xFFFFFFFFULL) : v_addr;
@@ -378,7 +366,27 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             return;
         }
         if (simrv::memory::is_dram_access(addr, size_bytes)) {
-            cpu.dcache.write(addr, data, funct3);
+            if (!cpu.dcache.write(addr, data, funct3)) {
+                // Not in Trunk state; acquire Trunk ownership via TL-C
+                const Address line_base =
+                    addr & ~(static_cast<Address>(simrv::cache::DCache::kLineBytes - 1u));
+                std::array<Byte, simrv::cache::DCache::kLineBytes> line_data{};
+                TlChannelA req{};
+                req.opcode = TlOpcodeA::AcquireBlock;
+                req.param = static_cast<uint8_t>(CoherenceState::Trunk);
+                req.size = simrv::cache::DCache::kLineShift;
+                req.source = static_cast<uint8_t>(cpu.state().mhartid);
+                req.address = line_base;
+
+                TlChannelD resp{};
+                if (mem.system_bus().acquire_block(req, resp, line_data)) {
+                    cpu.dcache.insert(line_base, line_data.data(), CoherenceState::Trunk, true);
+                    TlChannelE ack{};
+                    ack.sink = resp.sink;
+                    mem.system_bus().grant_ack(ack);
+                    (void)cpu.dcache.write(addr, data, funct3);
+                }
+            }
             simrv::memory::ram_write_fast(addr, data, funct3, mem.mmu()->mmem());
             return;
         }

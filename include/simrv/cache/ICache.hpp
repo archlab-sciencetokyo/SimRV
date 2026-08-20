@@ -35,6 +35,9 @@ class ICache : public BaseCache<64, 32, 4> {
      * @return true on cache hit, false on cache miss.
      */
     [[nodiscard]] auto read16(Address addr, uint16_t& data) -> bool;
+
+    auto handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp)
+        -> bool;
 };
 
 }  // namespace simrv::cache

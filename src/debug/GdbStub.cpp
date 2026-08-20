@@ -272,7 +272,10 @@ static void write_gdb_reg(std::size_t idx, const std::string& hex, std::size_t h
 // ---------------------------------------------------------------------------
 
 void GdbStub::cmd_read_registers(simrv::core::Machine& machine) {
-    const auto& state = machine.cpu.state();
+    auto& target_cpu = (current_thread_id_ > 0 && current_thread_id_ <= machine.num_harts())
+                           ? machine.hart(current_thread_id_ - 1)
+                           : machine.cpu;
+    const auto& state = target_cpu.state();
     std::string resp;
     // x0-x31 (4 bytes each, little-endian)
     for (std::size_t i = 0; i < 32; ++i) {
@@ -289,7 +292,10 @@ void GdbStub::cmd_read_registers(simrv::core::Machine& machine) {
 
 void GdbStub::cmd_write_registers(const std::string& pkt, simrv::core::Machine& machine) {
     // G<hex data>
-    auto& state = machine.cpu.state();
+    auto& target_cpu = (current_thread_id_ > 0 && current_thread_id_ <= machine.num_harts())
+                           ? machine.hart(current_thread_id_ - 1)
+                           : machine.cpu;
+    auto& state = target_cpu.state();
     std::size_t off = 1;
     for (std::size_t i = 0; i < 33 && off + 8 <= pkt.size(); ++i, off += 8) {
         write_gdb_reg(i, pkt, off, state);
@@ -300,7 +306,10 @@ void GdbStub::cmd_write_registers(const std::string& pkt, simrv::core::Machine& 
 void GdbStub::cmd_read_register(const std::string& pkt, simrv::core::Machine& machine) {
     // p n
     const std::size_t idx = std::stoul(pkt.substr(1), nullptr, 16);
-    const auto result = read_gdb_reg(idx, machine.cpu.state());
+    auto& target_cpu = (current_thread_id_ > 0 && current_thread_id_ <= machine.num_harts())
+                           ? machine.hart(current_thread_id_ - 1)
+                           : machine.cpu;
+    const auto result = read_gdb_reg(idx, target_cpu.state());
     if (result) {
         send_packet(*result);
     } else {
@@ -316,7 +325,10 @@ void GdbStub::cmd_write_register(const std::string& pkt, simrv::core::Machine& m
         return;
     }
     const std::size_t idx = std::stoul(pkt.substr(1, eq - 1), nullptr, 16);
-    write_gdb_reg(idx, pkt, eq + 1, machine.cpu.state());
+    auto& target_cpu = (current_thread_id_ > 0 && current_thread_id_ <= machine.num_harts())
+                           ? machine.hart(current_thread_id_ - 1)
+                           : machine.cpu;
+    write_gdb_reg(idx, pkt, eq + 1, target_cpu.state());
     send_packet("OK");
 }
 
@@ -479,9 +491,9 @@ void GdbStub::cmd_remove_breakpoint(const std::string& pkt, simrv::core::Machine
 // Query packet handler
 // ---------------------------------------------------------------------------
 
-void GdbStub::handle_query(const std::string& pkt, simrv::core::Machine& /*machine*/) {
+void GdbStub::handle_query(const std::string& pkt, simrv::core::Machine& machine) {
     if (pkt == "qSupported") {
-        send_packet("PacketSize=4000;QStartNoAckMode+;swbreak+");
+        send_packet("PacketSize=4000;QStartNoAckMode+;swbreak+;multiprocess+");
         return;
     }
     if (pkt == "QStartNoAckMode") {
@@ -494,11 +506,24 @@ void GdbStub::handle_query(const std::string& pkt, simrv::core::Machine& /*machi
         return;
     }
     if (pkt.starts_with("qSupported:")) {
-        send_packet("PacketSize=4000;QStartNoAckMode+;swbreak+");
+        send_packet("PacketSize=4000;QStartNoAckMode+;swbreak+;multiprocess+");
         return;
     }
     if (pkt == "qC") {
-        send_packet("QC1");
+        send_packet(std::format("QC{:x}", current_thread_id_));
+        return;
+    }
+    if (pkt == "qfThreadInfo") {
+        std::string threads = "m";
+        for (size_t i = 1; i <= machine.num_harts(); ++i) {
+            if (i > 1) threads += ",";
+            threads += std::format("{:x}", i);
+        }
+        send_packet(threads);
+        return;
+    }
+    if (pkt == "qsThreadInfo") {
+        send_packet("l");
         return;
     }
     if (pkt == "qOffsets") {
@@ -588,11 +613,30 @@ auto GdbStub::handle_packet(const std::string& pkt, simrv::core::Machine& machin
             close_connection();
             return true;
 
-        case 'H':
-        case 'T':
-            // Set thread / Thread alive check – only one hart, always OK
+        case 'H': {
+            if (pkt.size() > 2) {
+                const long tid = std::stol(pkt.substr(2), nullptr, 16);
+                if (tid > 0 && static_cast<size_t>(tid) <= machine.num_harts()) {
+                    current_thread_id_ = static_cast<uint32_t>(tid);
+                } else if (tid == 0 || tid == -1) {
+                    current_thread_id_ = 1;
+                }
+            }
             send_packet("OK");
             return false;
+        }
+
+        case 'T': {
+            if (pkt.size() > 1) {
+                const long tid = std::stol(pkt.substr(1), nullptr, 16);
+                if (tid > 0 && static_cast<size_t>(tid) <= machine.num_harts()) {
+                    send_packet("OK");
+                    return false;
+                }
+            }
+            send_packet("E01");
+            return false;
+        }
 
         case 'v':
             if (pkt == "vCont?") {

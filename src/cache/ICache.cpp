@@ -73,4 +73,26 @@ auto ICache::read16(Address addr, uint16_t& data) -> bool {
     return false;
 }
 
+auto ICache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp)
+    -> bool {
+    const Address line_base = req.address & ~(static_cast<Address>(kLineBytes - 1u));
+    const uint32_t set_idx = get_set_index(line_base);
+    const Address tag = get_tag(line_base);
+
+    resp.opcode = simrv::memory::TlOpcodeC::ProbeAck;
+    resp.address = line_base;
+    resp.param = static_cast<uint8_t>(simrv::memory::CoherenceState::None);
+
+    for (uint32_t w = 0; w < kWays; ++w) {
+        auto& line = sets_[set_idx][w];
+        if (line.valid && line.tag == tag) {
+            resp.param = static_cast<uint8_t>(line.state);
+            line.valid = false;
+            line.state = simrv::memory::CoherenceState::None;
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace simrv::cache

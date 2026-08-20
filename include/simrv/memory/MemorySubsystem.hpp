@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "simrv/memory/Mmu.hpp"
+#include "simrv/memory/ReservationTable.hpp"
 #include "simrv/memory/TileLinkBus.hpp"
 
 namespace simrv::core {
@@ -32,11 +33,19 @@ class MemorySubsystem {
     [[nodiscard]] auto mmu() const -> simrv::Mmu* { return mmu_.get(); }
     /// Access system TileLink interconnect bus
     [[nodiscard]] auto system_bus() -> simrv::memory::TileLinkBus& { return system_bus_; }
+    /// Access LR/SC reservation tracking table
+    [[nodiscard]] auto reservation_table() -> simrv::memory::ReservationTable& {
+        return reservation_table_;
+    }
+    [[nodiscard]] auto reservation_table() const -> const simrv::memory::ReservationTable& {
+        return reservation_table_;
+    }
 
    private:
     simrv::core::Machine& machine_;
     std::unique_ptr<simrv::Mmu> mmu_;
     simrv::memory::TileLinkBus system_bus_;
+    simrv::memory::ReservationTable reservation_table_;
 };
 
 }  // namespace simrv::memory

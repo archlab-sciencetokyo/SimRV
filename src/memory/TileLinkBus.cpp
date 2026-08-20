@@ -18,7 +18,8 @@ namespace simrv::memory {
 
 using simrv::isa::Funct3;
 
-TileLinkBus::TileLinkBus(simrv::core::Machine& machine) : machine_(machine) {}
+TileLinkBus::TileLinkBus(simrv::core::Machine& machine)
+    : machine_(machine), coherence_hub_(machine) {}
 
 void TileLinkBus::add_node(TileLinkNode* node) { router_.register_device(node); }
 
@@ -47,7 +48,10 @@ void TileLinkBus::tick() {
         const size_t transfer_bytes = valid_size ? (size_t{1} << req.size) : 0;
         bool handled = false;
 
-        if (!valid_size) {
+        if (req.opcode == TlOpcodeA::AcquireBlock || req.opcode == TlOpcodeA::AcquirePerm) {
+            std::array<Byte, CoherenceHub::kLineBytes> line_buf{};
+            handled = coherence_hub_.handle_acquire(req, resp, line_buf);
+        } else if (!valid_size) {
             resp.error = true;
             handled = true;
         } else if (req.opcode == TlOpcodeA::Get) {

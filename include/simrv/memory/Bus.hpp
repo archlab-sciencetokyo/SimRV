@@ -10,6 +10,12 @@
 
 namespace simrv::memory {
 
+enum class CoherenceState : uint8_t {
+    None = 0,    ///< Invalid / No copy
+    Branch = 1,  ///< Shared read-only copy
+    Trunk = 2    ///< Exclusive read/write copy (dirty or clean)
+};
+
 enum class TlOpcodeA : uint8_t {
     PutFullData = 0,
     PutPartialData = 1,
@@ -17,18 +23,39 @@ enum class TlOpcodeA : uint8_t {
     LogicalData = 3,
     Get = 4,
     Intent = 5,
+    AcquireBlock = 6,
+    AcquirePerm = 7,
+};
+
+enum class TlOpcodeB : uint8_t {
+    ProbeBlock = 0,
+    ProbePerm = 1,
+};
+
+enum class TlOpcodeC : uint8_t {
+    ProbeAck = 4,
+    ProbeAckData = 5,
+    Release = 6,
+    ReleaseData = 7,
 };
 
 enum class TlOpcodeD : uint8_t {
     AccessAck = 0,
     AccessAckData = 1,
     HintAck = 2,
+    Grant = 4,
+    GrantData = 5,
+    ReleaseAck = 6,
+};
+
+enum class TlOpcodeE : uint8_t {
+    GrantAck = 0,
 };
 
 struct TlChannelA {
     TlOpcodeA opcode{TlOpcodeA::Get};
-    uint8_t param{0};
-    uint8_t size{0};  // 2^size bytes (0=1B, 1=2B, 2=4B, 3=8B)
+    uint8_t param{0};  // CoherenceState requested for Acquire
+    uint8_t size{0};   // 2^size bytes (0=1B, 1=2B, 2=4B, 3=8B)
     uint8_t source{0};
     Address address{0};
     Word mask{0};
@@ -44,14 +71,39 @@ struct TlChannelA {
     }
 };
 
+struct TlChannelB {
+    TlOpcodeB opcode{TlOpcodeB::ProbeBlock};
+    uint8_t param{0};  // Target CoherenceState (Branch or None)
+    uint8_t size{0};
+    uint8_t source{0};  // Hub probe ID
+    Address address{0};
+    Word mask{0};
+    Word data{0};
+};
+
+struct TlChannelC {
+    TlOpcodeC opcode{TlOpcodeC::ProbeAck};
+    uint8_t param{0};  // CoherenceState transition details
+    uint8_t size{0};
+    uint8_t source{0};
+    Address address{0};
+    Word data{0};
+    bool error{false};
+};
+
 struct TlChannelD {
     TlOpcodeD opcode{TlOpcodeD::AccessAckData};
-    uint8_t param{0};
+    uint8_t param{0};  // Granted CoherenceState (Branch or Trunk)
     uint8_t size{0};
     uint8_t source{0};
     uint8_t sink{0};
     Word data{0};
     bool error{false};
+};
+
+struct TlChannelE {
+    TlOpcodeE opcode{TlOpcodeE::GrantAck};
+    uint8_t sink{0};
 };
 
 class Bus {

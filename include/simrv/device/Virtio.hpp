@@ -20,6 +20,8 @@ inline constexpr uint32_t kDiskBufferSize = (512u * 512u);
 inline constexpr uint32_t kDiskSize = (SIMRV_DISK_SIZE_MB * 1024u * 1024u);
 inline constexpr uint32_t kDiskMaxQueueNum = 4;
 inline constexpr uint32_t kDiskIrq = 2;
+inline constexpr uint32_t kRngMaxQueueNum = 1;
+inline constexpr uint32_t kRngIrq = 4;
 
 inline constexpr Word kMagicValue = 0x74726976;  // "virt"
 inline constexpr Word kVersion = 2;
@@ -30,6 +32,8 @@ inline constexpr Word kDiskDeviceFeatures = 1;
 inline constexpr Word kDiskConfigGeneration = 0;
 inline constexpr Word kDiskQueueNumMax = 4;
 inline constexpr Word kConsoleQueueNumMax = 16;
+inline constexpr Word kRngDeviceId = 4;
+inline constexpr Word kRngQueueNumMax = 8;
 
 using VringDescFlags = uint8_t;
 enum class VringDescFlag : VringDescFlags {

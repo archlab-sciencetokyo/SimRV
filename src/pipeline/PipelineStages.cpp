@@ -710,7 +710,10 @@ void CPU::execute_core(Machine& machine) {
                     break;
                 }
                 const bool native_success =
-                    (ctx.rrs1 == state_.load_res) && (state_.reserved != 0u);
+                    machine.memory_.reservation_table().check_and_clear_reservation(
+                        static_cast<HartId>(state_.mhartid), ctx.rrs1);
+                state_.reserved = native_success ? 1 : 0;
+                state_.load_res = ctx.rrs1;
                 ctx.wb_data = native_success ? 0 : 1;
                 if (machine.spike_lockstep && machine.spike_lockstep->is_running()) {
                     if (native_success) {
@@ -978,6 +981,8 @@ void CPU::memory_load_phase(Machine& machine) {
     if (opcode == Opcode::Amo && funct5 == Funct5Amo::Lr) {
         state_.load_res = ctx.mem_addr;
         state_.reserved = 1;
+        machine.memory_.reservation_table().set_reservation(static_cast<HartId>(state_.mhartid),
+                                                            ctx.mem_addr);
     }
 }
 
@@ -1021,6 +1026,8 @@ void CPU::memory_store_phase(Machine& machine) {
         (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr)) {
         if (!ctx.pending_exception.has_value()) {
             state_.reserved = 0;
+            machine.memory_.reservation_table().invalidate_matching(
+                ctx.mem_addr, static_cast<HartId>(state_.mhartid));
         }
     }
 }
