@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SimRV VERSION 2.0.0 LANGUAGES C CXX)
+project(SimRV VERSION 2.1.0 LANGUAGES C CXX)
 
 enable_testing()
 find_program(PYTHON_BIN NAMES "python3" "python" DOC "Path to Python interpreter")
@@ -8,7 +8,7 @@ if(NOT PYTHON_BIN)
   set(PYTHON_BIN "python3")
 endif()
 
-set(SIMRV_VERSION "2.0.0")
+set(SIMRV_VERSION "2.1.0-alpha.1")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -135,9 +135,11 @@ add_executable(SimRV
   src/memory/MmioRouter.cpp
   src/memory/Mmu.cpp
   src/memory/TileLinkBus.cpp
+  src/memory/CoherenceHub.cpp
   src/device/Console.cpp
   src/device/Disk.cpp
   src/device/VirtioDevice.cpp
+  src/device/Rng.cpp
   src/device/Rtc.cpp
   src/device/Uart.cpp
   src/device/Power.cpp
@@ -173,6 +175,7 @@ add_executable(SimRV
   src/debug/SymbolTable.cpp
   src/debug/BreakpointManager.cpp
   src/util/InstructionExplainer.cpp
+  src/util/FdtGenerator.cpp
   src/device/Framebuffer.cpp
   src/device/Audio.cpp
   src/device/InputDevice.cpp
@@ -281,6 +284,7 @@ add_executable(simrv-tui-tests
   src/tui/TuiKeybindings.cpp
   src/tui/TuiTheme.cpp
   src/tui/modals/HelpModal.cpp
+  src/tui/modals/SystemConfigModal.cpp
 )
 target_compile_features(simrv-tui-tests PRIVATE cxx_std_23)
 target_include_directories(simrv-tui-tests PRIVATE include ${CMAKE_CURRENT_BINARY_DIR}/generated)
@@ -310,9 +314,12 @@ endif()
 add_executable(simrv-core-semantics-tests
   tests/CoreSemanticsTests.cpp
   src/core/Logger.cpp
+  src/cache/ICache.cpp
+  src/cache/DCache.cpp
   src/memory/Mmu.cpp
   src/memory/MmioRouter.cpp
   src/pipeline/Decoder.cpp
+  src/util/FdtGenerator.cpp
 )
 target_compile_features(simrv-core-semantics-tests PRIVATE cxx_std_23)
 target_compile_definitions(simrv-core-semantics-tests PRIVATE SIMRV_XLEN=${SIMRV_XLEN})

@@ -3,6 +3,19 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.1.0-alpha.1] — 2026-08-20
+
+Alpha prerelease introducing full **Multi-Hart Symmetric Multiprocessing (SMP)** support, **TileLink-C 5-Channel Directory Cache Coherence (MESI)**, and fast inline directory lookups.
+
+### Key Capabilities & Enhancements
+
+- **Multi-Hart SMP Architecture**: Full OpenSBI SBI 3.0 HSM (Hart State Management) and IPI (Inter-Processor Interrupt) dispatch across dual/multi-core RISC-V systems.
+- **TileLink-C Directory Cache Coherence**: Complete 5-channel messaging implementation (Channels A, B, C, D, E) with `AcquireBlock`, `AcquirePerm`, `ProbeBlock`, `ProbeAckData`, and `GrantData` transactions.
+- **MESI Coherence Protocol**: Standard 4-state line management (`[M]` Modified, `[E]` Exclusive Clean, `[S]` Shared Clean, `[I]` Invalid) with sole-sharer Exclusive Clean grants to eliminate upgrade bus traffic on local stores.
+- **Direct-Mapped Inline Directory Cache**: $O(1)$ fast cache path for directory state lookups and dirty writeback management.
+- **TUI Visual Inspection**: Real-time MESI cache line state tags (`[M]`, `[E]`, `[S]`, `[I]`) in the Cache Inspector and TileLink-C channel metric counters in the Bus/IO panel.
+- **Dynamic Device Tree Multi-Hart Generation**: Automatic phandle-isolated CPU node and interrupt controller generation supporting multi-core Linux boot.
+
 ## [v2.0.0] — 2026-08-19
 
 General Availability release of SimRV 2.0: A dual-width explainable RISC-V full-system simulator written in modern ISO C++23, providing high-throughput functional simulation, in-terminal visual inspection, and multi-OS/RTOS execution.
@@ -398,6 +411,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
+[v2.1.0-alpha.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.1.0-alpha.1
 [v2.0.0]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0
 [v2.0.0-rc.10]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.10
 [v2.0.0-rc.9]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.9
