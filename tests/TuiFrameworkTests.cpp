@@ -14,6 +14,7 @@
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
 #include "simrv/tui/modals/HelpModal.hpp"
+#include "simrv/tui/modals/SystemConfigModal.hpp"
 
 namespace {
 
@@ -139,7 +140,7 @@ void test_utf8_and_theme_helpers() {
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 23, "all key actions have registry entries");
+    expect(bindings.size() == 24, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
     std::set<char> claimed_chars;
     for (const auto& binding : bindings) {
@@ -187,6 +188,7 @@ void test_key_registry() {
         simrv::tui::TuiFooterAction::ConfigureSystem,
         simrv::tui::TuiFooterAction::ManageBreakpoints,
         simrv::tui::TuiFooterAction::Reboot,
+        simrv::tui::TuiFooterAction::SwitchHart,
     };
     for (const auto footer_action : footer_actions) {
         const auto key_action = simrv::tui::key_action_for_footer(footer_action);
@@ -224,14 +226,70 @@ void test_key_registry() {
            "disabled actions explain how to become available");
     auto functional = paused;
     functional.cycle_accurate = false;
-    expect(!simrv::tui::Keybindings::is_available(KeyAction::ConfigureSystem, functional),
-           "cycle configuration is unavailable in functional mode");
+    expect(simrv::tui::Keybindings::is_available(KeyAction::ConfigureSystem, functional),
+           "system configuration is available in functional mode");
     auto modal = paused;
     modal.modal_active = true;
     expect(simrv::tui::Keybindings::is_available(KeyAction::Quit, modal),
            "quit remains available over a modal");
     expect(!simrv::tui::Keybindings::is_available(KeyAction::Step, modal),
            "modal input does not leak into simulation controls");
+}
+
+void test_sysconfig_modal_modes() {
+    using simrv::tui::SysConfigDraft;
+    using simrv::tui::modals::SystemConfigModal;
+
+    // Test Cycle-Accurate mode behavior
+    SysConfigDraft ca_draft;
+    ca_draft.cycle_accurate = true;
+    ca_draft.num_harts = 1;
+    ca_draft.icache_miss_penalty = 10;
+    int cursor = 0;
+
+    SystemConfigModal::move_cursor(ca_draft, cursor, 1);
+    expect(cursor == 1, "CA mode advances cursor across pipeline settings");
+
+    SystemConfigModal::adjust_setting(ca_draft, 0, 5);
+    expect(ca_draft.icache_miss_penalty == 15, "CA mode allows mutating cache penalties");
+
+    // Test Functional (IA) mode behavior
+    SysConfigDraft ia_draft;
+    ia_draft.cycle_accurate = false;
+    ia_draft.num_harts = 1;
+    ia_draft.icache_miss_penalty = 10;
+    cursor = 0;
+
+    SystemConfigModal::move_cursor(ia_draft, cursor, 1);
+    expect(cursor == 0, "IA mode with 1 hart has no navigable CA pipeline items");
+
+    // In IA mode, multi-hart allows configuring SMP quantum and execution mode
+    ia_draft.num_harts = 2;
+    ia_draft.smp_quantum = 1000;
+    ia_draft.smp_multithreaded = false;
+
+    SystemConfigModal::move_cursor(ia_draft, cursor, 1);
+    expect(cursor == 1, "IA multi-hart mode navigates SMP settings");
+
+    SystemConfigModal::adjust_setting(ia_draft, 0, 2);
+    expect(ia_draft.smp_quantum == 1200, "IA multi-hart mode adjusts SMP quantum");
+
+    SystemConfigModal::adjust_setting(ia_draft, 1, 1);
+    expect(ia_draft.smp_multithreaded == true, "IA multi-hart mode toggles SMP worker threads");
+
+    // Verify render text in IA mode contains disabled note for CA options
+    std::vector<std::string> rows;
+    SystemConfigModal::render(rows, [&](const std::string& line) { rows.push_back(line); },
+                              ia_draft, 0, "");
+    bool found_disabled_note = false;
+    for (const auto& r : rows) {
+        if (r.find("Disabled in IA Mode") != std::string::npos ||
+            r.find("Disabled (IA Mode)") != std::string::npos) {
+            found_disabled_note = true;
+            break;
+        }
+    }
+    expect(found_disabled_note, "IA mode render explicitly surfaces disabled status for CA options");
 }
 
 void test_page_guidance() {
@@ -436,6 +494,7 @@ int main() {
     test_key_registry();
     test_page_guidance();
     test_help_uses_canonical_registry();
+    test_sysconfig_modal_modes();
     test_input_routing();
     test_responsive_layout();
     test_frame_composition();

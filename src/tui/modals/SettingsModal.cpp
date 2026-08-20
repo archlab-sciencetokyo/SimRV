@@ -36,10 +36,11 @@ void SettingsModal::open(SettingsDraft& draft, int& cursor, const simrv::core::M
     draft.high_performance = machine.s_high_performance;
     draft.lockstep_mode = machine.s_lockstep_mode;
     draft.gdb_mode = machine.s_gdb_mode;
+    draft.smp_multithreaded = machine.s_smp_multithreaded;
 }
 
 void SettingsModal::move_cursor(int& cursor, int delta) {
-    constexpr int kNumSettings = 11;
+    constexpr int kNumSettings = 12;
     cursor = (cursor + delta + kNumSettings) % kNumSettings;
 }
 
@@ -91,13 +92,16 @@ void SettingsModal::toggle_setting(SettingsDraft& draft, int index,
             draft.gdb_mode = !draft.gdb_mode;
             break;
         case 8:
+            draft.smp_multithreaded = !draft.smp_multithreaded;
+            break;
+        case 9:
             if (!draft.cycle_accurate || draft.high_performance) break;
             draft.bp_trace = !draft.bp_trace;
             break;
-        case 9:
+        case 10:
             draft.traplog_mode = !draft.traplog_mode;
             break;
-        case 10:
+        case 11:
             if (machine.s_appmode) break;
             draft.dlog_mode = !draft.dlog_mode;
             break;
@@ -126,6 +130,7 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
     machine.s_high_performance = draft.high_performance;
     machine.s_lockstep_mode = draft.lockstep_mode;
     machine.s_gdb_mode = draft.gdb_mode;
+    machine.s_smp_multithreaded = draft.smp_multithreaded;
 
     if (machine.s_use_mix) {
         set_reg_page_cb(TuiRegPage::GPR);
@@ -177,6 +182,9 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
              : (draft.lockstep_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m")},
         {"GDB Server Stub (1234)",
          draft.gdb_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+        {"SMP Multi-Threaded Engine",
+         draft.smp_multithreaded ? "\033[1;32m[ON (Worker Threads)]\033[0m"
+                                 : "\033[90m[OFF (Quantum Barrier)]\033[0m"},
         {"Branch Prediction Trace",
          bp_disabled ? "\033[90m[Disabled (N/A in IA Mode)]\033[0m"
                      : (draft.bp_trace ? "\033[1;32m[ON (creates bptrace.txt)]\033[0m"
@@ -197,7 +205,7 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
             add_row_cb("");
             add_row_cb(std::format("{}\033[1;35m── External Integrations & Debug Stubs ──\033[0m",
                                    kThemeText));
-        } else if (i == 8) {
+        } else if (i == 9) {
             add_row_cb("");
             add_row_cb(std::format("{}\033[1;35m── Traces & Logging (Creates Text Files) ──\033[0m",
                                    kThemeText));

@@ -27,6 +27,9 @@ auto render_cache_way_row(const simrv::core::CPU& cpu, int way_idx, int inspect_
 
     bool valid =
         is_icache ? ic.is_line_valid(set_idx, way_u32) : dc.is_line_valid(set_idx, way_u32);
+    simrv::memory::CoherenceState coh =
+        is_icache ? ic.get_line_state(set_idx, way_u32) : dc.get_line_state(set_idx, way_u32);
+    bool dirty = !is_icache && dc.is_line_dirty(set_idx, way_u32);
     Address tag = is_icache ? ic.get_line_tag(set_idx, way_u32) : dc.get_line_tag(set_idx, way_u32);
     uint64_t lru = is_icache ? ic.get_line_last_used(set_idx, way_u32)
                              : dc.get_line_last_used(set_idx, way_u32);
@@ -44,8 +47,19 @@ auto render_cache_way_row(const simrv::core::CPU& cpu, int way_idx, int inspect_
         is_selected_way ? std::format("\033[1m{}▶\033[0m ", kThemeMint) : "  ";
     std::string way_str = is_selected_way ? std::format("\033[1;7mWay #{}\033[0m", way_idx)
                                           : std::format("{}Way #{}\033[0m", kThemeText, way_idx);
+
+    std::string coh_tag;
+    if (coh == simrv::memory::CoherenceState::Trunk) {
+        coh_tag = dirty ? std::format("\033[1m{}[M ]\033[0m", kThemeCoral)
+                        : std::format("\033[1m{}[E ]\033[0m", kThemePeach);
+    } else if (coh == simrv::memory::CoherenceState::Branch) {
+        coh_tag = std::format("\033[1m{}[S ]\033[0m", kThemeSky);
+    } else {
+        coh_tag = std::format("{}[I ]\033[0m", kThemeMuted);
+    }
+
     std::string way_prefix = std::format(
-        "{} [V:{}] Tag: {}", way_str,
+        "{} {} [V:{}] Tag: {}", way_str, coh_tag,
         valid ? std::format("{}1\033[0m", kThemeMint) : std::format("{}0\033[0m", kThemeMuted),
         status_tag);
 
@@ -107,7 +121,7 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
 
     switch (logical_row) {
         case 0:
-            return section_line("L1 Cache Performance & Replacements", width);
+            return section_line("L1 Cache Performance & Replacements (MESI)", width);
         case 1: {
             uint64_t h = ic.hit_count(), m = ic.miss_count(), r = ic.replacement_count();
             uint64_t tot = h + m;

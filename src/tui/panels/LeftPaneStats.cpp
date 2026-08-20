@@ -503,7 +503,7 @@ auto LeftPane::render_cycle_accurate_hw_info(const simrv::core::CPU& cpu, int ad
 }
 
 auto LeftPane::render_debug_state(int debug_row, int width) -> std::string {
-    auto const& cpu = machine_.cpu;
+    auto const& cpu = current_cpu();
     auto const& st = cpu.state();
     int col_width = width / 2;
     int right_width = width - col_width;

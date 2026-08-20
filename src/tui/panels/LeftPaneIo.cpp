@@ -116,7 +116,27 @@ auto LeftPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row, int
             width);
     }
     if (logical_row == 11) {
-        return section_line("Interconnect: TileLink Memory Bus + VirtIO 1.0 Ring Buffer", width);
+        return section_line("TileLink-C Directory Coherence Hub (5-Channel MSI)", width);
+    }
+    if (logical_row == 12) {
+        const auto& c_stats = machine_.memory().system_bus().coherence_hub().stats();
+        return format_to_width(
+            std::format("  {}Acquire:\033[0m {}{:<7}\033[0m │ {}Probe:\033[0m {}{:<7}\033[0m │ "
+                        "{}Grant:\033[0m {}{}\033[0m",
+                        kThemeText, kThemeMint, simrv::util::format_with_commas(c_stats.acquire_count),
+                        kThemeText, kThemeSky, simrv::util::format_with_commas(c_stats.probe_count),
+                        kThemeText, kThemePeach, simrv::util::format_with_commas(c_stats.grant_count)),
+            width);
+    }
+    if (logical_row == 13) {
+        const auto& c_stats = machine_.memory().system_bus().coherence_hub().stats();
+        return format_to_width(
+            std::format("  {}Release:\033[0m {}{:<7}\033[0m │ {}Inval:\033[0m {}{:<7}\033[0m │ "
+                        "{}WBack:\033[0m {}{}\033[0m",
+                        kThemeText, kThemeCoral, simrv::util::format_with_commas(c_stats.release_count),
+                        kThemeText, kThemeVal, simrv::util::format_with_commas(c_stats.invalidation_count),
+                        kThemeText, kThemePink, simrv::util::format_with_commas(c_stats.writeback_count)),
+            width);
     }
 
     return format_to_width("", width);

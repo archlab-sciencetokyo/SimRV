@@ -138,6 +138,10 @@ static const auto paused_row1_entries = std::to_array<FooterEntry>({
     {.text = "[p] Panel",
      .action = TuiFooterAction::TogglePanel,
      .category = FooterCategory::PanelNav},
+    {.text = "  ", .action = std::nullopt, .category = FooterCategory::Spacer},
+    {.text = "[n] Hart",
+     .action = TuiFooterAction::SwitchHart,
+     .category = FooterCategory::PanelNav},
 });
 
 static const auto paused_row2_entries = std::to_array<FooterEntry>({
@@ -221,6 +225,10 @@ static const auto running_row1_entries = std::to_array<FooterEntry>({
     {.text = "[p] Panel",
      .action = TuiFooterAction::TogglePanel,
      .category = FooterCategory::PanelNav},
+    {.text = "  ", .action = std::nullopt, .category = FooterCategory::Spacer},
+    {.text = "[n] Hart",
+     .action = TuiFooterAction::SwitchHart,
+     .category = FooterCategory::PanelNav},
 });
 
 static const auto running_row2_entries = std::to_array<FooterEntry>({
@@ -272,11 +280,14 @@ namespace {
     return entry.text;
 }
 
-auto filter_footer_entries(std::span<const FooterEntry> entries, bool is_debug_mode)
+auto filter_footer_entries(std::span<const FooterEntry> entries, bool is_debug_mode, bool is_smp)
     -> std::vector<FooterEntry> {
     std::vector<FooterEntry> active;
     active.reserve(entries.size());
     for (const auto& e : entries) {
+        if (!is_smp && e.action == TuiFooterAction::SwitchHart) {
+            continue;
+        }
         if (!is_debug_mode) {
             if (e.category == FooterCategory::DebugInspect) continue;
             if (e.category == FooterCategory::DebugExec && e.action != TuiFooterAction::RunPause &&
@@ -300,9 +311,9 @@ auto filter_footer_entries(std::span<const FooterEntry> entries, bool is_debug_m
 }  // namespace
 
 auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool is_debug_mode,
-                        std::optional<int> hit_col = std::nullopt)
+                        bool is_smp, std::optional<int> hit_col = std::nullopt)
     -> std::pair<std::string, std::optional<TuiFooterAction>> {
-    std::vector<FooterEntry> active_entries = filter_footer_entries(entries, is_debug_mode);
+    std::vector<FooterEntry> active_entries = filter_footer_entries(entries, is_debug_mode, is_smp);
 
     int content_len = 0;
     for (const auto& e : active_entries) {
@@ -389,16 +400,21 @@ auto StatusBar::get_footer_action_at_col(int col, int row_idx, int terminal_widt
     if (col < 0 || terminal_width < 2) return std::nullopt;
 
     bool is_dbg = machine_.s_debug_mode;
+    bool is_smp = machine_.num_harts() > 1;
     if (paused_) {
         if (row_idx == 0)
-            return process_footer_row(paused_row1_entries, terminal_width - 2, is_dbg, col).second;
+            return process_footer_row(paused_row1_entries, terminal_width - 2, is_dbg, is_smp, col)
+                .second;
         if (row_idx == 1)
-            return process_footer_row(paused_row2_entries, terminal_width - 2, is_dbg, col).second;
+            return process_footer_row(paused_row2_entries, terminal_width - 2, is_dbg, is_smp, col)
+                .second;
     } else {
         if (row_idx == 0)
-            return process_footer_row(running_row1_entries, terminal_width - 2, is_dbg, col).second;
+            return process_footer_row(running_row1_entries, terminal_width - 2, is_dbg, is_smp, col)
+                .second;
         if (row_idx == 1)
-            return process_footer_row(running_row2_entries, terminal_width - 2, is_dbg, col).second;
+            return process_footer_row(running_row2_entries, terminal_width - 2, is_dbg, is_smp, col)
+                .second;
     }
 
     return std::nullopt;
@@ -485,6 +501,28 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                 delay = machine_.tui->step_delay_us_.load(std::memory_order_relaxed);
             }
             std::string dbg_info;
+            if (machine_.num_harts() > 1) {
+                std::string hart_strip = "Harts:[";
+                for (size_t h = 0; h < machine_.num_harts(); ++h) {
+                    if (h > 0) hart_strip += " ";
+                    auto const& h_cpu = machine_.hart(h);
+                    const auto status = h_cpu.hart_status.load(std::memory_order_relaxed);
+                    std::string state_code = "STOP";
+                    if (status == simrv::core::HartStatus::Started) {
+                        state_code = "RUN";
+                    } else if (status == simrv::core::HartStatus::Suspended) {
+                        state_code = "SUSP";
+                    }
+                    const size_t selected = (machine_.tui) ? machine_.tui->selected_hart() : 0;
+                    if (h == selected) {
+                        hart_strip += std::format("*H{}:{}", h, state_code);
+                    } else {
+                        hart_strip += std::format("H{}:{}", h, state_code);
+                    }
+                }
+                hart_strip += "] | ";
+                dbg_info = hart_strip;
+            }
             const auto num_bp = machine_.breakpoints.get_pc_breakpoints().size();
             const auto num_wp = machine_.breakpoints.get_watchpoints().size();
             if (num_bp > 0 || num_wp > 0) {
@@ -660,12 +698,13 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         std::string footer_line1;
         std::string footer_line2;
         bool is_dbg = machine_.s_debug_mode;
+        bool is_smp = machine_.num_harts() > 1;
         if (paused_) {
-            footer_line1 = process_footer_row(paused_row1_entries, width - 2, is_dbg).first;
-            footer_line2 = process_footer_row(paused_row2_entries, width - 2, is_dbg).first;
+            footer_line1 = process_footer_row(paused_row1_entries, width - 2, is_dbg, is_smp).first;
+            footer_line2 = process_footer_row(paused_row2_entries, width - 2, is_dbg, is_smp).first;
         } else {
-            footer_line1 = process_footer_row(running_row1_entries, width - 2, is_dbg).first;
-            footer_line2 = process_footer_row(running_row2_entries, width - 2, is_dbg).first;
+            footer_line1 = process_footer_row(running_row1_entries, width - 2, is_dbg, is_smp).first;
+            footer_line2 = process_footer_row(running_row2_entries, width - 2, is_dbg, is_smp).first;
         }
 
         std::string screen =

@@ -434,6 +434,7 @@ void Tui::render_build_lines(int left_pane_width, int right_pane_width, int num_
         log_lines.push_back(vt_log_.get_line_as_string(i, log_width, false));
     }
 
+    left_pane_->set_selected_hart(selected_hart_);
     left_pane_->set_kips(kips_);
     left_pane_->set_max_kips(max_kips_);
     left_pane_->set_kips_history(kips_history_);
@@ -1277,12 +1278,7 @@ auto Tui::handle_modal_settings_misa(ModalType mtype, uint8_t byte, TuiKey key) 
             open_modal(ModalType::ConfigureMisa);
             render(true);
         } else if (byte == 'y' || byte == 'Y') {
-            if (!machine_.s_cycle_accurate) {
-                set_status_override(
-                    "System Config is available in CA Mode only. Enable CA Mode in Settings [,]");
-                render(true);
-            } else
-                open_modal(ModalType::ConfigureSystem);
+            open_modal(ModalType::ConfigureSystem);
         }
         return true;
     }
@@ -1532,21 +1528,17 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         case simrv::tui::TuiKey::O:
             open_modal(ModalType::LoadBinary);
             return true;
+        case simrv::tui::TuiKey::n:
+        case simrv::tui::TuiKey::N:
+            select_next_hart();
+            return true;
         default:
             if (byte == ',' || key == simrv::tui::TuiKey::Comma) {
                 open_modal(ModalType::Settings);
                 return true;
             }
             if (byte == 'y' || byte == 'Y') {
-                if (!machine_.s_cycle_accurate) {
-                    modal_.open_notice(
-                        "CA MODE REQUIRED",
-                        "System Config is available in Cycle-Accurate (CA) Mode only.\n\nPlease "
-                        "enable CA Mode in Simulator Settings [,] first.",
-                        false);
-                    render(true);
-                } else
-                    open_modal(ModalType::ConfigureSystem);
+                open_modal(ModalType::ConfigureSystem);
                 return true;
             }
             return false;
@@ -1751,17 +1743,26 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             open_modal(ModalType::ConfigureMisa);
             break;
         case TuiFooterAction::ConfigureSystem:
-            if (!machine_.s_cycle_accurate) {
-                set_status_override(
-                    "System Config is available in CA Mode only. Enable CA Mode in Settings [,]");
-                render(true);
-            } else {
-                open_modal(ModalType::ConfigureSystem);
-            }
+            open_modal(ModalType::ConfigureSystem);
             break;
         case TuiFooterAction::ManageBreakpoints:
             open_modal(ModalType::ManageBreakpoints);
             break;
+        case TuiFooterAction::SwitchHart:
+            select_next_hart();
+            break;
+    }
+}
+
+void Tui::select_next_hart() {
+    if (machine_.num_harts() > 1) {
+        selected_hart_ = (selected_hart_ + 1) % machine_.num_harts();
+        if (left_pane_) {
+            left_pane_->set_selected_hart(selected_hart_);
+            left_pane_->update_cache();
+        }
+        set_status_override(std::format("Active telemetry switched to Hart {}", selected_hart_));
+        render(true);
     }
 }
 
@@ -2043,6 +2044,10 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             if (x >= 2 && x <= pane_w + 1) {
                 int col = x - 2;
                 if (left_pane_) {
+                    if (left_pane_->is_hart_tab_click(col)) {
+                        select_next_hart();
+                        return true;
+                    }
                     auto tab_opt = left_pane_->get_tab_at_col(col);
                     if (tab_opt.has_value()) {
                         if (*tab_opt == TuiRegPage::CACHE &&

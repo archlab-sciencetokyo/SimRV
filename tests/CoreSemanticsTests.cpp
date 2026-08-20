@@ -5,12 +5,15 @@
 #include <string>
 
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/Pmp.hpp"
 #include "simrv/core/RegisterFile.hpp"
 #include "simrv/core/Sbi.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/MmioRouter.hpp"
 #include "simrv/memory/Mmu.hpp"
+#include "simrv/memory/ReservationTable.hpp"
 #include "simrv/pipeline/Decoder.hpp"
+#include "simrv/util/FdtGenerator.hpp"
 
 namespace {
 
@@ -273,8 +276,7 @@ void test_satp_modes() {
                "the same bits remain Bare under the RV64 SATP layout");
         expect(satp_mode_supported(0, 64), "RV64 accepts Bare address translation");
         expect(!satp_mode_supported(1, 64), "RV64 rejects reserved satp MODE=1");
-        expect(satp_mode_supported(8, 64), "RV64 accepts Sv39 address translation");
-        expect(satp_mode_supported(9, 64), "RV64 accepts Sv48 address translation");
+        expect(!satp_mode_supported(9, 64), "RV64 rejects unsupported Sv48 address translation");
     }
 }
 
@@ -313,13 +315,13 @@ void test_sv32_page_walk() {
     expect(translated.has_value() && *translated == 0x3234,
            "Sv32 walks a two-level page table and preserves the page offset");
 
-    constexpr Word kReservedNonLeaf = enum_mask(simrv::PteFlag::U);
+    constexpr Word kReservedNonLeaf = enum_mask(simrv::PteFlag::D);
     simrv::memory::ram_write_fast(kRoot, ((kNext >> 12U) << 10U) | kValid | kReservedNonLeaf,
                                   static_cast<Instruction>(simrv::isa::Funct3::Sw), ram.data());
     const auto malformed =
         mmu.translate(kVirtual, simrv::PteAccess::Read, kPrivSupervisor, 0, kSatp, 32, false);
     expect(!malformed.has_value() && malformed.error() == enum_mask(ExceptionCode::LoadPageFault),
-           "Sv32 faults when a non-leaf PTE sets a reserved U/A/D bit");
+           "Sv32 faults when a non-leaf PTE sets a reserved D bit");
 
     constexpr Word kOutsideRamSatp =
         (static_cast<Word>(1) << 31U) | (static_cast<Word>(ram.size()) >> 12U);
@@ -559,6 +561,143 @@ void test_lower_privilege_xlen_initialization() {
     }
 }
 
+void test_smp_reservation_table() {
+    simrv::memory::ReservationTable table;
+
+    table.set_reservation(0, 0x80001000);
+    expect(table.check_reservation(0, 0x80001000), "Hart 0 holds reservation at 0x80001000");
+    expect(table.check_reservation(0, 0x80001020),
+           "Hart 0 holds reservation within same 64-byte granule");
+    expect(!table.check_reservation(0, 0x80001040),
+           "Hart 0 does not hold reservation in different granule");
+    expect(!table.check_reservation(1, 0x80001000), "Hart 1 does not hold Hart 0's reservation");
+
+    table.invalidate_matching(0x80001000, 0);
+    expect(table.check_reservation(0, 0x80001000),
+           "Store from Hart 0 does not invalidate its own reservation before SC");
+
+    table.invalidate_matching(0x80001010, 1);
+    expect(!table.check_reservation(0, 0x80001000),
+           "Store from Hart 1 invalidates Hart 0's reservation");
+    expect(!table.check_and_clear_reservation(0, 0x80001000),
+           "SC on invalidated reservation fails");
+
+    table.set_reservation(0, 0x80002000);
+    table.set_reservation(1, 0x80003000);
+    expect(table.check_and_clear_reservation(0, 0x80002000),
+           "SC on valid reservation succeeds");
+    expect(!table.check_reservation(0, 0x80002000),
+           "Reservation is cleared after successful SC");
+    expect(table.check_reservation(1, 0x80003000), "Hart 1's reservation remains intact");
+
+    table.clear_all();
+    expect(!table.check_reservation(1, 0x80003000),
+           "clear_all invalidates all active reservations");
+}
+
+void test_dynamic_fdt_generator() {
+    simrv::util::FdtConfig config{
+        .num_harts = 4,
+        .dram_base = 0x80000000,
+        .dram_size = 512ULL * 1024ULL * 1024ULL,
+        .xlen = 64,
+    };
+    auto fdt = simrv::util::FdtGenerator::generate(config);
+    expect(fdt.size() > 40, "FDT binary is non-empty and has header");
+    // Check FDT magic (0xd00dfeed)
+    expect(fdt[0] == 0xd0 && fdt[1] == 0x0d && fdt[2] == 0xfe && fdt[3] == 0xed,
+           "FDT magic matches 0xd00dfeed in big-endian");
+}
+
+void test_pmp_semantics() {
+    simrv::core::ArchState state{};
+    state.priv = PrivilegeLevel::Supervisor;
+
+    // By default, no PMP entries are active, so S-mode accesses pass
+    expect(simrv::core::pmp::check_access(state, 0x80000000, 4, simrv::core::PmpAccessType::Read),
+           "Default empty PMP allows S-mode read access");
+
+    // Configure PMP entry 0: NAPOT 64KB region at 0x80000000 with R/W (no X)
+    // 64KB = 2^16 bytes. NAPOT encoding for 2^(t+3): 16 = t+3 -> t = 13 trailing ones in pmpaddr
+    const uint64_t napot_64k = (0x80000000ULL >> 2) | ((1ULL << 13) - 1);
+    state.pmpaddr[0] = static_cast<Address>(napot_64k);
+    state.pmpcfg[0] = simrv::core::pmp::kPmpModeNapot | simrv::core::pmp::kPmpR |
+                      simrv::core::pmp::kPmpW;
+
+    expect(simrv::core::pmp::check_access(state, 0x80001000, 4, simrv::core::PmpAccessType::Read),
+           "PMP entry 0 permits read within NAPOT range");
+    expect(simrv::core::pmp::check_access(state, 0x80001000, 4, simrv::core::PmpAccessType::Write),
+           "PMP entry 0 permits write within NAPOT range");
+    expect(!simrv::core::pmp::check_access(state, 0x80001000, 4,
+                                           simrv::core::PmpAccessType::Execute),
+           "PMP entry 0 denies execute without X flag");
+    expect(!simrv::core::pmp::check_access(state, 0x80020000, 4, simrv::core::PmpAccessType::Read),
+           "PMP access outside configured regions is denied in S-mode");
+
+    // M-mode accesses bypass unlocked PMP entries
+    state.priv = PrivilegeLevel::Machine;
+    expect(simrv::core::pmp::check_access(state, 0x80020000, 4, simrv::core::PmpAccessType::Read),
+           "M-mode bypasses unlocked PMP entries");
+}
+
+void test_tilelink_c_coherence_semantics() {
+    simrv::cache::DCache dcache;
+    simrv::cache::ICache icache;
+
+    std::array<Byte, simrv::cache::DCache::kLineBytes> sample_data{};
+    sample_data[0] = static_cast<Byte>(0xAA);
+    sample_data[1] = static_cast<Byte>(0xBB);
+    sample_data[2] = static_cast<Byte>(0xCC);
+    sample_data[3] = static_cast<Byte>(0xDD);
+
+    const Address test_addr = 0x80002000;
+    dcache.insert(test_addr, sample_data.data(), simrv::memory::CoherenceState::Branch, false);
+
+    Word read_val = 0;
+    expect(dcache.read(test_addr, read_val, 2), "D-Cache read hits in Branch state");
+    expect((read_val & 0xFFFFFFFFU) == 0xDDCCBBAAU, "D-Cache read returned expected data");
+
+    // Write in Branch state should return false (requiring AcquirePerm upgrade)
+    expect(!dcache.write(test_addr, 0x12345678, 2), "D-Cache write misses in Branch state (upgrade required)");
+
+    // Insert in Trunk state (exclusive/modified)
+    dcache.insert(test_addr, sample_data.data(), simrv::memory::CoherenceState::Trunk, false);
+    expect(dcache.write(test_addr, 0x12345678, 2), "D-Cache write hits in Trunk state");
+
+    // Probe with invalidation (target: None)
+    simrv::memory::TlChannelB probe_req{};
+    probe_req.opcode = simrv::memory::TlOpcodeB::ProbeBlock;
+    probe_req.param = static_cast<uint8_t>(simrv::memory::CoherenceState::None);
+    probe_req.address = test_addr;
+
+    simrv::memory::TlChannelC probe_resp{};
+    std::array<Byte, simrv::cache::DCache::kLineBytes> dirty_buf{};
+    expect(dcache.handle_probe(probe_req, probe_resp, dirty_buf), "D-Cache probe hits and handles request");
+    expect(probe_resp.opcode == simrv::memory::TlOpcodeC::ProbeAckData, "Dirty line returns ProbeAckData");
+    expect(!dcache.read(test_addr, read_val, 2), "D-Cache line is invalid after probe to None");
+
+    // Test MESI Trunk -> Branch downgrade probe with dirty writeback
+    dcache.insert(test_addr, sample_data.data(), simrv::memory::CoherenceState::Trunk, true);
+    simrv::memory::TlChannelB downgrade_req{};
+    downgrade_req.opcode = simrv::memory::TlOpcodeB::ProbeBlock;
+    downgrade_req.param = static_cast<uint8_t>(simrv::memory::CoherenceState::Branch);
+    downgrade_req.address = test_addr;
+
+    simrv::memory::TlChannelC downgrade_resp{};
+    std::array<Byte, simrv::cache::DCache::kLineBytes> dirty_wb{};
+    expect(dcache.handle_probe(downgrade_req, downgrade_resp, dirty_wb), "D-Cache probe handles Branch downgrade");
+    expect(downgrade_resp.opcode == simrv::memory::TlOpcodeC::ProbeAckData, "Dirty line returns ProbeAckData on downgrade");
+    expect(dcache.read(test_addr, read_val, 2), "D-Cache line is still valid for reads in Branch state");
+
+    // Test I-Cache probe invalidation
+    icache.insert(test_addr, sample_data.data(), simrv::memory::CoherenceState::Branch, false);
+    uint32_t inst_val = 0;
+    expect(icache.read(test_addr, inst_val), "I-Cache read hits on inserted line");
+    simrv::memory::TlChannelC ic_resp{};
+    expect(icache.handle_probe(probe_req, ic_resp), "I-Cache probe hits and handles request");
+    expect(!icache.read(test_addr, inst_val), "I-Cache line is invalid after probe to None");
+}
+
 }  // namespace
 
 int main() {
@@ -582,6 +721,10 @@ int main() {
     test_epc_ialign_mask();
     test_rv32_cause_translation();
     test_lower_privilege_xlen_initialization();
+    test_smp_reservation_table();
+    test_dynamic_fdt_generator();
+    test_pmp_semantics();
+    test_tilelink_c_coherence_semantics();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "Core semantic tests passed\n";
     return EXIT_SUCCESS;

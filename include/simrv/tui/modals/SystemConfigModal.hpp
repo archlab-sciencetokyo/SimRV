@@ -21,7 +21,7 @@ using simrv::tui::SysConfigDraft;
 class SystemConfigModal {
    public:
     static void open(SysConfigDraft& draft, int& cursor, const simrv::core::Machine& machine);
-    static void move_cursor(int& cursor, int delta);
+    static void move_cursor(const SysConfigDraft& draft, int& cursor, int delta);
     static void adjust_setting(SysConfigDraft& draft, int index, int dir);
     static void toggle_setting(SysConfigDraft& draft, int index);
     static void push_digit(SysConfigDraft& draft, int cursor, std::string& input, char digit);

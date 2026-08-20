@@ -168,6 +168,9 @@ class Tui {
     void toggle_run_state();
     [[nodiscard]] auto is_terminal_attached() const -> bool { return !is_paused(); }
 
+    [[nodiscard]] auto selected_hart() const -> size_t { return selected_hart_; }
+    void select_next_hart();
+
     void handle_mouse(int x, int y, int b);
 
    private:
@@ -216,6 +219,7 @@ class Tui {
     std::atomic<bool> trace_or_livetrace_active_{false};
     std::string status_override_;
     int scroll_offset_{0};
+    size_t selected_hart_{0};
     SelectionState selection_;
 
     // Performance tracking

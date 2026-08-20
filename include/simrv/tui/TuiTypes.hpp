@@ -48,7 +48,8 @@ enum class TuiFooterAction : uint8_t {
     ConfigureMisa,
     ConfigureSystem,
     ManageBreakpoints,
-    Reboot
+    Reboot,
+    SwitchHart
 };
 
 }  // namespace simrv::tui

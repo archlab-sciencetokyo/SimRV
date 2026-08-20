@@ -927,7 +927,7 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
 }
 
 auto LeftPane::get_pipeline_pc_at_row(int logical_row) const -> Register {
-    auto const& cpu = machine_.cpu;
+    auto const& cpu = current_cpu();
     auto const& ps = cpu.pipeline_sim;
 
     // Execution Timeline instruction rows (logical rows 2..6)

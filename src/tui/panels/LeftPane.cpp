@@ -143,8 +143,16 @@ auto LeftPane::is_running_label_click(int logical_row, int col, int width) const
     return false;
 }
 
+auto LeftPane::current_cpu() const -> const simrv::core::CPU& {
+    return machine_.hart(selected_hart_);
+}
+
+auto LeftPane::current_cpu() -> simrv::core::CPU& {
+    return machine_.hart(selected_hart_);
+}
+
 auto LeftPane::get_row_uncached(int logical_row, int width) -> std::string {
-    auto const& cpu = machine_.cpu;
+    auto const& cpu = current_cpu();
     auto const& st = cpu.state();
     int const col_width = width / 2;
     int const right_width = width - col_width;
@@ -215,6 +223,10 @@ auto LeftPane::render_tab_bar(int width) const -> std::string {
         }
     }
 
+    if (machine_.num_harts() > 1) {
+        line += std::format("{}│\033[1m{}[H{}]\033[0m", kThemeBorder, kThemePeach, selected_hart_);
+    }
+
     return format_to_width(line, width);
 }
 
@@ -261,6 +273,44 @@ auto LeftPane::get_tab_at_col(int col) const -> std::optional<TuiRegPage> {
     }
 
     return std::nullopt;
+}
+
+auto LeftPane::is_hart_tab_click(int col) const -> bool {
+    if (machine_.num_harts() <= 1) return false;
+    bool const is_regs =
+        (page_ == TuiRegPage::GPR || page_ == TuiRegPage::FPR || page_ == TuiRegPage::VEC);
+    int regs_width = is_regs ? 10 : 4;
+    int current_x = regs_width + 1;
+
+    std::string cache_name = "Cache";
+    if (page_ == TuiRegPage::CACHE) {
+        cache_name = (cache_inspect_type_ == 0) ? "Cache:IC" : "Cache:DC";
+    }
+
+    struct ToolTab {
+        TuiRegPage page;
+        std::string name;
+    };
+    std::vector<ToolTab> get_tabs;
+    get_tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Pipe"});
+    if (machine_.s_cycle_accurate) {
+        get_tabs.push_back({.page = TuiRegPage::CACHE, .name = cache_name});
+        get_tabs.push_back({.page = TuiRegPage::BPRED, .name = "BBPtr"});
+        get_tabs.push_back({.page = TuiRegPage::HAZARD, .name = "Haz"});
+    }
+    get_tabs.push_back({.page = TuiRegPage::TLB, .name = "TLB"});
+    get_tabs.push_back({.page = TuiRegPage::BUS, .name = "Bus"});
+    get_tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
+    get_tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Exp"});
+    get_tabs.push_back({.page = TuiRegPage::STACK, .name = "Stack"});
+
+    for (auto const& tab : get_tabs) {
+        int tab_width = (page_ == tab.page) ? (static_cast<int>(tab.name.length()) + 2)
+                                            : static_cast<int>(tab.name.length());
+        current_x += tab_width + 1;
+    }
+
+    return col >= current_x && col < current_x + 6;
 }
 
 auto LeftPane::render_trace_row(int logical_row, int width) -> std::string {
@@ -381,7 +431,7 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
 }
 
 void LeftPane::update_cache() {
-    auto& st = machine_.cpu.state();
+    auto& st = current_cpu().state();
     for (int i = 0; i < 32; ++i) {
         cached_gpr_.at(static_cast<std::size_t>(i)) = st.regs.read(static_cast<RegId>(i));
         cached_fpr_.at(static_cast<std::size_t>(i)) = st.regs.read_fp(static_cast<RegId>(i));

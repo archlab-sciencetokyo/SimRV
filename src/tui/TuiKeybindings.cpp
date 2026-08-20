@@ -9,7 +9,7 @@
 
 namespace simrv::tui {
 
-static const std::array<KeyBindingInfo, 23> kKeyBindings = {
+static const std::array<KeyBindingInfo, 24> kKeyBindings = {
     {{.action = KeyAction::Step,
       .key_display = "[s] / [Space]",
       .primary_char = 's',
@@ -147,7 +147,13 @@ static const std::array<KeyBindingInfo, 23> kKeyBindings = {
       .primary_char = 'v',
       .alt_char = 'V',
       .footer_label = "[v] Trace",
-      .help_label = "Toggle Trace Logging"}}};
+      .help_label = "Toggle Trace Logging"},
+     {.action = KeyAction::SwitchHart,
+      .key_display = "[n]",
+      .primary_char = 'n',
+      .alt_char = 'N',
+      .footer_label = "[n] Hart",
+      .help_label = "Switch active Hart telemetry"}}};
 
 auto Keybindings::get(KeyAction action) -> const KeyBindingInfo& {
     for (const auto& binding : kKeyBindings) {
@@ -208,9 +214,6 @@ auto Keybindings::unavailable_reason(KeyAction action, const ActionContext& cont
         !context.debug_mode) {
         return "Enable debug mode first";
     }
-    if (action == KeyAction::ConfigureSystem && !context.cycle_accurate) {
-        return "Enable cycle-accurate mode first";
-    }
     return {};
 }
 
@@ -270,6 +273,8 @@ auto key_action_for_footer(TuiFooterAction action) -> KeyAction {
             return KeyAction::ManageBreakpoints;
         case TuiFooterAction::Reboot:
             return KeyAction::Reset;
+        case TuiFooterAction::SwitchHart:
+            return KeyAction::SwitchHart;
     }
     throw std::out_of_range("unknown TUI footer action");
 }

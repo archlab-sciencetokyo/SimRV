@@ -38,7 +38,8 @@ enum class KeyAction : uint8_t {
     CycleRightPanel,
     ToggleLearn,
     ToggleExplain,
-    ToggleTrace
+    ToggleTrace,
+    SwitchHart
 };
 
 enum class ActionCategory : uint8_t { Execution, Inspect, Navigate, Configure, Help };

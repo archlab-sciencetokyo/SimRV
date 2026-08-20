@@ -47,6 +47,11 @@ class LeftPane : public TuiWidget {
     void set_page(TuiRegPage page) { page_ = page; }
     [[nodiscard]] auto get_page() const -> TuiRegPage { return page_; }
 
+    void set_selected_hart(size_t hart) { selected_hart_ = hart; }
+    [[nodiscard]] auto selected_hart() const -> size_t { return selected_hart_; }
+    [[nodiscard]] auto current_cpu() const -> const simrv::core::CPU&;
+    [[nodiscard]] auto current_cpu() -> simrv::core::CPU&;
+
     void update_cache();
     void set_kips(uint64_t kips) { kips_ = kips; }
     void set_max_kips(uint64_t max_kips) { max_kips_ = max_kips; }
@@ -73,6 +78,7 @@ class LeftPane : public TuiWidget {
         -> std::optional<Register>;
     [[nodiscard]] auto get_stack_addr_at_row(int logical_row) const -> std::optional<Register>;
     [[nodiscard]] auto is_running_label_click(int logical_row, int col, int width) const -> bool;
+    [[nodiscard]] auto is_hart_tab_click(int col) const -> bool;
     [[nodiscard]] auto get_text_in_range(int start_row, int start_col, int end_row, int end_col,
                                          int width) -> std::string;
 
@@ -198,6 +204,7 @@ class LeftPane : public TuiWidget {
                                    const std::string& l2, const std::string& v2, const char* c2,
                                    int col_width, int right_width, int label_pad) -> std::string;
     simrv::core::Machine& machine_;
+    size_t selected_hart_ = 0;
     TuiRegPage page_ = TuiRegPage::GPR;
     bool paused_ = true;
     bool learn_enabled_ = false;

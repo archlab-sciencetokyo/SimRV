@@ -224,7 +224,7 @@ auto LeftPane::render_registers_or_pipeline(const simrv::core::CPU& cpu,
 
 auto LeftPane::get_register_value_at_row(int logical_row, int col_x, int pane_width) const
     -> std::optional<Register> {
-    const auto& st = machine_.cpu.state();
+    const auto& st = current_cpu().state();
     bool single_col = is_single_column(pane_width);
     int reg = -1;
     if (single_col) {

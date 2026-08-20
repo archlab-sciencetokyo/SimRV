@@ -580,7 +580,7 @@ auto LeftPane::get_explain_rows(int width) -> std::vector<std::string> {
         return explain_rows;
     }
 
-    auto& cpu = machine_.cpu;
+    auto& cpu = current_cpu();
     auto& st = cpu.state();
     auto& ctx = cpu.pipeline_context;
 

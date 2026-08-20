@@ -87,7 +87,7 @@ void TuiModal::apply_misa_profile(int profile_idx) {
 
 void TuiModal::move_sysconfig_cursor(int delta) {
     input_.clear();
-    modals::SystemConfigModal::move_cursor(sysconfig_cursor_, delta);
+    modals::SystemConfigModal::move_cursor(sysconfig_draft_, sysconfig_cursor_, delta);
 }
 
 void TuiModal::adjust_sysconfig_at_cursor(int dir) {
@@ -220,8 +220,8 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
         case ModalType::ConfigureSystem:
             result = modals::SystemConfigModal::submit(sysconfig_draft_, machine_);
             if (result) {
-                open_notice("CA CONFIGURATION SAVED",
-                            "Cycle-Accurate system configuration saved and applied successfully.",
+                open_notice("SYSTEM CONFIGURATION SAVED",
+                            "System configuration saved and applied successfully.",
                             false);
                 return true;
             }
