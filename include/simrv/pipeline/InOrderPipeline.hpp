@@ -97,6 +97,7 @@ class InOrderPipeline : public PipelineModel {
     uint32_t icache_stall_remaining_ = 0;
     uint32_t dcache_stall_remaining_ = 0;
     uint32_t div_busy_cycles_remaining_ = 0;
+    uint32_t fdiv_busy_cycles_remaining_ = 0;
 
     uint64_t cycle_count_ = 0;
     uint64_t next_inst_id_ = 0;

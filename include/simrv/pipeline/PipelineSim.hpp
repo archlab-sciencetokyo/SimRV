@@ -28,6 +28,9 @@ struct PipelineReg {
     isa::OperationId op_id = isa::OperationId::UNKNOWN;
     bool writes_reg = false;
     uint32_t rd_mask = 0;
+    bool writes_fp_reg = false;
+    uint32_t rd_fp_mask = 0;
+    bool is_fp_op = false;
     bool is_load = false;
     int remaining_latency = 0;  // Cycles until value is ready for forwarding
     bool valid = false;
@@ -49,12 +52,22 @@ enum class BranchPredictorType : uint8_t {
     Gshare
 };
 
+enum class CpuPreset : uint8_t {
+    Rocket,    ///< Standard 5-stage RV64/32GC microarchitecture (Rocket Core)
+    Embedded,  ///< 3-stage lightweight embedded microcontroller
+    Fast       ///< Minimal latency profile for functional speed
+};
+
 struct CpuConfig {
     uint32_t icache_miss_penalty = 10;
     uint32_t dcache_miss_penalty = 15;
-    uint32_t tlb_miss_penalty = 30;
+    uint32_t tlb_miss_penalty = 25;
     uint32_t mul_latency = 3;
-    uint32_t div_latency = 20;
+    uint32_t div_latency = 18;
+    uint32_t fp_alu_latency = 4;
+    uint32_t fp_div_latency = 16;
+    uint32_t csr_flush_penalty = 3;
+    uint32_t fence_flush_penalty = 4;
     uint32_t branch_mispredict_penalty = 2;
     bool enable_forwarding = true;
     BranchPredictorType bp_type = BranchPredictorType::TwoBitBimodal;
@@ -63,6 +76,62 @@ struct CpuConfig {
     bool enable_ex_forwarding = true;
     bool enable_mem_forwarding = true;
     bool record_snapshots = false;
+
+    void apply_preset(CpuPreset preset) {
+        switch (preset) {
+            case CpuPreset::Rocket:
+                icache_miss_penalty = 10;
+                dcache_miss_penalty = 15;
+                tlb_miss_penalty = 25;
+                mul_latency = 3;
+                div_latency = 18;
+                fp_alu_latency = 4;
+                fp_div_latency = 16;
+                csr_flush_penalty = 3;
+                fence_flush_penalty = 4;
+                branch_mispredict_penalty = 2;
+                enable_forwarding = true;
+                enable_ex_forwarding = true;
+                enable_mem_forwarding = true;
+                bp_type = BranchPredictorType::TwoBitBimodal;
+                btb_entries = 128;
+                break;
+            case CpuPreset::Embedded:
+                icache_miss_penalty = 6;
+                dcache_miss_penalty = 8;
+                tlb_miss_penalty = 15;
+                mul_latency = 2;
+                div_latency = 12;
+                fp_alu_latency = 3;
+                fp_div_latency = 12;
+                csr_flush_penalty = 2;
+                fence_flush_penalty = 2;
+                branch_mispredict_penalty = 1;
+                enable_forwarding = true;
+                enable_ex_forwarding = true;
+                enable_mem_forwarding = true;
+                bp_type = BranchPredictorType::OneBitBimodal;
+                btb_entries = 64;
+                break;
+            case CpuPreset::Fast:
+                icache_miss_penalty = 2;
+                dcache_miss_penalty = 2;
+                tlb_miss_penalty = 4;
+                mul_latency = 1;
+                div_latency = 4;
+                fp_alu_latency = 1;
+                fp_div_latency = 4;
+                csr_flush_penalty = 1;
+                fence_flush_penalty = 1;
+                branch_mispredict_penalty = 1;
+                enable_forwarding = true;
+                enable_ex_forwarding = true;
+                enable_mem_forwarding = true;
+                bp_type = BranchPredictorType::StaticNotTaken;
+                btb_entries = 0;
+                break;
+        }
+    }
 };
 
 struct PipelineCycleSnapshot {

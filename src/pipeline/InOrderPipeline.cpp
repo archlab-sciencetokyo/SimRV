@@ -38,6 +38,68 @@ auto is_div_rem_op(isa::OperationId op_id) -> bool {
     }
 }
 
+auto is_fp_alu_op(isa::OperationId op_id) -> bool {
+    switch (op_id) {
+        case FADD_S:
+        case FSUB_S:
+        case FMUL_S:
+        case FMADD_S:
+        case FMSUB_S:
+        case FNMADD_S:
+        case FNMSUB_S:
+        case FADD_D:
+        case FSUB_D:
+        case FMUL_D:
+        case FMADD_D:
+        case FMSUB_D:
+        case FNMADD_D:
+        case FNMSUB_D:
+        case FMIN_S:
+        case FMAX_S:
+        case FMIN_D:
+        case FMAX_D:
+        case FSGNJ_S:
+        case FSGNJN_S:
+        case FSGNJX_S:
+        case FSGNJ_D:
+        case FSGNJN_D:
+        case FSGNJX_D:
+        case FCVT_S_D:
+        case FCVT_D_S:
+        case FCVT_W_S:
+        case FCVT_WU_S:
+        case FCVT_S_W:
+        case FCVT_S_WU:
+        case FCVT_L_S:
+        case FCVT_LU_S:
+        case FCVT_S_L:
+        case FCVT_S_LU:
+        case FCVT_W_D:
+        case FCVT_WU_D:
+        case FCVT_D_W:
+        case FCVT_D_WU:
+        case FCVT_L_D:
+        case FCVT_LU_D:
+        case FCVT_D_L:
+        case FCVT_D_LU:
+            return true;
+        default:
+            return false;
+    }
+}
+
+auto is_fp_div_sqrt_op(isa::OperationId op_id) -> bool {
+    switch (op_id) {
+        case FDIV_S:
+        case FSQRT_S:
+        case FDIV_D:
+        case FSQRT_D:
+            return true;
+        default:
+            return false;
+    }
+}
+
 }  // namespace
 
 InOrderPipeline::InOrderPipeline(const CpuConfig& cfg) : config(cfg) {
@@ -63,6 +125,7 @@ void InOrderPipeline::reset() {
     icache_stall_remaining_ = 0;
     dcache_stall_remaining_ = 0;
     div_busy_cycles_remaining_ = 0;
+    fdiv_busy_cycles_remaining_ = 0;
 
     cycle_count_ = 0;
     next_inst_id_ = 0;
@@ -86,6 +149,11 @@ void InOrderPipeline::init_execution_latency(PipelineReg& reg) {
     } else if (is_div_rem_op(reg.op_id)) {
         reg.remaining_latency = static_cast<int>(config.div_latency) - 1;
         div_busy_cycles_remaining_ = config.div_latency - 1;
+    } else if (is_fp_div_sqrt_op(reg.op_id)) {
+        reg.remaining_latency = static_cast<int>(config.fp_div_latency) - 1;
+        fdiv_busy_cycles_remaining_ = config.fp_div_latency - 1;
+    } else if (is_fp_alu_op(reg.op_id)) {
+        reg.remaining_latency = static_cast<int>(config.fp_alu_latency) - 1;
     } else {
         reg.remaining_latency = 0;
     }
@@ -100,17 +168,21 @@ auto InOrderPipeline::check_stall_ex() const -> bool {
     if (is_div_rem_op(e_reg_.op_id)) {
         return div_busy_cycles_remaining_ > 0;
     }
+    if (is_fp_div_sqrt_op(e_reg_.op_id)) {
+        return fdiv_busy_cycles_remaining_ > 0;
+    }
     return false;
 }
 
 auto InOrderPipeline::check_hazard_with_stage(const PipelineReg& stage_reg, bool reads_rs1,
                                               bool reads_rs2) const -> bool {
-    if (!stage_reg.valid || stage_reg.rd_mask == 0) {
+    if (!stage_reg.valid || (stage_reg.rd_mask == 0 && stage_reg.rd_fp_mask == 0)) {
         return false;
     }
     const uint32_t rs_mask = (reads_rs1 ? (1u << static_cast<uint32_t>(d_reg_.rs1)) : 0u) |
                              (reads_rs2 ? (1u << static_cast<uint32_t>(d_reg_.rs2)) : 0u);
-    if ((stage_reg.rd_mask & rs_mask) != 0) {
+    const uint32_t active_mask = d_reg_.is_fp_op ? stage_reg.rd_fp_mask : stage_reg.rd_mask;
+    if ((active_mask & rs_mask) != 0) {
         bool forward_enabled = config.enable_forwarding;
         if (&stage_reg == &e_reg_) {
             forward_enabled = forward_enabled && config.enable_ex_forwarding;
@@ -134,19 +206,33 @@ auto InOrderPipeline::check_stall_id() const -> bool {
     const uint32_t rs_mask = rs1_mask | rs2_mask;
     if (rs_mask == 0) return false;
 
-    // Check EX stage hazard
+    // Check GPR integer hazard
     if (e_reg_.valid && (e_reg_.rd_mask & rs_mask) != 0) {
         const bool fwd = config.enable_forwarding && config.enable_ex_forwarding;
         if (!fwd || e_reg_.remaining_latency > 0) {
             return true;
         }
     }
-
-    // Check MEM stage hazard
     if (m_reg_.valid && (m_reg_.rd_mask & rs_mask) != 0) {
         const bool fwd = config.enable_forwarding && config.enable_mem_forwarding;
         if (!fwd || m_reg_.remaining_latency > 0) {
             return true;
+        }
+    }
+
+    // Check FPR floating-point hazard
+    if (d_reg_.is_fp_op) {
+        if (e_reg_.valid && (e_reg_.rd_fp_mask & rs_mask) != 0) {
+            const bool fwd = config.enable_forwarding && config.enable_ex_forwarding;
+            if (!fwd || e_reg_.remaining_latency > 0) {
+                return true;
+            }
+        }
+        if (m_reg_.valid && (m_reg_.rd_fp_mask & rs_mask) != 0) {
+            const bool fwd = config.enable_forwarding && config.enable_mem_forwarding;
+            if (!fwd || m_reg_.remaining_latency > 0) {
+                return true;
+            }
         }
     }
 
@@ -401,6 +487,7 @@ void InOrderPipeline::tick_pipeline() {
 
     if (dcache_stall_remaining_ > 0) dcache_stall_remaining_--;
     if (div_busy_cycles_remaining_ > 0) div_busy_cycles_remaining_--;
+    if (fdiv_busy_cycles_remaining_ > 0) fdiv_busy_cycles_remaining_--;
     if (tlb_stall_remaining_ > 0) tlb_stall_remaining_--;
     if (icache_stall_remaining_ > 0) icache_stall_remaining_--;
 
@@ -439,6 +526,10 @@ auto InOrderPipeline::step_instruction(Register pc, isa::Opcode opcode, RegId rd
         }
     }
 
+    const bool is_fp = (opcode == isa::Opcode::OpFp || opcode == isa::Opcode::MAdd ||
+                        opcode == isa::Opcode::MSub || opcode == isa::Opcode::NMAdd ||
+                        opcode == isa::Opcode::NMSub || opcode == isa::Opcode::LoadFp);
+
     f_reg_.inst_id = ++next_inst_id_;
     f_reg_.pc = pc;
     f_reg_.opcode = opcode;
@@ -446,9 +537,15 @@ auto InOrderPipeline::step_instruction(Register pc, isa::Opcode opcode, RegId rd
     f_reg_.rs1 = rs1;
     f_reg_.rs2 = rs2;
     f_reg_.op_id = op_id;
-    f_reg_.writes_reg = (rd != static_cast<RegId>(0)) && (opcode != isa::Opcode::Branch) &&
+    f_reg_.is_fp_op = is_fp;
+
+    f_reg_.writes_reg = (rd != static_cast<RegId>(0)) && !is_fp && (opcode != isa::Opcode::Branch) &&
                         (opcode != isa::Opcode::Store) && (opcode != isa::Opcode::StoreFp);
     f_reg_.rd_mask = f_reg_.writes_reg ? (1u << static_cast<uint32_t>(rd)) : 0u;
+
+    f_reg_.writes_fp_reg = is_fp && (opcode != isa::Opcode::StoreFp);
+    f_reg_.rd_fp_mask = f_reg_.writes_fp_reg ? (1u << static_cast<uint32_t>(rd)) : 0u;
+
     f_reg_.is_load = (opcode == isa::Opcode::Load) || (opcode == isa::Opcode::LoadFp);
     f_reg_.tlb_miss = tlb_miss;
     f_reg_.icache_miss = icache_miss;
@@ -459,6 +556,16 @@ auto InOrderPipeline::step_instruction(Register pc, isa::Opcode opcode, RegId rd
     f_reg_.target_pc = target_pc;
     f_reg_.valid = true;
     f_reg_.control_resolved = false;
+
+    // Serialization / pipeline flush bubbles for CSR updates and FENCE instructions
+    if (opcode == isa::Opcode::System) {
+        if (op_id == OperationId::FENCE_I || op_id == OperationId::SFENCE_VMA) {
+            control_bubble_remaining_ = config.fence_flush_penalty;
+        } else if (op_id == OperationId::CSRRW || op_id == OperationId::CSRRS ||
+                   op_id == OperationId::CSRRC) {
+            control_bubble_remaining_ = config.csr_flush_penalty;
+        }
+    }
 
     if (tlb_miss) {
         tlb_stall_remaining_ = config.tlb_miss_penalty;

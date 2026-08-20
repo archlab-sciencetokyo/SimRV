@@ -244,14 +244,19 @@ void test_sysconfig_modal_modes() {
     SysConfigDraft ca_draft;
     ca_draft.cycle_accurate = true;
     ca_draft.num_harts = 1;
+    ca_draft.preset = 0;
     ca_draft.icache_miss_penalty = 10;
     int cursor = 0;
 
     SystemConfigModal::move_cursor(ca_draft, cursor, 1);
     expect(cursor == 1, "CA mode advances cursor across pipeline settings");
 
-    SystemConfigModal::adjust_setting(ca_draft, 0, 5);
+    SystemConfigModal::adjust_setting(ca_draft, 1, 5);
     expect(ca_draft.icache_miss_penalty == 15, "CA mode allows mutating cache penalties");
+
+    SystemConfigModal::adjust_setting(ca_draft, 0, 1);
+    expect(ca_draft.preset == 1, "CA mode allows cycling microarchitecture presets");
+    expect(ca_draft.icache_miss_penalty == 6, "Preset profile applies embedded microarchitecture defaults");
 
     // Test Functional (IA) mode behavior
     SysConfigDraft ia_draft;

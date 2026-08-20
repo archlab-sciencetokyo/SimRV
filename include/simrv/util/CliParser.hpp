@@ -48,6 +48,7 @@ struct RuntimeOptions {
     bool cycle_accurate = false;
     bool high_performance = true;
     bool high_contrast = false;
+    std::string preset = "rocket";
     bool disable_forwarding = false;
     std::string bp_type = "2bit";
     uint32_t btb_size = 128;

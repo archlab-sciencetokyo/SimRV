@@ -20,11 +20,16 @@ void SystemConfigModal::open(SysConfigDraft& draft, int& cursor,
     cursor = 0;
     draft.cycle_accurate = machine.s_cycle_accurate;
     const auto& cfg = machine.cpu.pipeline_sim.config;
+    draft.preset = 0;  // Default: Rocket
     draft.icache_miss_penalty = cfg.icache_miss_penalty;
     draft.dcache_miss_penalty = cfg.dcache_miss_penalty;
     draft.tlb_miss_penalty = cfg.tlb_miss_penalty;
     draft.mul_latency = cfg.mul_latency;
     draft.div_latency = cfg.div_latency;
+    draft.fp_alu_latency = cfg.fp_alu_latency;
+    draft.fp_div_latency = cfg.fp_div_latency;
+    draft.csr_flush_penalty = cfg.csr_flush_penalty;
+    draft.fence_flush_penalty = cfg.fence_flush_penalty;
     draft.branch_mispredict_penalty = cfg.branch_mispredict_penalty;
     draft.enable_forwarding = cfg.enable_forwarding;
     draft.enable_ex_forwarding = cfg.enable_ex_forwarding;
@@ -37,7 +42,7 @@ void SystemConfigModal::open(SysConfigDraft& draft, int& cursor,
 }
 
 void SystemConfigModal::move_cursor(const SysConfigDraft& draft, int& cursor, int delta) {
-    int total = draft.cycle_accurate ? (11 + (draft.num_harts > 1 ? 2 : 0))
+    int total = draft.cycle_accurate ? (16 + (draft.num_harts > 1 ? 2 : 0))
                                      : (draft.num_harts > 1 ? 2 : 0);
     if (total <= 0) {
         cursor = 0;
@@ -49,51 +54,93 @@ void SystemConfigModal::move_cursor(const SysConfigDraft& draft, int& cursor, in
 void SystemConfigModal::adjust_setting(SysConfigDraft& draft, int index, int dir) {
     if (draft.cycle_accurate) {
         switch (index) {
-            case 0: {  // I-Cache miss penalty
+            case 0: {  // Preset
+                int p = (static_cast<int>(draft.preset) + dir + 3) % 3;
+                draft.preset = static_cast<uint8_t>(p);
+                simrv::pipeline::CpuConfig tmp_cfg;
+                tmp_cfg.apply_preset(static_cast<simrv::pipeline::CpuPreset>(p));
+                draft.icache_miss_penalty = tmp_cfg.icache_miss_penalty;
+                draft.dcache_miss_penalty = tmp_cfg.dcache_miss_penalty;
+                draft.tlb_miss_penalty = tmp_cfg.tlb_miss_penalty;
+                draft.mul_latency = tmp_cfg.mul_latency;
+                draft.div_latency = tmp_cfg.div_latency;
+                draft.fp_alu_latency = tmp_cfg.fp_alu_latency;
+                draft.fp_div_latency = tmp_cfg.fp_div_latency;
+                draft.csr_flush_penalty = tmp_cfg.csr_flush_penalty;
+                draft.fence_flush_penalty = tmp_cfg.fence_flush_penalty;
+                draft.branch_mispredict_penalty = tmp_cfg.branch_mispredict_penalty;
+                draft.enable_forwarding = tmp_cfg.enable_forwarding;
+                draft.enable_ex_forwarding = tmp_cfg.enable_ex_forwarding;
+                draft.enable_mem_forwarding = tmp_cfg.enable_mem_forwarding;
+                draft.bp_type = static_cast<uint8_t>(tmp_cfg.bp_type);
+                draft.btb_entries = tmp_cfg.btb_entries;
+                break;
+            }
+            case 1: {  // I-Cache miss penalty
                 int v = static_cast<int>(draft.icache_miss_penalty) + dir;
                 draft.icache_miss_penalty = std::clamp(v, 1, 100);
                 break;
             }
-            case 1: {  // D-Cache miss penalty
+            case 2: {  // D-Cache miss penalty
                 int v = static_cast<int>(draft.dcache_miss_penalty) + dir;
                 draft.dcache_miss_penalty = std::clamp(v, 1, 100);
                 break;
             }
-            case 2: {  // TLB miss penalty
+            case 3: {  // TLB miss penalty
                 int v = static_cast<int>(draft.tlb_miss_penalty) + dir * 5;
                 draft.tlb_miss_penalty = std::clamp(v, 1, 200);
                 break;
             }
-            case 3: {  // Mul latency
+            case 4: {  // Mul latency
                 int v = static_cast<int>(draft.mul_latency) + dir;
                 draft.mul_latency = std::clamp(v, 1, 20);
                 break;
             }
-            case 4: {  // Div latency
+            case 5: {  // Div latency
                 int v = static_cast<int>(draft.div_latency) + dir;
                 draft.div_latency = std::clamp(v, 1, 100);
                 break;
             }
-            case 5: {  // Branch mispredict penalty
+            case 6: {  // FP ALU latency
+                int v = static_cast<int>(draft.fp_alu_latency) + dir;
+                draft.fp_alu_latency = std::clamp(v, 1, 20);
+                break;
+            }
+            case 7: {  // FP Div/Sqrt latency
+                int v = static_cast<int>(draft.fp_div_latency) + dir;
+                draft.fp_div_latency = std::clamp(v, 1, 100);
+                break;
+            }
+            case 8: {  // CSR flush penalty
+                int v = static_cast<int>(draft.csr_flush_penalty) + dir;
+                draft.csr_flush_penalty = std::clamp(v, 0, 20);
+                break;
+            }
+            case 9: {  // FENCE flush penalty
+                int v = static_cast<int>(draft.fence_flush_penalty) + dir;
+                draft.fence_flush_penalty = std::clamp(v, 0, 20);
+                break;
+            }
+            case 10: {  // Branch mispredict penalty
                 int v = static_cast<int>(draft.branch_mispredict_penalty) + dir;
                 draft.branch_mispredict_penalty = std::clamp(v, 1, 20);
                 break;
             }
-            case 6:
+            case 11:
                 draft.enable_forwarding = !draft.enable_forwarding;
                 break;
-            case 7:
+            case 12:
                 draft.enable_ex_forwarding = !draft.enable_ex_forwarding;
                 break;
-            case 8:
+            case 13:
                 draft.enable_mem_forwarding = !draft.enable_mem_forwarding;
                 break;
-            case 9: {  // Predictor type
+            case 14: {  // Predictor type
                 int t = (static_cast<int>(draft.bp_type) + dir + 5) % 5;
                 draft.bp_type = static_cast<uint8_t>(t);
                 break;
             }
-            case 10: {  // BTB entries
+            case 15: {  // BTB entries
                 static constexpr std::array<uint32_t, 6> kBtbOpts = {32, 64, 128, 256, 512, 1024};
                 auto it = std::find(kBtbOpts.begin(), kBtbOpts.end(), draft.btb_entries);
                 int idx = (it != kBtbOpts.end())
@@ -104,12 +151,12 @@ void SystemConfigModal::adjust_setting(SysConfigDraft& draft, int index, int dir
                 draft.btb_entries = kBtbOpts[static_cast<std::size_t>(idx)];
                 break;
             }
-            case 11: {  // SMP Quantum
+            case 16: {  // SMP Quantum
                 int v = static_cast<int>(draft.smp_quantum) + dir * 100;
                 draft.smp_quantum = static_cast<uint32_t>(std::clamp(v, 10, 1000000));
                 break;
             }
-            case 12:  // SMP Multithreaded
+            case 17:  // SMP Multithreaded
                 draft.smp_multithreaded = !draft.smp_multithreaded;
                 break;
             default:
@@ -137,8 +184,7 @@ void SystemConfigModal::push_digit(SysConfigDraft& draft, int cursor, std::strin
     if (input.size() >= 7) return;
 
     if (draft.cycle_accurate) {
-        if (cursor != 0 && cursor != 1 && cursor != 2 && cursor != 3 && cursor != 4 &&
-            cursor != 5 && cursor != 10 && cursor != 11)
+        if (cursor < 1 || (cursor > 10 && cursor != 15 && cursor != 16))
             return;
     } else {
         if (cursor != 0) return;
@@ -154,28 +200,40 @@ void SystemConfigModal::push_digit(SysConfigDraft& draft, int cursor, std::strin
 
     if (draft.cycle_accurate) {
         switch (cursor) {
-            case 0:
+            case 1:
                 draft.icache_miss_penalty = std::clamp(val, 1u, 100u);
                 break;
-            case 1:
+            case 2:
                 draft.dcache_miss_penalty = std::clamp(val, 1u, 100u);
                 break;
-            case 2:
+            case 3:
                 draft.tlb_miss_penalty = std::clamp(val, 1u, 200u);
                 break;
-            case 3:
+            case 4:
                 draft.mul_latency = std::clamp(val, 1u, 20u);
                 break;
-            case 4:
+            case 5:
                 draft.div_latency = std::clamp(val, 1u, 100u);
                 break;
-            case 5:
-                draft.branch_mispredict_penalty = std::clamp(val, 1u, 20u);
+            case 6:
+                draft.fp_alu_latency = std::clamp(val, 1u, 20u);
+                break;
+            case 7:
+                draft.fp_div_latency = std::clamp(val, 1u, 100u);
+                break;
+            case 8:
+                draft.csr_flush_penalty = std::clamp(val, 0u, 20u);
+                break;
+            case 9:
+                draft.fence_flush_penalty = std::clamp(val, 0u, 20u);
                 break;
             case 10:
+                draft.branch_mispredict_penalty = std::clamp(val, 1u, 20u);
+                break;
+            case 15:
                 draft.btb_entries = std::clamp(val, 1u, 4096u);
                 break;
-            case 11:
+            case 16:
                 draft.smp_quantum = std::clamp(val, 10u, 1000000u);
                 break;
             default:
@@ -201,28 +259,40 @@ void SystemConfigModal::pop_digit(SysConfigDraft& draft, int cursor, std::string
 
     if (draft.cycle_accurate) {
         switch (cursor) {
-            case 0:
+            case 1:
                 draft.icache_miss_penalty = std::clamp(val, 1u, 100u);
                 break;
-            case 1:
+            case 2:
                 draft.dcache_miss_penalty = std::clamp(val, 1u, 100u);
                 break;
-            case 2:
+            case 3:
                 draft.tlb_miss_penalty = std::clamp(val, 1u, 200u);
                 break;
-            case 3:
+            case 4:
                 draft.mul_latency = std::clamp(val, 1u, 20u);
                 break;
-            case 4:
+            case 5:
                 draft.div_latency = std::clamp(val, 1u, 100u);
                 break;
-            case 5:
-                draft.branch_mispredict_penalty = std::clamp(val, 1u, 20u);
+            case 6:
+                draft.fp_alu_latency = std::clamp(val, 1u, 20u);
+                break;
+            case 7:
+                draft.fp_div_latency = std::clamp(val, 1u, 100u);
+                break;
+            case 8:
+                draft.csr_flush_penalty = std::clamp(val, 0u, 20u);
+                break;
+            case 9:
+                draft.fence_flush_penalty = std::clamp(val, 0u, 20u);
                 break;
             case 10:
+                draft.branch_mispredict_penalty = std::clamp(val, 1u, 20u);
+                break;
+            case 15:
                 draft.btb_entries = std::clamp(val, 1u, 4096u);
                 break;
-            case 11:
+            case 16:
                 draft.smp_quantum = std::clamp(val, 10u, 1000000u);
                 break;
             default:
@@ -243,18 +313,28 @@ auto SystemConfigModal::submit(const SysConfigDraft& draft, simrv::core::Machine
     machine.s_smp_quantum = draft.smp_quantum;
     machine.s_smp_multithreaded = draft.smp_multithreaded;
     if (draft.cycle_accurate) {
-        auto& cfg = machine.cpu.pipeline_sim.config;
-        cfg.icache_miss_penalty = draft.icache_miss_penalty;
-        cfg.dcache_miss_penalty = draft.dcache_miss_penalty;
-        cfg.tlb_miss_penalty = draft.tlb_miss_penalty;
-        cfg.mul_latency = draft.mul_latency;
-        cfg.div_latency = draft.div_latency;
-        cfg.branch_mispredict_penalty = draft.branch_mispredict_penalty;
-        cfg.enable_forwarding = draft.enable_forwarding;
-        cfg.enable_ex_forwarding = draft.enable_ex_forwarding;
-        cfg.enable_mem_forwarding = draft.enable_mem_forwarding;
-        cfg.bp_type = static_cast<simrv::pipeline::BranchPredictorType>(draft.bp_type);
-        cfg.btb_entries = draft.btb_entries;
+        auto apply_to_cfg = [&](simrv::pipeline::CpuConfig& cfg) {
+            cfg.icache_miss_penalty = draft.icache_miss_penalty;
+            cfg.dcache_miss_penalty = draft.dcache_miss_penalty;
+            cfg.tlb_miss_penalty = draft.tlb_miss_penalty;
+            cfg.mul_latency = draft.mul_latency;
+            cfg.div_latency = draft.div_latency;
+            cfg.fp_alu_latency = draft.fp_alu_latency;
+            cfg.fp_div_latency = draft.fp_div_latency;
+            cfg.csr_flush_penalty = draft.csr_flush_penalty;
+            cfg.fence_flush_penalty = draft.fence_flush_penalty;
+            cfg.branch_mispredict_penalty = draft.branch_mispredict_penalty;
+            cfg.enable_forwarding = draft.enable_forwarding;
+            cfg.enable_ex_forwarding = draft.enable_ex_forwarding;
+            cfg.enable_mem_forwarding = draft.enable_mem_forwarding;
+            cfg.bp_type = static_cast<simrv::pipeline::BranchPredictorType>(draft.bp_type);
+            cfg.btb_entries = draft.btb_entries;
+        };
+
+        apply_to_cfg(machine.cpu.pipeline_sim.config);
+        for (size_t h = 0; h < machine.num_harts(); ++h) {
+            apply_to_cfg(machine.hart(h).pipeline_sim.config);
+        }
     }
     return true;
 }
@@ -276,61 +356,93 @@ void SystemConfigModal::render(std::vector<std::string>& content_rows,
             kThemeMuted));
         add_row_cb("");
 
+        static constexpr std::array<const char*, 3> kPresetNames = {
+            "Rocket (5-Stage Standard)", "Embedded (3-Stage Minimal)", "Fast (Low-Overhead Timing)"};
+        std::string preset_str = (draft.preset < 3) ? kPresetNames[draft.preset] : "Custom";
+
         static constexpr std::array<const char*, 5> kBpNames = {
             "Static Not-Taken", "Static Taken", "1-Bit Bimodal", "2-Bit Bimodal", "Gshare"};
         std::string bp_str = (draft.bp_type < 5) ? kBpNames[draft.bp_type] : "Unknown";
 
         std::string icache_val =
-            (cursor == 0 && !input.empty())
+            (cursor == 1 && !input.empty())
                 ? std::format("\033[1;36m{} cycles\033[0m \033[90m(input: {})\033[0m",
                               draft.icache_miss_penalty, input)
                 : std::format("\033[1;36m{} cycles\033[0m", draft.icache_miss_penalty);
         std::string dcache_val =
-            (cursor == 1 && !input.empty())
+            (cursor == 2 && !input.empty())
                 ? std::format("\033[1;36m{} cycles\033[0m \033[90m(input: {})\033[0m",
                               draft.dcache_miss_penalty, input)
                 : std::format("\033[1;36m{} cycles\033[0m", draft.dcache_miss_penalty);
         std::string tlb_val =
-            (cursor == 2 && !input.empty())
+            (cursor == 3 && !input.empty())
                 ? std::format("\033[1;36m{} cycles\033[0m \033[90m(input: {})\033[0m",
                               draft.tlb_miss_penalty, input)
                 : std::format("\033[1;36m{} cycles\033[0m", draft.tlb_miss_penalty);
         std::string mul_val =
-            (cursor == 3 && !input.empty())
+            (cursor == 4 && !input.empty())
                 ? std::format("\033[1;33m{} cycles\033[0m \033[90m(input: {})\033[0m",
                               draft.mul_latency, input)
                 : std::format("\033[1;33m{} cycles\033[0m", draft.mul_latency);
         std::string div_val =
-            (cursor == 4 && !input.empty())
+            (cursor == 5 && !input.empty())
                 ? std::format("\033[1;33m{} cycles\033[0m \033[90m(input: {})\033[0m",
                               draft.div_latency, input)
                 : std::format("\033[1;33m{} cycles\033[0m", draft.div_latency);
+        std::string fp_alu_val =
+            (cursor == 6 && !input.empty())
+                ? std::format("\033[1;35m{} cycles\033[0m \033[90m(input: {})\033[0m",
+                              draft.fp_alu_latency, input)
+                : std::format("\033[1;35m{} cycles\033[0m", draft.fp_alu_latency);
+        std::string fp_div_val =
+            (cursor == 7 && !input.empty())
+                ? std::format("\033[1;35m{} cycles\033[0m \033[90m(input: {})\033[0m",
+                              draft.fp_div_latency, input)
+                : std::format("\033[1;35m{} cycles\033[0m", draft.fp_div_latency);
+        std::string csr_val =
+            (cursor == 8 && !input.empty())
+                ? std::format("\033[1;32m{} cycles\033[0m \033[90m(input: {})\033[0m",
+                              draft.csr_flush_penalty, input)
+                : std::format("\033[1;32m{} cycles\033[0m", draft.csr_flush_penalty);
+        std::string fence_val =
+            (cursor == 9 && !input.empty())
+                ? std::format("\033[1;32m{} cycles\033[0m \033[90m(input: {})\033[0m",
+                              draft.fence_flush_penalty, input)
+                : std::format("\033[1;32m{} cycles\033[0m", draft.fence_flush_penalty);
         std::string branch_val =
-            (cursor == 5 && !input.empty())
+            (cursor == 10 && !input.empty())
                 ? std::format("\033[1;31m{} cycles\033[0m \033[90m(input: {})\033[0m",
                               draft.branch_mispredict_penalty, input)
                 : std::format("\033[1;31m{} cycles\033[0m", draft.branch_mispredict_penalty);
         std::string btb_val =
-            (cursor == 10 && !input.empty())
+            (cursor == 15 && !input.empty())
                 ? std::format("\033[1;36m{} entries\033[0m \033[90m(input: {})\033[0m",
                               draft.btb_entries, input)
                 : std::format("\033[1;36m{} entries\033[0m", draft.btb_entries);
 
         const auto settings = std::to_array<ItemInfo>({
+            {"Microarchitecture Preset", std::format("\033[1;32m{}\033[0m", preset_str)},
             {"I-Cache Miss Penalty", icache_val},
             {"D-Cache Miss Penalty", dcache_val},
             {"TLB Miss Penalty", tlb_val},
-            {"Multiplier Latency", mul_val},
-            {"Divider Latency", div_val},
+            {"Integer Mul Latency", mul_val},
+            {"Integer Div Latency", div_val},
+            {"FPU ALU Latency (FADD/FMUL)", fp_alu_val},
+            {"FPU Div/Sqrt Latency (FDIV)", fp_div_val},
+            {"CSR Pipeline Flush Penalty", csr_val},
+            {"FENCE.I Flush Penalty", fence_val},
             {"Branch Mispredict Penalty", branch_val},
-            {"Full Operand Forwarding",
-             draft.enable_forwarding ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-            {"EX-Stage Forwarding",
-             draft.enable_ex_forwarding ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-            {"MEM-Stage Forwarding",
-             draft.enable_mem_forwarding ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-            {"Branch Predictor Strategy", std::format("\033[1;35m[{}]\033[0m", bp_str)},
-            {"BTB Table Entries", btb_val},
+            {"Data Forwarding",
+             draft.enable_forwarding ? "\033[1;32mEnabled\033[0m"
+                                     : "\033[1;31mDisabled\033[0m"},
+            {"EX Stage Forwarding",
+             draft.enable_ex_forwarding ? "\033[1;32mEnabled\033[0m"
+                                        : "\033[1;31mDisabled\033[0m"},
+            {"MEM Stage Forwarding",
+             draft.enable_mem_forwarding ? "\033[1;32mEnabled\033[0m"
+                                         : "\033[1;31mDisabled\033[0m"},
+            {"Branch Predictor Type", std::format("\033[1;35m{}\033[0m", bp_str)},
+            {"BTB Entry Count", btb_val},
         });
 
         add_row_cb(std::format(
@@ -352,25 +464,25 @@ void SystemConfigModal::render(std::vector<std::string>& content_rows,
             add_row_cb(std::format("  \033[1;37m{:<29}\033[0m : \033[1;36m{} Cores (Harts)\033[0m",
                                    "Active Hart Topology", draft.num_harts));
 
-            bool is_sel11 = (cursor == 11);
-            std::string p11 = is_sel11 ? std::format("{}>\033[0m ", kThemeMint) : "  ";
-            std::string n11 = std::format("{}{:<29}\033[0m", is_sel11 ? "\033[1;37m" : kThemeText,
+            bool is_sel16 = (cursor == 16);
+            std::string p16 = is_sel16 ? std::format("{}>\033[0m ", kThemeMint) : "  ";
+            std::string n16 = std::format("{}{:<29}\033[0m", is_sel16 ? "\033[1;37m" : kThemeText,
                                           "SMP Time Quantum");
-            std::string v11 =
-                (is_sel11 && !input.empty())
+            std::string v16 =
+                (is_sel16 && !input.empty())
                     ? std::format("\033[1;33m{} cycles\033[0m \033[90m(input: {})\033[0m",
                                   draft.smp_quantum, input)
                     : std::format("\033[1;33m{} cycles\033[0m", draft.smp_quantum);
-            add_row_cb(std::format("{}{} : {}", p11, n11, v11));
+            add_row_cb(std::format("{}{} : {}", p16, n16, v16));
 
-            bool is_sel12 = (cursor == 12);
-            std::string p12 = is_sel12 ? std::format("{}>\033[0m ", kThemeMint) : "  ";
-            std::string n12 = std::format("{}{:<29}\033[0m", is_sel12 ? "\033[1;37m" : kThemeText,
+            bool is_sel17 = (cursor == 17);
+            std::string p17 = is_sel17 ? std::format("{}>\033[0m ", kThemeMint) : "  ";
+            std::string n17 = std::format("{}{:<29}\033[0m", is_sel17 ? "\033[1;37m" : kThemeText,
                                           "Execution Mode");
-            std::string v12 = draft.smp_multithreaded
+            std::string v17 = draft.smp_multithreaded
                                   ? "\033[1;32m[Multi-Threaded Workers]\033[0m"
                                   : "\033[1;33m[Single-Threaded Quantum Barrier]\033[0m";
-            add_row_cb(std::format("{}{} : {}", p12, n12, v12));
+            add_row_cb(std::format("{}{} : {}", p17, n17, v17));
         }
     } else {
         // Functional / Instruction-Accurate (IA) Mode

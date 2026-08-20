@@ -54,11 +54,16 @@ struct SettingsDraft {
 };
 
 struct SysConfigDraft {
+    uint8_t preset = 0;  // 0: Rocket, 1: Embedded, 2: Fast
     uint32_t icache_miss_penalty = 10;
     uint32_t dcache_miss_penalty = 15;
-    uint32_t tlb_miss_penalty = 30;
+    uint32_t tlb_miss_penalty = 25;
     uint32_t mul_latency = 3;
-    uint32_t div_latency = 20;
+    uint32_t div_latency = 18;
+    uint32_t fp_alu_latency = 4;
+    uint32_t fp_div_latency = 16;
+    uint32_t csr_flush_penalty = 3;
+    uint32_t fence_flush_penalty = 4;
     uint32_t branch_mispredict_penalty = 2;
     bool enable_forwarding = true;
     bool enable_ex_forwarding = true;

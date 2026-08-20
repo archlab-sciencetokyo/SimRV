@@ -458,6 +458,17 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.high_performance = false;
         return true;
     }
+    if (arg == "--preset") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        std::string p_str(*value);
+        if (p_str != "rocket" && p_str != "embedded" && p_str != "fast") {
+            return std::unexpected(std::format(
+                "unsupported preset '{}' (supported: rocket, embedded, fast)", p_str));
+        }
+        result.options.preset = p_str;
+        return true;
+    }
     if (is_ia_option(arg)) {
         result.options.cycle_accurate = false;
         result.options.high_performance = true;
@@ -834,23 +845,37 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
         machine->s_high_performance = options.high_performance;
     }
     machine->s_fn_cpuconfig = options.fn_cpuconfig;
-    machine->cpu.pipeline_sim.config.enable_forwarding = !options.disable_forwarding;
-    machine->cpu.pipeline_sim.config.enable_ex_forwarding = !options.disable_ex_forwarding;
-    machine->cpu.pipeline_sim.config.enable_mem_forwarding = !options.disable_mem_forwarding;
-    machine->cpu.pipeline_sim.config.btb_entries = options.btb_size;
 
-    {
+    auto apply_config_to_cpu = [&](simrv::core::CPU& cpu) {
+        if (options.preset == "embedded") {
+            cpu.pipeline_sim.config.apply_preset(pipeline::CpuPreset::Embedded);
+        } else if (options.preset == "fast") {
+            cpu.pipeline_sim.config.apply_preset(pipeline::CpuPreset::Fast);
+        } else {
+            cpu.pipeline_sim.config.apply_preset(pipeline::CpuPreset::Rocket);
+        }
+
+        cpu.pipeline_sim.config.enable_forwarding = !options.disable_forwarding;
+        cpu.pipeline_sim.config.enable_ex_forwarding = !options.disable_ex_forwarding;
+        cpu.pipeline_sim.config.enable_mem_forwarding = !options.disable_mem_forwarding;
+        cpu.pipeline_sim.config.btb_entries = options.btb_size;
+
         using BPT = pipeline::BranchPredictorType;
         if (options.bp_type == "static-not-taken")
-            machine->cpu.pipeline_sim.config.bp_type = BPT::StaticNotTaken;
+            cpu.pipeline_sim.config.bp_type = BPT::StaticNotTaken;
         else if (options.bp_type == "static-taken")
-            machine->cpu.pipeline_sim.config.bp_type = BPT::StaticTaken;
+            cpu.pipeline_sim.config.bp_type = BPT::StaticTaken;
         else if (options.bp_type == "1bit")
-            machine->cpu.pipeline_sim.config.bp_type = BPT::OneBitBimodal;
+            cpu.pipeline_sim.config.bp_type = BPT::OneBitBimodal;
         else if (options.bp_type == "gshare")
-            machine->cpu.pipeline_sim.config.bp_type = BPT::Gshare;
+            cpu.pipeline_sim.config.bp_type = BPT::Gshare;
         else
-            machine->cpu.pipeline_sim.config.bp_type = BPT::TwoBitBimodal;  // default "2bit"
+            cpu.pipeline_sim.config.bp_type = BPT::TwoBitBimodal;
+    };
+
+    apply_config_to_cpu(machine->cpu);
+    for (size_t h = 0; h < machine->num_harts(); ++h) {
+        apply_config_to_cpu(machine->hart(h));
     }
 
     machine->tracer.init_trace(options.trace_enabled);
