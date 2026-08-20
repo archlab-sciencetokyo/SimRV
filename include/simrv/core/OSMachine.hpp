@@ -10,6 +10,7 @@ class OSMachine : public Machine {
     ~OSMachine() override = default;
 
     void execute_cycle() override;
+    auto execute_fast_batch(uint32_t batch_size) -> bool override;
 
    protected:
     void prepare_cycle() override;

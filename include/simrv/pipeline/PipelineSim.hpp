@@ -27,6 +27,7 @@ struct PipelineReg {
     RegId rs2 = static_cast<RegId>(0);
     isa::OperationId op_id = isa::OperationId::UNKNOWN;
     bool writes_reg = false;
+    uint32_t rd_mask = 0;
     bool is_load = false;
     int remaining_latency = 0;  // Cycles until value is ready for forwarding
     bool valid = false;
@@ -61,6 +62,7 @@ struct CpuConfig {
     uint32_t global_history_bits = 8;
     bool enable_ex_forwarding = true;
     bool enable_mem_forwarding = true;
+    bool record_snapshots = false;
 };
 
 struct PipelineCycleSnapshot {

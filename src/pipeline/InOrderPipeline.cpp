@@ -55,10 +55,7 @@ void InOrderPipeline::reset() {
     branch_history_table_.fill(1);
     btb_.clear();
     btb_.resize(config.btb_entries);
-    {
-        std::scoped_lock lock(history_mutex_);
-        cycle_history_.clear();
-    }
+    ring_head_.store(0, std::memory_order_relaxed);
     gshare_history_ = 0;
 
     control_bubble_remaining_ = 0;
@@ -108,10 +105,12 @@ auto InOrderPipeline::check_stall_ex() const -> bool {
 
 auto InOrderPipeline::check_hazard_with_stage(const PipelineReg& stage_reg, bool reads_rs1,
                                               bool reads_rs2) const -> bool {
-    if (!stage_reg.valid || !stage_reg.writes_reg || stage_reg.rd == static_cast<RegId>(0)) {
+    if (!stage_reg.valid || stage_reg.rd_mask == 0) {
         return false;
     }
-    if ((reads_rs1 && d_reg_.rs1 == stage_reg.rd) || (reads_rs2 && d_reg_.rs2 == stage_reg.rd)) {
+    const uint32_t rs_mask = (reads_rs1 ? (1u << static_cast<uint32_t>(d_reg_.rs1)) : 0u) |
+                             (reads_rs2 ? (1u << static_cast<uint32_t>(d_reg_.rs2)) : 0u);
+    if ((stage_reg.rd_mask & rs_mask) != 0) {
         bool forward_enabled = config.enable_forwarding;
         if (&stage_reg == &e_reg_) {
             forward_enabled = forward_enabled && config.enable_ex_forwarding;
@@ -120,21 +119,38 @@ auto InOrderPipeline::check_hazard_with_stage(const PipelineReg& stage_reg, bool
         }
         if (forward_enabled) {
             return stage_reg.remaining_latency > 0;
-        } else {
-            return true;
         }
+        return true;
     }
     return false;
 }
 
 auto InOrderPipeline::check_stall_id() const -> bool {
     if (!d_reg_.valid) return false;
-    const bool reads_rs1 = (d_reg_.rs1 != static_cast<RegId>(0));
-    const bool reads_rs2 = (d_reg_.rs2 != static_cast<RegId>(0));
-    if (!reads_rs1 && !reads_rs2) return false;
+    const uint32_t rs1_val = static_cast<uint32_t>(d_reg_.rs1);
+    const uint32_t rs2_val = static_cast<uint32_t>(d_reg_.rs2);
+    const uint32_t rs1_mask = (rs1_val != 0) ? (1u << rs1_val) : 0u;
+    const uint32_t rs2_mask = (rs2_val != 0) ? (1u << rs2_val) : 0u;
+    const uint32_t rs_mask = rs1_mask | rs2_mask;
+    if (rs_mask == 0) return false;
 
-    return check_hazard_with_stage(e_reg_, reads_rs1, reads_rs2) ||
-           check_hazard_with_stage(m_reg_, reads_rs1, reads_rs2);
+    // Check EX stage hazard
+    if (e_reg_.valid && (e_reg_.rd_mask & rs_mask) != 0) {
+        const bool fwd = config.enable_forwarding && config.enable_ex_forwarding;
+        if (!fwd || e_reg_.remaining_latency > 0) {
+            return true;
+        }
+    }
+
+    // Check MEM stage hazard
+    if (m_reg_.valid && (m_reg_.rd_mask & rs_mask) != 0) {
+        const bool fwd = config.enable_forwarding && config.enable_mem_forwarding;
+        if (!fwd || m_reg_.remaining_latency > 0) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 auto InOrderPipeline::check_stall_if() const -> bool {
@@ -432,6 +448,7 @@ auto InOrderPipeline::step_instruction(Register pc, isa::Opcode opcode, RegId rd
     f_reg_.op_id = op_id;
     f_reg_.writes_reg = (rd != static_cast<RegId>(0)) && (opcode != isa::Opcode::Branch) &&
                         (opcode != isa::Opcode::Store) && (opcode != isa::Opcode::StoreFp);
+    f_reg_.rd_mask = f_reg_.writes_reg ? (1u << static_cast<uint32_t>(rd)) : 0u;
     f_reg_.is_load = (opcode == isa::Opcode::Load) || (opcode == isa::Opcode::LoadFp);
     f_reg_.tlb_miss = tlb_miss;
     f_reg_.icache_miss = icache_miss;
@@ -457,6 +474,10 @@ auto InOrderPipeline::step_instruction(Register pc, isa::Opcode opcode, RegId rd
 }
 
 void InOrderPipeline::record_cycle_snapshot() {
+    if (!config.record_snapshots) {
+        return;
+    }
+
     PipelineCycleSnapshot snap;
     snap.cycle = cycle_count_;
 
@@ -490,13 +511,8 @@ void InOrderPipeline::record_cycle_snapshot() {
     snap.w.valid = w_reg_.valid;
     snap.w.stalled = false;
 
-    {
-        std::scoped_lock lock(history_mutex_);
-        cycle_history_.push_back(snap);
-        if (cycle_history_.size() > 80) {
-            cycle_history_.pop_front();
-        }
-    }
+    const uint64_t head = ring_head_.fetch_add(1, std::memory_order_relaxed);
+    cycle_ring_buffer_[head % kHistoryCapacity] = snap;
 }
 
 auto InOrderPipeline::get_stats() const -> PipelineStats {
@@ -512,8 +528,15 @@ auto InOrderPipeline::get_stats() const -> PipelineStats {
 }
 
 auto InOrderPipeline::get_cycle_history() const -> std::vector<PipelineCycleSnapshot> {
-    std::scoped_lock lock(history_mutex_);
-    return {cycle_history_.begin(), cycle_history_.end()};
+    std::vector<PipelineCycleSnapshot> result;
+    const uint64_t head = ring_head_.load(std::memory_order_relaxed);
+    const size_t count = (head < kHistoryCapacity) ? static_cast<size_t>(head) : kHistoryCapacity;
+    result.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        const size_t idx = (head - count + i) % kHistoryCapacity;
+        result.push_back(cycle_ring_buffer_[idx]);
+    }
+    return result;
 }
 
 auto InOrderPipeline::get_bht_entry(Register pc) const -> uint8_t {
@@ -542,10 +565,7 @@ auto InOrderPipeline::save_state() const -> PipelineSimState {
     state.w_reg = w_reg_;
     state.branch_history_table = branch_history_table_;
     state.btb = btb_;
-    {
-        std::scoped_lock lock(history_mutex_);
-        state.cycle_history.assign(cycle_history_.begin(), cycle_history_.end());
-    }
+    state.cycle_history = get_cycle_history();
     state.control_bubble_remaining = control_bubble_remaining_;
     state.tlb_stall_remaining = tlb_stall_remaining_;
     state.icache_stall_remaining = icache_stall_remaining_;
@@ -564,10 +584,13 @@ void InOrderPipeline::restore_state(const PipelineSimState& state) {
     w_reg_ = state.w_reg;
     branch_history_table_ = state.branch_history_table;
     btb_ = state.btb;
-    {
-        std::scoped_lock lock(history_mutex_);
-        cycle_history_.assign(state.cycle_history.begin(), state.cycle_history.end());
+
+    ring_head_.store(0, std::memory_order_relaxed);
+    for (const auto& snap : state.cycle_history) {
+        const uint64_t head = ring_head_.fetch_add(1, std::memory_order_relaxed);
+        cycle_ring_buffer_[head % kHistoryCapacity] = snap;
     }
+
     control_bubble_remaining_ = state.control_bubble_remaining;
     tlb_stall_remaining_ = state.tlb_stall_remaining;
     icache_stall_remaining_ = state.icache_stall_remaining;

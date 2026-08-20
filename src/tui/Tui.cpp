@@ -156,6 +156,11 @@ void Tui::initialize() {
 
     set_tui_theme(get_tui_theme());
 
+    machine_.cpu.pipeline_sim.config.record_snapshots = true;
+    for (size_t h = 0; h < machine_.num_harts(); ++h) {
+        machine_.hart(h).pipeline_sim.config.record_snapshots = true;
+    }
+
     left_pane_->update_cache();
 
     if (!g_termios_saved) {

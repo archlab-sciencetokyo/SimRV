@@ -26,6 +26,56 @@ void OSMachine::execute_cycle() {
     }
 }
 
+auto OSMachine::execute_fast_batch(uint32_t batch_size) -> bool {
+    if (simrv::compiler::likely(s_high_performance && !s_tuimode && !s_cycle_accurate &&
+                                !s_lockstep_mode && !s_gdb_mode && !s_bp_trace && s_strace == 0 &&
+                                !breakpoints.has_any() && !s_rollback_enabled)) {
+        if (s_fincnt != std::numeric_limits<Counter>::max()) {
+            if (cpu.e_icount >= s_fincnt) {
+                stop();
+                return true;
+            }
+            batch_size =
+                static_cast<uint32_t>(std::min<Counter>(batch_size, s_fincnt - cpu.e_icount));
+        }
+
+        // Check if any secondary hart is running
+        bool any_sec_running = false;
+        for (const auto& sec_hart : secondary_harts_) {
+            if (sec_hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+                any_sec_running = true;
+                break;
+            }
+        }
+
+        if (!any_sec_running) {
+            // Fast single-hart burst
+            const uint32_t burst = std::min(batch_size, 4096u);
+            for (uint32_t i = 0; i < burst && is_running(); ++i) {
+                cpu.run_cycle(*this);
+            }
+            return true;
+        }
+
+        // Multi-hart round-robin quantum batching
+        constexpr uint32_t kHartQuantum = 2048;
+        const uint32_t quantum = std::min(batch_size, kHartQuantum);
+
+        for (uint32_t i = 0; i < quantum && is_running(); ++i) {
+            cpu.run_cycle(*this);
+        }
+        for (auto& sec_hart : secondary_harts_) {
+            if (sec_hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+                for (uint32_t i = 0; i < quantum && is_running(); ++i) {
+                    sec_hart->run_cycle(*this);
+                }
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 void OSMachine::prepare_cycle() {
     for (auto& sec_hart : secondary_harts_) {
         sec_hart->pipeline_context.pending_exception = std::nullopt;

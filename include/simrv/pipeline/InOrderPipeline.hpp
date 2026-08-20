@@ -1,8 +1,7 @@
 #pragma once
 
 #include <array>
-#include <deque>
-#include <mutex>
+#include <atomic>
 #include <vector>
 
 #include "simrv/pipeline/PipelineModel.hpp"
@@ -88,9 +87,10 @@ class InOrderPipeline : public PipelineModel {
 
     std::array<uint8_t, 256> branch_history_table_{};  // 2-bit dynamic bimodal predictor (0-3)
     std::vector<BtbEntry> btb_;                        // Branch Target Buffer
-    std::deque<PipelineCycleSnapshot>
-        cycle_history_;                 // Cycle-by-cycle pipeline stage snapshot history
-    mutable std::mutex history_mutex_;  // Mutex protecting cycle history access
+
+    static constexpr size_t kHistoryCapacity = 128;
+    std::array<PipelineCycleSnapshot, kHistoryCapacity> cycle_ring_buffer_{};
+    std::atomic<uint64_t> ring_head_{0};
 
     uint32_t control_bubble_remaining_ = 0;
     uint32_t tlb_stall_remaining_ = 0;
