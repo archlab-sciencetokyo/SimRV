@@ -87,6 +87,11 @@ struct alignas(128) ArchState {
                           ///< Store-Conditional (LR/SC)
     CSRValue reserved{};  ///< Reserved for internal architectural extensions or tracking
 
+    /* Physical Memory Protection (PMP) */
+    static constexpr size_t kNumPmpEntries = 16;
+    std::array<uint8_t, kNumPmpEntries> pmpcfg{};
+    std::array<Address, kNumPmpEntries> pmpaddr{};
+
     /** Recompute supervisor pending bits that combine independent software/device sources. */
     constexpr void refresh_supervisor_pending() {
         if (seip_software || seip_external)
@@ -233,8 +238,19 @@ struct UndoStep {
     std::array<uint64_t, isa::OperationIdCount> e_instmix{};
 };
 
+enum class HartStatus : uint8_t {
+    Started = 0,
+    Stopped = 1,
+    StartPending = 2,
+    StopPending = 3,
+    Suspended = 4,
+    SuspendPending = 5,
+    ResumePending = 6
+};
+
 class CPU {
    public:
+    std::atomic<HartStatus> hart_status{HartStatus::Started};
     /**
      * @brief Constructs a new CPU core, resetting GPRs, floating-point registers, and setting
      * initial status values.

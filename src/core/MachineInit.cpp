@@ -19,11 +19,13 @@
 #include "simrv/device/Disk.hpp"
 #include "simrv/device/InputDevice.hpp"
 #include "simrv/device/Power.hpp"
+#include "simrv/device/Rng.hpp"
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/Virtio.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/tui/Tui.hpp"
+#include "simrv/util/FdtGenerator.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
@@ -232,6 +234,7 @@ auto Machine::initialize() -> int {
 
     disk = std::make_unique<simrv::device::Disk>(*this);
     console = std::make_unique<simrv::device::Console>(*this);
+    rng = std::make_unique<simrv::device::Rng>(*this);
     rtc = std::make_unique<simrv::Rtc>(*this);
     uart = std::make_unique<simrv::device::Uart>(*this);
     power = std::make_unique<simrv::device::PowerMmio>(*this);
@@ -241,20 +244,25 @@ auto Machine::initialize() -> int {
     if (s_tuimode) {
         tui = std::make_unique<simrv::tui::Tui>(*this);
     }
+    const size_t effective_dram_size = (s_dram_size != 0)
+                                           ? static_cast<size_t>(s_dram_size)
+                                           : static_cast<size_t>(simrv::memory::kDramSize);
     mmem_owner_.reset(static_cast<Byte*>(std::calloc(
-        simrv::memory::kDramSize,
+        effective_dram_size,
         sizeof(Byte))));  // NOLINT(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory)
     if (mmem_owner_ == nullptr) {
         simrv::log::error("Failed to allocate main memory ({} bytes)",
-                          static_cast<std::size_t>(simrv::memory::kDramSize));
+                          effective_dram_size);
         return 1;
     }
     mmem = mmem_owner_.get();
     console->mmem = mmem;
     disk->mmem = mmem;
+    rng->mmem = mmem;
 
     console_queue_owner_.assign(simrv::virtio::kConsoleMaxQueueNum, simrv::virtio::QueueState{});
     disk_queue_owner_.assign(simrv::virtio::kDiskMaxQueueNum, simrv::virtio::QueueState{});
+    rng_queue_owner_.assign(simrv::virtio::kRngMaxQueueNum, simrv::virtio::QueueState{});
     console->Queue = console_queue_owner_.data();
     console->QueueSel = 0;
     console->QueueNum = 0;
@@ -267,10 +275,17 @@ auto Machine::initialize() -> int {
     disk->InterruptStatus = 0;
     disk->Status = 0;
 
+    rng->Queue = rng_queue_owner_.data();
+    rng->QueueSel = 0;
+    rng->QueueNum = 0;
+    rng->InterruptStatus = 0;
+    rng->Status = 0;
+
     memory_.initialize_mmu();
 
     memory_.system_bus().add_node(console.get());
     memory_.system_bus().add_node(disk.get());
+    memory_.system_bus().add_node(rng.get());
     memory_.system_bus().add_node(rtc.get());
     memory_.system_bus().add_node(uart.get());
     memory_.system_bus().add_node(power.get());
@@ -361,6 +376,35 @@ auto Machine::initialize() -> int {
 
     resolve_start_pc_and_dram_base(*this, symbols);
 
+    secondary_harts_.clear();
+    if (s_num_harts > 1) {
+        secondary_harts_.reserve(s_num_harts - 1);
+        for (uint32_t i = 1; i < s_num_harts; ++i) {
+            auto sec_cpu = std::make_unique<simrv::core::CPU>();
+            sec_cpu->machine_ = this;
+            sec_cpu->state().mhartid = i;
+            sec_cpu->state().misa = initial_misa;
+            sec_cpu->state().initialize_lower_xlen_fields();
+            sec_cpu->use_opensbi = cpu.use_opensbi;
+            sec_cpu->hart_status.store(HartStatus::Started, std::memory_order_relaxed);
+            for (std::size_t r = 0; r < 32; ++r) {
+                sec_cpu->state().regs.write(static_cast<RegId>(r), 0);
+            }
+            sec_cpu->state().pc = s_start_pc;
+            if (sec_cpu->state().regs.xlen == 32) {
+                sec_cpu->state().pc = static_cast<Register>(
+                    static_cast<int64_t>(static_cast<int32_t>(sec_cpu->state().pc)));
+            }
+            sec_cpu->state().priv = kPrivMachine;
+            sec_cpu->state().regs.write(static_cast<RegId>(10), i);
+            sec_cpu->state().regs.write(static_cast<RegId>(11),
+                                        linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);
+            sec_cpu->soft_tlb_flush();
+            sec_cpu->TLB_flush();
+            secondary_harts_.push_back(std::move(sec_cpu));
+        }
+    }
+
     // If launched without a binary in TUI mode, skip image-dependent init —
     // the TUI will open the LoadBinary modal and call load_program_binary() later.
     if (s_fn_memimg.empty() && s_tuimode) {
@@ -370,40 +414,26 @@ auto Machine::initialize() -> int {
         return 0;
     }
 
-    if (s_fn_dvtree.empty() && linux_boot) {
-        std::string dtb_candidate =
-            std::format("linux-images/rv{}/devicetree.dtb", simrv::xlen::kXLenBits);
-        if (std::filesystem::exists(dtb_candidate)) {
-            s_fn_dvtree = dtb_candidate;
-        } else if (!s_fn_memimg.empty()) {
-            std::filesystem::path bin_p(s_fn_memimg);
-            if (bin_p.has_parent_path()) {
-                auto dir_dtb = bin_p.parent_path() / "devicetree.dtb";
-                if (std::filesystem::exists(dir_dtb)) {
-                    s_fn_dvtree = dir_dtb.string();
-                }
-            }
-        }
-    }
-
-    if (s_fn_dvtree.empty()) {
-        if (linux_boot) {
-            if (s_tuimode) {
-                simrv::log::warn(
-                    "No device-tree file (-c) specified for Linux/RTOS boot mode; TUI launching "
-                    "in idle state.");
-            } else {
-                simrv::log::error("device-tree file (-c) is required for Linux boot mode");
+    if (linux_boot) {
+        if (!s_fn_dvtree.empty()) {
+            if (dtb_offset >= simrv::memory::kDramSize) {
+                simrv::log::error("device-tree load offset is outside DRAM");
                 return 1;
             }
+            const auto dt_cap = static_cast<std::size_t>(simrv::memory::kDramSize - dtb_offset);
+            load_image_into_ram(s_fn_dvtree, mmem + dtb_offset, dt_cap, "device-tree", s_tuimode);
+        } else {
+            simrv::util::FdtConfig const fdt_cfg{
+                .num_harts = s_num_harts,
+                .dram_base = simrv::memory::g_dram_base,
+                .dram_size = (s_dram_size != 0) ? s_dram_size : simrv::memory::kDramSize,
+                .xlen = simrv::xlen::kXLenBits,
+            };
+            auto fdt_blob = simrv::util::FdtGenerator::generate(fdt_cfg);
+            if (fdt_blob.size() <= static_cast<std::size_t>(0x00100000U)) {
+                std::memcpy(mmem + dtb_offset, fdt_blob.data(), fdt_blob.size());
+            }
         }
-    } else {
-        if (dtb_offset >= simrv::memory::kDramSize) {
-            simrv::log::error("device-tree load offset is outside DRAM");
-            return 1;
-        }
-        const auto dt_cap = static_cast<std::size_t>(simrv::memory::kDramSize - dtb_offset);
-        load_image_into_ram(s_fn_dvtree, mmem + dtb_offset, dt_cap, "device-tree", s_tuimode);
     }
 
     if (s_use_disk) {
@@ -558,24 +588,49 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
     is_running_ = true;
 
     if (linux_boot) {
-        if (s_fn_dvtree.empty()) {
-            std::string dtb_candidate =
-                std::format("linux-images/rv{}/devicetree.dtb", simrv::xlen::kXLenBits);
-            if (std::filesystem::exists(dtb_candidate)) {
-                s_fn_dvtree = dtb_candidate;
-            } else {
-                std::filesystem::path bin_p(s_fn_memimg);
-                if (bin_p.has_parent_path()) {
-                    auto dir_dtb = bin_p.parent_path() / "devicetree.dtb";
-                    if (std::filesystem::exists(dir_dtb)) {
-                        s_fn_dvtree = dir_dtb.string();
-                    }
-                }
-            }
-        }
         if (!s_fn_dvtree.empty()) {
             const auto dt_cap = static_cast<std::size_t>(simrv::memory::kDramSize - dtb_offset);
             load_image_into_ram(s_fn_dvtree, mmem + dtb_offset, dt_cap, "device-tree", s_tuimode);
+        } else {
+            simrv::util::FdtConfig const fdt_cfg{
+                .num_harts = s_num_harts,
+                .dram_base = simrv::memory::g_dram_base,
+                .dram_size = (s_dram_size != 0) ? s_dram_size : simrv::memory::kDramSize,
+                .xlen = simrv::xlen::kXLenBits,
+            };
+            auto fdt_blob = simrv::util::FdtGenerator::generate(fdt_cfg);
+            if (fdt_blob.size() <= static_cast<std::size_t>(0x00100000U)) {
+                std::memcpy(mmem + dtb_offset, fdt_blob.data(), fdt_blob.size());
+            }
+        }
+    }
+    secondary_harts_.clear();
+    if (s_num_harts > 1) {
+        secondary_harts_.reserve(s_num_harts - 1);
+        for (uint32_t i = 1; i < s_num_harts; ++i) {
+            auto sec_cpu = std::make_unique<simrv::core::CPU>();
+            sec_cpu->machine_ = this;
+            sec_cpu->state().mhartid = i;
+            sec_cpu->state().misa = initial_misa;
+            sec_cpu->state().initialize_lower_xlen_fields();
+            sec_cpu->hart_status.store(
+                s_appmode ? HartStatus::Started : HartStatus::Stopped,
+                std::memory_order_relaxed);
+            for (std::size_t r = 0; r < 32; ++r) {
+                sec_cpu->state().regs.write(static_cast<RegId>(r), 0);
+            }
+            sec_cpu->state().pc = s_start_pc;
+            if (sec_cpu->state().regs.xlen == 32) {
+                sec_cpu->state().pc = static_cast<Register>(
+                    static_cast<int64_t>(static_cast<int32_t>(sec_cpu->state().pc)));
+            }
+            sec_cpu->state().priv = kPrivMachine;
+            sec_cpu->state().regs.write(static_cast<RegId>(10), i);
+            sec_cpu->state().regs.write(static_cast<RegId>(11),
+                                        linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);
+            sec_cpu->soft_tlb_flush();
+            sec_cpu->TLB_flush();
+            secondary_harts_.push_back(std::move(sec_cpu));
         }
     }
     cpu.soft_tlb_flush();

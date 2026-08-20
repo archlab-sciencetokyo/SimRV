@@ -70,6 +70,9 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     std::optional<bool> override_misa_override;
     std::optional<uint64_t> override_misa_profile;
     std::optional<unsigned int> override_misa_xlen;
+    std::optional<uint32_t> override_num_harts;
+    std::optional<uint32_t> override_smp_quantum;
+    std::optional<bool> override_smp_multithreaded;
 
     bool keep_running = true;
     int final_exit_code = 0;
@@ -123,6 +126,15 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         if (override_gdb_mode.has_value()) {
             parsed->options.gdb_mode = *override_gdb_mode;
         }
+        if (override_num_harts.has_value()) {
+            parsed->options.num_harts = *override_num_harts;
+        }
+        if (override_smp_quantum.has_value()) {
+            parsed->options.smp_quantum = *override_smp_quantum;
+        }
+        if (override_smp_multithreaded.has_value()) {
+            parsed->options.smp_multithreaded = *override_smp_multithreaded;
+        }
 
         switch (parsed->action) {
             case CliAction::ShowHelp:
@@ -147,6 +159,16 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         auto applied = apply_runtime_options(sim_machine.get(), parsed->options);
         if (!applied) {
             option_error(applied.error(), 0);
+        }
+
+        if (override_num_harts.has_value()) {
+            sim_machine->s_num_harts = *override_num_harts;
+        }
+        if (override_smp_quantum.has_value()) {
+            sim_machine->s_smp_quantum = *override_smp_quantum;
+        }
+        if (override_smp_multithreaded.has_value()) {
+            sim_machine->s_smp_multithreaded = *override_smp_multithreaded;
         }
 
         if (override_misa_override.has_value() && *override_misa_override) {
@@ -214,6 +236,9 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             override_dlog_mode = sim_machine->s_dlog_mode;
             override_lockstep_mode = sim_machine->s_lockstep_mode;
             override_gdb_mode = sim_machine->s_gdb_mode;
+            override_num_harts = sim_machine->s_num_harts;
+            override_smp_quantum = sim_machine->s_smp_quantum;
+            override_smp_multithreaded = sim_machine->s_smp_multithreaded;
 
             if (sim_machine->s_misa_override) {
                 override_misa_override = true;

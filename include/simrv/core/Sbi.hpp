@@ -58,7 +58,12 @@ class Sbi {
     auto handle_time(Word func_id) -> bool;
     auto handle_rfence(Word func_id) -> bool;
     auto handle_ipi(Word func_id) -> bool;
+    auto handle_hsm(Word func_id) -> bool;
     auto handle_system_reset(Word func_id) -> bool;
+    auto handle_dbcn(Word func_id) -> bool;
+    auto handle_pmu(Word func_id) -> bool;
+    auto handle_cppc(Word func_id) -> bool;
+    auto handle_susp(Word func_id) -> bool;
 
     [[nodiscard]] auto timer_value() const -> Counter;
     void sbi_return(SignedWord error, Word value);

@@ -113,8 +113,30 @@ void CPU::raise_exception(TrapCause cause, CSRValue tval) {
 }
 
 void CPU::evaluate_timer_interrupt() {
-    const bool pending = clint_mmio.mtime >= clint_mmio.mtimecmp;
-    if (clint_mmio.supervisor_timer.load(std::memory_order_relaxed)) {
+    Counter cur_mtime = 0;
+    Counter cur_mtimecmp = 0;
+    bool is_supervisor_timer = false;
+
+    if (machine_ != nullptr) {
+        auto& primary_clint = machine_->cpu.clint_mmio;
+        cur_mtime = primary_clint.mtime.load(std::memory_order_relaxed);
+        const auto hid = static_cast<size_t>(state_.mhartid);
+        if (hid == 0) {
+            cur_mtimecmp = primary_clint.mtimecmp.load(std::memory_order_relaxed);
+            is_supervisor_timer = primary_clint.supervisor_timer.load(std::memory_order_relaxed);
+        } else if (hid < ClintMmio::kMaxClintHarts) {
+            cur_mtimecmp = primary_clint.hart_mtimecmp.at(hid).load(std::memory_order_relaxed);
+            is_supervisor_timer =
+                primary_clint.hart_supervisor_timer.at(hid).load(std::memory_order_relaxed);
+        }
+    } else {
+        cur_mtime = clint_mmio.mtime.load(std::memory_order_relaxed);
+        cur_mtimecmp = clint_mmio.mtimecmp.load(std::memory_order_relaxed);
+        is_supervisor_timer = clint_mmio.supervisor_timer.load(std::memory_order_relaxed);
+    }
+
+    const bool pending = (cur_mtime >= cur_mtimecmp);
+    if (is_supervisor_timer) {
         state_.mip &= ~enum_mask(MipBit::Mtip);
         state_.stip_timer = pending;
     } else {
@@ -232,29 +254,43 @@ void CPU::run_cycle(Machine& machine) {
         }
     }
 
-    // CLINT real-time-clock interrupt and cycle counter increments.
-    if (simrv::compiler::likely(!machine.s_cycle_accurate)) {
-        clint_mmio.mcycle++;
-        clint_mmio.rtc_divider++;
-        if (clint_mmio.rtc_divider == 10) {
-            clint_mmio.mtime++;
-            clint_mmio.rtc_divider = 0;
-            evaluate_timer_interrupt();
-        }
-    } else {
-        clint_mmio.mcycle += step_cycles;
-        clint_mmio.rtc_divider += static_cast<int>(step_cycles);
-        if (clint_mmio.rtc_divider >= 10) {
-            if (clint_mmio.rtc_divider < 20) {
-                clint_mmio.mtime += 1;
-                clint_mmio.rtc_divider -= 10;
-            } else {
-                clint_mmio.mtime += clint_mmio.rtc_divider / 10;
-                clint_mmio.rtc_divider %= 10;
+    // CLINT real-time-clock interrupt and cycle counter increments (driven by Hart 0).
+    if (state_.mhartid == 0) {
+        if (simrv::compiler::likely(!machine.s_cycle_accurate)) {
+            clint_mmio.mcycle++;
+            clint_mmio.rtc_divider++;
+            if (clint_mmio.rtc_divider == 10) {
+                clint_mmio.mtime++;
+                clint_mmio.rtc_divider = 0;
+                evaluate_timer_interrupt();
+                for (auto& sec : machine.secondary_harts_) {
+                    if (sec->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+                        sec->evaluate_timer_interrupt();
+                    }
+                }
             }
-            evaluate_timer_interrupt();
+        } else {
+            clint_mmio.mcycle += step_cycles;
+            clint_mmio.rtc_divider += static_cast<int>(step_cycles);
+            if (clint_mmio.rtc_divider >= 10) {
+                if (clint_mmio.rtc_divider < 20) {
+                    clint_mmio.mtime += 1;
+                    clint_mmio.rtc_divider -= 10;
+                } else {
+                    clint_mmio.mtime += clint_mmio.rtc_divider / 10;
+                    clint_mmio.rtc_divider %= 10;
+                }
+                evaluate_timer_interrupt();
+                for (auto& sec : machine.secondary_harts_) {
+                    if (sec->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+                        sec->evaluate_timer_interrupt();
+                    }
+                }
+            }
         }
     }
+
+    dispatch_pending_interrupts();
 
     // Record trace logs for active debug TUI components.
     if (machine.s_tuimode && machine.tui && machine.tui->is_trace_active()) {

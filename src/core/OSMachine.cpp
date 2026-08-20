@@ -17,9 +17,21 @@ namespace simrv::core {
 
 using namespace simrv::isa;
 
-void OSMachine::execute_cycle() { cpu.run_cycle(*this); }
+void OSMachine::execute_cycle() {
+    cpu.run_cycle(*this);
+    for (auto& sec_hart : secondary_harts_) {
+        if (sec_hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+            sec_hart->run_cycle(*this);
+        }
+    }
+}
 
 void OSMachine::prepare_cycle() {
+    for (auto& sec_hart : secondary_harts_) {
+        sec_hart->pipeline_context.pending_exception = std::nullopt;
+        sec_hart->pipeline_context.pending_tval = 0;
+    }
+
     if (simrv::compiler::likely(s_high_performance && cpu.clint_mmio.mtime <= s_enabletimer)) {
         if (simrv::compiler::unlikely(cpu.clint_mmio.mtime == s_memimg)) {
             tracer.dump_init_artifacts();

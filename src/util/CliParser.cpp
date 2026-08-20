@@ -463,6 +463,40 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.high_performance = true;
         return true;
     }
+    if (arg == "--smp" || arg == "-smp" || arg == "--cores") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        uint32_t val = 0;
+        if (!parse_u32_base0(*value, val) || val == 0 || val > 16) {
+            return std::unexpected(std::format("SMP core count must be between 1 and 16 (got: {})", *value));
+        }
+        result.options.num_harts = val;
+        return true;
+    }
+    if (arg == "--smp-quantum") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        uint32_t val = 0;
+        if (!parse_u32_base0(*value, val) || val == 0) {
+            return std::unexpected(std::format("invalid quantum value for {}", arg));
+        }
+        result.options.smp_quantum = val;
+        return true;
+    }
+    if (arg == "--smp-multithreaded") {
+        result.options.smp_multithreaded = true;
+        return true;
+    }
+    if (arg == "--ram-size" || arg == "--memory-size") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        uint64_t val = 0;
+        if (!parse_scaled_u64(*value, val) || val < 16ULL * 1024ULL * 1024ULL) {
+            return std::unexpected(std::format("invalid RAM size value for {} (minimum 16MB)", arg));
+        }
+        result.options.dram_size = val;
+        return true;
+    }
     return false;
 }
 
@@ -633,6 +667,10 @@ auto expand_short_flags(const std::vector<std::string>& original_args) -> std::v
 
     for (std::size_t i = 1; i < original_args.size(); ++i) {
         const std::string& arg = original_args[i];
+        if (arg == "-smp") {
+            expanded.push_back(arg);
+            continue;
+        }
         if (arg.starts_with('-') && !arg.starts_with("--") && arg.size() > 2) {
             if (std::isdigit(static_cast<unsigned char>(arg[1]))) {
                 expanded.push_back(arg);
@@ -775,6 +813,10 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     machine->s_dlog_mode = options.dlog_mode;
     machine->s_traplog_mode = options.traplog_mode;
     machine->s_use_disk = options.use_disk;
+    machine->s_num_harts = options.num_harts;
+    machine->s_smp_quantum = options.smp_quantum;
+    machine->s_smp_multithreaded = options.smp_multithreaded;
+    machine->s_dram_size = options.dram_size;
 
     if (options.debug_mode) {
         machine->s_use_mix = true;
@@ -823,7 +865,9 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
         machine->cpu.trap_log_stream = &machine->tracer.fp_traplog;
     }
 
-    machine->cpu.use_opensbi = options.use_opensbi || !options.fn_dvtree.empty();
+    const bool is_fw_payload = (options.fn_memimg.find("fw_payload") != std::string::npos ||
+                                options.fn_memimg.find("opensbi") != std::string::npos);
+    machine->cpu.use_opensbi = options.use_opensbi || !options.fn_dvtree.empty() || is_fw_payload;
 
     // Debug / co-simulation flags
     machine->s_gdb_mode = options.gdb_mode;

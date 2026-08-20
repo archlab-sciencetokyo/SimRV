@@ -68,6 +68,10 @@ struct RuntimeOptions {
     uint32_t explain_inst_val = 0;
     double mouse_sensitivity = 1.0;
     unsigned int vlen = 0;
+    uint32_t num_harts = 1;
+    uint32_t smp_quantum = 100;
+    bool smp_multithreaded = false;
+    uint64_t dram_size = 0;
 };
 
 struct ParseResult {

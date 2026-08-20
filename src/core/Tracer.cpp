@@ -253,6 +253,18 @@ void Tracer::print_summary() {
     simrv::log::info("Cycles Per Instr (CPI)   : {:>12.3f}", cpi);
     simrv::log::info("Instrs Per Cycle (IPC)   : {:>12.3f}", ipc);
 
+    if (machine_.num_harts() > 1) {
+        for (size_t i = 0; i < machine_.num_harts(); ++i) {
+            const auto& h = machine_.hart(i);
+            const char* priv_str = (h.state().priv == PrivilegeLevel::Machine)      ? "M"
+                                   : (h.state().priv == PrivilegeLevel::Supervisor) ? "S"
+                                                                                    : "U";
+            simrv::log::info("Hart {:<2} [mode {:>1}, PC 0x{:016x}] Executed Insns : {:>12}  ({})", i,
+                             priv_str, h.state().pc, format_scaled(h.e_icount),
+                             format_with_commas(h.e_icount));
+        }
+    }
+
     if (machine_.s_cycle_accurate) {
         const auto& ps = machine_.cpu.pipeline_sim;
         double stall_pct = mcycle == 0 ? 0.0

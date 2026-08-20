@@ -30,12 +30,63 @@ constexpr Address kClintMtimecmpOffset = 0x4000;
 constexpr Address kClintMtimeOffset = 0xbff8;
 
 void InterruptController::updateMip(PlicMmio& plic, ArchState& state) {
-    // Evaluate if any pending and enabled interrupt exists for Context 0 (M-mode) and Context 1
-    // (S-mode)
-    bool m_ext = false;
-    bool s_ext = false;
+    if (plic.cpu_.machine_ != nullptr) {
+        const size_t n_harts = plic.cpu_.machine_->num_harts();
+        for (size_t h = 0; h < n_harts; ++h) {
+            auto& target_cpu = plic.cpu_.machine_->hart(h);
+            auto& target_state = target_cpu.state();
+
+            const size_t m_ctx = 2 * h;
+            const size_t s_ctx = 2 * h + 1;
+
+            bool m_ext = false;
+            bool s_ext = false;
+
+            if (m_ctx < PlicMmio::kMaxPlicContexts) {
+                Word m_max_prio = 0;
+                for (int i : std::views::iota(1, 32)) {
+                    const auto idx = static_cast<std::size_t>(i);
+                    if ((plic.plic_pending.at(0) & (1u << i)) != 0 &&
+                        (plic.plic_enables.at(m_ctx).at(0) & (1u << i)) != 0) {
+                        if (plic.plic_priorities.at(idx) > m_max_prio) {
+                            m_max_prio = plic.plic_priorities.at(idx);
+                        }
+                    }
+                }
+                if (m_max_prio > plic.plic_threshold.at(m_ctx)) {
+                    m_ext = true;
+                }
+            }
+
+            if (s_ctx < PlicMmio::kMaxPlicContexts) {
+                Word s_max_prio = 0;
+                for (int i : std::views::iota(1, 32)) {
+                    const auto idx = static_cast<std::size_t>(i);
+                    if ((plic.plic_pending.at(0) & (1u << i)) != 0 &&
+                        (plic.plic_enables.at(s_ctx).at(0) & (1u << i)) != 0) {
+                        if (plic.plic_priorities.at(idx) > s_max_prio) {
+                            s_max_prio = plic.plic_priorities.at(idx);
+                        }
+                    }
+                }
+                if (s_max_prio > plic.plic_threshold.at(s_ctx)) {
+                    s_ext = true;
+                }
+            }
+
+            if (m_ext)
+                target_state.mip |= enum_mask(MipBit::Meip);
+            else
+                target_state.mip &= ~enum_mask(MipBit::Meip);
+
+            target_state.seip_external = s_ext;
+            target_state.refresh_supervisor_pending();
+        }
+        return;
+    }
 
     // Evaluate Context 0 (M-mode)
+    bool m_ext = false;
     Word m_max_prio = 0;
     for (int i : std::views::iota(1, 32)) {
         const auto idx = static_cast<std::size_t>(i);
@@ -51,6 +102,7 @@ void InterruptController::updateMip(PlicMmio& plic, ArchState& state) {
     }
 
     // Evaluate Context 1 (S-mode)
+    bool s_ext = false;
     Word s_max_prio = 0;
     for (int i : std::views::iota(1, 32)) {
         const auto idx = static_cast<std::size_t>(i);
@@ -103,8 +155,9 @@ auto PlicMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD&
 }
 
 auto PlicMmio::get_context_for_offset(Address offset) const -> int {
-    if (offset >= 0x200000 && offset < 0x201000) return 0;  // Context 0 (M-mode)
-    if (offset >= 0x201000 && offset < 0x202000) return 1;  // Context 1 (S-mode)
+    if (offset >= 0x200000 && offset < 0x200000 + (kMaxPlicContexts * 0x1000)) {
+        return static_cast<int>((offset - 0x200000) / 0x1000);
+    }
     return -1;
 }
 
@@ -117,14 +170,10 @@ auto PlicMmio::mmio_read(Address offset) -> Word {
     if (offset >= 0x1000 && offset < 0x1080) {
         return plic_pending.at((offset - 0x1000) / 4);
     }
-    if (offset >= 0x2000 && offset < 0x2080) {
-        const auto word = (offset - 0x2000) / 4;
-        const Word value = plic_enables.at(0).at(word);
-        return (word == 0) ? (value & ~Word{1}) : value;
-    }
-    if (offset >= 0x2080 && offset < 0x2100) {
-        const auto word = (offset - 0x2080) / 4;
-        const Word value = plic_enables.at(1).at(word);
+    if (offset >= 0x2000 && offset < 0x2000 + (kMaxPlicContexts * 0x80)) {
+        const auto ctx = (offset - 0x2000) / 0x80;
+        const auto word = ((offset - 0x2000) % 0x80) / 4;
+        const Word value = plic_enables.at(ctx).at(word);
         return (word == 0) ? (value & ~Word{1}) : value;
     }
 
@@ -168,12 +217,10 @@ void PlicMmio::mmio_write(Address offset, Word wdata) {
     if (offset < 0x1000) {
         // Source zero means "no interrupt" and is not configurable.
         if (offset != 0) plic_priorities.at(offset / 4) = wdata;
-    } else if (offset >= 0x2000 && offset < 0x2080) {
-        const auto word = (offset - 0x2000) / 4;
-        plic_enables.at(0).at(word) = (word == 0) ? (wdata & ~Word{1}) : wdata;
-    } else if (offset >= 0x2080 && offset < 0x2100) {
-        const auto word = (offset - 0x2080) / 4;
-        plic_enables.at(1).at(word) = (word == 0) ? (wdata & ~Word{1}) : wdata;
+    } else if (offset >= 0x2000 && offset < 0x2000 + (kMaxPlicContexts * 0x80)) {
+        const auto ctx = (offset - 0x2000) / 0x80;
+        const auto word = ((offset - 0x2000) % 0x80) / 4;
+        plic_enables.at(ctx).at(word) = (word == 0) ? (wdata & ~Word{1}) : wdata;
     } else {
         int context = get_context_for_offset(offset);
         if (context >= 0) {
@@ -193,6 +240,10 @@ void PlicMmio::mmio_write(Address offset, Word wdata) {
                                    cpu_.machine_->console &&
                                    cpu_.machine_->console->InterruptStatus != 0) {
                             InterruptController::setIrq(*this, static_cast<int>(wdata), 1);
+                        } else if (wdata == static_cast<Word>(simrv::virtio::kRngIrq) &&
+                                   cpu_.machine_->rng &&
+                                   cpu_.machine_->rng->InterruptStatus != 0) {
+                            InterruptController::setIrq(*this, static_cast<int>(wdata), 1);
                         } else if (wdata == 3 && cpu_.machine_->uart &&
                                    cpu_.machine_->uart->is_interrupt_pending()) {
                             InterruptController::setIrq(*this, static_cast<int>(wdata), 1);
@@ -211,28 +262,54 @@ auto ClintMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
 
     if (req.opcode == memory::TlOpcodeA::Get) {
         if (req_bytes == 8) {
-            if (off == kClintMtimeOffset) {
+            if (off == kClintMtimeOffset || off == 0x7ff8) {
                 resp.data = static_cast<Word>(mtime.load(std::memory_order_relaxed));
-            } else if (off == kClintMtimecmpOffset) {
-                resp.data = static_cast<Word>(mtimecmp.load(std::memory_order_relaxed));
+            } else if (off >= kClintMtimecmpOffset &&
+                       off < kClintMtimecmpOffset + (kMaxClintHarts * 8)) {
+                const size_t hid = (off - kClintMtimecmpOffset) / 8;
+                if (hid == 0) {
+                    resp.data = static_cast<Word>(mtimecmp.load(std::memory_order_relaxed));
+                } else {
+                    resp.data =
+                        static_cast<Word>(hart_mtimecmp.at(hid).load(std::memory_order_relaxed));
+                }
             } else {
-                resp.data = mmio_read(off);
+                const Word lo = mmio_read(off);
+                const Word hi = mmio_read(off + 4);
+                resp.data = lo | (hi << 32);
             }
         } else {
             resp.data = mmio_read(off);
         }
     } else {
         if (req_bytes == 8) {
-            if (off == kClintMtimecmpOffset) {
-                supervisor_timer.store(false, std::memory_order_release);
-                mtimecmp.store(static_cast<Counter>(req.data), std::memory_order_release);
-                cpu_.evaluate_timer_interrupt();
-            } else if (off == kClintMtimeOffset) {
+            if (off == kClintMtimeOffset || off == 0x7ff8) {
                 supervisor_timer.store(false, std::memory_order_release);
                 mtime.store(static_cast<Counter>(req.data), std::memory_order_release);
                 cpu_.evaluate_timer_interrupt();
+                if (cpu_.machine_) {
+                    for (auto& sec : cpu_.machine_->secondary_harts_) {
+                        sec->evaluate_timer_interrupt();
+                    }
+                }
+            } else if (off >= kClintMtimecmpOffset &&
+                       off < kClintMtimecmpOffset + (kMaxClintHarts * 8)) {
+                const size_t hid = (off - kClintMtimecmpOffset) / 8;
+                if (hid == 0) {
+                    supervisor_timer.store(false, std::memory_order_release);
+                    mtimecmp.store(static_cast<Counter>(req.data), std::memory_order_release);
+                    cpu_.evaluate_timer_interrupt();
+                } else {
+                    hart_supervisor_timer.at(hid).store(false, std::memory_order_release);
+                    hart_mtimecmp.at(hid).store(static_cast<Counter>(req.data),
+                                                std::memory_order_release);
+                    if (cpu_.machine_ && hid < cpu_.machine_->num_harts()) {
+                        cpu_.machine_->hart(hid).evaluate_timer_interrupt();
+                    }
+                }
             } else {
-                mmio_write(off, req.data);
+                mmio_write(off, static_cast<Word>(req.data & kWord32Mask));
+                mmio_write(off + 4, static_cast<Word>((req.data >> 32) & kWord32Mask));
             }
         } else {
             mmio_write(off, req.data);
@@ -245,70 +322,98 @@ void ClintMmio::reset() {
     mtime.store(1, std::memory_order_release);
     mtimecmp.store(std::numeric_limits<Counter>::max(), std::memory_order_release);
     supervisor_timer.store(false, std::memory_order_release);
+    for (auto& cmp : hart_mtimecmp) {
+        cmp.store(std::numeric_limits<Counter>::max(), std::memory_order_release);
+    }
+    for (auto& timer : hart_supervisor_timer) {
+        timer.store(false, std::memory_order_release);
+    }
     mcycle = 1;
     rtc_divider = 0;
 }
 
 auto ClintMmio::mmio_read(Address offset) const -> Word {
-    switch (offset) {
-        case 0x0000:  // msip for hart 0
+    if (offset < 0x4000 || (offset >= 0x80000 && offset < 0x84000)) {
+        const size_t hart_id = (offset >= 0x80000) ? ((offset - 0x80000) / 4) : (offset / 4);
+        if (cpu_.machine_ && hart_id < cpu_.machine_->num_harts()) {
+            return (cpu_.machine_->hart(hart_id).state().mip & enum_mask(MipBit::Msip)) != 0 ? 1 : 0;
+        }
+        if (hart_id == 0) {
             return (cpu_.state().mip & enum_mask(MipBit::Msip)) != 0 ? 1 : 0;
-        case kClintMtimeOffset:
-            return static_cast<Word>(mtime.load(std::memory_order_relaxed) & kWord32Mask);
-        case kClintMtimeOffset + 4:
-            return static_cast<Word>((mtime.load(std::memory_order_relaxed) >> 32) & kWord32Mask);
-        case kClintMtimecmpOffset:
-            return static_cast<Word>(mtimecmp.load(std::memory_order_relaxed) & kWord32Mask);
-        case kClintMtimecmpOffset + 4:
-            return static_cast<Word>((mtimecmp.load(std::memory_order_relaxed) >> 32) &
-                                     kWord32Mask);
-        default:
-            return 0;
+        }
+        return 0;
     }
+    if (offset >= kClintMtimecmpOffset && offset < kClintMtimecmpOffset + (kMaxClintHarts * 8)) {
+        const size_t hart_id = (offset - kClintMtimecmpOffset) / 8;
+        const bool is_hi = ((offset - kClintMtimecmpOffset) % 8) == 4;
+        Counter const cmp = (hart_id == 0) ? mtimecmp.load(std::memory_order_relaxed)
+                                           : hart_mtimecmp.at(hart_id).load(std::memory_order_relaxed);
+        return static_cast<Word>(is_hi ? ((cmp >> 32) & kWord32Mask) : (cmp & kWord32Mask));
+    }
+    if (offset == kClintMtimeOffset || offset == 0x7ff8) {
+        return static_cast<Word>(mtime.load(std::memory_order_relaxed) & kWord32Mask);
+    }
+    if (offset == kClintMtimeOffset + 4 || offset == 0x7ff8 + 4) {
+        return static_cast<Word>((mtime.load(std::memory_order_relaxed) >> 32) & kWord32Mask);
+    }
+    return 0;
 }
 
 void ClintMmio::mmio_write(Address offset, Word wdata) {
     const Counter wdata_64 = static_cast<Counter>(wdata) & kWord32Mask;
-    switch (offset) {
-        case 0x0000:  // msip for hart 0
+    if (offset < 0x4000 || (offset >= 0x80000 && offset < 0x84000)) {
+        const size_t hart_id = (offset >= 0x80000) ? ((offset - 0x80000) / 4) : (offset / 4);
+        if (cpu_.machine_ && hart_id < cpu_.machine_->num_harts()) {
+            if ((wdata & 1) != 0) {
+                cpu_.machine_->hart(hart_id).state().mip |= enum_mask(MipBit::Msip);
+            } else {
+                cpu_.machine_->hart(hart_id).state().mip &= ~enum_mask(MipBit::Msip);
+            }
+        } else if (hart_id == 0) {
             if ((wdata & 1) != 0) {
                 cpu_.state().mip |= enum_mask(MipBit::Msip);
             } else {
                 cpu_.state().mip &= ~enum_mask(MipBit::Msip);
             }
-            break;
-        case kClintMtimecmpOffset: {
-            supervisor_timer.store(false, std::memory_order_release);
-            const Counter cur = mtimecmp.load(std::memory_order_relaxed);
-            mtimecmp.store((cur & ~kWord32Mask) | wdata_64, std::memory_order_release);
-            cpu_.evaluate_timer_interrupt();
-            break;
         }
-        case kClintMtimecmpOffset + 4: {
+        return;
+    }
+    if (offset >= kClintMtimecmpOffset && offset < kClintMtimecmpOffset + (kMaxClintHarts * 8)) {
+        const size_t hart_id = (offset - kClintMtimecmpOffset) / 8;
+        const bool is_hi = ((offset - kClintMtimecmpOffset) % 8) == 4;
+        if (hart_id == 0) {
             supervisor_timer.store(false, std::memory_order_release);
             const Counter cur = mtimecmp.load(std::memory_order_relaxed);
-            mtimecmp.store((cur & kWord32Mask) | (wdata_64 << kWord32Shift),
+            mtimecmp.store(is_hi ? ((cur & kWord32Mask) | (wdata_64 << kWord32Shift))
+                                 : ((cur & ~kWord32Mask) | wdata_64),
                            std::memory_order_release);
             cpu_.evaluate_timer_interrupt();
-            break;
+        } else {
+            hart_supervisor_timer.at(hart_id).store(false, std::memory_order_release);
+            const Counter cur = hart_mtimecmp.at(hart_id).load(std::memory_order_relaxed);
+            hart_mtimecmp.at(hart_id).store(
+                is_hi ? ((cur & kWord32Mask) | (wdata_64 << kWord32Shift))
+                      : ((cur & ~kWord32Mask) | wdata_64),
+                std::memory_order_release);
+            if (cpu_.machine_ && hart_id < cpu_.machine_->num_harts()) {
+                cpu_.machine_->hart(hart_id).evaluate_timer_interrupt();
+            }
         }
-        case kClintMtimeOffset: {
-            supervisor_timer.store(false, std::memory_order_release);
-            const Counter cur = mtime.load(std::memory_order_relaxed);
-            mtime.store((cur & ~kWord32Mask) | wdata_64, std::memory_order_release);
-            cpu_.evaluate_timer_interrupt();
-            break;
-        }
-        case kClintMtimeOffset + 4: {
-            supervisor_timer.store(false, std::memory_order_release);
-            const Counter cur = mtime.load(std::memory_order_relaxed);
-            mtime.store((cur & kWord32Mask) | (wdata_64 << kWord32Shift),
-                        std::memory_order_release);
-            cpu_.evaluate_timer_interrupt();
-            break;
-        }
-        default:
-            break;
+        return;
+    }
+    if (offset == kClintMtimeOffset) {
+        supervisor_timer.store(false, std::memory_order_release);
+        const Counter cur = mtime.load(std::memory_order_relaxed);
+        mtime.store((cur & ~kWord32Mask) | wdata_64, std::memory_order_release);
+        cpu_.evaluate_timer_interrupt();
+        return;
+    }
+    if (offset == kClintMtimeOffset + 4) {
+        supervisor_timer.store(false, std::memory_order_release);
+        const Counter cur = mtime.load(std::memory_order_relaxed);
+        mtime.store((cur & kWord32Mask) | (wdata_64 << kWord32Shift), std::memory_order_release);
+        cpu_.evaluate_timer_interrupt();
+        return;
     }
 }
 

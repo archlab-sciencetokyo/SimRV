@@ -21,6 +21,7 @@
 #include "simrv/device/Console.hpp"
 #include "simrv/device/Disk.hpp"
 #include "simrv/device/Framebuffer.hpp"
+#include "simrv/device/Rng.hpp"
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
@@ -151,6 +152,10 @@ class Machine {
         false};  // Latched true the first time satp enables translation
     std::atomic<bool> s_multithreaded{false};     // Run simulation in a background thread
     std::atomic<bool> s_rollback_enabled{false};  // Enable instruction rollback tracking
+    uint32_t s_num_harts = 1;                     // Number of simulated harts (SMP cores)
+    uint32_t s_smp_quantum = 100;                 // Instruction quantum per hart in cooperative SMP mode
+    std::atomic<bool> s_smp_multithreaded{false}; // Enable parallel multi-threaded SMP execution
+    uint64_t s_dram_size = 0;                     // Dynamic DRAM size in bytes (0 = default 256MB)
     double s_mouse_sensitivity = 1.0;             // Mouse relative sensitivity factor
 
     // ========== Debug / Co-Simulation Flags ==========
@@ -184,9 +189,28 @@ class Machine {
     std::chrono::steady_clock::time_point s_start_time;  // Simulation start timestamp
 
     // ========== CPU and Subsystems ==========
-    simrv::core::CPU cpu;
+    simrv::core::CPU cpu;  ///< Primary / boot CPU (Hart 0)
+    std::vector<std::unique_ptr<simrv::core::CPU>> secondary_harts_;  ///< Secondary Harts (1..N-1)
+
+    /// Access a simulated Hart by index (0 is primary/boot hart).
+    [[nodiscard]] auto hart(size_t index = 0) -> CPU& {
+        if (index == 0) {
+            return cpu;
+        }
+        return *secondary_harts_.at(index - 1);
+    }
+    [[nodiscard]] auto hart(size_t index = 0) const -> const CPU& {
+        if (index == 0) {
+            return cpu;
+        }
+        return *secondary_harts_.at(index - 1);
+    }
+    [[nodiscard]] auto num_harts() const -> size_t {
+        return 1 + secondary_harts_.size();
+    }
     std::unique_ptr<simrv::device::Disk> disk;
     std::unique_ptr<simrv::device::Console> console;
+    std::unique_ptr<simrv::device::Rng> rng;
     std::unique_ptr<simrv::Rtc> rtc;
     std::unique_ptr<simrv::device::Uart> uart;
     std::unique_ptr<simrv::tui::Tui> tui;
@@ -205,15 +229,20 @@ class Machine {
     Tracer tracer{*this};               // Tracing facility
     simrv::debug::SymbolTable symbols;  // ELF debugging symbols
 
+    [[nodiscard]] auto memory() -> simrv::memory::MemorySubsystem& { return memory_; }
+    [[nodiscard]] auto memory() const -> const simrv::memory::MemorySubsystem& { return memory_; }
+
    protected:
     std::unique_ptr<Byte, decltype(&std::free)> mmem_owner_{nullptr, &std::free};
     std::vector<simrv::virtio::QueueState> console_queue_owner_;
     std::vector<simrv::virtio::QueueState> disk_queue_owner_;
+    std::vector<simrv::virtio::QueueState> rng_queue_owner_;
     friend class simrv::core::CPU;
     friend class simrv::execute::ExecuteUnit;
     friend class simrv::device::Uart;
     friend class simrv::tui::Tui;
     friend class simrv::tui::LeftPane;
+    friend class simrv::memory::CoherenceHub;
     simrv::memory::MemorySubsystem memory_;
 
     /// Virtual hooks for template method execution loop
