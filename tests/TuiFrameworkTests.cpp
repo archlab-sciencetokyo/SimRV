@@ -14,6 +14,7 @@
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
 #include "simrv/tui/modals/HelpModal.hpp"
+#include "simrv/tui/modals/SettingsModal.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
 
 namespace {
@@ -239,11 +240,12 @@ void test_key_registry() {
 void test_sysconfig_modal_modes() {
     using simrv::tui::SysConfigDraft;
     using simrv::tui::modals::SystemConfigModal;
+    using simrv::tui::SettingsDraft;
+    using simrv::tui::modals::SettingsModal;
 
     // Test Cycle-Accurate mode behavior
     SysConfigDraft ca_draft;
     ca_draft.cycle_accurate = true;
-    ca_draft.num_harts = 1;
     ca_draft.preset = 0;
     ca_draft.icache_miss_penalty = 10;
     int cursor = 0;
@@ -258,29 +260,33 @@ void test_sysconfig_modal_modes() {
     expect(ca_draft.preset == 1, "CA mode allows cycling microarchitecture presets");
     expect(ca_draft.icache_miss_penalty == 6, "Preset profile applies embedded microarchitecture defaults");
 
-    // Test Functional (IA) mode behavior
+    // Test Functional (IA) mode behavior for CA modal
     SysConfigDraft ia_draft;
     ia_draft.cycle_accurate = false;
-    ia_draft.num_harts = 1;
     ia_draft.icache_miss_penalty = 10;
     cursor = 0;
 
     SystemConfigModal::move_cursor(ia_draft, cursor, 1);
-    expect(cursor == 0, "IA mode with 1 hart has no navigable CA pipeline items");
+    expect(cursor == 0, "IA mode has no navigable CA pipeline items");
 
-    // In IA mode, multi-hart allows configuring SMP quantum and execution mode
-    ia_draft.num_harts = 2;
-    ia_draft.smp_quantum = 1000;
-    ia_draft.smp_multithreaded = false;
+    // Test SMP configuration in SettingsModal
+    SettingsDraft settings_draft;
+    settings_draft.num_harts = 1;
+    settings_draft.smp_quantum = 1000;
+    settings_draft.smp_multithreaded = false;
+    int s_cursor = 0;
 
-    SystemConfigModal::move_cursor(ia_draft, cursor, 1);
-    expect(cursor == 1, "IA multi-hart mode navigates SMP settings");
+    SettingsModal::move_cursor(s_cursor, 5);
+    expect(s_cursor == 5, "Settings modal advances cursor to SMP core count");
 
-    SystemConfigModal::adjust_setting(ia_draft, 0, 2);
-    expect(ia_draft.smp_quantum == 1200, "IA multi-hart mode adjusts SMP quantum");
+    SettingsModal::adjust_setting(settings_draft, 5, 3);
+    expect(settings_draft.num_harts == 4, "Settings modal adjusts SMP active core count");
 
-    SystemConfigModal::adjust_setting(ia_draft, 1, 1);
-    expect(ia_draft.smp_multithreaded == true, "IA multi-hart mode toggles SMP worker threads");
+    SettingsModal::adjust_setting(settings_draft, 6, 2);
+    expect(settings_draft.smp_quantum == 1200, "Settings modal adjusts SMP quantum slice");
+
+    SettingsModal::adjust_setting(settings_draft, 7, 1);
+    expect(settings_draft.smp_multithreaded == true, "Settings modal toggles SMP worker threads");
 
     // Verify render text in IA mode contains disabled note for CA options
     std::vector<std::string> rows;

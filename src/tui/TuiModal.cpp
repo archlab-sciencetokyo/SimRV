@@ -64,10 +64,14 @@ void TuiModal::move_settings_cursor(int delta) {
     modals::SettingsModal::move_cursor(settings_cursor_, delta);
 }
 
+void TuiModal::adjust_setting_at_cursor(int dir) {
+    modals::SettingsModal::adjust_setting(settings_draft_, settings_cursor_, dir, &machine_);
+}
+
 void TuiModal::toggle_setting_at_cursor() { toggle_setting_by_index(settings_cursor_); }
 
 void TuiModal::toggle_setting_by_index(int index) {
-    modals::SettingsModal::toggle_setting(settings_draft_, index, machine_);
+    modals::SettingsModal::toggle_setting(settings_draft_, index, &machine_);
 }
 
 void TuiModal::move_misa_cursor(int delta) {
@@ -204,8 +208,8 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
         case ModalType::Settings:
             result = modals::SettingsModal::submit(settings_draft_, machine_, set_reg_page_cb);
             if (result) {
-                open_notice("SETTINGS SAVED", "Simulator settings saved and applied successfully.",
-                            false);
+                open_notice("SETTINGS SAVED",
+                            "Simulator & SMP settings saved and applied successfully.", false);
                 return true;
             }
             break;
@@ -220,8 +224,8 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
         case ModalType::ConfigureSystem:
             result = modals::SystemConfigModal::submit(sysconfig_draft_, machine_);
             if (result) {
-                open_notice("SYSTEM CONFIGURATION SAVED",
-                            "System configuration saved and applied successfully.",
+                open_notice("MICROARCHITECTURE SAVED",
+                            "Pipeline & microarchitecture configuration saved and applied successfully.",
                             false);
                 return true;
             }
@@ -307,7 +311,7 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                                       staged_binary_path_);
             break;
         case ModalType::Settings:
-            title = " SIMULATOR SETTINGS ";
+            title = " SIMULATOR & SMP SETTINGS ";
             modals::SettingsModal::render(content_rows, add_row, settings_draft_, settings_cursor_,
                                           machine_);
             break;
@@ -316,7 +320,7 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             modals::MisaModal::render(content_rows, add_row, misa_draft_, misa_cursor_, machine_);
             break;
         case ModalType::ConfigureSystem:
-            title = " CA SYSTEM CONFIGURATION ";
+            title = " PIPELINE & MICROARCHITECTURE CONFIGURATION ";
             modals::SystemConfigModal::render(content_rows, add_row, sysconfig_draft_,
                                               sysconfig_cursor_, input_);
             break;

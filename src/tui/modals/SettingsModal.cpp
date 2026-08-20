@@ -36,16 +36,18 @@ void SettingsModal::open(SettingsDraft& draft, int& cursor, const simrv::core::M
     draft.high_performance = machine.s_high_performance;
     draft.lockstep_mode = machine.s_lockstep_mode;
     draft.gdb_mode = machine.s_gdb_mode;
+    draft.num_harts = static_cast<uint32_t>(machine.num_harts());
+    draft.smp_quantum = machine.s_smp_quantum;
     draft.smp_multithreaded = machine.s_smp_multithreaded;
 }
 
 void SettingsModal::move_cursor(int& cursor, int delta) {
-    constexpr int kNumSettings = 12;
+    constexpr int kNumSettings = 14;
     cursor = (cursor + delta + kNumSettings) % kNumSettings;
 }
 
-void SettingsModal::toggle_setting(SettingsDraft& draft, int index,
-                                   const simrv::core::Machine& machine) {
+void SettingsModal::adjust_setting(SettingsDraft& draft, int index, int dir,
+                                   const simrv::core::Machine* machine) {
     switch (index) {
         case 0:
             draft.cycle_accurate = !draft.cycle_accurate;
@@ -67,47 +69,62 @@ void SettingsModal::toggle_setting(SettingsDraft& draft, int index,
             }
             break;
         case 2:
-            if (draft.high_performance) break;
-            draft.rollback_enabled = !draft.rollback_enabled;
-            break;
-        case 3:
-            draft.high_contrast = !draft.high_contrast;
-            break;
-        case 4:
-            if (!draft.cycle_accurate) break;
-            draft.use_mix = !draft.use_mix;
-            break;
-        case 5:
             draft.high_performance = !draft.high_performance;
             if (draft.high_performance) {
                 draft.bp_trace = false;
                 draft.rollback_enabled = false;
             }
             break;
-        case 6:
-            if (machine.s_spike_bin.empty()) break;
-            draft.lockstep_mode = !draft.lockstep_mode;
+        case 3:
+            if (draft.high_performance) break;
+            draft.rollback_enabled = !draft.rollback_enabled;
             break;
-        case 7:
-            draft.gdb_mode = !draft.gdb_mode;
+        case 4:
+            draft.high_contrast = !draft.high_contrast;
             break;
-        case 8:
+        case 5: {  // SMP Core Count
+            int v = static_cast<int>(draft.num_harts) + dir;
+            draft.num_harts = static_cast<uint32_t>(std::clamp(v, 1, 16));
+            break;
+        }
+        case 6: {  // SMP Quantum
+            int v = static_cast<int>(draft.smp_quantum) + dir * 100;
+            draft.smp_quantum = static_cast<uint32_t>(std::clamp(v, 10, 1000000));
+            break;
+        }
+        case 7:  // SMP Multithreaded
             draft.smp_multithreaded = !draft.smp_multithreaded;
             break;
+        case 8:
+            if (machine && machine->s_spike_bin.empty()) break;
+            draft.lockstep_mode = !draft.lockstep_mode;
+            break;
         case 9:
+            draft.gdb_mode = !draft.gdb_mode;
+            break;
+        case 10:
             if (!draft.cycle_accurate || draft.high_performance) break;
             draft.bp_trace = !draft.bp_trace;
             break;
-        case 10:
+        case 11:
+            if (!draft.cycle_accurate) break;
+            draft.use_mix = !draft.use_mix;
+            break;
+        case 12:
             draft.traplog_mode = !draft.traplog_mode;
             break;
-        case 11:
-            if (machine.s_appmode) break;
+        case 13:
+            if (machine && machine->s_appmode) break;
             draft.dlog_mode = !draft.dlog_mode;
             break;
         default:
             break;
     }
+}
+
+void SettingsModal::toggle_setting(SettingsDraft& draft, int index,
+                                   const simrv::core::Machine* machine) {
+    adjust_setting(draft, index, 1, machine);
 }
 
 auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& machine,
@@ -130,6 +147,7 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
     machine.s_high_performance = draft.high_performance;
     machine.s_lockstep_mode = draft.lockstep_mode;
     machine.s_gdb_mode = draft.gdb_mode;
+    machine.s_smp_quantum = draft.smp_quantum;
     machine.s_smp_multithreaded = draft.smp_multithreaded;
 
     if (machine.s_use_mix) {
@@ -145,7 +163,7 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
     (void)content_rows;
     add_row_cb(
         std::format("{}Use \033[1m[↑/↓]\033[0m to navigate, \033[1m[←/→/Space]\033[0m to "
-                    "toggle, \033[1m[Enter]\033[0m to apply:\033[0m",
+                    "toggle/adjust, \033[1m[Enter]\033[0m to apply:\033[0m",
                     kThemeMuted));
     add_row_cb("");
 
@@ -165,30 +183,32 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
                                                  : "\033[1;33m[IA (Instruction-Accurate)]\033[0m"},
         {"TUI Diagnostics View", draft.debug_mode ? "\033[1;32m[Debug Mode (Diagnostics ON)]\033[0m"
                                                   : "\033[90m[Normal Mode]\033[0m"},
+        {"High-Performance Engine",
+         draft.high_performance ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
         {"Step Rollback History",
          rollback_disabled
              ? "\033[90m[Disabled (High-Perf Mode)]\033[0m"
              : (draft.rollback_enabled ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m")},
         {"High Contrast Theme",
          draft.high_contrast ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {"Instruction Mix Stats",
-         mix_disabled ? "\033[90m[Disabled (N/A in IA Mode)]\033[0m"
-                      : (draft.use_mix ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m")},
-        {"High-Performance Engine",
-         draft.high_performance ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+        {"SMP Active Core Count", std::format("\033[1;36m{} Cores (Harts)\033[0m", draft.num_harts)},
+        {"SMP Quantum Slice", std::format("\033[1;33m{} cycles\033[0m", draft.smp_quantum)},
+        {"SMP Multi-Threaded Engine",
+         draft.smp_multithreaded ? "\033[1;32m[ON (Worker Threads)]\033[0m"
+                                 : "\033[90m[OFF (Quantum Barrier)]\033[0m"},
         {"Co-Sim Spike Lockstep",
          lockstep_disabled
              ? "\033[90m[Disabled (No Spike Bin)]\033[0m"
              : (draft.lockstep_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m")},
         {"GDB Server Stub (1234)",
          draft.gdb_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {"SMP Multi-Threaded Engine",
-         draft.smp_multithreaded ? "\033[1;32m[ON (Worker Threads)]\033[0m"
-                                 : "\033[90m[OFF (Quantum Barrier)]\033[0m"},
         {"Branch Prediction Trace",
          bp_disabled ? "\033[90m[Disabled (N/A in IA Mode)]\033[0m"
                      : (draft.bp_trace ? "\033[1;32m[ON (creates bptrace.txt)]\033[0m"
                                        : "\033[90m[OFF (creates text file)]\033[0m")},
+        {"Instruction Mix Stats",
+         mix_disabled ? "\033[90m[Disabled (N/A in IA Mode)]\033[0m"
+                      : (draft.use_mix ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m")},
         {"Exception & Trap Log", draft.traplog_mode ? "\033[1;32m[ON (creates traplog.txt)]\033[0m"
                                                     : "\033[90m[OFF (creates text file)]\033[0m"},
         {"Device MMIO Access Log",
@@ -201,11 +221,16 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
         if (i == 0) {
             add_row_cb(
                 std::format("{}\033[1;35m── Core Engine & Diagnostics ──\033[0m", kThemeText));
-        } else if (i == 6) {
+        } else if (i == 5) {
+            add_row_cb("");
+            add_row_cb(std::format(
+                "{}\033[1;35m── Symmetric Multiprocessing (SMP) Configuration ──\033[0m",
+                kThemeText));
+        } else if (i == 8) {
             add_row_cb("");
             add_row_cb(std::format("{}\033[1;35m── External Integrations & Debug Stubs ──\033[0m",
                                    kThemeText));
-        } else if (i == 9) {
+        } else if (i == 10) {
             add_row_cb("");
             add_row_cb(std::format("{}\033[1;35m── Traces & Logging (Creates Text Files) ──\033[0m",
                                    kThemeText));

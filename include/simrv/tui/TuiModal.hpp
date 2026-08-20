@@ -50,6 +50,8 @@ struct SettingsDraft {
     bool high_performance = false;
     bool lockstep_mode = false;
     bool gdb_mode = false;
+    uint32_t num_harts = 1;
+    uint32_t smp_quantum = 1000;
     bool smp_multithreaded = false;
 };
 
@@ -70,9 +72,6 @@ struct SysConfigDraft {
     bool enable_mem_forwarding = true;
     uint8_t bp_type = 3;  // 0: Static-NT, 1: Static-T, 2: 1-Bit, 3: 2-Bit Bimodal, 4: Gshare
     uint32_t btb_entries = 128;
-    uint32_t num_harts = 1;
-    uint32_t smp_quantum = 1000;
-    bool smp_multithreaded = false;
     bool cycle_accurate = false;
 };
 
@@ -137,6 +136,7 @@ class TuiModal {
     [[nodiscard]] auto get_load_appmode() const -> bool { return load_appmode_; }
 
     void move_settings_cursor(int delta);
+    void adjust_setting_at_cursor(int dir);
     void toggle_setting_at_cursor();
     void toggle_setting_by_index(int index);
 

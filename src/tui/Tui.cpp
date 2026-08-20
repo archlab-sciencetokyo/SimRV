@@ -1900,7 +1900,7 @@ auto Tui::handle_arrow_key_sequence() -> bool {
         }
     } else if (esc_buf_ == "\033[C" || esc_buf_ == "\033OC") {
         if (get_active_modal() == ModalType::Settings) {
-            modal_.toggle_setting_at_cursor();
+            modal_.adjust_setting_at_cursor(1);
             render(true);
             return true;
         }
@@ -1921,7 +1921,7 @@ auto Tui::handle_arrow_key_sequence() -> bool {
         }
     } else if (esc_buf_ == "\033[D" || esc_buf_ == "\033OD") {
         if (get_active_modal() == ModalType::Settings) {
-            modal_.toggle_setting_at_cursor();
+            modal_.adjust_setting_at_cursor(-1);
             render(true);
             return true;
         }

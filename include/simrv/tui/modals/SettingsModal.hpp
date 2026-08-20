@@ -20,8 +20,10 @@ class SettingsModal {
    public:
     static void open(SettingsDraft& draft, int& cursor, const simrv::core::Machine& machine);
     static void move_cursor(int& cursor, int delta);
+    static void adjust_setting(SettingsDraft& draft, int index, int dir,
+                               const simrv::core::Machine* machine = nullptr);
     static void toggle_setting(SettingsDraft& draft, int index,
-                               const simrv::core::Machine& machine);
+                               const simrv::core::Machine* machine = nullptr);
     static auto submit(const SettingsDraft& draft, simrv::core::Machine& machine,
                        const std::function<void(TuiRegPage)>& set_reg_page_cb) -> bool;
     static void render(std::vector<std::string>& content_rows,

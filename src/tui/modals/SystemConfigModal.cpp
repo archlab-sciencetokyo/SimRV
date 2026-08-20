@@ -36,145 +36,120 @@ void SystemConfigModal::open(SysConfigDraft& draft, int& cursor,
     draft.enable_mem_forwarding = cfg.enable_mem_forwarding;
     draft.bp_type = static_cast<uint8_t>(cfg.bp_type);
     draft.btb_entries = cfg.btb_entries;
-    draft.num_harts = static_cast<uint32_t>(machine.num_harts());
-    draft.smp_quantum = machine.s_smp_quantum;
-    draft.smp_multithreaded = machine.s_smp_multithreaded;
 }
 
 void SystemConfigModal::move_cursor(const SysConfigDraft& draft, int& cursor, int delta) {
-    int total = draft.cycle_accurate ? (16 + (draft.num_harts > 1 ? 2 : 0))
-                                     : (draft.num_harts > 1 ? 2 : 0);
-    if (total <= 0) {
+    if (!draft.cycle_accurate) {
         cursor = 0;
         return;
     }
+    constexpr int total = 16;
     cursor = (cursor + delta + total) % total;
 }
 
 void SystemConfigModal::adjust_setting(SysConfigDraft& draft, int index, int dir) {
-    if (draft.cycle_accurate) {
-        switch (index) {
-            case 0: {  // Preset
-                int p = (static_cast<int>(draft.preset) + dir + 3) % 3;
-                draft.preset = static_cast<uint8_t>(p);
-                simrv::pipeline::CpuConfig tmp_cfg;
-                tmp_cfg.apply_preset(static_cast<simrv::pipeline::CpuPreset>(p));
-                draft.icache_miss_penalty = tmp_cfg.icache_miss_penalty;
-                draft.dcache_miss_penalty = tmp_cfg.dcache_miss_penalty;
-                draft.tlb_miss_penalty = tmp_cfg.tlb_miss_penalty;
-                draft.mul_latency = tmp_cfg.mul_latency;
-                draft.div_latency = tmp_cfg.div_latency;
-                draft.fp_alu_latency = tmp_cfg.fp_alu_latency;
-                draft.fp_div_latency = tmp_cfg.fp_div_latency;
-                draft.csr_flush_penalty = tmp_cfg.csr_flush_penalty;
-                draft.fence_flush_penalty = tmp_cfg.fence_flush_penalty;
-                draft.branch_mispredict_penalty = tmp_cfg.branch_mispredict_penalty;
-                draft.enable_forwarding = tmp_cfg.enable_forwarding;
-                draft.enable_ex_forwarding = tmp_cfg.enable_ex_forwarding;
-                draft.enable_mem_forwarding = tmp_cfg.enable_mem_forwarding;
-                draft.bp_type = static_cast<uint8_t>(tmp_cfg.bp_type);
-                draft.btb_entries = tmp_cfg.btb_entries;
-                break;
-            }
-            case 1: {  // I-Cache miss penalty
-                int v = static_cast<int>(draft.icache_miss_penalty) + dir;
-                draft.icache_miss_penalty = std::clamp(v, 1, 100);
-                break;
-            }
-            case 2: {  // D-Cache miss penalty
-                int v = static_cast<int>(draft.dcache_miss_penalty) + dir;
-                draft.dcache_miss_penalty = std::clamp(v, 1, 100);
-                break;
-            }
-            case 3: {  // TLB miss penalty
-                int v = static_cast<int>(draft.tlb_miss_penalty) + dir * 5;
-                draft.tlb_miss_penalty = std::clamp(v, 1, 200);
-                break;
-            }
-            case 4: {  // Mul latency
-                int v = static_cast<int>(draft.mul_latency) + dir;
-                draft.mul_latency = std::clamp(v, 1, 20);
-                break;
-            }
-            case 5: {  // Div latency
-                int v = static_cast<int>(draft.div_latency) + dir;
-                draft.div_latency = std::clamp(v, 1, 100);
-                break;
-            }
-            case 6: {  // FP ALU latency
-                int v = static_cast<int>(draft.fp_alu_latency) + dir;
-                draft.fp_alu_latency = std::clamp(v, 1, 20);
-                break;
-            }
-            case 7: {  // FP Div/Sqrt latency
-                int v = static_cast<int>(draft.fp_div_latency) + dir;
-                draft.fp_div_latency = std::clamp(v, 1, 100);
-                break;
-            }
-            case 8: {  // CSR flush penalty
-                int v = static_cast<int>(draft.csr_flush_penalty) + dir;
-                draft.csr_flush_penalty = std::clamp(v, 0, 20);
-                break;
-            }
-            case 9: {  // FENCE flush penalty
-                int v = static_cast<int>(draft.fence_flush_penalty) + dir;
-                draft.fence_flush_penalty = std::clamp(v, 0, 20);
-                break;
-            }
-            case 10: {  // Branch mispredict penalty
-                int v = static_cast<int>(draft.branch_mispredict_penalty) + dir;
-                draft.branch_mispredict_penalty = std::clamp(v, 1, 20);
-                break;
-            }
-            case 11:
-                draft.enable_forwarding = !draft.enable_forwarding;
-                break;
-            case 12:
-                draft.enable_ex_forwarding = !draft.enable_ex_forwarding;
-                break;
-            case 13:
-                draft.enable_mem_forwarding = !draft.enable_mem_forwarding;
-                break;
-            case 14: {  // Predictor type
-                int t = (static_cast<int>(draft.bp_type) + dir + 5) % 5;
-                draft.bp_type = static_cast<uint8_t>(t);
-                break;
-            }
-            case 15: {  // BTB entries
-                static constexpr std::array<uint32_t, 6> kBtbOpts = {32, 64, 128, 256, 512, 1024};
-                auto it = std::find(kBtbOpts.begin(), kBtbOpts.end(), draft.btb_entries);
-                int idx = (it != kBtbOpts.end())
-                              ? static_cast<int>(std::distance(kBtbOpts.begin(), it))
-                              : 2;
-                idx = (idx + dir + static_cast<int>(kBtbOpts.size())) %
-                      static_cast<int>(kBtbOpts.size());
-                draft.btb_entries = kBtbOpts[static_cast<std::size_t>(idx)];
-                break;
-            }
-            case 16: {  // SMP Quantum
-                int v = static_cast<int>(draft.smp_quantum) + dir * 100;
-                draft.smp_quantum = static_cast<uint32_t>(std::clamp(v, 10, 1000000));
-                break;
-            }
-            case 17:  // SMP Multithreaded
-                draft.smp_multithreaded = !draft.smp_multithreaded;
-                break;
-            default:
-                break;
+    if (!draft.cycle_accurate) return;
+
+    switch (index) {
+        case 0: {  // Preset
+            int p = (static_cast<int>(draft.preset) + dir + 3) % 3;
+            draft.preset = static_cast<uint8_t>(p);
+            simrv::pipeline::CpuConfig tmp_cfg;
+            tmp_cfg.apply_preset(static_cast<simrv::pipeline::CpuPreset>(p));
+            draft.icache_miss_penalty = tmp_cfg.icache_miss_penalty;
+            draft.dcache_miss_penalty = tmp_cfg.dcache_miss_penalty;
+            draft.tlb_miss_penalty = tmp_cfg.tlb_miss_penalty;
+            draft.mul_latency = tmp_cfg.mul_latency;
+            draft.div_latency = tmp_cfg.div_latency;
+            draft.fp_alu_latency = tmp_cfg.fp_alu_latency;
+            draft.fp_div_latency = tmp_cfg.fp_div_latency;
+            draft.csr_flush_penalty = tmp_cfg.csr_flush_penalty;
+            draft.fence_flush_penalty = tmp_cfg.fence_flush_penalty;
+            draft.branch_mispredict_penalty = tmp_cfg.branch_mispredict_penalty;
+            draft.enable_forwarding = tmp_cfg.enable_forwarding;
+            draft.enable_ex_forwarding = tmp_cfg.enable_ex_forwarding;
+            draft.enable_mem_forwarding = tmp_cfg.enable_mem_forwarding;
+            draft.bp_type = static_cast<uint8_t>(tmp_cfg.bp_type);
+            draft.btb_entries = tmp_cfg.btb_entries;
+            break;
         }
-    } else {
-        switch (index) {
-            case 0: {  // SMP Quantum
-                int v = static_cast<int>(draft.smp_quantum) + dir * 100;
-                draft.smp_quantum = static_cast<uint32_t>(std::clamp(v, 10, 1000000));
-                break;
-            }
-            case 1:  // SMP Multithreaded
-                draft.smp_multithreaded = !draft.smp_multithreaded;
-                break;
-            default:
-                break;
+        case 1: {  // I-Cache miss penalty
+            int v = static_cast<int>(draft.icache_miss_penalty) + dir;
+            draft.icache_miss_penalty = std::clamp(v, 1, 100);
+            break;
         }
+        case 2: {  // D-Cache miss penalty
+            int v = static_cast<int>(draft.dcache_miss_penalty) + dir;
+            draft.dcache_miss_penalty = std::clamp(v, 1, 100);
+            break;
+        }
+        case 3: {  // TLB miss penalty
+            int v = static_cast<int>(draft.tlb_miss_penalty) + dir * 5;
+            draft.tlb_miss_penalty = std::clamp(v, 1, 200);
+            break;
+        }
+        case 4: {  // Mul latency
+            int v = static_cast<int>(draft.mul_latency) + dir;
+            draft.mul_latency = std::clamp(v, 1, 20);
+            break;
+        }
+        case 5: {  // Div latency
+            int v = static_cast<int>(draft.div_latency) + dir;
+            draft.div_latency = std::clamp(v, 1, 100);
+            break;
+        }
+        case 6: {  // FP ALU latency
+            int v = static_cast<int>(draft.fp_alu_latency) + dir;
+            draft.fp_alu_latency = std::clamp(v, 1, 20);
+            break;
+        }
+        case 7: {  // FP Div/Sqrt latency
+            int v = static_cast<int>(draft.fp_div_latency) + dir;
+            draft.fp_div_latency = std::clamp(v, 1, 100);
+            break;
+        }
+        case 8: {  // CSR flush penalty
+            int v = static_cast<int>(draft.csr_flush_penalty) + dir;
+            draft.csr_flush_penalty = std::clamp(v, 0, 20);
+            break;
+        }
+        case 9: {  // FENCE flush penalty
+            int v = static_cast<int>(draft.fence_flush_penalty) + dir;
+            draft.fence_flush_penalty = std::clamp(v, 0, 20);
+            break;
+        }
+        case 10: {  // Branch mispredict penalty
+            int v = static_cast<int>(draft.branch_mispredict_penalty) + dir;
+            draft.branch_mispredict_penalty = std::clamp(v, 1, 20);
+            break;
+        }
+        case 11:
+            draft.enable_forwarding = !draft.enable_forwarding;
+            break;
+        case 12:
+            draft.enable_ex_forwarding = !draft.enable_ex_forwarding;
+            break;
+        case 13:
+            draft.enable_mem_forwarding = !draft.enable_mem_forwarding;
+            break;
+        case 14: {  // Predictor type
+            int t = (static_cast<int>(draft.bp_type) + dir + 5) % 5;
+            draft.bp_type = static_cast<uint8_t>(t);
+            break;
+        }
+        case 15: {  // BTB entries
+            static constexpr std::array<uint32_t, 6> kBtbOpts = {32, 64, 128, 256, 512, 1024};
+            auto it = std::find(kBtbOpts.begin(), kBtbOpts.end(), draft.btb_entries);
+            int idx = (it != kBtbOpts.end())
+                          ? static_cast<int>(std::distance(kBtbOpts.begin(), it))
+                          : 2;
+            idx = (idx + dir + static_cast<int>(kBtbOpts.size())) %
+                  static_cast<int>(kBtbOpts.size());
+            draft.btb_entries = kBtbOpts[static_cast<std::size_t>(idx)];
+            break;
+        }
+        default:
+            break;
     }
 }
 
@@ -183,12 +158,8 @@ void SystemConfigModal::push_digit(SysConfigDraft& draft, int cursor, std::strin
     if (digit < '0' || digit > '9') return;
     if (input.size() >= 7) return;
 
-    if (draft.cycle_accurate) {
-        if (cursor < 1 || (cursor > 10 && cursor != 15 && cursor != 16))
-            return;
-    } else {
-        if (cursor != 0) return;
-    }
+    if (!draft.cycle_accurate) return;
+    if (cursor < 1 || (cursor > 10 && cursor != 15)) return;
 
     input.push_back(digit);
     uint32_t val = 0;
@@ -198,51 +169,42 @@ void SystemConfigModal::push_digit(SysConfigDraft& draft, int cursor, std::strin
         return;
     }
 
-    if (draft.cycle_accurate) {
-        switch (cursor) {
-            case 1:
-                draft.icache_miss_penalty = std::clamp(val, 1u, 100u);
-                break;
-            case 2:
-                draft.dcache_miss_penalty = std::clamp(val, 1u, 100u);
-                break;
-            case 3:
-                draft.tlb_miss_penalty = std::clamp(val, 1u, 200u);
-                break;
-            case 4:
-                draft.mul_latency = std::clamp(val, 1u, 20u);
-                break;
-            case 5:
-                draft.div_latency = std::clamp(val, 1u, 100u);
-                break;
-            case 6:
-                draft.fp_alu_latency = std::clamp(val, 1u, 20u);
-                break;
-            case 7:
-                draft.fp_div_latency = std::clamp(val, 1u, 100u);
-                break;
-            case 8:
-                draft.csr_flush_penalty = std::clamp(val, 0u, 20u);
-                break;
-            case 9:
-                draft.fence_flush_penalty = std::clamp(val, 0u, 20u);
-                break;
-            case 10:
-                draft.branch_mispredict_penalty = std::clamp(val, 1u, 20u);
-                break;
-            case 15:
-                draft.btb_entries = std::clamp(val, 1u, 4096u);
-                break;
-            case 16:
-                draft.smp_quantum = std::clamp(val, 10u, 1000000u);
-                break;
-            default:
-                break;
-        }
-    } else {
-        if (cursor == 0) {
-            draft.smp_quantum = std::clamp(val, 10u, 1000000u);
-        }
+    switch (cursor) {
+        case 1:
+            draft.icache_miss_penalty = std::clamp(val, 1u, 100u);
+            break;
+        case 2:
+            draft.dcache_miss_penalty = std::clamp(val, 1u, 100u);
+            break;
+        case 3:
+            draft.tlb_miss_penalty = std::clamp(val, 1u, 200u);
+            break;
+        case 4:
+            draft.mul_latency = std::clamp(val, 1u, 20u);
+            break;
+        case 5:
+            draft.div_latency = std::clamp(val, 1u, 100u);
+            break;
+        case 6:
+            draft.fp_alu_latency = std::clamp(val, 1u, 20u);
+            break;
+        case 7:
+            draft.fp_div_latency = std::clamp(val, 1u, 100u);
+            break;
+        case 8:
+            draft.csr_flush_penalty = std::clamp(val, 0u, 20u);
+            break;
+        case 9:
+            draft.fence_flush_penalty = std::clamp(val, 0u, 20u);
+            break;
+        case 10:
+            draft.branch_mispredict_penalty = std::clamp(val, 1u, 20u);
+            break;
+        case 15:
+            draft.btb_entries = std::clamp(val, 1u, 4096u);
+            break;
+        default:
+            break;
     }
 }
 
@@ -257,51 +219,44 @@ void SystemConfigModal::pop_digit(SysConfigDraft& draft, int cursor, std::string
         return;
     }
 
-    if (draft.cycle_accurate) {
-        switch (cursor) {
-            case 1:
-                draft.icache_miss_penalty = std::clamp(val, 1u, 100u);
-                break;
-            case 2:
-                draft.dcache_miss_penalty = std::clamp(val, 1u, 100u);
-                break;
-            case 3:
-                draft.tlb_miss_penalty = std::clamp(val, 1u, 200u);
-                break;
-            case 4:
-                draft.mul_latency = std::clamp(val, 1u, 20u);
-                break;
-            case 5:
-                draft.div_latency = std::clamp(val, 1u, 100u);
-                break;
-            case 6:
-                draft.fp_alu_latency = std::clamp(val, 1u, 20u);
-                break;
-            case 7:
-                draft.fp_div_latency = std::clamp(val, 1u, 100u);
-                break;
-            case 8:
-                draft.csr_flush_penalty = std::clamp(val, 0u, 20u);
-                break;
-            case 9:
-                draft.fence_flush_penalty = std::clamp(val, 0u, 20u);
-                break;
-            case 10:
-                draft.branch_mispredict_penalty = std::clamp(val, 1u, 20u);
-                break;
-            case 15:
-                draft.btb_entries = std::clamp(val, 1u, 4096u);
-                break;
-            case 16:
-                draft.smp_quantum = std::clamp(val, 10u, 1000000u);
-                break;
-            default:
-                break;
-        }
-    } else {
-        if (cursor == 0) {
-            draft.smp_quantum = std::clamp(val, 10u, 1000000u);
-        }
+    if (!draft.cycle_accurate) return;
+
+    switch (cursor) {
+        case 1:
+            draft.icache_miss_penalty = std::clamp(val, 1u, 100u);
+            break;
+        case 2:
+            draft.dcache_miss_penalty = std::clamp(val, 1u, 100u);
+            break;
+        case 3:
+            draft.tlb_miss_penalty = std::clamp(val, 1u, 200u);
+            break;
+        case 4:
+            draft.mul_latency = std::clamp(val, 1u, 20u);
+            break;
+        case 5:
+            draft.div_latency = std::clamp(val, 1u, 100u);
+            break;
+        case 6:
+            draft.fp_alu_latency = std::clamp(val, 1u, 20u);
+            break;
+        case 7:
+            draft.fp_div_latency = std::clamp(val, 1u, 100u);
+            break;
+        case 8:
+            draft.csr_flush_penalty = std::clamp(val, 0u, 20u);
+            break;
+        case 9:
+            draft.fence_flush_penalty = std::clamp(val, 0u, 20u);
+            break;
+        case 10:
+            draft.branch_mispredict_penalty = std::clamp(val, 1u, 20u);
+            break;
+        case 15:
+            draft.btb_entries = std::clamp(val, 1u, 4096u);
+            break;
+        default:
+            break;
     }
 }
 
@@ -310,8 +265,6 @@ void SystemConfigModal::toggle_setting(SysConfigDraft& draft, int index) {
 }
 
 auto SystemConfigModal::submit(const SysConfigDraft& draft, simrv::core::Machine& machine) -> bool {
-    machine.s_smp_quantum = draft.smp_quantum;
-    machine.s_smp_multithreaded = draft.smp_multithreaded;
     if (draft.cycle_accurate) {
         auto apply_to_cfg = [&](simrv::pipeline::CpuConfig& cfg) {
             cfg.icache_miss_penalty = draft.icache_miss_penalty;
@@ -455,85 +408,21 @@ void SystemConfigModal::render(std::vector<std::string>& content_rows,
                                                is_sel ? "\033[1;37m" : kThemeText, settings[i].name);
             add_row_cb(std::format("{}{} : {}", prefix, name_str, settings[i].val));
         }
-
-        if (draft.num_harts > 1) {
-            add_row_cb("");
-            add_row_cb(
-                std::format("{}\033[1;35m── Multicore SMP Topology & Settings ──\033[0m",
-                            kThemeText));
-            add_row_cb(std::format("  \033[1;37m{:<29}\033[0m : \033[1;36m{} Cores (Harts)\033[0m",
-                                   "Active Hart Topology", draft.num_harts));
-
-            bool is_sel16 = (cursor == 16);
-            std::string p16 = is_sel16 ? std::format("{}>\033[0m ", kThemeMint) : "  ";
-            std::string n16 = std::format("{}{:<29}\033[0m", is_sel16 ? "\033[1;37m" : kThemeText,
-                                          "SMP Time Quantum");
-            std::string v16 =
-                (is_sel16 && !input.empty())
-                    ? std::format("\033[1;33m{} cycles\033[0m \033[90m(input: {})\033[0m",
-                                  draft.smp_quantum, input)
-                    : std::format("\033[1;33m{} cycles\033[0m", draft.smp_quantum);
-            add_row_cb(std::format("{}{} : {}", p16, n16, v16));
-
-            bool is_sel17 = (cursor == 17);
-            std::string p17 = is_sel17 ? std::format("{}>\033[0m ", kThemeMint) : "  ";
-            std::string n17 = std::format("{}{:<29}\033[0m", is_sel17 ? "\033[1;37m" : kThemeText,
-                                          "Execution Mode");
-            std::string v17 = draft.smp_multithreaded
-                                  ? "\033[1;32m[Multi-Threaded Workers]\033[0m"
-                                  : "\033[1;33m[Single-Threaded Quantum Barrier]\033[0m";
-            add_row_cb(std::format("{}{} : {}", p17, n17, v17));
-        }
     } else {
-        // Functional / Instruction-Accurate (IA) Mode
-        if (draft.num_harts > 1) {
-            add_row_cb(std::format(
-                "{}Use \033[1m[↑/↓]\033[0m to navigate, \033[1m[←/→/Space/0-9]\033[0m to "
-                "modify values, \033[1m[Enter]\033[0m to apply:\033[0m",
-                kThemeMuted));
-        } else {
-            add_row_cb(
-                std::format("{}System Architecture (Instruction-Accurate Mode):\033[0m",
-                            kThemeMuted));
-        }
-        add_row_cb("");
+        add_row_cb(std::format("{}Cycle-accurate pipeline simulation is disabled.\033[0m",
+                               kThemeMuted));
         add_row_cb(std::format(
-            "{}\033[1;35m── System Architecture & SMP Configuration ──\033[0m", kThemeText));
-        add_row_cb(std::format("  \033[1;37m{:<29}\033[0m : \033[1;36m{} Cores (Harts)\033[0m",
-                               "Active Hart Topology", draft.num_harts));
-
-        if (draft.num_harts > 1) {
-            bool is_sel0 = (cursor == 0);
-            std::string p0 = is_sel0 ? std::format("{}>\033[0m ", kThemeMint) : "  ";
-            std::string n0 = std::format("{}{:<29}\033[0m", is_sel0 ? "\033[1;37m" : kThemeText,
-                                         "SMP Time Quantum");
-            std::string v0 =
-                (is_sel0 && !input.empty())
-                    ? std::format("\033[1;33m{} cycles\033[0m \033[90m(input: {})\033[0m",
-                                  draft.smp_quantum, input)
-                    : std::format("\033[1;33m{} cycles\033[0m", draft.smp_quantum);
-            add_row_cb(std::format("{}{} : {}", p0, n0, v0));
-
-            bool is_sel1 = (cursor == 1);
-            std::string p1 = is_sel1 ? std::format("{}>\033[0m ", kThemeMint) : "  ";
-            std::string n1 = std::format("{}{:<29}\033[0m", is_sel1 ? "\033[1;37m" : kThemeText,
-                                         "Execution Mode");
-            std::string v1 = draft.smp_multithreaded
-                                  ? "\033[1;32m[Multi-Threaded Workers]\033[0m"
-                                  : "\033[1;33m[Single-Threaded Quantum Barrier]\033[0m";
-            add_row_cb(std::format("{}{} : {}", p1, n1, v1));
-        }
-
+            "{}Launch with {}--cycle-accurate\033[0m{} (-C) or toggle Simulation Mode "
+            "in Settings {}[,]\033[0m{} to configure pipeline latencies.\033[0m",
+            kThemeMuted, kThemeVal, kThemeMuted, kThemeVal, kThemeMuted));
         add_row_cb("");
         add_row_cb(std::format(
             "{}\033[1;90m── Pipeline & Microarchitecture (Disabled in IA Mode) ──\033[0m",
             kThemeMuted));
         add_row_cb(std::format("  \033[90m{:<29} : Disabled (IA Mode)\033[0m", "I/D Cache Latencies"));
+        add_row_cb(std::format("  \033[90m{:<29} : Disabled (IA Mode)\033[0m", "FPU & Integer ALUs"));
         add_row_cb(std::format("  \033[90m{:<29} : Disabled (IA Mode)\033[0m", "Branch Predictor & BTB"));
         add_row_cb(std::format("  \033[90m{:<29} : Disabled (IA Mode)\033[0m", "Pipeline Forwarding"));
-        add_row_cb("");
-        add_row_cb(std::format("  \033[33m* Note: To configure microarchitecture parameters, enable "
-                               "Cycle-Accurate (CA) Mode in Settings [,]\033[0m"));
     }
 
     add_row_cb("");

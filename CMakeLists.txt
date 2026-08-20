@@ -284,6 +284,7 @@ add_executable(simrv-tui-tests
   src/tui/TuiKeybindings.cpp
   src/tui/TuiTheme.cpp
   src/tui/modals/HelpModal.cpp
+  src/tui/modals/SettingsModal.cpp
   src/tui/modals/SystemConfigModal.cpp
 )
 target_compile_features(simrv-tui-tests PRIVATE cxx_std_23)
