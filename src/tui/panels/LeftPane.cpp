@@ -47,20 +47,24 @@ auto LeftPane::get_total_rows(int width) -> int {
 }
 
 auto LeftPane::section_line(const std::string& title, int width) -> std::string {
-    if (title.starts_with("─") || title.starts_with(" ")) {
-        std::string full = title + " ";
+    std::string safe_title = title;
+    if (get_display_width(safe_title) + 4 > width && width >= 10) {
+        safe_title = safe_title.substr(0, static_cast<std::size_t>(width - 6)) + "…";
+    }
+    if (safe_title.starts_with("─") || safe_title.starts_with(" ")) {
+        std::string full = safe_title + " ";
         int dash_len = width - get_display_width(full);
         if (dash_len < 0) dash_len = 0;
-        return std::format("\033[1m{}{} \033[0m{}{}", kThemeText, title, kThemeBorder,
+        return std::format("\033[1m{}{} \033[0m{}{}", kThemeText, safe_title, kThemeBorder,
                            make_repeated_string("─", dash_len));
     } else {
-        std::string text = " " + title + " ";
+        std::string text = " " + safe_title + " ";
         int dash_len = width - get_display_width(text);
         if (dash_len < 0) dash_len = 0;
         int left_dashes = std::min(4, dash_len / 2);
         int right_dashes = dash_len - left_dashes;
         return std::format("{}{} \033[1m{}{}\033[0m {}{}", kThemeBorder,
-                           make_repeated_string("─", left_dashes), kThemeText, title, kThemeBorder,
+                           make_repeated_string("─", left_dashes), kThemeText, safe_title, kThemeBorder,
                            make_repeated_string("─", right_dashes));
     }
 }
@@ -184,11 +188,11 @@ auto LeftPane::render_tab_bar(int width) const -> std::string {
         reg_sub = "VEC";
 
     // Build the grouped Regs tab
-    std::string line;
+    std::string line = " ";
     if (is_regs) {
-        line += std::format("\033[1m{}[Regs:{}]\033[0m", kThemeSky, reg_sub);
+        line += std::format("\033[1;7m {} \033[0m", reg_sub);
     } else {
-        line += std::format("{}Regs\033[0m", kThemeMuted);
+        line += std::format(" {}Regs\033[0m ", kThemeMuted);
     }
 
     std::string cache_name = "Cache";
@@ -205,7 +209,7 @@ auto LeftPane::render_tab_bar(int width) const -> std::string {
     tool_tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Pipe"});
     if (machine_.s_cycle_accurate) {
         tool_tabs.push_back({.page = TuiRegPage::CACHE, .name = cache_name});
-        tool_tabs.push_back({.page = TuiRegPage::BPRED, .name = "BBPtr"});
+        tool_tabs.push_back({.page = TuiRegPage::BPRED, .name = "BPred"});
         tool_tabs.push_back({.page = TuiRegPage::HAZARD, .name = "Haz"});
     }
     tool_tabs.push_back({.page = TuiRegPage::TLB, .name = "TLB"});
@@ -217,9 +221,9 @@ auto LeftPane::render_tab_bar(int width) const -> std::string {
     for (auto const& tab : tool_tabs) {
         line += std::format("{}│\033[0m", kThemeBorder);
         if (page_ == tab.page) {
-            line += std::format("\033[1m{}[{}]\033[0m", kThemeSky, tab.name);
+            line += std::format("\033[1;7m {} \033[0m", tab.name);
         } else {
-            line += std::format("{}{}\033[0m", kThemeMuted, tab.name);
+            line += std::format(" {}{}\033[0m ", kThemeMuted, tab.name);
         }
     }
 
@@ -233,9 +237,9 @@ auto LeftPane::render_tab_bar(int width) const -> std::string {
 auto LeftPane::get_tab_at_col(int col) const -> std::optional<TuiRegPage> {
     bool const is_regs =
         (page_ == TuiRegPage::GPR || page_ == TuiRegPage::FPR || page_ == TuiRegPage::VEC);
-    int regs_width = is_regs ? 10 : 4;
+    int regs_width = is_regs ? 5 : 6;
 
-    int current_x = 0;
+    int current_x = 1;
     if (col < current_x + regs_width) {
         return std::nullopt;  // Clicked on Regs tab
     }
@@ -254,7 +258,7 @@ auto LeftPane::get_tab_at_col(int col) const -> std::optional<TuiRegPage> {
     get_tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Pipe"});
     if (machine_.s_cycle_accurate) {
         get_tabs.push_back({.page = TuiRegPage::CACHE, .name = cache_name});
-        get_tabs.push_back({.page = TuiRegPage::BPRED, .name = "BBPtr"});
+        get_tabs.push_back({.page = TuiRegPage::BPRED, .name = "BPred"});
         get_tabs.push_back({.page = TuiRegPage::HAZARD, .name = "Haz"});
     }
     get_tabs.push_back({.page = TuiRegPage::TLB, .name = "TLB"});
@@ -264,8 +268,7 @@ auto LeftPane::get_tab_at_col(int col) const -> std::optional<TuiRegPage> {
     get_tabs.push_back({.page = TuiRegPage::STACK, .name = "Stack"});
 
     for (auto const& tab : get_tabs) {
-        int tab_width = (page_ == tab.page) ? (static_cast<int>(tab.name.length()) + 2)
-                                            : static_cast<int>(tab.name.length());
+        int tab_width = static_cast<int>(tab.name.length()) + 2;
         if (col < current_x + tab_width) {
             return tab.page;
         }
@@ -375,12 +378,14 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
     constexpr int kLogAreaHeight = 6;
     bool const show_guidance = should_show_guidance(paused_, learn_enabled_, visible_rows_);
     int const guidance_start = visible_rows_ - kLogAreaHeight - kGuidanceHeight;
-    if (show_guidance && row_idx >= guidance_start && row_idx < guidance_start + kGuidanceHeight) {
-        return render_guidance_row(row_idx - guidance_start, width);
-    }
-    if (visible_rows_ >= 15 && row_idx >= visible_rows_ - kLogAreaHeight) {
-        int log_row_idx = row_idx - (visible_rows_ - kLogAreaHeight);
-        return render_log_bottom_row(log_row_idx, kLogAreaHeight, width);
+    if (page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE) {
+        if (show_guidance && row_idx >= guidance_start && row_idx < guidance_start + kGuidanceHeight) {
+            return render_guidance_row(row_idx - guidance_start, width);
+        }
+        if (visible_rows_ >= 15 && row_idx >= visible_rows_ - kLogAreaHeight) {
+            int log_row_idx = row_idx - (visible_rows_ - kLogAreaHeight);
+            return render_log_bottom_row(log_row_idx, kLogAreaHeight, width);
+        }
     }
 
     int const content_row_idx = row_idx - 1;
@@ -393,6 +398,20 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
     if (page_ == TuiRegPage::EXPLAIN) {
         auto explain_rows = get_explain_rows(width);
         int const total_logical_rows = static_cast<int>(explain_rows.size());
+        if (scroll_offset_ > 0 && content_row_idx == 0) {
+            return format_to_width(
+                std::format(" {}▲ [{} more lines above - scroll up]\033[0m", kThemeMuted,
+                            scroll_offset_),
+                width);
+        }
+        if (scroll_offset_ + visible_rows_ - 1 < total_logical_rows &&
+            content_row_idx == visible_rows_ - 2) {
+            int remaining = total_logical_rows - (scroll_offset_ + visible_rows_ - 1);
+            return format_to_width(
+                std::format(" {}▼ [{} more lines below - scroll down]\033[0m", kThemeMuted,
+                            remaining),
+                width);
+        }
         if (logical_row >= total_logical_rows || logical_row < 0) {
             return format_to_width("", width);
         }

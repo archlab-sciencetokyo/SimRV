@@ -394,8 +394,8 @@ void test_responsive_layout() {
     expect(narrow.left > 0 && narrow.right > 0, "narrow resize keeps both panes visible");
 
     const auto desktop = calculate_pane_widths(140, TuiLayout::Split);
-    expect(desktop.left == 56 && desktop.right == 81,
-           "desktop split keeps the intended forty-percent inspection pane");
+    expect(desktop.left == 63 && desktop.right == 74,
+           "desktop split keeps the intended default inspection pane");
     const auto constrained = calculate_pane_widths(80, TuiLayout::Split, 200);
     expect(constrained.right == 20, "manual resizing preserves a usable guest terminal");
 
@@ -430,7 +430,7 @@ void test_responsive_layout() {
 
     const auto short_modal = calculate_overlay_geometry(40, 10, 78, 30);
     expect(short_modal.renderable && short_modal.width == 36 && short_modal.height == 10,
-           "a tall modal is constrained to the minimum terminal frame");
+       "a tall modal is constrained to the minimum terminal frame");
     expect(short_modal.start_x == 2 && short_modal.start_y == 0 &&
                short_modal.visible_content_rows == 8,
            "constrained modal geometry remains centered with two visible borders");
@@ -454,9 +454,9 @@ void test_frame_composition() {
     };
     constexpr FrameCase cases[] = {
         {40, 10, TuiLayout::Split, 1195331755914945392ULL},
-        {80, 24, TuiLayout::Split, 5102364040892133744ULL},
-        {120, 32, TuiLayout::Split, 13989743370693611914ULL},
-        {160, 48, TuiLayout::Split, 11898988648789430246ULL},
+        {80, 24, TuiLayout::Split, 12464046866688151874ULL},
+        {120, 32, TuiLayout::Split, 12126785168693464750ULL},
+        {160, 48, TuiLayout::Split, 3975935784378917810ULL},
         {120, 32, TuiLayout::FullLeft, 17252040885446061950ULL},
         {120, 32, TuiLayout::FullRight, 3818806389424029207ULL},
     };

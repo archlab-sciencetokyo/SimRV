@@ -46,16 +46,20 @@ inline constexpr int kFrameChromeRows = 7;
 
     int desired_left = requested_left;
     if (desired_left <= 0) {
-        desired_left =
-            terminal_width <= 80
-                ? split_width / 2
-                : (terminal_width <= 120 ? std::max(40, (terminal_width * 33) / 100)
-                                         : std::min(75, std::max(40, (terminal_width * 40) / 100)));
+        if (terminal_width <= 70) {
+            desired_left = split_width / 2;
+        } else if (terminal_width <= 95) {
+            desired_left = 35;
+        } else if (terminal_width <= 114) {
+            desired_left = std::max(35, (terminal_width * 35) / 100);
+        } else {
+            desired_left = std::min(70, std::max(58, (terminal_width * 45) / 100));
+        }
     }
 
-    // Below the normal desktop width, shrink both panes together. At larger sizes retain at least
-    // 40 columns for inspection and 20 for the guest terminal.
-    const int minimum_left = std::min(40, split_width / 2);
+    // Below the normal desktop width, shrink both panes together. Retain at least 34 columns
+    // for single-column inspection (zero clipping) and 20 for the guest terminal.
+    const int minimum_left = std::min(34, split_width / 2);
     const int minimum_right = std::min(20, split_width - minimum_left);
     const int maximum_left = std::max(minimum_left, split_width - minimum_right);
     const int left = std::clamp(desired_left, minimum_left, maximum_left);

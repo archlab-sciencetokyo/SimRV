@@ -355,6 +355,25 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
 
     if (content_rows.empty()) return;
 
+    int cursor_row = 0;
+    switch (active_modal_) {
+        case ModalType::Settings:
+            cursor_row = 2 + settings_cursor_;
+            break;
+        case ModalType::ConfigureMisa:
+            cursor_row = 2 + misa_cursor_;
+            break;
+        case ModalType::ConfigureSystem:
+            cursor_row = 2 + sysconfig_cursor_;
+            break;
+        case ModalType::ManageBreakpoints:
+            cursor_row = 2 + bp_cursor_;
+            break;
+        default:
+            cursor_row = 0;
+            break;
+    }
+
     const int available_height = std::min(term_height, static_cast<int>(lines.size()));
     const OverlayGeometry overlay = calculate_overlay_geometry(
         term_width, available_height, maximum_width, static_cast<int>(content_rows.size()));
@@ -364,6 +383,13 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
     const int start_y = overlay.start_y;
     const int start_x = overlay.start_x;
     int inner_w = box_w - 2;
+
+    const int total_rows = static_cast<int>(content_rows.size());
+    const int visible_rows = overlay.visible_content_rows;
+    int scroll_start = 0;
+    if (total_rows > visible_rows) {
+        scroll_start = std::clamp(cursor_row - visible_rows / 2, 0, total_rows - visible_rows);
+    }
 
     // Render Box Top Border
     if (start_y < static_cast<int>(lines.size())) {
@@ -383,19 +409,22 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             overlay_string(lines.at(static_cast<std::size_t>(start_y)), top_border, start_x, box_w);
     }
 
-    // Render Box Content Rows with background color persistence
-    const bool content_clipped =
-        static_cast<int>(content_rows.size()) > overlay.visible_content_rows;
-    for (int i = 0; i < overlay.visible_content_rows; ++i) {
+    // Render Box Content Rows with background color persistence & viewport scrolling
+    for (int i = 0; i < visible_rows; ++i) {
         int target_y = start_y + 1 + i;
+        int content_idx = scroll_start + i;
 
         std::string content;
-        if (content_clipped && i == overlay.visible_content_rows - 1) {
-            content =
-                std::format("{}… resize terminal to show remaining content\033[0m", kThemeMuted);
-        } else {
-            content = content_rows.at(static_cast<std::size_t>(i));
+        if (total_rows > visible_rows && scroll_start > 0 && i == 0) {
+            content = std::format(" {}▲ [{} more items above]\033[0m", kThemeMuted, scroll_start);
+        } else if (total_rows > visible_rows && (scroll_start + visible_rows < total_rows) &&
+                   i == visible_rows - 1) {
+            const int remaining = total_rows - (scroll_start + visible_rows - 1);
+            content = std::format(" {}▼ [{} more items below]\033[0m", kThemeMuted, remaining);
+        } else if (content_idx >= 0 && content_idx < total_rows) {
+            content = content_rows.at(static_cast<std::size_t>(content_idx));
         }
+
         if (!m_bg.empty() && m_bg != "\033[49m") {
             std::string target = "\033[0m";
             std::string replacement = "\033[0m" + std::string(m_bg);

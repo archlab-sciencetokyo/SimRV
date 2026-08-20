@@ -1009,7 +1009,7 @@ auto LeftPane::render_system_state(const simrv::core::CPU& cpu, int logical_row,
                                    int right_width) -> std::string {
     auto const& st = cpu.state();
     int const width = col_width + right_width;
-    int label_pad = (width < 50) ? 0 : ((width < 65) ? 5 : 8);
+    int label_pad = (width < 45) ? 0 : 7;
 
     if (logical_row == 16) {
         return section_line("CSRs & Privilege State", width);

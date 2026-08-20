@@ -41,8 +41,15 @@ auto render_cache_way_row(const simrv::core::CPU& cpu, int way_idx, int inspect_
 
     bool is_replaced_way = (set_idx == last_repl_set && way_u32 == last_repl_way);
 
-    std::string status_tag = !valid ? std::format("{}INVALID\033[0m           ", kThemeMuted)
-                                    : std::format("{}0x{:016x}\033[0m", kThemeVal, tag);
+    std::string status_tag;
+    if (!valid) {
+        status_tag = std::format("{}INVALID\033[0m", kThemeMuted);
+    } else if (width < 45) {
+        status_tag = std::format("{}0x{:08x}…\033[0m", kThemeVal, static_cast<uint32_t>(tag));
+    } else {
+        status_tag = std::format("{}0x{:016x}\033[0m", kThemeVal, tag);
+    }
+
     std::string cursor_marker =
         is_selected_way ? std::format("\033[1m{}▶\033[0m ", kThemeMint) : "  ";
     std::string way_str = is_selected_way ? std::format("\033[1;7mWay #{}\033[0m", way_idx)
@@ -74,8 +81,12 @@ auto render_cache_way_row(const simrv::core::CPU& cpu, int way_idx, int inspect_
         highlight = std::format("  \033[1m{}◄ HIT\033[0m", kThemeMint);
     }
 
-    std::string line_str =
-        std::format("{}{}  LRU:{:<8}{}", cursor_marker, way_prefix, lru, highlight);
+    std::string line_str;
+    if (width < 45) {
+        line_str = std::format("{}{}", cursor_marker, way_prefix);
+    } else {
+        line_str = std::format("{}{}  LRU:{:<8}{}", cursor_marker, way_prefix, lru, highlight);
+    }
     return format_to_width(line_str, width);
 }
 
@@ -127,6 +138,13 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
             uint64_t tot = h + m;
             double mr =
                 (tot == 0) ? 0.0 : 100.0 * static_cast<double>(m) / static_cast<double>(tot);
+            if (width < 50) {
+                return format_to_width(
+                    std::format("  {}IC\033[0m H:{}{}\033[0m M:{}{}\033[0m MR:{}{:>4.1f}%\033[0m",
+                                kThemeText, kThemeMint, simrv::util::format_scaled(h), kThemeCoral,
+                                simrv::util::format_scaled(m), kThemePeach, mr),
+                    width);
+            }
             return format_to_width(
                 std::format("  {}ICache\033[0m Hits: {}{:<7}\033[0m Miss: {}{:<6}\033[0m MR: "
                             "{}{:>5.1f}%\033[0m Evict: {}{:<5}\033[0m",
@@ -140,6 +158,13 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
             uint64_t tot = h + m;
             double mr =
                 (tot == 0) ? 0.0 : 100.0 * static_cast<double>(m) / static_cast<double>(tot);
+            if (width < 50) {
+                return format_to_width(
+                    std::format("  {}DC\033[0m H:{}{}\033[0m M:{}{}\033[0m MR:{}{:>4.1f}%\033[0m",
+                                kThemeText, kThemeMint, simrv::util::format_scaled(h), kThemeCoral,
+                                simrv::util::format_scaled(m), kThemePeach, mr),
+                    width);
+            }
             return format_to_width(
                 std::format("  {}DCache\033[0m Hits: {}{:<7}\033[0m Miss: {}{:<6}\033[0m MR: "
                             "{}{:>5.1f}%\033[0m Evict: {}{:<5}\033[0m",
@@ -157,6 +182,15 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
             uint64_t dtot = dh + dm;
             double dratio = (dtot == 0) ? 1.0 : static_cast<double>(dh) / static_cast<double>(dtot);
 
+            if (width < 45) {
+                int bar_w = std::max(3, (width - 24) / 2);
+                std::string ibar = make_bar(iratio, bar_w);
+                std::string dbar = make_bar(dratio, bar_w);
+                return format_to_width(
+                    std::format("  {}IC\033[0m[{}]{:>4.0f}% {}DC\033[0m[{}]{:>4.0f}%",
+                                kThemeText, ibar, iratio * 100.0, kThemeText, dbar, dratio * 100.0),
+                    width);
+            }
             int bar_w = std::max(4, (width - 46) / 2);
             std::string ibar = make_bar(iratio, bar_w);
             std::string dbar = make_bar(dratio, bar_w);

@@ -606,8 +606,7 @@ void Tui::render(bool force) {
     if (force || last_screen_lines_.size() != new_lines.size()) {
         update_cmds += "\033[H";
         for (size_t i = 0; i < new_lines.size(); ++i) {
-            update_cmds += new_lines[i];
-            if (i + 1 < new_lines.size()) update_cmds += "\n";
+            update_cmds += std::format("\033[{};1H{}", i + 1, new_lines[i]);
         }
         last_screen_lines_ = new_lines;
     } else {

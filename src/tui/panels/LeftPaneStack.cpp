@@ -50,27 +50,28 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
         if (logical_row == 0) {
             return section_line("Live Guest Stack Watch", width);
         }
-        if (logical_row == 4) {
-            std::string text = "\033[1;38;5;203m⚠️  STACK POINTER INVALID / NULL\033[0m";
-            int spaces = std::max(0, (width - 32) / 2);
-            return format_to_width(std::string(spaces, ' ') + text, width);
+        if (logical_row == 3) {
+            std::string text = std::format("\033[1;31m[!] STACK POINTER INACTIVE / NULL\033[0m");
+            int text_w = get_display_width(text);
+            int spaces = std::max(1, (width - text_w) / 2);
+            return format_to_width(std::string(static_cast<std::size_t>(spaces), ' ') + text, width);
         }
-        if (logical_row == 6) {
+        if (logical_row == 5) {
             std::string val_str =
                 (xlen == 64) ? std::format("0x{:016x}", sp) : std::format("0x{:08x}", sp);
-            std::string text = std::format("sp register = {}{}\033[0m", kThemeVal, val_str);
-            int spaces = std::max(0, (width - (14 + (xlen == 64 ? 18 : 10))) / 2);
-            return format_to_width(std::string(spaces, ' ') + text, width);
+            std::string text = std::format("sp register : {}{}\033[0m", kThemeVal, val_str);
+            int text_w = get_display_width(text);
+            int spaces = std::max(1, (width - text_w) / 2);
+            return format_to_width(std::string(static_cast<std::size_t>(spaces), ' ') + text, width);
         }
-        if (logical_row == 8) {
-            std::string text = "Stack watch requires a valid DRAM-mapped pointer.";
-            int spaces = std::max(0, (width - static_cast<int>(text.length())) / 2);
-            return format_to_width(std::string(spaces, ' ') + text, width);
-        }
-        if (logical_row == 9) {
-            std::string text = "It will activate once guest code initializes sp.";
-            int spaces = std::max(0, (width - static_cast<int>(text.length())) / 2);
-            return format_to_width(std::string(spaces, ' ') + text, width);
+        if (logical_row == 7) {
+            std::string text = (width < 45) ? "Waiting for guest sp initialization"
+                                            : "Stack watch activates when guest initializes sp.";
+            int text_w = get_display_width(text);
+            int spaces = std::max(1, (width - text_w) / 2);
+            return format_to_width(
+                std::string(static_cast<std::size_t>(spaces), ' ') + kThemeMuted + text + "\033[0m",
+                width);
         }
         if (logical_row == 14) {
             return section_line("Status: Stack Watch Inactive", width);

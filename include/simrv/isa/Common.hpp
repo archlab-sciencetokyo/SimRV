@@ -373,21 +373,21 @@ constexpr auto get_instruction_format(Opcode op) -> InstFormat {
 constexpr auto get_instruction_format_name(InstFormat fmt) -> std::string_view {
     switch (fmt) {
         case InstFormat::R:
-            return "R-Type (Register-Register)";
+            return "R-Type";
         case InstFormat::I:
-            return "I-Type (Register-Immediate / Load / Jump)";
+            return "I-Type";
         case InstFormat::S:
-            return "S-Type (Store)";
+            return "S-Type";
         case InstFormat::B:
-            return "B-Type (Branch)";
+            return "B-Type";
         case InstFormat::U:
-            return "U-Type (Upper Immediate)";
+            return "U-Type";
         case InstFormat::J:
-            return "J-Type (Unconditional Jump)";
+            return "J-Type";
         case InstFormat::R4:
-            return "R4-Type (Fused Multiply-Add)";
+            return "R4-Type";
         case InstFormat::Unknown:
-            return "Unknown / Custom Format";
+            return "Unknown";
     }
     return "Unknown";
 }

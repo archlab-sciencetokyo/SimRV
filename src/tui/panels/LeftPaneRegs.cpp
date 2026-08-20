@@ -166,14 +166,14 @@ auto LeftPane::render_registers_double_column(const simrv::core::ArchState& st, 
                 std::string c2 = changed2 ? kThemePeach : kThemeMint;
 
                 std::string val1_str =
-                    format_vec_value(val1, st.regs.vlen, std::max(10, col_width - 6));
+                    format_vec_value(val1, st.regs.vlen, std::max(10, col_width - 8));
                 std::string val2_str =
-                    format_vec_value(val2, st.regs.vlen, std::max(10, right_width - 6));
+                    format_vec_value(val2, st.regs.vlen, std::max(10, right_width - 8));
 
                 std::string col1_color =
-                    std::format(" {}v{:<2}\033[0m: {}{}\033[0m", kThemeText, reg1, c1, val1_str);
+                    std::format("  {}v{:<2}\033[0m: {}{}\033[0m", kThemeText, reg1, c1, val1_str);
                 std::string col2_color =
-                    std::format(" {}v{:<2}\033[0m: {}{}\033[0m", kThemeText, reg2, c2, val2_str);
+                    std::format("  {}v{:<2}\033[0m: {}{}\033[0m", kThemeText, reg2, c2, val2_str);
 
                 return format_to_width(col1_color, col_width) +
                        format_to_width(col2_color, right_width);

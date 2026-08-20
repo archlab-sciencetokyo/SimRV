@@ -23,14 +23,19 @@ auto LeftPane::render_bp_stats(const simrv::core::CPU& cpu, int logical_row, int
             return section_line("Branch Predictor Inspector", width);
         }
         if (logical_row == 4) {
-            std::string text = "\033[1;38;5;203m⚠️ CYCLE-ACCURATE MODE INACTIVE\033[0m";
-            int spaces = std::max(0, (width - 32) / 2);
-            return format_to_width(std::string(spaces, ' ') + text, width);
+            std::string text = "\033[1;31m[!] CYCLE-ACCURATE MODE INACTIVE\033[0m";
+            int text_w = get_display_width(text);
+            int spaces = std::max(1, (width - text_w) / 2);
+            return format_to_width(std::string(static_cast<std::size_t>(spaces), ' ') + text, width);
         }
         if (logical_row == 6) {
-            std::string text = "Enable Cycle-Accurate mode [,] or --cycle-accurate";
-            int spaces = std::max(0, (width - static_cast<int>(text.length())) / 2);
-            return format_to_width(std::string(spaces, ' ') + text, width);
+            std::string text = (width < 45) ? "Enable Cycle-Accurate mode [,]"
+                                            : "Enable Cycle-Accurate mode [,] or --cycle-accurate";
+            int text_w = get_display_width(text);
+            int spaces = std::max(1, (width - text_w) / 2);
+            return format_to_width(
+                std::string(static_cast<std::size_t>(spaces), ' ') + kThemeMuted + text + "\033[0m",
+                width);
         }
         if (logical_row == 14) {
             return section_line("Status: Predictor Disabled (Functional)", width);
@@ -72,6 +77,14 @@ auto LeftPane::render_bp_stats(const simrv::core::CPU& cpu, int logical_row, int
         return section_line("Branch Predictor & BHT Inspector", width);
     }
     if (logical_row == 1) {
+        if (width < 50) {
+            return format_to_width(
+                std::format("  {}Type:\033[0m {}{:<9}\033[0m {}Acc:\033[0m {}{:4.1f}%\033[0m",
+                            kThemeText, kThemeMint, bp_type_str, kThemeText,
+                            (acc >= 90.0 ? kThemeMint : (acc >= 75.0 ? kThemePeach : kThemeCoral)),
+                            acc),
+                width);
+        }
         return format_to_width(
             std::format("  {}Type:\033[0m {}{:<13}\033[0m │ {}Acc:\033[0m {}{:5.1f}%\033[0m │ "
                         "{}Pen:\033[0m {}{}\033[0m",
@@ -81,6 +94,15 @@ auto LeftPane::render_bp_stats(const simrv::core::CPU& cpu, int logical_row, int
             width);
     }
     if (logical_row == 2) {
+        if (width < 50) {
+            return format_to_width(
+                std::format(
+                    "  {}Br:\033[0m {}{}\033[0m {}Ok:\033[0m {}{}\033[0m {}Miss:\033[0m {}{}\033[0m",
+                    kThemeText, kThemeVal, simrv::util::format_scaled(total_branches), kThemeText,
+                    kThemeMint, simrv::util::format_scaled(correct), kThemeText, kThemeCoral,
+                    simrv::util::format_scaled(mispredicted)),
+                width);
+        }
         return format_to_width(
             std::format("  {}Branches:\033[0m {}{:<6}\033[0m │ {}Correct:\033[0m {}{:<6}\033[0m │ "
                         "{}Mispred:\033[0m {}{}\033[0m",
@@ -93,10 +115,10 @@ auto LeftPane::render_bp_stats(const simrv::core::CPU& cpu, int logical_row, int
         return section_line("Branch History Table (BHT 2-Bit Counter Map)", width);
     }
 
-    // Display 4 BHT entries per row to guarantee compact length (<44 chars)
+    // Display 3 entries per row on narrow screens, 4 on wider screens
     if (logical_row >= 4 && logical_row <= 12) {
         int row_idx = logical_row - 4;  // 0 to 8
-        int entries_per_row = 4;
+        int entries_per_row = (width < 45) ? 3 : 4;
         int start_idx = row_idx * entries_per_row;
         std::string line = "  ";
 
