@@ -118,13 +118,22 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "asset_base=${ASSET_BASE}" >> "$GITHUB_OUTPUT"
 
-      - name: Package binary
+      - name: Package binary and user scripts
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist
+          mkdir -p dist/scripts
           cp build/${{ matrix.arch }}-release/SimRV dist/SimRV
-          tar -C dist -czf "${{ steps.names.outputs.asset_base }}.tar.gz" SimRV
+          cp scripts/README.md dist/scripts/
+          cp scripts/benchmark.py dist/scripts/
+          cp scripts/benchmark.sh dist/scripts/
+          cp scripts/compare_arch.py dist/scripts/
+          cp scripts/run_benchmarks.py dist/scripts/
+          cp scripts/compare_benchmarks.py dist/scripts/
+          cp scripts/build-linux-image.sh dist/scripts/
+          cp README.md dist/README.md
+          cp LICENSE dist/LICENSE
+          tar -C dist -czf "${{ steps.names.outputs.asset_base }}.tar.gz" SimRV scripts README.md LICENSE
           cp build/${{ matrix.arch }}-release/SimRV "${{ steps.names.outputs.asset_base }}.bin"
           sha256sum "${{ steps.names.outputs.asset_base }}.tar.gz" > "${{ steps.names.outputs.asset_base }}.sha256"
           sha256sum "${{ steps.names.outputs.asset_base }}.bin" >> "${{ steps.names.outputs.asset_base }}.sha256"

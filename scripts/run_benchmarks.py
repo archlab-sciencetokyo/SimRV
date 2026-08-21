@@ -6,24 +6,40 @@ import json
 import argparse
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 TESTS_DIR = os.environ.get("TESTS_DIR", os.path.abspath(os.path.join(SCRIPT_DIR, "../../../tests")))
 
+
+def resolve_bench_path(rel_path):
+    candidates = [
+        os.path.join(ROOT_DIR, rel_path),
+        os.path.join(TESTS_DIR, rel_path),
+        os.path.join(TESTS_DIR, "riscv-tests", rel_path),
+    ]
+    for cand in candidates:
+        if os.path.isfile(cand):
+            return cand
+    return os.path.join(ROOT_DIR, rel_path)
+
+
 DEFAULT_BENCHMARKS_RV64 = [
-    ("CoreMark (RV64)", os.path.join(TESTS_DIR, "coremark/coremark64.riscv"), "rv64gc"),
-    ("Dhrystone", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/dhrystone.riscv"), "rv64gc"),
-    ("Median Filter", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/median.riscv"), "rv64gc"),
-    ("Memcpy", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/memcpy.riscv"), "rv64gc"),
-    ("Matrix Multiply", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/mm.riscv"), "rv64gc"),
-    ("Multiply", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/multiply.riscv"), "rv64gc"),
-    ("Quicksort", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/qsort.riscv"), "rv64gc"),
-    ("Radix Sort", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/rsort.riscv"), "rv64gc"),
-    ("SPMV", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/spmv.riscv"), "rv64gc"),
-    ("Towers of Hanoi", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/towers.riscv"), "rv64gc"),
-    ("Vector Add", os.path.join(TESTS_DIR, "riscv-tests/benchmarks/vvadd.riscv"), "rv64gc"),
+    ("AHA Montgomery (RV64)", resolve_bench_path("riscv-tests/benchmarks/aha-mont64.riscv"), "rv64gc"),
+    ("CoreMark (RV64)", resolve_bench_path("coremark/coremark64.riscv"), "rv64gc"),
+    ("Dhrystone", resolve_bench_path("riscv-tests/benchmarks/dhrystone.riscv"), "rv64gc"),
+    ("Median Filter", resolve_bench_path("riscv-tests/benchmarks/median.riscv"), "rv64gc"),
+    ("Memcpy", resolve_bench_path("riscv-tests/benchmarks/memcpy.riscv"), "rv64gc"),
+    ("Matrix Multiply", resolve_bench_path("riscv-tests/benchmarks/mm.riscv"), "rv64gc"),
+    ("Multiply", resolve_bench_path("riscv-tests/benchmarks/multiply.riscv"), "rv64gc"),
+    ("Quicksort", resolve_bench_path("riscv-tests/benchmarks/qsort.riscv"), "rv64gc"),
+    ("Radix Sort", resolve_bench_path("riscv-tests/benchmarks/rsort.riscv"), "rv64gc"),
+    ("SPMV", resolve_bench_path("riscv-tests/benchmarks/spmv.riscv"), "rv64gc"),
+    ("Towers of Hanoi", resolve_bench_path("riscv-tests/benchmarks/towers.riscv"), "rv64gc"),
+    ("Vector Add", resolve_bench_path("riscv-tests/benchmarks/vvadd.riscv"), "rv64gc"),
 ]
 
 DEFAULT_BENCHMARKS_RV32 = [
-    ("CoreMark (RV32)", os.path.join(TESTS_DIR, "coremark/coremark32.riscv"), "rv32imac"),
+    ("AHA Montgomery (RV32)", resolve_bench_path("riscv-tests/benchmarks/aha-mont32.riscv"), "rv32imac"),
+    ("CoreMark (RV32)", resolve_bench_path("coremark/coremark32.riscv"), "rv32imac"),
 ]
 
 def run_suite(benchmarks, simrv_bin, spike_bin, runs=3, limit=50000000, timeout=60):
@@ -69,7 +85,7 @@ def print_summary_table(results_64, results_32):
     print("\n" + "="*85)
     print(f"{'SIMRV VS SPIKE EXTENDED BENCHMARK SUITE SUMMARY':^85}")
     print("="*85)
-    print(f"{'Benchmark':<20} | {'Arch':<5} | {'Instructions':<12} | {'SimRV (s)':<10} | {'Spike (s)':<10} | {'Speedup':<8}")
+    print(f"{'Benchmark':<24} | {'Arch':<5} | {'Instructions':<12} | {'SimRV (s)':<10} | {'Spike (s)':<10} | {'Speedup':<8}")
     print("-" * 85)
 
     def print_rows(results, arch_str):
@@ -83,7 +99,7 @@ def print_summary_table(results_64, results_32):
             inst_str = f"{insts:,}" if insts else "N/A"
             speedup_str = f"{speedup:.2f}x" if speedup > 0 else "N/A"
 
-            print(f"{name:<20} | {arch_str:<5} | {inst_str:>12} | {simrv_t:>10.4f} | {spike_t:>10.4f} | {speedup_str:>8}")
+            print(f"{name:<24} | {arch_str:<5} | {inst_str:>12} | {simrv_t:>10.4f} | {spike_t:>10.4f} | {speedup_str:>8}")
 
     print_rows(results_64, "RV64")
     if results_32:
@@ -93,6 +109,43 @@ def print_summary_table(results_64, results_32):
     print("="*85)
     print("Note: Speedup > 1.0x indicates SimRV wall-clock time is faster than Spike.")
     print("="*85 + "\n")
+
+
+def print_arch_comparison_table(results_64, results_32):
+    # Match benchmarks by normalizing their names
+    def normalize_name(n):
+        return n.lower().replace("(rv64)", "").replace("(rv32)", "").replace("rv64", "").replace("rv32", "").strip()
+
+    map_64 = {normalize_name(r.get("display_name", r.get("test_name", ""))): r for r in results_64}
+    map_32 = {normalize_name(r.get("display_name", r.get("test_name", ""))): r for r in results_32}
+
+    common_keys = [k for k in map_64 if k in map_32]
+    if not common_keys:
+        return
+
+    print("="*92)
+    print(f"{'32-BIT VS 64-BIT ARCHITECTURAL BENCHMARK COMPARISON':^92}")
+    print("="*92)
+    print(f"{'Benchmark':<20} | {'RV32 Insts':>11} | {'RV64 Insts':>11} | {'Inst Ratio':>10} | {'RV32 Time (s)':>13} | {'RV64 Time (s)':>13}")
+    print("-" * 92)
+
+    for k in common_keys:
+        r32 = map_32[k]
+        r64 = map_64[k]
+        name = k.title()
+        i32 = r32.get("instructions", 0)
+        i64 = r64.get("instructions", 0)
+        ratio_str = f"{i32 / i64:.2f}x" if i64 > 0 else "N/A"
+
+        t32 = r32["simrv"]["stats"]["time"]["mean"]
+        t64 = r64["simrv"]["stats"]["time"]["mean"]
+
+        print(f"{name:<20} | {i32:>11,} | {i64:>11,} | {ratio_str:>10} | {t32:>13.4f} | {t64:>13.4f}")
+
+    print("="*92)
+    print("Note: Inst Ratio > 1.0x shows 32-bit instruction overhead vs native 64-bit operations.")
+    print("="*92 + "\n")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Extended Benchmark Suite Runner against Spike")
@@ -117,6 +170,8 @@ def main():
         results_32 = run_suite(DEFAULT_BENCHMARKS_RV32, args.simrv32, args.spike, runs=args.runs, limit=args.limit)
 
     print_summary_table(results_64, results_32)
+    if results_64 and results_32:
+        print_arch_comparison_table(results_64, results_32)
 
     if args.json:
         report = {

@@ -18,6 +18,7 @@ import time
 from shutil import which
 
 REALWORLD_BENCHMARKS = [
+    "aha-mont",
     "coremark",
     "dhrystone",
     "median",
@@ -628,6 +629,12 @@ def run_benchmark_single(
             os.path.join(riscv_tests_dir, "benchmarks", test_target),
             os.path.join(
                 riscv_tests_dir, "benchmarks", f"{test_target}.riscv"
+            ),
+            os.path.join(
+                riscv_tests_dir, "benchmarks", f"{test_target}64.riscv"
+            ),
+            os.path.join(
+                riscv_tests_dir, "benchmarks", f"{test_target}32.riscv"
             ),
             os.path.join(riscv_tests_dir, "isa", test_target),
             os.path.join(riscv_tests_dir, test_target),
