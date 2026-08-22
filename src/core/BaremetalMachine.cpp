@@ -16,11 +16,10 @@
 namespace simrv::core {
 
 void BaremetalMachine::execute_cycle() {
-    if (runtime_profile.is_cycle_mode() || (spike_lockstep && spike_lockstep->is_running())) {
+    if (runtime_profile.is_cycle_mode()) {
+        advance_ca_global_cycle();
+    } else if (spike_lockstep && spike_lockstep->is_running()) {
         cpu.run_cycle(*this);
-        if (runtime_profile.is_cycle_mode()) {
-            memory().system_bus().advance_cycle();
-        }
     } else {
         cpu.run_cycle_baremetal(*this);
     }

@@ -120,6 +120,8 @@ class Machine {
     auto load_disk_image(const std::string& filepath) -> bool;
     /// Execute the main simulation loop until termination criteria are met.
     void run();
+    /// Advance every runnable hart and the shared platform by exactly one CA global cycle.
+    void advance_ca_global_cycle();
     /// Finalize cycle for tohost checks only.
     void finalize_cycle_tohost();
     /// Stop the simulation loop.

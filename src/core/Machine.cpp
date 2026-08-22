@@ -416,4 +416,29 @@ void Machine::finalize_cycle_tohost() {
 
 Machine::~Machine() = default;
 
+void Machine::advance_ca_global_cycle() {
+    cpu.run_cycle(*this);
+    for (auto& secondary : secondary_harts_) {
+        if (secondary->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+            secondary->run_cycle(*this);
+        }
+    }
+
+    // Shared requests become visible only after every hart has observed the same start-of-cycle
+    // platform state. The timer transition follows the interconnect transition and is sampled by
+    // hart pipelines at a retirement boundary in the next global cycle.
+    memory().system_bus().advance_cycle();
+    ++cpu.clint_mmio.rtc_divider;
+    if (cpu.clint_mmio.rtc_divider == 10) {
+        ++cpu.clint_mmio.mtime;
+        cpu.clint_mmio.rtc_divider = 0;
+    }
+    const auto global_time = cpu.clint_mmio.mtime.load(std::memory_order_relaxed);
+    cpu.evaluate_timer_interrupt();
+    for (auto& secondary : secondary_harts_) {
+        secondary->clint_mmio.mtime.store(global_time, std::memory_order_relaxed);
+        secondary->evaluate_timer_interrupt();
+    }
+}
+
 }  // namespace simrv::core

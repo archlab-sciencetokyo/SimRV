@@ -108,10 +108,12 @@ For each OS-machine CA cycle SimRV performs the following fixed order:
 1. Advance hart 0 by one transition.
 2. Advance each started secondary hart once in ascending hart order.
 3. Advance the shared TileLink/coherence fabric once, servicing its oldest queued request.
-4. Run top-level termination and presentation checks outside the architectural transition.
+4. Advance shared timer and interrupt-pending state for the next cycle.
+5. Run top-level termination and presentation checks outside the architectural transition.
 
-Each hart updates its local `mcycle` once per global cycle. Hart 0 advances the shared timer;
-secondary harts observe that value. Interrupts are sampled only at retirement boundaries. Bus
+Each hart updates its local `mcycle` once per global cycle. All harts observe the same timer value
+during a cycle; the platform advances it only after every hart and the interconnect have stepped.
+Interrupts are sampled only at retirement boundaries. Bus
 requests carry explicit hart and port identities, FIFO sequence numbers, and ready cycles;
 squashed instruction/data requests are cancelled by source identity.
 

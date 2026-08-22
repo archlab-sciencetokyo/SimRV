@@ -18,14 +18,15 @@ namespace simrv::core {
 using namespace simrv::isa;
 
 void OSMachine::execute_cycle() {
+    if (runtime_profile.is_cycle_mode()) {
+        advance_ca_global_cycle();
+        return;
+    }
     cpu.run_cycle(*this);
     for (auto& sec_hart : secondary_harts_) {
         if (sec_hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
             sec_hart->run_cycle(*this);
         }
-    }
-    if (runtime_profile.is_cycle_mode()) {
-        memory().system_bus().advance_cycle();
     }
 }
 

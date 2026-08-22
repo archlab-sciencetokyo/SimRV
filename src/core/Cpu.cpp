@@ -337,6 +337,10 @@ void CPU::run_cycle(Machine& machine) {
 
 void CPU::tick_cycle_clock(Machine& machine, bool interrupt_boundary) {
     ++clint_mmio.mcycle;
+    if (machine.runtime_profile.is_cycle_mode()) {
+        if (interrupt_boundary) dispatch_pending_interrupts();
+        return;
+    }
     if (state_.mhartid == 0) {
         ++clint_mmio.rtc_divider;
         if (clint_mmio.rtc_divider == 10) {

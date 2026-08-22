@@ -503,6 +503,43 @@ void test_global_cycle_smp_pipeline_ordering() {
     std::cout << "[PASS] test_global_cycle_smp_pipeline_ordering\n";
 }
 
+void test_global_cycle_timer_phase_ordering() {
+    simrv::core::OSMachine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.mmem = ram.data();
+    machine.s_dram_size = ram.size();
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+    machine.cpu.machine_ = &machine;
+    machine.cpu.reset();
+
+    auto secondary = std::make_unique<simrv::core::CPU>();
+    secondary->machine_ = &machine;
+    secondary->reset();
+    secondary->state().mhartid = 1;
+    secondary->hart_status.store(simrv::core::HartStatus::Started, std::memory_order_relaxed);
+    machine.secondary_harts_.push_back(std::move(secondary));
+
+    constexpr Address pc = simrv::memory::kDramBaseAddress;
+    constexpr Instruction loop = 0x0000006f;  // jal x0, 0
+    std::memcpy(ram.data(), &loop, sizeof(loop));
+    machine.hart(0).state().pc = pc;
+    machine.hart(1).state().pc = pc;
+    machine.cpu.clint_mmio.mtime = 4;
+    machine.cpu.clint_mmio.rtc_divider = 9;
+    machine.cpu.clint_mmio.mtimecmp = 5;
+    machine.cpu.clint_mmio.hart_mtimecmp.at(1) = 5;
+
+    machine.execute_cycle();
+
+    assert(machine.hart(0).clint_mmio.mcycle == 1);
+    assert(machine.hart(1).clint_mmio.mcycle == 1);
+    assert(machine.hart(0).clint_mmio.mtime == 5);
+    assert(machine.hart(1).clint_mmio.mtime == 5);
+    assert((machine.hart(0).state().mip & enum_mask(simrv::core::MipBit::Mtip)) != 0);
+    assert((machine.hart(1).state().mip & enum_mask(simrv::core::MipBit::Mtip)) != 0);
+    std::cout << "[PASS] test_global_cycle_timer_phase_ordering\n";
+}
+
 void test_cycle_kernel_golden_forwarding() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
@@ -1276,6 +1313,7 @@ int main() {
     test_timed_page_walk_transitions();
     test_timed_smp_coherence_ordering();
     test_global_cycle_smp_pipeline_ordering();
+    test_global_cycle_timer_phase_ordering();
     test_cycle_kernel_golden_forwarding();
     test_cycle_kernel_golden_load_use();
     test_cycle_kernel_golden_data_refill();
