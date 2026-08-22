@@ -16,7 +16,7 @@
 
 #include "simrv/core/Logger.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
-#include "simrv/pipeline/PipelineFactory.hpp"
+#include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -266,18 +266,12 @@ auto is_baremetal_option(std::string_view arg) -> bool {
 
 auto is_os_option(std::string_view arg) -> bool { return arg == "--os"; }
 
-auto is_ca_option(std::string_view arg) -> bool {
-    return arg == "--ca" || arg == "--cycle-accurate" || arg == "-C";
-}
-auto is_ia_option(std::string_view arg) -> bool {
-    return arg == "--ia" || arg == "--high-performance";
-}
+auto is_ca_option(std::string_view arg) -> bool { return arg == "--ca" || arg == "-C"; }
+auto is_ia_option(std::string_view arg) -> bool { return arg == "--ia"; }
 
 auto is_tui_option(std::string_view arg) -> bool { return arg == "--tui" || arg == "-u"; }
 
 auto is_cli_option(std::string_view arg) -> bool { return arg == "--cli" || arg == "-c"; }
-
-auto is_gui_option(std::string_view arg) -> bool { return arg == "--gui" || arg == "-G"; }
 
 auto is_high_contrast_option(std::string_view arg) -> bool { return arg == "--high-contrast"; }
 
@@ -286,20 +280,6 @@ auto is_class_mode_option(std::string_view arg) -> bool {
 }
 
 auto is_no_forwarding_option(std::string_view arg) -> bool { return arg == "--no-forwarding"; }
-
-auto is_bp_type_option(std::string_view arg) -> bool { return arg == "--bp-type" || arg == "--bp"; }
-
-auto is_btb_size_option(std::string_view arg) -> bool {
-    return arg == "--btb-size" || arg == "--btb";
-}
-
-auto is_disable_ex_forwarding_option(std::string_view arg) -> bool {
-    return arg == "--disable-ex-forwarding" || arg == "--no-ex-forwarding";
-}
-
-auto is_disable_mem_forwarding_option(std::string_view arg) -> bool {
-    return arg == "--disable-mem-forwarding" || arg == "--no-mem-forwarding";
-}
 
 auto is_explain_inst_option(std::string_view arg) -> bool {
     return arg == "--explain-inst" || arg == "--explain";
@@ -326,22 +306,6 @@ auto is_gdb_port_option(std::string_view arg) -> bool {
 }
 
 auto is_gdb_option(std::string_view arg) -> bool { return arg == "--gdb"; }
-
-auto removed_option_replacement(std::string_view arg) -> std::string_view {
-    if (arg == "-k" || arg == "-i" || arg == "--kernel") return "--image";
-    if (arg == "--dtb") return "--fdt";
-    if (arg == "-a" || arg == "--app") return "--baremetal";
-    if (arg == "-o" || arg == "--linux") return "--os";
-    if (arg == "--high-accuracy" || arg == "--accuracy-mode") return "--cycle-accurate";
-    if (arg == "--perf-mode") return "--high-performance";
-    if (arg == "--headless" || arg == "--no-tui") return "--cli";
-    if (arg == "--contrast") return "--high-contrast";
-    if (arg == "--disable-forwarding") return "--no-forwarding";
-    if (arg == "--mouse-speed") return "--mouse-sensitivity";
-    if (arg == "--vector-len") return "--vlen";
-    if (arg == "-B" || arg == "--opensbi") return "remove it; OpenSBI is automatic with --fdt";
-    return {};
-}
 
 auto is_help_option(std::string_view arg) -> bool { return arg == "-h" || arg == "--help"; }
 
@@ -379,6 +343,12 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         if (!value) return std::unexpected(value.error());
         options.fn_traplog = std::string(*value);
         options.traplog_mode = true;
+        return true;
+    }
+    if (arg == "--log-file") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.fn_log = std::string(*value);
         return true;
     }
     return false;
@@ -459,30 +429,21 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         return true;
     }
     if (is_ca_option(arg)) {
-        result.options.cycle_accurate = true;
-        result.options.high_performance = false;
+        result.options.cycle_mode_requested = true;
         return true;
     }
-    if (arg == "--preset") {
+    if (arg == "--pipeline") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
-        std::string p_str(*value);
-        if (p_str != "rocket" && p_str != "embedded" && p_str != "fast") {
+        if (!pipeline::parse_pipeline_type(*value).has_value()) {
             return std::unexpected(
-                std::format("unsupported preset '{}' (supported: rocket, embedded, fast)", p_str));
+                std::format("unsupported pipeline '{}' (supported: 3stage, 5stage)", *value));
         }
-        result.options.preset = p_str;
-        return true;
-    }
-    if (arg == "--pipeline" || arg == "--pipe") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
         result.options.pipeline_type = std::string(*value);
         return true;
     }
     if (is_ia_option(arg)) {
-        result.options.cycle_accurate = false;
-        result.options.high_performance = true;
+        result.options.instruction_mode_requested = true;
         return true;
     }
     if (arg == "--smp" || arg == "-smp" || arg == "--cores") {
@@ -536,10 +497,6 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.explicit_cli_mode = true;
         return true;
     }
-    if (is_gui_option(arg)) {
-        result.options.gui_mode = true;
-        return true;
-    }
     if (arg == "--mouse-sensitivity") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -561,34 +518,6 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
     }
     if (is_no_forwarding_option(arg)) {
         result.options.disable_forwarding = true;
-        return true;
-    }
-    if (is_bp_type_option(arg)) {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        std::string val_str{*value};
-        if (val_str != "static-taken" && val_str != "static-not-taken" && val_str != "1bit" &&
-            val_str != "2bit" && val_str != "gshare") {
-            return std::unexpected(
-                std::format("invalid branch predictor type: {}. Allowed: static-taken, "
-                            "static-not-taken, 1bit, 2bit, gshare",
-                            val_str));
-        }
-        result.options.bp_type = val_str;
-        return true;
-    }
-    if (is_btb_size_option(arg)) {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        uint32_t val = 0;
-        if (!parse_u32_base0(*value, val)) {
-            return std::unexpected(std::format("invalid integer value for --btb-size: {}", *value));
-        }
-        result.options.btb_size = val;
-        return true;
-    }
-    if (is_disable_ex_forwarding_option(arg)) {
-        result.options.disable_ex_forwarding = true;
         return true;
     }
     if (arg.starts_with("--platform=")) {
@@ -630,10 +559,6 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
                 std::format("invalid network mode: {}. Allowed: user, tap, socket, none", net_opt));
         }
         result.options.net_mode = std::string(net_opt);
-        return true;
-    }
-    if (is_disable_mem_forwarding_option(arg)) {
-        result.options.disable_mem_forwarding = true;
         return true;
     }
     if (is_explain_inst_option(arg)) {
@@ -797,10 +722,6 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
 
     for (std::size_t i = 1; i < expanded_span.size(); ++i) {
         std::string_view const arg = expanded_span[i];
-        if (const auto replacement = removed_option_replacement(arg); !replacement.empty()) {
-            return std::unexpected(
-                std::format("option '{}' was removed in SimRV 2.0; use {}", arg, replacement));
-        }
         if (is_help_option(arg)) {
             result.action = CliAction::ShowHelp;
             return result;
@@ -842,11 +763,35 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
         result.options.tuimode = (::isatty(STDIN_FILENO) != 0);
     }
 
+    if (result.options.cycle_mode_requested && result.options.instruction_mode_requested) {
+        return std::unexpected("--ca and --ia are mutually exclusive");
+    }
+
+    if (result.options.explicit_cli_mode && result.options.explicit_tui_mode) {
+        return std::unexpected("--cli and --tui are mutually exclusive");
+    }
+
     if (needs_memory_image(result)) {
         return std::unexpected("-m/--image <FILE> is required to load a memory image");
     }
 
     return result;
+}
+
+auto resolve_runtime_profile(const RuntimeOptions& options) -> simrv::core::RuntimeProfile {
+    using simrv::core::ExecutionEngine;
+    using simrv::core::InteractionMode;
+    simrv::core::RuntimeProfile profile{};
+    profile.interaction = options.tuimode ? InteractionMode::Tui : InteractionMode::Cli;
+    profile.engine =
+        simrv::core::select_execution_engine(options.cycle_mode_requested, profile.interaction);
+    profile.debug_diagnostics = options.debug_mode || options.debugmode;
+    profile.tracing = options.bp_trace || options.trace_enabled || options.strace != 0 ||
+                      options.trace_begin != std::numeric_limits<Counter>::max();
+    profile.rollback = options.rollback || options.debug_mode;
+    profile.lockstep = options.lockstep_mode;
+    profile.gdb = options.gdb_mode;
+    return profile;
 }
 
 auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& options)
@@ -874,7 +819,6 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     machine->s_start_pc = options.start_pc;
     simrv::memory::g_dram_base = simrv::memory::kDramBaseAddress;
     machine->s_tuimode = options.tuimode;
-    machine->s_gui_mode = options.gui_mode;
     machine->s_high_contrast = options.high_contrast;
     machine->s_class_mode = options.class_mode;
     machine->s_debugmode = options.debugmode;
@@ -897,42 +841,39 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
         machine->s_bp_trace = options.bp_trace;
     }
 
-    machine->s_cycle_accurate = options.cycle_accurate;
-    if (options.cycle_accurate) {
-        machine->s_high_performance = false;
-    } else {
-        machine->s_high_performance = options.high_performance;
-    }
+    machine->runtime_profile = resolve_runtime_profile(options);
+    simrv::log::info("Runtime profile: {} execution, {} interaction{}{}{}",
+                     machine->runtime_profile.execution_name(),
+                     machine->runtime_profile.interaction_name(),
+                     machine->runtime_profile.debug_diagnostics ? ", diagnostics enabled" : "",
+                     machine->runtime_profile.tracing ? ", tracing enabled" : "",
+                     machine->runtime_profile.rollback ? ", rollback enabled" : "");
     machine->s_fn_cpuconfig = options.fn_cpuconfig;
-    const auto parsed_pipe = pipeline::parse_pipeline_type(options.pipeline_type);
+    const auto parsed_pipe = *pipeline::parse_pipeline_type(options.pipeline_type);
     machine->s_pipeline_type = parsed_pipe;
+    const auto platform_name =
+        options.platform_profile == simrv::core::PlatformProfile::Pcie   ? "pcie"
+        : options.platform_profile == simrv::core::PlatformProfile::Mmio ? "mmio"
+                                                                         : "hybrid";
+    simrv::log::info(
+        "Run configuration: RV{}, {}-mode, {} hart(s), {} platform, {} MiB RAM",
+        simrv::xlen::kXLenBits, options.appmode ? "bare-metal" : "OS", options.num_harts,
+        platform_name,
+        (options.dram_size != 0 ? options.dram_size : simrv::memory::kDramSize) / (1024 * 1024));
+    simrv::log::info("Guest image: {}", options.fn_memimg.empty() ? "<none>" : options.fn_memimg);
+    if (machine->runtime_profile.is_cycle_mode()) {
+        simrv::log::info("CA policy: {} pipeline, forwarding {}",
+                         pipeline::pipeline_type_name(parsed_pipe),
+                         options.disable_forwarding ? "disabled" : "enabled");
+    }
+    if (!options.fn_log.empty()) simrv::log::info("Developer log: {}", options.fn_log);
+    if (options.traplog_mode) simrv::log::info("Trap/SBI log: {}", options.fn_traplog);
 
     auto apply_config_to_cpu = [&](simrv::core::CPU& cpu) {
-        if (options.preset == "embedded") {
-            cpu.pipeline_sim.config.apply_preset(pipeline::CpuPreset::Embedded);
-        } else if (options.preset == "fast") {
-            cpu.pipeline_sim.config.apply_preset(pipeline::CpuPreset::Fast);
-        } else {
-            cpu.pipeline_sim.config.apply_preset(pipeline::CpuPreset::Rocket);
-        }
         cpu.pipeline_sim.config.pipeline_type = parsed_pipe;
+        cpu.pipeline_sim.config.record_snapshots = machine->runtime_profile.records_cycle_history();
 
         cpu.pipeline_sim.config.enable_forwarding = !options.disable_forwarding;
-        cpu.pipeline_sim.config.enable_ex_forwarding = !options.disable_ex_forwarding;
-        cpu.pipeline_sim.config.enable_mem_forwarding = !options.disable_mem_forwarding;
-        cpu.pipeline_sim.config.btb_entries = options.btb_size;
-
-        using BPT = pipeline::BranchPredictorType;
-        if (options.bp_type == "static-not-taken")
-            cpu.pipeline_sim.config.bp_type = BPT::StaticNotTaken;
-        else if (options.bp_type == "static-taken")
-            cpu.pipeline_sim.config.bp_type = BPT::StaticTaken;
-        else if (options.bp_type == "1bit")
-            cpu.pipeline_sim.config.bp_type = BPT::OneBitBimodal;
-        else if (options.bp_type == "gshare")
-            cpu.pipeline_sim.config.bp_type = BPT::Gshare;
-        else
-            cpu.pipeline_sim.config.bp_type = BPT::TwoBitBimodal;
     };
 
     apply_config_to_cpu(machine->cpu);
@@ -1040,8 +981,6 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         stdout,
         "  {}-u, --tui{}                  Enable interactive TUI split-screen monitor mode\n",
         style(kBrightGreen), style(kReset));
-    std::print(stdout, "  {}-G, --gui{}                  Enable external SDL3 graphical window\n",
-               style(kBrightGreen), style(kReset));
     std::print(stdout,
                "  {}--mouse-sensitivity {}{}<FACTOR>{} Adjust mouse relative speed "
                "scaling factor (default: 1.0)\n",
@@ -1055,13 +994,13 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         style(kBrightGreen), style(kReset));
 
     std::print(stdout,
-               "  {}-C, --cycle-accurate, --ca{} Enable structural cycle-accurate performance "
-               "simulation mode\n",
+               "  {}-C, --ca{}               Cycle simulation (fast in CLI, observable in TUI)\n",
+               style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}--ia{}                   Instruction engine (default)\n",
                style(kBrightGreen), style(kReset));
     std::print(stdout,
-               "  {}--high-performance, --ia{} Enable optimized simulation mode "
-               "bypassing caches/coroutines (default)\n",
-               style(kBrightGreen), style(kReset));
+               "  {}--pipeline {}{}<TYPE>{}  CA pipeline: 3stage or 5stage (default: 5stage)\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--cpu-config {}{}<FILE>{}    Load CPU latency configuration from a text file\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
@@ -1106,6 +1045,10 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         "  {}--trap-log {}{}<FILE>{}     Write comprehensive trap/SBI diagnostic logs to file\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
+               "  {}--log-file {}{}<FILE>{}     Mirror timestamped startup, diagnostics, and final "
+               "summary logs to file\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
                "  {}--instmix{}               Write instruction mix metrics report to "
                "trace/instmix.txt on exit\n\n",
                style(kBrightGreen), style(kReset));
@@ -1135,18 +1078,6 @@ auto needs_memory_image(const ParseResult& result) -> bool {
     std::print(stdout,
                "  {}--no-forwarding{}    Disable operand forwarding in cycle-accurate simulation\n",
                style(kBrightGreen), style(kReset));
-    std::print(stdout, "  {}--no-ex-forwarding{}  Disable EX-to-EX forwarding path only\n",
-               style(kBrightGreen), style(kReset));
-    std::print(stdout, "  {}--no-mem-forwarding{} Disable MEM-to-EX forwarding path only\n",
-               style(kBrightGreen), style(kReset));
-    std::print(stdout,
-               "  {}--bp-type {}{}<TYPE>{}  Branch predictor type "
-               "[static-not-taken|static-taken|1bit|2bit|gshare] (default: 2bit)\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}--btb-size {}{}<N>{}    Branch target buffer entries (default: 128, 0 = disabled)\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(
         stdout,
         "  {}--gdb{}                      Enable GDB RSP stub (waits for client before running)\n",
@@ -1191,7 +1122,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
 }
 
 auto option_error(std::string_view msg, int status) -> void {
-    simrv::log::error("{}", msg);
+    std::println(stderr, "{}", msg);
     std::exit(status);
 }
 

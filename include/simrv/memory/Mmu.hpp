@@ -28,6 +28,27 @@ enum class PteFlag : PteFlags {
 
 enum class PteAccess : uint8_t { Read = 0, Write = 1, Code = 2 };
 
+enum class PageWalkStatus : uint8_t { ReadPte, WritePte, Complete, Fault };
+
+/** Architectural state of one resumable hardware page-table walk. */
+struct PageWalkState {
+    Address virtual_address = 0;
+    Address pte_address = 0;
+    Address physical_address = 0;
+    Word pte = 0;
+    Word pte_update_mask = 0;
+    CSRValue mstatus = 0;
+    PteAccess access = PteAccess::Read;
+    PrivilegeLevel privilege{};
+    TrapCause fault = 0;
+    unsigned xlen = 0;
+    unsigned pte_size = 0;
+    unsigned vpn_bits_per_level = 0;
+    int level = -1;
+    bool update_access_bits = true;
+    PageWalkStatus status = PageWalkStatus::Fault;
+};
+
 /**
  * @class Mmu
  * @brief Handles Sv32, Sv39, and Sv48 page translation.
@@ -81,6 +102,20 @@ class Mmu {
     auto translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
                    Word satp, unsigned xlen, bool update_access_bits = true)
         -> std::expected<Address, TrapCause>;
+
+    /// Start a walk without performing any implicit physical-memory access.
+    [[nodiscard]] auto begin_page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv,
+                                       CSRValue mstatus, Word satp, unsigned xlen,
+                                       bool update_access_bits = true) -> PageWalkState;
+
+    /// Consume the PTE returned by the current ReadPte request.
+    void accept_page_walk_pte(PageWalkState& state, Word pte) const;
+
+    /// Complete the current accessed/dirty-bit WritePte request.
+    static void accept_page_walk_write(PageWalkState& state);
+
+    /// Convert a physical PTE transaction failure into the original access-fault class.
+    static void fail_page_walk_access(PageWalkState& state);
 
     /**
      * @brief Verify if a virtual address is canonical according to the active SV mode.
@@ -142,33 +177,12 @@ class Mmu {
                                                 PrivilegeLevel priv, CSRValue mstatus) const
         -> bool;
 
-    /**
-     * @brief Update PTE accessed (A) and dirty (D) flag bits per RISC-V spec.
-     *
-     * Sets the accessed bit on every access and dirty bit on writes,
-     * then writes the updated PTE back to memory.
-     *
-     * @param pte_addr Physical address of the PTE in memory
-     * @param pte_value Page table entry value to update
-     * @param access Access type that triggered the update
-     * @param pte_size Size of the PTE in bytes (4 or 8)
-     */
-    void update_pte_access_bits(Address pte_addr, Word& pte_value, PteAccess access,
-                                unsigned pte_size);
+    [[nodiscard]] static auto page_fault_for(PteAccess access) -> TrapCause;
+    [[nodiscard]] static auto access_fault_for(PteAccess access) -> TrapCause;
+    void select_next_pte(PageWalkState& state, Address table_address) const;
 
     // Page table structure constants
     static constexpr Word kPteShift = 10;  // PPN to PTE conversion shift
-
-    // Cached SATP configuration parameters to accelerate page walks
-    Word cached_satp_ = ~Word{0};
-    unsigned cached_xlen_ = 0;
-    int cached_levels_ = 2;
-    int cached_pte_size_ = 4;
-    int cached_vpn_bits_per_level_ = 10;
-    Word cached_root_ppn_ = 0;
-    Address cached_root_pt_addr_ = 0;
-    Word cached_satp_mode_ = 0;
-    bool cached_valid_ = false;
 };
 
 }  // namespace simrv

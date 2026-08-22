@@ -33,7 +33,7 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
                         "[Power] SiFive Test Finisher: System Poweroff requested (status: {}).",
                         status);
                     machine_.exit_code = status;
-                    machine_.stop();
+                    machine_.stop(simrv::core::Machine::StopReason::GuestPoweroff);
                     break;
                 }
                 case PowerCommand::Crash: {
@@ -42,7 +42,7 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
                         "[Power] SiFive Test Finisher: System Fail/Crash requested (status: {}).",
                         status);
                     machine_.exit_code = (status != 0) ? status : 1;
-                    machine_.stop();
+                    machine_.stop(simrv::core::Machine::StopReason::GuestCrash);
                     break;
                 }
                 case PowerCommand::Reboot:

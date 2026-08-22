@@ -58,9 +58,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     std::optional<bool> override_appmode;
     std::optional<std::string> override_binary;
     std::optional<std::string> override_disk;
-    std::optional<bool> override_cycle_accurate;
+    std::optional<bool> override_cycle_mode;
     std::optional<bool> override_debug_mode;
-    std::optional<bool> override_high_performance;
     std::optional<bool> override_rollback;
     std::optional<bool> override_high_contrast;
     std::optional<bool> override_class_mode;
@@ -96,14 +95,12 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             parsed->options.fn_dskimg = *override_disk;
             parsed->options.use_disk = !override_disk->empty();
         }
-        if (override_cycle_accurate.has_value()) {
-            parsed->options.cycle_accurate = *override_cycle_accurate;
+        if (override_cycle_mode.has_value()) {
+            parsed->options.cycle_mode_requested = *override_cycle_mode;
+            parsed->options.instruction_mode_requested = !*override_cycle_mode;
         }
         if (override_debug_mode.has_value()) {
             parsed->options.debug_mode = *override_debug_mode;
-        }
-        if (override_high_performance.has_value()) {
-            parsed->options.high_performance = *override_high_performance;
         }
         if (override_rollback.has_value()) {
             parsed->options.rollback = *override_rollback;
@@ -153,6 +150,10 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 std::exit(0);
             case CliAction::Run:
                 break;
+        }
+
+        if (!parsed->options.fn_log.empty() && !simrv::log::set_log_file(parsed->options.fn_log)) {
+            option_error("cannot open log file: " + parsed->options.fn_log, 0);
         }
 
         std::unique_ptr<simrv::core::Machine> sim_machine;
@@ -228,8 +229,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         if (sim_machine->reboot_requested) {
             simrv::log::info("Rebooting guest system...");
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            override_cycle_accurate = sim_machine->s_cycle_accurate;
-            override_high_performance = sim_machine->s_high_performance;
+            override_cycle_mode = sim_machine->runtime_profile.is_cycle_mode();
             override_debug_mode = sim_machine->s_debug_mode;
             override_rollback = sim_machine->s_rollback_enabled;
             override_high_contrast = sim_machine->s_high_contrast;

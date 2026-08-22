@@ -6,6 +6,8 @@
 #include <string>
 #include <string_view>
 
+#include "simrv/core/Machine.hpp"
+#include "simrv/tui/LogBuffer.hpp"
 #include "simrv/tui/TuiFrameRenderer.hpp"
 #include "simrv/tui/TuiGuidance.hpp"
 #include "simrv/tui/TuiInputRouter.hpp"
@@ -17,6 +19,10 @@
 #include "simrv/tui/modals/HelpModal.hpp"
 #include "simrv/tui/modals/SettingsModal.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
+
+namespace simrv::core {
+void Machine::request_reboot() {}
+}  // namespace simrv::core
 
 namespace {
 
@@ -142,7 +148,7 @@ void test_utf8_and_theme_helpers() {
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 25, "all key actions have registry entries");
+    expect(bindings.size() == 26, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
     std::set<char> claimed_chars;
     for (const auto& binding : bindings) {
@@ -192,6 +198,7 @@ void test_key_registry() {
         simrv::tui::TuiFooterAction::ManageBreakpoints,
         simrv::tui::TuiFooterAction::Reboot,
         simrv::tui::TuiFooterAction::SwitchHart,
+        simrv::tui::TuiFooterAction::ToggleTheme,
     };
     for (const auto footer_action : footer_actions) {
         const auto key_action = simrv::tui::key_action_for_footer(footer_action);
@@ -248,29 +255,22 @@ void test_sysconfig_modal_modes() {
     // Test Cycle-Accurate mode behavior
     SysConfigDraft ca_draft;
     ca_draft.cycle_accurate = true;
-    ca_draft.preset = 0;
-    ca_draft.icache_miss_penalty = 10;
+    ca_draft.mul_latency = 3;
     int cursor = 0;
 
     SystemConfigModal::move_cursor(ca_draft, cursor, 1);
     expect(cursor == 1, "CA mode advances cursor across pipeline settings");
 
-    SystemConfigModal::adjust_setting(ca_draft, 1, 1);
+    SystemConfigModal::adjust_setting(ca_draft, 0, 1);
     expect(ca_draft.pipeline_type == 1, "CA mode allows adjusting pipeline model");
 
-    SystemConfigModal::adjust_setting(ca_draft, 2, 5);
-    expect(ca_draft.icache_miss_penalty == 15, "CA mode allows mutating cache penalties");
-
-    SystemConfigModal::adjust_setting(ca_draft, 0, 1);
-    expect(ca_draft.preset == 1, "CA mode allows cycling microarchitecture presets");
-    expect(ca_draft.pipeline_type == 1, "Preset applies 3-stage embedded pipeline model");
-    expect(ca_draft.icache_miss_penalty == 6,
-           "Preset profile applies embedded microarchitecture defaults");
+    SystemConfigModal::adjust_setting(ca_draft, 1, 5);
+    expect(ca_draft.mul_latency == 8, "CA mode allows mutating modeled execution latency");
 
     // Test Functional (IA) mode behavior for CA modal
     SysConfigDraft ia_draft;
     ia_draft.cycle_accurate = false;
-    ia_draft.icache_miss_penalty = 10;
+    ia_draft.mul_latency = 3;
     cursor = 0;
 
     SystemConfigModal::move_cursor(ia_draft, cursor, 1);
@@ -283,16 +283,16 @@ void test_sysconfig_modal_modes() {
     settings_draft.smp_multithreaded = false;
     int s_cursor = 0;
 
-    SettingsModal::move_cursor(s_cursor, 6);
-    expect(s_cursor == 6, "Settings modal advances cursor to SMP core count");
+    SettingsModal::move_cursor(s_cursor, 5);
+    expect(s_cursor == 5, "Settings modal advances cursor to SMP core count");
 
-    SettingsModal::adjust_setting(settings_draft, 6, 3);
+    SettingsModal::adjust_setting(settings_draft, 5, 3);
     expect(settings_draft.num_harts == 4, "Settings modal adjusts SMP active core count");
 
-    SettingsModal::adjust_setting(settings_draft, 7, 2);
+    SettingsModal::adjust_setting(settings_draft, 6, 2);
     expect(settings_draft.smp_quantum == 1200, "Settings modal adjusts SMP quantum slice");
 
-    SettingsModal::adjust_setting(settings_draft, 8, 1);
+    SettingsModal::adjust_setting(settings_draft, 7, 1);
     expect(settings_draft.smp_multithreaded == true, "Settings modal toggles SMP worker threads");
 
     // Verify render text in IA mode contains disabled note for CA options
@@ -623,6 +623,23 @@ void test_themes_and_mouse_interactions() {
            "cycled back to modern unicode");
 }
 
+void test_log_buffer_wrapping() {
+    simrv::tui::LogBuffer buffer;
+    buffer.push("Short log line");
+    buffer.push(
+        "\033[36mLoaded 105604 symbols from ELF image: "
+        "linux-images/rv64/fw_payload.elf\033[0m");
+
+    auto lines_w30 = buffer.get_wrapped_lines(30, 20);
+    expect(lines_w30.size() >= 3, "Log wrapped across multiple lines when width=30");
+    expect(strip_ansi(lines_w30[0]) == "Short log line", "First short line is unchanged");
+    expect(strip_ansi(lines_w30[2]).starts_with("  "),
+           "Wrapped continuation line starts with 2-space indent");
+
+    auto lines_w100 = buffer.get_wrapped_lines(100, 20);
+    expect(lines_w100.size() == 2, "Log reflows to 2 lines when width=100");
+}
+
 }  // namespace
 
 int main() {
@@ -638,6 +655,7 @@ int main() {
     test_responsive_layout();
     test_frame_composition();
     test_themes_and_mouse_interactions();
+    test_log_buffer_wrapping();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;

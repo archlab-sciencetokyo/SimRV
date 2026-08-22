@@ -34,9 +34,9 @@ enum class ExtId : std::uint32_t {
     Rfence = 0x52464E43,        // RFNC
     Ipi = 0x735049,             // sPI
     Hsm = 0x48534D,             // HSM
-    SystemReset = 0x53525354,    // SRST
+    SystemReset = 0x53525354,   // SRST
     Pmu = 0x504D55,             // PMU
-    DebugConsole = 0x4442434E,   // DBCN
+    DebugConsole = 0x4442434E,  // DBCN
     Susp = 0x53555350,          // SUSP
     Cppc = 0x43505043,          // CPPC
 };
@@ -249,8 +249,8 @@ auto Sbi::handle_hsm(Word func_id) -> bool {
             }
             target_cpu.state().pc = start_addr;
             if (target_cpu.state().regs.xlen == 32) {
-                target_cpu.state().pc = static_cast<Register>(
-                    static_cast<int64_t>(static_cast<int32_t>(start_addr)));
+                target_cpu.state().pc =
+                    static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(start_addr)));
             }
             target_cpu.state().priv = PrivilegeLevel::Supervisor;
             target_cpu.state().regs.write(RegId::A0, target_hart);
@@ -296,7 +296,7 @@ auto Sbi::handle_system_reset(Word func_id) -> bool {
                              reset_reason);
             if (cpu_.machine_ != nullptr) {
                 cpu_.machine_->exit_code = static_cast<int>(reset_reason);
-                cpu_.machine_->stop();
+                cpu_.machine_->stop(core::Machine::StopReason::GuestPoweroff);
             }
             sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
         } else if (reset_type == 1 || reset_type == 2) {
@@ -321,8 +321,8 @@ auto Sbi::handle_dbcn(Word func_id) -> bool {
             const auto num_bytes = static_cast<size_t>(cpu_.state().regs.read(RegId::A0));
             const auto base_addr_lo = cpu_.state().regs.read(RegId::A1);
             const auto base_addr_hi = cpu_.state().regs.read(RegId::A2);
-            const auto paddr = static_cast<Address>(
-                (static_cast<uint64_t>(base_addr_hi) << 32) | static_cast<uint64_t>(base_addr_lo));
+            const auto paddr = static_cast<Address>((static_cast<uint64_t>(base_addr_hi) << 32) |
+                                                    static_cast<uint64_t>(base_addr_lo));
 
             size_t written = 0;
             for (size_t i = 0; i < num_bytes; ++i) {
@@ -435,7 +435,8 @@ auto Sbi::handle_cppc(Word func_id) -> bool {
         case 0: {  // sbi_cppc_probe
             const Word reg_id = cpu_.state().regs.read(RegId::A0);
             if (reg_id <= 0x12) {
-                sbi_return(static_cast<SignedWord>(SbiError::Success), 32);  // 32-bit register width
+                sbi_return(static_cast<SignedWord>(SbiError::Success),
+                           32);  // 32-bit register width
             } else {
                 sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);
             }
@@ -534,7 +535,7 @@ auto Sbi::handle_ecall(TrapCause cause) -> bool {
             simrv::log::info("[SBI] Legacy Shutdown requested (ext 0x08).");
             if (cpu_.machine_ != nullptr) {
                 cpu_.machine_->exit_code = 0;
-                cpu_.machine_->stop();
+                cpu_.machine_->stop(core::Machine::StopReason::GuestPoweroff);
             }
             sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
             return true;

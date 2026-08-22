@@ -319,7 +319,7 @@ struct Utf8Cell {
 
 }  // namespace
 
-auto get_display_width(const std::string& s) -> int {
+auto get_display_width(std::string_view s) -> int {
     int len = 0;
     bool in_esc = false;
     bool in_csi = false;

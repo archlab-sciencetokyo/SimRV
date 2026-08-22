@@ -38,7 +38,7 @@ auto LeftPane::get_total_rows(int width) -> int {
         return static_cast<int>(get_explain_rows(width).size());
     }
     bool const single_column = is_single_column(width);
-    int base_rows = machine_.s_cycle_accurate ? 43 : 35;
+    int base_rows = machine_.runtime_profile.is_cycle_mode() ? 43 : 35;
     if (single_column) {
         base_rows += 16;
     }
@@ -300,7 +300,7 @@ auto LeftPane::render_tab_bar_tier2(int width) const -> std::string {
         }
         case TuiCategoryGroup::Memory: {
             tabs.push_back({.page = TuiRegPage::STACK, .name = "Stack"});
-            if (machine_.s_cycle_accurate) {
+            if (machine_.runtime_profile.is_cycle_mode()) {
                 std::string cache_name = (cache_inspect_type_ == 0) ? "Cache:IC" : "Cache:DC";
                 tabs.push_back({.page = TuiRegPage::CACHE, .name = cache_name});
             }
@@ -310,7 +310,7 @@ auto LeftPane::render_tab_bar_tier2(int width) const -> std::string {
         }
         case TuiCategoryGroup::Pipeline: {
             tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Pipe"});
-            if (machine_.s_cycle_accurate) {
+            if (machine_.runtime_profile.is_cycle_mode()) {
                 tabs.push_back({.page = TuiRegPage::BPRED, .name = "BPred"});
                 tabs.push_back({.page = TuiRegPage::HAZARD, .name = "Hazard"});
             }
@@ -382,15 +382,16 @@ auto LeftPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPage> {
                     }
                     if (span.grp == TuiCategoryGroup::Memory) {
                         if (page_ == TuiRegPage::STACK)
-                            return machine_.s_cycle_accurate ? TuiRegPage::CACHE : TuiRegPage::TLB;
+                            return machine_.runtime_profile.is_cycle_mode() ? TuiRegPage::CACHE
+                                                                            : TuiRegPage::TLB;
                         if (page_ == TuiRegPage::CACHE) return TuiRegPage::TLB;
                         if (page_ == TuiRegPage::TLB) return TuiRegPage::BUS;
                         return TuiRegPage::STACK;
                     }
                     if (span.grp == TuiCategoryGroup::Pipeline) {
                         if (page_ == TuiRegPage::PIPELINE)
-                            return machine_.s_cycle_accurate ? TuiRegPage::BPRED
-                                                             : TuiRegPage::PIPELINE;
+                            return machine_.runtime_profile.is_cycle_mode() ? TuiRegPage::BPRED
+                                                                            : TuiRegPage::PIPELINE;
                         if (page_ == TuiRegPage::BPRED) return TuiRegPage::HAZARD;
                         return TuiRegPage::PIPELINE;
                     }
@@ -399,7 +400,8 @@ auto LeftPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPage> {
                                                               : TuiRegPage::EXPLAIN;
                     }
                 }
-                return get_default_page_for_group(span.grp, machine_.s_cycle_accurate);
+                return get_default_page_for_group(span.grp,
+                                                  machine_.runtime_profile.is_cycle_mode());
             }
         }
         return std::nullopt;
@@ -429,7 +431,7 @@ auto LeftPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPage> {
             }
             case TuiCategoryGroup::Memory: {
                 tabs.push_back({.page = TuiRegPage::STACK, .name = "Stack"});
-                if (machine_.s_cycle_accurate) {
+                if (machine_.runtime_profile.is_cycle_mode()) {
                     std::string cache_name = (cache_inspect_type_ == 0) ? "Cache:IC" : "Cache:DC";
                     tabs.push_back({.page = TuiRegPage::CACHE, .name = cache_name});
                 }
@@ -439,7 +441,7 @@ auto LeftPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPage> {
             }
             case TuiCategoryGroup::Pipeline: {
                 tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Pipe"});
-                if (machine_.s_cycle_accurate) {
+                if (machine_.runtime_profile.is_cycle_mode()) {
                     tabs.push_back({.page = TuiRegPage::BPRED, .name = "BPred"});
                     tabs.push_back({.page = TuiRegPage::HAZARD, .name = "Hazard"});
                 }
@@ -518,7 +520,7 @@ auto LeftPane::render_log_bottom_row(int row_idx, int num_rows, int width) -> st
 }
 
 auto LeftPane::render_guidance_row(int row_idx, int width) -> std::string {
-    auto const guidance = guidance_for_page(page_, machine_.s_cycle_accurate);
+    auto const guidance = guidance_for_page(page_, machine_.runtime_profile.is_cycle_mode());
     switch (row_idx) {
         case 0:
             return section_line("Learn · " + std::string(guidance.title), width);

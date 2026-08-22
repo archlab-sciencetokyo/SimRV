@@ -3,6 +3,32 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Execution architecture
+
+- Replaced post-retirement timing penalties with one deterministic per-cycle transition kernel for
+  three-stage and five-stage in-order pipelines. Fast CLI and observable TUI policies share the
+  same transitions and differ only in bounded diagnostic history.
+- Kept `--ia` and `--ca` as the public execution choices. CLI selects the fast policy and TUI
+  selects the observable policy for the chosen engine.
+- Added timed instruction/data cache traffic, resumable Sv32/Sv39 page walks, atomic accessed/dirty
+  PTE updates, deterministic hart-order arbitration, and cycle-boundary coherence effects.
+- Removed the coroutine pipeline, dual-issue model, aggregate cache/TLB penalty fields, and the TUI
+  high-performance toggle. `--pipeline` now accepts only `3stage` or `5stage`; there are no
+  compatibility aliases for removed pipeline presets or tuning flags.
+
+### Developer interfaces
+
+- Added `--log-file FILE` to mirror timestamped configuration, diagnostics, typed termination
+  reason, performance counters, cache statistics, and bus statistics without requiring the TUI.
+- Added machine-readable repeated benchmark reports and optional Linux `perf stat` host counters.
+  Host counters supplement wall-clock throughput and must only be compared under a controlled host
+  configuration.
+- Limited full ELF symbol loading to observable TUI execution; CLI loads only runtime-essential
+  symbols needed for guest control.
+- Consolidated TUI setting layouts and corrected modal cursor, scroll, and mouse hit-testing.
+
 ## [v2.1.0-alpha.1] — 2026-08-20
 
 Alpha prerelease introducing full **Multi-Hart Symmetric Multiprocessing (SMP)** support, **TileLink-C 5-Channel Directory Cache Coherence (MESI)**, and fast inline directory lookups.
@@ -51,27 +77,6 @@ Release candidate 9 focuses on architectural compliance, trap and interrupt corr
 OS lifecycle control, MMIO safety, and TUI/UART stability ahead of v2.0.0.
 
 ### Breaking CLI cleanup
-
-SimRV 2.0 removes ambiguous and deprecated aliases. Removed options fail with an explicit
-replacement instead of silently changing behavior.
-
-| Removed | Replacement |
-|---|---|
-| `-k`, `-i`, `--kernel` | `-m`, `--image` |
-| `--dtb` | `-f`, `--fdt` |
-| `-a`, `--app` | `-b`, `--baremetal` |
-| `-o`, `--linux` | `--os` |
-| `--headless`, `--no-tui` | `-c`, `--cli` |
-| `--high-accuracy`, `--accuracy-mode` | `-C`, `--cycle-accurate` |
-| `--perf-mode` | `--high-performance`, `--ia` |
-| `--vector-len` | `--vlen` |
-| `--mouse-speed` | `--mouse-sensitivity` |
-| `--contrast` | `--high-contrast` |
-| `--disable-forwarding` | `--no-forwarding` |
-| `-B`, `--opensbi` | Remove it; OpenSBI is automatic with `--fdt` |
-
-The conflicting `-G` alias is now GUI-only; use `--gdb` for the GDB server. The conflicting `-c`
-alias is now CLI-only; use `-f` or `--fdt` for a device tree.
 
 ### TUI framework hardening
 

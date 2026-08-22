@@ -8,6 +8,7 @@
 #include <deque>
 #include <expected>
 #include <fstream>
+#include <optional>
 #include <vector>
 
 #include "simrv/Define.hpp"
@@ -20,9 +21,10 @@
 #include "simrv/core/StateControl.hpp"
 #include "simrv/core/Tlb.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
+#include "simrv/memory/Bus.hpp"
+#include "simrv/pipeline/CycleTransition.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
-#include "simrv/pipeline/PipelineTask.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -235,6 +237,8 @@ struct UndoStep {
     ClintState clint_state;
     uint64_t e_icount = 0;
     Counter e_ccount = 0;
+    simrv::pipeline::HartCycleState ca_state{};
+    simrv::pipeline::HartPipelineState ca_pipeline{};
     std::array<uint64_t, isa::OperationIdCount> e_instmix{};
 };
 
@@ -350,11 +354,11 @@ class CPU {
     void evaluate_timer_interrupt();
 
     /**
-     * @brief Executes one full CPU cycle. Resolves all pipeline stages or steps coroutine
-     * execution.
+     * @brief Advances the selected execution engine by one scheduling step.
      * @param machine Reference to the top-level machine orchestration unit.
      */
     void run_cycle(Machine& machine);
+    void run_ca_pipeline_cycle(Machine& machine);
 
     /**
      * @brief Executes one full CPU cycle in optimized baremetal mode.
@@ -362,6 +366,8 @@ class CPU {
      * @param machine Reference to the top-level machine orchestration unit.
      */
     void run_cycle_baremetal(Machine& machine);
+    /// Advance architectural time by one deterministic global CA clock.
+    void tick_cycle_clock(Machine& machine, bool interrupt_boundary = true);
 
     /**
      * @brief Records active instruction details to the TUI (Text User Interface) trace buffer if
@@ -385,13 +391,6 @@ class CPU {
      * @param batch_size Maximum number of instructions to execute in the batch.
      */
     void run_fast_baremetal_batch(Machine& machine, uint32_t batch_size);
-
-    /**
-     * @brief Coroutine generator for persistent zero-allocation pipeline simulation.
-     * @param machine Pointer to the top-level machine orchestration unit.
-     * @return PipelineTask handle.
-     */
-    simrv::pipeline::PipelineTask run_pipeline_coroutine(Machine* machine);
 
    public:
     /**
@@ -468,6 +467,16 @@ class CPU {
      * @brief Functional monadic Commit stage.
      */
     [[nodiscard]] auto commit_stage(Machine& machine) -> bool;
+
+    /**
+     * Translate one address. In CA mode this resumes a typed page walk and returns nullopt while
+     * its physical PTE transaction is outstanding; IA drives the same MMU state synchronously.
+     */
+    auto translate_stage_address(Machine& machine, Address virtual_address, PteAccess access,
+                                 PrivilegeLevel privilege, unsigned active_xlen,
+                                 simrv::memory::TlPort port,
+                                 simrv::pipeline::TimedPageWalkState& timed_walk)
+        -> std::optional<std::expected<Address, TrapCause>>;
 
    private:
     /// Translate fetch addresses and prime IF transient context.
@@ -604,8 +613,9 @@ class CPU {
     std::ofstream* trap_log_stream = nullptr;
     bool use_opensbi = false;
     Machine* machine_ = nullptr;
-    simrv::pipeline::PipelineTask pipeline_task;
     simrv::pipeline::PipelineSim pipeline_sim;
+    simrv::pipeline::HartCycleState ca_state{};
+    simrv::pipeline::HartPipelineState ca_pipeline{};
     DecodeCache decode_cache;
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_read{};
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_write{};

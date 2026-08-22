@@ -125,25 +125,12 @@ auto StatusBar::get_header_action_at_col(int col, int terminal_width) const -> H
 
     // Right Pane header region
     int const right_x0 = (layout_ == TuiLayout::Split) ? (left_width_ + 3) : 2;
-    int const target_right_w = (layout_ == TuiLayout::Split) ? right_width_ : (terminal_width - 2);
 
     if (is_pos_on_right_panel_mode(col)) {
         return {.action = HeaderAction::TogglePanelMode};
     }
     if (is_pos_on_right_panel_attached(col)) {
         return {.action = HeaderAction::ToggleAttached};
-    }
-
-    // Check Quick Action icons at far right: [CFG] [ ? ] [THM] [PWR] (or [RST] in ANSI)
-    int const action_w = 24;
-    int const action_bar_start = right_x0 + target_right_w - action_w;
-    if (col >= action_bar_start && col < right_x0 + target_right_w) {
-        int rel = col - action_bar_start;
-        // "[CFG] [ ? ] [THM] [PWR] "
-        if (rel >= 0 && rel < 5) return {.action = HeaderAction::OpenSettings};
-        if (rel >= 6 && rel < 11) return {.action = HeaderAction::OpenGlossary};
-        if (rel >= 12 && rel < 17) return {.action = HeaderAction::ToggleTheme};
-        if (rel >= 18 && rel < 23) return {.action = HeaderAction::Reboot};
     }
 
     // Check Speed badge or Hart pills in middle region
@@ -159,7 +146,7 @@ auto StatusBar::get_header_action_at_col(int col, int terminal_width) const -> H
     return {};
 }
 
-enum class FooterCategory : uint8_t { Exec, Debug, Inspect, Nav, Separator, Spacer };
+enum class FooterCategory : uint8_t { Exec, Debug, Config, Inspect, Sys, Separator, Spacer };
 
 enum class FooterPriority : uint8_t { Core, Extended };
 
@@ -171,10 +158,6 @@ struct FooterEntry {
 };
 
 static const auto paused_row1_entries = std::to_array<FooterEntry>({
-    {.text = "EXEC: ",
-     .action = std::nullopt,
-     .category = FooterCategory::Exec,
-     .priority = FooterPriority::Core},
     {.text = "[s] Step",
      .action = TuiFooterAction::Step,
      .category = FooterCategory::Exec,
@@ -207,11 +190,7 @@ static const auto paused_row1_entries = std::to_array<FooterEntry>({
      .action = std::nullopt,
      .category = FooterCategory::Separator,
      .priority = FooterPriority::Core},
-    {.text = "DEBUG: ",
-     .action = std::nullopt,
-     .category = FooterCategory::Debug,
-     .priority = FooterPriority::Core},
-    {.text = "[:] BP",
+    {.text = "[:] Breakpoint",
      .action = TuiFooterAction::SetBreakpoint,
      .category = FooterCategory::Debug,
      .priority = FooterPriority::Core},
@@ -219,7 +198,7 @@ static const auto paused_row1_entries = std::to_array<FooterEntry>({
      .action = std::nullopt,
      .category = FooterCategory::Spacer,
      .priority = FooterPriority::Extended},
-    {.text = "[w] WP",
+    {.text = "[w] Watchpoint",
      .action = TuiFooterAction::SetWatchpoint,
      .category = FooterCategory::Debug,
      .priority = FooterPriority::Extended},
@@ -227,40 +206,40 @@ static const auto paused_row1_entries = std::to_array<FooterEntry>({
      .action = std::nullopt,
      .category = FooterCategory::Spacer,
      .priority = FooterPriority::Extended},
-    {.text = "[k] Toggle",
+    {.text = "[k] Toggle BP",
      .action = TuiFooterAction::TogglePcBreakpoint,
-     .category = FooterCategory::Debug,
-     .priority = FooterPriority::Extended},
-    {.text = "  ",
-     .action = std::nullopt,
-     .category = FooterCategory::Spacer,
-     .priority = FooterPriority::Extended},
-    {.text = "[m] List",
-     .action = TuiFooterAction::ManageBreakpoints,
      .category = FooterCategory::Debug,
      .priority = FooterPriority::Extended},
 });
 
 static const auto paused_row2_entries = std::to_array<FooterEntry>({
-    {.text = "INSPECT: ",
-     .action = std::nullopt,
-     .category = FooterCategory::Inspect,
+    {.text = "[,] Settings",
+     .action = TuiFooterAction::OpenSettings,
+     .category = FooterCategory::Config,
      .priority = FooterPriority::Core},
-    {.text = "[i] Mem",
-     .action = TuiFooterAction::InspectMem,
-     .category = FooterCategory::Inspect,
+    {.text = "  ",
+     .action = std::nullopt,
+     .category = FooterCategory::Spacer,
+     .priority = FooterPriority::Core},
+    {.text = "[?] Help",
+     .action = TuiFooterAction::ToggleHelp,
+     .category = FooterCategory::Config,
+     .priority = FooterPriority::Core},
+    {.text = "  ",
+     .action = std::nullopt,
+     .category = FooterCategory::Spacer,
+     .priority = FooterPriority::Core},
+    {.text = "[t] Theme",
+     .action = TuiFooterAction::ToggleTheme,
+     .category = FooterCategory::Config,
      .priority = FooterPriority::Core},
     {.text = "  │  ",
      .action = std::nullopt,
      .category = FooterCategory::Separator,
      .priority = FooterPriority::Core},
-    {.text = "NAV: ",
-     .action = std::nullopt,
-     .category = FooterCategory::Nav,
-     .priority = FooterPriority::Core},
-    {.text = "[Tab] Layout",
-     .action = TuiFooterAction::CycleLayout,
-     .category = FooterCategory::Nav,
+    {.text = "[i] Inspect",
+     .action = TuiFooterAction::InspectMem,
+     .category = FooterCategory::Inspect,
      .priority = FooterPriority::Core},
     {.text = "  ",
      .action = std::nullopt,
@@ -268,7 +247,15 @@ static const auto paused_row2_entries = std::to_array<FooterEntry>({
      .priority = FooterPriority::Core},
     {.text = "[g] Learn",
      .action = TuiFooterAction::ToggleLearn,
-     .category = FooterCategory::Nav,
+     .category = FooterCategory::Inspect,
+     .priority = FooterPriority::Core},
+    {.text = "  │  ",
+     .action = std::nullopt,
+     .category = FooterCategory::Separator,
+     .priority = FooterPriority::Core},
+    {.text = "[Tab] Layout",
+     .action = TuiFooterAction::CycleLayout,
+     .category = FooterCategory::Sys,
      .priority = FooterPriority::Core},
     {.text = "  ",
      .action = std::nullopt,
@@ -276,23 +263,27 @@ static const auto paused_row2_entries = std::to_array<FooterEntry>({
      .priority = FooterPriority::Core},
     {.text = "[o] Load",
      .action = TuiFooterAction::LoadBinary,
-     .category = FooterCategory::Nav,
+     .category = FooterCategory::Sys,
      .priority = FooterPriority::Core},
     {.text = "  ",
      .action = std::nullopt,
      .category = FooterCategory::Spacer,
      .priority = FooterPriority::Core},
-    {.text = "[Ctrl-Q] Quit",
+    {.text = "[Ctrl-R] Reboot",
+     .action = TuiFooterAction::Reboot,
+     .category = FooterCategory::Sys,
+     .priority = FooterPriority::Core},
+    {.text = "  ",
+     .action = std::nullopt,
+     .category = FooterCategory::Spacer,
+     .priority = FooterPriority::Core},
+    {.text = "[q] Quit",
      .action = TuiFooterAction::Quit,
-     .category = FooterCategory::Nav,
+     .category = FooterCategory::Sys,
      .priority = FooterPriority::Core},
 });
 
 static const auto running_row1_entries = std::to_array<FooterEntry>({
-    {.text = "EXEC: ",
-     .action = std::nullopt,
-     .category = FooterCategory::Exec,
-     .priority = FooterPriority::Core},
     {.text = "[Ctrl-P] Pause",
      .action = TuiFooterAction::RunPause,
      .category = FooterCategory::Exec,
@@ -305,23 +296,11 @@ static const auto running_row1_entries = std::to_array<FooterEntry>({
      .action = TuiFooterAction::SetSpeed,
      .category = FooterCategory::Exec,
      .priority = FooterPriority::Core},
-    {.text = "  ",
-     .action = std::nullopt,
-     .category = FooterCategory::Spacer,
-     .priority = FooterPriority::Extended},
-    {.text = "[v] Trace",
-     .action = TuiFooterAction::ToggleTrace,
-     .category = FooterCategory::Exec,
-     .priority = FooterPriority::Extended},
     {.text = "  │  ",
      .action = std::nullopt,
      .category = FooterCategory::Separator,
      .priority = FooterPriority::Core},
-    {.text = "DEBUG: ",
-     .action = std::nullopt,
-     .category = FooterCategory::Debug,
-     .priority = FooterPriority::Core},
-    {.text = "[:] BP",
+    {.text = "[:] Breakpoint",
      .action = TuiFooterAction::SetBreakpoint,
      .category = FooterCategory::Debug,
      .priority = FooterPriority::Core},
@@ -329,74 +308,13 @@ static const auto running_row1_entries = std::to_array<FooterEntry>({
      .action = std::nullopt,
      .category = FooterCategory::Spacer,
      .priority = FooterPriority::Extended},
-    {.text = "[w] WP",
+    {.text = "[w] Watchpoint",
      .action = TuiFooterAction::SetWatchpoint,
-     .category = FooterCategory::Debug,
-     .priority = FooterPriority::Extended},
-    {.text = "  ",
-     .action = std::nullopt,
-     .category = FooterCategory::Spacer,
-     .priority = FooterPriority::Extended},
-    {.text = "[k] Toggle",
-     .action = TuiFooterAction::TogglePcBreakpoint,
-     .category = FooterCategory::Debug,
-     .priority = FooterPriority::Extended},
-    {.text = "  ",
-     .action = std::nullopt,
-     .category = FooterCategory::Spacer,
-     .priority = FooterPriority::Extended},
-    {.text = "[m] List",
-     .action = TuiFooterAction::ManageBreakpoints,
      .category = FooterCategory::Debug,
      .priority = FooterPriority::Extended},
 });
 
-static const auto running_row2_entries = std::to_array<FooterEntry>({
-    {.text = "INSPECT: ",
-     .action = std::nullopt,
-     .category = FooterCategory::Inspect,
-     .priority = FooterPriority::Core},
-    {.text = "[i] Mem",
-     .action = TuiFooterAction::InspectMem,
-     .category = FooterCategory::Inspect,
-     .priority = FooterPriority::Core},
-    {.text = "  │  ",
-     .action = std::nullopt,
-     .category = FooterCategory::Separator,
-     .priority = FooterPriority::Core},
-    {.text = "NAV: ",
-     .action = std::nullopt,
-     .category = FooterCategory::Nav,
-     .priority = FooterPriority::Core},
-    {.text = "[Tab] Layout",
-     .action = TuiFooterAction::CycleLayout,
-     .category = FooterCategory::Nav,
-     .priority = FooterPriority::Core},
-    {.text = "  ",
-     .action = std::nullopt,
-     .category = FooterCategory::Spacer,
-     .priority = FooterPriority::Core},
-    {.text = "[g] Learn",
-     .action = TuiFooterAction::ToggleLearn,
-     .category = FooterCategory::Nav,
-     .priority = FooterPriority::Core},
-    {.text = "  ",
-     .action = std::nullopt,
-     .category = FooterCategory::Spacer,
-     .priority = FooterPriority::Core},
-    {.text = "[o] Load",
-     .action = TuiFooterAction::LoadBinary,
-     .category = FooterCategory::Nav,
-     .priority = FooterPriority::Core},
-    {.text = "  ",
-     .action = std::nullopt,
-     .category = FooterCategory::Spacer,
-     .priority = FooterPriority::Core},
-    {.text = "[Ctrl-Q] Quit",
-     .action = TuiFooterAction::Quit,
-     .category = FooterCategory::Nav,
-     .priority = FooterPriority::Core},
-});
+static const auto running_row2_entries = paused_row2_entries;
 
 namespace {
 
@@ -540,11 +458,14 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
             case FooterCategory::Debug:
                 color_tag = kThemeMint;
                 break;
-            case FooterCategory::Inspect:
+            case FooterCategory::Config:
                 color_tag = kThemeSky;
                 break;
-            case FooterCategory::Nav:
+            case FooterCategory::Inspect:
                 color_tag = kThemePink;
+                break;
+            case FooterCategory::Sys:
+                color_tag = kThemeCoral;
                 break;
             case FooterCategory::Separator:
                 color_tag = kThemeBorder;
@@ -627,12 +548,10 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             binary_name = "application";
         }
         std::string mode_str;
-        if (machine_.s_cycle_accurate) {
+        if (machine_.runtime_profile.is_cycle_mode()) {
             const auto ptype = machine_.cpu.pipeline_sim.config.pipeline_type;
             if (ptype == simrv::pipeline::PipelineType::ThreeStage) {
                 mode_str = machine_.s_appmode ? "App (3-Stage)" : "OS (3-Stage)";
-            } else if (ptype == simrv::pipeline::PipelineType::DualIssue) {
-                mode_str = machine_.s_appmode ? "App (Dual-Issue)" : "OS (Dual-Issue)";
             } else {
                 mode_str = machine_.s_appmode ? "App (5-Stage)" : "OS (5-Stage)";
             }
@@ -689,20 +608,11 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         switch (right_panel_mode_) {
             case TuiRightPanelMode::Terminal: {
                 const bool term_focused = machine_.tui && machine_.tui->is_terminal_attached();
-                if (target_right_width < 70) {
-                    mode_prefix = std::format(
-                        " {}[Term]\033[0m{}", kThemeSky,
-                        term_focused ? std::format(" \033[1m{}ATT\033[0m", kThemeMint)
-                                     : std::format(" \033[1m{}DET\033[0m", kThemeMuted));
-                } else {
-                    std::string const focus_badge =
-                        term_focused ? std::format(" \033[1m{}ATT\033[0m", kThemeMint)
-                                     : std::format(" \033[1m{}DET\033[0m", kThemeMuted);
-                    std::string const term_title =
-                        trace_enabled_ ? "Term [Trace]" : "Terminal";
-                    mode_prefix =
-                        std::format(" {}[{}]\033[0m{}", kThemeSky, term_title, focus_badge);
-                }
+                std::string const focus_badge =
+                    term_focused ? std::format(" \033[1m{}ATTACHED\033[0m", kThemeMint)
+                                 : std::format(" \033[1m{}DETACHED\033[0m", kThemeMuted);
+                std::string const term_title = trace_enabled_ ? "Terminal [Trace]" : "Terminal";
+                mode_prefix = std::format(" {}[{}]\033[0m{}", kThemeSky, term_title, focus_badge);
                 break;
             }
             case TuiRightPanelMode::Display:
@@ -711,16 +621,8 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                 break;
         }
 
-        // Build Right Quick Action Icons (Always keep all 4 buttons visible)
-        const auto style = get_active_theme_style();
-        const bool is_ansi = (style == TuiThemeStyle::ClassicAnsi);
-        std::string action_buttons =
-            std::format("\033[1m{}[CFG] {}[ ? ] {}[THM] {}[{}]\033[0m ", kThemeSky, kThemeMint,
-                        kThemePeach, kThemeCoral, is_ansi ? "RST" : "PWR");
-
         int const prefix_w = get_display_width(mode_prefix);
-        int const action_w = get_display_width(action_buttons);
-        int const available_mid_w = target_right_width - prefix_w - action_w - 2;
+        int const available_mid_w = target_right_width - prefix_w - 2;
 
         std::string mid_text;
         if (scroll_offset_ > 0) {
@@ -755,7 +657,7 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                 dbg_info += "Speed: Max | ";
             }
 
-            if (machine_.s_cycle_accurate) {
+            if (machine_.runtime_profile.is_cycle_mode()) {
                 std::string full_stats =
                     std::format("{}Cycles: {} | Insns: {} | CPI: {:.2f}", dbg_info,
                                 simrv::util::format_with_commas(cycles),
@@ -800,13 +702,10 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         }
 
         int const mid_w = get_display_width(mid_text);
-        int const pad_total = std::max(0, target_right_width - (prefix_w + mid_w + action_w));
-        int const mid_pad_left = pad_total / 2;
-        int const mid_pad_right = pad_total - mid_pad_left;
+        int const pad_total = std::max(0, target_right_width - (prefix_w + mid_w));
 
         std::string right_render =
-            mode_prefix + std::string(static_cast<std::size_t>(mid_pad_left), ' ') + mid_text +
-            std::string(static_cast<std::size_t>(mid_pad_right), ' ') + action_buttons;
+            mode_prefix + std::string(static_cast<std::size_t>(pad_total), ' ') + mid_text;
         if (get_display_width(right_render) > target_right_width) {
             right_render = format_to_width(right_render, target_right_width);
         } else if (get_display_width(right_render) < target_right_width) {
@@ -816,6 +715,7 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         }
 
         std::string screen;
+        const auto style = get_active_theme_style();
         if (style == TuiThemeStyle::ClassicAnsi) {
             switch (layout_) {
                 case TuiLayout::Split:

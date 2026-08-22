@@ -95,11 +95,6 @@ Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
     vt_.set_response_callback([this](std::string_view response) -> void {
         for (const char byte : response) write_guest_input(static_cast<uint8_t>(byte));
     });
-    vt_log_.set_scroll_offset_callback([this](int lines) -> void {
-        if (scroll_offset_ > 0) {
-            scroll_offset_ += lines;
-        }
-    });
     if (machine_.s_fn_memimg.empty()) {
         open_modal(ModalType::LoadBinary);
     }
@@ -427,15 +422,8 @@ void Tui::render_build_lines(int left_pane_width, int right_pane_width, int num_
         }
     }
 
-    int log_width = std::max(10, left_pane_width - 2);
-    vt_log_.resize(log_width, num_rows);
-    std::vector<std::string> log_lines;
-    int total_written = vt_log_.get_scrollback_size() + vt_log_.get_cursor_y() +
-                        (vt_log_.get_cursor_x() > 0 ? 1 : 0);
-    int start_log = std::max(0, total_written - 20);
-    for (int i = start_log; i < total_written; ++i) {
-        log_lines.push_back(vt_log_.get_line_as_string(i, log_width, false));
-    }
+    int const log_width = std::max(10, left_pane_width - 2);
+    std::vector<std::string> log_lines = log_buffer_.get_wrapped_lines(log_width, 100);
 
     left_pane_->set_selected_hart(selected_hart_);
     left_pane_->set_kips(kips_);
@@ -505,7 +493,7 @@ void Tui::render(bool force) {
     }
 
     while (!local_log.empty()) {
-        vt_log_.write_string(local_log.front());
+        log_buffer_.push(std::move(local_log.front()));
         local_log.pop();
     }
 
@@ -850,7 +838,8 @@ void Tui::cycle_reg_page() {
         case TuiCategoryGroup::Memory:
             switch (rp) {
                 case TuiRegPage::STACK:
-                    rp = machine_.s_cycle_accurate ? TuiRegPage::CACHE : TuiRegPage::TLB;
+                    rp = machine_.runtime_profile.is_cycle_mode() ? TuiRegPage::CACHE
+                                                                  : TuiRegPage::TLB;
                     break;
                 case TuiRegPage::CACHE:
                     rp = TuiRegPage::TLB;
@@ -867,7 +856,8 @@ void Tui::cycle_reg_page() {
         case TuiCategoryGroup::Pipeline:
             switch (rp) {
                 case TuiRegPage::PIPELINE:
-                    rp = machine_.s_cycle_accurate ? TuiRegPage::BPRED : TuiRegPage::PIPELINE;
+                    rp = machine_.runtime_profile.is_cycle_mode() ? TuiRegPage::BPRED
+                                                                  : TuiRegPage::PIPELINE;
                     break;
                 case TuiRegPage::BPRED:
                     rp = TuiRegPage::HAZARD;
@@ -904,15 +894,15 @@ void Tui::cycle_tool_page() {
             next_grp = TuiCategoryGroup::Regs;
             break;
     }
-    set_reg_page(get_default_page_for_group(next_grp, machine_.s_cycle_accurate));
+    set_reg_page(get_default_page_for_group(next_grp, machine_.runtime_profile.is_cycle_mode()));
 }
 
 void Tui::set_reg_page(TuiRegPage page) {
-    if (!machine_.s_cycle_accurate &&
+    if (!machine_.runtime_profile.is_cycle_mode() &&
         (page == TuiRegPage::CACHE || page == TuiRegPage::BPRED || page == TuiRegPage::HAZARD)) {
         set_status_override(
             "CA Inspector Page disabled in Functional Mode (Enable Cycle-Accurate mode "
-            "\033[1m[,]\033[22m or --cycle-accurate)");
+            "\033[1m[,]\033[22m or --ca)");
         page = TuiRegPage::TLB;
     }
     if (left_pane_) {
@@ -1245,14 +1235,36 @@ auto Tui::handle_modal_settings_misa(ModalType mtype, uint8_t byte, TuiKey key) 
             close_modal();
         } else if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
             submit_modal();
+        } else if (key == simrv::tui::TuiKey::Tab) {
+            modal_.cycle_settings_tab(1);
+            render(true);
+        } else if (byte == '1') {
+            modal_.set_settings_tab(0);
+            render(true);
+        } else if (byte == '2') {
+            modal_.set_settings_tab(1);
+            render(true);
+        } else if (byte == '3') {
+            modal_.set_settings_tab(2);
+            render(true);
         } else if (byte == ' ') {
             modal_.toggle_setting_at_cursor();
             render(true);
-        } else if (byte == 'm' || byte == 'M') {
-            open_modal(ModalType::ConfigureMisa);
+        } else if (byte == 'p' || byte == 'P') {
+            modal_.apply_settings_misa_profile(0);
             render(true);
-        } else if (byte == 'y' || byte == 'Y') {
-            open_modal(ModalType::ConfigureSystem);
+        } else if (byte == 'i' || byte == 'I') {
+            modal_.apply_settings_misa_profile(1);
+            render(true);
+        } else if (byte == 'g' || byte == 'G') {
+            modal_.apply_settings_misa_profile(2);
+            render(true);
+        } else if (byte >= '0' && byte <= '9') {
+            modal_.push_settings_digit(static_cast<char>(byte));
+            render(true);
+        } else if (byte == 8 || byte == 127 || key == simrv::tui::TuiKey::Backspace) {
+            modal_.pop_settings_digit();
+            render(true);
         }
         return true;
     }
@@ -1836,6 +1848,10 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             break;
         case TuiFooterAction::SwitchHart:
             select_next_hart();
+            break;
+        case TuiFooterAction::ToggleTheme:
+            cycle_theme_style();
+            render(true);
             break;
     }
 }

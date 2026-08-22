@@ -24,15 +24,16 @@ void OSMachine::execute_cycle() {
             sec_hart->run_cycle(*this);
         }
     }
+    if (runtime_profile.is_cycle_mode()) {
+        memory().system_bus().advance_cycle();
+    }
 }
 
 auto OSMachine::execute_fast_batch(uint32_t batch_size) -> bool {
-    if (simrv::compiler::likely(s_high_performance && !s_tuimode && !s_cycle_accurate &&
-                                !s_lockstep_mode && !s_gdb_mode && !s_bp_trace && s_strace == 0 &&
-                                !breakpoints.has_any() && !s_rollback_enabled)) {
+    if (simrv::compiler::likely(can_execute_fast_batch())) {
         if (s_fincnt != std::numeric_limits<Counter>::max()) {
             if (cpu.e_icount >= s_fincnt) {
-                stop();
+                stop(StopReason::InstructionLimit);
                 return true;
             }
             batch_size =
@@ -82,7 +83,8 @@ void OSMachine::prepare_cycle() {
         sec_hart->pipeline_context.pending_tval = 0;
     }
 
-    if (simrv::compiler::likely(s_high_performance && cpu.clint_mmio.mtime <= s_enabletimer)) {
+    if (simrv::compiler::likely(runtime_profile.is_instruction_fast() &&
+                                cpu.clint_mmio.mtime <= s_enabletimer)) {
         if (simrv::compiler::unlikely(cpu.clint_mmio.mtime == s_memimg)) {
             tracer.dump_init_artifacts();
         }
@@ -103,15 +105,16 @@ void OSMachine::prepare_cycle() {
 void OSMachine::finalize_cycle() {
     const bool in_trace_window =
         (cpu.clint_mmio.mtime >= s_trace_begin && cpu.clint_mmio.mtime <= s_trace_end);
-    if (simrv::compiler::likely(s_high_performance && (!s_tuimode || s_multithreaded) &&
-                                s_strace == 0 && !in_trace_window && !s_bp_trace)) {
+    if (simrv::compiler::likely(runtime_profile.is_instruction_fast() &&
+                                (!s_tuimode || s_multithreaded) && s_strace == 0 &&
+                                !in_trace_window && !s_bp_trace)) {
         if (simrv::compiler::unlikely(tohost != 0)) {
             finalize_cycle_tohost();
         }
         if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() &&
                                       cpu.e_icount >= s_fincnt)) {
             simrv::log::info("finished by -e option");
-            stop();
+            stop(StopReason::InstructionLimit);
         }
         if (uart && !uart->is_input_thread_running() &&
             simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
@@ -151,7 +154,7 @@ void OSMachine::finalize_cycle() {
     if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() &&
                                   cpu.e_icount >= s_fincnt)) {
         simrv::log::info("finished by -e option");
-        stop();
+        stop(StopReason::InstructionLimit);
     }
     if (simrv::compiler::unlikely(s_bp_trace)) {
         tracer.emit_branch_prediction_trace(cpu.clint_mmio.mtime, cpu.pipeline_context.cpc,

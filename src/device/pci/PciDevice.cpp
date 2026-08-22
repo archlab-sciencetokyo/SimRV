@@ -113,7 +113,7 @@ auto PciDevice::bar_base(int bar_idx) const -> Address {
     if (bar_is_64bit_[bar_idx] && bar_idx < 5) {
         uint32_t hi = 0;
         std::memcpy(&hi, &config_space_[0x14 + bar_idx * 4], 4);
-        return (static_cast<Address>(hi) << 32) | lo;
+        return static_cast<Address>((static_cast<uint64_t>(hi) << 32) | lo);
     }
     return lo;
 }

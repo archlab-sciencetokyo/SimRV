@@ -188,7 +188,8 @@ auto LeftPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row, int
     }
 
     uint64_t icount = cpu.e_icount;
-    uint64_t cycles = (machine_.s_cycle_accurate) ? cpu.pipeline_sim.cycle_count() : icount;
+    uint64_t cycles =
+        machine_.runtime_profile.is_cycle_mode() ? cpu.pipeline_sim.cycle_count() : icount;
 
     if (logical_row == 11) {
         return format_to_width(
@@ -206,7 +207,8 @@ auto LeftPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row, int
             std::format("  {}CPI:\033[0m {}{:5.2f}\033[0m │ {}IPC:\033[0m {}{:5.2f}\033[0m │ "
                         "{}Mode:\033[0m {}{}\033[0m",
                         kThemeText, kThemePeach, cpi, kThemeText, kThemeMint, ipc, kThemeText,
-                        kThemeSky, (machine_.s_cycle_accurate ? "5-Stage Pipeline" : "Functional")),
+                        kThemeSky,
+                        (machine_.runtime_profile.is_cycle_mode() ? "Pipeline" : "Functional")),
             width);
     }
     if (logical_row == 13) {

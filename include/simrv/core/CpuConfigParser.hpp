@@ -7,6 +7,7 @@
 #include <string>
 
 #include "simrv/core/Logger.hpp"
+#include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 
 namespace simrv::core {
@@ -55,55 +56,31 @@ inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuConfig&
 
         try {
             // Handle string-valued keys first
-            if (key == "pipeline_type" || key == "pipeline") {
-                if (val_str == "3stage" || val_str == "3" || val_str == "embedded" ||
-                    val_str == "ibex") {
-                    config.pipeline_type = simrv::pipeline::PipelineType::ThreeStage;
-                } else if (val_str == "dual" || val_str == "dualissue" || val_str == "swerv") {
-                    config.pipeline_type = simrv::pipeline::PipelineType::DualIssue;
-                } else {
-                    config.pipeline_type = simrv::pipeline::PipelineType::FiveStage;
+            if (key == "pipeline_type") {
+                const auto parsed = simrv::pipeline::parse_pipeline_type(val_str);
+                if (!parsed) {
+                    simrv::log::warn("Unsupported pipeline '{}' in CPU config", val_str);
+                    return false;
                 }
-                continue;
-            }
-            if (key == "bp_type") {
-                using BPT = simrv::pipeline::BranchPredictorType;
-                if (val_str == "static-not-taken")
-                    config.bp_type = BPT::StaticNotTaken;
-                else if (val_str == "static-taken")
-                    config.bp_type = BPT::StaticTaken;
-                else if (val_str == "1bit")
-                    config.bp_type = BPT::OneBitBimodal;
-                else if (val_str == "gshare")
-                    config.bp_type = BPT::Gshare;
-                else
-                    config.bp_type = BPT::TwoBitBimodal;
+                config.pipeline_type = *parsed;
                 continue;
             }
 
             uint32_t val = static_cast<uint32_t>(std::stoul(val_str));
-            if (key == "icache_miss_penalty") {
-                config.icache_miss_penalty = val;
-            } else if (key == "dcache_miss_penalty") {
-                config.dcache_miss_penalty = val;
-            } else if (key == "tlb_miss_penalty") {
-                config.tlb_miss_penalty = val;
-            } else if (key == "mul_latency") {
+            if (key == "mul_latency") {
                 config.mul_latency = val;
             } else if (key == "div_latency") {
                 config.div_latency = val;
-            } else if (key == "branch_mispredict_penalty") {
-                config.branch_mispredict_penalty = val;
+            } else if (key == "fp_alu_latency") {
+                config.fp_alu_latency = val;
+            } else if (key == "fp_div_latency") {
+                config.fp_div_latency = val;
+            } else if (key == "csr_flush_penalty") {
+                config.csr_flush_penalty = val;
+            } else if (key == "fence_flush_penalty") {
+                config.fence_flush_penalty = val;
             } else if (key == "enable_forwarding") {
                 config.enable_forwarding = (val != 0);
-            } else if (key == "enable_ex_forwarding") {
-                config.enable_ex_forwarding = (val != 0);
-            } else if (key == "enable_mem_forwarding") {
-                config.enable_mem_forwarding = (val != 0);
-            } else if (key == "btb_entries") {
-                config.btb_entries = val;
-            } else if (key == "global_history_bits") {
-                config.global_history_bits = val;
             } else {
                 simrv::log::warn("Unknown CPU config key: {}", key);
             }

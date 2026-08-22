@@ -2,26 +2,22 @@
 
 [![C/C++ CI](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=dev)](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml)
 
-SimRV is a C++23 research simulator for studying RISC-V functional behavior, in-order pipeline
-timing, memory-system behavior, and interactive architecture education. It provides functional and
-cycle-accurate modes for the **RV64GCBV** and **RV32GCBV** implementation targets, plus a TUI,
-guest stack analysis, cache inspectors, configurable MISA state, and a small virtual platform.
+SimRV is a C++23 RISC-V simulator for computer-architecture research and education. It provides
+instruction and cycle execution, RV32/RV64 targets, Linux support, and an interactive TUI for
+inspecting pipelines, caches, memory, and architectural state.
 
-The intended audience is computer-architecture researchers, students, and simulator developers.
-SimRV is suitable for reproducible experiments and teaching when the documented model matches the
-research question. It is not RISC-V certified, a production hypervisor, or a security boundary.
-The `GCBV` names are implementation targets; floating-point RMM arithmetic and parts of RVV 1.0
-remain qualification gaps documented in [the compliance scope](docs/RISCV_COMPLIANCE.md).
+SimRV is not RISC-V certified. `RV32GCBV` and `RV64GCBV` are implementation targets; see the
+[compliance scope](docs/RISCV_COMPLIANCE.md) for verified coverage and known gaps.
 
 ---
 
 ## Quick Start
 
-### Build Prerequisites
+### Prerequisites
 - **Clang 20+** (default in CMake presets) or **GCC 14+** (required for full C++23 feature support)
 - **CMake 3.20+** & **Ninja**
 
-### Building SimRV
+### Build
 
 ```bash
 # RV64 build (Default)
@@ -33,7 +29,7 @@ cmake --preset rv32-release
 cmake --build --preset rv32-release
 ```
 
-### Running Applications
+### Run
 
 Run a baremetal binary in interactive TUI mode (Default):
 ```bash
@@ -43,6 +39,19 @@ Run a baremetal binary in interactive TUI mode (Default):
 Run headless in CLI-only mode:
 ```bash
 ./build/rv64-release/SimRV -b -m img/hello.bin -c
+```
+
+Select instruction or cycle execution. CLI is optimized for speed; TUI retains inspection history:
+```bash
+./build/rv64-release/SimRV -b -m img/hello.bin --cli --ia
+./build/rv64-release/SimRV -b -m img/hello.bin --cli --ca
+./build/rv64-release/SimRV -b -m img/hello.bin --tui --ca
+```
+
+Mirror configuration, diagnostics, termination, cache, bus, and performance summaries to a log:
+
+```bash
+./build/rv64-release/SimRV -b -m img/hello.bin --cli --ca --log-file run.log
 ```
 
 Run Linux OS image with disk & devicetree:
@@ -58,9 +67,9 @@ Override MISA profile or Vector register length (VLEN):
 
 ---
 
-## Interactive TUI Split-Screen Monitor
+## Interactive TUI
 
-SimRV includes a rich terminal user interface (TUI) for hardware inspection, step-by-step instruction execution, and educational visualization.
+The TUI supports stepping, rollback, and hardware-state inspection.
 
 ### Key Shortcuts
 
@@ -87,7 +96,7 @@ SimRV includes a rich terminal user interface (TUI) for hardware inspection, ste
 
 ## Supported RISC-V Extensions
 
-Both RV32GCBV and RV64GCBV instruction sets are supported.
+RV32GCBV and RV64GCBV are implementation-target names, not complete conformance claims.
 
 See [RISC-V compliance scope](docs/RISCV_COMPLIANCE.md) for the precise architectural boundary,
 SBI/OpenSBI distinction, and the evidence required before treating a feature as verified. The

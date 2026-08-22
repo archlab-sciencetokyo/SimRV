@@ -41,44 +41,15 @@ enum class ModalType : uint8_t {
     PlatformChangeConfirm
 };
 
-struct SettingsDraft {
-    bool cycle_accurate = false;
-    bool debug_mode = false;
-    bool rollback_enabled = false;
-    bool high_contrast = false;
-    bool class_mode = false;
-    bool use_mix = false;
-    bool bp_trace = false;
-    bool traplog_mode = false;
-    bool dlog_mode = false;
-    bool high_performance = false;
-    bool lockstep_mode = false;
-    bool gdb_mode = false;
-    uint32_t num_harts = 1;
-    uint32_t smp_quantum = 1000;
-    bool smp_multithreaded = false;
-    uint8_t platform_profile = 0;  // 0: PCIe, 1: MMIO, 2: Hybrid
-    std::string net_mode = "user";
-};
-
 struct SysConfigDraft {
-    uint8_t preset = 0;         // 0: Rocket, 1: Embedded, 2: Fast
-    uint8_t pipeline_type = 0;  // 0: 5-Stage Rocket, 1: 3-Stage Embedded, 2: Dual-Issue Superscalar
-    uint32_t icache_miss_penalty = 10;
-    uint32_t dcache_miss_penalty = 15;
-    uint32_t tlb_miss_penalty = 25;
+    uint8_t pipeline_type = 0;  // 0: 5-stage, 1: 3-stage
     uint32_t mul_latency = 3;
     uint32_t div_latency = 18;
     uint32_t fp_alu_latency = 4;
     uint32_t fp_div_latency = 16;
     uint32_t csr_flush_penalty = 3;
     uint32_t fence_flush_penalty = 4;
-    uint32_t branch_mispredict_penalty = 2;
     bool enable_forwarding = true;
-    bool enable_ex_forwarding = true;
-    bool enable_mem_forwarding = true;
-    uint8_t bp_type = 3;  // 0: Static-NT, 1: Static-T, 2: 1-Bit, 3: 2-Bit Bimodal, 4: Gshare
-    uint32_t btb_entries = 128;
     bool cycle_accurate = false;
 };
 
@@ -120,6 +91,35 @@ struct MisaDraft {
     }
 };
 
+struct SettingsDraft {
+    uint8_t active_tab = 0;  // 0: General, 1: MISA Extensions, 2: Microarchitecture
+    int tab_cursor[3] = {0, 0, 0};
+
+    // Tab 0: General / UI
+    bool cycle_accurate = false;
+    bool debug_mode = false;
+    bool rollback_enabled = false;
+    bool high_contrast = false;
+    bool class_mode = false;
+    bool use_mix = false;
+    bool bp_trace = false;
+    bool traplog_mode = false;
+    bool dlog_mode = false;
+    bool lockstep_mode = false;
+    bool gdb_mode = false;
+    uint32_t num_harts = 1;
+    uint32_t smp_quantum = 1000;
+    bool smp_multithreaded = false;
+    uint8_t platform_profile = 0;  // 0: PCIe, 1: MMIO, 2: Hybrid
+    std::string net_mode = "user";
+
+    // Tab 1: MISA Extensions
+    MisaDraft misa;
+
+    // Tab 2: System / Microarchitecture
+    SysConfigDraft sys_config;
+};
+
 class TuiModal {
    public:
     explicit TuiModal(simrv::core::Machine& machine);
@@ -143,9 +143,14 @@ class TuiModal {
     [[nodiscard]] auto get_load_appmode() const -> bool { return load_appmode_; }
 
     void move_settings_cursor(int delta);
+    void cycle_settings_tab(int delta = 1);
+    void set_settings_tab(uint8_t tab);
     void adjust_setting_at_cursor(int dir);
     void toggle_setting_at_cursor();
     void toggle_setting_by_index(int index);
+    void push_settings_digit(char c);
+    void pop_settings_digit();
+    void apply_settings_misa_profile(int profile_idx);
 
     void move_misa_cursor(int delta);
     void toggle_misa_at_cursor();
@@ -195,7 +200,6 @@ class TuiModal {
     std::string notice_message_;
     bool notice_is_error_ = false;
     int bp_cursor_ = 0;
-    int settings_cursor_ = 0;
     SettingsDraft settings_draft_;
     SettingsDraft pending_platform_draft_;
     int misa_cursor_ = 0;

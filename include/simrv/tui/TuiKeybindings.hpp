@@ -40,7 +40,8 @@ enum class KeyAction : uint8_t {
     ToggleExplain,
     ToggleTrace,
     SwitchHart,
-    OpenGlossary
+    OpenGlossary,
+    ToggleTheme
 };
 
 enum class ActionCategory : uint8_t { Execution, Inspect, Navigate, Configure, Help };

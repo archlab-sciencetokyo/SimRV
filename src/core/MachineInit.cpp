@@ -416,7 +416,10 @@ auto Machine::initialize() -> int {
 
     load_image_into_ram(s_fn_memimg, mmem, static_cast<std::size_t>(simrv::memory::kDramSize),
                         "memory", s_tuimode);
-    symbols.load_from_elf(s_spike_elf.empty() ? s_fn_memimg : s_spike_elf);
+    symbols.load_from_elf(s_spike_elf.empty() ? s_fn_memimg : s_spike_elf, true,
+                          runtime_profile.interaction == InteractionMode::Tui
+                              ? simrv::debug::SymbolLoadMode::FullDebug
+                              : simrv::debug::SymbolLoadMode::RuntimeEssentials);
 
     resolve_start_pc_and_dram_base(*this, symbols);
 
@@ -426,6 +429,7 @@ auto Machine::initialize() -> int {
         for (uint32_t i = 1; i < s_num_harts; ++i) {
             auto sec_cpu = std::make_unique<simrv::core::CPU>();
             sec_cpu->machine_ = this;
+            sec_cpu->pipeline_sim.config = cpu.pipeline_sim.config;
             sec_cpu->state().mhartid = i;
             sec_cpu->state().misa = initial_misa;
             sec_cpu->state().initialize_lower_xlen_fields();
@@ -536,7 +540,10 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
     s_fn_memimg = filepath;
     load_image_into_ram(s_fn_memimg, mmem, static_cast<std::size_t>(simrv::memory::kDramSize),
                         "memory", s_tuimode);
-    symbols.load_from_elf(s_spike_elf.empty() ? s_fn_memimg : s_spike_elf);
+    symbols.load_from_elf(s_spike_elf.empty() ? s_fn_memimg : s_spike_elf, true,
+                          runtime_profile.interaction == InteractionMode::Tui
+                              ? simrv::debug::SymbolLoadMode::FullDebug
+                              : simrv::debug::SymbolLoadMode::RuntimeEssentials);
 
     CSRValue initial_misa =
         isa::misa_with_mxl(s_misa_override ? s_misa_profile : isa::kMisaDefault);
@@ -660,6 +667,7 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
         for (uint32_t i = 1; i < s_num_harts; ++i) {
             auto sec_cpu = std::make_unique<simrv::core::CPU>();
             sec_cpu->machine_ = this;
+            sec_cpu->pipeline_sim.config = cpu.pipeline_sim.config;
             sec_cpu->state().mhartid = i;
             sec_cpu->state().misa = initial_misa;
             sec_cpu->state().initialize_lower_xlen_fields();

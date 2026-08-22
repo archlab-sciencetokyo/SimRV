@@ -132,7 +132,7 @@ void set_high_contrast(bool enable);
 auto is_high_contrast() -> bool;
 
 auto make_repeated_string(const std::string& pattern, int count) -> std::string;
-auto get_display_width(const std::string& s) -> int;
+auto get_display_width(std::string_view s) -> int;
 auto format_to_width(const std::string& colored_str, int target_width) -> std::string;
 auto overlay_string(const std::string& base_line, const std::string& overlay_line, int start_x,
                     int box_w) -> std::string;

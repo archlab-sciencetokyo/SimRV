@@ -1,11 +1,11 @@
 # SimRV Architecture
 
-**Version:** 2.0.0 · **Targets:** RV32GC, RV64GC, qualified Vector subset, and Bitmanip
+**Version:** 2.1.0 · **Verified targets:** RV32GC and RV64GC; qualified Bitmanip and Vector subsets
 
 ## Scope
 
 This document describes the current high-level structure of SimRV. The simulator
-is a cycle-oriented RISC-V functional simulator written in C++23, supporting bare-metal
+is a RISC-V simulator with distinct instruction-accurate and cycle-stepped engines, supporting bare-metal
 applications, real-time operating systems (e.g., μT-Kernel 3.0), and full Linux OS execution.
 
 ---
@@ -67,26 +67,58 @@ making class boundaries explicit.
 
 ---
 
-## Pipeline Stages
+## Execution Policies and Pipeline Kernel
 
-The CPU pipeline is a 6-stage in-order functional model:
+`RuntimeProfile` is the authoritative execution policy. The public `--ia` and `--ca`
+selection is retained, while interaction selects the policy implementation:
 
-| # | Stage | Method | Description |
-|:---|:---|:---|:---|
-| 1 | **IF** | `run_fetch_stage` | Address translation (SV32/SV39), I-cache lookup, decompression (RVC) |
-| 2 | **ID** | `run_decode_stage` | Instruction field decode (opcode, rd/rs, funct, imm), operand capture |
-| 3 | **EX** | `run_execute_stage` | ALU, branch, CSR, FP operations |
-| 4 | **MEM** | `run_memory_stage` | Load/store/AMO memory access, D-cache lookup |
-| 5 | **WB** | `run_writeback_stage` | Integer and FP register file writeback |
-| 6 | **Commit** | `run_commit_stage` | Control-flow updates, trap/interrupt handling, tohost checks |
+| Interface | IA | CA |
+|:---|:---|:---|
+| CLI | `InstructionFast` | `CycleFast` |
+| TUI | `InstructionObservable` | `CycleObservable` |
 
-**Execution paths:**
-- **Standard path**: Full pipeline via `CPU::run_cycle()`.
-- **Baremetal path**: Optimized hot path (`run_cycle_baremetal`) bypassing TUI
-  overhead, used when TUI is inactive.
-- **Coroutine path**: C++20 coroutine-based `PipelineTask` for persistent
-  zero-allocation pipeline simulation (`PipelineSim`).
-- **Cached op path**: `execute_cached_op_fast` for decode-cache hits in IA mode.
+The two IA policies share functional-memory semantics. `InstructionFast` additionally uses
+decode caching and batching; `InstructionObservable` runs the same semantic stages with the
+context needed by tracing and presentation. Enabling the TUI therefore does not introduce a
+timed cache hierarchy into IA execution.
+
+CA uses one persistent per-hart transition kernel. Two in-order organizations are available:
+
+| Policy | Simultaneous pipeline registers |
+|:---|:---|
+| `5stage` | Fetch, Decode, Execute, Memory, Writeback/Retire |
+| `3stage` | Fetch, Decode+Execute, Memory+Writeback/Retire |
+
+Every call advances at most one simulated cycle. Instructions overlap in explicit typed slots;
+hazards, forwarding, multi-cycle execution, branch recovery, timed cache/interconnect requests,
+serialization, traps, interrupts, and flushes are transitions of that state. GPR, FPR, CSR, and
+architectural PC effects become visible at writeback/retirement. Stores become globally visible
+at their modeled memory/coherence boundary after all older instructions have advanced ahead of
+them. Precise exceptions are carried with their instruction and raised only at retirement.
+
+`CycleFast` sends counters and architecturally relevant event bits directly to the observer
+interface without allocating or copying snapshots. `CycleObservable` decorates the same kernel
+with bounded fixed-capacity history. Tests require identical guest state, memory effects,
+retirement counts, and cycle totals between the two policies.
+
+### Deterministic global-cycle order
+
+For each OS-machine CA cycle SimRV performs the following fixed order:
+
+1. Advance hart 0 by one transition.
+2. Advance each started secondary hart once in ascending hart order.
+3. Advance the shared TileLink/coherence fabric once, servicing its oldest queued request.
+4. Run top-level termination and presentation checks outside the architectural transition.
+
+Each hart updates its local `mcycle` once per global cycle. Hart 0 advances the shared timer;
+secondary harts observe that value. Interrupts are sampled only at retirement boundaries. Bus
+requests carry explicit hart and port identities, FIFO sequence numbers, and ready cycles;
+squashed instruction/data requests are cancelled by source identity.
+
+Sv32/Sv39 TLB misses use typed resumable page-walk state. Each PTE read and accessed/dirty update is
+a timed interconnect transaction; A/D bits are updated with an atomic OR so simultaneous hart walks
+cannot lose either bit. Faults and cancelled speculative walks are returned through the same state
+machine used synchronously by IA, avoiding a second set of translation semantics.
 
 ---
 
@@ -140,17 +172,26 @@ The TUI provides an ANSI-based split-screen monitor during simulation.
 | F (Single FP) | ✅ Full |
 | D (Double FP) | ✅ Full |
 | C (Compressed) | ✅ Full |
-| V (Vector) | ✅ Full |
-| B (Bitmanip) | ✅ Full |
-| Zicsr / Zifencei | ✅ Full |
-| SV32 / SV39 MMU | ✅ Full |
-| M/S/U privilege | ✅ Full |
+| V (Vector) | Qualified implemented subset; not advertised as full V compliance |
+| B (Bitmanip) | Qualified Zba/Zbb/Zbc/Zbs operations covered by available suites |
+| Zicsr / Zifencei | Implemented; covered by architectural and cycle tests |
+| SV32 / SV39 MMU | Implemented and Linux-tested; architectural qualification remains evidence-scoped |
+| M/S/U privilege | Implemented and Linux-tested; not an unqualified platform-compliance claim |
 
 XLEN is a **compile-time** selection via `SIMRV_XLEN` (32 or 64). There is no runtime XLEN switching — each build targets a single XLEN.
 
 ---
 
 ## Build and Validation
+
+### Cycle Performance Baselines
+
+Use `scripts/benchmark-ca.sh` to capture a JSON CA baseline. It forwards `--ca`, defaults to a
+long-running workload, compares CLI CA against `--ia`, and records hashes, host metadata, warmups,
+raw samples, variance, instruction/cycle counts, and the CA-to-IA wall-time ratio. CLI CA uses the
+fast policy; TUI CA enables bounded observable history. Set `SIMRV_CA_BENCH_PERF=1` to supplement
+wall time with per-run host performance counters; those counters are only comparable on equivalent
+host hardware and software configurations.
 
 **CMake presets** (`CMakePresets.json`):
 
@@ -179,7 +220,7 @@ include/simrv/         Public/internal headers
   cache/               ICache, DCache
   memory/              MMU, TileLink, memory subsystem
   device/              Console, Disk, UART, RTC, Power, VirtIO
-  pipeline/            PipelineContext, PipelineTask, PipelineSim, Decoder
+  pipeline/            PipelineContext, CycleTransition, PipelineSim, Decoder
   execute/             ExecuteUnit, ExecuteUnitInt, ExecuteUnitFloat
   debug/               GdbStub, SpikeLockstep, SymbolTable
   tui/                 Tui, LeftPane, LeftPanePipeline, LeftPaneRegs, LeftPaneStack,
@@ -197,7 +238,9 @@ docs/                  Architecture, extension, build, and education guides
 
 ## Current Development Status
 
-- **Stable:** RV32GC and RV64GC full feature sets (including Vector and Bitmanip extensions), with support for Linux boot on both targets.
+- **Release-gated:** RV32GC and RV64GC architectural suites, sampled Spike lockstep, and Linux
+  boot/lifecycle tests. Bitmanip and Vector claims are limited to the operations and configurations
+  covered by recorded tests.
 - **Compile-time XLEN:** Select the target with the appropriate CMake preset
   (`rv32-release` / `rv64-release`). XLEN cannot be changed at runtime.
 - **Planned:** Further ISA extension coverage (e.g., Cryptographic extensions).

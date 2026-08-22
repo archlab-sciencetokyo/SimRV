@@ -16,21 +16,21 @@
 namespace simrv::core {
 
 void BaremetalMachine::execute_cycle() {
-    if (s_cycle_accurate || (spike_lockstep && spike_lockstep->is_running())) {
+    if (runtime_profile.is_cycle_mode() || (spike_lockstep && spike_lockstep->is_running())) {
         cpu.run_cycle(*this);
+        if (runtime_profile.is_cycle_mode()) {
+            memory().system_bus().advance_cycle();
+        }
     } else {
         cpu.run_cycle_baremetal(*this);
     }
 }
 
 auto BaremetalMachine::execute_fast_batch(uint32_t batch_size) -> bool {
-    if (simrv::compiler::likely(s_high_performance &&
-                                (!s_tuimode || (tui && !tui->is_trace_active())) &&
-                                !s_lockstep_mode && !s_gdb_mode && !s_bp_trace && s_strace == 0 &&
-                                !breakpoints.has_any() && !s_rollback_enabled)) {
+    if (simrv::compiler::likely(can_execute_fast_batch())) {
         if (s_fincnt != std::numeric_limits<Counter>::max()) {
             if (cpu.e_icount >= s_fincnt) {
-                stop();
+                stop(StopReason::InstructionLimit);
                 return true;
             }
             batch_size =
@@ -54,7 +54,7 @@ void BaremetalMachine::finalize_cycle() {
     if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() &&
                                   cpu.e_icount >= s_fincnt)) {
         simrv::log::info("finished by -e option");
-        stop();
+        stop(StopReason::InstructionLimit);
     }
 
     if (s_tuimode && !s_multithreaded && tui) {

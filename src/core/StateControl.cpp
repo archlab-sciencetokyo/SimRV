@@ -261,7 +261,9 @@ auto ClintMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
             } else {
                 const Word lo = mmio_read(off);
                 const Word hi = mmio_read(off + 4);
-                resp.data = lo | (hi << 32);
+                const uint64_t combined =
+                    static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32U);
+                resp.data = static_cast<Word>(combined);
             }
         } else {
             resp.data = mmio_read(off);
@@ -294,7 +296,8 @@ auto ClintMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
                 }
             } else {
                 mmio_write(off, static_cast<Word>(req.data & kWord32Mask));
-                mmio_write(off + 4, static_cast<Word>((req.data >> 32) & kWord32Mask));
+                const uint64_t wide_data = static_cast<uint64_t>(req.data);
+                mmio_write(off + 4, static_cast<Word>((wide_data >> 32U) & kWord32Mask));
             }
         } else {
             mmio_write(off, req.data);
@@ -621,7 +624,7 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
                 cpu.machine_->tui->set_status_override("\033[1;31m UNHANDLED TRAP \033[0m");
                 cpu.machine_->tui->pause_loop();
             }
-            cpu.machine_->stop();
+            cpu.machine_->stop(Machine::StopReason::UnhandledTrap);
         }
     }
     state.reserved = 0;

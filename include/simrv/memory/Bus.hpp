@@ -52,11 +52,18 @@ enum class TlOpcodeE : uint8_t {
     GrantAck = 0,
 };
 
+enum class TlPort : uint8_t { Data = 0, Instruction = 1 };
+
+[[nodiscard]] constexpr auto make_tl_source(HartId hart, TlPort port) -> uint8_t {
+    return static_cast<uint8_t>((static_cast<uint8_t>(hart) << 1u) | static_cast<uint8_t>(port));
+}
+
 struct TlChannelA {
     TlOpcodeA opcode{TlOpcodeA::Get};
-    uint8_t param{0};  // CoherenceState requested for Acquire
-    uint8_t size{0};   // 2^size bytes (0=1B, 1=2B, 2=4B, 3=8B)
-    uint8_t source{0};
+    uint8_t param{0};   // CoherenceState requested for Acquire
+    uint8_t size{0};    // 2^size bytes (0=1B, 1=2B, 2=4B, 3=8B)
+    uint8_t source{0};  // Transaction/response routing tag.
+    HartId hart{0};     // Coherence requester identity.
     Address address{0};
     Word mask{0};
     Word data{0};
@@ -86,6 +93,7 @@ struct TlChannelC {
     uint8_t param{0};  // CoherenceState transition details
     uint8_t size{0};
     uint8_t source{0};
+    HartId hart{0};
     Address address{0};
     Word data{0};
     bool error{false};

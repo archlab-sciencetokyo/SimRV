@@ -112,10 +112,7 @@ set(SIMRV_SOURCES
   src/core/Tlb.cpp
   src/pipeline/Decoder.cpp
   src/pipeline/PipelineSim.cpp
-  src/pipeline/PipelineFactory.cpp
-  src/pipeline/InOrderPipeline.cpp
-  src/pipeline/ThreeStagePipeline.cpp
-  src/pipeline/DualIssuePipeline.cpp
+  src/pipeline/PipelineConfig.cpp
   src/execute/ExecuteUnitInt.cpp
   src/execute/ExecuteUnitB.cpp
   src/execute/ExecuteUnitFloat.cpp
@@ -128,6 +125,7 @@ set(SIMRV_SOURCES
   src/execute/vector/VectorFloat.cpp
   src/execute/vector/VectorPermute.cpp
   src/pipeline/PipelineStages.cpp
+  src/pipeline/CycleKernel.cpp
   src/core/Cpu.cpp
   src/util/CliParser.cpp
   src/cache/ICache.cpp
@@ -162,6 +160,7 @@ set(SIMRV_SOURCES
   src/device/Rtc.cpp
   src/device/Uart.cpp
   src/device/Power.cpp
+  src/tui/LogBuffer.cpp
   src/tui/Tui.cpp
   src/tui/TuiFrameRenderer.cpp
   src/tui/TuiGuidance.cpp
@@ -301,14 +300,17 @@ file(MAKE_DIRECTORY "${ISA_WORK_DIR}")
 # Fast, deterministic tests for the terminal parser, theme helpers, and key registry.
 add_executable(simrv-tui-tests
   tests/TuiFrameworkTests.cpp
+  src/tui/LogBuffer.cpp
   src/tui/TuiFrameRenderer.cpp
   src/tui/TuiGuidance.cpp
   src/tui/TuiKeybindings.cpp
   src/tui/TuiTheme.cpp
   src/tui/modals/GlossaryModal.cpp
   src/tui/modals/HelpModal.cpp
+  src/tui/modals/MisaModal.cpp
   src/tui/modals/SettingsModal.cpp
   src/tui/modals/SystemConfigModal.cpp
+  src/pipeline/PipelineConfig.cpp
 )
 target_compile_features(simrv-tui-tests PRIVATE cxx_std_23)
 target_include_directories(simrv-tui-tests PRIVATE include ${CMAKE_CURRENT_BINARY_DIR}/generated)
@@ -339,10 +341,7 @@ add_executable(simrv-pipeline-model-tests
   tests/PipelineModelTests.cpp
   src/core/Logger.cpp
   src/pipeline/PipelineSim.cpp
-  src/pipeline/PipelineFactory.cpp
-  src/pipeline/InOrderPipeline.cpp
-  src/pipeline/ThreeStagePipeline.cpp
-  src/pipeline/DualIssuePipeline.cpp
+  src/pipeline/PipelineConfig.cpp
 )
 target_compile_features(simrv-pipeline-model-tests PRIVATE cxx_std_23)
 target_compile_definitions(simrv-pipeline-model-tests PRIVATE SIMRV_XLEN=${SIMRV_XLEN})
@@ -442,15 +441,24 @@ set_tests_properties(cli-invalid-option PROPERTIES
   LABELS "gate;regress;cli"
 )
 
-add_test(NAME cli-removed-option COMMAND $<TARGET_FILE:SimRV> --headless)
-set_tests_properties(cli-removed-option PROPERTIES
-  PASS_REGULAR_EXPRESSION "removed in SimRV 2.0; use --cli"
+add_test(NAME cli-conflicting-execution COMMAND $<TARGET_FILE:SimRV> --ca --ia)
+set_tests_properties(cli-conflicting-execution PROPERTIES
+  WILL_FAIL TRUE
   LABELS "gate;regress;cli"
 )
 
-add_test(NAME cli-removed-linux-option COMMAND $<TARGET_FILE:SimRV> --linux)
-set_tests_properties(cli-removed-linux-option PROPERTIES
-  PASS_REGULAR_EXPRESSION "removed in SimRV 2.0; use --os"
+foreach(obsolete_option IN ITEMS --preset --pipe --bp-type --btb-size --no-ex-forwarding --no-mem-forwarding)
+  string(REGEX REPLACE "^-+" "" obsolete_name "${obsolete_option}")
+  add_test(NAME "cli-obsolete-${obsolete_name}" COMMAND $<TARGET_FILE:SimRV> ${obsolete_option})
+  set_tests_properties("cli-obsolete-${obsolete_name}" PROPERTIES
+    WILL_FAIL TRUE
+    LABELS "gate;regress;cli"
+  )
+endforeach()
+
+add_test(NAME cli-invalid-pipeline COMMAND $<TARGET_FILE:SimRV> --pipeline dual)
+set_tests_properties(cli-invalid-pipeline PROPERTIES
+  WILL_FAIL TRUE
   LABELS "gate;regress;cli"
 )
 
@@ -625,6 +633,50 @@ endif()
 
 foreach(test_name IN LISTS SMOKE_LIST)
   register_isa_test("${test_name}" TRUE)
+endforeach()
+
+function(register_ca_isa_test test_name pipeline_type)
+  if(NOT EXISTS "${ISA_DIR}/${test_name}")
+    return()
+  endif()
+  add_test(NAME "ca-${pipeline_type}-${test_name}"
+    COMMAND ${CMAKE_COMMAND}
+      -D SIMRV_BIN=$<TARGET_FILE:SimRV>
+      -D ELF_PATH=${ISA_DIR}/${test_name}
+      -D OBJCOPY_BIN=${RISCV_OBJCOPY}
+      -D NM_BIN=${RISCV_NM}
+      -D WORK_DIR=${ISA_WORK_DIR}/${pipeline_type}
+      -D TIMEOUT_SECS=20
+      -D END_INSNS=2000000
+      -D DEFAULT_TOHOST_ADDR=0x80001000
+      -D CYCLE_MODE=TRUE
+      -D PIPELINE_TYPE=${pipeline_type}
+      -P ${CMAKE_SOURCE_DIR}/scripts/RunIsaTest.cmake
+  )
+  set_tests_properties("ca-${pipeline_type}-${test_name}" PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    LABELS "gate;isa;ca;smoke;pipeline;rv${SIMRV_XLEN}gc"
+    SKIP_RETURN_CODE 2
+  )
+endfunction()
+
+set(CA_SMOKE_TESTS
+  "rv${SIMRV_XLEN}ui-p-add"
+  "rv${SIMRV_XLEN}ui-p-jalr"
+  "rv${SIMRV_XLEN}ui-p-lw"
+  "rv${SIMRV_XLEN}ui-p-sw"
+  "rv${SIMRV_XLEN}ui-p-ma_data"
+  "rv${SIMRV_XLEN}ui-p-fence_i"
+  "rv${SIMRV_XLEN}um-p-mul"
+  "rv${SIMRV_XLEN}um-p-div"
+  "rv${SIMRV_XLEN}ua-p-lrsc"
+  "rv${SIMRV_XLEN}uc-p-rvc"
+  "rv${SIMRV_XLEN}uf-p-fadd"
+)
+foreach(ca_pipeline IN ITEMS 5stage 3stage)
+  foreach(ca_test IN LISTS CA_SMOKE_TESTS)
+    register_ca_isa_test("${ca_test}" "${ca_pipeline}")
+  endforeach()
 endforeach()
 
 if(SPIKE_BIN)

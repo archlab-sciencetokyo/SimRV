@@ -18,7 +18,6 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/pipeline/Decoder.hpp"
-#include "simrv/pipeline/PipelineModel.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/LeftPane.hpp"
@@ -279,33 +278,18 @@ auto get_active_branch_pc(const simrv::pipeline::PipelineSim& ps) -> Register {
     return 0;
 }
 
-auto get_bht_string(const simrv::pipeline::PipelineSim& ps, Register pc) -> std::string {
+auto get_bht_string(const simrv::pipeline::PipelineSim& /*ps*/, Register pc) -> std::string {
     if (pc == 0) {
         return "No active branch";
     }
-    uint8_t counter = ps.get_model() ? ps.get_model()->get_bht_entry(pc) : 1;
-    switch (counter) {
-        case 0:
-            return "Strongly Not Taken (00)";
-        case 1:
-            return "Weakly Not Taken (01)";
-        case 2:
-            return "Weakly Taken (10)";
-        default:
-            return "Strongly Taken (11)";
-    }
+    return "No prediction (resolved in execute)";
 }
 
-auto get_btb_string(const simrv::pipeline::PipelineSim& ps, Register pc) -> std::string {
+auto get_btb_string(const simrv::pipeline::PipelineSim& /*ps*/, Register pc) -> std::string {
     if (pc == 0) {
         return "No active branch";
     }
-    auto [valid, target] =
-        ps.get_model() ? ps.get_model()->get_btb_target(pc) : std::pair<bool, Register>{false, 0};
-    if (valid) {
-        return std::format("Hit → cached target {}", hex_val(target));
-    }
-    return "Miss (no cached target)";
+    return "Disabled in the current CA policy";
 }
 
 auto get_active_forwarding_paths(const simrv::pipeline::PipelineSim& ps)
@@ -313,12 +297,12 @@ auto get_active_forwarding_paths(const simrv::pipeline::PipelineSim& ps)
     std::vector<std::string> paths;
     if (!ps.config.enable_forwarding) return paths;
 
-    auto d = ps.d_reg();
+    const auto& d = ps.d_reg();
     if (!d.valid) return paths;
 
-    auto e = ps.e_reg();
-    auto m = ps.m_reg();
-    auto w = ps.w_reg();
+    const auto& e = ps.e_reg();
+    const auto& m = ps.m_reg();
+    const auto& w = ps.w_reg();
 
     auto check_src = [&](RegId rs, const std::string& rs_label) -> void {
         if (rs == static_cast<RegId>(0)) return;
@@ -355,7 +339,7 @@ auto get_active_forwarding_paths(const simrv::pipeline::PipelineSim& ps)
 
 auto LeftPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logical_row, int col_width,
                                       int right_width) -> std::string {
-    if (machine_.s_cycle_accurate) {
+    if (machine_.runtime_profile.is_cycle_mode()) {
         // CA mode: rows 0-8 timeline, rows 9+ stage details
         if (logical_row < 9) {
             return render_pipeline_timeline(cpu, logical_row, col_width + right_width);
@@ -432,53 +416,6 @@ auto LeftPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int s
                     width);
             case 6:
                 return format_to_width("", width);
-            default:
-                return format_to_width("", width);
-        }
-    }
-
-    if (ptype == simrv::pipeline::PipelineType::DualIssue) {
-        switch (stage_idx) {
-            case 0:
-                return section_line("Dual-Issue Superscalar (SweRV EH1)", width);
-            case 1: {
-                std::string diagram = std::format(
-                    "  \033[1;36mIF:{}\033[0m → \033[1;32mEX0:{}\033[0m|\033[1;33mEX1:{}\033[0m → "
-                    "\033[1;35mMEM\033[0m → \033[1;34mWB0/1\033[0m",
-                    short_op_name(ps.f_reg()), short_op_name(ps.e_reg()),
-                    short_op_name(ps.e1_reg()));
-                return format_to_width(diagram, width);
-            }
-            case 2: {
-                std::string stall_type = ps.tlb_stall_remaining() > 0 ? "TLB Miss" : "I-Cache Miss";
-                uint32_t stall_rem = ps.tlb_stall_remaining() > 0 ? ps.tlb_stall_remaining()
-                                                                  : ps.icache_stall_remaining();
-                return format_to_width(
-                    std::format("  \033[1m{}IF  (Fetch)\033[0m     : {}", kThemeSky,
-                                get_stage_desc(ps.f_reg(), stall_rem, stall_type)),
-                    width);
-            }
-            case 3:
-                return format_to_width(
-                    std::format("  \033[1m{}EX0 (Slot 0)\033[0m    : {}", kThemeSky,
-                                get_stage_desc(ps.e_reg(), ps.div_busy_cycles_remaining(),
-                                               "Divider Busy", is_raw_stalled)),
-                    width);
-            case 4:
-                return format_to_width(std::format("  \033[1m{}EX1 (Slot 1)\033[0m    : {}",
-                                                   kThemeSky, get_stage_desc(ps.e1_reg(), 0, "")),
-                                       width);
-            case 5:
-                return format_to_width(
-                    std::format(
-                        "  \033[1m{}MEM (Memory)\033[0m    : {}", kThemeSky,
-                        get_stage_desc(ps.m_reg(), ps.dcache_stall_remaining(), "D-Cache Miss")),
-                    width);
-            case 6:
-                return format_to_width(
-                    std::format("  \033[1m{}WB  (Write-Back)\033[0m: {} | {}", kThemeSky,
-                                short_op_name(ps.w_reg()), short_op_name(ps.w1_reg())),
-                    width);
             default:
                 return format_to_width("", width);
         }
@@ -879,7 +816,7 @@ auto LeftPane::render_pipeline_stages_functional_high(const simrv::core::CPU& cp
 auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical_row, int width)
     -> std::string {
     auto const& ps = cpu.pipeline_sim;
-    auto const history = ps.get_cycle_history_copy();
+    auto const history = ps.cycle_history();
 
     if (logical_row == 0) {
         return section_line("Execution Timeline (Clock Cycles #NN)", width);
@@ -911,8 +848,8 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
     int const scan_start = std::max(0, history_size - 14);
     for (int i = scan_start; i < history_size; ++i) {
         auto const& snap = history.at(i);
-        std::array<simrv::pipeline::PipelineCycleSnapshot::StageInfo const*, 7> stages = {
-            &snap.w, &snap.w1, &snap.m, &snap.e, &snap.e1, &snap.d, &snap.f};
+        std::array<simrv::pipeline::PipelineCycleSnapshot::StageInfo const*, 5> stages = {
+            &snap.w, &snap.m, &snap.e, &snap.d, &snap.f};
         for (auto const* stage : stages) {
             if (stage->valid && stage->pc != 0) {
                 InstRef ref{.inst_id = stage->inst_id, .pc = stage->pc, .op_id = stage->op_id};
@@ -1005,24 +942,6 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
                     stage_lbl =
                         snap.f.stalled ? "\033[38;5;203m IF*\033[0m " : "\033[1;32m IF\033[0m  ";
                 }
-            } else if (ptype == simrv::pipeline::PipelineType::DualIssue) {
-                if (matches(snap.w)) {
-                    stage_lbl = "\033[1;37mWB0\033[0m  ";
-                } else if (matches(snap.w1)) {
-                    stage_lbl = "\033[1;36mWB1\033[0m  ";
-                } else if (matches(snap.m)) {
-                    stage_lbl =
-                        snap.m.stalled ? "\033[38;5;203mMEM*\033[0m " : "\033[1;34mMEM\033[0m  ";
-                } else if (matches(snap.e)) {
-                    stage_lbl =
-                        snap.e.stalled ? "\033[38;5;203mEX0*\033[0m " : "\033[1;31mEX0\033[0m  ";
-                } else if (matches(snap.e1)) {
-                    stage_lbl =
-                        snap.e1.stalled ? "\033[38;5;203mEX1*\033[0m " : "\033[1;33mEX1\033[0m  ";
-                } else if (matches(snap.f)) {
-                    stage_lbl =
-                        snap.f.stalled ? "\033[38;5;203m IF*\033[0m " : "\033[1;32m IF\033[0m  ";
-                }
             } else {
                 // 5-Stage Rocket
                 if (matches(snap.w)) {
@@ -1050,9 +969,6 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
         if (ps.config.pipeline_type == simrv::pipeline::PipelineType::ThreeStage) {
             return section_line("IF → ID/EX → MEM/WB   (* = Stalled)", width);
         }
-        if (ps.config.pipeline_type == simrv::pipeline::PipelineType::DualIssue) {
-            return section_line("IF → EX0/EX1 → MEM → WB0/WB1   (* = Stalled)", width);
-        }
         return section_line("IF → ID → EX → MEM → WB   (* = Stalled)", width);
     }
 
@@ -1065,7 +981,7 @@ auto LeftPane::get_pipeline_pc_at_row(int logical_row) const -> Register {
 
     // Execution Timeline instruction rows (logical rows 2..6)
     if (logical_row >= 2 && logical_row <= 6) {
-        auto const history = ps.get_cycle_history_copy();
+        auto const history = ps.cycle_history();
         if (history.empty()) return 0;
         int const history_size = static_cast<int>(history.size());
 
@@ -1106,7 +1022,7 @@ auto LeftPane::get_pipeline_pc_at_row(int logical_row) const -> Register {
     }
 
     // CA Stage Detail rows (logical rows 11..15 in CA mode)
-    if (machine_.s_cycle_accurate) {
+    if (machine_.runtime_profile.is_cycle_mode()) {
         switch (logical_row) {
             case 11:
                 return ps.f_reg().valid ? ps.f_reg().pc : 0;

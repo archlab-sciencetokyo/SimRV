@@ -5,6 +5,8 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -12,6 +14,8 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/CsrTypes.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/OSMachine.hpp"
+#include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/Aclint.hpp"
 #include "simrv/device/mmio/VirtioMmioBlock.hpp"
@@ -75,6 +79,999 @@ void test_mmio_device_and_dma() {
     assert(dev.dma_read(simrv::memory::kDramBaseAddress + 0x100, dst));
     assert(dst == src);
     std::cout << "[PASS] test_mmio_device_and_dma\n";
+}
+
+void test_timed_interconnect_ordering() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    ConcreteMachine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.mmem = ram.data();
+    machine.s_dram_size = ram.size();
+    ram[0] = Byte{0x11};
+    ram[8] = Byte{0x22};
+
+    auto& bus = machine.memory().system_bus();
+    simrv::memory::TlChannelA first{};
+    first.opcode = simrv::memory::TlOpcodeA::Get;
+    first.source = 2;
+    first.address = simrv::memory::kDramBaseAddress;
+    simrv::memory::TlChannelA second = first;
+    second.source = 1;
+    second.address += 8;
+
+    check(bus.send_request(first));
+    check(bus.send_request(second));
+    simrv::memory::TileLinkBus::TimedResponse response{};
+    check(!bus.try_get_timed_response(2, response));
+
+    bus.advance_cycle();
+    check(bus.try_get_timed_response(2, response));
+    check(response.sequence == 0);
+    check(response.ready_cycle == 1);
+    check((response.payload.data & 0xffU) == 0x11);
+    check(!bus.try_get_timed_response(1, response));
+
+    bus.advance_cycle();
+    check(bus.try_get_timed_response(1, response));
+    check(response.sequence == 1);
+    check(response.ready_cycle == 2);
+    check((response.payload.data & 0xffU) == 0x22);
+    std::cout << "[PASS] test_timed_interconnect_ordering\n";
+}
+
+void test_timed_interconnect_cancellation() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    ConcreteMachine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.mmem = ram.data();
+    machine.s_dram_size = ram.size();
+
+    auto& bus = machine.memory().system_bus();
+    simrv::memory::TlChannelA request{};
+    request.opcode = simrv::memory::TlOpcodeA::Get;
+    request.source = 7;
+    request.address = simrv::memory::kDramBaseAddress;
+
+    check(bus.send_request(request));
+    check(bus.pending_requests() == 1);
+    bus.cancel_source(request.source);
+    check(bus.pending_requests() == 0);
+    bus.advance_cycle();
+    simrv::memory::TileLinkBus::TimedResponse response{};
+    check(!bus.try_get_timed_response(request.source, response));
+
+    check(bus.send_request(request));
+    bus.advance_cycle();
+    check(bus.pending_responses() == 1);
+    bus.cancel_source(request.source);
+    check(bus.pending_responses() == 0);
+    check(!bus.try_get_timed_response(request.source, response));
+    std::cout << "[PASS] test_timed_interconnect_cancellation\n";
+}
+
+void test_timed_page_walk_transitions() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    ConcreteMachine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.mmem = ram.data();
+    machine.s_dram_size = ram.size();
+    machine.cpu.machine_ = &machine;
+    machine.cpu.reset();
+    machine.memory().initialize_mmu();
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+
+    constexpr Address physical = simrv::memory::kDramBaseAddress;
+    constexpr Address root = physical + 0x1000;
+    const Word root_ppn = root >> 12;
+    if constexpr (simrv::xlen::kIsXLen64) {
+        machine.cpu.state().satp = (Word{8} << 60) | root_ppn;
+    } else {
+        machine.cpu.state().satp = (Word{1} << 31) | root_ppn;
+    }
+    machine.cpu.state().priv = kPrivSupervisor;
+
+    constexpr unsigned top_vpn_bits = simrv::xlen::kIsXLen64 ? 9 : 10;
+    constexpr unsigned top_level = simrv::xlen::kIsXLen64 ? 2 : 1;
+    const Word vpn =
+        (physical >> (12 + top_level * top_vpn_bits)) & ((Word{1} << top_vpn_bits) - 1);
+    const Address pte_address = root + vpn * sizeof(Word);
+    Word pte = ((physical >> 12) << 10) | enum_mask(simrv::PteFlag::V) |
+               enum_mask(simrv::PteFlag::R) | enum_mask(simrv::PteFlag::X);
+    std::memcpy(ram.data() + (pte_address - physical), &pte, sizeof(pte));
+
+    auto& walk = machine.cpu.ca_state.instruction_walk;
+    auto result = machine.cpu.translate_stage_address(machine, physical, simrv::PteAccess::Code,
+                                                      kPrivSupervisor, simrv::xlen::kXLenBits,
+                                                      simrv::memory::TlPort::Instruction, walk);
+    check(!result.has_value());
+    check(machine.memory().system_bus().pending_requests() == 1);
+
+    machine.memory().system_bus().advance_cycle();
+    machine.cpu.ca_state.waiting_for_interconnect = false;
+    result = machine.cpu.translate_stage_address(machine, physical, simrv::PteAccess::Code,
+                                                 kPrivSupervisor, simrv::xlen::kXLenBits,
+                                                 simrv::memory::TlPort::Instruction, walk);
+    check(!result.has_value());  // Accessed-bit update is a distinct timed write.
+    check(machine.memory().system_bus().pending_requests() == 1);
+
+    machine.memory().system_bus().advance_cycle();
+    machine.cpu.ca_state.waiting_for_interconnect = false;
+    result = machine.cpu.translate_stage_address(machine, physical, simrv::PteAccess::Code,
+                                                 kPrivSupervisor, simrv::xlen::kXLenBits,
+                                                 simrv::memory::TlPort::Instruction, walk);
+    check(result.has_value() && result->has_value() && **result == physical);
+    check(!walk.active);
+    std::memcpy(&pte, ram.data() + (pte_address - physical), sizeof(pte));
+    check((pte & enum_mask(simrv::PteFlag::A)) != 0);
+
+    // A different, unmapped top-level entry faults after exactly one physical read.
+    constexpr Address unmapped = physical + (Address{1} << (12 + top_level * top_vpn_bits));
+    result = machine.cpu.translate_stage_address(machine, unmapped, simrv::PteAccess::Code,
+                                                 kPrivSupervisor, simrv::xlen::kXLenBits,
+                                                 simrv::memory::TlPort::Instruction, walk);
+    check(!result.has_value());
+    machine.memory().system_bus().advance_cycle();
+    machine.cpu.ca_state.waiting_for_interconnect = false;
+    result = machine.cpu.translate_stage_address(machine, unmapped, simrv::PteAccess::Code,
+                                                 kPrivSupervisor, simrv::xlen::kXLenBits,
+                                                 simrv::memory::TlPort::Instruction, walk);
+    check(result.has_value() && !result->has_value());
+    check(result->error() == static_cast<TrapCause>(ExceptionCode::FetchPageFault));
+
+    // A squashed fetch removes both the transaction and resumable architectural state.
+    result = machine.cpu.translate_stage_address(machine, physical, simrv::PteAccess::Code,
+                                                 kPrivSupervisor, simrv::xlen::kXLenBits,
+                                                 simrv::memory::TlPort::Instruction, walk);
+    check(!result.has_value());
+    machine.memory().system_bus().cancel_source(walk.source);
+    walk.reset();
+    check(machine.memory().system_bus().pending_requests() == 0);
+
+    // Simultaneous A and D updates cannot lose bits: the bus serializes atomic OR operations.
+    Word clear_pte = 0;
+    std::memcpy(ram.data() + (pte_address - physical), &clear_pte, sizeof(clear_pte));
+    simrv::memory::TlChannelA accessed{};
+    accessed.opcode = simrv::memory::TlOpcodeA::LogicalData;
+    accessed.size = sizeof(Word) == 8 ? 3 : 2;
+    accessed.source = 6;
+    accessed.address = pte_address;
+    accessed.data = enum_mask(simrv::PteFlag::A);
+    auto dirty = accessed;
+    dirty.source = 7;
+    dirty.data = enum_mask(simrv::PteFlag::D);
+    machine.memory().system_bus().send_request(accessed);
+    machine.memory().system_bus().send_request(dirty);
+    machine.memory().system_bus().advance_cycle();
+    machine.memory().system_bus().advance_cycle();
+    std::memcpy(&clear_pte, ram.data() + (pte_address - physical), sizeof(clear_pte));
+    check((clear_pte & (enum_mask(simrv::PteFlag::A) | enum_mask(simrv::PteFlag::D))) ==
+          (enum_mask(simrv::PteFlag::A) | enum_mask(simrv::PteFlag::D)));
+    std::cout << "[PASS] test_timed_page_walk_transitions\n";
+}
+
+void test_cycle_kernel_golden_translated_fetch() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    const auto run = [&](simrv::pipeline::PipelineType type) {
+        ConcreteMachine machine;
+        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        machine.mmem = ram.data();
+        machine.s_dram_size = ram.size();
+        machine.cpu.machine_ = &machine;
+        machine.cpu.reset();
+        machine.memory().initialize_mmu();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        machine.cpu.pipeline_sim.config.pipeline_type = type;
+
+        constexpr Address pc = simrv::memory::kDramBaseAddress;
+        constexpr Address root = pc + 0x1000;
+        constexpr Instruction instruction = 0x02a00093;  // addi x1, x0, 42
+        std::memcpy(ram.data(), &instruction, sizeof(instruction));
+        std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
+        std::memcpy(line.data(), &instruction, sizeof(instruction));
+        machine.cpu.icache.insert(pc, line.data(), simrv::memory::CoherenceState::Trunk, false);
+
+        const Word root_ppn = root >> 12;
+        if constexpr (simrv::xlen::kIsXLen64) {
+            machine.cpu.state().satp = (Word{8} << 60) | root_ppn;
+        } else {
+            machine.cpu.state().satp = (Word{1} << 31) | root_ppn;
+        }
+        constexpr unsigned vpn_bits = simrv::xlen::kIsXLen64 ? 9 : 10;
+        constexpr unsigned level = simrv::xlen::kIsXLen64 ? 2 : 1;
+        const Word vpn = (pc >> (12 + level * vpn_bits)) & ((Word{1} << vpn_bits) - 1);
+        const Address pte_address = root + vpn * sizeof(Word);
+        const Word pte = ((pc >> 12) << 10) | enum_mask(simrv::PteFlag::V) |
+                         enum_mask(simrv::PteFlag::R) | enum_mask(simrv::PteFlag::X) |
+                         enum_mask(simrv::PteFlag::A);
+        std::memcpy(ram.data() + (pte_address - pc), &pte, sizeof(pte));
+        machine.cpu.state().priv = kPrivSupervisor;
+        machine.cpu.state().pc = pc;
+
+        uint32_t cycles = 0;
+        while (machine.cpu.e_icount == 0 && cycles < 32) {
+            machine.cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+            ++cycles;
+        }
+        check(machine.cpu.e_icount == 1);
+        check(machine.cpu.state().regs.read(RegId::Ra) == 42);
+        check(machine.cpu.pipeline_sim.tlb_stalls() > 0);
+        return cycles;
+    };
+
+    check(run(simrv::pipeline::PipelineType::FiveStage) == 7);
+    check(run(simrv::pipeline::PipelineType::ThreeStage) == 5);
+    std::cout << "[PASS] test_cycle_kernel_golden_translated_fetch\n";
+}
+
+void test_cycle_kernel_golden_translated_load() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    const auto run = [&](simrv::pipeline::PipelineType type) {
+        ConcreteMachine machine;
+        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        machine.mmem = ram.data();
+        machine.s_dram_size = ram.size();
+        machine.cpu.machine_ = &machine;
+        machine.cpu.reset();
+        machine.memory().initialize_mmu();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        machine.cpu.pipeline_sim.config.pipeline_type = type;
+
+        constexpr Address pc = simrv::memory::kDramBaseAddress;
+        constexpr Address data_address = pc + 0x100;
+        constexpr Address root = pc + 0x1000;
+        constexpr std::array<Instruction, 4> program = {
+            0x00000097,  // auipc x1, 0
+            0x10008093,  // addi  x1, x1, 256
+            0x0000a103,  // lw    x2, 0(x1)
+            0x0000006f,
+        };
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        std::array<Byte, simrv::cache::ICache::kLineBytes> instruction_line{};
+        std::memcpy(instruction_line.data(), program.data(), sizeof(program));
+        machine.cpu.icache.insert(pc, instruction_line.data(), simrv::memory::CoherenceState::Trunk,
+                                  false);
+        constexpr uint32_t value = 73;
+        std::memcpy(ram.data() + 0x100, &value, sizeof(value));
+        std::array<Byte, simrv::cache::DCache::kLineBytes> data_line{};
+        std::memcpy(data_line.data(), &value, sizeof(value));
+        machine.cpu.dcache.insert(data_address, data_line.data(),
+                                  simrv::memory::CoherenceState::Branch, false);
+
+        const Word root_ppn = root >> 12;
+        if constexpr (simrv::xlen::kIsXLen64) {
+            machine.cpu.state().satp = (Word{8} << 60) | root_ppn;
+        } else {
+            machine.cpu.state().satp = (Word{1} << 31) | root_ppn;
+        }
+        constexpr unsigned vpn_bits = simrv::xlen::kIsXLen64 ? 9 : 10;
+        constexpr unsigned level = simrv::xlen::kIsXLen64 ? 2 : 1;
+        const Word vpn = (pc >> (12 + level * vpn_bits)) & ((Word{1} << vpn_bits) - 1);
+        const Address pte_address = root + vpn * sizeof(Word);
+        const Word pte = ((pc >> 12) << 10) | enum_mask(simrv::PteFlag::V) |
+                         enum_mask(simrv::PteFlag::R) | enum_mask(simrv::PteFlag::W) |
+                         enum_mask(simrv::PteFlag::X) | enum_mask(simrv::PteFlag::A) |
+                         enum_mask(simrv::PteFlag::D);
+        std::memcpy(ram.data() + (pte_address - pc), &pte, sizeof(pte));
+        machine.cpu.state().priv = kPrivSupervisor;
+        machine.cpu.state().pc = pc;
+        machine.cpu.tlb.insert_inst_r(pc, pc, 0, kPrivSupervisor);
+
+        uint32_t cycles = 0;
+        while (machine.cpu.e_icount < 3 && cycles < 32) {
+            machine.cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+            ++cycles;
+        }
+        if (machine.cpu.e_icount != 3 || machine.cpu.state().regs.read(RegId::Sp) != value ||
+            machine.cpu.pipeline_sim.tlb_stalls() == 0) {
+            std::cerr << "translated-load state: cycles=" << cycles
+                      << " retired=" << machine.cpu.e_icount
+                      << " x2=" << machine.cpu.state().regs.read(RegId::Sp)
+                      << " tlb-stalls=" << machine.cpu.pipeline_sim.tlb_stalls() << '\n';
+        }
+        check(machine.cpu.e_icount == 3);
+        check(machine.cpu.state().regs.read(RegId::Sp) == value);
+        check(machine.cpu.pipeline_sim.tlb_stalls() > 0);
+        return cycles;
+    };
+
+    check(run(simrv::pipeline::PipelineType::FiveStage) == 9);
+    check(run(simrv::pipeline::PipelineType::ThreeStage) == 7);
+    std::cout << "[PASS] test_cycle_kernel_golden_translated_load\n";
+}
+
+void test_timed_smp_coherence_ordering() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    ConcreteMachine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.mmem = ram.data();
+    machine.s_dram_size = ram.size();
+    machine.cpu.machine_ = &machine;
+    auto secondary = std::make_unique<simrv::core::CPU>();
+    secondary->machine_ = &machine;
+    secondary->state().mhartid = 1;
+    machine.secondary_harts_.push_back(std::move(secondary));
+    machine.memory().initialize_mmu();
+
+    const Address line = simrv::memory::kDramBaseAddress + 0x100;
+    ram[0x100] = Byte{0x5a};
+    auto& bus = machine.memory().system_bus();
+
+    simrv::memory::TlChannelA owner{};
+    owner.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
+    owner.param = static_cast<uint8_t>(simrv::memory::CoherenceState::Trunk);
+    owner.source = 9;  // Deliberately unrelated to hart identity.
+    owner.hart = 0;
+    owner.address = line;
+    check(bus.send_request(owner));
+    bus.advance_cycle();
+
+    simrv::memory::TileLinkBus::TimedResponse response{};
+    check(bus.try_get_timed_response(owner.source, response));
+    check(response.has_line_data);
+    check(std::to_integer<uint8_t>(response.line_data[0]) == 0x5a);
+    machine.hart(0).dcache.insert(line, response.line_data.data(),
+                                  simrv::memory::CoherenceState::Trunk, false);
+
+    simrv::memory::TlChannelA reader = owner;
+    reader.param = static_cast<uint8_t>(simrv::memory::CoherenceState::Branch);
+    reader.source = 3;
+    reader.hart = 1;
+    check(bus.send_request(reader));
+    bus.advance_cycle();
+    check(bus.try_get_timed_response(reader.source, response));
+    check(response.has_line_data);
+
+    const auto directory = bus.coherence_hub().get_directory_state(line);
+    check(directory.state == simrv::memory::CoherenceState::Branch);
+    check(directory.sharers_mask == 0b11U);
+    std::cout << "[PASS] test_timed_smp_coherence_ordering\n";
+}
+
+void test_global_cycle_smp_pipeline_ordering() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    const auto run = [&] {
+        simrv::core::OSMachine machine;
+        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        machine.mmem = ram.data();
+        machine.s_dram_size = ram.size();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        machine.cpu.machine_ = &machine;
+        machine.cpu.reset();
+
+        auto secondary = std::make_unique<simrv::core::CPU>();
+        secondary->machine_ = &machine;
+        secondary->reset();
+        secondary->state().mhartid = 1;
+        secondary->hart_status.store(simrv::core::HartStatus::Started, std::memory_order_relaxed);
+        machine.secondary_harts_.push_back(std::move(secondary));
+
+        constexpr Address pc = simrv::memory::kDramBaseAddress;
+        constexpr std::array<Instruction, 2> program = {
+            0x00100093,  // addi x1, x0, 1
+            0x0000006f,  // jal x0, 0
+        };
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        machine.hart(0).state().pc = pc;
+        machine.hart(1).state().pc = pc;
+        const auto initial_mcycle0 = machine.hart(0).clint_mmio.mcycle;
+        const auto initial_mcycle1 = machine.hart(1).clint_mmio.mcycle;
+
+        std::array<uint32_t, 2> retirement_cycle{};
+        uint32_t global_cycle = 0;
+        while ((machine.hart(0).e_icount == 0 || machine.hart(1).e_icount == 0) &&
+               global_cycle < 64) {
+            machine.execute_cycle();
+            ++global_cycle;
+            for (size_t hart = 0; hart < 2; ++hart) {
+                if (machine.hart(hart).e_icount != 0 && retirement_cycle[hart] == 0) {
+                    retirement_cycle[hart] = global_cycle;
+                }
+            }
+        }
+        check(machine.hart(0).state().regs.read(RegId::Ra) == 1);
+        check(machine.hart(1).state().regs.read(RegId::Ra) == 1);
+        check(machine.hart(0).clint_mmio.mcycle - initial_mcycle0 == global_cycle);
+        check(machine.hart(1).clint_mmio.mcycle - initial_mcycle1 == global_cycle);
+        return retirement_cycle;
+    };
+
+    const auto first = run();
+    const auto second = run();
+    check(first == second);
+    constexpr std::array<uint32_t, 2> expected =
+        simrv::xlen::kIsXLen64 ? std::array<uint32_t, 2>{13, 14} : std::array<uint32_t, 2>{21, 22};
+    if (first != expected) {
+        std::cerr << "unexpected SMP retirement cycles: " << first[0] << ", " << first[1] << '\n';
+    }
+    check(first == expected);
+    std::cout << "[PASS] test_global_cycle_smp_pipeline_ordering\n";
+}
+
+void test_cycle_kernel_golden_forwarding() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    const auto run = [&](simrv::pipeline::PipelineType type) {
+        ConcreteMachine machine;
+        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        machine.mmem = ram.data();
+        machine.s_dram_size = ram.size();
+        machine.cpu.machine_ = &machine;
+        machine.cpu.reset();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        machine.cpu.pipeline_sim.config.pipeline_type = type;
+        machine.cpu.pipeline_sim.config.enable_forwarding = true;
+
+        constexpr Address pc = simrv::memory::kDramBaseAddress;
+        constexpr std::array<Instruction, 4> program = {
+            0x00100093,  // addi x1, x0, 1
+            0x00108133,  // add  x2, x1, x1
+            0x001101b3,  // add  x3, x2, x1
+            0x0000006f,  // jal  x0, 0
+        };
+        std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
+        std::memcpy(line.data(), program.data(), sizeof(program));
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        machine.cpu.icache.insert(pc, line.data(), simrv::memory::CoherenceState::Trunk, false);
+        machine.cpu.state().pc = pc;
+
+        uint32_t cycles = 0;
+        while (machine.cpu.e_icount < 3 && cycles < 32) {
+            machine.cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+            ++cycles;
+        }
+        check(machine.cpu.e_icount == 3);
+        check(machine.cpu.state().regs.read(RegId::Ra) == 1);
+        check(machine.cpu.state().regs.read(RegId::Sp) == 2);
+        check(machine.cpu.state().regs.read(RegId::Gp) == 3);
+        return cycles;
+    };
+
+    check(run(simrv::pipeline::PipelineType::FiveStage) == 8);
+    check(run(simrv::pipeline::PipelineType::ThreeStage) == 6);
+    std::cout << "[PASS] test_cycle_kernel_golden_forwarding\n";
+}
+
+void test_cycle_kernel_golden_load_use() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    const auto run = [&](simrv::pipeline::PipelineType type) {
+        ConcreteMachine machine;
+        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        machine.mmem = ram.data();
+        machine.s_dram_size = ram.size();
+        machine.cpu.machine_ = &machine;
+        machine.cpu.reset();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        machine.cpu.pipeline_sim.config.pipeline_type = type;
+
+        constexpr Address pc = simrv::memory::kDramBaseAddress;
+        constexpr Address data_address = pc + 0x100;
+        constexpr std::array<Instruction, 5> program = {
+            0x00000097,  // auipc x1, 0
+            0x10008093,  // addi  x1, x1, 256
+            0x0000a103,  // lw    x2, 0(x1)
+            0x002101b3,  // add   x3, x2, x2
+            0x0000006f,  // jal   x0, 0
+        };
+        std::array<Byte, simrv::cache::ICache::kLineBytes> instruction_line{};
+        std::memcpy(instruction_line.data(), program.data(), sizeof(program));
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        machine.cpu.icache.insert(pc, instruction_line.data(), simrv::memory::CoherenceState::Trunk,
+                                  false);
+
+        std::array<Byte, simrv::cache::DCache::kLineBytes> data_line{};
+        constexpr uint32_t value = 21;
+        std::memcpy(data_line.data(), &value, sizeof(value));
+        std::memcpy(ram.data() + 0x100, &value, sizeof(value));
+        machine.cpu.dcache.insert(data_address, data_line.data(),
+                                  simrv::memory::CoherenceState::Branch, false);
+        machine.cpu.state().pc = pc;
+
+        uint32_t cycles = 0;
+        while (machine.cpu.e_icount < 4 && cycles < 32) {
+            machine.cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+            ++cycles;
+        }
+        check(machine.cpu.e_icount == 4);
+        check(machine.cpu.state().regs.read(RegId::Sp) == value);
+        check(machine.cpu.state().regs.read(RegId::Gp) == value * 2);
+        check(machine.cpu.dcache.miss_count() == 0);
+        check(machine.cpu.pipeline_sim.data_hazard_stalls() ==
+              (type == simrv::pipeline::PipelineType::FiveStage ? 1 : 0));
+        return cycles;
+    };
+
+    check(run(simrv::pipeline::PipelineType::FiveStage) == 10);
+    check(run(simrv::pipeline::PipelineType::ThreeStage) == 7);
+    std::cout << "[PASS] test_cycle_kernel_golden_load_use\n";
+}
+
+void test_cycle_kernel_golden_data_refill() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    const auto run = [&](simrv::pipeline::PipelineType type) {
+        ConcreteMachine machine;
+        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        machine.mmem = ram.data();
+        machine.s_dram_size = ram.size();
+        machine.cpu.machine_ = &machine;
+        machine.cpu.reset();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        machine.cpu.pipeline_sim.config.pipeline_type = type;
+        machine.memory().initialize_mmu();
+
+        constexpr Address pc = simrv::memory::kDramBaseAddress;
+        constexpr std::array<Instruction, 4> program = {
+            0x00000097,  // auipc x1, 0
+            0x10008093,  // addi  x1, x1, 256
+            0x0000a103,  // lw    x2, 0(x1)
+            0x0000006f,  // jal   x0, 0
+        };
+        std::array<Byte, simrv::cache::ICache::kLineBytes> instruction_line{};
+        std::memcpy(instruction_line.data(), program.data(), sizeof(program));
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        constexpr uint32_t value = 37;
+        std::memcpy(ram.data() + 0x100, &value, sizeof(value));
+        machine.cpu.icache.insert(pc, instruction_line.data(), simrv::memory::CoherenceState::Trunk,
+                                  false);
+        machine.cpu.state().pc = pc;
+
+        uint32_t cycles = 0;
+        while (machine.cpu.e_icount < 3 && cycles < 32) {
+            machine.cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+            ++cycles;
+        }
+        check(machine.cpu.e_icount == 3);
+        check(machine.cpu.state().regs.read(RegId::Sp) == value);
+        check(machine.cpu.dcache.miss_count() == 1);
+        check(machine.cpu.pipeline_sim.dcache_stalls() >= 1);
+        return cycles;
+    };
+
+    const auto five_cycles = run(simrv::pipeline::PipelineType::FiveStage);
+    const auto three_cycles = run(simrv::pipeline::PipelineType::ThreeStage);
+    if (five_cycles != 9 || three_cycles != 7) {
+        std::cerr << "unexpected data-refill cycles: " << five_cycles << ", " << three_cycles
+                  << '\n';
+    }
+    check(five_cycles == 9);
+    check(three_cycles == 7);
+    std::cout << "[PASS] test_cycle_kernel_golden_data_refill\n";
+}
+
+void test_cycle_kernel_golden_fence_serialization() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    const auto run = [&](simrv::pipeline::PipelineType type) {
+        ConcreteMachine machine;
+        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        machine.mmem = ram.data();
+        machine.s_dram_size = ram.size();
+        machine.cpu.machine_ = &machine;
+        machine.cpu.reset();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        machine.cpu.pipeline_sim.config.pipeline_type = type;
+        machine.cpu.pipeline_sim.config.fence_flush_penalty = 2;
+
+        constexpr Address pc = simrv::memory::kDramBaseAddress;
+        constexpr std::array<Instruction, 4> program = {
+            0x00100093,  // addi x1, x0, 1
+            0x0ff0000f,  // fence iorw, iorw
+            0x00200113,  // addi x2, x0, 2
+            0x0000006f,  // jal x0, 0
+        };
+        std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
+        std::memcpy(line.data(), program.data(), sizeof(program));
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        machine.cpu.icache.insert(pc, line.data(), simrv::memory::CoherenceState::Trunk, false);
+        machine.cpu.state().pc = pc;
+
+        uint32_t cycles = 0;
+        while (machine.cpu.e_icount < 3 && cycles < 32) {
+            machine.cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+            ++cycles;
+        }
+        check(machine.cpu.e_icount == 3);
+        check(machine.cpu.state().regs.read(RegId::Ra) == 1);
+        check(machine.cpu.state().regs.read(RegId::Sp) == 2);
+        return cycles;
+    };
+
+    check(run(simrv::pipeline::PipelineType::FiveStage) == 16);
+    check(run(simrv::pipeline::PipelineType::ThreeStage) == 10);
+    std::cout << "[PASS] test_cycle_kernel_golden_fence_serialization\n";
+}
+
+void test_cycle_kernel_golden_multicycle_execute() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    const auto run = [&](simrv::pipeline::PipelineType type) {
+        ConcreteMachine machine;
+        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        machine.mmem = ram.data();
+        machine.s_dram_size = ram.size();
+        machine.cpu.machine_ = &machine;
+        machine.cpu.reset();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        machine.cpu.pipeline_sim.config.pipeline_type = type;
+        machine.cpu.pipeline_sim.config.mul_latency = 3;
+
+        constexpr Address pc = simrv::memory::kDramBaseAddress;
+        constexpr std::array<Instruction, 4> program = {
+            0x00600093,  // addi x1, x0, 6
+            0x00700113,  // addi x2, x0, 7
+            0x022081b3,  // mul  x3, x1, x2
+            0x0000006f,  // jal  x0, 0
+        };
+        std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
+        std::memcpy(line.data(), program.data(), sizeof(program));
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        machine.cpu.icache.insert(pc, line.data(), simrv::memory::CoherenceState::Trunk, false);
+        machine.cpu.state().pc = pc;
+
+        uint32_t cycles = 0;
+        while (machine.cpu.e_icount < 3 && cycles < 32) {
+            machine.cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+            ++cycles;
+        }
+        check(machine.cpu.e_icount == 3);
+        check(machine.cpu.state().regs.read(RegId::Gp) == 42);
+        return cycles;
+    };
+
+    check(run(simrv::pipeline::PipelineType::FiveStage) == 10);
+    check(run(simrv::pipeline::PipelineType::ThreeStage) == 8);
+    std::cout << "[PASS] test_cycle_kernel_golden_multicycle_execute\n";
+}
+
+void test_cycle_kernel_golden_branch_recovery() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    const auto run = [&](simrv::pipeline::PipelineType type) {
+        ConcreteMachine machine;
+        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        machine.mmem = ram.data();
+        machine.s_dram_size = ram.size();
+        machine.cpu.machine_ = &machine;
+        machine.cpu.reset();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        machine.cpu.pipeline_sim.config.pipeline_type = type;
+
+        constexpr Address pc = simrv::memory::kDramBaseAddress;
+        constexpr std::array<Instruction, 6> program = {
+            0x00100093,  // addi x1, x0, 1
+            0x00008463,  // beq  x1, x0, +8 (not taken)
+            0x00108463,  // beq  x1, x1, +8 (taken)
+            0x06300113,  // addi x2, x0, 99 (must be squashed)
+            0x00700193,  // addi x3, x0, 7
+            0x0000006f,  // jal  x0, 0
+        };
+        std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
+        std::memcpy(line.data(), program.data(), sizeof(program));
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        machine.cpu.icache.insert(pc, line.data(), simrv::memory::CoherenceState::Trunk, false);
+        machine.cpu.state().pc = pc;
+
+        uint32_t cycles = 0;
+        while (machine.cpu.e_icount < 4 && cycles < 64) {
+            machine.cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+            ++cycles;
+        }
+        check(machine.cpu.e_icount == 4);
+        check(machine.cpu.state().regs.read(RegId::Sp) == 0);
+        check(machine.cpu.state().regs.read(RegId::Gp) == 7);
+        return cycles;
+    };
+
+    check(run(simrv::pipeline::PipelineType::FiveStage) == 13);
+    check(run(simrv::pipeline::PipelineType::ThreeStage) == 9);
+    std::cout << "[PASS] test_cycle_kernel_golden_branch_recovery\n";
+}
+
+void test_cycle_kernel_golden_instruction_refill() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    const auto run = [&](simrv::pipeline::PipelineType type) {
+        ConcreteMachine machine;
+        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        machine.mmem = ram.data();
+        machine.s_dram_size = ram.size();
+        machine.cpu.machine_ = &machine;
+        machine.cpu.reset();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        machine.cpu.pipeline_sim.config.pipeline_type = type;
+
+        constexpr Address pc = simrv::memory::kDramBaseAddress;
+        constexpr std::array<Instruction, 2> program = {
+            0x02a00093,  // addi x1, x0, 42
+            0x0000006f,  // jal  x0, 0
+        };
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        machine.cpu.state().pc = pc;
+
+        uint32_t cycles = 0;
+        while (machine.cpu.e_icount < 1 && cycles < 64) {
+            machine.cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+            ++cycles;
+        }
+        check(machine.cpu.e_icount == 1);
+        check(machine.cpu.state().regs.read(RegId::Ra) == 42);
+        check(machine.cpu.icache.miss_count() == 1);
+        return cycles;
+    };
+
+    check(run(simrv::pipeline::PipelineType::FiveStage) == (simrv::xlen::kIsXLen64 ? 10 : 14));
+    check(run(simrv::pipeline::PipelineType::ThreeStage) == (simrv::xlen::kIsXLen64 ? 8 : 12));
+    std::cout << "[PASS] test_cycle_kernel_golden_instruction_refill\n";
+}
+
+void test_cycle_kernel_golden_precise_trap() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    const auto run = [&](simrv::pipeline::PipelineType type) {
+        ConcreteMachine machine;
+        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        machine.mmem = ram.data();
+        machine.s_dram_size = ram.size();
+        machine.cpu.machine_ = &machine;
+        machine.cpu.reset();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        machine.cpu.pipeline_sim.config.pipeline_type = type;
+
+        constexpr Address pc = simrv::memory::kDramBaseAddress;
+        constexpr Address handler = pc + 16;
+        constexpr std::array<Instruction, 6> program = {
+            0xffffffff,  // illegal instruction
+            0x00900093,  // addi x1, x0, 9 (must be squashed)
+            0x00000013,  // nop
+            0x00000013,  // nop
+            0x00100113,  // handler: addi x2, x0, 1
+            0x0000006f,  // jal x0, 0
+        };
+        std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
+        std::memcpy(line.data(), program.data(), sizeof(program));
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        machine.cpu.icache.insert(pc, line.data(), simrv::memory::CoherenceState::Trunk, false);
+        machine.cpu.state().pc = pc;
+        machine.cpu.state().mtvec = handler;
+
+        uint32_t cycles = 0;
+        while (machine.cpu.state().mcause == 0 && cycles < 32) {
+            machine.cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+            ++cycles;
+        }
+        check(machine.cpu.state().mcause ==
+              static_cast<TrapCause>(ExceptionCode::IllegalInstruction));
+        check(machine.cpu.state().mepc == pc);
+        check(machine.cpu.state().pc == handler);
+        check(machine.cpu.state().regs.read(RegId::Ra) == 0);
+        check(machine.cpu.e_icount == 0);
+        return cycles;
+    };
+
+    check(run(simrv::pipeline::PipelineType::FiveStage) == 6);
+    check(run(simrv::pipeline::PipelineType::ThreeStage) == 4);
+    std::cout << "[PASS] test_cycle_kernel_golden_precise_trap\n";
+}
+
+void test_cycle_kernel_golden_interrupt_boundary() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    const auto run = [&](simrv::pipeline::PipelineType type) {
+        ConcreteMachine machine;
+        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        machine.mmem = ram.data();
+        machine.s_dram_size = ram.size();
+        machine.cpu.machine_ = &machine;
+        machine.cpu.reset();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        machine.cpu.pipeline_sim.config.pipeline_type = type;
+
+        constexpr Address pc = simrv::memory::kDramBaseAddress;
+        constexpr Address handler = pc + 16;
+        constexpr std::array<Instruction, 6> program = {
+            0x00100093,  // addi x1, x0, 1 (retires before interrupt)
+            0x00200113,  // addi x2, x0, 2 (must be squashed)
+            0x00000013,  // nop
+            0x00000013,  // nop
+            0x00100193,  // handler: addi x3, x0, 1
+            0x0000006f,  // jal x0, 0
+        };
+        std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
+        std::memcpy(line.data(), program.data(), sizeof(program));
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        machine.cpu.icache.insert(pc, line.data(), simrv::memory::CoherenceState::Trunk, false);
+        machine.cpu.state().pc = pc;
+        machine.cpu.state().mtvec = handler;
+        machine.cpu.state().mstatus |= enum_mask(simrv::core::MstatusBit::Mie);
+        machine.cpu.state().mie |= enum_mask(simrv::core::MipBit::Mtip);
+        machine.cpu.state().mip |= enum_mask(simrv::core::MipBit::Mtip);
+
+        uint32_t cycles = 0;
+        while (!trap_is_interrupt(machine.cpu.state().mcause) && cycles < 32) {
+            machine.cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+            ++cycles;
+        }
+        check(machine.cpu.state().mcause == (kInterruptCauseBit | TrapCause{7}));
+        check(machine.cpu.state().mepc == pc + 4);
+        check(machine.cpu.state().pc == handler);
+        check(machine.cpu.state().regs.read(RegId::Ra) == 1);
+        check(machine.cpu.state().regs.read(RegId::Sp) == 0);
+        check(machine.cpu.e_icount == 1);
+        return cycles;
+    };
+
+    check(run(simrv::pipeline::PipelineType::FiveStage) == 6);
+    check(run(simrv::pipeline::PipelineType::ThreeStage) == 4);
+    std::cout << "[PASS] test_cycle_kernel_golden_interrupt_boundary\n";
+}
+
+void test_cycle_policy_architectural_equivalence() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    struct Result {
+        Register x1 = 0;
+        Register x2 = 0;
+        Register x3 = 0;
+        Word memory_value = 0;
+        Counter retired = 0;
+        uint64_t cycles = 0;
+        size_t history_size = 0;
+    };
+    const auto run = [&](simrv::core::ExecutionEngine engine) {
+        ConcreteMachine machine;
+        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        machine.mmem = ram.data();
+        machine.s_dram_size = ram.size();
+        machine.cpu.machine_ = &machine;
+        machine.cpu.reset();
+        machine.memory().initialize_mmu();
+        machine.runtime_profile.engine = engine;
+        machine.cpu.pipeline_sim.config.pipeline_type = simrv::pipeline::PipelineType::FiveStage;
+        machine.cpu.pipeline_sim.config.record_snapshots =
+            engine == simrv::core::ExecutionEngine::CycleObservable;
+
+        constexpr Address pc = simrv::memory::kDramBaseAddress;
+        constexpr Address data_address = pc + 0x100;
+        constexpr std::array<Instruction, 6> program = {
+            0x02a00093,  // addi  x1, x0, 42
+            0x00000117,  // auipc x2, 0
+            0x0fc10113,  // addi  x2, x2, 252 -> pc + 0x100
+            0x00112023,  // sw    x1, 0(x2)
+            0x00012183,  // lw    x3, 0(x2)
+            0x0000006f,  // jal   x0, 0
+        };
+        std::array<Byte, simrv::cache::ICache::kLineBytes> instruction_line{};
+        std::memcpy(instruction_line.data(), program.data(), sizeof(program));
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        machine.cpu.icache.insert(pc, instruction_line.data(), simrv::memory::CoherenceState::Trunk,
+                                  false);
+        std::array<Byte, simrv::cache::DCache::kLineBytes> data_line{};
+        machine.cpu.dcache.insert(data_address, data_line.data(),
+                                  simrv::memory::CoherenceState::Trunk, false);
+        machine.cpu.state().pc = pc;
+
+        uint32_t guard = 0;
+        while (machine.cpu.e_icount < 5 && guard++ < 64) {
+            machine.cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+        }
+        Word memory_value = 0;
+        check(machine.cpu.dcache.read(data_address, memory_value,
+                                      static_cast<Instruction>(simrv::isa::Funct3::Lw)));
+        return Result{.x1 = machine.cpu.state().regs.read(RegId::Ra),
+                      .x2 = machine.cpu.state().regs.read(RegId::Sp),
+                      .x3 = machine.cpu.state().regs.read(RegId::Gp),
+                      .memory_value = memory_value,
+                      .retired = machine.cpu.e_icount,
+                      .cycles = machine.cpu.pipeline_sim.cycle_count(),
+                      .history_size = machine.cpu.pipeline_sim.cycle_history().size()};
+    };
+
+    const auto fast = run(simrv::core::ExecutionEngine::CycleFast);
+    const auto observable = run(simrv::core::ExecutionEngine::CycleObservable);
+    check(fast.x1 == 42 && fast.x2 == simrv::memory::kDramBaseAddress + 0x100 && fast.x3 == 42);
+    check(fast.memory_value == 42 && fast.retired == 5);
+    check(fast.x1 == observable.x1 && fast.x2 == observable.x2 && fast.x3 == observable.x3);
+    check(fast.memory_value == observable.memory_value && fast.retired == observable.retired);
+    check(fast.cycles == observable.cycles);
+    check(fast.history_size == 0 && observable.history_size == observable.cycles);
+    std::cout << "[PASS] test_cycle_policy_architectural_equivalence\n";
+}
+
+void test_instruction_policy_architectural_equivalence() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    struct Result {
+        Register x1 = 0;
+        Register x2 = 0;
+        Register x3 = 0;
+        Address pc = 0;
+        uint32_t memory_value = 0;
+        Counter retired = 0;
+        Counter cycles = 0;
+    };
+    const auto run = [](simrv::core::ExecutionEngine engine) {
+        ConcreteMachine machine;
+        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        machine.mmem = ram.data();
+        machine.s_dram_size = ram.size();
+        machine.cpu.machine_ = &machine;
+        machine.cpu.reset();
+        machine.memory().initialize_mmu();
+        machine.runtime_profile.engine = engine;
+
+        constexpr Address pc = simrv::memory::kDramBaseAddress;
+        constexpr std::array<Instruction, 6> program = {
+            0x02a00093,  // addi  x1, x0, 42
+            0x00000117,  // auipc x2, 0
+            0x0fc10113,  // addi  x2, x2, 252 -> pc + 0x100
+            0x00112023,  // sw    x1, 0(x2)
+            0x00012183,  // lw    x3, 0(x2)
+            0x0000006f,  // jal   x0, 0
+        };
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        machine.cpu.state().pc = pc;
+
+        uint32_t guard = 0;
+        while (machine.cpu.e_icount < 5 && guard++ < 16) {
+            machine.cpu.run_cycle(machine);
+        }
+        uint32_t memory_value = 0;
+        std::memcpy(&memory_value, ram.data() + 0x100, sizeof(memory_value));
+        return Result{.x1 = machine.cpu.state().regs.read(RegId::Ra),
+                      .x2 = machine.cpu.state().regs.read(RegId::Sp),
+                      .x3 = machine.cpu.state().regs.read(RegId::Gp),
+                      .pc = machine.cpu.state().pc,
+                      .memory_value = memory_value,
+                      .retired = machine.cpu.e_icount,
+                      .cycles = machine.cpu.clint_mmio.mcycle};
+    };
+
+    const auto fast = run(simrv::core::ExecutionEngine::InstructionFast);
+    const auto observable = run(simrv::core::ExecutionEngine::InstructionObservable);
+    check(fast.x1 == 42 && fast.x2 == simrv::memory::kDramBaseAddress + 0x100 && fast.x3 == 42);
+    check(fast.memory_value == 42 && fast.retired == 5);
+    check(fast.x1 == observable.x1 && fast.x2 == observable.x2 && fast.x3 == observable.x3);
+    check(fast.pc == observable.pc && fast.memory_value == observable.memory_value);
+    check(fast.retired == observable.retired && fast.cycles == observable.cycles);
+    std::cout << "[PASS] test_instruction_policy_architectural_equivalence\n";
 }
 
 void test_aclint() {
@@ -274,6 +1271,24 @@ void test_virtio_mmio_v2() {
 
 int main() {
     test_mmio_device_and_dma();
+    test_timed_interconnect_ordering();
+    test_timed_interconnect_cancellation();
+    test_timed_page_walk_transitions();
+    test_timed_smp_coherence_ordering();
+    test_global_cycle_smp_pipeline_ordering();
+    test_cycle_kernel_golden_forwarding();
+    test_cycle_kernel_golden_load_use();
+    test_cycle_kernel_golden_data_refill();
+    test_cycle_kernel_golden_fence_serialization();
+    test_cycle_kernel_golden_multicycle_execute();
+    test_cycle_kernel_golden_branch_recovery();
+    test_cycle_kernel_golden_instruction_refill();
+    test_cycle_kernel_golden_translated_fetch();
+    test_cycle_kernel_golden_translated_load();
+    test_cycle_kernel_golden_precise_trap();
+    test_cycle_kernel_golden_interrupt_boundary();
+    test_cycle_policy_architectural_equivalence();
+    test_instruction_policy_architectural_equivalence();
     test_aclint();
     test_aia_aplic_and_imsic();
     test_pcie_and_virtio_pci();

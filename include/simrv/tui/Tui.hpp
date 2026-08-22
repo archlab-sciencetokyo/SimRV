@@ -17,6 +17,7 @@
 #include "simrv/Define.hpp"
 #include "simrv/isa/Base.hpp"
 #include "simrv/isa/OperationId.hpp"
+#include "simrv/tui/LogBuffer.hpp"
 #include "simrv/tui/TuiInputRouter.hpp"
 #include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/TuiLayoutPolicy.hpp"
@@ -207,7 +208,7 @@ class Tui {
     int cell_height_px_ = 16;
     bool sixel_supported_{false};
     VirtualTerminal vt_;
-    VirtualTerminal vt_log_;
+    LogBuffer log_buffer_;
     std::vector<std::string> trace_buffer_;
     std::vector<std::string> lines_to_draw_;
     std::vector<std::string> last_screen_lines_;

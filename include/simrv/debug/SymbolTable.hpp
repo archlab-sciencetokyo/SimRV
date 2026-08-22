@@ -12,6 +12,8 @@
 
 namespace simrv::debug {
 
+enum class SymbolLoadMode : uint8_t { RuntimeEssentials, FullDebug };
+
 class SymbolTable {
    public:
     SymbolTable() = default;
@@ -23,7 +25,8 @@ class SymbolTable {
      * @param clear_existing Whether to clear pre-existing symbols before loading.
      * @return true if symbols were successfully loaded, false otherwise.
      */
-    auto load_from_elf(const std::string& elf_path, bool clear_existing = true) -> bool;
+    auto load_from_elf(const std::string& elf_path, bool clear_existing = true,
+                       SymbolLoadMode mode = SymbolLoadMode::FullDebug) -> bool;
     auto append_from_elf(const std::string& elf_path) -> bool;
 
     /**

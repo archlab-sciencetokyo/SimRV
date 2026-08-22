@@ -37,6 +37,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
 
     const bool crosses_page =
         ((v_addr & simrv::memory::kPageMask) + size_bytes) > (1u << simrv::memory::kPageShift);
+    const bool crosses_cache_line = ((v_addr & (simrv::cache::DCache::kLineBytes - 1u)) +
+                                     size_bytes) > simrv::cache::DCache::kLineBytes;
     if (simrv::compiler::unlikely((v_addr & (size_bytes - 1u)) != 0)) {
         if (is_amo) {
             cpu.pipeline_context.pending_exception =
@@ -45,12 +47,13 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             return 0;
         }
     }
-    if (simrv::compiler::unlikely(crosses_page)) {
+    if (simrv::compiler::unlikely(crosses_page || crosses_cache_line)) {
         Word result = 0;
         for (unsigned b = 0; b < size_bytes; ++b) {
             Address byte_vaddr = v_addr + b;
             Word byte_val =
                 target_read(mem, cpu, byte_vaddr, static_cast<Instruction>(isa::Funct3::Lbu));
+            if (cpu.ca_state.waiting_for_interconnect) return 0;
             if (cpu.pipeline_context.pending_exception.has_value()) {
                 cpu.pipeline_context.pending_tval = v_addr;
                 return 0;
@@ -90,7 +93,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
         }
     }
 
-    if (cpu.machine_->s_high_performance && !crosses_page) {
+    if (cpu.machine_->runtime_profile.is_instruction_mode() && !crosses_page) {
         if (!translation_enabled) {
             // Bypass soft TLB lookup if translation is disabled (direct DRAM access)
             const Address eff_vaddr = (active_xlen == 32) ? (v_addr & 0xFFFFFFFFULL) : v_addr;
@@ -114,19 +117,55 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     }
 
     auto issue_read = [&](Address addr) -> Word {
-        if (cpu.machine_->s_high_performance && simrv::memory::is_dram_access(addr, size_bytes)) {
+        if (cpu.machine_->runtime_profile.is_instruction_mode() &&
+            simrv::memory::is_dram_access(addr, size_bytes)) {
             return simrv::memory::ram_read_fast(addr, funct3, mem.mmu()->mmem());
         }
         if (!simrv::memory::is_dram_access(addr, size_bytes)) {
+            auto& transfer = cpu.ca_state.data_transfer;
+            if (cpu.machine_->runtime_profile.is_cycle_mode() && transfer.active) {
+                TileLinkBus::TimedResponse timed{};
+                if (!mem.system_bus().try_get_timed_response(transfer.source, timed)) {
+                    cpu.ca_state.waiting_for_interconnect = true;
+                    return 0;
+                }
+                transfer.reset();
+                if (simrv::compiler::unlikely(timed.payload.error)) {
+                    cpu.pipeline_context.pending_exception = ExceptionCode::FaultLoad;
+                    cpu.pipeline_context.pending_tval = v_addr;
+                    return 0;
+                }
+                Word rdata = timed.payload.data;
+                const unsigned req_size_bytes = 1u << (funct3 & 0x3u);
+                const unsigned bits = 8 * req_size_bytes;
+                if (bits < simrv::xlen::kXLenBits) {
+                    const Word mask = (static_cast<Word>(1) << bits) - 1;
+                    rdata &= mask;
+                    constexpr auto kSignExtendBit = 0x4u;
+                    if ((funct3 & kSignExtendBit) == 0) {
+                        const Word sign_bit = static_cast<Word>(1) << (bits - 1);
+                        if ((rdata & sign_bit) != 0) rdata |= ~mask;
+                    }
+                }
+                return static_cast<Word>(rdata & simrv::xlen::kXLenMask);
+            }
             TlChannelA req{};
             req.opcode = TlOpcodeA::Get;
             req.size = static_cast<uint8_t>(funct3 & 0x3);
-            req.source = 0;  // CPU Data Bus source ID
+            req.hart = static_cast<HartId>(cpu.state().mhartid);
+            req.source = make_tl_source(req.hart, TlPort::Data);
             req.address = addr;
             mem.system_bus().send_request(req);
 
+            if (cpu.machine_->runtime_profile.is_cycle_mode()) {
+                transfer = {
+                    .address = addr, .source = req.source, .active = true, .is_write = false};
+                cpu.ca_state.waiting_for_interconnect = true;
+                return 0;
+            }
+
             TlChannelD resp{};
-            if (mem.system_bus().get_response(0, resp)) {
+            if (mem.system_bus().get_response(req.source, resp)) {
                 if (simrv::compiler::unlikely(resp.error)) {
                     cpu.pipeline_context.pending_exception = ExceptionCode::FaultLoad;
                     cpu.pipeline_context.pending_tval = v_addr;
@@ -152,13 +191,33 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             return 0;
         }
 
-        const bool crosses_cache_line = ((addr & (simrv::cache::DCache::kLineBytes - 1u)) +
-                                         size_bytes) > simrv::cache::DCache::kLineBytes;
-        if (crosses_cache_line) {
-            return simrv::memory::ram_read_fast(addr, funct3, mem.mmu()->mmem());
+        auto& transfer = cpu.ca_state.data_transfer;
+        Word cached_data = 0;
+        // A resumable line fill represents one cache miss. Do not probe the cache again while
+        // that request is in flight, otherwise both miss counters and modeled penalties grow
+        // once per waiting cycle.
+        if (cpu.machine_->runtime_profile.is_cycle_mode() && transfer.active &&
+            transfer.line_fill) {
+            TileLinkBus::TimedResponse timed{};
+            if (!mem.system_bus().try_get_timed_response(transfer.source, timed)) {
+                cpu.ca_state.waiting_for_interconnect = true;
+                return 0;
+            }
+            const Address completed_line = transfer.address;
+            transfer.reset();
+            if (timed.payload.error || !timed.has_line_data) {
+                cpu.pipeline_context.pending_exception = ExceptionCode::FaultLoad;
+                cpu.pipeline_context.pending_tval = v_addr;
+                return 0;
+            }
+            const auto granted = static_cast<CoherenceState>(timed.payload.param);
+            cpu.dcache.insert(completed_line, timed.line_data.data(), granted, false);
+            TlChannelE ack{};
+            ack.sink = timed.payload.sink;
+            mem.system_bus().grant_ack(ack);
+            if (cpu.dcache.read(addr, cached_data, funct3)) return cached_data;
         }
 
-        Word cached_data = 0;
         if (cpu.dcache.read(addr, cached_data, funct3)) {
             return cached_data;
         }
@@ -171,8 +230,20 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
         req.opcode = TlOpcodeA::AcquireBlock;
         req.param = static_cast<uint8_t>(CoherenceState::Branch);
         req.size = simrv::cache::DCache::kLineShift;
-        req.source = static_cast<uint8_t>(cpu.state().mhartid);
+        req.hart = static_cast<HartId>(cpu.state().mhartid);
+        req.source = make_tl_source(req.hart, TlPort::Data);
         req.address = line_base;
+
+        if (cpu.machine_->runtime_profile.is_cycle_mode()) {
+            mem.system_bus().send_request(req);
+            transfer = {.address = line_base,
+                        .source = req.source,
+                        .active = true,
+                        .is_write = false,
+                        .line_fill = true};
+            cpu.ca_state.waiting_for_interconnect = true;
+            return 0;
+        }
 
         TlChannelD resp{};
         if (mem.system_bus().acquire_block(req, resp, line_data)) {
@@ -208,9 +279,11 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
         p_addr = entry->p_addr + (v_addr & simrv::memory::kPageMask);
     } else {
         cpu.pipeline_context.tlb_miss = true;
-        auto translate_res = mem.mmu()->translate(
-            v_addr, PteAccess::Read, eff_priv, cpu.state().mstatus, cpu.state().satp, active_xlen);
-        auto chain_res = translate_res
+        auto translate_res =
+            cpu.translate_stage_address(*cpu.machine_, v_addr, PteAccess::Read, eff_priv,
+                                        active_xlen, TlPort::Data, cpu.ca_state.data_walk);
+        if (!translate_res.has_value()) return 0;
+        auto chain_res = (*translate_res)
                              .and_then([&](Address phys) -> std::expected<void, TrapCause> {
                                  p_addr = phys;
                                  cpu.tlb.insert_data_r(v_addr, p_addr, current_asid, eff_priv);
@@ -226,7 +299,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     }
 
     if (!cpu.pipeline_context.pending_exception.has_value()) {
-        if (cpu.machine_->s_high_performance && simrv::memory::is_dram_addr(p_addr)) {
+        if (cpu.machine_->runtime_profile.is_instruction_mode() &&
+            simrv::memory::is_dram_addr(p_addr)) {
             const size_t tlb_idx = (v_addr >> 12) & 2047;
             const Address vpn = v_addr >> 12;
             Byte* host_base = mem.mmu()->mmem() + ((p_addr & ~0xFFFULL) & simrv::memory::kDramMask);
@@ -254,6 +328,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
 
     const bool crosses_page =
         ((v_addr & simrv::memory::kPageMask) + size_bytes) > (1u << simrv::memory::kPageShift);
+    const bool crosses_cache_line = ((v_addr & (simrv::cache::DCache::kLineBytes - 1u)) +
+                                     size_bytes) > simrv::cache::DCache::kLineBytes;
     const bool is_amo = (static_cast<Opcode>(cpu.pipeline_context.opcode) == Opcode::Amo);
     if (simrv::compiler::unlikely((v_addr & (size_bytes - 1u)) != 0)) {
         if (is_amo) {
@@ -262,11 +338,12 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             return;
         }
     }
-    if (simrv::compiler::unlikely(crosses_page)) {
+    if (simrv::compiler::unlikely(crosses_page || crosses_cache_line)) {
         for (unsigned b = 0; b < size_bytes; ++b) {
             Address byte_vaddr = v_addr + b;
             Word byte_val = (wdata >> (8 * b)) & 0xFFULL;
             target_write(mem, cpu, byte_vaddr, byte_val, static_cast<Instruction>(isa::Funct3::Sb));
+            if (cpu.ca_state.waiting_for_interconnect) return;
             if (cpu.pipeline_context.pending_exception.has_value()) {
                 cpu.pipeline_context.pending_tval = v_addr;
                 return;
@@ -293,28 +370,49 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
     }
 
     auto issue_write = [&](Address addr, Word data) -> void {
+        auto& transfer = cpu.ca_state.data_transfer;
+        if (cpu.machine_->runtime_profile.is_cycle_mode() && transfer.active &&
+            transfer.line_fill) {
+            TileLinkBus::TimedResponse timed{};
+            if (!mem.system_bus().try_get_timed_response(transfer.source, timed)) {
+                cpu.ca_state.waiting_for_interconnect = true;
+                return;
+            }
+            const Address completed_line = transfer.address;
+            transfer.reset();
+            if (timed.payload.error || !timed.has_line_data) {
+                cpu.pipeline_context.pending_exception = ExceptionCode::FaultStore;
+                cpu.pipeline_context.pending_tval = v_addr;
+                return;
+            }
+            cpu.dcache.insert(completed_line, timed.line_data.data(), CoherenceState::Trunk, true);
+            TlChannelE ack{};
+            ack.sink = timed.payload.sink;
+            mem.system_bus().grant_ack(ack);
+        }
+        const bool is_tohost_write = simrv::xlen::kIsXLen64
+                                         ? (funct3 == static_cast<Instruction>(Funct3::Sw) ||
+                                            funct3 == static_cast<Instruction>(Funct3::Sd))
+                                         : (funct3 == static_cast<Instruction>(Funct3::Sw));
+        if (simrv::compiler::unlikely(is_tohost_write)) {
+            if (addr == cpu.machine_->s_isatest_tohost || addr == 0x80001000 ||
+                addr == 0x40008000) {
+                cpu.machine_->tohost =
+                    simrv::xlen::kIsXLen64
+                        ? data
+                        : ((cpu.machine_->tohost & 0xFFFFFFFF00000000ULL) | data);
+            } else if (!simrv::xlen::kIsXLen64 && (addr == cpu.machine_->s_isatest_tohost + 4 ||
+                                                   addr == 0x80001004 || addr == 0x40008004)) {
+                cpu.machine_->tohost = (cpu.machine_->tohost & 0x00000000FFFFFFFFULL) |
+                                       (static_cast<uint64_t>(data) << 32);
+            }
+        }
         if (cpu.machine_->s_rollback_enabled && simrv::memory::is_dram_access(addr, size_bytes)) {
             Word old_val = simrv::memory::ram_read_fast(addr, funct3, mem.mmu()->mmem());
             cpu.record_mem_write(addr, old_val, funct3);
         }
-        if (cpu.machine_->s_high_performance && simrv::memory::is_dram_access(addr, size_bytes)) {
-            const bool is_tohost_write = simrv::xlen::kIsXLen64
-                                             ? (funct3 == static_cast<Instruction>(Funct3::Sw) ||
-                                                funct3 == static_cast<Instruction>(Funct3::Sd))
-                                             : (funct3 == static_cast<Instruction>(Funct3::Sw));
-            if (is_tohost_write) {
-                if (addr == cpu.machine_->s_isatest_tohost || addr == 0x80001000 ||
-                    addr == 0x40008000) {
-                    cpu.machine_->tohost =
-                        simrv::xlen::kIsXLen64
-                            ? data
-                            : ((cpu.machine_->tohost & 0xFFFFFFFF00000000ULL) | data);
-                } else if (!simrv::xlen::kIsXLen64 && (addr == cpu.machine_->s_isatest_tohost + 4 ||
-                                                       addr == 0x80001004 || addr == 0x40008004)) {
-                    cpu.machine_->tohost = (cpu.machine_->tohost & 0x00000000FFFFFFFFULL) |
-                                           (static_cast<uint64_t>(data) << 32);
-                }
-            }
+        if (cpu.machine_->runtime_profile.is_instruction_mode() &&
+            simrv::memory::is_dram_access(addr, size_bytes)) {
             simrv::memory::ram_write_fast(addr, data, funct3, mem.mmu()->mmem());
             return;
         }
@@ -328,8 +426,20 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
                 req.opcode = TlOpcodeA::AcquireBlock;
                 req.param = static_cast<uint8_t>(CoherenceState::Trunk);
                 req.size = simrv::cache::DCache::kLineShift;
-                req.source = static_cast<uint8_t>(cpu.state().mhartid);
+                req.hart = static_cast<HartId>(cpu.state().mhartid);
+                req.source = make_tl_source(req.hart, TlPort::Data);
                 req.address = line_base;
+
+                if (cpu.machine_->runtime_profile.is_cycle_mode()) {
+                    mem.system_bus().send_request(req);
+                    transfer = {.address = line_base,
+                                .source = req.source,
+                                .active = true,
+                                .is_write = true,
+                                .line_fill = true};
+                    cpu.ca_state.waiting_for_interconnect = true;
+                    return;
+                }
 
                 TlChannelD resp{};
                 if (mem.system_bus().acquire_block(req, resp, line_data)) {
@@ -347,16 +457,35 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
         TlChannelA req{};
         req.opcode = TlOpcodeA::PutFullData;
         req.size = static_cast<uint8_t>(funct3 & 0x3);
-        req.source = 0;  // CPU Data Bus source ID
+        req.hart = static_cast<HartId>(cpu.state().mhartid);
+        req.source = make_tl_source(req.hart, TlPort::Data);
         req.address = addr;
         const unsigned req_size_bytes = 1u << (funct3 & 0x3u);
         const unsigned bits = 8 * req_size_bytes;
         req.data =
             (bits < simrv::xlen::kXLenBits) ? (data & ((static_cast<Word>(1) << bits) - 1)) : data;
+        if (cpu.machine_->runtime_profile.is_cycle_mode() && transfer.active) {
+            TileLinkBus::TimedResponse timed{};
+            if (!mem.system_bus().try_get_timed_response(transfer.source, timed)) {
+                cpu.ca_state.waiting_for_interconnect = true;
+                return;
+            }
+            transfer.reset();
+            if (simrv::compiler::unlikely(timed.payload.error)) {
+                cpu.pipeline_context.pending_exception = ExceptionCode::FaultStore;
+                cpu.pipeline_context.pending_tval = v_addr;
+            }
+            return;
+        }
         mem.system_bus().send_request(req);
+        if (cpu.machine_->runtime_profile.is_cycle_mode()) {
+            transfer = {.address = addr, .source = req.source, .active = true, .is_write = true};
+            cpu.ca_state.waiting_for_interconnect = true;
+            return;
+        }
 
         TlChannelD resp{};
-        if (mem.system_bus().get_response(0, resp)) {
+        if (mem.system_bus().get_response(req.source, resp)) {
             if (simrv::compiler::unlikely(resp.error)) {
                 cpu.pipeline_context.pending_exception = ExceptionCode::FaultStore;
                 cpu.pipeline_context.pending_tval = v_addr;
@@ -367,7 +496,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
         }
     };
 
-    if (cpu.machine_->s_high_performance && !crosses_page) {
+    if (cpu.machine_->runtime_profile.is_instruction_mode() && !crosses_page) {
         if (!translation_enabled) {
             // Bypass soft TLB lookup if translation is disabled (direct DRAM access)
             const Address eff_vaddr = (active_xlen == 32) ? (v_addr & 0xFFFFFFFFULL) : v_addr;
@@ -418,9 +547,11 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
         p_addr = entry->p_addr + (v_addr & simrv::memory::kPageMask);
     } else {
         cpu.pipeline_context.tlb_miss = true;
-        auto translate_res = mem.mmu()->translate(
-            v_addr, PteAccess::Write, eff_priv, cpu.state().mstatus, cpu.state().satp, active_xlen);
-        auto chain_res = translate_res
+        auto translate_res =
+            cpu.translate_stage_address(*cpu.machine_, v_addr, PteAccess::Write, eff_priv,
+                                        active_xlen, TlPort::Data, cpu.ca_state.data_walk);
+        if (!translate_res.has_value()) return;
+        auto chain_res = (*translate_res)
                              .and_then([&](Address phys) -> std::expected<void, TrapCause> {
                                  p_addr = phys;
                                  cpu.tlb.insert_data_w(v_addr, p_addr, current_asid, eff_priv);
@@ -436,7 +567,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
     }
 
     if (!cpu.pipeline_context.pending_exception.has_value()) {
-        if (cpu.machine_->s_high_performance && simrv::memory::is_dram_addr(p_addr)) {
+        if (cpu.machine_->runtime_profile.is_instruction_mode() &&
+            simrv::memory::is_dram_addr(p_addr)) {
             const size_t tlb_idx = (v_addr >> 12) & 2047;
             const Address vpn = v_addr >> 12;
             Byte* host_base = mem.mmu()->mmem() + ((p_addr & ~0xFFFULL) & simrv::memory::kDramMask);

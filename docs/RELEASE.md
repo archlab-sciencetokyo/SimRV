@@ -38,6 +38,13 @@ requested for an individual study. Report effect sizes and variability without t
 target as a correctness criterion. Results are comparable only on the same idle host, compiler,
 build configuration, guest binaries, and instruction limits.
 
+Pass `--perf` to `scripts/benchmark.py` (or set `SIMRV_CA_BENCH_PERF=1` for
+`benchmark-ca.sh`) to add per-sample Linux host counters. Wall time remains the primary throughput
+measurement; host cycles, instructions, branches, and cache events are supplemental diagnostics.
+Reports retain perf's enabled time and running percentage, so multiplexed or unsupported counters
+can be identified rather than compared as if they were exact. For publication runs, pin the process
+to one physical core and keep the CPU governor, kernel, perf event set, and host hardware constant.
+
 ## Required evidence
 
 The manifest enumerates the authoritative matrix. Native regression, advertised ISA, vector,

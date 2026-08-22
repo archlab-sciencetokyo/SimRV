@@ -10,6 +10,7 @@
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -49,10 +50,8 @@ void CPU::reset() {
     undo_stack.clear();
     trace_history_head_ = 0;
     trace_history_size_ = 0;
-    if (pipeline_task.handle) {
-        pipeline_task.handle.destroy();
-        pipeline_task.handle = nullptr;
-    }
+    ca_state.reset_instruction();
+    ca_pipeline.reset();
 }
 
 void CPU::TLB_flush() {
@@ -168,129 +167,158 @@ void CPU::run_cycle(Machine& machine) {
         }
         push_undo_state();
     }
-    uint32_t step_cycles = 1;
-
-    if (machine.s_cycle_accurate) {
-        // Mode 1: Cycle-accurate pipeline execution.
-        // Runs stages via persistent coroutines and tracks pipeline stalls, cache misses, and
-        // hazard resolutions.
-        uint64_t prev_imiss = icache.miss_count();
-        uint64_t prev_dmiss = dcache.miss_count();
-
-        if (!pipeline_task.handle) {
-            pipeline_task = run_pipeline_coroutine(&machine);
+    if (machine.runtime_profile.is_cycle_mode()) {
+        run_ca_pipeline_cycle(machine);
+        auto stage_event = [](const pipeline::CycleInstructionSlot& slot, bool stalled) {
+            return pipeline::PipelineStageEvent{
+                .instruction = {.pc = slot.context.cpc,
+                                .opcode = slot.context.opcode,
+                                .rd = slot.context.rd,
+                                .rs1 = slot.context.rs1,
+                                .rs2 = slot.context.rs2,
+                                .op_id = slot.context.op_id,
+                                .branched = slot.context.tkn,
+                                .is_branch = slot.context.opcode == Opcode::Branch,
+                                .is_jump = slot.context.opcode == Opcode::Jal ||
+                                           slot.context.opcode == Opcode::Jalr,
+                                .target_pc = slot.context.jmp_pc},
+                .remaining_latency = slot.remaining_latency,
+                .valid = slot.valid,
+                .stalled = stalled,
+            };
+        };
+        const bool three_stage =
+            pipeline_sim.config.pipeline_type == pipeline::PipelineType::ThreeStage;
+        const bool icache_miss = ca_state.instruction_fill.active || ca_pipeline.fetch.icache_miss;
+        const bool dcache_miss = ca_pipeline.memory.dcache_miss ||
+                                 ca_pipeline.writeback.dcache_miss ||
+                                 ca_pipeline.retired.dcache_miss;
+        const bool instruction_walk = ca_state.instruction_walk.active;
+        const bool data_walk = ca_state.data_walk.active;
+        const bool tlb_miss = instruction_walk || data_walk || ca_pipeline.fetch.tlb_miss ||
+                              ca_pipeline.memory.tlb_miss || ca_pipeline.writeback.tlb_miss;
+        const bool fetch_stalled = ca_pipeline.fetch.remaining_latency != 0 ||
+                                   ca_state.instruction_fill.active || instruction_walk;
+        const bool decode_stalled = !three_stage && ca_pipeline.data_hazard_stall;
+        const bool execute_stalled = (three_stage ? ca_pipeline.decode.remaining_latency
+                                                  : ca_pipeline.execute.remaining_latency) != 0 ||
+                                     ca_pipeline.data_hazard_stall;
+        const bool memory_stalled = !three_stage && (ca_pipeline.memory.remaining_latency != 0 ||
+                                                     ca_state.data_transfer.active || data_walk);
+        const bool writeback_stalled =
+            ca_pipeline.writeback.remaining_latency != 0 ||
+            (three_stage && (ca_state.data_transfer.active || data_walk));
+        const pipeline::PipelineCycleMetrics metrics{
+            .fetch_stalled = fetch_stalled,
+            .decode_stalled = decode_stalled,
+            .execute_stalled = execute_stalled,
+            .memory_stalled = memory_stalled,
+            .writeback_stalled = writeback_stalled,
+            .retired = ca_pipeline.retired_this_cycle,
+            .icache_miss = icache_miss,
+            .dcache_miss = dcache_miss,
+            .tlb_miss = tlb_miss,
+            .data_hazard_stall = ca_pipeline.data_hazard_stall,
+            .control_flush = ca_pipeline.control_flush,
+        };
+        if (pipeline_sim.config.record_snapshots) {
+            pipeline_sim.advance_cycle({
+                .fetch = stage_event(ca_pipeline.fetch, fetch_stalled),
+                .decode = three_stage ? pipeline::PipelineStageEvent{}
+                                      : stage_event(ca_pipeline.decode, decode_stalled),
+                .execute = stage_event(three_stage ? ca_pipeline.decode : ca_pipeline.execute,
+                                       execute_stalled),
+                .memory = three_stage ? pipeline::PipelineStageEvent{}
+                                      : stage_event(ca_pipeline.memory, memory_stalled),
+                .writeback = stage_event(
+                    ca_pipeline.writeback.valid ? ca_pipeline.writeback : ca_pipeline.retired,
+                    writeback_stalled),
+                .retired = metrics.retired,
+                .icache_miss = metrics.icache_miss,
+                .dcache_miss = metrics.dcache_miss,
+                .tlb_miss = metrics.tlb_miss,
+                .data_hazard_stall = metrics.data_hazard_stall,
+                .control_flush = metrics.control_flush,
+            });
+        } else {
+            pipeline_sim.advance_cycle_fast(metrics);
         }
-
-        auto err = pipeline_task.resume();
-        if (err.has_value()) {
-            raise_exception(static_cast<TrapCause>(err->code), err->tval);
+        const auto retired_pc = state_.pc;
+        if (ca_pipeline.retired_this_cycle && machine.s_tuimode && machine.tui &&
+            machine.tui->is_trace_active()) {
+            std::swap(pipeline_context, ca_pipeline.retired.context);
+            record_trace_for_tui(machine);
+            std::swap(pipeline_context, ca_pipeline.retired.context);
         }
-
-        bool icache_miss = (icache.miss_count() > prev_imiss);
-        bool dcache_miss = (dcache.miss_count() > prev_dmiss);
-
-        bool is_branch = (pipeline_context.opcode == Opcode::Branch);
-        bool is_jump =
-            (pipeline_context.opcode == Opcode::Jal || pipeline_context.opcode == Opcode::Jalr);
-        bool branched = pipeline_context.tkn;
-
-        step_cycles = pipeline_sim.step_instruction(
-            pipeline_context.cpc, pipeline_context.opcode, pipeline_context.rd,
-            pipeline_context.rs1, pipeline_context.rs2, pipeline_context.op_id, branched, is_branch,
-            is_jump, icache_miss, dcache_miss, pipeline_context.tlb_miss, pipeline_context.jmp_pc);
-    } else {
-        if (machine.s_high_performance) {
-            // Mode 2: Cached fast-path functional execution (pre-decoded direct-lookup cache).
-            // Bypasses pipeline orchestration and fetches from direct lookup cache if available.
-            auto* cached = decode_cache.lookup(state_.pc);
-            if (simrv::compiler::likely(cached != nullptr)) {
-                const bool copy_ctx = machine.s_tuimode || machine.s_lockstep_mode ||
-                                      machine.s_gdb_mode || machine.s_bp_trace ||
-                                      (machine.s_strace != 0);
-                const bool inst_mix = machine.s_use_mix || machine.s_tuimode;
-                if (simrv::compiler::unlikely(copy_ctx && inst_mix)) {
-                    execute_cached_op_fast<true, true>(machine, *cached);
-                } else if (simrv::compiler::unlikely(copy_ctx)) {
-                    execute_cached_op_fast<true, false>(machine, *cached);
-                } else if (simrv::compiler::unlikely(inst_mix)) {
-                    execute_cached_op_fast<false, true>(machine, *cached);
-                } else {
-                    execute_cached_op_fast<false, false>(machine, *cached);
-                }
+        tick_cycle_clock(machine, ca_pipeline.retired_this_cycle);
+        if (ca_pipeline.retired_this_cycle && state_.pc != retired_pc) {
+            machine.memory().system_bus().cancel_source(simrv::memory::make_tl_source(
+                static_cast<HartId>(state_.mhartid), simrv::memory::TlPort::Instruction));
+            ca_pipeline.reset();
+            ca_pipeline.initialized = true;
+            ca_pipeline.fetch_pc = state_.pc;
+            ca_state.instruction_fill.reset();
+            ca_state.data_transfer.reset();
+            ca_state.instruction_walk.reset();
+            ca_state.data_walk.reset();
+        }
+        return;
+    }
+    if (machine.runtime_profile.is_instruction_fast()) {
+        // Mode 2: Cached fast-path functional execution (pre-decoded direct-lookup cache).
+        // Bypasses pipeline orchestration and fetches from direct lookup cache if available.
+        auto* cached = decode_cache.lookup(state_.pc);
+        if (simrv::compiler::likely(cached != nullptr)) {
+            const bool copy_ctx = machine.s_tuimode || machine.s_lockstep_mode ||
+                                  machine.s_gdb_mode || machine.s_bp_trace ||
+                                  (machine.s_strace != 0);
+            const bool inst_mix = machine.s_use_mix || machine.s_tuimode;
+            if (simrv::compiler::unlikely(copy_ctx && inst_mix)) {
+                execute_cached_op_fast<true, true>(machine, *cached);
+            } else if (simrv::compiler::unlikely(copy_ctx)) {
+                execute_cached_op_fast<true, false>(machine, *cached);
+            } else if (simrv::compiler::unlikely(inst_mix)) {
+                execute_cached_op_fast<false, true>(machine, *cached);
             } else {
-                // Decode cache miss: run basic functional stages sequentially and cache the decoded
-                // op.
-                bool success = fetch_stage(machine, state_.pc) && decode_stage(machine);
-
-                if (success && !pipeline_context.pending_exception.has_value()) {
-                    CachedOp op;
-                    op.copy_from(pipeline_context);
-                    decode_cache.insert(state_.pc, op);
-                }
-
-                if (success) {
-                    success = execute_stage(machine) && memory_stage(machine) &&
-                              writeback_stage(machine) && commit_stage(machine);
-                }
-
-                if (!success) {
-                    const auto cause =
-                        pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
-                    raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
-                }
+                execute_cached_op_fast<false, false>(machine, *cached);
             }
         } else {
-            // Mode 3: Normal pipeline coroutine execution.
-            // Bypasses cycle-accurate latency step tracking but executes instruction stages via
-            // coroutine states.
-            if (!pipeline_task.handle) {
-                pipeline_task = run_pipeline_coroutine(&machine);
+            // Decode cache miss: run basic functional stages sequentially and cache the decoded
+            // op.
+            bool success = fetch_stage(machine, state_.pc) && decode_stage(machine);
+
+            if (success && !pipeline_context.pending_exception.has_value()) {
+                CachedOp op;
+                op.copy_from(pipeline_context);
+                decode_cache.insert(state_.pc, op);
             }
 
-            auto err = pipeline_task.resume();
-            if (err.has_value()) {
-                raise_exception(static_cast<TrapCause>(err->code), err->tval);
+            if (success) {
+                success = execute_stage(machine) && memory_stage(machine) &&
+                          writeback_stage(machine) && commit_stage(machine);
             }
+
+            if (!success) {
+                const auto cause =
+                    pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
+                raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
+            }
+        }
+    } else {
+        // Observable instruction mode uses the same semantic stages without coroutine state.
+        bool success = fetch_stage(machine, state_.pc) && decode_stage(machine);
+        if (success) {
+            success = execute_stage(machine) && memory_stage(machine) && writeback_stage(machine) &&
+                      commit_stage(machine);
+        }
+        if (!success) {
+            const auto cause =
+                pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
+            raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
         }
     }
 
-    // CLINT real-time-clock interrupt and cycle counter increments (driven by Hart 0).
-    if (state_.mhartid == 0) {
-        if (simrv::compiler::likely(!machine.s_cycle_accurate)) {
-            clint_mmio.mcycle++;
-            clint_mmio.rtc_divider++;
-            if (clint_mmio.rtc_divider == 10) {
-                clint_mmio.mtime++;
-                clint_mmio.rtc_divider = 0;
-                evaluate_timer_interrupt();
-                for (auto& sec : machine.secondary_harts_) {
-                    if (sec->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
-                        sec->evaluate_timer_interrupt();
-                    }
-                }
-            }
-        } else {
-            clint_mmio.mcycle += step_cycles;
-            clint_mmio.rtc_divider += static_cast<int>(step_cycles);
-            if (clint_mmio.rtc_divider >= 10) {
-                if (clint_mmio.rtc_divider < 20) {
-                    clint_mmio.mtime += 1;
-                    clint_mmio.rtc_divider -= 10;
-                } else {
-                    clint_mmio.mtime += clint_mmio.rtc_divider / 10;
-                    clint_mmio.rtc_divider %= 10;
-                }
-                evaluate_timer_interrupt();
-                for (auto& sec : machine.secondary_harts_) {
-                    if (sec->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
-                        sec->evaluate_timer_interrupt();
-                    }
-                }
-            }
-        }
-    }
-
-    dispatch_pending_interrupts();
+    tick_cycle_clock(machine);
 
     // Record trace logs for active debug TUI components.
     if (machine.s_tuimode && machine.tui && machine.tui->is_trace_active()) {
@@ -305,6 +333,26 @@ void CPU::run_cycle(Machine& machine) {
             }
         }
     }
+}
+
+void CPU::tick_cycle_clock(Machine& machine, bool interrupt_boundary) {
+    ++clint_mmio.mcycle;
+    if (state_.mhartid == 0) {
+        ++clint_mmio.rtc_divider;
+        if (clint_mmio.rtc_divider == 10) {
+            ++clint_mmio.mtime;
+            clint_mmio.rtc_divider = 0;
+            evaluate_timer_interrupt();
+            for (auto& sec : machine.secondary_harts_) {
+                if (sec->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+                    sec->evaluate_timer_interrupt();
+                }
+            }
+        }
+    } else {
+        clint_mmio.mtime = machine.cpu.clint_mmio.mtime.load(std::memory_order_relaxed);
+    }
+    if (interrupt_boundary) dispatch_pending_interrupts();
 }
 
 void CPU::record_trace_for_tui(Machine& machine) {
@@ -364,7 +412,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
     pipeline_context.pending_exception = std::nullopt;
     pipeline_context.pending_tval = 0;
 
-    if (machine.s_high_performance) {
+    if (machine.runtime_profile.is_instruction_fast()) {
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
             const bool copy_ctx = machine.s_tuimode || machine.s_lockstep_mode ||
@@ -636,49 +684,6 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         if (!ctx.pending_exception.has_value()) {
             state_.reserved = 0;
         }
-    }
-}
-
-auto CPU::run_pipeline_coroutine(Machine* machine_ptr) -> simrv::pipeline::PipelineTask {
-    Machine& machine = *machine_ptr;
-    while (true) {
-        if (!fetch_stage(machine, state_.pc)) {
-            co_yield simrv::pipeline::StageError{
-                .code = pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch),
-                .tval = pipeline_context.pending_tval};
-            continue;
-        }
-        if (!decode_stage(machine)) {
-            co_yield simrv::pipeline::StageError{
-                .code = pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch),
-                .tval = pipeline_context.pending_tval};
-            continue;
-        }
-        if (!execute_stage(machine)) {
-            co_yield simrv::pipeline::StageError{
-                .code = pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch),
-                .tval = pipeline_context.pending_tval};
-            continue;
-        }
-        if (!memory_stage(machine)) {
-            co_yield simrv::pipeline::StageError{
-                .code = pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch),
-                .tval = pipeline_context.pending_tval};
-            continue;
-        }
-        if (!writeback_stage(machine)) {
-            co_yield simrv::pipeline::StageError{
-                .code = pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch),
-                .tval = pipeline_context.pending_tval};
-            continue;
-        }
-        if (!commit_stage(machine)) {
-            co_yield simrv::pipeline::StageError{
-                .code = pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch),
-                .tval = pipeline_context.pending_tval};
-            continue;
-        }
-        co_yield std::nullopt;
     }
 }
 
@@ -1316,6 +1321,8 @@ void CPU::push_undo_state() {
                                   .rtc_divider = clint_mmio.rtc_divider};
     step.e_icount = e_icount;
     step.e_ccount = e_ccount;
+    step.ca_state = ca_state;
+    step.ca_pipeline = ca_pipeline;
     step.e_instmix = e_instmix;
     undo_stack.push_front(std::move(step));
     if (undo_stack.size() > 1024) {
@@ -1347,13 +1354,15 @@ auto CPU::perform_backstep() -> bool {
     if (step.pipeline_sim_state.has_value()) {
         pipeline_sim.restore_state(*step.pipeline_sim_state);
     }
-    pipeline_task = {};
+    ca_state.reset_instruction();
     clint_mmio.mtime = step.clint_state.mtime;
     clint_mmio.mtimecmp = step.clint_state.mtimecmp;
     clint_mmio.mcycle = step.clint_state.mcycle;
     clint_mmio.rtc_divider = step.clint_state.rtc_divider;
     e_icount = step.e_icount;
     e_ccount = step.e_ccount;
+    ca_state = step.ca_state;
+    ca_pipeline = step.ca_pipeline;
     e_instmix = step.e_instmix;
     soft_tlb_flush();
     return true;

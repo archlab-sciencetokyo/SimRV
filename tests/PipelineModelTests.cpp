@@ -1,18 +1,16 @@
 /**
  * @file PipelineModelTests.cpp
- * @brief Unit tests for RISC-V 3-Stage, 5-Stage Rocket, and Dual-Issue Superscalar pipeline models.
+ * @brief Unit tests for the supported RISC-V 3-stage and 5-stage pipeline models.
  */
 #include <cstdlib>
 #include <iostream>
-#include <memory>
 
+#include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/isa/Base.hpp"
-#include "simrv/pipeline/DualIssuePipeline.hpp"
-#include "simrv/pipeline/InOrderPipeline.hpp"
-#include "simrv/pipeline/PipelineFactory.hpp"
-#include "simrv/pipeline/PipelineModel.hpp"
+#include "simrv/pipeline/OperationTraits.hpp"
+#include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
-#include "simrv/pipeline/ThreeStagePipeline.hpp"
+#include "simrv/pipeline/RetirementEffects.hpp"
 #include "simrv/xlen/Types.hpp"
 
 #define TEST_CHECK(expr)                                                                     \
@@ -28,182 +26,145 @@ namespace {
 using simrv::isa::Opcode;
 using simrv::isa::OperationId;
 using simrv::pipeline::CpuConfig;
-using simrv::pipeline::DualIssuePipeline;
-using simrv::pipeline::InOrderPipeline;
-using simrv::pipeline::PipelineModel;
 using simrv::pipeline::PipelineType;
-using simrv::pipeline::ThreeStagePipeline;
+
+void test_operation_traits() {
+    using namespace simrv::pipeline::operation;
+    TEST_CHECK(is_multiply(OperationId::MULH));
+    TEST_CHECK(is_divide_or_remainder(OperationId::REMW));
+    TEST_CHECK(is_fp_divide_or_sqrt(OperationId::FSQRT_D));
+    TEST_CHECK(is_fp_alu(OperationId::FCVT_D_LU));
+    TEST_CHECK(!is_fp_alu(OperationId::FDIV_D));
+    TEST_CHECK(is_load(Opcode::LoadFp));
+    TEST_CHECK(is_store(Opcode::StoreFp));
+    TEST_CHECK(reads_rs1(Opcode::Jalr));
+    TEST_CHECK(!reads_rs2(Opcode::OpImm));
+}
+
+void test_writeback_effects() {
+    simrv::pipeline::PipelineContext context{};
+    context.opcode = Opcode::Load;
+    context.rd = RegId::A0;
+    context.mem_rdata = 0x1234;
+    auto effects = simrv::pipeline::build_writeback_effects(context);
+    TEST_CHECK(effects.increments_instruction_count);
+    TEST_CHECK(effects.integer_write.enabled);
+    TEST_CHECK(effects.integer_write.destination == RegId::A0);
+    TEST_CHECK(effects.integer_write.value == 0x1234);
+
+    context.pending_exception = ExceptionCode::FaultLoad;
+    effects = simrv::pipeline::build_writeback_effects(context);
+    TEST_CHECK(!effects.increments_instruction_count);
+    TEST_CHECK(!effects.integer_write.enabled);
+
+    context = {};
+    context.opcode = Opcode::LoadFp;
+    context.rd = static_cast<RegId>(FpRegId::Fa0);
+    context.fp_mem_rdata = 0x3ff0000000000000ULL;
+    effects = simrv::pipeline::build_writeback_effects(context);
+    TEST_CHECK(effects.floating_write.enabled);
+    TEST_CHECK(effects.marks_floating_point_dirty);
+}
 
 void test_pipeline_factory_and_names() {
     std::cout << "[Test] PipelineFactory parser and naming...\n";
 
-    TEST_CHECK(simrv::pipeline::parse_pipeline_type("3") == PipelineType::ThreeStage);
     TEST_CHECK(simrv::pipeline::parse_pipeline_type("3stage") == PipelineType::ThreeStage);
-    TEST_CHECK(simrv::pipeline::parse_pipeline_type("threestage") == PipelineType::ThreeStage);
-    TEST_CHECK(simrv::pipeline::parse_pipeline_type("embedded") == PipelineType::ThreeStage);
-    TEST_CHECK(simrv::pipeline::parse_pipeline_type("ibex") == PipelineType::ThreeStage);
-
-    TEST_CHECK(simrv::pipeline::parse_pipeline_type("dual") == PipelineType::DualIssue);
-    TEST_CHECK(simrv::pipeline::parse_pipeline_type("dualissue") == PipelineType::DualIssue);
-    TEST_CHECK(simrv::pipeline::parse_pipeline_type("superscalar") == PipelineType::DualIssue);
-    TEST_CHECK(simrv::pipeline::parse_pipeline_type("swerv") == PipelineType::DualIssue);
-
-    TEST_CHECK(simrv::pipeline::parse_pipeline_type("5") == PipelineType::FiveStage);
     TEST_CHECK(simrv::pipeline::parse_pipeline_type("5stage") == PipelineType::FiveStage);
-    TEST_CHECK(simrv::pipeline::parse_pipeline_type("rocket") == PipelineType::FiveStage);
+    TEST_CHECK(!simrv::pipeline::parse_pipeline_type("embedded").has_value());
+    TEST_CHECK(!simrv::pipeline::parse_pipeline_type("dual").has_value());
 
-    CpuConfig cfg;
-    auto pipe3 = simrv::pipeline::create_pipeline(PipelineType::ThreeStage, cfg);
-    TEST_CHECK(dynamic_cast<ThreeStagePipeline*>(pipe3.get()) != nullptr);
-
-    auto pipe5 = simrv::pipeline::create_pipeline(PipelineType::FiveStage, cfg);
-    TEST_CHECK(dynamic_cast<InOrderPipeline*>(pipe5.get()) != nullptr);
-
-    auto pipe_dual = simrv::pipeline::create_pipeline(PipelineType::DualIssue, cfg);
-    TEST_CHECK(dynamic_cast<DualIssuePipeline*>(pipe_dual.get()) != nullptr);
-
-    std::cout << "  Factory creation passed.\n";
+    TEST_CHECK(simrv::pipeline::pipeline_type_name(PipelineType::ThreeStage) == "3-Stage In-Order");
 }
 
-void test_three_stage_pipeline() {
-    std::cout << "[Test] ThreeStagePipeline simulation...\n";
-    CpuConfig cfg;
-    cfg.record_snapshots = true;
-    cfg.enable_forwarding = true;
-    ThreeStagePipeline pipe(cfg);
+void test_runtime_profile_policy() {
+    using simrv::core::ExecutionEngine;
+    using simrv::core::InteractionMode;
+    using simrv::core::RuntimeProfile;
 
-    // Inst 1: addi x1, x0, 10 (pc=0x1000)
-    uint32_t c1 =
-        pipe.step_instruction(0x1000, Opcode::OpImm, RegId::Ra, RegId::Zero, RegId::Zero,
-                              OperationId::ADD, false, false, false, false, false, false, 0);
-    TEST_CHECK(c1 == 1);
+    RuntimeProfile profile{};
+    TEST_CHECK(profile.engine == ExecutionEngine::InstructionFast);
+    TEST_CHECK(profile.allows_fast_batch());
+    TEST_CHECK(profile.execution_name() == "instruction-fast");
 
-    // Inst 2: addi x2, x1, 5 (pc=0x1004, dependent on x1 from w_reg_ with forwarding)
-    uint32_t c2 =
-        pipe.step_instruction(0x1004, Opcode::OpImm, RegId::Sp, RegId::Ra, RegId::Zero,
-                              OperationId::ADD, false, false, false, false, false, false, 0);
-    TEST_CHECK(c2 == 1);
+    profile.engine = ExecutionEngine::CycleFast;
+    TEST_CHECK(!profile.allows_fast_batch());
+    TEST_CHECK(profile.execution_name() == "cycle-fast");
+    TEST_CHECK(!profile.records_cycle_history());
 
-    // Inst 3: lw x3, 0(x2) (pc=0x1008)
-    uint32_t c3 =
-        pipe.step_instruction(0x1008, Opcode::Load, RegId::Gp, RegId::Sp, RegId::Zero,
-                              OperationId::ADD, false, false, false, false, false, false, 0);
-    TEST_CHECK(c3 == 1);
+    profile.engine = ExecutionEngine::CycleObservable;
+    TEST_CHECK(profile.records_cycle_history());
 
-    // Inst 4: addi x4, x3, 1 (pc=0x100C, Load-use hazard with x3 in e_reg_)
-    uint32_t c4 =
-        pipe.step_instruction(0x100C, Opcode::OpImm, RegId::Tp, RegId::Gp, RegId::Zero,
-                              OperationId::ADD, false, false, false, false, false, false, 0);
-    TEST_CHECK(c4 == 2);  // 1 stall cycle + 1 exec cycle
+    profile.engine = ExecutionEngine::InstructionFast;
+    profile.interaction = InteractionMode::Tui;
+    TEST_CHECK(!profile.allows_fast_batch());
+    profile.interaction = InteractionMode::Cli;
+    profile.tracing = true;
+    TEST_CHECK(!profile.allows_fast_batch());
 
-    auto stats = pipe.get_stats();
-    TEST_CHECK(stats.data_hazard_stalls == 1);
-
-    // Test branch mispredict (1 cycle penalty)
-    uint32_t c5 =
-        pipe.step_instruction(0x1010, Opcode::Branch, RegId::Zero, RegId::Tp, RegId::Sp,
-                              OperationId::BEQ, true, true, false, false, false, false, 0x1020);
-    TEST_CHECK(c5 >= 2);  // Branch penalty evaluated
-
-    // Test Save / Restore state
-    auto saved = pipe.save_state();
-    pipe.reset();
-    TEST_CHECK(pipe.get_stats().cycle_count == 0);
-    pipe.restore_state(saved);
-    TEST_CHECK(pipe.get_stats().cycle_count == saved.stats.cycle_count);
-
-    std::cout << "  ThreeStagePipeline tests passed.\n";
-}
-
-void test_dual_issue_pipeline() {
-    std::cout << "[Test] DualIssuePipeline simulation...\n";
-    CpuConfig cfg;
-    cfg.record_snapshots = true;
-    cfg.enable_forwarding = true;
-    DualIssuePipeline pipe(cfg);
-
-    // Pair 1:
-    // Slot 0: addi x1, x0, 10 (pc=0x2000)
-    // Slot 1: addi x2, x0, 20 (pc=0x2004) -> Independent, co-issues in 1 cycle
-    uint32_t c1 =
-        pipe.step_instruction(0x2000, Opcode::OpImm, RegId::Ra, RegId::Zero, RegId::Zero,
-                              OperationId::ADD, false, false, false, false, false, false, 0);
-    TEST_CHECK(c1 == 1);
-
-    uint32_t c2 =
-        pipe.step_instruction(0x2004, Opcode::OpImm, RegId::Sp, RegId::Zero, RegId::Zero,
-                              OperationId::ADD, false, false, false, false, false, false, 0);
-    TEST_CHECK(c2 == 0);  // 0 additional cycles (co-issued!)
-
-    auto stats1 = pipe.get_stats();
-    TEST_CHECK(stats1.dual_issue_cycles == 1);
-
-    // Pair 2 with Inter-Slot RAW Dependency:
-    // Slot 0: addi x3, x0, 30 (pc=0x2008)
-    // Slot 1: addi x4, x3, 40 (pc=0x200C) -> Reads x3 produced by Slot 0 -> cannot dual issue!
-    uint32_t c3 =
-        pipe.step_instruction(0x2008, Opcode::OpImm, RegId::Gp, RegId::Zero, RegId::Zero,
-                              OperationId::ADD, false, false, false, false, false, false, 0);
-    TEST_CHECK(c3 == 1);
-
-    uint32_t c4 =
-        pipe.step_instruction(0x200C, Opcode::OpImm, RegId::Tp, RegId::Gp, RegId::Zero,
-                              OperationId::ADD, false, false, false, false, false, false, 0);
-    TEST_CHECK(c4 >= 1);  // Fallback to serialized issue
-
-    auto stats2 = pipe.get_stats();
-    TEST_CHECK(stats2.single_issue_cycles >= 1);
-
-    // Structural constraint: Load instruction in Slot 1 cannot co-issue
-    // Slot 0: addi x5, x0, 50 (pc=0x2010)
-    // Slot 1: lw x6, 0(x1) (pc=0x2014) -> Load not allowed in Slot 1
-    pipe.step_instruction(0x2010, Opcode::OpImm, RegId::T0, RegId::Zero, RegId::Zero,
-                          OperationId::ADD, false, false, false, false, false, false, 0);
-    uint32_t c6 =
-        pipe.step_instruction(0x2014, Opcode::Load, RegId::T1, RegId::Ra, RegId::Zero,
-                              OperationId::ADD, false, false, false, false, false, false, 0);
-    TEST_CHECK(c6 >= 1);
-
-    // Test Save / Restore state
-    auto saved = pipe.save_state();
-    pipe.reset();
-    TEST_CHECK(pipe.get_stats().cycle_count == 0);
-    pipe.restore_state(saved);
-    TEST_CHECK(pipe.get_stats().cycle_count == saved.stats.cycle_count);
-    TEST_CHECK(pipe.get_stats().dual_issue_cycles == saved.stats.dual_issue_cycles);
-
-    std::cout << "  DualIssuePipeline tests passed.\n";
+    TEST_CHECK(simrv::core::select_execution_engine(false, InteractionMode::Cli) ==
+               ExecutionEngine::InstructionFast);
+    TEST_CHECK(simrv::core::select_execution_engine(false, InteractionMode::Tui) ==
+               ExecutionEngine::InstructionObservable);
+    TEST_CHECK(simrv::core::select_execution_engine(true, InteractionMode::Cli) ==
+               ExecutionEngine::CycleFast);
+    TEST_CHECK(simrv::core::select_execution_engine(true, InteractionMode::Tui) ==
+               ExecutionEngine::CycleObservable);
 }
 
 void test_pipeline_sim_wrapper() {
-    std::cout << "[Test] PipelineSim wrapper with pipeline switching...\n";
+    std::cout << "[Test] PipelineSim full-cycle observer...\n";
     simrv::pipeline::PipelineSim sim;
-
-    // Default Rocket 5-stage
+    sim.config.record_snapshots = true;
     sim.reset();
-    TEST_CHECK(sim.config.pipeline_type == PipelineType::FiveStage);
+    sim.advance_cycle({
+        .fetch = {.instruction = {.pc = 0x1010, .op_id = OperationId::SUB}, .valid = true},
+        .decode = {.instruction = {.pc = 0x100c, .op_id = OperationId::ADD}, .valid = true},
+        .execute = {.instruction = {.pc = 0x1008, .op_id = OperationId::MUL},
+                    .valid = true,
+                    .stalled = true},
+        .memory = {.instruction = {.pc = 0x1004, .op_id = OperationId::LW}, .valid = true},
+        .writeback = {.instruction = {.pc = 0x1000, .op_id = OperationId::ADDI}, .valid = true},
+        .retired = true,
+        .data_hazard_stall = true,
+    });
+    TEST_CHECK(sim.f_reg().pc == 0x1010);
+    TEST_CHECK(sim.d_reg().pc == 0x100c);
+    TEST_CHECK(sim.e_reg().pc == 0x1008);
+    TEST_CHECK(sim.m_reg().pc == 0x1004);
+    TEST_CHECK(sim.w_reg().pc == 0x1000);
+    TEST_CHECK(sim.cycle_count() == 1);
+    TEST_CHECK(sim.stall_cycles() == 1);
+    TEST_CHECK(sim.data_hazard_stalls() == 1);
+    const auto history = sim.cycle_history();
+    TEST_CHECK(history.size() == 1);
+    TEST_CHECK(history.at(0).f.pc == 0x1010);
+    TEST_CHECK(history.at(0).w.pc == 0x1000);
 
-    // Switch to ThreeStage
-    sim.config.pipeline_type = PipelineType::ThreeStage;
+    auto saved = sim.save_state();
     sim.reset();
-    TEST_CHECK(sim.get_model() != nullptr);
+    sim.restore_state(saved);
+    TEST_CHECK(sim.e_reg().pc == 0x1008);
+    TEST_CHECK(sim.cycle_history().size() == 1);
 
-    uint32_t c1 =
-        sim.step_instruction(0x3000, Opcode::OpImm, RegId::Ra, RegId::Zero, RegId::Zero,
-                             OperationId::ADD, false, false, false, false, false, false, 0);
-    TEST_CHECK(c1 == 1);
-
-    // Switch to DualIssue
-    sim.config.pipeline_type = PipelineType::DualIssue;
-    sim.reset();
-    uint32_t d1 =
-        sim.step_instruction(0x4000, Opcode::OpImm, RegId::Ra, RegId::Zero, RegId::Zero,
-                             OperationId::ADD, false, false, false, false, false, false, 0);
-    uint32_t d2 =
-        sim.step_instruction(0x4004, Opcode::OpImm, RegId::Sp, RegId::Zero, RegId::Zero,
-                             OperationId::ADD, false, false, false, false, false, false, 0);
-    TEST_CHECK(d1 == 1);
-    TEST_CHECK(d2 == 0);
+    simrv::pipeline::PipelineSim fast;
+    fast.config.record_snapshots = false;
+    simrv::pipeline::PipelineSim observable;
+    observable.config.record_snapshots = true;
+    const simrv::pipeline::PipelineCycleEvent transition{
+        .fetch = {.instruction = {.pc = 0x2004, .op_id = OperationId::ADD}, .valid = true},
+        .writeback = {.instruction = {.pc = 0x2000, .op_id = OperationId::SUB}, .valid = true},
+        .retired = true,
+        .control_flush = true,
+    };
+    fast.advance_cycle_fast({.control_flush = true});
+    observable.advance_cycle(transition);
+    TEST_CHECK(fast.get_stats().cycle_count == observable.get_stats().cycle_count);
+    TEST_CHECK(fast.get_stats().bubble_cycles == observable.get_stats().bubble_cycles);
+    TEST_CHECK(!fast.f_reg().valid);
+    TEST_CHECK(observable.f_reg().pc == 0x2004);
+    TEST_CHECK(fast.cycle_history().empty());
+    TEST_CHECK(observable.cycle_history().size() == 1);
 
     std::cout << "  PipelineSim wrapper tests passed.\n";
 }
@@ -212,9 +173,10 @@ void test_pipeline_sim_wrapper() {
 
 auto main() -> int {
     std::cout << "=== Running Pipeline Model Tests ===\n";
+    test_operation_traits();
+    test_writeback_effects();
     test_pipeline_factory_and_names();
-    test_three_stage_pipeline();
-    test_dual_issue_pipeline();
+    test_runtime_profile_policy();
     test_pipeline_sim_wrapper();
     std::cout << "=== All Pipeline Model Tests Passed Successfully ===\n";
     return 0;

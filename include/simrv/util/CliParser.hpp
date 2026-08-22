@@ -9,6 +9,7 @@
 #include "simrv/Define.hpp"
 #include "simrv/core/Boot.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/RuntimeProfile.hpp"
 
 namespace simrv::util {
 
@@ -19,6 +20,7 @@ struct RuntimeOptions {
     std::string fn_dskimg;
     std::string fn_dvtree;
     std::string fn_traplog;
+    std::string fn_log;
 
     Address start_pc = simrv::boot::kStartPc;
     Counter fincnt = std::numeric_limits<Counter>::max();
@@ -36,7 +38,6 @@ struct RuntimeOptions {
     bool tuimode = false;
     bool explicit_tui_mode = false;
     bool explicit_cli_mode = false;
-    bool gui_mode = false;
     bool debugmode = false;
     bool dlog_mode = false;
     bool traplog_mode = false;
@@ -45,17 +46,12 @@ struct RuntimeOptions {
     bool bp_trace = false;
     bool trace_enabled = false;
     bool use_opensbi = false;
-    bool cycle_accurate = false;
-    bool high_performance = true;
+    bool cycle_mode_requested = false;
+    bool instruction_mode_requested = false;
     bool high_contrast = false;
     bool class_mode = false;
-    std::string preset = "rocket";
     std::string pipeline_type = "5stage";
     bool disable_forwarding = false;
-    std::string bp_type = "2bit";
-    uint32_t btb_size = 128;
-    bool disable_ex_forwarding = false;
-    bool disable_mem_forwarding = false;
 
     // Debug / co-simulation options
     bool gdb_mode = false;
@@ -83,6 +79,9 @@ struct ParseResult {
     CliAction action = CliAction::Run;
     RuntimeOptions options{};
 };
+
+[[nodiscard]] auto resolve_runtime_profile(const RuntimeOptions& options)
+    -> simrv::core::RuntimeProfile;
 
 auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResult, std::string>;
 auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& options)

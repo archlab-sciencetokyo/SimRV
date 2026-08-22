@@ -24,6 +24,27 @@
 
 namespace simrv::tui {
 
+namespace {
+
+constexpr std::array<int, 16> kGeneralSettingRows = {5,  6,  7,  8,  9,  12, 13, 14,
+                                                     17, 18, 21, 22, 25, 26, 27, 28};
+constexpr int kGeneralSettingsContentRows = 31;
+
+[[nodiscard]] auto general_setting_row(int item) -> int {
+    return item >= 0 && item < static_cast<int>(kGeneralSettingRows.size())
+               ? kGeneralSettingRows[static_cast<size_t>(item)]
+               : 0;
+}
+
+[[nodiscard]] auto general_setting_at_row(int row) -> int {
+    const auto found = std::ranges::find(kGeneralSettingRows, row);
+    return found == kGeneralSettingRows.end()
+               ? -1
+               : static_cast<int>(std::distance(kGeneralSettingRows.begin(), found));
+}
+
+}  // namespace
+
 TuiModal::TuiModal(simrv::core::Machine& machine) : machine_(machine) {}
 
 void TuiModal::open(ModalType type, LeftPane* left_pane, uint64_t step_delay_us) {
@@ -49,7 +70,7 @@ void TuiModal::open(ModalType type, LeftPane* left_pane, uint64_t step_delay_us)
             modals::GlossaryModal::open(glossary_topic_, glossary_scroll_);
             break;
         case ModalType::Settings:
-            modals::SettingsModal::open(settings_draft_, settings_cursor_, machine_);
+            modals::SettingsModal::open(settings_draft_, machine_);
             break;
         case ModalType::ConfigureMisa:
             modals::MisaModal::open(misa_draft_, misa_cursor_, machine_);
@@ -62,19 +83,44 @@ void TuiModal::open(ModalType type, LeftPane* left_pane, uint64_t step_delay_us)
     }
 }
 
+void TuiModal::cycle_settings_tab(int delta) {
+    input_.clear();
+    modals::SettingsModal::cycle_tab(settings_draft_, delta);
+}
+
+void TuiModal::set_settings_tab(uint8_t tab) {
+    input_.clear();
+    modals::SettingsModal::set_tab(settings_draft_, tab);
+}
+
 void TuiModal::move_settings_cursor(int delta) {
     input_.clear();
-    modals::SettingsModal::move_cursor(settings_cursor_, delta);
+    modals::SettingsModal::move_cursor(settings_draft_, delta);
 }
 
 void TuiModal::adjust_setting_at_cursor(int dir) {
-    modals::SettingsModal::adjust_setting(settings_draft_, settings_cursor_, dir, &machine_);
+    input_.clear();
+    modals::SettingsModal::adjust_setting(settings_draft_, dir, &machine_);
 }
 
-void TuiModal::toggle_setting_at_cursor() { toggle_setting_by_index(settings_cursor_); }
+void TuiModal::toggle_setting_at_cursor() {
+    input_.clear();
+    modals::SettingsModal::toggle_setting(settings_draft_, &machine_);
+}
 
 void TuiModal::toggle_setting_by_index(int index) {
-    modals::SettingsModal::toggle_setting(settings_draft_, index, &machine_);
+    settings_draft_.tab_cursor[settings_draft_.active_tab] = index;
+    toggle_setting_at_cursor();
+}
+
+void TuiModal::push_settings_digit(char c) {
+    modals::SettingsModal::push_digit(settings_draft_, input_, c);
+}
+
+void TuiModal::pop_settings_digit() { modals::SettingsModal::pop_digit(settings_draft_, input_); }
+
+void TuiModal::apply_settings_misa_profile(int profile_idx) {
+    modals::SettingsModal::apply_misa_profile(settings_draft_, profile_idx);
 }
 
 void TuiModal::move_misa_cursor(int delta) {
@@ -290,7 +336,8 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
     const int provisional_width = std::min(maximum_width, term_width - 4);
     if (provisional_width < 35) return ModalClickResult::Ignored;
 
-    int est_rows = (active_modal_ == ModalType::Settings)          ? 24
+    int est_rows = (active_modal_ == ModalType::Settings && settings_draft_.active_tab == 0)
+                       ? kGeneralSettingsContentRows
                    : (active_modal_ == ModalType::ConfigureMisa)   ? 16
                    : (active_modal_ == ModalType::ConfigureSystem) ? 22
                    : (active_modal_ == ModalType::Glossary)        ? 26
@@ -366,20 +413,16 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
         }
 
         case ModalType::Settings: {
-            int item_idx = -1;
-            if (content_row >= 1 && content_row <= 6)
-                item_idx = content_row - 1;
-            else if (content_row >= 8 && content_row <= 10)
-                item_idx = content_row - 2;
-            else if (content_row >= 12 && content_row <= 13)
-                item_idx = content_row - 3;
-            else if (content_row >= 15 && content_row <= 16)
-                item_idx = content_row - 4;
-            else if (content_row >= 18 && content_row <= 21)
-                item_idx = content_row - 5;
-
-            if (item_idx >= 0 && item_idx < 17) {
-                settings_cursor_ = item_idx;
+            if (settings_draft_.active_tab != 0) return ModalClickResult::Handled;
+            const int visible_rows = overlay.visible_content_rows;
+            const int cursor_row = general_setting_row(settings_draft_.tab_cursor[0]);
+            const int scroll_start = kGeneralSettingsContentRows > visible_rows
+                                         ? std::clamp(cursor_row - visible_rows / 2, 0,
+                                                      kGeneralSettingsContentRows - visible_rows)
+                                         : 0;
+            const int item_idx = general_setting_at_row(content_row + scroll_start);
+            if (item_idx >= 0) {
+                settings_draft_.tab_cursor[0] = item_idx;
                 if (rel_x > box_w / 2 + 10) {
                     adjust_setting_at_cursor(1);
                 } else if (rel_x > box_w / 2 && rel_x <= box_w / 2 + 10) {
@@ -489,9 +532,8 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                                           term_height, provisional_width);
             break;
         case ModalType::Settings:
-            title = " SIMULATOR & SMP SETTINGS ";
-            modals::SettingsModal::render(content_rows, add_row, settings_draft_, settings_cursor_,
-                                          machine_);
+            title = " SIMULATOR SETTINGS & CONFIGURATION ";
+            modals::SettingsModal::render(content_rows, add_row, settings_draft_, machine_);
             break;
         case ModalType::ConfigureMisa:
             title = " CONFIGURE CPU MISA & EXTENSIONS ";
@@ -568,13 +610,15 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
     int cursor_row = 0;
     switch (active_modal_) {
         case ModalType::Settings:
-            cursor_row = 2 + settings_cursor_;
+            cursor_row = settings_draft_.active_tab == 0
+                             ? general_setting_row(settings_draft_.tab_cursor[0])
+                             : 3 + settings_draft_.tab_cursor[settings_draft_.active_tab];
             break;
         case ModalType::ConfigureMisa:
             cursor_row = 2 + misa_cursor_;
             break;
         case ModalType::ConfigureSystem:
-            cursor_row = 2 + sysconfig_cursor_;
+            cursor_row = 3 + sysconfig_cursor_;
             break;
         case ModalType::ManageBreakpoints:
             cursor_row = 2 + bp_cursor_;

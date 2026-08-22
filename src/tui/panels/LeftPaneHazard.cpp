@@ -18,7 +18,7 @@ auto LeftPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical_row,
                                    int right_width) -> std::string {
     int const width = col_width + right_width;
 
-    if (!machine_.s_cycle_accurate) {
+    if (!machine_.runtime_profile.is_cycle_mode()) {
         if (logical_row == 0) {
             return section_line("Pipeline Hazard & Forwarding Unit Inspector", width);
         }
@@ -30,8 +30,8 @@ auto LeftPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical_row,
                                    width);
         }
         if (logical_row == 6) {
-            std::string text = (width < 45) ? "Enable Cycle-Accurate mode [,]"
-                                            : "Enable Cycle-Accurate mode [,] or --cycle-accurate";
+            std::string text =
+                (width < 45) ? "Enable Cycle-Accurate mode [,]" : "Enable cycle mode [,] or --ca";
             int text_w = get_display_width(text);
             int spaces = std::max(1, (width - text_w) / 2);
             return format_to_width(
@@ -167,77 +167,6 @@ auto LeftPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical_row,
         }
         if (logical_row == 9) {
             return section_line("WB→EX Forwarding + 1-Cycle Load-Use Stall Detection", width);
-        }
-        return format_to_width("", width);
-    }
-
-    if (ptype == simrv::pipeline::PipelineType::DualIssue) {
-        if (logical_row == 3) {
-            return section_line("Dual-Issue Superscalar Hazard & Dependency Units", width);
-        }
-        auto f_reg = state.f_reg;
-        auto e_reg = state.e_reg;
-        auto e1_reg = cpu.pipeline_sim.e1_reg();
-        auto w_reg = state.w_reg;
-        auto w1_reg = cpu.pipeline_sim.w1_reg();
-
-        uint32_t f_pc = static_cast<uint32_t>(f_reg.pc & 0xFFFFFFFFULL);
-        uint32_t e0_pc = static_cast<uint32_t>(e_reg.pc & 0xFFFFFFFFULL);
-        uint32_t e1_pc = static_cast<uint32_t>(e1_reg.pc & 0xFFFFFFFFULL);
-
-        uint8_t e0_rs1 = static_cast<uint8_t>(e_reg.rs1);
-        uint8_t e0_rs2 = static_cast<uint8_t>(e_reg.rs2);
-        uint8_t e0_rd = static_cast<uint8_t>(e_reg.rd);
-        uint8_t e1_rs1 = static_cast<uint8_t>(e1_reg.rs1);
-        uint8_t e1_rs2 = static_cast<uint8_t>(e1_reg.rs2);
-        uint8_t e1_rd = static_cast<uint8_t>(e1_reg.rd);
-        uint8_t w0_rd = static_cast<uint8_t>(w_reg.rd);
-        uint8_t w1_rd = static_cast<uint8_t>(w1_reg.rd);
-
-        if (logical_row == 4) {
-            return format_to_width(
-                std::format(
-                    "  {}IF  Stage:\033[0m {}PC {:08x}\033[0m │ {}Dual-Fetch Queue: {}\033[0m",
-                    kThemeText, kThemeVal, f_pc, kThemeText,
-                    (f_reg.valid ? "\033[38;5;120mACTIVE\033[0m" : "\033[38;5;244mIDLE\033[0m")),
-                width);
-        }
-        if (logical_row == 5) {
-            return format_to_width(
-                std::format("  {}Slot 0 (EX0):\033[0m {}PC {:08x}\033[0m │ {}rs1:\033[0mx{:<2} "
-                            "{}rs2:\033[0mx{:<2} {}rd:\033[0mx{:<2}",
-                            kThemeText, kThemeVal, e0_pc, kThemeText, e0_rs1, kThemeText, e0_rs2,
-                            kThemeText, e0_rd),
-                width);
-        }
-        if (logical_row == 6) {
-            return format_to_width(
-                std::format("  {}Slot 1 (EX1):\033[0m {}PC {:08x}\033[0m │ {}rs1:\033[0mx{:<2} "
-                            "{}rs2:\033[0mx{:<2} {}rd:\033[0mx{:<2}",
-                            kThemeText, kThemeVal, e1_pc, kThemeText, e1_rs1, kThemeText, e1_rs2,
-                            kThemeText, e1_rd),
-                width);
-        }
-        if (logical_row == 7) {
-            bool raw_hazard =
-                e_reg.valid && e1_reg.valid && e0_rd != 0 && (e0_rd == e1_rs1 || e0_rd == e1_rs2);
-            return format_to_width(
-                std::format("  {}Inter-Slot RAW:\033[0m {}", kThemeText,
-                            (raw_hazard ? "\033[38;5;203mHAZARD (Slot 1 reads Slot 0 rd)\033[0m"
-                                        : "\033[38;5;120mNONE (Independent dual-issue)\033[0m")),
-                width);
-        }
-        if (logical_row == 8) {
-            return format_to_width(
-                std::format("  {}WB0/WB1 Bypass:\033[0m {}rd0:\033[0mx{:<2} {}rd1:\033[0mx{:<2} │ "
-                            "{}Dual-Write:\033[0m {}\033[0m",
-                            kThemeText, kThemeText, w0_rd, kThemeText, w1_rd, kThemeText,
-                            (w_reg.valid && w1_reg.valid ? "\033[38;5;120m2-WAY\033[0m"
-                                                         : "\033[38;5;244m1-WAY\033[0m")),
-                width);
-        }
-        if (logical_row == 9) {
-            return section_line("SweRV Dual-Issue RAW Hazard Check + Multi-Port Bypass", width);
         }
         return format_to_width("", width);
     }

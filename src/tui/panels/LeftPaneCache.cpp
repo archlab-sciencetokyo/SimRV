@@ -95,7 +95,7 @@ auto render_cache_way_row(const simrv::core::CPU& cpu, int way_idx, int inspect_
 auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, int col_width,
                                   int right_width) -> std::string {
     int const width = col_width + right_width;
-    if (!machine_.s_cycle_accurate) {
+    if (!machine_.runtime_profile.is_cycle_mode()) {
         switch (logical_row) {
             case 0:
                 return section_line("Cache — Not Available", width);
@@ -106,7 +106,7 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
                     width);
             case 3:
                 return format_to_width(
-                    std::format("  {}Relaunch SimRV with {}--cycle-accurate\033[0m{} (-c) to "
+                    std::format("  {}Relaunch SimRV with {}--ca\033[0m{} (-C) to "
                                 "enable.\033[0m",
                                 kThemeMuted, kThemeVal, kThemeMuted),
                     width);
@@ -187,8 +187,8 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
                 std::string ibar = make_bar(iratio, bar_w);
                 std::string dbar = make_bar(dratio, bar_w);
                 return format_to_width(
-                    std::format("  {}IC\033[0m[{}]{:>4.0f}% {}DC\033[0m[{}]{:>4.0f}%",
-                                kThemeText, ibar, iratio * 100.0, kThemeText, dbar, dratio * 100.0),
+                    std::format("  {}IC\033[0m[{}]{:>4.0f}% {}DC\033[0m[{}]{:>4.0f}%", kThemeText,
+                                ibar, iratio * 100.0, kThemeText, dbar, dratio * 100.0),
                     width);
             }
             int bar_w = std::max(4, (width - 46) / 2);

@@ -29,12 +29,21 @@ Address g_dram_base =
 namespace simrv::core {
 Machine::Machine() : memory_(*this) { cpu.machine_ = this; }
 
+auto Machine::can_execute_fast_batch() const -> bool {
+    if (!runtime_profile.allows_fast_batch() || s_lockstep_mode || s_gdb_mode || s_bp_trace ||
+        s_strace != 0 || breakpoints.has_any() || s_rollback_enabled) {
+        return false;
+    }
+    return true;
+}
+
 void Machine::reset_state() {
     tohost = 0;
     reboot_requested = false;
     exit_code = 0;
     is_shutdown_ = false;
     is_running_ = true;
+    stop_reason_ = StopReason::Running;
     last_tui_check_cycles_ = 0;
     last_tui_update_ = {};
     execution_state_.store(ExecutionState::Running, std::memory_order_release);
@@ -98,11 +107,40 @@ void Machine::step() {
     execution_state_.notify_all();
 }
 
-void Machine::stop() {
+auto Machine::stop_reason_name(StopReason reason) noexcept -> std::string_view {
+    switch (reason) {
+        case StopReason::Running:
+            return "running";
+        case StopReason::InstructionLimit:
+            return "instruction limit reached";
+        case StopReason::TohostPass:
+            return "guest tohost pass";
+        case StopReason::TohostFail:
+            return "guest tohost failure";
+        case StopReason::GuestPoweroff:
+            return "guest poweroff";
+        case StopReason::GuestCrash:
+            return "guest crash";
+        case StopReason::GuestReboot:
+            return "guest reboot";
+        case StopReason::GuestExit:
+            return "guest exit";
+        case StopReason::LockstepDivergence:
+            return "lockstep divergence";
+        case StopReason::UnhandledTrap:
+            return "unhandled trap";
+        case StopReason::ExternalStop:
+            return "external/user stop";
+    }
+    return "unknown";
+}
+
+void Machine::stop(StopReason reason) {
+    stop_reason_ = reason;
     is_shutdown_ = true;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
     execution_state_.notify_all();
-    if (!s_tuimode && !s_gui_mode) {
+    if (!s_tuimode) {
         is_running_ = false;
     }
     if (s_tuimode && tui) {
@@ -111,6 +149,7 @@ void Machine::stop() {
 }
 
 void Machine::request_reboot() {
+    stop_reason_ = StopReason::GuestReboot;
     reboot_requested = true;
     is_running_ = false;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
@@ -118,6 +157,7 @@ void Machine::request_reboot() {
 }
 
 void Machine::request_exit(int status) {
+    stop_reason_ = StopReason::GuestExit;
     exit_code = status;
     is_shutdown_ = true;
     is_running_ = false;
@@ -168,6 +208,7 @@ void Machine::run() {
             if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() &&
                                           cpu.e_icount >= s_fincnt)) {
                 simrv::log::info("finished by -e option");
+                stop_reason_ = StopReason::InstructionLimit;
                 is_running_ = false;
             }
             if (s_tuimode && tui) {
@@ -218,7 +259,7 @@ void Machine::run() {
             spike_lockstep->compare_and_report(cpu.state(), cpu.pipeline_context.cpc, cpu.e_icount);
             if (spike_lockstep->should_halt()) {
                 simrv::log::error("Lockstep: halting on divergence");
-                stop();
+                stop(StopReason::LockstepDivergence);
             }
         }
 
@@ -283,7 +324,7 @@ void Machine::finalize_cycle_tohost() {
             simrv::log::info(
                 "[Power] Compatibility: guest requested poweroff via tohost (old protocol).");
             exit_code = 0;
-            stop();
+            stop(StopReason::GuestPoweroff);
             tohost = 0;
             return;
         } else {
@@ -338,7 +379,7 @@ void Machine::finalize_cycle_tohost() {
                         }
                     }
                     exit_code = code;
-                    stop();
+                    stop(code == 0 ? StopReason::TohostPass : StopReason::TohostFail);
                     tohost = 0;
                     return;
                 }
@@ -356,7 +397,7 @@ void Machine::finalize_cycle_tohost() {
             simrv::log::info("Program Halted (SUCCESS / PASS)");
         }
         exit_code = 0;
-        stop();
+        stop(StopReason::TohostPass);
         tohost = 0;
         return;
     } else if ((tohost & 1) != 0u) {
@@ -367,7 +408,7 @@ void Machine::finalize_cycle_tohost() {
             simrv::log::error("Program Halted (FAIL / EXIT code={})", code);
         }
         exit_code = code == 0 ? 1 : code;
-        stop();
+        stop(StopReason::TohostFail);
         tohost = 0;
         return;
     }

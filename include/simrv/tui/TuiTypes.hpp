@@ -104,7 +104,8 @@ enum class TuiFooterAction : uint8_t {
     ConfigureMisa,
     ConfigureSystem,
     Reboot,
-    SwitchHart
+    SwitchHart,
+    ToggleTheme
 };
 
 }  // namespace simrv::tui

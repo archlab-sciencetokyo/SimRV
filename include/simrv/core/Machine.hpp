@@ -12,6 +12,7 @@
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/debug/GdbStub.hpp"
@@ -80,6 +81,20 @@ struct PendingRebootState {
  */
 class Machine {
    public:
+    enum class StopReason : uint8_t {
+        Running,
+        InstructionLimit,
+        TohostPass,
+        TohostFail,
+        GuestPoweroff,
+        GuestCrash,
+        GuestReboot,
+        GuestExit,
+        LockstepDivergence,
+        UnhandledTrap,
+        ExternalStop,
+    };
+
     /// Construct the simulator root object.
     Machine();
     /// Destroy simulator resources.
@@ -108,7 +123,7 @@ class Machine {
     /// Finalize cycle for tohost checks only.
     void finalize_cycle_tohost();
     /// Stop the simulation loop.
-    void stop();
+    void stop(StopReason reason = StopReason::ExternalStop);
     /// Get current atomic execution state.
     [[nodiscard]] auto execution_state() const -> ExecutionState {
         return execution_state_.load(std::memory_order_relaxed);
@@ -137,6 +152,10 @@ class Machine {
     void request_reboot();
     /// Request termination of the simulator process with the supplied status.
     void request_exit(int status = 0);
+    [[nodiscard]] auto stop_reason() const noexcept -> StopReason {
+        return stop_reason_.load(std::memory_order_relaxed);
+    }
+    [[nodiscard]] static auto stop_reason_name(StopReason reason) noexcept -> std::string_view;
     /// Reset runtime state flags and CPU state.
     void reset_state();
 
@@ -151,24 +170,22 @@ class Machine {
     std::atomic<bool> reboot_requested = false;  // Reboot requested flag.
     std::atomic<int> exit_code{0};               // Exit/status code of the simulation.
     std::atomic<bool> is_shutdown_ = false;      // System shutdown flag.
+    std::atomic<StopReason> stop_reason_{StopReason::Running};
 
     // ========== Simulation Configuration Flags ==========
-    std::atomic<bool> s_appmode{true};          // Baremetal/app mode (default)
-    std::atomic<bool> s_tuimode{false};         // Enable TUI monitor mode
-    std::atomic<bool> s_gui_mode{false};        // Enable GUI graphics window mode
-    std::atomic<bool> s_high_contrast{false};   // Enable high-contrast TUI mode
-    std::atomic<bool> s_class_mode{false};      // Enable educational classroom mode
-    std::atomic<bool> s_debugmode{false};       // Enable debug logging in MMIO paths
-    std::atomic<bool> s_debug_mode{false};      // Enable TUI debug diagnostics mode
-    std::atomic<bool> s_dlog_mode{false};       // Enable device request/response logging
-    std::atomic<bool> s_traplog_mode{false};    // Enable trap/SBI/exception logging
-    std::atomic<bool> s_use_disk{false};        // Enable disk image simulation
-    std::atomic<bool> s_use_mix{false};         // Enable instruction-mix statistics collection
-    std::atomic<bool> s_bp_trace{false};        // Enable branch prediction tracing
-    std::atomic<bool> s_misa_override{false};   // True when CLI explicitly selected MISA profile
-    std::atomic<bool> s_cycle_accurate{false};  // Enable cycle-accurate performance simulation mode
-    std::atomic<bool> s_high_performance{
-        true};  // Enable high-performance optimized simulation mode
+    std::atomic<bool> s_appmode{true};         // Baremetal/app mode (default)
+    std::atomic<bool> s_tuimode{false};        // Enable TUI monitor mode
+    std::atomic<bool> s_high_contrast{false};  // Enable high-contrast TUI mode
+    std::atomic<bool> s_class_mode{false};     // Enable educational classroom mode
+    std::atomic<bool> s_debugmode{false};      // Enable debug logging in MMIO paths
+    std::atomic<bool> s_debug_mode{false};     // Enable TUI debug diagnostics mode
+    std::atomic<bool> s_dlog_mode{false};      // Enable device request/response logging
+    std::atomic<bool> s_traplog_mode{false};   // Enable trap/SBI/exception logging
+    std::atomic<bool> s_use_disk{false};       // Enable disk image simulation
+    std::atomic<bool> s_use_mix{false};        // Enable instruction-mix statistics collection
+    std::atomic<bool> s_bp_trace{false};       // Enable branch prediction tracing
+    std::atomic<bool> s_misa_override{false};  // True when CLI explicitly selected MISA profile
+    RuntimeProfile runtime_profile{};          // Resolved command-line runtime policy.
     std::atomic<bool> s_mmu_ever_used{
         false};  // Latched true the first time satp enables translation
     std::atomic<bool> s_multithreaded{false};     // Run simulation in a background thread
@@ -291,6 +308,8 @@ class Machine {
     virtual void prepare_cycle() {}
     /// Perform per-cycle finalization and completion checks.
     virtual void finalize_cycle() {}
+    /// Shared fast-batch policy. Bare-metal may allow a non-tracing TUI; OS mode may not.
+    [[nodiscard]] auto can_execute_fast_batch() const -> bool;
 
     mutable std::mutex pending_reboot_mutex_;
     std::string pending_binary_path_;

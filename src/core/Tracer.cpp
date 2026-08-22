@@ -24,6 +24,7 @@
 #include "simrv/device/pci/VirtioPciConsole.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/Decoder.hpp"
+#include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -189,8 +190,12 @@ void Tracer::print_summary() {
     const auto etime = static_cast<Counter>(elapsed == 0 ? 1 : elapsed);
 
     const auto mcycle = machine_.cpu.clint_mmio.mcycle;
-    const auto icount = machine_.cpu.e_icount;
-    const auto ccount = machine_.cpu.e_ccount;
+    Counter icount = 0;
+    Counter ccount = 0;
+    for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
+        icount += machine_.hart(hart).e_icount;
+        ccount += machine_.hart(hart).e_ccount;
+    }
 
     const double cpi =
         icount == 0 ? 0.0 : static_cast<double>(mcycle) / static_cast<double>(icount);
@@ -203,15 +208,22 @@ void Tracer::print_summary() {
     simrv::log::info("--------------------------------------------------");
     simrv::log::info("                Execution Summary                 ");
     simrv::log::info("--------------------------------------------------");
-    if (machine_.s_cycle_accurate) {
-        simrv::log::info("Simulation Mode          :         Cycle-Accurate");
-    } else {
-        simrv::log::info("Simulation Mode          :         Functional-Only");
+    simrv::log::info("Simulation Engine        : {:>22}",
+                     machine_.runtime_profile.execution_name());
+    simrv::log::info("Termination reason       : {:>22}",
+                     Machine::stop_reason_name(machine_.stop_reason()));
+    simrv::log::info("Process exit status      : {:>22}", machine_.exit_code.load());
+    simrv::log::info("Target / harts           : {:>13} / {:<3}",
+                     std::format("RV{}", simrv::xlen::kXLenBits), machine_.num_harts());
+    if (machine_.runtime_profile.is_cycle_mode()) {
+        simrv::log::info("CA pipeline              : {:>22}",
+                         pipeline::pipeline_type_name(machine_.s_pipeline_type));
     }
     simrv::log::info("Elapsed cycles (clocks)  : {:>12}  ({})", format_scaled(mcycle),
                      format_with_commas(mcycle));
     simrv::log::info("Executed instructions    : {:>12}  ({})", format_scaled(icount),
                      format_with_commas(icount));
+    simrv::log::info("Final architectural PC   :   0x{:016x}", machine_.cpu.state().pc);
     simrv::log::info("Fetched compressed insns : {:>12}  ({})  [{:.1f}%]", format_scaled(ccount),
                      format_with_commas(ccount), comp_ratio);
     simrv::log::info("Cycles Per Instr (CPI)   : {:>12.3f}", cpi);
@@ -229,7 +241,7 @@ void Tracer::print_summary() {
         }
     }
 
-    if (machine_.s_cycle_accurate) {
+    if (machine_.runtime_profile.is_cycle_mode()) {
         const auto& ps = machine_.cpu.pipeline_sim;
         double stall_pct = mcycle == 0 ? 0.0
                                        : (static_cast<double>(ps.stall_cycles()) * 100.0) /
@@ -244,6 +256,20 @@ void Tracer::print_summary() {
                          format_with_commas(ps.icache_stalls()));
         simrv::log::info(" - DCache Miss Stalls    : {:>12}",
                          format_with_commas(ps.dcache_stalls()));
+        simrv::log::info(" - Page-walk Stalls      : {:>12}", format_with_commas(ps.tlb_stalls()));
+        simrv::log::info("L1I hits / misses        : {:>12} / {}",
+                         format_with_commas(machine_.cpu.icache.hit_count()),
+                         format_with_commas(machine_.cpu.icache.miss_count()));
+        simrv::log::info("L1D hits / misses        : {:>12} / {}",
+                         format_with_commas(machine_.cpu.dcache.hit_count()),
+                         format_with_commas(machine_.cpu.dcache.miss_count()));
+        const auto& bus = machine_.memory().system_bus();
+        simrv::log::info("Bus reads / writes       : {:>12} / {}",
+                         format_with_commas(bus.read_count()),
+                         format_with_commas(bus.write_count()));
+        simrv::log::info("Bus pending req / resp   : {:>12} / {}",
+                         format_with_commas(bus.pending_requests()),
+                         format_with_commas(bus.pending_responses()));
     }
 
     simrv::log::info("Elapsed time (real)      : {:>12.3f} sec", etime_sec);
