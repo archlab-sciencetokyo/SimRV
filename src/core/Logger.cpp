@@ -23,6 +23,7 @@ struct PendingLog {
 };
 
 constexpr std::size_t kStartupLogLimit = 256;
+bool g_tui_mode = false;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 simrv::log::LogCallback
     g_tui_callback;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 std::deque<PendingLog>
@@ -50,6 +51,11 @@ auto callback_or_buffer(Level level, const std::string& message) -> LogCallback 
 }
 }  // namespace
 
+void set_tui_mode(bool enable) {
+    std::scoped_lock lock(g_log_mutex);
+    g_tui_mode = enable;
+}
+
 void set_tui_callback(LogCallback cb) {
     std::deque<PendingLog> pending;
     LogCallback callback;
@@ -68,6 +74,7 @@ void print_info(const std::string& msg) {
     if (auto callback = callback_or_buffer(Level::Info, msg)) {
         callback(tui_message(Level::Info, msg));
     } else {
+        if (g_tui_mode) return;
         if (simrv::util::is_terminal(STDOUT_FILENO)) {
             std::println(stdout, "\033[38;5;117m{}\033[0m", msg);  // Sakura Sky Blue
         } else {
@@ -80,6 +87,7 @@ void print_warn(const std::string& msg) {
     if (auto callback = callback_or_buffer(Level::Warn, msg)) {
         callback(tui_message(Level::Warn, msg));
     } else {
+        if (g_tui_mode) return;
         if (simrv::util::is_terminal(STDERR_FILENO)) {
             std::println(stderr, "\033[38;5;223m{}\033[0m", msg);  // Sakura Peach
         } else {
@@ -92,6 +100,7 @@ void print_error(const std::string& msg) {
     if (auto callback = callback_or_buffer(Level::Error, msg)) {
         callback(tui_message(Level::Error, msg));
     } else {
+        if (g_tui_mode) return;
         if (simrv::util::is_terminal(STDERR_FILENO)) {
             std::println(stderr, "\033[1;38;5;210m{}\033[0m", msg);  // Bold Sakura Coral
         } else {

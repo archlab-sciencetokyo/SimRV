@@ -44,6 +44,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         }
     }
 
+    simrv::log::set_tui_mode(is_tui);
+
     if (!is_tui && !skip_banner) {
         simrv::log::info("{} v{} ({}@{})\nPlease type Control+'q' to quit the simulation\n",
                          simrv::buildinfo::kProjectDescription, simrv::buildinfo::kVersion,
