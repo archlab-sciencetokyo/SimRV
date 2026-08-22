@@ -1,6 +1,7 @@
 #include "simrv/pipeline/PipelineSim.hpp"
 
-#include "simrv/pipeline/InOrderPipeline.hpp"
+#include "simrv/pipeline/DualIssuePipeline.hpp"
+#include "simrv/pipeline/PipelineFactory.hpp"
 #include "simrv/pipeline/PipelineModel.hpp"
 
 namespace simrv::pipeline {
@@ -9,7 +10,7 @@ PipelineSim::PipelineSim() { init_model(); }
 
 PipelineSim::~PipelineSim() = default;
 
-void PipelineSim::init_model() { model_ = std::make_unique<InOrderPipeline>(config); }
+void PipelineSim::init_model() { model_ = create_pipeline(config.pipeline_type, config); }
 
 void PipelineSim::reset() {
     // If model configuration changed, re-initialize model
@@ -62,12 +63,25 @@ auto PipelineSim::get_cycle_history_copy() const -> std::vector<PipelineCycleSna
     return model_ ? model_->get_cycle_history() : std::vector<PipelineCycleSnapshot>{};
 }
 
-// Model state getters for TUI compatibility
 auto PipelineSim::f_reg() const -> PipelineReg { return model_ ? model_->f_reg() : PipelineReg{}; }
 auto PipelineSim::d_reg() const -> PipelineReg { return model_ ? model_->d_reg() : PipelineReg{}; }
 auto PipelineSim::e_reg() const -> PipelineReg { return model_ ? model_->e_reg() : PipelineReg{}; }
 auto PipelineSim::m_reg() const -> PipelineReg { return model_ ? model_->m_reg() : PipelineReg{}; }
 auto PipelineSim::w_reg() const -> PipelineReg { return model_ ? model_->w_reg() : PipelineReg{}; }
+
+auto PipelineSim::e1_reg() const -> PipelineReg {
+    if (auto* d = dynamic_cast<const DualIssuePipeline*>(model_.get())) {
+        return d->e1_reg();
+    }
+    return PipelineReg{};
+}
+
+auto PipelineSim::w1_reg() const -> PipelineReg {
+    if (auto* d = dynamic_cast<const DualIssuePipeline*>(model_.get())) {
+        return d->w1_reg();
+    }
+    return PipelineReg{};
+}
 
 auto PipelineSim::div_busy_cycles_remaining() const -> uint32_t {
     return model_ ? model_->div_busy_cycles_remaining() : 0;
@@ -83,6 +97,10 @@ auto PipelineSim::tlb_stall_remaining() const -> uint32_t {
 }
 auto PipelineSim::control_bubble_remaining() const -> uint32_t {
     return model_ ? model_->control_bubble_remaining() : 0;
+}
+
+auto PipelineSim::get_stats() const -> PipelineStats {
+    return model_ ? model_->get_stats() : PipelineStats{};
 }
 
 auto PipelineSim::save_state() const -> PipelineSimState {

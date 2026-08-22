@@ -13,6 +13,7 @@
 #include "simrv/tui/TuiLayoutPolicy.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
+#include "simrv/tui/modals/GlossaryModal.hpp"
 #include "simrv/tui/modals/HelpModal.hpp"
 #include "simrv/tui/modals/SettingsModal.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
@@ -141,7 +142,7 @@ void test_utf8_and_theme_helpers() {
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 24, "all key actions have registry entries");
+    expect(bindings.size() == 25, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
     std::set<char> claimed_chars;
     for (const auto& binding : bindings) {
@@ -182,6 +183,7 @@ void test_key_registry() {
         simrv::tui::TuiFooterAction::RunPause,
         simrv::tui::TuiFooterAction::Quit,
         simrv::tui::TuiFooterAction::CycleLayout,
+        simrv::tui::TuiFooterAction::ToggleLearn,
         simrv::tui::TuiFooterAction::TogglePanel,
         simrv::tui::TuiFooterAction::ToggleTrace,
         simrv::tui::TuiFooterAction::OpenSettings,
@@ -238,10 +240,10 @@ void test_key_registry() {
 }
 
 void test_sysconfig_modal_modes() {
-    using simrv::tui::SysConfigDraft;
-    using simrv::tui::modals::SystemConfigModal;
     using simrv::tui::SettingsDraft;
+    using simrv::tui::SysConfigDraft;
     using simrv::tui::modals::SettingsModal;
+    using simrv::tui::modals::SystemConfigModal;
 
     // Test Cycle-Accurate mode behavior
     SysConfigDraft ca_draft;
@@ -253,12 +255,17 @@ void test_sysconfig_modal_modes() {
     SystemConfigModal::move_cursor(ca_draft, cursor, 1);
     expect(cursor == 1, "CA mode advances cursor across pipeline settings");
 
-    SystemConfigModal::adjust_setting(ca_draft, 1, 5);
+    SystemConfigModal::adjust_setting(ca_draft, 1, 1);
+    expect(ca_draft.pipeline_type == 1, "CA mode allows adjusting pipeline model");
+
+    SystemConfigModal::adjust_setting(ca_draft, 2, 5);
     expect(ca_draft.icache_miss_penalty == 15, "CA mode allows mutating cache penalties");
 
     SystemConfigModal::adjust_setting(ca_draft, 0, 1);
     expect(ca_draft.preset == 1, "CA mode allows cycling microarchitecture presets");
-    expect(ca_draft.icache_miss_penalty == 6, "Preset profile applies embedded microarchitecture defaults");
+    expect(ca_draft.pipeline_type == 1, "Preset applies 3-stage embedded pipeline model");
+    expect(ca_draft.icache_miss_penalty == 6,
+           "Preset profile applies embedded microarchitecture defaults");
 
     // Test Functional (IA) mode behavior for CA modal
     SysConfigDraft ia_draft;
@@ -276,22 +283,22 @@ void test_sysconfig_modal_modes() {
     settings_draft.smp_multithreaded = false;
     int s_cursor = 0;
 
-    SettingsModal::move_cursor(s_cursor, 5);
-    expect(s_cursor == 5, "Settings modal advances cursor to SMP core count");
+    SettingsModal::move_cursor(s_cursor, 6);
+    expect(s_cursor == 6, "Settings modal advances cursor to SMP core count");
 
-    SettingsModal::adjust_setting(settings_draft, 5, 3);
+    SettingsModal::adjust_setting(settings_draft, 6, 3);
     expect(settings_draft.num_harts == 4, "Settings modal adjusts SMP active core count");
 
-    SettingsModal::adjust_setting(settings_draft, 6, 2);
+    SettingsModal::adjust_setting(settings_draft, 7, 2);
     expect(settings_draft.smp_quantum == 1200, "Settings modal adjusts SMP quantum slice");
 
-    SettingsModal::adjust_setting(settings_draft, 7, 1);
+    SettingsModal::adjust_setting(settings_draft, 8, 1);
     expect(settings_draft.smp_multithreaded == true, "Settings modal toggles SMP worker threads");
 
     // Verify render text in IA mode contains disabled note for CA options
     std::vector<std::string> rows;
-    SystemConfigModal::render(rows, [&](const std::string& line) { rows.push_back(line); },
-                              ia_draft, 0, "");
+    SystemConfigModal::render(
+        rows, [&](const std::string& line) { rows.push_back(line); }, ia_draft, 0, "");
     bool found_disabled_note = false;
     for (const auto& r : rows) {
         if (r.find("Disabled in IA Mode") != std::string::npos ||
@@ -300,7 +307,8 @@ void test_sysconfig_modal_modes() {
             break;
         }
     }
-    expect(found_disabled_note, "IA mode render explicitly surfaces disabled status for CA options");
+    expect(found_disabled_note,
+           "IA mode render explicitly surfaces disabled status for CA options");
 }
 
 void test_page_guidance() {
@@ -347,6 +355,73 @@ void test_help_uses_canonical_registry() {
         expect(simrv::tui::get_display_width(compact_rows[i]) == 76,
                "each dual-column help row exactly fills the modal interior");
     }
+}
+
+void test_category_groups_and_glossary() {
+    using simrv::tui::get_category_group;
+    using simrv::tui::get_category_name;
+    using simrv::tui::get_default_page_for_group;
+    using simrv::tui::TuiCategoryGroup;
+    using simrv::tui::TuiRegPage;
+
+    expect(get_category_group(TuiRegPage::GPR) == TuiCategoryGroup::Regs, "GPR is in Regs group");
+    expect(get_category_group(TuiRegPage::FPR) == TuiCategoryGroup::Regs, "FPR is in Regs group");
+    expect(get_category_group(TuiRegPage::VEC) == TuiCategoryGroup::Regs, "VEC is in Regs group");
+
+    expect(get_category_group(TuiRegPage::STACK) == TuiCategoryGroup::Memory,
+           "STACK is in Memory group");
+    expect(get_category_group(TuiRegPage::CACHE) == TuiCategoryGroup::Memory,
+           "CACHE is in Memory group");
+    expect(get_category_group(TuiRegPage::TLB) == TuiCategoryGroup::Memory,
+           "TLB is in Memory group");
+    expect(get_category_group(TuiRegPage::BUS) == TuiCategoryGroup::Memory,
+           "BUS is in Memory group");
+
+    expect(get_category_group(TuiRegPage::PIPELINE) == TuiCategoryGroup::Pipeline,
+           "PIPELINE is in Pipeline group");
+    expect(get_category_group(TuiRegPage::BPRED) == TuiCategoryGroup::Pipeline,
+           "BPRED is in Pipeline group");
+    expect(get_category_group(TuiRegPage::HAZARD) == TuiCategoryGroup::Pipeline,
+           "HAZARD is in Pipeline group");
+
+    expect(get_category_group(TuiRegPage::EXPLAIN) == TuiCategoryGroup::Tools,
+           "EXPLAIN is in Tools group");
+    expect(get_category_group(TuiRegPage::TRACE) == TuiCategoryGroup::Tools,
+           "TRACE is in Tools group");
+
+    expect(get_default_page_for_group(TuiCategoryGroup::Regs) == TuiRegPage::GPR,
+           "Regs default is GPR");
+    expect(get_default_page_for_group(TuiCategoryGroup::Memory) == TuiRegPage::STACK,
+           "Memory default is STACK");
+    expect(get_default_page_for_group(TuiCategoryGroup::Pipeline) == TuiRegPage::PIPELINE,
+           "Pipeline default is PIPELINE");
+    expect(get_default_page_for_group(TuiCategoryGroup::Tools) == TuiRegPage::EXPLAIN,
+           "Tools default is EXPLAIN");
+
+    // Test GlossaryModal rendering for all 6 topics
+    for (int topic = 0; topic < 6; ++topic) {
+        std::vector<std::string> rows;
+        simrv::tui::modals::GlossaryModal::render(
+            rows, [&rows](const std::string& row) { rows.push_back(row); }, topic, 0, 30, 78);
+        expect(!rows.empty(), "glossary renders rows for topic " + std::to_string(topic));
+        bool found_nav = false;
+        for (const auto& r : rows) {
+            if (r.find("Select Topic") != std::string::npos) {
+                found_nav = true;
+                break;
+            }
+        }
+        expect(found_nav, "glossary includes navigation instructions");
+    }
+
+    int topic_idx = 0;
+    int scroll_offset = 0;
+    simrv::tui::modals::GlossaryModal::move_topic(topic_idx, scroll_offset, 1);
+    expect(topic_idx == 1, "moving topic advances topic index");
+    simrv::tui::modals::GlossaryModal::move_topic(topic_idx, scroll_offset, -1);
+    expect(topic_idx == 0, "moving topic backward returns to topic 0");
+    simrv::tui::modals::GlossaryModal::scroll_content(scroll_offset, 2, 20);
+    expect(scroll_offset == 2, "scrolling advances scroll offset");
 }
 
 void test_input_routing() {
@@ -430,7 +505,7 @@ void test_responsive_layout() {
 
     const auto short_modal = calculate_overlay_geometry(40, 10, 78, 30);
     expect(short_modal.renderable && short_modal.width == 36 && short_modal.height == 10,
-       "a tall modal is constrained to the minimum terminal frame");
+           "a tall modal is constrained to the minimum terminal frame");
     expect(short_modal.start_x == 2 && short_modal.start_y == 0 &&
                short_modal.visible_content_rows == 8,
            "constrained modal geometry remains centered with two visible borders");
@@ -496,6 +571,58 @@ void test_frame_composition() {
     }
 }
 
+void test_themes_and_mouse_interactions() {
+    using simrv::tui::cycle_theme_style;
+    using simrv::tui::get_active_theme_style;
+    using simrv::tui::get_display_width;
+    using simrv::tui::get_theme_glyphs;
+    using simrv::tui::set_theme_style;
+    using simrv::tui::TuiThemeStyle;
+
+    // 1. Validate Classic ANSI theme glyphs contain no multi-byte unicode or emojis
+    const auto& ansi_glyphs = get_theme_glyphs(TuiThemeStyle::ClassicAnsi);
+    expect(std::string(ansi_glyphs.top_left) == "+", "ANSI top left is +");
+    expect(std::string(ansi_glyphs.horiz) == "-", "ANSI horiz is -");
+    expect(std::string(ansi_glyphs.vert) == "|", "ANSI vert is |");
+    expect(std::string(ansi_glyphs.icon_settings) == "CFG", "ANSI settings icon is plain text CFG");
+    expect(std::string(ansi_glyphs.icon_theme) == "THM", "ANSI theme icon is plain text THM");
+    expect(std::string(ansi_glyphs.icon_power) == "RST", "ANSI power icon is plain text RST");
+
+    // Check ASCII purity for all ANSI glyph strings
+    const char* const all_ansi_ptrs[] = {
+        ansi_glyphs.top_left,      ansi_glyphs.top_right,  ansi_glyphs.bot_left,
+        ansi_glyphs.bot_right,     ansi_glyphs.horiz,      ansi_glyphs.vert,
+        ansi_glyphs.tee_left,      ansi_glyphs.tee_right,  ansi_glyphs.tee_top,
+        ansi_glyphs.tee_bot,       ansi_glyphs.cross,      ansi_glyphs.double_horiz,
+        ansi_glyphs.double_vert,   ansi_glyphs.bullet,     ansi_glyphs.arrow_up,
+        ansi_glyphs.arrow_down,    ansi_glyphs.arrow_left, ansi_glyphs.arrow_right,
+        ansi_glyphs.icon_settings, ansi_glyphs.icon_help,  ansi_glyphs.icon_theme,
+        ansi_glyphs.icon_power,    ansi_glyphs.icon_warn,  ansi_glyphs.icon_error};
+    for (const char* ptr : all_ansi_ptrs) {
+        for (const char* c = ptr; *c != '\0'; ++c) {
+            expect(static_cast<unsigned char>(*c) < 128,
+                   "Classic ANSI theme contains strictly pure ASCII (no emojis)");
+        }
+    }
+
+    // 2. Validate Modern Unicode theme glyphs
+    const auto& modern_glyphs = get_theme_glyphs(TuiThemeStyle::ModernUnicode);
+    expect(std::string(modern_glyphs.top_left) == "╭", "Modern top left is ╭");
+    expect(std::string(modern_glyphs.horiz) == "─", "Modern horiz is ─");
+    expect(std::string(modern_glyphs.vert) == "│", "Modern vert is │");
+
+    // 3. Validate Theme Cycling
+    set_theme_style(TuiThemeStyle::ModernUnicode);
+    expect(get_active_theme_style() == TuiThemeStyle::ModernUnicode, "active style is modern");
+    cycle_theme_style();
+    expect(get_active_theme_style() == TuiThemeStyle::ClassicAnsi, "cycled to classic ansi");
+    cycle_theme_style();
+    expect(get_active_theme_style() == TuiThemeStyle::SakuraPastel, "cycled to sakura pastel");
+    cycle_theme_style();
+    expect(get_active_theme_style() == TuiThemeStyle::ModernUnicode,
+           "cycled back to modern unicode");
+}
+
 }  // namespace
 
 int main() {
@@ -505,10 +632,12 @@ int main() {
     test_key_registry();
     test_page_guidance();
     test_help_uses_canonical_registry();
+    test_category_groups_and_glossary();
     test_sysconfig_modal_modes();
     test_input_routing();
     test_responsive_layout();
     test_frame_composition();
+    test_themes_and_mouse_interactions();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;

@@ -13,6 +13,7 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
+#include "simrv/pipeline/PipelineFactory.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/LeftPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
@@ -293,6 +294,22 @@ auto LeftPane::render_cycle_accurate_core_stats(const simrv::core::CPU& cpu, int
     double cpi = (icount == 0) ? 0.0 : static_cast<double>(cycles) / static_cast<double>(icount);
 
     if (adj_logical_row == 28) {
+        if (cpu.pipeline_sim.config.pipeline_type == simrv::pipeline::PipelineType::DualIssue) {
+            auto stats = cpu.pipeline_sim.get_stats();
+            uint64_t dual_c = stats.dual_issue_cycles;
+            uint64_t single_c = stats.single_issue_cycles;
+            uint64_t total_issue_cycles = dual_c + single_c;
+            double dual_rate = (total_issue_cycles == 0)
+                                   ? 0.0
+                                   : (static_cast<double>(dual_c) * 100.0) /
+                                         static_cast<double>(total_issue_cycles);
+            std::string color = std::format(
+                "  {}IPC / Peak\033[0m     : {}{:.2f} / 2.00 IPC\033[0m  │ {}Dual-Issue "
+                "Rate:\033[0m "
+                "{}{:5.1f}%\033[0m",
+                kThemeText, kThemeMint, ipc, kThemeText, kThemeMint, dual_rate);
+            return format_to_width(color, width);
+        }
         std::string color =
             std::format("  {}IPC / CPI\033[0m      : {}{:.2f} IPC\033[0m  /  {}{:.2f} CPI\033[0m",
                         kThemeText, kThemeMint, ipc, kThemePeach, cpi);
@@ -326,6 +343,14 @@ auto LeftPane::render_cycle_accurate_hazard_stats(const simrv::core::CPU& cpu, i
     uint64_t cache_stalls = ic_stalls + dc_stalls;
 
     if (adj_logical_row == 30) {
+        if (cpu.pipeline_sim.config.pipeline_type == simrv::pipeline::PipelineType::DualIssue) {
+            auto stats = cpu.pipeline_sim.get_stats();
+            std::string color = std::format(
+                "    {}- Co-Issue\033[0m    : {}{:>10}\033[0m clk {}(1-way: {})\033[0m",
+                kThemeMuted, kThemeMint, simrv::util::format_with_commas(stats.dual_issue_cycles),
+                kThemeMuted, simrv::util::format_with_commas(stats.single_issue_cycles));
+            return format_to_width(color, width);
+        }
         double data_pct = (cycles == 0) ? 0.0
                                         : (static_cast<double>(data_stalls) * 100.0) /
                                               static_cast<double>(cycles);
@@ -462,9 +487,10 @@ auto LeftPane::render_cycle_accurate_hw_info(const simrv::core::CPU& cpu, int ad
 
     if (adj_logical_row == 38) {
         std::string fwd_status = cpu.pipeline_sim.config.enable_forwarding ? "ON" : "OFF";
-        std::string mode =
-            std::format("  Simulation Mode: {}Cycle-Accurate (CA, forwarding: {})\033[0m",
-                        kThemeVal, fwd_status);
+        std::string_view pipe_name =
+            simrv::pipeline::pipeline_type_name(cpu.pipeline_sim.config.pipeline_type);
+        std::string mode = std::format("  Pipeline Model : {}{} (fwd: {})\033[0m", kThemeVal,
+                                       pipe_name, fwd_status);
         return format_to_width(mode, width);
     }
 

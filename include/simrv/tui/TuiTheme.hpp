@@ -10,8 +10,43 @@
 
 namespace simrv::tui {
 
-// Theme Enum
-enum class TuiTheme : std::uint8_t { Adaptive, Sakura, HighContrast };
+// Theme Style Enum
+enum class TuiThemeStyle : std::uint8_t { ModernUnicode, ClassicAnsi, SakuraPastel };
+
+// Theme Enum for color palette mapping
+enum class TuiTheme : std::uint8_t { Adaptive, Sakura, HighContrast, ClassicAnsi };
+
+struct ThemeGlyphs {
+    const char* top_left;
+    const char* top_right;
+    const char* bot_left;
+    const char* bot_right;
+    const char* horiz;
+    const char* vert;
+    const char* tee_left;
+    const char* tee_right;
+    const char* tee_top;
+    const char* tee_bot;
+    const char* cross;
+    const char* double_horiz;
+    const char* double_vert;
+    const char* bullet;
+    const char* arrow_up;
+    const char* arrow_down;
+    const char* arrow_left;
+    const char* arrow_right;
+    const char* icon_settings;
+    const char* icon_help;
+    const char* icon_theme;
+    const char* icon_power;
+    const char* icon_warn;
+    const char* icon_error;
+};
+
+[[nodiscard]] auto get_theme_glyphs(TuiThemeStyle style) -> const ThemeGlyphs&;
+[[nodiscard]] auto get_active_theme_style() -> TuiThemeStyle;
+void set_theme_style(TuiThemeStyle style);
+void cycle_theme_style();
 
 // Sakura Pastel Theme Colors (static constants)
 inline constexpr const char* kSakuraBorderConst = "\033[38;5;218m";  // Soft pink borders
@@ -50,6 +85,17 @@ inline constexpr const char* kAdaptivePeach = "\033[33m";        // Standard Yel
 inline constexpr const char* kAdaptiveCoral = "\033[31m";        // Standard Red
 inline constexpr const char* kAdaptiveSky = "\033[36m";          // Standard Cyan
 inline constexpr const char* kAdaptivePink = "\033[35m";         // Standard Magenta
+
+// Classic ANSI Theme Colors (Pure standard 8-color ANSI)
+inline constexpr const char* kClassicAnsiBorder = "\033[37m";  // Standard White
+inline constexpr const char* kClassicAnsiText = "\033[37m";    // Standard White
+inline constexpr const char* kClassicAnsiVal = "\033[36m";     // Cyan
+inline constexpr const char* kClassicAnsiMuted = "\033[90m";   // Dark Gray
+inline constexpr const char* kClassicAnsiMint = "\033[32m";    // Green
+inline constexpr const char* kClassicAnsiPeach = "\033[33m";   // Yellow
+inline constexpr const char* kClassicAnsiCoral = "\033[31m";   // Red
+inline constexpr const char* kClassicAnsiSky = "\033[36m";     // Cyan
+inline constexpr const char* kClassicAnsiPink = "\033[35m";    // Magenta
 
 // Theme Variables (pointers to active color definitions)
 extern const char* g_theme_border;

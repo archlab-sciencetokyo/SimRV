@@ -15,7 +15,8 @@
 
 namespace simrv::core {
 class Machine;
-}
+enum class PlatformProfile : uint8_t;
+}  // namespace simrv::core
 
 namespace simrv::tui {
 
@@ -31,11 +32,13 @@ enum class ModalType : uint8_t {
     LoadBinary,
     LoadDiskImage,
     Help,
+    Glossary,
     Settings,
     ConfigureMisa,
     ConfigureSystem,
     ManageBreakpoints,
-    Notice
+    Notice,
+    PlatformChangeConfirm
 };
 
 struct SettingsDraft {
@@ -43,6 +46,7 @@ struct SettingsDraft {
     bool debug_mode = false;
     bool rollback_enabled = false;
     bool high_contrast = false;
+    bool class_mode = false;
     bool use_mix = false;
     bool bp_trace = false;
     bool traplog_mode = false;
@@ -53,10 +57,13 @@ struct SettingsDraft {
     uint32_t num_harts = 1;
     uint32_t smp_quantum = 1000;
     bool smp_multithreaded = false;
+    uint8_t platform_profile = 0;  // 0: PCIe, 1: MMIO, 2: Hybrid
+    std::string net_mode = "user";
 };
 
 struct SysConfigDraft {
-    uint8_t preset = 0;  // 0: Rocket, 1: Embedded, 2: Fast
+    uint8_t preset = 0;         // 0: Rocket, 1: Embedded, 2: Fast
+    uint8_t pipeline_type = 0;  // 0: 5-Stage Rocket, 1: 3-Stage Embedded, 2: Dual-Issue Superscalar
     uint32_t icache_miss_penalty = 10;
     uint32_t dcache_miss_penalty = 15;
     uint32_t tlb_miss_penalty = 25;
@@ -156,7 +163,27 @@ class TuiModal {
     auto remove_bp_at_cursor(const std::function<void(const std::string&)>& set_status_override_cb)
         -> bool;
 
+    void move_glossary_topic(int delta);
+    void set_glossary_topic(int topic);
+    void scroll_glossary_content(int delta);
+
     void open_notice(const std::string& title, const std::string& message, bool is_error = false);
+    void open_platform_confirm(const SettingsDraft& draft);
+    [[nodiscard]] auto get_pending_platform_draft() const -> const SettingsDraft& {
+        return pending_platform_draft_;
+    }
+
+    enum class ModalClickResult : uint8_t {
+        Ignored,
+        Handled,
+        Closed,
+        Submit,
+        ReloadRequested,
+        DiscardRequested
+    };
+
+    [[nodiscard]] auto handle_click(int x, int y, int term_width, int term_height)
+        -> ModalClickResult;
 
     void render_overlay(std::vector<std::string>& lines, int term_width, int term_height) const;
 
@@ -170,10 +197,13 @@ class TuiModal {
     int bp_cursor_ = 0;
     int settings_cursor_ = 0;
     SettingsDraft settings_draft_;
+    SettingsDraft pending_platform_draft_;
     int misa_cursor_ = 0;
     MisaDraft misa_draft_;
     int sysconfig_cursor_ = 0;
     SysConfigDraft sysconfig_draft_;
+    int glossary_topic_ = 0;
+    int glossary_scroll_ = 0;
     bool load_appmode_ = true;  // Toggle for App (baremetal) vs OS (Linux) mode in LoadBinary modal
     std::string staged_binary_path_;
     bool staged_mode_change_ = false;

@@ -6,7 +6,6 @@
 #include "simrv/tui/TuiModal.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <format>
 
 #include "simrv/core/Machine.hpp"
@@ -14,6 +13,7 @@
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/modals/AddressModal.hpp"
 #include "simrv/tui/modals/BreakpointModal.hpp"
+#include "simrv/tui/modals/GlossaryModal.hpp"
 #include "simrv/tui/modals/HelpModal.hpp"
 #include "simrv/tui/modals/LoadModal.hpp"
 #include "simrv/tui/modals/MisaModal.hpp"
@@ -44,6 +44,9 @@ void TuiModal::open(ModalType type, LeftPane* left_pane, uint64_t step_delay_us)
         case ModalType::LoadBinary:
         case ModalType::LoadDiskImage:
             modals::LoadModal::open(type, input_, load_appmode_, machine_);
+            break;
+        case ModalType::Glossary:
+            modals::GlossaryModal::open(glossary_topic_, glossary_scroll_);
             break;
         case ModalType::Settings:
             modals::SettingsModal::open(settings_draft_, settings_cursor_, machine_);
@@ -205,14 +208,19 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
                 return true;
             }
             break;
-        case ModalType::Settings:
+        case ModalType::Settings: {
+            if (settings_draft_.platform_profile !=
+                static_cast<uint8_t>(machine_.s_platform_profile)) {
+                open_platform_confirm(settings_draft_);
+                return false;
+            }
             result = modals::SettingsModal::submit(settings_draft_, machine_, set_reg_page_cb);
             if (result) {
                 open_notice("SETTINGS SAVED",
                             "Simulator & SMP settings saved and applied successfully.", false);
                 return true;
             }
-            break;
+        } break;
         case ModalType::ConfigureMisa:
             result = modals::MisaModal::submit(misa_draft_, machine_, set_status_override_cb);
             if (result) {
@@ -224,9 +232,10 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
         case ModalType::ConfigureSystem:
             result = modals::SystemConfigModal::submit(sysconfig_draft_, machine_);
             if (result) {
-                open_notice("MICROARCHITECTURE SAVED",
-                            "Pipeline & microarchitecture configuration saved and applied successfully.",
-                            false);
+                open_notice(
+                    "MICROARCHITECTURE SAVED",
+                    "Pipeline & microarchitecture configuration saved and applied successfully.",
+                    false);
                 return true;
             }
             break;
@@ -241,6 +250,19 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
     return result;
 }
 
+void TuiModal::move_glossary_topic(int delta) {
+    modals::GlossaryModal::move_topic(glossary_topic_, glossary_scroll_, delta);
+}
+
+void TuiModal::set_glossary_topic(int topic) {
+    glossary_topic_ = std::clamp(topic, 0, 5);
+    glossary_scroll_ = 0;
+}
+
+void TuiModal::scroll_glossary_content(int delta) {
+    modals::GlossaryModal::scroll_content(glossary_scroll_, delta, 30);
+}
+
 void TuiModal::open_notice(const std::string& title, const std::string& message, bool is_error) {
     active_modal_ = ModalType::Notice;
     input_.clear();
@@ -249,15 +271,166 @@ void TuiModal::open_notice(const std::string& title, const std::string& message,
     notice_is_error_ = is_error;
 }
 
+void TuiModal::open_platform_confirm(const SettingsDraft& draft) {
+    active_modal_ = ModalType::PlatformChangeConfirm;
+    input_.clear();
+    pending_platform_draft_ = draft;
+}
+
+auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> ModalClickResult {
+    if (active_modal_ == ModalType::None) return ModalClickResult::Ignored;
+
+    bool is_help = (active_modal_ == ModalType::Help);
+    bool is_glossary = (active_modal_ == ModalType::Glossary);
+    bool is_wide_modal =
+        (is_help || is_glossary || active_modal_ == ModalType::Settings ||
+         active_modal_ == ModalType::ConfigureMisa || active_modal_ == ModalType::ConfigureSystem ||
+         active_modal_ == ModalType::Notice || active_modal_ == ModalType::PlatformChangeConfirm);
+    const int maximum_width = is_wide_modal ? 78 : 58;
+    const int provisional_width = std::min(maximum_width, term_width - 4);
+    if (provisional_width < 35) return ModalClickResult::Ignored;
+
+    int est_rows = (active_modal_ == ModalType::Settings)          ? 24
+                   : (active_modal_ == ModalType::ConfigureMisa)   ? 16
+                   : (active_modal_ == ModalType::ConfigureSystem) ? 22
+                   : (active_modal_ == ModalType::Glossary)        ? 26
+                   : (active_modal_ == ModalType::Help)            ? 24
+                                                                   : 10;
+
+    const OverlayGeometry overlay =
+        calculate_overlay_geometry(term_width, term_height, maximum_width, est_rows);
+    if (!overlay.renderable) return ModalClickResult::Ignored;
+
+    int box_w = overlay.width;
+    int box_h = overlay.height;
+    int start_y = overlay.start_y + 1;  // 1-indexed terminal row
+    int start_x = overlay.start_x + 1;  // 1-indexed terminal col
+
+    if (x < start_x || x >= start_x + box_w || y < start_y || y >= start_y + box_h) {
+        if (active_modal_ != ModalType::LoadBinary || !machine_.s_fn_memimg.empty()) {
+            close();
+            return ModalClickResult::Closed;
+        }
+        return ModalClickResult::Ignored;
+    }
+
+    int rel_y = y - start_y;
+    int rel_x = x - start_x;
+
+    if (rel_y == 0 || rel_y == box_h - 1) return ModalClickResult::Handled;
+    int content_row = rel_y - 1;
+
+    switch (active_modal_) {
+        case ModalType::Notice:
+            close();
+            return ModalClickResult::Closed;
+
+        case ModalType::PlatformChangeConfirm:
+            if (content_row >= 5 && content_row <= 6) return ModalClickResult::ReloadRequested;
+            if (content_row == 7) return ModalClickResult::DiscardRequested;
+            if (content_row >= 8) {
+                close();
+                return ModalClickResult::Closed;
+            }
+            return ModalClickResult::Handled;
+
+        case ModalType::Glossary: {
+            if (content_row == 0) {
+                // Topic buttons: 1.Regs (8) | 2.Pipe (8) | 3.Cache (9) | 4.VM/TLB (10) | 5.BPred
+                // (9) | 6.Priv/Trap (13)
+                constexpr std::array<int, 6> kTabWidths = {8, 8, 9, 10, 9, 13};
+                int current_x = 1;
+                for (size_t i = 0; i < kTabWidths.size(); ++i) {
+                    if (rel_x >= current_x && rel_x < current_x + kTabWidths.at(i)) {
+                        set_glossary_topic(static_cast<int>(i));
+                        return ModalClickResult::Handled;
+                    }
+                    current_x += kTabWidths.at(i) + 1;
+                }
+            } else if (content_row >= 2 && content_row < box_h - 4) {
+                if (rel_x >= box_w / 2) {
+                    move_glossary_topic(1);
+                } else {
+                    move_glossary_topic(-1);
+                }
+                return ModalClickResult::Handled;
+            } else if (rel_y >= box_h - 3) {
+                if (rel_x >= box_w - 18) {
+                    close();
+                    return ModalClickResult::Closed;
+                }
+                move_glossary_topic(1);
+                return ModalClickResult::Handled;
+            }
+            return ModalClickResult::Handled;
+        }
+
+        case ModalType::Settings: {
+            int item_idx = -1;
+            if (content_row >= 1 && content_row <= 6)
+                item_idx = content_row - 1;
+            else if (content_row >= 8 && content_row <= 10)
+                item_idx = content_row - 2;
+            else if (content_row >= 12 && content_row <= 13)
+                item_idx = content_row - 3;
+            else if (content_row >= 15 && content_row <= 16)
+                item_idx = content_row - 4;
+            else if (content_row >= 18 && content_row <= 21)
+                item_idx = content_row - 5;
+
+            if (item_idx >= 0 && item_idx < 17) {
+                settings_cursor_ = item_idx;
+                if (rel_x > box_w / 2 + 10) {
+                    adjust_setting_at_cursor(1);
+                } else if (rel_x > box_w / 2 && rel_x <= box_w / 2 + 10) {
+                    adjust_setting_at_cursor(-1);
+                } else {
+                    toggle_setting_at_cursor();
+                }
+                return ModalClickResult::Handled;
+            }
+            return ModalClickResult::Handled;
+        }
+
+        case ModalType::ConfigureSystem: {
+            int sys_idx = std::clamp(content_row - 1, 0, 15);
+            sysconfig_cursor_ = sys_idx;
+            if (rel_x > box_w / 2 + 10)
+                adjust_sysconfig_at_cursor(1);
+            else if (rel_x > box_w / 2)
+                adjust_sysconfig_at_cursor(-1);
+            else
+                toggle_sysconfig_at_cursor();
+            return ModalClickResult::Handled;
+        }
+
+        case ModalType::ConfigureMisa: {
+            int misa_idx = std::clamp(content_row - 1, 0, 10);
+            misa_cursor_ = misa_idx;
+            toggle_misa_at_cursor();
+            return ModalClickResult::Handled;
+        }
+
+        case ModalType::Help:
+            close();
+            return ModalClickResult::Closed;
+
+        default:
+            break;
+    }
+    return ModalClickResult::Handled;
+}
+
 void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                               int term_height) const {
     if (active_modal_ == ModalType::None || lines.empty()) return;
 
     bool is_help = (active_modal_ == ModalType::Help);
+    bool is_glossary = (active_modal_ == ModalType::Glossary);
     bool is_wide_modal =
-        (is_help || active_modal_ == ModalType::Settings ||
+        (is_help || is_glossary || active_modal_ == ModalType::Settings ||
          active_modal_ == ModalType::ConfigureMisa || active_modal_ == ModalType::ConfigureSystem ||
-         active_modal_ == ModalType::Notice);
+         active_modal_ == ModalType::Notice || active_modal_ == ModalType::PlatformChangeConfirm);
     const int maximum_width = is_wide_modal ? 78 : 58;
     const int provisional_width = std::min(maximum_width, term_width - 4);
     if (provisional_width < 35) return;
@@ -310,6 +483,11 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             modals::LoadModal::render(active_modal_, content_rows, input_, load_appmode_,
                                       staged_binary_path_);
             break;
+        case ModalType::Glossary:
+            title = " ARCHITECTURE GLOSSARY & CONCEPTS [?] ";
+            modals::GlossaryModal::render(content_rows, add_row, glossary_topic_, glossary_scroll_,
+                                          term_height, provisional_width);
+            break;
         case ModalType::Settings:
             title = " SIMULATOR & SMP SETTINGS ";
             modals::SettingsModal::render(content_rows, add_row, settings_draft_, settings_cursor_,
@@ -349,6 +527,38 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                             "\033[1m[Esc]\033[0m to dismiss\033[0m",
                             kThemeMuted));
             break;
+        case ModalType::PlatformChangeConfirm: {
+            title = " ⚙️  PLATFORM PROFILE CHANGE: RELOAD REQUIRED ";
+            add_row("");
+            const char* cur_prof =
+                (machine_.s_platform_profile == simrv::core::PlatformProfile::Pcie)
+                    ? "PCIe (PCIe 1.2 + ECAM)"
+                    : ((machine_.s_platform_profile == simrv::core::PlatformProfile::Mmio)
+                           ? "MMIO (VirtIO-MMIO v2)"
+                           : "Hybrid (PCIe + MMIO)");
+            const char* new_prof =
+                (pending_platform_draft_.platform_profile == 0)
+                    ? "PCIe (PCIe 1.2 + ECAM)"
+                    : ((pending_platform_draft_.platform_profile == 1) ? "MMIO (VirtIO-MMIO v2)"
+                                                                       : "Hybrid (PCIe + MMIO)");
+            add_row(std::format("  {}Platform profile changed:\033[0m", kThemeText));
+            add_row(std::format("    {}Current:\033[0m \033[1;36m{}\033[0m", kThemeText, cur_prof));
+            add_row(std::format("    {}Target :\033[0m \033[1;32m{}\033[0m", kThemeText, new_prof));
+            add_row("");
+            add_row(std::format("  Changing the platform bus topology requires regenerating the"));
+            add_row(std::format("  Device Tree (FDT) and restarting CPU execution state."));
+            add_row("");
+            add_row(
+                std::format("  {}[R / Enter]\033[0m \033[1;32mReload Simulator Now\033[0m (Apply & "
+                            "Reset System)",
+                            kThemeMint));
+            add_row(
+                std::format("  {}[D / Space]\033[0m \033[1;33mDiscard Platform Change\033[0m (Keep "
+                            "Current Profile)",
+                            kThemePeach));
+            add_row(std::format("  {}[Esc / q]  \033[0m \033[90mCancel & Return to Settings\033[0m",
+                                kThemeMuted));
+        } break;
         default:
             break;
     }
@@ -400,28 +610,27 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
         if (dash_len < 0) dash_len = 0;
         int left_dash = dash_len / 2;
         int right_dash = dash_len - left_dash;
+        const auto style = get_active_theme_style();
+        auto const& glyphs = get_theme_glyphs(style);
 
-        std::string top_border = std::format(
-            "{}{}{}{}{}{}{}\033[0m", kThemeBorder, m_bg, make_repeated_string("─", left_dash + 1),
-            title_fmt, kThemeBorder, make_repeated_string("─", right_dash + 1), "\033[0m");
+        std::string top_border =
+            std::format("{}{}{}{}{}{}{}\033[0m", kThemeBorder, m_bg,
+                        make_repeated_string(glyphs.horiz, left_dash + 1), title_fmt, kThemeBorder,
+                        make_repeated_string(glyphs.horiz, right_dash + 1), "\033[0m");
 
         lines.at(static_cast<std::size_t>(start_y)) =
             overlay_string(lines.at(static_cast<std::size_t>(start_y)), top_border, start_x, box_w);
     }
 
     // Render Box Content Rows with background color persistence & viewport scrolling
+    const auto style = get_active_theme_style();
+    auto const& glyphs = get_theme_glyphs(style);
     for (int i = 0; i < visible_rows; ++i) {
         int target_y = start_y + 1 + i;
         int content_idx = scroll_start + i;
 
         std::string content;
-        if (total_rows > visible_rows && scroll_start > 0 && i == 0) {
-            content = std::format(" {}▲ [{} more items above]\033[0m", kThemeMuted, scroll_start);
-        } else if (total_rows > visible_rows && (scroll_start + visible_rows < total_rows) &&
-                   i == visible_rows - 1) {
-            const int remaining = total_rows - (scroll_start + visible_rows - 1);
-            content = std::format(" {}▼ [{} more items below]\033[0m", kThemeMuted, remaining);
-        } else if (content_idx >= 0 && content_idx < total_rows) {
+        if (content_idx < total_rows) {
             content = content_rows.at(static_cast<std::size_t>(content_idx));
         }
 
@@ -435,8 +644,9 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             }
         }
 
-        std::string row_str = std::format("{}{}\033[0m{}{}{}{}\033[0m", kThemeBorder, "│", m_bg,
-                                          format_to_width(content, inner_w), kThemeBorder, "│");
+        std::string row_str =
+            std::format("{}{}\033[0m{}{}{}{}\033[0m", kThemeBorder, glyphs.vert, m_bg,
+                        format_to_width(content, inner_w), kThemeBorder, glyphs.vert);
 
         lines.at(static_cast<std::size_t>(target_y)) =
             overlay_string(lines.at(static_cast<std::size_t>(target_y)), row_str, start_x, box_w);
@@ -446,7 +656,7 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
     int bot_y = start_y + box_h - 1;
     if (bot_y < static_cast<int>(lines.size())) {
         std::string bot_border = std::format("{}{}{}{}\033[0m", kThemeBorder, m_bg,
-                                             make_repeated_string("─", box_w), "\033[0m");
+                                             make_repeated_string(glyphs.horiz, box_w), "\033[0m");
         lines.at(static_cast<std::size_t>(bot_y)) =
             overlay_string(lines.at(static_cast<std::size_t>(bot_y)), bot_border, start_x, box_w);
     }

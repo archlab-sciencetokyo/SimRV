@@ -61,6 +61,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     std::optional<bool> override_high_performance;
     std::optional<bool> override_rollback;
     std::optional<bool> override_high_contrast;
+    std::optional<bool> override_class_mode;
     std::optional<bool> override_use_mix;
     std::optional<bool> override_bp_trace;
     std::optional<bool> override_traplog_mode;
@@ -107,6 +108,9 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         }
         if (override_high_contrast.has_value()) {
             parsed->options.high_contrast = *override_high_contrast;
+        }
+        if (override_class_mode.has_value()) {
+            parsed->options.class_mode = *override_class_mode;
         }
         if (override_use_mix.has_value()) {
             parsed->options.use_mix = *override_use_mix;
@@ -196,11 +200,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 simrv::log::warn("Terminal raw mode setup failed; continuing in current mode");
             }
         }
-        if ((sim_machine->s_gui_mode && sim_machine->framebuffer) || sim_machine->s_tuimode) {
+        if (sim_machine->s_tuimode) {
             sim_machine->s_multithreaded = true;
-            if (sim_machine->s_gui_mode && sim_machine->framebuffer) {
-                sim_machine->framebuffer->set_multithreaded(true);
-            }
             auto* machine_ptr = sim_machine.get();
             std::thread sim_thread([machine_ptr]() -> void { machine_ptr->run(); });
 
@@ -230,6 +231,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             override_debug_mode = sim_machine->s_debug_mode;
             override_rollback = sim_machine->s_rollback_enabled;
             override_high_contrast = sim_machine->s_high_contrast;
+            override_class_mode = sim_machine->s_class_mode;
             override_use_mix = sim_machine->s_use_mix;
             override_bp_trace = sim_machine->s_bp_trace;
             override_traplog_mode = sim_machine->s_traplog_mode;

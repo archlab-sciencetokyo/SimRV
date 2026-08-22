@@ -96,20 +96,6 @@ void OSMachine::prepare_cycle() {
         tracer.dump_init_artifacts();
     }
 
-    if (cpu.clint_mmio.mtime > s_enabletimer) { /* enable timer after linux boot */
-        if (console) {
-            if (console->pop_pending_input()) {
-                int const ret = console->MC_receive_input(*this);
-                if (ret > 0) {
-                    cpu.plic_set_irq(simrv::virtio::kConsoleIrq, 1);
-                }
-                if (ret == -1) {
-                    stop();
-                }
-            }
-        }
-    }
-
     cpu.pipeline_context.pending_exception = std::nullopt; /* initialize regs */
     cpu.pipeline_context.pending_tval = 0;                 /* initialize regs */
 }

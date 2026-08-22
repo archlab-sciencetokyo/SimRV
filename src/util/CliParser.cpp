@@ -16,6 +16,7 @@
 
 #include "simrv/core/Logger.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/pipeline/PipelineFactory.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -280,6 +281,10 @@ auto is_gui_option(std::string_view arg) -> bool { return arg == "--gui" || arg 
 
 auto is_high_contrast_option(std::string_view arg) -> bool { return arg == "--high-contrast"; }
 
+auto is_class_mode_option(std::string_view arg) -> bool {
+    return arg == "--class" || arg == "--edu";
+}
+
 auto is_no_forwarding_option(std::string_view arg) -> bool { return arg == "--no-forwarding"; }
 
 auto is_bp_type_option(std::string_view arg) -> bool { return arg == "--bp-type" || arg == "--bp"; }
@@ -463,10 +468,16 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         if (!value) return std::unexpected(value.error());
         std::string p_str(*value);
         if (p_str != "rocket" && p_str != "embedded" && p_str != "fast") {
-            return std::unexpected(std::format(
-                "unsupported preset '{}' (supported: rocket, embedded, fast)", p_str));
+            return std::unexpected(
+                std::format("unsupported preset '{}' (supported: rocket, embedded, fast)", p_str));
         }
         result.options.preset = p_str;
+        return true;
+    }
+    if (arg == "--pipeline" || arg == "--pipe") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        result.options.pipeline_type = std::string(*value);
         return true;
     }
     if (is_ia_option(arg)) {
@@ -479,7 +490,8 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         if (!value) return std::unexpected(value.error());
         uint32_t val = 0;
         if (!parse_u32_base0(*value, val) || val == 0 || val > 16) {
-            return std::unexpected(std::format("SMP core count must be between 1 and 16 (got: {})", *value));
+            return std::unexpected(
+                std::format("SMP core count must be between 1 and 16 (got: {})", *value));
         }
         result.options.num_harts = val;
         return true;
@@ -503,7 +515,8 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         if (!value) return std::unexpected(value.error());
         uint64_t val = 0;
         if (!parse_scaled_u64(*value, val) || val < 16ULL * 1024ULL * 1024ULL) {
-            return std::unexpected(std::format("invalid RAM size value for {} (minimum 16MB)", arg));
+            return std::unexpected(
+                std::format("invalid RAM size value for {} (minimum 16MB)", arg));
         }
         result.options.dram_size = val;
         return true;
@@ -542,6 +555,10 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.high_contrast = true;
         return true;
     }
+    if (is_class_mode_option(arg)) {
+        result.options.class_mode = true;
+        return true;
+    }
     if (is_no_forwarding_option(arg)) {
         result.options.disable_forwarding = true;
         return true;
@@ -572,6 +589,47 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
     }
     if (is_disable_ex_forwarding_option(arg)) {
         result.options.disable_ex_forwarding = true;
+        return true;
+    }
+    if (arg.starts_with("--platform=")) {
+        std::string_view p = arg.substr(11);
+        if (p == "pcie") {
+            result.options.platform_profile = simrv::core::PlatformProfile::Pcie;
+        } else if (p == "mmio") {
+            result.options.platform_profile = simrv::core::PlatformProfile::Mmio;
+        } else if (p == "hybrid") {
+            result.options.platform_profile = simrv::core::PlatformProfile::Hybrid;
+        } else {
+            return std::unexpected(
+                std::format("invalid platform profile: {}. Allowed: pcie, mmio, hybrid", p));
+        }
+        return true;
+    }
+    if (arg == "--platform") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        std::string_view p = *value;
+        if (p == "pcie") {
+            result.options.platform_profile = simrv::core::PlatformProfile::Pcie;
+        } else if (p == "mmio") {
+            result.options.platform_profile = simrv::core::PlatformProfile::Mmio;
+        } else if (p == "hybrid") {
+            result.options.platform_profile = simrv::core::PlatformProfile::Hybrid;
+        } else {
+            return std::unexpected(
+                std::format("invalid platform profile: {}. Allowed: pcie, mmio, hybrid", p));
+        }
+        return true;
+    }
+    if (arg == "--net") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        std::string_view net_opt = *value;
+        if (net_opt != "user" && net_opt != "tap" && net_opt != "socket" && net_opt != "none") {
+            return std::unexpected(
+                std::format("invalid network mode: {}. Allowed: user, tap, socket, none", net_opt));
+        }
+        result.options.net_mode = std::string(net_opt);
         return true;
     }
     if (is_disable_mem_forwarding_option(arg)) {
@@ -818,6 +876,7 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     machine->s_tuimode = options.tuimode;
     machine->s_gui_mode = options.gui_mode;
     machine->s_high_contrast = options.high_contrast;
+    machine->s_class_mode = options.class_mode;
     machine->s_debugmode = options.debugmode;
     machine->s_debug_mode = options.debug_mode;
     machine->s_mouse_sensitivity = options.mouse_sensitivity;
@@ -845,6 +904,8 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
         machine->s_high_performance = options.high_performance;
     }
     machine->s_fn_cpuconfig = options.fn_cpuconfig;
+    const auto parsed_pipe = pipeline::parse_pipeline_type(options.pipeline_type);
+    machine->s_pipeline_type = parsed_pipe;
 
     auto apply_config_to_cpu = [&](simrv::core::CPU& cpu) {
         if (options.preset == "embedded") {
@@ -854,6 +915,7 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
         } else {
             cpu.pipeline_sim.config.apply_preset(pipeline::CpuPreset::Rocket);
         }
+        cpu.pipeline_sim.config.pipeline_type = parsed_pipe;
 
         cpu.pipeline_sim.config.enable_forwarding = !options.disable_forwarding;
         cpu.pipeline_sim.config.enable_ex_forwarding = !options.disable_ex_forwarding;
@@ -901,6 +963,8 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     machine->s_spike_bin = options.spike_bin;
     machine->s_spike_elf = options.spike_elf;
     machine->s_rollback_enabled = options.rollback;
+    machine->s_platform_profile = options.platform_profile;
+    machine->s_net_mode = options.net_mode;
     if (machine->tui && options.step_delay_us > 0) {
         machine->tui->step_delay_us_.store(options.step_delay_us, std::memory_order_relaxed);
     }
@@ -946,6 +1010,12 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         "  {}-D, --disk {}{}<FILE>{}      Disk image file (enables block storage virtio-disk)\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
+               "  {}--net {}{}<MODE>{}          VirtIO network backend (user, tap, socket, none)\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--platform {}{}<PROFILE>{}  Platform peripheral profile (pcie, mmio, hybrid)\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
                "  {}-f, --fdt {}{}<FILE>{}       Device-tree binary file (FDT / DTB "
                "configuration)\n\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
@@ -977,8 +1047,12 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                "scaling factor (default: 1.0)\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
-               "  {}--high-contrast{}          Toggle TUI colors to high-contrast palette\n",
+               "  {}--high-contrast{}         Enable accessible high-contrast TUI color theme\n",
                style(kBrightGreen), style(kReset));
+    std::print(
+        stdout,
+        "  {}--class, --edu{}          Enable educational classroom mode (guidance & glossary)\n",
+        style(kBrightGreen), style(kReset));
 
     std::print(stdout,
                "  {}-C, --cycle-accurate, --ca{} Enable structural cycle-accurate performance "

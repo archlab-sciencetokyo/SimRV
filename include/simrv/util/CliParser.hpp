@@ -48,7 +48,9 @@ struct RuntimeOptions {
     bool cycle_accurate = false;
     bool high_performance = true;
     bool high_contrast = false;
+    bool class_mode = false;
     std::string preset = "rocket";
+    std::string pipeline_type = "5stage";
     bool disable_forwarding = false;
     std::string bp_type = "2bit";
     uint32_t btb_size = 128;
@@ -73,6 +75,8 @@ struct RuntimeOptions {
     uint32_t smp_quantum = 100;
     bool smp_multithreaded = false;
     uint64_t dram_size = 0;
+    simrv::core::PlatformProfile platform_profile = simrv::core::PlatformProfile::Pcie;
+    std::string net_mode = "user";
 };
 
 struct ParseResult {

@@ -79,6 +79,7 @@ class LeftPane : public TuiWidget {
     [[nodiscard]] auto get_stack_addr_at_row(int logical_row) const -> std::optional<Register>;
     [[nodiscard]] auto is_running_label_click(int logical_row, int col, int width) const -> bool;
     [[nodiscard]] auto is_hart_tab_click(int col) const -> bool;
+    [[nodiscard]] auto is_hart_tab_click(int row, int col) const -> bool;
     [[nodiscard]] auto get_text_in_range(int start_row, int start_col, int end_row, int end_col,
                                          int width) -> std::string;
 
@@ -98,10 +99,12 @@ class LeftPane : public TuiWidget {
     [[nodiscard]] auto get_cache_inspect_way() const -> int { return cache_inspect_way_; }
 
     [[nodiscard]] auto get_tab_at_col(int col) const -> std::optional<TuiRegPage>;
+    [[nodiscard]] auto get_tab_at(int row, int col) const -> std::optional<TuiRegPage>;
 
    private:
     std::optional<TuiRegPage> previous_page_;
-    [[nodiscard]] auto render_tab_bar(int width) const -> std::string;
+    [[nodiscard]] auto render_tab_bar_tier1(int width) const -> std::string;
+    [[nodiscard]] auto render_tab_bar_tier2(int width) const -> std::string;
     [[nodiscard]] auto render_trace_row(int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_log_bottom_row(int row_idx, int num_rows, int width) -> std::string;
     [[nodiscard]] auto render_guidance_row(int row_idx, int width) -> std::string;

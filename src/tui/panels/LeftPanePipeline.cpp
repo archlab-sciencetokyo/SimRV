@@ -390,11 +390,105 @@ auto LeftPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int s
     auto& ps = cpu.pipeline_sim;
     bool is_raw_stalled = is_raw_hazard_stalled(ps);
 
+    const auto ptype = ps.config.pipeline_type;
+
+    if (ptype == simrv::pipeline::PipelineType::ThreeStage) {
+        switch (stage_idx) {
+            case 0:
+                return section_line("3-Stage Embedded Core (Ibex/E21)", width);
+            case 1: {
+                std::string diagram = std::format(
+                    "  \033[1;36mIF:{}\033[0m → \033[1;32mID/EX:{}\033[0m → "
+                    "\033[1;34mMEM/WB:{}\033[0m",
+                    short_op_name(ps.f_reg()), short_op_name(ps.e_reg()),
+                    short_op_name(ps.w_reg()));
+                return format_to_width(diagram, width);
+            }
+            case 2: {
+                std::string stall_type = ps.tlb_stall_remaining() > 0 ? "TLB Miss" : "I-Cache Miss";
+                uint32_t stall_rem = ps.tlb_stall_remaining() > 0 ? ps.tlb_stall_remaining()
+                                                                  : ps.icache_stall_remaining();
+                return format_to_width(
+                    std::format("  \033[1m{}IF   (Fetch)\033[0m     : {}", kThemeSky,
+                                get_stage_desc(ps.f_reg(), stall_rem, stall_type)),
+                    width);
+            }
+            case 3:
+                return format_to_width(
+                    std::format("  \033[1m{}ID/EX(Execute)\033[0m   : {}", kThemeSky,
+                                get_stage_desc(ps.e_reg(), ps.div_busy_cycles_remaining(),
+                                               "Divider Busy", is_raw_stalled)),
+                    width);
+            case 4:
+                return format_to_width(
+                    std::format(
+                        "  \033[1m{}MEM/WB(Write)\033[0m   : {}", kThemeSky,
+                        get_stage_desc(ps.w_reg(), ps.dcache_stall_remaining(), "D-Cache Miss")),
+                    width);
+            case 5:
+                return format_to_width(
+                    std::format("  \033[90m{:<29} : Single-issue In-order\033[0m",
+                                "Microarchitecture"),
+                    width);
+            case 6:
+                return format_to_width("", width);
+            default:
+                return format_to_width("", width);
+        }
+    }
+
+    if (ptype == simrv::pipeline::PipelineType::DualIssue) {
+        switch (stage_idx) {
+            case 0:
+                return section_line("Dual-Issue Superscalar (SweRV EH1)", width);
+            case 1: {
+                std::string diagram = std::format(
+                    "  \033[1;36mIF:{}\033[0m → \033[1;32mEX0:{}\033[0m|\033[1;33mEX1:{}\033[0m → "
+                    "\033[1;35mMEM\033[0m → \033[1;34mWB0/1\033[0m",
+                    short_op_name(ps.f_reg()), short_op_name(ps.e_reg()),
+                    short_op_name(ps.e1_reg()));
+                return format_to_width(diagram, width);
+            }
+            case 2: {
+                std::string stall_type = ps.tlb_stall_remaining() > 0 ? "TLB Miss" : "I-Cache Miss";
+                uint32_t stall_rem = ps.tlb_stall_remaining() > 0 ? ps.tlb_stall_remaining()
+                                                                  : ps.icache_stall_remaining();
+                return format_to_width(
+                    std::format("  \033[1m{}IF  (Fetch)\033[0m     : {}", kThemeSky,
+                                get_stage_desc(ps.f_reg(), stall_rem, stall_type)),
+                    width);
+            }
+            case 3:
+                return format_to_width(
+                    std::format("  \033[1m{}EX0 (Slot 0)\033[0m    : {}", kThemeSky,
+                                get_stage_desc(ps.e_reg(), ps.div_busy_cycles_remaining(),
+                                               "Divider Busy", is_raw_stalled)),
+                    width);
+            case 4:
+                return format_to_width(std::format("  \033[1m{}EX1 (Slot 1)\033[0m    : {}",
+                                                   kThemeSky, get_stage_desc(ps.e1_reg(), 0, "")),
+                                       width);
+            case 5:
+                return format_to_width(
+                    std::format(
+                        "  \033[1m{}MEM (Memory)\033[0m    : {}", kThemeSky,
+                        get_stage_desc(ps.m_reg(), ps.dcache_stall_remaining(), "D-Cache Miss")),
+                    width);
+            case 6:
+                return format_to_width(
+                    std::format("  \033[1m{}WB  (Write-Back)\033[0m: {} | {}", kThemeSky,
+                                short_op_name(ps.w_reg()), short_op_name(ps.w1_reg())),
+                    width);
+            default:
+                return format_to_width("", width);
+        }
+    }
+
+    // Default: 5-Stage Rocket In-Order
     switch (stage_idx) {
         case 0:
-            return section_line("Current Pipeline State", width);
+            return section_line("Current Pipeline State (5-Stage)", width);
         case 1: {
-            // Compact stage diagram showing what's in each stage
             std::string diagram = std::format(
                 "  \033[1;36mIF:{}\033[0m → \033[1;33mID:{}\033[0m → \033[1;32mEX:{}\033[0m → "
                 "\033[1;35mMEM:{}\033[0m → \033[1;34mWB:{}\033[0m",
@@ -817,8 +911,8 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
     int const scan_start = std::max(0, history_size - 14);
     for (int i = scan_start; i < history_size; ++i) {
         auto const& snap = history.at(i);
-        std::array<simrv::pipeline::PipelineCycleSnapshot::StageInfo const*, 5> stages = {
-            &snap.w, &snap.m, &snap.e, &snap.d, &snap.f};
+        std::array<simrv::pipeline::PipelineCycleSnapshot::StageInfo const*, 7> stages = {
+            &snap.w, &snap.w1, &snap.m, &snap.e, &snap.e1, &snap.d, &snap.f};
         for (auto const* stage : stages) {
             if (stage->valid && stage->pc != 0) {
                 InstRef ref{.inst_id = stage->inst_id, .pc = stage->pc, .op_id = stage->op_id};
@@ -887,6 +981,8 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
         std::string pc_str = hex_val(inst.pc);
         std::string line = std::format("  {:>{}} {:<5} |", pc_str, max_pc_width, mnem_5);
 
+        const auto ptype = ps.config.pipeline_type;
+
         for (int i = start_idx; i < history_size; ++i) {
             auto const& snap = history.at(i);
             std::string stage_lbl = " .   ";
@@ -899,20 +995,51 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
                 return stage.pc == inst.pc;
             };
 
-            if (matches(snap.w)) {
-                stage_lbl = "\033[1;37m WB\033[0m  ";
-            } else if (matches(snap.m)) {
-                stage_lbl =
-                    snap.m.stalled ? "\033[38;5;203m MEM*\033[0m" : "\033[1;34m MEM\033[0m ";
-            } else if (matches(snap.e)) {
-                stage_lbl =
-                    snap.e.stalled ? "\033[38;5;203m EX*\033[0m " : "\033[1;31m EX\033[0m  ";
-            } else if (matches(snap.d)) {
-                stage_lbl =
-                    snap.d.stalled ? "\033[38;5;203m ID*\033[0m " : "\033[1;33m ID\033[0m  ";
-            } else if (matches(snap.f)) {
-                stage_lbl =
-                    snap.f.stalled ? "\033[38;5;203m IF*\033[0m " : "\033[1;32m IF\033[0m  ";
+            if (ptype == simrv::pipeline::PipelineType::ThreeStage) {
+                if (matches(snap.w)) {
+                    stage_lbl = "\033[1;37m WB\033[0m  ";
+                } else if (matches(snap.e)) {
+                    stage_lbl =
+                        snap.e.stalled ? "\033[38;5;203m EX*\033[0m " : "\033[1;31m EX\033[0m  ";
+                } else if (matches(snap.f)) {
+                    stage_lbl =
+                        snap.f.stalled ? "\033[38;5;203m IF*\033[0m " : "\033[1;32m IF\033[0m  ";
+                }
+            } else if (ptype == simrv::pipeline::PipelineType::DualIssue) {
+                if (matches(snap.w)) {
+                    stage_lbl = "\033[1;37mWB0\033[0m  ";
+                } else if (matches(snap.w1)) {
+                    stage_lbl = "\033[1;36mWB1\033[0m  ";
+                } else if (matches(snap.m)) {
+                    stage_lbl =
+                        snap.m.stalled ? "\033[38;5;203mMEM*\033[0m " : "\033[1;34mMEM\033[0m  ";
+                } else if (matches(snap.e)) {
+                    stage_lbl =
+                        snap.e.stalled ? "\033[38;5;203mEX0*\033[0m " : "\033[1;31mEX0\033[0m  ";
+                } else if (matches(snap.e1)) {
+                    stage_lbl =
+                        snap.e1.stalled ? "\033[38;5;203mEX1*\033[0m " : "\033[1;33mEX1\033[0m  ";
+                } else if (matches(snap.f)) {
+                    stage_lbl =
+                        snap.f.stalled ? "\033[38;5;203m IF*\033[0m " : "\033[1;32m IF\033[0m  ";
+                }
+            } else {
+                // 5-Stage Rocket
+                if (matches(snap.w)) {
+                    stage_lbl = "\033[1;37m WB\033[0m  ";
+                } else if (matches(snap.m)) {
+                    stage_lbl =
+                        snap.m.stalled ? "\033[38;5;203m MEM*\033[0m" : "\033[1;34m MEM\033[0m ";
+                } else if (matches(snap.e)) {
+                    stage_lbl =
+                        snap.e.stalled ? "\033[38;5;203m EX*\033[0m " : "\033[1;31m EX\033[0m  ";
+                } else if (matches(snap.d)) {
+                    stage_lbl =
+                        snap.d.stalled ? "\033[38;5;203m ID*\033[0m " : "\033[1;33m ID\033[0m  ";
+                } else if (matches(snap.f)) {
+                    stage_lbl =
+                        snap.f.stalled ? "\033[38;5;203m IF*\033[0m " : "\033[1;32m IF\033[0m  ";
+                }
             }
             line += stage_lbl;
         }
@@ -920,6 +1047,12 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
     }
 
     if (logical_row == 7) {
+        if (ps.config.pipeline_type == simrv::pipeline::PipelineType::ThreeStage) {
+            return section_line("IF → ID/EX → MEM/WB   (* = Stalled)", width);
+        }
+        if (ps.config.pipeline_type == simrv::pipeline::PipelineType::DualIssue) {
+            return section_line("IF → EX0/EX1 → MEM → WB0/WB1   (* = Stalled)", width);
+        }
         return section_line("IF → ID → EX → MEM → WB   (* = Stalled)", width);
     }
 

@@ -258,6 +258,7 @@ class Tui {
     auto update_trace_active_cache() -> void;
 
     void execute_footer_action(TuiFooterAction action);
+    void execute_header_action(HeaderHitResult hit);
     auto handle_alt_key(char key, uint8_t byte) -> bool;
     auto handle_arrow_key_sequence() -> bool;
     auto handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool;

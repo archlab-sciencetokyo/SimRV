@@ -99,8 +99,7 @@ set(SIMRV_DISK_SIZE_MB "256" CACHE STRING "Disk size in megabytes")
 set(SIMRV_CORE_COUNT "1" CACHE STRING "Number of CPU cores (experimental)")
 set(SIMRV_SPIKE_PATH "spike" CACHE STRING "Path to Spike binary for lockstep co-simulation (runtime default, not used at build time)")
 
-add_executable(SimRV
-  src/Main.cpp
+set(SIMRV_SOURCES
   src/core/Logger.cpp
   src/core/Machine.cpp
   src/core/BaremetalMachine.cpp
@@ -113,7 +112,10 @@ add_executable(SimRV
   src/core/Tlb.cpp
   src/pipeline/Decoder.cpp
   src/pipeline/PipelineSim.cpp
+  src/pipeline/PipelineFactory.cpp
   src/pipeline/InOrderPipeline.cpp
+  src/pipeline/ThreeStagePipeline.cpp
+  src/pipeline/DualIssuePipeline.cpp
   src/execute/ExecuteUnitInt.cpp
   src/execute/ExecuteUnitB.cpp
   src/execute/ExecuteUnitFloat.cpp
@@ -133,13 +135,30 @@ add_executable(SimRV
   src/memory/MemoryAccess.cpp
   src/memory/MemorySubsystem.cpp
   src/memory/MmioRouter.cpp
+  src/memory/MmioDevice.cpp
   src/memory/Mmu.cpp
   src/memory/TileLinkBus.cpp
   src/memory/CoherenceHub.cpp
-  src/device/Console.cpp
-  src/device/Disk.cpp
-  src/device/VirtioDevice.cpp
-  src/device/Rng.cpp
+  src/device/Aclint.cpp
+  src/device/AIA.cpp
+  src/device/pci/PciDevice.cpp
+  src/device/pci/PcieRootComplex.cpp
+  src/device/pci/VirtioPciDevice.cpp
+  src/device/pci/VirtioPciBlock.cpp
+  src/device/pci/VirtioPciConsole.cpp
+  src/device/pci/VirtioPciGpu.cpp
+  src/device/pci/VirtioPciInput.cpp
+  src/device/pci/VirtioPciRng.cpp
+  src/device/pci/VirtioPciSound.cpp
+  src/device/pci/VirtioPciNet.cpp
+  src/device/mmio/VirtioMmioDevice.cpp
+  src/device/mmio/VirtioMmioBlock.cpp
+  src/device/mmio/VirtioMmioConsole.cpp
+  src/device/mmio/VirtioMmioGpu.cpp
+  src/device/mmio/VirtioMmioInput.cpp
+  src/device/mmio/VirtioMmioRng.cpp
+  src/device/mmio/VirtioMmioSound.cpp
+  src/device/mmio/VirtioMmioNet.cpp
   src/device/Rtc.cpp
   src/device/Uart.cpp
   src/device/Power.cpp
@@ -151,6 +170,7 @@ add_executable(SimRV
   src/tui/TuiTheme.cpp
   src/tui/modals/AddressModal.cpp
   src/tui/modals/BreakpointModal.cpp
+  src/tui/modals/GlossaryModal.cpp
   src/tui/modals/HelpModal.cpp
   src/tui/modals/LoadModal.cpp
   src/tui/modals/MisaModal.cpp
@@ -176,10 +196,12 @@ add_executable(SimRV
   src/debug/BreakpointManager.cpp
   src/util/InstructionExplainer.cpp
   src/util/FdtGenerator.cpp
-  src/device/Framebuffer.cpp
-  src/device/Audio.cpp
-  src/device/InputDevice.cpp
- )
+)
+
+add_executable(SimRV
+  src/Main.cpp
+  ${SIMRV_SOURCES}
+)
 
 target_compile_features(SimRV PRIVATE cxx_std_23)
 
@@ -283,6 +305,7 @@ add_executable(simrv-tui-tests
   src/tui/TuiGuidance.cpp
   src/tui/TuiKeybindings.cpp
   src/tui/TuiTheme.cpp
+  src/tui/modals/GlossaryModal.cpp
   src/tui/modals/HelpModal.cpp
   src/tui/modals/SettingsModal.cpp
   src/tui/modals/SystemConfigModal.cpp
@@ -310,6 +333,41 @@ add_test(NAME tui-framework COMMAND simrv-tui-tests)
 set_tests_properties(tui-framework PROPERTIES LABELS "gate;regress;tui")
 if(SIMRV_ENABLE_TSAN)
   set_property(TEST tui-framework APPEND PROPERTY LABELS "thread")
+endif()
+
+add_executable(simrv-pipeline-model-tests
+  tests/PipelineModelTests.cpp
+  src/core/Logger.cpp
+  src/pipeline/PipelineSim.cpp
+  src/pipeline/PipelineFactory.cpp
+  src/pipeline/InOrderPipeline.cpp
+  src/pipeline/ThreeStagePipeline.cpp
+  src/pipeline/DualIssuePipeline.cpp
+)
+target_compile_features(simrv-pipeline-model-tests PRIVATE cxx_std_23)
+target_compile_definitions(simrv-pipeline-model-tests PRIVATE SIMRV_XLEN=${SIMRV_XLEN})
+target_include_directories(simrv-pipeline-model-tests PRIVATE include)
+target_compile_options(simrv-pipeline-model-tests PRIVATE -Wall -Wextra -Wpedantic)
+if(SIMRV_WARNINGS_AS_ERRORS)
+  target_compile_options(simrv-pipeline-model-tests PRIVATE -Werror)
+endif()
+if(SIMRV_ENABLE_ASAN)
+  target_compile_options(simrv-pipeline-model-tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+  target_link_options(simrv-pipeline-model-tests PRIVATE -fsanitize=address)
+endif()
+if(SIMRV_ENABLE_UBSAN)
+  target_compile_options(simrv-pipeline-model-tests PRIVATE -fsanitize=undefined -fno-omit-frame-pointer)
+  target_link_options(simrv-pipeline-model-tests PRIVATE -fsanitize=undefined)
+endif()
+if(SIMRV_ENABLE_TSAN)
+  target_compile_options(simrv-pipeline-model-tests PRIVATE -fsanitize=thread -fno-omit-frame-pointer)
+  target_link_options(simrv-pipeline-model-tests PRIVATE -fsanitize=thread)
+endif()
+
+add_test(NAME pipeline-models COMMAND simrv-pipeline-model-tests)
+set_tests_properties(pipeline-models PROPERTIES LABELS "gate;regress;pipeline")
+if(SIMRV_ENABLE_TSAN)
+  set_property(TEST pipeline-models APPEND PROPERTY LABELS "thread")
 endif()
 
 add_executable(simrv-core-semantics-tests
@@ -340,6 +398,36 @@ endif()
 
 add_test(NAME core-semantics COMMAND simrv-core-semantics-tests)
 set_tests_properties(core-semantics PROPERTIES LABELS "gate;regress;memory;mmio")
+
+add_executable(simrv-modern-platform-tests
+  tests/ModernPlatformTests.cpp
+  ${SIMRV_SOURCES}
+)
+target_compile_definitions(simrv-modern-platform-tests PRIVATE
+  SIMRV_XLEN=${SIMRV_XLEN}
+  SIMRV_DRAM_SIZE_MB=${SIMRV_DRAM_SIZE_MB}
+  SIMRV_DISK_SIZE_MB=${SIMRV_DISK_SIZE_MB}
+  SIMRV_CORE_COUNT=${SIMRV_CORE_COUNT}
+)
+target_include_directories(simrv-modern-platform-tests PRIVATE
+  include
+  ${CMAKE_CURRENT_BINARY_DIR}/generated
+)
+target_compile_options(simrv-modern-platform-tests PRIVATE -Wall -Wextra -Wpedantic)
+if(SIMRV_WARNINGS_AS_ERRORS)
+  target_compile_options(simrv-modern-platform-tests PRIVATE -Werror)
+endif()
+if(SIMRV_ENABLE_ASAN)
+  target_compile_options(simrv-modern-platform-tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+  target_link_options(simrv-modern-platform-tests PRIVATE -fsanitize=address)
+endif()
+if(SIMRV_ENABLE_UBSAN)
+  target_compile_options(simrv-modern-platform-tests PRIVATE -fsanitize=undefined -fno-omit-frame-pointer)
+  target_link_options(simrv-modern-platform-tests PRIVATE -fsanitize=undefined)
+endif()
+
+add_test(NAME modern-platform COMMAND simrv-modern-platform-tests)
+set_tests_properties(modern-platform PROPERTIES LABELS "gate;regress;device;mmio;pcie;aia")
 
 # Native CLI tests
 add_test(NAME cli-help COMMAND $<TARGET_FILE:SimRV> -h)

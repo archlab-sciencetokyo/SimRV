@@ -23,8 +23,6 @@
 
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/device/Framebuffer.hpp"
-#include "simrv/device/InputDevice.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/tui/TuiFrameRenderer.hpp"
@@ -465,6 +463,7 @@ void Tui::render_build_lines(int left_pane_width, int right_pane_width, int num_
 
 void Tui::render_draw_sixel(int left_pane_width, int right_pane_width, int num_rows,
                             std::string& update_cmds) {
+    (void)right_pane_width;
     if (!modal_.is_active()) {
         for (int i = 0; i < num_rows; ++i) {
             std::string left = left_pane_->render_row(i, left_pane_width);
@@ -483,40 +482,6 @@ void Tui::render_draw_sixel(int left_pane_width, int right_pane_width, int num_r
             }
             update_cmds += std::format("\033[{};1H{}║\033[0m{}{}│\033[0m", i + 4, kThemeBorder,
                                        left, kThemeBorder);
-        }
-    }
-    if (machine_.framebuffer) {
-        int active_w = machine_.framebuffer->get_width();
-        int active_h = machine_.framebuffer->get_height();
-        if (active_w > 1 && active_h > 1) {
-            int avail_cols = right_pane_width - 4;
-            int avail_rows = num_rows - 2;
-            if (avail_cols >= 4 && avail_rows >= 4) {
-                int cell_w = cell_width_px_ > 0 ? cell_width_px_ : 8;
-                int cell_h = cell_height_px_ > 0 ? cell_height_px_ : 16;
-                int target_w = avail_cols * cell_w - 4;
-                int target_h = avail_rows * cell_h - 4;
-                double aspect = static_cast<double>(active_w) / active_h;
-                if (aspect <= 0.1) aspect = 1.6;
-                int fit_h = static_cast<int>(target_w / aspect);
-                if (fit_h > target_h)
-                    target_w = static_cast<int>(target_h * aspect);
-                else
-                    target_h = fit_h;
-                target_h = std::max(6, (target_h / 6) * 6);
-                target_w = std::max(6, target_w);
-                int img_w_cells = (target_w + cell_w - 1) / cell_w;
-                int img_h_cells = (target_h + cell_h - 1) / cell_h;
-                int rem_cols = avail_cols - img_w_cells;
-                int rem_rows = avail_rows - img_h_cells;
-                int right_pane_active_col =
-                    (layout_ == TuiLayout::Split) ? (left_pane_width + 5) : 4;
-                int img_col = right_pane_active_col + std::max(0, rem_cols / 2);
-                int img_row = 5 + std::max(0, rem_rows / 2);
-                update_cmds +=
-                    std::format("\033[{};{}H{}", img_row, img_col,
-                                machine_.framebuffer->get_sixel_escape(target_w, target_h));
-            }
         }
     }
 }
@@ -636,7 +601,18 @@ void Tui::handle_mouse_left_pane(int x, int y, int b) {
         if (y == 4) {
             int const col = x - 2;
             if (col < 0) return;
-            auto tab = left_pane_->get_tab_at_col(col);
+            if (left_pane_->is_hart_tab_click(0, col)) {
+                select_next_hart();
+                return;
+            }
+            auto tab = left_pane_->get_tab_at(0, col);
+            if (tab.has_value()) {
+                set_reg_page(*tab);
+            }
+        } else if (y == 5) {
+            int const col = x - 2;
+            if (col < 0) return;
+            auto tab = left_pane_->get_tab_at(1, col);
             if (tab.has_value()) {
                 if (*tab == TuiRegPage::CACHE && left_pane_->get_page() == TuiRegPage::CACHE) {
                     left_pane_->toggle_cache_inspect_type();
@@ -645,14 +621,9 @@ void Tui::handle_mouse_left_pane(int x, int y, int b) {
                 }
                 left_pane_->set_previous_page(left_pane_->get_page());
                 set_reg_page(*tab);
-            } else {
-                bool const is_regs = (left_pane_->get_page() == TuiRegPage::GPR ||
-                                      left_pane_->get_page() == TuiRegPage::FPR ||
-                                      left_pane_->get_page() == TuiRegPage::VEC);
-                if (col < (is_regs ? 10 : 4)) cycle_reg_page();
             }
-        } else if (y >= 5) {
-            int logical_row = (y - 5) + left_pane_->get_scroll_offset();
+        } else if (y >= 6) {
+            int logical_row = (y - 6) + left_pane_->get_scroll_offset();
             auto page = left_pane_->get_page();
             if (page == TuiRegPage::CACHE) {
                 if (logical_row == 0 || logical_row == 4) {
@@ -853,81 +824,87 @@ void Tui::cycle_reg_page() {
     bool has_d = (machine_.cpu.state().misa & (1ULL << ('d' - 'a'))) != 0;
     bool has_v = (machine_.cpu.state().misa & (1ULL << ('v' - 'a'))) != 0;
     TuiRegPage rp = left_pane_->get_page();
+    TuiCategoryGroup grp = get_category_group(rp);
 
-    // If currently on a tool tab, jump back to GPR
-    if (rp != TuiRegPage::GPR && rp != TuiRegPage::FPR && rp != TuiRegPage::VEC) {
-        rp = TuiRegPage::GPR;
-    } else {
-        // Cycle within register sub-views only
-        switch (rp) {
-            case TuiRegPage::GPR:
-                if (has_f || has_d)
-                    rp = TuiRegPage::FPR;
-                else if (has_v)
-                    rp = TuiRegPage::VEC;
-                // else stay on GPR (no fp/vec extensions)
-                break;
-            case TuiRegPage::FPR:
-                if (has_v)
-                    rp = TuiRegPage::VEC;
-                else
+    switch (grp) {
+        case TuiCategoryGroup::Regs:
+            switch (rp) {
+                case TuiRegPage::GPR:
+                    if (has_f || has_d)
+                        rp = TuiRegPage::FPR;
+                    else if (has_v)
+                        rp = TuiRegPage::VEC;
+                    break;
+                case TuiRegPage::FPR:
+                    if (has_v)
+                        rp = TuiRegPage::VEC;
+                    else
+                        rp = TuiRegPage::GPR;
+                    break;
+                case TuiRegPage::VEC:
+                default:
                     rp = TuiRegPage::GPR;
-                break;
-            case TuiRegPage::VEC:
-            default:
-                rp = TuiRegPage::GPR;
-                break;
-        }
+                    break;
+            }
+            break;
+        case TuiCategoryGroup::Memory:
+            switch (rp) {
+                case TuiRegPage::STACK:
+                    rp = machine_.s_cycle_accurate ? TuiRegPage::CACHE : TuiRegPage::TLB;
+                    break;
+                case TuiRegPage::CACHE:
+                    rp = TuiRegPage::TLB;
+                    break;
+                case TuiRegPage::TLB:
+                    rp = TuiRegPage::BUS;
+                    break;
+                case TuiRegPage::BUS:
+                default:
+                    rp = TuiRegPage::STACK;
+                    break;
+            }
+            break;
+        case TuiCategoryGroup::Pipeline:
+            switch (rp) {
+                case TuiRegPage::PIPELINE:
+                    rp = machine_.s_cycle_accurate ? TuiRegPage::BPRED : TuiRegPage::PIPELINE;
+                    break;
+                case TuiRegPage::BPRED:
+                    rp = TuiRegPage::HAZARD;
+                    break;
+                case TuiRegPage::HAZARD:
+                default:
+                    rp = TuiRegPage::PIPELINE;
+                    break;
+            }
+            break;
+        case TuiCategoryGroup::Tools:
+            rp = (rp == TuiRegPage::EXPLAIN) ? TuiRegPage::TRACE : TuiRegPage::EXPLAIN;
+            break;
     }
-    left_pane_->set_page(rp);
-    update_trace_active_cache();
-    render(true);
+
+    set_reg_page(rp);
 }
 
 void Tui::cycle_tool_page() {
-    TuiRegPage rp = left_pane_->get_page();
-    switch (rp) {
-        case TuiRegPage::GPR:
-        case TuiRegPage::FPR:
-        case TuiRegPage::VEC:
-            rp = TuiRegPage::PIPELINE;
+    TuiCategoryGroup const grp = get_category_group(left_pane_->get_page());
+    TuiCategoryGroup next_grp = TuiCategoryGroup::Regs;
+    switch (grp) {
+        case TuiCategoryGroup::Regs:
+            next_grp = TuiCategoryGroup::Memory;
             break;
-        case TuiRegPage::PIPELINE:
-            if (machine_.s_cycle_accurate) {
-                rp = TuiRegPage::CACHE;
-            } else {
-                rp = TuiRegPage::TLB;
-            }
+        case TuiCategoryGroup::Memory:
+            next_grp = TuiCategoryGroup::Pipeline;
             break;
-        case TuiRegPage::CACHE:
-            rp = machine_.s_cycle_accurate ? TuiRegPage::BPRED : TuiRegPage::TLB;
+        case TuiCategoryGroup::Pipeline:
+            next_grp = TuiCategoryGroup::Tools;
             break;
-        case TuiRegPage::BPRED:
-            rp = machine_.s_cycle_accurate ? TuiRegPage::HAZARD : TuiRegPage::TLB;
-            break;
-        case TuiRegPage::HAZARD:
-            rp = TuiRegPage::TLB;
-            break;
-        case TuiRegPage::TLB:
-            rp = TuiRegPage::BUS;
-            break;
-        case TuiRegPage::BUS:
-            rp = TuiRegPage::TRACE;
-            break;
-        case TuiRegPage::TRACE:
-            rp = TuiRegPage::EXPLAIN;
-            break;
-        case TuiRegPage::EXPLAIN:
-            rp = TuiRegPage::STACK;
-            break;
-        case TuiRegPage::STACK:
+        case TuiCategoryGroup::Tools:
         default:
-            rp = TuiRegPage::GPR;
+            next_grp = TuiCategoryGroup::Regs;
             break;
     }
-    left_pane_->set_page(rp);
-    update_trace_active_cache();
-    render(true);
+    set_reg_page(get_default_page_for_group(next_grp, machine_.s_cycle_accurate));
 }
 
 void Tui::set_reg_page(TuiRegPage page) {
@@ -1000,14 +977,7 @@ void Tui::toggle_run_state() {
 }
 
 void Tui::write_guest_input(uint8_t byte) {
-    // The platform's chosen console is the 16550 UART (ttyS0). Do not duplicate input into the
-    // optional VirtIO console: doing so makes one keyboard appear as two independent terminals and
-    // leaves stale input queued if a VirtIO driver is enabled later.
     if (machine_.uart) machine_.uart->push_rx_byte(normalize_guest_terminal_byte(byte));
-    if (machine_.input_device) {
-        machine_.input_device->push_key(static_cast<Word>(byte) | (1u << 31));
-        machine_.input_device->push_key(static_cast<Word>(byte));
-    }
 }
 
 void Tui::update_trace_active_cache() {
@@ -1365,6 +1335,59 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
             close_modal();
         return true;
     }
+    if (mtype == ModalType::Glossary) {
+        if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q' ||
+            key == simrv::tui::TuiKey::QuestionMark) {
+            close_modal();
+            return true;
+        }
+        if (key == simrv::tui::TuiKey::Tab || byte == 'l' || byte == 'L') {
+            modal_.move_glossary_topic(1);
+            render(true);
+            return true;
+        }
+        if (byte >= '1' && byte <= '6') {
+            modal_.set_glossary_topic(byte - '1');
+            render(true);
+            return true;
+        }
+        if (byte == ' ' || key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+            modal_.move_glossary_topic(1);
+            render(true);
+            return true;
+        }
+        return true;
+    }
+    if (mtype == ModalType::PlatformChangeConfirm) {
+        if (byte == 'r' || byte == 'R' || key == simrv::tui::TuiKey::Enter ||
+            key == simrv::tui::TuiKey::Newline) {
+            const auto& draft = modal_.get_pending_platform_draft();
+            machine_.s_platform_profile =
+                static_cast<simrv::core::PlatformProfile>(draft.platform_profile);
+            machine_.s_net_mode = draft.net_mode;
+            machine_.load_program_binary(machine_.s_fn_memimg);
+            close_modal();
+            modal_.open_notice(
+                "SIMULATOR RELOADED",
+                "Platform profile applied and simulation restarted with new Device Tree.", false);
+            render(true);
+            return true;
+        }
+        if (byte == 'd' || byte == 'D' || byte == ' ') {
+            close_modal();
+            modal_.open_notice(
+                "PLATFORM CHANGE DISCARDED",
+                "Platform profile change was discarded and previous topology retained.", false);
+            render(true);
+            return true;
+        }
+        if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
+            open_modal(ModalType::Settings);
+            render(true);
+            return true;
+        }
+        return true;
+    }
 
     if (byte == 27 || key == simrv::tui::TuiKey::Esc) {
         if (get_active_modal() != ModalType::LoadBinary || !machine_.s_fn_memimg.empty())
@@ -1494,6 +1517,8 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
             open_modal(ModalType::SetSpeed);
             return true;
         case simrv::tui::TuiKey::QuestionMark:
+            open_modal(ModalType::Glossary);
+            return true;
         case simrv::tui::TuiKey::h:
         case simrv::tui::TuiKey::H:
             open_modal(ModalType::Help);
@@ -1639,6 +1664,60 @@ void Tui::toggle_learn_mode() {
     render(true);
 }
 
+void Tui::execute_header_action(HeaderHitResult hit) {
+    switch (hit.action) {
+        case HeaderAction::RunPause:
+            if (machine_.is_shutdown_) {
+                machine_.request_reboot();
+            } else if (paused_) {
+                unpause_loop();
+            } else {
+                pause_loop();
+            }
+            break;
+        case HeaderAction::ToggleMode:
+            open_modal(ModalType::ConfigureSystem);
+            break;
+        case HeaderAction::SelectHart:
+            if (machine_.num_harts() > 1) {
+                selected_hart_ = hit.hart_index % machine_.num_harts();
+                if (left_pane_) {
+                    left_pane_->set_selected_hart(selected_hart_);
+                    left_pane_->update_cache();
+                }
+                set_status_override(
+                    std::format("Active telemetry switched to Hart {}", selected_hart_));
+                render(true);
+            }
+            break;
+        case HeaderAction::TogglePanelMode:
+            cycle_right_panel_mode();
+            break;
+        case HeaderAction::ToggleAttached:
+            toggle_run_state();
+            break;
+        case HeaderAction::SetSpeed:
+            open_modal(ModalType::SetSpeed);
+            break;
+        case HeaderAction::OpenSettings:
+            open_modal(ModalType::Settings);
+            break;
+        case HeaderAction::OpenGlossary:
+            open_modal(ModalType::Glossary);
+            break;
+        case HeaderAction::ToggleTheme:
+            cycle_theme_style();
+            render(true);
+            break;
+        case HeaderAction::Reboot:
+            machine_.request_reboot();
+            break;
+        case HeaderAction::None:
+        default:
+            break;
+    }
+}
+
 void Tui::execute_footer_action(TuiFooterAction action) {
     switch (action) {
         case TuiFooterAction::Reboot:
@@ -1733,6 +1812,9 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             break;
         case TuiFooterAction::CycleLayout:
             cycle_layout();
+            break;
+        case TuiFooterAction::ToggleLearn:
+            toggle_learn_mode();
             break;
         case TuiFooterAction::TogglePanel:
             cycle_right_panel_mode();
@@ -1846,6 +1928,11 @@ auto Tui::handle_alt_key(char key, uint8_t byte) -> bool {
 
 auto Tui::handle_arrow_key_sequence() -> bool {
     if (esc_buf_ == "\033[A" || esc_buf_ == "\033OA") {
+        if (get_active_modal() == ModalType::Glossary) {
+            modal_.scroll_glossary_content(-2);
+            render(true);
+            return true;
+        }
         if (get_active_modal() == ModalType::Settings) {
             modal_.move_settings_cursor(-1);
             render(true);
@@ -1872,6 +1959,11 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             return true;
         }
     } else if (esc_buf_ == "\033[B" || esc_buf_ == "\033OB") {
+        if (get_active_modal() == ModalType::Glossary) {
+            modal_.scroll_glossary_content(2);
+            render(true);
+            return true;
+        }
         if (get_active_modal() == ModalType::Settings) {
             modal_.move_settings_cursor(1);
             render(true);
@@ -1898,6 +1990,11 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             return true;
         }
     } else if (esc_buf_ == "\033[C" || esc_buf_ == "\033OC") {
+        if (get_active_modal() == ModalType::Glossary) {
+            modal_.move_glossary_topic(1);
+            render(true);
+            return true;
+        }
         if (get_active_modal() == ModalType::Settings) {
             modal_.adjust_setting_at_cursor(1);
             render(true);
@@ -1919,6 +2016,11 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             return true;
         }
     } else if (esc_buf_ == "\033[D" || esc_buf_ == "\033OD") {
+        if (get_active_modal() == ModalType::Glossary) {
+            modal_.move_glossary_topic(-1);
+            render(true);
+            return true;
+        }
         if (get_active_modal() == ModalType::Settings) {
             modal_.adjust_setting_at_cursor(-1);
             render(true);
@@ -1940,9 +2042,19 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             return true;
         }
     } else if (esc_buf_ == "\033[5~") {
+        if (get_active_modal() == ModalType::Glossary) {
+            modal_.scroll_glossary_content(-5);
+            render(true);
+            return true;
+        }
         scroll(-10);
         return true;
     } else if (esc_buf_ == "\033[6~") {
+        if (get_active_modal() == ModalType::Glossary) {
+            modal_.scroll_glossary_content(5);
+            render(true);
+            return true;
+        }
         scroll(10);
         return true;
     } else if (esc_buf_ == "\033[H" || esc_buf_ == "\033[1~") {
@@ -2000,7 +2112,31 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
 
         if (esc_buf_.back() == 'M' && (button == 0 || button == 1 || button == 2)) {
             if (is_modal_active()) {
-                close_modal();
+                if (button == 0) {
+                    struct winsize w_m{};
+                    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w_m);
+                    int term_wm = w_m.ws_col > 0 ? w_m.ws_col : 80;
+                    int term_hm = w_m.ws_row > 0 ? w_m.ws_row : 24;
+                    auto res = modal_.handle_click(x, y, term_wm, term_hm);
+                    if (res == TuiModal::ModalClickResult::Closed) {
+                        close_modal();
+                    } else if (res == TuiModal::ModalClickResult::ReloadRequested) {
+                        close_modal();
+                        auto draft = modal_.get_pending_platform_draft();
+                        machine_.s_platform_profile =
+                            (draft.platform_profile == 0)
+                                ? simrv::core::PlatformProfile::Pcie
+                                : ((draft.platform_profile == 1)
+                                       ? simrv::core::PlatformProfile::Mmio
+                                       : simrv::core::PlatformProfile::Hybrid);
+                        machine_.request_reboot();
+                    } else if (res == TuiModal::ModalClickResult::DiscardRequested) {
+                        close_modal();
+                    } else if (res == TuiModal::ModalClickResult::Submit) {
+                        submit_modal();
+                    }
+                    render(true);
+                }
                 return true;
             }
         }
@@ -2009,6 +2145,11 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
             int term_w = w.ws_col > 0 ? w.ws_col : 80;
             if (status_bar_) {
+                auto hit = status_bar_->get_header_action_at_col(x, term_w);
+                if (hit.action != HeaderAction::None) {
+                    execute_header_action(hit);
+                    return true;
+                }
                 if (status_bar_->is_pos_on_status_badge(x, term_w)) {
                     if (machine_.is_shutdown_) {
                         machine_.request_reboot();
@@ -2043,16 +2184,17 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             }
         }
 
-        if (esc_buf_.back() == 'M' && button == 0 && y == 4) {
+        if (esc_buf_.back() == 'M' && button == 0 && (y == 4 || y == 5)) {
             int pane_w = get_pane_width();
             if (x >= 2 && x <= pane_w + 1) {
                 int col = x - 2;
                 if (left_pane_) {
-                    if (left_pane_->is_hart_tab_click(col)) {
+                    int tier = (y == 4) ? 0 : 1;
+                    if (tier == 0 && left_pane_->is_hart_tab_click(0, col)) {
                         select_next_hart();
                         return true;
                     }
-                    auto tab_opt = left_pane_->get_tab_at_col(col);
+                    auto tab_opt = left_pane_->get_tab_at(tier, col);
                     if (tab_opt.has_value()) {
                         if (*tab_opt == TuiRegPage::CACHE &&
                             left_pane_->get_page() == TuiRegPage::CACHE) {
@@ -2061,7 +2203,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                         } else {
                             set_reg_page(tab_opt.value());
                         }
-                    } else {
+                    } else if (tier == 0) {
                         cycle_reg_page();
                     }
                 }

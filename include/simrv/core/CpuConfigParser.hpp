@@ -55,6 +55,17 @@ inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuConfig&
 
         try {
             // Handle string-valued keys first
+            if (key == "pipeline_type" || key == "pipeline") {
+                if (val_str == "3stage" || val_str == "3" || val_str == "embedded" ||
+                    val_str == "ibex") {
+                    config.pipeline_type = simrv::pipeline::PipelineType::ThreeStage;
+                } else if (val_str == "dual" || val_str == "dualissue" || val_str == "swerv") {
+                    config.pipeline_type = simrv::pipeline::PipelineType::DualIssue;
+                } else {
+                    config.pipeline_type = simrv::pipeline::PipelineType::FiveStage;
+                }
+                continue;
+            }
             if (key == "bp_type") {
                 using BPT = simrv::pipeline::BranchPredictorType;
                 if (val_str == "static-not-taken")

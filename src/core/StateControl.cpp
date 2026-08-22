@@ -12,8 +12,6 @@
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Sbi.hpp"
-#include "simrv/device/Console.hpp"
-#include "simrv/device/Disk.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Constants.hpp"
@@ -232,22 +230,9 @@ void PlicMmio::mmio_write(Address offset, Word wdata) {
                 // Complete: indicates the handler has finished with the IRQ
                 if (plic_claim.at(ctx_idx) == wdata && wdata != 0) {
                     plic_claim.at(ctx_idx) = 0;
-                    if (cpu_.machine_) {
-                        if (wdata == static_cast<Word>(simrv::virtio::kDiskIrq) &&
-                            cpu_.machine_->disk && cpu_.machine_->disk->InterruptStatus != 0) {
-                            InterruptController::setIrq(*this, static_cast<int>(wdata), 1);
-                        } else if (wdata == static_cast<Word>(simrv::virtio::kConsoleIrq) &&
-                                   cpu_.machine_->console &&
-                                   cpu_.machine_->console->InterruptStatus != 0) {
-                            InterruptController::setIrq(*this, static_cast<int>(wdata), 1);
-                        } else if (wdata == static_cast<Word>(simrv::virtio::kRngIrq) &&
-                                   cpu_.machine_->rng &&
-                                   cpu_.machine_->rng->InterruptStatus != 0) {
-                            InterruptController::setIrq(*this, static_cast<int>(wdata), 1);
-                        } else if (wdata == 3 && cpu_.machine_->uart &&
-                                   cpu_.machine_->uart->is_interrupt_pending()) {
-                            InterruptController::setIrq(*this, static_cast<int>(wdata), 1);
-                        }
+                    if (cpu_.machine_ && wdata == 3 && cpu_.machine_->uart &&
+                        cpu_.machine_->uart->is_interrupt_pending()) {
+                        InterruptController::setIrq(*this, static_cast<int>(wdata), 1);
                     }
                 }
             }
@@ -336,7 +321,8 @@ auto ClintMmio::mmio_read(Address offset) const -> Word {
     if (offset < 0x4000 || (offset >= 0x80000 && offset < 0x84000)) {
         const size_t hart_id = (offset >= 0x80000) ? ((offset - 0x80000) / 4) : (offset / 4);
         if (cpu_.machine_ && hart_id < cpu_.machine_->num_harts()) {
-            return (cpu_.machine_->hart(hart_id).state().mip & enum_mask(MipBit::Msip)) != 0 ? 1 : 0;
+            return (cpu_.machine_->hart(hart_id).state().mip & enum_mask(MipBit::Msip)) != 0 ? 1
+                                                                                             : 0;
         }
         if (hart_id == 0) {
             return (cpu_.state().mip & enum_mask(MipBit::Msip)) != 0 ? 1 : 0;
@@ -346,8 +332,9 @@ auto ClintMmio::mmio_read(Address offset) const -> Word {
     if (offset >= kClintMtimecmpOffset && offset < kClintMtimecmpOffset + (kMaxClintHarts * 8)) {
         const size_t hart_id = (offset - kClintMtimecmpOffset) / 8;
         const bool is_hi = ((offset - kClintMtimecmpOffset) % 8) == 4;
-        Counter const cmp = (hart_id == 0) ? mtimecmp.load(std::memory_order_relaxed)
-                                           : hart_mtimecmp.at(hart_id).load(std::memory_order_relaxed);
+        Counter const cmp = (hart_id == 0)
+                                ? mtimecmp.load(std::memory_order_relaxed)
+                                : hart_mtimecmp.at(hart_id).load(std::memory_order_relaxed);
         return static_cast<Word>(is_hi ? ((cmp >> 32) & kWord32Mask) : (cmp & kWord32Mask));
     }
     if (offset == kClintMtimeOffset || offset == 0x7ff8) {
@@ -391,10 +378,10 @@ void ClintMmio::mmio_write(Address offset, Word wdata) {
         } else {
             hart_supervisor_timer.at(hart_id).store(false, std::memory_order_release);
             const Counter cur = hart_mtimecmp.at(hart_id).load(std::memory_order_relaxed);
-            hart_mtimecmp.at(hart_id).store(
-                is_hi ? ((cur & kWord32Mask) | (wdata_64 << kWord32Shift))
-                      : ((cur & ~kWord32Mask) | wdata_64),
-                std::memory_order_release);
+            hart_mtimecmp.at(hart_id).store(is_hi
+                                                ? ((cur & kWord32Mask) | (wdata_64 << kWord32Shift))
+                                                : ((cur & ~kWord32Mask) | wdata_64),
+                                            std::memory_order_release);
             if (cpu_.machine_ && hart_id < cpu_.machine_->num_harts()) {
                 cpu_.machine_->hart(hart_id).evaluate_timer_interrupt();
             }

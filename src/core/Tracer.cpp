@@ -20,9 +20,8 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/device/Console.hpp"
-#include "simrv/device/Disk.hpp"
-#include "simrv/device/Virtio.hpp"
+#include "simrv/device/pci/VirtioPciBlock.hpp"
+#include "simrv/device/pci/VirtioPciConsole.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/util/FormatUtil.hpp"
@@ -65,9 +64,6 @@ void Tracer::init_dlog(bool dlog_mode) {
 void Tracer::dump_init_artifacts() {
     auto* cpu = &machine_.cpu;
     auto* ram = machine_.mmem;
-    auto* console = machine_.console.get();
-    auto* disk = machine_.disk.get();
-    auto* sector = disk->sector;
 
     {
         std::ofstream out("trace/init_mem.txt");
@@ -75,15 +71,6 @@ void Tracer::dump_init_artifacts() {
             out << std::hex << static_cast<unsigned>(std::to_integer<uint8_t>(ram[i])) << '\n';
         }
         simrv::log::info("file init_mem.txt was generated after {} cycle",
-                         static_cast<Counter>(cpu->clint_mmio.mtime.load()));
-    }
-
-    if (sector != nullptr) {
-        std::ofstream out("trace/init_dsk.txt");
-        for (Word i = 0; i < simrv::virtio::kDiskSize; ++i) {
-            out << std::hex << static_cast<unsigned>(std::to_integer<uint8_t>(sector[i])) << '\n';
-        }
-        simrv::log::info("file init_dsk.txt was generated after {} cycle",
                          static_cast<Counter>(cpu->clint_mmio.mtime.load()));
     }
 
@@ -161,38 +148,15 @@ void Tracer::dump_init_artifacts() {
         std::println(out, "mmu.TLB_data_w.mem[{}][21:0] =22'h{:06x};", i, entry.p_addr >> 10);
     }
 
-    write_32("mmu.console.QueueSel       ", console->QueueSel);
-    write_32("mmu.console.QueueNum       ", console->QueueNum);
-    for (Word i = 0; i < simrv::virtio::kConsoleMaxQueueNum; ++i) {
-        std::print(out, "mmu.console.Queue[{}*9+0] =32'h{:08x};\n", i, console->Queue[i].Ready);
-        std::print(out, "mmu.console.Queue[{}*9+1] =32'h{:08x};\n", i, console->Queue[i].Notify);
-        std::print(out, "mmu.console.Queue[{}*9+2] =32'h{:08x};\n", i, console->Queue[i].DescLow);
-        std::print(out, "mmu.console.Queue[{}*9+3] =32'h{:08x};\n", i, console->Queue[i].DescHigh);
-        std::print(out, "mmu.console.Queue[{}*9+4] =32'h{:08x};\n", i, console->Queue[i].AvailLow);
-        std::print(out, "mmu.console.Queue[{}*9+5] =32'h{:08x};\n", i, console->Queue[i].AvailHigh);
-        std::print(out, "mmu.console.Queue[{}*9+6] =32'h{:08x};\n", i, console->Queue[i].UsedLow);
-        std::print(out, "mmu.console.Queue[{}*9+7] =32'h{:08x};\n", i, console->Queue[i].UsedHigh);
-        std::print(out, "mmu.console.Queue[{}*9+8] =32'h{:08x};\n", i,
-                   console->Queue[i].last_avail_idx);
+    if (machine_.pci_console) {
+        write_32("pcie.virtio_console.status", machine_.pci_console->device_status());
+        write_32("pcie.virtio_console.isr   ", machine_.pci_console->isr_status());
     }
-    write_32("mmu.console.InterruptStatus", console->InterruptStatus);
-    write_32("mmu.console.Status         ", console->Status);
-
-    write_32("mmu.disk.QueueSel       ", disk->QueueSel);
-    write_32("mmu.disk.QueueNum       ", disk->QueueNum);
-    for (Word i = 0; i < simrv::virtio::kDiskMaxQueueNum; ++i) {
-        std::print(out, "mmu.disk.Queue[{}*9+0] =32'h{:08x};\n", i, disk->Queue[i].Ready);
-        std::print(out, "mmu.disk.Queue[{}*9+1] =32'h{:08x};\n", i, disk->Queue[i].Notify);
-        std::print(out, "mmu.disk.Queue[{}*9+2] =32'h{:08x};\n", i, disk->Queue[i].DescLow);
-        std::print(out, "mmu.disk.Queue[{}*9+3] =32'h{:08x};\n", i, disk->Queue[i].DescHigh);
-        std::print(out, "mmu.disk.Queue[{}*9+4] =32'h{:08x};\n", i, disk->Queue[i].AvailLow);
-        std::print(out, "mmu.disk.Queue[{}*9+5] =32'h{:08x};\n", i, disk->Queue[i].AvailHigh);
-        std::print(out, "mmu.disk.Queue[{}*9+6] =32'h{:08x};\n", i, disk->Queue[i].UsedLow);
-        std::print(out, "mmu.disk.Queue[{}*9+7] =32'h{:08x};\n", i, disk->Queue[i].UsedHigh);
-        std::print(out, "mmu.disk.Queue[{}*9+8] =32'h{:08x};\n", i, disk->Queue[i].last_avail_idx);
+    if (machine_.pci_disk) {
+        write_32("pcie.virtio_disk.status   ", machine_.pci_disk->device_status());
+        write_32("pcie.virtio_disk.isr      ", machine_.pci_disk->isr_status());
+        write_64("pcie.virtio_disk.capacity ", machine_.pci_disk->capacity_sectors());
     }
-    write_32("mmu.disk.InterruptStatus", disk->InterruptStatus);
-    write_32("mmu.disk.Status         ", disk->Status);
 
     simrv::log::info("file init_reg.txt was generated after {} cycle",
                      static_cast<Counter>(cpu->clint_mmio.mtime.load()));
@@ -259,8 +223,8 @@ void Tracer::print_summary() {
             const char* priv_str = (h.state().priv == PrivilegeLevel::Machine)      ? "M"
                                    : (h.state().priv == PrivilegeLevel::Supervisor) ? "S"
                                                                                     : "U";
-            simrv::log::info("Hart {:<2} [mode {:>1}, PC 0x{:016x}] Executed Insns : {:>12}  ({})", i,
-                             priv_str, h.state().pc, format_scaled(h.e_icount),
+            simrv::log::info("Hart {:<2} [mode {:>1}, PC 0x{:016x}] Executed Insns : {:>12}  ({})",
+                             i, priv_str, h.state().pc, format_scaled(h.e_icount),
                              format_with_commas(h.e_icount));
         }
     }

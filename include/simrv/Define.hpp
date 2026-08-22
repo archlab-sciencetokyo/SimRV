@@ -124,6 +124,5 @@ constexpr PrivilegeLevel kPrivMachine = PrivilegeLevel::Machine;
 
 // Include split domain headers
 #include "simrv/core/CsrTypes.hpp"  // IWYU pragma: export
-#include "simrv/device/Virtio.hpp"  // IWYU pragma: export
 #include "simrv/isa/Common.hpp"     // IWYU pragma: export
 #include "simrv/memory/Mmu.hpp"     // IWYU pragma: export

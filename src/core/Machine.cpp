@@ -11,9 +11,11 @@
 #include <print>
 
 #include "simrv/core/Logger.hpp"
-#include "simrv/device/InputDevice.hpp"
+#include "simrv/device/AIA.hpp"
+#include "simrv/device/Aclint.hpp"
 #include "simrv/device/Power.hpp"
 #include "simrv/device/Uart.hpp"
+#include "simrv/device/pci/PcieRootComplex.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Types.hpp"

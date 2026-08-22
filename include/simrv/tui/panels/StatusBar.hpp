@@ -18,6 +18,25 @@ class Machine;
 
 namespace simrv::tui {
 
+enum class HeaderAction : uint8_t {
+    None,
+    RunPause,
+    SetSpeed,
+    ToggleMode,
+    SelectHart,
+    TogglePanelMode,
+    ToggleAttached,
+    OpenSettings,
+    OpenGlossary,
+    ToggleTheme,
+    Reboot
+};
+
+struct HeaderHitResult {
+    HeaderAction action = HeaderAction::None;
+    size_t hart_index = 0;
+};
+
 class StatusBar : public TuiWidget {
    public:
     explicit StatusBar(simrv::core::Machine& machine);
@@ -39,6 +58,8 @@ class StatusBar : public TuiWidget {
     [[nodiscard]] auto is_pos_on_status_badge(int x, int width) const -> bool;
     [[nodiscard]] auto is_pos_on_right_panel_mode(int x) const -> bool;
     [[nodiscard]] auto is_pos_on_right_panel_attached(int x) const -> bool;
+    [[nodiscard]] auto get_header_action_at_col(int col, int terminal_width) const
+        -> HeaderHitResult;
     [[nodiscard]] auto get_footer_action_at_col(int col, int row_idx, int terminal_width) const
         -> std::optional<TuiFooterAction>;
     [[nodiscard]] auto render_row(int row_idx, int width) -> std::string override;

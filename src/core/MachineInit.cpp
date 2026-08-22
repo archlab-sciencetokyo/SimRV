@@ -15,14 +15,26 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
-#include "simrv/device/Console.hpp"
-#include "simrv/device/Disk.hpp"
-#include "simrv/device/InputDevice.hpp"
+#include "simrv/device/AIA.hpp"
+#include "simrv/device/Aclint.hpp"
 #include "simrv/device/Power.hpp"
-#include "simrv/device/Rng.hpp"
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
-#include "simrv/device/Virtio.hpp"
+#include "simrv/device/mmio/VirtioMmioBlock.hpp"
+#include "simrv/device/mmio/VirtioMmioConsole.hpp"
+#include "simrv/device/mmio/VirtioMmioGpu.hpp"
+#include "simrv/device/mmio/VirtioMmioInput.hpp"
+#include "simrv/device/mmio/VirtioMmioNet.hpp"
+#include "simrv/device/mmio/VirtioMmioRng.hpp"
+#include "simrv/device/mmio/VirtioMmioSound.hpp"
+#include "simrv/device/pci/PcieRootComplex.hpp"
+#include "simrv/device/pci/VirtioPciBlock.hpp"
+#include "simrv/device/pci/VirtioPciConsole.hpp"
+#include "simrv/device/pci/VirtioPciGpu.hpp"
+#include "simrv/device/pci/VirtioPciInput.hpp"
+#include "simrv/device/pci/VirtioPciNet.hpp"
+#include "simrv/device/pci/VirtioPciRng.hpp"
+#include "simrv/device/pci/VirtioPciSound.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/util/FdtGenerator.hpp"
@@ -232,15 +244,9 @@ auto Machine::initialize() -> int {
         }
     }
 
-    disk = std::make_unique<simrv::device::Disk>(*this);
-    console = std::make_unique<simrv::device::Console>(*this);
-    rng = std::make_unique<simrv::device::Rng>(*this);
     rtc = std::make_unique<simrv::Rtc>(*this);
     uart = std::make_unique<simrv::device::Uart>(*this);
     power = std::make_unique<simrv::device::PowerMmio>(*this);
-    framebuffer = std::make_unique<simrv::device::Framebuffer>(*this);
-    input_device = std::make_unique<simrv::device::InputDevice>(*this);
-    audio = std::make_unique<simrv::device::Audio>(*this);
     if (s_tuimode) {
         tui = std::make_unique<simrv::tui::Tui>(*this);
     }
@@ -251,47 +257,85 @@ auto Machine::initialize() -> int {
         effective_dram_size,
         sizeof(Byte))));  // NOLINT(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory)
     if (mmem_owner_ == nullptr) {
-        simrv::log::error("Failed to allocate main memory ({} bytes)",
-                          effective_dram_size);
+        simrv::log::error("Failed to allocate main memory ({} bytes)", effective_dram_size);
         return 1;
     }
     mmem = mmem_owner_.get();
-    console->mmem = mmem;
-    disk->mmem = mmem;
-    rng->mmem = mmem;
-
-    console_queue_owner_.assign(simrv::virtio::kConsoleMaxQueueNum, simrv::virtio::QueueState{});
-    disk_queue_owner_.assign(simrv::virtio::kDiskMaxQueueNum, simrv::virtio::QueueState{});
-    rng_queue_owner_.assign(simrv::virtio::kRngMaxQueueNum, simrv::virtio::QueueState{});
-    console->Queue = console_queue_owner_.data();
-    console->QueueSel = 0;
-    console->QueueNum = 0;
-    console->InterruptStatus = 0;
-    console->Status = 0;
-
-    disk->Queue = disk_queue_owner_.data();
-    disk->QueueSel = 0;
-    disk->QueueNum = 0;
-    disk->InterruptStatus = 0;
-    disk->Status = 0;
-
-    rng->Queue = rng_queue_owner_.data();
-    rng->QueueSel = 0;
-    rng->QueueNum = 0;
-    rng->InterruptStatus = 0;
-    rng->Status = 0;
 
     memory_.initialize_mmu();
 
-    memory_.system_bus().add_node(console.get());
-    memory_.system_bus().add_node(disk.get());
-    memory_.system_bus().add_node(rng.get());
+    aclint_mtimer = std::make_unique<simrv::device::AclintMtimer>(this);
+    aclint_mswi = std::make_unique<simrv::device::AclintMswi>(this);
+    imsic_m = std::make_unique<simrv::device::Imsic>(this, simrv::device::Imsic::Privilege::Machine,
+                                                     simrv::mmio::kImsicMBaseAddress,
+                                                     simrv::mmio::kImsicMSize);
+    imsic_s = std::make_unique<simrv::device::Imsic>(
+        this, simrv::device::Imsic::Privilege::Supervisor, simrv::mmio::kImsicSBaseAddress,
+        simrv::mmio::kImsicSSize);
+    aplic_m = std::make_unique<simrv::device::Aplic>(this, simrv::device::Aplic::Privilege::Machine,
+                                                     simrv::mmio::kAplicMBaseAddress,
+                                                     simrv::mmio::kAplicMSize, imsic_m.get());
+    aplic_s = std::make_unique<simrv::device::Aplic>(
+        this, simrv::device::Aplic::Privilege::Supervisor, simrv::mmio::kAplicSBaseAddress,
+        simrv::mmio::kAplicSSize, imsic_s.get());
+    const bool enable_pcie = (s_platform_profile == PlatformProfile::Pcie ||
+                              s_platform_profile == PlatformProfile::Hybrid);
+    const bool enable_mmio = (s_platform_profile == PlatformProfile::Mmio ||
+                              s_platform_profile == PlatformProfile::Hybrid);
+
+    if (enable_pcie) {
+        pcie = std::make_unique<simrv::device::PcieRootComplex>(this, aplic_s.get(), imsic_s.get());
+        pci_disk = std::make_shared<simrv::device::VirtioPciBlock>(s_fn_dskimg);
+        pci_console = std::make_shared<simrv::device::VirtioPciConsole>();
+        pci_rng = std::make_shared<simrv::device::VirtioPciRng>();
+        pci_gpu = std::make_shared<simrv::device::VirtioPciGpu>();
+        pci_input = std::make_shared<simrv::device::VirtioPciInput>();
+        pci_sound = std::make_shared<simrv::device::VirtioPciSound>();
+        pci_net = std::make_shared<simrv::device::VirtioPciNet>();
+
+        pcie->attach_device(0, 1, 0, pci_disk);
+        pcie->attach_device(0, 2, 0, pci_console);
+        pcie->attach_device(0, 3, 0, pci_rng);
+        pcie->attach_device(0, 4, 0, pci_gpu);
+        pcie->attach_device(0, 5, 0, pci_input);
+        pcie->attach_device(0, 6, 0, pci_sound);
+        pcie->attach_device(0, 7, 0, pci_net);
+    }
+
+    if (enable_mmio) {
+        mmio_disk =
+            std::make_shared<simrv::device::VirtioMmioBlock>(0x10001000, 2, this, s_fn_dskimg);
+        mmio_console = std::make_shared<simrv::device::VirtioMmioConsole>(0x10002000, 1, this);
+        mmio_rng = std::make_shared<simrv::device::VirtioMmioRng>(0x10003000, 4, this);
+        mmio_gpu = std::make_shared<simrv::device::VirtioMmioGpu>(0x10004000, 5, this);
+        mmio_input = std::make_shared<simrv::device::VirtioMmioInput>(0x10005000, 6, this);
+        mmio_sound = std::make_shared<simrv::device::VirtioMmioSound>(0x10006000, 7, this);
+        mmio_net = std::make_shared<simrv::device::VirtioMmioNet>(0x10007000, 8, this);
+    }
+
+    memory_.system_bus().add_node(aclint_mtimer.get());
+    memory_.system_bus().add_node(aclint_mswi.get());
+    memory_.system_bus().add_node(imsic_m.get());
+    memory_.system_bus().add_node(imsic_s.get());
+    memory_.system_bus().add_node(aplic_m.get());
+    memory_.system_bus().add_node(aplic_s.get());
+
+    if (pcie) {
+        memory_.system_bus().add_node(&pcie->ecam_node());
+        memory_.system_bus().add_node(&pcie->mmio_node());
+    }
+
+    if (mmio_disk) memory_.system_bus().add_node(mmio_disk.get());
+    if (mmio_console) memory_.system_bus().add_node(mmio_console.get());
+    if (mmio_rng) memory_.system_bus().add_node(mmio_rng.get());
+    if (mmio_gpu) memory_.system_bus().add_node(mmio_gpu.get());
+    if (mmio_input) memory_.system_bus().add_node(mmio_input.get());
+    if (mmio_sound) memory_.system_bus().add_node(mmio_sound.get());
+    if (mmio_net) memory_.system_bus().add_node(mmio_net.get());
+
     memory_.system_bus().add_node(rtc.get());
     memory_.system_bus().add_node(uart.get());
     memory_.system_bus().add_node(power.get());
-    memory_.system_bus().add_node(framebuffer.get());
-    memory_.system_bus().add_node(input_device.get());
-    memory_.system_bus().add_node(audio.get());
     memory_.system_bus().add_node(&cpu.plic_mmio);
     memory_.system_bus().add_node(&cpu.clint_mmio);
     const bool linux_boot = !s_appmode;
@@ -423,11 +467,17 @@ auto Machine::initialize() -> int {
             const auto dt_cap = static_cast<std::size_t>(simrv::memory::kDramSize - dtb_offset);
             load_image_into_ram(s_fn_dvtree, mmem + dtb_offset, dt_cap, "device-tree", s_tuimode);
         } else {
+            const bool enable_pcie = (s_platform_profile == PlatformProfile::Pcie ||
+                                      s_platform_profile == PlatformProfile::Hybrid);
+            const bool enable_mmio = (s_platform_profile == PlatformProfile::Mmio ||
+                                      s_platform_profile == PlatformProfile::Hybrid);
             simrv::util::FdtConfig const fdt_cfg{
                 .num_harts = s_num_harts,
                 .dram_base = simrv::memory::g_dram_base,
                 .dram_size = (s_dram_size != 0) ? s_dram_size : simrv::memory::kDramSize,
                 .xlen = simrv::xlen::kXLenBits,
+                .enable_pcie = enable_pcie,
+                .enable_mmio = enable_mmio,
             };
             auto fdt_blob = simrv::util::FdtGenerator::generate(fdt_cfg);
             if (fdt_blob.size() <= static_cast<std::size_t>(0x00100000U)) {
@@ -437,14 +487,8 @@ auto Machine::initialize() -> int {
     }
 
     if (s_use_disk) {
-        std::error_code ec;
-        const auto fsize = std::filesystem::file_size(s_fn_dskimg, ec);
-        const auto disk_capacity = (!ec && fsize > 0)
-                                       ? static_cast<std::size_t>(fsize)
-                                       : static_cast<std::size_t>(simrv::virtio::kDiskSize);
-        disk->sector_storage_.resize(disk_capacity);
-        disk->sector = disk->sector_storage_.data();
-        load_image_into_ram(s_fn_dskimg, disk->sector, disk_capacity, "disk", s_tuimode);
+        if (pci_disk) pci_disk->load_disk(s_fn_dskimg);
+        if (mmio_disk) mmio_disk->load_disk(s_fn_dskimg);
     }
 
     if (s_use_mix) {
@@ -592,11 +636,17 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
             const auto dt_cap = static_cast<std::size_t>(simrv::memory::kDramSize - dtb_offset);
             load_image_into_ram(s_fn_dvtree, mmem + dtb_offset, dt_cap, "device-tree", s_tuimode);
         } else {
+            const bool enable_pcie = (s_platform_profile == PlatformProfile::Pcie ||
+                                      s_platform_profile == PlatformProfile::Hybrid);
+            const bool enable_mmio = (s_platform_profile == PlatformProfile::Mmio ||
+                                      s_platform_profile == PlatformProfile::Hybrid);
             simrv::util::FdtConfig const fdt_cfg{
                 .num_harts = s_num_harts,
                 .dram_base = simrv::memory::g_dram_base,
                 .dram_size = (s_dram_size != 0) ? s_dram_size : simrv::memory::kDramSize,
                 .xlen = simrv::xlen::kXLenBits,
+                .enable_pcie = enable_pcie,
+                .enable_mmio = enable_mmio,
             };
             auto fdt_blob = simrv::util::FdtGenerator::generate(fdt_cfg);
             if (fdt_blob.size() <= static_cast<std::size_t>(0x00100000U)) {
@@ -613,9 +663,8 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
             sec_cpu->state().mhartid = i;
             sec_cpu->state().misa = initial_misa;
             sec_cpu->state().initialize_lower_xlen_fields();
-            sec_cpu->hart_status.store(
-                s_appmode ? HartStatus::Started : HartStatus::Stopped,
-                std::memory_order_relaxed);
+            sec_cpu->hart_status.store(s_appmode ? HartStatus::Started : HartStatus::Stopped,
+                                       std::memory_order_relaxed);
             for (std::size_t r = 0; r < 32; ++r) {
                 sec_cpu->state().regs.write(static_cast<RegId>(r), 0);
             }
@@ -639,18 +688,19 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
 }
 
 auto Machine::load_disk_image(const std::string& filepath) -> bool {
-    if (filepath.empty() || !disk) {
+    if (filepath.empty()) {
         return false;
-    }
-    if (disk->sector_storage_.empty()) {
-        disk->sector_storage_.resize(simrv::virtio::kDiskSize);
-        disk->sector = disk->sector_storage_.data();
     }
     s_fn_dskimg = filepath;
     s_use_disk = true;
-    load_image_into_ram(s_fn_dskimg, disk->sector,
-                        static_cast<std::size_t>(simrv::virtio::kDiskSize), "disk", s_tuimode);
-    return true;
+    bool ok = true;
+    if (pci_disk) {
+        ok &= pci_disk->load_disk(filepath);
+    }
+    if (mmio_disk) {
+        ok &= mmio_disk->load_disk(filepath);
+    }
+    return ok;
 }
 
 }  // namespace simrv::core

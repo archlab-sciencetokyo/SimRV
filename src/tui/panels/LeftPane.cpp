@@ -47,16 +47,17 @@ auto LeftPane::get_total_rows(int width) -> int {
 }
 
 auto LeftPane::section_line(const std::string& title, int width) -> std::string {
+    auto const& glyphs = get_theme_glyphs(get_active_theme_style());
     std::string safe_title = title;
     if (get_display_width(safe_title) + 4 > width && width >= 10) {
         safe_title = safe_title.substr(0, static_cast<std::size_t>(width - 6)) + "…";
     }
-    if (safe_title.starts_with("─") || safe_title.starts_with(" ")) {
+    if (safe_title.starts_with("─") || safe_title.starts_with("-") || safe_title.starts_with(" ")) {
         std::string full = safe_title + " ";
         int dash_len = width - get_display_width(full);
         if (dash_len < 0) dash_len = 0;
         return std::format("\033[1m{}{} \033[0m{}{}", kThemeText, safe_title, kThemeBorder,
-                           make_repeated_string("─", dash_len));
+                           make_repeated_string(glyphs.horiz, dash_len));
     } else {
         std::string text = " " + safe_title + " ";
         int dash_len = width - get_display_width(text);
@@ -64,8 +65,8 @@ auto LeftPane::section_line(const std::string& title, int width) -> std::string 
         int left_dashes = std::min(4, dash_len / 2);
         int right_dashes = dash_len - left_dashes;
         return std::format("{}{} \033[1m{}{}\033[0m {}{}", kThemeBorder,
-                           make_repeated_string("─", left_dashes), kThemeText, safe_title, kThemeBorder,
-                           make_repeated_string("─", right_dashes));
+                           make_repeated_string(glyphs.horiz, left_dashes), kThemeText, safe_title,
+                           kThemeBorder, make_repeated_string(glyphs.horiz, right_dashes));
     }
 }
 
@@ -151,9 +152,7 @@ auto LeftPane::current_cpu() const -> const simrv::core::CPU& {
     return machine_.hart(selected_hart_);
 }
 
-auto LeftPane::current_cpu() -> simrv::core::CPU& {
-    return machine_.hart(selected_hart_);
-}
+auto LeftPane::current_cpu() -> simrv::core::CPU& { return machine_.hart(selected_hart_); }
 
 auto LeftPane::get_row_uncached(int logical_row, int width) -> std::string {
     auto const& cpu = current_cpu();
@@ -177,144 +176,314 @@ auto LeftPane::get_row_uncached(int logical_row, int width) -> std::string {
     return render_perf_or_debug(cpu, logical_row, width, single_column);
 }
 
-auto LeftPane::render_tab_bar(int width) const -> std::string {
-    // Determine if we're in the Regs group (GPR/FPR/VEC)
-    bool const is_regs =
-        (page_ == TuiRegPage::GPR || page_ == TuiRegPage::FPR || page_ == TuiRegPage::VEC);
-    const char* reg_sub = "GPR";
-    if (page_ == TuiRegPage::FPR)
-        reg_sub = "FPR";
-    else if (page_ == TuiRegPage::VEC)
-        reg_sub = "VEC";
+namespace {
 
-    // Build the grouped Regs tab
-    std::string line = " ";
-    if (is_regs) {
-        line += std::format("\033[1;7m {} \033[0m", reg_sub);
-    } else {
-        line += std::format(" {}Regs\033[0m ", kThemeMuted);
+struct TabSlot {
+    std::string text;
+    int display_width;
+    TuiCategoryGroup grp = TuiCategoryGroup::Regs;
+    std::optional<TuiRegPage> page = std::nullopt;
+    bool is_hart = false;
+};
+
+struct ComputedTabSpan {
+    int start_col;
+    int width;
+    TuiCategoryGroup grp;
+    std::optional<TuiRegPage> page;
+    bool is_hart;
+};
+
+auto layout_tabs_equally(const std::vector<TabSlot>& slots, int available_width)
+    -> std::pair<std::string, std::vector<ComputedTabSpan>> {
+    if (slots.empty()) return {"", {}};
+
+    int total_item_w = 0;
+    for (const auto& slot : slots) {
+        total_item_w += slot.display_width;
     }
+    int num_seps = static_cast<int>(slots.size()) - 1;
+    int raw_w = total_item_w + num_seps;
+    int left_pad = std::max(0, (available_width - raw_w) / 2);
 
-    std::string cache_name = "Cache";
-    if (page_ == TuiRegPage::CACHE) {
-        cache_name = (cache_inspect_type_ == 0) ? "Cache:IC" : "Cache:DC";
-    }
+    std::string out;
+    out.append(static_cast<std::size_t>(left_pad), ' ');
+    int cur_col = left_pad;
 
-    // Remaining tool tabs
-    struct ToolTab {
-        TuiRegPage page;
-        std::string name;
-    };
-    std::vector<ToolTab> tool_tabs;
-    tool_tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Pipe"});
-    if (machine_.s_cycle_accurate) {
-        tool_tabs.push_back({.page = TuiRegPage::CACHE, .name = cache_name});
-        tool_tabs.push_back({.page = TuiRegPage::BPRED, .name = "BPred"});
-        tool_tabs.push_back({.page = TuiRegPage::HAZARD, .name = "Haz"});
-    }
-    tool_tabs.push_back({.page = TuiRegPage::TLB, .name = "TLB"});
-    tool_tabs.push_back({.page = TuiRegPage::BUS, .name = "Bus"});
-    tool_tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
-    tool_tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Exp"});
-    tool_tabs.push_back({.page = TuiRegPage::STACK, .name = "Stack"});
+    std::vector<ComputedTabSpan> spans;
+    spans.reserve(slots.size());
 
-    for (auto const& tab : tool_tabs) {
-        line += std::format("{}│\033[0m", kThemeBorder);
-        if (page_ == tab.page) {
-            line += std::format("\033[1;7m {} \033[0m", tab.name);
-        } else {
-            line += std::format(" {}{}\033[0m ", kThemeMuted, tab.name);
+    const auto style = get_active_theme_style();
+    const bool is_ansi = (style == TuiThemeStyle::ClassicAnsi);
+    const char* sep_glyph = is_ansi ? "|" : "│";
+
+    for (size_t i = 0; i < slots.size(); ++i) {
+        if (i > 0) {
+            out += std::format("{}{}\033[0m", kThemeBorder, sep_glyph);
+            cur_col += 1;
         }
+        spans.push_back({.start_col = cur_col,
+                         .width = slots[i].display_width,
+                         .grp = slots[i].grp,
+                         .page = slots[i].page,
+                         .is_hart = slots[i].is_hart});
+        out += slots[i].text;
+        cur_col += slots[i].display_width;
+    }
+
+    if (get_display_width(out) < available_width) {
+        out.append(static_cast<std::size_t>(available_width - get_display_width(out)), ' ');
+    } else if (get_display_width(out) > available_width) {
+        out = format_to_width(out, available_width);
+    }
+    return {out, spans};
+}
+
+}  // namespace
+
+auto LeftPane::render_tab_bar_tier1(int width) const -> std::string {
+    TuiCategoryGroup const current_grp = get_category_group(page_);
+    constexpr std::array<TuiCategoryGroup, 4> kGroups = {
+        TuiCategoryGroup::Regs, TuiCategoryGroup::Memory, TuiCategoryGroup::Pipeline,
+        TuiCategoryGroup::Tools};
+
+    std::vector<TabSlot> slots;
+    slots.reserve(5);
+    for (auto grp : kGroups) {
+        const char* name = get_category_name(grp);
+        std::string text;
+        if (grp == current_grp) {
+            text = std::format("\033[1;7m {} \033[0m", name);
+        } else {
+            text = std::format(" {}{}\033[0m ", kThemeMuted, name);
+        }
+        slots.push_back({.text = text,
+                         .display_width = static_cast<int>(std::strlen(name)) + 2,
+                         .grp = grp,
+                         .page = std::nullopt,
+                         .is_hart = false});
     }
 
     if (machine_.num_harts() > 1) {
-        line += std::format("{}│\033[1m{}[H{}]\033[0m", kThemeBorder, kThemePeach, selected_hart_);
+        std::string text = std::format("\033[1m{}[H{}]\033[0m", kThemePeach, selected_hart_);
+        slots.push_back({.text = text,
+                         .display_width = 4,
+                         .grp = TuiCategoryGroup::Regs,
+                         .page = std::nullopt,
+                         .is_hart = true});
     }
 
-    return format_to_width(line, width);
+    return layout_tabs_equally(slots, width).first;
 }
 
-auto LeftPane::get_tab_at_col(int col) const -> std::optional<TuiRegPage> {
-    bool const is_regs =
-        (page_ == TuiRegPage::GPR || page_ == TuiRegPage::FPR || page_ == TuiRegPage::VEC);
-    int regs_width = is_regs ? 5 : 6;
-
-    int current_x = 1;
-    if (col < current_x + regs_width) {
-        return std::nullopt;  // Clicked on Regs tab
-    }
-    current_x += regs_width + 1;  // +1 for │
-
-    std::string cache_name = "Cache";
-    if (page_ == TuiRegPage::CACHE) {
-        cache_name = (cache_inspect_type_ == 0) ? "Cache:IC" : "Cache:DC";
-    }
-
-    struct ToolTab {
+auto LeftPane::render_tab_bar_tier2(int width) const -> std::string {
+    TuiCategoryGroup const grp = get_category_group(page_);
+    struct SubTab {
         TuiRegPage page;
         std::string name;
     };
-    std::vector<ToolTab> get_tabs;
-    get_tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Pipe"});
-    if (machine_.s_cycle_accurate) {
-        get_tabs.push_back({.page = TuiRegPage::CACHE, .name = cache_name});
-        get_tabs.push_back({.page = TuiRegPage::BPRED, .name = "BPred"});
-        get_tabs.push_back({.page = TuiRegPage::HAZARD, .name = "Haz"});
-    }
-    get_tabs.push_back({.page = TuiRegPage::TLB, .name = "TLB"});
-    get_tabs.push_back({.page = TuiRegPage::BUS, .name = "Bus"});
-    get_tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
-    get_tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Exp"});
-    get_tabs.push_back({.page = TuiRegPage::STACK, .name = "Stack"});
+    std::vector<SubTab> tabs;
 
-    for (auto const& tab : get_tabs) {
-        int tab_width = static_cast<int>(tab.name.length()) + 2;
-        if (col < current_x + tab_width) {
-            return tab.page;
+    switch (grp) {
+        case TuiCategoryGroup::Regs: {
+            tabs.push_back({.page = TuiRegPage::GPR, .name = "GPR"});
+            bool has_f = (current_cpu().state().misa & (1ULL << ('f' - 'a'))) != 0;
+            bool has_d = (current_cpu().state().misa & (1ULL << ('d' - 'a'))) != 0;
+            bool has_v = (current_cpu().state().misa & (1ULL << ('v' - 'a'))) != 0;
+            if (has_f || has_d) {
+                tabs.push_back({.page = TuiRegPage::FPR, .name = "FPR"});
+            }
+            if (has_v) {
+                tabs.push_back({.page = TuiRegPage::VEC, .name = "VEC"});
+            }
+            break;
         }
-        current_x += tab_width + 1;
+        case TuiCategoryGroup::Memory: {
+            tabs.push_back({.page = TuiRegPage::STACK, .name = "Stack"});
+            if (machine_.s_cycle_accurate) {
+                std::string cache_name = (cache_inspect_type_ == 0) ? "Cache:IC" : "Cache:DC";
+                tabs.push_back({.page = TuiRegPage::CACHE, .name = cache_name});
+            }
+            tabs.push_back({.page = TuiRegPage::TLB, .name = "TLB"});
+            tabs.push_back({.page = TuiRegPage::BUS, .name = "Bus"});
+            break;
+        }
+        case TuiCategoryGroup::Pipeline: {
+            tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Pipe"});
+            if (machine_.s_cycle_accurate) {
+                tabs.push_back({.page = TuiRegPage::BPRED, .name = "BPred"});
+                tabs.push_back({.page = TuiRegPage::HAZARD, .name = "Hazard"});
+            }
+            break;
+        }
+        case TuiCategoryGroup::Tools: {
+            tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Explain"});
+            tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
+            break;
+        }
+    }
+
+    std::vector<TabSlot> slots;
+    slots.reserve(tabs.size());
+    for (const auto& t : tabs) {
+        std::string text;
+        if (page_ == t.page) {
+            text = std::format("\033[1;7m {} \033[0m", t.name);
+        } else {
+            text = std::format(" {}{}\033[0m ", kThemeMuted, t.name);
+        }
+        slots.push_back({.text = text,
+                         .display_width = static_cast<int>(t.name.length()) + 2,
+                         .grp = grp,
+                         .page = t.page,
+                         .is_hart = false});
+    }
+
+    return layout_tabs_equally(slots, width).first;
+}
+
+auto LeftPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPage> {
+    int const width = last_width_ > 0 ? last_width_ : 50;
+
+    if (row == 0) {
+        constexpr std::array<TuiCategoryGroup, 4> kGroups = {
+            TuiCategoryGroup::Regs, TuiCategoryGroup::Memory, TuiCategoryGroup::Pipeline,
+            TuiCategoryGroup::Tools};
+
+        std::vector<TabSlot> slots;
+        slots.reserve(5);
+        for (auto grp : kGroups) {
+            const char* name = get_category_name(grp);
+            slots.push_back({.text = "",
+                             .display_width = static_cast<int>(std::strlen(name)) + 2,
+                             .grp = grp,
+                             .page = std::nullopt,
+                             .is_hart = false});
+        }
+
+        if (machine_.num_harts() > 1) {
+            slots.push_back({.text = "",
+                             .display_width = 4,
+                             .grp = TuiCategoryGroup::Regs,
+                             .page = std::nullopt,
+                             .is_hart = true});
+        }
+
+        auto const [_, spans] = layout_tabs_equally(slots, width);
+        for (const auto& span : spans) {
+            if (col >= span.start_col && col < span.start_col + span.width) {
+                if (span.is_hart) return std::nullopt;
+                if (span.grp == get_category_group(page_)) {
+                    // Clicking active group cycles within that group
+                    if (span.grp == TuiCategoryGroup::Regs) {
+                        if (page_ == TuiRegPage::GPR) return TuiRegPage::FPR;
+                        if (page_ == TuiRegPage::FPR) return TuiRegPage::VEC;
+                        return TuiRegPage::GPR;
+                    }
+                    if (span.grp == TuiCategoryGroup::Memory) {
+                        if (page_ == TuiRegPage::STACK)
+                            return machine_.s_cycle_accurate ? TuiRegPage::CACHE : TuiRegPage::TLB;
+                        if (page_ == TuiRegPage::CACHE) return TuiRegPage::TLB;
+                        if (page_ == TuiRegPage::TLB) return TuiRegPage::BUS;
+                        return TuiRegPage::STACK;
+                    }
+                    if (span.grp == TuiCategoryGroup::Pipeline) {
+                        if (page_ == TuiRegPage::PIPELINE)
+                            return machine_.s_cycle_accurate ? TuiRegPage::BPRED
+                                                             : TuiRegPage::PIPELINE;
+                        if (page_ == TuiRegPage::BPRED) return TuiRegPage::HAZARD;
+                        return TuiRegPage::PIPELINE;
+                    }
+                    if (span.grp == TuiCategoryGroup::Tools) {
+                        return (page_ == TuiRegPage::EXPLAIN) ? TuiRegPage::TRACE
+                                                              : TuiRegPage::EXPLAIN;
+                    }
+                }
+                return get_default_page_for_group(span.grp, machine_.s_cycle_accurate);
+            }
+        }
+        return std::nullopt;
+    }
+
+    if (row == 1) {
+        TuiCategoryGroup const grp = get_category_group(page_);
+        struct SubTab {
+            TuiRegPage page;
+            std::string name;
+        };
+        std::vector<SubTab> tabs;
+
+        switch (grp) {
+            case TuiCategoryGroup::Regs: {
+                tabs.push_back({.page = TuiRegPage::GPR, .name = "GPR"});
+                bool has_f = (current_cpu().state().misa & (1ULL << ('f' - 'a'))) != 0;
+                bool has_d = (current_cpu().state().misa & (1ULL << ('d' - 'a'))) != 0;
+                bool has_v = (current_cpu().state().misa & (1ULL << ('v' - 'a'))) != 0;
+                if (has_f || has_d) {
+                    tabs.push_back({.page = TuiRegPage::FPR, .name = "FPR"});
+                }
+                if (has_v) {
+                    tabs.push_back({.page = TuiRegPage::VEC, .name = "VEC"});
+                }
+                break;
+            }
+            case TuiCategoryGroup::Memory: {
+                tabs.push_back({.page = TuiRegPage::STACK, .name = "Stack"});
+                if (machine_.s_cycle_accurate) {
+                    std::string cache_name = (cache_inspect_type_ == 0) ? "Cache:IC" : "Cache:DC";
+                    tabs.push_back({.page = TuiRegPage::CACHE, .name = cache_name});
+                }
+                tabs.push_back({.page = TuiRegPage::TLB, .name = "TLB"});
+                tabs.push_back({.page = TuiRegPage::BUS, .name = "Bus"});
+                break;
+            }
+            case TuiCategoryGroup::Pipeline: {
+                tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Pipe"});
+                if (machine_.s_cycle_accurate) {
+                    tabs.push_back({.page = TuiRegPage::BPRED, .name = "BPred"});
+                    tabs.push_back({.page = TuiRegPage::HAZARD, .name = "Hazard"});
+                }
+                break;
+            }
+            case TuiCategoryGroup::Tools: {
+                tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Explain"});
+                tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
+                break;
+            }
+        }
+
+        std::vector<TabSlot> slots;
+        slots.reserve(tabs.size());
+        for (const auto& t : tabs) {
+            slots.push_back({.text = "",
+                             .display_width = static_cast<int>(t.name.length()) + 2,
+                             .grp = grp,
+                             .page = t.page,
+                             .is_hart = false});
+        }
+
+        auto const [_, spans] = layout_tabs_equally(slots, width);
+        for (const auto& span : spans) {
+            if (col >= span.start_col && col < span.start_col + span.width) {
+                return span.page;
+            }
+        }
     }
 
     return std::nullopt;
 }
 
-auto LeftPane::is_hart_tab_click(int col) const -> bool {
-    if (machine_.num_harts() <= 1) return false;
-    bool const is_regs =
-        (page_ == TuiRegPage::GPR || page_ == TuiRegPage::FPR || page_ == TuiRegPage::VEC);
-    int regs_width = is_regs ? 10 : 4;
-    int current_x = regs_width + 1;
-
-    std::string cache_name = "Cache";
-    if (page_ == TuiRegPage::CACHE) {
-        cache_name = (cache_inspect_type_ == 0) ? "Cache:IC" : "Cache:DC";
-    }
-
-    struct ToolTab {
-        TuiRegPage page;
-        std::string name;
-    };
-    std::vector<ToolTab> get_tabs;
-    get_tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Pipe"});
-    if (machine_.s_cycle_accurate) {
-        get_tabs.push_back({.page = TuiRegPage::CACHE, .name = cache_name});
-        get_tabs.push_back({.page = TuiRegPage::BPRED, .name = "BBPtr"});
-        get_tabs.push_back({.page = TuiRegPage::HAZARD, .name = "Haz"});
-    }
-    get_tabs.push_back({.page = TuiRegPage::TLB, .name = "TLB"});
-    get_tabs.push_back({.page = TuiRegPage::BUS, .name = "Bus"});
-    get_tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
-    get_tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Exp"});
-    get_tabs.push_back({.page = TuiRegPage::STACK, .name = "Stack"});
-
-    for (auto const& tab : get_tabs) {
-        int tab_width = (page_ == tab.page) ? (static_cast<int>(tab.name.length()) + 2)
-                                            : static_cast<int>(tab.name.length());
-        current_x += tab_width + 1;
-    }
-
-    return col >= current_x && col < current_x + 6;
+auto LeftPane::get_tab_at_col(int col) const -> std::optional<TuiRegPage> {
+    return get_tab_at(1, col);
 }
+
+auto LeftPane::is_hart_tab_click(int row, int col) const -> bool {
+    if (machine_.num_harts() <= 1 || row != 0) return false;
+    // Tier 1 ends at col 34 (1 + 6 + 1 + 8 + 1 + 10 + 1 + 7 = 35)
+    return col >= 34 && col < 42;
+}
+
+auto LeftPane::is_hart_tab_click(int col) const -> bool { return is_hart_tab_click(0, col); }
 
 auto LeftPane::render_trace_row(int logical_row, int width) -> std::string {
     if (!trace_buffer_ || trace_buffer_->empty()) {
@@ -371,7 +540,10 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
     last_width_ = width;
 
     if (row_idx == 0) {
-        return render_tab_bar(width);
+        return render_tab_bar_tier1(width);
+    }
+    if (row_idx == 1) {
+        return render_tab_bar_tier2(width);
     }
 
     constexpr int kGuidanceHeight = 4;
@@ -379,7 +551,8 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
     bool const show_guidance = should_show_guidance(paused_, learn_enabled_, visible_rows_);
     int const guidance_start = visible_rows_ - kLogAreaHeight - kGuidanceHeight;
     if (page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE) {
-        if (show_guidance && row_idx >= guidance_start && row_idx < guidance_start + kGuidanceHeight) {
+        if (show_guidance && row_idx >= guidance_start &&
+            row_idx < guidance_start + kGuidanceHeight) {
             return render_guidance_row(row_idx - guidance_start, width);
         }
         if (visible_rows_ >= 15 && row_idx >= visible_rows_ - kLogAreaHeight) {
@@ -388,7 +561,7 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
         }
     }
 
-    int const content_row_idx = row_idx - 1;
+    int const content_row_idx = row_idx - 2;
     int const logical_row = content_row_idx + scroll_offset_;
 
     if (page_ == TuiRegPage::TRACE) {
@@ -399,18 +572,16 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
         auto explain_rows = get_explain_rows(width);
         int const total_logical_rows = static_cast<int>(explain_rows.size());
         if (scroll_offset_ > 0 && content_row_idx == 0) {
-            return format_to_width(
-                std::format(" {}▲ [{} more lines above - scroll up]\033[0m", kThemeMuted,
-                            scroll_offset_),
-                width);
+            return format_to_width(std::format(" {}▲ [{} more lines above - scroll up]\033[0m",
+                                               kThemeMuted, scroll_offset_),
+                                   width);
         }
         if (scroll_offset_ + visible_rows_ - 1 < total_logical_rows &&
             content_row_idx == visible_rows_ - 2) {
             int remaining = total_logical_rows - (scroll_offset_ + visible_rows_ - 1);
-            return format_to_width(
-                std::format(" {}▼ [{} more lines below - scroll down]\033[0m", kThemeMuted,
-                            remaining),
-                width);
+            return format_to_width(std::format(" {}▼ [{} more lines below - scroll down]\033[0m",
+                                               kThemeMuted, remaining),
+                                   width);
         }
         if (logical_row >= total_logical_rows || logical_row < 0) {
             return format_to_width("", width);

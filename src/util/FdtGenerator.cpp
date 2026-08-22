@@ -102,6 +102,14 @@ class FdtBuilder {
         push_bytes_padded(data.data(), data.size());
     }
 
+    void add_prop_bytes(std::string_view name, const std::vector<uint8_t>& bytes) {
+        const uint32_t str_off = get_string_offset(name);
+        push_u32(kFdtProp);
+        push_u32(static_cast<uint32_t>(bytes.size()));
+        push_u32(str_off);
+        push_bytes_padded(bytes.data(), bytes.size());
+    }
+
     auto build() -> std::vector<uint8_t> {
         push_u32(kFdtEnd);
 
@@ -190,8 +198,7 @@ class FdtBuilder {
 auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
     FdtBuilder b;
 
-    const uint32_t plic_phandle = 1;
-    const uint32_t clint_phandle = 2;
+    const uint32_t plic_phandle = 2;
     const uint32_t test_phandle = 3;
 
     // Root node "/"
@@ -201,10 +208,15 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
     b.add_prop_string("compatible", "simrv,virt");
     b.add_prop_string("model", "simrv,virt-riscv");
 
+    // aliases
+    b.begin_node("aliases");
+    b.add_prop_string("serial0", "/soc/serial@10000000");
+    b.end_node();
+
     // chosen
     b.begin_node("chosen");
     b.add_prop_string("bootargs", config.bootargs);
-    b.add_prop_string("stdout-path", "/soc/serial@10000000:115200n8");
+    b.add_prop_string("stdout-path", "serial0:115200n8");
     b.end_node();
 
     // memory
@@ -218,7 +230,7 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
         static_cast<uint32_t>(config.dram_size & 0xFFFFFFFF),
     };
     b.add_prop_u32_array("reg", mem_reg);
-    b.end_node();
+    b.end_node();  // memory
 
     // cpus
     b.begin_node("cpus");
@@ -226,51 +238,33 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
     b.add_prop_u32("#size-cells", 0);
     b.add_prop_u32("timebase-frequency", 10000000);
 
-    b.begin_node("cpu-map");
-    b.begin_node("cluster0");
-    for (uint32_t h = 0; h < config.num_harts; ++h) {
-        const std::string core_name = std::format("core{}", h);
-        b.begin_node(core_name);
-        const uint32_t cpu_phandle = 100 + h;
-        b.add_prop_u32("cpu", cpu_phandle);
-        b.end_node();
-    }
-    b.end_node();  // cluster0
-    b.end_node();  // cpu-map
-
     for (uint32_t h = 0; h < config.num_harts; ++h) {
         const std::string cpu_name = std::format("cpu@{}", h);
-        const uint32_t cpu_phandle = 100 + h;
         b.begin_node(cpu_name);
-        b.add_prop_u32("phandle", cpu_phandle);
-        b.add_prop_string("device_type", "cpu");
         b.add_prop_string("compatible", "riscv");
+        b.add_prop_string("device_type", "cpu");
         b.add_prop_u32("reg", h);
         b.add_prop_string("riscv,isa", (config.xlen == 64) ? "rv64imafdcbv" : "rv32imafdcbv");
         b.add_prop_string("riscv,isa-base", (config.xlen == 64) ? "rv64i" : "rv32i");
-        b.add_prop_string_list("riscv,isa-extensions",
-                               {"i", "m", "a", "f", "d", "c", "b", "v", "zicntr", "zicsr",
-                                "zifencei", "zihintpause"});
+        b.add_prop_string_list(
+            "riscv,isa-extensions",
+            {"i", "m", "a", "f", "d", "c", "b", "v", "zicntr", "zicsr", "zifencei", "zihintpause"});
         b.add_prop_string("mmu-type", (config.xlen == 64) ? "riscv,sv39" : "riscv,sv32");
         b.add_prop_u32("clock-frequency", 1000000000);
 
         // cpu_intc
         b.begin_node("interrupt-controller");
         b.add_prop_u32("#interrupt-cells", 1);
-        b.add_prop_empty("interrupt-controller");
+        b.add_prop_u32("#address-cells", 0);
         b.add_prop_string("compatible", "riscv,cpu-intc");
-        const uint32_t intc_phandle = 200 + h;
+        b.add_prop_empty("interrupt-controller");
+        const uint32_t intc_phandle = 1 + h;
         b.add_prop_u32("phandle", intc_phandle);
         b.end_node();
 
         b.end_node();  // cpu@h
     }
     b.end_node();  // cpus
-
-    // pmu
-    b.begin_node("pmu");
-    b.add_prop_string("compatible", "riscv,pmu");
-    b.end_node();
 
     // poweroff
     b.begin_node("poweroff");
@@ -306,11 +300,11 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
     b.begin_node("timer@60000000");
     b.add_prop_string_list("compatible", {"sifive,clint0", "riscv,clint0"});
     b.add_prop_u32_array("reg", {0, 0x60000000, 0, 0x000c0000});
-    b.add_prop_u32("phandle", clint_phandle);
+    b.add_prop_u32("clock-frequency", 10000000);
 
     std::vector<uint32_t> clint_irqs;
     for (uint32_t h = 0; h < config.num_harts; ++h) {
-        const uint32_t intc_phandle = 200 + h;
+        const uint32_t intc_phandle = 1 + h;
         clint_irqs.push_back(intc_phandle);
         clint_irqs.push_back(3);  // M-mode software interrupt
         clint_irqs.push_back(intc_phandle);
@@ -325,17 +319,17 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
     b.add_prop_u32("#interrupt-cells", 1);
     b.add_prop_string_list("compatible", {"sifive,plic-1.0.0", "riscv,plic0"});
     b.add_prop_empty("interrupt-controller");
-    b.add_prop_u32_array("reg", {0, 0x50000000, 0, 0x04000000});
+    b.add_prop_u32_array("reg", {0, 0x50000000, 0, 0x00400000});
     b.add_prop_u32("riscv,ndev", 31);
     b.add_prop_u32("phandle", plic_phandle);
 
     std::vector<uint32_t> plic_irqs;
     for (uint32_t h = 0; h < config.num_harts; ++h) {
-        const uint32_t intc_phandle = 200 + h;
+        const uint32_t intc_phandle = 1 + h;
         plic_irqs.push_back(intc_phandle);
         plic_irqs.push_back(11);  // M-mode external interrupt
         plic_irqs.push_back(intc_phandle);
-        plic_irqs.push_back(9);   // S-mode external interrupt
+        plic_irqs.push_back(9);  // S-mode external interrupt
     }
     b.add_prop_u32_array("interrupts-extended", plic_irqs);
     b.end_node();
@@ -352,29 +346,88 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
     b.add_prop_u32("interrupts", 3);
     b.end_node();
 
-    // virtio-console (virtio@40000000)
-    b.begin_node("virtio@40000000");
-    b.add_prop_string("compatible", "virtio,mmio");
-    b.add_prop_u32_array("reg", {0, 0x40000000, 0, 0x1000});
-    b.add_prop_u32("interrupt-parent", plic_phandle);
-    b.add_prop_u32("interrupts", 1);
-    b.end_node();
+    // VirtIO-MMIO v2 nodes
+    if (config.enable_mmio) {
+        // virtio-console (virtio@10002000)
+        b.begin_node("virtio@10002000");
+        b.add_prop_string("compatible", "virtio,mmio");
+        b.add_prop_u32_array("reg", {0, 0x10002000, 0, 0x1000});
+        b.add_prop_u32("interrupt-parent", plic_phandle);
+        b.add_prop_u32("interrupts", 1);
+        b.end_node();
 
-    // virtio-disk (virtio@48000000)
-    b.begin_node("virtio@48000000");
-    b.add_prop_string("compatible", "virtio,mmio");
-    b.add_prop_u32_array("reg", {0, 0x48000000, 0, 0x1000});
-    b.add_prop_u32("interrupt-parent", plic_phandle);
-    b.add_prop_u32("interrupts", 2);
-    b.end_node();
+        // virtio-disk (virtio@10001000)
+        b.begin_node("virtio@10001000");
+        b.add_prop_string("compatible", "virtio,mmio");
+        b.add_prop_u32_array("reg", {0, 0x10001000, 0, 0x1000});
+        b.add_prop_u32("interrupt-parent", plic_phandle);
+        b.add_prop_u32("interrupts", 2);
+        b.end_node();
 
-    // virtio-rng (virtio@44000000)
-    b.begin_node("virtio@44000000");
-    b.add_prop_string("compatible", "virtio,mmio");
-    b.add_prop_u32_array("reg", {0, 0x44000000, 0, 0x1000});
-    b.add_prop_u32("interrupt-parent", plic_phandle);
-    b.add_prop_u32("interrupts", 4);
-    b.end_node();
+        // virtio-rng (virtio@10003000)
+        b.begin_node("virtio@10003000");
+        b.add_prop_string("compatible", "virtio,mmio");
+        b.add_prop_u32_array("reg", {0, 0x10003000, 0, 0x1000});
+        b.add_prop_u32("interrupt-parent", plic_phandle);
+        b.add_prop_u32("interrupts", 4);
+        b.end_node();
+
+        // virtio-gpu (virtio@10004000)
+        b.begin_node("virtio@10004000");
+        b.add_prop_string("compatible", "virtio,mmio");
+        b.add_prop_u32_array("reg", {0, 0x10004000, 0, 0x1000});
+        b.add_prop_u32("interrupt-parent", plic_phandle);
+        b.add_prop_u32("interrupts", 5);
+        b.end_node();
+
+        // virtio-input (virtio@10005000)
+        b.begin_node("virtio@10005000");
+        b.add_prop_string("compatible", "virtio,mmio");
+        b.add_prop_u32_array("reg", {0, 0x10005000, 0, 0x1000});
+        b.add_prop_u32("interrupt-parent", plic_phandle);
+        b.add_prop_u32("interrupts", 6);
+        b.end_node();
+
+        // virtio-sound (virtio@10006000)
+        b.begin_node("virtio@10006000");
+        b.add_prop_string("compatible", "virtio,mmio");
+        b.add_prop_u32_array("reg", {0, 0x10006000, 0, 0x1000});
+        b.add_prop_u32("interrupt-parent", plic_phandle);
+        b.add_prop_u32("interrupts", 7);
+        b.end_node();
+
+        // virtio-net (virtio@10007000)
+        b.begin_node("virtio@10007000");
+        b.add_prop_string("compatible", "virtio,mmio");
+        b.add_prop_u32_array("reg", {0, 0x10007000, 0, 0x1000});
+        b.add_prop_u32("interrupt-parent", plic_phandle);
+        b.add_prop_u32("interrupts", 8);
+        b.add_prop_bytes("local-mac-address", {0x52, 0x54, 0x00, 0x12, 0x34, 0x56});
+        b.end_node();
+    }
+
+    if (config.enable_pcie) {
+        // pcie root complex (pci@30000000)
+        const uint32_t pcie_phandle = 10;
+        b.begin_node("pci@30000000");
+        b.add_prop_string("compatible", "pci-host-ecam-generic");
+        b.add_prop_string("device_type", "pci");
+        b.add_prop_u32("#address-cells", 3);
+        b.add_prop_u32("#size-cells", 2);
+        b.add_prop_u32("#interrupt-cells", 1);
+        b.add_prop_u32_array("reg", {0, 0x30000000, 0, 0x10000000});
+        b.add_prop_u32_array("bus-range", {0, 255});
+        b.add_prop_u32_array("ranges", {0x02000000, 0, 0x40000000, 0, 0x40000000, 0, 0x10000000});
+        b.add_prop_u32("phandle", pcie_phandle);
+        b.add_prop_u32("interrupt-parent", plic_phandle);
+        b.add_prop_u32_array("interrupt-map-mask", {0x3800, 0, 0, 7});
+        b.add_prop_u32_array("interrupt-map",
+                             {0x0800, 0, 0, 1, plic_phandle, 17, 0x1000, 0, 0, 1, plic_phandle, 18,
+                              0x1800, 0, 0, 1, plic_phandle, 19, 0x2000, 0, 0, 1, plic_phandle, 20,
+                              0x2800, 0, 0, 1, plic_phandle, 21, 0x3000, 0, 0, 1, plic_phandle, 22,
+                              0x3800, 0, 0, 1, plic_phandle, 23});
+        b.end_node();
+    }
 
     // rtc (rtc@70000000)
     b.begin_node("rtc@70000000");

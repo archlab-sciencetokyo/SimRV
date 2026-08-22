@@ -9,7 +9,6 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/device/Framebuffer.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/Mmio.hpp"
@@ -115,36 +114,6 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     }
 
     auto issue_read = [&](Address addr) -> Word {
-        constexpr Address kFramebufferDataBase = simrv::mmio::kFramebufferBaseAddress + 0x1000u;
-        constexpr Address kFramebufferEnd =
-            simrv::mmio::kFramebufferBaseAddress + simrv::mmio::kFramebufferSize;
-        if (addr >= kFramebufferDataBase && addr < kFramebufferEnd && cpu.machine_->framebuffer) {
-            const unsigned req_size_bytes = 1u << (funct3 & 0x3u);
-            if (req_size_bytes > kFramebufferEnd - addr) {
-                cpu.pipeline_context.pending_exception = ExceptionCode::FaultLoad;
-                cpu.pipeline_context.pending_tval = v_addr;
-                return 0;
-            }
-            uint8_t* fb_ptr = cpu.machine_->framebuffer->get_fb_ptr();
-            size_t fb_offset = addr - kFramebufferDataBase;
-            uint64_t raw_val = 0;
-            std::memcpy(&raw_val, fb_ptr + fb_offset, req_size_bytes);
-
-            Word rdata = raw_val;
-            const unsigned bits = 8 * req_size_bytes;
-            if (bits < simrv::xlen::kXLenBits) {
-                const Word mask = (static_cast<Word>(1) << bits) - 1;
-                rdata &= mask;
-                constexpr auto kSignExtendBit = 0x4u;
-                if ((funct3 & kSignExtendBit) == 0) {
-                    const Word sign_bit = static_cast<Word>(1) << (bits - 1);
-                    if ((rdata & sign_bit) != 0) {
-                        rdata |= ~mask;
-                    }
-                }
-            }
-            return static_cast<Word>(rdata & simrv::xlen::kXLenMask);
-        }
         if (cpu.machine_->s_high_performance && simrv::memory::is_dram_access(addr, size_bytes)) {
             return simrv::memory::ram_read_fast(addr, funct3, mem.mmu()->mmem());
         }
@@ -327,22 +296,6 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
         if (cpu.machine_->s_rollback_enabled && simrv::memory::is_dram_access(addr, size_bytes)) {
             Word old_val = simrv::memory::ram_read_fast(addr, funct3, mem.mmu()->mmem());
             cpu.record_mem_write(addr, old_val, funct3);
-        }
-        constexpr Address kFramebufferDataBase = simrv::mmio::kFramebufferBaseAddress + 0x1000u;
-        constexpr Address kFramebufferEnd =
-            simrv::mmio::kFramebufferBaseAddress + simrv::mmio::kFramebufferSize;
-        if (addr >= kFramebufferDataBase && addr < kFramebufferEnd && cpu.machine_->framebuffer) {
-            const unsigned req_size_bytes = 1u << (funct3 & 0x3u);
-            if (req_size_bytes > kFramebufferEnd - addr) {
-                cpu.pipeline_context.pending_exception = ExceptionCode::FaultStore;
-                cpu.pipeline_context.pending_tval = v_addr;
-                return;
-            }
-            uint8_t* fb_ptr = cpu.machine_->framebuffer->get_fb_ptr();
-            size_t fb_offset = addr - kFramebufferDataBase;
-            std::memcpy(fb_ptr + fb_offset, &data, req_size_bytes);
-            cpu.machine_->framebuffer->set_dirty(true);
-            return;
         }
         if (cpu.machine_->s_high_performance && simrv::memory::is_dram_access(addr, size_bytes)) {
             const bool is_tohost_write = simrv::xlen::kIsXLen64

@@ -52,6 +52,12 @@ enum class BranchPredictorType : uint8_t {
     Gshare
 };
 
+enum class PipelineType : uint8_t {
+    FiveStage = 0,   ///< Standard 5-stage RV64/32GC Rocket microarchitecture
+    ThreeStage = 1,  ///< 3-stage lightweight embedded microcontroller (Ibex/E21)
+    DualIssue = 2    ///< SweRV EH1-style dual-issue in-order superscalar pipeline
+};
+
 enum class CpuPreset : uint8_t {
     Rocket,    ///< Standard 5-stage RV64/32GC microarchitecture (Rocket Core)
     Embedded,  ///< 3-stage lightweight embedded microcontroller
@@ -76,10 +82,12 @@ struct CpuConfig {
     bool enable_ex_forwarding = true;
     bool enable_mem_forwarding = true;
     bool record_snapshots = false;
+    PipelineType pipeline_type = PipelineType::FiveStage;
 
     void apply_preset(CpuPreset preset) {
         switch (preset) {
             case CpuPreset::Rocket:
+                pipeline_type = PipelineType::FiveStage;
                 icache_miss_penalty = 10;
                 dcache_miss_penalty = 15;
                 tlb_miss_penalty = 25;
@@ -97,6 +105,7 @@ struct CpuConfig {
                 btb_entries = 128;
                 break;
             case CpuPreset::Embedded:
+                pipeline_type = PipelineType::ThreeStage;
                 icache_miss_penalty = 6;
                 dcache_miss_penalty = 8;
                 tlb_miss_penalty = 15;
@@ -148,6 +157,8 @@ struct PipelineCycleSnapshot {
     StageInfo e;
     StageInfo m;
     StageInfo w;
+    StageInfo e1;  // Slot 1 EX stage for dual-issue superscalar
+    StageInfo w1;  // Slot 1 WB stage for dual-issue superscalar
 };
 
 struct PipelineStats {
@@ -160,6 +171,8 @@ struct PipelineStats {
     uint64_t structural_stalls = 0;
     uint64_t data_hazard_stalls = 0;
     uint64_t control_hazard_bubbles = 0;
+    uint64_t dual_issue_cycles = 0;
+    uint64_t single_issue_cycles = 0;
 };
 
 struct PipelineSimState {
@@ -212,6 +225,7 @@ class PipelineSim {
     [[nodiscard]] auto data_hazard_stalls() const -> uint64_t;
     [[nodiscard]] auto control_hazard_bubbles() const -> uint64_t;
     [[nodiscard]] auto get_cycle_history_copy() const -> std::vector<PipelineCycleSnapshot>;
+    [[nodiscard]] auto get_stats() const -> PipelineStats;
 
     // Model state getters for TUI compatibility
     [[nodiscard]] auto f_reg() const -> PipelineReg;
@@ -219,6 +233,8 @@ class PipelineSim {
     [[nodiscard]] auto e_reg() const -> PipelineReg;
     [[nodiscard]] auto m_reg() const -> PipelineReg;
     [[nodiscard]] auto w_reg() const -> PipelineReg;
+    [[nodiscard]] auto e1_reg() const -> PipelineReg;
+    [[nodiscard]] auto w1_reg() const -> PipelineReg;
 
     [[nodiscard]] auto div_busy_cycles_remaining() const -> uint32_t;
     [[nodiscard]] auto icache_stall_remaining() const -> uint32_t;

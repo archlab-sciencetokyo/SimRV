@@ -42,32 +42,49 @@ auto compose_frame_lines(const FrameGeometry& frame, int terminal_width, TuiLayo
     lines.reserve(static_cast<std::size_t>(frame.frame_rows));
     append_block_lines(lines, header_block);
 
+    const auto style = get_active_theme_style();
+    const bool is_ansi = (style == TuiThemeStyle::ClassicAnsi);
+    const char* border_v = is_ansi ? "|" : "║";
+    const char* div_v = is_ansi ? "|" : "│";
+
     for (int row = 0; row < frame.content_rows; ++row) {
         if (layout == TuiLayout::Split) {
             lines.push_back(std::format(
-                "{}║\033[0m{}{}│\033[0m{}{}║\033[0m", kThemeBorder,
+                "{}{}\033[0m{}{}{}\033[0m{}{}{}\033[0m", kThemeBorder, border_v,
                 fit_pane_row(render_left(row, frame.panes.left), frame.panes.left), kThemeBorder,
-                fit_pane_row(render_right(row, frame.panes.right), frame.panes.right),
-                kThemeBorder));
+                div_v, fit_pane_row(render_right(row, frame.panes.right), frame.panes.right),
+                kThemeBorder, border_v));
         } else if (layout == TuiLayout::FullRight) {
             lines.push_back(
-                std::format("{}║\033[0m{}{}║\033[0m", kThemeBorder,
+                std::format("{}{}\033[0m{}{}{}\033[0m", kThemeBorder, border_v,
                             fit_pane_row(render_right(row, frame.panes.right), frame.panes.right),
-                            kThemeBorder));
+                            kThemeBorder, border_v));
         } else {
-            lines.push_back(std::format(
-                "{}║\033[0m{}{}║\033[0m", kThemeBorder,
-                fit_pane_row(render_left(row, frame.panes.left), frame.panes.left), kThemeBorder));
+            lines.push_back(
+                std::format("{}{}\033[0m{}{}{}\033[0m", kThemeBorder, border_v,
+                            fit_pane_row(render_left(row, frame.panes.left), frame.panes.left),
+                            kThemeBorder, border_v));
         }
     }
 
-    if (layout == TuiLayout::Split) {
-        lines.push_back(std::format("{}╠{}╧{}╣\033[0m", kThemeBorder,
-                                    make_repeated_string("═", frame.panes.left),
-                                    make_repeated_string("═", frame.panes.right)));
+    if (is_ansi) {
+        if (layout == TuiLayout::Split) {
+            lines.push_back(std::format("{}+{}+{}+\033[0m", kThemeBorder,
+                                        make_repeated_string("-", frame.panes.left),
+                                        make_repeated_string("-", frame.panes.right)));
+        } else {
+            lines.push_back(std::format("{}+{}+\033[0m", kThemeBorder,
+                                        make_repeated_string("-", terminal_width - 2)));
+        }
     } else {
-        lines.push_back(std::format("{}╠{}╣\033[0m", kThemeBorder,
-                                    make_repeated_string("═", terminal_width - 2)));
+        if (layout == TuiLayout::Split) {
+            lines.push_back(std::format("{}╠{}╧{}╣\033[0m", kThemeBorder,
+                                        make_repeated_string("═", frame.panes.left),
+                                        make_repeated_string("═", frame.panes.right)));
+        } else {
+            lines.push_back(std::format("{}╠{}╣\033[0m", kThemeBorder,
+                                        make_repeated_string("═", terminal_width - 2)));
+        }
     }
 
     append_block_lines(lines, footer_block);

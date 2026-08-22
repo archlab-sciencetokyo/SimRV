@@ -72,10 +72,11 @@ def main():
         "--os",
         "-m", mem_img,
         "-D", disk_img,
-        "-f", dtb_img,
         "--tui",
         "-e", "10000000000"  # Leave enough execution time to interact after boot.
     ]
+    if dtb_img and dtb_img != "dynamic" and dtb_img != "NONE" and os.path.exists(dtb_img):
+        cmd.extend(["-f", dtb_img])
     cmd.extend(shlex.split(os.environ.get("SIMRV_TEST_EXTRA_ARGS", "")))
 
     print(f"Running Linux PTY boot test: {' '.join(cmd)}")

@@ -17,18 +17,31 @@
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/debug/SymbolTable.hpp"
-#include "simrv/device/Audio.hpp"
-#include "simrv/device/Console.hpp"
-#include "simrv/device/Disk.hpp"
-#include "simrv/device/Framebuffer.hpp"
-#include "simrv/device/Rng.hpp"
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 
 namespace simrv::device {
 class PowerMmio;
-class InputDevice;
+class AclintMtimer;
+class AclintMswi;
+class Imsic;
+class Aplic;
+class PcieRootComplex;
+class VirtioPciBlock;
+class VirtioPciConsole;
+class VirtioPciRng;
+class VirtioPciGpu;
+class VirtioPciInput;
+class VirtioPciSound;
+class VirtioPciNet;
+class VirtioMmioBlock;
+class VirtioMmioConsole;
+class VirtioMmioRng;
+class VirtioMmioGpu;
+class VirtioMmioInput;
+class VirtioMmioSound;
+class VirtioMmioNet;
 }  // namespace simrv::device
 
 namespace simrv::tui {
@@ -37,6 +50,13 @@ class LeftPane;
 }  // namespace simrv::tui
 
 namespace simrv::core {
+
+enum class PlatformProfile : uint8_t {
+    Pcie = 0,
+    Mmio = 1,
+    Hybrid = 2,
+};
+
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
 enum class ExecutionState : uint8_t {
     Stopped = 0,
@@ -137,6 +157,7 @@ class Machine {
     std::atomic<bool> s_tuimode{false};         // Enable TUI monitor mode
     std::atomic<bool> s_gui_mode{false};        // Enable GUI graphics window mode
     std::atomic<bool> s_high_contrast{false};   // Enable high-contrast TUI mode
+    std::atomic<bool> s_class_mode{false};      // Enable educational classroom mode
     std::atomic<bool> s_debugmode{false};       // Enable debug logging in MMIO paths
     std::atomic<bool> s_debug_mode{false};      // Enable TUI debug diagnostics mode
     std::atomic<bool> s_dlog_mode{false};       // Enable device request/response logging
@@ -153,10 +174,10 @@ class Machine {
     std::atomic<bool> s_multithreaded{false};     // Run simulation in a background thread
     std::atomic<bool> s_rollback_enabled{false};  // Enable instruction rollback tracking
     uint32_t s_num_harts = 1;                     // Number of simulated harts (SMP cores)
-    uint32_t s_smp_quantum = 100;                 // Instruction quantum per hart in cooperative SMP mode
-    std::atomic<bool> s_smp_multithreaded{false}; // Enable parallel multi-threaded SMP execution
-    uint64_t s_dram_size = 0;                     // Dynamic DRAM size in bytes (0 = default 256MB)
-    double s_mouse_sensitivity = 1.0;             // Mouse relative sensitivity factor
+    uint32_t s_smp_quantum = 100;  // Instruction quantum per hart in cooperative SMP mode
+    std::atomic<bool> s_smp_multithreaded{false};  // Enable parallel multi-threaded SMP execution
+    uint64_t s_dram_size = 0;                      // Dynamic DRAM size in bytes (0 = default 256MB)
+    double s_mouse_sensitivity = 1.0;              // Mouse relative sensitivity factor
 
     // ========== Debug / Co-Simulation Flags ==========
     std::atomic<bool> s_gdb_mode{false};       // Enable GDB RSP stub
@@ -181,11 +202,13 @@ class Machine {
     unsigned int s_vlen = 0;                      // Selected VLEN (bits, or 0 if default)
 
     // ========== I/O and Logging ==========
-    std::string s_fn_memimg;                             // Memory image filename
-    std::string s_fn_dskimg;                             // Disk image filename
-    std::string s_fn_dvtree;                             // Device-tree binary filename
-    std::string s_fn_traplog;                            // Trap/exception log filename
-    std::string s_fn_cpuconfig;                          // CPU config filename
+    std::string s_fn_memimg;     // Memory image filename
+    std::string s_fn_dskimg;     // Disk image filename
+    std::string s_fn_dvtree;     // Device-tree binary filename
+    std::string s_fn_traplog;    // Trap/exception log filename
+    std::string s_fn_cpuconfig;  // CPU config filename
+    simrv::pipeline::PipelineType s_pipeline_type =
+        simrv::pipeline::PipelineType::FiveStage;        // Pipeline microarchitecture
     std::chrono::steady_clock::time_point s_start_time;  // Simulation start timestamp
 
     // ========== CPU and Subsystems ==========
@@ -205,19 +228,35 @@ class Machine {
         }
         return *secondary_harts_.at(index - 1);
     }
-    [[nodiscard]] auto num_harts() const -> size_t {
-        return 1 + secondary_harts_.size();
-    }
-    std::unique_ptr<simrv::device::Disk> disk;
-    std::unique_ptr<simrv::device::Console> console;
-    std::unique_ptr<simrv::device::Rng> rng;
+    [[nodiscard]] auto num_harts() const -> size_t { return 1 + secondary_harts_.size(); }
     std::unique_ptr<simrv::Rtc> rtc;
     std::unique_ptr<simrv::device::Uart> uart;
     std::unique_ptr<simrv::tui::Tui> tui;
     std::unique_ptr<simrv::device::PowerMmio> power;
-    std::unique_ptr<simrv::device::Framebuffer> framebuffer;
-    std::unique_ptr<simrv::device::InputDevice> input_device;
-    std::unique_ptr<simrv::device::Audio> audio;
+    std::unique_ptr<simrv::device::AclintMtimer> aclint_mtimer;
+    std::unique_ptr<simrv::device::AclintMswi> aclint_mswi;
+    std::unique_ptr<simrv::device::Imsic> imsic_m;
+    std::unique_ptr<simrv::device::Imsic> imsic_s;
+    std::unique_ptr<simrv::device::Aplic> aplic_m;
+    std::unique_ptr<simrv::device::Aplic> aplic_s;
+    std::unique_ptr<simrv::device::PcieRootComplex> pcie;
+    std::shared_ptr<simrv::device::VirtioPciBlock> pci_disk;
+    std::shared_ptr<simrv::device::VirtioPciConsole> pci_console;
+    std::shared_ptr<simrv::device::VirtioPciRng> pci_rng;
+    std::shared_ptr<simrv::device::VirtioPciGpu> pci_gpu;
+    std::shared_ptr<simrv::device::VirtioPciInput> pci_input;
+    std::shared_ptr<simrv::device::VirtioPciSound> pci_sound;
+    std::shared_ptr<simrv::device::VirtioPciNet> pci_net;
+
+    PlatformProfile s_platform_profile = PlatformProfile::Pcie;
+    std::string s_net_mode = "user";
+    std::shared_ptr<simrv::device::VirtioMmioBlock> mmio_disk;
+    std::shared_ptr<simrv::device::VirtioMmioConsole> mmio_console;
+    std::shared_ptr<simrv::device::VirtioMmioRng> mmio_rng;
+    std::shared_ptr<simrv::device::VirtioMmioGpu> mmio_gpu;
+    std::shared_ptr<simrv::device::VirtioMmioInput> mmio_input;
+    std::shared_ptr<simrv::device::VirtioMmioSound> mmio_sound;
+    std::shared_ptr<simrv::device::VirtioMmioNet> mmio_net;
 
     // ========== Debug Subsystems (null when disabled) ==========
     std::unique_ptr<simrv::debug::GdbStub> gdb_stub;
@@ -234,9 +273,6 @@ class Machine {
 
    protected:
     std::unique_ptr<Byte, decltype(&std::free)> mmem_owner_{nullptr, &std::free};
-    std::vector<simrv::virtio::QueueState> console_queue_owner_;
-    std::vector<simrv::virtio::QueueState> disk_queue_owner_;
-    std::vector<simrv::virtio::QueueState> rng_queue_owner_;
     friend class simrv::core::CPU;
     friend class simrv::execute::ExecuteUnit;
     friend class simrv::device::Uart;
