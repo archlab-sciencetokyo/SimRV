@@ -76,9 +76,9 @@ auto render_cache_way_row(const simrv::core::CPU& cpu, int way_idx, int inspect_
     std::string highlight;
     if (is_replaced_way) {
         highlight =
-            std::format("  \033[1m{}◄ MISS\033[0m {}▸ REPLACED\033[0m", kThemeCoral, kThemePeach);
+            std::format(" [1m{}◄ MISS\033[0m {}▸ REPLACED\033[0m", kThemeCoral, kThemePeach);
     } else if (is_hit_way) {
-        highlight = std::format("  \033[1m{}◄ HIT\033[0m", kThemeMint);
+        highlight = std::format(" [1m{}◄ HIT\033[0m", kThemeMint);
     }
 
     std::string line_str;
@@ -101,15 +101,14 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
                 return section_line("Cache — Not Available", width);
             case 2:
                 return format_to_width(
-                    std::format("  {}Cache simulation is disabled in high-performance mode.\033[0m",
+                    std::format(" {}Cache simulation is disabled in high-performance mode.\033[0m",
                                 kThemeMuted),
                     width);
             case 3:
-                return format_to_width(
-                    std::format("  {}Relaunch SimRV with {}--ca\033[0m{} (-C) to "
-                                "enable.\033[0m",
-                                kThemeMuted, kThemeVal, kThemeMuted),
-                    width);
+                return format_to_width(std::format(" {}Relaunch SimRV with {}--ca\033[0m{} (-C) to "
+                                                   "enable.\033[0m",
+                                                   kThemeMuted, kThemeVal, kThemeMuted),
+                                       width);
             default:
                 return format_to_width("", width);
         }
@@ -140,13 +139,13 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
                 (tot == 0) ? 0.0 : 100.0 * static_cast<double>(m) / static_cast<double>(tot);
             if (width < 50) {
                 return format_to_width(
-                    std::format("  {}IC\033[0m H:{}{}\033[0m M:{}{}\033[0m MR:{}{:>4.1f}%\033[0m",
+                    std::format(" {}IC\033[0m H:{}{}\033[0m M:{}{}\033[0m MR:{}{:>4.1f}%\033[0m",
                                 kThemeText, kThemeMint, simrv::util::format_scaled(h), kThemeCoral,
                                 simrv::util::format_scaled(m), kThemePeach, mr),
                     width);
             }
             return format_to_width(
-                std::format("  {}ICache\033[0m Hits: {}{:<7}\033[0m Miss: {}{:<6}\033[0m MR: "
+                std::format(" {}ICache\033[0m Hits: {}{:<7}\033[0m Miss: {}{:<6}\033[0m MR: "
                             "{}{:>5.1f}%\033[0m Evict: {}{:<5}\033[0m",
                             kThemeText, kThemeMint, simrv::util::format_with_commas(h), kThemeCoral,
                             simrv::util::format_with_commas(m), kThemePeach, mr, kThemeSky,
@@ -160,13 +159,13 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
                 (tot == 0) ? 0.0 : 100.0 * static_cast<double>(m) / static_cast<double>(tot);
             if (width < 50) {
                 return format_to_width(
-                    std::format("  {}DC\033[0m H:{}{}\033[0m M:{}{}\033[0m MR:{}{:>4.1f}%\033[0m",
+                    std::format(" {}DC\033[0m H:{}{}\033[0m M:{}{}\033[0m MR:{}{:>4.1f}%\033[0m",
                                 kThemeText, kThemeMint, simrv::util::format_scaled(h), kThemeCoral,
                                 simrv::util::format_scaled(m), kThemePeach, mr),
                     width);
             }
             return format_to_width(
-                std::format("  {}DCache\033[0m Hits: {}{:<7}\033[0m Miss: {}{:<6}\033[0m MR: "
+                std::format(" {}DCache\033[0m Hits: {}{:<7}\033[0m Miss: {}{:<6}\033[0m MR: "
                             "{}{:>5.1f}%\033[0m Evict: {}{:<5}\033[0m",
                             kThemeText, kThemeMint, simrv::util::format_with_commas(h), kThemeCoral,
                             simrv::util::format_with_commas(m), kThemePeach, mr, kThemeSky,
@@ -187,7 +186,7 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
                 std::string ibar = make_bar(iratio, bar_w);
                 std::string dbar = make_bar(dratio, bar_w);
                 return format_to_width(
-                    std::format("  {}IC\033[0m[{}]{:>4.0f}% {}DC\033[0m[{}]{:>4.0f}%", kThemeText,
+                    std::format(" {}IC\033[0m[{}]{:>4.0f}% {}DC\033[0m[{}]{:>4.0f}%", kThemeText,
                                 ibar, iratio * 100.0, kThemeText, dbar, dratio * 100.0),
                     width);
             }
@@ -195,7 +194,7 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
             std::string ibar = make_bar(iratio, bar_w);
             std::string dbar = make_bar(dratio, bar_w);
             return format_to_width(
-                std::format("  {}IC\033[0m [{}] {:>5.1f}%  │  {}DC\033[0m [{}] {:>5.1f}%",
+                std::format(" {}IC\033[0m [{}] {:>5.1f}%  │  {}DC\033[0m [{}] {:>5.1f}%",
                             kThemeText, ibar, iratio * 100.0, kThemeText, dbar, dratio * 100.0),
                 width);
         }
@@ -207,7 +206,7 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
         }
         case 5:
             return format_to_width(
-                std::format("  {}Use \033[1m{}[↑/↓]\033[0m{} Way, "
+                std::format(" {}Use \033[1m{}[↑/↓]\033[0m{} Way, "
                             "\033[1m{}[←/→]\033[0m{} Set\033[0m",
                             kThemeMuted, kThemeSky, kThemeMuted, kThemeSky, kThemeMuted),
                 width);
@@ -233,13 +232,12 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
                     hex_str += std::format("{}{:02x} ", kThemeVal, byte_val);
                 }
                 return format_to_width(
-                    std::format("  {}Data (Way #{}): {}\033[0m", kThemeText, way_idx, hex_str),
+                    std::format(" {}Data (Way #{}): {}\033[0m", kThemeText, way_idx, hex_str),
                     width);
             }
-            return format_to_width(
-                std::format("  {}Data (Way #{}): {}<Empty / Invalid Line>\033[0m", kThemeText,
-                            way_idx, kThemeMuted),
-                width);
+            return format_to_width(std::format(" {}Data (Way #{}): {}<Empty / Invalid Line>\033[0m",
+                                               kThemeText, way_idx, kThemeMuted),
+                                   width);
         }
         case 11:
             return section_line("Set Occupancy Map & Replacement Log", width);
@@ -292,7 +290,7 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
                 (r_set == 0xFFFFFFFF) ? "None" : std::format("Set #{}, Way #{}", r_set, r_way);
 
             return format_to_width(
-                std::format("  {}Last Evicted Tag:\033[0m {}  │  {}Location:\033[0m {}", kThemeText,
+                std::format(" {}Last Evicted Tag:\033[0m {}  │  {}Location:\033[0m {}", kThemeText,
                             ev_str, kThemeText, r_loc),
                 width);
         }

@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdint>
 #include <format>
 #include <string>
 #include <vector>
@@ -16,6 +15,83 @@
 namespace simrv::tui::modals {
 
 namespace {
+
+/// Word-wrap `line` (which may contain ANSI escape sequences) to `max_w` visible characters.
+/// Continuation lines are indented by `cont_indent` spaces to align under bullet text.
+/// Returns one or more output lines ready to pass to add_row_cb (without trailing newline).
+auto wrap_ansi_line(const std::string& line, int max_w, int cont_indent = 2)
+    -> std::vector<std::string> {
+    if (max_w <= 0) return {line};
+
+    // Measure visible display width of a string that may have ANSI escapes.
+    auto vis_width = [](const std::string& s) -> int { return get_display_width(s); };
+
+    // Split line into tokens preserving ANSI escapes so we can re-emit them on continuation lines.
+    // We walk the string character by character, collecting "words" (non-space runs including any
+    // embedded ANSI sequences) and "spaces".
+    std::vector<std::string> words;
+    std::vector<bool> is_space;
+    std::string cur;
+    bool in_esc = false;
+    for (std::size_t i = 0; i < line.size(); ++i) {
+        char ch = line.at(i);
+        if (ch == '\033') {
+            in_esc = true;
+            cur += ch;
+        } else if (in_esc) {
+            cur += ch;
+            if (ch >= 0x40 && ch <= 0x7E && ch != '[') in_esc = false;
+            if (!in_esc && cur.size() >= 2 && cur.at(1) == '[') {
+                // wait for terminator already consumed
+            }
+            // CSI: wait for final byte
+            if (ch >= 0x40 && ch <= 0x7E) in_esc = false;
+        } else if (ch == ' ') {
+            if (!cur.empty()) {
+                words.push_back(cur);
+                is_space.push_back(false);
+                cur.clear();
+            }
+            words.push_back(" ");
+            is_space.push_back(true);
+        } else {
+            cur += ch;
+        }
+    }
+    if (!cur.empty()) {
+        words.push_back(cur);
+        is_space.push_back(false);
+    }
+
+    std::vector<std::string> result;
+    std::string current_line;
+    int current_w = 0;
+    std::string const indent(static_cast<std::size_t>(cont_indent), ' ');
+
+    for (std::size_t i = 0; i < words.size(); ++i) {
+        const std::string& w = words.at(i);
+        if (is_space.at(i)) {
+            // space: only emit if we have content on current line
+            if (current_w > 0) {
+                current_line += ' ';
+                current_w += 1;
+            }
+            continue;
+        }
+        int ww = vis_width(w);
+        if (current_w + ww > max_w && current_w > 0) {
+            // flush current line, start new continuation
+            result.push_back(current_line);
+            current_line = indent;
+            current_w = cont_indent;
+        }
+        current_line += w;
+        current_w += ww;
+    }
+    if (!current_line.empty()) result.push_back(current_line);
+    if (result.empty()) result.push_back("");
+    return result;
+}
 
 struct TopicData {
     const char* title;
@@ -231,6 +307,7 @@ void GlossaryModal::render(std::vector<std::string>& content_rows,
 
     int const total_lines = static_cast<int>(data.lines.size());
     int const start_line = std::min(scroll_offset, std::max(0, total_lines - 1));
+    int const wrap_w = std::max(10, box_w - 4);  // available chars inside the modal border
 
     for (int i = start_line; i < total_lines; ++i) {
         std::string line = data.lines.at(static_cast<std::size_t>(i));
@@ -243,10 +320,14 @@ void GlossaryModal::render(std::vector<std::string>& content_rows,
             while ((p = line.find("→")) != std::string::npos)
                 line.replace(p, std::string("→").length(), "->");
         }
-        if (get_display_width(line) + 2 > box_w - 2 && box_w >= 20) {
-            line = format_to_width(line, box_w - 4);
+        if (line.empty()) {
+            add_row_cb("");
+            continue;
         }
-        add_row_cb(" " + line);
+        // ANSI-aware word-wrap: continuation lines indent by 2 to align under bullet text.
+        for (const auto& wrapped : wrap_ansi_line(line, wrap_w)) {
+            add_row_cb(" " + wrapped);
+        }
     }
 
     add_row_cb("");

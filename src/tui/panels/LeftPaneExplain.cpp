@@ -79,6 +79,8 @@ auto has_imm(InstFormat fmt) -> bool;
 auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
     -> std::vector<std::string> {
     std::vector<std::string> rows;
+
+    // --- Narrow mode: aligned two-column text list (no box drawing) ---
     if (width < 56) {
         uint32_t op = ir_org & 0x7F;
         uint32_t rd = (ir_org >> 7) & 0x1F;
@@ -90,253 +92,188 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
         uint32_t imm20 = (ir_org >> 12) & 0xFFFFF;
 
         rows.push_back(format_to_width(
-            std::format("  {}Opcode  [6:0]  :\033[0m {:07b} (0x{:02X})", kThemeText, op, op),
+            std::format(" {}Opcode [6:0]  :{} {:07b} (0x{:02X})", kThemeText, "\033[0m", op, op),
             width));
-        if (has_rd(fmt)) {
+        if (has_rd(fmt))
             rows.push_back(format_to_width(
-                std::format("  {}rd      [11:7] :\033[0m {:05b} (x{})", kThemeText, rd, rd),
+                std::format(" {}rd     [11:7] :{} {:05b} (x{})", kThemeText, "\033[0m", rd, rd),
                 width));
-        }
-        if (has_funct3(fmt)) {
+        if (has_funct3(fmt))
             rows.push_back(format_to_width(
-                std::format("  {}funct3  [14:12]:\033[0m {:03b} (0x{:X})", kThemeText, f3, f3),
+                std::format(" {}funct3 [14:12]:{} {:03b} (0x{:X})", kThemeText, "\033[0m", f3, f3),
                 width));
-        }
-        if (has_rs1(fmt)) {
+        if (has_rs1(fmt))
             rows.push_back(format_to_width(
-                std::format("  {}rs1     [19:15]:\033[0m {:05b} (x{})", kThemeText, rs1, rs1),
+                std::format(" {}rs1    [19:15]:{} {:05b} (x{})", kThemeText, "\033[0m", rs1, rs1),
                 width));
-        }
-        if (has_rs2(fmt)) {
+        if (has_rs2(fmt))
             rows.push_back(format_to_width(
-                std::format("  {}rs2     [24:20]:\033[0m {:05b} (x{})", kThemeText, rs2, rs2),
+                std::format(" {}rs2    [24:20]:{} {:05b} (x{})", kThemeText, "\033[0m", rs2, rs2),
                 width));
-        }
-        if (has_funct7(fmt)) {
+        if (has_funct7(fmt))
+            rows.push_back(format_to_width(std::format(" {}funct7 [31:25]:{} {:07b} (0x{:02X})",
+                                                       kThemeText, "\033[0m", f7, f7),
+                                           width));
+        if (fmt == InstFormat::I)
             rows.push_back(format_to_width(
-                std::format("  {}funct7  [31:25]:\033[0m {:07b} (0x{:02X})", kThemeText, f7, f7),
+                std::format(" {}imm    [11:0] :{} {:012b} ({})", kThemeText, "\033[0m", imm12,
+                            static_cast<int32_t>((imm12 ^ 0x800) - 0x800)),
                 width));
-        }
-        if (fmt == InstFormat::I) {
-            rows.push_back(
-                format_to_width(std::format("  {}imm[11:0]     :\033[0m {:012b} ({})", kThemeText,
-                                            imm12, static_cast<int32_t>((imm12 ^ 0x800) - 0x800)),
-                                width));
-        } else if (fmt == InstFormat::U || fmt == InstFormat::J) {
-            rows.push_back(
-                format_to_width(std::format("  {}imm[31:12]    :\033[0m {:020b} (0x{:05X})",
-                                            kThemeText, imm20, imm20),
-                                width));
-        }
+        else if (fmt == InstFormat::U || fmt == InstFormat::J)
+            rows.push_back(format_to_width(std::format(" {}imm    [31:12]:{} {:020b} (0x{:05X})",
+                                                       kThemeText, "\033[0m", imm20, imm20),
+                                           width));
         return rows;
     }
 
+    // --- Box mode: compute-driven column widths ---
+    // Each column: label text, bit-range text, bit count, extracted value
+    struct Col {
+        std::string label;
+        std::string bits;
+        int bit_count;
+        uint32_t value;
+        int cell_w;  // computed inner cell width (excl. borders)
+    };
+
+    auto make_cols = [](std::vector<Col> cols) -> std::vector<Col> {
+        for (auto& c : cols) {
+            int min_w = std::max(
+                {static_cast<int>(c.label.size()), static_cast<int>(c.bits.size()), c.bit_count});
+            c.cell_w = min_w + 2;
+        }
+        return cols;
+    };
+
+    // Build one content row (label / bits / value)
+    auto content_row = [](const std::vector<Col>& cols, int row_kind,
+                          const std::string& theme) -> std::string {
+        std::string row = std::format(" {}", theme);
+        for (auto const& c : cols) {
+            row += "\xe2\x94\x82\033[0m";  // │ + reset
+            std::string cell;
+            switch (row_kind) {
+                case 0:
+                    cell = c.label;
+                    break;
+                case 1:
+                    cell = c.bits;
+                    break;
+                default:
+                    cell = std::format("{:0{}b}", c.value, c.bit_count);
+                    break;
+            }
+            int disp = static_cast<int>(cell.size());
+            int pad = std::max(0, c.cell_w - disp);
+            int lpad = pad / 2;
+            int rpad = pad - lpad;
+            row += std::string(static_cast<std::size_t>(lpad), ' ');
+            row += cell;
+            row += std::string(static_cast<std::size_t>(rpad), ' ');
+        }
+        row += std::format("{}\xe2\x94\x82\033[0m", theme);
+        return row;
+    };
+
+    // Reusable box builder
+    auto build_box = [&](std::vector<Col> raw_cols) {
+        auto cols = make_cols(std::move(raw_cols));
+        // top border ┌─┬─┐
+        {
+            std::string row = std::format(" {}\xe2\x94\x8c", kThemeBorder);
+            for (std::size_t i = 0; i < cols.size(); ++i) {
+                for (int j = 0; j < cols.at(i).cell_w; ++j) row += "\xe2\x94\x80";
+                row += (i + 1 < cols.size()) ? "\xe2\x94\xac" : "\xe2\x94\x90";
+            }
+            row += "\033[0m";
+            rows.push_back(format_to_width(row, width));
+        }
+        rows.push_back(format_to_width(content_row(cols, 0, kThemeBorder), width));
+        rows.push_back(format_to_width(content_row(cols, 1, kThemeBorder), width));
+        // mid border ├─┼─┤
+        {
+            std::string row = std::format(" {}\xe2\x94\x9c", kThemeBorder);
+            for (std::size_t i = 0; i < cols.size(); ++i) {
+                for (int j = 0; j < cols.at(i).cell_w; ++j) row += "\xe2\x94\x80";
+                row += (i + 1 < cols.size()) ? "\xe2\x94\xbc" : "\xe2\x94\xa4";
+            }
+            row += "\033[0m";
+            rows.push_back(format_to_width(row, width));
+        }
+        rows.push_back(format_to_width(content_row(cols, 2, kThemeBorder), width));
+        // bottom border └─┴─┘
+        {
+            std::string row = std::format(" {}\xe2\x94\x94", kThemeBorder);
+            for (std::size_t i = 0; i < cols.size(); ++i) {
+                for (int j = 0; j < cols.at(i).cell_w; ++j) row += "\xe2\x94\x80";
+                row += (i + 1 < cols.size()) ? "\xe2\x94\xb4" : "\xe2\x94\x98";
+            }
+            row += "\033[0m";
+            rows.push_back(format_to_width(row, width));
+        }
+    };
+
     switch (fmt) {
         case InstFormat::R:
-            rows.push_back(format_to_width(
-                std::format("  {}┌─────────┬───────┬───────┬───────┬───────┬─────────┐\033[0m",
-                            kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format(
-                    "  {}│\033[0m funct7  {}│\033[0m  rs2  {}│\033[0m  rs1  {}│\033[0m  f3   "
-                    "{}│\033[0m  rd   {}│\033[0m opcode  {}│\033[0m",
-                    kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
-                    kThemeBorder, kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}│\033[0m 31..25  {}│\033[0m 24..20{}│\033[0m 19..15{}│\033[0m "
-                            "14..12{}│\033[0m 11..7 {}│\033[0m  6..0   {}│\033[0m",
-                            kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
-                            kThemeBorder, kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}├─────────┼───────┼───────┼───────┼───────┼─────────┤\033[0m",
-                            kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}│\033[0m {:07b} {}│\033[0m {:05b} {}│\033[0m {:05b} {}│\033[0m  "
-                            "{:03b}  {}│\033[0m {:05b} {}│\033[0m {:07b} {}│\033[0m",
-                            kThemeBorder, (ir_org >> 25) & 0x7F, kThemeBorder,
-                            (ir_org >> 20) & 0x1F, kThemeBorder, (ir_org >> 15) & 0x1F,
-                            kThemeBorder, (ir_org >> 12) & 0x07, kThemeBorder, (ir_org >> 7) & 0x1F,
-                            kThemeBorder, ir_org & 0x7F, kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}└─────────┴───────┴───────┴───────┴───────┴─────────┘\033[0m",
-                            kThemeBorder),
-                width));
+            build_box({
+                {"funct7", "31..25", 7, (ir_org >> 25) & 0x7F, 0},
+                {"rs2", "24..20", 5, (ir_org >> 20) & 0x1F, 0},
+                {"rs1", "19..15", 5, (ir_org >> 15) & 0x1F, 0},
+                {"f3", "14..12", 3, (ir_org >> 12) & 0x07, 0},
+                {"rd", "11..7", 5, (ir_org >> 7) & 0x1F, 0},
+                {"opcode", "6..0", 7, ir_org & 0x7F, 0},
+            });
             break;
         case InstFormat::I:
-            rows.push_back(format_to_width(
-                std::format("  {}┌──────────────┬───────┬───────┬───────┬─────────┐\033[0m",
-                            kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format(
-                    "  {}│\033[0m  imm[11:0]   {}│\033[0m  rs1  {}│\033[0m  f3   {}│\033[0m "
-                    " rd   {}│\033[0m opcode  {}│\033[0m",
-                    kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
-                    kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format(
-                    "  {}│\033[0m    31..20    {}│\033[0m 19..15{}│\033[0m 14..12{}│\033[0m "
-                    "11..7 {}│\033[0m  6..0   {}│\033[0m",
-                    kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
-                    kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}├──────────────┼───────┼───────┼───────┼─────────┤\033[0m",
-                            kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}│\033[0m {:012b} {}│\033[0m {:05b} {}│\033[0m  {:03b}  {}│\033[0m "
-                            "{:05b} {}│\033[0m {:07b} {}│\033[0m",
-                            kThemeBorder, (ir_org >> 20) & 0xFFF, kThemeBorder,
-                            (ir_org >> 15) & 0x1F, kThemeBorder, (ir_org >> 12) & 0x07,
-                            kThemeBorder, (ir_org >> 7) & 0x1F, kThemeBorder, ir_org & 0x7F,
-                            kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}└──────────────┴───────┴───────┴───────┴─────────┘\033[0m",
-                            kThemeBorder),
-                width));
+            build_box({
+                {"imm[11:0]", "31..20", 12, (ir_org >> 20) & 0xFFF, 0},
+                {"rs1", "19..15", 5, (ir_org >> 15) & 0x1F, 0},
+                {"f3", "14..12", 3, (ir_org >> 12) & 0x07, 0},
+                {"rd", "11..7", 5, (ir_org >> 7) & 0x1F, 0},
+                {"opcode", "6..0", 7, ir_org & 0x7F, 0},
+            });
             break;
         case InstFormat::S:
-            rows.push_back(format_to_width(
-                std::format("  {}┌─────────┬───────┬───────┬───────┬───────┬─────────┐\033[0m",
-                            kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format(
-                    "  {}│\033[0m imm11:5  {}│\033[0m  rs2  {}│\033[0m  rs1  {}│\033[0m  f3   "
-                    "{}│\033[0mimm4:0 {}│\033[0m opcode  {}│\033[0m",
-                    kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
-                    kThemeBorder, kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}│\033[0m 31..25   {}│\033[0m 24..20{}│\033[0m 19..15{}│\033[0m "
-                            "14..12{}│\033[0m 11..7 {}│\033[0m  6..0   {}│\033[0m",
-                            kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
-                            kThemeBorder, kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}├─────────┼───────┼───────┼───────┼───────┼─────────┤\033[0m",
-                            kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}│\033[0m {:07b} {}│\033[0m {:05b} {}│\033[0m {:05b} {}│\033[0m  "
-                            "{:03b}  {}│\033[0m {:05b} {}│\033[0m {:07b} {}│\033[0m",
-                            kThemeBorder, (ir_org >> 25) & 0x7F, kThemeBorder,
-                            (ir_org >> 20) & 0x1F, kThemeBorder, (ir_org >> 15) & 0x1F,
-                            kThemeBorder, (ir_org >> 12) & 0x07, kThemeBorder, (ir_org >> 7) & 0x1F,
-                            kThemeBorder, ir_org & 0x7F, kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}└─────────┴───────┴───────┴───────┴───────┴─────────┘\033[0m",
-                            kThemeBorder),
-                width));
+            build_box({
+                {"imm[11:5]", "31..25", 7, (ir_org >> 25) & 0x7F, 0},
+                {"rs2", "24..20", 5, (ir_org >> 20) & 0x1F, 0},
+                {"rs1", "19..15", 5, (ir_org >> 15) & 0x1F, 0},
+                {"f3", "14..12", 3, (ir_org >> 12) & 0x07, 0},
+                {"imm[4:0]", "11..7", 5, (ir_org >> 7) & 0x1F, 0},
+                {"opcode", "6..0", 7, ir_org & 0x7F, 0},
+            });
             break;
         case InstFormat::B:
-            rows.push_back(format_to_width(
-                std::format("  {}┌─────────┬───────┬───────┬───────┬───────┬─────────┐\033[0m",
-                            kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format(
-                    "  {}│\033[0m imm12:5  {}│\033[0m  rs2  {}│\033[0m  rs1  {}│\033[0m  f3   "
-                    "{}│\033[0mimm4:11{}│\033[0m opcode  {}│\033[0m",
-                    kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
-                    kThemeBorder, kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}│\033[0m 31..25   {}│\033[0m 24..20{}│\033[0m 19..15{}│\033[0m "
-                            "14..12{}│\033[0m 11..7 {}│\033[0m  6..0   {}│\033[0m",
-                            kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
-                            kThemeBorder, kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}├─────────┼───────┼───────┼───────┼───────┼─────────┤\033[0m",
-                            kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}│\033[0m {:07b} {}│\033[0m {:05b} {}│\033[0m {:05b} {}│\033[0m  "
-                            "{:03b}  {}│\033[0m {:05b} {}│\033[0m {:07b} {}│\033[0m",
-                            kThemeBorder, (ir_org >> 25) & 0x7F, kThemeBorder,
-                            (ir_org >> 20) & 0x1F, kThemeBorder, (ir_org >> 15) & 0x1F,
-                            kThemeBorder, (ir_org >> 12) & 0x07, kThemeBorder, (ir_org >> 7) & 0x1F,
-                            kThemeBorder, ir_org & 0x7F, kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}└─────────┴───────┴───────┴───────┴───────┴─────────┘\033[0m",
-                            kThemeBorder),
-                width));
+            build_box({
+                {"imm[12:5]", "31..25", 7, (ir_org >> 25) & 0x7F, 0},
+                {"rs2", "24..20", 5, (ir_org >> 20) & 0x1F, 0},
+                {"rs1", "19..15", 5, (ir_org >> 15) & 0x1F, 0},
+                {"f3", "14..12", 3, (ir_org >> 12) & 0x07, 0},
+                {"imm[4:1|11]", "11..7", 5, (ir_org >> 7) & 0x1F, 0},
+                {"opcode", "6..0", 7, ir_org & 0x7F, 0},
+            });
             break;
         case InstFormat::U:
         case InstFormat::J:
-            rows.push_back(format_to_width(
-                std::format("  {}┌──────────────────────┬───────┬─────────┐\033[0m", kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}│\033[0m      immediate       {}│\033[0m  rd   {}│\033[0m opcode  "
-                            "{}│\033[0m",
-                            kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}│\033[0m        31..12        {}│\033[0m 11..7 {}│\033[0m  6..0   "
-                            "{}│\033[0m",
-                            kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}├──────────────────────┼───────┼─────────┤\033[0m", kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}│\033[0m {:020b} {}│\033[0m {:05b} {}│\033[0m {:07b} {}│\033[0m",
-                            kThemeBorder, (ir_org >> 12) & 0xFFFFF, kThemeBorder,
-                            (ir_org >> 7) & 0x1F, kThemeBorder, ir_org & 0x7F, kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}└──────────────────────┴───────┴─────────┘\033[0m", kThemeBorder),
-                width));
+            build_box({
+                {"imm[31:12]", "31..12", 20, (ir_org >> 12) & 0xFFFFF, 0},
+                {"rd", "11..7", 5, (ir_org >> 7) & 0x1F, 0},
+                {"opcode", "6..0", 7, ir_org & 0x7F, 0},
+            });
             break;
         case InstFormat::R4:
-            rows.push_back(format_to_width(
-                std::format("  {}┌───────┬─────┬───────┬───────┬─────┬───────┬─────────┐\033[0m",
-                            kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}│\033[0m  rs3  {}│\033[0m fmt {}│\033[0m  rs2  {}│\033[0m  rs1  "
-                            "{}│\033[0m f3  {}│\033[0m  rd   {}│\033[0m opcode  {}│\033[0m",
-                            kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
-                            kThemeBorder, kThemeBorder, kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}│\033[0m 31..27{}│\033[0m26.25{}│\033[0m 24..20{}│\033[0m 19..15"
-                            "{}│\033[0m14.12{}│\033[0m 11..7 {}│\033[0m  6..0   {}│\033[0m",
-                            kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
-                            kThemeBorder, kThemeBorder, kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}├───────┼─────┼───────┼───────┼─────┼───────┼─────────┤\033[0m",
-                            kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format(
-                    "  {}│\033[0m {:05b} {}│\033[0m{:02b} 00{}│\033[0m {:05b} {}│\033[0m "
-                    "{:05b} {}│\033[0m{:03b}  {}│\033[0m {:05b} {}│\033[0m {:07b} {}│\033[0m",
-                    kThemeBorder, (ir_org >> 27) & 0x1F, kThemeBorder, (ir_org >> 25) & 0x03,
-                    kThemeBorder, (ir_org >> 20) & 0x1F, kThemeBorder, (ir_org >> 15) & 0x1F,
-                    kThemeBorder, (ir_org >> 12) & 0x07, kThemeBorder, (ir_org >> 7) & 0x1F,
-                    kThemeBorder, ir_org & 0x7F, kThemeBorder),
-                width));
-            rows.push_back(format_to_width(
-                std::format("  {}└───────┴─────┴───────┴───────┴─────┴───────┴─────────┘\033[0m",
-                            kThemeBorder),
-                width));
+            build_box({
+                {"rs3", "31..27", 5, (ir_org >> 27) & 0x1F, 0},
+                {"fmt", "26..25", 2, (ir_org >> 25) & 0x03, 0},
+                {"rs2", "24..20", 5, (ir_org >> 20) & 0x1F, 0},
+                {"rs1", "19..15", 5, (ir_org >> 15) & 0x1F, 0},
+                {"f3", "14..12", 3, (ir_org >> 12) & 0x07, 0},
+                {"rd", "11..7", 5, (ir_org >> 7) & 0x1F, 0},
+                {"opcode", "6..0", 7, ir_org & 0x7F, 0},
+            });
             break;
         default:
-            rows.push_back(format_to_width("  (Unknown instruction format layout)", width));
+            rows.push_back(format_to_width(" (Unknown instruction format layout)", width));
             break;
     }
     return rows;

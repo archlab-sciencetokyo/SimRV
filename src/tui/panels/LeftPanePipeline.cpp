@@ -382,7 +382,7 @@ auto LeftPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int s
                 return section_line("3-Stage Embedded Core (Ibex/E21)", width);
             case 1: {
                 std::string diagram = std::format(
-                    "  \033[1;36mIF:{}\033[0m → \033[1;32mID/EX:{}\033[0m → "
+                    " [1;36mIF:{}\033[0m → \033[1;32mID/EX:{}\033[0m → "
                     "\033[1;34mMEM/WB:{}\033[0m",
                     short_op_name(ps.f_reg()), short_op_name(ps.e_reg()),
                     short_op_name(ps.w_reg()));
@@ -393,26 +393,25 @@ auto LeftPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int s
                 uint32_t stall_rem = ps.tlb_stall_remaining() > 0 ? ps.tlb_stall_remaining()
                                                                   : ps.icache_stall_remaining();
                 return format_to_width(
-                    std::format("  \033[1m{}IF   (Fetch)\033[0m     : {}", kThemeSky,
+                    std::format(" [1m{}IF   (Fetch)\033[0m     : {}", kThemeSky,
                                 get_stage_desc(ps.f_reg(), stall_rem, stall_type)),
                     width);
             }
             case 3:
                 return format_to_width(
-                    std::format("  \033[1m{}ID/EX(Execute)\033[0m   : {}", kThemeSky,
+                    std::format(" [1m{}ID/EX(Execute)\033[0m   : {}", kThemeSky,
                                 get_stage_desc(ps.e_reg(), ps.div_busy_cycles_remaining(),
                                                "Divider Busy", is_raw_stalled)),
                     width);
             case 4:
                 return format_to_width(
                     std::format(
-                        "  \033[1m{}MEM/WB(Write)\033[0m   : {}", kThemeSky,
+                        " [1m{}MEM/WB(Write)\033[0m   : {}", kThemeSky,
                         get_stage_desc(ps.w_reg(), ps.dcache_stall_remaining(), "D-Cache Miss")),
                     width);
             case 5:
                 return format_to_width(
-                    std::format("  \033[90m{:<29} : Single-issue In-order\033[0m",
-                                "Microarchitecture"),
+                    std::format(" [90m{:<29} : Single-issue In-order\033[0m", "Microarchitecture"),
                     width);
             case 6:
                 return format_to_width("", width);
@@ -427,7 +426,7 @@ auto LeftPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int s
             return section_line("Current Pipeline State (5-Stage)", width);
         case 1: {
             std::string diagram = std::format(
-                "  \033[1;36mIF:{}\033[0m → \033[1;33mID:{}\033[0m → \033[1;32mEX:{}\033[0m → "
+                " [1;36mIF:{}\033[0m → \033[1;33mID:{}\033[0m → \033[1;32mEX:{}\033[0m → "
                 "\033[1;35mMEM:{}\033[0m → \033[1;34mWB:{}\033[0m",
                 short_op_name(ps.f_reg()), short_op_name(ps.d_reg()), short_op_name(ps.e_reg()),
                 short_op_name(ps.m_reg()), short_op_name(ps.w_reg()));
@@ -437,28 +436,28 @@ auto LeftPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int s
             std::string stall_type = ps.tlb_stall_remaining() > 0 ? "TLB Miss" : "I-Cache Miss";
             uint32_t stall_rem = ps.tlb_stall_remaining() > 0 ? ps.tlb_stall_remaining()
                                                               : ps.icache_stall_remaining();
-            return format_to_width(std::format("  \033[1m{}IF  (Fetch)\033[0m     : {}", kThemeSky,
+            return format_to_width(std::format(" [1m{}IF  (Fetch)\033[0m     : {}", kThemeSky,
                                                get_stage_desc(ps.f_reg(), stall_rem, stall_type)),
                                    width);
         }
         case 3:
-            return format_to_width(std::format("  \033[1m{}ID  (Decode)\033[0m    : {}", kThemeSky,
+            return format_to_width(std::format(" [1m{}ID  (Decode)\033[0m    : {}", kThemeSky,
                                                get_stage_desc(ps.d_reg(), 0, "", is_raw_stalled)),
                                    width);
         case 4:
             return format_to_width(
                 std::format(
-                    "  \033[1m{}EX  (Execute)\033[0m   : {}", kThemeSky,
+                    " [1m{}EX  (Execute)\033[0m   : {}", kThemeSky,
                     get_stage_desc(ps.e_reg(), ps.div_busy_cycles_remaining(), "Divider Busy")),
                 width);
         case 5:
             return format_to_width(
                 std::format(
-                    "  \033[1m{}MEM (Memory)\033[0m    : {}", kThemeSky,
+                    " [1m{}MEM (Memory)\033[0m    : {}", kThemeSky,
                     get_stage_desc(ps.m_reg(), ps.dcache_stall_remaining(), "D-Cache Miss")),
                 width);
         case 6:
-            return format_to_width(std::format("  \033[1m{}WB  (Write-Back)\033[0m: {}", kThemeSky,
+            return format_to_width(std::format(" [1m{}WB  (Write-Back)\033[0m: {}", kThemeSky,
                                                get_stage_desc(ps.w_reg(), 0, "")),
                                    width);
         default:
@@ -532,15 +531,15 @@ auto LeftPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, int s
         case 14: {
             Register pc = get_active_branch_pc(ps);
             std::string bht_str = get_bht_string(ps, pc);
-            return format_to_width(std::format("  {}Branch History\033[0m : {}{}\033[0m",
-                                               kThemeText, kThemeVal, bht_str),
+            return format_to_width(std::format(" {}Branch History\033[0m : {}{}\033[0m", kThemeText,
+                                               kThemeVal, bht_str),
                                    width);
         }
         case 15: {
             Register pc = get_active_branch_pc(ps);
             std::string btb_str = get_btb_string(ps, pc);
-            return format_to_width(std::format("  {}Target Buffer\033[0m  : {}{}\033[0m",
-                                               kThemeText, kThemeVal, btb_str),
+            return format_to_width(std::format(" {}Target Buffer\033[0m  : {}{}\033[0m", kThemeText,
+                                               kThemeVal, btb_str),
                                    width);
         }
         default:
@@ -824,7 +823,7 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
 
     if (history.empty()) {
         if (logical_row == 1) {
-            return format_to_width(std::format("  {}No cycle history yet — step the simulator to "
+            return format_to_width(std::format(" {}No cycle history yet — step the simulator to "
                                                "see instructions flow.\033[0m",
                                                kThemeMuted),
                                    width);
