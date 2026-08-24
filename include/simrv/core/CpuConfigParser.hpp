@@ -55,7 +55,6 @@ inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuConfig&
         }
 
         try {
-            // Handle string-valued keys first
             if (key == "pipeline_type") {
                 const auto parsed = simrv::pipeline::parse_pipeline_type(val_str);
                 if (!parsed) {
@@ -63,6 +62,15 @@ inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuConfig&
                     return false;
                 }
                 config.pipeline_type = *parsed;
+                continue;
+            }
+            if (key == "bpred_type" || key == "branch_predictor" || key == "bpred") {
+                const auto parsed = simrv::pipeline::parse_branch_predictor_type(val_str);
+                if (!parsed) {
+                    simrv::log::warn("Unsupported branch predictor '{}' in CPU config", val_str);
+                    return false;
+                }
+                config.branch_predictor.type = *parsed;
                 continue;
             }
 
@@ -81,6 +89,18 @@ inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuConfig&
                 config.fence_flush_penalty = val;
             } else if (key == "enable_forwarding") {
                 config.enable_forwarding = (val != 0);
+            } else if (key == "bht_size" || key == "bht_entries") {
+                config.branch_predictor.bht_entries = val;
+            } else if (key == "btb_size" || key == "btb_entries") {
+                config.branch_predictor.btb_entries = val;
+            } else if (key == "ras_size" || key == "ras_entries") {
+                config.branch_predictor.ras_entries = val;
+            } else if (key == "ghr_bits") {
+                config.branch_predictor.ghr_bits = val;
+            } else if (key == "enable_btb") {
+                config.branch_predictor.enable_btb = (val != 0);
+            } else if (key == "enable_ras") {
+                config.branch_predictor.enable_ras = (val != 0);
             } else {
                 simrv::log::warn("Unknown CPU config key: {}", key);
             }

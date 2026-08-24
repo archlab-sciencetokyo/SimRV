@@ -24,12 +24,14 @@ TileLinkBus::TileLinkBus(simrv::core::Machine& machine)
 void TileLinkBus::add_node(TileLinkNode* node) { router_.register_device(node); }
 
 auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
+    const std::scoped_lock lock(bus_mutex_);
     req_queue_.push_back(
         TimedRequest{.payload = req, .submitted_cycle = cycle_, .sequence = next_sequence_++});
     return true;
 }
 
 void TileLinkBus::advance_cycle() {
+    const std::scoped_lock lock(bus_mutex_);
     ++cycle_;
     if (!req_queue_.empty() && req_queue_.front().submitted_cycle < cycle_) {
         const auto request = req_queue_.front();
@@ -68,7 +70,18 @@ void TileLinkBus::process_request(const TimedRequest& request) {
         resp.opcode = TlOpcodeD::AccessAckData;
         if (simrv::memory::is_dram_access(req.address, transfer_bytes) &&
             machine_.mmem != nullptr) {
-            resp.data = simrv::memory::ram_read_fast(req.address, funct3, machine_.mmem);
+            bool found_in_cache = false;
+            for (uint32_t h = 0; h < machine_.num_harts(); ++h) {
+                Word cached_data = 0;
+                if (machine_.hart(h).dcache.read(req.address, cached_data, funct3)) {
+                    resp.data = cached_data;
+                    found_in_cache = true;
+                    break;
+                }
+            }
+            if (!found_in_cache) {
+                resp.data = simrv::memory::ram_read_fast(req.address, funct3, machine_.mmem);
+            }
             ++read_count_;
             handled = true;
         }
@@ -131,6 +144,7 @@ void TileLinkBus::process_request(const TimedRequest& request) {
 }
 
 auto TileLinkBus::try_get_timed_response(uint8_t source_id, TimedResponse& resp) -> bool {
+    const std::scoped_lock lock(bus_mutex_);
     auto it = std::ranges::find_if(
         resp_queue_, [source_id](const auto& r) -> bool { return r.payload.source == source_id; });
     if (it != resp_queue_.end()) {
@@ -142,6 +156,7 @@ auto TileLinkBus::try_get_timed_response(uint8_t source_id, TimedResponse& resp)
 }
 
 void TileLinkBus::cancel_source(uint8_t source_id) {
+    const std::scoped_lock lock(bus_mutex_);
     std::erase_if(req_queue_, [source_id](const TimedRequest& request) {
         return request.payload.source == source_id;
     });
@@ -151,6 +166,7 @@ void TileLinkBus::cancel_source(uint8_t source_id) {
 }
 
 auto TileLinkBus::get_response(uint8_t source_id, TlChannelD& resp) -> bool {
+    const std::scoped_lock lock(bus_mutex_);
     while (true) {
         TimedResponse timed{};
         if (try_get_timed_response(source_id, timed)) {

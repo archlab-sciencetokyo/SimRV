@@ -68,7 +68,10 @@ void Tracer::dump_init_artifacts() {
 
     {
         std::ofstream out("trace/init_mem.txt");
-        for (Address i = 0; i < simrv::memory::kDramSize; ++i) {
+        const auto dram_size = machine_.s_dram_size > 0
+                                   ? machine_.s_dram_size
+                                   : static_cast<uint64_t>(simrv::memory::g_dram_size);
+        for (Address i = 0; i < dram_size; ++i) {
             out << std::hex << static_cast<unsigned>(std::to_integer<uint8_t>(ram[i])) << '\n';
         }
         simrv::log::info("file init_mem.txt was generated after {} cycle",

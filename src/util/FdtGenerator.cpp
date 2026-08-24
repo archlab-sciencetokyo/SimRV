@@ -198,8 +198,9 @@ class FdtBuilder {
 auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
     FdtBuilder b;
 
-    const uint32_t plic_phandle = 2;
-    const uint32_t test_phandle = 3;
+    const uint32_t plic_phandle = config.num_harts + 1;
+    const uint32_t test_phandle = config.num_harts + 2;
+    const uint32_t pcie_phandle = config.num_harts + 3;
 
     // Root node "/"
     b.begin_node("");
@@ -408,7 +409,6 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
 
     if (config.enable_pcie) {
         // pcie root complex (pci@30000000)
-        const uint32_t pcie_phandle = 10;
         b.begin_node("pci@30000000");
         b.add_prop_string("compatible", "pci-host-ecam-generic");
         b.add_prop_string("device_type", "pci");
@@ -420,7 +420,7 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
         b.add_prop_u32_array("ranges", {0x02000000, 0, 0x40000000, 0, 0x40000000, 0, 0x10000000});
         b.add_prop_u32("phandle", pcie_phandle);
         b.add_prop_u32("interrupt-parent", plic_phandle);
-        b.add_prop_u32_array("interrupt-map-mask", {0x3800, 0, 0, 7});
+        b.add_prop_u32_array("interrupt-map-mask", {0xf800, 0, 0, 7});
         b.add_prop_u32_array("interrupt-map",
                              {0x0800, 0, 0, 1, plic_phandle, 17, 0x1000, 0, 0, 1, plic_phandle, 18,
                               0x1800, 0, 0, 1, plic_phandle, 19, 0x2000, 0, 0, 1, plic_phandle, 20,

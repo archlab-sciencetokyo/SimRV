@@ -828,8 +828,8 @@ void test_cycle_kernel_golden_branch_recovery() {
         return cycles;
     };
 
-    check(run(simrv::pipeline::PipelineType::FiveStage) == 13);
-    check(run(simrv::pipeline::PipelineType::ThreeStage) == 9);
+    check(run(simrv::pipeline::PipelineType::FiveStage) == 11);
+    check(run(simrv::pipeline::PipelineType::ThreeStage) == 8);
     std::cout << "[PASS] test_cycle_kernel_golden_branch_recovery\n";
 }
 
@@ -1304,6 +1304,218 @@ void test_virtio_mmio_v2() {
     std::cout << "[PASS] test_virtio_mmio_v2\n";
 }
 
+void test_sbi_multihart_rfence() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    simrv::core::OSMachine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.mmem = ram.data();
+    machine.s_dram_size = ram.size();
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+    machine.cpu.machine_ = &machine;
+    machine.cpu.reset();
+
+    for (uint32_t i = 1; i <= 2; ++i) {
+        auto sec = std::make_unique<simrv::core::CPU>();
+        sec->machine_ = &machine;
+        sec->reset();
+        sec->state().mhartid = i;
+        sec->hart_status.store(simrv::core::HartStatus::Started, std::memory_order_relaxed);
+        machine.secondary_harts_.push_back(std::move(sec));
+    }
+
+    // Insert TLB entry in Hart 1 and Hart 2
+    constexpr Address vaddr = 0x80004000;
+    constexpr Address paddr = 0x80008000;
+    machine.hart(1).tlb.insert_inst_r(vaddr, paddr, 0, PrivilegeLevel::Supervisor);
+    machine.hart(2).tlb.insert_inst_r(vaddr, paddr, 0, PrivilegeLevel::Supervisor);
+    check(machine.hart(1).tlb.lookup_inst_r(vaddr, 0, PrivilegeLevel::Supervisor) != nullptr);
+    check(machine.hart(2).tlb.lookup_inst_r(vaddr, 0, PrivilegeLevel::Supervisor) != nullptr);
+
+    // Broadcast RemoteSfenceVma from Hart 0 targeting Hart 1 and Hart 2 (mask = 0b110, base = 0)
+    machine.cpu.state().regs.write(RegId::A0, 0b110);       // hart_mask
+    machine.cpu.state().regs.write(RegId::A1, 0);           // hart_mask_base
+    machine.cpu.state().regs.write(RegId::A7, 0x52464E43);  // ExtId::Rfence
+    machine.cpu.state().regs.write(RegId::A6, 1);           // RfenceFid::RemoteSfenceVma
+    check(machine.cpu.sbi.handle_ecall(enum_mask(ExceptionCode::SupervisorEcall)));
+    check(machine.cpu.state().regs.read(RegId::A0) == 0);  // SbiError::Success
+
+    // Verify secondary harts had TLB flushed
+    check(machine.hart(1).tlb.lookup_inst_r(vaddr, 0, PrivilegeLevel::Supervisor) == nullptr);
+    check(machine.hart(2).tlb.lookup_inst_r(vaddr, 0, PrivilegeLevel::Supervisor) == nullptr);
+
+    // Test RemoteFenceI with base == -1 (all harts broadcast)
+    machine.cpu.state().regs.write(RegId::A0, 0);                      // ignored when base is -1
+    machine.cpu.state().regs.write(RegId::A1, static_cast<Word>(-1));  // all harts
+    machine.cpu.state().regs.write(RegId::A7, 0x52464E43);             // ExtId::Rfence
+    machine.cpu.state().regs.write(RegId::A6, 0);                      // RfenceFid::RemoteFenceI
+    check(machine.cpu.sbi.handle_ecall(enum_mask(ExceptionCode::SupervisorEcall)));
+    check(machine.cpu.state().regs.read(RegId::A0) == 0);
+
+    // Test send_ipi broadcast
+    machine.cpu.state().regs.write(RegId::A0, 0b10);      // hart 1 only
+    machine.cpu.state().regs.write(RegId::A1, 0);         // base 0
+    machine.cpu.state().regs.write(RegId::A7, 0x735049);  // ExtId::Ipi
+    machine.cpu.state().regs.write(RegId::A6, 0);         // send_ipi
+    check(machine.cpu.sbi.handle_ecall(enum_mask(ExceptionCode::SupervisorEcall)));
+    check(machine.cpu.state().regs.read(RegId::A0) == 0);
+    check((machine.hart(1).state().mip & enum_mask(simrv::core::MipBit::Ssip)) != 0);
+    check((machine.hart(2).state().mip & enum_mask(simrv::core::MipBit::Ssip)) == 0);
+
+    std::cout << "[PASS] test_sbi_multihart_rfence\n";
+}
+
+void test_ia_multihart_lr_sc_coherence() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    simrv::core::OSMachine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.mmem = ram.data();
+    machine.s_dram_size = ram.size();
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+    machine.cpu.machine_ = &machine;
+    machine.cpu.reset();
+
+    auto secondary = std::make_unique<simrv::core::CPU>();
+    secondary->machine_ = &machine;
+    secondary->reset();
+    secondary->state().mhartid = 1;
+    secondary->hart_status.store(simrv::core::HartStatus::Started, std::memory_order_relaxed);
+    machine.secondary_harts_.push_back(std::move(secondary));
+
+    constexpr Address target_addr = simrv::memory::kDramBaseAddress + 0x200;
+    constexpr uint32_t initial_val = 42;
+    std::memcpy(&ram[0x200], &initial_val, sizeof(initial_val));
+
+    // 1. Hart 0 executes LR.W
+    auto& h0 = machine.hart(0);
+    h0.state().regs.write(RegId::A0, target_addr);
+    h0.pipeline_context = {};
+    h0.pipeline_context.opcode = simrv::isa::Opcode::Amo;
+    h0.pipeline_context.funct5 = simrv::isa::Funct5Amo::Lr;
+    h0.pipeline_context.funct3 = simrv::isa::Funct3::Lw;
+    h0.pipeline_context.mem_addr = target_addr;
+    h0.pipeline_context.rrs1 = target_addr;
+    h0.pipeline_context.rd = RegId::A1;
+    h0.run_memory_stage_baremetal(machine);
+    check(h0.state().load_res == target_addr);
+    check(h0.state().reserved == 1);
+    check(machine.memory().reservation_table().check_reservation(0, target_addr));
+
+    // 2. Hart 1 performs a store to the same address in IA mode
+    auto& h1 = machine.hart(1);
+    h1.state().regs.write(RegId::A0, target_addr);
+    h1.state().regs.write(RegId::A1, 99);
+    h1.pipeline_context = {};
+    h1.pipeline_context.opcode = simrv::isa::Opcode::Store;
+    h1.pipeline_context.funct3 = simrv::isa::Funct3::Sw;
+    h1.pipeline_context.mem_addr = target_addr;
+    h1.pipeline_context.rrs1 = target_addr;
+    h1.pipeline_context.rrs2 = 99;
+    h1.run_memory_stage_baremetal(machine);
+
+    // 3. Hart 0's reservation must now be invalidated
+    check(!machine.memory().reservation_table().check_reservation(0, target_addr));
+
+    // 4. Hart 0 attempts SC.W, which must fail
+    h0.pipeline_context = {};
+    h0.pipeline_context.opcode = simrv::isa::Opcode::Amo;
+    h0.pipeline_context.funct5 = simrv::isa::Funct5Amo::Sc;
+    h0.pipeline_context.funct3 = simrv::isa::Funct3::Sw;
+    h0.pipeline_context.mem_addr = target_addr;
+    h0.pipeline_context.rrs1 = target_addr;
+    h0.pipeline_context.rrs2 = 100;
+    h0.pipeline_context.rd = RegId::A2;
+    (void)h0.execute_stage(machine);
+    check(h0.pipeline_context.wb_data == 1);  // 1 = SC failure
+
+    // Verify memory was not overwritten with 100
+    uint32_t val_in_ram = 0;
+    std::memcpy(&val_in_ram, &ram[0x200], sizeof(val_in_ram));
+    check(val_in_ram == 99);
+
+    std::cout << "[PASS] test_ia_multihart_lr_sc_coherence\n";
+}
+
+void test_ia_multithreaded_smp_execution() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    simrv::core::OSMachine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.mmem = ram.data();
+    machine.s_dram_size = ram.size();
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+    machine.s_smp_multithreaded = true;
+    machine.cpu.machine_ = &machine;
+    machine.cpu.reset();
+
+    constexpr size_t kNumHarts = 4;
+    for (uint32_t i = 1; i < kNumHarts; ++i) {
+        auto sec = std::make_unique<simrv::core::CPU>();
+        sec->machine_ = &machine;
+        sec->reset();
+        sec->state().mhartid = i;
+        sec->hart_status.store(simrv::core::HartStatus::Started, std::memory_order_relaxed);
+        machine.secondary_harts_.push_back(std::move(sec));
+    }
+
+    // Binary: each hart runs 500 atomic increments to 0x80000200
+    constexpr Address pc = simrv::memory::kDramBaseAddress;
+    constexpr std::array<Instruction, 10> program = {
+        0x1f400093,  // addi x1, x0, 500
+        0x00100213,  // addi x4, x0, 1
+        0x400001b7,  // lui  x3, 0x40000
+        0x00119193,  // slli x3, x3, 1 (x3 = 0x80000000 in both RV32 and RV64)
+        0x20018193,  // addi x3, x3, 0x200 (x3 = 0x80000200)
+        0x0041a2af,  // amoadd.w x5, x4, (x3)
+        0xfff08093,  // addi x1, x1, -1
+        0xfe009ce3,  // bnez x1, -8 (back to amoadd)
+        0x10500073,  // wfi
+        0x0000006f,  // jal x0, 0
+    };
+    std::memcpy(ram.data(), program.data(), sizeof(program));
+
+    for (size_t i = 0; i < kNumHarts; ++i) {
+        machine.hart(i).state().pc = pc;
+    }
+
+    // Start background SMP threads
+    machine.start_smp_threads();
+
+    // Hart 0 runs until it reaches WFI
+    while (machine.hart(0).state().pc < pc + 0x20) {
+        machine.hart(0).run_cycle(machine);
+    }
+
+    // Wait briefly for all secondary harts to finish their 500 iterations
+    auto start_time = std::chrono::steady_clock::now();
+    bool all_finished = false;
+    while (std::chrono::steady_clock::now() - start_time < std::chrono::seconds(3)) {
+        all_finished = true;
+        for (size_t i = 1; i < kNumHarts; ++i) {
+            if (machine.hart(i).state().pc < pc + 0x20) {
+                all_finished = false;
+                break;
+            }
+        }
+        if (all_finished) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    machine.stop_smp_threads();
+
+    check(all_finished);
+    uint32_t final_sum = 0;
+    std::memcpy(&final_sum, &ram[0x200], sizeof(final_sum));
+    check(final_sum == kNumHarts * 500);
+
+    std::cout << "[PASS] test_ia_multithreaded_smp_execution (" << kNumHarts
+              << " harts parallel AMO sum = " << final_sum << ")\n";
+}
+
 }  // namespace
 
 int main() {
@@ -1331,6 +1543,9 @@ int main() {
     test_aia_aplic_and_imsic();
     test_pcie_and_virtio_pci();
     test_virtio_mmio_v2();
+    test_sbi_multihart_rfence();
+    test_ia_multihart_lr_sc_coherence();
+    test_ia_multithreaded_smp_execution();
     std::cout << "All Modern Platform tests PASSED!\n";
     return 0;
 }

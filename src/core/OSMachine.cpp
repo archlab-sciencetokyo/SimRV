@@ -17,6 +17,55 @@ namespace simrv::core {
 
 using namespace simrv::isa;
 
+void OSMachine::start_smp_threads() {
+    if (!s_smp_multithreaded || secondary_harts_.empty() ||
+        !runtime_profile.is_instruction_mode()) {
+        return;
+    }
+    stop_smp_threads();
+    smp_threads_running_.store(true, std::memory_order_release);
+    for (size_t i = 0; i < secondary_harts_.size(); ++i) {
+        smp_worker_threads_.emplace_back([this, i](const std::stop_token& stop_token) {
+            auto& sec_hart = *secondary_harts_[i];
+            constexpr uint32_t kWorkerBatch = 2048;
+            while (!stop_token.stop_requested() && is_running() &&
+                   smp_threads_running_.load(std::memory_order_relaxed)) {
+                if (sec_hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started) {
+                    sec_hart.hart_status.wait(HartStatus::Stopped, std::memory_order_relaxed);
+                    continue;
+                }
+
+                if (execution_state_.load(std::memory_order_relaxed) == ExecutionState::Paused) {
+                    execution_state_.wait(ExecutionState::Paused, std::memory_order_relaxed);
+                    continue;
+                }
+
+                for (uint32_t step = 0;
+                     step < kWorkerBatch && is_running() &&
+                     sec_hart.hart_status.load(std::memory_order_relaxed) == HartStatus::Started;
+                     ++step) {
+                    sec_hart.run_cycle(*this);
+                }
+            }
+        });
+    }
+}
+
+void OSMachine::stop_smp_threads() {
+    smp_threads_running_.store(false, std::memory_order_release);
+    for (auto& sec_hart : secondary_harts_) {
+        sec_hart->hart_status.notify_all();
+    }
+    execution_state_.notify_all();
+    for (auto& thread : smp_worker_threads_) {
+        if (thread.joinable()) {
+            thread.request_stop();
+            thread.join();
+        }
+    }
+    smp_worker_threads_.clear();
+}
+
 void OSMachine::execute_cycle() {
     if (runtime_profile.is_cycle_mode()) {
         advance_ca_global_cycle();
@@ -41,7 +90,16 @@ auto OSMachine::execute_fast_batch(uint32_t batch_size) -> bool {
                 static_cast<uint32_t>(std::min<Counter>(batch_size, s_fincnt - cpu.e_icount));
         }
 
-        // Check if any secondary hart is running
+        if (s_smp_multithreaded && !secondary_harts_.empty()) {
+            // Hart 0 executes bursts while secondary harts run concurrently on their worker threads
+            const uint32_t burst = std::min(batch_size, 4096u);
+            for (uint32_t i = 0; i < burst && is_running(); ++i) {
+                cpu.run_cycle(*this);
+            }
+            return true;
+        }
+
+        // Cooperative fallback: check if any secondary hart is running
         bool any_sec_running = false;
         for (const auto& sec_hart : secondary_harts_) {
             if (sec_hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {

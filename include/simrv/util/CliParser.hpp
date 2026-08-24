@@ -52,6 +52,10 @@ struct RuntimeOptions {
     bool class_mode = false;
     std::string pipeline_type = "5stage";
     bool disable_forwarding = false;
+    std::string bpred_type;
+    uint32_t bht_size = 0;
+    uint32_t btb_size = 0;
+    uint32_t ras_size = 0;
 
     // Debug / co-simulation options
     bool gdb_mode = false;

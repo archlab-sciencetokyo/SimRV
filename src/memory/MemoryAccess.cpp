@@ -270,7 +270,10 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
 
     Word rdata = 0;
     Address p_addr = 0;
-    core::TLBEntry* entry = cpu.tlb.lookup_data_r(v_addr, current_asid, eff_priv);
+    const PteAccess access_type = (is_amo && !is_lr) ? PteAccess::Write : PteAccess::Read;
+    core::TLBEntry* entry = (is_amo && !is_lr)
+                                ? cpu.tlb.lookup_data_w(v_addr, current_asid, eff_priv)
+                                : cpu.tlb.lookup_data_r(v_addr, current_asid, eff_priv);
 
     if (eff_priv == kPrivMachine ||
         !simrv::xlen::satp_translation_enabled(cpu.state().satp, active_xlen)) {
@@ -280,13 +283,16 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     } else {
         cpu.pipeline_context.tlb_miss = true;
         auto translate_res =
-            cpu.translate_stage_address(*cpu.machine_, v_addr, PteAccess::Read, eff_priv,
-                                        active_xlen, TlPort::Data, cpu.ca_state.data_walk);
+            cpu.translate_stage_address(*cpu.machine_, v_addr, access_type, eff_priv, active_xlen,
+                                        TlPort::Data, cpu.ca_state.data_walk);
         if (!translate_res.has_value()) return 0;
         auto chain_res = (*translate_res)
                              .and_then([&](Address phys) -> std::expected<void, TrapCause> {
                                  p_addr = phys;
                                  cpu.tlb.insert_data_r(v_addr, p_addr, current_asid, eff_priv);
+                                 if (is_amo && !is_lr) {
+                                     cpu.tlb.insert_data_w(v_addr, p_addr, current_asid, eff_priv);
+                                 }
                                  return {};
                              })
                              .or_else([&](TrapCause error) -> std::expected<void, TrapCause> {

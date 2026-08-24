@@ -218,21 +218,21 @@ void test_csr_summary_and_presence_rules() {
            "clearing one interrupt source preserves independently asserted pending state");
 }
 
-void test_sbi_single_hart_masks() {
-    using simrv::sbi::detail::HartMaskSelection;
-    using simrv::sbi::detail::select_local_hart;
+void test_sbi_hart_masks() {
+    using simrv::sbi::detail::is_hart_selected;
 
-    expect(select_local_hart(0, 0, 0) == HartMaskSelection::Empty,
-           "an empty SBI hart mask selects no hart");
-    expect(select_local_hart(1, 0, 0) == HartMaskSelection::Local,
-           "bit zero selects local hart zero");
-    expect(select_local_hart(static_cast<Word>(0x55), static_cast<Word>(-1), 0) ==
-               HartMaskSelection::Local,
-           "an all-ones SBI hart-mask base broadcasts regardless of mask");
-    expect(select_local_hart(2, 0, 0) == HartMaskSelection::Invalid,
-           "a mask naming an unavailable hart is invalid");
-    expect(select_local_hart(3, 0, 0) == HartMaskSelection::Invalid,
-           "a mask mixing local and unavailable harts is invalid");
+    expect(!is_hart_selected(0, 0, 0), "an empty SBI hart mask selects no hart");
+    expect(is_hart_selected(1, 0, 0), "bit zero selects hart zero");
+    expect(!is_hart_selected(1, 0, 1), "bit zero does not select hart one");
+    expect(is_hart_selected(static_cast<Word>(0x55), static_cast<Word>(-1), 0),
+           "an all-ones SBI hart-mask base broadcasts to hart zero");
+    expect(is_hart_selected(static_cast<Word>(0x55), static_cast<Word>(-1), 4),
+           "an all-ones SBI hart-mask base broadcasts to any hart");
+    expect(is_hart_selected(2, 0, 1), "bit one with base zero selects hart one");
+    expect(is_hart_selected(0b11, 0, 0) && is_hart_selected(0b11, 0, 1),
+           "a mask with multiple bits selects both harts");
+    expect(is_hart_selected(1, 4, 4), "base 4 with bit 0 selects hart 4");
+    expect(!is_hart_selected(1, 4, 3), "hart below base is not selected");
     expect(simrv::sbi::detail::is_direct_sbi_ecall(enum_mask(ExceptionCode::SupervisorEcall)),
            "direct SBI accepts supervisor ECALLs");
     expect(!simrv::sbi::detail::is_direct_sbi_ecall(enum_mask(ExceptionCode::MachineEcall)),
@@ -705,7 +705,7 @@ int main() {
     test_mmio_ranges();
     test_physical_range_validation();
     test_csr_summary_and_presence_rules();
-    test_sbi_single_hart_masks();
+    test_sbi_hart_masks();
     test_vector_length_bytes();
     test_exception_delegation_mask();
     test_satp_modes();

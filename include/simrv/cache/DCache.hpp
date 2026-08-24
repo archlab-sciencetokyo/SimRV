@@ -17,7 +17,7 @@ class DCache : public BaseCache<64, 32, 4> {
     [[nodiscard]] auto write(Address addr, Word data, Instruction funct3) -> bool;
 
     auto handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp,
-                     std::array<Byte, kLineBytes>& dirty_data) -> bool;
+                      std::array<Byte, kLineBytes>& dirty_data) -> bool;
 };
 
 }  // namespace simrv::cache

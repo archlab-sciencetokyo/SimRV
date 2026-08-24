@@ -32,13 +32,15 @@ class BaseCache {
      * @brief Aligned L1 cache line entry with TileLink-C CoherenceState.
      */
     struct alignas(64) CacheLine {
-        Address tag = ~Address{0};          ///< Tag bits for address matching (8 bytes, offset 0)
-        uint64_t last_used = 0;             ///< Timestamp tick for LRU eviction (8 bytes, offset 8)
-        bool valid = false;                 ///< Cache line validity bit (1 byte, offset 16)
-        simrv::memory::CoherenceState state = simrv::memory::CoherenceState::None;  ///< TL-C state (offset 17)
-        bool dirty = false;                 ///< Modified dirty flag (offset 18)
-        std::array<uint8_t, 13> padding{};  ///< Explicit padding (offset 19..32)
-        alignas(16) std::array<Byte, kLineBytes> data{};  ///< 16-byte aligned payload buffer (32 bytes, offset 32..64)
+        Address tag = ~Address{0};  ///< Tag bits for address matching (8 bytes, offset 0)
+        uint64_t last_used = 0;     ///< Timestamp tick for LRU eviction (8 bytes, offset 8)
+        bool valid = false;         ///< Cache line validity bit (1 byte, offset 16)
+        simrv::memory::CoherenceState state =
+            simrv::memory::CoherenceState::None;          ///< TL-C state (offset 17)
+        bool dirty = false;                               ///< Modified dirty flag (offset 18)
+        std::array<uint8_t, 13> padding{};                ///< Explicit padding (offset 19..32)
+        alignas(16) std::array<Byte, kLineBytes> data{};  ///< 16-byte aligned payload buffer (32
+                                                          ///< bytes, offset 32..64)
     };
 
     BaseCache() = default;

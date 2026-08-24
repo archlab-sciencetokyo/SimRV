@@ -164,34 +164,48 @@ auto Sbi::handle_time(Word func_id) -> bool {
 }
 
 auto Sbi::handle_rfence(Word func_id) -> bool {
-    const auto selection = detail::select_local_hart(
-        cpu_.state().regs.read(RegId::A0), cpu_.state().regs.read(RegId::A1), cpu_.state().mhartid);
-    if (selection == detail::HartMaskSelection::Invalid) {
-        sbi_return(static_cast<SignedWord>(SbiError::InvalidParam), 0);
+    const Word hart_mask = cpu_.state().regs.read(RegId::A0);
+    const Word hart_mask_base = cpu_.state().regs.read(RegId::A1);
+
+    const auto fid = static_cast<RfenceFid>(func_id);
+    if (fid != RfenceFid::RemoteFenceI && fid != RfenceFid::RemoteSfenceVma &&
+        fid != RfenceFid::RemoteSfenceVmaAsid && fid != RfenceFid::RemoteHfenceGvmaVmid &&
+        fid != RfenceFid::RemoteHfenceGvma && fid != RfenceFid::RemoteHfenceVvmaAsid &&
+        fid != RfenceFid::RemoteHfenceVvma) {
+        sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);
         return true;
     }
 
-    switch (static_cast<RfenceFid>(func_id)) {
-        case RfenceFid::RemoteFenceI:
-            if (selection == detail::HartMaskSelection::Local) {
+    if (cpu_.machine_ != nullptr) {
+        const size_t n_harts = cpu_.machine_->num_harts();
+        for (size_t h = 0; h < n_harts; ++h) {
+            if (detail::is_hart_selected(hart_mask, hart_mask_base, h)) {
+                auto& target_cpu = cpu_.machine_->hart(h);
+                if (fid == RfenceFid::RemoteFenceI) {
+                    target_cpu.icache.flush();
+                    target_cpu.dcache.flush();
+                    target_cpu.decode_cache.flush();
+                } else if (fid == RfenceFid::RemoteSfenceVma ||
+                           fid == RfenceFid::RemoteSfenceVmaAsid) {
+                    target_cpu.TLB_flush();
+                    target_cpu.dcache.flush();
+                }
+            }
+        }
+    } else {
+        if (detail::is_hart_selected(hart_mask, hart_mask_base, cpu_.state().mhartid)) {
+            if (fid == RfenceFid::RemoteFenceI) {
                 cpu_.icache.flush();
                 cpu_.dcache.flush();
                 cpu_.decode_cache.flush();
-            }
-            sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
-            return true;
-        case RfenceFid::RemoteSfenceVma:
-        case RfenceFid::RemoteSfenceVmaAsid:
-            if (selection == detail::HartMaskSelection::Local) {
+            } else if (fid == RfenceFid::RemoteSfenceVma || fid == RfenceFid::RemoteSfenceVmaAsid) {
                 cpu_.TLB_flush();
                 cpu_.dcache.flush();
             }
-            sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
-            return true;
-        default:
-            sbi_return(static_cast<SignedWord>(SbiError::NotSupported), 0);
-            return true;
+        }
     }
+    sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
+    return true;
 }
 
 auto Sbi::handle_ipi(Word func_id) -> bool {
@@ -201,21 +215,14 @@ auto Sbi::handle_ipi(Word func_id) -> bool {
         if (cpu_.machine_ != nullptr) {
             const size_t n_harts = cpu_.machine_->num_harts();
             for (size_t h = 0; h < n_harts; ++h) {
-                bool target_this_hart = false;
-                if (hart_mask_base == static_cast<Word>(-1)) {
-                    target_this_hart = true;
-                } else if (h >= static_cast<size_t>(hart_mask_base) &&
-                           (h - static_cast<size_t>(hart_mask_base)) < 64) {
-                    if ((hart_mask & (Word{1} << (h - static_cast<size_t>(hart_mask_base)))) != 0) {
-                        target_this_hart = true;
-                    }
-                }
-                if (target_this_hart) {
+                if (detail::is_hart_selected(hart_mask, hart_mask_base, h)) {
                     cpu_.machine_->hart(h).state().mip |= enum_mask(MipBit::Ssip);
                 }
             }
         } else {
-            cpu_.state().mip |= enum_mask(MipBit::Ssip);
+            if (detail::is_hart_selected(hart_mask, hart_mask_base, cpu_.state().mhartid)) {
+                cpu_.state().mip |= enum_mask(MipBit::Ssip);
+            }
         }
         sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
     } else {
@@ -256,11 +263,13 @@ auto Sbi::handle_hsm(Word func_id) -> bool {
             target_cpu.state().regs.write(RegId::A0, target_hart);
             target_cpu.state().regs.write(RegId::A1, opaque);
             target_cpu.hart_status.store(HartStatus::Started, std::memory_order_release);
+            target_cpu.hart_status.notify_all();
             sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
             return true;
         }
         case HsmFid::HartStop: {
             cpu_.hart_status.store(HartStatus::Stopped, std::memory_order_release);
+            cpu_.hart_status.notify_all();
             sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
             return true;
         }
@@ -328,7 +337,7 @@ auto Sbi::handle_dbcn(Word func_id) -> bool {
             for (size_t i = 0; i < num_bytes; ++i) {
                 const Address byte_addr = paddr + i;
                 if (cpu_.machine_ != nullptr && byte_addr >= simrv::memory::g_dram_base &&
-                    (byte_addr - simrv::memory::g_dram_base) < simrv::memory::kDramSize) {
+                    (byte_addr - simrv::memory::g_dram_base) < simrv::memory::g_dram_size) {
                     const auto ch = static_cast<char>(
                         cpu_.machine_->mmem[byte_addr - simrv::memory::g_dram_base]);
                     if (cpu_.machine_->s_tuimode && cpu_.machine_->tui) {

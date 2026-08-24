@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <mutex>
 #include <vector>
 
 #include "simrv/memory/Bus.hpp"
@@ -89,6 +90,7 @@ class TileLinkBus : public Bus {
     uint64_t read_count_ = 0;
     uint64_t write_count_ = 0;
 
+    mutable std::recursive_mutex bus_mutex_;
     MmioRouter router_;
     CoherenceHub coherence_hub_;
     Cycle cycle_ = 0;

@@ -442,6 +442,48 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.pipeline_type = std::string(*value);
         return true;
     }
+    if (arg == "--bpred" || arg == "--bpred-type") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (!pipeline::parse_branch_predictor_type(*value).has_value()) {
+            return std::unexpected(
+                std::format("unsupported branch predictor '{}' (supported: static, bimodal, "
+                            "gshare, tournament)",
+                            *value));
+        }
+        result.options.bpred_type = std::string(*value);
+        return true;
+    }
+    if (arg == "--bht-size" || arg == "--bht-entries") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        uint32_t val = 0;
+        if (!parse_u32_base0(*value, val) || val == 0) {
+            return std::unexpected(std::format("invalid BHT size '{}'", *value));
+        }
+        result.options.bht_size = val;
+        return true;
+    }
+    if (arg == "--btb-size" || arg == "--btb-entries") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        uint32_t val = 0;
+        if (!parse_u32_base0(*value, val) || val == 0) {
+            return std::unexpected(std::format("invalid BTB size '{}'", *value));
+        }
+        result.options.btb_size = val;
+        return true;
+    }
+    if (arg == "--ras-size" || arg == "--ras-entries") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        uint32_t val = 0;
+        if (!parse_u32_base0(*value, val) || val == 0) {
+            return std::unexpected(std::format("invalid RAS size '{}'", *value));
+        }
+        result.options.ras_size = val;
+        return true;
+    }
     if (is_ia_option(arg)) {
         result.options.instruction_mode_requested = true;
         return true;
@@ -872,8 +914,23 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     auto apply_config_to_cpu = [&](simrv::core::CPU& cpu) {
         cpu.pipeline_sim.config.pipeline_type = parsed_pipe;
         cpu.pipeline_sim.config.record_snapshots = machine->runtime_profile.records_cycle_history();
-
         cpu.pipeline_sim.config.enable_forwarding = !options.disable_forwarding;
+
+        if (!options.bpred_type.empty()) {
+            if (const auto bp_type = pipeline::parse_branch_predictor_type(options.bpred_type)) {
+                cpu.pipeline_sim.config.branch_predictor.type = *bp_type;
+            }
+        }
+        if (options.bht_size != 0) {
+            cpu.pipeline_sim.config.branch_predictor.bht_entries = options.bht_size;
+        }
+        if (options.btb_size != 0) {
+            cpu.pipeline_sim.config.branch_predictor.btb_entries = options.btb_size;
+        }
+        if (options.ras_size != 0) {
+            cpu.pipeline_sim.config.branch_predictor.ras_entries = options.ras_size;
+        }
+        cpu.branch_predictor.configure(cpu.pipeline_sim.config.branch_predictor);
     };
 
     apply_config_to_cpu(machine->cpu);

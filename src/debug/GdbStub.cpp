@@ -351,7 +351,9 @@ void GdbStub::cmd_read_memory(const std::string& pkt, simrv::core::Machine& mach
     // Direct physical memory read (bypasses MMU)
     const auto* base = reinterpret_cast<const uint8_t*>(
         machine.mmem);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-    const auto dram_size = static_cast<uint64_t>(simrv::memory::kDramSize);
+    const auto dram_size = machine.s_dram_size > 0
+                               ? machine.s_dram_size
+                               : static_cast<uint64_t>(simrv::memory::g_dram_size);
     constexpr uint32_t kDramBase = 0x80000000U;
 
     for (uint32_t i = 0; i < safe_len; ++i) {
@@ -378,7 +380,9 @@ void GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& mac
         static_cast<uint32_t>(std::stoul(pkt.substr(comma + 1, colon - comma - 1), nullptr, 16));
 
     constexpr uint32_t kDramBase = 0x80000000U;
-    const auto dram_size = static_cast<uint64_t>(simrv::memory::kDramSize);
+    const auto dram_size = machine.s_dram_size > 0
+                               ? machine.s_dram_size
+                               : static_cast<uint64_t>(simrv::memory::g_dram_size);
     auto* base = reinterpret_cast<uint8_t*>(
         machine.mmem);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
@@ -425,7 +429,9 @@ void GdbStub::cmd_insert_breakpoint(const std::string& pkt, simrv::core::Machine
         static_cast<uint32_t>(std::stoul(pkt.substr(c1 + 1, c2 - c1 - 1), nullptr, 16));
 
     constexpr uint32_t kDramBase = 0x80000000U;
-    const auto dram_size = static_cast<uint64_t>(simrv::memory::kDramSize);
+    const auto dram_size = machine.s_dram_size > 0
+                               ? machine.s_dram_size
+                               : static_cast<uint64_t>(simrv::memory::g_dram_size);
     const auto phys = static_cast<uint64_t>(addr);
 
     if (phys < kDramBase || (phys - kDramBase + 4) > dram_size) {
@@ -476,7 +482,9 @@ void GdbStub::cmd_remove_breakpoint(const std::string& pkt, simrv::core::Machine
     }
 
     constexpr uint32_t kDramBase = 0x80000000U;
-    const auto dram_size = static_cast<uint64_t>(simrv::memory::kDramSize);
+    const auto dram_size = machine.s_dram_size > 0
+                               ? machine.s_dram_size
+                               : static_cast<uint64_t>(simrv::memory::g_dram_size);
     const auto phys = static_cast<uint64_t>(addr);
     if (phys >= kDramBase && (phys - kDramBase + 4) <= dram_size) {
         auto* ptr = reinterpret_cast<uint8_t*>(machine.mmem) +

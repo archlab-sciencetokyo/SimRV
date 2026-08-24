@@ -253,6 +253,7 @@ auto Machine::initialize() -> int {
     const size_t effective_dram_size = (s_dram_size != 0)
                                            ? static_cast<size_t>(s_dram_size)
                                            : static_cast<size_t>(simrv::memory::kDramSize);
+    simrv::memory::g_dram_size = static_cast<Address>(effective_dram_size);
     mmem_owner_.reset(static_cast<Byte*>(std::calloc(
         effective_dram_size,
         sizeof(Byte))));  // NOLINT(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory)
@@ -343,9 +344,8 @@ auto Machine::initialize() -> int {
         s_enabletimer = 0;
     }
     const Address dtb_offset =
-        linux_boot
-            ? static_cast<Address>(simrv::memory::kDramSize - static_cast<Address>(0x00100000U))
-            : simrv::boot::kInitDataAddress;
+        linux_boot ? static_cast<Address>(effective_dram_size - static_cast<size_t>(0x00100000U))
+                   : simrv::boot::kInitDataAddress;
 
     CSRValue initial_misa =
         isa::misa_with_mxl(s_misa_override ? s_misa_profile : isa::kMisaDefault);
@@ -414,8 +414,7 @@ auto Machine::initialize() -> int {
     }
     cpu.TLB_flush();
 
-    load_image_into_ram(s_fn_memimg, mmem, static_cast<std::size_t>(simrv::memory::kDramSize),
-                        "memory", s_tuimode);
+    load_image_into_ram(s_fn_memimg, mmem, effective_dram_size, "memory", s_tuimode);
     symbols.load_from_elf(s_spike_elf.empty() ? s_fn_memimg : s_spike_elf, true,
                           runtime_profile.interaction == InteractionMode::Tui
                               ? simrv::debug::SymbolLoadMode::FullDebug
@@ -464,11 +463,11 @@ auto Machine::initialize() -> int {
 
     if (linux_boot) {
         if (!s_fn_dvtree.empty()) {
-            if (dtb_offset >= simrv::memory::kDramSize) {
+            if (dtb_offset >= effective_dram_size) {
                 simrv::log::error("device-tree load offset is outside DRAM");
                 return 1;
             }
-            const auto dt_cap = static_cast<std::size_t>(simrv::memory::kDramSize - dtb_offset);
+            const auto dt_cap = static_cast<std::size_t>(effective_dram_size - dtb_offset);
             load_image_into_ram(s_fn_dvtree, mmem + dtb_offset, dt_cap, "device-tree", s_tuimode);
         } else {
             const bool enable_pcie = (s_platform_profile == PlatformProfile::Pcie ||
@@ -478,7 +477,7 @@ auto Machine::initialize() -> int {
             simrv::util::FdtConfig const fdt_cfg{
                 .num_harts = s_num_harts,
                 .dram_base = simrv::memory::g_dram_base,
-                .dram_size = (s_dram_size != 0) ? s_dram_size : simrv::memory::kDramSize,
+                .dram_size = effective_dram_size,
                 .xlen = simrv::xlen::kXLenBits,
                 .enable_pcie = enable_pcie,
                 .enable_mmio = enable_mmio,
@@ -626,10 +625,13 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
     cpu.state().priv = kPrivMachine;
     cpu.state().regs.write(static_cast<RegId>(10), 0);
     const bool linux_boot = !s_appmode;
+    const size_t effective_dram_size = (s_dram_size != 0)
+                                           ? static_cast<size_t>(s_dram_size)
+                                           : static_cast<size_t>(simrv::memory::kDramSize);
+    simrv::memory::g_dram_size = static_cast<Address>(effective_dram_size);
     const Address dtb_offset =
-        linux_boot
-            ? static_cast<Address>(simrv::memory::kDramSize - static_cast<Address>(0x00100000U))
-            : simrv::boot::kInitDataAddress;
+        linux_boot ? static_cast<Address>(effective_dram_size - static_cast<size_t>(0x00100000U))
+                   : simrv::boot::kInitDataAddress;
     cpu.state().regs.write(static_cast<RegId>(11),
                            linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);
 
@@ -640,7 +642,7 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
 
     if (linux_boot) {
         if (!s_fn_dvtree.empty()) {
-            const auto dt_cap = static_cast<std::size_t>(simrv::memory::kDramSize - dtb_offset);
+            const auto dt_cap = static_cast<std::size_t>(effective_dram_size - dtb_offset);
             load_image_into_ram(s_fn_dvtree, mmem + dtb_offset, dt_cap, "device-tree", s_tuimode);
         } else {
             const bool enable_pcie = (s_platform_profile == PlatformProfile::Pcie ||
@@ -650,7 +652,7 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
             simrv::util::FdtConfig const fdt_cfg{
                 .num_harts = s_num_harts,
                 .dram_base = simrv::memory::g_dram_base,
-                .dram_size = (s_dram_size != 0) ? s_dram_size : simrv::memory::kDramSize,
+                .dram_size = effective_dram_size,
                 .xlen = simrv::xlen::kXLenBits,
                 .enable_pcie = enable_pcie,
                 .enable_mmio = enable_mmio,

@@ -63,10 +63,9 @@ concept WordLike = std::integral<T> && requires(T w) {
 template <typename T>
 concept StoreFunct3Like = std::unsigned_integral<T>;
 
-// ========== Memory Region Classification ==========
-
 extern bool g_appmode;
 extern Address g_dram_base;
+extern Address g_dram_size;
 
 /// Overflow-safe containment test for a physical memory region.
 [[nodiscard]] constexpr auto address_range_contains(Address base, Address extent, Address address,
@@ -76,7 +75,7 @@ extern Address g_dram_base;
 
 /// Check whether the complete physical byte range is backed by DRAM.
 inline auto is_dram_access(Address p_addr, size_t size) -> bool {
-    return address_range_contains(g_dram_base, simrv::memory::kDramSize, p_addr, size);
+    return address_range_contains(g_dram_base, g_dram_size, p_addr, size);
 }
 
 /// Check if one physical byte is within the implemented DRAM range.

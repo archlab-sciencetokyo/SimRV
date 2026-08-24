@@ -15,27 +15,22 @@ namespace simrv::sbi {
 
 namespace detail {
 
-enum class HartMaskSelection : std::uint8_t { Empty, Local, Invalid };
-
 /** Direct SBI handles only supervisor ECALLs; M-mode ECALL remains an architectural trap. */
 constexpr auto is_direct_sbi_ecall(TrapCause cause) -> bool {
     return cause == enum_mask(ExceptionCode::SupervisorEcall);
 }
 
-/** Interpret an SBI hart-mask pair for SimRV's single supervisor-visible hart. */
-constexpr auto select_local_hart(Word hart_mask, Word hart_mask_base, Word hart_id)
-    -> HartMaskSelection {
+/** Determine whether a target hart is selected by an SBI (hart_mask, hart_mask_base) pair. */
+constexpr auto is_hart_selected(Word hart_mask, Word hart_mask_base, size_t hart_id) -> bool {
     if (hart_mask_base == static_cast<Word>(-1)) {
-        return HartMaskSelection::Local;
+        return true;
     }
-    if (hart_mask == 0) {
-        return HartMaskSelection::Empty;
+    if (hart_id < static_cast<size_t>(hart_mask_base) ||
+        (hart_id - static_cast<size_t>(hart_mask_base)) >= simrv::xlen::kXLenBits) {
+        return false;
     }
-    if (hart_id < hart_mask_base || (hart_id - hart_mask_base) >= simrv::xlen::kXLenBits) {
-        return HartMaskSelection::Invalid;
-    }
-    const Word local_bit = static_cast<Word>(1) << (hart_id - hart_mask_base);
-    return hart_mask == local_bit ? HartMaskSelection::Local : HartMaskSelection::Invalid;
+    const auto shift = hart_id - static_cast<size_t>(hart_mask_base);
+    return ((hart_mask >> shift) & Word{1}) != 0;
 }
 
 }  // namespace detail

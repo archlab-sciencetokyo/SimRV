@@ -301,6 +301,8 @@ class Machine {
     simrv::memory::MemorySubsystem memory_;
 
     /// Virtual hooks for template method execution loop
+    virtual void start_smp_threads() {}
+    virtual void stop_smp_threads() {}
     virtual void execute_cycle() = 0;
     virtual auto execute_fast_batch(uint32_t batch_size) -> bool {
         (void)batch_size;

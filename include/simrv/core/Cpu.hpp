@@ -584,7 +584,8 @@ class CPU {
 
     /// Get the effective privilege level for data accesses (considering MPRV).
     [[nodiscard]] constexpr auto effective_data_privilege() const -> PrivilegeLevel {
-        if (simrv::compiler::unlikely((state_.mstatus & enum_mask(MstatusBit::Mprv)) != 0)) {
+        if (simrv::compiler::unlikely(state_.priv == kPrivMachine &&
+                                      (state_.mstatus & enum_mask(MstatusBit::Mprv)) != 0)) {
             return static_cast<PrivilegeLevel>((state_.mstatus & enum_mask(MstatusBit::Mpp)) >> 11);
         }
         return state_.priv;
@@ -614,6 +615,7 @@ class CPU {
     bool use_opensbi = false;
     Machine* machine_ = nullptr;
     simrv::pipeline::PipelineSim pipeline_sim;
+    simrv::pipeline::BranchPredictor branch_predictor;
     simrv::pipeline::HartCycleState ca_state{};
     simrv::pipeline::HartPipelineState ca_pipeline{};
     DecodeCache decode_cache;

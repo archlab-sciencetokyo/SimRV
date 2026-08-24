@@ -23,7 +23,8 @@
 namespace simrv::memory {
 bool g_appmode = true;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 Address g_dram_base =
-    kDramBaseAddress;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+    kDramBaseAddress;             // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+Address g_dram_size = kDramSize;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 }  // namespace simrv::memory
 
 namespace simrv::core {
@@ -140,6 +141,7 @@ void Machine::stop(StopReason reason) {
     is_shutdown_ = true;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
     execution_state_.notify_all();
+    stop_smp_threads();
     if (!s_tuimode) {
         is_running_ = false;
     }
@@ -154,6 +156,7 @@ void Machine::request_reboot() {
     is_running_ = false;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
     execution_state_.notify_all();
+    stop_smp_threads();
 }
 
 void Machine::request_exit(int status) {
@@ -163,10 +166,19 @@ void Machine::request_exit(int status) {
     is_running_ = false;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
     execution_state_.notify_all();
+    stop_smp_threads();
 }
 
 void Machine::run() {
     cpu.evaluate_timer_interrupt();
+
+    // Start background SMP worker threads for multi-threaded secondary harts
+    start_smp_threads();
+
+    // Start background TUI rendering and input thread if in TUI mode
+    if (s_tuimode && tui && !tui->is_ui_thread_running()) {
+        tui->start_ui_thread();
+    }
 
     // Start background stdin input thread for non-TUI mode
     if (uart && !s_tuimode) {
@@ -211,18 +223,7 @@ void Machine::run() {
                 stop_reason_ = StopReason::InstructionLimit;
                 is_running_ = false;
             }
-            if (s_tuimode && tui) {
-                if (simrv::tui::g_resized) {
-                    tui->render();
-                }
-                auto now = std::chrono::steady_clock::now();
-                if (now - last_tui_update_ >= std::chrono::milliseconds(33)) {
-                    tui->update();
-                    tui->update_cache();
-                    tui->render();
-                    last_tui_update_ = now;
-                }
-            } else if (uart && !uart->is_input_thread_running()) {
+            if (!s_tuimode && uart && !uart->is_input_thread_running()) {
                 uart->non_tui_poll_input();
             }
             continue;
@@ -271,6 +272,14 @@ void Machine::run() {
                 tui->pause_loop();
             }
         }
+    }
+
+    // Stop background SMP worker threads
+    stop_smp_threads();
+
+    // Stop background TUI thread
+    if (s_tuimode && tui) {
+        tui->stop_ui_thread();
     }
 
     // Clean up background input thread

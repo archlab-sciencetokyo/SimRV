@@ -75,6 +75,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     std::optional<uint32_t> override_num_harts;
     std::optional<uint32_t> override_smp_quantum;
     std::optional<bool> override_smp_multithreaded;
+    std::optional<uint64_t> override_dram_size;
 
     bool keep_running = true;
     int final_exit_code = 0;
@@ -138,6 +139,9 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         if (override_smp_multithreaded.has_value()) {
             parsed->options.smp_multithreaded = *override_smp_multithreaded;
         }
+        if (override_dram_size.has_value()) {
+            parsed->options.dram_size = *override_dram_size;
+        }
 
         switch (parsed->action) {
             case CliAction::ShowHelp:
@@ -176,6 +180,9 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         }
         if (override_smp_multithreaded.has_value()) {
             sim_machine->s_smp_multithreaded = *override_smp_multithreaded;
+        }
+        if (override_dram_size.has_value()) {
+            sim_machine->s_dram_size = *override_dram_size;
         }
 
         if (override_misa_override.has_value() && *override_misa_override) {
@@ -243,6 +250,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             override_num_harts = sim_machine->s_num_harts;
             override_smp_quantum = sim_machine->s_smp_quantum;
             override_smp_multithreaded = sim_machine->s_smp_multithreaded;
+            override_dram_size = sim_machine->s_dram_size;
 
             if (sim_machine->s_misa_override) {
                 override_misa_override = true;

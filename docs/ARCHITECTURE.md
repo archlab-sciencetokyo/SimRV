@@ -245,7 +245,9 @@ docs/                  Architecture, extension, build, and education guides
   covered by recorded tests.
 - **Compile-time XLEN:** Select the target with the appropriate CMake preset
   (`rv32-release` / `rv64-release`). XLEN cannot be changed at runtime.
-- **Planned:** Further ISA extension coverage (e.g., Cryptographic extensions).
+- **Planned:**
+  - Parametric microarchitecture simulation & DSE (Design Space Exploration) for CPU development (configurable $N$-stage pipelines, superscalar issue bundles, and parametric scoreboard/forwarding matrices).
+  - Further ISA extension coverage (e.g., Cryptographic extensions).
 
 ---
 

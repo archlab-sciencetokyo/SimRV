@@ -4,6 +4,8 @@
  */
 #include "simrv/core/Cpu.hpp"
 
+#include <atomic>
+
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/device/Uart.hpp"
@@ -23,6 +25,70 @@ namespace {
 SIMRV_ALWAYS_INLINE auto is_tohost_addr(const Machine& machine, Address addr) -> bool {
     return (addr - machine.s_isatest_tohost < 8) || (addr - 0x80001000ULL < 8) ||
            (addr - 0x40008000ULL < 8);
+}
+
+template <typename T>
+auto execute_dram_amo(T* mem_ptr, Word rs2_val, Funct5Amo funct5) -> T {
+    std::atomic_ref<T> atomic_mem(*mem_ptr);
+    const auto op_val = static_cast<T>(rs2_val);
+    switch (funct5) {
+        case Funct5Amo::Swap:
+            return atomic_mem.exchange(op_val, std::memory_order_acq_rel);
+        case Funct5Amo::Add:
+            return atomic_mem.fetch_add(op_val, std::memory_order_acq_rel);
+        case Funct5Amo::Xor:
+            return atomic_mem.fetch_xor(op_val, std::memory_order_acq_rel);
+        case Funct5Amo::And:
+            return atomic_mem.fetch_and(op_val, std::memory_order_acq_rel);
+        case Funct5Amo::Or:
+            return atomic_mem.fetch_or(op_val, std::memory_order_acq_rel);
+        case Funct5Amo::Min: {
+            using SignedT = std::make_signed_t<T>;
+            T old_val = atomic_mem.load(std::memory_order_relaxed);
+            while (true) {
+                T new_val = static_cast<T>(
+                    std::min<SignedT>(static_cast<SignedT>(old_val), static_cast<SignedT>(op_val)));
+                if (atomic_mem.compare_exchange_weak(old_val, new_val, std::memory_order_acq_rel,
+                                                     std::memory_order_relaxed)) {
+                    return old_val;
+                }
+            }
+        }
+        case Funct5Amo::Max: {
+            using SignedT = std::make_signed_t<T>;
+            T old_val = atomic_mem.load(std::memory_order_relaxed);
+            while (true) {
+                T new_val = static_cast<T>(
+                    std::max<SignedT>(static_cast<SignedT>(old_val), static_cast<SignedT>(op_val)));
+                if (atomic_mem.compare_exchange_weak(old_val, new_val, std::memory_order_acq_rel,
+                                                     std::memory_order_relaxed)) {
+                    return old_val;
+                }
+            }
+        }
+        case Funct5Amo::Minu: {
+            T old_val = atomic_mem.load(std::memory_order_relaxed);
+            while (true) {
+                T new_val = std::min<T>(old_val, op_val);
+                if (atomic_mem.compare_exchange_weak(old_val, new_val, std::memory_order_acq_rel,
+                                                     std::memory_order_relaxed)) {
+                    return old_val;
+                }
+            }
+        }
+        case Funct5Amo::Maxu: {
+            T old_val = atomic_mem.load(std::memory_order_relaxed);
+            while (true) {
+                T new_val = std::max<T>(old_val, op_val);
+                if (atomic_mem.compare_exchange_weak(old_val, new_val, std::memory_order_acq_rel,
+                                                     std::memory_order_relaxed)) {
+                    return old_val;
+                }
+            }
+        }
+        default:
+            return atomic_mem.load(std::memory_order_relaxed);
+    }
 }
 }  // namespace
 
@@ -52,6 +118,8 @@ void CPU::reset() {
     trace_history_size_ = 0;
     ca_state.reset_instruction();
     ca_pipeline.reset();
+    branch_predictor.configure(pipeline_sim.config.branch_predictor);
+    branch_predictor.reset();
 }
 
 void CPU::TLB_flush() {
@@ -294,8 +362,18 @@ void CPU::run_cycle(Machine& machine) {
             }
 
             if (success) {
-                success = execute_stage(machine) && memory_stage(machine) &&
-                          writeback_stage(machine) && commit_stage(machine);
+                if (simrv::compiler::likely(state_.priv == kPrivMachine &&
+                                            (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+                    success = execute_stage(machine);
+                    if (success) {
+                        run_memory_stage_baremetal(machine);
+                        success = !pipeline_context.pending_exception.has_value() &&
+                                  writeback_stage(machine) && commit_stage(machine);
+                    }
+                } else {
+                    success = execute_stage(machine) && memory_stage(machine) &&
+                              writeback_stage(machine) && commit_stage(machine);
+                }
             }
 
             if (!success) {
@@ -308,8 +386,18 @@ void CPU::run_cycle(Machine& machine) {
         // Observable instruction mode uses the same semantic stages without coroutine state.
         bool success = fetch_stage(machine, state_.pc) && decode_stage(machine);
         if (success) {
-            success = execute_stage(machine) && memory_stage(machine) && writeback_stage(machine) &&
-                      commit_stage(machine);
+            if (simrv::compiler::likely(state_.priv == kPrivMachine &&
+                                        (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+                success = execute_stage(machine);
+                if (success) {
+                    run_memory_stage_baremetal(machine);
+                    success = !pipeline_context.pending_exception.has_value() &&
+                              writeback_stage(machine) && commit_stage(machine);
+                }
+            } else {
+                success = execute_stage(machine) && memory_stage(machine) &&
+                          writeback_stage(machine) && commit_stage(machine);
+            }
         }
         if (!success) {
             const auto cause =
@@ -518,13 +606,35 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     const size_t access_size = size_t{1} << (static_cast<unsigned>(ctx.funct3) & 0x3u);
 
     // Load Phase
-    if (opcode == Opcode::Load || (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc)) {
+    if (opcode == Opcode::Load || (opcode == Opcode::Amo && funct5 == Funct5Amo::Lr)) {
         if (simrv::compiler::likely(simrv::memory::is_dram_access(addr, access_size))) {
             ctx.mem_rdata = simrv::memory::ram_read_fast(addr, static_cast<Instruction>(ctx.funct3),
                                                          machine.mmem);
         } else {
             ctx.mem_rdata =
                 simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, addr, ctx.funct3);
+        }
+    } else if (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc) {
+        // Atomic DRAM AMO Execution (non-LR, non-SC)
+        if (simrv::compiler::likely(simrv::memory::is_dram_access(addr, access_size))) {
+            const Address offset = addr - simrv::memory::g_dram_base;
+            if (ctx.funct3 == Funct3::Sw || ctx.funct3 == Funct3::Lw) {
+                auto* ptr = reinterpret_cast<uint32_t*>(&machine.mmem[offset]);
+                const auto prev = execute_dram_amo<uint32_t>(ptr, ctx.rrs2, funct5);
+                ctx.mem_rdata = static_cast<Word>(static_cast<int32_t>(prev));
+                ctx.wb_data = ctx.mem_rdata;
+            } else if constexpr (simrv::xlen::kIsXLen64) {
+                if (ctx.funct3 == Funct3::Sd || ctx.funct3 == Funct3::Ld) {
+                    auto* ptr = reinterpret_cast<uint64_t*>(&machine.mmem[offset]);
+                    const auto prev = execute_dram_amo<uint64_t>(ptr, ctx.rrs2, funct5);
+                    ctx.mem_rdata = prev;
+                    ctx.wb_data = ctx.mem_rdata;
+                }
+            }
+        } else {
+            ctx.mem_rdata =
+                simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, addr, ctx.funct3);
+            ctx.wb_data = ctx.mem_rdata;
         }
     }
 
@@ -566,6 +676,8 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     if (opcode == Opcode::Amo && funct5 == Funct5Amo::Lr) {
         state_.load_res = addr;
         state_.reserved = 1;
+        machine.memory_.reservation_table().set_reservation(static_cast<HartId>(state_.mhartid),
+                                                            addr);
     }
 
     // Prepare Store Data
@@ -581,8 +693,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     // Store Phase
     if ((opcode == Opcode::Store) ||
         (opcode == Opcode::Amo &&
-         (funct5 == Funct5Amo::Sc && (ctx.wb_data == 0u) && (state_.reserved != 0u))) ||
-        (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr && funct5 != Funct5Amo::Sc)) {
+         (funct5 == Funct5Amo::Sc && (ctx.wb_data == 0u) && (state_.reserved != 0u)))) {
         if (simrv::compiler::likely(simrv::memory::is_dram_access(addr, access_size))) {
             // Check tohost writes (fast filter for 0x80000000 or 0x40000000 regions)
             if (simrv::compiler::unlikely((addr & 0xC0000000ULL) != 0)) {
@@ -625,6 +736,10 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
             simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, addr, ctx.mem_wdata,
                                                   ctx.funct3);
         }
+    } else if (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr && funct5 != Funct5Amo::Sc &&
+               !simrv::memory::is_dram_access(addr, access_size)) {
+        simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, addr, ctx.mem_wdata,
+                                              ctx.funct3);
     }
 
     if (opcode == Opcode::StoreFp) {
@@ -687,6 +802,8 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr)) {
         if (!ctx.pending_exception.has_value()) {
             state_.reserved = 0;
+            machine.memory_.reservation_table().invalidate_matching(
+                addr, static_cast<HartId>(state_.mhartid));
         }
     }
 }
@@ -938,7 +1055,14 @@ auto CPU::execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> 
         pipeline_context.mem_addr = mem_addr;
     }
     Register mem_rdata = 0;
-    if (!try_fast_load(machine, mem_addr, op.funct3, mem_rdata)) {
+    const unsigned size_bytes = access_size_for_funct3(op.funct3);
+    if (simrv::compiler::likely(state_.priv == kPrivMachine &&
+                                (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0 &&
+                                is_aligned_for_funct3(mem_addr, op.funct3) &&
+                                simrv::memory::is_dram_access(mem_addr, size_bytes))) {
+        mem_rdata = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(op.funct3),
+                                                 machine.mmem);
+    } else if (!try_fast_load(machine, mem_addr, op.funct3, mem_rdata)) {
         mem_rdata =
             simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, mem_addr, op.funct3);
         if (pipeline_context.pending_exception.has_value()) {
@@ -959,7 +1083,15 @@ auto CPU::execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Re
     if (simrv::compiler::unlikely(machine.s_tuimode || machine.s_bp_trace)) {
         pipeline_context.mem_addr = mem_addr;
     }
-    if (!try_fast_store(machine, mem_addr, op.funct3, rrs2)) {
+    const unsigned size_bytes = access_size_for_funct3(op.funct3);
+    if (simrv::compiler::likely(
+            state_.priv == kPrivMachine && (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0 &&
+            is_aligned_for_funct3(mem_addr, op.funct3) &&
+            simrv::memory::is_dram_access(mem_addr, size_bytes) &&
+            !is_tohost_addr(machine, mem_addr) && !machine.s_rollback_enabled)) {
+        simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(op.funct3),
+                                      machine.mmem);
+    } else if (!try_fast_store(machine, mem_addr, op.funct3, rrs2)) {
         simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, mem_addr, rrs2, op.funct3);
         if (pipeline_context.pending_exception.has_value()) {
             raise_exception(static_cast<TrapCause>(*pipeline_context.pending_exception),
@@ -969,14 +1101,27 @@ auto CPU::execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Re
     }
 
     state_.reserved = 0;
+    machine.memory_.reservation_table().invalidate_matching(mem_addr,
+                                                            static_cast<HartId>(state_.mhartid));
     advance_cached_pc(op);
     return true;
 }
 
 auto CPU::execute_cached_fallback(Machine& machine) -> void {
     fetch_operands(machine);
-    bool success = execute_stage(machine) && memory_stage(machine) && writeback_stage(machine) &&
-                   commit_stage(machine);
+    bool success = false;
+    if (simrv::compiler::likely(state_.priv == kPrivMachine &&
+                                (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+        success = execute_stage(machine);
+        if (success) {
+            run_memory_stage_baremetal(machine);
+            success = !pipeline_context.pending_exception.has_value() && writeback_stage(machine) &&
+                      commit_stage(machine);
+        }
+    } else {
+        success = execute_stage(machine) && memory_stage(machine) && writeback_stage(machine) &&
+                  commit_stage(machine);
+    }
     if (!success) {
         const auto cause =
             pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);

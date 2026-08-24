@@ -274,10 +274,12 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
                     const size_t cfg_idx = addr - 0x3A0;
                     if (cpu_.state().regs.xlen == 32) {
                         if (cfg_idx < 4) {
-                            rcsr = static_cast<CSRValue>(cpu_.state().pmpcfg[cfg_idx * 4]) |
-                                   (static_cast<CSRValue>(cpu_.state().pmpcfg[cfg_idx * 4 + 1]) << 8) |
-                                   (static_cast<CSRValue>(cpu_.state().pmpcfg[cfg_idx * 4 + 2]) << 16) |
-                                   (static_cast<CSRValue>(cpu_.state().pmpcfg[cfg_idx * 4 + 3]) << 24);
+                            rcsr =
+                                static_cast<CSRValue>(cpu_.state().pmpcfg[cfg_idx * 4]) |
+                                (static_cast<CSRValue>(cpu_.state().pmpcfg[cfg_idx * 4 + 1]) << 8) |
+                                (static_cast<CSRValue>(cpu_.state().pmpcfg[cfg_idx * 4 + 2])
+                                 << 16) |
+                                (static_cast<CSRValue>(cpu_.state().pmpcfg[cfg_idx * 4 + 3]) << 24);
                         } else {
                             rcsr = 0;
                         }
