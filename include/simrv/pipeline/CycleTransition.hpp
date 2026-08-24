@@ -5,6 +5,7 @@
 
 #include "simrv/Define.hpp"
 #include "simrv/memory/Mmu.hpp"
+#include "simrv/pipeline/BranchPredictor.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
 
 namespace simrv::pipeline {
@@ -83,6 +84,11 @@ struct CycleInstructionSlot {
     bool icache_miss = false;
     bool dcache_miss = false;
     bool tlb_miss = false;
+    bool writes_int = false;
+    bool wb_valid = false;
+    RegId wb_dest = static_cast<RegId>(0);
+    Register wb_val = 0;
+    BranchPrediction prediction{};
 
     constexpr void clear() noexcept { *this = {}; }
 };

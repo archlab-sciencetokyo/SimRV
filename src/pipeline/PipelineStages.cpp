@@ -168,12 +168,17 @@ auto CPU::translate_stage_address(Machine& machine, Address virtual_address, Pte
                               active_xlen);
     }
 
-    if (!timed_walk.active) {
+    if (!timed_walk.active || timed_walk.walk.virtual_address != virtual_address ||
+        timed_walk.walk.access != access || timed_walk.walk.privilege != privilege) {
+        if (timed_walk.active && timed_walk.request_pending) {
+            machine.memory_.system_bus().cancel_source(timed_walk.source);
+        }
         timed_walk.walk = mmu->begin_page_walk(virtual_address, access, privilege, state_.mstatus,
                                                state_.satp, active_xlen);
         timed_walk.source =
             simrv::memory::make_tl_source(static_cast<HartId>(state_.mhartid), port);
         timed_walk.active = true;
+        timed_walk.request_pending = false;
     }
 
     auto& walk = timed_walk.walk;
@@ -762,16 +767,16 @@ void CPU::execute_core(Machine& machine) {
             break;
         case Opcode::Auipc:
             ctx.tkn = false;
-            ctx.wb_data = state_.pc + ctx.imm;
+            ctx.wb_data = ctx.cpc + ctx.imm;
             break;
         case Opcode::Jal:
             ctx.tkn = true;
-            ctx.wb_data = state_.pc + ((ctx.cinsn != 0u) ? 2 : 4);
-            ctx.jmp_pc = state_.pc + ctx.imm;
+            ctx.wb_data = ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4);
+            ctx.jmp_pc = ctx.cpc + ctx.imm;
             break;
         case Opcode::Jalr:
             ctx.tkn = true;
-            ctx.wb_data = state_.pc + ((ctx.cinsn != 0u) ? 2 : 4);
+            ctx.wb_data = ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4);
             ctx.jmp_pc = (ctx.rrs1 + ctx.imm) & ~static_cast<Register>(1);
             if (state_.regs.xlen == 32) {
                 ctx.jmp_pc =
@@ -820,7 +825,7 @@ void CPU::execute_core(Machine& machine) {
         case Opcode::Branch:
             ctx.tkn =
                 execute::ExecuteUnit::branchTaken(ctx.rrs1, ctx.rrs2, ctx.funct3, state_.regs.xlen);
-            ctx.jmp_pc = state_.pc + ctx.imm;
+            ctx.jmp_pc = ctx.cpc + ctx.imm;
             if (state_.regs.xlen == 32) {
                 ctx.jmp_pc =
                     static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc)));
@@ -1264,6 +1269,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
         }
     }
     if (ctx.pending_exception.has_value()) {
+        state_.pc = ctx.cpc;
         raise_exception(std::to_underlying(*ctx.pending_exception), ctx.pending_tval);
     } else {
         if (ctx.tkn != 0u) {
@@ -1277,7 +1283,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
             }
             state_.pc = ctx.jmp_pc;
         } else {
-            state_.pc = state_.pc + ((ctx.cinsn != 0u) ? 2 : 4);
+            state_.pc = ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4);
         }
         if (state_.regs.xlen == 32) {
             state_.pc =
@@ -1366,6 +1372,7 @@ void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
     }
 
     if (ctx.pending_exception.has_value()) {
+        state_.pc = ctx.cpc;
         raise_exception(std::to_underlying(*ctx.pending_exception), ctx.pending_tval);
     } else {
         if (ctx.tkn != 0u) {
@@ -1379,7 +1386,7 @@ void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
             }
             state_.pc = ctx.jmp_pc;
         } else {
-            state_.pc = state_.pc + ((ctx.cinsn != 0u) ? 2 : 4);
+            state_.pc = ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4);
         }
         if (state_.regs.xlen == 32) {
             state_.pc =

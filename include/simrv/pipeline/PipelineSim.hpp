@@ -101,6 +101,7 @@ struct CpuConfig {
     bool enable_forwarding = true;
     bool record_snapshots = false;
     PipelineType pipeline_type = PipelineType::FiveStage;
+    BranchPredictorConfig branch_predictor{};
 };
 
 struct PipelineCycleSnapshot {
