@@ -9,7 +9,7 @@
 
 namespace simrv::tui {
 
-static const std::array<KeyBindingInfo, 26> kKeyBindings = {
+static const std::array<KeyBindingInfo, 27> kKeyBindings = {
     {{.action = KeyAction::Step,
       .key_display = "[s] / [Space]",
       .primary_char = 's',
@@ -171,6 +171,15 @@ static const std::array<KeyBindingInfo, 26> kKeyBindings = {
       .help_label = "Architecture Glossary & Concepts",
       .category = ActionCategory::Help,
       .allowed_running = true,
+      .allowed_in_modal = false},
+     {.action = KeyAction::ToggleDebug,
+      .key_display = "[Ctrl-D] / [d]",
+      .primary_char = 'd',
+      .alt_char = 'D',
+      .footer_label = "[d] Debug",
+      .help_label = "Toggle Debug Mode & Diagnostics",
+      .category = ActionCategory::Inspect,
+      .allowed_running = true,
       .allowed_in_modal = false}}};
 
 auto Keybindings::get(KeyAction action) -> const KeyBindingInfo& {
@@ -297,6 +306,8 @@ auto key_action_for_footer(TuiFooterAction action) -> KeyAction {
             return KeyAction::SwitchHart;
         case TuiFooterAction::ToggleTheme:
             return KeyAction::ToggleTheme;
+        case TuiFooterAction::ToggleDebug:
+            return KeyAction::ToggleDebug;
     }
     throw std::out_of_range("unknown TUI footer action");
 }

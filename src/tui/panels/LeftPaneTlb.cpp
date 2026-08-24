@@ -95,9 +95,10 @@ auto LeftPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_row, in
     if (logical_row == 1) {
         if (width < 54) {
             return format_to_width(
-                std::format("  {}SATP: {}{:<5}\033[0m │ {}ASID: {}{:<2}\033[0m │ {}PPN: {}0x{:x}\033[0m",
-                            kThemeText, kThemeMint, mode_str, kThemeText, kThemeVal, asid,
-                            kThemeText, kThemeSky, ppn),
+                std::format(
+                    "  {}SATP: {}{:<5}\033[0m │ {}ASID: {}{:<2}\033[0m │ {}PPN: {}0x{:x}\033[0m",
+                    kThemeText, kThemeMint, mode_str, kThemeText, kThemeVal, asid, kThemeText,
+                    kThemeSky, ppn),
                 width);
         }
         return format_to_width(std::format("  {}SATP Mode:\033[0m {}{:<5}\033[0m │ {}ASID:\033[0m "
@@ -124,9 +125,8 @@ auto LeftPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_row, in
         } else {
             if (logical_row == 3) {
                 return format_to_width(
-                    std::format(
-                        "  {}<No active TLB entries cached (flush / bare mapping)>\033[0m",
-                        kThemeMuted),
+                    std::format("  {}<No active TLB entries cached (flush / bare mapping)>\033[0m",
+                                kThemeMuted),
                     width);
             }
         }
@@ -139,10 +139,9 @@ auto LeftPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_row, in
         uint32_t v_trunc = static_cast<uint32_t>(e.vaddr & 0xFFFFFFFFULL);
         uint32_t p_trunc = static_cast<uint32_t>(e.paddr & 0xFFFFFFFFULL);
         if (width < 50) {
-            return format_to_width(
-                std::format("  \033[1m{:<6}\033[0m{:08x}➔{:08x} {}[{}]\033[0m", e.type, v_trunc,
-                            p_trunc, kThemePink, e.priv_str),
-                width);
+            return format_to_width(std::format("  \033[1m{:<6}\033[0m{:08x}➔{:08x} {}[{}]\033[0m",
+                                               e.type, v_trunc, p_trunc, kThemePink, e.priv_str),
+                                   width);
         }
         return format_to_width(std::format("  {}Set{:02d}/Way{}\033[0m \033[1m{:<6}\033[0m {:08x} "
                                            "➔ {:08x}  {}ASID:{:<2}\033[0m {}[{}]\033[0m",

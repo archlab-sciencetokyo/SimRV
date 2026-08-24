@@ -233,6 +233,14 @@ static const auto paused_row2_entries = std::to_array<FooterEntry>({
      .action = TuiFooterAction::ToggleTheme,
      .category = FooterCategory::Config,
      .priority = FooterPriority::Core},
+    {.text = "  ",
+     .action = std::nullopt,
+     .category = FooterCategory::Spacer,
+     .priority = FooterPriority::Core},
+    {.text = "[d] Debug",
+     .action = TuiFooterAction::ToggleDebug,
+     .category = FooterCategory::Config,
+     .priority = FooterPriority::Core},
     {.text = "  │  ",
      .action = std::nullopt,
      .category = FooterCategory::Separator,
@@ -548,8 +556,10 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             binary_name = "application";
         }
         std::string mode_str;
+        const size_t selected = (machine_.tui) ? machine_.tui->selected_hart() : 0;
+        const auto& current_cpu = machine_.hart(selected);
         if (machine_.runtime_profile.is_cycle_mode()) {
-            const auto ptype = machine_.cpu.pipeline_sim.config.pipeline_type;
+            const auto ptype = current_cpu.pipeline_sim.config.pipeline_type;
             if (ptype == simrv::pipeline::PipelineType::ThreeStage) {
                 mode_str = machine_.s_appmode ? "App (3-Stage)" : "OS (3-Stage)";
             } else {
@@ -631,8 +641,10 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                 mid_text = std::format("SCROLL (-{})", scroll_offset_);
             }
         } else if (available_mid_w >= 10) {
-            const auto cycles = machine_.cpu.clint_mmio.mcycle;
-            const auto icount = machine_.cpu.e_icount;
+            const size_t selected = (machine_.tui) ? machine_.tui->selected_hart() : 0;
+            const auto& current_cpu = machine_.hart(selected);
+            const auto cycles = current_cpu.clint_mmio.mcycle;
+            const auto icount = current_cpu.e_icount;
             const double cpi =
                 icount == 0 ? 0.0 : static_cast<double>(cycles) / static_cast<double>(icount);
             const double mips = static_cast<double>(kips_) / 1000.0;

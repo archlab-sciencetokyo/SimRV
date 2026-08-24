@@ -54,7 +54,8 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
             std::string text = std::format("\033[1;31m[!] STACK POINTER INACTIVE / NULL\033[0m");
             int text_w = get_display_width(text);
             int spaces = std::max(1, (width - text_w) / 2);
-            return format_to_width(std::string(static_cast<std::size_t>(spaces), ' ') + text, width);
+            return format_to_width(std::string(static_cast<std::size_t>(spaces), ' ') + text,
+                                   width);
         }
         if (logical_row == 5) {
             std::string val_str =
@@ -62,7 +63,8 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
             std::string text = std::format("sp register : {}{}\033[0m", kThemeVal, val_str);
             int text_w = get_display_width(text);
             int spaces = std::max(1, (width - text_w) / 2);
-            return format_to_width(std::string(static_cast<std::size_t>(spaces), ' ') + text, width);
+            return format_to_width(std::string(static_cast<std::size_t>(spaces), ' ') + text,
+                                   width);
         }
         if (logical_row == 7) {
             std::string text = (width < 45) ? "Waiting for guest sp initialization"

@@ -16,7 +16,7 @@ struct LogEntry {
 };
 
 class LogBuffer {
-public:
+   public:
     explicit LogBuffer(std::size_t max_capacity = 1000);
 
     void push(std::string message);
@@ -28,7 +28,7 @@ public:
     [[nodiscard]] auto size() const -> std::size_t;
     [[nodiscard]] auto empty() const -> bool;
 
-private:
+   private:
     std::size_t max_capacity_;
     mutable std::mutex mutex_;
     std::deque<LogEntry> entries_;

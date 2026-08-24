@@ -90,22 +90,27 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
         uint32_t imm20 = (ir_org >> 12) & 0xFFFFF;
 
         rows.push_back(format_to_width(
-            std::format("  {}Opcode  [6:0]  :\033[0m {:07b} (0x{:02X})", kThemeText, op, op), width));
+            std::format("  {}Opcode  [6:0]  :\033[0m {:07b} (0x{:02X})", kThemeText, op, op),
+            width));
         if (has_rd(fmt)) {
             rows.push_back(format_to_width(
-                std::format("  {}rd      [11:7] :\033[0m {:05b} (x{})", kThemeText, rd, rd), width));
+                std::format("  {}rd      [11:7] :\033[0m {:05b} (x{})", kThemeText, rd, rd),
+                width));
         }
         if (has_funct3(fmt)) {
             rows.push_back(format_to_width(
-                std::format("  {}funct3  [14:12]:\033[0m {:03b} (0x{:X})", kThemeText, f3, f3), width));
+                std::format("  {}funct3  [14:12]:\033[0m {:03b} (0x{:X})", kThemeText, f3, f3),
+                width));
         }
         if (has_rs1(fmt)) {
             rows.push_back(format_to_width(
-                std::format("  {}rs1     [19:15]:\033[0m {:05b} (x{})", kThemeText, rs1, rs1), width));
+                std::format("  {}rs1     [19:15]:\033[0m {:05b} (x{})", kThemeText, rs1, rs1),
+                width));
         }
         if (has_rs2(fmt)) {
             rows.push_back(format_to_width(
-                std::format("  {}rs2     [24:20]:\033[0m {:05b} (x{})", kThemeText, rs2, rs2), width));
+                std::format("  {}rs2     [24:20]:\033[0m {:05b} (x{})", kThemeText, rs2, rs2),
+                width));
         }
         if (has_funct7(fmt)) {
             rows.push_back(format_to_width(
@@ -113,15 +118,15 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
                 width));
         }
         if (fmt == InstFormat::I) {
-            rows.push_back(format_to_width(
-                std::format("  {}imm[11:0]     :\033[0m {:012b} ({})", kThemeText, imm12,
-                            static_cast<int32_t>((imm12 ^ 0x800) - 0x800)),
-                width));
+            rows.push_back(
+                format_to_width(std::format("  {}imm[11:0]     :\033[0m {:012b} ({})", kThemeText,
+                                            imm12, static_cast<int32_t>((imm12 ^ 0x800) - 0x800)),
+                                width));
         } else if (fmt == InstFormat::U || fmt == InstFormat::J) {
-            rows.push_back(format_to_width(
-                std::format("  {}imm[31:12]    :\033[0m {:020b} (0x{:05X})", kThemeText, imm20,
-                            imm20),
-                width));
+            rows.push_back(
+                format_to_width(std::format("  {}imm[31:12]    :\033[0m {:020b} (0x{:05X})",
+                                            kThemeText, imm20, imm20),
+                                width));
         }
         return rows;
     }
@@ -133,10 +138,11 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
                             kThemeBorder),
                 width));
             rows.push_back(format_to_width(
-                std::format("  {}│\033[0m funct7  {}│\033[0m  rs2  {}│\033[0m  rs1  {}│\033[0m  f3   "
-                            "{}│\033[0m  rd   {}│\033[0m opcode  {}│\033[0m",
-                            kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
-                            kThemeBorder, kThemeBorder),
+                std::format(
+                    "  {}│\033[0m funct7  {}│\033[0m  rs2  {}│\033[0m  rs1  {}│\033[0m  f3   "
+                    "{}│\033[0m  rd   {}│\033[0m opcode  {}│\033[0m",
+                    kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
+                    kThemeBorder, kThemeBorder),
                 width));
             rows.push_back(format_to_width(
                 std::format("  {}│\033[0m 31..25  {}│\033[0m 24..20{}│\033[0m 19..15{}│\033[0m "
@@ -151,10 +157,10 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
             rows.push_back(format_to_width(
                 std::format("  {}│\033[0m {:07b} {}│\033[0m {:05b} {}│\033[0m {:05b} {}│\033[0m  "
                             "{:03b}  {}│\033[0m {:05b} {}│\033[0m {:07b} {}│\033[0m",
-                            kThemeBorder, (ir_org >> 25) & 0x7F, kThemeBorder, (ir_org >> 20) & 0x1F,
-                            kThemeBorder, (ir_org >> 15) & 0x1F, kThemeBorder, (ir_org >> 12) & 0x07,
-                            kThemeBorder, (ir_org >> 7) & 0x1F, kThemeBorder, ir_org & 0x7F,
-                            kThemeBorder),
+                            kThemeBorder, (ir_org >> 25) & 0x7F, kThemeBorder,
+                            (ir_org >> 20) & 0x1F, kThemeBorder, (ir_org >> 15) & 0x1F,
+                            kThemeBorder, (ir_org >> 12) & 0x07, kThemeBorder, (ir_org >> 7) & 0x1F,
+                            kThemeBorder, ir_org & 0x7F, kThemeBorder),
                 width));
             rows.push_back(format_to_width(
                 std::format("  {}└─────────┴───────┴───────┴───────┴───────┴─────────┘\033[0m",
@@ -167,16 +173,18 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
                             kThemeBorder),
                 width));
             rows.push_back(format_to_width(
-                std::format("  {}│\033[0m  imm[11:0]   {}│\033[0m  rs1  {}│\033[0m  f3   {}│\033[0m "
-                            " rd   {}│\033[0m opcode  {}│\033[0m",
-                            kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
-                            kThemeBorder),
+                std::format(
+                    "  {}│\033[0m  imm[11:0]   {}│\033[0m  rs1  {}│\033[0m  f3   {}│\033[0m "
+                    " rd   {}│\033[0m opcode  {}│\033[0m",
+                    kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
+                    kThemeBorder),
                 width));
             rows.push_back(format_to_width(
-                std::format("  {}│\033[0m    31..20    {}│\033[0m 19..15{}│\033[0m 14..12{}│\033[0m "
-                            "11..7 {}│\033[0m  6..0   {}│\033[0m",
-                            kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
-                            kThemeBorder),
+                std::format(
+                    "  {}│\033[0m    31..20    {}│\033[0m 19..15{}│\033[0m 14..12{}│\033[0m "
+                    "11..7 {}│\033[0m  6..0   {}│\033[0m",
+                    kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
+                    kThemeBorder),
                 width));
             rows.push_back(format_to_width(
                 std::format("  {}├──────────────┼───────┼───────┼───────┼─────────┤\033[0m",
@@ -186,8 +194,9 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
                 std::format("  {}│\033[0m {:012b} {}│\033[0m {:05b} {}│\033[0m  {:03b}  {}│\033[0m "
                             "{:05b} {}│\033[0m {:07b} {}│\033[0m",
                             kThemeBorder, (ir_org >> 20) & 0xFFF, kThemeBorder,
-                            (ir_org >> 15) & 0x1F, kThemeBorder, (ir_org >> 12) & 0x07, kThemeBorder,
-                            (ir_org >> 7) & 0x1F, kThemeBorder, ir_org & 0x7F, kThemeBorder),
+                            (ir_org >> 15) & 0x1F, kThemeBorder, (ir_org >> 12) & 0x07,
+                            kThemeBorder, (ir_org >> 7) & 0x1F, kThemeBorder, ir_org & 0x7F,
+                            kThemeBorder),
                 width));
             rows.push_back(format_to_width(
                 std::format("  {}└──────────────┴───────┴───────┴───────┴─────────┘\033[0m",
@@ -200,10 +209,11 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
                             kThemeBorder),
                 width));
             rows.push_back(format_to_width(
-                std::format("  {}│\033[0m imm11:5  {}│\033[0m  rs2  {}│\033[0m  rs1  {}│\033[0m  f3   "
-                            "{}│\033[0mimm4:0 {}│\033[0m opcode  {}│\033[0m",
-                            kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
-                            kThemeBorder, kThemeBorder),
+                std::format(
+                    "  {}│\033[0m imm11:5  {}│\033[0m  rs2  {}│\033[0m  rs1  {}│\033[0m  f3   "
+                    "{}│\033[0mimm4:0 {}│\033[0m opcode  {}│\033[0m",
+                    kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
+                    kThemeBorder, kThemeBorder),
                 width));
             rows.push_back(format_to_width(
                 std::format("  {}│\033[0m 31..25   {}│\033[0m 24..20{}│\033[0m 19..15{}│\033[0m "
@@ -218,10 +228,10 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
             rows.push_back(format_to_width(
                 std::format("  {}│\033[0m {:07b} {}│\033[0m {:05b} {}│\033[0m {:05b} {}│\033[0m  "
                             "{:03b}  {}│\033[0m {:05b} {}│\033[0m {:07b} {}│\033[0m",
-                            kThemeBorder, (ir_org >> 25) & 0x7F, kThemeBorder, (ir_org >> 20) & 0x1F,
-                            kThemeBorder, (ir_org >> 15) & 0x1F, kThemeBorder, (ir_org >> 12) & 0x07,
-                            kThemeBorder, (ir_org >> 7) & 0x1F, kThemeBorder, ir_org & 0x7F,
-                            kThemeBorder),
+                            kThemeBorder, (ir_org >> 25) & 0x7F, kThemeBorder,
+                            (ir_org >> 20) & 0x1F, kThemeBorder, (ir_org >> 15) & 0x1F,
+                            kThemeBorder, (ir_org >> 12) & 0x07, kThemeBorder, (ir_org >> 7) & 0x1F,
+                            kThemeBorder, ir_org & 0x7F, kThemeBorder),
                 width));
             rows.push_back(format_to_width(
                 std::format("  {}└─────────┴───────┴───────┴───────┴───────┴─────────┘\033[0m",
@@ -234,10 +244,11 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
                             kThemeBorder),
                 width));
             rows.push_back(format_to_width(
-                std::format("  {}│\033[0m imm12:5  {}│\033[0m  rs2  {}│\033[0m  rs1  {}│\033[0m  f3   "
-                            "{}│\033[0mimm4:11{}│\033[0m opcode  {}│\033[0m",
-                            kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
-                            kThemeBorder, kThemeBorder),
+                std::format(
+                    "  {}│\033[0m imm12:5  {}│\033[0m  rs2  {}│\033[0m  rs1  {}│\033[0m  f3   "
+                    "{}│\033[0mimm4:11{}│\033[0m opcode  {}│\033[0m",
+                    kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder, kThemeBorder,
+                    kThemeBorder, kThemeBorder),
                 width));
             rows.push_back(format_to_width(
                 std::format("  {}│\033[0m 31..25   {}│\033[0m 24..20{}│\033[0m 19..15{}│\033[0m "
@@ -252,10 +263,10 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
             rows.push_back(format_to_width(
                 std::format("  {}│\033[0m {:07b} {}│\033[0m {:05b} {}│\033[0m {:05b} {}│\033[0m  "
                             "{:03b}  {}│\033[0m {:05b} {}│\033[0m {:07b} {}│\033[0m",
-                            kThemeBorder, (ir_org >> 25) & 0x7F, kThemeBorder, (ir_org >> 20) & 0x1F,
-                            kThemeBorder, (ir_org >> 15) & 0x1F, kThemeBorder, (ir_org >> 12) & 0x07,
-                            kThemeBorder, (ir_org >> 7) & 0x1F, kThemeBorder, ir_org & 0x7F,
-                            kThemeBorder),
+                            kThemeBorder, (ir_org >> 25) & 0x7F, kThemeBorder,
+                            (ir_org >> 20) & 0x1F, kThemeBorder, (ir_org >> 15) & 0x1F,
+                            kThemeBorder, (ir_org >> 12) & 0x07, kThemeBorder, (ir_org >> 7) & 0x1F,
+                            kThemeBorder, ir_org & 0x7F, kThemeBorder),
                 width));
             rows.push_back(format_to_width(
                 std::format("  {}└─────────┴───────┴───────┴───────┴───────┴─────────┘\033[0m",
@@ -311,13 +322,13 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
                             kThemeBorder),
                 width));
             rows.push_back(format_to_width(
-                std::format("  {}│\033[0m {:05b} {}│\033[0m{:02b} 00{}│\033[0m {:05b} {}│\033[0m "
-                            "{:05b} {}│\033[0m{:03b}  {}│\033[0m {:05b} {}│\033[0m {:07b} {}│\033[0m",
-                            kThemeBorder, (ir_org >> 27) & 0x1F, kThemeBorder,
-                            (ir_org >> 25) & 0x03, kThemeBorder, (ir_org >> 20) & 0x1F,
-                            kThemeBorder, (ir_org >> 15) & 0x1F, kThemeBorder,
-                            (ir_org >> 12) & 0x07, kThemeBorder, (ir_org >> 7) & 0x1F,
-                            kThemeBorder, ir_org & 0x7F, kThemeBorder),
+                std::format(
+                    "  {}│\033[0m {:05b} {}│\033[0m{:02b} 00{}│\033[0m {:05b} {}│\033[0m "
+                    "{:05b} {}│\033[0m{:03b}  {}│\033[0m {:05b} {}│\033[0m {:07b} {}│\033[0m",
+                    kThemeBorder, (ir_org >> 27) & 0x1F, kThemeBorder, (ir_org >> 25) & 0x03,
+                    kThemeBorder, (ir_org >> 20) & 0x1F, kThemeBorder, (ir_org >> 15) & 0x1F,
+                    kThemeBorder, (ir_org >> 12) & 0x07, kThemeBorder, (ir_org >> 7) & 0x1F,
+                    kThemeBorder, ir_org & 0x7F, kThemeBorder),
                 width));
             rows.push_back(format_to_width(
                 std::format("  {}└───────┴─────┴───────┴───────┴─────┴───────┴─────────┘\033[0m",

@@ -46,9 +46,8 @@ auto tokenize_ansi(std::string_view line) -> std::vector<AnsiToken> {
     }
 
     if (!text_accum.empty()) {
-        tokens.push_back({.text = text_accum,
-                          .is_ansi = false,
-                          .display_width = get_display_width(text_accum)});
+        tokens.push_back(
+            {.text = text_accum, .is_ansi = false, .display_width = get_display_width(text_accum)});
     }
     return tokens;
 }

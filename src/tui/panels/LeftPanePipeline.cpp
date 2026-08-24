@@ -592,9 +592,9 @@ auto LeftPane::render_pipeline_stages_functional_low_part1(const simrv::core::CP
     bool const is_compressed = (ctx.ir_org & 0x3) != 0x3;
 
     switch (logical_row) {
-        // ── Current Instruction ────────────────────────────────────
+        // Current Instruction
         case 0:
-            return section_line("── Current Instruction", width);
+            return section_line("Current Instruction", width);
         case 1: {
             // PC with optional symbol + Assembly
             std::string sym = machine_.symbols.lookup(cpu.state().pc);
@@ -643,9 +643,9 @@ auto LeftPane::render_pipeline_stages_functional_low_part1(const simrv::core::CP
                                col_width, right_width, 10);
         }
 
-        // ── IF (Instruction Fetch) ────────────────────────────────
+        // IF Instruction Fetch
         case 3:
-            return section_line("── IF  Instruction Fetch", width);
+            return section_line("IF  Instruction Fetch", width);
         case 4:
             return render_pair("Fetch PC", hex_val(ctx.cpc), kThemeMint, "Raw Word",
                                std::format("0x{:08x}", ctx.ir_org), kThemeVal, col_width,
@@ -656,9 +656,9 @@ auto LeftPane::render_pipeline_stages_functional_low_part1(const simrv::core::CP
                                kThemeVal, col_width, right_width, 10);
         }
 
-        // ── ID (Decode & Operand Read) ────────────────────────────
+        // ID Decode & Operand Read
         case 6:
-            return section_line("── ID  Decode & Operand Read", width);
+            return section_line("ID  Decode & Operand Read", width);
         case 7: {
             std::string op_str = std::format("{} ({})", op_name, isa_ext);
             bool is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
@@ -708,9 +708,9 @@ auto LeftPane::render_pipeline_stages_functional_low_part2(const simrv::core::CP
                                col_width, right_width, 10);
         }
 
-        // ── EX (Execute) ──────────────────────────────────────────
+        // EX (Execute)
         case 9:
-            return section_line("── EX  Execute", width);
+            return section_line("EX  Execute", width);
         case 10:
             return format_to_width(get_computation_desc(ctx), width);
         case 11: {
@@ -726,18 +726,18 @@ auto LeftPane::render_pipeline_stages_functional_low_part2(const simrv::core::CP
                                col_width, right_width, 10);
         }
 
-        // ── MEM (Memory Access) ───────────────────────────────────
+        // MEM (Memory Access)
         case 12:
-            return section_line("── MEM  Memory Access", width);
+            return section_line("MEM  Memory Access", width);
         case 13: {
             auto [access_str, data_str] = get_mem_stage_desc(ctx);
             return render_pair("Access", access_str, kThemeMint, "Data", data_str, kThemeMint,
                                col_width, right_width, 10);
         }
 
-        // ── WB (Write-Back) ───────────────────────────────────────
+        // WB (Write-Back)
         case 14:
-            return section_line("── WB  Write-Back", width);
+            return section_line("WB  Write-Back", width);
         case 15: {
             bool is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
             InstFormat wr_fmt = simrv::isa::get_instruction_format(ctx.opcode);
@@ -803,7 +803,7 @@ auto LeftPane::render_pipeline_stages_functional_high(const simrv::core::CPU& cp
         case 18:
             return format_to_width("", width);
         case 19:
-            return section_line("── End Pipeline View", width);
+            return section_line("End Pipeline View", width);
         default:
             return format_to_width("", width);
     }

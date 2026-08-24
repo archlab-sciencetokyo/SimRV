@@ -44,10 +44,10 @@ class LeftPane : public TuiWidget {
 
     [[nodiscard]] auto render_row(int row_idx, int width) -> std::string override;
 
-    void set_page(TuiRegPage page) { page_ = page; }
+    void set_page(TuiRegPage page);
     [[nodiscard]] auto get_page() const -> TuiRegPage { return page_; }
 
-    void set_selected_hart(size_t hart) { selected_hart_ = hart; }
+    void set_selected_hart(size_t hart);
     [[nodiscard]] auto selected_hart() const -> size_t { return selected_hart_; }
     [[nodiscard]] auto current_cpu() const -> const simrv::core::CPU&;
     [[nodiscard]] auto current_cpu() -> simrv::core::CPU&;
@@ -59,10 +59,14 @@ class LeftPane : public TuiWidget {
     void set_paused(bool paused) { paused_ = paused; }
     void set_learn_enabled(bool enabled) { learn_enabled_ = enabled; }
     void set_visible_rows(int rows) { visible_rows_ = rows; }
+    [[nodiscard]] auto get_visible_content_rows() const -> int;
     void set_active_runtime(double secs) { active_runtime_ = secs; }
     void scroll(int lines);
     void reset_scroll() { scroll_offset_ = 0; }
     [[nodiscard]] auto get_scroll_offset() const -> int { return scroll_offset_; }
+    void scroll_log(int lines);
+    void reset_log_scroll() { log_scroll_offset_ = 0; }
+    [[nodiscard]] auto get_log_scroll_offset() const -> int { return log_scroll_offset_; }
     void set_inspect_addr(Register addr) { inspect_addr_ = addr; }
     [[nodiscard]] auto get_inspect_addr() const -> Register { return inspect_addr_; }
     void set_explain_pc(Register pc) { explain_pc_ = pc; }
@@ -228,6 +232,7 @@ class LeftPane : public TuiWidget {
     Register explain_pc_ = 0;
     const std::vector<std::string>* trace_buffer_ = nullptr;
     std::vector<std::string> log_lines_;
+    int log_scroll_offset_ = 0;
     int cache_inspect_type_ = 0;  // 0: ICache, 1: DCache
     int cache_inspect_set_ = 0;   // 0 .. 15
     int cache_inspect_way_ = 0;   // 0 .. 3

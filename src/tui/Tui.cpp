@@ -85,7 +85,6 @@ Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
     last_speed_update_ = std::chrono::steady_clock::now();
     trace_enabled_.store(false, std::memory_order_relaxed);
     right_panel_mode_.store(TuiRightPanelMode::Terminal, std::memory_order_relaxed);
-    trace_record_buffer_.resize(Tui::kTraceBufferSize);
     update_trace_active_cache();
     vt_.set_scroll_offset_callback([this](int lines) -> void {
         if (scroll_offset_ > 0) {
@@ -139,6 +138,7 @@ void Tui::set_paused(bool p) {
             machine_.execution_state_.notify_all();
         }
         update_trace_active_cache();
+        trigger_immediate_render();
     }
 }
 
@@ -277,12 +277,15 @@ void Tui::initialize() {
 
     simrv::log::set_tui_callback([this](const std::string& msg) -> void { print_log(msg); });
 
+    start_ui_thread();
+
     if (machine_.s_fn_memimg.empty()) {
         open_modal(ModalType::LoadBinary);
     }
 }
 
 void Tui::shutdown() {
+    stop_ui_thread();
     simrv::log::set_tui_callback(nullptr);
     emergency_terminal_restore();
 
@@ -291,6 +294,65 @@ void Tui::shutdown() {
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART;
     sigaction(SIGWINCH, &sa, nullptr);
+}
+
+void Tui::start_ui_thread() {
+    if (ui_running_.load(std::memory_order_relaxed)) {
+        return;
+    }
+    ui_running_.store(true, std::memory_order_release);
+    ui_thread_ =
+        std::jthread([this](const std::stop_token& stop_token) { ui_render_loop(stop_token); });
+}
+
+void Tui::stop_ui_thread() {
+    if (!ui_running_.load(std::memory_order_relaxed)) {
+        return;
+    }
+    ui_running_.store(false, std::memory_order_release);
+    ui_cv_.notify_all();
+    if (ui_thread_.joinable()) {
+        ui_thread_.request_stop();
+        ui_thread_.join();
+    }
+}
+
+void Tui::trigger_immediate_render() {
+    render_requested_.store(true, std::memory_order_release);
+    ui_cv_.notify_all();
+}
+
+void Tui::ui_render_loop(const std::stop_token& stop_token) {
+    while (!stop_token.stop_requested() && ui_running_.load(std::memory_order_relaxed)) {
+        update();
+
+        if (g_resized) {
+            update_cache();
+            render(true);
+        } else {
+            update_cache();
+            render();
+        }
+
+        const bool is_sim_paused = is_paused();
+        const uint32_t target_fps = tui_target_fps_.load(std::memory_order_relaxed);
+        uint32_t active_fps = target_fps > 0 ? target_fps : 30;
+        if (!is_sim_paused && !machine_.runtime_profile.is_cycle_mode()) {
+            // Adaptively throttle to 15-20 FPS during heavy IA execution to prioritize simulation
+            // speed
+            active_fps = std::min(active_fps, 20u);
+        }
+        const auto sleep_dur = is_sim_paused
+                                   ? std::chrono::milliseconds(80)
+                                   : std::chrono::milliseconds(1000 / std::max(1u, active_fps));
+
+        std::unique_lock<std::mutex> lock(ui_cv_mutex_);
+        ui_cv_.wait_for(lock, sleep_dur, [this, &stop_token]() {
+            return stop_token.stop_requested() || !ui_running_.load(std::memory_order_relaxed) ||
+                   render_requested_.load(std::memory_order_relaxed);
+        });
+        render_requested_.store(false, std::memory_order_relaxed);
+    }
 }
 
 void Tui::handle_char_write(char ch) {
@@ -513,18 +575,19 @@ void Tui::render(bool force) {
     if (g_resized) g_resized = 0;
 
     if (trace_or_livetrace_active_.load(std::memory_order_relaxed)) {
+        const uint64_t current_seq = trace_write_seq_.load(std::memory_order_relaxed);
+        const size_t available =
+            std::min<size_t>(static_cast<size_t>(current_seq), kTraceBufferSize);
+        const uint64_t start_seq = current_seq - available;
         std::vector<TraceRecord> local_records;
-        {
-            std::scoped_lock tr_lock(trace_mutex_);
-            local_records.reserve(trace_buffer_size_);
-            size_t idx = trace_buffer_tail_;
-            for (size_t i = 0; i < trace_buffer_size_; ++i) {
-                local_records.push_back(trace_record_buffer_[idx]);
-                idx = (idx + 1) % kTraceBufferSize;
-            }
+        local_records.reserve(available);
+        for (uint64_t s = start_seq; s < current_seq; ++s) {
+            local_records.push_back(trace_record_buffer_[s % kTraceBufferSize]);
         }
         trace_buffer_.clear();
-        for (const auto& rec : local_records) trace_buffer_.push_back(format_trace_record(rec));
+        for (const auto& rec : local_records) {
+            trace_buffer_.push_back(format_trace_record(rec));
+        }
     }
 
     struct winsize w{};
@@ -585,7 +648,22 @@ void Tui::render(bool force) {
 }
 
 void Tui::handle_mouse_left_pane(int x, int y, int b) {
+    constexpr int kLogAreaHeight = 6;
+    winsize w{};
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+    int const term_height = w.ws_row > 0 ? w.ws_row : 24;
+    int const num_rows = std::max(1, term_height - 5);
+    int const log_start_y = 4 + (num_rows - kLogAreaHeight);
+    bool const has_log_area =
+        (left_pane_ && num_rows >= 15 && left_pane_->get_page() != TuiRegPage::EXPLAIN &&
+         left_pane_->get_page() != TuiRegPage::TRACE);
+
     if (b == 0) {
+        if (has_log_area && y == log_start_y) {
+            left_pane_->reset_log_scroll();
+            render(true);
+            return;
+        }
         if (y == 4) {
             int const col = x - 2;
             if (col < 0) return;
@@ -611,6 +689,9 @@ void Tui::handle_mouse_left_pane(int x, int y, int b) {
                 set_reg_page(*tab);
             }
         } else if (y >= 6) {
+            if (has_log_area && y >= log_start_y) {
+                return;
+            }
             int logical_row = (y - 6) + left_pane_->get_scroll_offset();
             auto page = left_pane_->get_page();
             if (page == TuiRegPage::CACHE) {
@@ -645,10 +726,21 @@ void Tui::handle_mouse_left_pane(int x, int y, int b) {
                 }
             }
         }
-    } else if (b == 64)
-        scroll_regs(-2);
-    else if (b == 65)
-        scroll_regs(2);
+    } else if (b == 64) {
+        if (has_log_area && y >= log_start_y) {
+            left_pane_->scroll_log(2);
+            render(true);
+        } else {
+            scroll_regs(-2);
+        }
+    } else if (b == 65) {
+        if (has_log_area && y >= log_start_y) {
+            left_pane_->scroll_log(-2);
+            render(true);
+        } else {
+            scroll_regs(2);
+        }
+    }
 }
 
 static auto base64_encode(std::string_view input) -> std::string {
@@ -971,35 +1063,32 @@ void Tui::write_guest_input(uint8_t byte) {
 }
 
 void Tui::update_trace_active_cache() {
-    bool trace_page_active = left_pane_ && (left_pane_->get_page() == TuiRegPage::TRACE);
+    const bool trace_page_active = left_pane_ && (left_pane_->get_page() == TuiRegPage::TRACE ||
+                                                  left_pane_->get_page() == TuiRegPage::EXPLAIN);
     trace_or_livetrace_active_.store(
         trace_enabled_.load(std::memory_order_relaxed) || trace_page_active,
-        std::memory_order_relaxed);
+        std::memory_order_release);
 }
 
 void Tui::record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa::OperationId op_id,
                              uint8_t rd, Register rd_val, uint8_t rs1, Register rs1_val,
                              uint8_t rs2, Register rs2_val, int64_t imm) {
-    std::scoped_lock lock(trace_mutex_);
-    if (trace_record_buffer_.empty()) {
-        trace_record_buffer_.resize(kTraceBufferSize);
+    if (!trace_or_livetrace_active_.load(std::memory_order_relaxed)) {
+        return;
     }
-    trace_record_buffer_[trace_buffer_head_] = TraceRecord{.pc = pc,
-                                                           .opcode = opcode,
-                                                           .op_id = op_id,
-                                                           .rd = rd,
-                                                           .rd_val = rd_val,
-                                                           .rs1 = rs1,
-                                                           .rs1_val = rs1_val,
-                                                           .rs2 = rs2,
-                                                           .rs2_val = rs2_val,
-                                                           .imm = imm};
-    trace_buffer_head_ = (trace_buffer_head_ + 1) % kTraceBufferSize;
-    if (trace_buffer_size_ < kTraceBufferSize) {
-        trace_buffer_size_++;
-    } else {
-        trace_buffer_tail_ = (trace_buffer_tail_ + 1) % kTraceBufferSize;
-    }
+    const uint64_t seq = trace_write_seq_.fetch_add(1, std::memory_order_relaxed);
+    const size_t slot = seq % kTraceBufferSize;
+    trace_record_buffer_[slot] = TraceRecord{.pc = pc,
+                                             .opcode = opcode,
+                                             .op_id = op_id,
+                                             .rd = rd,
+                                             .rd_val = rd_val,
+                                             .rs1 = rs1,
+                                             .rs1_val = rs1_val,
+                                             .rs2 = rs2,
+                                             .rs2_val = rs2_val,
+                                             .imm = imm,
+                                             .sequence = seq};
 }
 
 void Tui::format_trace_inst(const TraceRecord& rec, const std::string& op_name, bool rd_fp,
@@ -1630,6 +1719,14 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
 
     if (handle_navigation_keyboard_input(byte, key) || handle_speed_keyboard_input(key)) return;
 
+    if (key == simrv::tui::TuiKey::CtrlD || key == simrv::tui::TuiKey::d ||
+        key == simrv::tui::TuiKey::D) {
+        machine_.s_debug_mode = !machine_.s_debug_mode;
+        set_status_override(std::format("Debug Mode: {}", machine_.s_debug_mode ? "ON" : "OFF"));
+        trigger_immediate_render();
+        return;
+    }
+
     if (key == simrv::tui::TuiKey::Colon || key == simrv::tui::TuiKey::w ||
         key == simrv::tui::TuiKey::W || key == simrv::tui::TuiKey::i ||
         key == simrv::tui::TuiKey::I || key == simrv::tui::TuiKey::m ||
@@ -1851,6 +1948,12 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             break;
         case TuiFooterAction::ToggleTheme:
             cycle_theme_style();
+            render(true);
+            break;
+        case TuiFooterAction::ToggleDebug:
+            machine_.s_debug_mode = !machine_.s_debug_mode;
+            set_status_override(
+                std::format("Debug Mode: {}", machine_.s_debug_mode ? "ON" : "OFF"));
             render(true);
             break;
     }
