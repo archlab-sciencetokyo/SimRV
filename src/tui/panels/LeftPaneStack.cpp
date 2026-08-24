@@ -47,33 +47,30 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
 
     // Fallback: Display warning message when sp is invalid or null (e.g. during initial boot)
     if (!sp_valid) {
+        int const block_width = std::min(52, std::max(1, width - 4));
+        int const block_left = std::max(2, (width - block_width) / 2);
+        auto inactive_row = [&](const std::string& text) {
+            return format_to_width(std::string(static_cast<std::size_t>(block_left), ' ') + text,
+                                   width);
+        };
         if (logical_row == 0) {
             return section_line("Live Guest Stack Watch", width);
         }
         if (logical_row == 3) {
-            std::string text = std::format("\033[1;31m[!] STACK POINTER INACTIVE / NULL\033[0m");
-            int text_w = get_display_width(text);
-            int spaces = std::max(1, (width - text_w) / 2);
-            return format_to_width(std::string(static_cast<std::size_t>(spaces), ' ') + text,
-                                   width);
+            return inactive_row(
+                std::format("\033[1;31mSTACK POINTER INACTIVE\033[0m  {}waiting\033[0m",
+                            kThemeMuted));
         }
-        if (logical_row == 5) {
+        if (logical_row == 4) {
             std::string val_str =
                 (xlen == 64) ? std::format("0x{:016x}", sp) : std::format("0x{:08x}", sp);
-            std::string text = std::format("sp register : {}{}\033[0m", kThemeVal, val_str);
-            int text_w = get_display_width(text);
-            int spaces = std::max(1, (width - text_w) / 2);
-            return format_to_width(std::string(static_cast<std::size_t>(spaces), ' ') + text,
-                                   width);
+            return inactive_row(
+                std::format("{}sp register\033[0m · {}{}\033[0m", kThemeText, kThemeVal, val_str));
         }
-        if (logical_row == 7) {
-            std::string text = (width < 45) ? "Waiting for guest sp initialization"
-                                            : "Stack watch activates when guest initializes sp.";
-            int text_w = get_display_width(text);
-            int spaces = std::max(1, (width - text_w) / 2);
-            return format_to_width(
-                std::string(static_cast<std::size_t>(spaces), ' ') + kThemeMuted + text + "\033[0m",
-                width);
+        if (logical_row == 5) {
+            std::string const text = width < 48 ? "Activates after guest initializes sp."
+                                                : "Stack watch activates after guest initializes sp.";
+            return inactive_row(std::format("{}{}\033[0m", kThemeMuted, text));
         }
         if (logical_row == 14) {
             return section_line("Status: Stack Watch Inactive", width);
@@ -85,15 +82,24 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
 
     bool const is_16b_aligned = (sp % 16 == 0);
     if (logical_row == 0) {
-        std::string title = std::format("Live Guest Stack Watch ({})",
-                                        is_16b_aligned ? "16B ABI Aligned" : "Unaligned sp!");
+        int const viewport = std::max(1, width - 2);
+        int const first_col = horizontal_scroll_offset_ + 1;
+        int const last_col = std::min(104, horizontal_scroll_offset_ + viewport);
+        std::string title =
+            width < 104
+                ? std::format("Stack Watch · cols {}–{}/104 · Shift+←/→ or wheel ({})", first_col,
+                              last_col, is_16b_aligned ? "16B aligned" : "unaligned sp!")
+                : std::format("Live Guest Stack Watch ({})",
+                              is_16b_aligned ? "16B ABI Aligned" : "Unaligned sp!");
         return section_line(title, width);
     }
     if (logical_row == 14) {
+        std::string const pan_hint = width < 104 ? " · ◀/▶ more" : "";
         std::string footer_desc =
-            std::format("Occupancy: sp | active frame | free/scratch  [{}]",
+            std::format("Occupancy: sp · active frame · free/scratch  {}{}",
                         is_16b_aligned ? "\033[38;5;120m16B ABI Aligned\033[0m"
-                                       : "\033[38;5;203m16B Misaligned\033[0m");
+                                       : "\033[38;5;203m16B Misaligned\033[0m",
+                        pan_hint);
         return section_line(footer_desc, width);
     }
     if (logical_row > 14) {

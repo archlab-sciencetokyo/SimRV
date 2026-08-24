@@ -56,8 +56,7 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
 void AddressModal::render(std::vector<std::string>& content_rows, const std::string& input) {
     build_text_input_rows(content_rows, "Enter Target Address (hex) or Symbol:", input);
     content_rows.push_back("");
-    content_rows.push_back("  " +
-                           build_modal_footer({{"[Enter]", "Inspect"}, {"[Esc]", "Cancel"}}));
+    content_rows.push_back(build_modal_footer({{"[Enter]", "Inspect"}, {"[Esc]", "Cancel"}}));
 }
 
 }  // namespace simrv::tui::modals

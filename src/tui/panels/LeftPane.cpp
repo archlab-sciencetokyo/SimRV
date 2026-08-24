@@ -16,9 +16,25 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/TuiGuidance.hpp"
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/framework/Text.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::tui {
+
+namespace {
+
+[[nodiscard]] auto style_inline_separators(std::string row) -> std::string {
+    constexpr std::string_view rule = "│";
+    std::string const midpoint = std::format("{}·\033[0m", kThemeMuted);
+    std::size_t pos = 0;
+    while ((pos = row.find(rule, pos)) != std::string::npos) {
+        row.replace(pos, rule.size(), midpoint);
+        pos += midpoint.size();
+    }
+    return row;
+}
+
+}  // namespace
 
 auto LeftPane::is_single_column(int width) const -> bool {
     bool const is_reg_page =
@@ -153,6 +169,7 @@ void LeftPane::set_page(TuiRegPage page) {
         if (page == TuiRegPage::CACHE) page = TuiRegPage::STACK;
         if (page == TuiRegPage::BPRED || page == TuiRegPage::HAZARD) page = TuiRegPage::PIPELINE;
     }
+    if (page_ != page) horizontal_scroll_offset_ = 0;
     page_ = page;
 }
 
@@ -201,7 +218,6 @@ struct TabSlot {
     int display_width;
     TuiCategoryGroup grp = TuiCategoryGroup::Regs;
     std::optional<TuiRegPage> page = std::nullopt;
-    bool is_hart = false;
 };
 
 struct ComputedTabSpan {
@@ -209,7 +225,6 @@ struct ComputedTabSpan {
     int width;
     TuiCategoryGroup grp;
     std::optional<TuiRegPage> page;
-    bool is_hart;
 };
 
 auto layout_tabs_equally(const std::vector<TabSlot>& slots, int available_width)
@@ -220,8 +235,9 @@ auto layout_tabs_equally(const std::vector<TabSlot>& slots, int available_width)
     for (const auto& slot : slots) {
         total_item_w += slot.display_width;
     }
-    int num_seps = static_cast<int>(slots.size()) - 1;
-    int raw_w = total_item_w + num_seps;
+    constexpr int kTabGap = 2;
+    int const num_gaps = static_cast<int>(slots.size()) - 1;
+    int raw_w = total_item_w + num_gaps * kTabGap;
     int left_pad = std::max(0, (available_width - raw_w) / 2);
 
     std::string out;
@@ -231,20 +247,15 @@ auto layout_tabs_equally(const std::vector<TabSlot>& slots, int available_width)
     std::vector<ComputedTabSpan> spans;
     spans.reserve(slots.size());
 
-    const auto style = get_active_theme_style();
-    const bool is_ansi = (style == TuiThemeStyle::ClassicAnsi);
-    const char* sep_glyph = is_ansi ? "|" : "│";
-
     for (size_t i = 0; i < slots.size(); ++i) {
         if (i > 0) {
-            out += std::format("{}{}\033[0m", kThemeBorder, sep_glyph);
-            cur_col += 1;
+            out.append(kTabGap, ' ');
+            cur_col += kTabGap;
         }
         spans.push_back({.start_col = cur_col,
                          .width = slots[i].display_width,
                          .grp = slots[i].grp,
-                         .page = slots[i].page,
-                         .is_hart = slots[i].is_hart});
+                         .page = slots[i].page});
         out += slots[i].text;
         cur_col += slots[i].display_width;
     }
@@ -266,7 +277,7 @@ auto LeftPane::render_tab_bar_tier1(int width) const -> std::string {
         TuiCategoryGroup::Tools};
 
     std::vector<TabSlot> slots;
-    slots.reserve(5);
+    slots.reserve(4);
     for (auto grp : kGroups) {
         const char* name = get_category_name(grp);
         std::string text;
@@ -278,17 +289,7 @@ auto LeftPane::render_tab_bar_tier1(int width) const -> std::string {
         slots.push_back({.text = text,
                          .display_width = static_cast<int>(std::strlen(name)) + 2,
                          .grp = grp,
-                         .page = std::nullopt,
-                         .is_hart = false});
-    }
-
-    if (machine_.num_harts() > 1) {
-        std::string text = std::format("\033[1m{}[H{}]\033[0m", kThemePeach, selected_hart_);
-        slots.push_back({.text = text,
-                         .display_width = 4,
-                         .grp = TuiCategoryGroup::Regs,
-                         .page = std::nullopt,
-                         .is_hart = true});
+                         .page = std::nullopt});
     }
 
     return layout_tabs_equally(slots, width).first;
@@ -346,15 +347,14 @@ auto LeftPane::render_tab_bar_tier2(int width) const -> std::string {
     for (const auto& t : tabs) {
         std::string text;
         if (page_ == t.page) {
-            text = std::format("\033[1;7m {} \033[0m", t.name);
+            text = std::format("\033[1;4m{} {} \033[0m", kThemeSky, t.name);
         } else {
             text = std::format(" {}{}\033[0m ", kThemeMuted, t.name);
         }
         slots.push_back({.text = text,
                          .display_width = static_cast<int>(t.name.length()) + 2,
                          .grp = grp,
-                         .page = t.page,
-                         .is_hart = false});
+                         .page = t.page});
     }
 
     return layout_tabs_equally(slots, width).first;
@@ -369,28 +369,18 @@ auto LeftPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPage> {
             TuiCategoryGroup::Tools};
 
         std::vector<TabSlot> slots;
-        slots.reserve(5);
+        slots.reserve(4);
         for (auto grp : kGroups) {
             const char* name = get_category_name(grp);
             slots.push_back({.text = "",
                              .display_width = static_cast<int>(std::strlen(name)) + 2,
                              .grp = grp,
-                             .page = std::nullopt,
-                             .is_hart = false});
-        }
-
-        if (machine_.num_harts() > 1) {
-            slots.push_back({.text = "",
-                             .display_width = 4,
-                             .grp = TuiCategoryGroup::Regs,
-                             .page = std::nullopt,
-                             .is_hart = true});
+                             .page = std::nullopt});
         }
 
         auto const [_, spans] = layout_tabs_equally(slots, width);
         for (const auto& span : spans) {
             if (col >= span.start_col && col < span.start_col + span.width) {
-                if (span.is_hart) return std::nullopt;
                 if (span.grp == get_category_group(page_)) {
                     // Clicking active group cycles within that group
                     if (span.grp == TuiCategoryGroup::Regs) {
@@ -478,8 +468,7 @@ auto LeftPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPage> {
             slots.push_back({.text = "",
                              .display_width = static_cast<int>(t.name.length()) + 2,
                              .grp = grp,
-                             .page = t.page,
-                             .is_hart = false});
+                             .page = t.page});
         }
 
         auto const [_, spans] = layout_tabs_equally(slots, width);
@@ -496,42 +485,6 @@ auto LeftPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPage> {
 auto LeftPane::get_tab_at_col(int col) const -> std::optional<TuiRegPage> {
     return get_tab_at(1, col);
 }
-
-auto LeftPane::is_hart_tab_click(int row, int col) const -> bool {
-    if (machine_.num_harts() <= 1 || row != 0) return false;
-    int const width = last_width_ > 0 ? last_width_ : 50;
-
-    constexpr std::array<TuiCategoryGroup, 4> kGroups = {
-        TuiCategoryGroup::Regs, TuiCategoryGroup::Memory, TuiCategoryGroup::Pipeline,
-        TuiCategoryGroup::Tools};
-
-    std::vector<TabSlot> slots;
-    slots.reserve(5);
-    for (auto grp : kGroups) {
-        const char* name = get_category_name(grp);
-        slots.push_back({.text = "",
-                         .display_width = static_cast<int>(std::strlen(name)) + 2,
-                         .grp = grp,
-                         .page = std::nullopt,
-                         .is_hart = false});
-    }
-
-    slots.push_back({.text = "",
-                     .display_width = 4,
-                     .grp = TuiCategoryGroup::Regs,
-                     .page = std::nullopt,
-                     .is_hart = true});
-
-    auto const [_, spans] = layout_tabs_equally(slots, width);
-    for (const auto& span : spans) {
-        if (span.is_hart && col >= span.start_col && col < span.start_col + span.width) {
-            return true;
-        }
-    }
-    return false;
-}
-
-auto LeftPane::is_hart_tab_click(int col) const -> bool { return is_hart_tab_click(0, col); }
 
 auto LeftPane::render_trace_row(int logical_row, int width) -> std::string {
     if (!trace_buffer_ || trace_buffer_->empty()) {
@@ -683,15 +636,37 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
         return render_active_spinner(logical_row, width);
     }
 
+    constexpr int kStackCanvasWidth = 104;
+    bool const pan_stack_row =
+        supports_horizontal_scroll() && logical_row >= 1 && logical_row <= 13;
+    int const render_width = pan_stack_row ? std::max(width, kStackCanvasWidth) : width;
+    auto finish_row = [&](std::string res) {
+        if (page_ != TuiRegPage::PIPELINE && page_ != TuiRegPage::EXPLAIN) {
+            res = style_inline_separators(std::move(res));
+        }
+        if (pan_stack_row) {
+            int const viewport_width = std::max(1, width - 2);
+            int const max_scroll = std::max(0, kStackCanvasWidth - viewport_width);
+            std::string const left_marker = horizontal_scroll_offset_ > 0 ? "◀" : " ";
+            std::string const right_marker = horizontal_scroll_offset_ < max_scroll ? "▶" : " ";
+            res = std::format("{}{}\033[0m{}{}{}\033[0m", kThemeMuted, left_marker,
+                              framework::crop_columns(res, horizontal_scroll_offset_,
+                                                      viewport_width),
+                              kThemeMuted, right_marker);
+            res = format_to_width(res, width);
+        }
+        return res;
+    };
+
     if (logical_row <= max_active_row) {
-        std::string res = get_row_uncached(logical_row, width);
+        std::string res = finish_row(get_row_uncached(logical_row, render_width));
         if (static_cast<std::size_t>(logical_row) < cached_left_rows_.size()) {
             cached_left_rows_.at(static_cast<std::size_t>(logical_row)) = res;
         }
         return res;
     }
 
-    return get_row_uncached(logical_row, width);
+    return finish_row(get_row_uncached(logical_row, render_width));
 }
 
 void LeftPane::update_cache() {
@@ -728,6 +703,24 @@ void LeftPane::scroll(int lines) {
     int const content_rows = get_visible_content_rows();
     int const max_scroll = std::max(0, total_logical_rows - content_rows);
     scroll_offset_ = std::clamp(scroll_offset_ + lines, 0, max_scroll);
+}
+
+void LeftPane::scroll_horizontal(int columns) {
+    if (!supports_horizontal_scroll()) return;
+    constexpr int kStackCanvasWidth = 104;
+    int const viewport_width = last_width_ > 0 ? last_width_ : 60;
+    int const max_scroll = std::max(0, kStackCanvasWidth - std::max(1, viewport_width - 2));
+    horizontal_scroll_offset_ =
+        std::clamp(horizontal_scroll_offset_ + columns, 0, max_scroll);
+}
+
+auto LeftPane::supports_horizontal_scroll() const -> bool {
+    if (page_ != TuiRegPage::STACK) return false;
+    auto const& cpu = current_cpu();
+    Register const sp = cpu.state().regs.read(RegId::Sp);
+    if (sp == 0) return false;
+    auto const physical = translate_safe(cpu, sp);
+    return physical.has_value() && simrv::memory::is_dram_addr(*physical);
 }
 
 void LeftPane::scroll_log(int lines) {

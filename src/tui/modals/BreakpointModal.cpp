@@ -150,13 +150,13 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
         build_text_input_rows(content_rows, "Target PC Address (hex) or Symbol:", input);
         content_rows.push_back("");
         content_rows.push_back(
-            "  " + build_modal_footer({{"[Enter]", "Set Breakpoint"}, {"[Esc]", "Cancel"}}));
+            build_modal_footer({{"[Enter]", "Set Breakpoint"}, {"[Esc]", "Cancel"}}));
     } else if (type == ModalType::SetWatchpoint) {
         build_text_input_rows(content_rows, "Target Register, Address, or Symbol:", input,
                               "Pauses simulation on memory write or register state change.");
         content_rows.push_back("");
         content_rows.push_back(
-            "  " + build_modal_footer({{"[Enter]", "Set Watchpoint"}, {"[Esc]", "Cancel"}}));
+            build_modal_footer({{"[Enter]", "Set Watchpoint"}, {"[Esc]", "Cancel"}}));
     } else if (type == ModalType::ManageBreakpoints) {
         content_rows.push_back(
             std::format("{}Active Breakpoints & Watchpoints:\033[0m", kThemeText));
@@ -197,12 +197,13 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
         }
 
         content_rows.push_back("");
-        content_rows.push_back("  " + build_modal_footer({{"[↑/↓]", "Nav"},
-                                                          {"[Backspace/d]", "Del"},
-                                                          {"[c]", "Clear"},
-                                                          {"[Esc]", "Close"}}));
+        content_rows.push_back(build_modal_footer({{"[↑]", "Up"},
+                                                   {"[↓]", "Down"},
+                                                   {"[Backspace/d]", "Delete"},
+                                                   {"[c]", "Clear"},
+                                                   {"[Esc]", "Close"}}));
         content_rows.push_back(
-            "  " + build_modal_footer({{":", "Add Breakpoint"}, {"[w]", "Add Watchpoint"}}));
+            build_modal_footer({{":", "Add Breakpoint"}, {"[w]", "Add Watchpoint"}}));
     }
 }
 

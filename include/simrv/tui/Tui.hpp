@@ -137,8 +137,19 @@ class Tui {
     [[nodiscard]] auto is_modal_active() const -> bool { return modal_.is_active(); }
     [[nodiscard]] auto get_active_modal() const -> ModalType { return modal_.get_type(); }
 
-    void set_status_override(const std::string& status) { status_override_ = status; }
-    void clear_status_override() { status_override_.clear(); }
+    void set_status_override(const std::string& status) {
+        status_override_ = status;
+        status_override_expires_at_ =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(2500);
+    }
+    void set_persistent_status_override(const std::string& status) {
+        status_override_ = status;
+        status_override_expires_at_ = std::chrono::steady_clock::time_point::max();
+    }
+    void clear_status_override() {
+        status_override_.clear();
+        status_override_expires_at_ = {};
+    }
 
     void cycle_layout() {
         if (layout_ == TuiLayout::Split)
@@ -237,6 +248,7 @@ class Tui {
     std::atomic<TuiRightPanelMode> right_panel_mode_{TuiRightPanelMode::Terminal};
     std::atomic<bool> trace_or_livetrace_active_{false};
     std::string status_override_;
+    std::chrono::steady_clock::time_point status_override_expires_at_{};
     int scroll_offset_{0};
     size_t selected_hart_{0};
     SelectionState selection_;

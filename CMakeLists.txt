@@ -161,13 +161,10 @@ set(SIMRV_SOURCES
   src/device/Rtc.cpp
   src/device/Uart.cpp
   src/device/Power.cpp
-  src/tui/LogBuffer.cpp
   src/tui/Tui.cpp
-  src/tui/TuiFrameRenderer.cpp
   src/tui/TuiGuidance.cpp
   src/tui/TuiKeybindings.cpp
   src/tui/TuiModal.cpp
-  src/tui/TuiTheme.cpp
   src/tui/modals/AddressModal.cpp
   src/tui/modals/BreakpointModal.cpp
   src/tui/modals/GlossaryModal.cpp
@@ -199,6 +196,24 @@ set(SIMRV_SOURCES
   src/util/FdtGenerator.cpp
 )
 
+# Reusable terminal rendering infrastructure. The target stays internal to SimRV while enforcing
+# that generic code does not depend on simulator, ISA, memory, or device implementations.
+add_library(simrv-tui-framework STATIC
+  src/tui/LogBuffer.cpp
+  src/tui/TuiFrameRenderer.cpp
+  src/tui/TuiTheme.cpp
+  src/tui/framework/Text.cpp
+  src/tui/framework/Theme.cpp
+  src/tui/framework/Components.cpp
+  src/tui/framework/Modal.cpp
+)
+target_compile_features(simrv-tui-framework PUBLIC cxx_std_23)
+target_include_directories(simrv-tui-framework PUBLIC include)
+target_compile_options(simrv-tui-framework PRIVATE -Wall -Wextra -Wpedantic)
+if(SIMRV_WARNINGS_AS_ERRORS)
+  target_compile_options(simrv-tui-framework PRIVATE -Werror)
+endif()
+
 add_executable(SimRV
   src/Main.cpp
   ${SIMRV_SOURCES}
@@ -217,6 +232,7 @@ target_include_directories(SimRV PRIVATE
   include
   ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
+target_link_libraries(SimRV PRIVATE simrv-tui-framework)
 
 
 target_compile_options(SimRV PRIVATE
@@ -302,11 +318,8 @@ file(MAKE_DIRECTORY "${ISA_WORK_DIR}")
 # Fast, deterministic tests for the terminal parser, theme helpers, and key registry.
 add_executable(simrv-tui-tests
   tests/TuiFrameworkTests.cpp
-  src/tui/LogBuffer.cpp
-  src/tui/TuiFrameRenderer.cpp
   src/tui/TuiGuidance.cpp
   src/tui/TuiKeybindings.cpp
-  src/tui/TuiTheme.cpp
   src/tui/modals/GlossaryModal.cpp
   src/tui/modals/HelpModal.cpp
   src/tui/modals/MisaModal.cpp
@@ -316,6 +329,7 @@ add_executable(simrv-tui-tests
   src/pipeline/PipelineConfig.cpp
   src/pipeline/BranchPredictor.cpp
 )
+target_link_libraries(simrv-tui-tests PRIVATE simrv-tui-framework)
 target_compile_features(simrv-tui-tests PRIVATE cxx_std_23)
 target_include_directories(simrv-tui-tests PRIVATE include ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_compile_options(simrv-tui-tests PRIVATE -Wall -Wextra -Wpedantic)
@@ -340,6 +354,16 @@ set_tests_properties(tui-framework PROPERTIES LABELS "gate;regress;tui")
 if(SIMRV_ENABLE_TSAN)
   set_property(TEST tui-framework APPEND PROPERTY LABELS "thread")
 endif()
+
+add_executable(simrv-tui-framework-tests tests/TuiFrameworkCoreTests.cpp)
+target_compile_features(simrv-tui-framework-tests PRIVATE cxx_std_23)
+target_link_libraries(simrv-tui-framework-tests PRIVATE simrv-tui-framework)
+target_compile_options(simrv-tui-framework-tests PRIVATE -Wall -Wextra -Wpedantic)
+if(SIMRV_WARNINGS_AS_ERRORS)
+  target_compile_options(simrv-tui-framework-tests PRIVATE -Werror)
+endif()
+add_test(NAME tui-framework-core COMMAND simrv-tui-framework-tests)
+set_tests_properties(tui-framework-core PROPERTIES LABELS "gate;regress;tui")
 
 add_executable(simrv-pipeline-model-tests
   tests/PipelineModelTests.cpp
@@ -448,6 +472,7 @@ target_include_directories(simrv-modern-platform-tests PRIVATE
   include
   ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
+target_link_libraries(simrv-modern-platform-tests PRIVATE simrv-tui-framework)
 target_compile_options(simrv-modern-platform-tests PRIVATE -Wall -Wextra -Wpedantic)
 if(SIMRV_WARNINGS_AS_ERRORS)
   target_compile_options(simrv-modern-platform-tests PRIVATE -Werror)

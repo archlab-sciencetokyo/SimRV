@@ -86,7 +86,7 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
                         load_appmode ? "App (Baremetal)" : "OS (Linux/RTOS)", kThemeMuted));
         content_rows.push_back("");
         content_rows.push_back(
-            "  " + build_modal_footer({{"[Enter]", "Load Image"}, {"[Esc]", "Cancel"}}));
+            build_modal_footer({{"[Enter]", "Load Image"}, {"[Esc]", "Cancel"}}));
     } else if (type == ModalType::LoadDiskImage) {
         build_text_input_rows(content_rows, "Enter disk image filepath:", input,
                               "e.g. linux-images/rv64/root.img, root.ext4, root.bin");
@@ -96,7 +96,7 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
                                                kThemeSky, staged_binary_path));
         }
         content_rows.push_back("");
-        content_rows.push_back("  " + build_modal_footer({{"[Enter]", "Load (empty to skip)"},
+        content_rows.push_back(build_modal_footer({{"[Enter]", "Load (empty to skip)"},
                                                           {"[Esc]", "Skip Disk"}}));
     }
 }

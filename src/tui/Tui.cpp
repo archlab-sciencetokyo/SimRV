@@ -120,7 +120,7 @@ void Tui::set_paused(bool p) {
     if (cur_paused != p) {
         paused_.store(p, std::memory_order_release);
         if (!p) {
-            status_override_.clear();
+            clear_status_override();
             last_runtime_tick_ = std::chrono::steady_clock::now();
             last_speed_update_ = std::chrono::steady_clock::now();
             last_icount_ = machine_.cpu.e_icount;
@@ -430,6 +430,11 @@ auto Tui::get_right_pane_start_line(int num_rows) const -> int {
 
 void Tui::render_build_lines(int left_pane_width, int right_pane_width, int num_rows,
                              TuiRightPanelMode panel_mode) {
+    if (!status_override_.empty() &&
+        status_override_expires_at_ != std::chrono::steady_clock::time_point::max() &&
+        std::chrono::steady_clock::now() >= status_override_expires_at_) {
+        clear_status_override();
+    }
     if (!left_pane_ || !right_pane_ || !status_bar_) return;
     cached_num_rows_ = num_rows;
     lines_to_draw_.clear();
@@ -667,10 +672,6 @@ void Tui::handle_mouse_left_pane(int x, int y, int b) {
         if (y == 4) {
             int const col = x - 2;
             if (col < 0) return;
-            if (left_pane_->is_hart_tab_click(0, col)) {
-                select_next_hart();
-                return;
-            }
             auto tab = left_pane_->get_tab_at(0, col);
             if (tab.has_value()) {
                 set_reg_page(*tab);
@@ -726,6 +727,12 @@ void Tui::handle_mouse_left_pane(int x, int y, int b) {
                 }
             }
         }
+    } else if ((b == 66 || b == 68) && left_pane_->supports_horizontal_scroll()) {
+        left_pane_->scroll_horizontal(-8);
+        render(true);
+    } else if ((b == 67 || b == 69) && left_pane_->supports_horizontal_scroll()) {
+        left_pane_->scroll_horizontal(8);
+        render(true);
     } else if (b == 64) {
         if (has_log_area && y >= log_start_y) {
             left_pane_->scroll_log(2);
@@ -1784,9 +1791,6 @@ void Tui::execute_header_action(HeaderHitResult hit) {
                 pause_loop();
             }
             break;
-        case HeaderAction::ToggleMode:
-            open_modal(ModalType::ConfigureSystem);
-            break;
         case HeaderAction::SelectHart:
             if (machine_.num_harts() > 1) {
                 selected_hart_ = hit.hart_index % machine_.num_harts();
@@ -2046,6 +2050,13 @@ auto Tui::handle_alt_key(char key, uint8_t byte) -> bool {
 }
 
 auto Tui::handle_arrow_key_sequence() -> bool {
+    if (esc_buf_ == "\033[1;2C" || esc_buf_ == "\033[1;2D") {
+        if (!is_modal_active() && left_pane_ && left_pane_->supports_horizontal_scroll()) {
+            left_pane_->scroll_horizontal(esc_buf_.back() == 'C' ? 8 : -8);
+            render(true);
+            return true;
+        }
+    }
     if (esc_buf_ == "\033[A" || esc_buf_ == "\033OA") {
         if (get_active_modal() == ModalType::Glossary) {
             modal_.scroll_glossary_content(-2);
@@ -2309,10 +2320,6 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                 int col = x - 2;
                 if (left_pane_) {
                     int tier = (y == 4) ? 0 : 1;
-                    if (tier == 0 && left_pane_->is_hart_tab_click(0, col)) {
-                        select_next_hart();
-                        return true;
-                    }
                     auto tab_opt = left_pane_->get_tab_at(tier, col);
                     if (tab_opt.has_value()) {
                         if (*tab_opt == TuiRegPage::CACHE &&

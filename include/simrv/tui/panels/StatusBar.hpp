@@ -22,7 +22,6 @@ enum class HeaderAction : uint8_t {
     None,
     RunPause,
     SetSpeed,
-    ToggleMode,
     SelectHart,
     TogglePanelMode,
     ToggleAttached,

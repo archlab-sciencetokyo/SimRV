@@ -64,6 +64,12 @@ class LeftPane : public TuiWidget {
     void scroll(int lines);
     void reset_scroll() { scroll_offset_ = 0; }
     [[nodiscard]] auto get_scroll_offset() const -> int { return scroll_offset_; }
+    void scroll_horizontal(int columns);
+    void reset_horizontal_scroll() { horizontal_scroll_offset_ = 0; }
+    [[nodiscard]] auto get_horizontal_scroll_offset() const -> int {
+        return horizontal_scroll_offset_;
+    }
+    [[nodiscard]] auto supports_horizontal_scroll() const -> bool;
     void scroll_log(int lines);
     void reset_log_scroll() { log_scroll_offset_ = 0; }
     [[nodiscard]] auto get_log_scroll_offset() const -> int { return log_scroll_offset_; }
@@ -82,8 +88,6 @@ class LeftPane : public TuiWidget {
         -> std::optional<Register>;
     [[nodiscard]] auto get_stack_addr_at_row(int logical_row) const -> std::optional<Register>;
     [[nodiscard]] auto is_running_label_click(int logical_row, int col, int width) const -> bool;
-    [[nodiscard]] auto is_hart_tab_click(int col) const -> bool;
-    [[nodiscard]] auto is_hart_tab_click(int row, int col) const -> bool;
     [[nodiscard]] auto get_text_in_range(int start_row, int start_col, int end_row, int end_col,
                                          int width) -> std::string;
 
@@ -227,6 +231,7 @@ class LeftPane : public TuiWidget {
     std::vector<uint64_t> kips_history_;
     int visible_rows_ = 25;
     int scroll_offset_ = 0;
+    int horizontal_scroll_offset_ = 0;
     double active_runtime_ = 0.0;
     Register inspect_addr_ = 0;
     Register explain_pc_ = 0;

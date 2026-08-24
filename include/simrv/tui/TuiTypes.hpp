@@ -6,9 +6,11 @@
 
 #include <cstdint>
 
+#include "simrv/tui/framework/Layout.hpp"
+
 namespace simrv::tui {
 
-enum class TuiLayout : uint8_t { Split, FullRight, FullLeft };
+using TuiLayout = framework::Layout;
 
 enum class TuiCategoryGroup : uint8_t { Regs, Memory, Pipeline, Tools };
 
@@ -68,7 +70,7 @@ enum class TuiRegPage : uint8_t {
 [[nodiscard]] constexpr auto get_category_name(TuiCategoryGroup group) -> const char* {
     switch (group) {
         case TuiCategoryGroup::Regs:
-            return "Regs";
+            return "Register Files";
         case TuiCategoryGroup::Memory:
             return "Memory";
         case TuiCategoryGroup::Pipeline:

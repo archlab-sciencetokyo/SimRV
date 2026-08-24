@@ -9,9 +9,13 @@
 #include <string_view>
 #include <vector>
 
-#include "simrv/tui/TuiLayoutPolicy.hpp"
+#include "simrv/tui/framework/Layout.hpp"
 
 namespace simrv::tui {
+
+using framework::FrameGeometry;
+using TuiLayout = framework::Layout;
+inline constexpr int kFrameRendererMinimumTerminalWidth = framework::kMinimumTerminalWidth;
 
 using PaneRowRenderer = std::function<std::string(int row, int width)>;
 

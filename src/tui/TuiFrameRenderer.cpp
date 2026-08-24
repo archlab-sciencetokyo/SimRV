@@ -30,13 +30,40 @@ void append_block_lines(std::vector<std::string>& lines, std::string_view block)
     return format_to_width(row, width);
 }
 
+[[nodiscard]] auto strip_ansi(std::string_view row) -> std::string {
+    std::string plain;
+    bool escape = false;
+    bool csi = false;
+    for (char ch : row) {
+        if (ch == '\033') {
+            escape = true;
+            csi = false;
+        } else if (escape) {
+            if (!csi && ch == '[') {
+                csi = true;
+            } else if (!csi || (ch >= '@' && ch <= '~')) {
+                escape = false;
+                csi = false;
+            }
+        } else {
+            plain.push_back(ch);
+        }
+    }
+    return plain;
+}
+
+[[nodiscard]] auto is_horizontal_rule(const std::string& row, const char* horiz) -> bool {
+    const std::string plain = strip_ansi(row);
+    return plain.starts_with(horiz) && plain.ends_with(horiz);
+}
+
 }  // namespace
 
 auto compose_frame_lines(const FrameGeometry& frame, int terminal_width, TuiLayout layout,
                          std::string_view header_block, std::string_view footer_block,
                          const PaneRowRenderer& render_left, const PaneRowRenderer& render_right)
     -> std::vector<std::string> {
-    if (!frame.renderable || terminal_width < kMinimumTerminalWidth) return {};
+    if (!frame.renderable || terminal_width < kFrameRendererMinimumTerminalWidth) return {};
 
     std::vector<std::string> lines;
     lines.reserve(static_cast<std::size_t>(frame.frame_rows));
@@ -49,10 +76,15 @@ auto compose_frame_lines(const FrameGeometry& frame, int terminal_width, TuiLayo
 
     for (int row = 0; row < frame.content_rows; ++row) {
         if (layout == TuiLayout::Split) {
+            const std::string left = fit_pane_row(render_left(row, frame.panes.left),
+                                                  frame.panes.left);
+            const bool left_rule = is_horizontal_rule(left, is_ansi ? "-" : "─");
+            const char* left_border = left_rule ? (is_ansi ? "+" : "╟") : border_v;
+            const char* center_border = left_rule ? (is_ansi ? "+" : "┤") : div_v;
             lines.push_back(std::format(
-                "{}{}\033[0m{}{}{}\033[0m{}{}{}\033[0m", kThemeBorder, border_v,
-                fit_pane_row(render_left(row, frame.panes.left), frame.panes.left), kThemeBorder,
-                div_v, fit_pane_row(render_right(row, frame.panes.right), frame.panes.right),
+                "{}{}\033[0m{}{}{}\033[0m{}{}{}\033[0m", kThemeBorder, left_border,
+                left, kThemeBorder, center_border,
+                fit_pane_row(render_right(row, frame.panes.right), frame.panes.right),
                 kThemeBorder, border_v));
         } else if (layout == TuiLayout::FullRight) {
             lines.push_back(
@@ -60,10 +92,14 @@ auto compose_frame_lines(const FrameGeometry& frame, int terminal_width, TuiLayo
                             fit_pane_row(render_right(row, frame.panes.right), frame.panes.right),
                             kThemeBorder, border_v));
         } else {
+            const std::string left = fit_pane_row(render_left(row, frame.panes.left),
+                                                  frame.panes.left);
+            const bool left_rule = is_horizontal_rule(left, is_ansi ? "-" : "─");
+            const char* left_border = left_rule ? (is_ansi ? "+" : "╟") : border_v;
+            const char* right_border = left_rule ? (is_ansi ? "+" : "╢") : border_v;
             lines.push_back(
-                std::format("{}{}\033[0m{}{}{}\033[0m", kThemeBorder, border_v,
-                            fit_pane_row(render_left(row, frame.panes.left), frame.panes.left),
-                            kThemeBorder, border_v));
+                std::format("{}{}\033[0m{}{}{}\033[0m", kThemeBorder, left_border, left,
+                            kThemeBorder, right_border));
         }
     }
 

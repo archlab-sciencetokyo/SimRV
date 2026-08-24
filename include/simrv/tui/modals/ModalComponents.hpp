@@ -34,13 +34,13 @@ auto get_modal_metadata(ModalType type, bool is_notice_error = false,
                         std::string_view notice_title = "") -> ModalMetadata;
 
 /**
- * @brief Format a single action shortcut pill, e.g. "[Enter] Apply".
+ * @brief Format a single filled action keycap followed by its plain-text label.
  */
 auto format_action_hint(std::string_view key, std::string_view action,
                         std::string_view color = kThemeSky) -> std::string;
 
 /**
- * @brief Formats a unified footer action row, e.g. "[Enter] Apply | [Esc] Cancel".
+ * @brief Formats a unified footer action row with themed midpoint separators.
  */
 auto build_modal_footer(std::span<const ModalActionHint> hints) -> std::string;
 auto build_modal_footer(std::initializer_list<ModalActionHint> hints) -> std::string;
@@ -49,6 +49,13 @@ auto build_modal_footer(std::initializer_list<ModalActionHint> hints) -> std::st
  * @brief Formats an aligned horizontal tab bar with active tab highlighted.
  */
 auto build_modal_tab_bar(std::span<const std::string_view> tabs, size_t active_tab) -> std::string;
+
+/**
+ * @brief Resolve a shared tab/footer control row against the modal's final inner width.
+ */
+auto align_modal_control_row(std::string row, int inner_width) -> std::string;
+auto layout_modal_control_row(std::string row, int inner_width)
+    -> framework::RenderedControl;
 
 /**
  * @brief Formats a styled section category divider banner, e.g. "── ISA Extensions ──".

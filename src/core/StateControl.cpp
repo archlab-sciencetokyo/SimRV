@@ -621,7 +621,8 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
             trap_cause_name(cause), static_cast<uint64_t>(cause), static_cast<uint64_t>(trap_pc));
         if (cpu.machine_) {
             if (cpu.machine_->s_tuimode && cpu.machine_->tui) {
-                cpu.machine_->tui->set_status_override("\033[1;31m UNHANDLED TRAP \033[0m");
+                cpu.machine_->tui->set_persistent_status_override(
+                    "\033[1;31m UNHANDLED TRAP \033[0m");
                 cpu.machine_->tui->pause_loop();
             }
             cpu.machine_->stop(Machine::StopReason::UnhandledTrap);
@@ -633,7 +634,8 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
 
     if (cpu.machine_ && cpu.machine_->s_tuimode && cpu.machine_->tui &&
         cause == static_cast<TrapCause>(std::to_underlying(ExceptionCode::Breakpoint))) {
-        cpu.machine_->tui->set_status_override("\033[1;38;5;234;48;5;210m TRAPPED \033[0m");
+        cpu.machine_->tui->set_persistent_status_override(
+            "\033[1;38;5;234;48;5;210m TRAPPED \033[0m");
         if constexpr (simrv::xlen::kIsXLen64) {
             simrv::log::warn("Breakpoint: cause=0x{:016x} pc=0x{:016x} tval=0x{:016x}",
                              static_cast<uint64_t>(cause), static_cast<uint64_t>(trap_pc),

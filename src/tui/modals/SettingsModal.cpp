@@ -409,7 +409,7 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
              .val = draft.rollback_enabled ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
             {.name = "Color Theme / Contrast",
              .val = draft.high_contrast ? "\033[1;33m[High Contrast B&W]\033[0m"
-                                        : "\033[1;34m[Catppuccin Macchiato]\033[0m"},
+                                        : "\033[1;34m[Adaptive / Terminal Colors]\033[0m"},
             {.name = "Presentation Mode",
              .val = draft.class_mode ? "\033[1;35m[Classroom / Large]\033[0m"
                                      : "\033[90m[Standard]\033[0m"},
@@ -481,7 +481,7 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
     }
 
     add_row_cb("");
-    add_row_cb("  " + build_modal_footer({{"[Enter]", "apply settings"}, {"[Esc / q]", "cancel"}}));
+    add_row_cb(build_modal_footer({{"[Enter]", "Apply Settings"}, {"[Esc / q]", "Cancel"}}));
 }
 
 }  // namespace simrv::tui::modals

@@ -50,8 +50,7 @@ void StepModal::render(ModalType type, std::vector<std::string>& content_rows,
         build_text_input_rows(content_rows, "Enter Target Frequency (Hz, 0=Max):", input,
                               "Examples: 1000 (1kHz), 1000000 (1MHz), 0 (maximum speed)");
         content_rows.push_back("");
-        content_rows.push_back("  " +
-                               build_modal_footer({{"[Enter]", "Apply"}, {"[Esc]", "Cancel"}}));
+        content_rows.push_back(build_modal_footer({{"[Enter]", "Apply"}, {"[Esc]", "Cancel"}}));
     }
 }
 

@@ -12,6 +12,7 @@
 
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
+#include "simrv/tui/framework/Types.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -218,6 +219,19 @@ class TuiModal {
     std::string staged_binary_path_;
     bool staged_mode_change_ = false;
     bool staged_target_appmode_ = false;
+    // Rendering resolves content-dependent modal geometry; hit-testing reuses that exact box.
+    mutable int rendered_term_width_ = 0;
+    mutable int rendered_term_height_ = 0;
+    mutable int rendered_box_width_ = 0;
+    mutable int rendered_box_height_ = 0;
+    mutable int rendered_start_x_ = 0;
+    mutable int rendered_start_y_ = 0;
+    struct RenderedControlRow {
+        int relative_y = 0;
+        int content_row = 0;
+        std::vector<framework::ControlSpan> spans;
+    };
+    mutable std::vector<RenderedControlRow> rendered_control_rows_;
 };
 
 }  // namespace simrv::tui

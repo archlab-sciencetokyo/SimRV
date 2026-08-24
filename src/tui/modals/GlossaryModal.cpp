@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/modals/ModalComponents.hpp"
 
 namespace simrv::tui::modals {
 
@@ -106,14 +107,14 @@ auto get_topic_data(int index) -> TopicData {
                 .title = "1. RISC-V Registers & ABI Conventions",
                 .subtitle = "Standard Calling Conventions and Architectural State",
                 .lines = {
-                    "\033[1;36m── General Purpose Registers (GPRs: x0..x31) ──\033[0m",
+                    "## General-purpose registers (x0–x31)",
                     "• \033[1;33mx0 (zero)\033[0m : Hardwired to 0; writes are discarded.",
                     "• \033[1;33mx1 (ra)\033[0m   : Return address for function calls "
                     "(Caller-saved).",
-                    "• \033[1;33mx2 (sp)\033[0m   : Stack pointer; 16-byte aligned in standard ABI "
-                    "(Callee-saved).",
+                    "• \033[1;33mx2 (sp)\033[0m   : Stack pointer; kept 16-byte aligned at standard "
+                    "ABI procedure-call boundaries.",
                     "• \033[1;33mx3 (gp)\033[0m   : Global pointer for fast small-data access.",
-                    "• \033[1;33mx4 (tp)\033[0m   : Thread pointer (thread-local storage TLS).",
+                    "• \033[1;33mx4 (tp)\033[0m   : Thread pointer for thread-local storage (TLS).",
                     "• \033[1;33mx5..x7 (t0..t2)\033[0m   : Temporary registers (Caller-saved).",
                     "• \033[1;33mx8 (s0/fp)\033[0m      : Saved register or Frame pointer "
                     "(Callee-saved).",
@@ -124,125 +125,129 @@ auto get_topic_data(int index) -> TopicData {
                     "preserved across calls).",
                     "• \033[1;33mx28..x31 (t3..t6)\033[0m : Temporaries (Caller-saved).",
                     "",
-                    "\033[1;36m── Floating-Point Registers (FPRs: f0..f31) ──\033[0m",
+                    "## Floating-point registers (f0–f31)",
                     "• \033[1;33mfa0..fa7 (f10..f17)\033[0m: FP Arguments and return values.",
-                    "• \033[1;33mfs0..fs11\033[0m          : FP Saved registers (Callee-saved).",
+                    "• \033[1;33mfs0..fs11\033[0m          : Conditionally callee-saved under the "
+                    "hardware floating-point calling convention.",
                     "• \033[1;33mft0..ft11\033[0m          : FP Temporaries (Caller-saved).",
                     "",
-                    "\033[1;36m── Vector Registers (v0..v31) ──\033[0m",
+                    "## Vector registers (v0–v31)",
                     "• Scalable register size governed by \033[1;32mVLEN\033[0m (e.g. 128, 256 "
                     "bits).",
-                    "• Element width governed by \033[1;32mSEW\033[0m and multiplier "
-                    "\033[1;32mLMUL\033[0m configured by \033[1;33mvsetvli\033[0m."}};
+                    "• Element width is selected by \033[1;32mSEW\033[0m; register grouping is "
+                    "selected by \033[1;32mLMUL\033[0m through vector-configuration instructions."}};
         case 1:  // Pipeline & Hazards
             return {.title = "2. Pipeline Stages & Hazards",
                     .subtitle = "Instruction Pipelining, Dataflow, Forwarding, and Stalls",
-                    .lines = {"\033[1;36m── Classic 5-Stage RISC-V Pipeline ──\033[0m",
-                              "• \033[1;32m[IF]  Instruction Fetch\033[0m : Fetch 32-bit/16-bit "
-                              "instruction from memory/I-Cache at PC.",
-                              "• \033[1;32m[ID]  Instruction Decode\033[0m: Decode "
-                              "opcode/bitfields, read register file (rs1, rs2).",
-                              "• \033[1;32m[EX]  Execute / ALU\033[0m     : Perform "
-                              "arithmetic/logic computation, branch target evaluation.",
-                              "• \033[1;32m[MEM] Memory Access\033[0m    : Read (Load) or write "
-                              "(Store) DRAM/D-Cache at calculated address.",
-                              "• \033[1;32m[WB]  Write-Back\033[0m       : Write resulting value "
-                              "into destination register rd.",
-                              "", "\033[1;36m── Pipeline Hazards & Mitigations ──\033[0m",
-                              "• \033[1;31mRAW (Read-After-Write)\033[0m : Instruction needs "
-                              "result before previous instruction writes back.",
-                              "  \033[1;32m→ Forwarding (Bypassing)\033[0m: Route ALU output "
-                              "directly from EX/MEM stage to ID/EX stage.",
-                              "  \033[1;33m→ Load-Use Stall\033[0m        : Load data is only "
-                              "ready at end of MEM stage, requiring 1 bubble.",
-                              "• \033[1;31mControl Hazard\033[0m         : Branch target unknown "
-                              "during IF stage.",
-                              "  \033[1;32m→ Branch Prediction\033[0m     : Speculatively fetch "
-                              "next instruction; flush pipeline on mispredict.",
-                              "• \033[1;31mStructural Hazard\033[0m      : Hardware resource "
-                              "contention (e.g., single-port memory or busy divider)."}};
+                    .lines = {"## Classic five-stage pipeline",
+                              "• \033[1;32mIF \033[0m · Fetch the instruction at PC from the "
+                              "instruction cache or memory.",
+                              "• \033[1;32mID \033[0m · Decode opcode and operands; read rs1 "
+                              "and rs2 from the register file.",
+                              "• \033[1;32mEX \033[0m · Execute arithmetic or logic; calculate "
+                              "addresses and resolve branches.",
+                              "• \033[1;32mMEM\033[0m · Access the data cache or memory for "
+                              "loads and stores.",
+                              "• \033[1;32mWB \033[0m · Write an instruction result to rd when "
+                              "the instruction produces one.",
+                              "",
+                              "## Hazards and mitigations",
+                              "• \033[1;31mRAW\033[0m · A consumer needs a value before its "
+                              "producer reaches write-back.",
+                              "  ◦ \033[1;32mForwarding\033[0m · Bypass a result from a later stage "
+                              "directly to the dependent instruction.",
+                              "  ◦ \033[1;33mLoad-use interlock\033[0m · A dependent instruction "
+                              "typically waits one bubble because load data arrives after MEM.",
+                              "• \033[1;31mControl\033[0m · The correct next PC is not yet known "
+                              "after a branch or jump enters the pipeline.",
+                              "  ◦ \033[1;32mPrediction\033[0m · Fetch speculatively; redirect and flush "
+                              "younger work when the prediction is wrong.",
+                              "• \033[1;31mStructural\033[0m · Concurrent instructions require the "
+                              "same unavailable hardware resource.",
+                              "  ◦ \033[1;32mArbitration or stalling\033[0m · Serialize access until "
+                              "the resource becomes available."}};
         case 2:  // Memory Hierarchy & Caches
             return {
                 .title = "3. Memory Hierarchy & Caches",
                 .subtitle = "L1 Caches, Multi-Way Set Associativity, Line Replacement",
-                .lines = {"\033[1;36m── Cache Architecture & Address Breakdown ──\033[0m",
-                          "• Physical address is split into: \033[1;33m[ Tag | Set Index | Block "
-                          "Offset ]\033[0m.",
+                .lines = {"## Cache address breakdown",
+                          "• A cache address is divided into \033[1;33mTag · Set index · Block "
+                          "offset\033[0m.",
                           "  - \033[1;32mOffset\033[0m: Selects byte/word within cache block (e.g. "
                           "64-byte line = 6 bits).",
                           "  - \033[1;32mIndex\033[0m : Selects cache set (e.g. 16 sets = 4 bits).",
                           "  - \033[1;32mTag\033[0m   : Remaining upper bits verified against line "
                           "tags in the selected set.",
-                          "", "\033[1;36m── Associativity & Hit/Miss Dynamics ──\033[0m",
+                          "", "## Associativity and misses",
                           "• \033[1;33mDirect-Mapped (1-Way)\033[0m: Exactly 1 line per set. Fast, "
                           "but high conflict misses.",
                           "• \033[1;33mN-Way Set-Associative\033[0m: N lines per set. Line "
-                          "replaced using \033[1;32mLRU\033[0m (Least Recently Used).",
+                          "replacement policy chooses a victim on a miss (often LRU or an approximation).",
                           "• \033[1;33mFully Associative\033[0m    : Any block can go into any "
                           "line (used in TLBs).",
-                          "", "\033[1;36m── Write Policies ──\033[0m",
+                          "", "## Write policies",
                           "• \033[1;32mWrite-Back (with Dirty bit)\033[0m: Stores update cache "
-                          "line; written to DRAM only on eviction.",
+                          "line; propagated to the next memory level when the dirty line is evicted.",
                           "• \033[1;32mWrite-Through\033[0m              : Stores update cache and "
-                          "backing DRAM simultaneously."}};
+                          "next memory level as part of the store."}};
         case 3:  // Virtual Memory & TLB
             return {
                 .title = "4. Virtual Memory & Page Translation",
                 .subtitle = "Sv39/Sv48 Paging, Translation Lookaside Buffer (TLB), Faults",
-                .lines = {"\033[1;36m── RISC-V Sv39 Virtual Memory Architecture ──\033[0m",
-                          "• 39-bit Virtual Address → 3-level page table hierarchy (VPN[2], "
-                          "VPN[1], VPN[0]).",
+                .lines = {"## Sv39 virtual memory",
+                          "• Sv39 uses 39 translated address bits in a sign-extended 64-bit virtual "
+                          "address and a three-level page table (VPN[2:0]).",
                           "• Page size is \033[1;32m4 KiB (12-bit offset)\033[0m; Mega-pages (2 "
                           "MiB) and Giga-pages (1 GiB) supported.",
                           "• \033[1;33msatp (Supervisor Address Translation and Protection)\033[0m "
                           "CSR holds root page table PPN.",
-                          "", "\033[1;36m── TLB (Translation Lookaside Buffer) ──\033[0m",
+                          "", "## Translation lookaside buffer (TLB)",
                           "• High-speed associative cache holding recent \033[1;32mVirtual Page → "
                           "Physical Page\033[0m mappings.",
-                          "• \033[1;32mTLB Hit\033[0m : Instant single-cycle address translation.",
+                          "• \033[1;32mTLB hit\033[0m : Translation is supplied without a page-table walk.",
                           "• \033[1;31mTLB Miss\033[0m: Requires multi-cycle hardware Page Table "
                           "Walk (PTW).",
-                          "", "\033[1;36m── Page Table Entry (PTE) Permission Bits ──\033[0m",
+                          "", "## Page-table entry (PTE) bits",
                           "• \033[1;33mV\033[0m: Valid, \033[1;33mR\033[0m: Readable, "
                           "\033[1;33mW\033[0m: Writable, \033[1;33mX\033[0m: Executable, "
                           "\033[1;33mU\033[0m: User accessible.",
-                          "• \033[1;33mA\033[0m: Accessed (set on read/write), \033[1;33mD\033[0m: "
-                          "Dirty (set on write access)."}};
+                          "• \033[1;33mA\033[0m: Accessed; \033[1;33mD\033[0m: Dirty. Depending on the "
+                          "implemented scheme, hardware updates them or faults for software handling."}};
         case 4:  // Branch Prediction
             return {
                 .title = "5. Branch Prediction Mechanics",
                 .subtitle =
                     "Dynamic Branch History, Direction Predictors, and Branch Target Buffers",
                 .lines = {
-                    "\033[1;36m── Branch Predictor Architectures ──\033[0m",
+                    "## Direction prediction",
                     "• \033[1;33mStatic Predictors\033[0m    : Always predict Taken (AT) or Always "
                     "predict Not-Taken (ANT).",
                     "• \033[1;33m1-Bit Dynamic\033[0m        : Remembers last outcome (0: "
                     "Not-Taken, 1: Taken).",
                     "• \033[1;33m2-Bit Bimodal Counter\033[0m: 4-state saturating state machine:",
-                    "  - \033[1;32m00: Strongly Not-Taken\033[0m | \033[1;33m01: Weakly "
+                    "  - \033[1;32m00: Strongly Not-Taken\033[0m · \033[1;33m01: Weakly "
                     "Not-Taken\033[0m",
-                    "  - \033[1;33m10: Weakly Taken\033[0m     | \033[1;32m11: Strongly "
+                    "  - \033[1;33m10: Weakly Taken\033[0m · \033[1;32m11: Strongly "
                     "Taken\033[0m",
                     "  - Prevents single loop exit anomaly from thrashing the predictor state.",
                     "• \033[1;33mGshare Predictor\033[0m     : XORs Global Branch History Register "
                     "(GBHR) with branch PC bits.",
-                    "", "\033[1;36m── BTB (Branch Target Buffer) ──\033[0m",
-                    "• Cache storing predicted target jump addresses so the IF stage can redirect "
-                    "instantly."}};
+                    "", "## Branch target buffer (BTB)",
+                    "• Cache of predicted control-flow targets that lets fetch redirect without "
+                    "waiting for target calculation."}};
         case 5:  // Privilege Modes & Traps
         default:
             return {
                 .title = "6. Privilege Modes, CSRs & Traps",
                 .subtitle = "M/S/U Modes, Exceptions, Interrupts, and Control Registers",
                 .lines = {
-                    "\033[1;36m── RISC-V Privilege Hierarchy ──\033[0m",
+                    "## Privilege hierarchy",
                     "• \033[1;31mMachine Mode (M-mode)\033[0m    : Highest privilege level; direct "
                     "hardware access, OpenSBI.",
                     "• \033[1;34mSupervisor Mode (S-mode)\033[0m : OS Kernel level; virtual memory "
                     "management (Linux).",
                     "• \033[1;32mUser Mode (U-mode)\033[0m       : Unprivileged user applications.",
-                    "", "\033[1;36m── Core Control & Status Registers (CSRs) ──\033[0m",
+                    "", "## Core control and status registers (CSRs)",
                     "• \033[1;33mmstatus / sstatus\033[0m: Global interrupt enable (MIE/SIE) and "
                     "previous privilege mode (MPP/SPP).",
                     "• \033[1;33mmepc / sepc\033[0m      : Saved Program Counter where "
@@ -251,8 +256,8 @@ auto get_topic_data(int index) -> TopicData {
                     "Interrupt, MSB=0 for Exception).",
                     "• \033[1;33mmtvec / stvec\033[0m    : Base trap handler entry vector address "
                     "(Direct or Vectored).",
-                    "• \033[1;33mmedeleg / mideleg\033[0m: M-mode masks delegating specific "
-                    "exceptions/interrupts to S-mode."}};
+                    "• \033[1;33mmedeleg / mideleg\033[0m: Bitmaps selecting exceptions and "
+                    "interrupts delegated from M-mode to S-mode."}};
     }
 }
 
@@ -277,70 +282,85 @@ void GlossaryModal::render(std::vector<std::string>& content_rows,
                            const std::function<void(const std::string&)>& add_row_cb, int topic_idx,
                            int scroll_offset, int term_height, int box_w) {
     (void)content_rows;
-    (void)term_height;
 
     const auto style = get_active_theme_style();
     const bool is_ansi = (style == TuiThemeStyle::ClassicAnsi);
-    auto const& glyphs = get_theme_glyphs(style);
+    static constexpr std::array<std::string_view, 6> kTopicNames = {
+        "Regs", "Pipe", "Cache", "VM/TLB", "Branch", "Priv"};
 
-    constexpr std::array<const char*, 6> kTopicNames = {"1.Regs",   "2.Pipe",  "3.Cache",
-                                                        "4.VM/TLB", "5.BPred", "6.Priv/Trap"};
-
-    std::string nav_bar = " ";
-    for (size_t i = 0; i < kTopicNames.size(); ++i) {
-        if (i > 0) nav_bar += std::format("{}{}\033[0m", kThemeBorder, glyphs.vert);
-        if (static_cast<int>(i) == topic_idx) {
-            nav_bar += std::format("\033[1;7m {} \033[0m", kTopicNames.at(i));
-        } else {
-            nav_bar += std::format(" {}{}\033[0m ", kThemeMuted, kTopicNames.at(i));
-        }
-    }
-    add_row_cb(nav_bar);
-    int const div_len = std::max(10, box_w - 4);
-    add_row_cb(
-        std::format("{}{}\033[0m", kThemeBorder, make_repeated_string(glyphs.horiz, div_len)));
+    add_row_cb(build_modal_tab_bar(kTopicNames, static_cast<std::size_t>(topic_idx)));
 
     TopicData const data = get_topic_data(topic_idx);
     add_row_cb(std::format(" \033[1m{}\033[0m", data.title));
     add_row_cb(std::format(" {}{}\033[0m", kThemeMuted, data.subtitle));
     add_row_cb("");
 
-    int const total_lines = static_cast<int>(data.lines.size());
-    int const start_line = std::min(scroll_offset, std::max(0, total_lines - 1));
     int const wrap_w = std::max(10, box_w - 4);  // available chars inside the modal border
+    std::vector<std::string> body_rows;
+    auto add_body_row = [&](std::string row) { body_rows.push_back(std::move(row)); };
 
-    for (int i = start_line; i < total_lines; ++i) {
-        std::string line = data.lines.at(static_cast<std::size_t>(i));
+    for (std::string line : data.lines) {
         if (is_ansi) {
             size_t p = 0;
             while ((p = line.find("•")) != std::string::npos)
                 line.replace(p, std::string("•").length(), "*");
+            while ((p = line.find("◦")) != std::string::npos)
+                line.replace(p, std::string("◦").length(), "-");
             while ((p = line.find("──")) != std::string::npos)
                 line.replace(p, std::string("──").length(), "--");
             while ((p = line.find("→")) != std::string::npos)
                 line.replace(p, std::string("→").length(), "->");
         }
         if (line.empty()) {
-            add_row_cb("");
+            add_body_row("");
             continue;
         }
-        // ANSI-aware word-wrap: continuation lines indent by 2 to align under bullet text.
-        for (const auto& wrapped : wrap_ansi_line(line, wrap_w)) {
-            add_row_cb(" " + wrapped);
+        if (line.starts_with("## ")) {
+            add_body_row(build_section_divider(std::string_view(line).substr(3), kThemeSky));
+            continue;
+        }
+        int const continuation_indent = line.starts_with("  ") ? 6 : (line.starts_with("•") ? 4 : 2);
+        for (const auto& wrapped : wrap_ansi_line(line, wrap_w, continuation_indent)) {
+            add_body_row(" " + wrapped);
         }
     }
 
+    // Keep modal geometry independent of scrolling. Tabs/title/subtitle and the footer consume six
+    // content rows; the remaining rows form a stable body viewport. Previously, dropping rows
+    // before modal measurement made Up/Down visibly resize the box.
+    int const body_capacity = std::max(1, term_height - 12);
+    int const viewport_rows = std::min(static_cast<int>(body_rows.size()), body_capacity);
+    int const max_scroll = std::max(0, static_cast<int>(body_rows.size()) - viewport_rows);
+    int const start_row = std::clamp(scroll_offset, 0, max_scroll);
+    for (int row = 0; row < viewport_rows; ++row) {
+        int const source_row = start_row + row;
+        add_row_cb(source_row < static_cast<int>(body_rows.size())
+                       ? body_rows.at(static_cast<std::size_t>(source_row))
+                       : std::string{});
+    }
+
     add_row_cb("");
-    if (is_ansi) {
-        add_row_cb(
-            std::format("{}Navigation: \033[1m[</>/Tab/1-6]\033[0m Select Topic | "
-                        "\033[1m[^/v]\033[0m Scroll | \033[1m[Esc/?/q]\033[0m Close\033[0m",
-                        kThemeMuted));
+    bool const scrollable = static_cast<int>(body_rows.size()) > viewport_rows;
+    if (scrollable) {
+        add_row_cb(build_modal_footer(
+            is_ansi ? std::initializer_list<ModalActionHint>{{"<", "Previous"},
+                                                             {">", "Next"},
+                                                             {"^", "Up"},
+                                                             {"v", "Down"},
+                                                             {"Esc/?/q", "Close"}}
+                    : std::initializer_list<ModalActionHint>{{"←", "Previous"},
+                                                             {"→", "Next"},
+                                                             {"↑", "Up"},
+                                                             {"↓", "Down"},
+                                                             {"Esc/?/q", "Close"}}));
     } else {
-        add_row_cb(
-            std::format("{}Navigation: \033[1m[←/→/Tab/1-6]\033[0m Select Topic │ "
-                        "\033[1m[↑/↓]\033[0m Scroll │ \033[1m[Esc/?/q]\033[0m Close\033[0m",
-                        kThemeMuted));
+        add_row_cb(build_modal_footer(
+            is_ansi ? std::initializer_list<ModalActionHint>{{"<", "Previous"},
+                                                             {">", "Next"},
+                                                             {"Esc/?/q", "Close"}}
+                    : std::initializer_list<ModalActionHint>{{"←", "Previous"},
+                                                             {"→", "Next"},
+                                                             {"Esc/?/q", "Close"}}));
     }
 }
 

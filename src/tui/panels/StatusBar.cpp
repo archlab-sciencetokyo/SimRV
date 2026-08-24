@@ -11,42 +11,122 @@
 #include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiKeybindings.hpp"
 #include "simrv/tui/TuiTheme.hpp"
-#include "simrv/util/FormatUtil.hpp"
 
 namespace simrv::tui {
+
+namespace {
+
+[[nodiscard]] auto use_basic_ansi_badges() -> bool {
+    return get_tui_theme() == TuiTheme::Adaptive ||
+           get_tui_theme() == TuiTheme::HighContrast ||
+           get_tui_theme() == TuiTheme::ClassicAnsi ||
+           get_active_theme_style() == TuiThemeStyle::ClassicAnsi;
+}
+
+[[nodiscard]] auto header_badge(std::string_view text, const char* ansi_color,
+                                const char* indexed_color) -> std::string {
+    return std::format("{} {} \033[0m", use_basic_ansi_badges() ? ansi_color : indexed_color, text);
+}
+
+[[nodiscard]] auto panel_mode_label(TuiRightPanelMode mode, int width, bool trace_enabled)
+    -> std::string {
+    if (mode == TuiRightPanelMode::Display) return width < 45 ? "Disp" : "Display";
+    if (width < 45) return "Term";
+    return trace_enabled ? "Terminal Trace" : "Terminal";
+}
+
+[[nodiscard]] auto speed_control_label(const simrv::core::Machine& machine, uint64_t kips,
+                                       bool paused, int width) -> std::string {
+    uint64_t const delay =
+        machine.tui ? machine.tui->step_delay_us_.load(std::memory_order_relaxed) : 0;
+    if (delay > 0) {
+        double const hz = 1000000.0 / static_cast<double>(delay);
+        if (width < 60) return hz >= 1000.0 ? std::format("{:.0f}kHz", hz / 1000.0)
+                                             : std::format("{:.0f}Hz", hz);
+        return hz >= 1000.0 ? std::format("SPEED {:.0f}kHz", hz / 1000.0)
+                            : std::format("SPEED {:.1f}Hz", hz);
+    }
+    if (paused) return width < 60 ? "MAX" : "SPEED MAX";
+    double const mips = static_cast<double>(kips) / 1000.0;
+    return mips >= 1.0 ? std::format("{:.2f} MIPS", mips)
+                       : std::format("{:.1f} KIPS", static_cast<double>(kips));
+}
+
+[[nodiscard]] auto format_metric_count(uint64_t value) -> std::string {
+    if (value >= 1000000000000ULL) {
+        return std::format("{:.2f}T", static_cast<double>(value) / 1000000000000.0);
+    }
+    if (value >= 1000000000ULL) {
+        return std::format("{:.2f}G", static_cast<double>(value) / 1000000000.0);
+    }
+    if (value >= 1000000ULL) {
+        return std::format("{:.2f}M", static_cast<double>(value) / 1000000.0);
+    }
+    if (value >= 1000ULL) {
+        return std::format("{:.2f}K", static_cast<double>(value) / 1000.0);
+    }
+    return std::to_string(value);
+}
+
+[[nodiscard]] auto footer_display_width(std::string_view text) -> int {
+    const std::size_t close = text.find(']');
+    if (text.starts_with('[') && close != std::string_view::npos) {
+        return get_display_width(text) - 2;
+    }
+    return get_display_width(text);
+}
+
+struct LeftHeaderLayout {
+    std::string identity;
+    std::string mode;
+};
+
+[[nodiscard]] auto make_left_header_layout(const simrv::core::Machine& machine, int target_width,
+                                           size_t selected_hart) -> LeftHeaderLayout {
+    std::string binary_name = machine.s_fn_memimg;
+    auto const last_slash = binary_name.find_last_of("/\\");
+    if (last_slash != std::string::npos) binary_name = binary_name.substr(last_slash + 1);
+    if (binary_name.empty()) binary_name = "application";
+
+    LeftHeaderLayout result{.identity = " SimRV", .mode = {}};
+    if (target_width >= 45) result.identity += "  " + binary_name;
+    if (target_width < 35) return result;
+
+    const bool cycle_mode = machine.runtime_profile.is_cycle_mode();
+    if (target_width < 55) {
+        result.mode = cycle_mode ? "CA" : "IA";
+        return result;
+    }
+
+    std::string const environment = machine.s_appmode ? "App" : "OS";
+    if (!cycle_mode) {
+        result.mode = environment + " · IA";
+        return result;
+    }
+    auto const type = machine.hart(selected_hart).pipeline_sim.config.pipeline_type;
+    result.mode = std::format("{} · CA {}-stage", environment,
+                              type == simrv::pipeline::PipelineType::ThreeStage ? 3 : 5);
+    return result;
+}
+
+}  // namespace
 
 StatusBar::StatusBar(simrv::core::Machine& machine) : machine_(machine) {}
 
 void StatusBar::update_kips(uint64_t current_kips) { kips_ = current_kips; }
 
 auto StatusBar::is_pos_on_status_badge(int x, int width) const -> bool {
-    std::string binary_name = machine_.s_fn_memimg;
-    auto last_slash = binary_name.find_last_of("/\\");
-    if (last_slash != std::string::npos) {
-        binary_name = binary_name.substr(last_slash + 1);
-    }
-    if (binary_name.empty()) {
-        binary_name = "application";
-    }
-    std::string mode_str = machine_.s_appmode ? "Application" : "OS/RTOS";
     int target_width = layout_ == TuiLayout::Split ? left_width_ : width - 2;
-    std::string prefix;
-    if (target_width < 35) {
-        prefix = " SimRV | ";
-    } else if (target_width < 50) {
-        prefix = std::format(" SimRV [{}] | ", binary_name);
-    } else {
-        prefix = std::format(" SimRV [{}] ({}) | ", binary_name, mode_str);
-    }
-
-    int prefix_len = get_display_width(prefix);
+    size_t const selected = machine_.tui ? machine_.tui->selected_hart() : 0;
+    auto const header = make_left_header_layout(machine_, target_width, selected);
     std::string status_text = paused_ ? " PAUSED " : " RUNNING ";
     if (!status_override_.empty()) {
-        status_text = " TRAPPED ";
+        status_text = status_override_;
     }
-    int badge_len = static_cast<int>(status_text.length());
+    int const badge_len = get_display_width(status_text);
 
-    int x_start = 2 + prefix_len;  // 1-indexed column + 1 border char ║
+    int x_start = 2 + get_display_width(header.identity) + 3;
+    if (!header.mode.empty()) x_start += get_display_width(header.mode) + 3;
     int x_end = x_start + badge_len - 1;
 
     return (x >= x_start && x <= x_end);
@@ -58,25 +138,13 @@ auto StatusBar::is_pos_on_right_panel_mode(int x) const -> bool {
     }
 
     int const right_x0 = (layout_ == TuiLayout::Split) ? (left_width_ + 3) : 2;
-    int const target_right_w = (layout_ == TuiLayout::Split) ? right_width_ : 100;
-    std::string mode_label;
-    switch (right_panel_mode_) {
-        case TuiRightPanelMode::Terminal:
-            if (target_right_w < 45) {
-                mode_label = "Term";
-            } else {
-                mode_label = trace_enabled_ ? "Terminal [Trace ON]" : "Terminal";
-            }
-            break;
-        case TuiRightPanelMode::Display:
-        default:
-            mode_label = "Display";
-            break;
-    }
-    int const mode_len = 2 + static_cast<int>(mode_label.length());  // "[" + mode_label + "]"
-    int const x_end = right_x0 + mode_len - 1;
+    int const target_right_w = right_width_ > 0 ? right_width_ : 100;
+    std::string const mode_label =
+        panel_mode_label(right_panel_mode_, target_right_w, trace_enabled_);
+    int const x_start = right_x0 + 1;
+    int const x_end = x_start + static_cast<int>(mode_label.length()) + 1;
 
-    return (x >= right_x0 && x <= x_end);
+    return x >= x_start && x <= x_end;
 }
 
 auto StatusBar::is_pos_on_right_panel_attached(int x) const -> bool {
@@ -88,13 +156,16 @@ auto StatusBar::is_pos_on_right_panel_attached(int x) const -> bool {
     }
 
     int const right_x0 = (layout_ == TuiLayout::Split) ? (left_width_ + 3) : 2;
-    int const target_right_w = (layout_ == TuiLayout::Split) ? right_width_ : 100;
+    int const target_right_w = right_width_ > 0 ? right_width_ : 100;
     std::string const term_title =
-        (target_right_w < 45) ? "Term" : (trace_enabled_ ? "Terminal [Trace ON]" : "Terminal");
-    int const mode_len = 2 + static_cast<int>(term_title.length());
+        panel_mode_label(right_panel_mode_, target_right_w, trace_enabled_);
+    int const mode_len = static_cast<int>(term_title.length()) + 2;
 
-    int const badge_start = right_x0 + mode_len + 1;
-    int const badge_len = (target_right_w < 45) ? 3 : 8;
+    int const badge_start = right_x0 + 1 + mode_len + 1;
+    const bool attached = machine_.tui && machine_.tui->is_terminal_attached();
+    std::string const focus_label =
+        target_right_w < 45 ? (attached ? "ON" : "OFF") : (attached ? "ATTACHED" : "DETACHED");
+    int const badge_len = static_cast<int>(focus_label.length()) + 2;
     int const badge_end = badge_start + badge_len - 1;
 
     return (x >= badge_start && x <= badge_end);
@@ -104,20 +175,11 @@ auto StatusBar::get_header_action_at_col(int col, int terminal_width) const -> H
     if (col < 1 || terminal_width < 2) return {};
 
     // Check Left Pane header region
-    if (layout_ == TuiLayout::Split) {
-        if (col <= left_width_ + 1) {
+    if (layout_ == TuiLayout::Split || layout_ == TuiLayout::FullLeft) {
+        int const left_edge = layout_ == TuiLayout::Split ? left_width_ + 1 : terminal_width - 1;
+        if (col <= left_edge) {
             if (is_pos_on_status_badge(col, terminal_width)) {
                 return {.action = HeaderAction::RunPause};
-            }
-            // Check mode string click
-            std::string binary_name = machine_.s_fn_memimg;
-            auto last_slash = binary_name.find_last_of("/\\");
-            if (last_slash != std::string::npos) binary_name = binary_name.substr(last_slash + 1);
-            if (binary_name.empty()) binary_name = "application";
-            int bin_start = 2 + get_display_width(" SimRV [");
-            int bin_end = bin_start + get_display_width(binary_name) + 1;
-            if (col >= bin_start && col <= bin_end + 15) {
-                return {.action = HeaderAction::ToggleMode};
             }
             return {};
         }
@@ -125,23 +187,39 @@ auto StatusBar::get_header_action_at_col(int col, int terminal_width) const -> H
 
     // Right Pane header region
     int const right_x0 = (layout_ == TuiLayout::Split) ? (left_width_ + 3) : 2;
+    int const target_right_w = right_width_ > 0 ? right_width_ : terminal_width - 2;
+    int cursor = right_x0 + 1;
+    auto hit_badge = [col, &cursor](std::string_view label) {
+        int const start = cursor;
+        int const end = start + static_cast<int>(label.length()) + 1;
+        cursor = end + 2;
+        return col >= start && col <= end;
+    };
 
-    if (is_pos_on_right_panel_mode(col)) {
-        return {.action = HeaderAction::TogglePanelMode};
-    }
-    if (is_pos_on_right_panel_attached(col)) {
-        return {.action = HeaderAction::ToggleAttached};
+    std::string const mode_label =
+        panel_mode_label(right_panel_mode_, target_right_w, trace_enabled_);
+    if (hit_badge(mode_label)) return {.action = HeaderAction::TogglePanelMode};
+
+    if (right_panel_mode_ == TuiRightPanelMode::Terminal) {
+        const bool attached = machine_.tui && machine_.tui->is_terminal_attached();
+        std::string const focus_label = target_right_w < 45
+                                            ? (attached ? "ON" : "OFF")
+                                            : (attached ? "ATTACHED" : "DETACHED");
+        if (hit_badge(focus_label)) return {.action = HeaderAction::ToggleAttached};
     }
 
-    // Check Speed badge or Hart pills in middle region
     if (machine_.num_harts() > 1) {
-        for (size_t h = 0; h < machine_.num_harts(); ++h) {
-            int h_start = right_x0 + 15 + static_cast<int>(h * 8);
-            if (col >= h_start && col <= h_start + 7) {
-                return {.action = HeaderAction::SelectHart, .hart_index = h};
-            }
+        size_t const selected = machine_.tui ? machine_.tui->selected_hart() : 0;
+        std::string const hart_label =
+            std::format("HART {}/{}", selected, machine_.num_harts());
+        if (hit_badge(hart_label)) {
+            return {.action = HeaderAction::SelectHart,
+                    .hart_index = (selected + 1) % machine_.num_harts()};
         }
     }
+
+    std::string const speed_label = speed_control_label(machine_, kips_, paused_, target_right_w);
+    if (hit_badge(speed_label)) return {.action = HeaderAction::SetSpeed};
 
     return {};
 }
@@ -374,7 +452,7 @@ auto filter_footer_entries(std::span<const FooterEntry> entries, int inner_w, bo
     auto measure = [](const std::vector<FooterEntry>& list) -> int {
         int len = 0;
         for (const auto& e : list) {
-            len += get_display_width(footer_entry_text(e));
+            len += footer_display_width(footer_entry_text(e));
         }
         return len;
     };
@@ -418,11 +496,9 @@ auto filter_footer_entries(std::span<const FooterEntry> entries, int inner_w, bo
 }  // namespace
 
 auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool is_debug_mode,
-                        bool is_smp, std::optional<int> hit_col = std::nullopt)
+                        bool is_smp, bool alternate_shade = false,
+                        std::optional<int> hit_col = std::nullopt)
     -> std::pair<std::string, std::optional<TuiFooterAction>> {
-    const auto style = get_active_theme_style();
-    const bool is_ansi = (style == TuiThemeStyle::ClassicAnsi);
-
     std::vector<FooterEntry> active_entries =
         filter_footer_entries(entries, inner_w, is_debug_mode, is_smp);
 
@@ -430,9 +506,9 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
     for (const auto& e : active_entries) {
         std::string text = footer_entry_text(e);
         if (e.category == FooterCategory::Separator) {
-            text = is_ansi ? "  |  " : "  │  ";
+            text = "  ·  ";
         }
-        content_len += get_display_width(text);
+        content_len += footer_display_width(text);
     }
     int pad = inner_w - content_len;
     int left_pad = (pad > 0) ? (pad / 2) : 0;
@@ -449,9 +525,9 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
     for (const auto& e : active_entries) {
         std::string text = footer_entry_text(e);
         if (e.category == FooterCategory::Separator) {
-            text = is_ansi ? "  |  " : "  │  ";
+            text = "  ·  ";
         }
-        int item_len = get_display_width(text);
+        int item_len = footer_display_width(text);
         if (hit_col.has_value() && e.action.has_value()) {
             if (*hit_col >= current_col && *hit_col < current_col + item_len) {
                 hit_action = e.action;
@@ -476,7 +552,7 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
                 color_tag = kThemeCoral;
                 break;
             case FooterCategory::Separator:
-                color_tag = kThemeBorder;
+                color_tag = kThemeMuted;
                 break;
             case FooterCategory::Spacer:
                 color_tag = nullptr;
@@ -487,10 +563,45 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
             std::string_view text_sv{text};
             std::size_t close_bracket = text_sv.find(']');
             if (text_sv.starts_with('[') && close_bracket != std::string_view::npos) {
-                row_str += "\033[1m";
+                const std::string_view key = text_sv.substr(1, close_bracket - 1);
+                const char* ansi_color = alternate_shade ? "\033[100;37m" : "\033[47;30m";
+                const char* indexed_color =
+                    alternate_shade ? "\033[48;5;238;38;5;255m"
+                                    : "\033[48;5;245;38;5;232m";
+                switch (e.category) {
+                    case FooterCategory::Exec:
+                        ansi_color = alternate_shade ? "\033[100;37m" : "\033[43;30m";
+                        indexed_color = alternate_shade ? "\033[48;5;179;38;5;232m"
+                                                        : "\033[48;5;223;38;5;232m";
+                        break;
+                    case FooterCategory::Debug:
+                        ansi_color = alternate_shade ? "\033[100;37m" : "\033[42;30m";
+                        indexed_color = alternate_shade ? "\033[48;5;71;38;5;232m"
+                                                        : "\033[48;5;121;38;5;232m";
+                        break;
+                    case FooterCategory::Config:
+                        ansi_color = alternate_shade ? "\033[100;37m" : "\033[46;30m";
+                        indexed_color = alternate_shade ? "\033[48;5;73;38;5;232m"
+                                                        : "\033[48;5;117;38;5;232m";
+                        break;
+                    case FooterCategory::Inspect:
+                        ansi_color = alternate_shade ? "\033[100;37m" : "\033[45;37m";
+                        indexed_color = alternate_shade ? "\033[48;5;132;38;5;255m"
+                                                        : "\033[48;5;211;38;5;232m";
+                        break;
+                    case FooterCategory::Sys:
+                        ansi_color = alternate_shade ? "\033[100;37m" : "\033[41;37m";
+                        indexed_color = alternate_shade ? "\033[48;5;167;38;5;255m"
+                                                        : "\033[48;5;210;38;5;232m";
+                        break;
+                    case FooterCategory::Separator:
+                    case FooterCategory::Spacer:
+                        break;
+                }
+                row_str += use_basic_ansi_badges() ? ansi_color : indexed_color;
+                row_str += key;
+                row_str += "\033[0m";
                 row_str += color_tag;
-                row_str += text_sv.substr(0, close_bracket + 1);
-                row_str += "\033[22m";
                 row_str += text_sv.substr(close_bracket + 1);
             } else if (text_sv.ends_with(": ")) {
                 row_str += "\033[1m";
@@ -527,17 +638,21 @@ auto StatusBar::get_footer_action_at_col(int col, int row_idx, int terminal_widt
     bool is_smp = machine_.num_harts() > 1;
     if (paused_) {
         if (row_idx == 0)
-            return process_footer_row(paused_row1_entries, terminal_width - 2, is_dbg, is_smp, col)
+            return process_footer_row(paused_row1_entries, terminal_width - 2, is_dbg, is_smp,
+                                      false, col)
                 .second;
         if (row_idx == 1)
-            return process_footer_row(paused_row2_entries, terminal_width - 2, is_dbg, is_smp, col)
+            return process_footer_row(paused_row2_entries, terminal_width - 2, is_dbg, is_smp,
+                                      true, col)
                 .second;
     } else {
         if (row_idx == 0)
-            return process_footer_row(running_row1_entries, terminal_width - 2, is_dbg, is_smp, col)
+            return process_footer_row(running_row1_entries, terminal_width - 2, is_dbg, is_smp,
+                                      false, col)
                 .second;
         if (row_idx == 1)
-            return process_footer_row(running_row2_entries, terminal_width - 2, is_dbg, is_smp, col)
+            return process_footer_row(running_row2_entries, terminal_width - 2, is_dbg, is_smp,
+                                      true, col)
                 .second;
     }
 
@@ -547,33 +662,10 @@ auto StatusBar::get_footer_action_at_col(int col, int row_idx, int terminal_widt
 auto StatusBar::render_row(int row_idx, int width) -> std::string {
     if (row_idx == 0) {
         // Header
-        std::string binary_name = machine_.s_fn_memimg;
-        auto last_slash = binary_name.find_last_of("/\\");
-        if (last_slash != std::string::npos) {
-            binary_name = binary_name.substr(last_slash + 1);
-        }
-        if (binary_name.empty()) {
-            binary_name = "application";
-        }
-        std::string mode_str;
         const size_t selected = (machine_.tui) ? machine_.tui->selected_hart() : 0;
-        const auto& current_cpu = machine_.hart(selected);
-        if (machine_.runtime_profile.is_cycle_mode()) {
-            const auto ptype = current_cpu.pipeline_sim.config.pipeline_type;
-            if (ptype == simrv::pipeline::PipelineType::ThreeStage) {
-                mode_str = machine_.s_appmode ? "App (3-Stage)" : "OS (3-Stage)";
-            } else {
-                mode_str = machine_.s_appmode ? "App (5-Stage)" : "OS (5-Stage)";
-            }
-        } else {
-            mode_str = machine_.s_appmode ? "Application" : "OS/RTOS";
-        }
         std::string status_badge = status_override_;
         if (status_badge.empty()) {
-            bool use_ansi = (get_tui_theme() == TuiTheme::Adaptive ||
-                             get_tui_theme() == TuiTheme::HighContrast ||
-                             get_tui_theme() == TuiTheme::ClassicAnsi ||
-                             get_active_theme_style() == TuiThemeStyle::ClassicAnsi);
+            bool use_ansi = use_basic_ansi_badges();
             const auto st = machine_.execution_state();
             if (machine_.is_shutdown_ || st == simrv::core::ExecutionState::Stopped) {
                 status_badge = use_ansi ? "\033[41;37m SHUTDOWN \033[0m"
@@ -596,14 +688,20 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             status_badge = "\033[1;41;37m TRAPPED \033[0m";
         }
         int target_width = layout_ == TuiLayout::Split ? left_width_ : width - 2;
-        std::string left_render;
-        if (target_width < 35) {
-            left_render = std::format(" SimRV | {}", status_badge);
-        } else if (target_width < 55) {
-            left_render = std::format(" SimRV [{}] | {}", binary_name, status_badge);
-        } else {
-            left_render = std::format(" SimRV [{}] ({}) | {}", binary_name, mode_str, status_badge);
+        auto const left_header = make_left_header_layout(machine_, target_width, selected);
+        std::string left_render = left_header.identity;
+        if (!left_header.mode.empty()) {
+            std::string styled_mode = left_header.mode;
+            constexpr std::string_view separator = " · ";
+            auto const midpoint = styled_mode.find(separator);
+            if (midpoint != std::string::npos) {
+                styled_mode.replace(
+                    midpoint, separator.size(),
+                    std::format(" \033[0m{}·\033[0m \033[1m{}", kThemeMuted, kThemeSky));
+            }
+            left_render += std::format("   \033[1m{}{}\033[0m", kThemeSky, styled_mode);
         }
+        left_render += "   " + status_badge;
 
         if (get_display_width(left_render) > target_width) {
             left_render = format_to_width(left_render, target_width);
@@ -618,18 +716,41 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         switch (right_panel_mode_) {
             case TuiRightPanelMode::Terminal: {
                 const bool term_focused = machine_.tui && machine_.tui->is_terminal_attached();
-                std::string const focus_badge =
-                    term_focused ? std::format(" \033[1m{}ATTACHED\033[0m", kThemeMint)
-                                 : std::format(" \033[1m{}DETACHED\033[0m", kThemeMuted);
-                std::string const term_title = trace_enabled_ ? "Terminal [Trace]" : "Terminal";
-                mode_prefix = std::format(" {}[{}]\033[0m{}", kThemeSky, term_title, focus_badge);
+                std::string const term_title =
+                    panel_mode_label(right_panel_mode_, target_right_width, trace_enabled_);
+                std::string const mode_badge =
+                    header_badge(term_title, "\033[46;30m", "\033[48;5;117;38;5;232m");
+                std::string const focus_badge = term_focused
+                                                    ? header_badge(
+                                                          target_right_width < 45 ? "ON" : "ATTACHED",
+                                                          "\033[42;30m",
+                                                          "\033[48;5;121;38;5;232m")
+                                                    : header_badge(
+                                                          target_right_width < 45 ? "OFF" : "DETACHED",
+                                                          "\033[47;30m",
+                                                          "\033[48;5;245;38;5;232m");
+                mode_prefix = " " + mode_badge + " " + focus_badge;
                 break;
             }
             case TuiRightPanelMode::Display:
             default:
-                mode_prefix = std::format(" {}[Display]\033[0m", kThemeSky);
+                mode_prefix = " " + header_badge(
+                                          panel_mode_label(right_panel_mode_, target_right_width,
+                                                           trace_enabled_),
+                                          "\033[46;30m", "\033[48;5;117;38;5;232m");
                 break;
         }
+
+        if (machine_.num_harts() > 1) {
+            std::string const hart_label = std::format("HART {}/{}", selected, machine_.num_harts());
+            mode_prefix += " " + header_badge(hart_label, "\033[45;37m",
+                                                "\033[48;5;183;38;5;232m");
+        }
+        std::string const speed_label =
+            speed_control_label(machine_, kips_, paused_, target_right_width);
+        mode_prefix += " " +
+                       header_badge(speed_label, "\033[43;30m",
+                                    "\033[48;5;223;38;5;232m");
 
         int const prefix_w = get_display_width(mode_prefix);
         int const available_mid_w = target_right_width - prefix_w - 2;
@@ -647,45 +768,26 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             const auto icount = current_cpu.e_icount;
             const double cpi =
                 icount == 0 ? 0.0 : static_cast<double>(cycles) / static_cast<double>(icount);
-            const double mips = static_cast<double>(kips_) / 1000.0;
-            std::string speed_str = (mips >= 1.0)
-                                        ? std::format("{:.2f} MIPS", mips)
-                                        : std::format("{:.1f} KIPS", static_cast<double>(kips_));
-
-            uint64_t delay = 0;
-            if (machine_.tui) {
-                delay = machine_.tui->step_delay_us_.load(std::memory_order_relaxed);
-            }
-            std::string dbg_info;
-            if (machine_.num_harts() > 1) {
-                const size_t selected = (machine_.tui) ? machine_.tui->selected_hart() : 0;
-                dbg_info += std::format("*H{}/{} | ", selected, machine_.num_harts());
-            }
-            if (delay > 0) {
-                double hz = 1000000.0 / static_cast<double>(delay);
-                dbg_info += (hz >= 1000.0) ? std::format("Speed: {:.0f}kHz | ", hz / 1000.0)
-                                           : std::format("Speed: {:.1f}Hz | ", hz);
-            } else if (paused_) {
-                dbg_info += "Speed: Max | ";
-            }
+            std::string const metric_sep = std::format(" {}·\033[0m ", kThemeMuted);
 
             if (machine_.runtime_profile.is_cycle_mode()) {
                 std::string full_stats =
-                    std::format("{}Cycles: {} | Insns: {} | CPI: {:.2f}", dbg_info,
-                                simrv::util::format_with_commas(cycles),
-                                simrv::util::format_with_commas(icount), cpi);
+                    std::format("Cycles {}{}Instruction Count {}{}CPI {:.2f}",
+                                format_metric_count(cycles), metric_sep,
+                                format_metric_count(icount), metric_sep, cpi);
                 if (get_display_width(full_stats) <= available_mid_w) {
                     mid_text = full_stats;
                 } else {
-                    std::string med_stats = std::format("{}C: {} | I: {} | CPI: {:.2f}", dbg_info,
-                                                        simrv::util::format_scaled(cycles),
-                                                        simrv::util::format_scaled(icount), cpi);
+                    std::string med_stats =
+                        std::format("Cycles {}{}Instructions {}{}CPI {:.2f}",
+                                    format_metric_count(cycles), metric_sep,
+                                    format_metric_count(icount), metric_sep, cpi);
                     if (get_display_width(med_stats) <= available_mid_w) {
                         mid_text = med_stats;
                     } else {
-                        std::string short_stats = std::format("{}C: {} | I: {}", dbg_info,
-                                                              simrv::util::format_scaled(cycles),
-                                                              simrv::util::format_scaled(icount));
+                        std::string short_stats =
+                            std::format("C {}{}I {}", format_metric_count(cycles), metric_sep,
+                                        format_metric_count(icount));
                         if (get_display_width(short_stats) <= available_mid_w) {
                             mid_text = short_stats;
                         }
@@ -693,18 +795,16 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                 }
             } else {
                 std::string full_stats =
-                    std::format("{}Insns: {} | Speed: {}", dbg_info,
-                                simrv::util::format_with_commas(icount), speed_str);
+                    std::format("Instruction Count {}", format_metric_count(icount));
                 if (get_display_width(full_stats) <= available_mid_w) {
                     mid_text = full_stats;
                 } else {
-                    std::string med_stats = std::format(
-                        "{}I: {} | {}", dbg_info, simrv::util::format_scaled(icount), speed_str);
+                    std::string med_stats =
+                        std::format("Instructions {}", format_metric_count(icount));
                     if (get_display_width(med_stats) <= available_mid_w) {
                         mid_text = med_stats;
                     } else {
-                        std::string short_stats =
-                            std::format("{}I: {}", dbg_info, simrv::util::format_scaled(icount));
+                        std::string short_stats = std::format("I {}", format_metric_count(icount));
                         if (get_display_width(short_stats) <= available_mid_w) {
                             mid_text = short_stats;
                         }
@@ -795,13 +895,15 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         bool is_dbg = machine_.s_debug_mode;
         bool is_smp = machine_.num_harts() > 1;
         if (paused_) {
-            footer_line1 = process_footer_row(paused_row1_entries, width - 2, is_dbg, is_smp).first;
-            footer_line2 = process_footer_row(paused_row2_entries, width - 2, is_dbg, is_smp).first;
+            footer_line1 =
+                process_footer_row(paused_row1_entries, width - 2, is_dbg, is_smp, false).first;
+            footer_line2 =
+                process_footer_row(paused_row2_entries, width - 2, is_dbg, is_smp, true).first;
         } else {
             footer_line1 =
-                process_footer_row(running_row1_entries, width - 2, is_dbg, is_smp).first;
+                process_footer_row(running_row1_entries, width - 2, is_dbg, is_smp, false).first;
             footer_line2 =
-                process_footer_row(running_row2_entries, width - 2, is_dbg, is_smp).first;
+                process_footer_row(running_row2_entries, width - 2, is_dbg, is_smp, true).first;
         }
 
         const auto style = get_active_theme_style();
