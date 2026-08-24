@@ -10,6 +10,7 @@
 
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/tui/panels/LeftPane.hpp"
 
 namespace simrv::tui::modals {
@@ -146,16 +147,16 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
                              const std::string& input, const simrv::core::Machine* machine,
                              int bp_cursor) {
     if (type == ModalType::SetBreakpoint) {
+        build_text_input_rows(content_rows, "Target PC Address (hex) or Symbol:", input);
+        content_rows.push_back("");
         content_rows.push_back(
-            std::format("{}Target PC Address (hex) or Symbol:\033[0m", kThemeText));
-        content_rows.push_back(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, input));
+            "  " + build_modal_footer({{"[Enter]", "Set Breakpoint"}, {"[Esc]", "Cancel"}}));
     } else if (type == ModalType::SetWatchpoint) {
+        build_text_input_rows(content_rows, "Target Register, Address, or Symbol:", input,
+                              "Pauses simulation on memory write or register state change.");
+        content_rows.push_back("");
         content_rows.push_back(
-            std::format("{}Target Register, Address, or Symbol:\033[0m", kThemeText));
-        content_rows.push_back(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, input));
-        content_rows.push_back(
-            std::format("{}Pauses simulation on memory write\033[0m", kThemeMuted));
-        content_rows.push_back(std::format("{}or register state change.\033[0m", kThemeMuted));
+            "  " + build_modal_footer({{"[Enter]", "Set Watchpoint"}, {"[Esc]", "Cancel"}}));
     } else if (type == ModalType::ManageBreakpoints) {
         content_rows.push_back(
             std::format("{}Active Breakpoints & Watchpoints:\033[0m", kThemeText));
@@ -196,14 +197,12 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
         }
 
         content_rows.push_back("");
+        content_rows.push_back("  " + build_modal_footer({{"[↑/↓]", "Nav"},
+                                                          {"[Backspace/d]", "Del"},
+                                                          {"[c]", "Clear"},
+                                                          {"[Esc]", "Close"}}));
         content_rows.push_back(
-            std::format("  \033[1;36m[↑/↓]\033[0m {}Nav  |  \033[1;36m[Backspace/d]\033[0m {}Del  "
-                        "|  \033[1;36m[c]\033[0m {}Clear  |  \033[1;36m[Esc]\033[0m {}Close\033[0m",
-                        kThemeMuted, kThemeMuted, kThemeMuted, kThemeMuted));
-        content_rows.push_back(
-            std::format("  \033[1;36m[:]\033[0m {}Add Breakpoint  |  \033[1;36m[w]\033[0m {}Add "
-                        "Watchpoint\033[0m",
-                        kThemeMuted, kThemeMuted));
+            "  " + build_modal_footer({{":", "Add Breakpoint"}, {"[w]", "Add Watchpoint"}}));
     }
 }
 

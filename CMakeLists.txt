@@ -113,6 +113,7 @@ set(SIMRV_SOURCES
   src/pipeline/Decoder.cpp
   src/pipeline/PipelineSim.cpp
   src/pipeline/PipelineConfig.cpp
+  src/pipeline/BranchPredictor.cpp
   src/execute/ExecuteUnitInt.cpp
   src/execute/ExecuteUnitB.cpp
   src/execute/ExecuteUnitFloat.cpp
@@ -173,6 +174,7 @@ set(SIMRV_SOURCES
   src/tui/modals/HelpModal.cpp
   src/tui/modals/LoadModal.cpp
   src/tui/modals/MisaModal.cpp
+  src/tui/modals/ModalComponents.cpp
   src/tui/modals/SettingsModal.cpp
   src/tui/modals/SystemConfigModal.cpp
   src/tui/modals/StepModal.cpp
@@ -308,9 +310,11 @@ add_executable(simrv-tui-tests
   src/tui/modals/GlossaryModal.cpp
   src/tui/modals/HelpModal.cpp
   src/tui/modals/MisaModal.cpp
+  src/tui/modals/ModalComponents.cpp
   src/tui/modals/SettingsModal.cpp
   src/tui/modals/SystemConfigModal.cpp
   src/pipeline/PipelineConfig.cpp
+  src/pipeline/BranchPredictor.cpp
 )
 target_compile_features(simrv-tui-tests PRIVATE cxx_std_23)
 target_include_directories(simrv-tui-tests PRIVATE include ${CMAKE_CURRENT_BINARY_DIR}/generated)
@@ -342,6 +346,7 @@ add_executable(simrv-pipeline-model-tests
   src/core/Logger.cpp
   src/pipeline/PipelineSim.cpp
   src/pipeline/PipelineConfig.cpp
+  src/pipeline/BranchPredictor.cpp
 )
 target_compile_features(simrv-pipeline-model-tests PRIVATE cxx_std_23)
 target_compile_definitions(simrv-pipeline-model-tests PRIVATE SIMRV_XLEN=${SIMRV_XLEN})
@@ -367,6 +372,37 @@ add_test(NAME pipeline-models COMMAND simrv-pipeline-model-tests)
 set_tests_properties(pipeline-models PROPERTIES LABELS "gate;regress;pipeline")
 if(SIMRV_ENABLE_TSAN)
   set_property(TEST pipeline-models APPEND PROPERTY LABELS "thread")
+endif()
+
+add_executable(simrv-branch-predictor-tests
+  tests/BranchPredictorTests.cpp
+  src/core/Logger.cpp
+  src/pipeline/BranchPredictor.cpp
+)
+target_compile_features(simrv-branch-predictor-tests PRIVATE cxx_std_23)
+target_compile_definitions(simrv-branch-predictor-tests PRIVATE SIMRV_XLEN=${SIMRV_XLEN})
+target_include_directories(simrv-branch-predictor-tests PRIVATE include)
+target_compile_options(simrv-branch-predictor-tests PRIVATE -Wall -Wextra -Wpedantic)
+if(SIMRV_WARNINGS_AS_ERRORS)
+  target_compile_options(simrv-branch-predictor-tests PRIVATE -Werror)
+endif()
+if(SIMRV_ENABLE_ASAN)
+  target_compile_options(simrv-branch-predictor-tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+  target_link_options(simrv-branch-predictor-tests PRIVATE -fsanitize=address)
+endif()
+if(SIMRV_ENABLE_UBSAN)
+  target_compile_options(simrv-branch-predictor-tests PRIVATE -fsanitize=undefined -fno-omit-frame-pointer)
+  target_link_options(simrv-branch-predictor-tests PRIVATE -fsanitize=undefined)
+endif()
+if(SIMRV_ENABLE_TSAN)
+  target_compile_options(simrv-branch-predictor-tests PRIVATE -fsanitize=thread -fno-omit-frame-pointer)
+  target_link_options(simrv-branch-predictor-tests PRIVATE -fsanitize=thread)
+endif()
+
+add_test(NAME branch-predictor COMMAND simrv-branch-predictor-tests)
+set_tests_properties(branch-predictor PROPERTIES LABELS "gate;regress;pipeline;bpred")
+if(SIMRV_ENABLE_TSAN)
+  set_property(TEST branch-predictor APPEND PROPERTY LABELS "thread")
 endif()
 
 add_executable(simrv-core-semantics-tests

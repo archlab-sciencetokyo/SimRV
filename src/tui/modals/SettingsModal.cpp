@@ -9,9 +9,11 @@
 #include <format>
 
 #include "simrv/core/Machine.hpp"
+#include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/modals/MisaModal.hpp"
+#include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
 
 namespace simrv::tui::modals {
@@ -28,6 +30,7 @@ void SettingsModal::open(SettingsDraft& draft, const simrv::core::Machine& machi
     draft.rollback_enabled = machine.s_rollback_enabled;
     draft.high_contrast = machine.s_high_contrast;
     draft.class_mode = machine.s_class_mode;
+    draft.tui_fps = machine.tui ? machine.tui->target_fps() : 30;
     draft.use_mix = machine.s_use_mix;
     draft.bp_trace = machine.s_bp_trace;
     draft.traplog_mode = machine.s_traplog_mode;
@@ -38,6 +41,9 @@ void SettingsModal::open(SettingsDraft& draft, const simrv::core::Machine& machi
     draft.smp_quantum = machine.s_smp_quantum;
     draft.smp_multithreaded = machine.s_smp_multithreaded;
     draft.platform_profile = static_cast<uint8_t>(machine.s_platform_profile);
+    draft.dram_size_mb = (machine.s_dram_size > 0)
+                             ? (machine.s_dram_size / (1024ULL * 1024ULL))
+                             : (simrv::memory::kDramSize / (1024ULL * 1024ULL));
     draft.net_mode = machine.s_net_mode;
 
     // Tab 1: MISA
@@ -56,7 +62,7 @@ void SettingsModal::set_tab(SettingsDraft& draft, uint8_t tab) { draft.active_ta
 void SettingsModal::move_cursor(SettingsDraft& draft, int delta) {
     switch (draft.active_tab) {
         case 0: {
-            constexpr int kNumSettings = 16;
+            constexpr int kNumSettings = 18;
             draft.tab_cursor[0] = (draft.tab_cursor[0] + delta + kNumSettings) % kNumSettings;
             break;
         }
@@ -72,7 +78,7 @@ void SettingsModal::move_cursor(SettingsDraft& draft, int delta) {
 }
 
 void SettingsModal::move_cursor(int& cursor, int delta) {
-    constexpr int kNumSettings = 16;
+    constexpr int kNumSettings = 18;
     cursor = (cursor + delta + kNumSettings) % kNumSettings;
 }
 
@@ -121,24 +127,75 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                 case 4:
                     draft.class_mode = !draft.class_mode;
                     break;
-                case 5: {  // SMP Core Count
+                case 5: {  // TUI Target Refresh Rate
+                    static constexpr std::array<uint32_t, 4> kFpsOptions = {10, 15, 30, 60};
+                    size_t curr_idx = 2;  // default 30
+                    for (size_t f = 0; f < kFpsOptions.size(); ++f) {
+                        if (draft.tui_fps == kFpsOptions[f]) {
+                            curr_idx = f;
+                            break;
+                        }
+                    }
+                    if (dir > 0) {
+                        curr_idx = (curr_idx + 1) % kFpsOptions.size();
+                    } else {
+                        curr_idx = (curr_idx + kFpsOptions.size() - 1) % kFpsOptions.size();
+                    }
+                    draft.tui_fps = kFpsOptions[curr_idx];
+                    break;
+                }
+                case 6: {  // Active SMP Hart Count
                     int v = static_cast<int>(draft.num_harts) + dir;
                     draft.num_harts = static_cast<uint32_t>(std::clamp(v, 1, 16));
                     break;
                 }
-                case 6: {  // SMP Quantum
-                    int v = static_cast<int>(draft.smp_quantum) + dir * 100;
-                    draft.smp_quantum = static_cast<uint32_t>(std::clamp(v, 10, 1000000));
-                    break;
-                }
-                case 7:  // SMP Multithreaded
+                case 7:  // SMP Threading Model
                     draft.smp_multithreaded = !draft.smp_multithreaded;
                     break;
-                case 8:  // Platform Profile (0: PCIe, 1: MMIO, 2: Hybrid)
+                case 8: {  // SMP Scheduler Quantum (insns/slice)
+                    static constexpr std::array<uint32_t, 12> kQuantumLevels = {
+                        10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 50000, 100000};
+                    size_t curr = 6;  // default 1000
+                    for (size_t q = 0; q < kQuantumLevels.size(); ++q) {
+                        if (draft.smp_quantum <= kQuantumLevels[q]) {
+                            curr = q;
+                            break;
+                        }
+                    }
+                    if (dir > 0) {
+                        if (curr + 1 < kQuantumLevels.size()) {
+                            draft.smp_quantum = kQuantumLevels[curr + 1];
+                        }
+                    } else {
+                        if (curr > 0) {
+                            draft.smp_quantum = kQuantumLevels[curr - 1];
+                        }
+                    }
+                    break;
+                }
+                case 9:  // Platform Profile (0: PCIe, 1: MMIO, 2: Hybrid)
                     draft.platform_profile =
                         static_cast<uint8_t>((draft.platform_profile + (dir > 0 ? 1 : 2)) % 3);
                     break;
-                case 9:  // VirtIO Network Backend
+                case 10: {  // Physical RAM Capacity (MB)
+                    static constexpr std::array<uint64_t, 8> kRamSizes = {32,  64,   128,  256,
+                                                                          512, 1024, 2048, 4096};
+                    size_t curr_idx = 3;  // default 256
+                    for (size_t r = 0; r < kRamSizes.size(); ++r) {
+                        if (draft.dram_size_mb == kRamSizes[r]) {
+                            curr_idx = r;
+                            break;
+                        }
+                    }
+                    if (dir > 0) {
+                        curr_idx = (curr_idx + 1) % kRamSizes.size();
+                    } else {
+                        curr_idx = (curr_idx + kRamSizes.size() - 1) % kRamSizes.size();
+                    }
+                    draft.dram_size_mb = kRamSizes[curr_idx];
+                    break;
+                }
+                case 11:  // VirtIO Network Backend
                     if (draft.net_mode == "user")
                         draft.net_mode = (dir > 0) ? "tap" : "none";
                     else if (draft.net_mode == "tap")
@@ -148,24 +205,24 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     else
                         draft.net_mode = (dir > 0) ? "user" : "socket";
                     break;
-                case 10:
+                case 12:
                     if (machine && machine->s_spike_bin.empty()) break;
                     draft.lockstep_mode = !draft.lockstep_mode;
                     break;
-                case 11:
+                case 13:
                     draft.gdb_mode = !draft.gdb_mode;
                     break;
-                case 12:
+                case 14:
                     if (!draft.cycle_accurate) break;
                     draft.bp_trace = !draft.bp_trace;
                     break;
-                case 13:
+                case 15:
                     draft.use_mix = !draft.use_mix;
                     break;
-                case 14:
+                case 16:
                     draft.traplog_mode = !draft.traplog_mode;
                     break;
-                case 15:
+                case 17:
                     if (machine && machine->s_appmode) break;
                     draft.dlog_mode = !draft.dlog_mode;
                     break;
@@ -223,6 +280,9 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
         machine.s_high_contrast = draft.high_contrast;
     }
     machine.s_class_mode = draft.class_mode;
+    if (machine.tui) {
+        machine.tui->set_target_fps(draft.tui_fps);
+    }
 
     machine.s_use_mix = draft.use_mix;
     machine.s_bp_trace = draft.bp_trace;
@@ -232,7 +292,17 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
     machine.s_gdb_mode = draft.gdb_mode;
     machine.s_smp_quantum = draft.smp_quantum;
     machine.s_smp_multithreaded = draft.smp_multithreaded;
+
+    bool const profile_changed =
+        (machine.s_platform_profile !=
+         static_cast<simrv::core::PlatformProfile>(draft.platform_profile));
     machine.s_platform_profile = static_cast<simrv::core::PlatformProfile>(draft.platform_profile);
+
+    uint64_t const new_dram_size = draft.dram_size_mb * 1024ULL * 1024ULL;
+    bool const dram_size_changed =
+        (machine.s_dram_size != 0 && machine.s_dram_size != new_dram_size) ||
+        (machine.s_dram_size == 0 && new_dram_size != simrv::memory::kDramSize);
+    machine.s_dram_size = new_dram_size;
     machine.s_net_mode = draft.net_mode;
 
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
@@ -244,6 +314,8 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
         set_reg_page_cb(TuiRegPage::GPR);
     }
 
+    bool need_reboot = dram_size_changed || profile_changed;
+
     // 2. MISA Extensions
     uint64_t const new_misa = draft.misa.to_misa_val();
     if (machine.cpu.state().misa != new_misa || machine.s_vlen != draft.misa.vlen) {
@@ -253,6 +325,10 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
         machine.s_misa_xlen = draft.misa.xlen_bits;
         machine.cpu.state().initialize_lower_xlen_fields();
         machine.s_vlen = draft.misa.vlen;
+        need_reboot = true;
+    }
+
+    if (need_reboot) {
         machine.request_reboot();
     }
 
@@ -267,21 +343,10 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
                            const SettingsDraft& draft, const simrv::core::Machine& machine) {
     (void)content_rows;
 
-    const auto style = get_active_theme_style();
-    const bool is_ansi = (style == TuiThemeStyle::ClassicAnsi);
+    static constexpr std::array<std::string_view, 3> kTabNames = {"General / UI", "MISA Extensions",
+                                                                  "Microarchitecture"};
 
-    std::string tab0 = (draft.active_tab == 0)
-                           ? std::format("\033[7m [1] General / UI \033[0m")
-                           : std::format(" {}[1] General / UI\033[0m ", kThemeMuted);
-    std::string tab1 = (draft.active_tab == 1)
-                           ? std::format("\033[7m [2] MISA Extensions \033[0m")
-                           : std::format(" {}[2] MISA Extensions\033[0m ", kThemeMuted);
-    std::string tab2 = (draft.active_tab == 2)
-                           ? std::format("\033[7m [3] Microarchitecture \033[0m")
-                           : std::format(" {}[3] Microarchitecture\033[0m ", kThemeMuted);
-
-    std::string const sep = is_ansi ? " | " : " │ ";
-    add_row_cb(std::format("  {}{}{}{}{}", tab0, sep, tab1, sep, tab2));
+    add_row_cb(build_modal_tab_bar(kTabNames, draft.active_tab));
     add_row_cb("");
 
     if (draft.active_tab == 0) {
@@ -313,82 +378,94 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
         else
             net_str = "\033[90m[Disabled]\033[0m";
 
+        std::string fps_str;
+        if (draft.tui_fps == 10)
+            fps_str = "\033[1;33m[10 FPS (Power Saver)]\033[0m";
+        else if (draft.tui_fps == 15)
+            fps_str = "\033[1;36m[15 FPS (Turbo IA)]\033[0m";
+        else if (draft.tui_fps == 60)
+            fps_str = "\033[1;35m[60 FPS (Ultra Smooth)]\033[0m";
+        else
+            fps_str = "\033[1;32m[30 FPS (Standard)]\033[0m";
+
+        constexpr Address dram_base = 0x80000000ULL;
+        std::string ram_str =
+            std::format("\033[1;36m[{} MB (0x{:08x}–0x{:08x})]\033[0m", draft.dram_size_mb,
+                        dram_base, dram_base + (draft.dram_size_mb * 1024ULL * 1024ULL) - 1);
+
         struct ItemInfo {
             const char* name;
             std::string val;
         };
 
         const auto settings = std::to_array<ItemInfo>({
-            {"Simulation Mode", draft.cycle_accurate
-                                    ? "\033[1;36m[CA (Cycle-Accurate)]\033[0m"
-                                    : "\033[1;33m[IA (Instruction-Accurate)]\033[0m"},
-            {"TUI Diagnostics View", draft.debug_mode
-                                         ? "\033[1;32m[Debug Mode (Diagnostics ON)]\033[0m"
-                                         : "\033[90m[Normal Mode]\033[0m"},
-            {"Step Rollback History",
-             draft.rollback_enabled ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-            {"High Contrast Theme",
-             draft.high_contrast ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-            {"Educational Class Mode", draft.class_mode
-                                           ? "\033[1;32m[ON (Guidance & Glossary)]\033[0m"
-                                           : "\033[90m[OFF]\033[0m"},
-            {"SMP Active Core Count",
-             std::format("\033[1;36m{} Cores (Harts)\033[0m", draft.num_harts)},
-            {"SMP Quantum Slice", std::format("\033[1;33m{} cycles\033[0m", draft.smp_quantum)},
-            {"SMP Multi-Threaded Engine", draft.smp_multithreaded
-                                              ? "\033[1;32m[ON (Worker Threads)]\033[0m"
-                                              : "\033[90m[OFF (Quantum Barrier)]\033[0m"},
-            {"Platform Profile", profile_str},
-            {"VirtIO Network Backend", net_str},
-            {"Co-Sim Spike Lockstep",
-             lockstep_disabled
-                 ? "\033[90m[Disabled (No Spike Bin)]\033[0m"
-                 : (draft.lockstep_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m")},
-            {"GDB Server Stub (1234)",
-             draft.gdb_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-            {"Branch Prediction Trace",
-             bp_disabled ? "\033[90m[Disabled (N/A in IA Mode)]\033[0m"
-                         : (draft.bp_trace ? "\033[1;32m[ON (creates bptrace.txt)]\033[0m"
-                                           : "\033[90m[OFF (creates text file)]\033[0m")},
-            {"Instruction Mix Stats",
-             draft.use_mix ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-            {"Exception & Trap Log", draft.traplog_mode
-                                         ? "\033[1;32m[ON (creates traplog.txt)]\033[0m"
-                                         : "\033[90m[OFF (creates text file)]\033[0m"},
-            {"Device MMIO Access Log",
-             dlog_disabled ? "\033[90m[Disabled in Baremetal Mode]\033[0m"
-                           : (draft.dlog_mode ? "\033[1;32m[ON (creates devicelog.txt)]\033[0m"
-                                              : "\033[90m[OFF (creates text file)]\033[0m")},
+            {.name = "Simulation Precision",
+             .val = draft.cycle_accurate ? "\033[1;36m[Cycle-Accurate (CA)]\033[0m"
+                                         : "\033[1;32m[Instruction-Accurate (IA)]\033[0m"},
+            {.name = "Debug Mode & Diagnostics",
+             .val = draft.debug_mode ? "\033[1;32m[ON (Diagnostics Active)]\033[0m"
+                                     : "\033[90m[OFF]\033[0m"},
+            {.name = "Execution Rollback Stack",
+             .val = draft.rollback_enabled ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+            {.name = "Color Theme / Contrast",
+             .val = draft.high_contrast ? "\033[1;33m[High Contrast B&W]\033[0m"
+                                        : "\033[1;34m[Catppuccin Macchiato]\033[0m"},
+            {.name = "Presentation Mode",
+             .val = draft.class_mode ? "\033[1;35m[Classroom / Large]\033[0m"
+                                     : "\033[90m[Standard]\033[0m"},
+            {.name = "TUI Target Refresh Rate", .val = fps_str},
+            {.name = "Active SMP Hart Count",
+             .val = std::format("\033[1;32m[{} Core{}]\033[0m", draft.num_harts,
+                                draft.num_harts > 1 ? "s" : "")},
+            {.name = "SMP Threading Model",
+             .val = draft.smp_multithreaded ? "\033[1;36m[Multi-Threaded (MT-SMP)]\033[0m"
+                                            : "\033[1;33m[Single-Threaded Co-op]\033[0m"},
+            {.name = "SMP Scheduler Quantum",
+             .val = std::format("\033[1;36m[{} insns/slice]\033[0m", draft.smp_quantum)},
+            {.name = "Platform Bus Topology", .val = profile_str},
+            {.name = "Physical RAM Capacity", .val = ram_str},
+            {.name = "Virtual Network Mode", .val = net_str},
+            {.name = "Spike Lockstep Compare",
+             .val = lockstep_disabled
+                        ? "\033[90m[OFF (Requires --spike-bin)]\033[0m"
+                        : (draft.lockstep_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m")},
+            {.name = "GDB Remote Debug Stub",
+             .val = draft.gdb_mode ? "\033[1;32m[ON (Port 1234)]\033[0m" : "\033[90m[OFF]\033[0m"},
+            {.name = "Branch Prediction Log",
+             .val = bp_disabled ? "\033[90m[OFF (Requires CA mode)]\033[0m"
+                                : (draft.bp_trace ? "\033[1;32m[ON (trace/bpred.txt)]\033[0m"
+                                                  : "\033[90m[OFF]\033[0m")},
+            {.name = "Instruction Mix Summary",
+             .val = draft.use_mix ? "\033[1;32m[ON (trace/instmix.txt)]\033[0m"
+                                  : "\033[90m[OFF]\033[0m"},
+            {.name = "Architectural Trap Log",
+             .val = draft.traplog_mode ? "\033[1;32m[ON (trace/traplog.txt)]\033[0m"
+                                       : "\033[90m[OFF]\033[0m"},
+            {.name = "Device MMIO Access Log",
+             .val = dlog_disabled ? "\033[90m[OFF (Disabled in App Mode)]\033[0m"
+                                  : (draft.dlog_mode ? "\033[1;32m[ON (trace/dlog.txt)]\033[0m"
+                                                     : "\033[90m[OFF]\033[0m")},
         });
 
         int const cursor = draft.tab_cursor[0];
         for (std::size_t i = 0; i < settings.size(); ++i) {
             if (i == 0) {
-                add_row_cb(
-                    std::format("{}\033[1;35m── Core Engine & Diagnostics ──\033[0m", kThemeText));
-            } else if (i == 5) {
+                add_row_cb(build_section_divider("Simulation Engine & Visualization"));
+            } else if (i == 6) {
                 add_row_cb("");
-                add_row_cb(std::format(
-                    "{}\033[1;35m── Symmetric Multiprocessing (SMP) Configuration ──\033[0m",
-                    kThemeText));
-            } else if (i == 8) {
+                add_row_cb(build_section_divider("Symmetric Multiprocessing (SMP) Configuration"));
+            } else if (i == 9) {
                 add_row_cb("");
-                add_row_cb(std::format(
-                    "{}\033[1;35m── Platform Profile & Peripheral Devices ──\033[0m", kThemeText));
-            } else if (i == 10) {
-                add_row_cb("");
-                add_row_cb(std::format(
-                    "{}\033[1;35m── External Integrations & Debug Stubs ──\033[0m", kThemeText));
+                add_row_cb(build_section_divider("Platform Profile & Peripheral Devices"));
             } else if (i == 12) {
                 add_row_cb("");
-                add_row_cb(std::format(
-                    "{}\033[1;35m── Traces & Logging (Creates Text Files) ──\033[0m", kThemeText));
+                add_row_cb(build_section_divider("External Integrations & Debug Stubs"));
+            } else if (i == 14) {
+                add_row_cb("");
+                add_row_cb(build_section_divider("Traces & Logging (Creates Text Files)"));
             }
-            bool is_sel = (static_cast<int>(i) == cursor);
-            std::string prefix = is_sel ? std::format("{}>\033[0m ", kThemeMint) : "  ";
-            std::string name_str = std::format(
-                "{}{:<29}\033[0m", is_sel ? "\033[1;37m" : kThemeText, settings[i].name);
-            add_row_cb(std::format("{}{} : {}", prefix, name_str, settings[i].val));
+            const bool is_sel = (static_cast<int>(i) == cursor);
+            add_row_cb(build_menu_item_row(settings[i].name, settings[i].val, is_sel, 29));
         }
     } else if (draft.active_tab == 1) {
         add_row_cb(
@@ -397,16 +474,14 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
                         "GC:\033[0m",
                         kThemeMuted));
         add_row_cb("");
-        MisaModal::render(content_rows, add_row_cb, draft.misa, draft.tab_cursor[1], machine);
+        MisaModal::render(content_rows, add_row_cb, draft.misa, draft.tab_cursor[1], machine,
+                          /*show_footer=*/false);
     } else if (draft.active_tab == 2) {
         SystemConfigModal::render(content_rows, add_row_cb, draft.sys_config, draft.tab_cursor[2]);
     }
 
     add_row_cb("");
-    add_row_cb(
-        std::format("{}Press \033[1m[Enter]\033[0m to apply settings, \033[1m[Esc]\033[0m "
-                    "or \033[1m[q]\033[0m to cancel\033[0m",
-                    kThemeMuted));
+    add_row_cb("  " + build_modal_footer({{"[Enter]", "apply settings"}, {"[Esc / q]", "cancel"}}));
 }
 
 }  // namespace simrv::tui::modals

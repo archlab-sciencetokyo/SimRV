@@ -51,6 +51,10 @@ struct SysConfigDraft {
     uint32_t fence_flush_penalty = 4;
     bool enable_forwarding = true;
     bool cycle_accurate = false;
+    uint8_t bpred_type = 2;  // 0: Static, 1: Bimodal, 2: GShare, 3: Tournament
+    uint32_t bht_entries = 1024;
+    uint32_t btb_entries = 256;
+    uint32_t ras_entries = 16;
 };
 
 struct MisaDraft {
@@ -101,6 +105,7 @@ struct SettingsDraft {
     bool rollback_enabled = false;
     bool high_contrast = false;
     bool class_mode = false;
+    uint32_t tui_fps = 30;
     bool use_mix = false;
     bool bp_trace = false;
     bool traplog_mode = false;
@@ -111,6 +116,7 @@ struct SettingsDraft {
     uint32_t smp_quantum = 1000;
     bool smp_multithreaded = false;
     uint8_t platform_profile = 0;  // 0: PCIe, 1: MMIO, 2: Hybrid
+    uint64_t dram_size_mb = 256;
     std::string net_mode = "user";
 
     // Tab 1: MISA Extensions

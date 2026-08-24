@@ -10,6 +10,7 @@
 
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/tui/panels/LeftPane.hpp"
 
 namespace simrv::tui::modals {
@@ -53,9 +54,10 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
 }
 
 void AddressModal::render(std::vector<std::string>& content_rows, const std::string& input) {
-    content_rows.push_back(
-        std::format("{}Enter Target Address (hex) or Symbol:\033[0m", kThemeText));
-    content_rows.push_back(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, input));
+    build_text_input_rows(content_rows, "Enter Target Address (hex) or Symbol:", input);
+    content_rows.push_back("");
+    content_rows.push_back("  " +
+                           build_modal_footer({{"[Enter]", "Inspect"}, {"[Esc]", "Cancel"}}));
 }
 
 }  // namespace simrv::tui::modals

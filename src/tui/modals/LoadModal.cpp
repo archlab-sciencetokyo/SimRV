@@ -9,6 +9,7 @@
 
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/modals/ModalComponents.hpp"
 
 namespace simrv::tui::modals {
 
@@ -76,26 +77,27 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
                        const std::string& input, bool load_appmode,
                        const std::string& staged_binary_path) {
     if (type == ModalType::LoadBinary) {
-        content_rows.push_back(std::format("{}Enter binary image filepath:\033[0m", kThemeText));
-        content_rows.push_back(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, input));
-        content_rows.push_back(std::format(
-            "{}e.g. img/hello.bin, linux-images/rv64/fw_payload.bin\033[0m", kThemeMuted));
+        build_text_input_rows(content_rows, "Enter binary image filepath:", input,
+                              "e.g. img/hello.bin, linux-images/rv64/fw_payload.bin");
+        content_rows.push_back("");
         content_rows.push_back(
-            std::format("{}[Tab]\033[0m {} Mode: {}{}{}\033[0m  {}← toggle\033[0m", kThemeSky,
+            std::format("  {}[Tab]\033[0m {}Mode: {}{}\033[0m  {}← toggle mode\033[0m", kThemeSky,
                         kThemeMuted, load_appmode ? kThemePeach : kThemeMint,
-                        load_appmode ? "App (Baremetal)" : "OS (Linux/RTOS)", "", kThemeMuted));
+                        load_appmode ? "App (Baremetal)" : "OS (Linux/RTOS)", kThemeMuted));
+        content_rows.push_back("");
+        content_rows.push_back(
+            "  " + build_modal_footer({{"[Enter]", "Load Image"}, {"[Esc]", "Cancel"}}));
     } else if (type == ModalType::LoadDiskImage) {
-        content_rows.push_back(std::format("{}Enter disk image filepath:\033[0m", kThemeText));
-        content_rows.push_back(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, input));
-        content_rows.push_back(std::format(
-            "{}e.g. linux-images/rv64/root.img, root.ext4, root.bin\033[0m", kThemeMuted));
+        build_text_input_rows(content_rows, "Enter disk image filepath:", input,
+                              "e.g. linux-images/rv64/root.img, root.ext4, root.bin");
         if (!staged_binary_path.empty()) {
-            content_rows.push_back(std::format("{}Staged memory image: {}{}\033[0m", kThemeMuted,
+            content_rows.push_back("");
+            content_rows.push_back(std::format("  {}Staged memory image: {}{}\033[0m", kThemeMuted,
                                                kThemeSky, staged_binary_path));
         }
-        content_rows.push_back(
-            std::format("{}[Esc]\033[0m {} or {}[Enter]\033[0m{} with empty path to skip\033[0m",
-                        kThemeSky, kThemeMuted, kThemeSky, kThemeMuted));
+        content_rows.push_back("");
+        content_rows.push_back("  " + build_modal_footer({{"[Enter]", "Load (empty to skip)"},
+                                                          {"[Esc]", "Skip Disk"}}));
     }
 }
 

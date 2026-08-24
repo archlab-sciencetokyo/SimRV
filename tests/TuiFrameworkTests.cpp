@@ -17,6 +17,7 @@
 #include "simrv/tui/VirtualTerminal.hpp"
 #include "simrv/tui/modals/GlossaryModal.hpp"
 #include "simrv/tui/modals/HelpModal.hpp"
+#include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/tui/modals/SettingsModal.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
 
@@ -148,7 +149,7 @@ void test_utf8_and_theme_helpers() {
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 26, "all key actions have registry entries");
+    expect(bindings.size() == 27, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
     std::set<char> claimed_chars;
     for (const auto& binding : bindings) {
@@ -199,6 +200,7 @@ void test_key_registry() {
         simrv::tui::TuiFooterAction::Reboot,
         simrv::tui::TuiFooterAction::SwitchHart,
         simrv::tui::TuiFooterAction::ToggleTheme,
+        simrv::tui::TuiFooterAction::ToggleDebug,
     };
     for (const auto footer_action : footer_actions) {
         const auto key_action = simrv::tui::key_action_for_footer(footer_action);
@@ -276,24 +278,28 @@ void test_sysconfig_modal_modes() {
     SystemConfigModal::move_cursor(ia_draft, cursor, 1);
     expect(cursor == 0, "IA mode has no navigable CA pipeline items");
 
-    // Test SMP configuration in SettingsModal
+    // Test TUI FPS & SMP configuration in SettingsModal
     SettingsDraft settings_draft;
+    settings_draft.tui_fps = 30;
     settings_draft.num_harts = 1;
     settings_draft.smp_quantum = 1000;
     settings_draft.smp_multithreaded = false;
     int s_cursor = 0;
 
     SettingsModal::move_cursor(s_cursor, 5);
-    expect(s_cursor == 5, "Settings modal advances cursor to SMP core count");
+    expect(s_cursor == 5, "Settings modal advances cursor to TUI Target Refresh Rate");
 
-    SettingsModal::adjust_setting(settings_draft, 5, 3);
+    SettingsModal::adjust_setting(settings_draft, 5, 1);
+    expect(settings_draft.tui_fps == 60, "Settings modal cycles TUI FPS to 60");
+
+    SettingsModal::adjust_setting(settings_draft, 6, 3);
     expect(settings_draft.num_harts == 4, "Settings modal adjusts SMP active core count");
-
-    SettingsModal::adjust_setting(settings_draft, 6, 2);
-    expect(settings_draft.smp_quantum == 1200, "Settings modal adjusts SMP quantum slice");
 
     SettingsModal::adjust_setting(settings_draft, 7, 1);
     expect(settings_draft.smp_multithreaded == true, "Settings modal toggles SMP worker threads");
+
+    SettingsModal::adjust_setting(settings_draft, 8, 1);
+    expect(settings_draft.smp_quantum == 2500, "Settings modal advances SMP quantum level");
 
     // Verify render text in IA mode contains disabled note for CA options
     std::vector<std::string> rows;
@@ -640,6 +646,48 @@ void test_log_buffer_wrapping() {
     expect(lines_w100.size() == 2, "Log reflows to 2 lines when width=100");
 }
 
+void test_modal_components() {
+    using namespace simrv::tui::modals;
+
+    // Test dynamic metadata registry
+    const auto meta_bp = get_modal_metadata(simrv::tui::ModalType::SetBreakpoint);
+    expect(meta_bp.title == " SET BREAKPOINT ", "ModalMetadata title matches for SetBreakpoint");
+    expect(!meta_bp.is_wide, "SetBreakpoint is not wide");
+
+    const auto meta_settings = get_modal_metadata(simrv::tui::ModalType::Settings);
+    expect(meta_settings.title == " SIMULATOR SETTINGS & CONFIGURATION ", "Settings title matches");
+    expect(meta_settings.is_wide, "Settings is wide modal");
+
+    const auto meta_notice = get_modal_metadata(simrv::tui::ModalType::Notice, true, "ALERT");
+    expect(meta_notice.title.contains("❌ ALERT"), "Notice error title contains icon and name");
+
+    // Test unified footer builder
+    const auto footer = build_modal_footer({{"[Enter]", "Apply"}, {"[Esc]", "Cancel"}});
+    expect(footer.contains("[Enter]") && footer.contains("Apply") && footer.contains("[Esc]") &&
+               footer.contains("Cancel"),
+           "Modal footer renders key action pairs");
+
+    // Test tab bar builder
+    static constexpr std::array<std::string_view, 3> tabs = {"Tab1", "Tab2", "Tab3"};
+    const auto tab_bar = build_modal_tab_bar(tabs, 1);
+    expect(tab_bar.contains("[1] Tab1") && tab_bar.contains("[2] Tab2") &&
+               tab_bar.contains("[3] Tab3"),
+           "Modal tab bar renders all numbered tabs");
+
+    // Test section divider and menu item row
+    const auto div = build_section_divider("ISA Extensions");
+    expect(div.contains("ISA Extensions") && div.contains("──"), "Section divider formatted");
+
+    const auto row_sel = build_menu_item_row("Option A", "[ON]", true, 20);
+    expect(row_sel.starts_with(">") || row_sel.contains(">"), "Selected row contains selector pointer");
+
+    // Test text input helper
+    std::vector<std::string> input_rows;
+    build_text_input_rows(input_rows, "Enter Path:", "/tmp/test.bin", "hint example");
+    expect(input_rows.size() == 3, "Input helper creates prompt, cursor, and hint rows");
+    expect(input_rows[1].contains("/tmp/test.bin_"), "Cursor input row has trailing cursor");
+}
+
 }  // namespace
 
 int main() {
@@ -656,6 +704,7 @@ int main() {
     test_frame_composition();
     test_themes_and_mouse_interactions();
     test_log_buffer_wrapping();
+    test_modal_components();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;

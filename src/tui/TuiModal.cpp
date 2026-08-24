@@ -17,6 +17,7 @@
 #include "simrv/tui/modals/HelpModal.hpp"
 #include "simrv/tui/modals/LoadModal.hpp"
 #include "simrv/tui/modals/MisaModal.hpp"
+#include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/tui/modals/SettingsModal.hpp"
 #include "simrv/tui/modals/StepModal.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
@@ -26,9 +27,9 @@ namespace simrv::tui {
 
 namespace {
 
-constexpr std::array<int, 16> kGeneralSettingRows = {5,  6,  7,  8,  9,  12, 13, 14,
-                                                     17, 18, 21, 22, 25, 26, 27, 28};
-constexpr int kGeneralSettingsContentRows = 31;
+constexpr std::array<int, 18> kGeneralSettingRows = {4,  5,  6,  7,  8,  9,  12, 13, 14,
+                                                     17, 18, 19, 22, 23, 26, 27, 28, 29};
+constexpr int kGeneralSettingsContentRows = 30;
 
 [[nodiscard]] auto general_setting_row(int item) -> int {
     return item >= 0 && item < static_cast<int>(kGeneralSettingRows.size())
@@ -468,13 +469,8 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                               int term_height) const {
     if (active_modal_ == ModalType::None || lines.empty()) return;
 
-    bool is_help = (active_modal_ == ModalType::Help);
-    bool is_glossary = (active_modal_ == ModalType::Glossary);
-    bool is_wide_modal =
-        (is_help || is_glossary || active_modal_ == ModalType::Settings ||
-         active_modal_ == ModalType::ConfigureMisa || active_modal_ == ModalType::ConfigureSystem ||
-         active_modal_ == ModalType::Notice || active_modal_ == ModalType::PlatformChangeConfirm);
-    const int maximum_width = is_wide_modal ? 78 : 58;
+    const auto meta = modals::get_modal_metadata(active_modal_, notice_is_error_, notice_title_);
+    const int maximum_width = meta.is_wide ? 78 : 58;
     const int provisional_width = std::min(maximum_width, term_width - 4);
     if (provisional_width < 35) return;
 
@@ -493,64 +489,53 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
         content_rows.push_back(s);
     };
 
-    std::string title;
+    const std::string& title = meta.title;
     switch (active_modal_) {
         case ModalType::SetBreakpoint:
-            title = " SET BREAKPOINT ";
             modals::BreakpointModal::render(active_modal_, content_rows, input_, &machine_);
             break;
         case ModalType::SetWatchpoint:
-            title = " SET WATCHPOINT ";
             modals::BreakpointModal::render(active_modal_, content_rows, input_, &machine_);
             break;
         case ModalType::ManageBreakpoints:
-            title = " MANAGE BREAKPOINTS & WATCHPOINTS ";
             modals::BreakpointModal::render(active_modal_, content_rows, input_, &machine_,
                                             bp_cursor_);
             break;
         case ModalType::SetSpeed:
-            title = " SET SIMULATION FREQUENCY ";
             modals::StepModal::render(active_modal_, content_rows, input_);
             break;
         case ModalType::InspectAddress:
-            title = " INSPECT MEMORY ADDRESS ";
             modals::AddressModal::render(content_rows, input_);
             break;
         case ModalType::LoadBinary:
-            title = " LOAD PROGRAM BINARY ";
             modals::LoadModal::render(active_modal_, content_rows, input_, load_appmode_,
                                       staged_binary_path_);
             break;
         case ModalType::LoadDiskImage:
-            title = " LOAD DISK IMAGE (Optional) ";
             modals::LoadModal::render(active_modal_, content_rows, input_, load_appmode_,
                                       staged_binary_path_);
             break;
         case ModalType::Glossary:
-            title = " ARCHITECTURE GLOSSARY & CONCEPTS [?] ";
             modals::GlossaryModal::render(content_rows, add_row, glossary_topic_, glossary_scroll_,
                                           term_height, provisional_width);
             break;
         case ModalType::Settings:
-            title = " SIMULATOR SETTINGS & CONFIGURATION ";
             modals::SettingsModal::render(content_rows, add_row, settings_draft_, machine_);
             break;
         case ModalType::ConfigureMisa:
-            title = " CONFIGURE CPU MISA & EXTENSIONS ";
             modals::MisaModal::render(content_rows, add_row, misa_draft_, misa_cursor_, machine_);
             break;
         case ModalType::ConfigureSystem:
-            title = " PIPELINE & MICROARCHITECTURE CONFIGURATION ";
             modals::SystemConfigModal::render(content_rows, add_row, sysconfig_draft_,
                                               sysconfig_cursor_, input_);
+            add_row("");
+            add_row("  " + modals::build_modal_footer(
+                               {{"[Enter]", "apply configuration"}, {"[Esc / q]", "cancel"}}));
             break;
         case ModalType::Help:
-            title = " SIMULATOR KEYBOARD SHORTCUTS ";
             modals::HelpModal::render(content_rows, add_row, term_height, provisional_width);
             break;
         case ModalType::Notice:
-            title = notice_is_error_ ? std::format(" ❌ {} ", notice_title_)
-                                     : std::format(" ⚠️  {} ", notice_title_);
             add_row("");
             {
                 std::size_t start = 0;
@@ -564,13 +549,9 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                 }
             }
             add_row("");
-            add_row(
-                std::format("{}Press \033[1m[Enter]\033[0m, \033[1m[Space]\033[0m or "
-                            "\033[1m[Esc]\033[0m to dismiss\033[0m",
-                            kThemeMuted));
+            add_row("  " + modals::build_modal_footer({{"[Enter / Space / Esc]", "dismiss"}}));
             break;
         case ModalType::PlatformChangeConfirm: {
-            title = " ⚙️  PLATFORM PROFILE CHANGE: RELOAD REQUIRED ";
             add_row("");
             const char* cur_prof =
                 (machine_.s_platform_profile == simrv::core::PlatformProfile::Pcie)
@@ -587,8 +568,8 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             add_row(std::format("    {}Current:\033[0m \033[1;36m{}\033[0m", kThemeText, cur_prof));
             add_row(std::format("    {}Target :\033[0m \033[1;32m{}\033[0m", kThemeText, new_prof));
             add_row("");
-            add_row(std::format("  Changing the platform bus topology requires regenerating the"));
-            add_row(std::format("  Device Tree (FDT) and restarting CPU execution state."));
+            add_row("  Changing the platform bus topology requires regenerating the");
+            add_row("  Device Tree (FDT) and restarting CPU execution state.");
             add_row("");
             add_row(
                 std::format("  {}[R / Enter]\033[0m \033[1;32mReload Simulator Now\033[0m (Apply & "
@@ -598,8 +579,8 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                 std::format("  {}[D / Space]\033[0m \033[1;33mDiscard Platform Change\033[0m (Keep "
                             "Current Profile)",
                             kThemePeach));
-            add_row(std::format("  {}[Esc / q]  \033[0m \033[90mCancel & Return to Settings\033[0m",
-                                kThemeMuted));
+            add_row("  " +
+                    modals::build_modal_footer({{"[Esc / q]", "Cancel & Return to Settings"}}));
         } break;
         default:
             break;
