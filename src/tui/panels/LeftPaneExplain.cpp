@@ -150,7 +150,7 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
                           const std::string& theme) -> std::string {
         std::string row = std::format(" {}", theme);
         for (auto const& c : cols) {
-            row += "\xe2\x94\x82\033[0m";  // │ + reset
+            row += std::format("\xe2\x94\x82\033[0m", theme);  // │ (themed) + reset for cell text
             std::string cell;
             switch (row_kind) {
                 case 0:
@@ -170,8 +170,9 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
             row += std::string(static_cast<std::size_t>(lpad), ' ');
             row += cell;
             row += std::string(static_cast<std::size_t>(rpad), ' ');
+            row += theme;  // re-apply theme before the next │ separator
         }
-        row += std::format("{}\xe2\x94\x82\033[0m", theme);
+        row += std::format("\xe2\x94\x82\033[0m", theme);
         return row;
     };
 
