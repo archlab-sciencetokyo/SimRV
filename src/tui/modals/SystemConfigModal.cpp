@@ -203,16 +203,21 @@ auto SystemConfigModal::submit(const SysConfigDraft& draft, simrv::core::Machine
     model.profile = selected_profile;
     if (!model.validate()) return false;
     machine.s_pipeline_type = static_cast<simrv::pipeline::PipelineType>(draft.pipeline_type);
-    auto apply = [&](simrv::core::CPU& cpu) {
-        // Keep the modal link-light: the full reset/reboot path owns CA-local reconstruction.
-        // The current paused session receives the same policy projection for inspection.
+    // A profile changes cache geometry as well as pipeline policy.  Applying only the latter
+    // left the live D-cache at its previous size/associativity until an unrelated rebuild.
+    // This stays local to the modal so the lightweight TUI framework test target does not need
+    // to link the full CPU execution implementation.
+    for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
+        auto& cpu = machine.hart(hart);
         cpu.cpu_model_config = model;
         cpu.pipeline_sim.config = model.pipeline;
+        (void)cpu.icache.configure(model.instruction_cache.capacity_bytes,
+                                   model.instruction_cache.associativity);
+        (void)cpu.dcache.configure(model.data_cache.capacity_bytes, model.data_cache.associativity);
+        cpu.ca_state.reset_instruction();
+        cpu.ca_pipeline.reset();
         cpu.branch_predictor.configure(cpu.pipeline_sim.config.branch_predictor);
-    };
-    apply(machine.cpu);
-    for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
-        apply(machine.hart(hart));
+        cpu.branch_predictor.reset();
     }
     return true;
 }

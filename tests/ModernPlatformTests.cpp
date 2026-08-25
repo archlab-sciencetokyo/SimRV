@@ -35,6 +35,7 @@
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/MmioDevice.hpp"
 #include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/tui/modals/SystemConfigModal.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace {
@@ -109,6 +110,22 @@ void test_left_pane_runtime_summaries() {
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
     check(row(21).contains("Cycle Accurate") && row(27).contains("I-cache") &&
           row(28).contains("D-cache") && row(29).contains("limit"), "CA summary");
+}
+
+void test_ca_model_cache_application() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    ConcreteMachine machine;
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleObservable;
+
+    simrv::tui::SysConfigDraft draft{};
+    draft.cycle_accurate = true;
+    draft.profile = static_cast<uint8_t>(simrv::pipeline::CpuModelProfile::Performance);
+    check(simrv::tui::modals::SystemConfigModal::submit(draft, machine));
+    check(machine.cpu.cpu_model_config.profile == simrv::pipeline::CpuModelProfile::Performance);
+    check(machine.cpu.dcache.capacity_bytes() == 16384);
+    check(machine.cpu.dcache.associativity() == 4);
 }
 
 void test_mmio_device_and_dma() {
@@ -1640,6 +1657,7 @@ void test_ia_multithreaded_smp_execution() {
 
 int main() {
     test_left_pane_runtime_summaries();
+    test_ca_model_cache_application();
     test_mmio_device_and_dma();
     test_tui_uart_input_irq_publication();
     test_ia_tui_uart_input_is_immediate();
