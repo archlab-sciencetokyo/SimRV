@@ -761,12 +761,8 @@ def run_benchmark_single(
         or resolve_tohost(elf_path, nm_tool)
         or "0x80001000"
     )
-    elf_xlen = detect_elf_xlen(elf_path)
-    if elf_xlen:
-        alt_bin = os.path.join(root_dir, f"build/rv{elf_xlen}-release/SimRV")
-        if is_executable(alt_bin):
-            simrv_bin = alt_bin
-
+    # The caller may be comparing compiler builds or an out-of-tree binary.  Do not replace an
+    # explicit --simrv selection with the in-tree default based on the guest ELF's XLEN.
     xlen = detect_xlen(simrv_bin, elf_path)
     isa = isa_override or f"rv{xlen}gc"
 

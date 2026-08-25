@@ -23,17 +23,27 @@ TileLinkBus::TileLinkBus(simrv::core::Machine& machine)
 
 void TileLinkBus::add_node(TileLinkNode* node) { router_.register_device(node); }
 
+void TileLinkBus::configure_timing(uint32_t request_latency, uint32_t response_latency) {
+    std::unique_lock lock(bus_mutex_, std::defer_lock);
+    if (machine_.s_smp_multithreaded.load(std::memory_order_relaxed)) lock.lock();
+    request_latency_ = std::max(1u, request_latency);
+    response_latency_ = std::max(1u, response_latency);
+}
+
 auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
-    const std::scoped_lock lock(bus_mutex_);
+    std::unique_lock lock(bus_mutex_, std::defer_lock);
+    if (machine_.s_smp_multithreaded.load(std::memory_order_relaxed)) lock.lock();
     req_queue_.push_back(
         TimedRequest{.payload = req, .submitted_cycle = cycle_, .sequence = next_sequence_++});
     return true;
 }
 
 void TileLinkBus::advance_cycle() {
-    const std::scoped_lock lock(bus_mutex_);
+    std::unique_lock lock(bus_mutex_, std::defer_lock);
+    if (machine_.s_smp_multithreaded.load(std::memory_order_relaxed)) lock.lock();
     ++cycle_;
-    if (!req_queue_.empty() && req_queue_.front().submitted_cycle < cycle_) {
+    if (!req_queue_.empty() &&
+        req_queue_.front().submitted_cycle + request_latency_ <= cycle_) {
         const auto request = req_queue_.front();
         req_queue_.pop_front();
         process_request(request);
@@ -138,15 +148,22 @@ void TileLinkBus::process_request(const TimedRequest& request) {
     }
     resp_queue_.push_back(TimedResponse{.payload = resp,
                                         .line_data = response_line,
-                                        .ready_cycle = cycle_,
+                                        // A latency of one means that the response is visible in
+                                        // the cycle in which the request completes.  This keeps
+                                        // the default one-cycle request/response contract while
+                                        // larger configured latencies add whole CA transitions.
+                                        .ready_cycle = cycle_ + response_latency_ - 1,
                                         .sequence = request.sequence,
                                         .has_line_data = has_line_data});
 }
 
 auto TileLinkBus::try_get_timed_response(uint8_t source_id, TimedResponse& resp) -> bool {
-    const std::scoped_lock lock(bus_mutex_);
+    std::unique_lock lock(bus_mutex_, std::defer_lock);
+    if (machine_.s_smp_multithreaded.load(std::memory_order_relaxed)) lock.lock();
     auto it = std::ranges::find_if(
-        resp_queue_, [source_id](const auto& r) -> bool { return r.payload.source == source_id; });
+        resp_queue_, [this, source_id](const auto& r) -> bool {
+            return r.payload.source == source_id && r.ready_cycle <= cycle_;
+        });
     if (it != resp_queue_.end()) {
         resp = *it;
         resp_queue_.erase(it);
@@ -156,7 +173,8 @@ auto TileLinkBus::try_get_timed_response(uint8_t source_id, TimedResponse& resp)
 }
 
 void TileLinkBus::cancel_source(uint8_t source_id) {
-    const std::scoped_lock lock(bus_mutex_);
+    std::unique_lock lock(bus_mutex_, std::defer_lock);
+    if (machine_.s_smp_multithreaded.load(std::memory_order_relaxed)) lock.lock();
     std::erase_if(req_queue_, [source_id](const TimedRequest& request) {
         return request.payload.source == source_id;
     });
@@ -166,13 +184,21 @@ void TileLinkBus::cancel_source(uint8_t source_id) {
 }
 
 auto TileLinkBus::get_response(uint8_t source_id, TlChannelD& resp) -> bool {
-    const std::scoped_lock lock(bus_mutex_);
+    std::unique_lock lock(bus_mutex_, std::defer_lock);
+    if (machine_.s_smp_multithreaded.load(std::memory_order_relaxed)) lock.lock();
+    // IA deliberately remains functional and synchronous.  CA uses
+    // try_get_timed_response(), which honours ready_cycle exactly.
+    const auto pop_response = [&]() -> bool {
+        auto response = std::ranges::find_if(resp_queue_, [source_id](const auto& item) {
+            return item.payload.source == source_id;
+        });
+        if (response == resp_queue_.end()) return false;
+        resp = response->payload;
+        resp_queue_.erase(response);
+        return true;
+    };
     while (true) {
-        TimedResponse timed{};
-        if (try_get_timed_response(source_id, timed)) {
-            resp = timed.payload;
-            return true;
-        }
+        if (pop_response()) return true;
         if (req_queue_.empty()) {
             break;
         }

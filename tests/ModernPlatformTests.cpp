@@ -18,6 +18,7 @@
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/Aclint.hpp"
+#include "simrv/device/Uart.hpp"
 #include "simrv/device/mmio/VirtioMmioBlock.hpp"
 #include "simrv/device/mmio/VirtioMmioConsole.hpp"
 #include "simrv/device/mmio/VirtioMmioNet.hpp"
@@ -33,6 +34,7 @@
 #include "simrv/device/pci/VirtioPciSound.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/MmioDevice.hpp"
+#include "simrv/tui/panels/LeftPane.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace {
@@ -59,6 +61,56 @@ class ConcreteMachine : public simrv::core::Machine {
     void execute_cycle() override {}
 };
 
+class TestOSMachine : public simrv::core::OSMachine {
+   public:
+    using simrv::core::OSMachine::finalize_cycle;
+};
+
+void test_left_pane_runtime_summaries() {
+    const auto check = [](bool condition, const char* message) {
+        if (!condition) {
+            std::cerr << message << '\n';
+            std::abort();
+        }
+    };
+    ConcreteMachine machine;
+    simrv::tui::LeftPane pane(machine);
+    pane.set_visible_rows(60);
+    constexpr int kWidth = 80;
+    auto row = [&](int logical_row) { return pane.render_row(logical_row + 2, kWidth); };
+
+    check(row(1).contains("x1") && row(16).contains("Machine State"), "machine state heading");
+    check(row(18).contains("interrupts") && row(19).contains("translation"), "machine state health");
+    check(!row(18).contains("mstatus") && !row(19).contains("satp"), "raw CSRs hidden");
+    machine.cpu.state().mtvec = 0x80000100;
+    machine.cpu.raise_exception(static_cast<TrapCause>(ExceptionCode::FetchPageFault), 0x80201048);
+    check(!machine.is_stopped() && machine.stop_reason() == simrv::core::Machine::StopReason::Running,
+          "handled traps continue execution");
+    check(row(20).contains("I-page fault") && row(20).contains("address"),
+          "trap summary is compact and includes fault address");
+    check(row(21).contains("Performance") && row(22).contains("retired") &&
+          row(23).contains("engine") && row(24).contains("speed") && row(25).contains("average"),
+          "IA summary flow");
+
+    pane.set_paused(false);
+    check(row(0).contains("RUNNING") && row(0).contains("sampled state"),
+          "running view uses a compact sampled-state banner");
+    check(row(1).contains("x1"), "running view preserves cached register context");
+    pane.set_kips(12'345);
+    check(row(21).contains("Performance") && row(24).contains("12.35 MIPS"),
+          "running view keeps performance telemetry live");
+    pane.set_paused(true);
+
+    machine.s_debug_mode = true;
+    check(row(26).contains("Debug") && row(27).contains("ELF sym") &&
+          row(28).contains("breakpoints") && !row(28).contains("privilege"), "debug summary");
+
+    machine.s_debug_mode = false;
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+    check(row(21).contains("Cycle Accurate") && row(27).contains("I-cache") &&
+          row(28).contains("D-cache") && row(29).contains("limit"), "CA summary");
+}
+
 void test_mmio_device_and_dma() {
     ConcreteMachine machine;
     std::vector<Byte> ram(1024 * 1024, Byte{0});
@@ -79,6 +131,57 @@ void test_mmio_device_and_dma() {
     assert(dev.dma_read(simrv::memory::kDramBaseAddress + 0x100, dst));
     assert(dst == src);
     std::cout << "[PASS] test_mmio_device_and_dma\n";
+}
+
+void test_tui_uart_input_irq_publication() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    ConcreteMachine machine;
+    machine.cpu.reset();
+    machine.s_tuimode = true;
+    simrv::device::Uart uart(machine);
+
+    simrv::memory::TlChannelA enable_rx_irq{};
+    enable_rx_irq.opcode = simrv::memory::TlOpcodeA::PutFullData;
+    enable_rx_irq.address = simrv::mmio::kUartBaseAddress + simrv::mmio::kUartRegIerDlm;
+    enable_rx_irq.size = 0;
+    enable_rx_irq.data = 1;
+    simrv::memory::TlChannelD response{};
+    check(uart.handle_request(enable_rx_irq, response));
+
+    uart.push_rx_byte('x');
+    constexpr Word kUartIrqMask = static_cast<Word>(1) << 3;
+    check((machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) == 0);
+    uart.service_interrupts();
+    check((machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) != 0);
+    std::cout << "[PASS] test_tui_uart_input_irq_publication\n";
+}
+
+void test_ia_tui_uart_input_is_immediate() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    TestOSMachine machine;
+    machine.cpu.reset();
+    machine.s_tuimode = true;
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionObservable;
+    machine.uart = std::make_unique<simrv::device::Uart>(machine);
+
+    simrv::memory::TlChannelA enable_rx_irq{};
+    enable_rx_irq.opcode = simrv::memory::TlOpcodeA::PutFullData;
+    enable_rx_irq.address = simrv::mmio::kUartBaseAddress + simrv::mmio::kUartRegIerDlm;
+    enable_rx_irq.size = 0;
+    enable_rx_irq.data = 1;
+    simrv::memory::TlChannelD response{};
+    check(machine.uart->handle_request(enable_rx_irq, response));
+
+    machine.uart->push_rx_byte('i');
+    constexpr Word kUartIrqMask = static_cast<Word>(1) << 3;
+    check((machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) == 0);
+    machine.finalize_cycle();
+    check((machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) != 0);
+    std::cout << "[PASS] test_ia_tui_uart_input_is_immediate\n";
 }
 
 void test_timed_interconnect_ordering() {
@@ -118,6 +221,20 @@ void test_timed_interconnect_ordering() {
     check(response.sequence == 1);
     check(response.ready_cycle == 2);
     check((response.payload.data & 0xffU) == 0x22);
+
+    // One cycle is the baseline transport delay; larger values add full CA cycles after the
+    // request reaches the bus.
+    bus.configure_timing(2, 2);
+    simrv::memory::TlChannelA delayed = first;
+    delayed.source = 3;
+    check(bus.send_request(delayed));
+    bus.advance_cycle();
+    check(!bus.try_get_timed_response(3, response));
+    bus.advance_cycle();
+    check(!bus.try_get_timed_response(3, response));
+    bus.advance_cycle();
+    check(bus.try_get_timed_response(3, response));
+    check(response.ready_cycle == 5);
     std::cout << "[PASS] test_timed_interconnect_ordering\n";
 }
 
@@ -689,6 +806,8 @@ void test_cycle_kernel_golden_data_refill() {
 
     const auto five_cycles = run(simrv::pipeline::PipelineType::FiveStage);
     const auto three_cycles = run(simrv::pipeline::PipelineType::ThreeStage);
+    // The interconnect owns refill timing. A cache hit completes in its memory stage, so the
+    // configured one-cycle hit latency does not add a second pipeline delay.
     if (five_cycles != 9 || three_cycles != 7) {
         std::cerr << "unexpected data-refill cycles: " << five_cycles << ", " << three_cycles
                   << '\n';
@@ -989,6 +1108,7 @@ void test_cycle_policy_architectural_equivalence() {
         Counter retired = 0;
         uint64_t cycles = 0;
         size_t history_size = 0;
+        uint64_t data_misses = 0;
     };
     const auto run = [&](simrv::core::ExecutionEngine engine) {
         ConcreteMachine machine;
@@ -1005,22 +1125,20 @@ void test_cycle_policy_architectural_equivalence() {
 
         constexpr Address pc = simrv::memory::kDramBaseAddress;
         constexpr Address data_address = pc + 0x100;
-        constexpr std::array<Instruction, 6> program = {
+        constexpr std::array<Instruction, 7> program = {
             0x02a00093,  // addi  x1, x0, 42
             0x00000117,  // auipc x2, 0
             0x0fc10113,  // addi  x2, x2, 252 -> pc + 0x100
             0x00112023,  // sw    x1, 0(x2)
             0x00012183,  // lw    x3, 0(x2)
-            0x0000006f,  // jal   x0, 0
+            0x10500073,  // wfi
+            0xffdff06f,  // jal   x0, -4 (repeat cached WFI)
         };
         std::array<Byte, simrv::cache::ICache::kLineBytes> instruction_line{};
         std::memcpy(instruction_line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
         machine.cpu.icache.insert(pc, instruction_line.data(), simrv::memory::CoherenceState::Trunk,
                                   false);
-        std::array<Byte, simrv::cache::DCache::kLineBytes> data_line{};
-        machine.cpu.dcache.insert(data_address, data_line.data(),
-                                  simrv::memory::CoherenceState::Trunk, false);
         machine.cpu.state().pc = pc;
 
         uint32_t guard = 0;
@@ -1037,16 +1155,18 @@ void test_cycle_policy_architectural_equivalence() {
                       .memory_value = memory_value,
                       .retired = machine.cpu.e_icount,
                       .cycles = machine.cpu.pipeline_sim.cycle_count(),
-                      .history_size = machine.cpu.pipeline_sim.cycle_history().size()};
+                      .history_size = machine.cpu.pipeline_sim.cycle_history().size(),
+                      .data_misses = machine.cpu.dcache.miss_count()};
     };
 
     const auto fast = run(simrv::core::ExecutionEngine::CycleFast);
     const auto observable = run(simrv::core::ExecutionEngine::CycleObservable);
     check(fast.x1 == 42 && fast.x2 == simrv::memory::kDramBaseAddress + 0x100 && fast.x3 == 42);
-    check(fast.memory_value == 42 && fast.retired == 5);
+    check(fast.memory_value == 42 && fast.retired == 5 && fast.data_misses == 1);
     check(fast.x1 == observable.x1 && fast.x2 == observable.x2 && fast.x3 == observable.x3);
     check(fast.memory_value == observable.memory_value && fast.retired == observable.retired);
     check(fast.cycles == observable.cycles);
+    check(fast.data_misses == observable.data_misses);
     check(fast.history_size == 0 && observable.history_size == observable.cycles);
     std::cout << "[PASS] test_cycle_policy_architectural_equivalence\n";
 }
@@ -1087,7 +1207,7 @@ void test_instruction_policy_architectural_equivalence() {
         machine.cpu.state().pc = pc;
 
         uint32_t guard = 0;
-        while (machine.cpu.e_icount < 5 && guard++ < 16) {
+        while (machine.cpu.e_icount < 8 && guard++ < 16) {
             machine.cpu.run_cycle(machine);
         }
         uint32_t memory_value = 0;
@@ -1104,7 +1224,7 @@ void test_instruction_policy_architectural_equivalence() {
     const auto fast = run(simrv::core::ExecutionEngine::InstructionFast);
     const auto observable = run(simrv::core::ExecutionEngine::InstructionObservable);
     check(fast.x1 == 42 && fast.x2 == simrv::memory::kDramBaseAddress + 0x100 && fast.x3 == 42);
-    check(fast.memory_value == 42 && fast.retired == 5);
+    check(fast.memory_value == 42 && fast.retired == 8);
     check(fast.x1 == observable.x1 && fast.x2 == observable.x2 && fast.x3 == observable.x3);
     check(fast.pc == observable.pc && fast.memory_value == observable.memory_value);
     check(fast.retired == observable.retired && fast.cycles == observable.cycles);
@@ -1519,7 +1639,10 @@ void test_ia_multithreaded_smp_execution() {
 }  // namespace
 
 int main() {
+    test_left_pane_runtime_summaries();
     test_mmio_device_and_dma();
+    test_tui_uart_input_irq_publication();
+    test_ia_tui_uart_input_is_immediate();
     test_timed_interconnect_ordering();
     test_timed_interconnect_cancellation();
     test_timed_page_walk_transitions();

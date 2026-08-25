@@ -35,6 +35,10 @@ class TileLinkBus : public Bus {
     explicit TileLinkBus(simrv::core::Machine& machine);
 
     void add_node(TileLinkNode* node);
+    /// Set fixed ready/valid-style transport delays for CA. Both values are at least one cycle.
+    void configure_timing(uint32_t request_latency, uint32_t response_latency);
+    [[nodiscard]] auto request_latency() const noexcept -> uint32_t { return request_latency_; }
+    [[nodiscard]] auto response_latency() const noexcept -> uint32_t { return response_latency_; }
 
     [[nodiscard]] auto router() -> MmioRouter& { return router_; }
     [[nodiscard]] auto router() const -> const MmioRouter& { return router_; }
@@ -95,6 +99,8 @@ class TileLinkBus : public Bus {
     CoherenceHub coherence_hub_;
     Cycle cycle_ = 0;
     uint64_t next_sequence_ = 0;
+    uint32_t request_latency_ = 1;
+    uint32_t response_latency_ = 1;
     std::deque<TimedRequest> req_queue_;
     std::vector<TimedResponse> resp_queue_;
 };

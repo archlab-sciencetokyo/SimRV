@@ -614,6 +614,8 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
     if (state.regs.xlen == 32) {
         state.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state.pc)));
     }
+    // A delivered trap resumes through its guest handler.  The simulator only stops when no
+    // handler exists; debugger breakpoints and watchpoints pause independently in CPU::run_cycle.
     if (state.pc == 0) {
         simrv::log::error(
             "[FATAL] Trap vector (mtvec/stvec) is 0. Cannot handle trap: {} (0x{:x}) at PC 0x{:x}. "
@@ -632,22 +634,6 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
     cpu.pipeline_context.pending_exception = std::nullopt;
     cpu.pipeline_context.pending_tval = 0;
 
-    if (cpu.machine_ && cpu.machine_->s_tuimode && cpu.machine_->tui &&
-        cause == static_cast<TrapCause>(std::to_underlying(ExceptionCode::Breakpoint))) {
-        cpu.machine_->tui->set_persistent_status_override(
-            "\033[1;38;5;234;48;5;210m TRAPPED \033[0m");
-        if constexpr (simrv::xlen::kIsXLen64) {
-            simrv::log::warn("Breakpoint: cause=0x{:016x} pc=0x{:016x} tval=0x{:016x}",
-                             static_cast<uint64_t>(cause), static_cast<uint64_t>(trap_pc),
-                             static_cast<uint64_t>(tval));
-        } else {
-            simrv::log::warn("Breakpoint: cause=0x{:08x} pc=0x{:08x} tval=0x{:08x}",
-                             static_cast<uint64_t>(cause), static_cast<uint64_t>(trap_pc),
-                             static_cast<uint64_t>(tval));
-        }
-        cpu.machine_->tui->update();
-        cpu.machine_->tui->pause_loop();
-    }
 }
 
 auto TrapController::canExecutePrivilegedInstruction(PrivilegeLevel current_priv, CSRValue misa,

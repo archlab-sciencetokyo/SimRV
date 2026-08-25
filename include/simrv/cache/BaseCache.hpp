@@ -45,6 +45,31 @@ class BaseCache {
 
     BaseCache() = default;
 
+    /// Configure the active BRAM-visible portion of the fixed maximum backing store.  Keeping
+    /// storage bounded gives FPGA-style models deterministic resource limits while allowing
+    /// profile changes to alter set/way behaviour at runtime.
+    [[nodiscard]] auto configure(uint32_t capacity_bytes, uint32_t associativity) -> bool {
+        if (capacity_bytes == 0 || associativity == 0 || !std::has_single_bit(capacity_bytes) ||
+            !std::has_single_bit(associativity) || associativity > kWays ||
+            capacity_bytes > kNumLines * kLineBytes ||
+            capacity_bytes < associativity * kLineBytes) {
+            return false;
+        }
+        const uint32_t lines = capacity_bytes / kLineBytes;
+        if (!std::has_single_bit(lines) || lines > kNumLines || lines % associativity != 0 ||
+            !std::has_single_bit(lines / associativity)) {
+            return false;
+        }
+        active_lines_ = lines;
+        active_ways_ = associativity;
+        active_sets_ = lines / associativity;
+        flush(true);
+        return true;
+    }
+    [[nodiscard]] auto capacity_bytes() const -> uint32_t { return active_lines_ * kLineBytes; }
+    [[nodiscard]] auto associativity() const -> uint32_t { return active_ways_; }
+    [[nodiscard]] auto set_count() const -> uint32_t { return active_sets_; }
+
     void insert(Address base_addr, const Byte* line_data,
                 simrv::memory::CoherenceState init_state = simrv::memory::CoherenceState::Trunk,
                 bool is_dirty = false) {
@@ -56,7 +81,7 @@ class BaseCache {
         uint32_t victim_way = 0;
         bool found_exact_tag = false;
 
-        for (uint32_t w = 0; w < kWays; ++w) {
+        for (uint32_t w = 0; w < active_ways_; ++w) {
             auto& line = set[w];
             if (line.valid && line.tag == tag) {
                 victim = &line;
@@ -67,7 +92,7 @@ class BaseCache {
         }
 
         if (!found_exact_tag) {
-            for (uint32_t w = 0; w < kWays; ++w) {
+            for (uint32_t w = 0; w < active_ways_; ++w) {
                 auto& line = set[w];
                 if (!line.valid) {
                     victim = &line;
@@ -128,39 +153,39 @@ class BaseCache {
     [[nodiscard]] auto last_inserted_tag() const -> Address { return last_inserted_tag_; }
 
     [[nodiscard]] auto is_line_valid(uint32_t set_idx, uint32_t way_idx) const -> bool {
-        if (set_idx < kNumSets && way_idx < kWays) {
+        if (set_idx < active_sets_ && way_idx < active_ways_) {
             return sets_[set_idx][way_idx].valid;
         }
         return false;
     }
     [[nodiscard]] auto get_line_tag(uint32_t set_idx, uint32_t way_idx) const -> Address {
-        if (set_idx < kNumSets && way_idx < kWays) {
+        if (set_idx < active_sets_ && way_idx < active_ways_) {
             return sets_[set_idx][way_idx].tag;
         }
         return ~Address{0};
     }
     [[nodiscard]] auto get_line_state(uint32_t set_idx, uint32_t way_idx) const
         -> simrv::memory::CoherenceState {
-        if (set_idx < kNumSets && way_idx < kWays) {
+        if (set_idx < active_sets_ && way_idx < active_ways_) {
             return sets_[set_idx][way_idx].state;
         }
         return simrv::memory::CoherenceState::None;
     }
     [[nodiscard]] auto is_line_dirty(uint32_t set_idx, uint32_t way_idx) const -> bool {
-        if (set_idx < kNumSets && way_idx < kWays) {
+        if (set_idx < active_sets_ && way_idx < active_ways_) {
             return sets_[set_idx][way_idx].dirty;
         }
         return false;
     }
     [[nodiscard]] auto get_line_last_used(uint32_t set_idx, uint32_t way_idx) const -> uint64_t {
-        if (set_idx < kNumSets && way_idx < kWays) {
+        if (set_idx < active_sets_ && way_idx < active_ways_) {
             return sets_[set_idx][way_idx].last_used;
         }
         return 0;
     }
     [[nodiscard]] auto get_line_data(uint32_t set_idx, uint32_t way_idx) const
         -> const std::array<Byte, kLineBytes>* {
-        if (set_idx < kNumSets && way_idx < kWays) {
+        if (set_idx < active_sets_ && way_idx < active_ways_) {
             return &sets_[set_idx][way_idx].data;
         }
         return nullptr;
@@ -170,7 +195,7 @@ class BaseCache {
                     std::array<Byte, kLineBytes>* out_dirty_data = nullptr) -> bool {
         const uint32_t set_idx = get_set_index(base_addr);
         const Address tag = get_tag(base_addr);
-        for (uint32_t w = 0; w < kWays; ++w) {
+        for (uint32_t w = 0; w < active_ways_; ++w) {
             auto& line = sets_[set_idx][w];
             if (line.valid && line.tag == tag) {
                 if (line.dirty && out_dirty_data != nullptr) {
@@ -206,9 +231,12 @@ class BaseCache {
     mutable uint32_t last_accessed_set_ = 0xFFFFFFFF;
     mutable bool last_access_was_hit_ = false;
     mutable uint32_t last_hit_way_ = 0xFFFFFFFF;
+    uint32_t active_lines_ = kNumLines;
+    uint32_t active_ways_ = kWays;
+    uint32_t active_sets_ = kNumSets;
 
-    [[nodiscard]] constexpr auto get_set_index(Address addr) const -> uint32_t {
-        return (addr >> kLineShift) & kSetMask;
+    [[nodiscard]] auto get_set_index(Address addr) const -> uint32_t {
+        return static_cast<uint32_t>((addr >> kLineShift) & (active_sets_ - 1u));
     }
 
     [[nodiscard]] constexpr auto get_tag(Address addr) const -> Address {

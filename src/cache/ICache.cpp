@@ -17,7 +17,7 @@ auto ICache::read(Address addr, uint32_t& data) -> bool {
     const Address tag = get_tag(addr);
     last_accessed_set_ = set_idx;
 
-    for (uint32_t w = 0; w < kWays; ++w) {
+    for (uint32_t w = 0; w < associativity(); ++w) {
         auto& line = sets_[set_idx][w];
         if (line.valid && line.tag == tag) {
             const uint32_t byte_offset = addr & (kLineBytes - 1u);
@@ -48,7 +48,7 @@ auto ICache::read16(Address addr, uint16_t& data) -> bool {
     const Address tag = get_tag(addr);
     last_accessed_set_ = set_idx;
 
-    for (uint32_t w = 0; w < kWays; ++w) {
+    for (uint32_t w = 0; w < associativity(); ++w) {
         auto& line = sets_[set_idx][w];
         if (line.valid && line.tag == tag) {
             const uint32_t byte_offset = addr & (kLineBytes - 1u);
@@ -83,7 +83,7 @@ auto ICache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::T
     resp.address = line_base;
     resp.param = static_cast<uint8_t>(simrv::memory::CoherenceState::None);
 
-    for (uint32_t w = 0; w < kWays; ++w) {
+    for (uint32_t w = 0; w < associativity(); ++w) {
         auto& line = sets_[set_idx][w];
         if (line.valid && line.tag == tag) {
             resp.param = static_cast<uint8_t>(line.state);

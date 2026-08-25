@@ -5,12 +5,10 @@
 #include "simrv/core/BaremetalMachine.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <limits>
 
 #include "simrv/core/Logger.hpp"
 #include "simrv/device/Uart.hpp"
-#include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
@@ -56,24 +54,13 @@ void BaremetalMachine::finalize_cycle() {
         stop(StopReason::InstructionLimit);
     }
 
-    if (s_tuimode && !s_multithreaded && tui) {
-        if (simrv::tui::g_resized) {
-            tui->render();
-        }
-        if (cpu.e_icount - last_tui_check_cycles_ >= 1000 ||
-            tui->step_delay_us_.load(std::memory_order_relaxed) > 0) {
-            last_tui_check_cycles_ = cpu.e_icount;
-            auto now = std::chrono::steady_clock::now();
-            if (now - last_tui_update_ >= std::chrono::milliseconds(33)) {
-                tui->update();
-                tui->update_cache();
-                tui->render();
-                last_tui_update_ = now;
-            }
-        }
+    // TUI and PTY readers enqueue bytes asynchronously. Service their UART IRQ immediately on
+    // the simulation thread so an interactive guest does not wait for the low-rate host poll.
+    if (uart && s_tuimode) {
+        uart->service_interrupts();
     } else if (uart && !uart->is_input_thread_running()) {
         if (simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)) {
-            uart->non_tui_poll_input();
+            uart->service_interrupts();
         }
     }
 }

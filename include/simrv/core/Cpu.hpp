@@ -23,6 +23,7 @@
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/memory/Bus.hpp"
 #include "simrv/pipeline/CycleTransition.hpp"
+#include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 
@@ -332,7 +333,12 @@ class CPU {
      * @param machine Reference to the top-level machine orchestration unit.
      */
     void run_cycle(Machine& machine);
+    /// Advance exactly one authoritative CA transition.  Machine owns the global CA clock and
+    /// calls this directly; IA never uses this entry point.
+    void advance_ca_cycle(Machine& machine);
     void run_ca_pipeline_cycle(Machine& machine);
+    /// Install a validated model before reset/reboot and recreate CA-local timing state.
+    void apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config);
 
     /**
      * @brief Executes one full CPU cycle in optimized baremetal mode.
@@ -589,6 +595,7 @@ class CPU {
     bool use_opensbi = false;
     Machine* machine_ = nullptr;
     simrv::pipeline::PipelineSim pipeline_sim;
+    simrv::pipeline::CpuModelConfig cpu_model_config{};
     simrv::pipeline::BranchPredictor branch_predictor;
     simrv::pipeline::HartCycleState ca_state{};
     simrv::pipeline::HartPipelineState ca_pipeline{};

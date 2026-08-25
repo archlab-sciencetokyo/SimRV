@@ -1,8 +1,30 @@
 # SimRV 2.0 Release Guide
 
 The authoritative release contract is [`release/release-manifest.json`](../release/release-manifest.json).
-SimRV 2.0 officially supports Linux x86-64 hosts using GCC 14+ or Clang 20+, with separate
+SimRV 2.0 officially supports Linux x86-64 hosts using GCC 15+ or Clang 20+, with separate
 RV32GCBV and RV64GCBV binaries. Spike lockstep and the GDB server are optional features.
+
+## Support and qualification boundary
+
+“Supported” means the release matrix contains passing evidence. “Partial” means useful behavior
+has a documented qualification gap. These labels are not RISC-V certification claims.
+
+| Area | Status | Evidence or boundary |
+| --- | --- | --- |
+| RV32I/RV64I, M, A, C | Supported | Semantic tests, `riscv-tests`, and Spike lockstep |
+| Zba/Zbb/Zbc/Zbs | Supported | ISA and lockstep suites |
+| F/D | Partial | RMM arithmetic remains unqualified |
+| RVV 1.0 | Partial | Advertised instruction subset at VLEN 256; no complete-V claim |
+| Privilege, traps, CSRs; Sv32/Sv39/Sv48 | Supported | Semantic tests and Linux boot |
+| Direct SBI; UART, timers, interrupts, VirtIO | Supported | Platform and Linux integration tests |
+| TUI | Supported | Native UI tests and Linux PTY interaction |
+| GDB RSP | Optional | Debug integration; not a complete protocol promise |
+| Spike lockstep | Optional dependency | Reference evidence when Spike is provisioned |
+| Linux x86-64 host | Supported | GCC 15+ and Clang 20+ release matrix |
+
+The detailed architectural boundary and known deviations are in
+[RISC-V compliance scope](RISCV_COMPLIANCE.md). The release manifest controls when prose and
+machine-readable requirements disagree.
 
 ## Local release validation
 
@@ -17,6 +39,11 @@ Run clean builds and gate suites for both compilers and both guest XLENs:
 ```bash
 python3 scripts/reproduce.py --mode full --output repro/results
 ```
+
+The maintained validation preference is stable Clang 21+ and GCC 15+. GCC 16.2 is a current
+stable upstream series; LLVM 23 is still pre-release, so use stable LLVM 22.x (or the validated
+Clang 21.x host package) for release evidence. `rv64-clang-release` and `rv64-gcc-release`
+select the corresponding compiler from `PATH` without changing the portable default presets.
 
 The gate writes versioned evidence with compiler, architecture, MISA/VLEN, dependency revisions,
 test counts, skips, elapsed time, and binary size. A required suite that is absent or skipped is a

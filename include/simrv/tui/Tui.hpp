@@ -60,6 +60,7 @@ class StatusBar;
 class Tui {
    public:
     static constexpr size_t kTraceBufferSize = 200;
+    static constexpr uint64_t kDetailedExecutionMaxHz = 100;
     explicit Tui(simrv::core::Machine& machine);
     ~Tui();
 
@@ -81,7 +82,6 @@ class Tui {
         return ui_running_.load(std::memory_order_relaxed);
     }
 
-    void update();
     void pause_loop();
     void unpause_loop();
     [[nodiscard]] auto is_tui_paused() const -> bool {
@@ -90,13 +90,19 @@ class Tui {
 
     void set_paused(bool p);
     [[nodiscard]] auto is_paused() const -> bool { return paused_.load(std::memory_order_relaxed); }
+    /// Rich per-instruction state is useful while stopped or deliberately stepped slowly.  At
+    /// higher rates the UI renders sampled state instead, keeping the simulator hot path lean.
+    [[nodiscard]] auto captures_execution_detail() const -> bool {
+        return is_trace_active() || is_paused() ||
+               step_delay_us_.load(std::memory_order_relaxed) >
+                   (1'000'000U / kDetailedExecutionMaxHz);
+    }
     void set_sim_thread_sleeping(bool s) {
         sim_thread_is_sleeping_.store(s, std::memory_order_relaxed);
     }
     [[nodiscard]] auto is_sim_thread_sleeping() const -> bool {
         return sim_thread_is_sleeping_.load(std::memory_order_relaxed);
     }
-    void update_cache();
     void on_cycle_completed_slow();
     void on_cycle_completed() {
         if (simrv::compiler::unlikely(step_delay_us_.load(std::memory_order_relaxed) > 0)) {
@@ -291,6 +297,10 @@ class Tui {
     int cached_term_height_ = 0;
 
     void ui_render_loop(const std::stop_token& stop_token);
+    // The dedicated UI thread is the sole stdin reader and renderer. Keeping these private
+    // prevents simulation and launcher code from racing terminal input or escape parsing.
+    void update();
+    void update_cache();
 
     auto consume_control_sequence(uint8_t first_byte) -> bool;
     auto parse_sgr_mouse(const std::string& seq, int& b, int& x, int& y) -> bool;

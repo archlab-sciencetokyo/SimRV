@@ -92,6 +92,38 @@ auto render_cache_way_row(const simrv::core::CPU& cpu, int way_idx, int inspect_
 
 }  // namespace
 
+auto LeftPane::active_cache_set_count() const -> int {
+    const auto count = cache_inspect_type_ == 0 ? machine_.cpu.icache.set_count()
+                                                : machine_.cpu.dcache.set_count();
+    return std::max(1, static_cast<int>(count));
+}
+
+auto LeftPane::active_cache_way_count() const -> int {
+    const auto count = cache_inspect_type_ == 0 ? machine_.cpu.icache.associativity()
+                                                : machine_.cpu.dcache.associativity();
+    return std::max(1, static_cast<int>(count));
+}
+
+void LeftPane::select_next_cache_set(int delta) {
+    const int count = active_cache_set_count();
+    cache_inspect_set_ = (cache_inspect_set_ + (delta % count) + count) % count;
+}
+
+void LeftPane::toggle_cache_inspect_type() {
+    cache_inspect_type_ = 1 - cache_inspect_type_;
+    cache_inspect_set_ %= active_cache_set_count();
+    cache_inspect_way_ %= active_cache_way_count();
+}
+
+void LeftPane::select_cache_way(int way) {
+    if (way >= 0 && way < active_cache_way_count()) cache_inspect_way_ = way;
+}
+
+void LeftPane::cycle_cache_way(int delta) {
+    const int count = active_cache_way_count();
+    cache_inspect_way_ = (cache_inspect_way_ + (delta % count) + count) % count;
+}
+
 auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, int col_width,
                                   int right_width) -> std::string {
     int const width = col_width + right_width;
@@ -200,8 +232,9 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
         }
         case 4: {
             std::string target_name = (cache_inspect_type_ == 0) ? "L1 ICache" : "L1 DCache";
-            return section_line(std::format("Set & Way Inspector — {} Set #{:02d} (0-15)",
-                                            target_name, cache_inspect_set_),
+            return section_line(std::format("Set & Way Inspector — {} Set #{:02d} (0-{:02d})",
+                                            target_name, cache_inspect_set_,
+                                            active_cache_set_count() - 1),
                                 width);
         }
         case 5:
@@ -214,6 +247,7 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
         case 7:
         case 8:
         case 9:
+            if (logical_row - 6 >= active_cache_way_count()) return format_to_width("", width);
             return render_cache_way_row(cpu, logical_row - 6, cache_inspect_set_,
                                         cache_inspect_way_, cache_inspect_type_, width);
         case 10: {
@@ -244,14 +278,18 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
         case 12:
         case 13:
         case 14: {
-            int const base_set = (logical_row - 12) * 6;
+            constexpr int kSetsPerRow = 6;
+            constexpr int kVisibleSets = 3 * kSetsPerRow;
+            int const base_set = (cache_inspect_set_ / kVisibleSets) * kVisibleSets +
+                                 (logical_row - 12) * kSetsPerRow;
             bool is_ic = (cache_inspect_type_ == 0);
             const auto& target_cache =
-                is_ic ? static_cast<const simrv::cache::BaseCache<64, 32, 4>&>(ic)
-                      : static_cast<const simrv::cache::BaseCache<64, 32, 4>&>(dc);
+                is_ic ? static_cast<const simrv::cache::BaseCache<512, 32, 8>&>(ic)
+                      : static_cast<const simrv::cache::BaseCache<512, 32, 8>&>(dc);
 
             std::string sets_row;
-            for (int s = base_set; s < base_set + 6 && s < 16; ++s) {
+            for (int s = base_set; s < base_set + kSetsPerRow &&
+                                      s < static_cast<int>(target_cache.set_count()); ++s) {
                 bool const is_selected = (s == cache_inspect_set_);
                 bool const is_last = (static_cast<uint32_t>(s) == target_cache.last_accessed_set());
                 bool const was_hit = target_cache.last_access_was_hit();
@@ -267,7 +305,7 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
                 }
 
                 std::string s_str = set_prefix;
-                for (uint32_t w = 0; w < 4; ++w) {
+                for (uint32_t w = 0; w < target_cache.associativity(); ++w) {
                     s_str += target_cache.is_line_valid(s, w)
                                  ? std::format("{}#\033[0m", kThemeMint)
                                  : std::format("{}.\033[0m", kThemeMuted);
@@ -279,8 +317,8 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
         }
         case 15: {
             bool is_ic = (cache_inspect_type_ == 0);
-            const auto& cache = is_ic ? static_cast<const simrv::cache::BaseCache<64, 32, 4>&>(ic)
-                                      : static_cast<const simrv::cache::BaseCache<64, 32, 4>&>(dc);
+            const auto& cache = is_ic ? static_cast<const simrv::cache::BaseCache<512, 32, 8>&>(ic)
+                                      : static_cast<const simrv::cache::BaseCache<512, 32, 8>&>(dc);
             Address ev_tag = cache.last_evicted_tag();
             std::string ev_str =
                 (ev_tag == ~Address{0}) ? "None" : std::format("0x{:016x}", ev_tag);

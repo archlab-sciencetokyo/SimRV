@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <format>
 #include <string>
 #include <vector>
@@ -54,11 +53,11 @@ auto LeftPane::get_total_rows(int width) -> int {
         return static_cast<int>(get_explain_rows(width).size());
     }
     bool const single_column = is_single_column(width);
-    int base_rows = machine_.runtime_profile.is_cycle_mode() ? 43 : 35;
-    if (single_column) {
-        base_rows += 16;
-    }
-    int debug_rows = machine_.s_debug_mode ? 4 : 0;
+    // Semantic machine state needs five rows, unlike the legacy CSR dump.  The
+    // pipeline page retains its complete 25-row canvas; single-column register
+    // pages omit machine state entirely.
+    int base_rows = performance_start_row(single_column) + performance_row_count();
+    int debug_rows = machine_.s_debug_mode ? debug_state_row_count() : 0;
     return base_rows + debug_rows;
 }
 
@@ -103,42 +102,19 @@ auto LeftPane::render_pair(const std::string& l1, const std::string& v1, const c
            format_to_width(make_field(l2, v2, c2, label_pad), right_width);
 }
 
-auto LeftPane::get_running_label_start_row() const -> int {
-    int const top_view_height = (visible_rows_ > 12) ? std::min(24, visible_rows_ - 12) : 10;
-    return std::max(0, (top_view_height - 3) / 2);
-}
+auto LeftPane::get_running_label_start_row() const -> int { return 0; }
 
 auto LeftPane::render_active_spinner(int logical_row, int width) -> std::string {
-    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                      std::chrono::steady_clock::now().time_since_epoch())
-                      .count();
-    constexpr std::array<const char*, 10> spinner = {"⠋", "⠙", "⠹", "⠸", "⠼",
-                                                     "⠴", "⠦", "⠧", "⠇", "⠏"};
-    std::string spin = spinner.at((static_cast<std::size_t>(now_ms / 80)) % 10);
-
-    int const start_row = get_running_label_start_row();
-
-    if (logical_row == start_row) {
-        std::string text =
-            std::format("{}●\033[0m \033[1m{}SIMULATOR ACTIVE\033[0m", kThemePink, kThemePink);
-        int spaces = std::max(0, (width - 18) / 2);
-        std::string line = std::string(spaces, ' ') + text;
-        return format_to_width(line, width);
+    if (logical_row == get_running_label_start_row()) {
+        const std::string banner =
+            std::format("{}● RUNNING\033[0m {}· sampled state\033[0m  {}Ctrl-P\033[0m pause",
+                        kThemeMint, kThemeMuted, kThemeSky);
+        const int left_padding = std::max(0, (width - get_display_width(banner)) / 2);
+        return format_to_width(std::string(static_cast<std::size_t>(left_padding), ' ') + banner,
+                               width);
     }
-    if (logical_row == start_row + 1) {
-        std::string text =
-            std::format("[  {}{}\033[0m  Executing instructions... ]", kThemeMint, spin);
-        int spaces = std::max(0, (width - 33) / 2);
-        std::string line = std::string(spaces, ' ') + text;
-        return format_to_width(line, width);
-    }
-    if (logical_row == start_row + 2) {
-        std::string text =
-            std::format("Press \033[1m{}[Ctrl-P]\033[0m or \033[1m{}[Click Here]\033[0m to pause",
-                        kThemeSky, kThemeSky);
-        int spaces = std::max(0, (width - 39) / 2);
-        std::string line = std::string(spaces, ' ') + text;
-        return format_to_width(line, width);
+    if (logical_row >= 0 && static_cast<std::size_t>(logical_row) < cached_left_rows_.size()) {
+        return cached_left_rows_.at(static_cast<std::size_t>(logical_row));
     }
     return format_to_width("", width);
 }
@@ -146,22 +122,7 @@ auto LeftPane::render_active_spinner(int logical_row, int width) -> std::string 
 auto LeftPane::is_running_label_click(int logical_row, int col, int width) const -> bool {
     int const start_row = get_running_label_start_row();
 
-    if (logical_row == start_row) {
-        int text_len = 18;  // "● SIMULATOR ACTIVE"
-        int spaces = std::max(0, (width - text_len) / 2);
-        return col >= (spaces - 1) && col <= (spaces + text_len + 1);
-    }
-    if (logical_row == start_row + 1) {
-        int text_len = 33;  // "[  ⠋  Executing instructions... ]"
-        int spaces = std::max(0, (width - text_len) / 2);
-        return col >= (spaces - 1) && col <= (spaces + text_len + 1);
-    }
-    if (logical_row == start_row + 2) {
-        int text_len = 39;  // "Press [Ctrl-P] or [Click Here] to pause"
-        int spaces = std::max(0, (width - text_len) / 2);
-        return col >= (spaces - 1) && col <= (spaces + text_len + 1);
-    }
-    return false;
+    return logical_row == start_row && col >= 0 && col < width;
 }
 
 void LeftPane::set_page(TuiRegPage page) {
@@ -621,19 +582,12 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
         return format_to_width("", width);
     }
 
-    bool const single_column = is_single_column(width);
-    int const max_active_row = single_column ? 40 : 24;
-
     bool show_spinner = !paused_;
     if (show_spinner && machine_.tui) {
         uint64_t delay = machine_.tui->step_delay_us_.load(std::memory_order_relaxed);
         if (delay >= 10000) {
             show_spinner = false;
         }
-    }
-
-    if (show_spinner && logical_row <= max_active_row) {
-        return render_active_spinner(logical_row, width);
     }
 
     constexpr int kStackCanvasWidth = 104;
@@ -658,15 +612,28 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
         return res;
     };
 
-    if (logical_row <= max_active_row) {
-        std::string res = finish_row(get_row_uncached(logical_row, render_width));
-        if (static_cast<std::size_t>(logical_row) < cached_left_rows_.size()) {
-            cached_left_rows_.at(static_cast<std::size_t>(logical_row)) = res;
+    if (show_spinner) {
+        // Keep the low-rate dashboard live while the volatile register and pipeline canvas is
+        // sampled.  This preserves useful throughput feedback without repainting every changing
+        // architectural value at high simulator rates.
+        const int stats_start = performance_start_row(is_single_column(width));
+        const int stats_end = stats_start + performance_row_count();
+        if (logical_row >= stats_start && logical_row < stats_end) {
+            const int stats_row = logical_row - stats_start;
+            const std::string stats = machine_.runtime_profile.is_cycle_mode()
+                                          ? render_cycle_accurate_stats(current_cpu(), stats_row, width)
+                                          : render_machine_performance_stats(current_cpu(), stats_row,
+                                                                             width);
+            return finish_row(stats);
         }
-        return res;
+        return render_active_spinner(logical_row, width);
     }
 
-    return finish_row(get_row_uncached(logical_row, render_width));
+    std::string res = finish_row(get_row_uncached(logical_row, render_width));
+    if (static_cast<std::size_t>(logical_row) < cached_left_rows_.size()) {
+        cached_left_rows_.at(static_cast<std::size_t>(logical_row)) = res;
+    }
+    return res;
 }
 
 void LeftPane::update_cache() {

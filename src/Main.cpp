@@ -207,20 +207,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             }
         }
         if (sim_machine->s_tuimode) {
-            sim_machine->s_multithreaded = true;
             auto* machine_ptr = sim_machine.get();
             std::thread sim_thread([machine_ptr]() -> void { machine_ptr->run(); });
-
-            while (machine_ptr->is_running()) {
-                if (machine_ptr->s_tuimode) {
-                    if (simrv::tui::g_resized) {
-                        machine_ptr->tui->render(true);
-                    }
-                    machine_ptr->tui->update();
-                    machine_ptr->tui->render(false);
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(33));  // ~30 FPS
-            }
 
             if (sim_thread.joinable()) {
                 sim_thread.join();

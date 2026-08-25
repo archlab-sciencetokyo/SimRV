@@ -14,7 +14,8 @@ SimRV is not RISC-V certified. `RV32GCBV` and `RV64GCBV` are implementation targ
 ## Quick Start
 
 ### Prerequisites
-- **Clang 20+** (default in CMake presets) or **GCC 14+** (required for full C++23 feature support)
+- **Clang 20+** or **GCC 15+** (required for the C++23 baseline). For current validation,
+  prefer stable Clang 21+ and GCC 15+; use GCC 16+ once supplied by the host distribution.
 - **CMake 3.20+** & **Ninja**
 
 ### Build
@@ -28,6 +29,11 @@ cmake --build --preset rv64-release
 cmake --preset rv32-release
 cmake --build --preset rv32-release
 ```
+
+Use `rv64-clang-release` or `rv64-gcc-release` to make the host compiler explicit. These presets
+resolve `clang`/`clang++` and `gcc`/`g++` from `PATH`; they do not download or pin a toolchain.
+If a host ccache wrapper has no writable cache, prefix configure and build commands with
+`CCACHE_DISABLE=1`.
 
 ### Run
 
@@ -100,7 +106,8 @@ RV32GCBV and RV64GCBV are implementation-target names, not complete conformance 
 See [RISC-V compliance scope](docs/RISCV_COMPLIANCE.md) for the precise architectural boundary,
 SBI/OpenSBI distinction, and the evidence required before treating a feature as verified. The
 profile names are implementation targets and do not by themselves claim RISC-V certification.
-The cross-subsystem qualification status is summarized in the [2.0 support matrix](docs/SUPPORT_MATRIX.md).
+The cross-subsystem qualification status is summarized in the
+[release support boundary](docs/RELEASE.md#support-and-qualification-boundary).
 
 | Extension | Status | Description & Features |
 | --- | --- | --- |
@@ -187,7 +194,7 @@ Pre-compiled standalone binaries (`SimRV`) are available under GitHub Releases f
 - `src/`: Core implementation C++ units
 - `include/simrv/`: Simulator headers & public API
 - `scripts/`: Regression, ISA testing, and Linux image build helpers
-- `docs/`: Architecture and design notes (`docs/ARCHITECTURE.md`, `docs/BAREMETAL_GUIDE.md`)
+- `docs/`: Focused architecture, user, contributor, compliance, and release guides
 - `CHANGELOG.md`: Version release log
 - `docs/RELEASE.md`: 2.0 support contract, validation matrix, and publishing checklist
 - `docs/TUI.md`: TUI input focus, rendering layers, and test coverage

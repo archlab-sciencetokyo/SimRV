@@ -7,6 +7,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
+#include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
 
@@ -14,7 +15,23 @@ namespace simrv::tui::modals {
 
 namespace {
 
-constexpr int kSettingCount = 12;
+constexpr int kSettingCount = 13;
+
+void assign_pipeline(SysConfigDraft& draft, const simrv::pipeline::CpuModelConfig& model) {
+    const auto& cfg = model.pipeline;
+    draft.pipeline_type = static_cast<uint8_t>(cfg.pipeline_type);
+    draft.mul_latency = cfg.mul_latency;
+    draft.div_latency = cfg.div_latency;
+    draft.fp_alu_latency = cfg.fp_alu_latency;
+    draft.fp_div_latency = cfg.fp_div_latency;
+    draft.csr_flush_penalty = cfg.csr_flush_penalty;
+    draft.fence_flush_penalty = cfg.fence_flush_penalty;
+    draft.enable_forwarding = cfg.enable_forwarding;
+    draft.bpred_type = static_cast<uint8_t>(cfg.branch_predictor.type);
+    draft.bht_entries = cfg.branch_predictor.bht_entries;
+    draft.btb_entries = cfg.branch_predictor.btb_entries;
+    draft.ras_entries = cfg.branch_predictor.ras_entries;
+}
 
 void assign_numeric(SysConfigDraft& draft, int cursor, uint32_t value) {
     switch (cursor) {
@@ -56,6 +73,7 @@ void SystemConfigModal::open(SysConfigDraft& draft, int& cursor,
                              const simrv::core::Machine& machine) {
     cursor = 0;
     draft.cycle_accurate = machine.runtime_profile.is_cycle_mode();
+    draft.profile = static_cast<uint8_t>(machine.cpu.cpu_model_config.profile);
     const auto& cfg = machine.cpu.pipeline_sim.config;
     draft.pipeline_type = static_cast<uint8_t>(cfg.pipeline_type);
     draft.mul_latency = cfg.mul_latency;
@@ -83,6 +101,15 @@ void SystemConfigModal::adjust_setting(SysConfigDraft& draft, int index, int dir
     if (!draft.cycle_accurate) return;
     if (index == 0) {
         draft.pipeline_type = static_cast<uint8_t>(draft.pipeline_type == 0 ? 1 : 0);
+        return;
+    }
+    if (index == 12) {
+        constexpr int kProfiles = 4;
+        draft.profile = static_cast<uint8_t>((draft.profile + dir + kProfiles) % kProfiles);
+        const auto profile = static_cast<simrv::pipeline::CpuModelProfile>(draft.profile);
+        if (profile != simrv::pipeline::CpuModelProfile::Custom) {
+            assign_pipeline(draft, simrv::pipeline::make_cpu_model_profile(profile));
+        }
         return;
     }
     if (index == 7) {
@@ -151,8 +178,13 @@ void SystemConfigModal::toggle_setting(SysConfigDraft& draft, int index) {
 
 auto SystemConfigModal::submit(const SysConfigDraft& draft, simrv::core::Machine& machine) -> bool {
     if (!draft.cycle_accurate) return true;
-    auto apply = [&](simrv::core::CPU& cpu) {
-        auto& cfg = cpu.pipeline_sim.config;
+    auto model = machine.cpu.cpu_model_config;
+    const auto selected_profile = static_cast<simrv::pipeline::CpuModelProfile>(draft.profile);
+    if (selected_profile != simrv::pipeline::CpuModelProfile::Custom) {
+        model = simrv::pipeline::make_cpu_model_profile(selected_profile);
+    }
+    auto& cfg = model.pipeline;
+    {
         cfg.pipeline_type = static_cast<simrv::pipeline::PipelineType>(draft.pipeline_type);
         cfg.mul_latency = draft.mul_latency;
         cfg.div_latency = draft.div_latency;
@@ -166,9 +198,18 @@ auto SystemConfigModal::submit(const SysConfigDraft& draft, simrv::core::Machine
         cfg.branch_predictor.bht_entries = draft.bht_entries;
         cfg.branch_predictor.btb_entries = draft.btb_entries;
         cfg.branch_predictor.ras_entries = draft.ras_entries;
-        cpu.branch_predictor.configure(cfg.branch_predictor);
-    };
+    }
+    // Explicit field editing retains the named profile only while it remains an exact preset.
+    model.profile = selected_profile;
+    if (!model.validate()) return false;
     machine.s_pipeline_type = static_cast<simrv::pipeline::PipelineType>(draft.pipeline_type);
+    auto apply = [&](simrv::core::CPU& cpu) {
+        // Keep the modal link-light: the full reset/reboot path owns CA-local reconstruction.
+        // The current paused session receives the same policy projection for inspection.
+        cpu.cpu_model_config = model;
+        cpu.pipeline_sim.config = model.pipeline;
+        cpu.branch_predictor.configure(cpu.pipeline_sim.config.branch_predictor);
+    };
     apply(machine.cpu);
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
         apply(machine.hart(hart));
@@ -220,11 +261,23 @@ void SystemConfigModal::render(std::vector<std::string>& content_rows,
         {"BHT capacity", entries(draft.bht_entries, 9)},
         {"BTB capacity", entries(draft.btb_entries, 10)},
         {"RAS capacity", entries(draft.ras_entries, 11)},
+        {"FPGA core profile", std::string(simrv::pipeline::cpu_model_profile_name(
+                                  static_cast<simrv::pipeline::CpuModelProfile>(draft.profile)))},
     });
     add_row(build_section_divider("Authoritative CA Policy", kThemeMint));
     for (size_t i = 0; i < settings.size(); ++i) {
         const bool selected = static_cast<int>(i) == cursor;
         add_row(build_menu_item_row(settings[i].name, settings[i].value, selected, 29));
+    }
+    const auto profile = static_cast<simrv::pipeline::CpuModelProfile>(draft.profile);
+    if (profile != simrv::pipeline::CpuModelProfile::Custom) {
+        const auto model = simrv::pipeline::make_cpu_model_profile(profile);
+        add_row(std::format("{}BRAM L1: I {} KiB/{}-way · D {} KiB/{}-way · {} B lines\033[0m",
+                            kThemeMuted, model.instruction_cache.capacity_bytes / 1024,
+                            model.instruction_cache.associativity,
+                            model.data_cache.capacity_bytes / 1024,
+                            model.data_cache.associativity,
+                            model.instruction_cache.line_bytes));
     }
 }
 

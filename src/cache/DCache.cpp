@@ -18,7 +18,7 @@ auto DCache::read(Address addr, Word& data, Instruction funct3) -> bool {
     const unsigned size_bytes = 1u << (funct3 & 0x3u);
     last_accessed_set_ = set_idx;
 
-    for (uint32_t w = 0; w < kWays; ++w) {
+    for (uint32_t w = 0; w < associativity(); ++w) {
         auto& line = sets_[set_idx][w];
         if (line.valid && line.tag == tag && line.state != simrv::memory::CoherenceState::None) {
             const uint32_t byte_offset = addr & (kLineBytes - 1u);
@@ -59,7 +59,7 @@ auto DCache::write(Address addr, Word data, Instruction funct3) -> bool {
         const uint32_t set_idx = get_set_index(addr);
         const Address tag = get_tag(addr);
         last_accessed_set_ = set_idx;
-        for (uint32_t w = 0; w < kWays; ++w) {
+        for (uint32_t w = 0; w < associativity(); ++w) {
             auto& line = sets_[set_idx][w];
             if (line.valid && line.tag == tag) {
                 // Must be in Trunk state to write directly without bus transaction
@@ -67,6 +67,7 @@ auto DCache::write(Address addr, Word data, Instruction funct3) -> bool {
                     std::memcpy(line.data.data() + byte_offset, &data, size_bytes);
                     line.dirty = true;
                     line.last_used = ++access_tick_;
+                    ++hits_;
                     last_access_was_hit_ = true;
                     last_hit_way_ = w;
                     return true;
@@ -75,12 +76,14 @@ auto DCache::write(Address addr, Word data, Instruction funct3) -> bool {
                 break;
             }
         }
+        ++misses_;
         last_access_was_hit_ = false;
         last_hit_way_ = 0xFFFFFFFF;
         return false;
     }
 
     // Crosses cache line boundary
+    ++misses_;
     last_access_was_hit_ = false;
     last_hit_way_ = 0xFFFFFFFF;
     return false;
@@ -93,7 +96,7 @@ auto DCache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::T
     const uint32_t set_idx = get_set_index(line_base);
     const Address tag = get_tag(line_base);
 
-    for (uint32_t w = 0; w < kWays; ++w) {
+    for (uint32_t w = 0; w < associativity(); ++w) {
         auto& line = sets_[set_idx][w];
         if (line.valid && line.tag == tag) {
             const bool was_dirty = line.dirty;

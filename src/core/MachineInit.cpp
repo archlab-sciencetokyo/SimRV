@@ -238,10 +238,14 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
 
 auto Machine::initialize() -> int {
     if (!s_fn_cpuconfig.empty()) {
-        if (!simrv::core::load_cpu_config(s_fn_cpuconfig, cpu.pipeline_sim.config)) {
+        auto model = cpu.cpu_model_config;
+        if (!simrv::core::load_cpu_config(s_fn_cpuconfig, model)) {
             simrv::log::error("Failed to load CPU configuration file: {}", s_fn_cpuconfig);
             return 1;
         }
+        cpu.apply_cpu_model_config(model);
+        memory_.system_bus().configure_timing(model.interconnect.request_latency,
+                                              model.interconnect.response_latency);
     }
 
     rtc = std::make_unique<simrv::Rtc>(*this);
@@ -428,7 +432,7 @@ auto Machine::initialize() -> int {
         for (uint32_t i = 1; i < s_num_harts; ++i) {
             auto sec_cpu = std::make_unique<simrv::core::CPU>();
             sec_cpu->machine_ = this;
-            sec_cpu->pipeline_sim.config = cpu.pipeline_sim.config;
+            sec_cpu->apply_cpu_model_config(cpu.cpu_model_config);
             sec_cpu->state().mhartid = i;
             sec_cpu->state().misa = initial_misa;
             sec_cpu->state().initialize_lower_xlen_fields();
@@ -668,7 +672,7 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
         for (uint32_t i = 1; i < s_num_harts; ++i) {
             auto sec_cpu = std::make_unique<simrv::core::CPU>();
             sec_cpu->machine_ = this;
-            sec_cpu->pipeline_sim.config = cpu.pipeline_sim.config;
+            sec_cpu->apply_cpu_model_config(cpu.cpu_model_config);
             sec_cpu->state().mhartid = i;
             sec_cpu->state().misa = initial_misa;
             sec_cpu->state().initialize_lower_xlen_fields();

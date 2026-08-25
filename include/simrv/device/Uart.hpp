@@ -36,7 +36,10 @@ class Uart : public memory::TileLinkNode {
     [[nodiscard]] auto size() const -> Address override { return simrv::mmio::kUartSize; }
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool override;
 
-    void non_tui_poll_input();
+    /// Consume a pending RX-state transition and publish it to the guest PLIC. Reader threads
+    /// only enqueue bytes and mark the transition; interrupt-controller state stays owned by the
+    /// simulation thread.
+    void service_interrupts();
     void start_input_thread();
     void stop_input_thread();
     [[nodiscard]] auto is_input_thread_running() const -> bool { return input_thread_.joinable(); }
@@ -65,6 +68,7 @@ class Uart : public memory::TileLinkNode {
 
     std::queue<uint8_t> rx_fifo_;
     std::atomic<bool> rx_ready_{false};
+    std::atomic<bool> irq_update_pending_{false};
     mutable std::mutex rx_mutex_;
     std::thread input_thread_;
     std::atomic<bool> input_thread_stop_{false};

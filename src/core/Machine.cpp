@@ -226,7 +226,7 @@ void Machine::run() {
                 is_running_ = false;
             }
             if (!s_tuimode && uart && !uart->is_input_thread_running()) {
-                uart->non_tui_poll_input();
+                uart->service_interrupts();
             }
             continue;
         }
@@ -247,11 +247,7 @@ void Machine::run() {
         }
 
         if (gdb_stub && gdb_stub->is_connected()) {
-            const bool hit_ebreak = (cpu.pipeline_context.opcode == simrv::isa::Opcode::System) &&
-                                    (cpu.pipeline_context.funct12 ==
-                                     static_cast<Word>(simrv::isa::Funct12Priv::Ebreak)) &&
-                                    !cpu.pipeline_context.pending_exception.has_value();
-            if (gdb_stub->single_step() || hit_ebreak) {
+            if (gdb_stub->single_step()) {
                 gdb_stub->notify_breakpoint(*this);
             } else {
                 gdb_stub->poll(*this);
@@ -266,14 +262,6 @@ void Machine::run() {
             }
         }
 
-        if (s_tuimode && tui) {
-            const bool hit_ebreak = (cpu.pipeline_context.opcode == simrv::isa::Opcode::System) &&
-                                    (cpu.pipeline_context.funct12 ==
-                                     static_cast<Word>(simrv::isa::Funct12Priv::Ebreak));
-            if (simrv::compiler::unlikely(hit_ebreak)) {
-                tui->pause_loop();
-            }
-        }
     }
 
     // Stop background SMP worker threads
@@ -428,10 +416,10 @@ void Machine::finalize_cycle_tohost() {
 Machine::~Machine() = default;
 
 void Machine::advance_ca_global_cycle() {
-    cpu.run_cycle(*this);
+    cpu.advance_ca_cycle(*this);
     for (auto& secondary : secondary_harts_) {
         if (secondary->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
-            secondary->run_cycle(*this);
+            secondary->advance_ca_cycle(*this);
         }
     }
 

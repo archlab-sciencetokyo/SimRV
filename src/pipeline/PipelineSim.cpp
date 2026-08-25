@@ -88,18 +88,17 @@ void PipelineSim::update_stats(const PipelineCycleMetrics& metrics) noexcept {
     const bool stalled = metrics.fetch_stalled || metrics.decode_stalled ||
                          metrics.execute_stalled || metrics.memory_stalled ||
                          metrics.writeback_stalled;
-    if (stalled) ++ca_stats_.stall_cycles;
-    if (metrics.icache_miss && metrics.fetch_stalled) ++ca_stats_.icache_stalls;
-    if (metrics.dcache_miss && (metrics.memory_stalled || metrics.writeback_stalled)) {
-        ++ca_stats_.dcache_stalls;
-    }
-    if (metrics.tlb_miss && stalled) ++ca_stats_.tlb_stalls;
-    if (metrics.execute_stalled) ++ca_stats_.structural_stalls;
-    if (metrics.data_hazard_stall) ++ca_stats_.data_hazard_stalls;
-    if (metrics.control_flush) {
-        ++ca_stats_.control_hazard_bubbles;
-        ++ca_stats_.bubble_cycles;
-    }
+    // These counters are updated for every CA transition.  Boolean-to-integer accumulation keeps
+    // the fast engine's accounting branch-free while preserving the one-count-per-cycle model.
+    ca_stats_.stall_cycles += stalled;
+    ca_stats_.icache_stalls += metrics.icache_miss && metrics.fetch_stalled;
+    ca_stats_.dcache_stalls +=
+        metrics.dcache_miss && (metrics.memory_stalled || metrics.writeback_stalled);
+    ca_stats_.tlb_stalls += metrics.tlb_miss && stalled;
+    ca_stats_.structural_stalls += metrics.execute_stalled;
+    ca_stats_.data_hazard_stalls += metrics.data_hazard_stall;
+    ca_stats_.control_hazard_bubbles += metrics.control_flush;
+    ca_stats_.bubble_cycles += metrics.control_flush;
 }
 
 // Getters for statistics

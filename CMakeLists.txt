@@ -86,6 +86,12 @@ if(NOT "cxx_std_23" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
   message(FATAL_ERROR "${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} does not support required C++23 features")
 endif()
 
+# GCC 15 is the minimum supported GNU toolchain. It is the GNU baseline validated for this
+# C++23 codebase; use a current Clang release when GNU 15+ is unavailable.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 15)
+  message(FATAL_ERROR "GCC 15 or newer is required (found ${CMAKE_CXX_COMPILER_VERSION})")
+endif()
+
 # XLEN option (32 or 64) – compile-time selection
 option(SIMRV_XLEN "Target XLEN (32 or 64)" 32)
 set_property(CACHE SIMRV_XLEN PROPERTY STRINGS 32 64)
@@ -259,20 +265,40 @@ if(SIMRV_ENABLE_TSAN)
 endif()
 
 include(CheckCXXCompilerFlag)
+option(SIMRV_NATIVE_HOST_OPTIMIZATIONS
+       "Tune a Release build for the host CPU; do not use for redistributable binaries" OFF)
 check_cxx_compiler_flag("-frounding-math" COMPILER_SUPPORTS_FROUNDING_MATH)
 if(COMPILER_SUPPORTS_FROUNDING_MATH)
-  target_compile_options(SimRV PRIVATE -frounding-math)
+  # Only the host-FP execution units alter the floating-point environment.  Applying strict
+  # rounding semantics to the entire simulator prevents useful optimization in the integer,
+  # memory, and scheduling hot paths.
+  set_source_files_properties(
+    src/execute/ExecuteUnitFloat.cpp
+    src/execute/vector/VectorFloat.cpp
+    PROPERTIES COMPILE_OPTIONS "-frounding-math"
+  )
 endif()
 
 # Release optimizations and Link-Time Optimization (LTO/IPO)
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
   target_compile_options(SimRV PRIVATE -O3)
   
-  include(CheckCXXCompilerFlag)
-  check_cxx_compiler_flag("-march=x86-64-v3" COMPILER_SUPPORTS_MARCH_X86_64_V3)
-  if(COMPILER_SUPPORTS_MARCH_X86_64_V3)
-    target_compile_options(SimRV PRIVATE -march=x86-64-v3)
-    message(STATUS "x86-64-v3 instruction set architecture (AVX2/FMA/BMI) enabled.")
+  if(SIMRV_NATIVE_HOST_OPTIMIZATIONS)
+    check_cxx_compiler_flag("-march=native" COMPILER_SUPPORTS_MARCH_NATIVE)
+    check_cxx_compiler_flag("-mtune=native" COMPILER_SUPPORTS_MTUNE_NATIVE)
+    if(COMPILER_SUPPORTS_MARCH_NATIVE)
+      target_compile_options(SimRV PRIVATE -march=native)
+    endif()
+    if(COMPILER_SUPPORTS_MTUNE_NATIVE)
+      target_compile_options(SimRV PRIVATE -mtune=native)
+    endif()
+    message(STATUS "Native-host Release tuning enabled; binary is not portable.")
+  else()
+    check_cxx_compiler_flag("-march=x86-64-v3" COMPILER_SUPPORTS_MARCH_X86_64_V3)
+    if(COMPILER_SUPPORTS_MARCH_X86_64_V3)
+      target_compile_options(SimRV PRIVATE -march=x86-64-v3)
+      message(STATUS "x86-64-v3 instruction set architecture (AVX2/FMA/BMI) enabled.")
+    endif()
   endif()
   
   include(CheckIPOSupported)

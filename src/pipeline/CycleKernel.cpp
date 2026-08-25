@@ -1,6 +1,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
+#include "simrv/tui/Tui.hpp"
 
 namespace simrv::core {
 
@@ -64,8 +65,14 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     auto& pipe = ca_pipeline;
     const bool three_stage =
         pipeline_sim.config.pipeline_type == pipeline::PipelineType::ThreeStage;
+    // The retired slot is presentation state: fast CA only consumes the retirement bit, while
+    // observable snapshots and TUI tracing need the full instruction context.  Avoid copying a
+    // complete PipelineContext on every retirement when neither consumer is active.
+    const bool retain_retired_slot =
+        pipeline_sim.config.record_snapshots &&
+        (!machine.s_tuimode || (machine.tui && machine.tui->captures_execution_detail()));
     pipe.retired_this_cycle = false;
-    pipe.retired.clear();
+    if (retain_retired_slot) pipe.retired.clear();
     pipe.data_hazard_stall = false;
     pipe.control_flush = false;
     ca_state.retired_this_cycle = false;
@@ -190,8 +197,8 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             return;
         }
         const bool was_serializing = writeback.serializing;
-        pipe.retired = writeback;
-        writeback.clear();
+        if (retain_retired_slot) pipe.retired = writeback;
+        writeback.invalidate();
         pipe.retired_this_cycle = true;
         ca_state.retired_this_cycle = true;
         if (was_serializing) {
@@ -205,7 +212,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     if (!three_stage && memory.valid && !writeback.valid) {
         if (memory.serializing) {
             writeback = memory;
-            memory.clear();
+            memory.invalidate();
         } else if (memory.remaining_latency > 0) {
             --memory.remaining_latency;
         } else {
@@ -228,7 +235,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             }
             if (memory.remaining_latency == 0) {
                 writeback = memory;
-                memory.clear();
+                memory.invalidate();
             }
         }
     }
@@ -286,7 +293,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 }
             }
             memory = execute;
-            execute.clear();
+            execute.invalidate();
         }
     }
 
@@ -353,7 +360,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                             branch_predictor.restore_speculation(decode.prediction);
                             // The resolving instruction itself occupies the combined ID/EX stage.
                             // Only the younger fetch-stage instruction is squashed.
-                            pipe.fetch.clear();
+                            pipe.fetch.invalidate();
                             pipe.control_flush = true;
                             pipe.fetch_pc = target;
                             cancel_port(simrv::memory::TlPort::Instruction);
@@ -373,7 +380,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                         decode.remaining_latency = pipeline_sim.config.fence_flush_penalty;
                     }
                     writeback = decode;
-                    decode.clear();
+                    decode.invalidate();
                 }
             } else {
                 (void)run_with_context(decode, [&] {
@@ -382,7 +389,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     return !pipeline_context.pending_exception.has_value();
                 });
                 execute = decode;
-                decode.clear();
+                decode.invalidate();
 
                 if (pipeline::operation::is_multiply(execute.context.op_id)) {
                     execute.remaining_latency = latency_minus_one(pipeline_sim.config.mul_latency);
@@ -409,7 +416,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     }
     if (fetch.valid && fetch.remaining_latency == 0 && !decode.valid) {
         decode = fetch;
-        fetch.clear();
+        fetch.invalidate();
     }
 
     if (!fetch.valid && !pipe.frontend_blocked) {

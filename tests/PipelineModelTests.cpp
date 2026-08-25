@@ -5,10 +5,12 @@
 #include <cstdlib>
 #include <iostream>
 
+#include "simrv/cache/BaseCache.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/isa/Base.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
+#include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/pipeline/RetirementEffects.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -77,10 +79,61 @@ void test_pipeline_factory_and_names() {
     TEST_CHECK(simrv::pipeline::pipeline_type_name(PipelineType::ThreeStage) == "3-Stage In-Order");
 }
 
+void test_cpu_model_profiles_and_validation() {
+    using simrv::pipeline::CpuModelProfile;
+    using simrv::pipeline::PipelineType;
+    const auto tiny = simrv::pipeline::make_cpu_model_profile(CpuModelProfile::Tiny);
+    TEST_CHECK(tiny.validate().has_value());
+    TEST_CHECK(tiny.pipeline.pipeline_type == PipelineType::ThreeStage);
+    TEST_CHECK(!tiny.pipeline.enable_forwarding);
+    TEST_CHECK(tiny.instruction_cache.capacity_bytes == 2048);
+    TEST_CHECK(tiny.instruction_cache.associativity == 1);
+
+    const auto balanced = simrv::pipeline::make_cpu_model_profile(CpuModelProfile::Balanced);
+    TEST_CHECK(balanced.validate().has_value());
+    TEST_CHECK(balanced.pipeline.pipeline_type == PipelineType::FiveStage);
+    TEST_CHECK(balanced.instruction_cache.capacity_bytes == 4096);
+    TEST_CHECK(balanced.instruction_cache.associativity == 2);
+
+    const auto performance = simrv::pipeline::make_cpu_model_profile(CpuModelProfile::Performance);
+    TEST_CHECK(performance.validate().has_value());
+    TEST_CHECK(performance.instruction_cache.capacity_bytes == 16384);
+    TEST_CHECK(performance.instruction_cache.associativity == 4);
+
+    auto invalid = balanced;
+    invalid.data_cache.line_bytes = 64;
+    TEST_CHECK(!invalid.validate().has_value());
+    invalid = balanced;
+    invalid.instruction_cache.capacity_bytes = 3072;
+    TEST_CHECK(!invalid.validate().has_value());
+    TEST_CHECK(simrv::pipeline::parse_cpu_model_profile("performance") ==
+               CpuModelProfile::Performance);
+    TEST_CHECK(!simrv::pipeline::parse_cpu_model_profile("superscalar").has_value());
+}
+
+void test_runtime_cache_geometry() {
+    simrv::cache::BaseCache<512, 32, 8> cache;
+    TEST_CHECK(cache.configure(2048, 1));
+    TEST_CHECK(cache.capacity_bytes() == 2048);
+    TEST_CHECK(cache.associativity() == 1);
+    TEST_CHECK(cache.set_count() == 64);
+    TEST_CHECK(cache.configure(16384, 4));
+    TEST_CHECK(cache.capacity_bytes() == 16384);
+    TEST_CHECK(cache.associativity() == 4);
+    TEST_CHECK(cache.set_count() == 128);
+    TEST_CHECK(!cache.configure(4096, 3));
+    TEST_CHECK(!cache.configure(32768, 4));
+}
+
 void test_runtime_profile_policy() {
     using simrv::core::ExecutionEngine;
     using simrv::core::InteractionMode;
     using simrv::core::RuntimeProfile;
+
+    TEST_CHECK(!simrv::core::is_cycle_engine(ExecutionEngine::InstructionFast));
+    TEST_CHECK(simrv::core::is_cycle_engine(ExecutionEngine::CycleFast));
+    TEST_CHECK(simrv::core::is_observable_engine(ExecutionEngine::CycleObservable));
+    TEST_CHECK(simrv::core::is_fast_engine(ExecutionEngine::InstructionFast));
 
     RuntimeProfile profile{};
     TEST_CHECK(profile.engine == ExecutionEngine::InstructionFast);
@@ -179,6 +232,8 @@ auto main() -> int {
     test_operation_traits();
     test_writeback_effects();
     test_pipeline_factory_and_names();
+    test_cpu_model_profiles_and_validation();
+    test_runtime_cache_geometry();
     test_runtime_profile_policy();
     test_pipeline_sim_wrapper();
     std::cout << "=== All Pipeline Model Tests Passed Successfully ===\n";

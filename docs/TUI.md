@@ -9,6 +9,11 @@ The TUI is divided into four layers:
 
 ## Input and focus
 
+The dedicated UI thread exclusively owns stdin polling, escape-sequence parsing, terminal-size
+updates, and drawing. Simulation threads enqueue guest UART bytes and request a render; they never
+read stdin or render directly. This prevents concurrent consumers from dropping guest keystrokes or
+splitting ANSI control sequences.
+
 When the guest terminal is focused and running, ordinary bytes—including carriage return and
 newline—are delivered directly to the platform UART (`ttyS0`). `Ctrl-P` pauses and `Ctrl-Q` quits.
 While paused, keys control TUI navigation. An active modal
@@ -42,6 +47,28 @@ count, outer borders, and center-divider presence.
 
 Escape starts ANSI/control-sequence parsing in every state. A standalone Escape closes a modal when
 that modal permits cancellation.
+
+## Design contract
+
+The TUI communicates interaction before decoration: filled controls are actionable; plain text is
+state. Themes map semantic roles rather than hard-coded colours:
+
+| Role | Use |
+| --- | --- |
+| `surface` / `border` | Modal backgrounds and structural frames |
+| `text` / `muted` | Primary and secondary passive copy |
+| `value` | Machine state and inspected data |
+| `accent` | Focus, navigation, and actionable controls |
+| `success` / `warning` / `danger` | Active, paused/changed, and failure/trap states |
+
+Renderers measure terminal cells, not UTF-8 bytes; ANSI sequences have zero width. A renderer
+returns its requested width unless it is explicitly a fragment builder. Drawing and hit-testing
+share `RenderedControl` geometry. Narrow layouts shorten labels before removing important state,
+and the Classic ANSI theme remains usable without Unicode glyphs.
+
+Selected keycaps, badges, and primary tabs are filled and clickable. Passive telemetry remains
+plain text. Modal titles and action rows are centred; forms and explanatory content are
+left-aligned. Scrollable regions show direction markers whenever content exists beyond the view.
 
 ## Tests
 

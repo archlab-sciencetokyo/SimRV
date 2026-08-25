@@ -29,6 +29,44 @@
             }
         },
         {
+            "name": "rv64-native-release",
+            "displayName": "RV64 Native-Host Release (Ninja)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/rv64-native-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "SIMRV_XLEN": "64",
+                "SIMRV_NATIVE_HOST_OPTIMIZATIONS": "ON"
+            }
+        },
+        {
+            "name": "rv64-clang-release",
+            "displayName": "RV64 Release with Clang (Ninja)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/rv64-clang-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "SIMRV_XLEN": "64"
+            }
+        },
+        {
+            "name": "rv64-gcc-release",
+            "displayName": "RV64 Release with GCC (Ninja)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/rv64-gcc-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_CXX_COMPILER": "g++",
+                "SIMRV_XLEN": "64"
+            }
+        },
+        {
             "name": "rv32-debug",
             "displayName": "RV32 Debug (Ninja)",
             "generator": "Ninja",
@@ -59,6 +97,18 @@
         {
             "name": "rv64-release",
             "configurePreset": "rv64-release"
+        },
+        {
+            "name": "rv64-native-release",
+            "configurePreset": "rv64-native-release"
+        },
+        {
+            "name": "rv64-clang-release",
+            "configurePreset": "rv64-clang-release"
+        },
+        {
+            "name": "rv64-gcc-release",
+            "configurePreset": "rv64-gcc-release"
         },
         {
             "name": "rv32-debug",

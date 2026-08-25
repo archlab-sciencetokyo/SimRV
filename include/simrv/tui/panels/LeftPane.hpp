@@ -91,17 +91,10 @@ class LeftPane : public TuiWidget {
     [[nodiscard]] auto get_text_in_range(int start_row, int start_col, int end_row, int end_col,
                                          int width) -> std::string;
 
-    void select_next_cache_set(int delta) {
-        constexpr int kNumSets = 16;
-        cache_inspect_set_ = (cache_inspect_set_ + delta + kNumSets) % kNumSets;
-    }
-    void toggle_cache_inspect_type() { cache_inspect_type_ = 1 - cache_inspect_type_; }
-    void select_cache_way(int way) {
-        if (way >= 0 && way < 4) {
-            cache_inspect_way_ = way;
-        }
-    }
-    void cycle_cache_way(int delta) { cache_inspect_way_ = (cache_inspect_way_ + delta + 4) % 4; }
+    void select_next_cache_set(int delta);
+    void toggle_cache_inspect_type();
+    void select_cache_way(int way);
+    void cycle_cache_way(int delta);
     [[nodiscard]] auto get_cache_inspect_set() const -> int { return cache_inspect_set_; }
     [[nodiscard]] auto get_cache_inspect_type() const -> int { return cache_inspect_type_; }
     [[nodiscard]] auto get_cache_inspect_way() const -> int { return cache_inspect_way_; }
@@ -116,6 +109,8 @@ class LeftPane : public TuiWidget {
     [[nodiscard]] auto render_trace_row(int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_log_bottom_row(int row_idx, int num_rows, int width) -> std::string;
     [[nodiscard]] auto render_guidance_row(int row_idx, int width) -> std::string;
+    [[nodiscard]] auto active_cache_set_count() const -> int;
+    [[nodiscard]] auto active_cache_way_count() const -> int;
 
     [[nodiscard]] auto get_sparkline_string(int width) -> std::string;
     [[nodiscard]] auto get_row_uncached(int logical_row, int width) -> std::string;
@@ -188,25 +183,11 @@ class LeftPane : public TuiWidget {
     [[nodiscard]] auto render_machine_performance_stats(const simrv::core::CPU& cpu,
                                                         int adj_logical_row, int width)
         -> std::string;
-    [[nodiscard]] auto render_machine_performance_stats_core(const simrv::core::CPU& cpu,
-                                                             int adj_logical_row, int width)
-        -> std::string;
-    [[nodiscard]] auto render_machine_performance_stats_sys(const simrv::core::CPU& cpu,
-                                                            int adj_logical_row, int width)
-        -> std::string;
     [[nodiscard]] auto render_cycle_accurate_stats(const simrv::core::CPU& cpu, int adj_logical_row,
                                                    int width) -> std::string;
-    [[nodiscard]] auto render_cycle_accurate_core_stats(const simrv::core::CPU& cpu,
-                                                        int adj_logical_row, int width)
-        -> std::string;
-    [[nodiscard]] auto render_cycle_accurate_hazard_stats(const simrv::core::CPU& cpu,
-                                                          int adj_logical_row, int width)
-        -> std::string;
-    [[nodiscard]] auto render_cycle_accurate_mix_stats(const simrv::core::CPU& cpu,
-                                                       int adj_logical_row, int width)
-        -> std::string;
-    [[nodiscard]] auto render_cycle_accurate_hw_info(const simrv::core::CPU& cpu,
-                                                     int adj_logical_row, int width) -> std::string;
+    [[nodiscard]] auto performance_row_count() const -> int;
+    [[nodiscard]] auto performance_start_row(bool single_column) const -> int;
+    [[nodiscard]] auto debug_state_row_count() const -> int;
     [[nodiscard]] auto render_debug_state(int logical_row, int width) -> std::string;
     [[nodiscard]] auto section_line(const std::string& title, int width) -> std::string;
     [[nodiscard]] auto make_field(const std::string& label, const std::string& value,
@@ -239,8 +220,8 @@ class LeftPane : public TuiWidget {
     std::vector<std::string> log_lines_;
     int log_scroll_offset_ = 0;
     int cache_inspect_type_ = 0;  // 0: ICache, 1: DCache
-    int cache_inspect_set_ = 0;   // 0 .. 15
-    int cache_inspect_way_ = 0;   // 0 .. 3
+    int cache_inspect_set_ = 0;
+    int cache_inspect_way_ = 0;
 };
 
 }  // namespace simrv::tui

@@ -10,6 +10,7 @@
  */
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <format>
 #include <string>
 #include <vector>
@@ -66,6 +67,36 @@ auto hex_val(Register v) -> std::string {
             return std::format("0x{:08x}", static_cast<uint32_t>(val));
         }
         return std::format("0x{:016x}", val);
+    }
+}
+
+auto privilege_name(PrivilegeLevel privilege) -> const char* {
+    switch (privilege) {
+        case PrivilegeLevel::Machine: return "Machine";
+        case PrivilegeLevel::Supervisor: return "Supervisor";
+        case PrivilegeLevel::User: return "User";
+        default: return "Unknown";
+    }
+}
+
+auto translation_name(Word mode, unsigned xlen) -> std::string {
+    if (mode == 0) return "Bare";
+    if (xlen == 32 && mode == 1) return "Sv32";
+    if (xlen == 64 && mode == 8) return "Sv39";
+    return std::format("mode {}", mode);
+}
+
+auto trap_summary(TrapCause cause) -> std::string {
+    if (trap_is_interrupt(cause)) return std::format("interrupt {}", trap_exception_code(cause));
+    switch (trap_exception_code(cause)) {
+        case 2: return "illegal insn";
+        case 3: return "breakpoint";
+        case 5: return "load fault";
+        case 7: return "store fault";
+        case 12: return "I-page fault";
+        case 13: return "load page";
+        case 15: return "store page";
+        default: return std::format("exception {}", trap_exception_code(cause));
     }
 }
 
@@ -595,8 +626,9 @@ auto LeftPane::render_pipeline_stages_functional_low_part1(const simrv::core::CP
         case 0:
             return section_line("Current Instruction", width);
         case 1: {
-            // PC with optional symbol + Assembly
-            std::string sym = machine_.symbols.lookup(cpu.state().pc);
+            // Resolve against the instruction being presented rather than the architectural PC,
+            // which may already have advanced while the functional pipeline view is rendered.
+            std::string sym = machine_.symbols.lookup(ctx.cpc);
             std::string pc_str =
                 sym.empty() ? hex_val(ctx.cpc) : std::format("{} <{}>", hex_val(ctx.cpc), sym);
 
@@ -1043,12 +1075,11 @@ auto LeftPane::get_pipeline_pc_at_row(int logical_row) const -> Register {
 auto LeftPane::render_system_or_pipeline_extended(const simrv::core::CPU& cpu, int logical_row,
                                                   int col_width, int right_width,
                                                   bool single_column) -> std::string {
-    if (logical_row >= 16 && logical_row <= 24) {
-        if (page_ == TuiRegPage::PIPELINE) {
+    if (page_ == TuiRegPage::PIPELINE && logical_row >= 16 && logical_row <= 24) {
             return render_pipeline_stages(cpu, logical_row, col_width, right_width);
-        } else if (!single_column) {
-            return render_system_state(cpu, logical_row, col_width, right_width);
-        }
+    }
+    if (!single_column && logical_row >= 16 && logical_row <= 20) {
+        return render_system_state(cpu, logical_row, col_width, right_width);
     }
     return "";
 }
@@ -1057,60 +1088,52 @@ auto LeftPane::render_system_state(const simrv::core::CPU& cpu, int logical_row,
                                    int right_width) -> std::string {
     auto const& st = cpu.state();
     int const width = col_width + right_width;
-    int label_pad = (width < 45) ? 0 : 7;
+    int label_pad = (width < 64) ? 0 : 11;
 
     if (logical_row == 16) {
-        return section_line("CSRs & Privilege State", width);
+        return section_line("Machine State", width);
     }
     if (logical_row == 17) {
-        std::string priv_str = (st.priv == PrivilegeLevel::Machine)      ? "Machine"
-                               : (st.priv == PrivilegeLevel::Supervisor) ? "Supervisor"
-                                                                         : "User";
-        return render_pair("pc", std::format("0x{:0{}x}", st.pc, simrv::xlen::kXLenHexDigits),
-                           kThemeMint, "priv", priv_str, kThemePink, col_width, right_width,
-                           label_pad);
+        return render_pair("mode", privilege_name(st.priv), kThemeMint, "hart",
+                           std::to_string(st.mhartid), kThemeSky, col_width, right_width, label_pad);
     }
     if (logical_row == 18) {
-        std::string misa_str = simrv::xlen::resolve_misa_string(st.misa);
-        return render_pair(
-            "mstatus", std::format("0x{:0{}x}", st.mstatus, simrv::xlen::kXLenHexDigits), kThemeVal,
-            "misa", misa_str, kThemeVal, col_width, right_width, label_pad);
+        const bool global_enabled =
+            st.priv == PrivilegeLevel::Machine ? (st.mstatus & enum_mask(core::MstatusBit::Mie)) != 0
+            : st.priv == PrivilegeLevel::Supervisor ? (st.mstatus & enum_mask(core::MstatusBit::Sie)) != 0
+                                                     : true;
+        const CSRValue pending = st.mip & core::interrupt_implemented_mask(
+            simrv::isa::misa_has_extension(st.misa, simrv::isa::IsaExtension::S));
+        const CSRValue eligible = pending & st.mie;
+        const std::string state = eligible != 0 ? (global_enabled ? "ready" : "masked")
+                                                : (global_enabled ? "enabled" : "disabled");
+        return render_pair("interrupts", state, eligible != 0 ? kThemePeach : kThemeMint,
+                           "pending", pending == 0 ? "none" : std::format("{} source(s)",
+                                                                                std::popcount(pending)),
+                           pending == 0 ? kThemeMuted : kThemePeach, col_width, right_width, label_pad);
     }
     if (logical_row == 19) {
-        return render_pair("mie", std::format("0x{:0{}x}", st.mie, simrv::xlen::kXLenHexDigits),
-                           kThemeVal, "mip",
-                           std::format("0x{:0{}x}", st.mip, simrv::xlen::kXLenHexDigits), kThemeVal,
-                           col_width, right_width, label_pad);
+        const unsigned active_xlen = st.current_xlen();
+        const Word mode = simrv::xlen::satp_mode(st.satp, active_xlen);
+        const bool translated = simrv::xlen::satp_translation_enabled(st.satp, active_xlen);
+        return render_pair("translation", translation_name(mode, active_xlen),
+                           translated ? kThemeMint : kThemeMuted, "ASID",
+                           translated ? std::to_string(simrv::xlen::satp_asid(st.satp, active_xlen)) : "-",
+                           translated ? kThemeSky : kThemeMuted, col_width, right_width, label_pad);
     }
     if (logical_row == 20) {
-        return render_pair("mtvec", std::format("0x{:0{}x}", st.mtvec, simrv::xlen::kXLenHexDigits),
-                           kThemeVal, "mepc",
-                           std::format("0x{:0{}x}", st.mepc, simrv::xlen::kXLenHexDigits),
-                           kThemeVal, col_width, right_width, label_pad);
-    }
-    if (logical_row == 21) {
-        return render_pair("stvec", std::format("0x{:0{}x}", st.stvec, simrv::xlen::kXLenHexDigits),
-                           kThemeVal, "sepc",
-                           std::format("0x{:0{}x}", st.sepc, simrv::xlen::kXLenHexDigits),
-                           kThemeVal, col_width, right_width, label_pad);
-    }
-    if (logical_row == 22) {
-        return render_pair("mtval", std::format("0x{:0{}x}", st.mtval, simrv::xlen::kXLenHexDigits),
-                           kThemeVal, "satp",
-                           std::format("0x{:0{}x}", st.satp, simrv::xlen::kXLenHexDigits),
-                           kThemeVal, col_width, right_width, label_pad);
-    }
-    if (logical_row == 23) {
-        return render_pair(
-            "scause", std::format("0x{:0{}x}", st.scause, simrv::xlen::kXLenHexDigits), kThemeVal,
-            "stval", std::format("0x{:0{}x}", st.stval, simrv::xlen::kXLenHexDigits), kThemeVal,
-            col_width, right_width, label_pad);
-    }
-    if (logical_row == 24) {
-        return render_pair(
-            "medeleg", std::format("0x{:0{}x}", st.medeleg, simrv::xlen::kXLenHexDigits), kThemeVal,
-            "mideleg", std::format("0x{:0{}x}", st.mideleg, simrv::xlen::kXLenHexDigits), kThemeVal,
-            col_width, right_width, label_pad);
+        const bool supervisor_trap = st.scause != 0 || st.stval != 0 || st.sepc != 0;
+        const TrapCause cause = supervisor_trap ? st.scause : st.mcause;
+        const CSRValue tval = supervisor_trap ? st.stval : st.mtval;
+        const CSRValue epc = supervisor_trap ? st.sepc : st.mepc;
+        // Timer and device interrupts are routine and their sticky trap CSRs
+        // would permanently consume a summary row.  Surface exception context
+        // only, where it is actionable while debugging guest execution.
+        if (!trap_is_interrupt(cause) && (cause != 0 || tval != 0 || epc != 0)) {
+            return render_pair("trap", trap_summary(cause), kThemePeach, "address",
+                               tval != 0 ? hex_val(tval) : hex_val(epc), kThemeVal, col_width,
+                               right_width, label_pad);
+        }
     }
     return format_to_width("", width);
 }

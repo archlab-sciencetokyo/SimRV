@@ -91,6 +91,13 @@ struct CycleInstructionSlot {
     BranchPrediction prediction{};
 
     constexpr void clear() noexcept { *this = {}; }
+    /// Mark a transferred slot unavailable without touching its diagnostic payload.  Every
+    /// consumer gates architectural work on valid; retaining the payload avoids a bulk clear on
+    /// the CA critical path while still preventing stale latency from being reported as a stall.
+    constexpr void invalidate() noexcept {
+        valid = false;
+        remaining_latency = 0;
+    }
 };
 
 struct HartPipelineState {
@@ -108,8 +115,8 @@ struct HartPipelineState {
     bool control_flush = false;
 
     constexpr void flush_younger() noexcept {
-        fetch.clear();
-        decode.clear();
+        fetch.invalidate();
+        decode.invalidate();
     }
     constexpr void reset() noexcept { *this = {}; }
 };

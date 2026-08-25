@@ -15,7 +15,7 @@ namespace simrv::cache {
  * Simple direct-mapped cache: for a given address, index = (addr >> line_shift) & (num_lines - 1)
  * Supports configurable line size and number of lines.
  */
-class ICache : public BaseCache<64, 32, 4> {
+class ICache : public BaseCache<512, 32, 8> {
    public:
     /// Initialize cache to empty state
     ICache() = default;

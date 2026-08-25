@@ -22,6 +22,10 @@ namespace simrv::core {
 using namespace simrv::isa;
 
 namespace {
+SIMRV_ALWAYS_INLINE auto captures_tui_execution_detail(const Machine& machine) -> bool {
+    return machine.s_tuimode && machine.tui && machine.tui->captures_execution_detail();
+}
+
 SIMRV_ALWAYS_INLINE auto is_tohost_addr(const Machine& machine, Address addr) -> bool {
     return (addr - machine.s_isatest_tohost < 8) || (addr - 0x80001000ULL < 8) ||
            (addr - 0x40008000ULL < 8);
@@ -93,6 +97,22 @@ auto execute_dram_amo(T* mem_ptr, Word rs2_val, Funct5Amo funct5) -> T {
 }  // namespace
 
 CPU::CPU() : plic_mmio(*this), clint_mmio(*this), csr_file(*this), sbi(*this) { reset(); }
+
+void CPU::apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config) {
+    // Validation is performed by the parser/editor.  Keeping this operation atomic at the CPU
+    // boundary prevents partially-applied timing models from leaking into a live CA pipeline.
+    cpu_model_config = config;
+    pipeline_sim.config = config.pipeline;
+    // BaseCache has bounded 16 KiB / 8-way backing, enough for the shipped FPGA profiles.
+    // A validated model is required to fit before this point.
+    (void)icache.configure(config.instruction_cache.capacity_bytes,
+                           config.instruction_cache.associativity);
+    (void)dcache.configure(config.data_cache.capacity_bytes, config.data_cache.associativity);
+    ca_state.reset_instruction();
+    ca_pipeline.reset();
+    branch_predictor.configure(pipeline_sim.config.branch_predictor);
+    branch_predictor.reset();
+}
 
 void CPU::reset() {
     state_ = ArchState{};
@@ -280,7 +300,10 @@ void CPU::run_cycle(Machine& machine) {
             .data_hazard_stall = ca_pipeline.data_hazard_stall,
             .control_flush = ca_pipeline.control_flush,
         };
-        if (pipeline_sim.config.record_snapshots) {
+        const bool record_snapshots =
+            pipeline_sim.config.record_snapshots &&
+            (!machine.s_tuimode || captures_tui_execution_detail(machine));
+        if (record_snapshots) {
             pipeline_sim.advance_cycle({
                 .fetch = stage_event(ca_pipeline.fetch, fetch_stalled),
                 .decode = three_stage ? pipeline::PipelineStageEvent{}
@@ -328,10 +351,10 @@ void CPU::run_cycle(Machine& machine) {
         // Bypasses pipeline orchestration and fetches from direct lookup cache if available.
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
-            const bool copy_ctx = machine.s_tuimode || machine.s_lockstep_mode ||
+            const bool copy_ctx = captures_tui_execution_detail(machine) || machine.s_lockstep_mode ||
                                   machine.s_gdb_mode || machine.s_bp_trace ||
                                   (machine.s_strace != 0);
-            const bool inst_mix = machine.s_use_mix || machine.s_tuimode;
+            const bool inst_mix = machine.s_use_mix || captures_tui_execution_detail(machine);
             if (simrv::compiler::unlikely(copy_ctx && inst_mix)) {
                 execute_cached_op_fast<true, true>(machine, *cached);
             } else if (simrv::compiler::unlikely(copy_ctx)) {
@@ -414,6 +437,15 @@ void CPU::run_cycle(Machine& machine) {
     }
 }
 
+void CPU::advance_ca_cycle(Machine& machine) {
+    // CA is a separate, one-transition-per-call engine.  The assertion-like guard makes it
+    // impossible for an IA scheduling path to accidentally use CA as an instruction executor.
+    if (!machine.runtime_profile.is_cycle_mode()) {
+        return;
+    }
+    run_cycle(machine);
+}
+
 void CPU::tick_cycle_clock(Machine& machine, bool interrupt_boundary) {
     ++clint_mmio.mcycle;
     if (machine.runtime_profile.is_cycle_mode()) {
@@ -492,10 +524,10 @@ void CPU::run_cycle_baremetal(Machine& machine) {
     if (machine.runtime_profile.is_instruction_fast()) {
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
-            const bool copy_ctx = machine.s_tuimode || machine.s_lockstep_mode ||
+            const bool copy_ctx = captures_tui_execution_detail(machine) || machine.s_lockstep_mode ||
                                   machine.s_gdb_mode || machine.s_bp_trace ||
                                   (machine.s_strace != 0);
-            const bool inst_mix = machine.s_use_mix || machine.s_tuimode;
+            const bool inst_mix = machine.s_use_mix || captures_tui_execution_detail(machine);
             if (simrv::compiler::unlikely(copy_ctx && inst_mix)) {
                 execute_cached_op_fast<true, true>(machine, *cached);
             } else if (simrv::compiler::unlikely(copy_ctx)) {
@@ -1314,6 +1346,8 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         case isa::SD:
             execute_cached_store(machine, op, state_.regs.read(op.rs1), state_.regs.read(op.rs2));
             return;
+        // WFI deliberately reaches the full path: fetch is the interrupt-delivery boundary, and
+        // bypassing it in a cached idle loop can leave an OS waiting past a pending timer IRQ.
         // ---- Everything else: fallback to full pipeline stages ----
         default:
             if constexpr (!kCopyContext) {
@@ -1332,9 +1366,10 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
 }
 
 void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
-    const bool copy_ctx = machine.s_tuimode || machine.s_lockstep_mode || machine.s_gdb_mode ||
+    const bool copy_ctx = captures_tui_execution_detail(machine) || machine.s_lockstep_mode ||
+                          machine.s_gdb_mode ||
                           machine.s_bp_trace || (machine.s_strace != 0);
-    const bool inst_mix = machine.s_use_mix || machine.s_tuimode;
+    const bool inst_mix = machine.s_use_mix || captures_tui_execution_detail(machine);
     uint32_t cached_ops = 0;
 
     if (simrv::compiler::likely(!copy_ctx && !inst_mix)) {
@@ -1359,13 +1394,6 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
                 cached_ops++;
             } else {
                 run_cycle_baremetal(machine);
-            }
-            const bool tui_ebreak =
-                machine.s_tuimode && pipeline_context.opcode == isa::Opcode::System &&
-                pipeline_context.funct12 == static_cast<Word>(isa::Funct12Priv::Ebreak);
-            if (simrv::compiler::unlikely(tui_ebreak && machine.tui)) {
-                machine.tui->pause_loop();
-                break;
             }
             if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running() ||
                                           ((b & 0xffU) == 0 && machine.is_paused()))) {
