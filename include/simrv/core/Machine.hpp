@@ -190,9 +190,8 @@ class Machine {
     RuntimeProfile runtime_profile{};          // Resolved command-line runtime policy.
     std::atomic<bool> s_mmu_ever_used{
         false};  // Latched true the first time satp enables translation
-    std::atomic<bool> s_multithreaded{false};     // Run simulation in a background thread
-    std::atomic<bool> s_rollback_enabled{false};  // Enable instruction rollback tracking
-    uint32_t s_num_harts = 1;                     // Number of simulated harts (SMP cores)
+    std::atomic<bool> s_multithreaded{false};  // Run simulation in a background thread
+    uint32_t s_num_harts = 1;                  // Number of simulated harts (SMP cores)
     uint32_t s_smp_quantum = 100;  // Instruction quantum per hart in cooperative SMP mode
     std::atomic<bool> s_smp_multithreaded{false};  // Enable parallel multi-threaded SMP execution
     uint64_t s_dram_size = 0;                      // Dynamic DRAM size in bytes (0 = default 256MB)

@@ -85,7 +85,6 @@ enum class TuiRightPanelMode : uint8_t { Terminal, Display };
 
 enum class TuiFooterAction : uint8_t {
     Step,
-    StepBack,
     RunPause,
     SetSpeed,
     SetBreakpoint,

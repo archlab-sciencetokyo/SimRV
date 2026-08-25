@@ -1583,13 +1583,6 @@ auto Tui::handle_debug_keyboard_input(TuiKey key) -> bool {
         case simrv::tui::TuiKey::M:
             open_modal(ModalType::ManageBreakpoints);
             break;
-        case simrv::tui::TuiKey::b:
-        case simrv::tui::TuiKey::B:
-            if (machine_.cpu.perform_backstep()) {
-                update_cache();
-                render(true);
-            }
-            break;
         case simrv::tui::TuiKey::k:
         case simrv::tui::TuiKey::K: {
             Address pc = machine_.cpu.state().pc;
@@ -1776,8 +1769,7 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
     if (key == simrv::tui::TuiKey::Colon || key == simrv::tui::TuiKey::w ||
         key == simrv::tui::TuiKey::W || key == simrv::tui::TuiKey::i ||
         key == simrv::tui::TuiKey::I || key == simrv::tui::TuiKey::m ||
-        key == simrv::tui::TuiKey::M || key == simrv::tui::TuiKey::b ||
-        key == simrv::tui::TuiKey::B || key == simrv::tui::TuiKey::k ||
+        key == simrv::tui::TuiKey::M || key == simrv::tui::TuiKey::k ||
         key == simrv::tui::TuiKey::K) {
         if (handle_debug_keyboard_input(key)) return;
     }
@@ -1896,12 +1888,6 @@ void Tui::execute_footer_action(TuiFooterAction action) {
                 render(true);
             }
             break;
-        case TuiFooterAction::StepBack:
-            if (machine_.cpu.perform_backstep()) {
-                update_cache();
-                render(true);
-            }
-            break;
         case TuiFooterAction::RunPause:
             if (machine_.is_shutdown_) {
                 modal_.open_notice("SYSTEM SHUTDOWN",
@@ -2016,13 +2002,6 @@ void Tui::select_next_hart() {
 
 auto Tui::handle_alt_key(char key, uint8_t byte) -> bool {
     switch (key) {
-        case 'b':
-        case 'B':
-            machine_.s_rollback_enabled = !machine_.s_rollback_enabled;
-            if (!machine_.s_rollback_enabled) machine_.cpu.undo_stack.clear();
-            set_status_override(std::format("Rollback tracking {}",
-                                            machine_.s_rollback_enabled ? "enabled" : "disabled"));
-            return true;
         case 'p':
         case 'P':
             cycle_right_panel_mode();

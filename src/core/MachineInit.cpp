@@ -609,7 +609,6 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
     cpu.dcache.flush(true);
     cpu.decode_cache.flush();
     cpu.pipeline_context = simrv::pipeline::PipelineContext{};
-    cpu.undo_stack.clear();
     cpu.trace_history_head_ = 0;
     cpu.trace_history_size_ = 0;
     cpu.state().load_res = 0;

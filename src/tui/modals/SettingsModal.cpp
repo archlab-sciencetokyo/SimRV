@@ -27,7 +27,6 @@ void SettingsModal::open(SettingsDraft& draft, const simrv::core::Machine& machi
     // Tab 0: General
     draft.cycle_accurate = machine.runtime_profile.is_cycle_mode();
     draft.debug_mode = machine.s_debug_mode;
-    draft.rollback_enabled = machine.s_rollback_enabled;
     draft.high_contrast = machine.s_high_contrast;
     draft.class_mode = machine.s_class_mode;
     draft.tui_fps = machine.tui ? machine.tui->target_fps() : 30;
@@ -62,7 +61,7 @@ void SettingsModal::set_tab(SettingsDraft& draft, uint8_t tab) { draft.active_ta
 void SettingsModal::move_cursor(SettingsDraft& draft, int delta) {
     switch (draft.active_tab) {
         case 0: {
-            constexpr int kNumSettings = 18;
+            constexpr int kNumSettings = 17;
             draft.tab_cursor[0] = (draft.tab_cursor[0] + delta + kNumSettings) % kNumSettings;
             break;
         }
@@ -78,7 +77,7 @@ void SettingsModal::move_cursor(SettingsDraft& draft, int delta) {
 }
 
 void SettingsModal::move_cursor(int& cursor, int delta) {
-    constexpr int kNumSettings = 18;
+    constexpr int kNumSettings = 17;
     cursor = (cursor + delta + kNumSettings) % kNumSettings;
 }
 
@@ -112,22 +111,17 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     draft.debug_mode = !draft.debug_mode;
                     if (draft.debug_mode) {
                         draft.use_mix = true;
-                        draft.rollback_enabled = true;
                     } else {
                         draft.use_mix = false;
-                        draft.rollback_enabled = false;
                     }
                     break;
                 case 2:
-                    draft.rollback_enabled = !draft.rollback_enabled;
-                    break;
-                case 3:
                     draft.high_contrast = !draft.high_contrast;
                     break;
-                case 4:
+                case 3:
                     draft.class_mode = !draft.class_mode;
                     break;
-                case 5: {  // TUI Target Refresh Rate
+                case 4: {  // TUI Target Refresh Rate
                     static constexpr std::array<uint32_t, 4> kFpsOptions = {10, 15, 30, 60};
                     size_t curr_idx = 2;  // default 30
                     for (size_t f = 0; f < kFpsOptions.size(); ++f) {
@@ -144,15 +138,15 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     draft.tui_fps = kFpsOptions[curr_idx];
                     break;
                 }
-                case 6: {  // Active SMP Hart Count
+                case 5: {  // Active SMP Hart Count
                     int v = static_cast<int>(draft.num_harts) + dir;
                     draft.num_harts = static_cast<uint32_t>(std::clamp(v, 1, 16));
                     break;
                 }
-                case 7:  // SMP Threading Model
+                case 6:  // SMP Threading Model
                     draft.smp_multithreaded = !draft.smp_multithreaded;
                     break;
-                case 8: {  // SMP Scheduler Quantum (insns/slice)
+                case 7: {  // SMP Scheduler Quantum (insns/slice)
                     static constexpr std::array<uint32_t, 12> kQuantumLevels = {
                         10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 50000, 100000};
                     size_t curr = 6;  // default 1000
@@ -173,11 +167,11 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     }
                     break;
                 }
-                case 9:  // Platform Profile (0: PCIe, 1: MMIO, 2: Hybrid)
+                case 8:  // Platform Profile (0: PCIe, 1: MMIO, 2: Hybrid)
                     draft.platform_profile =
                         static_cast<uint8_t>((draft.platform_profile + (dir > 0 ? 1 : 2)) % 3);
                     break;
-                case 10: {  // Physical RAM Capacity (MB)
+                case 9: {  // Physical RAM Capacity (MB)
                     static constexpr std::array<uint64_t, 8> kRamSizes = {32,  64,   128,  256,
                                                                           512, 1024, 2048, 4096};
                     size_t curr_idx = 3;  // default 256
@@ -195,7 +189,7 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     draft.dram_size_mb = kRamSizes[curr_idx];
                     break;
                 }
-                case 11:  // VirtIO Network Backend
+                case 10:  // VirtIO Network Backend
                     if (draft.net_mode == "user")
                         draft.net_mode = (dir > 0) ? "tap" : "none";
                     else if (draft.net_mode == "tap")
@@ -205,24 +199,24 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     else
                         draft.net_mode = (dir > 0) ? "user" : "socket";
                     break;
-                case 12:
+                case 11:
                     if (machine && machine->s_spike_bin.empty()) break;
                     draft.lockstep_mode = !draft.lockstep_mode;
                     break;
-                case 13:
+                case 12:
                     draft.gdb_mode = !draft.gdb_mode;
                     break;
-                case 14:
+                case 13:
                     if (!draft.cycle_accurate) break;
                     draft.bp_trace = !draft.bp_trace;
                     break;
-                case 15:
+                case 14:
                     draft.use_mix = !draft.use_mix;
                     break;
-                case 16:
+                case 15:
                     draft.traplog_mode = !draft.traplog_mode;
                     break;
-                case 17:
+                case 16:
                     if (machine && machine->s_appmode) break;
                     draft.dlog_mode = !draft.dlog_mode;
                     break;
@@ -271,10 +265,6 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
     machine.runtime_profile.engine = simrv::core::select_execution_engine(
         draft.cycle_accurate, machine.runtime_profile.interaction);
     machine.s_debug_mode = draft.debug_mode;
-    machine.s_rollback_enabled = draft.rollback_enabled;
-    if (!machine.s_rollback_enabled) {
-        machine.cpu.undo_stack.clear();
-    }
     if (draft.high_contrast != machine.s_high_contrast) {
         set_high_contrast(draft.high_contrast);
         machine.s_high_contrast = draft.high_contrast;
@@ -405,8 +395,6 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
             {.name = "Debug Mode & Diagnostics",
              .val = draft.debug_mode ? "\033[1;32m[ON (Diagnostics Active)]\033[0m"
                                      : "\033[90m[OFF]\033[0m"},
-            {.name = "Execution Rollback Stack",
-             .val = draft.rollback_enabled ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
             {.name = "Color Theme / Contrast",
              .val = draft.high_contrast ? "\033[1;33m[High Contrast B&W]\033[0m"
                                         : "\033[1;34m[Adaptive / Terminal Colors]\033[0m"},
@@ -451,16 +439,16 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
         for (std::size_t i = 0; i < settings.size(); ++i) {
             if (i == 0) {
                 add_row_cb(build_section_divider("Simulation Engine & Visualization"));
-            } else if (i == 6) {
+            } else if (i == 5) {
                 add_row_cb("");
                 add_row_cb(build_section_divider("Symmetric Multiprocessing (SMP) Configuration"));
-            } else if (i == 9) {
+            } else if (i == 8) {
                 add_row_cb("");
                 add_row_cb(build_section_divider("Platform Profile & Peripheral Devices"));
-            } else if (i == 12) {
+            } else if (i == 11) {
                 add_row_cb("");
                 add_row_cb(build_section_divider("External Integrations & Debug Stubs"));
-            } else if (i == 14) {
+            } else if (i == 13) {
                 add_row_cb("");
                 add_row_cb(build_section_divider("Traces & Logging (Creates Text Files)"));
             }

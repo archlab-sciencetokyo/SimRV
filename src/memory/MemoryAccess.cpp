@@ -413,10 +413,6 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
                                        (static_cast<uint64_t>(data) << 32);
             }
         }
-        if (cpu.machine_->s_rollback_enabled && simrv::memory::is_dram_access(addr, size_bytes)) {
-            Word old_val = simrv::memory::ram_read_fast(addr, funct3, mem.mmu()->mmem());
-            cpu.record_mem_write(addr, old_val, funct3);
-        }
         if (cpu.machine_->runtime_profile.is_instruction_mode() &&
             simrv::memory::is_dram_access(addr, size_bytes)) {
             simrv::memory::ram_write_fast(addr, data, funct3, mem.mmu()->mmem());
@@ -517,12 +513,6 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
                 if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
-                    const Address paddr = entry.paddr_base + (v_addr & 0xFFF);
-                    if (cpu.machine_->s_rollback_enabled) {
-                        Word old_val = simrv::memory::host_read_fast(
-                            entry.host_ptr_base + (v_addr & 0xFFF), funct3);
-                        cpu.record_mem_write(paddr, old_val, funct3);
-                    }
                     simrv::memory::host_write_fast(entry.host_ptr_base + (v_addr & 0xFFF), wdata,
                                                    funct3);
                     return;

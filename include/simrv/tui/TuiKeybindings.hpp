@@ -17,7 +17,6 @@ namespace simrv::tui {
 
 enum class KeyAction : uint8_t {
     Step,
-    Backstep,
     RunPause,
     Reset,
     SetBreakpoint,
@@ -54,7 +53,6 @@ struct ActionContext {
     bool image_loaded = false;
     bool debug_mode = false;
     bool cycle_accurate = false;
-    bool rollback_enabled = false;
 };
 
 struct KeyBindingInfo {
@@ -70,7 +68,6 @@ struct KeyBindingInfo {
     bool requires_image = false;
     bool requires_debug = false;
     bool requires_cycle_accurate = false;
-    bool requires_rollback = false;
 };
 
 class Keybindings {

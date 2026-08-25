@@ -113,7 +113,6 @@ void CPU::reset() {
     e_icount = 0;
     e_ccount = 0;
     e_instmix.fill(0);
-    undo_stack.clear();
     trace_history_head_ = 0;
     trace_history_size_ = 0;
     ca_state.reset_instruction();
@@ -226,14 +225,6 @@ void CPU::run_cycle(Machine& machine) {
                 machine.tui->pause_loop();
             }
         }
-    }
-    // If rollback support is active, record architectural and memory checkpoints before updating
-    // state.
-    if (simrv::compiler::unlikely(machine.s_rollback_enabled)) {
-        if (!machine.breakpoints.has_any()) {
-            prev_state_ = state_;
-        }
-        push_undo_state();
     }
     if (machine.runtime_profile.is_cycle_mode()) {
         run_ca_pipeline_cycle(machine);
@@ -495,12 +486,6 @@ void CPU::run_cycle_baremetal(Machine& machine) {
             }
         }
     }
-    if (simrv::compiler::unlikely(machine.s_rollback_enabled)) {
-        if (!machine.breakpoints.has_any()) {
-            prev_state_ = state_;
-        }
-        push_undo_state();
-    }
     pipeline_context.pending_exception = std::nullopt;
     pipeline_context.pending_tval = 0;
 
@@ -725,11 +710,6 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                     }
                 }
             }
-            if (machine.s_rollback_enabled) {
-                Word old_val = simrv::memory::ram_read_fast(
-                    addr, static_cast<Instruction>(ctx.funct3), machine.mmem);
-                record_mem_write(addr, old_val, static_cast<Instruction>(ctx.funct3));
-            }
             simrv::memory::ram_write_fast(addr, ctx.mem_wdata, static_cast<Instruction>(ctx.funct3),
                                           machine.mmem);
         } else {
@@ -747,11 +727,6 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
             const auto f3 = ctx.funct3;
             switch (f3) {
                 case Funct3::Fsw:
-                    if (machine.s_rollback_enabled) {
-                        Word old_val = simrv::memory::ram_read_fast(
-                            addr, static_cast<Instruction>(Funct3::Sw), machine.mmem);
-                        record_mem_write(addr, old_val, static_cast<Instruction>(Funct3::Sw));
-                    }
                     simrv::memory::ram_write_fast(
                         addr,
                         static_cast<Word>(ctx.fp_mem_wdata &
@@ -760,23 +735,10 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                     break;
                 case Funct3::Fsd:
                     if constexpr (simrv::xlen::kIsXLen64) {
-                        if (machine.s_rollback_enabled) {
-                            Word old_val = simrv::memory::ram_read_fast(
-                                addr, static_cast<Instruction>(Funct3::Sd), machine.mmem);
-                            record_mem_write(addr, old_val, static_cast<Instruction>(Funct3::Sd));
-                        }
                         simrv::memory::ram_write_fast(addr, static_cast<Word>(ctx.fp_mem_wdata),
                                                       static_cast<Instruction>(Funct3::Sd),
                                                       machine.mmem);
                     } else {
-                        if (machine.s_rollback_enabled) {
-                            Word old1 = simrv::memory::ram_read_fast(
-                                addr, static_cast<Instruction>(Funct3::Sw), machine.mmem);
-                            record_mem_write(addr, old1, static_cast<Instruction>(Funct3::Sw));
-                            Word old2 = simrv::memory::ram_read_fast(
-                                addr + 4, static_cast<Instruction>(Funct3::Sw), machine.mmem);
-                            record_mem_write(addr + 4, old2, static_cast<Instruction>(Funct3::Sw));
-                        }
                         simrv::memory::ram_write_fast(
                             addr,
                             static_cast<Word>(ctx.fp_mem_wdata &
@@ -987,11 +949,6 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
         const unsigned size_bytes = access_size_for_funct3(funct3);
         if (simrv::compiler::likely(simrv::memory::is_dram_access(mem_addr, size_bytes) &&
                                     !is_tohost_addr(machine, mem_addr))) {
-            if (simrv::compiler::unlikely(machine.s_rollback_enabled)) {
-                Word old_val = simrv::memory::ram_read_fast(
-                    mem_addr, static_cast<Instruction>(funct3), machine.mmem);
-                record_mem_write(mem_addr, old_val, static_cast<Instruction>(funct3));
-            }
             simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3),
                                           machine.mmem);
             return true;
@@ -1010,11 +967,6 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
     if (!translation_enabled) {
         if (simrv::compiler::likely(simrv::memory::is_dram_access(mem_addr, size_bytes) &&
                                     !is_tohost_addr(machine, mem_addr))) {
-            if (simrv::compiler::unlikely(machine.s_rollback_enabled)) {
-                Word old_val = simrv::memory::ram_read_fast(
-                    mem_addr, static_cast<Instruction>(funct3), machine.mmem);
-                record_mem_write(mem_addr, old_val, static_cast<Instruction>(funct3));
-            }
             simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3),
                                           machine.mmem);
             return true;
@@ -1027,12 +979,6 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
             [tlb_idx];  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
             Address const paddr = entry.paddr_base + (mem_addr & 0xFFF);
-            if (simrv::compiler::unlikely(machine.s_rollback_enabled) &&
-                simrv::memory::is_dram_access(paddr, size_bytes)) {
-                Word old_val = simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(funct3),
-                                                            machine.mmem);
-                record_mem_write(paddr, old_val, static_cast<Instruction>(funct3));
-            }
             if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
                 simrv::memory::host_write_fast(entry.host_ptr_base + (mem_addr & 0xFFF), rrs2,
                                                static_cast<Instruction>(funct3));
@@ -1084,11 +1030,11 @@ auto CPU::execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Re
         pipeline_context.mem_addr = mem_addr;
     }
     const unsigned size_bytes = access_size_for_funct3(op.funct3);
-    if (simrv::compiler::likely(
-            state_.priv == kPrivMachine && (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0 &&
-            is_aligned_for_funct3(mem_addr, op.funct3) &&
-            simrv::memory::is_dram_access(mem_addr, size_bytes) &&
-            !is_tohost_addr(machine, mem_addr) && !machine.s_rollback_enabled)) {
+    if (simrv::compiler::likely(state_.priv == kPrivMachine &&
+                                (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0 &&
+                                is_aligned_for_funct3(mem_addr, op.funct3) &&
+                                simrv::memory::is_dram_access(mem_addr, size_bytes) &&
+                                !is_tohost_addr(machine, mem_addr))) {
         simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(op.funct3),
                                       machine.mmem);
     } else if (!try_fast_store(machine, mem_addr, op.funct3, rrs2)) {
@@ -1471,64 +1417,6 @@ template void CPU::execute_cached_op_fast<false, false>(Machine& machine, Cached
 template void CPU::execute_cached_op_fast<true, false>(Machine& machine, CachedOp& op);
 template void CPU::execute_cached_op_fast<false, true>(Machine& machine, CachedOp& op);
 template void CPU::execute_cached_op_fast<true, true>(Machine& machine, CachedOp& op);
-
-void CPU::push_undo_state() {
-    UndoStep step;
-    step.state = state_;
-    step.pipeline_context = pipeline_context;
-    step.pipeline_sim_state = pipeline_sim.save_state();
-    step.clint_state = ClintState{.mtime = clint_mmio.mtime,
-                                  .mtimecmp = clint_mmio.mtimecmp,
-                                  .mcycle = clint_mmio.mcycle,
-                                  .rtc_divider = clint_mmio.rtc_divider};
-    step.e_icount = e_icount;
-    step.e_ccount = e_ccount;
-    step.ca_state = ca_state;
-    step.ca_pipeline = ca_pipeline;
-    step.e_instmix = e_instmix;
-    undo_stack.push_front(std::move(step));
-    if (undo_stack.size() > 1024) {
-        undo_stack.pop_back();
-    }
-}
-
-void CPU::record_mem_write(Address paddr, Word old_data, Instruction funct3) {
-    if (undo_stack.empty()) return;
-    auto& step = undo_stack.front();
-    step.mem_writes.push_back(
-        MemWriteRecord{.addr = paddr, .old_data = old_data, .funct3 = funct3});
-}
-
-auto CPU::perform_backstep() -> bool {
-    if (undo_stack.empty()) return false;
-    auto step = std::move(undo_stack.front());
-    undo_stack.pop_front();
-    if (machine_) {
-        machine_->is_shutdown_ = false;
-        machine_->is_running_ = true;
-        for (auto it = step.mem_writes.rbegin(); it != step.mem_writes.rend(); ++it) {
-            simrv::memory::ram_write_fast(it->addr, it->old_data, it->funct3,
-                                          machine_->memory_.mmu()->mmem());
-        }
-    }
-    state_ = step.state;
-    pipeline_context = step.pipeline_context;
-    if (step.pipeline_sim_state.has_value()) {
-        pipeline_sim.restore_state(*step.pipeline_sim_state);
-    }
-    ca_state.reset_instruction();
-    clint_mmio.mtime = step.clint_state.mtime;
-    clint_mmio.mtimecmp = step.clint_state.mtimecmp;
-    clint_mmio.mcycle = step.clint_state.mcycle;
-    clint_mmio.rtc_divider = step.clint_state.rtc_divider;
-    e_icount = step.e_icount;
-    e_ccount = step.e_ccount;
-    ca_state = step.ca_state;
-    ca_pipeline = step.ca_pipeline;
-    e_instmix = step.e_instmix;
-    soft_tlb_flush();
-    return true;
-}
 
 void CPU::push_trace_history(Address pc, Instruction inst, const std::string& symbol) {
     // O(1) ring buffer write — no heap allocation, no shifting

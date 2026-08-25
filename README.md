@@ -69,7 +69,7 @@ Override MISA profile or Vector register length (VLEN):
 
 ## Interactive TUI
 
-The TUI supports stepping, rollback, and hardware-state inspection.
+The TUI supports forward stepping, breakpoints, and hardware-state inspection.
 
 ### Key Shortcuts
 
@@ -78,9 +78,8 @@ The TUI supports stepping, rollback, and hardware-state inspection.
 | `[s]` / `[Space]` | Single instruction step |
 | `[c]` / `[Ctrl-P]` | Run / Pause simulation loop |
 | `[Click Label]` / `[Click Badge]` | Click active running badge to pause |
-| `[b]` | Step back 1 instruction (Rollback tracking) |
 | `[o]` / `[Alt-O]` | Open Binary / Disk image loader modal |
-| `[,]` / `[Alt-S]` | Simulator Settings modal (CA/IA mode, rollback, logging) |
+| `[,]` / `[Alt-S]` | Simulator Settings modal (CA/IA mode, diagnostics, logging) |
 | `[Alt-M]` | Configure MISA CSR modal (Extensions A/B/C/D/F/M/V/S/U & VLEN) |
 | `[y]` | Cycle-Accurate System Config modal |
 | `[i]` | Memory inspector modal |

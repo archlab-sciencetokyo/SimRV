@@ -216,32 +216,6 @@ struct alignas(32) SoftTlbEntry {
     }
 };
 
-struct MemWriteRecord {
-    Address addr = 0;
-    Word old_data = 0;
-    Instruction funct3 = 0;
-};
-
-struct ClintState {
-    Counter mtime = 0;
-    Counter mtimecmp = 0;
-    Counter mcycle = 0;
-    int rtc_divider = 0;
-};
-
-struct UndoStep {
-    simrv::core::ArchState state;
-    std::vector<MemWriteRecord> mem_writes;
-    simrv::pipeline::PipelineContext pipeline_context;
-    std::optional<simrv::pipeline::PipelineSimState> pipeline_sim_state;
-    ClintState clint_state;
-    uint64_t e_icount = 0;
-    Counter e_ccount = 0;
-    simrv::pipeline::HartCycleState ca_state{};
-    simrv::pipeline::HartPipelineState ca_pipeline{};
-    std::array<uint64_t, isa::OperationIdCount> e_instmix{};
-};
-
 enum class HartStatus : uint8_t {
     Started = 0,
     Stopped = 1,
@@ -630,12 +604,6 @@ class CPU {
     uint64_t e_icount{0};                                     // Total instruction count
     Counter e_ccount = 0;                                     // Compressed instructions executed
     std::array<uint64_t, isa::OperationIdCount> e_instmix{};  // Instruction-mix statistics
-
-    // ========== Reverse Stepping / Time-Travel Debugging ==========
-    std::deque<UndoStep> undo_stack;
-    void push_undo_state();
-    void record_mem_write(Address paddr, Word old_data, Instruction funct3);
-    auto perform_backstep() -> bool;
 };
 
 }  // namespace simrv::core

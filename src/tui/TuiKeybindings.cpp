@@ -9,19 +9,13 @@
 
 namespace simrv::tui {
 
-static const std::array<KeyBindingInfo, 27> kKeyBindings = {
+static const std::array<KeyBindingInfo, 26> kKeyBindings = {
     {{.action = KeyAction::Step,
       .key_display = "[s] / [Space]",
       .primary_char = 's',
       .alt_char = 'S',
       .footer_label = "[s] Step",
       .help_label = "Step 1 instruction"},
-     {.action = KeyAction::Backstep,
-      .key_display = "[b]",
-      .primary_char = 'b',
-      .alt_char = 'B',
-      .footer_label = "[b] Back",
-      .help_label = "Undo step / Backstep"},
      {.action = KeyAction::RunPause,
       .key_display = "[c] / [Space] / [Ctrl-P]",
       .primary_char = 'c',
@@ -213,7 +207,6 @@ auto Keybindings::unavailable_reason(KeyAction action, const ActionContext& cont
     }
     switch (action) {
         case KeyAction::Step:
-        case KeyAction::Backstep:
         case KeyAction::SetBreakpoint:
         case KeyAction::SetWatchpoint:
         case KeyAction::ManageBreakpoints:
@@ -228,13 +221,10 @@ auto Keybindings::unavailable_reason(KeyAction action, const ActionContext& cont
         default:
             break;
     }
-    if ((action == KeyAction::Step || action == KeyAction::Backstep ||
-         action == KeyAction::RunPause || action == KeyAction::ToggleExplain) &&
+    if ((action == KeyAction::Step || action == KeyAction::RunPause ||
+         action == KeyAction::ToggleExplain) &&
         !context.image_loaded) {
         return "Load a program image first";
-    }
-    if ((action == KeyAction::Backstep) && !context.rollback_enabled) {
-        return "Enable rollback tracking first";
     }
     if ((action == KeyAction::SetBreakpoint || action == KeyAction::SetWatchpoint ||
          action == KeyAction::ManageBreakpoints || action == KeyAction::TogglePcBreakpoint) &&
@@ -260,8 +250,6 @@ auto key_action_for_footer(TuiFooterAction action) -> KeyAction {
     switch (action) {
         case TuiFooterAction::Step:
             return KeyAction::Step;
-        case TuiFooterAction::StepBack:
-            return KeyAction::Backstep;
         case TuiFooterAction::CycleRegs:
             return KeyAction::CycleRegPage;
         case TuiFooterAction::CycleTools:

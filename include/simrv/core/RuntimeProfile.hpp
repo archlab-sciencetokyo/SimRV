@@ -31,7 +31,6 @@ struct RuntimeProfile {
     InteractionMode interaction = InteractionMode::Cli;
     bool debug_diagnostics = false;
     bool tracing = false;
-    bool rollback = false;
     bool lockstep = false;
     bool gdb = false;
 
@@ -50,7 +49,7 @@ struct RuntimeProfile {
         const bool sampled_tui_engine =
             engine == ExecutionEngine::InstructionObservable && interaction == InteractionMode::Tui;
         return (fast_instruction_engine || sampled_tui_engine) && !debug_diagnostics && !tracing &&
-               !rollback && !lockstep && !gdb;
+               !lockstep && !gdb;
     }
     [[nodiscard]] constexpr auto fast_batch_quantum() const -> unsigned {
         return interaction == InteractionMode::Tui ? 2048U : 65536U;

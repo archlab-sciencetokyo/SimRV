@@ -17,8 +17,7 @@ namespace simrv::tui {
 namespace {
 
 [[nodiscard]] auto use_basic_ansi_badges() -> bool {
-    return get_tui_theme() == TuiTheme::Adaptive ||
-           get_tui_theme() == TuiTheme::HighContrast ||
+    return get_tui_theme() == TuiTheme::Adaptive || get_tui_theme() == TuiTheme::HighContrast ||
            get_tui_theme() == TuiTheme::ClassicAnsi ||
            get_active_theme_style() == TuiThemeStyle::ClassicAnsi;
 }
@@ -41,8 +40,9 @@ namespace {
         machine.tui ? machine.tui->step_delay_us_.load(std::memory_order_relaxed) : 0;
     if (delay > 0) {
         double const hz = 1000000.0 / static_cast<double>(delay);
-        if (width < 60) return hz >= 1000.0 ? std::format("{:.0f}kHz", hz / 1000.0)
-                                             : std::format("{:.0f}Hz", hz);
+        if (width < 60)
+            return hz >= 1000.0 ? std::format("{:.0f}kHz", hz / 1000.0)
+                                : std::format("{:.0f}Hz", hz);
         return hz >= 1000.0 ? std::format("SPEED {:.0f}kHz", hz / 1000.0)
                             : std::format("SPEED {:.1f}Hz", hz);
     }
@@ -202,16 +202,14 @@ auto StatusBar::get_header_action_at_col(int col, int terminal_width) const -> H
 
     if (right_panel_mode_ == TuiRightPanelMode::Terminal) {
         const bool attached = machine_.tui && machine_.tui->is_terminal_attached();
-        std::string const focus_label = target_right_w < 45
-                                            ? (attached ? "ON" : "OFF")
-                                            : (attached ? "ATTACHED" : "DETACHED");
+        std::string const focus_label =
+            target_right_w < 45 ? (attached ? "ON" : "OFF") : (attached ? "ATTACHED" : "DETACHED");
         if (hit_badge(focus_label)) return {.action = HeaderAction::ToggleAttached};
     }
 
     if (machine_.num_harts() > 1) {
         size_t const selected = machine_.tui ? machine_.tui->selected_hart() : 0;
-        std::string const hart_label =
-            std::format("HART {}/{}", selected, machine_.num_harts());
+        std::string const hart_label = std::format("HART {}/{}", selected, machine_.num_harts());
         if (hit_badge(hart_label)) {
             return {.action = HeaderAction::SelectHart,
                     .hart_index = (selected + 1) % machine_.num_harts()};
@@ -238,14 +236,6 @@ struct FooterEntry {
 static const auto paused_row1_entries = std::to_array<FooterEntry>({
     {.text = "[s] Step",
      .action = TuiFooterAction::Step,
-     .category = FooterCategory::Exec,
-     .priority = FooterPriority::Core},
-    {.text = "  ",
-     .action = std::nullopt,
-     .category = FooterCategory::Spacer,
-     .priority = FooterPriority::Core},
-    {.text = "[b] Back",
-     .action = TuiFooterAction::StepBack,
      .category = FooterCategory::Exec,
      .priority = FooterPriority::Core},
     {.text = "  ",
@@ -566,33 +556,32 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
                 const std::string_view key = text_sv.substr(1, close_bracket - 1);
                 const char* ansi_color = alternate_shade ? "\033[100;37m" : "\033[47;30m";
                 const char* indexed_color =
-                    alternate_shade ? "\033[48;5;238;38;5;255m"
-                                    : "\033[48;5;245;38;5;232m";
+                    alternate_shade ? "\033[48;5;238;38;5;255m" : "\033[48;5;245;38;5;232m";
                 switch (e.category) {
                     case FooterCategory::Exec:
                         ansi_color = alternate_shade ? "\033[100;37m" : "\033[43;30m";
-                        indexed_color = alternate_shade ? "\033[48;5;179;38;5;232m"
-                                                        : "\033[48;5;223;38;5;232m";
+                        indexed_color =
+                            alternate_shade ? "\033[48;5;179;38;5;232m" : "\033[48;5;223;38;5;232m";
                         break;
                     case FooterCategory::Debug:
                         ansi_color = alternate_shade ? "\033[100;37m" : "\033[42;30m";
-                        indexed_color = alternate_shade ? "\033[48;5;71;38;5;232m"
-                                                        : "\033[48;5;121;38;5;232m";
+                        indexed_color =
+                            alternate_shade ? "\033[48;5;71;38;5;232m" : "\033[48;5;121;38;5;232m";
                         break;
                     case FooterCategory::Config:
                         ansi_color = alternate_shade ? "\033[100;37m" : "\033[46;30m";
-                        indexed_color = alternate_shade ? "\033[48;5;73;38;5;232m"
-                                                        : "\033[48;5;117;38;5;232m";
+                        indexed_color =
+                            alternate_shade ? "\033[48;5;73;38;5;232m" : "\033[48;5;117;38;5;232m";
                         break;
                     case FooterCategory::Inspect:
                         ansi_color = alternate_shade ? "\033[100;37m" : "\033[45;37m";
-                        indexed_color = alternate_shade ? "\033[48;5;132;38;5;255m"
-                                                        : "\033[48;5;211;38;5;232m";
+                        indexed_color =
+                            alternate_shade ? "\033[48;5;132;38;5;255m" : "\033[48;5;211;38;5;232m";
                         break;
                     case FooterCategory::Sys:
                         ansi_color = alternate_shade ? "\033[100;37m" : "\033[41;37m";
-                        indexed_color = alternate_shade ? "\033[48;5;167;38;5;255m"
-                                                        : "\033[48;5;210;38;5;232m";
+                        indexed_color =
+                            alternate_shade ? "\033[48;5;167;38;5;255m" : "\033[48;5;210;38;5;232m";
                         break;
                     case FooterCategory::Separator:
                     case FooterCategory::Spacer:
@@ -642,8 +631,8 @@ auto StatusBar::get_footer_action_at_col(int col, int row_idx, int terminal_widt
                                       false, col)
                 .second;
         if (row_idx == 1)
-            return process_footer_row(paused_row2_entries, terminal_width - 2, is_dbg, is_smp,
-                                      true, col)
+            return process_footer_row(paused_row2_entries, terminal_width - 2, is_dbg, is_smp, true,
+                                      col)
                 .second;
     } else {
         if (row_idx == 0)
@@ -720,37 +709,31 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                     panel_mode_label(right_panel_mode_, target_right_width, trace_enabled_);
                 std::string const mode_badge =
                     header_badge(term_title, "\033[46;30m", "\033[48;5;117;38;5;232m");
-                std::string const focus_badge = term_focused
-                                                    ? header_badge(
-                                                          target_right_width < 45 ? "ON" : "ATTACHED",
-                                                          "\033[42;30m",
-                                                          "\033[48;5;121;38;5;232m")
-                                                    : header_badge(
-                                                          target_right_width < 45 ? "OFF" : "DETACHED",
-                                                          "\033[47;30m",
-                                                          "\033[48;5;245;38;5;232m");
+                std::string const focus_badge =
+                    term_focused ? header_badge(target_right_width < 45 ? "ON" : "ATTACHED",
+                                                "\033[42;30m", "\033[48;5;121;38;5;232m")
+                                 : header_badge(target_right_width < 45 ? "OFF" : "DETACHED",
+                                                "\033[47;30m", "\033[48;5;245;38;5;232m");
                 mode_prefix = " " + mode_badge + " " + focus_badge;
                 break;
             }
             case TuiRightPanelMode::Display:
             default:
-                mode_prefix = " " + header_badge(
-                                          panel_mode_label(right_panel_mode_, target_right_width,
-                                                           trace_enabled_),
-                                          "\033[46;30m", "\033[48;5;117;38;5;232m");
+                mode_prefix =
+                    " " + header_badge(panel_mode_label(right_panel_mode_, target_right_width,
+                                                        trace_enabled_),
+                                       "\033[46;30m", "\033[48;5;117;38;5;232m");
                 break;
         }
 
         if (machine_.num_harts() > 1) {
-            std::string const hart_label = std::format("HART {}/{}", selected, machine_.num_harts());
-            mode_prefix += " " + header_badge(hart_label, "\033[45;37m",
-                                                "\033[48;5;183;38;5;232m");
+            std::string const hart_label =
+                std::format("HART {}/{}", selected, machine_.num_harts());
+            mode_prefix += " " + header_badge(hart_label, "\033[45;37m", "\033[48;5;183;38;5;232m");
         }
         std::string const speed_label =
             speed_control_label(machine_, kips_, paused_, target_right_width);
-        mode_prefix += " " +
-                       header_badge(speed_label, "\033[43;30m",
-                                    "\033[48;5;223;38;5;232m");
+        mode_prefix += " " + header_badge(speed_label, "\033[43;30m", "\033[48;5;223;38;5;232m");
 
         int const prefix_w = get_display_width(mode_prefix);
         int const available_mid_w = target_right_width - prefix_w - 2;
@@ -771,17 +754,15 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             std::string const metric_sep = std::format(" {}·\033[0m ", kThemeMuted);
 
             if (machine_.runtime_profile.is_cycle_mode()) {
-                std::string full_stats =
-                    std::format("Cycles {}{}Instruction Count {}{}CPI {:.2f}",
-                                format_metric_count(cycles), metric_sep,
-                                format_metric_count(icount), metric_sep, cpi);
+                std::string full_stats = std::format("Cycles {}{}Instruction Count {}{}CPI {:.2f}",
+                                                     format_metric_count(cycles), metric_sep,
+                                                     format_metric_count(icount), metric_sep, cpi);
                 if (get_display_width(full_stats) <= available_mid_w) {
                     mid_text = full_stats;
                 } else {
-                    std::string med_stats =
-                        std::format("Cycles {}{}Instructions {}{}CPI {:.2f}",
-                                    format_metric_count(cycles), metric_sep,
-                                    format_metric_count(icount), metric_sep, cpi);
+                    std::string med_stats = std::format(
+                        "Cycles {}{}Instructions {}{}CPI {:.2f}", format_metric_count(cycles),
+                        metric_sep, format_metric_count(icount), metric_sep, cpi);
                     if (get_display_width(med_stats) <= available_mid_w) {
                         mid_text = med_stats;
                     } else {

@@ -658,10 +658,6 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         options.lockstep_mode = true;
         return true;
     }
-    if (arg == "--rollback") {
-        options.rollback = true;
-        return true;
-    }
     if (arg == "--step-delay" || arg == "--speed") {
         auto value = next_argument(args, i, std::string(arg));
         if (!value) return std::unexpected(value.error());
@@ -830,7 +826,6 @@ auto resolve_runtime_profile(const RuntimeOptions& options) -> simrv::core::Runt
     profile.debug_diagnostics = options.debug_mode || options.debugmode;
     profile.tracing = options.bp_trace || options.trace_enabled || options.strace != 0 ||
                       options.trace_begin != std::numeric_limits<Counter>::max();
-    profile.rollback = options.rollback || options.debug_mode;
     profile.lockstep = options.lockstep_mode;
     profile.gdb = options.gdb_mode;
     return profile;
@@ -877,19 +872,17 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     if (options.debug_mode) {
         machine->s_use_mix = true;
         machine->s_bp_trace = options.bp_trace;
-        machine->s_rollback_enabled = true;
     } else {
         machine->s_use_mix = options.use_mix;
         machine->s_bp_trace = options.bp_trace;
     }
 
     machine->runtime_profile = resolve_runtime_profile(options);
-    simrv::log::info("Runtime profile: {} execution, {} interaction{}{}{}",
+    simrv::log::info("Runtime profile: {} execution, {} interaction{}{}",
                      machine->runtime_profile.execution_name(),
                      machine->runtime_profile.interaction_name(),
                      machine->runtime_profile.debug_diagnostics ? ", diagnostics enabled" : "",
-                     machine->runtime_profile.tracing ? ", tracing enabled" : "",
-                     machine->runtime_profile.rollback ? ", rollback enabled" : "");
+                     machine->runtime_profile.tracing ? ", tracing enabled" : "");
     machine->s_fn_cpuconfig = options.fn_cpuconfig;
     const auto parsed_pipe = *pipeline::parse_pipeline_type(options.pipeline_type);
     machine->s_pipeline_type = parsed_pipe;
@@ -960,7 +953,6 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     machine->s_lockstep_mode = options.lockstep_mode;
     machine->s_spike_bin = options.spike_bin;
     machine->s_spike_elf = options.spike_elf;
-    machine->s_rollback_enabled = options.rollback;
     machine->s_platform_profile = options.platform_profile;
     machine->s_net_mode = options.net_mode;
     if (machine->tui && options.step_delay_us > 0) {

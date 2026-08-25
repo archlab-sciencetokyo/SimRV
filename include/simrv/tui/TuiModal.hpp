@@ -10,9 +10,9 @@
 #include <string>
 #include <vector>
 
+#include "simrv/tui/framework/Types.hpp"
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
-#include "simrv/tui/framework/Types.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -103,7 +103,6 @@ struct SettingsDraft {
     // Tab 0: General / UI
     bool cycle_accurate = false;
     bool debug_mode = false;
-    bool rollback_enabled = false;
     bool high_contrast = false;
     bool class_mode = false;
     uint32_t tui_fps = 30;

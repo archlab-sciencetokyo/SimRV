@@ -60,7 +60,6 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     std::optional<std::string> override_disk;
     std::optional<bool> override_cycle_mode;
     std::optional<bool> override_debug_mode;
-    std::optional<bool> override_rollback;
     std::optional<bool> override_high_contrast;
     std::optional<bool> override_class_mode;
     std::optional<bool> override_use_mix;
@@ -102,9 +101,6 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         }
         if (override_debug_mode.has_value()) {
             parsed->options.debug_mode = *override_debug_mode;
-        }
-        if (override_rollback.has_value()) {
-            parsed->options.rollback = *override_rollback;
         }
         if (override_high_contrast.has_value()) {
             parsed->options.high_contrast = *override_high_contrast;
@@ -238,7 +234,6 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
             override_cycle_mode = sim_machine->runtime_profile.is_cycle_mode();
             override_debug_mode = sim_machine->s_debug_mode;
-            override_rollback = sim_machine->s_rollback_enabled;
             override_high_contrast = sim_machine->s_high_contrast;
             override_class_mode = sim_machine->s_class_mode;
             override_use_mix = sim_machine->s_use_mix;

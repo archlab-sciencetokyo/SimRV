@@ -502,6 +502,12 @@ set_tests_properties(cli-invalid-option PROPERTIES
   LABELS "gate;regress;cli"
 )
 
+add_test(NAME cli-removed-rollback COMMAND $<TARGET_FILE:SimRV> --rollback)
+set_tests_properties(cli-removed-rollback PROPERTIES
+  PASS_REGULAR_EXPRESSION "unknown option"
+  LABELS "gate;regress;cli"
+)
+
 add_test(NAME cli-conflicting-execution COMMAND $<TARGET_FILE:SimRV> --ca --ia)
 set_tests_properties(cli-conflicting-execution PROPERTIES
   WILL_FAIL TRUE

@@ -149,7 +149,7 @@ void test_utf8_and_theme_helpers() {
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 27, "all key actions have registry entries");
+    expect(bindings.size() == 26, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
     std::set<char> claimed_chars;
     for (const auto& binding : bindings) {
@@ -177,7 +177,6 @@ void test_key_registry() {
 
     constexpr simrv::tui::TuiFooterAction footer_actions[] = {
         simrv::tui::TuiFooterAction::Step,
-        simrv::tui::TuiFooterAction::StepBack,
         simrv::tui::TuiFooterAction::CycleRegs,
         simrv::tui::TuiFooterAction::CycleTools,
         simrv::tui::TuiFooterAction::SetBreakpoint,
@@ -218,11 +217,10 @@ void test_key_registry() {
 
     using simrv::tui::ActionContext;
     using simrv::tui::KeyAction;
-    ActionContext paused{.paused = true,
-                         .image_loaded = true,
-                         .debug_mode = true,
-                         .cycle_accurate = true,
-                         .rollback_enabled = true};
+    expect(!claimed_chars.contains('b') && !claimed_chars.contains('B'),
+           "removed backstep keys remain unbound");
+    ActionContext paused{
+        .paused = true, .image_loaded = true, .debug_mode = true, .cycle_accurate = true};
     expect(simrv::tui::Keybindings::is_available(KeyAction::Step, paused),
            "step is available for a paused loaded image");
     auto running = paused;
@@ -286,19 +284,19 @@ void test_sysconfig_modal_modes() {
     settings_draft.smp_multithreaded = false;
     int s_cursor = 0;
 
-    SettingsModal::move_cursor(s_cursor, 5);
-    expect(s_cursor == 5, "Settings modal advances cursor to TUI Target Refresh Rate");
+    SettingsModal::move_cursor(s_cursor, 4);
+    expect(s_cursor == 4, "Settings modal advances cursor to TUI Target Refresh Rate");
 
-    SettingsModal::adjust_setting(settings_draft, 5, 1);
+    SettingsModal::adjust_setting(settings_draft, 4, 1);
     expect(settings_draft.tui_fps == 60, "Settings modal cycles TUI FPS to 60");
 
-    SettingsModal::adjust_setting(settings_draft, 6, 3);
+    SettingsModal::adjust_setting(settings_draft, 5, 3);
     expect(settings_draft.num_harts == 4, "Settings modal adjusts SMP active core count");
 
-    SettingsModal::adjust_setting(settings_draft, 7, 1);
+    SettingsModal::adjust_setting(settings_draft, 6, 1);
     expect(settings_draft.smp_multithreaded == true, "Settings modal toggles SMP worker threads");
 
-    SettingsModal::adjust_setting(settings_draft, 8, 1);
+    SettingsModal::adjust_setting(settings_draft, 7, 1);
     expect(settings_draft.smp_quantum == 2500, "Settings modal advances SMP quantum level");
 
     // Verify render text in IA mode contains disabled note for CA options

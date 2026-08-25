@@ -32,7 +32,7 @@ Machine::Machine() : memory_(*this) { cpu.machine_ = this; }
 
 auto Machine::can_execute_fast_batch() const -> bool {
     if (!runtime_profile.allows_fast_batch() || s_lockstep_mode || s_gdb_mode || s_bp_trace ||
-        s_strace != 0 || breakpoints.has_any() || s_rollback_enabled) {
+        s_strace != 0 || breakpoints.has_any()) {
         return false;
     }
     if (s_tuimode && (!tui || tui->is_trace_active() ||
