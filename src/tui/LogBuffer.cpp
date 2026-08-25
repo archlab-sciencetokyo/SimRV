@@ -157,11 +157,13 @@ void LogBuffer::push(std::string message) {
         entries_.pop_front();
     }
     entries_.push_back(LogEntry{.text = std::move(message)});
+    ++revision_;
 }
 
 void LogBuffer::clear() {
     std::scoped_lock lock(mutex_);
     entries_.clear();
+    ++revision_;
 }
 
 auto LogBuffer::size() const -> std::size_t {
@@ -179,6 +181,9 @@ auto LogBuffer::get_wrapped_lines(int max_width, int max_rows) const -> std::vec
     if (entries_.empty() || max_width <= 0 || max_rows <= 0) {
         return {};
     }
+    if (cached_revision_ == revision_ && cached_width_ == max_width && cached_rows_ == max_rows) {
+        return cached_wrapped_lines_;
+    }
 
     std::vector<std::string> all_wrapped;
     for (const auto& entry : entries_) {
@@ -193,14 +198,17 @@ auto LogBuffer::get_wrapped_lines(int max_width, int max_rows) const -> std::vec
     }
 
     if (static_cast<int>(all_wrapped.size()) <= max_rows) {
-        return all_wrapped;
+        cached_wrapped_lines_ = std::move(all_wrapped);
+    } else {
+        cached_wrapped_lines_.clear();
+        cached_wrapped_lines_.reserve(static_cast<std::size_t>(max_rows));
+        auto start_it = all_wrapped.end() - max_rows;
+        cached_wrapped_lines_.insert(cached_wrapped_lines_.end(), start_it, all_wrapped.end());
     }
-
-    std::vector<std::string> result;
-    result.reserve(static_cast<std::size_t>(max_rows));
-    auto start_it = all_wrapped.end() - max_rows;
-    result.insert(result.end(), start_it, all_wrapped.end());
-    return result;
+    cached_revision_ = revision_;
+    cached_width_ = max_width;
+    cached_rows_ = max_rows;
+    return cached_wrapped_lines_;
 }
 
 }  // namespace simrv::tui

@@ -439,7 +439,9 @@ void test_category_groups_and_glossary() {
     std::vector<std::string> scrolled_pipeline_rows;
     simrv::tui::modals::GlossaryModal::render(
         scrolled_pipeline_rows,
-        [&scrolled_pipeline_rows](const std::string& row) { scrolled_pipeline_rows.push_back(row); },
+        [&scrolled_pipeline_rows](const std::string& row) {
+            scrolled_pipeline_rows.push_back(row);
+        },
         1, 2, 16, 78);
     std::vector<std::string> unscrolled_pipeline_rows;
     simrv::tui::modals::GlossaryModal::render(
@@ -632,8 +634,7 @@ void test_frame_composition() {
         },
         [](int, int) { return std::string{}; });
     const std::string split_junction = strip_ansi(junction_lines.at(5));
-    expect(split_junction.starts_with("╟"),
-           "left-pane section rules join the double outer border");
+    expect(split_junction.starts_with("╟"), "left-pane section rules join the double outer border");
     expect(split_junction.find("┤") != std::string::npos,
            "left-pane section rules join the split-pane divider");
     expect(simrv::tui::get_display_width(junction_lines.at(5)) == 80,
@@ -719,6 +720,12 @@ void test_log_buffer_wrapping() {
 
     auto lines_w100 = buffer.get_wrapped_lines(100, 20);
     expect(lines_w100.size() == 2, "Log reflows to 2 lines when width=100");
+    expect(buffer.get_wrapped_lines(100, 20) == lines_w100,
+           "Repeated log wrapping returns the cached layout");
+    buffer.push("Cache invalidation line");
+    auto updated = buffer.get_wrapped_lines(100, 20);
+    expect(updated.size() == 3 && strip_ansi(updated.back()) == "Cache invalidation line",
+           "Appending a log entry invalidates the wrapped layout cache");
 }
 
 void test_modal_components() {
@@ -743,8 +750,8 @@ void test_modal_components() {
            "Modal footer renders filled keycaps and action labels");
     const int footer_width = simrv::tui::get_display_width(footer);
     const auto centered_footer = align_modal_control_row(footer, 60);
-    expect(strip_ansi(centered_footer).starts_with(
-               std::string(static_cast<std::size_t>((60 - footer_width) / 2), ' ')),
+    expect(strip_ansi(centered_footer)
+               .starts_with(std::string(static_cast<std::size_t>((60 - footer_width) / 2), ' ')),
            "modal footer uses the shared control-row centering policy");
     const auto footer_layout = layout_modal_control_row(footer, 60);
     expect(footer_layout.spans.size() == 2 &&
@@ -760,8 +767,8 @@ void test_modal_components() {
            "Modal tab bar renders all numbered tabs");
     const int tab_width = simrv::tui::get_display_width(tab_bar);
     const auto centered_tabs = align_modal_control_row(tab_bar, 48);
-    expect(strip_ansi(centered_tabs).starts_with(
-               std::string(static_cast<std::size_t>((48 - tab_width) / 2), ' ')),
+    expect(strip_ansi(centered_tabs)
+               .starts_with(std::string(static_cast<std::size_t>((48 - tab_width) / 2), ' ')),
            "modal tabs use the shared control-row centering policy");
 
     // Test section divider and menu item row

@@ -3,7 +3,7 @@
  * @brief Thread-safe LR/SC reservation tracking for multi-hart RISC-V systems.
  */
 #pragma once
-
+#include <atomic>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
@@ -45,6 +45,7 @@ class ReservationTable {
             .address = addr & kReservationGranuleMask,
             .valid = true,
         };
+        may_have_reservations_.store(true, std::memory_order_release);
     }
 
     /**
@@ -118,6 +119,13 @@ class ReservationTable {
     void clear_all() {
         const std::scoped_lock lock(mutex_);
         reservations_.clear();
+        may_have_reservations_.store(false, std::memory_order_release);
+    }
+
+    /// False guarantees that an ordinary store has no LR/SC reservation to invalidate. True is
+    /// deliberately conservative until reset, keeping the common no-LR workload lock-free.
+    [[nodiscard]] auto may_have_reservations() const noexcept -> bool {
+        return may_have_reservations_.load(std::memory_order_acquire);
     }
 
    private:
@@ -128,6 +136,7 @@ class ReservationTable {
 
     mutable std::mutex mutex_;
     std::unordered_map<HartId, ReservationEntry> reservations_;
+    std::atomic<bool> may_have_reservations_{false};
 };
 
 }  // namespace simrv::memory

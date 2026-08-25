@@ -1101,8 +1101,10 @@ auto CPU::execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Re
     }
 
     state_.reserved = 0;
-    machine.memory_.reservation_table().invalidate_matching(mem_addr,
-                                                            static_cast<HartId>(state_.mhartid));
+    auto& reservations = machine.memory_.reservation_table();
+    if (simrv::compiler::unlikely(reservations.may_have_reservations())) {
+        reservations.invalidate_matching(mem_addr, static_cast<HartId>(state_.mhartid));
+    }
     advance_cached_pc(op);
     return true;
 }
@@ -1398,7 +1400,8 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
             } else {
                 run_cycle_baremetal(machine);
             }
-            if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running())) {
+            if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running() ||
+                                          ((b & 0xffU) == 0 && machine.is_paused()))) {
                 break;
             }
         }
@@ -1411,7 +1414,15 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
             } else {
                 run_cycle_baremetal(machine);
             }
-            if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running())) {
+            const bool tui_ebreak =
+                machine.s_tuimode && pipeline_context.opcode == isa::Opcode::System &&
+                pipeline_context.funct12 == static_cast<Word>(isa::Funct12Priv::Ebreak);
+            if (simrv::compiler::unlikely(tui_ebreak && machine.tui)) {
+                machine.tui->pause_loop();
+                break;
+            }
+            if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running() ||
+                                          ((b & 0xffU) == 0 && machine.is_paused()))) {
                 break;
             }
         }
@@ -1424,7 +1435,8 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
             } else {
                 run_cycle_baremetal(machine);
             }
-            if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running())) {
+            if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running() ||
+                                          ((b & 0xffU) == 0 && machine.is_paused()))) {
                 break;
             }
         }
@@ -1437,7 +1449,8 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
             } else {
                 run_cycle_baremetal(machine);
             }
-            if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running())) {
+            if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running() ||
+                                          ((b & 0xffU) == 0 && machine.is_paused()))) {
                 break;
             }
         }

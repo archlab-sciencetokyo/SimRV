@@ -80,6 +80,9 @@ void OSMachine::execute_cycle() {
 }
 
 auto OSMachine::execute_fast_batch(uint32_t batch_size) -> bool {
+    // OS-mode TUI execution remains per-instruction: guest UART/device handshakes and terminal
+    // response sequences are observable boundaries that cannot yet be crossed by a batch.
+    if (runtime_profile.engine == ExecutionEngine::InstructionObservable) return false;
     if (simrv::compiler::likely(can_execute_fast_batch())) {
         if (s_fincnt != std::numeric_limits<Counter>::max()) {
             if (cpu.e_icount >= s_fincnt) {

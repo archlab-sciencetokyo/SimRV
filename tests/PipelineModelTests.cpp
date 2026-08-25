@@ -95,10 +95,13 @@ void test_runtime_profile_policy() {
     profile.engine = ExecutionEngine::CycleObservable;
     TEST_CHECK(profile.records_cycle_history());
 
-    profile.engine = ExecutionEngine::InstructionFast;
+    profile.engine = ExecutionEngine::InstructionObservable;
     profile.interaction = InteractionMode::Tui;
-    TEST_CHECK(!profile.allows_fast_batch());
+    TEST_CHECK(profile.allows_fast_batch());
+    TEST_CHECK(profile.fast_batch_quantum() == 2048);
+    profile.engine = ExecutionEngine::InstructionFast;
     profile.interaction = InteractionMode::Cli;
+    TEST_CHECK(profile.fast_batch_quantum() == 65536);
     profile.tracing = true;
     TEST_CHECK(!profile.allows_fast_batch());
 

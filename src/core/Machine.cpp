@@ -35,6 +35,10 @@ auto Machine::can_execute_fast_batch() const -> bool {
         s_strace != 0 || breakpoints.has_any() || s_rollback_enabled) {
         return false;
     }
+    if (s_tuimode && (!tui || tui->is_trace_active() ||
+                      tui->step_delay_us_.load(std::memory_order_relaxed) != 0 || is_stepping())) {
+        return false;
+    }
     return true;
 }
 
@@ -194,8 +198,6 @@ void Machine::run() {
         }
     }
 
-    constexpr uint32_t kBatchSize = 65536;
-
     while (is_running() &&
            execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
         if (s_tuimode && tui && tui->is_tui_paused()) {
@@ -210,7 +212,7 @@ void Machine::run() {
             tui->set_sim_thread_sleeping(false);
         }
 
-        if (execute_fast_batch(kBatchSize)) {
+        if (execute_fast_batch(runtime_profile.fast_batch_quantum())) {
             if (simrv::compiler::unlikely(tracer.fp_trace.is_open())) {
                 tracer.write_trace_snapshot();
             }

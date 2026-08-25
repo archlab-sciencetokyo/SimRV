@@ -46,8 +46,14 @@ struct RuntimeProfile {
         return engine == ExecutionEngine::CycleObservable;
     }
     [[nodiscard]] constexpr auto allows_fast_batch() const -> bool {
-        return engine == ExecutionEngine::InstructionFast && interaction == InteractionMode::Cli &&
-               !debug_diagnostics && !tracing && !rollback && !lockstep && !gdb;
+        const bool fast_instruction_engine = engine == ExecutionEngine::InstructionFast;
+        const bool sampled_tui_engine =
+            engine == ExecutionEngine::InstructionObservable && interaction == InteractionMode::Tui;
+        return (fast_instruction_engine || sampled_tui_engine) && !debug_diagnostics && !tracing &&
+               !rollback && !lockstep && !gdb;
+    }
+    [[nodiscard]] constexpr auto fast_batch_quantum() const -> unsigned {
+        return interaction == InteractionMode::Tui ? 2048U : 65536U;
     }
     [[nodiscard]] constexpr auto execution_name() const -> std::string_view {
         switch (engine) {

@@ -11,6 +11,7 @@
 
 #include <array>
 #include <cctype>
+#include <cerrno>
 #include <charconv>
 #include <chrono>
 #include <csignal>
@@ -39,6 +40,23 @@ static struct termios
     g_saved_termios;                  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 static bool g_termios_saved = false;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 static bool g_tui_active = false;     // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+namespace {
+
+void write_all(int fd, std::string_view data) {
+    while (!data.empty()) {
+        const auto written = ::write(fd, data.data(), data.size());
+        if (written > 0) {
+            data.remove_prefix(static_cast<std::size_t>(written));
+        } else if (written < 0 && errno == EINTR) {
+            continue;
+        } else {
+            break;
+        }
+    }
+}
+
+}  // namespace
 
 extern "C" void emergency_terminal_restore() {
     std::fflush(stdout);
@@ -324,14 +342,17 @@ void Tui::trigger_immediate_render() {
 
 void Tui::ui_render_loop(const std::stop_token& stop_token) {
     while (!stop_token.stop_requested() && ui_running_.load(std::memory_order_relaxed)) {
+        processing_ui_input_.store(true, std::memory_order_release);
         update();
+        processing_ui_input_.store(false, std::memory_order_release);
 
+        const bool force = full_render_requested_.exchange(false, std::memory_order_acq_rel);
         if (g_resized) {
             update_cache();
             render(true);
         } else {
             update_cache();
-            render();
+            render(force);
         }
 
         const bool is_sim_paused = is_paused();
@@ -356,13 +377,19 @@ void Tui::ui_render_loop(const std::stop_token& stop_token) {
 }
 
 void Tui::handle_char_write(char ch) {
-    std::scoped_lock lock(io_mutex_);
-    tx_fifo_.push(ch);
+    {
+        std::scoped_lock lock(io_mutex_);
+        tx_fifo_.push(ch);
+    }
+    trigger_immediate_render();
 }
 
 void Tui::print_log(const std::string& msg) {
-    std::scoped_lock lock(io_mutex_);
-    log_fifo_.push(msg);
+    {
+        std::scoped_lock lock(io_mutex_);
+        log_fifo_.push(msg);
+    }
+    trigger_immediate_render();
 }
 
 void Tui::render_update_speed(std::chrono::steady_clock::time_point now) {
@@ -542,6 +569,13 @@ void Tui::render_draw_sixel(int left_pane_width, int right_pane_width, int num_r
 }
 
 void Tui::render(bool force) {
+    if (ui_running_.load(std::memory_order_acquire) &&
+        (std::this_thread::get_id() != ui_thread_.get_id() ||
+         processing_ui_input_.load(std::memory_order_acquire))) {
+        if (force) full_render_requested_.store(true, std::memory_order_release);
+        trigger_immediate_render();
+        return;
+    }
     std::unique_lock<std::mutex> lock(tui_mutex_);
 
     std::queue<char> local_tx;
@@ -571,13 +605,14 @@ void Tui::render(bool force) {
     auto now = std::chrono::steady_clock::now();
     auto elapsed_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(now - last_draw_time).count();
+    const bool resized = g_resized != 0;
 
-    if (!force && !g_resized) {
+    if (!force && !resized) {
         bool const is_active = !paused_ || has_tx || has_log;
         if ((is_active && elapsed_ms < 16) || (!is_active && elapsed_ms < 200)) return;
     }
     last_draw_time = now;
-    if (g_resized) g_resized = 0;
+    if (resized) g_resized = 0;
 
     if (trace_or_livetrace_active_.load(std::memory_order_relaxed)) {
         const uint64_t current_seq = trace_write_seq_.load(std::memory_order_relaxed);
@@ -595,10 +630,14 @@ void Tui::render(bool force) {
         }
     }
 
-    struct winsize w{};
-    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-    int term_width = w.ws_col;
-    int term_height = w.ws_row;
+    if (cached_term_width_ <= 0 || cached_term_height_ <= 0 || resized) {
+        struct winsize w{};
+        ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+        cached_term_width_ = w.ws_col;
+        cached_term_height_ = w.ws_row;
+    }
+    int const term_width = cached_term_width_;
+    int const term_height = cached_term_height_;
     const FrameGeometry frame =
         calculate_frame_geometry(term_width, term_height, layout_, user_left_pane_width_);
     if (!frame.renderable) return;
@@ -624,6 +663,7 @@ void Tui::render(bool force) {
     modal_.render_overlay(new_lines, term_width, term_height);
 
     std::string update_cmds = "\033[?25l";
+    update_cmds.reserve(static_cast<std::size_t>(term_width) * new_lines.size() / 2);
     if (force || last_screen_lines_.size() != new_lines.size()) {
         update_cmds += "\033[H";
         for (size_t i = 0; i < new_lines.size(); ++i) {
@@ -648,8 +688,7 @@ void Tui::render(bool force) {
         update_cmds += std::format("\033[{};1H", term_height);
     }
 
-    (void)(::write(STDOUT_FILENO, update_cmds.data(), update_cmds.size()) == 0);
-    ::fflush(stdout);
+    write_all(STDOUT_FILENO, update_cmds);
 }
 
 void Tui::handle_mouse_left_pane(int x, int y, int b) {

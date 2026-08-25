@@ -273,6 +273,7 @@ class Tui {
     std::jthread ui_thread_;
     std::atomic<bool> ui_running_{false};
     std::atomic<bool> render_requested_{false};
+    std::atomic<bool> full_render_requested_{false};
     std::condition_variable_any ui_cv_;
     std::mutex ui_cv_mutex_;
 
@@ -285,6 +286,9 @@ class Tui {
     std::string esc_buf_;
     std::atomic<bool> sim_thread_is_sleeping_{false};
     std::thread::id main_thread_id_;
+    std::atomic<bool> processing_ui_input_{false};
+    int cached_term_width_ = 0;
+    int cached_term_height_ = 0;
 
     void ui_render_loop(const std::stop_token& stop_token);
 
