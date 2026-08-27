@@ -84,9 +84,9 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     }
 
     auto run_with_context = [&](CycleInstructionSlot& slot, auto&& operation) -> bool {
-        pipeline_context = slot.context;
+        active_context_ = &slot.context;
         const bool result = operation();
-        slot.context = pipeline_context;
+        active_context_ = &pipeline_context;
         return result;
     };
     auto cancel_port = [&](simrv::memory::TlPort port) {
@@ -149,62 +149,63 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     if (writeback.valid) {
         if (writeback.remaining_latency > 0) {
             --writeback.remaining_latency;
-            return;
-        }
-        bool ready = true;
-        if (writeback.serializing && !writeback.executed) {
-            ready = run_with_context(writeback, [&] {
-                fetch_operands(machine);
-                if (pipeline_context.pending_exception.has_value()) return false;
-                if (!execute_stage(machine)) return false;
-                writeback.executed = true;
-                if (writeback.context.opcode == isa::Opcode::Load) {
-                    writeback.wb_valid = false;
-                } else if (writeback.writes_int && writeback.wb_dest != RegId::Zero) {
-                    writeback.wb_val = (writeback.context.opcode == isa::Opcode::System &&
-                                        writeback.context.funct3 != isa::Funct3::Priv)
-                                           ? writeback.context.rcsr
-                                           : writeback.context.wb_data;
-                    writeback.wb_valid = true;
-                }
-                return true;
-            });
-        }
-        if (ready && (three_stage || writeback.serializing) && !writeback.memory_complete) {
-            const auto misses_before = dcache.miss_count();
-            ready = run_with_context(writeback, [&] {
-                if (!memory_stage(machine)) return false;
-                if (ca_state.waiting_for_interconnect) return false;
-                writeback.memory_complete = true;
-                if (writeback.context.opcode == isa::Opcode::Load) {
-                    writeback.wb_val = writeback.context.mem_rdata;
-                    writeback.wb_valid = (writeback.writes_int && writeback.wb_dest != RegId::Zero);
-                }
-                return true;
-            });
-            if (dcache.miss_count() != misses_before) {
-                writeback.dcache_miss = true;
+        } else {
+            bool ready = true;
+            if (writeback.serializing && !writeback.executed) {
+                ready = run_with_context(writeback, [&] {
+                    fetch_operands(machine);
+                    if (active_context().pending_exception.has_value()) return false;
+                    if (!execute_stage(machine)) return false;
+                    writeback.executed = true;
+                    if (writeback.context.opcode == isa::Opcode::Load) {
+                        writeback.wb_valid = false;
+                    } else if (writeback.writes_int && writeback.wb_dest != RegId::Zero) {
+                        writeback.wb_val = (writeback.context.opcode == isa::Opcode::System &&
+                                            writeback.context.funct3 != isa::Funct3::Priv)
+                                               ? writeback.context.rcsr
+                                               : writeback.context.wb_data;
+                        writeback.wb_valid = true;
+                    }
+                    return true;
+                });
             }
-            if (!ready && ca_state.waiting_for_interconnect) return;
-        }
-        if (!ready || writeback.context.pending_exception.has_value()) {
-            trap_at_retirement(writeback);
-            return;
-        }
-        const bool retired = run_with_context(
-            writeback, [&] { return writeback_stage(machine) && commit_stage(machine); });
-        if (!retired) {
-            trap_at_retirement(writeback);
-            return;
-        }
-        const bool was_serializing = writeback.serializing;
-        if (retain_retired_slot) pipe.retired = writeback;
-        writeback.invalidate();
-        pipe.retired_this_cycle = true;
-        ca_state.retired_this_cycle = true;
-        if (was_serializing) {
-            pipe.fetch_pc = state_.pc;
-            pipe.frontend_blocked = false;
+            if (ready && (three_stage || writeback.serializing) && !writeback.memory_complete) {
+                const auto misses_before = dcache.miss_count();
+                ready = run_with_context(writeback, [&] {
+                    if (!memory_stage(machine)) return false;
+                    if (ca_state.waiting_for_interconnect) return false;
+                    writeback.memory_complete = true;
+                    if (writeback.context.opcode == isa::Opcode::Load) {
+                        writeback.wb_val = writeback.context.mem_rdata;
+                        writeback.wb_valid =
+                            (writeback.writes_int && writeback.wb_dest != RegId::Zero);
+                    }
+                    return true;
+                });
+                if (dcache.miss_count() != misses_before) {
+                    writeback.dcache_miss = true;
+                }
+                if (!ready && ca_state.waiting_for_interconnect) return;
+            }
+            if (!ready || writeback.context.pending_exception.has_value()) {
+                trap_at_retirement(writeback);
+                return;
+            }
+            const bool retired = run_with_context(
+                writeback, [&] { return writeback_stage(machine) && commit_stage(machine); });
+            if (!retired) {
+                trap_at_retirement(writeback);
+                return;
+            }
+            const bool was_serializing = writeback.serializing;
+            if (retain_retired_slot) pipe.retired = writeback;
+            writeback.invalidate();
+            pipe.retired_this_cycle = true;
+            ca_state.retired_this_cycle = true;
+            if (was_serializing) {
+                pipe.fetch_pc = state_.pc;
+                pipe.frontend_blocked = false;
+            }
         }
     }
 
@@ -212,7 +213,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     auto& memory = pipe.memory;
     if (!three_stage && memory.valid && !writeback.valid) {
         if (memory.serializing) {
-            writeback = memory;
+            writeback = std::move(memory);
             memory.invalidate();
         } else if (memory.remaining_latency > 0) {
             --memory.remaining_latency;
@@ -235,7 +236,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 }
             }
             if (memory.remaining_latency == 0) {
-                writeback = memory;
+                writeback = std::move(memory);
                 memory.invalidate();
             }
         }
@@ -293,7 +294,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     }
                 }
             }
-            memory = execute;
+            memory = std::move(execute);
             execute.invalidate();
         }
     }
@@ -312,8 +313,8 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 if (!decode.executed && !decode.serializing) {
                     (void)run_with_context(decode, [&] {
                         fetch_operands(machine);
-                        apply_forwarding(pipeline_context);
-                        if (pipeline_context.pending_exception.has_value()) return false;
+                        apply_forwarding(active_context());
+                        if (active_context().pending_exception.has_value()) return false;
                         return execute_stage(machine);
                     });
                     decode.executed = true;
@@ -380,16 +381,16 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                                decode.context.opcode == isa::Opcode::MiscMem) {
                         decode.remaining_latency = pipeline_sim.config.fence_flush_penalty;
                     }
-                    writeback = decode;
+                    writeback = std::move(decode);
                     decode.invalidate();
                 }
             } else {
                 (void)run_with_context(decode, [&] {
                     fetch_operands(machine);
-                    apply_forwarding(pipeline_context);
-                    return !pipeline_context.pending_exception.has_value();
+                    apply_forwarding(active_context());
+                    return !active_context().pending_exception.has_value();
                 });
-                execute = decode;
+                execute = std::move(decode);
                 decode.invalidate();
 
                 if (pipeline::operation::is_multiply(execute.context.op_id)) {
@@ -416,32 +417,32 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         --fetch.remaining_latency;
     }
     if (fetch.valid && fetch.remaining_latency == 0 && !decode.valid) {
-        decode = fetch;
+        decode = std::move(fetch);
         fetch.invalidate();
     }
 
     if (!fetch.valid && !pipe.frontend_blocked) {
         const Register committed_pc = state_.pc;
         state_.pc = pipe.fetch_pc;
-        pipeline_context = fetch.context;
+        active_context_ = &fetch.context;
         const auto misses_before = icache.miss_count();
         const bool fetched = fetch_stage(machine, pipe.fetch_pc);
         const bool waiting = ca_state.waiting_for_interconnect;
-        fetch.context = pipeline_context;
         state_.pc = committed_pc;
         if (icache.miss_count() != misses_before) {
             ca_state.icache_miss = true;
         }
-        if (waiting) return;
+        if (waiting) {
+            active_context_ = &pipeline_context;
+            return;
+        }
 
         fetch.valid = true;
         if (!fetched) {
             fetch.serializing = true;
             pipe.frontend_blocked = true;
         } else {
-            pipeline_context = fetch.context;
             decode_fields(machine);
-            fetch.context = pipeline_context;
             fetch.serializing = is_serializing(fetch.context);
             fetch.writes_int = writes_integer(fetch.context);
             fetch.wb_dest = fetch.context.rd;
@@ -472,6 +473,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             ca_state.icache_miss = false;
             fetch.tlb_miss = fetch.context.tlb_miss;
         }
+        active_context_ = &pipeline_context;
     }
 }
 

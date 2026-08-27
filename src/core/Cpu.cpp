@@ -447,10 +447,10 @@ void CPU::advance_ca_cycle(Machine& machine) {
     run_cycle(machine);
 }
 
-void CPU::tick_cycle_clock(Machine& machine, bool interrupt_boundary) {
+SIMRV_ALWAYS_INLINE void CPU::tick_cycle_clock(Machine& machine, bool interrupt_boundary) {
     ++clint_mmio.mcycle;
     if (machine.runtime_profile.is_cycle_mode()) {
-        if (interrupt_boundary) dispatch_pending_interrupts();
+        if (interrupt_boundary) handle_cached_interrupts();
         return;
     }
     if (state_.mhartid == 0) {
@@ -459,16 +459,18 @@ void CPU::tick_cycle_clock(Machine& machine, bool interrupt_boundary) {
             ++clint_mmio.mtime;
             clint_mmio.rtc_divider = 0;
             evaluate_timer_interrupt();
-            for (auto& sec : machine.secondary_harts_) {
-                if (sec->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
-                    sec->evaluate_timer_interrupt();
+            if (simrv::compiler::unlikely(!machine.secondary_harts_.empty())) {
+                for (auto& sec : machine.secondary_harts_) {
+                    if (sec->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+                        sec->evaluate_timer_interrupt();
+                    }
                 }
             }
         }
     } else {
         clint_mmio.mtime = machine.cpu.clint_mmio.mtime.load(std::memory_order_relaxed);
     }
-    if (interrupt_boundary) dispatch_pending_interrupts();
+    if (interrupt_boundary) handle_cached_interrupts();
 }
 
 void CPU::record_trace_for_tui(Machine& machine) {
@@ -627,7 +629,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     if (opcode == Opcode::Load || (opcode == Opcode::Amo && funct5 == Funct5Amo::Lr)) {
         if (simrv::compiler::likely(machine.memory_geometry().contains(addr, access_size))) {
             ctx.mem_rdata = simrv::memory::ram_read_fast(addr, static_cast<Instruction>(ctx.funct3),
-                                                         machine.mmem);
+                                                         machine.ram_view());
         } else {
             ctx.mem_rdata =
                 simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, addr, ctx.funct3);
@@ -635,15 +637,14 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     } else if (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc) {
         // Atomic DRAM AMO Execution (non-LR, non-SC)
         if (simrv::compiler::likely(machine.memory_geometry().contains(addr, access_size))) {
-            const Address offset = addr - machine.memory_geometry().dram_base;
             if (ctx.funct3 == Funct3::Sw || ctx.funct3 == Funct3::Lw) {
-                auto* ptr = reinterpret_cast<uint32_t*>(&machine.mmem[offset]);
+                auto* ptr = reinterpret_cast<uint32_t*>(machine.ram_view().unchecked_ptr(addr));
                 const auto prev = execute_dram_amo<uint32_t>(ptr, ctx.rrs2, funct5);
                 ctx.mem_rdata = static_cast<Word>(static_cast<int32_t>(prev));
                 ctx.wb_data = ctx.mem_rdata;
             } else if constexpr (simrv::xlen::kIsXLen64) {
                 if (ctx.funct3 == Funct3::Sd || ctx.funct3 == Funct3::Ld) {
-                    auto* ptr = reinterpret_cast<uint64_t*>(&machine.mmem[offset]);
+                    auto* ptr = reinterpret_cast<uint64_t*>(machine.ram_view().unchecked_ptr(addr));
                     const auto prev = execute_dram_amo<uint64_t>(ptr, ctx.rrs2, funct5);
                     ctx.mem_rdata = prev;
                     ctx.wb_data = ctx.mem_rdata;
@@ -662,7 +663,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
             switch (f3) {
                 case Funct3::Flw: {
                     const Word lo = simrv::memory::ram_read_fast(
-                        addr, static_cast<Instruction>(Funct3::Lw), machine.mmem);
+                        addr, static_cast<Instruction>(Funct3::Lw), machine.ram_view());
                     ctx.fp_mem_rdata = static_cast<uint64_t>(kF32BoxerBits) |
                                        static_cast<uint64_t>(lo & kLower32Mask);
                     break;
@@ -671,12 +672,12 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                     if constexpr (simrv::xlen::kIsXLen64) {
                         ctx.fp_mem_rdata =
                             static_cast<FloatingRegister>(simrv::memory::ram_read_fast(
-                                addr, static_cast<Instruction>(Funct3::Ld), machine.mmem));
+                                addr, static_cast<Instruction>(Funct3::Ld), machine.ram_view()));
                     } else {
                         const Word lo = simrv::memory::ram_read_fast(
-                            addr, static_cast<Instruction>(Funct3::Lw), machine.mmem);
+                            addr, static_cast<Instruction>(Funct3::Lw), machine.ram_view());
                         const Word hi = simrv::memory::ram_read_fast(
-                            addr + 4, static_cast<Instruction>(Funct3::Lw), machine.mmem);
+                            addr + 4, static_cast<Instruction>(Funct3::Lw), machine.ram_view());
                         ctx.fp_mem_rdata =
                             static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32);
                     }
@@ -744,7 +745,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                 }
             }
             simrv::memory::ram_write_fast(addr, ctx.mem_wdata, static_cast<Instruction>(ctx.funct3),
-                                          machine.mmem);
+                                          machine.ram_view());
         } else {
             simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, addr, ctx.mem_wdata,
                                                   ctx.funct3);
@@ -764,24 +765,24 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                         addr,
                         static_cast<Word>(ctx.fp_mem_wdata &
                                           static_cast<FloatingRegister>(kLower32Mask)),
-                        static_cast<Instruction>(Funct3::Sw), machine.mmem);
+                        static_cast<Instruction>(Funct3::Sw), machine.ram_view());
                     break;
                 case Funct3::Fsd:
                     if constexpr (simrv::xlen::kIsXLen64) {
                         simrv::memory::ram_write_fast(addr, static_cast<Word>(ctx.fp_mem_wdata),
                                                       static_cast<Instruction>(Funct3::Sd),
-                                                      machine.mmem);
+                                                      machine.ram_view());
                     } else {
                         simrv::memory::ram_write_fast(
                             addr,
                             static_cast<Word>(ctx.fp_mem_wdata &
                                               static_cast<FloatingRegister>(kLower32Mask)),
-                            static_cast<Instruction>(Funct3::Sw), machine.mmem);
+                            static_cast<Instruction>(Funct3::Sw), machine.ram_view());
                         simrv::memory::ram_write_fast(
                             addr + 4,
                             static_cast<Word>((ctx.fp_mem_wdata >> 32) &
                                               static_cast<FloatingRegister>(kLower32Mask)),
-                            static_cast<Instruction>(Funct3::Sw), machine.mmem);
+                            static_cast<Instruction>(Funct3::Sw), machine.ram_view());
                     }
                     break;
                 default:
@@ -932,7 +933,7 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
         const unsigned size_bytes = access_size_for_funct3(funct3);
         if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes))) {
             out_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3),
-                                                   machine.mmem);
+                                                   machine.ram_view());
             return true;
         }
         return false;
@@ -941,31 +942,29 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
     const unsigned active_xlen = effective_data_xlen();
     if (active_xlen == 32) mem_addr &= 0xFFFFFFFFULL;
     const unsigned size_bytes = access_size_for_funct3(funct3);
-
     const PrivilegeLevel eff_priv = effective_data_privilege();
-    const bool translation_enabled =
-        (eff_priv != kPrivMachine &&
-         simrv::xlen::satp_translation_enabled(state_.satp, active_xlen));
-    if (!translation_enabled) {
-        if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes))) {
-            out_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3),
-                                                   machine.mmem);
-            return true;
-        }
-    } else {
+
+    if (simrv::compiler::likely(eff_priv != kPrivMachine &&
+                                simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
         const Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
         const Address vpn = mem_addr >> 12;
         const size_t tlb_idx = vpn & 2047u;
-        const auto& entry = soft_tlb_read
-            [tlb_idx];  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        const auto& entry = soft_tlb_read[tlb_idx];
         if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
             if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
                 out_val = simrv::memory::host_read_fast(entry.host_ptr_base + (mem_addr & 0xFFF),
                                                         static_cast<Instruction>(funct3));
                 return true;
             }
-            out_val = simrv::memory::ram_read_fast(entry.paddr_base + (mem_addr & 0xFFF),
-                                                   static_cast<Instruction>(funct3), machine.mmem);
+            out_val =
+                simrv::memory::ram_read_fast(entry.paddr_base + (mem_addr & 0xFFF),
+                                             static_cast<Instruction>(funct3), machine.ram_view());
+            return true;
+        }
+    } else {
+        if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes))) {
+            out_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3),
+                                                   machine.ram_view());
             return true;
         }
     }
@@ -983,7 +982,7 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
         if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes) &&
                                     !is_tohost_addr(machine, mem_addr))) {
             simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3),
-                                          machine.mmem);
+                                          machine.ram_view());
             return true;
         }
         return false;
@@ -992,24 +991,14 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
     const unsigned active_xlen = effective_data_xlen();
     if (active_xlen == 32) mem_addr &= 0xFFFFFFFFULL;
     const unsigned size_bytes = access_size_for_funct3(funct3);
-
     const PrivilegeLevel eff_priv = effective_data_privilege();
-    const bool translation_enabled =
-        (eff_priv != kPrivMachine &&
-         simrv::xlen::satp_translation_enabled(state_.satp, active_xlen));
-    if (!translation_enabled) {
-        if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes) &&
-                                    !is_tohost_addr(machine, mem_addr))) {
-            simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3),
-                                          machine.mmem);
-            return true;
-        }
-    } else {
+
+    if (simrv::compiler::likely(eff_priv != kPrivMachine &&
+                                simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
         const Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
         const Address vpn = mem_addr >> 12;
         const size_t tlb_idx = vpn & 2047u;
-        const auto& entry = soft_tlb_write
-            [tlb_idx];  // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        const auto& entry = soft_tlb_write[tlb_idx];
         if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
             Address const paddr = entry.paddr_base + (mem_addr & 0xFFF);
             if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
@@ -1020,9 +1009,16 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
             if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes) &&
                                         !is_tohost_addr(machine, paddr))) {
                 simrv::memory::ram_write_fast(paddr, rrs2, static_cast<Instruction>(funct3),
-                                              machine.mmem);
+                                              machine.ram_view());
                 return true;
             }
+        }
+    } else {
+        if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes) &&
+                                    !is_tohost_addr(machine, mem_addr))) {
+            simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3),
+                                          machine.ram_view());
+            return true;
         }
     }
     return false;
@@ -1040,7 +1036,7 @@ auto CPU::execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> 
                                 is_aligned_for_funct3(mem_addr, op.funct3) &&
                                 machine.memory_geometry().contains(mem_addr, size_bytes))) {
         mem_rdata = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(op.funct3),
-                                                 machine.mmem);
+                                                 machine.ram_view());
     } else if (!try_fast_load(machine, mem_addr, op.funct3, mem_rdata)) {
         mem_rdata =
             simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, mem_addr, op.funct3);
@@ -1069,7 +1065,7 @@ auto CPU::execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Re
                                 machine.memory_geometry().contains(mem_addr, size_bytes) &&
                                 !is_tohost_addr(machine, mem_addr))) {
         simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(op.funct3),
-                                      machine.mmem);
+                                      machine.ram_view());
     } else if (!try_fast_store(machine, mem_addr, op.funct3, rrs2)) {
         simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, mem_addr, rrs2, op.funct3);
         if (pipeline_context.pending_exception.has_value()) {
@@ -1080,9 +1076,10 @@ auto CPU::execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Re
     }
 
     state_.reserved = 0;
-    auto& reservations = machine.memory_.reservation_table();
-    if (simrv::compiler::unlikely(reservations.may_have_reservations())) {
-        reservations.invalidate_matching(mem_addr, static_cast<HartId>(state_.mhartid));
+    if (simrv::compiler::unlikely(machine.num_harts() > 1 &&
+                                  machine.memory_.reservation_table().may_have_reservations())) {
+        machine.memory_.reservation_table().invalidate_matching(
+            mem_addr, static_cast<HartId>(state_.mhartid));
     }
     advance_cached_pc(op);
     return true;
@@ -1160,150 +1157,137 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
     // 3. Execute, Memory, Writeback, Commit — single flat op_id dispatch (no double switch).
     // ALU arms compute wb_data and break to the shared writeback tail below the switch.
     // Non-ALU arms (branches, jumps, loads, stores, fallback) handle their own commit and return.
-    Register rrs1 = 0, rrs2 = 0;
     Register wb_data = 0;
+    const Register rrs1 = state_.regs.read(op.rs1);
     switch (op.op_id) {
         // ---- Scalar ALU with two register operands ----
-        case isa::ADD:
-            rrs1 = state_.regs.read(op.rs1);
-            rrs2 = state_.regs.read(op.rs2);
+        case isa::ADD: {
+            const Register rrs2 = state_.regs.read(op.rs2);
             wb_data = rrs1 + rrs2;
             break;
-        case isa::SUB:
-            rrs1 = state_.regs.read(op.rs1);
-            rrs2 = state_.regs.read(op.rs2);
+        }
+        case isa::SUB: {
+            const Register rrs2 = state_.regs.read(op.rs2);
             wb_data = rrs1 - rrs2;
             break;
-        case isa::AND:
-            rrs1 = state_.regs.read(op.rs1);
-            rrs2 = state_.regs.read(op.rs2);
+        }
+        case isa::AND: {
+            const Register rrs2 = state_.regs.read(op.rs2);
             wb_data = rrs1 & rrs2;
             break;
-        case isa::OR:
-            rrs1 = state_.regs.read(op.rs1);
-            rrs2 = state_.regs.read(op.rs2);
+        }
+        case isa::OR: {
+            const Register rrs2 = state_.regs.read(op.rs2);
             wb_data = rrs1 | rrs2;
             break;
-        case isa::XOR:
-            rrs1 = state_.regs.read(op.rs1);
-            rrs2 = state_.regs.read(op.rs2);
+        }
+        case isa::XOR: {
+            const Register rrs2 = state_.regs.read(op.rs2);
             wb_data = rrs1 ^ rrs2;
             break;
-        case isa::SLL:
-            rrs1 = state_.regs.read(op.rs1);
-            rrs2 = state_.regs.read(op.rs2);
+        }
+        case isa::SLL: {
+            const Register rrs2 = state_.regs.read(op.rs2);
             wb_data = rrs1 << (rrs2 & simrv::xlen::xlen_shift_mask());
             break;
-        case isa::SRL:
-            rrs1 = state_.regs.read(op.rs1);
-            rrs2 = state_.regs.read(op.rs2);
+        }
+        case isa::SRL: {
+            const Register rrs2 = state_.regs.read(op.rs2);
             wb_data = rrs1 >> (rrs2 & simrv::xlen::xlen_shift_mask());
             break;
-        case isa::SRA:
-            rrs1 = state_.regs.read(op.rs1);
-            rrs2 = state_.regs.read(op.rs2);
+        }
+        case isa::SRA: {
+            const Register rrs2 = state_.regs.read(op.rs2);
             wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >>
                                             (rrs2 & simrv::xlen::xlen_shift_mask()));
             break;
-        case isa::SLT:
-            rrs1 = state_.regs.read(op.rs1);
-            rrs2 = state_.regs.read(op.rs2);
+        }
+        case isa::SLT: {
+            const Register rrs2 = state_.regs.read(op.rs2);
             wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) <
                                             static_cast<SignedWord>(rrs2));
             break;
-        case isa::SLTU:
-            rrs1 = state_.regs.read(op.rs1);
-            rrs2 = state_.regs.read(op.rs2);
+        }
+        case isa::SLTU: {
+            const Register rrs2 = state_.regs.read(op.rs2);
             wb_data = static_cast<Register>(rrs1 < rrs2);
             break;
+        }
         // ---- 32-bit (W) register ops (RV64 only) ----
-        case isa::ADDW:
-            rrs1 = state_.regs.read(op.rs1);
-            rrs2 = state_.regs.read(op.rs2);
+        case isa::ADDW: {
+            const Register rrs2 = state_.regs.read(op.rs2);
             wb_data =
                 static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + rrs2)));
             break;
-        case isa::SUBW:
-            rrs1 = state_.regs.read(op.rs1);
-            rrs2 = state_.regs.read(op.rs2);
+        }
+        case isa::SUBW: {
+            const Register rrs2 = state_.regs.read(op.rs2);
             wb_data =
                 static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 - rrs2)));
             break;
-        case isa::SLLW:
-            rrs1 = state_.regs.read(op.rs1);
-            rrs2 = state_.regs.read(op.rs2);
+        }
+        case isa::SLLW: {
+            const Register rrs2 = state_.regs.read(op.rs2);
             wb_data = static_cast<Register>(static_cast<int64_t>(
                 static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (rrs2 & 0x1f))));
             break;
-        case isa::SRLW:
-            rrs1 = state_.regs.read(op.rs1);
-            rrs2 = state_.regs.read(op.rs2);
+        }
+        case isa::SRLW: {
+            const Register rrs2 = state_.regs.read(op.rs2);
             wb_data = static_cast<Register>(static_cast<int64_t>(
                 static_cast<int32_t>(static_cast<uint32_t>(rrs1) >> (rrs2 & 0x1f))));
             break;
-        case isa::SRAW:
-            rrs1 = state_.regs.read(op.rs1);
-            rrs2 = state_.regs.read(op.rs2);
+        }
+        case isa::SRAW: {
+            const Register rrs2 = state_.regs.read(op.rs2);
             wb_data = static_cast<Register>(
                 static_cast<int64_t>(static_cast<int32_t>(rrs1) >> (rrs2 & 0x1f)));
             break;
+        }
         // ---- Scalar ALU with immediate ----
         case isa::ADDI:
-            rrs1 = state_.regs.read(op.rs1);
             wb_data = rrs1 + op.imm;
             break;
         case isa::ANDI:
-            rrs1 = state_.regs.read(op.rs1);
             wb_data = rrs1 & op.imm;
             break;
         case isa::ORI:
-            rrs1 = state_.regs.read(op.rs1);
             wb_data = rrs1 | op.imm;
             break;
         case isa::XORI:
-            rrs1 = state_.regs.read(op.rs1);
             wb_data = rrs1 ^ op.imm;
             break;
         case isa::SLLI:
-            rrs1 = state_.regs.read(op.rs1);
             wb_data = rrs1 << (op.imm & simrv::xlen::xlen_shift_mask());
             break;
         case isa::SRLI:
-            rrs1 = state_.regs.read(op.rs1);
             wb_data = rrs1 >> (op.imm & simrv::xlen::xlen_shift_mask());
             break;
         case isa::SRAI:
-            rrs1 = state_.regs.read(op.rs1);
             wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >>
                                             (op.imm & simrv::xlen::xlen_shift_mask()));
             break;
         case isa::SLTI:
-            rrs1 = state_.regs.read(op.rs1);
             wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) <
                                             static_cast<SignedWord>(op.imm));
             break;
         case isa::SLTIU:
-            rrs1 = state_.regs.read(op.rs1);
             wb_data = static_cast<Register>(rrs1 < static_cast<Register>(op.imm));
             break;
         // ---- 32-bit immediate ops (RV64 only) ----
         case isa::ADDIW:
-            rrs1 = state_.regs.read(op.rs1);
             wb_data =
                 static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(rrs1 + op.imm)));
             break;
         case isa::SLLIW:
-            rrs1 = state_.regs.read(op.rs1);
             wb_data = static_cast<Register>(static_cast<int64_t>(
                 static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (op.imm & 0x1f))));
             break;
         case isa::SRLIW:
-            rrs1 = state_.regs.read(op.rs1);
             wb_data = static_cast<Register>(static_cast<int64_t>(
                 static_cast<int32_t>(static_cast<uint32_t>(rrs1) >> (op.imm & 0x1f))));
             break;
         case isa::SRAIW:
-            rrs1 = state_.regs.read(op.rs1);
             wb_data = static_cast<Register>(
                 static_cast<int64_t>(static_cast<int32_t>(rrs1) >> (op.imm & 0x1f)));
             break;
@@ -1321,14 +1305,14 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         case isa::BGE:
         case isa::BLTU:
         case isa::BGEU:
-            execute_cached_branch(op, state_.regs.read(op.rs1), state_.regs.read(op.rs2));
+            execute_cached_branch(op, rrs1, state_.regs.read(op.rs2));
             return;
         // ---- Jump instructions ----
         case isa::JAL:
             execute_cached_jal(op);
             return;
         case isa::JALR:
-            execute_cached_jalr(op, state_.regs.read(op.rs1));
+            execute_cached_jalr(op, rrs1);
             return;
         // ---- Loads ----
         case isa::LB:
@@ -1338,15 +1322,111 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         case isa::LBU:
         case isa::LHU:
         case isa::LWU:
-            execute_cached_load(machine, op, state_.regs.read(op.rs1));
+            execute_cached_load(machine, op, rrs1);
             return;
         // ---- Stores ----
         case isa::SB:
         case isa::SH:
         case isa::SW:
         case isa::SD:
-            execute_cached_store(machine, op, state_.regs.read(op.rs1), state_.regs.read(op.rs2));
+            execute_cached_store(machine, op, rrs1, state_.regs.read(op.rs2));
             return;
+        // ---- FP Loads ----
+        case isa::FLW:
+        case isa::FLD: {
+            Address const mem_addr = rrs1 + op.imm;
+            FloatingRegister mem_rdata = 0;
+            const unsigned size_bytes = (op.funct3 == isa::Funct3::Fld) ? 8u : 4u;
+            if (simrv::compiler::likely(state_.priv == kPrivMachine &&
+                                        (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0 &&
+                                        is_aligned_for_funct3(mem_addr, op.funct3) &&
+                                        machine.memory_geometry().contains(mem_addr, size_bytes))) {
+                mem_rdata = simrv::memory::ram_read_fast(
+                    mem_addr, static_cast<Instruction>(op.funct3), machine.ram_view());
+            } else {
+                Word raw_val = 0;
+                if (try_fast_load(machine, mem_addr, op.funct3, raw_val)) {
+                    mem_rdata = raw_val;
+                } else {
+                    mem_rdata = simrv::memory::MemoryAccess::loadFp(machine.memory_, *this,
+                                                                    mem_addr, op.funct3);
+                    if (pipeline_context.pending_exception.has_value()) {
+                        raise_exception(static_cast<TrapCause>(*pipeline_context.pending_exception),
+                                        pipeline_context.pending_tval);
+                        return;
+                    }
+                }
+            }
+            state_.regs.write_fp(op.rd,
+                                 (op.funct3 == isa::Funct3::Flw)
+                                     ? (static_cast<FloatingRegister>(simrv::xlen::kF32BoxerBits) |
+                                        (mem_rdata & 0xFFFFFFFFULL))
+                                     : mem_rdata);
+            advance_cached_pc(op);
+            return;
+        }
+        // ---- FP Stores ----
+        case isa::FSW:
+        case isa::FSD: {
+            Address const mem_addr = rrs1 + op.imm;
+            FloatingRegister const fp_data = state_.regs.read_fp(op.rs2);
+            const unsigned size_bytes = (op.funct3 == isa::Funct3::Fsd) ? 8u : 4u;
+            if (simrv::compiler::likely(state_.priv == kPrivMachine &&
+                                        (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0 &&
+                                        is_aligned_for_funct3(mem_addr, op.funct3) &&
+                                        machine.memory_geometry().contains(mem_addr, size_bytes))) {
+                simrv::memory::ram_write_fast(
+                    mem_addr, fp_data, static_cast<Instruction>(op.funct3), machine.ram_view());
+            } else if (!try_fast_store(machine, mem_addr, op.funct3, fp_data)) {
+                simrv::memory::MemoryAccess::storeFp(machine.memory_, *this, mem_addr, fp_data,
+                                                     op.funct3);
+                if (pipeline_context.pending_exception.has_value()) {
+                    raise_exception(static_cast<TrapCause>(*pipeline_context.pending_exception),
+                                    pipeline_context.pending_tval);
+                    return;
+                }
+            }
+            advance_cached_pc(op);
+            return;
+        }
+        // ---- FP Fused Operations ----
+        case isa::FMADD_D:
+        case isa::FMADD_S:
+        case isa::FMSUB_D:
+        case isa::FMSUB_S:
+        case isa::FNMSUB_D:
+        case isa::FNMSUB_S:
+        case isa::FNMADD_D:
+        case isa::FNMADD_S: {
+            const Word rs3 = (op.ir >> 27) & 0x1F;
+            const Word fmt = (op.ir >> 25) & 0x3;
+            auto res = execute::ExecuteUnit::fusedFp(
+                op.opcode, fmt, std::to_underlying(op.rs1), std::to_underlying(op.rs2), rs3,
+                enum_mask(op.funct3), state_.regs.fp_data_ptr(), state_.fcsr);
+            if (res.fp_wb_enable) {
+                state_.regs.write_fp(op.rd, res.fp_wb_data);
+            }
+            advance_cached_pc(op);
+            return;
+        }
+        // ---- FP Scalar Arithmetic ----
+        case isa::FADD_D:
+        case isa::FADD_S:
+        case isa::FSUB_D:
+        case isa::FSUB_S:
+        case isa::FMUL_D:
+        case isa::FMUL_S:
+        case isa::FDIV_D:
+        case isa::FDIV_S: {
+            auto res = execute::ExecuteUnit::opFp(op.funct7, op.funct3, std::to_underlying(op.rs1),
+                                                  std::to_underlying(op.rs2), rrs1,
+                                                  state_.regs.fp_data_ptr(), state_.fcsr);
+            if (res.fp_wb_enable) {
+                state_.regs.write_fp(op.rd, res.fp_wb_data);
+            }
+            advance_cached_pc(op);
+            return;
+        }
         // WFI deliberately reaches the full path: fetch is the interrupt-delivery boundary, and
         // bypassing it in a cached idle loop can leave an OS waiting past a pending timer IRQ.
         // ---- Everything else: fallback to full pipeline stages ----
@@ -1366,68 +1446,45 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
     advance_cached_pc(op);
 }
 
-void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
-    const bool copy_ctx = captures_tui_execution_detail(machine) || machine.s_lockstep_mode ||
-                          machine.s_gdb_mode || machine.s_bp_trace || (machine.s_strace != 0);
-    const bool inst_mix = machine.s_use_mix || captures_tui_execution_detail(machine);
+template <bool kCopyContext, bool kInstMix, bool kPollPause>
+SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32_t batch_size)
+    -> uint32_t {
     uint32_t cached_ops = 0;
+    for (uint32_t b = 0; b < batch_size; ++b) {
+        auto* cached = decode_cache.lookup(state_.pc);
+        if (simrv::compiler::likely(cached != nullptr)) {
+            execute_cached_op_fast<kCopyContext, kInstMix>(machine, *cached);
+            ++cached_ops;
+        } else {
+            run_cycle_baremetal(machine);
+        }
+        if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running() ||
+                                      (kPollPause && ((b & 0xFFu) == 0 && machine.is_paused())))) {
+            break;
+        }
+    }
+    return cached_ops;
+}
 
-    if (simrv::compiler::likely(!copy_ctx && !inst_mix)) {
-        for (uint32_t b = 0; b < batch_size; ++b) {
-            auto* cached = decode_cache.lookup(state_.pc);
-            if (simrv::compiler::likely(cached != nullptr)) {
-                execute_cached_op_fast<false, false>(machine, *cached);
-                cached_ops++;
-            } else {
-                run_cycle_baremetal(machine);
-            }
-            if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running() ||
-                                          ((b & 0xffU) == 0 && machine.is_paused()))) {
-                break;
-            }
-        }
-    } else if (copy_ctx && inst_mix) {
-        for (uint32_t b = 0; b < batch_size; ++b) {
-            auto* cached = decode_cache.lookup(state_.pc);
-            if (simrv::compiler::likely(cached != nullptr)) {
-                execute_cached_op_fast<true, true>(machine, *cached);
-                cached_ops++;
-            } else {
-                run_cycle_baremetal(machine);
-            }
-            if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running() ||
-                                          ((b & 0xffU) == 0 && machine.is_paused()))) {
-                break;
-            }
-        }
-    } else if (copy_ctx) {
-        for (uint32_t b = 0; b < batch_size; ++b) {
-            auto* cached = decode_cache.lookup(state_.pc);
-            if (simrv::compiler::likely(cached != nullptr)) {
-                execute_cached_op_fast<true, false>(machine, *cached);
-                cached_ops++;
-            } else {
-                run_cycle_baremetal(machine);
-            }
-            if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running() ||
-                                          ((b & 0xffU) == 0 && machine.is_paused()))) {
-                break;
-            }
-        }
+void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
+                                   const FastBatchPolicy& policy) {
+    uint32_t cached_ops = 0;
+    if (simrv::compiler::likely(!policy.copy_pipeline_context && !policy.collect_instruction_mix)) {
+        cached_ops = policy.poll_pause
+                         ? run_fast_baremetal_kernel<false, false, true>(machine, batch_size)
+                         : run_fast_baremetal_kernel<false, false, false>(machine, batch_size);
+    } else if (policy.copy_pipeline_context && policy.collect_instruction_mix) {
+        cached_ops = policy.poll_pause
+                         ? run_fast_baremetal_kernel<true, true, true>(machine, batch_size)
+                         : run_fast_baremetal_kernel<true, true, false>(machine, batch_size);
+    } else if (policy.copy_pipeline_context) {
+        cached_ops = policy.poll_pause
+                         ? run_fast_baremetal_kernel<true, false, true>(machine, batch_size)
+                         : run_fast_baremetal_kernel<true, false, false>(machine, batch_size);
     } else {
-        for (uint32_t b = 0; b < batch_size; ++b) {
-            auto* cached = decode_cache.lookup(state_.pc);
-            if (simrv::compiler::likely(cached != nullptr)) {
-                execute_cached_op_fast<false, true>(machine, *cached);
-                cached_ops++;
-            } else {
-                run_cycle_baremetal(machine);
-            }
-            if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running() ||
-                                          ((b & 0xffU) == 0 && machine.is_paused()))) {
-                break;
-            }
-        }
+        cached_ops = policy.poll_pause
+                         ? run_fast_baremetal_kernel<false, true, true>(machine, batch_size)
+                         : run_fast_baremetal_kernel<false, true, false>(machine, batch_size);
     }
 
     if (cached_ops > 0) {
@@ -1445,6 +1502,14 @@ template void CPU::execute_cached_op_fast<false, false>(Machine& machine, Cached
 template void CPU::execute_cached_op_fast<true, false>(Machine& machine, CachedOp& op);
 template void CPU::execute_cached_op_fast<false, true>(Machine& machine, CachedOp& op);
 template void CPU::execute_cached_op_fast<true, true>(Machine& machine, CachedOp& op);
+template auto CPU::run_fast_baremetal_kernel<false, false, false>(Machine&, uint32_t) -> uint32_t;
+template auto CPU::run_fast_baremetal_kernel<false, false, true>(Machine&, uint32_t) -> uint32_t;
+template auto CPU::run_fast_baremetal_kernel<true, false, false>(Machine&, uint32_t) -> uint32_t;
+template auto CPU::run_fast_baremetal_kernel<true, false, true>(Machine&, uint32_t) -> uint32_t;
+template auto CPU::run_fast_baremetal_kernel<false, true, false>(Machine&, uint32_t) -> uint32_t;
+template auto CPU::run_fast_baremetal_kernel<false, true, true>(Machine&, uint32_t) -> uint32_t;
+template auto CPU::run_fast_baremetal_kernel<true, true, false>(Machine&, uint32_t) -> uint32_t;
+template auto CPU::run_fast_baremetal_kernel<true, true, true>(Machine&, uint32_t) -> uint32_t;
 
 void CPU::push_trace_history(Address pc, Instruction inst, const std::string& symbol) {
     // O(1) ring buffer write — no heap allocation, no shifting

@@ -78,29 +78,6 @@ void PipelineSim::advance_cycle(const PipelineCycleEvent& event) {
     if (ca_history_size_ < kCaHistoryCapacity) ++ca_history_size_;
 }
 
-void PipelineSim::advance_cycle_fast(const PipelineCycleMetrics& metrics) noexcept {
-    ca_kernel_active_ = true;
-    update_stats(metrics);
-}
-
-void PipelineSim::update_stats(const PipelineCycleMetrics& metrics) noexcept {
-    ++ca_stats_.cycle_count;
-    const bool stalled = metrics.fetch_stalled || metrics.decode_stalled ||
-                         metrics.execute_stalled || metrics.memory_stalled ||
-                         metrics.writeback_stalled;
-    // These counters are updated for every CA transition.  Boolean-to-integer accumulation keeps
-    // the fast engine's accounting branch-free while preserving the one-count-per-cycle model.
-    ca_stats_.stall_cycles += stalled;
-    ca_stats_.icache_stalls += metrics.icache_miss && metrics.fetch_stalled;
-    ca_stats_.dcache_stalls +=
-        metrics.dcache_miss && (metrics.memory_stalled || metrics.writeback_stalled);
-    ca_stats_.tlb_stalls += metrics.tlb_miss && stalled;
-    ca_stats_.structural_stalls += metrics.execute_stalled;
-    ca_stats_.data_hazard_stalls += metrics.data_hazard_stall;
-    ca_stats_.control_hazard_bubbles += metrics.control_flush;
-    ca_stats_.bubble_cycles += metrics.control_flush;
-}
-
 // Getters for statistics
 auto PipelineSim::cycle_count() const -> uint64_t { return ca_stats_.cycle_count; }
 auto PipelineSim::stall_cycles() const -> uint64_t { return ca_stats_.stall_cycles; }

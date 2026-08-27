@@ -30,6 +30,15 @@
 namespace simrv::core {
 class Machine;
 
+/// Immutable fast-path decisions captured by a runner at a batch boundary.
+struct FastBatchPolicy {
+    bool copy_pipeline_context = false;
+    bool collect_instruction_mix = false;
+    bool poll_pause = true;
+    bool has_instruction_limit = false;
+    uint32_t pause_poll_mask = 0xFFu;
+};
+
 /**
  * @struct ArchState
  * @brief Groups all architectural registers and CSRs into a cohesive block.
@@ -380,13 +389,18 @@ class CPU {
     template <bool kCopyContext = false, bool kInstMix = false>
     SIMRV_ALWAYS_INLINE void execute_cached_op_fast(Machine& machine, CachedOp& op);
 
+    template <bool kCopyContext, bool kInstMix, bool kPollPause>
+    SIMRV_ALWAYS_INLINE auto run_fast_baremetal_kernel(Machine& machine, uint32_t batch_size)
+        -> uint32_t;
+
     /**
      * @brief Executes a batch of cached operations in a tight inlined loop for baremetal
      * acceleration.
      * @param machine Reference to top-level Machine.
      * @param batch_size Maximum number of instructions to execute in the batch.
      */
-    void run_fast_baremetal_batch(Machine& machine, uint32_t batch_size);
+    void run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
+                                  const FastBatchPolicy& policy);
 
    public:
     /**
@@ -604,6 +618,9 @@ class CPU {
     CsrFile csr_file;
     execute::ExecuteUnit execute_unit;
     simrv::pipeline::PipelineContext pipeline_context;
+    simrv::pipeline::PipelineContext* active_context_ = &pipeline_context;
+    [[nodiscard]] constexpr auto& active_context() noexcept { return *active_context_; }
+    [[nodiscard]] constexpr const auto& active_context() const noexcept { return *active_context_; }
     simrv::cache::ICache icache;
     simrv::cache::DCache dcache;
     sbi::Sbi sbi;

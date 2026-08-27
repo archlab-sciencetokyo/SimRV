@@ -8,26 +8,20 @@ namespace simrv::pipeline {
 
 namespace {
 
-constexpr uint8_t kSaturatingMin = 0;  // Strongly Not Taken
 constexpr uint8_t kSaturatingMax = 3;  // Strongly Taken
 constexpr uint8_t kWeaklyNotTaken = 1;
 constexpr uint8_t kWeaklyTaken = 2;
 
 [[nodiscard]] constexpr auto saturate_up(uint8_t val) noexcept -> uint8_t {
-    return val < kSaturatingMax ? static_cast<uint8_t>(val + 1) : kSaturatingMax;
+    return std::min<uint8_t>(static_cast<uint8_t>(val + 1), kSaturatingMax);
 }
 
 [[nodiscard]] constexpr auto saturate_down(uint8_t val) noexcept -> uint8_t {
-    return val > kSaturatingMin ? static_cast<uint8_t>(val - 1) : kSaturatingMin;
+    return val > 0 ? static_cast<uint8_t>(val - 1) : 0;
 }
 
 [[nodiscard]] constexpr auto is_taken_prediction(uint8_t counter) noexcept -> bool {
     return counter >= kWeaklyTaken;
-}
-
-[[nodiscard]] auto next_power_of_two(uint32_t val) noexcept -> uint32_t {
-    if (val <= 1) return 1;
-    return 1u << (32u - std::countl_zero(val - 1u));
 }
 
 }  // namespace
@@ -69,7 +63,7 @@ BranchPredictor::BranchPredictor(const BranchPredictorConfig& config) { configur
 void BranchPredictor::configure(const BranchPredictorConfig& config) {
     config_ = config;
 
-    const uint32_t bht_sz = next_power_of_two(std::max(16u, config_.bht_entries));
+    const uint32_t bht_sz = std::bit_ceil(std::max(16u, config_.bht_entries));
     bht_mask_ = bht_sz - 1u;
     bht_.assign(bht_sz, kWeaklyNotTaken);
 
@@ -85,7 +79,7 @@ void BranchPredictor::configure(const BranchPredictorConfig& config) {
     ghr_mask_ = (1u << bits) - 1u;
     ghr_ = 0;
 
-    const uint32_t btb_sz = next_power_of_two(std::max(16u, config_.btb_entries));
+    const uint32_t btb_sz = std::bit_ceil(std::max(16u, config_.btb_entries));
     btb_mask_ = btb_sz - 1u;
     btb_.assign(btb_sz, BtbEntry{});
 
