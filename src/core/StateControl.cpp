@@ -44,14 +44,14 @@ void InterruptController::updateMip(PlicMmio& plic, ArchState& state) {
                 Word m_max_prio = 0;
                 for (int i : std::views::iota(1, 32)) {
                     const auto idx = static_cast<std::size_t>(i);
-                    if ((plic.plic_pending.at(0) & (1u << i)) != 0 &&
-                        (plic.plic_enables.at(m_ctx).at(0) & (1u << i)) != 0) {
-                        if (plic.plic_priorities.at(idx) > m_max_prio) {
-                            m_max_prio = plic.plic_priorities.at(idx);
+                    if ((plic.plic_pending[0] & (1u << i)) != 0 &&
+                        (plic.plic_enables[m_ctx][0] & (1u << i)) != 0) {
+                        if (plic.plic_priorities[idx] > m_max_prio) {
+                            m_max_prio = plic.plic_priorities[idx];
                         }
                     }
                 }
-                if (m_max_prio > plic.plic_threshold.at(m_ctx)) {
+                if (m_max_prio > plic.plic_threshold[m_ctx]) {
                     m_ext = true;
                 }
             }
@@ -60,14 +60,14 @@ void InterruptController::updateMip(PlicMmio& plic, ArchState& state) {
                 Word s_max_prio = 0;
                 for (int i : std::views::iota(1, 32)) {
                     const auto idx = static_cast<std::size_t>(i);
-                    if ((plic.plic_pending.at(0) & (1u << i)) != 0 &&
-                        (plic.plic_enables.at(s_ctx).at(0) & (1u << i)) != 0) {
-                        if (plic.plic_priorities.at(idx) > s_max_prio) {
-                            s_max_prio = plic.plic_priorities.at(idx);
+                    if ((plic.plic_pending[0] & (1u << i)) != 0 &&
+                        (plic.plic_enables[s_ctx][0] & (1u << i)) != 0) {
+                        if (plic.plic_priorities[idx] > s_max_prio) {
+                            s_max_prio = plic.plic_priorities[idx];
                         }
                     }
                 }
-                if (s_max_prio > plic.plic_threshold.at(s_ctx)) {
+                if (s_max_prio > plic.plic_threshold[s_ctx]) {
                     s_ext = true;
                 }
             }
@@ -88,14 +88,13 @@ void InterruptController::updateMip(PlicMmio& plic, ArchState& state) {
     Word m_max_prio = 0;
     for (int i : std::views::iota(1, 32)) {
         const auto idx = static_cast<std::size_t>(i);
-        if ((plic.plic_pending.at(0) & (1u << i)) != 0 &&
-            (plic.plic_enables.at(0).at(0) & (1u << i)) != 0) {
-            if (plic.plic_priorities.at(idx) > m_max_prio) {
-                m_max_prio = plic.plic_priorities.at(idx);
+        if ((plic.plic_pending[0] & (1u << i)) != 0 && (plic.plic_enables[0][0] & (1u << i)) != 0) {
+            if (plic.plic_priorities[idx] > m_max_prio) {
+                m_max_prio = plic.plic_priorities[idx];
             }
         }
     }
-    if (m_max_prio > plic.plic_threshold.at(0)) {
+    if (m_max_prio > plic.plic_threshold[0]) {
         m_ext = true;
     }
 
@@ -104,14 +103,13 @@ void InterruptController::updateMip(PlicMmio& plic, ArchState& state) {
     Word s_max_prio = 0;
     for (int i : std::views::iota(1, 32)) {
         const auto idx = static_cast<std::size_t>(i);
-        if ((plic.plic_pending.at(0) & (1u << i)) != 0 &&
-            (plic.plic_enables.at(1).at(0) & (1u << i)) != 0) {
-            if (plic.plic_priorities.at(idx) > s_max_prio) {
-                s_max_prio = plic.plic_priorities.at(idx);
+        if ((plic.plic_pending[0] & (1u << i)) != 0 && (plic.plic_enables[1][0] & (1u << i)) != 0) {
+            if (plic.plic_priorities[idx] > s_max_prio) {
+                s_max_prio = plic.plic_priorities[idx];
             }
         }
     }
-    if (s_max_prio > plic.plic_threshold.at(1)) {
+    if (s_max_prio > plic.plic_threshold[1]) {
         s_ext = true;
     }
 
@@ -128,9 +126,9 @@ void InterruptController::setIrq(PlicMmio& plic, int irq_num, int state_val) {
     if (irq_num <= 0 || irq_num >= 32) return;
     const Word mask = static_cast<Word>(1) << irq_num;
     if (state_val != 0) {
-        plic.plic_pending.at(0) |= mask;
+        plic.plic_pending[0] |= mask;
     } else {
-        plic.plic_pending.at(0) &= ~mask;
+        plic.plic_pending[0] &= ~mask;
     }
     plic.cpu_.plic_update_mip();
 }
@@ -163,15 +161,15 @@ auto PlicMmio::mmio_read(Address offset) -> Word {
     if (offset < 0x1000) {
         // PLIC interrupt source zero is reserved and its priority is hardwired to zero.
         if (offset == 0) return 0;
-        return plic_priorities.at(offset / 4);
+        return plic_priorities[offset / 4];
     }
     if (offset >= 0x1000 && offset < 0x1080) {
-        return plic_pending.at((offset - 0x1000) / 4);
+        return plic_pending[(offset - 0x1000) / 4];
     }
     if (offset >= 0x2000 && offset < 0x2000 + (kMaxPlicContexts * 0x80)) {
         const auto ctx = (offset - 0x2000) / 0x80;
         const auto word = ((offset - 0x2000) % 0x80) / 4;
-        const Word value = plic_enables.at(ctx).at(word);
+        const Word value = plic_enables[ctx][word];
         return (word == 0) ? (value & ~Word{1}) : value;
     }
 
@@ -180,7 +178,7 @@ auto PlicMmio::mmio_read(Address offset) -> Word {
         const auto ctx_idx = static_cast<std::size_t>(context);
         Address ctx_base = 0x200000 + (context * 0x1000);
         if (offset == ctx_base) {
-            return plic_threshold.at(ctx_idx);
+            return plic_threshold[ctx_idx];
         }
         if (offset == ctx_base + 4) {
             // Claim: evaluate highest priority pending & enabled for this context
@@ -188,21 +186,21 @@ auto PlicMmio::mmio_read(Address offset) -> Word {
             int claim_id = 0;
             for (int i : std::views::iota(1, 32)) {
                 const auto idx = static_cast<std::size_t>(i);
-                if ((plic_pending.at(0) & (1u << i)) != 0 &&
-                    (plic_enables.at(ctx_idx).at(0) & (1u << i)) != 0) {
-                    if (plic_priorities.at(idx) > max_prio) {
-                        max_prio = plic_priorities.at(idx);
+                if ((plic_pending[0] & (1u << i)) != 0 &&
+                    (plic_enables[ctx_idx][0] & (1u << i)) != 0) {
+                    if (plic_priorities[idx] > max_prio) {
+                        max_prio = plic_priorities[idx];
                         claim_id = i;
                     }
                 }
             }
-            if (max_prio <= plic_threshold.at(ctx_idx)) {
+            if (max_prio <= plic_threshold[ctx_idx]) {
                 claim_id = 0;
             }
             if (claim_id > 0) {
                 // Clear the pending bit on claim
-                plic_pending.at(0) &= ~(1u << claim_id);
-                plic_claim.at(ctx_idx) = static_cast<Word>(claim_id);
+                plic_pending[0] &= ~(1u << claim_id);
+                plic_claim[ctx_idx] = static_cast<Word>(claim_id);
                 cpu_.plic_update_mip();
             }
             return static_cast<Word>(claim_id);
@@ -214,22 +212,22 @@ auto PlicMmio::mmio_read(Address offset) -> Word {
 void PlicMmio::mmio_write(Address offset, Word wdata) {
     if (offset < 0x1000) {
         // Source zero means "no interrupt" and is not configurable.
-        if (offset != 0) plic_priorities.at(offset / 4) = wdata;
+        if (offset != 0) plic_priorities[offset / 4] = wdata;
     } else if (offset >= 0x2000 && offset < 0x2000 + (kMaxPlicContexts * 0x80)) {
         const auto ctx = (offset - 0x2000) / 0x80;
         const auto word = ((offset - 0x2000) % 0x80) / 4;
-        plic_enables.at(ctx).at(word) = (word == 0) ? (wdata & ~Word{1}) : wdata;
+        plic_enables[ctx][word] = (word == 0) ? (wdata & ~Word{1}) : wdata;
     } else {
         int context = get_context_for_offset(offset);
         if (context >= 0) {
             const auto ctx_idx = static_cast<std::size_t>(context);
             Address ctx_base = 0x200000 + (context * 0x1000);
             if (offset == ctx_base) {
-                plic_threshold.at(ctx_idx) = wdata;
+                plic_threshold[ctx_idx] = wdata;
             } else if (offset == ctx_base + 4) {
                 // Complete: indicates the handler has finished with the IRQ
-                if (plic_claim.at(ctx_idx) == wdata && wdata != 0) {
-                    plic_claim.at(ctx_idx) = 0;
+                if (plic_claim[ctx_idx] == wdata && wdata != 0) {
+                    plic_claim[ctx_idx] = 0;
                     if (cpu_.machine_ && wdata == 3 && cpu_.machine_->uart_device() &&
                         cpu_.machine_->uart_device()->is_interrupt_pending()) {
                         InterruptController::setIrq(*this, static_cast<int>(wdata), 1);

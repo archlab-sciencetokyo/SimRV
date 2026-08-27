@@ -68,8 +68,10 @@ void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
     }
 }
 
-void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity,
+void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view,
                          const char* image_name, bool tuimode) {
+    Byte* const ram = ram_view.data();
+    const auto capacity = static_cast<std::size_t>(ram_view.size());
     if (ram == nullptr || capacity == 0) {
         simrv::log::error("invalid destination for {} image load", image_name);
         std::exit(EXIT_FAILURE);
@@ -130,7 +132,7 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
                             if (phdr.p_type == PT_LOAD && phdr.p_filesz > 0) {
                                 const Address paddr =
                                     phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
-                                const Address dram_base = simrv::memory::kDramBaseAddress;
+                                const Address dram_base = ram_view.base();
                                 Address dest_offset = 0;
                                 if (paddr >= dram_base && (paddr - dram_base) < capacity) {
                                     dest_offset = paddr - dram_base;
@@ -176,7 +178,7 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
                             if (phdr.p_type == PT_LOAD && phdr.p_filesz > 0) {
                                 const Address paddr =
                                     phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
-                                const Address dram_base = simrv::memory::kDramBaseAddress;
+                                const Address dram_base = ram_view.base();
                                 Address dest_offset = 0;
                                 if (paddr >= dram_base && (paddr - dram_base) < capacity) {
                                     dest_offset = paddr - dram_base;
@@ -285,9 +287,8 @@ auto Machine::initialize() -> int {
     if (s_tuimode) {
         tui = std::make_unique<simrv::tui::Tui>(*this);
     }
-    const size_t effective_dram_size = (s_dram_size != 0)
-                                           ? static_cast<size_t>(s_dram_size)
-                                           : static_cast<size_t>(simrv::memory::kDramSize);
+    const auto ram = ram_view();
+    const size_t effective_dram_size = static_cast<size_t>(ram.size());
     config.memory.dram_size = static_cast<Address>(effective_dram_size);
     if (!allocate_ram(effective_dram_size)) {
         simrv::log::error("Failed to allocate main memory ({} bytes)", effective_dram_size);
@@ -374,9 +375,14 @@ auto Machine::initialize() -> int {
     if (s_appmode) {
         s_enabletimer = 0;
     }
-    const Address dtb_offset =
-        linux_boot ? static_cast<Address>(effective_dram_size - static_cast<size_t>(0x00100000U))
-                   : simrv::boot::kInitDataAddress;
+    if (linux_boot && effective_dram_size < static_cast<size_t>(0x00100000U)) {
+        simrv::log::error("DRAM must be at least 1 MiB for an OS device tree");
+        return 1;
+    }
+    const Address dtb_offset = linux_boot
+                                   ? static_cast<Address>(effective_dram_size -
+                                                          static_cast<size_t>(0x00100000U))
+                                   : simrv::boot::kInitDataAddress;
 
     CSRValue initial_misa =
         isa::misa_with_mxl(s_misa_override ? s_misa_profile : isa::kMisaDefault);
@@ -445,7 +451,7 @@ auto Machine::initialize() -> int {
     }
     cpu.TLB_flush();
 
-    load_image_into_ram(s_fn_memimg, mmem, effective_dram_size, "memory", s_tuimode);
+    load_image_into_ram(s_fn_memimg, ram_view(), "memory", s_tuimode);
     symbols.load_from_elf(s_spike_elf.empty() ? s_fn_memimg : s_spike_elf, true,
                           runtime_profile.interaction == InteractionMode::Tui
                               ? simrv::debug::SymbolLoadMode::FullDebug
@@ -499,7 +505,18 @@ auto Machine::initialize() -> int {
                 return 1;
             }
             const auto dt_cap = static_cast<std::size_t>(effective_dram_size - dtb_offset);
-            load_image_into_ram(s_fn_dvtree, mmem + dtb_offset, dt_cap, "device-tree", s_tuimode);
+            // `ram` above captures geometry before allocation. Reacquire the view so the DTB
+            // loader receives the live backing pointer as well as the resolved runtime geometry.
+            const auto initialized_ram = ram_view();
+            const Address dtb_address = initialized_ram.base() + dtb_offset;
+            if (!initialized_ram.contains(dtb_address, dt_cap)) {
+                simrv::log::error("device-tree region is outside DRAM");
+                return 1;
+            }
+            load_image_into_ram(s_fn_dvtree,
+                                {initialized_ram.unchecked_ptr(dtb_address), dtb_address,
+                                 static_cast<Address>(dt_cap)},
+                                "device-tree", s_tuimode);
         } else {
             const bool enable_pcie = (s_platform_profile == PlatformProfile::Pcie ||
                                       s_platform_profile == PlatformProfile::Hybrid);
@@ -568,8 +585,7 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
         return false;
     }
     s_fn_memimg = filepath;
-    load_image_into_ram(s_fn_memimg, mmem, static_cast<std::size_t>(simrv::memory::kDramSize),
-                        "memory", s_tuimode);
+    load_image_into_ram(s_fn_memimg, ram_view(), "memory", s_tuimode);
     symbols.load_from_elf(s_spike_elf.empty() ? s_fn_memimg : s_spike_elf, true,
                           runtime_profile.interaction == InteractionMode::Tui
                               ? simrv::debug::SymbolLoadMode::FullDebug
@@ -655,13 +671,17 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
     cpu.state().priv = kPrivMachine;
     cpu.state().regs.write(static_cast<RegId>(10), 0);
     const bool linux_boot = !s_appmode;
-    const size_t effective_dram_size = (s_dram_size != 0)
-                                           ? static_cast<size_t>(s_dram_size)
-                                           : static_cast<size_t>(simrv::memory::kDramSize);
+    const auto ram = ram_view();
+    const size_t effective_dram_size = static_cast<size_t>(ram.size());
     config.memory.dram_size = static_cast<Address>(effective_dram_size);
-    const Address dtb_offset =
-        linux_boot ? static_cast<Address>(effective_dram_size - static_cast<size_t>(0x00100000U))
-                   : simrv::boot::kInitDataAddress;
+    if (linux_boot && effective_dram_size < static_cast<size_t>(0x00100000U)) {
+        simrv::log::error("DRAM must be at least 1 MiB for an OS device tree");
+        return false;
+    }
+    const Address dtb_offset = linux_boot
+                                   ? static_cast<Address>(effective_dram_size -
+                                                          static_cast<size_t>(0x00100000U))
+                                   : simrv::boot::kInitDataAddress;
     cpu.state().regs.write(static_cast<RegId>(11),
                            linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);
 
@@ -673,7 +693,15 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
     if (linux_boot) {
         if (!s_fn_dvtree.empty()) {
             const auto dt_cap = static_cast<std::size_t>(effective_dram_size - dtb_offset);
-            load_image_into_ram(s_fn_dvtree, mmem + dtb_offset, dt_cap, "device-tree", s_tuimode);
+            const Address dtb_address = ram.base() + dtb_offset;
+            if (!ram.contains(dtb_address, dt_cap)) {
+                simrv::log::error("device-tree region is outside DRAM");
+                return false;
+            }
+            load_image_into_ram(s_fn_dvtree,
+                                {ram.unchecked_ptr(dtb_address), dtb_address,
+                                 static_cast<Address>(dt_cap)},
+                                "device-tree", s_tuimode);
         } else {
             const bool enable_pcie = (s_platform_profile == PlatformProfile::Pcie ||
                                       s_platform_profile == PlatformProfile::Hybrid);

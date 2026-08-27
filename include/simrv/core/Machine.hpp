@@ -56,6 +56,12 @@ class LeftPane;
 
 namespace simrv::core {
 
+class BaremetalRunner;
+class OsRunner;
+
+/// Selects the composed execution policy for a machine instance.
+enum class MachineMode : uint8_t { Baremetal, OperatingSystem };
+
 struct PlatformStatusSnapshot {
     PlatformProfile profile = PlatformProfile::Pcie;
     bool has_pcie = false;
@@ -85,6 +91,14 @@ struct PendingRebootState {
     std::optional<std::string> disk_path;
 };
 
+/// Stable, inexpensive execution state consumed by the asynchronous TUI renderer.
+struct TuiExecutionSnapshot {
+    Register pc = 0;
+    Counter instruction_count = 0;
+    Counter timer_ticks = 0;
+    ExecutionState execution_state = ExecutionState::Stopped;
+};
+
 /**
  * @class Machine
  * @brief Owns and orchestrates CPU, memory subsystem, and MMIO devices.
@@ -92,7 +106,7 @@ struct PendingRebootState {
  * Machine is the simulator root object and drives the pipeline-cycle loop,
  * image loading, device wiring, tracing, and run termination checks.
  */
-class Machine {
+class Machine final {
    private:
     class Runtime;
     std::unique_ptr<Runtime> runtime_;
@@ -113,9 +127,9 @@ class Machine {
     };
 
     /// Construct the simulator root object.
-    Machine();
+    explicit Machine(MachineMode mode = MachineMode::Baremetal);
     /// Destroy simulator resources.
-    virtual ~Machine();
+    ~Machine();
     Machine(const Machine&) = delete;
     auto operator=(const Machine&) -> Machine& = delete;
     Machine(Machine&&) = delete;
@@ -291,6 +305,11 @@ class Machine {
     [[nodiscard]] auto primary_hart() const noexcept -> const CPU& { return cpu; }
     [[nodiscard]] auto ram_data() noexcept -> Byte* { return mmem; }
     [[nodiscard]] auto ram_data() const noexcept -> const Byte* { return mmem; }
+    [[nodiscard]] auto ram_view() const noexcept -> simrv::memory::RamView {
+        const auto geometry = memory_geometry();
+        return {mmem, geometry.dram_base, geometry.dram_size};
+    }
+    [[nodiscard]] auto tui_execution_snapshot() const noexcept -> TuiExecutionSnapshot;
     /// Platform capability used by built-in devices to publish an external interrupt level.
     void set_platform_irq(int irq, bool asserted) { cpu.plic_set_irq(irq, asserted ? 1 : 0); }
     /// Read the shared platform timer without exposing the CPU ownership graph.
@@ -379,19 +398,32 @@ class Machine {
     [[nodiscard]] auto memory() -> simrv::memory::MemorySubsystem& { return memory_; }
     [[nodiscard]] auto memory() const -> const simrv::memory::MemorySubsystem& { return memory_; }
 
-   protected:
-    [[nodiscard]] auto allocate_ram(size_t bytes) -> bool;
-    void release_ram() noexcept;
-    // Composition hooks for built-in machine specializations and focused lifetime tests. The
-    // owning containers remain inaccessible to adapters and are not part of the installed SDK.
-    [[nodiscard]] auto mutable_secondary_harts() noexcept
+   public:
+    /// Internal test support for deterministic component fixtures. Not part of the SDK contract.
+    void set_ram_for_testing(Byte* ram, size_t size) noexcept;
+    [[nodiscard]] auto mutable_ram_data_for_testing() noexcept -> Byte*& { return mmem; }
+    [[nodiscard]] auto allocate_ram_for_testing(size_t bytes) -> bool { return allocate_ram(bytes); }
+    void release_ram_for_testing() noexcept { release_ram(); }
+    void add_hart_for_testing(std::unique_ptr<CPU> hart);
+    [[nodiscard]] auto test_secondary_harts() noexcept
         -> std::vector<std::unique_ptr<simrv::core::CPU>>& {
         return secondary_harts_;
     }
-    [[nodiscard]] auto mutable_ram_pointer() noexcept -> Byte*& { return mmem; }
-    [[nodiscard]] auto mutable_uart() noexcept -> std::unique_ptr<simrv::device::Uart>& {
+    [[nodiscard]] auto mutable_uart_for_testing() noexcept -> std::unique_ptr<simrv::device::Uart>& {
         return uart;
     }
+    void finalize_for_testing() { finalize_runner_cycle(); }
+    void execute_cycle_for_testing() { execute_runner_cycle(); }
+    [[nodiscard]] auto execute_fast_batch_for_testing(uint32_t batch_size) -> bool {
+        return execute_runner_fast_batch(batch_size);
+    }
+    void publish_tui_execution_snapshot_for_testing() noexcept { publish_tui_execution_snapshot(); }
+    void start_runner_for_testing() { start_runner(); }
+    void stop_runner_for_testing() { stop_runner(); }
+
+   protected:
+    [[nodiscard]] auto allocate_ram(size_t bytes) -> bool;
+    void release_ram() noexcept;
     friend class simrv::core::CPU;
     friend class simrv::execute::ExecuteUnit;
     friend class simrv::device::Uart;
@@ -400,20 +432,15 @@ class Machine {
     friend class simrv::memory::CoherenceHub;
     simrv::memory::MemorySubsystem& memory_;
 
-    /// Virtual hooks for template method execution loop
-    virtual void start_smp_threads() {}
-    virtual void stop_smp_threads() {}
-    virtual void execute_cycle() = 0;
-    virtual auto execute_fast_batch(uint32_t batch_size) -> bool {
-        (void)batch_size;
-        return false;
-    }
-    /// Perform per-cycle initialization before CPU stage execution.
-    virtual void prepare_cycle() {}
-    /// Perform per-cycle finalization and completion checks.
-    virtual void finalize_cycle() {}
-    /// Shared fast-batch policy. Bare-metal may allow a non-tracing TUI; OS mode may not.
-    [[nodiscard]] auto can_execute_fast_batch() const -> bool;
+    void start_runner();
+    void stop_runner();
+    void execute_runner_cycle();
+    [[nodiscard]] auto execute_runner_fast_batch(uint32_t batch_size) -> bool;
+    void prepare_runner_cycle();
+    void finalize_runner_cycle();
+    void publish_tui_execution_snapshot() noexcept;
+    /// Snapshot all fast-path decisions once at a runner batch boundary.
+    [[nodiscard]] auto fast_batch_policy() const -> std::optional<FastBatchPolicy>;
 
     mutable std::mutex pending_reboot_mutex_;
     std::string pending_binary_path_;
@@ -430,6 +457,14 @@ class Machine {
 
     std::atomic<bool> is_running_ = true;  // Main-loop run flag.
     std::atomic<ExecutionState> execution_state_{ExecutionState::Running};
+    std::atomic<uint64_t> tui_snapshot_generation_{0};
+    std::atomic<Register> tui_snapshot_pc_{0};
+    std::atomic<Counter> tui_snapshot_instruction_count_{0};
+    std::atomic<Counter> tui_snapshot_timer_ticks_{0};
+    std::atomic<ExecutionState> tui_snapshot_execution_state_{ExecutionState::Stopped};
+
+    friend class BaremetalRunner;
+    friend class OsRunner;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes)
 }  // namespace simrv::core

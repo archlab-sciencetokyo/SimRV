@@ -120,55 +120,12 @@ include(SimRVOptions)
   # Runtime is the composition target and must be declared after all component object targets.
   add_subdirectory(src/core)
 
-  add_library(simrv-sdk
-    src/v3/Command.cpp
-    src/v3/RunManifest.cpp
-    src/v3/Plugin.cpp
-    src/v3/Simulator.cpp
-    $<TARGET_OBJECTS:simrv-foundation>
-    $<TARGET_OBJECTS:simrv-isa>
-    $<TARGET_OBJECTS:simrv-execution>
-    $<TARGET_OBJECTS:simrv-pipeline>
-    $<TARGET_OBJECTS:simrv-memory>
-    $<TARGET_OBJECTS:simrv-platform>
-    $<TARGET_OBJECTS:simrv-debug>
-    $<TARGET_OBJECTS:simrv-tui-framework>
-    $<TARGET_OBJECTS:simrv-tui>
-    $<TARGET_OBJECTS:simrv-core>
-  )
-  add_library(simrv::sdk ALIAS simrv-sdk)
-  add_library(SimRV::sdk ALIAS simrv-sdk)
-  target_include_directories(simrv-sdk PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-  )
-  set_target_properties(simrv-sdk PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-    VERSION ${PROJECT_VERSION}
-    SOVERSION ${PROJECT_VERSION_MAJOR}
-    EXPORT_NAME sdk
-  )
-  simrv_apply_options(simrv-sdk)
-  # Project options contain compile/link flags only; the installed archive has no runtime
-  # dependency on that internal helper target.
-  set_property(TARGET simrv-sdk PROPERTY INTERFACE_LINK_LIBRARIES "")
-
-  add_library(simrv-plugin-sdk INTERFACE)
-  add_library(simrv::plugin-sdk ALIAS simrv-plugin-sdk)
-  add_library(SimRV::plugin-sdk ALIAS simrv-plugin-sdk)
-  target_compile_features(simrv-plugin-sdk INTERFACE cxx_std_23)
-  target_include_directories(simrv-plugin-sdk INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-  )
-  set_target_properties(simrv-plugin-sdk PROPERTIES EXPORT_NAME plugin-sdk)
-
   add_executable(SimRV src/Main.cpp)
   target_include_directories(SimRV PRIVATE
     include
     ${CMAKE_CURRENT_BINARY_DIR}/generated
   )
-  target_link_libraries(SimRV PRIVATE simrv-sdk)
+  target_link_libraries(SimRV PRIVATE simrv-runtime)
   simrv_apply_options(SimRV)
 
 include(CheckCXXCompilerFlag)
@@ -194,9 +151,31 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
   include(CheckIPOSupported)
   check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
   if(ipo_supported)
-    set_property(TARGET SimRV PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-    message(STATUS "LTO (Link-Time Optimization) enabled.")
+    set(SIMRV_IPO_ENABLED ON)
+    # Most simulator code is compiled through object libraries and then composed into simrv-sdk.
+    # Enabling IPO only on the executable leaves those hot-path objects outside the LTO unit.
+    # Apply it to every concrete part of the final product so the linker can inline across the
+    # CPU, memory, pipeline, and device boundaries.
+    set(simrv_ipo_targets
+      simrv-foundation
+      simrv-isa
+      simrv-execution
+      simrv-pipeline
+      simrv-memory
+      simrv-platform
+      simrv-debug
+      simrv-tui-framework
+      simrv-tui
+      simrv-core
+      simrv-runtime
+      SimRV
+    )
+    foreach(simrv_ipo_target IN LISTS simrv_ipo_targets)
+      set_property(TARGET ${simrv_ipo_target} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endforeach()
+    message(STATUS "LTO (Link-Time Optimization) enabled across the simulator runtime.")
   else()
+    set(SIMRV_IPO_ENABLED OFF)
     message(STATUS "LTO not supported: ${ipo_error}")
   endif()
 endif()
@@ -299,12 +278,6 @@ target_link_libraries(simrv-machine-ownership-tests PRIVATE simrv-runtime)
 simrv_configure_native_test(simrv-machine-ownership-tests)
 add_test(NAME machine-ownership COMMAND simrv-machine-ownership-tests)
 set_tests_properties(machine-ownership PROPERTIES LABELS "gate;regress;core;ownership")
-
-add_executable(simrv-v3-sdk-tests tests/V3SdkTests.cpp)
-target_link_libraries(simrv-v3-sdk-tests PRIVATE simrv-sdk)
-simrv_configure_native_test(simrv-v3-sdk-tests)
-add_test(NAME v3-sdk COMMAND simrv-v3-sdk-tests)
-set_tests_properties(v3-sdk PROPERTIES LABELS "gate;regress;sdk;config")
 
 add_executable(simrv-modern-platform-tests
   tests/ModernPlatformTests.cpp
@@ -703,7 +676,7 @@ include(CMakePackageConfigHelpers)
 
 set_target_properties(SimRV PROPERTIES EXPORT_NAME cli)
 
-install(TARGETS SimRV simrv-sdk simrv-plugin-sdk
+install(TARGETS SimRV simrv-runtime
   EXPORT SimRVTargets
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -711,8 +684,12 @@ install(TARGETS SimRV simrv-sdk simrv-plugin-sdk
   INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
-install(DIRECTORY include/simrv/v3
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/simrv
+install(DIRECTORY include/simrv
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  FILES_MATCHING PATTERN "*.hpp"
+)
+install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated/"
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   FILES_MATCHING PATTERN "*.hpp"
 )
 install(DIRECTORY schemas/

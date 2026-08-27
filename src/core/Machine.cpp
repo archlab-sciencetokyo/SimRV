@@ -9,8 +9,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <new>
 #include <print>
+#include <span>
+#include <thread>
+#include <variant>
 
 #include "simrv/core/Logger.hpp"
 #include "simrv/device/AIA.hpp"
@@ -23,13 +27,79 @@
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
+
+/// Bare-metal and OS scheduling stay outside CPU's per-instruction fast path.  The selected
+/// runner is a value in Machine::Runtime, avoiding the old Machine subclass hierarchy.
+class BaremetalRunner {
+   public:
+    void start(Machine&) {}
+    void stop(Machine&) {}
+    void prepare(Machine&) {}
+    void execute(Machine& machine);
+    [[nodiscard]] auto execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool;
+    void finalize(Machine& machine);
+};
+
+class OsRunner {
+   public:
+    ~OsRunner() { stop_threads(); }
+    void start(Machine& machine);
+    void stop(Machine& machine);
+    void prepare(Machine& machine);
+    void execute(Machine& machine);
+    [[nodiscard]] auto execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool;
+    void finalize(Machine& machine);
+
+   private:
+    void stop_threads();
+    std::vector<std::jthread> worker_threads_;
+    std::atomic<bool> workers_running_{false};
+};
+
+/// Owns zero-initialized DRAM without eagerly touching every host page.  calloc is permitted to
+/// use demand-zero pages for large allocations while retaining the guest-visible zero-fill
+/// semantics required for RAM and ELF BSS.
+class RamStorage {
+   public:
+    RamStorage() = default;
+    ~RamStorage() { reset(); }
+    RamStorage(const RamStorage&) = delete;
+    auto operator=(const RamStorage&) -> RamStorage& = delete;
+
+    [[nodiscard]] auto allocate(size_t bytes) -> bool {
+        if (bytes == 0) return false;
+        auto* replacement = static_cast<Byte*>(std::calloc(bytes, sizeof(Byte)));
+        if (replacement == nullptr) return false;
+        reset();
+        data_ = replacement;
+        return true;
+    }
+
+    void reset() noexcept {
+        std::free(data_);
+        data_ = nullptr;
+    }
+
+    [[nodiscard]] auto data() const noexcept -> Byte* { return data_; }
+
+   private:
+    Byte* data_ = nullptr;
+};
+
 class Machine::Runtime {
    public:
-    explicit Runtime(Machine& machine) : tracer(machine), memory(machine) {}
+    using ExecutionRunner = std::variant<BaremetalRunner, OsRunner>;
+
+    explicit Runtime(Machine& machine, MachineMode mode)
+        : tracer(machine), memory(machine), runner(std::in_place_type<BaremetalRunner>) {
+        if (mode == MachineMode::OperatingSystem) {
+            runner.emplace<OsRunner>();
+        }
+    }
 
     CPU primary_cpu;
     std::vector<std::unique_ptr<CPU>> secondary_harts;
-    std::unique_ptr<Byte[]> ram;
+    RamStorage ram;
     std::unique_ptr<simrv::Rtc> rtc;
     std::unique_ptr<simrv::device::Uart> uart;
     std::unique_ptr<simrv::tui::Tui> tui;
@@ -61,10 +131,11 @@ class Machine::Runtime {
     Tracer tracer;
     simrv::debug::SymbolTable symbols;
     simrv::memory::MemorySubsystem memory;
+    ExecutionRunner runner;
 };
 
-Machine::Machine()
-    : runtime_(std::make_unique<Runtime>(*this)),
+Machine::Machine(MachineMode mode)
+    : runtime_(std::make_unique<Runtime>(*this, mode)),
       cpu(runtime_->primary_cpu),
       secondary_harts_(runtime_->secondary_harts),
       rtc(runtime_->rtc),
@@ -102,12 +173,10 @@ Machine::Machine()
 }
 
 auto Machine::allocate_ram(size_t bytes) -> bool {
-    auto ram = std::unique_ptr<Byte[]>(new (std::nothrow) Byte[bytes]{});
-    if (!ram) {
+    if (!runtime_->ram.allocate(bytes)) {
         return false;
     }
-    runtime_->ram = std::move(ram);
-    mmem = runtime_->ram.get();
+    mmem = runtime_->ram.data();
     return true;
 }
 
@@ -116,16 +185,274 @@ void Machine::release_ram() noexcept {
     mmem = nullptr;
 }
 
-auto Machine::can_execute_fast_batch() const -> bool {
+void Machine::set_ram_for_testing(Byte* ram, size_t size) noexcept {
+    runtime_->ram.reset();
+    mmem = ram;
+    s_dram_size = size;
+    config.memory.dram_size = static_cast<Address>(size);
+}
+
+void Machine::add_hart_for_testing(std::unique_ptr<CPU> hart) {
+    hart->machine_ = this;
+    secondary_harts_.push_back(std::move(hart));
+}
+
+void Machine::start_runner() {
+    std::visit([this](auto& runner) { runner.start(*this); }, runtime_->runner);
+}
+
+void Machine::stop_runner() {
+    std::visit([this](auto& runner) { runner.stop(*this); }, runtime_->runner);
+}
+
+void Machine::prepare_runner_cycle() {
+    std::visit([this](auto& runner) { runner.prepare(*this); }, runtime_->runner);
+}
+
+void Machine::execute_runner_cycle() {
+    std::visit([this](auto& runner) { runner.execute(*this); }, runtime_->runner);
+    if (s_tuimode) publish_tui_execution_snapshot();
+}
+
+auto Machine::execute_runner_fast_batch(uint32_t batch_size) -> bool {
+    const bool executed = std::visit(
+        [this, batch_size](auto& runner) { return runner.execute_fast_batch(*this, batch_size); },
+        runtime_->runner);
+    if (executed && s_tuimode) publish_tui_execution_snapshot();
+    return executed;
+}
+
+void Machine::publish_tui_execution_snapshot() noexcept {
+    tui_snapshot_generation_.fetch_add(1, std::memory_order_release);
+    tui_snapshot_pc_.store(primary_hart().state().pc, std::memory_order_relaxed);
+    tui_snapshot_instruction_count_.store(primary_hart().e_icount, std::memory_order_relaxed);
+    tui_snapshot_timer_ticks_.store(primary_hart().clint_mmio.mtime.load(std::memory_order_relaxed),
+                                    std::memory_order_relaxed);
+    tui_snapshot_execution_state_.store(execution_state_.load(std::memory_order_relaxed),
+                                        std::memory_order_relaxed);
+    tui_snapshot_generation_.fetch_add(1, std::memory_order_release);
+}
+
+auto Machine::tui_execution_snapshot() const noexcept -> TuiExecutionSnapshot {
+    TuiExecutionSnapshot snapshot;
+    while (true) {
+        const uint64_t before = tui_snapshot_generation_.load(std::memory_order_acquire);
+        if ((before & 1U) != 0) continue;
+        snapshot.pc = tui_snapshot_pc_.load(std::memory_order_relaxed);
+        snapshot.instruction_count =
+            tui_snapshot_instruction_count_.load(std::memory_order_relaxed);
+        snapshot.timer_ticks = tui_snapshot_timer_ticks_.load(std::memory_order_relaxed);
+        snapshot.execution_state = tui_snapshot_execution_state_.load(std::memory_order_relaxed);
+        const uint64_t after = tui_snapshot_generation_.load(std::memory_order_acquire);
+        if (before == after) return snapshot;
+    }
+}
+
+void Machine::finalize_runner_cycle() {
+    std::visit([this](auto& runner) { runner.finalize(*this); }, runtime_->runner);
+}
+
+auto Machine::fast_batch_policy() const -> std::optional<FastBatchPolicy> {
     if (!runtime_profile.allows_fast_batch() || s_lockstep_mode || s_gdb_mode || s_bp_trace ||
         s_strace != 0 || breakpoints.has_any()) {
-        return false;
+        return std::nullopt;
     }
     if (s_tuimode && (!tui || tui->is_trace_active() ||
                       tui->step_delay_us_.load(std::memory_order_relaxed) != 0 || is_stepping())) {
+        return std::nullopt;
+    }
+    const bool captures_execution_detail = s_tuimode && tui && tui->captures_execution_detail();
+    return FastBatchPolicy{
+        .copy_pipeline_context = captures_execution_detail,
+        .collect_instruction_mix = static_cast<bool>(s_use_mix) || captures_execution_detail,
+        .poll_pause = true,
+        .has_instruction_limit = s_fincnt != std::numeric_limits<Counter>::max(),
+    };
+}
+
+void BaremetalRunner::execute(Machine& machine) {
+    if (machine.runtime_profile.is_cycle_mode()) {
+        machine.advance_ca_global_cycle();
+    } else if (machine.lockstep() && machine.lockstep()->is_running()) {
+        machine.primary_hart().run_cycle(machine);
+    } else {
+        machine.primary_hart().run_cycle_baremetal(machine);
+    }
+}
+
+auto BaremetalRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool {
+    const auto policy = machine.fast_batch_policy();
+    if (!simrv::compiler::likely(policy.has_value())) return false;
+    if (policy->has_instruction_limit) {
+        if (machine.primary_hart().e_icount >= machine.s_fincnt) {
+            machine.stop(Machine::StopReason::InstructionLimit);
+            return true;
+        }
+        batch_size = static_cast<uint32_t>(
+            std::min<Counter>(batch_size, machine.s_fincnt - machine.primary_hart().e_icount));
+    }
+    machine.primary_hart().run_fast_baremetal_batch(machine, batch_size, *policy);
+    return true;
+}
+
+void BaremetalRunner::finalize(Machine& machine) {
+    if (simrv::compiler::unlikely(machine.trace().fp_trace.is_open())) {
+        machine.trace().write_trace_snapshot();
+    }
+    if (simrv::compiler::unlikely(machine.tohost != 0)) machine.finalize_cycle_tohost();
+    if (simrv::compiler::unlikely(machine.s_fincnt != std::numeric_limits<Counter>::max() &&
+                                  machine.primary_hart().e_icount >= machine.s_fincnt)) {
+        simrv::log::info("finished by -e option");
+        machine.stop(Machine::StopReason::InstructionLimit);
+    }
+    if (auto* uart = machine.uart_device(); uart && machine.s_tuimode) {
+        uart->service_interrupts();
+    } else if (uart && !uart->is_input_thread_running() &&
+               simrv::compiler::unlikely((machine.primary_hart().clint_mmio.mtime & 8191) == 0)) {
+        uart->service_interrupts();
+    }
+}
+
+void OsRunner::start(Machine& machine) {
+    if (!machine.s_smp_multithreaded || machine.secondary_harts_.empty() ||
+        !machine.runtime_profile.is_instruction_mode()) {
+        return;
+    }
+    stop_threads();
+    workers_running_.store(true, std::memory_order_release);
+    for (size_t i = 0; i < machine.secondary_harts_.size(); ++i) {
+        worker_threads_.emplace_back([&machine, this, i](const std::stop_token& stop_token) {
+            auto& hart = *machine.secondary_harts_[i];
+            constexpr uint32_t kWorkerBatch = 2048;
+            while (!stop_token.stop_requested() && machine.is_running() &&
+                   workers_running_.load(std::memory_order_relaxed)) {
+                if (hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started) {
+                    hart.hart_status.wait(HartStatus::Stopped, std::memory_order_relaxed);
+                    continue;
+                }
+                if (machine.execution_state_.load(std::memory_order_relaxed) ==
+                    ExecutionState::Paused) {
+                    machine.execution_state_.wait(ExecutionState::Paused,
+                                                  std::memory_order_relaxed);
+                    continue;
+                }
+                for (uint32_t step = 0;
+                     step < kWorkerBatch && machine.is_running() &&
+                     hart.hart_status.load(std::memory_order_relaxed) == HartStatus::Started;
+                     ++step) {
+                    hart.run_cycle(machine);
+                }
+            }
+        });
+    }
+}
+
+void OsRunner::stop_threads() {
+    workers_running_.store(false, std::memory_order_release);
+    for (auto& thread : worker_threads_) {
+        if (thread.joinable()) {
+            thread.request_stop();
+            thread.join();
+        }
+    }
+    worker_threads_.clear();
+}
+
+void OsRunner::stop(Machine& machine) {
+    workers_running_.store(false, std::memory_order_release);
+    for (auto& hart : machine.secondary_harts_) hart->hart_status.notify_all();
+    machine.execution_state_.notify_all();
+    stop_threads();
+}
+
+void OsRunner::prepare(Machine& machine) {
+    for (auto& hart : machine.secondary_harts_) {
+        hart->pipeline_context.pending_exception = std::nullopt;
+        hart->pipeline_context.pending_tval = 0;
+    }
+    if (simrv::compiler::likely(machine.runtime_profile.is_instruction_fast() &&
+                                machine.primary_hart().clint_mmio.mtime <= machine.s_enabletimer)) {
+        if (simrv::compiler::unlikely(machine.primary_hart().clint_mmio.mtime ==
+                                      machine.s_memimg)) {
+            machine.trace().dump_init_artifacts();
+        }
+    } else if (machine.primary_hart().clint_mmio.mtime == machine.s_memimg) {
+        machine.trace().dump_init_artifacts();
+    }
+    machine.primary_hart().pipeline_context.pending_exception = std::nullopt;
+    machine.primary_hart().pipeline_context.pending_tval = 0;
+}
+
+void OsRunner::execute(Machine& machine) {
+    if (machine.runtime_profile.is_cycle_mode()) {
+        machine.advance_ca_global_cycle();
+        return;
+    }
+    machine.primary_hart().run_cycle(machine);
+    for (auto& hart : machine.secondary_harts_) {
+        if (hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started)
+            hart->run_cycle(machine);
+    }
+}
+
+auto OsRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool {
+    const auto policy = machine.fast_batch_policy();
+    // Sampled TUI execution is safe for a single Linux hart: architectural execution remains
+    // instruction-by-instruction, while presentation and runner work move to the batch boundary.
+    // Keep every SMP configuration on the detailed scheduler until its ordering contract has an
+    // equally explicit parallel batch design.
+    if (!policy.has_value() || machine.s_smp_multithreaded || !machine.secondary_harts_.empty()) {
         return false;
     }
+    auto& cpu = machine.primary_hart();
+    if (policy->has_instruction_limit) {
+        if (cpu.e_icount >= machine.s_fincnt) {
+            machine.stop(Machine::StopReason::InstructionLimit);
+            return true;
+        }
+        batch_size =
+            static_cast<uint32_t>(std::min<Counter>(batch_size, machine.s_fincnt - cpu.e_icount));
+    }
+    const uint32_t quantum = std::min(batch_size, machine.secondary_harts_.empty() ? 4096u : 2048u);
+    for (uint32_t i = 0; i < quantum && machine.is_running(); ++i) cpu.run_cycle(machine);
+    // Functional TUI batches do not enter the per-cycle finalizer, so surface pending UART RX at
+    // the same explicit boundary that publishes the sampled UI snapshot.
+    if (auto* uart = machine.uart_device(); uart && machine.s_tuimode) {
+        uart->service_interrupts();
+    }
     return true;
+}
+
+void OsRunner::finalize(Machine& machine) {
+    auto& cpu = machine.primary_hart();
+    const bool trace_window = cpu.clint_mmio.mtime >= machine.s_trace_begin &&
+                              cpu.clint_mmio.mtime <= machine.s_trace_end;
+    if (simrv::compiler::likely(machine.runtime_profile.is_instruction_fast() &&
+                                (!machine.s_tuimode || machine.s_multithreaded) &&
+                                machine.s_strace == 0 && !trace_window && !machine.s_bp_trace)) {
+        if (simrv::compiler::unlikely(machine.tohost != 0)) machine.finalize_cycle_tohost();
+    } else {
+        if (simrv::compiler::unlikely(machine.s_strace != 0 &&
+                                      cpu.clint_mmio.mtime >= machine.s_strace))
+            machine.trace().emit_periodic_pc_trace(cpu.clint_mmio.mtime, cpu.pipeline_context.cpc);
+        if (simrv::compiler::unlikely(trace_window)) machine.trace().write_trace_snapshot();
+        if (simrv::compiler::unlikely(machine.s_bp_trace))
+            machine.trace().emit_branch_prediction_trace(
+                cpu.clint_mmio.mtime, cpu.pipeline_context.cpc, cpu.pipeline_context.jmp_pc,
+                cpu.pipeline_context.opcode, cpu.pipeline_context.tkn);
+        machine.finalize_cycle_tohost();
+    }
+    if (simrv::compiler::unlikely(machine.s_fincnt != std::numeric_limits<Counter>::max() &&
+                                  cpu.e_icount >= machine.s_fincnt)) {
+        simrv::log::info("finished by -e option");
+        machine.stop(Machine::StopReason::InstructionLimit);
+    }
+    if (auto* uart = machine.uart_device();
+        uart &&
+        (machine.s_tuimode || (!uart->is_input_thread_running() &&
+                               simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)))) {
+        uart->service_interrupts();
+    }
 }
 
 void Machine::reset_state() {
@@ -175,9 +502,8 @@ auto Machine::add_lifecycle_observer(LifecycleObserver observer) -> LifecycleObs
 
 void Machine::remove_lifecycle_observer(LifecycleObserverId observer_id) {
     std::lock_guard lock(lifecycle_observer_mutex_);
-    std::erase_if(lifecycle_observers_, [observer_id](const auto& entry) {
-        return entry.first == observer_id;
-    });
+    std::erase_if(lifecycle_observers_,
+                  [observer_id](const auto& entry) { return entry.first == observer_id; });
 }
 
 void Machine::publish_lifecycle_event(LifecycleEventKind kind, int exit_status) {
@@ -265,7 +591,7 @@ void Machine::stop(StopReason reason) {
     is_shutdown_ = true;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
     execution_state_.notify_all();
-    stop_smp_threads();
+    stop_runner();
     if (!s_tuimode) {
         is_running_ = false;
     }
@@ -281,7 +607,7 @@ void Machine::request_reboot() {
     is_running_ = false;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
     execution_state_.notify_all();
-    stop_smp_threads();
+    stop_runner();
     publish_lifecycle_event(LifecycleEventKind::RebootRequested);
 }
 
@@ -292,7 +618,7 @@ void Machine::request_exit(int status) {
     is_running_ = false;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
     execution_state_.notify_all();
-    stop_smp_threads();
+    stop_runner();
     publish_lifecycle_event(LifecycleEventKind::ExitRequested, status);
 }
 
@@ -300,8 +626,8 @@ void Machine::run() {
     publish_lifecycle_event(LifecycleEventKind::Started);
     cpu.evaluate_timer_interrupt();
 
-    // Start background SMP worker threads for multi-threaded secondary harts
-    start_smp_threads();
+    // Start the selected composed execution policy.
+    start_runner();
 
     // Start background TUI rendering and input thread if in TUI mode
     if (s_tuimode && tui && !tui->is_ui_thread_running()) {
@@ -336,7 +662,7 @@ void Machine::run() {
             tui->set_sim_thread_sleeping(false);
         }
 
-        if (execute_fast_batch(runtime_profile.fast_batch_quantum())) {
+        if (execute_runner_fast_batch(runtime_profile.fast_batch_quantum())) {
             if (simrv::compiler::unlikely(tracer.fp_trace.is_open())) {
                 tracer.write_trace_snapshot();
             }
@@ -355,9 +681,9 @@ void Machine::run() {
             continue;
         }
 
-        prepare_cycle();
-        execute_cycle();
-        finalize_cycle();
+        prepare_runner_cycle();
+        execute_runner_cycle();
+        finalize_runner_cycle();
 
         if (s_tuimode && tui) {
             tui->on_cycle_completed();
@@ -387,8 +713,7 @@ void Machine::run() {
         }
     }
 
-    // Stop background SMP worker threads
-    stop_smp_threads();
+    stop_runner();
 
     // Stop background TUI thread
     if (s_tuimode && tui) {
@@ -451,22 +776,33 @@ void Machine::finalize_cycle_tohost() {
             return;
         } else {
             // HTIF Syscall handling: payload is a pointer to the syscall block in guest DRAM
-            if (memory_geometry().contains(payload)) {
-                const Address masked_payload = payload & simrv::memory::kDramMask;
+            const auto ram = ram_view();
+            if (ram.contains(payload, 4 * sizeof(uint64_t))) {
                 uint64_t syscall_num = 0;
                 uint64_t arg0 = 0;
                 uint64_t arg1 = 0;
                 uint64_t arg2 = 0;
 
-                std::memcpy(&syscall_num, mmem + masked_payload + 0, 8);
-                std::memcpy(&arg0, mmem + masked_payload + 8, 8);
-                std::memcpy(&arg1, mmem + masked_payload + 16, 8);
-                std::memcpy(&arg2, mmem + masked_payload + 24, 8);
+                const auto* syscall_block = ram.unchecked_ptr(payload);
+                std::memcpy(&syscall_num, syscall_block + 0, sizeof(syscall_num));
+                std::memcpy(&arg0, syscall_block + 8, sizeof(arg0));
+                std::memcpy(&arg1, syscall_block + 16, sizeof(arg1));
+                std::memcpy(&arg2, syscall_block + 24, sizeof(arg2));
 
                 if (syscall_num == 64) {  // SYS_write
-                    const Address buf_masked = arg1 & simrv::memory::kDramMask;
-                    for (uint64_t i = 0; i < arg2; ++i) {
-                        char ch = static_cast<char>(mmem[buf_masked + i]);
+                    const Address fromhost_addr =
+                        (s_isatest_tohost != 0 ? s_isatest_tohost : 0x80001000) + 8;
+                    if (!ram.contains(arg1, static_cast<size_t>(arg2)) ||
+                        !ram.contains(fromhost_addr, sizeof(uint64_t))) {
+                        simrv::log::warn(
+                            "HTIF SYS_write references RAM outside the configured DRAM");
+                        tohost = 0;
+                        return;
+                    }
+                    const std::span<const Byte> bytes(ram.unchecked_ptr(arg1),
+                                                      static_cast<size_t>(arg2));
+                    for (const Byte byte : bytes) {
+                        const char ch = static_cast<char>(byte);
                         if (s_tuimode && tui) {
                             tui->handle_char_write(ch);
                         } else {
@@ -478,11 +814,8 @@ void Machine::finalize_cycle_tohost() {
                     }
 
                     // Write success response (bytes written) to fromhost
-                    const Address fromhost_addr =
-                        (s_isatest_tohost != 0 ? s_isatest_tohost : 0x80001000) + 8;
-                    const Address fromhost_masked = fromhost_addr & simrv::memory::kDramMask;
                     uint64_t resp = arg2;
-                    std::memcpy(mmem + fromhost_masked, &resp, 8);
+                    std::memcpy(ram.unchecked_ptr(fromhost_addr), &resp, sizeof(resp));
                     tohost = 0;
                     return;
                 } else if (syscall_num == 93) {  // SYS_exit
@@ -540,9 +873,11 @@ Machine::~Machine() = default;
 
 void Machine::advance_ca_global_cycle() {
     cpu.advance_ca_cycle(*this);
-    for (auto& secondary : secondary_harts_) {
-        if (secondary->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
-            secondary->advance_ca_cycle(*this);
+    if (simrv::compiler::unlikely(!secondary_harts_.empty())) {
+        for (auto& secondary : secondary_harts_) {
+            if (secondary->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+                secondary->advance_ca_cycle(*this);
+            }
         }
     }
 
@@ -551,15 +886,17 @@ void Machine::advance_ca_global_cycle() {
     // hart pipelines at a retirement boundary in the next global cycle.
     memory().system_bus().advance_cycle();
     ++cpu.clint_mmio.rtc_divider;
-    if (cpu.clint_mmio.rtc_divider == 10) {
+    if (simrv::compiler::unlikely(cpu.clint_mmio.rtc_divider >= 10)) {
         ++cpu.clint_mmio.mtime;
         cpu.clint_mmio.rtc_divider = 0;
-    }
-    const auto global_time = cpu.clint_mmio.mtime.load(std::memory_order_relaxed);
-    cpu.evaluate_timer_interrupt();
-    for (auto& secondary : secondary_harts_) {
-        secondary->clint_mmio.mtime.store(global_time, std::memory_order_relaxed);
-        secondary->evaluate_timer_interrupt();
+        cpu.evaluate_timer_interrupt();
+        if (simrv::compiler::unlikely(!secondary_harts_.empty())) {
+            const auto global_time = cpu.clint_mmio.mtime.load(std::memory_order_relaxed);
+            for (auto& secondary : secondary_harts_) {
+                secondary->clint_mmio.mtime.store(global_time, std::memory_order_relaxed);
+                secondary->evaluate_timer_interrupt();
+            }
+        }
     }
 }
 

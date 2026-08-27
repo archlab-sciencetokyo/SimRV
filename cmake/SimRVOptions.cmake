@@ -71,6 +71,11 @@ endfunction()
 
 function(simrv_configure_native_test target)
   simrv_apply_options(${target})
+  # Component object libraries may contain LTO bitcode.  Their native test consumers must use
+  # the same link mode so the selected linker plugin materializes those objects.
+  if(SIMRV_IPO_ENABLED)
+    set_property(TARGET ${target} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endif()
   target_include_directories(${target} PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
     "${CMAKE_BINARY_DIR}/generated"

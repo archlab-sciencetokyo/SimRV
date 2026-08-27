@@ -17,25 +17,18 @@
 #include <thread>
 
 #include "simrv/Define.hpp"
-#include "simrv/core/BaremetalMachine.hpp"
 #include "simrv/core/BuildInfo.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/core/OSMachine.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/util/CliParser.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
-#include "simrv/v3/Command.hpp"
 #include "simrv/xlen/Types.hpp"
 
 using namespace simrv::util;
 
 auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
-    std::span<char* const> const initial_args(argv, static_cast<std::size_t>(argc));
-    if (const auto v3_exit = simrv::v3::try_run_command(initial_args); v3_exit.has_value()) {
-        return *v3_exit;
-    }
     bool is_tui = (::isatty(STDIN_FILENO) != 0);
     bool skip_banner = false;
     for (int i = 1; i < argc; ++i) {
@@ -60,26 +53,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     // Write startup entry to MMU debug log
     std::signal(SIGINT, SIG_IGN);  // ignore control+'C'
 
-    std::optional<bool> override_appmode;
-    std::optional<std::string> override_binary;
-    std::optional<std::string> override_disk;
-    std::optional<bool> override_cycle_mode;
-    std::optional<bool> override_debug_mode;
-    std::optional<bool> override_high_contrast;
-    std::optional<bool> override_class_mode;
-    std::optional<bool> override_use_mix;
-    std::optional<bool> override_bp_trace;
-    std::optional<bool> override_traplog_mode;
-    std::optional<bool> override_dlog_mode;
-    std::optional<bool> override_lockstep_mode;
-    std::optional<bool> override_gdb_mode;
-    std::optional<bool> override_misa_override;
-    std::optional<uint64_t> override_misa_profile;
-    std::optional<unsigned int> override_misa_xlen;
-    std::optional<uint32_t> override_num_harts;
-    std::optional<uint32_t> override_smp_quantum;
-    std::optional<bool> override_smp_multithreaded;
-    std::optional<uint64_t> override_dram_size;
+    std::optional<RuntimeOptions> runtime_overrides;
 
     bool keep_running = true;
     int final_exit_code = 0;
@@ -90,58 +64,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             option_error(parsed.error());
         }
 
-        if (override_appmode.has_value()) {
-            parsed->options.appmode = *override_appmode;
-        }
-        if (override_binary.has_value()) {
-            parsed->options.fn_memimg = *override_binary;
-        }
-        if (override_disk.has_value()) {
-            parsed->options.fn_dskimg = *override_disk;
-            parsed->options.use_disk = !override_disk->empty();
-        }
-        if (override_cycle_mode.has_value()) {
-            parsed->options.cycle_mode_requested = *override_cycle_mode;
-            parsed->options.instruction_mode_requested = !*override_cycle_mode;
-        }
-        if (override_debug_mode.has_value()) {
-            parsed->options.debug_mode = *override_debug_mode;
-        }
-        if (override_high_contrast.has_value()) {
-            parsed->options.high_contrast = *override_high_contrast;
-        }
-        if (override_class_mode.has_value()) {
-            parsed->options.class_mode = *override_class_mode;
-        }
-        if (override_use_mix.has_value()) {
-            parsed->options.use_mix = *override_use_mix;
-        }
-        if (override_bp_trace.has_value()) {
-            parsed->options.bp_trace = *override_bp_trace;
-        }
-        if (override_traplog_mode.has_value()) {
-            parsed->options.traplog_mode = *override_traplog_mode;
-        }
-        if (override_dlog_mode.has_value()) {
-            parsed->options.dlog_mode = *override_dlog_mode;
-        }
-        if (override_lockstep_mode.has_value()) {
-            parsed->options.lockstep_mode = *override_lockstep_mode;
-        }
-        if (override_gdb_mode.has_value()) {
-            parsed->options.gdb_mode = *override_gdb_mode;
-        }
-        if (override_num_harts.has_value()) {
-            parsed->options.num_harts = *override_num_harts;
-        }
-        if (override_smp_quantum.has_value()) {
-            parsed->options.smp_quantum = *override_smp_quantum;
-        }
-        if (override_smp_multithreaded.has_value()) {
-            parsed->options.smp_multithreaded = *override_smp_multithreaded;
-        }
-        if (override_dram_size.has_value()) {
-            parsed->options.dram_size = *override_dram_size;
+        if (runtime_overrides.has_value()) {
+            parsed->options = *runtime_overrides;
         }
 
         switch (parsed->action) {
@@ -161,40 +85,13 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             option_error("cannot open log file: " + parsed->options.fn_log, 0);
         }
 
-        std::unique_ptr<simrv::core::Machine> sim_machine;
-        if (parsed->options.appmode) {
-            sim_machine = std::make_unique<simrv::core::BaremetalMachine>();
-        } else {
-            sim_machine = std::make_unique<simrv::core::OSMachine>();
-        }
+        auto sim_machine = std::make_unique<simrv::core::Machine>(
+            parsed->options.appmode ? simrv::core::MachineMode::Baremetal
+                                    : simrv::core::MachineMode::OperatingSystem);
 
         auto applied = apply_runtime_options(sim_machine.get(), parsed->options);
         if (!applied) {
             option_error(applied.error(), 0);
-        }
-
-        if (override_num_harts.has_value()) {
-            sim_machine->s_num_harts = *override_num_harts;
-        }
-        if (override_smp_quantum.has_value()) {
-            sim_machine->s_smp_quantum = *override_smp_quantum;
-        }
-        if (override_smp_multithreaded.has_value()) {
-            sim_machine->s_smp_multithreaded = *override_smp_multithreaded;
-        }
-        if (override_dram_size.has_value()) {
-            sim_machine->s_dram_size = *override_dram_size;
-        }
-
-        if (override_misa_override.has_value() && *override_misa_override) {
-            sim_machine->s_misa_override = true;
-            if (override_misa_profile.has_value()) {
-                sim_machine->s_misa_profile = *override_misa_profile;
-                sim_machine->primary_hart().state().misa = *override_misa_profile;
-            }
-            if (override_misa_xlen.has_value()) {
-                sim_machine->s_misa_xlen = *override_misa_xlen;
-            }
         }
 
         const int init_result = sim_machine->initialize();
@@ -225,33 +122,40 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         if (sim_machine->reboot_requested) {
             simrv::log::info("Rebooting guest system...");
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            override_cycle_mode = sim_machine->runtime_profile.is_cycle_mode();
-            override_debug_mode = sim_machine->s_debug_mode;
-            override_high_contrast = sim_machine->s_high_contrast;
-            override_class_mode = sim_machine->s_class_mode;
-            override_use_mix = sim_machine->s_use_mix;
-            override_bp_trace = sim_machine->s_bp_trace;
-            override_traplog_mode = sim_machine->s_traplog_mode;
-            override_dlog_mode = sim_machine->s_dlog_mode;
-            override_lockstep_mode = sim_machine->s_lockstep_mode;
-            override_gdb_mode = sim_machine->s_gdb_mode;
-            override_num_harts = sim_machine->s_num_harts;
-            override_smp_quantum = sim_machine->s_smp_quantum;
-            override_smp_multithreaded = sim_machine->s_smp_multithreaded;
-            override_dram_size = sim_machine->s_dram_size;
+            auto next_opt = parsed->options;
+            next_opt.cycle_mode_requested = sim_machine->runtime_profile.is_cycle_mode();
+            next_opt.instruction_mode_requested = !sim_machine->runtime_profile.is_cycle_mode();
+            next_opt.debug_mode = sim_machine->s_debug_mode;
+            next_opt.high_contrast = sim_machine->s_high_contrast;
+            next_opt.class_mode = sim_machine->s_class_mode;
+            next_opt.use_mix = sim_machine->s_use_mix;
+            next_opt.bp_trace = sim_machine->s_bp_trace;
+            next_opt.traplog_mode = sim_machine->s_traplog_mode;
+            next_opt.dlog_mode = sim_machine->s_dlog_mode;
+            next_opt.lockstep_mode = sim_machine->s_lockstep_mode;
+            next_opt.gdb_mode = sim_machine->s_gdb_mode;
+            next_opt.num_harts = sim_machine->s_num_harts;
+            next_opt.smp_quantum = sim_machine->s_smp_quantum;
+            next_opt.smp_multithreaded = sim_machine->s_smp_multithreaded;
+            next_opt.dram_size = sim_machine->s_dram_size;
 
             if (sim_machine->s_misa_override) {
-                override_misa_override = true;
-                override_misa_profile = sim_machine->s_misa_profile;
-                override_misa_xlen = sim_machine->s_misa_xlen;
+                next_opt.misa_override = true;
+                next_opt.misa_xlen = sim_machine->s_misa_xlen;
             }
 
             auto pending = sim_machine->get_pending_reboot();
             if (!pending.binary_path.empty()) {
-                override_binary = pending.binary_path;
-                override_appmode = pending.appmode;
-                override_disk = pending.disk_path;
+                next_opt.fn_memimg = pending.binary_path;
+                if (pending.appmode.has_value()) {
+                    next_opt.appmode = *pending.appmode;
+                }
+                if (pending.disk_path.has_value()) {
+                    next_opt.fn_dskimg = *pending.disk_path;
+                    next_opt.use_disk = !pending.disk_path->empty();
+                }
             }
+            runtime_overrides = next_opt;
             continue;
         } else {
             keep_running = false;

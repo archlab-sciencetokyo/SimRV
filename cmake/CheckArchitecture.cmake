@@ -11,7 +11,6 @@ endforeach()
 
 set(adapter_sources
   "${SIMRV_SOURCE_DIR}/src/Main.cpp"
-  "${SIMRV_SOURCE_DIR}/src/v3/*.cpp"
   "${SIMRV_SOURCE_DIR}/src/debug/*.cpp"
   "${SIMRV_SOURCE_DIR}/src/device/*.cpp"
   "${SIMRV_SOURCE_DIR}/src/device/mmio/*.cpp"
@@ -30,9 +29,6 @@ foreach(source IN LISTS adapter_files)
   endif()
 endforeach()
 
-if(NOT top_level_cmake MATCHES "install\\(DIRECTORY include/simrv/v3")
-  message(FATAL_ERROR "The install surface must be rooted at include/simrv/v3")
-endif()
-if(top_level_cmake MATCHES "install\\(DIRECTORY include/simrv/(core|memory|device|tui|debug|pipeline)")
-  message(FATAL_ERROR "An internal header directory is exposed by installation rules")
+if(NOT top_level_cmake MATCHES "install\\(DIRECTORY include/simrv")
+  message(FATAL_ERROR "The install surface must be rooted at include/simrv")
 endif()

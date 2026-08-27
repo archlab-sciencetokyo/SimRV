@@ -6,8 +6,6 @@ add_library(simrv::foundation ALIAS simrv-foundation)
 
 simrv_add_component(simrv-core
   Machine.cpp
-  BaremetalMachine.cpp
-  OSMachine.cpp
   MachineInit.cpp
   StateControl.cpp
   CsrFile.cpp
@@ -33,9 +31,15 @@ add_library(simrv-runtime STATIC
   $<TARGET_OBJECTS:simrv-core>
 )
 add_library(simrv::runtime ALIAS simrv-runtime)
+add_library(SimRV::runtime ALIAS simrv-runtime)
 target_include_directories(simrv-runtime PUBLIC
-  "${PROJECT_SOURCE_DIR}/include"
-  "${PROJECT_BINARY_DIR}/generated"
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/generated>
+  $<INSTALL_INTERFACE:include>
 )
-set_target_properties(simrv-runtime PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(simrv-runtime PROPERTIES
+  POSITION_INDEPENDENT_CODE ON
+  EXPORT_NAME runtime
+)
 simrv_apply_options(simrv-runtime)
+set_property(TARGET simrv-runtime PROPERTY INTERFACE_LINK_LIBRARIES "")

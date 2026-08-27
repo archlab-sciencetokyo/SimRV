@@ -17,6 +17,15 @@
 #ifndef SIMRV_CORE_COUNT
 #define SIMRV_CORE_COUNT 1
 #endif
+
+#ifndef SIMRV_DISK_SIZE_MB
+#define SIMRV_DISK_SIZE_MB 256
+#endif
+
+#ifndef SIMRV_DRAM_SIZE_MB
+#define SIMRV_DRAM_SIZE_MB 256
+#endif
+
 /// Number of simulated CPU cores.
 inline constexpr unsigned kCoreCount = SIMRV_CORE_COUNT;
 
