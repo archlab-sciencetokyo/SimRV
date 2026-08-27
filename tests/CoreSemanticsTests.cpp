@@ -83,6 +83,27 @@ void test_unaligned_host_access() {
            "unaligned 32-bit host access preserves all bytes");
 }
 
+void test_runtime_ram_view() {
+    std::array<Byte, 32> bytes{};
+    constexpr Address kUpperDramBase = simrv::memory::kDramBaseAddress + simrv::memory::kDramSize;
+    const simrv::memory::RamView ram(bytes.data(), kUpperDramBase, bytes.size());
+    const Address address = kUpperDramBase + 8;
+    simrv::memory::ram_write_fast(address, static_cast<Word>(0xA1B2C3D4U),
+                                  static_cast<Instruction>(simrv::isa::Funct3::Sw), ram);
+    expect(simrv::memory::ram_read_fast(address, static_cast<Instruction>(simrv::isa::Funct3::Lwu),
+                                        ram) == static_cast<Word>(0xA1B2C3D4U),
+           "runtime RAM view maps addresses above the build-time DRAM extent without aliasing");
+    expect(bytes[8] == Byte{0xD4}, "runtime RAM view uses the configured DRAM base as its offset");
+    expect(!ram.contains(kUpperDramBase + bytes.size(), 1), "runtime RAM view rejects its end address");
+
+    std::array<Byte, 8192> pages{};
+    const simrv::memory::RamView page_view(pages.data(), kUpperDramBase, pages.size());
+    expect(page_view.contains(kUpperDramBase + 4096, 4096),
+           "runtime RAM view accepts a complete page above the legacy DRAM extent");
+    expect(!page_view.contains(kUpperDramBase + 4097, 4096),
+           "runtime RAM view rejects a page that would cross the configured DRAM end");
+}
+
 void test_mmio_ranges() {
     simrv::memory::MmioRouter router;
     TestNode inner(0x1100, 0x100, "inner");
@@ -295,6 +316,7 @@ void test_named_misa_profiles() {
 
 void test_sv32_page_walk() {
     std::array<Byte, 0x6000> ram{};
+    const simrv::memory::RamView ram_view(ram.data(), 0, ram.size());
     constexpr Address kRoot = 0x1000;
     constexpr Address kNext = 0x2000;
     constexpr Address kPhysical = 0x3000;
@@ -306,9 +328,9 @@ void test_sv32_page_walk() {
                                 enum_mask(simrv::PteFlag::D);
 
     simrv::memory::ram_write_fast(kRoot, ((kNext >> 12U) << 10U) | kValid,
-                                  static_cast<Instruction>(simrv::isa::Funct3::Sw), ram.data());
+                                  static_cast<Instruction>(simrv::isa::Funct3::Sw), ram_view);
     simrv::memory::ram_write_fast(kNext + 4, ((kPhysical >> 12U) << 10U) | kLeafFlags,
-                                  static_cast<Instruction>(simrv::isa::Funct3::Sw), ram.data());
+                                  static_cast<Instruction>(simrv::isa::Funct3::Sw), ram_view);
     simrv::Mmu mmu(ram.data(), 0, ram.size());
     const auto translated =
         mmu.translate(kVirtual, simrv::PteAccess::Read, kPrivSupervisor, 0, kSatp, 32, false);
@@ -317,7 +339,7 @@ void test_sv32_page_walk() {
 
     constexpr Word kReservedNonLeaf = enum_mask(simrv::PteFlag::D);
     simrv::memory::ram_write_fast(kRoot, ((kNext >> 12U) << 10U) | kValid | kReservedNonLeaf,
-                                  static_cast<Instruction>(simrv::isa::Funct3::Sw), ram.data());
+                                  static_cast<Instruction>(simrv::isa::Funct3::Sw), ram_view);
     const auto malformed =
         mmu.translate(kVirtual, simrv::PteAccess::Read, kPrivSupervisor, 0, kSatp, 32, false);
     expect(!malformed.has_value() && malformed.error() == enum_mask(ExceptionCode::LoadPageFault),
@@ -340,6 +362,7 @@ void test_sv32_page_walk() {
 void test_sv39_reserved_pte_bits() {
     if constexpr (simrv::xlen::kIsXLen64) {
         std::array<Byte, 0x7000> ram{};
+        const simrv::memory::RamView ram_view(ram.data(), 0, ram.size());
         constexpr Address kRoot = 0x1000;
         constexpr Address kLevel1 = 0x2000;
         constexpr Address kLevel0 = 0x3000;
@@ -349,9 +372,9 @@ void test_sv39_reserved_pte_bits() {
         constexpr Word kValid = enum_mask(simrv::PteFlag::V);
         constexpr Word kLeafFlags =
             kValid | enum_mask(simrv::PteFlag::R) | enum_mask(simrv::PteFlag::A);
-        const auto write_pte = [&ram](Address address, Word pte) {
+        const auto write_pte = [ram_view](Address address, Word pte) {
             simrv::memory::ram_write_fast(
-                address, pte, static_cast<Instruction>(simrv::isa::Funct3::Sd), ram.data());
+                address, pte, static_cast<Instruction>(simrv::isa::Funct3::Sd), ram_view);
         };
 
         write_pte(kRoot, ((kLevel1 >> 12U) << 10U) | kValid);
@@ -608,6 +631,11 @@ void test_dynamic_fdt_generator() {
     // Check FDT magic (0xd00dfeed)
     expect(fdt[0] == 0xd0 && fdt[1] == 0x0d && fdt[2] == 0xfe && fdt[3] == 0xed,
            "FDT magic matches 0xd00dfeed in big-endian");
+    const std::string fdt_text(fdt.begin(), fdt.end());
+    expect(fdt_text.find("earlycon=uart8250,mmio,0x10000000,115200n8") != std::string::npos,
+           "Linux defaults to the standard 16550 MMIO early console, not legacy SBI console");
+    expect(fdt_text.find("earlycon=sbi") == std::string::npos,
+           "generated FDT omits the legacy SBI early console selector");
 }
 
 void test_pmp_semantics() {
@@ -710,6 +738,7 @@ void test_tilelink_c_coherence_semantics() {
 
 int main() {
     test_unaligned_host_access();
+    test_runtime_ram_view();
     test_mmio_ranges();
     test_physical_range_validation();
     test_csr_summary_and_presence_rules();

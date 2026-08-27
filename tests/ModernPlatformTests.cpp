@@ -14,7 +14,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/CsrTypes.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/core/OSMachine.hpp"
+#include "simrv/core/Machine.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/Aclint.hpp"
@@ -56,31 +56,12 @@ class DummyDevice : public simrv::memory::MmioDevice {
     uint32_t last_val_{0};
 };
 
-class ConcreteMachine : public simrv::core::Machine {
-   public:
-    ConcreteMachine()
-        : cpu(primary_hart()),
-          mmem(mutable_ram_pointer()),
-          secondary_harts_(mutable_secondary_harts()) {}
-    simrv::core::CPU& cpu;
-    Byte*& mmem;
-    std::vector<std::unique_ptr<simrv::core::CPU>>& secondary_harts_;
-    void execute_cycle() override {}
-};
+using ConcreteMachine = simrv::core::Machine;
 
-class TestOSMachine : public simrv::core::OSMachine {
-   public:
-    TestOSMachine()
-        : cpu(primary_hart()),
-          mmem(mutable_ram_pointer()),
-          secondary_harts_(mutable_secondary_harts()),
-          uart(mutable_uart()) {}
-    using simrv::core::OSMachine::finalize_cycle;
-    simrv::core::CPU& cpu;
-    Byte*& mmem;
-    std::vector<std::unique_ptr<simrv::core::CPU>>& secondary_harts_;
-    std::unique_ptr<simrv::device::Uart>& uart;
-};
+// Preserve concise fixture spelling while exercising the final, composed Machine.
+#define cpu primary_hart()
+#define mmem mutable_ram_data_for_testing()
+#define secondary_harts_ test_secondary_harts()
 
 void test_left_pane_runtime_summaries() {
     const auto check = [](bool condition, const char* message) {
@@ -194,11 +175,11 @@ void test_ia_tui_uart_input_is_immediate() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    TestOSMachine machine;
+    simrv::core::Machine machine(simrv::core::MachineMode::OperatingSystem);
     machine.cpu.reset();
     machine.s_tuimode = true;
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionObservable;
-    machine.uart = std::make_unique<simrv::device::Uart>(machine);
+    machine.mutable_uart_for_testing() = std::make_unique<simrv::device::Uart>(machine);
 
     simrv::memory::TlChannelA enable_rx_irq{};
     enable_rx_irq.opcode = simrv::memory::TlOpcodeA::PutFullData;
@@ -206,14 +187,37 @@ void test_ia_tui_uart_input_is_immediate() {
     enable_rx_irq.size = 0;
     enable_rx_irq.data = 1;
     simrv::memory::TlChannelD response{};
-    check(machine.uart->handle_request(enable_rx_irq, response));
+    check(machine.mutable_uart_for_testing()->handle_request(enable_rx_irq, response));
 
-    machine.uart->push_rx_byte('i');
+    machine.mutable_uart_for_testing()->push_rx_byte('i');
     constexpr Word kUartIrqMask = static_cast<Word>(1) << 3;
     check((machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) == 0);
-    machine.finalize_cycle();
+    machine.finalize_for_testing();
     check((machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) != 0);
     std::cout << "[PASS] test_ia_tui_uart_input_is_immediate\n";
+}
+
+void test_os_sampled_fast_batch_eligibility() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    simrv::core::Machine machine(simrv::core::MachineMode::OperatingSystem);
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionObservable;
+    machine.runtime_profile.interaction = simrv::core::InteractionMode::Tui;
+
+    // A zero-length batch exercises runner eligibility without requiring a guest image. The
+    // production TUI supplies the same observable profile, then publishes after real batches.
+    check(machine.execute_fast_batch_for_testing(0));
+
+    auto secondary = std::make_unique<simrv::core::CPU>();
+    secondary->reset();
+    machine.add_hart_for_testing(std::move(secondary));
+    check(!machine.execute_fast_batch_for_testing(0));
+
+    machine.test_secondary_harts().clear();
+    machine.s_smp_multithreaded = true;
+    check(!machine.execute_fast_batch_for_testing(0));
+    std::cout << "[PASS] test_os_sampled_fast_batch_eligibility\n";
 }
 
 void test_timed_interconnect_ordering() {
@@ -595,7 +599,7 @@ void test_global_cycle_smp_pipeline_ordering() {
         if (!condition) std::abort();
     };
     const auto run = [&] {
-        TestOSMachine machine;
+        simrv::core::Machine machine(simrv::core::MachineMode::OperatingSystem);
         std::vector<Byte> ram(1024 * 1024, Byte{0});
         machine.mmem = ram.data();
         machine.s_dram_size = ram.size();
@@ -625,7 +629,7 @@ void test_global_cycle_smp_pipeline_ordering() {
         uint32_t global_cycle = 0;
         while ((machine.hart(0).e_icount == 0 || machine.hart(1).e_icount == 0) &&
                global_cycle < 64) {
-            machine.execute_cycle();
+            machine.execute_cycle_for_testing();
             ++global_cycle;
             for (size_t hart = 0; hart < 2; ++hart) {
                 if (machine.hart(hart).e_icount != 0 && retirement_cycle[hart] == 0) {
@@ -653,7 +657,7 @@ void test_global_cycle_smp_pipeline_ordering() {
 }
 
 void test_global_cycle_timer_phase_ordering() {
-    TestOSMachine machine;
+    simrv::core::Machine machine(simrv::core::MachineMode::OperatingSystem);
     std::vector<Byte> ram(1024 * 1024, Byte{0});
     machine.mmem = ram.data();
     machine.s_dram_size = ram.size();
@@ -678,7 +682,7 @@ void test_global_cycle_timer_phase_ordering() {
     machine.cpu.clint_mmio.mtimecmp = 5;
     machine.cpu.clint_mmio.hart_mtimecmp.at(1) = 5;
 
-    machine.execute_cycle();
+    machine.execute_cycle_for_testing();
 
     assert(machine.hart(0).clint_mmio.mcycle == 1);
     assert(machine.hart(1).clint_mmio.mcycle == 1);
@@ -1460,7 +1464,7 @@ void test_sbi_multihart_rfence() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    TestOSMachine machine;
+    simrv::core::Machine machine(simrv::core::MachineMode::OperatingSystem);
     std::vector<Byte> ram(1024 * 1024, Byte{0});
     machine.mmem = ram.data();
     machine.s_dram_size = ram.size();
@@ -1522,7 +1526,7 @@ void test_ia_multihart_lr_sc_coherence() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    TestOSMachine machine;
+    simrv::core::Machine machine(simrv::core::MachineMode::OperatingSystem);
     std::vector<Byte> ram(1024 * 1024, Byte{0});
     machine.mmem = ram.data();
     machine.s_dram_size = ram.size();
@@ -1595,7 +1599,7 @@ void test_ia_multithreaded_smp_execution() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    TestOSMachine machine;
+    simrv::core::Machine machine(simrv::core::MachineMode::OperatingSystem);
     std::vector<Byte> ram(1024 * 1024, Byte{0});
     machine.mmem = ram.data();
     machine.s_dram_size = ram.size();
@@ -1635,7 +1639,7 @@ void test_ia_multithreaded_smp_execution() {
     }
 
     // Start background SMP threads
-    machine.start_smp_threads();
+    machine.start_runner_for_testing();
 
     // Hart 0 runs until it reaches WFI
     while (machine.hart(0).state().pc < pc + 0x20) {
@@ -1657,7 +1661,7 @@ void test_ia_multithreaded_smp_execution() {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
-    machine.stop_smp_threads();
+    machine.stop_runner_for_testing();
 
     check(all_finished);
     uint32_t final_sum = 0;
@@ -1676,6 +1680,7 @@ int main() {
     test_mmio_device_and_dma();
     test_tui_uart_input_irq_publication();
     test_ia_tui_uart_input_is_immediate();
+    test_os_sampled_fast_batch_eligibility();
     test_timed_interconnect_ordering();
     test_timed_interconnect_cancellation();
     test_timed_page_walk_transitions();

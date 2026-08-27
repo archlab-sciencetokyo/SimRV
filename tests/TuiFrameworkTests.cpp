@@ -75,7 +75,10 @@ void test_terminal_controls() {
     simrv::tui::VirtualTerminal terminal(8, 3);
     std::string response;
     terminal.set_response_callback([&response](std::string_view bytes) { response.append(bytes); });
+    const uint64_t initial_generation = terminal.generation();
     terminal.write_string("abc\rZ\n12\tX");
+    expect(terminal.generation() == initial_generation + 1,
+           "one UART chunk advances the terminal generation once");
     expect(terminal.get_cursor_x() == 0, "writing at the final tab stop wraps to column zero");
     expect(terminal.get_cursor_y() == 2, "writing at the final tab stop advances one row");
     expect(plain_line(terminal, 0, 8).starts_with("Zbc"), "carriage return overwrites row start");
@@ -102,7 +105,10 @@ void test_terminal_scrollback_and_selection() {
     expect(terminal.get_text_in_range(0, 0, 1, 2).find("one") != std::string::npos,
            "selection includes scrollback text");
 
+    const uint64_t generation_before_resize = terminal.generation();
     terminal.resize(6, 3);
+    expect(terminal.generation() == generation_before_resize + 1,
+           "geometry changes invalidate cached terminal rows");
     expect(terminal.get_cursor_x() < 6 && terminal.get_cursor_y() < 3,
            "resize keeps the cursor in bounds");
     terminal.write_string("\033c");
