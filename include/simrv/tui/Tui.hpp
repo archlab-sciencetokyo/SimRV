@@ -94,7 +94,7 @@ class Tui {
     /// higher rates the UI renders sampled state instead, keeping the simulator hot path lean.
     [[nodiscard]] auto captures_execution_detail() const -> bool {
         return is_trace_active() || is_paused() ||
-               step_delay_us_.load(std::memory_order_relaxed) >
+               step_delay_us_.load(std::memory_order_relaxed) >=
                    (1'000'000U / kDetailedExecutionMaxHz);
     }
     void set_sim_thread_sleeping(bool s) {
@@ -246,6 +246,11 @@ class Tui {
     LogBuffer log_buffer_;
     std::vector<std::string> trace_buffer_;
     std::vector<std::string> lines_to_draw_;
+    std::vector<std::string> terminal_rows_cache_;
+    uint64_t terminal_rows_generation_ = 0;
+    int terminal_rows_width_ = 0;
+    int terminal_rows_count_ = 0;
+    int terminal_rows_start_ = 0;
     std::vector<std::string> last_screen_lines_;
     std::atomic<bool> paused_{true};
     std::atomic<bool> trace_enabled_{false};
@@ -271,9 +276,12 @@ class Tui {
     std::chrono::microseconds runtime_duration_{0};
     std::chrono::steady_clock::time_point last_runtime_tick_{};
 
-    // Lock-free circular trace buffer
+    // Bounded trace ring. Tracing is detailed-mode-only, so producer/consumer synchronization
+    // stays outside the functional fast path.
     std::array<TraceRecord, kTraceBufferSize> trace_record_buffer_{};
     std::atomic<uint64_t> trace_write_seq_{0};
+    uint64_t rendered_trace_sequence_{0};
+    mutable std::mutex trace_mutex_;
 
     // Dedicated UI render and input thread
     std::jthread ui_thread_;
@@ -284,7 +292,7 @@ class Tui {
     std::mutex ui_cv_mutex_;
 
     // Thread-safe queues for decoupling writes from simulation
-    std::queue<char> tx_fifo_;
+    std::string tx_buffer_;
     std::queue<std::string> log_fifo_;
     mutable std::mutex tui_mutex_;
     mutable std::mutex io_mutex_;
@@ -295,6 +303,7 @@ class Tui {
     std::atomic<bool> processing_ui_input_{false};
     int cached_term_width_ = 0;
     int cached_term_height_ = 0;
+    std::chrono::steady_clock::time_point last_draw_time_{};
 
     void ui_render_loop(const std::stop_token& stop_token);
     // The dedicated UI thread is the sole stdin reader and renderer. Keeping these private
@@ -307,6 +316,7 @@ class Tui {
     auto poll_keyboard(uint8_t& byte_out) -> bool;
     auto format_trace_record(const TraceRecord& rec) -> std::string;
     auto update_trace_active_cache() -> void;
+    void drain_trace_records();
 
     void execute_footer_action(TuiFooterAction action);
     void execute_header_action(HeaderHitResult hit);

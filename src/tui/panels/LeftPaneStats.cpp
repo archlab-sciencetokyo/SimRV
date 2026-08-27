@@ -121,6 +121,49 @@ auto LeftPane::render_machine_performance_stats(const simrv::core::CPU& cpu, int
     return format_to_width("", width);
 }
 
+auto LeftPane::render_sampled_machine_performance_stats(
+    const simrv::core::TuiExecutionSnapshot& snapshot, int stats_row, int width) -> std::string {
+    const auto simulated_seconds = static_cast<double>(snapshot.timer_ticks) / 10000000.0;
+    if (stats_row == 0) return section_line("Performance", width);
+    if (stats_row == 1) {
+        return render_pair("retired", simrv::util::format_with_commas(snapshot.instruction_count),
+                           kThemeMint, "sim", std::format("{:.3f} s", simulated_seconds),
+                           kThemeSky, width / 2, width - width / 2, width < 45 ? 0 : 7);
+    }
+    if (stats_row == 2) {
+        return render_pair("engine", std::string(machine_.runtime_profile.execution_name()),
+                           kThemeVal, "host", std::format("{:.3f} s", active_runtime_),
+                           kThemeMint, width / 2, width - width / 2, width < 45 ? 0 : 7);
+    }
+    if (stats_row == 3) {
+        uint64_t top = max_kips_;
+        for (uint64_t value : kips_history_) top = std::max(top, value);
+        return render_pair("speed", format_speed(kips_), kThemeMint, "peak", format_speed(top),
+                           kThemeSky, width / 2, width - width / 2, width < 45 ? 0 : 7);
+    }
+    if (stats_row == 4) {
+        const auto average = active_runtime_ > 0.0
+                                 ? static_cast<uint64_t>(static_cast<double>(snapshot.instruction_count) /
+                                                         1000.0 / active_runtime_)
+                                 : 0;
+        if (width >= 52) {
+            const bool compact = width < 70;
+            const std::string average_label = compact ? "avg" : "average";
+            const std::string suffix =
+                std::format("]  {}: {}", average_label, format_speed(average));
+            const int available = width - 11 - get_display_width(suffix);
+            const int spark_width = std::max(8, std::min(available, (width * 2) / 5));
+            return format_to_width(
+                std::format(" {}{:<7}\033[0m: [{}{}\033[0m] {}{}: {}\033[0m", kThemeText, "trend",
+                            kThemeSky, get_sparkline_string(spark_width), kThemeSky, average_label,
+                            format_speed(average)),
+                width);
+        }
+        return make_field("average", format_speed(average), kThemeSky, width < 45 ? 0 : 7);
+    }
+    return format_to_width("", width);
+}
+
 auto LeftPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int stats_row, int width)
     -> std::string {
     const int half = width / 2;

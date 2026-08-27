@@ -22,12 +22,28 @@ extern std::array<const char*, 16> g_theme_palette;
 extern std::array<const char*, 16> g_theme_bg_palette;
 
 struct Cell {
-    std::string ch = " ";
+    std::array<char, 4> glyph{' ', '\0', '\0', '\0'};
+    uint8_t glyph_size = 1;
     uint8_t fg = 7;
     uint8_t bg = 0;
     bool bold = false;
     bool underline = false;
     bool reverse = false;
+
+    [[nodiscard]] auto text() const noexcept -> std::string_view { return {glyph.data(), glyph_size}; }
+
+    [[nodiscard]] static auto blank(uint8_t background = 0) -> Cell {
+        Cell cell;
+        cell.bg = background;
+        return cell;
+    }
+
+    [[nodiscard]] static auto from_utf8(std::string_view value, const Cell& attributes) -> Cell {
+        Cell cell = attributes;
+        cell.glyph_size = static_cast<uint8_t>(std::min<std::size_t>(value.size(), cell.glyph.size()));
+        std::copy_n(value.data(), cell.glyph_size, cell.glyph.data());
+        return cell;
+    }
 
     auto operator==(const Cell&) const -> bool = default;
 };
@@ -134,16 +150,16 @@ class VirtualTerminal {
             int diff = new_height - height_;
             for (int i = 0; i < diff; ++i) {
                 cells_.push_back(
-                    std::vector<Cell>(new_width, Cell{.ch = " ", .fg = 7, .bg = current_attr_.bg}));
+                    std::vector<Cell>(new_width, Cell::blank(current_attr_.bg)));
             }
         }
 
         // Adjust width of all rows
         for (auto& row : cells_) {
-            row.resize(new_width, Cell{.ch = " ", .fg = 7, .bg = current_attr_.bg});
+            row.resize(new_width, Cell::blank(current_attr_.bg));
         }
         for (auto& row : scrollback_) {
-            row.resize(new_width, Cell{.ch = " ", .fg = 7, .bg = current_attr_.bg});
+            row.resize(new_width, Cell::blank(current_attr_.bg));
         }
 
         width_ = new_width;
@@ -152,6 +168,7 @@ class VirtualTerminal {
         // Clamp cursor
         cursor_x_ = std::clamp(cursor_x_, 0, width_ - 1);
         cursor_y_ = std::clamp(cursor_y_, 0, height_ - 1);
+        ++generation_;
     }
 
     void write_char(char ch) {
@@ -219,11 +236,15 @@ class VirtualTerminal {
         }
     }
 
-    void write_string(const std::string& str) {
+    void write_string(std::string_view str) {
         for (char ch : str) {
             write_char(ch);
         }
+        if (!str.empty()) ++generation_;
     }
+
+    /// Increases once per externally supplied output chunk or geometry change.
+    [[nodiscard]] auto generation() const noexcept -> uint64_t { return generation_; }
 
     [[nodiscard]] auto get_cursor_x() const -> int { return cursor_x_; }
     [[nodiscard]] auto get_cursor_y() const -> int { return cursor_y_; }
@@ -298,7 +319,7 @@ class VirtualTerminal {
 
                 prev_cell = cell;
             }
-            res += cell.ch;
+            res += cell.text();
         }
 
         // Pad with empty cells
@@ -354,7 +375,7 @@ class VirtualTerminal {
                 col_to = std::clamp(col_to, 0, line_w - 1);
                 std::string line;
                 for (int c = col_from; c <= col_to; ++c) {
-                    line += (*row_ptr)[c].ch;
+                    line += (*row_ptr)[c].text();
                 }
                 while (!line.empty() && line.back() == ' ') {
                     line.pop_back();
@@ -388,7 +409,7 @@ class VirtualTerminal {
         scrollback_.push_back(cells_.front());
         cells_.pop_front();
         cells_.push_back(
-            std::vector<Cell>(width_, Cell{.ch = " ", .fg = 7, .bg = current_attr_.bg}));
+            std::vector<Cell>(width_, Cell::blank(current_attr_.bg)));
         if (scrollback_.size() > 9999) {
             scrollback_.pop_front();
         }
@@ -397,14 +418,9 @@ class VirtualTerminal {
         }
     }
 
-    void write_cell_string(const std::string& s) {
+    void write_cell_string(std::string_view s) {
         if (cursor_y_ >= 0 && cursor_y_ < height_ && cursor_x_ >= 0 && cursor_x_ < width_) {
-            cells_[cursor_y_][cursor_x_] = Cell{.ch = s,
-                                                .fg = current_attr_.fg,
-                                                .bg = current_attr_.bg,
-                                                .bold = current_attr_.bold,
-                                                .underline = current_attr_.underline,
-                                                .reverse = current_attr_.reverse};
+            cells_[cursor_y_][cursor_x_] = Cell::from_utf8(s, current_attr_);
         }
         cursor_x_++;
         if (cursor_x_ >= width_) {
@@ -429,7 +445,7 @@ class VirtualTerminal {
                 cursor_y_--;
                 if (cursor_y_ < 0) {
                     cells_.push_front(std::vector<Cell>(
-                        width_, Cell{.ch = " ", .fg = 7, .bg = current_attr_.bg}));
+                        width_, Cell::blank(current_attr_.bg)));
                     cells_.pop_back();
                     cursor_y_ = 0;
                 }
@@ -496,7 +512,7 @@ class VirtualTerminal {
             }
             for (int p : params) {
                 if (p == 0) {
-                    current_attr_ = Cell{.ch = " ", .fg = 7, .bg = 0};
+                    current_attr_ = Cell::blank();
                 } else if (p == 1) {
                     current_attr_.bold = true;
                 } else if (p == 22) {
@@ -550,35 +566,35 @@ class VirtualTerminal {
             int mode = params.size() > 0 ? params[0] : 0;
             if (mode == 0) {
                 for (int x = cursor_x_; x < width_; ++x)
-                    cells_[cursor_y_][x] = Cell{.ch = " ", .fg = 7, .bg = current_attr_.bg};
+                    cells_[cursor_y_][x] = Cell::blank(current_attr_.bg);
                 for (int y = cursor_y_ + 1; y < height_; ++y) {
                     std::fill(cells_[y].begin(), cells_[y].end(),
-                              Cell{.ch = " ", .fg = 7, .bg = current_attr_.bg});
+                              Cell::blank(current_attr_.bg));
                 }
             } else if (mode == 1) {
                 for (int y = 0; y < cursor_y_; ++y) {
                     std::fill(cells_[y].begin(), cells_[y].end(),
-                              Cell{.ch = " ", .fg = 7, .bg = current_attr_.bg});
+                              Cell::blank(current_attr_.bg));
                 }
                 for (int x = 0; x <= cursor_x_; ++x)
-                    cells_[cursor_y_][x] = Cell{.ch = " ", .fg = 7, .bg = current_attr_.bg};
+                    cells_[cursor_y_][x] = Cell::blank(current_attr_.bg);
             } else if (mode == 2 || mode == 3) {
                 for (auto& row : cells_) {
                     std::fill(row.begin(), row.end(),
-                              Cell{.ch = " ", .fg = 7, .bg = current_attr_.bg});
+                              Cell::blank(current_attr_.bg));
                 }
             }
         } else if (cmd == 'K') {  // Erase Line
             int mode = params.size() > 0 ? params[0] : 0;
             if (mode == 0) {
                 for (int x = cursor_x_; x < width_; ++x)
-                    cells_[cursor_y_][x] = Cell{.ch = " ", .fg = 7, .bg = current_attr_.bg};
+                    cells_[cursor_y_][x] = Cell::blank(current_attr_.bg);
             } else if (mode == 1) {
                 for (int x = 0; x <= cursor_x_; ++x)
-                    cells_[cursor_y_][x] = Cell{.ch = " ", .fg = 7, .bg = current_attr_.bg};
+                    cells_[cursor_y_][x] = Cell::blank(current_attr_.bg);
             } else if (mode == 2) {
                 std::fill(cells_[cursor_y_].begin(), cells_[cursor_y_].end(),
-                          Cell{.ch = " ", .fg = 7, .bg = current_attr_.bg});
+                          Cell::blank(current_attr_.bg));
             }
         } else if (cmd == 'n' && !is_private && response_cb_) {  // Device Status Report
             const int request = params.empty() ? 0 : params[0];
@@ -618,11 +634,11 @@ class VirtualTerminal {
 
     void reset_terminal() {
         for (auto& row : cells_) {
-            std::fill(row.begin(), row.end(), Cell{.ch = " ", .fg = 7, .bg = 0});
+            std::fill(row.begin(), row.end(), Cell::blank());
         }
         cursor_x_ = 0;
         cursor_y_ = 0;
-        current_attr_ = Cell{.ch = " ", .fg = 7, .bg = 0};
+        current_attr_ = Cell::blank();
         ansi_state_ = AnsiState::Normal;
         utf8_buf_.clear();
     }
@@ -637,6 +653,7 @@ class VirtualTerminal {
     Cell current_attr_;
 
     std::deque<std::vector<Cell>> cells_;
+    uint64_t generation_ = 0;
     std::deque<std::vector<Cell>> scrollback_;
 
     AnsiState ansi_state_ = AnsiState::Normal;

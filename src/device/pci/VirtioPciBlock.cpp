@@ -63,14 +63,14 @@ void VirtioPciBlock::on_queue_notify(uint16_t queue_index) {
             if (dma_read(q.desc_addr + desc0.next * sizeof(virtio::VirtqDesc), &desc1,
                          sizeof(desc1))) {
                 if (hdr.type == 0) {  // READ
-                    std::vector<std::byte> buf(desc1.len);
-                    backend_.read_sectors(hdr.sector, buf.data(), desc1.len);
-                    dma_write(desc1.addr, buf.data(), desc1.len);
+                    io_buffer_.resize(desc1.len);
+                    backend_.read_sectors(hdr.sector, io_buffer_.data(), desc1.len);
+                    dma_write(desc1.addr, io_buffer_.data(), desc1.len);
                     total_written = desc1.len;
                 } else if (hdr.type == 1) {  // WRITE
-                    std::vector<std::byte> buf(desc1.len);
-                    dma_read(desc1.addr, buf.data(), desc1.len);
-                    backend_.write_sectors(hdr.sector, buf.data(), desc1.len);
+                    io_buffer_.resize(desc1.len);
+                    dma_read(desc1.addr, io_buffer_.data(), desc1.len);
+                    backend_.write_sectors(hdr.sector, io_buffer_.data(), desc1.len);
                 }
 
                 if ((desc1.flags & virtio::kVirtqDescFNext) != 0) {

@@ -30,6 +30,7 @@ class VirtioMmioBlock : public VirtioMmioDevice {
 
    private:
     virtio::BlockBackend backend_;
+    std::vector<std::byte> io_buffer_{};
 };
 
 }  // namespace simrv::device

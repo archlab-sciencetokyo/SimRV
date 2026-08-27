@@ -17,6 +17,7 @@ namespace simrv::core {
 class Machine;
 class CPU;
 struct ArchState;
+struct TuiExecutionSnapshot;
 }  // namespace simrv::core
 
 namespace simrv::tui {
@@ -182,6 +183,9 @@ class LeftPane : public TuiWidget {
                                            int col_width, int right_width) -> std::string;
     [[nodiscard]] auto render_machine_performance_stats(const simrv::core::CPU& cpu,
                                                         int adj_logical_row, int width)
+        -> std::string;
+    [[nodiscard]] auto render_sampled_machine_performance_stats(
+        const simrv::core::TuiExecutionSnapshot& snapshot, int adj_logical_row, int width)
         -> std::string;
     [[nodiscard]] auto render_cycle_accurate_stats(const simrv::core::CPU& cpu, int adj_logical_row,
                                                    int width) -> std::string;

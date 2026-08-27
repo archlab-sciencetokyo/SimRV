@@ -141,14 +141,14 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
             if (xlen == 64) {
                 uint64_t data =
                     simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(isa::Funct3::Sd),
-                                                 machine_.memory_.mmu()->mmem());
+                                                 machine_.ram_view());
                 val_str = std::format("0x{:016x}", data);
                 dec_str = std::format("{}", static_cast<int64_t>(data));
                 raw_val = data;
             } else {
                 uint32_t data =
                     simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(isa::Funct3::Sw),
-                                                 machine_.memory_.mmu()->mmem());
+                                                 machine_.ram_view());
                 val_str = std::format("0x{:08x}", data);
                 dec_str = std::format("{}", static_cast<int32_t>(data));
                 raw_val = data;

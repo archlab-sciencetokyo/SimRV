@@ -614,19 +614,17 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
     };
 
     if (show_spinner) {
-        // Keep the low-rate dashboard live while the volatile register and pipeline canvas is
-        // sampled.  This preserves useful throughput feedback without repainting every changing
-        // architectural value at high simulator rates.
         const int stats_start = performance_start_row(is_single_column(width));
         const int stats_end = stats_start + performance_row_count();
         if (logical_row >= stats_start && logical_row < stats_end) {
             const int stats_row = logical_row - stats_start;
-            const std::string stats =
-                machine_.runtime_profile.is_cycle_mode()
-                    ? render_cycle_accurate_stats(current_cpu(), stats_row, width)
-                    : render_machine_performance_stats(current_cpu(), stats_row, width);
-            return finish_row(stats);
+            if (!machine_.runtime_profile.is_cycle_mode()) {
+                return finish_row(render_sampled_machine_performance_stats(
+                    machine_.tui_execution_snapshot(), stats_row, width));
+            }
+            return finish_row(render_cycle_accurate_stats(current_cpu(), stats_row, width));
         }
+        // High-speed UI frames use only a stable execution snapshot and cached pane state.
         return render_active_spinner(logical_row, width);
     }
 

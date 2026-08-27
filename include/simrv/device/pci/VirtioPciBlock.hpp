@@ -30,6 +30,7 @@ class VirtioPciBlock : public VirtioPciDevice {
 
    private:
     virtio::BlockBackend backend_;
+    std::vector<std::byte> io_buffer_{};
 };
 
 }  // namespace simrv::device

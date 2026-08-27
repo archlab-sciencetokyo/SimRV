@@ -172,8 +172,7 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                 resp.data = uart_mcr_;
                 break;
             case simrv::mmio::kUartRegLsr: {
-                std::scoped_lock lock(rx_mutex_);
-                const bool has_rx = !rx_fifo_.empty();
+                const bool has_rx = rx_ready_.load(std::memory_order_acquire);
                 resp.data = simrv::mmio::kUartLsrThreTemt |
                             (has_rx ? simrv::mmio::kUartLsrDataReady : static_cast<Word>(0));
             } break;
@@ -204,8 +203,7 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                         (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
                     }
                     tx_irq_pending_ = true;
-                    std::scoped_lock lock(rx_mutex_);
-                    const bool has_rx = !rx_fifo_.empty();
+                    const bool has_rx = rx_ready_.load(std::memory_order_acquire);
                     update_uart_irq(machine_, has_rx, uart_ier_, tx_irq_pending_);
                 }
                 break;
@@ -217,8 +215,7 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                     if ((uart_ier_ & static_cast<Word>(0x2U)) != 0) {
                         tx_irq_pending_ = true;
                     }
-                    std::scoped_lock lock(rx_mutex_);
-                    const bool has_rx = !rx_fifo_.empty();
+                    const bool has_rx = rx_ready_.load(std::memory_order_acquire);
                     update_uart_irq(machine_, has_rx, uart_ier_, tx_irq_pending_);
                 }
                 break;
@@ -230,8 +227,7 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                     rx_ready_.store(false, std::memory_order_release);
                 }
                 {
-                    std::scoped_lock lock(rx_mutex_);
-                    const bool has_rx = !rx_fifo_.empty();
+                    const bool has_rx = rx_ready_.load(std::memory_order_acquire);
                     update_uart_irq(machine_, has_rx, uart_ier_, tx_irq_pending_);
                 }
                 break;

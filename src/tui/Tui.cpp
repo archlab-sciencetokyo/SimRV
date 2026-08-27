@@ -166,6 +166,7 @@ void Tui::initialize() {
     status_bar_ = std::make_unique<StatusBar>(machine_);
 
     set_tui_theme(get_tui_theme());
+    machine_.publish_tui_execution_snapshot();
 
     machine_.primary_hart().pipeline_sim.config.record_snapshots = true;
     for (size_t h = 0; h < machine_.num_harts(); ++h) {
@@ -347,11 +348,16 @@ void Tui::ui_render_loop(const std::stop_token& stop_token) {
         processing_ui_input_.store(false, std::memory_order_release);
 
         const bool force = full_render_requested_.exchange(false, std::memory_order_acq_rel);
+        // Sampled frames must not chase the simulator's mutable register file. Only states
+        // promising instruction-precise inspection refresh the live register cache.
+        const bool detailed_frame = captures_execution_detail();
         if (g_resized) {
             update_cache();
             render(true);
-        } else {
+        } else if (detailed_frame) {
             update_cache();
+            render(force);
+        } else {
             render(force);
         }
 
@@ -379,7 +385,7 @@ void Tui::ui_render_loop(const std::stop_token& stop_token) {
 void Tui::handle_char_write(char ch) {
     {
         std::scoped_lock lock(io_mutex_);
-        tx_fifo_.push(ch);
+        tx_buffer_.push_back(ch);
     }
     trigger_immediate_render();
 }
@@ -393,6 +399,7 @@ void Tui::print_log(const std::string& msg) {
 }
 
 void Tui::render_update_speed(std::chrono::steady_clock::time_point now) {
+    const uint64_t current_icount = machine_.tui_execution_snapshot().instruction_count;
     if (!is_paused()) {
         if (last_runtime_tick_ != std::chrono::steady_clock::time_point{}) {
             runtime_duration_ +=
@@ -402,7 +409,6 @@ void Tui::render_update_speed(std::chrono::steady_clock::time_point now) {
         auto diff =
             std::chrono::duration_cast<std::chrono::milliseconds>(now - last_speed_update_).count();
         if (diff >= 50) {
-            uint64_t current_icount = machine_.primary_hart().e_icount;
             uint64_t insns_since_last = current_icount - last_icount_;
             if (diff > 0) {
                 speed_ips_ = (insns_since_last * 1000ULL) / static_cast<uint64_t>(diff);
@@ -420,7 +426,6 @@ void Tui::render_update_speed(std::chrono::steady_clock::time_point now) {
                 std::chrono::duration_cast<std::chrono::microseconds>(now - last_runtime_tick_);
             last_runtime_tick_ = std::chrono::steady_clock::time_point{};
         }
-        uint64_t current_icount = machine_.primary_hart().e_icount;
         if (current_icount > last_icount_) {
             auto diff =
                 std::chrono::duration_cast<std::chrono::milliseconds>(now - last_speed_update_)
@@ -474,6 +479,18 @@ void Tui::render_build_lines(int left_pane_width, int right_pane_width, int num_
             int cursor_abs_line = vt_.get_scrollback_size() + vt_.get_cursor_y();
             bool is_live = (scroll_offset_ == 0);
 
+            // Terminal output is parsed in guest-sized chunks. Reuse complete ANSI rows when a
+            // frame observes the same chunk and geometry; selections intentionally bypass this
+            // cache because they add presentation-only attributes.
+            const uint64_t terminal_generation = vt_.generation();
+            const bool reuse_terminal_rows =
+                !selection_.is_active && terminal_rows_generation_ == terminal_generation &&
+                terminal_rows_width_ == right_pane_width && terminal_rows_count_ == num_rows &&
+                terminal_rows_start_ == start;
+            if (reuse_terminal_rows) {
+                lines_to_draw_ = terminal_rows_cache_;
+            } else {
+
             int vt_sel_start = start + (selection_.start_y - 4);
             int vt_sel_end = start + (selection_.end_y - 4);
             int sx1 = selection_.start_x;
@@ -506,6 +523,14 @@ void Tui::render_build_lines(int left_pane_width, int right_pane_width, int num_
                 }
                 lines_to_draw_.push_back(vt_.get_line_as_string(i, right_pane_width, draw_cursor,
                                                                 sel_start_x, sel_end_x));
+            }
+            if (!selection_.is_active) {
+                terminal_rows_cache_ = lines_to_draw_;
+                terminal_rows_generation_ = terminal_generation;
+                terminal_rows_width_ = right_pane_width;
+                terminal_rows_count_ = num_rows;
+                terminal_rows_start_ = start;
+            }
             }
         } else if (panel_mode == TuiRightPanelMode::Display) {
             for (int i = 0; i < num_rows; ++i)
@@ -578,20 +603,17 @@ void Tui::render(bool force) {
     }
     std::unique_lock<std::mutex> lock(tui_mutex_);
 
-    std::queue<char> local_tx;
+    std::string local_tx;
     std::queue<std::string> local_log;
     {
         std::scoped_lock io_lock(io_mutex_);
-        std::swap(tx_fifo_, local_tx);
+        std::swap(tx_buffer_, local_tx);
         std::swap(log_fifo_, local_log);
     }
     const bool has_tx = !local_tx.empty();
     const bool has_log = !local_log.empty();
 
-    while (!local_tx.empty()) {
-        vt_.write_char(local_tx.front());
-        local_tx.pop();
-    }
+    if (!local_tx.empty()) vt_.write_string(local_tx);
 
     while (!local_log.empty()) {
         log_buffer_.push(std::move(local_log.front()));
@@ -601,34 +623,29 @@ void Tui::render(bool force) {
     if (!left_pane_ || !right_pane_ || !status_bar_) return;
 
     TuiRightPanelMode const panel_mode = right_panel_mode_.load(std::memory_order_relaxed);
-    static auto last_draw_time = std::chrono::steady_clock::now();
     auto now = std::chrono::steady_clock::now();
     auto elapsed_ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_draw_time).count();
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_draw_time_).count();
     const bool resized = g_resized != 0;
+    const bool status_expiring =
+        !status_override_.empty() &&
+        status_override_expires_at_ != std::chrono::steady_clock::time_point::max();
+
+    // A paused, unchanged frame has no sampled execution state to consume.  Input, logs,
+    // resizes, explicit renders, and expiring status messages still invalidate it immediately.
+    if (!force && !resized && is_paused() && !has_tx && !has_log &&
+        !trace_or_livetrace_active_.load(std::memory_order_relaxed) && !status_expiring) {
+        return;
+    }
 
     if (!force && !resized) {
         bool const is_active = !paused_ || has_tx || has_log;
         if ((is_active && elapsed_ms < 16) || (!is_active && elapsed_ms < 200)) return;
     }
-    last_draw_time = now;
+    last_draw_time_ = now;
     if (resized) g_resized = 0;
 
-    if (trace_or_livetrace_active_.load(std::memory_order_relaxed)) {
-        const uint64_t current_seq = trace_write_seq_.load(std::memory_order_relaxed);
-        const size_t available =
-            std::min<size_t>(static_cast<size_t>(current_seq), kTraceBufferSize);
-        const uint64_t start_seq = current_seq - available;
-        std::vector<TraceRecord> local_records;
-        local_records.reserve(available);
-        for (uint64_t s = start_seq; s < current_seq; ++s) {
-            local_records.push_back(trace_record_buffer_[s % kTraceBufferSize]);
-        }
-        trace_buffer_.clear();
-        for (const auto& rec : local_records) {
-            trace_buffer_.push_back(format_trace_record(rec));
-        }
-    }
+    if (trace_or_livetrace_active_.load(std::memory_order_relaxed)) drain_trace_records();
 
     if (cached_term_width_ <= 0 || cached_term_height_ <= 0 || resized) {
         struct winsize w{};
@@ -1124,19 +1141,39 @@ void Tui::record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa:
     if (!trace_or_livetrace_active_.load(std::memory_order_relaxed)) {
         return;
     }
-    const uint64_t seq = trace_write_seq_.fetch_add(1, std::memory_order_relaxed);
-    const size_t slot = seq % kTraceBufferSize;
-    trace_record_buffer_[slot] = TraceRecord{.pc = pc,
-                                             .opcode = opcode,
-                                             .op_id = op_id,
-                                             .rd = rd,
-                                             .rd_val = rd_val,
-                                             .rs1 = rs1,
-                                             .rs1_val = rs1_val,
-                                             .rs2 = rs2,
-                                             .rs2_val = rs2_val,
-                                             .imm = imm,
-                                             .sequence = seq};
+    std::scoped_lock lock(trace_mutex_);
+    const uint64_t seq = trace_write_seq_.load(std::memory_order_relaxed);
+    trace_record_buffer_[seq % kTraceBufferSize] = TraceRecord{.pc = pc,
+                                                                 .opcode = opcode,
+                                                                 .op_id = op_id,
+                                                                 .rd = rd,
+                                                                 .rd_val = rd_val,
+                                                                 .rs1 = rs1,
+                                                                 .rs1_val = rs1_val,
+                                                                 .rs2 = rs2,
+                                                                 .rs2_val = rs2_val,
+                                                                 .imm = imm,
+                                                                 .sequence = seq};
+    trace_write_seq_.store(seq + 1, std::memory_order_release);
+}
+
+void Tui::drain_trace_records() {
+    std::scoped_lock lock(trace_mutex_);
+    const uint64_t current = trace_write_seq_.load(std::memory_order_acquire);
+    const uint64_t earliest = current > kTraceBufferSize ? current - kTraceBufferSize : 0;
+    if (rendered_trace_sequence_ < earliest) {
+        trace_buffer_.clear();
+        rendered_trace_sequence_ = earliest;
+    }
+    for (; rendered_trace_sequence_ < current; ++rendered_trace_sequence_) {
+        const uint64_t seq = rendered_trace_sequence_;
+        trace_buffer_.push_back(format_trace_record(trace_record_buffer_[seq % kTraceBufferSize]));
+    }
+    if (trace_buffer_.size() > kTraceBufferSize) {
+        trace_buffer_.erase(trace_buffer_.begin(),
+                            trace_buffer_.begin() + static_cast<std::ptrdiff_t>(
+                                                        trace_buffer_.size() - kTraceBufferSize));
+    }
 }
 
 void Tui::format_trace_inst(const TraceRecord& rec, const std::string& op_name, bool rd_fp,
@@ -1790,9 +1827,9 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
             unpause_loop();
         } else {
             update_cache();
-            machine_.prepare_cycle();
+            machine_.prepare_runner_cycle();
             machine_.primary_hart().run_cycle(machine_);
-            machine_.finalize_cycle();
+            machine_.finalize_runner_cycle();
             render(true);
         }
     }
@@ -1884,9 +1921,9 @@ void Tui::execute_footer_action(TuiFooterAction action) {
                 render(true);
             } else {
                 update_cache();
-                machine_.prepare_cycle();
+                machine_.prepare_runner_cycle();
                 machine_.primary_hart().run_cycle(machine_);
-                machine_.finalize_cycle();
+                machine_.finalize_runner_cycle();
                 render(true);
             }
             break;
