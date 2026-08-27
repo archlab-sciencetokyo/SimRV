@@ -831,8 +831,65 @@ auto resolve_runtime_profile(const RuntimeOptions& options) -> simrv::core::Runt
     return profile;
 }
 
+auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
+    simrv::core::MachineConfig cfg{};
+    cfg.memory.dram_base = simrv::memory::kDramBaseAddress;
+    cfg.memory.dram_size = (dram_size != 0 ? dram_size : simrv::memory::kDramSize);
+
+    cfg.execution.appmode = appmode;
+    cfg.execution.start_pc = start_pc;
+    cfg.execution.fincnt = fincnt;
+    cfg.execution.strace = strace;
+    cfg.execution.trace_begin = trace_begin;
+    cfg.execution.trace_end = trace_end;
+    cfg.execution.enabletimer = enabletimer;
+    cfg.execution.memimg_cycle = memimg;
+    cfg.execution.num_harts = num_harts;
+    cfg.execution.smp_quantum = smp_quantum;
+    cfg.execution.smp_multithreaded = smp_multithreaded;
+    if (auto parsed = pipeline::parse_pipeline_type(pipeline_type)) {
+        cfg.execution.pipeline_type = *parsed;
+    }
+
+    cfg.tui.enabled = tuimode;
+    cfg.tui.high_contrast = high_contrast;
+    cfg.tui.class_mode = class_mode;
+    cfg.tui.mouse_sensitivity = mouse_sensitivity;
+
+    cfg.debug.gdb_enabled = gdb_mode;
+    cfg.debug.gdb_port = gdb_port;
+    cfg.debug.lockstep_enabled = lockstep_mode;
+    cfg.debug.spike_bin = spike_bin;
+    cfg.debug.spike_elf = spike_elf;
+    cfg.debug.debugmode = debugmode;
+    cfg.debug.dlog_mode = dlog_mode;
+    cfg.debug.traplog_mode = traplog_mode;
+    cfg.debug.bp_trace = bp_trace;
+    cfg.debug.use_mix = debug_mode ? true : use_mix;
+
+    cfg.isa.isatest_tohost = isatest_tohost;
+    cfg.isa.misa_profile = misa_profile_bits(effective_misa_profile(*this));
+    cfg.isa.misa_override = misa_override;
+    cfg.isa.misa_xlen = misa_xlen;
+    cfg.isa.vlen = vlen;
+
+    cfg.files.binary_path = fn_memimg;
+    cfg.files.disk_path = fn_dskimg;
+    cfg.files.dvtree_path = fn_dvtree;
+    cfg.files.traplog_path = fn_traplog;
+    cfg.files.cpuconfig_path = fn_cpuconfig;
+
+    cfg.network.mode = net_mode;
+    cfg.platform_profile = platform_profile;
+    return cfg;
+}
+
 auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& options)
     -> std::expected<void, std::string> {
+    if (!machine) {
+        return std::unexpected("internal error: machine pointer is null");
+    }
+
     machine->s_fn_memimg = options.fn_memimg;
     machine->s_fn_dskimg = options.fn_dskimg;
     machine->s_fn_dvtree = options.fn_dvtree;

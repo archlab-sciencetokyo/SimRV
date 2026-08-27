@@ -1,4 +1,5 @@
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/Machine.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 
 namespace simrv::execute {
@@ -46,8 +47,8 @@ constexpr auto is_vector_fp_arithmetic(isa::OperationId op_id) -> bool {
 }
 }  // namespace
 
-void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::OperationId op_id,
-                                 Instruction ir) {
+void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
+                                 isa::OperationId op_id, Instruction ir) {
     if (cpu.state().vstart != 0 && requires_zero_vstart(op_id)) {
         cpu.pipeline_context.pending_exception = ExceptionCode::IllegalInstruction;
         cpu.pipeline_context.pending_tval = ir;
@@ -142,7 +143,7 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::Op
         case isa::OperationId::VS2R_V:
         case isa::OperationId::VS4R_V:
         case isa::OperationId::VS8R_V:
-            execute_vector_memory(cpu, machine, op_id, rd, rs1, rs2, vm, vl, sew);
+            execute_vector_memory(cpu, mem, op_id, rd, rs1, rs2, vm, vl, sew);
             break;
 
         // Floating-Point
@@ -227,6 +228,11 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::Op
         }
         cpu.state().vstart = 0;
     }
+}
+
+void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::OperationId op_id,
+                                 Instruction ir) {
+    execute_vector(cpu, machine.memory(), op_id, ir);
 }
 
 }  // namespace simrv::execute

@@ -220,6 +220,26 @@ static auto fmax64_riscv(double a, double b) -> FloatingRegister {
 // Exception Handling
 // ============================================================================
 
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+
+static inline void fast_feclearexcept() noexcept {
+    // Intentionally no-op: host hardware MXCSR accumulates sticky exception flags directly
+}
+
+static inline void accumulate_fp_flags(CSRValue& fcsr) noexcept {
+    const unsigned int mxcsr = _mm_getcsr();
+    uint32_t flags = 0;
+    if ((mxcsr & 0x20u) != 0) flags |= enum_mask(FflagsBit::Nx);
+    if ((mxcsr & 0x10u) != 0) flags |= enum_mask(FflagsBit::Uf);
+    if ((mxcsr & 0x08u) != 0) flags |= enum_mask(FflagsBit::Of);
+    if ((mxcsr & 0x04u) != 0) flags |= enum_mask(FflagsBit::Dz);
+    if ((mxcsr & 0x01u) != 0) flags |= enum_mask(FflagsBit::Nv);
+    fcsr |= flags;
+}
+#else
+static inline void fast_feclearexcept() noexcept { std::feclearexcept(FE_ALL_EXCEPT); }
+
 static auto host_except_to_fflags(int ex) -> uint32_t {
     uint32_t flags = 0;
     if ((ex & FE_INEXACT) != 0) {
@@ -245,6 +265,7 @@ static void accumulate_fp_flags(CSRValue& fcsr) {
     const uint32_t new_flags = host_except_to_fflags(std::fetestexcept(FE_ALL_EXCEPT));
     fcsr = (fcsr & ~static_cast<CSRValue>(kFflagsMask)) | ((old_flags | new_flags) & kFflagsMask);
 }
+#endif
 
 // ============================================================================
 // Rounding Mode Management
@@ -272,10 +293,21 @@ static auto rm_to_fe_round(Word rm, CSRValue fcsr) -> int {
 
 class ScopedRoundingMode {
    public:
-    ScopedRoundingMode(Word rm, CSRValue fcsr) : old_mode_(std::fegetround()) {
-        std::fesetround(rm_to_fe_round(rm, fcsr));
+    ScopedRoundingMode(Word rm, CSRValue fcsr) {
+        target_mode_ = rm_to_fe_round(rm, fcsr);
+        if (simrv::compiler::unlikely(target_mode_ != FE_TONEAREST)) {
+            old_mode_ = std::fegetround();
+            if (old_mode_ != target_mode_) {
+                std::fesetround(target_mode_);
+                needs_restore_ = true;
+            }
+        }
     }
-    ~ScopedRoundingMode() { std::fesetround(old_mode_); }
+    ~ScopedRoundingMode() {
+        if (simrv::compiler::unlikely(needs_restore_)) {
+            std::fesetround(old_mode_);
+        }
+    }
     ScopedRoundingMode(const ScopedRoundingMode&) = delete;
     auto operator=(const ScopedRoundingMode&) -> ScopedRoundingMode& = delete;
     ScopedRoundingMode(ScopedRoundingMode&&) = delete;
@@ -283,6 +315,8 @@ class ScopedRoundingMode {
 
    private:
     int old_mode_ = FE_TONEAREST;
+    int target_mode_ = FE_TONEAREST;
+    bool needs_restore_ = false;
 };
 
 // ============================================================================
@@ -396,7 +430,7 @@ using namespace fp;
 auto ExecuteUnit::fusedFp(Opcode opcode, Word fmt, Word rs1, Word rs2, Word rs3, Word rm,
                           const FloatingRegister* freg, CSRValue& fcsr) -> FpExecResult {
     FpExecResult out;
-    std::feclearexcept(FE_ALL_EXCEPT);
+    fast_feclearexcept();
     {
         ScopedRoundingMode const scope(rm, fcsr);
         if (fmt == 0) {
@@ -405,16 +439,13 @@ auto ExecuteUnit::fusedFp(Opcode opcode, Word fmt, Word rs1, Word rs2, Word rs3,
             const float c = read_f32(freg, rs3);
             float value = 0.0F;
             if (opcode == Opcode::MAdd) {
-                value = std::fma(a, b, c);
-            }
-            if (opcode == Opcode::MSub) {
-                value = std::fma(a, b, -c);
-            }
-            if (opcode == Opcode::NMAdd) {
-                value = -std::fma(a, b, c);
-            }
-            if (opcode == Opcode::NMSub) {
-                value = -std::fma(a, b, -c);
+                value = __builtin_fmaf(a, b, c);
+            } else if (opcode == Opcode::MSub) {
+                value = __builtin_fmaf(a, b, -c);
+            } else if (opcode == Opcode::NMAdd) {
+                value = -__builtin_fmaf(a, b, c);
+            } else if (opcode == Opcode::NMSub) {
+                value = -__builtin_fmaf(a, b, -c);
             }
             if (std::isnan(value)) {
                 value = f32_from_bits(simrv::xlen::kF32Qnan);
@@ -427,16 +458,13 @@ auto ExecuteUnit::fusedFp(Opcode opcode, Word fmt, Word rs1, Word rs2, Word rs3,
             const double c = read_f64(freg, rs3);
             double value = 0.0;
             if (opcode == Opcode::MAdd) {
-                value = std::fma(a, b, c);
-            }
-            if (opcode == Opcode::MSub) {
-                value = std::fma(a, b, -c);
-            }
-            if (opcode == Opcode::NMAdd) {
-                value = -std::fma(a, b, c);
-            }
-            if (opcode == Opcode::NMSub) {
-                value = -std::fma(a, b, -c);
+                value = __builtin_fma(a, b, c);
+            } else if (opcode == Opcode::MSub) {
+                value = __builtin_fma(a, b, -c);
+            } else if (opcode == Opcode::NMAdd) {
+                value = -__builtin_fma(a, b, c);
+            } else if (opcode == Opcode::NMSub) {
+                value = -__builtin_fma(a, b, -c);
             }
             if (std::isnan(value)) {
                 value = f64_from_bits(simrv::xlen::kF64Qnan);
@@ -454,7 +482,7 @@ namespace fp {
 bool fp_exec_add_sub(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2,
                      const FloatingRegister* freg, CSRValue& fcsr) {
     if (funct7 == enum_mask(Funct7Fp::FaddS)) {
-        std::feclearexcept(FE_ALL_EXCEPT);
+        fast_feclearexcept();
         {
             ScopedRoundingMode const scope(rm, fcsr);
             float result = read_f32(freg, rs1) + read_f32(freg, rs2);
@@ -466,7 +494,7 @@ bool fp_exec_add_sub(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2
         return true;
     }
     if (funct7 == enum_mask(Funct7Fp::FaddD)) {
-        std::feclearexcept(FE_ALL_EXCEPT);
+        fast_feclearexcept();
         {
             ScopedRoundingMode const scope(rm, fcsr);
             double result = read_f64(freg, rs1) + read_f64(freg, rs2);
@@ -478,7 +506,7 @@ bool fp_exec_add_sub(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2
         return true;
     }
     if (funct7 == enum_mask(Funct7Fp::FsubS)) {
-        std::feclearexcept(FE_ALL_EXCEPT);
+        fast_feclearexcept();
         {
             ScopedRoundingMode const scope(rm, fcsr);
             float result = read_f32(freg, rs1) - read_f32(freg, rs2);
@@ -490,7 +518,7 @@ bool fp_exec_add_sub(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2
         return true;
     }
     if (funct7 == enum_mask(Funct7Fp::FsubD)) {
-        std::feclearexcept(FE_ALL_EXCEPT);
+        fast_feclearexcept();
         {
             ScopedRoundingMode const scope(rm, fcsr);
             double result = read_f64(freg, rs1) - read_f64(freg, rs2);
@@ -507,7 +535,7 @@ bool fp_exec_add_sub(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2
 bool fp_exec_mul_div_sqrt(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2,
                           const FloatingRegister* freg, CSRValue& fcsr) {
     if (funct7 == enum_mask(Funct7Fp::FmulS)) {
-        std::feclearexcept(FE_ALL_EXCEPT);
+        fast_feclearexcept();
         {
             ScopedRoundingMode const scope(rm, fcsr);
             float result = read_f32(freg, rs1) * read_f32(freg, rs2);
@@ -519,7 +547,7 @@ bool fp_exec_mul_div_sqrt(FpExecResult& out, Word funct7, Word rm, Word rs1, Wor
         return true;
     }
     if (funct7 == enum_mask(Funct7Fp::FmulD)) {
-        std::feclearexcept(FE_ALL_EXCEPT);
+        fast_feclearexcept();
         {
             ScopedRoundingMode const scope(rm, fcsr);
             double result = read_f64(freg, rs1) * read_f64(freg, rs2);
@@ -531,7 +559,7 @@ bool fp_exec_mul_div_sqrt(FpExecResult& out, Word funct7, Word rm, Word rs1, Wor
         return true;
     }
     if (funct7 == enum_mask(Funct7Fp::FdivS)) {
-        std::feclearexcept(FE_ALL_EXCEPT);
+        fast_feclearexcept();
         {
             ScopedRoundingMode const scope(rm, fcsr);
             float result = read_f32(freg, rs1) / read_f32(freg, rs2);
@@ -543,7 +571,7 @@ bool fp_exec_mul_div_sqrt(FpExecResult& out, Word funct7, Word rm, Word rs1, Wor
         return true;
     }
     if (funct7 == enum_mask(Funct7Fp::FdivD)) {
-        std::feclearexcept(FE_ALL_EXCEPT);
+        fast_feclearexcept();
         {
             ScopedRoundingMode const scope(rm, fcsr);
             double result = read_f64(freg, rs1) / read_f64(freg, rs2);
@@ -555,7 +583,7 @@ bool fp_exec_mul_div_sqrt(FpExecResult& out, Word funct7, Word rm, Word rs1, Wor
         return true;
     }
     if (funct7 == enum_mask(Funct7Fp::FsqrtS)) {
-        std::feclearexcept(FE_ALL_EXCEPT);
+        fast_feclearexcept();
         {
             ScopedRoundingMode const scope(rm, fcsr);
             float result = std::sqrt(read_f32(freg, rs1));
@@ -567,7 +595,7 @@ bool fp_exec_mul_div_sqrt(FpExecResult& out, Word funct7, Word rm, Word rs1, Wor
         return true;
     }
     if (funct7 == enum_mask(Funct7Fp::FsqrtD)) {
-        std::feclearexcept(FE_ALL_EXCEPT);
+        fast_feclearexcept();
         {
             ScopedRoundingMode const scope(rm, fcsr);
             double result = std::sqrt(read_f64(freg, rs1));
@@ -607,7 +635,7 @@ bool fp_exec_sgnj_minmax(FpExecResult& out, Word funct7, Funct3 funct3, Word rs1
         return true;
     }
     if (funct7 == enum_mask(Funct7Fp::FminmaxS)) {
-        std::feclearexcept(FE_ALL_EXCEPT);
+        fast_feclearexcept();
         const float a = read_f32(freg, rs1);
         const float b = read_f32(freg, rs2);
         out.fp_wb_data = (enum_mask(funct3) == enum_mask(Funct3Fp::Max)) ? fmax32_riscv(a, b)
@@ -617,7 +645,7 @@ bool fp_exec_sgnj_minmax(FpExecResult& out, Word funct7, Funct3 funct3, Word rs1
         return true;
     }
     if (funct7 == enum_mask(Funct7Fp::FminmaxD)) {
-        std::feclearexcept(FE_ALL_EXCEPT);
+        fast_feclearexcept();
         const double a = read_f64(freg, rs1);
         const double b = read_f64(freg, rs2);
         out.fp_wb_data = (enum_mask(funct3) == enum_mask(Funct3Fp::Max)) ? fmax64_riscv(a, b)
@@ -632,7 +660,7 @@ bool fp_exec_sgnj_minmax(FpExecResult& out, Word funct7, Funct3 funct3, Word rs1
 bool fp_exec_cvt(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2, Register rrs1,
                  const FloatingRegister* freg, CSRValue& fcsr) {
     if (funct7 == enum_mask(Funct7Fp::FcvtSD)) {
-        std::feclearexcept(FE_ALL_EXCEPT);
+        fast_feclearexcept();
         {
             ScopedRoundingMode const scope(rm, fcsr);
             const double src = read_f64(freg, rs1);
@@ -645,7 +673,7 @@ bool fp_exec_cvt(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2, Re
         return true;
     }
     if (funct7 == enum_mask(Funct7Fp::FcvtDS)) {
-        std::feclearexcept(FE_ALL_EXCEPT);
+        fast_feclearexcept();
         {
             ScopedRoundingMode const scope(rm, fcsr);
             const float src = read_f32(freg, rs1);
@@ -659,7 +687,7 @@ bool fp_exec_cvt(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2, Re
     }
     if (funct7 == enum_mask(Funct7Fp::FcvtWS) || funct7 == enum_mask(Funct7Fp::FcvtWD)) {
         const bool is_d = (funct7 == enum_mask(Funct7Fp::FcvtWD));
-        std::feclearexcept(FE_ALL_EXCEPT);
+        fast_feclearexcept();
         {
             ScopedRoundingMode const scope(rm, fcsr);
             const double a = !is_d ? static_cast<double>(read_f32(freg, rs1)) : read_f64(freg, rs1);
@@ -675,7 +703,7 @@ bool fp_exec_cvt(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2, Re
     }
     if (funct7 == enum_mask(Funct7Fp::FcvtSW) || funct7 == enum_mask(Funct7Fp::FcvtDW)) {
         const bool is_d = (funct7 == enum_mask(Funct7Fp::FcvtDW));
-        std::feclearexcept(FE_ALL_EXCEPT);
+        fast_feclearexcept();
         {
             ScopedRoundingMode const scope(rm, fcsr);
             double val = 0;
@@ -701,7 +729,7 @@ bool fp_exec_cmp(FpExecResult& out, Word funct7, Funct3 funct3, Word rs1, Word r
                  const FloatingRegister* freg, CSRValue& fcsr) {
     if (funct7 == enum_mask(Funct7Fp::FcmpS) || funct7 == enum_mask(Funct7Fp::FcmpD)) {
         const bool is_d = (funct7 == enum_mask(Funct7Fp::FcmpD));
-        std::feclearexcept(FE_ALL_EXCEPT);
+        fast_feclearexcept();
         if (!is_d) {
             const float a = read_f32(freg, rs1);
             const float b = read_f32(freg, rs2);

@@ -76,6 +76,8 @@ struct RuntimeOptions {
     uint64_t dram_size = 0;
     simrv::core::PlatformProfile platform_profile = simrv::core::PlatformProfile::Pcie;
     std::string net_mode = "user";
+
+    [[nodiscard]] auto to_machine_config() const -> simrv::core::MachineConfig;
 };
 
 struct ParseResult {

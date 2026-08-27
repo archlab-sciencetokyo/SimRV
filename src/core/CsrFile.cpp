@@ -10,6 +10,10 @@
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#endif
+
 namespace simrv::core {
 
 namespace {
@@ -372,6 +376,9 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
             }
             cpu_.state().fcsr = (cpu_.state().fcsr & ~kFflagsMask) | (wdata & kFflagsMask);
             cpu_.state().mstatus |= enum_mask(MstatusBit::Fs);
+#if defined(__x86_64__) || defined(_M_X64)
+            _mm_setcsr(_mm_getcsr() & ~0x3fu);
+#endif
             break;
         case csr_addr(Csr::Frm):
             if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::F) ||
@@ -389,6 +396,9 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
             }
             cpu_.state().fcsr = wdata & kFcsrMask;
             cpu_.state().mstatus |= enum_mask(MstatusBit::Fs);
+#if defined(__x86_64__) || defined(_M_X64)
+            _mm_setcsr(_mm_getcsr() & ~0x3fu);
+#endif
             break;
         case csr_addr(Csr::Vstart):
             if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::V) ||

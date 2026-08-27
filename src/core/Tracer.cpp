@@ -64,13 +64,16 @@ void Tracer::init_dlog(bool dlog_mode) {
 
 void Tracer::dump_init_artifacts() {
     auto* cpu = &machine_.primary_hart();
-    auto* ram = machine_.ram_data();
+    const auto ram = machine_.ram_view();
 
     {
         std::ofstream out("trace/init_mem.txt");
         const auto dram_size = static_cast<uint64_t>(machine_.memory_geometry().dram_size);
         for (Address i = 0; i < dram_size; ++i) {
-            out << std::hex << static_cast<unsigned>(std::to_integer<uint8_t>(ram[i])) << '\n';
+            out << std::hex
+                << static_cast<unsigned>(std::to_integer<uint8_t>(
+                       *ram.unchecked_ptr(machine_.memory_geometry().dram_base + i)))
+                << '\n';
         }
         simrv::log::info("file init_mem.txt was generated after {} cycle",
                          static_cast<Counter>(cpu->clint_mmio.mtime.load()));
@@ -93,7 +96,7 @@ void Tracer::dump_init_artifacts() {
                      cpu->state().regs.read(static_cast<RegId>(i)), kXLenHexDigits);
     }
     for (uint8_t i = 0; i < 32; ++i) {
-        std::println(out, "p.fregs.mem[{}]={}'h{:016x};", i, simrv::xlen::kXLenBits,
+        std::println(out, "p.fregs.mem[{}]={}'h{:016x};", i, 64,
                      cpu->state().regs.read_fp(static_cast<RegId>(i)));
     }
     write_xlen("p.fcsr        ", cpu->state().fcsr);
@@ -220,8 +223,7 @@ void Tracer::print_summary() {
                      format_with_commas(mcycle));
     simrv::log::info("Executed instructions    : {:>12}  ({})", format_scaled(icount),
                      format_with_commas(icount));
-    simrv::log::info("Final architectural PC   :   0x{:016x}",
-                     machine_.primary_hart().state().pc);
+    simrv::log::info("Final architectural PC   :   0x{:016x}", machine_.primary_hart().state().pc);
     simrv::log::info("Fetched compressed insns : {:>12}  ({})  [{:.1f}%]", format_scaled(ccount),
                      format_with_commas(ccount), comp_ratio);
     simrv::log::info("Cycles Per Instr (CPI)   : {:>12.3f}", cpi);

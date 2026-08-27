@@ -30,54 +30,94 @@ using simrv::isa::Opcode;
 using enum simrv::core::Csr;
 
 auto csr_name(uint32_t csr_addr) -> std::string {
-    static const std::unordered_map<Csr, std::string_view> kCsrNames = {
-        {Csr::Fflags, "fflags"},
-        {Csr::Frm, "frm"},
-        {Csr::Fcsr, "fcsr"},
-        {Csr::Pmpcfg0, "pmpcfg0"},
-        {Csr::Pmpaddr0, "pmpaddr0"},
-        {Csr::Cycle, "cycle"},
-        {Csr::Time, "time"},
-        {Csr::Instret, "instret"},
-        {Csr::Sstatus, "sstatus"},
-        {Csr::Sie, "sie"},
-        {Csr::Stvec, "stvec"},
-        {Csr::Scounteren, "scounteren"},
-        {Csr::Sscratch, "sscratch"},
-        {Csr::Sepc, "sepc"},
-        {Csr::Scause, "scause"},
-        {Csr::Stval, "stval"},
-        {Csr::Sip, "sip"},
-        {Csr::Satp, "satp"},
-        {Csr::Mvendorid, "mvendorid"},
-        {Csr::Marchid, "marchid"},
-        {Csr::Mimpid, "mimpid"},
-        {Csr::Mhartid, "mhartid"},
-        {Csr::Mconfigptr, "mconfigptr"},
-        {Csr::Mstatus, "mstatus"},
-        {Csr::Misa, "misa"},
-        {Csr::Medeleg, "medeleg"},
-        {Csr::Mideleg, "mideleg"},
-        {Csr::Mie, "mie"},
-        {Csr::Mtvec, "mtvec"},
-        {Csr::Mcounteren, "mcounteren"},
-        {Csr::Mscratch, "mscratch"},
-        {Csr::Mepc, "mepc"},
-        {Csr::Mcause, "mcause"},
-        {Csr::Mtval, "mtval"},
-        {Csr::Mip, "mip"},
-        {Csr::Mcycle, "mcycle"},
-        {Csr::Minstret, "minstret"},
-        {Csr::Mcycleh, "mcycleh"},
-        {Csr::Minstreth, "minstreth"},
-        {Csr::Cycleh, "cycleh"},
-        {Csr::Timeh, "timeh"},
-        {Csr::Instreth, "instreth"}};
-
-    if (auto it = kCsrNames.find(static_cast<Csr>(csr_addr)); it != kCsrNames.end()) {
-        return std::string(it->second);
+    switch (static_cast<Csr>(csr_addr)) {
+        case Csr::Fflags:
+            return "fflags";
+        case Csr::Frm:
+            return "frm";
+        case Csr::Fcsr:
+            return "fcsr";
+        case Csr::Pmpcfg0:
+            return "pmpcfg0";
+        case Csr::Pmpaddr0:
+            return "pmpaddr0";
+        case Csr::Cycle:
+            return "cycle";
+        case Csr::Time:
+            return "time";
+        case Csr::Instret:
+            return "instret";
+        case Csr::Sstatus:
+            return "sstatus";
+        case Csr::Sie:
+            return "sie";
+        case Csr::Stvec:
+            return "stvec";
+        case Csr::Scounteren:
+            return "scounteren";
+        case Csr::Sscratch:
+            return "sscratch";
+        case Csr::Sepc:
+            return "sepc";
+        case Csr::Scause:
+            return "scause";
+        case Csr::Stval:
+            return "stval";
+        case Csr::Sip:
+            return "sip";
+        case Csr::Satp:
+            return "satp";
+        case Csr::Mvendorid:
+            return "mvendorid";
+        case Csr::Marchid:
+            return "marchid";
+        case Csr::Mimpid:
+            return "mimpid";
+        case Csr::Mhartid:
+            return "mhartid";
+        case Csr::Mconfigptr:
+            return "mconfigptr";
+        case Csr::Mstatus:
+            return "mstatus";
+        case Csr::Misa:
+            return "misa";
+        case Csr::Medeleg:
+            return "medeleg";
+        case Csr::Mideleg:
+            return "mideleg";
+        case Csr::Mie:
+            return "mie";
+        case Csr::Mtvec:
+            return "mtvec";
+        case Csr::Mcounteren:
+            return "mcounteren";
+        case Csr::Mscratch:
+            return "mscratch";
+        case Csr::Mepc:
+            return "mepc";
+        case Csr::Mcause:
+            return "mcause";
+        case Csr::Mtval:
+            return "mtval";
+        case Csr::Mip:
+            return "mip";
+        case Csr::Mcycle:
+            return "mcycle";
+        case Csr::Minstret:
+            return "minstret";
+        case Csr::Mcycleh:
+            return "mcycleh";
+        case Csr::Minstreth:
+            return "minstreth";
+        case Csr::Cycleh:
+            return "cycleh";
+        case Csr::Timeh:
+            return "timeh";
+        case Csr::Instreth:
+            return "instreth";
+        default:
+            return std::format("0x{:03X}", csr_addr);
     }
-    return std::format("0x{:03X}", csr_addr);
 }
 
 namespace {

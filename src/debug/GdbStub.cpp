@@ -349,15 +349,13 @@ void GdbStub::cmd_read_memory(const std::string& pkt, simrv::core::Machine& mach
     resp.reserve(static_cast<std::size_t>(safe_len) * 2);
 
     // Direct physical memory read (bypasses MMU)
-    const auto* base = reinterpret_cast<const uint8_t*>(
-        machine.ram_data());  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-    const auto geometry = machine.memory_geometry();
+    const auto ram = machine.ram_view();
 
     for (uint32_t i = 0; i < safe_len; ++i) {
         const auto phys = static_cast<uint64_t>(addr) + i;
         uint8_t byte_val = 0;
-        if (geometry.contains(phys)) {
-            byte_val = static_cast<uint8_t>(base[phys - geometry.dram_base]);
+        if (ram.contains(phys)) {
+            byte_val = static_cast<uint8_t>(*ram.unchecked_ptr(phys));
         }
         resp += std::format("{:02x}", byte_val);
     }
@@ -376,9 +374,7 @@ void GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& mac
     const uint32_t len =
         static_cast<uint32_t>(std::stoul(pkt.substr(comma + 1, colon - comma - 1), nullptr, 16));
 
-    const auto geometry = machine.memory_geometry();
-    auto* base = reinterpret_cast<uint8_t*>(
-        machine.ram_data());  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    const auto ram = machine.ram_view();
 
     auto hd = [](char c) -> uint8_t {
         if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
@@ -393,8 +389,8 @@ void GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& mac
         const auto byte_val =
             static_cast<uint8_t>((hd(pkt.at(hex_off)) << 4) | hd(pkt.at(hex_off + 1)));
         const auto phys = static_cast<uint64_t>(addr) + i;
-        if (geometry.contains(phys)) {
-            base[phys - geometry.dram_base] = byte_val;
+        if (ram.contains(phys)) {
+            *ram.unchecked_ptr(phys) = static_cast<Byte>(byte_val);
         }
     }
     send_packet("OK");
@@ -422,15 +418,14 @@ void GdbStub::cmd_insert_breakpoint(const std::string& pkt, simrv::core::Machine
     const uint32_t addr =
         static_cast<uint32_t>(std::stoul(pkt.substr(c1 + 1, c2 - c1 - 1), nullptr, 16));
 
-    const auto geometry = machine.memory_geometry();
     const auto phys = static_cast<uint64_t>(addr);
 
-    if (!geometry.contains(phys, 4)) {
+    const auto ram = machine.ram_view();
+    if (!ram.contains(phys, 4)) {
         send_packet("E02");
         return;
     }
-    auto* ptr = reinterpret_cast<uint8_t*>(machine.ram_data()) +
-                (phys - geometry.dram_base);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    auto* ptr = ram.unchecked_ptr(phys);
 
     // Save original word
     uint32_t orig = 0;
@@ -472,11 +467,10 @@ void GdbStub::cmd_remove_breakpoint(const std::string& pkt, simrv::core::Machine
         return;
     }
 
-    const auto geometry = machine.memory_geometry();
     const auto phys = static_cast<uint64_t>(addr);
-    if (geometry.contains(phys, 4)) {
-        auto* ptr = reinterpret_cast<uint8_t*>(machine.ram_data()) +
-                    (phys - geometry.dram_base);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    const auto ram = machine.ram_view();
+    if (ram.contains(phys, 4)) {
+        auto* ptr = ram.unchecked_ptr(phys);
         std::memcpy(ptr, &it->second, 4);
     }
     sw_breakpoints_.erase(it);

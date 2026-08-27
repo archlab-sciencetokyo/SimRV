@@ -25,6 +25,10 @@ def command(args, cycle, tui):
     result = [args.simrv, "--tui" if tui else "--cli"]
     if cycle:
         result.append("--ca")
+    if args.os:
+        result += ["--os", "-D", args.disk]
+        if args.dtb:
+            result += ["-f", args.dtb]
     result += ["-m", args.image, "-e", str(args.limit), "-b"]
     if args.tohost:
         result += ["-H", args.tohost]
@@ -202,6 +206,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--simrv", default="./build/rv64-release/SimRV")
     parser.add_argument("--image", required=True)
+    parser.add_argument("--os", action="store_true", help="benchmark the Linux OS runner")
+    parser.add_argument("--disk", help="Linux root disk image (required with --os)")
+    parser.add_argument("--dtb", help="optional Linux device-tree blob")
     parser.add_argument("--tohost")
     parser.add_argument("--limit", type=int, default=20_000_000)
     parser.add_argument("--runs", type=int, default=5)
@@ -209,13 +216,22 @@ def main():
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--columns", type=int, default=160)
     parser.add_argument("--rows", type=int, default=48)
+    parser.add_argument("--modes", default="ia-cli,ia-tui,ca-cli,ca-tui",
+                        help="comma-separated modes: ia-cli, ia-tui, ca-cli, ca-tui")
     parser.add_argument("--output", default="benchmark-modes.json")
     parser.add_argument("--baseline")
     parser.add_argument("--regression-threshold", type=float, default=0.03)
     args = parser.parse_args()
+    if args.os and not args.disk:
+        parser.error("--disk is required with --os")
 
-    modes = (("ia-cli", False, False), ("ia-tui", False, True),
-             ("ca-cli", True, False), ("ca-tui", True, True))
+    available_modes = (("ia-cli", False, False), ("ia-tui", False, True),
+                       ("ca-cli", True, False), ("ca-tui", True, True))
+    requested_modes = {mode.strip() for mode in args.modes.split(",") if mode.strip()}
+    unknown_modes = requested_modes - {mode[0] for mode in available_modes}
+    if unknown_modes:
+        parser.error(f"unknown benchmark mode(s): {', '.join(sorted(unknown_modes))}")
+    modes = tuple(mode for mode in available_modes if mode[0] in requested_modes)
     report = {"schema": 1, "limit": args.limit, "terminal": [args.columns, args.rows], "modes": {}}
     for name, cycle, tui in modes:
         cmd = command(args, cycle, tui)
@@ -230,6 +246,12 @@ def main():
                            if tui else run_cli(cmd, args.timeout))
         report["modes"][name] = summarize(samples)
         print(f"{name:7} {report['modes'][name]['wall_seconds']['median']:.4f}s median")
+
+    if "ia-cli" in report["modes"] and "ia-tui" in report["modes"]:
+        cli_seconds = report["modes"]["ia-cli"]["wall_seconds"]["median"]
+        tui_seconds = report["modes"]["ia-tui"]["execution_seconds"]["median"]
+        parity = cli_seconds / tui_seconds * 100.0 if tui_seconds else 0.0
+        print(f"ia sampled-TUI throughput: {parity:.1f}% of CLI")
 
     with open(args.output, "w", encoding="utf-8") as target:
         json.dump(report, target, indent=2)

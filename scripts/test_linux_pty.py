@@ -116,6 +116,12 @@ def main():
                 break
 
             try:
+                # The initial TUI frame is intentionally paused. Start once the renderer has had
+                # a bounded chance to initialize; do not couple guest progress to a decorative
+                # status-bar label or to discovery of the optional external UART PTY.
+                if not run_sent and time.time() - start_time >= 0.5:
+                    os.write(master_fd, b"c")
+                    run_sent = True
                 watched_fds = [master_fd]
                 if uart_fd is not None:
                     watched_fds.append(uart_fd)
@@ -146,12 +152,6 @@ def main():
                     if len(guest_buffer) > 1_000_000:
                         guest_buffer = guest_buffer[-500_000:]
 
-                if not run_sent and uart_fd is not None and "PAUSED" in buffer and "DETACHED" in buffer:
-                    # The first frame can arrive while initialize() is still collecting terminal
-                    # capability replies. Wait until that bounded probe has returned before typing.
-                    time.sleep(0.2)
-                    os.write(master_fd, b"c")
-                    run_sent = True
                 if not enter_sent and "~ #" in guest_buffer:
                     # UART mirroring reaches this PTY just before the TUI parser answers the shell's
                     # trailing CSI 6 n query. Let one render interval deliver that response first.
