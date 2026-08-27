@@ -32,14 +32,14 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     const auto& geometry = mem.memory_geometry();
     const unsigned active_xlen = cpu.effective_data_xlen();
     if (active_xlen == 32) v_addr &= 0xFFFFFFFFULL;
-    if (simrv::compiler::unlikely(cpu.pipeline_context.pending_exception.has_value())) {
+    if (simrv::compiler::unlikely(cpu.active_context().pending_exception.has_value())) {
         return 0;
     }
 
     const unsigned size_bytes = 1u << (funct3 & 0x3u);  // unchanged
-    const bool is_amo = (static_cast<Opcode>(cpu.pipeline_context.opcode) == Opcode::Amo);
+    const bool is_amo = (static_cast<Opcode>(cpu.active_context().opcode) == Opcode::Amo);
     const bool is_lr =
-        is_amo && (static_cast<Funct5Amo>(cpu.pipeline_context.funct5) == Funct5Amo::Lr);
+        is_amo && (static_cast<Funct5Amo>(cpu.active_context().funct5) == Funct5Amo::Lr);
 
     const bool crosses_page =
         ((v_addr & simrv::memory::kPageMask) + size_bytes) > (1u << simrv::memory::kPageShift);
@@ -47,9 +47,9 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                                      size_bytes) > simrv::cache::DCache::kLineBytes;
     if (simrv::compiler::unlikely((v_addr & (size_bytes - 1u)) != 0)) {
         if (is_amo) {
-            cpu.pipeline_context.pending_exception =
+            cpu.active_context().pending_exception =
                 (!is_lr) ? ExceptionCode::MisalignedStore : ExceptionCode::MisalignedLoad;
-            cpu.pipeline_context.pending_tval = v_addr;
+            cpu.active_context().pending_tval = v_addr;
             return 0;
         }
     }
@@ -60,8 +60,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             Word byte_val =
                 target_read(mem, cpu, byte_vaddr, static_cast<Instruction>(isa::Funct3::Lbu));
             if (cpu.ca_state.waiting_for_interconnect) return 0;
-            if (cpu.pipeline_context.pending_exception.has_value()) {
-                cpu.pipeline_context.pending_tval = v_addr;
+            if (cpu.active_context().pending_exception.has_value()) {
+                cpu.active_context().pending_tval = v_addr;
                 return 0;
             }
             result |= (byte_val & 0xFFULL) << (8 * b);
@@ -91,9 +91,9 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
         if (translation_enabled) {
             if (simrv::compiler::unlikely(
                     !simrv::Mmu::is_canonical(v_addr, cpu.state().satp, active_xlen))) {
-                cpu.pipeline_context.pending_exception =
+                cpu.active_context().pending_exception =
                     is_amo ? ExceptionCode::StorePageFault : ExceptionCode::LoadPageFault;
-                cpu.pipeline_context.pending_tval = v_addr;
+                cpu.active_context().pending_tval = v_addr;
                 return 0;
             }
         }
@@ -106,12 +106,12 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             if (simrv::compiler::likely(geometry.contains(eff_vaddr, size_bytes))) {
                 if (simrv::compiler::unlikely(!core::pmp::check_access(
                         cpu.state(), eff_vaddr, size_bytes, core::PmpAccessType::Read, eff_priv))) {
-                    cpu.pipeline_context.pending_exception =
+                    cpu.active_context().pending_exception =
                         is_amo ? ExceptionCode::FaultStore : ExceptionCode::FaultLoad;
-                    cpu.pipeline_context.pending_tval = v_addr;
+                    cpu.active_context().pending_tval = v_addr;
                     return 0;
                 }
-                return simrv::memory::ram_read_fast(eff_vaddr, funct3, mem.mmu()->mmem());
+                return simrv::memory::ram_read_fast(eff_vaddr, funct3, cpu.machine_->ram_view());
             }
         } else {
             const Address vpn = v_addr >> 12;
@@ -124,7 +124,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                                                          funct3);
                 }
                 return simrv::memory::ram_read_fast(entry.paddr_base + (v_addr & 0xFFF), funct3,
-                                                    mem.mmu()->mmem());
+                                                    cpu.machine_->ram_view());
             }
         }
     }
@@ -132,7 +132,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     auto issue_read = [&](Address addr) -> Word {
         if (cpu.machine_->runtime_profile.is_instruction_mode() &&
             geometry.contains(addr, size_bytes)) {
-            return simrv::memory::ram_read_fast(addr, funct3, mem.mmu()->mmem());
+            return simrv::memory::ram_read_fast(addr, funct3, cpu.machine_->ram_view());
         }
         if (!geometry.contains(addr, size_bytes)) {
             auto& transfer = cpu.ca_state.data_transfer;
@@ -144,8 +144,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                 }
                 transfer.reset();
                 if (simrv::compiler::unlikely(timed.payload.error)) {
-                    cpu.pipeline_context.pending_exception = ExceptionCode::FaultLoad;
-                    cpu.pipeline_context.pending_tval = v_addr;
+                    cpu.active_context().pending_exception = ExceptionCode::FaultLoad;
+                    cpu.active_context().pending_tval = v_addr;
                     return 0;
                 }
                 Word rdata = timed.payload.data;
@@ -180,8 +180,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             TlChannelD resp{};
             if (mem.system_bus().get_response(req.source, resp)) {
                 if (simrv::compiler::unlikely(resp.error)) {
-                    cpu.pipeline_context.pending_exception = ExceptionCode::FaultLoad;
-                    cpu.pipeline_context.pending_tval = v_addr;
+                    cpu.active_context().pending_exception = ExceptionCode::FaultLoad;
+                    cpu.active_context().pending_tval = v_addr;
                 }
                 Word rdata = resp.data;
                 const unsigned req_size_bytes = 1u << (funct3 & 0x3u);
@@ -199,8 +199,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                 }
                 return static_cast<Word>(rdata & simrv::xlen::kXLenMask);
             }
-            cpu.pipeline_context.pending_exception = ExceptionCode::FaultLoad;
-            cpu.pipeline_context.pending_tval = v_addr;
+            cpu.active_context().pending_exception = ExceptionCode::FaultLoad;
+            cpu.active_context().pending_tval = v_addr;
             return 0;
         }
 
@@ -219,8 +219,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             const Address completed_line = transfer.address;
             transfer.reset();
             if (timed.payload.error || !timed.has_line_data) {
-                cpu.pipeline_context.pending_exception = ExceptionCode::FaultLoad;
-                cpu.pipeline_context.pending_tval = v_addr;
+                cpu.active_context().pending_exception = ExceptionCode::FaultLoad;
+                cpu.active_context().pending_tval = v_addr;
                 return 0;
             }
             const auto granted = static_cast<CoherenceState>(timed.payload.param);
@@ -269,12 +269,12 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                 return cached_data;
             }
         }
-        return simrv::memory::ram_read_fast(addr, funct3, mem.mmu()->mmem());
+        return simrv::memory::ram_read_fast(addr, funct3, cpu.machine_->ram_view());
     };
 
     const Address eff_vaddr = (active_xlen == 32) ? (v_addr & 0xFFFFFFFFULL) : v_addr;
 
-    if (simrv::compiler::likely(!cpu.pipeline_context.pending_exception.has_value()) &&
+    if (simrv::compiler::likely(!cpu.active_context().pending_exception.has_value()) &&
         simrv::compiler::likely(eff_priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(
                                                                 cpu.state().satp, active_xlen)) &&
         simrv::compiler::likely(geometry.contains(eff_vaddr, size_bytes))) {
@@ -294,7 +294,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     } else if (entry) {
         p_addr = entry->p_addr + (v_addr & simrv::memory::kPageMask);
     } else {
-        cpu.pipeline_context.tlb_miss = true;
+        cpu.active_context().tlb_miss = true;
         auto translate_res =
             cpu.translate_stage_address(*cpu.machine_, v_addr, access_type, eff_priv, active_xlen,
                                         TlPort::Data, cpu.ca_state.data_walk);
@@ -309,29 +309,28 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                                  return {};
                              })
                              .or_else([&](TrapCause error) -> std::expected<void, TrapCause> {
-                                 cpu.pipeline_context.pending_exception =
+                                 cpu.active_context().pending_exception =
                                      static_cast<ExceptionCode>(error);
-                                 cpu.pipeline_context.pending_tval = v_addr;
+                                 cpu.active_context().pending_tval = v_addr;
                                  return {};
                              });
         (void)chain_res;
     }
 
-    if (!cpu.pipeline_context.pending_exception.has_value()) {
+    if (!cpu.active_context().pending_exception.has_value()) {
         if (simrv::compiler::unlikely(!core::pmp::check_access(
                 cpu.state(), p_addr, size_bytes,
                 (is_amo && !is_lr) ? core::PmpAccessType::Write : core::PmpAccessType::Read,
                 eff_priv))) {
-            cpu.pipeline_context.pending_exception =
+            cpu.active_context().pending_exception =
                 is_amo ? ExceptionCode::FaultStore : ExceptionCode::FaultLoad;
-            cpu.pipeline_context.pending_tval = v_addr;
+            cpu.active_context().pending_tval = v_addr;
             return 0;
         }
-        if (cpu.machine_->runtime_profile.is_instruction_mode() &&
-            geometry.contains(p_addr)) {
+        if (cpu.machine_->runtime_profile.is_instruction_mode() && geometry.contains(p_addr)) {
             const size_t tlb_idx = (v_addr >> 12) & 2047;
             const Address vpn = v_addr >> 12;
-            Byte* host_base = mem.mmu()->mmem() + ((p_addr & ~0xFFFULL) & simrv::memory::kDramMask);
+            Byte* host_base = cpu.machine_->ram_view().unchecked_ptr(p_addr & ~0xFFFULL);
             cpu.soft_tlb_read[tlb_idx].set(
                 vpn, translation_enabled ? static_cast<uint64_t>(current_asid) : ~uint64_t{0},
                 eff_priv, cpu.soft_tlb_epoch, p_addr & ~0xFFFULL, host_base);
@@ -349,7 +348,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
     const auto& geometry = mem.memory_geometry();
     const unsigned active_xlen = cpu.effective_data_xlen();
     if (active_xlen == 32) v_addr &= 0xFFFFFFFFULL;
-    if (simrv::compiler::unlikely(cpu.pipeline_context.pending_exception.has_value())) {
+    if (simrv::compiler::unlikely(cpu.active_context().pending_exception.has_value())) {
         return;
     }
 
@@ -359,11 +358,11 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
         ((v_addr & simrv::memory::kPageMask) + size_bytes) > (1u << simrv::memory::kPageShift);
     const bool crosses_cache_line = ((v_addr & (simrv::cache::DCache::kLineBytes - 1u)) +
                                      size_bytes) > simrv::cache::DCache::kLineBytes;
-    const bool is_amo = (static_cast<Opcode>(cpu.pipeline_context.opcode) == Opcode::Amo);
+    const bool is_amo = (static_cast<Opcode>(cpu.active_context().opcode) == Opcode::Amo);
     if (simrv::compiler::unlikely((v_addr & (size_bytes - 1u)) != 0)) {
         if (is_amo) {
-            cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedStore;
-            cpu.pipeline_context.pending_tval = v_addr;
+            cpu.active_context().pending_exception = ExceptionCode::MisalignedStore;
+            cpu.active_context().pending_tval = v_addr;
             return;
         }
     }
@@ -373,8 +372,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             Word byte_val = (wdata >> (8 * b)) & 0xFFULL;
             target_write(mem, cpu, byte_vaddr, byte_val, static_cast<Instruction>(isa::Funct3::Sb));
             if (cpu.ca_state.waiting_for_interconnect) return;
-            if (cpu.pipeline_context.pending_exception.has_value()) {
-                cpu.pipeline_context.pending_tval = v_addr;
+            if (cpu.active_context().pending_exception.has_value()) {
+                cpu.active_context().pending_tval = v_addr;
                 return;
             }
         }
@@ -391,8 +390,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
         if (translation_enabled) {
             if (simrv::compiler::unlikely(
                     !simrv::Mmu::is_canonical(v_addr, cpu.state().satp, active_xlen))) {
-                cpu.pipeline_context.pending_exception = ExceptionCode::StorePageFault;
-                cpu.pipeline_context.pending_tval = v_addr;
+                cpu.active_context().pending_exception = ExceptionCode::StorePageFault;
+                cpu.active_context().pending_tval = v_addr;
                 return;
             }
         }
@@ -410,8 +409,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             const Address completed_line = transfer.address;
             transfer.reset();
             if (timed.payload.error || !timed.has_line_data) {
-                cpu.pipeline_context.pending_exception = ExceptionCode::FaultStore;
-                cpu.pipeline_context.pending_tval = v_addr;
+                cpu.active_context().pending_exception = ExceptionCode::FaultStore;
+                cpu.active_context().pending_tval = v_addr;
                 return;
             }
             cpu.dcache.insert(completed_line, timed.line_data.data(), CoherenceState::Trunk, true);
@@ -438,7 +437,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
         }
         if (cpu.machine_->runtime_profile.is_instruction_mode() &&
             geometry.contains(addr, size_bytes)) {
-            simrv::memory::ram_write_fast(addr, data, funct3, mem.mmu()->mmem());
+            simrv::memory::ram_write_fast(addr, data, funct3, cpu.machine_->ram_view());
             return;
         }
         if (geometry.contains(addr, size_bytes)) {
@@ -475,7 +474,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
                     (void)cpu.dcache.write(addr, data, funct3);
                 }
             }
-            simrv::memory::ram_write_fast(addr, data, funct3, mem.mmu()->mmem());
+            simrv::memory::ram_write_fast(addr, data, funct3, cpu.machine_->ram_view());
             return;
         }
 
@@ -497,8 +496,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             }
             transfer.reset();
             if (simrv::compiler::unlikely(timed.payload.error)) {
-                cpu.pipeline_context.pending_exception = ExceptionCode::FaultStore;
-                cpu.pipeline_context.pending_tval = v_addr;
+                cpu.active_context().pending_exception = ExceptionCode::FaultStore;
+                cpu.active_context().pending_tval = v_addr;
             }
             return;
         }
@@ -512,12 +511,12 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
         TlChannelD resp{};
         if (mem.system_bus().get_response(req.source, resp)) {
             if (simrv::compiler::unlikely(resp.error)) {
-                cpu.pipeline_context.pending_exception = ExceptionCode::FaultStore;
-                cpu.pipeline_context.pending_tval = v_addr;
+                cpu.active_context().pending_exception = ExceptionCode::FaultStore;
+                cpu.active_context().pending_tval = v_addr;
             }
         } else {
-            cpu.pipeline_context.pending_exception = ExceptionCode::FaultStore;
-            cpu.pipeline_context.pending_tval = v_addr;
+            cpu.active_context().pending_exception = ExceptionCode::FaultStore;
+            cpu.active_context().pending_tval = v_addr;
         }
     };
 
@@ -548,14 +547,14 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
 
     const Address eff_vaddr = (active_xlen == 32) ? (v_addr & 0xFFFFFFFFULL) : v_addr;
 
-    if (simrv::compiler::likely(!cpu.pipeline_context.pending_exception.has_value()) &&
+    if (simrv::compiler::likely(!cpu.active_context().pending_exception.has_value()) &&
         simrv::compiler::likely(eff_priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(
                                                                 cpu.state().satp, active_xlen)) &&
         simrv::compiler::likely(geometry.contains(eff_vaddr, size_bytes))) {
         if (simrv::compiler::unlikely(!core::pmp::check_access(
                 cpu.state(), eff_vaddr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
-            cpu.pipeline_context.pending_exception = ExceptionCode::FaultStore;
-            cpu.pipeline_context.pending_tval = v_addr;
+            cpu.active_context().pending_exception = ExceptionCode::FaultStore;
+            cpu.active_context().pending_tval = v_addr;
             return;
         }
         issue_write(eff_vaddr, wdata);
@@ -571,7 +570,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
     } else if (entry) {
         p_addr = entry->p_addr + (v_addr & simrv::memory::kPageMask);
     } else {
-        cpu.pipeline_context.tlb_miss = true;
+        cpu.active_context().tlb_miss = true;
         auto translate_res =
             cpu.translate_stage_address(*cpu.machine_, v_addr, PteAccess::Write, eff_priv,
                                         active_xlen, TlPort::Data, cpu.ca_state.data_walk);
@@ -583,26 +582,25 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
                                  return {};
                              })
                              .or_else([&](TrapCause error) -> std::expected<void, TrapCause> {
-                                 cpu.pipeline_context.pending_exception =
+                                 cpu.active_context().pending_exception =
                                      static_cast<ExceptionCode>(error);
-                                 cpu.pipeline_context.pending_tval = v_addr;
+                                 cpu.active_context().pending_tval = v_addr;
                                  return {};
                              });
         (void)chain_res;
     }
 
-    if (!cpu.pipeline_context.pending_exception.has_value()) {
+    if (!cpu.active_context().pending_exception.has_value()) {
         if (simrv::compiler::unlikely(!core::pmp::check_access(
                 cpu.state(), p_addr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
-            cpu.pipeline_context.pending_exception = ExceptionCode::FaultStore;
-            cpu.pipeline_context.pending_tval = v_addr;
+            cpu.active_context().pending_exception = ExceptionCode::FaultStore;
+            cpu.active_context().pending_tval = v_addr;
             return;
         }
-        if (cpu.machine_->runtime_profile.is_instruction_mode() &&
-            geometry.contains(p_addr)) {
+        if (cpu.machine_->runtime_profile.is_instruction_mode() && geometry.contains(p_addr)) {
             const size_t tlb_idx = (v_addr >> 12) & 2047;
             const Address vpn = v_addr >> 12;
-            Byte* host_base = mem.mmu()->mmem() + ((p_addr & ~0xFFFULL) & simrv::memory::kDramMask);
+            Byte* host_base = cpu.machine_->ram_view().unchecked_ptr(p_addr & ~0xFFFULL);
             cpu.soft_tlb_write[tlb_idx].set(
                 vpn, translation_enabled ? static_cast<uint64_t>(current_asid) : ~uint64_t{0},
                 eff_priv, cpu.soft_tlb_epoch, p_addr & ~0xFFFULL, host_base);

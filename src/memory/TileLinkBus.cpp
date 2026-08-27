@@ -18,32 +18,44 @@ namespace simrv::memory {
 
 using simrv::isa::Funct3;
 
+namespace {
+template <typename MutexT>
+struct SmpLockGuard {
+    MutexT& mutex_;
+    bool locked_;
+    SIMRV_ALWAYS_INLINE SmpLockGuard(MutexT& mutex, bool active) noexcept
+        : mutex_(mutex), locked_(active) {
+        if (simrv::compiler::unlikely(locked_)) mutex_.lock();
+    }
+    SIMRV_ALWAYS_INLINE ~SmpLockGuard() noexcept {
+        if (simrv::compiler::unlikely(locked_)) mutex_.unlock();
+    }
+};
+}  // namespace
+
 TileLinkBus::TileLinkBus(simrv::core::Machine& machine)
     : machine_(machine), coherence_hub_(machine) {}
 
 void TileLinkBus::add_node(TileLinkNode* node) { router_.register_device(node); }
 
 void TileLinkBus::configure_timing(uint32_t request_latency, uint32_t response_latency) {
-    std::unique_lock lock(bus_mutex_, std::defer_lock);
-    if (machine_.s_smp_multithreaded.load(std::memory_order_relaxed)) lock.lock();
+    SmpLockGuard lock(bus_mutex_, machine_.s_smp_multithreaded.load(std::memory_order_relaxed));
     request_latency_ = std::max(1u, request_latency);
     response_latency_ = std::max(1u, response_latency);
 }
 
 auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
-    std::unique_lock lock(bus_mutex_, std::defer_lock);
-    if (machine_.s_smp_multithreaded.load(std::memory_order_relaxed)) lock.lock();
+    SmpLockGuard lock(bus_mutex_, machine_.s_smp_multithreaded.load(std::memory_order_relaxed));
     req_queue_.push_back(
         TimedRequest{.payload = req, .submitted_cycle = cycle_, .sequence = next_sequence_++});
     return true;
 }
 
 void TileLinkBus::advance_cycle() {
-    std::unique_lock lock(bus_mutex_, std::defer_lock);
-    if (machine_.s_smp_multithreaded.load(std::memory_order_relaxed)) lock.lock();
+    SmpLockGuard lock(bus_mutex_, machine_.s_smp_multithreaded.load(std::memory_order_relaxed));
     ++cycle_;
     if (!req_queue_.empty() && req_queue_.front().submitted_cycle + request_latency_ <= cycle_) {
-        const auto request = req_queue_.front();
+        auto request = std::move(req_queue_.front());
         req_queue_.pop_front();
         process_request(request);
     }
@@ -89,7 +101,7 @@ void TileLinkBus::process_request(const TimedRequest& request) {
                 }
             }
             if (!found_in_cache) {
-                resp.data = simrv::memory::ram_read_fast(req.address, funct3, machine_.ram_data());
+                resp.data = simrv::memory::ram_read_fast(req.address, funct3, machine_.ram_view());
             }
             ++read_count_;
             handled = true;
@@ -101,10 +113,10 @@ void TileLinkBus::process_request(const TimedRequest& request) {
             machine_.ram_data() != nullptr) {
             coherence_hub_.invalidate_line_external(req.address);
             const Word previous =
-                simrv::memory::ram_read_fast(req.address, funct3, machine_.ram_data());
+                simrv::memory::ram_read_fast(req.address, funct3, machine_.ram_view());
             resp.data = previous;
             simrv::memory::ram_write_fast(req.address, previous | req.data, funct3,
-                                          machine_.ram_data());
+                                          machine_.ram_view());
             ++read_count_;
             ++write_count_;
             handled = true;
@@ -131,7 +143,7 @@ void TileLinkBus::process_request(const TimedRequest& request) {
 
         if (machine_.memory_geometry().contains(req.address, transfer_bytes) &&
             machine_.ram_data() != nullptr) {
-            simrv::memory::ram_write_fast(req.address, req.data, funct3, machine_.ram_data());
+            simrv::memory::ram_write_fast(req.address, req.data, funct3, machine_.ram_view());
             ++write_count_;
             handled = true;
         }
@@ -159,8 +171,7 @@ void TileLinkBus::process_request(const TimedRequest& request) {
 }
 
 auto TileLinkBus::try_get_timed_response(uint8_t source_id, TimedResponse& resp) -> bool {
-    std::unique_lock lock(bus_mutex_, std::defer_lock);
-    if (machine_.s_smp_multithreaded.load(std::memory_order_relaxed)) lock.lock();
+    SmpLockGuard lock(bus_mutex_, machine_.s_smp_multithreaded.load(std::memory_order_relaxed));
     auto it = std::ranges::find_if(resp_queue_, [this, source_id](const auto& r) -> bool {
         return r.payload.source == source_id && r.ready_cycle <= cycle_;
     });
@@ -173,8 +184,7 @@ auto TileLinkBus::try_get_timed_response(uint8_t source_id, TimedResponse& resp)
 }
 
 void TileLinkBus::cancel_source(uint8_t source_id) {
-    std::unique_lock lock(bus_mutex_, std::defer_lock);
-    if (machine_.s_smp_multithreaded.load(std::memory_order_relaxed)) lock.lock();
+    SmpLockGuard lock(bus_mutex_, machine_.s_smp_multithreaded.load(std::memory_order_relaxed));
     std::erase_if(req_queue_, [source_id](const TimedRequest& request) {
         return request.payload.source == source_id;
     });
@@ -184,8 +194,7 @@ void TileLinkBus::cancel_source(uint8_t source_id) {
 }
 
 auto TileLinkBus::get_response(uint8_t source_id, TlChannelD& resp) -> bool {
-    std::unique_lock lock(bus_mutex_, std::defer_lock);
-    if (machine_.s_smp_multithreaded.load(std::memory_order_relaxed)) lock.lock();
+    SmpLockGuard lock(bus_mutex_, machine_.s_smp_multithreaded.load(std::memory_order_relaxed));
     // IA deliberately remains functional and synchronous.  CA uses
     // try_get_timed_response(), which honours ready_cycle exactly.
     const auto pop_response = [&]() -> bool {

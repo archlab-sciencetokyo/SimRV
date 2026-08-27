@@ -34,21 +34,25 @@ auto MmioRouter::register_device(TileLinkNode* node) -> bool {
         const Address ex_end = ex_base + existing->size();
         const Address overlap_begin = std::max(base, ex_base);
         const Address overlap_end = std::min(end, ex_end);
-        bool owns_same_byte = false;
-        for (Address address = overlap_begin; address < overlap_end; ++address) {
-            if (node->contains(address) && existing->contains(address)) {
-                owns_same_byte = true;
-                break;
+        if (overlap_begin < overlap_end) {
+            bool collision = false;
+            for (Address address = overlap_begin; address < overlap_end; ++address) {
+                if (node->contains(address) && existing->contains(address)) {
+                    collision = true;
+                    break;
+                }
             }
-        }
-        if (owns_same_byte) {
-            simrv::log::warn(
-                "MMIO address range collision detected: '{}' [{:#x}, {:#x}) conflicts with '{}' "
-                "[{:#x}, {:#x})",
-                node->name(), static_cast<unsigned long long>(base),
-                static_cast<unsigned long long>(end), existing->name(),
-                static_cast<unsigned long long>(ex_base), static_cast<unsigned long long>(ex_end));
-            return false;
+            if (collision) {
+                simrv::log::warn(
+                    "MMIO address range collision detected: '{}' [{:#x}, {:#x}) conflicts with "
+                    "'{}' "
+                    "[{:#x}, {:#x})",
+                    node->name(), static_cast<unsigned long long>(base),
+                    static_cast<unsigned long long>(end), existing->name(),
+                    static_cast<unsigned long long>(ex_base),
+                    static_cast<unsigned long long>(ex_end));
+                return false;
+            }
         }
     }
 
@@ -88,7 +92,7 @@ auto MmioRouter::resolve_device(Address addr) const -> TileLinkNode* {
         }
     }
 
-    // Fallback linear scan if device override contains logic
+    // Fallback scan for sparse devices with holes or wider spans
     for (auto* node : nodes_) {
         if (node->contains(addr)) {
             return node;

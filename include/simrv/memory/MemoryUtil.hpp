@@ -24,7 +24,6 @@ namespace simrv::memory {
 
 inline constexpr Address kDramBaseAddress = static_cast<Address>(0x80000000u);
 inline constexpr Address kDramSize = static_cast<Address>(SIMRV_DRAM_SIZE_MB * 1024u * 1024u);
-inline constexpr Address kDramMask = kDramSize - 1;
 
 inline constexpr Word kTlbSize = 2048;
 inline constexpr Word kPageShift = 12;
@@ -69,6 +68,31 @@ concept StoreFunct3Like = std::unsigned_integral<T>;
     return size != 0 && size <= extent && address >= base && address - base <= extent - size;
 }
 
+/// A non-owning, runtime-sized DRAM mapping.  Fast paths receive this value rather than relying
+/// on the build-time DRAM mask, so a configured machine never aliases addresses above 256 MiB.
+class RamView {
+   public:
+    constexpr RamView() = default;
+    constexpr RamView(Byte* data, Address base, Address size)
+        : data_(data), base_(base), size_(size) {}
+
+    [[nodiscard]] constexpr auto data() const noexcept -> Byte* { return data_; }
+    [[nodiscard]] constexpr auto base() const noexcept -> Address { return base_; }
+    [[nodiscard]] constexpr auto size() const noexcept -> Address { return size_; }
+    [[nodiscard]] constexpr auto contains(Address address, size_t bytes = 1) const noexcept
+        -> bool {
+        return data_ != nullptr && address_range_contains(base_, size_, address, bytes);
+    }
+    [[nodiscard]] constexpr auto unchecked_ptr(Address address) const noexcept -> Byte* {
+        return data_ + (address - base_);
+    }
+
+   private:
+    Byte* data_ = nullptr;
+    Address base_ = kDramBaseAddress;
+    Address size_ = 0;
+};
+
 /// Check a physical range against explicitly supplied DRAM geometry.
 [[nodiscard]] constexpr auto is_dram_access(Address base, Address extent, Address p_addr,
                                             size_t size) -> bool {
@@ -103,6 +127,26 @@ constexpr auto store_width_bytes(Instruction funct3) -> size_t {
         }
     }
     return base_width;
+}
+
+// ========== Loaded Value Sign/Zero Extension Helper ==========
+
+/// Extend raw memory read data according to RISC-V load funct3 rules (sign vs zero extension).
+[[nodiscard]] constexpr auto extend_loaded_value(Word raw_data, uint8_t funct3) noexcept -> Word {
+    const unsigned req_size_bytes = 1u << (funct3 & 0x3u);
+    const unsigned bits = 8 * req_size_bytes;
+    if (bits < simrv::xlen::kXLenBits) {
+        const Word mask = (static_cast<Word>(1) << bits) - 1;
+        raw_data &= mask;
+        constexpr auto kSignExtendBit = 0x4u;
+        if ((funct3 & kSignExtendBit) == 0) {
+            const Word sign_bit = static_cast<Word>(1) << (bits - 1);
+            if ((raw_data & sign_bit) != 0) {
+                raw_data |= ~mask;
+            }
+        }
+    }
+    return static_cast<Word>(raw_data & simrv::xlen::kXLenMask);
 }
 
 // ========== Fast Host Memory Read/Write Operations (Direct Translation Fast Path) ==========
@@ -158,18 +202,17 @@ inline void host_write_fast(Byte* host_ptr, Register val, Instruction funct3) {
 
 /// ========== Fast RAM Read Operations ==========
 
-/// Fast inline RAM read with support for various load formats
-/// Requires: addr to be valid DRAM address; ram pointer must be non-null
-inline auto ram_read_fast(Address addr, Instruction funct3, Byte* ram) -> Word {
-    return host_read_fast(ram + (addr & simrv::memory::kDramMask), funct3);
+/// Fast inline RAM read. The caller validates the address against its RamView.
+inline auto ram_read_fast(Address addr, Instruction funct3, RamView ram) -> Word {
+    return host_read_fast(ram.unchecked_ptr(addr), funct3);
 }
 
 // ========== Fast RAM Write Operations ==========
 
-/// Fast inline RAM write with support for various store formats
+/// Fast inline RAM write. The caller validates the address against its RamView.
 /// Supports: SB (1 byte), SH (2 bytes), SW (4 bytes), SD (8 bytes on RV64)
-inline void ram_write_fast(Address addr, Word wdata, Instruction funct3, Byte* ram) {
-    host_write_fast(ram + (addr & simrv::memory::kDramMask), wdata, funct3);
+inline void ram_write_fast(Address addr, Word wdata, Instruction funct3, RamView ram) {
+    host_write_fast(ram.unchecked_ptr(addr), wdata, funct3);
 }
 
 }  // namespace simrv::memory

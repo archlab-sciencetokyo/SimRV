@@ -37,35 +37,8 @@ auto Mmu::translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
     }
 
     // Validate Sv39 / Sv48 canonical addresses for RV64
-    if (xlen == 64) {
-        Word const satp_mode = simrv::xlen::satp_mode(satp, 64);
-        if (satp_mode == 8) {  // Sv39 (39-bit VAs: bits 63..38 must match bit 38)
-            int64_t const signed_vaddr = static_cast<int64_t>(v_addr << 25) >> 25;
-            if (simrv::compiler::unlikely(static_cast<uint64_t>(signed_vaddr) != v_addr)) {
-                switch (access) {
-                    case PteAccess::Code:
-                        return std::unexpected(enum_mask(ExceptionCode::FetchPageFault));
-                    case PteAccess::Write:
-                        return std::unexpected(enum_mask(ExceptionCode::StorePageFault));
-                    case PteAccess::Read:
-                    default:
-                        return std::unexpected(enum_mask(ExceptionCode::LoadPageFault));
-                }
-            }
-        } else if (satp_mode == 9) {  // Sv48 (48-bit VAs: bits 63..47 must match bit 47)
-            int64_t const signed_vaddr = static_cast<int64_t>(v_addr << 16) >> 16;
-            if (simrv::compiler::unlikely(static_cast<uint64_t>(signed_vaddr) != v_addr)) {
-                switch (access) {
-                    case PteAccess::Code:
-                        return std::unexpected(enum_mask(ExceptionCode::FetchPageFault));
-                    case PteAccess::Write:
-                        return std::unexpected(enum_mask(ExceptionCode::StorePageFault));
-                    case PteAccess::Read:
-                    default:
-                        return std::unexpected(enum_mask(ExceptionCode::LoadPageFault));
-                }
-            }
-        }
+    if (simrv::compiler::unlikely(!is_canonical(v_addr, satp, xlen))) {
+        return std::unexpected(page_fault_for(access));
     }
 
     // Translate through page tables

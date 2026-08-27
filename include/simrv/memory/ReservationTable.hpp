@@ -77,6 +77,16 @@ class ReservationTable {
         }
         if (it->second.address == (addr & kReservationGranuleMask)) {
             it->second.valid = false;
+            bool any_valid = false;
+            for (const auto& [h, ent] : reservations_) {
+                if (ent.valid) {
+                    any_valid = true;
+                    break;
+                }
+            }
+            if (!any_valid) {
+                may_have_reservations_.store(false, std::memory_order_release);
+            }
             return true;
         }
         return false;
@@ -89,15 +99,25 @@ class ReservationTable {
      *                     reservations belonging to other Harts are invalidated.
      */
     void invalidate_matching(Address addr, std::optional<HartId> store_origin = std::nullopt) {
+        if (!may_have_reservations_.load(std::memory_order_acquire)) return;
         const std::scoped_lock lock(mutex_);
         const Address granule_addr = addr & kReservationGranuleMask;
+        bool any_valid = false;
         for (auto& [hart, entry] : reservations_) {
             if (store_origin.has_value() && hart == *store_origin) {
+                if (entry.valid) any_valid = true;
                 continue;  // Store originating from this Hart does not invalidate its own before SC
             }
-            if (entry.valid && entry.address == granule_addr) {
-                entry.valid = false;
+            if (entry.valid) {
+                if (entry.address == granule_addr) {
+                    entry.valid = false;
+                } else {
+                    any_valid = true;
+                }
             }
+        }
+        if (!any_valid) {
+            may_have_reservations_.store(false, std::memory_order_release);
         }
     }
 
@@ -110,6 +130,16 @@ class ReservationTable {
         auto it = reservations_.find(hart);
         if (it != reservations_.end()) {
             it->second.valid = false;
+        }
+        bool any_valid = false;
+        for (const auto& [h, ent] : reservations_) {
+            if (ent.valid) {
+                any_valid = true;
+                break;
+            }
+        }
+        if (!any_valid) {
+            may_have_reservations_.store(false, std::memory_order_release);
         }
     }
 

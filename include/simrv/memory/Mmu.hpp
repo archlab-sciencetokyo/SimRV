@@ -86,10 +86,10 @@ class Mmu {
      * @param arch_state Optional CPU architectural state for PMP enforcement
      * @return Translated physical address or TrapCause on fault
      */
-    std::expected<Address, TrapCause> page_walk(
-        Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus, Word satp,
-        unsigned xlen, bool update_access_bits = true,
-        const core::ArchState* arch_state = nullptr);
+    std::expected<Address, TrapCause> page_walk(Address v_addr, PteAccess access,
+                                                PrivilegeLevel priv, CSRValue mstatus, Word satp,
+                                                unsigned xlen, bool update_access_bits = true,
+                                                const core::ArchState* arch_state = nullptr);
 
     /**
      * @brief Translate address without performing page walk.
@@ -107,16 +107,16 @@ class Mmu {
      * @param arch_state Optional CPU architectural state for PMP enforcement
      * @return Translated physical address or TrapCause on fault
      */
-    std::expected<Address, TrapCause> translate(
-        Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus, Word satp,
-        unsigned xlen, bool update_access_bits = true,
-        const core::ArchState* arch_state = nullptr);
+    std::expected<Address, TrapCause> translate(Address v_addr, PteAccess access,
+                                                PrivilegeLevel priv, CSRValue mstatus, Word satp,
+                                                unsigned xlen, bool update_access_bits = true,
+                                                const core::ArchState* arch_state = nullptr);
 
     /// Start a walk without performing any implicit physical-memory access.
-    [[nodiscard]] PageWalkState begin_page_walk(
-        Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus, Word satp,
-        unsigned xlen, bool update_access_bits = true,
-        const core::ArchState* arch_state = nullptr);
+    [[nodiscard]] PageWalkState begin_page_walk(Address v_addr, PteAccess access,
+                                                PrivilegeLevel priv, CSRValue mstatus, Word satp,
+                                                unsigned xlen, bool update_access_bits = true,
+                                                const core::ArchState* arch_state = nullptr);
 
     /// Consume the PTE returned by the current ReadPte request.
     void accept_page_walk_pte(PageWalkState& state, Word pte) const;
@@ -160,12 +160,11 @@ class Mmu {
     Address dram_size_;
 
     /**
-     * @brief Test whether an implicit page-table access is backed by RAM.
+     * @brief Test whether an implicit page-table access is backed by valid memory and PMA extent.
      *
      * RISC-V page-table walks are physical memory accesses. A PMA/PMP or bus
-     * failure during the implicit PTE access raises the access-fault exception
-     * corresponding to the original instruction, load, or store—not a page
-     * fault. SimRV has no PMP yet, so the implemented RAM extent is its PMA.
+     * failure during implicit PTE access raises the access-fault exception
+     * corresponding to the original instruction, load, or store—not a page fault.
      */
     [[nodiscard]] auto pte_access_valid(Address address, unsigned size) const -> bool;
 

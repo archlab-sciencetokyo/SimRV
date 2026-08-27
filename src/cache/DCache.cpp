@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "simrv/Define.hpp"
+#include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/xlen/Math.hpp"
 
 namespace simrv::cache {
@@ -31,12 +32,7 @@ auto DCache::read(Address addr, Word& data, Instruction funct3) -> bool {
 
             Word raw = 0;
             std::memcpy(&raw, line.data.data() + byte_offset, size_bytes);
-
-            if ((funct3 & 0x4u) == 0) {  // Signed load
-                data = sign_extend(raw, 8 * size_bytes);
-            } else {
-                data = raw;
-            }
+            data = simrv::memory::extend_loaded_value(raw, static_cast<uint8_t>(funct3));
 
             line.last_used = access_tick_;
             ++hits_;
