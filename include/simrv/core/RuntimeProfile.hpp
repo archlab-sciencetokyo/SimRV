@@ -47,9 +47,7 @@ struct RuntimeProfile {
     bool lockstep = false;
     bool gdb = false;
 
-    [[nodiscard]] constexpr auto is_cycle_mode() const -> bool {
-        return is_cycle_engine(engine);
-    }
+    [[nodiscard]] constexpr auto is_cycle_mode() const -> bool { return is_cycle_engine(engine); }
     [[nodiscard]] constexpr auto is_instruction_mode() const -> bool { return !is_cycle_mode(); }
     [[nodiscard]] constexpr auto is_instruction_fast() const -> bool {
         return engine == ExecutionEngine::InstructionFast;

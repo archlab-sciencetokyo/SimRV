@@ -1,0 +1,15 @@
+schema_version = 1
+
+[guest]
+program = "img/hello.bin"
+
+[machine]
+baremetal = true
+cycle_accurate = false
+harts = 1
+vlen = 256
+misa = "gcbv"
+
+[run]
+tui = false
+output_directory = "simrv-output"

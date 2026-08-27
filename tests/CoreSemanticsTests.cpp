@@ -624,6 +624,7 @@ void test_pmp_semantics() {
     state.pmpaddr[0] = static_cast<Address>(napot_64k);
     state.pmpcfg[0] =
         simrv::core::pmp::kPmpModeNapot | simrv::core::pmp::kPmpR | simrv::core::pmp::kPmpW;
+    state.refresh_pmp_status();
 
     expect(simrv::core::pmp::check_access(state, 0x80001000, 4, simrv::core::PmpAccessType::Read),
            "PMP entry 0 permits read within NAPOT range");

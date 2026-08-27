@@ -86,7 +86,7 @@ void PcieRootComplex::assert_device_irq(uint8_t bus, uint8_t dev, uint8_t func) 
         aplic_s_->set_irq(irq_source, true);
     }
     if (machine_ != nullptr) {
-        machine_->cpu.plic_set_irq(static_cast<int>(irq_source), 1);
+        machine_->set_platform_irq(static_cast<int>(irq_source), true);
     }
 }
 

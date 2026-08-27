@@ -37,7 +37,9 @@ namespace {
 [[nodiscard]] auto speed_control_label(const simrv::core::Machine& machine, uint64_t kips,
                                        bool paused, int width) -> std::string {
     uint64_t const delay =
-        machine.tui ? machine.tui->step_delay_us_.load(std::memory_order_relaxed) : 0;
+        machine.tui_controller()
+            ? machine.tui_controller()->step_delay_us_.load(std::memory_order_relaxed)
+            : 0;
     if (delay > 0) {
         double const hz = 1000000.0 / static_cast<double>(delay);
         if (width < 60)
@@ -117,7 +119,8 @@ void StatusBar::update_kips(uint64_t current_kips) { kips_ = current_kips; }
 
 auto StatusBar::is_pos_on_status_badge(int x, int width) const -> bool {
     int target_width = layout_ == TuiLayout::Split ? left_width_ : width - 2;
-    size_t const selected = machine_.tui ? machine_.tui->selected_hart() : 0;
+    size_t const selected =
+        machine_.tui_controller() ? machine_.tui_controller()->selected_hart() : 0;
     auto const header = make_left_header_layout(machine_, target_width, selected);
     std::string status_text = paused_ ? " PAUSED " : " RUNNING ";
     if (!status_override_.empty()) {
@@ -162,7 +165,8 @@ auto StatusBar::is_pos_on_right_panel_attached(int x) const -> bool {
     int const mode_len = static_cast<int>(term_title.length()) + 2;
 
     int const badge_start = right_x0 + 1 + mode_len + 1;
-    const bool attached = machine_.tui && machine_.tui->is_terminal_attached();
+    const bool attached =
+        machine_.tui_controller() && machine_.tui_controller()->is_terminal_attached();
     std::string const focus_label =
         target_right_w < 45 ? (attached ? "ON" : "OFF") : (attached ? "ATTACHED" : "DETACHED");
     int const badge_len = static_cast<int>(focus_label.length()) + 2;
@@ -201,14 +205,16 @@ auto StatusBar::get_header_action_at_col(int col, int terminal_width) const -> H
     if (hit_badge(mode_label)) return {.action = HeaderAction::TogglePanelMode};
 
     if (right_panel_mode_ == TuiRightPanelMode::Terminal) {
-        const bool attached = machine_.tui && machine_.tui->is_terminal_attached();
+        const bool attached =
+            machine_.tui_controller() && machine_.tui_controller()->is_terminal_attached();
         std::string const focus_label =
             target_right_w < 45 ? (attached ? "ON" : "OFF") : (attached ? "ATTACHED" : "DETACHED");
         if (hit_badge(focus_label)) return {.action = HeaderAction::ToggleAttached};
     }
 
     if (machine_.num_harts() > 1) {
-        size_t const selected = machine_.tui ? machine_.tui->selected_hart() : 0;
+        size_t const selected =
+            machine_.tui_controller() ? machine_.tui_controller()->selected_hart() : 0;
         std::string const hart_label = std::format("HART {}/{}", selected, machine_.num_harts());
         if (hit_badge(hart_label)) {
             return {.action = HeaderAction::SelectHart,
@@ -651,7 +657,8 @@ auto StatusBar::get_footer_action_at_col(int col, int row_idx, int terminal_widt
 auto StatusBar::render_row(int row_idx, int width) -> std::string {
     if (row_idx == 0) {
         // Header
-        const size_t selected = (machine_.tui) ? machine_.tui->selected_hart() : 0;
+        const size_t selected =
+            machine_.tui_controller() ? machine_.tui_controller()->selected_hart() : 0;
         std::string status_badge = status_override_;
         if (status_badge.empty()) {
             bool use_ansi = use_basic_ansi_badges();
@@ -704,7 +711,8 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         std::string mode_prefix;
         switch (right_panel_mode_) {
             case TuiRightPanelMode::Terminal: {
-                const bool term_focused = machine_.tui && machine_.tui->is_terminal_attached();
+                const bool term_focused = machine_.tui_controller() &&
+                                          machine_.tui_controller()->is_terminal_attached();
                 std::string const term_title =
                     panel_mode_label(right_panel_mode_, target_right_width, trace_enabled_);
                 std::string const mode_badge =
@@ -745,7 +753,8 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                 mid_text = std::format("SCROLL (-{})", scroll_offset_);
             }
         } else if (available_mid_w >= 10) {
-            const size_t selected = (machine_.tui) ? machine_.tui->selected_hart() : 0;
+            const size_t selected =
+                machine_.tui_controller() ? machine_.tui_controller()->selected_hart() : 0;
             const auto& current_cpu = machine_.hart(selected);
             const auto cycles = current_cpu.clint_mmio.mcycle;
             const auto icount = current_cpu.e_icount;

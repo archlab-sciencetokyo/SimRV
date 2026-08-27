@@ -3,16 +3,20 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/MachineConfig.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
+#include "simrv/core/Telemetry.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/debug/GdbStub.hpp"
@@ -52,10 +56,19 @@ class LeftPane;
 
 namespace simrv::core {
 
-enum class PlatformProfile : uint8_t {
-    Pcie = 0,
-    Mmio = 1,
-    Hybrid = 2,
+struct PlatformStatusSnapshot {
+    PlatformProfile profile = PlatformProfile::Pcie;
+    bool has_pcie = false;
+    bool has_mmio = false;
+    bool disk_loaded = false;
+    uint32_t disk_status = 0;
+    uint32_t disk_isr = 0;
+    uint64_t disk_capacity_sectors = 0;
+    uint32_t network_status = 0;
+    uint64_t network_tx_packets = 0;
+    uint32_t console_status = 0;
+    uint32_t rng_status = 0;
+    uint32_t gpu_status = 0;
 };
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
@@ -80,6 +93,10 @@ struct PendingRebootState {
  * image loading, device wiring, tracing, and run termination checks.
  */
 class Machine {
+   private:
+    class Runtime;
+    std::unique_ptr<Runtime> runtime_;
+
    public:
     enum class StopReason : uint8_t {
         Running,
@@ -103,6 +120,21 @@ class Machine {
     auto operator=(const Machine&) -> Machine& = delete;
     Machine(Machine&&) = delete;
     auto operator=(Machine&&) -> Machine& = delete;
+    [[nodiscard]] auto memory_geometry() const noexcept -> MemoryGeometry {
+        return {.dram_base = config.memory.dram_base,
+                .dram_size = s_dram_size != 0 ? static_cast<Address>(s_dram_size)
+                                             : config.memory.dram_size};
+    }
+    [[nodiscard]] auto platform_profile() const noexcept -> PlatformProfile {
+        return s_platform_profile;
+    }
+    void set_platform_profile(PlatformProfile profile) noexcept {
+        config.platform_profile = profile;
+        s_platform_profile = profile;
+    }
+    [[nodiscard]] auto network_mode() const noexcept -> std::string_view { return s_net_mode; }
+    void set_network_mode(std::string mode) { s_net_mode = std::move(mode); }
+    [[nodiscard]] auto platform_status() const -> PlatformStatusSnapshot;
     /**
      * @brief Initialize machine state and load runtime images/configuration.
      * @return 0 on success, non-zero on configuration error.
@@ -158,6 +190,9 @@ class Machine {
         return stop_reason_.load(std::memory_order_relaxed);
     }
     [[nodiscard]] static auto stop_reason_name(StopReason reason) noexcept -> std::string_view;
+    /// Subscribe to lifecycle observations at the machine boundary.
+    [[nodiscard]] auto add_lifecycle_observer(LifecycleObserver observer) -> LifecycleObserverId;
+    void remove_lifecycle_observer(LifecycleObserverId observer_id);
     /// Reset runtime state flags and CPU state.
     void reset_state();
 
@@ -173,6 +208,8 @@ class Machine {
     std::atomic<int> exit_code{0};               // Exit/status code of the simulation.
     std::atomic<bool> is_shutdown_ = false;      // System shutdown flag.
     std::atomic<StopReason> stop_reason_{StopReason::Running};
+
+    MachineConfig config{};
 
     // ========== Simulation Configuration Flags ==========
     std::atomic<bool> s_appmode{true};         // Baremetal/app mode (default)
@@ -229,11 +266,14 @@ class Machine {
         simrv::pipeline::PipelineType::FiveStage;        // Pipeline microarchitecture
     std::chrono::steady_clock::time_point s_start_time;  // Simulation start timestamp
 
-    // ========== CPU and Subsystems ==========
-    simrv::core::CPU cpu;  ///< Primary / boot CPU (Hart 0)
-    std::vector<std::unique_ptr<simrv::core::CPU>> secondary_harts_;  ///< Secondary Harts (1..N-1)
+   private:
+    // Runtime-owned subsystem views. These aliases are private so ownership cannot be mutated by
+    // adapters; public access is limited to capability-style methods below.
+    simrv::core::CPU& cpu;
+    std::vector<std::unique_ptr<simrv::core::CPU>>& secondary_harts_;
 
-    /// Access a simulated Hart by index (0 is primary/boot hart).
+   public:
+    /// Inspect a simulated hart by index (0 is the primary/boot hart).
     [[nodiscard]] auto hart(size_t index = 0) -> CPU& {
         if (index == 0) {
             return cpu;
@@ -247,57 +287,118 @@ class Machine {
         return *secondary_harts_.at(index - 1);
     }
     [[nodiscard]] auto num_harts() const -> size_t { return 1 + secondary_harts_.size(); }
-    std::unique_ptr<simrv::Rtc> rtc;
-    std::unique_ptr<simrv::device::Uart> uart;
-    std::unique_ptr<simrv::tui::Tui> tui;
-    std::unique_ptr<simrv::device::PowerMmio> power;
-    std::unique_ptr<simrv::device::AclintMtimer> aclint_mtimer;
-    std::unique_ptr<simrv::device::AclintMswi> aclint_mswi;
-    std::unique_ptr<simrv::device::Imsic> imsic_m;
-    std::unique_ptr<simrv::device::Imsic> imsic_s;
-    std::unique_ptr<simrv::device::Aplic> aplic_m;
-    std::unique_ptr<simrv::device::Aplic> aplic_s;
-    std::unique_ptr<simrv::device::PcieRootComplex> pcie;
-    std::shared_ptr<simrv::device::VirtioPciBlock> pci_disk;
-    std::shared_ptr<simrv::device::VirtioPciConsole> pci_console;
-    std::shared_ptr<simrv::device::VirtioPciRng> pci_rng;
-    std::shared_ptr<simrv::device::VirtioPciGpu> pci_gpu;
-    std::shared_ptr<simrv::device::VirtioPciInput> pci_input;
-    std::shared_ptr<simrv::device::VirtioPciSound> pci_sound;
-    std::shared_ptr<simrv::device::VirtioPciNet> pci_net;
+    [[nodiscard]] auto primary_hart() noexcept -> CPU& { return cpu; }
+    [[nodiscard]] auto primary_hart() const noexcept -> const CPU& { return cpu; }
+    [[nodiscard]] auto ram_data() noexcept -> Byte* { return mmem; }
+    [[nodiscard]] auto ram_data() const noexcept -> const Byte* { return mmem; }
+    /// Platform capability used by built-in devices to publish an external interrupt level.
+    void set_platform_irq(int irq, bool asserted) { cpu.plic_set_irq(irq, asserted ? 1 : 0); }
+    /// Read the shared platform timer without exposing the CPU ownership graph.
+    [[nodiscard]] auto platform_time() const noexcept -> uint64_t {
+        return cpu.clint_mmio.mtime.load(std::memory_order_relaxed);
+    }
+    [[nodiscard]] auto rtc_device() noexcept -> simrv::Rtc* { return rtc.get(); }
+    [[nodiscard]] auto rtc_device() const noexcept -> const simrv::Rtc* { return rtc.get(); }
+    [[nodiscard]] auto uart_device() noexcept -> simrv::device::Uart* { return uart.get(); }
+    [[nodiscard]] auto uart_device() const noexcept -> const simrv::device::Uart* {
+        return uart.get();
+    }
+    [[nodiscard]] auto tui_controller() noexcept -> simrv::tui::Tui* { return tui.get(); }
+    [[nodiscard]] auto tui_controller() const noexcept -> const simrv::tui::Tui* {
+        return tui.get();
+    }
+    [[nodiscard]] auto pcie_root() noexcept -> simrv::device::PcieRootComplex* { return pcie.get(); }
+    [[nodiscard]] auto pcie_root() const noexcept -> const simrv::device::PcieRootComplex* {
+        return pcie.get();
+    }
+    [[nodiscard]] auto debugger() noexcept -> simrv::debug::GdbStub* { return gdb_stub.get(); }
+    [[nodiscard]] auto debugger() const noexcept -> const simrv::debug::GdbStub* {
+        return gdb_stub.get();
+    }
+    [[nodiscard]] auto lockstep() noexcept -> simrv::debug::SpikeLockstep* {
+        return spike_lockstep.get();
+    }
+    [[nodiscard]] auto lockstep() const noexcept -> const simrv::debug::SpikeLockstep* {
+        return spike_lockstep.get();
+    }
+    [[nodiscard]] auto breakpoint_manager() noexcept -> simrv::debug::BreakpointManager& {
+        return breakpoints;
+    }
+    [[nodiscard]] auto breakpoint_manager() const noexcept
+        -> const simrv::debug::BreakpointManager& {
+        return breakpoints;
+    }
+    [[nodiscard]] auto trace() noexcept -> Tracer& { return tracer; }
+    [[nodiscard]] auto trace() const noexcept -> const Tracer& { return tracer; }
+    [[nodiscard]] auto symbol_table() noexcept -> simrv::debug::SymbolTable& { return symbols; }
+    [[nodiscard]] auto symbol_table() const noexcept -> const simrv::debug::SymbolTable& {
+        return symbols;
+    }
+
+   private:
+    std::unique_ptr<simrv::Rtc>& rtc;
+    std::unique_ptr<simrv::device::Uart>& uart;
+    std::unique_ptr<simrv::tui::Tui>& tui;
+    std::unique_ptr<simrv::device::PowerMmio>& power;
+    std::unique_ptr<simrv::device::AclintMtimer>& aclint_mtimer;
+    std::unique_ptr<simrv::device::AclintMswi>& aclint_mswi;
+    std::unique_ptr<simrv::device::Imsic>& imsic_m;
+    std::unique_ptr<simrv::device::Imsic>& imsic_s;
+    std::unique_ptr<simrv::device::Aplic>& aplic_m;
+    std::unique_ptr<simrv::device::Aplic>& aplic_s;
+    std::unique_ptr<simrv::device::PcieRootComplex>& pcie;
+    std::shared_ptr<simrv::device::VirtioPciBlock>& pci_disk;
+    std::shared_ptr<simrv::device::VirtioPciConsole>& pci_console;
+    std::shared_ptr<simrv::device::VirtioPciRng>& pci_rng;
+    std::shared_ptr<simrv::device::VirtioPciGpu>& pci_gpu;
+    std::shared_ptr<simrv::device::VirtioPciInput>& pci_input;
+    std::shared_ptr<simrv::device::VirtioPciSound>& pci_sound;
+    std::shared_ptr<simrv::device::VirtioPciNet>& pci_net;
 
     PlatformProfile s_platform_profile = PlatformProfile::Pcie;
     std::string s_net_mode = "user";
-    std::shared_ptr<simrv::device::VirtioMmioBlock> mmio_disk;
-    std::shared_ptr<simrv::device::VirtioMmioConsole> mmio_console;
-    std::shared_ptr<simrv::device::VirtioMmioRng> mmio_rng;
-    std::shared_ptr<simrv::device::VirtioMmioGpu> mmio_gpu;
-    std::shared_ptr<simrv::device::VirtioMmioInput> mmio_input;
-    std::shared_ptr<simrv::device::VirtioMmioSound> mmio_sound;
-    std::shared_ptr<simrv::device::VirtioMmioNet> mmio_net;
+    std::shared_ptr<simrv::device::VirtioMmioBlock>& mmio_disk;
+    std::shared_ptr<simrv::device::VirtioMmioConsole>& mmio_console;
+    std::shared_ptr<simrv::device::VirtioMmioRng>& mmio_rng;
+    std::shared_ptr<simrv::device::VirtioMmioGpu>& mmio_gpu;
+    std::shared_ptr<simrv::device::VirtioMmioInput>& mmio_input;
+    std::shared_ptr<simrv::device::VirtioMmioSound>& mmio_sound;
+    std::shared_ptr<simrv::device::VirtioMmioNet>& mmio_net;
 
     // ========== Debug Subsystems (null when disabled) ==========
-    std::unique_ptr<simrv::debug::GdbStub> gdb_stub;
-    std::unique_ptr<simrv::debug::SpikeLockstep> spike_lockstep;
-    simrv::debug::BreakpointManager breakpoints;
+    std::unique_ptr<simrv::debug::GdbStub>& gdb_stub;
+    std::unique_ptr<simrv::debug::SpikeLockstep>& spike_lockstep;
+    simrv::debug::BreakpointManager& breakpoints;
 
     // ========== Memory and Interconnect ==========
     Byte* mmem{};                       // Pointer to main memory buffer
-    Tracer tracer{*this};               // Tracing facility
-    simrv::debug::SymbolTable symbols;  // ELF debugging symbols
+    Tracer& tracer;                       // Non-owning compatibility view.
+    simrv::debug::SymbolTable& symbols;  // Non-owning compatibility view.
 
+   public:
     [[nodiscard]] auto memory() -> simrv::memory::MemorySubsystem& { return memory_; }
     [[nodiscard]] auto memory() const -> const simrv::memory::MemorySubsystem& { return memory_; }
 
    protected:
-    std::unique_ptr<Byte, decltype(&std::free)> mmem_owner_{nullptr, &std::free};
+    [[nodiscard]] auto allocate_ram(size_t bytes) -> bool;
+    void release_ram() noexcept;
+    // Composition hooks for built-in machine specializations and focused lifetime tests. The
+    // owning containers remain inaccessible to adapters and are not part of the installed SDK.
+    [[nodiscard]] auto mutable_secondary_harts() noexcept
+        -> std::vector<std::unique_ptr<simrv::core::CPU>>& {
+        return secondary_harts_;
+    }
+    [[nodiscard]] auto mutable_ram_pointer() noexcept -> Byte*& { return mmem; }
+    [[nodiscard]] auto mutable_uart() noexcept -> std::unique_ptr<simrv::device::Uart>& {
+        return uart;
+    }
     friend class simrv::core::CPU;
     friend class simrv::execute::ExecuteUnit;
     friend class simrv::device::Uart;
     friend class simrv::tui::Tui;
     friend class simrv::tui::LeftPane;
     friend class simrv::memory::CoherenceHub;
-    simrv::memory::MemorySubsystem memory_;
+    simrv::memory::MemorySubsystem& memory_;
 
     /// Virtual hooks for template method execution loop
     virtual void start_smp_threads() {}
@@ -318,6 +419,11 @@ class Machine {
     std::string pending_binary_path_;
     std::optional<bool> pending_appmode_;
     std::optional<std::string> pending_disk_path_;
+
+    void publish_lifecycle_event(LifecycleEventKind kind, int exit_status = 0);
+    mutable std::mutex lifecycle_observer_mutex_;
+    std::vector<std::pair<LifecycleObserverId, LifecycleObserver>> lifecycle_observers_;
+    LifecycleObserverId next_lifecycle_observer_id_ = 1;
 
     uint64_t last_tui_check_cycles_ = 0;
     std::chrono::steady_clock::time_point last_tui_update_{};

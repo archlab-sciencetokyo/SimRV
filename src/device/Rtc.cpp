@@ -20,7 +20,7 @@ void Rtc::sync_with_system_time() {
 
 auto Rtc::current_time_ns() const -> uint64_t {
     return base_epoch_ns_ +
-           (machine_.cpu.clint_mmio.mtime.load(std::memory_order_relaxed) * 100ULL);
+           (machine_.platform_time() * 100ULL);
 }
 
 void Rtc::evaluate_alarm() {
@@ -28,7 +28,7 @@ void Rtc::evaluate_alarm() {
         const uint64_t rtc_ns = current_time_ns();
         if (rtc_ns >= alarm_time_) {
             alarm_status_ = true;
-            machine_.cpu.plic_set_irq(static_cast<int>(kRtcIrq), 1);
+            machine_.set_platform_irq(static_cast<int>(kRtcIrq), true);
         }
     }
 }
@@ -84,11 +84,11 @@ auto Rtc::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp
             case 0x14:  // CLEAR_ALARM
                 alarm_enabled_ = false;
                 alarm_status_ = false;
-                machine_.cpu.plic_set_irq(static_cast<int>(kRtcIrq), 0);
+                machine_.set_platform_irq(static_cast<int>(kRtcIrq), false);
                 break;
             case 0x1c:  // CLEAR_INTERRUPT
                 alarm_status_ = false;
-                machine_.cpu.plic_set_irq(static_cast<int>(kRtcIrq), 0);
+                machine_.set_platform_irq(static_cast<int>(kRtcIrq), false);
                 break;
             default:
                 break;

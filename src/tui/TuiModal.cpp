@@ -262,7 +262,7 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
             break;
         case ModalType::Settings: {
             if (settings_draft_.platform_profile !=
-                static_cast<uint8_t>(machine_.s_platform_profile)) {
+                static_cast<uint8_t>(machine_.platform_profile())) {
                 open_platform_confirm(settings_draft_);
                 return false;
             }
@@ -339,9 +339,9 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
          active_modal_ == ModalType::ConfigureMisa || active_modal_ == ModalType::ConfigureSystem ||
          active_modal_ == ModalType::Notice || active_modal_ == ModalType::PlatformChangeConfirm);
     const int fallback_width = is_wide_modal ? 78 : 58;
-    const bool has_rendered_geometry =
-        rendered_box_width_ > 0 && rendered_term_width_ == term_width &&
-        rendered_term_height_ == term_height;
+    const bool has_rendered_geometry = rendered_box_width_ > 0 &&
+                                       rendered_term_width_ == term_width &&
+                                       rendered_term_height_ == term_height;
     const int maximum_width = has_rendered_geometry ? rendered_box_width_ : fallback_width;
     const int provisional_width = std::min(maximum_width, term_width - 4);
     if (provisional_width < 35) return ModalClickResult::Ignored;
@@ -430,8 +430,8 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
                     } else if (action == 2) {
                         remove_bp_at_cursor({});
                     } else if (action == 3) {
-                        machine_.breakpoints.clear_pc_breakpoints();
-                        machine_.breakpoints.clear_watchpoints();
+                        machine_.breakpoint_manager().clear_pc_breakpoints();
+                        machine_.breakpoint_manager().clear_watchpoints();
                         bp_cursor_ = 0;
                     } else {
                         return ModalClickResult::Closed;
@@ -638,9 +638,9 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
         case ModalType::PlatformChangeConfirm: {
             add_row("");
             const char* cur_prof =
-                (machine_.s_platform_profile == simrv::core::PlatformProfile::Pcie)
+                (machine_.platform_profile() == simrv::core::PlatformProfile::Pcie)
                     ? "PCIe (PCIe 1.2 + ECAM)"
-                    : ((machine_.s_platform_profile == simrv::core::PlatformProfile::Mmio)
+                    : ((machine_.platform_profile() == simrv::core::PlatformProfile::Mmio)
                            ? "MMIO (VirtIO-MMIO v2)"
                            : "Hybrid (PCIe + MMIO)");
             const char* new_prof =
@@ -656,8 +656,8 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             add_row("  Device Tree (FDT) and restarting CPU execution state.");
             add_row("");
             add_row(modals::build_modal_footer({{"[R / Enter]", "Reload Simulator"},
-                                                 {"[D / Space]", "Discard Change"},
-                                                 {"[Esc / q]", "Cancel"}}));
+                                                {"[D / Space]", "Discard Change"},
+                                                {"[Esc / q]", "Cancel"}}));
         } break;
         default:
             break;
@@ -730,8 +730,7 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
         std::string top_border =
             std::format("{}{}{}{}{}{}{}{}{}\033[0m", kThemeBorder, m_bg, top_left,
                         make_repeated_string(glyphs.horiz, left_dash), title_fmt, kThemeBorder,
-                        make_repeated_string(glyphs.horiz, right_dash), top_right,
-                        "\033[0m");
+                        make_repeated_string(glyphs.horiz, right_dash), top_right, "\033[0m");
 
         lines.at(static_cast<std::size_t>(start_y)) =
             overlay_string(lines.at(static_cast<std::size_t>(start_y)), top_border, start_x, box_w);
@@ -770,9 +769,8 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
         // deliberately emits a reset, so relying on inherited state made the left, right, and
         // horizontal edges render with different backgrounds.
         std::string row_str =
-            std::format("{}{}{}\033[0m{}{}\033[0m{}{}{}\033[0m", m_bg, kThemeBorder,
-                        glyphs.vert, m_bg, format_to_width(content, inner_w), m_bg, kThemeBorder,
-                        glyphs.vert);
+            std::format("{}{}{}\033[0m{}{}\033[0m{}{}{}\033[0m", m_bg, kThemeBorder, glyphs.vert,
+                        m_bg, format_to_width(content, inner_w), m_bg, kThemeBorder, glyphs.vert);
 
         lines.at(static_cast<std::size_t>(target_y)) =
             overlay_string(lines.at(static_cast<std::size_t>(target_y)), row_str, start_x, box_w);

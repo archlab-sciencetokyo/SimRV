@@ -52,7 +52,8 @@ auto format_dev_status(uint32_t status) -> std::string {
 auto LeftPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row, int col_width,
                                int right_width) -> std::string {
     int const width = col_width + right_width;
-    const bool is_mmio = (machine_.s_platform_profile == simrv::core::PlatformProfile::Mmio);
+    const auto platform = machine_.platform_status();
+    const bool is_mmio = platform.profile == simrv::core::PlatformProfile::Mmio;
 
     if (logical_row == 0) {
         return section_line(is_mmio ? "VirtIO-MMIO v2 Interconnect & SoC Bus Inspector"
@@ -79,10 +80,7 @@ auto LeftPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row, int
                             width);
     }
 
-    const bool has_pci_disk = (machine_.pci_disk != nullptr && machine_.pci_disk->is_disk_loaded());
-    const bool has_mmio_disk =
-        (machine_.mmio_disk != nullptr && machine_.mmio_disk->is_disk_loaded());
-    const bool has_disk = has_pci_disk || has_mmio_disk;
+    const bool has_disk = platform.disk_loaded;
 
     if (logical_row == 3) {
         if (!has_disk) {
@@ -91,12 +89,9 @@ auto LeftPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row, int
                             kThemeText),
                 width);
         }
-        uint32_t status =
-            has_pci_disk ? machine_.pci_disk->device_status() : machine_.mmio_disk->device_status();
-        uint32_t irq_stat =
-            has_pci_disk ? machine_.pci_disk->isr_status() : machine_.mmio_disk->isr_status();
-        uint64_t cap_sec = has_pci_disk ? machine_.pci_disk->capacity_sectors()
-                                        : machine_.mmio_disk->capacity_sectors();
+        uint32_t status = platform.disk_status;
+        uint32_t irq_stat = platform.disk_isr;
+        uint64_t cap_sec = platform.disk_capacity_sectors;
         auto status_str = format_dev_status(status);
         if (width < 50) {
             return format_to_width(
@@ -112,16 +107,9 @@ auto LeftPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row, int
             width);
     }
     if (logical_row == 4) {
-        uint32_t net_status = 0;
+        uint32_t net_status = platform.network_status;
         std::string mac_str = "52:54:00:12:34:56";
-        size_t tx_pkts = 0;
-        if (machine_.pci_net) {
-            net_status = machine_.pci_net->device_status();
-            tx_pkts = machine_.pci_net->backend().tx_packet_count();
-        } else if (machine_.mmio_net) {
-            net_status = machine_.mmio_net->device_status();
-            tx_pkts = machine_.mmio_net->backend().tx_packet_count();
-        }
+        size_t tx_pkts = platform.network_tx_packets;
         auto status_str = format_dev_status(net_status);
         if (width < 50) {
             return format_to_width(
@@ -139,11 +127,7 @@ auto LeftPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row, int
         return section_line("Console, UART & Peripheral Endpoints", width);
     }
     if (logical_row == 6) {
-        uint32_t c_status = 0;
-        if (machine_.pci_console)
-            c_status = machine_.pci_console->device_status();
-        else if (machine_.mmio_console)
-            c_status = machine_.mmio_console->device_status();
+        uint32_t c_status = platform.console_status;
         auto c_str = format_dev_status(c_status);
 
         if (width < 50) {
@@ -158,12 +142,8 @@ auto LeftPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row, int
                                width);
     }
     if (logical_row == 7) {
-        uint32_t rng_status = machine_.pci_rng
-                                  ? machine_.pci_rng->device_status()
-                                  : (machine_.mmio_rng ? machine_.mmio_rng->device_status() : 0);
-        uint32_t gpu_status = machine_.pci_gpu
-                                  ? machine_.pci_gpu->device_status()
-                                  : (machine_.mmio_gpu ? machine_.mmio_gpu->device_status() : 0);
+        uint32_t rng_status = platform.rng_status;
+        uint32_t gpu_status = platform.gpu_status;
         auto rng_str = format_dev_status(rng_status);
         auto gpu_str = format_dev_status(gpu_status);
 

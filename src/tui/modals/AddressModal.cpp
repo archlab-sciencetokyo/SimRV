@@ -34,7 +34,7 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
         auto result = std::from_chars(input.data(), input.data() + input.size(), addr, 16);
         ok = (result.ec == std::errc{});
     } else {
-        auto sym_opt = machine.symbols.lookup_name(input);
+        auto sym_opt = machine.symbol_table().lookup_name(input);
         if (sym_opt.has_value()) {
             addr = *sym_opt;
             ok = true;

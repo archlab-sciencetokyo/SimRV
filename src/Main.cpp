@@ -26,11 +26,16 @@
 #include "simrv/util/CliParser.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
+#include "simrv/v3/Command.hpp"
 #include "simrv/xlen/Types.hpp"
 
 using namespace simrv::util;
 
 auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
+    std::span<char* const> const initial_args(argv, static_cast<std::size_t>(argc));
+    if (const auto v3_exit = simrv::v3::try_run_command(initial_args); v3_exit.has_value()) {
+        return *v3_exit;
+    }
     bool is_tui = (::isatty(STDIN_FILENO) != 0);
     bool skip_banner = false;
     for (int i = 1; i < argc; ++i) {
@@ -185,7 +190,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             sim_machine->s_misa_override = true;
             if (override_misa_profile.has_value()) {
                 sim_machine->s_misa_profile = *override_misa_profile;
-                sim_machine->cpu.state().misa = *override_misa_profile;
+                sim_machine->primary_hart().state().misa = *override_misa_profile;
             }
             if (override_misa_xlen.has_value()) {
                 sim_machine->s_misa_xlen = *override_misa_xlen;
@@ -252,7 +257,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             keep_running = false;
             final_exit_code = sim_machine->exit_code.load();
             if (!sim_machine->s_tuimode) {
-                sim_machine->tracer.print_summary();
+                sim_machine->trace().print_summary();
             }
         }
     }

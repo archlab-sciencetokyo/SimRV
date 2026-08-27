@@ -42,8 +42,7 @@ void TileLinkBus::advance_cycle() {
     std::unique_lock lock(bus_mutex_, std::defer_lock);
     if (machine_.s_smp_multithreaded.load(std::memory_order_relaxed)) lock.lock();
     ++cycle_;
-    if (!req_queue_.empty() &&
-        req_queue_.front().submitted_cycle + request_latency_ <= cycle_) {
+    if (!req_queue_.empty() && req_queue_.front().submitted_cycle + request_latency_ <= cycle_) {
         const auto request = req_queue_.front();
         req_queue_.pop_front();
         process_request(request);
@@ -78,8 +77,8 @@ void TileLinkBus::process_request(const TimedRequest& request) {
         handled = true;
     } else if (req.opcode == TlOpcodeA::Get) {
         resp.opcode = TlOpcodeD::AccessAckData;
-        if (simrv::memory::is_dram_access(req.address, transfer_bytes) &&
-            machine_.mmem != nullptr) {
+        if (machine_.memory_geometry().contains(req.address, transfer_bytes) &&
+            machine_.ram_data() != nullptr) {
             bool found_in_cache = false;
             for (uint32_t h = 0; h < machine_.num_harts(); ++h) {
                 Word cached_data = 0;
@@ -90,7 +89,7 @@ void TileLinkBus::process_request(const TimedRequest& request) {
                 }
             }
             if (!found_in_cache) {
-                resp.data = simrv::memory::ram_read_fast(req.address, funct3, machine_.mmem);
+                resp.data = simrv::memory::ram_read_fast(req.address, funct3, machine_.ram_data());
             }
             ++read_count_;
             handled = true;
@@ -98,12 +97,14 @@ void TileLinkBus::process_request(const TimedRequest& request) {
     } else if (req.opcode == TlOpcodeA::LogicalData) {
         // Page-table A/D updates use an atomic OR at the globally ordered bus boundary.
         resp.opcode = TlOpcodeD::AccessAckData;
-        if (simrv::memory::is_dram_access(req.address, transfer_bytes) &&
-            machine_.mmem != nullptr) {
+        if (machine_.memory_geometry().contains(req.address, transfer_bytes) &&
+            machine_.ram_data() != nullptr) {
             coherence_hub_.invalidate_line_external(req.address);
-            const Word previous = simrv::memory::ram_read_fast(req.address, funct3, machine_.mmem);
+            const Word previous =
+                simrv::memory::ram_read_fast(req.address, funct3, machine_.ram_data());
             resp.data = previous;
-            simrv::memory::ram_write_fast(req.address, previous | req.data, funct3, machine_.mmem);
+            simrv::memory::ram_write_fast(req.address, previous | req.data, funct3,
+                                          machine_.ram_data());
             ++read_count_;
             ++write_count_;
             handled = true;
@@ -128,9 +129,9 @@ void TileLinkBus::process_request(const TimedRequest& request) {
             }
         }
 
-        if (simrv::memory::is_dram_access(req.address, transfer_bytes) &&
-            machine_.mmem != nullptr) {
-            simrv::memory::ram_write_fast(req.address, req.data, funct3, machine_.mmem);
+        if (machine_.memory_geometry().contains(req.address, transfer_bytes) &&
+            machine_.ram_data() != nullptr) {
+            simrv::memory::ram_write_fast(req.address, req.data, funct3, machine_.ram_data());
             ++write_count_;
             handled = true;
         }
@@ -160,10 +161,9 @@ void TileLinkBus::process_request(const TimedRequest& request) {
 auto TileLinkBus::try_get_timed_response(uint8_t source_id, TimedResponse& resp) -> bool {
     std::unique_lock lock(bus_mutex_, std::defer_lock);
     if (machine_.s_smp_multithreaded.load(std::memory_order_relaxed)) lock.lock();
-    auto it = std::ranges::find_if(
-        resp_queue_, [this, source_id](const auto& r) -> bool {
-            return r.payload.source == source_id && r.ready_cycle <= cycle_;
-        });
+    auto it = std::ranges::find_if(resp_queue_, [this, source_id](const auto& r) -> bool {
+        return r.payload.source == source_id && r.ready_cycle <= cycle_;
+    });
     if (it != resp_queue_.end()) {
         resp = *it;
         resp_queue_.erase(it);

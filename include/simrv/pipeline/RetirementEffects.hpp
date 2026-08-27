@@ -25,8 +25,7 @@ struct WritebackEffects {
 // Called once for every retired instruction.  Keeping the small classification in the caller
 // avoids a hot out-of-line call in both IA and CA writeback paths.
 [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto build_writeback_effects(
-    const PipelineContext& context)
-    -> WritebackEffects {
+    const PipelineContext& context) -> WritebackEffects {
     WritebackEffects effects{};
     if (context.pending_exception.has_value()) return effects;
 

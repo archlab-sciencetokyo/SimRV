@@ -112,32 +112,32 @@ auto MmioDevice::handle_request(const TlChannelA& req, TlChannelD& resp) -> bool
 }
 
 auto MmioDevice::dma_read(Address paddr, std::span<uint8_t> dst) -> bool {
-    if (machine_ == nullptr || machine_->mmem == nullptr || dst.empty()) {
+    if (machine_ == nullptr || machine_->ram_data() == nullptr || dst.empty()) {
         return false;
     }
-    const Address dram_base = memory::kDramBaseAddress;
-    const uint64_t dram_size = machine_->s_dram_size > 0 ? machine_->s_dram_size
-                                                         : static_cast<uint64_t>(memory::kDramSize);
+    const auto geometry = machine_->memory_geometry();
+    const Address dram_base = geometry.dram_base;
+    const uint64_t dram_size = geometry.dram_size;
 
     if (paddr < dram_base || (paddr + dst.size()) > (dram_base + dram_size)) {
         return false;
     }
-    std::memcpy(dst.data(), machine_->mmem + (paddr - dram_base), dst.size());
+    std::memcpy(dst.data(), machine_->ram_data() + (paddr - dram_base), dst.size());
     return true;
 }
 
 auto MmioDevice::dma_write(Address paddr, std::span<const uint8_t> src) -> bool {
-    if (machine_ == nullptr || machine_->mmem == nullptr || src.empty()) {
+    if (machine_ == nullptr || machine_->ram_data() == nullptr || src.empty()) {
         return false;
     }
-    const Address dram_base = memory::kDramBaseAddress;
-    const uint64_t dram_size = machine_->s_dram_size > 0 ? machine_->s_dram_size
-                                                         : static_cast<uint64_t>(memory::kDramSize);
+    const auto geometry = machine_->memory_geometry();
+    const Address dram_base = geometry.dram_base;
+    const uint64_t dram_size = geometry.dram_size;
 
     if (paddr < dram_base || (paddr + src.size()) > (dram_base + dram_size)) {
         return false;
     }
-    std::memcpy(machine_->mmem + (paddr - dram_base), src.data(), src.size());
+    std::memcpy(machine_->ram_data() + (paddr - dram_base), src.data(), src.size());
     return true;
 }
 

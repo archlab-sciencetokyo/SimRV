@@ -563,11 +563,18 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
                 } else if (addr >= 0x3B0 && addr <= 0x3EF) {
                     const size_t pmp_idx = addr - 0x3B0;
                     if (pmp_idx < ArchState::kNumPmpEntries) {
-                        if ((cpu_.state().pmpcfg[pmp_idx] & 0x80) == 0) {
+                        const bool self_locked = (cpu_.state().pmpcfg[pmp_idx] & 0x80) != 0;
+                        const bool next_locked_tor =
+                            (pmp_idx + 1 < ArchState::kNumPmpEntries) &&
+                            ((cpu_.state().pmpcfg[pmp_idx + 1] & 0x80) != 0) &&
+                            ((cpu_.state().pmpcfg[pmp_idx + 1] & 0x18) == 0x08);
+                        if (!self_locked && !next_locked_tor) {
                             cpu_.state().pmpaddr[pmp_idx] = static_cast<Address>(wdata);
                         }
                     }
                 }
+                cpu_.state().refresh_pmp_status();
+                cpu_.TLB_flush();
                 break;
             }
             if (is_zero_hpm_csr(addr, cpu_.state().regs.xlen) || addr == 0x320) {

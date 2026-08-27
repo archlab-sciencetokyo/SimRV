@@ -22,8 +22,8 @@
 #include "simrv/core/Tlb.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/memory/Bus.hpp"
-#include "simrv/pipeline/CycleTransition.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
+#include "simrv/pipeline/CycleTransition.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 
@@ -94,6 +94,22 @@ struct alignas(128) ArchState {
     static constexpr size_t kNumPmpEntries = 16;
     std::array<uint8_t, kNumPmpEntries> pmpcfg{};
     std::array<Address, kNumPmpEntries> pmpaddr{};
+    size_t num_active_pmp = 0;
+    bool has_locked_pmp = false;
+
+    constexpr void refresh_pmp_status() {
+        num_active_pmp = 0;
+        has_locked_pmp = false;
+        for (size_t i = 0; i < kNumPmpEntries; ++i) {
+            const uint8_t mode = pmpcfg[i] & 0x18;
+            if (mode != 0) {
+                num_active_pmp = i + 1;
+            }
+            if ((pmpcfg[i] & 0x80) != 0) {
+                has_locked_pmp = true;
+            }
+        }
+    }
 
     /** Recompute supervisor pending bits that combine independent software/device sources. */
     constexpr void refresh_supervisor_pending() {

@@ -93,14 +93,14 @@ auto render_cache_way_row(const simrv::core::CPU& cpu, int way_idx, int inspect_
 }  // namespace
 
 auto LeftPane::active_cache_set_count() const -> int {
-    const auto count = cache_inspect_type_ == 0 ? machine_.cpu.icache.set_count()
-                                                : machine_.cpu.dcache.set_count();
+    const auto count = cache_inspect_type_ == 0 ? machine_.primary_hart().icache.set_count()
+                                                : machine_.primary_hart().dcache.set_count();
     return std::max(1, static_cast<int>(count));
 }
 
 auto LeftPane::active_cache_way_count() const -> int {
-    const auto count = cache_inspect_type_ == 0 ? machine_.cpu.icache.associativity()
-                                                : machine_.cpu.dcache.associativity();
+    const auto count = cache_inspect_type_ == 0 ? machine_.primary_hart().icache.associativity()
+                                                : machine_.primary_hart().dcache.associativity();
     return std::max(1, static_cast<int>(count));
 }
 
@@ -232,10 +232,10 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
         }
         case 4: {
             std::string target_name = (cache_inspect_type_ == 0) ? "L1 ICache" : "L1 DCache";
-            return section_line(std::format("Set & Way Inspector — {} Set #{:02d} (0-{:02d})",
-                                            target_name, cache_inspect_set_,
-                                            active_cache_set_count() - 1),
-                                width);
+            return section_line(
+                std::format("Set & Way Inspector — {} Set #{:02d} (0-{:02d})", target_name,
+                            cache_inspect_set_, active_cache_set_count() - 1),
+                width);
         }
         case 5:
             return format_to_width(
@@ -288,8 +288,9 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
                       : static_cast<const simrv::cache::BaseCache<512, 32, 8>&>(dc);
 
             std::string sets_row;
-            for (int s = base_set; s < base_set + kSetsPerRow &&
-                                      s < static_cast<int>(target_cache.set_count()); ++s) {
+            for (int s = base_set;
+                 s < base_set + kSetsPerRow && s < static_cast<int>(target_cache.set_count());
+                 ++s) {
                 bool const is_selected = (s == cache_inspect_set_);
                 bool const is_last = (static_cast<uint32_t>(s) == target_cache.last_accessed_set());
                 bool const was_hit = target_cache.last_access_was_hit();

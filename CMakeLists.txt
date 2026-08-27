@@ -1,11 +1,13 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.31)
 
 project(SimRV VERSION 2.1.0 LANGUAGES C CXX)
 
-enable_testing()
-find_program(PYTHON_BIN NAMES "python3" "python" DOC "Path to Python interpreter")
-if(NOT PYTHON_BIN)
-  set(PYTHON_BIN "python3")
+include(CTest)
+option(SIMRV_ENABLE_TOOLING "Enable release, documentation, and formatting helper targets" OFF)
+option(SIMRV_ENABLE_LINUX_TOOLS "Enable Linux image build and launch helper targets" OFF)
+if(BUILD_TESTING OR SIMRV_ENABLE_TOOLING)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  set(PYTHON_BIN "${Python3_EXECUTABLE}")
 endif()
 
 set(SIMRV_VERSION "2.1.0-alpha.1")
@@ -66,14 +68,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(SIMRV_ENABLE_CLANG_TIDY "Enable clang-tidy static analysis" OFF)
-if(SIMRV_ENABLE_CLANG_TIDY)
-  set(CMAKE_CXX_CLANG_TIDY clang-tidy)
-endif()
 
 option(SIMRV_WARNINGS_AS_ERRORS "Treat project compiler warnings as errors" OFF)
 option(SIMRV_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(SIMRV_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(SIMRV_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
+option(SIMRV_NATIVE_HOST_OPTIMIZATIONS
+       "Tune a Release build for the host CPU; do not use for redistributable binaries" OFF)
+option(SIMRV_X86_64_V3_BASELINE
+       "Use the x86-64-v3 ISA baseline for non-native x86-64 Release builds" ON)
 set(SIMRV_VECTOR_TESTS_DIR "" CACHE PATH "Path to a built chipsalliance/riscv-vector-tests checkout")
 
 if(SIMRV_ENABLE_TSAN AND (SIMRV_ENABLE_ASAN OR SIMRV_ENABLE_UBSAN))
@@ -105,168 +108,70 @@ set(SIMRV_DISK_SIZE_MB "256" CACHE STRING "Disk size in megabytes")
 set(SIMRV_CORE_COUNT "1" CACHE STRING "Number of CPU cores (experimental)")
 set(SIMRV_SPIKE_PATH "spike" CACHE STRING "Path to Spike binary for lockstep co-simulation (runtime default, not used at build time)")
 
-set(SIMRV_SOURCES
-  src/core/Logger.cpp
-  src/core/Machine.cpp
-  src/core/BaremetalMachine.cpp
-  src/core/OSMachine.cpp
-  src/core/MachineInit.cpp
-  src/core/StateControl.cpp
-  src/core/CsrFile.cpp
-  src/core/Tracer.cpp
-  src/core/Sbi.cpp
-  src/core/Tlb.cpp
-  src/pipeline/Decoder.cpp
-  src/pipeline/PipelineSim.cpp
-  src/pipeline/PipelineConfig.cpp
-  src/pipeline/BranchPredictor.cpp
-  src/execute/ExecuteUnitInt.cpp
-  src/execute/ExecuteUnitB.cpp
-  src/execute/ExecuteUnitFloat.cpp
-  src/execute/ExecuteUnit.cpp
-  src/execute/ExecuteUnitVector.cpp
-  src/execute/vector/VectorConfig.cpp
-  src/execute/vector/VectorMemory.cpp
-  src/execute/vector/VectorInteger.cpp
-  src/execute/vector/VectorFixedPoint.cpp
-  src/execute/vector/VectorFloat.cpp
-  src/execute/vector/VectorPermute.cpp
-  src/pipeline/PipelineStages.cpp
-  src/pipeline/CycleKernel.cpp
-  src/core/Cpu.cpp
-  src/util/CliParser.cpp
-  src/cache/ICache.cpp
-  src/cache/DCache.cpp
-  src/memory/MemoryAccess.cpp
-  src/memory/MemorySubsystem.cpp
-  src/memory/MmioRouter.cpp
-  src/memory/MmioDevice.cpp
-  src/memory/Mmu.cpp
-  src/memory/TileLinkBus.cpp
-  src/memory/CoherenceHub.cpp
-  src/device/Aclint.cpp
-  src/device/AIA.cpp
-  src/device/pci/PciDevice.cpp
-  src/device/pci/PcieRootComplex.cpp
-  src/device/pci/VirtioPciDevice.cpp
-  src/device/pci/VirtioPciBlock.cpp
-  src/device/pci/VirtioPciConsole.cpp
-  src/device/pci/VirtioPciGpu.cpp
-  src/device/pci/VirtioPciInput.cpp
-  src/device/pci/VirtioPciRng.cpp
-  src/device/pci/VirtioPciSound.cpp
-  src/device/pci/VirtioPciNet.cpp
-  src/device/mmio/VirtioMmioDevice.cpp
-  src/device/mmio/VirtioMmioBlock.cpp
-  src/device/mmio/VirtioMmioConsole.cpp
-  src/device/mmio/VirtioMmioGpu.cpp
-  src/device/mmio/VirtioMmioInput.cpp
-  src/device/mmio/VirtioMmioRng.cpp
-  src/device/mmio/VirtioMmioSound.cpp
-  src/device/mmio/VirtioMmioNet.cpp
-  src/device/Rtc.cpp
-  src/device/Uart.cpp
-  src/device/Power.cpp
-  src/tui/Tui.cpp
-  src/tui/TuiGuidance.cpp
-  src/tui/TuiKeybindings.cpp
-  src/tui/TuiModal.cpp
-  src/tui/modals/AddressModal.cpp
-  src/tui/modals/BreakpointModal.cpp
-  src/tui/modals/GlossaryModal.cpp
-  src/tui/modals/HelpModal.cpp
-  src/tui/modals/LoadModal.cpp
-  src/tui/modals/MisaModal.cpp
-  src/tui/modals/ModalComponents.cpp
-  src/tui/modals/SettingsModal.cpp
-  src/tui/modals/SystemConfigModal.cpp
-  src/tui/modals/StepModal.cpp
-  src/tui/panels/LeftPane.cpp
-  src/tui/panels/LeftPaneRegs.cpp
-  src/tui/panels/LeftPanePipeline.cpp
-  src/tui/panels/LeftPaneCache.cpp
-  src/tui/panels/LeftPaneTlb.cpp
-  src/tui/panels/LeftPaneBp.cpp
-  src/tui/panels/LeftPaneHazard.cpp
-  src/tui/panels/LeftPaneIo.cpp
-  src/tui/panels/LeftPaneStats.cpp
-  src/tui/panels/LeftPaneExplain.cpp
-  src/tui/panels/LeftPaneStack.cpp
-  src/tui/panels/RightPane.cpp
-  src/tui/panels/StatusBar.cpp
-  src/debug/GdbStub.cpp
-  src/debug/SpikeLockstep.cpp
-  src/debug/SymbolTable.cpp
-  src/debug/BreakpointManager.cpp
-  src/util/InstructionExplainer.cpp
-  src/util/FdtGenerator.cpp
-)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+include(SimRVOptions)
 
-# Reusable terminal rendering infrastructure. The target stays internal to SimRV while enforcing
-# that generic code does not depend on simulator, ISA, memory, or device implementations.
-add_library(simrv-tui-framework STATIC
-  src/tui/LogBuffer.cpp
-  src/tui/TuiFrameRenderer.cpp
-  src/tui/TuiTheme.cpp
-  src/tui/framework/Text.cpp
-  src/tui/framework/Theme.cpp
-  src/tui/framework/Components.cpp
-  src/tui/framework/Modal.cpp
-)
-target_compile_features(simrv-tui-framework PUBLIC cxx_std_23)
-target_include_directories(simrv-tui-framework PUBLIC include)
-target_compile_options(simrv-tui-framework PRIVATE -Wall -Wextra -Wpedantic)
-if(SIMRV_WARNINGS_AS_ERRORS)
-  target_compile_options(simrv-tui-framework PRIVATE -Werror)
-endif()
+  add_subdirectory(src/pipeline)
+  add_subdirectory(src/execute)
+  add_subdirectory(src/memory)
+  add_subdirectory(src/device)
+  add_subdirectory(src/debug)
+  add_subdirectory(src/tui)
+  # Runtime is the composition target and must be declared after all component object targets.
+  add_subdirectory(src/core)
 
-add_executable(SimRV
-  src/Main.cpp
-  ${SIMRV_SOURCES}
-)
+  add_library(simrv-sdk
+    src/v3/Command.cpp
+    src/v3/RunManifest.cpp
+    src/v3/Plugin.cpp
+    src/v3/Simulator.cpp
+    $<TARGET_OBJECTS:simrv-foundation>
+    $<TARGET_OBJECTS:simrv-isa>
+    $<TARGET_OBJECTS:simrv-execution>
+    $<TARGET_OBJECTS:simrv-pipeline>
+    $<TARGET_OBJECTS:simrv-memory>
+    $<TARGET_OBJECTS:simrv-platform>
+    $<TARGET_OBJECTS:simrv-debug>
+    $<TARGET_OBJECTS:simrv-tui-framework>
+    $<TARGET_OBJECTS:simrv-tui>
+    $<TARGET_OBJECTS:simrv-core>
+  )
+  add_library(simrv::sdk ALIAS simrv-sdk)
+  add_library(SimRV::sdk ALIAS simrv-sdk)
+  target_include_directories(simrv-sdk PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+  )
+  set_target_properties(simrv-sdk PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    VERSION ${PROJECT_VERSION}
+    SOVERSION ${PROJECT_VERSION_MAJOR}
+    EXPORT_NAME sdk
+  )
+  simrv_apply_options(simrv-sdk)
+  # Project options contain compile/link flags only; the installed archive has no runtime
+  # dependency on that internal helper target.
+  set_property(TARGET simrv-sdk PROPERTY INTERFACE_LINK_LIBRARIES "")
 
-target_compile_features(SimRV PRIVATE cxx_std_23)
+  add_library(simrv-plugin-sdk INTERFACE)
+  add_library(simrv::plugin-sdk ALIAS simrv-plugin-sdk)
+  add_library(SimRV::plugin-sdk ALIAS simrv-plugin-sdk)
+  target_compile_features(simrv-plugin-sdk INTERFACE cxx_std_23)
+  target_include_directories(simrv-plugin-sdk INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+  )
+  set_target_properties(simrv-plugin-sdk PROPERTIES EXPORT_NAME plugin-sdk)
 
-target_compile_definitions(SimRV PRIVATE
-  SIMRV_XLEN=${SIMRV_XLEN}
-  SIMRV_DRAM_SIZE_MB=${SIMRV_DRAM_SIZE_MB}
-  SIMRV_DISK_SIZE_MB=${SIMRV_DISK_SIZE_MB}
-  SIMRV_CORE_COUNT=${SIMRV_CORE_COUNT}
-)
-
-target_include_directories(SimRV PRIVATE
-  include
-  ${CMAKE_CURRENT_BINARY_DIR}/generated
-)
-target_link_libraries(SimRV PRIVATE simrv-tui-framework)
-
-
-target_compile_options(SimRV PRIVATE
-  -Wall
-  -Wextra
-  -Wpedantic
-)
-
-if(SIMRV_WARNINGS_AS_ERRORS)
-  target_compile_options(SimRV PRIVATE -Werror)
-endif()
-
-if(SIMRV_ENABLE_ASAN)
-  target_compile_options(SimRV PRIVATE -fsanitize=address -fno-omit-frame-pointer)
-  target_link_options(SimRV PRIVATE -fsanitize=address)
-endif()
-if(SIMRV_ENABLE_UBSAN)
-  target_compile_options(SimRV PRIVATE -fsanitize=undefined -fno-omit-frame-pointer)
-  target_link_options(SimRV PRIVATE -fsanitize=undefined)
-endif()
-if(SIMRV_ENABLE_TSAN)
-  target_compile_options(SimRV PRIVATE -fsanitize=thread -fno-omit-frame-pointer)
-  target_link_options(SimRV PRIVATE -fsanitize=thread)
-endif()
+  add_executable(SimRV src/Main.cpp)
+  target_include_directories(SimRV PRIVATE
+    include
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
+  )
+  target_link_libraries(SimRV PRIVATE simrv-sdk)
+  simrv_apply_options(SimRV)
 
 include(CheckCXXCompilerFlag)
-option(SIMRV_NATIVE_HOST_OPTIMIZATIONS
-       "Tune a Release build for the host CPU; do not use for redistributable binaries" OFF)
 check_cxx_compiler_flag("-frounding-math" COMPILER_SUPPORTS_FROUNDING_MATH)
 if(COMPILER_SUPPORTS_FROUNDING_MATH)
   # Only the host-FP execution units alter the floating-point environment.  Applying strict
@@ -281,26 +186,11 @@ endif()
 
 # Release optimizations and Link-Time Optimization (LTO/IPO)
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-  target_compile_options(SimRV PRIVATE -O3)
-  
+
   if(SIMRV_NATIVE_HOST_OPTIMIZATIONS)
-    check_cxx_compiler_flag("-march=native" COMPILER_SUPPORTS_MARCH_NATIVE)
-    check_cxx_compiler_flag("-mtune=native" COMPILER_SUPPORTS_MTUNE_NATIVE)
-    if(COMPILER_SUPPORTS_MARCH_NATIVE)
-      target_compile_options(SimRV PRIVATE -march=native)
-    endif()
-    if(COMPILER_SUPPORTS_MTUNE_NATIVE)
-      target_compile_options(SimRV PRIVATE -mtune=native)
-    endif()
     message(STATUS "Native-host Release tuning enabled; binary is not portable.")
-  else()
-    check_cxx_compiler_flag("-march=x86-64-v3" COMPILER_SUPPORTS_MARCH_X86_64_V3)
-    if(COMPILER_SUPPORTS_MARCH_X86_64_V3)
-      target_compile_options(SimRV PRIVATE -march=x86-64-v3)
-      message(STATUS "x86-64-v3 instruction set architecture (AVX2/FMA/BMI) enabled.")
-    endif()
   endif()
-  
+
   include(CheckIPOSupported)
   check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
   if(ipo_supported)
@@ -315,6 +205,7 @@ endif()
 
 # Toolchain detection for testing. Host-specific defaults are intentionally
 # avoided: release dependencies must be supplied through cache variables or PATH.
+if(BUILD_TESTING)
 if(NOT DEFINED RISCV_PREFIX)
   if(DEFINED ENV{RISCV_PREFIX})
     set(RISCV_PREFIX "$ENV{RISCV_PREFIX}")
@@ -344,36 +235,9 @@ file(MAKE_DIRECTORY "${ISA_WORK_DIR}")
 # Fast, deterministic tests for the terminal parser, theme helpers, and key registry.
 add_executable(simrv-tui-tests
   tests/TuiFrameworkTests.cpp
-  src/tui/TuiGuidance.cpp
-  src/tui/TuiKeybindings.cpp
-  src/tui/modals/GlossaryModal.cpp
-  src/tui/modals/HelpModal.cpp
-  src/tui/modals/MisaModal.cpp
-  src/tui/modals/ModalComponents.cpp
-  src/tui/modals/SettingsModal.cpp
-  src/tui/modals/SystemConfigModal.cpp
-  src/pipeline/PipelineConfig.cpp
-  src/pipeline/BranchPredictor.cpp
 )
-target_link_libraries(simrv-tui-tests PRIVATE simrv-tui-framework)
-target_compile_features(simrv-tui-tests PRIVATE cxx_std_23)
-target_include_directories(simrv-tui-tests PRIVATE include ${CMAKE_CURRENT_BINARY_DIR}/generated)
-target_compile_options(simrv-tui-tests PRIVATE -Wall -Wextra -Wpedantic)
-if(SIMRV_WARNINGS_AS_ERRORS)
-  target_compile_options(simrv-tui-tests PRIVATE -Werror)
-endif()
-if(SIMRV_ENABLE_ASAN)
-  target_compile_options(simrv-tui-tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
-  target_link_options(simrv-tui-tests PRIVATE -fsanitize=address)
-endif()
-if(SIMRV_ENABLE_UBSAN)
-  target_compile_options(simrv-tui-tests PRIVATE -fsanitize=undefined -fno-omit-frame-pointer)
-  target_link_options(simrv-tui-tests PRIVATE -fsanitize=undefined)
-endif()
-if(SIMRV_ENABLE_TSAN)
-  target_compile_options(simrv-tui-tests PRIVATE -fsanitize=thread -fno-omit-frame-pointer)
-  target_link_options(simrv-tui-tests PRIVATE -fsanitize=thread)
-endif()
+target_link_libraries(simrv-tui-tests PRIVATE simrv-runtime)
+simrv_configure_native_test(simrv-tui-tests)
 
 add_test(NAME tui-framework COMMAND simrv-tui-tests)
 set_tests_properties(tui-framework PROPERTIES LABELS "gate;regress;tui")
@@ -384,39 +248,15 @@ endif()
 add_executable(simrv-tui-framework-tests tests/TuiFrameworkCoreTests.cpp)
 target_compile_features(simrv-tui-framework-tests PRIVATE cxx_std_23)
 target_link_libraries(simrv-tui-framework-tests PRIVATE simrv-tui-framework)
-target_compile_options(simrv-tui-framework-tests PRIVATE -Wall -Wextra -Wpedantic)
-if(SIMRV_WARNINGS_AS_ERRORS)
-  target_compile_options(simrv-tui-framework-tests PRIVATE -Werror)
-endif()
+simrv_configure_native_test(simrv-tui-framework-tests)
 add_test(NAME tui-framework-core COMMAND simrv-tui-framework-tests)
 set_tests_properties(tui-framework-core PROPERTIES LABELS "gate;regress;tui")
 
 add_executable(simrv-pipeline-model-tests
   tests/PipelineModelTests.cpp
-  src/core/Logger.cpp
-  src/pipeline/PipelineSim.cpp
-  src/pipeline/PipelineConfig.cpp
-  src/pipeline/BranchPredictor.cpp
 )
-target_compile_features(simrv-pipeline-model-tests PRIVATE cxx_std_23)
-target_compile_definitions(simrv-pipeline-model-tests PRIVATE SIMRV_XLEN=${SIMRV_XLEN})
-target_include_directories(simrv-pipeline-model-tests PRIVATE include)
-target_compile_options(simrv-pipeline-model-tests PRIVATE -Wall -Wextra -Wpedantic)
-if(SIMRV_WARNINGS_AS_ERRORS)
-  target_compile_options(simrv-pipeline-model-tests PRIVATE -Werror)
-endif()
-if(SIMRV_ENABLE_ASAN)
-  target_compile_options(simrv-pipeline-model-tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
-  target_link_options(simrv-pipeline-model-tests PRIVATE -fsanitize=address)
-endif()
-if(SIMRV_ENABLE_UBSAN)
-  target_compile_options(simrv-pipeline-model-tests PRIVATE -fsanitize=undefined -fno-omit-frame-pointer)
-  target_link_options(simrv-pipeline-model-tests PRIVATE -fsanitize=undefined)
-endif()
-if(SIMRV_ENABLE_TSAN)
-  target_compile_options(simrv-pipeline-model-tests PRIVATE -fsanitize=thread -fno-omit-frame-pointer)
-  target_link_options(simrv-pipeline-model-tests PRIVATE -fsanitize=thread)
-endif()
+target_link_libraries(simrv-pipeline-model-tests PRIVATE simrv-runtime)
+simrv_configure_native_test(simrv-pipeline-model-tests)
 
 add_test(NAME pipeline-models COMMAND simrv-pipeline-model-tests)
 set_tests_properties(pipeline-models PROPERTIES LABELS "gate;regress;pipeline")
@@ -426,28 +266,9 @@ endif()
 
 add_executable(simrv-branch-predictor-tests
   tests/BranchPredictorTests.cpp
-  src/core/Logger.cpp
-  src/pipeline/BranchPredictor.cpp
 )
-target_compile_features(simrv-branch-predictor-tests PRIVATE cxx_std_23)
-target_compile_definitions(simrv-branch-predictor-tests PRIVATE SIMRV_XLEN=${SIMRV_XLEN})
-target_include_directories(simrv-branch-predictor-tests PRIVATE include)
-target_compile_options(simrv-branch-predictor-tests PRIVATE -Wall -Wextra -Wpedantic)
-if(SIMRV_WARNINGS_AS_ERRORS)
-  target_compile_options(simrv-branch-predictor-tests PRIVATE -Werror)
-endif()
-if(SIMRV_ENABLE_ASAN)
-  target_compile_options(simrv-branch-predictor-tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
-  target_link_options(simrv-branch-predictor-tests PRIVATE -fsanitize=address)
-endif()
-if(SIMRV_ENABLE_UBSAN)
-  target_compile_options(simrv-branch-predictor-tests PRIVATE -fsanitize=undefined -fno-omit-frame-pointer)
-  target_link_options(simrv-branch-predictor-tests PRIVATE -fsanitize=undefined)
-endif()
-if(SIMRV_ENABLE_TSAN)
-  target_compile_options(simrv-branch-predictor-tests PRIVATE -fsanitize=thread -fno-omit-frame-pointer)
-  target_link_options(simrv-branch-predictor-tests PRIVATE -fsanitize=thread)
-endif()
+target_link_libraries(simrv-branch-predictor-tests PRIVATE simrv-runtime)
+simrv_configure_native_test(simrv-branch-predictor-tests)
 
 add_test(NAME branch-predictor COMMAND simrv-branch-predictor-tests)
 set_tests_properties(branch-predictor PROPERTIES LABELS "gate;regress;pipeline;bpred")
@@ -455,62 +276,41 @@ if(SIMRV_ENABLE_TSAN)
   set_property(TEST branch-predictor APPEND PROPERTY LABELS "thread")
 endif()
 
-add_executable(simrv-core-semantics-tests
-  tests/CoreSemanticsTests.cpp
-  src/core/Logger.cpp
-  src/cache/ICache.cpp
-  src/cache/DCache.cpp
-  src/memory/Mmu.cpp
-  src/memory/MmioRouter.cpp
-  src/pipeline/Decoder.cpp
-  src/util/FdtGenerator.cpp
-)
-target_compile_features(simrv-core-semantics-tests PRIVATE cxx_std_23)
-target_compile_definitions(simrv-core-semantics-tests PRIVATE SIMRV_XLEN=${SIMRV_XLEN})
-target_include_directories(simrv-core-semantics-tests PRIVATE include)
-target_compile_options(simrv-core-semantics-tests PRIVATE -Wall -Wextra -Wpedantic)
-if(SIMRV_WARNINGS_AS_ERRORS)
-  target_compile_options(simrv-core-semantics-tests PRIVATE -Werror)
-endif()
-if(SIMRV_ENABLE_ASAN)
-  target_compile_options(simrv-core-semantics-tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
-  target_link_options(simrv-core-semantics-tests PRIVATE -fsanitize=address)
-endif()
-if(SIMRV_ENABLE_UBSAN)
-  target_compile_options(simrv-core-semantics-tests PRIVATE -fsanitize=undefined -fno-omit-frame-pointer)
-  target_link_options(simrv-core-semantics-tests PRIVATE -fsanitize=undefined)
-endif()
+add_executable(simrv-core-semantics-tests tests/CoreSemanticsTests.cpp)
+target_link_libraries(simrv-core-semantics-tests PRIVATE simrv-runtime)
+simrv_configure_native_test(simrv-core-semantics-tests)
 
 add_test(NAME core-semantics COMMAND simrv-core-semantics-tests)
 set_tests_properties(core-semantics PROPERTIES LABELS "gate;regress;memory;mmio")
 
+add_executable(simrv-pmp-tests tests/PmpTests.cpp)
+target_link_libraries(simrv-pmp-tests PRIVATE simrv-runtime)
+simrv_configure_native_test(simrv-pmp-tests)
+add_test(NAME pmp COMMAND simrv-pmp-tests)
+set_tests_properties(pmp PROPERTIES LABELS "gate;regress;core;memory;pmp")
+
+add_executable(simrv-machine-config-tests tests/MachineConfigTests.cpp)
+simrv_configure_native_test(simrv-machine-config-tests)
+add_test(NAME machine-config COMMAND simrv-machine-config-tests)
+set_tests_properties(machine-config PROPERTIES LABELS "gate;regress;core;config")
+
+add_executable(simrv-machine-ownership-tests tests/MachineOwnershipTests.cpp)
+target_link_libraries(simrv-machine-ownership-tests PRIVATE simrv-runtime)
+simrv_configure_native_test(simrv-machine-ownership-tests)
+add_test(NAME machine-ownership COMMAND simrv-machine-ownership-tests)
+set_tests_properties(machine-ownership PROPERTIES LABELS "gate;regress;core;ownership")
+
+add_executable(simrv-v3-sdk-tests tests/V3SdkTests.cpp)
+target_link_libraries(simrv-v3-sdk-tests PRIVATE simrv-sdk)
+simrv_configure_native_test(simrv-v3-sdk-tests)
+add_test(NAME v3-sdk COMMAND simrv-v3-sdk-tests)
+set_tests_properties(v3-sdk PROPERTIES LABELS "gate;regress;sdk;config")
+
 add_executable(simrv-modern-platform-tests
   tests/ModernPlatformTests.cpp
-  ${SIMRV_SOURCES}
 )
-target_compile_definitions(simrv-modern-platform-tests PRIVATE
-  SIMRV_XLEN=${SIMRV_XLEN}
-  SIMRV_DRAM_SIZE_MB=${SIMRV_DRAM_SIZE_MB}
-  SIMRV_DISK_SIZE_MB=${SIMRV_DISK_SIZE_MB}
-  SIMRV_CORE_COUNT=${SIMRV_CORE_COUNT}
-)
-target_include_directories(simrv-modern-platform-tests PRIVATE
-  include
-  ${CMAKE_CURRENT_BINARY_DIR}/generated
-)
-target_link_libraries(simrv-modern-platform-tests PRIVATE simrv-tui-framework)
-target_compile_options(simrv-modern-platform-tests PRIVATE -Wall -Wextra -Wpedantic)
-if(SIMRV_WARNINGS_AS_ERRORS)
-  target_compile_options(simrv-modern-platform-tests PRIVATE -Werror)
-endif()
-if(SIMRV_ENABLE_ASAN)
-  target_compile_options(simrv-modern-platform-tests PRIVATE -fsanitize=address -fno-omit-frame-pointer)
-  target_link_options(simrv-modern-platform-tests PRIVATE -fsanitize=address)
-endif()
-if(SIMRV_ENABLE_UBSAN)
-  target_compile_options(simrv-modern-platform-tests PRIVATE -fsanitize=undefined -fno-omit-frame-pointer)
-  target_link_options(simrv-modern-platform-tests PRIVATE -fsanitize=undefined)
-endif()
+target_link_libraries(simrv-modern-platform-tests PRIVATE simrv-runtime)
+simrv_configure_native_test(simrv-modern-platform-tests)
 
 add_test(NAME modern-platform COMMAND simrv-modern-platform-tests)
 set_tests_properties(modern-platform PROPERTIES LABELS "gate;regress;device;mmio;pcie;aia")
@@ -569,7 +369,7 @@ if(DEFINED ENV{SIMRV_APP_IMG})
   add_test(NAME app-smoke COMMAND $<TARGET_FILE:SimRV> -m $ENV{SIMRV_APP_IMG} -b -e 200000)
   set_tests_properties(app-smoke PROPERTIES
     TIMEOUT 20
-    LABELS "gate;regress;app"
+    LABELS "external;app"
   )
 endif()
 
@@ -581,7 +381,7 @@ if(DEFINED ENV{SIMRV_LINUX_MEM_IMG} AND DEFINED ENV{SIMRV_LINUX_DISK_IMG})
   add_test(NAME linux-boot COMMAND ${LINUX_BOOT_CMD})
   set_tests_properties(linux-boot PROPERTIES
     TIMEOUT 60
-    LABELS "gate;regress;linux"
+    LABELS "external;linux"
   )
 endif()
 
@@ -597,7 +397,7 @@ if(EXISTS "${TEST_IMAGES_DIR}/fw_payload.bin")
   set_tests_properties(linux-boot-pty PROPERTIES
     ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR}"
     TIMEOUT 110
-    LABELS "gate;regress;linux;pty;required"
+    LABELS "external;linux;pty;required"
   )
   add_test(NAME linux-poweroff-quit-pty
     COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py
@@ -605,7 +405,7 @@ if(EXISTS "${TEST_IMAGES_DIR}/fw_payload.bin")
   set_tests_properties(linux-poweroff-quit-pty PROPERTIES
     ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_TEST_LIFECYCLE=poweroff"
     TIMEOUT 110
-    LABELS "gate;regress;linux;pty;lifecycle;required"
+    LABELS "external;linux;pty;lifecycle;required"
   )
   add_test(NAME linux-poweroff-reboot-pty
     COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py
@@ -613,7 +413,7 @@ if(EXISTS "${TEST_IMAGES_DIR}/fw_payload.bin")
   set_tests_properties(linux-poweroff-reboot-pty PROPERTIES
     ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_TEST_LIFECYCLE=poweroff-reboot"
     TIMEOUT 110
-    LABELS "gate;regress;linux;pty;lifecycle;required"
+    LABELS "external;linux;pty;lifecycle;required"
   )
 endif()
 
@@ -671,7 +471,7 @@ if(EXISTS "${ISA_DIR}" AND IS_DIRECTORY "${ISA_DIR}")
 endif()
 
 function(register_isa_test test_name is_smoke)
-  set(labels "gate;isa")
+  set(labels "external;isa")
   if(is_smoke)
     list(APPEND labels "smoke")
   endif()
@@ -713,7 +513,7 @@ function(register_lockstep_isa_test test_name)
   )
   set_tests_properties("isa-lockstep-${test_name}" PROPERTIES
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    LABELS "gate;isa;lockstep;rv${SIMRV_XLEN}gc"
+    LABELS "external;isa;lockstep;rv${SIMRV_XLEN}gc"
     SKIP_RETURN_CODE 2
   )
 endfunction()
@@ -748,7 +548,7 @@ function(register_ca_isa_test test_name pipeline_type)
   )
   set_tests_properties("ca-${pipeline_type}-${test_name}" PROPERTIES
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    LABELS "gate;isa;ca;smoke;pipeline;rv${SIMRV_XLEN}gc"
+    LABELS "external;isa;ca;smoke;pipeline;rv${SIMRV_XLEN}gc"
     SKIP_RETURN_CODE 2
   )
 endfunction()
@@ -811,7 +611,7 @@ if(SIMRV_VECTOR_TESTS_DIR AND EXISTS "${SIMRV_VECTOR_TESTS_DIR}")
     )
     set_tests_properties(vector-suite PROPERTIES
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-      LABELS "gate;vector;required"
+      LABELS "external;vector;required"
       TIMEOUT 600
     )
   endif()
@@ -826,8 +626,10 @@ set_tests_properties(benchmark PROPERTIES
   LABELS "benchmark;perf"
   SKIP_RETURN_CODE 2
 )
+endif()
 
 # Utility Targets
+if(SIMRV_ENABLE_TOOLING)
 find_package(Doxygen QUIET)
 if(DOXYGEN_FOUND)
   add_custom_target(docs
@@ -839,6 +641,9 @@ if(DOXYGEN_FOUND)
   )
 endif()
 
+endif()
+
+if(SIMRV_ENABLE_LINUX_TOOLS)
 add_custom_target(linux-images
   COMMAND ${CMAKE_COMMAND} -E env SIMRV_USE_LOCAL_SCRATCH=1 bash ${CMAKE_SOURCE_DIR}/scripts/build-linux-image.sh --arch rv${SIMRV_XLEN}
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -846,6 +651,7 @@ add_custom_target(linux-images
   VERBATIM
   USES_TERMINAL
 )
+endif()
 
 add_custom_target(isa-gate
   COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR} --output-on-failure -L "gate"
@@ -856,6 +662,16 @@ add_custom_target(isa-gate
   USES_TERMINAL
 )
 
+add_custom_target(integration-gate
+  COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR} --output-on-failure -L "gate"
+  DEPENDS SimRV
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  COMMENT "Running the complete SimRV integration gate"
+  VERBATIM
+  USES_TERMINAL
+)
+
+if(SIMRV_ENABLE_TOOLING)
 add_custom_target(release-check
   COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/release_check.py
     --binary $<TARGET_FILE:SimRV>
@@ -864,6 +680,7 @@ add_custom_target(release-check
   COMMENT "Validating SimRV release metadata and binary"
   VERBATIM
 )
+endif()
 
 if(SIMRV_VECTOR_TESTS_DIR AND EXISTS "${SIMRV_VECTOR_TESTS_DIR}" AND RISCV_GCC)
   add_custom_target(vector-gate
@@ -882,23 +699,82 @@ if(SIMRV_VECTOR_TESTS_DIR AND EXISTS "${SIMRV_VECTOR_TESTS_DIR}" AND RISCV_GCC)
 endif()
 
 include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
-install(TARGETS SimRV
+set_target_properties(SimRV PROPERTIES EXPORT_NAME cli)
+
+install(TARGETS SimRV simrv-sdk simrv-plugin-sdk
+  EXPORT SimRVTargets
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
-install(DIRECTORY include/simrv
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+install(DIRECTORY include/simrv/v3
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/simrv
   FILES_MATCHING PATTERN "*.hpp"
 )
+install(DIRECTORY schemas/
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/schemas
+  FILES_MATCHING PATTERN "*.json"
+)
 
+configure_package_config_file(
+  cmake/SimRVConfig.cmake.in
+  "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfig.cmake"
+  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SimRV"
+)
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfigVersion.cmake"
+  VERSION "${PROJECT_VERSION}"
+  COMPATIBILITY SameMajorVersion
+)
+install(EXPORT SimRVTargets
+  FILE SimRVTargets.cmake
+  NAMESPACE SimRV::
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SimRV"
+)
+export(EXPORT SimRVTargets
+  FILE "${CMAKE_CURRENT_BINARY_DIR}/SimRVTargets.cmake"
+  NAMESPACE SimRV::
+)
+install(FILES
+  "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfig.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfigVersion.cmake"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SimRV"
+)
+install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/SimRV)
+
+if(BUILD_TESTING)
+  add_test(NAME architecture-boundaries
+    COMMAND ${CMAKE_COMMAND}
+      -D SIMRV_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+      -P ${CMAKE_SOURCE_DIR}/cmake/CheckArchitecture.cmake
+  )
+  set_tests_properties(architecture-boundaries PROPERTIES
+    LABELS "gate;regress;architecture"
+  )
+  add_test(NAME package-install-consumer
+    COMMAND ${CMAKE_COMMAND}
+      -D SIMRV_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+      -D SIMRV_BINARY_DIR=${CMAKE_BINARY_DIR}
+      -P ${CMAKE_SOURCE_DIR}/cmake/TestPackageConsumer.cmake
+  )
+  set_tests_properties(package-install-consumer PROPERTIES
+    LABELS "gate;regress;package;sdk"
+  )
+endif()
+
+if(SIMRV_ENABLE_LINUX_TOOLS)
 add_custom_target(run-tui
-  COMMAND $<TARGET_FILE:SimRV> -m ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/fw_payload.bin
-                               -D ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/root.bin
-                               -f ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/devicetree.dtb
-                               -u
+  COMMAND ${CMAKE_COMMAND}
+    -D SIMRV_BIN=$<TARGET_FILE:SimRV>
+    -D SIMRV_FW_PAYLOAD=${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/fw_payload.bin
+    -D SIMRV_DISK_IMAGE=${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/root.img
+    -D SIMRV_DTB=${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/devicetree.dtb
+    -D SIMRV_TUI=ON
+    -P ${CMAKE_SOURCE_DIR}/cmake/SimRVRunLinux.cmake
   DEPENDS SimRV
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
   COMMENT "Booting RV${SIMRV_XLEN} Linux in TUI mode..."
@@ -907,9 +783,12 @@ add_custom_target(run-tui
 )
 
 add_custom_target(run-linux
-  COMMAND $<TARGET_FILE:SimRV> -m ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/fw_payload.bin
-                               -D ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/root.bin
-                               -f ${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/devicetree.dtb
+  COMMAND ${CMAKE_COMMAND}
+    -D SIMRV_BIN=$<TARGET_FILE:SimRV>
+    -D SIMRV_FW_PAYLOAD=${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/fw_payload.bin
+    -D SIMRV_DISK_IMAGE=${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/root.img
+    -D SIMRV_DTB=${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/devicetree.dtb
+    -P ${CMAKE_SOURCE_DIR}/cmake/SimRVRunLinux.cmake
   DEPENDS SimRV
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
   COMMENT "Booting RV${SIMRV_XLEN} Linux in standard console mode..."
@@ -917,6 +796,9 @@ add_custom_target(run-linux
   USES_TERMINAL
 )
 
+endif()
+
+if(SIMRV_ENABLE_TOOLING)
 find_program(CLANG_FORMAT_BIN NAMES clang-format DOC "Path to clang-format tool")
 if(CLANG_FORMAT_BIN)
   file(GLOB_RECURSE ALL_SOURCE_FILES
@@ -941,3 +823,9 @@ if(CLANG_FORMAT_BIN)
     USES_TERMINAL
   )
 endif()
+endif()
+
+set(CPACK_PACKAGE_NAME "SimRV")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_FILE_NAME "SimRV-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+include(CPack)

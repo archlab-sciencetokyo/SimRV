@@ -336,12 +336,12 @@ auto Sbi::handle_dbcn(Word func_id) -> bool {
             size_t written = 0;
             for (size_t i = 0; i < num_bytes; ++i) {
                 const Address byte_addr = paddr + i;
-                if (cpu_.machine_ != nullptr && byte_addr >= simrv::memory::g_dram_base &&
-                    (byte_addr - simrv::memory::g_dram_base) < simrv::memory::g_dram_size) {
+                if (cpu_.machine_ != nullptr && cpu_.machine_->memory_geometry().contains(byte_addr)) {
+                    const auto geometry = cpu_.machine_->memory_geometry();
                     const auto ch = static_cast<char>(
-                        cpu_.machine_->mmem[byte_addr - simrv::memory::g_dram_base]);
-                    if (cpu_.machine_->s_tuimode && cpu_.machine_->tui) {
-                        cpu_.machine_->tui->handle_char_write(ch);
+                        cpu_.machine_->ram_data()[byte_addr - geometry.dram_base]);
+                    if (cpu_.machine_->s_tuimode && cpu_.machine_->tui_controller()) {
+                        cpu_.machine_->tui_controller()->handle_char_write(ch);
                     } else {
                         (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
                     }
@@ -357,8 +357,8 @@ auto Sbi::handle_dbcn(Word func_id) -> bool {
         }
         case 2: {  // sbi_debug_console_write_byte
             const auto ch = static_cast<char>(cpu_.state().regs.read(RegId::A0));
-            if (cpu_.machine_ && cpu_.machine_->s_tuimode && cpu_.machine_->tui) {
-                cpu_.machine_->tui->handle_char_write(ch);
+            if (cpu_.machine_ && cpu_.machine_->s_tuimode && cpu_.machine_->tui_controller()) {
+                cpu_.machine_->tui_controller()->handle_char_write(ch);
             } else {
                 (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
             }
@@ -529,8 +529,8 @@ auto Sbi::handle_ecall(TrapCause cause) -> bool {
             return handle_time(0);
         case ExtId::LegacyConsolePutchar: {
             const auto ch = static_cast<char>(cpu_.state().regs.read(RegId::A0));
-            if (cpu_.machine_ && cpu_.machine_->s_tuimode && cpu_.machine_->tui) {
-                cpu_.machine_->tui->handle_char_write(ch);
+            if (cpu_.machine_ && cpu_.machine_->s_tuimode && cpu_.machine_->tui_controller()) {
+                cpu_.machine_->tui_controller()->handle_char_write(ch);
             } else {
                 (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
             }

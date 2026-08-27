@@ -230,8 +230,8 @@ void PlicMmio::mmio_write(Address offset, Word wdata) {
                 // Complete: indicates the handler has finished with the IRQ
                 if (plic_claim.at(ctx_idx) == wdata && wdata != 0) {
                     plic_claim.at(ctx_idx) = 0;
-                    if (cpu_.machine_ && wdata == 3 && cpu_.machine_->uart &&
-                        cpu_.machine_->uart->is_interrupt_pending()) {
+                    if (cpu_.machine_ && wdata == 3 && cpu_.machine_->uart_device() &&
+                        cpu_.machine_->uart_device()->is_interrupt_pending()) {
                         InterruptController::setIrq(*this, static_cast<int>(wdata), 1);
                     }
                 }
@@ -275,8 +275,8 @@ auto ClintMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
                 mtime.store(static_cast<Counter>(req.data), std::memory_order_release);
                 cpu_.evaluate_timer_interrupt();
                 if (cpu_.machine_) {
-                    for (auto& sec : cpu_.machine_->secondary_harts_) {
-                        sec->evaluate_timer_interrupt();
+                    for (size_t hart = 1; hart < cpu_.machine_->num_harts(); ++hart) {
+                        cpu_.machine_->hart(hart).evaluate_timer_interrupt();
                     }
                 }
             } else if (off >= kClintMtimecmpOffset &&
@@ -622,10 +622,10 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
             "Halting simulator.",
             trap_cause_name(cause), static_cast<uint64_t>(cause), static_cast<uint64_t>(trap_pc));
         if (cpu.machine_) {
-            if (cpu.machine_->s_tuimode && cpu.machine_->tui) {
-                cpu.machine_->tui->set_persistent_status_override(
+            if (cpu.machine_->s_tuimode && cpu.machine_->tui_controller()) {
+                cpu.machine_->tui_controller()->set_persistent_status_override(
                     "\033[1;31m UNHANDLED TRAP \033[0m");
-                cpu.machine_->tui->pause_loop();
+                cpu.machine_->tui_controller()->pause_loop();
             }
             cpu.machine_->stop(Machine::StopReason::UnhandledTrap);
         }
@@ -633,7 +633,6 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
     state.reserved = 0;
     cpu.pipeline_context.pending_exception = std::nullopt;
     cpu.pipeline_context.pending_tval = 0;
-
 }
 
 auto TrapController::canExecutePrivilegedInstruction(PrivilegeLevel current_priv, CSRValue misa,

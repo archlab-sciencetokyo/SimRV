@@ -32,8 +32,8 @@ inline constexpr int kFrameChromeRows = framework::kFrameChromeRows;
 [[nodiscard]] constexpr auto calculate_overlay_geometry(int terminal_width, int terminal_height,
                                                         int maximum_width, int content_rows,
                                                         int minimum_width = 35) -> OverlayGeometry {
-    return framework::overlay_geometry(terminal_width, terminal_height, maximum_width,
-                                       content_rows, minimum_width);
+    return framework::overlay_geometry(terminal_width, terminal_height, maximum_width, content_rows,
+                                       minimum_width);
 }
 
 }  // namespace simrv::tui

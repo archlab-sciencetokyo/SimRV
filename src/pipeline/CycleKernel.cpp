@@ -70,7 +70,8 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     // complete PipelineContext on every retirement when neither consumer is active.
     const bool retain_retired_slot =
         pipeline_sim.config.record_snapshots &&
-        (!machine.s_tuimode || (machine.tui && machine.tui->captures_execution_detail()));
+        (!machine.s_tuimode ||
+         (machine.tui_controller() && machine.tui_controller()->captures_execution_detail()));
     pipe.retired_this_cycle = false;
     if (retain_retired_slot) pipe.retired.clear();
     pipe.data_hazard_stall = false;

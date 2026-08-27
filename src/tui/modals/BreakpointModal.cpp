@@ -19,7 +19,7 @@ void BreakpointModal::open(ModalType type, std::string& input, simrv::core::Mach
                            LeftPane* left_pane) {
     input.clear();
     if (type == ModalType::SetBreakpoint) {
-        input = std::format("0x{:08x}", machine.cpu.state().pc);
+        input = std::format("0x{:08x}", machine.primary_hart().state().pc);
     } else if (type == ModalType::SetWatchpoint) {
         input = std::format("0x{:08x}", left_pane ? left_pane->get_inspect_addr() : 0);
     }
@@ -41,7 +41,7 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
             auto result = std::from_chars(input.data(), input.data() + input.size(), addr, 16);
             ok = (result.ec == std::errc{});
         } else {
-            auto sym_opt = machine.symbols.lookup_name(input);
+            auto sym_opt = machine.symbol_table().lookup_name(input);
             if (sym_opt.has_value()) {
                 addr = *sym_opt;
                 ok = true;
@@ -53,14 +53,14 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
             return false;
         }
 
-        machine.breakpoints.add_pc_breakpoint(addr);
+        machine.breakpoint_manager().add_pc_breakpoint(addr);
         set_status_override_cb(std::format("Breakpoint set at 0x{:08x}", addr));
         return true;
 
     } else if (type == ModalType::SetWatchpoint) {
         auto parsed_reg = simrv::debug::parse_register_name(input);
         if (parsed_reg.has_value()) {
-            machine.breakpoints.add_reg_watchpoint(parsed_reg->type, parsed_reg->index,
+            machine.breakpoint_manager().add_reg_watchpoint(parsed_reg->type, parsed_reg->index,
                                                    parsed_reg->canonical_name);
             set_status_override_cb(
                 std::format("Register Watchpoint set on {}", parsed_reg->canonical_name));
@@ -76,7 +76,7 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
             auto result = std::from_chars(input.data(), input.data() + input.size(), addr, 16);
             ok = (result.ec == std::errc{});
         } else {
-            auto sym_opt = machine.symbols.lookup_name(input);
+            auto sym_opt = machine.symbol_table().lookup_name(input);
             if (sym_opt.has_value()) {
                 addr = *sym_opt;
                 ok = true;
@@ -88,7 +88,7 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
             return false;
         }
 
-        machine.breakpoints.add_watchpoint(addr, 4, simrv::debug::WatchType::Write, "");
+        machine.breakpoint_manager().add_watchpoint(addr, 4, simrv::debug::WatchType::Write, "");
         set_status_override_cb(std::format("Memory Write Watchpoint set at 0x{:08x}", addr));
         return true;
     }
@@ -96,8 +96,8 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
 }
 
 void BreakpointModal::move_cursor(int& cursor, int delta, const simrv::core::Machine& machine) {
-    const auto& pc_bps = machine.breakpoints.get_pc_breakpoints();
-    const auto& wps = machine.breakpoints.get_watchpoints();
+    const auto& pc_bps = machine.breakpoint_manager().get_pc_breakpoints();
+    const auto& wps = machine.breakpoint_manager().get_watchpoints();
     int count = static_cast<int>(pc_bps.size() + wps.size());
     if (count == 0) {
         cursor = 0;
@@ -109,15 +109,15 @@ void BreakpointModal::move_cursor(int& cursor, int delta, const simrv::core::Mac
 auto BreakpointModal::remove_at_cursor(
     int& cursor, simrv::core::Machine& machine,
     const std::function<void(const std::string&)>& set_status_override_cb) -> bool {
-    const auto& pc_bps = machine.breakpoints.get_pc_breakpoints();
-    const auto& wps = machine.breakpoints.get_watchpoints();
+    const auto& pc_bps = machine.breakpoint_manager().get_pc_breakpoints();
+    const auto& wps = machine.breakpoint_manager().get_watchpoints();
     int total = static_cast<int>(pc_bps.size() + wps.size());
     if (total == 0 || cursor < 0 || cursor >= total) return false;
 
     if (cursor < static_cast<int>(pc_bps.size())) {
         auto it = std::next(pc_bps.begin(), cursor);
         Address pc = *it;
-        machine.breakpoints.remove_pc_breakpoint(pc);
+        machine.breakpoint_manager().remove_pc_breakpoint(pc);
         if (set_status_override_cb) {
             set_status_override_cb(std::format("Removed breakpoint at 0x{:08x}", pc));
         }
@@ -127,13 +127,13 @@ auto BreakpointModal::remove_at_cursor(
         std::string name = (wp.target == simrv::debug::WatchTarget::Memory)
                                ? std::format("0x{:08x}", wp.addr)
                                : wp.reg_name;
-        machine.breakpoints.remove_watchpoint(wp_idx);
+        machine.breakpoint_manager().remove_watchpoint(wp_idx);
         if (set_status_override_cb) {
             set_status_override_cb(std::format("Removed watchpoint on {}", name));
         }
     }
-    const auto& new_pc_bps = machine.breakpoints.get_pc_breakpoints();
-    const auto& new_wps = machine.breakpoints.get_watchpoints();
+    const auto& new_pc_bps = machine.breakpoint_manager().get_pc_breakpoints();
+    const auto& new_wps = machine.breakpoint_manager().get_watchpoints();
     int new_total = static_cast<int>(new_pc_bps.size() + new_wps.size());
     if (new_total == 0) {
         cursor = 0;
@@ -163,8 +163,8 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
         content_rows.push_back("");
 
         if (!machine) return;
-        const auto& pc_bps = machine->breakpoints.get_pc_breakpoints();
-        const auto& wps = machine->breakpoints.get_watchpoints();
+        const auto& pc_bps = machine->breakpoint_manager().get_pc_breakpoints();
+        const auto& wps = machine->breakpoint_manager().get_watchpoints();
 
         int item_idx = 0;
         if (pc_bps.empty() && wps.empty()) {
@@ -174,7 +174,7 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
             for (auto pc : pc_bps) {
                 bool is_sel = (item_idx == bp_cursor);
                 std::string prefix = is_sel ? std::format("{}>\033[0m ", kThemeMint) : "  ";
-                std::string sym = machine->symbols.lookup(pc);
+                std::string sym = machine->symbol_table().lookup(pc);
                 std::string sym_str = sym.empty() ? "" : std::format(" ({})", sym);
                 content_rows.push_back(std::format("{}PC Breakpoint at \033[1;33m0x{:08x}\033[0m{}",
                                                    prefix, pc, sym_str));

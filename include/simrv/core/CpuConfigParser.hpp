@@ -7,8 +7,8 @@
 #include <string>
 
 #include "simrv/core/Logger.hpp"
-#include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
+#include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 
 namespace simrv::core {

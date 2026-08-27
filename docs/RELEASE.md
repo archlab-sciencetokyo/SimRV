@@ -1,7 +1,7 @@
-# SimRV 2.0 Release Guide
+# SimRV 2.1 Release Guide
 
 The authoritative release contract is [`release/release-manifest.json`](../release/release-manifest.json).
-SimRV 2.0 officially supports Linux x86-64 hosts using GCC 15+ or Clang 20+, with separate
+SimRV 2.1 officially supports Linux x86-64 hosts using GCC 15+ or Clang 20+, with separate
 RV32GCBV and RV64GCBV binaries. Spike lockstep and the GDB server are optional features.
 
 ## Support and qualification boundary
@@ -16,11 +16,17 @@ has a documented qualification gap. These labels are not RISC-V certification cl
 | F/D | Partial | RMM arithmetic remains unqualified |
 | RVV 1.0 | Partial | Advertised instruction subset at VLEN 256; no complete-V claim |
 | Privilege, traps, CSRs; Sv32/Sv39/Sv48 | Supported | Semantic tests and Linux boot |
-| Direct SBI; UART, timers, interrupts, VirtIO | Supported | Platform and Linux integration tests |
-| TUI | Supported | Native UI tests and Linux PTY interaction |
+| Direct SBI & Multi-Hart OpenSBI | Supported | Platform, SMP HSM/IPI, and Linux integration tests |
+| UART, timers, ACLINT, PLIC, AIA | Supported | Platform devices and interrupt delivery tests |
+| PCIe Root Complex & VirtIO (MMIO/PCI) | Supported | Device framework, block/net/console/gpu/input/sound tests |
+| TileLink-C Directory Coherence (MESI) | Supported | Multi-hart cache coherence regression tests |
+| TUI Framework & Modals | Supported | Native UI framework tests and Linux PTY interaction |
 | GDB RSP | Optional | Debug integration; not a complete protocol promise |
 | Spike lockstep | Optional dependency | Reference evidence when Spike is provisioned |
 | Linux x86-64 host | Supported | GCC 15+ and Clang 20+ release matrix |
+
+> [!NOTE]
+> Rollback snapshots and reverse stepping were permanently removed in SimRV 2.1.0 to eliminate state copy overhead and streamline pipeline kernels.
 
 The detailed architectural boundary and known deviations are in
 [RISC-V compliance scope](RISCV_COMPLIANCE.md). The release manifest controls when prose and

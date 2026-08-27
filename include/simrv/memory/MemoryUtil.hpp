@@ -63,23 +63,17 @@ concept WordLike = std::integral<T> && requires(T w) {
 template <typename T>
 concept StoreFunct3Like = std::unsigned_integral<T>;
 
-extern bool g_appmode;
-extern Address g_dram_base;
-extern Address g_dram_size;
-
 /// Overflow-safe containment test for a physical memory region.
 [[nodiscard]] constexpr auto address_range_contains(Address base, Address extent, Address address,
                                                     size_t size) -> bool {
     return size != 0 && size <= extent && address >= base && address - base <= extent - size;
 }
 
-/// Check whether the complete physical byte range is backed by DRAM.
-inline auto is_dram_access(Address p_addr, size_t size) -> bool {
-    return address_range_contains(g_dram_base, g_dram_size, p_addr, size);
+/// Check a physical range against explicitly supplied DRAM geometry.
+[[nodiscard]] constexpr auto is_dram_access(Address base, Address extent, Address p_addr,
+                                            size_t size) -> bool {
+    return address_range_contains(base, extent, p_addr, size);
 }
-
-/// Check if one physical byte is within the implemented DRAM range.
-inline auto is_dram_addr(Address p_addr) -> bool { return is_dram_access(p_addr, 1); }
 
 /// Check if a physical address is in a legacy reserved region (MMIO)
 inline auto is_legacy_reserved_region(Address p_addr) -> bool {

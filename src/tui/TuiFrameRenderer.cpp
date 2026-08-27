@@ -76,30 +76,29 @@ auto compose_frame_lines(const FrameGeometry& frame, int terminal_width, TuiLayo
 
     for (int row = 0; row < frame.content_rows; ++row) {
         if (layout == TuiLayout::Split) {
-            const std::string left = fit_pane_row(render_left(row, frame.panes.left),
-                                                  frame.panes.left);
+            const std::string left =
+                fit_pane_row(render_left(row, frame.panes.left), frame.panes.left);
             const bool left_rule = is_horizontal_rule(left, is_ansi ? "-" : "─");
             const char* left_border = left_rule ? (is_ansi ? "+" : "╟") : border_v;
             const char* center_border = left_rule ? (is_ansi ? "+" : "┤") : div_v;
-            lines.push_back(std::format(
-                "{}{}\033[0m{}{}{}\033[0m{}{}{}\033[0m", kThemeBorder, left_border,
-                left, kThemeBorder, center_border,
-                fit_pane_row(render_right(row, frame.panes.right), frame.panes.right),
-                kThemeBorder, border_v));
+            lines.push_back(
+                std::format("{}{}\033[0m{}{}{}\033[0m{}{}{}\033[0m", kThemeBorder, left_border,
+                            left, kThemeBorder, center_border,
+                            fit_pane_row(render_right(row, frame.panes.right), frame.panes.right),
+                            kThemeBorder, border_v));
         } else if (layout == TuiLayout::FullRight) {
             lines.push_back(
                 std::format("{}{}\033[0m{}{}{}\033[0m", kThemeBorder, border_v,
                             fit_pane_row(render_right(row, frame.panes.right), frame.panes.right),
                             kThemeBorder, border_v));
         } else {
-            const std::string left = fit_pane_row(render_left(row, frame.panes.left),
-                                                  frame.panes.left);
+            const std::string left =
+                fit_pane_row(render_left(row, frame.panes.left), frame.panes.left);
             const bool left_rule = is_horizontal_rule(left, is_ansi ? "-" : "─");
             const char* left_border = left_rule ? (is_ansi ? "+" : "╟") : border_v;
             const char* right_border = left_rule ? (is_ansi ? "+" : "╢") : border_v;
-            lines.push_back(
-                std::format("{}{}\033[0m{}{}{}\033[0m", kThemeBorder, left_border, left,
-                            kThemeBorder, right_border));
+            lines.push_back(std::format("{}{}\033[0m{}{}{}\033[0m", kThemeBorder, left_border, left,
+                                        kThemeBorder, right_border));
         }
     }
 

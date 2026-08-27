@@ -84,7 +84,8 @@ source ./linux-images/rv32/setup.sh
 ./build/rv32-release/SimRV \
     -m $SIMRV_LINUX_MEM_IMG \
     -D $SIMRV_LINUX_DISK_IMG \
-    -f $SIMRV_LINUX_DTB
+    --fdt $SIMRV_LINUX_DTB \
+    --cli
 ```
 
 **TUI mode:**
@@ -372,6 +373,6 @@ in `integration-gate`.
 After images are ready:
 
 1. ✅ Export environment: `source linux-images/rv32/setup.sh`
-2. ✅ Manual boot test: `./build/rv32-release/SimRV -m $SIMRV_LINUX_MEM_IMG -D $SIMRV_LINUX_DISK_IMG -f $SIMRV_LINUX_DTB`
+2. ✅ Manual boot test: `./build/rv32-release/SimRV -m $SIMRV_LINUX_MEM_IMG -D $SIMRV_LINUX_DISK_IMG --fdt $SIMRV_LINUX_DTB --cli`
 3. ✅ TUI boot: `cmake --build --preset rv32-release --target run-tui`
 4. ✅ Full validation: `cmake --build --preset rv32-release --target integration-gate`

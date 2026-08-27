@@ -42,22 +42,25 @@ struct CpuModelConfig {
     bool enable_idle_spans = true;
 
     [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
-        const auto valid_cache = [](const L1CacheConfig& cache, std::string_view name)
-            -> std::optional<std::string> {
+        const auto valid_cache = [](const L1CacheConfig& cache,
+                                    std::string_view name) -> std::optional<std::string> {
             const auto power_of_two = [](uint32_t value) {
                 return value != 0 && std::has_single_bit(value);
             };
             if (!power_of_two(cache.capacity_bytes) || !power_of_two(cache.associativity) ||
                 !power_of_two(cache.line_bytes)) {
-                return std::format("{} cache capacity, associativity, and line size must be powers of two", name);
+                return std::format(
+                    "{} cache capacity, associativity, and line size must be powers of two", name);
             }
             // The current coherent TileLink fabric transfers one 32-byte beat line.  Capacity
             // and associativity are runtime-modelled; a wider fabric is a separate protocol
             // change, not a cache-only setting.
             if (cache.line_bytes != 32) {
-                return std::format("{} cache line size must be 32 bytes for the current coherent fabric", name);
+                return std::format(
+                    "{} cache line size must be 32 bytes for the current coherent fabric", name);
             }
-            if (cache.associativity > 8 || cache.capacity_bytes < cache.associativity * cache.line_bytes) {
+            if (cache.associativity > 8 ||
+                cache.capacity_bytes < cache.associativity * cache.line_bytes) {
                 return std::format("{} cache geometry has no complete set", name);
             }
             if (cache.capacity_bytes > 16 * 1024) {
@@ -68,7 +71,8 @@ struct CpuModelConfig {
                 return std::format("{} cache set count must be a power of two", name);
             }
             if (cache.hit_latency == 0 || cache.miss_latency == 0) {
-                return std::format("{} cache hit and miss latency must be at least one cycle", name);
+                return std::format("{} cache hit and miss latency must be at least one cycle",
+                                   name);
             }
             return std::nullopt;
         };
@@ -79,13 +83,15 @@ struct CpuModelConfig {
             return std::unexpected(*error);
         }
         if (instruction_cache.line_bytes != data_cache.line_bytes) {
-            return std::unexpected("instruction and data caches must use one shared coherent line size");
+            return std::unexpected(
+                "instruction and data caches must use one shared coherent line size");
         }
         if (interconnect.request_latency == 0 || interconnect.response_latency == 0) {
-            return std::unexpected("interconnect request and response latency must be at least one cycle");
+            return std::unexpected(
+                "interconnect request and response latency must be at least one cycle");
         }
-        if (pipeline.mul_latency == 0 || pipeline.div_latency == 0 || pipeline.fp_alu_latency == 0 ||
-            pipeline.fp_div_latency == 0) {
+        if (pipeline.mul_latency == 0 || pipeline.div_latency == 0 ||
+            pipeline.fp_alu_latency == 0 || pipeline.fp_div_latency == 0) {
             return std::unexpected("execution-unit latency must be at least one cycle");
         }
         return {};
@@ -94,10 +100,14 @@ struct CpuModelConfig {
 
 [[nodiscard]] constexpr auto cpu_model_profile_name(CpuModelProfile profile) -> std::string_view {
     switch (profile) {
-        case CpuModelProfile::Tiny: return "tiny";
-        case CpuModelProfile::Balanced: return "balanced";
-        case CpuModelProfile::Performance: return "performance";
-        case CpuModelProfile::Custom: return "custom";
+        case CpuModelProfile::Tiny:
+            return "tiny";
+        case CpuModelProfile::Balanced:
+            return "balanced";
+        case CpuModelProfile::Performance:
+            return "performance";
+        case CpuModelProfile::Custom:
+            return "custom";
     }
     return "custom";
 }

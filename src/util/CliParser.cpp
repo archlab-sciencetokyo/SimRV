@@ -852,9 +852,7 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     machine->s_vlen = options.vlen;
 
     machine->s_appmode = options.appmode;
-    simrv::memory::g_appmode = options.appmode;
     machine->s_start_pc = options.start_pc;
-    simrv::memory::g_dram_base = simrv::memory::kDramBaseAddress;
     machine->s_tuimode = options.tuimode;
     machine->s_high_contrast = options.high_contrast;
     machine->s_class_mode = options.class_mode;
@@ -926,26 +924,27 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
         cpu.branch_predictor.configure(cpu.pipeline_sim.config.branch_predictor);
     };
 
-    apply_config_to_cpu(machine->cpu);
+    apply_config_to_cpu(machine->primary_hart());
     for (size_t h = 0; h < machine->num_harts(); ++h) {
         apply_config_to_cpu(machine->hart(h));
     }
 
-    machine->tracer.init_trace(options.trace_enabled);
-    machine->tracer.init_dlog(options.dlog_mode);
+    machine->trace().init_trace(options.trace_enabled);
+    machine->trace().init_dlog(options.dlog_mode);
 
-    machine->cpu.trap_log_stream = nullptr;
+    machine->primary_hart().trap_log_stream = nullptr;
     if (options.traplog_mode) {
-        machine->tracer.init_trap_log(options.traplog_mode, options.fn_traplog);
-        if (!machine->tracer.fp_traplog.is_open()) {
+        machine->trace().init_trap_log(options.traplog_mode, options.fn_traplog);
+        if (!machine->trace().fp_traplog.is_open()) {
             return std::unexpected("cannot open trap/SBI log file: " + options.fn_traplog);
         }
-        machine->cpu.trap_log_stream = &machine->tracer.fp_traplog;
+        machine->primary_hart().trap_log_stream = &machine->trace().fp_traplog;
     }
 
     const bool is_fw_payload = (options.fn_memimg.find("fw_payload") != std::string::npos ||
                                 options.fn_memimg.find("opensbi") != std::string::npos);
-    machine->cpu.use_opensbi = options.use_opensbi || !options.fn_dvtree.empty() || is_fw_payload;
+    machine->primary_hart().use_opensbi =
+        options.use_opensbi || !options.fn_dvtree.empty() || is_fw_payload;
 
     // Debug / co-simulation flags
     machine->s_gdb_mode = options.gdb_mode;
@@ -953,10 +952,11 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     machine->s_lockstep_mode = options.lockstep_mode;
     machine->s_spike_bin = options.spike_bin;
     machine->s_spike_elf = options.spike_elf;
-    machine->s_platform_profile = options.platform_profile;
-    machine->s_net_mode = options.net_mode;
-    if (machine->tui && options.step_delay_us > 0) {
-        machine->tui->step_delay_us_.store(options.step_delay_us, std::memory_order_relaxed);
+    machine->set_platform_profile(options.platform_profile);
+    machine->set_network_mode(options.net_mode);
+    if (machine->tui_controller() && options.step_delay_us > 0) {
+        machine->tui_controller()->step_delay_us_.store(options.step_delay_us,
+                                                        std::memory_order_relaxed);
     }
 
     return {};

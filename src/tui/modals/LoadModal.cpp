@@ -96,8 +96,8 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
                                                kThemeSky, staged_binary_path));
         }
         content_rows.push_back("");
-        content_rows.push_back(build_modal_footer({{"[Enter]", "Load (empty to skip)"},
-                                                          {"[Esc]", "Skip Disk"}}));
+        content_rows.push_back(
+            build_modal_footer({{"[Enter]", "Load (empty to skip)"}, {"[Esc]", "Skip Disk"}}));
     }
 }
 

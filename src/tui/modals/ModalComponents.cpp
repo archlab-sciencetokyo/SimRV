@@ -82,8 +82,8 @@ auto get_modal_metadata(ModalType type, bool is_notice_error, std::string_view n
 
 auto format_action_hint(std::string_view key, std::string_view action, std::string_view color)
     -> std::string {
-    return std::format("\033[1;7m{} {} \033[0m {}{}\033[0m", color, unbox_key(key),
-                       kThemeMuted, action);
+    return std::format("\033[1;7m{} {} \033[0m {}{}\033[0m", color, unbox_key(key), kThemeMuted,
+                       action);
 }
 
 auto build_modal_footer(std::span<const ModalActionHint> hints) -> std::string {
@@ -115,11 +115,11 @@ auto build_modal_tab_bar(std::span<const std::string_view> tabs, size_t active_t
             out += std::format("{}{}\033[0m", kThemeMuted, sep);
         }
         if (i == active_tab) {
-            out += std::format("\033[1;7m{} {} \033[0m \033[1;4m{}{}\033[0m", kThemeSky,
-                               i + 1, kThemeSky, tabs[i]);
+            out += std::format("\033[1;7m{} {} \033[0m \033[1;4m{}{}\033[0m", kThemeSky, i + 1,
+                               kThemeSky, tabs[i]);
         } else {
-            out += std::format("\033[7m{} {} \033[0m {}{}\033[0m", kThemeMuted, i + 1,
-                               kThemeMuted, tabs[i]);
+            out += std::format("\033[7m{} {} \033[0m {}{}\033[0m", kThemeMuted, i + 1, kThemeMuted,
+                               tabs[i]);
         }
     }
     return out;
@@ -157,8 +157,10 @@ auto layout_modal_control_row(std::string row, int inner_width) -> framework::Re
             escape = true;
             csi = false;
         } else if (escape) {
-            if (!csi && ch == '[') csi = true;
-            else if (!csi || (ch >= '@' && ch <= '~')) escape = csi = false;
+            if (!csi && ch == '[')
+                csi = true;
+            else if (!csi || (ch >= '@' && ch <= '~'))
+                escape = csi = false;
         } else {
             plain.push_back(ch);
         }
@@ -170,10 +172,8 @@ auto layout_modal_control_row(std::string row, int inner_width) -> framework::Re
     std::size_t index = 0;
     while (byte_start < plain.size()) {
         auto const end = plain.find(separator, byte_start);
-        std::string_view const group =
-            std::string_view(plain).substr(byte_start, end == std::string::npos
-                                                          ? std::string::npos
-                                                          : end - byte_start);
+        std::string_view const group = std::string_view(plain).substr(
+            byte_start, end == std::string::npos ? std::string::npos : end - byte_start);
         int const group_width = get_display_width(group);
         result.spans.push_back(
             {.start = start, .width = group_width, .id = std::to_string(index++)});
@@ -191,17 +191,16 @@ auto build_section_divider(std::string_view title, std::string_view color) -> st
 auto build_menu_item_row(std::string_view label, std::string_view value, bool is_selected,
                          int label_width) -> std::string {
     const std::string name_str =
-        is_selected
-            ? std::format("\033[1;7m{} {:<{}} \033[0m", kThemeSky, label, label_width)
-            : std::format(" {}{:<{}} \033[0m", kThemeText, label, label_width);
+        is_selected ? std::format("\033[1;7m{} {:<{}} \033[0m", kThemeSky, label, label_width)
+                    : std::format(" {}{:<{}} \033[0m", kThemeText, label, label_width);
     return std::format("{} : {}", name_str, unbox_value(value));
 }
 
 void build_text_input_rows(std::vector<std::string>& content_rows, std::string_view prompt,
                            std::string_view input, std::string_view hint) {
     content_rows.push_back(std::format("{}{}\033[0m", kThemeText, prompt));
-    content_rows.push_back(std::format("  \033[1;7m{} INPUT \033[0m {}{}_\033[0m", kThemeSky,
-                                       kThemeText, input));
+    content_rows.push_back(
+        std::format("  \033[1;7m{} INPUT \033[0m {}{}_\033[0m", kThemeSky, kThemeText, input));
     if (!hint.empty()) {
         content_rows.push_back(std::format("{}{}\033[0m", kThemeMuted, hint));
     }

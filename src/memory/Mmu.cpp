@@ -8,6 +8,7 @@
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Logger.hpp"
+#include "simrv/core/Pmp.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Helpers.hpp"
@@ -28,8 +29,8 @@ auto Mmu::pte_access_valid(Address address, unsigned size) const -> bool {
 }
 
 auto Mmu::translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
-                    Word satp, unsigned xlen, bool update_access_bits)
-    -> std::expected<Address, TrapCause> {
+                    Word satp, unsigned xlen, bool update_access_bits,
+                    const core::ArchState* arch_state) -> std::expected<Address, TrapCause> {
     // Machine mode or MMU disabled: use physical addressing
     if (priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(satp, xlen)) {
         return v_addr;
@@ -68,7 +69,7 @@ auto Mmu::translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
     }
 
     // Translate through page tables
-    return page_walk(v_addr, access, priv, mstatus, satp, xlen, update_access_bits);
+    return page_walk(v_addr, access, priv, mstatus, satp, xlen, update_access_bits, arch_state);
 }
 
 auto Mmu::page_fault_for(PteAccess access) -> TrapCause {
@@ -106,7 +107,10 @@ void Mmu::select_next_pte(PageWalkState& state, Address table_address) const {
         (state.virtual_address >> (12 + state.level * static_cast<int>(state.vpn_bits_per_level))) &
         vpn_mask;
     state.pte_address = table_address + vpn * state.pte_size;
-    if (!pte_access_valid(state.pte_address, state.pte_size)) {
+    if (!pte_access_valid(state.pte_address, state.pte_size) ||
+        (state.arch_state != nullptr &&
+         !core::pmp::check_access(*state.arch_state, state.pte_address, state.pte_size,
+                                  core::PmpAccessType::Read))) {
         fail_page_walk_access(state);
         return;
     }
@@ -114,14 +118,16 @@ void Mmu::select_next_pte(PageWalkState& state, Address table_address) const {
 }
 
 auto Mmu::begin_page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
-                          Word satp, unsigned xlen, bool update_access_bits) -> PageWalkState {
+                          Word satp, unsigned xlen, bool update_access_bits,
+                          const core::ArchState* arch_state) -> PageWalkState {
     PageWalkState state{.virtual_address = v_addr,
                         .mstatus = mstatus,
                         .access = access,
                         .privilege = priv,
                         .fault = page_fault_for(access),
                         .xlen = xlen,
-                        .update_access_bits = update_access_bits};
+                        .update_access_bits = update_access_bits,
+                        .arch_state = arch_state};
     if (priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(satp, xlen)) {
         state.physical_address = v_addr;
         state.status = PageWalkStatus::Complete;
@@ -196,9 +202,27 @@ void Mmu::accept_page_walk_pte(PageWalkState& state, Word pte) const {
     const Word offset_mask = (static_cast<Word>(1) << offset_bits) - 1;
     state.physical_address = (state.virtual_address & offset_mask) | ((ppn << 12) & ~offset_mask);
 
+    if (state.arch_state != nullptr) {
+        const auto pmp_access = state.access == PteAccess::Code ? core::PmpAccessType::Execute
+                                                                : (state.access == PteAccess::Write
+                                                                       ? core::PmpAccessType::Write
+                                                                       : core::PmpAccessType::Read);
+        if (!core::pmp::check_access(*state.arch_state, state.physical_address, 1, pmp_access)) {
+            state.fault = access_fault_for(state.access);
+            state.status = PageWalkStatus::Fault;
+            return;
+        }
+    }
+
     Word updated = pte | enum_mask(PteFlag::A);
     if (state.access == PteAccess::Write) updated |= enum_mask(PteFlag::D);
     if (state.update_access_bits && updated != pte) {
+        if (state.arch_state != nullptr &&
+            !core::pmp::check_access(*state.arch_state, state.pte_address, state.pte_size,
+                                     core::PmpAccessType::Write)) {
+            fail_page_walk_access(state);
+            return;
+        }
         state.pte = updated;
         state.pte_update_mask = updated ^ pte;
         state.status = PageWalkStatus::WritePte;
@@ -247,9 +271,10 @@ auto Mmu::validate_pte_permissions(Word pte, Word permission_bits, PteAccess acc
 }
 
 auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
-                    Word satp, unsigned xlen, bool update_access_bits)
-    -> std::expected<Address, TrapCause> {
-    auto state = begin_page_walk(v_addr, access, priv, mstatus, satp, xlen, update_access_bits);
+                    Word satp, unsigned xlen, bool update_access_bits,
+                    const core::ArchState* arch_state) -> std::expected<Address, TrapCause> {
+    auto state =
+        begin_page_walk(v_addr, access, priv, mstatus, satp, xlen, update_access_bits, arch_state);
     while (state.status == PageWalkStatus::ReadPte || state.status == PageWalkStatus::WritePte) {
         const Instruction operation =
             state.pte_size == 4

@@ -58,13 +58,28 @@ class DummyDevice : public simrv::memory::MmioDevice {
 
 class ConcreteMachine : public simrv::core::Machine {
    public:
-    ConcreteMachine() = default;
+    ConcreteMachine()
+        : cpu(primary_hart()),
+          mmem(mutable_ram_pointer()),
+          secondary_harts_(mutable_secondary_harts()) {}
+    simrv::core::CPU& cpu;
+    Byte*& mmem;
+    std::vector<std::unique_ptr<simrv::core::CPU>>& secondary_harts_;
     void execute_cycle() override {}
 };
 
 class TestOSMachine : public simrv::core::OSMachine {
    public:
+    TestOSMachine()
+        : cpu(primary_hart()),
+          mmem(mutable_ram_pointer()),
+          secondary_harts_(mutable_secondary_harts()),
+          uart(mutable_uart()) {}
     using simrv::core::OSMachine::finalize_cycle;
+    simrv::core::CPU& cpu;
+    Byte*& mmem;
+    std::vector<std::unique_ptr<simrv::core::CPU>>& secondary_harts_;
+    std::unique_ptr<simrv::device::Uart>& uart;
 };
 
 void test_left_pane_runtime_summaries() {
@@ -580,7 +595,7 @@ void test_global_cycle_smp_pipeline_ordering() {
         if (!condition) std::abort();
     };
     const auto run = [&] {
-        simrv::core::OSMachine machine;
+        TestOSMachine machine;
         std::vector<Byte> ram(1024 * 1024, Byte{0});
         machine.mmem = ram.data();
         machine.s_dram_size = ram.size();
@@ -638,7 +653,7 @@ void test_global_cycle_smp_pipeline_ordering() {
 }
 
 void test_global_cycle_timer_phase_ordering() {
-    simrv::core::OSMachine machine;
+    TestOSMachine machine;
     std::vector<Byte> ram(1024 * 1024, Byte{0});
     machine.mmem = ram.data();
     machine.s_dram_size = ram.size();
@@ -1445,7 +1460,7 @@ void test_sbi_multihart_rfence() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    simrv::core::OSMachine machine;
+    TestOSMachine machine;
     std::vector<Byte> ram(1024 * 1024, Byte{0});
     machine.mmem = ram.data();
     machine.s_dram_size = ram.size();
@@ -1507,7 +1522,7 @@ void test_ia_multihart_lr_sc_coherence() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    simrv::core::OSMachine machine;
+    TestOSMachine machine;
     std::vector<Byte> ram(1024 * 1024, Byte{0});
     machine.mmem = ram.data();
     machine.s_dram_size = ram.size();
@@ -1580,7 +1595,7 @@ void test_ia_multithreaded_smp_execution() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    simrv::core::OSMachine machine;
+    TestOSMachine machine;
     std::vector<Byte> ram(1024 * 1024, Byte{0});
     machine.mmem = ram.data();
     machine.s_dram_size = ram.size();

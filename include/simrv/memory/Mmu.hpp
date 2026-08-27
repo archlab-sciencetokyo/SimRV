@@ -12,6 +12,10 @@
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
+namespace simrv::core {
+struct ArchState;
+}  // namespace simrv::core
+
 namespace simrv {
 
 using PteFlags = uint8_t;
@@ -47,6 +51,7 @@ struct PageWalkState {
     int level = -1;
     bool update_access_bits = true;
     PageWalkStatus status = PageWalkStatus::Fault;
+    const core::ArchState* arch_state = nullptr;
 };
 
 /**
@@ -78,11 +83,13 @@ class Mmu {
      * @param satp Current CPU satp register
      * @param xlen Execution width (32 or 64)
      * @param update_access_bits Whether to update page table A/D bits
+     * @param arch_state Optional CPU architectural state for PMP enforcement
      * @return Translated physical address or TrapCause on fault
      */
-    auto page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
-                   Word satp, unsigned xlen, bool update_access_bits = true)
-        -> std::expected<Address, TrapCause>;
+    std::expected<Address, TrapCause> page_walk(
+        Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus, Word satp,
+        unsigned xlen, bool update_access_bits = true,
+        const core::ArchState* arch_state = nullptr);
 
     /**
      * @brief Translate address without performing page walk.
@@ -97,16 +104,19 @@ class Mmu {
      * @param satp Current CPU satp register
      * @param xlen Execution width (32 or 64)
      * @param update_access_bits Whether to update page table A/D bits
+     * @param arch_state Optional CPU architectural state for PMP enforcement
      * @return Translated physical address or TrapCause on fault
      */
-    auto translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
-                   Word satp, unsigned xlen, bool update_access_bits = true)
-        -> std::expected<Address, TrapCause>;
+    std::expected<Address, TrapCause> translate(
+        Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus, Word satp,
+        unsigned xlen, bool update_access_bits = true,
+        const core::ArchState* arch_state = nullptr);
 
     /// Start a walk without performing any implicit physical-memory access.
-    [[nodiscard]] auto begin_page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv,
-                                       CSRValue mstatus, Word satp, unsigned xlen,
-                                       bool update_access_bits = true) -> PageWalkState;
+    [[nodiscard]] PageWalkState begin_page_walk(
+        Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus, Word satp,
+        unsigned xlen, bool update_access_bits = true,
+        const core::ArchState* arch_state = nullptr);
 
     /// Consume the PTE returned by the current ReadPte request.
     void accept_page_walk_pte(PageWalkState& state, Word pte) const;

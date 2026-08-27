@@ -12,6 +12,7 @@
 
 namespace simrv::core {
 class Machine;
+struct MemoryGeometry;
 }
 
 namespace simrv::memory {
@@ -40,6 +41,8 @@ class MemorySubsystem {
     [[nodiscard]] auto reservation_table() const -> const simrv::memory::ReservationTable& {
         return reservation_table_;
     }
+    /// Access the immutable DRAM address range selected by the owning machine.
+    [[nodiscard]] auto memory_geometry() const noexcept -> const simrv::core::MemoryGeometry&;
 
    private:
     simrv::core::Machine& machine_;

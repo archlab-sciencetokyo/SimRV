@@ -9,6 +9,7 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/Pmp.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/Mmio.hpp"
@@ -22,8 +23,13 @@ using simrv::isa::Funct3;
 using simrv::isa::Funct5Amo;
 using simrv::isa::Opcode;
 
+auto MemorySubsystem::memory_geometry() const noexcept -> const simrv::core::MemoryGeometry& {
+    return machine_.config.memory;
+}
+
 auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_addr,
                                Instruction funct3) -> Word {
+    const auto& geometry = mem.memory_geometry();
     const unsigned active_xlen = cpu.effective_data_xlen();
     if (active_xlen == 32) v_addr &= 0xFFFFFFFFULL;
     if (simrv::compiler::unlikely(cpu.pipeline_context.pending_exception.has_value())) {
@@ -97,7 +103,14 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
         if (!translation_enabled) {
             // Bypass soft TLB lookup if translation is disabled (direct DRAM access)
             const Address eff_vaddr = (active_xlen == 32) ? (v_addr & 0xFFFFFFFFULL) : v_addr;
-            if (simrv::compiler::likely(simrv::memory::is_dram_access(eff_vaddr, size_bytes))) {
+            if (simrv::compiler::likely(geometry.contains(eff_vaddr, size_bytes))) {
+                if (simrv::compiler::unlikely(!core::pmp::check_access(
+                        cpu.state(), eff_vaddr, size_bytes, core::PmpAccessType::Read, eff_priv))) {
+                    cpu.pipeline_context.pending_exception =
+                        is_amo ? ExceptionCode::FaultStore : ExceptionCode::FaultLoad;
+                    cpu.pipeline_context.pending_tval = v_addr;
+                    return 0;
+                }
                 return simrv::memory::ram_read_fast(eff_vaddr, funct3, mem.mmu()->mmem());
             }
         } else {
@@ -118,10 +131,10 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
 
     auto issue_read = [&](Address addr) -> Word {
         if (cpu.machine_->runtime_profile.is_instruction_mode() &&
-            simrv::memory::is_dram_access(addr, size_bytes)) {
+            geometry.contains(addr, size_bytes)) {
             return simrv::memory::ram_read_fast(addr, funct3, mem.mmu()->mmem());
         }
-        if (!simrv::memory::is_dram_access(addr, size_bytes)) {
+        if (!geometry.contains(addr, size_bytes)) {
             auto& transfer = cpu.ca_state.data_transfer;
             if (cpu.machine_->runtime_profile.is_cycle_mode() && transfer.active) {
                 TileLinkBus::TimedResponse timed{};
@@ -264,7 +277,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     if (simrv::compiler::likely(!cpu.pipeline_context.pending_exception.has_value()) &&
         simrv::compiler::likely(eff_priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(
                                                                 cpu.state().satp, active_xlen)) &&
-        simrv::compiler::likely(simrv::memory::is_dram_access(eff_vaddr, size_bytes))) {
+        simrv::compiler::likely(geometry.contains(eff_vaddr, size_bytes))) {
         return issue_read(eff_vaddr);
     }
 
@@ -305,8 +318,17 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
     }
 
     if (!cpu.pipeline_context.pending_exception.has_value()) {
+        if (simrv::compiler::unlikely(!core::pmp::check_access(
+                cpu.state(), p_addr, size_bytes,
+                (is_amo && !is_lr) ? core::PmpAccessType::Write : core::PmpAccessType::Read,
+                eff_priv))) {
+            cpu.pipeline_context.pending_exception =
+                is_amo ? ExceptionCode::FaultStore : ExceptionCode::FaultLoad;
+            cpu.pipeline_context.pending_tval = v_addr;
+            return 0;
+        }
         if (cpu.machine_->runtime_profile.is_instruction_mode() &&
-            simrv::memory::is_dram_addr(p_addr)) {
+            geometry.contains(p_addr)) {
             const size_t tlb_idx = (v_addr >> 12) & 2047;
             const Address vpn = v_addr >> 12;
             Byte* host_base = mem.mmu()->mmem() + ((p_addr & ~0xFFFULL) & simrv::memory::kDramMask);
@@ -324,6 +346,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
 
 void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_addr, Word wdata,
                                 Instruction funct3) {
+    const auto& geometry = mem.memory_geometry();
     const unsigned active_xlen = cpu.effective_data_xlen();
     if (active_xlen == 32) v_addr &= 0xFFFFFFFFULL;
     if (simrv::compiler::unlikely(cpu.pipeline_context.pending_exception.has_value())) {
@@ -414,11 +437,11 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             }
         }
         if (cpu.machine_->runtime_profile.is_instruction_mode() &&
-            simrv::memory::is_dram_access(addr, size_bytes)) {
+            geometry.contains(addr, size_bytes)) {
             simrv::memory::ram_write_fast(addr, data, funct3, mem.mmu()->mmem());
             return;
         }
-        if (simrv::memory::is_dram_access(addr, size_bytes)) {
+        if (geometry.contains(addr, size_bytes)) {
             if (!cpu.dcache.write(addr, data, funct3)) {
                 // Not in Trunk state; acquire Trunk ownership via TL-C
                 const Address line_base =
@@ -502,7 +525,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
         if (!translation_enabled) {
             // Bypass soft TLB lookup if translation is disabled (direct DRAM access)
             const Address eff_vaddr = (active_xlen == 32) ? (v_addr & 0xFFFFFFFFULL) : v_addr;
-            if (simrv::compiler::likely(simrv::memory::is_dram_access(eff_vaddr, size_bytes))) {
+            if (simrv::compiler::likely(geometry.contains(eff_vaddr, size_bytes))) {
                 issue_write(eff_vaddr, wdata);
                 return;
             }
@@ -528,7 +551,13 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
     if (simrv::compiler::likely(!cpu.pipeline_context.pending_exception.has_value()) &&
         simrv::compiler::likely(eff_priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(
                                                                 cpu.state().satp, active_xlen)) &&
-        simrv::compiler::likely(simrv::memory::is_dram_access(eff_vaddr, size_bytes))) {
+        simrv::compiler::likely(geometry.contains(eff_vaddr, size_bytes))) {
+        if (simrv::compiler::unlikely(!core::pmp::check_access(
+                cpu.state(), eff_vaddr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
+            cpu.pipeline_context.pending_exception = ExceptionCode::FaultStore;
+            cpu.pipeline_context.pending_tval = v_addr;
+            return;
+        }
         issue_write(eff_vaddr, wdata);
         return;
     }
@@ -563,8 +592,14 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
     }
 
     if (!cpu.pipeline_context.pending_exception.has_value()) {
+        if (simrv::compiler::unlikely(!core::pmp::check_access(
+                cpu.state(), p_addr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
+            cpu.pipeline_context.pending_exception = ExceptionCode::FaultStore;
+            cpu.pipeline_context.pending_tval = v_addr;
+            return;
+        }
         if (cpu.machine_->runtime_profile.is_instruction_mode() &&
-            simrv::memory::is_dram_addr(p_addr)) {
+            geometry.contains(p_addr)) {
             const size_t tlb_idx = (v_addr >> 12) & 2047;
             const Address vpn = v_addr >> 12;
             Byte* host_base = mem.mmu()->mmem() + ((p_addr & ~0xFFFULL) & simrv::memory::kDramMask);

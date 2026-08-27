@@ -165,7 +165,7 @@ auto CPU::translate_stage_address(Machine& machine, Address virtual_address, Pte
     auto* mmu = machine.memory_.mmu();
     if (machine.runtime_profile.is_instruction_mode()) {
         return mmu->translate(virtual_address, access, privilege, state_.mstatus, state_.satp,
-                              active_xlen);
+                              active_xlen, true, &state_);
     }
 
     if (!timed_walk.active || timed_walk.walk.virtual_address != virtual_address ||
@@ -174,7 +174,7 @@ auto CPU::translate_stage_address(Machine& machine, Address virtual_address, Pte
             machine.memory_.system_bus().cancel_source(timed_walk.source);
         }
         timed_walk.walk = mmu->begin_page_walk(virtual_address, access, privilege, state_.mstatus,
-                                               state_.satp, active_xlen);
+                                               state_.satp, active_xlen, true, &state_);
         timed_walk.source =
             simrv::memory::make_tl_source(static_cast<HartId>(state_.mhartid), port);
         timed_walk.active = true;
@@ -231,11 +231,11 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
 
     if (machine.runtime_profile.is_instruction_mode()) {
         if (simrv::compiler::likely(ctx.padr2 == ctx.padr1 + 2 &&
-                                    simrv::memory::is_dram_access(ctx.padr1, sizeof(uint16_t)))) {
+                                    machine.memory_geometry().contains(ctx.padr1, sizeof(uint16_t)))) {
             const Address masked = ctx.padr1 & simrv::memory::kDramMask;
             if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 3))) {
                 uint32_t val = 0;
-                std::memcpy(&val, machine.mmem + masked, 4);
+                std::memcpy(&val, machine.ram_data() + masked, 4);
                 if ((val & 0x3) != 0x3) {
                     ctx.ir_org = val & 0xFFFF;
                 } else {
@@ -244,26 +244,26 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 return;
             }
             const uint16_t h1 = simrv::memory::ram_read_fast(
-                ctx.padr1, static_cast<Instruction>(Funct3::Lhu), machine.mmem);
+                ctx.padr1, static_cast<Instruction>(Funct3::Lhu), machine.ram_data());
             if ((h1 & 0x3) != 0x3) {
                 ctx.ir_org = h1;
             } else {
                 if (simrv::compiler::unlikely(
-                        !simrv::memory::is_dram_access(ctx.padr2, sizeof(uint16_t)))) {
+                        !machine.memory_geometry().contains(ctx.padr2, sizeof(uint16_t)))) {
                     ctx.pending_exception = ExceptionCode::FaultFetch;
                     ctx.pending_tval = state_.pc + 2;
                     return;
                 }
                 const uint16_t h2 = simrv::memory::ram_read_fast(
-                    ctx.padr2, static_cast<Instruction>(Funct3::Lhu), machine.mmem);
+                    ctx.padr2, static_cast<Instruction>(Funct3::Lhu), machine.ram_data());
                 ctx.ir_org = (static_cast<uint32_t>(h2) << 16) | h1;
             }
             return;
         }
     }
 
-    if (simrv::compiler::likely(simrv::memory::is_dram_access(ctx.padr1, sizeof(uint16_t)) &&
-                                simrv::memory::is_dram_access(ctx.padr2, sizeof(uint16_t)))) {
+    if (simrv::compiler::likely(machine.memory_geometry().contains(ctx.padr1, sizeof(uint16_t)) &&
+                                machine.memory_geometry().contains(ctx.padr2, sizeof(uint16_t)))) {
         auto fetch_halfword = [&](Address paddr, Address vaddr) -> std::optional<uint16_t> {
             uint16_t h_data = 0;
             const Address line_base =
@@ -547,15 +547,15 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
     // translation, so the branch predictor sees this as "not taken" for nearly
     // all cycles of a physical-only run and switches to "always taken" after
     // the OS enables virtual memory.
-    if (simrv::compiler::likely(simrv::memory::is_dram_access(ctx.padr1, sizeof(uint16_t)) &&
+    if (simrv::compiler::likely(machine.memory_geometry().contains(ctx.padr1, sizeof(uint16_t)) &&
                                 !machine.s_mmu_ever_used)) {
         const uint16_t h1 = simrv::memory::ram_read_fast(
-            ctx.padr1, static_cast<Instruction>(Funct3::Lhu), machine.mmem);
+            ctx.padr1, static_cast<Instruction>(Funct3::Lhu), machine.ram_data());
         if ((h1 & 0x3) != 0x3) {
             ctx.ir_org = h1;
         } else {
             if (simrv::compiler::unlikely(
-                    !simrv::memory::is_dram_access(ctx.padr2, sizeof(uint16_t)))) {
+                    !machine.memory_geometry().contains(ctx.padr2, sizeof(uint16_t)))) {
                 ctx.pending_exception = ExceptionCode::FaultFetch;
                 ctx.pending_tval = state_.pc + 2;
                 ctx.ir = isa::RV32_NOP;
@@ -563,7 +563,7 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
                 return;
             }
             const uint16_t h2 = simrv::memory::ram_read_fast(
-                ctx.padr2, static_cast<Instruction>(Funct3::Lhu), machine.mmem);
+                ctx.padr2, static_cast<Instruction>(Funct3::Lhu), machine.ram_data());
             ctx.ir_org = (static_cast<uint32_t>(h2) << 16) | h1;
         }
     } else {
@@ -848,9 +848,9 @@ void CPU::execute_core(Machine& machine) {
                 state_.reserved = native_success ? 1 : 0;
                 state_.load_res = ctx.rrs1;
                 ctx.wb_data = native_success ? 0 : 1;
-                if (machine.spike_lockstep && machine.spike_lockstep->is_running()) {
+                if (machine.lockstep() && machine.lockstep()->is_running()) {
                     if (native_success) {
-                        auto sc_success_opt = machine.spike_lockstep->determine_sc_success();
+                        auto sc_success_opt = machine.lockstep()->determine_sc_success();
                         if (sc_success_opt.has_value() && !sc_success_opt.value()) {
                             ctx.wb_data = 1;
                         }
@@ -891,13 +891,13 @@ void CPU::execute_system(Machine& machine) {
                 break;
             case Funct12Priv::Ebreak: {
                 bool semihost_handled = false;
-                const bool in_dram = simrv::memory::is_dram_addr(state_.pc - 4) &&
-                                     simrv::memory::is_dram_addr(state_.pc + 4);
+                const bool in_dram = machine.memory_geometry().contains(state_.pc - 4) &&
+                                     machine.memory_geometry().contains(state_.pc + 4);
                 if (in_dram) {
                     const Word inst_prev = simrv::memory::ram_read_fast(
-                        state_.pc - 4, static_cast<Instruction>(Funct3::Lw), machine.mmem);
+                        state_.pc - 4, static_cast<Instruction>(Funct3::Lw), machine.ram_data());
                     const Word inst_next = simrv::memory::ram_read_fast(
-                        state_.pc + 4, static_cast<Instruction>(Funct3::Lw), machine.mmem);
+                        state_.pc + 4, static_cast<Instruction>(Funct3::Lw), machine.ram_data());
                     if (inst_prev == 0x01f01013 && inst_next == 0x40705013) {
                         semihost_handled = true;
                         const Word semihost_op = state_.regs.read(RegId::A0);
@@ -909,22 +909,24 @@ void CPU::execute_system(Machine& machine) {
                                     kIsXLen64 ? static_cast<Instruction>(Funct3::Ld)
                                               : static_cast<Instruction>(Funct3::Lw);
                                 const Address fd =
-                                    simrv::memory::ram_read_fast(arg_ptr, load_op, machine.mmem);
+                                    simrv::memory::ram_read_fast(arg_ptr, load_op,
+                                                                 machine.ram_data());
                                 const Address buf_addr = simrv::memory::ram_read_fast(
-                                    arg_ptr + (kIsXLen64 ? 8 : 4), load_op, machine.mmem);
+                                    arg_ptr + (kIsXLen64 ? 8 : 4), load_op, machine.ram_data());
                                 const Address len = simrv::memory::ram_read_fast(
-                                    arg_ptr + (kIsXLen64 ? 16 : 8), load_op, machine.mmem);
+                                    arg_ptr + (kIsXLen64 ? 16 : 8), load_op, machine.ram_data());
                                 (void)fd;
 
-                                if (simrv::memory::is_dram_addr(buf_addr)) {
+                                if (machine.memory_geometry().contains(buf_addr)) {
                                     for (Address i = 0; i < len; ++i) {
                                         const auto ch = static_cast<uint8_t>(
                                             simrv::memory::ram_read_fast(
                                                 buf_addr + i, static_cast<Instruction>(Funct3::Lb),
-                                                machine.mmem) &
+                                                machine.ram_data()) &
                                             0xFF);
-                                        if (machine.s_tuimode && machine.tui) {
-                                            machine.tui->handle_char_write(static_cast<char>(ch));
+                                        if (machine.s_tuimode && machine.tui_controller()) {
+                                            machine.tui_controller()->handle_char_write(
+                                                static_cast<char>(ch));
                                         } else {
                                             (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
                                         }
@@ -934,14 +936,15 @@ void CPU::execute_system(Machine& machine) {
                                 break;
                             }
                             case 0x03: {
-                                if (simrv::memory::is_dram_addr(arg_ptr)) {
+                                if (machine.memory_geometry().contains(arg_ptr)) {
                                     const auto ch = static_cast<uint8_t>(
                                         simrv::memory::ram_read_fast(
                                             arg_ptr, static_cast<Instruction>(Funct3::Lb),
-                                            machine.mmem) &
+                                            machine.ram_data()) &
                                         0xFF);
-                                    if (machine.s_tuimode && machine.tui) {
-                                        machine.tui->handle_char_write(static_cast<char>(ch));
+                                    if (machine.s_tuimode && machine.tui_controller()) {
+                                        machine.tui_controller()->handle_char_write(
+                                            static_cast<char>(ch));
                                     } else {
                                         (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
                                     }
@@ -951,16 +954,17 @@ void CPU::execute_system(Machine& machine) {
                             }
                             case 0x04: {
                                 Address ptr = arg_ptr;
-                                if (simrv::memory::is_dram_addr(ptr)) {
+                                if (machine.memory_geometry().contains(ptr)) {
                                     while (true) {
                                         const auto ch = static_cast<uint8_t>(
                                             simrv::memory::ram_read_fast(
                                                 ptr, static_cast<Instruction>(Funct3::Lb),
-                                                machine.mmem) &
+                                                machine.ram_data()) &
                                             0xFF);
                                         if (ch == 0) break;
-                                        if (machine.s_tuimode && machine.tui) {
-                                            machine.tui->handle_char_write(static_cast<char>(ch));
+                                        if (machine.s_tuimode && machine.tui_controller()) {
+                                            machine.tui_controller()->handle_char_write(
+                                                static_cast<char>(ch));
                                         } else {
                                             (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
                                         }

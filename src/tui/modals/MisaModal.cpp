@@ -26,8 +26,8 @@ struct SettingItem {
 
 void MisaModal::open(MisaDraft& draft, int& cursor, const simrv::core::Machine& machine) {
     cursor = 0;
-    const uint64_t misa = machine.cpu.state().misa;
-    draft.xlen_bits = static_cast<uint8_t>(machine.cpu.state().regs.xlen);
+    const uint64_t misa = machine.primary_hart().state().misa;
+    draft.xlen_bits = static_cast<uint8_t>(machine.primary_hart().state().regs.xlen);
     draft.ext_a = (misa & (1ULL << ('a' - 'a'))) != 0;
     draft.ext_b = (misa & (1ULL << ('b' - 'a'))) != 0;
     draft.ext_c = (misa & (1ULL << ('c' - 'a'))) != 0;
@@ -39,7 +39,7 @@ void MisaModal::open(MisaDraft& draft, int& cursor, const simrv::core::Machine& 
     draft.ext_u = (misa & (1ULL << ('u' - 'a'))) != 0;
     draft.ext_v = (misa & (1ULL << ('v' - 'a'))) != 0;
     // Populate VLEN from current machine state (s_vlen=0 means default 256)
-    draft.vlen = machine.s_vlen ? machine.s_vlen : machine.cpu.state().regs.vlen;
+    draft.vlen = machine.s_vlen ? machine.s_vlen : machine.primary_hart().state().regs.vlen;
 }
 
 void MisaModal::move_cursor(int& cursor, int delta) {
@@ -157,11 +157,11 @@ auto MisaModal::submit(const MisaDraft& draft, simrv::core::Machine& machine,
                        const std::function<void(const std::string&)>& set_status_override_cb)
     -> bool {
     uint64_t new_misa = draft.to_misa_val();
-    machine.cpu.state().misa = new_misa;
+    machine.primary_hart().state().misa = new_misa;
     machine.s_misa_profile = new_misa;
     machine.s_misa_override = true;
     machine.s_misa_xlen = draft.xlen_bits;
-    machine.cpu.state().initialize_lower_xlen_fields();
+    machine.primary_hart().state().initialize_lower_xlen_fields();
     // Apply VLEN setting (only meaningful when V extension is enabled)
     machine.s_vlen = draft.vlen;
 
@@ -179,7 +179,8 @@ void MisaModal::render(std::vector<std::string>& content_rows,
                        const MisaDraft& draft, int cursor, const simrv::core::Machine& machine,
                        bool show_footer) {
     (void)content_rows;
-    std::string live_misa = simrv::xlen::resolve_misa_string(machine.cpu.state().misa);
+    std::string live_misa =
+        simrv::xlen::resolve_misa_string(machine.primary_hart().state().misa);
     std::string draft_misa = draft.to_misa_string();
 
     add_row_cb(std::format("{}Current Live MISA  : \033[1;36m{}\033[0m", kThemeText, live_misa));
@@ -241,8 +242,7 @@ void MisaModal::render(std::vector<std::string>& content_rows,
     }
     if (show_footer) {
         add_row_cb("");
-        add_row_cb(
-            build_modal_footer({{"[Enter]", "Apply MISA CSR"}, {"[Esc / q]", "Cancel"}}));
+        add_row_cb(build_modal_footer({{"[Enter]", "Apply MISA CSR"}, {"[Esc / q]", "Cancel"}}));
     }
 }
 

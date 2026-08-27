@@ -10,7 +10,11 @@ namespace simrv::core {
 
 class OSMachine : public Machine {
    public:
-    OSMachine() = default;
+    OSMachine()
+        : cpu(primary_hart()),
+          secondary_harts_(mutable_secondary_harts()),
+          uart(mutable_uart()),
+          tracer(trace()) {}
     ~OSMachine() override { stop_smp_threads(); }
 
     void start_smp_threads() override;
@@ -23,6 +27,12 @@ class OSMachine : public Machine {
     void finalize_cycle() override;
 
    private:
+    // Private capability bindings keep the execution adapter terse without exposing Runtime
+    // ownership through Machine's public surface.
+    CPU& cpu;
+    std::vector<std::unique_ptr<CPU>>& secondary_harts_;
+    std::unique_ptr<simrv::device::Uart>& uart;
+    Tracer& tracer;
     std::vector<std::jthread> smp_worker_threads_;
     std::atomic<bool> smp_threads_running_{false};
 };

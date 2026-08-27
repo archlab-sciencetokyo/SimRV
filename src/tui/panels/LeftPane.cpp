@@ -583,8 +583,9 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
     }
 
     bool show_spinner = !paused_;
-    if (show_spinner && machine_.tui) {
-        uint64_t delay = machine_.tui->step_delay_us_.load(std::memory_order_relaxed);
+    if (show_spinner && machine_.tui_controller()) {
+        uint64_t delay =
+            machine_.tui_controller()->step_delay_us_.load(std::memory_order_relaxed);
         if (delay >= 10000) {
             show_spinner = false;
         }
@@ -603,10 +604,10 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
             int const max_scroll = std::max(0, kStackCanvasWidth - viewport_width);
             std::string const left_marker = horizontal_scroll_offset_ > 0 ? "◀" : " ";
             std::string const right_marker = horizontal_scroll_offset_ < max_scroll ? "▶" : " ";
-            res = std::format("{}{}\033[0m{}{}{}\033[0m", kThemeMuted, left_marker,
-                              framework::crop_columns(res, horizontal_scroll_offset_,
-                                                      viewport_width),
-                              kThemeMuted, right_marker);
+            res =
+                std::format("{}{}\033[0m{}{}{}\033[0m", kThemeMuted, left_marker,
+                            framework::crop_columns(res, horizontal_scroll_offset_, viewport_width),
+                            kThemeMuted, right_marker);
             res = format_to_width(res, width);
         }
         return res;
@@ -620,10 +621,10 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
         const int stats_end = stats_start + performance_row_count();
         if (logical_row >= stats_start && logical_row < stats_end) {
             const int stats_row = logical_row - stats_start;
-            const std::string stats = machine_.runtime_profile.is_cycle_mode()
-                                          ? render_cycle_accurate_stats(current_cpu(), stats_row, width)
-                                          : render_machine_performance_stats(current_cpu(), stats_row,
-                                                                             width);
+            const std::string stats =
+                machine_.runtime_profile.is_cycle_mode()
+                    ? render_cycle_accurate_stats(current_cpu(), stats_row, width)
+                    : render_machine_performance_stats(current_cpu(), stats_row, width);
             return finish_row(stats);
         }
         return render_active_spinner(logical_row, width);
@@ -677,8 +678,7 @@ void LeftPane::scroll_horizontal(int columns) {
     constexpr int kStackCanvasWidth = 104;
     int const viewport_width = last_width_ > 0 ? last_width_ : 60;
     int const max_scroll = std::max(0, kStackCanvasWidth - std::max(1, viewport_width - 2));
-    horizontal_scroll_offset_ =
-        std::clamp(horizontal_scroll_offset_ + columns, 0, max_scroll);
+    horizontal_scroll_offset_ = std::clamp(horizontal_scroll_offset_ + columns, 0, max_scroll);
 }
 
 auto LeftPane::supports_horizontal_scroll() const -> bool {
@@ -687,7 +687,7 @@ auto LeftPane::supports_horizontal_scroll() const -> bool {
     Register const sp = cpu.state().regs.read(RegId::Sp);
     if (sp == 0) return false;
     auto const physical = translate_safe(cpu, sp);
-    return physical.has_value() && simrv::memory::is_dram_addr(*physical);
+    return physical.has_value() && machine_.memory_geometry().contains(*physical);
 }
 
 void LeftPane::scroll_log(int lines) {

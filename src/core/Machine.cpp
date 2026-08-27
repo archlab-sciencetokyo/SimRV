@@ -4,10 +4,12 @@
  */
 #include "simrv/core/Machine.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 #include <print>
 
 #include "simrv/core/Logger.hpp"
@@ -20,15 +22,99 @@
 #include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Types.hpp"
 
-namespace simrv::memory {
-bool g_appmode = true;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-Address g_dram_base =
-    kDramBaseAddress;             // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-Address g_dram_size = kDramSize;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-}  // namespace simrv::memory
-
 namespace simrv::core {
-Machine::Machine() : memory_(*this) { cpu.machine_ = this; }
+class Machine::Runtime {
+   public:
+    explicit Runtime(Machine& machine) : tracer(machine), memory(machine) {}
+
+    CPU primary_cpu;
+    std::vector<std::unique_ptr<CPU>> secondary_harts;
+    std::unique_ptr<Byte[]> ram;
+    std::unique_ptr<simrv::Rtc> rtc;
+    std::unique_ptr<simrv::device::Uart> uart;
+    std::unique_ptr<simrv::tui::Tui> tui;
+    std::unique_ptr<simrv::device::PowerMmio> power;
+    std::unique_ptr<simrv::device::AclintMtimer> aclint_mtimer;
+    std::unique_ptr<simrv::device::AclintMswi> aclint_mswi;
+    std::unique_ptr<simrv::device::Imsic> imsic_m;
+    std::unique_ptr<simrv::device::Imsic> imsic_s;
+    std::unique_ptr<simrv::device::Aplic> aplic_m;
+    std::unique_ptr<simrv::device::Aplic> aplic_s;
+    std::unique_ptr<simrv::device::PcieRootComplex> pcie;
+    std::shared_ptr<simrv::device::VirtioPciBlock> pci_disk;
+    std::shared_ptr<simrv::device::VirtioPciConsole> pci_console;
+    std::shared_ptr<simrv::device::VirtioPciRng> pci_rng;
+    std::shared_ptr<simrv::device::VirtioPciGpu> pci_gpu;
+    std::shared_ptr<simrv::device::VirtioPciInput> pci_input;
+    std::shared_ptr<simrv::device::VirtioPciSound> pci_sound;
+    std::shared_ptr<simrv::device::VirtioPciNet> pci_net;
+    std::shared_ptr<simrv::device::VirtioMmioBlock> mmio_disk;
+    std::shared_ptr<simrv::device::VirtioMmioConsole> mmio_console;
+    std::shared_ptr<simrv::device::VirtioMmioRng> mmio_rng;
+    std::shared_ptr<simrv::device::VirtioMmioGpu> mmio_gpu;
+    std::shared_ptr<simrv::device::VirtioMmioInput> mmio_input;
+    std::shared_ptr<simrv::device::VirtioMmioSound> mmio_sound;
+    std::shared_ptr<simrv::device::VirtioMmioNet> mmio_net;
+    std::unique_ptr<simrv::debug::GdbStub> gdb_stub;
+    std::unique_ptr<simrv::debug::SpikeLockstep> spike_lockstep;
+    simrv::debug::BreakpointManager breakpoints;
+    Tracer tracer;
+    simrv::debug::SymbolTable symbols;
+    simrv::memory::MemorySubsystem memory;
+};
+
+Machine::Machine()
+    : runtime_(std::make_unique<Runtime>(*this)),
+      cpu(runtime_->primary_cpu),
+      secondary_harts_(runtime_->secondary_harts),
+      rtc(runtime_->rtc),
+      uart(runtime_->uart),
+      tui(runtime_->tui),
+      power(runtime_->power),
+      aclint_mtimer(runtime_->aclint_mtimer),
+      aclint_mswi(runtime_->aclint_mswi),
+      imsic_m(runtime_->imsic_m),
+      imsic_s(runtime_->imsic_s),
+      aplic_m(runtime_->aplic_m),
+      aplic_s(runtime_->aplic_s),
+      pcie(runtime_->pcie),
+      pci_disk(runtime_->pci_disk),
+      pci_console(runtime_->pci_console),
+      pci_rng(runtime_->pci_rng),
+      pci_gpu(runtime_->pci_gpu),
+      pci_input(runtime_->pci_input),
+      pci_sound(runtime_->pci_sound),
+      pci_net(runtime_->pci_net),
+      mmio_disk(runtime_->mmio_disk),
+      mmio_console(runtime_->mmio_console),
+      mmio_rng(runtime_->mmio_rng),
+      mmio_gpu(runtime_->mmio_gpu),
+      mmio_input(runtime_->mmio_input),
+      mmio_sound(runtime_->mmio_sound),
+      mmio_net(runtime_->mmio_net),
+      gdb_stub(runtime_->gdb_stub),
+      spike_lockstep(runtime_->spike_lockstep),
+      breakpoints(runtime_->breakpoints),
+      tracer(runtime_->tracer),
+      symbols(runtime_->symbols),
+      memory_(runtime_->memory) {
+    cpu.machine_ = this;
+}
+
+auto Machine::allocate_ram(size_t bytes) -> bool {
+    auto ram = std::unique_ptr<Byte[]>(new (std::nothrow) Byte[bytes]{});
+    if (!ram) {
+        return false;
+    }
+    runtime_->ram = std::move(ram);
+    mmem = runtime_->ram.get();
+    return true;
+}
+
+void Machine::release_ram() noexcept {
+    runtime_->ram.reset();
+    mmem = nullptr;
+}
 
 auto Machine::can_execute_fast_batch() const -> bool {
     if (!runtime_profile.allows_fast_batch() || s_lockstep_mode || s_gdb_mode || s_bp_trace ||
@@ -78,6 +164,40 @@ void Machine::clear_pending_reboot() {
     pending_binary_path_.clear();
     pending_appmode_.reset();
     pending_disk_path_.reset();
+}
+
+auto Machine::add_lifecycle_observer(LifecycleObserver observer) -> LifecycleObserverId {
+    std::lock_guard lock(lifecycle_observer_mutex_);
+    const auto id = next_lifecycle_observer_id_++;
+    lifecycle_observers_.emplace_back(id, std::move(observer));
+    return id;
+}
+
+void Machine::remove_lifecycle_observer(LifecycleObserverId observer_id) {
+    std::lock_guard lock(lifecycle_observer_mutex_);
+    std::erase_if(lifecycle_observers_, [observer_id](const auto& entry) {
+        return entry.first == observer_id;
+    });
+}
+
+void Machine::publish_lifecycle_event(LifecycleEventKind kind, int exit_status) {
+    std::vector<LifecycleObserver> observers;
+    {
+        std::lock_guard lock(lifecycle_observer_mutex_);
+        observers.reserve(lifecycle_observers_.size());
+        for (const auto& [_, observer] : lifecycle_observers_) {
+            observers.push_back(observer);
+        }
+    }
+    const LifecycleEvent event{
+        .kind = kind,
+        .instruction_count = cpu.e_icount,
+        .exit_status = exit_status,
+        .stop_reason = static_cast<uint8_t>(stop_reason()),
+    };
+    for (const auto& observer : observers) {
+        observer(event);
+    }
 }
 
 auto Machine::is_paused() const -> bool {
@@ -152,6 +272,7 @@ void Machine::stop(StopReason reason) {
     if (s_tuimode && tui) {
         tui->pause_loop();
     }
+    publish_lifecycle_event(LifecycleEventKind::Stopped);
 }
 
 void Machine::request_reboot() {
@@ -161,6 +282,7 @@ void Machine::request_reboot() {
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
     execution_state_.notify_all();
     stop_smp_threads();
+    publish_lifecycle_event(LifecycleEventKind::RebootRequested);
 }
 
 void Machine::request_exit(int status) {
@@ -171,9 +293,11 @@ void Machine::request_exit(int status) {
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
     execution_state_.notify_all();
     stop_smp_threads();
+    publish_lifecycle_event(LifecycleEventKind::ExitRequested, status);
 }
 
 void Machine::run() {
+    publish_lifecycle_event(LifecycleEventKind::Started);
     cpu.evaluate_timer_interrupt();
 
     // Start background SMP worker threads for multi-threaded secondary harts
@@ -261,7 +385,6 @@ void Machine::run() {
                 stop(StopReason::LockstepDivergence);
             }
         }
-
     }
 
     // Stop background SMP worker threads
@@ -328,7 +451,7 @@ void Machine::finalize_cycle_tohost() {
             return;
         } else {
             // HTIF Syscall handling: payload is a pointer to the syscall block in guest DRAM
-            if (simrv::memory::is_dram_addr(payload)) {
+            if (memory_geometry().contains(payload)) {
                 const Address masked_payload = payload & simrv::memory::kDramMask;
                 uint64_t syscall_num = 0;
                 uint64_t arg0 = 0;

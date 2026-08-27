@@ -23,7 +23,8 @@ using namespace simrv::isa;
 
 namespace {
 SIMRV_ALWAYS_INLINE auto captures_tui_execution_detail(const Machine& machine) -> bool {
-    return machine.s_tuimode && machine.tui && machine.tui->captures_execution_detail();
+    return machine.s_tuimode && machine.tui_controller() &&
+           machine.tui_controller()->captures_execution_detail();
 }
 
 SIMRV_ALWAYS_INLINE auto is_tohost_addr(const Machine& machine, Address addr) -> bool {
@@ -351,9 +352,9 @@ void CPU::run_cycle(Machine& machine) {
         // Bypasses pipeline orchestration and fetches from direct lookup cache if available.
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
-            const bool copy_ctx = captures_tui_execution_detail(machine) || machine.s_lockstep_mode ||
-                                  machine.s_gdb_mode || machine.s_bp_trace ||
-                                  (machine.s_strace != 0);
+            const bool copy_ctx = captures_tui_execution_detail(machine) ||
+                                  machine.s_lockstep_mode || machine.s_gdb_mode ||
+                                  machine.s_bp_trace || (machine.s_strace != 0);
             const bool inst_mix = machine.s_use_mix || captures_tui_execution_detail(machine);
             if (simrv::compiler::unlikely(copy_ctx && inst_mix)) {
                 execute_cached_op_fast<true, true>(machine, *cached);
@@ -524,9 +525,9 @@ void CPU::run_cycle_baremetal(Machine& machine) {
     if (machine.runtime_profile.is_instruction_fast()) {
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
-            const bool copy_ctx = captures_tui_execution_detail(machine) || machine.s_lockstep_mode ||
-                                  machine.s_gdb_mode || machine.s_bp_trace ||
-                                  (machine.s_strace != 0);
+            const bool copy_ctx = captures_tui_execution_detail(machine) ||
+                                  machine.s_lockstep_mode || machine.s_gdb_mode ||
+                                  machine.s_bp_trace || (machine.s_strace != 0);
             const bool inst_mix = machine.s_use_mix || captures_tui_execution_detail(machine);
             if (simrv::compiler::unlikely(copy_ctx && inst_mix)) {
                 execute_cached_op_fast<true, true>(machine, *cached);
@@ -624,7 +625,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
 
     // Load Phase
     if (opcode == Opcode::Load || (opcode == Opcode::Amo && funct5 == Funct5Amo::Lr)) {
-        if (simrv::compiler::likely(simrv::memory::is_dram_access(addr, access_size))) {
+        if (simrv::compiler::likely(machine.memory_geometry().contains(addr, access_size))) {
             ctx.mem_rdata = simrv::memory::ram_read_fast(addr, static_cast<Instruction>(ctx.funct3),
                                                          machine.mmem);
         } else {
@@ -633,8 +634,8 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         }
     } else if (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc) {
         // Atomic DRAM AMO Execution (non-LR, non-SC)
-        if (simrv::compiler::likely(simrv::memory::is_dram_access(addr, access_size))) {
-            const Address offset = addr - simrv::memory::g_dram_base;
+        if (simrv::compiler::likely(machine.memory_geometry().contains(addr, access_size))) {
+            const Address offset = addr - machine.memory_geometry().dram_base;
             if (ctx.funct3 == Funct3::Sw || ctx.funct3 == Funct3::Lw) {
                 auto* ptr = reinterpret_cast<uint32_t*>(&machine.mmem[offset]);
                 const auto prev = execute_dram_amo<uint32_t>(ptr, ctx.rrs2, funct5);
@@ -656,7 +657,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     }
 
     if (opcode == Opcode::LoadFp) {
-        if (simrv::compiler::likely(simrv::memory::is_dram_access(addr, access_size))) {
+        if (simrv::compiler::likely(machine.memory_geometry().contains(addr, access_size))) {
             const auto f3 = ctx.funct3;
             switch (f3) {
                 case Funct3::Flw: {
@@ -711,7 +712,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     if ((opcode == Opcode::Store) ||
         (opcode == Opcode::Amo &&
          (funct5 == Funct5Amo::Sc && (ctx.wb_data == 0u) && (state_.reserved != 0u)))) {
-        if (simrv::compiler::likely(simrv::memory::is_dram_access(addr, access_size))) {
+        if (simrv::compiler::likely(machine.memory_geometry().contains(addr, access_size))) {
             // Check tohost writes (fast filter for 0x80000000 or 0x40000000 regions)
             if (simrv::compiler::unlikely((addr & 0xC0000000ULL) != 0)) {
                 if (simrv::compiler::unlikely(addr == machine.s_isatest_tohost ||
@@ -749,13 +750,13 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                                                   ctx.funct3);
         }
     } else if (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr && funct5 != Funct5Amo::Sc &&
-               !simrv::memory::is_dram_access(addr, access_size)) {
+               !machine.memory_geometry().contains(addr, access_size)) {
         simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, addr, ctx.mem_wdata,
                                               ctx.funct3);
     }
 
     if (opcode == Opcode::StoreFp) {
-        if (simrv::compiler::likely(simrv::memory::is_dram_access(addr, access_size))) {
+        if (simrv::compiler::likely(machine.memory_geometry().contains(addr, access_size))) {
             const auto f3 = ctx.funct3;
             switch (f3) {
                 case Funct3::Fsw:
@@ -929,7 +930,7 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
     if (simrv::compiler::likely(state_.priv == kPrivMachine &&
                                 (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
         const unsigned size_bytes = access_size_for_funct3(funct3);
-        if (simrv::compiler::likely(simrv::memory::is_dram_access(mem_addr, size_bytes))) {
+        if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes))) {
             out_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3),
                                                    machine.mmem);
             return true;
@@ -946,7 +947,7 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
         (eff_priv != kPrivMachine &&
          simrv::xlen::satp_translation_enabled(state_.satp, active_xlen));
     if (!translation_enabled) {
-        if (simrv::compiler::likely(simrv::memory::is_dram_access(mem_addr, size_bytes))) {
+        if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes))) {
             out_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3),
                                                    machine.mmem);
             return true;
@@ -979,7 +980,7 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
     if (simrv::compiler::likely(state_.priv == kPrivMachine &&
                                 (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
         const unsigned size_bytes = access_size_for_funct3(funct3);
-        if (simrv::compiler::likely(simrv::memory::is_dram_access(mem_addr, size_bytes) &&
+        if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes) &&
                                     !is_tohost_addr(machine, mem_addr))) {
             simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3),
                                           machine.mmem);
@@ -997,7 +998,7 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
         (eff_priv != kPrivMachine &&
          simrv::xlen::satp_translation_enabled(state_.satp, active_xlen));
     if (!translation_enabled) {
-        if (simrv::compiler::likely(simrv::memory::is_dram_access(mem_addr, size_bytes) &&
+        if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes) &&
                                     !is_tohost_addr(machine, mem_addr))) {
             simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3),
                                           machine.mmem);
@@ -1016,7 +1017,7 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
                                                static_cast<Instruction>(funct3));
                 return true;
             }
-            if (simrv::compiler::likely(simrv::memory::is_dram_access(paddr, size_bytes) &&
+            if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes) &&
                                         !is_tohost_addr(machine, paddr))) {
                 simrv::memory::ram_write_fast(paddr, rrs2, static_cast<Instruction>(funct3),
                                               machine.mmem);
@@ -1037,7 +1038,7 @@ auto CPU::execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> 
     if (simrv::compiler::likely(state_.priv == kPrivMachine &&
                                 (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0 &&
                                 is_aligned_for_funct3(mem_addr, op.funct3) &&
-                                simrv::memory::is_dram_access(mem_addr, size_bytes))) {
+                                machine.memory_geometry().contains(mem_addr, size_bytes))) {
         mem_rdata = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(op.funct3),
                                                  machine.mmem);
     } else if (!try_fast_load(machine, mem_addr, op.funct3, mem_rdata)) {
@@ -1065,7 +1066,7 @@ auto CPU::execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Re
     if (simrv::compiler::likely(state_.priv == kPrivMachine &&
                                 (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0 &&
                                 is_aligned_for_funct3(mem_addr, op.funct3) &&
-                                simrv::memory::is_dram_access(mem_addr, size_bytes) &&
+                                machine.memory_geometry().contains(mem_addr, size_bytes) &&
                                 !is_tohost_addr(machine, mem_addr))) {
         simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(op.funct3),
                                       machine.mmem);
@@ -1367,8 +1368,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
 
 void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size) {
     const bool copy_ctx = captures_tui_execution_detail(machine) || machine.s_lockstep_mode ||
-                          machine.s_gdb_mode ||
-                          machine.s_bp_trace || (machine.s_strace != 0);
+                          machine.s_gdb_mode || machine.s_bp_trace || (machine.s_strace != 0);
     const bool inst_mix = machine.s_use_mix || captures_tui_execution_detail(machine);
     uint32_t cached_ops = 0;
 

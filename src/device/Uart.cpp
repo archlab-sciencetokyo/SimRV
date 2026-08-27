@@ -4,11 +4,11 @@
  */
 #include "simrv/device/Uart.hpp"
 
-#include <cerrno>
 #include <sys/select.h>
 #include <sys/time.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <thread>
 
 #include "simrv/core/Machine.hpp"
@@ -25,7 +25,7 @@ void update_uart_irq(simrv::core::Machine& machine, bool uart_rx_ready, Word uar
     const bool rx_irq_enabled = (uart_ier & static_cast<Word>(0x1U)) != 0;
     const bool tx_irq_enabled = (uart_ier & static_cast<Word>(0x2U)) != 0;
     bool const irq = (rx_irq_enabled && uart_rx_ready) || (tx_irq_enabled && tx_irq_pending);
-    machine.cpu.plic_set_irq(D_UART_IRQ_NUM, irq ? 1 : 0);
+    machine.set_platform_irq(D_UART_IRQ_NUM, irq);
 }
 
 }  // namespace
@@ -198,8 +198,8 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                     if (pty_.is_open()) {
                         (void)pty_.write_byte_to_master(ch);
                     }
-                    if (machine_.s_tuimode && machine_.tui) {
-                        machine_.tui->handle_char_write(static_cast<char>(ch));
+                    if (machine_.s_tuimode && machine_.tui_controller()) {
+                        machine_.tui_controller()->handle_char_write(static_cast<char>(ch));
                     } else if (!pty_.is_open()) {
                         (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
                     }

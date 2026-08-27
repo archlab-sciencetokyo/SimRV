@@ -203,8 +203,9 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
             if (probe_resp.opcode == TlOpcodeC::ProbeAckData) {
                 std::memcpy(line_buffer.data(), dirty.data(), kLineBytes);
                 data_fetched_from_owner = true;
-                if (dram_ptr != nullptr && is_dram_access(line_base, kLineBytes)) {
-                    const Address offset = line_base - simrv::memory::g_dram_base;
+                const auto geometry = machine_.memory_geometry();
+                if (dram_ptr != nullptr && geometry.contains(line_base, kLineBytes)) {
+                    const Address offset = line_base - geometry.dram_base;
                     std::memcpy(dram_ptr + offset, dirty.data(), kLineBytes);
                 }
             }
@@ -255,8 +256,9 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
     }
 
     if (!data_fetched_from_owner) {
-        if (dram_ptr != nullptr && is_dram_access(line_base, kLineBytes)) {
-            const Address offset = line_base - simrv::memory::g_dram_base;
+        const auto geometry = machine_.memory_geometry();
+        if (dram_ptr != nullptr && geometry.contains(line_base, kLineBytes)) {
+            const Address offset = line_base - geometry.dram_base;
             std::memcpy(line_buffer.data(), dram_ptr + offset, kLineBytes);
         } else {
             std::ranges::fill(line_buffer, static_cast<Byte>(0));
@@ -288,8 +290,9 @@ auto CoherenceHub::handle_release(const TlChannelC& req, TlChannelD& resp,
         dir_entry.sharers_mask &= ~(1u << req.hart);
         if (req.opcode == TlOpcodeC::ReleaseData && release_data != nullptr) {
             auto dram_ptr = machine_.memory_.mmu() ? machine_.memory_.mmu()->mmem() : nullptr;
-            if (dram_ptr != nullptr && is_dram_access(line_base, kLineBytes)) {
-                const Address offset = line_base - simrv::memory::g_dram_base;
+            const auto geometry = machine_.memory_geometry();
+            if (dram_ptr != nullptr && geometry.contains(line_base, kLineBytes)) {
+                const Address offset = line_base - geometry.dram_base;
                 std::memcpy(dram_ptr + offset, release_data->data(), kLineBytes);
                 stats_.writeback_count++;
             }

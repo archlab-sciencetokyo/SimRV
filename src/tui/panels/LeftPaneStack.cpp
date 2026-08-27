@@ -43,7 +43,8 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
 
     // Check if the stack pointer is valid and mapped in DRAM
     auto sp_phys = translate_safe(cpu, sp);
-    bool const sp_valid = (sp != 0 && sp_phys.has_value() && simrv::memory::is_dram_addr(*sp_phys));
+    bool const sp_valid =
+        (sp != 0 && sp_phys.has_value() && machine_.memory_geometry().contains(*sp_phys));
 
     // Fallback: Display warning message when sp is invalid or null (e.g. during initial boot)
     if (!sp_valid) {
@@ -57,9 +58,8 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
             return section_line("Live Guest Stack Watch", width);
         }
         if (logical_row == 3) {
-            return inactive_row(
-                std::format("\033[1;31mSTACK POINTER INACTIVE\033[0m  {}waiting\033[0m",
-                            kThemeMuted));
+            return inactive_row(std::format(
+                "\033[1;31mSTACK POINTER INACTIVE\033[0m  {}waiting\033[0m", kThemeMuted));
         }
         if (logical_row == 4) {
             std::string val_str =
@@ -68,8 +68,9 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
                 std::format("{}sp register\033[0m · {}{}\033[0m", kThemeText, kThemeVal, val_str));
         }
         if (logical_row == 5) {
-            std::string const text = width < 48 ? "Activates after guest initializes sp."
-                                                : "Stack watch activates after guest initializes sp.";
+            std::string const text = width < 48
+                                         ? "Activates after guest initializes sp."
+                                         : "Stack watch activates after guest initializes sp.";
             return inactive_row(std::format("{}{}\033[0m", kThemeMuted, text));
         }
         if (logical_row == 14) {
@@ -135,7 +136,7 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
     auto paddr_opt = translate_safe(cpu, target_vaddr);
     if (paddr_opt) {
         Register paddr = *paddr_opt;
-        if (simrv::memory::is_dram_addr(paddr)) {
+        if (machine_.memory_geometry().contains(paddr)) {
             Register raw_val = 0;
             if (xlen == 64) {
                 uint64_t data =
@@ -154,7 +155,7 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
             }
 
             if (raw_val != 0) {
-                std::string sym = machine_.symbols.lookup(raw_val);
+                std::string sym = machine_.symbol_table().lookup(raw_val);
                 if (!sym.empty()) {
                     dec_str += std::format(" <{}>", sym);
                 } else if (raw_val == ra) {

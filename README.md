@@ -13,10 +13,31 @@ SimRV is not RISC-V certified. `RV32GCBV` and `RV64GCBV` are implementation targ
 
 ## Quick Start
 
+### Interactive versus reproducible runs
+
+The interactive TUI remains the quickest way to explore SimRV: launch `SimRV` normally (or pass
+`--tui`) and load an image from the UI.  Use a versioned manifest for headless, automated, or
+publication runs so the full configuration and structured results are recorded:
+
+```bash
+# Validate and inspect a reproducible run definition.
+./build/rv64-release/SimRV validate experiment.toml
+./build/rv64-release/SimRV inspect experiment.toml
+
+# Headless execution writes manifest.resolved.toml, events.jsonl, and result.json.
+./build/rv64-release/SimRV run experiment.toml
+
+# A manifest can also launch the TUI when a reproducible interactive session is needed.
+./build/rv64-release/SimRV tui experiment.toml
+```
+
+The legacy command-line flags remain available for the lightweight interactive workflow during the
+2.x transition; manifests are the canonical interface for CLI automation.
+
 ### Prerequisites
 - **Clang 20+** or **GCC 15+** (required for the C++23 baseline). For current validation,
   prefer stable Clang 21+ and GCC 15+; use GCC 16+ once supplied by the host distribution.
-- **CMake 3.20+** & **Ninja**
+- **CMake 3.31+** & **Ninja**
 
 ### Build
 
@@ -30,8 +51,18 @@ cmake --preset rv32-release
 cmake --build --preset rv32-release
 ```
 
-Use `rv64-clang-release` or `rv64-gcc-release` to make the host compiler explicit. These presets
-resolve `clang`/`clang++` and `gcc`/`g++` from `PATH`; they do not download or pin a toolchain.
+Native-host and compiler-specific presets are also available:
+```bash
+cmake --preset rv64-native-release && cmake --build --preset rv64-native-release
+cmake --preset rv64-clang-release && cmake --build --preset rv64-clang-release
+cmake --preset rv64-gcc-release && cmake --build --preset rv64-gcc-release
+```
+
+Repeatable analysis presets are also available:
+```bash
+cmake --preset rv64-asan && cmake --build --preset rv64-asan
+cmake --preset rv64-tidy && cmake --build --preset rv64-tidy
+```
 If a host ccache wrapper has no writable cache, prefix configure and build commands with
 `CCACHE_DISABLE=1`.
 
@@ -44,25 +75,30 @@ Run a baremetal binary in interactive TUI mode (Default):
 
 Run headless in CLI-only mode:
 ```bash
-./build/rv64-release/SimRV -b -m img/hello.bin -c
+./build/rv64-release/SimRV -b -m img/hello.bin --cli
 ```
 
-Select instruction or cycle execution. CLI is optimized for speed; TUI retains inspection history:
+Select execution mode across fast, detailed, or cycle-accurate microarchitectures:
 ```bash
-./build/rv64-release/SimRV -b -m img/hello.bin --cli --ia
-./build/rv64-release/SimRV -b -m img/hello.bin --cli --ca
-./build/rv64-release/SimRV -b -m img/hello.bin --tui --ca
+# Fast functional execution
+./build/rv64-release/SimRV -b -m img/hello.bin --mode fast --cli
+
+# Cycle-accurate 4-stage pipeline execution
+./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --cli
+
+# Microarchitecture targets (3-stage, dual-issue, 5-stage)
+./build/rv64-release/SimRV -b -m img/hello.bin --mode dual-issue --smp 2 --cli
 ```
 
 Mirror configuration, diagnostics, termination, cache, bus, and performance summaries to a log:
 
 ```bash
-./build/rv64-release/SimRV -b -m img/hello.bin --cli --ca --log-file run.log
+./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --cli --log-file run.log
 ```
 
 Run Linux OS image with disk & devicetree:
 ```bash
-./build/rv64-release/SimRV --os -m linux-images/rv64/fw_payload.bin -D linux-images/rv64/root.bin -f linux-images/rv64/devicetree.dtb
+./build/rv64-release/SimRV --os -m linux-images/rv64/fw_payload.bin -D linux-images/rv64/root.img -c linux-images/rv64/devicetree.dtb --cli
 ```
 
 Override MISA profile or Vector register length (VLEN):
@@ -75,7 +111,7 @@ Override MISA profile or Vector register length (VLEN):
 
 ## Interactive TUI
 
-The TUI supports forward stepping, breakpoints, and hardware-state inspection.
+The TUI supports interactive stepping, breakpoints, and live hardware-state inspection.
 
 ### Key Shortcuts
 
@@ -85,15 +121,16 @@ The TUI supports forward stepping, breakpoints, and hardware-state inspection.
 | `[c]` / `[Ctrl-P]` | Run / Pause simulation loop |
 | `[Click Label]` / `[Click Badge]` | Click active running badge to pause |
 | `[o]` / `[Alt-O]` | Open Binary / Disk image loader modal |
-| `[,]` / `[Alt-S]` | Simulator Settings modal (CA/IA mode, diagnostics, logging) |
+| `[,]` / `[Alt-S]` | Simulator Settings modal (Execution mode, SMP, scheduler, diagnostics) |
 | `[Alt-M]` | Configure MISA CSR modal (Extensions A/B/C/D/F/M/V/S/U & VLEN) |
-| `[y]` | Cycle-Accurate System Config modal |
+| `[y]` | Cycle-Accurate Microarchitecture & Cache Config modal |
 | `[i]` | Memory inspector modal |
 | `[m]` | Manage breakpoints and watchpoints |
-| `[l]` / `[Alt-L]` | Cycle tool inspector tab (Pipe / Cache / BP / Hazard / TLB / Bus) |
-| `[r]` / `[Alt-R]` | Cycle register tab (GPR / FPR / VEC) |
-| `[g]` | Toggle guided inspection hints while paused |
-| `[Tab]` | Cycle TUI layout |
+| `[l]` / `[Alt-L]` | Cycle tool inspector tab (Pipe / Cache / BP / Hazard / TLB / Bus / IO / Stats) |
+| `[r]` / `[Alt-R]` | Cycle register tab (GPR / FPR / VEC / CSR) |
+| `[g]` | Toggle Educational Glossary modal |
+| `[Ctrl-A]` | Toggle input focus between guest UART/PTY and TUI navigation |
+| `[Tab]` | Cycle right pane view (Guest Terminal / Log Buffer) |
 | `[F1]` / `[h]` / `[?]` | Display online help shortcuts |
 | `[Esc]` | Close active modal |
 

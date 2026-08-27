@@ -6,8 +6,8 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
+#include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
 
@@ -73,8 +73,8 @@ void SystemConfigModal::open(SysConfigDraft& draft, int& cursor,
                              const simrv::core::Machine& machine) {
     cursor = 0;
     draft.cycle_accurate = machine.runtime_profile.is_cycle_mode();
-    draft.profile = static_cast<uint8_t>(machine.cpu.cpu_model_config.profile);
-    const auto& cfg = machine.cpu.pipeline_sim.config;
+    draft.profile = static_cast<uint8_t>(machine.primary_hart().cpu_model_config.profile);
+    const auto& cfg = machine.primary_hart().pipeline_sim.config;
     draft.pipeline_type = static_cast<uint8_t>(cfg.pipeline_type);
     draft.mul_latency = cfg.mul_latency;
     draft.div_latency = cfg.div_latency;
@@ -178,7 +178,7 @@ void SystemConfigModal::toggle_setting(SysConfigDraft& draft, int index) {
 
 auto SystemConfigModal::submit(const SysConfigDraft& draft, simrv::core::Machine& machine) -> bool {
     if (!draft.cycle_accurate) return true;
-    auto model = machine.cpu.cpu_model_config;
+    auto model = machine.primary_hart().cpu_model_config;
     const auto selected_profile = static_cast<simrv::pipeline::CpuModelProfile>(draft.profile);
     if (selected_profile != simrv::pipeline::CpuModelProfile::Custom) {
         model = simrv::pipeline::make_cpu_model_profile(selected_profile);
@@ -280,8 +280,7 @@ void SystemConfigModal::render(std::vector<std::string>& content_rows,
         add_row(std::format("{}BRAM L1: I {} KiB/{}-way · D {} KiB/{}-way · {} B lines\033[0m",
                             kThemeMuted, model.instruction_cache.capacity_bytes / 1024,
                             model.instruction_cache.associativity,
-                            model.data_cache.capacity_bytes / 1024,
-                            model.data_cache.associativity,
+                            model.data_cache.capacity_bytes / 1024, model.data_cache.associativity,
                             model.instruction_cache.line_bytes));
     }
 }

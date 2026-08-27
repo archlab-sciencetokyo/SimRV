@@ -76,9 +76,9 @@ void VirtioPciDevice::add_pci_cap(uint8_t cap_type, uint8_t bar, uint32_t offset
 }
 
 auto VirtioPciDevice::dma_read(Address paddr, void* dst, size_t len) -> bool {
-    if (!root_complex_ || !root_complex_->machine() || !root_complex_->machine()->mmem)
+    if (!root_complex_ || !root_complex_->machine() || !root_complex_->machine()->ram_data())
         return false;
-    auto* mem = root_complex_->machine()->mmem;
+    auto* mem = root_complex_->machine()->ram_data();
     if (paddr < 0x80000000ULL) return false;
     Address offset = paddr - 0x80000000ULL;
     std::memcpy(dst, mem + offset, len);
@@ -86,9 +86,9 @@ auto VirtioPciDevice::dma_read(Address paddr, void* dst, size_t len) -> bool {
 }
 
 auto VirtioPciDevice::dma_write(Address paddr, const void* src, size_t len) -> bool {
-    if (!root_complex_ || !root_complex_->machine() || !root_complex_->machine()->mmem)
+    if (!root_complex_ || !root_complex_->machine() || !root_complex_->machine()->ram_data())
         return false;
-    auto* mem = root_complex_->machine()->mmem;
+    auto* mem = root_complex_->machine()->ram_data();
     if (paddr < 0x80000000ULL) return false;
     Address offset = paddr - 0x80000000ULL;
     std::memcpy(mem + offset, src, len);

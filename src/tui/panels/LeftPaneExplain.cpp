@@ -673,8 +673,9 @@ auto render_dataflow_breakdown(const simrv::core::ArchState& st,
 
 auto LeftPane::get_explain_rows(int width) -> std::vector<std::string> {
     bool show_disabled = !paused_;
-    if (show_disabled && machine_.tui) {
-        uint64_t delay = machine_.tui->step_delay_us_.load(std::memory_order_relaxed);
+    if (show_disabled && machine_.tui_controller()) {
+        uint64_t delay =
+            machine_.tui_controller()->step_delay_us_.load(std::memory_order_relaxed);
         if (delay >= 10000) {
             show_disabled = false;
         }
@@ -782,7 +783,7 @@ auto LeftPane::get_explain_rows(int width) -> std::vector<std::string> {
     }
     explain_rows.push_back(section_line("Instruction Explainer", width));
 
-    std::string sym = machine_.symbols.lookup(target_pc);
+    std::string sym = machine_.symbol_table().lookup(target_pc);
     std::string pc_label =
         sym.empty() ? hex_addr(target_pc) : std::format("{} <{}>", hex_addr(target_pc), sym);
     explain_rows.push_back(format_to_width(

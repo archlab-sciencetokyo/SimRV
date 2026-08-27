@@ -2,31 +2,61 @@
     "version": 6,
     "cmakeMinimumRequired": {
         "major": 3,
-        "minor": 20,
+        "minor": 31,
         "patch": 0
     },
     "configurePresets": [
         {
-            "name": "rv32-release",
-            "displayName": "RV32 Release (Ninja)",
+            "name": "simrv-base",
+            "hidden": true,
             "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build/rv32-release",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "simrv-release",
+            "hidden": true,
+            "inherits": "simrv-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "simrv-debug",
+            "hidden": true,
+            "inherits": "simrv-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "simrv-rv32",
+            "hidden": true,
+            "cacheVariables": {
                 "SIMRV_XLEN": "32"
             }
         },
         {
-            "name": "rv64-release",
-            "displayName": "RV64 Release (Ninja)",
-            "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build/rv64-release",
+            "name": "simrv-rv64",
+            "hidden": true,
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
                 "SIMRV_XLEN": "64"
             }
+        },
+        {
+            "name": "rv32-release",
+            "displayName": "RV32 Release (Ninja)",
+            "inherits": ["simrv-release", "simrv-rv32"],
+            "binaryDir": "${sourceDir}/build/rv32-release",
+            "cacheVariables": {}
+        },
+        {
+            "name": "rv64-release",
+            "displayName": "RV64 Release (Ninja)",
+            "inherits": ["simrv-release", "simrv-rv64"],
+            "binaryDir": "${sourceDir}/build/rv64-release",
+            "cacheVariables": {}
         },
         {
             "name": "rv64-native-release",
@@ -69,23 +99,43 @@
         {
             "name": "rv32-debug",
             "displayName": "RV32 Debug (Ninja)",
-            "generator": "Ninja",
+            "inherits": ["simrv-debug", "simrv-rv32"],
             "binaryDir": "${sourceDir}/build/rv32-debug",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-                "SIMRV_XLEN": "32"
-            }
+            "cacheVariables": {}
         },
         {
             "name": "rv64-debug",
             "displayName": "RV64 Debug (Ninja)",
-            "generator": "Ninja",
+            "inherits": ["simrv-debug", "simrv-rv64"],
             "binaryDir": "${sourceDir}/build/rv64-debug",
+            "cacheVariables": {}
+        },
+        {
+            "name": "rv64-asan",
+            "displayName": "RV64 Address/Undefined Sanitizers (Ninja)",
+            "inherits": "rv64-clang-release",
+            "binaryDir": "${sourceDir}/build/rv64-asan",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-                "SIMRV_XLEN": "64"
+                "SIMRV_ENABLE_ASAN": "ON",
+                "SIMRV_ENABLE_UBSAN": "ON"
+            }
+        },
+        {
+            "name": "rv64-tidy",
+            "displayName": "RV64 clang-tidy (Ninja)",
+            "inherits": "rv64-clang-release",
+            "binaryDir": "${sourceDir}/build/rv64-tidy",
+            "cacheVariables": {
+                "SIMRV_ENABLE_CLANG_TIDY": "ON"
+            }
+        },
+        {
+            "name": "rv64-tsan",
+            "displayName": "RV64 ThreadSanitizer (Ninja)",
+            "inherits": "rv64-clang-release",
+            "binaryDir": "${sourceDir}/build/rv64-tsan",
+            "cacheVariables": {
+                "SIMRV_ENABLE_TSAN": "ON"
             }
         }
     ],
@@ -117,6 +167,135 @@
         {
             "name": "rv64-debug",
             "configurePreset": "rv64-debug"
+        },
+        {
+            "name": "rv64-asan",
+            "configurePreset": "rv64-asan"
+        },
+        {
+            "name": "rv64-tidy",
+            "configurePreset": "rv64-tidy"
+        },
+        {
+            "name": "rv64-tsan",
+            "configurePreset": "rv64-tsan"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "rv64-dev",
+            "configurePreset": "rv64-debug",
+            "output": {
+                "outputOnFailure": true
+            },
+            "filter": {
+                "include": {
+                    "label": "regress"
+                }
+            }
+        },
+        {
+            "name": "rv64-gate",
+            "configurePreset": "rv64-release",
+            "output": {
+                "outputOnFailure": true
+            },
+            "filter": {
+                "include": {
+                    "label": "gate"
+                }
+            }
+        },
+        {
+            "name": "rv32-gate",
+            "configurePreset": "rv32-release",
+            "output": {
+                "outputOnFailure": true
+            },
+            "filter": {
+                "include": {
+                    "label": "gate"
+                }
+            }
+        },
+        {
+            "name": "rv64-asan-gate",
+            "configurePreset": "rv64-asan",
+            "output": {
+                "outputOnFailure": true
+            },
+            "filter": {
+                "include": {
+                    "label": "gate"
+                }
+            }
+        },
+        {
+            "name": "rv64-tsan-gate",
+            "configurePreset": "rv64-tsan",
+            "output": {
+                "outputOnFailure": true
+            },
+            "filter": {
+                "include": {
+                    "label": "gate"
+                }
+            }
+        }
+    ],
+    "packagePresets": [
+        {
+            "name": "rv64-release-package",
+            "configurePreset": "rv64-release",
+            "generators": ["TGZ"]
+        }
+    ],
+    "workflowPresets": [
+        {
+            "name": "rv64-dev",
+            "displayName": "RV64 developer workflow",
+            "steps": [
+                {"type": "configure", "name": "rv64-debug"},
+                {"type": "build", "name": "rv64-debug"},
+                {"type": "test", "name": "rv64-dev"}
+            ]
+        },
+        {
+            "name": "rv32-gate",
+            "displayName": "RV32 release gate",
+            "steps": [
+                {"type": "configure", "name": "rv32-release"},
+                {"type": "build", "name": "rv32-release"},
+                {"type": "test", "name": "rv32-gate"}
+            ]
+        },
+        {
+            "name": "rv64-gate",
+            "displayName": "RV64 release gate",
+            "steps": [
+                {"type": "configure", "name": "rv64-release"},
+                {"type": "build", "name": "rv64-release"},
+                {"type": "test", "name": "rv64-gate"}
+            ]
+        },
+        {
+            "name": "rv64-quality",
+            "displayName": "RV64 sanitizer quality gate",
+            "steps": [
+                {"type": "configure", "name": "rv64-asan"},
+                {"type": "build", "name": "rv64-asan"},
+                {"type": "test", "name": "rv64-asan-gate"}
+            ]
+        },
+        {
+            "name": "release-package",
+            "displayName": "RV64 release package workflow",
+            "steps": [
+                {"type": "configure", "name": "rv64-release"},
+                {"type": "build", "name": "rv64-release"},
+                {"type": "test", "name": "rv64-gate"},
+                {"type": "package", "name": "rv64-release-package"}
+            ]
         }
     ]
 }

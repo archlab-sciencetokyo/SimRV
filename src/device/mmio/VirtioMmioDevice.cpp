@@ -31,7 +31,7 @@ void VirtioMmioDevice::add_queue(uint16_t max_size) {
 void VirtioMmioDevice::trigger_irq() {
     interrupt_status_ |= 0x1;
     if (machine_ != nullptr && irq_num_ != 0) {
-        machine_->cpu.plic_set_irq(static_cast<int>(irq_num_), 1);
+        machine_->set_platform_irq(static_cast<int>(irq_num_), true);
     }
 }
 
@@ -153,7 +153,7 @@ void VirtioMmioDevice::write32(Address offset, uint32_t value) {
         case 0x64:  // InterruptACK
             interrupt_status_ &= ~value;
             if (interrupt_status_ == 0 && machine_ != nullptr && irq_num_ != 0) {
-                machine_->cpu.plic_set_irq(static_cast<int>(irq_num_), 0);
+                machine_->set_platform_irq(static_cast<int>(irq_num_), false);
             }
             break;
         case 0x70:  // Status

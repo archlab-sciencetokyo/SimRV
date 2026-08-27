@@ -46,7 +46,7 @@ namespace {
 
 void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
                                     const simrv::debug::SymbolTable& symbols) {
-    simrv::memory::g_dram_base = simrv::memory::kDramBaseAddress;
+    machine.config.memory.dram_base = simrv::memory::kDramBaseAddress;
 
     if (machine.s_start_pc == simrv::boot::kStartPc || machine.s_start_pc == 0) {
         Address entry = symbols.entry_point().value_or(
@@ -61,10 +61,10 @@ void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
         machine.s_isatest_tohost = *tohost_sym;
     }
 
-    machine.cpu.state().pc = machine.s_start_pc;
-    if (machine.cpu.state().regs.xlen == 32) {
-        machine.cpu.state().pc = static_cast<Register>(
-            static_cast<int64_t>(static_cast<int32_t>(machine.cpu.state().pc)));
+    machine.primary_hart().state().pc = machine.s_start_pc;
+    if (machine.primary_hart().state().regs.xlen == 32) {
+        machine.primary_hart().state().pc = static_cast<Register>(static_cast<int64_t>(
+            static_cast<int32_t>(machine.primary_hart().state().pc)));
     }
 }
 
@@ -236,6 +236,37 @@ void load_image_into_ram(std::string& file_path, Byte* ram, std::size_t capacity
 
 }  // namespace
 
+auto Machine::platform_status() const -> PlatformStatusSnapshot {
+    PlatformStatusSnapshot snapshot{.profile = platform_profile(),
+                                    .has_pcie = pcie != nullptr,
+                                    .has_mmio = mmio_disk != nullptr};
+    if (pci_disk) {
+        snapshot.disk_loaded = pci_disk->is_disk_loaded();
+        snapshot.disk_status = pci_disk->device_status();
+        snapshot.disk_isr = pci_disk->isr_status();
+        snapshot.disk_capacity_sectors = pci_disk->capacity_sectors();
+    } else if (mmio_disk) {
+        snapshot.disk_loaded = mmio_disk->is_disk_loaded();
+        snapshot.disk_status = mmio_disk->device_status();
+        snapshot.disk_isr = mmio_disk->isr_status();
+        snapshot.disk_capacity_sectors = mmio_disk->capacity_sectors();
+    }
+    if (pci_net) {
+        snapshot.network_status = pci_net->device_status();
+        snapshot.network_tx_packets = pci_net->backend().tx_packet_count();
+    } else if (mmio_net) {
+        snapshot.network_status = mmio_net->device_status();
+        snapshot.network_tx_packets = mmio_net->backend().tx_packet_count();
+    }
+    if (pci_console) snapshot.console_status = pci_console->device_status();
+    else if (mmio_console) snapshot.console_status = mmio_console->device_status();
+    snapshot.rng_status = pci_rng ? pci_rng->device_status()
+                                  : (mmio_rng ? mmio_rng->device_status() : 0);
+    snapshot.gpu_status = pci_gpu ? pci_gpu->device_status()
+                                  : (mmio_gpu ? mmio_gpu->device_status() : 0);
+    return snapshot;
+}
+
 auto Machine::initialize() -> int {
     if (!s_fn_cpuconfig.empty()) {
         auto model = cpu.cpu_model_config;
@@ -257,15 +288,11 @@ auto Machine::initialize() -> int {
     const size_t effective_dram_size = (s_dram_size != 0)
                                            ? static_cast<size_t>(s_dram_size)
                                            : static_cast<size_t>(simrv::memory::kDramSize);
-    simrv::memory::g_dram_size = static_cast<Address>(effective_dram_size);
-    mmem_owner_.reset(static_cast<Byte*>(std::calloc(
-        effective_dram_size,
-        sizeof(Byte))));  // NOLINT(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory)
-    if (mmem_owner_ == nullptr) {
+    config.memory.dram_size = static_cast<Address>(effective_dram_size);
+    if (!allocate_ram(effective_dram_size)) {
         simrv::log::error("Failed to allocate main memory ({} bytes)", effective_dram_size);
         return 1;
     }
-    mmem = mmem_owner_.get();
 
     memory_.initialize_mmu();
 
@@ -480,7 +507,7 @@ auto Machine::initialize() -> int {
                                       s_platform_profile == PlatformProfile::Hybrid);
             simrv::util::FdtConfig const fdt_cfg{
                 .num_harts = s_num_harts,
-                .dram_base = simrv::memory::g_dram_base,
+                .dram_base = config.memory.dram_base,
                 .dram_size = effective_dram_size,
                 .xlen = simrv::xlen::kXLenBits,
                 .enable_pcie = enable_pcie,
@@ -631,7 +658,7 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
     const size_t effective_dram_size = (s_dram_size != 0)
                                            ? static_cast<size_t>(s_dram_size)
                                            : static_cast<size_t>(simrv::memory::kDramSize);
-    simrv::memory::g_dram_size = static_cast<Address>(effective_dram_size);
+    config.memory.dram_size = static_cast<Address>(effective_dram_size);
     const Address dtb_offset =
         linux_boot ? static_cast<Address>(effective_dram_size - static_cast<size_t>(0x00100000U))
                    : simrv::boot::kInitDataAddress;
@@ -654,7 +681,7 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
                                       s_platform_profile == PlatformProfile::Hybrid);
             simrv::util::FdtConfig const fdt_cfg{
                 .num_harts = s_num_harts,
-                .dram_base = simrv::memory::g_dram_base,
+                .dram_base = config.memory.dram_base,
                 .dram_size = effective_dram_size,
                 .xlen = simrv::xlen::kXLenBits,
                 .enable_pcie = enable_pcie,

@@ -84,12 +84,12 @@ auto LeftPane::render_machine_performance_stats(const simrv::core::CPU& cpu, int
     if (stats_row == 0) return section_line("Performance", width);
     if (stats_row == 1) {
         return render_pair("retired", simrv::util::format_with_commas(cpu.e_icount), kThemeMint,
-                           "sim", std::format("{:.3f} s", simulated_seconds), kThemeSky,
-                           width / 2, width - width / 2, width < 45 ? 0 : 7);
+                           "sim", std::format("{:.3f} s", simulated_seconds), kThemeSky, width / 2,
+                           width - width / 2, width < 45 ? 0 : 7);
     }
     if (stats_row == 2) {
-        return render_pair("engine", std::string(machine_.runtime_profile.execution_name()), kThemeVal,
-                           "host", std::format("{:.3f} s", active_runtime_), kThemeMint,
+        return render_pair("engine", std::string(machine_.runtime_profile.execution_name()),
+                           kThemeVal, "host", std::format("{:.3f} s", active_runtime_), kThemeMint,
                            width / 2, width - width / 2, width < 45 ? 0 : 7);
     }
     if (stats_row == 3) {
@@ -100,13 +100,14 @@ auto LeftPane::render_machine_performance_stats(const simrv::core::CPU& cpu, int
     }
     if (stats_row == 4) {
         const auto average = active_runtime_ > 0.0
-                                 ? static_cast<uint64_t>(static_cast<double>(cpu.e_icount) / 1000.0 /
-                                                         active_runtime_)
+                                 ? static_cast<uint64_t>(static_cast<double>(cpu.e_icount) /
+                                                         1000.0 / active_runtime_)
                                  : 0;
         if (width >= 52) {
             const bool compact = width < 70;
             const std::string average_label = compact ? "avg" : "average";
-            const std::string suffix = std::format("]  {}: {}", average_label, format_speed(average));
+            const std::string suffix =
+                std::format("]  {}: {}", average_label, format_speed(average));
             const int available = width - 11 - get_display_width(suffix);
             const int spark_width = std::max(8, std::min(available, (width * 2) / 5));
             return format_to_width(
@@ -120,8 +121,8 @@ auto LeftPane::render_machine_performance_stats(const simrv::core::CPU& cpu, int
     return format_to_width("", width);
 }
 
-auto LeftPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int stats_row,
-                                           int width) -> std::string {
+auto LeftPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int stats_row, int width)
+    -> std::string {
     const int half = width / 2;
     const int label_pad = width < 45 ? 0 : 7;
     const uint64_t cycles = cpu.clint_mmio.mcycle;
@@ -129,12 +130,12 @@ auto LeftPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int stat
     if (stats_row == 0) return section_line("Performance · Cycle Accurate", width);
     if (stats_row == 1) {
         return render_pair("retired", simrv::util::format_with_commas(cpu.e_icount), kThemeMint,
-                           "sim", std::format("{:.3f} s", simulated_seconds), kThemeSky,
-                           half, width - half, label_pad);
+                           "sim", std::format("{:.3f} s", simulated_seconds), kThemeSky, half,
+                           width - half, label_pad);
     }
     if (stats_row == 2) {
-        return render_pair("engine", std::string(machine_.runtime_profile.execution_name()), kThemeVal,
-                           "host", std::format("{:.3f} s", active_runtime_), kThemeMint,
+        return render_pair("engine", std::string(machine_.runtime_profile.execution_name()),
+                           kThemeVal, "host", std::format("{:.3f} s", active_runtime_), kThemeMint,
                            half, width - half, label_pad);
     }
     if (stats_row == 3) {
@@ -145,13 +146,14 @@ auto LeftPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int stat
     }
     if (stats_row == 4) {
         const auto average = active_runtime_ > 0.0
-                                 ? static_cast<uint64_t>(static_cast<double>(cpu.e_icount) / 1000.0 /
-                                                         active_runtime_)
+                                 ? static_cast<uint64_t>(static_cast<double>(cpu.e_icount) /
+                                                         1000.0 / active_runtime_)
                                  : 0;
         if (width >= 52) {
             const bool compact = width < 70;
             const std::string average_label = compact ? "avg" : "average";
-            const std::string suffix = std::format("]  {}: {}", average_label, format_speed(average));
+            const std::string suffix =
+                std::format("]  {}: {}", average_label, format_speed(average));
             const int available = width - 11 - get_display_width(suffix);
             const int spark_width = std::max(8, std::min(available, (width * 2) / 5));
             return format_to_width(
@@ -166,13 +168,13 @@ auto LeftPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int stat
         const double ipc = cycles == 0 ? 0.0 : static_cast<double>(cpu.e_icount) / cycles;
         const double cpi = cpu.e_icount == 0 ? 0.0 : static_cast<double>(cycles) / cpu.e_icount;
         return render_pair("IPC", std::format("{:.2f}", ipc), kThemeMint, "CPI",
-                           std::format("{:.2f}", cpi), kThemePeach, half, width - half,
-                           label_pad);
+                           std::format("{:.2f}", cpi), kThemePeach, half, width - half, label_pad);
     }
     if (stats_row == 6 || stats_row == 7) {
         const bool instruction_cache = stats_row == 6;
         const uint64_t hits = instruction_cache ? cpu.icache.hit_count() : cpu.dcache.hit_count();
-        const uint64_t misses = instruction_cache ? cpu.icache.miss_count() : cpu.dcache.miss_count();
+        const uint64_t misses =
+            instruction_cache ? cpu.icache.miss_count() : cpu.dcache.miss_count();
         const uint64_t total = hits + misses;
         const double hit_rate = total == 0 ? 0.0 : static_cast<double>(hits) / total;
         // The cache inspector owns raw hit/miss counts.  Keep this summary visual and bounded so
@@ -182,17 +184,18 @@ auto LeftPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int stat
         const int available = width - 11 - 2 - get_display_width(percent);
         const int bar_width = std::max(1, std::min(available, (width * 2) / 5));
         const char* color = instruction_cache ? kThemeSky : kThemePink;
-        return format_to_width(std::format(" {}{:<7}\033[0m: [{}] {}{}\033[0m", kThemeText, label,
-                                           make_progress_bar(hit_rate, bar_width, color), color, percent),
-                               width);
+        return format_to_width(
+            std::format(" {}{:<7}\033[0m: [{}] {}{}\033[0m", kThemeText, label,
+                        make_progress_bar(hit_rate, bar_width, color), color, percent),
+            width);
     }
     if (stats_row == 8) {
         const uint64_t data = cpu.pipeline_sim.data_hazard_stalls();
         const uint64_t control = cpu.pipeline_sim.control_hazard_bubbles();
         const uint64_t cache = cpu.pipeline_sim.icache_stalls() + cpu.pipeline_sim.dcache_stalls();
-        const auto [name, count] = std::max({std::pair{"data", data}, std::pair{"control", control},
-                                             std::pair{"cache", cache}},
-                                            [](const auto& lhs, const auto& rhs) { return lhs.second < rhs.second; });
+        const auto [name, count] = std::max(
+            {std::pair{"data", data}, std::pair{"control", control}, std::pair{"cache", cache}},
+            [](const auto& lhs, const auto& rhs) { return lhs.second < rhs.second; });
         const double ratio = cycles == 0 ? 0.0 : static_cast<double>(count) * 100.0 / cycles;
         return make_field("limit", std::format("{} ({:.1f}%)", name, ratio), kThemePeach,
                           width < 45 ? 0 : 7);
@@ -211,47 +214,50 @@ auto LeftPane::render_debug_state(int debug_row, int width) -> std::string {
         return section_line("Debug · Live", width);
     }
     if (debug_row == 1) {
-        std::string sym = machine_.symbols.lookup(st.pc);
+        std::string sym = machine_.symbol_table().lookup(st.pc);
         // Keep the raw architectural PC separate from the ELF resolution.  The prior
         // <symbol> form hid the address and made an offset look like part of the symbol name.
         const bool resolved = !sym.empty();
         if (!resolved) sym = "no matching ELF symbol";
         // render_pair reserves eleven cells for the label and separator in the right column.
         sym = compact_elf_symbol(std::move(sym), std::max(1, right_width - 11));
-        return render_pair("PC", std::format("0x{:0{}x}", static_cast<uint64_t>(st.pc),
-                                              simrv::xlen::kIsXLen64 ? 16 : 8),
-                           kThemeMint, "ELF sym", sym, resolved ? kThemePeach : kThemeMuted,
-                           col_width, right_width, label_pad);
+        return render_pair(
+            "PC",
+            std::format("0x{:0{}x}", static_cast<uint64_t>(st.pc), simrv::xlen::kIsXLen64 ? 16 : 8),
+            kThemeMint, "ELF sym", sym, resolved ? kThemePeach : kThemeMuted, col_width,
+            right_width, label_pad);
     }
     if (debug_row == 2) {
         return render_pair(
-            "breakpoints", std::to_string(machine_.breakpoints.get_pc_breakpoints().size()),
-            machine_.breakpoints.get_pc_breakpoints().empty() ? kThemeMuted : kThemePeach,
-            "watchpoints", std::to_string(machine_.breakpoints.get_watchpoints().size()),
-            machine_.breakpoints.get_watchpoints().empty() ? kThemeMuted : kThemePeach, col_width,
+            "breakpoints",
+            std::to_string(machine_.breakpoint_manager().get_pc_breakpoints().size()),
+            machine_.breakpoint_manager().get_pc_breakpoints().empty() ? kThemeMuted : kThemePeach,
+            "watchpoints",
+            std::to_string(machine_.breakpoint_manager().get_watchpoints().size()),
+            machine_.breakpoint_manager().get_watchpoints().empty() ? kThemeMuted : kThemePeach,
+            col_width,
             right_width, label_pad);
     }
     int optional_row = 3;
     if (machine_.is_paused() &&
         machine_.stop_reason() != simrv::core::Machine::StopReason::Running) {
         if (debug_row == optional_row) {
-            return make_field("stop", std::string(simrv::core::Machine::stop_reason_name(
-                                          machine_.stop_reason())),
-                              kThemePeach, label_pad);
+            return make_field(
+                "stop", std::string(simrv::core::Machine::stop_reason_name(machine_.stop_reason())),
+                kThemePeach, label_pad);
         }
         ++optional_row;
     }
-    if (machine_.gdb_stub || machine_.spike_lockstep) {
+    if (machine_.debugger() || machine_.lockstep()) {
         if (debug_row == optional_row) {
-            const bool gdb_enabled = static_cast<bool>(machine_.gdb_stub);
-            const bool lockstep_enabled = static_cast<bool>(machine_.spike_lockstep);
-            return render_pair(gdb_enabled ? "gdb stub" : "",
-                               gdb_enabled ? (machine_.gdb_stub->is_connected() ? "connected"
-                                                                                   : "listening")
-                                           : "",
-                               kThemeMint, lockstep_enabled ? "lockstep" : "",
-                               lockstep_enabled ? "active" : "", kThemeMint, col_width,
-                               right_width, label_pad);
+            const bool gdb_enabled = machine_.debugger() != nullptr;
+            const bool lockstep_enabled = machine_.lockstep() != nullptr;
+            return render_pair(
+                gdb_enabled ? "gdb stub" : "",
+                gdb_enabled ? (machine_.debugger()->is_connected() ? "connected" : "listening")
+                            : "",
+                kThemeMint, lockstep_enabled ? "lockstep" : "", lockstep_enabled ? "active" : "",
+                kThemeMint, col_width, right_width, label_pad);
         }
         ++optional_row;
     }
@@ -266,10 +272,9 @@ auto LeftPane::render_debug_state(int debug_row, int width) -> std::string {
 
 auto LeftPane::debug_state_row_count() const -> int {
     int rows = 3;  // heading, PC/ELF resolution, and configured stop points
-    if (machine_.is_paused() &&
-        machine_.stop_reason() != simrv::core::Machine::StopReason::Running)
+    if (machine_.is_paused() && machine_.stop_reason() != simrv::core::Machine::StopReason::Running)
         ++rows;
-    if (machine_.gdb_stub || machine_.spike_lockstep) ++rows;
+    if (machine_.debugger() || machine_.lockstep()) ++rows;
     if (machine_.s_traplog_mode) ++rows;
     return rows;
 }

@@ -54,8 +54,7 @@ auto build_modal_tab_bar(std::span<const std::string_view> tabs, size_t active_t
  * @brief Resolve a shared tab/footer control row against the modal's final inner width.
  */
 auto align_modal_control_row(std::string row, int inner_width) -> std::string;
-auto layout_modal_control_row(std::string row, int inner_width)
-    -> framework::RenderedControl;
+auto layout_modal_control_row(std::string row, int inner_width) -> framework::RenderedControl;
 
 /**
  * @brief Formats a styled section category divider banner, e.g. "── ISA Extensions ──".

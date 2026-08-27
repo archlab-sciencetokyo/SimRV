@@ -63,14 +63,12 @@ void Tracer::init_dlog(bool dlog_mode) {
 }
 
 void Tracer::dump_init_artifacts() {
-    auto* cpu = &machine_.cpu;
-    auto* ram = machine_.mmem;
+    auto* cpu = &machine_.primary_hart();
+    auto* ram = machine_.ram_data();
 
     {
         std::ofstream out("trace/init_mem.txt");
-        const auto dram_size = machine_.s_dram_size > 0
-                                   ? machine_.s_dram_size
-                                   : static_cast<uint64_t>(simrv::memory::g_dram_size);
+        const auto dram_size = static_cast<uint64_t>(machine_.memory_geometry().dram_size);
         for (Address i = 0; i < dram_size; ++i) {
             out << std::hex << static_cast<unsigned>(std::to_integer<uint8_t>(ram[i])) << '\n';
         }
@@ -152,15 +150,11 @@ void Tracer::dump_init_artifacts() {
         std::println(out, "mmu.TLB_data_w.mem[{}][21:0] =22'h{:06x};", i, entry.p_addr >> 10);
     }
 
-    if (machine_.pci_console) {
-        write_32("pcie.virtio_console.status", machine_.pci_console->device_status());
-        write_32("pcie.virtio_console.isr   ", machine_.pci_console->isr_status());
-    }
-    if (machine_.pci_disk) {
-        write_32("pcie.virtio_disk.status   ", machine_.pci_disk->device_status());
-        write_32("pcie.virtio_disk.isr      ", machine_.pci_disk->isr_status());
-        write_64("pcie.virtio_disk.capacity ", machine_.pci_disk->capacity_sectors());
-    }
+    const auto platform = machine_.platform_status();
+    write_32("platform.virtio_console.status", platform.console_status);
+    write_32("platform.virtio_disk.status   ", platform.disk_status);
+    write_32("platform.virtio_disk.isr      ", platform.disk_isr);
+    write_64("platform.virtio_disk.capacity ", platform.disk_capacity_sectors);
 
     simrv::log::info("file init_reg.txt was generated after {} cycle",
                      static_cast<Counter>(cpu->clint_mmio.mtime.load()));
@@ -174,14 +168,14 @@ void Tracer::write_instruction_mix_report() {
     }
     std::println(out, "INSTRUCTION MIX");
     uint64_t total = 0;
-    for (auto const [i, count] : std::views::enumerate(machine_.cpu.e_instmix)) {
+    for (auto const [i, count] : std::views::enumerate(machine_.primary_hart().e_instmix)) {
         std::println(out, "{} : {:10}",
                      simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(i)), count);
         total += count;
     }
     std::println(out, "TOTAL      : {:10}", total);
     simrv::log::info("file instmix.txt was generated after {} cycle",
-                     static_cast<Counter>(machine_.cpu.clint_mmio.mtime.load()));
+                     static_cast<Counter>(machine_.primary_hart().clint_mmio.mtime.load()));
 }
 
 void Tracer::print_summary() {
@@ -192,7 +186,7 @@ void Tracer::print_summary() {
         std::chrono::duration_cast<std::chrono::microseconds>(now - machine_.s_start_time).count();
     const auto etime = static_cast<Counter>(elapsed == 0 ? 1 : elapsed);
 
-    const auto mcycle = machine_.cpu.clint_mmio.mcycle;
+    const auto mcycle = machine_.primary_hart().clint_mmio.mcycle;
     Counter icount = 0;
     Counter ccount = 0;
     for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
@@ -226,7 +220,8 @@ void Tracer::print_summary() {
                      format_with_commas(mcycle));
     simrv::log::info("Executed instructions    : {:>12}  ({})", format_scaled(icount),
                      format_with_commas(icount));
-    simrv::log::info("Final architectural PC   :   0x{:016x}", machine_.cpu.state().pc);
+    simrv::log::info("Final architectural PC   :   0x{:016x}",
+                     machine_.primary_hart().state().pc);
     simrv::log::info("Fetched compressed insns : {:>12}  ({})  [{:.1f}%]", format_scaled(ccount),
                      format_with_commas(ccount), comp_ratio);
     simrv::log::info("Cycles Per Instr (CPI)   : {:>12.3f}", cpi);
@@ -245,7 +240,7 @@ void Tracer::print_summary() {
     }
 
     if (machine_.runtime_profile.is_cycle_mode()) {
-        const auto& ps = machine_.cpu.pipeline_sim;
+        const auto& ps = machine_.primary_hart().pipeline_sim;
         double stall_pct = mcycle == 0 ? 0.0
                                        : (static_cast<double>(ps.stall_cycles()) * 100.0) /
                                              static_cast<double>(mcycle);
@@ -261,11 +256,11 @@ void Tracer::print_summary() {
                          format_with_commas(ps.dcache_stalls()));
         simrv::log::info(" - Page-walk Stalls      : {:>12}", format_with_commas(ps.tlb_stalls()));
         simrv::log::info("L1I hits / misses        : {:>12} / {}",
-                         format_with_commas(machine_.cpu.icache.hit_count()),
-                         format_with_commas(machine_.cpu.icache.miss_count()));
+                         format_with_commas(machine_.primary_hart().icache.hit_count()),
+                         format_with_commas(machine_.primary_hart().icache.miss_count()));
         simrv::log::info("L1D hits / misses        : {:>12} / {}",
-                         format_with_commas(machine_.cpu.dcache.hit_count()),
-                         format_with_commas(machine_.cpu.dcache.miss_count()));
+                         format_with_commas(machine_.primary_hart().dcache.hit_count()),
+                         format_with_commas(machine_.primary_hart().dcache.miss_count()));
         const auto& bus = machine_.memory().system_bus();
         simrv::log::info("Bus reads / writes       : {:>12} / {}",
                          format_with_commas(bus.read_count()),
@@ -330,7 +325,7 @@ void Tracer::write_trace_snapshot() {
     if (!fp_trace.is_open()) {
         return;
     }
-    const auto& cpu = machine_.cpu;
+    const auto& cpu = machine_.primary_hart();
     const auto& st = cpu.state();
 
     std::print(fp_trace, "{:08} {:0{}x} {:08x}", static_cast<Counter>(cpu.clint_mmio.mtime.load()),

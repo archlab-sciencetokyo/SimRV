@@ -1,0 +1,41 @@
+simrv_add_component(simrv-tui-framework
+  LogBuffer.cpp
+  TuiFrameRenderer.cpp
+  TuiTheme.cpp
+  framework/Text.cpp
+  framework/Theme.cpp
+  framework/Components.cpp
+  framework/Modal.cpp
+)
+add_library(simrv::tui-framework ALIAS simrv-tui-framework)
+
+simrv_add_component(simrv-tui
+  Tui.cpp
+  TuiGuidance.cpp
+  TuiKeybindings.cpp
+  TuiModal.cpp
+  modals/AddressModal.cpp
+  modals/BreakpointModal.cpp
+  modals/GlossaryModal.cpp
+  modals/HelpModal.cpp
+  modals/LoadModal.cpp
+  modals/MisaModal.cpp
+  modals/ModalComponents.cpp
+  modals/SettingsModal.cpp
+  modals/SystemConfigModal.cpp
+  modals/StepModal.cpp
+  panels/LeftPane.cpp
+  panels/LeftPaneRegs.cpp
+  panels/LeftPanePipeline.cpp
+  panels/LeftPaneCache.cpp
+  panels/LeftPaneTlb.cpp
+  panels/LeftPaneBp.cpp
+  panels/LeftPaneHazard.cpp
+  panels/LeftPaneIo.cpp
+  panels/LeftPaneStats.cpp
+  panels/LeftPaneExplain.cpp
+  panels/LeftPaneStack.cpp
+  panels/RightPane.cpp
+  panels/StatusBar.cpp
+)
+add_library(simrv::tui ALIAS simrv-tui)

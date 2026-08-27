@@ -274,7 +274,7 @@ static void write_gdb_reg(std::size_t idx, const std::string& hex, std::size_t h
 void GdbStub::cmd_read_registers(simrv::core::Machine& machine) {
     auto& target_cpu = (current_thread_id_ > 0 && current_thread_id_ <= machine.num_harts())
                            ? machine.hart(current_thread_id_ - 1)
-                           : machine.cpu;
+                           : machine.primary_hart();
     const auto& state = target_cpu.state();
     std::string resp;
     // x0-x31 (4 bytes each, little-endian)
@@ -294,7 +294,7 @@ void GdbStub::cmd_write_registers(const std::string& pkt, simrv::core::Machine& 
     // G<hex data>
     auto& target_cpu = (current_thread_id_ > 0 && current_thread_id_ <= machine.num_harts())
                            ? machine.hart(current_thread_id_ - 1)
-                           : machine.cpu;
+                           : machine.primary_hart();
     auto& state = target_cpu.state();
     std::size_t off = 1;
     for (std::size_t i = 0; i < 33 && off + 8 <= pkt.size(); ++i, off += 8) {
@@ -308,7 +308,7 @@ void GdbStub::cmd_read_register(const std::string& pkt, simrv::core::Machine& ma
     const std::size_t idx = std::stoul(pkt.substr(1), nullptr, 16);
     auto& target_cpu = (current_thread_id_ > 0 && current_thread_id_ <= machine.num_harts())
                            ? machine.hart(current_thread_id_ - 1)
-                           : machine.cpu;
+                           : machine.primary_hart();
     const auto result = read_gdb_reg(idx, target_cpu.state());
     if (result) {
         send_packet(*result);
@@ -327,7 +327,7 @@ void GdbStub::cmd_write_register(const std::string& pkt, simrv::core::Machine& m
     const std::size_t idx = std::stoul(pkt.substr(1, eq - 1), nullptr, 16);
     auto& target_cpu = (current_thread_id_ > 0 && current_thread_id_ <= machine.num_harts())
                            ? machine.hart(current_thread_id_ - 1)
-                           : machine.cpu;
+                           : machine.primary_hart();
     write_gdb_reg(idx, pkt, eq + 1, target_cpu.state());
     send_packet("OK");
 }
@@ -350,17 +350,14 @@ void GdbStub::cmd_read_memory(const std::string& pkt, simrv::core::Machine& mach
 
     // Direct physical memory read (bypasses MMU)
     const auto* base = reinterpret_cast<const uint8_t*>(
-        machine.mmem);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-    const auto dram_size = machine.s_dram_size > 0
-                               ? machine.s_dram_size
-                               : static_cast<uint64_t>(simrv::memory::g_dram_size);
-    constexpr uint32_t kDramBase = 0x80000000U;
+        machine.ram_data());  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    const auto geometry = machine.memory_geometry();
 
     for (uint32_t i = 0; i < safe_len; ++i) {
         const auto phys = static_cast<uint64_t>(addr) + i;
         uint8_t byte_val = 0;
-        if (phys >= kDramBase && (phys - kDramBase) < dram_size) {
-            byte_val = static_cast<uint8_t>(base[phys - kDramBase]);
+        if (geometry.contains(phys)) {
+            byte_val = static_cast<uint8_t>(base[phys - geometry.dram_base]);
         }
         resp += std::format("{:02x}", byte_val);
     }
@@ -379,12 +376,9 @@ void GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& mac
     const uint32_t len =
         static_cast<uint32_t>(std::stoul(pkt.substr(comma + 1, colon - comma - 1), nullptr, 16));
 
-    constexpr uint32_t kDramBase = 0x80000000U;
-    const auto dram_size = machine.s_dram_size > 0
-                               ? machine.s_dram_size
-                               : static_cast<uint64_t>(simrv::memory::g_dram_size);
+    const auto geometry = machine.memory_geometry();
     auto* base = reinterpret_cast<uint8_t*>(
-        machine.mmem);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        machine.ram_data());  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
     auto hd = [](char c) -> uint8_t {
         if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
@@ -399,8 +393,8 @@ void GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& mac
         const auto byte_val =
             static_cast<uint8_t>((hd(pkt.at(hex_off)) << 4) | hd(pkt.at(hex_off + 1)));
         const auto phys = static_cast<uint64_t>(addr) + i;
-        if (phys >= kDramBase && (phys - kDramBase) < dram_size) {
-            base[phys - kDramBase] = byte_val;
+        if (geometry.contains(phys)) {
+            base[phys - geometry.dram_base] = byte_val;
         }
     }
     send_packet("OK");
@@ -428,18 +422,15 @@ void GdbStub::cmd_insert_breakpoint(const std::string& pkt, simrv::core::Machine
     const uint32_t addr =
         static_cast<uint32_t>(std::stoul(pkt.substr(c1 + 1, c2 - c1 - 1), nullptr, 16));
 
-    constexpr uint32_t kDramBase = 0x80000000U;
-    const auto dram_size = machine.s_dram_size > 0
-                               ? machine.s_dram_size
-                               : static_cast<uint64_t>(simrv::memory::g_dram_size);
+    const auto geometry = machine.memory_geometry();
     const auto phys = static_cast<uint64_t>(addr);
 
-    if (phys < kDramBase || (phys - kDramBase + 4) > dram_size) {
+    if (!geometry.contains(phys, 4)) {
         send_packet("E02");
         return;
     }
-    auto* ptr = reinterpret_cast<uint8_t*>(machine.mmem) +
-                (phys - kDramBase);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    auto* ptr = reinterpret_cast<uint8_t*>(machine.ram_data()) +
+                (phys - geometry.dram_base);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
     // Save original word
     uint32_t orig = 0;
@@ -481,14 +472,11 @@ void GdbStub::cmd_remove_breakpoint(const std::string& pkt, simrv::core::Machine
         return;
     }
 
-    constexpr uint32_t kDramBase = 0x80000000U;
-    const auto dram_size = machine.s_dram_size > 0
-                               ? machine.s_dram_size
-                               : static_cast<uint64_t>(simrv::memory::g_dram_size);
+    const auto geometry = machine.memory_geometry();
     const auto phys = static_cast<uint64_t>(addr);
-    if (phys >= kDramBase && (phys - kDramBase + 4) <= dram_size) {
-        auto* ptr = reinterpret_cast<uint8_t*>(machine.mmem) +
-                    (phys - kDramBase);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (geometry.contains(phys, 4)) {
+        auto* ptr = reinterpret_cast<uint8_t*>(machine.ram_data()) +
+                    (phys - geometry.dram_base);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
         std::memcpy(ptr, &it->second, 4);
     }
     sw_breakpoints_.erase(it);

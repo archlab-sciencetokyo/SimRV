@@ -127,7 +127,7 @@ void Tui::set_paused(bool p) {
                            false);
         return;
     }
-    if (!p && machine_.cpu.state().pc == 0) {
+    if (!p && machine_.primary_hart().state().pc == 0) {
         modal_.open_notice(
             "NO PROGRAM LOADED",
             "Cannot run simulation: PC is 0x0.\n\nPlease load a program binary image first [o].",
@@ -141,7 +141,7 @@ void Tui::set_paused(bool p) {
             clear_status_override();
             last_runtime_tick_ = std::chrono::steady_clock::now();
             last_speed_update_ = std::chrono::steady_clock::now();
-            last_icount_ = machine_.cpu.e_icount;
+            last_icount_ = machine_.primary_hart().e_icount;
             machine_.execution_state_.store(simrv::core::ExecutionState::Running,
                                             std::memory_order_release);
             machine_.execution_state_.notify_all();
@@ -167,7 +167,7 @@ void Tui::initialize() {
 
     set_tui_theme(get_tui_theme());
 
-    machine_.cpu.pipeline_sim.config.record_snapshots = true;
+    machine_.primary_hart().pipeline_sim.config.record_snapshots = true;
     for (size_t h = 0; h < machine_.num_harts(); ++h) {
         machine_.hart(h).pipeline_sim.config.record_snapshots = true;
     }
@@ -402,7 +402,7 @@ void Tui::render_update_speed(std::chrono::steady_clock::time_point now) {
         auto diff =
             std::chrono::duration_cast<std::chrono::milliseconds>(now - last_speed_update_).count();
         if (diff >= 50) {
-            uint64_t current_icount = machine_.cpu.e_icount;
+            uint64_t current_icount = machine_.primary_hart().e_icount;
             uint64_t insns_since_last = current_icount - last_icount_;
             if (diff > 0) {
                 speed_ips_ = (insns_since_last * 1000ULL) / static_cast<uint64_t>(diff);
@@ -420,7 +420,7 @@ void Tui::render_update_speed(std::chrono::steady_clock::time_point now) {
                 std::chrono::duration_cast<std::chrono::microseconds>(now - last_runtime_tick_);
             last_runtime_tick_ = std::chrono::steady_clock::time_point{};
         }
-        uint64_t current_icount = machine_.cpu.e_icount;
+        uint64_t current_icount = machine_.primary_hart().e_icount;
         if (current_icount > last_icount_) {
             auto diff =
                 std::chrono::duration_cast<std::chrono::milliseconds>(now - last_speed_update_)
@@ -946,9 +946,9 @@ void Tui::handle_mouse(int x, int y, int b) {
 }
 
 void Tui::cycle_reg_page() {
-    bool has_f = (machine_.cpu.state().misa & (1ULL << ('f' - 'a'))) != 0;
-    bool has_d = (machine_.cpu.state().misa & (1ULL << ('d' - 'a'))) != 0;
-    bool has_v = (machine_.cpu.state().misa & (1ULL << ('v' - 'a'))) != 0;
+    bool has_f = (machine_.primary_hart().state().misa & (1ULL << ('f' - 'a'))) != 0;
+    bool has_d = (machine_.primary_hart().state().misa & (1ULL << ('d' - 'a'))) != 0;
+    bool has_v = (machine_.primary_hart().state().misa & (1ULL << ('v' - 'a'))) != 0;
     TuiRegPage rp = left_pane_->get_page();
     TuiCategoryGroup grp = get_category_group(rp);
 
@@ -1105,7 +1105,9 @@ void Tui::toggle_run_state() {
 }
 
 void Tui::write_guest_input(uint8_t byte) {
-    if (machine_.uart) machine_.uart->push_rx_byte(normalize_guest_terminal_byte(byte));
+    if (machine_.uart_device()) {
+        machine_.uart_device()->push_rx_byte(normalize_guest_terminal_byte(byte));
+    }
 }
 
 void Tui::update_trace_active_cache() {
@@ -1241,7 +1243,7 @@ auto Tui::format_trace_record(const TraceRecord& rec) -> std::string {
     std::string side_effect;
     format_trace_inst(rec, op_name, rd_fp, rs1_fp, rs2_fp, inst_str, side_effect);
 
-    std::string sym = machine_.symbols.lookup(rec.pc);
+    std::string sym = machine_.symbol_table().lookup(rec.pc);
     if (sym.empty()) {
         return side_effect.empty() ? std::format("{:#x}: {}", rec.pc, inst_str)
                                    : std::format("{:#x}: {} [{}]", rec.pc, inst_str, side_effect);
@@ -1286,7 +1288,7 @@ void Tui::update_cache() {
 
 void Tui::reset_speed_history() {
     last_speed_update_ = std::chrono::steady_clock::now();
-    last_icount_ = machine_.cpu.e_icount;
+    last_icount_ = machine_.primary_hart().e_icount;
     speed_ips_ = 0;
     kips_ = 0;
     max_kips_ = 0;
@@ -1454,8 +1456,8 @@ auto Tui::handle_modal_sysconfig_bp(ModalType mtype, uint8_t byte, TuiKey key) -
                     [this](const std::string& msg) { set_status_override(msg); }))
                 render(true);
         } else if (byte == 'c' || byte == 'C') {
-            machine_.breakpoints.clear_pc_breakpoints();
-            machine_.breakpoints.clear_watchpoints();
+            machine_.breakpoint_manager().clear_pc_breakpoints();
+            machine_.breakpoint_manager().clear_watchpoints();
             modal_.open_notice("BREAKPOINTS CLEARED", "Cleared all breakpoints and watchpoints.",
                                false);
             render(true);
@@ -1509,9 +1511,9 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         if (byte == 'r' || byte == 'R' || key == simrv::tui::TuiKey::Enter ||
             key == simrv::tui::TuiKey::Newline) {
             const auto& draft = modal_.get_pending_platform_draft();
-            machine_.s_platform_profile =
-                static_cast<simrv::core::PlatformProfile>(draft.platform_profile);
-            machine_.s_net_mode = draft.net_mode;
+            machine_.set_platform_profile(
+                static_cast<simrv::core::PlatformProfile>(draft.platform_profile));
+            machine_.set_network_mode(draft.net_mode);
             machine_.load_program_binary(machine_.s_fn_memimg);
             close_modal();
             modal_.open_notice(
@@ -1585,13 +1587,13 @@ auto Tui::handle_debug_keyboard_input(TuiKey key) -> bool {
             break;
         case simrv::tui::TuiKey::k:
         case simrv::tui::TuiKey::K: {
-            Address pc = machine_.cpu.state().pc;
-            if (machine_.breakpoints.has_pc_breakpoint(pc)) {
-                machine_.breakpoints.remove_pc_breakpoint(pc);
+            Address pc = machine_.primary_hart().state().pc;
+            if (machine_.breakpoint_manager().has_pc_breakpoint(pc)) {
+                machine_.breakpoint_manager().remove_pc_breakpoint(pc);
                 modal_.open_notice("BREAKPOINT REMOVED",
                                    std::format("Removed PC breakpoint at 0x{:08x}", pc), false);
             } else {
-                machine_.breakpoints.add_pc_breakpoint(pc);
+                machine_.breakpoint_manager().add_pc_breakpoint(pc);
                 modal_.open_notice("BREAKPOINT CREATED",
                                    std::format("PC breakpoint set at 0x{:08x}", pc), false);
             }
@@ -1731,7 +1733,7 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
             render(true);
             return;
         }
-        if (machine_.s_fn_memimg.empty() && machine_.cpu.state().pc == 0) {
+        if (machine_.s_fn_memimg.empty() && machine_.primary_hart().state().pc == 0) {
             modal_.open_notice("NO PROGRAM LOADED",
                                "Cannot run simulation: PC is 0x0.\n\nPlease load a program binary "
                                "image first [o].",
@@ -1776,7 +1778,7 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
 
     if (key == simrv::tui::TuiKey::s || key == simrv::tui::TuiKey::S ||
         key == simrv::tui::TuiKey::Space) {
-        if (machine_.s_fn_memimg.empty() && machine_.cpu.state().pc == 0) {
+        if (machine_.s_fn_memimg.empty() && machine_.primary_hart().state().pc == 0) {
             modal_.open_notice(
                 "NO PROGRAM LOADED",
                 "Cannot step: PC is 0x0.\n\nPlease load a program binary image first [o].", false);
@@ -1789,7 +1791,7 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
         } else {
             update_cache();
             machine_.prepare_cycle();
-            machine_.cpu.run_cycle(machine_);
+            machine_.primary_hart().run_cycle(machine_);
             machine_.finalize_cycle();
             render(true);
         }
@@ -1874,7 +1876,7 @@ void Tui::execute_footer_action(TuiFooterAction action) {
                                    "binary [o], or quit [q].",
                                    false);
                 render(true);
-            } else if (machine_.cpu.state().pc == 0) {
+            } else if (machine_.primary_hart().state().pc == 0) {
                 modal_.open_notice(
                     "NO PROGRAM LOADED",
                     "Cannot step: PC is 0x0.\n\nPlease load a program binary image first [o].",
@@ -1883,7 +1885,7 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             } else {
                 update_cache();
                 machine_.prepare_cycle();
-                machine_.cpu.run_cycle(machine_);
+                machine_.primary_hart().run_cycle(machine_);
                 machine_.finalize_cycle();
                 render(true);
             }
@@ -1895,7 +1897,7 @@ void Tui::execute_footer_action(TuiFooterAction action) {
                                    "binary [o], or quit [q].",
                                    false);
                 render(true);
-            } else if (paused_ && machine_.cpu.state().pc == 0) {
+            } else if (paused_ && machine_.primary_hart().state().pc == 0) {
                 modal_.open_notice("NO PROGRAM LOADED",
                                    "Cannot run simulation: PC is 0x0.\n\nPlease load a program "
                                    "binary image first [o].",
@@ -1920,13 +1922,13 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             open_modal(ModalType::SetWatchpoint);
             break;
         case TuiFooterAction::TogglePcBreakpoint: {
-            Address pc = machine_.cpu.state().pc;
-            if (machine_.breakpoints.has_pc_breakpoint(pc)) {
-                machine_.breakpoints.remove_pc_breakpoint(pc);
+            Address pc = machine_.primary_hart().state().pc;
+            if (machine_.breakpoint_manager().has_pc_breakpoint(pc)) {
+                machine_.breakpoint_manager().remove_pc_breakpoint(pc);
                 modal_.open_notice("BREAKPOINT REMOVED",
                                    std::format("Removed PC breakpoint at 0x{:08x}", pc), false);
             } else {
-                machine_.breakpoints.add_pc_breakpoint(pc);
+                machine_.breakpoint_manager().add_pc_breakpoint(pc);
                 modal_.open_notice("BREAKPOINT CREATED",
                                    std::format("PC breakpoint set at 0x{:08x}", pc), false);
             }
@@ -2271,12 +2273,12 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                     } else if (res == TuiModal::ModalClickResult::ReloadRequested) {
                         close_modal();
                         auto draft = modal_.get_pending_platform_draft();
-                        machine_.s_platform_profile =
+                        machine_.set_platform_profile(
                             (draft.platform_profile == 0)
                                 ? simrv::core::PlatformProfile::Pcie
                                 : ((draft.platform_profile == 1)
                                        ? simrv::core::PlatformProfile::Mmio
-                                       : simrv::core::PlatformProfile::Hybrid);
+                                       : simrv::core::PlatformProfile::Hybrid));
                         machine_.request_reboot();
                     } else if (res == TuiModal::ModalClickResult::DiscardRequested) {
                         close_modal();

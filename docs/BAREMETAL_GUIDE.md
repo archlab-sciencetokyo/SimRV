@@ -6,20 +6,19 @@ This guide details the physical memory map, MMIO device registers, and compilati
 
 ## Physical Memory Map
 
-SimRV uses a physical memory map where memory-mapped I/O (MMIO) devices are allocated in lower address ranges, and RAM is mapped starting at `0x80000000`.
+SimRV uses a physical memory map where memory-mapped I/O (MMIO) and PCIe devices are allocated in lower address ranges, and RAM is mapped starting at `0x80000000`.
 
 | Device / Region | Base Address | Size | Description |
 |:---|:---|:---|:---|
+| **Power Controller** | `0x00100000` | `0x00001000` (4 KB) | SiFive test-finisher poweroff / reboot port |
 | **UART 16550A** | `0x10000000` | `0x00000100` (256 B) | Serial console input/output port |
-| **Framebuffer Config** | `0x30000000` | `0x00001000` (4 KB) | Video mode control, keyboard, and mouse inputs |
-| **Framebuffer Memory** | `0x30001000` | `0x001FF000` (~2 MB) | Video memory pixel buffer (e.g. 320x200 RGBA8888) |
-| **Audio Controller** | `0x30200000` | `0x00010000` (64 KB) | 8-channel SFX and MIDI audio control |
-| **VirtIO Console** | `0x40000000` | `0x08000000` (128 MB) | Virtio console device |
-| **VirtIO Disk** | `0x48000000` | `0x08000000` (128 MB) | Virtio block storage device |
-| **PLIC** | `0x50000000` | `0x04000000` (64 MB) | Platform-Level Interrupt Controller |
-| **CLINT** | `0x60000000` | `0x000C0000` (768 KB) | Core Local Interruptor (mtimecmp / software interrupts) |
+| **VirtIO MMIO Slots** | `0x10001000` | `0x00008000` (32 KB) | VirtIO MMIO transport slots (Disk, Net, Console, GPU, Input, Sound, RNG) |
+| **PCIe ECAM Space** | `0x30000000` | `0x10000000` (256 MB) | PCI Express enhanced configuration space |
+| **PCIe 32-bit MMIO** | `0x40000000` | `0x10000000` (256 MB) | PCI Express non-prefetchable 32-bit BAR window |
+| **PLIC / AIA APLIC** | `0x0C000000` / `0x50000000` | `0x04000000` (64 MB) | Platform-Level Interrupt Controller / AIA APLIC |
+| **CLINT / ACLINT** | `0x02000000` / `0x60000000` | `0x000C0000` (768 KB) | Core Local Interruptor (mtimecmp / software interrupts) |
 | **RTC** | `0x70000000` | `0x00001000` (4 KB) | Real-Time Clock (`mtime` mirror) |
-| **System RAM** | `0x80000000` | Up to 512 MB | Architectural RAM space |
+| **System RAM** | `0x80000000` | Configurable (e.g. 128 MB – 2 GB) | Main physical memory space |
 
 ---
 
@@ -28,7 +27,7 @@ SimRV uses a physical memory map where memory-mapped I/O (MMIO) devices are allo
 To develop a baremetal program, you need:
 1. An assembly startup file (`startup.S`) to initialize the stack pointer and invoke your main entry point.
 2. A linker script (`link.ld`) to map the sections starting at the physical RAM base (`0x80000000`).
-3. An exit routine using the `tohost` termination register to signal the simulator to shut down.
+3. An exit routine using the `tohost` termination register or Power MMIO device to signal simulation shutdown.
 
 ### 1. Linker Script (`link.ld`)
 
@@ -63,12 +62,13 @@ _start:
     # Call main C/C++ function
     jal main
 
-    # Fallback exit: write 1 to tohost (0x80001000) to terminate
+    # Fallback exit: write 1 to tohost (0x80001000) or poweroff
 _startup_exit:
-    li t0, 0x80001000
-    li t1, 1
+    li t0, 0x00100000
+    li t1, 0x5555
     sw t1, 0(t0)
 loop:
+    wfi
     j loop
 ```
 
@@ -92,11 +92,14 @@ Run the resulting binary image in SimRV in baremetal mode (`-b` / `--baremetal`)
 # Interactive TUI mode (Default)
 ./build/rv32-release/SimRV -b -m program.bin
 
-# Headless / CLI-only mode
-./build/rv32-release/SimRV -b -m program.bin -c
+# Headless / CLI-only mode (fast execution)
+./build/rv32-release/SimRV -b -m program.bin --mode fast --cli
 
-# Cycle-accurate 5-stage pipeline simulation
-./build/rv32-release/SimRV -b -m program.bin -C
+# Cycle-accurate 4-stage pipeline simulation
+./build/rv32-release/SimRV -b -m program.bin --mode cycle-accurate --cli
+
+# 5-stage classic pipeline simulation
+./build/rv32-release/SimRV -b -m program.bin --mode five-stage --cli
 ```
 
 ---
@@ -126,64 +129,33 @@ void uart_puts(const char* s) {
 }
 ```
 
-### Custom Framebuffer Display
-The custom framebuffer device supports simple double-buffered or direct draw routines.
-
-```c
-#define FB_CTRL_BASE   0x30000000
-#define FB_WIDTH_REG   ((volatile uint32_t*)(FB_CTRL_BASE + 0x00))
-#define FB_HEIGHT_REG  ((volatile uint32_t*)(FB_CTRL_BASE + 0x04))
-#define FB_FORMAT_REG  ((volatile uint32_t*)(FB_CTRL_BASE + 0x08))
-#define FB_FLUSH_REG   ((volatile uint32_t*)(FB_CTRL_BASE + 0x0C))
-#define FB_PIXELS      ((volatile uint32_t*)0x30001000)
-
-void display_init(uint32_t width, uint32_t height) {
-    *FB_WIDTH_REG  = width;
-    *FB_HEIGHT_REG = height;
-    *FB_FORMAT_REG = 1; // 1 = RGBA8888
-}
-
-void display_draw_pixel(uint32_t x, uint32_t y, uint32_t color) {
-    uint32_t width = *FB_WIDTH_REG;
-    FB_PIXELS[y * width + x] = color;
-}
-
-void display_flush() {
-    *FB_FLUSH_REG = 1; // Signal simulator to redraw screen
-}
-```
-
-### Keyboard Input events
-Keyboard events are queried through the Framebuffer registers.
-
-```c
-#define FB_KEY_REG     ((volatile uint32_t*)(FB_CTRL_BASE + 0x10))
-#define FB_KEY_STATUS  ((volatile uint32_t*)(FB_CTRL_BASE + 0x14))
-
-int get_keyboard_event(int* pressed, char* key) {
-    if (*FB_KEY_STATUS) {
-        uint32_t packed = *FB_KEY_REG;
-        *pressed = (packed >> 31) & 1; // 1 if pressed, 0 if released
-        *key = packed & 0xFF;          // ASCII code
-        return 1; // Event received
-    }
-    return 0; // No event
-}
-```
-
 ### Real-Time Clock / Timer Delay
-Use the RTC `mtime` register at `0x70000000` to measure accurate delays. `mtime` runs at approximately 10 MHz.
+Use the RTC `mtime` register at `0x70000000` to measure accurate delays. `mtime` runs at approximately 10 MHz (10,000 ticks = 1 ms).
 
 ```c
 #define RTC_MTIME ((volatile uint64_t*)0x70000000)
 
 uint32_t get_time_ms() {
-    // 10,000 RTC ticks = 1 millisecond
     return (uint32_t)(*RTC_MTIME / 10000);
 }
 
 void delay_ms(uint32_t ms) {
     uint32_t start = get_time_ms();
     while (get_time_ms() - start < ms);
+}
+```
+
+### Power Controller (Shutdown & Reboot)
+Write SiFive test-finisher commands to `0x00100000` to cleanly terminate or reboot the machine:
+
+```c
+#define POWER_BASE ((volatile uint32_t*)0x00100000)
+
+void power_shutdown() {
+    *POWER_BASE = 0x5555; // Pass / Clean Poweroff
+}
+
+void power_reboot() {
+    *POWER_BASE = 0x7777; // Reset / Warm Reboot
 }
 ```

@@ -29,7 +29,7 @@ void SettingsModal::open(SettingsDraft& draft, const simrv::core::Machine& machi
     draft.debug_mode = machine.s_debug_mode;
     draft.high_contrast = machine.s_high_contrast;
     draft.class_mode = machine.s_class_mode;
-    draft.tui_fps = machine.tui ? machine.tui->target_fps() : 30;
+    draft.tui_fps = machine.tui_controller() ? machine.tui_controller()->target_fps() : 30;
     draft.use_mix = machine.s_use_mix;
     draft.bp_trace = machine.s_bp_trace;
     draft.traplog_mode = machine.s_traplog_mode;
@@ -39,11 +39,11 @@ void SettingsModal::open(SettingsDraft& draft, const simrv::core::Machine& machi
     draft.num_harts = static_cast<uint32_t>(machine.num_harts());
     draft.smp_quantum = machine.s_smp_quantum;
     draft.smp_multithreaded = machine.s_smp_multithreaded;
-    draft.platform_profile = static_cast<uint8_t>(machine.s_platform_profile);
+    draft.platform_profile = static_cast<uint8_t>(machine.platform_profile());
     draft.dram_size_mb = (machine.s_dram_size > 0)
                              ? (machine.s_dram_size / (1024ULL * 1024ULL))
                              : (simrv::memory::kDramSize / (1024ULL * 1024ULL));
-    draft.net_mode = machine.s_net_mode;
+    draft.net_mode = machine.network_mode();
 
     // Tab 1: MISA
     MisaModal::open(draft.misa, draft.tab_cursor[1], machine);
@@ -270,8 +270,8 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
         machine.s_high_contrast = draft.high_contrast;
     }
     machine.s_class_mode = draft.class_mode;
-    if (machine.tui) {
-        machine.tui->set_target_fps(draft.tui_fps);
+    if (machine.tui_controller()) {
+        machine.tui_controller()->set_target_fps(draft.tui_fps);
     }
 
     machine.s_use_mix = draft.use_mix;
@@ -284,16 +284,17 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
     machine.s_smp_multithreaded = draft.smp_multithreaded;
 
     bool const profile_changed =
-        (machine.s_platform_profile !=
+        (machine.platform_profile() !=
          static_cast<simrv::core::PlatformProfile>(draft.platform_profile));
-    machine.s_platform_profile = static_cast<simrv::core::PlatformProfile>(draft.platform_profile);
+    machine.set_platform_profile(
+        static_cast<simrv::core::PlatformProfile>(draft.platform_profile));
 
     uint64_t const new_dram_size = draft.dram_size_mb * 1024ULL * 1024ULL;
     bool const dram_size_changed =
         (machine.s_dram_size != 0 && machine.s_dram_size != new_dram_size) ||
         (machine.s_dram_size == 0 && new_dram_size != simrv::memory::kDramSize);
     machine.s_dram_size = new_dram_size;
-    machine.s_net_mode = draft.net_mode;
+    machine.set_network_mode(draft.net_mode);
 
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
         machine.hart(hart).pipeline_sim.config.record_snapshots =
@@ -308,12 +309,12 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
 
     // 2. MISA Extensions
     uint64_t const new_misa = draft.misa.to_misa_val();
-    if (machine.cpu.state().misa != new_misa || machine.s_vlen != draft.misa.vlen) {
-        machine.cpu.state().misa = new_misa;
+    if (machine.primary_hart().state().misa != new_misa || machine.s_vlen != draft.misa.vlen) {
+        machine.primary_hart().state().misa = new_misa;
         machine.s_misa_profile = new_misa;
         machine.s_misa_override = true;
         machine.s_misa_xlen = draft.misa.xlen_bits;
-        machine.cpu.state().initialize_lower_xlen_fields();
+        machine.primary_hart().state().initialize_lower_xlen_fields();
         machine.s_vlen = draft.misa.vlen;
         need_reboot = true;
     }

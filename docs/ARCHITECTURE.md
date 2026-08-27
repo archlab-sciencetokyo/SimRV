@@ -1,52 +1,49 @@
 # SimRV Architecture
 
-SimRV is a C++23 RISC-V simulator for RV32 and RV64 builds. It runs bare-metal
-images and supported OS configurations through either a functional instruction
-engine (IA) or a cycle-stepped in-order engine (CA). ISA qualification claims and
-known gaps are maintained in [RISC-V compliance scope](RISCV_COMPLIANCE.md).
+SimRV is a C++23 RISC-V simulator for RV32 and RV64 targets. It runs baremetal
+images and full Linux OS configurations through fast functional instruction execution,
+detailed state simulation, or cycle-accurate microarchitectural modeling. ISA qualification
+claims and known gaps are maintained in [RISC-V compliance scope](RISCV_COMPLIANCE.md).
 
-## Runtime structure
+## Runtime Structure
 
-`Machine` owns the CPUs, memory subsystem, devices, loader, and top-level
-scheduling. Each `CPU` owns architectural state, translation/cache state,
-decode cache, pipeline context, branch predictor, and CA state. Devices are
-MMIO endpoints connected through the memory subsystem and TileLink-style bus.
+`Machine` orchestrates the virtual platform: CPU harts, memory subsystem, TileLink-C
+interconnect, PCIe root complex, platform interrupt controllers, and device endpoints.
+Each `CPU` hart maintains its architectural register state (`ArchState`), translation/TLB
+structures, L1 I/D-caches, branch predictor, and execution pipeline model.
 
-| Area | Primary components | Responsibility |
+| Area | Primary Components | Architectural Responsibility |
 | --- | --- | --- |
-| Core | `Machine`, `CPU`, `ArchState` | Scheduling, architectural state, traps, counters |
-| Execution | decoder and execute units | Decode, integer/FP/vector execution, retirement |
-| Memory | MMU, TLB, caches, TileLink | Translation, coherent access, timed CA transactions |
-| Platform | UART, timers, interrupts, VirtIO | Guest-visible devices and interrupt delivery |
-| Debug | tracer, GDB stub, Spike lockstep | Inspection and optional co-simulation |
-| Presentation | TUI and virtual terminal | Interactive state inspection and guest console |
+| **Core** | `Machine`, `CPU`, `ArchState` | Hart lifecycle, architectural registers, CSRs, traps, performance counters |
+| **Execution** | `Decoder`, `ExecuteUnit`, `PipelineSim` | Decode caching, integer/FP/vector execution, pipeline hazards, retirement |
+| **Memory & Coherence** | `Mmu`, `DCache`, `ICache`, `TileLinkBus` | Address translation, L1 caches, TileLink-C directory coherence with MESI protocol |
+| **Platform Devices** | `PcieRootComplex`, `VirtioDevice`, `Uart`, `AIA`, `Aclint` | PCIe ECAM/BARs, VirtIO MMIO/PCI, 16550A UART, CLINT/PLIC, ACLINT, and AIA (APLIC/IMSIC) |
+| **Debug & Tracing** | `Tracer`, `GdbServer`, `SpikeLockstep` | Structured architectural traces, GDB RSP remote debugging, Spike co-simulation |
+| **Presentation** | `Tui`, `TuiFrameRenderer`, `VirtualTerminal` | Multi-hart state visualizer, terminal console PTY, educational glossary & inspector |
 
-## Execution policies
+## Execution Policies & Microarchitectures
 
-`RuntimeProfile` resolves the command-line execution choice and interaction
-mode into one policy:
+Execution is configured via `--mode <name>` and resolved into runtime profiles:
 
-| Interface | IA | CA |
+| Mode Flag | Policy Class | Description |
 | --- | --- | --- |
-| CLI | `InstructionFast` | `CycleFast` |
-| TUI | `InstructionObservable` | `CycleObservable` |
+| `--mode fast` | `InstructionFast` | High-throughput functional execution with decode caching and quantum batching |
+| `--mode detailed` | `InstructionObservable` | Instruction-by-instruction execution retaining telemetry for TUI inspection |
+| `--mode cycle-accurate` | `CycleFast` / `CycleObservable` | Cycle-stepped 4-stage pipeline with branch predictor and memory latency modeling |
+| `--mode three-stage` | `CycleObservable` | 3-stage Fetch / Decode+Execute / Memory+Writeback educational pipeline model |
+| `--mode dual-issue` | `CycleObservable` | Dual-issue superscalar pipeline modeling parallel ALU dispatch and structural hazards |
+| `--mode five-stage` | `CycleObservable` | Classic 5-stage Fetch / Decode / Execute / Memory / Writeback pipeline |
 
-IA executes the architectural stages without a timed pipeline. Its fast policy
-uses decode caching and batching where debugging, tracing, lockstep, and GDB do
-not require per-instruction observation. TUI IA retains the context required for
-presentation but does not model CA timing.
+In cycle-accurate and pipeline modes, instruction slots traverse stages with explicit data forwarding,
+structural hazard stalls, and branch-prediction redirection. Architectural effects commit strictly
+at the retirement boundary.
 
-CA has one persistent transition kernel per hart. It supports 5-stage
-Fetch/Decode/Execute/Memory/Writeback and 3-stage Fetch/Decode+Execute/
-Memory+Writeback organizations. Slots carry instruction context, latency,
-exceptions, forwarding state, and branch-prediction state. Architectural effects
-become visible at retirement; traps and interrupts are taken only at retirement
-boundaries.
+## Multi-Hart SMP & TileLink-C Coherence
 
-`CycleFast` records counters and event bits without snapshot allocation.
-`CycleObservable` uses the same kernel and adds a bounded history for the TUI.
-The platform tests require identical guest state, memory effects, retirement
-counts, and cycle counts for both policies.
+Multi-hart configurations (`--smp <N>`) simulate symmetric multiprocessing:
+1. **Directory Coherence**: L1 caches participate in directory-based cache coherence implementing the MESI (Modified, Exclusive, Shared, Invalid) protocol over TileLink-C channels.
+2. **Interrupt Routing**: Core local interrupts (software/timer) are managed via CLINT or ACLINT (MTIME/MSWI). External platform interrupts are handled by PLIC or AIA (APLIC wire interrupts and IMSIC message-signaled interrupts).
+3. **Synchronization**: Atomic operations (LR/SC and AMOs) use a global reservation table and coherent bus transactions across harts.
 
 ## CA timing and ordering
 
