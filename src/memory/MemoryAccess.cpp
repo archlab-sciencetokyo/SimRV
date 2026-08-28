@@ -16,6 +16,7 @@
 #include "simrv/memory/Mmu.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Helpers.hpp"
+#include "simrv/xlen/Math.hpp"
 
 namespace simrv::memory {
 
@@ -225,10 +226,13 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
         }
 
         cpu.dcache.insert(line_base, line_data.data());
-        if (cpu.dcache.read(addr, cached_data, funct3)) {
-            return cached_data;
+        const uint32_t byte_offset = addr & (simrv::cache::DCache::kLineBytes - 1u);
+        Word raw = 0;
+        std::memcpy(&raw, line_data.data() + byte_offset, size_bytes);
+        if ((funct3 & 0x4u) == 0) {  // Signed load
+            return ::sign_extend(raw, 8 * size_bytes);
         }
-        return 0;
+        return raw;
     };
 
     const Address eff_vaddr = (active_xlen == 32) ? (v_addr & 0xFFFFFFFFULL) : v_addr;

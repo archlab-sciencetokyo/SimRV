@@ -227,7 +227,8 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             }
 
             icache.insert(line_base, line_data.data());
-            (void)icache.read16(paddr, h_data);
+            const uint32_t byte_offset = paddr & (simrv::cache::ICache::kLineBytes - 1u);
+            std::memcpy(&h_data, line_data.data() + byte_offset, sizeof(uint16_t));
             return h_data;
         };
 

@@ -3,6 +3,21 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.1] — 2026-08-28
+
+Maintenance release addressing cache hit/miss accounting accuracy, TUI cache visual inspector state synchronization, and adding cache educational study session materials.
+
+### Bug Fixes & Microarchitecture
+
+- **Cache Accounting**: Fixed an issue where refill reads immediately following miss insertions generated spurious hit events and corrupted hit rate statistics.
+- **TUI Cache Inspector**: Corrected hit vs. eviction highlight priority in the Left Pane Cache view to prevent stale replacement markers from masking current hit indications.
+- **Base Cache State**: Ensured `BaseCache::insert` marks the current access as a compulsory/conflict miss state rather than inheriting stale hit indicators.
+
+### Educational & Workload Tooling
+
+- Added comprehensive 60-minute Cache Technologies study guides (`docs/STUDY_SESSION_CACHE.md` and `docs/STUDY_SESSION_CACHE_JA.md`) covering spatial/temporal locality, 4-way set associativity, conflict thrashing, and multicore cache coherence (MESI/MOESI, false sharing).
+- Added runnable bare-metal RISC-V assembly workloads in `examples/study_session_cache/` and `/mnt/archlab/study/cache/`.
+
 ## [v2.0.0] — 2026-08-19
 
 General Availability release of SimRV 2.0: A dual-width explainable RISC-V full-system simulator written in modern ISO C++23, providing high-throughput functional simulation, in-terminal visual inspection, and multi-OS/RTOS execution.
@@ -398,6 +413,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
+[v2.0.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.1
 [v2.0.0]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0
 [v2.0.0-rc.10]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.10
 [v2.0.0-rc.9]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.9
