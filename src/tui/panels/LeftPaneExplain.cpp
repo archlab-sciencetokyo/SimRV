@@ -10,9 +10,13 @@
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/memory/Mmu.hpp"
+#include "simrv/pipeline/Decoder.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/LeftPane.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
+#include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::tui {
@@ -582,7 +586,6 @@ auto LeftPane::get_explain_rows(int width) -> std::vector<std::string> {
 
     auto& cpu = machine_.cpu;
     auto& st = cpu.state();
-    auto& ctx = cpu.pipeline_context;
 
     Register const target_pc = (explain_pc_ != 0) ? explain_pc_ : st.pc;
 
@@ -618,14 +621,92 @@ auto LeftPane::get_explain_rows(int width) -> std::vector<std::string> {
         return explain_rows;
     }
 
-    auto& mutable_cpu = const_cast<simrv::core::CPU&>(cpu);
-    auto saved_pc = st.pc;
-    st.pc = target_pc;
-    bool fetch_success = mutable_cpu.fetch_stage(machine_, target_pc);
-    if (fetch_success) {
-        (void)mutable_cpu.decode_stage(machine_);
+    simrv::pipeline::PipelineContext local_ctx{};
+    bool fetch_success = false;
+
+    auto translate_addr = [&](Address vaddr) -> std::optional<Address> {
+        if (st.priv == kPrivMachine ||
+            !simrv::xlen::satp_translation_enabled(st.satp, st.current_xlen())) {
+            return (st.current_xlen() == 32) ? (vaddr & 0xFFFFFFFFULL) : vaddr;
+        }
+        core::TLBEntry* entry =
+            const_cast<core::CPU&>(cpu).tlb.lookup_data_r(vaddr, st.satp & 0xFFFF, st.priv);
+        if (entry != nullptr) {
+            return entry->p_addr | (vaddr & 0xFFF);
+        }
+        return (st.current_xlen() == 32) ? (vaddr & 0xFFFFFFFFULL) : vaddr;
+    };
+
+    auto read_mem16 = [&](Address paddr) -> std::optional<uint16_t> {
+        if (machine_.memory_.mmu() && simrv::memory::is_dram_access(paddr, sizeof(uint16_t))) {
+            const Address masked = paddr & simrv::memory::kDramMask;
+            uint16_t val = 0;
+            std::memcpy(&val, machine_.memory_.mmu()->mmem() + masked, sizeof(uint16_t));
+            return val;
+        }
+        return std::nullopt;
+    };
+
+    const auto paddr1 = translate_addr(target_pc);
+    if (paddr1.has_value()) {
+        const auto h1 = read_mem16(*paddr1);
+        if (h1.has_value()) {
+            if ((*h1 & 0x3) != 0x3) {
+                local_ctx.ir_org = *h1;
+                local_ctx.cpc = target_pc;
+                fetch_success = true;
+            } else {
+                const auto paddr2 = translate_addr(target_pc + 2);
+                if (paddr2.has_value()) {
+                    const auto h2 = read_mem16(*paddr2);
+                    if (h2.has_value()) {
+                        local_ctx.ir_org = (static_cast<uint32_t>(*h2) << 16) | *h1;
+                        local_ctx.cpc = target_pc;
+                        fetch_success = true;
+                    }
+                }
+            }
+        }
     }
-    st.pc = saved_pc;
+
+    if (fetch_success) {
+        simrv::pipeline::Decoder dec_org(local_ctx.ir_org);
+        bool const w_compressed = dec_org.is_compressed();
+        local_ctx.ir = w_compressed ? simrv::pipeline::decompressInstruction(
+                                          local_ctx.ir_org, st.current_xlen() == 64)
+                                    : local_ctx.ir_org;
+
+        simrv::pipeline::Decoder dec(local_ctx.ir);
+        local_ctx.opcode = dec.opcode();
+        local_ctx.op_id = simrv::pipeline::decoder(local_ctx.ir);
+        local_ctx.rd = dec.rd();
+        local_ctx.rs1 = dec.rs1();
+        local_ctx.rs2 = dec.rs2();
+
+        const auto fmt = simrv::isa::get_instruction_format(local_ctx.opcode);
+        switch (fmt) {
+            case InstFormat::I:
+                local_ctx.imm = dec.imm_i();
+                break;
+            case InstFormat::S:
+                local_ctx.imm = dec.imm_s();
+                break;
+            case InstFormat::B:
+                local_ctx.imm = dec.imm_b();
+                break;
+            case InstFormat::U:
+                local_ctx.imm = dec.imm_u();
+                break;
+            case InstFormat::J:
+                local_ctx.imm = dec.imm_j();
+                break;
+            default:
+                local_ctx.imm = 0;
+                break;
+        }
+    }
+
+    const auto& ctx = local_ctx;
 
     if (!fetch_success) {
         std::vector<std::string> explain_rows;
