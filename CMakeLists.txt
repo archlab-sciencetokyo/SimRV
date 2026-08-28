@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SimRV VERSION 2.0.1 LANGUAGES C CXX)
+project(SimRV VERSION 2.0.2 LANGUAGES C CXX)
 
 enable_testing()
 find_program(PYTHON_BIN NAMES "python3" "python" DOC "Path to Python interpreter")
@@ -8,7 +8,7 @@ if(NOT PYTHON_BIN)
   set(PYTHON_BIN "python3")
 endif()
 
-set(SIMRV_VERSION "2.0.1")
+set(SIMRV_VERSION "2.0.2")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 

@@ -3,6 +3,14 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.2] — 2026-08-28
+
+Maintenance release ensuring side-effect-free instruction explanation in the TUI left pane to prevent spurious ICache hits during tool tab navigation.
+
+### Bug Fixes & TUI Stability
+
+- **Instruction Explainer Side-Effect Removal**: Refactored `LeftPaneExplain::get_explain_rows()` to use an isolated, side-effect-free direct memory decode path instead of executing the core CPU `fetch_stage()` coroutine, eliminating spurious ICache hit counter increments and pipeline context mutations during TUI page cycling.
+
 ## [v2.0.1] — 2026-08-28
 
 Maintenance release addressing cache hit/miss accounting accuracy, TUI cache visual inspector state synchronization, and adding cache educational study session materials.
@@ -413,6 +421,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
+[v2.0.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.2
 [v2.0.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.1
 [v2.0.0]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0
 [v2.0.0-rc.10]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.10
