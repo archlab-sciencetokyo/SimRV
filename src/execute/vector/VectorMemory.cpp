@@ -15,7 +15,7 @@ void execute_vl_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId
     for (uint32_t i = first_byte; i < total_bytes; i++) {
         Address addr = base_addr + i;
         uint64_t val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, isa::Funct3::Lbu);
-        if (cpu.pipeline_context.pending_exception.has_value()) {
+        if (cpu.active_context().pending_exception.has_value()) {
             cpu.state().vstart = i / element_bytes;
             return;
         }
@@ -38,7 +38,7 @@ void execute_vs_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId
                           .u8[i % cpu.state().regs.vlen_bytes()];
         simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val),
                                               isa::Funct3::Sb);
-        if (cpu.pipeline_context.pending_exception.has_value()) {
+        if (cpu.active_context().pending_exception.has_value()) {
             cpu.state().vstart = i;
             return;
         }
@@ -50,7 +50,7 @@ template <typename T>
 void execute_vle(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd, Register base_addr,
                  bool vm, uint32_t vl, isa::Funct3 mem_f3) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    const uint32_t nf = (cpu.pipeline_context.ir >> 29) & 7;
+    const uint32_t nf = (cpu.active_context().ir >> 29) & 7;
     const uint32_t nfields = nf + 1;
 
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
@@ -63,8 +63,8 @@ void execute_vle(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd, 
                     val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
                 } else {
                     if (simrv::compiler::unlikely((addr & 7) != 0)) {
-                        cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedLoad;
-                        cpu.pipeline_context.pending_tval = addr;
+                        cpu.active_context().pending_exception = ExceptionCode::MisalignedLoad;
+                        cpu.active_context().pending_tval = addr;
                         cpu.state().vstart = i;
                         return;
                     }
@@ -76,7 +76,7 @@ void execute_vle(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd, 
             } else {
                 val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
             }
-            if (cpu.pipeline_context.pending_exception.has_value()) {
+            if (cpu.active_context().pending_exception.has_value()) {
                 cpu.state().vstart = i;
                 return;
             }
@@ -91,7 +91,7 @@ template <typename T>
 void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3, Register base_addr,
                  bool vm, uint32_t vl, isa::Funct3 mem_f3) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    const uint32_t nf = (cpu.pipeline_context.ir >> 29) & 7;
+    const uint32_t nf = (cpu.active_context().ir >> 29) & 7;
     const uint32_t nfields = nf + 1;
 
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
@@ -106,8 +106,8 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3,
                                                           mem_f3);
                 } else {
                     if (simrv::compiler::unlikely((addr & 7) != 0)) {
-                        cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedStore;
-                        cpu.pipeline_context.pending_tval = addr;
+                        cpu.active_context().pending_exception = ExceptionCode::MisalignedStore;
+                        cpu.active_context().pending_tval = addr;
                         cpu.state().vstart = i;
                         return;
                     }
@@ -121,7 +121,7 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3,
                 simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val),
                                                       mem_f3);
             }
-            if (cpu.pipeline_context.pending_exception.has_value()) {
+            if (cpu.active_context().pending_exception.has_value()) {
                 cpu.state().vstart = i;
                 return;
             }
@@ -145,8 +145,8 @@ void execute_vlse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd,
                 val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
             } else {
                 if (simrv::compiler::unlikely((addr & 7) != 0)) {
-                    cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedLoad;
-                    cpu.pipeline_context.pending_tval = addr;
+                    cpu.active_context().pending_exception = ExceptionCode::MisalignedLoad;
+                    cpu.active_context().pending_tval = addr;
                     cpu.state().vstart = i;
                     return;
                 }
@@ -157,7 +157,7 @@ void execute_vlse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd,
         } else {
             val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
         }
-        if (cpu.pipeline_context.pending_exception.has_value()) {
+        if (cpu.active_context().pending_exception.has_value()) {
             cpu.state().vstart = i;
             return;
         }
@@ -183,8 +183,8 @@ void execute_vsse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3
                                                       mem_f3);
             } else {
                 if (simrv::compiler::unlikely((addr & 7) != 0)) {
-                    cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedStore;
-                    cpu.pipeline_context.pending_tval = addr;
+                    cpu.active_context().pending_exception = ExceptionCode::MisalignedStore;
+                    cpu.active_context().pending_tval = addr;
                     cpu.state().vstart = i;
                     return;
                 }
@@ -197,7 +197,7 @@ void execute_vsse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3
         } else {
             simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val), mem_f3);
         }
-        if (cpu.pipeline_context.pending_exception.has_value()) {
+        if (cpu.active_context().pending_exception.has_value()) {
             cpu.state().vstart = i;
             return;
         }
@@ -221,8 +221,8 @@ void execute_vluxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId r
                 val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
             } else {
                 if (simrv::compiler::unlikely((addr & 7) != 0)) {
-                    cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedLoad;
-                    cpu.pipeline_context.pending_tval = addr;
+                    cpu.active_context().pending_exception = ExceptionCode::MisalignedLoad;
+                    cpu.active_context().pending_tval = addr;
                     cpu.state().vstart = i;
                     return;
                 }
@@ -233,7 +233,7 @@ void execute_vluxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId r
         } else {
             val = simrv::memory::MemoryAccess::loadInt(mem, cpu, addr, mem_f3);
         }
-        if (cpu.pipeline_context.pending_exception.has_value()) {
+        if (cpu.active_context().pending_exception.has_value()) {
             cpu.state().vstart = i;
             return;
         }
@@ -272,8 +272,8 @@ void execute_vsuxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId v
                                                       mem_f3);
             } else {
                 if (simrv::compiler::unlikely((addr & 7) != 0)) {
-                    cpu.pipeline_context.pending_exception = ExceptionCode::MisalignedStore;
-                    cpu.pipeline_context.pending_tval = addr;
+                    cpu.active_context().pending_exception = ExceptionCode::MisalignedStore;
+                    cpu.active_context().pending_tval = addr;
                     cpu.state().vstart = i;
                     return;
                 }
@@ -286,7 +286,7 @@ void execute_vsuxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId v
         } else {
             simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<Word>(val), mem_f3);
         }
-        if (cpu.pipeline_context.pending_exception.has_value()) {
+        if (cpu.active_context().pending_exception.has_value()) {
             cpu.state().vstart = i;
             return;
         }

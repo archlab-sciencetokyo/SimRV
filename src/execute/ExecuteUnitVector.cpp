@@ -50,8 +50,8 @@ constexpr auto is_vector_fp_arithmetic(isa::OperationId op_id) -> bool {
 void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
                                  isa::OperationId op_id, Instruction ir) {
     if (cpu.state().vstart != 0 && requires_zero_vstart(op_id)) {
-        cpu.pipeline_context.pending_exception = ExceptionCode::IllegalInstruction;
-        cpu.pipeline_context.pending_tval = ir;
+        cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
+        cpu.active_context().pending_tval = ir;
         return;
     }
 
@@ -78,8 +78,8 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
         const Word frm = (cpu.state().fcsr >> 5U) & 0x7U;
         if (!scalar_fp_enabled || !fs_enabled || (is_vector_fp_arithmetic(op_id) && frm >= 5U)) {
             // SEW=16 vector FP belongs to Zvfh, which SimRV does not advertise.
-            cpu.pipeline_context.pending_exception = ExceptionCode::IllegalInstruction;
-            cpu.pipeline_context.pending_tval = ir;
+            cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
+            cpu.active_context().pending_tval = ir;
             return;
         }
     }
@@ -110,19 +110,21 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
         case isa::OperationId::VSSE32_V:
         case isa::OperationId::VSSE64_V:
         case isa::OperationId::VLUXEI8_V:
-        case isa::OperationId::VLOXEI8_V:
         case isa::OperationId::VLUXEI16_V:
-        case isa::OperationId::VLOXEI16_V:
         case isa::OperationId::VLUXEI32_V:
-        case isa::OperationId::VLOXEI32_V:
         case isa::OperationId::VLUXEI64_V:
+        case isa::OperationId::VLOXEI8_V:
+        case isa::OperationId::VLOXEI16_V:
+        case isa::OperationId::VLOXEI32_V:
         case isa::OperationId::VLOXEI64_V:
         case isa::OperationId::VSUXEI8_V:
-        case isa::OperationId::VSOXEI8_V:
         case isa::OperationId::VSUXEI16_V:
-        case isa::OperationId::VSOXEI16_V:
         case isa::OperationId::VSUXEI32_V:
+        case isa::OperationId::VSUXEI64_V:
+        case isa::OperationId::VSOXEI8_V:
+        case isa::OperationId::VSOXEI16_V:
         case isa::OperationId::VSOXEI32_V:
+        case isa::OperationId::VSOXEI64_V:
         case isa::OperationId::VL1RE8_V:
         case isa::OperationId::VL1RE16_V:
         case isa::OperationId::VL1RE32_V:
@@ -146,21 +148,28 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
             execute_vector_memory(cpu, mem, op_id, rd, rs1, rs2, vm, vl, sew);
             break;
 
-        // Floating-Point
+        // Floating-point
         case isa::OperationId::VFADD_VV:
         case isa::OperationId::VFADD_VF:
         case isa::OperationId::VFMACC_VV:
         case isa::OperationId::VFMACC_VF:
+        case isa::OperationId::VFMV_F_S:
+        case isa::OperationId::VFMV_S_F:
+        case isa::OperationId::VFMERGE_VFM:
             execute_vector_float(cpu, op_id, rd, rs1, rs2, vm, vl, sew);
             break;
 
-        // Fixed-Point
+        // Fixed-point
         case isa::OperationId::VSADD_VV:
         case isa::OperationId::VSADD_VX:
         case isa::OperationId::VSADD_VI:
         case isa::OperationId::VSADDU_VV:
         case isa::OperationId::VSADDU_VX:
         case isa::OperationId::VSADDU_VI:
+        case isa::OperationId::VSSUB_VV:
+        case isa::OperationId::VSSUB_VX:
+        case isa::OperationId::VSSUBU_VV:
+        case isa::OperationId::VSSUBU_VX:
         case isa::OperationId::VSMUL_VV:
         case isa::OperationId::VSMUL_VX:
         case isa::OperationId::VSSRA_VV:
@@ -169,10 +178,6 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
         case isa::OperationId::VSSRL_VV:
         case isa::OperationId::VSSRL_VX:
         case isa::OperationId::VSSRL_VI:
-        case isa::OperationId::VSSUB_VV:
-        case isa::OperationId::VSSUB_VX:
-        case isa::OperationId::VSSUBU_VV:
-        case isa::OperationId::VSSUBU_VX:
         case isa::OperationId::VNCLIP_WV:
         case isa::OperationId::VNCLIP_WX:
         case isa::OperationId::VNCLIP_WI:
@@ -183,7 +188,7 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
                                        cpu.state().regs.read(rs1), simm5);
             break;
 
-        // Permute and Move
+        // Permutations
         case isa::OperationId::VMV_X_S:
         case isa::OperationId::VMV_S_X:
         case isa::OperationId::VMERGE_VVM:
@@ -204,14 +209,10 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
         case isa::OperationId::VMV4R_V:
         case isa::OperationId::VMV8R_V:
         case isa::OperationId::VCOMPRESS_VM:
-        case isa::OperationId::VFMV_F_S:
-        case isa::OperationId::VFMV_S_F:
-        case isa::OperationId::VFMERGE_VFM:
             execute_vector_permute(cpu, op_id, rd, rs1, rs2, vm, vl, sew,
                                    cpu.state().regs.read(rs1), simm5);
             break;
 
-        // Integer Arithmetic (default/fallback for all remaining vector integer ops)
         default:
             execute_vector_integer(cpu, op_id, rd, rs1, rs2, vm, vl, sew,
                                    cpu.state().regs.read(rs1), simm5);
@@ -220,7 +221,8 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
 
     // Vector 1.0 requires every successfully completed vector instruction, including vset*vl*, to
     // reset vstart. Faulting vector memory operations leave the faulting element index for resume.
-    if (!cpu.pipeline_context.pending_exception.has_value()) {
+    if (!cpu.active_context().pending_exception.has_value()) {
+        cpu.state().mstatus |= enum_mask(core::MstatusBit::Vs);
         if (is_vector_fp(op_id)) {
             // Vector FP may update scalar FP registers or fflags. Setting FS Dirty
             // conservatively is permitted even when a particular result is exact.

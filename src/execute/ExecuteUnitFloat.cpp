@@ -224,7 +224,8 @@ static auto fmax64_riscv(double a, double b) -> FloatingRegister {
 #include <immintrin.h>
 
 static inline void fast_feclearexcept() noexcept {
-    // Intentionally no-op: host hardware MXCSR accumulates sticky exception flags directly
+    _mm_setcsr(_mm_getcsr() & ~0x3fu);
+    std::feclearexcept(FE_ALL_EXCEPT);
 }
 
 static inline void accumulate_fp_flags(CSRValue& fcsr) noexcept {
@@ -235,6 +236,14 @@ static inline void accumulate_fp_flags(CSRValue& fcsr) noexcept {
     if ((mxcsr & 0x08u) != 0) flags |= enum_mask(FflagsBit::Of);
     if ((mxcsr & 0x04u) != 0) flags |= enum_mask(FflagsBit::Dz);
     if ((mxcsr & 0x01u) != 0) flags |= enum_mask(FflagsBit::Nv);
+
+    const int ex = std::fetestexcept(FE_ALL_EXCEPT);
+    if ((ex & FE_INEXACT) != 0) flags |= enum_mask(FflagsBit::Nx);
+    if ((ex & FE_UNDERFLOW) != 0) flags |= enum_mask(FflagsBit::Uf);
+    if ((ex & FE_OVERFLOW) != 0) flags |= enum_mask(FflagsBit::Of);
+    if ((ex & FE_DIVBYZERO) != 0) flags |= enum_mask(FflagsBit::Dz);
+    if ((ex & FE_INVALID) != 0) flags |= enum_mask(FflagsBit::Nv);
+
     fcsr |= flags;
 }
 #else
@@ -323,13 +332,13 @@ class ScopedRoundingMode {
 // Floating-Point to Integer Conversion
 // ============================================================================
 
-static auto fcvt_to_int(double value, Word op_mode, Word effective_rm) -> Register {
+static auto fcvt_to_int(double value, Word op_mode, Word effective_rm, CSRValue& fcsr) -> Register {
     const bool is_unsigned = (op_mode & 1) != 0;
     const bool is_64 = (op_mode >= 2);
 
-    auto saturate = [&](bool nan, bool pos_inf) -> Register {
-        std::feraiseexcept(FE_INVALID);
-        if (nan || pos_inf) {
+    auto saturate = [&](bool pos_inf) -> Register {
+        fcsr |= enum_mask(FflagsBit::Nv);
+        if (pos_inf) {
             if (is_64) {
                 return is_unsigned ? static_cast<Register>(std::numeric_limits<uint64_t>::max())
                                    : static_cast<Register>(std::numeric_limits<int64_t>::max());
@@ -354,11 +363,11 @@ static auto fcvt_to_int(double value, Word op_mode, Word effective_rm) -> Regist
     };
 
     if (std::isnan(value)) {
-        return saturate(true, false);
+        return saturate(true);
     }
 
     if (std::isinf(value)) {
-        return saturate(false, value > 0);
+        return saturate(value > 0);
     }
 
     double rounded = 0.0;
@@ -375,45 +384,45 @@ static auto fcvt_to_int(double value, Word op_mode, Word effective_rm) -> Regist
         rounded = std::rint(value);
     }
 
-    if (rounded != value) {
-        std::feraiseexcept(FE_INEXACT);
-    }
-
     if (is_64) {
         if (is_unsigned) {
             if (rounded < 0.0) {
-                return saturate(false, false);
+                return saturate(false);
             }
             if (rounded >= 18446744073709551616.0) {
-                return saturate(false, true);
+                return saturate(true);
             }
+            if (rounded != value) fcsr |= enum_mask(FflagsBit::Nx);
             return static_cast<Register>(static_cast<uint64_t>(rounded));
         } else {
             if (rounded < -9223372036854775808.0) {
-                return saturate(false, false);
+                return saturate(false);
             }
             if (rounded >= 9223372036854775808.0) {
-                return saturate(false, true);
+                return saturate(true);
             }
+            if (rounded != value) fcsr |= enum_mask(FflagsBit::Nx);
             return static_cast<Register>(static_cast<int64_t>(rounded));
         }
     } else {
         if (is_unsigned) {
             if (rounded < 0.0) {
-                return saturate(false, false);
+                return saturate(false);
             }
             if (rounded >= 4294967296.0) {
-                return saturate(false, true);
+                return saturate(true);
             }
+            if (rounded != value) fcsr |= enum_mask(FflagsBit::Nx);
             return static_cast<Register>(
                 static_cast<SignedWord>(static_cast<int32_t>(static_cast<uint32_t>(rounded))));
         } else {
             if (rounded < -2147483648.0) {
-                return saturate(false, false);
+                return saturate(false);
             }
             if (rounded >= 2147483648.0) {
-                return saturate(false, true);
+                return saturate(true);
             }
+            if (rounded != value) fcsr |= enum_mask(FflagsBit::Nx);
             return static_cast<Register>(static_cast<SignedWord>(static_cast<int32_t>(rounded)));
         }
     }
@@ -687,18 +696,13 @@ bool fp_exec_cvt(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2, Re
     }
     if (funct7 == enum_mask(Funct7Fp::FcvtWS) || funct7 == enum_mask(Funct7Fp::FcvtWD)) {
         const bool is_d = (funct7 == enum_mask(Funct7Fp::FcvtWD));
-        fast_feclearexcept();
-        {
-            ScopedRoundingMode const scope(rm, fcsr);
-            const double a = !is_d ? static_cast<double>(read_f32(freg, rs1)) : read_f64(freg, rs1);
-            Word effective_rm = rm;
-            if (effective_rm == enum_mask(RoundingMode::Dyn)) {
-                effective_rm = (fcsr >> 5) & 0x7;
-            }
-            out.int_wb_data = fcvt_to_int(a, rs2, effective_rm);
+        const double a = !is_d ? static_cast<double>(read_f32(freg, rs1)) : read_f64(freg, rs1);
+        Word effective_rm = rm;
+        if (effective_rm == enum_mask(RoundingMode::Dyn)) {
+            effective_rm = (fcsr >> 5) & 0x7;
         }
+        out.int_wb_data = fcvt_to_int(a, rs2, effective_rm, fcsr);
         out.int_wb_enable = true;
-        accumulate_fp_flags(fcsr);
         return true;
     }
     if (funct7 == enum_mask(Funct7Fp::FcvtSW) || funct7 == enum_mask(Funct7Fp::FcvtDW)) {
