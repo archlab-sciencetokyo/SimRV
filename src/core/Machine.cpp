@@ -32,12 +32,18 @@ namespace simrv::core {
 /// runner is a value in Machine::Runtime, avoiding the old Machine subclass hierarchy.
 class BaremetalRunner {
    public:
-    void start(Machine&) {}
-    void stop(Machine&) {}
-    void prepare(Machine&) {}
+    ~BaremetalRunner() { stop_threads(); }
+    void start(Machine& machine);
+    void stop(Machine& machine);
+    void prepare(Machine& machine);
     void execute(Machine& machine);
     [[nodiscard]] auto execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool;
     void finalize(Machine& machine);
+
+   private:
+    void stop_threads();
+    std::vector<std::jthread> worker_threads_;
+    std::atomic<bool> workers_running_{false};
 };
 
 class OsRunner {
@@ -299,13 +305,96 @@ auto Machine::fast_batch_policy() const -> std::optional<FastBatchPolicy> {
     };
 }
 
+void BaremetalRunner::start(Machine& machine) {
+    if (!machine.config.execution.smp_multithreaded || machine.secondary_harts_.empty() ||
+        !machine.runtime_profile.is_instruction_mode()) {
+        return;
+    }
+    stop_threads();
+    workers_running_.store(true, std::memory_order_release);
+    for (size_t i = 0; i < machine.secondary_harts_.size(); ++i) {
+        worker_threads_.emplace_back([&machine, this, i](const std::stop_token& stop_token) {
+            auto& hart = *machine.secondary_harts_[i];
+            constexpr uint32_t kWorkerBatch = 2048;
+            while (!stop_token.stop_requested() && machine.is_running() &&
+                   workers_running_.load(std::memory_order_relaxed)) {
+                if (hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started) {
+                    hart.hart_status.wait(HartStatus::Stopped, std::memory_order_relaxed);
+                    continue;
+                }
+                if (machine.execution_state_.load(std::memory_order_relaxed) ==
+                    ExecutionState::Paused) {
+                    machine.execution_state_.wait(ExecutionState::Paused,
+                                                  std::memory_order_relaxed);
+                    continue;
+                }
+                for (uint32_t step = 0;
+                     step < kWorkerBatch && machine.is_running() &&
+                     hart.hart_status.load(std::memory_order_relaxed) == HartStatus::Started;
+                     ++step) {
+                    hart.run_cycle_baremetal(machine);
+                }
+            }
+        });
+    }
+}
+
+void BaremetalRunner::stop_threads() {
+    workers_running_.store(false, std::memory_order_release);
+    for (auto& thread : worker_threads_) {
+        if (thread.joinable()) {
+            thread.request_stop();
+            thread.join();
+        }
+    }
+    worker_threads_.clear();
+}
+
+void BaremetalRunner::stop(Machine& machine) {
+    workers_running_.store(false, std::memory_order_release);
+    for (auto& hart : machine.secondary_harts_) hart->hart_status.notify_all();
+    machine.execution_state_.notify_all();
+    stop_threads();
+}
+
+void BaremetalRunner::prepare(Machine& machine) {
+    for (auto& hart : machine.secondary_harts_) {
+        hart->pipeline_context.pending_exception = std::nullopt;
+        hart->pipeline_context.pending_tval = 0;
+    }
+    machine.primary_hart().pipeline_context.pending_exception = std::nullopt;
+    machine.primary_hart().pipeline_context.pending_tval = 0;
+}
+
 void BaremetalRunner::execute(Machine& machine) {
     if (machine.runtime_profile.is_cycle_mode()) {
         machine.advance_ca_global_cycle();
     } else if (machine.lockstep() && machine.lockstep()->is_running()) {
         machine.primary_hart().run_cycle(machine);
     } else {
-        machine.primary_hart().run_cycle_baremetal(machine);
+        const uint32_t quantum = machine.config.execution.smp_quantum;
+        if (machine.secondary_harts_.empty() || quantum <= 1) {
+            machine.primary_hart().run_cycle_baremetal(machine);
+            for (auto& hart : machine.secondary_harts_) {
+                if (hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+                    hart->run_cycle_baremetal(machine);
+                }
+            }
+        } else {
+            for (uint32_t q = 0; q < quantum && machine.is_running(); ++q) {
+                machine.primary_hart().run_cycle_baremetal(machine);
+            }
+            for (auto& hart : machine.secondary_harts_) {
+                if (hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+                    for (uint32_t q = 0;
+                         q < quantum && machine.is_running() &&
+                         hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started;
+                         ++q) {
+                        hart->run_cycle_baremetal(machine);
+                    }
+                }
+            }
+        }
     }
 }
 
