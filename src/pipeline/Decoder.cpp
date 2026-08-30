@@ -550,57 +550,68 @@ auto decode_op_imm(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operatio
     }
 }
 
-auto decode_op_standard(uint32_t funct3, uint32_t funct7) -> OperationId {
-    switch (funct3) {
-        case 0:
-            if (funct7 == 0x00) return OperationId::ADD;
-            if (funct7 == 0x20) return OperationId::SUB;
-            return OperationId::UNKNOWN;
-        case 1:
-            if (funct7 == 0x30) return OperationId::ROL;
-            if (funct7 == 0x05) return OperationId::CLMUL;
-            if (funct7 == 0x14) return OperationId::BSET;
-            if (funct7 == 0x24) return OperationId::BCLR;
-            if (funct7 == 0x34) return OperationId::BINV;
-            if (funct7 == 0x00) return OperationId::SLL;
-            return OperationId::UNKNOWN;
-        case 2:
-            if (funct7 == 0x10) return OperationId::SH1ADD;
-            if (funct7 == 0x05) return OperationId::CLMULR;
-            if (funct7 == 0x00) return OperationId::SLT;
-            return OperationId::UNKNOWN;
-        case 3:
-            if (funct7 == 0x05) return OperationId::CLMULH;
-            if (funct7 == 0x00) return OperationId::SLTU;
-            return OperationId::UNKNOWN;
-        case 4:
-            if (funct7 == 0x10) return OperationId::SH2ADD;
-            if (funct7 == 0x20) return OperationId::XNOR;
-            if (funct7 == 0x05) return OperationId::MIN;
-            if (funct7 == 0x04) return OperationId::PACK;
-            if (funct7 == 0x00) return OperationId::XOR;
-            return OperationId::UNKNOWN;
-        case 5:
-            if (funct7 == 0x30) return OperationId::ROR;
-            if (funct7 == 0x24) return OperationId::BEXT;
-            if (funct7 == 0x05) return OperationId::MINU;
-            if (funct7 == 0x00) return OperationId::SRL;
-            if (funct7 == 0x20) return OperationId::SRA;
-            return OperationId::UNKNOWN;
-        case 6:
-            if (funct7 == 0x10) return OperationId::SH3ADD;
-            if (funct7 == 0x20) return OperationId::ORN;
-            if (funct7 == 0x05) return OperationId::MAX;
-            if (funct7 == 0x00) return OperationId::OR;
-            return OperationId::UNKNOWN;
-        case 7:
-            if (funct7 == 0x20) return OperationId::ANDN;
-            if (funct7 == 0x05) return OperationId::MAXU;
-            if (funct7 == 0x00) return OperationId::AND;
-            return OperationId::UNKNOWN;
-        default:
-            return OperationId::UNKNOWN;
+consteval auto generate_op_standard_table() {
+    std::array<std::array<OperationId, 128>, 8> table{};
+    for (auto& row : table) {
+        row.fill(OperationId::UNKNOWN);
     }
+    // funct3 = 0
+    table[0][0x00] = OperationId::ADD;
+    table[0][0x20] = OperationId::SUB;
+
+    // funct3 = 1
+    table[1][0x00] = OperationId::SLL;
+    table[1][0x05] = OperationId::CLMUL;
+    table[1][0x14] = OperationId::BSET;
+    table[1][0x24] = OperationId::BCLR;
+    table[1][0x30] = OperationId::ROL;
+    table[1][0x34] = OperationId::BINV;
+
+    // funct3 = 2
+    table[2][0x00] = OperationId::SLT;
+    table[2][0x05] = OperationId::CLMULR;
+    table[2][0x10] = OperationId::SH1ADD;
+
+    // funct3 = 3
+    table[3][0x00] = OperationId::SLTU;
+    table[3][0x05] = OperationId::CLMULH;
+
+    // funct3 = 4
+    table[4][0x00] = OperationId::XOR;
+    table[4][0x04] = OperationId::PACK;
+    table[4][0x05] = OperationId::MIN;
+    table[4][0x10] = OperationId::SH2ADD;
+    table[4][0x20] = OperationId::XNOR;
+
+    // funct3 = 5
+    table[5][0x00] = OperationId::SRL;
+    table[5][0x05] = OperationId::MINU;
+    table[5][0x20] = OperationId::SRA;
+    table[5][0x24] = OperationId::BEXT;
+    table[5][0x30] = OperationId::ROR;
+
+    // funct3 = 6
+    table[6][0x00] = OperationId::OR;
+    table[6][0x05] = OperationId::MAX;
+    table[6][0x10] = OperationId::SH3ADD;
+    table[6][0x20] = OperationId::ORN;
+
+    // funct3 = 7
+    table[7][0x00] = OperationId::AND;
+    table[7][0x05] = OperationId::MAXU;
+    table[7][0x20] = OperationId::ANDN;
+
+    return table;
+}
+
+constexpr auto kOpStandardTable = generate_op_standard_table();
+
+[[nodiscard]] constexpr auto decode_op_standard(uint32_t funct3, uint32_t funct7) noexcept
+    -> OperationId {
+    if (funct3 < 8 && funct7 < 128) {
+        return kOpStandardTable[funct3][funct7];
+    }
+    return OperationId::UNKNOWN;
 }
 
 auto decode_op_imm32(uint32_t funct3, uint32_t funct7, Instruction ir) -> OperationId {
@@ -626,35 +637,46 @@ auto decode_op_imm32(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operat
     }
 }
 
-auto decode_op32_standard(uint32_t funct3, uint32_t funct7) -> OperationId {
-    switch (funct3) {
-        case 0:
-            if (funct7 == 0x04) return OperationId::ADD_UW;
-            if (funct7 == 0x00) return OperationId::ADDW;
-            if (funct7 == 0x20) return OperationId::SUBW;
-            return OperationId::UNKNOWN;
-        case 1:
-            if (funct7 == 0x30) return OperationId::ROLW;
-            if (funct7 == 0x00) return OperationId::SLLW;
-            return OperationId::UNKNOWN;
-        case 2:
-            if (funct7 == 0x10) return OperationId::SH1ADD_UW;
-            return OperationId::UNKNOWN;
-        case 4:
-            if (funct7 == 0x10) return OperationId::SH2ADD_UW;
-            if (funct7 == 0x04) return OperationId::PACKW;
-            return OperationId::UNKNOWN;
-        case 5:
-            if (funct7 == 0x30) return OperationId::RORW;
-            if (funct7 == 0x00) return OperationId::SRLW;
-            if (funct7 == 0x20) return OperationId::SRAW;
-            return OperationId::UNKNOWN;
-        case 6:
-            if (funct7 == 0x10) return OperationId::SH3ADD_UW;
-            return OperationId::UNKNOWN;
-        default:
-            return OperationId::UNKNOWN;
+consteval auto generate_op32_standard_table() {
+    std::array<std::array<OperationId, 128>, 8> table{};
+    for (auto& row : table) {
+        row.fill(OperationId::UNKNOWN);
     }
+    // funct3 = 0
+    table[0][0x00] = OperationId::ADDW;
+    table[0][0x04] = OperationId::ADD_UW;
+    table[0][0x20] = OperationId::SUBW;
+
+    // funct3 = 1
+    table[1][0x00] = OperationId::SLLW;
+    table[1][0x30] = OperationId::ROLW;
+
+    // funct3 = 2
+    table[2][0x10] = OperationId::SH1ADD_UW;
+
+    // funct3 = 4
+    table[4][0x04] = OperationId::PACKW;
+    table[4][0x10] = OperationId::SH2ADD_UW;
+
+    // funct3 = 5
+    table[5][0x00] = OperationId::SRLW;
+    table[5][0x20] = OperationId::SRAW;
+    table[5][0x30] = OperationId::RORW;
+
+    // funct3 = 6
+    table[6][0x10] = OperationId::SH3ADD_UW;
+
+    return table;
+}
+
+constexpr auto kOp32StandardTable = generate_op32_standard_table();
+
+[[nodiscard]] constexpr auto decode_op32_standard(uint32_t funct3, uint32_t funct7) noexcept
+    -> OperationId {
+    if (funct3 < 8 && funct7 < 128) {
+        return kOp32StandardTable[funct3][funct7];
+    }
+    return OperationId::UNKNOWN;
 }
 
 auto decode_system_priv(uint32_t funct7, Instruction ir) -> OperationId {
