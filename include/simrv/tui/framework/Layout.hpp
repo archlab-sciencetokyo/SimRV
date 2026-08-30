@@ -40,31 +40,27 @@ inline constexpr int kMinimumTerminalWidth = 40;
 inline constexpr int kMinimumTerminalHeight = 10;
 inline constexpr int kFrameChromeRows = 7;
 
+[[nodiscard]] constexpr auto max_supported_columns(int terminal_width) -> uint8_t {
+    if (terminal_width >= 160) return 4;
+    if (terminal_width >= 120) return 3;
+    if (terminal_width >= 75) return 2;
+    return 1;
+}
+
 [[nodiscard]] constexpr auto multi_column_widths(int terminal_width, Layout layout,
                                                  int requested_left = -1) -> ColumnWidths {
     int const full_width = std::max(0, terminal_width - 2);
-    if (layout == Layout::FullLeft) {
+    if (layout == Layout::FullLeft || layout == Layout::FullRight) {
         return {.widths = {full_width, 0, 0, 0}, .count = 1};
     }
-    if (layout == Layout::FullRight) {
-        return {.widths = {full_width, 0, 0, 0}, .count = 1};
-    }
-    if (layout == Layout::ThreeColumn && terminal_width >= 110) {
-        int const usable = std::max(0, terminal_width - 4);  // 2 inner dividers + borders
-        int const c1 = (usable * 30) / 100;
-        int const c2 = (usable * 30) / 100;
-        int const c3 = usable - c1 - c2;
-        return {.widths = {c1, c2, c3, 0}, .count = 3};
-    }
-    if (layout == Layout::FourColumn && terminal_width >= 135) {
-        int const usable = std::max(0, terminal_width - 5);  // 3 inner dividers + borders
+    if (layout == Layout::FourColumn && terminal_width >= 160) {
+        int const usable = std::max(0, terminal_width - 5);  // 3 inner dividers + 2 borders
         int const c = usable / 4;
         int const c4 = usable - (c * 3);
         return {.widths = {c, c, c, c4}, .count = 4};
     }
-    if (layout == Layout::FourColumn && terminal_width >= 110) {
-        // Fallback to 3 columns on medium width
-        int const usable = std::max(0, terminal_width - 4);
+    if ((layout == Layout::ThreeColumn || layout == Layout::FourColumn) && terminal_width >= 120) {
+        int const usable = std::max(0, terminal_width - 4);  // 2 inner dividers + 2 borders
         int const c1 = (usable * 30) / 100;
         int const c2 = (usable * 30) / 100;
         int const c3 = usable - c1 - c2;
@@ -74,6 +70,9 @@ inline constexpr int kFrameChromeRows = 7;
     // Default 2-column Split
     int const split_width = std::max(0, terminal_width - 3);
     if (split_width == 0) return {.widths = {0, 0, 0, 0}, .count = 0};
+    if (terminal_width < 75 && layout != Layout::Split) {
+        return {.widths = {full_width, 0, 0, 0}, .count = 1};
+    }
     int desired_left = requested_left;
     if (desired_left <= 0) {
         if (terminal_width <= 70)

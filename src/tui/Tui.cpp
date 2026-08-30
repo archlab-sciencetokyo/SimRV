@@ -883,96 +883,88 @@ void Tui::handle_mouse(int x, int y, int b) {
 
     struct winsize w{};
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-    int term_width = w.ws_col > 0 ? w.ws_col : 80;
-    int right_pane_width = std::max(0, term_width - pane_width_cached_ - 3);
+    int const term_width = w.ws_col > 0 ? w.ws_col : 80;
 
-    int const left_content_x = std::clamp(x - 2, 0, std::max(0, pane_width_cached_ - 1));
-    int const right_content_x =
-        std::clamp(x - (pane_width_cached_ + 3), 0, std::max(0, right_pane_width - 1));
+    auto const col_widths =
+        framework::multi_column_widths(term_width, layout_, user_left_pane_width_);
+    if (col_widths.count == 0) return;
 
-    int const y_clamped = std::max(4, y);
-
-    // Handle mouse drag selection (b == 32)
-    if (b == 32 && selection_.is_selecting) {
-        if (selection_.pane == SelectionPane::LeftPane) {
-            selection_.end_x = left_content_x;
-            selection_.end_y = y_clamped;
-        } else if (selection_.pane == SelectionPane::RightPane) {
-            selection_.end_x = right_content_x;
-            selection_.end_y = y_clamped;
+    // Find which column x falls into
+    size_t clicked_col = 0;
+    int cur_x = 1;
+    int col_local_x = 0;
+    int col_width = col_widths.widths[0];
+    for (size_t i = 0; i < col_widths.count; ++i) {
+        int const cw = col_widths.widths[i];
+        if (x >= cur_x && (x < cur_x + cw + 1 || i + 1 == col_widths.count)) {
+            clicked_col = i;
+            col_local_x = std::max(0, x - cur_x - 1);
+            col_width = cw;
+            break;
         }
-        render(true);
+        cur_x += cw + 1;
+    }
+
+    if (b == 0 && clicked_col < workbench_slots_.size()) {
+        focused_slot_index_ = clicked_col;
+    }
+
+    if (y < 4) {
+        // Header clicks
+        if (b == 0 && status_bar_) {
+            auto hit = status_bar_->get_header_action_at_col(x, term_width);
+            switch (hit.action) {
+                case HeaderAction::RunPause:
+                    toggle_run_state();
+                    break;
+                case HeaderAction::TogglePanelMode:
+                    cycle_right_panel_mode();
+                    break;
+                case HeaderAction::ToggleAttached:
+                    toggle_run_state();
+                    break;
+                case HeaderAction::SelectHart:
+                    select_next_hart();
+                    break;
+                case HeaderAction::SetSpeed:
+                    open_modal(ModalType::SetSpeed);
+                    break;
+                case HeaderAction::None:
+                default:
+                    break;
+            }
+        }
         return;
     }
 
-    // Right-click copy (b == 2)
-    if (b == 2) {
-        if (selection_.is_active) {
-            copy_active_selection();
-            clear_selection();
-        } else {
-            clear_selection();
-            if (x >= 2 && x <= pane_width_cached_ + 1) {
-                selection_.pane = SelectionPane::LeftPane;
-                selection_.start_x = 0;
-                selection_.start_y = y_clamped;
-                selection_.end_x = std::max(0, pane_width_cached_ - 1);
-                selection_.end_y = y_clamped;
-                selection_.is_active = true;
-            } else if (x >= pane_width_cached_ + 3) {
-                selection_.pane = SelectionPane::RightPane;
-                selection_.start_x = 0;
-                selection_.start_y = y_clamped;
-                selection_.end_x = std::max(0, right_pane_width - 1);
-                selection_.end_y = y_clamped;
-                selection_.is_active = true;
-            }
-            if (selection_.is_active) {
-                copy_active_selection();
-                clear_selection();
-            }
-        }
-        return;
-    }
-
-    if (b == 0) {  // Mouse down
-        clear_selection();
-        if (x >= 2 && x <= pane_width_cached_ + 1) {
-            selection_.pane = SelectionPane::LeftPane;
-            selection_.start_x = left_content_x;
-            selection_.start_y = y_clamped;
-            selection_.end_x = selection_.start_x;
-            selection_.end_y = y_clamped;
-            selection_.is_selecting = true;
-            selection_.is_active = true;
-        } else if (x >= pane_width_cached_ + 3) {
-            selection_.pane = SelectionPane::RightPane;
-            selection_.start_x = right_content_x;
-            selection_.start_y = y_clamped;
-            selection_.end_x = selection_.start_x;
-            selection_.end_y = y_clamped;
-            selection_.is_selecting = true;
-            selection_.is_active = true;
-        }
-    }
-
-    if (x < pane_width_cached_) {
-        if (!paused_) {
-            if (y >= 5) {
-                int logical_row = (y - 5) + left_pane_->get_scroll_offset();
-                if (left_pane_->is_running_label_click(logical_row, x - 2, pane_width_cached_)) {
-                    pause_loop();
-                }
-            }
-            return;
-        }
-        handle_mouse_left_pane(x, y, b);
-    } else {
+    // Body clicks (y >= 4)
+    if (clicked_col < workbench_slots_.size() &&
+        workbench_slots_[clicked_col].page == TuiRegPage::DISASM) {
         if (b == 64)
             scroll(5);
         else if (b == 65)
             scroll(-5);
+        else if (b == 0 && y >= 6) {
+            // Disassembly breakpoint toggle / inspect
+            render(true);
+        }
+        return;
     }
+
+    if (!paused_) {
+        if (y >= 5) {
+            int const logical_row = (y - 5) + left_pane_->get_scroll_offset();
+            if (left_pane_->is_running_label_click(logical_row, col_local_x, col_width)) {
+                pause_loop();
+            }
+        }
+        return;
+    }
+
+    if (clicked_col < workbench_slots_.size()) {
+        left_pane_->set_page(workbench_slots_[clicked_col].page);
+    }
+    handle_mouse_left_pane(col_local_x + 2, y, b);
 }
 
 void Tui::sync_workbench_slots() {
@@ -1032,16 +1024,22 @@ void Tui::sync_workbench_slots() {
 }
 
 void Tui::cycle_layout() {
-    if (layout_ == TuiLayout::Split)
-        layout_ = TuiLayout::ThreeColumn;
-    else if (layout_ == TuiLayout::ThreeColumn)
-        layout_ = TuiLayout::FourColumn;
-    else if (layout_ == TuiLayout::FourColumn)
+    winsize w{};
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+    int const term_width = w.ws_col > 0 ? w.ws_col : 80;
+    int const max_cols = framework::max_supported_columns(term_width);
+
+    if (layout_ == TuiLayout::Split) {
+        layout_ = (max_cols >= 3) ? TuiLayout::ThreeColumn : TuiLayout::FullRight;
+    } else if (layout_ == TuiLayout::ThreeColumn) {
+        layout_ = (max_cols >= 4) ? TuiLayout::FourColumn : TuiLayout::FullRight;
+    } else if (layout_ == TuiLayout::FourColumn) {
         layout_ = TuiLayout::FullRight;
-    else if (layout_ == TuiLayout::FullRight)
+    } else if (layout_ == TuiLayout::FullRight) {
         layout_ = TuiLayout::FullLeft;
-    else
-        layout_ = TuiLayout::Split;
+    } else {
+        layout_ = (max_cols >= 2) ? TuiLayout::Split : TuiLayout::FullLeft;
+    }
     sync_workbench_slots();
     const char* name = (layout_ == TuiLayout::Split)         ? "2-Column Split"
                        : (layout_ == TuiLayout::ThreeColumn) ? "3-Column Tri-Pane"

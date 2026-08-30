@@ -816,66 +816,78 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                 ' ');
         }
 
+        auto col_widths = framework::multi_column_widths(width, layout_, left_width_);
+        std::vector<std::string> cell_renders(col_widths.count);
+        if (col_widths.count == 1) {
+            cell_renders[0] = (layout_ == TuiLayout::FullRight) ? right_render : left_render;
+        } else if (col_widths.count == 2) {
+            cell_renders[0] = left_render;
+            cell_renders[1] = right_render;
+        } else if (col_widths.count == 3) {
+            cell_renders[0] = left_render;
+            cell_renders[1] = format_to_width(mode_prefix, col_widths.widths[1]);
+            cell_renders[2] = format_to_width(mid_text, col_widths.widths[2]);
+        } else if (col_widths.count >= 4) {
+            cell_renders[0] = left_render;
+            cell_renders[1] = format_to_width(mode_prefix, col_widths.widths[1]);
+            cell_renders[2] = format_to_width(mid_text, col_widths.widths[2]);
+            std::string hart_info;
+            if (machine_.num_harts() > 1) {
+                hart_info = std::format("HART {}/{}", selected, machine_.num_harts());
+            } else {
+                hart_info = "RV64GC / SimRV 2.1.0";
+            }
+            cell_renders[3] = format_to_width(" " + hart_info, col_widths.widths[3]);
+        }
+
+        for (size_t c = 0; c < col_widths.count; ++c) {
+            cell_renders[c] = format_to_width(cell_renders[c], col_widths.widths[c]);
+        }
+
         std::string screen;
         const auto style = get_active_theme_style();
-        if (style == TuiThemeStyle::ClassicAnsi) {
-            switch (layout_) {
-                case TuiLayout::Split:
-                    screen += std::string(kThemeBorder) + "+" +
-                              make_repeated_string("-", left_width_) + "+" +
-                              make_repeated_string("-", right_width_) + "+\033[0m\n";
-                    screen += std::string(kThemeBorder) + "|\033[0m" + left_render + kThemeBorder +
-                              "|\033[0m" + right_render + kThemeBorder + "|\033[0m\n";
-                    screen += std::string(kThemeBorder) + "+" +
-                              make_repeated_string("-", left_width_) + "+" +
-                              make_repeated_string("-", right_width_) + "+\033[0m\n";
-                    break;
-                case TuiLayout::FullRight:
-                    screen += std::string(kThemeBorder) + "+" +
-                              make_repeated_string("-", width - 2) + "+\033[0m\n";
-                    screen += std::string(kThemeBorder) + "|\033[0m" + right_render + kThemeBorder +
-                              "|\033[0m\n";
-                    screen += std::string(kThemeBorder) + "+" +
-                              make_repeated_string("-", width - 2) + "+\033[0m\n";
-                    break;
-                default:
-                    screen += std::string(kThemeBorder) + "+" +
-                              make_repeated_string("-", width - 2) + "+\033[0m\n";
-                    screen += std::string(kThemeBorder) + "|\033[0m" + left_render + kThemeBorder +
-                              "|\033[0m\n";
-                    screen += std::string(kThemeBorder) + "+" +
-                              make_repeated_string("-", width - 2) + "+\033[0m\n";
-                    break;
+        const bool is_ansi = (style == TuiThemeStyle::ClassicAnsi);
+        if (is_ansi) {
+            screen += std::string(kThemeBorder) + "+";
+            for (size_t c = 0; c < col_widths.count; ++c) {
+                screen += make_repeated_string("-", col_widths.widths[c]) + "+";
             }
+            screen += "\033[0m\n";
+
+            screen += std::string(kThemeBorder) + "|\033[0m";
+            for (size_t c = 0; c < col_widths.count; ++c) {
+                screen += cell_renders[c] + kThemeBorder + "|\033[0m";
+            }
+            screen += "\n";
+
+            screen += std::string(kThemeBorder) + "+";
+            for (size_t c = 0; c < col_widths.count; ++c) {
+                screen += make_repeated_string("-", col_widths.widths[c]) + "+";
+            }
+            screen += "\033[0m\n";
         } else {
-            switch (layout_) {
-                case TuiLayout::Split:
-                    screen += std::string(kThemeBorder) + "╔" +
-                              make_repeated_string("═", left_width_) + "╤" +
-                              make_repeated_string("═", right_width_) + "╗\033[0m\n";
-                    screen += std::string(kThemeBorder) + "║\033[0m" + left_render + kThemeBorder +
-                              "│\033[0m" + right_render + kThemeBorder + "║\033[0m\n";
-                    screen += std::string(kThemeBorder) + "╠" +
-                              make_repeated_string("═", left_width_) + "╪" +
-                              make_repeated_string("═", right_width_) + "╣\033[0m\n";
-                    break;
-                case TuiLayout::FullRight:
-                    screen += std::string(kThemeBorder) + "╔" +
-                              make_repeated_string("═", width - 2) + "╗\033[0m\n";
-                    screen += std::string(kThemeBorder) + "║\033[0m" + right_render + kThemeBorder +
-                              "║\033[0m\n";
-                    screen += std::string(kThemeBorder) + "╠" +
-                              make_repeated_string("═", width - 2) + "╣\033[0m\n";
-                    break;
-                default:
-                    screen += std::string(kThemeBorder) + "╔" +
-                              make_repeated_string("═", width - 2) + "╗\033[0m\n";
-                    screen += std::string(kThemeBorder) + "║\033[0m" + left_render + kThemeBorder +
-                              "║\033[0m\n";
-                    screen += std::string(kThemeBorder) + "╠" +
-                              make_repeated_string("═", width - 2) + "╣\033[0m\n";
-                    break;
+            screen += std::string(kThemeBorder) + "╔";
+            for (size_t c = 0; c < col_widths.count; ++c) {
+                screen += make_repeated_string("═", col_widths.widths[c]);
+                if (c + 1 < col_widths.count) screen += "╤";
             }
+            screen += "╗\033[0m\n";
+
+            screen += std::string(kThemeBorder) + "║\033[0m";
+            for (size_t c = 0; c < col_widths.count; ++c) {
+                screen += cell_renders[c];
+                if (c + 1 < col_widths.count) {
+                    screen += std::string(kThemeBorder) + "│\033[0m";
+                }
+            }
+            screen += std::string(kThemeBorder) + "║\033[0m\n";
+
+            screen += std::string(kThemeBorder) + "╠";
+            for (size_t c = 0; c < col_widths.count; ++c) {
+                screen += make_repeated_string("═", col_widths.widths[c]);
+                if (c + 1 < col_widths.count) screen += "╪";
+            }
+            screen += "╣\033[0m\n";
         }
         return screen;
     } else if (row_idx == 1) {
