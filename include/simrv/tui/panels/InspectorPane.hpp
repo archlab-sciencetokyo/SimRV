@@ -215,8 +215,16 @@ class InspectorPane : public TuiWidget {
     uint64_t max_kips_ = 0;
     std::vector<uint64_t> kips_history_;
     int visible_rows_ = 25;
-    framework::ScrollView scroll_view_;
+    std::array<framework::ScrollView, 16> scroll_views_{};
     framework::ScrollView log_scroll_view_{framework::ScrollIndicatorMode::HeaderSummary};
+
+    [[nodiscard]] auto current_scroll_view() -> framework::ScrollView& {
+        return scroll_views_.at(static_cast<std::size_t>(page_) % scroll_views_.size());
+    }
+    [[nodiscard]] auto current_scroll_view() const -> const framework::ScrollView& {
+        return scroll_views_.at(static_cast<std::size_t>(page_) % scroll_views_.size());
+    }
+
     double active_runtime_ = 0.0;
     Register inspect_addr_ = 0;
     Register explain_pc_ = 0;

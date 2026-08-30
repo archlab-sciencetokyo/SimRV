@@ -944,7 +944,9 @@ void Tui::handle_mouse(int x, int y, int b) {
             if (page == TuiRegPage::DISASM) {
                 scroll(5);
             } else {
-                scroll_regs(-2);
+                left_pane_->set_page(page);
+                left_pane_->scroll(-2);
+                render(true);
             }
             return;
         }
@@ -952,7 +954,19 @@ void Tui::handle_mouse(int x, int y, int b) {
             if (page == TuiRegPage::DISASM) {
                 scroll(-5);
             } else {
-                scroll_regs(2);
+                left_pane_->set_page(page);
+                left_pane_->scroll(2);
+                render(true);
+            }
+            return;
+        }
+        if (b == 66 || b == 67) {
+            if (page != TuiRegPage::DISASM) {
+                left_pane_->set_page(page);
+                if (left_pane_->supports_horizontal_scroll()) {
+                    left_pane_->scroll_horizontal(b == 66 ? -4 : 4);
+                    render(true);
+                }
             }
             return;
         }
@@ -1447,6 +1461,7 @@ void Tui::reset_scroll() {
 
 void Tui::scroll_regs(int lines) {
     if (left_pane_) {
+        left_pane_->set_page(focused_page());
         left_pane_->scroll(lines);
         render();
     }
@@ -1454,6 +1469,7 @@ void Tui::scroll_regs(int lines) {
 
 void Tui::reset_scroll_regs() {
     if (left_pane_) {
+        left_pane_->set_page(focused_page());
         left_pane_->reset_scroll();
         render();
     }
@@ -2382,10 +2398,19 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             render(true);
             return true;
         }
-        if (paused_ && left_pane_ && left_pane_->get_page() == TuiRegPage::CACHE) {
-            left_pane_->select_next_cache_set(1);
-            render(true);
-            return true;
+        if (paused_ && left_pane_) {
+            auto page = focused_page();
+            if (page == TuiRegPage::CACHE) {
+                left_pane_->select_next_cache_set(1);
+                render(true);
+                return true;
+            }
+            left_pane_->set_page(page);
+            if (left_pane_->supports_horizontal_scroll()) {
+                left_pane_->scroll_horizontal(4);
+                render(true);
+                return true;
+            }
         }
     } else if (esc_buf_ == "\033[D" || esc_buf_ == "\033OD") {
         if (get_active_modal() == ModalType::Glossary) {
@@ -2408,10 +2433,19 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             render(true);
             return true;
         }
-        if (paused_ && left_pane_ && left_pane_->get_page() == TuiRegPage::CACHE) {
-            left_pane_->select_next_cache_set(-1);
-            render(true);
-            return true;
+        if (paused_ && left_pane_) {
+            auto page = focused_page();
+            if (page == TuiRegPage::CACHE) {
+                left_pane_->select_next_cache_set(-1);
+                render(true);
+                return true;
+            }
+            left_pane_->set_page(page);
+            if (left_pane_->supports_horizontal_scroll()) {
+                left_pane_->scroll_horizontal(-4);
+                render(true);
+                return true;
+            }
         }
     } else if (esc_buf_ == "\033[5~") {
         if (get_active_modal() == ModalType::Glossary) {
