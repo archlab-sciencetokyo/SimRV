@@ -46,6 +46,9 @@ auto LeftPane::get_total_rows(int width) -> int {
     if (page_ == TuiRegPage::EXPLAIN) {
         return static_cast<int>(get_explain_rows(width).size());
     }
+    if (page_ == TuiRegPage::TRACE) {
+        return static_cast<int>(trace_buffer_ ? trace_buffer_->size() : 0);
+    }
     bool const single_column = is_single_column(width);
     // Semantic machine state needs five rows, unlike the legacy CSR dump.  The
     // pipeline page retains its complete 25-row canvas; single-column register

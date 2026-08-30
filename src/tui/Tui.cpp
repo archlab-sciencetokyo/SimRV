@@ -938,17 +938,29 @@ void Tui::handle_mouse(int x, int y, int b) {
     }
 
     // Body clicks (y >= 4)
-    if (clicked_col < workbench_slots_.size() &&
-        workbench_slots_[clicked_col].page == TuiRegPage::DISASM) {
-        if (b == 64)
-            scroll(5);
-        else if (b == 65)
-            scroll(-5);
-        else if (b == 0 && y >= 6) {
+    if (clicked_col < workbench_slots_.size()) {
+        auto page = workbench_slots_[clicked_col].page;
+        if (b == 64) {
+            if (page == TuiRegPage::DISASM) {
+                scroll(5);
+            } else {
+                scroll_regs(-2);
+            }
+            return;
+        }
+        if (b == 65) {
+            if (page == TuiRegPage::DISASM) {
+                scroll(-5);
+            } else {
+                scroll_regs(2);
+            }
+            return;
+        }
+        if (page == TuiRegPage::DISASM && b == 0 && y >= 6) {
             // Disassembly breakpoint toggle / inspect
             render(true);
+            return;
         }
-        return;
     }
 
     if (!paused_) {
@@ -2294,9 +2306,18 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             render(true);
             return true;
         }
-        if (paused_ && left_pane_ && left_pane_->get_page() == TuiRegPage::CACHE) {
-            left_pane_->cycle_cache_way(-1);
-            render(true);
+        if (paused_ && left_pane_) {
+            auto page = focused_page();
+            if (page == TuiRegPage::CACHE) {
+                left_pane_->cycle_cache_way(-1);
+                render(true);
+                return true;
+            }
+            if (page == TuiRegPage::DISASM) {
+                scroll(-1);
+                return true;
+            }
+            scroll_regs(-1);
             return true;
         }
     } else if (esc_buf_ == "\033[B" || esc_buf_ == "\033OB") {
@@ -2325,9 +2346,18 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             render(true);
             return true;
         }
-        if (paused_ && left_pane_ && left_pane_->get_page() == TuiRegPage::CACHE) {
-            left_pane_->cycle_cache_way(1);
-            render(true);
+        if (paused_ && left_pane_) {
+            auto page = focused_page();
+            if (page == TuiRegPage::CACHE) {
+                left_pane_->cycle_cache_way(1);
+                render(true);
+                return true;
+            }
+            if (page == TuiRegPage::DISASM) {
+                scroll(1);
+                return true;
+            }
+            scroll_regs(1);
             return true;
         }
     } else if (esc_buf_ == "\033[C" || esc_buf_ == "\033OC") {
@@ -2388,7 +2418,11 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             render(true);
             return true;
         }
-        scroll(-10);
+        if (focused_page() == TuiRegPage::DISASM) {
+            scroll(-10);
+        } else {
+            scroll_regs(-10);
+        }
         return true;
     } else if (esc_buf_ == "\033[6~") {
         if (get_active_modal() == ModalType::Glossary) {
@@ -2396,10 +2430,18 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             render(true);
             return true;
         }
-        scroll(10);
+        if (focused_page() == TuiRegPage::DISASM) {
+            scroll(10);
+        } else {
+            scroll_regs(10);
+        }
         return true;
     } else if (esc_buf_ == "\033[H" || esc_buf_ == "\033[1~") {
-        reset_scroll();
+        if (focused_page() == TuiRegPage::DISASM) {
+            reset_scroll();
+        } else {
+            reset_scroll_regs();
+        }
         return true;
     }
     return false;
