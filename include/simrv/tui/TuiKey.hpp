@@ -13,12 +13,14 @@ enum class TuiKey : uint8_t {
     CtrlC = 3,
     CtrlD = 4,
     Tab = 9,
-    Enter = 13,    // '\r'
     Newline = 10,  // '\n'
+    CtrlL = 12,
+    Enter = 13,  // '\r'
     CtrlP = 16,
     CtrlQ = 17,
     CtrlR = 18,
     Space = 32,  // ' '
+    BackTab = 254,
     a = 'a',
     A = 'A',
     c = 'c',

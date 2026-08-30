@@ -335,7 +335,7 @@ static const auto paused_row2_entries = std::to_array<FooterEntry>({
      .action = std::nullopt,
      .category = FooterCategory::Separator,
      .priority = FooterPriority::Core},
-    {.text = "[Tab] Layout",
+    {.text = "[Ctrl-L] Layout",
      .action = TuiFooterAction::CycleLayout,
      .category = FooterCategory::Sys,
      .priority = FooterPriority::Core},
@@ -711,8 +711,8 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         std::string mode_prefix;
         switch (right_panel_mode_) {
             case TuiRightPanelMode::Terminal: {
-                const bool term_focused = machine_.tui_controller() &&
-                                          machine_.tui_controller()->is_terminal_attached();
+                const bool term_focused =
+                    machine_.tui_controller() && machine_.tui_controller()->is_terminal_attached();
                 std::string const term_title =
                     panel_mode_label(right_panel_mode_, target_right_width, trace_enabled_);
                 std::string const mode_badge =

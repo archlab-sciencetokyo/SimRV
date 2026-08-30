@@ -9,12 +9,18 @@
 
 namespace simrv::tui::framework {
 
-enum class Layout : std::uint8_t { Split, FullRight, FullLeft };
+enum class Layout : std::uint8_t { Split, FullRight, FullLeft, ThreeColumn, FourColumn };
 
 struct PaneWidths {
     int left = 0;
     int right = 0;
 };
+
+struct ColumnWidths {
+    int widths[4] = {0, 0, 0, 0};
+    uint8_t count = 0;
+};
+
 struct FrameGeometry {
     PaneWidths panes{};
     int content_rows = 0;
@@ -34,13 +40,40 @@ inline constexpr int kMinimumTerminalWidth = 40;
 inline constexpr int kMinimumTerminalHeight = 10;
 inline constexpr int kFrameChromeRows = 7;
 
-[[nodiscard]] constexpr auto pane_widths(int terminal_width, Layout layout, int requested_left = -1)
-    -> PaneWidths {
+[[nodiscard]] constexpr auto multi_column_widths(int terminal_width, Layout layout,
+                                                 int requested_left = -1) -> ColumnWidths {
     int const full_width = std::max(0, terminal_width - 2);
-    if (layout == Layout::FullLeft) return {.left = full_width, .right = 0};
-    if (layout == Layout::FullRight) return {.left = 0, .right = full_width};
+    if (layout == Layout::FullLeft) {
+        return {.widths = {full_width, 0, 0, 0}, .count = 1};
+    }
+    if (layout == Layout::FullRight) {
+        return {.widths = {full_width, 0, 0, 0}, .count = 1};
+    }
+    if (layout == Layout::ThreeColumn && terminal_width >= 110) {
+        int const usable = std::max(0, terminal_width - 4);  // 2 inner dividers + borders
+        int const c1 = (usable * 30) / 100;
+        int const c2 = (usable * 30) / 100;
+        int const c3 = usable - c1 - c2;
+        return {.widths = {c1, c2, c3, 0}, .count = 3};
+    }
+    if (layout == Layout::FourColumn && terminal_width >= 135) {
+        int const usable = std::max(0, terminal_width - 5);  // 3 inner dividers + borders
+        int const c = usable / 4;
+        int const c4 = usable - (c * 3);
+        return {.widths = {c, c, c, c4}, .count = 4};
+    }
+    if (layout == Layout::FourColumn && terminal_width >= 110) {
+        // Fallback to 3 columns on medium width
+        int const usable = std::max(0, terminal_width - 4);
+        int const c1 = (usable * 30) / 100;
+        int const c2 = (usable * 30) / 100;
+        int const c3 = usable - c1 - c2;
+        return {.widths = {c1, c2, c3, 0}, .count = 3};
+    }
+
+    // Default 2-column Split
     int const split_width = std::max(0, terminal_width - 3);
-    if (split_width == 0) return {};
+    if (split_width == 0) return {.widths = {0, 0, 0, 0}, .count = 0};
     int desired_left = requested_left;
     if (desired_left <= 0) {
         if (terminal_width <= 70)
@@ -56,7 +89,17 @@ inline constexpr int kFrameChromeRows = 7;
     int const minimum_right = std::min(20, split_width - minimum_left);
     int const maximum_left = std::max(minimum_left, split_width - minimum_right);
     int const left = std::clamp(desired_left, minimum_left, maximum_left);
-    return {.left = left, .right = split_width - left};
+    return {.widths = {left, split_width - left, 0, 0}, .count = 2};
+}
+
+[[nodiscard]] constexpr auto pane_widths(int terminal_width, Layout layout, int requested_left = -1)
+    -> PaneWidths {
+    auto cols = multi_column_widths(terminal_width, layout, requested_left);
+    if (cols.count == 1) {
+        if (layout == Layout::FullLeft) return {.left = cols.widths[0], .right = 0};
+        return {.left = 0, .right = cols.widths[0]};
+    }
+    return {.left = cols.widths[0], .right = cols.widths[1]};
 }
 
 [[nodiscard]] constexpr auto frame_geometry(int terminal_width, int terminal_height, Layout layout,

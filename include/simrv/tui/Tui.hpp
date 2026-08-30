@@ -157,15 +157,16 @@ class Tui {
         status_override_expires_at_ = {};
     }
 
-    void cycle_layout() {
-        if (layout_ == TuiLayout::Split)
-            layout_ = TuiLayout::FullRight;
-        else if (layout_ == TuiLayout::FullRight)
-            layout_ = TuiLayout::FullLeft;
-        else
-            layout_ = TuiLayout::Split;
-        render(true);
+    void cycle_layout();
+    void focus_next_slot();
+    void focus_prev_slot();
+    [[nodiscard]] auto is_terminal_focused() const noexcept -> bool { return !is_paused(); }
+    [[nodiscard]] auto focused_slot() const noexcept -> size_t { return focused_slot_index_; }
+    [[nodiscard]] auto get_workbench_slots() const noexcept -> const std::vector<WorkbenchSlot>& {
+        return workbench_slots_;
     }
+    void set_workbench_slot_page(size_t slot_idx, TuiRegPage page);
+    [[nodiscard]] auto focused_page() const -> TuiRegPage;
 
     void cycle_reg_page();
     void cycle_tool_page();
@@ -209,6 +210,7 @@ class Tui {
     void handle_mouse(int x, int y, int b);
 
    private:
+    void sync_workbench_slots();
     struct TraceRecord {
         Register pc = 0;
         simrv::isa::Opcode opcode{};
@@ -255,6 +257,8 @@ class Tui {
     std::atomic<bool> paused_{true};
     std::atomic<bool> trace_enabled_{false};
     bool learn_mode_enabled_{false};
+    std::vector<WorkbenchSlot> workbench_slots_{{TuiRegPage::GPR, 0}, {TuiRegPage::DISASM, 0}};
+    size_t focused_slot_index_{0};
     TuiLayout layout_ = TuiLayout::Split;
     std::atomic<TuiRightPanelMode> right_panel_mode_{TuiRightPanelMode::Terminal};
     std::atomic<bool> trace_or_livetrace_active_{false};

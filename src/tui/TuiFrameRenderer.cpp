@@ -59,11 +59,13 @@ void append_block_lines(std::vector<std::string>& lines, std::string_view block)
 
 }  // namespace
 
-auto compose_frame_lines(const FrameGeometry& frame, int terminal_width, TuiLayout layout,
-                         std::string_view header_block, std::string_view footer_block,
-                         const PaneRowRenderer& render_left, const PaneRowRenderer& render_right)
+auto compose_multi_frame_lines(const FrameGeometry& frame, int terminal_width,
+                               framework::ColumnWidths col_widths, std::string_view header_block,
+                               std::string_view footer_block, const ColumnRowRenderer& render_col)
     -> std::vector<std::string> {
-    if (!frame.renderable || terminal_width < kFrameRendererMinimumTerminalWidth) return {};
+    if (!frame.renderable || terminal_width < kFrameRendererMinimumTerminalWidth ||
+        col_widths.count == 0)
+        return {};
 
     std::vector<std::string> lines;
     lines.reserve(static_cast<std::size_t>(frame.frame_rows));
@@ -75,55 +77,84 @@ auto compose_frame_lines(const FrameGeometry& frame, int terminal_width, TuiLayo
     const char* div_v = is_ansi ? "|" : "│";
 
     for (int row = 0; row < frame.content_rows; ++row) {
-        if (layout == TuiLayout::Split) {
-            const std::string left =
-                fit_pane_row(render_left(row, frame.panes.left), frame.panes.left);
-            const bool left_rule = is_horizontal_rule(left, is_ansi ? "-" : "─");
-            const char* left_border = left_rule ? (is_ansi ? "+" : "╟") : border_v;
-            const char* center_border = left_rule ? (is_ansi ? "+" : "┤") : div_v;
-            lines.push_back(
-                std::format("{}{}\033[0m{}{}{}\033[0m{}{}{}\033[0m", kThemeBorder, left_border,
-                            left, kThemeBorder, center_border,
-                            fit_pane_row(render_right(row, frame.panes.right), frame.panes.right),
-                            kThemeBorder, border_v));
-        } else if (layout == TuiLayout::FullRight) {
-            lines.push_back(
-                std::format("{}{}\033[0m{}{}{}\033[0m", kThemeBorder, border_v,
-                            fit_pane_row(render_right(row, frame.panes.right), frame.panes.right),
-                            kThemeBorder, border_v));
-        } else {
-            const std::string left =
-                fit_pane_row(render_left(row, frame.panes.left), frame.panes.left);
-            const bool left_rule = is_horizontal_rule(left, is_ansi ? "-" : "─");
-            const char* left_border = left_rule ? (is_ansi ? "+" : "╟") : border_v;
-            const char* right_border = left_rule ? (is_ansi ? "+" : "╢") : border_v;
-            lines.push_back(std::format("{}{}\033[0m{}{}{}\033[0m", kThemeBorder, left_border, left,
-                                        kThemeBorder, right_border));
+        std::string cells[4];
+        bool is_rule[4] = {false, false, false, false};
+        for (size_t col = 0; col < col_widths.count; ++col) {
+            const int w = col_widths.widths[col];
+            cells[col] = fit_pane_row(render_col(col, row, w), w);
+            is_rule[col] = is_horizontal_rule(cells[col], is_ansi ? "-" : "─");
         }
+
+        const char* left_border = is_rule[0] ? (is_ansi ? "+" : "╟") : border_v;
+        std::string line;
+        line += std::format("{}{}\033[0m", kThemeBorder, left_border);
+
+        for (size_t col = 0; col < col_widths.count; ++col) {
+            line += cells[col];
+            if (col + 1 < col_widths.count) {
+                const char* div = div_v;
+                if (is_rule[col] && is_rule[col + 1]) {
+                    div = is_ansi ? "+" : "┼";
+                } else if (is_rule[col]) {
+                    div = is_ansi ? "+" : "┤";
+                } else if (is_rule[col + 1]) {
+                    div = is_ansi ? "+" : "├";
+                }
+                line += std::format("{}{}\033[0m", kThemeBorder, div);
+            }
+        }
+
+        const bool last_rule = is_rule[col_widths.count - 1];
+        const char* right_border =
+            (col_widths.count == 1 && last_rule) ? (is_ansi ? "+" : "╢") : border_v;
+        line += std::format("{}{}\033[0m", kThemeBorder, right_border);
+        lines.push_back(std::move(line));
     }
 
     if (is_ansi) {
-        if (layout == TuiLayout::Split) {
-            lines.push_back(std::format("{}+{}+{}+\033[0m", kThemeBorder,
-                                        make_repeated_string("-", frame.panes.left),
-                                        make_repeated_string("-", frame.panes.right)));
-        } else {
-            lines.push_back(std::format("{}+{}+\033[0m", kThemeBorder,
-                                        make_repeated_string("-", terminal_width - 2)));
+        std::string bottom = std::format("{}+", kThemeBorder);
+        for (size_t col = 0; col < col_widths.count; ++col) {
+            bottom += make_repeated_string("-", col_widths.widths[col]);
+            bottom += "+";
         }
+        bottom += "\033[0m";
+        lines.push_back(std::move(bottom));
     } else {
-        if (layout == TuiLayout::Split) {
-            lines.push_back(std::format("{}╠{}╧{}╣\033[0m", kThemeBorder,
-                                        make_repeated_string("═", frame.panes.left),
-                                        make_repeated_string("═", frame.panes.right)));
-        } else {
-            lines.push_back(std::format("{}╠{}╣\033[0m", kThemeBorder,
-                                        make_repeated_string("═", terminal_width - 2)));
+        std::string bottom = std::format("{}╠", kThemeBorder);
+        for (size_t col = 0; col < col_widths.count; ++col) {
+            bottom += make_repeated_string("═", col_widths.widths[col]);
+            if (col + 1 < col_widths.count) {
+                bottom += "╧";
+            }
         }
+        bottom += std::format("╣\033[0m");
+        lines.push_back(std::move(bottom));
     }
 
     append_block_lines(lines, footer_block);
     return lines;
+}
+
+auto compose_frame_lines(const FrameGeometry& frame, int terminal_width, TuiLayout layout,
+                         std::string_view header_block, std::string_view footer_block,
+                         const PaneRowRenderer& render_left, const PaneRowRenderer& render_right)
+    -> std::vector<std::string> {
+    if (!frame.renderable || terminal_width < kFrameRendererMinimumTerminalWidth) return {};
+
+    auto col_widths = framework::multi_column_widths(terminal_width, layout);
+    return compose_multi_frame_lines(frame, terminal_width, col_widths, header_block, footer_block,
+                                     [&](size_t col_idx, int row, int width) -> std::string {
+                                         if (col_widths.count == 1) {
+                                             if (layout == TuiLayout::FullRight) {
+                                                 return render_right(row, width);
+                                             }
+                                             return render_left(row, width);
+                                         }
+                                         if (col_idx == 0) {
+                                             return render_left(row, width);
+                                         }
+                                         return render_right(row, width);
+                                     });
 }
 
 }  // namespace simrv::tui

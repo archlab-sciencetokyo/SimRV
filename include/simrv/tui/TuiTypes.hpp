@@ -26,7 +26,13 @@ enum class TuiRegPage : uint8_t {
     BUS,
     TRACE,
     EXPLAIN,
-    STACK
+    STACK,
+    DISASM
+};
+
+struct WorkbenchSlot {
+    TuiRegPage page = TuiRegPage::GPR;
+    int scroll_offset = 0;
 };
 
 [[nodiscard]] constexpr auto get_category_group(TuiRegPage page) -> TuiCategoryGroup {
@@ -46,9 +52,42 @@ enum class TuiRegPage : uint8_t {
             return TuiCategoryGroup::Pipeline;
         case TuiRegPage::TRACE:
         case TuiRegPage::EXPLAIN:
+        case TuiRegPage::DISASM:
         default:
             return TuiCategoryGroup::Tools;
     }
+}
+
+[[nodiscard]] constexpr auto get_page_name(TuiRegPage page) -> const char* {
+    switch (page) {
+        case TuiRegPage::GPR:
+            return "GPR Registers";
+        case TuiRegPage::FPR:
+            return "FPR Float Regs";
+        case TuiRegPage::VEC:
+            return "Vector Registers";
+        case TuiRegPage::PIPELINE:
+            return "Pipeline Stages";
+        case TuiRegPage::CACHE:
+            return "Cache Hierarchy";
+        case TuiRegPage::TLB:
+            return "TLB & Page Table";
+        case TuiRegPage::BPRED:
+            return "Branch Predictor";
+        case TuiRegPage::HAZARD:
+            return "Hazards & Stalls";
+        case TuiRegPage::BUS:
+            return "Bus & Coherence";
+        case TuiRegPage::TRACE:
+            return "Execution Trace";
+        case TuiRegPage::EXPLAIN:
+            return "Instruction Explainer";
+        case TuiRegPage::STACK:
+            return "Stack & Memory";
+        case TuiRegPage::DISASM:
+            return "Disassembly";
+    }
+    return "Tool View";
 }
 
 [[nodiscard]] constexpr auto get_default_page_for_group(TuiCategoryGroup group,
