@@ -30,7 +30,9 @@ struct Cell {
     bool underline = false;
     bool reverse = false;
 
-    [[nodiscard]] auto text() const noexcept -> std::string_view { return {glyph.data(), glyph_size}; }
+    [[nodiscard]] auto text() const noexcept -> std::string_view {
+        return {glyph.data(), glyph_size};
+    }
 
     [[nodiscard]] static auto blank(uint8_t background = 0) -> Cell {
         Cell cell;
@@ -40,7 +42,8 @@ struct Cell {
 
     [[nodiscard]] static auto from_utf8(std::string_view value, const Cell& attributes) -> Cell {
         Cell cell = attributes;
-        cell.glyph_size = static_cast<uint8_t>(std::min<std::size_t>(value.size(), cell.glyph.size()));
+        cell.glyph_size =
+            static_cast<uint8_t>(std::min<std::size_t>(value.size(), cell.glyph.size()));
         std::copy_n(value.data(), cell.glyph_size, cell.glyph.data());
         return cell;
     }
@@ -149,8 +152,7 @@ class VirtualTerminal {
             // Grow: add new lines at the bottom
             int diff = new_height - height_;
             for (int i = 0; i < diff; ++i) {
-                cells_.push_back(
-                    std::vector<Cell>(new_width, Cell::blank(current_attr_.bg)));
+                cells_.push_back(std::vector<Cell>(new_width, Cell::blank(current_attr_.bg)));
             }
         }
 
@@ -408,8 +410,7 @@ class VirtualTerminal {
     void scroll_up() {
         scrollback_.push_back(cells_.front());
         cells_.pop_front();
-        cells_.push_back(
-            std::vector<Cell>(width_, Cell::blank(current_attr_.bg)));
+        cells_.push_back(std::vector<Cell>(width_, Cell::blank(current_attr_.bg)));
         if (scrollback_.size() > 9999) {
             scrollback_.pop_front();
         }
@@ -444,8 +445,7 @@ class VirtualTerminal {
             if (ch == 'M') {  // Reverse Index
                 cursor_y_--;
                 if (cursor_y_ < 0) {
-                    cells_.push_front(std::vector<Cell>(
-                        width_, Cell::blank(current_attr_.bg)));
+                    cells_.push_front(std::vector<Cell>(width_, Cell::blank(current_attr_.bg)));
                     cells_.pop_back();
                     cursor_y_ = 0;
                 }
@@ -568,20 +568,17 @@ class VirtualTerminal {
                 for (int x = cursor_x_; x < width_; ++x)
                     cells_[cursor_y_][x] = Cell::blank(current_attr_.bg);
                 for (int y = cursor_y_ + 1; y < height_; ++y) {
-                    std::fill(cells_[y].begin(), cells_[y].end(),
-                              Cell::blank(current_attr_.bg));
+                    std::fill(cells_[y].begin(), cells_[y].end(), Cell::blank(current_attr_.bg));
                 }
             } else if (mode == 1) {
                 for (int y = 0; y < cursor_y_; ++y) {
-                    std::fill(cells_[y].begin(), cells_[y].end(),
-                              Cell::blank(current_attr_.bg));
+                    std::fill(cells_[y].begin(), cells_[y].end(), Cell::blank(current_attr_.bg));
                 }
                 for (int x = 0; x <= cursor_x_; ++x)
                     cells_[cursor_y_][x] = Cell::blank(current_attr_.bg);
             } else if (mode == 2 || mode == 3) {
                 for (auto& row : cells_) {
-                    std::fill(row.begin(), row.end(),
-                              Cell::blank(current_attr_.bg));
+                    std::fill(row.begin(), row.end(), Cell::blank(current_attr_.bg));
                 }
             }
         } else if (cmd == 'K') {  // Erase Line

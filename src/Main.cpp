@@ -125,8 +125,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         if (sim_machine->reboot_requested) {
             simrv::log::info("Rebooting guest system...");
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            auto next_config = sim_machine->take_staged_reconfiguration()
-                                   .value_or(sim_machine->configuration());
+            auto next_config =
+                sim_machine->take_staged_reconfiguration().value_or(sim_machine->configuration());
 
             staged_configuration = std::move(next_config);
             staged_runtime_profile = sim_machine->runtime_profile;

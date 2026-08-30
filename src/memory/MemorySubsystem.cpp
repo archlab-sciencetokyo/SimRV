@@ -17,7 +17,7 @@ void MemorySubsystem::initialize_mmu() {
     if (!mmu_) {
         const auto geometry = machine_.memory_geometry();
         mmu_ = std::make_unique<simrv::Mmu>(machine_.ram_view().data(), geometry.dram_base,
-                                           geometry.dram_size);
+                                            geometry.dram_size);
     }
 }
 

@@ -14,7 +14,6 @@
 #include "simrv/xlen/Constants.hpp"  // IWYU pragma: export
 #include "simrv/xlen/Types.hpp"
 
-
 #ifndef SIMRV_DISK_SIZE_MB
 #define SIMRV_DISK_SIZE_MB 256
 #endif

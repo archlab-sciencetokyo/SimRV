@@ -166,8 +166,7 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     break;
                 }
                 case 8:  // Platform Profile (0: PCIe, 1: MMIO)
-                    draft.platform_profile =
-                        static_cast<uint8_t>((draft.platform_profile + 1) % 2);
+                    draft.platform_profile = static_cast<uint8_t>((draft.platform_profile + 1) % 2);
                     break;
                 case 9: {  // Physical RAM Capacity (MB)
                     static constexpr std::array<uint64_t, 8> kRamSizes = {32,  64,   128,  256,
@@ -278,8 +277,8 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
     machine.set_device_log_enabled(draft.dlog_mode);
 
     auto next = machine.configuration();
-    bool const profile_changed = next.platform_profile !=
-        static_cast<simrv::core::PlatformProfile>(draft.platform_profile);
+    bool const profile_changed =
+        next.platform_profile != static_cast<simrv::core::PlatformProfile>(draft.platform_profile);
     next.platform_profile = static_cast<simrv::core::PlatformProfile>(draft.platform_profile);
 
     uint64_t const new_dram_size = draft.dram_size_mb * 1024ULL * 1024ULL;
@@ -300,12 +299,13 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
         set_reg_page_cb(TuiRegPage::GPR);
     }
 
-    bool need_reboot = dram_size_changed || profile_changed ||
-                       next.execution.smp_quantum != machine.execution_config().smp_quantum ||
-                       next.execution.smp_multithreaded != machine.execution_config().smp_multithreaded ||
-                       next.network.mode != machine.network_mode() ||
-                       next.debug.lockstep_enabled != machine.lockstep_enabled() ||
-                       next.debug.gdb_enabled != machine.debugger_enabled();
+    bool need_reboot =
+        dram_size_changed || profile_changed ||
+        next.execution.smp_quantum != machine.execution_config().smp_quantum ||
+        next.execution.smp_multithreaded != machine.execution_config().smp_multithreaded ||
+        next.network.mode != machine.network_mode() ||
+        next.debug.lockstep_enabled != machine.lockstep_enabled() ||
+        next.debug.gdb_enabled != machine.debugger_enabled();
 
     // 2. MISA Extensions
     uint64_t const new_misa = draft.misa.to_misa_val();

@@ -177,8 +177,7 @@ void MisaModal::render(std::vector<std::string>& content_rows,
                        const MisaDraft& draft, int cursor, const simrv::core::Machine& machine,
                        bool show_footer) {
     (void)content_rows;
-    std::string live_misa =
-        simrv::xlen::resolve_misa_string(machine.primary_hart().state().misa);
+    std::string live_misa = simrv::xlen::resolve_misa_string(machine.primary_hart().state().misa);
     std::string draft_misa = draft.to_misa_string();
 
     add_row_cb(std::format("{}Current Live MISA  : \033[1;36m{}\033[0m", kThemeText, live_misa));

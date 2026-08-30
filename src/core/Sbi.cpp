@@ -336,7 +336,8 @@ auto Sbi::handle_dbcn(Word func_id) -> bool {
             size_t written = 0;
             for (size_t i = 0; i < num_bytes; ++i) {
                 const Address byte_addr = paddr + i;
-                if (cpu_.machine_ != nullptr && cpu_.machine_->memory_geometry().contains(byte_addr)) {
+                if (cpu_.machine_ != nullptr &&
+                    cpu_.machine_->memory_geometry().contains(byte_addr)) {
                     const auto geometry = cpu_.machine_->memory_geometry();
                     const auto ch = static_cast<char>(
                         cpu_.machine_->ram_data()[byte_addr - geometry.dram_base]);

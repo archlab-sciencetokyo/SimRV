@@ -231,7 +231,8 @@ void SystemConfigModal::render(std::vector<std::string>& content_rows,
     (void)content_rows;
     if (!draft.cycle_accurate) {
         add_row(
-            std::format("{}Disabled in IA Mode. Launch with --mode cycle-accurate to configure cycle timing.\033[0m",
+            std::format("{}Disabled in IA Mode. Launch with --mode cycle-accurate to configure "
+                        "cycle timing.\033[0m",
                         kThemeMuted));
         return;
     }

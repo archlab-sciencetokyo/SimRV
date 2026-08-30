@@ -59,8 +59,8 @@ void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
     machine.set_resolved_boot_state(start_pc, symbols.lookup_name("tohost"));
     machine.primary_hart().state().pc = machine.resolved_start_pc();
     if (machine.primary_hart().state().regs.xlen == 32) {
-        machine.primary_hart().state().pc = static_cast<Register>(static_cast<int64_t>(
-            static_cast<int32_t>(machine.primary_hart().state().pc)));
+        machine.primary_hart().state().pc = static_cast<Register>(
+            static_cast<int64_t>(static_cast<int32_t>(machine.primary_hart().state().pc)));
     }
 }
 
@@ -256,12 +256,14 @@ auto Machine::platform_status() const -> PlatformStatusSnapshot {
         snapshot.network_status = mmio_net->device_status();
         snapshot.network_tx_packets = mmio_net->backend().tx_packet_count();
     }
-    if (pci_console) snapshot.console_status = pci_console->device_status();
-    else if (mmio_console) snapshot.console_status = mmio_console->device_status();
-    snapshot.rng_status = pci_rng ? pci_rng->device_status()
-                                  : (mmio_rng ? mmio_rng->device_status() : 0);
-    snapshot.gpu_status = pci_gpu ? pci_gpu->device_status()
-                                  : (mmio_gpu ? mmio_gpu->device_status() : 0);
+    if (pci_console)
+        snapshot.console_status = pci_console->device_status();
+    else if (mmio_console)
+        snapshot.console_status = mmio_console->device_status();
+    snapshot.rng_status =
+        pci_rng ? pci_rng->device_status() : (mmio_rng ? mmio_rng->device_status() : 0);
+    snapshot.gpu_status =
+        pci_gpu ? pci_gpu->device_status() : (mmio_gpu ? mmio_gpu->device_status() : 0);
     return snapshot;
 }
 
@@ -269,7 +271,8 @@ auto Machine::initialize() -> int {
     if (!config.files.cpuconfig_path.empty()) {
         auto model = cpu.cpu_model_config;
         if (!simrv::core::load_cpu_config(config.files.cpuconfig_path, model)) {
-            simrv::log::error("Failed to load CPU configuration file: {}", config.files.cpuconfig_path);
+            simrv::log::error("Failed to load CPU configuration file: {}",
+                              config.files.cpuconfig_path);
             return 1;
         }
         cpu.apply_cpu_model_config(model);
@@ -339,10 +342,9 @@ auto Machine::initialize() -> int {
         simrv::log::error("DRAM must be at least 1 MiB for an OS device tree");
         return 1;
     }
-    const Address dtb_offset = linux_boot
-                                   ? static_cast<Address>(effective_dram_size -
-                                                          static_cast<size_t>(0x00100000U))
-                                   : simrv::boot::kInitDataAddress;
+    const Address dtb_offset =
+        linux_boot ? static_cast<Address>(effective_dram_size - static_cast<size_t>(0x00100000U))
+                   : simrv::boot::kInitDataAddress;
 
     CSRValue initial_misa =
         isa::misa_with_mxl(config.isa.misa_override ? config.isa.misa_profile : isa::kMisaDefault);
@@ -412,10 +414,11 @@ auto Machine::initialize() -> int {
     cpu.TLB_flush();
 
     load_image_into_ram(config.files.binary_path, ram_view(), "memory", tui_enabled());
-    symbols.load_from_elf(config.debug.spike_elf.empty() ? config.files.binary_path : config.debug.spike_elf, true,
-                          runtime_profile.interaction == InteractionMode::Tui
-                              ? simrv::debug::SymbolLoadMode::FullDebug
-                              : simrv::debug::SymbolLoadMode::RuntimeEssentials);
+    symbols.load_from_elf(
+        config.debug.spike_elf.empty() ? config.files.binary_path : config.debug.spike_elf, true,
+        runtime_profile.interaction == InteractionMode::Tui
+            ? simrv::debug::SymbolLoadMode::FullDebug
+            : simrv::debug::SymbolLoadMode::RuntimeEssentials);
 
     resolve_start_pc_and_dram_base(*this, symbols);
 
@@ -507,7 +510,8 @@ auto Machine::initialize() -> int {
     if (debugger_enabled()) {
         try {
             gdb_stub = std::make_unique<simrv::debug::GdbStub>(debugger_port());
-            simrv::log::info("GDB stub listening on port {} — waiting for connection…", debugger_port());
+            simrv::log::info("GDB stub listening on port {} — waiting for connection…",
+                             debugger_port());
             gdb_stub->wait_for_connection();
             simrv::log::info("GDB client connected");
         } catch (const std::exception& ex) {

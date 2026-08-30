@@ -349,13 +349,11 @@ void GlossaryModal::render(std::vector<std::string>& content_rows,
     bool const scrollable = static_cast<int>(body_rows.size()) > viewport_rows;
     if (scrollable) {
         const std::array ansi_actions{ModalActionHint{"<", "Previous"},
-                                      ModalActionHint{">", "Next"},
-                                      ModalActionHint{"^", "Up"},
+                                      ModalActionHint{">", "Next"}, ModalActionHint{"^", "Up"},
                                       ModalActionHint{"v", "Down"},
                                       ModalActionHint{"Esc/?/q", "Close"}};
         const std::array unicode_actions{ModalActionHint{"←", "Previous"},
-                                         ModalActionHint{"→", "Next"},
-                                         ModalActionHint{"↑", "Up"},
+                                         ModalActionHint{"→", "Next"}, ModalActionHint{"↑", "Up"},
                                          ModalActionHint{"↓", "Down"},
                                          ModalActionHint{"Esc/?/q", "Close"}};
         add_row_cb(

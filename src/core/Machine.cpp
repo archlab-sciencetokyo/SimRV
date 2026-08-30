@@ -179,7 +179,8 @@ void Machine::apply_configuration(MachineConfig machine_config) {
     resolved_isatest_tohost_ = config.isa.isatest_tohost;
 }
 
-void Machine::set_resolved_boot_state(Address start_pc, std::optional<Address> tohost_address) noexcept {
+void Machine::set_resolved_boot_state(Address start_pc,
+                                      std::optional<Address> tohost_address) noexcept {
     resolved_start_pc_ = start_pc;
     if (tohost_address.has_value()) resolved_isatest_tohost_ = *tohost_address;
 }
@@ -284,8 +285,9 @@ auto Machine::fast_batch_policy() const -> std::optional<FastBatchPolicy> {
         branch_trace_enabled() || config.execution.strace != 0 || breakpoints.has_any()) {
         return std::nullopt;
     }
-    if (tui_enabled() && (!tui || tui->is_trace_active() ||
-                      tui->step_delay_us_.load(std::memory_order_relaxed) != 0 || is_stepping())) {
+    if (tui_enabled() &&
+        (!tui || tui->is_trace_active() ||
+         tui->step_delay_us_.load(std::memory_order_relaxed) != 0 || is_stepping())) {
         return std::nullopt;
     }
     const bool captures_execution_detail = tui_enabled() && tui && tui->captures_execution_detail();
@@ -315,8 +317,8 @@ auto BaremetalRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) 
             machine.stop(Machine::StopReason::InstructionLimit);
             return true;
         }
-        batch_size = static_cast<uint32_t>(
-            std::min<Counter>(batch_size, machine.config.execution.fincnt - machine.primary_hart().e_icount));
+        batch_size = static_cast<uint32_t>(std::min<Counter>(
+            batch_size, machine.config.execution.fincnt - machine.primary_hart().e_icount));
     }
     machine.primary_hart().run_fast_baremetal_batch(machine, batch_size, *policy);
     return true;
@@ -327,8 +329,9 @@ void BaremetalRunner::finalize(Machine& machine) {
         machine.trace().write_trace_snapshot();
     }
     if (simrv::compiler::unlikely(machine.tohost != 0)) machine.finalize_cycle_tohost();
-    if (simrv::compiler::unlikely(machine.config.execution.fincnt != std::numeric_limits<Counter>::max() &&
-                                  machine.primary_hart().e_icount >= machine.config.execution.fincnt)) {
+    if (simrv::compiler::unlikely(
+            machine.config.execution.fincnt != std::numeric_limits<Counter>::max() &&
+            machine.primary_hart().e_icount >= machine.config.execution.fincnt)) {
         simrv::log::info("finished by -e option");
         machine.stop(Machine::StopReason::InstructionLimit);
     }
@@ -398,7 +401,8 @@ void OsRunner::prepare(Machine& machine) {
         hart->pipeline_context.pending_tval = 0;
     }
     if (simrv::compiler::likely(machine.runtime_profile.is_instruction_fast() &&
-                                machine.primary_hart().clint_mmio.mtime <= machine.config.execution.enabletimer)) {
+                                machine.primary_hart().clint_mmio.mtime <=
+                                    machine.config.execution.enabletimer)) {
         if (simrv::compiler::unlikely(machine.primary_hart().clint_mmio.mtime ==
                                       machine.config.execution.memimg_cycle)) {
             machine.trace().dump_init_artifacts();
@@ -428,7 +432,8 @@ auto OsRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool
     // instruction-by-instruction, while presentation and runner work move to the batch boundary.
     // Keep every SMP configuration on the detailed scheduler until its ordering contract has an
     // equally explicit parallel batch design.
-    if (!policy.has_value() || machine.config.execution.smp_multithreaded || !machine.secondary_harts_.empty()) {
+    if (!policy.has_value() || machine.config.execution.smp_multithreaded ||
+        !machine.secondary_harts_.empty()) {
         return false;
     }
     auto& cpu = machine.primary_hart();
@@ -437,8 +442,8 @@ auto OsRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool
             machine.stop(Machine::StopReason::InstructionLimit);
             return true;
         }
-        batch_size =
-            static_cast<uint32_t>(std::min<Counter>(batch_size, machine.config.execution.fincnt - cpu.e_icount));
+        batch_size = static_cast<uint32_t>(
+            std::min<Counter>(batch_size, machine.config.execution.fincnt - cpu.e_icount));
     }
     const uint32_t quantum = std::min(batch_size, machine.secondary_harts_.empty() ? 4096u : 2048u);
     for (uint32_t i = 0; i < quantum && machine.is_running(); ++i) cpu.run_cycle(machine);
@@ -454,10 +459,11 @@ void OsRunner::finalize(Machine& machine) {
     auto& cpu = machine.primary_hart();
     const bool trace_window = cpu.clint_mmio.mtime >= machine.config.execution.trace_begin &&
                               cpu.clint_mmio.mtime <= machine.config.execution.trace_end;
-    if (simrv::compiler::likely(machine.runtime_profile.is_instruction_fast() &&
-                                (!machine.tui_enabled() ||
-                                 machine.config.execution.ui_worker_threaded) &&
-                                machine.config.execution.strace == 0 && !trace_window && !machine.branch_trace_enabled())) {
+    if (simrv::compiler::likely(
+            machine.runtime_profile.is_instruction_fast() &&
+            (!machine.tui_enabled() || machine.config.execution.ui_worker_threaded) &&
+            machine.config.execution.strace == 0 && !trace_window &&
+            !machine.branch_trace_enabled())) {
         if (simrv::compiler::unlikely(machine.tohost != 0)) machine.finalize_cycle_tohost();
     } else {
         if (simrv::compiler::unlikely(machine.config.execution.strace != 0 &&
@@ -470,15 +476,16 @@ void OsRunner::finalize(Machine& machine) {
                 cpu.pipeline_context.opcode, cpu.pipeline_context.tkn);
         machine.finalize_cycle_tohost();
     }
-    if (simrv::compiler::unlikely(machine.config.execution.fincnt != std::numeric_limits<Counter>::max() &&
+    if (simrv::compiler::unlikely(machine.config.execution.fincnt !=
+                                      std::numeric_limits<Counter>::max() &&
                                   cpu.e_icount >= machine.config.execution.fincnt)) {
         simrv::log::info("finished by -e option");
         machine.stop(Machine::StopReason::InstructionLimit);
     }
     if (auto* uart = machine.uart_device();
-        uart &&
-        (machine.tui_enabled() || (!uart->is_input_thread_running() &&
-                               simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)))) {
+        uart && (machine.tui_enabled() ||
+                 (!uart->is_input_thread_running() &&
+                  simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)))) {
         uart->service_interrupts();
     }
 }
@@ -673,7 +680,8 @@ void Machine::run() {
             if (simrv::compiler::unlikely(tohost != 0)) {
                 finalize_cycle_tohost();
             }
-            if (simrv::compiler::unlikely(config.execution.fincnt != std::numeric_limits<Counter>::max() &&
+            if (simrv::compiler::unlikely(config.execution.fincnt !=
+                                              std::numeric_limits<Counter>::max() &&
                                           cpu.e_icount >= config.execution.fincnt)) {
                 simrv::log::info("finished by -e option");
                 stop_reason_ = StopReason::InstructionLimit;

@@ -134,7 +134,9 @@ class Machine final {
     [[nodiscard]] auto debug_diagnostics_enabled() const noexcept -> bool {
         return config.tui.debug_diagnostics;
     }
-    void set_debug_diagnostics_enabled(bool enabled) noexcept { config.tui.debug_diagnostics = enabled; }
+    void set_debug_diagnostics_enabled(bool enabled) noexcept {
+        config.tui.debug_diagnostics = enabled;
+    }
     [[nodiscard]] auto high_contrast_enabled() const noexcept -> bool {
         return config.tui.high_contrast;
     }
@@ -142,8 +144,12 @@ class Machine final {
     [[nodiscard]] auto class_mode_enabled() const noexcept -> bool { return config.tui.class_mode; }
     void set_class_mode_enabled(bool enabled) noexcept { config.tui.class_mode = enabled; }
     [[nodiscard]] auto debugmode_enabled() const noexcept -> bool { return config.debug.debugmode; }
-    [[nodiscard]] auto device_log_enabled() const noexcept -> bool { return config.debug.dlog_mode; }
-    [[nodiscard]] auto trap_log_enabled() const noexcept -> bool { return config.debug.traplog_mode; }
+    [[nodiscard]] auto device_log_enabled() const noexcept -> bool {
+        return config.debug.dlog_mode;
+    }
+    [[nodiscard]] auto trap_log_enabled() const noexcept -> bool {
+        return config.debug.traplog_mode;
+    }
     void set_instruction_mix_enabled(bool enabled) noexcept { config.debug.use_mix = enabled; }
     void set_branch_trace_enabled(bool enabled) noexcept { config.debug.bp_trace = enabled; }
     void set_trap_log_enabled(bool enabled) noexcept { config.debug.traplog_mode = enabled; }
@@ -152,14 +158,18 @@ class Machine final {
     [[nodiscard]] auto binary_path() const noexcept -> const std::string& {
         return config.files.binary_path;
     }
-    [[nodiscard]] auto disk_path() const noexcept -> const std::string& { return config.files.disk_path; }
+    [[nodiscard]] auto disk_path() const noexcept -> const std::string& {
+        return config.files.disk_path;
+    }
     [[nodiscard]] auto branch_trace_enabled() const noexcept -> bool {
         return config.debug.bp_trace;
     }
     [[nodiscard]] auto instruction_mix_enabled() const noexcept -> bool {
         return config.debug.use_mix;
     }
-    [[nodiscard]] auto debugger_enabled() const noexcept -> bool { return config.debug.gdb_enabled; }
+    [[nodiscard]] auto debugger_enabled() const noexcept -> bool {
+        return config.debug.gdb_enabled;
+    }
     [[nodiscard]] auto debugger_port() const noexcept -> uint16_t { return config.debug.gdb_port; }
     [[nodiscard]] auto lockstep_enabled() const noexcept -> bool {
         return config.debug.lockstep_enabled;
@@ -167,17 +177,19 @@ class Machine final {
     [[nodiscard]] auto spike_binary() const noexcept -> const std::string& {
         return config.debug.spike_bin;
     }
-    [[nodiscard]] auto spike_elf() const noexcept -> const std::string& { return config.debug.spike_elf; }
+    [[nodiscard]] auto spike_elf() const noexcept -> const std::string& {
+        return config.debug.spike_elf;
+    }
     [[nodiscard]] auto isa_test_tohost() const noexcept -> Address {
         return config.isa.isatest_tohost;
     }
-    [[nodiscard]] auto memory_geometry() const noexcept -> MemoryGeometry {
-        return config.memory;
-    }
+    [[nodiscard]] auto memory_geometry() const noexcept -> MemoryGeometry { return config.memory; }
     [[nodiscard]] auto platform_profile() const noexcept -> PlatformProfile {
         return config.platform_profile;
     }
-    [[nodiscard]] auto network_mode() const noexcept -> std::string_view { return config.network.mode; }
+    [[nodiscard]] auto network_mode() const noexcept -> std::string_view {
+        return config.network.mode;
+    }
     [[nodiscard]] auto execution_config() const noexcept -> const ExecutionConfig& {
         return config.execution;
     }
@@ -259,14 +271,13 @@ class Machine final {
     /// Reset runtime state flags and CPU state.
     void reset_state();
 
-
     std::atomic<uint64_t> tohost{0};  // Host communication register (always 64-bit for HTIF).
     std::atomic<bool> reboot_requested = false;  // Reboot requested flag.
     std::atomic<int> exit_code{0};               // Exit/status code of the simulation.
     std::atomic<bool> is_shutdown_ = false;      // System shutdown flag.
     std::atomic<StopReason> stop_reason_{StopReason::Running};
 
-    RuntimeProfile runtime_profile{};          // Resolved command-line runtime policy.
+    RuntimeProfile runtime_profile{};  // Resolved command-line runtime policy.
     std::atomic<bool> s_mmu_ever_used{
         false};  // Latched true the first time satp enables translation
    private:
@@ -321,7 +332,9 @@ class Machine final {
     [[nodiscard]] auto tui_controller() const noexcept -> const simrv::tui::Tui* {
         return tui.get();
     }
-    [[nodiscard]] auto pcie_root() noexcept -> simrv::device::PcieRootComplex* { return pcie.get(); }
+    [[nodiscard]] auto pcie_root() noexcept -> simrv::device::PcieRootComplex* {
+        return pcie.get();
+    }
     [[nodiscard]] auto pcie_root() const noexcept -> const simrv::device::PcieRootComplex* {
         return pcie.get();
     }
@@ -383,8 +396,8 @@ class Machine final {
     simrv::debug::BreakpointManager& breakpoints;
 
     // ========== Memory and Interconnect ==========
-    Byte* mmem{};                       // Pointer to main memory buffer
-    Tracer& tracer;                       // Non-owning compatibility view.
+    Byte* mmem{};                        // Pointer to main memory buffer
+    Tracer& tracer;                      // Non-owning compatibility view.
     simrv::debug::SymbolTable& symbols;  // Non-owning compatibility view.
 
    public:
@@ -399,14 +412,17 @@ class Machine final {
         config.execution.smp_multithreaded = enabled;
     }
     [[nodiscard]] auto mutable_ram_data_for_testing() noexcept -> Byte*& { return mmem; }
-    [[nodiscard]] auto allocate_ram_for_testing(size_t bytes) -> bool { return allocate_ram(bytes); }
+    [[nodiscard]] auto allocate_ram_for_testing(size_t bytes) -> bool {
+        return allocate_ram(bytes);
+    }
     void release_ram_for_testing() noexcept { release_ram(); }
     void add_hart_for_testing(std::unique_ptr<CPU> hart);
     [[nodiscard]] auto test_secondary_harts() noexcept
         -> std::vector<std::unique_ptr<simrv::core::CPU>>& {
         return secondary_harts_;
     }
-    [[nodiscard]] auto mutable_uart_for_testing() noexcept -> std::unique_ptr<simrv::device::Uart>& {
+    [[nodiscard]] auto mutable_uart_for_testing() noexcept
+        -> std::unique_ptr<simrv::device::Uart>& {
         return uart;
     }
     void finalize_for_testing() { finalize_runner_cycle(); }

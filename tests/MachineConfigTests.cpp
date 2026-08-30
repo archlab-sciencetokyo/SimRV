@@ -1,8 +1,8 @@
 #include <cstdlib>
 #include <iostream>
 
-#include "simrv/core/MachineConfig.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/MachineConfig.hpp"
 #include "simrv/core/Telemetry.hpp"
 
 namespace {
@@ -22,7 +22,8 @@ auto main() -> int {
     const simrv::core::MachineConfig defaults{};
     expect(defaults.memory.contains(defaults.memory.dram_base), "DRAM base is contained");
     expect(defaults.memory.contains(defaults.memory.dram_base, 4), "DRAM range is contained");
-    expect(!defaults.memory.contains(defaults.memory.dram_base - 1), "address below DRAM is rejected");
+    expect(!defaults.memory.contains(defaults.memory.dram_base - 1),
+           "address below DRAM is rejected");
     expect(!defaults.memory.contains(defaults.memory.dram_base + defaults.memory.dram_size, 1),
            "address at DRAM end is rejected");
 

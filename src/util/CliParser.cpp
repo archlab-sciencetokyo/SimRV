@@ -575,7 +575,8 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         } else if (p == "mmio") {
             result.options.platform_profile = simrv::core::PlatformProfile::Mmio;
         } else {
-            return std::unexpected(std::format("invalid platform profile: {}. Allowed: pcie, mmio", p));
+            return std::unexpected(
+                std::format("invalid platform profile: {}. Allowed: pcie, mmio", p));
         }
         return true;
     }
@@ -588,7 +589,8 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         } else if (p == "mmio") {
             result.options.platform_profile = simrv::core::PlatformProfile::Mmio;
         } else {
-            return std::unexpected(std::format("invalid platform profile: {}. Allowed: pcie, mmio", p));
+            return std::unexpected(
+                std::format("invalid platform profile: {}. Allowed: pcie, mmio", p));
         }
         return true;
     }
@@ -829,8 +831,8 @@ auto resolve_runtime_profile(const RuntimeOptions& options) -> simrv::core::Runt
                 profile.engine = ExecutionEngine::InstructionObservable;
                 break;
             case RequestedExecutionMode::CycleAccurate:
-                profile.engine = options.tuimode ? ExecutionEngine::CycleObservable
-                                                  : ExecutionEngine::CycleFast;
+                profile.engine =
+                    options.tuimode ? ExecutionEngine::CycleObservable : ExecutionEngine::CycleFast;
                 break;
         }
     }

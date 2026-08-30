@@ -13,7 +13,7 @@
 namespace simrv::core {
 class Machine;
 struct MemoryGeometry;
-}
+}  // namespace simrv::core
 
 namespace simrv::memory {
 

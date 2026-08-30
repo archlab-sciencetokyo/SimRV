@@ -28,8 +28,9 @@ void test_pmp_matching_modes() {
     // Default: No PMP entries active -> All S-mode accesses allowed
     expect(simrv::core::pmp::check_access(state, 0x80000000, 4, simrv::core::PmpAccessType::Read),
            "Default: Empty PMP allows S-mode read");
-    expect(simrv::core::pmp::check_access(state, 0x80000000, 4, simrv::core::PmpAccessType::Execute),
-           "Default: Empty PMP allows S-mode execute");
+    expect(
+        simrv::core::pmp::check_access(state, 0x80000000, 4, simrv::core::PmpAccessType::Execute),
+        "Default: Empty PMP allows S-mode execute");
 
     // 1. NA4 mode at 0x80001000 (4-byte range [0x80001000, 0x80001004))
     state.pmpaddr[0] = static_cast<Address>(0x80001000 >> 2);
@@ -39,8 +40,9 @@ void test_pmp_matching_modes() {
 
     expect(simrv::core::pmp::check_access(state, 0x80001000, 4, simrv::core::PmpAccessType::Read),
            "NA4: Read inside NA4 region allowed");
-    expect(simrv::core::pmp::check_access(state, 0x80001000, 4, simrv::core::PmpAccessType::Execute),
-           "NA4: Execute inside NA4 region allowed");
+    expect(
+        simrv::core::pmp::check_access(state, 0x80001000, 4, simrv::core::PmpAccessType::Execute),
+        "NA4: Execute inside NA4 region allowed");
     expect(!simrv::core::pmp::check_access(state, 0x80001000, 4, simrv::core::PmpAccessType::Write),
            "NA4: Write without W bit denied");
     expect(!simrv::core::pmp::check_access(state, 0x80001004, 4, simrv::core::PmpAccessType::Read),
@@ -59,24 +61,25 @@ void test_pmp_matching_modes() {
     // Entry 1 covers [0x80001004, 0x80002000)
     expect(simrv::core::pmp::check_access(state, 0x80001004, 4, simrv::core::PmpAccessType::Write),
            "TOR: Write within entry 1 range allowed");
-    expect(!simrv::core::pmp::check_access(state, 0x80001004, 4, simrv::core::PmpAccessType::Execute),
-           "TOR: Execute without X bit denied in entry 1 range");
+    expect(
+        !simrv::core::pmp::check_access(state, 0x80001004, 4, simrv::core::PmpAccessType::Execute),
+        "TOR: Execute without X bit denied in entry 1 range");
 
     // 3. NAPOT mode: Entry 2 64KB region at 0x80010000
     // 64KB = 2^16 bytes. NAPOT: t = 13 trailing ones in pmpaddr
     const uint64_t napot_64k = (0x80010000ULL >> 2) | ((1ULL << 13) - 1);
     state.pmpaddr[2] = static_cast<Address>(napot_64k);
-    state.pmpcfg[2] =
-        simrv::core::pmp::kPmpModeNapot | simrv::core::pmp::kPmpR | simrv::core::pmp::kPmpW |
-        simrv::core::pmp::kPmpX;
+    state.pmpcfg[2] = simrv::core::pmp::kPmpModeNapot | simrv::core::pmp::kPmpR |
+                      simrv::core::pmp::kPmpW | simrv::core::pmp::kPmpX;
     state.refresh_pmp_status();
 
     expect(simrv::core::pmp::check_access(state, 0x80010000, 4, simrv::core::PmpAccessType::Read),
            "NAPOT: Read at start of 64KB range allowed");
     expect(simrv::core::pmp::check_access(state, 0x8001FFFC, 4, simrv::core::PmpAccessType::Write),
            "NAPOT: Write at end of 64KB range allowed");
-    expect(simrv::core::pmp::check_access(state, 0x80018000, 4, simrv::core::PmpAccessType::Execute),
-           "NAPOT: Execute in middle of 64KB range allowed");
+    expect(
+        simrv::core::pmp::check_access(state, 0x80018000, 4, simrv::core::PmpAccessType::Execute),
+        "NAPOT: Execute in middle of 64KB range allowed");
     expect(!simrv::core::pmp::check_access(state, 0x80020000, 4, simrv::core::PmpAccessType::Read),
            "NAPOT: Access past 64KB boundary denied");
 }
@@ -87,13 +90,12 @@ void test_pmp_partial_overlap() {
 
     // PMP entry 0: NA4 at 0x80001000 ([0x80001000, 0x80001004)) with RWX
     state.pmpaddr[0] = static_cast<Address>(0x80001000 >> 2);
-    state.pmpcfg[0] =
-        simrv::core::pmp::kPmpModeNa4 | simrv::core::pmp::kPmpR | simrv::core::pmp::kPmpW |
-        simrv::core::pmp::kPmpX;
+    state.pmpcfg[0] = simrv::core::pmp::kPmpModeNa4 | simrv::core::pmp::kPmpR |
+                      simrv::core::pmp::kPmpW | simrv::core::pmp::kPmpX;
     state.refresh_pmp_status();
 
-    // 8-byte access at 0x80001000 spans [0x80001000, 0x80001008), partially outside [0x80001000, 0x80001004)
-    // Per RISC-V Spec: partial overlap must fail immediately!
+    // 8-byte access at 0x80001000 spans [0x80001000, 0x80001008), partially outside [0x80001000,
+    // 0x80001004) Per RISC-V Spec: partial overlap must fail immediately!
     expect(!simrv::core::pmp::check_access(state, 0x80001000, 8, simrv::core::PmpAccessType::Read),
            "Partial overlap: 8-byte read across 4-byte PMP boundary fails");
     expect(!simrv::core::pmp::check_access(state, 0x80000FFE, 4, simrv::core::PmpAccessType::Read),
@@ -184,7 +186,8 @@ void test_pmp_mmu_page_walk() {
         satp = (1ULL << 31) | root_ppn;  // Sv32
     }
 
-    // Configure PMP to DENY read on page table memory at 0x80000000 (TOR [0x80000000, 0x80001000) no R)
+    // Configure PMP to DENY read on page table memory at 0x80000000 (TOR [0x80000000, 0x80001000)
+    // no R)
     state.pmpaddr[0] = static_cast<Address>(dram_base >> 2);
     state.pmpcfg[0] = simrv::core::pmp::kPmpModeTor;  // [0, dram_base) no perms
 
@@ -192,7 +195,8 @@ void test_pmp_mmu_page_walk() {
     state.pmpcfg[1] = simrv::core::pmp::kPmpModeTor;  // [dram_base, dram_base + 0x1000) no R/W/X
     state.refresh_pmp_status();
 
-    // Attempt page walk: Reading PTE at 0x80000000 should fail PMP check and return Access Fault (FaultLoad)
+    // Attempt page walk: Reading PTE at 0x80000000 should fail PMP check and return Access Fault
+    // (FaultLoad)
     auto result = mmu.translate(0x10000, simrv::PteAccess::Read, PrivilegeLevel::Supervisor, 0,
                                 satp, simrv::xlen::kXLenBits, true, &state);
     expect(!result.has_value(), "Page walk across PMP-prohibited PTE fails");

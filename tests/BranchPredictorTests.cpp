@@ -28,11 +28,16 @@ using simrv::pipeline::BranchPredictorType;
 using simrv::pipeline::DecodedInstruction;
 
 void test_type_parsing() {
-    TEST_CHECK(simrv::pipeline::parse_branch_predictor_type("static") == BranchPredictorType::Static);
-    TEST_CHECK(simrv::pipeline::parse_branch_predictor_type("bimodal") == BranchPredictorType::Bimodal);
-    TEST_CHECK(simrv::pipeline::parse_branch_predictor_type("2bit") == BranchPredictorType::Bimodal);
-    TEST_CHECK(simrv::pipeline::parse_branch_predictor_type("gshare") == BranchPredictorType::GShare);
-    TEST_CHECK(simrv::pipeline::parse_branch_predictor_type("tournament") == BranchPredictorType::Tournament);
+    TEST_CHECK(simrv::pipeline::parse_branch_predictor_type("static") ==
+               BranchPredictorType::Static);
+    TEST_CHECK(simrv::pipeline::parse_branch_predictor_type("bimodal") ==
+               BranchPredictorType::Bimodal);
+    TEST_CHECK(simrv::pipeline::parse_branch_predictor_type("2bit") ==
+               BranchPredictorType::Bimodal);
+    TEST_CHECK(simrv::pipeline::parse_branch_predictor_type("gshare") ==
+               BranchPredictorType::GShare);
+    TEST_CHECK(simrv::pipeline::parse_branch_predictor_type("tournament") ==
+               BranchPredictorType::Tournament);
     TEST_CHECK(simrv::pipeline::parse_branch_predictor_type("invalid") == std::nullopt);
 }
 
