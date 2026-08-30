@@ -332,7 +332,11 @@ void Tui::stop_ui_thread() {
     ui_cv_.notify_all();
     if (ui_thread_.joinable()) {
         ui_thread_.request_stop();
-        ui_thread_.join();
+        if (ui_thread_.get_id() != std::this_thread::get_id()) {
+            ui_thread_.join();
+        } else {
+            ui_thread_.detach();
+        }
     }
 }
 
