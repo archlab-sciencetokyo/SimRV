@@ -151,14 +151,14 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
             }
         }
 
-        auto translate_res =
-            translate_stage_address(machine, w_vadr, PteAccess::Code, state_.priv, state_.regs.xlen,
-                                    simrv::memory::TlPort::Instruction, ca_state.instruction_walk);
+        auto translate_res = translate_stage_address(
+            machine, VirtAddr{w_vadr}, PteAccess::Code, state_.priv, state_.regs.xlen,
+            simrv::memory::TlPort::Instruction, ca_state.instruction_walk);
         if (!translate_res.has_value()) return;
         auto chain_res =
             (*translate_res)
-                .and_then([&](Address phys) -> std::expected<void, TrapCause> {
-                    w_padr = phys;
+                .and_then([&](PhysAddr phys) -> std::expected<void, TrapCause> {
+                    w_padr = phys.raw();
                     tlb.insert_inst_r(w_vadr, w_padr,
                                       simrv::xlen::satp_asid(state_.satp, state_.regs.xlen),
                                       state_.priv);
@@ -174,11 +174,11 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
     *r_padr = w_padr;
 }
 
-auto CPU::translate_stage_address(Machine& machine, Address virtual_address, PteAccess access,
+auto CPU::translate_stage_address(Machine& machine, VirtAddr virtual_address, PteAccess access,
                                   PrivilegeLevel privilege, unsigned active_xlen,
                                   simrv::memory::TlPort port,
                                   simrv::pipeline::TimedPageWalkState& timed_walk)
-    -> std::optional<std::expected<Address, TrapCause>> {
+    -> std::optional<std::expected<PhysAddr, TrapCause>> {
     auto* mmu = machine.memory_.mmu();
     if (machine.runtime_profile.is_instruction_mode()) {
         return mmu->translate(virtual_address, access, privilege, state_.mstatus, state_.satp,
@@ -216,14 +216,14 @@ auto CPU::translate_stage_address(Machine& machine, Address virtual_address, Pte
     }
 
     if (walk.status == PageWalkStatus::Complete) {
-        const Address result = walk.physical_address;
+        const PhysAddr result = walk.physical_address;
         timed_walk.reset();
-        return std::expected<Address, TrapCause>{result};
+        return std::expected<PhysAddr, TrapCause>{result};
     }
     if (walk.status == PageWalkStatus::Fault) {
         const TrapCause fault = walk.fault;
         timed_walk.reset();
-        return std::expected<Address, TrapCause>{std::unexpected(fault)};
+        return std::expected<PhysAddr, TrapCause>{std::unexpected(fault)};
     }
 
     simrv::memory::TlChannelA request{};

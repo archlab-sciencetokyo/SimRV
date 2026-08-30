@@ -86,7 +86,7 @@ auto CoherenceHub::validate_directory() const -> std::expected<void, std::string
     return {};
 }
 
-void CoherenceHub::probe_hart_dcache(uint32_t hart_id, const TlChannelB& probe_req,
+void CoherenceHub::probe_hart_dcache(HartId hart_id, const TlChannelB& probe_req,
                                      TlChannelC& probe_resp,
                                      std::array<Byte, kLineBytes>& dirty_data) {
     if (hart_id >= machine_.num_harts()) {
@@ -101,7 +101,7 @@ void CoherenceHub::probe_hart_dcache(uint32_t hart_id, const TlChannelB& probe_r
     }
 }
 
-void CoherenceHub::probe_hart_icache(uint32_t hart_id, const TlChannelB& probe_req) {
+void CoherenceHub::probe_hart_icache(HartId hart_id, const TlChannelB& probe_req) {
     if (hart_id >= machine_.num_harts()) {
         return;
     }
@@ -160,7 +160,7 @@ void CoherenceHub::invalidate_line_external(Address line_base) {
 
 auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
                                   std::array<Byte, kLineBytes>& line_buffer) -> bool {
-    const Address line_base = req.address & ~(static_cast<Address>(kLineBytes - 1u));
+    const Address line_base = (req.address & ~(static_cast<Address>(kLineBytes - 1u))).raw();
     const auto requested_permission =
         req.grow == TlGrow::NtoB ? TlPermission::Branch : TlPermission::Trunk;
 
@@ -317,7 +317,7 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
 
 auto CoherenceHub::handle_release(const TlChannelC& req, TlChannelD& resp,
                                   const std::array<Byte, kLineBytes>* release_data) -> bool {
-    const Address line_base = req.address & ~(static_cast<Address>(kLineBytes - 1u));
+    const Address line_base = (req.address & ~(static_cast<Address>(kLineBytes - 1u))).raw();
     stats_.release_count++;
 
     DirectoryEntry dir_entry{};

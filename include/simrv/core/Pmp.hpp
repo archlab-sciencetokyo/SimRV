@@ -104,17 +104,16 @@ inline auto check_access(const ArchState& state, Address paddr, size_t size, Pmp
             if (effective_priv == PrivilegeLevel::Machine && !is_locked) {
                 return true;
             }
-            if (access == PmpAccessType::Read && (cfg & kPmpR) == 0) return false;
-            if (access == PmpAccessType::Write && (cfg & kPmpW) == 0) return false;
-            if (access == PmpAccessType::Execute && (cfg & kPmpX) == 0) return false;
-            return true;
+            return (cfg & static_cast<uint8_t>(access)) != 0;
         }
     }
 
-    if (effective_priv == PrivilegeLevel::Machine) {
-        return true;
-    }
-    return false;
+    return effective_priv == PrivilegeLevel::Machine;
+}
+
+inline auto check_access(const ArchState& state, PhysAddr paddr, size_t size, PmpAccessType access,
+                         std::optional<PrivilegeLevel> priv_override = std::nullopt) -> bool {
+    return check_access(state, paddr.raw(), size, access, priv_override);
 }
 
 }  // namespace pmp

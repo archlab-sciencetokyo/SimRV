@@ -127,7 +127,7 @@ inline constexpr TlManagerCapabilities kMmioCapabilities{
 }
 
 [[nodiscard]] constexpr auto make_tl_source(HartId hart, TlPort port) -> TlSourceId {
-    return static_cast<TlSourceId>((static_cast<TlSourceId>(hart) << 1u) |
+    return static_cast<TlSourceId>((static_cast<TlSourceId>(hart.val) << 1u) |
                                    static_cast<TlSourceId>(port));
 }
 
@@ -149,7 +149,7 @@ struct TlChannelA {
         -> TlMask {
         if (transfer_size > kTlBeatSize) return 0;
         const auto bytes = static_cast<unsigned>(1u << transfer_size);
-        const auto lane = static_cast<unsigned>(address & (kTlBeatBytes - 1u));
+        const auto lane = static_cast<unsigned>(address.raw() & (kTlBeatBytes - 1u));
         if (lane + bytes > kTlBeatBytes) return 0;
         const auto lanes = static_cast<unsigned>((1u << bytes) - 1u);
         return static_cast<TlMask>(lanes << lane);

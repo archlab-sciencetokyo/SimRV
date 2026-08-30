@@ -112,7 +112,7 @@ auto MmioRouter::find_by_name(std::string_view name) const -> TileLinkNode* {
 }
 
 auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool {
-    TileLinkNode* device = resolve_device(req.address);
+    TileLinkNode* device = resolve_device(req.address.raw());
     if (device == nullptr) {
         resp.denied = true;
         ++bus_error_count_;
@@ -130,8 +130,8 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
     }
 
     const Address request_bytes = static_cast<Address>(1u << (req.size & 0x3u));
-    if (request_bytes - 1 > std::numeric_limits<Address>::max() - req.address ||
-        !device->contains(req.address + request_bytes - 1)) {
+    if (request_bytes - 1 > std::numeric_limits<Address>::max() - req.address.raw() ||
+        !device->contains((req.address + request_bytes - 1).raw())) {
         resp.denied = true;
         ++bus_error_count_;
         return true;

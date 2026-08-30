@@ -89,7 +89,7 @@ auto DCache::write(Address addr, Word data, Instruction funct3) -> bool {
 auto DCache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp,
                           std::array<Byte, kLineBytes>& dirty_data) -> bool {
     const auto target_state = simrv::memory::mesi_for(req.cap);
-    const Address line_base = req.address & ~(static_cast<Address>(kLineBytes - 1u));
+    const Address line_base = (req.address & ~(static_cast<Address>(kLineBytes - 1u))).raw();
     const uint32_t set_idx = get_set_index(line_base);
     const Address tag = get_tag(line_base);
 

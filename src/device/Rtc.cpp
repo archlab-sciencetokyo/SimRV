@@ -40,7 +40,7 @@ auto Rtc::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp
 
     const bool is_write = (req.opcode == memory::TlOpcodeA::PutFullData ||
                            req.opcode == memory::TlOpcodeA::PutPartialData);
-    const Address offset = req.address - kBaseAddress;
+    const Address offset = (req.address - kBaseAddress).raw();
 
     if (!is_write) {
         const uint64_t rtc_ns = current_time_ns();

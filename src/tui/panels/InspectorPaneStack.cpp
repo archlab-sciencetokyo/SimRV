@@ -28,7 +28,7 @@ auto InspectorPane::translate_safe(const simrv::core::CPU& cpu, Register vaddr) 
         mmu->translate(vaddr, PteAccess::Read, eff_priv, cpu.state().mstatus, cpu.state().satp,
                        cpu.state().regs.xlen, /*update_access_bits=*/false);
     if (res.has_value()) {
-        return res.value();
+        return res.value().raw();
     }
     return std::nullopt;
 }

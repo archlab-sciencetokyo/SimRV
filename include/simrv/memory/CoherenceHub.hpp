@@ -87,10 +87,10 @@ class CoherenceHub {
     void erase_dir_entry(Address line_base);
     auto lookup_dir_entry(Address line_base, DirectoryEntry& out_entry) -> bool;
 
-    void probe_hart_dcache(uint32_t hart_id, const TlChannelB& probe_req, TlChannelC& probe_resp,
+    void probe_hart_dcache(HartId hart_id, const TlChannelB& probe_req, TlChannelC& probe_resp,
                            std::array<Byte, kLineBytes>& dirty_data);
 
-    void probe_hart_icache(uint32_t hart_id, const TlChannelB& probe_req);
+    void probe_hart_icache(HartId hart_id, const TlChannelB& probe_req);
     [[nodiscard]] auto allocate_sink() -> TlSinkId;
 };
 

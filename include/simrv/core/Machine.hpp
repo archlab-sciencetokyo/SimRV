@@ -306,6 +306,8 @@ class Machine final {
         }
         return *secondary_harts_.at(index - 1);
     }
+    [[nodiscard]] auto hart(HartId id) -> CPU& { return hart(id.val); }
+    [[nodiscard]] auto hart(HartId id) const -> const CPU& { return hart(id.val); }
     [[nodiscard]] auto num_harts() const -> size_t { return 1 + secondary_harts_.size(); }
     [[nodiscard]] auto primary_hart() noexcept -> CPU& { return cpu; }
     [[nodiscard]] auto primary_hart() const noexcept -> const CPU& { return cpu; }

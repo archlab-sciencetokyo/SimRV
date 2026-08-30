@@ -36,12 +36,12 @@ enum class PageWalkStatus : uint8_t { ReadPte, WritePte, Complete, Fault };
 
 /** Architectural state of one resumable hardware page-table walk. */
 struct PageWalkState {
-    Address virtual_address = 0;
-    Address pte_address = 0;
-    Address physical_address = 0;
-    Word pte = 0;
-    Word pte_update_mask = 0;
-    CSRValue mstatus = 0;
+    VirtAddr virtual_address{0};
+    PhysAddr pte_address{0};
+    PhysAddr physical_address{0};
+    Word pte{0};
+    Word pte_update_mask{0};
+    CSRValue mstatus{0};
     PteAccess access = PteAccess::Read;
     PrivilegeLevel privilege{};
     TrapCause fault = 0;
@@ -86,10 +86,10 @@ class Mmu {
      * @param arch_state Optional CPU architectural state for PMP enforcement
      * @return Translated physical address or TrapCause on fault
      */
-    std::expected<Address, TrapCause> page_walk(Address v_addr, PteAccess access,
-                                                PrivilegeLevel priv, CSRValue mstatus, Word satp,
-                                                unsigned xlen, bool update_access_bits = true,
-                                                const core::ArchState* arch_state = nullptr);
+    std::expected<PhysAddr, TrapCause> page_walk(VirtAddr v_addr, PteAccess access,
+                                                 PrivilegeLevel priv, CSRValue mstatus, Word satp,
+                                                 unsigned xlen, bool update_access_bits = true,
+                                                 const core::ArchState* arch_state = nullptr);
 
     /**
      * @brief Translate address without performing page walk.
@@ -107,13 +107,13 @@ class Mmu {
      * @param arch_state Optional CPU architectural state for PMP enforcement
      * @return Translated physical address or TrapCause on fault
      */
-    std::expected<Address, TrapCause> translate(Address v_addr, PteAccess access,
-                                                PrivilegeLevel priv, CSRValue mstatus, Word satp,
-                                                unsigned xlen, bool update_access_bits = true,
-                                                const core::ArchState* arch_state = nullptr);
+    std::expected<PhysAddr, TrapCause> translate(VirtAddr v_addr, PteAccess access,
+                                                 PrivilegeLevel priv, CSRValue mstatus, Word satp,
+                                                 unsigned xlen, bool update_access_bits = true,
+                                                 const core::ArchState* arch_state = nullptr);
 
     /// Start a walk without performing any implicit physical-memory access.
-    [[nodiscard]] PageWalkState begin_page_walk(Address v_addr, PteAccess access,
+    [[nodiscard]] PageWalkState begin_page_walk(VirtAddr v_addr, PteAccess access,
                                                 PrivilegeLevel priv, CSRValue mstatus, Word satp,
                                                 unsigned xlen, bool update_access_bits = true,
                                                 const core::ArchState* arch_state = nullptr);
@@ -135,23 +135,23 @@ class Mmu {
      * @param xlen Current execution XLEN
      * @return true if the address is canonical, false otherwise
      */
-    [[nodiscard]] static constexpr auto is_canonical(Address v_addr, Word satp, unsigned xlen)
+    [[nodiscard]] static constexpr auto is_canonical(VirtAddr v_addr, Word satp, unsigned xlen)
         -> bool {
         if (xlen == 32) {
             return true;
-        } else {
-            const Word mode = simrv::xlen::satp_mode(satp, 64);
-            if (mode == 8) {  // Sv39
-                constexpr Word shift = 64 - 39;
-                return (static_cast<SignedWord>(v_addr << shift) >> shift) ==
-                       static_cast<SignedWord>(v_addr);
-            } else if (mode == 9) {  // Sv48
-                constexpr Word shift = 64 - 48;
-                return (static_cast<SignedWord>(v_addr << shift) >> shift) ==
-                       static_cast<SignedWord>(v_addr);
-            }
-            return true;
         }
+        const Word mode = simrv::xlen::satp_mode(satp, 64);
+        if (mode == 8) {  // Sv39
+            constexpr Word shift = 64 - 39;
+            return (static_cast<SignedWord>(v_addr.raw() << shift) >> shift) ==
+                   static_cast<SignedWord>(v_addr.raw());
+        }
+        if (mode == 9) {  // Sv48
+            constexpr Word shift = 64 - 48;
+            return (static_cast<SignedWord>(v_addr.raw() << shift) >> shift) ==
+                   static_cast<SignedWord>(v_addr.raw());
+        }
+        return true;
     }
 
    private:
@@ -166,7 +166,7 @@ class Mmu {
      * failure during implicit PTE access raises the access-fault exception
      * corresponding to the original instruction, load, or store—not a page fault.
      */
-    [[nodiscard]] auto pte_access_valid(Address address, unsigned size) const -> bool;
+    [[nodiscard]] auto pte_access_valid(PhysAddr address, unsigned size) const -> bool;
 
     // Per-address-space translation helpers
     /**
@@ -188,7 +188,7 @@ class Mmu {
 
     [[nodiscard]] static auto page_fault_for(PteAccess access) -> TrapCause;
     [[nodiscard]] static auto access_fault_for(PteAccess access) -> TrapCause;
-    void select_next_pte(PageWalkState& state, Address table_address) const;
+    void select_next_pte(PageWalkState& state, PhysAddr table_address) const;
 
     // Page table structure constants
     static constexpr Word kPteShift = 10;  // PPN to PTE conversion shift

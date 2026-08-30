@@ -92,7 +92,7 @@ void PcieRootComplex::assert_device_irq(uint8_t bus, uint8_t dev, uint8_t func) 
 
 auto PcieRootComplex::EcamNode::handle_request(const memory::TlChannelA& req,
                                                memory::TlChannelD& resp) -> bool {
-    const Address offset = req.address - kEcamBaseAddress;
+    const Address offset = (req.address - kEcamBaseAddress).raw();
     const bool is_write = (req.opcode == memory::TlOpcodeA::PutFullData ||
                            req.opcode == memory::TlOpcodeA::PutPartialData);
 
@@ -113,7 +113,7 @@ auto PcieRootComplex::EcamNode::handle_request(const memory::TlChannelA& req,
 
 auto PcieRootComplex::MmioNode::handle_request(const memory::TlChannelA& req,
                                                memory::TlChannelD& resp) -> bool {
-    const Address addr = req.address;
+    const Address addr = req.address.raw();
     const bool is_write = (req.opcode == memory::TlOpcodeA::PutFullData ||
                            req.opcode == memory::TlOpcodeA::PutPartialData);
 

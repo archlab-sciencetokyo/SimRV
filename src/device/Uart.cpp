@@ -121,7 +121,7 @@ void Uart::stop_pty() {
 }
 
 auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
-    const Address reg = simrv::mmio::uart_reg(req.address, uart_reg_shift_);
+    const Address reg = simrv::mmio::uart_reg(req.address.raw(), uart_reg_shift_);
     if (reg == simrv::mmio::kUartRegInvalid) {
         if (req.opcode == memory::TlOpcodeA::Get) resp.data = 0;
         return true;

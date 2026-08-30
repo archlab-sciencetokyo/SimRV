@@ -482,11 +482,11 @@ class CPU {
      * Translate one address. In CA mode this resumes a typed page walk and returns nullopt while
      * its physical PTE transaction is outstanding; IA drives the same MMU state synchronously.
      */
-    auto translate_stage_address(Machine& machine, Address virtual_address, PteAccess access,
+    auto translate_stage_address(Machine& machine, VirtAddr virtual_address, PteAccess access,
                                  PrivilegeLevel privilege, unsigned active_xlen,
                                  simrv::memory::TlPort port,
                                  simrv::pipeline::TimedPageWalkState& timed_walk)
-        -> std::optional<std::expected<Address, TrapCause>>;
+        -> std::optional<std::expected<PhysAddr, TrapCause>>;
 
    private:
     /// Translate fetch addresses and prime IF transient context.

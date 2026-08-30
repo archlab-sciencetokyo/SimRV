@@ -62,7 +62,7 @@ void MmioDevice::write64(Address offset, uint64_t val) {
 }
 
 auto MmioDevice::handle_request(const TlChannelA& req, TlChannelD& resp) -> bool {
-    const Address offset = req.address - base_address();
+    const Address offset = (req.address - base_address()).raw();
     resp.source = req.source;
     resp.size = req.size;
     resp.denied = false;

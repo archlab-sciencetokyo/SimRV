@@ -41,7 +41,7 @@ class TestNode final : public simrv::memory::TileLinkNode {
     auto handle_request(const simrv::memory::TlChannelA& req, simrv::memory::TlChannelD& resp)
         -> bool override {
         ++requests_;
-        resp.data = req.address;
+        resp.data = req.address.raw();
         return true;
     }
     [[nodiscard]] auto requests() const -> unsigned { return requests_; }
@@ -807,9 +807,66 @@ void test_tilelink_c_protocol_checker() {
            "MESI Exclusive and Modified map to TileLink Trunk");
 }
 
+void test_strong_semantic_types() {
+    // Compile-time zero memory overhead verification
+    static_assert(sizeof(PhysAddr) == sizeof(Word));
+    static_assert(sizeof(VirtAddr) == sizeof(Word));
+    static_assert(sizeof(HartId) == sizeof(uint32_t));
+    static_assert(sizeof(CsrNumber) == sizeof(uint16_t));
+    static_assert(StrongAddress<PhysAddr>);
+    static_assert(StrongAddress<VirtAddr>);
+    static_assert(!StrongAddress<Word>);
+
+    // PhysAddr arithmetic and bitwise testing
+    PhysAddr p1{0x80000000ULL};
+    expect(p1.raw() == 0x80000000ULL, "PhysAddr raw value matches");
+    expect(p1 == 0x80000000ULL, "PhysAddr equality with integer literal");
+
+    PhysAddr p2 = p1 + 0x100U;
+    expect(p2.val == 0x80000100ULL, "PhysAddr addition with unsigned integer");
+    expect((p2 - p1) == 0x100, "PhysAddr subtraction yields SignedWord offset");
+
+    PhysAddr p3 = p2 & ~0xFFFULL;
+    expect(p3 == p1, "PhysAddr bitwise AND with mask");
+
+    // VirtAddr testing
+    VirtAddr v1{0x10000ULL};
+    VirtAddr v2 = v1 + 0x20U;
+    expect(v2.raw() == 0x10020ULL, "VirtAddr addition");
+    expect((v2 - v1) == 0x20, "VirtAddr subtraction difference");
+    expect(v1 < v2, "VirtAddr comparison operators");
+
+    // HartId testing
+    HartId h1{3U};
+    expect(h1.value() == 3U, "HartId value getter");
+    expect((1ULL << h1) == (1ULL << 3U), "HartId bitwise shift operator");
+    expect(h1 == 3U, "HartId equality with integer");
+
+    // CsrNumber testing
+    CsrNumber mstatus_csr{0x300U};
+    expect(!mstatus_csr.is_read_only(), "mstatus CSR (0x300) is writable");
+    expect(mstatus_csr.privilege_level() == PrivilegeLevel::Machine,
+           "mstatus CSR privilege level is Machine");
+
+    CsrNumber cycle_csr{0xC00U};
+    expect(cycle_csr.is_read_only(), "cycle CSR (0xC00) is read-only");
+    expect(cycle_csr.privilege_level() == PrivilegeLevel::User,
+           "cycle CSR privilege level is User");
+
+    // std::format and std::hash validation
+    const auto formatted_p = std::format("0x{:x}", p1);
+    expect(formatted_p.find("80000000") != std::string::npos,
+           "std::format specialization formats PhysAddr as hex integer");
+
+    const auto hash_val = std::hash<PhysAddr>{}(p1);
+    expect(hash_val == std::hash<Word>{}(p1.val),
+           "std::hash<PhysAddr> matches underlying Word hash");
+}
+
 }  // namespace
 
 int main() {
+    test_strong_semantic_types();
     test_unaligned_host_access();
     test_runtime_ram_view();
     test_mmio_ranges();

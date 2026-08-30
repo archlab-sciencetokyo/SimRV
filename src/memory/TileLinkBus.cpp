@@ -96,10 +96,11 @@ void TileLinkBus::process_request(const TimedRequest& request) {
         handled = true;
     } else if (req.opcode == TlOpcodeA::Get) {
         resp.opcode = TlOpcodeD::AccessAckData;
-        if (machine_.memory_geometry().contains(req.address, transfer_bytes) &&
+        if (machine_.memory_geometry().contains(req.address.raw(), transfer_bytes) &&
             machine_.ram_data() != nullptr) {
-            coherence_hub_.invalidate_line_external(req.address);
-            resp.data = simrv::memory::ram_read_fast(req.address, funct3, machine_.ram_view());
+            coherence_hub_.invalidate_line_external(req.address.raw());
+            resp.data =
+                simrv::memory::ram_read_fast(req.address.raw(), funct3, machine_.ram_view());
             ++read_count_;
             handled = true;
         }
@@ -107,13 +108,13 @@ void TileLinkBus::process_request(const TimedRequest& request) {
                !req.corrupt) {
         // Page-table A/D updates use an atomic OR at the globally ordered bus boundary.
         resp.opcode = TlOpcodeD::AccessAckData;
-        if (machine_.memory_geometry().contains(req.address, transfer_bytes) &&
+        if (machine_.memory_geometry().contains(req.address.raw(), transfer_bytes) &&
             machine_.ram_data() != nullptr) {
-            coherence_hub_.invalidate_line_external(req.address);
+            coherence_hub_.invalidate_line_external(req.address.raw());
             const Word previous =
-                simrv::memory::ram_read_fast(req.address, funct3, machine_.ram_view());
+                simrv::memory::ram_read_fast(req.address.raw(), funct3, machine_.ram_view());
             resp.data = previous;
-            simrv::memory::ram_write_fast(req.address, previous | req.data, funct3,
+            simrv::memory::ram_write_fast(req.address.raw(), previous | req.data, funct3,
                                           machine_.ram_view());
             ++read_count_;
             ++write_count_;
@@ -140,12 +141,13 @@ void TileLinkBus::process_request(const TimedRequest& request) {
             }
         }
 
-        if (machine_.memory_geometry().contains(req.address, transfer_bytes) &&
+        if (machine_.memory_geometry().contains(req.address.raw(), transfer_bytes) &&
             machine_.ram_data() != nullptr) {
-            coherence_hub_.invalidate_line_external(req.address);
+            coherence_hub_.invalidate_line_external(req.address.raw());
             if (req.opcode == TlOpcodeA::PutPartialData) {
-                auto* destination = machine_.ram_view().unchecked_ptr(req.address);
-                const unsigned lane_base = static_cast<unsigned>(req.address & (kTlBeatBytes - 1u));
+                auto* destination = machine_.ram_view().unchecked_ptr(req.address.raw());
+                const unsigned lane_base =
+                    static_cast<unsigned>(req.address.raw() & (kTlBeatBytes - 1u));
                 for (size_t byte = 0; byte < transfer_bytes; ++byte) {
                     const auto lane = static_cast<unsigned>(lane_base + byte);
                     if ((req.mask & (TlMask{1} << lane)) != 0) {
@@ -153,7 +155,8 @@ void TileLinkBus::process_request(const TimedRequest& request) {
                     }
                 }
             } else {
-                simrv::memory::ram_write_fast(req.address, req.data, funct3, machine_.ram_view());
+                simrv::memory::ram_write_fast(req.address.raw(), req.data, funct3,
+                                              machine_.ram_view());
             }
             ++write_count_;
             handled = true;

@@ -21,19 +21,19 @@ using isa::Funct3;
 Mmu::Mmu(Byte* mmem, Address dram_base, Address dram_size)
     : mmem_(mmem), dram_base_(dram_base), dram_size_(dram_size) {}
 
-auto Mmu::pte_access_valid(Address address, unsigned size) const -> bool {
-    if (mmem_ == nullptr || size == 0 || dram_size_ < size || address < dram_base_) {
+auto Mmu::pte_access_valid(PhysAddr address, unsigned size) const -> bool {
+    if (mmem_ == nullptr || size == 0 || dram_size_ < size || address.raw() < dram_base_) {
         return false;
     }
-    return address - dram_base_ <= dram_size_ - size;
+    return address.raw() - dram_base_ <= dram_size_ - size;
 }
 
-auto Mmu::translate(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
+auto Mmu::translate(VirtAddr v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
                     Word satp, unsigned xlen, bool update_access_bits,
-                    const core::ArchState* arch_state) -> std::expected<Address, TrapCause> {
+                    const core::ArchState* arch_state) -> std::expected<PhysAddr, TrapCause> {
     // Machine mode or MMU disabled: use physical addressing
     if (priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(satp, xlen)) {
-        return v_addr;
+        return PhysAddr{v_addr.raw()};
     }
 
     // Validate Sv39 / Sv48 canonical addresses for RV64
@@ -74,11 +74,11 @@ void Mmu::fail_page_walk_access(PageWalkState& state) {
     state.status = PageWalkStatus::Fault;
 }
 
-void Mmu::select_next_pte(PageWalkState& state, Address table_address) const {
+void Mmu::select_next_pte(PageWalkState& state, PhysAddr table_address) const {
     const Word vpn_mask = (static_cast<Word>(1) << state.vpn_bits_per_level) - 1;
-    const Word vpn =
-        (state.virtual_address >> (12 + state.level * static_cast<int>(state.vpn_bits_per_level))) &
-        vpn_mask;
+    const Word vpn = (state.virtual_address.raw() >>
+                      (12 + state.level * static_cast<int>(state.vpn_bits_per_level))) &
+                     vpn_mask;
     state.pte_address = table_address + vpn * state.pte_size;
     if (!pte_access_valid(state.pte_address, state.pte_size) ||
         (state.arch_state != nullptr &&
@@ -90,7 +90,7 @@ void Mmu::select_next_pte(PageWalkState& state, Address table_address) const {
     state.status = PageWalkStatus::ReadPte;
 }
 
-auto Mmu::begin_page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
+auto Mmu::begin_page_walk(VirtAddr v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
                           Word satp, unsigned xlen, bool update_access_bits,
                           const core::ArchState* arch_state) -> PageWalkState {
     PageWalkState state{.virtual_address = v_addr,
@@ -102,7 +102,7 @@ auto Mmu::begin_page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv,
                         .update_access_bits = update_access_bits,
                         .arch_state = arch_state};
     if (priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(satp, xlen)) {
-        state.physical_address = v_addr;
+        state.physical_address = PhysAddr{v_addr.raw()};
         state.status = PageWalkStatus::Complete;
         return state;
     }
@@ -122,7 +122,7 @@ auto Mmu::begin_page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv,
         return state;
     }
     state.level = levels - 1;
-    const Address root = static_cast<Address>(simrv::xlen::satp_root_ppn(satp, xlen) << 12);
+    const PhysAddr root = PhysAddr{static_cast<Word>(simrv::xlen::satp_root_ppn(satp, xlen) << 12)};
     select_next_pte(state, root);
     return state;
 }
@@ -146,7 +146,7 @@ void Mmu::accept_page_walk_pte(PageWalkState& state, Word pte) const {
             return;
         }
         --state.level;
-        select_next_pte(state, static_cast<Address>((pte >> kPteShift) << 12));
+        select_next_pte(state, PhysAddr{static_cast<Word>((pte >> kPteShift) << 12)});
         return;
     }
 
@@ -173,7 +173,8 @@ void Mmu::accept_page_walk_pte(PageWalkState& state, Word pte) const {
     }
     const unsigned offset_bits = 12 + state.level * state.vpn_bits_per_level;
     const Word offset_mask = (static_cast<Word>(1) << offset_bits) - 1;
-    state.physical_address = (state.virtual_address & offset_mask) | ((ppn << 12) & ~offset_mask);
+    state.physical_address =
+        PhysAddr{(state.virtual_address.raw() & offset_mask) | ((ppn << 12) & ~offset_mask)};
 
     if (state.arch_state != nullptr) {
         const auto pmp_access = state.access == PteAccess::Code ? core::PmpAccessType::Execute
@@ -243,9 +244,9 @@ auto Mmu::validate_pte_permissions(Word pte, Word permission_bits, PteAccess acc
     return true;
 }
 
-auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
+auto Mmu::page_walk(VirtAddr v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
                     Word satp, unsigned xlen, bool update_access_bits,
-                    const core::ArchState* arch_state) -> std::expected<Address, TrapCause> {
+                    const core::ArchState* arch_state) -> std::expected<PhysAddr, TrapCause> {
     auto state =
         begin_page_walk(v_addr, access, priv, mstatus, satp, xlen, update_access_bits, arch_state);
     while (state.status == PageWalkStatus::ReadPte || state.status == PageWalkStatus::WritePte) {
@@ -256,15 +257,15 @@ auto Mmu::page_walk(Address v_addr, PteAccess access, PrivilegeLevel priv, CSRVa
                 : static_cast<Instruction>(state.status == PageWalkStatus::ReadPte ? Funct3::Ld
                                                                                    : Funct3::Sd);
         if (state.status == PageWalkStatus::ReadPte) {
-            const Word pte =
-                simrv::memory::host_read_fast(mmem_ + (state.pte_address - dram_base_), operation);
+            const Word pte = simrv::memory::host_read_fast(
+                mmem_ + (state.pte_address.raw() - dram_base_), operation);
             accept_page_walk_pte(state, pte);
         } else {
             const Word current = simrv::memory::host_read_fast(
-                mmem_ + (state.pte_address - dram_base_),
+                mmem_ + (state.pte_address.raw() - dram_base_),
                 state.pte_size == 4 ? static_cast<Instruction>(Funct3::Lw)
                                     : static_cast<Instruction>(Funct3::Ld));
-            simrv::memory::host_write_fast(mmem_ + (state.pte_address - dram_base_),
+            simrv::memory::host_write_fast(mmem_ + (state.pte_address.raw() - dram_base_),
                                            current | state.pte_update_mask, operation);
             accept_page_walk_write(state);
         }

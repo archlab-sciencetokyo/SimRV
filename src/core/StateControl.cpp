@@ -143,9 +143,9 @@ void PlicMmio::reset() {
 
 auto PlicMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
     if (req.opcode == memory::TlOpcodeA::Get) {
-        resp.data = mmio_read(offset(req.address));
+        resp.data = mmio_read(offset(req.address.raw()));
     } else {
-        mmio_write(offset(req.address), req.data);
+        mmio_write(offset(req.address.raw()), req.data);
     }
     return true;
 }
@@ -240,7 +240,7 @@ void PlicMmio::mmio_write(Address offset, Word wdata) {
 }
 
 auto ClintMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
-    const Address off = offset(req.address);
+    const Address off = offset(req.address.raw());
     const int req_bytes = 1 << (req.size & 3);
 
     if (req.opcode == memory::TlOpcodeA::Get) {

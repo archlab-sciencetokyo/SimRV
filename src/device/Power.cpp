@@ -22,7 +22,7 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
                            req.opcode == memory::TlOpcodeA::PutPartialData);
 
     if (is_write) {
-        const Address offset = req.address - kBaseAddress;
+        const Address offset = (req.address - kBaseAddress).raw();
         // The finisher has a single 32-bit register at offset 0
         if (offset == 0 && req.size == 2) {
             const Word wdata = req.data;
@@ -71,7 +71,7 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
             resp.denied = true;
         }
     } else if (req.opcode == memory::TlOpcodeA::Get) {
-        const Address offset = req.address - kBaseAddress;
+        const Address offset = (req.address - kBaseAddress).raw();
         if (offset == 0 && req.size == 2) {
             // Read from test register always returns 0
             resp.data = 0;

@@ -75,7 +75,7 @@ auto ICache::read16(Address addr, uint16_t& data) -> bool {
 
 auto ICache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp)
     -> bool {
-    const Address line_base = req.address & ~(static_cast<Address>(kLineBytes - 1u));
+    const Address line_base = (req.address & ~(static_cast<Address>(kLineBytes - 1u))).raw();
     const uint32_t set_idx = get_set_index(line_base);
     const Address tag = get_tag(line_base);
 

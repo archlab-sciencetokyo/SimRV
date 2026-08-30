@@ -322,8 +322,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                                         TlPort::Data, cpu.ca_state.data_walk);
         if (!translate_res.has_value()) return 0;
         auto chain_res = (*translate_res)
-                             .and_then([&](Address phys) -> std::expected<void, TrapCause> {
-                                 p_addr = phys;
+                             .and_then([&](PhysAddr phys) -> std::expected<void, TrapCause> {
+                                 p_addr = phys.raw();
                                  cpu.tlb.insert_data_r(v_addr, p_addr, current_asid, eff_priv);
                                  if (is_amo && !is_lr) {
                                      cpu.tlb.insert_data_w(v_addr, p_addr, current_asid, eff_priv);
@@ -608,8 +608,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
                                         active_xlen, TlPort::Data, cpu.ca_state.data_walk);
         if (!translate_res.has_value()) return;
         auto chain_res = (*translate_res)
-                             .and_then([&](Address phys) -> std::expected<void, TrapCause> {
-                                 p_addr = phys;
+                             .and_then([&](PhysAddr phys) -> std::expected<void, TrapCause> {
+                                 p_addr = phys.raw();
                                  cpu.tlb.insert_data_w(v_addr, p_addr, current_asid, eff_priv);
                                  return {};
                              })
