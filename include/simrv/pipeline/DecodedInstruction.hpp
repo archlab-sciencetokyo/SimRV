@@ -17,7 +17,7 @@ namespace simrv::pipeline {
  * signals.
  */
 struct DecodedInstruction {
-    Register cpc = 0;           ///< Current Program Counter of this instruction
+    VirtAddr cpc{0};            ///< Current Program Counter of this instruction
     ImmValue imm = 0;           ///< Sign-extended immediate value
     CSRValue pending_tval = 0;  ///< Trap value / faulting address for pending exception
     std::optional<ExceptionCode>

@@ -105,7 +105,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     auto trap_at_retirement = [&](CycleInstructionSlot& slot) {
         const auto cause = slot.context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
         const auto tval = slot.context.pending_tval;
-        state_.pc = slot.context.cpc;
+        state_.pc = slot.context.cpc.raw();
         cancel_port(simrv::memory::TlPort::Instruction);
         cancel_port(simrv::memory::TlPort::Data);
         pipe.reset();
@@ -252,7 +252,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         } else {
             if (!execute->serializing && !execute->executed) {
                 const Register saved_pc = state_.pc;
-                state_.pc = execute->context.cpc;
+                state_.pc = execute->context.cpc.raw();
                 (void)run_with_context(*execute, [&] { return execute_stage(machine); });
                 state_.pc = saved_pc;
                 execute->executed = true;
@@ -268,12 +268,12 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
 
                 if (is_control(execute->context)) {
                     const Address sequential =
-                        execute->context.cpc + (execute->context.cinsn != 0u ? 2 : 4);
+                        (execute->context.cpc + (execute->context.cinsn != 0u ? 2 : 4)).raw();
                     const Address target =
                         execute->context.tkn ? execute->context.jmp_pc : sequential;
 
                     const simrv::pipeline::BranchFeedback feedback{
-                        .pc = execute->context.cpc,
+                        .pc = execute->context.cpc.raw(),
                         .actual_taken = execute->context.tkn,
                         .actual_target = target,
                         .opcode = execute->context.opcode,
@@ -339,12 +339,12 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     }
                     if (is_control(decode->context)) {
                         const Address sequential =
-                            decode->context.cpc + (decode->context.cinsn != 0u ? 2 : 4);
+                            (decode->context.cpc + (decode->context.cinsn != 0u ? 2 : 4)).raw();
                         const Address target =
                             decode->context.tkn ? decode->context.jmp_pc : sequential;
 
                         const simrv::pipeline::BranchFeedback feedback{
-                            .pc = decode->context.cpc,
+                            .pc = decode->context.cpc.raw(),
                             .actual_taken = decode->context.tkn,
                             .actual_target = target,
                             .opcode = decode->context.opcode,
@@ -454,10 +454,11 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             fetch->wb_valid = false;
             fetch->wb_val = 0;
             const Address width = fetch->context.cinsn != 0u ? 2 : 4;
-            const Address sequential = fetch->context.cpc + width;
+            const Address sequential = (fetch->context.cpc + width).raw();
 
             if (is_control(fetch->context)) {
-                fetch->prediction = branch_predictor.predict(fetch->context.cpc, fetch->context);
+                fetch->prediction =
+                    branch_predictor.predict(fetch->context.cpc.raw(), fetch->context);
                 if (fetch->prediction.predicted_taken && fetch->prediction.predicted_target != 0) {
                     pipe.fetch_pc = fetch->prediction.predicted_target;
                     pipe.frontend_blocked = fetch->serializing;

@@ -760,16 +760,16 @@ void CPU::execute_core(Machine& machine) {
             break;
         case Opcode::Auipc:
             ctx.tkn = false;
-            ctx.wb_data = ctx.cpc + ctx.imm;
+            ctx.wb_data = (ctx.cpc + ctx.imm).raw();
             break;
         case Opcode::Jal:
             ctx.tkn = true;
-            ctx.wb_data = ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4);
-            ctx.jmp_pc = ctx.cpc + ctx.imm;
+            ctx.wb_data = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
+            ctx.jmp_pc = (ctx.cpc + ctx.imm).raw();
             break;
         case Opcode::Jalr:
             ctx.tkn = true;
-            ctx.wb_data = ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4);
+            ctx.wb_data = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
             ctx.jmp_pc = (ctx.rrs1 + ctx.imm) & ~static_cast<Register>(1);
             if (state_.regs.xlen == 32) {
                 ctx.jmp_pc =
@@ -818,7 +818,7 @@ void CPU::execute_core(Machine& machine) {
         case Opcode::Branch:
             ctx.tkn =
                 execute::ExecuteUnit::branchTaken(ctx.rrs1, ctx.rrs2, ctx.funct3, state_.regs.xlen);
-            ctx.jmp_pc = ctx.cpc + ctx.imm;
+            ctx.jmp_pc = (ctx.cpc + ctx.imm).raw();
             if (state_.regs.xlen == 32) {
                 ctx.jmp_pc =
                     static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc)));
@@ -1275,7 +1275,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
         }
     }
     if (ctx.pending_exception.has_value()) {
-        state_.pc = ctx.cpc;
+        state_.pc = ctx.cpc.raw();
         raise_exception(std::to_underlying(*ctx.pending_exception), ctx.pending_tval);
     } else {
         if (ctx.tkn != 0u) {
@@ -1289,7 +1289,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
             }
             state_.pc = ctx.jmp_pc;
         } else {
-            state_.pc = ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4);
+            state_.pc = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
         }
         if (state_.regs.xlen == 32) {
             state_.pc =
@@ -1378,7 +1378,7 @@ void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
     }
 
     if (ctx.pending_exception.has_value()) {
-        state_.pc = ctx.cpc;
+        state_.pc = ctx.cpc.raw();
         raise_exception(std::to_underlying(*ctx.pending_exception), ctx.pending_tval);
     } else {
         if (ctx.tkn != 0u) {
@@ -1392,7 +1392,7 @@ void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
             }
             state_.pc = ctx.jmp_pc;
         } else {
-            state_.pc = ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4);
+            state_.pc = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
         }
         if (state_.regs.xlen == 32) {
             state_.pc =

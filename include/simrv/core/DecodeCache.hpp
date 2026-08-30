@@ -46,9 +46,9 @@ class DecodeCache {
     void flush() {
         for (auto& set : sets_) {
             set.ways[0].valid = false;
-            set.ways[0].cpc = ~Register{0};
+            set.ways[0].cpc = VirtAddr{~Register{0}};
             set.ways[1].valid = false;
-            set.ways[1].cpc = ~Register{0};
+            set.ways[1].cpc = VirtAddr{~Register{0}};
             set.lru_way = 0;
         }
     }
@@ -60,6 +60,9 @@ class DecodeCache {
      */
     [[nodiscard]] static constexpr inline auto calc_set(Register pc) noexcept -> size_t {
         return ((pc >> 1) ^ (pc >> 13)) & kSetMask;
+    }
+    [[nodiscard]] static constexpr inline auto calc_set(VirtAddr pc) noexcept -> size_t {
+        return ((pc.raw() >> 1) ^ (pc.raw() >> 13)) & kSetMask;
     }
 
     /**
@@ -80,6 +83,7 @@ class DecodeCache {
         }
         return nullptr;
     }
+    [[nodiscard]] inline auto lookup(VirtAddr pc) noexcept -> CachedOp* { return lookup(pc.raw()); }
 
     /**
      * @brief Insert pre-decoded operation into the decode cache using LRU replacement.
@@ -92,11 +96,12 @@ class DecodeCache {
         const uint32_t way = set.lru_way;
         auto& entry = set.ways[way];
         entry = op;
-        entry.cpc = pc;
+        entry.cpc = VirtAddr{pc};
         entry.len = op.cinsn ? 2 : 4;
         entry.valid = true;
         set.lru_way = 1 - way;
     }
+    inline void insert(VirtAddr pc, const CachedOp& op) { insert(pc.raw(), op); }
 
    private:
     std::array<CacheSet, kNumSets> sets_{};

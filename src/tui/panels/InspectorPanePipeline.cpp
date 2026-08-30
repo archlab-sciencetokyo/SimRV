@@ -152,7 +152,7 @@ auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx) -> std::s
     }
     if (opc == Opcode::Jal) {
         return std::format(" {}Computation : {}Jump to {} (link {} in rd)\033[0m", kThemeText,
-                           kThemeMint, hex_val(ctx.jmp_pc), hex_val(ctx.cpc + 4));
+                           kThemeMint, hex_val(ctx.jmp_pc), hex_val((ctx.cpc + 4).raw()));
     }
     if (opc == Opcode::Jalr) {
         return std::format(" {}Computation : {}Jump to {} + {} = {} (link in rd)\033[0m",
@@ -164,7 +164,7 @@ auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx) -> std::s
     }
     if (opc == Opcode::Auipc) {
         return std::format(" {}Computation : {}PC + (imm << 12) = {} + {} = {}\033[0m", kThemeText,
-                           kThemeMint, hex_val(ctx.cpc),
+                           kThemeMint, hex_val(ctx.cpc.raw()),
                            hex_val(static_cast<Register>(ctx.imm) << 12), hex_val(ctx.wb_data));
     }
     // System / CSR
@@ -642,9 +642,9 @@ auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::cor
         case 1: {
             // Resolve against the instruction being presented rather than the architectural PC,
             // which may already have advanced while the functional pipeline view is rendered.
-            std::string sym = machine_.symbol_table().lookup(ctx.cpc);
+            std::string sym = machine_.symbol_table().lookup(ctx.cpc.raw());
             std::string pc_str =
-                sym.empty() ? hex_val(ctx.cpc) : std::format("{} <{}>", hex_val(ctx.cpc), sym);
+                sym.empty() ? hex_val(ctx.cpc.raw()) : std::format("{} <{}>", hex_val(ctx.cpc.raw()), sym);
 
             // Build assembly string from operation name
             bool is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
@@ -692,7 +692,7 @@ auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::cor
         case 3:
             return section_line("IF  Instruction Fetch", width);
         case 4:
-            return render_pair("Fetch PC", hex_val(ctx.cpc), kThemeMint, "Raw Word",
+            return render_pair("Fetch PC", hex_val(ctx.cpc.raw()), kThemeMint, "Raw Word",
                                std::format("0x{:08x}", ctx.ir_org), kThemeVal, col_width,
                                right_width, 10);
         case 5: {

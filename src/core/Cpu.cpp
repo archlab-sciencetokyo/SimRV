@@ -251,7 +251,7 @@ void CPU::run_cycle(Machine& machine) {
         run_ca_pipeline_cycle(machine);
         auto stage_event = [](const pipeline::CycleInstructionSlot& slot, bool stalled) {
             return pipeline::PipelineStageEvent{
-                .instruction = {.pc = slot.context.cpc,
+                .instruction = {.pc = slot.context.cpc.raw(),
                                 .opcode = slot.context.opcode,
                                 .rd = slot.context.rd,
                                 .rs1 = slot.context.rs1,
@@ -508,9 +508,9 @@ void CPU::record_trace_for_tui(Machine& machine) {
         rs2_val = state_.regs.read(rs2);
     }
 
-    machine.tui->record_instruction(pipeline_context.cpc, opcode, op_id, std::to_underlying(rd),
-                                    rd_val, std::to_underlying(rs1), rs1_val,
-                                    std::to_underlying(rs2), rs2_val, pipeline_context.imm);
+    machine.tui->record_instruction(
+        pipeline_context.cpc.raw(), opcode, op_id, std::to_underlying(rd), rd_val,
+        std::to_underlying(rs1), rs1_val, std::to_underlying(rs2), rs2_val, pipeline_context.imm);
 }
 
 void CPU::run_cycle_baremetal(Machine& machine) {

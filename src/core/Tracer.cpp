@@ -331,7 +331,7 @@ void Tracer::write_trace_snapshot() {
     const auto& st = cpu.state();
 
     std::print(fp_trace, "{:08} {:0{}x} {:08x}", static_cast<Counter>(cpu.clint_mmio.mtime.load()),
-               cpu.pipeline_context.cpc, D_TRACE_HEX_WIDTH,
+               cpu.pipeline_context.cpc.raw(), D_TRACE_HEX_WIDTH,
                static_cast<uint32_t>(cpu.pipeline_context.ir));
     std::println(fp_trace, "");
 

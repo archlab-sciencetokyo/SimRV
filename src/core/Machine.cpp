@@ -468,11 +468,12 @@ void OsRunner::finalize(Machine& machine) {
     } else {
         if (simrv::compiler::unlikely(machine.config.execution.strace != 0 &&
                                       cpu.clint_mmio.mtime >= machine.config.execution.strace))
-            machine.trace().emit_periodic_pc_trace(cpu.clint_mmio.mtime, cpu.pipeline_context.cpc);
+            machine.trace().emit_periodic_pc_trace(cpu.clint_mmio.mtime,
+                                                   cpu.pipeline_context.cpc.raw());
         if (simrv::compiler::unlikely(trace_window)) machine.trace().write_trace_snapshot();
         if (simrv::compiler::unlikely(machine.branch_trace_enabled()))
             machine.trace().emit_branch_prediction_trace(
-                cpu.clint_mmio.mtime, cpu.pipeline_context.cpc, cpu.pipeline_context.jmp_pc,
+                cpu.clint_mmio.mtime, cpu.pipeline_context.cpc.raw(), cpu.pipeline_context.jmp_pc,
                 cpu.pipeline_context.opcode, cpu.pipeline_context.tkn);
         machine.finalize_cycle_tohost();
     }
@@ -717,7 +718,8 @@ void Machine::run() {
         }
 
         if (!appmode_enabled() && spike_lockstep && spike_lockstep->is_running()) {
-            spike_lockstep->compare_and_report(cpu.state(), cpu.pipeline_context.cpc, cpu.e_icount);
+            spike_lockstep->compare_and_report(cpu.state(), cpu.pipeline_context.cpc.raw(),
+                                               cpu.e_icount);
             if (spike_lockstep->should_halt()) {
                 simrv::log::error("Lockstep: halting on divergence");
                 stop(StopReason::LockstepDivergence);
