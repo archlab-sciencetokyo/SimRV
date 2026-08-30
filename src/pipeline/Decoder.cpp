@@ -486,59 +486,28 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
 
 namespace {
 
-auto decode_branch(uint32_t funct3) -> OperationId {
-    switch (funct3) {
-        case 0:
-            return OperationId::BEQ;
-        case 1:
-            return OperationId::BNE;
-        case 4:
-            return OperationId::BLT;
-        case 5:
-            return OperationId::BGE;
-        case 6:
-            return OperationId::BLTU;
-        case 7:
-            return OperationId::BGEU;
-        default:
-            return OperationId::UNKNOWN;
-    }
+constexpr std::array<OperationId, 8> kBranchTable = {
+    OperationId::BEQ, OperationId::BNE, OperationId::UNKNOWN, OperationId::UNKNOWN,
+    OperationId::BLT, OperationId::BGE, OperationId::BLTU,    OperationId::BGEU};
+
+constexpr std::array<OperationId, 8> kLoadTable = {
+    OperationId::LB,  OperationId::LH,  OperationId::LW,  OperationId::LD,
+    OperationId::LBU, OperationId::LHU, OperationId::LWU, OperationId::UNKNOWN};
+
+constexpr std::array<OperationId, 8> kStoreTable = {
+    OperationId::SB,      OperationId::SH,      OperationId::SW,      OperationId::SD,
+    OperationId::UNKNOWN, OperationId::UNKNOWN, OperationId::UNKNOWN, OperationId::UNKNOWN};
+
+[[nodiscard]] constexpr auto decode_branch(uint32_t funct3) noexcept -> OperationId {
+    return funct3 < kBranchTable.size() ? kBranchTable[funct3] : OperationId::UNKNOWN;
 }
 
-auto decode_load(uint32_t funct3) -> OperationId {
-    switch (funct3) {
-        case 0:
-            return OperationId::LB;
-        case 1:
-            return OperationId::LH;
-        case 2:
-            return OperationId::LW;
-        case 3:
-            return OperationId::LD;
-        case 4:
-            return OperationId::LBU;
-        case 5:
-            return OperationId::LHU;
-        case 6:
-            return OperationId::LWU;
-        default:
-            return OperationId::UNKNOWN;
-    }
+[[nodiscard]] constexpr auto decode_load(uint32_t funct3) noexcept -> OperationId {
+    return funct3 < kLoadTable.size() ? kLoadTable[funct3] : OperationId::UNKNOWN;
 }
 
-auto decode_store(uint32_t funct3) -> OperationId {
-    switch (funct3) {
-        case 0:
-            return OperationId::SB;
-        case 1:
-            return OperationId::SH;
-        case 2:
-            return OperationId::SW;
-        case 3:
-            return OperationId::SD;
-        default:
-            return OperationId::UNKNOWN;
-    }
+[[nodiscard]] constexpr auto decode_store(uint32_t funct3) noexcept -> OperationId {
+    return funct3 < kStoreTable.size() ? kStoreTable[funct3] : OperationId::UNKNOWN;
 }
 
 auto decode_op_imm(uint32_t funct3, uint32_t funct7, Instruction ir) -> OperationId {
@@ -775,47 +744,23 @@ auto decode_ext_i(Opcode op, uint32_t funct3, uint32_t funct7, Instruction ir) -
     }
 }
 
-auto decode_ext_m_op(uint32_t funct3) -> OperationId {
-    switch (funct3) {
-        case 0:
-            return OperationId::MUL;
-        case 1:
-            return OperationId::MULH;
-        case 2:
-            return OperationId::MULHSU;
-        case 3:
-            return OperationId::MULHU;
-        case 4:
-            return OperationId::DIV;
-        case 5:
-            return OperationId::DIVU;
-        case 6:
-            return OperationId::REM;
-        case 7:
-            return OperationId::REMU;
-        default:
-            return OperationId::UNKNOWN;
-    }
+constexpr std::array<OperationId, 8> kMTable = {
+    OperationId::MUL, OperationId::MULH, OperationId::MULHSU, OperationId::MULHU,
+    OperationId::DIV, OperationId::DIVU, OperationId::REM,    OperationId::REMU};
+
+constexpr std::array<OperationId, 8> kMTable32 = {
+    OperationId::MULW, OperationId::UNKNOWN, OperationId::UNKNOWN, OperationId::UNKNOWN,
+    OperationId::DIVW, OperationId::DIVUW,   OperationId::REMW,    OperationId::REMUW};
+
+[[nodiscard]] constexpr auto decode_ext_m_op(uint32_t funct3) noexcept -> OperationId {
+    return funct3 < kMTable.size() ? kMTable[funct3] : OperationId::UNKNOWN;
 }
 
-auto decode_ext_m_op32(uint32_t funct3) -> OperationId {
-    switch (funct3) {
-        case 0:
-            return OperationId::MULW;
-        case 4:
-            return OperationId::DIVW;
-        case 5:
-            return OperationId::DIVUW;
-        case 6:
-            return OperationId::REMW;
-        case 7:
-            return OperationId::REMUW;
-        default:
-            return OperationId::UNKNOWN;
-    }
+[[nodiscard]] constexpr auto decode_ext_m_op32(uint32_t funct3) noexcept -> OperationId {
+    return funct3 < kMTable32.size() ? kMTable32[funct3] : OperationId::UNKNOWN;
 }
 
-auto decode_ext_m(Opcode op, uint32_t funct3) -> OperationId {
+[[nodiscard]] constexpr auto decode_ext_m(Opcode op, uint32_t funct3) noexcept -> OperationId {
     if (op == Opcode::Op32) {
         return decode_ext_m_op32(funct3);
     }

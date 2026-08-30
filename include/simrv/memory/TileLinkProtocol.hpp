@@ -140,12 +140,12 @@ struct TlChannelA {
     uint8_t size{0};
     TlSourceId source{0};
     HartId hart{0};
-    Address address{0};
+    PhysicalAddress address{0};
     TlMask mask{0};
     TlData data{0};
     bool corrupt{false};
 
-    [[nodiscard]] static constexpr auto compute_mask(uint8_t transfer_size, Address address)
+    [[nodiscard]] static constexpr auto compute_mask(uint8_t transfer_size, PhysicalAddress address)
         -> TlMask {
         if (transfer_size > kTlBeatSize) return 0;
         const auto bytes = static_cast<unsigned>(1u << transfer_size);
@@ -154,6 +154,10 @@ struct TlChannelA {
         const auto lanes = static_cast<unsigned>((1u << bytes) - 1u);
         return static_cast<TlMask>(lanes << lane);
     }
+
+    [[nodiscard]] constexpr auto is_valid() const noexcept -> bool {
+        return size <= kTlBlockSize && (opcode != TlOpcodeA::PutFullData || mask != 0);
+    }
 };
 
 struct TlChannelB {
@@ -161,7 +165,7 @@ struct TlChannelB {
     TlCap cap{TlCap::ToN};
     uint8_t size{kTlBlockSize};
     TlSourceId source{0};
-    Address address{0};
+    PhysicalAddress address{0};
 };
 
 struct TlChannelC {
@@ -170,9 +174,11 @@ struct TlChannelC {
     uint8_t size{kTlBlockSize};
     TlSourceId source{0};
     HartId hart{0};
-    Address address{0};
+    PhysicalAddress address{0};
     TlData data{0};
     bool corrupt{false};
+
+    [[nodiscard]] constexpr auto is_valid() const noexcept -> bool { return size <= kTlBlockSize; }
 };
 
 struct TlChannelD {

@@ -39,12 +39,17 @@ using Counter = uint64_t;
 using Address = Word;
 using PhysAddr = Address;
 using VirtAddr = Address;
+using PhysicalAddress = PhysAddr;
+using VirtualAddress = VirtAddr;
 using Instruction = uint32_t;  // RISC-V base instructions are exactly 32 bits
 using CSRValue = Word;
 using CSRAddress = Address;
 using ImmValue = SignedWord;
 using TrapCause = Word;
+using PageFaultCause = TrapCause;
 using HartId = uint32_t;
+using PortId = uint8_t;
+using LatencyCycles = uint32_t;
 enum class PrivilegeLevel : uint8_t { User = 0, Supervisor = 1, Machine = 3 };
 
 constexpr auto operator<(PrivilegeLevel lhs, PrivilegeLevel rhs) -> bool {
