@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "simrv/core/Machine.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 
 namespace simrv::memory {
@@ -64,7 +65,8 @@ auto MmioDevice::handle_request(const TlChannelA& req, TlChannelD& resp) -> bool
     const Address offset = req.address - base_address();
     resp.source = req.source;
     resp.size = req.size;
-    resp.error = false;
+    resp.denied = false;
+    resp.corrupt = false;
 
     if (req.opcode == TlOpcodeA::Get) {
         resp.opcode = TlOpcodeD::AccessAckData;
@@ -105,7 +107,7 @@ auto MmioDevice::handle_request(const TlChannelA& req, TlChannelD& resp) -> bool
                 break;
         }
     } else {
-        resp.error = true;
+        resp.denied = true;
         return false;
     }
     return true;
@@ -122,6 +124,12 @@ auto MmioDevice::dma_read(Address paddr, std::span<uint8_t> dst) -> bool {
     if (paddr < dram_base || (paddr + dst.size()) > (dram_base + dram_size)) {
         return false;
     }
+    const Address first_line = paddr & ~(Address{CoherenceHub::kLineBytes - 1u});
+    const Address last_line = (paddr + dst.size() - 1u) & ~(Address{CoherenceHub::kLineBytes - 1u});
+    for (Address line = first_line;; line += CoherenceHub::kLineBytes) {
+        machine_->memory().system_bus().coherence_hub().invalidate_line_external(line);
+        if (line == last_line) break;
+    }
     std::memcpy(dst.data(), machine_->ram_data() + (paddr - dram_base), dst.size());
     return true;
 }
@@ -136,6 +144,12 @@ auto MmioDevice::dma_write(Address paddr, std::span<const uint8_t> src) -> bool 
 
     if (paddr < dram_base || (paddr + src.size()) > (dram_base + dram_size)) {
         return false;
+    }
+    const Address first_line = paddr & ~(Address{CoherenceHub::kLineBytes - 1u});
+    const Address last_line = (paddr + src.size() - 1u) & ~(Address{CoherenceHub::kLineBytes - 1u});
+    for (Address line = first_line;; line += CoherenceHub::kLineBytes) {
+        machine_->memory().system_bus().coherence_hub().invalidate_line_external(line);
+        if (line == last_line) break;
     }
     std::memcpy(machine_->ram_data() + (paddr - dram_base), src.data(), src.size());
     return true;

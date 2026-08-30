@@ -4,7 +4,9 @@
  */
 #include "simrv/memory/CoherenceHub.hpp"
 
+#include <bit>
 #include <cstring>
+#include <format>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
@@ -64,6 +66,26 @@ auto CoherenceHub::get_directory_state(Address line_base) const -> DirectoryEntr
     return DirectoryEntry{};
 }
 
+auto CoherenceHub::validate_directory() const -> std::expected<void, std::string> {
+    for (const auto& [address, entry] : directory_) {
+        const bool has_owner = entry.owner_hart.has_value();
+        const unsigned sharers = std::popcount(entry.sharers_mask);
+        if (entry.state == MesiState::Invalid || entry.sharers_mask == 0) {
+            return std::unexpected(std::format("invalid live directory entry at {:#x}", address));
+        }
+        if (entry.state == MesiState::Shared && has_owner) {
+            return std::unexpected(std::format("shared line has an owner at {:#x}", address));
+        }
+        if ((entry.state == MesiState::Exclusive || entry.state == MesiState::Modified) &&
+            (!has_owner || sharers != 1 ||
+             (entry.sharers_mask & (uint64_t{1} << *entry.owner_hart)) == 0)) {
+            return std::unexpected(
+                std::format("Trunk line lacks its unique owner at {:#x}", address));
+        }
+    }
+    return {};
+}
+
 void CoherenceHub::probe_hart_dcache(uint32_t hart_id, const TlChannelB& probe_req,
                                      TlChannelC& probe_resp,
                                      std::array<Byte, kLineBytes>& dirty_data) {
@@ -94,7 +116,7 @@ void CoherenceHub::invalidate_line_broadcast(Address line_base, uint32_t initiat
     const Address aligned_addr = line_base & ~(static_cast<Address>(kLineBytes - 1u));
     TlChannelB probe_req{};
     probe_req.opcode = TlOpcodeB::ProbeBlock;
-    probe_req.param = static_cast<uint8_t>(CoherenceState::None);
+    probe_req.cap = TlCap::ToN;
     probe_req.address = aligned_addr;
 
     for (uint32_t h = 0; h < machine_.num_harts(); ++h) {
@@ -116,12 +138,19 @@ void CoherenceHub::invalidate_line_external(Address line_base) {
     const Address aligned_addr = line_base & ~(static_cast<Address>(kLineBytes - 1u));
     TlChannelB probe{};
     probe.opcode = TlOpcodeB::ProbeBlock;
-    probe.param = static_cast<uint8_t>(CoherenceState::None);
+    probe.cap = TlCap::ToN;
     probe.address = aligned_addr;
     for (uint32_t hart = 0; hart < machine_.num_harts(); ++hart) {
         TlChannelC response{};
         std::array<Byte, kLineBytes> dirty{};
         probe_hart_dcache(hart, probe, response, dirty);
+        if (response.opcode == TlOpcodeC::ProbeAckData) {
+            auto* dram = machine_.ram_data();
+            const auto geometry = machine_.memory_geometry();
+            if (dram != nullptr && geometry.contains(aligned_addr, kLineBytes)) {
+                std::memcpy(dram + (aligned_addr - geometry.dram_base), dirty.data(), kLineBytes);
+            }
+        }
         probe_hart_icache(hart, probe);
         ++stats_.invalidation_count;
     }
@@ -132,14 +161,12 @@ void CoherenceHub::invalidate_line_external(Address line_base) {
 auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
                                   std::array<Byte, kLineBytes>& line_buffer) -> bool {
     const Address line_base = req.address & ~(static_cast<Address>(kLineBytes - 1u));
-    const auto req_state =
-        (req.opcode == TlOpcodeA::AcquirePerm)
-            ? CoherenceState::Trunk
-            : ((req.param != 0) ? static_cast<CoherenceState>(req.param) : CoherenceState::Trunk);
+    const auto requested_permission =
+        req.grow == TlGrow::NtoB ? TlPermission::Branch : TlPermission::Trunk;
 
     stats_.acquire_count++;
 
-    auto dram_ptr = machine_.memory_.mmu() ? machine_.memory_.mmu()->mmem() : nullptr;
+    auto* dram_ptr = machine_.ram_data();
 
     DirectoryEntry dir_entry{};
     const bool dir_hit = lookup_dir_entry(line_base, dir_entry);
@@ -147,12 +174,12 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
     if (req.opcode == TlOpcodeA::AcquirePerm) {
         // Upgrade from Branch to Trunk
         if (dir_hit && dir_entry.sharers_mask != 0) {
-            uint32_t mask = dir_entry.sharers_mask;
+            const uint64_t mask = dir_entry.sharers_mask;
             for (uint32_t h = 0; h < machine_.num_harts(); ++h) {
-                if (h != req.hart && ((mask & (1u << h)) != 0u)) {
+                if (h != req.hart && (mask & (uint64_t{1} << h)) != 0u) {
                     TlChannelB probe_req{};
                     probe_req.opcode = TlOpcodeB::ProbeBlock;
-                    probe_req.param = static_cast<uint8_t>(CoherenceState::None);
+                    probe_req.cap = TlCap::ToN;
                     probe_req.address = line_base;
                     TlChannelC probe_resp{};
                     std::array<Byte, kLineBytes> dirty{};
@@ -166,39 +193,44 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
         machine_.memory_.reservation_table().invalidate_matching(line_base, req.hart);
 
         update_dir_entry(line_base, DirectoryEntry{
-                                        .state = CoherenceState::Trunk,
-                                        .sharers_mask = (1u << req.hart),
-                                        .owner_hart = static_cast<uint32_t>(req.hart),
+                                        .state = MesiState::Exclusive,
+                                        .sharers_mask = (uint64_t{1} << req.hart),
+                                        .owner_hart = req.hart,
                                     });
 
         resp.opcode = TlOpcodeD::Grant;
-        resp.param = static_cast<uint8_t>(CoherenceState::Trunk);
+        resp.cap = TlCap::ToT;
+        resp.size = req.size;
         resp.source = req.source;
-        resp.sink = 0;
-        resp.error = false;
+        resp.sink = allocate_sink();
+        resp.denied = false;
+        resp.corrupt = false;
         stats_.grant_count++;
         return true;
     }
 
     // AcquireBlock (fetch line into cache)
     bool data_fetched_from_owner = false;
-    CoherenceState granted_state = req_state;
+    TlCap granted_cap = requested_permission == TlPermission::Branch ? TlCap::ToB : TlCap::ToT;
 
     if (dir_hit && dir_entry.sharers_mask != 0) {
-        if (dir_entry.state == CoherenceState::Trunk && dir_entry.owner_hart != req.hart) {
+        const bool trunk_owned = permission_for(dir_entry.state) == TlPermission::Trunk &&
+                                 dir_entry.owner_hart.has_value();
+        if (trunk_owned &&
+            (*dir_entry.owner_hart != req.hart || requested_permission == TlPermission::Branch)) {
             // Owner has Exclusive/Modified line.
             // If requesting Branch (read), probe owner to downgrade Trunk -> Branch (Shared Clean).
             // If requesting Trunk (write), probe owner to invalidate Trunk -> None.
-            const auto target_probe_state = (req_state == CoherenceState::Branch)
-                                                ? CoherenceState::Branch
-                                                : CoherenceState::None;
+            const auto target_cap =
+                requested_permission == TlPermission::Branch ? TlCap::ToB : TlCap::ToN;
             TlChannelB probe_req{};
             probe_req.opcode = TlOpcodeB::ProbeBlock;
-            probe_req.param = static_cast<uint8_t>(target_probe_state);
+            probe_req.cap = target_cap;
             probe_req.address = line_base;
             TlChannelC probe_resp{};
             std::array<Byte, kLineBytes> dirty{};
-            probe_hart_dcache(dir_entry.owner_hart, probe_req, probe_resp, dirty);
+            probe_hart_dcache(*dir_entry.owner_hart, probe_req, probe_resp, dirty);
+            probe_hart_icache(*dir_entry.owner_hart, probe_req);
 
             if (probe_resp.opcode == TlOpcodeC::ProbeAckData) {
                 std::memcpy(line_buffer.data(), dirty.data(), kLineBytes);
@@ -210,25 +242,26 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
                 }
             }
 
-            if (req_state == CoherenceState::Branch) {
-                dir_entry.state = CoherenceState::Branch;
-                dir_entry.sharers_mask |= (1u << req.hart);
-                granted_state = CoherenceState::Branch;
+            if (requested_permission == TlPermission::Branch) {
+                dir_entry.state = MesiState::Shared;
+                dir_entry.sharers_mask |= (uint64_t{1} << req.hart);
+                dir_entry.owner_hart.reset();
+                granted_cap = TlCap::ToB;
             } else {
-                dir_entry.state = CoherenceState::Trunk;
-                dir_entry.sharers_mask = (1u << req.hart);
-                dir_entry.owner_hart = static_cast<uint32_t>(req.hart);
-                granted_state = CoherenceState::Trunk;
+                dir_entry.state = MesiState::Exclusive;
+                dir_entry.sharers_mask = (uint64_t{1} << req.hart);
+                dir_entry.owner_hart = req.hart;
+                granted_cap = TlCap::ToT;
             }
-        } else if (dir_entry.state == CoherenceState::Branch &&
-                   req_state == CoherenceState::Trunk) {
+        } else if (dir_entry.state == MesiState::Shared &&
+                   requested_permission == TlPermission::Trunk) {
             // Invalidate all existing sharers
-            uint32_t mask = dir_entry.sharers_mask;
+            const uint64_t mask = dir_entry.sharers_mask;
             for (uint32_t h = 0; h < machine_.num_harts(); ++h) {
-                if (h != req.hart && ((mask & (1u << h)) != 0u)) {
+                if (h != req.hart && (mask & (uint64_t{1} << h)) != 0u) {
                     TlChannelB probe_req{};
                     probe_req.opcode = TlOpcodeB::ProbeBlock;
-                    probe_req.param = static_cast<uint8_t>(CoherenceState::None);
+                    probe_req.cap = TlCap::ToN;
                     probe_req.address = line_base;
                     TlChannelC probe_resp{};
                     std::array<Byte, kLineBytes> dirty{};
@@ -237,22 +270,22 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
                     stats_.invalidation_count++;
                 }
             }
-            dir_entry.state = CoherenceState::Trunk;
-            dir_entry.sharers_mask = (1u << req.hart);
-            dir_entry.owner_hart = static_cast<uint32_t>(req.hart);
-            granted_state = CoherenceState::Trunk;
-        } else if (dir_entry.state == CoherenceState::Branch &&
-                   req_state == CoherenceState::Branch) {
-            dir_entry.sharers_mask |= (1u << req.hart);
-            granted_state = CoherenceState::Branch;
+            dir_entry.state = MesiState::Exclusive;
+            dir_entry.sharers_mask = (uint64_t{1} << req.hart);
+            dir_entry.owner_hart = req.hart;
+            granted_cap = TlCap::ToT;
+        } else if (dir_entry.state == MesiState::Shared &&
+                   requested_permission == TlPermission::Branch) {
+            dir_entry.sharers_mask |= (uint64_t{1} << req.hart);
+            granted_cap = TlCap::ToB;
         }
     } else {
         // MESI Optimization: Sole-sharer read miss receives Exclusive Clean (Trunk)
         // Subsequent stores will hit immediately without emitting AcquirePerm bus requests.
-        granted_state = CoherenceState::Trunk;
-        dir_entry.state = CoherenceState::Trunk;
-        dir_entry.sharers_mask = (1u << req.hart);
-        dir_entry.owner_hart = static_cast<uint32_t>(req.hart);
+        granted_cap = TlCap::ToT;
+        dir_entry.state = MesiState::Exclusive;
+        dir_entry.sharers_mask = (uint64_t{1} << req.hart);
+        dir_entry.owner_hart = req.hart;
     }
 
     if (!data_fetched_from_owner) {
@@ -265,17 +298,19 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
         }
     }
 
-    if (granted_state == CoherenceState::Trunk) {
+    if (granted_cap == TlCap::ToT) {
         machine_.memory_.reservation_table().invalidate_matching(line_base, req.hart);
     }
 
     update_dir_entry(line_base, dir_entry);
 
     resp.opcode = TlOpcodeD::GrantData;
-    resp.param = static_cast<uint8_t>(granted_state);
+    resp.cap = granted_cap;
+    resp.size = req.size;
     resp.source = req.source;
-    resp.sink = 0;
-    resp.error = false;
+    resp.sink = allocate_sink();
+    resp.denied = false;
+    resp.corrupt = false;
     stats_.grant_count++;
     return true;
 }
@@ -287,9 +322,9 @@ auto CoherenceHub::handle_release(const TlChannelC& req, TlChannelD& resp,
 
     DirectoryEntry dir_entry{};
     if (lookup_dir_entry(line_base, dir_entry)) {
-        dir_entry.sharers_mask &= ~(1u << req.hart);
+        dir_entry.sharers_mask &= ~(uint64_t{1} << req.hart);
         if (req.opcode == TlOpcodeC::ReleaseData && release_data != nullptr) {
-            auto dram_ptr = machine_.memory_.mmu() ? machine_.memory_.mmu()->mmem() : nullptr;
+            auto* dram_ptr = machine_.ram_data();
             const auto geometry = machine_.memory_geometry();
             if (dram_ptr != nullptr && geometry.contains(line_base, kLineBytes)) {
                 const Address offset = line_base - geometry.dram_base;
@@ -297,23 +332,47 @@ auto CoherenceHub::handle_release(const TlChannelC& req, TlChannelD& resp,
                 stats_.writeback_count++;
             }
         }
+        if (req.hart < machine_.num_harts()) {
+            const auto& hart = machine_.hart(req.hart);
+            const bool other_copy = hart.icache.line_state(line_base) != MesiState::Invalid ||
+                                    hart.dcache.line_state(line_base) != MesiState::Invalid;
+            if (other_copy) dir_entry.sharers_mask |= (uint64_t{1} << req.hart);
+        }
         if (dir_entry.sharers_mask == 0) {
             erase_dir_entry(line_base);
         } else {
-            dir_entry.state = CoherenceState::Branch;
+            dir_entry.state = MesiState::Shared;
+            dir_entry.owner_hart.reset();
             update_dir_entry(line_base, dir_entry);
         }
     }
 
     resp.opcode = TlOpcodeD::ReleaseAck;
+    resp.size = req.size;
     resp.source = req.source;
     resp.sink = 0;
-    resp.error = false;
+    resp.denied = false;
+    resp.corrupt = false;
     return true;
 }
 
-void CoherenceHub::process_grant_ack([[maybe_unused]] const TlChannelE& ack) {
-    // TL-C 3-way handshake completion
+auto CoherenceHub::allocate_sink() -> TlSinkId {
+    while (next_sink_ == 0 || pending_grants_.contains(next_sink_)) ++next_sink_;
+    const TlSinkId sink = next_sink_++;
+    pending_grants_.insert(sink);
+    return sink;
+}
+
+void CoherenceHub::process_grant_ack(const TlChannelE& ack) { pending_grants_.erase(ack.sink); }
+
+void CoherenceHub::mark_modified(Address line_base, HartId hart) {
+    DirectoryEntry entry{};
+    if (!lookup_dir_entry(line_base, entry) || !entry.owner_hart.has_value() ||
+        *entry.owner_hart != hart || permission_for(entry.state) != TlPermission::Trunk) {
+        return;
+    }
+    entry.state = MesiState::Modified;
+    update_dir_entry(line_base, entry);
 }
 
 }  // namespace simrv::memory

@@ -1,12 +1,14 @@
 /**
  * @file TileLinkBus.cpp
- * @brief TileLink-style simple sequential bus implementation.
+ * @brief Internal TileLink-C 1.8.1 profile fabric and transaction adapter.
  */
 #include "simrv/memory/TileLinkBus.hpp"
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <format>
+#include <unordered_set>
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Logger.hpp"
@@ -39,20 +41,24 @@ TileLinkBus::TileLinkBus(simrv::core::Machine& machine)
 void TileLinkBus::add_node(TileLinkNode* node) { router_.register_device(node); }
 
 void TileLinkBus::configure_timing(uint32_t request_latency, uint32_t response_latency) {
-    SmpLockGuard lock(bus_mutex_, machine_.s_smp_multithreaded.load(std::memory_order_relaxed));
+    SmpLockGuard lock(bus_mutex_, machine_.configuration().execution.smp_multithreaded);
     request_latency_ = std::max(1u, request_latency);
     response_latency_ = std::max(1u, response_latency);
 }
 
 auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
-    SmpLockGuard lock(bus_mutex_, machine_.s_smp_multithreaded.load(std::memory_order_relaxed));
+    SmpLockGuard lock(bus_mutex_, machine_.configuration().execution.smp_multithreaded);
+    if (const auto valid = protocol_checker_.accept_a(req); !valid) {
+        simrv::log::warn("TileLink-C request rejected: {}", valid.error());
+        return false;
+    }
     req_queue_.push_back(
         TimedRequest{.payload = req, .submitted_cycle = cycle_, .sequence = next_sequence_++});
     return true;
 }
 
 void TileLinkBus::advance_cycle() {
-    SmpLockGuard lock(bus_mutex_, machine_.s_smp_multithreaded.load(std::memory_order_relaxed));
+    SmpLockGuard lock(bus_mutex_, machine_.configuration().execution.smp_multithreaded);
     ++cycle_;
     if (!req_queue_.empty() && req_queue_.front().submitted_cycle + request_latency_ <= cycle_) {
         auto request = std::move(req_queue_.front());
@@ -71,7 +77,8 @@ void TileLinkBus::process_request(const TimedRequest& request) {
     TlChannelD resp{};
     resp.source = req.source;
     resp.size = req.size;
-    resp.error = false;
+    resp.denied = false;
+    resp.corrupt = false;
     resp.data = 0;
 
     const Instruction funct3 = req.size;
@@ -83,30 +90,21 @@ void TileLinkBus::process_request(const TimedRequest& request) {
 
     if (req.opcode == TlOpcodeA::AcquireBlock || req.opcode == TlOpcodeA::AcquirePerm) {
         handled = coherence_hub_.handle_acquire(req, resp, response_line);
-        has_line_data = req.opcode == TlOpcodeA::AcquireBlock && handled && !resp.error;
+        has_line_data = req.opcode == TlOpcodeA::AcquireBlock && handled && !resp.failed();
     } else if (!valid_size) {
-        resp.error = true;
+        resp.denied = true;
         handled = true;
     } else if (req.opcode == TlOpcodeA::Get) {
         resp.opcode = TlOpcodeD::AccessAckData;
         if (machine_.memory_geometry().contains(req.address, transfer_bytes) &&
             machine_.ram_data() != nullptr) {
-            bool found_in_cache = false;
-            for (uint32_t h = 0; h < machine_.num_harts(); ++h) {
-                Word cached_data = 0;
-                if (machine_.hart(h).dcache.read(req.address, cached_data, funct3)) {
-                    resp.data = cached_data;
-                    found_in_cache = true;
-                    break;
-                }
-            }
-            if (!found_in_cache) {
-                resp.data = simrv::memory::ram_read_fast(req.address, funct3, machine_.ram_view());
-            }
+            coherence_hub_.invalidate_line_external(req.address);
+            resp.data = simrv::memory::ram_read_fast(req.address, funct3, machine_.ram_view());
             ++read_count_;
             handled = true;
         }
-    } else if (req.opcode == TlOpcodeA::LogicalData) {
+    } else if (req.opcode == TlOpcodeA::LogicalData && req.logical == TlLogical::Or &&
+               !req.corrupt) {
         // Page-table A/D updates use an atomic OR at the globally ordered bus boundary.
         resp.opcode = TlOpcodeD::AccessAckData;
         if (machine_.memory_geometry().contains(req.address, transfer_bytes) &&
@@ -121,21 +119,22 @@ void TileLinkBus::process_request(const TimedRequest& request) {
             ++write_count_;
             handled = true;
         }
-    } else if (req.opcode == TlOpcodeA::PutFullData || req.opcode == TlOpcodeA::PutPartialData) {
+    } else if ((req.opcode == TlOpcodeA::PutFullData || req.opcode == TlOpcodeA::PutPartialData) &&
+               !req.corrupt) {
         resp.opcode = TlOpcodeD::AccessAck;
         const bool is_tohost_write = simrv::xlen::kIsXLen64
                                          ? (funct3 == static_cast<Instruction>(Funct3::Sw) ||
                                             funct3 == static_cast<Instruction>(Funct3::Sd))
                                          : (funct3 == static_cast<Instruction>(Funct3::Sw));
         if (is_tohost_write) {
-            if (req.address == machine_.s_isatest_tohost || req.address == 0x80001000 ||
-                req.address == 0x40008000) {
+            if (req.address == machine_.configuration().isa.isatest_tohost ||
+                req.address == 0x80001000 || req.address == 0x40008000) {
                 machine_.tohost = simrv::xlen::kIsXLen64
                                       ? req.data
                                       : ((machine_.tohost & 0xFFFFFFFF00000000ULL) | req.data);
             } else if (!simrv::xlen::kIsXLen64 &&
-                       (req.address == machine_.s_isatest_tohost + 4 || req.address == 0x80001004 ||
-                        req.address == 0x40008004)) {
+                       (req.address == machine_.configuration().isa.isatest_tohost + 4 ||
+                        req.address == 0x80001004 || req.address == 0x40008004)) {
                 machine_.tohost = (machine_.tohost & 0x00000000FFFFFFFFULL) |
                                   (static_cast<uint64_t>(req.data) << 32);
             }
@@ -143,12 +142,32 @@ void TileLinkBus::process_request(const TimedRequest& request) {
 
         if (machine_.memory_geometry().contains(req.address, transfer_bytes) &&
             machine_.ram_data() != nullptr) {
-            simrv::memory::ram_write_fast(req.address, req.data, funct3, machine_.ram_view());
+            coherence_hub_.invalidate_line_external(req.address);
+            if (req.opcode == TlOpcodeA::PutPartialData) {
+                auto* destination = machine_.ram_view().unchecked_ptr(req.address);
+                const unsigned lane_base = static_cast<unsigned>(req.address & (kTlBeatBytes - 1u));
+                for (size_t byte = 0; byte < transfer_bytes; ++byte) {
+                    const auto lane = static_cast<unsigned>(lane_base + byte);
+                    if ((req.mask & (TlMask{1} << lane)) != 0) {
+                        destination[byte] = static_cast<Byte>((req.data >> (byte * 8u)) & 0xffu);
+                    }
+                }
+            } else {
+                simrv::memory::ram_write_fast(req.address, req.data, funct3, machine_.ram_view());
+            }
             ++write_count_;
             handled = true;
         }
     } else {
-        resp.error = true;
+        if (req.opcode == TlOpcodeA::Intent) {
+            resp.opcode = TlOpcodeD::HintAck;
+        } else if (req.opcode == TlOpcodeA::PutFullData ||
+                   req.opcode == TlOpcodeA::PutPartialData) {
+            resp.opcode = TlOpcodeD::AccessAck;
+        } else {
+            resp.opcode = TlOpcodeD::AccessAckData;
+        }
+        resp.denied = true;
         handled = true;
     }
 
@@ -157,57 +176,62 @@ void TileLinkBus::process_request(const TimedRequest& request) {
     }
 
     if (!handled) {
-        resp.error = true;
+        resp.denied = true;
     }
-    resp_queue_.push_back(TimedResponse{.payload = resp,
-                                        .line_data = response_line,
-                                        // A latency of one means that the response is visible in
-                                        // the cycle in which the request completes.  This keeps
-                                        // the default one-cycle request/response contract while
-                                        // larger configured latencies add whole CA transitions.
-                                        .ready_cycle = cycle_ + response_latency_ - 1,
-                                        .sequence = request.sequence,
-                                        .has_line_data = has_line_data});
+    const uint8_t beat_count = has_line_data ? kTlBlockBytes / kTlBeatBytes : 1;
+    for (uint8_t beat = 0; beat < beat_count; ++beat) {
+        TlChannelD payload = resp;
+        if (has_line_data) {
+            std::memcpy(&payload.data, response_line.data() + beat * kTlBeatBytes, kTlBeatBytes);
+        }
+        d_queue_.push_back(TimedDBeat{
+            .payload = payload,
+            // A latency of one exposes the first beat in the request-completion cycle. Each
+            // following beat occupies its own D-channel transfer cycle.
+            .ready_cycle = cycle_ + response_latency_ - 1 + beat,
+            .sequence = request.sequence,
+            .beat_index = beat,
+            .beat_count = beat_count,
+        });
+    }
 }
 
-auto TileLinkBus::try_get_timed_response(uint8_t source_id, TimedResponse& resp) -> bool {
-    SmpLockGuard lock(bus_mutex_, machine_.s_smp_multithreaded.load(std::memory_order_relaxed));
-    auto it = std::ranges::find_if(resp_queue_, [this, source_id](const auto& r) -> bool {
-        return r.payload.source == source_id && r.ready_cycle <= cycle_;
-    });
-    if (it != resp_queue_.end()) {
-        resp = *it;
-        resp_queue_.erase(it);
-        return true;
-    }
-    return false;
+auto TileLinkBus::try_get_timed_response(TlSourceId source_id, TimedResponse& resp) -> bool {
+    SmpLockGuard lock(bus_mutex_, machine_.configuration().execution.smp_multithreaded);
+    return consume_d_beat(source_id, true, resp);
 }
 
-void TileLinkBus::cancel_source(uint8_t source_id) {
-    SmpLockGuard lock(bus_mutex_, machine_.s_smp_multithreaded.load(std::memory_order_relaxed));
+void TileLinkBus::cancel_source(TlSourceId source_id) {
+    SmpLockGuard lock(bus_mutex_, machine_.configuration().execution.smp_multithreaded);
     std::erase_if(req_queue_, [source_id](const TimedRequest& request) {
         return request.payload.source == source_id;
     });
-    std::erase_if(resp_queue_, [source_id](const TimedResponse& response) {
+    std::erase_if(d_queue_, [source_id](const TimedDBeat& response) {
         return response.payload.source == source_id;
     });
+    d_assemblies_.erase(source_id);
+    protocol_checker_.cancel(source_id);
 }
 
-auto TileLinkBus::get_response(uint8_t source_id, TlChannelD& resp) -> bool {
-    SmpLockGuard lock(bus_mutex_, machine_.s_smp_multithreaded.load(std::memory_order_relaxed));
-    // IA deliberately remains functional and synchronous.  CA uses
-    // try_get_timed_response(), which honours ready_cycle exactly.
+auto TileLinkBus::get_response(TlSourceId source_id, TlChannelD& resp) -> bool {
+    SmpLockGuard lock(bus_mutex_, machine_.configuration().execution.smp_multithreaded);
+    // Functional engines use the transaction adapter and drain all constituent beats without
+    // advancing simulated time. Cycle engines consume at most one ready beat per call.
     const auto pop_response = [&]() -> bool {
-        auto response = std::ranges::find_if(resp_queue_, [source_id](const auto& item) {
-            return item.payload.source == source_id;
-        });
-        if (response == resp_queue_.end()) return false;
-        resp = response->payload;
-        resp_queue_.erase(response);
-        return true;
+        TimedResponse response{};
+        while (consume_d_beat(source_id, false, response)) {
+            resp = response.payload;
+            return true;
+        }
+        return false;
     };
     while (true) {
         if (pop_response()) return true;
+        if (std::ranges::any_of(d_queue_, [source_id](const auto& item) {
+                return item.payload.source == source_id;
+            })) {
+            continue;
+        }
         if (req_queue_.empty()) {
             break;
         }
@@ -216,6 +240,93 @@ auto TileLinkBus::get_response(uint8_t source_id, TlChannelD& resp) -> bool {
         process_request(request);
     }
     return false;
+}
+
+auto TileLinkBus::consume_d_beat(TlSourceId source_id, bool honor_ready, TimedResponse& response)
+    -> bool {
+    auto beat = std::ranges::find_if(d_queue_, [this, source_id, honor_ready](const auto& item) {
+        return item.payload.source == source_id && (!honor_ready || item.ready_cycle <= cycle_);
+    });
+    if (beat == d_queue_.end()) return false;
+
+    auto [assembly_it, inserted] = d_assemblies_.try_emplace(source_id);
+    auto& assembly = assembly_it->second;
+    if (inserted) {
+        assembly.response.payload = beat->payload;
+        assembly.response.ready_cycle = beat->ready_cycle;
+        assembly.response.sequence = beat->sequence;
+        assembly.response.has_line_data = beat->beat_count > 1;
+        assembly.beat_count = beat->beat_count;
+    }
+    const bool stable = beat->sequence == assembly.response.sequence &&
+                        beat->beat_count == assembly.beat_count &&
+                        beat->beat_index == assembly.next_beat &&
+                        beat->payload.opcode == assembly.response.payload.opcode &&
+                        beat->payload.cap == assembly.response.payload.cap &&
+                        beat->payload.size == assembly.response.payload.size &&
+                        beat->payload.source == assembly.response.payload.source &&
+                        beat->payload.sink == assembly.response.payload.sink &&
+                        beat->payload.denied == assembly.response.payload.denied &&
+                        beat->payload.corrupt == assembly.response.payload.corrupt;
+    if (!stable) {
+        assembly.response.payload.denied = true;
+        simrv::log::warn("TileLink-C D multibeat stability violation for source {}", source_id);
+    }
+    if (assembly.response.has_line_data && beat->beat_index < assembly.beat_count) {
+        std::memcpy(assembly.response.line_data.data() + beat->beat_index * kTlBeatBytes,
+                    &beat->payload.data, kTlBeatBytes);
+    } else {
+        assembly.response.payload.data = beat->payload.data;
+    }
+    ++assembly.next_beat;
+    d_queue_.erase(beat);
+
+    if (assembly.next_beat != assembly.beat_count) return false;
+    if (const auto valid = protocol_checker_.accept_d(assembly.response.payload); !valid) {
+        simrv::log::warn("TileLink-C response violation: {}", valid.error());
+        assembly.response.payload.denied = true;
+    }
+    response = assembly.response;
+    d_assemblies_.erase(assembly_it);
+    return true;
+}
+
+auto TileLinkBus::pending_responses() const noexcept -> size_t {
+    std::unordered_set<TlSourceId> transactions;
+    for (const auto& [source, unused] : d_assemblies_) {
+        (void)unused;
+        transactions.insert(source);
+    }
+    for (const auto& beat : d_queue_) {
+        transactions.insert(beat.payload.source);
+    }
+    return transactions.size();
+}
+
+auto TileLinkBus::acquire_block(const TlChannelA& req, TlChannelD& resp,
+                                std::array<Byte, CoherenceHub::kLineBytes>& line_data) -> bool {
+    SmpLockGuard lock(bus_mutex_, machine_.configuration().execution.smp_multithreaded);
+    if (const auto valid = protocol_checker_.accept_a(req); !valid) return false;
+    const bool handled = coherence_hub_.handle_acquire(req, resp, line_data);
+    if (!handled) {
+        protocol_checker_.cancel(req.source);
+        return false;
+    }
+    return protocol_checker_.accept_d(resp).has_value();
+}
+
+auto TileLinkBus::acquire_perm(const TlChannelA& req, TlChannelD& resp) -> bool {
+    std::array<Byte, CoherenceHub::kLineBytes> unused{};
+    return acquire_block(req, resp, unused);
+}
+
+void TileLinkBus::grant_ack(const TlChannelE& ack) {
+    SmpLockGuard lock(bus_mutex_, machine_.configuration().execution.smp_multithreaded);
+    if (const auto valid = protocol_checker_.accept_e(ack); !valid) {
+        simrv::log::warn("TileLink-C GrantAck violation: {}", valid.error());
+        return;
+    }
+    coherence_hub_.process_grant_ack(ack);
 }
 
 }  // namespace simrv::memory

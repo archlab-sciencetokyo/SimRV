@@ -6,7 +6,11 @@
 
 #include <array>
 #include <cstdint>
+#include <expected>
+#include <optional>
+#include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "simrv/Define.hpp"
@@ -21,9 +25,9 @@ class Machine;
 namespace simrv::memory {
 
 struct DirectoryEntry {
-    CoherenceState state = CoherenceState::None;
-    uint32_t sharers_mask = 0;
-    uint32_t owner_hart = 0;
+    MesiState state = MesiState::Invalid;
+    uint64_t sharers_mask = 0;
+    std::optional<HartId> owner_hart;
 };
 
 struct CoherenceStats {
@@ -49,6 +53,9 @@ class CoherenceHub {
 
     void process_grant_ack(const TlChannelE& ack);
 
+    /// Notify the directory when a Trunk holder performs its first write (E -> M).
+    void mark_modified(Address line_base, HartId hart);
+
     void invalidate_line_broadcast(Address line_base, uint32_t initiator_hart);
 
     /// Invalidate every cached copy before a coherent implicit/DMA memory write.
@@ -58,6 +65,7 @@ class CoherenceHub {
     void reset_stats() { stats_ = {}; }
 
     [[nodiscard]] auto get_directory_state(Address line_base) const -> DirectoryEntry;
+    [[nodiscard]] auto validate_directory() const -> std::expected<void, std::string>;
 
    private:
     struct FastCacheEntry {
@@ -72,6 +80,8 @@ class CoherenceHub {
     std::unordered_map<Address, DirectoryEntry> directory_;
     std::array<FastCacheEntry, kFastCacheEntries> fast_cache_{};
     CoherenceStats stats_{};
+    TlSinkId next_sink_ = 1;
+    std::unordered_set<TlSinkId> pending_grants_;
 
     void update_dir_entry(Address line_base, const DirectoryEntry& entry);
     void erase_dir_entry(Address line_base);
@@ -81,6 +91,7 @@ class CoherenceHub {
                            std::array<Byte, kLineBytes>& dirty_data);
 
     void probe_hart_icache(uint32_t hart_id, const TlChannelB& probe_req);
+    [[nodiscard]] auto allocate_sink() -> TlSinkId;
 };
 
 }  // namespace simrv::memory

@@ -114,7 +114,7 @@ auto MmioRouter::find_by_name(std::string_view name) const -> TileLinkNode* {
 auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool {
     TileLinkNode* device = resolve_device(req.address);
     if (device == nullptr) {
-        resp.error = true;
+        resp.denied = true;
         ++bus_error_count_;
         return false;
     }
@@ -124,7 +124,7 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
         (req.opcode == TlOpcodeA::PutFullData || req.opcode == TlOpcodeA::PutPartialData);
 
     if (!is_read && !is_write) {
-        resp.error = true;
+        resp.denied = true;
         ++bus_error_count_;
         return true;
     }
@@ -132,13 +132,13 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
     const Address request_bytes = static_cast<Address>(1u << (req.size & 0x3u));
     if (request_bytes - 1 > std::numeric_limits<Address>::max() - req.address ||
         !device->contains(req.address + request_bytes - 1)) {
-        resp.error = true;
+        resp.denied = true;
         ++bus_error_count_;
         return true;
     }
 
     if (is_write && device->is_read_only()) {
-        resp.error = true;
+        resp.denied = true;
         ++bus_error_count_;
         return true;
     }
@@ -146,7 +146,7 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
     // Alignment validation against device requirements
     const Address align = device->alignment();
     if (align > 1 && (req.address % align) != 0) {
-        resp.error = true;
+        resp.denied = true;
         ++bus_error_count_;
         return true;
     }
@@ -158,11 +158,11 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
         } else if (is_write) {
             ++mmio_write_count_;
         }
-        if (resp.error) {
+        if (resp.failed()) {
             ++bus_error_count_;
         }
     } else {
-        resp.error = true;
+        resp.denied = true;
         ++bus_error_count_;
     }
 

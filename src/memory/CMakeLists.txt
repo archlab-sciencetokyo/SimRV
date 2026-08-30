@@ -7,6 +7,7 @@ simrv_add_component(simrv-memory
   MmioDevice.cpp
   Mmu.cpp
   TileLinkBus.cpp
+  TileLinkProtocolChecker.cpp
   CoherenceHub.cpp
 )
 add_library(simrv::memory ALIAS simrv-memory)

@@ -7,6 +7,7 @@ add_library(simrv::foundation ALIAS simrv-foundation)
 simrv_add_component(simrv-core
   Machine.cpp
   MachineInit.cpp
+  PlatformBuilder.cpp
   StateControl.cpp
   CsrFile.cpp
   Tracer.cpp

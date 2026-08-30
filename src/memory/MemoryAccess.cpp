@@ -19,12 +19,31 @@
 
 namespace simrv::memory {
 
+namespace {
+template <typename Cache>
+void release_evicted_line(TileLinkBus& bus, Cache& cache, HartId hart, TlPort port) {
+    const auto evicted = cache.take_last_eviction();
+    if (!evicted.has_value()) return;
+    TlChannelC release{};
+    release.opcode =
+        evicted->state == MesiState::Modified ? TlOpcodeC::ReleaseData : TlOpcodeC::Release;
+    release.report = report_for(evicted->state, TlCap::ToN);
+    release.size = kTlBlockSize;
+    release.source = make_tl_source(hart, port);
+    release.hart = hart;
+    release.address = evicted->address;
+    TlChannelD acknowledgement{};
+    const auto* data = evicted->state == MesiState::Modified ? &evicted->data : nullptr;
+    (void)bus.release_line(release, acknowledgement, data);
+}
+}  // namespace
+
 using simrv::isa::Funct3;
 using simrv::isa::Funct5Amo;
 using simrv::isa::Opcode;
 
 auto MemorySubsystem::memory_geometry() const noexcept -> const simrv::core::MemoryGeometry& {
-    return machine_.config.memory;
+    return machine_.configuration().memory;
 }
 
 auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_addr,
@@ -143,7 +162,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                     return 0;
                 }
                 transfer.reset();
-                if (simrv::compiler::unlikely(timed.payload.error)) {
+                if (simrv::compiler::unlikely(timed.payload.failed())) {
                     cpu.active_context().pending_exception = ExceptionCode::FaultLoad;
                     cpu.active_context().pending_tval = v_addr;
                     return 0;
@@ -179,7 +198,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
 
             TlChannelD resp{};
             if (mem.system_bus().get_response(req.source, resp)) {
-                if (simrv::compiler::unlikely(resp.error)) {
+                if (simrv::compiler::unlikely(resp.failed())) {
                     cpu.active_context().pending_exception = ExceptionCode::FaultLoad;
                     cpu.active_context().pending_tval = v_addr;
                 }
@@ -218,13 +237,14 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             }
             const Address completed_line = transfer.address;
             transfer.reset();
-            if (timed.payload.error || !timed.has_line_data) {
+            if (timed.payload.failed() || !timed.has_line_data) {
                 cpu.active_context().pending_exception = ExceptionCode::FaultLoad;
                 cpu.active_context().pending_tval = v_addr;
                 return 0;
             }
-            const auto granted = static_cast<CoherenceState>(timed.payload.param);
-            cpu.dcache.insert(completed_line, timed.line_data.data(), granted, false);
+            cpu.dcache.insert(completed_line, timed.line_data.data(), mesi_for(timed.payload.cap));
+            release_evicted_line(mem.system_bus(), cpu.dcache,
+                                 static_cast<HartId>(cpu.state().mhartid), TlPort::Data);
             TlChannelE ack{};
             ack.sink = timed.payload.sink;
             mem.system_bus().grant_ack(ack);
@@ -241,7 +261,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
 
         TlChannelA req{};
         req.opcode = TlOpcodeA::AcquireBlock;
-        req.param = static_cast<uint8_t>(CoherenceState::Branch);
+        req.grow = TlGrow::NtoB;
         req.size = simrv::cache::DCache::kLineShift;
         req.hart = static_cast<HartId>(cpu.state().mhartid);
         req.source = make_tl_source(req.hart, TlPort::Data);
@@ -260,7 +280,9 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
 
         TlChannelD resp{};
         if (mem.system_bus().acquire_block(req, resp, line_data)) {
-            cpu.dcache.insert(line_base, line_data.data(), CoherenceState::Branch, false);
+            cpu.dcache.insert(line_base, line_data.data(), mesi_for(resp.cap));
+            release_evicted_line(mem.system_bus(), cpu.dcache,
+                                 static_cast<HartId>(cpu.state().mhartid), TlPort::Data);
             TlChannelE ack{};
             ack.sink = resp.sink;
             mem.system_bus().grant_ack(ack);
@@ -408,12 +430,14 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             }
             const Address completed_line = transfer.address;
             transfer.reset();
-            if (timed.payload.error || !timed.has_line_data) {
+            if (timed.payload.failed() || !timed.has_line_data) {
                 cpu.active_context().pending_exception = ExceptionCode::FaultStore;
                 cpu.active_context().pending_tval = v_addr;
                 return;
             }
-            cpu.dcache.insert(completed_line, timed.line_data.data(), CoherenceState::Trunk, true);
+            cpu.dcache.insert(completed_line, timed.line_data.data(), mesi_for(timed.payload.cap));
+            release_evicted_line(mem.system_bus(), cpu.dcache,
+                                 static_cast<HartId>(cpu.state().mhartid), TlPort::Data);
             TlChannelE ack{};
             ack.sink = timed.payload.sink;
             mem.system_bus().grant_ack(ack);
@@ -423,14 +447,15 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
                                             funct3 == static_cast<Instruction>(Funct3::Sd))
                                          : (funct3 == static_cast<Instruction>(Funct3::Sw));
         if (simrv::compiler::unlikely(is_tohost_write)) {
-            if (addr == cpu.machine_->s_isatest_tohost || addr == 0x80001000 ||
+            if (addr == cpu.machine_->configuration().isa.isatest_tohost || addr == 0x80001000 ||
                 addr == 0x40008000) {
                 cpu.machine_->tohost =
                     simrv::xlen::kIsXLen64
                         ? data
                         : ((cpu.machine_->tohost & 0xFFFFFFFF00000000ULL) | data);
-            } else if (!simrv::xlen::kIsXLen64 && (addr == cpu.machine_->s_isatest_tohost + 4 ||
-                                                   addr == 0x80001004 || addr == 0x40008004)) {
+            } else if (!simrv::xlen::kIsXLen64 &&
+                       (addr == cpu.machine_->configuration().isa.isatest_tohost + 4 ||
+                        addr == 0x80001004 || addr == 0x40008004)) {
                 cpu.machine_->tohost = (cpu.machine_->tohost & 0x00000000FFFFFFFFULL) |
                                        (static_cast<uint64_t>(data) << 32);
             }
@@ -441,14 +466,15 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             return;
         }
         if (geometry.contains(addr, size_bytes)) {
-            if (!cpu.dcache.write(addr, data, funct3)) {
+            bool cache_write_completed = cpu.dcache.write(addr, data, funct3);
+            if (!cache_write_completed) {
                 // Not in Trunk state; acquire Trunk ownership via TL-C
                 const Address line_base =
                     addr & ~(static_cast<Address>(simrv::cache::DCache::kLineBytes - 1u));
                 std::array<Byte, simrv::cache::DCache::kLineBytes> line_data{};
                 TlChannelA req{};
                 req.opcode = TlOpcodeA::AcquireBlock;
-                req.param = static_cast<uint8_t>(CoherenceState::Trunk);
+                req.grow = TlGrow::NtoT;
                 req.size = simrv::cache::DCache::kLineShift;
                 req.hart = static_cast<HartId>(cpu.state().mhartid);
                 req.source = make_tl_source(req.hart, TlPort::Data);
@@ -467,12 +493,18 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
 
                 TlChannelD resp{};
                 if (mem.system_bus().acquire_block(req, resp, line_data)) {
-                    cpu.dcache.insert(line_base, line_data.data(), CoherenceState::Trunk, true);
+                    cpu.dcache.insert(line_base, line_data.data(), mesi_for(resp.cap));
+                    release_evicted_line(mem.system_bus(), cpu.dcache,
+                                         static_cast<HartId>(cpu.state().mhartid), TlPort::Data);
                     TlChannelE ack{};
                     ack.sink = resp.sink;
                     mem.system_bus().grant_ack(ack);
-                    (void)cpu.dcache.write(addr, data, funct3);
+                    cache_write_completed = cpu.dcache.write(addr, data, funct3);
                 }
+            }
+            if (cache_write_completed) {
+                mem.system_bus().coherence_hub().mark_modified(
+                    addr, static_cast<HartId>(cpu.state().mhartid));
             }
             simrv::memory::ram_write_fast(addr, data, funct3, cpu.machine_->ram_view());
             return;
@@ -495,7 +527,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
                 return;
             }
             transfer.reset();
-            if (simrv::compiler::unlikely(timed.payload.error)) {
+            if (simrv::compiler::unlikely(timed.payload.failed())) {
                 cpu.active_context().pending_exception = ExceptionCode::FaultStore;
                 cpu.active_context().pending_tval = v_addr;
             }
@@ -510,7 +542,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
 
         TlChannelD resp{};
         if (mem.system_bus().get_response(req.source, resp)) {
-            if (simrv::compiler::unlikely(resp.error)) {
+            if (simrv::compiler::unlikely(resp.failed())) {
                 cpu.active_context().pending_exception = ExceptionCode::FaultStore;
                 cpu.active_context().pending_tval = v_addr;
             }
