@@ -198,16 +198,21 @@ auto StatusBar::get_header_action_at_col(int col, int terminal_width) const -> H
         return col >= start && col <= end;
     };
 
-    std::string const mode_label = panel_mode_label(right_panel_mode_, inner_w / 2, trace_enabled_);
-    if (hit_badge(mode_label)) return {.action = HeaderAction::TogglePanelMode};
-
-    if (right_panel_mode_ == TuiRightPanelMode::Terminal) {
-        const bool attached =
-            machine_.tui_controller() && machine_.tui_controller()->is_terminal_attached();
-        std::string const focus_label =
-            inner_w < 60 ? (attached ? "ON" : "ATTACHED") : (attached ? "ATTACHED" : "DETACHED");
-        if (hit_badge(focus_label)) return {.action = HeaderAction::ToggleAttached};
+    std::string focus_label;
+    if (machine_.tui_controller()) {
+        size_t const focused_slot = machine_.tui_controller()->focused_slot();
+        const auto& slots = machine_.tui_controller()->get_workbench_slots();
+        TuiRegPage const page = machine_.tui_controller()->focused_page();
+        const char* page_name = get_page_name(page);
+        if (inner_w < 70) {
+            focus_label = std::format("P{}: {}", focused_slot + 1, page_name);
+        } else if (slots.size() > 1) {
+            focus_label = std::format("PANE {}/{}: {}", focused_slot + 1, slots.size(), page_name);
+        } else {
+            focus_label = std::format("PANE: {}", page_name);
+        }
     }
+    if (hit_badge(focus_label)) return {.action = HeaderAction::ToggleAttached};
 
     if (machine_.num_harts() > 1) {
         std::string const hart_label = std::format("HART {}/{}", selected, machine_.num_harts());
@@ -694,31 +699,25 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         }
         left_info += "   " + status_badge;
 
-        // Build Right Mode Prefix & Metrics
-        std::string mode_prefix;
-        switch (right_panel_mode_) {
-            case TuiRightPanelMode::Terminal: {
-                const bool term_focused =
-                    machine_.tui_controller() && machine_.tui_controller()->is_terminal_attached();
-                std::string const term_title =
-                    panel_mode_label(right_panel_mode_, inner_w / 2, trace_enabled_);
-                std::string const mode_badge =
-                    header_badge(term_title, "\033[46;30m", "\033[48;5;117;38;5;232m");
-                std::string const focus_badge =
-                    term_focused ? header_badge(inner_w < 60 ? "ON" : "ATTACHED", "\033[42;30m",
-                                                "\033[48;5;121;38;5;232m")
-                                 : header_badge(inner_w < 60 ? "OFF" : "DETACHED", "\033[47;30m",
-                                                "\033[48;5;245;38;5;232m");
-                mode_prefix = " " + mode_badge + " " + focus_badge;
-                break;
+        // Build Focused Panel Badge (replacing attached/detached)
+        std::string focus_label;
+        if (machine_.tui_controller()) {
+            size_t const focused_slot = machine_.tui_controller()->focused_slot();
+            const auto& slots = machine_.tui_controller()->get_workbench_slots();
+            TuiRegPage const page = machine_.tui_controller()->focused_page();
+            const char* page_name = get_page_name(page);
+            if (inner_w < 70) {
+                focus_label = std::format("P{}: {}", focused_slot + 1, page_name);
+            } else if (slots.size() > 1) {
+                focus_label =
+                    std::format("PANE {}/{}: {}", focused_slot + 1, slots.size(), page_name);
+            } else {
+                focus_label = std::format("PANE: {}", page_name);
             }
-            case TuiRightPanelMode::Display:
-            default:
-                mode_prefix = " " + header_badge(panel_mode_label(right_panel_mode_, inner_w / 2,
-                                                                  trace_enabled_),
-                                                 "\033[46;30m", "\033[48;5;117;38;5;232m");
-                break;
         }
+        std::string const focus_badge =
+            header_badge(focus_label, "\033[44;37m", "\033[48;5;69;38;5;231m");
+        std::string mode_prefix = " " + focus_badge;
 
         if (machine_.num_harts() > 1) {
             std::string const hart_label =

@@ -921,7 +921,7 @@ void Tui::handle_mouse(int x, int y, int b) {
                     cycle_right_panel_mode();
                     break;
                 case HeaderAction::ToggleAttached:
-                    toggle_run_state();
+                    focus_next_slot();
                     break;
                 case HeaderAction::SelectHart:
                     select_next_hart();
