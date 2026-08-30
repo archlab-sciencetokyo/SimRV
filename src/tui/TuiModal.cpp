@@ -51,7 +51,7 @@ constexpr int kGeneralSettingsContentRows = 30;
 
 TuiModal::TuiModal(simrv::core::Machine& machine) : machine_(machine) {}
 
-void TuiModal::open(ModalType type, InspectorPane* left_pane, uint64_t step_delay_us) {
+void TuiModal::open(ModalType type, InspectorPane* inspector_pane, uint64_t step_delay_us) {
     active_modal_ = type;
     rendered_box_width_ = 0;
     input_.clear();
@@ -59,13 +59,13 @@ void TuiModal::open(ModalType type, InspectorPane* left_pane, uint64_t step_dela
     switch (type) {
         case ModalType::SetBreakpoint:
         case ModalType::SetWatchpoint:
-            modals::BreakpointModal::open(type, input_, machine_, left_pane);
+            modals::BreakpointModal::open(type, input_, machine_, inspector_pane);
             break;
         case ModalType::SetSpeed:
             modals::StepModal::open(type, input_, step_delay_us);
             break;
         case ModalType::InspectAddress:
-            modals::AddressModal::open(input_, left_pane);
+            modals::AddressModal::open(input_, inspector_pane);
             break;
         case ModalType::LoadBinary:
         case ModalType::LoadDiskImage:
@@ -199,7 +199,7 @@ void TuiModal::close() {
     input_.clear();
 }
 
-auto TuiModal::submit(InspectorPane* left_pane, std::atomic<uint64_t>& step_delay_us,
+auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step_delay_us,
                       const std::function<void(TuiRegPage)>& set_reg_page_cb,
                       const std::function<void(const std::string&)>& set_status_override_cb,
                       const std::function<void()>& on_speed_changed_cb) -> bool {
@@ -231,7 +231,7 @@ auto TuiModal::submit(InspectorPane* left_pane, std::atomic<uint64_t>& step_dela
         case ModalType::InspectAddress: {
             std::string addr_msg;
             auto addr_cb = [&](const std::string& msg) { addr_msg = msg; };
-            result = modals::AddressModal::submit(input_, machine_, left_pane, addr_cb);
+            result = modals::AddressModal::submit(input_, machine_, inspector_pane, addr_cb);
             if (result && set_reg_page_cb) {
                 set_reg_page_cb(TuiRegPage::STACK);
             }
@@ -641,10 +641,9 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                 (machine_.platform_profile() == simrv::core::PlatformProfile::Pcie)
                     ? "PCIe (PCIe 1.2 + ECAM)"
                     : "MMIO (VirtIO-MMIO v2)";
-            const char* new_prof =
-                (pending_platform_draft_.platform_profile == 0)
-                    ? "PCIe (PCIe 1.2 + ECAM)"
-                    : "MMIO (VirtIO-MMIO v2)";
+            const char* new_prof = (pending_platform_draft_.platform_profile == 0)
+                                       ? "PCIe (PCIe 1.2 + ECAM)"
+                                       : "MMIO (VirtIO-MMIO v2)";
             add_row(std::format("  {}Platform profile changed:\033[0m", kThemeText));
             add_row(std::format("    {}Current:\033[0m \033[1;36m{}\033[0m", kThemeText, cur_prof));
             add_row(std::format("    {}Target :\033[0m \033[1;32m{}\033[0m", kThemeText, new_prof));

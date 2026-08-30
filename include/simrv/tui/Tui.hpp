@@ -125,7 +125,7 @@ class Tui {
         if (!is_paused()) {
             pause_loop();
         }
-        modal_.open(type, left_pane_.get(), step_delay_us_.load(std::memory_order_relaxed));
+        modal_.open(type, inspector_pane_.get(), step_delay_us_.load(std::memory_order_relaxed));
         set_paused(true);
         render(true);
     }
@@ -135,7 +135,7 @@ class Tui {
     }
     void submit_modal() {
         modal_.submit(
-            left_pane_.get(), step_delay_us_, [this](TuiRegPage page) { set_reg_page(page); },
+            inspector_pane_.get(), step_delay_us_, [this](TuiRegPage page) { set_reg_page(page); },
             [this](const std::string& status) { set_status_override(status); },
             [this]() { reset_speed_history(); });
         render(true);
@@ -190,15 +190,15 @@ class Tui {
     }
     void scroll(int lines);
     void reset_scroll();
-    void scroll_regs(int lines);
-    void reset_scroll_regs();
+    void scroll_inspector(int lines);
+    void reset_scroll_inspector();
     [[nodiscard]] auto get_scroll_offset() const -> int { return scroll_offset_; }
     [[nodiscard]] auto get_right_panel_mode() const -> TuiRightPanelMode {
         return right_panel_mode_.load(std::memory_order_relaxed);
     }
     [[nodiscard]] auto get_pane_width() const -> int { return pane_width_cached_; }
     [[nodiscard]] auto get_layout() const -> TuiLayout { return layout_; }
-    void adjust_left_pane_width(int delta);
+    void adjust_inspector_width(int delta);
 
     /// Toggle the unified run/terminal-attachment state.
     void toggle_run_state();
@@ -231,16 +231,16 @@ class Tui {
     void write_guest_input(uint8_t byte);
     TuiModal modal_;
 
-    std::unique_ptr<InspectorPane> left_pane_;
-    std::unique_ptr<TerminalPane> right_pane_;
+    std::unique_ptr<InspectorPane> inspector_pane_;
+    std::unique_ptr<TerminalPane> terminal_pane_;
     std::unique_ptr<StatusBar> status_bar_;
 
     int pane_width_cached_ = 62;
     int cached_num_rows_ = 20;
-    [[nodiscard]] auto get_right_pane_start_line(int num_rows) const -> int;
+    [[nodiscard]] auto get_terminal_pane_start_line(int num_rows) const -> int;
     [[nodiscard]] auto is_sixel_supported() const -> bool { return sixel_supported_; }
 
-    int user_left_pane_width_{-1};
+    int user_inspector_width_{-1};
     int cell_width_px_ = 8;
     int cell_height_px_ = 16;
     bool sixel_supported_{false};
@@ -258,18 +258,18 @@ class Tui {
     std::atomic<bool> trace_enabled_{false};
     bool learn_mode_enabled_{false};
     std::vector<WorkbenchSlot> workbench_slots_{{TuiRegPage::GPR, 0}, {TuiRegPage::DISASM, 0}};
-    size_t focused_slot_index_{0};
+    size_t focused_slot_index_ = 0;
+    size_t selected_hart_ = 0;
     TuiLayout layout_ = TuiLayout::Split;
     std::atomic<TuiRightPanelMode> right_panel_mode_{TuiRightPanelMode::Terminal};
+    std::atomic<uint64_t> current_instruction_count_{0};
     std::atomic<bool> trace_or_livetrace_active_{false};
+    bool render_in_progress_{false};
     std::string status_override_;
     std::chrono::steady_clock::time_point status_override_expires_at_{};
     int scroll_offset_{0};
-    size_t selected_hart_{0};
     SelectionState selection_;
-
-    // Performance tracking
-    std::chrono::steady_clock::time_point last_speed_update_;
+    std::chrono::steady_clock::time_point last_speed_update_{std::chrono::steady_clock::now()};
     uint64_t last_icount_ = 0;
     uint64_t speed_ips_ = 0;
     uint64_t kips_ = 0;
@@ -333,14 +333,14 @@ class Tui {
     auto handle_debug_keyboard_input(TuiKey key) -> bool;
     bool handle_speed_keyboard_input(TuiKey key);
     bool handle_navigation_keyboard_input(uint8_t byte, TuiKey key);
-    auto handle_mouse_left_pane(int x, int y, int b) -> void;
+    auto handle_mouse_inspector(int x, int y, int b) -> void;
     void format_trace_inst(const TraceRecord& rec, const std::string& op_name, bool rd_fp,
                            bool rs1_fp, bool rs2_fp, std::string& inst_str,
                            std::string& side_effect);
     void render_update_speed(std::chrono::steady_clock::time_point now);
-    void render_build_lines(int left_pane_width, int right_pane_width, int num_rows,
+    void render_build_lines(int inspector_width, int terminal_width, int num_rows,
                             TuiRightPanelMode panel_mode);
-    void render_draw_sixel(int left_pane_width, int right_pane_width, int num_rows,
+    void render_draw_sixel(int inspector_width, int terminal_width, int num_rows,
                            std::string& update_cmds);
     void init_terminal_raw_mode();
     void detect_terminal_sixel_support(const std::string& resp);

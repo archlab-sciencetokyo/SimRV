@@ -161,8 +161,8 @@ void Tui::set_paused(bool p) {
 }
 
 void Tui::initialize() {
-    left_pane_ = std::make_unique<InspectorPane>(machine_);
-    right_pane_ = std::make_unique<TerminalPane>();
+    inspector_pane_ = std::make_unique<InspectorPane>(machine_);
+    terminal_pane_ = std::make_unique<TerminalPane>();
     status_bar_ = std::make_unique<StatusBar>(machine_);
 
     set_tui_theme(get_tui_theme());
@@ -173,7 +173,7 @@ void Tui::initialize() {
         machine_.hart(h).pipeline_sim.config.record_snapshots = true;
     }
 
-    left_pane_->update_cache();
+    inspector_pane_->update_cache();
 
     if (!g_termios_saved) {
         tcgetattr(STDIN_FILENO, &g_saved_termios);
@@ -453,28 +453,28 @@ void Tui::render_update_speed(std::chrono::steady_clock::time_point now) {
     }
 }
 
-auto Tui::get_right_pane_start_line(int num_rows) const -> int {
+auto Tui::get_terminal_pane_start_line(int num_rows) const -> int {
     int total_lines =
         vt_.get_scrollback_size() + vt_.get_cursor_y() + (vt_.get_cursor_x() > 0 ? 1 : 0);
     int end_exclusive = std::max(0, total_lines - scroll_offset_);
     return std::max(0, end_exclusive - num_rows);
 }
 
-void Tui::render_build_lines(int left_pane_width, int right_pane_width, int num_rows,
+void Tui::render_build_lines(int inspector_width, int terminal_width, int num_rows,
                              TuiRightPanelMode panel_mode) {
     if (!status_override_.empty() &&
         status_override_expires_at_ != std::chrono::steady_clock::time_point::max() &&
         std::chrono::steady_clock::now() >= status_override_expires_at_) {
         clear_status_override();
     }
-    if (!left_pane_ || !right_pane_ || !status_bar_) return;
+    if (!inspector_pane_ || !terminal_pane_ || !status_bar_) return;
     cached_num_rows_ = num_rows;
     lines_to_draw_.clear();
-    if (right_pane_width > 0 && num_rows > 0) {
+    if (terminal_width > 0 && num_rows > 0) {
         if (panel_mode == TuiRightPanelMode::Terminal) {
-            vt_.resize(right_pane_width, num_rows);
+            vt_.resize(terminal_width, num_rows);
             int total = vt_.get_lines_count();
-            int start = get_right_pane_start_line(num_rows);
+            int start = get_terminal_pane_start_line(num_rows);
             int end_exclusive = std::min(total, start + num_rows);
             int cursor_abs_line = vt_.get_scrollback_size() + vt_.get_cursor_y();
             bool is_live = (scroll_offset_ == 0);
@@ -485,7 +485,7 @@ void Tui::render_build_lines(int left_pane_width, int right_pane_width, int num_
             const uint64_t terminal_generation = vt_.generation();
             const bool reuse_terminal_rows =
                 !selection_.is_active && terminal_rows_generation_ == terminal_generation &&
-                terminal_rows_width_ == right_pane_width && terminal_rows_count_ == num_rows &&
+                terminal_rows_width_ == terminal_width && terminal_rows_count_ == num_rows &&
                 terminal_rows_start_ == start;
             if (reuse_terminal_rows) {
                 lines_to_draw_ = terminal_rows_cache_;
@@ -510,69 +510,69 @@ void Tui::render_build_lines(int left_pane_width, int right_pane_width, int num_
                                 sel_end_x = sx2;
                             } else if (i == vt_sel_start) {
                                 sel_start_x = sx1;
-                                sel_end_x = right_pane_width - 1;
+                                sel_end_x = terminal_width - 1;
                             } else if (i == vt_sel_end) {
                                 sel_start_x = 0;
                                 sel_end_x = sx2;
                             } else {
                                 sel_start_x = 0;
-                                sel_end_x = right_pane_width - 1;
+                                sel_end_x = terminal_width - 1;
                             }
                         }
                     }
-                    lines_to_draw_.push_back(vt_.get_line_as_string(
-                        i, right_pane_width, draw_cursor, sel_start_x, sel_end_x));
+                    lines_to_draw_.push_back(vt_.get_line_as_string(i, terminal_width, draw_cursor,
+                                                                    sel_start_x, sel_end_x));
                 }
                 if (!selection_.is_active) {
                     terminal_rows_cache_ = lines_to_draw_;
                     terminal_rows_generation_ = terminal_generation;
-                    terminal_rows_width_ = right_pane_width;
+                    terminal_rows_width_ = terminal_width;
                     terminal_rows_count_ = num_rows;
                     terminal_rows_start_ = start;
                 }
             }
         } else if (panel_mode == TuiRightPanelMode::Display) {
             for (int i = 0; i < num_rows; ++i)
-                lines_to_draw_.emplace_back(static_cast<size_t>(right_pane_width), ' ');
+                lines_to_draw_.emplace_back(static_cast<size_t>(terminal_width), ' ');
         }
         while (lines_to_draw_.size() < static_cast<std::size_t>(num_rows)) {
-            lines_to_draw_.emplace_back(static_cast<std::size_t>(right_pane_width), ' ');
+            lines_to_draw_.emplace_back(static_cast<std::size_t>(terminal_width), ' ');
         }
     }
 
-    int const log_width = std::max(10, left_pane_width - 2);
+    int const log_width = std::max(10, inspector_width - 2);
     std::vector<std::string> log_lines = log_buffer_.get_wrapped_lines(log_width, 100);
 
-    left_pane_->set_selected_hart(selected_hart_);
-    left_pane_->set_kips(kips_);
-    left_pane_->set_max_kips(max_kips_);
-    left_pane_->set_kips_history(kips_history_);
-    left_pane_->set_paused(paused_);
-    left_pane_->set_learn_enabled(learn_mode_enabled_);
-    left_pane_->set_visible_rows(num_rows);
-    left_pane_->set_active_runtime(static_cast<double>(runtime_duration_.count()) / 1000000.0);
-    left_pane_->set_trace_buffer(&trace_buffer_);
-    left_pane_->set_log_lines(std::move(log_lines));
-    right_pane_->set_lines(lines_to_draw_);
-    right_pane_->set_scroll_offset(scroll_offset_);
+    inspector_pane_->set_selected_hart(selected_hart_);
+    inspector_pane_->set_kips(kips_);
+    inspector_pane_->set_max_kips(max_kips_);
+    inspector_pane_->set_kips_history(kips_history_);
+    inspector_pane_->set_paused(paused_);
+    inspector_pane_->set_learn_enabled(learn_mode_enabled_);
+    inspector_pane_->set_visible_rows(num_rows);
+    inspector_pane_->set_active_runtime(static_cast<double>(runtime_duration_.count()) / 1000000.0);
+    inspector_pane_->set_trace_buffer(&trace_buffer_);
+    inspector_pane_->set_log_lines(std::move(log_lines));
+    terminal_pane_->set_lines(lines_to_draw_);
+    terminal_pane_->set_scroll_offset(scroll_offset_);
 
     status_bar_->set_paused(paused_);
     status_bar_->set_status_override(status_override_);
     status_bar_->update_kips(kips_);
     status_bar_->set_layout(layout_);
-    status_bar_->set_active_page(left_pane_->get_page());
+    status_bar_->set_active_page(inspector_pane_->get_page());
     status_bar_->set_scroll_offset(scroll_offset_);
-    status_bar_->set_pane_widths(left_pane_width, right_pane_width);
+    status_bar_->set_pane_widths(inspector_width, terminal_width);
     status_bar_->set_right_panel_mode(panel_mode);
     status_bar_->set_trace_enabled(trace_enabled_.load(std::memory_order_relaxed));
 }
 
-void Tui::render_draw_sixel(int left_pane_width, int right_pane_width, int num_rows,
+void Tui::render_draw_sixel(int inspector_width, int terminal_width, int num_rows,
                             std::string& update_cmds) {
-    (void)right_pane_width;
+    (void)terminal_width;
     if (!modal_.is_active()) {
         for (int i = 0; i < num_rows; ++i) {
-            std::string left = left_pane_->render_row(i, left_pane_width);
+            std::string left = inspector_pane_->render_row(i, inspector_width);
             if (selection_.is_active && selection_.pane == SelectionPane::InspectorPane) {
                 int sy1 = selection_.start_y - 4;
                 int sy2 = selection_.end_y - 4;
@@ -619,7 +619,7 @@ void Tui::render(bool force) {
         local_log.pop();
     }
 
-    if (!left_pane_ || !right_pane_ || !status_bar_) return;
+    if (!inspector_pane_ || !terminal_pane_ || !status_bar_) return;
 
     TuiRightPanelMode const panel_mode = right_panel_mode_.load(std::memory_order_relaxed);
     auto now = std::chrono::steady_clock::now();
@@ -655,23 +655,23 @@ void Tui::render(bool force) {
     int const term_width = cached_term_width_;
     int const term_height = cached_term_height_;
     const FrameGeometry frame =
-        calculate_frame_geometry(term_width, term_height, layout_, user_left_pane_width_);
+        calculate_frame_geometry(term_width, term_height, layout_, user_inspector_width_);
     if (!frame.renderable) return;
 
     render_update_speed(now);
 
-    const int left_pane_width = frame.panes.left;
-    const int right_pane_width = frame.panes.right;
-    pane_width_cached_ = left_pane_width;
+    const int inspector_width = frame.panes.left;
+    const int terminal_width = frame.panes.right;
+    pane_width_cached_ = inspector_width;
 
     const int num_rows = frame.content_rows;
     int total = (panel_mode == TuiRightPanelMode::Terminal) ? vt_.get_lines_count() : 0;
     scroll_offset_ = std::min(scroll_offset_, std::max(0, total - num_rows));
 
-    render_build_lines(left_pane_width, right_pane_width, num_rows, panel_mode);
+    render_build_lines(inspector_width, terminal_width, num_rows, panel_mode);
     lock.unlock();
 
-    auto col_widths = framework::multi_column_widths(term_width, layout_, user_left_pane_width_);
+    auto col_widths = framework::multi_column_widths(term_width, layout_, user_inspector_width_);
     if (workbench_slots_.size() != col_widths.count && col_widths.count > 0) {
         sync_workbench_slots();
     }
@@ -683,10 +683,10 @@ void Tui::render(bool force) {
             if (col_idx < workbench_slots_.size()) {
                 const auto page = workbench_slots_[col_idx].page;
                 if (page == TuiRegPage::DISASM) {
-                    return right_pane_->render_row(row, width);
+                    return terminal_pane_->render_row(row, width);
                 }
-                left_pane_->set_page(page);
-                return left_pane_->render_row(row, width);
+                inspector_pane_->set_page(page);
+                return inspector_pane_->render_row(row, width);
             }
             return "";
         });
@@ -714,14 +714,14 @@ void Tui::render(bool force) {
 
     if (sixel_supported_ && panel_mode == TuiRightPanelMode::Display &&
         layout_ == TuiLayout::Split) {
-        render_draw_sixel(left_pane_width, right_pane_width, num_rows, update_cmds);
+        render_draw_sixel(inspector_width, terminal_width, num_rows, update_cmds);
         update_cmds += std::format("\033[{};1H", term_height);
     }
 
     write_all(STDOUT_FILENO, update_cmds);
 }
 
-void Tui::handle_mouse_left_pane(int x, int y, int b) {
+void Tui::handle_mouse_inspector(int x, int y, int b) {
     constexpr int kLogAreaHeight = 6;
     winsize w{};
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
@@ -729,92 +729,92 @@ void Tui::handle_mouse_left_pane(int x, int y, int b) {
     int const num_rows = std::max(1, term_height - 5);
     int const log_start_y = 4 + (num_rows - kLogAreaHeight);
     bool const has_log_area =
-        (left_pane_ && num_rows >= 15 && left_pane_->get_page() != TuiRegPage::EXPLAIN &&
-         left_pane_->get_page() != TuiRegPage::TRACE);
+        (inspector_pane_ && num_rows >= 15 && inspector_pane_->get_page() != TuiRegPage::EXPLAIN &&
+         inspector_pane_->get_page() != TuiRegPage::TRACE);
 
     if (b == 0) {
         if (has_log_area && y == log_start_y) {
-            left_pane_->reset_log_scroll();
+            inspector_pane_->reset_log_scroll();
             render(true);
             return;
         }
         if (y == 4) {
             int const col = x - 2;
             if (col < 0) return;
-            auto tab = left_pane_->get_tab_at(0, col);
+            auto tab = inspector_pane_->get_tab_at(0, col);
             if (tab.has_value()) {
                 set_reg_page(*tab);
             }
         } else if (y == 5) {
             int const col = x - 2;
             if (col < 0) return;
-            auto tab = left_pane_->get_tab_at(1, col);
+            auto tab = inspector_pane_->get_tab_at(1, col);
             if (tab.has_value()) {
-                if (*tab == TuiRegPage::CACHE && left_pane_->get_page() == TuiRegPage::CACHE) {
-                    left_pane_->toggle_cache_inspect_type();
+                if (*tab == TuiRegPage::CACHE && inspector_pane_->get_page() == TuiRegPage::CACHE) {
+                    inspector_pane_->toggle_cache_inspect_type();
                     render(true);
                     return;
                 }
-                left_pane_->set_previous_page(left_pane_->get_page());
+                inspector_pane_->set_previous_page(inspector_pane_->get_page());
                 set_reg_page(*tab);
             }
         } else if (y >= 6) {
             if (has_log_area && y >= log_start_y) {
                 return;
             }
-            int logical_row = (y - 6) + left_pane_->get_scroll_offset();
-            auto page = left_pane_->get_page();
+            int logical_row = (y - 6) + inspector_pane_->get_scroll_offset();
+            auto page = inspector_pane_->get_page();
             if (page == TuiRegPage::CACHE) {
                 if (logical_row == 0 || logical_row == 4) {
-                    left_pane_->toggle_cache_inspect_type();
+                    inspector_pane_->toggle_cache_inspect_type();
                     render(true);
                 }
             } else if (page == TuiRegPage::PIPELINE) {
-                Register clicked_pc = left_pane_->get_pipeline_pc_at_row(logical_row);
+                Register clicked_pc = inspector_pane_->get_pipeline_pc_at_row(logical_row);
                 if (clicked_pc != 0) {
-                    left_pane_->set_previous_page(TuiRegPage::PIPELINE);
-                    left_pane_->set_explain_pc(clicked_pc);
+                    inspector_pane_->set_previous_page(TuiRegPage::PIPELINE);
+                    inspector_pane_->set_explain_pc(clicked_pc);
                     set_reg_page(TuiRegPage::EXPLAIN);
                 }
             } else if (page == TuiRegPage::EXPLAIN) {
                 if (logical_row <= 1) {
-                    auto prev = left_pane_->get_previous_page();
+                    auto prev = inspector_pane_->get_previous_page();
                     if (prev.has_value()) set_reg_page(*prev);
                 }
             } else if (page == TuiRegPage::GPR || page == TuiRegPage::FPR) {
                 auto reg_val =
-                    left_pane_->get_register_value_at_row(logical_row, x, pane_width_cached_);
+                    inspector_pane_->get_register_value_at_row(logical_row, x, pane_width_cached_);
                 if (reg_val.has_value()) {
-                    left_pane_->set_inspect_addr(*reg_val);
+                    inspector_pane_->set_inspect_addr(*reg_val);
                     open_modal(ModalType::InspectAddress);
                 }
             } else if (page == TuiRegPage::STACK) {
-                auto stack_addr = left_pane_->get_stack_addr_at_row(logical_row);
+                auto stack_addr = inspector_pane_->get_stack_addr_at_row(logical_row);
                 if (stack_addr.has_value()) {
-                    left_pane_->set_inspect_addr(*stack_addr);
+                    inspector_pane_->set_inspect_addr(*stack_addr);
                     open_modal(ModalType::InspectAddress);
                 }
             }
         }
-    } else if ((b == 66 || b == 68) && left_pane_->supports_horizontal_scroll()) {
-        left_pane_->scroll_horizontal(-8);
+    } else if ((b == 66 || b == 68) && inspector_pane_->supports_horizontal_scroll()) {
+        inspector_pane_->scroll_horizontal(-8);
         render(true);
-    } else if ((b == 67 || b == 69) && left_pane_->supports_horizontal_scroll()) {
-        left_pane_->scroll_horizontal(8);
+    } else if ((b == 67 || b == 69) && inspector_pane_->supports_horizontal_scroll()) {
+        inspector_pane_->scroll_horizontal(8);
         render(true);
     } else if (b == 64) {
         if (has_log_area && y >= log_start_y) {
-            left_pane_->scroll_log(2);
+            inspector_pane_->scroll_log(2);
             render(true);
         } else {
-            scroll_regs(-2);
+            scroll_inspector(-2);
         }
     } else if (b == 65) {
         if (has_log_area && y >= log_start_y) {
-            left_pane_->scroll_log(-2);
+            inspector_pane_->scroll_log(-2);
             render(true);
         } else {
-            scroll_regs(2);
+            scroll_inspector(2);
         }
     }
 }
@@ -860,16 +860,16 @@ void Tui::copy_active_selection() {
     if (!selection_.is_active) return;
     std::string text;
 
-    if (selection_.pane == SelectionPane::TerminalPane && right_pane_) {
-        int start_line = get_right_pane_start_line(cached_num_rows_);
+    if (selection_.pane == SelectionPane::TerminalPane && terminal_pane_) {
+        int start_line = get_terminal_pane_start_line(cached_num_rows_);
         int start_r = start_line + (selection_.start_y - 4);
         int end_r = start_line + (selection_.end_y - 4);
         text = vt_.get_text_in_range(start_r, selection_.start_x, end_r, selection_.end_x);
-    } else if (selection_.pane == SelectionPane::InspectorPane && left_pane_) {
+    } else if (selection_.pane == SelectionPane::InspectorPane && inspector_pane_) {
         int start_r = selection_.start_y - 4;
         int end_r = selection_.end_y - 4;
-        text = left_pane_->get_text_in_range(start_r, selection_.start_x, end_r, selection_.end_x,
-                                             pane_width_cached_);
+        text = inspector_pane_->get_text_in_range(start_r, selection_.start_x, end_r,
+                                                  selection_.end_x, pane_width_cached_);
     }
 
     if (!text.empty()) {
@@ -879,14 +879,14 @@ void Tui::copy_active_selection() {
 }
 
 void Tui::handle_mouse(int x, int y, int b) {
-    if (!right_pane_ || !left_pane_) return;
+    if (!terminal_pane_ || !inspector_pane_) return;
 
     struct winsize w{};
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
     int const term_width = w.ws_col > 0 ? w.ws_col : 80;
 
     auto const col_widths =
-        framework::multi_column_widths(term_width, layout_, user_left_pane_width_);
+        framework::multi_column_widths(term_width, layout_, user_inspector_width_);
     if (col_widths.count == 0) return;
 
     // Find which column x falls into
@@ -942,8 +942,8 @@ void Tui::handle_mouse(int x, int y, int b) {
             if (page == TuiRegPage::DISASM) {
                 scroll(5);
             } else {
-                left_pane_->set_page(page);
-                left_pane_->scroll(-2);
+                inspector_pane_->set_page(page);
+                inspector_pane_->scroll(-2);
                 render(true);
             }
             return;
@@ -952,17 +952,17 @@ void Tui::handle_mouse(int x, int y, int b) {
             if (page == TuiRegPage::DISASM) {
                 scroll(-5);
             } else {
-                left_pane_->set_page(page);
-                left_pane_->scroll(2);
+                inspector_pane_->set_page(page);
+                inspector_pane_->scroll(2);
                 render(true);
             }
             return;
         }
         if (b == 66 || b == 67) {
             if (page != TuiRegPage::DISASM) {
-                left_pane_->set_page(page);
-                if (left_pane_->supports_horizontal_scroll()) {
-                    left_pane_->scroll_horizontal(b == 66 ? -4 : 4);
+                inspector_pane_->set_page(page);
+                if (inspector_pane_->supports_horizontal_scroll()) {
+                    inspector_pane_->scroll_horizontal(b == 66 ? -4 : 4);
                     render(true);
                 }
             }
@@ -975,9 +975,9 @@ void Tui::handle_mouse(int x, int y, int b) {
         }
 
         if (clicked_col < workbench_slots_.size()) {
-            left_pane_->set_page(workbench_slots_[clicked_col].page);
+            inspector_pane_->set_page(workbench_slots_[clicked_col].page);
         }
-        handle_mouse_left_pane(col_local_x + 2, y, b);
+        handle_mouse_inspector(col_local_x + 2, y, b);
     }
 }
 
@@ -1094,8 +1094,8 @@ void Tui::focus_prev_slot() {
 void Tui::set_workbench_slot_page(size_t slot_idx, TuiRegPage page) {
     if (slot_idx < workbench_slots_.size()) {
         workbench_slots_[slot_idx].page = page;
-        if (slot_idx == 0 && left_pane_) {
-            left_pane_->set_page(page);
+        if (slot_idx == 0 && inspector_pane_) {
+            inspector_pane_->set_page(page);
         }
         render(true);
     }
@@ -1105,7 +1105,7 @@ auto Tui::focused_page() const -> TuiRegPage {
     if (focused_slot_index_ < workbench_slots_.size()) {
         return workbench_slots_[focused_slot_index_].page;
     }
-    return left_pane_ ? left_pane_->get_page() : TuiRegPage::GPR;
+    return inspector_pane_ ? inspector_pane_->get_page() : TuiRegPage::GPR;
 }
 
 void Tui::cycle_reg_page() {
@@ -1214,19 +1214,19 @@ void Tui::set_reg_page(TuiRegPage page) {
     if (focused_slot_index_ < workbench_slots_.size()) {
         workbench_slots_[focused_slot_index_].page = page;
     }
-    if (left_pane_) {
-        left_pane_->set_page(page);
+    if (inspector_pane_) {
+        inspector_pane_->set_page(page);
         update_trace_active_cache();
         render(true);
     }
 }
 
 void Tui::toggle_explain() {
-    if (left_pane_) {
-        if (left_pane_->get_page() == TuiRegPage::EXPLAIN) {
-            left_pane_->set_page(TuiRegPage::GPR);
+    if (inspector_pane_) {
+        if (inspector_pane_->get_page() == TuiRegPage::EXPLAIN) {
+            inspector_pane_->set_page(TuiRegPage::GPR);
         } else {
-            left_pane_->set_page(TuiRegPage::EXPLAIN);
+            inspector_pane_->set_page(TuiRegPage::EXPLAIN);
         }
         update_trace_active_cache();
         render(true);
@@ -1282,8 +1282,9 @@ void Tui::write_guest_input(uint8_t byte) {
 }
 
 void Tui::update_trace_active_cache() {
-    const bool trace_page_active = left_pane_ && (left_pane_->get_page() == TuiRegPage::TRACE ||
-                                                  left_pane_->get_page() == TuiRegPage::EXPLAIN);
+    const bool trace_page_active =
+        inspector_pane_ && (inspector_pane_->get_page() == TuiRegPage::TRACE ||
+                            inspector_pane_->get_page() == TuiRegPage::EXPLAIN);
     trace_or_livetrace_active_.store(
         trace_enabled_.load(std::memory_order_relaxed) || trace_page_active,
         std::memory_order_release);
@@ -1457,25 +1458,25 @@ void Tui::reset_scroll() {
     render();
 }
 
-void Tui::scroll_regs(int lines) {
-    if (left_pane_) {
-        left_pane_->set_page(focused_page());
-        left_pane_->scroll(lines);
+void Tui::scroll_inspector(int lines) {
+    if (inspector_pane_) {
+        inspector_pane_->set_page(focused_page());
+        inspector_pane_->scroll(lines);
         render();
     }
 }
 
-void Tui::reset_scroll_regs() {
-    if (left_pane_) {
-        left_pane_->set_page(focused_page());
-        left_pane_->reset_scroll();
+void Tui::reset_scroll_inspector() {
+    if (inspector_pane_) {
+        inspector_pane_->set_page(focused_page());
+        inspector_pane_->reset_scroll();
         render();
     }
 }
 
 void Tui::update_cache() {
-    if (left_pane_) {
-        left_pane_->update_cache();
+    if (inspector_pane_) {
+        inspector_pane_->update_cache();
     }
 }
 
@@ -1488,14 +1489,14 @@ void Tui::reset_speed_history() {
     kips_history_.clear();
 }
 
-void Tui::adjust_left_pane_width(int delta) {
+void Tui::adjust_inspector_width(int delta) {
     struct winsize w{};
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);  // NOLINT(cppcoreguidelines-pro-type-vararg)
     int term_width = w.ws_col;
 
     const PaneWidths current =
-        calculate_pane_widths(term_width, TuiLayout::Split, user_left_pane_width_);
-    user_left_pane_width_ =
+        calculate_pane_widths(term_width, TuiLayout::Split, user_inspector_width_);
+    user_inspector_width_ =
         calculate_pane_widths(term_width, TuiLayout::Split, current.left + delta).left;
     render(true);
 }
@@ -1867,10 +1868,10 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
             open_modal(ModalType::Help);
             return true;
         case simrv::tui::TuiKey::LeftBracket:
-            adjust_left_pane_width(-2);
+            adjust_inspector_width(-2);
             return true;
         case simrv::tui::TuiKey::RightBracket:
-            adjust_left_pane_width(2);
+            adjust_inspector_width(2);
             return true;
         case simrv::tui::TuiKey::t:
         case simrv::tui::TuiKey::T:
@@ -2045,9 +2046,9 @@ void Tui::execute_header_action(HeaderHitResult hit) {
         case HeaderAction::SelectHart:
             if (machine_.num_harts() > 1) {
                 selected_hart_ = hit.hart_index % machine_.num_harts();
-                if (left_pane_) {
-                    left_pane_->set_selected_hart(selected_hart_);
-                    left_pane_->update_cache();
+                if (inspector_pane_) {
+                    inspector_pane_->set_selected_hart(selected_hart_);
+                    inspector_pane_->update_cache();
                 }
                 set_status_override(
                     std::format("Active telemetry switched to Hart {}", selected_hart_));
@@ -2211,9 +2212,9 @@ void Tui::execute_footer_action(TuiFooterAction action) {
 void Tui::select_next_hart() {
     if (machine_.num_harts() > 1) {
         selected_hart_ = (selected_hart_ + 1) % machine_.num_harts();
-        if (left_pane_) {
-            left_pane_->set_selected_hart(selected_hart_);
-            left_pane_->update_cache();
+        if (inspector_pane_) {
+            inspector_pane_->set_selected_hart(selected_hart_);
+            inspector_pane_->update_cache();
         }
         set_status_override(std::format("Active telemetry switched to Hart {}", selected_hart_));
         render(true);
@@ -2260,7 +2261,7 @@ auto Tui::handle_alt_key(char key, uint8_t byte) -> bool {
             return true;
         case 'w':
         case 'W':
-            scroll_regs(-2);
+            scroll_inspector(-2);
             return true;
         case 's':
         case 'S':
@@ -2272,7 +2273,7 @@ auto Tui::handle_alt_key(char key, uint8_t byte) -> bool {
             return true;
         case 'z':
         case 'Z':
-            reset_scroll_regs();
+            reset_scroll_inspector();
             return true;
         case 'c':
         case 'C':
@@ -2289,8 +2290,9 @@ auto Tui::handle_alt_key(char key, uint8_t byte) -> bool {
 
 auto Tui::handle_arrow_key_sequence() -> bool {
     if (esc_buf_ == "\033[1;2C" || esc_buf_ == "\033[1;2D") {
-        if (!is_modal_active() && left_pane_ && left_pane_->supports_horizontal_scroll()) {
-            left_pane_->scroll_horizontal(esc_buf_.back() == 'C' ? 8 : -8);
+        if (!is_modal_active() && inspector_pane_ &&
+            inspector_pane_->supports_horizontal_scroll()) {
+            inspector_pane_->scroll_horizontal(esc_buf_.back() == 'C' ? 8 : -8);
             render(true);
             return true;
         }
@@ -2321,10 +2323,10 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             render(true);
             return true;
         }
-        if (paused_ && left_pane_) {
+        if (paused_ && inspector_pane_) {
             auto page = focused_page();
             if (page == TuiRegPage::CACHE) {
-                left_pane_->cycle_cache_way(-1);
+                inspector_pane_->cycle_cache_way(-1);
                 render(true);
                 return true;
             }
@@ -2332,7 +2334,7 @@ auto Tui::handle_arrow_key_sequence() -> bool {
                 scroll(-1);
                 return true;
             }
-            scroll_regs(-1);
+            scroll_inspector(-1);
             return true;
         }
     } else if (esc_buf_ == "\033[B" || esc_buf_ == "\033OB") {
@@ -2361,10 +2363,10 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             render(true);
             return true;
         }
-        if (paused_ && left_pane_) {
+        if (paused_ && inspector_pane_) {
             auto page = focused_page();
             if (page == TuiRegPage::CACHE) {
-                left_pane_->cycle_cache_way(1);
+                inspector_pane_->cycle_cache_way(1);
                 render(true);
                 return true;
             }
@@ -2372,7 +2374,7 @@ auto Tui::handle_arrow_key_sequence() -> bool {
                 scroll(1);
                 return true;
             }
-            scroll_regs(1);
+            scroll_inspector(1);
             return true;
         }
     } else if (esc_buf_ == "\033[C" || esc_buf_ == "\033OC") {
@@ -2396,16 +2398,16 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             render(true);
             return true;
         }
-        if (paused_ && left_pane_) {
+        if (paused_ && inspector_pane_) {
             auto page = focused_page();
             if (page == TuiRegPage::CACHE) {
-                left_pane_->select_next_cache_set(1);
+                inspector_pane_->select_next_cache_set(1);
                 render(true);
                 return true;
             }
-            left_pane_->set_page(page);
-            if (left_pane_->supports_horizontal_scroll()) {
-                left_pane_->scroll_horizontal(4);
+            inspector_pane_->set_page(page);
+            if (inspector_pane_->supports_horizontal_scroll()) {
+                inspector_pane_->scroll_horizontal(4);
                 render(true);
                 return true;
             }
@@ -2431,16 +2433,16 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             render(true);
             return true;
         }
-        if (paused_ && left_pane_) {
+        if (paused_ && inspector_pane_) {
             auto page = focused_page();
             if (page == TuiRegPage::CACHE) {
-                left_pane_->select_next_cache_set(-1);
+                inspector_pane_->select_next_cache_set(-1);
                 render(true);
                 return true;
             }
-            left_pane_->set_page(page);
-            if (left_pane_->supports_horizontal_scroll()) {
-                left_pane_->scroll_horizontal(-4);
+            inspector_pane_->set_page(page);
+            if (inspector_pane_->supports_horizontal_scroll()) {
+                inspector_pane_->scroll_horizontal(-4);
                 render(true);
                 return true;
             }
@@ -2454,7 +2456,7 @@ auto Tui::handle_arrow_key_sequence() -> bool {
         if (focused_page() == TuiRegPage::DISASM) {
             scroll(-10);
         } else {
-            scroll_regs(-10);
+            scroll_inspector(-10);
         }
         return true;
     } else if (esc_buf_ == "\033[6~") {
@@ -2466,14 +2468,14 @@ auto Tui::handle_arrow_key_sequence() -> bool {
         if (focused_page() == TuiRegPage::DISASM) {
             scroll(10);
         } else {
-            scroll_regs(10);
+            scroll_inspector(10);
         }
         return true;
     } else if (esc_buf_ == "\033[H" || esc_buf_ == "\033[1~") {
         if (focused_page() == TuiRegPage::DISASM) {
             reset_scroll();
         } else {
-            reset_scroll_regs();
+            reset_scroll_inspector();
         }
         return true;
     }
@@ -2602,13 +2604,13 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             int pane_w = get_pane_width();
             if (x >= 2 && x <= pane_w + 1) {
                 int col = x - 2;
-                if (left_pane_) {
+                if (inspector_pane_) {
                     int tier = (y == 4) ? 0 : 1;
-                    auto tab_opt = left_pane_->get_tab_at(tier, col);
+                    auto tab_opt = inspector_pane_->get_tab_at(tier, col);
                     if (tab_opt.has_value()) {
                         if (*tab_opt == TuiRegPage::CACHE &&
-                            left_pane_->get_page() == TuiRegPage::CACHE) {
-                            left_pane_->toggle_cache_inspect_type();
+                            inspector_pane_->get_page() == TuiRegPage::CACHE) {
+                            inspector_pane_->toggle_cache_inspect_type();
                             render(true);
                         } else {
                             set_reg_page(tab_opt.value());

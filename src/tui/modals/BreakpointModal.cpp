@@ -16,12 +16,12 @@
 namespace simrv::tui::modals {
 
 void BreakpointModal::open(ModalType type, std::string& input, simrv::core::Machine& machine,
-                           InspectorPane* left_pane) {
+                           InspectorPane* inspector_pane) {
     input.clear();
     if (type == ModalType::SetBreakpoint) {
         input = std::format("0x{:08x}", machine.primary_hart().state().pc);
     } else if (type == ModalType::SetWatchpoint) {
-        input = std::format("0x{:08x}", left_pane ? left_pane->get_inspect_addr() : 0);
+        input = std::format("0x{:08x}", inspector_pane ? inspector_pane->get_inspect_addr() : 0);
     }
 }
 
@@ -61,7 +61,7 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
         auto parsed_reg = simrv::debug::parse_register_name(input);
         if (parsed_reg.has_value()) {
             machine.breakpoint_manager().add_reg_watchpoint(parsed_reg->type, parsed_reg->index,
-                                                   parsed_reg->canonical_name);
+                                                            parsed_reg->canonical_name);
             set_status_override_cb(
                 std::format("Register Watchpoint set on {}", parsed_reg->canonical_name));
             return true;

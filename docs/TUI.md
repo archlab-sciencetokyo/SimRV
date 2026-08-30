@@ -3,16 +3,19 @@
 The TUI is organized into a modular internal framework:
 
 1. **Framework Core (`include/simrv/tui/framework/`)**:
-   - `Layout.hpp` & `Terminal.hpp`: Cell-based geometry calculation, box drawing, clip regions, and split/full layout policies.
-   - `Theme.hpp` & `Text.hpp`: Semantic ANSI color palette tokens, word-wrapping, padding, and cell width measurement.
-   - `Components.hpp` & `Modal.hpp`: Reusable modal frames, radio button selectors, sliders, action buttons, and scroll views.
+   - `Layout.hpp` & `Terminal.hpp`: Cell-based geometry calculation, box drawing, multi-column sizing, clip regions, and split/full layout policies.
+   - `Theme.hpp` & `Text.hpp`: Semantic ANSI color palette tokens, word-wrapping, padding, column cropping, and cell width measurement.
+   - `Components.hpp` & `Modal.hpp`: Reusable modal frames, radio button selectors, sliders, action buttons, and control hitboxes.
+   - `ScrollView.hpp`: Reusable 2D viewport slicing, coordinate conversion, horizontal/vertical bounding, and scroll indicators.
 2. **Input Routing & Terminal (`TuiInputRouter.hpp`, `VirtualTerminal.hpp`)**:
    - `TuiInputRouter.hpp` classifies each input byte and key action using modal, pause, and terminal-focus state.
    - `VirtualTerminal.hpp` parses guest ANSI/UTF-8 terminal sequences into a bounded screen buffer and scrollback history.
 3. **Domain Modals (`include/simrv/tui/modals/`)**:
    - `SettingsModal`, `SystemConfigModal`, `GlossaryModal`, `LoadModal`, `MisaModal`, `BreakpointModal`, `AddressModal`, `StepModal`.
 4. **Panels & Telemetry (`include/simrv/tui/panels/`)**:
-   - LeftPane sub-views (Registers, Pipeline, Cache, TLB, Breakpoints, Hazards, I/O, Stats, Explain), Header, and StatusBar.
+   - `InspectorPane`: Multi-view tool inspector (Registers, Stack Watch, Pipeline, Cache, TLB, Breakpoints, Hazards, I/O, Performance Stats, Instruction Trace, Microarchitecture Explainer).
+   - `TerminalPane`: Guest virtual terminal console, disassembly inspector, and Sixel display.
+   - `StatusBar` and `Header`: Contextual hotkey legend, telemetry metrics, and hart selectors.
 
 ## Input and Focus
 

@@ -15,12 +15,12 @@
 
 namespace simrv::tui::modals {
 
-void AddressModal::open(std::string& input, InspectorPane* left_pane) {
-    input = std::format("0x{:08x}", left_pane ? left_pane->get_inspect_addr() : 0);
+void AddressModal::open(std::string& input, InspectorPane* inspector_pane) {
+    input = std::format("0x{:08x}", inspector_pane ? inspector_pane->get_inspect_addr() : 0);
 }
 
 auto AddressModal::submit(const std::string& input, simrv::core::Machine& machine,
-                          InspectorPane* left_pane,
+                          InspectorPane* inspector_pane,
                           const std::function<void(const std::string&)>& set_status_override_cb)
     -> bool {
     if (input.empty()) return false;
@@ -42,8 +42,8 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
     }
 
     if (ok) {
-        if (left_pane) {
-            left_pane->set_inspect_addr(addr);
+        if (inspector_pane) {
+            inspector_pane->set_inspect_addr(addr);
         }
         set_status_override_cb(std::format("Inspecting address 0x{:08x}", addr));
         return true;
