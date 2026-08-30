@@ -30,9 +30,8 @@ Execution is configured via `--mode <name>` and resolved into runtime profiles:
 | `--mode fast` | `InstructionFast` | High-throughput functional execution with decode caching and quantum batching |
 | `--mode detailed` | `InstructionObservable` | Instruction-by-instruction execution retaining telemetry for TUI inspection |
 | `--mode cycle-accurate` | `CycleFast` / `CycleObservable` | Cycle-stepped 4-stage pipeline with branch predictor and memory latency modeling |
-| `--mode three-stage` | `CycleObservable` | 3-stage Fetch / Decode+Execute / Memory+Writeback educational pipeline model |
-| `--mode dual-issue` | `CycleObservable` | Dual-issue superscalar pipeline modeling parallel ALU dispatch and structural hazards |
-| `--mode five-stage` | `CycleObservable` | Classic 5-stage Fetch / Decode / Execute / Memory / Writeback pipeline |
+| `--mode cycle-accurate --pipeline 3stage` | `CycleFast` / `CycleObservable` | 3-stage Fetch / Decode+Execute / Memory+Writeback educational pipeline model |
+| `--mode cycle-accurate --pipeline 5stage` | `CycleFast` / `CycleObservable` | Classic 5-stage Fetch / Decode / Execute / Memory / Writeback pipeline |
 
 In cycle-accurate and pipeline modes, instruction slots traverse stages with explicit data forwarding,
 structural hazard stalls, and branch-prediction redirection. Architectural effects commit strictly

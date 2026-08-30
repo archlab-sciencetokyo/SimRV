@@ -15,7 +15,8 @@ if(NOT build_tree_configure_result EQUAL 0)
   message(FATAL_ERROR "Build-tree package consumer configure failed: ${build_tree_configure_result}")
 endif()
 execute_process(
-  COMMAND "${CMAKE_COMMAND}" --build "${consumer_root}/build-tree"
+  COMMAND "${CMAKE_COMMAND}" -E env CCACHE_DISABLE=1
+          "${CMAKE_COMMAND}" --build "${consumer_root}/build-tree"
   RESULT_VARIABLE build_tree_build_result
 )
 if(NOT build_tree_build_result EQUAL 0)
@@ -47,7 +48,8 @@ if(NOT configure_result EQUAL 0)
 endif()
 
 execute_process(
-  COMMAND "${CMAKE_COMMAND}" --build "${consumer_root}/build"
+  COMMAND "${CMAKE_COMMAND}" -E env CCACHE_DISABLE=1
+          "${CMAKE_COMMAND}" --build "${consumer_root}/build"
   RESULT_VARIABLE build_result
 )
 if(NOT build_result EQUAL 0)

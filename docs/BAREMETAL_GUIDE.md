@@ -99,7 +99,7 @@ Run the resulting binary image in SimRV in baremetal mode (`-b` / `--baremetal`)
 ./build/rv32-release/SimRV -b -m program.bin --mode cycle-accurate --cli
 
 # 5-stage classic pipeline simulation
-./build/rv32-release/SimRV -b -m program.bin --mode five-stage --cli
+./build/rv32-release/SimRV -b -m program.bin --mode cycle-accurate --pipeline 5stage --cli
 ```
 
 ---

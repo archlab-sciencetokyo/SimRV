@@ -49,6 +49,7 @@ perf*.data*
 isa_logs/
 regression_logs/
 release-report.json
+benchmark-modes.json
 Testing/
 repro/results/
 Makefrag

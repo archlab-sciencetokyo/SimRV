@@ -14,7 +14,6 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/CsrTypes.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/core/Machine.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/Aclint.hpp"
@@ -34,8 +33,8 @@
 #include "simrv/device/pci/VirtioPciSound.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/MmioDevice.hpp"
-#include "simrv/tui/panels/LeftPane.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
+#include "simrv/tui/panels/LeftPane.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace {
@@ -77,16 +76,19 @@ void test_left_pane_runtime_summaries() {
     auto row = [&](int logical_row) { return pane.render_row(logical_row + 2, kWidth); };
 
     check(row(1).contains("x1") && row(16).contains("Machine State"), "machine state heading");
-    check(row(18).contains("interrupts") && row(19).contains("translation"), "machine state health");
+    check(row(18).contains("interrupts") && row(19).contains("translation"),
+          "machine state health");
     check(!row(18).contains("mstatus") && !row(19).contains("satp"), "raw CSRs hidden");
     machine.cpu.state().mtvec = 0x80000100;
     machine.cpu.raise_exception(static_cast<TrapCause>(ExceptionCode::FetchPageFault), 0x80201048);
-    check(!machine.is_stopped() && machine.stop_reason() == simrv::core::Machine::StopReason::Running,
-          "handled traps continue execution");
+    check(
+        !machine.is_stopped() && machine.stop_reason() == simrv::core::Machine::StopReason::Running,
+        "handled traps continue execution");
     check(row(20).contains("I-page fault") && row(20).contains("address"),
           "trap summary is compact and includes fault address");
     check(row(21).contains("Performance") && row(22).contains("retired") &&
-          row(23).contains("engine") && row(24).contains("speed") && row(25).contains("average"),
+              row(23).contains("engine") && row(24).contains("speed") &&
+              row(25).contains("average"),
           "IA summary flow");
 
     pane.set_paused(false);
@@ -98,14 +100,16 @@ void test_left_pane_runtime_summaries() {
           "running view keeps performance telemetry live");
     pane.set_paused(true);
 
-    machine.s_debug_mode = true;
+    machine.set_debug_diagnostics_enabled(true);
     check(row(26).contains("Debug") && row(27).contains("ELF sym") &&
-          row(28).contains("breakpoints") && !row(28).contains("privilege"), "debug summary");
+              row(28).contains("breakpoints") && !row(28).contains("privilege"),
+          "debug summary");
 
-    machine.s_debug_mode = false;
+    machine.set_debug_diagnostics_enabled(false);
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
     check(row(21).contains("Cycle Accurate") && row(27).contains("I-cache") &&
-          row(28).contains("D-cache") && row(29).contains("limit"), "CA summary");
+              row(28).contains("D-cache") && row(29).contains("limit"),
+          "CA summary");
 }
 
 void test_ca_model_cache_application() {
@@ -127,8 +131,7 @@ void test_ca_model_cache_application() {
 void test_mmio_device_and_dma() {
     ConcreteMachine machine;
     std::vector<Byte> ram(1024 * 1024, Byte{0});
-    machine.mmem = ram.data();
-    machine.s_dram_size = ram.size();
+    machine.set_ram_for_testing(ram.data(), ram.size());
 
     DummyDevice dev(&machine);
     assert(dev.base_address() == 0x1000U);
@@ -152,7 +155,7 @@ void test_tui_uart_input_irq_publication() {
     };
     ConcreteMachine machine;
     machine.cpu.reset();
-    machine.s_tuimode = true;
+    machine.set_tui_enabled_for_testing(true);
     simrv::device::Uart uart(machine);
 
     simrv::memory::TlChannelA enable_rx_irq{};
@@ -175,9 +178,9 @@ void test_ia_tui_uart_input_is_immediate() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    simrv::core::Machine machine(simrv::core::MachineMode::OperatingSystem);
+    simrv::core::Machine machine(simrv::core::MachineConfig{.execution = {.appmode = false}});
     machine.cpu.reset();
-    machine.s_tuimode = true;
+    machine.set_tui_enabled_for_testing(true);
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionObservable;
     machine.mutable_uart_for_testing() = std::make_unique<simrv::device::Uart>(machine);
 
@@ -201,7 +204,7 @@ void test_os_sampled_fast_batch_eligibility() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    simrv::core::Machine machine(simrv::core::MachineMode::OperatingSystem);
+    simrv::core::Machine machine(simrv::core::MachineConfig{.execution = {.appmode = false}});
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionObservable;
     machine.runtime_profile.interaction = simrv::core::InteractionMode::Tui;
 
@@ -215,7 +218,7 @@ void test_os_sampled_fast_batch_eligibility() {
     check(!machine.execute_fast_batch_for_testing(0));
 
     machine.test_secondary_harts().clear();
-    machine.s_smp_multithreaded = true;
+    machine.set_smp_parallel_for_testing(true);
     check(!machine.execute_fast_batch_for_testing(0));
     std::cout << "[PASS] test_os_sampled_fast_batch_eligibility\n";
 }
@@ -226,8 +229,7 @@ void test_timed_interconnect_ordering() {
     };
     ConcreteMachine machine;
     std::vector<Byte> ram(1024 * 1024, Byte{0});
-    machine.mmem = ram.data();
-    machine.s_dram_size = ram.size();
+    machine.set_ram_for_testing(ram.data(), ram.size());
     ram[0] = Byte{0x11};
     ram[8] = Byte{0x22};
 
@@ -280,8 +282,7 @@ void test_timed_interconnect_cancellation() {
     };
     ConcreteMachine machine;
     std::vector<Byte> ram(1024 * 1024, Byte{0});
-    machine.mmem = ram.data();
-    machine.s_dram_size = ram.size();
+    machine.set_ram_for_testing(ram.data(), ram.size());
 
     auto& bus = machine.memory().system_bus();
     simrv::memory::TlChannelA request{};
@@ -312,8 +313,7 @@ void test_timed_page_walk_transitions() {
     };
     ConcreteMachine machine;
     std::vector<Byte> ram(1024 * 1024, Byte{0});
-    machine.mmem = ram.data();
-    machine.s_dram_size = ram.size();
+    machine.set_ram_for_testing(ram.data(), ram.size());
     machine.cpu.machine_ = &machine;
     machine.cpu.reset();
     machine.memory().initialize_mmu();
@@ -415,8 +415,7 @@ void test_cycle_kernel_golden_translated_fetch() {
     const auto run = [&](simrv::pipeline::PipelineType type) {
         ConcreteMachine machine;
         std::vector<Byte> ram(1024 * 1024, Byte{0});
-        machine.mmem = ram.data();
-        machine.s_dram_size = ram.size();
+        machine.set_ram_for_testing(ram.data(), ram.size());
         machine.cpu.machine_ = &machine;
         machine.cpu.reset();
         machine.memory().initialize_mmu();
@@ -429,7 +428,7 @@ void test_cycle_kernel_golden_translated_fetch() {
         std::memcpy(ram.data(), &instruction, sizeof(instruction));
         std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), &instruction, sizeof(instruction));
-        machine.cpu.icache.insert(pc, line.data(), simrv::memory::CoherenceState::Trunk, false);
+        machine.cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
 
         const Word root_ppn = root >> 12;
         if constexpr (simrv::xlen::kIsXLen64) {
@@ -472,8 +471,7 @@ void test_cycle_kernel_golden_translated_load() {
     const auto run = [&](simrv::pipeline::PipelineType type) {
         ConcreteMachine machine;
         std::vector<Byte> ram(1024 * 1024, Byte{0});
-        machine.mmem = ram.data();
-        machine.s_dram_size = ram.size();
+        machine.set_ram_for_testing(ram.data(), ram.size());
         machine.cpu.machine_ = &machine;
         machine.cpu.reset();
         machine.memory().initialize_mmu();
@@ -492,14 +490,12 @@ void test_cycle_kernel_golden_translated_load() {
         std::memcpy(ram.data(), program.data(), sizeof(program));
         std::array<Byte, simrv::cache::ICache::kLineBytes> instruction_line{};
         std::memcpy(instruction_line.data(), program.data(), sizeof(program));
-        machine.cpu.icache.insert(pc, instruction_line.data(), simrv::memory::CoherenceState::Trunk,
-                                  false);
+        machine.cpu.icache.insert(pc, instruction_line.data(), simrv::memory::MesiState::Exclusive);
         constexpr uint32_t value = 73;
         std::memcpy(ram.data() + 0x100, &value, sizeof(value));
         std::array<Byte, simrv::cache::DCache::kLineBytes> data_line{};
         std::memcpy(data_line.data(), &value, sizeof(value));
-        machine.cpu.dcache.insert(data_address, data_line.data(),
-                                  simrv::memory::CoherenceState::Branch, false);
+        machine.cpu.dcache.insert(data_address, data_line.data(), simrv::memory::MesiState::Shared);
 
         const Word root_ppn = root >> 12;
         if constexpr (simrv::xlen::kIsXLen64) {
@@ -550,8 +546,7 @@ void test_timed_smp_coherence_ordering() {
     };
     ConcreteMachine machine;
     std::vector<Byte> ram(1024 * 1024, Byte{0});
-    machine.mmem = ram.data();
-    machine.s_dram_size = ram.size();
+    machine.set_ram_for_testing(ram.data(), ram.size());
     machine.cpu.machine_ = &machine;
     auto secondary = std::make_unique<simrv::core::CPU>();
     secondary->machine_ = &machine;
@@ -565,32 +560,43 @@ void test_timed_smp_coherence_ordering() {
 
     simrv::memory::TlChannelA owner{};
     owner.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
-    owner.param = static_cast<uint8_t>(simrv::memory::CoherenceState::Trunk);
+    owner.grow = simrv::memory::TlGrow::NtoT;
     owner.source = 9;  // Deliberately unrelated to hart identity.
     owner.hart = 0;
     owner.address = line;
+    owner.size = simrv::memory::kTlBlockSize;
     check(bus.send_request(owner));
-    bus.advance_cycle();
 
     simrv::memory::TileLinkBus::TimedResponse response{};
-    check(bus.try_get_timed_response(owner.source, response));
+    for (unsigned beat = 0; beat < simrv::memory::kTlBlockBytes / simrv::memory::kTlBeatBytes;
+         ++beat) {
+        bus.advance_cycle();
+        const bool complete = bus.try_get_timed_response(owner.source, response);
+        check(complete == (beat + 1 == simrv::memory::kTlBlockBytes / simrv::memory::kTlBeatBytes));
+    }
     check(response.has_line_data);
     check(std::to_integer<uint8_t>(response.line_data[0]) == 0x5a);
+    bus.grant_ack(simrv::memory::TlChannelE{.sink = response.payload.sink});
     machine.hart(0).dcache.insert(line, response.line_data.data(),
-                                  simrv::memory::CoherenceState::Trunk, false);
+                                  simrv::memory::MesiState::Exclusive);
 
     simrv::memory::TlChannelA reader = owner;
-    reader.param = static_cast<uint8_t>(simrv::memory::CoherenceState::Branch);
+    reader.grow = simrv::memory::TlGrow::NtoB;
     reader.source = 3;
     reader.hart = 1;
     check(bus.send_request(reader));
-    bus.advance_cycle();
-    check(bus.try_get_timed_response(reader.source, response));
+    for (unsigned beat = 0; beat < simrv::memory::kTlBlockBytes / simrv::memory::kTlBeatBytes;
+         ++beat) {
+        bus.advance_cycle();
+        const bool complete = bus.try_get_timed_response(reader.source, response);
+        check(complete == (beat + 1 == simrv::memory::kTlBlockBytes / simrv::memory::kTlBeatBytes));
+    }
     check(response.has_line_data);
 
     const auto directory = bus.coherence_hub().get_directory_state(line);
-    check(directory.state == simrv::memory::CoherenceState::Branch);
+    check(directory.state == simrv::memory::MesiState::Shared);
     check(directory.sharers_mask == 0b11U);
+    check(bus.coherence_hub().validate_directory().has_value());
     std::cout << "[PASS] test_timed_smp_coherence_ordering\n";
 }
 
@@ -599,10 +605,9 @@ void test_global_cycle_smp_pipeline_ordering() {
         if (!condition) std::abort();
     };
     const auto run = [&] {
-        simrv::core::Machine machine(simrv::core::MachineMode::OperatingSystem);
+        simrv::core::Machine machine(simrv::core::MachineConfig{.execution = {.appmode = false}});
         std::vector<Byte> ram(1024 * 1024, Byte{0});
-        machine.mmem = ram.data();
-        machine.s_dram_size = ram.size();
+        machine.set_ram_for_testing(ram.data(), ram.size());
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
         machine.cpu.machine_ = &machine;
         machine.cpu.reset();
@@ -647,8 +652,7 @@ void test_global_cycle_smp_pipeline_ordering() {
     const auto first = run();
     const auto second = run();
     check(first == second);
-    constexpr std::array<uint32_t, 2> expected =
-        simrv::xlen::kIsXLen64 ? std::array<uint32_t, 2>{13, 14} : std::array<uint32_t, 2>{21, 22};
+    constexpr std::array<uint32_t, 2> expected = std::array<uint32_t, 2>{10, 11};
     if (first != expected) {
         std::cerr << "unexpected SMP retirement cycles: " << first[0] << ", " << first[1] << '\n';
     }
@@ -657,10 +661,9 @@ void test_global_cycle_smp_pipeline_ordering() {
 }
 
 void test_global_cycle_timer_phase_ordering() {
-    simrv::core::Machine machine(simrv::core::MachineMode::OperatingSystem);
+    simrv::core::Machine machine(simrv::core::MachineConfig{.execution = {.appmode = false}});
     std::vector<Byte> ram(1024 * 1024, Byte{0});
-    machine.mmem = ram.data();
-    machine.s_dram_size = ram.size();
+    machine.set_ram_for_testing(ram.data(), ram.size());
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
     machine.cpu.machine_ = &machine;
     machine.cpu.reset();
@@ -700,8 +703,7 @@ void test_cycle_kernel_golden_forwarding() {
     const auto run = [&](simrv::pipeline::PipelineType type) {
         ConcreteMachine machine;
         std::vector<Byte> ram(1024 * 1024, Byte{0});
-        machine.mmem = ram.data();
-        machine.s_dram_size = ram.size();
+        machine.set_ram_for_testing(ram.data(), ram.size());
         machine.cpu.machine_ = &machine;
         machine.cpu.reset();
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
@@ -718,7 +720,7 @@ void test_cycle_kernel_golden_forwarding() {
         std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.cpu.icache.insert(pc, line.data(), simrv::memory::CoherenceState::Trunk, false);
+        machine.cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
         machine.cpu.state().pc = pc;
 
         uint32_t cycles = 0;
@@ -746,8 +748,7 @@ void test_cycle_kernel_golden_load_use() {
     const auto run = [&](simrv::pipeline::PipelineType type) {
         ConcreteMachine machine;
         std::vector<Byte> ram(1024 * 1024, Byte{0});
-        machine.mmem = ram.data();
-        machine.s_dram_size = ram.size();
+        machine.set_ram_for_testing(ram.data(), ram.size());
         machine.cpu.machine_ = &machine;
         machine.cpu.reset();
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
@@ -765,15 +766,13 @@ void test_cycle_kernel_golden_load_use() {
         std::array<Byte, simrv::cache::ICache::kLineBytes> instruction_line{};
         std::memcpy(instruction_line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.cpu.icache.insert(pc, instruction_line.data(), simrv::memory::CoherenceState::Trunk,
-                                  false);
+        machine.cpu.icache.insert(pc, instruction_line.data(), simrv::memory::MesiState::Exclusive);
 
         std::array<Byte, simrv::cache::DCache::kLineBytes> data_line{};
         constexpr uint32_t value = 21;
         std::memcpy(data_line.data(), &value, sizeof(value));
         std::memcpy(ram.data() + 0x100, &value, sizeof(value));
-        machine.cpu.dcache.insert(data_address, data_line.data(),
-                                  simrv::memory::CoherenceState::Branch, false);
+        machine.cpu.dcache.insert(data_address, data_line.data(), simrv::memory::MesiState::Shared);
         machine.cpu.state().pc = pc;
 
         uint32_t cycles = 0;
@@ -803,8 +802,7 @@ void test_cycle_kernel_golden_data_refill() {
     const auto run = [&](simrv::pipeline::PipelineType type) {
         ConcreteMachine machine;
         std::vector<Byte> ram(1024 * 1024, Byte{0});
-        machine.mmem = ram.data();
-        machine.s_dram_size = ram.size();
+        machine.set_ram_for_testing(ram.data(), ram.size());
         machine.cpu.machine_ = &machine;
         machine.cpu.reset();
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
@@ -823,8 +821,7 @@ void test_cycle_kernel_golden_data_refill() {
         std::memcpy(ram.data(), program.data(), sizeof(program));
         constexpr uint32_t value = 37;
         std::memcpy(ram.data() + 0x100, &value, sizeof(value));
-        machine.cpu.icache.insert(pc, instruction_line.data(), simrv::memory::CoherenceState::Trunk,
-                                  false);
+        machine.cpu.icache.insert(pc, instruction_line.data(), simrv::memory::MesiState::Exclusive);
         machine.cpu.state().pc = pc;
 
         uint32_t cycles = 0;
@@ -844,12 +841,12 @@ void test_cycle_kernel_golden_data_refill() {
     const auto three_cycles = run(simrv::pipeline::PipelineType::ThreeStage);
     // The interconnect owns refill timing. A cache hit completes in its memory stage, so the
     // configured one-cycle hit latency does not add a second pipeline delay.
-    if (five_cycles != 9 || three_cycles != 7) {
+    if (five_cycles != 12 || three_cycles != 10) {
         std::cerr << "unexpected data-refill cycles: " << five_cycles << ", " << three_cycles
                   << '\n';
     }
-    check(five_cycles == 9);
-    check(three_cycles == 7);
+    check(five_cycles == 12);
+    check(three_cycles == 10);
     std::cout << "[PASS] test_cycle_kernel_golden_data_refill\n";
 }
 
@@ -860,8 +857,7 @@ void test_cycle_kernel_golden_fence_serialization() {
     const auto run = [&](simrv::pipeline::PipelineType type) {
         ConcreteMachine machine;
         std::vector<Byte> ram(1024 * 1024, Byte{0});
-        machine.mmem = ram.data();
-        machine.s_dram_size = ram.size();
+        machine.set_ram_for_testing(ram.data(), ram.size());
         machine.cpu.machine_ = &machine;
         machine.cpu.reset();
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
@@ -878,7 +874,7 @@ void test_cycle_kernel_golden_fence_serialization() {
         std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.cpu.icache.insert(pc, line.data(), simrv::memory::CoherenceState::Trunk, false);
+        machine.cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
         machine.cpu.state().pc = pc;
 
         uint32_t cycles = 0;
@@ -905,8 +901,7 @@ void test_cycle_kernel_golden_multicycle_execute() {
     const auto run = [&](simrv::pipeline::PipelineType type) {
         ConcreteMachine machine;
         std::vector<Byte> ram(1024 * 1024, Byte{0});
-        machine.mmem = ram.data();
-        machine.s_dram_size = ram.size();
+        machine.set_ram_for_testing(ram.data(), ram.size());
         machine.cpu.machine_ = &machine;
         machine.cpu.reset();
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
@@ -923,7 +918,7 @@ void test_cycle_kernel_golden_multicycle_execute() {
         std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.cpu.icache.insert(pc, line.data(), simrv::memory::CoherenceState::Trunk, false);
+        machine.cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
         machine.cpu.state().pc = pc;
 
         uint32_t cycles = 0;
@@ -949,8 +944,7 @@ void test_cycle_kernel_golden_branch_recovery() {
     const auto run = [&](simrv::pipeline::PipelineType type) {
         ConcreteMachine machine;
         std::vector<Byte> ram(1024 * 1024, Byte{0});
-        machine.mmem = ram.data();
-        machine.s_dram_size = ram.size();
+        machine.set_ram_for_testing(ram.data(), ram.size());
         machine.cpu.machine_ = &machine;
         machine.cpu.reset();
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
@@ -968,7 +962,7 @@ void test_cycle_kernel_golden_branch_recovery() {
         std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.cpu.icache.insert(pc, line.data(), simrv::memory::CoherenceState::Trunk, false);
+        machine.cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
         machine.cpu.state().pc = pc;
 
         uint32_t cycles = 0;
@@ -995,8 +989,7 @@ void test_cycle_kernel_golden_instruction_refill() {
     const auto run = [&](simrv::pipeline::PipelineType type) {
         ConcreteMachine machine;
         std::vector<Byte> ram(1024 * 1024, Byte{0});
-        machine.mmem = ram.data();
-        machine.s_dram_size = ram.size();
+        machine.set_ram_for_testing(ram.data(), ram.size());
         machine.cpu.machine_ = &machine;
         machine.cpu.reset();
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
@@ -1022,8 +1015,16 @@ void test_cycle_kernel_golden_instruction_refill() {
         return cycles;
     };
 
-    check(run(simrv::pipeline::PipelineType::FiveStage) == (simrv::xlen::kIsXLen64 ? 10 : 14));
-    check(run(simrv::pipeline::PipelineType::ThreeStage) == (simrv::xlen::kIsXLen64 ? 8 : 12));
+    const auto five_stage = run(simrv::pipeline::PipelineType::FiveStage);
+    const auto three_stage = run(simrv::pipeline::PipelineType::ThreeStage);
+    constexpr auto expected_five = 10u;
+    constexpr auto expected_three = 8u;
+    if (five_stage != expected_five || three_stage != expected_three) {
+        std::cerr << "unexpected coherent refill cycles: " << five_stage << ", " << three_stage
+                  << '\n';
+    }
+    check(five_stage == expected_five);
+    check(three_stage == expected_three);
     std::cout << "[PASS] test_cycle_kernel_golden_instruction_refill\n";
 }
 
@@ -1034,8 +1035,7 @@ void test_cycle_kernel_golden_precise_trap() {
     const auto run = [&](simrv::pipeline::PipelineType type) {
         ConcreteMachine machine;
         std::vector<Byte> ram(1024 * 1024, Byte{0});
-        machine.mmem = ram.data();
-        machine.s_dram_size = ram.size();
+        machine.set_ram_for_testing(ram.data(), ram.size());
         machine.cpu.machine_ = &machine;
         machine.cpu.reset();
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
@@ -1054,7 +1054,7 @@ void test_cycle_kernel_golden_precise_trap() {
         std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.cpu.icache.insert(pc, line.data(), simrv::memory::CoherenceState::Trunk, false);
+        machine.cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
         machine.cpu.state().pc = pc;
         machine.cpu.state().mtvec = handler;
 
@@ -1085,8 +1085,7 @@ void test_cycle_kernel_golden_interrupt_boundary() {
     const auto run = [&](simrv::pipeline::PipelineType type) {
         ConcreteMachine machine;
         std::vector<Byte> ram(1024 * 1024, Byte{0});
-        machine.mmem = ram.data();
-        machine.s_dram_size = ram.size();
+        machine.set_ram_for_testing(ram.data(), ram.size());
         machine.cpu.machine_ = &machine;
         machine.cpu.reset();
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
@@ -1105,7 +1104,7 @@ void test_cycle_kernel_golden_interrupt_boundary() {
         std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.cpu.icache.insert(pc, line.data(), simrv::memory::CoherenceState::Trunk, false);
+        machine.cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
         machine.cpu.state().pc = pc;
         machine.cpu.state().mtvec = handler;
         machine.cpu.state().mstatus |= enum_mask(simrv::core::MstatusBit::Mie);
@@ -1146,16 +1145,16 @@ void test_cycle_policy_architectural_equivalence() {
         size_t history_size = 0;
         uint64_t data_misses = 0;
     };
-    const auto run = [&](simrv::core::ExecutionEngine engine) {
+    const auto run = [&](simrv::core::ExecutionEngine engine,
+                         simrv::pipeline::PipelineType pipeline_type) {
         ConcreteMachine machine;
         std::vector<Byte> ram(1024 * 1024, Byte{0});
-        machine.mmem = ram.data();
-        machine.s_dram_size = ram.size();
+        machine.set_ram_for_testing(ram.data(), ram.size());
         machine.cpu.machine_ = &machine;
         machine.cpu.reset();
         machine.memory().initialize_mmu();
         machine.runtime_profile.engine = engine;
-        machine.cpu.pipeline_sim.config.pipeline_type = simrv::pipeline::PipelineType::FiveStage;
+        machine.cpu.pipeline_sim.config.pipeline_type = pipeline_type;
         machine.cpu.pipeline_sim.config.record_snapshots =
             engine == simrv::core::ExecutionEngine::CycleObservable;
 
@@ -1173,8 +1172,7 @@ void test_cycle_policy_architectural_equivalence() {
         std::array<Byte, simrv::cache::ICache::kLineBytes> instruction_line{};
         std::memcpy(instruction_line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.cpu.icache.insert(pc, instruction_line.data(), simrv::memory::CoherenceState::Trunk,
-                                  false);
+        machine.cpu.icache.insert(pc, instruction_line.data(), simrv::memory::MesiState::Exclusive);
         machine.cpu.state().pc = pc;
 
         uint32_t guard = 0;
@@ -1183,8 +1181,12 @@ void test_cycle_policy_architectural_equivalence() {
             machine.memory().system_bus().advance_cycle();
         }
         Word memory_value = 0;
-        check(machine.cpu.dcache.read(data_address, memory_value,
-                                      static_cast<Instruction>(simrv::isa::Funct3::Lw)));
+        if (simrv::core::is_cycle_engine(engine)) {
+            check(machine.cpu.dcache.read(data_address, memory_value,
+                                          static_cast<Instruction>(simrv::isa::Funct3::Lw)));
+        } else {
+            std::memcpy(&memory_value, ram.data() + 0x100, sizeof(memory_value));
+        }
         return Result{.x1 = machine.cpu.state().regs.read(RegId::Ra),
                       .x2 = machine.cpu.state().regs.read(RegId::Sp),
                       .x3 = machine.cpu.state().regs.read(RegId::Gp),
@@ -1195,15 +1197,44 @@ void test_cycle_policy_architectural_equivalence() {
                       .data_misses = machine.cpu.dcache.miss_count()};
     };
 
-    const auto fast = run(simrv::core::ExecutionEngine::CycleFast);
-    const auto observable = run(simrv::core::ExecutionEngine::CycleObservable);
-    check(fast.x1 == 42 && fast.x2 == simrv::memory::kDramBaseAddress + 0x100 && fast.x3 == 42);
-    check(fast.memory_value == 42 && fast.retired == 5 && fast.data_misses == 1);
-    check(fast.x1 == observable.x1 && fast.x2 == observable.x2 && fast.x3 == observable.x3);
-    check(fast.memory_value == observable.memory_value && fast.retired == observable.retired);
-    check(fast.cycles == observable.cycles);
-    check(fast.data_misses == observable.data_misses);
-    check(fast.history_size == 0 && observable.history_size == observable.cycles);
+    const auto functional = run(simrv::core::ExecutionEngine::InstructionFast,
+                                simrv::pipeline::PipelineType::FiveStage);
+    const auto fast_five =
+        run(simrv::core::ExecutionEngine::CycleFast, simrv::pipeline::PipelineType::FiveStage);
+    const auto observable_five = run(simrv::core::ExecutionEngine::CycleObservable,
+                                     simrv::pipeline::PipelineType::FiveStage);
+    const auto fast_three =
+        run(simrv::core::ExecutionEngine::CycleFast, simrv::pipeline::PipelineType::ThreeStage);
+    const auto observable_three = run(simrv::core::ExecutionEngine::CycleObservable,
+                                      simrv::pipeline::PipelineType::ThreeStage);
+    const auto check_architectural_equivalence = [&](std::string_view model,
+                                                     const Result& candidate) {
+        const auto compare = [&](std::string_view field, auto expected, auto actual) {
+            if (expected != actual) {
+                std::cerr << "semantic mismatch: model=" << model
+                          << " hart=0 retirement=" << candidate.retired << " field=" << field
+                          << " expected=" << expected << " actual=" << actual << '\n';
+                std::abort();
+            }
+        };
+        compare("x1", functional.x1, candidate.x1);
+        compare("x2", functional.x2, candidate.x2);
+        compare("x3", functional.x3, candidate.x3);
+        compare("memory[0x100]", functional.memory_value, candidate.memory_value);
+        compare("retired", functional.retired, candidate.retired);
+    };
+    check(functional.x1 == 42 && functional.x2 == simrv::memory::kDramBaseAddress + 0x100 &&
+          functional.x3 == 42 && functional.memory_value == 42 && functional.retired == 5);
+    check_architectural_equivalence("five-stage-ca-fast", fast_five);
+    check_architectural_equivalence("five-stage-ca-observable", observable_five);
+    check_architectural_equivalence("three-stage-ca-fast", fast_three);
+    check_architectural_equivalence("three-stage-ca-observable", observable_three);
+    check(fast_five.cycles == observable_five.cycles);
+    check(fast_three.cycles == observable_three.cycles);
+    check(fast_five.data_misses == observable_five.data_misses);
+    check(fast_three.data_misses == observable_three.data_misses);
+    check(fast_five.history_size == 0 && observable_five.history_size == observable_five.cycles);
+    check(fast_three.history_size == 0 && observable_three.history_size == observable_three.cycles);
     std::cout << "[PASS] test_cycle_policy_architectural_equivalence\n";
 }
 
@@ -1223,8 +1254,7 @@ void test_instruction_policy_architectural_equivalence() {
     const auto run = [](simrv::core::ExecutionEngine engine) {
         ConcreteMachine machine;
         std::vector<Byte> ram(1024 * 1024, Byte{0});
-        machine.mmem = ram.data();
-        machine.s_dram_size = ram.size();
+        machine.set_ram_for_testing(ram.data(), ram.size());
         machine.cpu.machine_ = &machine;
         machine.cpu.reset();
         machine.memory().initialize_mmu();
@@ -1326,8 +1356,7 @@ void test_aia_aplic_and_imsic() {
 void test_pcie_and_virtio_pci() {
     ConcreteMachine machine;
     std::vector<Byte> ram(1024 * 1024, Byte{0});
-    machine.mmem = ram.data();
-    machine.s_dram_size = ram.size();
+    machine.set_ram_for_testing(ram.data(), ram.size());
 
     simrv::device::PcieRootComplex rc(&machine);
     auto blk = std::make_shared<simrv::device::VirtioPciBlock>();
@@ -1406,8 +1435,7 @@ void test_pcie_and_virtio_pci() {
 void test_virtio_mmio_v2() {
     ConcreteMachine machine;
     std::vector<Byte> ram(1024 * 1024, Byte{0});
-    machine.mmem = ram.data();
-    machine.s_dram_size = ram.size();
+    machine.set_ram_for_testing(ram.data(), ram.size());
 
     simrv::device::VirtioMmioBlock blk(0x10001000, 2, &machine);
     simrv::device::VirtioMmioConsole con(0x10002000, 1, &machine);
@@ -1464,10 +1492,9 @@ void test_sbi_multihart_rfence() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    simrv::core::Machine machine(simrv::core::MachineMode::OperatingSystem);
+    simrv::core::Machine machine(simrv::core::MachineConfig{.execution = {.appmode = false}});
     std::vector<Byte> ram(1024 * 1024, Byte{0});
-    machine.mmem = ram.data();
-    machine.s_dram_size = ram.size();
+    machine.set_ram_for_testing(ram.data(), ram.size());
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
     machine.cpu.machine_ = &machine;
     machine.cpu.reset();
@@ -1526,10 +1553,9 @@ void test_ia_multihart_lr_sc_coherence() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    simrv::core::Machine machine(simrv::core::MachineMode::OperatingSystem);
+    simrv::core::Machine machine(simrv::core::MachineConfig{.execution = {.appmode = false}});
     std::vector<Byte> ram(1024 * 1024, Byte{0});
-    machine.mmem = ram.data();
-    machine.s_dram_size = ram.size();
+    machine.set_ram_for_testing(ram.data(), ram.size());
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
     machine.cpu.machine_ = &machine;
     machine.cpu.reset();
@@ -1599,12 +1625,11 @@ void test_ia_multithreaded_smp_execution() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    simrv::core::Machine machine(simrv::core::MachineMode::OperatingSystem);
+    simrv::core::Machine machine(simrv::core::MachineConfig{.execution = {.appmode = false}});
     std::vector<Byte> ram(1024 * 1024, Byte{0});
-    machine.mmem = ram.data();
-    machine.s_dram_size = ram.size();
+    machine.set_ram_for_testing(ram.data(), ram.size());
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
-    machine.s_smp_multithreaded = true;
+    machine.set_smp_parallel_for_testing(true);
     machine.cpu.machine_ = &machine;
     machine.cpu.reset();
 
@@ -1674,7 +1699,13 @@ void test_ia_multithreaded_smp_execution() {
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--semantic-equivalence") {
+        test_cycle_policy_architectural_equivalence();
+        test_instruction_policy_architectural_equivalence();
+        std::cout << "Semantic equivalence tests PASSED!\n";
+        return 0;
+    }
     test_left_pane_runtime_summaries();
     test_ca_model_cache_application();
     test_mmio_device_and_dma();

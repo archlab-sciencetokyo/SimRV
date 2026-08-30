@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark SimRV's IA/CA CLI and TUI runtime profiles with relative regression checks."""
+"""Benchmark SimRV execution profiles with repeatable warmup and sampling."""
 
 import argparse
 import errno
@@ -21,10 +21,13 @@ ANSI_RE = re.compile(rb"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 SPEED_RE = re.compile(r"Simulation speed\s*:\s*([\d.]+)\s*(MIPS|KIPS)")
 
 
-def command(args, cycle, tui):
+def command(args, mode, pipeline, tui):
     result = [args.simrv, "--tui" if tui else "--cli"]
-    if cycle:
-        result.append("--ca")
+    result += ["--mode", mode]
+    if pipeline:
+        result += ["--pipeline", pipeline]
+    if args.harts > 1:
+        result += ["--smp", str(args.harts)]
     if args.os:
         result += ["--os", "-D", args.disk]
         if args.dtb:
@@ -211,30 +214,42 @@ def main():
     parser.add_argument("--dtb", help="optional Linux device-tree blob")
     parser.add_argument("--tohost")
     parser.add_argument("--limit", type=int, default=20_000_000)
+    parser.add_argument("--harts", type=int, default=1)
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--columns", type=int, default=160)
     parser.add_argument("--rows", type=int, default=48)
-    parser.add_argument("--modes", default="ia-cli,ia-tui,ca-cli,ca-tui",
-                        help="comma-separated modes: ia-cli, ia-tui, ca-cli, ca-tui")
+    parser.add_argument("--modes", default="fast-cli,detailed-cli,cycle3-cli,cycle5-cli",
+                        help="comma-separated execution/interaction profiles")
     parser.add_argument("--output", default="benchmark-modes.json")
     parser.add_argument("--baseline")
     parser.add_argument("--regression-threshold", type=float, default=0.03)
     args = parser.parse_args()
     if args.os and not args.disk:
         parser.error("--disk is required with --os")
+    if not 1 <= args.harts <= 64:
+        parser.error("--harts must be between 1 and 64")
 
-    available_modes = (("ia-cli", False, False), ("ia-tui", False, True),
-                       ("ca-cli", True, False), ("ca-tui", True, True))
+    available_modes = (
+        ("fast-cli", "fast", None, False),
+        ("fast-tui", "fast", None, True),
+        ("detailed-cli", "detailed", None, False),
+        ("detailed-tui", "detailed", None, True),
+        ("cycle3-cli", "cycle-accurate", "3stage", False),
+        ("cycle3-tui", "cycle-accurate", "3stage", True),
+        ("cycle5-cli", "cycle-accurate", "5stage", False),
+        ("cycle5-tui", "cycle-accurate", "5stage", True),
+    )
     requested_modes = {mode.strip() for mode in args.modes.split(",") if mode.strip()}
     unknown_modes = requested_modes - {mode[0] for mode in available_modes}
     if unknown_modes:
         parser.error(f"unknown benchmark mode(s): {', '.join(sorted(unknown_modes))}")
     modes = tuple(mode for mode in available_modes if mode[0] in requested_modes)
-    report = {"schema": 1, "limit": args.limit, "terminal": [args.columns, args.rows], "modes": {}}
-    for name, cycle, tui in modes:
-        cmd = command(args, cycle, tui)
+    report = {"schema": 2, "limit": args.limit, "harts": args.harts,
+              "terminal": [args.columns, args.rows], "modes": {}}
+    for name, mode, pipeline, tui in modes:
+        cmd = command(args, mode, pipeline, tui)
         for _ in range(args.warmup):
             if tui:
                 run_tui(cmd, args.timeout, args.columns, args.rows, args.limit)
@@ -247,9 +262,9 @@ def main():
         report["modes"][name] = summarize(samples)
         print(f"{name:7} {report['modes'][name]['wall_seconds']['median']:.4f}s median")
 
-    if "ia-cli" in report["modes"] and "ia-tui" in report["modes"]:
-        cli_seconds = report["modes"]["ia-cli"]["wall_seconds"]["median"]
-        tui_seconds = report["modes"]["ia-tui"]["execution_seconds"]["median"]
+    if "fast-cli" in report["modes"] and "fast-tui" in report["modes"]:
+        cli_seconds = report["modes"]["fast-cli"]["wall_seconds"]["median"]
+        tui_seconds = report["modes"]["fast-tui"]["execution_seconds"]["median"]
         parity = cli_seconds / tui_seconds * 100.0 if tui_seconds else 0.0
         print(f"ia sampled-TUI throughput: {parity:.1f}% of CLI")
 

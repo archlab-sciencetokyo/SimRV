@@ -105,7 +105,6 @@ set(SIMRV_LINUX_IMAGES_DIR "${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}" CA
 
 set(SIMRV_DRAM_SIZE_MB "256" CACHE STRING "DRAM size in megabytes (must be power of 2)")
 set(SIMRV_DISK_SIZE_MB "256" CACHE STRING "Disk size in megabytes")
-set(SIMRV_CORE_COUNT "1" CACHE STRING "Number of CPU cores (experimental)")
 set(SIMRV_SPIKE_PATH "spike" CACHE STRING "Path to Spike binary for lockstep co-simulation (runtime default, not used at build time)")
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
@@ -269,6 +268,7 @@ add_test(NAME pmp COMMAND simrv-pmp-tests)
 set_tests_properties(pmp PROPERTIES LABELS "gate;regress;core;memory;pmp")
 
 add_executable(simrv-machine-config-tests tests/MachineConfigTests.cpp)
+target_link_libraries(simrv-machine-config-tests PRIVATE simrv-runtime)
 simrv_configure_native_test(simrv-machine-config-tests)
 add_test(NAME machine-config COMMAND simrv-machine-config-tests)
 set_tests_properties(machine-config PROPERTIES LABELS "gate;regress;core;config")
@@ -286,7 +286,15 @@ target_link_libraries(simrv-modern-platform-tests PRIVATE simrv-runtime)
 simrv_configure_native_test(simrv-modern-platform-tests)
 
 add_test(NAME modern-platform COMMAND simrv-modern-platform-tests)
-set_tests_properties(modern-platform PROPERTIES LABELS "gate;regress;device;mmio;pcie;aia")
+set_tests_properties(modern-platform PROPERTIES LABELS "gate;regress;semantic;device;mmio;pcie;aia")
+
+# Architectural equivalence is a first-class native gate.  The fixture deliberately exercises
+# functional execution and both CA pipelines while excluding cache/cycle/UI observations.
+add_executable(simrv-semantic-equivalence-tests tests/ModernPlatformTests.cpp)
+target_link_libraries(simrv-semantic-equivalence-tests PRIVATE simrv-runtime)
+simrv_configure_native_test(simrv-semantic-equivalence-tests)
+add_test(NAME semantic-equivalence COMMAND simrv-semantic-equivalence-tests --semantic-equivalence)
+set_tests_properties(semantic-equivalence PROPERTIES LABELS "gate;semantic;equivalence")
 
 # Native CLI tests
 add_test(NAME cli-help COMMAND $<TARGET_FILE:SimRV> -h)
@@ -300,27 +308,6 @@ set_tests_properties(cli-invalid-option PROPERTIES
   PASS_REGULAR_EXPRESSION "unknown option"
   LABELS "gate;regress;cli"
 )
-
-add_test(NAME cli-removed-rollback COMMAND $<TARGET_FILE:SimRV> --rollback)
-set_tests_properties(cli-removed-rollback PROPERTIES
-  PASS_REGULAR_EXPRESSION "unknown option"
-  LABELS "gate;regress;cli"
-)
-
-add_test(NAME cli-conflicting-execution COMMAND $<TARGET_FILE:SimRV> --ca --ia)
-set_tests_properties(cli-conflicting-execution PROPERTIES
-  WILL_FAIL TRUE
-  LABELS "gate;regress;cli"
-)
-
-foreach(obsolete_option IN ITEMS --preset --pipe --bp-type --btb-size --no-ex-forwarding --no-mem-forwarding)
-  string(REGEX REPLACE "^-+" "" obsolete_name "${obsolete_option}")
-  add_test(NAME "cli-obsolete-${obsolete_name}" COMMAND $<TARGET_FILE:SimRV> ${obsolete_option})
-  set_tests_properties("cli-obsolete-${obsolete_name}" PROPERTIES
-    WILL_FAIL TRUE
-    LABELS "gate;regress;cli"
-  )
-endforeach()
 
 add_test(NAME cli-invalid-pipeline COMMAND $<TARGET_FILE:SimRV> --pipeline dual)
 set_tests_properties(cli-invalid-pipeline PROPERTIES

@@ -13,26 +13,18 @@ SimRV is not RISC-V certified. `RV32GCBV` and `RV64GCBV` are implementation targ
 
 ## Quick Start
 
-### Interactive versus reproducible runs
+### Interactive and headless runs
 
-The interactive TUI remains the quickest way to explore SimRV: launch `SimRV` normally (or pass
-`--tui`) and load an image from the UI.  Use a versioned manifest for headless, automated, or
-publication runs so the full configuration and structured results are recorded:
+Launch `SimRV` normally (or pass `--tui`) to explore an image with the interactive TUI. Use
+`--cli` for scripted and headless runs; command-line options are the supported run interface.
 
 ```bash
-# Validate and inspect a reproducible run definition.
-./build/rv64-release/SimRV validate experiment.toml
-./build/rv64-release/SimRV inspect experiment.toml
+# Interactive image loading and inspection.
+./build/rv64-release/SimRV -b -m img/hello.bin --tui
 
-# Headless execution writes manifest.resolved.toml, events.jsonl, and result.json.
-./build/rv64-release/SimRV run experiment.toml
-
-# A manifest can also launch the TUI when a reproducible interactive session is needed.
-./build/rv64-release/SimRV tui experiment.toml
+# Headless execution with an explicit instruction limit.
+./build/rv64-release/SimRV -b -m img/hello.bin --cli --steps 200000
 ```
-
-The legacy command-line flags remain available for the lightweight interactive workflow during the
-2.x transition; manifests are the canonical interface for CLI automation.
 
 ### Prerequisites
 - **Clang 20+** or **GCC 15+** (required for the C++23 baseline). For current validation,
@@ -86,8 +78,8 @@ Select execution mode across fast, detailed, or cycle-accurate microarchitecture
 # Cycle-accurate 4-stage pipeline execution
 ./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --cli
 
-# Microarchitecture targets (3-stage, dual-issue, 5-stage)
-./build/rv64-release/SimRV -b -m img/hello.bin --mode dual-issue --smp 2 --cli
+# Choose the three-stage educational pipeline.
+./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --pipeline 3stage --cli
 ```
 
 Mirror configuration, diagnostics, termination, cache, bus, and performance summaries to a log:
@@ -141,6 +133,8 @@ The TUI supports interactive stepping, breakpoints, and live hardware-state insp
 RV32GCBV and RV64GCBV are implementation-target names, not complete conformance claims.
 
 See [RISC-V compliance scope](docs/RISCV_COMPLIANCE.md) for the precise architectural boundary,
+the [TileLink-C profile](docs/TILELINK_C_PROFILE.md) for protocol/coherence scope, and the
+[2.1 migration guide](docs/MIGRATION.md) for intentional host-interface breakage.
 SBI/OpenSBI distinction, and the evidence required before treating a feature as verified. The
 profile names are implementation targets and do not by themselves claim RISC-V certification.
 The cross-subsystem qualification status is summarized in the
@@ -235,8 +229,8 @@ Pre-compiled standalone binaries (`SimRV`) are available under GitHub Releases f
 - `CHANGELOG.md`: Version release log
 - `docs/RELEASE.md`: 2.0 support contract, validation matrix, and publishing checklist
 - `docs/TUI.md`: TUI input focus, rendering layers, and test coverage
-- `repro/`: Versioned experiment manifest and research-companion instructions
-- `release/schemas/`: Machine-readable release and experiment interfaces
+- `repro/`: Research-companion scripts and reproducibility instructions
+- `release/`: Release metadata, evidence schemas, and publishing inputs
 
 ---
 

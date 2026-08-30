@@ -6,7 +6,6 @@ target_compile_definitions(simrv-project-options INTERFACE
   SIMRV_XLEN=${SIMRV_XLEN}
   SIMRV_DRAM_SIZE_MB=${SIMRV_DRAM_SIZE_MB}
   SIMRV_DISK_SIZE_MB=${SIMRV_DISK_SIZE_MB}
-  SIMRV_CORE_COUNT=${SIMRV_CORE_COUNT}
 )
 target_compile_options(simrv-project-options INTERFACE
   $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>

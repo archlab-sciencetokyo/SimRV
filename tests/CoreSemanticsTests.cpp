@@ -5,13 +5,17 @@
 #include <string>
 
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/Machine.hpp"
 #include "simrv/core/Pmp.hpp"
 #include "simrv/core/RegisterFile.hpp"
 #include "simrv/core/Sbi.hpp"
+#include "simrv/execute/ExecuteUnit.hpp"
+#include "simrv/isa/Common.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/MmioRouter.hpp"
 #include "simrv/memory/Mmu.hpp"
 #include "simrv/memory/ReservationTable.hpp"
+#include "simrv/memory/TileLinkProtocolChecker.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/util/FdtGenerator.hpp"
 
@@ -94,7 +98,8 @@ void test_runtime_ram_view() {
                                         ram) == static_cast<Word>(0xA1B2C3D4U),
            "runtime RAM view maps addresses above the build-time DRAM extent without aliasing");
     expect(bytes[8] == Byte{0xD4}, "runtime RAM view uses the configured DRAM base as its offset");
-    expect(!ram.contains(kUpperDramBase + bytes.size(), 1), "runtime RAM view rejects its end address");
+    expect(!ram.contains(kUpperDramBase + bytes.size(), 1),
+           "runtime RAM view rejects its end address");
 
     std::array<Byte, 8192> pages{};
     const simrv::memory::RamView page_view(pages.data(), kUpperDramBase, pages.size());
@@ -129,7 +134,7 @@ void test_mmio_ranges() {
     simrv::memory::TlChannelD response{};
     expect(router.route_request(request, response),
            "straddling request resolves to its first node");
-    expect(response.error, "straddling MMIO request returns a bus error");
+    expect(response.denied, "straddling MMIO request returns a denied response");
     expect(inner.requests() == 0, "straddling request is not delivered to the device");
 
     request.address = 0x1100;
@@ -137,7 +142,7 @@ void test_mmio_ranges() {
     request.opcode = simrv::memory::TlOpcodeA::ArithmeticData;
     response = {};
     expect(router.route_request(request, response), "unsupported operation resolves its address");
-    expect(response.error, "unsupported MMIO operation returns a bus error");
+    expect(response.denied, "unsupported MMIO operation returns a denied response");
     expect(inner.requests() == 0, "unsupported operation is not delivered to the device");
 }
 
@@ -269,6 +274,30 @@ void test_vector_length_bytes() {
         expect(regs.vstart_mask() == static_cast<CSRValue>(vlen - 1),
                "vstart represents every index below maximum VLMAX");
     }
+}
+
+void test_vector_exception_propagation_and_status() {
+    simrv::core::Machine machine;
+    auto& cpu = machine.hart(0);
+    cpu.state().misa = simrv::isa::kMisaDefault;
+    cpu.state().mstatus = 0;
+    cpu.state().vstart = 1;
+
+    const Instruction ir = 0x00000057;
+    simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                simrv::isa::OperationId::VREDSUM_VS, ir);
+    expect(cpu.active_context().pending_exception == ExceptionCode::IllegalInstruction,
+           "requires_zero_vstart raises IllegalInstruction on active context");
+    expect(cpu.active_context().pending_tval == ir,
+           "requires_zero_vstart reports instruction as pending_tval");
+
+    cpu.active_context().pending_exception.reset();
+    cpu.state().vstart = 0;
+    cpu.state().mstatus = 0;
+    simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                simrv::isa::OperationId::VADD_VV, 0);
+    expect((cpu.state().mstatus & enum_mask(simrv::core::MstatusBit::Vs)) != 0,
+           "successful vector instruction sets mstatus.VS Dirty");
 }
 
 void test_exception_delegation_mask() {
@@ -681,7 +710,7 @@ void test_tilelink_c_coherence_semantics() {
     sample_data[3] = static_cast<Byte>(0xDD);
 
     const Address test_addr = 0x80002000;
-    dcache.insert(test_addr, sample_data.data(), simrv::memory::CoherenceState::Branch, false);
+    dcache.insert(test_addr, sample_data.data(), simrv::memory::MesiState::Shared);
 
     Word read_val = 0;
     expect(dcache.read(test_addr, read_val, 2), "D-Cache read hits in Branch state");
@@ -692,13 +721,13 @@ void test_tilelink_c_coherence_semantics() {
            "D-Cache write misses in Branch state (upgrade required)");
 
     // Insert in Trunk state (exclusive/modified)
-    dcache.insert(test_addr, sample_data.data(), simrv::memory::CoherenceState::Trunk, false);
+    dcache.insert(test_addr, sample_data.data(), simrv::memory::MesiState::Exclusive);
     expect(dcache.write(test_addr, 0x12345678, 2), "D-Cache write hits in Trunk state");
 
     // Probe with invalidation (target: None)
     simrv::memory::TlChannelB probe_req{};
     probe_req.opcode = simrv::memory::TlOpcodeB::ProbeBlock;
-    probe_req.param = static_cast<uint8_t>(simrv::memory::CoherenceState::None);
+    probe_req.cap = simrv::memory::TlCap::ToN;
     probe_req.address = test_addr;
 
     simrv::memory::TlChannelC probe_resp{};
@@ -710,10 +739,10 @@ void test_tilelink_c_coherence_semantics() {
     expect(!dcache.read(test_addr, read_val, 2), "D-Cache line is invalid after probe to None");
 
     // Test MESI Trunk -> Branch downgrade probe with dirty writeback
-    dcache.insert(test_addr, sample_data.data(), simrv::memory::CoherenceState::Trunk, true);
+    dcache.insert(test_addr, sample_data.data(), simrv::memory::MesiState::Modified);
     simrv::memory::TlChannelB downgrade_req{};
     downgrade_req.opcode = simrv::memory::TlOpcodeB::ProbeBlock;
-    downgrade_req.param = static_cast<uint8_t>(simrv::memory::CoherenceState::Branch);
+    downgrade_req.cap = simrv::memory::TlCap::ToB;
     downgrade_req.address = test_addr;
 
     simrv::memory::TlChannelC downgrade_resp{};
@@ -726,12 +755,56 @@ void test_tilelink_c_coherence_semantics() {
            "D-Cache line is still valid for reads in Branch state");
 
     // Test I-Cache probe invalidation
-    icache.insert(test_addr, sample_data.data(), simrv::memory::CoherenceState::Branch, false);
+    icache.insert(test_addr, sample_data.data(), simrv::memory::MesiState::Shared);
     uint32_t inst_val = 0;
     expect(icache.read(test_addr, inst_val), "I-Cache read hits on inserted line");
     simrv::memory::TlChannelC ic_resp{};
     expect(icache.handle_probe(probe_req, ic_resp), "I-Cache probe hits and handles request");
     expect(!icache.read(test_addr, inst_val), "I-Cache line is invalid after probe to None");
+}
+
+void test_tilelink_c_protocol_checker() {
+    using namespace simrv::memory;
+    TileLinkProtocolChecker checker;
+
+    TlChannelA get{
+        .opcode = TlOpcodeA::Get, .size = 2, .source = 7, .address = 0x80000004, .mask = 0xf0};
+    expect(checker.accept_a(get).has_value(), "checker accepts aligned masked Get");
+    expect(!checker.accept_a(get).has_value(), "checker rejects live source reuse");
+    TlChannelD get_response{
+        .opcode = TlOpcodeD::AccessAckData, .size = 2, .source = 7, .data = 0x1234};
+    expect(checker.accept_d(get_response).has_value(), "checker matches AccessAckData to Get");
+
+    TlChannelA bad_mask = get;
+    bad_mask.source = 8;
+    bad_mask.mask = 0x0f;
+    expect(!checker.accept_a(bad_mask).has_value(), "checker rejects a lane-inconsistent mask");
+
+    TlChannelA acquire{.opcode = TlOpcodeA::AcquireBlock,
+                       .grow = TlGrow::NtoB,
+                       .size = kTlBlockSize,
+                       .source = 9,
+                       .hart = 0,
+                       .address = 0x80000020};
+    expect(checker.accept_a(acquire).has_value(), "checker accepts one-block AcquireBlock");
+    TlChannelD grant{.opcode = TlOpcodeD::GrantData,
+                     .cap = TlCap::ToT,
+                     .size = kTlBlockSize,
+                     .source = 9,
+                     .sink = 3};
+    expect(checker.accept_d(grant).has_value(), "checker accepts a matching unique GrantData");
+    expect(checker.outstanding_sinks() == 1, "grant sink remains live until GrantAck");
+    expect(checker.accept_e(TlChannelE{.sink = 3}).has_value(), "checker accepts GrantAck");
+    expect(!checker.accept_e(TlChannelE{.sink = 3}).has_value(),
+           "checker rejects duplicate GrantAck");
+
+    expect(permission_for(MesiState::Invalid) == TlPermission::None,
+           "MESI Invalid maps to TileLink None");
+    expect(permission_for(MesiState::Shared) == TlPermission::Branch,
+           "MESI Shared maps to TileLink Branch");
+    expect(permission_for(MesiState::Exclusive) == TlPermission::Trunk &&
+               permission_for(MesiState::Modified) == TlPermission::Trunk,
+           "MESI Exclusive and Modified map to TileLink Trunk");
 }
 
 }  // namespace
@@ -744,6 +817,7 @@ int main() {
     test_csr_summary_and_presence_rules();
     test_sbi_hart_masks();
     test_vector_length_bytes();
+    test_vector_exception_propagation_and_status();
     test_exception_delegation_mask();
     test_satp_modes();
     test_named_misa_profiles();
@@ -762,6 +836,7 @@ int main() {
     test_dynamic_fdt_generator();
     test_pmp_semantics();
     test_tilelink_c_coherence_semantics();
+    test_tilelink_c_protocol_checker();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "Core semantic tests passed\n";
     return EXIT_SUCCESS;

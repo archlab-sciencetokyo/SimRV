@@ -1161,7 +1161,7 @@ def main():
                     objcopy_tool,
                     args.isa,
                     args.warmups,
-                    ["--ia"],
+                    ["--mode", "fast"],
                     perf_bin,
                     args.perf_events,
                 )

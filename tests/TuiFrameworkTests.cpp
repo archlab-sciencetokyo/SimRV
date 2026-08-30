@@ -21,10 +21,6 @@
 #include "simrv/tui/modals/SettingsModal.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
 
-namespace simrv::core {
-void Machine::request_reboot() {}
-}  // namespace simrv::core
-
 namespace {
 
 auto failures = 0;

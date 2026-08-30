@@ -30,4 +30,4 @@ fi
   --json "$report" \
   --compare-instruction \
   "${perf_args[@]}" \
-  --simrv-arg=--ca
+  --simrv-arg=--mode --simrv-arg=cycle-accurate
