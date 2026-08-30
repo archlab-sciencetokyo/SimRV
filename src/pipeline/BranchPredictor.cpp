@@ -13,15 +13,15 @@ constexpr uint8_t kWeaklyNotTaken = 1;
 constexpr uint8_t kWeaklyTaken = 2;
 
 [[nodiscard]] constexpr auto saturate_up(uint8_t val) noexcept -> uint8_t {
-    return std::min<uint8_t>(static_cast<uint8_t>(val + 1), kSaturatingMax);
+    return (val < 3) ? static_cast<uint8_t>(val + 1) : 3;
 }
 
 [[nodiscard]] constexpr auto saturate_down(uint8_t val) noexcept -> uint8_t {
-    return val > 0 ? static_cast<uint8_t>(val - 1) : 0;
+    return (val > 0) ? static_cast<uint8_t>(val - 1) : 0;
 }
 
 [[nodiscard]] constexpr auto is_taken_prediction(uint8_t counter) noexcept -> bool {
-    return counter >= kWeaklyTaken;
+    return (counter & 0x2) != 0;
 }
 
 }  // namespace

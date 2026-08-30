@@ -149,6 +149,9 @@ class BranchPredictor {
     void reset();
 
     [[nodiscard]] auto predict(Address pc, const DecodedInstruction& inst) -> BranchPrediction;
+    [[nodiscard]] auto predict(VirtAddr pc, const DecodedInstruction& inst) -> BranchPrediction {
+        return predict(pc.raw(), inst);
+    }
     void update(const BranchFeedback& feedback);
     void restore_speculation(const BranchPrediction& prediction);
 
