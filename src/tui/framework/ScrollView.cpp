@@ -40,10 +40,33 @@ auto ScrollView::render_row(int visible_row_idx, int width, RowRenderer renderer
     }
 
     std::string line = renderer ? renderer(logical_row, logical_col, width) : "";
-    if (bounds_.offset_x > 0 || bounds_.total_cols > width) {
-        line = crop_columns(line, bounds_.offset_x, width);
+    if (bounds_.total_cols > width || bounds_.offset_x > 0) {
+        return format_horizontal_row(line, width);
     }
     return fit_to_width(line, width);
+}
+
+auto ScrollView::format_horizontal_row(std::string_view raw_line, int width) const -> std::string {
+    if (width <= 2) {
+        return fit_to_width(raw_line, width);
+    }
+    bool const has_left = can_scroll_left();
+    bool const has_right = can_scroll_right();
+
+    if (!has_left && !has_right && bounds_.total_cols <= width) {
+        return fit_to_width(raw_line, width);
+    }
+
+    auto const theme = active_theme();
+    int const content_width = std::max(1, width - 2);
+    std::string const cropped = crop_columns(raw_line, bounds_.offset_x, content_width);
+
+    std::string const left_marker =
+        has_left ? std::format("{}{}\033[0m", theme.palette.muted, theme.glyphs.arrow_left) : " ";
+    std::string const right_marker =
+        has_right ? std::format("{}{}\033[0m", theme.palette.muted, theme.glyphs.arrow_right) : " ";
+
+    return fit_to_width(left_marker + cropped + right_marker, width);
 }
 
 auto ScrollView::header_summary(std::string_view base_title) const -> std::string {

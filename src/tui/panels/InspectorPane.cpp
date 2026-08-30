@@ -452,18 +452,12 @@ auto InspectorPane::render_trace_row(int logical_row, int width) -> std::string 
     if (logical_row < 0 || logical_row >= total) {
         return format_to_width("", width);
     }
-    std::string line = trace_buffer_->at(static_cast<std::size_t>(logical_row));
-    auto const& sv = current_scroll_view();
-    if (sv.offset_x() > 0) {
-        line = framework::crop_columns(line, sv.offset_x(), std::max(1, width - 2));
-    }
-    return format_to_width(" " + line, width);
+    return trace_buffer_->at(static_cast<std::size_t>(logical_row));
 }
 
 auto InspectorPane::render_log_bottom_row(int row_idx, int num_rows, int width) -> std::string {
     int const total = static_cast<int>(log_lines_.size());
     int const max_entries = num_rows - 1;
-    log_scroll_view_.set_geometry(total, max_entries);
     if (row_idx == 0) {
         if (total > max_entries) {
             std::string summary = log_scroll_view_.header_summary("Log");
@@ -536,10 +530,16 @@ auto InspectorPane::render_row(int row_idx, int width) -> std::string {
         : (page_ == TuiRegPage::TRACE) ? static_cast<int>(trace_buffer_ ? trace_buffer_->size() : 0)
                                        : get_total_rows(width);
 
+    bool const is_stack_active = (page_ == TuiRegPage::STACK) && supports_horizontal_scroll();
     constexpr int kStackCanvasWidth = 104;
-    constexpr int kTraceCanvasWidth = 120;
-    int const total_cols = (page_ == TuiRegPage::STACK)   ? kStackCanvasWidth
-                           : (page_ == TuiRegPage::TRACE) ? kTraceCanvasWidth
+    int max_trace_cols = width;
+    if (page_ == TuiRegPage::TRACE && trace_buffer_) {
+        for (auto const& line : *trace_buffer_) {
+            max_trace_cols = std::max(max_trace_cols, framework::display_width(line));
+        }
+    }
+    int const total_cols = is_stack_active                ? kStackCanvasWidth
+                           : (page_ == TuiRegPage::TRACE) ? max_trace_cols
                                                           : width;
     auto& sv = current_scroll_view();
     sv.set_geometry(total_logical_rows, max_content_rows, total_cols, std::max(1, width - 2));
@@ -584,15 +584,14 @@ auto InspectorPane::render_row(int row_idx, int width) -> std::string {
         }
     }
 
-    bool const pan_stack_row =
-        (page_ == TuiRegPage::STACK) && logical_row >= 1 && logical_row <= 13;
+    bool const pan_stack_row = is_stack_active && logical_row >= 1 && logical_row <= 13;
     int const render_width = pan_stack_row ? std::max(width, kStackCanvasWidth) : width;
     auto finish_row = [&](std::string res) {
         if (page_ != TuiRegPage::PIPELINE && page_ != TuiRegPage::EXPLAIN) {
             res = style_inline_separators(std::move(res));
         }
-        if (pan_stack_row && sv.offset_x() > 0) {
-            res = " " + framework::crop_columns(res, sv.offset_x(), std::max(1, width - 2));
+        if (pan_stack_row) {
+            return sv.format_horizontal_row(res, width);
         }
         return format_to_width(res, width);
     };
@@ -672,10 +671,17 @@ void InspectorPane::scroll(int lines) {
 
 void InspectorPane::scroll_horizontal(int columns) {
     if (!supports_horizontal_scroll()) return;
-    constexpr int kStackCanvasWidth = 104;
     int const viewport_width = last_width_ > 0 ? last_width_ : 60;
+    int total_cols = viewport_width;
+    if (page_ == TuiRegPage::STACK) {
+        total_cols = 104;
+    } else if (page_ == TuiRegPage::TRACE && trace_buffer_) {
+        for (auto const& line : *trace_buffer_) {
+            total_cols = std::max(total_cols, framework::display_width(line));
+        }
+    }
     auto& sv = current_scroll_view();
-    sv.set_geometry(get_total_rows(viewport_width), get_visible_content_rows(), kStackCanvasWidth,
+    sv.set_geometry(get_total_rows(viewport_width), get_visible_content_rows(), total_cols,
                     std::max(1, viewport_width - 2));
     sv.scroll_x(columns);
 }

@@ -156,6 +156,8 @@ class ScrollView {
 
     [[nodiscard]] auto render_row(int visible_row_idx, int width, RowRenderer renderer) const
         -> std::string;
+    [[nodiscard]] auto format_horizontal_row(std::string_view raw_line, int width) const
+        -> std::string;
     [[nodiscard]] auto header_summary(std::string_view base_title) const -> std::string;
 
    private:

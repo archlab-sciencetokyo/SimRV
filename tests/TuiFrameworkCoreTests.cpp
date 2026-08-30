@@ -99,5 +99,22 @@ int main() {
     expect(summary.find("above") != std::string::npos && summary.find("below") != std::string::npos,
            "header summary formats scroll indicator with counts");
 
+    ScrollView hsv;
+    hsv.set_geometry(10, 5, 100, 20);
+    auto const current_thm = active_theme();
+    auto const at_start = hsv.format_horizontal_row("012345678901234567890123456789", 20);
+    expect(display_width(at_start) == 20 &&
+               at_start.find(current_thm.glyphs.arrow_right) != std::string::npos &&
+               at_start.find(current_thm.glyphs.arrow_left) == std::string::npos,
+           "horizontal row at start shows right indicator and no left indicator");
+
+    hsv.scroll_x(10);
+    auto const in_middle = hsv.format_horizontal_row("012345678901234567890123456789", 20);
+    expect(display_width(in_middle) == 20 &&
+               in_middle.find(current_thm.glyphs.arrow_right) != std::string::npos &&
+               in_middle.find(current_thm.glyphs.arrow_left) != std::string::npos,
+           "horizontal row in middle shows both left and right indicators");
+
+    simrv::tui::set_theme_style(simrv::tui::TuiThemeStyle::ModernUnicode);
     return failures == 0 ? 0 : 1;
 }

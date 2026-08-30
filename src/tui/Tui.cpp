@@ -893,13 +893,11 @@ void Tui::handle_mouse(int x, int y, int b) {
     size_t clicked_col = 0;
     int cur_x = 1;
     int col_local_x = 0;
-    int col_width = col_widths.widths[0];
     for (size_t i = 0; i < col_widths.count; ++i) {
         int const cw = col_widths.widths[i];
         if (x >= cur_x && (x < cur_x + cw + 1 || i + 1 == col_widths.count)) {
             clicked_col = i;
             col_local_x = std::max(0, x - cur_x - 1);
-            col_width = cw;
             break;
         }
         cur_x += cw + 1;
