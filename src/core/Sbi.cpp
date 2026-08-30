@@ -216,12 +216,15 @@ auto Sbi::handle_ipi(Word func_id) -> bool {
             const size_t n_harts = cpu_.machine_->num_harts();
             for (size_t h = 0; h < n_harts; ++h) {
                 if (detail::is_hart_selected(hart_mask, hart_mask_base, h)) {
-                    cpu_.machine_->hart(h).state().mip |= enum_mask(MipBit::Ssip);
+                    auto& target_cpu = cpu_.machine_->hart(h);
+                    target_cpu.state().mip |= enum_mask(MipBit::Ssip);
+                    target_cpu.hart_status.notify_all();
                 }
             }
         } else {
             if (detail::is_hart_selected(hart_mask, hart_mask_base, cpu_.state().mhartid)) {
                 cpu_.state().mip |= enum_mask(MipBit::Ssip);
+                cpu_.hart_status.notify_all();
             }
         }
         sbi_return(static_cast<SignedWord>(SbiError::Success), 0);

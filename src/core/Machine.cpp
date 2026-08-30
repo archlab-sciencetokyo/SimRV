@@ -419,10 +419,28 @@ void OsRunner::execute(Machine& machine) {
         machine.advance_ca_global_cycle();
         return;
     }
-    machine.primary_hart().run_cycle(machine);
-    for (auto& hart : machine.secondary_harts_) {
-        if (hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started)
-            hart->run_cycle(machine);
+    const uint32_t quantum = machine.config.execution.smp_quantum;
+    if (machine.secondary_harts_.empty() || quantum <= 1) {
+        machine.primary_hart().run_cycle(machine);
+        for (auto& hart : machine.secondary_harts_) {
+            if (hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+                hart->run_cycle(machine);
+            }
+        }
+    } else {
+        for (uint32_t q = 0; q < quantum && machine.is_running(); ++q) {
+            machine.primary_hart().run_cycle(machine);
+        }
+        for (auto& hart : machine.secondary_harts_) {
+            if (hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+                for (uint32_t q = 0;
+                     q < quantum && machine.is_running() &&
+                     hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started;
+                     ++q) {
+                    hart->run_cycle(machine);
+                }
+            }
+        }
     }
 }
 
