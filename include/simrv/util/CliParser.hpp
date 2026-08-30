@@ -14,6 +14,7 @@
 namespace simrv::util {
 
 enum class CliAction : uint8_t { Run, ShowHelp, ShowVersion, ExplainInstruction };
+enum class RequestedExecutionMode : uint8_t { Fast, Detailed, CycleAccurate };
 
 struct RuntimeOptions {
     std::string fn_memimg;
@@ -46,8 +47,8 @@ struct RuntimeOptions {
     bool bp_trace = false;
     bool trace_enabled = false;
     bool use_opensbi = false;
-    bool cycle_mode_requested = false;
-    bool instruction_mode_requested = false;
+    RequestedExecutionMode execution_mode = RequestedExecutionMode::Fast;
+    bool execution_mode_explicit = false;
     bool high_contrast = false;
     bool class_mode = false;
     std::string pipeline_type = "5stage";

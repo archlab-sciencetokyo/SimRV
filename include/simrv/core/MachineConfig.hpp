@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <limits>
 #include <string>
 
@@ -18,7 +19,6 @@ namespace simrv::core {
 enum class PlatformProfile : uint8_t {
     Pcie = 0,
     Mmio = 1,
-    Hybrid = 2,
 };
 
 struct MemoryGeometry {
@@ -32,7 +32,7 @@ struct MemoryGeometry {
 
 struct ExecutionConfig {
     bool appmode = true;
-    bool multithreaded = false;
+    bool ui_worker_threaded = false;
     uint32_t num_harts = 1;
     uint32_t smp_quantum = 100;
     bool smp_multithreaded = false;
@@ -78,6 +78,7 @@ struct IsaConfig {
 struct FilesConfig {
     std::string binary_path;
     std::string disk_path;
+    bool disk_enabled = false;
     std::string memimg_path;
     std::string dvtree_path;
     std::string traplog_path;
@@ -96,9 +97,30 @@ struct MachineConfig {
     IsaConfig isa{};
     FilesConfig files{};
     NetworkConfig network{};
-    unsigned core_count = SIMRV_CORE_COUNT;
     unsigned disk_size_mb = SIMRV_DISK_SIZE_MB;
     PlatformProfile platform_profile = PlatformProfile::Pcie;
+
+    [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
+        if (memory.dram_size == 0 || (memory.dram_size & (memory.dram_size - 1U)) != 0) {
+            return std::unexpected("DRAM size must be a non-zero power of two");
+        }
+        if (execution.num_harts == 0 || execution.num_harts > 64) {
+            return std::unexpected("hart count must be between 1 and 64");
+        }
+        if (execution.smp_quantum == 0) {
+            return std::unexpected("SMP quantum must be non-zero");
+        }
+        if (isa.misa_xlen != 0 && isa.misa_xlen != 32 && isa.misa_xlen != 64) {
+            return std::unexpected("MISA XLEN must be 32, 64, or unspecified");
+        }
+        if (isa.vlen != 0 && (isa.vlen < 32 || isa.vlen > 1024 || (isa.vlen % 32) != 0)) {
+            return std::unexpected("VLEN must be a multiple of 32 between 32 and 1024");
+        }
+        if (files.disk_enabled && files.disk_path.empty()) {
+            return std::unexpected("a disk path is required when disk support is enabled");
+        }
+        return {};
+    }
 };
 
 }  // namespace simrv::core

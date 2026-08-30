@@ -53,7 +53,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     // Write startup entry to MMU debug log
     std::signal(SIGINT, SIG_IGN);  // ignore control+'C'
 
-    std::optional<RuntimeOptions> runtime_overrides;
+    std::optional<simrv::core::MachineConfig> staged_configuration;
+    std::optional<simrv::core::RuntimeProfile> staged_runtime_profile;
 
     bool keep_running = true;
     int final_exit_code = 0;
@@ -62,10 +63,6 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         auto parsed = parse_command_line(args);
         if (!parsed) {
             option_error(parsed.error());
-        }
-
-        if (runtime_overrides.has_value()) {
-            parsed->options = *runtime_overrides;
         }
 
         switch (parsed->action) {
@@ -85,13 +82,19 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             option_error("cannot open log file: " + parsed->options.fn_log, 0);
         }
 
-        auto sim_machine = std::make_unique<simrv::core::Machine>(
-            parsed->options.appmode ? simrv::core::MachineMode::Baremetal
-                                    : simrv::core::MachineMode::OperatingSystem);
+        auto machine_config = staged_configuration.value_or(parsed->options.to_machine_config());
+        if (const auto valid = machine_config.validate(); !valid) {
+            option_error(valid.error(), 0);
+        }
+        auto sim_machine = std::make_unique<simrv::core::Machine>(std::move(machine_config));
 
-        auto applied = apply_runtime_options(sim_machine.get(), parsed->options);
-        if (!applied) {
-            option_error(applied.error(), 0);
+        if (staged_runtime_profile.has_value()) {
+            sim_machine->runtime_profile = *staged_runtime_profile;
+        } else {
+            auto applied = apply_runtime_options(sim_machine.get(), parsed->options);
+            if (!applied) {
+                option_error(applied.error(), 0);
+            }
         }
 
         const int init_result = sim_machine->initialize();
@@ -99,7 +102,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             return init_result;
         }
 
-        sim_machine->s_start_time = std::chrono::steady_clock::now();
+        sim_machine->set_start_time(std::chrono::steady_clock::now());
 
         // Initialize terminal in raw mode for simulator I/O.
         TerminalModeGuard terminal_mode;
@@ -108,7 +111,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 simrv::log::warn("Terminal raw mode setup failed; continuing in current mode");
             }
         }
-        if (sim_machine->s_tuimode) {
+        if (sim_machine->tui_enabled()) {
             auto* machine_ptr = sim_machine.get();
             std::thread sim_thread([machine_ptr]() -> void { machine_ptr->run(); });
 
@@ -122,45 +125,16 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         if (sim_machine->reboot_requested) {
             simrv::log::info("Rebooting guest system...");
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            auto next_opt = parsed->options;
-            next_opt.cycle_mode_requested = sim_machine->runtime_profile.is_cycle_mode();
-            next_opt.instruction_mode_requested = !sim_machine->runtime_profile.is_cycle_mode();
-            next_opt.debug_mode = sim_machine->s_debug_mode;
-            next_opt.high_contrast = sim_machine->s_high_contrast;
-            next_opt.class_mode = sim_machine->s_class_mode;
-            next_opt.use_mix = sim_machine->s_use_mix;
-            next_opt.bp_trace = sim_machine->s_bp_trace;
-            next_opt.traplog_mode = sim_machine->s_traplog_mode;
-            next_opt.dlog_mode = sim_machine->s_dlog_mode;
-            next_opt.lockstep_mode = sim_machine->s_lockstep_mode;
-            next_opt.gdb_mode = sim_machine->s_gdb_mode;
-            next_opt.num_harts = sim_machine->s_num_harts;
-            next_opt.smp_quantum = sim_machine->s_smp_quantum;
-            next_opt.smp_multithreaded = sim_machine->s_smp_multithreaded;
-            next_opt.dram_size = sim_machine->s_dram_size;
+            auto next_config = sim_machine->take_staged_reconfiguration()
+                                   .value_or(sim_machine->configuration());
 
-            if (sim_machine->s_misa_override) {
-                next_opt.misa_override = true;
-                next_opt.misa_xlen = sim_machine->s_misa_xlen;
-            }
-
-            auto pending = sim_machine->get_pending_reboot();
-            if (!pending.binary_path.empty()) {
-                next_opt.fn_memimg = pending.binary_path;
-                if (pending.appmode.has_value()) {
-                    next_opt.appmode = *pending.appmode;
-                }
-                if (pending.disk_path.has_value()) {
-                    next_opt.fn_dskimg = *pending.disk_path;
-                    next_opt.use_disk = !pending.disk_path->empty();
-                }
-            }
-            runtime_overrides = next_opt;
+            staged_configuration = std::move(next_config);
+            staged_runtime_profile = sim_machine->runtime_profile;
             continue;
         } else {
             keep_running = false;
             final_exit_code = sim_machine->exit_code.load();
-            if (!sim_machine->s_tuimode) {
+            if (!sim_machine->tui_enabled()) {
                 sim_machine->trace().print_summary();
             }
         }

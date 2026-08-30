@@ -340,7 +340,7 @@ auto Sbi::handle_dbcn(Word func_id) -> bool {
                     const auto geometry = cpu_.machine_->memory_geometry();
                     const auto ch = static_cast<char>(
                         cpu_.machine_->ram_data()[byte_addr - geometry.dram_base]);
-                    if (cpu_.machine_->s_tuimode && cpu_.machine_->tui_controller()) {
+                    if (cpu_.machine_->tui_enabled() && cpu_.machine_->tui_controller()) {
                         cpu_.machine_->tui_controller()->handle_char_write(ch);
                     } else {
                         (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
@@ -357,7 +357,7 @@ auto Sbi::handle_dbcn(Word func_id) -> bool {
         }
         case 2: {  // sbi_debug_console_write_byte
             const auto ch = static_cast<char>(cpu_.state().regs.read(RegId::A0));
-            if (cpu_.machine_ && cpu_.machine_->s_tuimode && cpu_.machine_->tui_controller()) {
+            if (cpu_.machine_ && cpu_.machine_->tui_enabled() && cpu_.machine_->tui_controller()) {
                 cpu_.machine_->tui_controller()->handle_char_write(ch);
             } else {
                 (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
@@ -529,7 +529,7 @@ auto Sbi::handle_ecall(TrapCause cause) -> bool {
             return handle_time(0);
         case ExtId::LegacyConsolePutchar: {
             const auto ch = static_cast<char>(cpu_.state().regs.read(RegId::A0));
-            if (cpu_.machine_ && cpu_.machine_->s_tuimode && cpu_.machine_->tui_controller()) {
+            if (cpu_.machine_ && cpu_.machine_->tui_enabled() && cpu_.machine_->tui_controller()) {
                 cpu_.machine_->tui_controller()->handle_char_write(ch);
             } else {
                 (void)(::write(STDOUT_FILENO, &ch, 1) == 0);

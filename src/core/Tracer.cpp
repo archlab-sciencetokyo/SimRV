@@ -186,7 +186,7 @@ void Tracer::print_summary() {
     using simrv::util::format_with_commas;
     const auto now = std::chrono::steady_clock::now();
     const auto elapsed =
-        std::chrono::duration_cast<std::chrono::microseconds>(now - machine_.s_start_time).count();
+        std::chrono::duration_cast<std::chrono::microseconds>(now - machine_.start_time()).count();
     const auto etime = static_cast<Counter>(elapsed == 0 ? 1 : elapsed);
 
     const auto mcycle = machine_.primary_hart().clint_mmio.mcycle;
@@ -217,7 +217,7 @@ void Tracer::print_summary() {
                      std::format("RV{}", simrv::xlen::kXLenBits), machine_.num_harts());
     if (machine_.runtime_profile.is_cycle_mode()) {
         simrv::log::info("CA pipeline              : {:>22}",
-                         pipeline::pipeline_type_name(machine_.s_pipeline_type));
+                         pipeline::pipeline_type_name(machine_.execution_config().pipeline_type));
     }
     simrv::log::info("Elapsed cycles (clocks)  : {:>12}  ({})", format_scaled(mcycle),
                      format_with_commas(mcycle));
@@ -284,7 +284,7 @@ void Tracer::print_summary() {
     }
     simrv::log::info("--------------------------------------------------");
 
-    if (machine_.s_use_mix) {
+    if (machine_.instruction_mix_enabled()) {
         write_instruction_mix_report();
     }
 }
@@ -342,7 +342,7 @@ void Tracer::write_trace_snapshot() {
         }
     }
 
-    if (!machine_.s_appmode) {
+    if (!machine_.appmode_enabled()) {
         std::println(fp_trace, "{:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x}",
                      st.mstatus, D_TRACE_HEX_WIDTH, st.mtvec, D_TRACE_HEX_WIDTH, st.mscratch,
                      D_TRACE_HEX_WIDTH, st.mepc, D_TRACE_HEX_WIDTH, st.mcause, D_TRACE_HEX_WIDTH,

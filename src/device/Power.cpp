@@ -14,7 +14,8 @@ namespace simrv::device {
 PowerMmio::PowerMmio(simrv::core::Machine& machine) : machine_(machine) {}
 
 auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
-    resp.error = false;
+    resp.denied = false;
+    resp.corrupt = false;
     resp.data = 0;
 
     const bool is_write = (req.opcode == memory::TlOpcodeA::PutFullData ||
@@ -67,7 +68,7 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
                 "[Power] SiFive Test Finisher: Expected a 32-bit write at offset 0; got offset "
                 "0x{:x}, size 2^{}",
                 offset, req.size);
-            resp.error = true;
+            resp.denied = true;
         }
     } else if (req.opcode == memory::TlOpcodeA::Get) {
         const Address offset = req.address - kBaseAddress;
@@ -77,7 +78,7 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
         } else {
             simrv::log::warn("[Power] SiFive Test Finisher: Out-of-bounds read to offset 0x{:x}",
                              offset);
-            resp.error = true;
+            resp.denied = true;
         }
     }
 

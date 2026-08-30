@@ -58,9 +58,7 @@ namespace simrv::core {
 
 class BaremetalRunner;
 class OsRunner;
-
-/// Selects the composed execution policy for a machine instance.
-enum class MachineMode : uint8_t { Baremetal, OperatingSystem };
+class PlatformBuilder;
 
 struct PlatformStatusSnapshot {
     PlatformProfile profile = PlatformProfile::Pcie;
@@ -83,12 +81,6 @@ enum class ExecutionState : uint8_t {
     Running = 1,
     Paused = 2,
     Stepping = 3,
-};
-
-struct PendingRebootState {
-    std::string binary_path;
-    std::optional<bool> appmode;
-    std::optional<std::string> disk_path;
 };
 
 /// Stable, inexpensive execution state consumed by the asynchronous TUI renderer.
@@ -126,28 +118,85 @@ class Machine final {
         ExternalStop,
     };
 
-    /// Construct the simulator root object.
-    explicit Machine(MachineMode mode = MachineMode::Baremetal);
+    /// Construct the simulator root object from its complete, typed run configuration.
+    explicit Machine(MachineConfig machine_config = {});
     /// Destroy simulator resources.
     ~Machine();
     Machine(const Machine&) = delete;
     auto operator=(const Machine&) -> Machine& = delete;
     Machine(Machine&&) = delete;
     auto operator=(Machine&&) -> Machine& = delete;
+    [[nodiscard]] auto configuration() const noexcept -> const MachineConfig& { return config; }
+    [[nodiscard]] auto tui_enabled() const noexcept -> bool { return config.tui.enabled; }
+    [[nodiscard]] auto mouse_sensitivity() const noexcept -> double {
+        return config.tui.mouse_sensitivity;
+    }
+    [[nodiscard]] auto debug_diagnostics_enabled() const noexcept -> bool {
+        return config.tui.debug_diagnostics;
+    }
+    void set_debug_diagnostics_enabled(bool enabled) noexcept { config.tui.debug_diagnostics = enabled; }
+    [[nodiscard]] auto high_contrast_enabled() const noexcept -> bool {
+        return config.tui.high_contrast;
+    }
+    void set_high_contrast_enabled(bool enabled) noexcept { config.tui.high_contrast = enabled; }
+    [[nodiscard]] auto class_mode_enabled() const noexcept -> bool { return config.tui.class_mode; }
+    void set_class_mode_enabled(bool enabled) noexcept { config.tui.class_mode = enabled; }
+    [[nodiscard]] auto debugmode_enabled() const noexcept -> bool { return config.debug.debugmode; }
+    [[nodiscard]] auto device_log_enabled() const noexcept -> bool { return config.debug.dlog_mode; }
+    [[nodiscard]] auto trap_log_enabled() const noexcept -> bool { return config.debug.traplog_mode; }
+    void set_instruction_mix_enabled(bool enabled) noexcept { config.debug.use_mix = enabled; }
+    void set_branch_trace_enabled(bool enabled) noexcept { config.debug.bp_trace = enabled; }
+    void set_trap_log_enabled(bool enabled) noexcept { config.debug.traplog_mode = enabled; }
+    void set_device_log_enabled(bool enabled) noexcept { config.debug.dlog_mode = enabled; }
+    [[nodiscard]] auto appmode_enabled() const noexcept -> bool { return config.execution.appmode; }
+    [[nodiscard]] auto binary_path() const noexcept -> const std::string& {
+        return config.files.binary_path;
+    }
+    [[nodiscard]] auto disk_path() const noexcept -> const std::string& { return config.files.disk_path; }
+    [[nodiscard]] auto branch_trace_enabled() const noexcept -> bool {
+        return config.debug.bp_trace;
+    }
+    [[nodiscard]] auto instruction_mix_enabled() const noexcept -> bool {
+        return config.debug.use_mix;
+    }
+    [[nodiscard]] auto debugger_enabled() const noexcept -> bool { return config.debug.gdb_enabled; }
+    [[nodiscard]] auto debugger_port() const noexcept -> uint16_t { return config.debug.gdb_port; }
+    [[nodiscard]] auto lockstep_enabled() const noexcept -> bool {
+        return config.debug.lockstep_enabled;
+    }
+    [[nodiscard]] auto spike_binary() const noexcept -> const std::string& {
+        return config.debug.spike_bin;
+    }
+    [[nodiscard]] auto spike_elf() const noexcept -> const std::string& { return config.debug.spike_elf; }
+    [[nodiscard]] auto isa_test_tohost() const noexcept -> Address {
+        return config.isa.isatest_tohost;
+    }
     [[nodiscard]] auto memory_geometry() const noexcept -> MemoryGeometry {
-        return {.dram_base = config.memory.dram_base,
-                .dram_size = s_dram_size != 0 ? static_cast<Address>(s_dram_size)
-                                             : config.memory.dram_size};
+        return config.memory;
     }
     [[nodiscard]] auto platform_profile() const noexcept -> PlatformProfile {
-        return s_platform_profile;
+        return config.platform_profile;
     }
-    void set_platform_profile(PlatformProfile profile) noexcept {
-        config.platform_profile = profile;
-        s_platform_profile = profile;
+    [[nodiscard]] auto network_mode() const noexcept -> std::string_view { return config.network.mode; }
+    [[nodiscard]] auto execution_config() const noexcept -> const ExecutionConfig& {
+        return config.execution;
     }
-    [[nodiscard]] auto network_mode() const noexcept -> std::string_view { return s_net_mode; }
-    void set_network_mode(std::string mode) { s_net_mode = std::move(mode); }
+    [[nodiscard]] auto isa_config() const noexcept -> const IsaConfig& { return config.isa; }
+    [[nodiscard]] auto files_config() const noexcept -> const FilesConfig& { return config.files; }
+    /// Stage an architectural reconfiguration. It is validated and only takes effect after reboot.
+    [[nodiscard]] auto stage_reconfiguration(MachineConfig machine_config)
+        -> std::expected<void, std::string>;
+    [[nodiscard]] auto take_staged_reconfiguration() -> std::optional<MachineConfig>;
+    void set_start_time(std::chrono::steady_clock::time_point time) noexcept { start_time_ = time; }
+    [[nodiscard]] auto start_time() const noexcept -> std::chrono::steady_clock::time_point {
+        return start_time_;
+    }
+    /// Initialization-only derived boot state; image symbols never rewrite the input config.
+    void set_resolved_boot_state(Address start_pc, std::optional<Address> tohost_address) noexcept;
+    [[nodiscard]] auto resolved_start_pc() const noexcept -> Address { return resolved_start_pc_; }
+    [[nodiscard]] auto resolved_isatest_tohost() const noexcept -> Address {
+        return resolved_isatest_tohost_;
+    }
     [[nodiscard]] auto platform_status() const -> PlatformStatusSnapshot;
     /**
      * @brief Initialize machine state and load runtime images/configuration.
@@ -210,12 +259,6 @@ class Machine final {
     /// Reset runtime state flags and CPU state.
     void reset_state();
 
-    /// Thread-safe getter and setter for pending reboot configuration
-    void set_pending_reboot(const std::string& binary_path,
-                            std::optional<bool> appmode = std::nullopt,
-                            std::optional<std::string> disk_path = std::nullopt);
-    [[nodiscard]] auto get_pending_reboot() const -> PendingRebootState;
-    void clear_pending_reboot();
 
     std::atomic<uint64_t> tohost{0};  // Host communication register (always 64-bit for HTIF).
     std::atomic<bool> reboot_requested = false;  // Reboot requested flag.
@@ -223,64 +266,16 @@ class Machine final {
     std::atomic<bool> is_shutdown_ = false;      // System shutdown flag.
     std::atomic<StopReason> stop_reason_{StopReason::Running};
 
-    MachineConfig config{};
-
-    // ========== Simulation Configuration Flags ==========
-    std::atomic<bool> s_appmode{true};         // Baremetal/app mode (default)
-    std::atomic<bool> s_tuimode{false};        // Enable TUI monitor mode
-    std::atomic<bool> s_high_contrast{false};  // Enable high-contrast TUI mode
-    std::atomic<bool> s_class_mode{false};     // Enable educational classroom mode
-    std::atomic<bool> s_debugmode{false};      // Enable debug logging in MMIO paths
-    std::atomic<bool> s_debug_mode{false};     // Enable TUI debug diagnostics mode
-    std::atomic<bool> s_dlog_mode{false};      // Enable device request/response logging
-    std::atomic<bool> s_traplog_mode{false};   // Enable trap/SBI/exception logging
-    std::atomic<bool> s_use_disk{false};       // Enable disk image simulation
-    std::atomic<bool> s_use_mix{false};        // Enable instruction-mix statistics collection
-    std::atomic<bool> s_bp_trace{false};       // Enable branch prediction tracing
-    std::atomic<bool> s_misa_override{false};  // True when CLI explicitly selected MISA profile
     RuntimeProfile runtime_profile{};          // Resolved command-line runtime policy.
     std::atomic<bool> s_mmu_ever_used{
         false};  // Latched true the first time satp enables translation
-    std::atomic<bool> s_multithreaded{false};  // Run simulation in a background thread
-    uint32_t s_num_harts = 1;                  // Number of simulated harts (SMP cores)
-    uint32_t s_smp_quantum = 100;  // Instruction quantum per hart in cooperative SMP mode
-    std::atomic<bool> s_smp_multithreaded{false};  // Enable parallel multi-threaded SMP execution
-    uint64_t s_dram_size = 0;                      // Dynamic DRAM size in bytes (0 = default 256MB)
-    double s_mouse_sensitivity = 1.0;              // Mouse relative sensitivity factor
-
-    // ========== Debug / Co-Simulation Flags ==========
-    std::atomic<bool> s_gdb_mode{false};       // Enable GDB RSP stub
-    uint16_t s_gdb_port = 1234;                // GDB stub TCP port
-    std::atomic<bool> s_lockstep_mode{false};  // Enable Spike lockstep co-simulation
-    std::string s_spike_bin = "spike";         // Path to Spike binary
-    std::string s_spike_elf;                   // Path to Spike ELF image
-
-    // ========== Simulation Control Parameters ==========
-    Address s_start_pc = 0;                                  // Initial PC value
-    Counter s_strace = 0;                                    // Starting cycle for trace generation
-    Counter s_fincnt = std::numeric_limits<Counter>::max();  // Finish cycle count
-    Counter s_trace_begin = std::numeric_limits<Counter>::max();  // Trace begin cycle
-    Counter s_trace_end = std::numeric_limits<Counter>::max();    // Trace end cycle
-    Counter s_enabletimer = std::numeric_limits<Counter>::max();  // Timer enable cycle
-    Counter s_memimg = std::numeric_limits<Counter>::max();       // Memory image dump cycle
-
-    // ========== ISA/Privilege Configuration ==========
-    Address s_isatest_tohost = 0x80001000;        // ISA-test tohost RAM address
-    CSRValue s_misa_profile = isa::kMisaDefault;  // Selected MISA profile (without MXL)
-    unsigned int s_misa_xlen = 0;                 // Selected MISA XLEN (32 or 64, or 0 if default)
-    unsigned int s_vlen = 0;                      // Selected VLEN (bits, or 0 if default)
-
-    // ========== I/O and Logging ==========
-    std::string s_fn_memimg;     // Memory image filename
-    std::string s_fn_dskimg;     // Disk image filename
-    std::string s_fn_dvtree;     // Device-tree binary filename
-    std::string s_fn_traplog;    // Trap/exception log filename
-    std::string s_fn_cpuconfig;  // CPU config filename
-    simrv::pipeline::PipelineType s_pipeline_type =
-        simrv::pipeline::PipelineType::FiveStage;        // Pipeline microarchitecture
-    std::chrono::steady_clock::time_point s_start_time;  // Simulation start timestamp
-
    private:
+    /// Construction/reinitialization boundary; never a live architectural mutation API.
+    void apply_configuration(MachineConfig machine_config);
+    MachineConfig config{};
+    std::chrono::steady_clock::time_point start_time_{};
+    Address resolved_start_pc_ = 0;
+    Address resolved_isatest_tohost_ = 0;
     // Runtime-owned subsystem views. These aliases are private so ownership cannot be mutated by
     // adapters; public access is limited to capability-style methods below.
     simrv::core::CPU& cpu;
@@ -374,8 +369,6 @@ class Machine final {
     std::shared_ptr<simrv::device::VirtioPciSound>& pci_sound;
     std::shared_ptr<simrv::device::VirtioPciNet>& pci_net;
 
-    PlatformProfile s_platform_profile = PlatformProfile::Pcie;
-    std::string s_net_mode = "user";
     std::shared_ptr<simrv::device::VirtioMmioBlock>& mmio_disk;
     std::shared_ptr<simrv::device::VirtioMmioConsole>& mmio_console;
     std::shared_ptr<simrv::device::VirtioMmioRng>& mmio_rng;
@@ -401,6 +394,10 @@ class Machine final {
    public:
     /// Internal test support for deterministic component fixtures. Not part of the SDK contract.
     void set_ram_for_testing(Byte* ram, size_t size) noexcept;
+    void set_tui_enabled_for_testing(bool enabled) noexcept { config.tui.enabled = enabled; }
+    void set_smp_parallel_for_testing(bool enabled) noexcept {
+        config.execution.smp_multithreaded = enabled;
+    }
     [[nodiscard]] auto mutable_ram_data_for_testing() noexcept -> Byte*& { return mmem; }
     [[nodiscard]] auto allocate_ram_for_testing(size_t bytes) -> bool { return allocate_ram(bytes); }
     void release_ram_for_testing() noexcept { release_ram(); }
@@ -442,11 +439,8 @@ class Machine final {
     /// Snapshot all fast-path decisions once at a runner batch boundary.
     [[nodiscard]] auto fast_batch_policy() const -> std::optional<FastBatchPolicy>;
 
-    mutable std::mutex pending_reboot_mutex_;
-    std::string pending_binary_path_;
-    std::optional<bool> pending_appmode_;
-    std::optional<std::string> pending_disk_path_;
-
+    mutable std::mutex staged_configuration_mutex_;
+    std::optional<MachineConfig> staged_configuration_;
     void publish_lifecycle_event(LifecycleEventKind kind, int exit_status = 0);
     mutable std::mutex lifecycle_observer_mutex_;
     std::vector<std::pair<LifecycleObserverId, LifecycleObserver>> lifecycle_observers_;
@@ -465,6 +459,7 @@ class Machine final {
 
     friend class BaremetalRunner;
     friend class OsRunner;
+    friend class PlatformBuilder;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes)
 }  // namespace simrv::core

@@ -14,9 +14,6 @@
 #include "simrv/xlen/Constants.hpp"  // IWYU pragma: export
 #include "simrv/xlen/Types.hpp"
 
-#ifndef SIMRV_CORE_COUNT
-#define SIMRV_CORE_COUNT 1
-#endif
 
 #ifndef SIMRV_DISK_SIZE_MB
 #define SIMRV_DISK_SIZE_MB 256
@@ -25,9 +22,6 @@
 #ifndef SIMRV_DRAM_SIZE_MB
 #define SIMRV_DRAM_SIZE_MB 256
 #endif
-
-/// Number of simulated CPU cores.
-inline constexpr unsigned kCoreCount = SIMRV_CORE_COUNT;
 
 /// Maximum vector register length in bits.
 inline constexpr unsigned kVlenMaxBits = 1024;

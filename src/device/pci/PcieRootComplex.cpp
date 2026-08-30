@@ -99,7 +99,8 @@ auto PcieRootComplex::EcamNode::handle_request(const memory::TlChannelA& req,
     resp.opcode = is_write ? memory::TlOpcodeD::AccessAck : memory::TlOpcodeD::AccessAckData;
     resp.size = req.size;
     resp.source = req.source;
-    resp.error = false;
+    resp.denied = false;
+    resp.corrupt = false;
 
     const uint8_t size = 1 << req.size;
     if (is_write) {
@@ -119,7 +120,8 @@ auto PcieRootComplex::MmioNode::handle_request(const memory::TlChannelA& req,
     resp.opcode = is_write ? memory::TlOpcodeD::AccessAck : memory::TlOpcodeD::AccessAckData;
     resp.size = req.size;
     resp.source = req.source;
-    resp.error = false;
+    resp.denied = false;
+    resp.corrupt = false;
 
     const uint8_t size = 1 << req.size;
     if (is_write) {

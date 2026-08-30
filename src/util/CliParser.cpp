@@ -266,9 +266,6 @@ auto is_baremetal_option(std::string_view arg) -> bool {
 
 auto is_os_option(std::string_view arg) -> bool { return arg == "--os"; }
 
-auto is_ca_option(std::string_view arg) -> bool { return arg == "--ca" || arg == "-C"; }
-auto is_ia_option(std::string_view arg) -> bool { return arg == "--ia"; }
-
 auto is_tui_option(std::string_view arg) -> bool { return arg == "--tui" || arg == "-u"; }
 
 auto is_cli_option(std::string_view arg) -> bool { return arg == "--cli" || arg == "-c"; }
@@ -428,8 +425,21 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.appmode = false;
         return true;
     }
-    if (is_ca_option(arg)) {
-        result.options.cycle_mode_requested = true;
+    if (arg == "--mode") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (*value == "fast") {
+            result.options.execution_mode = RequestedExecutionMode::Fast;
+        } else if (*value == "detailed") {
+            result.options.execution_mode = RequestedExecutionMode::Detailed;
+        } else if (*value == "cycle-accurate") {
+            result.options.execution_mode = RequestedExecutionMode::CycleAccurate;
+        } else {
+            return std::unexpected(std::format(
+                "unsupported execution mode '{}' (supported: fast, detailed, cycle-accurate)",
+                *value));
+        }
+        result.options.execution_mode_explicit = true;
         return true;
     }
     if (arg == "--pipeline") {
@@ -482,10 +492,6 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
             return std::unexpected(std::format("invalid RAS size '{}'", *value));
         }
         result.options.ras_size = val;
-        return true;
-    }
-    if (is_ia_option(arg)) {
-        result.options.instruction_mode_requested = true;
         return true;
     }
     if (arg == "--smp" || arg == "-smp" || arg == "--cores") {
@@ -568,11 +574,8 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
             result.options.platform_profile = simrv::core::PlatformProfile::Pcie;
         } else if (p == "mmio") {
             result.options.platform_profile = simrv::core::PlatformProfile::Mmio;
-        } else if (p == "hybrid") {
-            result.options.platform_profile = simrv::core::PlatformProfile::Hybrid;
         } else {
-            return std::unexpected(
-                std::format("invalid platform profile: {}. Allowed: pcie, mmio, hybrid", p));
+            return std::unexpected(std::format("invalid platform profile: {}. Allowed: pcie, mmio", p));
         }
         return true;
     }
@@ -584,11 +587,8 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
             result.options.platform_profile = simrv::core::PlatformProfile::Pcie;
         } else if (p == "mmio") {
             result.options.platform_profile = simrv::core::PlatformProfile::Mmio;
-        } else if (p == "hybrid") {
-            result.options.platform_profile = simrv::core::PlatformProfile::Hybrid;
         } else {
-            return std::unexpected(
-                std::format("invalid platform profile: {}. Allowed: pcie, mmio, hybrid", p));
+            return std::unexpected(std::format("invalid platform profile: {}. Allowed: pcie, mmio", p));
         }
         return true;
     }
@@ -801,10 +801,6 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
         result.options.tuimode = (::isatty(STDIN_FILENO) != 0);
     }
 
-    if (result.options.cycle_mode_requested && result.options.instruction_mode_requested) {
-        return std::unexpected("--ca and --ia are mutually exclusive");
-    }
-
     if (result.options.explicit_cli_mode && result.options.explicit_tui_mode) {
         return std::unexpected("--cli and --tui are mutually exclusive");
     }
@@ -821,8 +817,23 @@ auto resolve_runtime_profile(const RuntimeOptions& options) -> simrv::core::Runt
     using simrv::core::InteractionMode;
     simrv::core::RuntimeProfile profile{};
     profile.interaction = options.tuimode ? InteractionMode::Tui : InteractionMode::Cli;
-    profile.engine =
-        simrv::core::select_execution_engine(options.cycle_mode_requested, profile.interaction);
+    if (!options.execution_mode_explicit) {
+        profile.engine = options.tuimode ? ExecutionEngine::InstructionObservable
+                                         : ExecutionEngine::InstructionFast;
+    } else {
+        switch (options.execution_mode) {
+            case RequestedExecutionMode::Fast:
+                profile.engine = ExecutionEngine::InstructionFast;
+                break;
+            case RequestedExecutionMode::Detailed:
+                profile.engine = ExecutionEngine::InstructionObservable;
+                break;
+            case RequestedExecutionMode::CycleAccurate:
+                profile.engine = options.tuimode ? ExecutionEngine::CycleObservable
+                                                  : ExecutionEngine::CycleFast;
+                break;
+        }
+    }
     profile.debug_diagnostics = options.debug_mode || options.debugmode;
     profile.tracing = options.bp_trace || options.trace_enabled || options.strace != 0 ||
                       options.trace_begin != std::numeric_limits<Counter>::max();
@@ -854,6 +865,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.tui.enabled = tuimode;
     cfg.tui.high_contrast = high_contrast;
     cfg.tui.class_mode = class_mode;
+    cfg.tui.debug_diagnostics = debug_mode;
     cfg.tui.mouse_sensitivity = mouse_sensitivity;
 
     cfg.debug.gdb_enabled = gdb_mode;
@@ -875,6 +887,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
 
     cfg.files.binary_path = fn_memimg;
     cfg.files.disk_path = fn_dskimg;
+    cfg.files.disk_enabled = use_disk;
     cfg.files.dvtree_path = fn_dvtree;
     cfg.files.traplog_path = fn_traplog;
     cfg.files.cpuconfig_path = fn_cpuconfig;
@@ -890,47 +903,8 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
         return std::unexpected("internal error: machine pointer is null");
     }
 
-    machine->s_fn_memimg = options.fn_memimg;
-    machine->s_fn_dskimg = options.fn_dskimg;
-    machine->s_fn_dvtree = options.fn_dvtree;
-    machine->s_fn_traplog = options.fn_traplog;
-
-    machine->s_start_pc = options.start_pc;
-    machine->s_fincnt = options.fincnt;
-    machine->s_memimg = options.memimg;
-    machine->s_strace = options.strace;
-    machine->s_trace_begin = options.trace_begin;
-    machine->s_trace_end = options.trace_end;
-    machine->s_enabletimer = options.enabletimer;
-    machine->s_isatest_tohost = options.isatest_tohost;
-    machine->s_misa_profile = misa_profile_bits(effective_misa_profile(options));
-    machine->s_misa_override = options.misa_override;
-    machine->s_misa_xlen = options.misa_xlen;
-    machine->s_vlen = options.vlen;
-
-    machine->s_appmode = options.appmode;
-    machine->s_start_pc = options.start_pc;
-    machine->s_tuimode = options.tuimode;
-    machine->s_high_contrast = options.high_contrast;
-    machine->s_class_mode = options.class_mode;
-    machine->s_debugmode = options.debugmode;
-    machine->s_debug_mode = options.debug_mode;
-    machine->s_mouse_sensitivity = options.mouse_sensitivity;
-    machine->s_dlog_mode = options.dlog_mode;
-    machine->s_traplog_mode = options.traplog_mode;
-    machine->s_use_disk = options.use_disk;
-    machine->s_num_harts = options.num_harts;
-    machine->s_smp_quantum = options.smp_quantum;
-    machine->s_smp_multithreaded = options.smp_multithreaded;
-    machine->s_dram_size = options.dram_size;
-
-    if (options.debug_mode) {
-        machine->s_use_mix = true;
-        machine->s_bp_trace = options.bp_trace;
-    } else {
-        machine->s_use_mix = options.use_mix;
-        machine->s_bp_trace = options.bp_trace;
-    }
+    // The complete machine configuration is consumed by Machine construction.  This adapter only
+    // initializes derived runtime services and per-CPU state that depend on the live machine.
 
     machine->runtime_profile = resolve_runtime_profile(options);
     simrv::log::info("Runtime profile: {} execution, {} interaction{}{}",
@@ -938,9 +912,7 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
                      machine->runtime_profile.interaction_name(),
                      machine->runtime_profile.debug_diagnostics ? ", diagnostics enabled" : "",
                      machine->runtime_profile.tracing ? ", tracing enabled" : "");
-    machine->s_fn_cpuconfig = options.fn_cpuconfig;
-    const auto parsed_pipe = *pipeline::parse_pipeline_type(options.pipeline_type);
-    machine->s_pipeline_type = parsed_pipe;
+    const auto parsed_pipe = machine->configuration().execution.pipeline_type;
     const auto platform_name =
         options.platform_profile == simrv::core::PlatformProfile::Pcie   ? "pcie"
         : options.platform_profile == simrv::core::PlatformProfile::Mmio ? "mmio"
@@ -1004,13 +976,6 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
         options.use_opensbi || !options.fn_dvtree.empty() || is_fw_payload;
 
     // Debug / co-simulation flags
-    machine->s_gdb_mode = options.gdb_mode;
-    machine->s_gdb_port = options.gdb_port;
-    machine->s_lockstep_mode = options.lockstep_mode;
-    machine->s_spike_bin = options.spike_bin;
-    machine->s_spike_elf = options.spike_elf;
-    machine->set_platform_profile(options.platform_profile);
-    machine->set_network_mode(options.net_mode);
     if (machine->tui_controller() && options.step_delay_us > 0) {
         machine->tui_controller()->step_delay_us_.store(options.step_delay_us,
                                                         std::memory_order_relaxed);
@@ -1100,10 +1065,8 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         style(kBrightGreen), style(kReset));
 
     std::print(stdout,
-               "  {}-C, --ca{}               Cycle simulation (fast in CLI, observable in TUI)\n",
-               style(kBrightGreen), style(kReset));
-    std::print(stdout, "  {}--ia{}                   Instruction engine (default)\n",
-               style(kBrightGreen), style(kReset));
+               "  {}--mode {}{}<MODE>{}      Execution: fast, detailed, or cycle-accurate\n",
+               style(kBrightGreen), style(kReset), style(kBrightBlack), style(kReset));
     std::print(stdout,
                "  {}--pipeline {}{}<TYPE>{}  CA pipeline: 3stage or 5stage (default: 5stage)\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));

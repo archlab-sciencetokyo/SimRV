@@ -620,7 +620,7 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
             "Halting simulator.",
             trap_cause_name(cause), static_cast<uint64_t>(cause), static_cast<uint64_t>(trap_pc));
         if (cpu.machine_) {
-            if (cpu.machine_->s_tuimode && cpu.machine_->tui_controller()) {
+            if (cpu.machine_->tui_enabled() && cpu.machine_->tui_controller()) {
                 cpu.machine_->tui_controller()->set_persistent_status_override(
                     "\033[1;31m UNHANDLED TRAP \033[0m");
                 cpu.machine_->tui_controller()->pause_loop();

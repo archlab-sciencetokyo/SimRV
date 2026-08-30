@@ -38,7 +38,7 @@ Uart::~Uart() {
 }
 
 void Uart::start_input_thread() {
-    if (machine_.s_tuimode) return;  // TUI manages its own input
+    if (machine_.tui_enabled()) return;  // TUI manages its own input
     input_thread_stop_.store(false, std::memory_order_relaxed);
     input_thread_ = std::thread([this]() -> void {
         constexpr int stdin_fd = STDIN_FILENO;
@@ -197,7 +197,7 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                     if (pty_.is_open()) {
                         (void)pty_.write_byte_to_master(ch);
                     }
-                    if (machine_.s_tuimode && machine_.tui_controller()) {
+                    if (machine_.tui_enabled() && machine_.tui_controller()) {
                         machine_.tui_controller()->handle_char_write(static_cast<char>(ch));
                     } else if (!pty_.is_open()) {
                         (void)(::write(STDOUT_FILENO, &ch, 1) == 0);

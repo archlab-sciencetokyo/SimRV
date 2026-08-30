@@ -90,9 +90,9 @@ class Machine::Runtime {
    public:
     using ExecutionRunner = std::variant<BaremetalRunner, OsRunner>;
 
-    explicit Runtime(Machine& machine, MachineMode mode)
+    explicit Runtime(Machine& machine, bool appmode)
         : tracer(machine), memory(machine), runner(std::in_place_type<BaremetalRunner>) {
-        if (mode == MachineMode::OperatingSystem) {
+        if (!appmode) {
             runner.emplace<OsRunner>();
         }
     }
@@ -134,8 +134,8 @@ class Machine::Runtime {
     ExecutionRunner runner;
 };
 
-Machine::Machine(MachineMode mode)
-    : runtime_(std::make_unique<Runtime>(*this, mode)),
+Machine::Machine(MachineConfig machine_config)
+    : runtime_(std::make_unique<Runtime>(*this, machine_config.execution.appmode)),
       cpu(runtime_->primary_cpu),
       secondary_harts_(runtime_->secondary_harts),
       rtc(runtime_->rtc),
@@ -170,6 +170,34 @@ Machine::Machine(MachineMode mode)
       symbols(runtime_->symbols),
       memory_(runtime_->memory) {
     cpu.machine_ = this;
+    apply_configuration(std::move(machine_config));
+}
+
+void Machine::apply_configuration(MachineConfig machine_config) {
+    config = std::move(machine_config);
+    resolved_start_pc_ = config.execution.start_pc;
+    resolved_isatest_tohost_ = config.isa.isatest_tohost;
+}
+
+void Machine::set_resolved_boot_state(Address start_pc, std::optional<Address> tohost_address) noexcept {
+    resolved_start_pc_ = start_pc;
+    if (tohost_address.has_value()) resolved_isatest_tohost_ = *tohost_address;
+}
+
+auto Machine::stage_reconfiguration(MachineConfig machine_config)
+    -> std::expected<void, std::string> {
+    if (const auto valid = machine_config.validate(); !valid) return std::unexpected(valid.error());
+    {
+        const std::scoped_lock lock(staged_configuration_mutex_);
+        staged_configuration_ = std::move(machine_config);
+    }
+    request_reboot();
+    return {};
+}
+
+auto Machine::take_staged_reconfiguration() -> std::optional<MachineConfig> {
+    const std::scoped_lock lock(staged_configuration_mutex_);
+    return std::exchange(staged_configuration_, std::nullopt);
 }
 
 auto Machine::allocate_ram(size_t bytes) -> bool {
@@ -188,7 +216,6 @@ void Machine::release_ram() noexcept {
 void Machine::set_ram_for_testing(Byte* ram, size_t size) noexcept {
     runtime_->ram.reset();
     mmem = ram;
-    s_dram_size = size;
     config.memory.dram_size = static_cast<Address>(size);
 }
 
@@ -211,14 +238,14 @@ void Machine::prepare_runner_cycle() {
 
 void Machine::execute_runner_cycle() {
     std::visit([this](auto& runner) { runner.execute(*this); }, runtime_->runner);
-    if (s_tuimode) publish_tui_execution_snapshot();
+    if (tui_enabled()) publish_tui_execution_snapshot();
 }
 
 auto Machine::execute_runner_fast_batch(uint32_t batch_size) -> bool {
     const bool executed = std::visit(
         [this, batch_size](auto& runner) { return runner.execute_fast_batch(*this, batch_size); },
         runtime_->runner);
-    if (executed && s_tuimode) publish_tui_execution_snapshot();
+    if (executed && tui_enabled()) publish_tui_execution_snapshot();
     return executed;
 }
 
@@ -253,20 +280,20 @@ void Machine::finalize_runner_cycle() {
 }
 
 auto Machine::fast_batch_policy() const -> std::optional<FastBatchPolicy> {
-    if (!runtime_profile.allows_fast_batch() || s_lockstep_mode || s_gdb_mode || s_bp_trace ||
-        s_strace != 0 || breakpoints.has_any()) {
+    if (!runtime_profile.allows_fast_batch() || lockstep_enabled() || debugger_enabled() ||
+        branch_trace_enabled() || config.execution.strace != 0 || breakpoints.has_any()) {
         return std::nullopt;
     }
-    if (s_tuimode && (!tui || tui->is_trace_active() ||
+    if (tui_enabled() && (!tui || tui->is_trace_active() ||
                       tui->step_delay_us_.load(std::memory_order_relaxed) != 0 || is_stepping())) {
         return std::nullopt;
     }
-    const bool captures_execution_detail = s_tuimode && tui && tui->captures_execution_detail();
+    const bool captures_execution_detail = tui_enabled() && tui && tui->captures_execution_detail();
     return FastBatchPolicy{
         .copy_pipeline_context = captures_execution_detail,
-        .collect_instruction_mix = static_cast<bool>(s_use_mix) || captures_execution_detail,
+        .collect_instruction_mix = instruction_mix_enabled() || captures_execution_detail,
         .poll_pause = true,
-        .has_instruction_limit = s_fincnt != std::numeric_limits<Counter>::max(),
+        .has_instruction_limit = config.execution.fincnt != std::numeric_limits<Counter>::max(),
     };
 }
 
@@ -284,12 +311,12 @@ auto BaremetalRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) 
     const auto policy = machine.fast_batch_policy();
     if (!simrv::compiler::likely(policy.has_value())) return false;
     if (policy->has_instruction_limit) {
-        if (machine.primary_hart().e_icount >= machine.s_fincnt) {
+        if (machine.primary_hart().e_icount >= machine.config.execution.fincnt) {
             machine.stop(Machine::StopReason::InstructionLimit);
             return true;
         }
         batch_size = static_cast<uint32_t>(
-            std::min<Counter>(batch_size, machine.s_fincnt - machine.primary_hart().e_icount));
+            std::min<Counter>(batch_size, machine.config.execution.fincnt - machine.primary_hart().e_icount));
     }
     machine.primary_hart().run_fast_baremetal_batch(machine, batch_size, *policy);
     return true;
@@ -300,12 +327,12 @@ void BaremetalRunner::finalize(Machine& machine) {
         machine.trace().write_trace_snapshot();
     }
     if (simrv::compiler::unlikely(machine.tohost != 0)) machine.finalize_cycle_tohost();
-    if (simrv::compiler::unlikely(machine.s_fincnt != std::numeric_limits<Counter>::max() &&
-                                  machine.primary_hart().e_icount >= machine.s_fincnt)) {
+    if (simrv::compiler::unlikely(machine.config.execution.fincnt != std::numeric_limits<Counter>::max() &&
+                                  machine.primary_hart().e_icount >= machine.config.execution.fincnt)) {
         simrv::log::info("finished by -e option");
         machine.stop(Machine::StopReason::InstructionLimit);
     }
-    if (auto* uart = machine.uart_device(); uart && machine.s_tuimode) {
+    if (auto* uart = machine.uart_device(); uart && machine.tui_enabled()) {
         uart->service_interrupts();
     } else if (uart && !uart->is_input_thread_running() &&
                simrv::compiler::unlikely((machine.primary_hart().clint_mmio.mtime & 8191) == 0)) {
@@ -314,7 +341,7 @@ void BaremetalRunner::finalize(Machine& machine) {
 }
 
 void OsRunner::start(Machine& machine) {
-    if (!machine.s_smp_multithreaded || machine.secondary_harts_.empty() ||
+    if (!machine.config.execution.smp_multithreaded || machine.secondary_harts_.empty() ||
         !machine.runtime_profile.is_instruction_mode()) {
         return;
     }
@@ -371,12 +398,12 @@ void OsRunner::prepare(Machine& machine) {
         hart->pipeline_context.pending_tval = 0;
     }
     if (simrv::compiler::likely(machine.runtime_profile.is_instruction_fast() &&
-                                machine.primary_hart().clint_mmio.mtime <= machine.s_enabletimer)) {
+                                machine.primary_hart().clint_mmio.mtime <= machine.config.execution.enabletimer)) {
         if (simrv::compiler::unlikely(machine.primary_hart().clint_mmio.mtime ==
-                                      machine.s_memimg)) {
+                                      machine.config.execution.memimg_cycle)) {
             machine.trace().dump_init_artifacts();
         }
-    } else if (machine.primary_hart().clint_mmio.mtime == machine.s_memimg) {
+    } else if (machine.primary_hart().clint_mmio.mtime == machine.config.execution.memimg_cycle) {
         machine.trace().dump_init_artifacts();
     }
     machine.primary_hart().pipeline_context.pending_exception = std::nullopt;
@@ -401,23 +428,23 @@ auto OsRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool
     // instruction-by-instruction, while presentation and runner work move to the batch boundary.
     // Keep every SMP configuration on the detailed scheduler until its ordering contract has an
     // equally explicit parallel batch design.
-    if (!policy.has_value() || machine.s_smp_multithreaded || !machine.secondary_harts_.empty()) {
+    if (!policy.has_value() || machine.config.execution.smp_multithreaded || !machine.secondary_harts_.empty()) {
         return false;
     }
     auto& cpu = machine.primary_hart();
     if (policy->has_instruction_limit) {
-        if (cpu.e_icount >= machine.s_fincnt) {
+        if (cpu.e_icount >= machine.config.execution.fincnt) {
             machine.stop(Machine::StopReason::InstructionLimit);
             return true;
         }
         batch_size =
-            static_cast<uint32_t>(std::min<Counter>(batch_size, machine.s_fincnt - cpu.e_icount));
+            static_cast<uint32_t>(std::min<Counter>(batch_size, machine.config.execution.fincnt - cpu.e_icount));
     }
     const uint32_t quantum = std::min(batch_size, machine.secondary_harts_.empty() ? 4096u : 2048u);
     for (uint32_t i = 0; i < quantum && machine.is_running(); ++i) cpu.run_cycle(machine);
     // Functional TUI batches do not enter the per-cycle finalizer, so surface pending UART RX at
     // the same explicit boundary that publishes the sampled UI snapshot.
-    if (auto* uart = machine.uart_device(); uart && machine.s_tuimode) {
+    if (auto* uart = machine.uart_device(); uart && machine.tui_enabled()) {
         uart->service_interrupts();
     }
     return true;
@@ -425,31 +452,32 @@ auto OsRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool
 
 void OsRunner::finalize(Machine& machine) {
     auto& cpu = machine.primary_hart();
-    const bool trace_window = cpu.clint_mmio.mtime >= machine.s_trace_begin &&
-                              cpu.clint_mmio.mtime <= machine.s_trace_end;
+    const bool trace_window = cpu.clint_mmio.mtime >= machine.config.execution.trace_begin &&
+                              cpu.clint_mmio.mtime <= machine.config.execution.trace_end;
     if (simrv::compiler::likely(machine.runtime_profile.is_instruction_fast() &&
-                                (!machine.s_tuimode || machine.s_multithreaded) &&
-                                machine.s_strace == 0 && !trace_window && !machine.s_bp_trace)) {
+                                (!machine.tui_enabled() ||
+                                 machine.config.execution.ui_worker_threaded) &&
+                                machine.config.execution.strace == 0 && !trace_window && !machine.branch_trace_enabled())) {
         if (simrv::compiler::unlikely(machine.tohost != 0)) machine.finalize_cycle_tohost();
     } else {
-        if (simrv::compiler::unlikely(machine.s_strace != 0 &&
-                                      cpu.clint_mmio.mtime >= machine.s_strace))
+        if (simrv::compiler::unlikely(machine.config.execution.strace != 0 &&
+                                      cpu.clint_mmio.mtime >= machine.config.execution.strace))
             machine.trace().emit_periodic_pc_trace(cpu.clint_mmio.mtime, cpu.pipeline_context.cpc);
         if (simrv::compiler::unlikely(trace_window)) machine.trace().write_trace_snapshot();
-        if (simrv::compiler::unlikely(machine.s_bp_trace))
+        if (simrv::compiler::unlikely(machine.branch_trace_enabled()))
             machine.trace().emit_branch_prediction_trace(
                 cpu.clint_mmio.mtime, cpu.pipeline_context.cpc, cpu.pipeline_context.jmp_pc,
                 cpu.pipeline_context.opcode, cpu.pipeline_context.tkn);
         machine.finalize_cycle_tohost();
     }
-    if (simrv::compiler::unlikely(machine.s_fincnt != std::numeric_limits<Counter>::max() &&
-                                  cpu.e_icount >= machine.s_fincnt)) {
+    if (simrv::compiler::unlikely(machine.config.execution.fincnt != std::numeric_limits<Counter>::max() &&
+                                  cpu.e_icount >= machine.config.execution.fincnt)) {
         simrv::log::info("finished by -e option");
         machine.stop(Machine::StopReason::InstructionLimit);
     }
     if (auto* uart = machine.uart_device();
         uart &&
-        (machine.s_tuimode || (!uart->is_input_thread_running() &&
+        (machine.tui_enabled() || (!uart->is_input_thread_running() &&
                                simrv::compiler::unlikely((cpu.clint_mmio.mtime & 8191) == 0)))) {
         uart->service_interrupts();
     }
@@ -467,30 +495,6 @@ void Machine::reset_state() {
     execution_state_.store(ExecutionState::Running, std::memory_order_release);
     execution_state_.notify_all();
     cpu.reset();
-}
-
-void Machine::set_pending_reboot(const std::string& binary_path, std::optional<bool> appmode,
-                                 std::optional<std::string> disk_path) {
-    std::lock_guard<std::mutex> lock(pending_reboot_mutex_);
-    pending_binary_path_ = binary_path;
-    pending_appmode_ = appmode;
-    pending_disk_path_ = disk_path;
-}
-
-auto Machine::get_pending_reboot() const -> PendingRebootState {
-    std::lock_guard<std::mutex> lock(pending_reboot_mutex_);
-    return PendingRebootState{
-        .binary_path = pending_binary_path_,
-        .appmode = pending_appmode_,
-        .disk_path = pending_disk_path_,
-    };
-}
-
-void Machine::clear_pending_reboot() {
-    std::lock_guard<std::mutex> lock(pending_reboot_mutex_);
-    pending_binary_path_.clear();
-    pending_appmode_.reset();
-    pending_disk_path_.reset();
 }
 
 auto Machine::add_lifecycle_observer(LifecycleObserver observer) -> LifecycleObserverId {
@@ -528,13 +532,13 @@ void Machine::publish_lifecycle_event(LifecycleEventKind kind, int exit_status) 
 
 auto Machine::is_paused() const -> bool {
     return execution_state_.load(std::memory_order_relaxed) == ExecutionState::Paused ||
-           (s_tuimode && tui && tui->is_paused());
+           (tui_enabled() && tui && tui->is_paused());
 }
 
 void Machine::pause() {
     execution_state_.store(ExecutionState::Paused, std::memory_order_release);
     execution_state_.notify_all();
-    if (s_tuimode && tui) {
+    if (tui_enabled() && tui) {
         tui->pause_loop();
     }
 }
@@ -545,7 +549,7 @@ void Machine::resume() {
     }
     execution_state_.store(ExecutionState::Running, std::memory_order_release);
     execution_state_.notify_all();
-    if (s_tuimode && tui) {
+    if (tui_enabled() && tui) {
         tui->unpause_loop();
     }
 }
@@ -592,10 +596,10 @@ void Machine::stop(StopReason reason) {
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
     execution_state_.notify_all();
     stop_runner();
-    if (!s_tuimode) {
+    if (!tui_enabled()) {
         is_running_ = false;
     }
-    if (s_tuimode && tui) {
+    if (tui_enabled() && tui) {
         tui->pause_loop();
     }
     publish_lifecycle_event(LifecycleEventKind::Stopped);
@@ -630,17 +634,17 @@ void Machine::run() {
     start_runner();
 
     // Start background TUI rendering and input thread if in TUI mode
-    if (s_tuimode && tui && !tui->is_ui_thread_running()) {
+    if (tui_enabled() && tui && !tui->is_ui_thread_running()) {
         tui->start_ui_thread();
     }
 
     // Start background stdin input thread for non-TUI mode
-    if (uart && !s_tuimode) {
+    if (uart && !tui_enabled()) {
         uart->start_input_thread();
     }
 
     // In TUI mode expose the UART through a PTY for optional external terminals.
-    if (uart && s_tuimode) {
+    if (uart && tui_enabled()) {
         if (uart->start_pty()) {
             simrv::log::info("[UART] PTY slave: {}", uart->pty_slave_path());
         } else {
@@ -650,7 +654,7 @@ void Machine::run() {
 
     while (is_running() &&
            execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
-        if (s_tuimode && tui && tui->is_tui_paused()) {
+        if (tui_enabled() && tui && tui->is_tui_paused()) {
             tui->set_sim_thread_sleeping(true);
             execution_state_.wait(ExecutionState::Paused, std::memory_order_relaxed);
             if (execution_state_.load(std::memory_order_relaxed) == ExecutionState::Paused) {
@@ -658,7 +662,7 @@ void Machine::run() {
             }
             continue;
         }
-        if (s_tuimode && tui) {
+        if (tui_enabled() && tui) {
             tui->set_sim_thread_sleeping(false);
         }
 
@@ -669,13 +673,13 @@ void Machine::run() {
             if (simrv::compiler::unlikely(tohost != 0)) {
                 finalize_cycle_tohost();
             }
-            if (simrv::compiler::unlikely(s_fincnt != std::numeric_limits<Counter>::max() &&
-                                          cpu.e_icount >= s_fincnt)) {
+            if (simrv::compiler::unlikely(config.execution.fincnt != std::numeric_limits<Counter>::max() &&
+                                          cpu.e_icount >= config.execution.fincnt)) {
                 simrv::log::info("finished by -e option");
                 stop_reason_ = StopReason::InstructionLimit;
                 is_running_ = false;
             }
-            if (!s_tuimode && uart && !uart->is_input_thread_running()) {
+            if (!tui_enabled() && uart && !uart->is_input_thread_running()) {
                 uart->service_interrupts();
             }
             continue;
@@ -685,13 +689,13 @@ void Machine::run() {
         execute_runner_cycle();
         finalize_runner_cycle();
 
-        if (s_tuimode && tui) {
+        if (tui_enabled() && tui) {
             tui->on_cycle_completed();
         }
 
         if (is_stepping()) {
             execution_state_.store(ExecutionState::Paused, std::memory_order_release);
-            if (s_tuimode && tui) {
+            if (tui_enabled() && tui) {
                 tui->set_paused(true);
             }
         }
@@ -704,7 +708,7 @@ void Machine::run() {
             }
         }
 
-        if (!s_appmode && spike_lockstep && spike_lockstep->is_running()) {
+        if (!appmode_enabled() && spike_lockstep && spike_lockstep->is_running()) {
             spike_lockstep->compare_and_report(cpu.state(), cpu.pipeline_context.cpc, cpu.e_icount);
             if (spike_lockstep->should_halt()) {
                 simrv::log::error("Lockstep: halting on divergence");
@@ -716,16 +720,16 @@ void Machine::run() {
     stop_runner();
 
     // Stop background TUI thread
-    if (s_tuimode && tui) {
+    if (tui_enabled() && tui) {
         tui->stop_ui_thread();
     }
 
     // Clean up background input thread
-    if (uart && !s_tuimode) {
+    if (uart && !tui_enabled()) {
         uart->stop_input_thread();
     }
     // Clean up PTY
-    if (uart && s_tuimode) {
+    if (uart && tui_enabled()) {
         uart->stop_pty();
     }
 }
@@ -742,7 +746,7 @@ void Machine::finalize_cycle_tohost() {
 
     if (dev == 1 && cmd == 1) {
         // HTIF Console Print
-        if (s_tuimode && tui) {
+        if (tui_enabled() && tui) {
             tui->handle_char_write(static_cast<char>(payload & 0xff));
         } else {
             std::print("{}", static_cast<char>(payload & 0xff));
@@ -759,7 +763,7 @@ void Machine::finalize_cycle_tohost() {
         const auto old_payload = static_cast<uint16_t>(tohost & 0xffffULL);
         if (old_cmd == 1) {  // CMD_PRINT_CHAR
             const char ch = static_cast<char>(old_payload & 0xff);
-            if (s_tuimode && tui) {
+            if (tui_enabled() && tui) {
                 tui->handle_char_write(ch);
             } else {
                 std::print("{}", ch);
@@ -791,7 +795,7 @@ void Machine::finalize_cycle_tohost() {
 
                 if (syscall_num == 64) {  // SYS_write
                     const Address fromhost_addr =
-                        (s_isatest_tohost != 0 ? s_isatest_tohost : 0x80001000) + 8;
+                        (isa_test_tohost() != 0 ? isa_test_tohost() : 0x80001000) + 8;
                     if (!ram.contains(arg1, static_cast<size_t>(arg2)) ||
                         !ram.contains(fromhost_addr, sizeof(uint64_t))) {
                         simrv::log::warn(
@@ -803,13 +807,13 @@ void Machine::finalize_cycle_tohost() {
                                                       static_cast<size_t>(arg2));
                     for (const Byte byte : bytes) {
                         const char ch = static_cast<char>(byte);
-                        if (s_tuimode && tui) {
+                        if (tui_enabled() && tui) {
                             tui->handle_char_write(ch);
                         } else {
                             std::print("{}", ch);
                         }
                     }
-                    if (!s_tuimode) {
+                    if (!tui_enabled()) {
                         std::fflush(stdout);
                     }
 
@@ -820,7 +824,7 @@ void Machine::finalize_cycle_tohost() {
                     return;
                 } else if (syscall_num == 93) {  // SYS_exit
                     const int code = static_cast<int>(arg0);
-                    if (s_appmode) {
+                    if (appmode_enabled()) {
                         if (code == 0) {
                             simrv::log::info("ISA TEST PASS");
                         } else {
@@ -846,7 +850,7 @@ void Machine::finalize_cycle_tohost() {
 
     // Universal tohost halting check (e.g. exit code via tohost)
     if (tohost == 1) {
-        if (s_appmode) {
+        if (appmode_enabled()) {
             simrv::log::info("ISA TEST PASS");
         } else {
             simrv::log::info("Program Halted (SUCCESS / PASS)");
@@ -857,7 +861,7 @@ void Machine::finalize_cycle_tohost() {
         return;
     } else if ((tohost & 1) != 0u) {
         const int code = static_cast<int>(tohost >> 1);
-        if (s_appmode) {
+        if (appmode_enabled()) {
             simrv::log::error("ISA TEST FAIL code={} (tohost=0x{:016x})", code, tohost.load());
         } else {
             simrv::log::error("Program Halted (FAIL / EXIT code={})", code);

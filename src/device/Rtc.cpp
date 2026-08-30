@@ -19,8 +19,7 @@ void Rtc::sync_with_system_time() {
 }
 
 auto Rtc::current_time_ns() const -> uint64_t {
-    return base_epoch_ns_ +
-           (machine_.platform_time() * 100ULL);
+    return base_epoch_ns_ + (machine_.platform_time() * 100ULL);
 }
 
 void Rtc::evaluate_alarm() {
@@ -35,7 +34,8 @@ void Rtc::evaluate_alarm() {
 
 auto Rtc::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
     evaluate_alarm();
-    resp.error = false;
+    resp.denied = false;
+    resp.corrupt = false;
     resp.data = 0;
 
     const bool is_write = (req.opcode == memory::TlOpcodeA::PutFullData ||

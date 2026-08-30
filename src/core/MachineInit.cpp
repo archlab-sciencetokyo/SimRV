@@ -13,6 +13,7 @@
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/PlatformBuilder.hpp"
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/device/AIA.hpp"
@@ -46,22 +47,17 @@ namespace {
 
 void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
                                     const simrv::debug::SymbolTable& symbols) {
-    machine.config.memory.dram_base = simrv::memory::kDramBaseAddress;
-
-    if (machine.s_start_pc == simrv::boot::kStartPc || machine.s_start_pc == 0) {
+    Address start_pc = machine.execution_config().start_pc;
+    if (start_pc == simrv::boot::kStartPc || start_pc == 0) {
         Address entry = symbols.entry_point().value_or(
             symbols.lookup_name("_start").value_or(simrv::boot::kStartPc));
         if (entry < simrv::memory::kDramBaseAddress) {
             entry += simrv::memory::kDramBaseAddress;
         }
-        machine.s_start_pc = entry;
+        start_pc = entry;
     }
-
-    if (auto tohost_sym = symbols.lookup_name("tohost"); tohost_sym.has_value()) {
-        machine.s_isatest_tohost = *tohost_sym;
-    }
-
-    machine.primary_hart().state().pc = machine.s_start_pc;
+    machine.set_resolved_boot_state(start_pc, symbols.lookup_name("tohost"));
+    machine.primary_hart().state().pc = machine.resolved_start_pc();
     if (machine.primary_hart().state().regs.xlen == 32) {
         machine.primary_hart().state().pc = static_cast<Register>(static_cast<int64_t>(
             static_cast<int32_t>(machine.primary_hart().state().pc)));
@@ -270,10 +266,10 @@ auto Machine::platform_status() const -> PlatformStatusSnapshot {
 }
 
 auto Machine::initialize() -> int {
-    if (!s_fn_cpuconfig.empty()) {
+    if (!config.files.cpuconfig_path.empty()) {
         auto model = cpu.cpu_model_config;
-        if (!simrv::core::load_cpu_config(s_fn_cpuconfig, model)) {
-            simrv::log::error("Failed to load CPU configuration file: {}", s_fn_cpuconfig);
+        if (!simrv::core::load_cpu_config(config.files.cpuconfig_path, model)) {
+            simrv::log::error("Failed to load CPU configuration file: {}", config.files.cpuconfig_path);
             return 1;
         }
         cpu.apply_cpu_model_config(model);
@@ -284,7 +280,7 @@ auto Machine::initialize() -> int {
     rtc = std::make_unique<simrv::Rtc>(*this);
     uart = std::make_unique<simrv::device::Uart>(*this);
     power = std::make_unique<simrv::device::PowerMmio>(*this);
-    if (s_tuimode) {
+    if (tui_enabled()) {
         tui = std::make_unique<simrv::tui::Tui>(*this);
     }
     const auto ram = ram_view();
@@ -311,40 +307,7 @@ auto Machine::initialize() -> int {
     aplic_s = std::make_unique<simrv::device::Aplic>(
         this, simrv::device::Aplic::Privilege::Supervisor, simrv::mmio::kAplicSBaseAddress,
         simrv::mmio::kAplicSSize, imsic_s.get());
-    const bool enable_pcie = (s_platform_profile == PlatformProfile::Pcie ||
-                              s_platform_profile == PlatformProfile::Hybrid);
-    const bool enable_mmio = (s_platform_profile == PlatformProfile::Mmio ||
-                              s_platform_profile == PlatformProfile::Hybrid);
-
-    if (enable_pcie) {
-        pcie = std::make_unique<simrv::device::PcieRootComplex>(this, aplic_s.get(), imsic_s.get());
-        pci_disk = std::make_shared<simrv::device::VirtioPciBlock>(s_fn_dskimg);
-        pci_console = std::make_shared<simrv::device::VirtioPciConsole>();
-        pci_rng = std::make_shared<simrv::device::VirtioPciRng>();
-        pci_gpu = std::make_shared<simrv::device::VirtioPciGpu>();
-        pci_input = std::make_shared<simrv::device::VirtioPciInput>();
-        pci_sound = std::make_shared<simrv::device::VirtioPciSound>();
-        pci_net = std::make_shared<simrv::device::VirtioPciNet>();
-
-        pcie->attach_device(0, 1, 0, pci_disk);
-        pcie->attach_device(0, 2, 0, pci_console);
-        pcie->attach_device(0, 3, 0, pci_rng);
-        pcie->attach_device(0, 4, 0, pci_gpu);
-        pcie->attach_device(0, 5, 0, pci_input);
-        pcie->attach_device(0, 6, 0, pci_sound);
-        pcie->attach_device(0, 7, 0, pci_net);
-    }
-
-    if (enable_mmio) {
-        mmio_disk =
-            std::make_shared<simrv::device::VirtioMmioBlock>(0x10001000, 2, this, s_fn_dskimg);
-        mmio_console = std::make_shared<simrv::device::VirtioMmioConsole>(0x10002000, 1, this);
-        mmio_rng = std::make_shared<simrv::device::VirtioMmioRng>(0x10003000, 4, this);
-        mmio_gpu = std::make_shared<simrv::device::VirtioMmioGpu>(0x10004000, 5, this);
-        mmio_input = std::make_shared<simrv::device::VirtioMmioInput>(0x10005000, 6, this);
-        mmio_sound = std::make_shared<simrv::device::VirtioMmioSound>(0x10006000, 7, this);
-        mmio_net = std::make_shared<simrv::device::VirtioMmioNet>(0x10007000, 8, this);
-    }
+    PlatformBuilder::compose(*this);
 
     memory_.system_bus().add_node(aclint_mtimer.get());
     memory_.system_bus().add_node(aclint_mswi.get());
@@ -371,10 +334,7 @@ auto Machine::initialize() -> int {
     memory_.system_bus().add_node(power.get());
     memory_.system_bus().add_node(&cpu.plic_mmio);
     memory_.system_bus().add_node(&cpu.clint_mmio);
-    const bool linux_boot = !s_appmode;
-    if (s_appmode) {
-        s_enabletimer = 0;
-    }
+    const bool linux_boot = !config.execution.appmode;
     if (linux_boot && effective_dram_size < static_cast<size_t>(0x00100000U)) {
         simrv::log::error("DRAM must be at least 1 MiB for an OS device tree");
         return 1;
@@ -385,12 +345,12 @@ auto Machine::initialize() -> int {
                                    : simrv::boot::kInitDataAddress;
 
     CSRValue initial_misa =
-        isa::misa_with_mxl(s_misa_override ? s_misa_profile : isa::kMisaDefault);
+        isa::misa_with_mxl(config.isa.misa_override ? config.isa.misa_profile : isa::kMisaDefault);
     if constexpr (simrv::xlen::kIsXLen64) {
         bool is_32bit = false;
-        if (s_misa_override && s_misa_xlen == 32) {
+        if (config.isa.misa_override && config.isa.misa_xlen == 32) {
             is_32bit = true;
-        } else if (!s_misa_override || s_misa_xlen == 0) {
+        } else if (!config.isa.misa_override || config.isa.misa_xlen == 0) {
             auto check_elf = [&](const std::string& path) -> void {
                 if (path.empty()) return;
                 std::ifstream file(path, std::ios::binary);
@@ -406,17 +366,17 @@ auto Machine::initialize() -> int {
                     }
                 }
             };
-            check_elf(s_fn_memimg);
-            check_elf(s_spike_elf);
-            if (!is_32bit && !s_fn_memimg.empty()) {
-                std::string base_path = s_fn_memimg;
+            check_elf(config.files.binary_path);
+            check_elf(config.debug.spike_elf);
+            if (!is_32bit && !config.files.binary_path.empty()) {
+                std::string base_path = config.files.binary_path;
                 size_t last_dot = base_path.find_last_of('.');
                 size_t last_slash = base_path.find_last_of("/\\");
                 if (last_dot != std::string::npos &&
                     (last_slash == std::string::npos || last_dot > last_slash)) {
                     base_path = base_path.substr(0, last_dot);
                 }
-                if (base_path != s_fn_memimg) {
+                if (base_path != config.files.binary_path) {
                     check_elf(base_path + ".elf");
                     check_elf(base_path + ".ELF");
                     check_elf(base_path + ".out");
@@ -427,8 +387,8 @@ auto Machine::initialize() -> int {
                 }
             }
             if (!is_32bit) {
-                if (s_fn_memimg.find("rv32") != std::string::npos ||
-                    s_spike_elf.find("rv32") != std::string::npos) {
+                if (config.files.binary_path.find("rv32") != std::string::npos ||
+                    config.debug.spike_elf.find("rv32") != std::string::npos) {
                     is_32bit = true;
                 }
             }
@@ -437,13 +397,13 @@ auto Machine::initialize() -> int {
             initial_misa = (initial_misa & ~(3ull << 62)) | (1ull << 62);
         }
     }
-    cpu.state().pc = s_start_pc;
+    cpu.state().pc = resolved_start_pc_;
     cpu.state().regs.write(static_cast<RegId>(10), 0);  // a0 = hartid
     cpu.state().regs.write(static_cast<RegId>(11),
                            linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);  // a1 = dtb
     cpu.state().misa = initial_misa;
     cpu.state().priv = kPrivMachine;
-    cpu.state().regs.vlen = s_vlen ? s_vlen : 256;
+    cpu.state().regs.vlen = config.isa.vlen ? config.isa.vlen : 256;
     cpu.state().initialize_lower_xlen_fields();
     if (cpu.state().regs.xlen == 32) {
         cpu.state().pc =
@@ -451,8 +411,8 @@ auto Machine::initialize() -> int {
     }
     cpu.TLB_flush();
 
-    load_image_into_ram(s_fn_memimg, ram_view(), "memory", s_tuimode);
-    symbols.load_from_elf(s_spike_elf.empty() ? s_fn_memimg : s_spike_elf, true,
+    load_image_into_ram(config.files.binary_path, ram_view(), "memory", tui_enabled());
+    symbols.load_from_elf(config.debug.spike_elf.empty() ? config.files.binary_path : config.debug.spike_elf, true,
                           runtime_profile.interaction == InteractionMode::Tui
                               ? simrv::debug::SymbolLoadMode::FullDebug
                               : simrv::debug::SymbolLoadMode::RuntimeEssentials);
@@ -460,9 +420,9 @@ auto Machine::initialize() -> int {
     resolve_start_pc_and_dram_base(*this, symbols);
 
     secondary_harts_.clear();
-    if (s_num_harts > 1) {
-        secondary_harts_.reserve(s_num_harts - 1);
-        for (uint32_t i = 1; i < s_num_harts; ++i) {
+    if (config.execution.num_harts > 1) {
+        secondary_harts_.reserve(config.execution.num_harts - 1);
+        for (uint32_t i = 1; i < config.execution.num_harts; ++i) {
             auto sec_cpu = std::make_unique<simrv::core::CPU>();
             sec_cpu->machine_ = this;
             sec_cpu->apply_cpu_model_config(cpu.cpu_model_config);
@@ -474,7 +434,7 @@ auto Machine::initialize() -> int {
             for (std::size_t r = 0; r < 32; ++r) {
                 sec_cpu->state().regs.write(static_cast<RegId>(r), 0);
             }
-            sec_cpu->state().pc = s_start_pc;
+            sec_cpu->state().pc = resolved_start_pc_;
             if (sec_cpu->state().regs.xlen == 32) {
                 sec_cpu->state().pc = static_cast<Register>(
                     static_cast<int64_t>(static_cast<int32_t>(sec_cpu->state().pc)));
@@ -491,7 +451,7 @@ auto Machine::initialize() -> int {
 
     // If launched without a binary in TUI mode, skip image-dependent init —
     // the TUI will open the LoadBinary modal and call load_program_binary() later.
-    if (s_fn_memimg.empty() && s_tuimode) {
+    if (config.files.binary_path.empty() && tui_enabled()) {
         if (tui) {
             tui->initialize();
         }
@@ -499,7 +459,7 @@ auto Machine::initialize() -> int {
     }
 
     if (linux_boot) {
-        if (!s_fn_dvtree.empty()) {
+        if (!config.files.dvtree_path.empty()) {
             if (dtb_offset >= effective_dram_size) {
                 simrv::log::error("device-tree load offset is outside DRAM");
                 return 1;
@@ -513,22 +473,19 @@ auto Machine::initialize() -> int {
                 simrv::log::error("device-tree region is outside DRAM");
                 return 1;
             }
-            load_image_into_ram(s_fn_dvtree,
+            load_image_into_ram(config.files.dvtree_path,
                                 {initialized_ram.unchecked_ptr(dtb_address), dtb_address,
                                  static_cast<Address>(dt_cap)},
-                                "device-tree", s_tuimode);
+                                "device-tree", tui_enabled());
         } else {
-            const bool enable_pcie = (s_platform_profile == PlatformProfile::Pcie ||
-                                      s_platform_profile == PlatformProfile::Hybrid);
-            const bool enable_mmio = (s_platform_profile == PlatformProfile::Mmio ||
-                                      s_platform_profile == PlatformProfile::Hybrid);
+            const auto composition = platform_composition(config.platform_profile);
             simrv::util::FdtConfig const fdt_cfg{
-                .num_harts = s_num_harts,
+                .num_harts = config.execution.num_harts,
                 .dram_base = config.memory.dram_base,
                 .dram_size = effective_dram_size,
                 .xlen = simrv::xlen::kXLenBits,
-                .enable_pcie = enable_pcie,
-                .enable_mmio = enable_mmio,
+                .enable_pcie = composition.pcie,
+                .enable_mmio = composition.mmio,
             };
             auto fdt_blob = simrv::util::FdtGenerator::generate(fdt_cfg);
             if (fdt_blob.size() <= static_cast<std::size_t>(0x00100000U)) {
@@ -537,20 +494,20 @@ auto Machine::initialize() -> int {
         }
     }
 
-    if (s_use_disk) {
-        if (pci_disk) pci_disk->load_disk(s_fn_dskimg);
-        if (mmio_disk) mmio_disk->load_disk(s_fn_dskimg);
+    if (config.files.disk_enabled) {
+        if (pci_disk) pci_disk->load_disk(config.files.disk_path);
+        if (mmio_disk) mmio_disk->load_disk(config.files.disk_path);
     }
 
-    if (s_use_mix) {
+    if (instruction_mix_enabled()) {
         cpu.e_instmix.fill(0);
     }
 
     // ---- GDB stub initialization ----
-    if (s_gdb_mode) {
+    if (debugger_enabled()) {
         try {
-            gdb_stub = std::make_unique<simrv::debug::GdbStub>(s_gdb_port);
-            simrv::log::info("GDB stub listening on port {} — waiting for connection…", s_gdb_port);
+            gdb_stub = std::make_unique<simrv::debug::GdbStub>(debugger_port());
+            simrv::log::info("GDB stub listening on port {} — waiting for connection…", debugger_port());
             gdb_stub->wait_for_connection();
             simrv::log::info("GDB client connected");
         } catch (const std::exception& ex) {
@@ -560,12 +517,12 @@ auto Machine::initialize() -> int {
     }
 
     // ---- Spike lockstep initialization ----
-    if (s_lockstep_mode) {
+    if (lockstep_enabled()) {
         // Derive the ISA string from the active MISA profile and compile-time XLEN
         const std::string isa_str = simrv::debug::spike_isa_string(cpu.state().misa);
-        const std::string spike_img = s_spike_elf.empty() ? s_fn_memimg : s_spike_elf;
+        const std::string spike_img = spike_elf().empty() ? binary_path() : spike_elf();
         spike_lockstep = std::make_unique<simrv::debug::SpikeLockstep>(
-            s_spike_bin, spike_img, s_fn_dskimg, s_fn_dvtree, isa_str);
+            spike_binary(), spike_img, disk_path(), config.files.dvtree_path, isa_str);
         simrv::log::info("Spike lockstep co-simulation active (isa={})", isa_str);
         if (!spike_lockstep->start()) {
             simrv::log::error("Failed to launch Spike for lockstep verification");
@@ -573,7 +530,7 @@ auto Machine::initialize() -> int {
         }
     }
 
-    if (s_tuimode && tui) {
+    if (tui_enabled() && tui) {
         tui->initialize();
     }
 
@@ -584,191 +541,19 @@ auto Machine::load_program_binary(const std::string& filepath) -> bool {
     if (filepath.empty()) {
         return false;
     }
-    s_fn_memimg = filepath;
-    load_image_into_ram(s_fn_memimg, ram_view(), "memory", s_tuimode);
-    symbols.load_from_elf(s_spike_elf.empty() ? s_fn_memimg : s_spike_elf, true,
-                          runtime_profile.interaction == InteractionMode::Tui
-                              ? simrv::debug::SymbolLoadMode::FullDebug
-                              : simrv::debug::SymbolLoadMode::RuntimeEssentials);
-
-    CSRValue initial_misa =
-        isa::misa_with_mxl(s_misa_override ? s_misa_profile : isa::kMisaDefault);
-    if constexpr (simrv::xlen::kIsXLen64) {
-        bool is_32bit = false;
-        if (s_misa_override && s_misa_xlen == 32) {
-            is_32bit = true;
-        } else if (!s_misa_override || s_misa_xlen == 0) {
-            auto check_elf = [&](const std::string& path) -> void {
-                if (path.empty()) return;
-                std::ifstream file(path, std::ios::binary);
-                if (file.is_open()) {
-                    std::array<char, 5> header{};
-                    if (file.read(header.data(), 5)) {
-                        if (header[0] == 0x7f && header[1] == 'E' && header[2] == 'L' &&
-                            header[3] == 'F') {
-                            if (header[4] == 1) {  // ELFCLASS32
-                                is_32bit = true;
-                            }
-                        }
-                    }
-                }
-            };
-            check_elf(s_fn_memimg);
-            check_elf(s_spike_elf);
-            if (!is_32bit && !s_fn_memimg.empty()) {
-                std::string base_path = s_fn_memimg;
-                size_t last_dot = base_path.find_last_of('.');
-                size_t last_slash = base_path.find_last_of("/\\");
-                if (last_dot != std::string::npos &&
-                    (last_slash == std::string::npos || last_dot > last_slash)) {
-                    base_path = base_path.substr(0, last_dot);
-                }
-                if (base_path != s_fn_memimg) {
-                    check_elf(base_path + ".elf");
-                    check_elf(base_path + ".ELF");
-                    check_elf(base_path + ".out");
-                    check_elf(base_path + ".OUT");
-                    check_elf(base_path + ".axf");
-                    check_elf(base_path + ".AXF");
-                    check_elf(base_path);
-                }
-            }
-            if (!is_32bit) {
-                if (s_fn_memimg.find("rv32") != std::string::npos ||
-                    s_spike_elf.find("rv32") != std::string::npos) {
-                    is_32bit = true;
-                }
-            }
-        }
-        if (is_32bit) {
-            initial_misa = (initial_misa & ~(3ull << 62)) | (1ull << 62);
-        }
-    }
-
-    cpu.state().misa = initial_misa;
-    cpu.state().initialize_lower_xlen_fields();
-
-    resolve_start_pc_and_dram_base(*this, symbols);
-
-    cpu.soft_tlb_flush();
-    cpu.TLB_flush();
-    cpu.icache.flush(true);
-    cpu.dcache.flush(true);
-    cpu.decode_cache.flush();
-    cpu.pipeline_context = simrv::pipeline::PipelineContext{};
-    cpu.trace_history_head_ = 0;
-    cpu.trace_history_size_ = 0;
-    cpu.state().load_res = 0;
-
-    for (std::size_t r = 0; r < 32; ++r) {
-        cpu.state().regs.write(static_cast<RegId>(r), 0);
-    }
-    cpu.state().pc = s_start_pc;
-    if (cpu.state().regs.xlen == 32) {
-        cpu.state().pc =
-            static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(cpu.state().pc)));
-    }
-    cpu.state().priv = kPrivMachine;
-    cpu.state().regs.write(static_cast<RegId>(10), 0);
-    const bool linux_boot = !s_appmode;
-    const auto ram = ram_view();
-    const size_t effective_dram_size = static_cast<size_t>(ram.size());
-    config.memory.dram_size = static_cast<Address>(effective_dram_size);
-    if (linux_boot && effective_dram_size < static_cast<size_t>(0x00100000U)) {
-        simrv::log::error("DRAM must be at least 1 MiB for an OS device tree");
-        return false;
-    }
-    const Address dtb_offset = linux_boot
-                                   ? static_cast<Address>(effective_dram_size -
-                                                          static_cast<size_t>(0x00100000U))
-                                   : simrv::boot::kInitDataAddress;
-    cpu.state().regs.write(static_cast<RegId>(11),
-                           linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);
-
-    tohost = 0;
-    exit_code = 0;
-    is_shutdown_ = false;
-    is_running_ = true;
-
-    if (linux_boot) {
-        if (!s_fn_dvtree.empty()) {
-            const auto dt_cap = static_cast<std::size_t>(effective_dram_size - dtb_offset);
-            const Address dtb_address = ram.base() + dtb_offset;
-            if (!ram.contains(dtb_address, dt_cap)) {
-                simrv::log::error("device-tree region is outside DRAM");
-                return false;
-            }
-            load_image_into_ram(s_fn_dvtree,
-                                {ram.unchecked_ptr(dtb_address), dtb_address,
-                                 static_cast<Address>(dt_cap)},
-                                "device-tree", s_tuimode);
-        } else {
-            const bool enable_pcie = (s_platform_profile == PlatformProfile::Pcie ||
-                                      s_platform_profile == PlatformProfile::Hybrid);
-            const bool enable_mmio = (s_platform_profile == PlatformProfile::Mmio ||
-                                      s_platform_profile == PlatformProfile::Hybrid);
-            simrv::util::FdtConfig const fdt_cfg{
-                .num_harts = s_num_harts,
-                .dram_base = config.memory.dram_base,
-                .dram_size = effective_dram_size,
-                .xlen = simrv::xlen::kXLenBits,
-                .enable_pcie = enable_pcie,
-                .enable_mmio = enable_mmio,
-            };
-            auto fdt_blob = simrv::util::FdtGenerator::generate(fdt_cfg);
-            if (fdt_blob.size() <= static_cast<std::size_t>(0x00100000U)) {
-                std::memcpy(mmem + dtb_offset, fdt_blob.data(), fdt_blob.size());
-            }
-        }
-    }
-    secondary_harts_.clear();
-    if (s_num_harts > 1) {
-        secondary_harts_.reserve(s_num_harts - 1);
-        for (uint32_t i = 1; i < s_num_harts; ++i) {
-            auto sec_cpu = std::make_unique<simrv::core::CPU>();
-            sec_cpu->machine_ = this;
-            sec_cpu->apply_cpu_model_config(cpu.cpu_model_config);
-            sec_cpu->state().mhartid = i;
-            sec_cpu->state().misa = initial_misa;
-            sec_cpu->state().initialize_lower_xlen_fields();
-            sec_cpu->hart_status.store(s_appmode ? HartStatus::Started : HartStatus::Stopped,
-                                       std::memory_order_relaxed);
-            for (std::size_t r = 0; r < 32; ++r) {
-                sec_cpu->state().regs.write(static_cast<RegId>(r), 0);
-            }
-            sec_cpu->state().pc = s_start_pc;
-            if (sec_cpu->state().regs.xlen == 32) {
-                sec_cpu->state().pc = static_cast<Register>(
-                    static_cast<int64_t>(static_cast<int32_t>(sec_cpu->state().pc)));
-            }
-            sec_cpu->state().priv = kPrivMachine;
-            sec_cpu->state().regs.write(static_cast<RegId>(10), i);
-            sec_cpu->state().regs.write(static_cast<RegId>(11),
-                                        linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);
-            sec_cpu->soft_tlb_flush();
-            sec_cpu->TLB_flush();
-            secondary_harts_.push_back(std::move(sec_cpu));
-        }
-    }
-    cpu.soft_tlb_flush();
-    cpu.TLB_flush();
-    return true;
+    auto next = configuration();
+    next.files.binary_path = filepath;
+    return stage_reconfiguration(std::move(next)).has_value();
 }
 
 auto Machine::load_disk_image(const std::string& filepath) -> bool {
     if (filepath.empty()) {
         return false;
     }
-    s_fn_dskimg = filepath;
-    s_use_disk = true;
-    bool ok = true;
-    if (pci_disk) {
-        ok &= pci_disk->load_disk(filepath);
-    }
-    if (mmio_disk) {
-        ok &= mmio_disk->load_disk(filepath);
-    }
-    return ok;
+    auto next = configuration();
+    next.files.disk_path = filepath;
+    next.files.disk_enabled = true;
+    return stage_reconfiguration(std::move(next)).has_value();
 }
 
 }  // namespace simrv::core
