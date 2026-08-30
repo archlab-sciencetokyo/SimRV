@@ -61,13 +61,13 @@ void VirtioMmioBlock::on_queue_notify(uint32_t q_idx) {
                                reinterpret_cast<std::byte*>(&desc1), sizeof(desc1))) {
                 if (hdr.type == 0) {  // READ
                     io_buffer_.resize(desc1.len);
-                    backend_.read_sectors(hdr.sector, io_buffer_.data(), desc1.len);
+                    backend_.read_sectors(hdr.sector, std::span<std::byte>(io_buffer_));
                     dma_write_bytes(desc1.addr, io_buffer_.data(), desc1.len);
                     total_written = desc1.len;
                 } else if (hdr.type == 1) {  // WRITE
                     io_buffer_.resize(desc1.len);
                     dma_read_bytes(desc1.addr, io_buffer_.data(), desc1.len);
-                    backend_.write_sectors(hdr.sector, io_buffer_.data(), desc1.len);
+                    backend_.write_sectors(hdr.sector, std::span<const std::byte>(io_buffer_));
                 }
 
                 if ((desc1.flags & virtio::kVirtqDescFNext) != 0) {

@@ -9,6 +9,7 @@
 #include <cstring>
 #include <fstream>
 #include <random>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -94,19 +95,28 @@ class BlockBackend {
     [[nodiscard]] auto is_loaded() const -> bool { return file_.is_open(); }
     [[nodiscard]] auto capacity_sectors() const -> uint64_t { return size_bytes_ / 512ULL; }
 
-    auto read_sectors(uint64_t sector, std::byte* dst, std::size_t len) -> bool {
+    auto read_sectors(uint64_t sector, std::span<std::byte> dst) -> bool {
         if (!file_.is_open()) return false;
         file_.seekg(static_cast<std::streamoff>(sector * 512ULL));
-        file_.read(reinterpret_cast<char*>(dst), static_cast<std::streamsize>(len));
-        return file_.gcount() == static_cast<std::streamsize>(len);
+        file_.read(reinterpret_cast<char*>(dst.data()), static_cast<std::streamsize>(dst.size()));
+        return file_.gcount() == static_cast<std::streamsize>(dst.size());
+    }
+
+    auto read_sectors(uint64_t sector, std::byte* dst, std::size_t len) -> bool {
+        return read_sectors(sector, std::span<std::byte>(dst, len));
+    }
+
+    auto write_sectors(uint64_t sector, std::span<const std::byte> src) -> bool {
+        if (!file_.is_open()) return false;
+        file_.seekp(static_cast<std::streamoff>(sector * 512ULL));
+        file_.write(reinterpret_cast<const char*>(src.data()),
+                    static_cast<std::streamsize>(src.size()));
+        file_.flush();
+        return true;
     }
 
     auto write_sectors(uint64_t sector, const std::byte* src, std::size_t len) -> bool {
-        if (!file_.is_open()) return false;
-        file_.seekp(static_cast<std::streamoff>(sector * 512ULL));
-        file_.write(reinterpret_cast<const char*>(src), static_cast<std::streamsize>(len));
-        file_.flush();
-        return true;
+        return write_sectors(sector, std::span<const std::byte>(src, len));
     }
 
    private:
@@ -140,10 +150,14 @@ class RngBackend {
    public:
     RngBackend() : rng_(1337) {}
 
-    void fill_random(std::byte* dst, std::size_t len) {
-        for (std::size_t i = 0; i < len; ++i) {
-            dst[i] = static_cast<std::byte>(dist_(rng_));
+    void fill_random(std::span<std::byte> dst) {
+        for (auto& byte : dst) {
+            byte = static_cast<std::byte>(dist_(rng_));
         }
+    }
+
+    void fill_random(std::byte* dst, std::size_t len) {
+        fill_random(std::span<std::byte>(dst, len));
     }
 
    private:
@@ -171,6 +185,9 @@ class NetBackend {
     void set_mode(Mode m) { mode_ = m; }
 
     void push_rx_packet(const std::vector<uint8_t>& packet) { rx_queue_.push_back(packet); }
+    void push_rx_packet(std::span<const uint8_t> packet) {
+        rx_queue_.emplace_back(packet.begin(), packet.end());
+    }
 
     [[nodiscard]] auto has_rx_packet() const -> bool { return !rx_queue_.empty(); }
 
@@ -181,16 +198,20 @@ class NetBackend {
         return pkt;
     }
 
-    void send_tx_packet(const uint8_t* data, std::size_t len) {
-        std::vector<uint8_t> pkt(data, data + len);
+    void send_tx_packet(std::span<const uint8_t> data) {
+        std::vector<uint8_t> pkt(data.begin(), data.end());
         tx_history_.push_back(pkt);
         if (mode_ == Mode::User) {
             // Loopback ARP/ICMP frame simulation if requested
-            if (len >= 14) {
+            if (data.size() >= 14) {
                 // If destination matches our MAC or broadcast, echo
                 push_rx_packet(pkt);
             }
         }
+    }
+
+    void send_tx_packet(const uint8_t* data, std::size_t len) {
+        send_tx_packet(std::span<const uint8_t>(data, len));
     }
 
     [[nodiscard]] auto tx_packet_count() const -> std::size_t { return tx_history_.size(); }
