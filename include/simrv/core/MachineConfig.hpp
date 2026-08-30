@@ -28,6 +28,9 @@ struct MemoryGeometry {
     [[nodiscard]] constexpr auto contains(Address address, size_t size = 1) const -> bool {
         return memory::address_range_contains(dram_base, dram_size, address, size);
     }
+    [[nodiscard]] constexpr auto contains(PhysAddr address, size_t size = 1) const -> bool {
+        return memory::address_range_contains(dram_base, dram_size, address.raw(), size);
+    }
 };
 
 struct ExecutionConfig {

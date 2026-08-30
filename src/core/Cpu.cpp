@@ -181,7 +181,15 @@ auto CPU::read_csr(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
     return csr_file.read(addr);
 }
 
+auto CPU::read_csr(CsrNumber addr) const -> std::expected<CSRValue, ExceptionCode> {
+    return csr_file.read(addr);
+}
+
 auto CPU::write_csr(CSRAddress addr, CSRValue wdata) -> std::expected<void, ExceptionCode> {
+    return csr_file.write(addr, wdata);
+}
+
+auto CPU::write_csr(CsrNumber addr, CSRValue wdata) -> std::expected<void, ExceptionCode> {
     return csr_file.write(addr, wdata);
 }
 

@@ -853,6 +853,18 @@ void test_strong_semantic_types() {
     expect(cycle_csr.privilege_level() == PrivilegeLevel::User,
            "cycle CSR privilege level is User");
 
+    // Register Identifier concept and classifications
+    static_assert(simrv::xlen::RegisterIdentifier<RegId>, "RegId satisfies RegisterIdentifier");
+    static_assert(simrv::xlen::RegisterIdentifier<FpRegId>, "FpRegId satisfies RegisterIdentifier");
+    static_assert(simrv::xlen::RegisterIdentifier<VecRegId>,
+                  "VecRegId satisfies RegisterIdentifier");
+    expect(std::to_underlying(VecRegId::V5) == 5, "VecRegId underlying value");
+
+    // MemoryGeometry with PhysAddr
+    simrv::core::MemoryGeometry geom{.dram_base = 0x80000000ULL, .dram_size = 0x10000000ULL};
+    expect(geom.contains(PhysAddr{0x80001000ULL}), "MemoryGeometry contains PhysAddr within DRAM");
+    expect(!geom.contains(PhysAddr{0x10000000ULL}), "MemoryGeometry rejects PhysAddr outside DRAM");
+
     // std::format and std::hash validation
     const auto formatted_p = std::format("0x{:x}", p1);
     expect(formatted_p.find("80000000") != std::string::npos,

@@ -481,6 +481,77 @@ enum class FpRegId : uint8_t {
     Ft11 = 31
 };
 
+using FRegId = FpRegId;
+
+enum class VecRegId : uint8_t {
+    V0 = 0,
+    V1 = 1,
+    V2 = 2,
+    V3 = 3,
+    V4 = 4,
+    V5 = 5,
+    V6 = 6,
+    V7 = 7,
+    V8 = 8,
+    V9 = 9,
+    V10 = 10,
+    V11 = 11,
+    V12 = 12,
+    V13 = 13,
+    V14 = 14,
+    V15 = 15,
+    V16 = 16,
+    V17 = 17,
+    V18 = 18,
+    V19 = 19,
+    V20 = 20,
+    V21 = 21,
+    V22 = 22,
+    V23 = 23,
+    V24 = 24,
+    V25 = 25,
+    V26 = 26,
+    V27 = 27,
+    V28 = 28,
+    V29 = 29,
+    V30 = 30,
+    V31 = 31
+};
+
+using VRegId = VecRegId;
+
+template <typename T>
+concept RegisterIdentifier =
+    std::same_as<T, RegId> || std::same_as<T, FpRegId> || std::same_as<T, VecRegId>;
+
+namespace simrv {
+using ::CsrNumber;
+using ::FpRegId;
+using ::FRegId;
+using ::HartId;
+using ::PhysAddr;
+using ::RegId;
+using ::RegisterIdentifier;
+using ::StrongAddress;
+using ::VecRegId;
+using ::VirtAddr;
+using ::VRegId;
+
+namespace xlen {
+using ::CsrNumber;
+using ::FpRegId;
+using ::FRegId;
+using ::HartId;
+using ::PhysAddr;
+using ::RegId;
+using ::RegisterIdentifier;
+using ::StrongAddress;
+using ::VecRegId;
+using ::VirtAddr;
+using ::VRegId;
+}  // namespace xlen
+}  // namespace simrv
+
 template <typename EnumType>
 constexpr auto enum_mask(EnumType bit) {
     return std::to_underlying(bit);

@@ -304,6 +304,7 @@ class CPU {
      * invalid.
      */
     [[nodiscard]] auto read_csr(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCode>;
+    [[nodiscard]] auto read_csr(CsrNumber addr) const -> std::expected<CSRValue, ExceptionCode>;
 
     /**
      * @brief Writes a value to a specified Control and Status Register (CSR).
@@ -312,6 +313,7 @@ class CPU {
      * @return A void result if successful, or an ExceptionCode on failure.
      */
     auto write_csr(CSRAddress addr, CSRValue val) -> std::expected<void, ExceptionCode>;
+    auto write_csr(CsrNumber addr, CSRValue val) -> std::expected<void, ExceptionCode>;
 
     /**
      * @brief Handles execution return from a machine-mode trap (MRET instruction).
