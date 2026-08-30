@@ -8,6 +8,8 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/memory/CoherenceHub.hpp"
+#include "simrv/memory/TileLinkBus.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
@@ -164,7 +166,7 @@ auto InspectorPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_
 
     switch (logical_row) {
         case 0:
-            return section_line("L1 Cache Performance & Replacements (MESI)", width);
+            return section_line("Cache Hierarchy & Coherence (L1/L2/L3 MESI)", width);
         case 1: {
             uint64_t h = ic.hit_count(), m = ic.miss_count(), r = ic.replacement_count();
             uint64_t tot = h + m;
@@ -172,13 +174,13 @@ auto InspectorPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_
                 (tot == 0) ? 0.0 : 100.0 * static_cast<double>(m) / static_cast<double>(tot);
             if (width < 50) {
                 return format_to_width(
-                    std::format(" {}IC\033[0m H:{}{}\033[0m M:{}{}\033[0m MR:{}{:>4.1f}%\033[0m",
+                    std::format(" {}L1I\033[0m H:{}{}\033[0m M:{}{}\033[0m MR:{}{:>4.1f}%\033[0m",
                                 kThemeText, kThemeMint, simrv::util::format_scaled(h), kThemeCoral,
                                 simrv::util::format_scaled(m), kThemePeach, mr),
                     width);
             }
             return format_to_width(
-                std::format(" {}ICache\033[0m Hits: {}{:<7}\033[0m Miss: {}{:<6}\033[0m MR: "
+                std::format(" {}L1 ICache\033[0m Hits: {}{:<7}\033[0m Miss: {}{:<6}\033[0m MR: "
                             "{}{:>5.1f}%\033[0m Evict: {}{:<5}\033[0m",
                             kThemeText, kThemeMint, simrv::util::format_with_commas(h), kThemeCoral,
                             simrv::util::format_with_commas(m), kThemePeach, mr, kThemeSky,
@@ -192,13 +194,13 @@ auto InspectorPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_
                 (tot == 0) ? 0.0 : 100.0 * static_cast<double>(m) / static_cast<double>(tot);
             if (width < 50) {
                 return format_to_width(
-                    std::format(" {}DC\033[0m H:{}{}\033[0m M:{}{}\033[0m MR:{}{:>4.1f}%\033[0m",
+                    std::format(" {}L1D\033[0m H:{}{}\033[0m M:{}{}\033[0m MR:{}{:>4.1f}%\033[0m",
                                 kThemeText, kThemeMint, simrv::util::format_scaled(h), kThemeCoral,
                                 simrv::util::format_scaled(m), kThemePeach, mr),
                     width);
             }
             return format_to_width(
-                std::format(" {}DCache\033[0m Hits: {}{:<7}\033[0m Miss: {}{:<6}\033[0m MR: "
+                std::format(" {}L1 DCache\033[0m Hits: {}{:<7}\033[0m Miss: {}{:<6}\033[0m MR: "
                             "{}{:>5.1f}%\033[0m Evict: {}{:<5}\033[0m",
                             kThemeText, kThemeMint, simrv::util::format_with_commas(h), kThemeCoral,
                             simrv::util::format_with_commas(m), kThemePeach, mr, kThemeSky,
@@ -206,9 +208,12 @@ auto InspectorPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_
                 width);
         }
         case 3: {
-            uint64_t ih = ic.hit_count(), im = ic.miss_count();
-            uint64_t itot = ih + im;
-            double iratio = (itot == 0) ? 1.0 : static_cast<double>(ih) / static_cast<double>(itot);
+            const auto& coh = machine_.memory().system_bus().coherence_hub();
+            const auto& l3 = coh.l3_cache();
+            uint64_t l3_h = l3.hit_count(), l3_m = l3.miss_count();
+            uint64_t l3_tot = l3_h + l3_m;
+            double l3_ratio =
+                (l3_tot == 0) ? 1.0 : static_cast<double>(l3_h) / static_cast<double>(l3_tot);
 
             uint64_t dh = dc.hit_count(), dm = dc.miss_count();
             uint64_t dtot = dh + dm;
@@ -216,19 +221,19 @@ auto InspectorPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_
 
             if (width < 45) {
                 int bar_w = std::max(3, (width - 24) / 2);
-                std::string ibar = make_bar(iratio, bar_w);
                 std::string dbar = make_bar(dratio, bar_w);
+                std::string l3bar = make_bar(l3_ratio, bar_w);
                 return format_to_width(
-                    std::format(" {}IC\033[0m[{}]{:>4.0f}% {}DC\033[0m[{}]{:>4.0f}%", kThemeText,
-                                ibar, iratio * 100.0, kThemeText, dbar, dratio * 100.0),
+                    std::format(" {}L1\033[0m[{}]{:>4.0f}% {}L3\033[0m[{}]{:>4.0f}%", kThemeText,
+                                dbar, dratio * 100.0, kThemeText, l3bar, l3_ratio * 100.0),
                     width);
             }
             int bar_w = std::max(4, (width - 46) / 2);
-            std::string ibar = make_bar(iratio, bar_w);
             std::string dbar = make_bar(dratio, bar_w);
+            std::string l3bar = make_bar(l3_ratio, bar_w);
             return format_to_width(
-                std::format(" {}IC\033[0m [{}] {:>5.1f}%  │  {}DC\033[0m [{}] {:>5.1f}%",
-                            kThemeText, ibar, iratio * 100.0, kThemeText, dbar, dratio * 100.0),
+                std::format(" {}L1D\033[0m [{}] {:>5.1f}%  │  {}L3 LLC\033[0m [{}] {:>5.1f}%",
+                            kThemeText, dbar, dratio * 100.0, kThemeText, l3bar, l3_ratio * 100.0),
                 width);
         }
         case 4: {

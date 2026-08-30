@@ -1,8 +1,8 @@
 {
   "$schema": "schemas/release-manifest.schema.json",
   "schema_version": 2,
-  "version": "2.1.0-alpha.1",
-  "release_tag": "v2.1.0-alpha.1",
+  "version": "2.1.0-alpha.2",
+  "release_tag": "v2.1.0-alpha.2",
   "host_support": {
     "os": "Linux",
     "architecture": "x86_64",
@@ -11,9 +11,15 @@
       "clang": "20+"
     }
   },
-  "guest_profiles": ["RV32GCBV", "RV64GCBV"],
+  "guest_profiles": [
+    "RV32GCBV",
+    "RV64GCBV"
+  ],
   "compliance_scope": "docs/RISCV_COMPLIANCE.md",
-  "optional_features": ["Spike lockstep", "GDB RSP"],
+  "optional_features": [
+    "Spike lockstep",
+    "GDB RSP"
+  ],
   "dependencies": {
     "riscv_tests": {
       "url": "https://github.com/riscv-software-src/riscv-tests.git",
@@ -53,26 +59,109 @@
     }
   },
   "required_suites": [
-    {"id": "native", "ctest_label": "regress", "arches": [32, 64], "compilers": ["gcc", "clang"], "allow_skip": false},
-    {"id": "isa", "ctest_label": "isa", "arches": [32, 64], "compilers": ["gcc", "clang"], "allow_skip": false},
-    {"id": "vector", "ctest_label": "vector", "arches": [32, 64], "compilers": ["gcc"], "allow_skip": false},
-    {"id": "linux-pty", "ctest_label": "linux", "arches": [32, 64], "compilers": ["gcc"], "allow_skip": false},
-    {"id": "asan-ubsan", "ctest_label": "regress", "arches": [64], "compilers": ["gcc"], "allow_skip": false},
-    {"id": "tsan", "ctest_label": "thread", "arches": [64], "compilers": ["gcc"], "allow_skip": false},
-    {"id": "package", "ctest_label": "release", "arches": [32, 64], "compilers": ["gcc"], "allow_skip": false}
+    {
+      "id": "native",
+      "ctest_label": "regress",
+      "arches": [
+        32,
+        64
+      ],
+      "compilers": [
+        "gcc",
+        "clang"
+      ],
+      "allow_skip": false
+    },
+    {
+      "id": "isa",
+      "ctest_label": "isa",
+      "arches": [
+        32,
+        64
+      ],
+      "compilers": [
+        "gcc",
+        "clang"
+      ],
+      "allow_skip": false
+    },
+    {
+      "id": "vector",
+      "ctest_label": "vector",
+      "arches": [
+        32,
+        64
+      ],
+      "compilers": [
+        "gcc"
+      ],
+      "allow_skip": false
+    },
+    {
+      "id": "linux-pty",
+      "ctest_label": "linux",
+      "arches": [
+        32,
+        64
+      ],
+      "compilers": [
+        "gcc"
+      ],
+      "allow_skip": false
+    },
+    {
+      "id": "asan-ubsan",
+      "ctest_label": "regress",
+      "arches": [
+        64
+      ],
+      "compilers": [
+        "gcc"
+      ],
+      "allow_skip": false
+    },
+    {
+      "id": "tsan",
+      "ctest_label": "thread",
+      "arches": [
+        64
+      ],
+      "compilers": [
+        "gcc"
+      ],
+      "allow_skip": false
+    },
+    {
+      "id": "package",
+      "ctest_label": "release",
+      "arches": [
+        32,
+        64
+      ],
+      "compilers": [
+        "gcc"
+      ],
+      "allow_skip": false
+    }
   ],
   "performance": {
     "policy": "evidence-only",
     "blocking": false,
     "minimum_samples": 5,
     "statistic": "median",
-    "required_provenance": ["host", "compiler", "simrv_revision", "workload_revision", "configuration"]
+    "required_provenance": [
+      "host",
+      "compiler",
+      "simrv_revision",
+      "workload_revision",
+      "configuration"
+    ]
   },
   "artifacts": [
-    "SimRV-rv32-linux-x86_64-v2.1.0-alpha.1.tar.gz",
-    "SimRV-rv64-linux-x86_64-v2.1.0-alpha.1.tar.gz",
-    "SimRV-docs-v2.1.0-alpha.1.tar.gz",
-    "SimRV-repro-v2.1.0-alpha.1.tar.gz",
-    "SimRV-evidence-v2.1.0-alpha.1.json"
+    "SimRV-rv32-linux-x86_64-v2.1.0-alpha.2.tar.gz",
+    "SimRV-rv64-linux-x86_64-v2.1.0-alpha.2.tar.gz",
+    "SimRV-docs-v2.1.0-alpha.2.tar.gz",
+    "SimRV-repro-v2.1.0-alpha.2.tar.gz",
+    "SimRV-evidence-v2.1.0-alpha.2.json"
   ]
 }

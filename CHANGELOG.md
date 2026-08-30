@@ -29,6 +29,19 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   symbols needed for guest control.
 - Consolidated TUI setting layouts and corrected modal cursor, scroll, and mouse hit-testing.
 
+## [v2.1.0-alpha.2] — 2026-08-31
+
+Alpha 2 release featuring high-performance floating-point acceleration, multi-level cache hierarchy, quantum-sliced and multi-threaded SMP execution, and compile-time 2D LUT instruction decoding.
+
+### Key Capabilities & Enhancements
+
+- **Lazy MXCSR Floating-Point Unit**: Replaced per-instruction libc rounding mode transitions with host MXCSR state tracking, accelerating FP execution (e.g. `mm.riscv` double-precision matrix multiplication from 13.2 MIPS to 51.6 MIPS, 1.35x faster than Spike).
+- **Hardware FMA Acceleration**: Direct `__builtin_fmaf` / `__builtin_fma` fused multiply-add intrinsics with single-rounding precision and branchless canonical quiet NaN fixups.
+- **Multi-Level Cache Hierarchy**: Fast $O(1)$ L1 tag matching, 64 KiB 8-way L2 Unified Intermediate Cache, and 512 KiB 16-way shared Last-Level Cache (LLC) integrated with TileLink-C Directory Coherence.
+- **Quantum-Sliced & True MT-SMP Schedulers**: Configurable instruction burst scheduling (`smp_quantum`) and parallel `std::jthread` worker threads with atomic SBI v2.0 Hart State Management (HSM) states and direct IPI wakeups, achieving 108.2 MIPS on `mt-matmul.riscv` (1.72x faster than Spike).
+- **Compile-Time 2D LUT Decoder**: Replaced nested switch branches with `constexpr` 2D lookup tables for ALU, OP-IMM, CSR, AMO, and FMA instruction groups, reaching 235.5 MIPS core speed on Montgomery multiplication.
+- **TUI Alignment**: Hierarchical L1/L2/L3 cache metrics in the Cache Inspector, Status Bar SMP indicators (`[SMP: 4 (MT)]`), and live decoder LUT hit metrics.
+
 ## [v2.1.0-alpha.1] — 2026-08-20
 
 Alpha prerelease introducing full **Multi-Hart Symmetric Multiprocessing (SMP)** support, **TileLink-C 5-Channel Directory Cache Coherence (MESI)**, and fast inline directory lookups.

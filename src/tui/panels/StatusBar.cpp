@@ -103,11 +103,15 @@ struct LeftHeaderLayout {
     std::string const environment = machine.appmode_enabled() ? "App" : "OS";
     if (!cycle_mode) {
         result.mode = environment + " · IA";
-        return result;
+    } else {
+        auto const type = machine.hart(selected_hart).pipeline_sim.config.pipeline_type;
+        result.mode = std::format("{} · CA {}-stage", environment,
+                                  type == simrv::pipeline::PipelineType::ThreeStage ? 3 : 5);
     }
-    auto const type = machine.hart(selected_hart).pipeline_sim.config.pipeline_type;
-    result.mode = std::format("{} · CA {}-stage", environment,
-                              type == simrv::pipeline::PipelineType::ThreeStage ? 3 : 5);
+    if (machine.num_harts() > 1) {
+        const std::string smp_mode = machine.execution_config().smp_multithreaded ? "MT" : "Q";
+        result.mode += std::format(" · SMP:{} ({})", machine.num_harts(), smp_mode);
+    }
     return result;
 }
 
