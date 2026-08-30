@@ -432,8 +432,9 @@ auto Machine::initialize() -> int {
             sec_cpu->state().mhartid = i;
             sec_cpu->state().misa = initial_misa;
             sec_cpu->state().initialize_lower_xlen_fields();
-            sec_cpu->use_opensbi = cpu.use_opensbi;
-            sec_cpu->hart_status.store(HartStatus::Started, std::memory_order_relaxed);
+            const bool sec_started = appmode_enabled();
+            sec_cpu->hart_status.store(sec_started ? HartStatus::Started : HartStatus::Stopped,
+                                       std::memory_order_relaxed);
             for (std::size_t r = 0; r < 32; ++r) {
                 sec_cpu->state().regs.write(static_cast<RegId>(r), 0);
             }

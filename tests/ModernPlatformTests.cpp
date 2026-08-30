@@ -1625,7 +1625,8 @@ void test_ia_multithreaded_smp_execution() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    simrv::core::Machine machine(simrv::core::MachineConfig{.execution = {.appmode = false}});
+    simrv::core::Machine machine(simrv::core::MachineConfig{
+        .execution = {.appmode = true, .smp_multithreaded = true}});
     std::vector<Byte> ram(1024 * 1024, Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
@@ -1702,7 +1703,7 @@ void test_quantum_smp_baremetal_execution() {
         if (!condition) std::abort();
     };
     simrv::core::Machine machine(simrv::core::MachineConfig{
-        .execution = {.appmode = false, .smp_quantum = 100, .smp_multithreaded = false}});
+        .execution = {.appmode = true, .smp_quantum = 100, .smp_multithreaded = false}});
     std::vector<Byte> ram(1024 * 1024, Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;

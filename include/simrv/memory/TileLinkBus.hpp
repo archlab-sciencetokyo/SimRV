@@ -116,7 +116,7 @@ class TileLinkBus : public Bus {
     uint64_t read_count_ = 0;
     uint64_t write_count_ = 0;
 
-    mutable std::mutex bus_mutex_;
+    mutable std::recursive_mutex bus_mutex_;
     MmioRouter router_;
     CoherenceHub coherence_hub_;
     TileLinkProtocolChecker protocol_checker_;

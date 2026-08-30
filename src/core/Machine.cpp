@@ -319,17 +319,15 @@ void BaremetalRunner::start(Machine& machine) {
             while (!stop_token.stop_requested() && machine.is_running() &&
                    workers_running_.load(std::memory_order_relaxed)) {
                 if (hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started) {
-                    hart.hart_status.wait(HartStatus::Stopped, std::memory_order_relaxed);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
                     continue;
                 }
-                if (machine.execution_state_.load(std::memory_order_relaxed) ==
-                    ExecutionState::Paused) {
-                    machine.execution_state_.wait(ExecutionState::Paused,
-                                                  std::memory_order_relaxed);
+                if (machine.is_paused()) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
                     continue;
                 }
                 for (uint32_t step = 0;
-                     step < kWorkerBatch && machine.is_running() &&
+                     step < kWorkerBatch && machine.is_running() && !machine.is_paused() &&
                      hart.hart_status.load(std::memory_order_relaxed) == HartStatus::Started;
                      ++step) {
                     hart.run_cycle_baremetal(machine);
@@ -341,10 +339,15 @@ void BaremetalRunner::start(Machine& machine) {
 
 void BaremetalRunner::stop_threads() {
     workers_running_.store(false, std::memory_order_release);
+    const auto self_id = std::this_thread::get_id();
     for (auto& thread : worker_threads_) {
         if (thread.joinable()) {
             thread.request_stop();
-            thread.join();
+            if (thread.get_id() != self_id) {
+                thread.join();
+            } else {
+                thread.detach();
+            }
         }
     }
     worker_threads_.clear();
@@ -446,17 +449,15 @@ void OsRunner::start(Machine& machine) {
             while (!stop_token.stop_requested() && machine.is_running() &&
                    workers_running_.load(std::memory_order_relaxed)) {
                 if (hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started) {
-                    hart.hart_status.wait(HartStatus::Stopped, std::memory_order_relaxed);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
                     continue;
                 }
-                if (machine.execution_state_.load(std::memory_order_relaxed) ==
-                    ExecutionState::Paused) {
-                    machine.execution_state_.wait(ExecutionState::Paused,
-                                                  std::memory_order_relaxed);
+                if (machine.is_paused()) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
                     continue;
                 }
                 for (uint32_t step = 0;
-                     step < kWorkerBatch && machine.is_running() &&
+                     step < kWorkerBatch && machine.is_running() && !machine.is_paused() &&
                      hart.hart_status.load(std::memory_order_relaxed) == HartStatus::Started;
                      ++step) {
                     hart.run_cycle(machine);
@@ -468,10 +469,15 @@ void OsRunner::start(Machine& machine) {
 
 void OsRunner::stop_threads() {
     workers_running_.store(false, std::memory_order_release);
+    const auto self_id = std::this_thread::get_id();
     for (auto& thread : worker_threads_) {
         if (thread.joinable()) {
             thread.request_stop();
-            thread.join();
+            if (thread.get_id() != self_id) {
+                thread.join();
+            } else {
+                thread.detach();
+            }
         }
     }
     worker_threads_.clear();
@@ -653,6 +659,7 @@ auto Machine::is_paused() const -> bool {
 void Machine::pause() {
     execution_state_.store(ExecutionState::Paused, std::memory_order_release);
     execution_state_.notify_all();
+    for (auto& hart : secondary_harts_) hart->hart_status.notify_all();
     if (tui_enabled() && tui) {
         tui->pause_loop();
     }
@@ -664,6 +671,7 @@ void Machine::resume() {
     }
     execution_state_.store(ExecutionState::Running, std::memory_order_release);
     execution_state_.notify_all();
+    for (auto& hart : secondary_harts_) hart->hart_status.notify_all();
     if (tui_enabled() && tui) {
         tui->unpause_loop();
     }
@@ -675,6 +683,7 @@ void Machine::step() {
     }
     execution_state_.store(ExecutionState::Stepping, std::memory_order_release);
     execution_state_.notify_all();
+    for (auto& hart : secondary_harts_) hart->hart_status.notify_all();
 }
 
 auto Machine::stop_reason_name(StopReason reason) noexcept -> std::string_view {
@@ -710,6 +719,7 @@ void Machine::stop(StopReason reason) {
     is_shutdown_ = true;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
     execution_state_.notify_all();
+    for (auto& hart : secondary_harts_) hart->hart_status.notify_all();
     stop_runner();
     if (!tui_enabled()) {
         is_running_ = false;
@@ -726,6 +736,7 @@ void Machine::request_reboot() {
     is_running_ = false;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
     execution_state_.notify_all();
+    for (auto& hart : secondary_harts_) hart->hart_status.notify_all();
     stop_runner();
     publish_lifecycle_event(LifecycleEventKind::RebootRequested);
 }
@@ -737,6 +748,7 @@ void Machine::request_exit(int status) {
     is_running_ = false;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
     execution_state_.notify_all();
+    for (auto& hart : secondary_harts_) hart->hart_status.notify_all();
     stop_runner();
     publish_lifecycle_event(LifecycleEventKind::ExitRequested, status);
 }

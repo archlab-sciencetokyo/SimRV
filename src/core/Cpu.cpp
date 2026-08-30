@@ -387,7 +387,8 @@ void CPU::run_cycle(Machine& machine) {
             }
 
             if (success) {
-                if (simrv::compiler::likely(state_.priv == kPrivMachine &&
+                if (simrv::compiler::likely(machine.appmode_enabled() &&
+                                            state_.priv == kPrivMachine &&
                                             (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
                     success = execute_stage(machine);
                     if (success) {
@@ -411,7 +412,7 @@ void CPU::run_cycle(Machine& machine) {
         // Observable instruction mode uses the same semantic stages without coroutine state.
         bool success = fetch_stage(machine, state_.pc) && decode_stage(machine);
         if (success) {
-            if (simrv::compiler::likely(state_.priv == kPrivMachine &&
+            if (simrv::compiler::likely(machine.appmode_enabled() && state_.priv == kPrivMachine &&
                                         (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
                 success = execute_stage(machine);
                 if (success) {

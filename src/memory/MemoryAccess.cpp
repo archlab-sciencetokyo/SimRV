@@ -183,10 +183,19 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             }
             TlChannelA req{};
             req.opcode = TlOpcodeA::Get;
-            req.size = static_cast<uint8_t>(funct3 & 0x3);
+            const unsigned req_size = static_cast<uint8_t>(funct3 & 0x3);
+            const unsigned req_size_bytes = 1u << req_size;
+            const bool is_aligned = (addr & (req_size_bytes - 1u)) == 0;
+
             req.hart = static_cast<HartId>(cpu.state().mhartid);
             req.source = make_tl_source(req.hart, TlPort::Data);
-            req.address = addr;
+            if (is_aligned) {
+                req.size = static_cast<uint8_t>(req_size);
+                req.address = addr;
+            } else {
+                req.size = kTlBeatSize;
+                req.address = addr & ~(static_cast<Address>(kTlBeatBytes - 1u));
+            }
             mem.system_bus().send_request(req);
 
             if (cpu.machine_->runtime_profile.is_cycle_mode()) {
@@ -203,7 +212,10 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                     cpu.active_context().pending_tval = v_addr;
                 }
                 Word rdata = resp.data;
-                const unsigned req_size_bytes = 1u << (funct3 & 0x3u);
+                if (!is_aligned) {
+                    const unsigned lane_offset = static_cast<unsigned>(addr & (kTlBeatBytes - 1u));
+                    rdata >>= (lane_offset * 8u);
+                }
                 const unsigned bits = 8 * req_size_bytes;
                 if (bits < simrv::xlen::kXLenBits) {
                     const Word mask = (static_cast<Word>(1) << bits) - 1;
@@ -511,15 +523,31 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
         }
 
         TlChannelA req{};
-        req.opcode = TlOpcodeA::PutFullData;
-        req.size = static_cast<uint8_t>(funct3 & 0x3);
+        const unsigned req_size = static_cast<uint8_t>(funct3 & 0x3);
+        const unsigned req_size_bytes = 1u << req_size;
+        const bool is_aligned = (addr & (req_size_bytes - 1u)) == 0;
+
         req.hart = static_cast<HartId>(cpu.state().mhartid);
         req.source = make_tl_source(req.hart, TlPort::Data);
-        req.address = addr;
-        const unsigned req_size_bytes = 1u << (funct3 & 0x3u);
+        if (is_aligned) {
+            req.opcode = TlOpcodeA::PutFullData;
+            req.size = static_cast<uint8_t>(req_size);
+            req.address = addr;
+            req.mask = TlChannelA::compute_mask(req.size, req.address);
+        } else {
+            req.opcode = TlOpcodeA::PutPartialData;
+            req.size = kTlBeatSize;
+            req.address = addr & ~(static_cast<Address>(kTlBeatBytes - 1u));
+            const unsigned lane_offset = static_cast<unsigned>(addr & (kTlBeatBytes - 1u));
+            req.mask = ((TlMask{1} << req_size_bytes) - 1u) << lane_offset;
+        }
         const unsigned bits = 8 * req_size_bytes;
         req.data =
             (bits < simrv::xlen::kXLenBits) ? (data & ((static_cast<Word>(1) << bits) - 1)) : data;
+        if (!is_aligned) {
+            const unsigned lane_offset = static_cast<unsigned>(addr & (kTlBeatBytes - 1u));
+            req.data <<= (lane_offset * 8u);
+        }
         if (cpu.machine_->runtime_profile.is_cycle_mode() && transfer.active) {
             TileLinkBus::TimedResponse timed{};
             if (!mem.system_bus().try_get_timed_response(transfer.source, timed)) {
