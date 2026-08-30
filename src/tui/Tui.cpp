@@ -29,9 +29,9 @@
 #include "simrv/tui/TuiFrameRenderer.hpp"
 #include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/TuiTheme.hpp"
-#include "simrv/tui/panels/LeftPane.hpp"
-#include "simrv/tui/panels/RightPane.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/tui/panels/StatusBar.hpp"
+#include "simrv/tui/panels/TerminalPane.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::tui {
@@ -161,8 +161,8 @@ void Tui::set_paused(bool p) {
 }
 
 void Tui::initialize() {
-    left_pane_ = std::make_unique<LeftPane>(machine_);
-    right_pane_ = std::make_unique<RightPane>();
+    left_pane_ = std::make_unique<InspectorPane>(machine_);
+    right_pane_ = std::make_unique<TerminalPane>();
     status_bar_ = std::make_unique<StatusBar>(machine_);
 
     set_tui_theme(get_tui_theme());
@@ -503,7 +503,7 @@ void Tui::render_build_lines(int left_pane_width, int right_pane_width, int num_
                     bool draw_cursor = is_live && (i == cursor_abs_line) && vt_.is_cursor_visible();
                     int sel_start_x = -1;
                     int sel_end_x = -1;
-                    if (selection_.is_active && selection_.pane == SelectionPane::RightPane) {
+                    if (selection_.is_active && selection_.pane == SelectionPane::TerminalPane) {
                         if (i >= vt_sel_start && i <= vt_sel_end) {
                             if (vt_sel_start == vt_sel_end) {
                                 sel_start_x = sx1;
@@ -573,7 +573,7 @@ void Tui::render_draw_sixel(int left_pane_width, int right_pane_width, int num_r
     if (!modal_.is_active()) {
         for (int i = 0; i < num_rows; ++i) {
             std::string left = left_pane_->render_row(i, left_pane_width);
-            if (selection_.is_active && selection_.pane == SelectionPane::LeftPane) {
+            if (selection_.is_active && selection_.pane == SelectionPane::InspectorPane) {
                 int sy1 = selection_.start_y - 4;
                 int sy2 = selection_.end_y - 4;
                 int sx1 = selection_.start_x;
@@ -860,12 +860,12 @@ void Tui::copy_active_selection() {
     if (!selection_.is_active) return;
     std::string text;
 
-    if (selection_.pane == SelectionPane::RightPane && right_pane_) {
+    if (selection_.pane == SelectionPane::TerminalPane && right_pane_) {
         int start_line = get_right_pane_start_line(cached_num_rows_);
         int start_r = start_line + (selection_.start_y - 4);
         int end_r = start_line + (selection_.end_y - 4);
         text = vt_.get_text_in_range(start_r, selection_.start_x, end_r, selection_.end_x);
-    } else if (selection_.pane == SelectionPane::LeftPane && left_pane_) {
+    } else if (selection_.pane == SelectionPane::InspectorPane && left_pane_) {
         int start_r = selection_.start_y - 4;
         int end_r = selection_.end_y - 4;
         text = left_pane_->get_text_in_range(start_r, selection_.start_x, end_r, selection_.end_x,
@@ -961,22 +961,12 @@ void Tui::handle_mouse(int x, int y, int b) {
             render(true);
             return;
         }
-    }
 
-    if (!paused_) {
-        if (y >= 5) {
-            int const logical_row = (y - 5) + left_pane_->get_scroll_offset();
-            if (left_pane_->is_running_label_click(logical_row, col_local_x, col_width)) {
-                pause_loop();
-            }
+        if (clicked_col < workbench_slots_.size()) {
+            left_pane_->set_page(workbench_slots_[clicked_col].page);
         }
-        return;
+        handle_mouse_left_pane(col_local_x + 2, y, b);
     }
-
-    if (clicked_col < workbench_slots_.size()) {
-        left_pane_->set_page(workbench_slots_[clicked_col].page);
-    }
-    handle_mouse_left_pane(col_local_x + 2, y, b);
 }
 
 void Tui::sync_workbench_slots() {
@@ -1019,15 +1009,25 @@ void Tui::sync_workbench_slots() {
             workbench_slots_.resize(3);
         }
     } else if (desired == 4) {
-        while (workbench_slots_.size() < 4) {
-            if (workbench_slots_.size() == 1)
-                workbench_slots_.push_back({TuiRegPage::PIPELINE, 0});
-            else if (workbench_slots_.size() == 2)
-                workbench_slots_.push_back({TuiRegPage::STACK, 0});
-            else
-                workbench_slots_.push_back({TuiRegPage::DISASM, 0});
+        if (workbench_slots_.size() == 1) {
+            workbench_slots_ = {{TuiRegPage::GPR, 0},
+                                {TuiRegPage::STACK, 0},
+                                {TuiRegPage::TRACE, 0},
+                                {TuiRegPage::DISASM, 0}};
+        } else if (workbench_slots_.size() == 2) {
+            auto last = workbench_slots_.back();
+            workbench_slots_.pop_back();
+            workbench_slots_.push_back({TuiRegPage::STACK, 0});
+            workbench_slots_.push_back({TuiRegPage::TRACE, 0});
+            workbench_slots_.push_back(last);
+        } else if (workbench_slots_.size() == 3) {
+            auto last = workbench_slots_.back();
+            workbench_slots_.pop_back();
+            workbench_slots_.push_back({TuiRegPage::TRACE, 0});
+            workbench_slots_.push_back(last);
+        } else if (workbench_slots_.size() > 4) {
+            workbench_slots_.resize(4);
         }
-        if (workbench_slots_.size() > 4) workbench_slots_.resize(4);
     }
 
     if (focused_slot_index_ >= workbench_slots_.size()) {
@@ -1537,8 +1537,9 @@ void Tui::update() {
                 machine_.request_exit();
                 return;
             case InputRoute::Guest:
-                // The integrated terminal is an attached UART endpoint. The external PTY slave is
-                // another endpoint for the same UART and remains available to independent tools.
+                // The integrated terminal is an attached UART endpoint. The external PTY slave
+                // is another endpoint for the same UART and remains available to independent
+                // tools.
                 write_guest_input(byte);
                 break;
         }

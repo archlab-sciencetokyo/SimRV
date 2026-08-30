@@ -1,5 +1,5 @@
 /**
- * @file LeftPaneBp.cpp
+ * @file InspectorPaneBp.cpp
  * @brief Implements Branch Predictor Inspector and Telemetry for TUI Left Pane.
  */
 #include <algorithm>
@@ -12,13 +12,13 @@
 #include "simrv/pipeline/BranchPredictor.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/tui/TuiTheme.hpp"
-#include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
 
 namespace simrv::tui {
 
-auto LeftPane::render_bp_stats(const simrv::core::CPU& cpu, int logical_row, int col_width,
-                               int right_width) -> std::string {
+auto InspectorPane::render_bp_stats(const simrv::core::CPU& cpu, int logical_row, int col_width,
+                                    int right_width) -> std::string {
     int const width = col_width + right_width;
 
     if (!machine_.runtime_profile.is_cycle_mode()) {
@@ -33,9 +33,8 @@ auto LeftPane::render_bp_stats(const simrv::core::CPU& cpu, int logical_row, int
                                    width);
         }
         if (logical_row == 6) {
-            std::string text =
-                (width < 45) ? "Enable Cycle-Accurate mode [,]"
-                             : "Enable cycle mode [,] or --mode cycle-accurate";
+            std::string text = (width < 45) ? "Enable Cycle-Accurate mode [,]"
+                                            : "Enable cycle mode [,] or --mode cycle-accurate";
             int text_w = get_display_width(text);
             int spaces = std::max(1, (width - text_w) / 2);
             return format_to_width(

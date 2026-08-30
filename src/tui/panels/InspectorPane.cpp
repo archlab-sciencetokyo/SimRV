@@ -1,8 +1,8 @@
 /**
- * @file LeftPane.cpp
- * @brief Implements LeftPane widget rendering base and infrastructure.
+ * @file InspectorPane.cpp
+ * @brief Implements InspectorPane widget rendering base and infrastructure.
  */
-#include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 
 #include <algorithm>
 #include <array>
@@ -35,19 +35,16 @@ namespace {
 
 }  // namespace
 
-auto LeftPane::is_single_column(int width) const -> bool {
+auto InspectorPane::is_single_column(int width) const -> bool {
     bool const is_reg_page =
         (page_ == TuiRegPage::GPR || page_ == TuiRegPage::FPR || page_ == TuiRegPage::VEC);
     if (!is_reg_page) return false;
     return width < 60;
 }
 
-auto LeftPane::get_total_rows(int width) -> int {
+auto InspectorPane::get_total_rows(int width) -> int {
     if (page_ == TuiRegPage::EXPLAIN) {
         return static_cast<int>(get_explain_rows(width).size());
-    }
-    if (page_ == TuiRegPage::TRACE) {
-        return static_cast<int>(trace_buffer_ ? trace_buffer_->size() : 0);
     }
     bool const single_column = is_single_column(width);
     // Semantic machine state needs five rows, unlike the legacy CSR dump.  The
@@ -58,7 +55,7 @@ auto LeftPane::get_total_rows(int width) -> int {
     return base_rows + debug_rows;
 }
 
-auto LeftPane::section_line(const std::string& title, int width) -> std::string {
+auto InspectorPane::section_line(const std::string& title, int width) -> std::string {
     auto const& glyphs = get_theme_glyphs(get_active_theme_style());
     std::string safe_title = title;
     if (get_display_width(safe_title) + 4 > width && width >= 10) {
@@ -82,8 +79,8 @@ auto LeftPane::section_line(const std::string& title, int width) -> std::string 
     }
 }
 
-auto LeftPane::make_field(const std::string& label, const std::string& value,
-                          const char* value_color, int label_pad) -> std::string {
+auto InspectorPane::make_field(const std::string& label, const std::string& value,
+                               const char* value_color, int label_pad) -> std::string {
     if (label_pad == 0) {
         return std::format(" {}{}\033[0m: {}{}\033[0m", kThemeText, label, value_color, value);
     } else {
@@ -92,16 +89,16 @@ auto LeftPane::make_field(const std::string& label, const std::string& value,
     }
 }
 
-auto LeftPane::render_pair(const std::string& l1, const std::string& v1, const char* c1,
-                           const std::string& l2, const std::string& v2, const char* c2,
-                           int col_width, int right_width, int label_pad) -> std::string {
+auto InspectorPane::render_pair(const std::string& l1, const std::string& v1, const char* c1,
+                                const std::string& l2, const std::string& v2, const char* c2,
+                                int col_width, int right_width, int label_pad) -> std::string {
     return format_to_width(make_field(l1, v1, c1, label_pad), col_width) +
            format_to_width(make_field(l2, v2, c2, label_pad), right_width);
 }
 
-auto LeftPane::get_running_label_start_row() const -> int { return 0; }
+auto InspectorPane::get_running_label_start_row() const -> int { return 0; }
 
-auto LeftPane::render_active_spinner(int logical_row, int width) -> std::string {
+auto InspectorPane::render_active_spinner(int logical_row, int width) -> std::string {
     if (logical_row == get_running_label_start_row()) {
         const std::string banner =
             std::format("{}● RUNNING\033[0m {}· sampled state\033[0m  {}Ctrl-P\033[0m pause",
@@ -116,22 +113,22 @@ auto LeftPane::render_active_spinner(int logical_row, int width) -> std::string 
     return format_to_width("", width);
 }
 
-auto LeftPane::is_running_label_click(int logical_row, int col, int width) const -> bool {
+auto InspectorPane::is_running_label_click(int logical_row, int col, int width) const -> bool {
     int const start_row = get_running_label_start_row();
 
     return logical_row == start_row && col >= 0 && col < width;
 }
 
-void LeftPane::set_page(TuiRegPage page) {
+void InspectorPane::set_page(TuiRegPage page) {
     if (!machine_.runtime_profile.is_cycle_mode()) {
         if (page == TuiRegPage::CACHE) page = TuiRegPage::STACK;
         if (page == TuiRegPage::BPRED || page == TuiRegPage::HAZARD) page = TuiRegPage::PIPELINE;
     }
-    if (page_ != page) horizontal_scroll_offset_ = 0;
+    if (page_ != page) reset_horizontal_scroll();
     page_ = page;
 }
 
-void LeftPane::set_selected_hart(size_t hart) {
+void InspectorPane::set_selected_hart(size_t hart) {
     if (machine_.num_harts() > 0) {
         selected_hart_ = hart % machine_.num_harts();
     } else {
@@ -141,13 +138,13 @@ void LeftPane::set_selected_hart(size_t hart) {
     update_cache();
 }
 
-auto LeftPane::current_cpu() const -> const simrv::core::CPU& {
+auto InspectorPane::current_cpu() const -> const simrv::core::CPU& {
     return machine_.hart(selected_hart_);
 }
 
-auto LeftPane::current_cpu() -> simrv::core::CPU& { return machine_.hart(selected_hart_); }
+auto InspectorPane::current_cpu() -> simrv::core::CPU& { return machine_.hart(selected_hart_); }
 
-auto LeftPane::get_row_uncached(int logical_row, int width) -> std::string {
+auto InspectorPane::get_row_uncached(int logical_row, int width) -> std::string {
     auto const& cpu = current_cpu();
     auto const& st = cpu.state();
     int const col_width = width / 2;
@@ -228,7 +225,7 @@ auto layout_tabs_equally(const std::vector<TabSlot>& slots, int available_width)
 
 }  // namespace
 
-auto LeftPane::render_tab_bar_tier1(int width) const -> std::string {
+auto InspectorPane::render_tab_bar_tier1(int width) const -> std::string {
     TuiCategoryGroup const current_grp = get_category_group(page_);
     constexpr std::array<TuiCategoryGroup, 4> kGroups = {
         TuiCategoryGroup::Regs, TuiCategoryGroup::Memory, TuiCategoryGroup::Pipeline,
@@ -253,7 +250,7 @@ auto LeftPane::render_tab_bar_tier1(int width) const -> std::string {
     return layout_tabs_equally(slots, width).first;
 }
 
-auto LeftPane::render_tab_bar_tier2(int width) const -> std::string {
+auto InspectorPane::render_tab_bar_tier2(int width) const -> std::string {
     TuiCategoryGroup const grp = get_category_group(page_);
     struct SubTab {
         TuiRegPage page;
@@ -318,7 +315,7 @@ auto LeftPane::render_tab_bar_tier2(int width) const -> std::string {
     return layout_tabs_equally(slots, width).first;
 }
 
-auto LeftPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPage> {
+auto InspectorPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPage> {
     int const width = last_width_ > 0 ? last_width_ : 50;
 
     if (row == 0) {
@@ -440,11 +437,11 @@ auto LeftPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPage> {
     return std::nullopt;
 }
 
-auto LeftPane::get_tab_at_col(int col) const -> std::optional<TuiRegPage> {
+auto InspectorPane::get_tab_at_col(int col) const -> std::optional<TuiRegPage> {
     return get_tab_at(1, col);
 }
 
-auto LeftPane::render_trace_row(int logical_row, int width) -> std::string {
+auto InspectorPane::render_trace_row(int logical_row, int width) -> std::string {
     if (!trace_buffer_ || trace_buffer_->empty()) {
         if (logical_row == 1) {
             return format_to_width(" [No execution trace recorded yet]", width);
@@ -458,40 +455,28 @@ auto LeftPane::render_trace_row(int logical_row, int width) -> std::string {
     return format_to_width(" " + trace_buffer_->at(static_cast<std::size_t>(logical_row)), width);
 }
 
-auto LeftPane::render_log_bottom_row(int row_idx, int num_rows, int width) -> std::string {
+auto InspectorPane::render_log_bottom_row(int row_idx, int num_rows, int width) -> std::string {
     int const total = static_cast<int>(log_lines_.size());
     int const max_entries = num_rows - 1;
+    log_scroll_view_.set_geometry(total, max_entries);
     if (row_idx == 0) {
         if (total > max_entries) {
-            if (log_scroll_offset_ > 0) {
-                const int more_above = std::max(0, total - max_entries - log_scroll_offset_);
-                const int more_below = log_scroll_offset_;
-                if (more_above > 0) {
-                    return section_line(std::format("Log (▲ {} above · ▼ {} below · click to jump)",
-                                                    more_above, more_below),
-                                        width);
-                }
-                return section_line(std::format("Log (▼ {} below · click to jump)", more_below),
-                                    width);
-            }
-            const int more_above = total - max_entries;
-            return section_line(std::format("Log (▲ {} more in buffer)", more_above), width);
+            std::string summary = log_scroll_view_.header_summary("Log");
+            return section_line(summary + " · click to jump", width);
         }
         return section_line("Log", width);
     }
     if (log_lines_.empty()) {
         return format_to_width("", width);
     }
-    int const log_idx = total - max_entries - log_scroll_offset_ + (row_idx - 1);
+    int const log_idx = total - max_entries - log_scroll_view_.offset_y() + (row_idx - 1);
     if (log_idx < 0 || log_idx >= total) {
         return format_to_width("", width);
     }
-    // Log lines come from vt_log_ with their own content — prepend space to align with pane section
-    // text.
     return format_to_width(" " + log_lines_.at(static_cast<std::size_t>(log_idx)), width);
 }
 
-auto LeftPane::render_guidance_row(int row_idx, int width) -> std::string {
+auto InspectorPane::render_guidance_row(int row_idx, int width) -> std::string {
     auto const guidance = guidance_for_page(page_, machine_.runtime_profile.is_cycle_mode());
     switch (row_idx) {
         case 0:
@@ -510,7 +495,7 @@ auto LeftPane::render_guidance_row(int row_idx, int width) -> std::string {
     }
 }
 
-auto LeftPane::render_row(int row_idx, int width) -> std::string {
+auto InspectorPane::render_row(int row_idx, int width) -> std::string {
     last_width_ = width;
 
     if (!machine_.runtime_profile.is_cycle_mode()) {
@@ -540,39 +525,45 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
         }
     }
 
-    int const content_row_idx = row_idx - 2;
-    int const logical_row = content_row_idx + scroll_offset_;
-
+    int const max_content_rows = get_visible_content_rows();
     int const total_logical_rows =
         (page_ == TuiRegPage::EXPLAIN) ? static_cast<int>(get_explain_rows(width).size())
         : (page_ == TuiRegPage::TRACE) ? static_cast<int>(trace_buffer_ ? trace_buffer_->size() : 0)
                                        : get_total_rows(width);
 
-    int const max_content_rows = get_visible_content_rows();
+    constexpr int kStackCanvasWidth = 104;
+    int const total_cols = (page_ == TuiRegPage::STACK) ? kStackCanvasWidth : width;
+    scroll_view_.set_geometry(total_logical_rows, max_content_rows, total_cols,
+                              std::max(1, width - 2));
 
-    if (scroll_offset_ > 0 && content_row_idx == 0) {
+    int const content_row_idx = row_idx - 2;
+    int const logical_row = content_row_idx + scroll_view_.offset_y();
+
+    if (page_ == TuiRegPage::TRACE || page_ == TuiRegPage::EXPLAIN) {
+        return scroll_view_.render_row(
+            content_row_idx, width,
+            [this, width](framework::RowIndex r, framework::ColumnIndex, int w) {
+                if (page_ == TuiRegPage::TRACE) {
+                    return render_trace_row(r, w);
+                }
+                auto explain_rows = get_explain_rows(width);
+                if (r >= 0 && r < static_cast<int>(explain_rows.size())) {
+                    return explain_rows.at(static_cast<std::size_t>(r));
+                }
+                return std::string{};
+            });
+    }
+
+    if (scroll_view_.can_scroll_up() && content_row_idx == 0) {
         return format_to_width(std::format(" {}▲ [{} more lines above - scroll up]\033[0m",
-                                           kThemeMuted, scroll_offset_),
+                                           kThemeMuted, scroll_view_.remaining_above()),
                                width);
     }
-    if (max_content_rows > 1 && scroll_offset_ + max_content_rows < total_logical_rows &&
+    if (max_content_rows > 1 && scroll_view_.can_scroll_down() &&
         content_row_idx == max_content_rows - 1) {
-        int remaining = total_logical_rows - (scroll_offset_ + max_content_rows);
-        return format_to_width(
-            std::format(" {}▼ [{} more lines below - scroll down]\033[0m", kThemeMuted, remaining),
-            width);
-    }
-
-    if (page_ == TuiRegPage::TRACE) {
-        return render_trace_row(logical_row, width);
-    }
-
-    if (page_ == TuiRegPage::EXPLAIN) {
-        auto explain_rows = get_explain_rows(width);
-        if (logical_row >= total_logical_rows || logical_row < 0) {
-            return format_to_width("", width);
-        }
-        return explain_rows.at(static_cast<std::size_t>(logical_row));
+        return format_to_width(std::format(" {}▼ [{} more lines below - scroll down]\033[0m",
+                                           kThemeMuted, scroll_view_.remaining_below()),
+                               width);
     }
 
     if (logical_row >= total_logical_rows || logical_row < 0) {
@@ -587,7 +578,6 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
         }
     }
 
-    constexpr int kStackCanvasWidth = 104;
     bool const pan_stack_row =
         supports_horizontal_scroll() && logical_row >= 1 && logical_row <= 13;
     int const render_width = pan_stack_row ? std::max(width, kStackCanvasWidth) : width;
@@ -597,13 +587,11 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
         }
         if (pan_stack_row) {
             int const viewport_width = std::max(1, width - 2);
-            int const max_scroll = std::max(0, kStackCanvasWidth - viewport_width);
-            std::string const left_marker = horizontal_scroll_offset_ > 0 ? "◀" : " ";
-            std::string const right_marker = horizontal_scroll_offset_ < max_scroll ? "▶" : " ";
-            res =
-                std::format("{}{}\033[0m{}{}{}\033[0m", kThemeMuted, left_marker,
-                            framework::crop_columns(res, horizontal_scroll_offset_, viewport_width),
-                            kThemeMuted, right_marker);
+            std::string const left_marker = scroll_view_.can_scroll_left() ? "◀" : " ";
+            std::string const right_marker = scroll_view_.can_scroll_right() ? "▶" : " ";
+            res = std::format("{}{}\033[0m{}{}{}\033[0m", kThemeMuted, left_marker,
+                              framework::crop_columns(res, scroll_view_.offset_x(), viewport_width),
+                              kThemeMuted, right_marker);
             res = format_to_width(res, width);
         }
         return res;
@@ -631,7 +619,7 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
     return res;
 }
 
-void LeftPane::update_cache() {
+void InspectorPane::update_cache() {
     auto& st = current_cpu().state();
     for (int i = 0; i < 32; ++i) {
         cached_gpr_.at(static_cast<std::size_t>(i)) = st.regs.read(static_cast<RegId>(i));
@@ -640,7 +628,7 @@ void LeftPane::update_cache() {
     }
 }
 
-auto LeftPane::get_visible_content_rows() const -> int {
+auto InspectorPane::get_visible_content_rows() const -> int {
     constexpr int kLogAreaHeight = 6;
     constexpr int kGuidanceHeight = 4;
     bool const show_guidance = should_show_guidance(paused_, learn_enabled_, visible_rows_);
@@ -656,26 +644,39 @@ auto LeftPane::get_visible_content_rows() const -> int {
     return std::max(1, max_content_rows);
 }
 
-void LeftPane::scroll(int lines) {
+auto InspectorPane::get_scroll_offset() const -> int { return scroll_view_.offset_y(); }
+
+auto InspectorPane::get_horizontal_scroll_offset() const -> int { return scroll_view_.offset_x(); }
+
+auto InspectorPane::get_log_scroll_offset() const -> int { return log_scroll_view_.offset_y(); }
+
+void InspectorPane::reset_scroll() { scroll_view_.reset_y(); }
+
+void InspectorPane::reset_horizontal_scroll() { scroll_view_.reset_x(); }
+
+void InspectorPane::reset_log_scroll() { log_scroll_view_.reset_y(); }
+
+void InspectorPane::scroll(int lines) {
     int w = last_width_ > 0 ? last_width_ : 60;
     int const total_logical_rows =
         (page_ == TuiRegPage::EXPLAIN) ? static_cast<int>(get_explain_rows(w).size())
         : (page_ == TuiRegPage::TRACE) ? static_cast<int>(trace_buffer_ ? trace_buffer_->size() : 0)
                                        : get_total_rows(w);
     int const content_rows = get_visible_content_rows();
-    int const max_scroll = std::max(0, total_logical_rows - content_rows);
-    scroll_offset_ = std::clamp(scroll_offset_ + lines, 0, max_scroll);
+    scroll_view_.set_geometry(total_logical_rows, content_rows, 104, w);
+    scroll_view_.scroll_y(lines);
 }
 
-void LeftPane::scroll_horizontal(int columns) {
+void InspectorPane::scroll_horizontal(int columns) {
     if (!supports_horizontal_scroll()) return;
     constexpr int kStackCanvasWidth = 104;
     int const viewport_width = last_width_ > 0 ? last_width_ : 60;
-    int const max_scroll = std::max(0, kStackCanvasWidth - std::max(1, viewport_width - 2));
-    horizontal_scroll_offset_ = std::clamp(horizontal_scroll_offset_ + columns, 0, max_scroll);
+    scroll_view_.set_geometry(get_total_rows(viewport_width), get_visible_content_rows(),
+                              kStackCanvasWidth, std::max(1, viewport_width - 2));
+    scroll_view_.scroll_x(columns);
 }
 
-auto LeftPane::supports_horizontal_scroll() const -> bool {
+auto InspectorPane::supports_horizontal_scroll() const -> bool {
     if (page_ != TuiRegPage::STACK) return false;
     auto const& cpu = current_cpu();
     Register const sp = cpu.state().regs.read(RegId::Sp);
@@ -684,16 +685,16 @@ auto LeftPane::supports_horizontal_scroll() const -> bool {
     return physical.has_value() && machine_.memory_geometry().contains(*physical);
 }
 
-void LeftPane::scroll_log(int lines) {
+void InspectorPane::scroll_log(int lines) {
     constexpr int kLogAreaHeight = 6;
     int const total = static_cast<int>(log_lines_.size());
     int const max_entries = kLogAreaHeight - 1;
-    int const max_scroll = std::max(0, total - max_entries);
-    log_scroll_offset_ = std::clamp(log_scroll_offset_ + lines, 0, max_scroll);
+    log_scroll_view_.set_geometry(total, max_entries);
+    log_scroll_view_.scroll_y(lines);
 }
 
-auto LeftPane::get_text_in_range(int start_row, int start_col, int end_row, int end_col, int width)
-    -> std::string {
+auto InspectorPane::get_text_in_range(int start_row, int start_col, int end_row, int end_col,
+                                      int width) -> std::string {
     if (start_row > end_row || (start_row == end_row && start_col > end_col)) {
         std::swap(start_row, end_row);
         std::swap(start_col, end_col);

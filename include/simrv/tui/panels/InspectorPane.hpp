@@ -1,6 +1,7 @@
 /**
- * @file LeftPane.hpp
- * @brief OOP Widget for TUI Left Pane (Registers, Pipeline, Cache, Trace, Stack, Explainer & Log).
+ * @file InspectorPane.hpp
+ * @brief OOP Widget for TUI Inspector Pane (Registers, Pipeline, Cache, Trace, Stack, Explainer &
+ * Log).
  */
 #pragma once
 
@@ -12,6 +13,7 @@
 #include "simrv/core/RegisterFile.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiWidget.hpp"
+#include "simrv/tui/framework/ScrollView.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -34,14 +36,14 @@ inline constexpr std::array<const char*, 32> kFpRegNames = {
     "fa1", "fa2", "fa3", "fa4", "fa5",  "fa6",  "fa7", "fs2", "fs3",  "fs4", "fs5",
     "fs6", "fs7", "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11"};
 
-class LeftPane : public TuiWidget {
+class InspectorPane : public TuiWidget {
    public:
-    explicit LeftPane(simrv::core::Machine& machine) : machine_(machine) {
+    explicit InspectorPane(simrv::core::Machine& machine) : machine_(machine) {
         cached_gpr_.fill(0);
         cached_fpr_.fill(0);
         cached_vec_.fill({});
     }
-    ~LeftPane() override = default;
+    ~InspectorPane() override = default;
 
     [[nodiscard]] auto render_row(int row_idx, int width) -> std::string override;
 
@@ -63,17 +65,15 @@ class LeftPane : public TuiWidget {
     [[nodiscard]] auto get_visible_content_rows() const -> int;
     void set_active_runtime(double secs) { active_runtime_ = secs; }
     void scroll(int lines);
-    void reset_scroll() { scroll_offset_ = 0; }
-    [[nodiscard]] auto get_scroll_offset() const -> int { return scroll_offset_; }
+    void reset_scroll();
+    [[nodiscard]] auto get_scroll_offset() const -> int;
     void scroll_horizontal(int columns);
-    void reset_horizontal_scroll() { horizontal_scroll_offset_ = 0; }
-    [[nodiscard]] auto get_horizontal_scroll_offset() const -> int {
-        return horizontal_scroll_offset_;
-    }
+    void reset_horizontal_scroll();
+    [[nodiscard]] auto get_horizontal_scroll_offset() const -> int;
     [[nodiscard]] auto supports_horizontal_scroll() const -> bool;
     void scroll_log(int lines);
-    void reset_log_scroll() { log_scroll_offset_ = 0; }
-    [[nodiscard]] auto get_log_scroll_offset() const -> int { return log_scroll_offset_; }
+    void reset_log_scroll();
+    [[nodiscard]] auto get_log_scroll_offset() const -> int;
     void set_inspect_addr(Register addr) { inspect_addr_ = addr; }
     [[nodiscard]] auto get_inspect_addr() const -> Register { return inspect_addr_; }
     void set_explain_pc(Register pc) { explain_pc_ = pc; }
@@ -215,14 +215,13 @@ class LeftPane : public TuiWidget {
     uint64_t max_kips_ = 0;
     std::vector<uint64_t> kips_history_;
     int visible_rows_ = 25;
-    int scroll_offset_ = 0;
-    int horizontal_scroll_offset_ = 0;
+    framework::ScrollView scroll_view_;
+    framework::ScrollView log_scroll_view_{framework::ScrollIndicatorMode::HeaderSummary};
     double active_runtime_ = 0.0;
     Register inspect_addr_ = 0;
     Register explain_pc_ = 0;
     const std::vector<std::string>* trace_buffer_ = nullptr;
     std::vector<std::string> log_lines_;
-    int log_scroll_offset_ = 0;
     int cache_inspect_type_ = 0;  // 0: ICache, 1: DCache
     int cache_inspect_set_ = 0;
     int cache_inspect_way_ = 0;

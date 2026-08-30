@@ -6,6 +6,7 @@ simrv_add_component(simrv-tui-framework
   framework/Theme.cpp
   framework/Components.cpp
   framework/Modal.cpp
+  framework/ScrollView.cpp
 )
 add_library(simrv::tui-framework ALIAS simrv-tui-framework)
 
@@ -24,18 +25,18 @@ simrv_add_component(simrv-tui
   modals/SettingsModal.cpp
   modals/SystemConfigModal.cpp
   modals/StepModal.cpp
-  panels/LeftPane.cpp
-  panels/LeftPaneRegs.cpp
-  panels/LeftPanePipeline.cpp
-  panels/LeftPaneCache.cpp
-  panels/LeftPaneTlb.cpp
-  panels/LeftPaneBp.cpp
-  panels/LeftPaneHazard.cpp
-  panels/LeftPaneIo.cpp
-  panels/LeftPaneStats.cpp
-  panels/LeftPaneExplain.cpp
-  panels/LeftPaneStack.cpp
-  panels/RightPane.cpp
+  panels/InspectorPane.cpp
+  panels/InspectorPaneRegs.cpp
+  panels/InspectorPanePipeline.cpp
+  panels/InspectorPaneCache.cpp
+  panels/InspectorPaneTlb.cpp
+  panels/InspectorPaneBp.cpp
+  panels/InspectorPaneHazard.cpp
+  panels/InspectorPaneIo.cpp
+  panels/InspectorPaneStats.cpp
+  panels/InspectorPaneExplain.cpp
+  panels/InspectorPaneStack.cpp
+  panels/TerminalPane.cpp
   panels/StatusBar.cpp
 )
 add_library(simrv::tui ALIAS simrv-tui)

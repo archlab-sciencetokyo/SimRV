@@ -5,6 +5,7 @@
 
 #include "simrv/tui/framework/Components.hpp"
 #include "simrv/tui/framework/Modal.hpp"
+#include "simrv/tui/framework/ScrollView.hpp"
 #include "simrv/tui/framework/Text.hpp"
 #include "simrv/tui/framework/Theme.hpp"
 
@@ -63,6 +64,40 @@ int main() {
     expect(std::string_view(classic.glyphs.horiz) == "-" &&
                display_width(section_divider("Section", 24)) == 24,
            "Classic ANSI supplies complete glyph and component fallbacks");
+
+    ScrollView sv(ScrollIndicatorMode::EmbeddedRows);
+    sv.set_geometry(100, 10, 80, 40);
+    expect(sv.can_scroll_down() && !sv.can_scroll_up(),
+           "scroll view starts at top with scroll down available");
+    expect(sv.can_scroll_right() && !sv.can_scroll_left(),
+           "scroll view starts at left with scroll right available");
+
+    sv.scroll_y(15);
+    expect(sv.offset_y() == 15 && sv.can_scroll_up(), "vertical scrolling advances offset");
+    sv.scroll_x(10);
+    expect(sv.offset_x() == 10 && sv.can_scroll_left(), "horizontal scrolling advances offset");
+
+    auto const top_row =
+        sv.render_row(0, 40, [](RowIndex r, ColumnIndex, int) { return std::format("row-{}", r); });
+    expect(display_width(top_row) == 40 && top_row.find("above") != std::string::npos,
+           "top row renders embedded scroll indicator when scrolled down");
+
+    auto const mid_row = sv.render_row(
+        1, 40, [](RowIndex r, ColumnIndex, int) { return std::format("content-row-{}", r); });
+    expect(display_width(mid_row) == 40 && mid_row.find("-16") != std::string::npos,
+           "middle row dispatches logical row offset to renderer with horizontal crop");
+
+    sv.reset_x();
+    auto const uncropped_row = sv.render_row(
+        1, 40, [](RowIndex r, ColumnIndex, int) { return std::format("content-row-{}", r); });
+    expect(display_width(uncropped_row) == 40 &&
+               uncropped_row.find("content-row-16") != std::string::npos,
+           "middle row dispatches logical row offset without horizontal crop");
+
+    sv.set_indicator_mode(ScrollIndicatorMode::HeaderSummary);
+    auto const summary = sv.header_summary("Trace");
+    expect(summary.find("above") != std::string::npos && summary.find("below") != std::string::npos,
+           "header summary formats scroll indicator with counts");
 
     return failures == 0 ? 0 : 1;
 }

@@ -11,16 +11,16 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
-#include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 
 namespace simrv::tui::modals {
 
-void AddressModal::open(std::string& input, LeftPane* left_pane) {
+void AddressModal::open(std::string& input, InspectorPane* left_pane) {
     input = std::format("0x{:08x}", left_pane ? left_pane->get_inspect_addr() : 0);
 }
 
 auto AddressModal::submit(const std::string& input, simrv::core::Machine& machine,
-                          LeftPane* left_pane,
+                          InspectorPane* left_pane,
                           const std::function<void(const std::string&)>& set_status_override_cb)
     -> bool {
     if (input.empty()) return false;

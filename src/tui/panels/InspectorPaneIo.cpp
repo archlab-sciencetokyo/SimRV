@@ -1,5 +1,5 @@
 /**
- * @file LeftPaneIo.cpp
+ * @file InspectorPaneIo.cpp
  * @brief Implements Comprehensive I/O Bus & Modern Device Inspector for TUI Left Pane.
  */
 #include <algorithm>
@@ -24,7 +24,7 @@
 #include "simrv/device/pci/VirtioPciRng.hpp"
 #include "simrv/device/pci/VirtioPciSound.hpp"
 #include "simrv/tui/TuiTheme.hpp"
-#include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
 
 namespace simrv::tui {
@@ -49,8 +49,8 @@ auto format_dev_status(uint32_t status) -> std::string {
 
 }  // namespace
 
-auto LeftPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row, int col_width,
-                               int right_width) -> std::string {
+auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row, int col_width,
+                                    int right_width) -> std::string {
     int const width = col_width + right_width;
     const auto platform = machine_.platform_status();
     const bool is_mmio = platform.profile == simrv::core::PlatformProfile::Mmio;

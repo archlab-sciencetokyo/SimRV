@@ -1,5 +1,5 @@
 /**
- * @file LeftPaneCache.cpp
+ * @file InspectorPaneCache.cpp
  * @brief Implements Cache Statistics and Set & Way Inspector for TUI Left Pane.
  */
 #include <algorithm>
@@ -9,7 +9,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/TuiTheme.hpp"
-#include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
 
 namespace simrv::tui {
@@ -92,40 +92,40 @@ auto render_cache_way_row(const simrv::core::CPU& cpu, int way_idx, int inspect_
 
 }  // namespace
 
-auto LeftPane::active_cache_set_count() const -> int {
+auto InspectorPane::active_cache_set_count() const -> int {
     const auto count = cache_inspect_type_ == 0 ? machine_.primary_hart().icache.set_count()
                                                 : machine_.primary_hart().dcache.set_count();
     return std::max(1, static_cast<int>(count));
 }
 
-auto LeftPane::active_cache_way_count() const -> int {
+auto InspectorPane::active_cache_way_count() const -> int {
     const auto count = cache_inspect_type_ == 0 ? machine_.primary_hart().icache.associativity()
                                                 : machine_.primary_hart().dcache.associativity();
     return std::max(1, static_cast<int>(count));
 }
 
-void LeftPane::select_next_cache_set(int delta) {
+void InspectorPane::select_next_cache_set(int delta) {
     const int count = active_cache_set_count();
     cache_inspect_set_ = (cache_inspect_set_ + (delta % count) + count) % count;
 }
 
-void LeftPane::toggle_cache_inspect_type() {
+void InspectorPane::toggle_cache_inspect_type() {
     cache_inspect_type_ = 1 - cache_inspect_type_;
     cache_inspect_set_ %= active_cache_set_count();
     cache_inspect_way_ %= active_cache_way_count();
 }
 
-void LeftPane::select_cache_way(int way) {
+void InspectorPane::select_cache_way(int way) {
     if (way >= 0 && way < active_cache_way_count()) cache_inspect_way_ = way;
 }
 
-void LeftPane::cycle_cache_way(int delta) {
+void InspectorPane::cycle_cache_way(int delta) {
     const int count = active_cache_way_count();
     cache_inspect_way_ = (cache_inspect_way_ + (delta % count) + count) % count;
 }
 
-auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, int col_width,
-                                  int right_width) -> std::string {
+auto InspectorPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, int col_width,
+                                       int right_width) -> std::string {
     int const width = col_width + right_width;
     if (!machine_.runtime_profile.is_cycle_mode()) {
         switch (logical_row) {

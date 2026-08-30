@@ -11,12 +11,12 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
-#include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 
 namespace simrv::tui::modals {
 
 void BreakpointModal::open(ModalType type, std::string& input, simrv::core::Machine& machine,
-                           LeftPane* left_pane) {
+                           InspectorPane* left_pane) {
     input.clear();
     if (type == ModalType::SetBreakpoint) {
         input = std::format("0x{:08x}", machine.primary_hart().state().pc);

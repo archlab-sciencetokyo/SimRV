@@ -1,5 +1,5 @@
 /**
- * @file LeftPanePipeline.cpp
+ * @file InspectorPanePipeline.cpp
  * @brief Pipeline visualization pane rendering for the TUI register panel.
  *
  * Designed to be readable by students learning about pipelining:
@@ -21,7 +21,7 @@
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/tui/TuiTheme.hpp"
-#include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
 #include "simrv/xlen/Helpers.hpp"
@@ -380,8 +380,8 @@ auto get_active_forwarding_paths(const simrv::pipeline::PipelineSim& ps)
 // Top-level dispatch
 // ═══════════════════════════════════════════════════════════════════════
 
-auto LeftPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logical_row, int col_width,
-                                      int right_width) -> std::string {
+auto InspectorPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logical_row,
+                                           int col_width, int right_width) -> std::string {
     if (machine_.runtime_profile.is_cycle_mode()) {
         // CA mode: rows 0-8 timeline, rows 9+ stage details
         if (logical_row < 9) {
@@ -397,9 +397,9 @@ auto LeftPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logical_r
 // Cycle-Accurate mode
 // ═══════════════════════════════════════════════════════════════════════
 
-auto LeftPane::render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu, int logical_row,
-                                                     int col_width, int right_width)
-    -> std::string {
+auto InspectorPane::render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu,
+                                                          int logical_row, int col_width,
+                                                          int right_width) -> std::string {
     // Adjusted row index relative to the start of the non-timeline area.
     // Timeline occupies rows 0–8, so stage details begin at row 9.
     int const val = logical_row - 9;
@@ -412,8 +412,8 @@ auto LeftPane::render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu
     return render_pipeline_stages_ca_pred(cpu, val, col_width + right_width);
 }
 
-auto LeftPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int stage_idx, int width)
-    -> std::string {
+auto InspectorPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int stage_idx,
+                                                   int width) -> std::string {
     auto& ps = cpu.pipeline_sim;
     bool is_raw_stalled = is_raw_hazard_stalled(ps);
 
@@ -508,8 +508,9 @@ auto LeftPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int s
     }
 }
 
-auto LeftPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu, int stage_idx,
-                                                 int col_width, int right_width) -> std::string {
+auto InspectorPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu, int stage_idx,
+                                                      int col_width, int right_width)
+    -> std::string {
     auto& ps = cpu.pipeline_sim;
     int const width = col_width + right_width;
     bool is_raw_stalled = is_raw_hazard_stalled(ps);
@@ -564,8 +565,8 @@ auto LeftPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cpu, in
     }
 }
 
-auto LeftPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, int stage_idx, int width)
-    -> std::string {
+auto InspectorPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, int stage_idx,
+                                                   int width) -> std::string {
     auto& ps = cpu.pipeline_sim;
 
     switch (stage_idx) {
@@ -594,17 +595,18 @@ auto LeftPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, int s
 // Functional (non-cycle-accurate) mode
 // ═══════════════════════════════════════════════════════════════════════
 
-auto LeftPane::render_pipeline_stages_functional(const simrv::core::CPU& cpu, int logical_row,
-                                                 int col_width, int right_width) -> std::string {
+auto InspectorPane::render_pipeline_stages_functional(const simrv::core::CPU& cpu, int logical_row,
+                                                      int col_width, int right_width)
+    -> std::string {
     if (logical_row >= 0 && logical_row < 16) {
         return render_pipeline_stages_functional_low(cpu, logical_row, col_width, right_width);
     }
     return render_pipeline_stages_functional_high(cpu, logical_row, col_width, right_width);
 }
 
-auto LeftPane::render_pipeline_stages_functional_low(const simrv::core::CPU& cpu, int logical_row,
-                                                     int col_width, int right_width)
-    -> std::string {
+auto InspectorPane::render_pipeline_stages_functional_low(const simrv::core::CPU& cpu,
+                                                          int logical_row, int col_width,
+                                                          int right_width) -> std::string {
     if (logical_row >= 0 && logical_row <= 7) {
         return render_pipeline_stages_functional_low_part1(cpu, logical_row, col_width,
                                                            right_width);
@@ -618,9 +620,9 @@ auto LeftPane::render_pipeline_stages_functional_low(const simrv::core::CPU& cpu
 }
 
 // Rows 0–7: Current Instruction overview + IF stage + ID stage header
-auto LeftPane::render_pipeline_stages_functional_low_part1(const simrv::core::CPU& cpu,
-                                                           int logical_row, int col_width,
-                                                           int right_width) -> std::string {
+auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::core::CPU& cpu,
+                                                                int logical_row, int col_width,
+                                                                int right_width) -> std::string {
     int const width = col_width + right_width;
     auto& ctx = cpu.pipeline_context;
 
@@ -717,9 +719,9 @@ auto LeftPane::render_pipeline_stages_functional_low_part1(const simrv::core::CP
 }
 
 // Rows 8–15: Source operands + EX stage + MEM stage + WB header
-auto LeftPane::render_pipeline_stages_functional_low_part2(const simrv::core::CPU& cpu,
-                                                           int logical_row, int col_width,
-                                                           int right_width) -> std::string {
+auto InspectorPane::render_pipeline_stages_functional_low_part2(const simrv::core::CPU& cpu,
+                                                                int logical_row, int col_width,
+                                                                int right_width) -> std::string {
     int const width = col_width + right_width;
     auto& ctx = cpu.pipeline_context;
     InstFormat const fmt = simrv::isa::get_instruction_format(ctx.opcode);
@@ -802,9 +804,9 @@ auto LeftPane::render_pipeline_stages_functional_low_part2(const simrv::core::CP
 }
 
 // Rows 16–19: Exception / trap info + end marker
-auto LeftPane::render_pipeline_stages_functional_high(const simrv::core::CPU& cpu, int logical_row,
-                                                      int col_width, int right_width)
-    -> std::string {
+auto InspectorPane::render_pipeline_stages_functional_high(const simrv::core::CPU& cpu,
+                                                           int logical_row, int col_width,
+                                                           int right_width) -> std::string {
     int const width = col_width + right_width;
     auto& ctx = cpu.pipeline_context;
 
@@ -856,8 +858,8 @@ auto LeftPane::render_pipeline_stages_functional_high(const simrv::core::CPU& cp
 // Pipeline Execution Timeline (cycle-accurate mode, rows 0–8)
 // ═══════════════════════════════════════════════════════════════════════
 
-auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical_row, int width)
-    -> std::string {
+auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical_row,
+                                             int width) -> std::string {
     auto const& ps = cpu.pipeline_sim;
     auto const history = ps.cycle_history();
 
@@ -1018,7 +1020,7 @@ auto LeftPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical
     return format_to_width("", width);
 }
 
-auto LeftPane::get_pipeline_pc_at_row(int logical_row) const -> Register {
+auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> Register {
     auto const& cpu = current_cpu();
     auto const& ps = cpu.pipeline_sim;
 
@@ -1084,9 +1086,9 @@ auto LeftPane::get_pipeline_pc_at_row(int logical_row) const -> Register {
     return 0;
 }
 
-auto LeftPane::render_system_or_pipeline_extended(const simrv::core::CPU& cpu, int logical_row,
-                                                  int col_width, int right_width,
-                                                  bool single_column) -> std::string {
+auto InspectorPane::render_system_or_pipeline_extended(const simrv::core::CPU& cpu, int logical_row,
+                                                       int col_width, int right_width,
+                                                       bool single_column) -> std::string {
     if (page_ == TuiRegPage::PIPELINE && logical_row >= 16 && logical_row <= 24) {
         return render_pipeline_stages(cpu, logical_row, col_width, right_width);
     }
@@ -1096,8 +1098,8 @@ auto LeftPane::render_system_or_pipeline_extended(const simrv::core::CPU& cpu, i
     return "";
 }
 
-auto LeftPane::render_system_state(const simrv::core::CPU& cpu, int logical_row, int col_width,
-                                   int right_width) -> std::string {
+auto InspectorPane::render_system_state(const simrv::core::CPU& cpu, int logical_row, int col_width,
+                                        int right_width) -> std::string {
     auto const& st = cpu.state();
     int const width = col_width + right_width;
     int label_pad = (width < 64) ? 0 : 11;

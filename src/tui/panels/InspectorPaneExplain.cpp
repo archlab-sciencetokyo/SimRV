@@ -1,5 +1,5 @@
 /**
- * @file LeftPaneExplain.cpp
+ * @file InspectorPaneExplain.cpp
  * @brief Instruction explainer pane rendering for the TUI register panel.
  */
 #include <array>
@@ -11,7 +11,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/TuiTheme.hpp"
-#include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -671,11 +671,10 @@ auto render_dataflow_breakdown(const simrv::core::ArchState& st,
 
 }  // namespace
 
-auto LeftPane::get_explain_rows(int width) -> std::vector<std::string> {
+auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
     bool show_disabled = !paused_;
     if (show_disabled && machine_.tui_controller()) {
-        uint64_t delay =
-            machine_.tui_controller()->step_delay_us_.load(std::memory_order_relaxed);
+        uint64_t delay = machine_.tui_controller()->step_delay_us_.load(std::memory_order_relaxed);
         if (delay >= 10000) {
             show_disabled = false;
         }

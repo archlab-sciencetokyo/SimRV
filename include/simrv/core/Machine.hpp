@@ -51,7 +51,7 @@ class VirtioMmioNet;
 
 namespace simrv::tui {
 class Tui;
-class LeftPane;
+class InspectorPane;
 }  // namespace simrv::tui
 
 namespace simrv::core {
@@ -425,7 +425,7 @@ class Machine final {
     friend class simrv::execute::ExecuteUnit;
     friend class simrv::device::Uart;
     friend class simrv::tui::Tui;
-    friend class simrv::tui::LeftPane;
+    friend class simrv::tui::InspectorPane;
     friend class simrv::memory::CoherenceHub;
     simrv::memory::MemorySubsystem& memory_;
 

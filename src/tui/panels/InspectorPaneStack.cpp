@@ -1,5 +1,5 @@
 /**
- * @file LeftPaneStack.cpp
+ * @file InspectorPaneStack.cpp
  * @brief Stack memory view pane rendering for the TUI register panel.
  */
 #include <format>
@@ -10,11 +10,11 @@
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/Mmu.hpp"
 #include "simrv/tui/TuiTheme.hpp"
-#include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 
 namespace simrv::tui {
 
-auto LeftPane::translate_safe(const simrv::core::CPU& cpu, Register vaddr) const
+auto InspectorPane::translate_safe(const simrv::core::CPU& cpu, Register vaddr) const
     -> std::optional<Register> {
     const auto eff_priv = cpu.effective_data_privilege();
     const bool translation_enabled =
@@ -33,8 +33,8 @@ auto LeftPane::translate_safe(const simrv::core::CPU& cpu, Register vaddr) const
     return std::nullopt;
 }
 
-auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, int col_width,
-                                  int right_width) -> std::string {
+auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, int col_width,
+                                       int right_width) -> std::string {
     int const width = col_width + right_width;
 
     Register sp = cpu.state().regs.read(RegId::Sp);
@@ -84,8 +84,8 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
     bool const is_16b_aligned = (sp % 16 == 0);
     if (logical_row == 0) {
         int const viewport = std::max(1, width - 2);
-        int const first_col = horizontal_scroll_offset_ + 1;
-        int const last_col = std::min(104, horizontal_scroll_offset_ + viewport);
+        int const first_col = get_horizontal_scroll_offset() + 1;
+        int const last_col = std::min(104, get_horizontal_scroll_offset() + viewport);
         std::string title =
             width < 104
                 ? std::format("Stack Watch · cols {}–{}/104 · Shift+←/→ or wheel ({})", first_col,
@@ -139,16 +139,14 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
         if (machine_.memory_geometry().contains(paddr)) {
             Register raw_val = 0;
             if (xlen == 64) {
-                uint64_t data =
-                    simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(isa::Funct3::Sd),
-                                                 machine_.ram_view());
+                uint64_t data = simrv::memory::ram_read_fast(
+                    paddr, static_cast<Instruction>(isa::Funct3::Sd), machine_.ram_view());
                 val_str = std::format("0x{:016x}", data);
                 dec_str = std::format("{}", static_cast<int64_t>(data));
                 raw_val = data;
             } else {
-                uint32_t data =
-                    simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(isa::Funct3::Sw),
-                                                 machine_.ram_view());
+                uint32_t data = simrv::memory::ram_read_fast(
+                    paddr, static_cast<Instruction>(isa::Funct3::Sw), machine_.ram_view());
                 val_str = std::format("0x{:08x}", data);
                 dec_str = std::format("{}", static_cast<int32_t>(data));
                 raw_val = data;
@@ -199,7 +197,7 @@ auto LeftPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_row, 
     return format_to_width(full_row, width);
 }
 
-auto LeftPane::get_stack_addr_at_row(int logical_row) const -> std::optional<Register> {
+auto InspectorPane::get_stack_addr_at_row(int logical_row) const -> std::optional<Register> {
     if (page_ != TuiRegPage::STACK) return std::nullopt;
     const auto& st = current_cpu().state();
     Register sp = st.regs.read(RegId::Sp);

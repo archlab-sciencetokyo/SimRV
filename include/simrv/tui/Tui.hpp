@@ -41,7 +41,7 @@ extern volatile std::sig_atomic_t g_resized;  // NOLINT(avoid-non-const-global-v
  * @class Tui
  * @brief Handles ANSI-based split-screen rendering, scrolling, and status display for RTOS mode.
  */
-enum class SelectionPane : uint8_t { None, LeftPane, RightPane };
+enum class SelectionPane : uint8_t { None, InspectorPane, TerminalPane };
 
 struct SelectionState {
     SelectionPane pane = SelectionPane::None;
@@ -53,8 +53,8 @@ struct SelectionState {
     bool is_active = false;
 };
 
-class LeftPane;
-class RightPane;
+class InspectorPane;
+class TerminalPane;
 class StatusBar;
 
 class Tui {
@@ -231,8 +231,8 @@ class Tui {
     void write_guest_input(uint8_t byte);
     TuiModal modal_;
 
-    std::unique_ptr<LeftPane> left_pane_;
-    std::unique_ptr<RightPane> right_pane_;
+    std::unique_ptr<InspectorPane> left_pane_;
+    std::unique_ptr<TerminalPane> right_pane_;
     std::unique_ptr<StatusBar> status_bar_;
 
     int pane_width_cached_ = 62;

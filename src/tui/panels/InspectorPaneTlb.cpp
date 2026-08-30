@@ -1,5 +1,5 @@
 /**
- * @file LeftPaneTlb.cpp
+ * @file InspectorPaneTlb.cpp
  * @brief Implements TLB (Translation Lookaside Buffer) Inspector for TUI Left Pane.
  */
 #include <format>
@@ -10,13 +10,13 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Tlb.hpp"
 #include "simrv/tui/TuiTheme.hpp"
-#include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::tui {
 
-auto LeftPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_row, int col_width,
-                                int right_width) -> std::string {
+auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_row, int col_width,
+                                     int right_width) -> std::string {
     int const width = col_width + right_width;
     const auto& st = cpu.state();
     const auto& tlb = cpu.tlb;

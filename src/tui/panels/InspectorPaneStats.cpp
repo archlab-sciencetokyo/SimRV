@@ -1,5 +1,5 @@
 /**
- * @file LeftPaneStats.cpp
+ * @file InspectorPaneStats.cpp
  * @brief Performance statistics and pipeline counters pane rendering.
  */
 #include <algorithm>
@@ -15,7 +15,7 @@
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/tui/TuiTheme.hpp"
-#include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -69,17 +69,17 @@ auto format_speed(uint64_t kips) -> std::string {
 
 }  // namespace
 
-auto LeftPane::performance_row_count() const -> int {
+auto InspectorPane::performance_row_count() const -> int {
     return machine_.runtime_profile.is_cycle_mode() ? 9 : 5;
 }
 
-auto LeftPane::performance_start_row(bool single_column) const -> int {
+auto InspectorPane::performance_start_row(bool single_column) const -> int {
     if (single_column) return 32;
     return page_ == TuiRegPage::PIPELINE ? 25 : 21;
 }
 
-auto LeftPane::render_machine_performance_stats(const simrv::core::CPU& cpu, int stats_row,
-                                                int width) -> std::string {
+auto InspectorPane::render_machine_performance_stats(const simrv::core::CPU& cpu, int stats_row,
+                                                     int width) -> std::string {
     const auto simulated_seconds = static_cast<double>(cpu.clint_mmio.mtime.load()) / 10000000.0;
     if (stats_row == 0) return section_line("Performance", width);
     if (stats_row == 1) {
@@ -121,19 +121,19 @@ auto LeftPane::render_machine_performance_stats(const simrv::core::CPU& cpu, int
     return format_to_width("", width);
 }
 
-auto LeftPane::render_sampled_machine_performance_stats(
+auto InspectorPane::render_sampled_machine_performance_stats(
     const simrv::core::TuiExecutionSnapshot& snapshot, int stats_row, int width) -> std::string {
     const auto simulated_seconds = static_cast<double>(snapshot.timer_ticks) / 10000000.0;
     if (stats_row == 0) return section_line("Performance", width);
     if (stats_row == 1) {
         return render_pair("retired", simrv::util::format_with_commas(snapshot.instruction_count),
-                           kThemeMint, "sim", std::format("{:.3f} s", simulated_seconds),
-                           kThemeSky, width / 2, width - width / 2, width < 45 ? 0 : 7);
+                           kThemeMint, "sim", std::format("{:.3f} s", simulated_seconds), kThemeSky,
+                           width / 2, width - width / 2, width < 45 ? 0 : 7);
     }
     if (stats_row == 2) {
         return render_pair("engine", std::string(machine_.runtime_profile.execution_name()),
-                           kThemeVal, "host", std::format("{:.3f} s", active_runtime_),
-                           kThemeMint, width / 2, width - width / 2, width < 45 ? 0 : 7);
+                           kThemeVal, "host", std::format("{:.3f} s", active_runtime_), kThemeMint,
+                           width / 2, width - width / 2, width < 45 ? 0 : 7);
     }
     if (stats_row == 3) {
         uint64_t top = max_kips_;
@@ -142,10 +142,11 @@ auto LeftPane::render_sampled_machine_performance_stats(
                            kThemeSky, width / 2, width - width / 2, width < 45 ? 0 : 7);
     }
     if (stats_row == 4) {
-        const auto average = active_runtime_ > 0.0
-                                 ? static_cast<uint64_t>(static_cast<double>(snapshot.instruction_count) /
-                                                         1000.0 / active_runtime_)
-                                 : 0;
+        const auto average =
+            active_runtime_ > 0.0
+                ? static_cast<uint64_t>(static_cast<double>(snapshot.instruction_count) / 1000.0 /
+                                        active_runtime_)
+                : 0;
         if (width >= 52) {
             const bool compact = width < 70;
             const std::string average_label = compact ? "avg" : "average";
@@ -164,8 +165,8 @@ auto LeftPane::render_sampled_machine_performance_stats(
     return format_to_width("", width);
 }
 
-auto LeftPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int stats_row, int width)
-    -> std::string {
+auto InspectorPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int stats_row,
+                                                int width) -> std::string {
     const int half = width / 2;
     const int label_pad = width < 45 ? 0 : 7;
     const uint64_t cycles = cpu.clint_mmio.mcycle;
@@ -246,7 +247,7 @@ auto LeftPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int stat
     return format_to_width("", width);
 }
 
-auto LeftPane::render_debug_state(int debug_row, int width) -> std::string {
+auto InspectorPane::render_debug_state(int debug_row, int width) -> std::string {
     auto const& cpu = current_cpu();
     auto const& st = cpu.state();
     int col_width = width / 2;
@@ -275,11 +276,9 @@ auto LeftPane::render_debug_state(int debug_row, int width) -> std::string {
             "breakpoints",
             std::to_string(machine_.breakpoint_manager().get_pc_breakpoints().size()),
             machine_.breakpoint_manager().get_pc_breakpoints().empty() ? kThemeMuted : kThemePeach,
-            "watchpoints",
-            std::to_string(machine_.breakpoint_manager().get_watchpoints().size()),
+            "watchpoints", std::to_string(machine_.breakpoint_manager().get_watchpoints().size()),
             machine_.breakpoint_manager().get_watchpoints().empty() ? kThemeMuted : kThemePeach,
-            col_width,
-            right_width, label_pad);
+            col_width, right_width, label_pad);
     }
     int optional_row = 3;
     if (machine_.is_paused() &&
@@ -313,7 +312,7 @@ auto LeftPane::render_debug_state(int debug_row, int width) -> std::string {
     return format_to_width("", width);
 }
 
-auto LeftPane::debug_state_row_count() const -> int {
+auto InspectorPane::debug_state_row_count() const -> int {
     int rows = 3;  // heading, PC/ELF resolution, and configured stop points
     if (machine_.is_paused() && machine_.stop_reason() != simrv::core::Machine::StopReason::Running)
         ++rows;
@@ -322,13 +321,14 @@ auto LeftPane::debug_state_row_count() const -> int {
     return rows;
 }
 
-auto LeftPane::render_perf_or_debug(const simrv::core::CPU& cpu, int logical_row, int width,
-                                    bool single_column) -> std::string {
+auto InspectorPane::render_perf_or_debug(const simrv::core::CPU& cpu, int logical_row, int width,
+                                         bool single_column) -> std::string {
     int const total_logical_rows = get_total_rows(width);
     int const debug_rows = machine_.debug_diagnostics_enabled() ? debug_state_row_count() : 0;
     int const adj_base_rows = total_logical_rows - debug_rows;
 
-    if (machine_.debug_diagnostics_enabled() && logical_row >= adj_base_rows && logical_row < total_logical_rows) {
+    if (machine_.debug_diagnostics_enabled() && logical_row >= adj_base_rows &&
+        logical_row < total_logical_rows) {
         return render_debug_state(logical_row - adj_base_rows, width);
     }
 
@@ -340,7 +340,7 @@ auto LeftPane::render_perf_or_debug(const simrv::core::CPU& cpu, int logical_row
                : render_machine_performance_stats(cpu, stats_row, width);
 }
 
-auto LeftPane::get_sparkline_string(int width) -> std::string {
+auto InspectorPane::get_sparkline_string(int width) -> std::string {
     if (kips_history_.empty()) {
         std::string res(static_cast<std::size_t>(width), ' ');
         return res;

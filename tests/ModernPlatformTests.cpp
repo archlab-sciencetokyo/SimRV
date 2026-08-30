@@ -34,7 +34,7 @@
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/MmioDevice.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
-#include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace {
@@ -70,7 +70,7 @@ void test_left_pane_runtime_summaries() {
         }
     };
     ConcreteMachine machine;
-    simrv::tui::LeftPane pane(machine);
+    simrv::tui::InspectorPane pane(machine);
     pane.set_visible_rows(60);
     constexpr int kWidth = 80;
     auto row = [&](int logical_row) { return pane.render_row(logical_row + 2, kWidth); };

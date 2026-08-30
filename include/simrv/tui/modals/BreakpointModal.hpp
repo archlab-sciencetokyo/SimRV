@@ -15,7 +15,7 @@ class Machine;
 }
 
 namespace simrv::tui {
-class LeftPane;
+class InspectorPane;
 }
 
 namespace simrv::tui::modals {
@@ -23,7 +23,7 @@ namespace simrv::tui::modals {
 class BreakpointModal {
    public:
     static void open(ModalType type, std::string& input, simrv::core::Machine& machine,
-                     LeftPane* left_pane);
+                     InspectorPane* left_pane);
     static void move_cursor(int& cursor, int delta, const simrv::core::Machine& machine);
     static auto remove_at_cursor(
         int& cursor, simrv::core::Machine& machine,

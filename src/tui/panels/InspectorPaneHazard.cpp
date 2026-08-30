@@ -1,5 +1,5 @@
 /**
- * @file LeftPaneHazard.cpp
+ * @file InspectorPaneHazard.cpp
  * @brief Implements Pipeline Hazard & Forwarding Unit Inspector for TUI Left Pane.
  */
 #include <format>
@@ -9,13 +9,13 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/tui/TuiTheme.hpp"
-#include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
 
 namespace simrv::tui {
 
-auto LeftPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical_row, int col_width,
-                                   int right_width) -> std::string {
+auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical_row, int col_width,
+                                        int right_width) -> std::string {
     int const width = col_width + right_width;
 
     if (!machine_.runtime_profile.is_cycle_mode()) {
@@ -30,9 +30,8 @@ auto LeftPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical_row,
                                    width);
         }
         if (logical_row == 6) {
-            std::string text =
-                (width < 45) ? "Enable Cycle-Accurate mode [,]"
-                             : "Enable cycle mode [,] or --mode cycle-accurate";
+            std::string text = (width < 45) ? "Enable Cycle-Accurate mode [,]"
+                                            : "Enable cycle mode [,] or --mode cycle-accurate";
             int text_w = get_display_width(text);
             int spaces = std::max(1, (width - text_w) / 2);
             return format_to_width(

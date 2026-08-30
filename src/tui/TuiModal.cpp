@@ -24,7 +24,7 @@
 #include "simrv/tui/modals/SettingsModal.hpp"
 #include "simrv/tui/modals/StepModal.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
-#include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 
 namespace simrv::tui {
 
@@ -51,7 +51,7 @@ constexpr int kGeneralSettingsContentRows = 30;
 
 TuiModal::TuiModal(simrv::core::Machine& machine) : machine_(machine) {}
 
-void TuiModal::open(ModalType type, LeftPane* left_pane, uint64_t step_delay_us) {
+void TuiModal::open(ModalType type, InspectorPane* left_pane, uint64_t step_delay_us) {
     active_modal_ = type;
     rendered_box_width_ = 0;
     input_.clear();
@@ -199,7 +199,7 @@ void TuiModal::close() {
     input_.clear();
 }
 
-auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
+auto TuiModal::submit(InspectorPane* left_pane, std::atomic<uint64_t>& step_delay_us,
                       const std::function<void(TuiRegPage)>& set_reg_page_cb,
                       const std::function<void(const std::string&)>& set_status_override_cb,
                       const std::function<void()>& on_speed_changed_cb) -> bool {

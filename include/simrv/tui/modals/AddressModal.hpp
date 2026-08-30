@@ -13,15 +13,15 @@ class Machine;
 }
 
 namespace simrv::tui {
-class LeftPane;
+class InspectorPane;
 }
 
 namespace simrv::tui::modals {
 
 class AddressModal {
    public:
-    static void open(std::string& input, LeftPane* left_pane);
-    static auto submit(const std::string& input, simrv::core::Machine& machine, LeftPane* left_pane,
+    static void open(std::string& input, InspectorPane* left_pane);
+    static auto submit(const std::string& input, simrv::core::Machine& machine, InspectorPane* left_pane,
                        const std::function<void(const std::string&)>& set_status_override_cb)
         -> bool;
     static void render(std::vector<std::string>& content_rows, const std::string& input);
