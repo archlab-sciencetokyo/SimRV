@@ -5,6 +5,7 @@
 
 #include "simrv/Define.hpp"
 #include "simrv/memory/Mmu.hpp"
+#include "simrv/memory/TileLinkProtocol.hpp"
 #include "simrv/pipeline/BranchPredictor.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
 
@@ -17,7 +18,7 @@ struct InstructionFillState {
     static constexpr size_t kLineBytes = 32;
     Address line_base = 0;
     uint32_t next_offset = 0;
-    uint8_t source = 0;
+    simrv::memory::TlSourceId source = 0;
     bool active = false;
     bool request_pending = false;
     std::array<Byte, kLineBytes> line_data{};
@@ -27,7 +28,7 @@ struct InstructionFillState {
 
 struct DataTransferState {
     Address address = 0;
-    uint8_t source = 0;
+    simrv::memory::TlSourceId source = 0;
     bool active = false;
     bool is_write = false;
     bool line_fill = false;
@@ -37,7 +38,7 @@ struct DataTransferState {
 
 struct TimedPageWalkState {
     PageWalkState walk{};
-    uint8_t source = 0;
+    simrv::memory::TlSourceId source = 0;
     bool active = false;
     bool request_pending = false;
 
@@ -91,22 +92,23 @@ struct CycleInstructionSlot {
     BranchPrediction prediction{};
 
     constexpr void clear() noexcept { *this = {}; }
-    /// Mark a transferred slot unavailable without touching its diagnostic payload.  Every
-    /// consumer gates architectural work on valid; retaining the payload avoids a bulk clear on
-    /// the CA critical path while still preventing stale latency from being reported as a stall.
     constexpr void invalidate() noexcept {
         valid = false;
         remaining_latency = 0;
+        executed = false;
+        memory_complete = false;
+        wb_valid = false;
     }
 };
 
 struct HartPipelineState {
-    CycleInstructionSlot fetch{};
-    CycleInstructionSlot decode{};
-    CycleInstructionSlot execute{};
-    CycleInstructionSlot memory{};
-    CycleInstructionSlot writeback{};
-    CycleInstructionSlot retired{};
+    std::array<CycleInstructionSlot, 6> storage_{};
+    CycleInstructionSlot* fetch = &storage_[0];
+    CycleInstructionSlot* decode = &storage_[1];
+    CycleInstructionSlot* execute = &storage_[2];
+    CycleInstructionSlot* memory = &storage_[3];
+    CycleInstructionSlot* writeback = &storage_[4];
+    CycleInstructionSlot* retired = &storage_[5];
     Address fetch_pc = 0;
     bool initialized = false;
     bool frontend_blocked = false;
@@ -114,11 +116,62 @@ struct HartPipelineState {
     bool data_hazard_stall = false;
     bool control_flush = false;
 
-    constexpr void flush_younger() noexcept {
-        fetch.invalidate();
-        decode.invalidate();
+    constexpr HartPipelineState() noexcept = default;
+
+    constexpr HartPipelineState(const HartPipelineState& other) noexcept {
+        storage_ = other.storage_;
+        fetch = &storage_[other.fetch - other.storage_.data()];
+        decode = &storage_[other.decode - other.storage_.data()];
+        execute = &storage_[other.execute - other.storage_.data()];
+        memory = &storage_[other.memory - other.storage_.data()];
+        writeback = &storage_[other.writeback - other.storage_.data()];
+        retired = &storage_[other.retired - other.storage_.data()];
+        fetch_pc = other.fetch_pc;
+        initialized = other.initialized;
+        frontend_blocked = other.frontend_blocked;
+        retired_this_cycle = other.retired_this_cycle;
+        data_hazard_stall = other.data_hazard_stall;
+        control_flush = other.control_flush;
     }
-    constexpr void reset() noexcept { *this = {}; }
+
+    constexpr auto operator=(const HartPipelineState& other) noexcept -> HartPipelineState& {
+        if (this != &other) {
+            storage_ = other.storage_;
+            fetch = &storage_[other.fetch - other.storage_.data()];
+            decode = &storage_[other.decode - other.storage_.data()];
+            execute = &storage_[other.execute - other.storage_.data()];
+            memory = &storage_[other.memory - other.storage_.data()];
+            writeback = &storage_[other.writeback - other.storage_.data()];
+            retired = &storage_[other.retired - other.storage_.data()];
+            fetch_pc = other.fetch_pc;
+            initialized = other.initialized;
+            frontend_blocked = other.frontend_blocked;
+            retired_this_cycle = other.retired_this_cycle;
+            data_hazard_stall = other.data_hazard_stall;
+            control_flush = other.control_flush;
+        }
+        return *this;
+    }
+
+    constexpr void flush_younger() noexcept {
+        fetch->invalidate();
+        decode->invalidate();
+    }
+    constexpr void reset() noexcept {
+        for (auto& slot : storage_) slot.clear();
+        fetch = &storage_[0];
+        decode = &storage_[1];
+        execute = &storage_[2];
+        memory = &storage_[3];
+        writeback = &storage_[4];
+        retired = &storage_[5];
+        fetch_pc = 0;
+        initialized = false;
+        frontend_blocked = false;
+        retired_this_cycle = false;
+        data_hazard_stall = false;
+        control_flush = false;
+    }
 };
 
 }  // namespace simrv::pipeline

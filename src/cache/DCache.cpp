@@ -21,7 +21,7 @@ auto DCache::read(Address addr, Word& data, Instruction funct3) -> bool {
 
     for (uint32_t w = 0; w < associativity(); ++w) {
         auto& line = sets_[set_idx][w];
-        if (line.valid && line.tag == tag && line.state != simrv::memory::CoherenceState::None) {
+        if (line.valid && line.tag == tag && line.state != simrv::memory::MesiState::Invalid) {
             const uint32_t byte_offset = addr & (kLineBytes - 1u);
             if (simrv::compiler::unlikely(byte_offset + size_bytes > kLineBytes)) {
                 ++misses_;
@@ -58,17 +58,18 @@ auto DCache::write(Address addr, Word data, Instruction funct3) -> bool {
         for (uint32_t w = 0; w < associativity(); ++w) {
             auto& line = sets_[set_idx][w];
             if (line.valid && line.tag == tag) {
-                // Must be in Trunk state to write directly without bus transaction
-                if (line.state == simrv::memory::CoherenceState::Trunk) {
+                // Exclusive and Modified both carry TileLink Trunk permission.
+                if (line.state == simrv::memory::MesiState::Exclusive ||
+                    line.state == simrv::memory::MesiState::Modified) {
                     std::memcpy(line.data.data() + byte_offset, &data, size_bytes);
-                    line.dirty = true;
+                    line.state = simrv::memory::MesiState::Modified;
                     line.last_used = ++access_tick_;
                     ++hits_;
                     last_access_was_hit_ = true;
                     last_hit_way_ = w;
                     return true;
                 }
-                // Line is in Branch state; requires AcquirePerm upgrade to Trunk
+                // A Shared line requires a BtoT AcquirePerm upgrade.
                 break;
             }
         }
@@ -87,7 +88,7 @@ auto DCache::write(Address addr, Word data, Instruction funct3) -> bool {
 
 auto DCache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp,
                           std::array<Byte, kLineBytes>& dirty_data) -> bool {
-    const auto target_state = static_cast<simrv::memory::CoherenceState>(req.param);
+    const auto target_state = simrv::memory::mesi_for(req.cap);
     const Address line_base = req.address & ~(static_cast<Address>(kLineBytes - 1u));
     const uint32_t set_idx = get_set_index(line_base);
     const Address tag = get_tag(line_base);
@@ -95,7 +96,7 @@ auto DCache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::T
     for (uint32_t w = 0; w < associativity(); ++w) {
         auto& line = sets_[set_idx][w];
         if (line.valid && line.tag == tag) {
-            const bool was_dirty = line.dirty;
+            const bool was_dirty = line.state == simrv::memory::MesiState::Modified;
             if (was_dirty) {
                 std::memcpy(dirty_data.data(), line.data.data(), kLineBytes);
                 resp.opcode = simrv::memory::TlOpcodeC::ProbeAckData;
@@ -103,14 +104,11 @@ auto DCache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::T
                 resp.opcode = simrv::memory::TlOpcodeC::ProbeAck;
             }
             resp.address = line_base;
-            resp.param = static_cast<uint8_t>(line.state);
+            resp.report = simrv::memory::report_for(line.state, req.cap);
 
             line.state = target_state;
-            if (target_state == simrv::memory::CoherenceState::None) {
+            if (target_state == simrv::memory::MesiState::Invalid) {
                 line.valid = false;
-                line.dirty = false;
-            } else if (target_state == simrv::memory::CoherenceState::Branch) {
-                line.dirty = false;
             }
             return true;
         }
@@ -119,7 +117,7 @@ auto DCache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::T
     // Line was not present in cache
     resp.opcode = simrv::memory::TlOpcodeC::ProbeAck;
     resp.address = line_base;
-    resp.param = static_cast<uint8_t>(simrv::memory::CoherenceState::None);
+    resp.report = simrv::memory::TlReport::NtoN;
     return false;
 }
 

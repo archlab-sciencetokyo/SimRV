@@ -9,6 +9,7 @@
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <utility>
 
 #include "simrv/Define.hpp"
@@ -29,18 +30,23 @@ class BaseCache {
 
     /**
      * @struct CacheLine
-     * @brief Aligned L1 cache line entry with TileLink-C CoherenceState.
+     * @brief Aligned L1 cache line entry with explicit Illinois MESI state.
      */
     struct alignas(64) CacheLine {
         Address tag = ~Address{0};  ///< Tag bits for address matching (8 bytes, offset 0)
         uint64_t last_used = 0;     ///< Timestamp tick for LRU eviction (8 bytes, offset 8)
         bool valid = false;         ///< Cache line validity bit (1 byte, offset 16)
-        simrv::memory::CoherenceState state =
-            simrv::memory::CoherenceState::None;          ///< TL-C state (offset 17)
-        bool dirty = false;                               ///< Modified dirty flag (offset 18)
-        std::array<uint8_t, 13> padding{};                ///< Explicit padding (offset 19..32)
+        simrv::memory::MesiState state =
+            simrv::memory::MesiState::Invalid;            ///< MESI state (offset 17)
+        std::array<uint8_t, 14> padding{};                ///< Explicit padding (offset 18..32)
         alignas(16) std::array<Byte, kLineBytes> data{};  ///< 16-byte aligned payload buffer (32
                                                           ///< bytes, offset 32..64)
+    };
+
+    struct EvictedLine {
+        Address address = 0;
+        simrv::memory::MesiState state = simrv::memory::MesiState::Invalid;
+        std::array<Byte, kLineBytes> data{};
     };
 
     BaseCache() = default;
@@ -71,8 +77,7 @@ class BaseCache {
     [[nodiscard]] auto set_count() const -> uint32_t { return active_sets_; }
 
     void insert(Address base_addr, const Byte* line_data,
-                simrv::memory::CoherenceState init_state = simrv::memory::CoherenceState::Trunk,
-                bool is_dirty = false) {
+                simrv::memory::MesiState init_state = simrv::memory::MesiState::Exclusive) {
         ++access_tick_;
         const uint32_t set_idx = get_set_index(base_addr);
         const Address tag = get_tag(base_addr);
@@ -106,9 +111,12 @@ class BaseCache {
             }
         }
 
+        last_eviction_.reset();
         if (victim->valid) {
             ++replacements_;
             last_evicted_tag_ = victim->tag;
+            last_eviction_ =
+                EvictedLine{.address = victim->tag, .state = victim->state, .data = victim->data};
         } else {
             last_evicted_tag_ = ~Address{0};
         }
@@ -117,9 +125,8 @@ class BaseCache {
         last_inserted_tag_ = tag;
 
         victim->tag = tag;
-        victim->valid = (init_state != simrv::memory::CoherenceState::None);
+        victim->valid = (init_state != simrv::memory::MesiState::Invalid);
         victim->state = init_state;
-        victim->dirty = is_dirty;
         victim->last_used = access_tick_;
         std::memcpy(victim->data.data(), line_data, kLineBytes);
     }
@@ -132,6 +139,7 @@ class BaseCache {
         last_replaced_way_ = 0xFFFFFFFF;
         last_evicted_tag_ = ~Address{0};
         last_inserted_tag_ = ~Address{0};
+        last_eviction_.reset();
         if (clear_stats) {
             reset_stats();
         }
@@ -151,6 +159,9 @@ class BaseCache {
     [[nodiscard]] auto last_replaced_way() const -> uint32_t { return last_replaced_way_; }
     [[nodiscard]] auto last_evicted_tag() const -> Address { return last_evicted_tag_; }
     [[nodiscard]] auto last_inserted_tag() const -> Address { return last_inserted_tag_; }
+    auto take_last_eviction() -> std::optional<EvictedLine> {
+        return std::exchange(last_eviction_, std::nullopt);
+    }
 
     [[nodiscard]] auto is_line_valid(uint32_t set_idx, uint32_t way_idx) const -> bool {
         if (set_idx < active_sets_ && way_idx < active_ways_) {
@@ -165,15 +176,15 @@ class BaseCache {
         return ~Address{0};
     }
     [[nodiscard]] auto get_line_state(uint32_t set_idx, uint32_t way_idx) const
-        -> simrv::memory::CoherenceState {
+        -> simrv::memory::MesiState {
         if (set_idx < active_sets_ && way_idx < active_ways_) {
             return sets_[set_idx][way_idx].state;
         }
-        return simrv::memory::CoherenceState::None;
+        return simrv::memory::MesiState::Invalid;
     }
     [[nodiscard]] auto is_line_dirty(uint32_t set_idx, uint32_t way_idx) const -> bool {
         if (set_idx < active_sets_ && way_idx < active_ways_) {
-            return sets_[set_idx][way_idx].dirty;
+            return sets_[set_idx][way_idx].state == simrv::memory::MesiState::Modified;
         }
         return false;
     }
@@ -191,22 +202,29 @@ class BaseCache {
         return nullptr;
     }
 
-    auto probe_line(Address base_addr, simrv::memory::CoherenceState target_state,
+    [[nodiscard]] auto line_state(Address base_addr) const -> simrv::memory::MesiState {
+        const uint32_t set_idx = get_set_index(base_addr);
+        const Address tag = get_tag(base_addr);
+        for (uint32_t way = 0; way < active_ways_; ++way) {
+            const auto& line = sets_[set_idx][way];
+            if (line.valid && line.tag == tag) return line.state;
+        }
+        return simrv::memory::MesiState::Invalid;
+    }
+
+    auto probe_line(Address base_addr, simrv::memory::MesiState target_state,
                     std::array<Byte, kLineBytes>* out_dirty_data = nullptr) -> bool {
         const uint32_t set_idx = get_set_index(base_addr);
         const Address tag = get_tag(base_addr);
         for (uint32_t w = 0; w < active_ways_; ++w) {
             auto& line = sets_[set_idx][w];
             if (line.valid && line.tag == tag) {
-                if (line.dirty && out_dirty_data != nullptr) {
+                if (line.state == simrv::memory::MesiState::Modified && out_dirty_data != nullptr) {
                     std::memcpy(out_dirty_data->data(), line.data.data(), kLineBytes);
                 }
                 line.state = target_state;
-                if (target_state == simrv::memory::CoherenceState::None) {
+                if (target_state == simrv::memory::MesiState::Invalid) {
                     line.valid = false;
-                    line.dirty = false;
-                } else if (target_state == simrv::memory::CoherenceState::Branch) {
-                    line.dirty = false;
                 }
                 return true;
             }
@@ -228,6 +246,7 @@ class BaseCache {
     uint32_t last_replaced_way_ = 0xFFFFFFFF;
     Address last_evicted_tag_ = ~Address{0};
     Address last_inserted_tag_ = ~Address{0};
+    std::optional<EvictedLine> last_eviction_;
     mutable uint32_t last_accessed_set_ = 0xFFFFFFFF;
     mutable bool last_access_was_hit_ = false;
     mutable uint32_t last_hit_way_ = 0xFFFFFFFF;

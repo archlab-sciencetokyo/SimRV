@@ -29,6 +29,23 @@ namespace simrv::core {
 
 using namespace simrv::isa;
 
+namespace {
+void release_instruction_eviction(Machine& machine, CPU& cpu) {
+    const auto evicted = cpu.icache.take_last_eviction();
+    if (!evicted.has_value()) return;
+    simrv::memory::TlChannelC release{};
+    release.opcode = simrv::memory::TlOpcodeC::Release;
+    release.report = simrv::memory::report_for(evicted->state, simrv::memory::TlCap::ToN);
+    release.size = simrv::memory::kTlBlockSize;
+    release.source = simrv::memory::make_tl_source(static_cast<HartId>(cpu.state().mhartid),
+                                                   simrv::memory::TlPort::Instruction);
+    release.hart = static_cast<HartId>(cpu.state().mhartid);
+    release.address = evicted->address;
+    simrv::memory::TlChannelD acknowledgement{};
+    (void)machine.memory().system_bus().release_line(release, acknowledgement);
+}
+}  // namespace
+
 // ==========================================
 // IF (Instruction Fetch) Stage
 // ==========================================
@@ -189,7 +206,7 @@ auto CPU::translate_stage_address(Machine& machine, Address virtual_address, Pte
             return std::nullopt;
         }
         timed_walk.request_pending = false;
-        if (response.payload.error) {
+        if (response.payload.failed()) {
             Mmu::fail_page_walk_access(walk);
         } else if (walk.status == PageWalkStatus::ReadPte) {
             mmu->accept_page_walk_pte(walk, response.payload.data);
@@ -259,10 +276,6 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             }
 
             std::array<Byte, simrv::cache::ICache::kLineBytes> line_data{};
-            const unsigned fetch_size = xlen::kFetchSize;
-            const auto fetch_funct3 =
-                static_cast<Instruction>(xlen::kIsXLen64 ? isa::Funct3::Sd : isa::Funct3::Sw);
-
             if (machine.runtime_profile.is_cycle_mode()) {
                 static_assert(simrv::cache::ICache::kLineBytes ==
                               pipeline::InstructionFillState::kLineBytes);
@@ -282,61 +295,59 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                         return std::nullopt;
                     }
                     fill.request_pending = false;
-                    if (timed.payload.error) {
+                    if (timed.payload.failed()) {
                         ctx.pending_exception = ExceptionCode::FaultFetch;
                         ctx.pending_tval = vaddr;
                         fill.reset();
                         return std::nullopt;
                     }
-                    std::memcpy(fill.line_data.data() + fill.next_offset, &timed.payload.data,
-                                fetch_size);
-                    fill.next_offset += fetch_size;
-                }
-
-                if (fill.next_offset == simrv::cache::ICache::kLineBytes) {
-                    icache.insert(line_base, fill.line_data.data());
+                    if (!timed.has_line_data) {
+                        ctx.pending_exception = ExceptionCode::FaultFetch;
+                        ctx.pending_tval = vaddr;
+                        fill.reset();
+                        return std::nullopt;
+                    }
+                    icache.insert(line_base, timed.line_data.data(),
+                                  simrv::memory::mesi_for(timed.payload.cap));
+                    release_instruction_eviction(machine, *this);
+                    machine.memory_.system_bus().grant_ack(
+                        simrv::memory::TlChannelE{.sink = timed.payload.sink});
                     fill.reset();
                     (void)icache.read16(paddr, h_data);
                     return h_data;
                 }
 
                 simrv::memory::TlChannelA req{};
-                req.opcode = simrv::memory::TlOpcodeA::Get;
-                req.size = static_cast<uint8_t>(fetch_funct3 & 0x3);
+                req.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
+                req.grow = simrv::memory::TlGrow::NtoB;
+                req.size = simrv::memory::kTlBlockSize;
                 req.hart = static_cast<HartId>(state_.mhartid);
                 req.source = fill.source;
-                req.address = line_base + fill.next_offset;
+                req.address = line_base;
                 machine.memory_.system_bus().send_request(req);
                 fill.request_pending = true;
                 ca_state.waiting_for_interconnect = true;
                 return std::nullopt;
             }
 
-            for (uint32_t i = 0; i < simrv::cache::ICache::kLineBytes; i += fetch_size) {
-                simrv::memory::TlChannelA req{};
-                req.opcode = simrv::memory::TlOpcodeA::Get;
-                req.size = static_cast<uint8_t>(fetch_funct3 & 0x3);
-                req.hart = static_cast<HartId>(state_.mhartid);
-                req.source =
-                    simrv::memory::make_tl_source(req.hart, simrv::memory::TlPort::Instruction);
-                req.address = line_base + i;
-                machine.memory_.system_bus().send_request(req);
-
-                simrv::memory::TlChannelD resp{};
-                const bool received = machine.memory_.system_bus().get_response(req.source, resp);
-                const bool contains_requested_halfword =
-                    paddr >= req.address && paddr - req.address <= fetch_size - sizeof(uint16_t);
-                if ((!received || resp.error) && contains_requested_halfword) {
-                    ctx.pending_exception = ExceptionCode::FaultFetch;
-                    ctx.pending_tval = vaddr;
-                    return std::nullopt;
-                }
-                if (received && !resp.error) {
-                    std::memcpy(line_data.data() + i, &resp.data, fetch_size);
-                }
+            simrv::memory::TlChannelA req{};
+            req.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
+            req.grow = simrv::memory::TlGrow::NtoB;
+            req.size = simrv::memory::kTlBlockSize;
+            req.hart = static_cast<HartId>(state_.mhartid);
+            req.source =
+                simrv::memory::make_tl_source(req.hart, simrv::memory::TlPort::Instruction);
+            req.address = line_base;
+            simrv::memory::TlChannelD resp{};
+            if (!machine.memory_.system_bus().acquire_block(req, resp, line_data) ||
+                resp.failed()) {
+                ctx.pending_exception = ExceptionCode::FaultFetch;
+                ctx.pending_tval = vaddr;
+                return std::nullopt;
             }
-
-            icache.insert(line_base, line_data.data());
+            icache.insert(line_base, line_data.data(), simrv::memory::mesi_for(resp.cap));
+            release_instruction_eviction(machine, *this);
+            machine.memory_.system_bus().grant_ack(simrv::memory::TlChannelE{.sink = resp.sink});
             (void)icache.read16(paddr, h_data);
             return h_data;
         };
@@ -367,7 +378,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
         req_l.address = ctx.padr1;
         machine.memory_.system_bus().send_request(req_l);
         simrv::memory::TlChannelD resp_l{};
-        if (!machine.memory_.system_bus().get_response(req_l.source, resp_l) || resp_l.error) {
+        if (!machine.memory_.system_bus().get_response(req_l.source, resp_l) || resp_l.failed()) {
             ctx.pending_exception = ExceptionCode::FaultFetch;
             ctx.pending_tval = state_.pc;
             return;
@@ -394,7 +405,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 machine.memory_.system_bus().send_request(req_h);
                 simrv::memory::TlChannelD resp_h{};
                 if (!machine.memory_.system_bus().get_response(req_h.source, resp_h) ||
-                    resp_h.error) {
+                    resp_h.failed()) {
                     ctx.pending_exception = ExceptionCode::FaultFetch;
                     ctx.pending_tval = state_.pc + 2;
                     return;
@@ -421,13 +432,13 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
                                               : ctx.ir_org;
 
     bool is_valid = true;
-    if (simrv::compiler::unlikely(machine.s_misa_profile != kMisaDefault)) {
+    if (simrv::compiler::unlikely(machine.configuration().isa.misa_profile != kMisaDefault)) {
         is_valid = instruction_enabled_by_misa(state_.misa, w_ir_tmp, w_compressed);
     }
 
     const isa::OperationId op_id = simrv::pipeline::decoder(w_ir_tmp);
     if (simrv::compiler::unlikely(op_id == isa::UNKNOWN)) {
-        if (!machine.s_tuimode) {
+        if (!machine.tui_enabled()) {
             simrv::log::warn("[DECODER] Unknown instruction: PC=0x{:x}, HEX=0x{:x}", state_.pc,
                              w_ir_tmp);
         }
@@ -476,7 +487,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
                            (op == Opcode::NMAdd) || (op == Opcode::NMSub));
         if (is_vector) {
             if (simrv::compiler::unlikely((state_.mstatus & enum_mask(MstatusBit::Vs)) == 0)) {
-                if (!machine.s_tuimode) {
+                if (!machine.tui_enabled()) {
                     simrv::log::warn("[VS CHECK] VS is 0! mstatus=0x{:x}, Vs mask=0x{:x}",
                                      state_.mstatus, enum_mask(MstatusBit::Vs));
                 }
@@ -905,7 +916,7 @@ void CPU::execute_system(Machine& machine) {
                                                 buf_addr + i, static_cast<Instruction>(Funct3::Lb),
                                                 machine.ram_view()) &
                                             0xFF);
-                                        if (machine.s_tuimode && machine.tui_controller()) {
+                                        if (machine.tui_enabled() && machine.tui_controller()) {
                                             machine.tui_controller()->handle_char_write(
                                                 static_cast<char>(ch));
                                         } else {
@@ -923,7 +934,7 @@ void CPU::execute_system(Machine& machine) {
                                             arg_ptr, static_cast<Instruction>(Funct3::Lb),
                                             machine.ram_view()) &
                                         0xFF);
-                                    if (machine.s_tuimode && machine.tui_controller()) {
+                                    if (machine.tui_enabled() && machine.tui_controller()) {
                                         machine.tui_controller()->handle_char_write(
                                             static_cast<char>(ch));
                                     } else {
@@ -943,7 +954,7 @@ void CPU::execute_system(Machine& machine) {
                                                 machine.ram_view()) &
                                             0xFF);
                                         if (ch == 0) break;
-                                        if (machine.s_tuimode && machine.tui_controller()) {
+                                        if (machine.tui_enabled() && machine.tui_controller()) {
                                             machine.tui_controller()->handle_char_write(
                                                 static_cast<char>(ch));
                                         } else {
@@ -1168,7 +1179,8 @@ void CPU::run_writeback_stage(Machine& machine) { writeback_registers(machine); 
 void CPU::writeback_registers(Machine& machine) {
     const auto effects = pipeline::build_writeback_effects(active_context());
     e_icount += effects.increments_instruction_count;
-    if (simrv::compiler::unlikely(machine.s_use_mix) && effects.increments_instruction_count != 0) {
+    if (simrv::compiler::unlikely(machine.instruction_mix_enabled()) &&
+        effects.increments_instruction_count != 0) {
         e_instmix[static_cast<std::size_t>(active_context().op_id)]++;
     }
     if (effects.floating_write.enabled) {

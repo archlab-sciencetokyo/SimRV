@@ -81,14 +81,14 @@ auto ICache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::T
 
     resp.opcode = simrv::memory::TlOpcodeC::ProbeAck;
     resp.address = line_base;
-    resp.param = static_cast<uint8_t>(simrv::memory::CoherenceState::None);
+    resp.report = simrv::memory::TlReport::NtoN;
 
     for (uint32_t w = 0; w < associativity(); ++w) {
         auto& line = sets_[set_idx][w];
         if (line.valid && line.tag == tag) {
-            resp.param = static_cast<uint8_t>(line.state);
-            line.valid = false;
-            line.state = simrv::memory::CoherenceState::None;
+            resp.report = simrv::memory::report_for(line.state, req.cap);
+            line.state = simrv::memory::mesi_for(req.cap);
+            line.valid = line.state != simrv::memory::MesiState::Invalid;
             return true;
         }
     }

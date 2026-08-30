@@ -23,12 +23,12 @@ using namespace simrv::isa;
 
 namespace {
 SIMRV_ALWAYS_INLINE auto captures_tui_execution_detail(const Machine& machine) -> bool {
-    return machine.s_tuimode && machine.tui_controller() &&
+    return machine.tui_enabled() && machine.tui_controller() &&
            machine.tui_controller()->captures_execution_detail();
 }
 
 SIMRV_ALWAYS_INLINE auto is_tohost_addr(const Machine& machine, Address addr) -> bool {
-    return (addr - machine.s_isatest_tohost < 8) || (addr - 0x80001000ULL < 8) ||
+    return (addr - machine.isa_test_tohost() < 8) || (addr - 0x80001000ULL < 8) ||
            (addr - 0x40008000ULL < 8);
 }
 
@@ -269,24 +269,24 @@ void CPU::run_cycle(Machine& machine) {
         };
         const bool three_stage =
             pipeline_sim.config.pipeline_type == pipeline::PipelineType::ThreeStage;
-        const bool icache_miss = ca_state.instruction_fill.active || ca_pipeline.fetch.icache_miss;
-        const bool dcache_miss = ca_pipeline.memory.dcache_miss ||
-                                 ca_pipeline.writeback.dcache_miss ||
-                                 ca_pipeline.retired.dcache_miss;
+        const bool icache_miss = ca_state.instruction_fill.active || ca_pipeline.fetch->icache_miss;
+        const bool dcache_miss = ca_pipeline.memory->dcache_miss ||
+                                 ca_pipeline.writeback->dcache_miss ||
+                                 ca_pipeline.retired->dcache_miss;
         const bool instruction_walk = ca_state.instruction_walk.active;
         const bool data_walk = ca_state.data_walk.active;
-        const bool tlb_miss = instruction_walk || data_walk || ca_pipeline.fetch.tlb_miss ||
-                              ca_pipeline.memory.tlb_miss || ca_pipeline.writeback.tlb_miss;
-        const bool fetch_stalled = ca_pipeline.fetch.remaining_latency != 0 ||
+        const bool tlb_miss = instruction_walk || data_walk || ca_pipeline.fetch->tlb_miss ||
+                              ca_pipeline.memory->tlb_miss || ca_pipeline.writeback->tlb_miss;
+        const bool fetch_stalled = ca_pipeline.fetch->remaining_latency != 0 ||
                                    ca_state.instruction_fill.active || instruction_walk;
         const bool decode_stalled = !three_stage && ca_pipeline.data_hazard_stall;
-        const bool execute_stalled = (three_stage ? ca_pipeline.decode.remaining_latency
-                                                  : ca_pipeline.execute.remaining_latency) != 0 ||
+        const bool execute_stalled = (three_stage ? ca_pipeline.decode->remaining_latency
+                                                  : ca_pipeline.execute->remaining_latency) != 0 ||
                                      ca_pipeline.data_hazard_stall;
-        const bool memory_stalled = !three_stage && (ca_pipeline.memory.remaining_latency != 0 ||
+        const bool memory_stalled = !three_stage && (ca_pipeline.memory->remaining_latency != 0 ||
                                                      ca_state.data_transfer.active || data_walk);
         const bool writeback_stalled =
-            ca_pipeline.writeback.remaining_latency != 0 ||
+            ca_pipeline.writeback->remaining_latency != 0 ||
             (three_stage && (ca_state.data_transfer.active || data_walk));
         const pipeline::PipelineCycleMetrics metrics{
             .fetch_stalled = fetch_stalled,
@@ -303,18 +303,18 @@ void CPU::run_cycle(Machine& machine) {
         };
         const bool record_snapshots =
             pipeline_sim.config.record_snapshots &&
-            (!machine.s_tuimode || captures_tui_execution_detail(machine));
+            (!machine.tui_enabled() || captures_tui_execution_detail(machine));
         if (record_snapshots) {
             pipeline_sim.advance_cycle({
-                .fetch = stage_event(ca_pipeline.fetch, fetch_stalled),
+                .fetch = stage_event(*ca_pipeline.fetch, fetch_stalled),
                 .decode = three_stage ? pipeline::PipelineStageEvent{}
-                                      : stage_event(ca_pipeline.decode, decode_stalled),
-                .execute = stage_event(three_stage ? ca_pipeline.decode : ca_pipeline.execute,
+                                      : stage_event(*ca_pipeline.decode, decode_stalled),
+                .execute = stage_event(three_stage ? *ca_pipeline.decode : *ca_pipeline.execute,
                                        execute_stalled),
                 .memory = three_stage ? pipeline::PipelineStageEvent{}
-                                      : stage_event(ca_pipeline.memory, memory_stalled),
+                                      : stage_event(*ca_pipeline.memory, memory_stalled),
                 .writeback = stage_event(
-                    ca_pipeline.writeback.valid ? ca_pipeline.writeback : ca_pipeline.retired,
+                    ca_pipeline.writeback->valid ? *ca_pipeline.writeback : *ca_pipeline.retired,
                     writeback_stalled),
                 .retired = metrics.retired,
                 .icache_miss = metrics.icache_miss,
@@ -327,11 +327,11 @@ void CPU::run_cycle(Machine& machine) {
             pipeline_sim.advance_cycle_fast(metrics);
         }
         const auto retired_pc = state_.pc;
-        if (ca_pipeline.retired_this_cycle && machine.s_tuimode && machine.tui &&
+        if (ca_pipeline.retired_this_cycle && machine.tui_enabled() && machine.tui &&
             machine.tui->is_trace_active()) {
-            std::swap(pipeline_context, ca_pipeline.retired.context);
+            std::swap(pipeline_context, ca_pipeline.retired->context);
             record_trace_for_tui(machine);
-            std::swap(pipeline_context, ca_pipeline.retired.context);
+            std::swap(pipeline_context, ca_pipeline.retired->context);
         }
         tick_cycle_clock(machine, ca_pipeline.retired_this_cycle);
         if (ca_pipeline.retired_this_cycle && state_.pc != retired_pc) {
@@ -353,9 +353,11 @@ void CPU::run_cycle(Machine& machine) {
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
             const bool copy_ctx = captures_tui_execution_detail(machine) ||
-                                  machine.s_lockstep_mode || machine.s_gdb_mode ||
-                                  machine.s_bp_trace || (machine.s_strace != 0);
-            const bool inst_mix = machine.s_use_mix || captures_tui_execution_detail(machine);
+                                  machine.lockstep_enabled() || machine.debugger_enabled() ||
+                                  machine.branch_trace_enabled() ||
+                                  (machine.configuration().execution.strace != 0);
+            const bool inst_mix =
+                machine.instruction_mix_enabled() || captures_tui_execution_detail(machine);
             if (simrv::compiler::unlikely(copy_ctx && inst_mix)) {
                 execute_cached_op_fast<true, true>(machine, *cached);
             } else if (simrv::compiler::unlikely(copy_ctx)) {
@@ -424,7 +426,7 @@ void CPU::run_cycle(Machine& machine) {
     tick_cycle_clock(machine);
 
     // Record trace logs for active debug TUI components.
-    if (machine.s_tuimode && machine.tui && machine.tui->is_trace_active()) {
+    if (machine.tui_enabled() && machine.tui && machine.tui->is_trace_active()) {
         record_trace_for_tui(machine);
     }
 
@@ -528,9 +530,11 @@ void CPU::run_cycle_baremetal(Machine& machine) {
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
             const bool copy_ctx = captures_tui_execution_detail(machine) ||
-                                  machine.s_lockstep_mode || machine.s_gdb_mode ||
-                                  machine.s_bp_trace || (machine.s_strace != 0);
-            const bool inst_mix = machine.s_use_mix || captures_tui_execution_detail(machine);
+                                  machine.lockstep_enabled() || machine.debugger_enabled() ||
+                                  machine.branch_trace_enabled() ||
+                                  (machine.configuration().execution.strace != 0);
+            const bool inst_mix =
+                machine.instruction_mix_enabled() || captures_tui_execution_detail(machine);
             if (simrv::compiler::unlikely(copy_ctx && inst_mix)) {
                 execute_cached_op_fast<true, true>(machine, *cached);
             } else if (simrv::compiler::unlikely(copy_ctx)) {
@@ -547,7 +551,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
                 clint_mmio.rtc_divider = 0;
                 evaluate_timer_interrupt();
             }
-            if (machine.s_tuimode && machine.tui && machine.tui->is_trace_active()) {
+            if (machine.tui_enabled() && machine.tui && machine.tui->is_trace_active()) {
                 record_trace_for_tui(machine);
             }
             if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
@@ -596,7 +600,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
         clint_mmio.rtc_divider = 0;
         evaluate_timer_interrupt();
     }
-    if (machine.s_tuimode && machine.tui && machine.tui->is_trace_active()) {
+    if (machine.tui_enabled() && machine.tui && machine.tui->is_trace_active()) {
         record_trace_for_tui(machine);
     }
 
@@ -716,7 +720,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         if (simrv::compiler::likely(machine.memory_geometry().contains(addr, access_size))) {
             // Check tohost writes (fast filter for 0x80000000 or 0x40000000 regions)
             if (simrv::compiler::unlikely((addr & 0xC0000000ULL) != 0)) {
-                if (simrv::compiler::unlikely(addr == machine.s_isatest_tohost ||
+                if (simrv::compiler::unlikely(addr == machine.isa_test_tohost() ||
                                               addr == 0x80001000ULL || addr == 0x40008000ULL)) {
                     const bool is_tohost_write =
                         simrv::xlen::kIsXLen64
@@ -732,7 +736,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                             std::memory_order_relaxed);
                     }
                 } else if (simrv::compiler::unlikely(!simrv::xlen::kIsXLen64 &&
-                                                     (addr == machine.s_isatest_tohost + 4 ||
+                                                     (addr == machine.isa_test_tohost() + 4 ||
                                                       addr == 0x80001004ULL ||
                                                       addr == 0x40008004ULL))) {
                     const bool is_tohost_write = (ctx.funct3 == Funct3::Sw);
@@ -1026,7 +1030,7 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
 
 auto CPU::execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> bool {
     Address const mem_addr = rrs1 + op.imm;
-    if (simrv::compiler::unlikely(machine.s_tuimode || machine.s_bp_trace)) {
+    if (simrv::compiler::unlikely(machine.tui_enabled() || machine.branch_trace_enabled())) {
         pipeline_context.mem_addr = mem_addr;
     }
     Register mem_rdata = 0;
@@ -1055,7 +1059,7 @@ auto CPU::execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> 
 auto CPU::execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Register rrs2)
     -> bool {
     Address const mem_addr = rrs1 + op.imm;
-    if (simrv::compiler::unlikely(machine.s_tuimode || machine.s_bp_trace)) {
+    if (simrv::compiler::unlikely(machine.tui_enabled() || machine.branch_trace_enabled())) {
         pipeline_context.mem_addr = mem_addr;
     }
     const unsigned size_bytes = access_size_for_funct3(op.funct3);
