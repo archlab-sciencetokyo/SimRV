@@ -39,13 +39,7 @@ auto LeftPane::is_single_column(int width) const -> bool {
     bool const is_reg_page =
         (page_ == TuiRegPage::GPR || page_ == TuiRegPage::FPR || page_ == TuiRegPage::VEC);
     if (!is_reg_page) return false;
-    if (page_ == TuiRegPage::GPR) {
-        return (simrv::xlen::kIsXLen64 && width < 58) || (!simrv::xlen::kIsXLen64 && width < 42);
-    }
-    if (page_ == TuiRegPage::VEC) {
-        return width < 58;
-    }
-    return width < 58;
+    return width < 60;
 }
 
 auto LeftPane::get_total_rows(int width) -> int {
@@ -584,8 +578,7 @@ auto LeftPane::render_row(int row_idx, int width) -> std::string {
 
     bool show_spinner = !paused_;
     if (show_spinner && machine_.tui_controller()) {
-        uint64_t delay =
-            machine_.tui_controller()->step_delay_us_.load(std::memory_order_relaxed);
+        uint64_t delay = machine_.tui_controller()->step_delay_us_.load(std::memory_order_relaxed);
         if (delay >= 10000) {
             show_spinner = false;
         }

@@ -524,10 +524,10 @@ void test_responsive_layout() {
     expect(narrow.left > 0 && narrow.right > 0, "narrow resize keeps both panes visible");
 
     const auto desktop = calculate_pane_widths(140, TuiLayout::Split);
-    expect(desktop.left == 63 && desktop.right == 74,
+    expect(desktop.left == 61 && desktop.right == 76,
            "desktop split keeps the intended default inspection pane");
     const auto constrained = calculate_pane_widths(80, TuiLayout::Split, 200);
-    expect(constrained.right == 20, "manual resizing preserves a usable guest terminal");
+    expect(constrained.right == 30, "manual resizing preserves a usable guest terminal");
 
     const auto full_right = calculate_pane_widths(80, TuiLayout::FullRight, 60);
     expect(full_right.left == 0 && full_right.right == 78,
@@ -584,9 +584,9 @@ void test_frame_composition() {
     };
     constexpr FrameCase cases[] = {
         {40, 10, TuiLayout::Split, 1195331755914945392ULL},
-        {80, 24, TuiLayout::Split, 12464046866688151874ULL},
-        {120, 32, TuiLayout::Split, 12126785168693464750ULL},
-        {160, 48, TuiLayout::Split, 3975935784378917810ULL},
+        {80, 24, TuiLayout::Split, 2550224749323736092ULL},
+        {120, 32, TuiLayout::Split, 8780889241500289282ULL},
+        {160, 48, TuiLayout::Split, 11898988648789430246ULL},
         {120, 32, TuiLayout::FullLeft, 17252040885446061950ULL},
         {120, 32, TuiLayout::FullRight, 3818806389424029207ULL},
     };

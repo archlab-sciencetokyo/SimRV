@@ -36,14 +36,15 @@ struct OverlayGeometry {
     bool renderable = false;
 };
 
+inline constexpr int kBaseColumnUnitWidth = 40;
 inline constexpr int kMinimumTerminalWidth = 40;
 inline constexpr int kMinimumTerminalHeight = 10;
 inline constexpr int kFrameChromeRows = 7;
 
 [[nodiscard]] constexpr auto max_supported_columns(int terminal_width) -> uint8_t {
-    if (terminal_width >= 160) return 4;
-    if (terminal_width >= 120) return 3;
-    if (terminal_width >= 75) return 2;
+    if (terminal_width >= 165) return 4;
+    if (terminal_width >= 124) return 3;
+    if (terminal_width >= 82) return 2;
     return 1;
 }
 
@@ -53,39 +54,40 @@ inline constexpr int kFrameChromeRows = 7;
     if (layout == Layout::FullLeft || layout == Layout::FullRight) {
         return {.widths = {full_width, 0, 0, 0}, .count = 1};
     }
-    if (layout == Layout::FourColumn && terminal_width >= 160) {
+
+    if (layout == Layout::FourColumn && terminal_width >= 165) {
         int const usable = std::max(0, terminal_width - 5);  // 3 inner dividers + 2 borders
-        int const c = usable / 4;
-        int const c4 = usable - (c * 3);
-        return {.widths = {c, c, c, c4}, .count = 4};
+        int const c_left = std::clamp((usable * 22) / 100, kBaseColumnUnitWidth, 60);
+        int const c3 = usable - (c_left * 3);
+        return {.widths = {c_left, c_left, c_left, c3}, .count = 4};
     }
-    if ((layout == Layout::ThreeColumn || layout == Layout::FourColumn) && terminal_width >= 120) {
+
+    if ((layout == Layout::ThreeColumn || layout == Layout::FourColumn) && terminal_width >= 124) {
         int const usable = std::max(0, terminal_width - 4);  // 2 inner dividers + 2 borders
-        int const c1 = (usable * 30) / 100;
-        int const c2 = (usable * 30) / 100;
-        int const c3 = usable - c1 - c2;
-        return {.widths = {c1, c2, c3, 0}, .count = 3};
+        int const c_left = std::clamp((usable * 30) / 100, kBaseColumnUnitWidth, 60);
+        int const c2 = usable - (c_left * 2);
+        return {.widths = {c_left, c_left, c2, 0}, .count = 3};
     }
 
     // Default 2-column Split
     int const split_width = std::max(0, terminal_width - 3);
-    if (split_width == 0) return {.widths = {0, 0, 0, 0}, .count = 0};
+    if (split_width <= 0) return {.widths = {0, 0, 0, 0}, .count = 0};
     if (terminal_width < 75 && layout != Layout::Split) {
         return {.widths = {full_width, 0, 0, 0}, .count = 1};
     }
+
     int desired_left = requested_left;
     if (desired_left <= 0) {
-        if (terminal_width <= 70)
-            desired_left = split_width / 2;
-        else if (terminal_width <= 95)
-            desired_left = 35;
-        else if (terminal_width <= 114)
-            desired_left = std::max(35, (terminal_width * 35) / 100);
-        else
-            desired_left = std::min(70, std::max(58, (terminal_width * 45) / 100));
+        if (terminal_width <= 82) {
+            desired_left = kBaseColumnUnitWidth;
+        } else if (terminal_width <= 110) {
+            desired_left = std::clamp((split_width * 42) / 100, kBaseColumnUnitWidth, 58);
+        } else {
+            desired_left = std::clamp((split_width * 45) / 100, kBaseColumnUnitWidth, 64);
+        }
     }
-    int const minimum_left = std::min(34, split_width / 2);
-    int const minimum_right = std::min(20, split_width - minimum_left);
+    int const minimum_left = std::min(kBaseColumnUnitWidth, split_width / 2);
+    int const minimum_right = std::min(30, split_width - minimum_left);
     int const maximum_left = std::max(minimum_left, split_width - minimum_right);
     int const left = std::clamp(desired_left, minimum_left, maximum_left);
     return {.widths = {left, split_width - left, 0, 0}, .count = 2};
