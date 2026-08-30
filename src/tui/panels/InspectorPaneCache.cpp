@@ -76,9 +76,9 @@ auto render_cache_way_row(const simrv::core::CPU& cpu, int way_idx, int inspect_
     std::string highlight;
     if (is_replaced_way) {
         highlight =
-            std::format(" [1m{}◄ MISS\033[0m {}▸ REPLACED\033[0m", kThemeCoral, kThemePeach);
+            std::format("  \033[1m{}◄ MISS\033[0m {}▸ REPLACED\033[0m", kThemeCoral, kThemePeach);
     } else if (is_hit_way) {
-        highlight = std::format(" [1m{}◄ HIT\033[0m", kThemeMint);
+        highlight = std::format("  \033[1m{}◄ HIT\033[0m", kThemeMint);
     }
 
     std::string line_str;

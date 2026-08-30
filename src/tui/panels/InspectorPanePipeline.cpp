@@ -643,8 +643,8 @@ auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::cor
             // Resolve against the instruction being presented rather than the architectural PC,
             // which may already have advanced while the functional pipeline view is rendered.
             std::string sym = machine_.symbol_table().lookup(ctx.cpc.raw());
-            std::string pc_str =
-                sym.empty() ? hex_val(ctx.cpc.raw()) : std::format("{} <{}>", hex_val(ctx.cpc.raw()), sym);
+            std::string pc_str = sym.empty() ? hex_val(ctx.cpc.raw())
+                                             : std::format("{} <{}>", hex_val(ctx.cpc.raw()), sym);
 
             // Build assembly string from operation name
             bool is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
