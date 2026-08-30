@@ -1697,6 +1697,73 @@ void test_ia_multithreaded_smp_execution() {
               << " harts parallel AMO sum = " << final_sum << ")\n";
 }
 
+void test_quantum_smp_baremetal_execution() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    simrv::core::Machine machine(simrv::core::MachineConfig{
+        .execution = {.appmode = false, .smp_quantum = 100, .smp_multithreaded = false}});
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+    machine.cpu.machine_ = &machine;
+    machine.cpu.reset();
+
+    constexpr size_t kNumHarts = 4;
+    for (uint32_t i = 1; i < kNumHarts; ++i) {
+        auto sec = std::make_unique<simrv::core::CPU>();
+        sec->machine_ = &machine;
+        sec->reset();
+        sec->state().mhartid = i;
+        sec->hart_status.store(simrv::core::HartStatus::Started, std::memory_order_relaxed);
+        machine.secondary_harts_.push_back(std::move(sec));
+    }
+
+    // Binary: each hart runs 250 atomic increments to 0x80000200
+    constexpr Address pc = simrv::memory::kDramBaseAddress;
+    constexpr std::array<Instruction, 10> program = {
+        0x0fa00093,  // addi x1, x0, 250
+        0x00100213,  // addi x4, x0, 1
+        0x400001b7,  // lui  x3, 0x40000
+        0x00119193,  // slli x3, x3, 1 (x3 = 0x80000000)
+        0x20018193,  // addi x3, x3, 0x200 (x3 = 0x80000200)
+        0x0041a2af,  // amoadd.w x5, x4, (x3)
+        0xfff08093,  // addi x1, x1, -1
+        0xfe009ce3,  // bnez x1, -8 (back to amoadd)
+        0x10500073,  // wfi
+        0x0000006f,  // jal x0, 0
+    };
+    std::memcpy(ram.data(), program.data(), sizeof(program));
+
+    for (size_t i = 0; i < kNumHarts; ++i) {
+        machine.hart(i).state().pc = pc;
+    }
+
+    // Run execution turns using OsRunner quantum batching
+    for (uint32_t turn = 0; turn < 2000; ++turn) {
+        machine.execute_cycle_for_testing();
+        bool all_done = true;
+        for (size_t i = 0; i < kNumHarts; ++i) {
+            if (machine.hart(i).state().pc < pc + 0x20) {
+                all_done = false;
+                break;
+            }
+        }
+        if (all_done) break;
+    }
+
+    for (size_t i = 0; i < kNumHarts; ++i) {
+        check(machine.hart(i).state().pc >= pc + 0x20);
+    }
+
+    uint32_t final_sum = 0;
+    std::memcpy(&final_sum, &ram[0x200], sizeof(final_sum));
+    check(final_sum == kNumHarts * 250);
+
+    std::cout << "[PASS] test_quantum_smp_baremetal_execution (" << kNumHarts
+              << " harts quantum-scheduled AMO sum = " << final_sum << ")\n";
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1738,6 +1805,7 @@ int main(int argc, char** argv) {
     test_sbi_multihart_rfence();
     test_ia_multihart_lr_sc_coherence();
     test_ia_multithreaded_smp_execution();
+    test_quantum_smp_baremetal_execution();
     std::cout << "All Modern Platform tests PASSED!\n";
     return 0;
 }
