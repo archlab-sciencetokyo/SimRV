@@ -452,7 +452,12 @@ auto InspectorPane::render_trace_row(int logical_row, int width) -> std::string 
     if (logical_row < 0 || logical_row >= total) {
         return format_to_width("", width);
     }
-    return format_to_width(" " + trace_buffer_->at(static_cast<std::size_t>(logical_row)), width);
+    std::string line = trace_buffer_->at(static_cast<std::size_t>(logical_row));
+    auto const& sv = current_scroll_view();
+    if (sv.offset_x() > 0) {
+        line = framework::crop_columns(line, sv.offset_x(), std::max(1, width - 2));
+    }
+    return format_to_width(" " + line, width);
 }
 
 auto InspectorPane::render_log_bottom_row(int row_idx, int num_rows, int width) -> std::string {
@@ -532,7 +537,10 @@ auto InspectorPane::render_row(int row_idx, int width) -> std::string {
                                        : get_total_rows(width);
 
     constexpr int kStackCanvasWidth = 104;
-    int const total_cols = (page_ == TuiRegPage::STACK) ? kStackCanvasWidth : width;
+    constexpr int kTraceCanvasWidth = 120;
+    int const total_cols = (page_ == TuiRegPage::STACK)   ? kStackCanvasWidth
+                           : (page_ == TuiRegPage::TRACE) ? kTraceCanvasWidth
+                                                          : width;
     auto& sv = current_scroll_view();
     sv.set_geometry(total_logical_rows, max_content_rows, total_cols, std::max(1, width - 2));
 
@@ -577,22 +585,16 @@ auto InspectorPane::render_row(int row_idx, int width) -> std::string {
     }
 
     bool const pan_stack_row =
-        supports_horizontal_scroll() && logical_row >= 1 && logical_row <= 13;
+        (page_ == TuiRegPage::STACK) && logical_row >= 1 && logical_row <= 13;
     int const render_width = pan_stack_row ? std::max(width, kStackCanvasWidth) : width;
     auto finish_row = [&](std::string res) {
         if (page_ != TuiRegPage::PIPELINE && page_ != TuiRegPage::EXPLAIN) {
             res = style_inline_separators(std::move(res));
         }
-        if (pan_stack_row) {
-            int const viewport_width = std::max(1, width - 2);
-            std::string const left_marker = sv.can_scroll_left() ? "◀" : " ";
-            std::string const right_marker = sv.can_scroll_right() ? "▶" : " ";
-            res = std::format("{}{}\033[0m{}{}{}\033[0m", kThemeMuted, left_marker,
-                              framework::crop_columns(res, sv.offset_x(), viewport_width),
-                              kThemeMuted, right_marker);
-            res = format_to_width(res, width);
+        if (pan_stack_row && sv.offset_x() > 0) {
+            res = " " + framework::crop_columns(res, sv.offset_x(), std::max(1, width - 2));
         }
-        return res;
+        return format_to_width(res, width);
     };
 
     if (show_spinner) {

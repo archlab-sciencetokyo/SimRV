@@ -86,21 +86,25 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
         int const viewport = std::max(1, width - 2);
         int const first_col = get_horizontal_scroll_offset() + 1;
         int const last_col = std::min(104, get_horizontal_scroll_offset() + viewport);
-        std::string title =
-            width < 104
-                ? std::format("Stack Watch · cols {}–{}/104 · Shift+←/→ or wheel ({})", first_col,
-                              last_col, is_16b_aligned ? "16B aligned" : "unaligned sp!")
-                : std::format("Live Guest Stack Watch ({})",
-                              is_16b_aligned ? "16B ABI Aligned" : "Unaligned sp!");
+        std::string title;
+        if (width >= 80) {
+            title = std::format("Stack Watch · cols {}-{}/104 ({})", first_col, last_col,
+                                is_16b_aligned ? "16B aligned" : "unaligned");
+        } else if (width >= 50) {
+            title = std::format("Stack (cols {}-{}/104)", first_col, last_col);
+        } else {
+            title = std::format("Stack ({}-{})", first_col, last_col);
+        }
         return section_line(title, width);
     }
     if (logical_row == 14) {
-        std::string const pan_hint = width < 104 ? " · ◀/▶ more" : "";
-        std::string footer_desc =
-            std::format("Occupancy: sp · active frame · free/scratch  {}{}",
-                        is_16b_aligned ? "\033[38;5;120m16B ABI Aligned\033[0m"
-                                       : "\033[38;5;203m16B Misaligned\033[0m",
-                        pan_hint);
+        std::string footer_desc;
+        if (width >= 60) {
+            footer_desc = std::format("Occupancy: sp · frame · scratch ({})",
+                                      is_16b_aligned ? "16B aligned" : "unaligned");
+        } else {
+            footer_desc = "sp · frame · scratch";
+        }
         return section_line(footer_desc, width);
     }
     if (logical_row > 14) {
