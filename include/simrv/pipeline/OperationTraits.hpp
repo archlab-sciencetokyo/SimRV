@@ -122,6 +122,7 @@ namespace simrv::pipeline::operation {
         case Branch:
         case Jalr:
         case System:
+        case Amo:
         case OpFp:
             return true;
         default:
@@ -137,6 +138,7 @@ namespace simrv::pipeline::operation {
         case Store:
         case StoreFp:
         case Branch:
+        case Amo:
         case OpFp:
             return true;
         default:

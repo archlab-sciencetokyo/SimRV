@@ -425,6 +425,16 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.appmode = false;
         return true;
     }
+    if (arg == "--ca") {
+        result.options.execution_mode = RequestedExecutionMode::CycleAccurate;
+        result.options.execution_mode_explicit = true;
+        return true;
+    }
+    if (arg == "--ia") {
+        result.options.execution_mode = RequestedExecutionMode::Fast;
+        result.options.execution_mode_explicit = true;
+        return true;
+    }
     if (arg == "--mode") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -1066,6 +1076,14 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         "  {}--class, --edu{}          Enable educational classroom mode (guidance & glossary)\n",
         style(kBrightGreen), style(kReset));
 
+    std::print(stdout,
+               "  {}--ia{}                      Instruction-accurate execution mode (fast in CLI, "
+               "observable in TUI)\n",
+               style(kBrightGreen), style(kReset));
+    std::print(stdout,
+               "  {}--ca{}                      Cycle-accurate execution mode (cycle-fast in CLI, "
+               "observable in TUI)\n",
+               style(kBrightGreen), style(kReset));
     std::print(stdout,
                "  {}--mode {}{}<MODE>{}      Execution: fast, detailed, or cycle-accurate\n",
                style(kBrightGreen), style(kReset), style(kBrightBlack), style(kReset));

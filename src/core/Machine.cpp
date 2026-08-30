@@ -817,6 +817,17 @@ void Machine::run() {
         execute_runner_cycle();
         finalize_runner_cycle();
 
+        if (simrv::compiler::unlikely(tohost != 0)) {
+            finalize_cycle_tohost();
+        }
+        if (simrv::compiler::unlikely(config.execution.fincnt !=
+                                          std::numeric_limits<Counter>::max() &&
+                                      cpu.e_icount >= config.execution.fincnt)) {
+            simrv::log::info("finished by -e option");
+            stop_reason_ = StopReason::InstructionLimit;
+            is_running_ = false;
+        }
+
         if (tui_enabled() && tui) {
             tui->on_cycle_completed();
         }

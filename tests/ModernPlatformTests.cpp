@@ -1625,8 +1625,8 @@ void test_ia_multithreaded_smp_execution() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    simrv::core::Machine machine(simrv::core::MachineConfig{
-        .execution = {.appmode = true, .smp_multithreaded = true}});
+    simrv::core::Machine machine(
+        simrv::core::MachineConfig{.execution = {.appmode = true, .smp_multithreaded = true}});
     std::vector<Byte> ram(1024 * 1024, Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;

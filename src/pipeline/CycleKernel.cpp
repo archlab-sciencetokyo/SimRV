@@ -18,11 +18,7 @@ using pipeline::CycleInstructionSlot;
     const auto opcode = context.opcode;
     const bool vector =
         context.op_id >= isa::OperationId::VSETVLI && context.op_id <= isa::OperationId::VWSLL_VI;
-    return vector || opcode == isa::Opcode::System || opcode == isa::Opcode::MiscMem ||
-           opcode == isa::Opcode::Amo || opcode == isa::Opcode::OpFp ||
-           opcode == isa::Opcode::LoadFp || opcode == isa::Opcode::StoreFp ||
-           opcode == isa::Opcode::MAdd || opcode == isa::Opcode::MSub ||
-           opcode == isa::Opcode::NMAdd || opcode == isa::Opcode::NMSub;
+    return vector || opcode == isa::Opcode::System || opcode == isa::Opcode::MiscMem;
 }
 
 [[nodiscard]] auto writes_integer(const pipeline::PipelineContext& context) -> bool {
