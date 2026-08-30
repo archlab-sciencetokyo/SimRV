@@ -202,12 +202,25 @@ class BaseCache {
         return nullptr;
     }
 
+    [[nodiscard]] constexpr auto find_way(uint32_t set_idx, Address tag) const noexcept
+        -> std::optional<uint32_t> {
+        if (set_idx >= active_sets_) return std::nullopt;
+        const auto& set = sets_[set_idx];
+        for (uint32_t w = 0; w < active_ways_; ++w) {
+            if (set[w].valid && set[w].tag == tag &&
+                set[w].state != simrv::memory::MesiState::Invalid) {
+                return w;
+            }
+        }
+        return std::nullopt;
+    }
+
     [[nodiscard]] auto line_state(Address base_addr) const -> simrv::memory::MesiState {
         const uint32_t set_idx = get_set_index(base_addr);
         const Address tag = get_tag(base_addr);
-        for (uint32_t way = 0; way < active_ways_; ++way) {
-            const auto& line = sets_[set_idx][way];
-            if (line.valid && line.tag == tag) return line.state;
+        const auto way_opt = find_way(set_idx, tag);
+        if (way_opt.has_value()) {
+            return sets_[set_idx][*way_opt].state;
         }
         return simrv::memory::MesiState::Invalid;
     }

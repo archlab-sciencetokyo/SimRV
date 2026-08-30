@@ -15,6 +15,7 @@
 
 #include "simrv/Define.hpp"
 #include "simrv/cache/BaseCache.hpp"
+#include "simrv/cache/L3Cache.hpp"
 #include "simrv/memory/Bus.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -64,6 +65,11 @@ class CoherenceHub {
     [[nodiscard]] auto stats() const -> const CoherenceStats& { return stats_; }
     void reset_stats() { stats_ = {}; }
 
+    [[nodiscard]] auto l3_cache() noexcept -> simrv::cache::L3Cache& { return l3_cache_; }
+    [[nodiscard]] auto l3_cache() const noexcept -> const simrv::cache::L3Cache& {
+        return l3_cache_;
+    }
+
     [[nodiscard]] auto get_directory_state(Address line_base) const -> DirectoryEntry;
     [[nodiscard]] auto validate_directory() const -> std::expected<void, std::string>;
 
@@ -77,6 +83,7 @@ class CoherenceHub {
     static constexpr size_t kFastCacheMask = kFastCacheEntries - 1;
 
     simrv::core::Machine& machine_;
+    simrv::cache::L3Cache l3_cache_{};
     std::unordered_map<Address, DirectoryEntry> directory_;
     std::array<FastCacheEntry, kFastCacheEntries> fast_cache_{};
     CoherenceStats stats_{};

@@ -4,6 +4,8 @@
 #include <limits>
 #include <string>
 
+#include "simrv/cache/L2Cache.hpp"
+#include "simrv/cache/L3Cache.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Pmp.hpp"
@@ -875,10 +877,41 @@ void test_strong_semantic_types() {
            "std::hash<PhysAddr> matches underlying Word hash");
 }
 
+void test_cache_hierarchy_semantics() {
+    // Test L2 Cache
+    simrv::cache::L2Cache l2{};
+    std::array<Byte, simrv::cache::L2Cache::kLineBytes> fill_data{};
+    fill_data[0] = static_cast<Byte>(0xAA);
+    fill_data[31] = static_cast<Byte>(0x55);
+
+    const Address test_addr = 0x80002000;
+    std::array<Byte, simrv::cache::L2Cache::kLineBytes> read_buf{};
+    expect(!l2.read_line(test_addr, read_buf), "L2 read misses on empty cache");
+
+    l2.write_line(test_addr, fill_data, simrv::memory::MesiState::Exclusive);
+    expect(l2.read_line(test_addr, read_buf), "L2 read hits after line insertion");
+    expect(read_buf[0] == static_cast<Byte>(0xAA), "L2 read data matches written payload");
+    expect(read_buf[31] == static_cast<Byte>(0x55), "L2 read data matches tail byte");
+
+    // Test L3 Cache (LLC)
+    simrv::cache::L3Cache l3{};
+    simrv::memory::MesiState state = simrv::memory::MesiState::Invalid;
+    expect(!l3.lookup_line(test_addr, read_buf, state), "L3 lookup misses on empty cache");
+
+    l3.write_line(test_addr, fill_data, simrv::memory::MesiState::Modified);
+    expect(l3.lookup_line(test_addr, read_buf, state), "L3 lookup hits after write_line");
+    expect(state == simrv::memory::MesiState::Modified, "L3 line state matches written state");
+    expect(read_buf[0] == static_cast<Byte>(0xAA), "L3 line payload preserved");
+
+    l3.invalidate_line(test_addr);
+    expect(!l3.lookup_line(test_addr, read_buf, state), "L3 lookup misses after invalidation");
+}
+
 }  // namespace
 
 int main() {
     test_strong_semantic_types();
+    test_cache_hierarchy_semantics();
     test_unaligned_host_access();
     test_runtime_ram_view();
     test_mmio_ranges();

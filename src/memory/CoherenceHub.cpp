@@ -131,6 +131,7 @@ void CoherenceHub::invalidate_line_broadcast(Address line_base, uint32_t initiat
 
     machine_.memory_.reservation_table().invalidate_matching(aligned_addr,
                                                              static_cast<HartId>(initiator_hart));
+    l3_cache_.invalidate_line(aligned_addr);
     erase_dir_entry(aligned_addr);
 }
 
@@ -155,6 +156,7 @@ void CoherenceHub::invalidate_line_external(Address line_base) {
         ++stats_.invalidation_count;
     }
     machine_.memory_.reservation_table().invalidate_matching(aligned_addr);
+    l3_cache_.invalidate_line(aligned_addr);
     erase_dir_entry(aligned_addr);
 }
 
@@ -235,6 +237,7 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
             if (probe_resp.opcode == TlOpcodeC::ProbeAckData) {
                 std::memcpy(line_buffer.data(), dirty.data(), kLineBytes);
                 data_fetched_from_owner = true;
+                l3_cache_.write_line(line_base, line_buffer, MesiState::Exclusive);
                 const auto geometry = machine_.memory_geometry();
                 if (dram_ptr != nullptr && geometry.contains(line_base, kLineBytes)) {
                     const Address offset = line_base - geometry.dram_base;
@@ -289,12 +292,16 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
     }
 
     if (!data_fetched_from_owner) {
-        const auto geometry = machine_.memory_geometry();
-        if (dram_ptr != nullptr && geometry.contains(line_base, kLineBytes)) {
-            const Address offset = line_base - geometry.dram_base;
-            std::memcpy(line_buffer.data(), dram_ptr + offset, kLineBytes);
-        } else {
-            std::ranges::fill(line_buffer, static_cast<Byte>(0));
+        MesiState l3_state = MesiState::Invalid;
+        if (!l3_cache_.lookup_line(line_base, line_buffer, l3_state)) {
+            const auto geometry = machine_.memory_geometry();
+            if (dram_ptr != nullptr && geometry.contains(line_base, kLineBytes)) {
+                const Address offset = line_base - geometry.dram_base;
+                std::memcpy(line_buffer.data(), dram_ptr + offset, kLineBytes);
+            } else {
+                std::ranges::fill(line_buffer, static_cast<Byte>(0));
+            }
+            l3_cache_.write_line(line_base, line_buffer, MesiState::Exclusive);
         }
     }
 
@@ -324,6 +331,7 @@ auto CoherenceHub::handle_release(const TlChannelC& req, TlChannelD& resp,
     if (lookup_dir_entry(line_base, dir_entry)) {
         dir_entry.sharers_mask &= ~(uint64_t{1} << req.hart);
         if (req.opcode == TlOpcodeC::ReleaseData && release_data != nullptr) {
+            l3_cache_.write_line(line_base, *release_data, MesiState::Exclusive);
             auto* dram_ptr = machine_.ram_data();
             const auto geometry = machine_.memory_geometry();
             if (dram_ptr != nullptr && geometry.contains(line_base, kLineBytes)) {
