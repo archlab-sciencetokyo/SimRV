@@ -304,7 +304,7 @@ auto LeftPane::render_debug_state(int debug_row, int width) -> std::string {
         }
         ++optional_row;
     }
-    if (machine_.s_traplog_mode && debug_row == optional_row) {
+    if (machine_.trap_log_enabled() && debug_row == optional_row) {
         std::string tohost_str = std::format("0x{:x}", machine_.tohost.load());
         return render_pair("tohost", tohost_str,
                            machine_.tohost.load() != 0 ? kThemePeach : kThemeVal, "traplog",
@@ -318,17 +318,17 @@ auto LeftPane::debug_state_row_count() const -> int {
     if (machine_.is_paused() && machine_.stop_reason() != simrv::core::Machine::StopReason::Running)
         ++rows;
     if (machine_.debugger() || machine_.lockstep()) ++rows;
-    if (machine_.s_traplog_mode) ++rows;
+    if (machine_.trap_log_enabled()) ++rows;
     return rows;
 }
 
 auto LeftPane::render_perf_or_debug(const simrv::core::CPU& cpu, int logical_row, int width,
                                     bool single_column) -> std::string {
     int const total_logical_rows = get_total_rows(width);
-    int const debug_rows = machine_.s_debug_mode ? debug_state_row_count() : 0;
+    int const debug_rows = machine_.debug_diagnostics_enabled() ? debug_state_row_count() : 0;
     int const adj_base_rows = total_logical_rows - debug_rows;
 
-    if (machine_.s_debug_mode && logical_row >= adj_base_rows && logical_row < total_logical_rows) {
+    if (machine_.debug_diagnostics_enabled() && logical_row >= adj_base_rows && logical_row < total_logical_rows) {
         return render_debug_state(logical_row - adj_base_rows, width);
     }
 

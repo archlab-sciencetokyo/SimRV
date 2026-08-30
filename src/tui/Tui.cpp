@@ -112,7 +112,7 @@ Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
     vt_.set_response_callback([this](std::string_view response) -> void {
         for (const char byte : response) write_guest_input(static_cast<uint8_t>(byte));
     });
-    if (machine_.s_fn_memimg.empty()) {
+    if (machine_.binary_path().empty()) {
         open_modal(ModalType::LoadBinary);
     }
 }
@@ -298,7 +298,7 @@ void Tui::initialize() {
 
     start_ui_thread();
 
-    if (machine_.s_fn_memimg.empty()) {
+    if (machine_.binary_path().empty()) {
         open_modal(ModalType::LoadBinary);
     }
 }
@@ -1057,7 +1057,7 @@ void Tui::set_reg_page(TuiRegPage page) {
         (page == TuiRegPage::CACHE || page == TuiRegPage::BPRED || page == TuiRegPage::HAZARD)) {
         set_status_override(
             "CA Inspector Page disabled in Functional Mode (Enable Cycle-Accurate mode "
-            "\033[1m[,]\033[22m or --ca)");
+            "\033[1m[,]\033[22m or --mode cycle-accurate)");
         page = TuiRegPage::TLB;
     }
     if (left_pane_) {
@@ -1080,14 +1080,14 @@ void Tui::toggle_explain() {
 }
 
 void Tui::toggle_high_contrast() {
-    machine_.s_high_contrast = !machine_.s_high_contrast;
-    set_high_contrast(machine_.s_high_contrast);
+    machine_.set_high_contrast_enabled(!machine_.high_contrast_enabled());
+    set_high_contrast(machine_.high_contrast_enabled());
     render(true);
 }
 
 void Tui::toggle_sakura_theme() {
     if (get_tui_theme() == TuiTheme::Sakura) {
-        if (machine_.s_high_contrast) {
+        if (machine_.high_contrast_enabled()) {
             set_tui_theme(TuiTheme::HighContrast);
         } else {
             set_tui_theme(TuiTheme::Adaptive);
@@ -1548,10 +1548,10 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         if (byte == 'r' || byte == 'R' || key == simrv::tui::TuiKey::Enter ||
             key == simrv::tui::TuiKey::Newline) {
             const auto& draft = modal_.get_pending_platform_draft();
-            machine_.set_platform_profile(
-                static_cast<simrv::core::PlatformProfile>(draft.platform_profile));
-            machine_.set_network_mode(draft.net_mode);
-            machine_.load_program_binary(machine_.s_fn_memimg);
+            auto next = machine_.configuration();
+            next.platform_profile = static_cast<simrv::core::PlatformProfile>(draft.platform_profile);
+            next.network.mode = draft.net_mode;
+            (void)machine_.stage_reconfiguration(std::move(next));
             close_modal();
             modal_.open_notice(
                 "SIMULATOR RELOADED",
@@ -1576,7 +1576,7 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
     }
 
     if (byte == 27 || key == simrv::tui::TuiKey::Esc) {
-        if (get_active_modal() != ModalType::LoadBinary || !machine_.s_fn_memimg.empty())
+        if (get_active_modal() != ModalType::LoadBinary || !machine_.binary_path().empty())
             close_modal();
     } else if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline)
         submit_modal();
@@ -1598,7 +1598,7 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
 }
 
 auto Tui::handle_debug_keyboard_input(TuiKey key) -> bool {
-    if (!machine_.s_debug_mode) {
+    if (!machine_.debug_diagnostics_enabled()) {
         modal_.open_notice("DEBUG MODE REQUIRED",
                            "Debug features are disabled in Normal Mode.\n\nPlease enable TUI Debug "
                            "Mode in Simulator Settings [,] first.",
@@ -1770,7 +1770,7 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
             render(true);
             return;
         }
-        if (machine_.s_fn_memimg.empty() && machine_.primary_hart().state().pc == 0) {
+        if (machine_.binary_path().empty() && machine_.primary_hart().state().pc == 0) {
             modal_.open_notice("NO PROGRAM LOADED",
                                "Cannot run simulation: PC is 0x0.\n\nPlease load a program binary "
                                "image first [o].",
@@ -1799,8 +1799,8 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
 
     if (key == simrv::tui::TuiKey::CtrlD || key == simrv::tui::TuiKey::d ||
         key == simrv::tui::TuiKey::D) {
-        machine_.s_debug_mode = !machine_.s_debug_mode;
-        set_status_override(std::format("Debug Mode: {}", machine_.s_debug_mode ? "ON" : "OFF"));
+        machine_.set_debug_diagnostics_enabled(!machine_.debug_diagnostics_enabled());
+        set_status_override(std::format("Debug Mode: {}", machine_.debug_diagnostics_enabled() ? "ON" : "OFF"));
         trigger_immediate_render();
         return;
     }
@@ -1815,7 +1815,7 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
 
     if (key == simrv::tui::TuiKey::s || key == simrv::tui::TuiKey::S ||
         key == simrv::tui::TuiKey::Space) {
-        if (machine_.s_fn_memimg.empty() && machine_.primary_hart().state().pc == 0) {
+        if (machine_.binary_path().empty() && machine_.primary_hart().state().pc == 0) {
             modal_.open_notice(
                 "NO PROGRAM LOADED",
                 "Cannot step: PC is 0x0.\n\nPlease load a program binary image first [o].", false);
@@ -2019,9 +2019,9 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             render(true);
             break;
         case TuiFooterAction::ToggleDebug:
-            machine_.s_debug_mode = !machine_.s_debug_mode;
+            machine_.set_debug_diagnostics_enabled(!machine_.debug_diagnostics_enabled());
             set_status_override(
-                std::format("Debug Mode: {}", machine_.s_debug_mode ? "ON" : "OFF"));
+                std::format("Debug Mode: {}", machine_.debug_diagnostics_enabled() ? "ON" : "OFF"));
             render(true);
             break;
     }
@@ -2310,13 +2310,11 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                     } else if (res == TuiModal::ModalClickResult::ReloadRequested) {
                         close_modal();
                         auto draft = modal_.get_pending_platform_draft();
-                        machine_.set_platform_profile(
-                            (draft.platform_profile == 0)
-                                ? simrv::core::PlatformProfile::Pcie
-                                : ((draft.platform_profile == 1)
-                                       ? simrv::core::PlatformProfile::Mmio
-                                       : simrv::core::PlatformProfile::Hybrid));
-                        machine_.request_reboot();
+                        auto next = machine_.configuration();
+                        next.platform_profile = draft.platform_profile == 0
+                                                    ? simrv::core::PlatformProfile::Pcie
+                                                    : simrv::core::PlatformProfile::Mmio;
+                        (void)machine_.stage_reconfiguration(std::move(next));
                     } else if (res == TuiModal::ModalClickResult::DiscardRequested) {
                         close_modal();
                     } else if (res == TuiModal::ModalClickResult::Submit) {

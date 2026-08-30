@@ -251,7 +251,7 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
                                                staged_target_appmode_, notice_cb);
             if (current_modal == ModalType::LoadBinary && staged_mode_change_ && !load_appmode_) {
                 active_modal_ = ModalType::LoadDiskImage;
-                input_ = machine_.s_fn_dskimg;
+                input_ = machine_.disk_path();
                 return false;
             }
             if (result) {
@@ -372,7 +372,7 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
     int start_x = overlay.start_x + 1;  // 1-indexed terminal col
 
     if (x < start_x || x >= start_x + box_w || y < start_y || y >= start_y + box_h) {
-        if (active_modal_ != ModalType::LoadBinary || !machine_.s_fn_memimg.empty()) {
+        if (active_modal_ != ModalType::LoadBinary || !machine_.binary_path().empty()) {
             close();
             return ModalClickResult::Closed;
         }
@@ -640,14 +640,11 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             const char* cur_prof =
                 (machine_.platform_profile() == simrv::core::PlatformProfile::Pcie)
                     ? "PCIe (PCIe 1.2 + ECAM)"
-                    : ((machine_.platform_profile() == simrv::core::PlatformProfile::Mmio)
-                           ? "MMIO (VirtIO-MMIO v2)"
-                           : "Hybrid (PCIe + MMIO)");
+                    : "MMIO (VirtIO-MMIO v2)";
             const char* new_prof =
                 (pending_platform_draft_.platform_profile == 0)
                     ? "PCIe (PCIe 1.2 + ECAM)"
-                    : ((pending_platform_draft_.platform_profile == 1) ? "MMIO (VirtIO-MMIO v2)"
-                                                                       : "Hybrid (PCIe + MMIO)");
+                    : "MMIO (VirtIO-MMIO v2)";
             add_row(std::format("  {}Platform profile changed:\033[0m", kThemeText));
             add_row(std::format("    {}Current:\033[0m \033[1;36m{}\033[0m", kThemeText, cur_prof));
             add_row(std::format("    {}Target :\033[0m \033[1;32m{}\033[0m", kThemeText, new_prof));

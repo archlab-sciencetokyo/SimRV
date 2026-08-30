@@ -85,7 +85,7 @@ struct LeftHeaderLayout {
 
 [[nodiscard]] auto make_left_header_layout(const simrv::core::Machine& machine, int target_width,
                                            size_t selected_hart) -> LeftHeaderLayout {
-    std::string binary_name = machine.s_fn_memimg;
+    std::string binary_name = machine.binary_path();
     auto const last_slash = binary_name.find_last_of("/\\");
     if (last_slash != std::string::npos) binary_name = binary_name.substr(last_slash + 1);
     if (binary_name.empty()) binary_name = "application";
@@ -100,7 +100,7 @@ struct LeftHeaderLayout {
         return result;
     }
 
-    std::string const environment = machine.s_appmode ? "App" : "OS";
+    std::string const environment = machine.appmode_enabled() ? "App" : "OS";
     if (!cycle_mode) {
         result.mode = environment + " · IA";
         return result;
@@ -629,7 +629,7 @@ auto StatusBar::get_footer_action_at_col(int col, int row_idx, int terminal_widt
     -> std::optional<TuiFooterAction> {
     if (col < 0 || terminal_width < 2) return std::nullopt;
 
-    bool is_dbg = machine_.s_debug_mode;
+    bool is_dbg = machine_.debug_diagnostics_enabled();
     bool is_smp = machine_.num_harts() > 1;
     if (paused_) {
         if (row_idx == 0)
@@ -882,7 +882,7 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         // 2-Row Footer (Centered & Grouped)
         std::string footer_line1;
         std::string footer_line2;
-        bool is_dbg = machine_.s_debug_mode;
+        bool is_dbg = machine_.debug_diagnostics_enabled();
         bool is_smp = machine_.num_harts() > 1;
         if (paused_) {
             footer_line1 =

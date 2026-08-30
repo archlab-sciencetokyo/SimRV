@@ -26,23 +26,21 @@ void SettingsModal::open(SettingsDraft& draft, const simrv::core::Machine& machi
 
     // Tab 0: General
     draft.cycle_accurate = machine.runtime_profile.is_cycle_mode();
-    draft.debug_mode = machine.s_debug_mode;
-    draft.high_contrast = machine.s_high_contrast;
-    draft.class_mode = machine.s_class_mode;
+    draft.debug_mode = machine.debug_diagnostics_enabled();
+    draft.high_contrast = machine.high_contrast_enabled();
+    draft.class_mode = machine.class_mode_enabled();
     draft.tui_fps = machine.tui_controller() ? machine.tui_controller()->target_fps() : 30;
-    draft.use_mix = machine.s_use_mix;
-    draft.bp_trace = machine.s_bp_trace;
-    draft.traplog_mode = machine.s_traplog_mode;
-    draft.dlog_mode = machine.s_dlog_mode;
-    draft.lockstep_mode = machine.s_lockstep_mode;
-    draft.gdb_mode = machine.s_gdb_mode;
-    draft.num_harts = static_cast<uint32_t>(machine.num_harts());
-    draft.smp_quantum = machine.s_smp_quantum;
-    draft.smp_multithreaded = machine.s_smp_multithreaded;
+    draft.use_mix = machine.instruction_mix_enabled();
+    draft.bp_trace = machine.branch_trace_enabled();
+    draft.traplog_mode = machine.trap_log_enabled();
+    draft.dlog_mode = machine.device_log_enabled();
+    draft.lockstep_mode = machine.lockstep_enabled();
+    draft.gdb_mode = machine.debugger_enabled();
+    draft.num_harts = machine.execution_config().num_harts;
+    draft.smp_quantum = machine.execution_config().smp_quantum;
+    draft.smp_multithreaded = machine.execution_config().smp_multithreaded;
     draft.platform_profile = static_cast<uint8_t>(machine.platform_profile());
-    draft.dram_size_mb = (machine.s_dram_size > 0)
-                             ? (machine.s_dram_size / (1024ULL * 1024ULL))
-                             : (simrv::memory::kDramSize / (1024ULL * 1024ULL));
+    draft.dram_size_mb = machine.memory_geometry().dram_size / (1024ULL * 1024ULL);
     draft.net_mode = machine.network_mode();
 
     // Tab 1: MISA
@@ -167,9 +165,9 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     }
                     break;
                 }
-                case 8:  // Platform Profile (0: PCIe, 1: MMIO, 2: Hybrid)
+                case 8:  // Platform Profile (0: PCIe, 1: MMIO)
                     draft.platform_profile =
-                        static_cast<uint8_t>((draft.platform_profile + (dir > 0 ? 1 : 2)) % 3);
+                        static_cast<uint8_t>((draft.platform_profile + 1) % 2);
                     break;
                 case 9: {  // Physical RAM Capacity (MB)
                     static constexpr std::array<uint64_t, 8> kRamSizes = {32,  64,   128,  256,
@@ -200,7 +198,7 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                         draft.net_mode = (dir > 0) ? "user" : "socket";
                     break;
                 case 11:
-                    if (machine && machine->s_spike_bin.empty()) break;
+                    if (machine && machine->spike_binary().empty()) break;
                     draft.lockstep_mode = !draft.lockstep_mode;
                     break;
                 case 12:
@@ -217,7 +215,7 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     draft.traplog_mode = !draft.traplog_mode;
                     break;
                 case 16:
-                    if (machine && machine->s_appmode) break;
+                    if (machine && machine->appmode_enabled()) break;
                     draft.dlog_mode = !draft.dlog_mode;
                     break;
                 default:
@@ -264,63 +262,63 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
     machine.runtime_profile.interaction = simrv::core::InteractionMode::Tui;
     machine.runtime_profile.engine = simrv::core::select_execution_engine(
         draft.cycle_accurate, machine.runtime_profile.interaction);
-    machine.s_debug_mode = draft.debug_mode;
-    if (draft.high_contrast != machine.s_high_contrast) {
+    machine.set_debug_diagnostics_enabled(draft.debug_mode);
+    if (draft.high_contrast != machine.high_contrast_enabled()) {
         set_high_contrast(draft.high_contrast);
-        machine.s_high_contrast = draft.high_contrast;
+        machine.set_high_contrast_enabled(draft.high_contrast);
     }
-    machine.s_class_mode = draft.class_mode;
+    machine.set_class_mode_enabled(draft.class_mode);
     if (machine.tui_controller()) {
         machine.tui_controller()->set_target_fps(draft.tui_fps);
     }
 
-    machine.s_use_mix = draft.use_mix;
-    machine.s_bp_trace = draft.bp_trace;
-    machine.s_traplog_mode = draft.traplog_mode;
-    machine.s_dlog_mode = draft.dlog_mode;
-    machine.s_lockstep_mode = draft.lockstep_mode;
-    machine.s_gdb_mode = draft.gdb_mode;
-    machine.s_smp_quantum = draft.smp_quantum;
-    machine.s_smp_multithreaded = draft.smp_multithreaded;
+    machine.set_instruction_mix_enabled(draft.use_mix);
+    machine.set_branch_trace_enabled(draft.bp_trace);
+    machine.set_trap_log_enabled(draft.traplog_mode);
+    machine.set_device_log_enabled(draft.dlog_mode);
 
-    bool const profile_changed =
-        (machine.platform_profile() !=
-         static_cast<simrv::core::PlatformProfile>(draft.platform_profile));
-    machine.set_platform_profile(
-        static_cast<simrv::core::PlatformProfile>(draft.platform_profile));
+    auto next = machine.configuration();
+    bool const profile_changed = next.platform_profile !=
+        static_cast<simrv::core::PlatformProfile>(draft.platform_profile);
+    next.platform_profile = static_cast<simrv::core::PlatformProfile>(draft.platform_profile);
 
     uint64_t const new_dram_size = draft.dram_size_mb * 1024ULL * 1024ULL;
-    bool const dram_size_changed =
-        (machine.s_dram_size != 0 && machine.s_dram_size != new_dram_size) ||
-        (machine.s_dram_size == 0 && new_dram_size != simrv::memory::kDramSize);
-    machine.s_dram_size = new_dram_size;
-    machine.set_network_mode(draft.net_mode);
+    bool const dram_size_changed = next.memory.dram_size != new_dram_size;
+    next.memory.dram_size = new_dram_size;
+    next.network.mode = draft.net_mode;
+    next.execution.smp_quantum = draft.smp_quantum;
+    next.execution.smp_multithreaded = draft.smp_multithreaded;
+    next.debug.lockstep_enabled = draft.lockstep_mode;
+    next.debug.gdb_enabled = draft.gdb_mode;
 
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
         machine.hart(hart).pipeline_sim.config.record_snapshots =
             machine.runtime_profile.records_cycle_history();
     }
 
-    if (machine.s_use_mix) {
+    if (machine.instruction_mix_enabled()) {
         set_reg_page_cb(TuiRegPage::GPR);
     }
 
-    bool need_reboot = dram_size_changed || profile_changed;
+    bool need_reboot = dram_size_changed || profile_changed ||
+                       next.execution.smp_quantum != machine.execution_config().smp_quantum ||
+                       next.execution.smp_multithreaded != machine.execution_config().smp_multithreaded ||
+                       next.network.mode != machine.network_mode() ||
+                       next.debug.lockstep_enabled != machine.lockstep_enabled() ||
+                       next.debug.gdb_enabled != machine.debugger_enabled();
 
     // 2. MISA Extensions
     uint64_t const new_misa = draft.misa.to_misa_val();
-    if (machine.primary_hart().state().misa != new_misa || machine.s_vlen != draft.misa.vlen) {
-        machine.primary_hart().state().misa = new_misa;
-        machine.s_misa_profile = new_misa;
-        machine.s_misa_override = true;
-        machine.s_misa_xlen = draft.misa.xlen_bits;
-        machine.primary_hart().state().initialize_lower_xlen_fields();
-        machine.s_vlen = draft.misa.vlen;
+    if (machine.primary_hart().state().misa != new_misa || next.isa.vlen != draft.misa.vlen) {
+        next.isa.misa_profile = new_misa;
+        next.isa.misa_override = true;
+        next.isa.misa_xlen = draft.misa.xlen_bits;
+        next.isa.vlen = draft.misa.vlen;
         need_reboot = true;
     }
 
     if (need_reboot) {
-        machine.request_reboot();
+        (void)machine.stage_reconfiguration(std::move(next));
     }
 
     // 3. System Microarchitecture
@@ -348,16 +346,14 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
         add_row_cb("");
 
         const bool bp_disabled = !draft.cycle_accurate;
-        const bool dlog_disabled = machine.s_appmode;
-        const bool lockstep_disabled = machine.s_spike_bin.empty();
+        const bool dlog_disabled = machine.appmode_enabled();
+        const bool lockstep_disabled = machine.spike_binary().empty();
 
         std::string profile_str;
         if (draft.platform_profile == 0)
             profile_str = "\033[1;32m[PCIe (PCIe 1.2 + ECAM)]\033[0m";
         else if (draft.platform_profile == 1)
             profile_str = "\033[1;36m[MMIO (VirtIO-MMIO v2)]\033[0m";
-        else
-            profile_str = "\033[1;35m[Hybrid (PCIe + MMIO)]\033[0m";
 
         std::string net_str;
         if (draft.net_mode == "user")

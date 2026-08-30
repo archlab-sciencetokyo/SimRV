@@ -17,10 +17,10 @@ void LoadModal::open(ModalType type, std::string& input, bool& load_appmode,
                      const simrv::core::Machine& machine) {
     input.clear();
     if (type == ModalType::LoadBinary) {
-        input = machine.s_fn_memimg;
-        load_appmode = machine.s_appmode;
+        input = machine.binary_path();
+        load_appmode = machine.appmode_enabled();
     } else if (type == ModalType::LoadDiskImage) {
-        input = machine.s_fn_dskimg;
+        input = machine.disk_path();
     }
 }
 
@@ -40,13 +40,17 @@ auto LoadModal::submit(ModalType type, const std::string& input, bool load_appmo
         staged_mode_change = true;
         staged_target_appmode = load_appmode;
         if (load_appmode) {
-            machine.set_pending_reboot(input, true, "");
+            auto next = machine.configuration();
+            next.files.binary_path = input;
+            next.execution.appmode = true;
+            next.files.disk_path.clear();
+            next.files.disk_enabled = false;
+            (void)machine.stage_reconfiguration(std::move(next));
             staged_binary_path.clear();
             staged_mode_change = false;
             if (set_status_override_cb) {
                 set_status_override_cb("Loaded binary image. Resetting system...");
             }
-            machine.request_reboot();
         }
         return true;
     } else if (type == ModalType::LoadDiskImage) {
@@ -62,12 +66,16 @@ auto LoadModal::submit(ModalType type, const std::string& input, bool load_appmo
         staged_binary_path.clear();
         staged_mode_change = false;
 
-        machine.set_pending_reboot(bin_to_load, target_appmode, input);
+        auto next = machine.configuration();
+        next.files.binary_path = bin_to_load;
+        next.execution.appmode = target_appmode;
+        next.files.disk_path = input;
+        next.files.disk_enabled = !input.empty();
+        (void)machine.stage_reconfiguration(std::move(next));
 
         if (set_status_override_cb) {
             set_status_override_cb("Loaded binary and disk image. Resetting system...");
         }
-        machine.request_reboot();
         return true;
     }
     return false;

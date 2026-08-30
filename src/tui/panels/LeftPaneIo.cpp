@@ -192,7 +192,7 @@ auto LeftPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row, int
             width);
     }
     if (logical_row == 13) {
-        return section_line("TileLink-C Directory Coherence Hub (5-Channel MSI)", width);
+        return section_line("TileLink-C Directory Coherence Hub (Illinois MESI)", width);
     }
     if (logical_row == 14) {
         const auto& c_stats = machine_.memory().system_bus().coherence_hub().stats();

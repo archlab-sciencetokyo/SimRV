@@ -34,7 +34,8 @@ auto LeftPane::render_bp_stats(const simrv::core::CPU& cpu, int logical_row, int
         }
         if (logical_row == 6) {
             std::string text =
-                (width < 45) ? "Enable Cycle-Accurate mode [,]" : "Enable cycle mode [,] or --ca";
+                (width < 45) ? "Enable Cycle-Accurate mode [,]"
+                             : "Enable cycle mode [,] or --mode cycle-accurate";
             int text_w = get_display_width(text);
             int spaces = std::max(1, (width - text_w) / 2);
             return format_to_width(

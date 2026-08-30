@@ -57,7 +57,7 @@ auto LeftPane::get_total_rows(int width) -> int {
     // pipeline page retains its complete 25-row canvas; single-column register
     // pages omit machine state entirely.
     int base_rows = performance_start_row(single_column) + performance_row_count();
-    int debug_rows = machine_.s_debug_mode ? debug_state_row_count() : 0;
+    int debug_rows = machine_.debug_diagnostics_enabled() ? debug_state_row_count() : 0;
     return base_rows + debug_rows;
 }
 

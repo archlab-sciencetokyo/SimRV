@@ -116,7 +116,7 @@ struct SettingsDraft {
     uint32_t num_harts = 1;
     uint32_t smp_quantum = 1000;
     bool smp_multithreaded = false;
-    uint8_t platform_profile = 0;  // 0: PCIe, 1: MMIO, 2: Hybrid
+    uint8_t platform_profile = 0;  // 0: PCIe, 1: MMIO
     uint64_t dram_size_mb = 256;
     std::string net_mode = "user";
 

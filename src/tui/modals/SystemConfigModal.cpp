@@ -202,7 +202,9 @@ auto SystemConfigModal::submit(const SysConfigDraft& draft, simrv::core::Machine
     // Explicit field editing retains the named profile only while it remains an exact preset.
     model.profile = selected_profile;
     if (!model.validate()) return false;
-    machine.s_pipeline_type = static_cast<simrv::pipeline::PipelineType>(draft.pipeline_type);
+    auto staged_configuration = machine.configuration();
+    staged_configuration.execution.pipeline_type =
+        static_cast<simrv::pipeline::PipelineType>(draft.pipeline_type);
     // A profile changes cache geometry as well as pipeline policy.  Applying only the latter
     // left the live D-cache at its previous size/associativity until an unrelated rebuild.
     // This stays local to the modal so the lightweight TUI framework test target does not need
@@ -219,6 +221,7 @@ auto SystemConfigModal::submit(const SysConfigDraft& draft, simrv::core::Machine
         cpu.branch_predictor.configure(cpu.pipeline_sim.config.branch_predictor);
         cpu.branch_predictor.reset();
     }
+    (void)machine.stage_reconfiguration(std::move(staged_configuration));
     return true;
 }
 
@@ -228,7 +231,7 @@ void SystemConfigModal::render(std::vector<std::string>& content_rows,
     (void)content_rows;
     if (!draft.cycle_accurate) {
         add_row(
-            std::format("{}Disabled in IA Mode. Launch with --ca to configure cycle timing.\033[0m",
+            std::format("{}Disabled in IA Mode. Launch with --mode cycle-accurate to configure cycle timing.\033[0m",
                         kThemeMuted));
         return;
     }

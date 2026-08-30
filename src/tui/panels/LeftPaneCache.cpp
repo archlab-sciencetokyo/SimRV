@@ -27,9 +27,8 @@ auto render_cache_way_row(const simrv::core::CPU& cpu, int way_idx, int inspect_
 
     bool valid =
         is_icache ? ic.is_line_valid(set_idx, way_u32) : dc.is_line_valid(set_idx, way_u32);
-    simrv::memory::CoherenceState coh =
+    simrv::memory::MesiState coh =
         is_icache ? ic.get_line_state(set_idx, way_u32) : dc.get_line_state(set_idx, way_u32);
-    bool dirty = !is_icache && dc.is_line_dirty(set_idx, way_u32);
     Address tag = is_icache ? ic.get_line_tag(set_idx, way_u32) : dc.get_line_tag(set_idx, way_u32);
     uint64_t lru = is_icache ? ic.get_line_last_used(set_idx, way_u32)
                              : dc.get_line_last_used(set_idx, way_u32);
@@ -56,10 +55,11 @@ auto render_cache_way_row(const simrv::core::CPU& cpu, int way_idx, int inspect_
                                           : std::format("{}Way #{}\033[0m", kThemeText, way_idx);
 
     std::string coh_tag;
-    if (coh == simrv::memory::CoherenceState::Trunk) {
-        coh_tag = dirty ? std::format("\033[1m{}[M ]\033[0m", kThemeCoral)
-                        : std::format("\033[1m{}[E ]\033[0m", kThemePeach);
-    } else if (coh == simrv::memory::CoherenceState::Branch) {
+    if (coh == simrv::memory::MesiState::Modified) {
+        coh_tag = std::format("\033[1m{}[M ]\033[0m", kThemeCoral);
+    } else if (coh == simrv::memory::MesiState::Exclusive) {
+        coh_tag = std::format("\033[1m{}[E ]\033[0m", kThemePeach);
+    } else if (coh == simrv::memory::MesiState::Shared) {
         coh_tag = std::format("\033[1m{}[S ]\033[0m", kThemeSky);
     } else {
         coh_tag = std::format("{}[I ]\033[0m", kThemeMuted);
@@ -137,10 +137,11 @@ auto LeftPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_row, 
                                 kThemeMuted),
                     width);
             case 3:
-                return format_to_width(std::format(" {}Relaunch SimRV with {}--ca\033[0m{} (-C) to "
-                                                   "enable.\033[0m",
-                                                   kThemeMuted, kThemeVal, kThemeMuted),
-                                       width);
+                return format_to_width(
+                    std::format(" {}Relaunch SimRV with {}--mode cycle-accurate\033[0m{} to "
+                                "enable.\033[0m",
+                                kThemeMuted, kThemeVal, kThemeMuted),
+                    width);
             default:
                 return format_to_width("", width);
         }

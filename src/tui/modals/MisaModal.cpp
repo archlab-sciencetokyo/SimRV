@@ -38,8 +38,9 @@ void MisaModal::open(MisaDraft& draft, int& cursor, const simrv::core::Machine& 
     draft.ext_s = (misa & (1ULL << ('s' - 'a'))) != 0;
     draft.ext_u = (misa & (1ULL << ('u' - 'a'))) != 0;
     draft.ext_v = (misa & (1ULL << ('v' - 'a'))) != 0;
-    // Populate VLEN from current machine state (s_vlen=0 means default 256)
-    draft.vlen = machine.s_vlen ? machine.s_vlen : machine.primary_hart().state().regs.vlen;
+    // An unspecified configured VLEN uses the active register-file default.
+    draft.vlen = machine.isa_config().vlen ? machine.isa_config().vlen
+                                           : machine.primary_hart().state().regs.vlen;
 }
 
 void MisaModal::move_cursor(int& cursor, int delta) {
@@ -157,15 +158,12 @@ auto MisaModal::submit(const MisaDraft& draft, simrv::core::Machine& machine,
                        const std::function<void(const std::string&)>& set_status_override_cb)
     -> bool {
     uint64_t new_misa = draft.to_misa_val();
-    machine.primary_hart().state().misa = new_misa;
-    machine.s_misa_profile = new_misa;
-    machine.s_misa_override = true;
-    machine.s_misa_xlen = draft.xlen_bits;
-    machine.primary_hart().state().initialize_lower_xlen_fields();
-    // Apply VLEN setting (only meaningful when V extension is enabled)
-    machine.s_vlen = draft.vlen;
-
-    machine.request_reboot();
+    auto next = machine.configuration();
+    next.isa.misa_profile = new_misa;
+    next.isa.misa_override = true;
+    next.isa.misa_xlen = draft.xlen_bits;
+    next.isa.vlen = draft.vlen;
+    if (!machine.stage_reconfiguration(std::move(next))) return false;
 
     std::string misa_str = draft.to_misa_string();
     set_status_override_cb(
