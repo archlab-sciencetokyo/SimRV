@@ -17,7 +17,8 @@
 
 namespace simrv::isa {
 
-constexpr Instruction RV32_NOP = 0x00000013;
+constexpr Instruction kNop32 = 0x00000013;
+constexpr Instruction RV32_NOP = kNop32;
 
 /**
  * @brief Extracts the standard 7-bit base opcode from a 32-bit instruction word.
@@ -47,14 +48,18 @@ constexpr auto funct3_of(Instruction ir) -> Funct3 { return static_cast<Funct3>(
  * @param ir The raw instruction word.
  * @return 12-bit value representing bits [31:20].
  */
-constexpr auto funct12_of(Instruction ir) -> Instruction { return (ir >> 20) & 0xFFF; }
+constexpr auto funct12_of(Instruction ir) -> Funct12 {
+    return static_cast<Funct12>((ir >> 20) & 0xFFF);
+}
 
 /**
  * @brief Extracts the 7-bit funct7 field from a register-register instruction.
  * @param ir The raw instruction word.
  * @return 7-bit value representing bits [31:25].
  */
-constexpr auto funct7_of(Instruction ir) -> Instruction { return (ir >> 25) & 0x7F; }
+constexpr auto funct7_of(Instruction ir) -> Funct7 {
+    return static_cast<Funct7>((ir >> 25) & 0x7F);
+}
 
 /**
  * @brief Extracts the 5-bit funct5 field from an atomic memory operation (AMO).

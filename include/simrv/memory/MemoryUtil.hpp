@@ -99,19 +99,6 @@ class RamView {
     return address_range_contains(base, extent, p_addr, size);
 }
 
-/// Check if a physical address is in a legacy reserved region (MMIO)
-inline auto is_legacy_reserved_region(Address p_addr) -> bool {
-    switch (p_addr & static_cast<Address>(0xF0000000u)) {
-        case static_cast<Address>(0x10000000u):
-        case static_cast<Address>(0x20000000u):
-        case static_cast<Address>(0x30000000u):
-        case static_cast<Address>(0x70000000u):
-            return true;
-        default:
-            return false;
-    }
-}
-
 // ========== XLEN-Aware Store Width Calculation ==========
 
 /// Compute store byte count from funct3 field for the configured XLEN

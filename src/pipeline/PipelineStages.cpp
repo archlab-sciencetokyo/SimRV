@@ -62,7 +62,7 @@ void CPU::run_fetch_stage(Machine& machine) {
     if ((state_.pc & alignment_mask) != 0) {
         ctx.pending_exception = ExceptionCode::MisalignedFetch;
         ctx.pending_tval = state_.pc;
-        ctx.ir = isa::RV32_NOP;
+        ctx.ir = isa::kNop32;
         ctx.op_id = isa::UNKNOWN;
         return;
     }
@@ -423,7 +423,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
 void CPU::decode_and_normalize_instruction(Machine& machine) {
     auto& ctx = active_context();
     if (simrv::compiler::unlikely(ctx.pending_exception.has_value())) {
-        ctx.ir = isa::RV32_NOP;
+        ctx.ir = isa::kNop32;
         return;
     }
 
@@ -508,7 +508,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
     } else {
         ctx.pending_exception = ExceptionCode::IllegalInstruction;
         ctx.pending_tval = ctx.ir_org;
-        ctx.ir = isa::RV32_NOP;
+        ctx.ir = isa::kNop32;
         ctx.op_id = isa::UNKNOWN;
     }
 
@@ -528,7 +528,7 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
     if ((state_.pc & alignment_mask) != 0) {
         ctx.pending_exception = ExceptionCode::MisalignedFetch;
         ctx.pending_tval = state_.pc;
-        ctx.ir = isa::RV32_NOP;
+        ctx.ir = isa::kNop32;
         ctx.op_id = isa::UNKNOWN;
         return;
     }
@@ -552,7 +552,7 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
                     !machine.memory_geometry().contains(ctx.padr2, sizeof(uint16_t)))) {
                 ctx.pending_exception = ExceptionCode::FaultFetch;
                 ctx.pending_tval = state_.pc + 2;
-                ctx.ir = isa::RV32_NOP;
+                ctx.ir = isa::kNop32;
                 ctx.op_id = isa::UNKNOWN;
                 return;
             }

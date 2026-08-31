@@ -27,18 +27,6 @@ inline constexpr unsigned kVlenMaxBits = 1024;
 /// Maximum vector register length in bytes.
 inline constexpr unsigned kVlenMaxBytes = kVlenMaxBits / 8;
 
-using DumpFlags = uint8_t;
-
-/// Flags controlling state logging and trace dumping.
-enum class DumpFlag : DumpFlags {
-    Exec = (1u << 0),
-    Reg = (1u << 1),
-    Csr = (1u << 2),
-};
-
-/// Bitmask for disk controller MMIO offset addressing.
-constexpr Address DISK_MASK = static_cast<Address>(0x03ffffffu);
-
 namespace simrv::compiler {
 /// Branch prediction hint for likely true conditions.
 template <typename T>
