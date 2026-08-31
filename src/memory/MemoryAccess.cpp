@@ -16,6 +16,7 @@
 #include "simrv/memory/Mmu.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Helpers.hpp"
+#include "simrv/xlen/Math.hpp"
 
 namespace simrv::memory {
 

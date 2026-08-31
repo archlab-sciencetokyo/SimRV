@@ -69,6 +69,28 @@ Alpha prerelease introducing full **Multi-Hart Symmetric Multiprocessing (SMP)**
 - **Direct-Mapped Inline Directory Cache**: $O(1)$ fast cache path for directory state lookups and dirty writeback management.
 - **TUI Visual Inspection**: Real-time MESI cache line state tags (`[M]`, `[E]`, `[S]`, `[I]`) in the Cache Inspector and TileLink-C channel metric counters in the Bus/IO panel.
 - **Dynamic Device Tree Multi-Hart Generation**: Automatic phandle-isolated CPU node and interrupt controller generation supporting multi-core Linux boot.
+## [v2.0.2] — 2026-08-28
+
+Maintenance release ensuring side-effect-free instruction explanation in the TUI left pane to prevent spurious ICache hits during tool tab navigation.
+
+### Bug Fixes & TUI Stability
+
+- **Instruction Explainer Side-Effect Removal**: Refactored `LeftPaneExplain::get_explain_rows()` to use an isolated, side-effect-free direct memory decode path instead of executing the core CPU `fetch_stage()` coroutine, eliminating spurious ICache hit counter increments and pipeline context mutations during TUI page cycling.
+
+## [v2.0.1] — 2026-08-28
+
+Maintenance release addressing cache hit/miss accounting accuracy, TUI cache visual inspector state synchronization, and adding cache educational study session materials.
+
+### Bug Fixes & Microarchitecture
+
+- **Cache Accounting**: Fixed an issue where refill reads immediately following miss insertions generated spurious hit events and corrupted hit rate statistics.
+- **TUI Cache Inspector**: Corrected hit vs. eviction highlight priority in the Left Pane Cache view to prevent stale replacement markers from masking current hit indications.
+- **Base Cache State**: Ensured `BaseCache::insert` marks the current access as a compulsory/conflict miss state rather than inheriting stale hit indicators.
+
+### Educational & Workload Tooling
+
+- Added comprehensive 60-minute Cache Technologies study guides (`docs/STUDY_SESSION_CACHE.md` and `docs/STUDY_SESSION_CACHE_JA.md`) covering spatial/temporal locality, 4-way set associativity, conflict thrashing, and multicore cache coherence (MESI/MOESI, false sharing).
+- Added runnable bare-metal RISC-V assembly workloads in `examples/study_session_cache/` and `/mnt/archlab/study/cache/`.
 
 ## [v2.0.0] — 2026-08-19
 
@@ -447,6 +469,8 @@ on inspector polish, correctness fixes, and CLI normalization.
 [v3.0.0-alpha.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-alpha.1
 [v2.1.0-alpha.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.1.0-alpha.2
 [v2.1.0-alpha.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.1.0-alpha.1
+[v2.0.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.2
+[v2.0.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.1
 [v2.0.0]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0
 [v2.0.0-rc.10]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.10
 [v2.0.0-rc.9]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.9
