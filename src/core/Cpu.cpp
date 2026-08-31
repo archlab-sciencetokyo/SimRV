@@ -138,6 +138,7 @@ void CPU::reset() {
     trace_history_size_ = 0;
     ca_state.reset_instruction();
     ca_pipeline.reset();
+    scoreboard.reset();
     branch_predictor.configure(pipeline_sim.config.branch_predictor);
     branch_predictor.reset();
 }

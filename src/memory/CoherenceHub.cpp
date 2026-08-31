@@ -17,28 +17,28 @@ namespace simrv::memory {
 
 CoherenceHub::CoherenceHub(simrv::core::Machine& machine) : machine_(machine) {
     for (auto& entry : fast_cache_) {
-        entry.line_base = ~Address{0};
+        entry.line_base = ~LineAddress{0};
     }
 }
 
-void CoherenceHub::update_dir_entry(Address line_base, const DirectoryEntry& entry) {
-    const Address aligned_addr = line_base & ~(static_cast<Address>(kLineBytes - 1u));
+void CoherenceHub::update_dir_entry(LineAddress line_base, const DirectoryEntry& entry) {
+    const LineAddress aligned_addr = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
     directory_[aligned_addr] = entry;
     const size_t idx = (aligned_addr >> 5) & kFastCacheMask;
     fast_cache_[idx] = FastCacheEntry{.line_base = aligned_addr, .entry = entry};
 }
 
-void CoherenceHub::erase_dir_entry(Address line_base) {
-    const Address aligned_addr = line_base & ~(static_cast<Address>(kLineBytes - 1u));
+void CoherenceHub::erase_dir_entry(LineAddress line_base) {
+    const LineAddress aligned_addr = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
     directory_.erase(aligned_addr);
     const size_t idx = (aligned_addr >> 5) & kFastCacheMask;
     if (fast_cache_[idx].line_base == aligned_addr) {
-        fast_cache_[idx].line_base = ~Address{0};
+        fast_cache_[idx].line_base = ~LineAddress{0};
     }
 }
 
-auto CoherenceHub::lookup_dir_entry(Address line_base, DirectoryEntry& out_entry) -> bool {
-    const Address aligned_addr = line_base & ~(static_cast<Address>(kLineBytes - 1u));
+auto CoherenceHub::lookup_dir_entry(LineAddress line_base, DirectoryEntry& out_entry) -> bool {
+    const LineAddress aligned_addr = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
     const size_t idx = (aligned_addr >> 5) & kFastCacheMask;
     if (fast_cache_[idx].line_base == aligned_addr) {
         out_entry = fast_cache_[idx].entry;
@@ -53,8 +53,8 @@ auto CoherenceHub::lookup_dir_entry(Address line_base, DirectoryEntry& out_entry
     return false;
 }
 
-auto CoherenceHub::get_directory_state(Address line_base) const -> DirectoryEntry {
-    const Address aligned_addr = line_base & ~(static_cast<Address>(kLineBytes - 1u));
+auto CoherenceHub::get_directory_state(LineAddress line_base) const -> DirectoryEntry {
+    const LineAddress aligned_addr = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
     const size_t idx = (aligned_addr >> 5) & kFastCacheMask;
     if (fast_cache_[idx].line_base == aligned_addr) {
         return fast_cache_[idx].entry;
@@ -112,15 +112,15 @@ void CoherenceHub::probe_hart_icache(HartId hart_id, const TlChannelB& probe_req
     }
 }
 
-void CoherenceHub::invalidate_line_broadcast(Address line_base, uint32_t initiator_hart) {
-    const Address aligned_addr = line_base & ~(static_cast<Address>(kLineBytes - 1u));
+void CoherenceHub::invalidate_line_broadcast(LineAddress line_base, HartId initiator_hart) {
+    const LineAddress aligned_addr = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
     TlChannelB probe_req{};
     probe_req.opcode = TlOpcodeB::ProbeBlock;
     probe_req.cap = TlCap::ToN;
     probe_req.address = aligned_addr;
 
     for (uint32_t h = 0; h < machine_.num_harts(); ++h) {
-        if (h != initiator_hart) {
+        if (h != initiator_hart.value()) {
             TlChannelC resp{};
             std::array<Byte, kLineBytes> dirty{};
             probe_hart_dcache(h, probe_req, resp, dirty);
@@ -129,14 +129,13 @@ void CoherenceHub::invalidate_line_broadcast(Address line_base, uint32_t initiat
         }
     }
 
-    machine_.memory_.reservation_table().invalidate_matching(aligned_addr,
-                                                             static_cast<HartId>(initiator_hart));
+    machine_.memory_.reservation_table().invalidate_matching(aligned_addr, initiator_hart);
     l3_cache_.invalidate_line(aligned_addr);
     erase_dir_entry(aligned_addr);
 }
 
-void CoherenceHub::invalidate_line_external(Address line_base) {
-    const Address aligned_addr = line_base & ~(static_cast<Address>(kLineBytes - 1u));
+void CoherenceHub::invalidate_line_external(LineAddress line_base) {
+    const LineAddress aligned_addr = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
     TlChannelB probe{};
     probe.opcode = TlOpcodeB::ProbeBlock;
     probe.cap = TlCap::ToN;
@@ -373,8 +372,8 @@ auto CoherenceHub::allocate_sink() -> TlSinkId {
 
 void CoherenceHub::process_grant_ack(const TlChannelE& ack) { pending_grants_.erase(ack.sink); }
 
-void CoherenceHub::mark_modified(Address line_base, HartId hart) {
-    line_base &= ~(static_cast<Address>(kLineBytes - 1u));
+void CoherenceHub::mark_modified(LineAddress line_base, HartId hart) {
+    line_base &= ~(static_cast<LineAddress>(kLineBytes - 1u));
     // DRAM stores are write-through, while the shared backing cache may still contain the line
     // fetched before the store. Once an L1 becomes authoritative, invalidate that clean copy so
     // a later refill cannot resurrect stale data after the modified L1 line is evicted.

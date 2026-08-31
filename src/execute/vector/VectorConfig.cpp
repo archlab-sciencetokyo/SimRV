@@ -7,68 +7,54 @@ namespace simrv::execute {
 
 void ExecuteUnit::execute_vector_config(core::CPU& cpu, isa::OperationId op_id, Instruction ir,
                                         RegId rd, RegId rs1, RegId rs2) {
-    uint64_t vtype = 0;
+    uint64_t raw_vtype = 0;
     if (op_id == isa::OperationId::VSETVLI) {
-        vtype = (ir >> 20) & 0x7FF;
+        raw_vtype = (ir >> 20) & 0x7FF;
     } else if (op_id == isa::OperationId::VSETIVLI) {
-        vtype = (ir >> 20) & 0x3FF;
+        raw_vtype = (ir >> 20) & 0x3FF;
     } else {
-        vtype = cpu.state().regs.read(rs2);
+        raw_vtype = cpu.state().regs.read(rs2);
     }
 
-    uint64_t vill_mask = 1ULL << (cpu.state().regs.xlen - 1);
-    bool vill = (vtype & vill_mask) != 0;
+    VtypeView const view{.raw = raw_vtype, .xlen = static_cast<uint8_t>(cpu.state().regs.xlen)};
+    uint64_t const vill_mask = 1ULL << (cpu.state().regs.xlen - 1);
+    bool vill = view.vill();
 
-    // Check reserved bits in vtype [XLEN-2:8]
-    uint64_t reserved_mask = ~(0xFFULL | vill_mask);
-    if (cpu.state().regs.xlen == 32) {
-        reserved_mask &= 0xFFFFFFFFULL;
-    }
-    if ((vtype & reserved_mask) != 0) {
-        vill = true;
-    }
-
-    uint32_t sew_field = (vtype >> 3) & 0x7;
-    uint32_t lmul_field = vtype & 0x7u;
-
-    if (sew_field > 3 || lmul_field == 4) {
-        vill = true;
-    }
-
-    uint32_t req_sew = 8 << sew_field;
+    uint32_t const req_sew = view.sew_bits();
     uint32_t lmul_num = 1;
     uint32_t lmul_den = 1;
 
-    switch (lmul_field) {
-        case 0:
+    switch (view.vlmul()) {
+        case Vlmul::LMUL_1:
             lmul_num = 1;
             lmul_den = 1;
             break;
-        case 1:
+        case Vlmul::LMUL_2:
             lmul_num = 2;
             lmul_den = 1;
             break;
-        case 2:
+        case Vlmul::LMUL_4:
             lmul_num = 4;
             lmul_den = 1;
             break;
-        case 3:
+        case Vlmul::LMUL_8:
             lmul_num = 8;
             lmul_den = 1;
             break;
-        case 5:
+        case Vlmul::LMUL_F8:
             lmul_num = 1;
             lmul_den = 8;
             break;
-        case 6:
+        case Vlmul::LMUL_F4:
             lmul_num = 1;
             lmul_den = 4;
             break;
-        case 7:
+        case Vlmul::LMUL_F2:
             lmul_num = 1;
             lmul_den = 2;
             break;
         default:
+            vill = true;
             break;
     }
 
@@ -77,15 +63,16 @@ void ExecuteUnit::execute_vector_config(core::CPU& cpu, isa::OperationId op_id, 
     }
 
     uint32_t new_vl = 0;
+    uint64_t final_vtype = 0;
     if (vill) {
         new_vl = 0;
-        vtype = vill_mask;
+        final_vtype = vill_mask;
     } else {
-        vtype = vtype & 0xFFu;
-        auto vlmax = (cpu.state().regs.vlen * lmul_num) / (req_sew * lmul_den);
+        final_vtype = raw_vtype & 0xFFu;
+        auto const vlmax = (cpu.state().regs.vlen * lmul_num) / (req_sew * lmul_den);
 
         if (op_id == isa::OperationId::VSETIVLI) {
-            uint32_t uimm = (ir >> 15) & 0x1F;
+            uint32_t const uimm = (ir >> 15) & 0x1F;
             new_vl = std::min(uimm, vlmax);
         } else {
             if (rs1 == RegId::Zero) {
@@ -101,7 +88,7 @@ void ExecuteUnit::execute_vector_config(core::CPU& cpu, isa::OperationId op_id, 
     }
 
     cpu.state().vl = new_vl;
-    cpu.state().vtype = vtype;
+    cpu.state().vtype = final_vtype;
     cpu.state().vstart = 0;
     cpu.state().regs.write(rd, new_vl);
 

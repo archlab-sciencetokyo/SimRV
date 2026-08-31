@@ -131,16 +131,15 @@ void Mmu::accept_page_walk_pte(PageWalkState& state, Word pte) const {
     if (state.status != PageWalkStatus::ReadPte) return;
     if (state.pte_size == 4) pte &= 0xFFFFFFFFu;
     state.pte = pte;
-    if ((pte & enum_mask(PteFlag::V)) == 0u ||
-        (state.pte_size == 8 && (static_cast<uint64_t>(pte) >> 54U) != 0)) {
+    const PteView view{.raw = pte};
+    if (!view.valid() || view.has_reserved_bits(state.pte_size)) {
         state.fault = page_fault_for(state.access);
         state.status = PageWalkStatus::Fault;
         return;
     }
 
-    const Word original_rwx = (pte >> 1) & 0x7;
-    if (original_rwx == 0) {
-        if ((pte & enum_mask(PteFlag::D)) != 0u || state.level == 0) {
+    if (view.is_table()) {
+        if (view.dirty() || state.level == 0) {
             state.fault = page_fault_for(state.access);
             state.status = PageWalkStatus::Fault;
             return;
@@ -151,9 +150,9 @@ void Mmu::accept_page_walk_pte(PageWalkState& state, Word pte) const {
     }
 
     const bool mxr = (state.mstatus & enum_mask(MstatusBit::Mxr)) != 0u;
-    const bool pte_r = (pte & enum_mask(PteFlag::R)) != 0u;
-    const bool pte_w = (pte & enum_mask(PteFlag::W)) != 0u;
-    const bool pte_x = (pte & enum_mask(PteFlag::X)) != 0u;
+    const bool pte_r = view.readable();
+    const bool pte_w = view.writable();
+    const bool pte_x = view.executable();
     const Word permissions = (static_cast<Word>(pte_x) << 2) | (static_cast<Word>(pte_w) << 1) |
                              static_cast<Word>(pte_r || (mxr && pte_x));
     if (!validate_pte_permissions(pte, permissions, state.access, state.privilege, state.mstatus)) {
@@ -214,13 +213,15 @@ auto Mmu::validate_pte_permissions(Word pte, Word permission_bits, PteAccess acc
     // XWR field must not be reserved values: Write-Only (2) or Write-Execute (6)
     constexpr Word kPermWriteOnly = 2;
     constexpr Word kPermWriteExecute = 6;
+    const PteView view{.raw = pte};
     const Word original_rwx = (pte >> 1) & 0x7;
     if (original_rwx == kPermWriteOnly || original_rwx == kPermWriteExecute) {
         return false;
     }
 
+    const bool pte_u = view.user();
     // Supervisor access to user-only page (U=1)
-    if (priv == kPrivSupervisor && ((pte & enum_mask(PteFlag::U)) != 0u)) {
+    if (priv == kPrivSupervisor && pte_u) {
         if (access == PteAccess::Code) {
             // Executing code from a U=1 page in Supervisor mode raises a Page Fault regardless of
             // SUM
@@ -232,7 +233,7 @@ auto Mmu::validate_pte_permissions(Word pte, Word permission_bits, PteAccess acc
     }
 
     // User accessing supervisor page
-    if (priv == kPrivUser && ((pte & enum_mask(PteFlag::U)) == 0u)) {
+    if (priv == kPrivUser && !pte_u) {
         return false;
     }
 

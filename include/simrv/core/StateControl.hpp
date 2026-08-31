@@ -25,7 +25,10 @@ class PlicMmio;
 class InterruptController {
    public:
     static void updateMip(PlicMmio& plic, ArchState& state);
-    static void setIrq(PlicMmio& plic, int irq_num, int state_val);
+    static void setIrq(PlicMmio& plic, IrqNumber irq_num, int state_val);
+    static void setIrq(PlicMmio& plic, IrqNumber irq_num, bool active) {
+        setIrq(plic, irq_num, active ? 1 : 0);
+    }
 };
 
 /**
@@ -60,18 +63,19 @@ class PlicMmio : public memory::TileLinkNode {
     std::array<Word, 32> plic_pending{};
 
     // Backing storage for PLIC registers to support OpenSBI drivers
-    std::array<Word, 1024> plic_priorities{};
+    std::array<InterruptPriority, 1024> plic_priorities{};
 
     static constexpr size_t kMaxPlicContexts = 32;
 
     // plic_enables[context][word_idx]. Support up to 32 contexts (16 Harts: M-mode and S-mode).
     std::array<std::array<Word, 32>, kMaxPlicContexts> plic_enables{};
-    std::array<Word, kMaxPlicContexts> plic_threshold{};
-    std::array<Word, kMaxPlicContexts> plic_claim{};  // The current claim value per context
+    std::array<InterruptPriority, kMaxPlicContexts> plic_threshold{};
+    std::array<InterruptSourceId, kMaxPlicContexts>
+        plic_claim{};  // The current claim value per context
 
    private:
     CPU& cpu_;
-    auto get_context_for_offset(Address offset) const -> int;
+    [[nodiscard]] auto get_context_for_offset(Address offset) const -> std::optional<PlicContextId>;
 };
 
 /**

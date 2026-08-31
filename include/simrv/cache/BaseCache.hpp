@@ -33,9 +33,10 @@ class BaseCache {
      * @brief Aligned L1 cache line entry with explicit Illinois MESI state.
      */
     struct alignas(64) CacheLine {
-        Address tag = ~Address{0};  ///< Tag bits for address matching (8 bytes, offset 0)
-        uint64_t last_used = 0;     ///< Timestamp tick for LRU eviction (8 bytes, offset 8)
-        bool valid = false;         ///< Cache line validity bit (1 byte, offset 16)
+        simrv::memory::CacheTag tag =
+            ~simrv::memory::CacheTag{0};  ///< Tag bits for address matching (8 bytes, offset 0)
+        uint64_t last_used = 0;           ///< Timestamp tick for LRU eviction (8 bytes, offset 8)
+        bool valid = false;               ///< Cache line validity bit (1 byte, offset 16)
         simrv::memory::MesiState state =
             simrv::memory::MesiState::Invalid;            ///< MESI state (offset 17)
         std::array<uint8_t, 14> padding{};                ///< Explicit padding (offset 18..32)
@@ -44,7 +45,7 @@ class BaseCache {
     };
 
     struct EvictedLine {
-        Address address = 0;
+        simrv::memory::LineAddress address = 0;
         simrv::memory::MesiState state = simrv::memory::MesiState::Invalid;
         std::array<Byte, kLineBytes> data{};
     };
@@ -263,8 +264,8 @@ class BaseCache {
     uint64_t replacements_ = 0;
     uint32_t last_replaced_set_ = 0xFFFFFFFF;
     uint32_t last_replaced_way_ = 0xFFFFFFFF;
-    Address last_evicted_tag_ = ~Address{0};
-    Address last_inserted_tag_ = ~Address{0};
+    simrv::memory::CacheTag last_evicted_tag_ = ~simrv::memory::CacheTag{0};
+    simrv::memory::CacheTag last_inserted_tag_ = ~simrv::memory::CacheTag{0};
     std::optional<EvictedLine> last_eviction_;
     mutable uint32_t last_accessed_set_ = 0xFFFFFFFF;
     mutable bool last_access_was_hit_ = false;
@@ -273,12 +274,13 @@ class BaseCache {
     uint32_t active_ways_ = kWays;
     uint32_t active_sets_ = kNumSets;
 
-    [[nodiscard]] auto get_set_index(Address addr) const -> uint32_t {
-        return static_cast<uint32_t>((addr >> kLineShift) & (active_sets_ - 1u));
+    [[nodiscard]] auto get_set_index(Address addr) const -> simrv::memory::CacheSetIndex {
+        return static_cast<simrv::memory::CacheSetIndex>((addr >> kLineShift) &
+                                                         (active_sets_ - 1u));
     }
 
-    [[nodiscard]] constexpr auto get_tag(Address addr) const -> Address {
-        return addr & ~static_cast<Address>((1u << kLineShift) - 1u);
+    [[nodiscard]] constexpr auto get_tag(Address addr) const -> simrv::memory::CacheTag {
+        return addr & ~static_cast<simrv::memory::CacheTag>((1u << kLineShift) - 1u);
     }
 };
 

@@ -47,11 +47,12 @@ void Imsic::write32(Address offset, uint32_t val) {
     }
 }
 
-auto Imsic::csr_read(size_t hart_idx, uint32_t reg_idx) -> Word {
-    if (hart_idx >= kMaxHarts) {
+auto Imsic::csr_read(HartId hart_idx, uint32_t reg_idx) -> Word {
+    const size_t h = hart_idx.value();
+    if (h >= kMaxHarts) {
         return 0;
     }
-    const auto& file = files_[hart_idx];
+    const auto& file = files_[h];
     switch (reg_idx) {
         case 0x70:  // eidelivery
             return file.eidelivery;
@@ -86,11 +87,12 @@ auto Imsic::csr_read(size_t hart_idx, uint32_t reg_idx) -> Word {
     }
 }
 
-void Imsic::csr_write(size_t hart_idx, uint32_t reg_idx, Word val) {
-    if (hart_idx >= kMaxHarts) {
+void Imsic::csr_write(HartId hart_idx, uint32_t reg_idx, Word val) {
+    const size_t h = hart_idx.value();
+    if (h >= kMaxHarts) {
         return;
     }
-    auto& file = files_[hart_idx];
+    auto& file = files_[h];
     switch (reg_idx) {
         case 0x70:  // eidelivery
             file.eidelivery = static_cast<uint32_t>(val & 1U);
@@ -123,19 +125,21 @@ void Imsic::csr_write(size_t hart_idx, uint32_t reg_idx, Word val) {
     }
 }
 
-void Imsic::trigger_msi(size_t hart_idx, uint32_t interrupt_id) {
-    if (hart_idx < kMaxHarts && interrupt_id > 0 && interrupt_id < kNumInterrupts) {
-        files_[hart_idx].eip |= (1ULL << interrupt_id);
+void Imsic::trigger_msi(HartId hart_idx, InterruptSourceId interrupt_id) {
+    const size_t h = hart_idx.value();
+    if (h < kMaxHarts && interrupt_id > 0 && interrupt_id < kNumInterrupts) {
+        files_[h].eip |= (1ULL << interrupt_id);
         update_hart(hart_idx);
     }
 }
 
-void Imsic::update_hart(size_t hart_idx) {
-    if (machine_ == nullptr || hart_idx >= machine_->num_harts() || hart_idx >= kMaxHarts) {
+void Imsic::update_hart(HartId hart_idx) {
+    const size_t h = hart_idx.value();
+    if (machine_ == nullptr || h >= machine_->num_harts() || h >= kMaxHarts) {
         return;
     }
-    auto& hart = machine_->hart(hart_idx);
-    const auto& file = files_[hart_idx];
+    auto& hart = machine_->hart(h);
+    const auto& file = files_[h];
     const bool delivery = (file.eidelivery != 0);
     const uint64_t active = file.eip & file.eie;
     bool has_pending = false;
@@ -295,7 +299,7 @@ void Aplic::write32(Address offset, uint32_t val) {
     }
 }
 
-void Aplic::set_irq(uint32_t irq_source, bool active) {
+void Aplic::set_irq(InterruptSourceId irq_source, bool active) {
     if (irq_source > 0 && irq_source < kMaxSources) {
         input_wires_[irq_source] = active;
         if (active) {

@@ -12,10 +12,10 @@
 
 namespace simrv::device {
 
-VirtioPciDevice::VirtioPciDevice(uint16_t subsystem_device_id, uint32_t class_code,
+VirtioPciDevice::VirtioPciDevice(uint16_t subsystem_device_id, PciClassCode class_code,
                                  size_t max_queues)
     : PciDevice(kVirtioPciVendorId,
-                static_cast<uint16_t>(kVirtioPciModernDeviceBase + subsystem_device_id), 0x01,
+                static_cast<PciDeviceId>(kVirtioPciModernDeviceBase + subsystem_device_id), 0x01,
                 class_code),
       queues_(max_queues) {
     config_space_[0x2C] = static_cast<uint8_t>(kVirtioPciVendorId & 0xff);
@@ -114,7 +114,7 @@ auto VirtioPciDevice::dma_write(Address paddr, const void* src, size_t len) -> b
     return true;
 }
 
-auto VirtioPciDevice::bar_read(int bar_idx, Address offset, uint8_t size) -> uint32_t {
+auto VirtioPciDevice::bar_read(BarIndex bar_idx, Address offset, uint8_t size) -> uint32_t {
     if (bar_idx != 0) return 0;
 
     // Common Config (0x000 - 0x0FF)
@@ -207,7 +207,7 @@ auto VirtioPciDevice::bar_read(int bar_idx, Address offset, uint8_t size) -> uin
     return 0;
 }
 
-void VirtioPciDevice::bar_write(int bar_idx, Address offset, uint32_t val, uint8_t size) {
+void VirtioPciDevice::bar_write(BarIndex bar_idx, Address offset, uint32_t val, uint8_t size) {
     if (bar_idx != 0) return;
 
     // Common Config
@@ -290,7 +290,7 @@ void VirtioPciDevice::bar_write(int bar_idx, Address offset, uint32_t val, uint8
 
     // Notify Config
     if (offset >= 0x100 && offset < 0x200) {
-        uint16_t queue_idx = static_cast<uint16_t>(val);
+        virtio::VirtioQueueIndex queue_idx = static_cast<virtio::VirtioQueueIndex>(val);
         on_queue_notify(queue_idx);
         return;
     }

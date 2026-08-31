@@ -27,17 +27,17 @@ namespace simrv::memory {
 
 struct DirectoryEntry {
     MesiState state = MesiState::Invalid;
-    uint64_t sharers_mask = 0;
+    CoherenceSharersMask sharers_mask = 0;
     std::optional<HartId> owner_hart;
 };
 
 struct CoherenceStats {
-    uint64_t acquire_count = 0;
-    uint64_t probe_count = 0;
-    uint64_t release_count = 0;
-    uint64_t grant_count = 0;
-    uint64_t invalidation_count = 0;
-    uint64_t writeback_count = 0;
+    Counter acquire_count = 0;
+    Counter probe_count = 0;
+    Counter release_count = 0;
+    Counter grant_count = 0;
+    Counter invalidation_count = 0;
+    Counter writeback_count = 0;
 };
 
 class CoherenceHub {
@@ -55,12 +55,12 @@ class CoherenceHub {
     void process_grant_ack(const TlChannelE& ack);
 
     /// Notify the directory when a Trunk holder performs its first write (E -> M).
-    void mark_modified(Address line_base, HartId hart);
+    void mark_modified(LineAddress line_base, HartId hart);
 
-    void invalidate_line_broadcast(Address line_base, uint32_t initiator_hart);
+    void invalidate_line_broadcast(LineAddress line_base, HartId initiator_hart);
 
     /// Invalidate every cached copy before a coherent implicit/DMA memory write.
-    void invalidate_line_external(Address line_base);
+    void invalidate_line_external(LineAddress line_base);
 
     [[nodiscard]] auto stats() const -> const CoherenceStats& { return stats_; }
     void reset_stats() { stats_ = {}; }
@@ -70,12 +70,12 @@ class CoherenceHub {
         return l3_cache_;
     }
 
-    [[nodiscard]] auto get_directory_state(Address line_base) const -> DirectoryEntry;
+    [[nodiscard]] auto get_directory_state(LineAddress line_base) const -> DirectoryEntry;
     [[nodiscard]] auto validate_directory() const -> std::expected<void, std::string>;
 
    private:
     struct FastCacheEntry {
-        Address line_base = ~Address{0};
+        LineAddress line_base = ~LineAddress{0};
         DirectoryEntry entry{};
     };
 
@@ -84,15 +84,15 @@ class CoherenceHub {
 
     simrv::core::Machine& machine_;
     simrv::cache::L3Cache l3_cache_{};
-    std::unordered_map<Address, DirectoryEntry> directory_;
+    std::unordered_map<LineAddress, DirectoryEntry> directory_;
     std::array<FastCacheEntry, kFastCacheEntries> fast_cache_{};
     CoherenceStats stats_{};
     TlSinkId next_sink_ = 1;
     std::unordered_set<TlSinkId> pending_grants_;
 
-    void update_dir_entry(Address line_base, const DirectoryEntry& entry);
-    void erase_dir_entry(Address line_base);
-    auto lookup_dir_entry(Address line_base, DirectoryEntry& out_entry) -> bool;
+    void update_dir_entry(LineAddress line_base, const DirectoryEntry& entry);
+    void erase_dir_entry(LineAddress line_base);
+    auto lookup_dir_entry(LineAddress line_base, DirectoryEntry& out_entry) -> bool;
 
     void probe_hart_dcache(HartId hart_id, const TlChannelB& probe_req, TlChannelC& probe_resp,
                            std::array<Byte, kLineBytes>& dirty_data);

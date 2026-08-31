@@ -27,8 +27,8 @@ struct DecodedInstruction {
     Instruction ir_org = 0;  ///< Original uncompressed 16-bit or 32-bit instruction word
     Instruction cinsn = 0;   ///< Compressed instruction indicator (non-zero for RVC)
     isa::OperationId op_id = isa::UNKNOWN;  ///< Internal operation identifier
-    Word funct7 = 0;                        ///< R-type 7-bit function code
-    Word funct12 = 0;                       ///< System/I-type 12-bit function code
+    Funct7 funct7 = 0;                      ///< R-type 7-bit function code
+    Funct12 funct12 = 0;                    ///< System/I-type 12-bit function code
 
     isa::Opcode opcode = static_cast<isa::Opcode>(0);        ///< 7-bit RISC-V opcode
     RegId rd = static_cast<RegId>(0);                        ///< Destination register ID

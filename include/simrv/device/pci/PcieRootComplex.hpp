@@ -33,10 +33,17 @@ class PcieRootComplex {
                     Imsic* imsic_s = nullptr);
     ~PcieRootComplex() = default;
 
+    auto attach_device(PciBdf bdf, std::shared_ptr<PciDevice> device) -> bool;
     auto attach_device(uint8_t bus, uint8_t dev, uint8_t func, std::shared_ptr<PciDevice> device)
-        -> bool;
+        -> bool {
+        return attach_device(PciBdf{.bus = bus, .dev = dev, .func = func}, std::move(device));
+    }
+
+    [[nodiscard]] auto get_device(PciBdf bdf) -> std::shared_ptr<PciDevice>;
     [[nodiscard]] auto get_device(uint8_t bus, uint8_t dev, uint8_t func)
-        -> std::shared_ptr<PciDevice>;
+        -> std::shared_ptr<PciDevice> {
+        return get_device(PciBdf{.bus = bus, .dev = dev, .func = func});
+    }
 
     [[nodiscard]] auto ecam_read(Address offset, uint8_t size) -> uint32_t;
     void ecam_write(Address offset, uint32_t val, uint8_t size);
@@ -44,7 +51,10 @@ class PcieRootComplex {
     [[nodiscard]] auto mmio_read(Address addr, uint8_t size) -> uint32_t;
     void mmio_write(Address addr, uint32_t val, uint8_t size);
 
-    void assert_device_irq(uint8_t bus, uint8_t dev, uint8_t func);
+    void assert_device_irq(PciBdf bdf);
+    void assert_device_irq(uint8_t bus, uint8_t dev, uint8_t func) {
+        assert_device_irq(PciBdf{.bus = bus, .dev = dev, .func = func});
+    }
 
     class EcamNode : public memory::TileLinkNode {
        public:
@@ -85,9 +95,7 @@ class PcieRootComplex {
     MmioNode mmio_node_{this};
 
     struct DeviceEntry {
-        uint8_t bus;
-        uint8_t dev;
-        uint8_t func;
+        PciBdf bdf;
         std::shared_ptr<PciDevice> device;
     };
     std::vector<DeviceEntry> attached_devices_;

@@ -9,6 +9,8 @@
 
 #include "simrv/core/Machine.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/pipeline/OperationInfo.hpp"
+#include "simrv/pipeline/Scoreboard.hpp"
 #include "simrv/tui/LogBuffer.hpp"
 #include "simrv/tui/TuiFrameRenderer.hpp"
 #include "simrv/tui/TuiGuidance.hpp"
@@ -497,6 +499,7 @@ void test_input_routing() {
     expect(route_input(0x12, focused) == InputRoute::Reboot,
            "Ctrl-R requests reboot instead of reaching a running guest");
     expect(route_input(0x11, focused) == InputRoute::Quit, "Ctrl-Q quits a running guest");
+    expect(route_input(0x03, focused) == InputRoute::Quit, "Ctrl-C quits a running guest");
     expect(route_input(0x01, focused) == InputRoute::Guest,
            "Ctrl-A is passed through when the guest is running");
 
@@ -507,6 +510,7 @@ void test_input_routing() {
     expect(route_input('\r', modal) == InputRoute::Modal, "Enter submits the active modal");
     expect(route_input(0x01, modal) == InputRoute::Modal, "Ctrl-A has no global binding");
     expect(route_input(0x11, modal) == InputRoute::Quit, "Ctrl-Q remains globally available");
+    expect(route_input(0x03, modal) == InputRoute::Quit, "Ctrl-C remains globally available");
     expect(route_input(0x12, modal) == InputRoute::Reboot,
            "Ctrl-R remains globally available after shutdown notices and other modals");
     expect(route_input(0x1B, modal) == InputRoute::ControlSequence,
@@ -826,6 +830,60 @@ void test_instruction_explainer_is_side_effect_free() {
                cpu.icache.miss_count() == before_icache_misses,
            "explainer preserves instruction-cache counters");
     expect(cpu.tlb.inst_r_lru == before_tlb_lru, "explainer preserves TLB replacement state");
+
+    // Verify microarchitectural profile is rendered in explain rows
+    pane.set_paused(true);
+    pane.set_page(simrv::tui::TuiRegPage::EXPLAIN);
+    pane.set_visible_rows(80);
+    bool found_microarch = false;
+    bool found_rd_bank = false;
+    for (int r = 0; r < 60; ++r) {
+        std::string line = pane.render_row(r, 80);
+        if (line.contains("Microarchitectural & Hazard Profile")) found_microarch = true;
+        if (line.contains("rd (dest)") && line.contains("Int RegFile")) found_rd_bank = true;
+    }
+    expect(found_microarch, "explainer renders Microarchitectural & Hazard Profile header");
+    expect(found_rd_bank, "explainer renders destination register bank classification");
+}
+
+void test_inspector_panels_traits_and_scoreboard() {
+    simrv::core::Machine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    auto& cpu = machine.primary_hart();
+    cpu.machine_ = &machine;
+    cpu.reset();
+
+    // 1. Test Scoreboard integration in Register pane
+    cpu.get_scoreboard().reserve(simrv::pipeline::operation::RegBank::Integer,
+                                 static_cast<RegId>(1), simrv::pipeline::PipelineStage::Execute, 2,
+                                 false);
+    cpu.get_scoreboard().reserve(simrv::pipeline::operation::RegBank::Integer,
+                                 static_cast<RegId>(2), simrv::pipeline::PipelineStage::Memory, 0,
+                                 true);
+
+    simrv::tui::InspectorPane pane(machine);
+    pane.set_page(simrv::tui::TuiRegPage::GPR);
+    pane.set_paused(true);
+    pane.set_visible_rows(30);
+
+    std::string reg1_row = pane.render_row(3, 80);  // content row for x1
+    expect(reg1_row.contains("[EX 2c]"),
+           "register view renders in-flight reservation badge [EX 2c]");
+
+    std::string reg2_row = pane.render_row(4, 80);  // content row for x2
+    expect(reg2_row.contains("[FWD]"), "register view renders forwarding badge [FWD]");
+
+    // 2. Test Live Scoreboard table in Hazard pane (cycle mode active)
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+    pane.set_page(simrv::tui::TuiRegPage::HAZARD);
+    std::string hazard_row_header = pane.render_row(12, 80);  // logical_row 10
+    expect(hazard_row_header.contains("Live Multi-Bank Scoreboard"),
+           "hazard pane renders Live Multi-Bank Scoreboard section header");
+    std::string hazard_row_entry = pane.render_row(13, 80);  // logical_row 11
+    expect(hazard_row_entry.contains("INT") && hazard_row_entry.contains("x1") &&
+               hazard_row_entry.contains("EX"),
+           "hazard pane renders active in-flight reservation item");
 }
 
 }  // namespace
@@ -846,6 +904,7 @@ int main() {
     test_log_buffer_wrapping();
     test_modal_components();
     test_instruction_explainer_is_side_effect_free();
+    test_inspector_panels_traits_and_scoreboard();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;

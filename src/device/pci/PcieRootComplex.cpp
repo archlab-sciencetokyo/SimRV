@@ -14,18 +14,16 @@ namespace simrv::device {
 PcieRootComplex::PcieRootComplex(simrv::core::Machine* machine, Aplic* aplic_s, Imsic* imsic_s)
     : machine_(machine), aplic_s_(aplic_s), imsic_s_(imsic_s) {}
 
-auto PcieRootComplex::attach_device(uint8_t bus, uint8_t dev, uint8_t func,
-                                    std::shared_ptr<PciDevice> device) -> bool {
+auto PcieRootComplex::attach_device(PciBdf bdf, std::shared_ptr<PciDevice> device) -> bool {
     if (!device) return false;
-    device->set_root_complex(this, bus, dev, func);
-    attached_devices_.push_back({bus, dev, func, device});
+    device->set_root_complex(this, bdf);
+    attached_devices_.push_back({bdf, device});
     return true;
 }
 
-auto PcieRootComplex::get_device(uint8_t bus, uint8_t dev, uint8_t func)
-    -> std::shared_ptr<PciDevice> {
+auto PcieRootComplex::get_device(PciBdf bdf) -> std::shared_ptr<PciDevice> {
     for (auto& entry : attached_devices_) {
-        if (entry.bus == bus && entry.dev == dev && entry.func == func) {
+        if (entry.bdf == bdf) {
             return entry.device;
         }
     }
@@ -57,7 +55,7 @@ void PcieRootComplex::ecam_write(Address offset, uint32_t val, uint8_t size) {
 
 auto PcieRootComplex::mmio_read(Address addr, uint8_t size) -> uint32_t {
     for (auto& entry : attached_devices_) {
-        int bar_idx = 0;
+        BarIndex bar_idx = 0;
         Address offset = 0;
         if (entry.device && entry.device->contains_mmio(addr, bar_idx, offset)) {
             return entry.device->bar_read(bar_idx, offset, size);
@@ -68,7 +66,7 @@ auto PcieRootComplex::mmio_read(Address addr, uint8_t size) -> uint32_t {
 
 void PcieRootComplex::mmio_write(Address addr, uint32_t val, uint8_t size) {
     for (auto& entry : attached_devices_) {
-        int bar_idx = 0;
+        BarIndex bar_idx = 0;
         Address offset = 0;
         if (entry.device && entry.device->contains_mmio(addr, bar_idx, offset)) {
             entry.device->bar_write(bar_idx, offset, val, size);
@@ -77,10 +75,8 @@ void PcieRootComplex::mmio_write(Address addr, uint32_t val, uint8_t size) {
     }
 }
 
-void PcieRootComplex::assert_device_irq(uint8_t bus, uint8_t dev, uint8_t func) {
-    (void)bus;
-    (void)func;
-    const uint32_t irq_source = 16 + (dev % 8);
+void PcieRootComplex::assert_device_irq(PciBdf bdf) {
+    const InterruptSourceId irq_source = 16 + (bdf.dev % 8);
 
     if (aplic_s_ != nullptr) {
         aplic_s_->set_irq(irq_source, true);

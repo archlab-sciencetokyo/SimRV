@@ -506,6 +506,23 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         }
         active_context_ = &pipeline_context;
     }
+
+    // Synchronize live scoreboard reservations for TUI telemetry and hazard inspection
+    scoreboard.reset();
+    const auto update_slot = [&](const CycleInstructionSlot* slot, pipeline::PipelineStage stage) {
+        if (!slot || !slot->valid) return;
+        if (slot->writes_int && slot->wb_dest != RegId::Zero) {
+            scoreboard.reserve(pipeline::operation::RegBank::Integer, slot->wb_dest, stage,
+                               static_cast<uint8_t>(slot->remaining_latency), slot->wb_valid);
+        } else if (slot->writes_fp) {
+            scoreboard.reserve(pipeline::operation::RegBank::Float, slot->wb_dest, stage,
+                               static_cast<uint8_t>(slot->remaining_latency), slot->wb_valid);
+        }
+    };
+    update_slot(pipe.writeback, pipeline::PipelineStage::Writeback);
+    update_slot(pipe.memory, pipeline::PipelineStage::Memory);
+    update_slot(pipe.execute, pipeline::PipelineStage::Execute);
+    update_slot(pipe.decode, pipeline::PipelineStage::Decode);
 }
 
 }  // namespace simrv::core

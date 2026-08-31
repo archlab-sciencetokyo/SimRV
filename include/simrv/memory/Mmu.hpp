@@ -30,6 +30,53 @@ enum class PteFlag : PteFlags {
     D = (1 << 7),
 };
 
+/**
+ * @struct PteView
+ * @brief Strongly typed architectural view of a Page Table Entry (PTE) for Sv32/Sv39/Sv48/Sv57.
+ */
+struct PteView {
+    Word raw{0};
+
+    [[nodiscard]] constexpr auto valid() const noexcept -> bool {
+        return (raw & enum_mask(PteFlag::V)) != 0;
+    }
+    [[nodiscard]] constexpr auto readable() const noexcept -> bool {
+        return (raw & enum_mask(PteFlag::R)) != 0;
+    }
+    [[nodiscard]] constexpr auto writable() const noexcept -> bool {
+        return (raw & enum_mask(PteFlag::W)) != 0;
+    }
+    [[nodiscard]] constexpr auto executable() const noexcept -> bool {
+        return (raw & enum_mask(PteFlag::X)) != 0;
+    }
+    [[nodiscard]] constexpr auto user() const noexcept -> bool {
+        return (raw & enum_mask(PteFlag::U)) != 0;
+    }
+    [[nodiscard]] constexpr auto global() const noexcept -> bool { return (raw & (1 << 5)) != 0; }
+    [[nodiscard]] constexpr auto accessed() const noexcept -> bool {
+        return (raw & enum_mask(PteFlag::A)) != 0;
+    }
+    [[nodiscard]] constexpr auto dirty() const noexcept -> bool {
+        return (raw & enum_mask(PteFlag::D)) != 0;
+    }
+    [[nodiscard]] constexpr auto rsw() const noexcept -> uint8_t {
+        return static_cast<uint8_t>((raw >> 8) & 0x3);
+    }
+    [[nodiscard]] constexpr auto is_leaf() const noexcept -> bool {
+        return readable() || executable();
+    }
+    [[nodiscard]] constexpr auto is_table() const noexcept -> bool { return valid() && !is_leaf(); }
+    [[nodiscard]] constexpr auto ppn() const noexcept -> uint64_t {
+        return static_cast<uint64_t>(raw >> 10);
+    }
+    [[nodiscard]] constexpr auto flags() const noexcept -> PteFlags {
+        return static_cast<PteFlags>(raw & 0xFF);
+    }
+    [[nodiscard]] constexpr auto has_reserved_bits(unsigned pte_size) const noexcept -> bool {
+        return pte_size == 8 && (static_cast<uint64_t>(raw) >> 54U) != 0;
+    }
+};
+
 enum class PteAccess : uint8_t { Read = 0, Write = 1, Code = 2 };
 
 enum class PageWalkStatus : uint8_t { ReadPte, WritePte, Complete, Fault };
@@ -48,7 +95,7 @@ struct PageWalkState {
     unsigned xlen = 0;
     unsigned pte_size = 0;
     unsigned vpn_bits_per_level = 0;
-    int level = -1;
+    PageTableLevel level = -1;
     bool update_access_bits = true;
     PageWalkStatus status = PageWalkStatus::Fault;
     const core::ArchState* arch_state = nullptr;

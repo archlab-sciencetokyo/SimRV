@@ -6,13 +6,14 @@
 
 #include <string_view>
 
-#include "simrv/isa/Amo.hpp"          // IWYU pragma: export
-#include "simrv/isa/Base.hpp"         // IWYU pragma: export
-#include "simrv/isa/Compressed.hpp"   // IWYU pragma: export
-#include "simrv/isa/Fp.hpp"           // IWYU pragma: export
-#include "simrv/isa/OperationId.hpp"  // IWYU pragma: export
-#include "simrv/isa/Priv.hpp"         // IWYU pragma: export
-#include "simrv/xlen/Types.hpp"       // IWYU pragma: export
+#include "simrv/isa/Amo.hpp"                   // IWYU pragma: export
+#include "simrv/isa/Base.hpp"                  // IWYU pragma: export
+#include "simrv/isa/Compressed.hpp"            // IWYU pragma: export
+#include "simrv/isa/Fp.hpp"                    // IWYU pragma: export
+#include "simrv/isa/OperationId.hpp"           // IWYU pragma: export
+#include "simrv/isa/Priv.hpp"                  // IWYU pragma: export
+#include "simrv/pipeline/OperationTraits.hpp"  // IWYU pragma: export
+#include "simrv/xlen/Types.hpp"                // IWYU pragma: export
 
 namespace simrv::isa {
 
@@ -245,36 +246,11 @@ constexpr auto instruction_enabled_by_misa(CSRValue misa, Instruction ir, bool c
  * @return True if the destination register is floating-point, false otherwise.
  */
 constexpr auto is_destination_fp(Opcode opcode, OperationId op_id) -> bool {
-    if (opcode == Opcode::LoadFp || opcode == Opcode::MAdd || opcode == Opcode::MSub ||
-        opcode == Opcode::NMAdd || opcode == Opcode::NMSub) {
-        return true;
+    if (op_id != OperationId::UNKNOWN) {
+        return simrv::pipeline::operation::writes_float(op_id);
     }
-    if (opcode != Opcode::OpFp) {
-        return false;
-    }
-    switch (op_id) {
-        case OperationId::FCVT_W_S:
-        case OperationId::FCVT_WU_S:
-        case OperationId::FCVT_L_S:
-        case OperationId::FCVT_LU_S:
-        case OperationId::FCVT_W_D:
-        case OperationId::FCVT_WU_D:
-        case OperationId::FCVT_L_D:
-        case OperationId::FCVT_LU_D:
-        case OperationId::FEQ_S:
-        case OperationId::FLT_S:
-        case OperationId::FLE_S:
-        case OperationId::FEQ_D:
-        case OperationId::FLT_D:
-        case OperationId::FLE_D:
-        case OperationId::FCLASS_S:
-        case OperationId::FCLASS_D:
-        case OperationId::FMV_X_W:
-        case OperationId::FMV_X_D:
-            return false;
-        default:
-            return true;
-    }
+    return opcode == Opcode::LoadFp || opcode == Opcode::MAdd || opcode == Opcode::MSub ||
+           opcode == Opcode::NMAdd || opcode == Opcode::NMSub || opcode == Opcode::OpFp;
 }
 
 /**
@@ -284,25 +260,11 @@ constexpr auto is_destination_fp(Opcode opcode, OperationId op_id) -> bool {
  * @return True if rs1 is a floating-point register, false otherwise.
  */
 constexpr auto is_rs1_fp(Opcode opcode, OperationId op_id) -> bool {
-    if (opcode != Opcode::OpFp && opcode != Opcode::MAdd && opcode != Opcode::MSub &&
-        opcode != Opcode::NMSub && opcode != Opcode::NMAdd) {
-        return false;
+    if (op_id != OperationId::UNKNOWN) {
+        return simrv::pipeline::operation::is_rs1_fp(op_id);
     }
-    switch (op_id) {
-        case OperationId::FCVT_S_W:
-        case OperationId::FCVT_S_WU:
-        case OperationId::FCVT_S_L:
-        case OperationId::FCVT_S_LU:
-        case OperationId::FCVT_D_W:
-        case OperationId::FCVT_D_WU:
-        case OperationId::FCVT_D_L:
-        case OperationId::FCVT_D_LU:
-        case OperationId::FMV_W_X:
-        case OperationId::FMV_D_X:
-            return false;
-        default:
-            return true;
-    }
+    return opcode == Opcode::OpFp || opcode == Opcode::MAdd || opcode == Opcode::MSub ||
+           opcode == Opcode::NMSub || opcode == Opcode::NMAdd;
 }
 
 /**
@@ -311,15 +273,12 @@ constexpr auto is_rs1_fp(Opcode opcode, OperationId op_id) -> bool {
  * @param op_id The instruction OperationId.
  * @return True if rs2 is a floating-point register, false otherwise.
  */
-constexpr auto is_rs2_fp(Opcode opcode, [[maybe_unused]] OperationId op_id) -> bool {
-    if (opcode == Opcode::StoreFp) {
-        return true;
+constexpr auto is_rs2_fp(Opcode opcode, OperationId op_id) -> bool {
+    if (op_id != OperationId::UNKNOWN) {
+        return simrv::pipeline::operation::is_rs2_fp(op_id);
     }
-    if (opcode != Opcode::OpFp && opcode != Opcode::MAdd && opcode != Opcode::MSub &&
-        opcode != Opcode::NMSub && opcode != Opcode::NMAdd) {
-        return false;
-    }
-    return true;
+    return opcode == Opcode::StoreFp || opcode == Opcode::OpFp || opcode == Opcode::MAdd ||
+           opcode == Opcode::MSub || opcode == Opcode::NMSub || opcode == Opcode::NMAdd;
 }
 
 /**

@@ -10,8 +10,10 @@
 
 namespace simrv::pipeline {
 
+enum class ForwardSource : uint8_t { None = 0, Execute = 1, Memory = 2, Writeback = 3 };
+
 struct PipelineReg {
-    uint64_t inst_id = 0;
+    InstructionId inst_id = 0;
     Register pc = 0;
     isa::Opcode opcode = static_cast<isa::Opcode>(0);
     RegId rd = static_cast<RegId>(0);
@@ -24,7 +26,7 @@ struct PipelineReg {
     uint32_t rd_fp_mask = 0;
     bool is_fp_op = false;
     bool is_load = false;
-    int remaining_latency = 0;  // Cycles until value is ready for forwarding
+    LatencyCycles remaining_latency = 0;  // Cycles until value is ready for forwarding
     bool valid = false;
     bool tlb_miss = false;
     bool icache_miss = false;
@@ -55,7 +57,7 @@ struct PipelineInstruction {
 
 struct PipelineStageEvent {
     PipelineInstruction instruction{};
-    uint32_t remaining_latency = 0;
+    LatencyCycles remaining_latency = 0;
     bool valid = false;
     bool stalled = false;
 };
@@ -92,12 +94,12 @@ struct PipelineCycleEvent {
 enum class PipelineType : uint8_t { FiveStage = 0, ThreeStage = 1 };
 
 struct CpuConfig {
-    uint32_t mul_latency = 3;
-    uint32_t div_latency = 18;
-    uint32_t fp_alu_latency = 4;
-    uint32_t fp_div_latency = 16;
-    uint32_t csr_flush_penalty = 3;
-    uint32_t fence_flush_penalty = 4;
+    LatencyCycles mul_latency = 3;
+    LatencyCycles div_latency = 18;
+    LatencyCycles fp_alu_latency = 4;
+    LatencyCycles fp_div_latency = 16;
+    LatencyCycles csr_flush_penalty = 3;
+    LatencyCycles fence_flush_penalty = 4;
     bool enable_forwarding = true;
     bool record_snapshots = false;
     PipelineType pipeline_type = PipelineType::FiveStage;
@@ -105,9 +107,9 @@ struct CpuConfig {
 };
 
 struct PipelineCycleSnapshot {
-    uint64_t cycle = 0;
+    CycleCount cycle = 0;
     struct StageInfo {
-        uint64_t inst_id = 0;
+        InstructionId inst_id = 0;
         Register pc = 0;
         isa::OperationId op_id = isa::OperationId::UNKNOWN;
         bool valid = false;
@@ -121,15 +123,15 @@ struct PipelineCycleSnapshot {
 };
 
 struct PipelineStats {
-    uint64_t cycle_count = 0;
-    uint64_t stall_cycles = 0;
-    uint64_t bubble_cycles = 0;
-    uint64_t icache_stalls = 0;
-    uint64_t dcache_stalls = 0;
-    uint64_t tlb_stalls = 0;
-    uint64_t structural_stalls = 0;
-    uint64_t data_hazard_stalls = 0;
-    uint64_t control_hazard_bubbles = 0;
+    Counter cycle_count = 0;
+    Counter stall_cycles = 0;
+    Counter bubble_cycles = 0;
+    Counter icache_stalls = 0;
+    Counter dcache_stalls = 0;
+    Counter tlb_stalls = 0;
+    Counter structural_stalls = 0;
+    Counter data_hazard_stalls = 0;
+    Counter control_hazard_bubbles = 0;
 };
 
 class PipelineHistoryView {
@@ -178,15 +180,15 @@ class PipelineSim {
     }
 
     // Getters for statistics
-    [[nodiscard]] auto cycle_count() const -> uint64_t;
-    [[nodiscard]] auto stall_cycles() const -> uint64_t;
-    [[nodiscard]] auto bubble_cycles() const -> uint64_t;
-    [[nodiscard]] auto icache_stalls() const -> uint64_t;
-    [[nodiscard]] auto dcache_stalls() const -> uint64_t;
-    [[nodiscard]] auto tlb_stalls() const -> uint64_t;
-    [[nodiscard]] auto structural_stalls() const -> uint64_t;
-    [[nodiscard]] auto data_hazard_stalls() const -> uint64_t;
-    [[nodiscard]] auto control_hazard_bubbles() const -> uint64_t;
+    [[nodiscard]] auto cycle_count() const -> Counter;
+    [[nodiscard]] auto stall_cycles() const -> Counter;
+    [[nodiscard]] auto bubble_cycles() const -> Counter;
+    [[nodiscard]] auto icache_stalls() const -> Counter;
+    [[nodiscard]] auto dcache_stalls() const -> Counter;
+    [[nodiscard]] auto tlb_stalls() const -> Counter;
+    [[nodiscard]] auto structural_stalls() const -> Counter;
+    [[nodiscard]] auto data_hazard_stalls() const -> Counter;
+    [[nodiscard]] auto control_hazard_bubbles() const -> Counter;
     [[nodiscard]] auto cycle_history() const noexcept -> PipelineHistoryView;
     [[nodiscard]] auto get_stats() const -> PipelineStats;
 
@@ -197,11 +199,11 @@ class PipelineSim {
     [[nodiscard]] auto m_reg() const -> const PipelineReg&;
     [[nodiscard]] auto w_reg() const -> const PipelineReg&;
 
-    [[nodiscard]] auto div_busy_cycles_remaining() const -> uint32_t;
-    [[nodiscard]] auto icache_stall_remaining() const -> uint32_t;
-    [[nodiscard]] auto dcache_stall_remaining() const -> uint32_t;
-    [[nodiscard]] auto tlb_stall_remaining() const -> uint32_t;
-    [[nodiscard]] auto control_bubble_remaining() const -> uint32_t;
+    [[nodiscard]] auto div_busy_cycles_remaining() const -> LatencyCycles;
+    [[nodiscard]] auto icache_stall_remaining() const -> LatencyCycles;
+    [[nodiscard]] auto dcache_stall_remaining() const -> LatencyCycles;
+    [[nodiscard]] auto tlb_stall_remaining() const -> LatencyCycles;
+    [[nodiscard]] auto control_bubble_remaining() const -> LatencyCycles;
 
     [[nodiscard]] auto save_state() const -> PipelineSimState;
     void restore_state(const PipelineSimState& state);

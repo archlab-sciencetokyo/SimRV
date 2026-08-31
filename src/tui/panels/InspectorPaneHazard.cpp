@@ -8,6 +8,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
+#include "simrv/pipeline/Scoreboard.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
@@ -243,6 +244,106 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
     }
     if (logical_row == 9) {
         return section_line("EX/MEM & MEM/WB Bypassing + 1-Cycle Load-Use Bubble", width);
+    }
+
+    // --- Live Multi-Bank Scoreboard & Active Dependency Section (rows 10+) ---
+    if (logical_row == 10) {
+        return section_line("Live Multi-Bank Scoreboard (In-Flight Reservations)", width);
+    }
+
+    struct ActiveReservation {
+        const char* bank_name;
+        std::string reg_name;
+        const char* stage_name;
+        LatencyCycles latency;
+        bool can_forward;
+    };
+    std::vector<ActiveReservation> active_entries;
+    const auto& sb = cpu.get_scoreboard();
+
+    const auto stage_to_string = [](simrv::pipeline::PipelineStage s) -> const char* {
+        switch (s) {
+            case simrv::pipeline::PipelineStage::Fetch:
+                return "IF ";
+            case simrv::pipeline::PipelineStage::Decode:
+                return "ID ";
+            case simrv::pipeline::PipelineStage::Execute:
+                return "EX ";
+            case simrv::pipeline::PipelineStage::Memory:
+                return "MEM";
+            case simrv::pipeline::PipelineStage::Writeback:
+                return "WB ";
+        }
+        return "UNK";
+    };
+
+    // Check Integer bank
+    for (size_t r = 1; r < 32; ++r) {
+        auto reg = static_cast<RegId>(r);
+        if (auto entry = sb.get_entry_data(simrv::pipeline::operation::RegBank::Integer, reg)) {
+            active_entries.push_back({
+                .bank_name = "INT",
+                .reg_name = std::format("x{:<2}/{}", r, kRegNames.at(r)),
+                .stage_name = stage_to_string(entry->stage),
+                .latency = entry->latency,
+                .can_forward = entry->can_forward,
+            });
+        }
+    }
+    // Check Float bank
+    for (size_t r = 0; r < 32; ++r) {
+        auto reg = static_cast<RegId>(r);
+        if (auto entry = sb.get_entry_data(simrv::pipeline::operation::RegBank::Float, reg)) {
+            active_entries.push_back({
+                .bank_name = "FP ",
+                .reg_name = std::format("f{:<2}/{}", r, kFpRegNames.at(r)),
+                .stage_name = stage_to_string(entry->stage),
+                .latency = entry->latency,
+                .can_forward = entry->can_forward,
+            });
+        }
+    }
+
+    if (active_entries.empty()) {
+        if (logical_row == 11) {
+            return format_to_width(
+                std::format("  {}No in-flight reservations (all register writes committed)\033[0m",
+                            kThemeMuted),
+                width);
+        }
+    } else {
+        size_t entry_idx = static_cast<size_t>(logical_row - 11);
+        if (entry_idx < active_entries.size() && entry_idx < 6) {
+            const auto& item = active_entries[entry_idx];
+            std::string fwd_str = item.can_forward ? "\033[38;5;120m[CAN FWD]\033[0m"
+                                                   : "\033[38;5;203m[STALL  ]\033[0m";
+            return format_to_width(
+                std::format("  {}[{}]\033[0m {}{:<10}\033[0m │ {}Stage: {}{}\033[0m │ "
+                            "{}Lat:\033[0m {}{:<2}c\033[0m │ {}",
+                            kThemeText, item.bank_name, kThemeVal, item.reg_name, kThemeText,
+                            kThemeSky, item.stage_name, kThemeText, kThemePeach, item.latency,
+                            fwd_str),
+                width);
+        }
+    }
+
+    if (logical_row == 17) {
+        return section_line("Active RAW Hazard Interlock & Dependency Status", width);
+    }
+    if (logical_row == 18) {
+        if (cpu.ca_pipeline.data_hazard_stall) {
+            return format_to_width(
+                std::format(
+                    "  {}Status:\033[0m \033[38;5;203m[RAW STALL]\033[0m Pipeline interlock "
+                    "active in Decode stage",
+                    kThemeText),
+                width);
+        }
+        return format_to_width(
+            std::format("  {}Status:\033[0m \033[38;5;120m[FLOWING]\033[0m No data hazard stalls "
+                        "this cycle",
+                        kThemeText),
+            width);
     }
 
     return format_to_width("", width);

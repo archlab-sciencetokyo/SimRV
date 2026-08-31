@@ -2226,7 +2226,7 @@ void explain_instruction(uint32_t raw_inst) {
     uint32_t const rs2_val = std::to_underlying(dec.rs2());
     uint32_t const funct7_val = dec.funct7();
     uint32_t const rs3_val = std::to_underlying(dec.rs3());
-    uint32_t const csr_val = dec.csr();
+    uint32_t const csr_val = dec.csr().value();
 
     InstFormat const fmt = simrv::isa::get_instruction_format(op);
     std::println("Instruction Format: {}{}{}", c(kBold),

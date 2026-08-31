@@ -10,8 +10,8 @@
 
 namespace simrv::device {
 
-PciDevice::PciDevice(uint16_t vendor_id, uint16_t device_id, uint8_t revision_id,
-                     uint32_t class_code) {
+PciDevice::PciDevice(PciVendorId vendor_id, PciDeviceId device_id, uint8_t revision_id,
+                     PciClassCode class_code) {
     config_space_[0x00] = static_cast<uint8_t>(vendor_id & 0xff);
     config_space_[0x01] = static_cast<uint8_t>((vendor_id >> 8) & 0xff);
     config_space_[0x02] = static_cast<uint8_t>(device_id & 0xff);
@@ -37,21 +37,19 @@ void PciDevice::reset() {
     config_space_[0x05] = 0;
 }
 
-void PciDevice::set_root_complex(PcieRootComplex* rc, uint8_t bus, uint8_t dev, uint8_t func) {
+void PciDevice::set_root_complex(PcieRootComplex* rc, PciBdf bdf) {
     root_complex_ = rc;
-    bus_ = bus;
-    dev_ = dev;
-    func_ = func;
+    bdf_ = bdf;
 }
 
 void PciDevice::trigger_irq() {
     if (root_complex_ != nullptr) {
-        root_complex_->assert_device_irq(bus_, dev_, func_);
+        root_complex_->assert_device_irq(bdf_.bus, bdf_.dev, bdf_.func);
     }
 }
 
-void PciDevice::init_bar(int bar_idx, Address size, bool is_64bit, bool is_prefetchable) {
-    if (bar_idx < 0 || bar_idx >= 6) return;
+void PciDevice::init_bar(BarIndex bar_idx, Address size, bool is_64bit, bool is_prefetchable) {
+    if (bar_idx >= 6) return;
     bar_sizes_[bar_idx] = size;
     bar_masks_[bar_idx] = ~(size - 1);
     bar_is_64bit_[bar_idx] = is_64bit;
@@ -91,22 +89,22 @@ void PciDevice::config_write(Address offset, uint32_t val, uint8_t size) {
     std::memcpy(&config_space_[offset], &val, size);
 }
 
-auto PciDevice::bar_read(int bar_idx, Address offset, uint8_t size) -> uint32_t {
+auto PciDevice::bar_read(BarIndex bar_idx, Address offset, uint8_t size) -> uint32_t {
     (void)bar_idx;
     (void)offset;
     (void)size;
     return 0;
 }
 
-void PciDevice::bar_write(int bar_idx, Address offset, uint32_t val, uint8_t size) {
+void PciDevice::bar_write(BarIndex bar_idx, Address offset, uint32_t val, uint8_t size) {
     (void)bar_idx;
     (void)offset;
     (void)val;
     (void)size;
 }
 
-auto PciDevice::bar_base(int bar_idx) const -> Address {
-    if (bar_idx < 0 || bar_idx >= 6) return 0;
+auto PciDevice::bar_base(BarIndex bar_idx) const -> Address {
+    if (bar_idx >= 6) return 0;
     uint32_t lo = 0;
     std::memcpy(&lo, &config_space_[0x10 + bar_idx * 4], 4);
     lo &= 0xFFFFFFF0U;
@@ -118,13 +116,13 @@ auto PciDevice::bar_base(int bar_idx) const -> Address {
     return lo;
 }
 
-auto PciDevice::bar_size(int bar_idx) const -> Address {
-    if (bar_idx < 0 || bar_idx >= 6) return 0;
+auto PciDevice::bar_size(BarIndex bar_idx) const -> Address {
+    if (bar_idx >= 6) return 0;
     return bar_sizes_[bar_idx];
 }
 
-auto PciDevice::contains_mmio(Address addr, int& out_bar, Address& out_offset) const -> bool {
-    for (int i = 0; i < 6; ++i) {
+auto PciDevice::contains_mmio(Address addr, BarIndex& out_bar, Address& out_offset) const -> bool {
+    for (uint8_t i = 0; i < 6; ++i) {
         if (bar_sizes_[i] == 0) continue;
         Address base = bar_base(i);
         if (base != 0 && addr >= base && addr < base + bar_sizes_[i]) {

@@ -19,6 +19,8 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/pipeline/Decoder.hpp"
+#include "simrv/pipeline/OperationInfo.hpp"
+#include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
@@ -182,7 +184,11 @@ auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx) -> std::s
     // Default: ALU / FP / Atomic / Vector
     // Show: operand1 <op> operand2 = result
     InstFormat fmt = simrv::isa::get_instruction_format(opc);
-    if (fmt == InstFormat::R || fmt == InstFormat::R4) {
+    if (fmt == InstFormat::R4 || pipeline::operation::reads_rs3(ctx.op_id)) {
+        return std::format(" {}Computation : {}{} * {} ± rs3 = {} [FMA 3-op]\033[0m", kThemeText,
+                           kThemeMint, hex_val(ctx.rrs1), hex_val(ctx.rrs2), hex_val(ctx.wb_data));
+    }
+    if (fmt == InstFormat::R) {
         return std::format(" {}Computation : {}{} {} {} = {}\033[0m", kThemeText, kThemeMint,
                            hex_val(ctx.rrs1), op_name, hex_val(ctx.rrs2), hex_val(ctx.wb_data));
     }
@@ -194,11 +200,15 @@ auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx) -> std::s
 /// Build a description for the MEM stage.
 auto get_mem_stage_desc(const simrv::pipeline::PipelineContext& ctx)
     -> std::pair<std::string, std::string> {
-    if (is_load_opcode(ctx.opcode)) {
+    if (pipeline::operation::is_atomic(ctx.op_id)) {
+        return {std::format("Atomic RMW at {}", hex_val(ctx.mem_addr)),
+                std::format("Data: {}", hex_val(ctx.mem_wdata))};
+    }
+    if (pipeline::operation::is_load(ctx.op_id) || is_load_opcode(ctx.opcode)) {
         return {std::format("Load from {}", hex_val(ctx.mem_addr)),
                 std::format("Read: {}", hex_val(ctx.mem_rdata))};
     }
-    if (is_store_opcode(ctx.opcode)) {
+    if (pipeline::operation::is_store(ctx.op_id) || is_store_opcode(ctx.opcode)) {
         return {std::format("Store to {}", hex_val(ctx.mem_addr)),
                 std::format("Data: {}", hex_val(ctx.mem_wdata))};
     }

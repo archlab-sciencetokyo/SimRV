@@ -1677,9 +1677,28 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         return true;
     }
     if (mtype == ModalType::Notice) {
-        if (byte == 27 || key == simrv::tui::TuiKey::Esc || key == simrv::tui::TuiKey::Enter ||
-            key == simrv::tui::TuiKey::Newline || byte == ' ' || byte == 'q' || byte == 'Q')
+        if (byte == 'q' || byte == 'Q') {
             close_modal();
+            if (machine_.is_shutdown_) {
+                machine_.request_exit();
+            }
+            return true;
+        }
+        if (key == simrv::tui::TuiKey::CtrlR || byte == 0x12) {
+            close_modal();
+            machine_.request_reboot();
+            return true;
+        }
+        if (byte == 'o' || byte == 'O') {
+            close_modal();
+            open_modal(ModalType::LoadBinary);
+            return true;
+        }
+        if (byte == 27 || key == simrv::tui::TuiKey::Esc || key == simrv::tui::TuiKey::Enter ||
+            key == simrv::tui::TuiKey::Newline || byte == ' ') {
+            close_modal();
+            return true;
+        }
         return true;
     }
     if (mtype == ModalType::Glossary) {
@@ -1738,8 +1757,7 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
     }
 
     if (byte == 27 || key == simrv::tui::TuiKey::Esc) {
-        if (get_active_modal() != ModalType::LoadBinary || !machine_.binary_path().empty())
-            close_modal();
+        close_modal();
     } else if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline)
         submit_modal();
     else if (get_active_modal() == ModalType::Help &&
@@ -2008,12 +2026,16 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
             return;
         }
         if (machine_.is_shutdown_) {
-            machine_.request_reboot();
-            unpause_loop();
+            modal_.open_notice("SYSTEM SHUTDOWN",
+                               "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a "
+                               "binary [o], or quit [q].",
+                               false);
+            render(true);
+            return;
         } else {
             if (!is_paused()) pause_loop();
+            machine_.step_sync();
             update_cache();
-            machine_.step();
             render(true);
         }
     }
@@ -2104,10 +2126,9 @@ void Tui::execute_footer_action(TuiFooterAction action) {
                     false);
                 render(true);
             } else {
+                if (!is_paused()) pause_loop();
+                machine_.step_sync();
                 update_cache();
-                machine_.prepare_runner_cycle();
-                machine_.primary_hart().run_cycle(machine_);
-                machine_.finalize_runner_cycle();
                 render(true);
             }
             break;

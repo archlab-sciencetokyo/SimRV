@@ -14,6 +14,11 @@ using TlData = uint64_t;
 using TlMask = uint8_t;
 using TlSourceId = uint16_t;
 using TlSinkId = uint16_t;
+using LineAddress = Address;
+using CacheTag = Address;
+using CacheSetIndex = uint32_t;
+using CacheOffset = uint32_t;
+using CoherenceSharersMask = uint64_t;
 
 inline constexpr uint8_t kTlBeatBytes = 8;
 inline constexpr uint8_t kTlBeatSize = 3;

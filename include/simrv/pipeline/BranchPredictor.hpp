@@ -36,9 +36,9 @@ enum class BranchPredictorType : uint8_t {
  */
 struct BranchPredictorConfig {
     BranchPredictorType type = BranchPredictorType::GShare;
-    uint32_t bht_entries = 1024;
-    uint32_t btb_entries = 256;
-    uint32_t ras_entries = 16;
+    BhtIndex bht_entries = 1024;
+    BtbIndex btb_entries = 256;
+    RasIndex ras_entries = 16;
     uint32_t ghr_bits = 10;
     bool enable_btb = true;
     bool enable_ras = true;
@@ -56,10 +56,14 @@ struct BranchPrediction {
     bool is_return = false;
     bool predicted_taken = false;
     Address predicted_target = 0;
-    uint32_t bht_index = 0;
-    uint32_t ghr_snapshot = 0;
+    BhtIndex bht_index = 0;
+    GlobalHistory ghr_snapshot = 0;
     bool btb_hit = false;
     bool ras_hit = false;
+
+    [[nodiscard]] constexpr auto direction() const noexcept -> BranchDirection {
+        return predicted_taken ? BranchDirection::Taken : BranchDirection::NotTaken;
+    }
 };
 
 /**
@@ -75,6 +79,10 @@ struct BranchFeedback {
     RegId rd = static_cast<RegId>(0);
     RegId rs1 = static_cast<RegId>(0);
     BranchPrediction prediction{};
+
+    [[nodiscard]] constexpr auto direction() const noexcept -> BranchDirection {
+        return actual_taken ? BranchDirection::Taken : BranchDirection::NotTaken;
+    }
 };
 
 /**
@@ -82,32 +90,32 @@ struct BranchFeedback {
  * @brief Comprehensive branch prediction telemetry.
  */
 struct BranchPredictorStats {
-    uint64_t total_branches = 0;
-    uint64_t conditional_branches = 0;
-    uint64_t direct_jumps = 0;
-    uint64_t indirect_jumps = 0;
-    uint64_t function_calls = 0;
-    uint64_t function_returns = 0;
+    Counter total_branches = 0;
+    Counter conditional_branches = 0;
+    Counter direct_jumps = 0;
+    Counter indirect_jumps = 0;
+    Counter function_calls = 0;
+    Counter function_returns = 0;
 
-    uint64_t direction_predictions = 0;
-    uint64_t direction_hits = 0;
-    uint64_t direction_misses = 0;
+    Counter direction_predictions = 0;
+    Counter direction_hits = 0;
+    Counter direction_misses = 0;
 
-    uint64_t target_predictions = 0;
-    uint64_t target_hits = 0;
-    uint64_t target_misses = 0;
+    Counter target_predictions = 0;
+    Counter target_hits = 0;
+    Counter target_misses = 0;
 
-    uint64_t btb_lookups = 0;
-    uint64_t btb_hits = 0;
-    uint64_t btb_misses = 0;
+    Counter btb_lookups = 0;
+    Counter btb_hits = 0;
+    Counter btb_misses = 0;
 
-    uint64_t ras_pushes = 0;
-    uint64_t ras_pops = 0;
-    uint64_t ras_hits = 0;
-    uint64_t ras_misses = 0;
+    Counter ras_pushes = 0;
+    Counter ras_pops = 0;
+    Counter ras_hits = 0;
+    Counter ras_misses = 0;
 
-    uint64_t misprediction_flushes = 0;
-    uint64_t misprediction_penalty_cycles = 0;
+    Counter misprediction_flushes = 0;
+    Counter misprediction_penalty_cycles = 0;
 
     [[nodiscard]] auto overall_accuracy() const noexcept -> double {
         if (total_branches == 0) return 100.0;

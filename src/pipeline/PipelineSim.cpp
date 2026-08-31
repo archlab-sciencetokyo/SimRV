@@ -30,7 +30,7 @@ void PipelineSim::advance_cycle(const PipelineCycleEvent& event) {
                            .rs1 = stage.instruction.rs1,
                            .rs2 = stage.instruction.rs2,
                            .op_id = stage.instruction.op_id,
-                           .remaining_latency = static_cast<int>(stage.remaining_latency),
+                           .remaining_latency = stage.remaining_latency,
                            .valid = stage.valid,
                            .is_branch = stage.instruction.is_branch,
                            .is_jump = stage.instruction.is_jump,
@@ -79,15 +79,15 @@ void PipelineSim::advance_cycle(const PipelineCycleEvent& event) {
 }
 
 // Getters for statistics
-auto PipelineSim::cycle_count() const -> uint64_t { return ca_stats_.cycle_count; }
-auto PipelineSim::stall_cycles() const -> uint64_t { return ca_stats_.stall_cycles; }
-auto PipelineSim::bubble_cycles() const -> uint64_t { return ca_stats_.bubble_cycles; }
-auto PipelineSim::icache_stalls() const -> uint64_t { return ca_stats_.icache_stalls; }
-auto PipelineSim::dcache_stalls() const -> uint64_t { return ca_stats_.dcache_stalls; }
-auto PipelineSim::tlb_stalls() const -> uint64_t { return ca_stats_.tlb_stalls; }
-auto PipelineSim::structural_stalls() const -> uint64_t { return ca_stats_.structural_stalls; }
-auto PipelineSim::data_hazard_stalls() const -> uint64_t { return ca_stats_.data_hazard_stalls; }
-auto PipelineSim::control_hazard_bubbles() const -> uint64_t {
+auto PipelineSim::cycle_count() const -> Counter { return ca_stats_.cycle_count; }
+auto PipelineSim::stall_cycles() const -> Counter { return ca_stats_.stall_cycles; }
+auto PipelineSim::bubble_cycles() const -> Counter { return ca_stats_.bubble_cycles; }
+auto PipelineSim::icache_stalls() const -> Counter { return ca_stats_.icache_stalls; }
+auto PipelineSim::dcache_stalls() const -> Counter { return ca_stats_.dcache_stalls; }
+auto PipelineSim::tlb_stalls() const -> Counter { return ca_stats_.tlb_stalls; }
+auto PipelineSim::structural_stalls() const -> Counter { return ca_stats_.structural_stalls; }
+auto PipelineSim::data_hazard_stalls() const -> Counter { return ca_stats_.data_hazard_stalls; }
+auto PipelineSim::control_hazard_bubbles() const -> Counter {
     return ca_stats_.control_hazard_bubbles;
 }
 auto PipelineSim::cycle_history() const noexcept -> PipelineHistoryView {
@@ -120,19 +120,19 @@ auto PipelineSim::w_reg() const -> const PipelineReg& {
     return kEmptyPipelineRegister;
 }
 
-auto PipelineSim::div_busy_cycles_remaining() const -> uint32_t {
-    return operation::is_divide_or_remainder(ca_regs_[2].op_id)
-               ? static_cast<uint32_t>(std::max(0, ca_regs_[2].remaining_latency))
-               : 0;
+auto PipelineSim::div_busy_cycles_remaining() const -> LatencyCycles {
+    return operation::is_divide_or_remainder(ca_regs_[2].op_id) ? ca_regs_[2].remaining_latency : 0;
 }
-auto PipelineSim::icache_stall_remaining() const -> uint32_t {
+auto PipelineSim::icache_stall_remaining() const -> LatencyCycles {
     return ca_regs_[0].icache_miss ? 1 : 0;
 }
-auto PipelineSim::dcache_stall_remaining() const -> uint32_t {
+auto PipelineSim::dcache_stall_remaining() const -> LatencyCycles {
     return (ca_regs_[3].dcache_miss || ca_regs_[4].dcache_miss) ? 1 : 0;
 }
-auto PipelineSim::tlb_stall_remaining() const -> uint32_t { return ca_regs_[0].tlb_miss ? 1 : 0; }
-auto PipelineSim::control_bubble_remaining() const -> uint32_t { return 0; }
+auto PipelineSim::tlb_stall_remaining() const -> LatencyCycles {
+    return ca_regs_[0].tlb_miss ? 1 : 0;
+}
+auto PipelineSim::control_bubble_remaining() const -> LatencyCycles { return 0; }
 
 auto PipelineSim::get_stats() const -> PipelineStats { return ca_stats_; }
 

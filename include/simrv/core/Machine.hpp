@@ -77,7 +77,7 @@ struct PlatformStatusSnapshot {
 };
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
-enum class ExecutionState : uint8_t {
+enum class ExecutionState : uint32_t {
     Stopped = 0,
     Running = 1,
     Paused = 2,
@@ -263,6 +263,8 @@ class Machine final {
     void resume();
     /// Request execution of a single instruction cycle.
     void step();
+    /// Request execution of a single instruction cycle and synchronously wait for completion.
+    void step_sync(std::chrono::milliseconds timeout = std::chrono::milliseconds(500));
     /// Check if the simulation loop is running.
     [[nodiscard]] auto is_running() const -> bool {
         return is_running_.load(std::memory_order_relaxed);
@@ -486,7 +488,9 @@ class Machine final {
     std::chrono::steady_clock::time_point last_tui_update_{};
 
     std::atomic<bool> is_running_ = true;  // Main-loop run flag.
+    std::atomic<bool> runner_started_{false};
     std::atomic<ExecutionState> execution_state_{ExecutionState::Running};
+    std::atomic<uint64_t> step_ack_count_{0};
     std::atomic<uint32_t> runner_in_cycle_{0};
     struct TuiSnapshotSlot {
         std::atomic<uint64_t> generation{0};

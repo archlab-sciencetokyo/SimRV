@@ -7,33 +7,39 @@
 #include <algorithm>
 #include <cstdint>
 
+#include "simrv/tui/framework/Types.hpp"
+
 namespace simrv::tui::framework {
 
 enum class Layout : std::uint8_t { Split, FullRight, FullLeft, ThreeColumn, FourColumn };
 
 struct PaneWidths {
-    int left = 0;
-    int right = 0;
+    DisplayWidth left = 0;
+    DisplayWidth right = 0;
 };
 
 struct ColumnWidths {
-    int widths[4] = {0, 0, 0, 0};
+    DisplayWidth widths[4] = {0, 0, 0, 0};
     uint8_t count = 0;
 };
 
 struct FrameGeometry {
     PaneWidths panes{};
-    int content_rows = 0;
-    int frame_rows = 0;
+    DisplayHeight content_rows = 0;
+    DisplayHeight frame_rows = 0;
     bool renderable = false;
 };
 struct OverlayGeometry {
-    int width = 0;
-    int height = 0;
-    int start_x = 0;
-    int start_y = 0;
+    DisplayWidth width = 0;
+    DisplayHeight height = 0;
+    ColIndex start_x = 0;
+    RowIndex start_y = 0;
     int visible_content_rows = 0;
     bool renderable = false;
+
+    [[nodiscard]] constexpr auto rect() const noexcept -> ScreenRect {
+        return {.origin = {.x = start_x, .y = start_y}, .size = {.width = width, .height = height}};
+    }
 };
 
 inline constexpr int kBaseColumnUnitWidth = 40;

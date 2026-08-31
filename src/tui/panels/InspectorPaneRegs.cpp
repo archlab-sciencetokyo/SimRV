@@ -10,12 +10,45 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/RegisterFile.hpp"
+#include "simrv/pipeline/OperationInfo.hpp"
+#include "simrv/pipeline/Scoreboard.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 
 namespace simrv::tui {
 
 namespace {
+
+auto get_in_flight_badge(const simrv::pipeline::Scoreboard& sb,
+                         simrv::pipeline::operation::RegBank bank, RegId reg) -> std::string {
+    auto entry = sb.get_entry_data(bank, reg);
+    if (!entry) return "";
+    if (entry->can_forward) {
+        return " \033[38;5;120m[FWD]\033[0m";
+    }
+    const char* stage_str = "EX";
+    switch (entry->stage) {
+        case simrv::pipeline::PipelineStage::Fetch:
+            stage_str = "IF";
+            break;
+        case simrv::pipeline::PipelineStage::Decode:
+            stage_str = "ID";
+            break;
+        case simrv::pipeline::PipelineStage::Execute:
+            stage_str = "EX";
+            break;
+        case simrv::pipeline::PipelineStage::Memory:
+            stage_str = "MEM";
+            break;
+        case simrv::pipeline::PipelineStage::Writeback:
+            stage_str = "WB";
+            break;
+    }
+    if (entry->latency > 0) {
+        return std::format(" \033[38;5;203m[{} {}c]\033[0m", stage_str, entry->latency);
+    }
+    return std::format(" \033[38;5;203m[{}]\033[0m", stage_str);
+}
 
 auto format_vec_value(const simrv::core::VectorRegister& val, unsigned vlen, int avail_w)
     -> std::string {
@@ -64,15 +97,18 @@ auto InspectorPane::render_registers_single_column(const simrv::core::ArchState&
                                                    int logical_row, int width) -> std::string {
     if (logical_row >= 0 && logical_row < 32) {
         int reg = logical_row;
+        const auto& sb = current_cpu().get_scoreboard();
         switch (page_) {
             case TuiRegPage::GPR: {
                 auto val = st.regs.read(static_cast<RegId>(reg));
                 std::string name = kRegNames.at(static_cast<std::size_t>(reg));
                 bool changed = paused_ && (cached_gpr_.at(static_cast<std::size_t>(reg)) != val);
                 std::string c = changed ? kThemePeach : kThemeMint;
+                std::string badge = get_in_flight_badge(
+                    sb, simrv::pipeline::operation::RegBank::Integer, static_cast<RegId>(reg));
                 std::string col_color =
-                    std::format(" {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m", kThemeText,
-                                reg, kThemeVal, name, c, val, simrv::xlen::kXLenHexDigits);
+                    std::format(" {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m{}", kThemeText,
+                                reg, kThemeVal, name, c, val, simrv::xlen::kXLenHexDigits, badge);
                 return format_to_width(col_color, width);
             }
             case TuiRegPage::FPR: {
@@ -80,9 +116,11 @@ auto InspectorPane::render_registers_single_column(const simrv::core::ArchState&
                 std::string name = kFpRegNames.at(static_cast<std::size_t>(reg));
                 bool changed = paused_ && (cached_fpr_.at(static_cast<std::size_t>(reg)) != val);
                 std::string c = changed ? kThemePeach : kThemeMint;
+                std::string badge = get_in_flight_badge(
+                    sb, simrv::pipeline::operation::RegBank::Float, static_cast<RegId>(reg));
                 std::string col_color =
-                    std::format(" {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m", kThemeText,
-                                reg, kThemeVal, name, c, val);
+                    std::format(" {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m{}", kThemeText,
+                                reg, kThemeVal, name, c, val, badge);
                 return format_to_width(col_color, width);
             }
             case TuiRegPage::VEC: {
@@ -109,6 +147,7 @@ auto InspectorPane::render_registers_double_column(const simrv::core::ArchState&
         int reg1 = logical_row;
         int reg2 = logical_row + 16;
 
+        const auto& sb = current_cpu().get_scoreboard();
         switch (page_) {
             case TuiRegPage::GPR: {
                 auto val1 = st.regs.read(static_cast<RegId>(reg1));
@@ -122,12 +161,23 @@ auto InspectorPane::render_registers_double_column(const simrv::core::ArchState&
                 bool changed2 = paused_ && (cached_gpr_.at(static_cast<std::size_t>(reg2)) != val2);
                 std::string c2 = changed2 ? kThemePeach : kThemeMint;
 
-                std::string col1_color =
-                    std::format(" {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m", kThemeText,
-                                reg1, kThemeVal, name1, c1, val1, simrv::xlen::kXLenHexDigits);
-                std::string col2_color =
-                    std::format(" {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m", kThemeText,
-                                reg2, kThemeVal, name2, c2, val2, simrv::xlen::kXLenHexDigits);
+                std::string badge1 =
+                    (col_width >= 36)
+                        ? get_in_flight_badge(sb, simrv::pipeline::operation::RegBank::Integer,
+                                              static_cast<RegId>(reg1))
+                        : "";
+                std::string badge2 =
+                    (right_width >= 36)
+                        ? get_in_flight_badge(sb, simrv::pipeline::operation::RegBank::Integer,
+                                              static_cast<RegId>(reg2))
+                        : "";
+
+                std::string col1_color = std::format(
+                    " {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m{}", kThemeText, reg1,
+                    kThemeVal, name1, c1, val1, simrv::xlen::kXLenHexDigits, badge1);
+                std::string col2_color = std::format(
+                    " {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m{}", kThemeText, reg2,
+                    kThemeVal, name2, c2, val2, simrv::xlen::kXLenHexDigits, badge2);
 
                 return format_to_width(col1_color, col_width) +
                        format_to_width(col2_color, right_width);
@@ -144,12 +194,23 @@ auto InspectorPane::render_registers_double_column(const simrv::core::ArchState&
                 bool changed2 = paused_ && (cached_fpr_.at(static_cast<std::size_t>(reg2)) != val2);
                 std::string c2 = changed2 ? kThemePeach : kThemeMint;
 
+                std::string badge1 =
+                    (col_width >= 36)
+                        ? get_in_flight_badge(sb, simrv::pipeline::operation::RegBank::Float,
+                                              static_cast<RegId>(reg1))
+                        : "";
+                std::string badge2 =
+                    (right_width >= 36)
+                        ? get_in_flight_badge(sb, simrv::pipeline::operation::RegBank::Float,
+                                              static_cast<RegId>(reg2))
+                        : "";
+
                 std::string col1_color =
-                    std::format(" {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m", kThemeText,
-                                reg1, kThemeVal, name1, c1, val1);
+                    std::format(" {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m{}", kThemeText,
+                                reg1, kThemeVal, name1, c1, val1, badge1);
                 std::string col2_color =
-                    std::format(" {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m", kThemeText,
-                                reg2, kThemeVal, name2, c2, val2);
+                    std::format(" {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m{}", kThemeText,
+                                reg2, kThemeVal, name2, c2, val2, badge2);
 
                 return format_to_width(col1_color, col_width) +
                        format_to_width(col2_color, right_width);

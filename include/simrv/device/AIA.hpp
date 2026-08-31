@@ -42,14 +42,14 @@ class Imsic : public memory::MmioDevice {
     void write32(Address offset, uint32_t val) override;
 
     // Indirect CSR register access via miselect/mireg or siselect/sireg
-    [[nodiscard]] auto csr_read(size_t hart_idx, uint32_t reg_idx) -> Word;
-    void csr_write(size_t hart_idx, uint32_t reg_idx, Word val);
+    [[nodiscard]] auto csr_read(HartId hart_idx, uint32_t reg_idx) -> Word;
+    void csr_write(HartId hart_idx, uint32_t reg_idx, Word val);
 
     // Trigger an MSI interrupt message on a specific hart
-    void trigger_msi(size_t hart_idx, uint32_t interrupt_id);
+    void trigger_msi(HartId hart_idx, InterruptSourceId interrupt_id);
 
     // Recalculate pending & enabled interrupts against threshold and update CPU mip
-    void update_hart(size_t hart_idx);
+    void update_hart(HartId hart_idx);
 
    private:
     Privilege priv_{Privilege::Machine};
@@ -90,7 +90,7 @@ class Aplic : public memory::MmioDevice {
     void write32(Address offset, uint32_t val) override;
 
     // External device wire IRQ trigger
-    void set_irq(uint32_t irq_source, bool active);
+    void set_irq(InterruptSourceId irq_source, bool active);
 
     // Update pending states and delivery to CPU/IMSIC
     void update();

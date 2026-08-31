@@ -122,8 +122,8 @@ void InterruptController::updateMip(PlicMmio& plic, ArchState& state) {
     state.refresh_supervisor_pending();
 }
 
-void InterruptController::setIrq(PlicMmio& plic, int irq_num, int state_val) {
-    if (irq_num <= 0 || irq_num >= 32) return;
+void InterruptController::setIrq(PlicMmio& plic, IrqNumber irq_num, int state_val) {
+    if (irq_num == 0 || irq_num >= 32) return;
     const Word mask = static_cast<Word>(1) << irq_num;
     if (state_val != 0) {
         plic.plic_pending[0] |= mask;
@@ -150,11 +150,11 @@ auto PlicMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD&
     return true;
 }
 
-auto PlicMmio::get_context_for_offset(Address offset) const -> int {
+auto PlicMmio::get_context_for_offset(Address offset) const -> std::optional<PlicContextId> {
     if (offset >= 0x200000 && offset < 0x200000 + (kMaxPlicContexts * 0x1000)) {
-        return static_cast<int>((offset - 0x200000) / 0x1000);
+        return static_cast<PlicContextId>((offset - 0x200000) / 0x1000);
     }
-    return -1;
+    return std::nullopt;
 }
 
 auto PlicMmio::mmio_read(Address offset) -> Word {
@@ -173,10 +173,9 @@ auto PlicMmio::mmio_read(Address offset) -> Word {
         return (word == 0) ? (value & ~Word{1}) : value;
     }
 
-    int context = get_context_for_offset(offset);
-    if (context >= 0) {
-        const auto ctx_idx = static_cast<std::size_t>(context);
-        Address ctx_base = 0x200000 + (context * 0x1000);
+    if (const auto context = get_context_for_offset(offset)) {
+        const auto ctx_idx = static_cast<std::size_t>(*context);
+        Address ctx_base = 0x200000 + (*context * 0x1000);
         if (offset == ctx_base) {
             return plic_threshold[ctx_idx];
         }
@@ -200,7 +199,7 @@ auto PlicMmio::mmio_read(Address offset) -> Word {
             if (claim_id > 0) {
                 // Clear the pending bit on claim
                 plic_pending[0] &= ~(1u << claim_id);
-                plic_claim[ctx_idx] = static_cast<Word>(claim_id);
+                plic_claim[ctx_idx] = static_cast<InterruptSourceId>(claim_id);
                 cpu_.plic_update_mip();
             }
             return static_cast<Word>(claim_id);
@@ -212,25 +211,24 @@ auto PlicMmio::mmio_read(Address offset) -> Word {
 void PlicMmio::mmio_write(Address offset, Word wdata) {
     if (offset < 0x1000) {
         // Source zero means "no interrupt" and is not configurable.
-        if (offset != 0) plic_priorities[offset / 4] = wdata;
+        if (offset != 0) plic_priorities[offset / 4] = static_cast<InterruptPriority>(wdata);
     } else if (offset >= 0x2000 && offset < 0x2000 + (kMaxPlicContexts * 0x80)) {
         const auto ctx = (offset - 0x2000) / 0x80;
         const auto word = ((offset - 0x2000) % 0x80) / 4;
         plic_enables[ctx][word] = (word == 0) ? (wdata & ~Word{1}) : wdata;
     } else {
-        int context = get_context_for_offset(offset);
-        if (context >= 0) {
-            const auto ctx_idx = static_cast<std::size_t>(context);
-            Address ctx_base = 0x200000 + (context * 0x1000);
+        if (const auto context = get_context_for_offset(offset)) {
+            const auto ctx_idx = static_cast<std::size_t>(*context);
+            Address ctx_base = 0x200000 + (*context * 0x1000);
             if (offset == ctx_base) {
-                plic_threshold[ctx_idx] = wdata;
+                plic_threshold[ctx_idx] = static_cast<InterruptPriority>(wdata);
             } else if (offset == ctx_base + 4) {
                 // Complete: indicates the handler has finished with the IRQ
-                if (plic_claim[ctx_idx] == wdata && wdata != 0) {
+                if (plic_claim[ctx_idx] == static_cast<InterruptSourceId>(wdata) && wdata != 0) {
                     plic_claim[ctx_idx] = 0;
                     if (cpu_.machine_ && wdata == 3 && cpu_.machine_->uart_device() &&
                         cpu_.machine_->uart_device()->is_interrupt_pending()) {
-                        InterruptController::setIrq(*this, static_cast<int>(wdata), 1);
+                        InterruptController::setIrq(*this, static_cast<IrqNumber>(wdata), 1);
                     }
                 }
             }

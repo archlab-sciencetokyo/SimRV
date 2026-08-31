@@ -230,6 +230,27 @@ simrv_configure_native_test(simrv-tui-framework-tests)
 add_test(NAME tui-framework-core COMMAND simrv-tui-framework-tests)
 set_tests_properties(tui-framework-core PROPERTIES LABELS "gate;regress;tui")
 
+add_executable(simrv-operation-traits-tests
+  tests/OperationTraitsTests.cpp
+)
+target_link_libraries(simrv-operation-traits-tests PRIVATE simrv-runtime)
+simrv_configure_native_test(simrv-operation-traits-tests)
+
+add_test(NAME operation-traits COMMAND simrv-operation-traits-tests)
+set_tests_properties(operation-traits PROPERTIES LABELS "gate;regress;pipeline")
+
+add_executable(simrv-pipeline-hazard-tests
+  tests/PipelineHazardTests.cpp
+)
+target_link_libraries(simrv-pipeline-hazard-tests PRIVATE simrv-runtime)
+simrv_configure_native_test(simrv-pipeline-hazard-tests)
+
+add_test(NAME pipeline-hazards COMMAND simrv-pipeline-hazard-tests)
+set_tests_properties(pipeline-hazards PROPERTIES LABELS "gate;regress;pipeline")
+if(SIMRV_ENABLE_TSAN)
+  set_property(TEST pipeline-hazards APPEND PROPERTY LABELS "thread")
+endif()
+
 add_executable(simrv-pipeline-model-tests
   tests/PipelineModelTests.cpp
 )

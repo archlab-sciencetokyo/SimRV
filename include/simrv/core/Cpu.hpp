@@ -27,6 +27,7 @@
 #include "simrv/pipeline/CycleTransition.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
+#include "simrv/pipeline/Scoreboard.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -638,6 +639,11 @@ class CPU {
     simrv::pipeline::BranchPredictor branch_predictor;
     simrv::pipeline::HartCycleState ca_state{};
     simrv::pipeline::HartPipelineState ca_pipeline{};
+    simrv::pipeline::Scoreboard scoreboard{};
+    [[nodiscard]] const simrv::pipeline::Scoreboard& get_scoreboard() const noexcept {
+        return scoreboard;
+    }
+    [[nodiscard]] simrv::pipeline::Scoreboard& get_scoreboard() noexcept { return scoreboard; }
     DecodeCache decode_cache;
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_read{};
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_write{};

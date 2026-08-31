@@ -183,30 +183,117 @@ constexpr auto mstatus_read_value(CSRValue mstatus, CSRValue mask, unsigned xlen
     return value;
 }
 
+/**
+ * @struct MstatusView
+ * @brief Strongly typed architectural view for mstatus/sstatus values.
+ */
+struct MstatusView {
+    CSRValue value{0};
+
+    [[nodiscard]] constexpr auto uie() const noexcept -> bool { return (value & (1U << 0)) != 0; }
+    [[nodiscard]] constexpr auto sie() const noexcept -> bool { return (value & (1U << 1)) != 0; }
+    [[nodiscard]] constexpr auto mie() const noexcept -> bool { return (value & (1U << 3)) != 0; }
+    [[nodiscard]] constexpr auto upie() const noexcept -> bool { return (value & (1U << 4)) != 0; }
+    [[nodiscard]] constexpr auto spie() const noexcept -> bool { return (value & (1U << 5)) != 0; }
+    [[nodiscard]] constexpr auto mpie() const noexcept -> bool { return (value & (1U << 7)) != 0; }
+    [[nodiscard]] constexpr auto spp() const noexcept -> PrivilegeLevel {
+        return (value & (1U << 8)) ? PrivilegeLevel::Supervisor : PrivilegeLevel::User;
+    }
+    [[nodiscard]] constexpr auto mpp() const noexcept -> PrivilegeLevel {
+        return static_cast<PrivilegeLevel>((value >> 11U) & 0x3U);
+    }
+    [[nodiscard]] constexpr auto fs() const noexcept -> uint8_t {
+        return static_cast<uint8_t>((value >> 13U) & 0x3U);
+    }
+    [[nodiscard]] constexpr auto vs() const noexcept -> uint8_t {
+        return static_cast<uint8_t>((value >> 9U) & 0x3U);
+    }
+    [[nodiscard]] constexpr auto mprv() const noexcept -> bool { return (value & (1U << 17)) != 0; }
+    [[nodiscard]] constexpr auto sum() const noexcept -> bool { return (value & (1U << 18)) != 0; }
+    [[nodiscard]] constexpr auto mxr() const noexcept -> bool { return (value & (1U << 19)) != 0; }
+    [[nodiscard]] constexpr auto tvm() const noexcept -> bool { return (value & (1U << 20)) != 0; }
+    [[nodiscard]] constexpr auto tw() const noexcept -> bool { return (value & (1U << 21)) != 0; }
+    [[nodiscard]] constexpr auto tsr() const noexcept -> bool { return (value & (1U << 22)) != 0; }
+    [[nodiscard]] constexpr auto sd() const noexcept -> bool { return (value & kMstatusSd) != 0; }
+};
+
+/**
+ * @struct SatpView
+ * @brief Strongly typed architectural view for satp address translation register.
+ */
+struct SatpView {
+    CSRValue value{0};
+
+    [[nodiscard]] constexpr auto mode() const noexcept -> uint8_t {
+        if constexpr (simrv::xlen::kIsXLen64) {
+            return static_cast<uint8_t>((value >> 60U) & 0xFU);
+        } else {
+            return static_cast<uint8_t>((value >> 31U) & 0x1U);
+        }
+    }
+    [[nodiscard]] constexpr auto asid() const noexcept -> uint16_t {
+        if constexpr (simrv::xlen::kIsXLen64) {
+            return static_cast<uint16_t>((value >> 44U) & 0xFFFFU);
+        } else {
+            return static_cast<uint16_t>((value >> 22U) & 0x1FFU);
+        }
+    }
+    [[nodiscard]] constexpr auto ppn() const noexcept -> uint64_t {
+        if constexpr (simrv::xlen::kIsXLen64) {
+            return value & 0xFFFFFFFFFFFULL;
+        } else {
+            return value & 0x3FFFFFULL;
+        }
+    }
+};
+
+/**
+ * @struct MisaView
+ * @brief Strongly typed architectural view for misa extension register.
+ */
+struct MisaView {
+    CSRValue value{0};
+
+    [[nodiscard]] constexpr auto has_extension(char ext) const noexcept -> bool {
+        if (ext >= 'a' && ext <= 'z') ext = static_cast<char>(ext - 'a' + 'A');
+        if (ext >= 'A' && ext <= 'Z') {
+            const unsigned bit = static_cast<unsigned>(ext - 'A');
+            return (value & (CSRValue{1} << bit)) != 0;
+        }
+        return false;
+    }
+    [[nodiscard]] constexpr auto mxl() const noexcept -> uint8_t {
+        return static_cast<uint8_t>(value >> (simrv::xlen::kXLenBits - 2u));
+    }
+};
+
 /** Return whether a PMP CSR address exists for the active architectural XLEN. */
-constexpr auto pmp_csr_exists(CSRAddress address, unsigned xlen) -> bool {
-    if (address >= 0x3A0 && address <= 0x3AF) {
+constexpr auto pmp_csr_exists(CsrNumber address, unsigned xlen) -> bool {
+    const uint16_t addr = address.value();
+    if (addr >= 0x3A0 && addr <= 0x3AF) {
         // RV64 packs eight configuration bytes per even-numbered pmpcfg CSR;
         // the odd-numbered addresses are illegal rather than zero-valued.
-        return xlen == 32 || (address & 1U) == 0;
+        return xlen == 32 || (addr & 1U) == 0;
     }
-    return address >= 0x3B0 && address <= 0x3EF;
+    return addr >= 0x3B0 && addr <= 0x3EF;
 }
 
 /** Debug CSR encodings are unavailable to ordinary U/S/M execution. */
-constexpr auto is_debug_csr(CSRAddress address) -> bool {
-    return address >= 0x7A0 && address <= 0x7BF;
+constexpr auto is_debug_csr(CsrNumber address) -> bool {
+    const uint16_t addr = address.value();
+    return addr >= 0x7A0 && addr <= 0x7BF;
 }
 
 /** Apply architectural privilege, presence, and read-only checks to a CSR encoding. */
 constexpr auto csr_access_permitted(PrivilegeLevel current_priv, bool has_s, bool has_u,
-                                    CSRAddress address, bool is_write) -> bool {
+                                    CsrNumber address, bool is_write) -> bool {
     if (is_debug_csr(address)) return false;
-    const Word required_priv = (address >> 8U) & 0x3U;
-    const bool read_only = ((address >> 10U) & 0x3U) == 0x3U;
+    const uint16_t addr = address.value();
+    const Word required_priv = (addr >> 8U) & 0x3U;
+    const bool read_only = address.is_read_only();
     if (required_priv == 1U && !has_s) return false;
-    if (!has_s && (address == 0x302U || address == 0x303U)) return false;
-    if (!has_u && address == 0x306U) return false;
+    if (!has_s && (addr == 0x302U || addr == 0x303U)) return false;
+    if (!has_u && addr == 0x306U) return false;
     if (static_cast<Word>(current_priv) < required_priv) return false;
     return !is_write || !read_only;
 }
@@ -217,13 +304,14 @@ constexpr auto csr_access_permitted(PrivilegeLevel current_priv, bool has_s, boo
  * RV32 defines high halves of its 64-bit counters. The same addresses are
  * reserved in RV64 and must not appear as implemented zero-valued CSRs.
  */
-constexpr auto is_zero_hpm_csr(CSRAddress address, unsigned xlen) -> bool {
-    if ((address >= 0x323U && address <= 0x33FU) || (address >= 0xB03U && address <= 0xB1FU) ||
-        (address >= 0xC03U && address <= 0xC1FU)) {
+constexpr auto is_zero_hpm_csr(CsrNumber address, unsigned xlen) -> bool {
+    const uint16_t addr = address.value();
+    if ((addr >= 0x323U && addr <= 0x33FU) || (addr >= 0xB03U && addr <= 0xB1FU) ||
+        (addr >= 0xC03U && addr <= 0xC1FU)) {
         return true;
     }
     return xlen == 32U &&
-           ((address >= 0xB83U && address <= 0xB9FU) || (address >= 0xC83U && address <= 0xC9FU));
+           ((addr >= 0xB83U && addr <= 0xB9FU) || (addr >= 0xC83U && addr <= 0xC9FU));
 }
 
 /**
@@ -326,5 +414,42 @@ enum class Csr : CSRAddress {
 };
 
 constexpr CSRAddress csr_addr(Csr csr) { return static_cast<CSRAddress>(csr); }
+constexpr CsrNumber csr_num(Csr csr) { return CsrNumber{static_cast<uint16_t>(csr)}; }
+
+namespace csr {
+inline constexpr CsrNumber kMstatus{0x300};
+inline constexpr CsrNumber kMisa{0x301};
+inline constexpr CsrNumber kMedeleg{0x302};
+inline constexpr CsrNumber kMideleg{0x303};
+inline constexpr CsrNumber kMie{0x304};
+inline constexpr CsrNumber kMtvec{0x305};
+inline constexpr CsrNumber kMcounteren{0x306};
+inline constexpr CsrNumber kMstatush{0x310};
+inline constexpr CsrNumber kMcountinhibit{0x320};
+inline constexpr CsrNumber kMscratch{0x340};
+inline constexpr CsrNumber kMepc{0x341};
+inline constexpr CsrNumber kMcause{0x342};
+inline constexpr CsrNumber kMtval{0x343};
+inline constexpr CsrNumber kMip{0x344};
+
+inline constexpr CsrNumber kSstatus{0x100};
+inline constexpr CsrNumber kSie{0x104};
+inline constexpr CsrNumber kStvec{0x105};
+inline constexpr CsrNumber kScounteren{0x106};
+inline constexpr CsrNumber kSscratch{0x140};
+inline constexpr CsrNumber kSepc{0x141};
+inline constexpr CsrNumber kScause{0x142};
+inline constexpr CsrNumber kStval{0x143};
+inline constexpr CsrNumber kSip{0x144};
+inline constexpr CsrNumber kSatp{0x180};
+
+inline constexpr CsrNumber kFflags{0x001};
+inline constexpr CsrNumber kFrm{0x002};
+inline constexpr CsrNumber kFcsr{0x003};
+
+inline constexpr CsrNumber kCycle{0xC00};
+inline constexpr CsrNumber kTime{0xC01};
+inline constexpr CsrNumber kInstret{0xC02};
+}  // namespace csr
 
 }  // namespace simrv::core

@@ -271,10 +271,16 @@ void Machine::add_hart_for_testing(std::unique_ptr<CPU> hart) {
 }
 
 void Machine::start_runner() {
+    if (runner_started_.exchange(true, std::memory_order_acq_rel)) {
+        return;
+    }
     std::visit([this](auto& runner) { runner.start(*this); }, runtime_->runner);
 }
 
 void Machine::stop_runner() {
+    if (!runner_started_.exchange(false, std::memory_order_acq_rel)) {
+        return;
+    }
     std::visit([this](auto& runner) { runner.stop(*this); }, runtime_->runner);
 }
 
@@ -862,6 +868,8 @@ auto Machine::is_paused() const -> bool {
 
 void Machine::pause() {
     execution_state_.store(ExecutionState::Paused, std::memory_order_release);
+    step_ack_count_.fetch_add(1, std::memory_order_release);
+    step_ack_count_.notify_all();
     execution_state_.notify_all();
     for (auto& hart : secondary_harts_) hart->hart_status.notify_all();
     wait_for_runner_quiescence();
@@ -890,6 +898,19 @@ void Machine::step() {
     execution_state_.store(ExecutionState::Stepping, std::memory_order_release);
     execution_state_.notify_all();
     for (auto& hart : secondary_harts_) hart->hart_status.notify_all();
+}
+
+void Machine::step_sync(std::chrono::milliseconds timeout) {
+    if (is_shutdown_) {
+        return;
+    }
+    const uint64_t target_ack = step_ack_count_.load(std::memory_order_relaxed) + 1;
+    step();
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (step_ack_count_.load(std::memory_order_acquire) < target_ack && is_running() &&
+           std::chrono::steady_clock::now() < deadline) {
+        step_ack_count_.wait(target_ack - 1, std::memory_order_relaxed);
+    }
 }
 
 auto Machine::stop_reason_name(StopReason reason) noexcept -> std::string_view {
@@ -924,6 +945,8 @@ void Machine::stop(StopReason reason) {
     stop_reason_ = reason;
     is_shutdown_ = true;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
+    step_ack_count_.fetch_add(1, std::memory_order_release);
+    step_ack_count_.notify_all();
     execution_state_.notify_all();
     for (auto& hart : secondary_harts_) hart->hart_status.notify_all();
     stop_runner();
@@ -941,6 +964,8 @@ void Machine::request_reboot() {
     reboot_requested = true;
     is_running_ = false;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
+    step_ack_count_.fetch_add(1, std::memory_order_release);
+    step_ack_count_.notify_all();
     execution_state_.notify_all();
     for (auto& hart : secondary_harts_) hart->hart_status.notify_all();
     stop_runner();
@@ -953,6 +978,8 @@ void Machine::request_exit(int status) {
     is_shutdown_ = true;
     is_running_ = false;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
+    step_ack_count_.fetch_add(1, std::memory_order_release);
+    step_ack_count_.notify_all();
     execution_state_.notify_all();
     for (auto& hart : secondary_harts_) hart->hart_status.notify_all();
     stop_runner();
@@ -1040,6 +1067,9 @@ void Machine::run() {
 
         if (is_stepping()) {
             execution_state_.store(ExecutionState::Paused, std::memory_order_release);
+            step_ack_count_.fetch_add(1, std::memory_order_release);
+            step_ack_count_.notify_all();
+            execution_state_.notify_all();
             if (tui_enabled() && tui) {
                 tui->set_paused(true);
             }
@@ -1224,11 +1254,18 @@ Machine::~Machine() = default;
 void Machine::advance_ca_global_cycle() {
     cpu.advance_ca_cycle(*this);
     if (simrv::compiler::unlikely(!secondary_harts_.empty())) {
-        for (auto& secondary : secondary_harts_) {
+        for (size_t i = 0; i < secondary_harts_.size(); ++i) {
+            auto& secondary = secondary_harts_[i];
             if (secondary->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
                 secondary->advance_ca_cycle(*this);
             }
+            if (tui_enabled()) {
+                publish_tui_execution_snapshot_for_hart(i + 1);
+            }
         }
+    }
+    if (tui_enabled()) {
+        publish_tui_execution_snapshot_for_hart(0);
     }
 
     advance_ca_platform_cycle(true);
@@ -1241,9 +1278,9 @@ void Machine::advance_ca_primary_cycle() {
 
 void Machine::advance_ca_platform_cycle(bool synchronize_secondary_harts) {
     // Shared requests become visible after the scheduler's current hart transition(s). In
-    // best-effort MT mode hart 0 owns this clock while secondary pipelines progress independently.
-    // The timer transition follows the interconnect transition and is sampled by hart pipelines
-    // at a retirement boundary in the next global cycle.
+    // best-effort MT mode hart 0 owns this clock while secondary pipelines progress
+    // independently. The timer transition follows the interconnect transition and is
+    // sampled by hart pipelines at a retirement boundary in the next global cycle.
     memory().system_bus().advance_cycle();
     ++cpu.clint_mmio.rtc_divider;
     if (simrv::compiler::unlikely(cpu.clint_mmio.rtc_divider >= 10)) {

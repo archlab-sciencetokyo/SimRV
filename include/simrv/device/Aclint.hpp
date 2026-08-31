@@ -43,12 +43,12 @@ class AclintMtimer : public memory::MmioDevice {
     void write64(Address offset, uint64_t val) override;
 
     void tick();
-    [[nodiscard]] auto mtime() const -> uint64_t { return mtime_; }
-    void set_mtime(uint64_t val) { mtime_ = val; }
+    [[nodiscard]] auto mtime() const -> Counter { return mtime_; }
+    void set_mtime(Counter val) { mtime_ = val; }
 
    private:
-    uint64_t mtime_{0};
-    std::array<std::atomic<uint64_t>, kMaxHarts> mtimecmp_{};
+    Counter mtime_{0};
+    std::array<std::atomic<Counter>, kMaxHarts> mtimecmp_{};
 };
 
 /**

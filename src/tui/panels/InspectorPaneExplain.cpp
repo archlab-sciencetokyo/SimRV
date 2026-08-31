@@ -14,6 +14,8 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/Decoder.hpp"
+#include "simrv/pipeline/OperationInfo.hpp"
+#include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
@@ -674,6 +676,130 @@ auto render_dataflow_breakdown(const simrv::core::ArchState& st,
     return rows;
 }
 
+auto render_microarchitectural_profile(const simrv::pipeline::PipelineContext& ctx_in, int w)
+    -> std::vector<std::string> {
+    std::vector<std::string> rows;
+    using namespace simrv::pipeline::operation;
+
+    // 1. Operand Bank Breakdown
+    const auto rdb = rd_bank(ctx_in.op_id);
+    const auto rs1b = rs1_bank(ctx_in.op_id);
+    const auto rs2b = rs2_bank(ctx_in.op_id);
+    const auto rs3b = rs3_bank(ctx_in.op_id);
+
+    const auto bank_str = [](RegBank b) -> const char* {
+        switch (b) {
+            case RegBank::Integer:
+                return "Int RegFile (X)";
+            case RegBank::Float:
+                return "FP RegFile (F)";
+            case RegBank::Vector:
+                return "Vector RegFile (V)";
+            default:
+                return "None";
+        }
+    };
+
+    if (rdb != RegBank::None) {
+        uint32_t rd_idx = std::to_underlying(ctx_in.rd) & 0x1FU;
+        std::string name = (rdb == RegBank::Float) ? kFpRegNames.at(rd_idx) : kRegNames.at(rd_idx);
+        rows.push_back(
+            format_to_width(std::format("  {}rd (dest) : {}{:<5}\033[0m  [{}{}\033[0m]", kThemeText,
+                                        kThemeMint, name, kThemeVal, bank_str(rdb)),
+                            w));
+    }
+    if (rs1b != RegBank::None) {
+        uint32_t rs1_idx = std::to_underlying(ctx_in.rs1) & 0x1FU;
+        std::string name =
+            (rs1b == RegBank::Float) ? kFpRegNames.at(rs1_idx) : kRegNames.at(rs1_idx);
+        rows.push_back(
+            format_to_width(std::format("  {}rs1 (src1): {}{:<5}\033[0m  [{}{}\033[0m]", kThemeText,
+                                        kThemePeach, name, kThemeVal, bank_str(rs1b)),
+                            w));
+    }
+    if (rs2b != RegBank::None) {
+        uint32_t rs2_idx = std::to_underlying(ctx_in.rs2) & 0x1FU;
+        std::string name =
+            (rs2b == RegBank::Float) ? kFpRegNames.at(rs2_idx) : kRegNames.at(rs2_idx);
+        rows.push_back(
+            format_to_width(std::format("  {}rs2 (src2): {}{:<5}\033[0m  [{}{}\033[0m]", kThemeText,
+                                        kThemePeach, name, kThemeVal, bank_str(rs2b)),
+                            w));
+    }
+    if (rs3b != RegBank::None) {
+        uint32_t rs3_num = (ctx_in.ir_org >> 27U) & 0x1FU;
+        std::string name =
+            (rs3b == RegBank::Float) ? kFpRegNames.at(rs3_num) : kRegNames.at(rs3_num);
+        rows.push_back(
+            format_to_width(std::format("  {}rs3 (src3): {}{:<5}\033[0m  [{}{}\033[0m] (Addend)",
+                                        kThemeText, kThemeSky, name, kThemeVal, bank_str(rs3b)),
+                            w));
+    }
+
+    // 2. Functional Unit & Latency Class
+    const auto info_entry = info(ctx_in.op_id);
+    std::string fu_class;
+    std::string latency_note;
+    switch (info_entry.execution_class) {
+        case ExecutionClass::Multiply:
+            fu_class = "Integer Multiplier";
+            latency_note = "Pipelined multi-cycle ALU";
+            break;
+        case ExecutionClass::DivideOrRemainder:
+            fu_class = "Integer Hardware Divider";
+            latency_note = "Iterative non-pipelined";
+            break;
+        case ExecutionClass::FpAlu:
+            fu_class = "Floating-Point ALU / FMA";
+            latency_note = "Pipelined FP unit";
+            break;
+        case ExecutionClass::FpDivideOrSqrt:
+            fu_class = "FP Divide & Square Root Unit";
+            latency_note = "Multi-cycle iterative";
+            break;
+        case ExecutionClass::Default:
+        default:
+            if (is_load(ctx_in.op_id)) {
+                fu_class = "Load / Store Unit (LSU)";
+                latency_note = "1 cyc hit / DCache fill";
+            } else if (is_store(ctx_in.op_id)) {
+                fu_class = "Load / Store Unit (LSU)";
+                latency_note = "Posted write buffer";
+            } else if (is_branch(ctx_in.op_id) || is_jump(ctx_in.op_id)) {
+                fu_class = "Branch & Jump Unit (BJU)";
+                latency_note = "Predicted at IF / resolved at EX";
+            } else {
+                fu_class = "Single-Cycle Integer ALU";
+                latency_note = "1 cycle execution";
+            }
+            break;
+    }
+    rows.push_back(format_to_width(std::format("  {}Unit Class : {}{}\033[0m ({})", kThemeText,
+                                               kThemeSky, fu_class, latency_note),
+                                   w));
+
+    // 3. Side Effects & Pipeline Hazard Profile
+    std::vector<std::string> markers;
+    if (is_serializing(ctx_in.op_id)) markers.push_back("Pipeline Serializing");
+    if (is_atomic(ctx_in.op_id)) markers.push_back("Atomic Memory RMW");
+    if (is_branch(ctx_in.op_id)) markers.push_back("Conditional Branch");
+    if (is_jump(ctx_in.op_id)) markers.push_back("Unconditional Jump");
+    if (has_side_effects(ctx_in.op_id)) markers.push_back("System / CSR Side Effects");
+    if (writes_rd(ctx_in.op_id)) markers.push_back("RAW Hazard Producer");
+
+    if (!markers.empty()) {
+        std::string tags;
+        for (size_t i = 0; i < markers.size(); ++i) {
+            if (i > 0) tags += " | ";
+            tags += markers[i];
+        }
+        rows.push_back(format_to_width(
+            std::format("  {}Hazard Tag : {}{}\033[0m", kThemeText, kThemeCoral, tags), w));
+    }
+
+    return rows;
+}
+
 }  // namespace
 
 auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
@@ -777,7 +903,7 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
         local_ctx.rs2 = decoded.rs2();
         local_ctx.funct3 = decoded.funct3();
         local_ctx.funct7 = decoded.funct7();
-        local_ctx.funct12 = decoded.csr();
+        local_ctx.funct12 = decoded.csr().value();
         local_ctx.funct5 = static_cast<simrv::isa::Funct5Amo>(decoded.funct7() >> 2U);
         switch (simrv::isa::get_instruction_format(local_ctx.opcode)) {
             case InstFormat::I:
@@ -911,6 +1037,11 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
             format_to_width(std::format("  CSR    : {} (addr 0x{:03X})", csr_nm, csr_addr), width));
         explain_rows.push_back(format_to_width("", width));
     }
+
+    explain_rows.push_back(section_line("Microarchitectural & Hazard Profile", width));
+    auto microarch_fields = render_microarchitectural_profile(ctx, width);
+    explain_rows.insert(explain_rows.end(), microarch_fields.begin(), microarch_fields.end());
+    explain_rows.push_back(format_to_width("", width));
 
     explain_rows.push_back(section_line("Instruction Description", width));
     std::string isa_ext = std::string(simrv::util::get_isa_extension_name(ctx.op_id));

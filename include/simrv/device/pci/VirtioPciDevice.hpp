@@ -19,16 +19,17 @@ namespace simrv::device {
  */
 class VirtioPciDevice : public PciDevice {
    public:
-    static constexpr uint16_t kVirtioPciVendorId = 0x1AF4;
-    static constexpr uint16_t kVirtioPciModernDeviceBase = 0x1040;
+    static constexpr PciVendorId kVirtioPciVendorId = 0x1AF4;
+    static constexpr PciDeviceId kVirtioPciModernDeviceBase = 0x1040;
 
-    VirtioPciDevice(uint16_t subsystem_device_id, uint32_t class_code, size_t max_queues = 2);
+    VirtioPciDevice(uint16_t subsystem_device_id, PciClassCode class_code, size_t max_queues = 2);
     ~VirtioPciDevice() override = default;
 
     void reset() override;
 
-    [[nodiscard]] auto bar_read(int bar_idx, Address offset, uint8_t size) -> uint32_t override;
-    void bar_write(int bar_idx, Address offset, uint32_t val, uint8_t size) override;
+    [[nodiscard]] auto bar_read(BarIndex bar_idx, Address offset, uint8_t size)
+        -> uint32_t override;
+    void bar_write(BarIndex bar_idx, Address offset, uint32_t val, uint8_t size) override;
 
     [[nodiscard]] auto device_status() const -> uint8_t { return device_status_; }
     [[nodiscard]] auto isr_status() const -> uint8_t { return isr_status_; }
@@ -47,7 +48,7 @@ class VirtioPciDevice : public PciDevice {
         (void)select;
         (void)val;
     }
-    virtual void on_queue_notify(uint16_t queue_index) = 0;
+    virtual void on_queue_notify(virtio::VirtioQueueIndex queue_index) = 0;
     virtual auto read_device_config(Address offset, uint8_t size) -> uint32_t {
         (void)offset;
         (void)size;

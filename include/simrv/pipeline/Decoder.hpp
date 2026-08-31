@@ -53,7 +53,9 @@ class Decoder {
     }
 
     /// Extract 7-bit function field (funct7)
-    [[nodiscard]] constexpr auto funct7() const -> uint32_t { return (inst_ >> 25) & 0x7F; }
+    [[nodiscard]] constexpr auto funct7() const -> Funct7 {
+        return static_cast<Funct7>((inst_ >> 25) & 0x7F);
+    }
 
     /// Extract third source register specifier (rs3, used for floating-point FMA)
     [[nodiscard]] constexpr auto rs3() const -> RegId {
@@ -98,20 +100,28 @@ class Decoder {
     // =========================================================================
 
     /// Extract 12-bit CSR address field
-    [[nodiscard]] constexpr auto csr() const -> uint32_t { return (inst_ >> 20) & 0xFFF; }
+    [[nodiscard]] constexpr auto csr() const -> CsrNumber {
+        return CsrNumber{static_cast<uint16_t>((inst_ >> 20) & 0xFFF)};
+    }
 
     /// Extract zero-extended 5-bit immediate field stored in rs1 for CSR imm instructions
-    [[nodiscard]] constexpr auto zimm() const -> uint32_t { return std::to_underlying(rs1()); }
+    [[nodiscard]] constexpr auto zimm() const -> CsrImm {
+        return static_cast<CsrImm>(std::to_underlying(rs1()));
+    }
 
     // =========================================================================
     // Compressed Instruction Decoding Base Hooks (C Extension)
     // =========================================================================
 
     /// Extract compressed instruction opcode / funct3 field (bits 15-13)
-    [[nodiscard]] constexpr auto c_op() const -> uint32_t { return (inst_ >> 13) & 0x7; }
+    [[nodiscard]] constexpr auto c_op() const -> uint8_t {
+        return static_cast<uint8_t>((inst_ >> 13) & 0x7);
+    }
 
     /// Extract compressed instruction 4-bit funct field (bits 15-12)
-    [[nodiscard]] constexpr auto c_funct4() const -> uint32_t { return (inst_ >> 12) & 0xF; }
+    [[nodiscard]] constexpr auto c_funct4() const -> uint8_t {
+        return static_cast<uint8_t>((inst_ >> 12) & 0xF);
+    }
 
     /// Standard C register mapping for rs1 / rd (bits 11-7)
     [[nodiscard]] constexpr auto c_rs1_rd() const -> RegId {

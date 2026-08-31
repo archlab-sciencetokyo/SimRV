@@ -7,10 +7,12 @@
 #include <cstdint>
 
 #include "simrv/tui/framework/Layout.hpp"
+#include "simrv/xlen/Types.hpp"
 
 namespace simrv::tui {
 
 using TuiLayout = framework::Layout;
+using HartSelection = HartId;
 
 enum class TuiCategoryGroup : uint8_t { Regs, Memory, Pipeline, Tools };
 

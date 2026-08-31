@@ -77,7 +77,7 @@ struct HartCycleState {
 
 struct CycleInstructionSlot {
     PipelineContext context{};
-    uint32_t remaining_latency = 0;
+    LatencyCycles remaining_latency = 0;
     bool valid = false;
     bool serializing = false;
     bool executed = false;

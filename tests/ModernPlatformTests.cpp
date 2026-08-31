@@ -842,7 +842,7 @@ void test_ca_mt_smp_pause_and_snapshots() {
         }
     });
     const auto all_workers_started = [&] {
-        for (size_t hart = 1; hart < kNumHarts; ++hart) {
+        for (size_t hart = 0; hart < kNumHarts; ++hart) {
             if (machine.tui_execution_snapshot(hart).cycle_count == 0) return false;
         }
         return true;
@@ -851,7 +851,6 @@ void test_ca_mt_smp_pause_and_snapshots() {
     while (!all_workers_started() && std::chrono::steady_clock::now() < startup_deadline) {
         std::this_thread::yield();
     }
-    check(machine.tui_execution_snapshot(0).cycle_count > 0);
     check(all_workers_started());
 
     machine.pause();
@@ -938,6 +937,66 @@ void test_cycle_kernel_golden_forwarding() {
     check(run(simrv::pipeline::PipelineType::FiveStage) == 8);
     check(run(simrv::pipeline::PipelineType::ThreeStage) == 6);
     std::cout << "[PASS] test_cycle_kernel_golden_forwarding\n";
+}
+
+void test_tui_mode_sim_thread_multiple_step_sync() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    ConcreteMachine machine(simrv::core::MachineConfig{
+        .execution = {.appmode = true, .num_harts = 2, .smp_multithreaded = true},
+        .tui = {.enabled = true}});
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+    machine.cpu.machine_ = &machine;
+    machine.cpu.reset();
+
+    for (size_t hart = 1; hart < 2; ++hart) {
+        auto secondary = std::make_unique<simrv::core::CPU>();
+        secondary->machine_ = &machine;
+        secondary->reset();
+        secondary->state().mhartid = hart;
+        secondary->hart_status.store(simrv::core::HartStatus::Started, std::memory_order_relaxed);
+        machine.secondary_harts_.push_back(std::move(secondary));
+    }
+
+    constexpr Instruction loop = 0x0000006f;  // jal x0, 0
+    std::memcpy(ram.data(), &loop, sizeof(loop));
+    for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
+        machine.hart(hart).state().pc = simrv::memory::kDramBaseAddress;
+    }
+
+    machine.start_runner_for_testing();
+    machine.pause();
+
+    // Run machine in background simulation thread
+    std::jthread sim_thread([&machine](const std::stop_token& stop_token) {
+        while (!stop_token.stop_requested() && machine.is_running()) {
+            if (machine.execution_state() == simrv::core::ExecutionState::Stepping) {
+                machine.advance_ca_global_cycle();
+                machine.pause();
+            } else if (machine.execution_state() == simrv::core::ExecutionState::Paused) {
+                std::this_thread::sleep_for(std::chrono::microseconds(50));
+            }
+        }
+    });
+
+    // Step 10 times synchronously
+    for (int step = 0; step < 10; ++step) {
+        Counter before = machine.primary_hart().clint_mmio.mcycle;
+        machine.step_sync(std::chrono::milliseconds(1000));
+        Counter after = machine.primary_hart().clint_mmio.mcycle;
+        check(after == before + 1);
+    }
+
+    machine.request_exit();
+    sim_thread.request_stop();
+    if (sim_thread.joinable()) {
+        sim_thread.join();
+    }
+    machine.stop_runner_for_testing();
+    std::cout << "[PASS] test_tui_mode_sim_thread_multiple_step_sync\n";
 }
 
 void test_cycle_kernel_golden_load_use() {
@@ -2173,6 +2232,7 @@ int main(int argc, char** argv) {
     test_ca_quantum_smp_batching();
     test_ca_mt_smp_pause_and_snapshots();
     test_cycle_kernel_golden_forwarding();
+    test_tui_mode_sim_thread_multiple_step_sync();
     test_cycle_kernel_golden_load_use();
     test_cycle_kernel_golden_fp_dependencies();
     test_cycle_kernel_golden_data_refill();

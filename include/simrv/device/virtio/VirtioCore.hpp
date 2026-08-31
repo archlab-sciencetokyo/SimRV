@@ -18,15 +18,19 @@
 
 namespace simrv::device::virtio {
 
+// VirtIO Types
+using VirtioDeviceId = uint16_t;
+using VirtioQueueIndex = uint16_t;
+
 // VirtIO 1.2 Device IDs
-inline constexpr uint16_t kDevIdNet = 1;
-inline constexpr uint16_t kDevIdBlock = 2;
-inline constexpr uint16_t kDevIdConsole = 3;
-inline constexpr uint16_t kDevIdRng = 4;
-inline constexpr uint16_t kDevIdBalloon = 5;
-inline constexpr uint16_t kDevIdGpu = 16;
-inline constexpr uint16_t kDevIdInput = 18;
-inline constexpr uint16_t kDevIdSound = 25;
+inline constexpr VirtioDeviceId kDevIdNet = 1;
+inline constexpr VirtioDeviceId kDevIdBlock = 2;
+inline constexpr VirtioDeviceId kDevIdConsole = 3;
+inline constexpr VirtioDeviceId kDevIdRng = 4;
+inline constexpr VirtioDeviceId kDevIdBalloon = 5;
+inline constexpr VirtioDeviceId kDevIdGpu = 16;
+inline constexpr VirtioDeviceId kDevIdInput = 18;
+inline constexpr VirtioDeviceId kDevIdSound = 25;
 
 // VirtIO 1.2 Common Feature Bits
 inline constexpr uint64_t kVirtioFVersion1 = (1ULL << 32);
@@ -55,13 +59,13 @@ struct VirtqUsedElem {
 
 // Dynamic Virtqueue state tracker
 struct QueueState {
-    uint16_t num_max{64};
-    uint16_t num{64};
+    VirtioQueueIndex num_max{64};
+    VirtioQueueIndex num{64};
     uint16_t ready{0};
     uint64_t desc_addr{0};
     uint64_t driver_addr{0};
     uint64_t device_addr{0};
-    uint16_t last_avail_idx{0};
+    VirtioQueueIndex last_avail_idx{0};
 };
 
 // -----------------------------------------------------------------------------
