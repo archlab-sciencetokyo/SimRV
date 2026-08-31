@@ -28,6 +28,13 @@
 
 namespace simrv::core {
 
+namespace {
+
+thread_local bool g_primary_runner_active = false;
+thread_local bool g_secondary_runner_active = false;
+
+}  // namespace
+
 /// Bare-metal and OS scheduling stay outside CPU's per-instruction fast path.  The selected
 /// runner is a value in Machine::Runtime, avoiding the old Machine subclass hierarchy.
 class BaremetalRunner {
@@ -244,6 +251,13 @@ void Machine::stop_runner() {
 }
 
 void Machine::wait_for_runner_quiescence() {
+    if (!g_primary_runner_active) {
+        auto active = runner_in_cycle_.load(std::memory_order_acquire);
+        while (active != 0) {
+            runner_in_cycle_.wait(active, std::memory_order_relaxed);
+            active = runner_in_cycle_.load(std::memory_order_acquire);
+        }
+    }
     std::visit([](auto& runner) { runner.wait_for_quiescence(); }, runtime_->runner);
 }
 
@@ -252,15 +266,36 @@ void Machine::prepare_runner_cycle() {
 }
 
 void Machine::execute_runner_cycle() {
+    runner_in_cycle_.fetch_add(1, std::memory_order_acq_rel);
+    const auto state = execution_state();
+    if (state != ExecutionState::Running && state != ExecutionState::Stepping) {
+        runner_in_cycle_.fetch_sub(1, std::memory_order_acq_rel);
+        runner_in_cycle_.notify_all();
+        return;
+    }
+    g_primary_runner_active = true;
     std::visit([this](auto& runner) { runner.execute(*this); }, runtime_->runner);
     if (tui_enabled()) publish_tui_execution_snapshot();
+    g_primary_runner_active = false;
+    runner_in_cycle_.fetch_sub(1, std::memory_order_acq_rel);
+    runner_in_cycle_.notify_all();
 }
 
 auto Machine::execute_runner_fast_batch(uint32_t batch_size) -> bool {
+    runner_in_cycle_.fetch_add(1, std::memory_order_acq_rel);
+    if (execution_state() != ExecutionState::Running) {
+        runner_in_cycle_.fetch_sub(1, std::memory_order_acq_rel);
+        runner_in_cycle_.notify_all();
+        return false;
+    }
+    g_primary_runner_active = true;
     const bool executed = std::visit(
         [this, batch_size](auto& runner) { return runner.execute_fast_batch(*this, batch_size); },
         runtime_->runner);
     if (executed && tui_enabled()) publish_tui_execution_snapshot();
+    g_primary_runner_active = false;
+    runner_in_cycle_.fetch_sub(1, std::memory_order_acq_rel);
+    runner_in_cycle_.notify_all();
     return executed;
 }
 
@@ -406,6 +441,7 @@ void BaremetalRunner::start(Machine& machine) {
                         workers_in_cycle_.notify_all();
                         break;
                     }
+                    g_secondary_runner_active = true;
                     hart.pipeline_context.pending_exception = std::nullopt;
                     hart.pipeline_context.pending_tval = 0;
                     if (machine.runtime_profile.is_cycle_mode()) {
@@ -419,6 +455,7 @@ void BaremetalRunner::start(Machine& machine) {
                          hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started)) {
                         machine.publish_tui_execution_snapshot_for_hart(i + 1);
                     }
+                    g_secondary_runner_active = false;
                     workers_in_cycle_.fetch_sub(1, std::memory_order_acq_rel);
                     workers_in_cycle_.notify_all();
                 }
@@ -428,8 +465,9 @@ void BaremetalRunner::start(Machine& machine) {
 }
 
 void BaremetalRunner::wait_for_quiescence() {
+    const uint32_t caller_activity = g_secondary_runner_active ? 1U : 0U;
     auto active = workers_in_cycle_.load(std::memory_order_acquire);
-    while (active != 0) {
+    while (active > caller_activity) {
         workers_in_cycle_.wait(active, std::memory_order_relaxed);
         active = workers_in_cycle_.load(std::memory_order_acquire);
     }
@@ -579,6 +617,7 @@ void OsRunner::start(Machine& machine) {
                         workers_in_cycle_.notify_all();
                         break;
                     }
+                    g_secondary_runner_active = true;
                     hart.pipeline_context.pending_exception = std::nullopt;
                     hart.pipeline_context.pending_tval = 0;
                     if (machine.runtime_profile.is_cycle_mode()) {
@@ -592,6 +631,7 @@ void OsRunner::start(Machine& machine) {
                          hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started)) {
                         machine.publish_tui_execution_snapshot_for_hart(i + 1);
                     }
+                    g_secondary_runner_active = false;
                     workers_in_cycle_.fetch_sub(1, std::memory_order_acq_rel);
                     workers_in_cycle_.notify_all();
                 }
@@ -601,8 +641,9 @@ void OsRunner::start(Machine& machine) {
 }
 
 void OsRunner::wait_for_quiescence() {
+    const uint32_t caller_activity = g_secondary_runner_active ? 1U : 0U;
     auto active = workers_in_cycle_.load(std::memory_order_acquire);
-    while (active != 0) {
+    while (active > caller_activity) {
         workers_in_cycle_.wait(active, std::memory_order_relaxed);
         active = workers_in_cycle_.load(std::memory_order_acquire);
     }
@@ -939,7 +980,7 @@ void Machine::run() {
 
     while (is_running() &&
            execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
-        if (tui_enabled() && tui && tui->is_tui_paused()) {
+        if (tui_enabled() && tui && tui->is_tui_paused() && !is_stepping()) {
             tui->set_sim_thread_sleeping(true);
             execution_state_.wait(ExecutionState::Paused, std::memory_order_relaxed);
             if (execution_state_.load(std::memory_order_relaxed) == ExecutionState::Paused) {

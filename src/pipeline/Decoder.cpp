@@ -832,12 +832,20 @@ constexpr auto kAmoTable = generate_amo_table();
     return OperationId::UNKNOWN;
 }
 
-constexpr std::array<std::array<OperationId, 2>, 4> kFmaTable = {{
-    {OperationId::FMADD_S, OperationId::FMADD_D},
-    {OperationId::FMSUB_S, OperationId::FMSUB_D},
-    {OperationId::FNMSUB_S, OperationId::FNMSUB_D},
-    {OperationId::FNMADD_S, OperationId::FNMADD_D},
-}};
+consteval auto generate_fma_table() {
+    DecodeTable<OperationId, 4, 2, OperationId::UNKNOWN> table;
+    table.assign(0, 0, OperationId::FMADD_S);
+    table.assign(0, 1, OperationId::FMADD_D);
+    table.assign(1, 0, OperationId::FMSUB_S);
+    table.assign(1, 1, OperationId::FMSUB_D);
+    table.assign(2, 0, OperationId::FNMSUB_S);
+    table.assign(2, 1, OperationId::FNMSUB_D);
+    table.assign(3, 0, OperationId::FNMADD_S);
+    table.assign(3, 1, OperationId::FNMADD_D);
+    return table;
+}
+
+constexpr auto kFmaTable = generate_fma_table();
 
 [[nodiscard]] constexpr auto decode_fma(Opcode op, uint32_t funct7) noexcept -> OperationId {
     const uint32_t fmt = funct7 & 0x03;
@@ -861,7 +869,7 @@ constexpr std::array<std::array<OperationId, 2>, 4> kFmaTable = {{
         default:
             return OperationId::UNKNOWN;
     }
-    return kFmaTable[op_idx][fmt];
+    return kFmaTable.lookup(op_idx, fmt);
 }
 
 consteval auto generate_fp_single_table() {
@@ -1174,8 +1182,6 @@ auto decode_ext_v_special(uint32_t f6, uint32_t funct3, Instruction ir) -> Opera
             }
             break;
         case 0x12:
-            if (funct3 == 0) return OperationId::VSBC_VVM;
-            if (funct3 == 4) return OperationId::VSBC_VXM;
             if (funct3 == 2) {
                 uint32_t rs1_val = (ir >> 15) & 0x1F;
                 if (rs1_val == 7) return OperationId::VSEXT_VF2;
@@ -1193,9 +1199,6 @@ auto decode_ext_v_special(uint32_t f6, uint32_t funct3, Instruction ir) -> Opera
             }
             break;
         case 0x14:
-            if (funct3 == 0) return OperationId::VROR_VV;
-            if (funct3 == 4) return OperationId::VROR_VX;
-            if (funct3 == 3) return OperationId::VROR_VI;
             if (funct3 == 2) {
                 uint32_t rs1_val = (ir >> 15) & 0x1F;
                 if (rs1_val == 1) return OperationId::VMSBF_M;
@@ -1211,166 +1214,19 @@ auto decode_ext_v_special(uint32_t f6, uint32_t funct3, Instruction ir) -> Opera
     return OperationId::UNKNOWN;
 }
 
-auto decode_ext_v_range2(uint32_t f6, uint32_t funct3, Instruction ir) -> OperationId {
-    switch (f6) {
-        case 0x20:
-            if (funct3 == 2) return OperationId::VDIVU_VV;
-            if (funct3 == 6) return OperationId::VDIVU_VX;
-            if (funct3 == 0) return OperationId::VSADDU_VV;
-            if (funct3 == 4) return OperationId::VSADDU_VX;
-            if (funct3 == 3) return OperationId::VSADDU_VI;
-            break;
-        case 0x21:
-            if (funct3 == 2) return OperationId::VDIV_VV;
-            if (funct3 == 6) return OperationId::VDIV_VX;
-            if (funct3 == 0) return OperationId::VSADD_VV;
-            if (funct3 == 4) return OperationId::VSADD_VX;
-            if (funct3 == 3) return OperationId::VSADD_VI;
-            break;
-        case 0x22:
-            if (funct3 == 0) return OperationId::VSSUBU_VV;
-            if (funct3 == 4) return OperationId::VSSUBU_VX;
-            break;
-        case 0x23:
-            if (funct3 == 0) return OperationId::VSSUB_VV;
-            if (funct3 == 4) return OperationId::VSSUB_VX;
-            break;
-        case 0x25:
-            if (funct3 == 0) return OperationId::VSLL_VV;
-            if (funct3 == 4) return OperationId::VSLL_VX;
-            if (funct3 == 3) return OperationId::VSLL_VI;
-            if (funct3 == 2) return OperationId::VMUL_VV;
-            if (funct3 == 6) return OperationId::VMUL_VX;
-            break;
-        case 0x27:
-            if (funct3 == 0) return OperationId::VSMUL_VV;
-            if (funct3 == 4) return OperationId::VSMUL_VX;
-            if (funct3 == 3) {
-                uint32_t simm5 = (ir >> 15) & 0x1F;
-                if (simm5 == 0) return OperationId::VMV1R_V;
-                if (simm5 == 1) return OperationId::VMV2R_V;
-                if (simm5 == 3) return OperationId::VMV4R_V;
-                if (simm5 == 7) return OperationId::VMV8R_V;
-            }
-            break;
-        case 0x28:
-            if (funct3 == 0) return OperationId::VSRL_VV;
-            if (funct3 == 4) return OperationId::VSRL_VX;
-            if (funct3 == 3) return OperationId::VSRL_VI;
-            break;
-        case 0x29:
-            if (funct3 == 0) return OperationId::VSRA_VV;
-            if (funct3 == 4) return OperationId::VSRA_VX;
-            if (funct3 == 3) return OperationId::VSRA_VI;
-            if (funct3 == 2) return OperationId::VMADD_VV;
-            if (funct3 == 6) return OperationId::VMADD_VX;
-            break;
-        case 0x2A:
-            if (funct3 == 0) return OperationId::VSSRL_VV;
-            if (funct3 == 4) return OperationId::VSSRL_VX;
-            if (funct3 == 3) return OperationId::VSSRL_VI;
-            break;
-        case 0x2B:
-            if (funct3 == 2) return OperationId::VNSUB_VV;
-            if (funct3 == 6) return OperationId::VNSUB_VX;
-            if (funct3 == 0) return OperationId::VSSRA_VV;
-            if (funct3 == 4) return OperationId::VSSRA_VX;
-            if (funct3 == 3) return OperationId::VSSRA_VI;
-            break;
-        case 0x2C:
-            if (funct3 == 0) return OperationId::VNSRL_WV;
-            if (funct3 == 4) return OperationId::VNSRL_WX;
-            if (funct3 == 3) return OperationId::VNSRL_WI;
-            if (funct3 == 1) return OperationId::VFMACC_VV;
-            if (funct3 == 5) return OperationId::VFMACC_VF;
-            break;
-        case 0x2D:
-            if (funct3 == 0) return OperationId::VNSRA_WV;
-            if (funct3 == 4) return OperationId::VNSRA_WX;
-            if (funct3 == 3) return OperationId::VNSRA_WI;
-            if (funct3 == 2) return OperationId::VMACC_VV;
-            if (funct3 == 6) return OperationId::VMACC_VX;
-            break;
-        case 0x2E:
-            if (funct3 == 0) return OperationId::VNCLIPU_WV;
-            if (funct3 == 4) return OperationId::VNCLIPU_WX;
-            if (funct3 == 3) return OperationId::VNCLIPU_WI;
-            break;
-        case 0x2F:
-            if (funct3 == 2) return OperationId::VNMSAC_VV;
-            if (funct3 == 6) return OperationId::VNMSAC_VX;
-            if (funct3 == 0) return OperationId::VNCLIP_WV;
-            if (funct3 == 4) return OperationId::VNCLIP_WX;
-            if (funct3 == 3) return OperationId::VNCLIP_WI;
-            break;
-        case 0x30:
-            if (funct3 == 2) return OperationId::VWADDU_VV;
-            if (funct3 == 6) return OperationId::VWADDU_VX;
-            if (funct3 == 0) return OperationId::VWREDSUMU_VS;
-            break;
-        case 0x31:
-            if (funct3 == 2) return OperationId::VWADD_VV;
-            if (funct3 == 6) return OperationId::VWADD_VX;
-            if (funct3 == 0) return OperationId::VWREDSUM_VS;
-            break;
-        case 0x32:
-            if (funct3 == 2) return OperationId::VWSUBU_VV;
-            if (funct3 == 6) return OperationId::VWSUBU_VX;
-            break;
-        case 0x33:
-            if (funct3 == 2) return OperationId::VWSUB_VV;
-            if (funct3 == 6) return OperationId::VWSUB_VX;
-            break;
-        case 0x34:
-            if (funct3 == 2) return OperationId::VWADDU_WV;
-            if (funct3 == 6) return OperationId::VWADDU_WX;
-            break;
-        case 0x35:
-            if (funct3 == 2) return OperationId::VWADD_WV;
-            if (funct3 == 6) return OperationId::VWADD_WX;
-            if (funct3 == 0) return OperationId::VWSLL_VV;
-            if (funct3 == 4) return OperationId::VWSLL_VX;
-            if (funct3 == 3) return OperationId::VWSLL_VI;
-            break;
-        case 0x36:
-            if (funct3 == 2) return OperationId::VWSUBU_WV;
-            if (funct3 == 6) return OperationId::VWSUBU_WX;
-            break;
-        case 0x37:
-            if (funct3 == 2) return OperationId::VWSUB_WV;
-            if (funct3 == 6) return OperationId::VWSUB_WX;
-            break;
-        case 0x38:
-            if (funct3 == 2) return OperationId::VWMULU_VV;
-            if (funct3 == 6) return OperationId::VWMULU_VX;
-            break;
-        case 0x3A:
-            if (funct3 == 2) return OperationId::VWMULSU_VV;
-            if (funct3 == 6) return OperationId::VWMULSU_VX;
-            break;
-        case 0x3B:
-            if (funct3 == 2) return OperationId::VWMUL_VV;
-            if (funct3 == 6) return OperationId::VWMUL_VX;
-            break;
-        case 0x3C:
-            if (funct3 == 2) return OperationId::VWMACCU_VV;
-            if (funct3 == 6) return OperationId::VWMACCU_VX;
-            break;
-        case 0x3D:
-            if (funct3 == 2) return OperationId::VWMACC_VV;
-            if (funct3 == 6) return OperationId::VWMACC_VX;
-            break;
-        case 0x3E:
-            if (funct3 == 6) return OperationId::VWMACCUS_VX;
-            break;
-        case 0x3F:
-            if (funct3 == 2) return OperationId::VWMACCSU_VV;
-            if (funct3 == 6) return OperationId::VWMACCSU_VX;
-            break;
+auto decode_vector_whole_register_move(Instruction ir) -> OperationId {
+    switch ((ir >> 15) & 0x1F) {
+        case 0:
+            return OperationId::VMV1R_V;
+        case 1:
+            return OperationId::VMV2R_V;
+        case 3:
+            return OperationId::VMV4R_V;
+        case 7:
+            return OperationId::VMV8R_V;
         default:
-            break;
+            return OperationId::UNKNOWN;
     }
-    return OperationId::UNKNOWN;
 }
 
 }  // namespace
@@ -1398,7 +1254,7 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operation
         return decode_ext_v_special(f6, funct3, ir);
     }
     if (f6 == 0x27 && funct3 == 3) {
-        return decode_ext_v_range2(f6, funct3, ir);
+        return decode_vector_whole_register_move(ir);
     }
 
     const auto mask_dependent = (vm ? kVectorUnmaskedTable : kVectorMaskedTable).lookup(f6, funct3);

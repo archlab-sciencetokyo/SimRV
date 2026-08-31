@@ -26,7 +26,7 @@ inline constexpr uint16_t kDevIdRng = 4;
 inline constexpr uint16_t kDevIdBalloon = 5;
 inline constexpr uint16_t kDevIdGpu = 16;
 inline constexpr uint16_t kDevIdInput = 18;
-inline constexpr uint16_t kDevIdSound = 24;
+inline constexpr uint16_t kDevIdSound = 25;
 
 // VirtIO 1.2 Common Feature Bits
 inline constexpr uint64_t kVirtioFVersion1 = (1ULL << 32);

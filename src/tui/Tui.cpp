@@ -2011,10 +2011,9 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
             machine_.request_reboot();
             unpause_loop();
         } else {
+            if (!is_paused()) pause_loop();
             update_cache();
-            machine_.prepare_runner_cycle();
-            machine_.primary_hart().run_cycle(machine_);
-            machine_.finalize_runner_cycle();
+            machine_.step();
             render(true);
         }
     }

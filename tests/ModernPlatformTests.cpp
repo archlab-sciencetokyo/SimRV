@@ -712,6 +712,9 @@ void test_global_cycle_smp_pipeline_ordering() {
 }
 
 void test_global_cycle_timer_phase_ordering() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
     simrv::core::Machine machine(
         simrv::core::MachineConfig{.execution = {.appmode = false, .smp_quantum = 1}});
     std::vector<Byte> ram(1024 * 1024, Byte{0});
@@ -737,14 +740,16 @@ void test_global_cycle_timer_phase_ordering() {
     machine.cpu.clint_mmio.mtimecmp = 5;
     machine.cpu.clint_mmio.hart_mtimecmp.at(1) = 5;
 
+    const auto hart0_cycles = machine.hart(0).clint_mmio.mcycle;
+    const auto hart1_cycles = machine.hart(1).clint_mmio.mcycle;
     machine.execute_cycle_for_testing();
 
-    assert(machine.hart(0).clint_mmio.mcycle == 1);
-    assert(machine.hart(1).clint_mmio.mcycle == 1);
-    assert(machine.hart(0).clint_mmio.mtime == 5);
-    assert(machine.hart(1).clint_mmio.mtime == 5);
-    assert((machine.hart(0).state().mip & enum_mask(simrv::core::MipBit::Mtip)) != 0);
-    assert((machine.hart(1).state().mip & enum_mask(simrv::core::MipBit::Mtip)) != 0);
+    check(machine.hart(0).clint_mmio.mcycle == hart0_cycles + 1);
+    check(machine.hart(1).clint_mmio.mcycle == hart1_cycles + 1);
+    check(machine.hart(0).clint_mmio.mtime == 5);
+    check(machine.hart(1).clint_mmio.mtime == 5);
+    check((machine.hart(0).state().mip & enum_mask(simrv::core::MipBit::Mtip)) != 0);
+    check((machine.hart(1).state().mip & enum_mask(simrv::core::MipBit::Mtip)) != 0);
     std::cout << "[PASS] test_global_cycle_timer_phase_ordering\n";
 }
 
@@ -831,20 +836,27 @@ void test_ca_mt_smp_pause_and_snapshots() {
     }
 
     machine.start_runner_for_testing();
+    std::jthread primary_runner([&machine](const std::stop_token& stop_token) {
+        while (!stop_token.stop_requested()) {
+            machine.execute_cycle_for_testing();
+        }
+    });
     const auto all_workers_started = [&] {
         for (size_t hart = 1; hart < kNumHarts; ++hart) {
             if (machine.tui_execution_snapshot(hart).cycle_count == 0) return false;
         }
         return true;
     };
-    for (uint32_t cycle = 0; cycle < 2048 && !all_workers_started(); ++cycle) {
-        machine.execute_cycle_for_testing();
+    const auto startup_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!all_workers_started() && std::chrono::steady_clock::now() < startup_deadline) {
         std::this_thread::yield();
     }
     check(machine.tui_execution_snapshot(0).cycle_count > 0);
     check(all_workers_started());
 
     machine.pause();
+    primary_runner.request_stop();
+    primary_runner.join();
     std::array<Counter, kNumHarts> paused_cycles{};
     for (size_t hart = 0; hart < kNumHarts; ++hart) {
         paused_cycles[hart] = machine.hart(hart).clint_mmio.mcycle;
@@ -853,21 +865,33 @@ void test_ca_mt_smp_pause_and_snapshots() {
         check(snapshot.cycle_count == paused_cycles[hart]);
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    for (size_t hart = 1; hart < kNumHarts; ++hart) {
+    for (size_t hart = 0; hart < kNumHarts; ++hart) {
         check(machine.hart(hart).clint_mmio.mcycle == paused_cycles[hart]);
     }
 
     machine.stop_runner_for_testing();
     machine.resume();
     machine.start_runner_for_testing();
-    for (uint32_t cycle = 0;
-         cycle < 4096 && machine.tui_execution_snapshot(1).cycle_count == paused_cycles[1];
-         ++cycle) {
+    const auto resume_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (machine.tui_execution_snapshot(1).cycle_count == paused_cycles[1] &&
+           std::chrono::steady_clock::now() < resume_deadline) {
         machine.execute_cycle_for_testing();
         std::this_thread::yield();
     }
     check(machine.tui_execution_snapshot(1).cycle_count > paused_cycles[1]);
     machine.stop_runner_for_testing();
+
+    machine.pause();
+    std::array<Counter, kNumHarts> before_step{};
+    for (size_t hart = 0; hart < kNumHarts; ++hart) {
+        before_step[hart] = machine.hart(hart).clint_mmio.mcycle;
+    }
+    machine.step();
+    machine.execute_cycle_for_testing();
+    for (size_t hart = 0; hart < kNumHarts; ++hart) {
+        check(machine.hart(hart).clint_mmio.mcycle == before_step[hart] + 1);
+    }
+    machine.pause();
     std::cout << "[PASS] test_ca_mt_smp_pause_and_snapshots\n";
 }
 

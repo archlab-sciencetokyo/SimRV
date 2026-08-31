@@ -13,7 +13,7 @@ constexpr uint8_t kWeaklyNotTaken = 1;
 constexpr uint8_t kWeaklyTaken = 2;
 
 [[nodiscard]] constexpr auto saturate_up(uint8_t val) noexcept -> uint8_t {
-    return (val < 3) ? static_cast<uint8_t>(val + 1) : 3;
+    return (val < kSaturatingMax) ? static_cast<uint8_t>(val + 1) : kSaturatingMax;
 }
 
 [[nodiscard]] constexpr auto saturate_down(uint8_t val) noexcept -> uint8_t {

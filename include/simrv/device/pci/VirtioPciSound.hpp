@@ -11,7 +11,7 @@ namespace simrv::device {
 
 /**
  * @class VirtioPciSound
- * @brief VirtIO-PCI Sound Endpoint (Device ID 0x1059 / Subsystem ID 24).
+ * @brief VirtIO-PCI Sound Endpoint (Device ID 0x1059 / Subsystem ID 25).
  */
 class VirtioPciSound : public VirtioPciDevice {
    public:

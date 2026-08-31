@@ -487,6 +487,7 @@ class Machine final {
 
     std::atomic<bool> is_running_ = true;  // Main-loop run flag.
     std::atomic<ExecutionState> execution_state_{ExecutionState::Running};
+    std::atomic<uint32_t> runner_in_cycle_{0};
     struct TuiSnapshotSlot {
         std::atomic<uint64_t> generation{0};
         std::atomic<Register> pc{0};

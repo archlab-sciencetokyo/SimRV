@@ -467,9 +467,8 @@ void test_fp_decode_legality() {
     const auto encode_op_fp = [](unsigned funct7, unsigned rm, unsigned rs2) {
         return (funct7 << 25U) | (rs2 << 20U) | (1U << 15U) | (rm << 12U) | (2U << 7U) | kOpFp;
     };
-    const auto encode_fma = [](unsigned fmt) {
-        constexpr Instruction kFmadd = 0x43U;
-        return (3U << 27U) | (fmt << 25U) | (2U << 20U) | (1U << 15U) | (2U << 7U) | kFmadd;
+    const auto encode_fma = [](unsigned opcode, unsigned fmt) {
+        return (3U << 27U) | (fmt << 25U) | (2U << 20U) | (1U << 15U) | (2U << 7U) | opcode;
     };
 
     expect(simrv::pipeline::decoder(encode_op_fp(0x2CU, 0, 0)) == simrv::isa::OperationId::FSQRT_S,
@@ -478,8 +477,23 @@ void test_fp_decode_legality() {
            "FSQRT.S with nonzero rs2 is reserved");
     expect(simrv::pipeline::decoder(encode_op_fp(0x70U, 1, 1)) == simrv::isa::OperationId::UNKNOWN,
            "FCLASS.S with nonzero rs2 is reserved");
-    expect(simrv::pipeline::decoder(encode_fma(2)) == simrv::isa::OperationId::UNKNOWN,
-           "reserved fused-operation formats do not alias single precision");
+    constexpr std::array<unsigned, 4> kFmaOpcodes = {0x43U, 0x47U, 0x4BU, 0x4FU};
+    constexpr std::array<std::array<simrv::isa::OperationId, 2>, 4> kFmaOperations = {{
+        {simrv::isa::OperationId::FMADD_S, simrv::isa::OperationId::FMADD_D},
+        {simrv::isa::OperationId::FMSUB_S, simrv::isa::OperationId::FMSUB_D},
+        {simrv::isa::OperationId::FNMSUB_S, simrv::isa::OperationId::FNMSUB_D},
+        {simrv::isa::OperationId::FNMADD_S, simrv::isa::OperationId::FNMADD_D},
+    }};
+    for (size_t operation = 0; operation < kFmaOpcodes.size(); ++operation) {
+        for (unsigned format = 0; format < 2; ++format) {
+            expect(simrv::pipeline::decoder(encode_fma(kFmaOpcodes[operation], format)) ==
+                       kFmaOperations[operation][format],
+                   "checked fused-operation table covers every legal opcode and format");
+        }
+    }
+    expect(
+        simrv::pipeline::decoder(encode_fma(kFmaOpcodes[0], 2)) == simrv::isa::OperationId::UNKNOWN,
+        "reserved fused-operation formats do not alias single precision");
 
     expect(simrv::pipeline::decoder(encode_op_fp(0x21U, 0, 0)) == simrv::isa::OperationId::FCVT_D_S,
            "FCVT.D.S accepts its specified rm=000 encoding");
@@ -518,9 +532,16 @@ void test_vector_decode_tables() {
     expect(simrv::pipeline::decoder(encode_op_v(0x10, 2, true, 31)) ==
                simrv::isa::OperationId::UNKNOWN,
            "reserved secondary vector encoding remains unknown");
-    expect(
-        simrv::pipeline::decoder(encode_op_v(0x27, 3, true, 7)) == simrv::isa::OperationId::VMV8R_V,
-        "whole-register vector move retains its simm5 decoding");
+    constexpr std::array<simrv::isa::OperationId, 8> kWholeRegisterMoves = {
+        simrv::isa::OperationId::VMV1R_V, simrv::isa::OperationId::VMV2R_V,
+        simrv::isa::OperationId::UNKNOWN, simrv::isa::OperationId::VMV4R_V,
+        simrv::isa::OperationId::UNKNOWN, simrv::isa::OperationId::UNKNOWN,
+        simrv::isa::OperationId::UNKNOWN, simrv::isa::OperationId::VMV8R_V};
+    for (unsigned simm5 = 0; simm5 < kWholeRegisterMoves.size(); ++simm5) {
+        expect(simrv::pipeline::decoder(encode_op_v(0x27, 3, true, simm5)) ==
+                   kWholeRegisterMoves[simm5],
+               "whole-register vector move accepts only legal register group sizes");
+    }
     expect(simrv::pipeline::decoder(encode_op_v(0x08, 0, true)) == simrv::isa::OperationId::UNKNOWN,
            "unassigned vector table entries decode as unknown");
 }
