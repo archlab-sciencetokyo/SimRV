@@ -2,7 +2,7 @@
 
 Branch: `release/3.0.0-alpha.1`  
 PR: https://github.com/archlab-sciencetokyo/SimRV/pull/26 (target: `dev`)  
-Latest functional commit: `5478897 fix(tui): serialize live hart snapshot publication`
+Latest functional commit: `0ddb6a1 refactor(runtime): share SMP worker quiescence wait`
 
 Do not create a tag or GitHub release. Keep the PR as the delivery vehicle until all
 required qualification checks are green.
