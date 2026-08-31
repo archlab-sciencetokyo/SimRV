@@ -27,99 +27,47 @@ constexpr int kLogHexWidth = static_cast<int>(kXLenHexDigits);
 constexpr Address kClintMtimecmpOffset = 0x4000;
 constexpr Address kClintMtimeOffset = 0xbff8;
 
+namespace {
+
+[[nodiscard]] inline auto find_highest_pending_plic_source(const PlicMmio& plic,
+                                                           std::size_t ctx) noexcept -> int {
+    if (ctx >= PlicMmio::kMaxPlicContexts) return 0;
+    Word max_prio = 0;
+    int claim_id = 0;
+    for (int i : std::views::iota(1, 32)) {
+        const auto idx = static_cast<std::size_t>(i);
+        if ((plic.plic_pending[0] & (1u << i)) != 0 &&
+            (plic.plic_enables[ctx][0] & (1u << i)) != 0) {
+            if (plic.plic_priorities[idx] > max_prio) {
+                max_prio = plic.plic_priorities[idx];
+                claim_id = i;
+            }
+        }
+    }
+    return (max_prio > plic.plic_threshold[ctx]) ? claim_id : 0;
+}
+
+}  // namespace
+
 void InterruptController::updateMip(PlicMmio& plic, ArchState& state) {
+    auto apply_state = [&](ArchState& target_state, size_t m_ctx, size_t s_ctx) {
+        if (find_highest_pending_plic_source(plic, m_ctx) != 0)
+            target_state.mip |= enum_mask(MipBit::Meip);
+        else
+            target_state.mip &= ~enum_mask(MipBit::Meip);
+
+        target_state.seip_external = (find_highest_pending_plic_source(plic, s_ctx) != 0);
+        target_state.refresh_supervisor_pending();
+    };
+
     if (plic.cpu_.machine_ != nullptr) {
         const size_t n_harts = plic.cpu_.machine_->num_harts();
         for (size_t h = 0; h < n_harts; ++h) {
-            auto& target_cpu = plic.cpu_.machine_->hart(h);
-            auto& target_state = target_cpu.state();
-
-            const size_t m_ctx = 2 * h;
-            const size_t s_ctx = 2 * h + 1;
-
-            bool m_ext = false;
-            bool s_ext = false;
-
-            if (m_ctx < PlicMmio::kMaxPlicContexts) {
-                Word m_max_prio = 0;
-                for (int i : std::views::iota(1, 32)) {
-                    const auto idx = static_cast<std::size_t>(i);
-                    if ((plic.plic_pending[0] & (1u << i)) != 0 &&
-                        (plic.plic_enables[m_ctx][0] & (1u << i)) != 0) {
-                        if (plic.plic_priorities[idx] > m_max_prio) {
-                            m_max_prio = plic.plic_priorities[idx];
-                        }
-                    }
-                }
-                if (m_max_prio > plic.plic_threshold[m_ctx]) {
-                    m_ext = true;
-                }
-            }
-
-            if (s_ctx < PlicMmio::kMaxPlicContexts) {
-                Word s_max_prio = 0;
-                for (int i : std::views::iota(1, 32)) {
-                    const auto idx = static_cast<std::size_t>(i);
-                    if ((plic.plic_pending[0] & (1u << i)) != 0 &&
-                        (plic.plic_enables[s_ctx][0] & (1u << i)) != 0) {
-                        if (plic.plic_priorities[idx] > s_max_prio) {
-                            s_max_prio = plic.plic_priorities[idx];
-                        }
-                    }
-                }
-                if (s_max_prio > plic.plic_threshold[s_ctx]) {
-                    s_ext = true;
-                }
-            }
-
-            if (m_ext)
-                target_state.mip |= enum_mask(MipBit::Meip);
-            else
-                target_state.mip &= ~enum_mask(MipBit::Meip);
-
-            target_state.seip_external = s_ext;
-            target_state.refresh_supervisor_pending();
+            apply_state(plic.cpu_.machine_->hart(h).state(), 2 * h, 2 * h + 1);
         }
         return;
     }
-
-    // Evaluate Context 0 (M-mode)
-    bool m_ext = false;
-    Word m_max_prio = 0;
-    for (int i : std::views::iota(1, 32)) {
-        const auto idx = static_cast<std::size_t>(i);
-        if ((plic.plic_pending[0] & (1u << i)) != 0 && (plic.plic_enables[0][0] & (1u << i)) != 0) {
-            if (plic.plic_priorities[idx] > m_max_prio) {
-                m_max_prio = plic.plic_priorities[idx];
-            }
-        }
-    }
-    if (m_max_prio > plic.plic_threshold[0]) {
-        m_ext = true;
-    }
-
-    // Evaluate Context 1 (S-mode)
-    bool s_ext = false;
-    Word s_max_prio = 0;
-    for (int i : std::views::iota(1, 32)) {
-        const auto idx = static_cast<std::size_t>(i);
-        if ((plic.plic_pending[0] & (1u << i)) != 0 && (plic.plic_enables[1][0] & (1u << i)) != 0) {
-            if (plic.plic_priorities[idx] > s_max_prio) {
-                s_max_prio = plic.plic_priorities[idx];
-            }
-        }
-    }
-    if (s_max_prio > plic.plic_threshold[1]) {
-        s_ext = true;
-    }
-
-    if (m_ext)
-        state.mip |= enum_mask(MipBit::Meip);
-    else
-        state.mip &= ~enum_mask(MipBit::Meip);
-
-    state.seip_external = s_ext;
-    state.refresh_supervisor_pending();
+    apply_state(state, 0, 1);
 }
 
 void InterruptController::setIrq(PlicMmio& plic, IrqNumber irq_num, int state_val) {
@@ -180,24 +128,8 @@ auto PlicMmio::mmio_read(Address offset) -> Word {
             return plic_threshold[ctx_idx];
         }
         if (offset == ctx_base + 4) {
-            // Claim: evaluate highest priority pending & enabled for this context
-            Word max_prio = 0;
-            int claim_id = 0;
-            for (int i : std::views::iota(1, 32)) {
-                const auto idx = static_cast<std::size_t>(i);
-                if ((plic_pending[0] & (1u << i)) != 0 &&
-                    (plic_enables[ctx_idx][0] & (1u << i)) != 0) {
-                    if (plic_priorities[idx] > max_prio) {
-                        max_prio = plic_priorities[idx];
-                        claim_id = i;
-                    }
-                }
-            }
-            if (max_prio <= plic_threshold[ctx_idx]) {
-                claim_id = 0;
-            }
+            const int claim_id = find_highest_pending_plic_source(*this, ctx_idx);
             if (claim_id > 0) {
-                // Clear the pending bit on claim
                 plic_pending[0] &= ~(1u << claim_id);
                 plic_claim[ctx_idx] = static_cast<InterruptSourceId>(claim_id);
                 cpu_.plic_update_mip();
@@ -520,6 +452,17 @@ auto trap_cause_name(TrapCause cause) -> std::string {
         }
     }
 }
+
+[[nodiscard]] constexpr auto calculate_trap_target(CSRValue tvec, TrapCause cause) noexcept
+    -> Address {
+    const Address tvec_base = tvec & ~Address{3};
+    const Word tvec_mode = tvec & 3;
+    if (tvec_mode == 1 && trap_is_interrupt(cause)) {
+        return tvec_base + 4 * trap_exception_code(cause);
+    }
+    return tvec_base;
+}
+
 }  // namespace
 
 void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
@@ -579,14 +522,7 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
         state.mstatus &= ~enum_mask(MstatusBit::Sie);
         state.priv = kPrivSupervisor;
         state.update_xlen();
-
-        const Address tvec_base = state.stvec & ~Address{3};
-        const Word tvec_mode = state.stvec & 3;
-        if (tvec_mode == 1 && trap_is_interrupt(cause)) {
-            state.pc = tvec_base + 4 * trap_exception_code(cause);
-        } else {
-            state.pc = tvec_base;
-        }
+        state.pc = calculate_trap_target(state.stvec, cause);
     } else {
         state.mcause = cause;
         state.mepc = trap_pc;
@@ -598,14 +534,7 @@ void TrapController::raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
         state.mstatus &= ~enum_mask(MstatusBit::Mie);
         state.priv = kPrivMachine;
         state.update_xlen();
-
-        const Address tvec_base = state.mtvec & ~Address{3};
-        const Word tvec_mode = state.mtvec & 3;
-        if (tvec_mode == 1 && trap_is_interrupt(cause)) {
-            state.pc = tvec_base + 4 * trap_exception_code(cause);
-        } else {
-            state.pc = tvec_base;
-        }
+        state.pc = calculate_trap_target(state.mtvec, cause);
     }
     if (state.regs.xlen == 32) {
         state.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state.pc)));

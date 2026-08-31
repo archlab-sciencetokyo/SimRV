@@ -32,6 +32,15 @@ SIMRV_ALWAYS_INLINE auto is_tohost_addr(const Machine& machine, Address addr) ->
            (addr - 0x40008000ULL < 8);
 }
 
+template <typename T, typename Op>
+auto atomic_update(std::atomic_ref<T>& atomic_mem, Op&& op) -> T {
+    T old_val = atomic_mem.load(std::memory_order_relaxed);
+    while (!atomic_mem.compare_exchange_weak(old_val, op(old_val), std::memory_order_acq_rel,
+                                             std::memory_order_relaxed)) {
+    }
+    return old_val;
+}
+
 template <typename T>
 auto execute_dram_amo(T* mem_ptr, Word rs2_val, Funct5Amo funct5) -> T {
     std::atomic_ref<T> atomic_mem(*mem_ptr);
@@ -49,48 +58,22 @@ auto execute_dram_amo(T* mem_ptr, Word rs2_val, Funct5Amo funct5) -> T {
             return atomic_mem.fetch_or(op_val, std::memory_order_acq_rel);
         case Funct5Amo::Min: {
             using SignedT = std::make_signed_t<T>;
-            T old_val = atomic_mem.load(std::memory_order_relaxed);
-            while (true) {
-                T new_val = static_cast<T>(
-                    std::min<SignedT>(static_cast<SignedT>(old_val), static_cast<SignedT>(op_val)));
-                if (atomic_mem.compare_exchange_weak(old_val, new_val, std::memory_order_acq_rel,
-                                                     std::memory_order_relaxed)) {
-                    return old_val;
-                }
-            }
+            return atomic_update(atomic_mem, [op_val](T old) {
+                return static_cast<T>(
+                    std::min<SignedT>(static_cast<SignedT>(old), static_cast<SignedT>(op_val)));
+            });
         }
         case Funct5Amo::Max: {
             using SignedT = std::make_signed_t<T>;
-            T old_val = atomic_mem.load(std::memory_order_relaxed);
-            while (true) {
-                T new_val = static_cast<T>(
-                    std::max<SignedT>(static_cast<SignedT>(old_val), static_cast<SignedT>(op_val)));
-                if (atomic_mem.compare_exchange_weak(old_val, new_val, std::memory_order_acq_rel,
-                                                     std::memory_order_relaxed)) {
-                    return old_val;
-                }
-            }
+            return atomic_update(atomic_mem, [op_val](T old) {
+                return static_cast<T>(
+                    std::max<SignedT>(static_cast<SignedT>(old), static_cast<SignedT>(op_val)));
+            });
         }
-        case Funct5Amo::Minu: {
-            T old_val = atomic_mem.load(std::memory_order_relaxed);
-            while (true) {
-                T new_val = std::min<T>(old_val, op_val);
-                if (atomic_mem.compare_exchange_weak(old_val, new_val, std::memory_order_acq_rel,
-                                                     std::memory_order_relaxed)) {
-                    return old_val;
-                }
-            }
-        }
-        case Funct5Amo::Maxu: {
-            T old_val = atomic_mem.load(std::memory_order_relaxed);
-            while (true) {
-                T new_val = std::max<T>(old_val, op_val);
-                if (atomic_mem.compare_exchange_weak(old_val, new_val, std::memory_order_acq_rel,
-                                                     std::memory_order_relaxed)) {
-                    return old_val;
-                }
-            }
-        }
+        case Funct5Amo::Minu:
+            return atomic_update(atomic_mem, [op_val](T old) { return std::min<T>(old, op_val); });
+        case Funct5Amo::Maxu:
+            return atomic_update(atomic_mem, [op_val](T old) { return std::max<T>(old, op_val); });
         default:
             return atomic_mem.load(std::memory_order_relaxed);
     }
