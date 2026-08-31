@@ -86,6 +86,7 @@ struct CycleInstructionSlot {
     bool dcache_miss = false;
     bool tlb_miss = false;
     bool writes_int = false;
+    bool writes_fp = false;
     bool wb_valid = false;
     RegId wb_dest = static_cast<RegId>(0);
     Register wb_val = 0;

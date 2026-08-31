@@ -165,7 +165,7 @@ SimRV launches in interactive visual TUI mode by default:
 # Headless / CLI-only mode (fast execution)
 ./build/rv64-release/SimRV -b -m program.bin --mode fast --cli
 
-# Cycle-accurate 4-stage pipeline execution
+# Cycle-accurate five-stage pipeline execution
 ./build/rv64-release/SimRV -b -m program.bin --mode cycle-accurate --cli
 ```
 

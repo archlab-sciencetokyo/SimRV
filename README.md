@@ -75,7 +75,7 @@ Select execution mode across fast, detailed, or cycle-accurate microarchitecture
 # Fast functional execution
 ./build/rv64-release/SimRV -b -m img/hello.bin --mode fast --cli
 
-# Cycle-accurate 4-stage pipeline execution
+# Cycle-accurate five-stage pipeline execution
 ./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --cli
 
 # Choose the three-stage educational pipeline.
@@ -134,7 +134,7 @@ RV32GCBV and RV64GCBV are implementation-target names, not complete conformance 
 
 See [RISC-V compliance scope](docs/RISCV_COMPLIANCE.md) for the precise architectural boundary,
 the [TileLink-C profile](docs/TILELINK_C_PROFILE.md) for protocol/coherence scope, and the
-[2.1 migration guide](docs/MIGRATION.md) for intentional host-interface breakage.
+[3.0 migration guide](docs/MIGRATION.md) for intentional host-interface breakage.
 SBI/OpenSBI distinction, and the evidence required before treating a feature as verified. The
 profile names are implementation targets and do not by themselves claim RISC-V certification.
 The cross-subsystem qualification status is summarized in the

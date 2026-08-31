@@ -245,7 +245,8 @@ constexpr auto instruction_enabled_by_misa(CSRValue misa, Instruction ir, bool c
  * @return True if the destination register is floating-point, false otherwise.
  */
 constexpr auto is_destination_fp(Opcode opcode, OperationId op_id) -> bool {
-    if (opcode == Opcode::LoadFp) {
+    if (opcode == Opcode::LoadFp || opcode == Opcode::MAdd || opcode == Opcode::MSub ||
+        opcode == Opcode::NMAdd || opcode == Opcode::NMSub) {
         return true;
     }
     if (opcode != Opcode::OpFp) {
@@ -283,9 +284,6 @@ constexpr auto is_destination_fp(Opcode opcode, OperationId op_id) -> bool {
  * @return True if rs1 is a floating-point register, false otherwise.
  */
 constexpr auto is_rs1_fp(Opcode opcode, OperationId op_id) -> bool {
-    if (opcode == Opcode::StoreFp) {
-        return true;
-    }
     if (opcode != Opcode::OpFp && opcode != Opcode::MAdd && opcode != Opcode::MSub &&
         opcode != Opcode::NMSub && opcode != Opcode::NMAdd) {
         return false;

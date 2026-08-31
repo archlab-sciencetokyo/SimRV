@@ -34,16 +34,40 @@ using pipeline::CycleInstructionSlot;
     }
 }
 
-[[nodiscard]] auto has_raw_dependency(const CycleInstructionSlot& consumer,
-                                      const CycleInstructionSlot& producer) -> bool {
+[[nodiscard]] auto integer_result_from_memory(const pipeline::PipelineContext& context) -> bool {
+    if (context.opcode == isa::Opcode::Load) return true;
+    return context.opcode == isa::Opcode::Amo &&
+           static_cast<isa::Funct5Amo>(context.funct5) != isa::Funct5Amo::Sc;
+}
+
+[[nodiscard]] auto has_integer_raw_dependency(const CycleInstructionSlot& consumer,
+                                              const CycleInstructionSlot& producer) -> bool {
     if (!consumer.valid || !producer.valid || !producer.writes_int ||
         producer.wb_dest == RegId::Zero)
         return false;
     const auto destination = producer.wb_dest;
     return (pipeline::operation::reads_rs1(consumer.context.opcode) &&
+            !isa::is_rs1_fp(consumer.context.opcode, consumer.context.op_id) &&
             consumer.context.rs1 == destination) ||
            (pipeline::operation::reads_rs2(consumer.context.opcode) &&
+            !isa::is_rs2_fp(consumer.context.opcode, consumer.context.op_id) &&
             consumer.context.rs2 == destination);
+}
+
+[[nodiscard]] auto has_floating_raw_dependency(const CycleInstructionSlot& consumer,
+                                               const CycleInstructionSlot& producer) -> bool {
+    if (!consumer.valid || !producer.valid || !producer.writes_fp) return false;
+    const auto destination = producer.wb_dest;
+    const bool reads_rs1 = pipeline::operation::reads_rs1(consumer.context.opcode) &&
+                           isa::is_rs1_fp(consumer.context.opcode, consumer.context.op_id) &&
+                           consumer.context.rs1 == destination;
+    const bool reads_rs2 = pipeline::operation::reads_rs2(consumer.context.opcode) &&
+                           isa::is_rs2_fp(consumer.context.opcode, consumer.context.op_id) &&
+                           consumer.context.rs2 == destination;
+    const RegId rs3 = static_cast<RegId>((consumer.context.ir >> 27U) & 0x1FU);
+    const bool reads_rs3 =
+        pipeline::operation::reads_rs3(consumer.context.opcode) && rs3 == destination;
+    return reads_rs1 || reads_rs2 || reads_rs3;
 }
 
 [[nodiscard]] auto forwarded_integer(const CycleInstructionSlot& producer, RegId source)
@@ -112,7 +136,11 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     };
     auto can_resolve_dependency = [&](const CycleInstructionSlot& consumer,
                                       const CycleInstructionSlot& producer) {
-        if (!has_raw_dependency(consumer, producer)) return true;
+        // FP execute helpers currently consume the architectural FP register file directly.
+        // Keep FP dependencies interlocked until retirement rather than forwarding a value into
+        // an interface that cannot consume it. Integer forwarding remains unchanged.
+        if (has_floating_raw_dependency(consumer, producer)) return false;
+        if (!has_integer_raw_dependency(consumer, producer)) return true;
         if (!pipeline_sim.config.enable_forwarding) return false;
         const auto destination = producer.wb_dest;
         const bool source1_ready = !pipeline::operation::reads_rs1(consumer.context.opcode) ||
@@ -155,7 +183,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     if (active_context().pending_exception.has_value()) return false;
                     if (!execute_stage(machine)) return false;
                     writeback->executed = true;
-                    if (writeback->context.opcode == isa::Opcode::Load) {
+                    if (integer_result_from_memory(writeback->context)) {
                         writeback->wb_valid = false;
                     } else if (writeback->writes_int && writeback->wb_dest != RegId::Zero) {
                         writeback->wb_val = (writeback->context.opcode == isa::Opcode::System &&
@@ -173,7 +201,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     if (!memory_stage(machine)) return false;
                     if (ca_state.waiting_for_interconnect) return false;
                     writeback->memory_complete = true;
-                    if (writeback->context.opcode == isa::Opcode::Load) {
+                    if (integer_result_from_memory(writeback->context)) {
                         writeback->wb_val = writeback->context.mem_rdata;
                         writeback->wb_valid =
                             (writeback->writes_int && writeback->wb_dest != RegId::Zero);
@@ -225,7 +253,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 }
                 if (ca_state.waiting_for_interconnect) return;
                 memory->memory_complete = true;
-                if (memory->context.opcode == isa::Opcode::Load) {
+                if (integer_result_from_memory(memory->context)) {
                     memory->wb_val = memory->context.mem_rdata;
                     memory->wb_valid = (memory->writes_int && memory->wb_dest != RegId::Zero);
                 }
@@ -252,7 +280,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 (void)run_with_context(*execute, [&] { return execute_stage(machine); });
                 state_.pc = saved_pc;
                 execute->executed = true;
-                if (execute->context.opcode == isa::Opcode::Load) {
+                if (integer_result_from_memory(execute->context)) {
                     execute->wb_valid = false;
                 } else if (execute->writes_int && execute->wb_dest != RegId::Zero) {
                     execute->wb_val = (execute->context.opcode == isa::Opcode::System &&
@@ -317,7 +345,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                         return execute_stage(machine);
                     });
                     decode->executed = true;
-                    if (decode->context.opcode == isa::Opcode::Load) {
+                    if (integer_result_from_memory(decode->context)) {
                         decode->wb_valid = false;
                     } else if (decode->writes_int && decode->wb_dest != RegId::Zero) {
                         decode->wb_val = (decode->context.opcode == isa::Opcode::System &&
@@ -446,6 +474,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             decode_fields(machine);
             fetch->serializing = is_serializing(fetch->context);
             fetch->writes_int = writes_integer(fetch->context);
+            fetch->writes_fp = isa::is_destination_fp(fetch->context.opcode, fetch->context.op_id);
             fetch->wb_dest = fetch->context.rd;
             fetch->wb_valid = false;
             fetch->wb_val = 0;

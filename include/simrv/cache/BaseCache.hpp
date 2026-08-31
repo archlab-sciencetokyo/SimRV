@@ -123,6 +123,9 @@ class BaseCache {
         last_replaced_set_ = set_idx;
         last_replaced_way_ = victim_way;
         last_inserted_tag_ = tag;
+        last_accessed_set_ = set_idx;
+        last_access_was_hit_ = false;
+        last_hit_way_ = 0xFFFFFFFF;
 
         victim->tag = tag;
         victim->valid = (init_state != simrv::memory::MesiState::Invalid);
@@ -140,6 +143,9 @@ class BaseCache {
         last_evicted_tag_ = ~Address{0};
         last_inserted_tag_ = ~Address{0};
         last_eviction_.reset();
+        last_accessed_set_ = 0xFFFFFFFF;
+        last_access_was_hit_ = false;
+        last_hit_way_ = 0xFFFFFFFF;
         if (clear_stats) {
             reset_stats();
         }

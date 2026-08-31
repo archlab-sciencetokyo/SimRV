@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <set>
 #include <stdexcept>
@@ -7,6 +8,7 @@
 #include <string_view>
 
 #include "simrv/core/Machine.hpp"
+#include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/tui/LogBuffer.hpp"
 #include "simrv/tui/TuiFrameRenderer.hpp"
 #include "simrv/tui/TuiGuidance.hpp"
@@ -20,6 +22,7 @@
 #include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/tui/modals/SettingsModal.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 
 namespace {
 
@@ -787,6 +790,44 @@ void test_modal_components() {
            "Active input row has a filled label and trailing cursor");
 }
 
+void test_instruction_explainer_is_side_effect_free() {
+    simrv::core::Machine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    auto& cpu = machine.primary_hart();
+    cpu.machine_ = &machine;
+    cpu.reset();
+    constexpr Address pc = simrv::memory::kDramBaseAddress;
+    constexpr Instruction addi = 0x00100093U;
+    std::memcpy(ram.data(), &addi, sizeof(addi));
+    cpu.state().pc = pc;
+    cpu.pipeline_context.ir = 0xDEADBEEFU;
+    cpu.pipeline_context.cpc = VirtAddr{pc + 0x40};
+
+    const auto before_pc = cpu.state().pc;
+    const auto before_context_ir = cpu.pipeline_context.ir;
+    const auto before_context_pc = cpu.pipeline_context.cpc;
+    const auto before_icache_hits = cpu.icache.hit_count();
+    const auto before_icache_misses = cpu.icache.miss_count();
+    const auto before_tlb_lru = cpu.tlb.inst_r_lru;
+
+    simrv::tui::InspectorPane pane(machine);
+    pane.set_page(simrv::tui::TuiRegPage::EXPLAIN);
+    pane.set_explain_pc(pc);
+    pane.set_visible_rows(30);
+    const auto rendered = pane.render_row(2, 80);
+
+    expect(rendered.contains("Instruction Explainer"), "explainer renders inspected instruction");
+    expect(cpu.state().pc == before_pc, "explainer preserves architectural PC");
+    expect(cpu.pipeline_context.ir == before_context_ir &&
+               cpu.pipeline_context.cpc == before_context_pc,
+           "explainer preserves the live pipeline context");
+    expect(cpu.icache.hit_count() == before_icache_hits &&
+               cpu.icache.miss_count() == before_icache_misses,
+           "explainer preserves instruction-cache counters");
+    expect(cpu.tlb.inst_r_lru == before_tlb_lru, "explainer preserves TLB replacement state");
+}
+
 }  // namespace
 
 int main() {
@@ -804,6 +845,7 @@ int main() {
     test_themes_and_mouse_interactions();
     test_log_buffer_wrapping();
     test_modal_components();
+    test_instruction_explainer_is_side_effect_free();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;

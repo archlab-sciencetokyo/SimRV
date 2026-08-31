@@ -124,6 +124,10 @@ namespace simrv::pipeline::operation {
         case System:
         case Amo:
         case OpFp:
+        case MAdd:
+        case MSub:
+        case NMAdd:
+        case NMSub:
             return true;
         default:
             return false;
@@ -140,10 +144,19 @@ namespace simrv::pipeline::operation {
         case Branch:
         case Amo:
         case OpFp:
+        case MAdd:
+        case MSub:
+        case NMAdd:
+        case NMSub:
             return true;
         default:
             return false;
     }
+}
+
+[[nodiscard]] constexpr auto reads_rs3(isa::Opcode opcode) -> bool {
+    return opcode == isa::Opcode::MAdd || opcode == isa::Opcode::MSub ||
+           opcode == isa::Opcode::NMAdd || opcode == isa::Opcode::NMSub;
 }
 
 }  // namespace simrv::pipeline::operation

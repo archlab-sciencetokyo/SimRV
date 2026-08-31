@@ -154,6 +154,11 @@ void Tui::set_paused(bool p) {
             machine_.execution_state_.store(simrv::core::ExecutionState::Paused,
                                             std::memory_order_release);
             machine_.execution_state_.notify_all();
+            for (size_t hart = 1; hart < machine_.num_harts(); ++hart) {
+                machine_.hart(hart).hart_status.notify_all();
+            }
+            machine_.wait_for_runner_quiescence();
+            machine_.publish_tui_execution_snapshot();
         }
         update_trace_active_cache();
         trigger_immediate_render();

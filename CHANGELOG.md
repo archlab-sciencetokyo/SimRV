@@ -5,6 +5,12 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [v3.0.0-alpha.1] — 2026-08-31
+
+This alpha rebaselines the former 2.1 development line as 3.0 because the execution architecture,
+host APIs, CLI compatibility surface, and pipeline choices are breaking changes. The historical
+2.1 alpha entries below are retained for provenance; that prerelease line is superseded by 3.0.
+
 ### Execution architecture
 
 - Replaced post-retirement timing penalties with one deterministic per-cycle transition kernel for
@@ -27,7 +33,16 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   configuration.
 - Limited full ELF symbol loading to observable TUI execution; CLI loads only runtime-essential
   symbols needed for guest control.
-- Consolidated TUI setting layouts and corrected modal cursor, scroll, and mouse hit-testing.
+
+### Correctness and qualification
+
+- Added register-bank-aware RAW interlocks for FP loads, FP arithmetic, integer/FP conversions,
+  FP stores, and fused operations including `rs3`, while preserving integer forwarding.
+- Made cache refills count exactly one miss without a synthetic hit and made the instruction
+  explainer inspect a stable snapshot without changing cache, PC, pipeline, TLB, or counters.
+- Treat performance studies as non-blocking evidence. Numerical results in the historical 2.1
+  entries are local measurements, not 3.0 release guarantees, unless reproduced with recorded
+  host, compiler, workload, revision, and configuration provenance.
 
 ## [v2.1.0-alpha.2] — 2026-08-31
 
@@ -429,6 +444,8 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
+[v3.0.0-alpha.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-alpha.1
+[v2.1.0-alpha.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.1.0-alpha.2
 [v2.1.0-alpha.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.1.0-alpha.1
 [v2.0.0]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0
 [v2.0.0-rc.10]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0-rc.10

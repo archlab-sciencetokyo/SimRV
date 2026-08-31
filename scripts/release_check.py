@@ -60,7 +60,7 @@ def verify_metadata(manifest: dict) -> None:
     if not suites or len({suite.get("id") for suite in suites}) != len(suites):
         fail("required suites must have unique non-empty IDs")
     if any(suite.get("allow_skip") is not False for suite in suites):
-        fail("2.0 required suites must not permit skips")
+        fail("required release suites must not permit skips")
     performance = manifest.get("performance", {})
     if performance.get("policy") != "evidence-only" or performance.get("blocking") is not False:
         fail("performance policy must be non-blocking evidence-only")

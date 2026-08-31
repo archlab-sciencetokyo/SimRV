@@ -374,6 +374,11 @@ auto CoherenceHub::allocate_sink() -> TlSinkId {
 void CoherenceHub::process_grant_ack(const TlChannelE& ack) { pending_grants_.erase(ack.sink); }
 
 void CoherenceHub::mark_modified(Address line_base, HartId hart) {
+    line_base &= ~(static_cast<Address>(kLineBytes - 1u));
+    // DRAM stores are write-through, while the shared backing cache may still contain the line
+    // fetched before the store. Once an L1 becomes authoritative, invalidate that clean copy so
+    // a later refill cannot resurrect stale data after the modified L1 line is evicted.
+    l3_cache_.invalidate_line(line_base);
     DirectoryEntry entry{};
     if (!lookup_dir_entry(line_base, entry) || !entry.owner_hart.has_value() ||
         *entry.owner_hart != hart || permission_for(entry.state) != TlPermission::Trunk) {

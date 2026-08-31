@@ -313,7 +313,8 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                     machine.memory_.system_bus().grant_ack(
                         simrv::memory::TlChannelE{.sink = timed.payload.sink});
                     fill.reset();
-                    (void)icache.read16(paddr, h_data);
+                    const auto byte_offset = static_cast<size_t>(paddr - line_base);
+                    std::memcpy(&h_data, timed.line_data.data() + byte_offset, sizeof(h_data));
                     return h_data;
                 }
 
@@ -348,7 +349,8 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             icache.insert(line_base, line_data.data(), simrv::memory::mesi_for(resp.cap));
             release_instruction_eviction(machine, *this);
             machine.memory_.system_bus().grant_ack(simrv::memory::TlChannelE{.sink = resp.sink});
-            (void)icache.read16(paddr, h_data);
+            const auto byte_offset = static_cast<size_t>(paddr - line_base);
+            std::memcpy(&h_data, line_data.data() + byte_offset, sizeof(h_data));
             return h_data;
         };
 

@@ -1,7 +1,7 @@
-# SimRV 2.1 Release Guide
+# SimRV 3.0 Release Guide
 
 The authoritative release contract is [`release/release-manifest.json`](../release/release-manifest.json).
-SimRV 2.1 officially supports Linux x86-64 hosts using GCC 15+ or Clang 20+, with separate
+SimRV 3.0 officially supports Linux x86-64 hosts using GCC 15+ or Clang 20+, with separate
 RV32GCBV and RV64GCBV binaries. Spike lockstep and the GDB server are optional features.
 
 ## Support and qualification boundary
@@ -26,7 +26,8 @@ has a documented qualification gap. These labels are not RISC-V certification cl
 | Linux x86-64 host | Supported | GCC 15+ and Clang 20+ release matrix |
 
 > [!NOTE]
-> Rollback snapshots and reverse stepping were permanently removed in SimRV 2.1.0 to eliminate state copy overhead and streamline pipeline kernels.
+> Rollback snapshots and reverse stepping are not part of SimRV 3.0. They were removed to
+> eliminate state-copy overhead and streamline the replacement execution kernels.
 
 The detailed architectural boundary and known deviations are in
 [RISC-V compliance scope](RISCV_COMPLIANCE.md). The release manifest controls when prose and

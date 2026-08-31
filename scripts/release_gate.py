@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the reproducible local SimRV 2.0 release validation matrix."""
+"""Run the reproducible local SimRV 3.0 release validation matrix."""
 
 import argparse
 import json

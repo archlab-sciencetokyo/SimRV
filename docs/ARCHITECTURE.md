@@ -29,7 +29,7 @@ Execution is configured via `--mode <name>` and resolved into runtime profiles:
 | --- | --- | --- |
 | `--mode fast` | `InstructionFast` | High-throughput functional execution with decode caching and quantum batching |
 | `--mode detailed` | `InstructionObservable` | Instruction-by-instruction execution retaining telemetry for TUI inspection |
-| `--mode cycle-accurate` | `CycleFast` / `CycleObservable` | Cycle-stepped 4-stage pipeline with branch predictor and memory latency modeling |
+| `--mode cycle-accurate` | `CycleFast` / `CycleObservable` | Cycle-stepped pipeline with branch predictor and memory latency modeling |
 | `--mode cycle-accurate --pipeline 3stage` | `CycleFast` / `CycleObservable` | 3-stage Fetch / Decode+Execute / Memory+Writeback educational pipeline model |
 | `--mode cycle-accurate --pipeline 5stage` | `CycleFast` / `CycleObservable` | Classic 5-stage Fetch / Decode / Execute / Memory / Writeback pipeline |
 
@@ -46,12 +46,23 @@ Multi-hart configurations (`--smp <N>`) simulate symmetric multiprocessing:
 
 ## CA timing and ordering
 
-On each global CA cycle SimRV:
+Without `--smp-multithreaded`, CA uses deterministic global cycles. On each cycle SimRV:
 
 1. Advances hart 0, then started secondary harts in ascending order.
 2. Advances the shared TileLink/coherence fabric once.
 3. Updates shared timer and interrupt-pending state.
 4. Performs termination and presentation work outside the architectural step.
+
+`--smp-quantum N` batches up to `N` of those complete global cycles before host-side UART and TUI
+presentation work. It does not give one hart a longer modeled time slice: all started harts still
+advance exactly once per global cycle. Debugging, tracing, breakpoints, delayed execution, and
+single-step reduce the batch to one cycle.
+
+With `--smp-multithreaded`, secondary CA harts run on independent host workers without a per-cycle
+barrier. Hart 0 owns advancement of the shared TileLink fabric and timer, while coherent operations
+are synchronized. This mode provides real host parallelism, but relative hart cycle counts and
+inter-hart timing are intentionally nondeterministic. Pause, reboot, reconfiguration, shutdown, and
+single-step first quiesce the workers; a single step then advances one deterministic all-hart cycle.
 
 The CPU model controls pipeline, cache, and interconnect timing. Cache hit/miss
 latencies and TileLink request/response latencies are positive whole-cycle

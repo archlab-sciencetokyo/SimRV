@@ -54,6 +54,10 @@ def main():
     disk_img = os.environ.get("SIMRV_LINUX_DISK_IMG", disk_img_default)
     dtb_img = os.environ.get("SIMRV_LINUX_DTB", os.path.join(images_dir, "devicetree.dtb"))
     timeout_secs = int(os.environ.get("SIMRV_TEST_TIMEOUT", "90"))
+    expected_cpus = int(os.environ.get("SIMRV_TEST_EXPECT_CPUS", "0"))
+    if expected_cpus < 0:
+        print("Error: SIMRV_TEST_EXPECT_CPUS must be non-negative", file=sys.stderr)
+        sys.exit(2)
     lifecycle_action = os.environ.get("SIMRV_TEST_LIFECYCLE", "shell")
     if lifecycle_action not in ("shell", "poweroff", "reboot", "poweroff-reboot"):
         print(f"Error: unsupported SIMRV_TEST_LIFECYCLE '{lifecycle_action}'", file=sys.stderr)
@@ -163,7 +167,13 @@ def main():
                     # Keep the exact token out of the echoed command line, so seeing it proves the
                     # shell ran the command instead of merely echoing keyboard input.
                     time.sleep(0.1)
-                    os.write(master_fd, b"echo __SIMRV_TUI_ENTER_\"OK__\"\r")
+                    cpu_check = ""
+                    if expected_cpus:
+                        cpu_check = (
+                            f'test "$(getconf _NPROCESSORS_ONLN)" -eq {expected_cpus} && '
+                        )
+                    command = cpu_check + 'echo __SIMRV_TUI_ENTER_"OK__"\r'
+                    os.write(master_fd, command.encode("ascii"))
                     command_sent = True
                 if command_sent and SHELL_TOKEN in guest_buffer and not lifecycle_sent:
                     if lifecycle_action == "shell":

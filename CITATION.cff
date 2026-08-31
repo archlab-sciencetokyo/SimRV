@@ -3,7 +3,7 @@ message: "If you use SimRV in your research, please cite it as below."
 authors:
   - name: "The SimRV Authors"
 title: "SimRV: A Dual-Width Explainable RISC-V System Simulator"
-version: 2.0.0
-date-released: 2026-08-19
+version: 3.0.0-alpha.1
+date-released: 2026-08-31
 url: "https://github.com/archlab-sciencetokyo/SimRV"
 license: MIT

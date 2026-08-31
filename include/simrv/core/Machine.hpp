@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -85,9 +86,16 @@ enum class ExecutionState : uint8_t {
 
 /// Stable, inexpensive execution state consumed by the asynchronous TUI renderer.
 struct TuiExecutionSnapshot {
+    size_t hart = 0;
     Register pc = 0;
+    Counter cycle_count = 0;
     Counter instruction_count = 0;
     Counter timer_ticks = 0;
+    pipeline::PipelineStats ca_stats{};
+    uint64_t icache_hits = 0;
+    uint64_t icache_misses = 0;
+    uint64_t dcache_hits = 0;
+    uint64_t dcache_misses = 0;
     ExecutionState execution_state = ExecutionState::Stopped;
 };
 
@@ -229,6 +237,8 @@ class Machine final {
     void run();
     /// Advance every runnable hart and the shared platform by exactly one CA global cycle.
     void advance_ca_global_cycle();
+    /// Advance hart 0 and the shared platform while CA secondary workers run independently.
+    void advance_ca_primary_cycle();
     /// Finalize cycle for tohost checks only.
     void finalize_cycle_tohost();
     /// Stop the simulation loop.
@@ -317,7 +327,8 @@ class Machine final {
         const auto geometry = memory_geometry();
         return {mmem, geometry.dram_base, geometry.dram_size};
     }
-    [[nodiscard]] auto tui_execution_snapshot() const noexcept -> TuiExecutionSnapshot;
+    [[nodiscard]] auto tui_execution_snapshot(size_t hart = 0) const noexcept
+        -> TuiExecutionSnapshot;
     /// Platform capability used by built-in devices to publish an external interrupt level.
     void set_platform_irq(int irq, bool asserted) { cpu.plic_set_irq(irq, asserted ? 1 : 0); }
     /// Read the shared platform timer without exposing the CPU ownership graph.
@@ -413,6 +424,9 @@ class Machine final {
     void set_smp_parallel_for_testing(bool enabled) noexcept {
         config.execution.smp_multithreaded = enabled;
     }
+    void set_instruction_limit_for_testing(Counter limit) noexcept {
+        config.execution.fincnt = limit;
+    }
     [[nodiscard]] auto mutable_ram_data_for_testing() noexcept -> Byte*& { return mmem; }
     [[nodiscard]] auto allocate_ram_for_testing(size_t bytes) -> bool {
         return allocate_ram(bytes);
@@ -449,13 +463,17 @@ class Machine final {
 
     void start_runner();
     void stop_runner();
+    void wait_for_runner_quiescence();
     void execute_runner_cycle();
     [[nodiscard]] auto execute_runner_fast_batch(uint32_t batch_size) -> bool;
     void prepare_runner_cycle();
     void finalize_runner_cycle();
     void publish_tui_execution_snapshot() noexcept;
+    void publish_tui_execution_snapshot_for_hart(size_t hart) noexcept;
     /// Snapshot all fast-path decisions once at a runner batch boundary.
     [[nodiscard]] auto fast_batch_policy() const -> std::optional<FastBatchPolicy>;
+    [[nodiscard]] auto ca_batch_quantum() const noexcept -> uint32_t;
+    void advance_ca_platform_cycle(bool synchronize_secondary_harts);
 
     mutable std::mutex staged_configuration_mutex_;
     std::optional<MachineConfig> staged_configuration_;
@@ -469,11 +487,21 @@ class Machine final {
 
     std::atomic<bool> is_running_ = true;  // Main-loop run flag.
     std::atomic<ExecutionState> execution_state_{ExecutionState::Running};
-    std::atomic<uint64_t> tui_snapshot_generation_{0};
-    std::atomic<Register> tui_snapshot_pc_{0};
-    std::atomic<Counter> tui_snapshot_instruction_count_{0};
-    std::atomic<Counter> tui_snapshot_timer_ticks_{0};
-    std::atomic<ExecutionState> tui_snapshot_execution_state_{ExecutionState::Stopped};
+    struct TuiSnapshotSlot {
+        std::atomic<uint64_t> generation{0};
+        std::atomic<Register> pc{0};
+        std::atomic<Counter> cycle_count{0};
+        std::atomic<Counter> instruction_count{0};
+        std::atomic<Counter> timer_ticks{0};
+        std::array<std::atomic<uint64_t>, 9> ca_stats{};
+        std::atomic<uint64_t> icache_hits{0};
+        std::atomic<uint64_t> icache_misses{0};
+        std::atomic<uint64_t> dcache_hits{0};
+        std::atomic<uint64_t> dcache_misses{0};
+        std::atomic<ExecutionState> execution_state{ExecutionState::Stopped};
+    };
+    static constexpr size_t kMaxTuiSnapshotHarts = 64;
+    std::array<TuiSnapshotSlot, kMaxTuiSnapshotHarts> tui_snapshots_{};
 
     friend class BaremetalRunner;
     friend class OsRunner;

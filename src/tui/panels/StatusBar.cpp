@@ -735,9 +735,9 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         if (scroll_offset_ > 0) {
             mid_text = std::format("═══ SCROLLBACK (-{}) ['c'/'Enter' Live] ═══", scroll_offset_);
         } else {
-            const auto& current_cpu = machine_.hart(selected);
-            const auto cycles = current_cpu.clint_mmio.mcycle;
-            const auto icount = current_cpu.e_icount;
+            const auto snapshot = machine_.tui_execution_snapshot(selected);
+            const auto cycles = snapshot.cycle_count;
+            const auto icount = snapshot.instruction_count;
             const double cpi =
                 icount == 0 ? 0.0 : static_cast<double>(cycles) / static_cast<double>(icount);
             std::string const metric_sep = std::format(" {}·\033[0m ", kThemeMuted);

@@ -713,6 +713,8 @@ void test_tilelink_c_coherence_semantics() {
 
     const Address test_addr = 0x80002000;
     dcache.insert(test_addr, sample_data.data(), simrv::memory::MesiState::Shared);
+    expect(!dcache.last_access_was_hit() && dcache.hit_count() == 0,
+           "cache insertion preserves miss accounting and highlight state");
 
     Word read_val = 0;
     expect(dcache.read(test_addr, read_val, 2), "D-Cache read hits in Branch state");

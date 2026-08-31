@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.31)
 
-project(SimRV VERSION 2.1.0 LANGUAGES C CXX)
+project(SimRV VERSION 3.0.0 LANGUAGES C CXX)
 
 include(CTest)
 option(SIMRV_ENABLE_TOOLING "Enable release, documentation, and formatting helper targets" OFF)
@@ -10,7 +10,7 @@ if(BUILD_TESTING OR SIMRV_ENABLE_TOOLING)
   set(PYTHON_BIN "${Python3_EXECUTABLE}")
 endif()
 
-set(SIMRV_VERSION "2.1.0-alpha.2")
+set(SIMRV_VERSION "3.0.0-alpha.1")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -287,6 +287,9 @@ simrv_configure_native_test(simrv-modern-platform-tests)
 
 add_test(NAME modern-platform COMMAND simrv-modern-platform-tests)
 set_tests_properties(modern-platform PROPERTIES LABELS "gate;regress;semantic;device;mmio;pcie;aia")
+if(SIMRV_ENABLE_TSAN)
+  set_property(TEST modern-platform APPEND PROPERTY LABELS thread)
+endif()
 
 # Architectural equivalence is a first-class native gate.  The fixture deliberately exercises
 # functional execution and both CA pipelines while excluding cache/cycle/UI observations.
@@ -355,24 +358,54 @@ if(EXISTS "${TEST_IMAGES_DIR}/fw_payload.bin")
     COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py
   )
   set_tests_properties(linux-boot-pty PROPERTIES
-    ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR}"
-    TIMEOUT 110
+    ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_TEST_TIMEOUT=180"
+    TIMEOUT 200
+    RUN_SERIAL TRUE
     LABELS "external;linux;pty;required"
+  )
+  add_test(NAME linux-ca-boot-pty
+    COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py
+  )
+  set_tests_properties(linux-ca-boot-pty PROPERTIES
+    ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_TEST_EXTRA_ARGS=--mode cycle-accurate;SIMRV_TEST_TIMEOUT=420"
+    TIMEOUT 440
+    RUN_SERIAL TRUE
+    LABELS "external;linux;pty;ca"
+  )
+  add_test(NAME linux-ca-quantum-smp-pty
+    COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py
+  )
+  set_tests_properties(linux-ca-quantum-smp-pty PROPERTIES
+    ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_LINUX_DTB=NONE;SIMRV_TEST_EXTRA_ARGS=--mode cycle-accurate --smp 2 --smp-quantum 100;SIMRV_TEST_EXPECT_CPUS=2;SIMRV_TEST_TIMEOUT=480"
+    TIMEOUT 500
+    RUN_SERIAL TRUE
+    LABELS "external;linux;pty;ca;smp;quantum"
+  )
+  add_test(NAME linux-ca-mt-smp-pty
+    COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py
+  )
+  set_tests_properties(linux-ca-mt-smp-pty PROPERTIES
+    ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_LINUX_DTB=NONE;SIMRV_TEST_EXTRA_ARGS=--mode cycle-accurate --smp 2 --smp-quantum 100 --smp-multithreaded;SIMRV_TEST_EXPECT_CPUS=2;SIMRV_TEST_TIMEOUT=480"
+    TIMEOUT 500
+    RUN_SERIAL TRUE
+    LABELS "external;linux;pty;ca;smp;mt;thread"
   )
   add_test(NAME linux-poweroff-quit-pty
     COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py
   )
   set_tests_properties(linux-poweroff-quit-pty PROPERTIES
-    ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_TEST_LIFECYCLE=poweroff"
-    TIMEOUT 110
+    ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_TEST_LIFECYCLE=poweroff;SIMRV_TEST_TIMEOUT=180"
+    TIMEOUT 200
+    RUN_SERIAL TRUE
     LABELS "external;linux;pty;lifecycle;required"
   )
   add_test(NAME linux-poweroff-reboot-pty
     COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py
   )
   set_tests_properties(linux-poweroff-reboot-pty PROPERTIES
-    ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_TEST_LIFECYCLE=poweroff-reboot"
-    TIMEOUT 110
+    ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_TEST_LIFECYCLE=poweroff-reboot;SIMRV_TEST_TIMEOUT=180"
+    TIMEOUT 200
+    RUN_SERIAL TRUE
     LABELS "external;linux;pty;lifecycle;required"
   )
 endif()

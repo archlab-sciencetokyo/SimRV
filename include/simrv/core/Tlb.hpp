@@ -105,6 +105,20 @@ class Tlb {
         return nullptr;
     }
 
+    /// Inspect an instruction translation without updating replacement state or hit counters.
+    [[nodiscard]] constexpr auto peek_inst_r(Address vaddr, Word asid,
+                                             PrivilegeLevel priv) const noexcept
+        -> const TLBEntry* {
+        const size_t set = calc_set(vaddr);
+        const Address vpage = calc_vpage(vaddr);
+        for (const auto& entry : inst_r[set]) {
+            if (entry.valid && entry.asid == asid && entry.v_addr == vpage && entry.priv == priv) {
+                return &entry;
+            }
+        }
+        return nullptr;
+    }
+
     /**
      * @brief Insert entry into instruction fetch TLB using LRU replacement.
      * @param vaddr Virtual address.

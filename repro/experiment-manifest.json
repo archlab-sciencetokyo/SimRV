@@ -1,7 +1,7 @@
 {
   "$schema": "../release/schemas/experiment.schema.json",
   "schema_version": 1,
-  "name": "SimRV 2.0 research companion",
+  "name": "SimRV 3.0 research companion",
   "repetitions": 20,
   "warmups": 1,
   "timeout_seconds": 120,

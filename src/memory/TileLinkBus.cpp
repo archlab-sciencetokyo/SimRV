@@ -323,6 +323,17 @@ auto TileLinkBus::acquire_perm(const TlChannelA& req, TlChannelD& resp) -> bool 
     return acquire_block(req, resp, unused);
 }
 
+auto TileLinkBus::release_line(const TlChannelC& req, TlChannelD& resp,
+                               const std::array<Byte, CoherenceHub::kLineBytes>* data) -> bool {
+    SmpLockGuard lock(bus_mutex_, machine_.configuration().execution.smp_multithreaded);
+    return coherence_hub_.handle_release(req, resp, data);
+}
+
+void TileLinkBus::mark_modified(Address line_base, HartId hart) {
+    SmpLockGuard lock(bus_mutex_, machine_.configuration().execution.smp_multithreaded);
+    coherence_hub_.mark_modified(line_base, hart);
+}
+
 void TileLinkBus::grant_ack(const TlChannelE& ack) {
     SmpLockGuard lock(bus_mutex_, machine_.configuration().execution.smp_multithreaded);
     if (const auto valid = protocol_checker_.accept_e(ack); !valid) {

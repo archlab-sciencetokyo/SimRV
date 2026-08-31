@@ -237,6 +237,12 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
 
         auto& transfer = cpu.ca_state.data_transfer;
         Word cached_data = 0;
+        const auto read_refill_data = [&](const auto& data, Address line_base) -> Word {
+            const auto byte_offset = static_cast<size_t>(addr - line_base);
+            Word raw = 0;
+            std::memcpy(&raw, data.data() + byte_offset, size_bytes);
+            return simrv::memory::extend_loaded_value(raw, static_cast<uint8_t>(funct3));
+        };
         // A resumable line fill represents one cache miss. Do not probe the cache again while
         // that request is in flight, otherwise both miss counters and modeled penalties grow
         // once per waiting cycle.
@@ -260,7 +266,13 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             TlChannelE ack{};
             ack.sink = timed.payload.sink;
             mem.system_bus().grant_ack(ack);
-            if (cpu.dcache.read(addr, cached_data, funct3)) return cached_data;
+            const Address completed_offset = addr - completed_line;
+            if (addr >= completed_line && completed_offset < simrv::cache::DCache::kLineBytes &&
+                size_bytes <= simrv::cache::DCache::kLineBytes - completed_offset) {
+                return read_refill_data(timed.line_data, completed_line);
+            }
+            // A prior split or write transaction can complete before this access resumes. Its
+            // insertion is not this access's refill, so continue with a normal lookup/request.
         }
 
         if (cpu.dcache.read(addr, cached_data, funct3)) {
@@ -298,10 +310,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             TlChannelE ack{};
             ack.sink = resp.sink;
             mem.system_bus().grant_ack(ack);
-
-            if (cpu.dcache.read(addr, cached_data, funct3)) {
-                return cached_data;
-            }
+            return read_refill_data(line_data, line_base);
         }
         return simrv::memory::ram_read_fast(addr, funct3, cpu.machine_->ram_view());
     };
@@ -515,8 +524,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
                 }
             }
             if (cache_write_completed) {
-                mem.system_bus().coherence_hub().mark_modified(
-                    addr, static_cast<HartId>(cpu.state().mhartid));
+                mem.system_bus().mark_modified(addr, static_cast<HartId>(cpu.state().mhartid));
             }
             simrv::memory::ram_write_fast(addr, data, funct3, cpu.machine_->ram_view());
             return;

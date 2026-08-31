@@ -82,10 +82,16 @@ cursor visibility, scrollback, selection, resize/reset behavior, UTF-8 cells, th
 registry integrity. It is part of the `gate`, `regress`, and `tui` labels and runs under sanitizer
 configurations.
 
-`linux-boot-pty` is the end-to-end test for Linux boot and TUI/PTY/UART interaction. It runs the TUI
-under a pseudo-terminal, waits for getty, sends Enter, and verifies a command executed by the guest
+While simulation is running, status and CA performance views consume stable per-hart snapshots.
+Detailed register, pipeline, cache, and TLB inspection resumes only after all SMP workers have
+acknowledged pause.
+
+`linux-boot-pty` is the baseline end-to-end test for Linux boot and TUI/PTY/UART interaction. The
+`linux-ca-boot-pty`, `linux-ca-quantum-smp-pty`, and `linux-ca-mt-smp-pty` variants cover CA and
+verify that both CPUs reach the shell in SMP configurations. The tests run the TUI
+under a pseudo-terminal, wait for getty, send Enter, and verify a command executed by the guest
 shell. Run the focused tests with:
 
 ```bash
-ctest --test-dir build/rv64-release --output-on-failure -R 'tui-framework|linux-boot-pty'
+ctest --test-dir build/rv64-release --output-on-failure -R 'tui-framework|linux-(boot|ca-.*)-pty'
 ```

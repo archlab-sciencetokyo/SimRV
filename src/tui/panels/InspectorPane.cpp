@@ -605,7 +605,8 @@ auto InspectorPane::render_row(int row_idx, int width) -> std::string {
                 return finish_row(render_sampled_machine_performance_stats(
                     machine_.tui_execution_snapshot(), stats_row, width));
             }
-            return finish_row(render_cycle_accurate_stats(current_cpu(), stats_row, width));
+            return finish_row(render_cycle_accurate_stats(
+                machine_.tui_execution_snapshot(selected_hart_), stats_row, width));
         }
         // High-speed UI frames use only a stable execution snapshot and cached pane state.
         return render_active_spinner(logical_row, width);

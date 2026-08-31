@@ -95,7 +95,7 @@ Run the resulting binary image in SimRV in baremetal mode (`-b` / `--baremetal`)
 # Headless / CLI-only mode (fast execution)
 ./build/rv32-release/SimRV -b -m program.bin --mode fast --cli
 
-# Cycle-accurate 4-stage pipeline simulation
+# Cycle-accurate five-stage pipeline simulation
 ./build/rv32-release/SimRV -b -m program.bin --mode cycle-accurate --cli
 
 # 5-stage classic pipeline simulation

@@ -65,9 +65,10 @@ class TileLinkBus : public Bus {
     auto acquire_perm(const TlChannelA& req, TlChannelD& resp) -> bool;
 
     auto release_line(const TlChannelC& req, TlChannelD& resp,
-                      const std::array<Byte, CoherenceHub::kLineBytes>* data = nullptr) -> bool {
-        return coherence_hub_.handle_release(req, resp, data);
-    }
+                      const std::array<Byte, CoherenceHub::kLineBytes>* data = nullptr) -> bool;
+
+    /// Publish a successful L1 store while holding the shared coherence lock in MT-SMP mode.
+    void mark_modified(Address line_base, HartId hart);
 
     void grant_ack(const TlChannelE& ack);
 

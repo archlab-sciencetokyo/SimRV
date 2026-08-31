@@ -165,17 +165,17 @@ auto InspectorPane::render_sampled_machine_performance_stats(
     return format_to_width("", width);
 }
 
-auto InspectorPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int stats_row,
-                                                int width) -> std::string {
+auto InspectorPane::render_cycle_accurate_stats(const simrv::core::TuiExecutionSnapshot& snapshot,
+                                                int stats_row, int width) -> std::string {
     const int half = width / 2;
     const int label_pad = width < 45 ? 0 : 7;
-    const uint64_t cycles = cpu.clint_mmio.mcycle;
-    const auto simulated_seconds = static_cast<double>(cpu.clint_mmio.mtime.load()) / 10000000.0;
+    const uint64_t cycles = snapshot.cycle_count;
+    const auto simulated_seconds = static_cast<double>(snapshot.timer_ticks) / 10000000.0;
     if (stats_row == 0) return section_line("Performance · Cycle Accurate", width);
     if (stats_row == 1) {
-        return render_pair("retired", simrv::util::format_with_commas(cpu.e_icount), kThemeMint,
-                           "sim", std::format("{:.3f} s", simulated_seconds), kThemeSky, half,
-                           width - half, label_pad);
+        return render_pair("retired", simrv::util::format_with_commas(snapshot.instruction_count),
+                           kThemeMint, "sim", std::format("{:.3f} s", simulated_seconds), kThemeSky,
+                           half, width - half, label_pad);
     }
     if (stats_row == 2) {
         return render_pair("engine", std::string(machine_.runtime_profile.execution_name()),
@@ -189,10 +189,11 @@ auto InspectorPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int
                            kThemeSky, half, width - half, label_pad);
     }
     if (stats_row == 4) {
-        const auto average = active_runtime_ > 0.0
-                                 ? static_cast<uint64_t>(static_cast<double>(cpu.e_icount) /
-                                                         1000.0 / active_runtime_)
-                                 : 0;
+        const auto average =
+            active_runtime_ > 0.0
+                ? static_cast<uint64_t>(static_cast<double>(snapshot.instruction_count) / 1000.0 /
+                                        active_runtime_)
+                : 0;
         if (width >= 52) {
             const bool compact = width < 70;
             const std::string average_label = compact ? "avg" : "average";
@@ -209,16 +210,18 @@ auto InspectorPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int
         return make_field("average", format_speed(average), kThemeSky, width < 45 ? 0 : 7);
     }
     if (stats_row == 5) {
-        const double ipc = cycles == 0 ? 0.0 : static_cast<double>(cpu.e_icount) / cycles;
-        const double cpi = cpu.e_icount == 0 ? 0.0 : static_cast<double>(cycles) / cpu.e_icount;
+        const double ipc =
+            cycles == 0 ? 0.0 : static_cast<double>(snapshot.instruction_count) / cycles;
+        const double cpi = snapshot.instruction_count == 0
+                               ? 0.0
+                               : static_cast<double>(cycles) / snapshot.instruction_count;
         return render_pair("IPC", std::format("{:.2f}", ipc), kThemeMint, "CPI",
                            std::format("{:.2f}", cpi), kThemePeach, half, width - half, label_pad);
     }
     if (stats_row == 6 || stats_row == 7) {
         const bool instruction_cache = stats_row == 6;
-        const uint64_t hits = instruction_cache ? cpu.icache.hit_count() : cpu.dcache.hit_count();
-        const uint64_t misses =
-            instruction_cache ? cpu.icache.miss_count() : cpu.dcache.miss_count();
+        const uint64_t hits = instruction_cache ? snapshot.icache_hits : snapshot.dcache_hits;
+        const uint64_t misses = instruction_cache ? snapshot.icache_misses : snapshot.dcache_misses;
         const uint64_t total = hits + misses;
         const double hit_rate = total == 0 ? 0.0 : static_cast<double>(hits) / total;
         // The cache inspector owns raw hit/miss counts.  Keep this summary visual and bounded so
@@ -234,9 +237,9 @@ auto InspectorPane::render_cycle_accurate_stats(const simrv::core::CPU& cpu, int
             width);
     }
     if (stats_row == 8) {
-        const uint64_t data = cpu.pipeline_sim.data_hazard_stalls();
-        const uint64_t control = cpu.pipeline_sim.control_hazard_bubbles();
-        const uint64_t cache = cpu.pipeline_sim.icache_stalls() + cpu.pipeline_sim.dcache_stalls();
+        const uint64_t data = snapshot.ca_stats.data_hazard_stalls;
+        const uint64_t control = snapshot.ca_stats.control_hazard_bubbles;
+        const uint64_t cache = snapshot.ca_stats.icache_stalls + snapshot.ca_stats.dcache_stalls;
         const auto [name, count] = std::max(
             {std::pair{"data", data}, std::pair{"control", control}, std::pair{"cache", cache}},
             [](const auto& lhs, const auto& rhs) { return lhs.second < rhs.second; });
@@ -336,7 +339,8 @@ auto InspectorPane::render_perf_or_debug(const simrv::core::CPU& cpu, int logica
     if (logical_row < stats_start) return format_to_width("", width);
     const int stats_row = logical_row - stats_start;
     return machine_.runtime_profile.is_cycle_mode()
-               ? render_cycle_accurate_stats(cpu, stats_row, width)
+               ? render_cycle_accurate_stats(machine_.tui_execution_snapshot(selected_hart_),
+                                             stats_row, width)
                : render_machine_performance_stats(cpu, stats_row, width);
 }
 

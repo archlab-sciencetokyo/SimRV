@@ -187,8 +187,9 @@ class InspectorPane : public TuiWidget {
     [[nodiscard]] auto render_sampled_machine_performance_stats(
         const simrv::core::TuiExecutionSnapshot& snapshot, int adj_logical_row, int width)
         -> std::string;
-    [[nodiscard]] auto render_cycle_accurate_stats(const simrv::core::CPU& cpu, int adj_logical_row,
-                                                   int width) -> std::string;
+    [[nodiscard]] auto render_cycle_accurate_stats(
+        const simrv::core::TuiExecutionSnapshot& snapshot, int adj_logical_row, int width)
+        -> std::string;
     [[nodiscard]] auto performance_row_count() const -> int;
     [[nodiscard]] auto performance_start_row(bool single_column) const -> int;
     [[nodiscard]] auto debug_state_row_count() const -> int;
