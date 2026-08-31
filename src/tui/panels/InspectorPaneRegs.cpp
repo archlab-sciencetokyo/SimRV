@@ -43,6 +43,9 @@ auto get_in_flight_badge(const simrv::pipeline::Scoreboard& sb,
         case simrv::pipeline::PipelineStage::Writeback:
             stage_str = "WB";
             break;
+        case simrv::pipeline::PipelineStage::Commit:
+            stage_str = "CM";
+            break;
     }
     if (entry->latency > 0) {
         return std::format(" \033[38;5;203m[{} {}c]\033[0m", stage_str, entry->latency);

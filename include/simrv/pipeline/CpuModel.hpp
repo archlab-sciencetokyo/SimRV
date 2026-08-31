@@ -24,13 +24,13 @@ struct L1CacheConfig {
     uint32_t capacity_bytes = 4096;
     uint32_t associativity = 2;
     uint32_t line_bytes = 32;
-    uint32_t hit_latency = 1;
-    uint32_t miss_latency = 12;
+    LatencyCycles hit_latency = 1;
+    LatencyCycles miss_latency = 12;
 };
 
 struct InterconnectTiming {
-    uint32_t request_latency = 1;
-    uint32_t response_latency = 1;
+    LatencyCycles request_latency = 1;
+    LatencyCycles response_latency = 1;
 };
 
 struct CpuModelConfig {

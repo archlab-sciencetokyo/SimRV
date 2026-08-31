@@ -198,6 +198,7 @@ class PipelineSim {
     [[nodiscard]] auto e_reg() const -> const PipelineReg&;
     [[nodiscard]] auto m_reg() const -> const PipelineReg&;
     [[nodiscard]] auto w_reg() const -> const PipelineReg&;
+    [[nodiscard]] auto stage_reg(PipelineStage stage) const -> const PipelineReg&;
 
     [[nodiscard]] auto div_busy_cycles_remaining() const -> LatencyCycles;
     [[nodiscard]] auto icache_stall_remaining() const -> LatencyCycles;

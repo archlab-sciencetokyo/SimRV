@@ -8,11 +8,12 @@
 #include "simrv/memory/TileLinkProtocol.hpp"
 #include "simrv/pipeline/BranchPredictor.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
+#include "simrv/pipeline/Scoreboard.hpp"
 
 namespace simrv::pipeline {
 
 /// Authoritative progress of one instruction through the semantic CA kernel.
-enum class CycleStage : uint8_t { Fetch, Decode, Execute, Memory, Writeback, Commit };
+using CycleStage = PipelineStage;
 
 struct InstructionFillState {
     static constexpr size_t kLineBytes = 32;
@@ -116,6 +117,14 @@ struct HartPipelineState {
     bool retired_this_cycle = false;
     bool data_hazard_stall = false;
     bool control_flush = false;
+
+    [[nodiscard]] constexpr auto slot(PipelineStage s) noexcept -> CycleInstructionSlot& {
+        return storage_[std::to_underlying(s)];
+    }
+    [[nodiscard]] constexpr auto slot(PipelineStage s) const noexcept
+        -> const CycleInstructionSlot& {
+        return storage_[std::to_underlying(s)];
+    }
 
     constexpr HartPipelineState() noexcept = default;
 

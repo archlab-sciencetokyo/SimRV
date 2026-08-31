@@ -77,8 +77,27 @@ using Funct12 = uint16_t;
 using Funct6 = uint8_t;
 using Funct2 = uint8_t;
 using CsrImm = uint8_t;
-
 enum class AccessWidth : uint8_t { Byte = 1, HalfWord = 2, Word = 4, DoubleWord = 8 };
+
+// TLB domain types
+using Asid = uint16_t;
+using TlbSetIndex = uint32_t;
+using TlbWay = uint8_t;
+enum class TlbAccessKind : uint8_t { Instruction, DataRead, DataWrite };
+
+// Floating-point execution domain types
+enum class FpFmt : uint8_t { Single = 0, Double = 1, Half = 2, Quad = 3 };
+enum class VectorMaskMode : bool { Masked = false, Unmasked = true };
+
+// GDB RSP domain types
+enum class GdbBreakpointType : uint8_t {
+    Software = 0,
+    Hardware,
+    WriteWatch,
+    ReadWatch,
+    AccessWatch
+};
+enum class GdbSignal : uint8_t { SigInt = 2, SigTrap = 5, SigSegv = 11 };
 
 enum class FpPrecision : uint8_t { Single = 32, Double = 64, Quad = 128 };
 

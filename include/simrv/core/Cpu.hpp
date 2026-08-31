@@ -275,15 +275,20 @@ class CPU {
     void TLB_flush();
 
     /**
+     * @brief Selectively flushes TLB entries matching the specified filter criteria.
+     * @param filter The selective flush criteria.
+     */
+    void TLB_flush(const core::TlbFlushFilter& filter);
+
+    /**
      * @brief Selectively flushes TLB entries matching virtual address and/or Address Space
      * Identifier (ASID).
-     * @param match_all_vaddr If true, ignores the vaddr matching criteria (flushes all virtual
-     * addresses matching ASID).
-     * @param vaddr The target virtual address to match.
-     * @param match_all_asid If true, ignores the ASID matching criteria.
-     * @param asid The target ASID to match.
      */
-    void TLB_flush(bool match_all_vaddr, Address vaddr, bool match_all_asid, Word asid);
+    inline void TLB_flush(bool match_all_vaddr, Address vaddr, bool match_all_asid, Word asid) {
+        TLB_flush(core::TlbFlushFilter{
+            .vaddr = match_all_vaddr ? std::nullopt : std::make_optional(vaddr),
+            .asid = match_all_asid ? std::nullopt : std::make_optional(static_cast<Asid>(asid))});
+    }
 
     /**
      * @brief Writes the `mstatus` CSR, applying any architectural side effects (such as flushing
@@ -649,8 +654,13 @@ class CPU {
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_write{};
     uint32_t soft_tlb_epoch = 1;
     void soft_tlb_flush();
-    void soft_tlb_flush_selective(bool match_all_vaddr, Address vaddr, bool match_all_asid,
-                                  Word asid);
+    void soft_tlb_flush_selective(const core::TlbFlushFilter& filter);
+    inline void soft_tlb_flush_selective(bool match_all_vaddr, Address vaddr, bool match_all_asid,
+                                         Word asid) {
+        soft_tlb_flush_selective(core::TlbFlushFilter{
+            .vaddr = match_all_vaddr ? std::nullopt : std::make_optional(vaddr),
+            .asid = match_all_asid ? std::nullopt : std::make_optional(static_cast<Asid>(asid))});
+    }
 
     // ========== Execution Metrics ==========
     uint64_t e_icount{0};                                     // Total instruction count

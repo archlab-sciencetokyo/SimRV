@@ -24,13 +24,41 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
+
+#include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
 class Machine;
 }
 
 namespace simrv::debug {
+
+/**
+ * @struct UniqueFd
+ * @brief Lightweight RAII wrapper for POSIX file descriptors / sockets.
+ */
+struct UniqueFd {
+    int fd = -1;
+    constexpr UniqueFd() noexcept = default;
+    constexpr explicit UniqueFd(int f) noexcept : fd(f) {}
+    ~UniqueFd();
+    UniqueFd(const UniqueFd&) = delete;
+    auto operator=(const UniqueFd&) -> UniqueFd& = delete;
+    UniqueFd(UniqueFd&& o) noexcept : fd(std::exchange(o.fd, -1)) {}
+    auto operator=(UniqueFd&& o) noexcept -> UniqueFd& {
+        if (this != &o) {
+            reset();
+            fd = std::exchange(o.fd, -1);
+        }
+        return *this;
+    }
+    void reset() noexcept;
+    [[nodiscard]] auto get() const noexcept -> int { return fd; }
+    [[nodiscard]] auto release() noexcept -> int { return std::exchange(fd, -1); }
+    [[nodiscard]] explicit operator bool() const noexcept { return fd >= 0; }
+};
 
 /**
  * @class GdbStub
@@ -54,7 +82,7 @@ class GdbStub {
     void wait_for_connection();
 
     /** @return True when a GDB client is currently connected. */
-    [[nodiscard]] bool is_connected() const { return conn_fd_ >= 0; }
+    [[nodiscard]] bool is_connected() const { return conn_fd_.get() >= 0; }
 
     /**
      * @brief Non-blocking poll: process any pending RSP packets.
@@ -79,17 +107,17 @@ class GdbStub {
 
    private:
     // ---- TCP socket management ----
-    int listen_fd_ = -1;
-    int conn_fd_ = -1;
+    UniqueFd listen_fd_;
+    UniqueFd conn_fd_;
     uint16_t port_;
 
     // ---- RSP protocol state ----
     bool single_step_ = false;
     bool no_ack_mode_ = false;
-    uint32_t current_thread_id_ = 1;
+    HartId current_hart_{HartId{0}};
 
-    // Software breakpoint table: addr -> original 4-byte word
-    std::unordered_map<uint32_t, uint32_t> sw_breakpoints_;
+    // Software breakpoint table: addr -> original 4-byte instruction
+    std::unordered_map<Address, Instruction> sw_breakpoints_;
 
     // ---- RSP packet I/O ----
     /** Send a formatted RSP packet (adds '$', checksum, '#'). */
@@ -136,9 +164,9 @@ class GdbStub {
    public:
     // ---- Public Utility (used by file-scope helpers in GdbStub.cpp) ----
     /** Format a XLEN-wide register value as a little-endian hex string. */
-    static auto reg_to_hex(uint32_t val) -> std::string;
+    static auto reg_to_hex(Register val) -> std::string;
     /** Parse a hex string as a little-endian XLEN-wide register value. */
-    static auto hex_to_reg(const std::string& s, std::size_t offset) -> uint32_t;
+    static auto hex_to_reg(const std::string& s, std::size_t offset) -> Register;
     /** Compute RSP checksum (sum of bytes mod 256). */
     static auto checksum(const std::string& data) -> uint8_t;
 

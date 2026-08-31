@@ -47,11 +47,23 @@ class ExecuteUnit {
     static auto csrWriteValue(CSRValue rcsr, Register rrs1, ImmValue imm, isa::Funct3 funct3)
         -> std::expected<CSRValue, TrapCause>;
     /// Execute fused floating-point multiply-add family.
+    static auto fusedFp(isa::Opcode opcode, FpFmt fmt, FpRegId rs1, FpRegId rs2, FpRegId rs3,
+                        isa::RoundingMode rm, const FloatingRegister* freg, CSRValue& fcsr)
+        -> FpExecResult;
     static auto fusedFp(isa::Opcode opcode, Word fmt, Word rs1, Word rs2, Word rs3, Word rm,
-                        const FloatingRegister* freg, CSRValue& fcsr) -> FpExecResult;
+                        const FloatingRegister* freg, CSRValue& fcsr) -> FpExecResult {
+        return fusedFp(opcode, static_cast<FpFmt>(fmt), static_cast<FpRegId>(rs1),
+                       static_cast<FpRegId>(rs2), static_cast<FpRegId>(rs3),
+                       static_cast<isa::RoundingMode>(rm), freg, fcsr);
+    }
     /// Execute non-fused floating-point operations and conversions.
-    static auto opFp(Word funct7, isa::Funct3 funct3, Word rs1, Word rs2, Register rrs1,
+    static auto opFp(Funct7 funct7, isa::Funct3 funct3, FpRegId rs1, FpRegId rs2, Register rrs1,
                      const FloatingRegister* freg, CSRValue& fcsr) -> FpExecResult;
+    static auto opFp(Word funct7, isa::Funct3 funct3, Word rs1, Word rs2, Register rrs1,
+                     const FloatingRegister* freg, CSRValue& fcsr) -> FpExecResult {
+        return opFp(static_cast<Funct7>(funct7), funct3, static_cast<FpRegId>(rs1),
+                    static_cast<FpRegId>(rs2), rrs1, freg, fcsr);
+    }
     /// Execute vector instructions.
     static void execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem, isa::OperationId op_id,
                                Instruction ir);

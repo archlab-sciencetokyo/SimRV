@@ -427,15 +427,19 @@ static auto fcvt_to_int(double value, Word op_mode, Word effective_rm, CSRValue&
 
 using namespace fp;
 
-auto ExecuteUnit::fusedFp(Opcode opcode, Word fmt, Word rs1, Word rs2, Word rs3, Word rm,
-                          const FloatingRegister* freg, CSRValue& fcsr) -> FpExecResult {
+auto ExecuteUnit::fusedFp(Opcode opcode, FpFmt fmt, FpRegId rs1, FpRegId rs2, FpRegId rs3,
+                          RoundingMode rm, const FloatingRegister* freg, CSRValue& fcsr)
+    -> FpExecResult {
     FpExecResult out;
-    FpEnvironment::set_rounding_mode(rm, fcsr);
+    FpEnvironment::set_rounding_mode(std::to_underlying(rm), fcsr);
     FpEnvironment::clear_exceptions();
-    if (fmt == 0) {
-        const float a = read_f32(freg, rs1);
-        const float b = read_f32(freg, rs2);
-        const float c = read_f32(freg, rs3);
+    const auto u_rs1 = std::to_underlying(rs1);
+    const auto u_rs2 = std::to_underlying(rs2);
+    const auto u_rs3 = std::to_underlying(rs3);
+    if (fmt == FpFmt::Single) {
+        const float a = read_f32(freg, u_rs1);
+        const float b = read_f32(freg, u_rs2);
+        const float c = read_f32(freg, u_rs3);
         float value = 0.0F;
         switch (opcode) {
             case Opcode::MAdd:
@@ -458,10 +462,10 @@ auto ExecuteUnit::fusedFp(Opcode opcode, Word fmt, Word rs1, Word rs2, Word rs3,
         }
         out.fp_wb_data = write_f32_boxed(value);
         out.fp_wb_enable = true;
-    } else if (fmt == 1) {
-        const double a = read_f64(freg, rs1);
-        const double b = read_f64(freg, rs2);
-        const double c = read_f64(freg, rs3);
+    } else if (fmt == FpFmt::Double) {
+        const double a = read_f64(freg, u_rs1);
+        const double b = read_f64(freg, u_rs2);
+        const double c = read_f64(freg, u_rs3);
         double value = 0.0;
         switch (opcode) {
             case Opcode::MAdd:
@@ -800,17 +804,19 @@ bool fp_exec_mv_class(FpExecResult& out, Word funct7, Funct3 funct3, Word rs1, R
 
 }  // namespace fp
 
-auto ExecuteUnit::opFp(Word funct7, Funct3 funct3, Word rs1, Word rs2, Register rrs1,
+auto ExecuteUnit::opFp(Funct7 funct7, Funct3 funct3, FpRegId rs1, FpRegId rs2, Register rrs1,
                        const FloatingRegister* freg, CSRValue& fcsr) -> FpExecResult {
     FpExecResult out;
     const Word rm = enum_mask(funct3);
+    const auto u_rs1 = std::to_underlying(rs1);
+    const auto u_rs2 = std::to_underlying(rs2);
 
-    if (fp::fp_exec_add_sub(out, funct7, rm, rs1, rs2, freg, fcsr)) return out;
-    if (fp::fp_exec_mul_div_sqrt(out, funct7, rm, rs1, rs2, freg, fcsr)) return out;
-    if (fp::fp_exec_sgnj_minmax(out, funct7, funct3, rs1, rs2, freg, fcsr)) return out;
-    if (fp::fp_exec_cvt(out, funct7, rm, rs1, rs2, rrs1, freg, fcsr)) return out;
-    if (fp::fp_exec_cmp(out, funct7, funct3, rs1, rs2, freg, fcsr)) return out;
-    if (fp::fp_exec_mv_class(out, funct7, funct3, rs1, rrs1, freg)) return out;
+    if (fp::fp_exec_add_sub(out, funct7, rm, u_rs1, u_rs2, freg, fcsr)) return out;
+    if (fp::fp_exec_mul_div_sqrt(out, funct7, rm, u_rs1, u_rs2, freg, fcsr)) return out;
+    if (fp::fp_exec_sgnj_minmax(out, funct7, funct3, u_rs1, u_rs2, freg, fcsr)) return out;
+    if (fp::fp_exec_cvt(out, funct7, rm, u_rs1, u_rs2, rrs1, freg, fcsr)) return out;
+    if (fp::fp_exec_cmp(out, funct7, funct3, u_rs1, u_rs2, freg, fcsr)) return out;
+    if (fp::fp_exec_mv_class(out, funct7, funct3, u_rs1, rrs1, freg)) return out;
 
     return out;
 }

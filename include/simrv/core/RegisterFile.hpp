@@ -106,7 +106,15 @@ class RegisterFile {
         return freg_[std::to_underlying(idx)];
     }
 
+    [[nodiscard]] constexpr auto read_fp(FpRegId idx) const -> FloatingRegister {
+        return freg_[std::to_underlying(idx)];
+    }
+
     constexpr void write_fp(RegId idx, FloatingRegister val) {
+        freg_[std::to_underlying(idx)] = val;
+    }
+
+    constexpr void write_fp(FpRegId idx, FloatingRegister val) {
         freg_[std::to_underlying(idx)] = val;
     }
 
@@ -114,11 +122,23 @@ class RegisterFile {
         return vreg_[std::to_underlying(idx)];
     }
 
+    [[nodiscard]] constexpr auto read_vector(VecRegId idx) const -> const VectorRegister& {
+        return vreg_[std::to_underlying(idx)];
+    }
+
     [[nodiscard]] constexpr auto read_vector(RegId idx) -> VectorRegister& {
         return vreg_[std::to_underlying(idx)];
     }
 
+    [[nodiscard]] constexpr auto read_vector(VecRegId idx) -> VectorRegister& {
+        return vreg_[std::to_underlying(idx)];
+    }
+
     constexpr void write_vector(RegId idx, const VectorRegister& val) {
+        vreg_[std::to_underlying(idx)] = val;
+    }
+
+    constexpr void write_vector(VecRegId idx, const VectorRegister& val) {
         vreg_[std::to_underlying(idx)] = val;
     }
 

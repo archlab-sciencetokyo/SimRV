@@ -17,6 +17,7 @@ enum class PipelineStage : uint8_t {
     Execute,
     Memory,
     Writeback,
+    Commit,
 };
 
 /**

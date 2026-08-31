@@ -273,6 +273,8 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
                 return "MEM";
             case simrv::pipeline::PipelineStage::Writeback:
                 return "WB ";
+            case simrv::pipeline::PipelineStage::Commit:
+                return "CM ";
         }
         return "UNK";
     };

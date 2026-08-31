@@ -32,50 +32,55 @@
 #include "simrv/xlen/Types.hpp"
 
 // EBREAK encoding (RV32 uncompressed: 0x00100073)
-static constexpr uint32_t kEbreak32 = 0x00100073U;
+static constexpr Instruction kEbreak32 = 0x00100073U;
 
 namespace simrv::debug {
+
+// ---------------------------------------------------------------------------
+// UniqueFd Implementation
+// ---------------------------------------------------------------------------
+
+UniqueFd::~UniqueFd() { reset(); }
+
+void UniqueFd::reset() noexcept {
+    if (fd >= 0) {
+        ::close(fd);
+        fd = -1;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Construction / destruction
 // ---------------------------------------------------------------------------
 
 GdbStub::GdbStub(uint16_t port) : listen_fd_(::socket(AF_INET, SOCK_STREAM, 0)), port_(port) {
-    if (listen_fd_ < 0) {
+    if (listen_fd_.get() < 0) {
         throw std::runtime_error(std::format("GdbStub: socket() failed: {}", std::strerror(errno)));
     }
 
     int opt = 1;
-    ::setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    ::setsockopt(listen_fd_, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+    ::setsockopt(listen_fd_.get(), SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    ::setsockopt(listen_fd_.get(), IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(port_);
 
-    if (::bind(listen_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) <
+    if (::bind(listen_fd_.get(), reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) <
         0) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-        ::close(listen_fd_);
-        listen_fd_ = -1;
+        listen_fd_.reset();
         throw std::runtime_error(
             std::format("GdbStub: bind() on port {} failed: {}", port_, std::strerror(errno)));
     }
 
-    if (::listen(listen_fd_, 1) < 0) {
-        ::close(listen_fd_);
-        listen_fd_ = -1;
+    if (::listen(listen_fd_.get(), 1) < 0) {
+        listen_fd_.reset();
         throw std::runtime_error(std::format("GdbStub: listen() failed: {}", std::strerror(errno)));
     }
 }
 
-GdbStub::~GdbStub() {
-    close_connection();
-    if (listen_fd_ >= 0) {
-        ::close(listen_fd_);
-        listen_fd_ = -1;
-    }
-}
+GdbStub::~GdbStub() { close_connection(); }
 
 // ---------------------------------------------------------------------------
 // Connection management
@@ -84,13 +89,14 @@ GdbStub::~GdbStub() {
 void GdbStub::wait_for_connection() {
     sockaddr_in peer{};
     socklen_t peer_len = sizeof(peer);
-    conn_fd_ = ::accept(listen_fd_, reinterpret_cast<sockaddr*>(&peer),
-                        &peer_len);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-    if (conn_fd_ < 0) {
+    conn_fd_ =
+        UniqueFd(::accept(listen_fd_.get(), reinterpret_cast<sockaddr*>(&peer),
+                          &peer_len));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (conn_fd_.get() < 0) {
         throw std::runtime_error(std::format("GdbStub: accept() failed: {}", std::strerror(errno)));
     }
     int opt = 1;
-    ::setsockopt(conn_fd_, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+    ::setsockopt(conn_fd_.get(), IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 
     std::array<char, INET_ADDRSTRLEN> peer_ip{};
     ::inet_ntop(AF_INET, &peer.sin_addr, peer_ip.data(), peer_ip.size());
@@ -98,10 +104,7 @@ void GdbStub::wait_for_connection() {
 }
 
 void GdbStub::close_connection() {
-    if (conn_fd_ >= 0) {
-        ::close(conn_fd_);
-        conn_fd_ = -1;
-    }
+    conn_fd_.reset();
     single_step_ = false;
     no_ack_mode_ = false;
 }
@@ -112,7 +115,7 @@ void GdbStub::close_connection() {
 
 auto GdbStub::recv_char() -> int {
     char c = 0;
-    const ssize_t n = ::read(conn_fd_, &c, 1);
+    const ssize_t n = ::read(conn_fd_.get(), &c, 1);
     if (n <= 0) {
         close_connection();
         return -1;
@@ -172,7 +175,7 @@ auto GdbStub::recv_packet(std::string& out) -> bool {
 
     if (!no_ack_mode_) {
         const char ack = (recv_sum == sum) ? '+' : '-';
-        ::write(conn_fd_, &ack, 1);
+        ::write(conn_fd_.get(), &ack, 1);
     }
 
     return recv_sum == sum;
@@ -189,7 +192,7 @@ auto GdbStub::checksum(const std::string& data) -> uint8_t {
 void GdbStub::send_raw(const std::string& s) {
     std::size_t sent = 0;
     while (sent < s.size()) {
-        const ssize_t n = ::write(conn_fd_, s.data() + sent, s.size() - sent);
+        const ssize_t n = ::write(conn_fd_.get(), s.data() + sent, s.size() - sent);
         if (n <= 0) {
             close_connection();
             return;
@@ -208,10 +211,13 @@ void GdbStub::send_packet(const std::string& data) {
 // Register encoding helpers (little-endian hex)
 // ---------------------------------------------------------------------------
 
-auto GdbStub::reg_to_hex(uint32_t val) -> std::string {
-    // Little-endian: LSB first
-    return std::format("{:02x}{:02x}{:02x}{:02x}", val & 0xFFU, (val >> 8U) & 0xFFU,
-                       (val >> 16U) & 0xFFU, (val >> 24U) & 0xFFU);
+auto GdbStub::reg_to_hex(Register val) -> std::string {
+    std::string s;
+    s.reserve(sizeof(Register) * 2);
+    for (size_t b = 0; b < sizeof(Register); ++b) {
+        s += std::format("{:02x}", static_cast<uint8_t>(val >> (b * 8)));
+    }
+    return s;
 }
 
 // For 64-bit FP registers in little-endian
@@ -224,16 +230,21 @@ static auto fp_to_hex(uint64_t val) -> std::string {
     return s;
 }
 
-auto GdbStub::hex_to_reg(const std::string& s, std::size_t offset) -> uint32_t {
-    auto hd = [&](std::size_t i) -> uint32_t {
+auto GdbStub::hex_to_reg(const std::string& s, std::size_t offset) -> Register {
+    auto hd = [&](std::size_t i) -> Register {
+        if (offset + i >= s.size()) return 0;
         const char c = s.at(offset + i);
-        if (c >= '0' && c <= '9') return static_cast<uint32_t>(c - '0');
-        if (c >= 'a' && c <= 'f') return static_cast<uint32_t>(c - 'a' + 10);
-        if (c >= 'A' && c <= 'F') return static_cast<uint32_t>(c - 'A' + 10);
-        return 0U;
+        if (c >= '0' && c <= '9') return static_cast<Register>(c - '0');
+        if (c >= 'a' && c <= 'f') return static_cast<Register>(c - 'a' + 10);
+        if (c >= 'A' && c <= 'F') return static_cast<Register>(c - 'A' + 10);
+        return 0;
     };
-    return (hd(0) << 4U | hd(1)) | ((hd(2) << 4U | hd(3)) << 8U) | ((hd(4) << 4U | hd(5)) << 16U) |
-           ((hd(6) << 4U | hd(7)) << 24U);
+    Register val = 0;
+    for (size_t b = 0; b < sizeof(Register); ++b) {
+        const Register byte_val = (hd(b * 2) << 4) | hd(b * 2 + 1);
+        val |= (byte_val << (b * 8));
+    }
+    return val;
 }
 
 // ---------------------------------------------------------------------------
@@ -247,7 +258,7 @@ static auto read_gdb_reg(std::size_t idx, const simrv::core::ArchState& state)
         return GdbStub::reg_to_hex(state.regs.read(static_cast<RegId>(idx)));
     }
     if (idx == 32) {
-        return GdbStub::reg_to_hex(static_cast<uint32_t>(state.pc));
+        return GdbStub::reg_to_hex(state.pc);
     }
     if (idx >= 33 && idx < 65) {
         // FP registers: 64-bit, little-endian
@@ -259,8 +270,8 @@ static auto read_gdb_reg(std::size_t idx, const simrv::core::ArchState& state)
 static void write_gdb_reg(std::size_t idx, const std::string& hex, std::size_t hex_off,
                           simrv::core::ArchState& state) {
     if (idx < 32) {
-        const uint32_t val = GdbStub::hex_to_reg(hex, hex_off);
-        state.regs.write(static_cast<RegId>(idx), static_cast<Register>(val));
+        const Register val = GdbStub::hex_to_reg(hex, hex_off);
+        state.regs.write(static_cast<RegId>(idx), val);
     } else if (idx == 32) {
         state.pc = static_cast<Address>(GdbStub::hex_to_reg(hex, hex_off));
     }
@@ -272,17 +283,16 @@ static void write_gdb_reg(std::size_t idx, const std::string& hex, std::size_t h
 // ---------------------------------------------------------------------------
 
 void GdbStub::cmd_read_registers(simrv::core::Machine& machine) {
-    auto& target_cpu = (current_thread_id_ > 0 && current_thread_id_ <= machine.num_harts())
-                           ? machine.hart(current_thread_id_ - 1)
-                           : machine.primary_hart();
+    auto& target_cpu = (current_hart_.raw() < machine.num_harts()) ? machine.hart(current_hart_)
+                                                                   : machine.primary_hart();
     const auto& state = target_cpu.state();
     std::string resp;
-    // x0-x31 (4 bytes each, little-endian)
+    // x0-x31 (XLEN bytes each, little-endian)
     for (std::size_t i = 0; i < 32; ++i) {
         resp += reg_to_hex(state.regs.read(static_cast<RegId>(i)));
     }
     // pc
-    resp += reg_to_hex(static_cast<uint32_t>(state.pc));
+    resp += reg_to_hex(state.pc);
     // f0-f31 (8 bytes each, little-endian)
     for (std::size_t i = 0; i < 32; ++i) {
         resp += fp_to_hex(state.regs.read_fp(static_cast<RegId>(i)));
@@ -292,12 +302,12 @@ void GdbStub::cmd_read_registers(simrv::core::Machine& machine) {
 
 void GdbStub::cmd_write_registers(const std::string& pkt, simrv::core::Machine& machine) {
     // G<hex data>
-    auto& target_cpu = (current_thread_id_ > 0 && current_thread_id_ <= machine.num_harts())
-                           ? machine.hart(current_thread_id_ - 1)
-                           : machine.primary_hart();
+    auto& target_cpu = (current_hart_.raw() < machine.num_harts()) ? machine.hart(current_hart_)
+                                                                   : machine.primary_hart();
     auto& state = target_cpu.state();
+    const size_t hex_per_reg = sizeof(Register) * 2;
     std::size_t off = 1;
-    for (std::size_t i = 0; i < 33 && off + 8 <= pkt.size(); ++i, off += 8) {
+    for (std::size_t i = 0; i < 33 && off + hex_per_reg <= pkt.size(); ++i, off += hex_per_reg) {
         write_gdb_reg(i, pkt, off, state);
     }
     send_packet("OK");
@@ -306,9 +316,8 @@ void GdbStub::cmd_write_registers(const std::string& pkt, simrv::core::Machine& 
 void GdbStub::cmd_read_register(const std::string& pkt, simrv::core::Machine& machine) {
     // p n
     const std::size_t idx = std::stoul(pkt.substr(1), nullptr, 16);
-    auto& target_cpu = (current_thread_id_ > 0 && current_thread_id_ <= machine.num_harts())
-                           ? machine.hart(current_thread_id_ - 1)
-                           : machine.primary_hart();
+    auto& target_cpu = (current_hart_.raw() < machine.num_harts()) ? machine.hart(current_hart_)
+                                                                   : machine.primary_hart();
     const auto result = read_gdb_reg(idx, target_cpu.state());
     if (result) {
         send_packet(*result);
@@ -325,9 +334,8 @@ void GdbStub::cmd_write_register(const std::string& pkt, simrv::core::Machine& m
         return;
     }
     const std::size_t idx = std::stoul(pkt.substr(1, eq - 1), nullptr, 16);
-    auto& target_cpu = (current_thread_id_ > 0 && current_thread_id_ <= machine.num_harts())
-                           ? machine.hart(current_thread_id_ - 1)
-                           : machine.primary_hart();
+    auto& target_cpu = (current_hart_.raw() < machine.num_harts()) ? machine.hart(current_hart_)
+                                                                   : machine.primary_hart();
     write_gdb_reg(idx, pkt, eq + 1, target_cpu.state());
     send_packet("OK");
 }
@@ -339,19 +347,19 @@ void GdbStub::cmd_read_memory(const std::string& pkt, simrv::core::Machine& mach
         send_packet("E01");
         return;
     }
-    const uint32_t addr = static_cast<uint32_t>(std::stoul(pkt.substr(1, comma - 1), nullptr, 16));
-    const uint32_t len = static_cast<uint32_t>(std::stoul(pkt.substr(comma + 1), nullptr, 16));
+    const auto addr = static_cast<Address>(std::stoull(pkt.substr(1, comma - 1), nullptr, 16));
+    const auto len = static_cast<size_t>(std::stoul(pkt.substr(comma + 1), nullptr, 16));
 
     // Clamp to a safe maximum
-    const uint32_t safe_len = std::min(len, uint32_t{4096});
+    const size_t safe_len = std::min(len, size_t{4096});
 
     std::string resp;
-    resp.reserve(static_cast<std::size_t>(safe_len) * 2);
+    resp.reserve(safe_len * 2);
 
     // Direct physical memory read (bypasses MMU)
     const auto ram = machine.ram_view();
 
-    for (uint32_t i = 0; i < safe_len; ++i) {
+    for (size_t i = 0; i < safe_len; ++i) {
         const auto phys = static_cast<uint64_t>(addr) + i;
         uint8_t byte_val = 0;
         if (ram.contains(phys)) {
@@ -370,9 +378,9 @@ void GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& mac
         send_packet("E01");
         return;
     }
-    const uint32_t addr = static_cast<uint32_t>(std::stoul(pkt.substr(1, comma - 1), nullptr, 16));
-    const uint32_t len =
-        static_cast<uint32_t>(std::stoul(pkt.substr(comma + 1, colon - comma - 1), nullptr, 16));
+    const auto addr = static_cast<Address>(std::stoull(pkt.substr(1, comma - 1), nullptr, 16));
+    const auto len =
+        static_cast<size_t>(std::stoul(pkt.substr(comma + 1, colon - comma - 1), nullptr, 16));
 
     const auto ram = machine.ram_view();
 
@@ -383,8 +391,8 @@ void GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& mac
         return 0;
     };
 
-    for (uint32_t i = 0; i < len; ++i) {
-        const auto hex_off = colon + 1 + static_cast<std::size_t>(i) * 2;
+    for (size_t i = 0; i < len; ++i) {
+        const auto hex_off = colon + 1 + i * 2;
         if (hex_off + 1 >= pkt.size()) break;
         const auto byte_val =
             static_cast<uint8_t>((hd(pkt.at(hex_off)) << 4) | hd(pkt.at(hex_off + 1)));
@@ -409,32 +417,32 @@ void GdbStub::cmd_insert_breakpoint(const std::string& pkt, simrv::core::Machine
         return;
     }
 
-    const uint32_t type = static_cast<uint32_t>(std::stoul(pkt.substr(1, c1 - 1), nullptr, 16));
-    if (type != 0) {
+    const auto type = static_cast<uint32_t>(std::stoul(pkt.substr(1, c1 - 1), nullptr, 16));
+    if (type != std::to_underlying(GdbBreakpointType::Software)) {
         send_packet("");
         return;
     }  // only sw breakpoints
 
-    const uint32_t addr =
-        static_cast<uint32_t>(std::stoul(pkt.substr(c1 + 1, c2 - c1 - 1), nullptr, 16));
+    const auto addr =
+        static_cast<Address>(std::stoull(pkt.substr(c1 + 1, c2 - c1 - 1), nullptr, 16));
 
     const auto phys = static_cast<uint64_t>(addr);
 
     const auto ram = machine.ram_view();
-    if (!ram.contains(phys, 4)) {
+    if (!ram.contains(phys, sizeof(Instruction))) {
         send_packet("E02");
         return;
     }
     auto* ptr = ram.unchecked_ptr(phys);
 
     // Save original word
-    uint32_t orig = 0;
-    std::memcpy(&orig, ptr, 4);
+    Instruction orig = 0;
+    std::memcpy(&orig, ptr, sizeof(Instruction));
     sw_breakpoints_[addr] = orig;
 
     // Write EBREAK
-    const uint32_t ebrk = kEbreak32;
-    std::memcpy(ptr, &ebrk, 4);
+    const Instruction ebrk = kEbreak32;
+    std::memcpy(ptr, &ebrk, sizeof(Instruction));
 
     send_packet("OK");
 }
@@ -452,14 +460,14 @@ void GdbStub::cmd_remove_breakpoint(const std::string& pkt, simrv::core::Machine
         return;
     }
 
-    const uint32_t type = static_cast<uint32_t>(std::stoul(pkt.substr(1, c1 - 1), nullptr, 16));
-    if (type != 0) {
+    const auto type = static_cast<uint32_t>(std::stoul(pkt.substr(1, c1 - 1), nullptr, 16));
+    if (type != std::to_underlying(GdbBreakpointType::Software)) {
         send_packet("");
         return;
     }
 
-    const uint32_t addr =
-        static_cast<uint32_t>(std::stoul(pkt.substr(c1 + 1, c2 - c1 - 1), nullptr, 16));
+    const auto addr =
+        static_cast<Address>(std::stoull(pkt.substr(c1 + 1, c2 - c1 - 1), nullptr, 16));
 
     auto it = sw_breakpoints_.find(addr);
     if (it == sw_breakpoints_.end()) {
@@ -469,9 +477,9 @@ void GdbStub::cmd_remove_breakpoint(const std::string& pkt, simrv::core::Machine
 
     const auto phys = static_cast<uint64_t>(addr);
     const auto ram = machine.ram_view();
-    if (ram.contains(phys, 4)) {
+    if (ram.contains(phys, sizeof(Instruction))) {
         auto* ptr = ram.unchecked_ptr(phys);
-        std::memcpy(ptr, &it->second, 4);
+        std::memcpy(ptr, &it->second, sizeof(Instruction));
     }
     sw_breakpoints_.erase(it);
     send_packet("OK");
@@ -500,7 +508,7 @@ void GdbStub::handle_query(const std::string& pkt, simrv::core::Machine& machine
         return;
     }
     if (pkt == "qC") {
-        send_packet(std::format("QC{:x}", current_thread_id_));
+        send_packet(std::format("QC{:x}", current_hart_.raw() + 1));
         return;
     }
     if (pkt == "qfThreadInfo") {
@@ -607,9 +615,9 @@ auto GdbStub::handle_packet(const std::string& pkt, simrv::core::Machine& machin
             if (pkt.size() > 2) {
                 const long tid = std::stol(pkt.substr(2), nullptr, 16);
                 if (tid > 0 && static_cast<size_t>(tid) <= machine.num_harts()) {
-                    current_thread_id_ = static_cast<uint32_t>(tid);
+                    current_hart_ = HartId{static_cast<uint32_t>(tid - 1)};
                 } else if (tid == 0 || tid == -1) {
-                    current_thread_id_ = 1;
+                    current_hart_ = HartId{0};
                 }
             }
             send_packet("OK");
@@ -664,7 +672,7 @@ void GdbStub::poll(simrv::core::Machine& machine) {
 
     // Non-blocking check using poll(2)
     struct pollfd pfd{};
-    pfd.fd = conn_fd_;
+    pfd.fd = conn_fd_.get();
     pfd.events = POLLIN;
     const int rc = ::poll(&pfd, 1, 0);
     if (rc <= 0) return;

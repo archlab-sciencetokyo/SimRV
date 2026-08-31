@@ -150,11 +150,10 @@ void CPU::TLB_flush() {
     dcache.flush();
     soft_tlb_flush();
 }
-
-void CPU::TLB_flush(bool match_all_vaddr, Address vaddr, bool match_all_asid, Word asid) {
-    tlb.flush_selective(match_all_vaddr, vaddr, match_all_asid, asid);
+void CPU::TLB_flush(const core::TlbFlushFilter& filter) {
+    tlb.flush_selective(filter);
     decode_cache.flush();
-    soft_tlb_flush_selective(match_all_vaddr, vaddr, match_all_asid, asid);
+    soft_tlb_flush_selective(filter);
 }
 
 void CPU::soft_tlb_flush() {
@@ -169,10 +168,7 @@ void CPU::soft_tlb_flush() {
     }
 }
 
-void CPU::soft_tlb_flush_selective(bool /*match_all_vaddr*/, Address /*vaddr*/,
-                                   bool /*match_all_asid*/, Word /*asid*/) {
-    soft_tlb_flush();
-}
+void CPU::soft_tlb_flush_selective(const core::TlbFlushFilter& /*filter*/) { soft_tlb_flush(); }
 
 auto CPU::get_mstatus(CSRValue mask) const -> CSRValue { return csr_file.getMstatus(mask); }
 

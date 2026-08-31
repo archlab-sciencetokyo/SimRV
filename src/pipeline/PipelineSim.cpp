@@ -37,14 +37,14 @@ void PipelineSim::advance_cycle(const PipelineCycleEvent& event) {
                            .branched = stage.instruction.branched,
                            .target_pc = stage.instruction.target_pc};
     };
-    ca_regs_[0] = copy_stage(event.fetch);
-    ca_regs_[1] = copy_stage(event.decode);
-    ca_regs_[2] = copy_stage(event.execute);
-    ca_regs_[3] = copy_stage(event.memory);
-    ca_regs_[4] = copy_stage(event.writeback);
-    ca_regs_[0].icache_miss = event.icache_miss;
-    ca_regs_[0].tlb_miss = event.tlb_miss;
-    ca_regs_[3].dcache_miss = event.dcache_miss;
+    ca_regs_[std::to_underlying(PipelineStage::Fetch)] = copy_stage(event.fetch);
+    ca_regs_[std::to_underlying(PipelineStage::Decode)] = copy_stage(event.decode);
+    ca_regs_[std::to_underlying(PipelineStage::Execute)] = copy_stage(event.execute);
+    ca_regs_[std::to_underlying(PipelineStage::Memory)] = copy_stage(event.memory);
+    ca_regs_[std::to_underlying(PipelineStage::Writeback)] = copy_stage(event.writeback);
+    ca_regs_[std::to_underlying(PipelineStage::Fetch)].icache_miss = event.icache_miss;
+    ca_regs_[std::to_underlying(PipelineStage::Fetch)].tlb_miss = event.tlb_miss;
+    ca_regs_[std::to_underlying(PipelineStage::Memory)].dcache_miss = event.dcache_miss;
 
     const PipelineCycleMetrics metrics{
         .fetch_stalled = event.fetch.stalled,
@@ -68,11 +68,16 @@ void PipelineSim::advance_cycle(const PipelineCycleEvent& event) {
         return PipelineCycleSnapshot::StageInfo{
             .pc = reg.pc, .op_id = reg.op_id, .valid = reg.valid, .stalled = stage_stalled};
     };
-    snapshot.f = stage_info(ca_regs_[0], event.fetch.stalled);
-    snapshot.d = stage_info(ca_regs_[1], event.decode.stalled);
-    snapshot.e = stage_info(ca_regs_[2], event.execute.stalled);
-    snapshot.m = stage_info(ca_regs_[3], event.memory.stalled);
-    snapshot.w = stage_info(ca_regs_[4], event.writeback.stalled);
+    snapshot.f =
+        stage_info(ca_regs_[std::to_underlying(PipelineStage::Fetch)], event.fetch.stalled);
+    snapshot.d =
+        stage_info(ca_regs_[std::to_underlying(PipelineStage::Decode)], event.decode.stalled);
+    snapshot.e =
+        stage_info(ca_regs_[std::to_underlying(PipelineStage::Execute)], event.execute.stalled);
+    snapshot.m =
+        stage_info(ca_regs_[std::to_underlying(PipelineStage::Memory)], event.memory.stalled);
+    snapshot.w =
+        stage_info(ca_regs_[std::to_underlying(PipelineStage::Writeback)], event.writeback.stalled);
     ca_history_[ca_history_head_] = snapshot;
     ca_history_head_ = (ca_history_head_ + 1) % kCaHistoryCapacity;
     if (ca_history_size_ < kCaHistoryCapacity) ++ca_history_size_;
@@ -99,38 +104,36 @@ namespace {
 const PipelineReg kEmptyPipelineRegister{};
 }
 
-auto PipelineSim::f_reg() const -> const PipelineReg& {
-    if (ca_kernel_active_) return ca_regs_[0];
-    return kEmptyPipelineRegister;
-}
-auto PipelineSim::d_reg() const -> const PipelineReg& {
-    if (ca_kernel_active_) return ca_regs_[1];
-    return kEmptyPipelineRegister;
-}
-auto PipelineSim::e_reg() const -> const PipelineReg& {
-    if (ca_kernel_active_) return ca_regs_[2];
-    return kEmptyPipelineRegister;
-}
-auto PipelineSim::m_reg() const -> const PipelineReg& {
-    if (ca_kernel_active_) return ca_regs_[3];
-    return kEmptyPipelineRegister;
-}
+auto PipelineSim::f_reg() const -> const PipelineReg& { return stage_reg(PipelineStage::Fetch); }
+auto PipelineSim::d_reg() const -> const PipelineReg& { return stage_reg(PipelineStage::Decode); }
+auto PipelineSim::e_reg() const -> const PipelineReg& { return stage_reg(PipelineStage::Execute); }
+auto PipelineSim::m_reg() const -> const PipelineReg& { return stage_reg(PipelineStage::Memory); }
 auto PipelineSim::w_reg() const -> const PipelineReg& {
-    if (ca_kernel_active_) return ca_regs_[4];
+    return stage_reg(PipelineStage::Writeback);
+}
+auto PipelineSim::stage_reg(PipelineStage stage) const -> const PipelineReg& {
+    const auto idx = std::to_underlying(stage);
+    if (ca_kernel_active_ && idx < ca_regs_.size()) return ca_regs_[idx];
     return kEmptyPipelineRegister;
 }
 
 auto PipelineSim::div_busy_cycles_remaining() const -> LatencyCycles {
-    return operation::is_divide_or_remainder(ca_regs_[2].op_id) ? ca_regs_[2].remaining_latency : 0;
+    return operation::is_divide_or_remainder(
+               ca_regs_[std::to_underlying(PipelineStage::Execute)].op_id)
+               ? ca_regs_[std::to_underlying(PipelineStage::Execute)].remaining_latency
+               : 0;
 }
 auto PipelineSim::icache_stall_remaining() const -> LatencyCycles {
-    return ca_regs_[0].icache_miss ? 1 : 0;
+    return ca_regs_[std::to_underlying(PipelineStage::Fetch)].icache_miss ? 1 : 0;
 }
 auto PipelineSim::dcache_stall_remaining() const -> LatencyCycles {
-    return (ca_regs_[3].dcache_miss || ca_regs_[4].dcache_miss) ? 1 : 0;
+    return (ca_regs_[std::to_underlying(PipelineStage::Memory)].dcache_miss ||
+            ca_regs_[std::to_underlying(PipelineStage::Writeback)].dcache_miss)
+               ? 1
+               : 0;
 }
 auto PipelineSim::tlb_stall_remaining() const -> LatencyCycles {
-    return ca_regs_[0].tlb_miss ? 1 : 0;
+    return ca_regs_[std::to_underlying(PipelineStage::Fetch)].tlb_miss ? 1 : 0;
 }
 auto PipelineSim::control_bubble_remaining() const -> LatencyCycles { return 0; }
 
@@ -144,11 +147,11 @@ auto PipelineSim::save_state() const -> PipelineSimState {
         const auto history = cycle_history();
         state.cycle_history.reserve(history.size());
         for (size_t i = 0; i < history.size(); ++i) state.cycle_history.push_back(history.at(i));
-        state.f_reg = ca_regs_[0];
-        state.d_reg = ca_regs_[1];
-        state.e_reg = ca_regs_[2];
-        state.m_reg = ca_regs_[3];
-        state.w_reg = ca_regs_[4];
+        state.f_reg = ca_regs_[std::to_underlying(PipelineStage::Fetch)];
+        state.d_reg = ca_regs_[std::to_underlying(PipelineStage::Decode)];
+        state.e_reg = ca_regs_[std::to_underlying(PipelineStage::Execute)];
+        state.m_reg = ca_regs_[std::to_underlying(PipelineStage::Memory)];
+        state.w_reg = ca_regs_[std::to_underlying(PipelineStage::Writeback)];
     }
     return state;
 }
