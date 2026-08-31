@@ -2,7 +2,7 @@
 
 Branch: `release/3.0.0-alpha.1`  
 PR: https://github.com/archlab-sciencetokyo/SimRV/pull/26 (target: `dev`)  
-Latest functional commit: `0ddb6a1 refactor(runtime): share SMP worker quiescence wait`
+Latest functional commit: `8fe4ac5 refactor(runtime): scope runner activity accounting`
 
 Do not create a tag or GitHub release. Keep the PR as the delivery vehicle until all
 required qualification checks are green.
