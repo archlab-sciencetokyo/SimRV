@@ -2,7 +2,7 @@
 
 Branch: `release/3.0.0-alpha.1`  
 PR: https://github.com/archlab-sciencetokyo/SimRV/pull/26 (target: `dev`)  
-Latest commit: `52d5650 fix(runtime): quiesce SMP execution for TUI control`
+Latest functional commit: `5478897 fix(tui): serialize live hart snapshot publication`
 
 Do not create a tag or GitHub release. Keep the PR as the delivery vehicle until all
 required qualification checks are green.
