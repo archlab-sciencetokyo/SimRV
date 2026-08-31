@@ -64,6 +64,9 @@ Files to inspect:
   modern-platform passed five consecutive runs with leak detection disabled.
 - Consolidated the identical Baremetal/OS worker-quiescence wait loops into one
   self-worker-aware helper, so pause/shutdown semantics cannot drift between runners.
+- Added an RAII activity-counter guard for primary runner cycles and fast batches, ensuring every
+  exit path decrements and wakes quiescence waiters while retaining the established runner-flag
+  ordering.
 
 ## Local qualification already completed
 

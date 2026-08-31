@@ -42,6 +42,25 @@ void wait_for_worker_quiescence(std::atomic<uint32_t>& workers_in_cycle) {
     }
 }
 
+class RunnerActivityGuard {
+   public:
+    explicit RunnerActivityGuard(std::atomic<uint32_t>& runner_in_cycle) noexcept
+        : runner_in_cycle_(runner_in_cycle) {
+        runner_in_cycle_.fetch_add(1, std::memory_order_acq_rel);
+    }
+
+    ~RunnerActivityGuard() {
+        runner_in_cycle_.fetch_sub(1, std::memory_order_acq_rel);
+        runner_in_cycle_.notify_all();
+    }
+
+    RunnerActivityGuard(const RunnerActivityGuard&) = delete;
+    auto operator=(const RunnerActivityGuard&) -> RunnerActivityGuard& = delete;
+
+   private:
+    std::atomic<uint32_t>& runner_in_cycle_;
+};
+
 }  // namespace
 
 /// Bare-metal and OS scheduling stay outside CPU's per-instruction fast path.  The selected
@@ -275,26 +294,20 @@ void Machine::prepare_runner_cycle() {
 }
 
 void Machine::execute_runner_cycle() {
-    runner_in_cycle_.fetch_add(1, std::memory_order_acq_rel);
+    RunnerActivityGuard runner_activity(runner_in_cycle_);
     const auto state = execution_state();
     if (state != ExecutionState::Running && state != ExecutionState::Stepping) {
-        runner_in_cycle_.fetch_sub(1, std::memory_order_acq_rel);
-        runner_in_cycle_.notify_all();
         return;
     }
     g_primary_runner_active = true;
     std::visit([this](auto& runner) { runner.execute(*this); }, runtime_->runner);
     if (tui_enabled()) publish_tui_execution_snapshot();
     g_primary_runner_active = false;
-    runner_in_cycle_.fetch_sub(1, std::memory_order_acq_rel);
-    runner_in_cycle_.notify_all();
 }
 
 auto Machine::execute_runner_fast_batch(uint32_t batch_size) -> bool {
-    runner_in_cycle_.fetch_add(1, std::memory_order_acq_rel);
+    RunnerActivityGuard runner_activity(runner_in_cycle_);
     if (execution_state() != ExecutionState::Running) {
-        runner_in_cycle_.fetch_sub(1, std::memory_order_acq_rel);
-        runner_in_cycle_.notify_all();
         return false;
     }
     g_primary_runner_active = true;
@@ -303,8 +316,6 @@ auto Machine::execute_runner_fast_batch(uint32_t batch_size) -> bool {
         runtime_->runner);
     if (executed && tui_enabled()) publish_tui_execution_snapshot();
     g_primary_runner_active = false;
-    runner_in_cycle_.fetch_sub(1, std::memory_order_acq_rel);
-    runner_in_cycle_.notify_all();
     return executed;
 }
 
