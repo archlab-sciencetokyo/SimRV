@@ -72,12 +72,50 @@ using IrqNumber = uint32_t;
 using InterruptSourceId = uint32_t;
 using InterruptPriority = uint32_t;
 using PlicContextId = uint32_t;
+enum class IrqLevel : bool { Deasserted = false, Asserted = true };
+using TimeBaseTicks = Counter;
+
 using Funct7 = uint8_t;
 using Funct12 = uint16_t;
 using Funct6 = uint8_t;
 using Funct2 = uint8_t;
 using CsrImm = uint8_t;
 enum class AccessWidth : uint8_t { Byte = 1, HalfWord = 2, Word = 4, DoubleWord = 8 };
+
+// Symbol table & debugger domain types
+enum class SymbolType : uint8_t {
+    NoType = 0,
+    Object = 1,
+    Function = 2,
+    Section = 3,
+    File = 4,
+    Common = 5,
+    Tls = 6
+};
+enum class SymbolBinding : uint8_t { Local = 0, Global = 1, Weak = 2 };
+using BreakpointId = uint32_t;
+using WatchpointId = uint32_t;
+
+// UART 16550A domain types
+enum class UartRegister : uint8_t {
+    RbrThrDll = 0,
+    IerDlm = 1,
+    IirFcr = 2,
+    Lcr = 3,
+    Mcr = 4,
+    Lsr = 5,
+    Msr = 6,
+    Scr = 7
+};
+enum class UartRegStride : int8_t { Auto = -1, Byte = 0, Word = 2 };
+
+// PMP domain types
+enum class PmpMode : uint8_t { Off = 0x00, Tor = 0x08, Na4 = 0x10, Napot = 0x18 };
+enum class PmpPermission : uint8_t { None = 0, Read = 1, Write = 2, Execute = 4, Lock = 0x80 };
+using PmpIndex = uint8_t;
+
+// TileLink-C channel identification
+enum class TileLinkChannel : uint8_t { A = 0, B = 1, C = 2, D = 3, E = 4 };
 
 // TLB domain types
 using Asid = uint16_t;

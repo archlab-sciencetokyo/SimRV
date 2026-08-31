@@ -70,6 +70,22 @@ enum class TlOpcodeD : uint8_t {
 enum class TlOpcodeE : uint8_t { GrantAck = 0 };
 enum class TlPort : uint8_t { Data = 0, Instruction = 1 };
 
+[[nodiscard]] constexpr auto to_char(TileLinkChannel ch) noexcept -> char {
+    switch (ch) {
+        case TileLinkChannel::A:
+            return 'A';
+        case TileLinkChannel::B:
+            return 'B';
+        case TileLinkChannel::C:
+            return 'C';
+        case TileLinkChannel::D:
+            return 'D';
+        case TileLinkChannel::E:
+            return 'E';
+    }
+    return '?';
+}
+
 struct TlManagerCapabilities {
     bool acquire_block = false;
     bool acquire_perm = false;

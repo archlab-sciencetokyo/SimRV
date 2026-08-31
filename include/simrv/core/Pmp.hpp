@@ -34,6 +34,25 @@ constexpr uint8_t kPmpModeTor = 0x08;
 constexpr uint8_t kPmpModeNa4 = 0x10;
 constexpr uint8_t kPmpModeNapot = 0x18;
 
+/**
+ * @struct PmpConfigEntry
+ * @brief Structured view over a single 8-bit PMP configuration register (pmpcfg).
+ */
+struct PmpConfigEntry {
+    uint8_t raw = 0;
+
+    [[nodiscard]] constexpr auto mode() const noexcept -> PmpMode {
+        return static_cast<PmpMode>(raw & kPmpA);
+    }
+    [[nodiscard]] constexpr auto is_locked() const noexcept -> bool { return (raw & kPmpL) != 0; }
+    [[nodiscard]] constexpr auto readable() const noexcept -> bool { return (raw & kPmpR) != 0; }
+    [[nodiscard]] constexpr auto writable() const noexcept -> bool { return (raw & kPmpW) != 0; }
+    [[nodiscard]] constexpr auto executable() const noexcept -> bool { return (raw & kPmpX) != 0; }
+    [[nodiscard]] constexpr auto allows(PmpAccessType access) const noexcept -> bool {
+        return (raw & std::to_underlying(access)) != 0;
+    }
+};
+
 inline auto check_access(const ArchState& state, Address paddr, size_t size, PmpAccessType access,
                          std::optional<PrivilegeLevel> priv_override = std::nullopt) -> bool {
     PrivilegeLevel effective_priv = priv_override.value_or(state.priv);
@@ -54,9 +73,9 @@ inline auto check_access(const ArchState& state, Address paddr, size_t size, Pmp
     const Address req_end = paddr + size;
 
     for (size_t i = 0; i < state.num_active_pmp; ++i) {
-        const uint8_t cfg = state.pmpcfg[i];
-        const uint8_t mode = cfg & kPmpA;
-        if (mode == kPmpModeOff) {
+        const PmpConfigEntry cfg{state.pmpcfg[i]};
+        const PmpMode mode = cfg.mode();
+        if (mode == PmpMode::Off) {
             continue;
         }
 
@@ -64,16 +83,16 @@ inline auto check_access(const ArchState& state, Address paddr, size_t size, Pmp
         Address limit = 0;
         bool full_range = false;
 
-        if (mode == kPmpModeTor) {
+        if (mode == PmpMode::Tor) {
             base = (i == 0) ? 0 : (state.pmpaddr[i - 1] << 2);
             limit = state.pmpaddr[i] << 2;
             if (limit <= base) {
                 continue;
             }
-        } else if (mode == kPmpModeNa4) {
+        } else if (mode == PmpMode::Na4) {
             base = state.pmpaddr[i] << 2;
             limit = base + 4;
-        } else if (mode == kPmpModeNapot) {
+        } else if (mode == PmpMode::Napot) {
             const auto raw = static_cast<uint64_t>(state.pmpaddr[i]);
             const int t = std::countr_one(raw);
             constexpr unsigned kAddrBits = sizeof(Address) * 8;
@@ -100,11 +119,10 @@ inline auto check_access(const ArchState& state, Address paddr, size_t size, Pmp
         }
 
         if (matches) {
-            const bool is_locked = (cfg & kPmpL) != 0;
-            if (effective_priv == PrivilegeLevel::Machine && !is_locked) {
+            if (effective_priv == PrivilegeLevel::Machine && !cfg.is_locked()) {
                 return true;
             }
-            return (cfg & static_cast<uint8_t>(access)) != 0;
+            return cfg.allows(access);
         }
     }
 

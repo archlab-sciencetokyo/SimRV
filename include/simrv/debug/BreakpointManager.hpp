@@ -30,6 +30,7 @@ enum class RegType : uint8_t { GPR, FPR, VEC, PC };
 
 /// Descriptor for a memory address or register watchpoint.
 struct Watchpoint {
+    WatchpointId id = 0;
     WatchTarget target = WatchTarget::Memory;
     Address addr = 0;
     RegType reg_type = RegType::GPR;
@@ -43,6 +44,7 @@ struct Watchpoint {
 /// Details of a triggered breakpoint or watchpoint hit.
 struct BreakpointHit {
     enum class Reason : uint8_t { Breakpoint, Watchpoint } reason;
+    BreakpointId breakpoint_id = 0;
     Address addr = 0;
     std::string description;
 };

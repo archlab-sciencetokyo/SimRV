@@ -57,12 +57,12 @@ class Uart : public memory::TileLinkNode {
    private:
     simrv::core::Machine& machine_;
     int8_t uart_reg_shift_ = -1;
-    Word uart_lcr_ = 0;
-    Word uart_ier_ = 0;
-    Word uart_mcr_ = 0;
-    Word uart_scr_ = 0;
-    Word uart_dll_ = 0;
-    Word uart_dlm_ = 0;
+    uint8_t uart_lcr_ = 0;
+    uint8_t uart_ier_ = 0;
+    uint8_t uart_mcr_ = 0;
+    uint8_t uart_scr_ = 0;
+    uint8_t uart_dll_ = 0;
+    uint8_t uart_dlm_ = 0;
     bool tx_irq_pending_ = false;
     bool fcr_fifo_enabled_ = true;
 

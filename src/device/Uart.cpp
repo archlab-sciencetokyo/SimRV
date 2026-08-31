@@ -20,11 +20,11 @@ namespace {
 constexpr int D_UART_IRQ_NUM = 3;
 constexpr std::size_t kMaxRxFifoSize = 2048;
 
-void update_uart_irq(simrv::core::Machine& machine, bool uart_rx_ready, Word uart_ier,
+void update_uart_irq(simrv::core::Machine& machine, bool uart_rx_ready, uint8_t uart_ier,
                      bool tx_irq_pending) {
-    const bool rx_irq_enabled = (uart_ier & static_cast<Word>(0x1U)) != 0;
-    const bool tx_irq_enabled = (uart_ier & static_cast<Word>(0x2U)) != 0;
-    bool const irq = (rx_irq_enabled && uart_rx_ready) || (tx_irq_enabled && tx_irq_pending);
+    const bool rx_irq_enabled = (uart_ier & 0x1U) != 0;
+    const bool tx_irq_enabled = (uart_ier & 0x2U) != 0;
+    const bool irq = (rx_irq_enabled && uart_rx_ready) || (tx_irq_enabled && tx_irq_pending);
     machine.set_platform_irq(D_UART_IRQ_NUM, irq);
 }
 
@@ -190,9 +190,9 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
         switch (reg) {
             case simrv::mmio::kUartRegRbrThrDll:
                 if (dlab_enabled) {
-                    uart_dll_ = wdata & static_cast<Word>(0xffU);
+                    uart_dll_ = static_cast<uint8_t>(wdata & 0xffU);
                 } else {
-                    const auto ch = static_cast<uint8_t>(wdata & static_cast<Word>(0xffU));
+                    const auto ch = static_cast<uint8_t>(wdata & 0xffU);
                     // Mirror output to both the built-in TUI and an attached PTY terminal.
                     if (pty_.is_open()) {
                         (void)pty_.write_byte_to_master(ch);
@@ -209,10 +209,10 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                 break;
             case simrv::mmio::kUartRegIerDlm:
                 if (dlab_enabled) {
-                    uart_dlm_ = wdata & static_cast<Word>(0xffU);
+                    uart_dlm_ = static_cast<uint8_t>(wdata & 0xffU);
                 } else {
-                    uart_ier_ = wdata & static_cast<Word>(0x0fU);
-                    if ((uart_ier_ & static_cast<Word>(0x2U)) != 0) {
+                    uart_ier_ = static_cast<uint8_t>(wdata & 0x0fU);
+                    if ((uart_ier_ & 0x2U) != 0) {
                         tx_irq_pending_ = true;
                     }
                     const bool has_rx = rx_ready_.load(std::memory_order_acquire);
@@ -220,8 +220,8 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                 }
                 break;
             case simrv::mmio::kUartRegIirFcr:
-                fcr_fifo_enabled_ = (wdata & static_cast<Word>(0x01U)) != 0;
-                if ((wdata & static_cast<Word>(0x02U)) != 0) {
+                fcr_fifo_enabled_ = (wdata & 0x01U) != 0;
+                if ((wdata & 0x02U) != 0) {
                     std::scoped_lock lock(rx_mutex_);
                     while (!rx_fifo_.empty()) rx_fifo_.pop();
                     rx_ready_.store(false, std::memory_order_release);
@@ -233,15 +233,15 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                 break;
 
             case simrv::mmio::kUartRegLcr:
-                uart_lcr_ = wdata & static_cast<Word>(0xffU);
+                uart_lcr_ = static_cast<uint8_t>(wdata & 0xffU);
                 break;
             case simrv::mmio::kUartRegMcr:
-                uart_mcr_ = wdata & static_cast<Word>(0x1fU);
+                uart_mcr_ = static_cast<uint8_t>(wdata & 0x1fU);
                 break;
             case simrv::mmio::kUartRegMsr:
                 break;
             case simrv::mmio::kUartRegScr:
-                uart_scr_ = wdata & static_cast<Word>(0xffU);
+                uart_scr_ = static_cast<uint8_t>(wdata & 0xffU);
                 break;
             default:
                 break;

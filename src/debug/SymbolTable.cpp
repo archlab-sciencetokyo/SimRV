@@ -197,27 +197,39 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
     return false;
 }
 
-auto SymbolTable::lookup(Address addr) const -> std::string {
+auto SymbolTable::lookup_symbol(Address addr) const -> std::optional<SymbolLookupResult> {
     if (symbols_.empty()) {
-        return "";
+        return std::nullopt;
     }
 
     auto it = symbols_.upper_bound(addr);
     if (it == symbols_.begin()) {
-        return "";
+        return std::nullopt;
     }
     --it;
 
-    Address sym_addr = it->first;
-    const std::string& name = it->second;
-
-    Address offset = addr - sym_addr;
-    if (offset == 0) {
-        return name;
-    } else if (offset < 0x2000) {  // Limit offset to prevent matching distant symbols
-        return std::format("{} + 0x{:x}", name, offset);
+    const Address sym_addr = it->first;
+    const Address offset = addr - sym_addr;
+    if (offset >= 0x2000) {  // Limit offset to prevent matching distant symbols
+        return std::nullopt;
     }
-    return "";
+
+    return SymbolLookupResult{
+        .name = it->second,
+        .base_addr = sym_addr,
+        .offset = offset,
+    };
+}
+
+auto SymbolTable::lookup(Address addr) const -> std::string {
+    const auto res = lookup_symbol(addr);
+    if (!res) {
+        return "";
+    }
+    if (res->is_exact()) {
+        return std::string(res->name);
+    }
+    return std::format("{} + 0x{:x}", res->name, res->offset);
 }
 
 auto SymbolTable::lookup_name(const std::string& name) const -> std::optional<Address> {
