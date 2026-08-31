@@ -141,38 +141,6 @@ auto reg_name(uint32_t r, bool is_fp = false) -> std::string {
     }
 }
 
-[[maybe_unused]] auto extract_bitfields(uint32_t raw_inst) -> Bitfields {
-    Bitfields bf{};
-    bf.opcode = raw_inst & 0x7F;
-    bf.rd = (raw_inst >> 7) & 0x1F;
-    bf.funct3 = (raw_inst >> 12) & 0x07;
-    bf.rs1 = (raw_inst >> 15) & 0x1F;
-    bf.rs2 = (raw_inst >> 20) & 0x1F;
-    bf.funct7 = (raw_inst >> 25) & 0x7F;
-
-    // I-type immediate (sign-extended 12-bit)
-    bf.imm_i = static_cast<int32_t>(raw_inst) >> 20;
-
-    // S-type immediate (sign-extended 12-bit)
-    uint32_t s_raw = ((raw_inst >> 25) & 0x7F) << 5 | ((raw_inst >> 7) & 0x1F);
-    bf.imm_s = (static_cast<int32_t>(s_raw << 20)) >> 20;
-
-    // B-type immediate (sign-extended 13-bit)
-    uint32_t b_raw = ((raw_inst >> 31) & 0x1) << 12 | ((raw_inst >> 7) & 0x1) << 11 |
-                     ((raw_inst >> 25) & 0x3F) << 5 | ((raw_inst >> 8) & 0xF) << 1;
-    bf.imm_b = (static_cast<int32_t>(b_raw << 19)) >> 19;
-
-    // U-type immediate (upper 20 bits)
-    bf.imm_u = raw_inst & 0xFFFFF000;
-
-    // J-type immediate (sign-extended 21-bit)
-    uint32_t j_raw = ((raw_inst >> 31) & 0x1) << 20 | ((raw_inst >> 12) & 0xFF) << 12 |
-                     ((raw_inst >> 20) & 0x1) << 11 | ((raw_inst >> 21) & 0x3FF) << 1;
-    bf.imm_j = (static_cast<int32_t>(j_raw << 11)) >> 11;
-
-    return bf;
-}
-
 auto get_description(OperationId op_id) -> std::pair<std::string_view, std::string_view> {
     static constexpr std::pair<std::string_view, std::string_view> kDefaultDesc = {
         "UNKNOWN",

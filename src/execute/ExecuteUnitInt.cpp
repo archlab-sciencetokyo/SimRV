@@ -272,69 +272,47 @@ auto ExecuteUnit::aluIntW(Register in1, Register in2, isa::OperationId op_id) ->
         using enum isa::OperationId;
         const auto lhs32 = static_cast<uint32_t>(in1);
         const auto rhs32 = static_cast<uint32_t>(in2);
-        int32_t res32 = 0;
 
         switch (op_id) {
             // Base W Arithmetic
             case ADDW:
             case ADDIW:
-                res32 = static_cast<int32_t>(lhs32 + rhs32);
-                break;
+                return static_cast<Register>(
+                    static_cast<int64_t>(static_cast<int32_t>(lhs32 + rhs32)));
             case SUBW:
-                res32 = static_cast<int32_t>(lhs32 - rhs32);
-                break;
+                return static_cast<Register>(
+                    static_cast<int64_t>(static_cast<int32_t>(lhs32 - rhs32)));
             case SLLW:
             case SLLIW:
-                res32 = static_cast<int32_t>(lhs32 << (rhs32 & 0x1F));
-                break;
+                return static_cast<Register>(
+                    static_cast<int64_t>(static_cast<int32_t>(lhs32 << (rhs32 & 0x1F))));
             case SRLW:
             case SRLIW:
-                res32 = static_cast<int32_t>(lhs32 >> (rhs32 & 0x1F));
-                break;
+                return static_cast<Register>(
+                    static_cast<int64_t>(static_cast<int32_t>(lhs32 >> (rhs32 & 0x1F))));
             case SRAW:
             case SRAIW:
-                res32 = static_cast<int32_t>(lhs32) >> (rhs32 & 0x1F);
-                break;
+                return static_cast<Register>(
+                    static_cast<int64_t>(static_cast<int32_t>(lhs32) >> (rhs32 & 0x1F)));
 
             // M-Extension W
             case MULW:
-                res32 = static_cast<int32_t>(lhs32 * rhs32);
-                break;
-            case DIVW: {
-                const auto lhs_s = static_cast<int32_t>(lhs32);
-                const auto rhs_s = static_cast<int32_t>(rhs32);
-                if (rhs_s == 0)
-                    res32 = -1;
-                else if (lhs_s == std::numeric_limits<int32_t>::min() && rhs_s == -1)
-                    res32 = lhs_s;
-                else
-                    res32 = lhs_s / rhs_s;
-                break;
-            }
-            case DIVUW: {
-                if (rhs32 == 0)
-                    res32 = -1;
-                else
-                    res32 = static_cast<int32_t>(lhs32 / rhs32);
-                break;
-            }
-            case REMW: {
-                const auto lhs_s = static_cast<int32_t>(lhs32);
-                const auto rhs_s = static_cast<int32_t>(rhs32);
-                if (rhs_s == 0)
-                    res32 = lhs_s;
-                else if (lhs_s == std::numeric_limits<int32_t>::min() && rhs_s == -1)
-                    res32 = 0;
-                else
-                    res32 = lhs_s % rhs_s;
-                break;
-            }
+            case DIVW:
+            case DIVUW:
+            case REMW:
             case REMUW: {
-                if (rhs32 == 0)
-                    res32 = static_cast<int32_t>(lhs32);
-                else
-                    res32 = static_cast<int32_t>(lhs32 % rhs32);
-                break;
+                isa::OperationId base_op = ADD;
+                if (op_id == MULW)
+                    base_op = MUL;
+                else if (op_id == DIVW)
+                    base_op = DIV;
+                else if (op_id == DIVUW)
+                    base_op = DIVU;
+                else if (op_id == REMW)
+                    base_op = REM;
+                else if (op_id == REMUW)
+                    base_op = REMU;
+                return aluInt32(lhs32, rhs32, base_op);
             }
 
             // B-Extension W cases (delegated to ExecuteUnitB.cpp)
@@ -353,11 +331,8 @@ auto ExecuteUnit::aluIntW(Register in1, Register in2, isa::OperationId op_id) ->
                 return aluIntBW(in1, in2, op_id);
 
             default:
-                break;
+                return 0;
         }
-
-        // Sign-extend 32-bit result to 64-bit register
-        return static_cast<Register>(static_cast<SignedWord>(res32));
     }
 }
 

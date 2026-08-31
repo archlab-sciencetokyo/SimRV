@@ -13,25 +13,6 @@
 
 namespace simrv::util {
 
-struct Bitfields {
-    uint32_t opcode{0};
-    uint32_t rd{0};
-    uint32_t funct3{0};
-    uint32_t rs1{0};
-    uint32_t rs2{0};
-    uint32_t funct7{0};
-    int32_t imm_i{0};
-    int32_t imm_s{0};
-    int32_t imm_b{0};
-    uint32_t imm_u{0};
-    int32_t imm_j{0};
-};
-
-/**
- * @brief Decode bitfields from a 32-bit RISC-V instruction.
- */
-auto extract_bitfields(uint32_t raw_inst) -> Bitfields;
-
 /**
  * @brief Print a detailed educational breakdown of a 32-bit (or 16-bit compressed) instruction.
  * @param raw_inst The raw bits of the instruction to explain.
