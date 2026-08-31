@@ -62,6 +62,8 @@ Files to inspect:
 - Corrected VirtIO sound's device type to 25, yielding modern PCI device ID `0x1059`.
 - Hardened SMP test startup/resume waits with two-second deadlines; ASan/UBSan
   modern-platform passed five consecutive runs with leak detection disabled.
+- Consolidated the identical Baremetal/OS worker-quiescence wait loops into one
+  self-worker-aware helper, so pause/shutdown semantics cannot drift between runners.
 
 ## Local qualification already completed
 

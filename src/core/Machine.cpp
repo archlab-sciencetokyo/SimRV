@@ -33,6 +33,15 @@ namespace {
 thread_local bool g_primary_runner_active = false;
 thread_local bool g_secondary_runner_active = false;
 
+void wait_for_worker_quiescence(std::atomic<uint32_t>& workers_in_cycle) {
+    const uint32_t caller_activity = g_secondary_runner_active ? 1U : 0U;
+    auto active = workers_in_cycle.load(std::memory_order_acquire);
+    while (active > caller_activity) {
+        workers_in_cycle.wait(active, std::memory_order_relaxed);
+        active = workers_in_cycle.load(std::memory_order_acquire);
+    }
+}
+
 }  // namespace
 
 /// Bare-metal and OS scheduling stay outside CPU's per-instruction fast path.  The selected
@@ -465,14 +474,7 @@ void BaremetalRunner::start(Machine& machine) {
     }
 }
 
-void BaremetalRunner::wait_for_quiescence() {
-    const uint32_t caller_activity = g_secondary_runner_active ? 1U : 0U;
-    auto active = workers_in_cycle_.load(std::memory_order_acquire);
-    while (active > caller_activity) {
-        workers_in_cycle_.wait(active, std::memory_order_relaxed);
-        active = workers_in_cycle_.load(std::memory_order_acquire);
-    }
-}
+void BaremetalRunner::wait_for_quiescence() { wait_for_worker_quiescence(workers_in_cycle_); }
 
 void BaremetalRunner::stop_threads() {
     workers_running_.store(false, std::memory_order_release);
@@ -641,14 +643,7 @@ void OsRunner::start(Machine& machine) {
     }
 }
 
-void OsRunner::wait_for_quiescence() {
-    const uint32_t caller_activity = g_secondary_runner_active ? 1U : 0U;
-    auto active = workers_in_cycle_.load(std::memory_order_acquire);
-    while (active > caller_activity) {
-        workers_in_cycle_.wait(active, std::memory_order_relaxed);
-        active = workers_in_cycle_.load(std::memory_order_acquire);
-    }
-}
+void OsRunner::wait_for_quiescence() { wait_for_worker_quiescence(workers_in_cycle_); }
 
 void OsRunner::stop_threads() {
     workers_running_.store(false, std::memory_order_release);
