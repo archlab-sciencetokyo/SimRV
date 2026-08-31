@@ -86,19 +86,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
             }
             result |= (byte_val & 0xFFULL) << (8 * b);
         }
-        const unsigned bits = 8 * size_bytes;
-        if (bits < simrv::xlen::kXLenBits) {
-            const Word mask = (static_cast<Word>(1) << bits) - 1;
-            result &= mask;
-            constexpr auto kSignExtendBit = 0x4u;
-            if ((funct3 & kSignExtendBit) == 0) {
-                const Word sign_bit = static_cast<Word>(1) << (bits - 1);
-                if ((result & sign_bit) != 0) {
-                    result |= ~mask;
-                }
-            }
-        }
-        return static_cast<Word>(result & simrv::xlen::kXLenMask);
+        return simrv::memory::extend_loaded_value(result, static_cast<uint8_t>(funct3));
     }
 
     const PrivilegeLevel eff_priv = cpu.effective_data_privilege();
@@ -169,18 +157,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                     return 0;
                 }
                 Word rdata = timed.payload.data;
-                const unsigned req_size_bytes = 1u << (funct3 & 0x3u);
-                const unsigned bits = 8 * req_size_bytes;
-                if (bits < simrv::xlen::kXLenBits) {
-                    const Word mask = (static_cast<Word>(1) << bits) - 1;
-                    rdata &= mask;
-                    constexpr auto kSignExtendBit = 0x4u;
-                    if ((funct3 & kSignExtendBit) == 0) {
-                        const Word sign_bit = static_cast<Word>(1) << (bits - 1);
-                        if ((rdata & sign_bit) != 0) rdata |= ~mask;
-                    }
-                }
-                return static_cast<Word>(rdata & simrv::xlen::kXLenMask);
+                return simrv::memory::extend_loaded_value(rdata, static_cast<uint8_t>(funct3));
             }
             TlChannelA req{};
             req.opcode = TlOpcodeA::Get;
@@ -217,19 +194,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                     const unsigned lane_offset = static_cast<unsigned>(addr & (kTlBeatBytes - 1u));
                     rdata >>= (lane_offset * 8u);
                 }
-                const unsigned bits = 8 * req_size_bytes;
-                if (bits < simrv::xlen::kXLenBits) {
-                    const Word mask = (static_cast<Word>(1) << bits) - 1;
-                    rdata &= mask;
-                    constexpr auto kSignExtendBit = 0x4u;
-                    if ((funct3 & kSignExtendBit) == 0) {
-                        const Word sign_bit = static_cast<Word>(1) << (bits - 1);
-                        if ((rdata & sign_bit) != 0) {
-                            rdata |= ~mask;
-                        }
-                    }
-                }
-                return static_cast<Word>(rdata & simrv::xlen::kXLenMask);
+                return simrv::memory::extend_loaded_value(rdata, static_cast<uint8_t>(funct3));
             }
             cpu.active_context().pending_exception = ExceptionCode::FaultLoad;
             cpu.active_context().pending_tval = v_addr;

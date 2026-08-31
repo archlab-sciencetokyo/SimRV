@@ -139,52 +139,15 @@ constexpr auto store_width_bytes(Instruction funct3) -> size_t {
 // ========== Fast Host Memory Read/Write Operations (Direct Translation Fast Path) ==========
 
 inline auto host_read_fast(const Byte* host_ptr, Instruction funct3) -> Word {
-    auto read = [host_ptr]<typename T>() -> T {
-        T value{};
-        std::memcpy(&value, host_ptr, sizeof(value));
-        return value;
-    };
-    switch (static_cast<isa::Funct3>(funct3 & 0x7u)) {
-        case isa::Funct3::Lb:
-            return static_cast<Word>(static_cast<SignedWord>(read.template operator()<int8_t>()));
-        case isa::Funct3::Lbu:
-            return static_cast<Word>(read.template operator()<uint8_t>());
-        case isa::Funct3::Lh:
-            return static_cast<Word>(static_cast<SignedWord>(read.template operator()<int16_t>()));
-        case isa::Funct3::Lhu:
-            return static_cast<Word>(read.template operator()<uint16_t>());
-        case isa::Funct3::Lw:
-            return static_cast<Word>(static_cast<SignedWord>(read.template operator()<int32_t>()));
-        case isa::Funct3::Lwu:
-            return static_cast<Word>(read.template operator()<uint32_t>());
-        case isa::Funct3::Ld:
-            return static_cast<Word>(read.template operator()<uint64_t>());
-        default:
-            return 0;
-    }
+    const unsigned size_bytes = 1u << (funct3 & 0x3u);
+    Word raw = 0;
+    std::memcpy(&raw, host_ptr, size_bytes);
+    return extend_loaded_value(raw, static_cast<uint8_t>(funct3));
 }
 
 inline void host_write_fast(Byte* host_ptr, Register val, Instruction funct3) {
-    auto write = [host_ptr]<typename T>(Register value) {
-        const T narrowed = static_cast<T>(value);
-        std::memcpy(host_ptr, &narrowed, sizeof(narrowed));
-    };
-    switch (static_cast<isa::Funct3>(funct3 & 0x7u)) {
-        case isa::Funct3::Sb:
-            write.template operator()<uint8_t>(val);
-            break;
-        case isa::Funct3::Sh:
-            write.template operator()<uint16_t>(val);
-            break;
-        case isa::Funct3::Sw:
-            write.template operator()<uint32_t>(val);
-            break;
-        case isa::Funct3::Sd:
-            write.template operator()<uint64_t>(val);
-            break;
-        default:
-            break;
-    }
+    const unsigned size_bytes = 1u << (funct3 & 0x3u);
+    std::memcpy(host_ptr, &val, size_bytes);
 }
 
 /// ========== Fast RAM Read Operations ==========
