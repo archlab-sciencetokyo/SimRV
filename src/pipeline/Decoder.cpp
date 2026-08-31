@@ -493,6 +493,11 @@ auto operation_name(isa::OperationId operation) noexcept -> std::string_view {
 
 namespace {
 
+template <const auto& Table>
+[[nodiscard]] constexpr auto decode_table(uint32_t index) noexcept -> OperationId {
+    return index < Table.size() ? Table[index] : OperationId::UNKNOWN;
+}
+
 constexpr std::array<OperationId, 8> kBranchTable = {
     OperationId::BEQ, OperationId::BNE, OperationId::UNKNOWN, OperationId::UNKNOWN,
     OperationId::BLT, OperationId::BGE, OperationId::BLTU,    OperationId::BGEU};
@@ -505,17 +510,9 @@ constexpr std::array<OperationId, 8> kStoreTable = {
     OperationId::SB,      OperationId::SH,      OperationId::SW,      OperationId::SD,
     OperationId::UNKNOWN, OperationId::UNKNOWN, OperationId::UNKNOWN, OperationId::UNKNOWN};
 
-[[nodiscard]] constexpr auto decode_branch(uint32_t funct3) noexcept -> OperationId {
-    return funct3 < kBranchTable.size() ? kBranchTable[funct3] : OperationId::UNKNOWN;
-}
-
-[[nodiscard]] constexpr auto decode_load(uint32_t funct3) noexcept -> OperationId {
-    return funct3 < kLoadTable.size() ? kLoadTable[funct3] : OperationId::UNKNOWN;
-}
-
-[[nodiscard]] constexpr auto decode_store(uint32_t funct3) noexcept -> OperationId {
-    return funct3 < kStoreTable.size() ? kStoreTable[funct3] : OperationId::UNKNOWN;
-}
+constexpr auto decode_branch = decode_table<kBranchTable>;
+constexpr auto decode_load = decode_table<kLoadTable>;
+constexpr auto decode_store = decode_table<kStoreTable>;
 
 constexpr std::array<OperationId, 8> kOpImmBaseTable = {
     OperationId::ADDI, OperationId::UNKNOWN, OperationId::SLTI, OperationId::SLTIU,
@@ -707,9 +704,7 @@ constexpr std::array<OperationId, 8> kSystemCsrTable = {
     OperationId::UNKNOWN, OperationId::CSRRWI, OperationId::CSRRSI, OperationId::CSRRCI,
 };
 
-[[nodiscard]] constexpr auto decode_system_csr(uint32_t funct3) noexcept -> OperationId {
-    return funct3 < kSystemCsrTable.size() ? kSystemCsrTable[funct3] : OperationId::UNKNOWN;
-}
+constexpr auto decode_system_csr = decode_table<kSystemCsrTable>;
 
 auto decode_system(uint32_t funct3, uint32_t funct7, Instruction ir) -> OperationId {
     if (funct3 == 0) {
@@ -723,9 +718,7 @@ constexpr std::array<OperationId, 8> kMiscMemTable = {
     OperationId::UNKNOWN, OperationId::UNKNOWN, OperationId::UNKNOWN, OperationId::UNKNOWN,
 };
 
-[[nodiscard]] constexpr auto decode_misc_mem(uint32_t funct3) noexcept -> OperationId {
-    return funct3 < kMiscMemTable.size() ? kMiscMemTable[funct3] : OperationId::UNKNOWN;
-}
+constexpr auto decode_misc_mem = decode_table<kMiscMemTable>;
 
 auto decode_ext_i(Opcode op, uint32_t funct3, uint32_t funct7, Instruction ir) -> OperationId {
     switch (op) {
@@ -768,13 +761,8 @@ constexpr std::array<OperationId, 8> kMTable32 = {
     OperationId::MULW, OperationId::UNKNOWN, OperationId::UNKNOWN, OperationId::UNKNOWN,
     OperationId::DIVW, OperationId::DIVUW,   OperationId::REMW,    OperationId::REMUW};
 
-[[nodiscard]] constexpr auto decode_ext_m_op(uint32_t funct3) noexcept -> OperationId {
-    return funct3 < kMTable.size() ? kMTable[funct3] : OperationId::UNKNOWN;
-}
-
-[[nodiscard]] constexpr auto decode_ext_m_op32(uint32_t funct3) noexcept -> OperationId {
-    return funct3 < kMTable32.size() ? kMTable32[funct3] : OperationId::UNKNOWN;
-}
+constexpr auto decode_ext_m_op = decode_table<kMTable>;
+constexpr auto decode_ext_m_op32 = decode_table<kMTable32>;
 
 [[nodiscard]] constexpr auto decode_ext_m(Opcode op, uint32_t funct3) noexcept -> OperationId {
     if (op == Opcode::Op32) {

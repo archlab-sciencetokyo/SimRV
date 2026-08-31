@@ -16,6 +16,7 @@
 
 #include "simrv/Define.hpp"
 #include "simrv/pipeline/Decoder.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
 
 namespace simrv::util {
@@ -30,107 +31,61 @@ using simrv::isa::Opcode;
 using enum simrv::core::Csr;
 
 auto csr_name(uint32_t csr_addr) -> std::string {
-    switch (static_cast<Csr>(csr_addr)) {
-        case Csr::Fflags:
-            return "fflags";
-        case Csr::Frm:
-            return "frm";
-        case Csr::Fcsr:
-            return "fcsr";
-        case Csr::Pmpcfg0:
-            return "pmpcfg0";
-        case Csr::Pmpaddr0:
-            return "pmpaddr0";
-        case Csr::Cycle:
-            return "cycle";
-        case Csr::Time:
-            return "time";
-        case Csr::Instret:
-            return "instret";
-        case Csr::Sstatus:
-            return "sstatus";
-        case Csr::Sie:
-            return "sie";
-        case Csr::Stvec:
-            return "stvec";
-        case Csr::Scounteren:
-            return "scounteren";
-        case Csr::Sscratch:
-            return "sscratch";
-        case Csr::Sepc:
-            return "sepc";
-        case Csr::Scause:
-            return "scause";
-        case Csr::Stval:
-            return "stval";
-        case Csr::Sip:
-            return "sip";
-        case Csr::Satp:
-            return "satp";
-        case Csr::Mvendorid:
-            return "mvendorid";
-        case Csr::Marchid:
-            return "marchid";
-        case Csr::Mimpid:
-            return "mimpid";
-        case Csr::Mhartid:
-            return "mhartid";
-        case Csr::Mconfigptr:
-            return "mconfigptr";
-        case Csr::Mstatus:
-            return "mstatus";
-        case Csr::Misa:
-            return "misa";
-        case Csr::Medeleg:
-            return "medeleg";
-        case Csr::Mideleg:
-            return "mideleg";
-        case Csr::Mie:
-            return "mie";
-        case Csr::Mtvec:
-            return "mtvec";
-        case Csr::Mcounteren:
-            return "mcounteren";
-        case Csr::Mscratch:
-            return "mscratch";
-        case Csr::Mepc:
-            return "mepc";
-        case Csr::Mcause:
-            return "mcause";
-        case Csr::Mtval:
-            return "mtval";
-        case Csr::Mip:
-            return "mip";
-        case Csr::Mcycle:
-            return "mcycle";
-        case Csr::Minstret:
-            return "minstret";
-        case Csr::Mcycleh:
-            return "mcycleh";
-        case Csr::Minstreth:
-            return "minstreth";
-        case Csr::Cycleh:
-            return "cycleh";
-        case Csr::Timeh:
-            return "timeh";
-        case Csr::Instreth:
-            return "instreth";
-        default:
-            return std::format("0x{:03X}", csr_addr);
+    static constexpr std::array<std::pair<Csr, std::string_view>, 43> kCsrNames = {{
+        {Csr::Fflags, "fflags"},
+        {Csr::Frm, "frm"},
+        {Csr::Fcsr, "fcsr"},
+        {Csr::Pmpcfg0, "pmpcfg0"},
+        {Csr::Pmpaddr0, "pmpaddr0"},
+        {Csr::Cycle, "cycle"},
+        {Csr::Time, "time"},
+        {Csr::Instret, "instret"},
+        {Csr::Sstatus, "sstatus"},
+        {Csr::Sie, "sie"},
+        {Csr::Stvec, "stvec"},
+        {Csr::Scounteren, "scounteren"},
+        {Csr::Sscratch, "sscratch"},
+        {Csr::Sepc, "sepc"},
+        {Csr::Scause, "scause"},
+        {Csr::Stval, "stval"},
+        {Csr::Sip, "sip"},
+        {Csr::Satp, "satp"},
+        {Csr::Mvendorid, "mvendorid"},
+        {Csr::Marchid, "marchid"},
+        {Csr::Mimpid, "mimpid"},
+        {Csr::Mhartid, "mhartid"},
+        {Csr::Mconfigptr, "mconfigptr"},
+        {Csr::Mstatus, "mstatus"},
+        {Csr::Misa, "misa"},
+        {Csr::Medeleg, "medeleg"},
+        {Csr::Mideleg, "mideleg"},
+        {Csr::Mie, "mie"},
+        {Csr::Mtvec, "mtvec"},
+        {Csr::Mcounteren, "mcounteren"},
+        {Csr::Mscratch, "mscratch"},
+        {Csr::Mepc, "mepc"},
+        {Csr::Mcause, "mcause"},
+        {Csr::Mtval, "mtval"},
+        {Csr::Mip, "mip"},
+        {Csr::Mcycle, "mcycle"},
+        {Csr::Minstret, "minstret"},
+        {Csr::Mcycleh, "mcycleh"},
+        {Csr::Minstreth, "minstreth"},
+        {Csr::Cycleh, "cycleh"},
+        {Csr::Timeh, "timeh"},
+        {Csr::Instreth, "instreth"},
+    }};
+    const auto target = static_cast<Csr>(csr_addr);
+    for (const auto& [csr, name] : kCsrNames) {
+        if (csr == target) return std::string(name);
     }
+    return std::format("0x{:03X}", csr_addr);
 }
 
 namespace {
 
-const std::array<const char*, 32> ABI_NAMES = {"zero",  "ra", "sp",  "gp",  "tp", "t0", "t1", "t2",
-                                               "s0/fp", "s1", "a0",  "a1",  "a2", "a3", "a4", "a5",
-                                               "a6",    "a7", "s2",  "s3",  "s4", "s5", "s6", "s7",
-                                               "s8",    "s9", "s10", "s11", "t3", "t4", "t5", "t6"};
-
-const std::array<const char*, 32> FP_ABI_NAMES = {
-    "ft0", "ft1", "ft2", "ft3", "ft4",  "ft5",  "ft6", "ft7", "fs0",  "fs1", "fa0",
-    "fa1", "fa2", "fa3", "fa4", "fa5",  "fa6",  "fa7", "fs2", "fs3",  "fs4", "fs5",
-    "fs6", "fs7", "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11"};
+constexpr auto& ABI_NAMES = simrv::tui::kRegNames;
+constexpr auto& FP_ABI_NAMES = simrv::tui::kFpRegNames;
 
 auto reg_name(uint32_t r, bool is_fp = false) -> std::string {
     if (r >= 32) return std::format("r{}", r);
@@ -1733,8 +1688,6 @@ auto get_reg_name(uint32_t idx, bool is_fp) -> std::string {
     }
 }
 
-namespace {
-
 struct HazardOperandsInfo {
     bool writes_rd{false};
     bool rd_is_fp{false};
@@ -2149,8 +2102,6 @@ void explain_datapath_diagram(isa::OperationId op_id, isa::InstFormat fmt, isa::
         std::println("  (Data-path layout not defined for this instruction format)");
     }
 }
-
-}  // namespace
 
 void explain_instruction(uint32_t raw_inst) {
     bool const use_color = simrv::util::is_terminal(STDOUT_FILENO);
