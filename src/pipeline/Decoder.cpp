@@ -833,15 +833,15 @@ constexpr auto kAmoTable = generate_amo_table();
 }
 
 consteval auto generate_fma_table() {
-    DecodeTable<OperationId, 4, 2, OperationId::UNKNOWN> table;
-    table.assign(0, 0, OperationId::FMADD_S);
-    table.assign(0, 1, OperationId::FMADD_D);
-    table.assign(1, 0, OperationId::FMSUB_S);
-    table.assign(1, 1, OperationId::FMSUB_D);
-    table.assign(2, 0, OperationId::FNMSUB_S);
-    table.assign(2, 1, OperationId::FNMSUB_D);
-    table.assign(3, 0, OperationId::FNMADD_S);
-    table.assign(3, 1, OperationId::FNMADD_D);
+    DecodeTable<OperationId, 128, 2, OperationId::UNKNOWN> table;
+    table.assign(std::to_underlying(Opcode::MAdd), 0, OperationId::FMADD_S);
+    table.assign(std::to_underlying(Opcode::MAdd), 1, OperationId::FMADD_D);
+    table.assign(std::to_underlying(Opcode::MSub), 0, OperationId::FMSUB_S);
+    table.assign(std::to_underlying(Opcode::MSub), 1, OperationId::FMSUB_D);
+    table.assign(std::to_underlying(Opcode::NMSub), 0, OperationId::FNMSUB_S);
+    table.assign(std::to_underlying(Opcode::NMSub), 1, OperationId::FNMSUB_D);
+    table.assign(std::to_underlying(Opcode::NMAdd), 0, OperationId::FNMADD_S);
+    table.assign(std::to_underlying(Opcode::NMAdd), 1, OperationId::FNMADD_D);
     return table;
 }
 
@@ -852,24 +852,7 @@ constexpr auto kFmaTable = generate_fma_table();
     if (fmt > 1) {
         return OperationId::UNKNOWN;
     }
-    size_t op_idx = 0;
-    switch (op) {
-        case Opcode::MAdd:
-            op_idx = 0;
-            break;
-        case Opcode::MSub:
-            op_idx = 1;
-            break;
-        case Opcode::NMSub:
-            op_idx = 2;
-            break;
-        case Opcode::NMAdd:
-            op_idx = 3;
-            break;
-        default:
-            return OperationId::UNKNOWN;
-    }
-    return kFmaTable.lookup(op_idx, fmt);
+    return kFmaTable.lookup(std::to_underlying(op), fmt);
 }
 
 consteval auto generate_fp_single_table() {

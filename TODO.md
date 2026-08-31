@@ -54,6 +54,8 @@ Files to inspect:
 - TUI step now uses `Machine::step()` and the CA runner, so it steps all harts once.
 - Vector and FMA decoder dispatch uses checked dense decode tables; the remaining
   vector whole-register move path is an explicit secondary-field legality decoder.
+- FMA dispatch indexes its checked table directly by the encoded opcode and format,
+  with no separate opcode-to-row selection switch.
 - Core decoder regressions cover legal and reserved FMA formats and whole-register
   vector group encodings.
 - Fixed the Clang unused-constant warning in `BranchPredictor`.
