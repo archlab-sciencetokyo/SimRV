@@ -24,22 +24,7 @@ using core::MipBit;
 
 namespace {
 
-enum class ExtId : std::uint32_t {
-    LegacySetTimer = 0x00,
-    LegacyConsolePutchar = 0x01,
-    LegacyConsoleGetchar = 0x02,
-    LegacyShutdown = 0x08,
-    Base = 0x10,
-    Time = 0x54494D45,          // TIME
-    Rfence = 0x52464E43,        // RFNC
-    Ipi = 0x735049,             // sPI
-    Hsm = 0x48534D,             // HSM
-    SystemReset = 0x53525354,   // SRST
-    Pmu = 0x504D55,             // PMU
-    DebugConsole = 0x4442434E,  // DBCN
-    Susp = 0x53555350,          // SUSP
-    Cppc = 0x43505043,          // CPPC
-};
+using ExtId = SbiExtId;
 
 enum class BaseFid : std::uint8_t {
     GetSpecVersion = 0x0,

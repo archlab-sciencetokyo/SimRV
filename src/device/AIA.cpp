@@ -42,7 +42,7 @@ void Imsic::write32(Address offset, uint32_t val) {
         const uint32_t id = val & 0x7ffU;
         if (id > 0 && id < kNumInterrupts) {
             files_[hart_idx].eip |= (1ULL << id);
-            update_hart(hart_idx);
+            update_hart(HartId{static_cast<uint32_t>(hart_idx)});
         }
     }
 }
@@ -321,13 +321,15 @@ void Aplic::update() {
                 const uint32_t tgt = target_[src];
                 const size_t hart_idx = (tgt >> 18) & 0x3fffU;
                 const uint32_t eiid = tgt & 0x7ffU;
-                imsic_->trigger_msi(hart_idx, eiid ? eiid : static_cast<uint32_t>(src));
+                imsic_->trigger_msi(
+                    HartId{static_cast<uint32_t>(hart_idx)},
+                    eiid ? InterruptSourceId{eiid} : InterruptSourceId{static_cast<uint32_t>(src)});
                 pending_ &= ~(1ULL << src);  // In MSI mode, message has been dispatched
             } else if (!msi_mode && machine_ != nullptr) {
                 const uint32_t tgt = target_[src];
                 const size_t hart_idx = (tgt >> 18) & 0x3fffU;
                 if (hart_idx < machine_->num_harts()) {
-                    auto& hart = machine_->hart(hart_idx);
+                    auto& hart = machine_->hart(HartId{static_cast<uint32_t>(hart_idx)});
                     if (priv_ == Privilege::Machine) {
                         hart.state().mip |= enum_mask(core::MipBit::Meip);
                     } else {

@@ -63,6 +63,11 @@ class PciDevice {
     void trigger_irq();
 
     [[nodiscard]] auto bdf() const noexcept -> PciBdf { return bdf_; }
+    [[nodiscard]] auto has_command_bit(PciCommandBit bit) const noexcept -> bool {
+        const uint16_t cmd = static_cast<uint16_t>(config_space_[0x04]) |
+                             (static_cast<uint16_t>(config_space_[0x05]) << 8);
+        return (cmd & std::to_underlying(bit)) != 0;
+    }
 
    protected:
     void init_bar(BarIndex bar_idx, Address size, bool is_64bit = false,

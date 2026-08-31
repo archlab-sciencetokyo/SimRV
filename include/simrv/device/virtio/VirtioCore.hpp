@@ -37,10 +37,21 @@ inline constexpr uint64_t kVirtioFVersion1 = (1ULL << 32);
 inline constexpr uint64_t kVirtioFAccessPlatform = (1ULL << 33);
 inline constexpr uint64_t kVirtioFRingPacked = (1ULL << 34);
 
+// VirtIO 1.2 Device Status Flags
+inline constexpr uint8_t kVirtioStatusAcknowledge =
+    std::to_underlying(VirtioDeviceStatus::Acknowledge);
+inline constexpr uint8_t kVirtioStatusDriver = std::to_underlying(VirtioDeviceStatus::Driver);
+inline constexpr uint8_t kVirtioStatusDriverOk = std::to_underlying(VirtioDeviceStatus::DriverOk);
+inline constexpr uint8_t kVirtioStatusFeaturesOk =
+    std::to_underlying(VirtioDeviceStatus::FeaturesOk);
+inline constexpr uint8_t kVirtioStatusDeviceNeedsReset =
+    std::to_underlying(VirtioDeviceStatus::DeviceNeedsReset);
+inline constexpr uint8_t kVirtioStatusFailed = std::to_underlying(VirtioDeviceStatus::Failed);
+
 // Virtqueue Split Ring Flags
-inline constexpr uint16_t kVirtqDescFNext = 1;
-inline constexpr uint16_t kVirtqDescFWrite = 2;
-inline constexpr uint16_t kVirtqDescFIndirect = 4;
+inline constexpr uint16_t kVirtqDescFNext = std::to_underlying(VirtqDescFlag::Next);
+inline constexpr uint16_t kVirtqDescFWrite = std::to_underlying(VirtqDescFlag::Write);
+inline constexpr uint16_t kVirtqDescFIndirect = std::to_underlying(VirtqDescFlag::Indirect);
 
 // Split Virtqueue Standard Descriptor (16 bytes)
 #pragma pack(push, 1)
@@ -49,6 +60,10 @@ struct VirtqDesc {
     uint32_t len{0};
     uint16_t flags{0};
     uint16_t next{0};
+
+    [[nodiscard]] constexpr auto has_flag(VirtqDescFlag f) const noexcept -> bool {
+        return (flags & std::to_underlying(f)) != 0;
+    }
 };
 
 struct VirtqUsedElem {

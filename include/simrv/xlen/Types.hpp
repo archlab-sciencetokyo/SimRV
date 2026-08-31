@@ -137,6 +137,118 @@ enum class GdbBreakpointType : uint8_t {
 };
 enum class GdbSignal : uint8_t { SigInt = 2, SigTrap = 5, SigSegv = 11 };
 
+// SBI domain types
+enum class SbiError : int64_t {
+    Success = 0,
+    Failed = -1,
+    NotSupported = -2,
+    InvalidParam = -3,
+    Denied = -4,
+    InvalidAddress = -5,
+    AlreadyAvailable = -6,
+    AlreadyStarted = -7,
+    AlreadyStopped = -8,
+    NoShmem = -9
+};
+
+struct SbiRet {
+    SbiError error{SbiError::Success};
+    Word value{0};
+};
+
+enum class SbiExtId : uint32_t {
+    LegacySetTimer = 0x00,
+    LegacyConsolePutchar = 0x01,
+    LegacyConsoleGetchar = 0x02,
+    LegacyShutdown = 0x08,
+    Base = 0x10,
+    Time = 0x54494D45,          // TIME
+    Rfence = 0x52464E43,        // RFNC
+    Ipi = 0x735049,             // sPI
+    Hsm = 0x48534D,             // HSM
+    SystemReset = 0x53525354,   // SRST
+    Pmu = 0x504D55,             // PMU
+    DebugConsole = 0x4442434E,  // DBCN
+    Susp = 0x53555350,          // SUSP
+    Cppc = 0x43505043,          // CPPC
+};
+
+// AIA domain types
+enum class ImsicPrivilege : uint8_t { Machine = 0, Supervisor = 1 };
+enum class AplicPrivilege : uint8_t { Machine = 0, Supervisor = 1 };
+enum class AplicSourceMode : uint8_t {
+    Inactive = 0,
+    Detached = 1,
+    Edge1 = 4,
+    Edge0 = 5,
+    Level1 = 6,
+    Level0 = 7
+};
+
+// VirtIO domain types
+enum class VirtioDeviceStatus : uint8_t {
+    Acknowledge = 1,
+    Driver = 2,
+    DriverOk = 4,
+    FeaturesOk = 8,
+    DeviceNeedsReset = 64,
+    Failed = 128
+};
+enum class VirtqDescFlag : uint16_t { Next = 1, Write = 2, Indirect = 4 };
+
+// PCIe domain types
+enum class PciCommandBit : uint16_t {
+    IoSpace = 0x0001,
+    MemorySpace = 0x0002,
+    BusMaster = 0x0004,
+    SpecialCycles = 0x0008,
+    MemWriteInvalidate = 0x0010,
+    VgaPaletteSnoop = 0x0020,
+    ParityErrorResponse = 0x0040,
+    SserrEnable = 0x0100,
+    FastBackToBack = 0x0200,
+    InterruptDisable = 0x0400
+};
+
+enum class PciStatusBit : uint16_t {
+    InterruptStatus = 0x0008,
+    CapabilitiesList = 0x0010,
+    Pci66MHz = 0x0020,
+    FastBackToBack = 0x0080,
+    MasterDataParityError = 0x0100,
+    DevselTiming = 0x0600,
+    SignaledTargetAbort = 0x0800,
+    ReceivedTargetAbort = 0x1000,
+    ReceivedMasterAbort = 0x2000,
+    SignaledSystemError = 0x4000,
+    DetectedParityError = 0x8000
+};
+
+enum class PciCapabilityId : uint8_t {
+    Null = 0,
+    Pmd = 1,
+    Agp = 2,
+    Vpd = 3,
+    SlotId = 4,
+    Msi = 5,
+    CompactPci = 6,
+    PciX = 7,
+    HyperTransport = 8,
+    VendorSpecific = 9,
+    DebugPort = 10,
+    CompactPciCentralResource = 11,
+    HotPlug = 12,
+    SubsystemId = 13,
+    Agp8x = 14,
+    SecureDevice = 15,
+    PciExpress = 16,
+    MsiX = 17,
+    Sata = 18,
+    AdvancedFeatures = 19,
+    EnhancedAllocation = 20,
+    FlatteningPortal = 21
+};
+
 enum class FpPrecision : uint8_t { Single = 32, Double = 64, Quad = 128 };
 
 enum class Vsew : uint8_t {
