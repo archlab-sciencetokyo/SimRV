@@ -44,6 +44,26 @@ void release_instruction_eviction(Machine& machine, CPU& cpu) {
     simrv::memory::TlChannelD acknowledgement{};
     (void)machine.memory().system_bus().release_line(release, acknowledgement);
 }
+
+[[nodiscard]] inline auto check_fetch_alignment(ArchState& state,
+                                                simrv::pipeline::PipelineContext& ctx) noexcept
+    -> bool {
+    if (state.regs.xlen == 32) {
+        state.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state.pc)));
+    }
+    ctx.tlb_miss = false;
+    const bool has_c = misa_has_extension(state.misa, isa::IsaExtension::C);
+    const Word alignment_mask = has_c ? 1u : 3u;
+    if ((state.pc & alignment_mask) != 0) {
+        ctx.pending_exception = ExceptionCode::MisalignedFetch;
+        ctx.pending_tval = state.pc;
+        ctx.ir = isa::kNop32;
+        ctx.op_id = isa::UNKNOWN;
+        return false;
+    }
+    return true;
+}
+
 }  // namespace
 
 // ==========================================
@@ -51,21 +71,8 @@ void release_instruction_eviction(Machine& machine, CPU& cpu) {
 // ==========================================
 
 void CPU::run_fetch_stage(Machine& machine) {
-    if (state_.regs.xlen == 32) {
-        state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
-    }
     auto& ctx = active_context();
-    ctx.tlb_miss = false;
-
-    const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
-    const Word alignment_mask = has_c ? 1u : 3u;
-    if ((state_.pc & alignment_mask) != 0) {
-        ctx.pending_exception = ExceptionCode::MisalignedFetch;
-        ctx.pending_tval = state_.pc;
-        ctx.ir = isa::kNop32;
-        ctx.op_id = isa::UNKNOWN;
-        return;
-    }
+    if (!check_fetch_alignment(state_, ctx)) return;
 
     const bool split_page =
         ((state_.pc & ~simrv::memory::kPageMask) != ((state_.pc + 2) & ~simrv::memory::kPageMask));
@@ -516,22 +523,9 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
 }
 
 void CPU::run_fetch_stage_baremetal(Machine& machine) {
-    if (state_.regs.xlen == 32) {
-        state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
-    }
     auto& ctx = active_context();
-    ctx.tlb_miss = false;
+    if (!check_fetch_alignment(state_, ctx)) return;
     ctx.cpc = state_.pc;
-
-    const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
-    const Word alignment_mask = has_c ? 1u : 3u;
-    if ((state_.pc & alignment_mask) != 0) {
-        ctx.pending_exception = ExceptionCode::MisalignedFetch;
-        ctx.pending_tval = state_.pc;
-        ctx.ir = isa::kNop32;
-        ctx.op_id = isa::UNKNOWN;
-        return;
-    }
 
     ctx.padr1 = (state_.regs.xlen == 32) ? (state_.pc & 0xFFFFFFFFULL) : state_.pc;
     ctx.padr2 = (state_.regs.xlen == 32) ? ((state_.pc + 2) & 0xFFFFFFFFULL) : (state_.pc + 2);

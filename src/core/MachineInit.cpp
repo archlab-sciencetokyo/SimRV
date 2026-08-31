@@ -312,29 +312,26 @@ auto Machine::initialize() -> int {
         simrv::mmio::kAplicSSize, imsic_s.get());
     PlatformBuilder::compose(*this);
 
-    memory_.system_bus().add_node(aclint_mtimer.get());
-    memory_.system_bus().add_node(aclint_mswi.get());
-    memory_.system_bus().add_node(imsic_m.get());
-    memory_.system_bus().add_node(imsic_s.get());
-    memory_.system_bus().add_node(aplic_m.get());
-    memory_.system_bus().add_node(aplic_s.get());
+    const std::array<simrv::memory::TileLinkNode*, 9> base_nodes = {
+        aclint_mtimer.get(), aclint_mswi.get(), imsic_m.get(), imsic_s.get(), aplic_m.get(),
+        aplic_s.get(),       rtc.get(),         uart.get(),    power.get(),
+    };
+    for (auto* node : base_nodes) {
+        if (node != nullptr) memory_.system_bus().add_node(node);
+    }
 
     if (pcie) {
         memory_.system_bus().add_node(&pcie->ecam_node());
         memory_.system_bus().add_node(&pcie->mmio_node());
     }
 
-    if (mmio_disk) memory_.system_bus().add_node(mmio_disk.get());
-    if (mmio_console) memory_.system_bus().add_node(mmio_console.get());
-    if (mmio_rng) memory_.system_bus().add_node(mmio_rng.get());
-    if (mmio_gpu) memory_.system_bus().add_node(mmio_gpu.get());
-    if (mmio_input) memory_.system_bus().add_node(mmio_input.get());
-    if (mmio_sound) memory_.system_bus().add_node(mmio_sound.get());
-    if (mmio_net) memory_.system_bus().add_node(mmio_net.get());
+    const std::array<std::shared_ptr<simrv::device::VirtioMmioDevice>, 7> mmio_devs = {
+        mmio_disk, mmio_console, mmio_rng, mmio_gpu, mmio_input, mmio_sound, mmio_net,
+    };
+    for (const auto& dev : mmio_devs) {
+        if (dev) memory_.system_bus().add_node(dev.get());
+    }
 
-    memory_.system_bus().add_node(rtc.get());
-    memory_.system_bus().add_node(uart.get());
-    memory_.system_bus().add_node(power.get());
     memory_.system_bus().add_node(&cpu.plic_mmio);
     memory_.system_bus().add_node(&cpu.clint_mmio);
     const bool linux_boot = !config.execution.appmode;
@@ -379,13 +376,11 @@ auto Machine::initialize() -> int {
                     base_path = base_path.substr(0, last_dot);
                 }
                 if (base_path != config.files.binary_path) {
-                    check_elf(base_path + ".elf");
-                    check_elf(base_path + ".ELF");
-                    check_elf(base_path + ".out");
-                    check_elf(base_path + ".OUT");
-                    check_elf(base_path + ".axf");
-                    check_elf(base_path + ".AXF");
-                    check_elf(base_path);
+                    static constexpr std::array kSuffixes = {".elf", ".ELF", ".out", ".OUT",
+                                                             ".axf", ".AXF", ""};
+                    for (const auto* suffix : kSuffixes) {
+                        check_elf(base_path + suffix);
+                    }
                 }
             }
             if (!is_32bit) {

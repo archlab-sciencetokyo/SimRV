@@ -36,13 +36,13 @@ void PlatformBuilder::compose(Machine& machine) {
         machine.pci_input = std::make_shared<simrv::device::VirtioPciInput>();
         machine.pci_sound = std::make_shared<simrv::device::VirtioPciSound>();
         machine.pci_net = std::make_shared<simrv::device::VirtioPciNet>();
-        machine.pcie->attach_device(0, 1, 0, machine.pci_disk);
-        machine.pcie->attach_device(0, 2, 0, machine.pci_console);
-        machine.pcie->attach_device(0, 3, 0, machine.pci_rng);
-        machine.pcie->attach_device(0, 4, 0, machine.pci_gpu);
-        machine.pcie->attach_device(0, 5, 0, machine.pci_input);
-        machine.pcie->attach_device(0, 6, 0, machine.pci_sound);
-        machine.pcie->attach_device(0, 7, 0, machine.pci_net);
+        const std::array<std::shared_ptr<simrv::device::PciDevice>, 7> pci_devices = {
+            machine.pci_disk,  machine.pci_console, machine.pci_rng, machine.pci_gpu,
+            machine.pci_input, machine.pci_sound,   machine.pci_net,
+        };
+        for (uint8_t slot = 1; slot <= pci_devices.size(); ++slot) {
+            machine.pcie->attach_device(0, slot, 0, pci_devices[slot - 1]);
+        }
     }
     if (composition.mmio) {
         machine.mmio_disk =
