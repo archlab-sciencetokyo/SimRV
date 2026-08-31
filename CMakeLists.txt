@@ -10,7 +10,7 @@ if(BUILD_TESTING OR SIMRV_ENABLE_TOOLING)
   set(PYTHON_BIN "${Python3_EXECUTABLE}")
 endif()
 
-set(SIMRV_VERSION "3.0.0-alpha.1")
+set(SIMRV_VERSION "3.0.0-alpha.2")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 

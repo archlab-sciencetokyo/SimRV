@@ -1,7 +1,7 @@
 # SimRV 3.0 alpha handoff
 
-Branch: `release/3.0.0-alpha.1`  
-PR: https://github.com/archlab-sciencetokyo/SimRV/pull/26 (target: `dev`)  
+Branch: `release/3.0.0-alpha.2`
+PR: https://github.com/archlab-sciencetokyo/SimRV/pull/26 (target: `dev`)
 Latest functional commit: `8a24c2c refactor(decoder): index fused operations by opcode`
 
 Do not create a tag or GitHub release. Keep the PR as the delivery vehicle until all
@@ -49,7 +49,7 @@ Files to inspect:
 
 ## Completed in the current branch
 
-- SimRV is versioned as `3.0.0-alpha.1`; the branch and draft PR target `dev`.
+- SimRV is versioned as `3.0.0-alpha.2`; the branch and draft PR target `dev`.
 - CA/SMP TUI pause waits for primary and secondary runner quiescence.
 - TUI step now uses `Machine::step()` and the CA runner, so it steps all harts once.
 - Vector and FMA decoder dispatch uses checked dense decode tables; the remaining

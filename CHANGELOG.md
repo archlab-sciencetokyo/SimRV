@@ -5,6 +5,27 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [v3.0.0-alpha.2] — 2026-09-01
+
+This alpha release delivers comprehensive strong domain typing, code reduction, and modernization across all major architectural subsystems (Core, Memory, Execution, Platform, Debug, and Pipeline).
+
+### Modernization & Strong Typing
+
+- Modernized TLB subsystem with dedicated `Asid`, `TlbSetIndex`, `TlbWay`, and `TlbFlushFilter` domain types.
+- Strongly typed GDB stub socket handles with `UniqueFd` RAII wrappers and added strongly typed `GdbBreakpointType` and `GdbSignal`.
+- Strongly typed symbol table structures with `SymbolType`, `SymbolBinding`, `SymbolVisibility`, and `SymbolIndex`.
+- Replaced raw integer constants with strongly typed offsets and bitmasks in UART (`UartRegisterOffset`, `UartInterruptFlag`), PMP (`PmpStatusFlag`), TileLink (`TlPort`), and ACLINT (`AclintRegisterOffset`).
+- Added strong types for SBI extension/function IDs, AIA APLIC/IMSIC IDs, VirtIO feature masks, and PCIe configuration space domains.
+
+### Code Reduction & Architectural Cleanups
+
+- Streamlined floating-point unit implementations with generic execution and class templates across single- and double-precision instructions.
+- Consolidated B-extension bit manipulation and integer word arithmetic units.
+- Unified PLIC priority evaluation and claim scanning across all execution contexts.
+- Extracted `RunnerBase` to deduplicate multi-threaded worker lifecycle and quiescence synchronization between bare-metal and OS runner engines.
+- Templated decode tables and centralized instruction disassembly formatters and CSR name lookups.
+- Streamlined CLI parser and bus node attachment logic, eliminating redundant option predicates.
+
 ## [v3.0.0-alpha.1] — 2026-08-31
 
 This alpha rebaselines the former 2.1 development line as 3.0 because the execution architecture,
@@ -470,6 +491,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
+[v3.0.0-alpha.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-alpha.2
 [v3.0.0-alpha.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-alpha.1
 [v2.1.0-alpha.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.1.0-alpha.2
 [v2.1.0-alpha.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.1.0-alpha.1

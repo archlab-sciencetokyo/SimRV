@@ -1,8 +1,8 @@
 {
   "$schema": "schemas/release-manifest.schema.json",
   "schema_version": 2,
-  "version": "3.0.0-alpha.1",
-  "release_tag": "v3.0.0-alpha.1",
+  "version": "3.0.0-alpha.2",
+  "release_tag": "v3.0.0-alpha.2",
   "host_support": {
     "os": "Linux",
     "architecture": "x86_64",
@@ -158,10 +158,10 @@
     ]
   },
   "artifacts": [
-    "SimRV-rv32-linux-x86_64-v3.0.0-alpha.1.tar.gz",
-    "SimRV-rv64-linux-x86_64-v3.0.0-alpha.1.tar.gz",
-    "SimRV-docs-v3.0.0-alpha.1.tar.gz",
-    "SimRV-repro-v3.0.0-alpha.1.tar.gz",
-    "SimRV-evidence-v3.0.0-alpha.1.json"
+    "SimRV-rv32-linux-x86_64-v3.0.0-alpha.2.tar.gz",
+    "SimRV-rv64-linux-x86_64-v3.0.0-alpha.2.tar.gz",
+    "SimRV-docs-v3.0.0-alpha.2.tar.gz",
+    "SimRV-repro-v3.0.0-alpha.2.tar.gz",
+    "SimRV-evidence-v3.0.0-alpha.2.json"
   ]
 }
