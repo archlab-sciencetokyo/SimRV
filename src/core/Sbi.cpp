@@ -57,18 +57,6 @@ enum class RfenceFid : std::uint8_t {
     RemoteHfenceVvma = 0x6,
 };
 
-enum class SbiError : std::int8_t {
-    Success = 0,
-    Failed = -1,
-    NotSupported = -2,
-    InvalidParam = -3,
-    Denied = -4,
-    InvalidAddress = -5,
-    AlreadyAvailable = -6,
-    AlreadyStarted = -7,
-    AlreadyStopped = -8,
-};
-
 constexpr Word kSpecVersion_2_0 = 0x02000000U;
 // Project-specific ID (ASCII "SIM"). ID 1 is reserved for OpenSBI and must not be reported by
 // SimRV's direct execution environment. An official SBI implementation ID has not been assigned.

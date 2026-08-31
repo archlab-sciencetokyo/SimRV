@@ -34,17 +34,17 @@ constexpr std::array<int, 18> kGeneralSettingRows = {4,  5,  6,  7,  8,  9,  12,
                                                      17, 18, 19, 22, 23, 26, 27, 28, 29};
 constexpr int kGeneralSettingsContentRows = 30;
 
-[[nodiscard]] auto general_setting_row(int item) -> int {
-    return item >= 0 && item < static_cast<int>(kGeneralSettingRows.size())
+[[nodiscard]] constexpr auto general_setting_row(int item) noexcept -> int {
+    return (item >= 0 && static_cast<size_t>(item) < kGeneralSettingRows.size())
                ? kGeneralSettingRows[static_cast<size_t>(item)]
                : 0;
 }
 
-[[nodiscard]] auto general_setting_at_row(int row) -> int {
-    const auto found = std::ranges::find(kGeneralSettingRows, row);
-    return found == kGeneralSettingRows.end()
+[[nodiscard]] inline auto general_setting_at_row(int row) noexcept -> int {
+    const auto it = std::ranges::find(kGeneralSettingRows, row);
+    return it == kGeneralSettingRows.end()
                ? -1
-               : static_cast<int>(std::distance(kGeneralSettingRows.begin(), found));
+               : static_cast<int>(std::distance(kGeneralSettingRows.begin(), it));
 }
 
 }  // namespace

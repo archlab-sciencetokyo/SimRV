@@ -61,72 +61,89 @@ constexpr auto write_f32_boxed(float v) -> FloatingRegister {
 }
 
 // ============================================================================
+// FP Traits & Generic Helpers
+// ============================================================================
+
+template <typename FloatT>
+struct FpTraits;
+
+template <>
+struct FpTraits<float> {
+    using Bits = uint32_t;
+    static constexpr unsigned kSignBit = simrv::xlen::kF32SignBit;
+    static constexpr unsigned kExpShift = simrv::xlen::kF32ExpShift;
+    static constexpr Bits kExpMask = simrv::xlen::kF32ExpMask;
+    static constexpr Bits kFracMask = simrv::xlen::kF32FracMask;
+    static constexpr unsigned kFracQnanBit = simrv::xlen::kF32FracQnanBit;
+    static constexpr Bits kQnanBits = simrv::xlen::kF32Qnan;
+    static constexpr auto from_bits(Bits b) -> float { return f32_from_bits(b); }
+    static constexpr auto to_bits(float v) -> Bits { return f32_bits(v); }
+    static constexpr auto to_boxed(float v) -> FloatingRegister { return write_f32_boxed(v); }
+    static constexpr auto read(const FloatingRegister* freg, Word idx) -> float {
+        return read_f32(freg, idx);
+    }
+};
+
+template <>
+struct FpTraits<double> {
+    using Bits = uint64_t;
+    static constexpr unsigned kSignBit = simrv::xlen::kF64SignBit;
+    static constexpr unsigned kExpShift = simrv::xlen::kF64ExpShift;
+    static constexpr Bits kExpMask = simrv::xlen::kF64ExpMask;
+    static constexpr Bits kFracMask = simrv::xlen::kF64FracMask;
+    static constexpr unsigned kFracQnanBit = simrv::xlen::kF64FracQnanBit;
+    static constexpr Bits kQnanBits = simrv::xlen::kF64Qnan;
+    static constexpr auto from_bits(Bits b) -> double { return f64_from_bits(b); }
+    static constexpr auto to_bits(double v) -> Bits { return f64_bits(v); }
+    static constexpr auto to_boxed(double v) -> FloatingRegister { return f64_bits(v); }
+    static constexpr auto read(const FloatingRegister* freg, Word idx) -> double {
+        return read_f64(freg, idx);
+    }
+};
+
+// ============================================================================
 // Classification Functions
 // ============================================================================
 
-constexpr auto fclass32(float v) -> uint32_t {
-    const uint32_t bits = f32_bits(v);
-    const bool sign = (bits >> simrv::xlen::kF32SignBit) != 0;
-    const uint32_t exp = (bits >> simrv::xlen::kF32ExpShift) & simrv::xlen::kF32ExpMask;
-    const uint32_t frac = bits & simrv::xlen::kF32FracMask;
+template <typename FloatT>
+constexpr auto fclass(FloatT v) -> uint32_t {
+    using T = FpTraits<FloatT>;
+    const typename T::Bits bits = T::to_bits(v);
+    const bool sign = (bits >> T::kSignBit) != 0;
+    const typename T::Bits exp = (bits >> T::kExpShift) & T::kExpMask;
+    const typename T::Bits frac = bits & T::kFracMask;
 
-    if (exp == simrv::xlen::kF32ExpMask) {
-        if (frac == 0) {
-            return sign ? (1U << 0) : (1U << 7);
-        }
-        const bool qnan = (frac & (1U << simrv::xlen::kF32FracQnanBit)) != 0;
+    if (exp == T::kExpMask) {
+        if (frac == 0) return sign ? (1U << 0) : (1U << 7);
+        const bool qnan = (frac & (typename T::Bits{1} << T::kFracQnanBit)) != 0;
         return qnan ? (1U << 9) : (1U << 8);
     }
     if (exp == 0) {
-        if (frac == 0) {
-            return sign ? (1U << 3) : (1U << 4);
-        }
+        if (frac == 0) return sign ? (1U << 3) : (1U << 4);
         return sign ? (1U << 2) : (1U << 5);
     }
     return sign ? (1U << 1) : (1U << 6);
 }
 
-constexpr auto fclass64(double v) -> uint32_t {
-    const uint64_t bits = f64_bits(v);
-    const bool sign = (bits >> simrv::xlen::kF64SignBit) != 0;
-    const uint64_t exp = (bits >> simrv::xlen::kF64ExpShift) & simrv::xlen::kF64ExpMask;
-    const uint64_t frac = bits & simrv::xlen::kF64FracMask;
-
-    if (exp == simrv::xlen::kF64ExpMask) {
-        if (frac == 0) {
-            return sign ? (1U << 0) : (1U << 7);
-        }
-        const bool qnan = (frac & (1ULL << simrv::xlen::kF64FracQnanBit)) != 0;
-        return qnan ? (1U << 9) : (1U << 8);
-    }
-    if (exp == 0) {
-        if (frac == 0) {
-            return sign ? (1U << 3) : (1U << 4);
-        }
-        return sign ? (1U << 2) : (1U << 5);
-    }
-    return sign ? (1U << 1) : (1U << 6);
-}
+constexpr auto fclass32(float v) -> uint32_t { return fclass(v); }
+constexpr auto fclass64(double v) -> uint32_t { return fclass(v); }
 
 // ============================================================================
 // Signaling NaN Detection
 // ============================================================================
 
-constexpr auto is_snan32(float v) -> bool {
-    const uint32_t bits = f32_bits(v);
-    const uint32_t exp = (bits >> simrv::xlen::kF32ExpShift) & simrv::xlen::kF32ExpMask;
-    const uint32_t frac = bits & simrv::xlen::kF32FracMask;
-    return (exp == simrv::xlen::kF32ExpMask) && (frac != 0) &&
-           ((frac & (1U << simrv::xlen::kF32FracQnanBit)) == 0);
+template <typename FloatT>
+constexpr auto is_snan(FloatT v) -> bool {
+    using T = FpTraits<FloatT>;
+    const typename T::Bits bits = T::to_bits(v);
+    const typename T::Bits exp = (bits >> T::kExpShift) & T::kExpMask;
+    const typename T::Bits frac = bits & T::kFracMask;
+    return (exp == T::kExpMask) && (frac != 0) &&
+           ((frac & (typename T::Bits{1} << T::kFracQnanBit)) == 0);
 }
 
-constexpr auto is_snan64(double v) -> bool {
-    const uint64_t bits = f64_bits(v);
-    const uint64_t exp = (bits >> simrv::xlen::kF64ExpShift) & simrv::xlen::kF64ExpMask;
-    const uint64_t frac = bits & simrv::xlen::kF64FracMask;
-    return (exp == simrv::xlen::kF64ExpMask) && (frac != 0) &&
-           ((frac & (1ULL << simrv::xlen::kF64FracQnanBit)) == 0);
-}
+constexpr auto is_snan32(float v) -> bool { return is_snan(v); }
+constexpr auto is_snan64(double v) -> bool { return is_snan(v); }
 
 // ============================================================================
 // Exception & Rounding Mode Management (Lazy MXCSR State Machine)
@@ -231,92 +248,42 @@ class FpEnvironment {
 // Min/Max Functions
 // ============================================================================
 
+template <typename FloatT, bool IsMax>
+static auto fminmax_riscv(FloatT a, FloatT b) -> FloatingRegister {
+    using T = FpTraits<FloatT>;
+    const bool a_nan = std::isnan(a);
+    const bool b_nan = std::isnan(b);
+    if (is_snan(a) || is_snan(b)) {
+        FpEnvironment::raise_invalid();
+    }
+    if (a_nan && b_nan) {
+        return T::to_boxed(T::from_bits(T::kQnanBits));
+    }
+    if (a_nan) return T::to_boxed(b);
+    if (b_nan) return T::to_boxed(a);
+    if (a == FloatT{0} && b == FloatT{0}) {
+        if constexpr (IsMax) {
+            const bool pos = !std::signbit(a) || !std::signbit(b);
+            return T::to_boxed(pos ? FloatT{0} : -FloatT{0});
+        } else {
+            const bool neg = std::signbit(a) || std::signbit(b);
+            return T::to_boxed(neg ? -FloatT{0} : FloatT{0});
+        }
+    }
+    return T::to_boxed(IsMax ? std::fmax(a, b) : std::fmin(a, b));
+}
+
 static auto fmin32_riscv(float a, float b) -> FloatingRegister {
-    const bool a_nan = std::isnan(a);
-    const bool b_nan = std::isnan(b);
-    if (is_snan32(a) || is_snan32(b)) {
-        FpEnvironment::raise_invalid();
-    }
-    if (a_nan && b_nan) {
-        return write_f32_boxed(f32_from_bits(simrv::xlen::kF32Qnan));
-    }
-    if (a_nan) {
-        return write_f32_boxed(b);
-    }
-    if (b_nan) {
-        return write_f32_boxed(a);
-    }
-    if (a == 0.0F && b == 0.0F) {
-        const bool neg = std::signbit(a) || std::signbit(b);
-        return write_f32_boxed(neg ? -0.0F : 0.0F);
-    }
-    return write_f32_boxed(std::fmin(a, b));
+    return fminmax_riscv<float, false>(a, b);
 }
-
 static auto fmax32_riscv(float a, float b) -> FloatingRegister {
-    const bool a_nan = std::isnan(a);
-    const bool b_nan = std::isnan(b);
-    if (is_snan32(a) || is_snan32(b)) {
-        FpEnvironment::raise_invalid();
-    }
-    if (a_nan && b_nan) {
-        return write_f32_boxed(f32_from_bits(simrv::xlen::kF32Qnan));
-    }
-    if (a_nan) {
-        return write_f32_boxed(b);
-    }
-    if (b_nan) {
-        return write_f32_boxed(a);
-    }
-    if (a == 0.0F && b == 0.0F) {
-        const bool pos = !std::signbit(a) || !std::signbit(b);
-        return write_f32_boxed(pos ? 0.0F : -0.0F);
-    }
-    return write_f32_boxed(std::fmax(a, b));
+    return fminmax_riscv<float, true>(a, b);
 }
-
 static auto fmin64_riscv(double a, double b) -> FloatingRegister {
-    const bool a_nan = std::isnan(a);
-    const bool b_nan = std::isnan(b);
-    if (is_snan64(a) || is_snan64(b)) {
-        FpEnvironment::raise_invalid();
-    }
-    if (a_nan && b_nan) {
-        return static_cast<FloatingRegister>(simrv::xlen::kF64Qnan);
-    }
-    if (a_nan) {
-        return f64_bits(b);
-    }
-    if (b_nan) {
-        return f64_bits(a);
-    }
-    if (a == 0.0 && b == 0.0) {
-        const bool neg = std::signbit(a) || std::signbit(b);
-        return f64_bits(neg ? -0.0 : 0.0);
-    }
-    return f64_bits(std::fmin(a, b));
+    return fminmax_riscv<double, false>(a, b);
 }
-
 static auto fmax64_riscv(double a, double b) -> FloatingRegister {
-    const bool a_nan = std::isnan(a);
-    const bool b_nan = std::isnan(b);
-    if (is_snan64(a) || is_snan64(b)) {
-        FpEnvironment::raise_invalid();
-    }
-    if (a_nan && b_nan) {
-        return static_cast<FloatingRegister>(simrv::xlen::kF64Qnan);
-    }
-    if (a_nan) {
-        return f64_bits(b);
-    }
-    if (b_nan) {
-        return f64_bits(a);
-    }
-    if (a == 0.0 && b == 0.0) {
-        const bool pos = !std::signbit(a) || !std::signbit(b);
-        return f64_bits(pos ? 0.0 : -0.0);
-    }
-    return f64_bits(std::fmax(a, b));
+    return fminmax_riscv<double, true>(a, b);
 }
 
 // ============================================================================
@@ -495,133 +462,66 @@ auto ExecuteUnit::fusedFp(Opcode opcode, FpFmt fmt, FpRegId rs1, FpRegId rs2, Fp
 
 namespace fp {
 
+template <typename FloatT, typename Op>
+inline auto fp_exec_binary(FpExecResult& out, Word rm, Word rs1, Word rs2,
+                           const FloatingRegister* freg, CSRValue& fcsr, Op&& op) -> bool {
+    using T = FpTraits<FloatT>;
+    FpEnvironment::set_rounding_mode(rm, fcsr);
+    FpEnvironment::clear_exceptions();
+    FloatT result = op(T::read(freg, rs1), T::read(freg, rs2));
+    if (simrv::compiler::unlikely(std::isnan(result))) {
+        result = T::from_bits(T::kQnanBits);
+    }
+    out.fp_wb_data = T::to_boxed(result);
+    out.fp_wb_enable = true;
+    FpEnvironment::accumulate_exceptions(fcsr);
+    return true;
+}
+
+template <typename FloatT, typename Op>
+inline auto fp_exec_unary(FpExecResult& out, Word rm, Word rs1, const FloatingRegister* freg,
+                          CSRValue& fcsr, Op&& op) -> bool {
+    using T = FpTraits<FloatT>;
+    FpEnvironment::set_rounding_mode(rm, fcsr);
+    FpEnvironment::clear_exceptions();
+    FloatT result = op(T::read(freg, rs1));
+    if (simrv::compiler::unlikely(std::isnan(result))) {
+        result = T::from_bits(T::kQnanBits);
+    }
+    out.fp_wb_data = T::to_boxed(result);
+    out.fp_wb_enable = true;
+    FpEnvironment::accumulate_exceptions(fcsr);
+    return true;
+}
+
 bool fp_exec_add_sub(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2,
                      const FloatingRegister* freg, CSRValue& fcsr) {
-    if (funct7 == enum_mask(Funct7Fp::FaddS)) {
-        FpEnvironment::set_rounding_mode(rm, fcsr);
-        FpEnvironment::clear_exceptions();
-        float result = read_f32(freg, rs1) + read_f32(freg, rs2);
-        if (simrv::compiler::unlikely(std::isnan(result))) {
-            result = f32_from_bits(simrv::xlen::kF32Qnan);
-        }
-        out.fp_wb_data = write_f32_boxed(result);
-        out.fp_wb_enable = true;
-        FpEnvironment::accumulate_exceptions(fcsr);
-        return true;
-    }
-    if (funct7 == enum_mask(Funct7Fp::FaddD)) {
-        FpEnvironment::set_rounding_mode(rm, fcsr);
-        FpEnvironment::clear_exceptions();
-        double result = read_f64(freg, rs1) + read_f64(freg, rs2);
-        if (simrv::compiler::unlikely(std::isnan(result))) {
-            result = f64_from_bits(simrv::xlen::kF64Qnan);
-        }
-        out.fp_wb_data = f64_bits(result);
-        out.fp_wb_enable = true;
-        FpEnvironment::accumulate_exceptions(fcsr);
-        return true;
-    }
-    if (funct7 == enum_mask(Funct7Fp::FsubS)) {
-        FpEnvironment::set_rounding_mode(rm, fcsr);
-        FpEnvironment::clear_exceptions();
-        float result = read_f32(freg, rs1) - read_f32(freg, rs2);
-        if (simrv::compiler::unlikely(std::isnan(result))) {
-            result = f32_from_bits(simrv::xlen::kF32Qnan);
-        }
-        out.fp_wb_data = write_f32_boxed(result);
-        out.fp_wb_enable = true;
-        FpEnvironment::accumulate_exceptions(fcsr);
-        return true;
-    }
-    if (funct7 == enum_mask(Funct7Fp::FsubD)) {
-        FpEnvironment::set_rounding_mode(rm, fcsr);
-        FpEnvironment::clear_exceptions();
-        double result = read_f64(freg, rs1) - read_f64(freg, rs2);
-        if (simrv::compiler::unlikely(std::isnan(result))) {
-            result = f64_from_bits(simrv::xlen::kF64Qnan);
-        }
-        out.fp_wb_data = f64_bits(result);
-        out.fp_wb_enable = true;
-        FpEnvironment::accumulate_exceptions(fcsr);
-        return true;
-    }
+    if (funct7 == enum_mask(Funct7Fp::FaddS))
+        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, std::plus<float>{});
+    if (funct7 == enum_mask(Funct7Fp::FaddD))
+        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, std::plus<double>{});
+    if (funct7 == enum_mask(Funct7Fp::FsubS))
+        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, std::minus<float>{});
+    if (funct7 == enum_mask(Funct7Fp::FsubD))
+        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, std::minus<double>{});
     return false;
 }
 
 bool fp_exec_mul_div_sqrt(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2,
                           const FloatingRegister* freg, CSRValue& fcsr) {
-    if (funct7 == enum_mask(Funct7Fp::FmulS)) {
-        FpEnvironment::set_rounding_mode(rm, fcsr);
-        FpEnvironment::clear_exceptions();
-        float result = read_f32(freg, rs1) * read_f32(freg, rs2);
-        if (simrv::compiler::unlikely(std::isnan(result))) {
-            result = f32_from_bits(simrv::xlen::kF32Qnan);
-        }
-        out.fp_wb_data = write_f32_boxed(result);
-        out.fp_wb_enable = true;
-        FpEnvironment::accumulate_exceptions(fcsr);
-        return true;
-    }
-    if (funct7 == enum_mask(Funct7Fp::FmulD)) {
-        FpEnvironment::set_rounding_mode(rm, fcsr);
-        FpEnvironment::clear_exceptions();
-        double result = read_f64(freg, rs1) * read_f64(freg, rs2);
-        if (simrv::compiler::unlikely(std::isnan(result))) {
-            result = f64_from_bits(simrv::xlen::kF64Qnan);
-        }
-        out.fp_wb_data = f64_bits(result);
-        out.fp_wb_enable = true;
-        FpEnvironment::accumulate_exceptions(fcsr);
-        return true;
-    }
-    if (funct7 == enum_mask(Funct7Fp::FdivS)) {
-        FpEnvironment::set_rounding_mode(rm, fcsr);
-        FpEnvironment::clear_exceptions();
-        float result = read_f32(freg, rs1) / read_f32(freg, rs2);
-        if (simrv::compiler::unlikely(std::isnan(result))) {
-            result = f32_from_bits(simrv::xlen::kF32Qnan);
-        }
-        out.fp_wb_data = write_f32_boxed(result);
-        out.fp_wb_enable = true;
-        FpEnvironment::accumulate_exceptions(fcsr);
-        return true;
-    }
-    if (funct7 == enum_mask(Funct7Fp::FdivD)) {
-        FpEnvironment::set_rounding_mode(rm, fcsr);
-        FpEnvironment::clear_exceptions();
-        double result = read_f64(freg, rs1) / read_f64(freg, rs2);
-        if (simrv::compiler::unlikely(std::isnan(result))) {
-            result = f64_from_bits(simrv::xlen::kF64Qnan);
-        }
-        out.fp_wb_data = f64_bits(result);
-        out.fp_wb_enable = true;
-        FpEnvironment::accumulate_exceptions(fcsr);
-        return true;
-    }
-    if (funct7 == enum_mask(Funct7Fp::FsqrtS)) {
-        FpEnvironment::set_rounding_mode(rm, fcsr);
-        FpEnvironment::clear_exceptions();
-        float result = std::sqrt(read_f32(freg, rs1));
-        if (simrv::compiler::unlikely(std::isnan(result))) {
-            result = f32_from_bits(simrv::xlen::kF32Qnan);
-        }
-        out.fp_wb_data = write_f32_boxed(result);
-        out.fp_wb_enable = true;
-        FpEnvironment::accumulate_exceptions(fcsr);
-        return true;
-    }
-    if (funct7 == enum_mask(Funct7Fp::FsqrtD)) {
-        FpEnvironment::set_rounding_mode(rm, fcsr);
-        FpEnvironment::clear_exceptions();
-        double result = std::sqrt(read_f64(freg, rs1));
-        if (simrv::compiler::unlikely(std::isnan(result))) {
-            result = f64_from_bits(simrv::xlen::kF64Qnan);
-        }
-        out.fp_wb_data = f64_bits(result);
-        out.fp_wb_enable = true;
-        FpEnvironment::accumulate_exceptions(fcsr);
-        return true;
-    }
+    if (funct7 == enum_mask(Funct7Fp::FmulS))
+        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, std::multiplies<float>{});
+    if (funct7 == enum_mask(Funct7Fp::FmulD))
+        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, std::multiplies<double>{});
+    if (funct7 == enum_mask(Funct7Fp::FdivS))
+        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, std::divides<float>{});
+    if (funct7 == enum_mask(Funct7Fp::FdivD))
+        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, std::divides<double>{});
+    if (funct7 == enum_mask(Funct7Fp::FsqrtS))
+        return fp_exec_unary<float>(out, rm, rs1, freg, fcsr, [](float x) { return std::sqrt(x); });
+    if (funct7 == enum_mask(Funct7Fp::FsqrtD))
+        return fp_exec_unary<double>(out, rm, rs1, freg, fcsr,
+                                     [](double x) { return std::sqrt(x); });
     return false;
 }
 
