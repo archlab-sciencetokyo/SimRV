@@ -114,10 +114,7 @@ auto trap_summary(TrapCause cause) -> std::string {
 
 auto short_op_name(const simrv::pipeline::PipelineReg& reg) -> std::string {
     if (!reg.valid) return "-";
-    if (static_cast<std::size_t>(reg.op_id) < simrv::pipeline::OPERATION_NAME.size()) {
-        return std::string(simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(reg.op_id)));
-    }
-    return "insn";
+    return std::string(simrv::pipeline::operation_name(reg.op_id));
 }
 
 /// Is this opcode a load instruction?
@@ -132,10 +129,7 @@ auto is_branch_opcode(Opcode opc) -> bool { return opc == Opcode::Branch; }
 /// Build a one-line description of what the EX stage computed.
 auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx) -> std::string {
     auto const opc = ctx.opcode;
-    std::string_view op_name = "?";
-    if (static_cast<std::size_t>(ctx.op_id) < simrv::pipeline::OPERATION_NAME.size()) {
-        op_name = simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(ctx.op_id));
-    }
+    const std::string_view op_name = simrv::pipeline::operation_name(ctx.op_id);
 
     if (is_load_opcode(opc)) {
         return std::format(" {}Computation : {}Memory[{} + {}] → {}\033[0m", kThemeText, kThemeMint,
@@ -264,10 +258,7 @@ auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem,
     if (!reg.valid) {
         return std::format("{}bubble (empty)\033[0m", kThemeMuted);
     }
-    std::string_view op_name = "UNKNOWN";
-    if (static_cast<std::size_t>(reg.op_id) < simrv::pipeline::OPERATION_NAME.size()) {
-        op_name = simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(reg.op_id));
-    }
+    const std::string_view op_name = simrv::pipeline::operation_name(reg.op_id);
 
     std::string ops_info;
     if (reg.rs1 != static_cast<RegId>(0) || reg.rs2 != static_cast<RegId>(0) ||
@@ -627,10 +618,7 @@ auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::cor
     auto& ctx = cpu.pipeline_context;
 
     // Get operation info for labels
-    std::string_view op_name = "UNKNOWN";
-    if (static_cast<std::size_t>(ctx.op_id) < simrv::pipeline::OPERATION_NAME.size()) {
-        op_name = simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(ctx.op_id));
-    }
+    const std::string_view op_name = simrv::pipeline::operation_name(ctx.op_id);
     auto isa_ext = simrv::util::get_isa_extension_name(ctx.op_id);
     InstFormat const fmt = simrv::isa::get_instruction_format(ctx.opcode);
     bool const is_compressed = (ctx.ir_org & 0x3) != 0x3;
@@ -954,10 +942,7 @@ auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int lo
         auto const& inst = active_insts.at(inst_row);
 
         // Get assembly mnemonic (truncated to max 5 chars to ensure table alignment)
-        std::string_view op_mnem = "UNK";
-        if (static_cast<std::size_t>(inst.op_id) < simrv::pipeline::OPERATION_NAME.size()) {
-            op_mnem = simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(inst.op_id));
-        }
+        const std::string_view op_mnem = simrv::pipeline::operation_name(inst.op_id);
         std::string mnem_5 =
             (op_mnem.size() > 5) ? std::string(op_mnem.substr(0, 5)) : std::string(op_mnem);
         std::string pc_str = hex_val(inst.pc);

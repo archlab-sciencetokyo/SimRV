@@ -173,7 +173,8 @@ void Tracer::write_instruction_mix_report() {
     uint64_t total = 0;
     for (auto const [i, count] : std::views::enumerate(machine_.primary_hart().e_instmix)) {
         std::println(out, "{} : {:10}",
-                     simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(i)), count);
+                     simrv::pipeline::operation_name(static_cast<simrv::isa::OperationId>(i)),
+                     count);
         total += count;
     }
     std::println(out, "TOTAL      : {:10}", total);

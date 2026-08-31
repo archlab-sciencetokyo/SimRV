@@ -495,6 +495,36 @@ void test_fp_decode_legality() {
            "64-bit integer FP conversions exist only on RV64");
 }
 
+void test_vector_decode_tables() {
+    constexpr Instruction kOpV = 0x57U;
+    const auto encode_op_v = [](unsigned funct6, unsigned funct3, bool vm, unsigned rs1 = 1,
+                                unsigned vs2 = 2) {
+        return (funct6 << 26U) | (static_cast<unsigned>(vm) << 25U) | (vs2 << 20U) | (rs1 << 15U) |
+               (funct3 << 12U) | (3U << 7U) | kOpV;
+    };
+
+    expect(
+        simrv::pipeline::decoder(encode_op_v(0x0D, 6, true)) == simrv::isa::OperationId::VCLMULH_VX,
+        "common vector table decodes a funct6/funct3 operation");
+    expect(
+        simrv::pipeline::decoder(encode_op_v(0x11, 0, true)) == simrv::isa::OperationId::VMADC_VV,
+        "unmasked vector table selects the vm=1 operation");
+    expect(
+        simrv::pipeline::decoder(encode_op_v(0x11, 0, false)) == simrv::isa::OperationId::VMADC_VVM,
+        "masked vector table selects the vm=0 operation");
+    expect(simrv::pipeline::decoder(encode_op_v(0x10, 2, true, 16)) ==
+               simrv::isa::OperationId::VCPOP_M,
+           "secondary rs1 vector encoding remains explicit");
+    expect(simrv::pipeline::decoder(encode_op_v(0x10, 2, true, 31)) ==
+               simrv::isa::OperationId::UNKNOWN,
+           "reserved secondary vector encoding remains unknown");
+    expect(
+        simrv::pipeline::decoder(encode_op_v(0x27, 3, true, 7)) == simrv::isa::OperationId::VMV8R_V,
+        "whole-register vector move retains its simm5 decoding");
+    expect(simrv::pipeline::decoder(encode_op_v(0x08, 0, true)) == simrv::isa::OperationId::UNKNOWN,
+           "unassigned vector table entries decode as unknown");
+}
+
 void test_privileged_decode_legality() {
     constexpr Instruction kSystemOpcode = 0x73U;
     const auto encode_priv = [](unsigned funct12, unsigned rd, unsigned rs1) {
@@ -930,6 +960,7 @@ int main() {
     test_atomic_alignment();
     test_atomic_decode_legality();
     test_fp_decode_legality();
+    test_vector_decode_tables();
     test_privileged_decode_legality();
     test_csr_privilege_presence();
     test_interrupt_priority();

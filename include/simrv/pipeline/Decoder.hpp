@@ -147,4 +147,7 @@ auto decompressInstruction(Instruction ir, bool is_rv64) -> Instruction;
 extern const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)>
     OPERATION_NAME;
 
+/// Return a stable mnemonic for an operation, including invalid enum values.
+[[nodiscard]] auto operation_name(isa::OperationId operation) noexcept -> std::string_view;
+
 }  // namespace simrv::pipeline

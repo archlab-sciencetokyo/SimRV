@@ -1422,14 +1422,8 @@ void Tui::format_trace_inst(const TraceRecord& rec, const std::string& op_name, 
 
 auto Tui::format_trace_record(const TraceRecord& rec) -> std::string {
     std::string op_name;
-    if (static_cast<std::size_t>(rec.op_id) < simrv::pipeline::OPERATION_NAME.size()) {
-        std::string_view name_sv =
-            simrv::pipeline::OPERATION_NAME.at(static_cast<std::size_t>(rec.op_id));
-        for (char c : name_sv) {
-            op_name += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        }
-    } else {
-        op_name = "unknown";
+    for (char c : simrv::pipeline::operation_name(rec.op_id)) {
+        op_name += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
 
     for (char& c : op_name) {

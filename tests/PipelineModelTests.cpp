@@ -9,6 +9,7 @@
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/isa/Base.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
+#include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
@@ -37,6 +38,10 @@ void test_operation_traits() {
     TEST_CHECK(is_fp_divide_or_sqrt(OperationId::FSQRT_D));
     TEST_CHECK(is_fp_alu(OperationId::FCVT_D_LU));
     TEST_CHECK(!is_fp_alu(OperationId::FDIV_D));
+    TEST_CHECK(info(OperationId::MUL).execution_class == ExecutionClass::Multiply);
+    TEST_CHECK(info(OperationId::ADD).execution_class == ExecutionClass::Default);
+    TEST_CHECK(simrv::pipeline::operation_name(OperationId::VADD_VV) == "VADD_VV");
+    TEST_CHECK(simrv::pipeline::operation_name(static_cast<OperationId>(0xffff)) == "UNKNOWN");
     TEST_CHECK(is_load(Opcode::LoadFp));
     TEST_CHECK(is_store(Opcode::StoreFp));
     TEST_CHECK(reads_rs1(Opcode::Jalr));

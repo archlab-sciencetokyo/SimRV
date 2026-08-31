@@ -26,6 +26,10 @@ host APIs, CLI compatibility surface, and pipeline choices are breaking changes.
 
 ### Developer interfaces
 
+- Generalized instruction decoding around collision-checked `consteval` tables, including common
+  and mask-dependent vector encodings and single/double FP operations. Irregular encodings retain
+  explicit secondary-field validation, while pipeline timing classes and mnemonic lookup use
+  shared operation metadata.
 - Added `--log-file FILE` to mirror timestamped configuration, diagnostics, typed termination
   reason, performance counters, cache statistics, and bus statistics without requiring the TUI.
 - Added machine-readable repeated benchmark reports and optional Linux `perf stat` host counters.

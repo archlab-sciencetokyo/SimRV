@@ -3,6 +3,8 @@
 #include <cstdio>
 #include <utility>
 
+#include "simrv/pipeline/DecodeTable.hpp"
+
 namespace simrv::pipeline {
 
 using simrv::isa::OperationId;
@@ -484,6 +486,11 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "VCHECK",
     "UNKNOWN"};
 
+auto operation_name(isa::OperationId operation) noexcept -> std::string_view {
+    const auto index = static_cast<std::size_t>(operation);
+    return index < OPERATION_NAME.size() ? OPERATION_NAME[index] : "UNKNOWN";
+}
+
 namespace {
 
 constexpr std::array<OperationId, 8> kBranchTable = {
@@ -547,55 +554,52 @@ constexpr std::array<OperationId, 8> kOpImmBaseTable = {
 }
 
 consteval auto generate_op_standard_table() {
-    std::array<std::array<OperationId, 128>, 8> table{};
-    for (auto& row : table) {
-        row.fill(OperationId::UNKNOWN);
-    }
+    DecodeTable<OperationId, 8, 128, OperationId::UNKNOWN> table;
     // funct3 = 0
-    table[0][0x00] = OperationId::ADD;
-    table[0][0x20] = OperationId::SUB;
+    table.assign(0, 0x00, OperationId::ADD);
+    table.assign(0, 0x20, OperationId::SUB);
 
     // funct3 = 1
-    table[1][0x00] = OperationId::SLL;
-    table[1][0x05] = OperationId::CLMUL;
-    table[1][0x14] = OperationId::BSET;
-    table[1][0x24] = OperationId::BCLR;
-    table[1][0x30] = OperationId::ROL;
-    table[1][0x34] = OperationId::BINV;
+    table.assign(1, 0x00, OperationId::SLL);
+    table.assign(1, 0x05, OperationId::CLMUL);
+    table.assign(1, 0x14, OperationId::BSET);
+    table.assign(1, 0x24, OperationId::BCLR);
+    table.assign(1, 0x30, OperationId::ROL);
+    table.assign(1, 0x34, OperationId::BINV);
 
     // funct3 = 2
-    table[2][0x00] = OperationId::SLT;
-    table[2][0x05] = OperationId::CLMULR;
-    table[2][0x10] = OperationId::SH1ADD;
+    table.assign(2, 0x00, OperationId::SLT);
+    table.assign(2, 0x05, OperationId::CLMULR);
+    table.assign(2, 0x10, OperationId::SH1ADD);
 
     // funct3 = 3
-    table[3][0x00] = OperationId::SLTU;
-    table[3][0x05] = OperationId::CLMULH;
+    table.assign(3, 0x00, OperationId::SLTU);
+    table.assign(3, 0x05, OperationId::CLMULH);
 
     // funct3 = 4
-    table[4][0x00] = OperationId::XOR;
-    table[4][0x04] = OperationId::PACK;
-    table[4][0x05] = OperationId::MIN;
-    table[4][0x10] = OperationId::SH2ADD;
-    table[4][0x20] = OperationId::XNOR;
+    table.assign(4, 0x00, OperationId::XOR);
+    table.assign(4, 0x04, OperationId::PACK);
+    table.assign(4, 0x05, OperationId::MIN);
+    table.assign(4, 0x10, OperationId::SH2ADD);
+    table.assign(4, 0x20, OperationId::XNOR);
 
     // funct3 = 5
-    table[5][0x00] = OperationId::SRL;
-    table[5][0x05] = OperationId::MINU;
-    table[5][0x20] = OperationId::SRA;
-    table[5][0x24] = OperationId::BEXT;
-    table[5][0x30] = OperationId::ROR;
+    table.assign(5, 0x00, OperationId::SRL);
+    table.assign(5, 0x05, OperationId::MINU);
+    table.assign(5, 0x20, OperationId::SRA);
+    table.assign(5, 0x24, OperationId::BEXT);
+    table.assign(5, 0x30, OperationId::ROR);
 
     // funct3 = 6
-    table[6][0x00] = OperationId::OR;
-    table[6][0x05] = OperationId::MAX;
-    table[6][0x10] = OperationId::SH3ADD;
-    table[6][0x20] = OperationId::ORN;
+    table.assign(6, 0x00, OperationId::OR);
+    table.assign(6, 0x05, OperationId::MAX);
+    table.assign(6, 0x10, OperationId::SH3ADD);
+    table.assign(6, 0x20, OperationId::ORN);
 
     // funct3 = 7
-    table[7][0x00] = OperationId::AND;
-    table[7][0x05] = OperationId::MAXU;
-    table[7][0x20] = OperationId::ANDN;
+    table.assign(7, 0x00, OperationId::AND);
+    table.assign(7, 0x05, OperationId::MAXU);
+    table.assign(7, 0x20, OperationId::ANDN);
 
     return table;
 }
@@ -605,7 +609,7 @@ constexpr auto kOpStandardTable = generate_op_standard_table();
 [[nodiscard]] constexpr auto decode_op_standard(uint32_t funct3, uint32_t funct7) noexcept
     -> OperationId {
     if (funct3 < 8 && funct7 < 128) {
-        return kOpStandardTable[funct3][funct7];
+        return kOpStandardTable.lookup(funct3, funct7);
     }
     return OperationId::UNKNOWN;
 }
@@ -634,33 +638,30 @@ auto decode_op_imm32(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operat
 }
 
 consteval auto generate_op32_standard_table() {
-    std::array<std::array<OperationId, 128>, 8> table{};
-    for (auto& row : table) {
-        row.fill(OperationId::UNKNOWN);
-    }
+    DecodeTable<OperationId, 8, 128, OperationId::UNKNOWN> table;
     // funct3 = 0
-    table[0][0x00] = OperationId::ADDW;
-    table[0][0x04] = OperationId::ADD_UW;
-    table[0][0x20] = OperationId::SUBW;
+    table.assign(0, 0x00, OperationId::ADDW);
+    table.assign(0, 0x04, OperationId::ADD_UW);
+    table.assign(0, 0x20, OperationId::SUBW);
 
     // funct3 = 1
-    table[1][0x00] = OperationId::SLLW;
-    table[1][0x30] = OperationId::ROLW;
+    table.assign(1, 0x00, OperationId::SLLW);
+    table.assign(1, 0x30, OperationId::ROLW);
 
     // funct3 = 2
-    table[2][0x10] = OperationId::SH1ADD_UW;
+    table.assign(2, 0x10, OperationId::SH1ADD_UW);
 
     // funct3 = 4
-    table[4][0x04] = OperationId::PACKW;
-    table[4][0x10] = OperationId::SH2ADD_UW;
+    table.assign(4, 0x04, OperationId::PACKW);
+    table.assign(4, 0x10, OperationId::SH2ADD_UW);
 
     // funct3 = 5
-    table[5][0x00] = OperationId::SRLW;
-    table[5][0x20] = OperationId::SRAW;
-    table[5][0x30] = OperationId::RORW;
+    table.assign(5, 0x00, OperationId::SRLW);
+    table.assign(5, 0x20, OperationId::SRAW);
+    table.assign(5, 0x30, OperationId::RORW);
 
     // funct3 = 6
-    table[6][0x10] = OperationId::SH3ADD_UW;
+    table.assign(6, 0x10, OperationId::SH3ADD_UW);
 
     return table;
 }
@@ -670,7 +671,7 @@ constexpr auto kOp32StandardTable = generate_op32_standard_table();
 [[nodiscard]] constexpr auto decode_op32_standard(uint32_t funct3, uint32_t funct7) noexcept
     -> OperationId {
     if (funct3 < 8 && funct7 < 128) {
-        return kOp32StandardTable[funct3][funct7];
+        return kOp32StandardTable.lookup(funct3, funct7);
     }
     return OperationId::UNKNOWN;
 }
@@ -783,35 +784,32 @@ constexpr std::array<OperationId, 8> kMTable32 = {
 }
 
 consteval auto generate_amo_table() {
-    std::array<std::array<OperationId, 32>, 2> table{};
-    for (auto& row : table) {
-        row.fill(OperationId::UNKNOWN);
-    }
+    DecodeTable<OperationId, 2, 32, OperationId::UNKNOWN> table;
     // funct3 == 2 (32-bit AMO*W)
-    table[0][0x00] = OperationId::AMOADD_W;
-    table[0][0x01] = OperationId::AMOSWAP_W;
-    table[0][0x02] = OperationId::LR_W;
-    table[0][0x03] = OperationId::SC_W;
-    table[0][0x04] = OperationId::AMOXOR_W;
-    table[0][0x08] = OperationId::AMOOR_W;
-    table[0][0x0C] = OperationId::AMOAND_W;
-    table[0][0x10] = OperationId::AMOMIN_W;
-    table[0][0x14] = OperationId::AMOMAX_W;
-    table[0][0x18] = OperationId::AMOMINU_W;
-    table[0][0x1C] = OperationId::AMOMAXU_W;
+    table.assign(0, 0x00, OperationId::AMOADD_W);
+    table.assign(0, 0x01, OperationId::AMOSWAP_W);
+    table.assign(0, 0x02, OperationId::LR_W);
+    table.assign(0, 0x03, OperationId::SC_W);
+    table.assign(0, 0x04, OperationId::AMOXOR_W);
+    table.assign(0, 0x08, OperationId::AMOOR_W);
+    table.assign(0, 0x0C, OperationId::AMOAND_W);
+    table.assign(0, 0x10, OperationId::AMOMIN_W);
+    table.assign(0, 0x14, OperationId::AMOMAX_W);
+    table.assign(0, 0x18, OperationId::AMOMINU_W);
+    table.assign(0, 0x1C, OperationId::AMOMAXU_W);
 
     // funct3 == 3 (64-bit AMO*D)
-    table[1][0x00] = OperationId::AMOADD_D;
-    table[1][0x01] = OperationId::AMOSWAP_D;
-    table[1][0x02] = OperationId::LR_D;
-    table[1][0x03] = OperationId::SC_D;
-    table[1][0x04] = OperationId::AMOXOR_D;
-    table[1][0x08] = OperationId::AMOOR_D;
-    table[1][0x0C] = OperationId::AMOAND_D;
-    table[1][0x10] = OperationId::AMOMIN_D;
-    table[1][0x14] = OperationId::AMOMAX_D;
-    table[1][0x18] = OperationId::AMOMINU_D;
-    table[1][0x1C] = OperationId::AMOMAXU_D;
+    table.assign(1, 0x00, OperationId::AMOADD_D);
+    table.assign(1, 0x01, OperationId::AMOSWAP_D);
+    table.assign(1, 0x02, OperationId::LR_D);
+    table.assign(1, 0x03, OperationId::SC_D);
+    table.assign(1, 0x04, OperationId::AMOXOR_D);
+    table.assign(1, 0x08, OperationId::AMOOR_D);
+    table.assign(1, 0x0C, OperationId::AMOAND_D);
+    table.assign(1, 0x10, OperationId::AMOMIN_D);
+    table.assign(1, 0x14, OperationId::AMOMAX_D);
+    table.assign(1, 0x18, OperationId::AMOMINU_D);
+    table.assign(1, 0x1C, OperationId::AMOMAXU_D);
 
     return table;
 }
@@ -829,7 +827,7 @@ constexpr auto kAmoTable = generate_amo_table();
         return OperationId::UNKNOWN;
     }
     if (funct5 < 32) {
-        return kAmoTable[funct3 - 2][funct5];
+        return kAmoTable.lookup(funct3 - 2, funct5);
     }
     return OperationId::UNKNOWN;
 }
@@ -866,34 +864,28 @@ constexpr std::array<std::array<OperationId, 2>, 4> kFmaTable = {{
     return kFmaTable[op_idx][fmt];
 }
 
-auto decode_op_fp_single_arith(uint32_t funct3, uint32_t f5, uint32_t rs2) -> OperationId {
-    switch (f5) {
-        case 0x00:
-            return OperationId::FADD_S;
-        case 0x01:
-            return OperationId::FSUB_S;
-        case 0x02:
-            return OperationId::FMUL_S;
-        case 0x03:
-            return OperationId::FDIV_S;
-        case 0x04:
-            if (funct3 == 0) return OperationId::FSGNJ_S;
-            if (funct3 == 1) return OperationId::FSGNJN_S;
-            if (funct3 == 2) return OperationId::FSGNJX_S;
-            break;
-        case 0x05:
-            if (funct3 == 0) return OperationId::FMIN_S;
-            if (funct3 == 1) return OperationId::FMAX_S;
-            break;
-        case 0x0B:
-            return (rs2 == 0) ? OperationId::FSQRT_S : OperationId::UNKNOWN;
-        case 0x1E:
-            return (rs2 == 0 && funct3 == 0) ? OperationId::FMV_W_X : OperationId::UNKNOWN;
-        default:
-            break;
-    }
-    return OperationId::UNKNOWN;
+consteval auto generate_fp_single_table() {
+    DecodeTable<OperationId, 32, 8, OperationId::UNKNOWN> table;
+    table.assign_row(0x00, OperationId::FADD_S);
+    table.assign_row(0x01, OperationId::FSUB_S);
+    table.assign_row(0x02, OperationId::FMUL_S);
+    table.assign_row(0x03, OperationId::FDIV_S);
+    table.assign(0x04, 0, OperationId::FSGNJ_S);
+    table.assign(0x04, 1, OperationId::FSGNJN_S);
+    table.assign(0x04, 2, OperationId::FSGNJX_S);
+    table.assign(0x05, 0, OperationId::FMIN_S);
+    table.assign(0x05, 1, OperationId::FMAX_S);
+    table.assign_row(0x0B, OperationId::FSQRT_S);
+    table.assign(0x14, 0, OperationId::FLE_S);
+    table.assign(0x14, 1, OperationId::FLT_S);
+    table.assign(0x14, 2, OperationId::FEQ_S);
+    table.assign(0x1C, 0, OperationId::FMV_X_W);
+    table.assign(0x1C, 1, OperationId::FCLASS_S);
+    table.assign(0x1E, 0, OperationId::FMV_W_X);
+    return table;
 }
+
+constexpr auto kFpSingleTable = generate_fp_single_table();
 
 auto decode_op_fp_single_fcvt(uint32_t f5, uint32_t rs2) -> OperationId {
     switch (f5) {
@@ -917,62 +909,38 @@ auto decode_op_fp_single_fcvt(uint32_t f5, uint32_t rs2) -> OperationId {
     return OperationId::UNKNOWN;
 }
 
-auto decode_op_fp_single_cmp(uint32_t funct3, uint32_t f5) -> OperationId {
-    switch (f5) {
-        case 0x14:
-            if (funct3 == 0) return OperationId::FLE_S;
-            if (funct3 == 1) return OperationId::FLT_S;
-            if (funct3 == 2) return OperationId::FEQ_S;
-            break;
-        case 0x1C:
-            return (funct3 == 0)   ? OperationId::FMV_X_W
-                   : (funct3 == 1) ? OperationId::FCLASS_S
-                                   : OperationId::UNKNOWN;
-        default:
-            break;
-    }
-    return OperationId::UNKNOWN;
-}
-
 auto decode_op_fp_single(uint32_t funct3, uint32_t f5, uint32_t rs2) -> OperationId {
     if (f5 == 0x08 || f5 == 0x18 || f5 == 0x1A) {
         return decode_op_fp_single_fcvt(f5, rs2);
     }
-    if (f5 == 0x1C && rs2 != 0) {
+    if ((f5 == 0x0B || f5 == 0x1C || f5 == 0x1E) && rs2 != 0) {
         return OperationId::UNKNOWN;
     }
-    if (f5 == 0x14 || f5 == 0x1C) {
-        return decode_op_fp_single_cmp(funct3, f5);
-    }
-    return decode_op_fp_single_arith(funct3, f5, rs2);
+    return kFpSingleTable.lookup(f5, funct3);
 }
 
-auto decode_op_fp_double_arith(uint32_t funct3, uint32_t f5, uint32_t rs2) -> OperationId {
-    switch (f5) {
-        case 0x00:
-            return OperationId::FADD_D;
-        case 0x01:
-            return OperationId::FSUB_D;
-        case 0x02:
-            return OperationId::FMUL_D;
-        case 0x03:
-            return OperationId::FDIV_D;
-        case 0x04:
-            if (funct3 == 0) return OperationId::FSGNJ_D;
-            if (funct3 == 1) return OperationId::FSGNJN_D;
-            if (funct3 == 2) return OperationId::FSGNJX_D;
-            break;
-        case 0x05:
-            if (funct3 == 0) return OperationId::FMIN_D;
-            if (funct3 == 1) return OperationId::FMAX_D;
-            break;
-        case 0x0B:
-            return (rs2 == 0) ? OperationId::FSQRT_D : OperationId::UNKNOWN;
-        default:
-            break;
-    }
-    return OperationId::UNKNOWN;
+consteval auto generate_fp_double_table() {
+    DecodeTable<OperationId, 32, 8, OperationId::UNKNOWN> table;
+    table.assign_row(0x00, OperationId::FADD_D);
+    table.assign_row(0x01, OperationId::FSUB_D);
+    table.assign_row(0x02, OperationId::FMUL_D);
+    table.assign_row(0x03, OperationId::FDIV_D);
+    table.assign(0x04, 0, OperationId::FSGNJ_D);
+    table.assign(0x04, 1, OperationId::FSGNJN_D);
+    table.assign(0x04, 2, OperationId::FSGNJX_D);
+    table.assign(0x05, 0, OperationId::FMIN_D);
+    table.assign(0x05, 1, OperationId::FMAX_D);
+    table.assign_row(0x0B, OperationId::FSQRT_D);
+    table.assign(0x14, 0, OperationId::FLE_D);
+    table.assign(0x14, 1, OperationId::FLT_D);
+    table.assign(0x14, 2, OperationId::FEQ_D);
+    table.assign(0x1C, 0, OperationId::FMV_X_D);
+    table.assign(0x1C, 1, OperationId::FCLASS_D);
+    table.assign(0x1E, 0, OperationId::FMV_D_X);
+    return table;
 }
+
+constexpr auto kFpDoubleTable = generate_fp_double_table();
 
 auto decode_op_fp_double_fcvt(uint32_t funct3, uint32_t f5, uint32_t rs2) -> OperationId {
     switch (f5) {
@@ -997,36 +965,14 @@ auto decode_op_fp_double_fcvt(uint32_t funct3, uint32_t f5, uint32_t rs2) -> Ope
     return OperationId::UNKNOWN;
 }
 
-auto decode_op_fp_double_cmp(uint32_t funct3, uint32_t f5) -> OperationId {
-    switch (f5) {
-        case 0x14:
-            if (funct3 == 0) return OperationId::FLE_D;
-            if (funct3 == 1) return OperationId::FLT_D;
-            if (funct3 == 2) return OperationId::FEQ_D;
-            break;
-        case 0x1C:
-            if (funct3 == 0) return OperationId::FMV_X_D;
-            if (funct3 == 1) return OperationId::FCLASS_D;
-            break;
-        case 0x1E:
-            return (funct3 == 0) ? OperationId::FMV_D_X : OperationId::UNKNOWN;
-        default:
-            break;
-    }
-    return OperationId::UNKNOWN;
-}
-
 auto decode_op_fp_double(uint32_t funct3, uint32_t f5, uint32_t rs2) -> OperationId {
     if (f5 == 0x08 || f5 == 0x18 || f5 == 0x1A) {
         return decode_op_fp_double_fcvt(funct3, f5, rs2);
     }
-    if ((f5 == 0x1C || f5 == 0x1E) && rs2 != 0) {
+    if ((f5 == 0x0B || f5 == 0x1C || f5 == 0x1E) && rs2 != 0) {
         return OperationId::UNKNOWN;
     }
-    if (f5 == 0x14 || f5 == 0x1C || f5 == 0x1E) {
-        return decode_op_fp_double_cmp(funct3, f5);
-    }
-    return decode_op_fp_double_arith(funct3, f5, rs2);
+    return kFpDoubleTable.lookup(f5, funct3);
 }
 
 auto decode_op_fp(uint32_t funct3, uint32_t funct7, uint32_t rs2) -> OperationId {
@@ -1043,84 +989,175 @@ auto decode_op_fp(uint32_t funct3, uint32_t funct7, uint32_t rs2) -> OperationId
 
 namespace {
 
-auto decode_ext_v_range0(uint32_t f6, uint32_t funct3) -> OperationId {
-    switch (f6) {
-        case 0x00:
-            if (funct3 == 0) return OperationId::VADD_VV;
-            if (funct3 == 4) return OperationId::VADD_VX;
-            if (funct3 == 3) return OperationId::VADD_VI;
-            if (funct3 == 1) return OperationId::VFADD_VV;
-            if (funct3 == 5) return OperationId::VFADD_VF;
-            if (funct3 == 2) return OperationId::VREDSUM_VS;
-            break;
-        case 0x01:
-            if (funct3 == 0) return OperationId::VANDN_VV;
-            if (funct3 == 4) return OperationId::VANDN_VX;
-            break;
-        case 0x02:
-            if (funct3 == 0) return OperationId::VSUB_VV;
-            if (funct3 == 4) return OperationId::VSUB_VX;
-            break;
-        case 0x03:
-            if (funct3 == 4) return OperationId::VRSUB_VX;
-            if (funct3 == 3) return OperationId::VRSUB_VI;
-            break;
-        case 0x04:
-            if (funct3 == 0) return OperationId::VMINU_VV;
-            if (funct3 == 4) return OperationId::VMINU_VX;
-            break;
-        case 0x05:
-            if (funct3 == 0) return OperationId::VMIN_VV;
-            if (funct3 == 4) return OperationId::VMIN_VX;
-            break;
-        case 0x06:
-            if (funct3 == 0) return OperationId::VMAXU_VV;
-            if (funct3 == 4) return OperationId::VMAXU_VX;
-            break;
-        case 0x07:
-            if (funct3 == 0) return OperationId::VMAX_VV;
-            if (funct3 == 4) return OperationId::VMAX_VX;
-            break;
-        case 0x09:
-            if (funct3 == 0) return OperationId::VAND_VV;
-            if (funct3 == 4) return OperationId::VAND_VX;
-            if (funct3 == 3) return OperationId::VAND_VI;
-            break;
-        case 0x0A:
-            if (funct3 == 0) return OperationId::VOR_VV;
-            if (funct3 == 4) return OperationId::VOR_VX;
-            if (funct3 == 3) return OperationId::VOR_VI;
-            break;
-        case 0x0B:
-            if (funct3 == 0) return OperationId::VXOR_VV;
-            if (funct3 == 4) return OperationId::VXOR_VX;
-            if (funct3 == 3) return OperationId::VXOR_VI;
-            break;
-        case 0x0C:
-            if (funct3 == 2) return OperationId::VCLMUL_VV;
-            if (funct3 == 6) return OperationId::VCLMUL_VX;
-            break;
-        case 0x0D:
-            if (funct3 == 2) return OperationId::VCLMULH_VV;
-            if (funct3 == 6) return OperationId::VCLMULH_VX;
-            break;
-        case 0x0E:
-            if (funct3 == 6) return OperationId::VSLIDE1UP_VX;
-            if (funct3 == 4) return OperationId::VSLIDEUP_VX;
-            if (funct3 == 3) return OperationId::VSLIDEUP_VI;
-            break;
-        case 0x0F:
-            if (funct3 == 6) return OperationId::VSLIDE1DOWN_VX;
-            if (funct3 == 4) return OperationId::VSLIDEDOWN_VX;
-            if (funct3 == 3) return OperationId::VSLIDEDOWN_VI;
-            break;
-        default:
-            break;
-    }
-    return OperationId::UNKNOWN;
+consteval auto generate_vector_common_table() {
+    DecodeTable<OperationId, 64, 8, OperationId::UNKNOWN> table;
+    table.assign_row(0x00, {{0, OperationId::VADD_VV},
+                            {4, OperationId::VADD_VX},
+                            {3, OperationId::VADD_VI},
+                            {1, OperationId::VFADD_VV},
+                            {5, OperationId::VFADD_VF},
+                            {2, OperationId::VREDSUM_VS}});
+    table.assign_row(0x01, {{0, OperationId::VANDN_VV}, {4, OperationId::VANDN_VX}});
+    table.assign_row(0x02, {{0, OperationId::VSUB_VV}, {4, OperationId::VSUB_VX}});
+    table.assign_row(0x03, {{4, OperationId::VRSUB_VX}, {3, OperationId::VRSUB_VI}});
+    table.assign_row(0x04, {{0, OperationId::VMINU_VV}, {4, OperationId::VMINU_VX}});
+    table.assign_row(0x05, {{0, OperationId::VMIN_VV}, {4, OperationId::VMIN_VX}});
+    table.assign_row(0x06, {{0, OperationId::VMAXU_VV}, {4, OperationId::VMAXU_VX}});
+    table.assign_row(0x07, {{0, OperationId::VMAX_VV}, {4, OperationId::VMAX_VX}});
+    table.assign_row(
+        0x09, {{0, OperationId::VAND_VV}, {4, OperationId::VAND_VX}, {3, OperationId::VAND_VI}});
+    table.assign_row(
+        0x0A, {{0, OperationId::VOR_VV}, {4, OperationId::VOR_VX}, {3, OperationId::VOR_VI}});
+    table.assign_row(
+        0x0B, {{0, OperationId::VXOR_VV}, {4, OperationId::VXOR_VX}, {3, OperationId::VXOR_VI}});
+    table.assign_row(0x0C, {{2, OperationId::VCLMUL_VV}, {6, OperationId::VCLMUL_VX}});
+    table.assign_row(0x0D, {{2, OperationId::VCLMULH_VV}, {6, OperationId::VCLMULH_VX}});
+    table.assign_row(0x0E, {{6, OperationId::VSLIDE1UP_VX},
+                            {4, OperationId::VSLIDEUP_VX},
+                            {3, OperationId::VSLIDEUP_VI}});
+    table.assign_row(0x0F, {{6, OperationId::VSLIDE1DOWN_VX},
+                            {4, OperationId::VSLIDEDOWN_VX},
+                            {3, OperationId::VSLIDEDOWN_VI}});
+    table.assign(0x10, 6, OperationId::VMV_S_X);
+    table.assign_row(0x12, {{0, OperationId::VSBC_VVM}, {4, OperationId::VSBC_VXM}});
+    table.assign_row(
+        0x14, {{0, OperationId::VROR_VV}, {4, OperationId::VROR_VX}, {3, OperationId::VROR_VI}});
+    table.assign_row(0x15, {{0, OperationId::VROL_VV}, {4, OperationId::VROL_VX}});
+    table.assign_row(0x18, {{0, OperationId::VMSEQ_VV},
+                            {4, OperationId::VMSEQ_VX},
+                            {3, OperationId::VMSEQ_VI},
+                            {2, OperationId::VMNAND_MM}});
+    table.assign_row(0x19, {{0, OperationId::VMSNE_VV},
+                            {4, OperationId::VMSNE_VX},
+                            {3, OperationId::VMSNE_VI},
+                            {2, OperationId::VMAND_MM}});
+    table.assign_row(
+        0x1A,
+        {{0, OperationId::VMSLTU_VV}, {4, OperationId::VMSLTU_VX}, {2, OperationId::VMANDN_MM}});
+    table.assign_row(
+        0x1B, {{0, OperationId::VMSLT_VV}, {4, OperationId::VMSLT_VX}, {2, OperationId::VMXOR_MM}});
+    table.assign_row(0x1C, {{0, OperationId::VMSLEU_VV},
+                            {4, OperationId::VMSLEU_VX},
+                            {3, OperationId::VMSLEU_VI},
+                            {2, OperationId::VMOR_MM}});
+    table.assign_row(0x1D, {{0, OperationId::VMSLE_VV},
+                            {4, OperationId::VMSLE_VX},
+                            {3, OperationId::VMSLE_VI},
+                            {2, OperationId::VMNOR_MM}});
+    table.assign_row(
+        0x1E,
+        {{4, OperationId::VMSGTU_VX}, {3, OperationId::VMSGTU_VI}, {2, OperationId::VMORN_MM}});
+    table.assign_row(
+        0x1F,
+        {{4, OperationId::VMSGT_VX}, {3, OperationId::VMSGT_VI}, {2, OperationId::VMXNOR_MM}});
+    table.assign_row(0x20, {{2, OperationId::VDIVU_VV},
+                            {6, OperationId::VDIVU_VX},
+                            {0, OperationId::VSADDU_VV},
+                            {4, OperationId::VSADDU_VX},
+                            {3, OperationId::VSADDU_VI}});
+    table.assign_row(0x21, {{2, OperationId::VDIV_VV},
+                            {6, OperationId::VDIV_VX},
+                            {0, OperationId::VSADD_VV},
+                            {4, OperationId::VSADD_VX},
+                            {3, OperationId::VSADD_VI}});
+    table.assign_row(0x22, {{0, OperationId::VSSUBU_VV}, {4, OperationId::VSSUBU_VX}});
+    table.assign_row(0x23, {{0, OperationId::VSSUB_VV}, {4, OperationId::VSSUB_VX}});
+    table.assign_row(0x25, {{0, OperationId::VSLL_VV},
+                            {4, OperationId::VSLL_VX},
+                            {3, OperationId::VSLL_VI},
+                            {2, OperationId::VMUL_VV},
+                            {6, OperationId::VMUL_VX}});
+    table.assign_row(0x27, {{0, OperationId::VSMUL_VV}, {4, OperationId::VSMUL_VX}});
+    table.assign_row(
+        0x28, {{0, OperationId::VSRL_VV}, {4, OperationId::VSRL_VX}, {3, OperationId::VSRL_VI}});
+    table.assign_row(0x29, {{0, OperationId::VSRA_VV},
+                            {4, OperationId::VSRA_VX},
+                            {3, OperationId::VSRA_VI},
+                            {2, OperationId::VMADD_VV},
+                            {6, OperationId::VMADD_VX}});
+    table.assign_row(
+        0x2A, {{0, OperationId::VSSRL_VV}, {4, OperationId::VSSRL_VX}, {3, OperationId::VSSRL_VI}});
+    table.assign_row(0x2B, {{2, OperationId::VNSUB_VV},
+                            {6, OperationId::VNSUB_VX},
+                            {0, OperationId::VSSRA_VV},
+                            {4, OperationId::VSSRA_VX},
+                            {3, OperationId::VSSRA_VI}});
+    table.assign_row(0x2C, {{0, OperationId::VNSRL_WV},
+                            {4, OperationId::VNSRL_WX},
+                            {3, OperationId::VNSRL_WI},
+                            {1, OperationId::VFMACC_VV},
+                            {5, OperationId::VFMACC_VF}});
+    table.assign_row(0x2D, {{0, OperationId::VNSRA_WV},
+                            {4, OperationId::VNSRA_WX},
+                            {3, OperationId::VNSRA_WI},
+                            {2, OperationId::VMACC_VV},
+                            {6, OperationId::VMACC_VX}});
+    table.assign_row(
+        0x2E,
+        {{0, OperationId::VNCLIPU_WV}, {4, OperationId::VNCLIPU_WX}, {3, OperationId::VNCLIPU_WI}});
+    table.assign_row(0x2F, {{2, OperationId::VNMSAC_VV},
+                            {6, OperationId::VNMSAC_VX},
+                            {0, OperationId::VNCLIP_WV},
+                            {4, OperationId::VNCLIP_WX},
+                            {3, OperationId::VNCLIP_WI}});
+    table.assign_row(
+        0x30,
+        {{2, OperationId::VWADDU_VV}, {6, OperationId::VWADDU_VX}, {0, OperationId::VWREDSUMU_VS}});
+    table.assign_row(
+        0x31,
+        {{2, OperationId::VWADD_VV}, {6, OperationId::VWADD_VX}, {0, OperationId::VWREDSUM_VS}});
+    table.assign_row(0x32, {{2, OperationId::VWSUBU_VV}, {6, OperationId::VWSUBU_VX}});
+    table.assign_row(0x33, {{2, OperationId::VWSUB_VV}, {6, OperationId::VWSUB_VX}});
+    table.assign_row(0x34, {{2, OperationId::VWADDU_WV}, {6, OperationId::VWADDU_WX}});
+    table.assign_row(0x35, {{2, OperationId::VWADD_WV},
+                            {6, OperationId::VWADD_WX},
+                            {0, OperationId::VWSLL_VV},
+                            {4, OperationId::VWSLL_VX},
+                            {3, OperationId::VWSLL_VI}});
+    table.assign_row(0x36, {{2, OperationId::VWSUBU_WV}, {6, OperationId::VWSUBU_WX}});
+    table.assign_row(0x37, {{2, OperationId::VWSUB_WV}, {6, OperationId::VWSUB_WX}});
+    table.assign_row(0x38, {{2, OperationId::VWMULU_VV}, {6, OperationId::VWMULU_VX}});
+    table.assign_row(0x3A, {{2, OperationId::VWMULSU_VV}, {6, OperationId::VWMULSU_VX}});
+    table.assign_row(0x3B, {{2, OperationId::VWMUL_VV}, {6, OperationId::VWMUL_VX}});
+    table.assign_row(0x3C, {{2, OperationId::VWMACCU_VV}, {6, OperationId::VWMACCU_VX}});
+    table.assign_row(0x3D, {{2, OperationId::VWMACC_VV}, {6, OperationId::VWMACC_VX}});
+    table.assign(0x3E, 6, OperationId::VWMACCUS_VX);
+    table.assign_row(0x3F, {{2, OperationId::VWMACCSU_VV}, {6, OperationId::VWMACCSU_VX}});
+    return table;
 }
 
-auto decode_ext_v_range1(uint32_t f6, uint32_t funct3, bool vm, Instruction ir) -> OperationId {
+consteval auto generate_vector_mask_table(bool vm) {
+    DecodeTable<OperationId, 64, 8, OperationId::UNKNOWN> table;
+    if (vm) {
+        table.assign_row(
+            0x11,
+            {{0, OperationId::VMADC_VV}, {4, OperationId::VMADC_VX}, {3, OperationId::VMADC_VI}});
+        table.assign_row(0x13, {{0, OperationId::VMSBC_VV}, {4, OperationId::VMSBC_VX}});
+        table.assign_row(0x17, {{0, OperationId::VMV_V_V},
+                                {4, OperationId::VMV_V_X},
+                                {3, OperationId::VMV_V_I},
+                                {2, OperationId::VCOMPRESS_VM}});
+    } else {
+        table.assign_row(
+            0x10,
+            {{0, OperationId::VADC_VVM}, {4, OperationId::VADC_VXM}, {3, OperationId::VADC_VIM}});
+        table.assign_row(0x11, {{0, OperationId::VMADC_VVM},
+                                {4, OperationId::VMADC_VXM},
+                                {3, OperationId::VMADC_VIM}});
+        table.assign_row(0x13, {{0, OperationId::VMSBC_VVM}, {4, OperationId::VMSBC_VXM}});
+        table.assign_row(0x17, {{0, OperationId::VMERGE_VVM},
+                                {4, OperationId::VMERGE_VXM},
+                                {3, OperationId::VMERGE_VIM},
+                                {5, OperationId::VFMERGE_VFM}});
+    }
+    return table;
+}
+
+constexpr auto kVectorCommonTable = generate_vector_common_table();
+constexpr auto kVectorMaskedTable = generate_vector_mask_table(false);
+constexpr auto kVectorUnmaskedTable = generate_vector_mask_table(true);
+
+auto decode_ext_v_special(uint32_t f6, uint32_t funct3, Instruction ir) -> OperationId {
     switch (f6) {
         case 0x10:
             if (funct3 == 2) {
@@ -1128,29 +1165,12 @@ auto decode_ext_v_range1(uint32_t f6, uint32_t funct3, bool vm, Instruction ir) 
                 if (rs1_val == 0) return OperationId::VMV_X_S;
                 if (rs1_val == 16) return OperationId::VCPOP_M;
                 if (rs1_val == 17) return OperationId::VFIRST_M;
-            } else if (funct3 == 6) {
-                return OperationId::VMV_S_X;
             } else if (funct3 == 1) {
                 uint32_t rs1_val = (ir >> 15) & 0x1F;
                 if (rs1_val == 0) return OperationId::VFMV_F_S;
             } else if (funct3 == 5) {
                 uint32_t vs2 = (ir >> 20) & 0x1F;
                 if (vs2 == 0) return OperationId::VFMV_S_F;
-            } else if (!vm) {
-                if (funct3 == 0) return OperationId::VADC_VVM;
-                if (funct3 == 4) return OperationId::VADC_VXM;
-                if (funct3 == 3) return OperationId::VADC_VIM;
-            }
-            break;
-        case 0x11:
-            if (vm) {
-                if (funct3 == 0) return OperationId::VMADC_VV;
-                if (funct3 == 4) return OperationId::VMADC_VX;
-                if (funct3 == 3) return OperationId::VMADC_VI;
-            } else {
-                if (funct3 == 0) return OperationId::VMADC_VVM;
-                if (funct3 == 4) return OperationId::VMADC_VXM;
-                if (funct3 == 3) return OperationId::VMADC_VIM;
             }
             break;
         case 0x12:
@@ -1172,15 +1192,6 @@ auto decode_ext_v_range1(uint32_t f6, uint32_t funct3, bool vm, Instruction ir) 
                 if (rs1_val == 14) return OperationId::VCPOP_V;
             }
             break;
-        case 0x13:
-            if (vm) {
-                if (funct3 == 0) return OperationId::VMSBC_VV;
-                if (funct3 == 4) return OperationId::VMSBC_VX;
-            } else {
-                if (funct3 == 0) return OperationId::VMSBC_VVM;
-                if (funct3 == 4) return OperationId::VMSBC_VXM;
-            }
-            break;
         case 0x14:
             if (funct3 == 0) return OperationId::VROR_VV;
             if (funct3 == 4) return OperationId::VROR_VX;
@@ -1193,67 +1204,6 @@ auto decode_ext_v_range1(uint32_t f6, uint32_t funct3, bool vm, Instruction ir) 
                 if (rs1_val == 16) return OperationId::VIOTA_M;
                 if (rs1_val == 17 && ((ir >> 20) & 0x1F) == 0) return OperationId::VID_V;
             }
-            break;
-        case 0x15:
-            if (funct3 == 0) return OperationId::VROL_VV;
-            if (funct3 == 4) return OperationId::VROL_VX;
-            break;
-        case 0x17:
-            if (vm) {
-                if (funct3 == 0) return OperationId::VMV_V_V;
-                if (funct3 == 4) return OperationId::VMV_V_X;
-                if (funct3 == 3) return OperationId::VMV_V_I;
-                if (funct3 == 2) return OperationId::VCOMPRESS_VM;
-            } else {
-                if (funct3 == 0) return OperationId::VMERGE_VVM;
-                if (funct3 == 4) return OperationId::VMERGE_VXM;
-                if (funct3 == 3) return OperationId::VMERGE_VIM;
-                if (funct3 == 5) return OperationId::VFMERGE_VFM;
-            }
-            break;
-        case 0x18:
-            if (funct3 == 0) return OperationId::VMSEQ_VV;
-            if (funct3 == 4) return OperationId::VMSEQ_VX;
-            if (funct3 == 3) return OperationId::VMSEQ_VI;
-            if (funct3 == 2) return OperationId::VMNAND_MM;
-            break;
-        case 0x19:
-            if (funct3 == 0) return OperationId::VMSNE_VV;
-            if (funct3 == 4) return OperationId::VMSNE_VX;
-            if (funct3 == 3) return OperationId::VMSNE_VI;
-            if (funct3 == 2) return OperationId::VMAND_MM;
-            break;
-        case 0x1A:
-            if (funct3 == 0) return OperationId::VMSLTU_VV;
-            if (funct3 == 4) return OperationId::VMSLTU_VX;
-            if (funct3 == 2) return OperationId::VMANDN_MM;
-            break;
-        case 0x1B:
-            if (funct3 == 0) return OperationId::VMSLT_VV;
-            if (funct3 == 4) return OperationId::VMSLT_VX;
-            if (funct3 == 2) return OperationId::VMXOR_MM;
-            break;
-        case 0x1C:
-            if (funct3 == 0) return OperationId::VMSLEU_VV;
-            if (funct3 == 4) return OperationId::VMSLEU_VX;
-            if (funct3 == 3) return OperationId::VMSLEU_VI;
-            if (funct3 == 2) return OperationId::VMOR_MM;
-            break;
-        case 0x1D:
-            if (funct3 == 0) return OperationId::VMSLE_VV;
-            if (funct3 == 4) return OperationId::VMSLE_VX;
-            if (funct3 == 3) return OperationId::VMSLE_VI;
-            if (funct3 == 2) return OperationId::VMNOR_MM;
-            break;
-        case 0x1E:
-            if (funct3 == 4) return OperationId::VMSGTU_VX;
-            if (funct3 == 3) return OperationId::VMSGTU_VI;
-            if (funct3 == 2) return OperationId::VMORN_MM;
-            break;
-        case 0x1F:
-            if (funct3 == 4) return OperationId::VMSGT_VX;
-            if (funct3 == 3) return OperationId::VMSGT_VI;
-            if (funct3 == 2) return OperationId::VMXNOR_MM;
             break;
         default:
             break;
@@ -1442,13 +1392,18 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operation
     const bool vm = (ir & (1u << 25)) != 0;
     const uint32_t f6 = funct7 >> 1;
 
-    if (f6 <= 0x0F) {
-        return decode_ext_v_range0(f6, funct3);
+    // A small number of vector encodings use rs1/vs2 as a secondary opcode.
+    if ((f6 == 0x10 && (funct3 == 1 || funct3 == 2 || funct3 == 5)) ||
+        ((f6 == 0x12 || f6 == 0x14) && funct3 == 2)) {
+        return decode_ext_v_special(f6, funct3, ir);
     }
-    if (f6 <= 0x1F) {
-        return decode_ext_v_range1(f6, funct3, vm, ir);
+    if (f6 == 0x27 && funct3 == 3) {
+        return decode_ext_v_range2(f6, funct3, ir);
     }
-    return decode_ext_v_range2(f6, funct3, ir);
+
+    const auto mask_dependent = (vm ? kVectorUnmaskedTable : kVectorMaskedTable).lookup(f6, funct3);
+    return mask_dependent != OperationId::UNKNOWN ? mask_dependent
+                                                  : kVectorCommonTable.lookup(f6, funct3);
 }
 
 auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2, Instruction ir)
