@@ -8,6 +8,7 @@
 #include <deque>
 #include <expected>
 #include <fstream>
+#include <mutex>
 #include <optional>
 #include <vector>
 
@@ -629,6 +630,9 @@ class CPU {
     std::ofstream* trap_log_stream = nullptr;
     bool use_opensbi = false;
     Machine* machine_ = nullptr;
+    // Serializes a TUI snapshot with this hart's architectural/pipeline transition. It is only
+    // acquired while TUI telemetry is enabled, so headless execution keeps its lock-free path.
+    mutable std::mutex tui_snapshot_mutex;
     simrv::pipeline::PipelineSim pipeline_sim;
     simrv::pipeline::CpuModelConfig cpu_model_config{};
     simrv::pipeline::BranchPredictor branch_predictor;

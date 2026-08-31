@@ -23,17 +23,21 @@ The issue is architectural: a TUI snapshot must never read a hart's live pipelin
 cache, or CPU counters from another execution thread. The existing atomic snapshot
 slot only protects TUI readers; it does not make the source-state copy safe.
 
-Recommended fix:
+Implemented locally (pending TSan certification):
 
-1. Make each hart's owning execution thread publish its own complete snapshot after
-   its cycle or worker batch.
-2. In MT-SMP running mode, prohibit cross-hart live reads in
-   `publish_tui_execution_snapshot()`; it may publish only hart 0 from the primary
-   execution thread. Secondary workers already have a per-hart publication path.
-3. For pause, reboot, shutdown, and deterministic step, wait for runner quiescence
-   before publishing all-hart snapshots. This makes copying live state safe.
-4. Rebuild `build/tsan` with GCC and run
-   `TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1 ctest --test-dir build/tsan --output-on-failure -L thread`.
+1. Each CPU now owns `tui_snapshot_mutex`, acquired only while TUI telemetry is
+   enabled.
+2. `CPU::run_cycle()` and `CPU::run_cycle_baremetal()` hold their hart's lock for
+   the architectural/pipeline transition.
+3. `publish_tui_execution_snapshot_for_hart()` holds that same hart's lock while
+   copying live state to the atomic display slot.
+
+This preserves parallel execution across harts and keeps headless execution lock-free,
+while preventing a snapshot from observing a concurrent transition of the same hart.
+The patch passed the RV64 strict release focused suite. Rebuild `build/tsan` with GCC
+and run:
+
+`TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1 ctest --test-dir build/tsan --output-on-failure -L thread`.
 
 Files to inspect:
 

@@ -245,6 +245,8 @@ void CPU::evaluate_timer_interrupt() {
 }
 
 void CPU::run_cycle(Machine& machine) {
+    std::unique_lock snapshot_lock(tui_snapshot_mutex, std::defer_lock);
+    if (machine.tui_enabled()) snapshot_lock.lock();
     if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
         prev_state_ = state_;
         if (auto hit = machine.breakpoints.check_pc(state_.pc)) {
@@ -523,6 +525,8 @@ void CPU::record_trace_for_tui(Machine& machine) {
 }
 
 void CPU::run_cycle_baremetal(Machine& machine) {
+    std::unique_lock snapshot_lock(tui_snapshot_mutex, std::defer_lock);
+    if (machine.tui_enabled()) snapshot_lock.lock();
     if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
         prev_state_ = state_;
         if (auto hit = machine.breakpoints.check_pc(state_.pc)) {

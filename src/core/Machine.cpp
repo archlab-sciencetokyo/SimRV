@@ -312,6 +312,7 @@ void Machine::publish_tui_execution_snapshot_for_hart(size_t hart_index) noexcep
     if (hart_index >= num_harts() || hart_index >= tui_snapshots_.size()) return;
     auto& slot = tui_snapshots_[hart_index];
     const auto& source = hart(hart_index);
+    std::scoped_lock source_lock(source.tui_snapshot_mutex);
     const auto stats = source.pipeline_sim.get_stats();
     const std::array<uint64_t, 9> packed_stats = {
         stats.cycle_count,       stats.stall_cycles,       stats.bubble_cycles,
