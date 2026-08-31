@@ -211,24 +211,19 @@ void GdbStub::send_packet(const std::string& data) {
 // Register encoding helpers (little-endian hex)
 // ---------------------------------------------------------------------------
 
-auto GdbStub::reg_to_hex(Register val) -> std::string {
+template <typename T>
+[[nodiscard]] auto to_le_hex(T val) -> std::string {
     std::string s;
-    s.reserve(sizeof(Register) * 2);
-    for (size_t b = 0; b < sizeof(Register); ++b) {
+    s.reserve(sizeof(T) * 2);
+    for (std::size_t b = 0; b < sizeof(T); ++b) {
         s += std::format("{:02x}", static_cast<uint8_t>(val >> (b * 8)));
     }
     return s;
 }
 
-// For 64-bit FP registers in little-endian
-static auto fp_to_hex(uint64_t val) -> std::string {
-    std::string s;
-    s.reserve(16);
-    for (int b = 0; b < 8; ++b) {
-        s += std::format("{:02x}", static_cast<uint8_t>(val >> (b * 8)));
-    }
-    return s;
-}
+auto GdbStub::reg_to_hex(Register val) -> std::string { return to_le_hex(val); }
+
+static auto fp_to_hex(uint64_t val) -> std::string { return to_le_hex(val); }
 
 auto GdbStub::hex_to_reg(const std::string& s, std::size_t offset) -> Register {
     auto hd = [&](std::size_t i) -> Register {

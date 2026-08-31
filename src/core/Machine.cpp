@@ -63,42 +63,52 @@ class RunnerActivityGuard {
 
 }  // namespace
 
-/// Bare-metal and OS scheduling stay outside CPU's per-instruction fast path.  The selected
-/// runner is a value in Machine::Runtime, avoiding the old Machine subclass hierarchy.
-class BaremetalRunner {
+class RunnerBase {
    public:
-    ~BaremetalRunner() { stop_threads(); }
-    void start(Machine& machine);
-    void stop(Machine& machine);
-    void wait_for_quiescence();
-    void prepare(Machine& machine);
-    void execute(Machine& machine);
-    [[nodiscard]] auto execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool;
-    void finalize(Machine& machine);
+    ~RunnerBase() { stop_threads(); }
+    void wait_for_quiescence() { wait_for_worker_quiescence(workers_in_cycle_); }
 
-   private:
-    void stop_threads();
+   protected:
+    void stop_threads() {
+        workers_running_.store(false, std::memory_order_release);
+        const auto self_id = std::this_thread::get_id();
+        for (auto& thread : worker_threads_) {
+            if (thread.joinable()) {
+                thread.request_stop();
+                if (thread.get_id() != self_id) {
+                    thread.join();
+                } else {
+                    thread.detach();
+                }
+            }
+        }
+        worker_threads_.clear();
+    }
     std::vector<std::jthread> worker_threads_;
     std::atomic<bool> workers_running_{false};
     std::atomic<uint32_t> workers_in_cycle_{0};
 };
 
-class OsRunner {
+/// Bare-metal and OS scheduling stay outside CPU's per-instruction fast path.  The selected
+/// runner is a value in Machine::Runtime, avoiding the old Machine subclass hierarchy.
+class BaremetalRunner : public RunnerBase {
    public:
-    ~OsRunner() { stop_threads(); }
     void start(Machine& machine);
     void stop(Machine& machine);
-    void wait_for_quiescence();
     void prepare(Machine& machine);
     void execute(Machine& machine);
     [[nodiscard]] auto execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool;
     void finalize(Machine& machine);
+};
 
-   private:
-    void stop_threads();
-    std::vector<std::jthread> worker_threads_;
-    std::atomic<bool> workers_running_{false};
-    std::atomic<uint32_t> workers_in_cycle_{0};
+class OsRunner : public RunnerBase {
+   public:
+    void start(Machine& machine);
+    void stop(Machine& machine);
+    void prepare(Machine& machine);
+    void execute(Machine& machine);
+    [[nodiscard]] auto execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool;
+    void finalize(Machine& machine);
 };
 
 /// Owns zero-initialized DRAM without eagerly touching every host page.  calloc is permitted to
@@ -491,24 +501,6 @@ void BaremetalRunner::start(Machine& machine) {
     }
 }
 
-void BaremetalRunner::wait_for_quiescence() { wait_for_worker_quiescence(workers_in_cycle_); }
-
-void BaremetalRunner::stop_threads() {
-    workers_running_.store(false, std::memory_order_release);
-    const auto self_id = std::this_thread::get_id();
-    for (auto& thread : worker_threads_) {
-        if (thread.joinable()) {
-            thread.request_stop();
-            if (thread.get_id() != self_id) {
-                thread.join();
-            } else {
-                thread.detach();
-            }
-        }
-    }
-    worker_threads_.clear();
-}
-
 void BaremetalRunner::stop(Machine& machine) {
     workers_running_.store(false, std::memory_order_release);
     for (auto& hart : machine.secondary_harts_) hart->hart_status.notify_all();
@@ -658,24 +650,6 @@ void OsRunner::start(Machine& machine) {
             }
         });
     }
-}
-
-void OsRunner::wait_for_quiescence() { wait_for_worker_quiescence(workers_in_cycle_); }
-
-void OsRunner::stop_threads() {
-    workers_running_.store(false, std::memory_order_release);
-    const auto self_id = std::this_thread::get_id();
-    for (auto& thread : worker_threads_) {
-        if (thread.joinable()) {
-            thread.request_stop();
-            if (thread.get_id() != self_id) {
-                thread.join();
-            } else {
-                thread.detach();
-            }
-        }
-    }
-    worker_threads_.clear();
 }
 
 void OsRunner::stop(Machine& machine) {
