@@ -9,6 +9,10 @@ class CPU;
 class Machine;
 }  // namespace simrv::core
 
+namespace simrv::memory {
+class MemorySubsystem;
+}  // namespace simrv::memory
+
 namespace simrv::execute {
 
 /**
@@ -49,6 +53,8 @@ class ExecuteUnit {
     static auto opFp(Word funct7, isa::Funct3 funct3, Word rs1, Word rs2, Register rrs1,
                      const FloatingRegister* freg, CSRValue& fcsr) -> FpExecResult;
     /// Execute vector instructions.
+    static void execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem, isa::OperationId op_id,
+                               Instruction ir);
     static void execute_vector(core::CPU& cpu, core::Machine& machine, isa::OperationId op_id,
                                Instruction ir);
 
@@ -61,7 +67,7 @@ class ExecuteUnit {
     static void execute_vector_config(core::CPU& cpu, isa::OperationId op_id, Instruction ir,
                                       RegId rd, RegId rs1, RegId rs2);
 
-    static void execute_vector_memory(core::CPU& cpu, core::Machine& machine,
+    static void execute_vector_memory(core::CPU& cpu, memory::MemorySubsystem& mem,
                                       isa::OperationId op_id, RegId rd, RegId rs1, RegId rs2,
                                       bool vm, uint32_t vl, uint32_t sew);
 

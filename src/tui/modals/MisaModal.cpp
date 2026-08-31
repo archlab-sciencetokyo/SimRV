@@ -9,6 +9,7 @@
 
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/xlen/Helpers.hpp"
 
 namespace simrv::tui::modals {
@@ -25,8 +26,8 @@ struct SettingItem {
 
 void MisaModal::open(MisaDraft& draft, int& cursor, const simrv::core::Machine& machine) {
     cursor = 0;
-    const uint64_t misa = machine.cpu.state().misa;
-    draft.xlen_bits = static_cast<uint8_t>(machine.cpu.state().regs.xlen);
+    const uint64_t misa = machine.primary_hart().state().misa;
+    draft.xlen_bits = static_cast<uint8_t>(machine.primary_hart().state().regs.xlen);
     draft.ext_a = (misa & (1ULL << ('a' - 'a'))) != 0;
     draft.ext_b = (misa & (1ULL << ('b' - 'a'))) != 0;
     draft.ext_c = (misa & (1ULL << ('c' - 'a'))) != 0;
@@ -37,8 +38,9 @@ void MisaModal::open(MisaDraft& draft, int& cursor, const simrv::core::Machine& 
     draft.ext_s = (misa & (1ULL << ('s' - 'a'))) != 0;
     draft.ext_u = (misa & (1ULL << ('u' - 'a'))) != 0;
     draft.ext_v = (misa & (1ULL << ('v' - 'a'))) != 0;
-    // Populate VLEN from current machine state (s_vlen=0 means default 256)
-    draft.vlen = machine.s_vlen ? machine.s_vlen : machine.cpu.state().regs.vlen;
+    // An unspecified configured VLEN uses the active register-file default.
+    draft.vlen = machine.isa_config().vlen ? machine.isa_config().vlen
+                                           : machine.primary_hart().state().regs.vlen;
 }
 
 void MisaModal::move_cursor(int& cursor, int delta) {
@@ -156,15 +158,12 @@ auto MisaModal::submit(const MisaDraft& draft, simrv::core::Machine& machine,
                        const std::function<void(const std::string&)>& set_status_override_cb)
     -> bool {
     uint64_t new_misa = draft.to_misa_val();
-    machine.cpu.state().misa = new_misa;
-    machine.s_misa_profile = new_misa;
-    machine.s_misa_override = true;
-    machine.s_misa_xlen = draft.xlen_bits;
-    machine.cpu.state().initialize_lower_xlen_fields();
-    // Apply VLEN setting (only meaningful when V extension is enabled)
-    machine.s_vlen = draft.vlen;
-
-    machine.request_reboot();
+    auto next = machine.configuration();
+    next.isa.misa_profile = new_misa;
+    next.isa.misa_override = true;
+    next.isa.misa_xlen = draft.xlen_bits;
+    next.isa.vlen = draft.vlen;
+    if (!machine.stage_reconfiguration(std::move(next))) return false;
 
     std::string misa_str = draft.to_misa_string();
     set_status_override_cb(
@@ -175,9 +174,10 @@ auto MisaModal::submit(const MisaDraft& draft, simrv::core::Machine& machine,
 
 void MisaModal::render(std::vector<std::string>& content_rows,
                        const std::function<void(const std::string&)>& add_row_cb,
-                       const MisaDraft& draft, int cursor, const simrv::core::Machine& machine) {
+                       const MisaDraft& draft, int cursor, const simrv::core::Machine& machine,
+                       bool show_footer) {
     (void)content_rows;
-    std::string live_misa = simrv::xlen::resolve_misa_string(machine.cpu.state().misa);
+    std::string live_misa = simrv::xlen::resolve_misa_string(machine.primary_hart().state().misa);
     std::string draft_misa = draft.to_misa_string();
 
     add_row_cb(std::format("{}Current Live MISA  : \033[1;36m{}\033[0m", kThemeText, live_misa));
@@ -187,13 +187,9 @@ void MisaModal::render(std::vector<std::string>& content_rows,
                     kThemeText, draft_misa));
     add_row_cb("");
 
-    // Build VLEN val string — greyed out when V is disabled
-    std::string vlen_val;
+    std::string vlen_val = "\033[90m[Disabled (V=OFF)]\033[0m";
     if (draft.ext_v) {
-        vlen_val = std::format(
-            "\033[1;36m[VLEN={}]\033[0m  \033[90m(bits per vector register)\033[0m", draft.vlen);
-    } else {
-        vlen_val = std::format("\033[90m[VLEN={}]  (enable V extension first)\033[0m", draft.vlen);
+        vlen_val = std::format("\033[1;36m[VLEN = {} bits]\033[0m", draft.vlen);
     }
 
     struct ItemInfo {
@@ -204,19 +200,19 @@ void MisaModal::render(std::vector<std::string>& content_rows,
     const auto misa_items = std::to_array<ItemInfo>({
         {.name = "Base XLEN Mode",
          .val = (draft.xlen_bits == 32) ? "\033[1;33m[RV32]\033[0m" : "\033[1;36m[RV64]\033[0m"},
-        {.name = "Extension M (Int Mul/Div)",
+        {.name = "Multiply/Divide (M)",
          .val = draft.ext_m ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {.name = "Extension A (Atomic Ops)",
+        {.name = "Atomic Memory Ops (A)",
          .val = draft.ext_a ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {.name = "Extension F (Single FP)",
+        {.name = "Single-Precision FP (F)",
          .val = draft.ext_f ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {.name = "Extension D (Double FP)",
-         .val = draft.ext_d ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF (Requires F)]\033[0m"},
-        {.name = "Extension C (Compressed)",
+        {.name = "Double-Precision FP (D)",
+         .val = draft.ext_d ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
+        {.name = "Compressed 16-bit (C)",
          .val = draft.ext_c ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {.name = "Extension B (Bitmanip)",
+        {.name = "Bit-Manipulation (B/Zb*)",
          .val = draft.ext_b ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
-        {.name = "Extension V (Vector)",
+        {.name = "Vector SIMD 1.0 (V)",
          .val = draft.ext_v ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"},
         {.name = "Vector VLEN (bits)", .val = vlen_val},
         {.name = "Privilege Modes (S & U)",
@@ -229,26 +225,22 @@ void MisaModal::render(std::vector<std::string>& content_rows,
 
     for (std::size_t i = 0; i < misa_items.size(); ++i) {
         if (i == 0) {
-            add_row_cb(std::format("{}\033[1;35m── Base Architecture Mode ──\033[0m", kThemeText));
+            add_row_cb(build_section_divider("Base Architecture Mode"));
         } else if (i == 1) {
             add_row_cb("");
-            add_row_cb(std::format("{}\033[1;35m── Standard ISA Extensions ──\033[0m", kThemeText));
+            add_row_cb(build_section_divider("Standard ISA Extensions"));
         } else if (i == 10) {
             add_row_cb("");
-            add_row_cb(std::format("{}\033[1;35m── Quick Presets ──\033[0m", kThemeText));
+            add_row_cb(build_section_divider("Quick Presets"));
         }
 
-        bool is_sel = (static_cast<int>(i) == cursor);
-        std::string prefix = is_sel ? std::format("{}>", kThemeMint) + "\033[0m " : "  ";
-        std::string name_str =
-            std::format("{}{:<29}\033[0m", is_sel ? "\033[1;37m" : kThemeText, misa_items[i].name);
-        add_row_cb(std::format("{}{} : {}", prefix, name_str, misa_items[i].val));
+        const bool is_sel = (static_cast<int>(i) == cursor);
+        add_row_cb(build_menu_item_row(misa_items[i].name, misa_items[i].val, is_sel, 29));
     }
-    add_row_cb("");
-    add_row_cb(
-        std::format("{}Press \033[1m[Enter]\033[0m to apply MISA CSR, \033[1m[Esc]\033[0m "
-                    "or \033[1m[q]\033[0m to cancel\033[0m",
-                    kThemeMuted));
+    if (show_footer) {
+        add_row_cb("");
+        add_row_cb(build_modal_footer({{"[Enter]", "Apply MISA CSR"}, {"[Esc / q]", "Cancel"}}));
+    }
 }
 
 }  // namespace simrv::tui::modals

@@ -34,6 +34,12 @@ endif()
 
 # 2. Run SimRV directly with ELF binary
 set(SIMRV_ARGS --cli -m ${ELF_PATH} -e ${END_INSNS} -b -H ${tohost_addr})
+if(CYCLE_MODE)
+  list(APPEND SIMRV_ARGS --mode cycle-accurate)
+endif()
+if(DEFINED PIPELINE_TYPE AND NOT "${PIPELINE_TYPE}" STREQUAL "")
+  list(APPEND SIMRV_ARGS --pipeline ${PIPELINE_TYPE})
+endif()
 if(LOCKSTEP)
   list(APPEND SIMRV_ARGS --lockstep)
   list(APPEND SIMRV_ARGS --spike-elf ${ELF_PATH})

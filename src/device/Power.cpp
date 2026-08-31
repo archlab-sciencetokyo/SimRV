@@ -14,14 +14,15 @@ namespace simrv::device {
 PowerMmio::PowerMmio(simrv::core::Machine& machine) : machine_(machine) {}
 
 auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
-    resp.error = false;
+    resp.denied = false;
+    resp.corrupt = false;
     resp.data = 0;
 
     const bool is_write = (req.opcode == memory::TlOpcodeA::PutFullData ||
                            req.opcode == memory::TlOpcodeA::PutPartialData);
 
     if (is_write) {
-        const Address offset = req.address - kBaseAddress;
+        const Address offset = (req.address - kBaseAddress).raw();
         // The finisher has a single 32-bit register at offset 0
         if (offset == 0 && req.size == 2) {
             const Word wdata = req.data;
@@ -33,7 +34,7 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
                         "[Power] SiFive Test Finisher: System Poweroff requested (status: {}).",
                         status);
                     machine_.exit_code = status;
-                    machine_.stop();
+                    machine_.stop(simrv::core::Machine::StopReason::GuestPoweroff);
                     break;
                 }
                 case PowerCommand::Crash: {
@@ -42,7 +43,7 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
                         "[Power] SiFive Test Finisher: System Fail/Crash requested (status: {}).",
                         status);
                     machine_.exit_code = (status != 0) ? status : 1;
-                    machine_.stop();
+                    machine_.stop(simrv::core::Machine::StopReason::GuestCrash);
                     break;
                 }
                 case PowerCommand::Reboot:
@@ -67,17 +68,17 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
                 "[Power] SiFive Test Finisher: Expected a 32-bit write at offset 0; got offset "
                 "0x{:x}, size 2^{}",
                 offset, req.size);
-            resp.error = true;
+            resp.denied = true;
         }
     } else if (req.opcode == memory::TlOpcodeA::Get) {
-        const Address offset = req.address - kBaseAddress;
+        const Address offset = (req.address - kBaseAddress).raw();
         if (offset == 0 && req.size == 2) {
             // Read from test register always returns 0
             resp.data = 0;
         } else {
             simrv::log::warn("[Power] SiFive Test Finisher: Out-of-bounds read to offset 0x{:x}",
                              offset);
-            resp.error = true;
+            resp.denied = true;
         }
     }
 

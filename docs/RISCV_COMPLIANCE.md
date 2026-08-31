@@ -89,20 +89,19 @@ Invalid dynamic rounding modes and scalar FP widths/extensions cause illegal-ins
 
 SimRV has two distinct supervisor-environment paths:
 
-- With an FDT/OpenSBI image, supervisor ECALLs trap architecturally into the guest's M-mode
-  firmware. OpenSBI owns the SBI version and extension set in this configuration.
-- Without M-mode firmware, SimRV provides a single-hart direct SBI environment. It advertises Base,
-  TIME, RFENCE, IPI, and SRST. It does not advertise HSM because hart start/stop/suspend semantics are
-  not implemented.
+- With an FDT/OpenSBI image or multi-hart SMP configuration, supervisor ECALLs trap architecturally into the guest's M-mode
+  firmware. OpenSBI owns the SBI version and extension set (including multi-hart HSM and IPI management) in this configuration.
+- In single-hart direct-boot mode without external M-mode firmware, SimRV provides a built-in direct SBI environment. It advertises Base,
+  TIME, RFENCE, IPI, and SRST.
 
 The direct SBI environment follows the standard two-register return convention for SBI v0.2 and
 later and intercepts only supervisor ECALLs; machine ECALLs remain ordinary architectural traps.
-RFENCE and IPI hart-mask arguments are validated against the single available hart. A
+RFENCE and IPI hart-mask arguments are validated against the active hart set. A
 successful SRST request is terminal: shutdown stops the machine and cold/warm reboot requests a
 machine restart.
 
 The device tree describes the platform independently of Linux so other supervisor software and
-RTOSes can use the same UART, interrupt controller, timer, virtio, and syscon power devices.
+RTOSes can use the same UART, interrupt controller, timer, PCIe/VirtIO, and syscon power devices.
 
 ## Interpreting test results
 

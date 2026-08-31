@@ -54,6 +54,10 @@ def main():
     disk_img = os.environ.get("SIMRV_LINUX_DISK_IMG", disk_img_default)
     dtb_img = os.environ.get("SIMRV_LINUX_DTB", os.path.join(images_dir, "devicetree.dtb"))
     timeout_secs = int(os.environ.get("SIMRV_TEST_TIMEOUT", "90"))
+    expected_cpus = int(os.environ.get("SIMRV_TEST_EXPECT_CPUS", "0"))
+    if expected_cpus < 0:
+        print("Error: SIMRV_TEST_EXPECT_CPUS must be non-negative", file=sys.stderr)
+        sys.exit(2)
     lifecycle_action = os.environ.get("SIMRV_TEST_LIFECYCLE", "shell")
     if lifecycle_action not in ("shell", "poweroff", "reboot", "poweroff-reboot"):
         print(f"Error: unsupported SIMRV_TEST_LIFECYCLE '{lifecycle_action}'", file=sys.stderr)
@@ -72,10 +76,11 @@ def main():
         "--os",
         "-m", mem_img,
         "-D", disk_img,
-        "-f", dtb_img,
         "--tui",
         "-e", "10000000000"  # Leave enough execution time to interact after boot.
     ]
+    if dtb_img and dtb_img != "dynamic" and dtb_img != "NONE" and os.path.exists(dtb_img):
+        cmd.extend(["-f", dtb_img])
     cmd.extend(shlex.split(os.environ.get("SIMRV_TEST_EXTRA_ARGS", "")))
 
     print(f"Running Linux PTY boot test: {' '.join(cmd)}")
@@ -115,6 +120,12 @@ def main():
                 break
 
             try:
+                # The initial TUI frame is intentionally paused. Start once the renderer has had
+                # a bounded chance to initialize; do not couple guest progress to a decorative
+                # status-bar label or to discovery of the optional external UART PTY.
+                if not run_sent and time.time() - start_time >= 0.5:
+                    os.write(master_fd, b"c")
+                    run_sent = True
                 watched_fds = [master_fd]
                 if uart_fd is not None:
                     watched_fds.append(uart_fd)
@@ -145,12 +156,6 @@ def main():
                     if len(guest_buffer) > 1_000_000:
                         guest_buffer = guest_buffer[-500_000:]
 
-                if not run_sent and uart_fd is not None and "PAUSED" in buffer and "DETACHED" in buffer:
-                    # The first frame can arrive while initialize() is still collecting terminal
-                    # capability replies. Wait until that bounded probe has returned before typing.
-                    time.sleep(0.2)
-                    os.write(master_fd, b"c")
-                    run_sent = True
                 if not enter_sent and "~ #" in guest_buffer:
                     # UART mirroring reaches this PTY just before the TUI parser answers the shell's
                     # trailing CSI 6 n query. Let one render interval deliver that response first.
@@ -162,7 +167,13 @@ def main():
                     # Keep the exact token out of the echoed command line, so seeing it proves the
                     # shell ran the command instead of merely echoing keyboard input.
                     time.sleep(0.1)
-                    os.write(master_fd, b"echo __SIMRV_TUI_ENTER_\"OK__\"\r")
+                    cpu_check = ""
+                    if expected_cpus:
+                        cpu_check = (
+                            f'test "$(getconf _NPROCESSORS_ONLN)" -eq {expected_cpus} && '
+                        )
+                    command = cpu_check + 'echo __SIMRV_TUI_ENTER_"OK__"\r'
+                    os.write(master_fd, command.encode("ascii"))
                     command_sent = True
                 if command_sent and SHELL_TOKEN in guest_buffer and not lifecycle_sent:
                     if lifecycle_action == "shell":

@@ -24,6 +24,7 @@ def load(name: str, path: pathlib.Path):
 
 release_check = load("release_check", ROOT / "scripts/release_check.py")
 aggregate = load("aggregate_experiments", ROOT / "scripts/aggregate_experiments.py")
+benchmark = load("benchmark", ROOT / "scripts/benchmark.py")
 
 
 class ReleaseToolTests(unittest.TestCase):
@@ -91,6 +92,21 @@ class ReleaseToolTests(unittest.TestCase):
             result = subprocess.run([sys.executable, str(ROOT / "scripts/compare_benchmarks.py"),
                                      str(baseline), str(candidate)], check=False)
             self.assertEqual(result.returncode, 0)
+
+    def test_perf_stat_parser_preserves_scaling_metadata(self):
+        contents = (
+            "12345;;cycles;1000000;98.50\n"
+            "678;;instructions;1000000;98.50\n"
+            "<not supported>;;cache-misses;1000000;100.00\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "perf.csv"
+            path.write_text(contents)
+            counters = benchmark.parse_perf_stat(path)
+        self.assertEqual(counters["cycles"]["value"], 12345)
+        self.assertEqual(counters["cycles"]["time_enabled_ns"], 1000000)
+        self.assertEqual(counters["cycles"]["running_percent"], 98.5)
+        self.assertNotIn("cache-misses", counters)
 
 
 if __name__ == "__main__":

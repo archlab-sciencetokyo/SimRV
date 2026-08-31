@@ -15,8 +15,9 @@ namespace simrv::memory {
 
 void MemorySubsystem::initialize_mmu() {
     if (!mmu_) {
-        mmu_ = std::make_unique<simrv::Mmu>(machine_.mmem, simrv::memory::g_dram_base,
-                                            simrv::memory::kDramSize);
+        const auto geometry = machine_.memory_geometry();
+        mmu_ = std::make_unique<simrv::Mmu>(machine_.ram_view().data(), geometry.dram_base,
+                                            geometry.dram_size);
     }
 }
 

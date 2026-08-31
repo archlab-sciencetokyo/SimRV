@@ -34,21 +34,25 @@ auto MmioRouter::register_device(TileLinkNode* node) -> bool {
         const Address ex_end = ex_base + existing->size();
         const Address overlap_begin = std::max(base, ex_base);
         const Address overlap_end = std::min(end, ex_end);
-        bool owns_same_byte = false;
-        for (Address address = overlap_begin; address < overlap_end; ++address) {
-            if (node->contains(address) && existing->contains(address)) {
-                owns_same_byte = true;
-                break;
+        if (overlap_begin < overlap_end) {
+            bool collision = false;
+            for (Address address = overlap_begin; address < overlap_end; ++address) {
+                if (node->contains(address) && existing->contains(address)) {
+                    collision = true;
+                    break;
+                }
             }
-        }
-        if (owns_same_byte) {
-            simrv::log::warn(
-                "MMIO address range collision detected: '{}' [{:#x}, {:#x}) conflicts with '{}' "
-                "[{:#x}, {:#x})",
-                node->name(), static_cast<unsigned long long>(base),
-                static_cast<unsigned long long>(end), existing->name(),
-                static_cast<unsigned long long>(ex_base), static_cast<unsigned long long>(ex_end));
-            return false;
+            if (collision) {
+                simrv::log::warn(
+                    "MMIO address range collision detected: '{}' [{:#x}, {:#x}) conflicts with "
+                    "'{}' "
+                    "[{:#x}, {:#x})",
+                    node->name(), static_cast<unsigned long long>(base),
+                    static_cast<unsigned long long>(end), existing->name(),
+                    static_cast<unsigned long long>(ex_base),
+                    static_cast<unsigned long long>(ex_end));
+                return false;
+            }
         }
     }
 
@@ -88,7 +92,7 @@ auto MmioRouter::resolve_device(Address addr) const -> TileLinkNode* {
         }
     }
 
-    // Fallback linear scan if device override contains logic
+    // Fallback scan for sparse devices with holes or wider spans
     for (auto* node : nodes_) {
         if (node->contains(addr)) {
             return node;
@@ -108,9 +112,9 @@ auto MmioRouter::find_by_name(std::string_view name) const -> TileLinkNode* {
 }
 
 auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool {
-    TileLinkNode* device = resolve_device(req.address);
+    TileLinkNode* device = resolve_device(req.address.raw());
     if (device == nullptr) {
-        resp.error = true;
+        resp.denied = true;
         ++bus_error_count_;
         return false;
     }
@@ -120,21 +124,21 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
         (req.opcode == TlOpcodeA::PutFullData || req.opcode == TlOpcodeA::PutPartialData);
 
     if (!is_read && !is_write) {
-        resp.error = true;
+        resp.denied = true;
         ++bus_error_count_;
         return true;
     }
 
     const Address request_bytes = static_cast<Address>(1u << (req.size & 0x3u));
-    if (request_bytes - 1 > std::numeric_limits<Address>::max() - req.address ||
-        !device->contains(req.address + request_bytes - 1)) {
-        resp.error = true;
+    if (request_bytes - 1 > std::numeric_limits<Address>::max() - req.address.raw() ||
+        !device->contains((req.address + request_bytes - 1).raw())) {
+        resp.denied = true;
         ++bus_error_count_;
         return true;
     }
 
     if (is_write && device->is_read_only()) {
-        resp.error = true;
+        resp.denied = true;
         ++bus_error_count_;
         return true;
     }
@@ -142,7 +146,7 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
     // Alignment validation against device requirements
     const Address align = device->alignment();
     if (align > 1 && (req.address % align) != 0) {
-        resp.error = true;
+        resp.denied = true;
         ++bus_error_count_;
         return true;
     }
@@ -154,11 +158,11 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
         } else if (is_write) {
             ++mmio_write_count_;
         }
-        if (resp.error) {
+        if (resp.failed()) {
             ++bus_error_count_;
         }
     } else {
-        resp.error = true;
+        resp.denied = true;
         ++bus_error_count_;
     }
 

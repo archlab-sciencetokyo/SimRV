@@ -17,11 +17,9 @@
 #include <thread>
 
 #include "simrv/Define.hpp"
-#include "simrv/core/BaremetalMachine.hpp"
 #include "simrv/core/BuildInfo.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/core/OSMachine.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/util/CliParser.hpp"
 #include "simrv/util/FormatUtil.hpp"
@@ -44,6 +42,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         }
     }
 
+    simrv::log::set_tui_mode(is_tui);
+
     if (!is_tui && !skip_banner) {
         simrv::log::info("{} v{} ({}@{})\nPlease type Control+'q' to quit the simulation\n",
                          simrv::buildinfo::kProjectDescription, simrv::buildinfo::kVersion,
@@ -53,23 +53,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     // Write startup entry to MMU debug log
     std::signal(SIGINT, SIG_IGN);  // ignore control+'C'
 
-    std::optional<bool> override_appmode;
-    std::optional<std::string> override_binary;
-    std::optional<std::string> override_disk;
-    std::optional<bool> override_cycle_accurate;
-    std::optional<bool> override_debug_mode;
-    std::optional<bool> override_high_performance;
-    std::optional<bool> override_rollback;
-    std::optional<bool> override_high_contrast;
-    std::optional<bool> override_use_mix;
-    std::optional<bool> override_bp_trace;
-    std::optional<bool> override_traplog_mode;
-    std::optional<bool> override_dlog_mode;
-    std::optional<bool> override_lockstep_mode;
-    std::optional<bool> override_gdb_mode;
-    std::optional<bool> override_misa_override;
-    std::optional<uint64_t> override_misa_profile;
-    std::optional<unsigned int> override_misa_xlen;
+    std::optional<simrv::core::MachineConfig> staged_configuration;
+    std::optional<simrv::core::RuntimeProfile> staged_runtime_profile;
 
     bool keep_running = true;
     int final_exit_code = 0;
@@ -78,50 +63,6 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         auto parsed = parse_command_line(args);
         if (!parsed) {
             option_error(parsed.error());
-        }
-
-        if (override_appmode.has_value()) {
-            parsed->options.appmode = *override_appmode;
-        }
-        if (override_binary.has_value()) {
-            parsed->options.fn_memimg = *override_binary;
-        }
-        if (override_disk.has_value()) {
-            parsed->options.fn_dskimg = *override_disk;
-            parsed->options.use_disk = !override_disk->empty();
-        }
-        if (override_cycle_accurate.has_value()) {
-            parsed->options.cycle_accurate = *override_cycle_accurate;
-        }
-        if (override_debug_mode.has_value()) {
-            parsed->options.debug_mode = *override_debug_mode;
-        }
-        if (override_high_performance.has_value()) {
-            parsed->options.high_performance = *override_high_performance;
-        }
-        if (override_rollback.has_value()) {
-            parsed->options.rollback = *override_rollback;
-        }
-        if (override_high_contrast.has_value()) {
-            parsed->options.high_contrast = *override_high_contrast;
-        }
-        if (override_use_mix.has_value()) {
-            parsed->options.use_mix = *override_use_mix;
-        }
-        if (override_bp_trace.has_value()) {
-            parsed->options.bp_trace = *override_bp_trace;
-        }
-        if (override_traplog_mode.has_value()) {
-            parsed->options.traplog_mode = *override_traplog_mode;
-        }
-        if (override_dlog_mode.has_value()) {
-            parsed->options.dlog_mode = *override_dlog_mode;
-        }
-        if (override_lockstep_mode.has_value()) {
-            parsed->options.lockstep_mode = *override_lockstep_mode;
-        }
-        if (override_gdb_mode.has_value()) {
-            parsed->options.gdb_mode = *override_gdb_mode;
         }
 
         switch (parsed->action) {
@@ -137,26 +78,22 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 break;
         }
 
-        std::unique_ptr<simrv::core::Machine> sim_machine;
-        if (parsed->options.appmode) {
-            sim_machine = std::make_unique<simrv::core::BaremetalMachine>();
+        if (!parsed->options.fn_log.empty() && !simrv::log::set_log_file(parsed->options.fn_log)) {
+            option_error("cannot open log file: " + parsed->options.fn_log, 0);
+        }
+
+        auto machine_config = staged_configuration.value_or(parsed->options.to_machine_config());
+        if (const auto valid = machine_config.validate(); !valid) {
+            option_error(valid.error(), 0);
+        }
+        auto sim_machine = std::make_unique<simrv::core::Machine>(std::move(machine_config));
+
+        if (staged_runtime_profile.has_value()) {
+            sim_machine->runtime_profile = *staged_runtime_profile;
         } else {
-            sim_machine = std::make_unique<simrv::core::OSMachine>();
-        }
-
-        auto applied = apply_runtime_options(sim_machine.get(), parsed->options);
-        if (!applied) {
-            option_error(applied.error(), 0);
-        }
-
-        if (override_misa_override.has_value() && *override_misa_override) {
-            sim_machine->s_misa_override = true;
-            if (override_misa_profile.has_value()) {
-                sim_machine->s_misa_profile = *override_misa_profile;
-                sim_machine->cpu.state().misa = *override_misa_profile;
-            }
-            if (override_misa_xlen.has_value()) {
-                sim_machine->s_misa_xlen = *override_misa_xlen;
+            auto applied = apply_runtime_options(sim_machine.get(), parsed->options);
+            if (!applied) {
+                option_error(applied.error(), 0);
             }
         }
 
@@ -165,7 +102,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             return init_result;
         }
 
-        sim_machine->s_start_time = std::chrono::steady_clock::now();
+        sim_machine->set_start_time(std::chrono::steady_clock::now());
 
         // Initialize terminal in raw mode for simulator I/O.
         TerminalModeGuard terminal_mode;
@@ -174,24 +111,9 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 simrv::log::warn("Terminal raw mode setup failed; continuing in current mode");
             }
         }
-        if ((sim_machine->s_gui_mode && sim_machine->framebuffer) || sim_machine->s_tuimode) {
-            sim_machine->s_multithreaded = true;
-            if (sim_machine->s_gui_mode && sim_machine->framebuffer) {
-                sim_machine->framebuffer->set_multithreaded(true);
-            }
+        if (sim_machine->tui_enabled()) {
             auto* machine_ptr = sim_machine.get();
             std::thread sim_thread([machine_ptr]() -> void { machine_ptr->run(); });
-
-            while (machine_ptr->is_running()) {
-                if (machine_ptr->s_tuimode) {
-                    if (simrv::tui::g_resized) {
-                        machine_ptr->tui->render(true);
-                    }
-                    machine_ptr->tui->update();
-                    machine_ptr->tui->render(false);
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(33));  // ~30 FPS
-            }
 
             if (sim_thread.joinable()) {
                 sim_thread.join();
@@ -203,36 +125,17 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         if (sim_machine->reboot_requested) {
             simrv::log::info("Rebooting guest system...");
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            override_cycle_accurate = sim_machine->s_cycle_accurate;
-            override_high_performance = sim_machine->s_high_performance;
-            override_debug_mode = sim_machine->s_debug_mode;
-            override_rollback = sim_machine->s_rollback_enabled;
-            override_high_contrast = sim_machine->s_high_contrast;
-            override_use_mix = sim_machine->s_use_mix;
-            override_bp_trace = sim_machine->s_bp_trace;
-            override_traplog_mode = sim_machine->s_traplog_mode;
-            override_dlog_mode = sim_machine->s_dlog_mode;
-            override_lockstep_mode = sim_machine->s_lockstep_mode;
-            override_gdb_mode = sim_machine->s_gdb_mode;
+            auto next_config =
+                sim_machine->take_staged_reconfiguration().value_or(sim_machine->configuration());
 
-            if (sim_machine->s_misa_override) {
-                override_misa_override = true;
-                override_misa_profile = sim_machine->s_misa_profile;
-                override_misa_xlen = sim_machine->s_misa_xlen;
-            }
-
-            auto pending = sim_machine->get_pending_reboot();
-            if (!pending.binary_path.empty()) {
-                override_binary = pending.binary_path;
-                override_appmode = pending.appmode;
-                override_disk = pending.disk_path;
-            }
+            staged_configuration = std::move(next_config);
+            staged_runtime_profile = sim_machine->runtime_profile;
             continue;
         } else {
             keep_running = false;
             final_exit_code = sim_machine->exit_code.load();
-            if (!sim_machine->s_tuimode) {
-                sim_machine->tracer.print_summary();
+            if (!sim_machine->tui_enabled()) {
+                sim_machine->trace().print_summary();
             }
         }
     }

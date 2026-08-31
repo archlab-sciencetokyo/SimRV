@@ -70,7 +70,7 @@ template <unsigned XLen = kXLenBits>
 [[nodiscard]] inline constexpr auto satp_mode_supported(Word mode) -> bool {
     if constexpr (XLen == 64) {
         // RV64 MODE=1 is reserved; Sv32 is an RV32 translation scheme.
-        return mode == 0 || mode == 8 || mode == 9;  // Bare, Sv39, Sv48
+        return mode == 0 || mode == 8;  // Bare, Sv39
     } else {
         return mode == 0 || mode == 1;  // Bare, SV32
     }

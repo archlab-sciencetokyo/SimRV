@@ -13,8 +13,15 @@ namespace simrv::log {
 
 using LogCallback = std::function<void(const std::string&)>;
 
+/// Enable or disable TUI mode (suppresses raw stdout leaks during early startup).
+void set_tui_mode(bool enable);
+
 /// Register a callback to route logs to the TUI (if active).
 void set_tui_callback(LogCallback cb);
+
+/// Mirror all subsequent log records to a timestamped UTF-8 developer log.
+[[nodiscard]] auto set_log_file(std::string_view path) -> bool;
+void close_log_file();
 
 /// Internal base print functions
 void print_info(const std::string& msg);

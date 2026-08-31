@@ -8,6 +8,7 @@
 #include <format>
 
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/modals/ModalComponents.hpp"
 
 namespace simrv::tui::modals {
 
@@ -46,9 +47,10 @@ auto StepModal::submit(ModalType type, const std::string& input,
 void StepModal::render(ModalType type, std::vector<std::string>& content_rows,
                        const std::string& input) {
     if (type == ModalType::SetSpeed) {
-        content_rows.push_back(
-            std::format("{}Enter Target Frequency (Hz, 0=Max):\033[0m", kThemeText));
-        content_rows.push_back(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, input));
+        build_text_input_rows(content_rows, "Enter Target Frequency (Hz, 0=Max):", input,
+                              "Examples: 1000 (1kHz), 1000000 (1MHz), 0 (maximum speed)");
+        content_rows.push_back("");
+        content_rows.push_back(build_modal_footer({{"[Enter]", "Apply"}, {"[Esc]", "Cancel"}}));
     }
 }
 

@@ -36,9 +36,12 @@ class Rtc : public memory::TileLinkNode {
 
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool override;
     void evaluate_alarm();
+    void sync_with_system_time();
+    [[nodiscard]] auto current_time_ns() const -> uint64_t;
 
    private:
     simrv::core::Machine& machine_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+    uint64_t base_epoch_ns_{0};
     uint64_t alarm_time_{0};
     bool alarm_enabled_{false};
     bool alarm_status_{false};

@@ -58,6 +58,10 @@ auto guidance_for_page(TuiRegPage page, bool cycle_accurate) -> PageGuidance {
             return {"Stack and memory", "Stack slots hold frames, saved registers, and local data.",
                     "SP and frame pointers connect ABI conventions to memory addresses.",
                     KeyAction::InspectAddress, "Open a selected stack or register address."};
+        case TuiRegPage::DISASM:
+            return {"Disassembly view", "Decoded program instructions and live execution stream.",
+                    "Current PC and breakpoint indicators show execution progress.",
+                    KeyAction::Step, "Step instruction or continue execution."};
     }
     return {"Inspection", "Inspect the current machine state.",
             "Relate visible values to the instruction being executed.", KeyAction::Help,

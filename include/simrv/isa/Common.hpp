@@ -245,7 +245,8 @@ constexpr auto instruction_enabled_by_misa(CSRValue misa, Instruction ir, bool c
  * @return True if the destination register is floating-point, false otherwise.
  */
 constexpr auto is_destination_fp(Opcode opcode, OperationId op_id) -> bool {
-    if (opcode == Opcode::LoadFp) {
+    if (opcode == Opcode::LoadFp || opcode == Opcode::MAdd || opcode == Opcode::MSub ||
+        opcode == Opcode::NMAdd || opcode == Opcode::NMSub) {
         return true;
     }
     if (opcode != Opcode::OpFp) {
@@ -283,9 +284,6 @@ constexpr auto is_destination_fp(Opcode opcode, OperationId op_id) -> bool {
  * @return True if rs1 is a floating-point register, false otherwise.
  */
 constexpr auto is_rs1_fp(Opcode opcode, OperationId op_id) -> bool {
-    if (opcode == Opcode::StoreFp) {
-        return true;
-    }
     if (opcode != Opcode::OpFp && opcode != Opcode::MAdd && opcode != Opcode::MSub &&
         opcode != Opcode::NMSub && opcode != Opcode::NMAdd) {
         return false;
@@ -373,21 +371,21 @@ constexpr auto get_instruction_format(Opcode op) -> InstFormat {
 constexpr auto get_instruction_format_name(InstFormat fmt) -> std::string_view {
     switch (fmt) {
         case InstFormat::R:
-            return "R-Type (Register-Register)";
+            return "R-Type";
         case InstFormat::I:
-            return "I-Type (Register-Immediate / Load / Jump)";
+            return "I-Type";
         case InstFormat::S:
-            return "S-Type (Store)";
+            return "S-Type";
         case InstFormat::B:
-            return "B-Type (Branch)";
+            return "B-Type";
         case InstFormat::U:
-            return "U-Type (Upper Immediate)";
+            return "U-Type";
         case InstFormat::J:
-            return "J-Type (Unconditional Jump)";
+            return "J-Type";
         case InstFormat::R4:
-            return "R4-Type (Fused Multiply-Add)";
+            return "R4-Type";
         case InstFormat::Unknown:
-            return "Unknown / Custom Format";
+            return "Unknown";
     }
     return "Unknown";
 }

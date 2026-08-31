@@ -6,6 +6,7 @@
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import os
@@ -34,6 +35,34 @@ REALWORLD_BENCHMARKS = [
 
 def is_executable(path):
     return path and os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def command_version(executable):
+    try:
+        result = subprocess.run(
+            [executable, "--version"], capture_output=True, text=True, timeout=5, check=False
+        )
+        return (result.stdout or result.stderr).strip().splitlines()[0]
+    except (OSError, subprocess.TimeoutExpired, IndexError):
+        return "unknown"
+
+
+def repository_revision(root_dir):
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=root_dir, capture_output=True, text=True,
+            timeout=5, check=True
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
 
 
 def get_riscv_prefix():
@@ -118,6 +147,7 @@ def detect_xlen(simrv_bin, elf_path=None):
 
 def parse_simrv_output(output):
     instrs = None
+    cycles = None
     kips = None
     sim_time = None
 
@@ -132,6 +162,13 @@ def parse_simrv_output(output):
                     match = re.search(r"(\d+)", parts[1])
                     if match:
                         instrs = int(match.group(1))
+
+        if "Elapsed cycles (clocks)" in line:
+            parts = line.split(":")
+            if len(parts) > 1:
+                match = re.search(r"\(([\d,]+)\)", parts[1])
+                if match:
+                    cycles = int(match.group(1).replace(",", ""))
 
         if "Simulation speed" in line:
             parts = line.split(":")
@@ -150,7 +187,61 @@ def parse_simrv_output(output):
                 match = re.search(r"([\d.]+)\s+sec", parts[1])
                 if match:
                     sim_time = float(match.group(1))
-    return instrs, kips, sim_time
+    return instrs, cycles, kips, sim_time
+
+
+def parse_perf_stat(path):
+    """Parse perf stat's semicolon-delimited machine-readable output."""
+    counters = {}
+    with open(path, encoding="utf-8") as source:
+        for raw_line in source:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            fields = [field.strip() for field in line.split(";")]
+            if len(fields) < 3 or fields[0].startswith("<"):
+                continue
+            try:
+                value = float(fields[0])
+            except ValueError:
+                continue
+            event = fields[2]
+            sample = {
+                "value": int(value) if value.is_integer() else value,
+                "unit": fields[1] or None,
+            }
+            if len(fields) > 3 and fields[3]:
+                try:
+                    sample["time_enabled_ns"] = int(float(fields[3]))
+                except ValueError:
+                    pass
+            if len(fields) > 4 and fields[4]:
+                try:
+                    sample["running_percent"] = float(fields[4].rstrip("%"))
+                except ValueError:
+                    pass
+            counters[event] = sample
+    return counters
+
+
+def wrap_measured_command(command, perf_bin, perf_events, perf_output, use_time):
+    if perf_bin:
+        command = [
+            perf_bin,
+            "stat",
+            "--no-big-num",
+            "-x",
+            ";",
+            "-e",
+            perf_events,
+            "-o",
+            perf_output,
+            "--",
+            *command,
+        ]
+    if use_time:
+        command = ["/usr/bin/time", "-f", "__MAX_RSS_KB__:%M", *command]
+    return command
 
 
 def calculate_stats(data_list):
@@ -620,6 +711,9 @@ def run_benchmark_single(
     objcopy_tool,
     isa_override,
     warmups,
+    simrv_args,
+    perf_bin,
+    perf_events,
 ):
     # Resolve ELF path
     elf_path = test_target
@@ -667,12 +761,8 @@ def run_benchmark_single(
         or resolve_tohost(elf_path, nm_tool)
         or "0x80001000"
     )
-    elf_xlen = detect_elf_xlen(elf_path)
-    if elf_xlen:
-        alt_bin = os.path.join(root_dir, f"build/rv{elf_xlen}-release/SimRV")
-        if is_executable(alt_bin):
-            simrv_bin = alt_bin
-
+    # The caller may be comparing compiler builds or an out-of-tree binary.  Do not replace an
+    # explicit --simrv selection with the in-tree default based on the guest ELF's XLEN.
     xlen = detect_xlen(simrv_bin, elf_path)
     isa = isa_override or f"rv{xlen}gc"
 
@@ -680,7 +770,9 @@ def run_benchmark_single(
     simrv_sim_times = []
     simrv_speeds = []
     simrv_rss = []
+    simrv_host_counters = []
     simrv_instrs = None
+    simrv_cycles = None
 
     has_time_wrapper = os.path.isfile("/usr/bin/time") and os.access(
         "/usr/bin/time", os.X_OK
@@ -693,7 +785,7 @@ def run_benchmark_single(
 
     for _ in range(warmups):
         warmup = subprocess.run(
-            [simrv_bin, "--cli", "-m", elf_path, "-e", str(limit), "-b", "-H", tohost_addr],
+            [simrv_bin, "--cli", *simrv_args, "-m", elf_path, "-e", str(limit), "-b", "-H", tohost_addr],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=timeout,
@@ -709,6 +801,7 @@ def run_benchmark_single(
         simrv_cmd = [
             simrv_bin,
             "--cli",
+            *simrv_args,
             "-m",
             elf_path,
             "-e",
@@ -717,8 +810,10 @@ def run_benchmark_single(
             "-H",
             tohost_addr,
         ]
-        if has_time_wrapper:
-            simrv_cmd = ["/usr/bin/time", "-f", "__MAX_RSS_KB__:%M"] + simrv_cmd
+        perf_output = os.path.join(log_dir, f"bench_simrv_{test_basename}_{i}.perf.csv")
+        simrv_cmd = wrap_measured_command(
+            simrv_cmd, perf_bin, perf_events, perf_output, has_time_wrapper
+        )
 
         start_t = time.perf_counter()
         try:
@@ -742,7 +837,7 @@ def run_benchmark_single(
                 )
                 return None
 
-            insts, kips, sim_time = parse_simrv_output(
+            insts, cycles, kips, sim_time = parse_simrv_output(
                 res.stdout + "\n" + res.stderr
             )
             if kips is None:
@@ -755,6 +850,8 @@ def run_benchmark_single(
             rss_match = re.search(r"__MAX_RSS_KB__:(\d+)", res.stderr)
             if rss_match:
                 simrv_rss.append(int(rss_match.group(1)) / 1024.0)
+            if perf_bin:
+                simrv_host_counters.append(parse_perf_stat(perf_output))
 
             elapsed = end_t - start_t
             simrv_times.append(elapsed)
@@ -762,6 +859,8 @@ def run_benchmark_single(
             simrv_sim_times.append(sim_time if sim_time is not None else 0.0)
             if insts:
                 simrv_instrs = insts
+            if cycles:
+                simrv_cycles = cycles
         except subprocess.TimeoutExpired:
             print(
                 f"  [ERROR] SimRV timed out on {test_basename} (iter {i})",
@@ -773,13 +872,16 @@ def run_benchmark_single(
     spike_times = []
     spike_speeds = []
     spike_rss = []
+    spike_host_counters = []
     spike_available = spike_bin and (is_executable(spike_bin) or which(spike_bin))
 
     if spike_available:
         for i in range(1, runs + 1):
             spike_cmd = [spike_bin, f"--isa={isa}", elf_path]
-            if has_time_wrapper:
-                spike_cmd = ["/usr/bin/time", "-f", "__MAX_RSS_KB__:%M"] + spike_cmd
+            perf_output = os.path.join(log_dir, f"bench_spike_{test_basename}_{i}.perf.csv")
+            spike_cmd = wrap_measured_command(
+                spike_cmd, perf_bin, perf_events, perf_output, has_time_wrapper
+            )
 
             start_t = time.perf_counter()
             try:
@@ -802,6 +904,8 @@ def run_benchmark_single(
                 rss_match = re.search(r"__MAX_RSS_KB__:(\d+)", stderr_str)
                 if rss_match:
                     spike_rss.append(int(rss_match.group(1)) / 1024.0)
+                if perf_bin:
+                    spike_host_counters.append(parse_perf_stat(perf_output))
 
                 elapsed = end_t - start_t
                 spike_times.append(elapsed)
@@ -843,21 +947,34 @@ def run_benchmark_single(
 
     return {
         "test_name": test_basename,
+        "workload_path": os.path.realpath(elf_path),
+        "workload_sha256": sha256_file(elf_path),
         "runs": runs,
+        "warmups": warmups,
+        "instruction_limit": limit,
         "instructions": simrv_instrs,
+        "simulated_cycles": simrv_cycles,
         "xlen": xlen,
         "spike_isa": isa,
+        "simrv_args": list(simrv_args),
+        "simrv_binary_sha256": sha256_file(simrv_bin),
+        "simrv_version": command_version(simrv_bin),
+        "simrv_revision": repository_revision(root_dir),
+        "compiler": command_version(os.environ.get("CXX", "c++")),
+        "host": platform.platform(),
         "simrv": {
             "runs_time": simrv_times,
             "runs_sim_speed_kips": simrv_speeds,
             "runs_wall_speed_kips": simrv_wall_speeds,
             "runs_rss_mb": simrv_rss,
+            "host_counters": simrv_host_counters,
             "stats": simrv_stats,
         },
         "spike": {
             "runs_time": spike_times,
             "runs_wall_speed_kips": spike_speeds,
             "runs_rss_mb": spike_rss,
+            "host_counters": spike_host_counters,
             "stats": spike_stats,
         },
     }
@@ -914,6 +1031,27 @@ def main():
     )
     parser.add_argument("--csv", help="Path to export raw CSV benchmark report")
     parser.add_argument("--isa", help="Override Spike ISA string (e.g. rv64gc)")
+    parser.add_argument(
+        "--simrv-arg",
+        action="append",
+        default=[],
+        help="Additional argument forwarded to every SimRV invocation (repeatable)",
+    )
+    parser.add_argument(
+        "--compare-instruction",
+        action="store_true",
+        help="Also run the instruction engine and record the CA host-time ratio",
+    )
+    parser.add_argument(
+        "--perf",
+        action="store_true",
+        help="Record supplemental Linux perf host counters for measured runs",
+    )
+    parser.add_argument(
+        "--perf-events",
+        default="task-clock,cycles,instructions,branches,branch-misses,cache-references,cache-misses",
+        help="Comma-separated perf events used with --perf",
+    )
 
     args = parser.parse_args()
 
@@ -929,6 +1067,10 @@ def main():
     if args.warmups < 0:
         print("ERROR: --warmups cannot be negative", file=sys.stderr)
         sys.exit(1)
+    perf_bin = which("perf") if args.perf else None
+    if args.perf and not perf_bin:
+        print("ERROR: --perf requested but perf is not executable", file=sys.stderr)
+        sys.exit(2)
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     root_dir = os.path.dirname(script_dir)
@@ -999,8 +1141,37 @@ def main():
             objcopy_tool,
             args.isa,
             args.warmups,
+            args.simrv_arg,
+            perf_bin,
+            args.perf_events,
         )
         if result:
+            if args.compare_instruction:
+                baseline = run_benchmark_single(
+                    target,
+                    simrv_bin,
+                    None,
+                    args.runs,
+                    args.limit,
+                    args.timeout,
+                    args.tohost,
+                    riscv_tests_dir,
+                    root_dir,
+                    nm_tool,
+                    objcopy_tool,
+                    args.isa,
+                    args.warmups,
+                    ["--mode", "fast"],
+                    perf_bin,
+                    args.perf_events,
+                )
+                if baseline:
+                    result["instruction_baseline"] = baseline["simrv"]
+                    instruction_median = baseline["simrv"]["stats"]["time"]["median"]
+                    cycle_median = result["simrv"]["stats"]["time"]["median"]
+                    result["ca_to_instruction_time_ratio"] = (
+                        cycle_median / instruction_median if instruction_median > 0 else None
+                    )
             suite_results.append(result)
             if len(targets) == 1:
                 print_single_stats_table(

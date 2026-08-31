@@ -1,0 +1,26 @@
+simrv_add_component(simrv-platform
+  Aclint.cpp
+  AIA.cpp
+  Rtc.cpp
+  Uart.cpp
+  Power.cpp
+  pci/PciDevice.cpp
+  pci/PcieRootComplex.cpp
+  pci/VirtioPciDevice.cpp
+  pci/VirtioPciBlock.cpp
+  pci/VirtioPciConsole.cpp
+  pci/VirtioPciGpu.cpp
+  pci/VirtioPciInput.cpp
+  pci/VirtioPciRng.cpp
+  pci/VirtioPciSound.cpp
+  pci/VirtioPciNet.cpp
+  mmio/VirtioMmioDevice.cpp
+  mmio/VirtioMmioBlock.cpp
+  mmio/VirtioMmioConsole.cpp
+  mmio/VirtioMmioGpu.cpp
+  mmio/VirtioMmioInput.cpp
+  mmio/VirtioMmioRng.cpp
+  mmio/VirtioMmioSound.cpp
+  mmio/VirtioMmioNet.cpp
+)
+add_library(simrv::platform ALIAS simrv-platform)

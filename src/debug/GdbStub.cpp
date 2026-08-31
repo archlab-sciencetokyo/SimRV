@@ -272,7 +272,10 @@ static void write_gdb_reg(std::size_t idx, const std::string& hex, std::size_t h
 // ---------------------------------------------------------------------------
 
 void GdbStub::cmd_read_registers(simrv::core::Machine& machine) {
-    const auto& state = machine.cpu.state();
+    auto& target_cpu = (current_thread_id_ > 0 && current_thread_id_ <= machine.num_harts())
+                           ? machine.hart(current_thread_id_ - 1)
+                           : machine.primary_hart();
+    const auto& state = target_cpu.state();
     std::string resp;
     // x0-x31 (4 bytes each, little-endian)
     for (std::size_t i = 0; i < 32; ++i) {
@@ -289,7 +292,10 @@ void GdbStub::cmd_read_registers(simrv::core::Machine& machine) {
 
 void GdbStub::cmd_write_registers(const std::string& pkt, simrv::core::Machine& machine) {
     // G<hex data>
-    auto& state = machine.cpu.state();
+    auto& target_cpu = (current_thread_id_ > 0 && current_thread_id_ <= machine.num_harts())
+                           ? machine.hart(current_thread_id_ - 1)
+                           : machine.primary_hart();
+    auto& state = target_cpu.state();
     std::size_t off = 1;
     for (std::size_t i = 0; i < 33 && off + 8 <= pkt.size(); ++i, off += 8) {
         write_gdb_reg(i, pkt, off, state);
@@ -300,7 +306,10 @@ void GdbStub::cmd_write_registers(const std::string& pkt, simrv::core::Machine& 
 void GdbStub::cmd_read_register(const std::string& pkt, simrv::core::Machine& machine) {
     // p n
     const std::size_t idx = std::stoul(pkt.substr(1), nullptr, 16);
-    const auto result = read_gdb_reg(idx, machine.cpu.state());
+    auto& target_cpu = (current_thread_id_ > 0 && current_thread_id_ <= machine.num_harts())
+                           ? machine.hart(current_thread_id_ - 1)
+                           : machine.primary_hart();
+    const auto result = read_gdb_reg(idx, target_cpu.state());
     if (result) {
         send_packet(*result);
     } else {
@@ -316,7 +325,10 @@ void GdbStub::cmd_write_register(const std::string& pkt, simrv::core::Machine& m
         return;
     }
     const std::size_t idx = std::stoul(pkt.substr(1, eq - 1), nullptr, 16);
-    write_gdb_reg(idx, pkt, eq + 1, machine.cpu.state());
+    auto& target_cpu = (current_thread_id_ > 0 && current_thread_id_ <= machine.num_harts())
+                           ? machine.hart(current_thread_id_ - 1)
+                           : machine.primary_hart();
+    write_gdb_reg(idx, pkt, eq + 1, target_cpu.state());
     send_packet("OK");
 }
 
@@ -337,16 +349,13 @@ void GdbStub::cmd_read_memory(const std::string& pkt, simrv::core::Machine& mach
     resp.reserve(static_cast<std::size_t>(safe_len) * 2);
 
     // Direct physical memory read (bypasses MMU)
-    const auto* base = reinterpret_cast<const uint8_t*>(
-        machine.mmem);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-    const auto dram_size = static_cast<uint64_t>(simrv::memory::kDramSize);
-    constexpr uint32_t kDramBase = 0x80000000U;
+    const auto ram = machine.ram_view();
 
     for (uint32_t i = 0; i < safe_len; ++i) {
         const auto phys = static_cast<uint64_t>(addr) + i;
         uint8_t byte_val = 0;
-        if (phys >= kDramBase && (phys - kDramBase) < dram_size) {
-            byte_val = static_cast<uint8_t>(base[phys - kDramBase]);
+        if (ram.contains(phys)) {
+            byte_val = static_cast<uint8_t>(*ram.unchecked_ptr(phys));
         }
         resp += std::format("{:02x}", byte_val);
     }
@@ -365,10 +374,7 @@ void GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& mac
     const uint32_t len =
         static_cast<uint32_t>(std::stoul(pkt.substr(comma + 1, colon - comma - 1), nullptr, 16));
 
-    constexpr uint32_t kDramBase = 0x80000000U;
-    const auto dram_size = static_cast<uint64_t>(simrv::memory::kDramSize);
-    auto* base = reinterpret_cast<uint8_t*>(
-        machine.mmem);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    const auto ram = machine.ram_view();
 
     auto hd = [](char c) -> uint8_t {
         if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
@@ -383,8 +389,8 @@ void GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& mac
         const auto byte_val =
             static_cast<uint8_t>((hd(pkt.at(hex_off)) << 4) | hd(pkt.at(hex_off + 1)));
         const auto phys = static_cast<uint64_t>(addr) + i;
-        if (phys >= kDramBase && (phys - kDramBase) < dram_size) {
-            base[phys - kDramBase] = byte_val;
+        if (ram.contains(phys)) {
+            *ram.unchecked_ptr(phys) = static_cast<Byte>(byte_val);
         }
     }
     send_packet("OK");
@@ -412,16 +418,14 @@ void GdbStub::cmd_insert_breakpoint(const std::string& pkt, simrv::core::Machine
     const uint32_t addr =
         static_cast<uint32_t>(std::stoul(pkt.substr(c1 + 1, c2 - c1 - 1), nullptr, 16));
 
-    constexpr uint32_t kDramBase = 0x80000000U;
-    const auto dram_size = static_cast<uint64_t>(simrv::memory::kDramSize);
     const auto phys = static_cast<uint64_t>(addr);
 
-    if (phys < kDramBase || (phys - kDramBase + 4) > dram_size) {
+    const auto ram = machine.ram_view();
+    if (!ram.contains(phys, 4)) {
         send_packet("E02");
         return;
     }
-    auto* ptr = reinterpret_cast<uint8_t*>(machine.mmem) +
-                (phys - kDramBase);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    auto* ptr = ram.unchecked_ptr(phys);
 
     // Save original word
     uint32_t orig = 0;
@@ -463,12 +467,10 @@ void GdbStub::cmd_remove_breakpoint(const std::string& pkt, simrv::core::Machine
         return;
     }
 
-    constexpr uint32_t kDramBase = 0x80000000U;
-    const auto dram_size = static_cast<uint64_t>(simrv::memory::kDramSize);
     const auto phys = static_cast<uint64_t>(addr);
-    if (phys >= kDramBase && (phys - kDramBase + 4) <= dram_size) {
-        auto* ptr = reinterpret_cast<uint8_t*>(machine.mmem) +
-                    (phys - kDramBase);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    const auto ram = machine.ram_view();
+    if (ram.contains(phys, 4)) {
+        auto* ptr = ram.unchecked_ptr(phys);
         std::memcpy(ptr, &it->second, 4);
     }
     sw_breakpoints_.erase(it);
@@ -479,9 +481,9 @@ void GdbStub::cmd_remove_breakpoint(const std::string& pkt, simrv::core::Machine
 // Query packet handler
 // ---------------------------------------------------------------------------
 
-void GdbStub::handle_query(const std::string& pkt, simrv::core::Machine& /*machine*/) {
+void GdbStub::handle_query(const std::string& pkt, simrv::core::Machine& machine) {
     if (pkt == "qSupported") {
-        send_packet("PacketSize=4000;QStartNoAckMode+;swbreak+");
+        send_packet("PacketSize=4000;QStartNoAckMode+;swbreak+;multiprocess+");
         return;
     }
     if (pkt == "QStartNoAckMode") {
@@ -494,11 +496,24 @@ void GdbStub::handle_query(const std::string& pkt, simrv::core::Machine& /*machi
         return;
     }
     if (pkt.starts_with("qSupported:")) {
-        send_packet("PacketSize=4000;QStartNoAckMode+;swbreak+");
+        send_packet("PacketSize=4000;QStartNoAckMode+;swbreak+;multiprocess+");
         return;
     }
     if (pkt == "qC") {
-        send_packet("QC1");
+        send_packet(std::format("QC{:x}", current_thread_id_));
+        return;
+    }
+    if (pkt == "qfThreadInfo") {
+        std::string threads = "m";
+        for (size_t i = 1; i <= machine.num_harts(); ++i) {
+            if (i > 1) threads += ",";
+            threads += std::format("{:x}", i);
+        }
+        send_packet(threads);
+        return;
+    }
+    if (pkt == "qsThreadInfo") {
+        send_packet("l");
         return;
     }
     if (pkt == "qOffsets") {
@@ -588,11 +603,30 @@ auto GdbStub::handle_packet(const std::string& pkt, simrv::core::Machine& machin
             close_connection();
             return true;
 
-        case 'H':
-        case 'T':
-            // Set thread / Thread alive check – only one hart, always OK
+        case 'H': {
+            if (pkt.size() > 2) {
+                const long tid = std::stol(pkt.substr(2), nullptr, 16);
+                if (tid > 0 && static_cast<size_t>(tid) <= machine.num_harts()) {
+                    current_thread_id_ = static_cast<uint32_t>(tid);
+                } else if (tid == 0 || tid == -1) {
+                    current_thread_id_ = 1;
+                }
+            }
             send_packet("OK");
             return false;
+        }
+
+        case 'T': {
+            if (pkt.size() > 1) {
+                const long tid = std::stol(pkt.substr(1), nullptr, 16);
+                if (tid > 0 && static_cast<size_t>(tid) <= machine.num_harts()) {
+                    send_packet("OK");
+                    return false;
+                }
+            }
+            send_packet("E01");
+            return false;
+        }
 
         case 'v':
             if (pkt == "vCont?") {

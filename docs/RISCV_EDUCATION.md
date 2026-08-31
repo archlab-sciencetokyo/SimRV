@@ -153,17 +153,20 @@ riscv64-unknown-elf-objcopy -O binary program.elf program.bin
 
 ### Step 4: Run on SimRV
 
-SimRV 2.0 launches in interactive visual TUI mode by default:
+SimRV launches in interactive visual TUI mode by default:
 
 ```bash
-# RV32 build (Bare-metal mode)
+# RV32 build (Bare-metal interactive TUI)
 ./build/rv32-release/SimRV -b -m program.bin
 
-# RV64 build (Bare-metal mode)
+# RV64 build (Bare-metal interactive TUI)
 ./build/rv64-release/SimRV -b -m program.bin
 
-# Headless / CLI-only mode
-./build/rv64-release/SimRV -b -m program.bin -c
+# Headless / CLI-only mode (fast execution)
+./build/rv64-release/SimRV -b -m program.bin --mode fast --cli
+
+# Cycle-accurate five-stage pipeline execution
+./build/rv64-release/SimRV -b -m program.bin --mode cycle-accurate --cli
 ```
 
 ---
@@ -227,28 +230,32 @@ Description (Behavior):
    ./build/rv32-release/SimRV -b -m program.bin
    ```
 2. The simulation starts paused (`[PAUSED]`). Press `c` to unpause and run continuously, or press `s` / `Space` to single-step instructions.
-3. Press `e` to switch directly to the **EXPLAIN** pane, or press `r` to cycle through left pane views (GPRs → FPRs → Pipeline → Cache → TLB → Breakpoints → Hazards → I/O → Stats → Stack → Explain).
+3. Press `l` to cycle through left inspector tabs (Pipe → Cache → BP → Hazard → TLB → Bus → IO → Stats → Explain), or `r` to cycle register views (GPR → FPR → VEC → CSR).
 4. The EXPLAIN pane displays:
    - Current PC and symbolic function name.
    - Instruction hex value and disassembled mnemonic.
    - Visual bit-field layout grid identifying opcode, register specifiers, and immediate encodings.
    - Architectural values before and after execution.
    - Educational prose explaining microarchitectural effects and hazards.
-5. Press `g` to toggle the compact **Guided Inspection** assistant ribbon for contextual advice.
+5. Press `g` to open the full interactive **Educational Glossary** modal.
 
-### TUI Keybindings Reference (SimRV 2.0)
+### TUI Keybindings Reference
 
 | Key | Context | Action |
 |:---|:---|:---|
-| `c` | Paused | Unpause / Continue continuous simulation |
-| `p` / `Ctrl-P` | Running | Pause execution and enter interactive inspection mode |
+| `c` / `Ctrl-P` | Paused / Running | Run / Pause simulation loop |
 | `s` / `Space` | Paused | Single-step one instruction |
-| `e` | Paused | Jump directly to EXPLAIN inspection view |
-| `r` | Paused | Cycle left panel view (GPR, FPR, Pipeline, Cache, TLB, BP, Hazard, IO, Stats, Stack, Explain) |
-| `Tab` / `Shift-Tab` | All | Switch between right pane tabs (PTY, Display, Stats, Logs) |
-| `g` | Paused | Toggle Guided Inspection ribbon |
-| `b` | Paused | Open Breakpoint Management modal |
-| `m` | Paused | Open MISA / Extension Configuration modal |
-| `?` | Paused | Open Help & Keybindings reference modal |
+| `l` / `Alt-L` | Paused | Cycle left inspector tool tabs (Pipe / Cache / BP / Hazard / TLB / Bus / IO / Stats) |
+| `r` / `Alt-R` | Paused | Cycle register tabs (GPR / FPR / VEC / CSR) |
+| `o` / `Alt-O` | Paused | Open Binary & Disk Image Loader modal |
+| `,` / `Alt-S` | Paused | Open Simulator Settings modal (Mode, SMP, Scheduler, Diagnostics) |
+| `Alt-M` | Paused | Open MISA CSR / Extensions Configuration modal |
+| `y` | Paused | Open Cycle-Accurate Microarchitecture & Cache Config modal |
+| `i` | Paused | Open Memory Inspector modal |
+| `m` | Paused | Open Breakpoints & Watchpoints Management modal |
+| `g` | Paused | Open Educational Architecture Glossary modal |
+| `Ctrl-A` | All | Toggle input focus between guest UART/PTY and TUI controls |
+| `Tab` | All | Switch between right pane views (Guest Terminal / Log Buffer) |
+| `?` / `F1` / `h` | Paused | Open Help & Keybindings reference modal |
 | `q` / `Ctrl-Q` | All | Cleanly terminate simulation |
 | `Ctrl-R` | All | Soft-reboot guest simulation |

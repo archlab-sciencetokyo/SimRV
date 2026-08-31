@@ -8,6 +8,8 @@
 #include <deque>
 #include <expected>
 #include <fstream>
+#include <mutex>
+#include <optional>
 #include <vector>
 
 #include "simrv/Define.hpp"
@@ -20,12 +22,23 @@
 #include "simrv/core/StateControl.hpp"
 #include "simrv/core/Tlb.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
+#include "simrv/memory/Bus.hpp"
+#include "simrv/pipeline/CpuModel.hpp"
+#include "simrv/pipeline/CycleTransition.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
-#include "simrv/pipeline/PipelineTask.hpp"
 
 namespace simrv::core {
 class Machine;
+
+/// Immutable fast-path decisions captured by a runner at a batch boundary.
+struct FastBatchPolicy {
+    bool copy_pipeline_context = false;
+    bool collect_instruction_mix = false;
+    bool poll_pause = true;
+    bool has_instruction_limit = false;
+    uint32_t pause_poll_mask = 0xFFu;
+};
 
 /**
  * @struct ArchState
@@ -86,6 +99,27 @@ struct alignas(128) ArchState {
     Address load_res{};   ///< Active memory physical address reservation for Load-Reserved /
                           ///< Store-Conditional (LR/SC)
     CSRValue reserved{};  ///< Reserved for internal architectural extensions or tracking
+
+    /* Physical Memory Protection (PMP) */
+    static constexpr size_t kNumPmpEntries = 16;
+    std::array<uint8_t, kNumPmpEntries> pmpcfg{};
+    std::array<Address, kNumPmpEntries> pmpaddr{};
+    size_t num_active_pmp = 0;
+    bool has_locked_pmp = false;
+
+    constexpr void refresh_pmp_status() {
+        num_active_pmp = 0;
+        has_locked_pmp = false;
+        for (size_t i = 0; i < kNumPmpEntries; ++i) {
+            const uint8_t mode = pmpcfg[i] & 0x18;
+            if (mode != 0) {
+                num_active_pmp = i + 1;
+            }
+            if ((pmpcfg[i] & 0x80) != 0) {
+                has_locked_pmp = true;
+            }
+        }
+    }
 
     /** Recompute supervisor pending bits that combine independent software/device sources. */
     constexpr void refresh_supervisor_pending() {
@@ -209,32 +243,19 @@ struct alignas(32) SoftTlbEntry {
     }
 };
 
-struct MemWriteRecord {
-    Address addr = 0;
-    Word old_data = 0;
-    Instruction funct3 = 0;
-};
-
-struct ClintState {
-    Counter mtime = 0;
-    Counter mtimecmp = 0;
-    Counter mcycle = 0;
-    int rtc_divider = 0;
-};
-
-struct UndoStep {
-    simrv::core::ArchState state;
-    std::vector<MemWriteRecord> mem_writes;
-    simrv::pipeline::PipelineContext pipeline_context;
-    std::optional<simrv::pipeline::PipelineSimState> pipeline_sim_state;
-    ClintState clint_state;
-    uint64_t e_icount = 0;
-    Counter e_ccount = 0;
-    std::array<uint64_t, isa::OperationIdCount> e_instmix{};
+enum class HartStatus : uint8_t {
+    Started = 0,
+    Stopped = 1,
+    StartPending = 2,
+    StopPending = 3,
+    Suspended = 4,
+    SuspendPending = 5,
+    ResumePending = 6
 };
 
 class CPU {
    public:
+    std::atomic<HartStatus> hart_status{HartStatus::Started};
     /**
      * @brief Constructs a new CPU core, resetting GPRs, floating-point registers, and setting
      * initial status values.
@@ -284,6 +305,7 @@ class CPU {
      * invalid.
      */
     [[nodiscard]] auto read_csr(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCode>;
+    [[nodiscard]] auto read_csr(CsrNumber addr) const -> std::expected<CSRValue, ExceptionCode>;
 
     /**
      * @brief Writes a value to a specified Control and Status Register (CSR).
@@ -292,6 +314,7 @@ class CPU {
      * @return A void result if successful, or an ExceptionCode on failure.
      */
     auto write_csr(CSRAddress addr, CSRValue val) -> std::expected<void, ExceptionCode>;
+    auto write_csr(CsrNumber addr, CSRValue val) -> std::expected<void, ExceptionCode>;
 
     /**
      * @brief Handles execution return from a machine-mode trap (MRET instruction).
@@ -334,11 +357,16 @@ class CPU {
     void evaluate_timer_interrupt();
 
     /**
-     * @brief Executes one full CPU cycle. Resolves all pipeline stages or steps coroutine
-     * execution.
+     * @brief Advances the selected execution engine by one scheduling step.
      * @param machine Reference to the top-level machine orchestration unit.
      */
     void run_cycle(Machine& machine);
+    /// Advance exactly one authoritative CA transition.  Machine owns the global CA clock and
+    /// calls this directly; IA never uses this entry point.
+    void advance_ca_cycle(Machine& machine);
+    void run_ca_pipeline_cycle(Machine& machine);
+    /// Install a validated model before reset/reboot and recreate CA-local timing state.
+    void apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config);
 
     /**
      * @brief Executes one full CPU cycle in optimized baremetal mode.
@@ -346,6 +374,8 @@ class CPU {
      * @param machine Reference to the top-level machine orchestration unit.
      */
     void run_cycle_baremetal(Machine& machine);
+    /// Advance architectural time by one deterministic global CA clock.
+    void tick_cycle_clock(Machine& machine, bool interrupt_boundary = true);
 
     /**
      * @brief Records active instruction details to the TUI (Text User Interface) trace buffer if
@@ -362,20 +392,18 @@ class CPU {
     template <bool kCopyContext = false, bool kInstMix = false>
     SIMRV_ALWAYS_INLINE void execute_cached_op_fast(Machine& machine, CachedOp& op);
 
+    template <bool kCopyContext, bool kInstMix, bool kPollPause>
+    SIMRV_ALWAYS_INLINE auto run_fast_baremetal_kernel(Machine& machine, uint32_t batch_size)
+        -> uint32_t;
+
     /**
      * @brief Executes a batch of cached operations in a tight inlined loop for baremetal
      * acceleration.
      * @param machine Reference to top-level Machine.
      * @param batch_size Maximum number of instructions to execute in the batch.
      */
-    void run_fast_baremetal_batch(Machine& machine, uint32_t batch_size);
-
-    /**
-     * @brief Coroutine generator for persistent zero-allocation pipeline simulation.
-     * @param machine Pointer to the top-level machine orchestration unit.
-     * @return PipelineTask handle.
-     */
-    simrv::pipeline::PipelineTask run_pipeline_coroutine(Machine* machine);
+    void run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
+                                  const FastBatchPolicy& policy);
 
    public:
     /**
@@ -452,6 +480,16 @@ class CPU {
      * @brief Functional monadic Commit stage.
      */
     [[nodiscard]] auto commit_stage(Machine& machine) -> bool;
+
+    /**
+     * Translate one address. In CA mode this resumes a typed page walk and returns nullopt while
+     * its physical PTE transaction is outstanding; IA drives the same MMU state synchronously.
+     */
+    auto translate_stage_address(Machine& machine, VirtAddr virtual_address, PteAccess access,
+                                 PrivilegeLevel privilege, unsigned active_xlen,
+                                 simrv::memory::TlPort port,
+                                 simrv::pipeline::TimedPageWalkState& timed_walk)
+        -> std::optional<std::expected<PhysAddr, TrapCause>>;
 
    private:
     /// Translate fetch addresses and prime IF transient context.
@@ -559,7 +597,8 @@ class CPU {
 
     /// Get the effective privilege level for data accesses (considering MPRV).
     [[nodiscard]] constexpr auto effective_data_privilege() const -> PrivilegeLevel {
-        if (simrv::compiler::unlikely((state_.mstatus & enum_mask(MstatusBit::Mprv)) != 0)) {
+        if (simrv::compiler::unlikely(state_.priv == kPrivMachine &&
+                                      (state_.mstatus & enum_mask(MstatusBit::Mprv)) != 0)) {
             return static_cast<PrivilegeLevel>((state_.mstatus & enum_mask(MstatusBit::Mpp)) >> 11);
         }
         return state_.priv;
@@ -582,14 +621,23 @@ class CPU {
     CsrFile csr_file;
     execute::ExecuteUnit execute_unit;
     simrv::pipeline::PipelineContext pipeline_context;
+    simrv::pipeline::PipelineContext* active_context_ = &pipeline_context;
+    [[nodiscard]] constexpr auto& active_context() noexcept { return *active_context_; }
+    [[nodiscard]] constexpr const auto& active_context() const noexcept { return *active_context_; }
     simrv::cache::ICache icache;
     simrv::cache::DCache dcache;
     sbi::Sbi sbi;
     std::ofstream* trap_log_stream = nullptr;
     bool use_opensbi = false;
     Machine* machine_ = nullptr;
-    simrv::pipeline::PipelineTask pipeline_task;
+    // Serializes a TUI snapshot with this hart's architectural/pipeline transition. It is only
+    // acquired while TUI telemetry is enabled, so headless execution keeps its lock-free path.
+    mutable std::mutex tui_snapshot_mutex;
     simrv::pipeline::PipelineSim pipeline_sim;
+    simrv::pipeline::CpuModelConfig cpu_model_config{};
+    simrv::pipeline::BranchPredictor branch_predictor;
+    simrv::pipeline::HartCycleState ca_state{};
+    simrv::pipeline::HartPipelineState ca_pipeline{};
     DecodeCache decode_cache;
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_read{};
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_write{};
@@ -602,12 +650,6 @@ class CPU {
     uint64_t e_icount{0};                                     // Total instruction count
     Counter e_ccount = 0;                                     // Compressed instructions executed
     std::array<uint64_t, isa::OperationIdCount> e_instmix{};  // Instruction-mix statistics
-
-    // ========== Reverse Stepping / Time-Travel Debugging ==========
-    std::deque<UndoStep> undo_stack;
-    void push_undo_state();
-    void record_mem_write(Address paddr, Word old_data, Instruction funct3);
-    auto perform_backstep() -> bool;
 };
 
 }  // namespace simrv::core

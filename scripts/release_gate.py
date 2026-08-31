@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the reproducible local SimRV 2.0 release validation matrix."""
+"""Run the reproducible local SimRV 3.0 release validation matrix."""
 
 import argparse
 import json
@@ -51,7 +51,7 @@ def main() -> None:
                     "cmake", "-S", ".", "-B", str(build_dir), "-G", "Ninja",
                     "-DCMAKE_BUILD_TYPE=Release", f"-DSIMRV_XLEN={xlen}",
                     f"-DCMAKE_C_COMPILER={cc}", f"-DCMAKE_CXX_COMPILER={cxx}",
-                    "-DSIMRV_WARNINGS_AS_ERRORS=ON", "-DSIMRV_ENABLE_SDL=OFF",
+                    "-DSIMRV_WARNINGS_AS_ERRORS=ON",
                 ]
                 elapsed = run(configure)
                 elapsed += run(["cmake", "--build", str(build_dir)])

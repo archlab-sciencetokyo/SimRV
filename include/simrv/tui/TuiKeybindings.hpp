@@ -17,7 +17,6 @@ namespace simrv::tui {
 
 enum class KeyAction : uint8_t {
     Step,
-    Backstep,
     RunPause,
     Reset,
     SetBreakpoint,
@@ -33,12 +32,18 @@ enum class KeyAction : uint8_t {
     Help,
     Quit,
     CycleLayout,
+    FocusNextPane,
+    FocusPrevPane,
     CycleRegPage,
     CycleToolPage,
     CycleRightPanel,
     ToggleLearn,
     ToggleExplain,
-    ToggleTrace
+    ToggleTrace,
+    SwitchHart,
+    OpenGlossary,
+    ToggleTheme,
+    ToggleDebug
 };
 
 enum class ActionCategory : uint8_t { Execution, Inspect, Navigate, Configure, Help };
@@ -50,7 +55,6 @@ struct ActionContext {
     bool image_loaded = false;
     bool debug_mode = false;
     bool cycle_accurate = false;
-    bool rollback_enabled = false;
 };
 
 struct KeyBindingInfo {
@@ -66,7 +70,6 @@ struct KeyBindingInfo {
     bool requires_image = false;
     bool requires_debug = false;
     bool requires_cycle_accurate = false;
-    bool requires_rollback = false;
 };
 
 class Keybindings {

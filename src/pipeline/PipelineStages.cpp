@@ -19,6 +19,7 @@
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/Mmu.hpp"
 #include "simrv/pipeline/Decoder.hpp"
+#include "simrv/pipeline/RetirementEffects.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Helpers.hpp"
@@ -28,6 +29,23 @@ namespace simrv::core {
 
 using namespace simrv::isa;
 
+namespace {
+void release_instruction_eviction(Machine& machine, CPU& cpu) {
+    const auto evicted = cpu.icache.take_last_eviction();
+    if (!evicted.has_value()) return;
+    simrv::memory::TlChannelC release{};
+    release.opcode = simrv::memory::TlOpcodeC::Release;
+    release.report = simrv::memory::report_for(evicted->state, simrv::memory::TlCap::ToN);
+    release.size = simrv::memory::kTlBlockSize;
+    release.source = simrv::memory::make_tl_source(static_cast<HartId>(cpu.state().mhartid),
+                                                   simrv::memory::TlPort::Instruction);
+    release.hart = static_cast<HartId>(cpu.state().mhartid);
+    release.address = evicted->address;
+    simrv::memory::TlChannelD acknowledgement{};
+    (void)machine.memory().system_bus().release_line(release, acknowledgement);
+}
+}  // namespace
+
 // ==========================================
 // IF (Instruction Fetch) Stage
 // ==========================================
@@ -36,7 +54,7 @@ void CPU::run_fetch_stage(Machine& machine) {
     if (state_.regs.xlen == 32) {
         state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
     }
-    auto& ctx = pipeline_context;
+    auto& ctx = active_context();
     ctx.tlb_miss = false;
 
     const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
@@ -59,19 +77,24 @@ void CPU::run_fetch_stage(Machine& machine) {
 
     if (simrv::compiler::unlikely(translation_enabled)) {
         fetch_resolve_page_walk(machine, 1);
+        if (ca_state.waiting_for_interconnect) return;
         if (simrv::compiler::likely(!split_page)) {
             if (!ctx.pending_exception.has_value() && ctx.padr1 != kWordAllOnes) {
                 ctx.padr2 = ctx.padr1 + 2;
             }
+        } else {
+            fetch_resolve_page_walk(machine, 2);
+            if (ca_state.waiting_for_interconnect) return;
         }
     }
 
     fetch_read_instruction_word(machine);
+    if (ca_state.waiting_for_interconnect) return;
     decode_and_normalize_instruction(machine);
 }
 
 void CPU::fetch_address_translate(Machine& /*machine*/) {
-    auto& ctx = pipeline_context;
+    auto& ctx = active_context();
     Word w_padr1 = kWordAllOnes;
     Word w_padr2 = kWordAllOnes;
     Word const w_vadr1 = state_.pc;
@@ -109,7 +132,7 @@ void CPU::fetch_address_translate(Machine& /*machine*/) {
 }
 
 void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
-    auto& ctx = pipeline_context;
+    auto& ctx = active_context();
     if (ctx.pending_exception.has_value()) {
         return;
     }
@@ -128,13 +151,14 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
             }
         }
 
-        auto* mmu = machine.memory_.mmu();
-        auto translate_res = mmu->translate(w_vadr, PteAccess::Code, state_.priv, state_.mstatus,
-                                            state_.satp, state_.regs.xlen);
+        auto translate_res = translate_stage_address(
+            machine, VirtAddr{w_vadr}, PteAccess::Code, state_.priv, state_.regs.xlen,
+            simrv::memory::TlPort::Instruction, ca_state.instruction_walk);
+        if (!translate_res.has_value()) return;
         auto chain_res =
-            translate_res
-                .and_then([&](Address phys) -> std::expected<void, TrapCause> {
-                    w_padr = phys;
+            (*translate_res)
+                .and_then([&](PhysAddr phys) -> std::expected<void, TrapCause> {
+                    w_padr = phys.raw();
                     tlb.insert_inst_r(w_vadr, w_padr,
                                       simrv::xlen::satp_asid(state_.satp, state_.regs.xlen),
                                       state_.priv);
@@ -150,85 +174,183 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
     *r_padr = w_padr;
 }
 
+auto CPU::translate_stage_address(Machine& machine, VirtAddr virtual_address, PteAccess access,
+                                  PrivilegeLevel privilege, unsigned active_xlen,
+                                  simrv::memory::TlPort port,
+                                  simrv::pipeline::TimedPageWalkState& timed_walk)
+    -> std::optional<std::expected<PhysAddr, TrapCause>> {
+    auto* mmu = machine.memory_.mmu();
+    if (machine.runtime_profile.is_instruction_mode()) {
+        return mmu->translate(virtual_address, access, privilege, state_.mstatus, state_.satp,
+                              active_xlen, true, &state_);
+    }
+
+    if (!timed_walk.active || timed_walk.walk.virtual_address != virtual_address ||
+        timed_walk.walk.access != access || timed_walk.walk.privilege != privilege) {
+        if (timed_walk.active && timed_walk.request_pending) {
+            machine.memory_.system_bus().cancel_source(timed_walk.source);
+        }
+        timed_walk.walk = mmu->begin_page_walk(virtual_address, access, privilege, state_.mstatus,
+                                               state_.satp, active_xlen, true, &state_);
+        timed_walk.source =
+            simrv::memory::make_tl_source(static_cast<HartId>(state_.mhartid), port);
+        timed_walk.active = true;
+        timed_walk.request_pending = false;
+    }
+
+    auto& walk = timed_walk.walk;
+    if (timed_walk.request_pending) {
+        simrv::memory::TileLinkBus::TimedResponse response{};
+        if (!machine.memory_.system_bus().try_get_timed_response(timed_walk.source, response)) {
+            ca_state.waiting_for_interconnect = true;
+            return std::nullopt;
+        }
+        timed_walk.request_pending = false;
+        if (response.payload.failed()) {
+            Mmu::fail_page_walk_access(walk);
+        } else if (walk.status == PageWalkStatus::ReadPte) {
+            mmu->accept_page_walk_pte(walk, response.payload.data);
+        } else if (walk.status == PageWalkStatus::WritePte) {
+            Mmu::accept_page_walk_write(walk);
+        }
+    }
+
+    if (walk.status == PageWalkStatus::Complete) {
+        const PhysAddr result = walk.physical_address;
+        timed_walk.reset();
+        return std::expected<PhysAddr, TrapCause>{result};
+    }
+    if (walk.status == PageWalkStatus::Fault) {
+        const TrapCause fault = walk.fault;
+        timed_walk.reset();
+        return std::expected<PhysAddr, TrapCause>{std::unexpected(fault)};
+    }
+
+    simrv::memory::TlChannelA request{};
+    request.opcode = walk.status == PageWalkStatus::ReadPte ? simrv::memory::TlOpcodeA::Get
+                                                            : simrv::memory::TlOpcodeA::LogicalData;
+    request.size = walk.pte_size == 4 ? 2 : 3;
+    request.source = timed_walk.source;
+    request.hart = static_cast<HartId>(state_.mhartid);
+    request.address = walk.pte_address;
+    request.data = walk.status == PageWalkStatus::WritePte ? walk.pte_update_mask : walk.pte;
+    machine.memory_.system_bus().send_request(request);
+    timed_walk.request_pending = true;
+    ca_state.waiting_for_interconnect = true;
+    return std::nullopt;
+}
+
 void CPU::fetch_read_instruction_word(Machine& machine) {
-    auto& ctx = pipeline_context;
+    auto& ctx = active_context();
     if (ctx.pending_exception.has_value()) {
         return;
     }
 
-    if (machine.s_high_performance) {
+    if (machine.runtime_profile.is_instruction_mode()) {
         if (simrv::compiler::likely(ctx.padr2 == ctx.padr1 + 2 &&
-                                    simrv::memory::is_dram_access(ctx.padr1, sizeof(uint16_t)))) {
-            const Address masked = ctx.padr1 & simrv::memory::kDramMask;
-            if (simrv::compiler::likely(masked <= (simrv::memory::kDramMask - 3))) {
-                uint32_t val = 0;
-                std::memcpy(&val, machine.mmem + masked, 4);
-                if ((val & 0x3) != 0x3) {
-                    ctx.ir_org = val & 0xFFFF;
-                } else {
-                    ctx.ir_org = val;
-                }
-                return;
-            }
-            const uint16_t h1 = simrv::memory::ram_read_fast(
-                ctx.padr1, static_cast<Instruction>(Funct3::Lhu), machine.mmem);
-            if ((h1 & 0x3) != 0x3) {
-                ctx.ir_org = h1;
+                                    machine.ram_view().contains(ctx.padr1, sizeof(uint32_t)))) {
+            uint32_t val = 0;
+            std::memcpy(&val, machine.ram_view().unchecked_ptr(ctx.padr1), 4);
+            if ((val & 0x3) != 0x3) {
+                ctx.ir_org = val & 0xFFFF;
             } else {
-                if (simrv::compiler::unlikely(
-                        !simrv::memory::is_dram_access(ctx.padr2, sizeof(uint16_t)))) {
-                    ctx.pending_exception = ExceptionCode::FaultFetch;
-                    ctx.pending_tval = state_.pc + 2;
-                    return;
-                }
-                const uint16_t h2 = simrv::memory::ram_read_fast(
-                    ctx.padr2, static_cast<Instruction>(Funct3::Lhu), machine.mmem);
-                ctx.ir_org = (static_cast<uint32_t>(h2) << 16) | h1;
+                ctx.ir_org = val;
             }
             return;
         }
     }
 
-    if (simrv::compiler::likely(ctx.padr2 == ctx.padr1 + 2 &&
-                                simrv::memory::is_dram_access(ctx.padr1, sizeof(uint16_t)))) {
+    if (simrv::compiler::likely(machine.memory_geometry().contains(ctx.padr1, sizeof(uint16_t)) &&
+                                machine.memory_geometry().contains(ctx.padr2, sizeof(uint16_t)))) {
         auto fetch_halfword = [&](Address paddr, Address vaddr) -> std::optional<uint16_t> {
             uint16_t h_data = 0;
-            if (icache.read16(paddr, h_data)) {
-                return h_data;
-            }
             const Address line_base =
                 paddr & ~(static_cast<Address>(simrv::cache::ICache::kLineBytes - 1u));
-
-            std::array<Byte, simrv::cache::ICache::kLineBytes> line_data{};
-            const unsigned fetch_size = xlen::kFetchSize;
-            const auto fetch_funct3 =
-                static_cast<Instruction>(xlen::kIsXLen64 ? isa::Funct3::Sd : isa::Funct3::Sw);
-
-            for (uint32_t i = 0; i < simrv::cache::ICache::kLineBytes; i += fetch_size) {
-                simrv::memory::TlChannelA req{};
-                req.opcode = simrv::memory::TlOpcodeA::Get;
-                req.size = static_cast<uint8_t>(fetch_funct3 & 0x3);
-                req.source = 1;
-                req.address = line_base + i;
-                machine.memory_.system_bus().send_request(req);
-
-                simrv::memory::TlChannelD resp{};
-                const bool received = machine.memory_.system_bus().get_response(1, resp);
-                const bool contains_requested_halfword =
-                    paddr >= req.address && paddr - req.address <= fetch_size - sizeof(uint16_t);
-                if ((!received || resp.error) && contains_requested_halfword) {
-                    ctx.pending_exception = ExceptionCode::FaultFetch;
-                    ctx.pending_tval = vaddr;
-                    return std::nullopt;
-                }
-                if (received && !resp.error) {
-                    std::memcpy(line_data.data() + i, &resp.data, fetch_size);
-                }
+            // A timed refill is one cache miss, not one miss per cycle spent resuming it.
+            // Avoid probing (and incrementing miss statistics) while this line is in flight.
+            const bool refill_in_progress = machine.runtime_profile.is_cycle_mode() &&
+                                            ca_state.instruction_fill.active &&
+                                            ca_state.instruction_fill.line_base == line_base;
+            if (!refill_in_progress && icache.read16(paddr, h_data)) {
+                return h_data;
             }
 
-            icache.insert(line_base, line_data.data());
-            const uint32_t byte_offset = paddr & (simrv::cache::ICache::kLineBytes - 1u);
-            std::memcpy(&h_data, line_data.data() + byte_offset, sizeof(uint16_t));
+            std::array<Byte, simrv::cache::ICache::kLineBytes> line_data{};
+            if (machine.runtime_profile.is_cycle_mode()) {
+                static_assert(simrv::cache::ICache::kLineBytes ==
+                              pipeline::InstructionFillState::kLineBytes);
+                auto& fill = ca_state.instruction_fill;
+                if (fill.active && fill.line_base != line_base) fill.reset();
+                if (!fill.active) {
+                    fill.active = true;
+                    fill.line_base = line_base;
+                    fill.source = simrv::memory::make_tl_source(static_cast<HartId>(state_.mhartid),
+                                                                simrv::memory::TlPort::Instruction);
+                }
+
+                if (fill.request_pending) {
+                    simrv::memory::TileLinkBus::TimedResponse timed{};
+                    if (!machine.memory_.system_bus().try_get_timed_response(fill.source, timed)) {
+                        ca_state.waiting_for_interconnect = true;
+                        return std::nullopt;
+                    }
+                    fill.request_pending = false;
+                    if (timed.payload.failed()) {
+                        ctx.pending_exception = ExceptionCode::FaultFetch;
+                        ctx.pending_tval = vaddr;
+                        fill.reset();
+                        return std::nullopt;
+                    }
+                    if (!timed.has_line_data) {
+                        ctx.pending_exception = ExceptionCode::FaultFetch;
+                        ctx.pending_tval = vaddr;
+                        fill.reset();
+                        return std::nullopt;
+                    }
+                    icache.insert(line_base, timed.line_data.data(),
+                                  simrv::memory::mesi_for(timed.payload.cap));
+                    release_instruction_eviction(machine, *this);
+                    machine.memory_.system_bus().grant_ack(
+                        simrv::memory::TlChannelE{.sink = timed.payload.sink});
+                    fill.reset();
+                    const auto byte_offset = static_cast<size_t>(paddr - line_base);
+                    std::memcpy(&h_data, timed.line_data.data() + byte_offset, sizeof(h_data));
+                    return h_data;
+                }
+
+                simrv::memory::TlChannelA req{};
+                req.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
+                req.grow = simrv::memory::TlGrow::NtoB;
+                req.size = simrv::memory::kTlBlockSize;
+                req.hart = static_cast<HartId>(state_.mhartid);
+                req.source = fill.source;
+                req.address = line_base;
+                machine.memory_.system_bus().send_request(req);
+                fill.request_pending = true;
+                ca_state.waiting_for_interconnect = true;
+                return std::nullopt;
+            }
+
+            simrv::memory::TlChannelA req{};
+            req.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
+            req.grow = simrv::memory::TlGrow::NtoB;
+            req.size = simrv::memory::kTlBlockSize;
+            req.hart = static_cast<HartId>(state_.mhartid);
+            req.source =
+                simrv::memory::make_tl_source(req.hart, simrv::memory::TlPort::Instruction);
+            req.address = line_base;
+            simrv::memory::TlChannelD resp{};
+            if (!machine.memory_.system_bus().acquire_block(req, resp, line_data) ||
+                resp.failed()) {
+                ctx.pending_exception = ExceptionCode::FaultFetch;
+                ctx.pending_tval = vaddr;
+                return std::nullopt;
+            }
+            icache.insert(line_base, line_data.data(), simrv::memory::mesi_for(resp.cap));
+            release_instruction_eviction(machine, *this);
+            machine.memory_.system_bus().grant_ack(simrv::memory::TlChannelE{.sink = resp.sink});
+            const auto byte_offset = static_cast<size_t>(paddr - line_base);
+            std::memcpy(&h_data, line_data.data() + byte_offset, sizeof(h_data));
             return h_data;
         };
 
@@ -252,11 +374,13 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
         simrv::memory::TlChannelA req_l{};
         req_l.opcode = simrv::memory::TlOpcodeA::Get;
         req_l.size = static_cast<uint8_t>(Funct3::Lhu) & 0x3;
-        req_l.source = 1;
+        req_l.hart = static_cast<HartId>(state_.mhartid);
+        req_l.source =
+            simrv::memory::make_tl_source(req_l.hart, simrv::memory::TlPort::Instruction);
         req_l.address = ctx.padr1;
         machine.memory_.system_bus().send_request(req_l);
         simrv::memory::TlChannelD resp_l{};
-        if (!machine.memory_.system_bus().get_response(1, resp_l) || resp_l.error) {
+        if (!machine.memory_.system_bus().get_response(req_l.source, resp_l) || resp_l.failed()) {
             ctx.pending_exception = ExceptionCode::FaultFetch;
             ctx.pending_tval = state_.pc;
             return;
@@ -276,11 +400,14 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 simrv::memory::TlChannelA req_h{};
                 req_h.opcode = simrv::memory::TlOpcodeA::Get;
                 req_h.size = static_cast<uint8_t>(Funct3::Lhu) & 0x3;
-                req_h.source = 1;
+                req_h.hart = static_cast<HartId>(state_.mhartid);
+                req_h.source =
+                    simrv::memory::make_tl_source(req_h.hart, simrv::memory::TlPort::Instruction);
                 req_h.address = ctx.padr2;
                 machine.memory_.system_bus().send_request(req_h);
                 simrv::memory::TlChannelD resp_h{};
-                if (!machine.memory_.system_bus().get_response(1, resp_h) || resp_h.error) {
+                if (!machine.memory_.system_bus().get_response(req_h.source, resp_h) ||
+                    resp_h.failed()) {
                     ctx.pending_exception = ExceptionCode::FaultFetch;
                     ctx.pending_tval = state_.pc + 2;
                     return;
@@ -294,7 +421,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
 }
 
 void CPU::decode_and_normalize_instruction(Machine& machine) {
-    auto& ctx = pipeline_context;
+    auto& ctx = active_context();
     if (simrv::compiler::unlikely(ctx.pending_exception.has_value())) {
         ctx.ir = isa::RV32_NOP;
         return;
@@ -307,13 +434,13 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
                                               : ctx.ir_org;
 
     bool is_valid = true;
-    if (simrv::compiler::unlikely(machine.s_misa_profile != kMisaDefault)) {
+    if (simrv::compiler::unlikely(machine.configuration().isa.misa_profile != kMisaDefault)) {
         is_valid = instruction_enabled_by_misa(state_.misa, w_ir_tmp, w_compressed);
     }
 
     const isa::OperationId op_id = simrv::pipeline::decoder(w_ir_tmp);
     if (simrv::compiler::unlikely(op_id == isa::UNKNOWN)) {
-        if (!machine.s_tuimode) {
+        if (!machine.tui_enabled()) {
             simrv::log::warn("[DECODER] Unknown instruction: PC=0x{:x}, HEX=0x{:x}", state_.pc,
                              w_ir_tmp);
         }
@@ -362,7 +489,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
                            (op == Opcode::NMAdd) || (op == Opcode::NMSub));
         if (is_vector) {
             if (simrv::compiler::unlikely((state_.mstatus & enum_mask(MstatusBit::Vs)) == 0)) {
-                if (!machine.s_tuimode) {
+                if (!machine.tui_enabled()) {
                     simrv::log::warn("[VS CHECK] VS is 0! mstatus=0x{:x}, Vs mask=0x{:x}",
                                      state_.mstatus, enum_mask(MstatusBit::Vs));
                 }
@@ -386,14 +513,13 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
     }
 
     ctx.cinsn = w_compressed ? 1U : 0U;
-    e_instmix.at(static_cast<std::size_t>(ctx.op_id))++;
 }
 
 void CPU::run_fetch_stage_baremetal(Machine& machine) {
     if (state_.regs.xlen == 32) {
         state_.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
     }
-    auto& ctx = pipeline_context;
+    auto& ctx = active_context();
     ctx.tlb_miss = false;
     ctx.cpc = state_.pc;
 
@@ -415,15 +541,15 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
     // translation, so the branch predictor sees this as "not taken" for nearly
     // all cycles of a physical-only run and switches to "always taken" after
     // the OS enables virtual memory.
-    if (simrv::compiler::likely(simrv::memory::is_dram_access(ctx.padr1, sizeof(uint16_t)) &&
+    if (simrv::compiler::likely(machine.memory_geometry().contains(ctx.padr1, sizeof(uint16_t)) &&
                                 !machine.s_mmu_ever_used)) {
         const uint16_t h1 = simrv::memory::ram_read_fast(
-            ctx.padr1, static_cast<Instruction>(Funct3::Lhu), machine.mmem);
+            ctx.padr1, static_cast<Instruction>(Funct3::Lhu), machine.ram_view());
         if ((h1 & 0x3) != 0x3) {
             ctx.ir_org = h1;
         } else {
             if (simrv::compiler::unlikely(
-                    !simrv::memory::is_dram_access(ctx.padr2, sizeof(uint16_t)))) {
+                    !machine.memory_geometry().contains(ctx.padr2, sizeof(uint16_t)))) {
                 ctx.pending_exception = ExceptionCode::FaultFetch;
                 ctx.pending_tval = state_.pc + 2;
                 ctx.ir = isa::RV32_NOP;
@@ -431,7 +557,7 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
                 return;
             }
             const uint16_t h2 = simrv::memory::ram_read_fast(
-                ctx.padr2, static_cast<Instruction>(Funct3::Lhu), machine.mmem);
+                ctx.padr2, static_cast<Instruction>(Funct3::Lhu), machine.ram_view());
             ctx.ir_org = (static_cast<uint32_t>(h2) << 16) | h1;
         }
     } else {
@@ -469,14 +595,15 @@ void CPU::run_decode_stage(Machine& machine) {
 }
 
 void CPU::decode_fields(Machine& /*machine*/) {
-    auto& ctx = pipeline_context;
+    auto& ctx = active_context();
     if (simrv::compiler::unlikely(ctx.pending_exception.has_value())) {
         return;
     }
 
     simrv::pipeline::Decoder dec(ctx.ir);
+    const auto op = dec.opcode();
 
-    ctx.opcode = static_cast<Opcode>(dec.opcode());
+    ctx.opcode = static_cast<Opcode>(op);
     ctx.rd = dec.rd();
     ctx.rs1 = dec.rs1();
     ctx.rs2 = dec.rs2();
@@ -485,7 +612,7 @@ void CPU::decode_fields(Machine& /*machine*/) {
     ctx.funct7 = dec.funct7();
     ctx.funct12 = (ctx.ir >> 20);
 
-    switch (dec.opcode()) {
+    switch (op) {
         case Opcode::Lui:
         case Opcode::Auipc:
             ctx.imm = dec.imm_u();
@@ -507,7 +634,7 @@ void CPU::decode_fields(Machine& /*machine*/) {
 }
 
 void CPU::fetch_operands(Machine& /*machine*/) {
-    auto& ctx = pipeline_context;
+    auto& ctx = active_context();
     if (simrv::compiler::unlikely(ctx.pending_exception.has_value())) {
         return;
     }
@@ -610,7 +737,7 @@ void CPU::fetch_operands(Machine& /*machine*/) {
 void CPU::run_execute_stage(Machine& machine) { execute_core(machine); }
 
 void CPU::execute_core(Machine& machine) {
-    auto& ctx = pipeline_context;
+    auto& ctx = active_context();
     if (simrv::compiler::unlikely(ctx.pending_exception.has_value())) {
         return;
     }
@@ -635,16 +762,16 @@ void CPU::execute_core(Machine& machine) {
             break;
         case Opcode::Auipc:
             ctx.tkn = false;
-            ctx.wb_data = state_.pc + ctx.imm;
+            ctx.wb_data = (ctx.cpc + ctx.imm).raw();
             break;
         case Opcode::Jal:
             ctx.tkn = true;
-            ctx.wb_data = state_.pc + ((ctx.cinsn != 0u) ? 2 : 4);
-            ctx.jmp_pc = state_.pc + ctx.imm;
+            ctx.wb_data = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
+            ctx.jmp_pc = (ctx.cpc + ctx.imm).raw();
             break;
         case Opcode::Jalr:
             ctx.tkn = true;
-            ctx.wb_data = state_.pc + ((ctx.cinsn != 0u) ? 2 : 4);
+            ctx.wb_data = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
             ctx.jmp_pc = (ctx.rrs1 + ctx.imm) & ~static_cast<Register>(1);
             if (state_.regs.xlen == 32) {
                 ctx.jmp_pc =
@@ -693,7 +820,7 @@ void CPU::execute_core(Machine& machine) {
         case Opcode::Branch:
             ctx.tkn =
                 execute::ExecuteUnit::branchTaken(ctx.rrs1, ctx.rrs2, ctx.funct3, state_.regs.xlen);
-            ctx.jmp_pc = state_.pc + ctx.imm;
+            ctx.jmp_pc = (ctx.cpc + ctx.imm).raw();
             if (state_.regs.xlen == 32) {
                 ctx.jmp_pc =
                     static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc)));
@@ -711,11 +838,14 @@ void CPU::execute_core(Machine& machine) {
                     break;
                 }
                 const bool native_success =
-                    (ctx.rrs1 == state_.load_res) && (state_.reserved != 0u);
+                    machine.memory_.reservation_table().check_and_clear_reservation(
+                        static_cast<HartId>(state_.mhartid), ctx.rrs1);
+                state_.reserved = native_success ? 1 : 0;
+                state_.load_res = ctx.rrs1;
                 ctx.wb_data = native_success ? 0 : 1;
-                if (machine.spike_lockstep && machine.spike_lockstep->is_running()) {
+                if (machine.lockstep() && machine.lockstep()->is_running()) {
                     if (native_success) {
-                        auto sc_success_opt = machine.spike_lockstep->determine_sc_success();
+                        auto sc_success_opt = machine.lockstep()->determine_sc_success();
                         if (sc_success_opt.has_value() && !sc_success_opt.value()) {
                             ctx.wb_data = 1;
                         }
@@ -745,7 +875,7 @@ void CPU::execute_core(Machine& machine) {
 }
 
 void CPU::execute_system(Machine& machine) {
-    auto& ctx = pipeline_context;
+    auto& ctx = active_context();
     if (ctx.funct3 == Funct3::Priv) {
         switch (static_cast<Funct12Priv>(ctx.funct12)) {
             case Funct12Priv::Ecall:
@@ -753,17 +883,16 @@ void CPU::execute_system(Machine& machine) {
                     enum_mask(ExceptionCode::UserEcall) + std::to_underlying(state_.priv);
                 ctx.pending_exception = static_cast<ExceptionCode>(
                     enum_mask(ExceptionCode::UserEcall) + std::to_underlying(state_.priv));
-                e_icount++;
                 break;
             case Funct12Priv::Ebreak: {
                 bool semihost_handled = false;
-                const bool in_dram = simrv::memory::is_dram_addr(state_.pc - 4) &&
-                                     simrv::memory::is_dram_addr(state_.pc + 4);
+                const bool in_dram = machine.memory_geometry().contains(state_.pc - 4) &&
+                                     machine.memory_geometry().contains(state_.pc + 4);
                 if (in_dram) {
                     const Word inst_prev = simrv::memory::ram_read_fast(
-                        state_.pc - 4, static_cast<Instruction>(Funct3::Lw), machine.mmem);
+                        state_.pc - 4, static_cast<Instruction>(Funct3::Lw), machine.ram_view());
                     const Word inst_next = simrv::memory::ram_read_fast(
-                        state_.pc + 4, static_cast<Instruction>(Funct3::Lw), machine.mmem);
+                        state_.pc + 4, static_cast<Instruction>(Funct3::Lw), machine.ram_view());
                     if (inst_prev == 0x01f01013 && inst_next == 0x40705013) {
                         semihost_handled = true;
                         const Word semihost_op = state_.regs.read(RegId::A0);
@@ -774,23 +903,24 @@ void CPU::execute_system(Machine& machine) {
                                 const Instruction load_op =
                                     kIsXLen64 ? static_cast<Instruction>(Funct3::Ld)
                                               : static_cast<Instruction>(Funct3::Lw);
-                                const Address fd =
-                                    simrv::memory::ram_read_fast(arg_ptr, load_op, machine.mmem);
+                                const Address fd = simrv::memory::ram_read_fast(arg_ptr, load_op,
+                                                                                machine.ram_view());
                                 const Address buf_addr = simrv::memory::ram_read_fast(
-                                    arg_ptr + (kIsXLen64 ? 8 : 4), load_op, machine.mmem);
+                                    arg_ptr + (kIsXLen64 ? 8 : 4), load_op, machine.ram_view());
                                 const Address len = simrv::memory::ram_read_fast(
-                                    arg_ptr + (kIsXLen64 ? 16 : 8), load_op, machine.mmem);
+                                    arg_ptr + (kIsXLen64 ? 16 : 8), load_op, machine.ram_view());
                                 (void)fd;
 
-                                if (simrv::memory::is_dram_addr(buf_addr)) {
+                                if (machine.memory_geometry().contains(buf_addr)) {
                                     for (Address i = 0; i < len; ++i) {
                                         const auto ch = static_cast<uint8_t>(
                                             simrv::memory::ram_read_fast(
                                                 buf_addr + i, static_cast<Instruction>(Funct3::Lb),
-                                                machine.mmem) &
+                                                machine.ram_view()) &
                                             0xFF);
-                                        if (machine.s_tuimode && machine.tui) {
-                                            machine.tui->handle_char_write(static_cast<char>(ch));
+                                        if (machine.tui_enabled() && machine.tui_controller()) {
+                                            machine.tui_controller()->handle_char_write(
+                                                static_cast<char>(ch));
                                         } else {
                                             (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
                                         }
@@ -800,14 +930,15 @@ void CPU::execute_system(Machine& machine) {
                                 break;
                             }
                             case 0x03: {
-                                if (simrv::memory::is_dram_addr(arg_ptr)) {
+                                if (machine.memory_geometry().contains(arg_ptr)) {
                                     const auto ch = static_cast<uint8_t>(
                                         simrv::memory::ram_read_fast(
                                             arg_ptr, static_cast<Instruction>(Funct3::Lb),
-                                            machine.mmem) &
+                                            machine.ram_view()) &
                                         0xFF);
-                                    if (machine.s_tuimode && machine.tui) {
-                                        machine.tui->handle_char_write(static_cast<char>(ch));
+                                    if (machine.tui_enabled() && machine.tui_controller()) {
+                                        machine.tui_controller()->handle_char_write(
+                                            static_cast<char>(ch));
                                     } else {
                                         (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
                                     }
@@ -817,16 +948,17 @@ void CPU::execute_system(Machine& machine) {
                             }
                             case 0x04: {
                                 Address ptr = arg_ptr;
-                                if (simrv::memory::is_dram_addr(ptr)) {
+                                if (machine.memory_geometry().contains(ptr)) {
                                     while (true) {
                                         const auto ch = static_cast<uint8_t>(
                                             simrv::memory::ram_read_fast(
                                                 ptr, static_cast<Instruction>(Funct3::Lb),
-                                                machine.mmem) &
+                                                machine.ram_view()) &
                                             0xFF);
                                         if (ch == 0) break;
-                                        if (machine.s_tuimode && machine.tui) {
-                                            machine.tui->handle_char_write(static_cast<char>(ch));
+                                        if (machine.tui_enabled() && machine.tui_controller()) {
+                                            machine.tui_controller()->handle_char_write(
+                                                static_cast<char>(ch));
                                         } else {
                                             (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
                                         }
@@ -852,7 +984,6 @@ void CPU::execute_system(Machine& machine) {
                     ctx.wb_data_csr = enum_mask(ExceptionCode::Breakpoint);
                     ctx.pending_exception = ExceptionCode::Breakpoint;
                     ctx.tkn = false;
-                    e_icount++;
                 }
                 break;
             }
@@ -864,6 +995,14 @@ void CPU::execute_system(Machine& machine) {
                 break;
             case Funct12Priv::Wfi: {
                 ctx.tkn = false;
+                if ((state_.mip & state_.mie) == 0) {
+                    const Counter cur_cmp = clint_mmio.mtimecmp.load(std::memory_order_relaxed);
+                    if (cur_cmp > clint_mmio.mtime.load(std::memory_order_relaxed) &&
+                        cur_cmp != std::numeric_limits<Counter>::max()) {
+                        clint_mmio.mtime.store(cur_cmp, std::memory_order_relaxed);
+                        evaluate_timer_interrupt();
+                    }
+                }
                 break;
             }
             default:
@@ -889,7 +1028,7 @@ void CPU::execute_system(Machine& machine) {
 }
 
 void CPU::execute_fp(Machine& /*machine*/) {
-    auto& ctx = pipeline_context;
+    auto& ctx = active_context();
     switch (ctx.opcode) {
         case Opcode::MAdd:
         case Opcode::MSub:
@@ -948,17 +1087,18 @@ void CPU::execute_fp(Machine& /*machine*/) {
 // ==========================================
 
 void CPU::run_memory_stage(Machine& machine) {
-    if (pipeline_context.op_id >= isa::OperationId::VSETVLI &&
-        pipeline_context.op_id <= isa::OperationId::VWSLL_VI) {
+    if (active_context().op_id >= isa::OperationId::VSETVLI &&
+        active_context().op_id <= isa::OperationId::VWSLL_VI) {
         return;
     }
     memory_load_phase(machine);
     memory_prepare_store_data(machine);
     memory_store_phase(machine);
+    if (ca_state.waiting_for_interconnect) return;
 }
 
 void CPU::memory_load_phase(Machine& machine) {
-    auto& ctx = pipeline_context;
+    auto& ctx = active_context();
     if (ctx.pending_exception.has_value()) {
         return;
     }
@@ -979,11 +1119,13 @@ void CPU::memory_load_phase(Machine& machine) {
     if (opcode == Opcode::Amo && funct5 == Funct5Amo::Lr) {
         state_.load_res = ctx.mem_addr;
         state_.reserved = 1;
+        machine.memory_.reservation_table().set_reservation(static_cast<HartId>(state_.mhartid),
+                                                            ctx.mem_addr);
     }
 }
 
 void CPU::memory_prepare_store_data(Machine& /*machine*/) {
-    auto& ctx = pipeline_context;
+    auto& ctx = active_context();
     const auto opcode = static_cast<Opcode>(ctx.opcode);
     const auto funct5 = static_cast<Funct5Amo>(ctx.funct5);
     ctx.mem_wdata = (opcode != Opcode::Amo || funct5 == Funct5Amo::Sc)
@@ -997,7 +1139,7 @@ void CPU::memory_prepare_store_data(Machine& /*machine*/) {
 }
 
 void CPU::memory_store_phase(Machine& machine) {
-    auto& ctx = pipeline_context;
+    auto& ctx = active_context();
     if (ctx.pending_exception.has_value()) {
         return;
     }
@@ -1018,10 +1160,14 @@ void CPU::memory_store_phase(Machine& machine) {
                                              ctx.funct3);
     }
 
+    if (ca_state.waiting_for_interconnect) return;
+
     if ((opcode == Opcode::Store) || (opcode == Opcode::StoreFp) ||
         (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr)) {
         if (!ctx.pending_exception.has_value()) {
             state_.reserved = 0;
+            machine.memory_.reservation_table().invalidate_matching(
+                ctx.mem_addr, static_cast<HartId>(state_.mhartid));
         }
     }
 }
@@ -1032,55 +1178,20 @@ void CPU::memory_store_phase(Machine& machine) {
 
 void CPU::run_writeback_stage(Machine& machine) { writeback_registers(machine); }
 
-void CPU::writeback_registers([[maybe_unused]] Machine& machine) {
-    auto& ctx = pipeline_context;
-    if (ctx.pending_exception.has_value()) {
-        return;
+void CPU::writeback_registers(Machine& machine) {
+    const auto effects = pipeline::build_writeback_effects(active_context());
+    e_icount += effects.increments_instruction_count;
+    if (simrv::compiler::unlikely(machine.instruction_mix_enabled()) &&
+        effects.increments_instruction_count != 0) {
+        e_instmix[static_cast<std::size_t>(active_context().op_id)]++;
     }
-
-    e_icount++;
-
-    if (ctx.op_id >= isa::OperationId::VSETVLI && ctx.op_id <= isa::OperationId::VWSLL_VI) {
-        return;
+    if (effects.floating_write.enabled) {
+        state_.regs.write_fp(effects.floating_write.destination, effects.floating_write.value);
     }
-
-    Word wire_wb_r_data = 0;
-    Word wire_wb_r_enable = 0;
-
-    const auto opcode = static_cast<Opcode>(ctx.opcode);
-    const auto funct5 = static_cast<Funct5Amo>(ctx.funct5);
-    const auto funct3 = static_cast<Funct3>(ctx.funct3);
-
-    if ((opcode == Opcode::Load) || (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc)) {
-        wire_wb_r_data = ctx.mem_rdata;
-        wire_wb_r_enable = 1;
-    } else if (opcode == Opcode::System && funct3 != Funct3::Priv) {
-        wire_wb_r_data = ctx.rcsr;
-        wire_wb_r_enable = 1;
-    } else {
-        if ((opcode == Opcode::Amo && funct5 == Funct5Amo::Sc) || (opcode == Opcode::Lui) ||
-            (opcode == Opcode::Auipc) || (opcode == Opcode::Jal) || (opcode == Opcode::Jalr) ||
-            (opcode == Opcode::Op) || (opcode == Opcode::OpImm) || (opcode == Opcode::Op32) ||
-            (opcode == Opcode::OpImm32) || (opcode == Opcode::OpFp && (ctx.int_wb_from_fp != 0u))) {
-            wire_wb_r_data = ctx.wb_data;
-            wire_wb_r_enable = 1;
-        }
-    }
-
-    if (opcode == Opcode::LoadFp) {
-        state_.regs.write_fp(ctx.rd, ctx.fp_mem_rdata);
-        state_.mstatus |= enum_mask(MstatusBit::Fs);
-    }
-
-    if ((opcode == Opcode::OpFp || opcode == Opcode::MAdd || opcode == Opcode::MSub ||
-         opcode == Opcode::NMAdd || opcode == Opcode::NMSub) &&
-        (ctx.fp_wb_enable != 0u)) {
-        state_.regs.write_fp(ctx.rd, ctx.fp_wb_data);
-        state_.mstatus |= enum_mask(MstatusBit::Fs);
-    }
-
-    if (wire_wb_r_enable != 0u) {
-        state_.regs.write(ctx.rd, wire_wb_r_data);
+    if (effects.marks_floating_point_dirty) state_.mstatus |= enum_mask(MstatusBit::Fs);
+    if (effects.integer_write.enabled) {
+        state_.regs.write_branchless(effects.integer_write.destination,
+                                     effects.integer_write.value);
     }
 }
 
@@ -1091,7 +1202,7 @@ void CPU::writeback_registers([[maybe_unused]] Machine& machine) {
 void CPU::run_commit_stage(Machine& machine) { commit_control_flow_and_traps(machine); }
 
 void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
-    auto& ctx = pipeline_context;
+    auto& ctx = active_context();
     if (ctx.cinsn != 0u && !ctx.pending_exception.has_value()) {
         e_ccount++;
     }
@@ -1138,7 +1249,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
     Word enable_interrupts = 0;
     Word mask = 0;
     Word irq_num = 32;
-    if (pending_interrupts != 0u) {
+    if (simrv::compiler::unlikely(pending_interrupts != 0u)) {
         switch (state_.priv) {
             case kPrivMachine: {
                 if ((state_.mstatus & enum_mask(MstatusBit::Mie)) != 0u) {
@@ -1166,6 +1277,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
         }
     }
     if (ctx.pending_exception.has_value()) {
+        state_.pc = ctx.cpc.raw();
         raise_exception(std::to_underlying(*ctx.pending_exception), ctx.pending_tval);
     } else {
         if (ctx.tkn != 0u) {
@@ -1179,7 +1291,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
             }
             state_.pc = ctx.jmp_pc;
         } else {
-            state_.pc = state_.pc + ((ctx.cinsn != 0u) ? 2 : 4);
+            state_.pc = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
         }
         if (state_.regs.xlen == 32) {
             state_.pc =
@@ -1192,7 +1304,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
 }
 
 void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
-    auto& ctx = pipeline_context;
+    auto& ctx = active_context();
     if (ctx.cinsn != 0u && !ctx.pending_exception.has_value()) {
         e_ccount++;
     }
@@ -1268,6 +1380,7 @@ void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
     }
 
     if (ctx.pending_exception.has_value()) {
+        state_.pc = ctx.cpc.raw();
         raise_exception(std::to_underlying(*ctx.pending_exception), ctx.pending_tval);
     } else {
         if (ctx.tkn != 0u) {
@@ -1281,7 +1394,7 @@ void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
             }
             state_.pc = ctx.jmp_pc;
         } else {
-            state_.pc = state_.pc + ((ctx.cinsn != 0u) ? 2 : 4);
+            state_.pc = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
         }
         if (state_.regs.xlen == 32) {
             state_.pc =

@@ -86,15 +86,15 @@ auto alu_int_b32(uint32_t u1, uint32_t u2, int32_t s1, int32_t s2, isa::Operatio
             break;
         case ORC_B: {
             uint32_t r = 0;
-            for (int i = 0; i < 32; i += 8) {
-                if ((u1 >> i) & 0xFF) r |= (0xFFu << i);
-            }
+            if ((u1 & 0x000000FFu) != 0) r |= 0x000000FFu;
+            if ((u1 & 0x0000FF00u) != 0) r |= 0x0000FF00u;
+            if ((u1 & 0x00FF0000u) != 0) r |= 0x00FF0000u;
+            if ((u1 & 0xFF000000u) != 0) r |= 0xFF000000u;
             res32 = static_cast<int32_t>(r);
             break;
         }
         case REV8: {
-            res32 = static_cast<int32_t>(((u1 & 0x000000FFu) << 24) | ((u1 & 0x0000FF00u) << 8) |
-                                         ((u1 & 0x00FF0000u) >> 8) | ((u1 & 0xFF000000u) >> 24));
+            res32 = static_cast<int32_t>(std::byteswap(u1));
             break;
         }
         case PACK:
@@ -230,10 +230,15 @@ auto alu_int_b64(Register in1, Register in2, isa::OperationId op_id, int xlen) -
         // B-Extension: Zbb pseudo-ops
         case ORC_B: {
             Register r = 0;
-            for (size_t i = 0; i < sizeof(Register); i++) {
-                if ((in1 >> (i * 8)) & 0xFF) {
-                    r |= static_cast<Register>(0xFF) << (i * 8);
-                }
+            if ((in1 & 0x00000000000000FFULL) != 0) r |= 0x00000000000000FFULL;
+            if ((in1 & 0x000000000000FF00ULL) != 0) r |= 0x000000000000FF00ULL;
+            if ((in1 & 0x0000000000FF0000ULL) != 0) r |= 0x0000000000FF0000ULL;
+            if ((in1 & 0x00000000FF000000ULL) != 0) r |= 0x00000000FF000000ULL;
+            if constexpr (simrv::xlen::kIsXLen64) {
+                if ((in1 & 0x000000FF00000000ULL) != 0) r |= 0x000000FF00000000ULL;
+                if ((in1 & 0x0000FF0000000000ULL) != 0) r |= 0x0000FF0000000000ULL;
+                if ((in1 & 0x00FF000000000000ULL) != 0) r |= 0x00FF000000000000ULL;
+                if ((in1 & 0xFF00000000000000ULL) != 0) r |= 0xFF00000000000000ULL;
             }
             return r;
         }

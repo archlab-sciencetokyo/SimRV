@@ -3,6 +3,76 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+## [v3.0.0-alpha.1] — 2026-08-31
+
+This alpha rebaselines the former 2.1 development line as 3.0 because the execution architecture,
+host APIs, CLI compatibility surface, and pipeline choices are breaking changes. The historical
+2.1 alpha entries below are retained for provenance; that prerelease line is superseded by 3.0.
+
+### Execution architecture
+
+- Replaced post-retirement timing penalties with one deterministic per-cycle transition kernel for
+  three-stage and five-stage in-order pipelines. Fast CLI and observable TUI policies share the
+  same transitions and differ only in bounded diagnostic history.
+- Kept `--ia` and `--ca` as the public execution choices. CLI selects the fast policy and TUI
+  selects the observable policy for the chosen engine.
+- Added timed instruction/data cache traffic, resumable Sv32/Sv39 page walks, atomic accessed/dirty
+  PTE updates, deterministic hart-order arbitration, and cycle-boundary coherence effects.
+- Removed the coroutine pipeline, dual-issue model, aggregate cache/TLB penalty fields, and the TUI
+  high-performance toggle. `--pipeline` now accepts only `3stage` or `5stage`; there are no
+  compatibility aliases for removed pipeline presets or tuning flags.
+
+### Developer interfaces
+
+- Generalized instruction decoding around collision-checked `consteval` tables, including common
+  and mask-dependent vector encodings and single/double FP operations. Irregular encodings retain
+  explicit secondary-field validation, while pipeline timing classes and mnemonic lookup use
+  shared operation metadata.
+- Added `--log-file FILE` to mirror timestamped configuration, diagnostics, typed termination
+  reason, performance counters, cache statistics, and bus statistics without requiring the TUI.
+- Added machine-readable repeated benchmark reports and optional Linux `perf stat` host counters.
+  Host counters supplement wall-clock throughput and must only be compared under a controlled host
+  configuration.
+- Limited full ELF symbol loading to observable TUI execution; CLI loads only runtime-essential
+  symbols needed for guest control.
+
+### Correctness and qualification
+
+- Added register-bank-aware RAW interlocks for FP loads, FP arithmetic, integer/FP conversions,
+  FP stores, and fused operations including `rs3`, while preserving integer forwarding.
+- Made cache refills count exactly one miss without a synthetic hit and made the instruction
+  explainer inspect a stable snapshot without changing cache, PC, pipeline, TLB, or counters.
+- Treat performance studies as non-blocking evidence. Numerical results in the historical 2.1
+  entries are local measurements, not 3.0 release guarantees, unless reproduced with recorded
+  host, compiler, workload, revision, and configuration provenance.
+
+## [v2.1.0-alpha.2] — 2026-08-31
+
+Alpha 2 release featuring high-performance floating-point acceleration, multi-level cache hierarchy, quantum-sliced and multi-threaded SMP execution, and compile-time 2D LUT instruction decoding.
+
+### Key Capabilities & Enhancements
+
+- **Lazy MXCSR Floating-Point Unit**: Replaced per-instruction libc rounding mode transitions with host MXCSR state tracking, accelerating FP execution (e.g. `mm.riscv` double-precision matrix multiplication from 13.2 MIPS to 51.6 MIPS, 1.35x faster than Spike).
+- **Hardware FMA Acceleration**: Direct `__builtin_fmaf` / `__builtin_fma` fused multiply-add intrinsics with single-rounding precision and branchless canonical quiet NaN fixups.
+- **Multi-Level Cache Hierarchy**: Fast $O(1)$ L1 tag matching, 64 KiB 8-way L2 Unified Intermediate Cache, and 512 KiB 16-way shared Last-Level Cache (LLC) integrated with TileLink-C Directory Coherence.
+- **Quantum-Sliced & True MT-SMP Schedulers**: Configurable instruction burst scheduling (`smp_quantum`) and parallel `std::jthread` worker threads with atomic SBI v2.0 Hart State Management (HSM) states and direct IPI wakeups, achieving 108.2 MIPS on `mt-matmul.riscv` (1.72x faster than Spike).
+- **Compile-Time 2D LUT Decoder**: Replaced nested switch branches with `constexpr` 2D lookup tables for ALU, OP-IMM, CSR, AMO, and FMA instruction groups, reaching 235.5 MIPS core speed on Montgomery multiplication.
+- **TUI Alignment**: Hierarchical L1/L2/L3 cache metrics in the Cache Inspector, Status Bar SMP indicators (`[SMP: 4 (MT)]`), and live decoder LUT hit metrics.
+
+## [v2.1.0-alpha.1] — 2026-08-20
+
+Alpha prerelease introducing full **Multi-Hart Symmetric Multiprocessing (SMP)** support, **TileLink-C 5-Channel Directory Cache Coherence (MESI)**, and fast inline directory lookups.
+
+### Key Capabilities & Enhancements
+
+- **Multi-Hart SMP Architecture**: Full OpenSBI SBI 3.0 HSM (Hart State Management) and IPI (Inter-Processor Interrupt) dispatch across dual/multi-core RISC-V systems.
+- **TileLink-C Directory Cache Coherence**: Complete 5-channel messaging implementation (Channels A, B, C, D, E) with `AcquireBlock`, `AcquirePerm`, `ProbeBlock`, `ProbeAckData`, and `GrantData` transactions.
+- **MESI Coherence Protocol**: Standard 4-state line management (`[M]` Modified, `[E]` Exclusive Clean, `[S]` Shared Clean, `[I]` Invalid) with sole-sharer Exclusive Clean grants to eliminate upgrade bus traffic on local stores.
+- **Direct-Mapped Inline Directory Cache**: $O(1)$ fast cache path for directory state lookups and dirty writeback management.
+- **TUI Visual Inspection**: Real-time MESI cache line state tags (`[M]`, `[E]`, `[S]`, `[I]`) in the Cache Inspector and TileLink-C channel metric counters in the Bus/IO panel.
+- **Dynamic Device Tree Multi-Hart Generation**: Automatic phandle-isolated CPU node and interrupt controller generation supporting multi-core Linux boot.
 ## [v2.0.2] — 2026-08-28
 
 Maintenance release ensuring side-effect-free instruction explanation in the TUI left pane to prevent spurious ICache hits during tool tab navigation.
@@ -61,27 +131,6 @@ Release candidate 9 focuses on architectural compliance, trap and interrupt corr
 OS lifecycle control, MMIO safety, and TUI/UART stability ahead of v2.0.0.
 
 ### Breaking CLI cleanup
-
-SimRV 2.0 removes ambiguous and deprecated aliases. Removed options fail with an explicit
-replacement instead of silently changing behavior.
-
-| Removed | Replacement |
-|---|---|
-| `-k`, `-i`, `--kernel` | `-m`, `--image` |
-| `--dtb` | `-f`, `--fdt` |
-| `-a`, `--app` | `-b`, `--baremetal` |
-| `-o`, `--linux` | `--os` |
-| `--headless`, `--no-tui` | `-c`, `--cli` |
-| `--high-accuracy`, `--accuracy-mode` | `-C`, `--cycle-accurate` |
-| `--perf-mode` | `--high-performance`, `--ia` |
-| `--vector-len` | `--vlen` |
-| `--mouse-speed` | `--mouse-sensitivity` |
-| `--contrast` | `--high-contrast` |
-| `--disable-forwarding` | `--no-forwarding` |
-| `-B`, `--opensbi` | Remove it; OpenSBI is automatic with `--fdt` |
-
-The conflicting `-G` alias is now GUI-only; use `--gdb` for the GDB server. The conflicting `-c`
-alias is now CLI-only; use `-f` or `--fdt` for a device tree.
 
 ### TUI framework hardening
 
@@ -421,6 +470,9 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
+[v3.0.0-alpha.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-alpha.1
+[v2.1.0-alpha.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.1.0-alpha.2
+[v2.1.0-alpha.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.1.0-alpha.1
 [v2.0.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.2
 [v2.0.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.1
 [v2.0.0]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0

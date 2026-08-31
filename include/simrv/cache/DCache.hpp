@@ -9,12 +9,15 @@
 
 namespace simrv::cache {
 
-class DCache : public BaseCache<64, 32, 4> {
+class DCache : public BaseCache<512, 32, 8> {
    public:
     DCache() = default;
 
     [[nodiscard]] auto read(Address addr, Word& data, Instruction funct3) -> bool;
-    void write(Address addr, Word data, Instruction funct3);
+    [[nodiscard]] auto write(Address addr, Word data, Instruction funct3) -> bool;
+
+    auto handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp,
+                      std::array<Byte, kLineBytes>& dirty_data) -> bool;
 };
 
 }  // namespace simrv::cache

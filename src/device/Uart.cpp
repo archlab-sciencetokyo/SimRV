@@ -8,6 +8,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <thread>
 
 #include "simrv/core/Machine.hpp"
@@ -24,7 +25,7 @@ void update_uart_irq(simrv::core::Machine& machine, bool uart_rx_ready, Word uar
     const bool rx_irq_enabled = (uart_ier & static_cast<Word>(0x1U)) != 0;
     const bool tx_irq_enabled = (uart_ier & static_cast<Word>(0x2U)) != 0;
     bool const irq = (rx_irq_enabled && uart_rx_ready) || (tx_irq_enabled && tx_irq_pending);
-    machine.cpu.plic_set_irq(D_UART_IRQ_NUM, irq ? 1 : 0);
+    machine.set_platform_irq(D_UART_IRQ_NUM, irq);
 }
 
 }  // namespace
@@ -37,7 +38,7 @@ Uart::~Uart() {
 }
 
 void Uart::start_input_thread() {
-    if (machine_.s_tuimode) return;  // TUI manages its own input
+    if (machine_.tui_enabled()) return;  // TUI manages its own input
     input_thread_stop_.store(false, std::memory_order_relaxed);
     input_thread_ = std::thread([this]() -> void {
         constexpr int stdin_fd = STDIN_FILENO;
@@ -52,18 +53,18 @@ void Uart::start_input_thread() {
             }
             if (!FD_ISSET(stdin_fd, &read_fds)) continue;
             uint8_t byte = 0;
-            if (::read(stdin_fd, &byte, 1) != 1) continue;
+            const auto bytes_read = ::read(stdin_fd, &byte, 1);
+            if (bytes_read == 0) return;  // EOF: do not spin for the remainder of the run.
+            if (bytes_read != 1) {
+                if (errno != EINTR) return;
+                continue;
+            }
 
             if (byte == 17) {  // Ctrl-Q → stop simulation
                 machine_.is_running_ = false;
                 return;
             }
-            std::scoped_lock lock(rx_mutex_);
-            if (rx_fifo_.size() < kMaxRxFifoSize) {
-                rx_fifo_.push(byte);
-            }
-            const bool has_rx = !rx_fifo_.empty();
-            rx_ready_.store(has_rx, std::memory_order_release);
+            push_rx_byte(byte);
         }
     });
 }
@@ -96,13 +97,16 @@ auto Uart::start_pty() -> bool {
             if (ret <= 0) continue;
             ssize_t const n = pty_.read_from_master(buf, sizeof(buf));
             if (n <= 0) continue;
-            std::scoped_lock lock(rx_mutex_);
-            for (ssize_t i = 0; i < n; ++i) {
-                if (rx_fifo_.size() < kMaxRxFifoSize) {
-                    rx_fifo_.push(buf[i]);
+            {
+                std::scoped_lock lock(rx_mutex_);
+                for (ssize_t i = 0; i < n; ++i) {
+                    if (rx_fifo_.size() < kMaxRxFifoSize) {
+                        rx_fifo_.push(buf[i]);
+                    }
                 }
+                rx_ready_.store(!rx_fifo_.empty(), std::memory_order_release);
             }
-            rx_ready_.store(true, std::memory_order_release);
+            irq_update_pending_.store(true, std::memory_order_release);
         }
     });
     return true;
@@ -117,7 +121,7 @@ void Uart::stop_pty() {
 }
 
 auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
-    const Address reg = simrv::mmio::uart_reg(req.address, uart_reg_shift_);
+    const Address reg = simrv::mmio::uart_reg(req.address.raw(), uart_reg_shift_);
     if (reg == simrv::mmio::kUartRegInvalid) {
         if (req.opcode == memory::TlOpcodeA::Get) resp.data = 0;
         return true;
@@ -168,8 +172,7 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                 resp.data = uart_mcr_;
                 break;
             case simrv::mmio::kUartRegLsr: {
-                std::scoped_lock lock(rx_mutex_);
-                const bool has_rx = !rx_fifo_.empty();
+                const bool has_rx = rx_ready_.load(std::memory_order_acquire);
                 resp.data = simrv::mmio::kUartLsrThreTemt |
                             (has_rx ? simrv::mmio::kUartLsrDataReady : static_cast<Word>(0));
             } break;
@@ -194,14 +197,13 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                     if (pty_.is_open()) {
                         (void)pty_.write_byte_to_master(ch);
                     }
-                    if (machine_.s_tuimode && machine_.tui) {
-                        machine_.tui->handle_char_write(static_cast<char>(ch));
+                    if (machine_.tui_enabled() && machine_.tui_controller()) {
+                        machine_.tui_controller()->handle_char_write(static_cast<char>(ch));
                     } else if (!pty_.is_open()) {
                         (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
                     }
                     tx_irq_pending_ = true;
-                    std::scoped_lock lock(rx_mutex_);
-                    const bool has_rx = !rx_fifo_.empty();
+                    const bool has_rx = rx_ready_.load(std::memory_order_acquire);
                     update_uart_irq(machine_, has_rx, uart_ier_, tx_irq_pending_);
                 }
                 break;
@@ -213,8 +215,7 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                     if ((uart_ier_ & static_cast<Word>(0x2U)) != 0) {
                         tx_irq_pending_ = true;
                     }
-                    std::scoped_lock lock(rx_mutex_);
-                    const bool has_rx = !rx_fifo_.empty();
+                    const bool has_rx = rx_ready_.load(std::memory_order_acquire);
                     update_uart_irq(machine_, has_rx, uart_ier_, tx_irq_pending_);
                 }
                 break;
@@ -226,8 +227,7 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                     rx_ready_.store(false, std::memory_order_release);
                 }
                 {
-                    std::scoped_lock lock(rx_mutex_);
-                    const bool has_rx = !rx_fifo_.empty();
+                    const bool has_rx = rx_ready_.load(std::memory_order_acquire);
                     update_uart_irq(machine_, has_rx, uart_ier_, tx_irq_pending_);
                 }
                 break;
@@ -254,22 +254,15 @@ void Uart::push_rx_byte(uint8_t byte) {
     std::scoped_lock lock(rx_mutex_);
     if (rx_fifo_.size() < kMaxRxFifoSize) {
         rx_fifo_.push(byte);
-        // Input can arrive on the TUI or PTY reader thread. Only publish readiness here; the
-        // simulation thread owns PLIC mutation in non_tui_poll_input().
+        // Input can arrive on the TUI or PTY reader thread. The simulation thread owns PLIC
+        // mutation, so only publish a transition here.
         rx_ready_.store(true, std::memory_order_release);
+        irq_update_pending_.store(true, std::memory_order_release);
     }
 }
 
-void Uart::non_tui_poll_input() {
-    if (machine_.s_tuimode) {
-        bool const has_data = rx_ready_.load(std::memory_order_relaxed);
-        update_uart_irq(machine_, has_data, uart_ier_, tx_irq_pending_);
-        return;
-    }
-
-    if (!rx_ready_.load(std::memory_order_relaxed) && !tx_irq_pending_) {
-        return;
-    }
+void Uart::service_interrupts() {
+    if (!irq_update_pending_.exchange(false, std::memory_order_acq_rel)) return;
 
     std::scoped_lock lock(rx_mutex_);
     const bool has_rx = !rx_fifo_.empty();

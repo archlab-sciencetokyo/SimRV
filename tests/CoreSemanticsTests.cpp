@@ -4,13 +4,22 @@
 #include <limits>
 #include <string>
 
+#include "simrv/cache/L2Cache.hpp"
+#include "simrv/cache/L3Cache.hpp"
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/Machine.hpp"
+#include "simrv/core/Pmp.hpp"
 #include "simrv/core/RegisterFile.hpp"
 #include "simrv/core/Sbi.hpp"
+#include "simrv/execute/ExecuteUnit.hpp"
+#include "simrv/isa/Common.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/MmioRouter.hpp"
 #include "simrv/memory/Mmu.hpp"
+#include "simrv/memory/ReservationTable.hpp"
+#include "simrv/memory/TileLinkProtocolChecker.hpp"
 #include "simrv/pipeline/Decoder.hpp"
+#include "simrv/util/FdtGenerator.hpp"
 
 namespace {
 
@@ -34,7 +43,7 @@ class TestNode final : public simrv::memory::TileLinkNode {
     auto handle_request(const simrv::memory::TlChannelA& req, simrv::memory::TlChannelD& resp)
         -> bool override {
         ++requests_;
-        resp.data = req.address;
+        resp.data = req.address.raw();
         return true;
     }
     [[nodiscard]] auto requests() const -> unsigned { return requests_; }
@@ -80,6 +89,28 @@ void test_unaligned_host_access() {
            "unaligned 32-bit host access preserves all bytes");
 }
 
+void test_runtime_ram_view() {
+    std::array<Byte, 32> bytes{};
+    constexpr Address kUpperDramBase = simrv::memory::kDramBaseAddress + simrv::memory::kDramSize;
+    const simrv::memory::RamView ram(bytes.data(), kUpperDramBase, bytes.size());
+    const Address address = kUpperDramBase + 8;
+    simrv::memory::ram_write_fast(address, static_cast<Word>(0xA1B2C3D4U),
+                                  static_cast<Instruction>(simrv::isa::Funct3::Sw), ram);
+    expect(simrv::memory::ram_read_fast(address, static_cast<Instruction>(simrv::isa::Funct3::Lwu),
+                                        ram) == static_cast<Word>(0xA1B2C3D4U),
+           "runtime RAM view maps addresses above the build-time DRAM extent without aliasing");
+    expect(bytes[8] == Byte{0xD4}, "runtime RAM view uses the configured DRAM base as its offset");
+    expect(!ram.contains(kUpperDramBase + bytes.size(), 1),
+           "runtime RAM view rejects its end address");
+
+    std::array<Byte, 8192> pages{};
+    const simrv::memory::RamView page_view(pages.data(), kUpperDramBase, pages.size());
+    expect(page_view.contains(kUpperDramBase + 4096, 4096),
+           "runtime RAM view accepts a complete page above the legacy DRAM extent");
+    expect(!page_view.contains(kUpperDramBase + 4097, 4096),
+           "runtime RAM view rejects a page that would cross the configured DRAM end");
+}
+
 void test_mmio_ranges() {
     simrv::memory::MmioRouter router;
     TestNode inner(0x1100, 0x100, "inner");
@@ -105,7 +136,7 @@ void test_mmio_ranges() {
     simrv::memory::TlChannelD response{};
     expect(router.route_request(request, response),
            "straddling request resolves to its first node");
-    expect(response.error, "straddling MMIO request returns a bus error");
+    expect(response.denied, "straddling MMIO request returns a denied response");
     expect(inner.requests() == 0, "straddling request is not delivered to the device");
 
     request.address = 0x1100;
@@ -113,7 +144,7 @@ void test_mmio_ranges() {
     request.opcode = simrv::memory::TlOpcodeA::ArithmeticData;
     response = {};
     expect(router.route_request(request, response), "unsupported operation resolves its address");
-    expect(response.error, "unsupported MMIO operation returns a bus error");
+    expect(response.denied, "unsupported MMIO operation returns a denied response");
     expect(inner.requests() == 0, "unsupported operation is not delivered to the device");
 }
 
@@ -215,21 +246,21 @@ void test_csr_summary_and_presence_rules() {
            "clearing one interrupt source preserves independently asserted pending state");
 }
 
-void test_sbi_single_hart_masks() {
-    using simrv::sbi::detail::HartMaskSelection;
-    using simrv::sbi::detail::select_local_hart;
+void test_sbi_hart_masks() {
+    using simrv::sbi::detail::is_hart_selected;
 
-    expect(select_local_hart(0, 0, 0) == HartMaskSelection::Empty,
-           "an empty SBI hart mask selects no hart");
-    expect(select_local_hart(1, 0, 0) == HartMaskSelection::Local,
-           "bit zero selects local hart zero");
-    expect(select_local_hart(static_cast<Word>(0x55), static_cast<Word>(-1), 0) ==
-               HartMaskSelection::Local,
-           "an all-ones SBI hart-mask base broadcasts regardless of mask");
-    expect(select_local_hart(2, 0, 0) == HartMaskSelection::Invalid,
-           "a mask naming an unavailable hart is invalid");
-    expect(select_local_hart(3, 0, 0) == HartMaskSelection::Invalid,
-           "a mask mixing local and unavailable harts is invalid");
+    expect(!is_hart_selected(0, 0, 0), "an empty SBI hart mask selects no hart");
+    expect(is_hart_selected(1, 0, 0), "bit zero selects hart zero");
+    expect(!is_hart_selected(1, 0, 1), "bit zero does not select hart one");
+    expect(is_hart_selected(static_cast<Word>(0x55), static_cast<Word>(-1), 0),
+           "an all-ones SBI hart-mask base broadcasts to hart zero");
+    expect(is_hart_selected(static_cast<Word>(0x55), static_cast<Word>(-1), 4),
+           "an all-ones SBI hart-mask base broadcasts to any hart");
+    expect(is_hart_selected(2, 0, 1), "bit one with base zero selects hart one");
+    expect(is_hart_selected(0b11, 0, 0) && is_hart_selected(0b11, 0, 1),
+           "a mask with multiple bits selects both harts");
+    expect(is_hart_selected(1, 4, 4), "base 4 with bit 0 selects hart 4");
+    expect(!is_hart_selected(1, 4, 3), "hart below base is not selected");
     expect(simrv::sbi::detail::is_direct_sbi_ecall(enum_mask(ExceptionCode::SupervisorEcall)),
            "direct SBI accepts supervisor ECALLs");
     expect(!simrv::sbi::detail::is_direct_sbi_ecall(enum_mask(ExceptionCode::MachineEcall)),
@@ -245,6 +276,30 @@ void test_vector_length_bytes() {
         expect(regs.vstart_mask() == static_cast<CSRValue>(vlen - 1),
                "vstart represents every index below maximum VLMAX");
     }
+}
+
+void test_vector_exception_propagation_and_status() {
+    simrv::core::Machine machine;
+    auto& cpu = machine.hart(0);
+    cpu.state().misa = simrv::isa::kMisaDefault;
+    cpu.state().mstatus = 0;
+    cpu.state().vstart = 1;
+
+    const Instruction ir = 0x00000057;
+    simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                simrv::isa::OperationId::VREDSUM_VS, ir);
+    expect(cpu.active_context().pending_exception == ExceptionCode::IllegalInstruction,
+           "requires_zero_vstart raises IllegalInstruction on active context");
+    expect(cpu.active_context().pending_tval == ir,
+           "requires_zero_vstart reports instruction as pending_tval");
+
+    cpu.active_context().pending_exception.reset();
+    cpu.state().vstart = 0;
+    cpu.state().mstatus = 0;
+    simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                simrv::isa::OperationId::VADD_VV, 0);
+    expect((cpu.state().mstatus & enum_mask(simrv::core::MstatusBit::Vs)) != 0,
+           "successful vector instruction sets mstatus.VS Dirty");
 }
 
 void test_exception_delegation_mask() {
@@ -273,8 +328,7 @@ void test_satp_modes() {
                "the same bits remain Bare under the RV64 SATP layout");
         expect(satp_mode_supported(0, 64), "RV64 accepts Bare address translation");
         expect(!satp_mode_supported(1, 64), "RV64 rejects reserved satp MODE=1");
-        expect(satp_mode_supported(8, 64), "RV64 accepts Sv39 address translation");
-        expect(satp_mode_supported(9, 64), "RV64 accepts Sv48 address translation");
+        expect(!satp_mode_supported(9, 64), "RV64 rejects unsupported Sv48 address translation");
     }
 }
 
@@ -293,6 +347,7 @@ void test_named_misa_profiles() {
 
 void test_sv32_page_walk() {
     std::array<Byte, 0x6000> ram{};
+    const simrv::memory::RamView ram_view(ram.data(), 0, ram.size());
     constexpr Address kRoot = 0x1000;
     constexpr Address kNext = 0x2000;
     constexpr Address kPhysical = 0x3000;
@@ -304,22 +359,22 @@ void test_sv32_page_walk() {
                                 enum_mask(simrv::PteFlag::D);
 
     simrv::memory::ram_write_fast(kRoot, ((kNext >> 12U) << 10U) | kValid,
-                                  static_cast<Instruction>(simrv::isa::Funct3::Sw), ram.data());
+                                  static_cast<Instruction>(simrv::isa::Funct3::Sw), ram_view);
     simrv::memory::ram_write_fast(kNext + 4, ((kPhysical >> 12U) << 10U) | kLeafFlags,
-                                  static_cast<Instruction>(simrv::isa::Funct3::Sw), ram.data());
+                                  static_cast<Instruction>(simrv::isa::Funct3::Sw), ram_view);
     simrv::Mmu mmu(ram.data(), 0, ram.size());
     const auto translated =
         mmu.translate(kVirtual, simrv::PteAccess::Read, kPrivSupervisor, 0, kSatp, 32, false);
     expect(translated.has_value() && *translated == 0x3234,
            "Sv32 walks a two-level page table and preserves the page offset");
 
-    constexpr Word kReservedNonLeaf = enum_mask(simrv::PteFlag::U);
+    constexpr Word kReservedNonLeaf = enum_mask(simrv::PteFlag::D);
     simrv::memory::ram_write_fast(kRoot, ((kNext >> 12U) << 10U) | kValid | kReservedNonLeaf,
-                                  static_cast<Instruction>(simrv::isa::Funct3::Sw), ram.data());
+                                  static_cast<Instruction>(simrv::isa::Funct3::Sw), ram_view);
     const auto malformed =
         mmu.translate(kVirtual, simrv::PteAccess::Read, kPrivSupervisor, 0, kSatp, 32, false);
     expect(!malformed.has_value() && malformed.error() == enum_mask(ExceptionCode::LoadPageFault),
-           "Sv32 faults when a non-leaf PTE sets a reserved U/A/D bit");
+           "Sv32 faults when a non-leaf PTE sets a reserved D bit");
 
     constexpr Word kOutsideRamSatp =
         (static_cast<Word>(1) << 31U) | (static_cast<Word>(ram.size()) >> 12U);
@@ -338,6 +393,7 @@ void test_sv32_page_walk() {
 void test_sv39_reserved_pte_bits() {
     if constexpr (simrv::xlen::kIsXLen64) {
         std::array<Byte, 0x7000> ram{};
+        const simrv::memory::RamView ram_view(ram.data(), 0, ram.size());
         constexpr Address kRoot = 0x1000;
         constexpr Address kLevel1 = 0x2000;
         constexpr Address kLevel0 = 0x3000;
@@ -347,9 +403,9 @@ void test_sv39_reserved_pte_bits() {
         constexpr Word kValid = enum_mask(simrv::PteFlag::V);
         constexpr Word kLeafFlags =
             kValid | enum_mask(simrv::PteFlag::R) | enum_mask(simrv::PteFlag::A);
-        const auto write_pte = [&ram](Address address, Word pte) {
+        const auto write_pte = [ram_view](Address address, Word pte) {
             simrv::memory::ram_write_fast(
-                address, pte, static_cast<Instruction>(simrv::isa::Funct3::Sd), ram.data());
+                address, pte, static_cast<Instruction>(simrv::isa::Funct3::Sd), ram_view);
         };
 
         write_pte(kRoot, ((kLevel1 >> 12U) << 10U) | kValid);
@@ -411,9 +467,8 @@ void test_fp_decode_legality() {
     const auto encode_op_fp = [](unsigned funct7, unsigned rm, unsigned rs2) {
         return (funct7 << 25U) | (rs2 << 20U) | (1U << 15U) | (rm << 12U) | (2U << 7U) | kOpFp;
     };
-    const auto encode_fma = [](unsigned fmt) {
-        constexpr Instruction kFmadd = 0x43U;
-        return (3U << 27U) | (fmt << 25U) | (2U << 20U) | (1U << 15U) | (2U << 7U) | kFmadd;
+    const auto encode_fma = [](unsigned opcode, unsigned fmt) {
+        return (3U << 27U) | (fmt << 25U) | (2U << 20U) | (1U << 15U) | (2U << 7U) | opcode;
     };
 
     expect(simrv::pipeline::decoder(encode_op_fp(0x2CU, 0, 0)) == simrv::isa::OperationId::FSQRT_S,
@@ -422,8 +477,23 @@ void test_fp_decode_legality() {
            "FSQRT.S with nonzero rs2 is reserved");
     expect(simrv::pipeline::decoder(encode_op_fp(0x70U, 1, 1)) == simrv::isa::OperationId::UNKNOWN,
            "FCLASS.S with nonzero rs2 is reserved");
-    expect(simrv::pipeline::decoder(encode_fma(2)) == simrv::isa::OperationId::UNKNOWN,
-           "reserved fused-operation formats do not alias single precision");
+    constexpr std::array<unsigned, 4> kFmaOpcodes = {0x43U, 0x47U, 0x4BU, 0x4FU};
+    constexpr std::array<std::array<simrv::isa::OperationId, 2>, 4> kFmaOperations = {{
+        {simrv::isa::OperationId::FMADD_S, simrv::isa::OperationId::FMADD_D},
+        {simrv::isa::OperationId::FMSUB_S, simrv::isa::OperationId::FMSUB_D},
+        {simrv::isa::OperationId::FNMSUB_S, simrv::isa::OperationId::FNMSUB_D},
+        {simrv::isa::OperationId::FNMADD_S, simrv::isa::OperationId::FNMADD_D},
+    }};
+    for (size_t operation = 0; operation < kFmaOpcodes.size(); ++operation) {
+        for (unsigned format = 0; format < 2; ++format) {
+            expect(simrv::pipeline::decoder(encode_fma(kFmaOpcodes[operation], format)) ==
+                       kFmaOperations[operation][format],
+                   "checked fused-operation table covers every legal opcode and format");
+        }
+    }
+    expect(
+        simrv::pipeline::decoder(encode_fma(kFmaOpcodes[0], 2)) == simrv::isa::OperationId::UNKNOWN,
+        "reserved fused-operation formats do not alias single precision");
 
     expect(simrv::pipeline::decoder(encode_op_fp(0x21U, 0, 0)) == simrv::isa::OperationId::FCVT_D_S,
            "FCVT.D.S accepts its specified rm=000 encoding");
@@ -437,6 +507,43 @@ void test_fp_decode_legality() {
     expect(fcvt_l_s == (simrv::xlen::kIsXLen64 ? simrv::isa::OperationId::FCVT_L_S
                                                : simrv::isa::OperationId::UNKNOWN),
            "64-bit integer FP conversions exist only on RV64");
+}
+
+void test_vector_decode_tables() {
+    constexpr Instruction kOpV = 0x57U;
+    const auto encode_op_v = [](unsigned funct6, unsigned funct3, bool vm, unsigned rs1 = 1,
+                                unsigned vs2 = 2) {
+        return (funct6 << 26U) | (static_cast<unsigned>(vm) << 25U) | (vs2 << 20U) | (rs1 << 15U) |
+               (funct3 << 12U) | (3U << 7U) | kOpV;
+    };
+
+    expect(
+        simrv::pipeline::decoder(encode_op_v(0x0D, 6, true)) == simrv::isa::OperationId::VCLMULH_VX,
+        "common vector table decodes a funct6/funct3 operation");
+    expect(
+        simrv::pipeline::decoder(encode_op_v(0x11, 0, true)) == simrv::isa::OperationId::VMADC_VV,
+        "unmasked vector table selects the vm=1 operation");
+    expect(
+        simrv::pipeline::decoder(encode_op_v(0x11, 0, false)) == simrv::isa::OperationId::VMADC_VVM,
+        "masked vector table selects the vm=0 operation");
+    expect(simrv::pipeline::decoder(encode_op_v(0x10, 2, true, 16)) ==
+               simrv::isa::OperationId::VCPOP_M,
+           "secondary rs1 vector encoding remains explicit");
+    expect(simrv::pipeline::decoder(encode_op_v(0x10, 2, true, 31)) ==
+               simrv::isa::OperationId::UNKNOWN,
+           "reserved secondary vector encoding remains unknown");
+    constexpr std::array<simrv::isa::OperationId, 8> kWholeRegisterMoves = {
+        simrv::isa::OperationId::VMV1R_V, simrv::isa::OperationId::VMV2R_V,
+        simrv::isa::OperationId::UNKNOWN, simrv::isa::OperationId::VMV4R_V,
+        simrv::isa::OperationId::UNKNOWN, simrv::isa::OperationId::UNKNOWN,
+        simrv::isa::OperationId::UNKNOWN, simrv::isa::OperationId::VMV8R_V};
+    for (unsigned simm5 = 0; simm5 < kWholeRegisterMoves.size(); ++simm5) {
+        expect(simrv::pipeline::decoder(encode_op_v(0x27, 3, true, simm5)) ==
+                   kWholeRegisterMoves[simm5],
+               "whole-register vector move accepts only legal register group sizes");
+    }
+    expect(simrv::pipeline::decoder(encode_op_v(0x08, 0, true)) == simrv::isa::OperationId::UNKNOWN,
+           "unassigned vector table entries decode as unknown");
 }
 
 void test_privileged_decode_legality() {
@@ -559,15 +666,313 @@ void test_lower_privilege_xlen_initialization() {
     }
 }
 
+void test_smp_reservation_table() {
+    simrv::memory::ReservationTable table;
+    expect(!table.may_have_reservations(), "New reservation table has a lock-free empty state");
+
+    table.set_reservation(0, 0x80001000);
+    expect(table.may_have_reservations(), "Setting LR marks possible reservations");
+    expect(table.check_reservation(0, 0x80001000), "Hart 0 holds reservation at 0x80001000");
+    expect(table.check_reservation(0, 0x80001020),
+           "Hart 0 holds reservation within same 64-byte granule");
+    expect(!table.check_reservation(0, 0x80001040),
+           "Hart 0 does not hold reservation in different granule");
+    expect(!table.check_reservation(1, 0x80001000), "Hart 1 does not hold Hart 0's reservation");
+
+    table.invalidate_matching(0x80001000, 0);
+    expect(table.check_reservation(0, 0x80001000),
+           "Store from Hart 0 does not invalidate its own reservation before SC");
+
+    table.invalidate_matching(0x80001010, 1);
+    expect(!table.check_reservation(0, 0x80001000),
+           "Store from Hart 1 invalidates Hart 0's reservation");
+    expect(!table.check_and_clear_reservation(0, 0x80001000),
+           "SC on invalidated reservation fails");
+
+    table.set_reservation(0, 0x80002000);
+    table.set_reservation(1, 0x80003000);
+    expect(table.check_and_clear_reservation(0, 0x80002000), "SC on valid reservation succeeds");
+    expect(!table.check_reservation(0, 0x80002000), "Reservation is cleared after successful SC");
+    expect(table.check_reservation(1, 0x80003000), "Hart 1's reservation remains intact");
+
+    table.clear_all();
+    expect(!table.may_have_reservations(), "clear_all restores the lock-free empty state");
+    expect(!table.check_reservation(1, 0x80003000),
+           "clear_all invalidates all active reservations");
+}
+
+void test_dynamic_fdt_generator() {
+    simrv::util::FdtConfig config{
+        .num_harts = 4,
+        .dram_base = 0x80000000,
+        .dram_size = 512ULL * 1024ULL * 1024ULL,
+        .xlen = 64,
+    };
+    auto fdt = simrv::util::FdtGenerator::generate(config);
+    expect(fdt.size() > 40, "FDT binary is non-empty and has header");
+    // Check FDT magic (0xd00dfeed)
+    expect(fdt[0] == 0xd0 && fdt[1] == 0x0d && fdt[2] == 0xfe && fdt[3] == 0xed,
+           "FDT magic matches 0xd00dfeed in big-endian");
+    const std::string fdt_text(fdt.begin(), fdt.end());
+    expect(fdt_text.find("earlycon=uart8250,mmio,0x10000000,115200n8") != std::string::npos,
+           "Linux defaults to the standard 16550 MMIO early console, not legacy SBI console");
+    expect(fdt_text.find("earlycon=sbi") == std::string::npos,
+           "generated FDT omits the legacy SBI early console selector");
+}
+
+void test_pmp_semantics() {
+    simrv::core::ArchState state{};
+    state.priv = PrivilegeLevel::Supervisor;
+
+    // By default, no PMP entries are active, so S-mode accesses pass
+    expect(simrv::core::pmp::check_access(state, 0x80000000, 4, simrv::core::PmpAccessType::Read),
+           "Default empty PMP allows S-mode read access");
+
+    // Configure PMP entry 0: NAPOT 64KB region at 0x80000000 with R/W (no X)
+    // 64KB = 2^16 bytes. NAPOT encoding for 2^(t+3): 16 = t+3 -> t = 13 trailing ones in pmpaddr
+    const uint64_t napot_64k = (0x80000000ULL >> 2) | ((1ULL << 13) - 1);
+    state.pmpaddr[0] = static_cast<Address>(napot_64k);
+    state.pmpcfg[0] =
+        simrv::core::pmp::kPmpModeNapot | simrv::core::pmp::kPmpR | simrv::core::pmp::kPmpW;
+    state.refresh_pmp_status();
+
+    expect(simrv::core::pmp::check_access(state, 0x80001000, 4, simrv::core::PmpAccessType::Read),
+           "PMP entry 0 permits read within NAPOT range");
+    expect(simrv::core::pmp::check_access(state, 0x80001000, 4, simrv::core::PmpAccessType::Write),
+           "PMP entry 0 permits write within NAPOT range");
+    expect(
+        !simrv::core::pmp::check_access(state, 0x80001000, 4, simrv::core::PmpAccessType::Execute),
+        "PMP entry 0 denies execute without X flag");
+    expect(!simrv::core::pmp::check_access(state, 0x80020000, 4, simrv::core::PmpAccessType::Read),
+           "PMP access outside configured regions is denied in S-mode");
+
+    // M-mode accesses bypass unlocked PMP entries
+    state.priv = PrivilegeLevel::Machine;
+    expect(simrv::core::pmp::check_access(state, 0x80020000, 4, simrv::core::PmpAccessType::Read),
+           "M-mode bypasses unlocked PMP entries");
+}
+
+void test_tilelink_c_coherence_semantics() {
+    simrv::cache::DCache dcache;
+    simrv::cache::ICache icache;
+
+    std::array<Byte, simrv::cache::DCache::kLineBytes> sample_data{};
+    sample_data[0] = static_cast<Byte>(0xAA);
+    sample_data[1] = static_cast<Byte>(0xBB);
+    sample_data[2] = static_cast<Byte>(0xCC);
+    sample_data[3] = static_cast<Byte>(0xDD);
+
+    const Address test_addr = 0x80002000;
+    dcache.insert(test_addr, sample_data.data(), simrv::memory::MesiState::Shared);
+    expect(!dcache.last_access_was_hit() && dcache.hit_count() == 0,
+           "cache insertion preserves miss accounting and highlight state");
+
+    Word read_val = 0;
+    expect(dcache.read(test_addr, read_val, 2), "D-Cache read hits in Branch state");
+    expect((read_val & 0xFFFFFFFFU) == 0xDDCCBBAAU, "D-Cache read returned expected data");
+
+    // Write in Branch state should return false (requiring AcquirePerm upgrade)
+    expect(!dcache.write(test_addr, 0x12345678, 2),
+           "D-Cache write misses in Branch state (upgrade required)");
+
+    // Insert in Trunk state (exclusive/modified)
+    dcache.insert(test_addr, sample_data.data(), simrv::memory::MesiState::Exclusive);
+    expect(dcache.write(test_addr, 0x12345678, 2), "D-Cache write hits in Trunk state");
+
+    // Probe with invalidation (target: None)
+    simrv::memory::TlChannelB probe_req{};
+    probe_req.opcode = simrv::memory::TlOpcodeB::ProbeBlock;
+    probe_req.cap = simrv::memory::TlCap::ToN;
+    probe_req.address = test_addr;
+
+    simrv::memory::TlChannelC probe_resp{};
+    std::array<Byte, simrv::cache::DCache::kLineBytes> dirty_buf{};
+    expect(dcache.handle_probe(probe_req, probe_resp, dirty_buf),
+           "D-Cache probe hits and handles request");
+    expect(probe_resp.opcode == simrv::memory::TlOpcodeC::ProbeAckData,
+           "Dirty line returns ProbeAckData");
+    expect(!dcache.read(test_addr, read_val, 2), "D-Cache line is invalid after probe to None");
+
+    // Test MESI Trunk -> Branch downgrade probe with dirty writeback
+    dcache.insert(test_addr, sample_data.data(), simrv::memory::MesiState::Modified);
+    simrv::memory::TlChannelB downgrade_req{};
+    downgrade_req.opcode = simrv::memory::TlOpcodeB::ProbeBlock;
+    downgrade_req.cap = simrv::memory::TlCap::ToB;
+    downgrade_req.address = test_addr;
+
+    simrv::memory::TlChannelC downgrade_resp{};
+    std::array<Byte, simrv::cache::DCache::kLineBytes> dirty_wb{};
+    expect(dcache.handle_probe(downgrade_req, downgrade_resp, dirty_wb),
+           "D-Cache probe handles Branch downgrade");
+    expect(downgrade_resp.opcode == simrv::memory::TlOpcodeC::ProbeAckData,
+           "Dirty line returns ProbeAckData on downgrade");
+    expect(dcache.read(test_addr, read_val, 2),
+           "D-Cache line is still valid for reads in Branch state");
+
+    // Test I-Cache probe invalidation
+    icache.insert(test_addr, sample_data.data(), simrv::memory::MesiState::Shared);
+    uint32_t inst_val = 0;
+    expect(icache.read(test_addr, inst_val), "I-Cache read hits on inserted line");
+    simrv::memory::TlChannelC ic_resp{};
+    expect(icache.handle_probe(probe_req, ic_resp), "I-Cache probe hits and handles request");
+    expect(!icache.read(test_addr, inst_val), "I-Cache line is invalid after probe to None");
+}
+
+void test_tilelink_c_protocol_checker() {
+    using namespace simrv::memory;
+    TileLinkProtocolChecker checker;
+
+    TlChannelA get{
+        .opcode = TlOpcodeA::Get, .size = 2, .source = 7, .address = 0x80000004, .mask = 0xf0};
+    expect(checker.accept_a(get).has_value(), "checker accepts aligned masked Get");
+    expect(!checker.accept_a(get).has_value(), "checker rejects live source reuse");
+    TlChannelD get_response{
+        .opcode = TlOpcodeD::AccessAckData, .size = 2, .source = 7, .data = 0x1234};
+    expect(checker.accept_d(get_response).has_value(), "checker matches AccessAckData to Get");
+
+    TlChannelA bad_mask = get;
+    bad_mask.source = 8;
+    bad_mask.mask = 0x0f;
+    expect(!checker.accept_a(bad_mask).has_value(), "checker rejects a lane-inconsistent mask");
+
+    TlChannelA acquire{.opcode = TlOpcodeA::AcquireBlock,
+                       .grow = TlGrow::NtoB,
+                       .size = kTlBlockSize,
+                       .source = 9,
+                       .hart = 0,
+                       .address = 0x80000020};
+    expect(checker.accept_a(acquire).has_value(), "checker accepts one-block AcquireBlock");
+    TlChannelD grant{.opcode = TlOpcodeD::GrantData,
+                     .cap = TlCap::ToT,
+                     .size = kTlBlockSize,
+                     .source = 9,
+                     .sink = 3};
+    expect(checker.accept_d(grant).has_value(), "checker accepts a matching unique GrantData");
+    expect(checker.outstanding_sinks() == 1, "grant sink remains live until GrantAck");
+    expect(checker.accept_e(TlChannelE{.sink = 3}).has_value(), "checker accepts GrantAck");
+    expect(!checker.accept_e(TlChannelE{.sink = 3}).has_value(),
+           "checker rejects duplicate GrantAck");
+
+    expect(permission_for(MesiState::Invalid) == TlPermission::None,
+           "MESI Invalid maps to TileLink None");
+    expect(permission_for(MesiState::Shared) == TlPermission::Branch,
+           "MESI Shared maps to TileLink Branch");
+    expect(permission_for(MesiState::Exclusive) == TlPermission::Trunk &&
+               permission_for(MesiState::Modified) == TlPermission::Trunk,
+           "MESI Exclusive and Modified map to TileLink Trunk");
+}
+
+void test_strong_semantic_types() {
+    // Compile-time zero memory overhead verification
+    static_assert(sizeof(PhysAddr) == sizeof(Word));
+    static_assert(sizeof(VirtAddr) == sizeof(Word));
+    static_assert(sizeof(HartId) == sizeof(uint32_t));
+    static_assert(sizeof(CsrNumber) == sizeof(uint16_t));
+    static_assert(StrongAddress<PhysAddr>);
+    static_assert(StrongAddress<VirtAddr>);
+    static_assert(!StrongAddress<Word>);
+
+    // PhysAddr arithmetic and bitwise testing
+    PhysAddr p1{0x80000000ULL};
+    expect(p1.raw() == 0x80000000ULL, "PhysAddr raw value matches");
+    expect(p1 == 0x80000000ULL, "PhysAddr equality with integer literal");
+
+    PhysAddr p2 = p1 + 0x100U;
+    expect(p2.val == 0x80000100ULL, "PhysAddr addition with unsigned integer");
+    expect((p2 - p1) == 0x100, "PhysAddr subtraction yields SignedWord offset");
+
+    PhysAddr p3 = p2 & ~0xFFFULL;
+    expect(p3 == p1, "PhysAddr bitwise AND with mask");
+
+    // VirtAddr testing
+    VirtAddr v1{0x10000ULL};
+    VirtAddr v2 = v1 + 0x20U;
+    expect(v2.raw() == 0x10020ULL, "VirtAddr addition");
+    expect((v2 - v1) == 0x20, "VirtAddr subtraction difference");
+    expect(v1 < v2, "VirtAddr comparison operators");
+
+    // HartId testing
+    HartId h1{3U};
+    expect(h1.value() == 3U, "HartId value getter");
+    expect((1ULL << h1) == (1ULL << 3U), "HartId bitwise shift operator");
+    expect(h1 == 3U, "HartId equality with integer");
+
+    // CsrNumber testing
+    CsrNumber mstatus_csr{0x300U};
+    expect(!mstatus_csr.is_read_only(), "mstatus CSR (0x300) is writable");
+    expect(mstatus_csr.privilege_level() == PrivilegeLevel::Machine,
+           "mstatus CSR privilege level is Machine");
+
+    CsrNumber cycle_csr{0xC00U};
+    expect(cycle_csr.is_read_only(), "cycle CSR (0xC00) is read-only");
+    expect(cycle_csr.privilege_level() == PrivilegeLevel::User,
+           "cycle CSR privilege level is User");
+
+    // Register Identifier concept and classifications
+    static_assert(simrv::xlen::RegisterIdentifier<RegId>, "RegId satisfies RegisterIdentifier");
+    static_assert(simrv::xlen::RegisterIdentifier<FpRegId>, "FpRegId satisfies RegisterIdentifier");
+    static_assert(simrv::xlen::RegisterIdentifier<VecRegId>,
+                  "VecRegId satisfies RegisterIdentifier");
+    expect(std::to_underlying(VecRegId::V5) == 5, "VecRegId underlying value");
+
+    // MemoryGeometry with PhysAddr
+    simrv::core::MemoryGeometry geom{.dram_base = 0x80000000ULL, .dram_size = 0x10000000ULL};
+    expect(geom.contains(PhysAddr{0x80001000ULL}), "MemoryGeometry contains PhysAddr within DRAM");
+    expect(!geom.contains(PhysAddr{0x10000000ULL}), "MemoryGeometry rejects PhysAddr outside DRAM");
+
+    // std::format and std::hash validation
+    const auto formatted_p = std::format("0x{:x}", p1);
+    expect(formatted_p.find("80000000") != std::string::npos,
+           "std::format specialization formats PhysAddr as hex integer");
+
+    const auto hash_val = std::hash<PhysAddr>{}(p1);
+    expect(hash_val == std::hash<Word>{}(p1.val),
+           "std::hash<PhysAddr> matches underlying Word hash");
+}
+
+void test_cache_hierarchy_semantics() {
+    // Test L2 Cache
+    simrv::cache::L2Cache l2{};
+    std::array<Byte, simrv::cache::L2Cache::kLineBytes> fill_data{};
+    fill_data[0] = static_cast<Byte>(0xAA);
+    fill_data[31] = static_cast<Byte>(0x55);
+
+    const Address test_addr = 0x80002000;
+    std::array<Byte, simrv::cache::L2Cache::kLineBytes> read_buf{};
+    expect(!l2.read_line(test_addr, read_buf), "L2 read misses on empty cache");
+
+    l2.write_line(test_addr, fill_data, simrv::memory::MesiState::Exclusive);
+    expect(l2.read_line(test_addr, read_buf), "L2 read hits after line insertion");
+    expect(read_buf[0] == static_cast<Byte>(0xAA), "L2 read data matches written payload");
+    expect(read_buf[31] == static_cast<Byte>(0x55), "L2 read data matches tail byte");
+
+    // Test L3 Cache (LLC)
+    simrv::cache::L3Cache l3{};
+    simrv::memory::MesiState state = simrv::memory::MesiState::Invalid;
+    expect(!l3.lookup_line(test_addr, read_buf, state), "L3 lookup misses on empty cache");
+
+    l3.write_line(test_addr, fill_data, simrv::memory::MesiState::Modified);
+    expect(l3.lookup_line(test_addr, read_buf, state), "L3 lookup hits after write_line");
+    expect(state == simrv::memory::MesiState::Modified, "L3 line state matches written state");
+    expect(read_buf[0] == static_cast<Byte>(0xAA), "L3 line payload preserved");
+
+    l3.invalidate_line(test_addr);
+    expect(!l3.lookup_line(test_addr, read_buf, state), "L3 lookup misses after invalidation");
+}
+
 }  // namespace
 
 int main() {
+    test_strong_semantic_types();
+    test_cache_hierarchy_semantics();
     test_unaligned_host_access();
+    test_runtime_ram_view();
     test_mmio_ranges();
     test_physical_range_validation();
     test_csr_summary_and_presence_rules();
-    test_sbi_single_hart_masks();
+    test_sbi_hart_masks();
     test_vector_length_bytes();
+    test_vector_exception_propagation_and_status();
     test_exception_delegation_mask();
     test_satp_modes();
     test_named_misa_profiles();
@@ -576,12 +981,18 @@ int main() {
     test_atomic_alignment();
     test_atomic_decode_legality();
     test_fp_decode_legality();
+    test_vector_decode_tables();
     test_privileged_decode_legality();
     test_csr_privilege_presence();
     test_interrupt_priority();
     test_epc_ialign_mask();
     test_rv32_cause_translation();
     test_lower_privilege_xlen_initialization();
+    test_smp_reservation_table();
+    test_dynamic_fdt_generator();
+    test_pmp_semantics();
+    test_tilelink_c_coherence_semantics();
+    test_tilelink_c_protocol_checker();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "Core semantic tests passed\n";
     return EXIT_SUCCESS;

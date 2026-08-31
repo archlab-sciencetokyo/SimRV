@@ -21,7 +21,8 @@ namespace {
 
 template <typename Ehdr, typename Shdr, typename Sym, typename StTypeFunc>
 auto parse_elf_symbols(std::ifstream& fs, std::map<Address, std::string>& out_symbols,
-                       std::optional<Address>& out_entry, StTypeFunc get_type) -> bool {
+                       std::optional<Address>& out_entry, StTypeFunc get_type, SymbolLoadMode mode)
+    -> bool {
     Ehdr ehdr{};
     if (!fs.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr)))
         return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
@@ -53,22 +54,20 @@ auto parse_elf_symbols(std::ifstream& fs, std::map<Address, std::string>& out_sy
         }
 
         size_t num_syms = shdrs[symtab_idx].sh_size / sizeof(Sym);
-        std::vector<Sym> syms(num_syms);
         fs.seekg(static_cast<std::streamoff>(shdrs[symtab_idx].sh_offset), std::ios::beg);
-        if (!fs.read(reinterpret_cast<char*>(syms.data()),
-                     static_cast<std::streamsize>(
-                         shdrs[symtab_idx]
-                             .sh_size))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-            return false;
-        }
-
-        for (const auto& sym : syms) {
+        for (size_t index = 0; index < num_syms; ++index) {
+            Sym sym{};
+            if (!fs.read(reinterpret_cast<char*>(&sym), sizeof(sym))) {
+                return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+            }
             const auto type = get_type(sym.st_info);
             if (sym.st_name != 0 && static_cast<size_t>(sym.st_name) < strtab.size() &&
                 sym.st_value != 0 &&
                 (type == STT_FUNC || type == STT_OBJECT || type == STT_NOTYPE)) {
                 std::string name = &strtab[sym.st_name];
-                if (!name.empty() && name.find('$') == std::string::npos) {
+                const bool runtime_essential = name == "_start" || name == "tohost";
+                if (!name.empty() && name.find('$') == std::string::npos &&
+                    (mode == SymbolLoadMode::FullDebug || runtime_essential)) {
                     out_symbols[sym.st_value] = name;
                 }
             }
@@ -80,10 +79,11 @@ auto parse_elf_symbols(std::ifstream& fs, std::map<Address, std::string>& out_sy
 }  // namespace
 
 auto SymbolTable::append_from_elf(const std::string& elf_path) -> bool {
-    return load_from_elf(elf_path, false);
+    return load_from_elf(elf_path, false, SymbolLoadMode::FullDebug);
 }
 
-auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing) -> bool {
+auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing,
+                                SymbolLoadMode mode) -> bool {
     if (clear_existing) {
         symbols_.clear();
         entry_point_.reset();
@@ -146,12 +146,12 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
     std::optional<Address> ep;
     if (elf_class == ELFCLASS32) {
         if (!parse_elf_symbols<Elf32_Ehdr, Elf32_Shdr, Elf32_Sym>(
-                fs, symbols_, ep, [](auto info) { return ELF32_ST_TYPE(info); })) {
+                fs, symbols_, ep, [](auto info) { return ELF32_ST_TYPE(info); }, mode)) {
             return false;
         }
     } else {
         if (!parse_elf_symbols<Elf64_Ehdr, Elf64_Shdr, Elf64_Sym>(
-                fs, symbols_, ep, [](auto info) { return ELF64_ST_TYPE(info); })) {
+                fs, symbols_, ep, [](auto info) { return ELF64_ST_TYPE(info); }, mode)) {
             return false;
         }
     }
@@ -159,9 +159,9 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
         entry_point_ = ep;
     }
 
-    // Check for companion kernel ELF (e.g. vmlinux) in the same directory
+    // Companion images are presentation/debug metadata and are intentionally TUI-only.
     std::filesystem::path loaded_p(path_to_load);
-    if (loaded_p.has_parent_path()) {
+    if (mode == SymbolLoadMode::FullDebug && loaded_p.has_parent_path()) {
         auto dir = loaded_p.parent_path();
         for (const auto& fname : {"vmlinux", "vmlinux.elf", "kernel.elf"}) {
             auto kpath = (dir / fname).string();
@@ -175,10 +175,12 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
                         std::optional<Address> kep;
                         if (k_class == ELFCLASS32) {
                             (void)parse_elf_symbols<Elf32_Ehdr, Elf32_Shdr, Elf32_Sym>(
-                                kfs, symbols_, kep, [](auto info) { return ELF32_ST_TYPE(info); });
+                                kfs, symbols_, kep, [](auto info) { return ELF32_ST_TYPE(info); },
+                                mode);
                         } else if (k_class == ELFCLASS64) {
                             (void)parse_elf_symbols<Elf64_Ehdr, Elf64_Shdr, Elf64_Sym>(
-                                kfs, symbols_, kep, [](auto info) { return ELF64_ST_TYPE(info); });
+                                kfs, symbols_, kep, [](auto info) { return ELF64_ST_TYPE(info); },
+                                mode);
                         }
                     }
                 }
@@ -187,7 +189,9 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
     }
 
     if (!symbols_.empty()) {
-        simrv::log::info("Loaded {} symbols from ELF image: {}", symbols_.size(), path_to_load);
+        simrv::log::info("Loaded {} {} from ELF image: {}", symbols_.size(),
+                         mode == SymbolLoadMode::FullDebug ? "debug symbols" : "runtime symbols",
+                         path_to_load);
         return true;
     }
     return false;

@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   RISCV_TESTS_REVISION: 933a897d8631773f385d45938facc466dddc7514
   VECTOR_TESTS_REVISION: f76bff121dce91b6b23e1d37be77a5e44af914c3
@@ -16,8 +20,9 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     container:
-      image: almalinux:10
+      image: fedora:42
 
     strategy:
       fail-fast: false
@@ -31,8 +36,6 @@ jobs:
     - name: Install build tools
       run: |
         dnf update -y
-        dnf install -y dnf-plugins-core
-        dnf config-manager --enable crb || dnf config-manager --set-enabled crb || true
         dnf install -y git cmake ninja-build gcc gcc-c++ clang clang-tools-extra wget tar xz autoconf make which golang
 
     - name: Fetch and compile riscv-tests
@@ -108,25 +111,33 @@ jobs:
       run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L gate
 
     - name: Record required-suite evidence
-      run: >-
-        python3 scripts/release_evidence.py
-        --build-dir build/${{ matrix.arch }}-release
-        --arch ${{ matrix.arch == 'rv32' && '32' || '64' }}
-        --compiler ${{ matrix.compiler }}
-        --suite native --suite isa
-        --dependency riscv_tests=${{ runner.temp }}/riscv-tests
-        --output evidence-${{ matrix.compiler }}-${{ matrix.arch }}.json
+      shell: bash
+      run: |
+        SUITES=(--suite native --suite isa)
+        DEPENDENCIES=(--dependency riscv_tests=${{ runner.temp }}/riscv-tests)
+        if [[ "${{ matrix.compiler }}" == "gcc" ]]; then
+          SUITES+=(--suite vector --suite package)
+          DEPENDENCIES+=(--dependency vector_tests=${{ runner.temp }}/riscv-vector-tests)
+        fi
+        python3 scripts/release_evidence.py \
+          --build-dir build/${{ matrix.arch }}-release \
+          --arch ${{ matrix.arch == 'rv32' && '32' || '64' }} \
+          --compiler ${{ matrix.compiler }} \
+          "${SUITES[@]}" "${DEPENDENCIES[@]}" \
+          --output evidence-${{ matrix.compiler }}-${{ matrix.arch }}.json
 
     - name: Upload evidence
       uses: actions/upload-artifact@v7
       with:
         name: evidence-${{ matrix.compiler }}-${{ matrix.arch }}
         path: evidence-${{ matrix.compiler }}-${{ matrix.arch }}.json
+        retention-days: 14
 
   quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     container:
-      image: almalinux:10
+      image: fedora:42
     steps:
     - uses: actions/checkout@v6
       with:
@@ -164,8 +175,9 @@ jobs:
 
   thread-sanitizer:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     container:
-      image: almalinux:10
+      image: fedora:42
     steps:
     - uses: actions/checkout@v6
     - name: Install build tools
@@ -177,7 +189,7 @@ jobs:
         -DSIMRV_ENABLE_TSAN=ON
     - name: Build TSan
       run: cmake --build build/tsan
-    - name: Run thread-focused smoke tests
+    - name: Run thread-safety suite
       env:
         TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
-      run: ctest --test-dir build/tsan --output-on-failure -R 'tui-framework|cli-|release-metadata'
+      run: ctest --test-dir build/tsan --output-on-failure -L thread

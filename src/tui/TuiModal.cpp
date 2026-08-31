@@ -6,47 +6,76 @@
 #include "simrv/tui/TuiModal.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <format>
+#include <numeric>
+#include <string_view>
 
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/TuiLayoutPolicy.hpp"
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/framework/Modal.hpp"
 #include "simrv/tui/modals/AddressModal.hpp"
 #include "simrv/tui/modals/BreakpointModal.hpp"
+#include "simrv/tui/modals/GlossaryModal.hpp"
 #include "simrv/tui/modals/HelpModal.hpp"
 #include "simrv/tui/modals/LoadModal.hpp"
 #include "simrv/tui/modals/MisaModal.hpp"
+#include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/tui/modals/SettingsModal.hpp"
 #include "simrv/tui/modals/StepModal.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
-#include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 
 namespace simrv::tui {
 
+namespace {
+
+constexpr std::array<int, 18> kGeneralSettingRows = {4,  5,  6,  7,  8,  9,  12, 13, 14,
+                                                     17, 18, 19, 22, 23, 26, 27, 28, 29};
+constexpr int kGeneralSettingsContentRows = 30;
+
+[[nodiscard]] auto general_setting_row(int item) -> int {
+    return item >= 0 && item < static_cast<int>(kGeneralSettingRows.size())
+               ? kGeneralSettingRows[static_cast<size_t>(item)]
+               : 0;
+}
+
+[[nodiscard]] auto general_setting_at_row(int row) -> int {
+    const auto found = std::ranges::find(kGeneralSettingRows, row);
+    return found == kGeneralSettingRows.end()
+               ? -1
+               : static_cast<int>(std::distance(kGeneralSettingRows.begin(), found));
+}
+
+}  // namespace
+
 TuiModal::TuiModal(simrv::core::Machine& machine) : machine_(machine) {}
 
-void TuiModal::open(ModalType type, LeftPane* left_pane, uint64_t step_delay_us) {
+void TuiModal::open(ModalType type, InspectorPane* inspector_pane, uint64_t step_delay_us) {
     active_modal_ = type;
+    rendered_box_width_ = 0;
     input_.clear();
     bp_cursor_ = 0;
     switch (type) {
         case ModalType::SetBreakpoint:
         case ModalType::SetWatchpoint:
-            modals::BreakpointModal::open(type, input_, machine_, left_pane);
+            modals::BreakpointModal::open(type, input_, machine_, inspector_pane);
             break;
         case ModalType::SetSpeed:
             modals::StepModal::open(type, input_, step_delay_us);
             break;
         case ModalType::InspectAddress:
-            modals::AddressModal::open(input_, left_pane);
+            modals::AddressModal::open(input_, inspector_pane);
             break;
         case ModalType::LoadBinary:
         case ModalType::LoadDiskImage:
             modals::LoadModal::open(type, input_, load_appmode_, machine_);
             break;
+        case ModalType::Glossary:
+            modals::GlossaryModal::open(glossary_topic_, glossary_scroll_);
+            break;
         case ModalType::Settings:
-            modals::SettingsModal::open(settings_draft_, settings_cursor_, machine_);
+            modals::SettingsModal::open(settings_draft_, machine_);
             break;
         case ModalType::ConfigureMisa:
             modals::MisaModal::open(misa_draft_, misa_cursor_, machine_);
@@ -59,15 +88,44 @@ void TuiModal::open(ModalType type, LeftPane* left_pane, uint64_t step_delay_us)
     }
 }
 
-void TuiModal::move_settings_cursor(int delta) {
+void TuiModal::cycle_settings_tab(int delta) {
     input_.clear();
-    modals::SettingsModal::move_cursor(settings_cursor_, delta);
+    modals::SettingsModal::cycle_tab(settings_draft_, delta);
 }
 
-void TuiModal::toggle_setting_at_cursor() { toggle_setting_by_index(settings_cursor_); }
+void TuiModal::set_settings_tab(uint8_t tab) {
+    input_.clear();
+    modals::SettingsModal::set_tab(settings_draft_, tab);
+}
+
+void TuiModal::move_settings_cursor(int delta) {
+    input_.clear();
+    modals::SettingsModal::move_cursor(settings_draft_, delta);
+}
+
+void TuiModal::adjust_setting_at_cursor(int dir) {
+    input_.clear();
+    modals::SettingsModal::adjust_setting(settings_draft_, dir, &machine_);
+}
+
+void TuiModal::toggle_setting_at_cursor() {
+    input_.clear();
+    modals::SettingsModal::toggle_setting(settings_draft_, &machine_);
+}
 
 void TuiModal::toggle_setting_by_index(int index) {
-    modals::SettingsModal::toggle_setting(settings_draft_, index, machine_);
+    settings_draft_.tab_cursor[settings_draft_.active_tab] = index;
+    toggle_setting_at_cursor();
+}
+
+void TuiModal::push_settings_digit(char c) {
+    modals::SettingsModal::push_digit(settings_draft_, input_, c);
+}
+
+void TuiModal::pop_settings_digit() { modals::SettingsModal::pop_digit(settings_draft_, input_); }
+
+void TuiModal::apply_settings_misa_profile(int profile_idx) {
+    modals::SettingsModal::apply_misa_profile(settings_draft_, profile_idx);
 }
 
 void TuiModal::move_misa_cursor(int delta) {
@@ -87,7 +145,7 @@ void TuiModal::apply_misa_profile(int profile_idx) {
 
 void TuiModal::move_sysconfig_cursor(int delta) {
     input_.clear();
-    modals::SystemConfigModal::move_cursor(sysconfig_cursor_, delta);
+    modals::SystemConfigModal::move_cursor(sysconfig_draft_, sysconfig_cursor_, delta);
 }
 
 void TuiModal::adjust_sysconfig_at_cursor(int dir) {
@@ -137,10 +195,11 @@ auto TuiModal::remove_bp_at_cursor(
 
 void TuiModal::close() {
     active_modal_ = ModalType::None;
+    rendered_box_width_ = 0;
     input_.clear();
 }
 
-auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
+auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step_delay_us,
                       const std::function<void(TuiRegPage)>& set_reg_page_cb,
                       const std::function<void(const std::string&)>& set_status_override_cb,
                       const std::function<void()>& on_speed_changed_cb) -> bool {
@@ -172,7 +231,7 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
         case ModalType::InspectAddress: {
             std::string addr_msg;
             auto addr_cb = [&](const std::string& msg) { addr_msg = msg; };
-            result = modals::AddressModal::submit(input_, machine_, left_pane, addr_cb);
+            result = modals::AddressModal::submit(input_, machine_, inspector_pane, addr_cb);
             if (result && set_reg_page_cb) {
                 set_reg_page_cb(TuiRegPage::STACK);
             }
@@ -192,7 +251,7 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
                                                staged_target_appmode_, notice_cb);
             if (current_modal == ModalType::LoadBinary && staged_mode_change_ && !load_appmode_) {
                 active_modal_ = ModalType::LoadDiskImage;
-                input_ = machine_.s_fn_dskimg;
+                input_ = machine_.disk_path();
                 return false;
             }
             if (result) {
@@ -201,14 +260,19 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
                 return true;
             }
             break;
-        case ModalType::Settings:
+        case ModalType::Settings: {
+            if (settings_draft_.platform_profile !=
+                static_cast<uint8_t>(machine_.platform_profile())) {
+                open_platform_confirm(settings_draft_);
+                return false;
+            }
             result = modals::SettingsModal::submit(settings_draft_, machine_, set_reg_page_cb);
             if (result) {
-                open_notice("SETTINGS SAVED", "Simulator settings saved and applied successfully.",
-                            false);
+                open_notice("SETTINGS SAVED",
+                            "Simulator & SMP settings saved and applied successfully.", false);
                 return true;
             }
-            break;
+        } break;
         case ModalType::ConfigureMisa:
             result = modals::MisaModal::submit(misa_draft_, machine_, set_status_override_cb);
             if (result) {
@@ -220,9 +284,10 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
         case ModalType::ConfigureSystem:
             result = modals::SystemConfigModal::submit(sysconfig_draft_, machine_);
             if (result) {
-                open_notice("CA CONFIGURATION SAVED",
-                            "Cycle-Accurate system configuration saved and applied successfully.",
-                            false);
+                open_notice(
+                    "MICROARCHITECTURE SAVED",
+                    "Pipeline & microarchitecture configuration saved and applied successfully.",
+                    false);
                 return true;
             }
             break;
@@ -237,6 +302,19 @@ auto TuiModal::submit(LeftPane* left_pane, std::atomic<uint64_t>& step_delay_us,
     return result;
 }
 
+void TuiModal::move_glossary_topic(int delta) {
+    modals::GlossaryModal::move_topic(glossary_topic_, glossary_scroll_, delta);
+}
+
+void TuiModal::set_glossary_topic(int topic) {
+    glossary_topic_ = std::clamp(topic, 0, 5);
+    glossary_scroll_ = 0;
+}
+
+void TuiModal::scroll_glossary_content(int delta) {
+    modals::GlossaryModal::scroll_content(glossary_scroll_, delta, 30);
+}
+
 void TuiModal::open_notice(const std::string& title, const std::string& message, bool is_error) {
     active_modal_ = ModalType::Notice;
     input_.clear();
@@ -245,17 +323,239 @@ void TuiModal::open_notice(const std::string& title, const std::string& message,
     notice_is_error_ = is_error;
 }
 
+void TuiModal::open_platform_confirm(const SettingsDraft& draft) {
+    active_modal_ = ModalType::PlatformChangeConfirm;
+    input_.clear();
+    pending_platform_draft_ = draft;
+}
+
+auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> ModalClickResult {
+    if (active_modal_ == ModalType::None) return ModalClickResult::Ignored;
+
+    bool is_help = (active_modal_ == ModalType::Help);
+    bool is_glossary = (active_modal_ == ModalType::Glossary);
+    bool is_wide_modal =
+        (is_help || is_glossary || active_modal_ == ModalType::Settings ||
+         active_modal_ == ModalType::ConfigureMisa || active_modal_ == ModalType::ConfigureSystem ||
+         active_modal_ == ModalType::Notice || active_modal_ == ModalType::PlatformChangeConfirm);
+    const int fallback_width = is_wide_modal ? 78 : 58;
+    const bool has_rendered_geometry = rendered_box_width_ > 0 &&
+                                       rendered_term_width_ == term_width &&
+                                       rendered_term_height_ == term_height;
+    const int maximum_width = has_rendered_geometry ? rendered_box_width_ : fallback_width;
+    const int provisional_width = std::min(maximum_width, term_width - 4);
+    if (provisional_width < 35) return ModalClickResult::Ignored;
+
+    int est_rows = (active_modal_ == ModalType::Settings && settings_draft_.active_tab == 0)
+                       ? kGeneralSettingsContentRows
+                   : (active_modal_ == ModalType::ConfigureMisa)   ? 16
+                   : (active_modal_ == ModalType::ConfigureSystem) ? 22
+                   : (active_modal_ == ModalType::Glossary)        ? 26
+                   : (active_modal_ == ModalType::Help)            ? 24
+                                                                   : 10;
+
+    OverlayGeometry overlay =
+        calculate_overlay_geometry(term_width, term_height, maximum_width, est_rows);
+    if (has_rendered_geometry) {
+        overlay.width = rendered_box_width_;
+        overlay.height = rendered_box_height_;
+        overlay.start_x = rendered_start_x_;
+        overlay.start_y = rendered_start_y_;
+        overlay.visible_content_rows = std::max(0, overlay.height - 2);
+        overlay.renderable = true;
+    }
+    if (!overlay.renderable) return ModalClickResult::Ignored;
+
+    int box_w = overlay.width;
+    int box_h = overlay.height;
+    int start_y = overlay.start_y + 1;  // 1-indexed terminal row
+    int start_x = overlay.start_x + 1;  // 1-indexed terminal col
+
+    if (x < start_x || x >= start_x + box_w || y < start_y || y >= start_y + box_h) {
+        if (active_modal_ != ModalType::LoadBinary || !machine_.binary_path().empty()) {
+            close();
+            return ModalClickResult::Closed;
+        }
+        return ModalClickResult::Ignored;
+    }
+
+    int rel_y = y - start_y;
+    int rel_x = x - start_x;
+
+    if (rel_y == 0 || rel_y == box_h - 1) return ModalClickResult::Handled;
+    int content_row = rel_y - 1;
+
+    for (auto const& control_row : rendered_control_rows_) {
+        if (control_row.relative_y != rel_y) continue;
+        int const control_column = rel_x - 1;
+        for (std::size_t action = 0; action < control_row.spans.size(); ++action) {
+            if (!control_row.spans[action].contains(control_column)) continue;
+            switch (active_modal_) {
+                case ModalType::Glossary:
+                    if (control_row.content_row == 0) {
+                        set_glossary_topic(static_cast<int>(action));
+                    } else if (action == 0) {
+                        move_glossary_topic(-1);
+                    } else if (action == 1) {
+                        move_glossary_topic(1);
+                    } else if (control_row.spans.size() == 5 && action == 2) {
+                        scroll_glossary_content(-2);
+                    } else if (control_row.spans.size() == 5 && action == 3) {
+                        scroll_glossary_content(2);
+                    } else {
+                        return ModalClickResult::Closed;
+                    }
+                    return ModalClickResult::Handled;
+                case ModalType::Settings:
+                    if (control_row.content_row == 0) {
+                        set_settings_tab(static_cast<uint8_t>(action));
+                        return ModalClickResult::Handled;
+                    }
+                    return action == 0 ? ModalClickResult::Submit : ModalClickResult::Closed;
+                case ModalType::ConfigureMisa:
+                case ModalType::ConfigureSystem:
+                    return action == 0 ? ModalClickResult::Submit : ModalClickResult::Closed;
+                case ModalType::ManageBreakpoints: {
+                    int last_control_row = 0;
+                    for (auto const& row : rendered_control_rows_) {
+                        last_control_row = std::max(last_control_row, row.content_row);
+                    }
+                    if (control_row.content_row == last_control_row) {
+                        open(action == 0 ? ModalType::SetBreakpoint : ModalType::SetWatchpoint,
+                             nullptr, 0);
+                    } else if (action == 0) {
+                        move_bp_cursor(-1);
+                    } else if (action == 1) {
+                        move_bp_cursor(1);
+                    } else if (action == 2) {
+                        remove_bp_at_cursor({});
+                    } else if (action == 3) {
+                        machine_.breakpoint_manager().clear_pc_breakpoints();
+                        machine_.breakpoint_manager().clear_watchpoints();
+                        bp_cursor_ = 0;
+                    } else {
+                        return ModalClickResult::Closed;
+                    }
+                    return ModalClickResult::Handled;
+                }
+                case ModalType::LoadDiskImage:
+                    return ModalClickResult::Submit;
+                case ModalType::Notice:
+                case ModalType::PlatformChangeConfirm:
+                    if (active_modal_ == ModalType::PlatformChangeConfirm && action == 0)
+                        return ModalClickResult::ReloadRequested;
+                    if (active_modal_ == ModalType::PlatformChangeConfirm && action == 1)
+                        return ModalClickResult::DiscardRequested;
+                    return ModalClickResult::Closed;
+                case ModalType::SetBreakpoint:
+                case ModalType::SetWatchpoint:
+                case ModalType::SetSpeed:
+                case ModalType::InspectAddress:
+                case ModalType::LoadBinary:
+                    return action == 0 ? ModalClickResult::Submit : ModalClickResult::Closed;
+                case ModalType::Help:
+                case ModalType::None:
+                    return ModalClickResult::Handled;
+            }
+        }
+    }
+
+    switch (active_modal_) {
+        case ModalType::Notice:
+            close();
+            return ModalClickResult::Closed;
+
+        case ModalType::PlatformChangeConfirm:
+            return ModalClickResult::Handled;
+
+        case ModalType::Glossary: {
+            if (content_row == 0) {
+                // Topic buttons: 1.Regs (8) | 2.Pipe (8) | 3.Cache (9) | 4.VM/TLB (10) | 5.BPred
+                // (9) | 6.Priv/Trap (13)
+                constexpr std::array<int, 6> kTabWidths = {8, 8, 9, 10, 9, 13};
+                constexpr int kSeparatorWidth = 3;
+                int const controls_width =
+                    std::accumulate(kTabWidths.begin(), kTabWidths.end(), 0) +
+                    (static_cast<int>(kTabWidths.size()) - 1) * kSeparatorWidth;
+                int current_x = 1 + std::max(0, (box_w - 2 - controls_width) / 2);
+                for (size_t i = 0; i < kTabWidths.size(); ++i) {
+                    if (rel_x >= current_x && rel_x < current_x + kTabWidths.at(i)) {
+                        set_glossary_topic(static_cast<int>(i));
+                        return ModalClickResult::Handled;
+                    }
+                    current_x += kTabWidths.at(i) + kSeparatorWidth;
+                }
+            } else if (content_row >= 2 && content_row < box_h - 4) {
+                if (rel_x >= box_w / 2) {
+                    move_glossary_topic(1);
+                } else {
+                    move_glossary_topic(-1);
+                }
+                return ModalClickResult::Handled;
+            }
+            return ModalClickResult::Handled;
+        }
+
+        case ModalType::Settings: {
+            if (settings_draft_.active_tab != 0) return ModalClickResult::Handled;
+            const int visible_rows = overlay.visible_content_rows;
+            const int cursor_row = general_setting_row(settings_draft_.tab_cursor[0]);
+            const int scroll_start = kGeneralSettingsContentRows > visible_rows
+                                         ? std::clamp(cursor_row - visible_rows / 2, 0,
+                                                      kGeneralSettingsContentRows - visible_rows)
+                                         : 0;
+            const int item_idx = general_setting_at_row(content_row + scroll_start);
+            if (item_idx >= 0) {
+                settings_draft_.tab_cursor[0] = item_idx;
+                if (rel_x > box_w / 2 + 10) {
+                    adjust_setting_at_cursor(1);
+                } else if (rel_x > box_w / 2 && rel_x <= box_w / 2 + 10) {
+                    adjust_setting_at_cursor(-1);
+                } else {
+                    toggle_setting_at_cursor();
+                }
+                return ModalClickResult::Handled;
+            }
+            return ModalClickResult::Handled;
+        }
+
+        case ModalType::ConfigureSystem: {
+            int sys_idx = std::clamp(content_row - 1, 0, 15);
+            sysconfig_cursor_ = sys_idx;
+            if (rel_x > box_w / 2 + 10)
+                adjust_sysconfig_at_cursor(1);
+            else if (rel_x > box_w / 2)
+                adjust_sysconfig_at_cursor(-1);
+            else
+                toggle_sysconfig_at_cursor();
+            return ModalClickResult::Handled;
+        }
+
+        case ModalType::ConfigureMisa: {
+            int misa_idx = std::clamp(content_row - 1, 0, 10);
+            misa_cursor_ = misa_idx;
+            toggle_misa_at_cursor();
+            return ModalClickResult::Handled;
+        }
+
+        case ModalType::Help:
+            close();
+            return ModalClickResult::Closed;
+
+        default:
+            break;
+    }
+    return ModalClickResult::Handled;
+}
+
 void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                               int term_height) const {
     if (active_modal_ == ModalType::None || lines.empty()) return;
+    rendered_control_rows_.clear();
 
-    bool is_help = (active_modal_ == ModalType::Help);
-    bool is_wide_modal =
-        (is_help || active_modal_ == ModalType::Settings ||
-         active_modal_ == ModalType::ConfigureMisa || active_modal_ == ModalType::ConfigureSystem ||
-         active_modal_ == ModalType::Notice);
-    const int maximum_width = is_wide_modal ? 78 : 58;
-    const int provisional_width = std::min(maximum_width, term_width - 4);
+    const auto meta = modals::get_modal_metadata(active_modal_, notice_is_error_, notice_title_);
+    const int maximum_width = term_width - 4;
+    const int provisional_width = maximum_width;
     if (provisional_width < 35) return;
 
     std::string m_bg = kThemeModalBg;
@@ -273,60 +573,53 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
         content_rows.push_back(s);
     };
 
-    std::string title;
+    const std::string& title = meta.title;
     switch (active_modal_) {
         case ModalType::SetBreakpoint:
-            title = " SET BREAKPOINT ";
             modals::BreakpointModal::render(active_modal_, content_rows, input_, &machine_);
             break;
         case ModalType::SetWatchpoint:
-            title = " SET WATCHPOINT ";
             modals::BreakpointModal::render(active_modal_, content_rows, input_, &machine_);
             break;
         case ModalType::ManageBreakpoints:
-            title = " MANAGE BREAKPOINTS & WATCHPOINTS ";
             modals::BreakpointModal::render(active_modal_, content_rows, input_, &machine_,
                                             bp_cursor_);
             break;
         case ModalType::SetSpeed:
-            title = " SET SIMULATION FREQUENCY ";
             modals::StepModal::render(active_modal_, content_rows, input_);
             break;
         case ModalType::InspectAddress:
-            title = " INSPECT MEMORY ADDRESS ";
             modals::AddressModal::render(content_rows, input_);
             break;
         case ModalType::LoadBinary:
-            title = " LOAD PROGRAM BINARY ";
             modals::LoadModal::render(active_modal_, content_rows, input_, load_appmode_,
                                       staged_binary_path_);
             break;
         case ModalType::LoadDiskImage:
-            title = " LOAD DISK IMAGE (Optional) ";
             modals::LoadModal::render(active_modal_, content_rows, input_, load_appmode_,
                                       staged_binary_path_);
             break;
+        case ModalType::Glossary:
+            modals::GlossaryModal::render(content_rows, add_row, glossary_topic_, glossary_scroll_,
+                                          term_height, provisional_width);
+            break;
         case ModalType::Settings:
-            title = " SIMULATOR SETTINGS ";
-            modals::SettingsModal::render(content_rows, add_row, settings_draft_, settings_cursor_,
-                                          machine_);
+            modals::SettingsModal::render(content_rows, add_row, settings_draft_, machine_);
             break;
         case ModalType::ConfigureMisa:
-            title = " CONFIGURE CPU MISA & EXTENSIONS ";
             modals::MisaModal::render(content_rows, add_row, misa_draft_, misa_cursor_, machine_);
             break;
         case ModalType::ConfigureSystem:
-            title = " CA SYSTEM CONFIGURATION ";
             modals::SystemConfigModal::render(content_rows, add_row, sysconfig_draft_,
                                               sysconfig_cursor_, input_);
+            add_row("");
+            add_row(modals::build_modal_footer(
+                {{"[Enter]", "Apply Configuration"}, {"[Esc / q]", "Cancel"}}));
             break;
         case ModalType::Help:
-            title = " SIMULATOR KEYBOARD SHORTCUTS ";
             modals::HelpModal::render(content_rows, add_row, term_height, provisional_width);
             break;
         case ModalType::Notice:
-            title = notice_is_error_ ? std::format(" ❌ {} ", notice_title_)
-                                     : std::format(" ⚠️  {} ", notice_title_);
             add_row("");
             {
                 std::size_t start = 0;
@@ -340,26 +633,80 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                 }
             }
             add_row("");
-            add_row(
-                std::format("{}Press \033[1m[Enter]\033[0m, \033[1m[Space]\033[0m or "
-                            "\033[1m[Esc]\033[0m to dismiss\033[0m",
-                            kThemeMuted));
+            add_row(modals::build_modal_footer({{"[Enter / Space / Esc]", "Dismiss"}}));
             break;
+        case ModalType::PlatformChangeConfirm: {
+            add_row("");
+            const char* cur_prof =
+                (machine_.platform_profile() == simrv::core::PlatformProfile::Pcie)
+                    ? "PCIe (PCIe 1.2 + ECAM)"
+                    : "MMIO (VirtIO-MMIO v2)";
+            const char* new_prof = (pending_platform_draft_.platform_profile == 0)
+                                       ? "PCIe (PCIe 1.2 + ECAM)"
+                                       : "MMIO (VirtIO-MMIO v2)";
+            add_row(std::format("  {}Platform profile changed:\033[0m", kThemeText));
+            add_row(std::format("    {}Current:\033[0m \033[1;36m{}\033[0m", kThemeText, cur_prof));
+            add_row(std::format("    {}Target :\033[0m \033[1;32m{}\033[0m", kThemeText, new_prof));
+            add_row("");
+            add_row("  Changing the platform bus topology requires regenerating the");
+            add_row("  Device Tree (FDT) and restarting CPU execution state.");
+            add_row("");
+            add_row(modals::build_modal_footer({{"[R / Enter]", "Reload Simulator"},
+                                                {"[D / Space]", "Discard Change"},
+                                                {"[Esc / q]", "Cancel"}}));
+        } break;
         default:
             break;
     }
 
     if (content_rows.empty()) return;
 
+    int cursor_row = 0;
+    switch (active_modal_) {
+        case ModalType::Settings:
+            cursor_row = settings_draft_.active_tab == 0
+                             ? general_setting_row(settings_draft_.tab_cursor[0])
+                             : 3 + settings_draft_.tab_cursor[settings_draft_.active_tab];
+            break;
+        case ModalType::ConfigureMisa:
+            cursor_row = 2 + misa_cursor_;
+            break;
+        case ModalType::ConfigureSystem:
+            cursor_row = 3 + sysconfig_cursor_;
+            break;
+        case ModalType::ManageBreakpoints:
+            cursor_row = 2 + bp_cursor_;
+            break;
+        default:
+            cursor_row = 0;
+            break;
+    }
+
     const int available_height = std::min(term_height, static_cast<int>(lines.size()));
-    const OverlayGeometry overlay = calculate_overlay_geometry(
-        term_width, available_height, maximum_width, static_cast<int>(content_rows.size()));
+    std::vector<framework::Row> measured_rows;
+    measured_rows.reserve(content_rows.size());
+    for (auto const& row : content_rows) measured_rows.push_back({.text = row});
+    const OverlayGeometry overlay =
+        framework::layout_modal(title, measured_rows, term_width, available_height).geometry;
     if (!overlay.renderable) return;
     const int box_w = overlay.width;
     const int box_h = overlay.height;
     const int start_y = overlay.start_y;
     const int start_x = overlay.start_x;
     int inner_w = box_w - 2;
+    rendered_term_width_ = term_width;
+    rendered_term_height_ = term_height;
+    rendered_box_width_ = box_w;
+    rendered_box_height_ = box_h;
+    rendered_start_x_ = start_x;
+    rendered_start_y_ = start_y;
+
+    const int total_rows = static_cast<int>(content_rows.size());
+    const int visible_rows = overlay.visible_content_rows;
+    int scroll_start = 0;
+    if (total_rows > visible_rows) {
+        scroll_start = std::clamp(cursor_row - visible_rows / 2, 0, total_rows - visible_rows);
+    }
 
     // Render Box Top Border
     if (start_y < static_cast<int>(lines.size())) {
@@ -370,28 +717,40 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
         if (dash_len < 0) dash_len = 0;
         int left_dash = dash_len / 2;
         int right_dash = dash_len - left_dash;
+        const auto style = get_active_theme_style();
+        auto const& glyphs = get_theme_glyphs(style);
 
-        std::string top_border = std::format(
-            "{}{}{}{}{}{}{}\033[0m", kThemeBorder, m_bg, make_repeated_string("─", left_dash + 1),
-            title_fmt, kThemeBorder, make_repeated_string("─", right_dash + 1), "\033[0m");
+        bool const classic = std::string_view(glyphs.top_left) == "+";
+        std::string_view const top_left = classic ? "+" : "┌";
+        std::string_view const top_right = classic ? "+" : "┐";
+        std::string top_border =
+            std::format("{}{}{}{}{}{}{}{}{}\033[0m", kThemeBorder, m_bg, top_left,
+                        make_repeated_string(glyphs.horiz, left_dash), title_fmt, kThemeBorder,
+                        make_repeated_string(glyphs.horiz, right_dash), top_right, "\033[0m");
 
         lines.at(static_cast<std::size_t>(start_y)) =
             overlay_string(lines.at(static_cast<std::size_t>(start_y)), top_border, start_x, box_w);
     }
 
-    // Render Box Content Rows with background color persistence
-    const bool content_clipped =
-        static_cast<int>(content_rows.size()) > overlay.visible_content_rows;
-    for (int i = 0; i < overlay.visible_content_rows; ++i) {
+    // Render Box Content Rows with background color persistence & viewport scrolling
+    const auto style = get_active_theme_style();
+    auto const& glyphs = get_theme_glyphs(style);
+    for (int i = 0; i < visible_rows; ++i) {
         int target_y = start_y + 1 + i;
+        int content_idx = scroll_start + i;
 
         std::string content;
-        if (content_clipped && i == overlay.visible_content_rows - 1) {
-            content =
-                std::format("{}… resize terminal to show remaining content\033[0m", kThemeMuted);
-        } else {
-            content = content_rows.at(static_cast<std::size_t>(i));
+        if (content_idx < total_rows) {
+            auto control = modals::layout_modal_control_row(
+                content_rows.at(static_cast<std::size_t>(content_idx)), inner_w);
+            content = std::move(control.text);
+            if (!control.spans.empty()) {
+                rendered_control_rows_.push_back({.relative_y = i + 1,
+                                                  .content_row = content_idx,
+                                                  .spans = std::move(control.spans)});
+            }
         }
+
         if (!m_bg.empty() && m_bg != "\033[49m") {
             std::string target = "\033[0m";
             std::string replacement = "\033[0m" + std::string(m_bg);
@@ -402,8 +761,12 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             }
         }
 
-        std::string row_str = std::format("{}{}\033[0m{}{}{}{}\033[0m", kThemeBorder, "│", m_bg,
-                                          format_to_width(content, inner_w), kThemeBorder, "│");
+        // Each border cell establishes its own foreground and surface background. Content fitting
+        // deliberately emits a reset, so relying on inherited state made the left, right, and
+        // horizontal edges render with different backgrounds.
+        std::string row_str =
+            std::format("{}{}{}\033[0m{}{}\033[0m{}{}{}\033[0m", m_bg, kThemeBorder, glyphs.vert,
+                        m_bg, format_to_width(content, inner_w), m_bg, kThemeBorder, glyphs.vert);
 
         lines.at(static_cast<std::size_t>(target_y)) =
             overlay_string(lines.at(static_cast<std::size_t>(target_y)), row_str, start_x, box_w);
@@ -412,8 +775,12 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
     // Render Box Bottom Border
     int bot_y = start_y + box_h - 1;
     if (bot_y < static_cast<int>(lines.size())) {
-        std::string bot_border = std::format("{}{}{}{}\033[0m", kThemeBorder, m_bg,
-                                             make_repeated_string("─", box_w), "\033[0m");
+        bool const classic = std::string_view(glyphs.bot_left) == "+";
+        std::string_view const bot_left = classic ? "+" : "└";
+        std::string_view const bot_right = classic ? "+" : "┘";
+        std::string bot_border =
+            std::format("{}{}{}{}{}{}\033[0m", kThemeBorder, m_bg, bot_left,
+                        make_repeated_string(glyphs.horiz, inner_w), bot_right, "\033[0m");
         lines.at(static_cast<std::size_t>(bot_y)) =
             overlay_string(lines.at(static_cast<std::size_t>(bot_y)), bot_border, start_x, box_w);
     }

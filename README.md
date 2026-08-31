@@ -2,26 +2,36 @@
 
 [![C/C++ CI](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=dev)](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml)
 
-SimRV is a C++23 research simulator for studying RISC-V functional behavior, in-order pipeline
-timing, memory-system behavior, and interactive architecture education. It provides functional and
-cycle-accurate modes for the **RV64GCBV** and **RV32GCBV** implementation targets, plus a TUI,
-guest stack analysis, cache inspectors, configurable MISA state, and a small virtual platform.
+SimRV is a C++23 RISC-V simulator for computer-architecture research and education. It provides
+instruction and cycle execution, RV32/RV64 targets, Linux support, and an interactive TUI for
+inspecting pipelines, caches, memory, and architectural state.
 
-The intended audience is computer-architecture researchers, students, and simulator developers.
-SimRV is suitable for reproducible experiments and teaching when the documented model matches the
-research question. It is not RISC-V certified, a production hypervisor, or a security boundary.
-The `GCBV` names are implementation targets; floating-point RMM arithmetic and parts of RVV 1.0
-remain qualification gaps documented in [the compliance scope](docs/RISCV_COMPLIANCE.md).
+SimRV is not RISC-V certified. `RV32GCBV` and `RV64GCBV` are implementation targets; see the
+[compliance scope](docs/RISCV_COMPLIANCE.md) for verified coverage and known gaps.
 
 ---
 
 ## Quick Start
 
-### Build Prerequisites
-- **Clang 20+** (default in CMake presets) or **GCC 14+** (required for full C++23 feature support)
-- **CMake 3.20+** & **Ninja**
+### Interactive and headless runs
 
-### Building SimRV
+Launch `SimRV` normally (or pass `--tui`) to explore an image with the interactive TUI. Use
+`--cli` for scripted and headless runs; command-line options are the supported run interface.
+
+```bash
+# Interactive image loading and inspection.
+./build/rv64-release/SimRV -b -m img/hello.bin --tui
+
+# Headless execution with an explicit instruction limit.
+./build/rv64-release/SimRV -b -m img/hello.bin --cli --steps 200000
+```
+
+### Prerequisites
+- **Clang 20+** or **GCC 15+** (required for the C++23 baseline). For current validation,
+  prefer stable Clang 21+ and GCC 15+; use GCC 16+ once supplied by the host distribution.
+- **CMake 3.31+** & **Ninja**
+
+### Build
 
 ```bash
 # RV64 build (Default)
@@ -33,7 +43,22 @@ cmake --preset rv32-release
 cmake --build --preset rv32-release
 ```
 
-### Running Applications
+Native-host and compiler-specific presets are also available:
+```bash
+cmake --preset rv64-native-release && cmake --build --preset rv64-native-release
+cmake --preset rv64-clang-release && cmake --build --preset rv64-clang-release
+cmake --preset rv64-gcc-release && cmake --build --preset rv64-gcc-release
+```
+
+Repeatable analysis presets are also available:
+```bash
+cmake --preset rv64-asan && cmake --build --preset rv64-asan
+cmake --preset rv64-tidy && cmake --build --preset rv64-tidy
+```
+If a host ccache wrapper has no writable cache, prefix configure and build commands with
+`CCACHE_DISABLE=1`.
+
+### Run
 
 Run a baremetal binary in interactive TUI mode (Default):
 ```bash
@@ -42,12 +67,30 @@ Run a baremetal binary in interactive TUI mode (Default):
 
 Run headless in CLI-only mode:
 ```bash
-./build/rv64-release/SimRV -b -m img/hello.bin -c
+./build/rv64-release/SimRV -b -m img/hello.bin --cli
+```
+
+Select execution mode across fast, detailed, or cycle-accurate microarchitectures:
+```bash
+# Fast functional execution
+./build/rv64-release/SimRV -b -m img/hello.bin --mode fast --cli
+
+# Cycle-accurate five-stage pipeline execution
+./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --cli
+
+# Choose the three-stage educational pipeline.
+./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --pipeline 3stage --cli
+```
+
+Mirror configuration, diagnostics, termination, cache, bus, and performance summaries to a log:
+
+```bash
+./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --cli --log-file run.log
 ```
 
 Run Linux OS image with disk & devicetree:
 ```bash
-./build/rv64-release/SimRV --os -m linux-images/rv64/fw_payload.bin -D linux-images/rv64/root.bin -f linux-images/rv64/devicetree.dtb
+./build/rv64-release/SimRV --os -m linux-images/rv64/fw_payload.bin -D linux-images/rv64/root.img -c linux-images/rv64/devicetree.dtb --cli
 ```
 
 Override MISA profile or Vector register length (VLEN):
@@ -58,9 +101,9 @@ Override MISA profile or Vector register length (VLEN):
 
 ---
 
-## Interactive TUI Split-Screen Monitor
+## Interactive TUI
 
-SimRV includes a rich terminal user interface (TUI) for hardware inspection, step-by-step instruction execution, and educational visualization.
+The TUI supports interactive stepping, breakpoints, and live hardware-state inspection.
 
 ### Key Shortcuts
 
@@ -69,17 +112,17 @@ SimRV includes a rich terminal user interface (TUI) for hardware inspection, ste
 | `[s]` / `[Space]` | Single instruction step |
 | `[c]` / `[Ctrl-P]` | Run / Pause simulation loop |
 | `[Click Label]` / `[Click Badge]` | Click active running badge to pause |
-| `[b]` | Step back 1 instruction (Rollback tracking) |
 | `[o]` / `[Alt-O]` | Open Binary / Disk image loader modal |
-| `[,]` / `[Alt-S]` | Simulator Settings modal (CA/IA mode, rollback, logging) |
+| `[,]` / `[Alt-S]` | Simulator Settings modal (Execution mode, SMP, scheduler, diagnostics) |
 | `[Alt-M]` | Configure MISA CSR modal (Extensions A/B/C/D/F/M/V/S/U & VLEN) |
-| `[y]` | Cycle-Accurate System Config modal |
+| `[y]` | Cycle-Accurate Microarchitecture & Cache Config modal |
 | `[i]` | Memory inspector modal |
 | `[m]` | Manage breakpoints and watchpoints |
-| `[l]` / `[Alt-L]` | Cycle tool inspector tab (Pipe / Cache / BP / Hazard / TLB / Bus) |
-| `[r]` / `[Alt-R]` | Cycle register tab (GPR / FPR / VEC) |
-| `[g]` | Toggle guided inspection hints while paused |
-| `[Tab]` | Cycle TUI layout |
+| `[l]` / `[Alt-L]` | Cycle tool inspector tab (Pipe / Cache / BP / Hazard / TLB / Bus / IO / Stats) |
+| `[r]` / `[Alt-R]` | Cycle register tab (GPR / FPR / VEC / CSR) |
+| `[g]` | Toggle Educational Glossary modal |
+| `[Ctrl-A]` | Toggle input focus between guest UART/PTY and TUI navigation |
+| `[Tab]` | Cycle right pane view (Guest Terminal / Log Buffer) |
 | `[F1]` / `[h]` / `[?]` | Display online help shortcuts |
 | `[Esc]` | Close active modal |
 
@@ -87,12 +130,15 @@ SimRV includes a rich terminal user interface (TUI) for hardware inspection, ste
 
 ## Supported RISC-V Extensions
 
-Both RV32GCBV and RV64GCBV instruction sets are supported.
+RV32GCBV and RV64GCBV are implementation-target names, not complete conformance claims.
 
 See [RISC-V compliance scope](docs/RISCV_COMPLIANCE.md) for the precise architectural boundary,
+the [TileLink-C profile](docs/TILELINK_C_PROFILE.md) for protocol/coherence scope, and the
+[3.0 migration guide](docs/MIGRATION.md) for intentional host-interface breakage.
 SBI/OpenSBI distinction, and the evidence required before treating a feature as verified. The
 profile names are implementation targets and do not by themselves claim RISC-V certification.
-The cross-subsystem qualification status is summarized in the [2.0 support matrix](docs/SUPPORT_MATRIX.md).
+The cross-subsystem qualification status is summarized in the
+[release support boundary](docs/RELEASE.md#support-and-qualification-boundary).
 
 | Extension | Status | Description & Features |
 | --- | --- | --- |
@@ -179,12 +225,12 @@ Pre-compiled standalone binaries (`SimRV`) are available under GitHub Releases f
 - `src/`: Core implementation C++ units
 - `include/simrv/`: Simulator headers & public API
 - `scripts/`: Regression, ISA testing, and Linux image build helpers
-- `docs/`: Architecture and design notes (`docs/ARCHITECTURE.md`, `docs/BAREMETAL_GUIDE.md`)
+- `docs/`: Focused architecture, user, contributor, compliance, and release guides
 - `CHANGELOG.md`: Version release log
 - `docs/RELEASE.md`: 2.0 support contract, validation matrix, and publishing checklist
 - `docs/TUI.md`: TUI input focus, rendering layers, and test coverage
-- `repro/`: Versioned experiment manifest and research-companion instructions
-- `release/schemas/`: Machine-readable release and experiment interfaces
+- `repro/`: Research-companion scripts and reproducibility instructions
+- `release/`: Release metadata, evidence schemas, and publishing inputs
 
 ---
 

@@ -10,6 +10,10 @@
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#endif
+
 namespace simrv::core {
 
 namespace {
@@ -81,11 +85,6 @@ void CsrFile::setMstatus(CSRValue wdata) {
 auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCode> {
     CSRValue rcsr = 0;
     switch (addr) {
-        case csr_addr(Csr::Pmpcfg0):
-        case csr_addr(Csr::Pmpaddr0):
-            rcsr = 0;
-            break;
-
         case csr_addr(Csr::Fflags):
             if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::F) ||
                 (cpu_.state().mstatus & enum_mask(MstatusBit::Fs)) == 0) {
@@ -275,7 +274,43 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
 
         default:
             if (pmp_csr_exists(addr, cpu_.state().regs.xlen)) {
-                rcsr = 0;
+                if (addr >= 0x3A0 && addr <= 0x3AF) {
+                    const size_t cfg_idx = addr - 0x3A0;
+                    if (cpu_.state().regs.xlen == 32) {
+                        if (cfg_idx < 4) {
+                            rcsr =
+                                static_cast<CSRValue>(cpu_.state().pmpcfg[cfg_idx * 4]) |
+                                (static_cast<CSRValue>(cpu_.state().pmpcfg[cfg_idx * 4 + 1]) << 8) |
+                                (static_cast<CSRValue>(cpu_.state().pmpcfg[cfg_idx * 4 + 2])
+                                 << 16) |
+                                (static_cast<CSRValue>(cpu_.state().pmpcfg[cfg_idx * 4 + 3]) << 24);
+                        } else {
+                            rcsr = 0;
+                        }
+                    } else {
+                        if (cfg_idx < 4 && (cfg_idx & 1) == 0) {
+                            const size_t base_pmp = (cfg_idx / 2) * 8;
+                            rcsr = 0;
+                            for (size_t b = 0; b < 8; ++b) {
+                                if (base_pmp + b < ArchState::kNumPmpEntries) {
+                                    rcsr |= static_cast<CSRValue>(cpu_.state().pmpcfg[base_pmp + b])
+                                            << (8 * b);
+                                }
+                            }
+                        } else {
+                            rcsr = 0;
+                        }
+                    }
+                } else if (addr >= 0x3B0 && addr <= 0x3EF) {
+                    const size_t pmp_idx = addr - 0x3B0;
+                    if (pmp_idx < ArchState::kNumPmpEntries) {
+                        rcsr = static_cast<CSRValue>(cpu_.state().pmpaddr[pmp_idx]);
+                    } else {
+                        rcsr = 0;
+                    }
+                } else {
+                    rcsr = 0;
+                }
                 break;
             }
             if (is_zero_hpm_csr(addr, cpu_.state().regs.xlen) || addr == 0x320) {
@@ -298,8 +333,6 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
         case csr_addr(Csr::Mimpid):
         case csr_addr(Csr::Mconfigptr):
         case csr_addr(Csr::Mhartid):
-        case csr_addr(Csr::Pmpcfg0):
-        case csr_addr(Csr::Pmpaddr0):
         case csr_addr(Csr::Time):
         case csr_addr(Csr::Timeh):
         case csr_addr(Csr::Misa):
@@ -343,6 +376,9 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
             }
             cpu_.state().fcsr = (cpu_.state().fcsr & ~kFflagsMask) | (wdata & kFflagsMask);
             cpu_.state().mstatus |= enum_mask(MstatusBit::Fs);
+#if defined(__x86_64__) || defined(_M_X64)
+            _mm_setcsr(_mm_getcsr() & ~0x3fu);
+#endif
             break;
         case csr_addr(Csr::Frm):
             if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::F) ||
@@ -360,6 +396,9 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
             }
             cpu_.state().fcsr = wdata & kFcsrMask;
             cpu_.state().mstatus |= enum_mask(MstatusBit::Fs);
+#if defined(__x86_64__) || defined(_M_X64)
+            _mm_setcsr(_mm_getcsr() & ~0x3fu);
+#endif
             break;
         case csr_addr(Csr::Vstart):
             if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::V) ||
@@ -503,6 +542,49 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
             break;
         default:
             if (pmp_csr_exists(addr, cpu_.state().regs.xlen)) {
+                if (addr >= 0x3A0 && addr <= 0x3AF) {
+                    const size_t cfg_idx = addr - 0x3A0;
+                    if (cpu_.state().regs.xlen == 32) {
+                        if (cfg_idx < 4) {
+                            for (size_t b = 0; b < 4; ++b) {
+                                const size_t entry = cfg_idx * 4 + b;
+                                if (entry < ArchState::kNumPmpEntries) {
+                                    if ((cpu_.state().pmpcfg[entry] & 0x80) == 0) {
+                                        cpu_.state().pmpcfg[entry] =
+                                            static_cast<uint8_t>((wdata >> (8 * b)) & 0xFF);
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        if (cfg_idx < 4 && (cfg_idx & 1) == 0) {
+                            const size_t base_pmp = (cfg_idx / 2) * 8;
+                            for (size_t b = 0; b < 8; ++b) {
+                                const size_t entry = base_pmp + b;
+                                if (entry < ArchState::kNumPmpEntries) {
+                                    if ((cpu_.state().pmpcfg[entry] & 0x80) == 0) {
+                                        cpu_.state().pmpcfg[entry] =
+                                            static_cast<uint8_t>((wdata >> (8 * b)) & 0xFF);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if (addr >= 0x3B0 && addr <= 0x3EF) {
+                    const size_t pmp_idx = addr - 0x3B0;
+                    if (pmp_idx < ArchState::kNumPmpEntries) {
+                        const bool self_locked = (cpu_.state().pmpcfg[pmp_idx] & 0x80) != 0;
+                        const bool next_locked_tor =
+                            (pmp_idx + 1 < ArchState::kNumPmpEntries) &&
+                            ((cpu_.state().pmpcfg[pmp_idx + 1] & 0x80) != 0) &&
+                            ((cpu_.state().pmpcfg[pmp_idx + 1] & 0x18) == 0x08);
+                        if (!self_locked && !next_locked_tor) {
+                            cpu_.state().pmpaddr[pmp_idx] = static_cast<Address>(wdata);
+                        }
+                    }
+                }
+                cpu_.state().refresh_pmp_status();
+                cpu_.TLB_flush();
                 break;
             }
             if (is_zero_hpm_csr(addr, cpu_.state().regs.xlen) || addr == 0x320) {

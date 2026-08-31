@@ -125,8 +125,8 @@ To maintain full observability:
 
 2. **TUI Register & Subsystem Panes:** The TUI is split into modular components under `src/tui/panels/`:
    - If you add new architectural state (e.g., vector registers), update
-     [`src/tui/panels/LeftPaneRegs.cpp`](../src/tui/panels/LeftPaneRegs.cpp) or create a dedicated panel view. Add a new view type in
-     [`include/simrv/tui/panels/LeftPane.hpp`](../include/simrv/tui/panels/LeftPane.hpp) and wire it into the pane cycler.
+     [`src/tui/panels/InspectorPaneRegs.cpp`](../src/tui/panels/InspectorPaneRegs.cpp) or create a dedicated panel view. Add a new view type in
+     [`include/simrv/tui/panels/InspectorPane.hpp`](../include/simrv/tui/panels/InspectorPane.hpp) and wire it into the pane cycler.
    - Use the centralized theme helpers from `TuiTheme.hpp` — never hardcode raw ANSI escape sequences.
 
 ---

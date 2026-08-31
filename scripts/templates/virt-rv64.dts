@@ -8,7 +8,7 @@
 
     chosen {
         stdout-path = "serial0:115200n8";
-        bootargs = "console=ttyS0,115200 earlycon=sbi root=/dev/vda rw loglevel=7";
+        bootargs = "console=ttyS0,115200 earlycon=uart8250,mmio,0x10000000,115200n8 root=/dev/vda rw loglevel=7";
     };
 
     aliases {

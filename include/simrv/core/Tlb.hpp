@@ -105,6 +105,20 @@ class Tlb {
         return nullptr;
     }
 
+    /// Inspect an instruction translation without updating replacement state or hit counters.
+    [[nodiscard]] constexpr auto peek_inst_r(Address vaddr, Word asid,
+                                             PrivilegeLevel priv) const noexcept
+        -> const TLBEntry* {
+        const size_t set = calc_set(vaddr);
+        const Address vpage = calc_vpage(vaddr);
+        for (const auto& entry : inst_r[set]) {
+            if (entry.valid && entry.asid == asid && entry.v_addr == vpage && entry.priv == priv) {
+                return &entry;
+            }
+        }
+        return nullptr;
+    }
+
     /**
      * @brief Insert entry into instruction fetch TLB using LRU replacement.
      * @param vaddr Virtual address.
@@ -119,7 +133,7 @@ class Tlb {
         const int way = inst_r_lru[set];
         auto& entry = inst_r[set][way];
         entry.v_addr = calc_vpage(vaddr);
-        entry.p_addr = calc_vpage(paddr);
+        entry.p_addr = paddr & ~simrv::memory::kPageMask;
         entry.asid = asid;
         entry.priv = priv;
         entry.valid = true;
@@ -162,7 +176,7 @@ class Tlb {
         const int way = data_r_lru[set];
         auto& entry = data_r[set][way];
         entry.v_addr = calc_vpage(vaddr);
-        entry.p_addr = calc_vpage(paddr);
+        entry.p_addr = paddr & ~simrv::memory::kPageMask;
         entry.asid = asid;
         entry.priv = priv;
         entry.valid = true;
@@ -205,7 +219,7 @@ class Tlb {
         const int way = data_w_lru[set];
         auto& entry = data_w[set][way];
         entry.v_addr = calc_vpage(vaddr);
-        entry.p_addr = calc_vpage(paddr);
+        entry.p_addr = paddr & ~simrv::memory::kPageMask;
         entry.asid = asid;
         entry.priv = priv;
         entry.valid = true;

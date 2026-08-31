@@ -86,6 +86,7 @@ class GdbStub {
     // ---- RSP protocol state ----
     bool single_step_ = false;
     bool no_ack_mode_ = false;
+    uint32_t current_thread_id_ = 1;
 
     // Software breakpoint table: addr -> original 4-byte word
     std::unordered_map<uint32_t, uint32_t> sw_breakpoints_;

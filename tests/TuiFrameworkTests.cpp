@@ -1,11 +1,15 @@
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 
+#include "simrv/core/Machine.hpp"
+#include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/tui/LogBuffer.hpp"
 #include "simrv/tui/TuiFrameRenderer.hpp"
 #include "simrv/tui/TuiGuidance.hpp"
 #include "simrv/tui/TuiInputRouter.hpp"
@@ -13,7 +17,12 @@
 #include "simrv/tui/TuiLayoutPolicy.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
+#include "simrv/tui/modals/GlossaryModal.hpp"
 #include "simrv/tui/modals/HelpModal.hpp"
+#include "simrv/tui/modals/ModalComponents.hpp"
+#include "simrv/tui/modals/SettingsModal.hpp"
+#include "simrv/tui/modals/SystemConfigModal.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 
 namespace {
 
@@ -65,7 +74,10 @@ void test_terminal_controls() {
     simrv::tui::VirtualTerminal terminal(8, 3);
     std::string response;
     terminal.set_response_callback([&response](std::string_view bytes) { response.append(bytes); });
+    const uint64_t initial_generation = terminal.generation();
     terminal.write_string("abc\rZ\n12\tX");
+    expect(terminal.generation() == initial_generation + 1,
+           "one UART chunk advances the terminal generation once");
     expect(terminal.get_cursor_x() == 0, "writing at the final tab stop wraps to column zero");
     expect(terminal.get_cursor_y() == 2, "writing at the final tab stop advances one row");
     expect(plain_line(terminal, 0, 8).starts_with("Zbc"), "carriage return overwrites row start");
@@ -92,7 +104,10 @@ void test_terminal_scrollback_and_selection() {
     expect(terminal.get_text_in_range(0, 0, 1, 2).find("one") != std::string::npos,
            "selection includes scrollback text");
 
+    const uint64_t generation_before_resize = terminal.generation();
     terminal.resize(6, 3);
+    expect(terminal.generation() == generation_before_resize + 1,
+           "geometry changes invalidate cached terminal rows");
     expect(terminal.get_cursor_x() < 6 && terminal.get_cursor_y() < 3,
            "resize keeps the cursor in bounds");
     terminal.write_string("\033c");
@@ -139,7 +154,7 @@ void test_utf8_and_theme_helpers() {
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 23, "all key actions have registry entries");
+    expect(bindings.size() == 28, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
     std::set<char> claimed_chars;
     for (const auto& binding : bindings) {
@@ -167,7 +182,6 @@ void test_key_registry() {
 
     constexpr simrv::tui::TuiFooterAction footer_actions[] = {
         simrv::tui::TuiFooterAction::Step,
-        simrv::tui::TuiFooterAction::StepBack,
         simrv::tui::TuiFooterAction::CycleRegs,
         simrv::tui::TuiFooterAction::CycleTools,
         simrv::tui::TuiFooterAction::SetBreakpoint,
@@ -180,6 +194,7 @@ void test_key_registry() {
         simrv::tui::TuiFooterAction::RunPause,
         simrv::tui::TuiFooterAction::Quit,
         simrv::tui::TuiFooterAction::CycleLayout,
+        simrv::tui::TuiFooterAction::ToggleLearn,
         simrv::tui::TuiFooterAction::TogglePanel,
         simrv::tui::TuiFooterAction::ToggleTrace,
         simrv::tui::TuiFooterAction::OpenSettings,
@@ -187,6 +202,9 @@ void test_key_registry() {
         simrv::tui::TuiFooterAction::ConfigureSystem,
         simrv::tui::TuiFooterAction::ManageBreakpoints,
         simrv::tui::TuiFooterAction::Reboot,
+        simrv::tui::TuiFooterAction::SwitchHart,
+        simrv::tui::TuiFooterAction::ToggleTheme,
+        simrv::tui::TuiFooterAction::ToggleDebug,
     };
     for (const auto footer_action : footer_actions) {
         const auto key_action = simrv::tui::key_action_for_footer(footer_action);
@@ -204,11 +222,10 @@ void test_key_registry() {
 
     using simrv::tui::ActionContext;
     using simrv::tui::KeyAction;
-    ActionContext paused{.paused = true,
-                         .image_loaded = true,
-                         .debug_mode = true,
-                         .cycle_accurate = true,
-                         .rollback_enabled = true};
+    expect(!claimed_chars.contains('b') && !claimed_chars.contains('B'),
+           "removed backstep keys remain unbound");
+    ActionContext paused{
+        .paused = true, .image_loaded = true, .debug_mode = true, .cycle_accurate = true};
     expect(simrv::tui::Keybindings::is_available(KeyAction::Step, paused),
            "step is available for a paused loaded image");
     auto running = paused;
@@ -224,14 +241,83 @@ void test_key_registry() {
            "disabled actions explain how to become available");
     auto functional = paused;
     functional.cycle_accurate = false;
-    expect(!simrv::tui::Keybindings::is_available(KeyAction::ConfigureSystem, functional),
-           "cycle configuration is unavailable in functional mode");
+    expect(simrv::tui::Keybindings::is_available(KeyAction::ConfigureSystem, functional),
+           "system configuration is available in functional mode");
     auto modal = paused;
     modal.modal_active = true;
     expect(simrv::tui::Keybindings::is_available(KeyAction::Quit, modal),
            "quit remains available over a modal");
     expect(!simrv::tui::Keybindings::is_available(KeyAction::Step, modal),
            "modal input does not leak into simulation controls");
+}
+
+void test_sysconfig_modal_modes() {
+    using simrv::tui::SettingsDraft;
+    using simrv::tui::SysConfigDraft;
+    using simrv::tui::modals::SettingsModal;
+    using simrv::tui::modals::SystemConfigModal;
+
+    // Test Cycle-Accurate mode behavior
+    SysConfigDraft ca_draft;
+    ca_draft.cycle_accurate = true;
+    ca_draft.mul_latency = 3;
+    int cursor = 0;
+
+    SystemConfigModal::move_cursor(ca_draft, cursor, 1);
+    expect(cursor == 1, "CA mode advances cursor across pipeline settings");
+
+    SystemConfigModal::adjust_setting(ca_draft, 0, 1);
+    expect(ca_draft.pipeline_type == 1, "CA mode allows adjusting pipeline model");
+
+    SystemConfigModal::adjust_setting(ca_draft, 1, 5);
+    expect(ca_draft.mul_latency == 8, "CA mode allows mutating modeled execution latency");
+
+    // Test Functional (IA) mode behavior for CA modal
+    SysConfigDraft ia_draft;
+    ia_draft.cycle_accurate = false;
+    ia_draft.mul_latency = 3;
+    cursor = 0;
+
+    SystemConfigModal::move_cursor(ia_draft, cursor, 1);
+    expect(cursor == 0, "IA mode has no navigable CA pipeline items");
+
+    // Test TUI FPS & SMP configuration in SettingsModal
+    SettingsDraft settings_draft;
+    settings_draft.tui_fps = 30;
+    settings_draft.num_harts = 1;
+    settings_draft.smp_quantum = 1000;
+    settings_draft.smp_multithreaded = false;
+    int s_cursor = 0;
+
+    SettingsModal::move_cursor(s_cursor, 4);
+    expect(s_cursor == 4, "Settings modal advances cursor to TUI Target Refresh Rate");
+
+    SettingsModal::adjust_setting(settings_draft, 4, 1);
+    expect(settings_draft.tui_fps == 60, "Settings modal cycles TUI FPS to 60");
+
+    SettingsModal::adjust_setting(settings_draft, 5, 3);
+    expect(settings_draft.num_harts == 4, "Settings modal adjusts SMP active core count");
+
+    SettingsModal::adjust_setting(settings_draft, 6, 1);
+    expect(settings_draft.smp_multithreaded == true, "Settings modal toggles SMP worker threads");
+
+    SettingsModal::adjust_setting(settings_draft, 7, 1);
+    expect(settings_draft.smp_quantum == 2500, "Settings modal advances SMP quantum level");
+
+    // Verify render text in IA mode contains disabled note for CA options
+    std::vector<std::string> rows;
+    SystemConfigModal::render(
+        rows, [&](const std::string& line) { rows.push_back(line); }, ia_draft, 0, "");
+    bool found_disabled_note = false;
+    for (const auto& r : rows) {
+        if (r.find("Disabled in IA Mode") != std::string::npos ||
+            r.find("Disabled (IA Mode)") != std::string::npos) {
+            found_disabled_note = true;
+            break;
+        }
+    }
+    expect(found_disabled_note,
+           "IA mode render explicitly surfaces disabled status for CA options");
 }
 
 void test_page_guidance() {
@@ -280,6 +366,122 @@ void test_help_uses_canonical_registry() {
     }
 }
 
+void test_category_groups_and_glossary() {
+    using simrv::tui::get_category_group;
+    using simrv::tui::get_category_name;
+    using simrv::tui::get_default_page_for_group;
+    using simrv::tui::TuiCategoryGroup;
+    using simrv::tui::TuiRegPage;
+
+    expect(get_category_group(TuiRegPage::GPR) == TuiCategoryGroup::Regs, "GPR is in Regs group");
+    expect(get_category_group(TuiRegPage::FPR) == TuiCategoryGroup::Regs, "FPR is in Regs group");
+    expect(get_category_group(TuiRegPage::VEC) == TuiCategoryGroup::Regs, "VEC is in Regs group");
+
+    expect(get_category_group(TuiRegPage::STACK) == TuiCategoryGroup::Memory,
+           "STACK is in Memory group");
+    expect(get_category_group(TuiRegPage::CACHE) == TuiCategoryGroup::Memory,
+           "CACHE is in Memory group");
+    expect(get_category_group(TuiRegPage::TLB) == TuiCategoryGroup::Memory,
+           "TLB is in Memory group");
+    expect(get_category_group(TuiRegPage::BUS) == TuiCategoryGroup::Memory,
+           "BUS is in Memory group");
+
+    expect(get_category_group(TuiRegPage::PIPELINE) == TuiCategoryGroup::Pipeline,
+           "PIPELINE is in Pipeline group");
+    expect(get_category_group(TuiRegPage::BPRED) == TuiCategoryGroup::Pipeline,
+           "BPRED is in Pipeline group");
+    expect(get_category_group(TuiRegPage::HAZARD) == TuiCategoryGroup::Pipeline,
+           "HAZARD is in Pipeline group");
+
+    expect(get_category_group(TuiRegPage::EXPLAIN) == TuiCategoryGroup::Tools,
+           "EXPLAIN is in Tools group");
+    expect(get_category_group(TuiRegPage::TRACE) == TuiCategoryGroup::Tools,
+           "TRACE is in Tools group");
+
+    expect(get_default_page_for_group(TuiCategoryGroup::Regs) == TuiRegPage::GPR,
+           "Regs default is GPR");
+    expect(get_default_page_for_group(TuiCategoryGroup::Memory) == TuiRegPage::STACK,
+           "Memory default is STACK");
+    expect(get_default_page_for_group(TuiCategoryGroup::Pipeline) == TuiRegPage::PIPELINE,
+           "Pipeline default is PIPELINE");
+    expect(get_default_page_for_group(TuiCategoryGroup::Tools) == TuiRegPage::EXPLAIN,
+           "Tools default is EXPLAIN");
+
+    // Test GlossaryModal rendering for all 6 topics
+    for (int topic = 0; topic < 6; ++topic) {
+        std::vector<std::string> rows;
+        simrv::tui::modals::GlossaryModal::render(
+            rows, [&rows](const std::string& row) { rows.push_back(row); }, topic, 0, 30, 78);
+        expect(!rows.empty(), "glossary renders rows for topic " + std::to_string(topic));
+        bool found_nav = false;
+        for (const auto& r : rows) {
+            expect(simrv::tui::get_display_width(r) <= 78,
+                   "glossary row stays within the requested modal width");
+            if (r.find("Previous") != std::string::npos && r.find("Next") != std::string::npos &&
+                r.find("Close") != std::string::npos) {
+                found_nav = true;
+                break;
+            }
+        }
+        expect(found_nav, "glossary includes consistent action-key navigation");
+    }
+
+    std::vector<std::string> pipeline_rows;
+    simrv::tui::modals::GlossaryModal::render(
+        pipeline_rows, [&pipeline_rows](const std::string& row) { pipeline_rows.push_back(row); },
+        1, 0, 30, 78);
+    std::string pipeline_text;
+    for (auto const& row : pipeline_rows) pipeline_text += row + '\n';
+    expect(pipeline_text.contains("IF ") && pipeline_text.contains("MEM") &&
+               pipeline_text.contains(" · "),
+           "pipeline glossary uses an aligned stage-and-description grammar");
+    expect(pipeline_text.contains("◦") && pipeline_text.contains("Forwarding") &&
+               pipeline_text.contains("Load-use interlock"),
+           "pipeline glossary uses nested bullets for hazard mitigations");
+
+    std::vector<std::string> scrolled_pipeline_rows;
+    simrv::tui::modals::GlossaryModal::render(
+        scrolled_pipeline_rows,
+        [&scrolled_pipeline_rows](const std::string& row) {
+            scrolled_pipeline_rows.push_back(row);
+        },
+        1, 2, 16, 78);
+    std::vector<std::string> unscrolled_pipeline_rows;
+    simrv::tui::modals::GlossaryModal::render(
+        unscrolled_pipeline_rows,
+        [&unscrolled_pipeline_rows](const std::string& row) {
+            unscrolled_pipeline_rows.push_back(row);
+        },
+        1, 0, 16, 78);
+    expect(scrolled_pipeline_rows.size() == unscrolled_pipeline_rows.size(),
+           "glossary scrolling preserves modal height");
+    expect(scrolled_pipeline_rows != unscrolled_pipeline_rows,
+           "glossary scrolling changes viewport content");
+    std::string compact_pipeline_text;
+    for (auto const& row : unscrolled_pipeline_rows) compact_pipeline_text += row + '\n';
+    expect(compact_pipeline_text.contains("Up") && compact_pipeline_text.contains("Down"),
+           "scrollable glossary exposes directional controls");
+
+    std::vector<std::string> roomy_pipeline_rows;
+    simrv::tui::modals::GlossaryModal::render(
+        roomy_pipeline_rows,
+        [&roomy_pipeline_rows](const std::string& row) { roomy_pipeline_rows.push_back(row); }, 1,
+        0, 100, 78);
+    std::string roomy_pipeline_text;
+    for (auto const& row : roomy_pipeline_rows) roomy_pipeline_text += row + '\n';
+    expect(!roomy_pipeline_text.contains("Up") && !roomy_pipeline_text.contains("Down"),
+           "non-scrollable glossary omits directional controls");
+
+    int topic_idx = 0;
+    int scroll_offset = 0;
+    simrv::tui::modals::GlossaryModal::move_topic(topic_idx, scroll_offset, 1);
+    expect(topic_idx == 1, "moving topic advances topic index");
+    simrv::tui::modals::GlossaryModal::move_topic(topic_idx, scroll_offset, -1);
+    expect(topic_idx == 0, "moving topic backward returns to topic 0");
+    simrv::tui::modals::GlossaryModal::scroll_content(scroll_offset, 2, 20);
+    expect(scroll_offset == 2, "scrolling advances scroll offset");
+}
+
 void test_input_routing() {
     using simrv::tui::InputContext;
     using simrv::tui::InputRoute;
@@ -325,10 +527,10 @@ void test_responsive_layout() {
     expect(narrow.left > 0 && narrow.right > 0, "narrow resize keeps both panes visible");
 
     const auto desktop = calculate_pane_widths(140, TuiLayout::Split);
-    expect(desktop.left == 56 && desktop.right == 81,
-           "desktop split keeps the intended forty-percent inspection pane");
+    expect(desktop.left == 61 && desktop.right == 76,
+           "desktop split keeps the intended default inspection pane");
     const auto constrained = calculate_pane_widths(80, TuiLayout::Split, 200);
-    expect(constrained.right == 20, "manual resizing preserves a usable guest terminal");
+    expect(constrained.right == 30, "manual resizing preserves a usable guest terminal");
 
     const auto full_right = calculate_pane_widths(80, TuiLayout::FullRight, 60);
     expect(full_right.left == 0 && full_right.right == 78,
@@ -385,8 +587,8 @@ void test_frame_composition() {
     };
     constexpr FrameCase cases[] = {
         {40, 10, TuiLayout::Split, 1195331755914945392ULL},
-        {80, 24, TuiLayout::Split, 5102364040892133744ULL},
-        {120, 32, TuiLayout::Split, 13989743370693611914ULL},
+        {80, 24, TuiLayout::Split, 2550224749323736092ULL},
+        {120, 32, TuiLayout::Split, 8780889241500289282ULL},
         {160, 48, TuiLayout::Split, 11898988648789430246ULL},
         {120, 32, TuiLayout::FullLeft, 17252040885446061950ULL},
         {120, 32, TuiLayout::FullRight, 3818806389424029207ULL},
@@ -425,6 +627,205 @@ void test_frame_composition() {
                    std::to_string(static_cast<int>(frame_case.layout)) + ": " +
                    std::to_string(golden_hash));
     }
+
+    const auto junction_frame = calculate_frame_geometry(80, 24, TuiLayout::Split);
+    const auto junction_lines = compose_frame_lines(
+        junction_frame, 80, TuiLayout::Split, "header-0\nheader-1\nheader-2",
+        "footer-0\nfooter-1\nfooter-2",
+        [](int row, int width) {
+            return row == 2 ? simrv::tui::make_repeated_string("─", width) : std::string{};
+        },
+        [](int, int) { return std::string{}; });
+    const std::string split_junction = strip_ansi(junction_lines.at(5));
+    expect(split_junction.starts_with("╟"), "left-pane section rules join the double outer border");
+    expect(split_junction.find("┤") != std::string::npos,
+           "left-pane section rules join the split-pane divider");
+    expect(simrv::tui::get_display_width(junction_lines.at(5)) == 80,
+           "section junctions preserve split-frame width");
+
+    const auto full_left_frame = calculate_frame_geometry(80, 24, TuiLayout::FullLeft);
+    const auto full_left_lines = compose_frame_lines(
+        full_left_frame, 80, TuiLayout::FullLeft, "header-0\nheader-1\nheader-2",
+        "footer-0\nfooter-1\nfooter-2",
+        [](int row, int width) {
+            return row == 2 ? simrv::tui::make_repeated_string("─", width) : std::string{};
+        },
+        [](int, int) { return std::string{}; });
+    const std::string full_left_junction = strip_ansi(full_left_lines.at(5));
+    expect(full_left_junction.starts_with("╟") && full_left_junction.ends_with("╢"),
+           "full-left section rules join both double outer borders");
+}
+
+void test_themes_and_mouse_interactions() {
+    using simrv::tui::cycle_theme_style;
+    using simrv::tui::get_active_theme_style;
+    using simrv::tui::get_display_width;
+    using simrv::tui::get_theme_glyphs;
+    using simrv::tui::set_theme_style;
+    using simrv::tui::TuiThemeStyle;
+
+    // 1. Validate Classic ANSI theme glyphs contain no multi-byte unicode or emojis
+    const auto& ansi_glyphs = get_theme_glyphs(TuiThemeStyle::ClassicAnsi);
+    expect(std::string(ansi_glyphs.top_left) == "+", "ANSI top left is +");
+    expect(std::string(ansi_glyphs.horiz) == "-", "ANSI horiz is -");
+    expect(std::string(ansi_glyphs.vert) == "|", "ANSI vert is |");
+    expect(std::string(ansi_glyphs.icon_settings) == "CFG", "ANSI settings icon is plain text CFG");
+    expect(std::string(ansi_glyphs.icon_theme) == "THM", "ANSI theme icon is plain text THM");
+    expect(std::string(ansi_glyphs.icon_power) == "RST", "ANSI power icon is plain text RST");
+
+    // Check ASCII purity for all ANSI glyph strings
+    const char* const all_ansi_ptrs[] = {
+        ansi_glyphs.top_left,      ansi_glyphs.top_right,  ansi_glyphs.bot_left,
+        ansi_glyphs.bot_right,     ansi_glyphs.horiz,      ansi_glyphs.vert,
+        ansi_glyphs.tee_left,      ansi_glyphs.tee_right,  ansi_glyphs.tee_top,
+        ansi_glyphs.tee_bot,       ansi_glyphs.cross,      ansi_glyphs.double_horiz,
+        ansi_glyphs.double_vert,   ansi_glyphs.bullet,     ansi_glyphs.arrow_up,
+        ansi_glyphs.arrow_down,    ansi_glyphs.arrow_left, ansi_glyphs.arrow_right,
+        ansi_glyphs.icon_settings, ansi_glyphs.icon_help,  ansi_glyphs.icon_theme,
+        ansi_glyphs.icon_power,    ansi_glyphs.icon_warn,  ansi_glyphs.icon_error};
+    for (const char* ptr : all_ansi_ptrs) {
+        for (const char* c = ptr; *c != '\0'; ++c) {
+            expect(static_cast<unsigned char>(*c) < 128,
+                   "Classic ANSI theme contains strictly pure ASCII (no emojis)");
+        }
+    }
+
+    // 2. Validate Modern Unicode theme glyphs
+    const auto& modern_glyphs = get_theme_glyphs(TuiThemeStyle::ModernUnicode);
+    expect(std::string(modern_glyphs.top_left) == "╭", "Modern top left is ╭");
+    expect(std::string(modern_glyphs.horiz) == "─", "Modern horiz is ─");
+    expect(std::string(modern_glyphs.vert) == "│", "Modern vert is │");
+
+    // 3. Validate Theme Cycling
+    set_theme_style(TuiThemeStyle::ModernUnicode);
+    expect(get_active_theme_style() == TuiThemeStyle::ModernUnicode, "active style is modern");
+    cycle_theme_style();
+    expect(get_active_theme_style() == TuiThemeStyle::ClassicAnsi, "cycled to classic ansi");
+    cycle_theme_style();
+    expect(get_active_theme_style() == TuiThemeStyle::SakuraPastel, "cycled to sakura pastel");
+    cycle_theme_style();
+    expect(get_active_theme_style() == TuiThemeStyle::ModernUnicode,
+           "cycled back to modern unicode");
+}
+
+void test_log_buffer_wrapping() {
+    simrv::tui::LogBuffer buffer;
+    buffer.push("Short log line");
+    buffer.push(
+        "\033[36mLoaded 105604 symbols from ELF image: "
+        "linux-images/rv64/fw_payload.elf\033[0m");
+
+    auto lines_w30 = buffer.get_wrapped_lines(30, 20);
+    expect(lines_w30.size() >= 3, "Log wrapped across multiple lines when width=30");
+    expect(strip_ansi(lines_w30[0]) == "Short log line", "First short line is unchanged");
+    expect(strip_ansi(lines_w30[2]).starts_with("  "),
+           "Wrapped continuation line starts with 2-space indent");
+
+    auto lines_w100 = buffer.get_wrapped_lines(100, 20);
+    expect(lines_w100.size() == 2, "Log reflows to 2 lines when width=100");
+    expect(buffer.get_wrapped_lines(100, 20) == lines_w100,
+           "Repeated log wrapping returns the cached layout");
+    buffer.push("Cache invalidation line");
+    auto updated = buffer.get_wrapped_lines(100, 20);
+    expect(updated.size() == 3 && strip_ansi(updated.back()) == "Cache invalidation line",
+           "Appending a log entry invalidates the wrapped layout cache");
+}
+
+void test_modal_components() {
+    using namespace simrv::tui::modals;
+
+    // Test dynamic metadata registry
+    const auto meta_bp = get_modal_metadata(simrv::tui::ModalType::SetBreakpoint);
+    expect(meta_bp.title == " SET BREAKPOINT ", "ModalMetadata title matches for SetBreakpoint");
+    expect(!meta_bp.is_wide, "SetBreakpoint is not wide");
+
+    const auto meta_settings = get_modal_metadata(simrv::tui::ModalType::Settings);
+    expect(meta_settings.title == " SIMULATOR SETTINGS & CONFIGURATION ", "Settings title matches");
+    expect(meta_settings.is_wide, "Settings is wide modal");
+
+    const auto meta_notice = get_modal_metadata(simrv::tui::ModalType::Notice, true, "ALERT");
+    expect(meta_notice.title.contains("❌ ALERT"), "Notice error title contains icon and name");
+
+    // Test unified footer builder
+    const auto footer = build_modal_footer({{"[Enter]", "Apply"}, {"[Esc]", "Cancel"}});
+    expect(footer.contains(" Enter ") && footer.contains("Apply") && footer.contains(" Esc ") &&
+               footer.contains("Cancel"),
+           "Modal footer renders filled keycaps and action labels");
+    const int footer_width = simrv::tui::get_display_width(footer);
+    const auto centered_footer = align_modal_control_row(footer, 60);
+    expect(strip_ansi(centered_footer)
+               .starts_with(std::string(static_cast<std::size_t>((60 - footer_width) / 2), ' ')),
+           "modal footer uses the shared control-row centering policy");
+    const auto footer_layout = layout_modal_control_row(footer, 60);
+    expect(footer_layout.spans.size() == 2 &&
+               footer_layout.spans[0].contains(footer_layout.spans[0].start) &&
+               footer_layout.spans[1].start > footer_layout.spans[0].start,
+           "modal footer rendering exposes aligned click spans for every action");
+
+    // Test tab bar builder
+    static constexpr std::array<std::string_view, 3> tabs = {"Tab1", "Tab2", "Tab3"};
+    const auto tab_bar = build_modal_tab_bar(tabs, 1);
+    expect(tab_bar.contains(" 1 ") && tab_bar.contains("Tab1") && tab_bar.contains(" 2 ") &&
+               tab_bar.contains("Tab2") && tab_bar.contains(" 3 ") && tab_bar.contains("Tab3"),
+           "Modal tab bar renders all numbered tabs");
+    const int tab_width = simrv::tui::get_display_width(tab_bar);
+    const auto centered_tabs = align_modal_control_row(tab_bar, 48);
+    expect(strip_ansi(centered_tabs)
+               .starts_with(std::string(static_cast<std::size_t>((48 - tab_width) / 2), ' ')),
+           "modal tabs use the shared control-row centering policy");
+
+    // Test section divider and menu item row
+    const auto div = build_section_divider("ISA Extensions");
+    expect(div.contains("ISA Extensions") && div.contains("──"), "Section divider formatted");
+
+    const auto row_sel = build_menu_item_row("Option A", "[ON]", true, 20);
+    expect(row_sel.contains("\033[1;7m") && row_sel.contains("ON") && !row_sel.contains("[ON]"),
+           "Selected menu row uses a filled label and an unboxed value");
+
+    // Test text input helper
+    std::vector<std::string> input_rows;
+    build_text_input_rows(input_rows, "Enter Path:", "/tmp/test.bin", "hint example");
+    expect(input_rows.size() == 3, "Input helper creates prompt, cursor, and hint rows");
+    expect(input_rows[1].contains(" INPUT ") && input_rows[1].contains("/tmp/test.bin_"),
+           "Active input row has a filled label and trailing cursor");
+}
+
+void test_instruction_explainer_is_side_effect_free() {
+    simrv::core::Machine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    auto& cpu = machine.primary_hart();
+    cpu.machine_ = &machine;
+    cpu.reset();
+    constexpr Address pc = simrv::memory::kDramBaseAddress;
+    constexpr Instruction addi = 0x00100093U;
+    std::memcpy(ram.data(), &addi, sizeof(addi));
+    cpu.state().pc = pc;
+    cpu.pipeline_context.ir = 0xDEADBEEFU;
+    cpu.pipeline_context.cpc = VirtAddr{pc + 0x40};
+
+    const auto before_pc = cpu.state().pc;
+    const auto before_context_ir = cpu.pipeline_context.ir;
+    const auto before_context_pc = cpu.pipeline_context.cpc;
+    const auto before_icache_hits = cpu.icache.hit_count();
+    const auto before_icache_misses = cpu.icache.miss_count();
+    const auto before_tlb_lru = cpu.tlb.inst_r_lru;
+
+    simrv::tui::InspectorPane pane(machine);
+    pane.set_page(simrv::tui::TuiRegPage::EXPLAIN);
+    pane.set_explain_pc(pc);
+    pane.set_visible_rows(30);
+    const auto rendered = pane.render_row(2, 80);
+
+    expect(rendered.contains("Instruction Explainer"), "explainer renders inspected instruction");
+    expect(cpu.state().pc == before_pc, "explainer preserves architectural PC");
+    expect(cpu.pipeline_context.ir == before_context_ir &&
+               cpu.pipeline_context.cpc == before_context_pc,
+           "explainer preserves the live pipeline context");
+    expect(cpu.icache.hit_count() == before_icache_hits &&
+               cpu.icache.miss_count() == before_icache_misses,
+           "explainer preserves instruction-cache counters");
+    expect(cpu.tlb.inst_r_lru == before_tlb_lru, "explainer preserves TLB replacement state");
 }
 
 }  // namespace
@@ -436,9 +837,15 @@ int main() {
     test_key_registry();
     test_page_guidance();
     test_help_uses_canonical_registry();
+    test_category_groups_and_glossary();
+    test_sysconfig_modal_modes();
     test_input_routing();
     test_responsive_layout();
     test_frame_composition();
+    test_themes_and_mouse_interactions();
+    test_log_buffer_wrapping();
+    test_modal_components();
+    test_instruction_explainer_is_side_effect_free();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;

@@ -2,21 +2,13 @@
 
 #include <array>
 #include <cstdint>
-#include <deque>
-#include <memory>
-#include <mutex>
 #include <simrv/Define.hpp>
 #include <simrv/isa/Base.hpp>
+#include <simrv/pipeline/CycleTransition.hpp>
 #include <simrv/xlen/Types.hpp>
 #include <vector>
 
 namespace simrv::pipeline {
-
-struct BtbEntry {
-    Register pc = 0;
-    Register target = 0;
-    bool valid = false;
-};
 
 struct PipelineReg {
     uint64_t inst_id = 0;
@@ -27,6 +19,10 @@ struct PipelineReg {
     RegId rs2 = static_cast<RegId>(0);
     isa::OperationId op_id = isa::OperationId::UNKNOWN;
     bool writes_reg = false;
+    uint32_t rd_mask = 0;
+    bool writes_fp_reg = false;
+    uint32_t rd_fp_mask = 0;
+    bool is_fp_op = false;
     bool is_load = false;
     int remaining_latency = 0;  // Cycles until value is ready for forwarding
     bool valid = false;
@@ -40,27 +36,72 @@ struct PipelineReg {
     bool control_resolved = false;
 };
 
-enum class BranchPredictorType : uint8_t {
-    StaticNotTaken,
-    StaticTaken,
-    OneBitBimodal,
-    TwoBitBimodal,
-    Gshare
+/// Immutable event submitted by the architectural engine to the cycle model.
+struct PipelineInstruction {
+    Register pc = 0;
+    isa::Opcode opcode = static_cast<isa::Opcode>(0);
+    RegId rd = static_cast<RegId>(0);
+    RegId rs1 = static_cast<RegId>(0);
+    RegId rs2 = static_cast<RegId>(0);
+    isa::OperationId op_id = isa::OperationId::UNKNOWN;
+    bool branched = false;
+    bool is_branch = false;
+    bool is_jump = false;
+    bool icache_miss = false;
+    bool dcache_miss = false;
+    bool tlb_miss = false;
+    Register target_pc = 0;
 };
 
+struct PipelineStageEvent {
+    PipelineInstruction instruction{};
+    uint32_t remaining_latency = 0;
+    bool valid = false;
+    bool stalled = false;
+};
+
+struct PipelineCycleMetrics {
+    bool fetch_stalled = false;
+    bool decode_stalled = false;
+    bool execute_stalled = false;
+    bool memory_stalled = false;
+    bool writeback_stalled = false;
+    bool retired = false;
+    bool icache_miss = false;
+    bool dcache_miss = false;
+    bool tlb_miss = false;
+    bool data_hazard_stall = false;
+    bool control_flush = false;
+};
+
+/// Complete immutable view of one authoritative CA transition.
+struct PipelineCycleEvent {
+    PipelineStageEvent fetch{};
+    PipelineStageEvent decode{};
+    PipelineStageEvent execute{};
+    PipelineStageEvent memory{};
+    PipelineStageEvent writeback{};
+    bool retired = false;
+    bool icache_miss = false;
+    bool dcache_miss = false;
+    bool tlb_miss = false;
+    bool data_hazard_stall = false;
+    bool control_flush = false;
+};
+
+enum class PipelineType : uint8_t { FiveStage = 0, ThreeStage = 1 };
+
 struct CpuConfig {
-    uint32_t icache_miss_penalty = 10;
-    uint32_t dcache_miss_penalty = 15;
-    uint32_t tlb_miss_penalty = 30;
     uint32_t mul_latency = 3;
-    uint32_t div_latency = 20;
-    uint32_t branch_mispredict_penalty = 2;
+    uint32_t div_latency = 18;
+    uint32_t fp_alu_latency = 4;
+    uint32_t fp_div_latency = 16;
+    uint32_t csr_flush_penalty = 3;
+    uint32_t fence_flush_penalty = 4;
     bool enable_forwarding = true;
-    BranchPredictorType bp_type = BranchPredictorType::TwoBitBimodal;
-    uint32_t btb_entries = 128;
-    uint32_t global_history_bits = 8;
-    bool enable_ex_forwarding = true;
-    bool enable_mem_forwarding = true;
+    bool record_snapshots = false;
+    PipelineType pipeline_type = PipelineType::FiveStage;
+    BranchPredictorConfig branch_predictor{};
 };
 
 struct PipelineCycleSnapshot {
@@ -91,44 +132,50 @@ struct PipelineStats {
     uint64_t control_hazard_bubbles = 0;
 };
 
+class PipelineHistoryView {
+   public:
+    constexpr PipelineHistoryView() noexcept = default;
+    [[nodiscard]] constexpr auto empty() const noexcept -> bool { return size_ == 0; }
+    [[nodiscard]] constexpr auto size() const noexcept -> size_t { return size_; }
+    [[nodiscard]] auto at(size_t index) const -> const PipelineCycleSnapshot&;
+
+   private:
+    friend class PipelineSim;
+    static constexpr size_t kCapacity = 4096;
+    constexpr PipelineHistoryView(const std::array<PipelineCycleSnapshot, kCapacity>* history,
+                                  size_t head, size_t size) noexcept
+        : history_(history), head_(head), size_(size) {}
+    const std::array<PipelineCycleSnapshot, kCapacity>* history_ = nullptr;
+    size_t head_ = 0;
+    size_t size_ = 0;
+};
+
 struct PipelineSimState {
     PipelineReg f_reg;
     PipelineReg d_reg;
     PipelineReg e_reg;
     PipelineReg m_reg;
     PipelineReg w_reg;
-    std::array<uint8_t, 256> branch_history_table{};
-    std::vector<BtbEntry> btb;
     std::vector<PipelineCycleSnapshot> cycle_history;
-    uint32_t control_bubble_remaining = 0;
-    uint32_t tlb_stall_remaining = 0;
-    uint32_t icache_stall_remaining = 0;
-    uint32_t dcache_stall_remaining = 0;
-    uint32_t div_busy_cycles_remaining = 0;
     PipelineStats stats;
-    uint32_t gshare_history = 0;
+    bool ca_kernel_active = false;
 };
-
-class PipelineModel;  // Forward declaration
 
 class PipelineSim {
    public:
-    PipelineSim();
-    ~PipelineSim();
+    PipelineSim() = default;
 
     /// Reset pipeline simulation state
     void reset();
 
     CpuConfig config;
 
-    /**
-     * @brief Process a single committed instruction and calculate its cycle latency
-     * @return Number of simulated cycles spent for this instruction (1 base + stalls/bubbles)
-     */
-    auto step_instruction(Register pc, isa::Opcode opcode, RegId rd, RegId rs1, RegId rs2,
-                          isa::OperationId op_id, bool branched, bool is_branch, bool is_jump,
-                          bool icache_miss, bool dcache_miss, bool tlb_miss, Register target_pc)
-        -> uint32_t;
+    /// Advance the authoritative CA observer state by exactly one global cycle.
+    void advance_cycle(const PipelineCycleEvent& event);
+    SIMRV_ALWAYS_INLINE void advance_cycle_fast(const PipelineCycleMetrics& metrics) noexcept {
+        ca_kernel_active_ = true;
+        update_stats(metrics);
+    }
 
     // Getters for statistics
     [[nodiscard]] auto cycle_count() const -> uint64_t;
@@ -140,14 +187,15 @@ class PipelineSim {
     [[nodiscard]] auto structural_stalls() const -> uint64_t;
     [[nodiscard]] auto data_hazard_stalls() const -> uint64_t;
     [[nodiscard]] auto control_hazard_bubbles() const -> uint64_t;
-    [[nodiscard]] auto get_cycle_history_copy() const -> std::vector<PipelineCycleSnapshot>;
+    [[nodiscard]] auto cycle_history() const noexcept -> PipelineHistoryView;
+    [[nodiscard]] auto get_stats() const -> PipelineStats;
 
     // Model state getters for TUI compatibility
-    [[nodiscard]] auto f_reg() const -> PipelineReg;
-    [[nodiscard]] auto d_reg() const -> PipelineReg;
-    [[nodiscard]] auto e_reg() const -> PipelineReg;
-    [[nodiscard]] auto m_reg() const -> PipelineReg;
-    [[nodiscard]] auto w_reg() const -> PipelineReg;
+    [[nodiscard]] auto f_reg() const -> const PipelineReg&;
+    [[nodiscard]] auto d_reg() const -> const PipelineReg&;
+    [[nodiscard]] auto e_reg() const -> const PipelineReg&;
+    [[nodiscard]] auto m_reg() const -> const PipelineReg&;
+    [[nodiscard]] auto w_reg() const -> const PipelineReg&;
 
     [[nodiscard]] auto div_busy_cycles_remaining() const -> uint32_t;
     [[nodiscard]] auto icache_stall_remaining() const -> uint32_t;
@@ -155,16 +203,33 @@ class PipelineSim {
     [[nodiscard]] auto tlb_stall_remaining() const -> uint32_t;
     [[nodiscard]] auto control_bubble_remaining() const -> uint32_t;
 
-    [[nodiscard]] auto get_model() const -> const PipelineModel* { return model_.get(); }
-    [[nodiscard]] auto get_model() -> PipelineModel* { return model_.get(); }
-
     [[nodiscard]] auto save_state() const -> PipelineSimState;
     void restore_state(const PipelineSimState& state);
 
    private:
-    void init_model();
+    SIMRV_ALWAYS_INLINE void update_stats(const PipelineCycleMetrics& metrics) noexcept {
+        ++ca_stats_.cycle_count;
+        const bool stalled = metrics.fetch_stalled || metrics.decode_stalled ||
+                             metrics.execute_stalled || metrics.memory_stalled ||
+                             metrics.writeback_stalled;
+        ca_stats_.stall_cycles += stalled;
+        ca_stats_.icache_stalls += metrics.icache_miss && metrics.fetch_stalled;
+        ca_stats_.dcache_stalls +=
+            metrics.dcache_miss && (metrics.memory_stalled || metrics.writeback_stalled);
+        ca_stats_.tlb_stalls += metrics.tlb_miss && stalled;
+        ca_stats_.structural_stalls += metrics.execute_stalled;
+        ca_stats_.data_hazard_stalls += metrics.data_hazard_stall;
+        ca_stats_.control_hazard_bubbles += metrics.control_flush;
+        ca_stats_.bubble_cycles += metrics.control_flush;
+    }
 
-    std::unique_ptr<PipelineModel> model_;
+    bool ca_kernel_active_ = false;
+    std::array<PipelineReg, 5> ca_regs_{};
+    PipelineStats ca_stats_{};
+    static constexpr size_t kCaHistoryCapacity = PipelineHistoryView::kCapacity;
+    std::array<PipelineCycleSnapshot, kCaHistoryCapacity> ca_history_{};
+    size_t ca_history_head_ = 0;
+    size_t ca_history_size_ = 0;
 };
 
 }  // namespace simrv::pipeline

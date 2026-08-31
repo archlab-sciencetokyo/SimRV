@@ -27,7 +27,8 @@ class MisaModal {
         -> bool;
     static void render(std::vector<std::string>& content_rows,
                        const std::function<void(const std::string&)>& add_row_cb,
-                       const MisaDraft& draft, int cursor, const simrv::core::Machine& machine);
+                       const MisaDraft& draft, int cursor, const simrv::core::Machine& machine,
+                       bool show_footer = true);
 };
 
 }  // namespace simrv::tui::modals

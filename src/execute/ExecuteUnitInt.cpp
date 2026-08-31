@@ -16,29 +16,29 @@ template <typename T>
 constexpr auto perform_amo_op(T reg_val, T mem_val, Funct5Amo funct5) -> T {
     using SignedT = std::make_signed_t<T>;
     using UnsignedT = std::make_unsigned_t<T>;
-    switch (enum_mask(funct5)) {
-        case 0x01:
-            return reg_val;  // SWAP
-        case 0x00:
-            return mem_val + reg_val;  // ADD
-        case 0x0c:
-            return mem_val & reg_val;  // AND
-        case 0x08:
-            return mem_val | reg_val;  // OR
-        case 0x04:
-            return mem_val ^ reg_val;  // XOR
-        case 0x10:
+    switch (funct5) {
+        case Funct5Amo::Swap:
+            return reg_val;
+        case Funct5Amo::Add:
+            return mem_val + reg_val;
+        case Funct5Amo::And:
+            return mem_val & reg_val;
+        case Funct5Amo::Or:
+            return mem_val | reg_val;
+        case Funct5Amo::Xor:
+            return mem_val ^ reg_val;
+        case Funct5Amo::Min:
             return static_cast<T>(
-                std::min(static_cast<SignedT>(reg_val), static_cast<SignedT>(mem_val)));  // MIN
-        case 0x14:
+                std::min(static_cast<SignedT>(reg_val), static_cast<SignedT>(mem_val)));
+        case Funct5Amo::Max:
             return static_cast<T>(
-                std::max(static_cast<SignedT>(reg_val), static_cast<SignedT>(mem_val)));  // MAX
-        case 0x18:
-            return static_cast<T>(std::min(static_cast<UnsignedT>(reg_val),
-                                           static_cast<UnsignedT>(mem_val)));  // MINU
-        case 0x1c:
-            return static_cast<T>(std::max(static_cast<UnsignedT>(reg_val),
-                                           static_cast<UnsignedT>(mem_val)));  // MAXU
+                std::max(static_cast<SignedT>(reg_val), static_cast<SignedT>(mem_val)));
+        case Funct5Amo::Minu:
+            return static_cast<T>(
+                std::min(static_cast<UnsignedT>(reg_val), static_cast<UnsignedT>(mem_val)));
+        case Funct5Amo::Maxu:
+            return static_cast<T>(
+                std::max(static_cast<UnsignedT>(reg_val), static_cast<UnsignedT>(mem_val)));
         default:
             return mem_val;
     }

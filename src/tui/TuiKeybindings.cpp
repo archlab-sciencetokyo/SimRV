@@ -9,25 +9,37 @@
 
 namespace simrv::tui {
 
-static const std::array<KeyBindingInfo, 23> kKeyBindings = {
+static const std::array<KeyBindingInfo, 28> kKeyBindings = {
     {{.action = KeyAction::Step,
       .key_display = "[s] / [Space]",
       .primary_char = 's',
       .alt_char = 'S',
       .footer_label = "[s] Step",
       .help_label = "Step 1 instruction"},
-     {.action = KeyAction::Backstep,
-      .key_display = "[b]",
-      .primary_char = 'b',
-      .alt_char = 'B',
-      .footer_label = "[b] Back",
-      .help_label = "Undo step / Backstep"},
      {.action = KeyAction::RunPause,
       .key_display = "[c] / [Space] / [Ctrl-P]",
       .primary_char = 'c',
       .alt_char = 'C',
-      .footer_label = "[c] Run/Pause",
+      .footer_label = "[c] Run",
       .help_label = "Run / Pause simulation"},
+     {.action = KeyAction::FocusNextPane,
+      .key_display = "[Tab]",
+      .primary_char = '\0',
+      .alt_char = '\0',
+      .footer_label = "[Tab] Pane",
+      .help_label = "Focus Next Column",
+      .category = ActionCategory::Navigate,
+      .allowed_running = true,
+      .allowed_in_modal = false},
+     {.action = KeyAction::FocusPrevPane,
+      .key_display = "[Shift-Tab]",
+      .primary_char = '\0',
+      .alt_char = '\0',
+      .footer_label = "[S-Tab] Pane",
+      .help_label = "Focus Prev Column",
+      .category = ActionCategory::Navigate,
+      .allowed_running = true,
+      .allowed_in_modal = false},
      {.action = KeyAction::Reset,
       .key_display = "[Ctrl-R]",
       .primary_char = '\0',
@@ -38,13 +50,13 @@ static const std::array<KeyBindingInfo, 23> kKeyBindings = {
       .key_display = "[:]",
       .primary_char = ':',
       .alt_char = '\0',
-      .footer_label = "[:] SetBP",
+      .footer_label = "[:] Breakpoint",
       .help_label = "Set PC Breakpoint"},
      {.action = KeyAction::SetWatchpoint,
       .key_display = "[w]",
       .primary_char = 'w',
       .alt_char = 'W',
-      .footer_label = "[w] SetWP",
+      .footer_label = "[w] Watchpoint",
       .help_label = "Set Watchpoint"},
      {.action = KeyAction::ManageBreakpoints,
       .key_display = "[m]",
@@ -56,13 +68,13 @@ static const std::array<KeyBindingInfo, 23> kKeyBindings = {
       .key_display = "[k]",
       .primary_char = 'k',
       .alt_char = 'K',
-      .footer_label = "[k] TogBP",
+      .footer_label = "[k] Toggle BP",
       .help_label = "Toggle PC Breakpoint"},
      {.action = KeyAction::InspectAddress,
       .key_display = "[i]",
       .primary_char = 'i',
       .alt_char = 'I',
-      .footer_label = "[i] Mem",
+      .footer_label = "[i] Inspect",
       .help_label = "Inspect Memory Address"},
      {.action = KeyAction::SetSpeed,
       .key_display = "[f]",
@@ -98,20 +110,29 @@ static const std::array<KeyBindingInfo, 23> kKeyBindings = {
       .key_display = "[F1] / [h]",
       .primary_char = 'h',
       .alt_char = 'H',
-      .footer_label = "[F1/?] Help",
+      .footer_label = "[?] Help",
       .help_label = "Show Help modal"},
+     {.action = KeyAction::ToggleTheme,
+      .key_display = "[t]",
+      .primary_char = 't',
+      .alt_char = 'T',
+      .footer_label = "[t] Theme",
+      .help_label = "Cycle Theme / Color Scheme",
+      .category = ActionCategory::Configure,
+      .allowed_running = true,
+      .allowed_in_modal = false},
      {.action = KeyAction::Quit,
       .key_display = "[q] / [Ctrl-Q]",
       .primary_char = 'q',
       .alt_char = 'Q',
-      .footer_label = "[Ctrl-Q] Quit",
+      .footer_label = "[q] Quit",
       .help_label = "Quit Simulator"},
      {.action = KeyAction::CycleLayout,
-      .key_display = "[Tab]",
+      .key_display = "[Ctrl-L]",
       .primary_char = '\0',
       .alt_char = '\0',
-      .footer_label = "[Tab] Layout",
-      .help_label = "Cycle UI Layout"},
+      .footer_label = "[Ctrl-L] Layout",
+      .help_label = "Cycle Workbench Layout"},
      {.action = KeyAction::CycleRegPage,
       .key_display = "[r]",
       .primary_char = 'r',
@@ -128,7 +149,7 @@ static const std::array<KeyBindingInfo, 23> kKeyBindings = {
       .key_display = "[p]",
       .primary_char = 'p',
       .alt_char = 'P',
-      .footer_label = "[p] RightPane",
+      .footer_label = "[p] Panel",
       .help_label = "Cycle Right Pane"},
      {.action = KeyAction::ToggleLearn,
       .key_display = "[g]",
@@ -147,7 +168,31 @@ static const std::array<KeyBindingInfo, 23> kKeyBindings = {
       .primary_char = 'v',
       .alt_char = 'V',
       .footer_label = "[v] Trace",
-      .help_label = "Toggle Trace Logging"}}};
+      .help_label = "Toggle Trace Logging"},
+     {.action = KeyAction::SwitchHart,
+      .key_display = "[n]",
+      .primary_char = 'n',
+      .alt_char = 'N',
+      .footer_label = "[n] Hart",
+      .help_label = "Switch active Hart telemetry"},
+     {.action = KeyAction::OpenGlossary,
+      .key_display = "[?]",
+      .primary_char = '?',
+      .alt_char = '?',
+      .footer_label = "[?] Glossary",
+      .help_label = "Architecture Glossary & Concepts",
+      .category = ActionCategory::Help,
+      .allowed_running = true,
+      .allowed_in_modal = false},
+     {.action = KeyAction::ToggleDebug,
+      .key_display = "[Ctrl-D] / [d]",
+      .primary_char = 'd',
+      .alt_char = 'D',
+      .footer_label = "[d] Debug",
+      .help_label = "Toggle Debug Mode & Diagnostics",
+      .category = ActionCategory::Inspect,
+      .allowed_running = true,
+      .allowed_in_modal = false}}};
 
 auto Keybindings::get(KeyAction action) -> const KeyBindingInfo& {
     for (const auto& binding : kKeyBindings) {
@@ -180,7 +225,6 @@ auto Keybindings::unavailable_reason(KeyAction action, const ActionContext& cont
     }
     switch (action) {
         case KeyAction::Step:
-        case KeyAction::Backstep:
         case KeyAction::SetBreakpoint:
         case KeyAction::SetWatchpoint:
         case KeyAction::ManageBreakpoints:
@@ -195,21 +239,15 @@ auto Keybindings::unavailable_reason(KeyAction action, const ActionContext& cont
         default:
             break;
     }
-    if ((action == KeyAction::Step || action == KeyAction::Backstep ||
-         action == KeyAction::RunPause || action == KeyAction::ToggleExplain) &&
+    if ((action == KeyAction::Step || action == KeyAction::RunPause ||
+         action == KeyAction::ToggleExplain) &&
         !context.image_loaded) {
         return "Load a program image first";
-    }
-    if ((action == KeyAction::Backstep) && !context.rollback_enabled) {
-        return "Enable rollback tracking first";
     }
     if ((action == KeyAction::SetBreakpoint || action == KeyAction::SetWatchpoint ||
          action == KeyAction::ManageBreakpoints || action == KeyAction::TogglePcBreakpoint) &&
         !context.debug_mode) {
         return "Enable debug mode first";
-    }
-    if (action == KeyAction::ConfigureSystem && !context.cycle_accurate) {
-        return "Enable cycle-accurate mode first";
     }
     return {};
 }
@@ -230,8 +268,6 @@ auto key_action_for_footer(TuiFooterAction action) -> KeyAction {
     switch (action) {
         case TuiFooterAction::Step:
             return KeyAction::Step;
-        case TuiFooterAction::StepBack:
-            return KeyAction::Backstep;
         case TuiFooterAction::CycleRegs:
             return KeyAction::CycleRegPage;
         case TuiFooterAction::CycleTools:
@@ -256,6 +292,8 @@ auto key_action_for_footer(TuiFooterAction action) -> KeyAction {
             return KeyAction::Quit;
         case TuiFooterAction::CycleLayout:
             return KeyAction::CycleLayout;
+        case TuiFooterAction::ToggleLearn:
+            return KeyAction::ToggleLearn;
         case TuiFooterAction::TogglePanel:
             return KeyAction::CycleRightPanel;
         case TuiFooterAction::ToggleTrace:
@@ -270,6 +308,12 @@ auto key_action_for_footer(TuiFooterAction action) -> KeyAction {
             return KeyAction::ManageBreakpoints;
         case TuiFooterAction::Reboot:
             return KeyAction::Reset;
+        case TuiFooterAction::SwitchHart:
+            return KeyAction::SwitchHart;
+        case TuiFooterAction::ToggleTheme:
+            return KeyAction::ToggleTheme;
+        case TuiFooterAction::ToggleDebug:
+            return KeyAction::ToggleDebug;
     }
     throw std::out_of_range("unknown TUI footer action");
 }

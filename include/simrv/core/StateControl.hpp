@@ -6,7 +6,7 @@
 
 #include <array>
 #include <atomic>
-#include <utility>
+#include <limits>
 
 #include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
@@ -62,10 +62,12 @@ class PlicMmio : public memory::TileLinkNode {
     // Backing storage for PLIC registers to support OpenSBI drivers
     std::array<Word, 1024> plic_priorities{};
 
-    // plic_enables[context][word_idx]. Support up to 2 contexts (M-mode, S-mode).
-    std::array<std::array<Word, 32>, 2> plic_enables{};
-    std::array<Word, 2> plic_threshold{};
-    std::array<Word, 2> plic_claim{};  // The current claim value per context
+    static constexpr size_t kMaxPlicContexts = 32;
+
+    // plic_enables[context][word_idx]. Support up to 32 contexts (16 Harts: M-mode and S-mode).
+    std::array<std::array<Word, 32>, kMaxPlicContexts> plic_enables{};
+    std::array<Word, kMaxPlicContexts> plic_threshold{};
+    std::array<Word, kMaxPlicContexts> plic_claim{};  // The current claim value per context
 
    private:
     CPU& cpu_;
@@ -78,10 +80,18 @@ class PlicMmio : public memory::TileLinkNode {
  */
 class ClintMmio : public memory::TileLinkNode {
    public:
-    explicit ClintMmio(CPU& cpu) : cpu_(cpu) {}
+    explicit ClintMmio(CPU& cpu) : cpu_(cpu) {
+        for (auto& cmp : hart_mtimecmp) {
+            cmp.store(std::numeric_limits<Counter>::max(), std::memory_order_relaxed);
+        }
+        for (auto& timer : hart_supervisor_timer) {
+            timer.store(false, std::memory_order_relaxed);
+        }
+    }
 
     static constexpr Address kBaseAddress = simrv::mmio::kClintBaseAddress;
     static constexpr Address kSize = simrv::mmio::kClintSize;
+    static constexpr size_t kMaxClintHarts = 16;
 
     [[nodiscard]] auto name() const -> const char* final { return "clint"; }
     [[nodiscard]] auto base_address() const -> Address final { return kBaseAddress; }
@@ -102,6 +112,8 @@ class ClintMmio : public memory::TileLinkNode {
     std::atomic<Counter> mtime{1};
     std::atomic<Counter> mtimecmp{0};
     std::atomic<bool> supervisor_timer{false};
+    std::array<std::atomic<Counter>, kMaxClintHarts> hart_mtimecmp{};
+    std::array<std::atomic<bool>, kMaxClintHarts> hart_supervisor_timer{};
     Counter mcycle{1};
     int rtc_divider{0};
 

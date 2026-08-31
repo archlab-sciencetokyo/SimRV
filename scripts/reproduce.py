@@ -41,7 +41,7 @@ def main() -> None:
             configure = ["cmake", "-S", ".", "-B", str(build_dir), "-G", "Ninja",
                          "-DCMAKE_BUILD_TYPE=Release", f"-DSIMRV_XLEN={arch}",
                          f"-DCMAKE_C_COMPILER={cc}", f"-DCMAKE_CXX_COMPILER={cxx}",
-                         "-DSIMRV_WARNINGS_AS_ERRORS=ON", "-DSIMRV_ENABLE_SDL=OFF"]
+                         "-DSIMRV_WARNINGS_AS_ERRORS=ON"]
             if args.riscv_tests_dir:
                 configure.append(f"-DRISCV_TESTS_DIR={args.riscv_tests_dir.resolve()}")
             if args.vector_tests_dir and compiler == "gcc":
@@ -83,7 +83,7 @@ def main() -> None:
         for suite, flags in sanitizer_builds:
             build_dir = ROOT / "build/repro" / suite
             run(["cmake", "-S", ".", "-B", str(build_dir), "-G", "Ninja",
-                 "-DCMAKE_BUILD_TYPE=Debug", "-DSIMRV_XLEN=64", "-DSIMRV_ENABLE_SDL=OFF",
+                 "-DCMAKE_BUILD_TYPE=Debug", "-DSIMRV_XLEN=64",
                  "-DSIMRV_WARNINGS_AS_ERRORS=ON", *flags])
             run(["cmake", "--build", str(build_dir)])
             output = args.output / f"evidence-gcc-rv64-{suite}.json"

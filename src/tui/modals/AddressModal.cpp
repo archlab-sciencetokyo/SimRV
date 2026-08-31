@@ -10,16 +10,17 @@
 
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/TuiTheme.hpp"
-#include "simrv/tui/panels/LeftPane.hpp"
+#include "simrv/tui/modals/ModalComponents.hpp"
+#include "simrv/tui/panels/InspectorPane.hpp"
 
 namespace simrv::tui::modals {
 
-void AddressModal::open(std::string& input, LeftPane* left_pane) {
-    input = std::format("0x{:08x}", left_pane ? left_pane->get_inspect_addr() : 0);
+void AddressModal::open(std::string& input, InspectorPane* inspector_pane) {
+    input = std::format("0x{:08x}", inspector_pane ? inspector_pane->get_inspect_addr() : 0);
 }
 
 auto AddressModal::submit(const std::string& input, simrv::core::Machine& machine,
-                          LeftPane* left_pane,
+                          InspectorPane* inspector_pane,
                           const std::function<void(const std::string&)>& set_status_override_cb)
     -> bool {
     if (input.empty()) return false;
@@ -33,7 +34,7 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
         auto result = std::from_chars(input.data(), input.data() + input.size(), addr, 16);
         ok = (result.ec == std::errc{});
     } else {
-        auto sym_opt = machine.symbols.lookup_name(input);
+        auto sym_opt = machine.symbol_table().lookup_name(input);
         if (sym_opt.has_value()) {
             addr = *sym_opt;
             ok = true;
@@ -41,8 +42,8 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
     }
 
     if (ok) {
-        if (left_pane) {
-            left_pane->set_inspect_addr(addr);
+        if (inspector_pane) {
+            inspector_pane->set_inspect_addr(addr);
         }
         set_status_override_cb(std::format("Inspecting address 0x{:08x}", addr));
         return true;
@@ -53,9 +54,9 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
 }
 
 void AddressModal::render(std::vector<std::string>& content_rows, const std::string& input) {
-    content_rows.push_back(
-        std::format("{}Enter Target Address (hex) or Symbol:\033[0m", kThemeText));
-    content_rows.push_back(std::format("  \033[1m>\033[0m {}{}_\033[0m", kThemeMint, input));
+    build_text_input_rows(content_rows, "Enter Target Address (hex) or Symbol:", input);
+    content_rows.push_back("");
+    content_rows.push_back(build_modal_footer({{"[Enter]", "Inspect"}, {"[Esc]", "Cancel"}}));
 }
 
 }  // namespace simrv::tui::modals

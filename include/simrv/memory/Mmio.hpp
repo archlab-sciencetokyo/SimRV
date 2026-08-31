@@ -15,7 +15,7 @@ namespace simrv::mmio {
 inline constexpr Address kRtcBaseAddress = static_cast<Address>(0x70000000u);
 inline constexpr Address kRtcSize = static_cast<Address>(0x00001000u);
 
-// Interrupt controller addresses
+// Interrupt controller addresses (PLIC / CLINT legacy)
 inline constexpr Address kPlicBaseAddress = static_cast<Address>(0x50000000u);
 inline constexpr Address kPlicSize = static_cast<Address>(0x04000000u);
 inline constexpr Address kPlicHartBase = static_cast<Address>(0x00200000u);
@@ -23,14 +23,32 @@ inline constexpr Address kPlicHartSize = static_cast<Address>(0x00001000u);
 inline constexpr Address kClintBaseAddress = static_cast<Address>(0x60000000u);
 inline constexpr Address kClintSize = static_cast<Address>(0x000c0000u);
 
-// Virtio and device addresses
-inline constexpr Address kFramebufferBaseAddress = static_cast<Address>(0x30000000u);
-inline constexpr Address kFramebufferSize = static_cast<Address>(0x00200000u);
+// RISC-V AIA (APLIC / IMSIC) and ACLINT addresses
+inline constexpr Address kAclintMtimerBaseAddress = static_cast<Address>(0x02000000u);
+inline constexpr Address kAclintMtimerSize = static_cast<Address>(0x00010000u);
+inline constexpr Address kAclintMswiBaseAddress = static_cast<Address>(0x02010000u);
+inline constexpr Address kAclintMswiSize = static_cast<Address>(0x00010000u);
 
-inline constexpr Address kVirtioBaseAddress = static_cast<Address>(0x40000000u);
-inline constexpr Address kVirtioSize = static_cast<Address>(0x08000000u);
-inline constexpr Address kDiskBaseAddress = static_cast<Address>(0x48000000u);
-inline constexpr Address kDiskSize = static_cast<Address>(0x08000000u);
+inline constexpr Address kAplicMBaseAddress = static_cast<Address>(0x0c000000u);
+inline constexpr Address kAplicMSize = static_cast<Address>(0x00004000u);
+inline constexpr Address kAplicSBaseAddress = static_cast<Address>(0x0d000000u);
+inline constexpr Address kAplicSSize = static_cast<Address>(0x00004000u);
+
+inline constexpr Address kImsicMBaseAddress = static_cast<Address>(0x24000000u);
+inline constexpr Address kImsicMSize = static_cast<Address>(0x00010000u);
+inline constexpr Address kImsicSBaseAddress = static_cast<Address>(0x28000000u);
+inline constexpr Address kImsicSSize = static_cast<Address>(0x00010000u);
+
+// PCIe ECAM hierarchy and MMIO 32-bit window
+inline constexpr Address kPcieEcamBaseAddress = static_cast<Address>(0x30000000u);
+inline constexpr Address kPcieEcamSize = static_cast<Address>(0x10000000u);
+inline constexpr Address kPcieMmioBaseAddress = static_cast<Address>(0x40000000u);
+inline constexpr Address kPcieMmioSize = static_cast<Address>(0x10000000u);
+
+// Standard VirtIO-MMIO v2 base address range (0x10001000..0x10008000)
+inline constexpr Address kVirtioMmioBaseAddress = static_cast<Address>(0x10001000u);
+inline constexpr Address kVirtioMmioSlotSize = static_cast<Address>(0x1000u);
+
 inline constexpr Address kTohostAddress = static_cast<Address>(0x40008000u);
 inline constexpr Address kUartBaseAddress = static_cast<Address>(0x10000000u);
 inline constexpr Address kUartSize = static_cast<Address>(0x00000100u);
