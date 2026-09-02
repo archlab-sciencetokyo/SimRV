@@ -36,7 +36,11 @@ receive copies of UART keystrokes.
 The host terminal's carriage-return Enter byte is normalized to newline at the virtual-terminal
 boundary, matching PTY line input and shells that read the UART without enabling `ICRNL` themselves.
 
-Press `g` to open the interactive **Educational Glossary** modal containing comprehensive RISC-V and computer architecture concept definitions.
+In classroom mode, the interactive **Student Guide** is visible when the simulator is paused. It
+explains the active inspector and proposes one safe, context-sensitive next action. Press `Enter`
+to perform that action, `g` to show or hide the guide, and `?` to open the **Educational Glossary**
+at the topic associated with the active inspector. Outside the guide, `Enter` retains its normal
+scroll-reset behavior.
 
 Frame and modal geometry share one resize policy across split and full-pane layouts. Modal borders
 remain closed at the 40×10 minimum; when content cannot fit, the last visible row reports that the

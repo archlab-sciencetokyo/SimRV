@@ -107,5 +107,5 @@ The current development measurements are recorded on an Intel Core Ultra X7 358H
 Linux 6.18.33.2-microsoft-standard-WSL2. Benchmarks pin to logical CPU 0. WSL2
 does not expose the host governor or frequency telemetry here, so these results
 are local regression evidence only—not portable performance claims. Use the
-`rv64-native-release` preset for local tuning; release artifacts continue to
+`rv64-native-release` Clang preset for local tuning; release artifacts continue to
 use the portable `rv64-release` x86-64-v3 configuration.

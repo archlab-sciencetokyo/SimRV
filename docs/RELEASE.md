@@ -51,6 +51,8 @@ The maintained validation preference is stable Clang 21+ and GCC 15+. GCC 16.2 i
 stable upstream series; LLVM 23 is still pre-release, so use stable LLVM 22.x (or the validated
 Clang 21.x host package) for release evidence. `rv64-clang-release` and `rv64-gcc-release`
 select the corresponding compiler from `PATH` without changing the portable default presets.
+The `rv64-native-release` preset also pins Clang and adds host-specific optimization; it is for
+controlled local measurements rather than portable release artifacts.
 
 The gate writes versioned evidence with compiler, architecture, MISA/VLEN, dependency revisions,
 test counts, skips, elapsed time, and binary size. A required suite that is absent or skipped is a

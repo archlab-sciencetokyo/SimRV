@@ -94,80 +94,36 @@ non-contiguous bit positions. This is a deliberate hardware engineering decision
 
 ## 3. Compilation and Execution Guide
 
-To run custom assembly or C programs on SimRV, compile them to a raw flat binary
-image and load it with `-m`.
-
-### Step 1: Write Your Code
-
-#### Example Assembly (`add.S`)
-```assembly
-.global _start
-.section .text
-
-_start:
-    li a0, 5        # Load immediate 5 into a0 (x10)
-    li a1, 10       # Load immediate 10 into a1 (x11)
-    add a2, a0, a1  # Add a0 and a1, store result in a2 (x12)
-
-loop:
-    j loop          # Infinite loop — pause here for TUI inspection
-```
-
-#### Example C Code (`main.c`)
-```c
-void _start() {
-    int a = 5;
-    int b = 10;
-    volatile int c = a + b;
-    while (1);
-}
-```
-
-### Step 2: Compile to ELF
-
-Use the GNU Toolchain or Clang. Specify `-march=rv32gc -mabi=ilp32` for RV32,
-or `-march=rv64gc -mabi=lp64d` for RV64.
+SimRV loads ELF executables directly, including loadable segments, BSS, entry-point, and symbol
+information. It also accepts raw flat binaries. See the
+[bare-metal guide](BAREMETAL_GUIDE.md) for toolchain, startup, linker-script, C, and assembly setup;
+the reusable programs under [`examples/isa/`](../examples/isa/) provide compact starting points.
 
 ```bash
-# RV32GC assembly
-riscv64-unknown-elf-gcc -march=rv32gc -mabi=ilp32 \
-    -static -nostdlib -Ttext 0x80000000 \
-    -o program.elf add.S
-
-# RV64GC assembly
-riscv64-unknown-elf-gcc -march=rv64gc -mabi=lp64d \
-    -static -nostdlib -Ttext 0x80000000 \
-    -o program.elf add.S
-```
-
-- `-Ttext 0x80000000`: Sets the entry point to `0x80000000` (SimRV's DRAM base).
-- `-nostdlib`: Skips standard startup libs — not present in bare-metal simulation.
-
-### Step 3: Extract Raw Flat Binary
-
-SimRV loads raw memory images, not ELF. Convert with `objcopy`:
-
-```bash
-riscv64-unknown-elf-objcopy -O binary program.elf program.bin
-```
-
-### Step 4: Run on SimRV
-
-SimRV launches in interactive visual TUI mode by default:
-
-```bash
-# RV32 build (Bare-metal interactive TUI)
-./build/rv32-release/SimRV -b -m program.bin
-
-# RV64 build (Bare-metal interactive TUI)
-./build/rv64-release/SimRV -b -m program.bin
+# Student-facing mode: start paused with the interactive Student Guide visible
+./build/rv64-release/SimRV --tui --baremetal -m program.elf --class
 
 # Headless / CLI-only mode (fast execution)
-./build/rv64-release/SimRV -b -m program.bin --mode fast --cli
+./build/rv64-release/SimRV --cli --baremetal -m program.elf --mode fast
 
-# Cycle-accurate five-stage pipeline execution
-./build/rv64-release/SimRV -b -m program.bin --mode cycle-accurate --cli
+# Configure a portable report destination, then press x while paused
+./build/rv64-release/SimRV --tui --baremetal -m program.elf --class \
+    --inspection-output inspection.json
 ```
+
+### Teacher-friendly interaction points
+
+ELF symbols make planned pauses possible without a SimRV-specific source format. Add a global label
+at a useful observation point, press `:` in the paused TUI, and enter the label name; continuing then
+pauses before that address. `ebreak` retains its architectural meaning and raises a breakpoint
+exception, so it remains suitable for trap/debugger exercises rather than acting as a hidden
+classroom command.
+
+Guest programs can write to the 16550A UART to place prompts, intermediate values, or questions in
+the TUI virtual terminal. The [`uart-output.S`](../examples/isa/uart-output.S) example is a minimal
+source-only implementation; [`uart-input-echo.S`](../examples/isa/uart-input-echo.S) also accepts
+student input. The example catalog additionally covers load widths, loops, M/A/C/D extensions, and
+architectural counters. Build all of them with `make -C examples/isa XLEN=64` or `XLEN=32`.
 
 ---
 
@@ -227,17 +183,19 @@ Description (Behavior):
 
 1. Run your binary on SimRV:
    ```bash
-   ./build/rv32-release/SimRV -b -m program.bin
+   ./build/rv32-release/SimRV --tui --baremetal -m program.elf --class
    ```
 2. The simulation starts paused (`[PAUSED]`). Press `c` to unpause and run continuously, or press `s` / `Space` to single-step instructions.
-3. Press `l` to cycle through left inspector tabs (Pipe → Cache → BP → Hazard → TLB → Bus → IO → Stats → Explain), or `r` to cycle register views (GPR → FPR → VEC → CSR).
+3. Press `l` to cycle tool views, `r` to cycle register views, or `e` to open the instruction explainer.
 4. The EXPLAIN pane displays:
    - Current PC and symbolic function name.
    - Instruction hex value and disassembled mnemonic.
    - Visual bit-field layout grid identifying opcode, register specifiers, and immediate encodings.
    - Architectural values before and after execution.
-   - Educational prose explaining microarchitectural effects and hazards.
-5. Press `g` to open the full interactive **Educational Glossary** modal.
+   - Architectural dataflow and, in cycle-accurate mode, microarchitectural effects and hazards.
+5. The **Student Guide** explains the active view and proposes a context-sensitive next action.
+   Press `Enter` to perform that action, `g` to show or hide the guide, or `?` to open the glossary
+   topic associated with the active inspector.
 
 ### TUI Keybindings Reference
 
@@ -253,9 +211,13 @@ Description (Behavior):
 | `y` | Paused | Open Cycle-Accurate Microarchitecture & Cache Config modal |
 | `i` | Paused | Open Memory Inspector modal |
 | `m` | Paused | Open Breakpoints & Watchpoints Management modal |
-| `g` | Paused | Open Educational Architecture Glossary modal |
+| `g` | Paused | Show / hide the interactive Student Guide |
+| `Enter` | Paused, guide visible | Perform the Student Guide's suggested action |
+| `e` | Paused | Open / close the current instruction explanation |
+| `?` | Paused | Open the glossary at the active inspector's topic |
+| `x` | Paused | Export the configured inspection report |
 | `Ctrl-A` | All | Toggle input focus between guest UART/PTY and TUI controls |
 | `Tab` | All | Switch between right pane views (Guest Terminal / Log Buffer) |
-| `?` / `F1` / `h` | Paused | Open Help & Keybindings reference modal |
+| `F1` / `h` | Paused | Open Help & Keybindings reference modal |
 | `q` / `Ctrl-Q` | All | Cleanly terminate simulation |
 | `Ctrl-R` | All | Soft-reboot guest simulation |

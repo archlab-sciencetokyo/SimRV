@@ -74,32 +74,34 @@ loop:
 
 ### 3. Compiling and Packaging
 
-Compile your source files using a RISC-V cross-compiler and dump it to a raw binary file:
+Compile and link your source files as an ELF executable. SimRV loads the ELF segments, BSS,
+entry point, and symbols directly:
 
 ```bash
 # Compile and Link
 riscv64-unknown-elf-gcc -march=rv32imac -mabi=ilp32 -T link.ld startup.S main.c -o program.elf -ffreestanding -O2 -nostdlib
 
-# Convert ELF to raw flat binary image
+# Optional: create a flat image for environments that specifically require one
 riscv64-unknown-elf-objcopy -O binary program.elf program.bin
 ```
 
 ### 4. Running the Program
 
-Run the resulting binary image in SimRV in baremetal mode (`-b` / `--baremetal`). SimRV starts in interactive TUI mode by default:
+Run the ELF in baremetal mode (`-b` / `--baremetal`). SimRV starts in interactive TUI mode by
+default:
 
 ```bash
 # Interactive TUI mode (Default)
-./build/rv32-release/SimRV -b -m program.bin
+./build/rv32-release/SimRV -b -m program.elf
 
 # Headless / CLI-only mode (fast execution)
-./build/rv32-release/SimRV -b -m program.bin --mode fast --cli
+./build/rv32-release/SimRV -b -m program.elf --mode fast --cli
 
 # Cycle-accurate five-stage pipeline simulation
-./build/rv32-release/SimRV -b -m program.bin --mode cycle-accurate --cli
+./build/rv32-release/SimRV -b -m program.elf --mode cycle-accurate --cli
 
 # 5-stage classic pipeline simulation
-./build/rv32-release/SimRV -b -m program.bin --mode cycle-accurate --pipeline 5stage --cli
+./build/rv32-release/SimRV -b -m program.elf --mode cycle-accurate --pipeline 5stage --cli
 ```
 
 ---

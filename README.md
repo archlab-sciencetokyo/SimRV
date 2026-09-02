@@ -43,7 +43,8 @@ cmake --preset rv32-release
 cmake --build --preset rv32-release
 ```
 
-Native-host and compiler-specific presets are also available:
+Native-host and compiler-specific presets are also available. The native-host preset pins Clang
+and enables host-specific code generation:
 ```bash
 cmake --preset rv64-native-release && cmake --build --preset rv64-native-release
 cmake --preset rv64-clang-release && cmake --build --preset rv64-clang-release
@@ -90,7 +91,7 @@ Mirror configuration, diagnostics, termination, cache, bus, and performance summ
 
 Run Linux OS image with disk & devicetree:
 ```bash
-./build/rv64-release/SimRV --os -m linux-images/rv64/fw_payload.bin -D linux-images/rv64/root.img -c linux-images/rv64/devicetree.dtb --cli
+./build/rv64-release/SimRV --os -m linux-images/rv64/fw_payload.bin -D linux-images/rv64/root.img -f linux-images/rv64/devicetree.dtb --cli
 ```
 
 Override MISA profile or Vector register length (VLEN):
@@ -104,6 +105,24 @@ Override MISA profile or Vector register length (VLEN):
 ## Interactive TUI
 
 The TUI supports interactive stepping, breakpoints, and live hardware-state inspection.
+
+### Classroom integration
+
+SimRV accepts ordinary RISC-V ELF files and needs no course-specific lesson format. Instructors can
+use the same command across exercises; `--class` starts the TUI paused with the interactive Student
+Guide visible, while students remain free to inspect any subsystem.
+
+```bash
+./build/rv64-release/SimRV --tui --baremetal -m exercise.elf --class \
+  --inspection-output inspection.json
+```
+
+Students can load (`o`), step (`s`), inspect (`r`/`l`), explain (`e`), open the relevant glossary
+topic (`?`), and trace (`v`) without changing the workload. The Student Guide proposes a
+context-sensitive next action; `Enter` performs it and `g` shows or hides the guide. Pressing `x`
+while paused writes the configured, schema-versioned inspection report; existing files require a
+second explicit export action. See the [educational reference](docs/RISCV_EDUCATION.md),
+[bare-metal guide](docs/BAREMETAL_GUIDE.md), and [source-first ISA examples](examples/isa/).
 
 ### Key Shortcuts
 
@@ -120,10 +139,15 @@ The TUI supports interactive stepping, breakpoints, and live hardware-state insp
 | `[m]` | Manage breakpoints and watchpoints |
 | `[l]` / `[Alt-L]` | Cycle tool inspector tab (Pipe / Cache / BP / Hazard / TLB / Bus / IO / Stats) |
 | `[r]` / `[Alt-R]` | Cycle register tab (GPR / FPR / VEC / CSR) |
-| `[g]` | Toggle Educational Glossary modal |
+| `[g]` | Show / hide the interactive Student Guide |
+| `[Enter]` | Perform the Student Guide's suggested action when visible |
+| `[e]` | Toggle instruction explanation |
+| `[?]` | Open glossary at the active inspector topic |
+| `[v]` | Toggle execution trace capture |
+| `[x]` | Export configured inspection report while paused |
 | `[Ctrl-A]` | Toggle input focus between guest UART/PTY and TUI navigation |
 | `[Tab]` | Cycle right pane view (Guest Terminal / Log Buffer) |
-| `[F1]` / `[h]` / `[?]` | Display online help shortcuts |
+| `[F1]` / `[h]` | Display online help shortcuts |
 | `[Esc]` | Close active modal |
 
 ---

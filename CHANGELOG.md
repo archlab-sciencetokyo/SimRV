@@ -5,6 +5,26 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Interactive education
+
+- Replaced the static guidance strip with a contextual, opt-in Student Guide, added reusable
+  source-first ISA examples, and added versioned JSON inspection-report export.
+- Removed the internal cache study sessions and their committed binary artifacts.
+
+### Performance
+
+- Compacted the per-hart decode cache, removed lookup-time replacement writes, and specialized
+  fixed-width unaligned host-memory accesses.
+- Moved TUI-only pipeline scoreboard state into frame-sampled inspector snapshots, leaving
+  headless execution free of presentation work.
+- Applied bounded cycle batching to single-hart cycle-accurate execution while preserving
+  per-cycle device, breakpoint, trace, debugger, and stepping semantics.
+
+### Developer tooling
+
+- Pinned the native-host release preset to Clang, corrected OS benchmark command construction,
+  and updated developer instructions to the current CMake and CTest gates.
+
 ## [v3.0.0-alpha.2] — 2026-09-01
 
 This alpha release delivers comprehensive strong domain typing, code reduction, and modernization across all major architectural subsystems (Core, Memory, Execution, Platform, Debug, and Pipeline).
@@ -104,18 +124,13 @@ Maintenance release ensuring side-effect-free instruction explanation in the TUI
 
 ## [v2.0.1] — 2026-08-28
 
-Maintenance release addressing cache hit/miss accounting accuracy, TUI cache visual inspector state synchronization, and adding cache educational study session materials.
+Maintenance release addressing cache hit/miss accounting accuracy and TUI cache visual inspector state synchronization.
 
 ### Bug Fixes & Microarchitecture
 
 - **Cache Accounting**: Fixed an issue where refill reads immediately following miss insertions generated spurious hit events and corrupted hit rate statistics.
 - **TUI Cache Inspector**: Corrected hit vs. eviction highlight priority in the Left Pane Cache view to prevent stale replacement markers from masking current hit indications.
 - **Base Cache State**: Ensured `BaseCache::insert` marks the current access as a compulsory/conflict miss state rather than inheriting stale hit indicators.
-
-### Educational & Workload Tooling
-
-- Added comprehensive 60-minute Cache Technologies study guides (`docs/STUDY_SESSION_CACHE.md` and `docs/STUDY_SESSION_CACHE_JA.md`) covering spatial/temporal locality, 4-way set associativity, conflict thrashing, and multicore cache coherence (MESI/MOESI, false sharing).
-- Added runnable bare-metal RISC-V assembly workloads in `examples/study_session_cache/` and `/mnt/archlab/study/cache/`.
 
 ## [v2.0.0] — 2026-08-19
 
@@ -163,7 +178,7 @@ OS lifecycle control, MMIO safety, and TUI/UART stability ahead of v2.0.0.
   setting breakpoints; `[:]` sets a breakpoint and `[k]` toggles one at the current PC.
 - Kept `Ctrl-R` reboot and `Ctrl-Q` quit globally available after shutdown and over modals; quit
   now uses the machine exit request without transiently resuming stopped execution.
-- Made the educational guidance strip opt-in with `[g]`; it remains hidden while running and in
+- Made the interactive Student Guide opt-in with `[g]`; it remains hidden while running and in
   terminals too short to show it without displacing architectural state.
 - Split byte-routing policy from terminal I/O so focused guest input, modal input, and paused
   navigation have deterministic behavior and native test coverage.
