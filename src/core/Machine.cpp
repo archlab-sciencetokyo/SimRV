@@ -33,6 +33,30 @@ namespace {
 thread_local bool g_primary_runner_active = false;
 thread_local bool g_secondary_runner_active = false;
 
+constexpr uint16_t kScoreboardBusy = 1U;
+constexpr unsigned kScoreboardStageShift = 1U;
+constexpr unsigned kScoreboardLatencyShift = 4U;
+constexpr uint16_t kScoreboardForward = 1U << 12U;
+
+[[nodiscard]] auto pack_scoreboard_entry(const pipeline::Scoreboard& scoreboard,
+                                         pipeline::operation::RegBank bank, RegId reg) noexcept
+    -> uint16_t {
+    const auto entry = scoreboard.get_entry_data(bank, reg);
+    if (!entry) return 0;
+    const auto latency = std::min<uint32_t>(entry->latency, 0xFFU);
+    return static_cast<uint16_t>(
+        kScoreboardBusy | (static_cast<uint16_t>(entry->stage) << kScoreboardStageShift) |
+        (latency << kScoreboardLatencyShift) | (entry->can_forward ? kScoreboardForward : 0));
+}
+
+void unpack_scoreboard_entry(pipeline::Scoreboard& scoreboard, pipeline::operation::RegBank bank,
+                             RegId reg, uint16_t packed) noexcept {
+    if ((packed & kScoreboardBusy) == 0) return;
+    const auto stage = static_cast<pipeline::PipelineStage>((packed >> kScoreboardStageShift) & 7U);
+    const auto latency = static_cast<LatencyCycles>((packed >> kScoreboardLatencyShift) & 0xFFU);
+    scoreboard.reserve(bank, reg, stage, latency, (packed & kScoreboardForward) != 0);
+}
+
 void wait_for_worker_quiescence(std::atomic<uint32_t>& workers_in_cycle) {
     const uint32_t caller_activity = g_secondary_runner_active ? 1U : 0U;
     auto active = workers_in_cycle.load(std::memory_order_acquire);
@@ -350,6 +374,26 @@ void Machine::publish_tui_execution_snapshot_for_hart(size_t hart_index) noexcep
     const auto& source = hart(hart_index);
     std::scoped_lock source_lock(source.tui_snapshot_mutex);
     const auto stats = source.pipeline_sim.get_stats();
+    pipeline::Scoreboard scoreboard;
+    if (runtime_profile.is_cycle_mode()) {
+        const auto reserve_slot = [&scoreboard](const pipeline::CycleInstructionSlot* entry,
+                                                pipeline::PipelineStage stage) {
+            if (entry == nullptr || !entry->valid) return;
+            if (entry->writes_int && entry->wb_dest != RegId::Zero) {
+                scoreboard.reserve(pipeline::operation::RegBank::Integer, entry->wb_dest, stage,
+                                   static_cast<LatencyCycles>(entry->remaining_latency),
+                                   entry->wb_valid);
+            } else if (entry->writes_fp) {
+                scoreboard.reserve(pipeline::operation::RegBank::Float, entry->wb_dest, stage,
+                                   static_cast<LatencyCycles>(entry->remaining_latency),
+                                   entry->wb_valid);
+            }
+        };
+        reserve_slot(source.ca_pipeline.writeback, pipeline::PipelineStage::Writeback);
+        reserve_slot(source.ca_pipeline.memory, pipeline::PipelineStage::Memory);
+        reserve_slot(source.ca_pipeline.execute, pipeline::PipelineStage::Execute);
+        reserve_slot(source.ca_pipeline.decode, pipeline::PipelineStage::Decode);
+    }
     const std::array<uint64_t, 9> packed_stats = {
         stats.cycle_count,       stats.stall_cycles,       stats.bubble_cycles,
         stats.icache_stalls,     stats.dcache_stalls,      stats.tlb_stalls,
@@ -368,6 +412,15 @@ void Machine::publish_tui_execution_snapshot_for_hart(size_t hart_index) noexcep
     slot.icache_misses.store(source.icache.miss_count(), std::memory_order_relaxed);
     slot.dcache_hits.store(source.dcache.hit_count(), std::memory_order_relaxed);
     slot.dcache_misses.store(source.dcache.miss_count(), std::memory_order_relaxed);
+    for (size_t reg = 0; reg < 32; ++reg) {
+        const auto reg_id = static_cast<RegId>(reg);
+        slot.scoreboard[reg].store(
+            pack_scoreboard_entry(scoreboard, pipeline::operation::RegBank::Integer, reg_id),
+            std::memory_order_relaxed);
+        slot.scoreboard[32 + reg].store(
+            pack_scoreboard_entry(scoreboard, pipeline::operation::RegBank::Float, reg_id),
+            std::memory_order_relaxed);
+    }
     slot.execution_state.store(execution_state_.load(std::memory_order_relaxed),
                                std::memory_order_relaxed);
     slot.generation.fetch_add(1, std::memory_order_release);
@@ -403,6 +456,15 @@ auto Machine::tui_execution_snapshot(size_t hart_index) const noexcept -> TuiExe
         snapshot.icache_misses = slot.icache_misses.load(std::memory_order_relaxed);
         snapshot.dcache_hits = slot.dcache_hits.load(std::memory_order_relaxed);
         snapshot.dcache_misses = slot.dcache_misses.load(std::memory_order_relaxed);
+        snapshot.scoreboard.reset();
+        for (size_t reg = 0; reg < 32; ++reg) {
+            const auto reg_id = static_cast<RegId>(reg);
+            unpack_scoreboard_entry(snapshot.scoreboard, pipeline::operation::RegBank::Integer,
+                                    reg_id, slot.scoreboard[reg].load(std::memory_order_relaxed));
+            unpack_scoreboard_entry(snapshot.scoreboard, pipeline::operation::RegBank::Float,
+                                    reg_id,
+                                    slot.scoreboard[32 + reg].load(std::memory_order_relaxed));
+        }
         snapshot.execution_state = slot.execution_state.load(std::memory_order_relaxed);
         const uint64_t after = slot.generation.load(std::memory_order_acquire);
         if (before == after) return snapshot;
@@ -433,9 +495,9 @@ auto Machine::fast_batch_policy() const -> std::optional<FastBatchPolicy> {
 }
 
 auto Machine::ca_batch_quantum() const noexcept -> uint32_t {
-    if (!runtime_profile.is_cycle_mode() || secondary_harts_.empty() ||
-        config.execution.smp_multithreaded || is_stepping() || debugger_enabled() ||
-        lockstep_enabled() || branch_trace_enabled() || config.execution.strace != 0 ||
+    if (!runtime_profile.is_cycle_mode() || config.execution.smp_multithreaded || is_stepping() ||
+        debugger_enabled() || lockstep_enabled() || branch_trace_enabled() ||
+        config.execution.strace != 0 ||
         config.execution.trace_begin != std::numeric_limits<Counter>::max() ||
         breakpoints.has_any()) {
         return 1;

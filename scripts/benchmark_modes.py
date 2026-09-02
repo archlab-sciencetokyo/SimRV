@@ -23,16 +23,17 @@ SPEED_RE = re.compile(r"Simulation speed\s*:\s*([\d.]+)\s*(MIPS|KIPS)")
 
 def command(args, mode, pipeline, tui):
     result = [args.simrv, "--tui" if tui else "--cli"]
+    result += ["--os" if args.os else "--baremetal"]
     result += ["--mode", mode]
     if pipeline:
         result += ["--pipeline", pipeline]
     if args.harts > 1:
         result += ["--smp", str(args.harts)]
     if args.os:
-        result += ["--os", "-D", args.disk]
+        result += ["-D", args.disk]
         if args.dtb:
             result += ["-f", args.dtb]
-    result += ["-m", args.image, "-e", str(args.limit), "-b"]
+    result += ["-m", args.image, "-e", str(args.limit)]
     if args.tohost:
         result += ["-H", args.tohost]
     return result

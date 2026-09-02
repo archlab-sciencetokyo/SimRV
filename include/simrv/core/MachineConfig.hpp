@@ -55,6 +55,7 @@ struct TuiConfig {
     bool class_mode = false;
     bool debug_diagnostics = false;
     double mouse_sensitivity = 1.0;
+    std::string inspection_output;
 };
 
 struct DebugConfig {

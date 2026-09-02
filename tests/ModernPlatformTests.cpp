@@ -803,6 +803,31 @@ void test_ca_quantum_smp_batching() {
     std::cout << "[PASS] test_ca_quantum_smp_batching\n";
 }
 
+void test_ca_quantum_single_hart_batching() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    constexpr uint32_t kQuantum = 11;
+    simrv::core::Machine machine(
+        simrv::core::MachineConfig{.execution = {.appmode = false, .smp_quantum = kQuantum}});
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+    machine.cpu.machine_ = &machine;
+    machine.cpu.reset();
+
+    constexpr Instruction loop = 0x0000006f;  // jal x0, 0
+    std::memcpy(ram.data(), &loop, sizeof(loop));
+    machine.cpu.state().pc = simrv::memory::kDramBaseAddress;
+
+    const auto initial_cycles = machine.cpu.clint_mmio.mcycle;
+    machine.execute_cycle_for_testing();
+    check(machine.cpu.clint_mmio.mcycle - initial_cycles == kQuantum);
+    check(machine.memory().system_bus().cycle() == kQuantum);
+    check(machine.cpu.clint_mmio.rtc_divider == 1);
+    std::cout << "[PASS] test_ca_quantum_single_hart_batching\n";
+}
+
 void test_ca_mt_smp_pause_and_snapshots() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
@@ -813,7 +838,7 @@ void test_ca_mt_smp_pause_and_snapshots() {
                                                  .num_harts = kNumHarts,
                                                  .smp_quantum = 32,
                                                  .smp_multithreaded = true},
-                                   .tui = {.enabled = true}});
+                                   .tui = {.enabled = true, .inspection_output = {}}});
     std::vector<Byte> ram(1024 * 1024, Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
@@ -945,7 +970,7 @@ void test_tui_mode_sim_thread_multiple_step_sync() {
     };
     ConcreteMachine machine(simrv::core::MachineConfig{
         .execution = {.appmode = true, .num_harts = 2, .smp_multithreaded = true},
-        .tui = {.enabled = true}});
+        .tui = {.enabled = true, .inspection_output = {}}});
     std::vector<Byte> ram(1024 * 1024, Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
@@ -2230,6 +2255,7 @@ int main(int argc, char** argv) {
     test_global_cycle_smp_pipeline_ordering();
     test_global_cycle_timer_phase_ordering();
     test_ca_quantum_smp_batching();
+    test_ca_quantum_single_hart_batching();
     test_ca_mt_smp_pause_and_snapshots();
     test_cycle_kernel_golden_forwarding();
     test_tui_mode_sim_thread_multiple_step_sync();

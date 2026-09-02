@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import types
 import unittest
 
 
@@ -25,9 +26,47 @@ def load(name: str, path: pathlib.Path):
 release_check = load("release_check", ROOT / "scripts/release_check.py")
 aggregate = load("aggregate_experiments", ROOT / "scripts/aggregate_experiments.py")
 benchmark = load("benchmark", ROOT / "scripts/benchmark.py")
+benchmark_modes = load("benchmark_modes", ROOT / "scripts/benchmark_modes.py")
 
 
 class ReleaseToolTests(unittest.TestCase):
+    def test_native_release_preset_pins_clang(self):
+        presets = json.loads((ROOT / "CMakePresets.json").read_text())
+        native = next(item for item in presets["configurePresets"]
+                      if item["name"] == "rv64-native-release")
+        self.assertEqual(native["cacheVariables"]["CMAKE_C_COMPILER"], "clang")
+        self.assertEqual(native["cacheVariables"]["CMAKE_CXX_COMPILER"], "clang++")
+        self.assertEqual(native["cacheVariables"]["SIMRV_NATIVE_HOST_OPTIMIZATIONS"], "ON")
+
+    def test_benchmark_modes_baremetal_command(self):
+        args = types.SimpleNamespace(simrv="simrv", harts=4, os=False, disk=None, dtb=None,
+                                     image="guest.elf", limit=1234, tohost="0x80001000")
+        command = benchmark_modes.command(args, "cycle-accurate", "5stage", False)
+        self.assertEqual(command.count("--baremetal"), 1)
+        self.assertNotIn("--os", command)
+        self.assertIn("--smp", command)
+        self.assertIn("--pipeline", command)
+        self.assertEqual(command[-2:], ["-H", "0x80001000"])
+
+    def test_benchmark_modes_os_command(self):
+        args = types.SimpleNamespace(simrv="simrv", harts=1, os=True, disk="root.img",
+                                     dtb="virt.dtb", image="firmware.bin", limit=5678,
+                                     tohost=None)
+        command = benchmark_modes.command(args, "fast", None, True)
+        self.assertEqual(command.count("--os"), 1)
+        self.assertNotIn("--baremetal", command)
+        self.assertNotIn("-b", command)
+        self.assertIn("-D", command)
+        self.assertIn("-f", command)
+        self.assertNotIn("--pipeline", command)
+
+    def test_inspection_report_schema_is_versioned_and_private(self):
+        schema = json.loads((ROOT / "schemas/inspection-report.schema.json").read_text())
+        self.assertEqual(schema["properties"]["schema_version"]["const"], 1)
+        serialized = json.dumps(schema).lower()
+        self.assertNotIn("student_id", serialized)
+        self.assertNotIn("grade", serialized)
+
     def test_checked_in_metadata(self):
         manifest = json.loads((ROOT / "release/release-manifest.json").read_text())
         release_check.verify_metadata(manifest)

@@ -488,6 +488,13 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         }
         return true;
     }
+    if (arg == "--inspection-output") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (value->empty()) return std::unexpected("--inspection-output requires a non-empty path");
+        result.options.inspection_output = std::string(*value);
+        return true;
+    }
     if (arg == "--high-contrast") {
         result.options.high_contrast = true;
         return true;
@@ -792,6 +799,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.tui.class_mode = class_mode;
     cfg.tui.debug_diagnostics = debug_mode;
     cfg.tui.mouse_sensitivity = mouse_sensitivity;
+    cfg.tui.inspection_output = inspection_output;
 
     cfg.debug.gdb_enabled = gdb_mode;
     cfg.debug.gdb_port = gdb_port;
@@ -986,8 +994,12 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBrightGreen), style(kReset));
     std::print(
         stdout,
-        "  {}--class, --edu{}          Enable educational classroom mode (guidance & glossary)\n",
+        "  {}--class, --edu{}          Enable classroom mode with the interactive Student Guide\n",
         style(kBrightGreen), style(kReset));
+    std::print(stdout,
+               "  {}--inspection-output {}{}<FILE>{} Set the paused-state TUI inspection report "
+               "destination\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
 
     std::print(stdout,
                "  {}--ia{}                      Instruction-accurate execution mode (fast in CLI, "

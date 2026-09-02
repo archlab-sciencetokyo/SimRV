@@ -96,6 +96,7 @@ struct TuiExecutionSnapshot {
     uint64_t icache_misses = 0;
     uint64_t dcache_hits = 0;
     uint64_t dcache_misses = 0;
+    pipeline::Scoreboard scoreboard{};
     ExecutionState execution_state = ExecutionState::Stopped;
 };
 
@@ -503,6 +504,7 @@ class Machine final {
         std::atomic<uint64_t> icache_misses{0};
         std::atomic<uint64_t> dcache_hits{0};
         std::atomic<uint64_t> dcache_misses{0};
+        std::array<std::atomic<uint16_t>, 64> scoreboard{};
         std::atomic<ExecutionState> execution_state{ExecutionState::Stopped};
     };
     static constexpr size_t kMaxTuiSnapshotHarts = 64;
