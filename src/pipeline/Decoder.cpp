@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <utility>
 
+#include "simrv/isa/Compressed.hpp"
 #include "simrv/pipeline/DecodeTable.hpp"
 
 namespace simrv::pipeline {
@@ -1375,23 +1376,23 @@ auto make_j_type(uint32_t opcode, uint32_t rd, uint32_t imm) -> Instruction {
 
 auto decompress_q0(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_p, uint32_t rs2_p)
     -> Instruction {
-    switch (op) {
-        case 0: {
+    switch (static_cast<isa::Q0Op>(op)) {
+        case isa::Q0Op::ADDI4SPN: {
             const uint32_t imm = ((ir >> 7) & 0xF) << 6 | ((ir >> 11) & 0x3) << 4 |
                                  ((ir >> 5) & 0x1) << 3 | ((ir >> 6) & 0x1) << 2;
             if (imm == 0) return 0;
             return make_i_type(0x13, 0x0, rs2_p, 2, imm);
         }
-        case 1: {
+        case isa::Q0Op::FLD: {
             const uint32_t imm = ((ir >> 5) & 0x3) << 6 | ((ir >> 10) & 0x7) << 3;
             return make_i_type(0x07, 0x3, rs2_p, rs1_p, imm);
         }
-        case 2: {
+        case isa::Q0Op::LW: {
             const uint32_t imm =
                 ((ir >> 5) & 0x1) << 6 | ((ir >> 10) & 0x7) << 3 | ((ir >> 6) & 0x1) << 2;
             return make_i_type(0x03, 0x2, rs2_p, rs1_p, imm);
         }
-        case 3: {
+        case isa::Q0Op::LD_FLW: {
             if (is_rv64) {
                 const uint32_t imm = ((ir >> 5) & 0x3) << 6 | ((ir >> 10) & 0x7) << 3;
                 return make_i_type(0x03, 0x3, rs2_p, rs1_p, imm);
@@ -1401,16 +1402,16 @@ auto decompress_q0(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_p, ui
                 return make_i_type(0x07, 0x2, rs2_p, rs1_p, imm);
             }
         }
-        case 5: {
+        case isa::Q0Op::FSD: {
             const uint32_t imm = ((ir >> 5) & 0x3) << 6 | ((ir >> 10) & 0x7) << 3;
             return make_s_type(0x27, 0x3, rs1_p, rs2_p, imm);
         }
-        case 6: {
+        case isa::Q0Op::SW: {
             const uint32_t imm =
                 ((ir >> 5) & 0x1) << 6 | ((ir >> 10) & 0x7) << 3 | ((ir >> 6) & 0x1) << 2;
             return make_s_type(0x23, 0x2, rs1_p, rs2_p, imm);
         }
-        case 7: {
+        case isa::Q0Op::SD_FSW: {
             if (is_rv64) {
                 const uint32_t imm = ((ir >> 5) & 0x3) << 6 | ((ir >> 10) & 0x7) << 3;
                 return make_s_type(0x23, 0x3, rs1_p, rs2_p, imm);
@@ -1491,34 +1492,35 @@ auto decompress_q1_op3(Instruction ir, uint32_t rs1_rd) -> Instruction {
 
 auto decompress_q1(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_rd, uint32_t rs1_p,
                    uint32_t rs2_p) -> Instruction {
-    switch (op) {
-        case 0: {
+    switch (static_cast<isa::Q1Op>(op)) {
+        case isa::Q1Op::ADDI: {
             const uint32_t imm = ((ir >> 2) & 0x1F) | (((ir >> 12) & 0x1) ? 0xFFFFFFE0 : 0);
             return make_i_type(0x13, 0x0, rs1_rd, rs1_rd, imm);
         }
-        case 1:
+        case isa::Q1Op::JAL_ADDIW:
             return decompress_q1_op1(ir, is_rv64, rs1_rd);
-        case 2: {
+        case isa::Q1Op::LI: {
             const uint32_t imm = ((ir >> 2) & 0x1F) | (((ir >> 12) & 0x1) ? 0xFFFFFFE0 : 0);
             return make_i_type(0x13, 0x0, rs1_rd, 0, imm);
         }
-        case 3:
+        case isa::Q1Op::LUI_ADDI16SP:
             return decompress_q1_op3(ir, rs1_rd);
-        case 4:
+        case isa::Q1Op::ARITH:
             return decompress_q1_op4(ir, rs1_p, rs2_p);
-        case 5: {
+        case isa::Q1Op::J: {
             const uint32_t imm = ((ir >> 2) & 0x1) << 5 | ((ir >> 3) & 0x7) << 1 |
                                  ((ir >> 6) & 0x1) << 7 | ((ir >> 7) & 0x1) << 6 |
                                  ((ir >> 8) & 0x1) << 10 | ((ir >> 9) & 0x3) << 8 |
                                  ((ir >> 11) & 0x1) << 4 | (((ir >> 12) & 0x1) ? 0xFFFFF800 : 0);
             return make_j_type(0x6F, 0, imm);
         }
-        case 6:
-        case 7: {
+        case isa::Q1Op::BEQZ:
+        case isa::Q1Op::BNEZ: {
             const uint32_t imm = ((ir >> 2) & 0x1) << 5 | ((ir >> 3) & 0x3) << 1 |
                                  ((ir >> 5) & 0x3) << 6 | ((ir >> 10) & 0x3) << 3 |
                                  (((ir >> 12) & 0x1) ? 0xFFFFFF00 : 0);
-            return make_b_type(0x63, (op == 6) ? 0x0 : 0x1, rs1_p, 0, imm);
+            return make_b_type(0x63, (static_cast<isa::Q1Op>(op) == isa::Q1Op::BEQZ) ? 0x0 : 0x1,
+                               rs1_p, 0, imm);
         }
         default:
             break;
@@ -1546,22 +1548,22 @@ auto decompress_q2_op4(Instruction ir, uint32_t rs1_rd, uint32_t rs2) -> Instruc
 
 auto decompress_q2(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_rd, uint32_t rs2)
     -> Instruction {
-    switch (op) {
-        case 0: {
+    switch (static_cast<isa::Q2Op>(op)) {
+        case isa::Q2Op::SLLI: {
             const uint32_t shamt = ((ir >> 2) & 0x1F) | (((ir >> 12) & 0x1) << 5);
             return make_r_type(0x13, 0x1, 0x00, rs1_rd, rs1_rd, shamt);
         }
-        case 1: {
+        case isa::Q2Op::FLDSP: {
             const uint32_t imm =
                 ((ir >> 2) & 0x7) << 6 | ((ir >> 5) & 0x3) << 3 | ((ir >> 12) & 0x1) << 5;
             return make_i_type(0x07, 0x3, rs1_rd, 2, imm);
         }
-        case 2: {
+        case isa::Q2Op::LWSP: {
             const uint32_t imm =
                 ((ir >> 2) & 0x3) << 6 | ((ir >> 4) & 0x7) << 2 | ((ir >> 12) & 0x1) << 5;
             return make_i_type(0x03, 0x2, rs1_rd, 2, imm);
         }
-        case 3: {
+        case isa::Q2Op::LDSP_FLWSP: {
             if (is_rv64) {
                 const uint32_t imm =
                     ((ir >> 2) & 0x7) << 6 | ((ir >> 5) & 0x3) << 3 | ((ir >> 12) & 0x1) << 5;
@@ -1572,17 +1574,17 @@ auto decompress_q2(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_rd, u
                 return make_i_type(0x07, 0x2, rs1_rd, 2, imm);
             }
         }
-        case 4:
+        case isa::Q2Op::ALU_JR:
             return decompress_q2_op4(ir, rs1_rd, rs2);
-        case 5: {
+        case isa::Q2Op::FSDSP: {
             const uint32_t imm = ((ir >> 7) & 0x7) << 6 | ((ir >> 10) & 0x7) << 3;
             return make_s_type(0x27, 0x3, 2, rs2, imm);
         }
-        case 6: {
+        case isa::Q2Op::SWSP: {
             const uint32_t imm = ((ir >> 7) & 0x3) << 6 | ((ir >> 9) & 0xF) << 2;
             return make_s_type(0x23, 0x2, 2, rs2, imm);
         }
-        case 7: {
+        case isa::Q2Op::SDSP_FSWSP: {
             if (is_rv64) {
                 const uint32_t imm = ((ir >> 7) & 0x7) << 6 | ((ir >> 10) & 0x7) << 3;
                 return make_s_type(0x23, 0x3, 2, rs2, imm);

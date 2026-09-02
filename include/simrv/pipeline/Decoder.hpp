@@ -138,6 +138,9 @@ class Decoder {
         return static_cast<RegId>(8 + ((inst_ >> 7) & 0x7));
     }
 
+    /// Compressed prime register mapping for rs1 (maps to x8-x15, identical to c_rs1_rd_p)
+    [[nodiscard]] constexpr auto c_rs1_p() const -> RegId { return c_rs1_rd_p(); }
+
     /// Compressed prime register mapping for rs2 (maps to x8-x15)
     [[nodiscard]] constexpr auto c_rs2_p() const -> RegId {
         return static_cast<RegId>(8 + ((inst_ >> 2) & 0x7));
