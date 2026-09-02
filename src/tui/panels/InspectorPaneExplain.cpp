@@ -376,15 +376,14 @@ auto format_assembly_r(const simrv::pipeline::PipelineContext& ctx, std::string_
 
 auto format_assembly_i(const simrv::pipeline::PipelineContext& ctx, std::string_view mnemonic,
                        const std::string& rd_name, const std::string& rs1_name) -> std::string {
-    bool const is_load = (ctx.opcode == Opcode::Load) || (ctx.opcode == Opcode::LoadFp);
-    bool const is_csr = (ctx.op_id >= CSRRW && ctx.op_id <= CSRRCI);
-    if (is_load) {
+    using namespace simrv::pipeline::operation;
+    if (is_load(ctx.op_id)) {
         return std::format("{} {}, {}({})", mnemonic, rd_name, ctx.imm, rs1_name);
     }
     if (ctx.op_id == JALR) {
         return std::format("jalr {}, {}({})", rd_name, ctx.imm, rs1_name);
     }
-    if (is_csr) {
+    if (info(ctx.op_id).side_effects & SideEffectFlags::Csr) {
         std::string csr_str = simrv::util::csr_name(ctx.imm & 0xFFF);
         if (is_csr_imm_op(ctx.op_id)) {
             return std::format("{} {}, {}, {}", mnemonic, rd_name, csr_str,
@@ -414,7 +413,8 @@ auto format_assembly_s_b_u_j_r4(const simrv::pipeline::PipelineContext& ctx, Ins
     -> std::string {
     switch (fmt) {
         case InstFormat::S: {
-            bool const is_store_fp = (ctx.opcode == Opcode::StoreFp);
+            bool const is_store_fp = simrv::pipeline::operation::rs2_bank(ctx.op_id) ==
+                                     simrv::pipeline::operation::RegBank::Float;
             return std::format("{} {}, {}({})", mnemonic, get_reg_name(ctx.rs2, is_store_fp),
                                ctx.imm, rs1_name);
         }
@@ -622,9 +622,9 @@ auto render_field_decoded_values(const simrv::core::ArchState& st,
             std::format("  imm    : {} (0x{:X})", ctx.imm, static_cast<uint32_t>(ctx.imm)), width));
     }
     if (has_target(fmt)) {
-        rows.push_back(format_to_width(
-            std::format("  target : 0x{:0{}x}", st.pc + ctx.imm, simrv::xlen::kXLenHexDigits),
-            width));
+        rows.push_back(format_to_width(std::format("  target : 0x{:0{}x}", ctx.cpc.raw() + ctx.imm,
+                                                   simrv::xlen::kXLenHexDigits),
+                                       width));
     }
     return rows;
 }
@@ -634,9 +634,10 @@ auto render_dataflow_breakdown(const simrv::core::ArchState& st,
                                const std::string& rd_name, const std::string& rs1_name,
                                const std::string& rs2_name, int width) -> std::vector<std::string> {
     std::vector<std::string> rows;
-    bool is_rs1_fpr = simrv::isa::is_rs1_fp(ctx.opcode, ctx.op_id);
-    bool is_rs2_fpr = simrv::isa::is_rs2_fp(ctx.opcode, ctx.op_id);
-    bool is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
+    using namespace simrv::pipeline::operation;
+    bool is_rs1_fpr = rs1_bank(ctx.op_id) == RegBank::Float;
+    bool is_rs2_fpr = rs2_bank(ctx.op_id) == RegBank::Float;
+    bool is_dst_fp = rd_bank(ctx.op_id) == RegBank::Float;
 
     std::string op1_str = has_rs1(fmt)
                               ? std::format("{} ({}) = {}", rs1_name, is_rs1_fpr ? "FPR" : "GPR",
@@ -663,6 +664,24 @@ auto render_dataflow_breakdown(const simrv::core::ArchState& st,
         std::format("  {}Operand 2   : {}{}\033[0m", kThemeText, kThemeSky, op2_str), width));
     rows.push_back(format_to_width(
         std::format("  {}Destination : {}{}\033[0m", kThemeText, kThemeMint, dst_str), width));
+
+    if (is_memory(ctx.op_id)) {
+        const Register base = st.regs.read(ctx.rs1);
+        rows.push_back(format_to_width(
+            std::format("  {}Effective Addr: {}0x{:0{}x}\033[0m = {} + {}", kThemeText, kThemeSky,
+                        base + ctx.imm, simrv::xlen::kXLenHexDigits, rs1_name, ctx.imm),
+            width));
+    }
+    if (is_control(ctx.op_id)) {
+        const Register target =
+            is_jump(ctx.op_id) && info(ctx.op_id).control == ControlFlowKind::Jalr
+                ? (st.regs.read(ctx.rs1) + ctx.imm) & ~Register{1}
+                : ctx.cpc.raw() + ctx.imm;
+        rows.push_back(
+            format_to_width(std::format("  {}Control Target: {}0x{:0{}x}\033[0m", kThemeText,
+                                        kThemeSky, target, simrv::xlen::kXLenHexDigits),
+                            width));
+    }
 
     if (has_imm(fmt) && fmt != InstFormat::U) {
         bool sign_bit = (ctx.imm < 0);
@@ -955,9 +974,10 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
     InstFormat const fmt = simrv::isa::get_instruction_format(ctx.opcode);
     auto const [mnemonic, behavior_desc] = simrv::util::get_operation_details(ctx.op_id);
 
-    bool const is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
-    bool const is_rs1_fpr = simrv::isa::is_rs1_fp(ctx.opcode, ctx.op_id);
-    bool const is_rs2_fpr = simrv::isa::is_rs2_fp(ctx.opcode, ctx.op_id);
+    using simrv::pipeline::operation::RegBank;
+    bool const is_dst_fp = simrv::pipeline::operation::rd_bank(ctx.op_id) == RegBank::Float;
+    bool const is_rs1_fpr = simrv::pipeline::operation::rs1_bank(ctx.op_id) == RegBank::Float;
+    bool const is_rs2_fpr = simrv::pipeline::operation::rs2_bank(ctx.op_id) == RegBank::Float;
 
     std::string rd_name = get_reg_name(ctx.rd, is_dst_fp);
     std::string rs1_name = get_reg_name(ctx.rs1, is_rs1_fpr);
@@ -1029,7 +1049,8 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
     explain_rows.insert(explain_rows.end(), dataflow_fields.begin(), dataflow_fields.end());
     explain_rows.push_back(format_to_width("", width));
 
-    bool const is_csr = (ctx.op_id >= CSRRW && ctx.op_id <= CSRRCI);
+    bool const is_csr = simrv::pipeline::operation::info(ctx.op_id).side_effects &
+                        simrv::pipeline::operation::SideEffectFlags::Csr;
     if (is_csr) {
         uint32_t csr_addr = ctx.imm & 0xFFF;
         std::string csr_nm = simrv::util::csr_name(csr_addr);
@@ -1038,10 +1059,12 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
         explain_rows.push_back(format_to_width("", width));
     }
 
-    explain_rows.push_back(section_line("Microarchitectural & Hazard Profile", width));
-    auto microarch_fields = render_microarchitectural_profile(ctx, width);
-    explain_rows.insert(explain_rows.end(), microarch_fields.begin(), microarch_fields.end());
-    explain_rows.push_back(format_to_width("", width));
+    if (machine_.runtime_profile.is_cycle_mode()) {
+        explain_rows.push_back(section_line("Microarchitectural & Hazard Profile", width));
+        auto microarch_fields = render_microarchitectural_profile(ctx, width);
+        explain_rows.insert(explain_rows.end(), microarch_fields.begin(), microarch_fields.end());
+        explain_rows.push_back(format_to_width("", width));
+    }
 
     explain_rows.push_back(section_line("Instruction Description", width));
     std::string isa_ext = std::string(simrv::util::get_isa_extension_name(ctx.op_id));

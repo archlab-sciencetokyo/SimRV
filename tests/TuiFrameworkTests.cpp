@@ -1,7 +1,9 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
+#include <memory>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -11,6 +13,7 @@
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"
+#include "simrv/tui/InspectionReport.hpp"
 #include "simrv/tui/LogBuffer.hpp"
 #include "simrv/tui/TuiFrameRenderer.hpp"
 #include "simrv/tui/TuiGuidance.hpp"
@@ -25,6 +28,7 @@
 #include "simrv/tui/modals/SettingsModal.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
+#include "simrv/util/CliParser.hpp"
 
 namespace {
 
@@ -156,7 +160,7 @@ void test_utf8_and_theme_helpers() {
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 28, "all key actions have registry entries");
+    expect(bindings.size() == 30, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
     std::set<char> claimed_chars;
     for (const auto& binding : bindings) {
@@ -196,7 +200,7 @@ void test_key_registry() {
         simrv::tui::TuiFooterAction::RunPause,
         simrv::tui::TuiFooterAction::Quit,
         simrv::tui::TuiFooterAction::CycleLayout,
-        simrv::tui::TuiFooterAction::ToggleLearn,
+        simrv::tui::TuiFooterAction::ToggleStudentGuide,
         simrv::tui::TuiFooterAction::TogglePanel,
         simrv::tui::TuiFooterAction::ToggleTrace,
         simrv::tui::TuiFooterAction::OpenSettings,
@@ -234,13 +238,26 @@ void test_key_registry() {
     running.paused = false;
     expect(!simrv::tui::Keybindings::is_available(KeyAction::InspectAddress, running),
            "inspection requires a paused machine");
-    expect(!simrv::tui::Keybindings::is_available(KeyAction::ToggleLearn, running),
-           "guided inspection can only be changed while navigating the paused TUI");
-    expect(simrv::tui::Keybindings::get(KeyAction::ToggleLearn).primary_char == 'g',
-           "guided inspection uses the canonical g binding");
+    expect(!simrv::tui::Keybindings::is_available(KeyAction::ToggleStudentGuide, running),
+           "the Student Guide can only be changed while navigating the paused TUI");
+    const auto& guide_binding = simrv::tui::Keybindings::get(KeyAction::ToggleStudentGuide);
+    expect(guide_binding.primary_char == 'g' && guide_binding.footer_label == "[g] Guide" &&
+               guide_binding.help_label.contains("Student Guide"),
+           "the Student Guide has one mnemonic canonical binding and name");
+    expect(simrv::tui::Keybindings::get(KeyAction::ActivateStudentGuide).key_display == "[Enter]",
+           "performing the guide suggestion has a canonical Enter binding");
+    expect(!simrv::tui::Keybindings::is_available(KeyAction::ActivateStudentGuide, paused),
+           "Enter retains its normal meaning while the Student Guide is hidden");
+    paused.student_guide_enabled = true;
+    expect(simrv::tui::Keybindings::is_available(KeyAction::ActivateStudentGuide, paused),
+           "the guide action becomes available when the paused guide is visible");
     expect(simrv::tui::Keybindings::unavailable_reason(KeyAction::InspectAddress, running) ==
                "Pause the simulator first",
            "disabled actions explain how to become available");
+    auto normal_mode = paused;
+    normal_mode.debug_mode = false;
+    expect(simrv::tui::Keybindings::is_available(KeyAction::InspectAddress, normal_mode),
+           "architectural memory inspection does not require debug diagnostics");
     auto functional = paused;
     functional.cycle_accurate = false;
     expect(simrv::tui::Keybindings::is_available(KeyAction::ConfigureSystem, functional),
@@ -327,23 +344,111 @@ void test_page_guidance() {
     constexpr TuiRegPage pages[] = {TuiRegPage::GPR,      TuiRegPage::FPR,     TuiRegPage::VEC,
                                     TuiRegPage::PIPELINE, TuiRegPage::CACHE,   TuiRegPage::TLB,
                                     TuiRegPage::BPRED,    TuiRegPage::HAZARD,  TuiRegPage::BUS,
-                                    TuiRegPage::TRACE,    TuiRegPage::EXPLAIN, TuiRegPage::STACK};
+                                    TuiRegPage::TRACE,    TuiRegPage::EXPLAIN, TuiRegPage::STACK,
+                                    TuiRegPage::DISASM};
     for (auto page : pages) {
         auto const guidance = simrv::tui::guidance_for_page(page, true);
         expect(!guidance.title.empty(), "each inspection page has a guidance title");
-        expect(!guidance.meaning.empty(), "each inspection page explains its meaning");
+        expect(!guidance.meaning.empty(), "each inspection page explains visible state");
         expect(!guidance.relationship.empty(), "each inspection page links state to execution");
         expect(!simrv::tui::Keybindings::get(guidance.next_action).key_display.empty(),
                "each inspection page links to a canonical action");
     }
     expect(!simrv::tui::should_show_guidance(true, false, 24),
-           "guidance is hidden by default until learn mode is enabled");
+           "guidance is hidden by default until the Student Guide is enabled");
     expect(simrv::tui::should_show_guidance(true, true, 24),
-           "learn mode shows guidance while paused when space permits");
+           "the Student Guide is visible while paused when space permits");
     expect(!simrv::tui::should_show_guidance(false, true, 24),
            "guidance does not replace guest-terminal content while running");
     expect(!simrv::tui::should_show_guidance(true, true, 15),
            "architectural data wins over guidance in short terminals");
+
+    auto memory_guidance =
+        simrv::tui::guidance_for_context({.page = TuiRegPage::GPR,
+                                          .cycle_accurate = false,
+                                          .instruction_valid = true,
+                                          .operation = simrv::isa::OperationId::LW,
+                                          .destination = 10});
+    expect(memory_guidance.relationship.contains("address"),
+           "memory instructions receive contextual address guidance");
+    auto hazard_guidance = simrv::tui::guidance_for_context({.page = TuiRegPage::HAZARD,
+                                                             .cycle_accurate = true,
+                                                             .data_hazard_stalls = 3,
+                                                             .control_hazard_bubbles = 2});
+    expect(hazard_guidance.meaning.contains("3 data stalls") &&
+               hazard_guidance.meaning.contains("2 control bubbles"),
+           "cycle telemetry is summarized in contextual guidance");
+    auto empty_guidance = simrv::tui::guidance_for_context({.image_loaded = false});
+    expect(empty_guidance.next_action == simrv::tui::KeyAction::LoadBinary &&
+               empty_guidance.meaning.contains("No program"),
+           "an empty classroom session guides the student into the program loader");
+}
+
+void test_classroom_cli_defaults() {
+    std::array<std::string, 7> storage = {"SimRV",       "--tui", "--class", "--inspection-output",
+                                          "report.json", "-m",    "demo.elf"};
+    std::array<char*, 7> arguments{};
+    for (size_t index = 0; index < storage.size(); ++index) {
+        arguments[index] = storage[index].data();
+    }
+    auto parsed = simrv::util::parse_command_line(arguments);
+    expect(parsed.has_value(), "classroom CLI options parse together");
+    if (!parsed) return;
+    auto config = parsed->options.to_machine_config();
+    expect(config.tui.enabled && config.tui.class_mode,
+           "classroom CLI selects the guided TUI profile");
+    expect(config.tui.inspection_output == "report.json",
+           "inspection output path reaches typed machine configuration");
+    simrv::core::Machine machine(config);
+    simrv::tui::Tui tui(machine);
+    expect(tui.is_student_guide_enabled(),
+           "classroom mode starts the interactive Student Guide enabled");
+
+    simrv::core::MachineConfig empty_config{};
+    empty_config.tui.enabled = true;
+    empty_config.tui.class_mode = true;
+    simrv::core::Machine empty_machine(empty_config);
+    simrv::tui::Tui empty_tui(empty_machine);
+    empty_tui.activate_student_guide_suggestion();
+    expect(empty_tui.get_active_modal() == simrv::tui::ModalType::LoadBinary,
+           "the Student Guide can execute its context-sensitive suggestion");
+}
+
+void test_inspection_report() {
+    simrv::core::MachineConfig config{};
+    config.execution.num_harts = 2;
+    config.tui.inspection_output = "/tmp/simrv-inspection-report-test.json";
+    simrv::core::Machine machine(config);
+    machine.add_hart_for_testing(std::make_unique<simrv::core::CPU>());
+    machine.hart(1).state().pc = 0x80000100;
+    machine.hart(1).state().regs.write(RegId::A0, 42);
+    machine.hart(1).pipeline_context.op_id = simrv::isa::OperationId::ADDI;
+    machine.hart(1).pipeline_context.ir_org = 0x02A00513;
+
+    const std::vector<std::string> trace{"0x80000100: addi a0, zero, 42"};
+    const std::string report = simrv::tui::make_inspection_report(machine, 1, trace);
+    expect(report.contains("\"schema_version\": 1"), "inspection report is versioned");
+    expect(report.contains("\"selected_hart\": 1"), "inspection report selects requested hart");
+    const std::string expected_a0 = simrv::xlen::kIsXLen64 ? "0x000000000000002a" : "0x0000002a";
+    expect(report.contains(expected_a0), "inspection report captures GPR state");
+    expect(report.contains("addi a0, zero, 42"), "inspection report captures recent trace");
+    expect(!report.contains("student") && !report.contains("grade"),
+           "inspection report contains no identity or grading fields");
+
+    const auto path = std::filesystem::temp_directory_path() / "simrv-inspection-report-test.json";
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    auto first = simrv::tui::write_inspection_report(path, report, false);
+    expect(first.has_value() && *first == simrv::tui::InspectionReportWriteStatus::Written,
+           "inspection report writes to an explicit unused path");
+    auto guarded = simrv::tui::write_inspection_report(path, report, false);
+    expect(
+        guarded.has_value() && *guarded == simrv::tui::InspectionReportWriteStatus::WouldOverwrite,
+        "inspection report refuses implicit overwrite");
+    auto confirmed = simrv::tui::write_inspection_report(path, report, true);
+    expect(confirmed.has_value() && *confirmed == simrv::tui::InspectionReportWriteStatus::Written,
+           "inspection report replaces a file only after confirmation");
+    std::filesystem::remove(path, error);
 }
 
 void test_help_uses_canonical_registry() {
@@ -831,7 +936,8 @@ void test_instruction_explainer_is_side_effect_free() {
            "explainer preserves instruction-cache counters");
     expect(cpu.tlb.inst_r_lru == before_tlb_lru, "explainer preserves TLB replacement state");
 
-    // Verify microarchitectural profile is rendered in explain rows
+    // Microarchitectural claims are shown only when cycle telemetry is available.
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleObservable;
     pane.set_paused(true);
     pane.set_page(simrv::tui::TuiRegPage::EXPLAIN);
     pane.set_visible_rows(80);
@@ -854,15 +960,20 @@ void test_inspector_panels_traits_and_scoreboard() {
     cpu.machine_ = &machine;
     cpu.reset();
 
-    // 1. Test Scoreboard integration in Register pane
-    cpu.get_scoreboard().reserve(simrv::pipeline::operation::RegBank::Integer,
-                                 static_cast<RegId>(1), simrv::pipeline::PipelineStage::Execute, 2,
-                                 false);
-    cpu.get_scoreboard().reserve(simrv::pipeline::operation::RegBank::Integer,
-                                 static_cast<RegId>(2), simrv::pipeline::PipelineStage::Memory, 0,
-                                 true);
+    // 1. Project authoritative pipeline slots into the sampled TUI scoreboard.
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+    cpu.ca_pipeline.execute->valid = true;
+    cpu.ca_pipeline.execute->writes_int = true;
+    cpu.ca_pipeline.execute->wb_dest = static_cast<RegId>(1);
+    cpu.ca_pipeline.execute->remaining_latency = 2;
+    cpu.ca_pipeline.memory->valid = true;
+    cpu.ca_pipeline.memory->writes_int = true;
+    cpu.ca_pipeline.memory->wb_dest = static_cast<RegId>(2);
+    cpu.ca_pipeline.memory->wb_valid = true;
+    machine.publish_tui_execution_snapshot_for_testing();
 
     simrv::tui::InspectorPane pane(machine);
+    pane.refresh_execution_snapshot();
     pane.set_page(simrv::tui::TuiRegPage::GPR);
     pane.set_paused(true);
     pane.set_visible_rows(30);
@@ -875,7 +986,6 @@ void test_inspector_panels_traits_and_scoreboard() {
     expect(reg2_row.contains("[FWD]"), "register view renders forwarding badge [FWD]");
 
     // 2. Test Live Scoreboard table in Hazard pane (cycle mode active)
-    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
     pane.set_page(simrv::tui::TuiRegPage::HAZARD);
     std::string hazard_row_header = pane.render_row(12, 80);  // logical_row 10
     expect(hazard_row_header.contains("Live Multi-Bank Scoreboard"),
@@ -884,6 +994,47 @@ void test_inspector_panels_traits_and_scoreboard() {
     expect(hazard_row_entry.contains("INT") && hazard_row_entry.contains("x1") &&
                hazard_row_entry.contains("EX"),
            "hazard pane renders active in-flight reservation item");
+
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+    machine.publish_tui_execution_snapshot_for_testing();
+    pane.refresh_execution_snapshot();
+    pane.set_page(simrv::tui::TuiRegPage::GPR);
+    expect(!pane.render_row(3, 80).contains("[EX 2c]"),
+           "functional-mode snapshots contain no pipeline reservations");
+
+    simrv::core::Machine smp_machine(simrv::core::MachineConfig{
+        .execution = {.num_harts = 2}, .tui = {.enabled = true, .inspection_output = {}}});
+    smp_machine.add_hart_for_testing(std::make_unique<simrv::core::CPU>());
+    std::vector<Byte> smp_ram(1024 * 1024, Byte{0});
+    smp_machine.set_ram_for_testing(smp_ram.data(), smp_ram.size());
+    smp_machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+    auto& secondary = smp_machine.hart(1);
+    secondary.ca_pipeline.writeback->valid = true;
+    secondary.ca_pipeline.writeback->writes_fp = true;
+    secondary.ca_pipeline.writeback->wb_dest = static_cast<RegId>(3);
+    secondary.ca_pipeline.writeback->wb_valid = true;
+    for (const auto pipeline_type :
+         {simrv::pipeline::PipelineType::ThreeStage, simrv::pipeline::PipelineType::FiveStage}) {
+        secondary.pipeline_sim.config.pipeline_type = pipeline_type;
+        smp_machine.publish_tui_execution_snapshot_for_testing();
+        const auto primary_snapshot = smp_machine.tui_execution_snapshot(0);
+        const auto secondary_snapshot = smp_machine.tui_execution_snapshot(1);
+        expect(!primary_snapshot.scoreboard.is_busy(simrv::pipeline::operation::RegBank::Float,
+                                                    static_cast<RegId>(3)),
+               "scoreboard projection remains isolated by hart");
+        expect(secondary_snapshot.scoreboard.can_forward(simrv::pipeline::operation::RegBank::Float,
+                                                         static_cast<RegId>(3)),
+               "three- and five-stage snapshots project FP forwarding state");
+    }
+
+    simrv::tui::InspectorPane secondary_pane(smp_machine);
+    secondary_pane.set_selected_hart(1);
+    secondary_pane.refresh_execution_snapshot();
+    secondary_pane.set_page(simrv::tui::TuiRegPage::FPR);
+    secondary_pane.set_paused(true);
+    secondary_pane.set_visible_rows(30);
+    expect(secondary_pane.render_row(5, 80).contains("[FWD]"),
+           "selected-hart register view consumes its sampled FP scoreboard");
 }
 
 }  // namespace
@@ -894,6 +1045,8 @@ int main() {
     test_utf8_and_theme_helpers();
     test_key_registry();
     test_page_guidance();
+    test_classroom_cli_defaults();
+    test_inspection_report();
     test_help_uses_canonical_registry();
     test_category_groups_and_glossary();
     test_sysconfig_modal_modes();

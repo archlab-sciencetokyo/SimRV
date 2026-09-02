@@ -475,19 +475,37 @@ auto InspectorPane::render_log_bottom_row(int row_idx, int num_rows, int width) 
     return format_to_width(" " + log_lines_.at(static_cast<std::size_t>(log_idx)), width);
 }
 
+auto InspectorPane::current_student_guidance() const -> PageGuidance {
+    auto const& context = current_cpu().pipeline_context;
+    auto const snapshot = machine_.tui_execution_snapshot(selected_hart_);
+    return guidance_for_context(
+        {.page = page_,
+         .cycle_accurate = machine_.runtime_profile.is_cycle_mode(),
+         .instruction_valid = context.op_id != simrv::isa::OperationId::UNKNOWN,
+         .operation = context.op_id,
+         .destination = static_cast<uint8_t>(context.rd),
+         .cache_misses = snapshot.icache_misses + snapshot.dcache_misses,
+         .data_hazard_stalls = snapshot.ca_stats.data_hazard_stalls,
+         .control_hazard_bubbles = snapshot.ca_stats.control_hazard_bubbles,
+         .image_loaded = !machine_.binary_path().empty(),
+         .shutdown = machine_.is_shutdown_});
+}
+
 auto InspectorPane::render_guidance_row(int row_idx, int width) -> std::string {
-    auto const guidance = guidance_for_page(page_, machine_.runtime_profile.is_cycle_mode());
+    auto const guidance = current_student_guidance();
     switch (row_idx) {
         case 0:
-            return section_line("Learn · " + std::string(guidance.title), width);
+            return section_line("Student Guide · " + guidance.title, width);
         case 1:
-            return format_to_width(" Meaning: " + std::string(guidance.meaning), width);
+            return format_to_width(" What you see: " + guidance.meaning, width);
         case 2:
-            return format_to_width(" Connect: " + std::string(guidance.relationship), width);
+            return format_to_width(" Why it matters: " + guidance.relationship, width);
         case 3: {
             auto const& binding = Keybindings::get(guidance.next_action);
-            return format_to_width(
-                " Next: " + binding.key_display + " " + std::string(guidance.next_hint), width);
+            auto const& activate = Keybindings::get(KeyAction::ActivateStudentGuide);
+            return format_to_width(" Try next: " + activate.key_display + " " + guidance.next_hint +
+                                       " (" + binding.key_display + ")  [?] Glossary",
+                                   width);
         }
         default:
             return format_to_width("", width);
@@ -511,7 +529,7 @@ auto InspectorPane::render_row(int row_idx, int width) -> std::string {
 
     constexpr int kGuidanceHeight = 4;
     constexpr int kLogAreaHeight = 6;
-    bool const show_guidance = should_show_guidance(paused_, learn_enabled_, visible_rows_);
+    bool const show_guidance = should_show_guidance(paused_, student_guide_enabled_, visible_rows_);
     int const guidance_start = visible_rows_ - kLogAreaHeight - kGuidanceHeight;
     if (page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE) {
         if (show_guidance && row_idx >= guidance_start &&
@@ -628,10 +646,14 @@ void InspectorPane::update_cache() {
     }
 }
 
+void InspectorPane::refresh_execution_snapshot() {
+    projected_scoreboard_ = machine_.tui_execution_snapshot(selected_hart_).scoreboard;
+}
+
 auto InspectorPane::get_visible_content_rows() const -> int {
     constexpr int kLogAreaHeight = 6;
     constexpr int kGuidanceHeight = 4;
-    bool const show_guidance = should_show_guidance(paused_, learn_enabled_, visible_rows_);
+    bool const show_guidance = should_show_guidance(paused_, student_guide_enabled_, visible_rows_);
     int max_content_rows = visible_rows_ - 2;
     if (page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE) {
         if (visible_rows_ >= 15) {

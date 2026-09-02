@@ -9,7 +9,7 @@
 
 namespace simrv::tui {
 
-static const std::array<KeyBindingInfo, 28> kKeyBindings = {
+static const std::array<KeyBindingInfo, 30> kKeyBindings = {
     {{.action = KeyAction::Step,
       .key_display = "[s] / [Space]",
       .primary_char = 's',
@@ -151,12 +151,20 @@ static const std::array<KeyBindingInfo, 28> kKeyBindings = {
       .alt_char = 'P',
       .footer_label = "[p] Panel",
       .help_label = "Cycle Right Pane"},
-     {.action = KeyAction::ToggleLearn,
+     {.action = KeyAction::ToggleStudentGuide,
       .key_display = "[g]",
       .primary_char = 'g',
       .alt_char = 'G',
-      .footer_label = "[g] Learn",
-      .help_label = "Toggle Guided Inspection"},
+      .footer_label = "[g] Guide",
+      .help_label = "Toggle Interactive Student Guide",
+      .category = ActionCategory::Help},
+     {.action = KeyAction::ActivateStudentGuide,
+      .key_display = "[Enter]",
+      .primary_char = '\0',
+      .alt_char = '\0',
+      .footer_label = "[Enter] Try Next",
+      .help_label = "Perform Student Guide Suggestion",
+      .category = ActionCategory::Help},
      {.action = KeyAction::ToggleExplain,
       .key_display = "[e]",
       .primary_char = 'e',
@@ -169,6 +177,14 @@ static const std::array<KeyBindingInfo, 28> kKeyBindings = {
       .alt_char = 'V',
       .footer_label = "[v] Trace",
       .help_label = "Toggle Trace Logging"},
+     {.action = KeyAction::ExportInspection,
+      .key_display = "[x]",
+      .primary_char = 'x',
+      .alt_char = 'X',
+      .footer_label = "[x] Export",
+      .help_label = "Export Paused Inspection Report",
+      .category = ActionCategory::Inspect,
+      .requires_image = true},
      {.action = KeyAction::SwitchHart,
       .key_display = "[n]",
       .primary_char = 'n',
@@ -220,7 +236,7 @@ auto Keybindings::unavailable_reason(KeyAction action, const ActionContext& cont
     }
     if (context.shutdown && action != KeyAction::Reset && action != KeyAction::LoadBinary &&
         action != KeyAction::Quit && action != KeyAction::Help &&
-        action != KeyAction::ToggleLearn) {
+        action != KeyAction::ToggleStudentGuide && action != KeyAction::ActivateStudentGuide) {
         return "The target is shut down";
     }
     switch (action) {
@@ -233,16 +249,21 @@ auto Keybindings::unavailable_reason(KeyAction action, const ActionContext& cont
         case KeyAction::Settings:
         case KeyAction::ConfigureSystem:
         case KeyAction::ConfigureMisa:
-        case KeyAction::ToggleLearn:
+        case KeyAction::ToggleStudentGuide:
+        case KeyAction::ActivateStudentGuide:
+        case KeyAction::ExportInspection:
             if (!context.paused) return "Pause the simulator first";
             break;
         default:
             break;
     }
     if ((action == KeyAction::Step || action == KeyAction::RunPause ||
-         action == KeyAction::ToggleExplain) &&
+         action == KeyAction::ToggleExplain || action == KeyAction::ExportInspection) &&
         !context.image_loaded) {
         return "Load a program image first";
+    }
+    if (action == KeyAction::ActivateStudentGuide && !context.student_guide_enabled) {
+        return "Enable the Student Guide first";
     }
     if ((action == KeyAction::SetBreakpoint || action == KeyAction::SetWatchpoint ||
          action == KeyAction::ManageBreakpoints || action == KeyAction::TogglePcBreakpoint) &&
@@ -292,8 +313,8 @@ auto key_action_for_footer(TuiFooterAction action) -> KeyAction {
             return KeyAction::Quit;
         case TuiFooterAction::CycleLayout:
             return KeyAction::CycleLayout;
-        case TuiFooterAction::ToggleLearn:
-            return KeyAction::ToggleLearn;
+        case TuiFooterAction::ToggleStudentGuide:
+            return KeyAction::ToggleStudentGuide;
         case TuiFooterAction::TogglePanel:
             return KeyAction::CycleRightPanel;
         case TuiFooterAction::ToggleTrace:

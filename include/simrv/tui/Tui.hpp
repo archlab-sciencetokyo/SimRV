@@ -179,9 +179,16 @@ class Tui {
                             uint8_t rd, Register rd_val, uint8_t rs1, Register rs1_val, uint8_t rs2,
                             Register rs2_val, int64_t imm);
     void toggle_trace_enabled();
-    /// Toggle the opt-in educational guidance strip used while paused.
-    void toggle_learn_mode();
-    [[nodiscard]] auto is_learn_mode_enabled() const -> bool { return learn_mode_enabled_; }
+    /// Export the selected hart's paused architectural state and recent trace as JSON.
+    void export_inspection_report();
+    /// Toggle the interactive Student Guide used while paused.
+    void toggle_student_guide();
+    /// Perform the context-sensitive action currently proposed by the Student Guide.
+    void activate_student_guide_suggestion();
+    [[nodiscard]] auto is_student_guide_enabled() const -> bool { return student_guide_enabled_; }
+    // Source-compatible wrappers for the former "learn mode" API.
+    void toggle_learn_mode() { toggle_student_guide(); }
+    [[nodiscard]] auto is_learn_mode_enabled() const -> bool { return is_student_guide_enabled(); }
     [[nodiscard]] auto is_trace_enabled() const -> bool {
         return trace_enabled_.load(std::memory_order_relaxed);
     }
@@ -256,7 +263,8 @@ class Tui {
     std::vector<std::string> last_screen_lines_;
     std::atomic<bool> paused_{true};
     std::atomic<bool> trace_enabled_{false};
-    bool learn_mode_enabled_{false};
+    bool student_guide_enabled_{false};
+    bool inspection_overwrite_armed_{false};
     std::vector<WorkbenchSlot> workbench_slots_{{TuiRegPage::GPR, 0}, {TuiRegPage::DISASM, 0}};
     size_t focused_slot_index_ = 0;
     size_t selected_hart_ = 0;

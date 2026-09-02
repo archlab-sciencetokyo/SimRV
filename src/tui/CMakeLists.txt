@@ -11,6 +11,7 @@ simrv_add_component(simrv-tui-framework
 add_library(simrv::tui-framework ALIAS simrv-tui-framework)
 
 simrv_add_component(simrv-tui
+  InspectionReport.cpp
   Tui.cpp
   TuiGuidance.cpp
   TuiKeybindings.cpp

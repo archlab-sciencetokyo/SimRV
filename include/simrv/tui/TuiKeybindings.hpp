@@ -37,9 +37,12 @@ enum class KeyAction : uint8_t {
     CycleRegPage,
     CycleToolPage,
     CycleRightPanel,
-    ToggleLearn,
+    ToggleStudentGuide,
+    ToggleLearn = ToggleStudentGuide,  // Compatibility alias for the former name.
+    ActivateStudentGuide,
     ToggleExplain,
     ToggleTrace,
+    ExportInspection,
     SwitchHart,
     OpenGlossary,
     ToggleTheme,
@@ -55,6 +58,7 @@ struct ActionContext {
     bool image_loaded = false;
     bool debug_mode = false;
     bool cycle_accurate = false;
+    bool student_guide_enabled = false;
 };
 
 struct KeyBindingInfo {

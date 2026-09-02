@@ -26,7 +26,9 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/pipeline/Decoder.hpp"
+#include "simrv/tui/InspectionReport.hpp"
 #include "simrv/tui/TuiFrameRenderer.hpp"
+#include "simrv/tui/TuiGuidance.hpp"
 #include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
@@ -102,6 +104,7 @@ Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
     main_thread_id_ = std::this_thread::get_id();
     last_speed_update_ = std::chrono::steady_clock::now();
     trace_enabled_.store(false, std::memory_order_relaxed);
+    student_guide_enabled_ = machine_.class_mode_enabled();
     right_panel_mode_.store(TuiRightPanelMode::Terminal, std::memory_order_relaxed);
     update_trace_active_cache();
     vt_.set_scroll_offset_callback([this](int lines) -> void {
@@ -557,11 +560,12 @@ void Tui::render_build_lines(int inspector_width, int terminal_width, int num_ro
     inspector_pane_->set_max_kips(max_kips_);
     inspector_pane_->set_kips_history(kips_history_);
     inspector_pane_->set_paused(paused_);
-    inspector_pane_->set_learn_enabled(learn_mode_enabled_);
+    inspector_pane_->set_student_guide_enabled(student_guide_enabled_);
     inspector_pane_->set_visible_rows(num_rows);
     inspector_pane_->set_active_runtime(static_cast<double>(runtime_duration_.count()) / 1000000.0);
     inspector_pane_->set_trace_buffer(&trace_buffer_);
     inspector_pane_->set_log_lines(std::move(log_lines));
+    inspector_pane_->refresh_execution_snapshot();
     terminal_pane_->set_lines(lines_to_draw_);
     terminal_pane_->set_scroll_offset(scroll_offset_);
 
@@ -1277,6 +1281,44 @@ void Tui::toggle_trace_enabled() {
     render(true);
 }
 
+void Tui::export_inspection_report() {
+    if (!is_paused()) {
+        modal_.open_notice("PAUSE REQUIRED",
+                           "Pause the simulator before exporting inspection state.", true);
+        render(true);
+        return;
+    }
+    const std::string& destination = machine_.configuration().tui.inspection_output;
+    if (destination.empty()) {
+        modal_.open_notice("OUTPUT PATH REQUIRED",
+                           "Restart with --inspection-output <FILE>, then press [x] while paused.",
+                           true);
+        render(true);
+        return;
+    }
+
+    drain_trace_records();
+    const std::string report = make_inspection_report(machine_, selected_hart_, trace_buffer_);
+    const auto result = write_inspection_report(destination, report, inspection_overwrite_armed_);
+    if (!result) {
+        inspection_overwrite_armed_ = false;
+        modal_.open_notice("EXPORT FAILED", result.error(), true);
+    } else if (*result == InspectionReportWriteStatus::WouldOverwrite) {
+        inspection_overwrite_armed_ = true;
+        modal_.open_notice(
+            "CONFIRM OVERWRITE",
+            std::format("{} already exists. Close this dialog and press [x] again to replace it.",
+                        destination),
+            false);
+    } else {
+        inspection_overwrite_armed_ = false;
+        modal_.open_notice(
+            "INSPECTION EXPORTED",
+            std::format("Wrote selected Hart {} state to {}.", selected_hart_, destination), false);
+    }
+    render(true);
+}
+
 void Tui::toggle_run_state() {
     if (paused_.load(std::memory_order_relaxed))
         unpause_loop();
@@ -1882,6 +1924,12 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
             open_modal(ModalType::SetSpeed);
             return true;
         case simrv::tui::TuiKey::QuestionMark:
+            if (inspector_pane_) {
+                modal_.set_glossary_topic(
+                    guidance_for_page(inspector_pane_->get_page(),
+                                      machine_.runtime_profile.is_cycle_mode())
+                        .glossary_topic);
+            }
             open_modal(ModalType::Glossary);
             return true;
         case simrv::tui::TuiKey::h:
@@ -1904,11 +1952,15 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
             return true;
         case simrv::tui::TuiKey::g:
         case simrv::tui::TuiKey::G:
-            toggle_learn_mode();
+            toggle_student_guide();
             return true;
         case simrv::tui::TuiKey::v:
         case simrv::tui::TuiKey::V:
             toggle_trace_enabled();
+            return true;
+        case simrv::tui::TuiKey::x:
+        case simrv::tui::TuiKey::X:
+            export_inspection_report();
             return true;
         case simrv::tui::TuiKey::u:
         case simrv::tui::TuiKey::U:
@@ -1987,6 +2039,11 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
         machine_.request_reboot();
         return;
     }
+    if ((key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) &&
+        student_guide_enabled_ && is_paused()) {
+        activate_student_guide_suggestion();
+        return;
+    }
     if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
         reset_scroll();
         return;
@@ -1999,6 +2056,13 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
 
     if (handle_navigation_keyboard_input(byte, key) || handle_speed_keyboard_input(key)) return;
 
+    // Memory inspection is an architectural teaching/observation tool, not a debug-diagnostics
+    // feature. Keep its input semantics aligned with the canonical keybinding registry.
+    if (key == simrv::tui::TuiKey::i || key == simrv::tui::TuiKey::I) {
+        open_modal(ModalType::InspectAddress);
+        return;
+    }
+
     if (key == simrv::tui::TuiKey::CtrlD || key == simrv::tui::TuiKey::d ||
         key == simrv::tui::TuiKey::D) {
         machine_.set_debug_diagnostics_enabled(!machine_.debug_diagnostics_enabled());
@@ -2009,8 +2073,7 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
     }
 
     if (key == simrv::tui::TuiKey::Colon || key == simrv::tui::TuiKey::w ||
-        key == simrv::tui::TuiKey::W || key == simrv::tui::TuiKey::i ||
-        key == simrv::tui::TuiKey::I || key == simrv::tui::TuiKey::m ||
+        key == simrv::tui::TuiKey::W || key == simrv::tui::TuiKey::m ||
         key == simrv::tui::TuiKey::M || key == simrv::tui::TuiKey::k ||
         key == simrv::tui::TuiKey::K) {
         if (handle_debug_keyboard_input(key)) return;
@@ -2049,11 +2112,52 @@ void Tui::pause_loop() {
 
 void Tui::unpause_loop() { set_paused(false); }
 
-void Tui::toggle_learn_mode() {
-    learn_mode_enabled_ = !learn_mode_enabled_;
+void Tui::toggle_student_guide() {
+    student_guide_enabled_ = !student_guide_enabled_;
     set_status_override(
-        std::format("Guided inspection {}", learn_mode_enabled_ ? "enabled" : "hidden"));
+        std::format("Student Guide {}", student_guide_enabled_ ? "enabled" : "hidden"));
     render(true);
+}
+
+void Tui::activate_student_guide_suggestion() {
+    if (!student_guide_enabled_ || !is_paused() || !inspector_pane_) return;
+
+    auto const guidance = inspector_pane_->current_student_guidance();
+    switch (guidance.next_action) {
+        case KeyAction::Step:
+            handle_normal_keyboard_input('s', TuiKey::s);
+            break;
+        case KeyAction::LoadBinary:
+            open_modal(ModalType::LoadBinary);
+            break;
+        case KeyAction::Reset:
+            machine_.request_reboot();
+            break;
+        case KeyAction::CycleRegPage:
+            cycle_reg_page();
+            break;
+        case KeyAction::CycleToolPage:
+            cycle_tool_page();
+            break;
+        case KeyAction::ToggleExplain:
+            toggle_explain();
+            break;
+        case KeyAction::ToggleTrace:
+            toggle_trace_enabled();
+            break;
+        case KeyAction::InspectAddress:
+            open_modal(ModalType::InspectAddress);
+            break;
+        case KeyAction::ConfigureSystem:
+            open_modal(ModalType::ConfigureSystem);
+            break;
+        default:
+            set_status_override(std::format("Use {} to {}",
+                                            Keybindings::get(guidance.next_action).key_display,
+                                            guidance.next_hint));
+            render(true);
+            break;
+    }
 }
 
 void Tui::execute_header_action(HeaderHitResult hit) {
@@ -2195,8 +2299,8 @@ void Tui::execute_footer_action(TuiFooterAction action) {
         case TuiFooterAction::CycleLayout:
             cycle_layout();
             break;
-        case TuiFooterAction::ToggleLearn:
-            toggle_learn_mode();
+        case TuiFooterAction::ToggleStudentGuide:
+            toggle_student_guide();
             break;
         case TuiFooterAction::TogglePanel:
             cycle_right_panel_mode();

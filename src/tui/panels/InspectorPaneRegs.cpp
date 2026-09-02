@@ -100,7 +100,7 @@ auto InspectorPane::render_registers_single_column(const simrv::core::ArchState&
                                                    int logical_row, int width) -> std::string {
     if (logical_row >= 0 && logical_row < 32) {
         int reg = logical_row;
-        const auto& sb = current_cpu().get_scoreboard();
+        const auto& sb = projected_scoreboard_;
         switch (page_) {
             case TuiRegPage::GPR: {
                 auto val = st.regs.read(static_cast<RegId>(reg));
@@ -150,7 +150,7 @@ auto InspectorPane::render_registers_double_column(const simrv::core::ArchState&
         int reg1 = logical_row;
         int reg2 = logical_row + 16;
 
-        const auto& sb = current_cpu().get_scoreboard();
+        const auto& sb = projected_scoreboard_;
         switch (page_) {
             case TuiRegPage::GPR: {
                 auto val1 = st.regs.read(static_cast<RegId>(reg1));

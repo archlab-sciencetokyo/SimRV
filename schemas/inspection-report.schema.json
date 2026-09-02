@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simrv.dev/schemas/v3/inspection-report.schema.json",
+  "title": "SimRV Inspection Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "simulator",
+    "configuration",
+    "selected_hart",
+    "instruction",
+    "architectural_state",
+    "counters",
+    "recent_trace"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "simulator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "git_sha", "xlen"],
+      "properties": {
+        "version": { "type": "string" },
+        "git_sha": { "type": "string" },
+        "xlen": { "enum": [32, 64] }
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine", "platform", "baremetal", "harts", "pipeline", "dram_base", "dram_size", "vlen"],
+      "properties": {
+        "engine": { "type": "string" },
+        "platform": { "enum": ["pcie", "mmio"] },
+        "baremetal": { "type": "boolean" },
+        "harts": { "type": "integer", "minimum": 1 },
+        "pipeline": { "type": "string" },
+        "dram_base": { "$ref": "#/$defs/hex" },
+        "dram_size": { "type": "integer", "minimum": 1 },
+        "vlen": { "type": "integer", "minimum": 32 }
+      }
+    },
+    "selected_hart": { "type": "integer", "minimum": 0 },
+    "instruction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pc", "raw", "operation"],
+      "properties": {
+        "pc": { "$ref": "#/$defs/hex" },
+        "raw": { "$ref": "#/$defs/hex" },
+        "operation": { "type": "string" }
+      }
+    },
+    "architectural_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["privilege", "gpr", "csr"],
+      "properties": {
+        "privilege": { "enum": ["user", "supervisor", "machine", "unknown"] },
+        "gpr": {
+          "type": "array",
+          "minItems": 32,
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/hex" }
+        },
+        "csr": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mstatus", "mepc", "mcause", "mtval", "satp", "sepc", "scause", "stval"],
+          "properties": {
+            "mstatus": { "$ref": "#/$defs/hex" },
+            "mepc": { "$ref": "#/$defs/hex" },
+            "mcause": { "$ref": "#/$defs/hex" },
+            "mtval": { "$ref": "#/$defs/hex" },
+            "satp": { "$ref": "#/$defs/hex" },
+            "sepc": { "$ref": "#/$defs/hex" },
+            "scause": { "$ref": "#/$defs/hex" },
+            "stval": { "$ref": "#/$defs/hex" }
+          }
+        }
+      }
+    },
+    "counters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instructions", "cycles", "icache_hits", "icache_misses", "dcache_hits", "dcache_misses", "data_hazard_stalls", "control_hazard_bubbles"],
+      "properties": {
+        "instructions": { "$ref": "#/$defs/count" },
+        "cycles": { "$ref": "#/$defs/count" },
+        "icache_hits": { "$ref": "#/$defs/count" },
+        "icache_misses": { "$ref": "#/$defs/count" },
+        "dcache_hits": { "$ref": "#/$defs/count" },
+        "dcache_misses": { "$ref": "#/$defs/count" },
+        "data_hazard_stalls": { "$ref": "#/$defs/count" },
+        "control_hazard_bubbles": { "$ref": "#/$defs/count" }
+      }
+    },
+    "recent_trace": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "hex": { "type": "string", "pattern": "^0x[0-9a-f]+$" },
+    "count": { "type": "integer", "minimum": 0 }
+  }
+}

@@ -259,7 +259,7 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
         bool can_forward;
     };
     std::vector<ActiveReservation> active_entries;
-    const auto& sb = cpu.get_scoreboard();
+    const auto& sb = projected_scoreboard_;
 
     const auto stage_to_string = [](simrv::pipeline::PipelineStage s) -> const char* {
         switch (s) {
