@@ -97,7 +97,30 @@ void CPU::run_fetch_stage(Machine& machine) {
 
     fetch_read_instruction_word(machine);
     if (ca_state.waiting_for_interconnect) return;
+
+    // Decode cache hit: skip decompression and decode dispatch for instructions fetched
+    // from this virtual PC before in cycle-accurate pipeline mode. The cache holds the
+    // fully-decoded result including the decompressed ir, op_id, imm, and all register fields.
+    if (machine.runtime_profile.is_cycle_mode()) {
+        if (auto* cached = decode_cache.lookup(ctx.cpc);
+            simrv::compiler::likely(cached != nullptr)) {
+            cached->copy_to(ctx);
+            return;
+        }
+    }
+
     decode_and_normalize_instruction(machine);
+
+    // Insert successful decode results into the cache for future fetches of this PC.
+    // Instructions that raised exceptions are not cached; they re-decode each time,
+    // which is correct since the exception path must re-evaluate validity in context.
+    if (machine.runtime_profile.is_cycle_mode()) {
+        if (simrv::compiler::likely(!ctx.pending_exception.has_value())) {
+            CachedOp op;
+            op.copy_from(ctx);
+            decode_cache.insert(ctx.cpc, op);
+        }
+    }
 }
 
 void CPU::fetch_address_translate(Machine& /*machine*/) {

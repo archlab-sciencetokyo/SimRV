@@ -7,6 +7,7 @@
 #include "simrv/cache/L2Cache.hpp"
 #include "simrv/cache/L3Cache.hpp"
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/DecodeCache.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Pmp.hpp"
 #include "simrv/core/RegisterFile.hpp"
@@ -87,6 +88,138 @@ void test_unaligned_host_access() {
                                          static_cast<Instruction>(simrv::isa::Funct3::Lwu)) ==
                static_cast<Word>(0xA1B2C3D4U),
            "unaligned 32-bit host access preserves all bytes");
+
+    bytes.fill(Byte{0xCC});
+    simrv::memory::host_write_fast(bytes.data() + 1, static_cast<Register>(0xFEDCBA9876543210ULL),
+                                   3);
+    const size_t widest_store = simrv::xlen::kIsXLen64 ? 8 : 4;
+    expect(bytes[1] == Byte{0x10} && bytes[2] == Byte{0x32} && bytes[3] == Byte{0x54} &&
+               bytes[4] == Byte{0x76},
+           "fast stores preserve little-endian byte order");
+    expect(bytes[1 + widest_store] == Byte{0xCC},
+           "width-3 fast stores do not write beyond the XLEN width");
+
+    const std::array<Byte, 8> signed_values = {Byte{0x80}, Byte{0x00}, Byte{0x80}, Byte{0x00},
+                                               Byte{0x00}, Byte{0x80}, Byte{0x00}, Byte{0x00}};
+    expect(simrv::memory::host_read_fast(signed_values.data(), 0) ==
+               static_cast<Word>(static_cast<SignedWord>(-128)),
+           "LB sign-extends");
+    expect(simrv::memory::host_read_fast(signed_values.data(), 4) == static_cast<Word>(0x80),
+           "LBU zero-extends");
+    expect(simrv::memory::host_read_fast(signed_values.data() + 1, 1) ==
+               static_cast<Word>(static_cast<SignedWord>(-32768)),
+           "LH sign-extends");
+    expect(simrv::memory::host_read_fast(signed_values.data() + 1, 5) == static_cast<Word>(0x8000),
+           "LHU zero-extends");
+    const std::array<Byte, 4> signed_word = {Byte{0x00}, Byte{0x00}, Byte{0x00}, Byte{0x80}};
+    expect(simrv::memory::host_read_fast(signed_word.data(), 2) ==
+               static_cast<Word>(static_cast<SignedWord>(static_cast<int32_t>(0x80000000U))),
+           "LW sign-extends");
+    expect(simrv::memory::host_read_fast(signed_word.data(), 6) == static_cast<Word>(0x80000000U),
+           "LWU preserves the unsigned word value");
+}
+
+void test_decode_cache_compact_round_robin() {
+    simrv::core::DecodeCache cache;
+    simrv::pipeline::DecodedInstruction decoded{};
+    decoded.cpc = VirtAddr{0x80000000};
+    decoded.imm = -16;
+    decoded.ir = 0xFE208EE3;
+    decoded.ir_org = decoded.ir;
+    decoded.op_id = simrv::isa::BEQ;
+    decoded.opcode = simrv::isa::Opcode::Branch;
+    decoded.rd = static_cast<RegId>(3);
+    decoded.rs1 = static_cast<RegId>(1);
+    decoded.rs2 = static_cast<RegId>(2);
+    decoded.funct3 = simrv::isa::Funct3::Beq;
+    decoded.funct7 = 0x7F;
+    decoded.funct12 = 0x123;
+    decoded.funct5 = static_cast<simrv::isa::Funct5Amo>(7);
+
+    simrv::core::CachedOp first{};
+    first.copy_from(decoded);
+    cache.insert(decoded.cpc, first);
+    auto* hit = cache.lookup(decoded.cpc);
+    expect(hit != nullptr && hit->len == 4, "decode cache returns an inserted operation");
+    simrv::pipeline::DecodedInstruction restored{};
+    hit->copy_to(restored);
+    expect(restored.cpc == decoded.cpc && restored.imm == decoded.imm &&
+               restored.ir == decoded.ir && restored.ir_org == decoded.ir_org &&
+               restored.cinsn == decoded.cinsn && restored.op_id == decoded.op_id &&
+               restored.opcode == decoded.opcode && restored.rd == decoded.rd &&
+               restored.rs1 == decoded.rs1 && restored.rs2 == decoded.rs2 &&
+               restored.funct3 == decoded.funct3 && restored.funct5 == decoded.funct5 &&
+               restored.funct7 == decoded.funct7 && restored.funct12 == decoded.funct12 &&
+               restored.pending_tval == 0 && !restored.pending_exception.has_value(),
+           "compact decode entries reconstruct the decoded context");
+
+    const Register first_pc = decoded.cpc.raw();
+    Register second_pc = first_pc + 2;
+    while (simrv::core::DecodeCache::calc_set(second_pc) !=
+           simrv::core::DecodeCache::calc_set(first_pc)) {
+        second_pc += 2;
+    }
+    Register third_pc = second_pc + 2;
+    while (simrv::core::DecodeCache::calc_set(third_pc) !=
+           simrv::core::DecodeCache::calc_set(first_pc)) {
+        third_pc += 2;
+    }
+    simrv::core::CachedOp compressed = first;
+    compressed.cinsn = 1;
+    cache.insert(second_pc, compressed);
+    expect(cache.lookup(second_pc) != nullptr && cache.lookup(second_pc)->len == 2,
+           "decode cache records compressed instruction length");
+    expect(cache.lookup(first_pc) != nullptr, "lookup hits do not disturb replacement state");
+    cache.insert(third_pc, first);
+    expect(cache.lookup(first_pc) == nullptr && cache.lookup(second_pc) != nullptr &&
+               cache.lookup(third_pc) != nullptr,
+           "full decode sets replace entries in insertion round-robin order");
+    cache.flush();
+    expect(cache.lookup(second_pc) == nullptr && cache.lookup(third_pc) == nullptr,
+           "decode cache flush invalidates every way");
+}
+
+void test_compressed_instruction_decode_and_flush() {
+    // 1. Decompression correctness for representative compressed instructions
+    // C.ADDI4SPN: 0x0000 -> quadrant 0, op 0, nzuimm=0 -> illegal/reserved (returns 0)
+    expect(simrv::pipeline::decompressInstruction(0x0000, true) == 0,
+           "C.ADDI4SPN with imm=0 decompresses to 0 (illegal/reserved)");
+    // C.NOP: 0x0001 -> addi x0, x0, 0 (0x00000013)
+    expect(simrv::pipeline::decompressInstruction(0x0001, true) == 0x00000013,
+           "C.NOP decompresses to canonical ADDI x0, x0, 0");
+    // C.ADDI: addi a0, a0, 1 -> 0x0505
+    const auto decomp_addi = simrv::pipeline::decompressInstruction(0x0505, true);
+    expect((decomp_addi & 0x7F) == 0x13, "C.ADDI decompresses to an OP-IMM instruction");
+
+    // 2. Decoder accessor c_rs1_p returns prime register
+    simrv::pipeline::Decoder dec_c(0x0505);
+    expect(dec_c.is_compressed(), "Decoder reports compressed instruction");
+    expect(dec_c.c_rs1_p() == dec_c.c_rs1_rd_p(), "c_rs1_p() matches c_rs1_rd_p()");
+
+    // 3. mstatus FS/VS modification flushes decode cache via CPU::TLB_flush()
+    simrv::core::Machine machine;
+    auto& cpu = machine.hart(HartId{0});
+    auto& csr = cpu.csr_file;
+
+    // Cache an operation at PC 0x1000
+    simrv::pipeline::DecodedInstruction test_op{};
+    test_op.cpc = VirtAddr{0x1000};
+    test_op.ir = 0x00000013;
+    test_op.ir_org = 0x0001;
+    test_op.cinsn = 1;
+    test_op.op_id = simrv::isa::ADDI;
+    simrv::core::CachedOp cop{};
+    cop.copy_from(test_op);
+    cpu.decode_cache.insert(test_op.cpc, cop);
+    expect(cpu.decode_cache.lookup(test_op.cpc) != nullptr, "cached op present before CSR write");
+
+    // Write to mstatus altering FS field: must trigger TLB_flush which clears decode_cache
+    const CSRValue curr_mstatus = cpu.state().mstatus;
+    const CSRValue new_mstatus = curr_mstatus ^ enum_mask(simrv::core::MstatusBit::Fs);
+    auto res = csr.write(csr_addr(simrv::core::Csr::Mstatus), new_mstatus);
+    (void)res;
+    expect(cpu.decode_cache.lookup(test_op.cpc) == nullptr,
+           "mstatus FS toggle flushes decode cache to invalidate cached execution legality");
 }
 
 void test_runtime_ram_view() {
@@ -966,6 +1099,8 @@ int main() {
     test_strong_semantic_types();
     test_cache_hierarchy_semantics();
     test_unaligned_host_access();
+    test_decode_cache_compact_round_robin();
+    test_compressed_instruction_decode_and_flush();
     test_runtime_ram_view();
     test_mmio_ranges();
     test_physical_range_validation();

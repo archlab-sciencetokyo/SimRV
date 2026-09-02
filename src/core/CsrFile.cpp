@@ -77,9 +77,15 @@ void CsrFile::setMstatus(CSRValue wdata) {
         }
     }
     CSRValue const mod = cpu_.state().mstatus ^ wdata;
-    const CSRValue tlb_sensitive =
-        enum_mask(MstatusBit::Mprv) | enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr);
-    if ((mod & tlb_sensitive) != 0 ||
+    // Bits whose change must flush the TLB and decode cache:
+    // - Mprv/Sum/Mxr: address translation mode changes
+    // - Fs/Vs: FP/Vector state enable changes invalidate cached illegal-instruction checks
+    // - Sxl/Uxl (bits 35:34 and 33:32): XLEN changes alter RVC decompression (C.JAL vs C.ADDIW)
+    const CSRValue tlb_sensitive = enum_mask(MstatusBit::Mprv) | enum_mask(MstatusBit::Sum) |
+                                   enum_mask(MstatusBit::Mxr) | enum_mask(MstatusBit::Fs) |
+                                   enum_mask(MstatusBit::Vs);
+    const CSRValue xlen_bits = static_cast<CSRValue>(uint64_t{0xFULL} << 32U);
+    if ((mod & (tlb_sensitive | xlen_bits)) != 0 ||
         (((cpu_.state().mstatus & enum_mask(MstatusBit::Mprv)) != 0u) &&
          (mod & enum_mask(MstatusBit::Mpp)) != 0)) {
         cpu_.TLB_flush();
