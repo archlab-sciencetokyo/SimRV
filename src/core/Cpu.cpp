@@ -121,7 +121,6 @@ void CPU::reset() {
     trace_history_size_ = 0;
     ca_state.reset_instruction();
     ca_pipeline.reset();
-    scoreboard.reset();
     branch_predictor.configure(pipeline_sim.config.branch_predictor);
     branch_predictor.reset();
 }
@@ -1140,7 +1139,7 @@ void CPU::dispatch_pending_interrupts() {
 template <bool kCopyContext, bool kInstMix>
 void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
     if constexpr (kCopyContext) {
-        pipeline_context.copy_from(op);
+        op.copy_to(pipeline_context);
         pipeline_context.tlb_miss = false;
         pipeline_context.pending_tval = 0;
     } else {
@@ -1429,7 +1428,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         // ---- Everything else: fallback to full pipeline stages ----
         default:
             if constexpr (!kCopyContext) {
-                pipeline_context.copy_from(op);
+                op.copy_to(pipeline_context);
                 pipeline_context.tlb_miss = false;
                 pipeline_context.pending_tval = 0;
             }

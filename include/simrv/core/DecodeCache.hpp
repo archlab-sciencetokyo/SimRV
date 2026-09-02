@@ -14,11 +14,62 @@ namespace simrv::core {
 
 /**
  * @struct CachedOp
- * @brief Decoded instruction augmented with cache entry validity.
+ * @brief Compact decoded instruction payload used by the fast execution path.
  */
-struct alignas(64) CachedOp : public simrv::pipeline::DecodedInstruction {
-    bool valid = false;  ///< Validity flag for direct-mapped cache line
-    uint8_t len = 4;     ///< Instruction length in bytes (2 for RVC, 4 for 32-bit)
+struct CachedOp {
+    VirtAddr cpc{0};
+    ImmValue imm = 0;
+    Instruction ir = 0;
+    Instruction ir_org = 0;
+    Instruction cinsn = 0;
+    isa::OperationId op_id = isa::UNKNOWN;
+    Funct12 funct12 = 0;
+    isa::Opcode opcode = static_cast<isa::Opcode>(0);
+    RegId rd = RegId::Zero;
+    RegId rs1 = RegId::Zero;
+    RegId rs2 = RegId::Zero;
+    isa::Funct3 funct3 = static_cast<isa::Funct3>(0);
+    isa::Funct5Amo funct5 = static_cast<isa::Funct5Amo>(0);
+    Funct7 funct7 = 0;
+    uint8_t len = 4;
+    bool valid = false;
+
+    constexpr void copy_from(const simrv::pipeline::DecodedInstruction& decoded) noexcept {
+        cpc = decoded.cpc;
+        imm = decoded.imm;
+        ir = decoded.ir;
+        ir_org = decoded.ir_org;
+        cinsn = decoded.cinsn;
+        op_id = decoded.op_id;
+        funct12 = decoded.funct12;
+        opcode = decoded.opcode;
+        rd = decoded.rd;
+        rs1 = decoded.rs1;
+        rs2 = decoded.rs2;
+        funct3 = decoded.funct3;
+        funct5 = decoded.funct5;
+        funct7 = decoded.funct7;
+        len = decoded.cinsn ? 2 : 4;
+    }
+
+    constexpr void copy_to(simrv::pipeline::DecodedInstruction& decoded) const noexcept {
+        decoded.cpc = cpc;
+        decoded.imm = imm;
+        decoded.pending_tval = 0;
+        decoded.pending_exception = std::nullopt;
+        decoded.ir = ir;
+        decoded.ir_org = ir_org;
+        decoded.cinsn = cinsn;
+        decoded.op_id = op_id;
+        decoded.funct7 = funct7;
+        decoded.funct12 = funct12;
+        decoded.opcode = opcode;
+        decoded.rd = rd;
+        decoded.rs1 = rs1;
+        decoded.rs2 = rs2;
+        decoded.funct3 = funct3;
+        decoded.funct5 = funct5;
+    }
 };
 
 /**
@@ -26,8 +77,9 @@ struct alignas(64) CachedOp : public simrv::pipeline::DecodedInstruction {
  * @brief 2-way set-associative cache for pre-decoded instructions to bypass fetch/decode stages.
  *
  * Indexed by XOR-hash of PC (`((pc >> 1) ^ (pc >> 13)) & kSetMask`), caching 4096 decoded
- * instructions (2048 2-way sets) with 64-byte alignment for cache locality and 1-bit pseudo-LRU
- * replacement.
+ * instructions (2048 2-way sets) with 64-byte set alignment for cache locality and 1-bit
+ * round-robin replacement. Lookup hits are read-only so the hottest path does not dirty cache
+ * metadata.
  */
 class DecodeCache {
    public:
@@ -37,7 +89,7 @@ class DecodeCache {
 
     struct alignas(64) CacheSet {
         std::array<CachedOp, 2> ways{};
-        uint32_t lru_way = 0;
+        uint8_t next_victim = 0;
     };
 
     /**
@@ -49,7 +101,7 @@ class DecodeCache {
             set.ways[0].cpc = VirtAddr{~Register{0}};
             set.ways[1].valid = false;
             set.ways[1].cpc = VirtAddr{~Register{0}};
-            set.lru_way = 0;
+            set.next_victim = 0;
         }
     }
 
@@ -74,11 +126,9 @@ class DecodeCache {
         const size_t set_idx = calc_set(pc);
         auto& set = sets_[set_idx];
         if (simrv::compiler::likely(set.ways[0].valid && set.ways[0].cpc == pc)) {
-            set.lru_way = 1;
             return &set.ways[0];
         }
         if (set.ways[1].valid && set.ways[1].cpc == pc) {
-            set.lru_way = 0;
             return &set.ways[1];
         }
         return nullptr;
@@ -93,18 +143,21 @@ class DecodeCache {
     inline void insert(Register pc, const CachedOp& op) {
         const size_t set_idx = calc_set(pc);
         auto& set = sets_[set_idx];
-        const uint32_t way = set.lru_way;
+        const uint8_t way = !set.ways[0].valid ? 0 : (!set.ways[1].valid ? 1 : set.next_victim);
         auto& entry = set.ways[way];
         entry = op;
         entry.cpc = VirtAddr{pc};
         entry.len = op.cinsn ? 2 : 4;
         entry.valid = true;
-        set.lru_way = 1 - way;
+        set.next_victim = static_cast<uint8_t>(1U - way);
     }
     inline void insert(VirtAddr pc, const CachedOp& op) { insert(pc.raw(), op); }
 
    private:
     std::array<CacheSet, kNumSets> sets_{};
 };
+
+static_assert(sizeof(DecodeCache::CacheSet) <= 128);
+static_assert(sizeof(DecodeCache) <= 256 * 1024);
 
 }  // namespace simrv::core

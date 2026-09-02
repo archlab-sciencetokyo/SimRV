@@ -138,16 +138,70 @@ constexpr auto store_width_bytes(Instruction funct3) -> size_t {
 
 // ========== Fast Host Memory Read/Write Operations (Direct Translation Fast Path) ==========
 
-inline auto host_read_fast(const Byte* host_ptr, Instruction funct3) -> Word {
-    const unsigned size_bytes = 1u << (funct3 & 0x3u);
-    Word raw = 0;
-    std::memcpy(&raw, host_ptr, size_bytes);
-    return extend_loaded_value(raw, static_cast<uint8_t>(funct3));
+template <std::unsigned_integral T>
+[[nodiscard]] SIMRV_ALWAYS_INLINE auto load_unaligned(const Byte* host_ptr) noexcept -> T {
+    T value{};
+    std::memcpy(&value, host_ptr, sizeof(T));
+    return value;
 }
 
-inline void host_write_fast(Byte* host_ptr, Register val, Instruction funct3) {
-    const unsigned size_bytes = 1u << (funct3 & 0x3u);
-    std::memcpy(host_ptr, &val, size_bytes);
+template <std::unsigned_integral T>
+SIMRV_ALWAYS_INLINE void store_unaligned(Byte* host_ptr, T value) noexcept {
+    std::memcpy(host_ptr, &value, sizeof(T));
+}
+
+SIMRV_ALWAYS_INLINE auto host_read_fast(const Byte* host_ptr, Instruction funct3) noexcept -> Word {
+    switch (funct3 & 0x7u) {
+        case 0:
+            return static_cast<Word>(
+                static_cast<SignedWord>(static_cast<int8_t>(load_unaligned<uint8_t>(host_ptr))));
+        case 1:
+            return static_cast<Word>(
+                static_cast<SignedWord>(static_cast<int16_t>(load_unaligned<uint16_t>(host_ptr))));
+        case 2:
+            return static_cast<Word>(
+                static_cast<SignedWord>(static_cast<int32_t>(load_unaligned<uint32_t>(host_ptr))));
+        case 3:
+            if constexpr (simrv::xlen::kIsXLen64) {
+                return load_unaligned<uint64_t>(host_ptr);
+            } else {
+                return load_unaligned<uint32_t>(host_ptr);
+            }
+        case 4:
+            return load_unaligned<uint8_t>(host_ptr);
+        case 5:
+            return load_unaligned<uint16_t>(host_ptr);
+        case 6:
+            return static_cast<Word>(load_unaligned<uint32_t>(host_ptr));
+        default:
+            if constexpr (simrv::xlen::kIsXLen64) {
+                return load_unaligned<uint64_t>(host_ptr);
+            } else {
+                return load_unaligned<uint32_t>(host_ptr);
+            }
+    }
+}
+
+SIMRV_ALWAYS_INLINE void host_write_fast(Byte* host_ptr, Register val,
+                                         Instruction funct3) noexcept {
+    switch (funct3 & 0x3u) {
+        case 0:
+            store_unaligned(host_ptr, static_cast<uint8_t>(val));
+            return;
+        case 1:
+            store_unaligned(host_ptr, static_cast<uint16_t>(val));
+            return;
+        case 2:
+            store_unaligned(host_ptr, static_cast<uint32_t>(val));
+            return;
+        default:
+            if constexpr (simrv::xlen::kIsXLen64) {
+                store_unaligned(host_ptr, static_cast<uint64_t>(val));
+            } else {
+                store_unaligned(host_ptr, static_cast<uint32_t>(val));
+            }
+            return;
+    }
 }
 
 /// ========== Fast RAM Read Operations ==========
