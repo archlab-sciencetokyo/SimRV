@@ -91,17 +91,20 @@ void test_cpu_model_profiles_and_validation() {
     TEST_CHECK(tiny.validate().has_value());
     TEST_CHECK(tiny.pipeline.pipeline_type == PipelineType::ThreeStage);
     TEST_CHECK(!tiny.pipeline.enable_forwarding);
+    TEST_CHECK(!tiny.pipeline.enable_instruction_prefetch);
     TEST_CHECK(tiny.instruction_cache.capacity_bytes == 2048);
     TEST_CHECK(tiny.instruction_cache.associativity == 1);
 
     const auto balanced = simrv::pipeline::make_cpu_model_profile(CpuModelProfile::Balanced);
     TEST_CHECK(balanced.validate().has_value());
     TEST_CHECK(balanced.pipeline.pipeline_type == PipelineType::FiveStage);
+    TEST_CHECK(!balanced.pipeline.enable_instruction_prefetch);
     TEST_CHECK(balanced.instruction_cache.capacity_bytes == 4096);
     TEST_CHECK(balanced.instruction_cache.associativity == 2);
 
     const auto performance = simrv::pipeline::make_cpu_model_profile(CpuModelProfile::Performance);
     TEST_CHECK(performance.validate().has_value());
+    TEST_CHECK(performance.pipeline.enable_instruction_prefetch);
     TEST_CHECK(performance.instruction_cache.capacity_bytes == 16384);
     TEST_CHECK(performance.instruction_cache.associativity == 4);
 

@@ -301,7 +301,40 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             const bool refill_in_progress = machine.runtime_profile.is_cycle_mode() &&
                                             ca_state.instruction_fill.active &&
                                             ca_state.instruction_fill.line_base == line_base;
+            if (machine.runtime_profile.is_cycle_mode() && ca_state.instruction_prefetch.active &&
+                ca_state.instruction_prefetch.request_pending) {
+                simrv::memory::TileLinkBus::TimedResponse pf_timed{};
+                if (machine.memory_.system_bus().try_get_timed_response(
+                        ca_state.instruction_prefetch.source, pf_timed)) {
+                    ca_state.instruction_prefetch.request_pending = false;
+                    ca_state.instruction_prefetch.reset();
+                }
+            }
+
             if (!refill_in_progress && icache.read16(paddr, h_data)) {
+                if (machine.runtime_profile.is_cycle_mode() &&
+                    pipeline_sim.config.enable_instruction_prefetch &&
+                    !ca_state.instruction_fill.active && !ca_state.instruction_prefetch.active) {
+                    const Address next_line = line_base + simrv::cache::ICache::kLineBytes;
+                    if (machine.memory_geometry().contains(next_line,
+                                                           simrv::cache::ICache::kLineBytes) &&
+                        icache.line_state(next_line) == simrv::memory::MesiState::Invalid) {
+                        simrv::memory::TlChannelA pf_req{};
+                        pf_req.opcode = simrv::memory::TlOpcodeA::Intent;
+                        pf_req.intent = simrv::memory::TlIntent::PrefetchRead;
+                        pf_req.size = simrv::memory::kTlBeatSize;
+                        pf_req.hart = static_cast<HartId>(state_.mhartid);
+                        pf_req.source = simrv::memory::make_tl_source(
+                            pf_req.hart, simrv::memory::TlPort::Instruction);
+                        pf_req.address = next_line;
+                        if (machine.memory_.system_bus().send_request(pf_req)) {
+                            ca_state.instruction_prefetch.active = true;
+                            ca_state.instruction_prefetch.request_pending = true;
+                            ca_state.instruction_prefetch.line_base = next_line;
+                            ca_state.instruction_prefetch.source = pf_req.source;
+                        }
+                    }
+                }
                 return h_data;
             }
 
@@ -343,6 +376,30 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                     machine.memory_.system_bus().grant_ack(
                         simrv::memory::TlChannelE{.sink = timed.payload.sink});
                     fill.reset();
+
+                    // Hardware next-line instruction stream prefetcher
+                    if (pipeline_sim.config.enable_instruction_prefetch) {
+                        const Address next_line = line_base + simrv::cache::ICache::kLineBytes;
+                        if (machine.memory_geometry().contains(next_line,
+                                                               simrv::cache::ICache::kLineBytes) &&
+                            icache.line_state(next_line) == simrv::memory::MesiState::Invalid &&
+                            !ca_state.instruction_prefetch.active) {
+                            simrv::memory::TlChannelA pf_req{};
+                            pf_req.opcode = simrv::memory::TlOpcodeA::Intent;
+                            pf_req.intent = simrv::memory::TlIntent::PrefetchRead;
+                            pf_req.size = simrv::memory::kTlBeatSize;
+                            pf_req.hart = static_cast<HartId>(state_.mhartid);
+                            pf_req.source = fill.source;
+                            pf_req.address = next_line;
+                            if (machine.memory_.system_bus().send_request(pf_req)) {
+                                ca_state.instruction_prefetch.active = true;
+                                ca_state.instruction_prefetch.request_pending = true;
+                                ca_state.instruction_prefetch.line_base = next_line;
+                                ca_state.instruction_prefetch.source = pf_req.source;
+                            }
+                        }
+                    }
+
                     const auto byte_offset = static_cast<size_t>(paddr - line_base);
                     std::memcpy(&h_data, timed.line_data.data() + byte_offset, sizeof(h_data));
                     return h_data;

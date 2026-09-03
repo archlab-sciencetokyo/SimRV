@@ -143,6 +143,7 @@ struct CpuModelConfig {
         case CpuModelProfile::Performance:
             result.pipeline.pipeline_type = PipelineType::FiveStage;
             result.pipeline.enable_forwarding = true;
+            result.pipeline.enable_instruction_prefetch = true;
             result.pipeline.branch_predictor.type = BranchPredictorType::Tournament;
             result.instruction_cache = {16384, 4, 32, 1, 8};
             result.data_cache = result.instruction_cache;

@@ -137,6 +137,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         pipe.fetch_pc = pc;
         cancel_port(simrv::memory::TlPort::Instruction);
         ca_state.instruction_fill.reset();
+        ca_state.instruction_prefetch.reset();
         ca_state.instruction_walk.reset();
         pipe.frontend_blocked = false;
     };

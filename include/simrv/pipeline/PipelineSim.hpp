@@ -101,6 +101,7 @@ struct CpuConfig {
     LatencyCycles csr_flush_penalty = 3;
     LatencyCycles fence_flush_penalty = 4;
     bool enable_forwarding = true;
+    bool enable_instruction_prefetch = false;
     bool record_snapshots = false;
     PipelineType pipeline_type = PipelineType::FiveStage;
     BranchPredictorConfig branch_predictor{};

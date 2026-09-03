@@ -27,6 +27,16 @@ struct InstructionFillState {
     constexpr void reset() noexcept { *this = {}; }
 };
 
+struct InstructionPrefetchState {
+    static constexpr size_t kLineBytes = 32;
+    Address line_base = 0;
+    simrv::memory::TlSourceId source = 0;
+    bool active = false;
+    bool request_pending = false;
+
+    constexpr void reset() noexcept { *this = {}; }
+};
+
 struct DataTransferState {
     Address address = 0;
     simrv::memory::TlSourceId source = 0;
@@ -56,6 +66,7 @@ struct HartCycleState {
     bool waiting_for_interconnect = false;
     bool memory_complete = false;
     InstructionFillState instruction_fill{};
+    InstructionPrefetchState instruction_prefetch{};
     DataTransferState data_transfer{};
     TimedPageWalkState instruction_walk{};
     TimedPageWalkState data_walk{};
@@ -70,6 +81,7 @@ struct HartCycleState {
         waiting_for_interconnect = false;
         memory_complete = false;
         instruction_fill.reset();
+        instruction_prefetch.reset();
         data_transfer.reset();
         instruction_walk.reset();
         data_walk.reset();

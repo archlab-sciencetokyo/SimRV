@@ -26,7 +26,7 @@ DEFAULT_BENCHMARKS_RV32 = [
     ("CoreMark (RV32)", os.path.join(TESTS_DIR, "coremark/coremark32.riscv"), "rv32imac"),
 ]
 
-def run_suite(benchmarks, simrv_bin, spike_bin, runs=3, limit=50000000, timeout=60):
+def run_suite(benchmarks, simrv_bin, spike_bin, runs=3, limit=50000000, timeout=60, mode=None, extra_args=None):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     benchmark_py = os.path.join(script_dir, "benchmark.py")
     results = []
@@ -36,10 +36,12 @@ def run_suite(benchmarks, simrv_bin, spike_bin, runs=3, limit=50000000, timeout=
             print(f"Skipping {name}: file {path} not found.")
             continue
 
+        mode_str = f" [mode: {mode}]" if mode else ""
         print(f"\n==========================================")
-        print(f" Running Benchmark: {name}")
+        print(f" Running Benchmark: {name}{mode_str}")
         print(f"==========================================")
 
+        os.makedirs(os.path.join(script_dir, "../.bench_tmp"), exist_ok=True)
         tmp_json = os.path.join(script_dir, "../.bench_tmp/last_run.json")
         cmd = [
             sys.executable, benchmark_py,
@@ -52,6 +54,11 @@ def run_suite(benchmarks, simrv_bin, spike_bin, runs=3, limit=50000000, timeout=
             "--isa", isa,
             "--json", tmp_json
         ]
+        if mode:
+            cmd.extend(["--simrv-arg", f"--mode {mode}"])
+        if extra_args:
+            for ea in extra_args:
+                cmd.extend(["--simrv-arg", ea])
 
         try:
             res = subprocess.run(cmd, check=True)
@@ -59,40 +66,51 @@ def run_suite(benchmarks, simrv_bin, spike_bin, runs=3, limit=50000000, timeout=
                 with open(tmp_json, "r") as f:
                     data = json.load(f)
                     data["display_name"] = name
+                    if mode:
+                        data["mode"] = mode
                     results.append(data)
         except Exception as e:
             print(f"Error running benchmark {name}: {e}")
 
     return results
 
-def print_summary_table(results_64, results_32):
-    print("\n" + "="*85)
-    print(f"{'SIMRV VS SPIKE EXTENDED BENCHMARK SUITE SUMMARY':^85}")
-    print("="*85)
-    print(f"{'Benchmark':<20} | {'Arch':<5} | {'Instructions':<12} | {'SimRV (s)':<10} | {'Spike (s)':<10} | {'Speedup':<8}")
-    print("-" * 85)
+def print_summary_table(results_64, results_32, baseline_report=None, regression_thresh=0.03):
+    print("\n" + "="*95)
+    print(f"{'SIMRV VS SPIKE EXTENDED BENCHMARK SUITE SUMMARY':^95}")
+    print("="*95)
+    print(f"{'Benchmark':<20} | {'Arch':<5} | {'Mode':<10} | {'SimRV (s)':<10} | {'Spike (s)':<10} | {'Speedup':<8} | {'Status':<8}")
+    print("-" * 95)
 
     def print_rows(results, arch_str):
         for r in results:
             name = r.get("display_name", r.get("test_name", "Unknown"))
-            insts = r.get("instructions", 0)
+            mode = r.get("mode", "default")
             simrv_t = r["simrv"]["stats"]["time"]["mean"]
             spike_t = r["spike"]["stats"]["time"]["mean"]
             speedup = spike_t / simrv_t if simrv_t > 0 and spike_t > 0 else 0.0
-            
-            inst_str = f"{insts:,}" if insts else "N/A"
             speedup_str = f"{speedup:.2f}x" if speedup > 0 else "N/A"
 
-            print(f"{name:<20} | {arch_str:<5} | {inst_str:>12} | {simrv_t:>10.4f} | {spike_t:>10.4f} | {speedup_str:>8}")
+            status = "PASS"
+            if baseline_report:
+                b_results = baseline_report.get(f"{arch_str.lower()}_results", [])
+                for br in b_results:
+                    if br.get("display_name") == name and br.get("mode", "default") == mode:
+                        base_t = br["simrv"]["stats"]["time"]["mean"]
+                        if simrv_t > base_t * (1.0 + regression_thresh):
+                            pct = ((simrv_t - base_t) / base_t) * 100
+                            status = f"REGRESS(+{pct:.1f}%)"
+                        break
+
+            print(f"{name:<20} | {arch_str:<5} | {mode:<10} | {simrv_t:>10.4f} | {spike_t:>10.4f} | {speedup_str:>8} | {status:<8}")
 
     print_rows(results_64, "RV64")
     if results_32:
-        print("-" * 85)
+        print("-" * 95)
         print_rows(results_32, "RV32")
 
-    print("="*85)
+    print("="*95)
     print("Note: Speedup > 1.0x indicates SimRV wall-clock time is faster than Spike.")
-    print("="*85 + "\n")
+    print("="*95 + "\n")
 
 def main():
     parser = argparse.ArgumentParser(description="Extended Benchmark Suite Runner against Spike")
@@ -101,22 +119,31 @@ def main():
     parser.add_argument("--spike", default="spike", help="Path to Spike binary")
     parser.add_argument("-n", "--runs", type=int, default=3, help="Number of benchmark iterations")
     parser.add_argument("-e", "--limit", type=int, default=50000000, help="Instruction limit")
+    parser.add_argument("--modes", nargs="+", default=[None], help="Modes to sweep across (e.g. fast detailed 3stage 5stage)")
+    parser.add_argument("--baseline", help="Baseline JSON report to check for regressions")
+    parser.add_argument("--regression-threshold", type=float, default=0.03, help="Regression alert threshold (default: 0.03 = 3%)")
     parser.add_argument("--json", help="Path to save consolidated JSON report")
 
     args = parser.parse_args()
 
+    baseline_data = None
+    if args.baseline and os.path.isfile(args.baseline):
+        with open(args.baseline, "r") as f:
+            baseline_data = json.load(f)
+
     results_64 = []
     results_32 = []
 
-    if os.path.isfile(args.simrv64):
-        print("\n>>> Running RV64 Benchmark Suite <<<")
-        results_64 = run_suite(DEFAULT_BENCHMARKS_RV64, args.simrv64, args.spike, runs=args.runs, limit=args.limit)
+    for mode in args.modes:
+        if os.path.isfile(args.simrv64):
+            print(f"\n>>> Running RV64 Benchmark Suite (mode: {mode or 'default'}) <<<")
+            results_64.extend(run_suite(DEFAULT_BENCHMARKS_RV64, args.simrv64, args.spike, runs=args.runs, limit=args.limit, mode=mode))
 
-    if os.path.isfile(args.simrv32):
-        print("\n>>> Running RV32 Benchmark Suite <<<")
-        results_32 = run_suite(DEFAULT_BENCHMARKS_RV32, args.simrv32, args.spike, runs=args.runs, limit=args.limit)
+        if os.path.isfile(args.simrv32):
+            print(f"\n>>> Running RV32 Benchmark Suite (mode: {mode or 'default'}) <<<")
+            results_32.extend(run_suite(DEFAULT_BENCHMARKS_RV32, args.simrv32, args.spike, runs=args.runs, limit=args.limit, mode=mode))
 
-    print_summary_table(results_64, results_32)
+    print_summary_table(results_64, results_32, baseline_report=baseline_data, regression_thresh=args.regression_threshold)
 
     if args.json:
         report = {

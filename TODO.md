@@ -159,16 +159,19 @@ CoreMark therefore improved by about 31% in median wall-throughput (176.1 to
 231.0 M instructions/s).  Do not compare these values across different hosts or
 toolchains; repeat the same controlled workflow instead.
 
-### Next performance work, in priority order
+### Completed & ongoing performance work
 
-1. **L1 Instruction Stream Prefetching.** Implement configurable hardware next-line / stream
-   prefetching for `ICache` in CA mode using TileLink non-blocking prefetch intents (`TlIntent::PrefetchRead`).
-2. **Slim branch-predictor update without changing statistics.** Predictor update
+1. **L1 Instruction Stream Prefetching.** (Completed) Implemented configurable hardware next-line / stream
+   prefetching for `ICache` in CA mode (`enable_instruction_prefetch` in `CpuConfig` & `CpuModelConfig`)
+   using TileLink non-blocking prefetch intents (`TlIntent::PrefetchRead`) and pipeline flush cancellation.
+2. **Extended Benchmark Suite Harness.** (Completed) Enhanced `scripts/run_benchmarks.py` with multi-mode
+   sweeping (`--modes fast detailed 3stage 5stage`), baseline JSON tracking, and automated regression alerts (> 3%).
+3. **Slim branch-predictor update without changing statistics.** Predictor update
    is about 8% of the sampled CA host CPU time.  Separate unavoidable predictor state
    mutation from optional accounting only if every existing visible counter, decision,
    and training event stays unchanged.  Benchmark both branch-heavy and straight-line
    programs; do not trade trace/TUI observability for speed by default.
-3. **Further cached fast-memory specialization.** Fast-mode cached loads are about
+4. **Further cached fast-memory specialization.** Fast-mode cached loads are about
    11% and stores about 3% of sampled host CPU time.  Investigate a direct-RAM path
    only after proving its guards cover alignment, MMIO/tohost, address translation,
    privilege, traps, and dynamically changed machine configuration.  Prefer a
