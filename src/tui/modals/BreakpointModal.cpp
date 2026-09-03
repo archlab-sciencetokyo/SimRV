@@ -127,7 +127,7 @@ auto BreakpointModal::remove_at_cursor(
         std::string name = (wp.target == simrv::debug::WatchTarget::Memory)
                                ? std::format("0x{:08x}", wp.addr)
                                : wp.reg_name;
-        machine.breakpoint_manager().remove_watchpoint(wp_idx);
+        machine.breakpoint_manager().remove_watchpoint_by_index(wp_idx);
         if (set_status_override_cb) {
             set_status_override_cb(std::format("Removed watchpoint on {}", name));
         }

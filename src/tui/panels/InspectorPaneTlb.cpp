@@ -51,7 +51,7 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
         int way;
         Address vaddr;
         Address paddr;
-        Word asid;
+        Asid asid;
         const char* priv_str;
     };
     std::vector<RenderTlbEntry> active_entries;

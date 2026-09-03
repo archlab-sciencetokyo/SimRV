@@ -34,7 +34,7 @@ struct Watchpoint {
     WatchTarget target = WatchTarget::Memory;
     Address addr = 0;
     RegType reg_type = RegType::GPR;
-    uint8_t reg_index = 0;
+    RegId reg_index = RegId::Zero;
     std::string reg_name;
     size_t size = 4;
     WatchType type = WatchType::Write;
@@ -52,7 +52,7 @@ struct BreakpointHit {
 /// Parsed register specification resulting from string lookup.
 struct ParsedReg {
     RegType type;
-    uint8_t index;
+    RegId index;
     std::string canonical_name;
 };
 
@@ -83,11 +83,13 @@ class BreakpointManager {
     void add_watchpoint(Address addr, size_t size = 4, WatchType type = WatchType::Write,
                         const std::string& label = "");
     /// Add a register watchpoint monitoring changes to a specific register
-    void add_reg_watchpoint(RegType reg_type, uint8_t reg_index, const std::string& reg_name);
+    void add_reg_watchpoint(RegType reg_type, RegId reg_index, const std::string& reg_name);
     /// Remove a memory watchpoint at physical address
     void remove_watchpoint(Address addr);
+    /// Remove a watchpoint by index in the watchpoints list
+    void remove_watchpoint_by_index(size_t index);
     /// Remove a register watchpoint for the given register type and index
-    void remove_reg_watchpoint(RegType reg_type, uint8_t reg_index);
+    void remove_reg_watchpoint(RegType reg_type, RegId reg_index);
     /// Clear all active memory and register watchpoints
     void clear_watchpoints();
     /// Get list of configured watchpoints

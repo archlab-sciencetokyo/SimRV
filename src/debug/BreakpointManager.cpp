@@ -22,7 +22,7 @@ auto parse_gpr_reg(const std::string& str) -> std::optional<ParsedReg> {
         int idx = std::stoi(str.substr(1));
         if (idx >= 0 && idx < 32) {
             return ParsedReg{.type = RegType::GPR,
-                             .index = static_cast<uint8_t>(idx),
+                             .index = static_cast<RegId>(idx),
                              .canonical_name = std::format("x{}", idx)};
         }
     }
@@ -33,12 +33,12 @@ auto parse_gpr_reg(const std::string& str) -> std::optional<ParsedReg> {
     for (size_t i = 0; i < kGprAbi.size(); ++i) {
         if (str == kGprAbi[i]) {
             return ParsedReg{.type = RegType::GPR,
-                             .index = static_cast<uint8_t>(i),
+                             .index = static_cast<RegId>(i),
                              .canonical_name = std::format("x{} ({})", i, kGprAbi[i])};
         }
     }
     if (str == "fp") {
-        return ParsedReg{.type = RegType::GPR, .index = 8, .canonical_name = "x8 (s0/fp)"};
+        return ParsedReg{.type = RegType::GPR, .index = RegId::S0, .canonical_name = "x8 (s0/fp)"};
     }
     return std::nullopt;
 }
@@ -49,7 +49,7 @@ auto parse_fpr_reg(const std::string& str) -> std::optional<ParsedReg> {
         int idx = std::stoi(str.substr(1));
         if (idx >= 0 && idx < 32) {
             return ParsedReg{.type = RegType::FPR,
-                             .index = static_cast<uint8_t>(idx),
+                             .index = static_cast<RegId>(idx),
                              .canonical_name = std::format("f{}", idx)};
         }
     }
@@ -60,7 +60,7 @@ auto parse_fpr_reg(const std::string& str) -> std::optional<ParsedReg> {
     for (size_t i = 0; i < kFprAbi.size(); ++i) {
         if (str == kFprAbi[i]) {
             return ParsedReg{.type = RegType::FPR,
-                             .index = static_cast<uint8_t>(i),
+                             .index = static_cast<RegId>(i),
                              .canonical_name = std::format("f{} ({})", i, kFprAbi[i])};
         }
     }
@@ -73,7 +73,7 @@ auto parse_vec_reg(const std::string& str) -> std::optional<ParsedReg> {
         int idx = std::stoi(str.substr(1));
         if (idx >= 0 && idx < 32) {
             return ParsedReg{.type = RegType::VEC,
-                             .index = static_cast<uint8_t>(idx),
+                             .index = static_cast<RegId>(idx),
                              .canonical_name = std::format("v{}", idx)};
         }
     }
@@ -83,17 +83,21 @@ auto parse_vec_reg(const std::string& str) -> std::optional<ParsedReg> {
 }  // namespace
 
 auto parse_register_name(std::string_view input) -> std::optional<ParsedReg> {
-    if (input.empty()) return std::nullopt;
-
-    std::string str(input);
-    std::ranges::transform(str, str.begin(), [](unsigned char c) { return std::tolower(c); });
+    std::string str;
+    for (char c : input) {
+        if (!std::isspace(static_cast<unsigned char>(c))) {
+            str += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+    }
+    if (str.empty()) return std::nullopt;
 
     if (str == "pc") {
-        return ParsedReg{.type = RegType::PC, .index = 0, .canonical_name = "pc"};
+        return ParsedReg{.type = RegType::PC, .index = RegId::Zero, .canonical_name = "pc"};
     }
-    if (auto res = parse_gpr_reg(str); res.has_value()) return res;
-    if (auto res = parse_fpr_reg(str); res.has_value()) return res;
-    if (auto res = parse_vec_reg(str); res.has_value()) return res;
+
+    if (auto gpr = parse_gpr_reg(str)) return gpr;
+    if (auto fpr = parse_fpr_reg(str)) return fpr;
+    if (auto vec = parse_vec_reg(str)) return vec;
 
     return std::nullopt;
 }
@@ -123,7 +127,7 @@ void BreakpointManager::add_watchpoint(Address addr, size_t size, WatchType type
     watchpoints_.push_back(Watchpoint{.target = WatchTarget::Memory,
                                       .addr = addr,
                                       .reg_type = RegType::GPR,
-                                      .reg_index = 0,
+                                      .reg_index = RegId::Zero,
                                       .reg_name = "",
                                       .size = size,
                                       .type = type,
@@ -131,7 +135,7 @@ void BreakpointManager::add_watchpoint(Address addr, size_t size, WatchType type
     update_active();
 }
 
-void BreakpointManager::add_reg_watchpoint(RegType reg_type, uint8_t reg_index,
+void BreakpointManager::add_reg_watchpoint(RegType reg_type, RegId reg_index,
                                            const std::string& reg_name) {
     remove_reg_watchpoint(reg_type, reg_index);
     watchpoints_.push_back(Watchpoint{.target = WatchTarget::Register,
@@ -152,7 +156,14 @@ void BreakpointManager::remove_watchpoint(Address addr) {
     update_active();
 }
 
-void BreakpointManager::remove_reg_watchpoint(RegType reg_type, uint8_t reg_index) {
+void BreakpointManager::remove_watchpoint_by_index(size_t index) {
+    if (index < watchpoints_.size()) {
+        watchpoints_.erase(watchpoints_.begin() + static_cast<std::ptrdiff_t>(index));
+        update_active();
+    }
+}
+
+void BreakpointManager::remove_reg_watchpoint(RegType reg_type, RegId reg_index) {
     std::erase_if(watchpoints_, [reg_type, reg_index](const Watchpoint& wp) -> bool {
         return wp.target == WatchTarget::Register && wp.reg_type == reg_type &&
                wp.reg_index == reg_index;
@@ -227,36 +238,40 @@ auto BreakpointManager::check_reg_changes(const simrv::core::ArchState& state,
 
         switch (wp.reg_type) {
             case RegType::GPR: {
-                auto old_val = prev_state.regs.read(static_cast<RegId>(wp.reg_index));
-                auto new_val = state.regs.read(static_cast<RegId>(wp.reg_index));
+                auto old_val = prev_state.regs.read(wp.reg_index);
+                auto new_val = state.regs.read(wp.reg_index);
                 if (old_val != new_val) {
                     return BreakpointHit{
                         .reason = BreakpointHit::Reason::Watchpoint,
                         .addr = static_cast<Address>(wp.reg_index),
-                        .description = std::format(
-                            "Register Watchpoint hit: {} changed from 0x{:x} to 0x{:x}",
-                            wp.reg_name.empty() ? std::format("x{}", wp.reg_index) : wp.reg_name,
-                            old_val, new_val)};
+                        .description =
+                            std::format("Register Watchpoint hit: {} changed from 0x{:x} to 0x{:x}",
+                                        wp.reg_name.empty()
+                                            ? std::format("x{}", std::to_underlying(wp.reg_index))
+                                            : wp.reg_name,
+                                        old_val, new_val)};
                 }
                 break;
             }
             case RegType::FPR: {
-                auto old_val = prev_state.regs.read_fp(static_cast<RegId>(wp.reg_index));
-                auto new_val = state.regs.read_fp(static_cast<RegId>(wp.reg_index));
+                auto old_val = prev_state.regs.read_fp(wp.reg_index);
+                auto new_val = state.regs.read_fp(wp.reg_index);
                 if (old_val != new_val) {
                     return BreakpointHit{
                         .reason = BreakpointHit::Reason::Watchpoint,
                         .addr = static_cast<Address>(wp.reg_index),
                         .description = std::format(
                             "Register Watchpoint hit: {} changed from 0x{:016x} to 0x{:016x}",
-                            wp.reg_name.empty() ? std::format("f{}", wp.reg_index) : wp.reg_name,
+                            wp.reg_name.empty()
+                                ? std::format("f{}", std::to_underlying(wp.reg_index))
+                                : wp.reg_name,
                             old_val, new_val)};
                 }
                 break;
             }
             case RegType::VEC: {
-                const auto& old_v = prev_state.regs.read_vector(static_cast<RegId>(wp.reg_index));
-                const auto& new_v = state.regs.read_vector(static_cast<RegId>(wp.reg_index));
+                const auto& old_v = prev_state.regs.read_vector(wp.reg_index);
+                const auto& new_v = state.regs.read_vector(wp.reg_index);
                 bool vec_changed = false;
                 for (size_t i = 0; i < std::size(old_v.u64); ++i) {
                     if (old_v.u64[i] != new_v.u64[i]) {
@@ -268,9 +283,11 @@ auto BreakpointManager::check_reg_changes(const simrv::core::ArchState& state,
                     return BreakpointHit{
                         .reason = BreakpointHit::Reason::Watchpoint,
                         .addr = static_cast<Address>(wp.reg_index),
-                        .description = std::format(
-                            "Register Watchpoint hit: {} (Vector) value modified",
-                            wp.reg_name.empty() ? std::format("v{}", wp.reg_index) : wp.reg_name)};
+                        .description =
+                            std::format("Register Watchpoint hit: {} (Vector) value modified",
+                                        wp.reg_name.empty()
+                                            ? std::format("v{}", std::to_underlying(wp.reg_index))
+                                            : wp.reg_name)};
                 }
                 break;
             }
