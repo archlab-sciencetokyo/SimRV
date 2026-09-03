@@ -18,11 +18,15 @@ using pipeline::CycleInstructionSlot;
     const auto opcode = context.opcode;
     const bool vector =
         context.op_id >= isa::OperationId::VSETVLI && context.op_id <= isa::OperationId::VWSLL_VI;
-    return vector || opcode == isa::Opcode::System || opcode == isa::Opcode::MiscMem;
+    return vector || pipeline::operation::is_serializing(context.op_id) ||
+           opcode == isa::Opcode::System || opcode == isa::Opcode::MiscMem;
 }
 
 [[nodiscard]] auto writes_integer(const pipeline::PipelineContext& context) -> bool {
     if (context.rd == RegId::Zero) return false;
+    if (context.op_id != isa::UNKNOWN) {
+        return pipeline::operation::writes_integer(context.op_id);
+    }
     switch (context.opcode) {
         case isa::Opcode::Branch:
         case isa::Opcode::Store:
@@ -35,6 +39,9 @@ using pipeline::CycleInstructionSlot;
 }
 
 [[nodiscard]] auto integer_result_from_memory(const pipeline::PipelineContext& context) -> bool {
+    if (context.op_id != isa::UNKNOWN && pipeline::operation::is_load(context.op_id)) {
+        return pipeline::operation::writes_integer(context.op_id);
+    }
     if (context.opcode == isa::Opcode::Load) return true;
     return context.opcode == isa::Opcode::Amo &&
            static_cast<isa::Funct5Amo>(context.funct5) != isa::Funct5Amo::Sc;
@@ -46,28 +53,39 @@ using pipeline::CycleInstructionSlot;
         producer.wb_dest == RegId::Zero)
         return false;
     const auto destination = producer.wb_dest;
-    return (pipeline::operation::reads_rs1(consumer.context.opcode) &&
-            !isa::is_rs1_fp(consumer.context.opcode, consumer.context.op_id) &&
-            consumer.context.rs1 == destination) ||
-           (pipeline::operation::reads_rs2(consumer.context.opcode) &&
-            !isa::is_rs2_fp(consumer.context.opcode, consumer.context.op_id) &&
-            consumer.context.rs2 == destination);
+    const auto op = consumer.context.op_id;
+    const bool reads_r1 = (op != isa::UNKNOWN)
+                              ? pipeline::operation::is_rs1_int(op)
+                              : (pipeline::operation::reads_rs1(consumer.context.opcode) &&
+                                 !isa::is_rs1_fp(consumer.context.opcode, op));
+    const bool reads_r2 = (op != isa::UNKNOWN)
+                              ? pipeline::operation::is_rs2_int(op)
+                              : (pipeline::operation::reads_rs2(consumer.context.opcode) &&
+                                 !isa::is_rs2_fp(consumer.context.opcode, op));
+    return (reads_r1 && consumer.context.rs1 == destination) ||
+           (reads_r2 && consumer.context.rs2 == destination);
 }
 
 [[nodiscard]] auto has_floating_raw_dependency(const CycleInstructionSlot& consumer,
                                                const CycleInstructionSlot& producer) -> bool {
     if (!consumer.valid || !producer.valid || !producer.writes_fp) return false;
     const auto destination = producer.wb_dest;
-    const bool reads_rs1 = pipeline::operation::reads_rs1(consumer.context.opcode) &&
-                           isa::is_rs1_fp(consumer.context.opcode, consumer.context.op_id) &&
-                           consumer.context.rs1 == destination;
-    const bool reads_rs2 = pipeline::operation::reads_rs2(consumer.context.opcode) &&
-                           isa::is_rs2_fp(consumer.context.opcode, consumer.context.op_id) &&
-                           consumer.context.rs2 == destination;
+    const auto op = consumer.context.op_id;
+    const bool reads_r1 = (op != isa::UNKNOWN)
+                              ? pipeline::operation::is_rs1_fp(op)
+                              : (pipeline::operation::reads_rs1(consumer.context.opcode) &&
+                                 isa::is_rs1_fp(consumer.context.opcode, op));
+    const bool reads_r2 = (op != isa::UNKNOWN)
+                              ? pipeline::operation::is_rs2_fp(op)
+                              : (pipeline::operation::reads_rs2(consumer.context.opcode) &&
+                                 isa::is_rs2_fp(consumer.context.opcode, op));
     const RegId rs3 = static_cast<RegId>((consumer.context.ir >> 27U) & 0x1FU);
-    const bool reads_rs3 =
-        pipeline::operation::reads_rs3(consumer.context.opcode) && rs3 == destination;
-    return reads_rs1 || reads_rs2 || reads_rs3;
+    const bool reads_r3 =
+        (op != isa::UNKNOWN)
+            ? (pipeline::operation::is_rs3_fp(op) && rs3 == destination)
+            : (pipeline::operation::reads_rs3(consumer.context.opcode) && rs3 == destination);
+    return (reads_r1 && consumer.context.rs1 == destination) ||
+           (reads_r2 && consumer.context.rs2 == destination) || reads_r3;
 }
 
 [[nodiscard]] auto forwarded_integer(const CycleInstructionSlot& producer, RegId source)
@@ -143,11 +161,18 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         if (!has_integer_raw_dependency(consumer, producer)) return true;
         if (!pipeline_sim.config.enable_forwarding) return false;
         const auto destination = producer.wb_dest;
-        const bool source1_ready = !pipeline::operation::reads_rs1(consumer.context.opcode) ||
-                                   consumer.context.rs1 != destination ||
+        const auto op = consumer.context.op_id;
+        const bool reads_int_rs1 = (op != isa::UNKNOWN)
+                                       ? pipeline::operation::is_rs1_int(op)
+                                       : (pipeline::operation::reads_rs1(consumer.context.opcode) &&
+                                          !isa::is_rs1_fp(consumer.context.opcode, op));
+        const bool reads_int_rs2 = (op != isa::UNKNOWN)
+                                       ? pipeline::operation::is_rs2_int(op)
+                                       : (pipeline::operation::reads_rs2(consumer.context.opcode) &&
+                                          !isa::is_rs2_fp(consumer.context.opcode, op));
+        const bool source1_ready = !reads_int_rs1 || consumer.context.rs1 != destination ||
                                    forwarded_integer(producer, consumer.context.rs1).has_value();
-        const bool source2_ready = !pipeline::operation::reads_rs2(consumer.context.opcode) ||
-                                   consumer.context.rs2 != destination ||
+        const bool source2_ready = !reads_int_rs2 || consumer.context.rs2 != destination ||
                                    forwarded_integer(producer, consumer.context.rs2).has_value();
         return source1_ready && source2_ready;
     };
@@ -474,7 +499,10 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             decode_fields(machine);
             fetch->serializing = is_serializing(fetch->context);
             fetch->writes_int = writes_integer(fetch->context);
-            fetch->writes_fp = isa::is_destination_fp(fetch->context.opcode, fetch->context.op_id);
+            fetch->writes_fp =
+                (fetch->context.op_id != isa::UNKNOWN)
+                    ? pipeline::operation::writes_float(fetch->context.op_id)
+                    : isa::is_destination_fp(fetch->context.opcode, fetch->context.op_id);
             fetch->wb_dest = fetch->context.rd;
             fetch->wb_valid = false;
             fetch->wb_val = 0;

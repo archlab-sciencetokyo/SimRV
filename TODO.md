@@ -114,6 +114,12 @@ Avoid a broad execution rewrite until the metadata is proven by those regression
   fetch stage (`CPU::run_fetch_stage`). Cache hits skip full RVC decompression
   (`decompressInstruction`) and decoder dispatch, reconstructing the per-slot
   `PipelineContext` while preserving mode-specific legality checks.
+- Precomputed pipeline dependency traits: integrated compile-time metadata traits
+  from `OperationTraits.hpp` (`is_rs1_int`, `is_rs2_int`, `is_rs1_fp`, `is_rs2_fp`,
+  `is_rs3_fp`, `writes_integer`, `writes_float`, `is_serializing`) into
+  `CycleKernel.cpp` hazard detection, source readiness checks, and slot classification.
+  Added bit-for-bit cycle and data-hazard stall counter tests in `PipelineHazardTests.cpp`
+  verifying identical behavior across 3-stage and 5-stage models.
 - Hardened cache flush safety on CSR writes: `mstatus` writes affecting `FS`,
   `VS`, or effective `XLEN` (`SXL`/`UXL`) now trigger a `CPU::TLB_flush()`
   and decode cache invalidation, preventing stale execution privileges.
@@ -155,17 +161,14 @@ toolchains; repeat the same controlled workflow instead.
 
 ### Next performance work, in priority order
 
-1. **Precompute pipeline dependency traits.** The dependency-resolution path is a
-   measurable CA hot spot.  Add source/destination-bank and operand-use traits to
-   decoder metadata, then consume them in hazard checks.  Keep integer/FP forwarding
-   results and three-/five-stage stall counters bit-for-bit identical; exercise SMP
-   selected-hart snapshots too.
-3. **Slim branch-predictor update without changing statistics.** Predictor update
+1. **L1 Instruction Stream Prefetching.** Implement configurable hardware next-line / stream
+   prefetching for `ICache` in CA mode using TileLink non-blocking prefetch intents (`TlIntent::PrefetchRead`).
+2. **Slim branch-predictor update without changing statistics.** Predictor update
    is about 8% of the sampled CA host CPU time.  Separate unavoidable predictor state
    mutation from optional accounting only if every existing visible counter, decision,
    and training event stays unchanged.  Benchmark both branch-heavy and straight-line
    programs; do not trade trace/TUI observability for speed by default.
-4. **Further cached fast-memory specialization.** Fast-mode cached loads are about
+3. **Further cached fast-memory specialization.** Fast-mode cached loads are about
    11% and stores about 3% of sampled host CPU time.  Investigate a direct-RAM path
    only after proving its guards cover alignment, MMIO/tohost, address translation,
    privilege, traps, and dynamically changed machine configuration.  Prefer a

@@ -6,7 +6,12 @@
 #include <cstdlib>
 #include <iostream>
 
+#include "simrv/cache/ICache.hpp"
+#include "simrv/core/Cpu.hpp"
+#include "simrv/core/Machine.hpp"
+#include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/isa/OperationId.hpp"
+#include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
@@ -152,6 +157,79 @@ void test_pipeline_sim_hazard_events() {
     TEST_CHECK(sim.cycle_count() == 1);
 }
 
+void test_cycle_kernel_bit_for_bit_hazard_stall_counters() {
+    // Verifies bit-for-bit cycle counts and data hazard stall counts across
+    // 3-stage and 5-stage cycle-accurate pipeline models under integer RAW dependencies.
+    // Program:
+    // 1: addi x1, x0, 10
+    // 2: addi x2, x1, 5   (depends on x1)
+    // 3: add  x3, x2, x1  (depends on x2 and x1)
+    // 4: jal  x0, 0
+    constexpr std::array<Instruction, 4> program = {
+        0x00a00093,  // addi x1, x0, 10
+        0x00508113,  // addi x2, x1, 5
+        0x001101b3,  // add  x3, x2, x1
+        0x0000006f,  // jal  x0, 0
+    };
+
+    const auto run_model = [&](simrv::pipeline::PipelineType type, bool forwarding) {
+        simrv::core::Machine machine;
+        const Address pc = machine.memory_geometry().dram_base;
+        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        auto& cpu = machine.primary_hart();
+        cpu.machine_ = &machine;
+        cpu.reset();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        cpu.pipeline_sim.config.pipeline_type = type;
+        cpu.pipeline_sim.config.enable_forwarding = forwarding;
+
+        std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
+        std::memcpy(line.data(), program.data(), sizeof(program));
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
+        cpu.state().pc = pc;
+
+        uint32_t cycles = 0;
+        while (cpu.e_icount < 3 && cycles < 64) {
+            cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+            ++cycles;
+        }
+        TEST_CHECK(cpu.e_icount == 3);
+        TEST_CHECK(cpu.state().regs.read(RegId::Ra) == 10);
+        TEST_CHECK(cpu.state().regs.read(RegId::Sp) == 15);
+        TEST_CHECK(cpu.state().regs.read(RegId::Gp) == 25);
+        return std::make_pair(cycles, cpu.pipeline_sim.data_hazard_stalls());
+    };
+
+    // 5-stage with forwarding: resolved via forwarding paths (8 cycles, 0 data hazard stalls)
+    const auto [cycles_5s_fwd, stalls_5s_fwd] =
+        run_model(simrv::pipeline::PipelineType::FiveStage, true);
+    TEST_CHECK(cycles_5s_fwd == 8);
+    TEST_CHECK(stalls_5s_fwd == 0);
+
+    // 5-stage without forwarding: RAW dependencies stall until Writeback (12 cycles, 4 stalls)
+    const auto [cycles_5s_nofwd, stalls_5s_nofwd] =
+        run_model(simrv::pipeline::PipelineType::FiveStage, false);
+    TEST_CHECK(cycles_5s_nofwd == 12);
+    TEST_CHECK(stalls_5s_nofwd == 4);
+
+    // 3-stage with forwarding: (6 cycles, 0 stalls)
+    const auto [cycles_3s_fwd, stalls_3s_fwd] =
+        run_model(simrv::pipeline::PipelineType::ThreeStage, true);
+    TEST_CHECK(cycles_3s_fwd == 6);
+    TEST_CHECK(stalls_3s_fwd == 0);
+
+    // 3-stage without forwarding: in this 3-stage model (Fetch -> Decode/Execute -> Writeback),
+    // single-cycle ALU operations write back on cycle completion so subsequent instructions
+    // in Decode observe committed architectural registers (6 cycles, 0 stalls)
+    const auto [cycles_3s_nofwd, stalls_3s_nofwd] =
+        run_model(simrv::pipeline::PipelineType::ThreeStage, false);
+    TEST_CHECK(cycles_3s_nofwd == 6);
+    TEST_CHECK(stalls_3s_nofwd == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -162,6 +240,7 @@ int main() {
     test_fma_rs3_hazard();
     test_cross_bank_conversion_hazards();
     test_pipeline_sim_hazard_events();
+    test_cycle_kernel_bit_for_bit_hazard_stall_counters();
     std::cout << "=== All Pipeline Hazard Tests Passed Successfully ===\n";
     return 0;
 }
