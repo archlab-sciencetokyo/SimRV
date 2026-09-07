@@ -20,6 +20,7 @@
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/Mmu.hpp"
 #include "simrv/pipeline/Decoder.hpp"
+#include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/RetirementEffects.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Constants.hpp"
@@ -593,14 +594,54 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
     if (simrv::compiler::likely(is_valid)) {
         ctx.ir = w_ir_tmp;
         ctx.op_id = op_id;
+        ctx.cinsn = w_compressed ? 1U : 0U;
+
+        simrv::pipeline::Decoder dec(w_ir_tmp);
+        const auto op = dec.opcode();
+
+        ctx.opcode = static_cast<Opcode>(op);
+        ctx.rd = dec.rd();
+        ctx.rs1 = dec.rs1();
+        ctx.rs2 = dec.rs2();
+        ctx.funct3 = static_cast<Funct3>(dec.funct3());
+        ctx.funct5 = static_cast<Funct5Amo>((w_ir_tmp >> 27) & 0x1F);
+        ctx.funct7 = dec.funct7();
+        ctx.funct12 = (w_ir_tmp >> 20);
+
+        switch (op) {
+            case Opcode::Lui:
+            case Opcode::Auipc:
+                ctx.imm = dec.imm_u();
+                break;
+            case Opcode::Jal:
+                ctx.imm = dec.imm_j();
+                break;
+            case Opcode::Branch:
+                ctx.imm = dec.imm_b();
+                break;
+            case Opcode::Store:
+            case Opcode::StoreFp:
+                ctx.imm = dec.imm_s();
+                break;
+            default:
+                ctx.imm = dec.imm_i();
+                break;
+        }
+
+        ctx.traits = pipeline::operation::make_dependency_traits(op_id, ctx.opcode, ctx.rd,
+                                                                 std::to_underlying(ctx.funct5));
     } else {
         ctx.pending_exception = ExceptionCode::IllegalInstruction;
         ctx.pending_tval = ctx.ir_org;
         ctx.ir = isa::kNop32;
         ctx.op_id = isa::UNKNOWN;
+        ctx.cinsn = w_compressed ? 1U : 0U;
+        ctx.opcode = static_cast<Opcode>(0);
+        ctx.rd = RegId::Zero;
+        ctx.rs1 = RegId::Zero;
+        ctx.rs2 = RegId::Zero;
+        ctx.traits = {};
     }
-
-    ctx.cinsn = w_compressed ? 1U : 0U;
 }
 
 void CPU::run_fetch_stage_baremetal(Machine& machine) {
@@ -674,6 +715,9 @@ void CPU::decode_fields(Machine& /*machine*/) {
     if (simrv::compiler::unlikely(ctx.pending_exception.has_value())) {
         return;
     }
+    if (ctx.opcode != static_cast<Opcode>(0) || ctx.op_id != isa::UNKNOWN) {
+        return;
+    }
 
     simrv::pipeline::Decoder dec(ctx.ir);
     const auto op = dec.opcode();
@@ -706,6 +750,9 @@ void CPU::decode_fields(Machine& /*machine*/) {
             ctx.imm = dec.imm_i();
             break;
     }
+
+    ctx.traits = pipeline::operation::make_dependency_traits(ctx.op_id, ctx.opcode, ctx.rd,
+                                                             std::to_underlying(ctx.funct5));
 }
 
 void CPU::fetch_operands(Machine& /*machine*/) {

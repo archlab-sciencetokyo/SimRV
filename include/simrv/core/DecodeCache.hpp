@@ -31,6 +31,7 @@ struct CachedOp {
     isa::Funct3 funct3 = static_cast<isa::Funct3>(0);
     isa::Funct5Amo funct5 = static_cast<isa::Funct5Amo>(0);
     Funct7 funct7 = 0;
+    simrv::pipeline::DependencyTraits traits{};
     uint8_t len = 4;
     bool valid = false;
 
@@ -49,6 +50,7 @@ struct CachedOp {
         funct3 = decoded.funct3;
         funct5 = decoded.funct5;
         funct7 = decoded.funct7;
+        traits = decoded.traits;
         len = decoded.cinsn ? 2 : 4;
     }
 
@@ -69,6 +71,7 @@ struct CachedOp {
         decoded.rs2 = rs2;
         decoded.funct3 = funct3;
         decoded.funct5 = funct5;
+        decoded.traits = traits;
     }
 };
 

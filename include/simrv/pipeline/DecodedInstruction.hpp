@@ -12,6 +12,23 @@
 namespace simrv::pipeline {
 
 /**
+ * @struct DependencyTraits
+ * @brief Compact precomputed operand and pipeline dependency flags.
+ */
+struct DependencyTraits {
+    bool reads_rs1_int : 1 = false;
+    bool reads_rs2_int : 1 = false;
+    bool reads_rs1_fp : 1 = false;
+    bool reads_rs2_fp : 1 = false;
+    bool reads_rs3_fp : 1 = false;
+    bool writes_int : 1 = false;
+    bool writes_fp : 1 = false;
+    bool is_mem_load : 1 = false;
+    bool is_control : 1 = false;
+    bool is_serializing : 1 = false;
+};
+
+/**
  * @struct DecodedInstruction
  * @brief Represents a fully decoded RISC-V instruction with pre-extracted operands and control
  * signals.
@@ -36,6 +53,7 @@ struct DecodedInstruction {
     RegId rs2 = static_cast<RegId>(0);                       ///< Source register 2 ID
     isa::Funct3 funct3 = static_cast<isa::Funct3>(0);        ///< 3-bit function code
     isa::Funct5Amo funct5 = static_cast<isa::Funct5Amo>(0);  ///< 5-bit Atomic/Vector function code
+    DependencyTraits traits{};
 
     /**
      * @brief Copy decoded instruction content.
