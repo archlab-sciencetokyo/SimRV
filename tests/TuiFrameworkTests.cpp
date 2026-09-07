@@ -518,6 +518,63 @@ void test_classroom_cli_defaults() {
     empty_tui.activate_student_guide_suggestion();
     expect(empty_tui.get_active_modal() == simrv::tui::ModalType::LoadBinary,
            "the Student Guide can execute its context-sensitive suggestion");
+
+    const auto mission_path = (std::filesystem::path(__FILE__).parent_path().parent_path() /
+                               "examples/isa/lessons/control-flow-calls.mission")
+                                  .string();
+    std::array<std::string, 7> mission_storage = {
+        "SimRV", "--tui", "--class", "--mission", mission_path, "-m", "control-flow-calls.elf"};
+    std::array<char*, 7> mission_args{};
+    for (size_t index = 0; index < mission_storage.size(); ++index) {
+        mission_args[index] = mission_storage[index].data();
+    }
+    const auto mission_parsed = simrv::util::parse_command_line(mission_args);
+    expect(mission_parsed.has_value() &&
+               mission_parsed->options.to_machine_config().tui.mission == mission_path,
+           "mission CLI selects an external classroom mission");
+
+    std::array<std::string, 6> invalid_storage = {"SimRV",      "--class", "--mission",
+                                                  mission_path, "-m",      "demo.elf"};
+    std::array<char*, 6> invalid_args{};
+    for (size_t index = 0; index < invalid_storage.size(); ++index) {
+        invalid_args[index] = invalid_storage[index].data();
+    }
+    expect(!simrv::util::parse_command_line(invalid_args).has_value(),
+           "mission rejects a non-TUI classroom invocation");
+}
+
+void test_control_flow_calls_mission() {
+    simrv::tui::MissionProgress mission;
+    const auto lesson = (std::filesystem::path(__FILE__).parent_path().parent_path() /
+                         "examples/isa/lessons/control-flow-calls.mission")
+                            .string();
+    mission.configure(lesson, "/tmp/control-flow-calls.elf");
+    expect(mission.enabled() && mission.step() == 0, "mission starts for its bundled ELF");
+    expect(mission.guidance()->title.contains("Conditional branch"),
+           "mission starts at branch objective");
+    mission.observe_symbol("mission_loop");
+    expect(mission.step() == 0, "out-of-order checkpoints do not advance a mission");
+    for (const auto* checkpoint : {"mission_branch", "mission_loop", "mission_before_call",
+                                   "mission_in_callee", "mission_after_call", "mission_done"}) {
+        mission.observe_symbol(checkpoint);
+    }
+    expect(mission.completed() && mission.step() == 6, "ordered checkpoints complete the mission");
+    expect(mission.guidance()->title.contains("complete"),
+           "completed mission provides review guidance");
+    mission.restart();
+    expect(mission.enabled() && mission.step() == 0, "mission restart resets local progress");
+    mission.dismiss();
+    expect(
+        mission.status() == simrv::tui::MissionStatus::Inactive && !mission.guidance().has_value(),
+        "mission dismissal preserves free exploration without guidance");
+    mission.configure(lesson, "calls-stack.elf");
+    expect(mission.status() == simrv::tui::MissionStatus::ProgramMismatch &&
+               mission.guidance().has_value(),
+           "mission reports a bundled-program mismatch");
+    mission.configure("/tmp/does-not-exist.mission", "control-flow-calls.elf");
+    expect(
+        mission.status() == simrv::tui::MissionStatus::LoadError && mission.guidance().has_value(),
+        "mission reports an unavailable external lesson file");
 }
 
 void test_tui_running_state_synchronization() {
@@ -600,6 +657,15 @@ void test_help_uses_canonical_registry() {
     for (std::size_t i = 2; i < compact_rows.size(); ++i) {
         expect(simrv::tui::get_display_width(compact_rows[i]) == 76,
                "each dual-column help row exactly fills the modal interior");
+    }
+
+    std::vector<std::string> narrow_rows;
+    simrv::tui::modals::HelpModal::render(
+        narrow_rows, [&narrow_rows](const std::string& row) { narrow_rows.push_back(row); }, 24,
+        40);
+    for (const auto& row : narrow_rows) {
+        expect(simrv::tui::get_display_width(row) == 38,
+               "narrow help rows wrap within the modal interior");
     }
 }
 
@@ -708,6 +774,20 @@ void test_category_groups_and_glossary() {
     for (auto const& row : roomy_pipeline_rows) roomy_pipeline_text += row + '\n';
     expect(!roomy_pipeline_text.contains("Up") && !roomy_pipeline_text.contains("Down"),
            "non-scrollable glossary omits directional controls");
+
+    std::vector<std::string> narrow_glossary_rows;
+    simrv::tui::modals::GlossaryModal::render(
+        narrow_glossary_rows,
+        [&narrow_glossary_rows](const std::string& row) { narrow_glossary_rows.push_back(row); }, 0,
+        0, 24, 40);
+    for (const auto& row : narrow_glossary_rows) {
+        expect(simrv::tui::get_display_width(row) <= 40,
+               "narrow glossary rows do not exceed the modal width");
+    }
+    expect(!simrv::tui::should_show_guidance(true, true, 24, 55),
+           "guided text stays hidden when the inspector is too narrow to read it");
+    expect(simrv::tui::should_show_guidance(true, true, 24, 56),
+           "guided text appears at the readable inspector width threshold");
 
     int topic_idx = 0;
     int scroll_offset = 0;
@@ -1381,6 +1461,7 @@ int main() {
     test_mirrored_modal_arrows();
     test_page_guidance();
     test_classroom_cli_defaults();
+    test_control_flow_calls_mission();
     test_tui_running_state_synchronization();
     test_inspection_report();
     test_help_uses_canonical_registry();

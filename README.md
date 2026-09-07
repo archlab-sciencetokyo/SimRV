@@ -117,6 +117,11 @@ Guide visible, while students remain free to inspect any subsystem.
   --inspection-output inspection.json
 ```
 
+The optional external `control-flow-calls.mission` lesson turns the Student Guide into a local
+sequence of branch, loop, call, return, and ABI observations. Build the supplied example first,
+then pass the lesson path to `--class --mission`. Missions do not collect identity or grading data,
+and students remain free to use the normal TUI controls.
+
 Students can load (`o`), step (`s`), inspect (`r`/`l`), explain (`e`), open the relevant glossary
 topic (`?`), and trace (`v`) without changing the workload. The Student Guide proposes a
 context-sensitive next action; `Enter` performs it and `g` shows or hides the guide. Pressing `x`

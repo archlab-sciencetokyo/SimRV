@@ -147,6 +147,7 @@ class Machine final {
     void set_high_contrast_enabled(bool enabled) noexcept { config.tui.high_contrast = enabled; }
     [[nodiscard]] auto class_mode_enabled() const noexcept -> bool { return config.tui.class_mode; }
     void set_class_mode_enabled(bool enabled) noexcept { config.tui.class_mode = enabled; }
+    [[nodiscard]] auto mission_id() const noexcept -> const std::string& { return config.tui.mission; }
     [[nodiscard]] auto device_log_enabled() const noexcept -> bool {
         return config.debug.dlog_mode;
     }

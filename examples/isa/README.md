@@ -38,6 +38,7 @@ globally visible `done` loop so it can be stepped and inspected safely.
 | `loops-arrays.S` | Pointer traversal, loop counters, reductions | `t0`, `t1`, and running sum `a0` |
 | `branches.S` | Signed comparison and conditional control flow | PC movement and `a2` |
 | `calls-stack.S` | ABI calls, returns, and stack preservation | `ra`, `sp`, and `a0` |
+| `control-flow-calls.S` | Guided branch, loop, call, return, and ABI exploration | `a0`, `a1`, `ra`, `sp`, and Trace |
 | `multiply-divide.S` | M-extension multiply/divide/remainder | `a2`–`a7`, including division by zero |
 | `atomics.S` | A-extension LR/SC and AMO behavior | Reservation loop and `shared_counter` |
 | `floating-point.S` | D-extension loads, arithmetic, and stores | `fa0`–`fa3` and result memory |
@@ -63,6 +64,25 @@ to give students prompts such as “predict the next register change, then press
 
 `ebreak` remains a real RISC-V breakpoint exception: use it when teaching traps or with a debugger,
 not as a simulator-only classroom marker.
+
+### Guided control-flow and calls mission
+
+Build the examples, then launch the named ELF with the classroom mission:
+
+```bash
+./build/rv64-release/SimRV --tui --baremetal \
+  -m /tmp/simrv-isa-rv64/control-flow-calls.elf --class \
+  --mission examples/isa/lessons/control-flow-calls.mission
+```
+
+The mission is local guidance, not an assessment. It follows the `mission_*` labels in order and
+uses Enter to open the relevant inspector view. Students can freely step, set breakpoints, or hide
+the guide; `z` dismisses the mission and `Z` restarts it without modifying the guest program.
+
+Mission files use a versioned `[mission]` section followed by ordered `[step]` sections. A step
+references an ELF label and supplies its title, prompt, architectural rationale, target inspector
+view, and glossary topic. This keeps course flow editable alongside course material without
+rebuilding SimRV; unknown or incomplete fields are rejected with a local guide message.
 
 For the interactive UART example:
 

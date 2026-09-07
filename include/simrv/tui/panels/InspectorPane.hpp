@@ -26,6 +26,7 @@ struct TuiExecutionSnapshot;
 namespace simrv::tui {
 
 struct PageGuidance;
+class MissionProgress;
 
 /// Canonical ABI register names shared by all register pane sub-units.
 inline constexpr std::array<const char*, 32> kRegNames = {
@@ -80,6 +81,7 @@ class InspectorPane : public TuiWidget {
     void set_kips_history(const std::vector<uint64_t>& history) { kips_history_ = history; }
     void set_paused(bool paused) { paused_ = paused; }
     void set_student_guide_enabled(bool enabled) { student_guide_enabled_ = enabled; }
+    void set_mission_progress(const MissionProgress* mission) { mission_ = mission; }
     void set_learn_enabled(bool enabled) { set_student_guide_enabled(enabled); }
     [[nodiscard]] auto current_student_guidance() const -> PageGuidance;
     void set_visible_rows(int rows) { visible_rows_ = rows; }
@@ -126,6 +128,7 @@ class InspectorPane : public TuiWidget {
 
    private:
     std::optional<TuiRegPage> previous_page_;
+    const MissionProgress* mission_ = nullptr;
     [[nodiscard]] auto render_tab_bar_tier1(int width) const -> std::string;
     [[nodiscard]] auto render_tab_bar_tier2(int width) const -> std::string;
     [[nodiscard]] auto render_trace_row(int logical_row, int width) -> std::string;

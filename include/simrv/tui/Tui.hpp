@@ -24,6 +24,7 @@
 #include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/TuiLayoutPolicy.hpp"
 #include "simrv/tui/TuiModal.hpp"
+#include "simrv/tui/TuiMission.hpp"
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
 #include "simrv/tui/panels/StatusBar.hpp"
@@ -191,6 +192,9 @@ class Tui {
     /// Perform the context-sensitive action currently proposed by the Student Guide.
     void activate_student_guide_suggestion();
     [[nodiscard]] auto is_student_guide_enabled() const -> bool { return student_guide_enabled_; }
+    void dismiss_mission();
+    void restart_mission();
+    [[nodiscard]] auto mission_progress() const noexcept -> const MissionProgress& { return mission_; }
     // Source-compatible wrappers for the former "learn mode" API.
     void toggle_learn_mode() { toggle_student_guide(); }
     [[nodiscard]] auto is_learn_mode_enabled() const -> bool { return is_student_guide_enabled(); }
@@ -267,6 +271,7 @@ class Tui {
     std::vector<std::string> last_screen_lines_;
     std::atomic<bool> paused_{true};
     bool student_guide_enabled_{false};
+    MissionProgress mission_;
     bool inspection_overwrite_armed_{false};
     std::vector<WorkbenchSlot> workbench_slots_{{TuiRegPage::GPR, 0}, {TuiRegPage::CONSOLE, 0}};
     size_t focused_slot_index_ = 0;

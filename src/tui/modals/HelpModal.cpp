@@ -14,6 +14,7 @@
 #include "simrv/core/BuildInfo.hpp"
 #include "simrv/tui/TuiKeybindings.hpp"
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/framework/Text.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::tui::modals {
@@ -93,19 +94,25 @@ void HelpModal::render(std::vector<std::string>& content_rows,
                        const std::function<void(const std::string&)>& add_row_cb, int term_height,
                        int box_w) {
     (void)content_rows;
-    add_row_cb(
+    (void)term_height;
+    const int inner_width = std::max(1, box_w - 2);
+    auto add_wrapped = [&](std::string_view row, int continuation_indent = 0) {
+        for (const auto& wrapped : framework::wrap_text(row, inner_width, continuation_indent)) {
+            add_row_cb(wrapped);
+        }
+    };
+
+    add_wrapped(
         std::format(" \033[1mSimRV Version:\033[0m \033[1;36m{}\033[0m  \033[90m(RV{})\033[0m",
                     simrv::buildinfo::kVersion, simrv::xlen::kXLenBits));
-    add_row_cb("");
+    add_wrapped("");
 
-    (void)term_height;
-    (void)box_w;
     for (const auto& group : help_shortcuts()) {
-        add_row_cb(std::format(" {}{}\033[0m", kThemeMint, group.title));
+        add_wrapped(std::format(" {}{}\033[0m", kThemeMint, group.title));
         for (const auto& shortcut : group.shortcuts) {
-            add_row_cb(" " + format_shortcut(shortcut, 24));
+            add_wrapped(" " + format_shortcut(shortcut, 24), 2);
         }
-        add_row_cb("");
+        add_wrapped("");
     }
 }
 

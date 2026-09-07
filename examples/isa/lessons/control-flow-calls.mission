@@ -1,0 +1,53 @@
+# SimRV classroom mission format, version 1.
+[mission]
+version = "1"
+id = "control-flow-calls"
+program = "control-flow-calls.elf"
+
+[step]
+label = "mission_branch"
+title = "Conditional branch"
+prompt = "Predict whether bne changes the PC, then inspect a0."
+why = "A branch chooses the next instruction from register values and an immediate."
+view = "explain"
+glossary = "0"
+
+[step]
+label = "mission_loop"
+title = "Loop control"
+prompt = "Follow one loop iteration in Trace; find the back edge."
+why = "A loop is repeated control flow, not a special ISA instruction."
+view = "trace"
+glossary = "0"
+
+[step]
+label = "mission_before_call"
+title = "Call setup"
+prompt = "Inspect a0, a1, ra, and sp before jal enters add_pair."
+why = "The ABI gives argument, return-address, and stack registers shared meanings."
+view = "registers"
+glossary = "0"
+
+[step]
+label = "mission_in_callee"
+title = "Callee frame"
+prompt = "Open Stack and observe sp move before ra is saved."
+why = "A callee protects the caller's return path in its stack frame."
+view = "stack"
+glossary = "0"
+
+[step]
+label = "mission_after_call"
+title = "Return"
+prompt = "Use Trace to connect jalr with the instruction after the call."
+why = "ret is jalr through ra: it restores the caller's control flow."
+view = "trace"
+glossary = "0"
+
+[step]
+label = "mission_done"
+title = "ABI result"
+prompt = "Inspect a0 and sp; explain why the result and stack are stable."
+why = "Returning values in a0 while restoring sp makes calls compose safely."
+view = "registers"
+glossary = "0"

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/framework/Text.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
 
 namespace simrv::tui::modals {
@@ -22,76 +23,7 @@ namespace {
 /// Returns one or more output lines ready to pass to add_row_cb (without trailing newline).
 auto wrap_ansi_line(const std::string& line, int max_w, int cont_indent = 2)
     -> std::vector<std::string> {
-    if (max_w <= 0) return {line};
-
-    // Measure visible display width of a string that may have ANSI escapes.
-    auto vis_width = [](const std::string& s) -> int { return get_display_width(s); };
-
-    // Split line into tokens preserving ANSI escapes so we can re-emit them on continuation lines.
-    // We walk the string character by character, collecting "words" (non-space runs including any
-    // embedded ANSI sequences) and "spaces".
-    std::vector<std::string> words;
-    std::vector<bool> is_space;
-    std::string cur;
-    bool in_esc = false;
-    for (std::size_t i = 0; i < line.size(); ++i) {
-        char ch = line.at(i);
-        if (ch == '\033') {
-            in_esc = true;
-            cur += ch;
-        } else if (in_esc) {
-            cur += ch;
-            if (ch >= 0x40 && ch <= 0x7E && ch != '[') in_esc = false;
-            if (!in_esc && cur.size() >= 2 && cur.at(1) == '[') {
-                // wait for terminator already consumed
-            }
-            // CSI: wait for final byte
-            if (ch >= 0x40 && ch <= 0x7E) in_esc = false;
-        } else if (ch == ' ') {
-            if (!cur.empty()) {
-                words.push_back(cur);
-                is_space.push_back(false);
-                cur.clear();
-            }
-            words.push_back(" ");
-            is_space.push_back(true);
-        } else {
-            cur += ch;
-        }
-    }
-    if (!cur.empty()) {
-        words.push_back(cur);
-        is_space.push_back(false);
-    }
-
-    std::vector<std::string> result;
-    std::string current_line;
-    int current_w = 0;
-    std::string const indent(static_cast<std::size_t>(cont_indent), ' ');
-
-    for (std::size_t i = 0; i < words.size(); ++i) {
-        const std::string& w = words.at(i);
-        if (is_space.at(i)) {
-            // space: only emit if we have content on current line
-            if (current_w > 0) {
-                current_line += ' ';
-                current_w += 1;
-            }
-            continue;
-        }
-        int ww = vis_width(w);
-        if (current_w + ww > max_w && current_w > 0) {
-            // flush current line, start new continuation
-            result.push_back(current_line);
-            current_line = indent;
-            current_w = cont_indent;
-        }
-        current_line += w;
-        current_w += ww;
-    }
-    if (!current_line.empty()) result.push_back(current_line);
-    if (result.empty()) result.push_back("");
-    return result;
+    return framework::wrap_text(line, std::max(1, max_w), cont_indent);
 }
 
 struct TopicData {

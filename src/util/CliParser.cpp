@@ -18,6 +18,7 @@
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/tui/Tui.hpp"
+#include "simrv/tui/TuiMission.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -501,6 +502,12 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.class_mode = true;
         return true;
     }
+    if (arg == "--mission") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        result.options.mission = std::string(*value);
+        return true;
+    }
     if (arg == "--no-forwarding") {
         result.options.disable_forwarding = true;
         return true;
@@ -741,6 +748,10 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
     if (result.options.explicit_cli_mode && result.options.explicit_tui_mode) {
         return std::unexpected("--cli and --tui are mutually exclusive");
     }
+    if (!result.options.mission.empty() &&
+        (!result.options.class_mode || !result.options.tuimode)) {
+        return std::unexpected("--mission requires --class and --tui");
+    }
 
     if (needs_memory_image(result)) {
         return std::unexpected("-m/--image <FILE> is required to load a memory image");
@@ -801,6 +812,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.tui.enabled = tuimode;
     cfg.tui.high_contrast = high_contrast;
     cfg.tui.class_mode = class_mode;
+    cfg.tui.mission = mission;
     cfg.tui.mouse_sensitivity = mouse_sensitivity;
     cfg.tui.inspection_output = inspection_output;
 
@@ -1002,6 +1014,8 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         stdout,
         "  {}--class, --edu{}          Enable classroom mode with the interactive Student Guide\n",
         style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}--mission {}{}<FILE>{}     Load an external classroom mission\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--inspection-output {}{}<FILE>{} Set the paused-state TUI inspection report "
                "destination\n",

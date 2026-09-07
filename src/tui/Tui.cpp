@@ -105,6 +105,7 @@ Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
     main_thread_id_ = std::this_thread::get_id();
     last_speed_update_ = std::chrono::steady_clock::now();
     student_guide_enabled_ = machine_.class_mode_enabled();
+    mission_.configure(machine_.mission_id(), machine_.binary_path());
     right_panel_mode_.store(TuiRightPanelMode::Terminal, std::memory_order_relaxed);
     update_trace_active_cache();
     vt_.set_scroll_offset_callback([this](int lines) -> void {
@@ -175,6 +176,7 @@ void Tui::set_paused(bool p) {
 
 void Tui::initialize() {
     inspector_pane_ = std::make_unique<InspectorPane>(machine_);
+    inspector_pane_->set_mission_progress(&mission_);
     terminal_pane_ = std::make_unique<TerminalPane>();
     status_bar_ = std::make_unique<StatusBar>(machine_);
 
@@ -1503,6 +1505,12 @@ void Tui::update_trace_active_cache() {
 void Tui::record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa::OperationId op_id,
                              uint8_t rd, Register rd_val, uint8_t rs1, Register rs1_val,
                              uint8_t rs2, Register rs2_val, int64_t imm, uint8_t hart) {
+    if (mission_.enabled()) {
+        if (const auto symbol = machine_.symbol_table().lookup_symbol(pc);
+            symbol && symbol->is_exact()) {
+            mission_.observe_symbol(symbol->name);
+        }
+    }
     if (!trace_or_livetrace_active_.load(std::memory_order_relaxed)) {
         return;
     }
@@ -2231,6 +2239,14 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
         machine_.request_reboot();
         return;
     }
+    if (byte == 'z') {
+        dismiss_mission();
+        return;
+    }
+    if (byte == 'Z') {
+        restart_mission();
+        return;
+    }
     if ((key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) &&
         student_guide_enabled_ && is_paused()) {
         activate_student_guide_suggestion();
@@ -2302,8 +2318,26 @@ void Tui::toggle_student_guide() {
     render(true);
 }
 
+void Tui::dismiss_mission() {
+    mission_.dismiss();
+    set_status_override("Mission dismissed; the Student Guide remains available.");
+    render(true);
+}
+
+void Tui::restart_mission() {
+    mission_.restart();
+    set_status_override("Mission restarted at objective 1.");
+    render(true);
+}
+
 void Tui::activate_student_guide_suggestion() {
     if (!student_guide_enabled_ || !is_paused() || !inspector_pane_) return;
+
+    if (const auto mission_guidance = mission_.guidance()) {
+        set_reg_page(mission_guidance->destination);
+        set_status_override(std::string(mission_guidance->prompt));
+        return;
+    }
 
     auto const guidance = inspector_pane_->current_student_guidance();
     switch (guidance.next_action) {

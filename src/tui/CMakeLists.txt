@@ -15,6 +15,7 @@ simrv_add_component(simrv-tui
   Tui.cpp
   TuiGuidance.cpp
   TuiKeybindings.cpp
+  TuiMission.cpp
   TuiModal.cpp
   modals/AddressModal.cpp
   modals/BreakpointModal.cpp

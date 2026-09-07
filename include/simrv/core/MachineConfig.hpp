@@ -53,6 +53,8 @@ struct TuiConfig {
     bool enabled = false;
     bool high_contrast = false;
     bool class_mode = false;
+    /// Optional external classroom mission path. Missions are local guidance only.
+    std::string mission;
     double mouse_sensitivity = 1.0;
     std::string inspection_output;
 };

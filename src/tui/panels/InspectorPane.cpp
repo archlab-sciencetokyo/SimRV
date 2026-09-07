@@ -14,6 +14,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/TuiGuidance.hpp"
+#include "simrv/tui/TuiMission.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/framework/Text.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -510,6 +511,13 @@ auto InspectorPane::render_log_bottom_row(int row_idx, int num_rows, int width) 
 }
 
 auto InspectorPane::current_student_guidance() const -> PageGuidance {
+    if (mission_ != nullptr) {
+        if (const auto mission_guidance = mission_->guidance()) {
+            return {std::string(mission_guidance->title), std::string(mission_guidance->prompt),
+                    std::string(mission_guidance->why),   KeyAction::CycleToolPage,
+                    "Open the mission observation view.", mission_guidance->glossary_topic};
+        }
+    }
     auto const& context = current_cpu().pipeline_context;
     auto const snapshot = machine_.tui_execution_snapshot(selected_hart_);
     return guidance_for_context(
@@ -637,7 +645,8 @@ auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows,
     constexpr int kGuidanceHeight = 4;
     constexpr int kLogAreaHeight = 6;
     bool const show_guidance =
-        !is_secondary && should_show_guidance(paused_, student_guide_enabled_, visible_rows_);
+        !is_secondary &&
+        should_show_guidance(paused_, student_guide_enabled_, visible_rows_, width);
     int const guidance_start = visible_rows_ - kLogAreaHeight - kGuidanceHeight;
     if (!is_secondary && page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE) {
         if (show_guidance && row_idx >= guidance_start &&
@@ -783,7 +792,8 @@ auto InspectorPane::get_visible_content_rows() const -> int {
     }
     constexpr int kLogAreaHeight = 6;
     constexpr int kGuidanceHeight = 4;
-    bool const show_guidance = should_show_guidance(paused_, student_guide_enabled_, visible_rows_);
+    bool const show_guidance =
+        should_show_guidance(paused_, student_guide_enabled_, visible_rows_, last_width_);
     int max_content_rows = visible_rows_ - (column_header_mode_ ? 1 : 2);
     if (page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE) {
         if (visible_rows_ >= 15) {
