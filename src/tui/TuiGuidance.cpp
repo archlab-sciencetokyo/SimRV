@@ -131,12 +131,12 @@ auto guidance_for_context(const GuidanceContext& context) -> PageGuidance {
                         "Open a selected stack or register address.",
                         0};
             break;
-        case TuiRegPage::DISASM:
-            guidance = {"Disassembly",
-                        "Decoded instructions surround the current program counter.",
-                        "PC and breakpoint markers show where execution is paused.",
-                        KeyAction::Step,
-                        "Step one instruction and follow the PC.",
+        case TuiRegPage::CONSOLE:
+            guidance = {"Console",
+                        "Terminal or display output from the simulated system.",
+                        "Direct guest UART terminal and framebuffer display output.",
+                        KeyAction::RunPause,
+                        "Run or pause guest execution.",
                         0};
             break;
     }

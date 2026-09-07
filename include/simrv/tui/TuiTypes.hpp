@@ -29,7 +29,15 @@ enum class TuiRegPage : uint8_t {
     TRACE,
     EXPLAIN,
     STACK,
-    DISASM
+    CONSOLE,
+    DISASM = CONSOLE
+};
+
+enum class LayoutPreset : uint8_t {
+    GeneralDebug,
+    Microarchitecture,
+    TraceExecution,
+    MemoryInterconnect
 };
 
 struct WorkbenchSlot {
@@ -54,7 +62,7 @@ struct WorkbenchSlot {
             return TuiCategoryGroup::Pipeline;
         case TuiRegPage::TRACE:
         case TuiRegPage::EXPLAIN:
-        case TuiRegPage::DISASM:
+        case TuiRegPage::CONSOLE:
         default:
             return TuiCategoryGroup::Tools;
     }
@@ -86,8 +94,8 @@ struct WorkbenchSlot {
             return "Instruction Explainer";
         case TuiRegPage::STACK:
             return "Stack & Memory";
-        case TuiRegPage::DISASM:
-            return "Disassembly";
+        case TuiRegPage::CONSOLE:
+            return "Console";
     }
     return "Tool View";
 }

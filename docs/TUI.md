@@ -104,3 +104,11 @@ shell. Run the focused tests with:
 ```bash
 ctest --test-dir build/rv64-release --output-on-failure -R 'tui-framework|linux-(boot|ca-.*)-pty'
 ```
+
+## Roadmap: Attachable Out-of-Process Architecture (3.0.0 Goal)
+
+To achieve zero-overhead headless simulation while supporting rich visual inspection, the TUI is targeted to decouple into an attachable client:
+
+- **Transport**: Hybrid IPC with Unix Domain Sockets for bidirectional RPC (pause, resume, step, logical breakpoints, inspection queries) and POSIX Shared Memory (`/dev/shm`) for 60 Hz live telemetry (`TuiSnapshotSlot`) and lock-free circular ring buffers for guest UART streams.
+- **Attach/Detach**: Tmux/GDB-style on-demand attach (`SimRV --attach <sock>`). The headless simulator (`SimRV --listen-tui <sock>`) runs at uninhibited native throughput when detached, and begins publishing shared-memory frames only while a client is attached.
+- **Multi-call Binary**: Preserves existing embedded execution while introducing headless server and attach client sub-modes in the unified `SimRV` binary.

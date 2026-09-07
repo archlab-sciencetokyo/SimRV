@@ -291,6 +291,9 @@ auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step
                 return true;
             }
             break;
+        case ModalType::LayoutPresets:
+            result = true;
+            break;
         default:
             break;
     }
@@ -337,7 +340,8 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
     bool is_wide_modal =
         (is_help || is_glossary || active_modal_ == ModalType::Settings ||
          active_modal_ == ModalType::ConfigureMisa || active_modal_ == ModalType::ConfigureSystem ||
-         active_modal_ == ModalType::Notice || active_modal_ == ModalType::PlatformChangeConfirm);
+         active_modal_ == ModalType::Notice || active_modal_ == ModalType::PlatformChangeConfirm ||
+         active_modal_ == ModalType::LayoutPresets);
     const int fallback_width = is_wide_modal ? 78 : 58;
     const bool has_rendered_geometry = rendered_box_width_ > 0 &&
                                        rendered_term_width_ == term_width &&
@@ -352,6 +356,7 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
                    : (active_modal_ == ModalType::ConfigureSystem) ? 22
                    : (active_modal_ == ModalType::Glossary)        ? 26
                    : (active_modal_ == ModalType::Help)            ? 24
+                   : (active_modal_ == ModalType::LayoutPresets)   ? 12
                                                                    : 10;
 
     OverlayGeometry overlay =
@@ -452,6 +457,7 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
                 case ModalType::SetSpeed:
                 case ModalType::InspectAddress:
                 case ModalType::LoadBinary:
+                case ModalType::LayoutPresets:
                     return action == 0 ? ModalClickResult::Submit : ModalClickResult::Closed;
                 case ModalType::Help:
                 case ModalType::None:
@@ -542,6 +548,15 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
             close();
             return ModalClickResult::Closed;
 
+        case ModalType::LayoutPresets: {
+            int sel = content_row - 2;
+            if (sel >= 0 && sel <= 3) {
+                preset_cursor_ = sel;
+                return ModalClickResult::Submit;
+            }
+            return ModalClickResult::Handled;
+        }
+
         default:
             break;
     }
@@ -619,6 +634,31 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
         case ModalType::Help:
             modals::HelpModal::render(content_rows, add_row, term_height, provisional_width);
             break;
+        case ModalType::LayoutPresets: {
+            add_row("Select a workbench preset to configure pane columns:");
+            add_row("");
+            const std::array<std::pair<const char*, const char*>, 4> presets = {
+                {{"1 / F1", "General Debug        [GPR, Stack, Trace, Console]"},
+                 {"2 / F2", "Microarchitecture    [Pipeline, Cache, Hazard, Console]"},
+                 {"3 / F3", "Trace & Execution    [GPR, Trace, Explain, Console]"},
+                 {"4 / F4", "Memory & Bus         [Stack, Cache, TLB, Bus]"}}};
+            for (size_t i = 0; i < presets.size(); ++i) {
+                bool is_sel = (preset_cursor_ == static_cast<int>(i));
+                std::string line;
+                if (is_sel) {
+                    line = std::format(" \033[1;7m [{}] {:<44} \033[0m", presets[i].first,
+                                       presets[i].second);
+                } else {
+                    line = std::format("  [{}] {:<44}", presets[i].first, presets[i].second);
+                }
+                add_row(line);
+            }
+            add_row("");
+            add_row(modals::build_modal_footer({{"[Enter / 1-4]", "Apply Preset"},
+                                                {"[Up/Down]", "Navigate"},
+                                                {"[Esc / q]", "Cancel"}}));
+            break;
+        }
         case ModalType::Notice:
             add_row("");
             {

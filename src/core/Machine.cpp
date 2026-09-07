@@ -1105,7 +1105,7 @@ void Machine::run() {
     // Start the selected composed execution policy.
     start_runner();
 
-    if (tui_enabled()) {
+    if (tui_enabled() && execution_state() != ExecutionState::Stepping) {
         execution_state_.store(ExecutionState::Paused, std::memory_order_release);
     }
 

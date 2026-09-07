@@ -80,6 +80,10 @@ enum class TuiKey : uint8_t {
     Dot = '.',
     LeftBracket = '[',
     RightBracket = ']',
+    F1 = 241,
+    F2 = 242,
+    F3 = 243,
+    F4 = 244
 };
 
 }  // namespace simrv::tui

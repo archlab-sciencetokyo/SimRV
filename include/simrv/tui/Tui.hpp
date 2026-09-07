@@ -160,6 +160,7 @@ class Tui {
     }
 
     void cycle_layout();
+    void apply_layout_preset(LayoutPreset preset);
     void focus_next_slot();
     void focus_prev_slot();
     [[nodiscard]] auto is_terminal_focused() const noexcept -> bool { return !is_paused(); }
@@ -267,7 +268,7 @@ class Tui {
     std::atomic<bool> trace_enabled_{false};
     bool student_guide_enabled_{false};
     bool inspection_overwrite_armed_{false};
-    std::vector<WorkbenchSlot> workbench_slots_{{TuiRegPage::GPR, 0}, {TuiRegPage::DISASM, 0}};
+    std::vector<WorkbenchSlot> workbench_slots_{{TuiRegPage::GPR, 0}, {TuiRegPage::CONSOLE, 0}};
     size_t focused_slot_index_ = 0;
     size_t selected_hart_ = 0;
     TuiLayout layout_ = TuiLayout::Split;

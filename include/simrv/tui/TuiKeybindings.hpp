@@ -45,7 +45,12 @@ enum class KeyAction : uint8_t {
     ExportInspection,
     SwitchHart,
     OpenGlossary,
-    ToggleTheme
+    ToggleTheme,
+    SelectPreset1,
+    SelectPreset2,
+    SelectPreset3,
+    SelectPreset4,
+    OpenLayoutPresets
 };
 
 enum class ActionCategory : uint8_t { Execution, Inspect, Navigate, Configure, Help };

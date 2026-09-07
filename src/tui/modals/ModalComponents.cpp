@@ -74,6 +74,8 @@ auto get_modal_metadata(ModalType type, bool is_notice_error, std::string_view n
                     .is_wide = true};
         case ModalType::PlatformChangeConfirm:
             return {.title = " ⚙️  PLATFORM PROFILE CHANGE: RELOAD REQUIRED ", .is_wide = true};
+        case ModalType::LayoutPresets:
+            return {.title = " WORKBENCH LAYOUT PRESETS ", .is_wide = true};
         case ModalType::None:
         default:
             return {.title = "", .is_wide = false};

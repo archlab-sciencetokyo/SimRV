@@ -49,6 +49,15 @@ class InspectorPane : public TuiWidget {
     ~InspectorPane() override = default;
 
     [[nodiscard]] auto render_row(int row_idx, int width) -> std::string override;
+    [[nodiscard]] auto render_column_row(int row_idx, int width, int col_idx, size_t total_cols,
+                                         bool is_focused) -> std::string;
+    [[nodiscard]] auto render_column_header(int col_idx, const char* name, bool is_focused,
+                                            int width) const -> std::string;
+
+    void set_secondary_column_mode(bool secondary) { secondary_column_mode_ = secondary; }
+    [[nodiscard]] auto is_secondary_column_mode() const noexcept -> bool {
+        return secondary_column_mode_;
+    }
 
     void set_page(TuiRegPage page);
     [[nodiscard]] auto get_page() const -> TuiRegPage { return page_; }
@@ -187,6 +196,8 @@ class InspectorPane : public TuiWidget {
                                                               int right_width) -> std::string;
     [[nodiscard]] auto render_system_state(const simrv::core::CPU& cpu, int logical_row,
                                            int col_width, int right_width) -> std::string;
+    [[nodiscard]] auto render_row_internal(int row_idx, int width, int header_rows,
+                                           bool is_secondary) -> std::string;
     [[nodiscard]] auto render_machine_performance_stats(const simrv::core::CPU& cpu,
                                                         int adj_logical_row, int width)
         -> std::string;
@@ -241,6 +252,7 @@ class InspectorPane : public TuiWidget {
     int cache_inspect_type_ = 0;  // 0: ICache, 1: DCache
     int cache_inspect_set_ = 0;
     int cache_inspect_way_ = 0;
+    bool secondary_column_mode_ = false;
 };
 
 }  // namespace simrv::tui

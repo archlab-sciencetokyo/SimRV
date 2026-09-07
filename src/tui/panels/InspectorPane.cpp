@@ -47,6 +47,9 @@ auto InspectorPane::get_total_rows(int width) -> int {
         return static_cast<int>(get_explain_rows(width).size());
     }
     bool const single_column = is_single_column(width);
+    if (secondary_column_mode_) {
+        return performance_start_row(single_column);
+    }
     // Semantic machine state needs five rows, unlike the legacy CSR dump.  The
     // pipeline page retains its complete 25-row canvas; single-column register
     // pages omit machine state entirely.
@@ -124,7 +127,6 @@ void InspectorPane::set_page(TuiRegPage page) {
         if (page == TuiRegPage::CACHE) page = TuiRegPage::STACK;
         if (page == TuiRegPage::BPRED || page == TuiRegPage::HAZARD) page = TuiRegPage::PIPELINE;
     }
-    if (page_ != page) reset_horizontal_scroll();
     page_ = page;
 }
 
@@ -161,6 +163,10 @@ auto InspectorPane::get_row_uncached(int logical_row, int width) -> std::string 
         render_system_or_pipeline_extended(cpu, logical_row, col_width, right_width, single_column);
     if (!res.empty()) {
         return res;
+    }
+
+    if (secondary_column_mode_) {
+        return format_to_width("", width);
     }
 
     return render_perf_or_debug(cpu, logical_row, width, single_column);
@@ -512,26 +518,46 @@ auto InspectorPane::render_guidance_row(int row_idx, int width) -> std::string {
     }
 }
 
-auto InspectorPane::render_row(int row_idx, int width) -> std::string {
+auto InspectorPane::render_column_header(int col_idx, const char* name, bool is_focused,
+                                         int width) const -> std::string {
+    const auto style = get_active_theme_style();
+    const bool is_ansi = (style == TuiThemeStyle::ClassicAnsi);
+    const char* horiz = is_ansi ? "-" : "─";
+
+    std::string badge;
+    if (is_focused) {
+        badge = is_ansi ? std::format(" [{}: {}] ", col_idx + 1, name)
+                        : std::format(" \033[1;7m [{}: {}] \033[0m", col_idx + 1, name);
+    } else {
+        badge = is_ansi ? std::format(" [{}: {}] ", col_idx + 1, name)
+                        : std::format(" {}{}[{}: {}]\033[0m ", kThemeMuted, is_focused ? "► " : "",
+                                      col_idx + 1, name);
+    }
+    int const badge_w = get_display_width(badge);
+    if (badge_w >= width) return format_to_width(badge, width);
+    int const pad = std::max(0, width - badge_w);
+    int const left = std::min(2, pad / 2);
+    int const right = pad - left;
+    return std::format("{}{}{}{}{}\033[0m", kThemeBorder, make_repeated_string(horiz, left), badge,
+                       kThemeBorder, make_repeated_string(horiz, right));
+}
+
+auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows, bool is_secondary)
+    -> std::string {
     last_width_ = width;
+    secondary_column_mode_ = is_secondary;
 
     if (!machine_.runtime_profile.is_cycle_mode()) {
         if (page_ == TuiRegPage::CACHE) page_ = TuiRegPage::STACK;
         if (page_ == TuiRegPage::BPRED || page_ == TuiRegPage::HAZARD) page_ = TuiRegPage::PIPELINE;
     }
 
-    if (row_idx == 0) {
-        return render_tab_bar_tier1(width);
-    }
-    if (row_idx == 1) {
-        return render_tab_bar_tier2(width);
-    }
-
     constexpr int kGuidanceHeight = 4;
     constexpr int kLogAreaHeight = 6;
-    bool const show_guidance = should_show_guidance(paused_, student_guide_enabled_, visible_rows_);
+    bool const show_guidance =
+        !is_secondary && should_show_guidance(paused_, student_guide_enabled_, visible_rows_);
     int const guidance_start = visible_rows_ - kLogAreaHeight - kGuidanceHeight;
-    if (page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE) {
+    if (!is_secondary && page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE) {
         if (show_guidance && row_idx >= guidance_start &&
             row_idx < guidance_start + kGuidanceHeight) {
             return render_guidance_row(row_idx - guidance_start, width);
@@ -550,33 +576,52 @@ auto InspectorPane::render_row(int row_idx, int width) -> std::string {
 
     bool const is_stack_active = (page_ == TuiRegPage::STACK) && supports_horizontal_scroll();
     constexpr int kStackCanvasWidth = 104;
+    constexpr int kPipelineCanvasWidth = 104;
+    constexpr int kBusCanvasWidth = 88;
+    constexpr int kExplainCanvasWidth = 96;
+
     int max_trace_cols = width;
     if (page_ == TuiRegPage::TRACE && trace_buffer_) {
         for (auto const& line : *trace_buffer_) {
             max_trace_cols = std::max(max_trace_cols, framework::display_width(line));
         }
     }
-    int const total_cols = is_stack_active                ? kStackCanvasWidth
-                           : (page_ == TuiRegPage::TRACE) ? max_trace_cols
-                                                          : width;
+    int const total_cols = is_stack_active                   ? kStackCanvasWidth
+                           : (page_ == TuiRegPage::PIPELINE) ? std::max(width, kPipelineCanvasWidth)
+                           : (page_ == TuiRegPage::BUS)      ? std::max(width, kBusCanvasWidth)
+                           : (page_ == TuiRegPage::EXPLAIN)  ? std::max(width, kExplainCanvasWidth)
+                           : (page_ == TuiRegPage::TRACE)    ? max_trace_cols
+                                                             : width;
     auto& sv = current_scroll_view();
     sv.set_geometry(total_logical_rows, max_content_rows, total_cols, std::max(1, width - 2));
 
-    int const content_row_idx = row_idx - 2;
+    int const content_row_idx = row_idx - header_rows;
     int const logical_row = content_row_idx + sv.offset_y();
 
+    int render_width = width;
+    if (is_stack_active && logical_row >= 1 && logical_row <= 13) {
+        render_width = std::max(width, kStackCanvasWidth);
+    } else if (page_ == TuiRegPage::PIPELINE && width < kPipelineCanvasWidth) {
+        render_width = kPipelineCanvasWidth;
+    } else if (page_ == TuiRegPage::BUS && width < kBusCanvasWidth) {
+        render_width = kBusCanvasWidth;
+    } else if (page_ == TuiRegPage::EXPLAIN && width < kExplainCanvasWidth) {
+        render_width = kExplainCanvasWidth;
+    }
+
     if (page_ == TuiRegPage::TRACE || page_ == TuiRegPage::EXPLAIN) {
-        return sv.render_row(content_row_idx, width,
-                             [this, width](framework::RowIndex r, framework::ColumnIndex, int w) {
-                                 if (page_ == TuiRegPage::TRACE) {
-                                     return render_trace_row(r, w);
-                                 }
-                                 auto explain_rows = get_explain_rows(width);
-                                 if (r >= 0 && r < static_cast<int>(explain_rows.size())) {
-                                     return explain_rows.at(static_cast<std::size_t>(r));
-                                 }
-                                 return std::string{};
-                             });
+        return sv.render_row(
+            content_row_idx, width,
+            [this, render_width](framework::RowIndex r, framework::ColumnIndex, int w) {
+                if (page_ == TuiRegPage::TRACE) {
+                    return render_trace_row(r, w);
+                }
+                auto explain_rows = get_explain_rows(render_width);
+                if (r >= 0 && r < static_cast<int>(explain_rows.size())) {
+                    return explain_rows.at(static_cast<std::size_t>(r));
+                }
+                return std::string{};
+            });
     }
 
     if (sv.can_scroll_up() && content_row_idx == 0) {
@@ -602,29 +647,29 @@ auto InspectorPane::render_row(int row_idx, int width) -> std::string {
         }
     }
 
-    bool const pan_stack_row = is_stack_active && logical_row >= 1 && logical_row <= 13;
-    int const render_width = pan_stack_row ? std::max(width, kStackCanvasWidth) : width;
     auto finish_row = [&](std::string res) {
         if (page_ != TuiRegPage::PIPELINE && page_ != TuiRegPage::EXPLAIN) {
             res = style_inline_separators(std::move(res));
         }
-        if (pan_stack_row) {
+        if (sv.offset_x() > 0 || total_cols > width) {
             return sv.format_horizontal_row(res, width);
         }
         return format_to_width(res, width);
     };
 
     if (show_spinner) {
-        const int stats_start = performance_start_row(is_single_column(width));
-        const int stats_end = stats_start + performance_row_count();
-        if (logical_row >= stats_start && logical_row < stats_end) {
-            const int stats_row = logical_row - stats_start;
-            if (!machine_.runtime_profile.is_cycle_mode()) {
-                return finish_row(render_sampled_machine_performance_stats(
-                    machine_.tui_execution_snapshot(), stats_row, width));
+        if (!is_secondary) {
+            const int stats_start = performance_start_row(is_single_column(width));
+            const int stats_end = stats_start + performance_row_count();
+            if (logical_row >= stats_start && logical_row < stats_end) {
+                const int stats_row = logical_row - stats_start;
+                if (!machine_.runtime_profile.is_cycle_mode()) {
+                    return finish_row(render_sampled_machine_performance_stats(
+                        machine_.tui_execution_snapshot(), stats_row, width));
+                }
+                return finish_row(render_cycle_accurate_stats(
+                    machine_.tui_execution_snapshot(selected_hart_), stats_row, width));
             }
-            return finish_row(render_cycle_accurate_stats(
-                machine_.tui_execution_snapshot(selected_hart_), stats_row, width));
         }
         // High-speed UI frames use only a stable execution snapshot and cached pane state.
         return render_active_spinner(logical_row, width);
@@ -635,6 +680,31 @@ auto InspectorPane::render_row(int row_idx, int width) -> std::string {
         cached_left_rows_.at(static_cast<std::size_t>(logical_row)) = res;
     }
     return res;
+}
+
+auto InspectorPane::render_row(int row_idx, int width) -> std::string {
+    if (row_idx == 0) {
+        return render_tab_bar_tier1(width);
+    }
+    if (row_idx == 1) {
+        return render_tab_bar_tier2(width);
+    }
+    return render_row_internal(row_idx, width, /*header_rows=*/2, /*is_secondary=*/false);
+}
+
+auto InspectorPane::render_column_row(int row_idx, int width, int col_idx, size_t total_cols,
+                                      bool is_focused) -> std::string {
+    bool const is_multi = (total_cols > 2);
+    bool const is_secondary = (col_idx > 0);
+
+    if (is_multi || is_secondary) {
+        if (row_idx == 0) {
+            return render_column_header(col_idx, get_page_name(page_), is_focused, width);
+        }
+        return render_row_internal(row_idx, width, /*header_rows=*/1, is_secondary);
+    }
+
+    return render_row(row_idx, width);
 }
 
 void InspectorPane::update_cache() {
@@ -651,6 +721,9 @@ void InspectorPane::refresh_execution_snapshot() {
 }
 
 auto InspectorPane::get_visible_content_rows() const -> int {
+    if (secondary_column_mode_) {
+        return std::max(1, visible_rows_ - 1);
+    }
     constexpr int kLogAreaHeight = 6;
     constexpr int kGuidanceHeight = 4;
     bool const show_guidance = should_show_guidance(paused_, student_guide_enabled_, visible_rows_);
@@ -698,6 +771,12 @@ void InspectorPane::scroll_horizontal(int columns) {
     int total_cols = viewport_width;
     if (page_ == TuiRegPage::STACK) {
         total_cols = 104;
+    } else if (page_ == TuiRegPage::PIPELINE) {
+        total_cols = 104;
+    } else if (page_ == TuiRegPage::BUS) {
+        total_cols = 88;
+    } else if (page_ == TuiRegPage::EXPLAIN) {
+        total_cols = 96;
     } else if (page_ == TuiRegPage::TRACE && trace_buffer_) {
         for (auto const& line : *trace_buffer_) {
             total_cols = std::max(total_cols, framework::display_width(line));
@@ -718,7 +797,7 @@ auto InspectorPane::supports_horizontal_scroll() const -> bool {
         return physical.has_value() && machine_.memory_geometry().contains(*physical);
     }
     if (page_ == TuiRegPage::TRACE || page_ == TuiRegPage::EXPLAIN ||
-        page_ == TuiRegPage::PIPELINE) {
+        page_ == TuiRegPage::PIPELINE || page_ == TuiRegPage::BUS) {
         return true;
     }
     return false;

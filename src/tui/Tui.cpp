@@ -684,28 +684,41 @@ void Tui::render(bool force) {
     pane_width_cached_ = inspector_width;
 
     const int num_rows = frame.content_rows;
-    int total = (panel_mode == TuiRightPanelMode::Terminal) ? vt_.get_lines_count() : 0;
-    scroll_offset_ = std::min(scroll_offset_, std::max(0, total - num_rows));
-
-    render_build_lines(inspector_width, terminal_width, num_rows, panel_mode);
-    lock.unlock();
-
     auto col_widths = framework::multi_column_widths(term_width, layout_, user_inspector_width_);
     if (workbench_slots_.size() != col_widths.count && col_widths.count > 0) {
         sync_workbench_slots();
     }
+    int const term_content_rows = (col_widths.count > 2) ? std::max(1, num_rows - 1) : num_rows;
+
+    int total = (panel_mode == TuiRightPanelMode::Terminal) ? vt_.get_lines_count() : 0;
+    scroll_offset_ = std::min(scroll_offset_, std::max(0, total - term_content_rows));
+
+    render_build_lines(inspector_width, terminal_width, term_content_rows, panel_mode);
+    lock.unlock();
 
     std::vector<std::string> new_lines = compose_multi_frame_lines(
         frame, term_width, col_widths, status_bar_->render_row(0, term_width),
         status_bar_->render_row(1, term_width),
-        [this](size_t col_idx, int row, int width) -> std::string {
+        [this, total_cols = col_widths.count, panel_mode](size_t col_idx, int row,
+                                                          int width) -> std::string {
             if (col_idx < workbench_slots_.size()) {
                 const auto page = workbench_slots_[col_idx].page;
-                if (page == TuiRegPage::DISASM) {
+                const bool is_focused = (col_idx == focused_slot_index_);
+                if (page == TuiRegPage::CONSOLE) {
+                    if (total_cols > 2) {
+                        if (row == 0) {
+                            return inspector_pane_->render_column_header(
+                                static_cast<int>(col_idx),
+                                (panel_mode == TuiRightPanelMode::Display) ? "Display" : "Console",
+                                is_focused, width);
+                        }
+                        return terminal_pane_->render_row(row - 1, width);
+                    }
                     return terminal_pane_->render_row(row, width);
                 }
                 inspector_pane_->set_page(page);
-                return inspector_pane_->render_row(row, width);
+                return inspector_pane_->render_column_row(row, width, static_cast<int>(col_idx),
+                                                          total_cols, is_focused);
             }
             return "";
         });
@@ -958,7 +971,8 @@ void Tui::handle_mouse(int x, int y, int b) {
     if (clicked_col < workbench_slots_.size()) {
         auto page = workbench_slots_[clicked_col].page;
         if (b == 64) {
-            if (page == TuiRegPage::DISASM) {
+            focused_slot_index_ = clicked_col;
+            if (page == TuiRegPage::CONSOLE) {
                 scroll(5);
             } else {
                 inspector_pane_->set_page(page);
@@ -968,7 +982,8 @@ void Tui::handle_mouse(int x, int y, int b) {
             return;
         }
         if (b == 65) {
-            if (page == TuiRegPage::DISASM) {
+            focused_slot_index_ = clicked_col;
+            if (page == TuiRegPage::CONSOLE) {
                 scroll(-5);
             } else {
                 inspector_pane_->set_page(page);
@@ -977,18 +992,19 @@ void Tui::handle_mouse(int x, int y, int b) {
             }
             return;
         }
-        if (b == 66 || b == 67) {
-            if (page != TuiRegPage::DISASM) {
+        if (b == 66 || b == 67 || b == 68 || b == 69) {
+            focused_slot_index_ = clicked_col;
+            if (page != TuiRegPage::CONSOLE) {
                 inspector_pane_->set_page(page);
                 if (inspector_pane_->supports_horizontal_scroll()) {
-                    inspector_pane_->scroll_horizontal(b == 66 ? -4 : 4);
+                    inspector_pane_->scroll_horizontal((b == 66 || b == 68) ? -4 : 4);
                     render(true);
                 }
             }
             return;
         }
-        if (page == TuiRegPage::DISASM && b == 0 && y >= 6) {
-            // Disassembly breakpoint toggle / inspect
+        if (page == TuiRegPage::CONSOLE && b == 0 && y >= 6) {
+            // Console click
             render(true);
             return;
         }
@@ -1018,13 +1034,13 @@ void Tui::sync_workbench_slots() {
 
     if (desired == 1) {
         if (layout_ == TuiLayout::FullRight) {
-            workbench_slots_ = {{TuiRegPage::DISASM, 0}};
+            workbench_slots_ = {{TuiRegPage::CONSOLE, 0}};
         } else {
             workbench_slots_ = {{TuiRegPage::GPR, 0}};
         }
     } else if (desired == 2) {
         if (workbench_slots_.size() < 2) {
-            workbench_slots_.push_back({TuiRegPage::DISASM, 0});
+            workbench_slots_.push_back({TuiRegPage::CONSOLE, 0});
         } else if (workbench_slots_.size() > 2) {
             workbench_slots_.resize(2);
         }
@@ -1032,7 +1048,7 @@ void Tui::sync_workbench_slots() {
         if (workbench_slots_.size() < 3) {
             if (workbench_slots_.size() == 1) {
                 workbench_slots_.push_back({TuiRegPage::STACK, 0});
-                workbench_slots_.push_back({TuiRegPage::DISASM, 0});
+                workbench_slots_.push_back({TuiRegPage::CONSOLE, 0});
             } else {
                 workbench_slots_.insert(workbench_slots_.begin() + 1, {TuiRegPage::STACK, 0});
             }
@@ -1044,7 +1060,7 @@ void Tui::sync_workbench_slots() {
             workbench_slots_ = {{TuiRegPage::GPR, 0},
                                 {TuiRegPage::STACK, 0},
                                 {TuiRegPage::TRACE, 0},
-                                {TuiRegPage::DISASM, 0}};
+                                {TuiRegPage::CONSOLE, 0}};
         } else if (workbench_slots_.size() == 2) {
             auto last = workbench_slots_.back();
             workbench_slots_.pop_back();
@@ -1087,9 +1103,98 @@ void Tui::cycle_layout() {
     const char* name = (layout_ == TuiLayout::Split)         ? "2-Column Split"
                        : (layout_ == TuiLayout::ThreeColumn) ? "3-Column Tri-Pane"
                        : (layout_ == TuiLayout::FourColumn)  ? "4-Column Quad-Pane"
-                       : (layout_ == TuiLayout::FullRight)   ? "Full Disassembly"
+                       : (layout_ == TuiLayout::FullRight)   ? "Full Console"
                                                              : "Full Registers";
     set_status_override(std::format("Workbench Layout: {}", name));
+    render(true);
+}
+
+void Tui::apply_layout_preset(LayoutPreset preset) {
+    winsize w{};
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+    int const term_width = w.ws_col > 0 ? w.ws_col : 80;
+    int const max_cols = framework::max_supported_columns(term_width);
+
+    switch (preset) {
+        case LayoutPreset::GeneralDebug:
+            if (max_cols >= 4) {
+                layout_ = TuiLayout::FourColumn;
+                workbench_slots_ = {{TuiRegPage::GPR, 0},
+                                    {TuiRegPage::STACK, 0},
+                                    {TuiRegPage::TRACE, 0},
+                                    {TuiRegPage::CONSOLE, 0}};
+            } else if (max_cols >= 3) {
+                layout_ = TuiLayout::ThreeColumn;
+                workbench_slots_ = {
+                    {TuiRegPage::GPR, 0}, {TuiRegPage::STACK, 0}, {TuiRegPage::CONSOLE, 0}};
+            } else {
+                layout_ = TuiLayout::Split;
+                workbench_slots_ = {{TuiRegPage::GPR, 0}, {TuiRegPage::CONSOLE, 0}};
+            }
+            set_status_override("Layout Preset: General Debug [F1]");
+            break;
+
+        case LayoutPreset::Microarchitecture:
+            if (max_cols >= 4) {
+                layout_ = TuiLayout::FourColumn;
+                workbench_slots_ = {{TuiRegPage::PIPELINE, 0},
+                                    {TuiRegPage::CACHE, 0},
+                                    {TuiRegPage::HAZARD, 0},
+                                    {TuiRegPage::CONSOLE, 0}};
+            } else if (max_cols >= 3) {
+                layout_ = TuiLayout::ThreeColumn;
+                workbench_slots_ = {
+                    {TuiRegPage::PIPELINE, 0}, {TuiRegPage::CACHE, 0}, {TuiRegPage::CONSOLE, 0}};
+            } else {
+                layout_ = TuiLayout::Split;
+                workbench_slots_ = {{TuiRegPage::PIPELINE, 0}, {TuiRegPage::CONSOLE, 0}};
+            }
+            set_status_override("Layout Preset: Microarchitecture [F2]");
+            break;
+
+        case LayoutPreset::TraceExecution:
+            if (max_cols >= 4) {
+                layout_ = TuiLayout::FourColumn;
+                workbench_slots_ = {{TuiRegPage::GPR, 0},
+                                    {TuiRegPage::TRACE, 0},
+                                    {TuiRegPage::EXPLAIN, 0},
+                                    {TuiRegPage::CONSOLE, 0}};
+            } else if (max_cols >= 3) {
+                layout_ = TuiLayout::ThreeColumn;
+                workbench_slots_ = {
+                    {TuiRegPage::GPR, 0}, {TuiRegPage::TRACE, 0}, {TuiRegPage::CONSOLE, 0}};
+            } else {
+                layout_ = TuiLayout::Split;
+                workbench_slots_ = {{TuiRegPage::TRACE, 0}, {TuiRegPage::CONSOLE, 0}};
+            }
+            set_status_override("Layout Preset: Trace & Execution [F3]");
+            break;
+
+        case LayoutPreset::MemoryInterconnect:
+            if (max_cols >= 4) {
+                layout_ = TuiLayout::FourColumn;
+                workbench_slots_ = {{TuiRegPage::STACK, 0},
+                                    {TuiRegPage::CACHE, 0},
+                                    {TuiRegPage::TLB, 0},
+                                    {TuiRegPage::BUS, 0}};
+            } else if (max_cols >= 3) {
+                layout_ = TuiLayout::ThreeColumn;
+                workbench_slots_ = {
+                    {TuiRegPage::STACK, 0}, {TuiRegPage::CACHE, 0}, {TuiRegPage::BUS, 0}};
+            } else {
+                layout_ = TuiLayout::Split;
+                workbench_slots_ = {{TuiRegPage::STACK, 0}, {TuiRegPage::BUS, 0}};
+            }
+            set_status_override("Layout Preset: Memory & Interconnect [F4]");
+            break;
+    }
+
+    if (focused_slot_index_ >= workbench_slots_.size()) {
+        focused_slot_index_ = 0;
+    }
+    if (inspector_pane_) {
+        inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
+    }
     render(true);
 }
 
@@ -1192,7 +1297,7 @@ void Tui::cycle_reg_page() {
             if (rp == TuiRegPage::EXPLAIN)
                 rp = TuiRegPage::TRACE;
             else if (rp == TuiRegPage::TRACE)
-                rp = TuiRegPage::DISASM;
+                rp = TuiRegPage::CONSOLE;
             else
                 rp = TuiRegPage::EXPLAIN;
             break;
@@ -1803,6 +1908,44 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         }
         return true;
     }
+    if (mtype == ModalType::LayoutPresets) {
+        if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
+            close_modal();
+            return true;
+        }
+        if (byte >= '1' && byte <= '4') {
+            modal_.set_preset_cursor(byte - '1');
+            apply_layout_preset(modal_.get_selected_preset());
+            close_modal();
+            return true;
+        }
+        if (key == simrv::tui::TuiKey::F1) {
+            apply_layout_preset(LayoutPreset::GeneralDebug);
+            close_modal();
+            return true;
+        }
+        if (key == simrv::tui::TuiKey::F2) {
+            apply_layout_preset(LayoutPreset::Microarchitecture);
+            close_modal();
+            return true;
+        }
+        if (key == simrv::tui::TuiKey::F3) {
+            apply_layout_preset(LayoutPreset::TraceExecution);
+            close_modal();
+            return true;
+        }
+        if (key == simrv::tui::TuiKey::F4) {
+            apply_layout_preset(LayoutPreset::MemoryInterconnect);
+            close_modal();
+            return true;
+        }
+        if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline || byte == ' ') {
+            apply_layout_preset(modal_.get_selected_preset());
+            close_modal();
+            return true;
+        }
+        return true;
+    }
 
     if (byte == 27 || key == simrv::tui::TuiKey::Esc) {
         close_modal();
@@ -1904,6 +2047,18 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
             return true;
         case simrv::tui::TuiKey::CtrlL:
             cycle_layout();
+            return true;
+        case simrv::tui::TuiKey::F1:
+            apply_layout_preset(LayoutPreset::GeneralDebug);
+            return true;
+        case simrv::tui::TuiKey::F2:
+            apply_layout_preset(LayoutPreset::Microarchitecture);
+            return true;
+        case simrv::tui::TuiKey::F3:
+            apply_layout_preset(LayoutPreset::TraceExecution);
+            return true;
+        case simrv::tui::TuiKey::F4:
+            apply_layout_preset(LayoutPreset::MemoryInterconnect);
             return true;
         case simrv::tui::TuiKey::r:
         case simrv::tui::TuiKey::R:
@@ -2438,6 +2593,11 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             render(true);
             return true;
         }
+        if (get_active_modal() == ModalType::LayoutPresets) {
+            modal_.move_preset_cursor(direction);
+            render(true);
+            return true;
+        }
         if (paused_ && inspector_pane_) {
             auto page = focused_page();
             if (page == TuiRegPage::CACHE) {
@@ -2445,7 +2605,7 @@ auto Tui::handle_arrow_key_sequence() -> bool {
                 render(true);
                 return true;
             }
-            if (page == TuiRegPage::DISASM) {
+            if (page == TuiRegPage::CONSOLE) {
                 scroll(direction);
                 return true;
             }
@@ -2494,7 +2654,7 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             render(true);
             return true;
         }
-        if (focused_page() == TuiRegPage::DISASM) {
+        if (focused_page() == TuiRegPage::CONSOLE) {
             scroll(-10);
         } else {
             scroll_inspector(-10);
@@ -2506,18 +2666,33 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             render(true);
             return true;
         }
-        if (focused_page() == TuiRegPage::DISASM) {
+        if (focused_page() == TuiRegPage::CONSOLE) {
             scroll(10);
         } else {
             scroll_inspector(10);
         }
         return true;
     } else if (esc_buf_ == "\033[H" || esc_buf_ == "\033[1~") {
-        if (focused_page() == TuiRegPage::DISASM) {
+        if (focused_page() == TuiRegPage::CONSOLE) {
             reset_scroll();
         } else {
             reset_scroll_inspector();
         }
+        return true;
+    } else if (esc_buf_ == "\033OP" || esc_buf_ == "\033[11~") {
+        apply_layout_preset(LayoutPreset::GeneralDebug);
+        return true;
+    } else if (esc_buf_ == "\033OQ" || esc_buf_ == "\033[12~") {
+        apply_layout_preset(LayoutPreset::Microarchitecture);
+        return true;
+    } else if (esc_buf_ == "\033OR" || esc_buf_ == "\033[13~") {
+        apply_layout_preset(LayoutPreset::TraceExecution);
+        return true;
+    } else if (esc_buf_ == "\033OS" || esc_buf_ == "\033[14~") {
+        apply_layout_preset(LayoutPreset::MemoryInterconnect);
+        return true;
+    } else if (esc_buf_ == "\033[15~") {
+        open_modal(ModalType::LayoutPresets);
         return true;
     }
     return false;

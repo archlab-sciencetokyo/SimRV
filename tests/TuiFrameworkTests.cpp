@@ -170,7 +170,7 @@ void test_utf8_and_theme_helpers() {
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 29, "all key actions have registry entries");
+    expect(bindings.size() == 34, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
     std::set<char> claimed_chars;
     for (const auto& binding : bindings) {
@@ -353,7 +353,7 @@ void test_page_guidance() {
                                     TuiRegPage::PIPELINE, TuiRegPage::CACHE,   TuiRegPage::TLB,
                                     TuiRegPage::BPRED,    TuiRegPage::HAZARD,  TuiRegPage::BUS,
                                     TuiRegPage::TRACE,    TuiRegPage::EXPLAIN, TuiRegPage::STACK,
-                                    TuiRegPage::DISASM};
+                                    TuiRegPage::CONSOLE};
     for (auto page : pages) {
         auto const guidance = simrv::tui::guidance_for_page(page, true);
         expect(!guidance.title.empty(), "each inspection page has a guidance title");
@@ -1153,6 +1153,104 @@ void test_inspector_panels_traits_and_scoreboard() {
            "selected-hart register view consumes its sampled FP scoreboard");
 }
 
+void test_multicolumn_refinement() {
+    simrv::core::Machine machine;
+    simrv::tui::InspectorPane pane(machine);
+    pane.set_paused(true);
+    pane.set_visible_rows(35);
+    pane.set_page(simrv::tui::TuiRegPage::PIPELINE);
+
+    // 1. Check compact column header
+    std::string h1 = pane.render_column_header(0, "GPR Registers", false, 40);
+    std::string h2 = pane.render_column_header(1, "Pipeline Stages", true, 40);
+    expect(h1.contains("[1: GPR Registers]"),
+           "unfocused column header contains column number and name");
+    expect(h2.contains("[2: Pipeline Stages]"),
+           "focused column header contains column number and name");
+
+    // 2. Primary render contains performance/debug/log
+    bool primary_has_perf_or_log = false;
+    for (int r = 0; r < 35; ++r) {
+        std::string line = pane.render_row(r, 45);
+        if (line.contains("Performance") || line.contains("Log")) {
+            primary_has_perf_or_log = true;
+            break;
+        }
+    }
+    expect(primary_has_perf_or_log, "primary pane render contains performance or log");
+
+    // 3. Secondary column render MUST NOT contain performance, debug, or log
+    bool secondary_has_perf_or_log = false;
+    for (int r = 0; r < 35; ++r) {
+        std::string line =
+            pane.render_column_row(r, 45, /*col_idx=*/1, /*total_cols=*/4, /*is_focused=*/false);
+        if (line.contains("Performance") || line.contains("Debug - Live") || line.contains("Log")) {
+            secondary_has_perf_or_log = true;
+            break;
+        }
+    }
+    expect(!secondary_has_perf_or_log,
+           "secondary column in multi-column layout suppresses duplicate performance and log");
+
+    // Row 0 of secondary column is the column header
+    std::string sec_header = pane.render_column_row(0, 45, 1, 4, false);
+    expect(sec_header.contains("[2: Pipeline Stages]"),
+           "secondary column row 0 is the column header");
+}
+
+void test_horizontal_scrolling() {
+    simrv::core::Machine machine;
+    simrv::tui::InspectorPane pane(machine);
+
+    // Verify supports_horizontal_scroll for wide views
+    pane.set_page(simrv::tui::TuiRegPage::PIPELINE);
+    expect(pane.supports_horizontal_scroll(), "PIPELINE supports horizontal scroll");
+
+    pane.set_page(simrv::tui::TuiRegPage::BUS);
+    expect(pane.supports_horizontal_scroll(), "BUS supports horizontal scroll");
+
+    pane.set_page(simrv::tui::TuiRegPage::EXPLAIN);
+    expect(pane.supports_horizontal_scroll(), "EXPLAIN supports horizontal scroll");
+
+    pane.set_page(simrv::tui::TuiRegPage::TRACE);
+    expect(pane.supports_horizontal_scroll(), "TRACE supports horizontal scroll");
+
+    // Scroll offset starts at 0
+    pane.set_page(simrv::tui::TuiRegPage::PIPELINE);
+    expect(pane.get_horizontal_scroll_offset() == 0, "initial horizontal scroll is 0");
+
+    // Scroll right by 8 in a narrow column (width=40)
+    (void)pane.render_column_row(1, 40, 1, 3, true);
+    pane.scroll_horizontal(8);
+    expect(pane.get_horizontal_scroll_offset() == 8, "scroll_horizontal(8) advances offset");
+
+    // Scroll further right
+    pane.scroll_horizontal(8);
+    expect(pane.get_horizontal_scroll_offset() == 16, "scroll_horizontal advances to 16");
+
+    // Scroll left
+    pane.scroll_horizontal(-8);
+    expect(pane.get_horizontal_scroll_offset() == 8, "scroll_horizontal(-8) decreases offset");
+
+    // Multi-column page switching preserves horizontal offset per page
+    pane.set_page(simrv::tui::TuiRegPage::BUS);
+    expect(pane.get_horizontal_scroll_offset() == 0, "BUS starts at 0 offset");
+    (void)pane.render_column_row(1, 40, 1, 3, true);
+    pane.scroll_horizontal(12);
+    expect(pane.get_horizontal_scroll_offset() == 12, "BUS scrolls to 12");
+
+    pane.set_page(simrv::tui::TuiRegPage::PIPELINE);
+    expect(pane.get_horizontal_scroll_offset() == 8,
+           "PIPELINE offset is preserved across page switch");
+
+    pane.set_page(simrv::tui::TuiRegPage::BUS);
+    expect(pane.get_horizontal_scroll_offset() == 12, "BUS offset is preserved across page switch");
+
+    // Reset horizontal scroll
+    pane.reset_horizontal_scroll();
+    expect(pane.get_horizontal_scroll_offset() == 0, "reset_horizontal_scroll clears offset");
+}
+
 }  // namespace
 
 int main() {
@@ -1177,6 +1275,8 @@ int main() {
     test_modal_components();
     test_instruction_explainer_is_side_effect_free();
     test_inspector_panels_traits_and_scoreboard();
+    test_multicolumn_refinement();
+    test_horizontal_scrolling();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;

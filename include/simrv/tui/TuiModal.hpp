@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/framework/Types.hpp"
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -22,7 +23,6 @@ enum class PlatformProfile : uint8_t;
 namespace simrv::tui {
 
 class InspectorPane;
-enum class TuiRegPage : uint8_t;
 
 enum class ModalType : uint8_t {
     None,
@@ -39,7 +39,8 @@ enum class ModalType : uint8_t {
     ConfigureSystem,
     ManageBreakpoints,
     Notice,
-    PlatformChangeConfirm
+    PlatformChangeConfirm,
+    LayoutPresets
 };
 
 struct SysConfigDraft {
@@ -177,6 +178,15 @@ class TuiModal {
     void set_glossary_topic(int topic);
     void scroll_glossary_content(int delta);
 
+    void move_preset_cursor(int delta) {
+        preset_cursor_ = std::clamp(preset_cursor_ + delta, 0, 3);
+    }
+    void set_preset_cursor(int cursor) { preset_cursor_ = std::clamp(cursor, 0, 3); }
+    [[nodiscard]] auto get_selected_preset() const -> LayoutPreset {
+        return static_cast<LayoutPreset>(preset_cursor_);
+    }
+    [[nodiscard]] auto get_preset_cursor() const -> int { return preset_cursor_; }
+
     void open_notice(const std::string& title, const std::string& message, bool is_error = false);
     void open_platform_confirm(const SettingsDraft& draft);
     [[nodiscard]] auto get_pending_platform_draft() const -> const SettingsDraft& {
@@ -213,6 +223,7 @@ class TuiModal {
     SysConfigDraft sysconfig_draft_;
     int glossary_topic_ = 0;
     int glossary_scroll_ = 0;
+    int preset_cursor_ = 0;
     bool load_appmode_ = true;  // Toggle for App (baremetal) vs OS (Linux) mode in LoadBinary modal
     std::string staged_binary_path_;
     bool staged_mode_change_ = false;

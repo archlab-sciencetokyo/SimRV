@@ -858,6 +858,7 @@ void test_ca_mt_smp_pause_and_snapshots() {
         machine.hart(hart).state().pc = simrv::memory::kDramBaseAddress;
     }
 
+    machine.resume();
     machine.start_runner_for_testing();
     std::jthread primary_runner([&machine](const std::stop_token& stop_token) {
         while (!stop_token.stop_requested()) {
