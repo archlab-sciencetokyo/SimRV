@@ -283,12 +283,7 @@ void BranchPredictor::update_direction(const BranchFeedback& feedback) {
 }
 
 void BranchPredictor::update(const BranchFeedback& feedback) {
-    const auto opcode = feedback.opcode;
-    const bool is_branch = (opcode == isa::Opcode::Branch);
-    const bool is_jal = (opcode == isa::Opcode::Jal);
-    const bool is_jalr = (opcode == isa::Opcode::Jalr);
-
-    if (!is_branch && !is_jal && !is_jalr) {
+    if (!feedback.prediction.is_control) {
         return;
     }
 
@@ -297,7 +292,7 @@ void BranchPredictor::update(const BranchFeedback& feedback) {
     if (feedback.prediction.is_call) ++stats_.function_calls;
     if (feedback.prediction.is_return) ++stats_.function_returns;
 
-    if (is_branch) {
+    if (feedback.prediction.is_branch) {
         ++stats_.conditional_branches;
         ++stats_.direction_predictions;
 
@@ -316,9 +311,9 @@ void BranchPredictor::update(const BranchFeedback& feedback) {
             btb_[btb_idx] =
                 BtbEntry{.tag = feedback.pc, .target = feedback.actual_target, .valid = true};
         }
-    } else if (is_jal) {
+    } else if (feedback.opcode == isa::Opcode::Jal) {
         ++stats_.direct_jumps;
-    } else if (is_jalr) {
+    } else if (feedback.opcode == isa::Opcode::Jalr) {
         ++stats_.indirect_jumps;
         ++stats_.target_predictions;
 
