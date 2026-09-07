@@ -163,6 +163,13 @@ Verify execution against Spike instruction-by-instruction:
 ./build/rv64-release/SimRV -m path/to/hello.bin --lockstep
 ```
 
+Lockstep is a verification workflow for reproducible experiments, not an
+interactive TUI feature. Use a caller-supplied Spike built for the same XLEN
+and ISA profile as the image under test; `--spike-bin` selects a non-default
+binary and `--spike-elf` selects its comparison image. Keep the command line,
+Spike revision, image hash, and SimRV revision with paper evidence. Lockstep
+and GDB are intentionally mutually exclusive.
+
 ---
 
 ## Release Assets & Pre-built Binaries
@@ -191,3 +198,8 @@ Pre-compiled standalone binaries (`SimRV`) are available under GitHub Releases f
 ## License
 
 SimRV is licensed under the [MIT License](LICENSE).
+
+## Citation
+
+If you use SimRV in academic work, please cite the metadata in
+[`CITATION.cff`](CITATION.cff), which credits Lennart Trunk and Prof. Kenji Kise.
