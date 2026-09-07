@@ -1515,7 +1515,7 @@ void Tui::record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa:
         return;
     }
     auto& ring = flight_rings_.at(hart % kFlightRecorderHarts);
-    const uint64_t slot = ring.write_sequence.fetch_add(1, std::memory_order_relaxed);
+    const uint64_t slot = ring.write_sequence.load(std::memory_order_relaxed);
     const uint64_t seq = flight_sequence_.fetch_add(1, std::memory_order_relaxed);
     ring.records[slot % kTraceBufferSize] = TraceRecord{.pc = pc,
                                                         .opcode = opcode,
@@ -1536,7 +1536,7 @@ void Tui::record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa:
 void Tui::record_flight_instruction(Register pc, simrv::isa::Opcode opcode,
                                     simrv::isa::OperationId op_id, uint8_t hart) {
     auto& ring = flight_rings_.at(hart % kFlightRecorderHarts);
-    const uint64_t slot = ring.write_sequence.fetch_add(1, std::memory_order_relaxed);
+    const uint64_t slot = ring.write_sequence.load(std::memory_order_relaxed);
     const uint64_t seq = flight_sequence_.fetch_add(1, std::memory_order_relaxed);
     ring.records[slot % kTraceBufferSize] =
         TraceRecord{.pc = pc, .opcode = opcode, .op_id = op_id, .sequence = seq, .hart = hart};
@@ -1545,7 +1545,7 @@ void Tui::record_flight_instruction(Register pc, simrv::isa::Opcode opcode,
 
 void Tui::drain_trace_records() {
     std::vector<TraceRecord> pending;
-    for (size_t hart = 0; hart < std::min(machine_.num_harts(), kFlightRecorderHarts); ++hart) {
+    for (size_t hart = 0; hart < kFlightRecorderHarts; ++hart) {
         auto const current = flight_rings_[hart].write_sequence.load(std::memory_order_acquire);
         auto& rendered = rendered_flight_sequences_[hart];
         rendered = std::max(rendered, current > kTraceBufferSize ? current - kTraceBufferSize : 0);

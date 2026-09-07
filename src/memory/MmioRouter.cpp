@@ -59,6 +59,7 @@ auto MmioRouter::register_device(TileLinkNode* node) -> bool {
     nodes_.push_back(node);
     std::ranges::sort(
         nodes_, [](const auto* a, const auto* b) { return a->base_address() < b->base_address(); });
+    rebuild_entries();
     return true;
 }
 
@@ -69,33 +70,73 @@ auto MmioRouter::unregister_device(TileLinkNode* node) -> bool {
     const auto it = std::ranges::find(nodes_, node);
     if (it != nodes_.end()) {
         nodes_.erase(it);
+        rebuild_entries();
         return true;
     }
     return false;
 }
 
-void MmioRouter::clear() { nodes_.clear(); }
+void MmioRouter::clear() {
+    nodes_.clear();
+    rebuild_entries();
+}
+
+void MmioRouter::rebuild_entries() {
+    entries_.clear();
+    entries_.reserve(nodes_.size());
+    min_base_ = std::numeric_limits<Address>::max();
+    max_end_ = 0;
+    mru_count_ = 0;
+    for (auto* node : nodes_) {
+        if (node == nullptr) continue;
+        const Address base = node->base_address();
+        const Address end = base + node->size();
+        entries_.push_back(DeviceEntry{.base = base, .end = end, .node = node});
+        min_base_ = std::min(min_base_, base);
+        max_end_ = std::max(max_end_, end);
+    }
+    std::ranges::sort(entries_, [](const auto& a, const auto& b) { return a.base < b.base; });
+}
 
 auto MmioRouter::resolve_device(Address addr) const -> TileLinkNode* {
-    if (nodes_.empty()) {
+    if (entries_.empty() || addr < min_base_ || addr >= max_end_) {
         return nullptr;
     }
 
-    // Binary search over sorted base addresses
-    auto it = std::ranges::upper_bound(nodes_, addr, {},
-                                       [](const auto* node) { return node->base_address(); });
-
-    if (it != nodes_.begin()) {
-        --it;
-        if ((*it)->contains(addr)) {
-            return *it;
+    // Check 4-entry MRU cache (covers high-frequency alternating UART, CLINT, PLIC, VirtIO)
+    for (size_t i = 0; i < mru_count_; ++i) {
+        const auto& entry = mru_entries_[i];
+        if (addr >= entry.base && addr < entry.end && entry.node->contains(addr)) {
+            if (i > 0) {
+                const auto hit = entry;
+                for (size_t j = i; j > 0; --j) {
+                    mru_entries_[j] = mru_entries_[j - 1];
+                }
+                mru_entries_[0] = hit;
+            }
+            return mru_entries_[0].node;
         }
     }
 
-    // Fallback scan for sparse devices with holes or wider spans
-    for (auto* node : nodes_) {
-        if (node->contains(addr)) {
-            return node;
+    // Binary search over sorted base addresses (scalar comparisons, zero virtual calls)
+    auto it = std::ranges::upper_bound(entries_, addr, {}, &DeviceEntry::base);
+
+    while (it != entries_.begin()) {
+        --it;
+        if (addr < it->end && it->node->contains(addr)) {
+            const size_t shift_limit = std::min(mru_count_, kMruCapacity - 1);
+            for (size_t j = shift_limit; j > 0; --j) {
+                mru_entries_[j] = mru_entries_[j - 1];
+            }
+            mru_entries_[0] = *it;
+            if (mru_count_ < kMruCapacity) {
+                ++mru_count_;
+            }
+            return it->node;
+        }
+        if (addr >= it->end) {
+            // For nested devices with subrange holes, continue checking enclosing entries
+            continue;
         }
     }
 

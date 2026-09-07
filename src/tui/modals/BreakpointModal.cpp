@@ -147,19 +147,25 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
                              const std::string& input, const simrv::core::Machine* machine,
                              int bp_cursor) {
     if (type == ModalType::SetBreakpoint) {
-        build_text_input_rows(content_rows, "Target PC Address (hex) or Symbol:", input);
+        build_text_input_rows(
+            content_rows, "Target PC Address (hex) or Symbol:", input,
+            "Enforces exact single-instruction step evaluation for 100% trap precision.");
         content_rows.push_back("");
         content_rows.push_back(
             build_modal_footer({{"[Enter]", "Set Breakpoint"}, {"[Esc]", "Cancel"}}));
     } else if (type == ModalType::SetWatchpoint) {
-        build_text_input_rows(content_rows, "Target Register, Address, or Symbol:", input,
-                              "Pauses simulation on memory write or register state change.");
+        build_text_input_rows(
+            content_rows, "Target Register, Address, or Symbol:", input,
+            "Pauses on memory write or register delta (disengages fast-batching).");
         content_rows.push_back("");
         content_rows.push_back(
             build_modal_footer({{"[Enter]", "Set Watchpoint"}, {"[Esc]", "Cancel"}}));
     } else if (type == ModalType::ManageBreakpoints) {
         content_rows.push_back(
             std::format("{}Active Breakpoints & Watchpoints:\033[0m", kThemeText));
+        content_rows.push_back(std::format(
+            "  {}Active points disengage fast batching to ensure single-step fidelity.\033[0m",
+            kThemeMuted));
         content_rows.push_back("");
 
         if (!machine) return;

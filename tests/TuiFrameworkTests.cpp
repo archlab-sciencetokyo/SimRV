@@ -358,6 +358,17 @@ void test_sysconfig_modal_modes() {
     SettingsModal::adjust_setting(settings_draft, 6, 1);
     expect(settings_draft.smp_quantum == 2500, "Settings modal advances SMP quantum level");
 
+    simrv::core::Machine settings_machine;
+    SettingsDraft submitted_draft;
+    SettingsModal::open(submitted_draft, settings_machine);
+    submitted_draft.num_harts = 4;
+    expect(SettingsModal::submit(submitted_draft, settings_machine, [](simrv::tui::TuiRegPage) {}),
+           "Settings modal accepts an SMP hart-count update");
+    const auto staged_settings = settings_machine.take_staged_reconfiguration();
+    expect(settings_machine.reboot_requested && staged_settings.has_value() &&
+               staged_settings->execution.num_harts == 4,
+           "Settings modal stages hart-count changes for reboot");
+
     // Verify render text in IA mode contains disabled note for CA options
     std::vector<std::string> rows;
     SystemConfigModal::render(
@@ -432,6 +443,14 @@ void test_cleanup_input_boundaries() {
             expect(simrv::util::parse_command_line(args).has_value() == valid,
                    "size parsing preserves numeric boundaries");
         }
+    }
+    for (const auto* value : {"0", "1", "16", "17"}) {
+        std::array<std::string, 5> storage{"SimRV", "--smp", value, "-m", "test.bin"};
+        std::array<char*, 5> args{storage[0].data(), storage[1].data(), storage[2].data(),
+                                  storage[3].data(), storage[4].data()};
+        const bool valid = std::string_view(value) == "1" || std::string_view(value) == "16";
+        expect(simrv::util::parse_command_line(args).has_value() == valid,
+               "SMP hart count respects platform capacity");
     }
     for (const auto* name : {"x0", "r31", "f31", "v31", "fp", " X 1 "})
         expect(simrv::debug::parse_register_name(name).has_value(), "valid register spelling");

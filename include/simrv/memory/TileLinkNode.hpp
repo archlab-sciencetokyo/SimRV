@@ -16,7 +16,8 @@ class TileLinkNode {
     [[nodiscard]] virtual auto base_address() const -> Address = 0;
     [[nodiscard]] virtual auto size() const -> Address = 0;
     [[nodiscard]] virtual auto contains(Address addr) const -> bool {
-        return addr >= base_address() && (addr - base_address()) < size();
+        const Address base = base_address();
+        return addr >= base && (addr - base) < size();
     }
     [[nodiscard]] virtual auto alignment() const -> Address { return 1; }
     [[nodiscard]] virtual auto is_read_only() const -> bool { return false; }

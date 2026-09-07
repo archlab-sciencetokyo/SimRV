@@ -411,6 +411,17 @@ class CPU {
     void run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
                                   const FastBatchPolicy& policy);
 
+    template <bool kCopyContext, bool kInstMix, bool kPollPause>
+    SIMRV_ALWAYS_INLINE auto run_fast_os_kernel(Machine& machine, uint32_t batch_size) -> uint32_t;
+
+    /**
+     * @brief Executes a batch of cached operations in a tight inlined loop for OS
+     * acceleration.
+     * @param machine Reference to top-level Machine.
+     * @param batch_size Maximum number of instructions to execute in the batch.
+     */
+    void run_fast_os_batch(Machine& machine, uint32_t batch_size, const FastBatchPolicy& policy);
+
    public:
     /**
      * @brief Runs the Fetch stage of the cycle-accurate pipeline.
@@ -528,15 +539,18 @@ class CPU {
     void commit_control_flow_and_traps(Machine& machine);
 
    private:
-    auto execute_cached_jal(CachedOp& op) -> void;
-    auto execute_cached_jalr(CachedOp& op, Register rrs1) -> void;
-    auto execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) -> void;
+    SIMRV_ALWAYS_INLINE auto execute_cached_jal(CachedOp& op) -> void;
+    SIMRV_ALWAYS_INLINE auto execute_cached_jalr(CachedOp& op, Register rrs1) -> void;
+    SIMRV_ALWAYS_INLINE auto execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2)
+        -> void;
     SIMRV_ALWAYS_INLINE auto try_fast_load(Machine& machine, Address mem_addr, isa::Funct3 funct3,
                                            Register& out_val) -> bool;
     SIMRV_ALWAYS_INLINE auto try_fast_store(Machine& machine, Address mem_addr, isa::Funct3 funct3,
                                             Register rrs2) -> bool;
-    auto execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> bool;
-    auto execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Register rrs2) -> bool;
+    SIMRV_ALWAYS_INLINE auto execute_cached_load(Machine& machine, CachedOp& op, Register rrs1)
+        -> bool;
+    SIMRV_ALWAYS_INLINE auto execute_cached_store(Machine& machine, CachedOp& op, Register rrs1,
+                                                  Register rrs2) -> bool;
     auto execute_cached_fallback(Machine& machine) -> void;
     auto dispatch_pending_interrupts() -> void;
     SIMRV_ALWAYS_INLINE auto handle_cached_interrupts() -> void {
@@ -636,9 +650,6 @@ class CPU {
     std::ofstream* trap_log_stream = nullptr;
     bool use_opensbi = false;
     Machine* machine_ = nullptr;
-    // Serializes a TUI snapshot with this hart's architectural/pipeline transition. It is only
-    // acquired while TUI telemetry is enabled, so headless execution keeps its lock-free path.
-    mutable std::mutex tui_snapshot_mutex;
     simrv::pipeline::PipelineSim pipeline_sim;
     simrv::pipeline::CpuModelConfig cpu_model_config{};
     simrv::pipeline::BranchPredictor branch_predictor;
@@ -647,6 +658,7 @@ class CPU {
     DecodeCache decode_cache;
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_read{};
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_write{};
+    alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_inst{};
     uint32_t soft_tlb_epoch = 1;
     void soft_tlb_flush();
     void soft_tlb_flush_selective(const core::TlbFlushFilter& filter);

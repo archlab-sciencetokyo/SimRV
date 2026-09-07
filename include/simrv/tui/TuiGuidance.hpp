@@ -40,8 +40,7 @@ struct GuidanceContext {
 
 /// Educational guidance is opt-in and only displaces pane content when sufficient room exists.
 [[nodiscard]] constexpr auto should_show_guidance(bool paused, bool guide_enabled, int visible_rows,
-                                                  int width = 80)
-    -> bool {
+                                                  int width = 80) -> bool {
     // The guide reserves four fixed rows. Below this width its labelled prompts would be clipped
     // instead of being readable, so preserve the inspector and let the user widen the pane.
     return paused && guide_enabled && visible_rows >= 16 && width >= 56;

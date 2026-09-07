@@ -13,7 +13,14 @@
 
 namespace simrv::util {
 
-enum class CliAction : uint8_t { Run, ShowHelp, ShowVersion, ExplainInstruction };
+enum class CliAction : uint8_t {
+    Run,
+    ShowHelp,
+    ShowVersion,
+    ShowLicense,
+    ExplainInstruction,
+    Attach
+};
 enum class RequestedExecutionMode : uint8_t { Fast, Detailed, CycleAccurate };
 
 struct RuntimeOptions {
@@ -78,6 +85,10 @@ struct RuntimeOptions {
     uint64_t dram_size = 0;
     simrv::core::PlatformProfile platform_profile = simrv::core::PlatformProfile::Pcie;
     std::string net_mode = "user";
+    bool server_mode = false;
+    std::string server_endpoint;
+    bool attach_mode = false;
+    std::string attach_endpoint;
 
     [[nodiscard]] auto to_machine_config() const -> simrv::core::MachineConfig;
 };

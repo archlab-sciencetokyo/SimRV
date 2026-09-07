@@ -26,6 +26,9 @@ ordering. `--smp-multithreaded` opts into best-effort parallel timing, so precis
 is intentionally nondeterministic. Worker quiescence is deterministic for pause, step, reboot, and
 shutdown: those operations wait until every worker has reached the requested boundary.
 
+The CLI, typed configuration, and TUI all support 1 through 16 harts. Changing the hart count in
+the TUI stages the configuration and takes effect after reboot.
+
 ## SDK and protocol boundary
 
 `SimRV::runtime` remains the supported CMake target. Cache, pipeline, device, and TileLink classes

@@ -105,7 +105,26 @@ struct CycleInstructionSlot {
     Register wb_val = 0;
     BranchPrediction prediction{};
 
-    constexpr void clear() noexcept { *this = {}; }
+    constexpr void clear() noexcept {
+        valid = false;
+        remaining_latency = 0;
+        serializing = false;
+        executed = false;
+        memory_complete = false;
+        icache_miss = false;
+        dcache_miss = false;
+        tlb_miss = false;
+        writes_int = false;
+        writes_fp = false;
+        wb_valid = false;
+        wb_dest = static_cast<RegId>(0);
+        wb_val = 0;
+        context.pending_exception.reset();
+        context.ir = 0;
+        context.ir_org = 0;
+        context.cpc = VirtAddr{0};
+        prediction = {};
+    }
     constexpr void invalidate() noexcept {
         valid = false;
         remaining_latency = 0;

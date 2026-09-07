@@ -3,10 +3,9 @@
 
 #include <expected>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
 
 #include "simrv/memory/TileLinkProtocol.hpp"
+#include "simrv/util/SmallFlatMap.hpp"
 
 namespace simrv::memory {
 
@@ -29,10 +28,10 @@ class TileLinkProtocolChecker {
     [[nodiscard]] auto outstanding_sinks() const noexcept -> size_t { return sinks_.size(); }
 
    private:
-    std::unordered_map<TlSourceId, TlChannelA> sources_;
-    std::unordered_map<TlSourceId, TlChannelC> releases_;
-    std::unordered_set<Address> active_probes_;
-    std::unordered_map<TlSinkId, TlSourceId> sinks_;
+    simrv::util::SmallFlatMap<TlSourceId, TlChannelA, 64> sources_;
+    simrv::util::SmallFlatMap<TlSourceId, TlChannelC, 64> releases_;
+    simrv::util::SmallFlatSet<Address, 64> active_probes_;
+    simrv::util::SmallFlatMap<TlSinkId, TlSourceId, 64> sinks_;
 };
 
 }  // namespace simrv::memory

@@ -2363,9 +2363,48 @@ void test_quantum_smp_baremetal_execution() {
     uint32_t final_sum = 0;
     std::memcpy(&final_sum, &ram[0x200], sizeof(final_sum));
     check(final_sum == kNumHarts * 250);
+    Counter summed_retired = 0;
+    for (size_t i = 0; i < kNumHarts; ++i) summed_retired += machine.hart(i).e_icount;
+    check(machine.retired_instruction_count() == summed_retired);
 
     std::cout << "[PASS] test_quantum_smp_baremetal_execution (" << kNumHarts
               << " harts quantum-scheduled AMO sum = " << final_sum << ")\n";
+}
+
+void test_smp_instruction_limit_is_machine_wide() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    simrv::core::Machine machine(simrv::core::MachineConfig{
+        .execution = {.appmode = true, .num_harts = 2, .smp_quantum = 16, .fincnt = 4}});
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+    machine.cpu.machine_ = &machine;
+    machine.cpu.reset();
+
+    auto secondary = std::make_unique<simrv::core::CPU>();
+    secondary->machine_ = &machine;
+    secondary->reset();
+    secondary->state().mhartid = 1;
+    secondary->hart_status.store(simrv::core::HartStatus::Started, std::memory_order_relaxed);
+    machine.secondary_harts_.push_back(std::move(secondary));
+
+    constexpr Address pc = simrv::memory::kDramBaseAddress;
+    constexpr Instruction loop = 0x0000006f;  // jal x0, 0
+    std::memcpy(ram.data(), &loop, sizeof(loop));
+    machine.hart(0).state().pc = pc;
+    machine.hart(1).state().pc = pc;
+
+    machine.execute_cycle_for_testing();
+    machine.finalize_for_testing();
+
+    check(machine.stop_reason() == simrv::core::Machine::StopReason::InstructionLimit);
+    check(machine.retired_instruction_count() >= 4);
+    check(machine.hart(0).e_icount > 0 && machine.hart(1).e_icount > 0);
+    check(machine.retired_instruction_count() ==
+          machine.hart(0).e_icount + machine.hart(1).e_icount);
+    std::cout << "[PASS] test_smp_instruction_limit_is_machine_wide\n";
 }
 
 }  // namespace
@@ -2420,6 +2459,7 @@ int main(int argc, char** argv) {
     test_ia_multihart_lr_sc_coherence();
     test_ia_multithreaded_smp_execution();
     test_quantum_smp_baremetal_execution();
+    test_smp_instruction_limit_is_machine_wide();
     std::cout << "All Modern Platform tests PASSED!\n";
     return 0;
 }

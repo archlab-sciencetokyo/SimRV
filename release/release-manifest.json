@@ -52,8 +52,8 @@
       "redistribute": false
     },
     "linux": {
-      "url": "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.1.8.tar.xz",
-      "revision": "v7.1.8",
+      "url": "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.3.tar.xz",
+      "revision": "v7.2.3",
       "license": "GPL-2.0-only",
       "redistribute": false
     }

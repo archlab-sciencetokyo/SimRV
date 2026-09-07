@@ -27,17 +27,70 @@ class ICache : public BaseCache<512, 32, 8> {
      * @return true on cache hit, false on cache miss.
      */
     [[nodiscard]] auto read(Address addr, uint32_t& data) -> bool;
-
-    /**
-     * @brief Attempt to read a 16-bit instruction halfword from cache.
-     * @param addr Physical address to read from.
-     * @param[out] data Output parameter filled with compressed instruction halfword on hit.
-     * @return true on cache hit, false on cache miss.
-     */
     [[nodiscard]] auto read16(Address addr, uint16_t& data) -> bool;
 
     auto handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp)
         -> bool;
 };
+
+inline auto ICache::read(Address addr, uint32_t& data) -> bool {
+    const uint32_t set_idx = get_set_index(addr);
+    const Address tag = get_tag(addr);
+    last_accessed_set_ = set_idx;
+
+    const auto way_opt = find_way(set_idx, tag);
+    if (simrv::compiler::likely(way_opt.has_value())) {
+        const uint32_t w = *way_opt;
+        auto& line = sets_[set_idx][w];
+        const uint32_t byte_offset = addr & (kLineBytes - 1u);
+        if (simrv::compiler::unlikely(byte_offset + sizeof(uint32_t) > kLineBytes)) {
+            ++misses_;
+            last_access_was_hit_ = false;
+            last_hit_way_ = 0xFFFFFFFF;
+            return false;
+        }
+        std::memcpy(&data, line.data.data() + byte_offset, sizeof(uint32_t));
+        line.last_used = ++access_tick_;
+        ++hits_;
+        last_access_was_hit_ = true;
+        last_hit_way_ = w;
+        return true;
+    }
+
+    ++misses_;
+    last_access_was_hit_ = false;
+    last_hit_way_ = 0xFFFFFFFF;
+    return false;
+}
+
+inline auto ICache::read16(Address addr, uint16_t& data) -> bool {
+    const uint32_t set_idx = get_set_index(addr);
+    const Address tag = get_tag(addr);
+    last_accessed_set_ = set_idx;
+
+    const auto way_opt = find_way(set_idx, tag);
+    if (simrv::compiler::likely(way_opt.has_value())) {
+        const uint32_t w = *way_opt;
+        auto& line = sets_[set_idx][w];
+        const uint32_t byte_offset = addr & (kLineBytes - 1u);
+        if (simrv::compiler::unlikely(byte_offset + sizeof(uint16_t) > kLineBytes)) {
+            ++misses_;
+            last_access_was_hit_ = false;
+            last_hit_way_ = 0xFFFFFFFF;
+            return false;
+        }
+        std::memcpy(&data, line.data.data() + byte_offset, sizeof(uint16_t));
+        line.last_used = ++access_tick_;
+        ++hits_;
+        last_access_was_hit_ = true;
+        last_hit_way_ = w;
+        return true;
+    }
+
+    ++misses_;
+    last_access_was_hit_ = false;
+    last_hit_way_ = 0xFFFFFFFF;
+    return false;
+}
 
 }  // namespace simrv::cache

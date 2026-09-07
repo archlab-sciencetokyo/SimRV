@@ -12,7 +12,7 @@ IMAGES_DIR="$ROOT_DIR/linux-images/$ARCH"
 
 # Versions
 OPENSBI_VER="1.9"
-LINUX_VER="7.1.8"
+LINUX_VER="${LINUX_VER:-7.2.3}"
 BUSYBOX_VER="1.38.0"
 ALPINE_VER="3.24.1"
 
@@ -38,6 +38,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --libc)
             LIBC="$2"
+            shift
+            ;;
+        --linux-version)
+            LINUX_VER="$2"
             shift
             ;;
         --cross-compile)

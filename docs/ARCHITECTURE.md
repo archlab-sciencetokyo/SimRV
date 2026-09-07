@@ -37,12 +37,32 @@ In cycle-accurate and pipeline modes, instruction slots traverse stages with exp
 structural hazard stalls, and branch-prediction redirection. Architectural effects commit strictly
 at the retirement boundary.
 
+### Fast-Batch Execution Engine & Debug Fallbacks
+
+In `--mode fast` (Instruction-Accurate), single-hart OS kernels and baremetal applications run via the
+`run_fast_os_batch` / `run_fast_baremetal_batch` acceleration engines:
+- **Batched Retirement & Telemetry**: Eliminates per-instruction atomic operations on machine-wide retirement
+  counters, synchronizing only at chunk, decode miss, or batch boundaries.
+- **CLINT Chunking**: Architectural timebase (`mcycle`, `mtime`, and timer interrupt evaluations) updates in
+  64-instruction chunks during tight loops, preventing timer evaluation overhead on every single instruction.
+- **Inlined Cached Helpers**: Load, store, branch, and jump operations inline directly into the opcode dispatcher
+  without function call frames.
+- **Automatic Debug Fallback**: Fast batching is governed by `Machine::fast_batch_policy()`. The moment any
+  breakpoint or watchpoint is registered (`breakpoints.has_any()`), lockstep testing is engaged, instruction tracing
+  is active, or the user is single-stepping (`is_stepping()` or `step_delay_us != 0`), fast-batching immediately
+  disengages. Execution automatically reverts to the cycle-by-cycle engine (`CPU::run_cycle`), guaranteeing
+  100% single-instruction hit precision, accurate watchpoint diffing, and fine-grained TUI animation.
+
 ## Multi-Hart SMP & TileLink-C Coherence
 
-Multi-hart configurations (`--smp <N>`) simulate symmetric multiprocessing:
+Multi-hart configurations (`--smp <N>`, `N` from 1 through 16) simulate symmetric multiprocessing:
 1. **Directory Coherence**: L1 caches participate in directory-based cache coherence implementing the MESI (Modified, Exclusive, Shared, Invalid) protocol over TileLink-C channels.
 2. **Interrupt Routing**: Core local interrupts (software/timer) are managed via CLINT or ACLINT (MTIME/MSWI). External platform interrupts are handled by PLIC or AIA (APLIC wire interrupts and IMSIC message-signaled interrupts).
 3. **Synchronization**: Atomic operations (LR/SC and AMOs) use a global reservation table and coherent bus transactions across harts.
+
+`--steps` / `-e` applies to the machine-wide retired-instruction total, not just hart 0. In
+deterministic instruction mode, harts advance in round-robin order within each scheduler quantum;
+MT-SMP may retire a small number of additional instructions while workers observe the stop request.
 
 ## Debugger ownership and synchronization
 

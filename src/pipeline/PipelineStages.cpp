@@ -143,9 +143,18 @@ void CPU::fetch_address_translate(Machine& /*machine*/) {
             ((w_vadr1 & ~simrv::memory::kPageMask) != (w_vadr2 & ~simrv::memory::kPageMask));
         const Word current_asid = simrv::xlen::satp_asid(state_.satp, state_.regs.xlen);
 
-        TLBEntry* tlb_e1 = tlb.lookup_inst_r(w_vadr1, current_asid, state_.priv);
-        if (tlb_e1) {
-            w_padr1 = tlb_e1->p_addr + (w_vadr1 & simrv::memory::kPageMask);
+        const Address vpn1 = w_vadr1 >> 12;
+        const size_t tlb_idx1 = static_cast<size_t>(vpn1) & 2047u;
+        const auto& se1 = soft_tlb_inst[tlb_idx1];
+        if (simrv::compiler::likely(se1.matches(vpn1, current_asid, state_.priv, soft_tlb_epoch))) {
+            w_padr1 = se1.paddr_base + (w_vadr1 & simrv::memory::kPageMask);
+        } else {
+            TLBEntry* tlb_e1 = tlb.lookup_inst_r(w_vadr1, current_asid, state_.priv);
+            if (tlb_e1) {
+                w_padr1 = tlb_e1->p_addr + (w_vadr1 & simrv::memory::kPageMask);
+                soft_tlb_inst[tlb_idx1].set(vpn1, current_asid, state_.priv, soft_tlb_epoch,
+                                            tlb_e1->p_addr, nullptr);
+            }
         }
 
         if (simrv::compiler::likely(!split_page)) {
@@ -153,9 +162,19 @@ void CPU::fetch_address_translate(Machine& /*machine*/) {
                 w_padr2 = w_padr1 + 2;
             }
         } else {
-            TLBEntry* tlb_e2 = tlb.lookup_inst_r(w_vadr2, current_asid, state_.priv);
-            if (tlb_e2) {
-                w_padr2 = tlb_e2->p_addr + (w_vadr2 & simrv::memory::kPageMask);
+            const Address vpn2 = w_vadr2 >> 12;
+            const size_t tlb_idx2 = static_cast<size_t>(vpn2) & 2047u;
+            const auto& se2 = soft_tlb_inst[tlb_idx2];
+            if (simrv::compiler::likely(
+                    se2.matches(vpn2, current_asid, state_.priv, soft_tlb_epoch))) {
+                w_padr2 = se2.paddr_base + (w_vadr2 & simrv::memory::kPageMask);
+            } else {
+                TLBEntry* tlb_e2 = tlb.lookup_inst_r(w_vadr2, current_asid, state_.priv);
+                if (tlb_e2) {
+                    w_padr2 = tlb_e2->p_addr + (w_vadr2 & simrv::memory::kPageMask);
+                    soft_tlb_inst[tlb_idx2].set(vpn2, current_asid, state_.priv, soft_tlb_epoch,
+                                                tlb_e2->p_addr, nullptr);
+                }
             }
         }
     }
@@ -294,53 +313,62 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
 
     if (simrv::compiler::likely(machine.memory_geometry().contains(ctx.padr1, sizeof(uint16_t)) &&
                                 machine.memory_geometry().contains(ctx.padr2, sizeof(uint16_t)))) {
-        auto fetch_halfword = [&](Address paddr, Address vaddr) -> std::optional<uint16_t> {
-            uint16_t h_data = 0;
-            const Address line_base =
-                paddr & ~(static_cast<Address>(simrv::cache::ICache::kLineBytes - 1u));
-            // A timed refill is one cache miss, not one miss per cycle spent resuming it.
-            // Avoid probing (and incrementing miss statistics) while this line is in flight.
-            const bool refill_in_progress = machine.runtime_profile.is_cycle_mode() &&
-                                            ca_state.instruction_fill.active &&
-                                            ca_state.instruction_fill.line_base == line_base;
-            if (machine.runtime_profile.is_cycle_mode() && ca_state.instruction_prefetch.active &&
-                ca_state.instruction_prefetch.request_pending) {
-                simrv::memory::TileLinkBus::TimedResponse pf_timed{};
-                if (machine.memory_.system_bus().try_get_timed_response(
-                        ca_state.instruction_prefetch.source, pf_timed)) {
-                    ca_state.instruction_prefetch.request_pending = false;
-                    ca_state.instruction_prefetch.reset();
-                }
+        const Address line_base =
+            ctx.padr1 & ~(static_cast<Address>(simrv::cache::ICache::kLineBytes - 1u));
+        const bool refill_in_progress = machine.runtime_profile.is_cycle_mode() &&
+                                        ca_state.instruction_fill.active &&
+                                        ca_state.instruction_fill.line_base == line_base;
+        if (machine.runtime_profile.is_cycle_mode() && ca_state.instruction_prefetch.active &&
+            ca_state.instruction_prefetch.request_pending) {
+            simrv::memory::TileLinkBus::TimedResponse pf_timed{};
+            if (machine.memory_.system_bus().try_get_timed_response(
+                    ca_state.instruction_prefetch.source, pf_timed)) {
+                ca_state.instruction_prefetch.request_pending = false;
+                ca_state.instruction_prefetch.reset();
             }
+        }
 
-            if (!refill_in_progress && icache.read16(paddr, h_data)) {
-                if (machine.runtime_profile.is_cycle_mode() &&
-                    pipeline_sim.config.enable_instruction_prefetch &&
-                    !ca_state.instruction_fill.active && !ca_state.instruction_prefetch.active) {
-                    const Address next_line = line_base + simrv::cache::ICache::kLineBytes;
-                    if (machine.memory_geometry().contains(next_line,
-                                                           simrv::cache::ICache::kLineBytes) &&
-                        icache.line_state(next_line) == simrv::memory::MesiState::Invalid) {
-                        simrv::memory::TlChannelA pf_req{};
-                        pf_req.opcode = simrv::memory::TlOpcodeA::Intent;
-                        pf_req.intent = simrv::memory::TlIntent::PrefetchRead;
-                        pf_req.size = simrv::memory::kTlBeatSize;
-                        pf_req.hart = static_cast<HartId>(state_.mhartid);
-                        pf_req.source = simrv::memory::make_tl_source(
-                            pf_req.hart, simrv::memory::TlPort::Instruction);
-                        pf_req.address = next_line;
-                        if (machine.memory_.system_bus().send_request(pf_req)) {
-                            ca_state.instruction_prefetch.active = true;
-                            ca_state.instruction_prefetch.request_pending = true;
-                            ca_state.instruction_prefetch.line_base = next_line;
-                            ca_state.instruction_prefetch.source = pf_req.source;
-                        }
+        auto trigger_prefetch = [&](Address base) {
+            if (machine.runtime_profile.is_cycle_mode() &&
+                pipeline_sim.config.enable_instruction_prefetch &&
+                !ca_state.instruction_fill.active && !ca_state.instruction_prefetch.active) {
+                const Address next_line = base + simrv::cache::ICache::kLineBytes;
+                if (machine.memory_geometry().contains(next_line,
+                                                       simrv::cache::ICache::kLineBytes) &&
+                    icache.line_state(next_line) == simrv::memory::MesiState::Invalid) {
+                    simrv::memory::TlChannelA pf_req{};
+                    pf_req.opcode = simrv::memory::TlOpcodeA::Intent;
+                    pf_req.intent = simrv::memory::TlIntent::PrefetchRead;
+                    pf_req.size = simrv::memory::kTlBeatSize;
+                    pf_req.hart = static_cast<HartId>(state_.mhartid);
+                    pf_req.source = simrv::memory::make_tl_source(
+                        pf_req.hart, simrv::memory::TlPort::Instruction);
+                    pf_req.address = next_line;
+                    if (machine.memory_.system_bus().send_request(pf_req)) {
+                        ca_state.instruction_prefetch.active = true;
+                        ca_state.instruction_prefetch.request_pending = true;
+                        ca_state.instruction_prefetch.line_base = next_line;
+                        ca_state.instruction_prefetch.source = pf_req.source;
                     }
                 }
-                return h_data;
+            }
+        };
+
+        const bool single_line = (ctx.padr2 == ctx.padr1 + 2) &&
+                                 ((ctx.padr1 & (simrv::cache::ICache::kLineBytes - 1u)) <=
+                                  (simrv::cache::ICache::kLineBytes - 4u));
+        if (single_line) {
+            uint32_t w_data = 0;
+            if (!refill_in_progress && icache.read(ctx.padr1, w_data)) {
+                trigger_prefetch(line_base);
+                if ((w_data & 0x3) != 0x3) {
+                    ctx.ir_org = w_data & 0xFFFF;
+                } else {
+                    ctx.ir_org = w_data;
+                }
+                return;
             }
 
-            std::array<Byte, simrv::cache::ICache::kLineBytes> line_data{};
             if (machine.runtime_profile.is_cycle_mode()) {
                 static_assert(simrv::cache::ICache::kLineBytes ==
                               pipeline::InstructionFillState::kLineBytes);
@@ -357,20 +385,14 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                     simrv::memory::TileLinkBus::TimedResponse timed{};
                     if (!machine.memory_.system_bus().try_get_timed_response(fill.source, timed)) {
                         ca_state.waiting_for_interconnect = true;
-                        return std::nullopt;
+                        return;
                     }
                     fill.request_pending = false;
-                    if (timed.payload.failed()) {
+                    if (timed.payload.failed() || !timed.has_line_data) {
                         ctx.pending_exception = ExceptionCode::FaultFetch;
-                        ctx.pending_tval = vaddr;
+                        ctx.pending_tval = state_.pc;
                         fill.reset();
-                        return std::nullopt;
-                    }
-                    if (!timed.has_line_data) {
-                        ctx.pending_exception = ExceptionCode::FaultFetch;
-                        ctx.pending_tval = vaddr;
-                        fill.reset();
-                        return std::nullopt;
+                        return;
                     }
                     icache.insert(line_base, timed.line_data.data(),
                                   simrv::memory::mesi_for(timed.payload.cap));
@@ -378,31 +400,108 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                     machine.memory_.system_bus().grant_ack(
                         simrv::memory::TlChannelE{.sink = timed.payload.sink});
                     fill.reset();
+                    trigger_prefetch(line_base);
 
-                    // Hardware next-line instruction stream prefetcher
-                    if (pipeline_sim.config.enable_instruction_prefetch) {
-                        const Address next_line = line_base + simrv::cache::ICache::kLineBytes;
-                        if (machine.memory_geometry().contains(next_line,
-                                                               simrv::cache::ICache::kLineBytes) &&
-                            icache.line_state(next_line) == simrv::memory::MesiState::Invalid &&
-                            !ca_state.instruction_prefetch.active) {
-                            simrv::memory::TlChannelA pf_req{};
-                            pf_req.opcode = simrv::memory::TlOpcodeA::Intent;
-                            pf_req.intent = simrv::memory::TlIntent::PrefetchRead;
-                            pf_req.size = simrv::memory::kTlBeatSize;
-                            pf_req.hart = static_cast<HartId>(state_.mhartid);
-                            pf_req.source = fill.source;
-                            pf_req.address = next_line;
-                            if (machine.memory_.system_bus().send_request(pf_req)) {
-                                ca_state.instruction_prefetch.active = true;
-                                ca_state.instruction_prefetch.request_pending = true;
-                                ca_state.instruction_prefetch.line_base = next_line;
-                                ca_state.instruction_prefetch.source = pf_req.source;
-                            }
-                        }
+                    const auto byte_offset = static_cast<size_t>(ctx.padr1 - line_base);
+                    std::memcpy(&w_data, timed.line_data.data() + byte_offset, sizeof(w_data));
+                    if ((w_data & 0x3) != 0x3) {
+                        ctx.ir_org = w_data & 0xFFFF;
+                    } else {
+                        ctx.ir_org = w_data;
                     }
+                    return;
+                }
 
-                    const auto byte_offset = static_cast<size_t>(paddr - line_base);
+                simrv::memory::TlChannelA req{};
+                req.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
+                req.grow = simrv::memory::TlGrow::NtoB;
+                req.size = simrv::memory::kTlBlockSize;
+                req.hart = static_cast<HartId>(state_.mhartid);
+                req.source = fill.source;
+                req.address = line_base;
+                machine.memory_.system_bus().send_request(req);
+                fill.request_pending = true;
+                ca_state.waiting_for_interconnect = true;
+                return;
+            }
+
+            std::array<Byte, simrv::cache::ICache::kLineBytes> line_data{};
+            simrv::memory::TlChannelA req{};
+            req.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
+            req.grow = simrv::memory::TlGrow::NtoB;
+            req.size = simrv::memory::kTlBlockSize;
+            req.hart = static_cast<HartId>(state_.mhartid);
+            req.source =
+                simrv::memory::make_tl_source(req.hart, simrv::memory::TlPort::Instruction);
+            req.address = line_base;
+            simrv::memory::TlChannelD resp{};
+            if (!machine.memory_.system_bus().acquire_block(req, resp, line_data) ||
+                resp.failed()) {
+                ctx.pending_exception = ExceptionCode::FaultFetch;
+                ctx.pending_tval = state_.pc;
+                return;
+            }
+            icache.insert(line_base, line_data.data(), simrv::memory::mesi_for(resp.cap));
+            release_instruction_eviction(machine, *this);
+            machine.memory_.system_bus().grant_ack(simrv::memory::TlChannelE{.sink = resp.sink});
+            const auto byte_offset = static_cast<size_t>(ctx.padr1 - line_base);
+            std::memcpy(&w_data, line_data.data() + byte_offset, sizeof(w_data));
+            if ((w_data & 0x3) != 0x3) {
+                ctx.ir_org = w_data & 0xFFFF;
+            } else {
+                ctx.ir_org = w_data;
+            }
+            return;
+        }
+
+        auto fetch_halfword = [&](Address paddr, Address vaddr) -> std::optional<uint16_t> {
+            uint16_t h_data = 0;
+            const Address h_line_base =
+                paddr & ~(static_cast<Address>(simrv::cache::ICache::kLineBytes - 1u));
+            const bool h_refill_in_progress = machine.runtime_profile.is_cycle_mode() &&
+                                              ca_state.instruction_fill.active &&
+                                              ca_state.instruction_fill.line_base == h_line_base;
+
+            if (!h_refill_in_progress && icache.read16(paddr, h_data)) {
+                trigger_prefetch(h_line_base);
+                return h_data;
+            }
+
+            std::array<Byte, simrv::cache::ICache::kLineBytes> line_data{};
+            if (machine.runtime_profile.is_cycle_mode()) {
+                static_assert(simrv::cache::ICache::kLineBytes ==
+                              pipeline::InstructionFillState::kLineBytes);
+                auto& fill = ca_state.instruction_fill;
+                if (fill.active && fill.line_base != h_line_base) fill.reset();
+                if (!fill.active) {
+                    fill.active = true;
+                    fill.line_base = h_line_base;
+                    fill.source = simrv::memory::make_tl_source(static_cast<HartId>(state_.mhartid),
+                                                                simrv::memory::TlPort::Instruction);
+                }
+
+                if (fill.request_pending) {
+                    simrv::memory::TileLinkBus::TimedResponse timed{};
+                    if (!machine.memory_.system_bus().try_get_timed_response(fill.source, timed)) {
+                        ca_state.waiting_for_interconnect = true;
+                        return std::nullopt;
+                    }
+                    fill.request_pending = false;
+                    if (timed.payload.failed() || !timed.has_line_data) {
+                        ctx.pending_exception = ExceptionCode::FaultFetch;
+                        ctx.pending_tval = vaddr;
+                        fill.reset();
+                        return std::nullopt;
+                    }
+                    icache.insert(h_line_base, timed.line_data.data(),
+                                  simrv::memory::mesi_for(timed.payload.cap));
+                    release_instruction_eviction(machine, *this);
+                    machine.memory_.system_bus().grant_ack(
+                        simrv::memory::TlChannelE{.sink = timed.payload.sink});
+                    fill.reset();
+                    trigger_prefetch(h_line_base);
+
+                    const auto byte_offset = static_cast<size_t>(paddr - h_line_base);
                     std::memcpy(&h_data, timed.line_data.data() + byte_offset, sizeof(h_data));
                     return h_data;
                 }
@@ -413,7 +512,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 req.size = simrv::memory::kTlBlockSize;
                 req.hart = static_cast<HartId>(state_.mhartid);
                 req.source = fill.source;
-                req.address = line_base;
+                req.address = h_line_base;
                 machine.memory_.system_bus().send_request(req);
                 fill.request_pending = true;
                 ca_state.waiting_for_interconnect = true;
@@ -427,7 +526,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             req.hart = static_cast<HartId>(state_.mhartid);
             req.source =
                 simrv::memory::make_tl_source(req.hart, simrv::memory::TlPort::Instruction);
-            req.address = line_base;
+            req.address = h_line_base;
             simrv::memory::TlChannelD resp{};
             if (!machine.memory_.system_bus().acquire_block(req, resp, line_data) ||
                 resp.failed()) {
@@ -435,10 +534,10 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 ctx.pending_tval = vaddr;
                 return std::nullopt;
             }
-            icache.insert(line_base, line_data.data(), simrv::memory::mesi_for(resp.cap));
+            icache.insert(h_line_base, line_data.data(), simrv::memory::mesi_for(resp.cap));
             release_instruction_eviction(machine, *this);
             machine.memory_.system_bus().grant_ack(simrv::memory::TlChannelE{.sink = resp.sink});
-            const auto byte_offset = static_cast<size_t>(paddr - line_base);
+            const auto byte_offset = static_cast<size_t>(paddr - h_line_base);
             std::memcpy(&h_data, line_data.data() + byte_offset, sizeof(h_data));
             return h_data;
         };

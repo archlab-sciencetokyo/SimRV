@@ -12,5 +12,11 @@
         "true": true,
         "command": true
     },
-    "markdown.validate.enabled": true
+    "markdown.validate.enabled": true,
+    "files.watcherExclude": {
+        "**/.git/objects/**": true,
+        "**/.git/subtree-cache/**": true,
+        "**/build/**": true,
+        "**/linux-images/**": true
+    }
 }

@@ -285,6 +285,8 @@ auto Machine::initialize() -> int {
     power = std::make_unique<simrv::device::PowerMmio>(*this);
     if (tui_enabled()) {
         tui = std::make_unique<simrv::tui::Tui>(*this);
+        telemetry_sink_ = std::shared_ptr<simrv::tui::Tui>(tui.get(), [](simrv::tui::Tui*) {});
+        console_sink_ = std::shared_ptr<simrv::tui::Tui>(tui.get(), [](simrv::tui::Tui*) {});
         execution_state_.store(ExecutionState::Paused, std::memory_order_release);
     }
     const auto ram = ram_view();
@@ -428,7 +430,10 @@ auto Machine::initialize() -> int {
             sec_cpu->state().mhartid = i;
             sec_cpu->state().misa = initial_misa;
             sec_cpu->state().initialize_lower_xlen_fields();
-            const bool sec_started = appmode_enabled();
+            // OpenSBI owns HSM for Linux boots.  Secondary harts must execute its M-mode wait
+            // loop so its IPI can release them into the Linux entry point; a stopped simulator
+            // hart cannot observe that firmware event.
+            const bool sec_started = appmode_enabled() || linux_boot;
             sec_cpu->hart_status.store(sec_started ? HartStatus::Started : HartStatus::Stopped,
                                        std::memory_order_relaxed);
             for (std::size_t r = 0; r < 32; ++r) {

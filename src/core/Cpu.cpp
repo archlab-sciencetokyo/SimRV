@@ -148,6 +148,9 @@ void CPU::soft_tlb_flush() {
         for (auto& entry : soft_tlb_write) {
             entry.invalidate();
         }
+        for (auto& entry : soft_tlb_inst) {
+            entry.invalidate();
+        }
     }
 }
 
@@ -225,8 +228,7 @@ void CPU::evaluate_timer_interrupt() {
 }
 
 void CPU::run_cycle(Machine& machine) {
-    std::unique_lock snapshot_lock(tui_snapshot_mutex, std::defer_lock);
-    if (machine.tui_enabled()) snapshot_lock.lock();
+    const Counter retired_before = e_icount;
     if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
         prev_state_ = state_;
         if (auto hit = machine.breakpoints.check_pc(
@@ -248,24 +250,9 @@ void CPU::run_cycle(Machine& machine) {
     }
     if (machine.runtime_profile.is_cycle_mode()) {
         run_ca_pipeline_cycle(machine);
-        auto stage_event = [](const pipeline::CycleInstructionSlot& slot, bool stalled) {
-            return pipeline::PipelineStageEvent{
-                .instruction = {.pc = slot.context.cpc.raw(),
-                                .opcode = slot.context.opcode,
-                                .rd = slot.context.rd,
-                                .rs1 = slot.context.rs1,
-                                .rs2 = slot.context.rs2,
-                                .op_id = slot.context.op_id,
-                                .branched = slot.context.tkn,
-                                .is_branch = slot.context.opcode == Opcode::Branch,
-                                .is_jump = slot.context.opcode == Opcode::Jal ||
-                                           slot.context.opcode == Opcode::Jalr,
-                                .target_pc = slot.context.jmp_pc},
-                .remaining_latency = slot.remaining_latency,
-                .valid = slot.valid,
-                .stalled = stalled,
-            };
-        };
+        const bool record_snapshots =
+            pipeline_sim.config.record_snapshots &&
+            (!machine.tui_enabled() || captures_tui_execution_detail(machine));
         const bool three_stage =
             pipeline_sim.config.pipeline_type == pipeline::PipelineType::ThreeStage;
         const bool icache_miss = ca_state.instruction_fill.active || ca_pipeline.fetch->icache_miss;
@@ -300,10 +287,25 @@ void CPU::run_cycle(Machine& machine) {
             .data_hazard_stall = ca_pipeline.data_hazard_stall,
             .control_flush = ca_pipeline.control_flush,
         };
-        const bool record_snapshots =
-            pipeline_sim.config.record_snapshots &&
-            (!machine.tui_enabled() || captures_tui_execution_detail(machine));
-        if (record_snapshots) {
+        if (simrv::compiler::unlikely(record_snapshots)) {
+            auto stage_event = [](const pipeline::CycleInstructionSlot& slot, bool stalled) {
+                return pipeline::PipelineStageEvent{
+                    .instruction = {.pc = slot.context.cpc.raw(),
+                                    .opcode = slot.context.opcode,
+                                    .rd = slot.context.rd,
+                                    .rs1 = slot.context.rs1,
+                                    .rs2 = slot.context.rs2,
+                                    .op_id = slot.context.op_id,
+                                    .branched = slot.context.tkn,
+                                    .is_branch = slot.context.opcode == Opcode::Branch,
+                                    .is_jump = slot.context.opcode == Opcode::Jal ||
+                                               slot.context.opcode == Opcode::Jalr,
+                                    .target_pc = slot.context.jmp_pc},
+                    .remaining_latency = slot.remaining_latency,
+                    .valid = slot.valid,
+                    .stalled = stalled,
+                };
+            };
             pipeline_sim.advance_cycle({
                 .fetch = stage_event(*ca_pipeline.fetch, fetch_stalled),
                 .decode = three_stage ? pipeline::PipelineStageEvent{}
@@ -326,7 +328,8 @@ void CPU::run_cycle(Machine& machine) {
             pipeline_sim.advance_cycle_fast(metrics);
         }
         const auto retired_pc = state_.pc;
-        if (ca_pipeline.retired_this_cycle && machine.tui_enabled() && machine.tui) {
+        if (simrv::compiler::unlikely(ca_pipeline.retired_this_cycle && machine.tui_enabled() &&
+                                      machine.tui)) {
             std::swap(pipeline_context, ca_pipeline.retired->context);
             record_trace_for_tui(machine);
             std::swap(pipeline_context, ca_pipeline.retired->context);
@@ -343,6 +346,7 @@ void CPU::run_cycle(Machine& machine) {
             ca_state.instruction_walk.reset();
             ca_state.data_walk.reset();
         }
+        machine.record_retired_instructions(e_icount - retired_before);
         return;
     }
     if (machine.runtime_profile.is_instruction_fast() && !machine.breakpoints.has_any()) {
@@ -439,6 +443,7 @@ void CPU::run_cycle(Machine& machine) {
             }
         }
     }
+    machine.record_retired_instructions(e_icount - retired_before);
 }
 
 void CPU::advance_ca_cycle(Machine& machine) {
@@ -524,8 +529,7 @@ void CPU::record_trace_for_tui(Machine& machine) {
 }
 
 void CPU::run_cycle_baremetal(Machine& machine) {
-    std::unique_lock snapshot_lock(tui_snapshot_mutex, std::defer_lock);
-    if (machine.tui_enabled()) snapshot_lock.lock();
+    const Counter retired_before = e_icount;
     if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
         prev_state_ = state_;
         if (auto hit = machine.breakpoints.check_pc(
@@ -587,6 +591,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
                     }
                 }
             }
+            machine.record_retired_instructions(e_icount - retired_before);
             return;
         }
     }
@@ -639,6 +644,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
             }
         }
     }
+    machine.record_retired_instructions(e_icount - retired_before);
 }
 
 void CPU::run_memory_stage_baremetal(Machine& machine) {
@@ -889,7 +895,7 @@ namespace {
 }
 }  // namespace
 
-void CPU::execute_cached_jal(CachedOp& op) {
+SIMRV_ALWAYS_INLINE void CPU::execute_cached_jal(CachedOp& op) {
     Register const next_pc = state_.pc + op.len;
     pipeline_context.tkn = true;
     pipeline_context.jmp_pc = state_.pc + op.imm;
@@ -906,7 +912,7 @@ void CPU::execute_cached_jal(CachedOp& op) {
     commit_cached_branch_target(op, pipeline_context.jmp_pc);
 }
 
-void CPU::execute_cached_jalr(CachedOp& op, Register rrs1) {
+SIMRV_ALWAYS_INLINE void CPU::execute_cached_jalr(CachedOp& op, Register rrs1) {
     Register const next_pc = state_.pc + op.len;
     pipeline_context.tkn = true;
     pipeline_context.jmp_pc = (rrs1 + op.imm) & ~static_cast<Register>(1);
@@ -927,7 +933,7 @@ void CPU::execute_cached_jalr(CachedOp& op, Register rrs1) {
     commit_cached_branch_target(op, pipeline_context.jmp_pc);
 }
 
-void CPU::execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) {
+SIMRV_ALWAYS_INLINE void CPU::execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2) {
     bool tkn = false;
     switch (op.funct3) {
         case isa::Funct3::Beq:
@@ -1059,7 +1065,8 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
     return false;
 }
 
-auto CPU::execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> bool {
+SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op, Register rrs1)
+    -> bool {
     Address const mem_addr = rrs1 + op.imm;
     if (simrv::compiler::unlikely(machine.tui_enabled() || machine.branch_trace_enabled())) {
         pipeline_context.mem_addr = mem_addr;
@@ -1087,8 +1094,8 @@ auto CPU::execute_cached_load(Machine& machine, CachedOp& op, Register rrs1) -> 
     return true;
 }
 
-auto CPU::execute_cached_store(Machine& machine, CachedOp& op, Register rrs1, Register rrs2)
-    -> bool {
+SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& op, Register rrs1,
+                                                   Register rrs2) -> bool {
     Address const mem_addr = rrs1 + op.imm;
     if (simrv::compiler::unlikely(machine.tui_enabled() || machine.branch_trace_enabled())) {
         pipeline_context.mem_addr = mem_addr;
@@ -1485,12 +1492,19 @@ template <bool kCopyContext, bool kInstMix, bool kPollPause>
 SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32_t batch_size)
     -> uint32_t {
     uint32_t cached_ops = 0;
+    Counter accumulated_retired = 0;
     for (uint32_t b = 0; b < batch_size; ++b) {
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
+            const Counter retired_before = e_icount;
             execute_cached_op_fast<kCopyContext, kInstMix>(machine, *cached);
+            accumulated_retired += (e_icount - retired_before);
             ++cached_ops;
         } else {
+            if (accumulated_retired > 0) {
+                machine.record_retired_instructions(accumulated_retired);
+                accumulated_retired = 0;
+            }
             run_cycle_baremetal(machine);
         }
         if (simrv::compiler::unlikely(
@@ -1499,6 +1513,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                  ((b & 0xFFu) == 0 && (machine.is_paused() || machine.debug_pause_requested()))))) {
             break;
         }
+    }
+    if (accumulated_retired > 0) {
+        machine.record_retired_instructions(accumulated_retired);
     }
     return cached_ops;
 }
@@ -1535,6 +1552,86 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
     }
 }
 
+template <bool kCopyContext, bool kInstMix, bool kPollPause>
+SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batch_size)
+    -> uint32_t {
+    uint32_t cached_ops = 0;
+    Counter accumulated_retired = 0;
+    uint32_t chunk_cycles = 0;
+
+    auto flush_clint_and_retired = [&]() {
+        if (chunk_cycles > 0) {
+            clint_mmio.mcycle += chunk_cycles;
+            clint_mmio.rtc_divider += static_cast<int>(chunk_cycles);
+            if (clint_mmio.rtc_divider >= 10) {
+                clint_mmio.mtime += clint_mmio.rtc_divider / 10;
+                clint_mmio.rtc_divider %= 10;
+                evaluate_timer_interrupt();
+                handle_cached_interrupts();
+            }
+            chunk_cycles = 0;
+        }
+        if (accumulated_retired > 0) {
+            machine.record_retired_instructions(accumulated_retired);
+            accumulated_retired = 0;
+        }
+    };
+
+    for (uint32_t b = 0; b < batch_size; ++b) {
+        auto* cached = decode_cache.lookup(state_.pc);
+        if (simrv::compiler::likely(cached != nullptr)) {
+            const Counter retired_before = e_icount;
+            execute_cached_op_fast<kCopyContext, kInstMix>(machine, *cached);
+            accumulated_retired += (e_icount - retired_before);
+            ++cached_ops;
+            ++chunk_cycles;
+
+            if (simrv::compiler::unlikely(chunk_cycles >= 64)) {
+                flush_clint_and_retired();
+            }
+        } else {
+            flush_clint_and_retired();
+            run_cycle(machine);
+        }
+        if (simrv::compiler::unlikely(
+                machine.tohost != 0 || !machine.is_running() ||
+                (kPollPause &&
+                 ((b & 0xFFu) == 0 && (machine.is_paused() || machine.debug_pause_requested()))))) {
+            break;
+        }
+    }
+    flush_clint_and_retired();
+    return cached_ops;
+}
+
+void CPU::run_fast_os_batch(Machine& machine, uint32_t batch_size, const FastBatchPolicy& policy) {
+    if (simrv::compiler::likely(!policy.copy_pipeline_context && !policy.collect_instruction_mix)) {
+        if (policy.poll_pause) {
+            run_fast_os_kernel<false, false, true>(machine, batch_size);
+        } else {
+            run_fast_os_kernel<false, false, false>(machine, batch_size);
+        }
+    } else if (policy.copy_pipeline_context && policy.collect_instruction_mix) {
+        if (policy.poll_pause) {
+            run_fast_os_kernel<true, true, true>(machine, batch_size);
+        } else {
+            run_fast_os_kernel<true, true, false>(machine, batch_size);
+        }
+    } else if (policy.copy_pipeline_context) {
+        if (policy.poll_pause) {
+            run_fast_os_kernel<true, false, true>(machine, batch_size);
+        } else {
+            run_fast_os_kernel<true, false, false>(machine, batch_size);
+        }
+    } else {
+        if (policy.poll_pause) {
+            run_fast_os_kernel<false, true, true>(machine, batch_size);
+        } else {
+            run_fast_os_kernel<false, true, false>(machine, batch_size);
+        }
+    }
+}
+
 template void CPU::execute_cached_op_fast<false, false>(Machine& machine, CachedOp& op);
 template void CPU::execute_cached_op_fast<true, false>(Machine& machine, CachedOp& op);
 template void CPU::execute_cached_op_fast<false, true>(Machine& machine, CachedOp& op);
@@ -1547,6 +1644,14 @@ template auto CPU::run_fast_baremetal_kernel<false, true, false>(Machine&, uint3
 template auto CPU::run_fast_baremetal_kernel<false, true, true>(Machine&, uint32_t) -> uint32_t;
 template auto CPU::run_fast_baremetal_kernel<true, true, false>(Machine&, uint32_t) -> uint32_t;
 template auto CPU::run_fast_baremetal_kernel<true, true, true>(Machine&, uint32_t) -> uint32_t;
+template auto CPU::run_fast_os_kernel<false, false, false>(Machine&, uint32_t) -> uint32_t;
+template auto CPU::run_fast_os_kernel<false, false, true>(Machine&, uint32_t) -> uint32_t;
+template auto CPU::run_fast_os_kernel<true, false, false>(Machine&, uint32_t) -> uint32_t;
+template auto CPU::run_fast_os_kernel<true, false, true>(Machine&, uint32_t) -> uint32_t;
+template auto CPU::run_fast_os_kernel<false, true, false>(Machine&, uint32_t) -> uint32_t;
+template auto CPU::run_fast_os_kernel<false, true, true>(Machine&, uint32_t) -> uint32_t;
+template auto CPU::run_fast_os_kernel<true, true, false>(Machine&, uint32_t) -> uint32_t;
+template auto CPU::run_fast_os_kernel<true, true, true>(Machine&, uint32_t) -> uint32_t;
 
 void CPU::push_trace_history(Address pc, Instruction inst, const std::string& symbol) {
     // O(1) ring buffer write — no heap allocation, no shifting

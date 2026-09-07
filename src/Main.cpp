@@ -20,6 +20,8 @@
 #include "simrv/core/BuildInfo.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/net/Client.hpp"
+#include "simrv/net/Server.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/util/CliParser.hpp"
 #include "simrv/util/FormatUtil.hpp"
@@ -39,7 +41,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             is_tui = false;
         } else if (arg == "--tui" || arg == "-u") {
             is_tui = true;
-        } else if (arg == "-h" || arg == "--help" || arg == "--version") {
+        } else if (arg == "-h" || arg == "--help" || arg == "--version" || arg == "--license") {
             skip_banner = true;
         }
     }
@@ -73,9 +75,18 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             case CliAction::ShowVersion:
                 std::println("{} (RV{})", simrv::buildinfo::kVersion, simrv::xlen::kXLenBits);
                 std::exit(0);
+            case CliAction::ShowLicense:
+                std::println("SimRV {} (RV{})", simrv::buildinfo::kVersion, simrv::xlen::kXLenBits);
+                std::println("Licensed under the MIT License.");
+                std::println("Copyright (c) 2024-2026 Lennart Trunk and ArchLab @ ScienceTokyo");
+                std::println("Full license: LICENSE; third-party notices: THIRD_PARTY_NOTICES.md");
+                std::exit(0);
             case CliAction::ExplainInstruction:
                 simrv::util::explain_instruction(parsed->options.explain_inst_val);
                 std::exit(0);
+            case CliAction::Attach:
+                return simrv::net::run_client(parsed->options.attach_endpoint,
+                                              !parsed->options.tuimode);
             case CliAction::Run:
                 break;
         }
@@ -106,6 +117,20 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
 
         sim_machine->set_start_time(std::chrono::steady_clock::now());
 
+        std::unique_ptr<simrv::net::SimRvServer> ipc_server;
+        if (parsed->options.server_mode) {
+            ipc_server = std::make_unique<simrv::net::SimRvServer>(*sim_machine,
+                                                                   parsed->options.server_endpoint);
+            sim_machine->set_telemetry_sink(std::shared_ptr<simrv::net::SimRvServer>(
+                ipc_server.get(), [](simrv::net::SimRvServer*) {}));
+            sim_machine->set_console_sink(std::shared_ptr<simrv::net::SimRvServer>(
+                ipc_server.get(), [](simrv::net::SimRvServer*) {}));
+            if (!ipc_server->start()) {
+                simrv::log::error("Failed to start IPC server daemon");
+                return 1;
+            }
+        }
+
         // Initialize terminal in raw mode for simulator I/O.
         TerminalModeGuard terminal_mode;
         if (!terminal_mode.enable_raw_mode()) {
@@ -122,6 +147,10 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             }
         } else {
             sim_machine->run();
+        }
+
+        if (ipc_server) {
+            ipc_server->stop();
         }
 
         if (sim_machine->reboot_requested) {

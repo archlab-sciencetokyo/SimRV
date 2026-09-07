@@ -225,14 +225,28 @@ void GlossaryModal::render(std::vector<std::string>& content_rows,
     static constexpr std::array<std::string_view, 6> kTopicNames = {"Regs",   "Pipe",   "Cache",
                                                                     "VM/TLB", "Branch", "Priv"};
 
-    add_row_cb(build_modal_tab_bar(kTopicNames, static_cast<std::size_t>(topic_idx)));
+    int const wrap_w = std::max(10, box_w - 4);  // available chars inside the modal border
+
+    auto emit_row = [&](std::string_view row) {
+        if (get_display_width(row) <= box_w) {
+            add_row_cb(std::string(row));
+        } else {
+            add_row_cb(framework::fit_to_width(row, box_w));
+        }
+    };
+
+    emit_row(build_modal_tab_bar(kTopicNames, static_cast<std::size_t>(topic_idx)));
 
     TopicData const data = get_topic_data(topic_idx);
-    add_row_cb(std::format(" \033[1m{}\033[0m", data.title));
-    add_row_cb(std::format(" {}{}\033[0m", kThemeMuted, data.subtitle));
-    add_row_cb("");
+    for (const auto& w : wrap_ansi_line(std::format(" \033[1m{}\033[0m", data.title), wrap_w, 2)) {
+        emit_row(w);
+    }
+    for (const auto& w :
+         wrap_ansi_line(std::format(" {}{}\033[0m", kThemeMuted, data.subtitle), wrap_w, 2)) {
+        emit_row(w);
+    }
+    emit_row("");
 
-    int const wrap_w = std::max(10, box_w - 4);  // available chars inside the modal border
     std::vector<std::string> body_rows;
     auto add_body_row = [&](std::string row) { body_rows.push_back(std::move(row)); };
 
@@ -272,12 +286,12 @@ void GlossaryModal::render(std::vector<std::string>& content_rows,
     int const start_row = std::clamp(scroll_offset, 0, max_scroll);
     for (int row = 0; row < viewport_rows; ++row) {
         int const source_row = start_row + row;
-        add_row_cb(source_row < static_cast<int>(body_rows.size())
-                       ? body_rows.at(static_cast<std::size_t>(source_row))
-                       : std::string{});
+        emit_row(source_row < static_cast<int>(body_rows.size())
+                     ? body_rows.at(static_cast<std::size_t>(source_row))
+                     : std::string{});
     }
 
-    add_row_cb("");
+    emit_row("");
     bool const scrollable = static_cast<int>(body_rows.size()) > viewport_rows;
     if (scrollable) {
         const std::array ansi_actions{ModalActionHint{"<", "Previous"},
@@ -288,7 +302,7 @@ void GlossaryModal::render(std::vector<std::string>& content_rows,
                                          ModalActionHint{"→", "Next"}, ModalActionHint{"↑", "Up"},
                                          ModalActionHint{"↓", "Down"},
                                          ModalActionHint{"Esc/?/q", "Close"}};
-        add_row_cb(
+        emit_row(
             build_modal_footer(is_ansi ? std::span{ansi_actions} : std::span{unicode_actions}));
     } else {
         const std::array ansi_actions{ModalActionHint{"<", "Previous"},
@@ -297,7 +311,7 @@ void GlossaryModal::render(std::vector<std::string>& content_rows,
         const std::array unicode_actions{ModalActionHint{"←", "Previous"},
                                          ModalActionHint{"→", "Next"},
                                          ModalActionHint{"Esc/?/q", "Close"}};
-        add_row_cb(
+        emit_row(
             build_modal_footer(is_ansi ? std::span{ansi_actions} : std::span{unicode_actions}));
     }
 }

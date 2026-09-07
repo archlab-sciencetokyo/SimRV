@@ -34,6 +34,9 @@ struct MemoryGeometry {
 };
 
 struct ExecutionConfig {
+    // ACLINT and AIA allocate one interrupt file per simulated hart.
+    static constexpr uint32_t kMaxHarts = 16;
+
     bool appmode = true;
     bool ui_worker_threaded = false;
     uint32_t num_harts = 1;
@@ -54,9 +57,9 @@ struct TuiConfig {
     bool high_contrast = false;
     bool class_mode = false;
     /// Optional external classroom mission path. Missions are local guidance only.
-    std::string mission;
+    std::string mission = {};
     double mouse_sensitivity = 1.0;
-    std::string inspection_output;
+    std::string inspection_output = {};
 };
 
 struct DebugConfig {
@@ -108,8 +111,8 @@ struct MachineConfig {
         if (memory.dram_size == 0 || (memory.dram_size & (memory.dram_size - 1U)) != 0) {
             return std::unexpected("DRAM size must be a non-zero power of two");
         }
-        if (execution.num_harts == 0 || execution.num_harts > 64) {
-            return std::unexpected("hart count must be between 1 and 64");
+        if (execution.num_harts == 0 || execution.num_harts > ExecutionConfig::kMaxHarts) {
+            return std::unexpected("hart count must be between 1 and 16");
         }
         if (execution.smp_quantum == 0) {
             return std::unexpected("SMP quantum must be non-zero");

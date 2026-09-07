@@ -95,6 +95,9 @@ class RunnerBase {
 
    protected:
     void start_threads(Machine& machine, bool baremetal);
+    static void reset_runner_transients(Machine& machine);
+    static void execute_ca_batch(Machine& machine);
+    static void execute_instruction_smp(Machine& machine, bool baremetal);
     void stop_threads() {
         workers_running_.store(false, std::memory_order_release);
         if (machine_ != nullptr) machine_->notify_control_event();
@@ -377,7 +380,6 @@ void Machine::publish_tui_execution_snapshot_for_hart(size_t hart_index) noexcep
     if (hart_index >= num_harts() || hart_index >= tui_snapshots_.size()) return;
     auto& slot = tui_snapshots_[hart_index];
     const auto& source = hart(hart_index);
-    std::scoped_lock source_lock(source.tui_snapshot_mutex);
     const auto stats = source.pipeline_sim.get_stats();
     pipeline::Scoreboard scoreboard;
     if (runtime_profile.is_cycle_mode()) {
@@ -482,7 +484,8 @@ void Machine::finalize_runner_cycle() {
 
 auto Machine::fast_batch_policy() const -> std::optional<FastBatchPolicy> {
     if (!runtime_profile.allows_fast_batch() || is_stepping() || lockstep_enabled() ||
-        branch_trace_enabled() || config.execution.strace != 0 || breakpoints.has_any()) {
+        branch_trace_enabled() || config.execution.strace != 0 || breakpoints.has_any() ||
+        config.execution.smp_multithreaded) {
         return std::nullopt;
     }
     if (tui_enabled() && (!tui || tui->is_trace_active() ||
@@ -589,7 +592,7 @@ void RunnerBase::stop(Machine& machine) {
     stop_threads();
 }
 
-void BaremetalRunner::prepare(Machine& machine) {
+void RunnerBase::reset_runner_transients(Machine& machine) {
     if (!machine.config.execution.smp_multithreaded || machine.breakpoints.has_any()) {
         for (auto& hart : machine.secondary_harts_) {
             hart->pipeline_context.pending_exception = std::nullopt;
@@ -600,74 +603,103 @@ void BaremetalRunner::prepare(Machine& machine) {
     machine.primary_hart().pipeline_context.pending_tval = 0;
 }
 
-void BaremetalRunner::execute(Machine& machine) {
+void RunnerBase::execute_ca_batch(Machine& machine) {
     if (machine.config.execution.smp_multithreaded && !machine.is_stepping() &&
-        !machine.breakpoints.has_any() && machine.runtime_profile.is_instruction_mode()) {
-        machine.primary_hart().run_cycle_baremetal(machine);
+        !machine.breakpoints.has_any()) {
+        machine.advance_ca_primary_cycle();
         return;
     }
-    if (machine.runtime_profile.is_cycle_mode()) {
-        if (machine.config.execution.smp_multithreaded && !machine.is_stepping() &&
-            !machine.breakpoints.has_any()) {
-            machine.advance_ca_primary_cycle();
-            return;
-        }
-        const uint32_t quantum = machine.ca_batch_quantum();
-        for (uint32_t cycle = 0; cycle < quantum && machine.is_running(); ++cycle) {
-            if (cycle != 0 && machine.execution_state() != ExecutionState::Running) break;
-            machine.advance_ca_global_cycle();
-            if (machine.tohost != 0 ||
-                (machine.config.execution.fincnt != std::numeric_limits<Counter>::max() &&
-                 machine.primary_hart().e_icount >= machine.config.execution.fincnt)) {
-                break;
-            }
-        }
-    } else if (machine.lockstep() && machine.lockstep()->is_running()) {
-        machine.primary_hart().run_cycle(machine);
-    } else {
-        const uint32_t quantum =
-            (machine.is_stepping() || machine.debugger_enabled() || machine.breakpoints.has_any())
-                ? 1
-                : machine.config.execution.smp_quantum;
-        if (machine.secondary_harts_.empty() || quantum <= 1) {
-            machine.primary_hart().run_cycle_baremetal(machine);
-            for (auto& hart : machine.secondary_harts_) {
-                if (hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
-                    hart->run_cycle_baremetal(machine);
-                }
-            }
-        } else {
-            for (uint32_t q = 0; q < quantum && machine.is_running(); ++q) {
-                machine.primary_hart().run_cycle_baremetal(machine);
-            }
-            for (auto& hart : machine.secondary_harts_) {
-                if (hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
-                    for (uint32_t q = 0;
-                         q < quantum && machine.is_running() &&
-                         hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started;
-                         ++q) {
-                        hart->run_cycle_baremetal(machine);
-                    }
-                }
-            }
+    const uint32_t quantum = machine.ca_batch_quantum();
+    for (uint32_t cycle = 0; cycle < quantum && machine.is_running(); ++cycle) {
+        if (cycle != 0 && machine.execution_state() != ExecutionState::Running) break;
+        machine.advance_ca_global_cycle();
+        if (machine.tohost != 0 ||
+            (machine.config.execution.fincnt != std::numeric_limits<Counter>::max() &&
+             machine.retired_instruction_count() >= machine.config.execution.fincnt)) {
+            break;
         }
     }
 }
 
+void RunnerBase::execute_instruction_smp(Machine& machine, bool baremetal) {
+    const auto run_hart = [&](CPU& hart) {
+        if (baremetal) {
+            hart.run_cycle_baremetal(machine);
+        } else {
+            hart.run_cycle(machine);
+        }
+    };
+    if (machine.config.execution.smp_multithreaded && !machine.is_stepping() &&
+        !machine.breakpoints.has_any()) {
+        run_hart(machine.primary_hart());
+        return;
+    }
+    const uint32_t quantum =
+        (machine.is_stepping() || machine.debugger_enabled() || machine.breakpoints.has_any())
+            ? 1
+            : machine.config.execution.smp_quantum;
+    const auto run_round = [&] {
+        run_hart(machine.primary_hart());
+        for (auto& hart : machine.secondary_harts_) {
+            if (hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+                run_hart(*hart);
+            }
+        }
+    };
+    if (machine.secondary_harts_.empty() || quantum <= 1) {
+        run_round();
+        return;
+    }
+    for (uint32_t q = 0; q < quantum && machine.is_running(); ++q) {
+        run_round();
+        if (machine.retired_instruction_count() >= machine.config.execution.fincnt) break;
+    }
+}
+
+void BaremetalRunner::prepare(Machine& machine) { reset_runner_transients(machine); }
+
+void BaremetalRunner::execute(Machine& machine) {
+    if (machine.runtime_profile.is_cycle_mode()) {
+        execute_ca_batch(machine);
+    } else if (machine.lockstep() && machine.lockstep()->is_running()) {
+        machine.primary_hart().run_cycle(machine);
+    } else {
+        execute_instruction_smp(machine, true);
+    }
+}
+
 auto BaremetalRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool {
-    if (!machine.secondary_harts_.empty() && !machine.config.execution.smp_multithreaded)
-        return false;
     const auto policy = machine.fast_batch_policy();
     if (!simrv::compiler::likely(policy.has_value())) return false;
     if (policy->has_instruction_limit) {
-        if (machine.primary_hart().e_icount >= machine.config.execution.fincnt) {
+        if (machine.retired_instruction_count() >= machine.config.execution.fincnt) {
             machine.stop(Machine::StopReason::InstructionLimit);
             return true;
         }
         batch_size = static_cast<uint32_t>(std::min<Counter>(
-            batch_size, machine.config.execution.fincnt - machine.primary_hart().e_icount));
+            batch_size, machine.config.execution.fincnt - machine.retired_instruction_count()));
     }
-    machine.primary_hart().run_fast_baremetal_batch(machine, batch_size, *policy);
+    const uint32_t quantum =
+        machine.secondary_harts_.empty()
+            ? batch_size
+            : std::min(batch_size, static_cast<uint32_t>(machine.config.execution.smp_quantum));
+    machine.primary_hart().run_fast_baremetal_batch(machine, quantum, *policy);
+    for (auto& sec : machine.secondary_harts_) {
+        if (!machine.is_running()) break;
+        if (sec->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+            uint32_t sec_batch = quantum;
+            if (policy->has_instruction_limit) {
+                if (machine.retired_instruction_count() >= machine.config.execution.fincnt) {
+                    machine.stop(Machine::StopReason::InstructionLimit);
+                    break;
+                }
+                sec_batch = static_cast<uint32_t>(std::min<Counter>(
+                    sec_batch,
+                    machine.config.execution.fincnt - machine.retired_instruction_count()));
+            }
+            sec->run_fast_baremetal_batch(machine, sec_batch, *policy);
+        }
+    }
     return true;
 }
 
@@ -678,7 +710,7 @@ void BaremetalRunner::finalize(Machine& machine) {
     if (simrv::compiler::unlikely(machine.tohost != 0)) machine.finalize_cycle_tohost();
     if (simrv::compiler::unlikely(
             machine.config.execution.fincnt != std::numeric_limits<Counter>::max() &&
-            machine.primary_hart().e_icount >= machine.config.execution.fincnt)) {
+            machine.retired_instruction_count() >= machine.config.execution.fincnt)) {
         simrv::log::info("finished by -e option");
         machine.stop(Machine::StopReason::InstructionLimit);
     }
@@ -693,12 +725,7 @@ void BaremetalRunner::finalize(Machine& machine) {
 void OsRunner::start(Machine& machine) { start_threads(machine, false); }
 
 void OsRunner::prepare(Machine& machine) {
-    if (!machine.config.execution.smp_multithreaded || machine.breakpoints.has_any()) {
-        for (auto& hart : machine.secondary_harts_) {
-            hart->pipeline_context.pending_exception = std::nullopt;
-            hart->pipeline_context.pending_tval = 0;
-        }
-    }
+    reset_runner_transients(machine);
     if (simrv::compiler::likely(machine.runtime_profile.is_instruction_fast() &&
                                 machine.primary_hart().clint_mmio.mtime <=
                                     machine.config.execution.enabletimer)) {
@@ -709,60 +736,14 @@ void OsRunner::prepare(Machine& machine) {
     } else if (machine.primary_hart().clint_mmio.mtime == machine.config.execution.memimg_cycle) {
         machine.trace().dump_init_artifacts();
     }
-    machine.primary_hart().pipeline_context.pending_exception = std::nullopt;
-    machine.primary_hart().pipeline_context.pending_tval = 0;
 }
 
 void OsRunner::execute(Machine& machine) {
-    if (machine.config.execution.smp_multithreaded && !machine.is_stepping() &&
-        !machine.breakpoints.has_any() && machine.runtime_profile.is_instruction_mode()) {
-        machine.primary_hart().run_cycle(machine);
-        return;
-    }
     if (machine.runtime_profile.is_cycle_mode()) {
-        if (machine.config.execution.smp_multithreaded && !machine.is_stepping() &&
-            !machine.breakpoints.has_any()) {
-            machine.advance_ca_primary_cycle();
-            return;
-        }
-        const uint32_t quantum = machine.ca_batch_quantum();
-        for (uint32_t cycle = 0; cycle < quantum && machine.is_running(); ++cycle) {
-            if (cycle != 0 && machine.execution_state() != ExecutionState::Running) break;
-            machine.advance_ca_global_cycle();
-            if (machine.tohost != 0 ||
-                (machine.config.execution.fincnt != std::numeric_limits<Counter>::max() &&
-                 machine.primary_hart().e_icount >= machine.config.execution.fincnt)) {
-                break;
-            }
-        }
+        execute_ca_batch(machine);
         return;
     }
-    const uint32_t quantum =
-        (machine.is_stepping() || machine.debugger_enabled() || machine.breakpoints.has_any())
-            ? 1
-            : machine.config.execution.smp_quantum;
-    if (machine.secondary_harts_.empty() || quantum <= 1) {
-        machine.primary_hart().run_cycle(machine);
-        for (auto& hart : machine.secondary_harts_) {
-            if (hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
-                hart->run_cycle(machine);
-            }
-        }
-    } else {
-        for (uint32_t q = 0; q < quantum && machine.is_running(); ++q) {
-            machine.primary_hart().run_cycle(machine);
-        }
-        for (auto& hart : machine.secondary_harts_) {
-            if (hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
-                for (uint32_t q = 0;
-                     q < quantum && machine.is_running() &&
-                     hart->hart_status.load(std::memory_order_relaxed) == HartStatus::Started;
-                     ++q) {
-                    hart->run_cycle(machine);
-                }
-            }
-        }
-    }
+    execute_instruction_smp(machine, false);
 }
 
 auto OsRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool {
@@ -777,18 +758,18 @@ auto OsRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool
     }
     auto& cpu = machine.primary_hart();
     if (policy->has_instruction_limit) {
-        if (cpu.e_icount >= machine.config.execution.fincnt) {
+        if (machine.retired_instruction_count() >= machine.config.execution.fincnt) {
             machine.stop(Machine::StopReason::InstructionLimit);
             return true;
         }
-        batch_size = static_cast<uint32_t>(
-            std::min<Counter>(batch_size, machine.config.execution.fincnt - cpu.e_icount));
+        batch_size = static_cast<uint32_t>(std::min<Counter>(
+            batch_size, machine.config.execution.fincnt - machine.retired_instruction_count()));
     }
-    const uint32_t quantum = std::min(batch_size, machine.secondary_harts_.empty() ? 4096u : 2048u);
-    for (uint32_t i = 0; i < quantum && machine.is_running(); ++i) {
-        cpu.run_cycle(machine);
-        if ((i & 255U) == 0 && (machine.is_paused() || machine.debug_pause_requested())) break;
-    }
+    const uint32_t quantum =
+        std::min(batch_size, machine.secondary_harts_.empty()
+                                 ? 4096u
+                                 : static_cast<uint32_t>(machine.config.execution.smp_quantum));
+    cpu.run_fast_os_batch(machine, quantum, *policy);
     // Functional TUI batches do not enter the per-cycle finalizer, so surface pending UART RX at
     // the same explicit boundary that publishes the sampled UI snapshot.
     if (auto* uart = machine.uart_device(); uart && machine.tui_enabled()) {
@@ -819,9 +800,9 @@ void OsRunner::finalize(Machine& machine) {
                 cpu.pipeline_context.opcode, cpu.pipeline_context.tkn);
         machine.finalize_cycle_tohost();
     }
-    if (simrv::compiler::unlikely(machine.config.execution.fincnt !=
-                                      std::numeric_limits<Counter>::max() &&
-                                  cpu.e_icount >= machine.config.execution.fincnt)) {
+    if (simrv::compiler::unlikely(
+            machine.config.execution.fincnt != std::numeric_limits<Counter>::max() &&
+            machine.retired_instruction_count() >= machine.config.execution.fincnt)) {
         simrv::log::info("finished by -e option");
         machine.stop(Machine::StopReason::InstructionLimit);
     }
@@ -840,6 +821,7 @@ void Machine::reset_state() {
     is_shutdown_ = false;
     is_running_ = true;
     stop_reason_ = StopReason::Running;
+    retired_instruction_count_.store(0, std::memory_order_relaxed);
     last_tui_check_cycles_ = 0;
     last_tui_update_ = {};
     execution_state_.store(
@@ -1163,7 +1145,7 @@ void Machine::run() {
             }
             if (simrv::compiler::unlikely(config.execution.fincnt !=
                                               std::numeric_limits<Counter>::max() &&
-                                          cpu.e_icount >= config.execution.fincnt)) {
+                                          retired_instruction_count() >= config.execution.fincnt)) {
                 simrv::log::info("finished by -e option");
                 stop_reason_ = StopReason::InstructionLimit;
                 is_running_ = false;
@@ -1184,7 +1166,7 @@ void Machine::run() {
         }
         if (simrv::compiler::unlikely(config.execution.fincnt !=
                                           std::numeric_limits<Counter>::max() &&
-                                      cpu.e_icount >= config.execution.fincnt)) {
+                                      retired_instruction_count() >= config.execution.fincnt)) {
             simrv::log::info("finished by -e option");
             stop_reason_ = StopReason::InstructionLimit;
             is_running_ = false;
@@ -1248,6 +1230,17 @@ void Machine::run() {
     if (gdb_stub) gdb_stub->stop();
 }
 
+void Machine::console_write(char ch) {
+    if (console_sink_) {
+        console_sink_->handle_char_write(ch);
+    } else if (tui_enabled() && tui) {
+        tui->handle_char_write(ch);
+    } else {
+        std::print("{}", ch);
+        fflush(stdout);
+    }
+}
+
 void Machine::finalize_cycle_tohost() {
     if (tohost == 0) {
         return;
@@ -1260,12 +1253,7 @@ void Machine::finalize_cycle_tohost() {
 
     if (dev == 1 && cmd == 1) {
         // HTIF Console Print
-        if (tui_enabled() && tui) {
-            tui->handle_char_write(static_cast<char>(payload & 0xff));
-        } else {
-            std::print("{}", static_cast<char>(payload & 0xff));
-            fflush(stdout);
-        }
+        console_write(static_cast<char>(payload & 0xff));
         tohost = 0;
         return;
     }
@@ -1277,12 +1265,7 @@ void Machine::finalize_cycle_tohost() {
         const auto old_payload = static_cast<uint16_t>(tohost & 0xffffULL);
         if (old_cmd == 1) {  // CMD_PRINT_CHAR
             const char ch = static_cast<char>(old_payload & 0xff);
-            if (tui_enabled() && tui) {
-                tui->handle_char_write(ch);
-            } else {
-                std::print("{}", ch);
-                fflush(stdout);
-            }
+            console_write(ch);
             tohost = 0;
             return;
         } else if (old_cmd == 2) {  // CMD_POWER_OFF

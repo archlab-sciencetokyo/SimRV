@@ -492,7 +492,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             return;
         }
         if (geometry.contains(addr, size_bytes)) {
-            bool cache_write_completed = cpu.dcache.write(addr, data, funct3);
+            bool first_write = false;
+            bool cache_write_completed = cpu.dcache.write(addr, data, funct3, &first_write);
             if (!cache_write_completed) {
                 // Not in Trunk state; acquire Trunk ownership via TL-C
                 const Address line_base =
@@ -525,7 +526,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
                         TlChannelE ack{};
                         ack.sink = resp.sink;
                         mem.system_bus().grant_ack(ack);
-                        cache_write_completed = cpu.dcache.write(addr, data, funct3);
+                        cache_write_completed = cpu.dcache.write(addr, data, funct3, &first_write);
                     }
                 } else {
                     std::array<Byte, simrv::cache::DCache::kLineBytes> line_data{};
@@ -537,11 +538,11 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
                         TlChannelE ack{};
                         ack.sink = resp.sink;
                         mem.system_bus().grant_ack(ack);
-                        cache_write_completed = cpu.dcache.write(addr, data, funct3);
+                        cache_write_completed = cpu.dcache.write(addr, data, funct3, &first_write);
                     }
                 }
             }
-            if (cache_write_completed) {
+            if (cache_write_completed && first_write) {
                 mem.system_bus().mark_modified(addr, static_cast<HartId>(cpu.state().mhartid));
             }
             simrv::memory::ram_write_fast(addr, data, funct3, cpu.machine_->ram_view());

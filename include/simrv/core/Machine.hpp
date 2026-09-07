@@ -19,6 +19,7 @@
 #include "simrv/core/MachineConfig.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/core/Telemetry.hpp"
+#include "simrv/core/TelemetrySink.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/debug/GdbStub.hpp"
@@ -147,7 +148,9 @@ class Machine final {
     void set_high_contrast_enabled(bool enabled) noexcept { config.tui.high_contrast = enabled; }
     [[nodiscard]] auto class_mode_enabled() const noexcept -> bool { return config.tui.class_mode; }
     void set_class_mode_enabled(bool enabled) noexcept { config.tui.class_mode = enabled; }
-    [[nodiscard]] auto mission_id() const noexcept -> const std::string& { return config.tui.mission; }
+    [[nodiscard]] auto mission_id() const noexcept -> const std::string& {
+        return config.tui.mission;
+    }
     [[nodiscard]] auto device_log_enabled() const noexcept -> bool {
         return config.debug.dlog_mode;
     }
@@ -275,6 +278,14 @@ class Machine final {
     [[nodiscard]] auto is_running() const -> bool {
         return is_running_.load(std::memory_order_relaxed);
     }
+    /// Total instructions retired by every hart during the current machine run.
+    [[nodiscard]] auto retired_instruction_count() const noexcept -> Counter {
+        return retired_instruction_count_.load(std::memory_order_relaxed);
+    }
+    /// Publish retired instructions from a hart; used by execution engines and safe for MT-SMP.
+    void record_retired_instructions(Counter count) noexcept {
+        retired_instruction_count_.fetch_add(count, std::memory_order_relaxed);
+    }
     /// Request system reboot.
     void request_reboot();
     /// Request termination of the simulator process with the supplied status.
@@ -294,6 +305,7 @@ class Machine final {
     std::atomic<int> exit_code{0};               // Exit/status code of the simulation.
     std::atomic<bool> is_shutdown_ = false;      // System shutdown flag.
     std::atomic<StopReason> stop_reason_{StopReason::Running};
+    std::atomic<Counter> retired_instruction_count_{0};
 
     RuntimeProfile runtime_profile{};  // Resolved command-line runtime policy.
     std::atomic<bool> s_mmu_ever_used{
@@ -382,6 +394,26 @@ class Machine final {
     [[nodiscard]] auto symbol_table() const noexcept -> const simrv::debug::SymbolTable& {
         return symbols;
     }
+
+    [[nodiscard]] auto telemetry_sink() noexcept -> std::shared_ptr<ITelemetrySink> {
+        return telemetry_sink_;
+    }
+    [[nodiscard]] auto telemetry_sink() const noexcept -> std::shared_ptr<const ITelemetrySink> {
+        return telemetry_sink_;
+    }
+    void set_telemetry_sink(std::shared_ptr<ITelemetrySink> sink) noexcept {
+        telemetry_sink_ = std::move(sink);
+    }
+    [[nodiscard]] auto console_sink() noexcept -> std::shared_ptr<IConsoleSink> {
+        return console_sink_;
+    }
+    [[nodiscard]] auto console_sink() const noexcept -> std::shared_ptr<const IConsoleSink> {
+        return console_sink_;
+    }
+    void set_console_sink(std::shared_ptr<IConsoleSink> sink) noexcept {
+        console_sink_ = std::move(sink);
+    }
+    void console_write(char ch);
 
    private:
     std::unique_ptr<simrv::Rtc>& rtc;
@@ -498,6 +530,8 @@ class Machine final {
     std::chrono::steady_clock::time_point last_tui_update_{};
 
     std::atomic<bool> is_running_ = true;  // Main-loop run flag.
+    std::shared_ptr<ITelemetrySink> telemetry_sink_{};
+    std::shared_ptr<IConsoleSink> console_sink_{};
     std::atomic<bool> runner_started_{false};
     std::atomic<ExecutionState> execution_state_{ExecutionState::Running};
     void acknowledge_step();

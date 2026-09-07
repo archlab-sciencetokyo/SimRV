@@ -216,15 +216,19 @@ class PipelineSim {
         const bool stalled = metrics.fetch_stalled || metrics.decode_stalled ||
                              metrics.execute_stalled || metrics.memory_stalled ||
                              metrics.writeback_stalled;
-        ca_stats_.stall_cycles += stalled;
-        ca_stats_.icache_stalls += metrics.icache_miss && metrics.fetch_stalled;
-        ca_stats_.dcache_stalls +=
-            metrics.dcache_miss && (metrics.memory_stalled || metrics.writeback_stalled);
-        ca_stats_.tlb_stalls += metrics.tlb_miss && stalled;
-        ca_stats_.structural_stalls += metrics.execute_stalled;
-        ca_stats_.data_hazard_stalls += metrics.data_hazard_stall;
-        ca_stats_.control_hazard_bubbles += metrics.control_flush;
-        ca_stats_.bubble_cycles += metrics.control_flush;
+        if (simrv::compiler::unlikely(stalled)) {
+            ++ca_stats_.stall_cycles;
+            ca_stats_.icache_stalls += metrics.icache_miss && metrics.fetch_stalled;
+            ca_stats_.dcache_stalls +=
+                metrics.dcache_miss && (metrics.memory_stalled || metrics.writeback_stalled);
+            ca_stats_.tlb_stalls += metrics.tlb_miss;
+            ca_stats_.structural_stalls += metrics.execute_stalled;
+            ca_stats_.data_hazard_stalls += metrics.data_hazard_stall;
+        }
+        if (simrv::compiler::unlikely(metrics.control_flush)) {
+            ++ca_stats_.control_hazard_bubbles;
+            ++ca_stats_.bubble_cycles;
+        }
     }
 
     bool ca_kernel_active_ = false;

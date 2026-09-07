@@ -77,6 +77,7 @@ option(SIMRV_NATIVE_HOST_OPTIMIZATIONS
        "Tune a Release build for the host CPU; do not use for redistributable binaries" OFF)
 option(SIMRV_X86_64_V3_BASELINE
        "Use the x86-64-v3 ISA baseline for non-native x86-64 Release builds" ON)
+option(SIMRV_PREFER_LLD "Prefer lld for Clang links when available" ON)
 set(SIMRV_VECTOR_TESTS_DIR "" CACHE PATH "Path to a built chipsalliance/riscv-vector-tests checkout")
 
 if(SIMRV_ENABLE_TSAN AND (SIMRV_ENABLE_ASAN OR SIMRV_ENABLE_UBSAN))
@@ -87,6 +88,35 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT "cxx_std_23" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
   message(FATAL_ERROR "${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} does not support required C++23 features")
+endif()
+
+# Prefer lld for Clang builds whenever it is available.  In Release, it also enables LTO across
+# the composed runtime archive; GNU ld cannot link its LLVM ThinLTO members.
+set(SIMRV_LLD_ENABLED OFF)
+if(SIMRV_PREFER_LLD AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  find_program(SIMRV_LLD_EXECUTABLE NAMES ld.lld)
+  if(SIMRV_LLD_EXECUTABLE)
+    add_link_options($<$<LINK_LANGUAGE:CXX>:-fuse-ld=lld>)
+    set(SIMRV_LLD_ENABLED ON)
+  endif()
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+  if(SIMRV_LLD_ENABLED)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+    message(STATUS "Release LTO enabled across the runtime with lld.")
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT SIMRV_IPO_ENABLED OUTPUT SIMRV_IPO_ERROR LANGUAGES CXX)
+    if(SIMRV_IPO_ENABLED)
+      set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+      message(STATUS "Release LTO enabled across the runtime.")
+    else()
+      message(STATUS "Release LTO disabled: ${SIMRV_IPO_ERROR}")
+    endif()
+  else()
+    message(STATUS "Release LTO disabled: Clang requires lld.")
+  endif()
 endif()
 
 # GCC 15 is the minimum supported GNU toolchain. It is the GNU baseline validated for this
@@ -110,22 +140,23 @@ set(SIMRV_SPIKE_PATH "spike" CACHE STRING "Path to Spike binary for lockstep co-
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(SimRVOptions)
 
-  add_subdirectory(src/pipeline)
-  add_subdirectory(src/execute)
-  add_subdirectory(src/memory)
-  add_subdirectory(src/device)
-  add_subdirectory(src/debug)
-  add_subdirectory(src/tui)
-  # Runtime is the composition target and must be declared after all component object targets.
-  add_subdirectory(src/core)
+add_subdirectory(src/pipeline)
+add_subdirectory(src/execute)
+add_subdirectory(src/memory)
+add_subdirectory(src/device)
+add_subdirectory(src/debug)
+add_subdirectory(src/tui)
+add_subdirectory(src/net)
+# Runtime is the composition target and must be declared after all component object targets.
+add_subdirectory(src/core)
 
-  add_executable(SimRV src/Main.cpp)
-  target_include_directories(SimRV PRIVATE
-    include
-    ${CMAKE_CURRENT_BINARY_DIR}/generated
-  )
-  target_link_libraries(SimRV PRIVATE simrv-runtime)
-  simrv_apply_options(SimRV)
+add_executable(SimRV src/Main.cpp)
+target_include_directories(SimRV PRIVATE
+  include
+  ${CMAKE_CURRENT_BINARY_DIR}/generated
+)
+target_link_libraries(SimRV PRIVATE simrv-runtime)
+simrv_apply_options(SimRV)
 
 include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-frounding-math" COMPILER_SUPPORTS_FROUNDING_MATH)
@@ -140,46 +171,9 @@ if(COMPILER_SUPPORTS_FROUNDING_MATH)
   )
 endif()
 
-# Release optimizations and Link-Time Optimization (LTO/IPO)
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
-
-  if(SIMRV_NATIVE_HOST_OPTIMIZATIONS)
-    message(STATUS "Native-host Release tuning enabled; binary is not portable.")
-  endif()
-
-  include(CheckIPOSupported)
-  check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
-  if(ipo_supported)
-    set(SIMRV_IPO_ENABLED ON)
-    # Most simulator code is compiled through object libraries and then composed into simrv-sdk.
-    # Enabling IPO only on the executable leaves those hot-path objects outside the LTO unit.
-    # Apply it to every concrete part of the final product so the linker can inline across the
-    # CPU, memory, pipeline, and device boundaries.
-    set(simrv_ipo_targets
-      simrv-foundation
-      simrv-isa
-      simrv-execution
-      simrv-pipeline
-      simrv-memory
-      simrv-platform
-      simrv-debug
-      simrv-tui-framework
-      simrv-tui
-      simrv-core
-      simrv-runtime
-      SimRV
-    )
-    foreach(simrv_ipo_target IN LISTS simrv_ipo_targets)
-      set_property(TARGET ${simrv_ipo_target} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-    endforeach()
-    message(STATUS "LTO (Link-Time Optimization) enabled across the simulator runtime.")
-  else()
-    set(SIMRV_IPO_ENABLED OFF)
-    message(STATUS "LTO not supported: ${ipo_error}")
-  endif()
+if(CMAKE_BUILD_TYPE STREQUAL "Release" AND SIMRV_NATIVE_HOST_OPTIMIZATIONS)
+  message(STATUS "Native-host Release tuning enabled; binary is not portable.")
 endif()
-
-# Standard compilation optimization options are handled via build types (e.g., -O3 in Release mode)
 
 # Toolchain detection for testing. Host-specific defaults are intentionally
 # avoided: release dependencies must be supplied through cache variables or PATH.
@@ -210,15 +204,16 @@ find_program(SPIKE_BIN spike DOC "Path to Spike binary for lockstep co-simulatio
 set(ISA_WORK_DIR "${CMAKE_CURRENT_BINARY_DIR}/.isa_tmp")
 file(MAKE_DIRECTORY "${ISA_WORK_DIR}")
 
-# Fast, deterministic tests for the terminal parser, theme helpers, and key registry.
-add_executable(simrv-tui-tests
-  tests/TuiFrameworkTests.cpp
-)
-target_link_libraries(simrv-tui-tests PRIVATE simrv-runtime)
-simrv_configure_native_test(simrv-tui-tests)
+function(simrv_add_runtime_test target source test_name labels)
+  add_executable(${target} ${source})
+  target_link_libraries(${target} PRIVATE simrv-runtime)
+  simrv_configure_native_test(${target})
+  add_test(NAME ${test_name} COMMAND ${target})
+  set_tests_properties(${test_name} PROPERTIES LABELS "${labels}")
+endfunction()
 
-add_test(NAME tui-framework COMMAND simrv-tui-tests)
-set_tests_properties(tui-framework PROPERTIES LABELS "gate;regress;tui")
+# Fast, deterministic tests for the terminal parser, theme helpers, and key registry.
+simrv_add_runtime_test(simrv-tui-tests tests/TuiFrameworkTests.cpp tui-framework "gate;regress;tui")
 if(SIMRV_ENABLE_TSAN)
   set_property(TEST tui-framework APPEND PROPERTY LABELS "thread")
 endif()
@@ -230,93 +225,43 @@ simrv_configure_native_test(simrv-tui-framework-tests)
 add_test(NAME tui-framework-core COMMAND simrv-tui-framework-tests)
 set_tests_properties(tui-framework-core PROPERTIES LABELS "gate;regress;tui")
 
-add_executable(simrv-operation-traits-tests
-  tests/OperationTraitsTests.cpp
-)
-target_link_libraries(simrv-operation-traits-tests PRIVATE simrv-runtime)
-simrv_configure_native_test(simrv-operation-traits-tests)
-
-add_test(NAME operation-traits COMMAND simrv-operation-traits-tests)
-set_tests_properties(operation-traits PROPERTIES LABELS "gate;regress;pipeline")
-
-add_executable(simrv-pipeline-hazard-tests
-  tests/PipelineHazardTests.cpp
-)
-target_link_libraries(simrv-pipeline-hazard-tests PRIVATE simrv-runtime)
-simrv_configure_native_test(simrv-pipeline-hazard-tests)
-
-add_test(NAME pipeline-hazards COMMAND simrv-pipeline-hazard-tests)
-set_tests_properties(pipeline-hazards PROPERTIES LABELS "gate;regress;pipeline")
+simrv_add_runtime_test(simrv-operation-traits-tests tests/OperationTraitsTests.cpp operation-traits
+                       "gate;regress;pipeline")
+simrv_add_runtime_test(simrv-pipeline-hazard-tests tests/PipelineHazardTests.cpp pipeline-hazards
+                       "gate;regress;pipeline")
 if(SIMRV_ENABLE_TSAN)
   set_property(TEST pipeline-hazards APPEND PROPERTY LABELS "thread")
 endif()
 
-add_executable(simrv-pipeline-model-tests
-  tests/PipelineModelTests.cpp
-)
-target_link_libraries(simrv-pipeline-model-tests PRIVATE simrv-runtime)
-simrv_configure_native_test(simrv-pipeline-model-tests)
-
-add_test(NAME pipeline-models COMMAND simrv-pipeline-model-tests)
-set_tests_properties(pipeline-models PROPERTIES LABELS "gate;regress;pipeline")
+simrv_add_runtime_test(simrv-pipeline-model-tests tests/PipelineModelTests.cpp pipeline-models
+                       "gate;regress;pipeline")
 if(SIMRV_ENABLE_TSAN)
   set_property(TEST pipeline-models APPEND PROPERTY LABELS "thread")
 endif()
 
-add_executable(simrv-branch-predictor-tests
-  tests/BranchPredictorTests.cpp
-)
-target_link_libraries(simrv-branch-predictor-tests PRIVATE simrv-runtime)
-simrv_configure_native_test(simrv-branch-predictor-tests)
-
-add_test(NAME branch-predictor COMMAND simrv-branch-predictor-tests)
-set_tests_properties(branch-predictor PROPERTIES LABELS "gate;regress;pipeline;bpred")
+simrv_add_runtime_test(simrv-branch-predictor-tests tests/BranchPredictorTests.cpp branch-predictor
+                       "gate;regress;pipeline;bpred")
 if(SIMRV_ENABLE_TSAN)
   set_property(TEST branch-predictor APPEND PROPERTY LABELS "thread")
 endif()
 
-add_executable(simrv-core-semantics-tests tests/CoreSemanticsTests.cpp)
-target_link_libraries(simrv-core-semantics-tests PRIVATE simrv-runtime)
-simrv_configure_native_test(simrv-core-semantics-tests)
-
-add_test(NAME core-semantics COMMAND simrv-core-semantics-tests)
-set_tests_properties(core-semantics PROPERTIES LABELS "gate;regress;memory;mmio")
-
-add_executable(simrv-pmp-tests tests/PmpTests.cpp)
-target_link_libraries(simrv-pmp-tests PRIVATE simrv-runtime)
-simrv_configure_native_test(simrv-pmp-tests)
-add_test(NAME pmp COMMAND simrv-pmp-tests)
-set_tests_properties(pmp PROPERTIES LABELS "gate;regress;core;memory;pmp")
-
-add_executable(simrv-machine-config-tests tests/MachineConfigTests.cpp)
-target_link_libraries(simrv-machine-config-tests PRIVATE simrv-runtime)
-simrv_configure_native_test(simrv-machine-config-tests)
-add_test(NAME machine-config COMMAND simrv-machine-config-tests)
-set_tests_properties(machine-config PROPERTIES LABELS "gate;regress;core;config")
-
-add_executable(simrv-machine-ownership-tests tests/MachineOwnershipTests.cpp)
-target_link_libraries(simrv-machine-ownership-tests PRIVATE simrv-runtime)
-simrv_configure_native_test(simrv-machine-ownership-tests)
-add_test(NAME machine-ownership COMMAND simrv-machine-ownership-tests)
-set_tests_properties(machine-ownership PROPERTIES LABELS "gate;regress;core;ownership")
-
-add_executable(simrv-gdb-stub-tests tests/GdbStubTests.cpp)
-target_link_libraries(simrv-gdb-stub-tests PRIVATE simrv-runtime)
-simrv_configure_native_test(simrv-gdb-stub-tests)
-add_test(NAME gdb-stub COMMAND simrv-gdb-stub-tests)
-set_tests_properties(gdb-stub PROPERTIES LABELS "gate;regress;debug;thread" TIMEOUT 30)
-
-add_executable(simrv-modern-platform-tests
-  tests/ModernPlatformTests.cpp
-)
-target_link_libraries(simrv-modern-platform-tests PRIVATE simrv-runtime)
-simrv_configure_native_test(simrv-modern-platform-tests)
-
-add_test(NAME modern-platform COMMAND simrv-modern-platform-tests)
-set_tests_properties(modern-platform PROPERTIES LABELS "gate;regress;semantic;device;mmio;pcie;aia")
+simrv_add_runtime_test(simrv-core-semantics-tests tests/CoreSemanticsTests.cpp core-semantics
+                       "gate;regress;memory;mmio")
+simrv_add_runtime_test(simrv-pmp-tests tests/PmpTests.cpp pmp "gate;regress;core;memory;pmp")
+simrv_add_runtime_test(simrv-machine-config-tests tests/MachineConfigTests.cpp machine-config
+                       "gate;regress;core;config")
+simrv_add_runtime_test(simrv-machine-ownership-tests tests/MachineOwnershipTests.cpp
+                       machine-ownership "gate;regress;core;ownership")
+simrv_add_runtime_test(simrv-gdb-stub-tests tests/GdbStubTests.cpp gdb-stub
+                       "gate;regress;debug;thread")
+set_tests_properties(gdb-stub PROPERTIES TIMEOUT 30)
+simrv_add_runtime_test(simrv-modern-platform-tests tests/ModernPlatformTests.cpp modern-platform
+                       "gate;regress;semantic;device;mmio;pcie;aia")
 if(SIMRV_ENABLE_TSAN)
   set_property(TEST modern-platform APPEND PROPERTY LABELS thread)
 endif()
+simrv_add_runtime_test(simrv-ipc-protocol-tests tests/IpcProtocolTests.cpp ipc-protocol
+                       "gate;regress;ipc;net;thread")
 
 # Architectural equivalence is a first-class native gate.  The fixture deliberately exercises
 # functional execution and both CA pipelines while excluding cache/cycle/UI observations.
@@ -331,6 +276,12 @@ add_test(NAME cli-help COMMAND $<TARGET_FILE:SimRV> -h)
 set_tests_properties(cli-help PROPERTIES
   PASS_REGULAR_EXPRESSION "Usage:"
   LABELS "gate;regress;cli"
+)
+
+add_test(NAME cli-license COMMAND $<TARGET_FILE:SimRV> --license)
+set_tests_properties(cli-license PROPERTIES
+  PASS_REGULAR_EXPRESSION "Licensed under the MIT License"
+  LABELS "gate;regress;cli;license"
 )
 
 add_test(NAME cli-invalid-option COMMAND $<TARGET_FILE:SimRV> -Z)
@@ -399,10 +350,6 @@ endif()
 
 set(TEST_IMAGES_DIR "${SIMRV_LINUX_IMAGES_DIR}")
 if(EXISTS "${TEST_IMAGES_DIR}/fw_payload.bin")
-  find_program(PYTHON_BIN NAMES "python3" "python" DOC "Path to python3 interpreter")
-  if(NOT PYTHON_BIN)
-    set(PYTHON_BIN "python3")
-  endif()
   add_test(NAME linux-boot-pty
     COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py
   )
@@ -411,6 +358,15 @@ if(EXISTS "${TEST_IMAGES_DIR}/fw_payload.bin")
     TIMEOUT 200
     RUN_SERIAL TRUE
     LABELS "external;linux;pty;required"
+  )
+  add_test(NAME linux-ia-quantum-smp-pty
+    COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py
+  )
+  set_tests_properties(linux-ia-quantum-smp-pty PROPERTIES
+    ENVIRONMENT "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_LINUX_DTB=NONE;SIMRV_TEST_EXTRA_ARGS=--smp 2 --smp-quantum 100;SIMRV_TEST_EXPECT_CPUS=2;SIMRV_TEST_TIMEOUT=180"
+    TIMEOUT 200
+    RUN_SERIAL TRUE
+    LABELS "external;linux;pty;ia;smp;quantum"
   )
   add_test(NAME linux-ca-boot-pty
     COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py
@@ -635,10 +591,6 @@ if(SIMRV_VECTOR_TESTS_DIR AND EXISTS "${SIMRV_VECTOR_TESTS_DIR}")
   list(APPEND RISCV_GCC_NAMES "riscv64-unknown-elf-gcc" "riscv32-unknown-elf-gcc" "riscv64-linux-gnu-gcc" "riscv32-linux-gnu-gcc" "riscv-none-elf-gcc")
   find_program(RISCV_GCC NAMES ${RISCV_GCC_NAMES}
                DOC "Path to RISC-V GCC cross-compiler for compiling vector tests")
-  find_program(PYTHON_BIN NAMES "python3" "python" DOC "Path to python3 interpreter")
-  if(NOT PYTHON_BIN)
-    set(PYTHON_BIN "python3")
-  endif()
 
   if(RISCV_GCC)
     add_test(NAME vector-suite
@@ -794,7 +746,7 @@ install(FILES LICENSE THIRD_PARTY_NOTICES.md DESTINATION ${CMAKE_INSTALL_DATADIR
 
 if(BUILD_TESTING)
   add_test(NAME mit-license-audit
-    COMMAND ${CMAKE_COMMAND} -D CMAKE_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+    COMMAND ${CMAKE_COMMAND} -D SIMRV_SOURCE_DIR=${CMAKE_SOURCE_DIR}
       -P ${CMAKE_SOURCE_DIR}/cmake/CheckMitLicense.cmake)
   set_tests_properties(mit-license-audit PROPERTIES LABELS "gate;license")
   add_test(NAME architecture-boundaries

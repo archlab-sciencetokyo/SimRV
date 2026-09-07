@@ -429,9 +429,10 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         uint32_t val = 0;
-        if (!parse_u32_base0(*value, val) || val == 0 || val > 16) {
-            return std::unexpected(
-                std::format("SMP core count must be between 1 and 16 (got: {})", *value));
+        if (!parse_u32_base0(*value, val) || val == 0 ||
+            val > simrv::core::ExecutionConfig::kMaxHarts) {
+            return std::unexpected(std::format("SMP core count must be between 1 and {} (got: {})",
+                                               simrv::core::ExecutionConfig::kMaxHarts, *value));
         }
         result.options.num_harts = val;
         return true;
@@ -506,6 +507,29 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         result.options.mission = std::string(*value);
+        return true;
+    }
+    if (arg == "--server" || arg.starts_with("--server=")) {
+        result.options.server_mode = true;
+        std::string_view ep = arg.starts_with("--server=") ? arg.substr(9) : "";
+        if (ep.empty() && i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
+            args[i + 1][0] != '-') {
+            ++i;
+            ep = args[i];
+        }
+        result.options.server_endpoint = ep.empty() ? "/tmp/simrv.sock" : std::string(ep);
+        return true;
+    }
+    if (arg == "--attach" || arg.starts_with("--attach=")) {
+        result.options.attach_mode = true;
+        result.action = CliAction::Attach;
+        std::string_view ep = arg.starts_with("--attach=") ? arg.substr(9) : "";
+        if (ep.empty()) {
+            auto value = next_argument(args, i, arg);
+            if (!value) return std::unexpected(value.error());
+            ep = *value;
+        }
+        result.options.attach_endpoint = ep.empty() ? "/tmp/simrv.sock" : std::string(ep);
         return true;
     }
     if (arg == "--no-forwarding") {
@@ -701,6 +725,10 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             result.action = CliAction::ShowVersion;
             return result;
         }
+        if (arg == "--license") {
+            result.action = CliAction::ShowLicense;
+            return result;
+        }
 
         // Try parsing file options
         auto res_file = parse_file_options(arg, expanded_span, i, result.options);
@@ -749,7 +777,7 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
         return std::unexpected("--cli and --tui are mutually exclusive");
     }
     if (!result.options.mission.empty() &&
-        (!result.options.class_mode || !result.options.tuimode)) {
+        (!result.options.class_mode || !result.options.explicit_tui_mode)) {
         return std::unexpected("--mission requires --class and --tui");
     }
 
@@ -938,7 +966,8 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
 auto needs_memory_image(const ParseResult& result) -> bool {
     return result.options.fn_memimg.empty() && !result.options.tuimode &&
            result.action != CliAction::ExplainInstruction && result.action != CliAction::ShowHelp &&
-           result.action != CliAction::ShowVersion;
+           result.action != CliAction::ShowVersion && result.action != CliAction::ShowLicense &&
+           result.action != CliAction::Attach && !result.options.attach_mode;
 }
 
 [[noreturn]] auto usage(std::string_view prog_name, int status) -> void {
@@ -987,7 +1016,8 @@ auto needs_memory_image(const ParseResult& result) -> bool {
     std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue),
                "Execution Control (runs on high-performance simrv::pipeline engine)", style(kReset),
                style(kReset));
-    std::print(stdout, "  {}-s, -e, --steps {}{}<N>{}    Stop execution after N instructions\n",
+    std::print(stdout,
+               "  {}-s, -e, --steps {}{}<N>{}    Stop after N instructions retired by all harts\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(
         stdout,
@@ -1103,6 +1133,8 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         "  {}--explain-inst {}{}<HEX>{} Explain a hex instruction and exit (e.g., 0x005202b3)\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout, "  {}--version{}         Show compiler-injected version details and exit\n",
+               style(kBrightGreen), style(kReset));
+    std::print(stdout, "  {}--license{}         Show the MIT license notice and exit\n",
                style(kBrightGreen), style(kReset));
     std::print(stdout,
                "  {}--no-forwarding{}    Disable operand forwarding in cycle-accurate simulation\n",

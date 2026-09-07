@@ -128,7 +128,8 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                 }
                 case 4: {  // Active SMP Hart Count
                     int v = static_cast<int>(draft.num_harts) + dir;
-                    draft.num_harts = static_cast<uint32_t>(std::clamp(v, 1, 16));
+                    draft.num_harts = static_cast<uint32_t>(std::clamp(
+                        v, 1, static_cast<int>(simrv::core::ExecutionConfig::kMaxHarts)));
                     break;
                 }
                 case 5:  // SMP Threading Model
@@ -271,6 +272,7 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
     bool const dram_size_changed = next.memory.dram_size != new_dram_size;
     next.memory.dram_size = new_dram_size;
     next.network.mode = draft.net_mode;
+    next.execution.num_harts = draft.num_harts;
     next.execution.smp_quantum = draft.smp_quantum;
     next.execution.smp_multithreaded = draft.smp_multithreaded;
     next.debug.lockstep_enabled = draft.lockstep_mode;
@@ -286,6 +288,7 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
 
     bool need_reboot =
         dram_size_changed || profile_changed ||
+        next.execution.num_harts != machine.execution_config().num_harts ||
         next.execution.smp_quantum != machine.execution_config().smp_quantum ||
         next.execution.smp_multithreaded != machine.execution_config().smp_multithreaded ||
         next.network.mode != machine.network_mode() ||

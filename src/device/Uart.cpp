@@ -197,7 +197,9 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                     if (pty_.is_open()) {
                         (void)pty_.write_byte_to_master(ch);
                     }
-                    if (machine_.tui_enabled() && machine_.tui_controller()) {
+                    if (machine_.console_sink()) {
+                        machine_.console_sink()->handle_char_write(static_cast<char>(ch));
+                    } else if (machine_.tui_enabled() && machine_.tui_controller()) {
                         machine_.tui_controller()->handle_char_write(static_cast<char>(ch));
                     } else if (!pty_.is_open()) {
                         (void)(::write(STDOUT_FILENO, &ch, 1) == 0);

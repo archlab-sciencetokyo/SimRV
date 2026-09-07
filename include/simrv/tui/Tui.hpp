@@ -17,14 +17,15 @@
 #include <vector>
 
 #include "simrv/Define.hpp"
+#include "simrv/core/TelemetrySink.hpp"
 #include "simrv/isa/Base.hpp"
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/tui/LogBuffer.hpp"
 #include "simrv/tui/TuiInputRouter.hpp"
 #include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/TuiLayoutPolicy.hpp"
-#include "simrv/tui/TuiModal.hpp"
 #include "simrv/tui/TuiMission.hpp"
+#include "simrv/tui/TuiModal.hpp"
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
 #include "simrv/tui/panels/StatusBar.hpp"
@@ -58,7 +59,7 @@ class InspectorPane;
 class TerminalPane;
 class StatusBar;
 
-class Tui {
+class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     friend struct TuiTestAccess;
 
    public:
@@ -66,7 +67,7 @@ class Tui {
     static constexpr size_t kFlightRecorderHarts = 16;
     static constexpr uint64_t kDetailedExecutionMaxHz = 100;
     explicit Tui(simrv::core::Machine& machine);
-    ~Tui();
+    ~Tui() override;
 
     void clear_selection();
     void copy_active_selection();
@@ -76,39 +77,47 @@ class Tui {
     void initialize();
     void shutdown();
     void render(bool force = false);
-    void handle_char_write(char ch);
+    void handle_char_write(char ch) override;
     void print_log(const std::string& msg);
 
-    void start_ui_thread();
-    void stop_ui_thread();
+    void start_ui_thread() override;
+    void stop_ui_thread() override;
     void trigger_immediate_render();
-    [[nodiscard]] auto is_ui_thread_running() const -> bool {
+    [[nodiscard]] auto is_ui_thread_running() const -> bool override {
         return ui_running_.load(std::memory_order_relaxed);
     }
 
-    void pause_loop();
-    void unpause_loop();
+    void pause_loop() override;
+    void unpause_loop() override;
     [[nodiscard]] auto is_tui_paused() const -> bool {
         return paused_.load(std::memory_order_relaxed);
     }
 
-    void set_paused(bool p);
-    [[nodiscard]] auto is_paused() const -> bool { return paused_.load(std::memory_order_relaxed); }
+    void set_paused(bool p) override;
+    [[nodiscard]] auto is_paused() const -> bool override {
+        return paused_.load(std::memory_order_relaxed);
+    }
     /// Rich per-instruction state is useful while stopped or deliberately stepped slowly.  At
     /// higher rates the UI renders sampled state instead, keeping the simulator hot path lean.
-    [[nodiscard]] auto captures_execution_detail() const -> bool {
+    [[nodiscard]] auto captures_execution_detail() const -> bool override {
         return is_trace_active() || is_paused() ||
                step_delay_us_.load(std::memory_order_relaxed) >=
                    (1'000'000U / kDetailedExecutionMaxHz);
     }
-    void set_sim_thread_sleeping(bool s) {
+    [[nodiscard]] auto step_delay_us() const -> uint64_t override {
+        return step_delay_us_.load(std::memory_order_relaxed);
+    }
+    void set_step_delay_us(uint64_t delay_us) override {
+        step_delay_us_.store(delay_us, std::memory_order_relaxed);
+    }
+    void set_sim_thread_sleeping(bool s) override {
         sim_thread_is_sleeping_.store(s, std::memory_order_relaxed);
     }
     [[nodiscard]] auto is_sim_thread_sleeping() const -> bool {
         return sim_thread_is_sleeping_.load(std::memory_order_relaxed);
     }
     void on_cycle_completed_slow();
-    void on_cycle_completed() {
+    void on_cycle_completed() override {
         if (simrv::compiler::unlikely(step_delay_us_.load(std::memory_order_relaxed) > 0)) {
             on_cycle_completed_slow();
         }
@@ -118,10 +127,10 @@ class Tui {
     std::atomic<uint64_t> step_delay_us_{0};
     std::atomic<uint32_t> tui_target_fps_{30};
 
-    void set_target_fps(uint32_t fps) {
+    void set_target_fps(uint32_t fps) override {
         tui_target_fps_.store(fps > 0 ? fps : 30, std::memory_order_relaxed);
     }
-    [[nodiscard]] auto target_fps() const -> uint32_t {
+    [[nodiscard]] auto target_fps() const -> uint32_t override {
         return tui_target_fps_.load(std::memory_order_relaxed);
     }
 
@@ -147,12 +156,12 @@ class Tui {
     [[nodiscard]] auto is_modal_active() const -> bool { return modal_.is_active(); }
     [[nodiscard]] auto get_active_modal() const -> ModalType { return modal_.get_type(); }
 
-    void set_status_override(const std::string& status) {
+    void set_status_override(const std::string& status) override {
         status_override_ = status;
         status_override_expires_at_ =
             std::chrono::steady_clock::now() + std::chrono::milliseconds(2500);
     }
-    void set_persistent_status_override(const std::string& status) {
+    void set_persistent_status_override(const std::string& status) override {
         status_override_ = status;
         status_override_expires_at_ = std::chrono::steady_clock::time_point::max();
     }
@@ -194,11 +203,13 @@ class Tui {
     [[nodiscard]] auto is_student_guide_enabled() const -> bool { return student_guide_enabled_; }
     void dismiss_mission();
     void restart_mission();
-    [[nodiscard]] auto mission_progress() const noexcept -> const MissionProgress& { return mission_; }
+    [[nodiscard]] auto mission_progress() const noexcept -> const MissionProgress& {
+        return mission_;
+    }
     // Source-compatible wrappers for the former "learn mode" API.
     void toggle_learn_mode() { toggle_student_guide(); }
     [[nodiscard]] auto is_learn_mode_enabled() const -> bool { return is_student_guide_enabled(); }
-    [[nodiscard]] auto is_trace_active() const -> bool {
+    [[nodiscard]] auto is_trace_active() const -> bool override {
         return trace_or_livetrace_active_.load(std::memory_order_relaxed);
     }
     void scroll(int lines);

@@ -4,7 +4,9 @@
  */
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <limits>
 #include <string_view>
 #include <vector>
 
@@ -81,10 +83,25 @@ class MmioRouter {
     }
 
    private:
+    struct DeviceEntry {
+        Address base = 0;
+        Address end = 0;
+        TileLinkNode* node = nullptr;
+    };
+
+    static constexpr size_t kMruCapacity = 4;
+
     std::vector<TileLinkNode*> nodes_;
+    std::vector<DeviceEntry> entries_;
+    Address min_base_ = std::numeric_limits<Address>::max();
+    Address max_end_ = 0;
+    mutable std::array<DeviceEntry, kMruCapacity> mru_entries_{};
+    mutable size_t mru_count_ = 0;
     uint64_t mmio_read_count_ = 0;
     uint64_t mmio_write_count_ = 0;
     uint64_t bus_error_count_ = 0;
+
+    void rebuild_entries();
 };
 
 }  // namespace simrv::memory

@@ -35,6 +35,12 @@ auto main() -> int {
     invalid.execution.num_harts = 0;
     expect(!invalid.validate().has_value(), "configuration rejects zero harts");
     invalid = defaults;
+    invalid.execution.num_harts = simrv::core::ExecutionConfig::kMaxHarts + 1;
+    expect(!invalid.validate().has_value(), "configuration rejects harts beyond platform capacity");
+    invalid = defaults;
+    invalid.execution.num_harts = simrv::core::ExecutionConfig::kMaxHarts;
+    expect(invalid.validate().has_value(), "configuration accepts platform hart capacity");
+    invalid = defaults;
     invalid.files.disk_enabled = true;
     expect(!invalid.validate().has_value(), "configuration rejects disk without a path");
     invalid = defaults;

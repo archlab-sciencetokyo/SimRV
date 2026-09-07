@@ -15,6 +15,7 @@
 #include "simrv/memory/MmioRouter.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/memory/TileLinkProtocolChecker.hpp"
+#include "simrv/util/SmallFlatMap.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -37,11 +38,11 @@ class TileLinkBus : public Bus {
     struct TlTransactionRecord {
         Cycle cycle = 0;
         TileLinkChannel channel = TileLinkChannel::A;
-        std::string opcode;
+        std::string_view opcode;
         TlSourceId source = 0;
         TlSinkId sink = 0;
         Address address = 0;
-        std::string detail;
+        std::string_view detail;
     };
 
     static constexpr size_t kMaxTransactionHistory = 32;
@@ -147,8 +148,9 @@ class TileLinkBus : public Bus {
     uint32_t response_latency_ = 1;
     std::deque<TimedRequest> req_queue_;
     std::deque<TimedDBeat> d_queue_;
-    std::unordered_map<TlSourceId, DAssembly> d_assemblies_;
+    simrv::util::SmallFlatMap<TlSourceId, DAssembly, 32> d_assemblies_;
     std::deque<TlTransactionRecord> transaction_history_;
+    bool smp_enabled_ = false;
 };
 
 }  // namespace simrv::memory
