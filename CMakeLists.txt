@@ -790,9 +790,13 @@ install(FILES
   "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfigVersion.cmake"
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SimRV"
 )
-install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/SimRV)
+install(FILES LICENSE THIRD_PARTY_NOTICES.md DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/SimRV)
 
 if(BUILD_TESTING)
+  add_test(NAME mit-license-audit
+    COMMAND ${CMAKE_COMMAND} -D CMAKE_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+      -P ${CMAKE_SOURCE_DIR}/cmake/CheckMitLicense.cmake)
+  set_tests_properties(mit-license-audit PROPERTIES LABELS "gate;license")
   add_test(NAME architecture-boundaries
     COMMAND ${CMAKE_COMMAND}
       -D SIMRV_SOURCE_DIR=${CMAKE_SOURCE_DIR}
