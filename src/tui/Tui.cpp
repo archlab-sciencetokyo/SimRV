@@ -138,7 +138,10 @@ void Tui::set_paused(bool p) {
         return;
     }
     const bool cur_paused = paused_.load(std::memory_order_relaxed);
-    if (cur_paused != p) {
+    const auto cur_machine_state = machine_.execution_state_.load(std::memory_order_relaxed);
+    const auto target_machine_state =
+        p ? simrv::core::ExecutionState::Paused : simrv::core::ExecutionState::Running;
+    if (cur_paused != p || cur_machine_state != target_machine_state) {
         paused_.store(p, std::memory_order_release);
         if (!p) {
             clear_status_override();
@@ -176,6 +179,7 @@ void Tui::initialize() {
     status_bar_ = std::make_unique<StatusBar>(machine_);
 
     set_tui_theme(get_tui_theme());
+    machine_.execution_state_.store(simrv::core::ExecutionState::Paused, std::memory_order_release);
     machine_.publish_tui_execution_snapshot();
 
     machine_.primary_hart().pipeline_sim.config.record_snapshots = true;

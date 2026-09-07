@@ -285,6 +285,7 @@ auto Machine::initialize() -> int {
     power = std::make_unique<simrv::device::PowerMmio>(*this);
     if (tui_enabled()) {
         tui = std::make_unique<simrv::tui::Tui>(*this);
+        execution_state_.store(ExecutionState::Paused, std::memory_order_release);
     }
     const auto ram = ram_view();
     const size_t effective_dram_size = static_cast<size_t>(ram.size());
@@ -451,6 +452,7 @@ auto Machine::initialize() -> int {
     // If launched without a binary in TUI mode, skip image-dependent init —
     // the TUI will open the LoadBinary modal and call load_program_binary() later.
     if (config.files.binary_path.empty() && tui_enabled()) {
+        execution_state_.store(ExecutionState::Paused, std::memory_order_release);
         if (tui) {
             tui->initialize();
         }
@@ -530,8 +532,11 @@ auto Machine::initialize() -> int {
         }
     }
 
-    if (tui_enabled() && tui) {
-        tui->initialize();
+    if (tui_enabled()) {
+        execution_state_.store(ExecutionState::Paused, std::memory_order_release);
+        if (tui) {
+            tui->initialize();
+        }
     }
 
     return 0;

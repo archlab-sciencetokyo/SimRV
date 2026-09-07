@@ -506,6 +506,30 @@ void test_classroom_cli_defaults() {
            "the Student Guide can execute its context-sensitive suggestion");
 }
 
+void test_tui_running_state_synchronization() {
+    simrv::core::MachineConfig config{};
+    config.tui.enabled = true;
+    simrv::core::Machine machine(config);
+    expect(machine.initialize() == 0, "machine initializes successfully with TUI enabled");
+    expect(machine.execution_state() == simrv::core::ExecutionState::Paused,
+           "machine starts in Paused state when TUI is enabled");
+    expect(machine.is_paused(), "machine.is_paused() returns true on startup with TUI");
+    if (auto* tui = machine.tui_controller()) {
+        expect(tui->is_paused(), "tui.is_paused() is true on startup");
+        tui->set_paused(false);
+        expect(!tui->is_paused(), "tui.is_paused() is false after unpausing");
+        expect(machine.execution_state() == simrv::core::ExecutionState::Running,
+               "machine execution state is Running after unpausing TUI");
+        expect(!machine.is_paused(), "machine.is_paused() is false after unpausing");
+
+        tui->set_paused(true);
+        expect(tui->is_paused(), "tui.is_paused() is true after pausing");
+        expect(machine.execution_state() == simrv::core::ExecutionState::Paused,
+               "machine execution state is Paused after pausing TUI");
+        expect(machine.is_paused(), "machine.is_paused() is true after pausing");
+    }
+}
+
 void test_inspection_report() {
     simrv::core::MachineConfig config{};
     config.execution.num_harts = 2;
@@ -1140,6 +1164,7 @@ int main() {
     test_mirrored_modal_arrows();
     test_page_guidance();
     test_classroom_cli_defaults();
+    test_tui_running_state_synchronization();
     test_inspection_report();
     test_help_uses_canonical_registry();
     test_category_groups_and_glossary();

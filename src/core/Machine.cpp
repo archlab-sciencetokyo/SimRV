@@ -258,6 +258,9 @@ void Machine::apply_configuration(MachineConfig machine_config) {
     config = std::move(machine_config);
     resolved_start_pc_ = config.execution.start_pc;
     resolved_isatest_tohost_ = config.isa.isatest_tohost;
+    if (tui_enabled() || debugger_enabled()) {
+        execution_state_.store(ExecutionState::Paused, std::memory_order_release);
+    }
 }
 
 void Machine::set_resolved_boot_state(Address start_pc,
@@ -839,7 +842,9 @@ void Machine::reset_state() {
     stop_reason_ = StopReason::Running;
     last_tui_check_cycles_ = 0;
     last_tui_update_ = {};
-    execution_state_.store(ExecutionState::Running, std::memory_order_release);
+    execution_state_.store(
+        tui_enabled() || debugger_enabled() ? ExecutionState::Paused : ExecutionState::Running,
+        std::memory_order_release);
     execution_state_.notify_all();
     cpu.reset();
 }
@@ -1100,6 +1105,10 @@ void Machine::run() {
     // Start the selected composed execution policy.
     start_runner();
 
+    if (tui_enabled()) {
+        execution_state_.store(ExecutionState::Paused, std::memory_order_release);
+    }
+
     // Start background TUI rendering and input thread if in TUI mode
     if (tui_enabled() && tui && !tui->is_ui_thread_running()) {
         tui->start_ui_thread();
@@ -1126,7 +1135,10 @@ void Machine::run() {
         if (gdb_stub && gdb_stub->pause_requested() && execution_state() == ExecutionState::Running)
             pause();
 
-        if (execution_state() == ExecutionState::Paused && !is_stepping()) {
+        if (is_paused() && !is_stepping()) {
+            if (execution_state() != ExecutionState::Paused) {
+                execution_state_.store(ExecutionState::Paused, std::memory_order_release);
+            }
             if (tui_enabled() && tui) tui->set_sim_thread_sleeping(true);
             if (gdb_stub) gdb_stub->service_pending(*this);
             if (execution_state() != ExecutionState::Paused) continue;
