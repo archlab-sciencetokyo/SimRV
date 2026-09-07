@@ -50,7 +50,8 @@ class InspectorPane : public TuiWidget {
 
     [[nodiscard]] auto render_row(int row_idx, int width) -> std::string override;
     [[nodiscard]] auto render_column_row(int row_idx, int width, int col_idx, size_t total_cols,
-                                         bool is_focused) -> std::string;
+                                         bool is_focused, bool force_column_header = false)
+        -> std::string;
     [[nodiscard]] auto render_column_header(int col_idx, const char* name, bool is_focused,
                                             int width) const -> std::string;
 

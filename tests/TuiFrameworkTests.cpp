@@ -22,6 +22,7 @@
 #include "simrv/tui/TuiLayoutPolicy.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
+#include "simrv/tui/framework/Layout.hpp"
 #include "simrv/tui/modals/GlossaryModal.hpp"
 #include "simrv/tui/modals/HelpModal.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
@@ -37,6 +38,7 @@ struct TuiTestAccess {
         return tui.handle_arrow_key_sequence();
     }
     static auto modal(Tui& tui) -> TuiModal& { return tui.modal_; }
+    static void set_cached_term_width(Tui& tui, int w) { tui.cached_term_width_ = w; }
 };
 }  // namespace simrv::tui
 
@@ -195,6 +197,34 @@ void test_key_registry() {
     expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::RunPause).find("Ctrl-P") !=
                std::string::npos,
            "global pause is documented by the canonical help descriptor");
+
+    expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::Help).find("F1") !=
+               std::string::npos,
+           "canonical F1 is Help");
+    expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::Settings).find("F2") !=
+               std::string::npos,
+           "canonical F2 is Settings");
+    expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::CycleRegPage).find("F3") !=
+               std::string::npos,
+           "canonical F3 is CycleRegPage");
+    expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::OpenLayoutPresets)
+                   .find("F4") != std::string::npos,
+           "canonical F4 is Layout Presets");
+    expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::RunPause).find("F5") !=
+               std::string::npos,
+           "canonical F5 is Run/Pause");
+    expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::Step).find("F6") !=
+               std::string::npos,
+           "canonical F6 is Step");
+    expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::TogglePcBreakpoint)
+                   .find("F8") != std::string::npos,
+           "canonical F8 is TogglePcBreakpoint");
+    expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::OpenGlossary).find("F9") !=
+               std::string::npos,
+           "canonical F9 is Architecture Glossary");
+    expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::Quit).find("F10") !=
+               std::string::npos,
+           "canonical F10 is Quit");
 
     constexpr simrv::tui::TuiFooterAction footer_actions[] = {
         simrv::tui::TuiFooterAction::Step,
@@ -1196,6 +1226,39 @@ void test_multicolumn_refinement() {
     std::string sec_header = pane.render_column_row(0, 45, 1, 4, false);
     expect(sec_header.contains("[2: Pipeline Stages]"),
            "secondary column row 0 is the column header");
+
+    // 4. Forced column header for column 0
+    std::string col0_forced =
+        pane.render_column_row(0, 45, 0, 2, false, /*force_column_header=*/true);
+    expect(col0_forced.contains("[1: Pipeline Stages]"),
+           "forced column 0 header renders column header");
+
+    // 5. Layout presets in functional mode do not produce duplicate panels
+    simrv::core::Machine fm_machine;
+    simrv::tui::Tui fm_tui(fm_machine);
+    simrv::tui::TuiTestAccess::set_cached_term_width(fm_tui, 192);
+    fm_tui.apply_layout_preset(simrv::tui::LayoutPreset::MemoryInterconnect);
+    const auto& f4_slots = fm_tui.get_workbench_slots();
+    expect(f4_slots.size() >= 2, "preset 4 has at least 2 slots");
+    expect(f4_slots[0].page != f4_slots[1].page,
+           "preset 4 slots 0 and 1 have distinct pages in functional mode");
+
+    // 6. Multi-column right border junction connects with ╢ on horizontal rule
+    const auto geom = simrv::tui::calculate_frame_geometry(120, 20, simrv::tui::TuiLayout::Split);
+    simrv::tui::framework::ColumnWidths col_widths{.widths = {30, 30, 0, 0}, .count = 2};
+    std::string header = simrv::tui::format_to_width("h0", 63) + "\n" +
+                         simrv::tui::format_to_width("h1", 63) + "\n" +
+                         simrv::tui::format_to_width("h2", 63);
+    std::string footer = simrv::tui::format_to_width("f0", 63) + "\n" +
+                         simrv::tui::format_to_width("f1", 63) + "\n" +
+                         simrv::tui::format_to_width("f2", 63);
+    const auto multi_lines = simrv::tui::compose_multi_frame_lines(
+        geom, 63, col_widths, header, footer, [](size_t col_idx, int row, int) -> std::string {
+            if (row == 0) return simrv::tui::make_repeated_string("─", 30);
+            return "c" + std::to_string(col_idx);
+        });
+    std::string rule_row = strip_ansi(multi_lines.at(3));
+    expect(rule_row.ends_with("╢"), "multi-column horizontal rule connects to right border with ╢");
 }
 
 void test_horizontal_scrolling() {

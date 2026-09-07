@@ -244,7 +244,7 @@ struct FooterEntry {
 };
 
 static const auto paused_row1_entries = std::to_array<FooterEntry>({
-    {.text = "[s] Step",
+    {.text = "[F6] Step",
      .action = TuiFooterAction::Step,
      .category = FooterCategory::Exec,
      .priority = FooterPriority::Core},
@@ -252,7 +252,7 @@ static const auto paused_row1_entries = std::to_array<FooterEntry>({
      .action = std::nullopt,
      .category = FooterCategory::Spacer,
      .priority = FooterPriority::Core},
-    {.text = "[c] Run",
+    {.text = "[F5] Run",
      .action = TuiFooterAction::RunPause,
      .category = FooterCategory::Exec,
      .priority = FooterPriority::Core},
@@ -284,14 +284,14 @@ static const auto paused_row1_entries = std::to_array<FooterEntry>({
      .action = std::nullopt,
      .category = FooterCategory::Spacer,
      .priority = FooterPriority::Extended},
-    {.text = "[k] Toggle BP",
+    {.text = "[F8] Toggle BP",
      .action = TuiFooterAction::TogglePcBreakpoint,
      .category = FooterCategory::Debug,
      .priority = FooterPriority::Extended},
 });
 
 static const auto paused_row2_entries = std::to_array<FooterEntry>({
-    {.text = "[,] Settings",
+    {.text = "[F2] Settings",
      .action = TuiFooterAction::OpenSettings,
      .category = FooterCategory::Config,
      .priority = FooterPriority::Core},
@@ -299,7 +299,7 @@ static const auto paused_row2_entries = std::to_array<FooterEntry>({
      .action = std::nullopt,
      .category = FooterCategory::Spacer,
      .priority = FooterPriority::Core},
-    {.text = "[?] Help",
+    {.text = "[F1] Help",
      .action = TuiFooterAction::ToggleHelp,
      .category = FooterCategory::Config,
      .priority = FooterPriority::Core},
@@ -355,14 +355,14 @@ static const auto paused_row2_entries = std::to_array<FooterEntry>({
      .action = std::nullopt,
      .category = FooterCategory::Spacer,
      .priority = FooterPriority::Core},
-    {.text = "[q] Quit",
+    {.text = "[F10] Quit",
      .action = TuiFooterAction::Quit,
      .category = FooterCategory::Sys,
      .priority = FooterPriority::Core},
 });
 
 static const auto running_row1_entries = std::to_array<FooterEntry>({
-    {.text = "[Ctrl-P] Pause",
+    {.text = "[F5] Pause",
      .action = TuiFooterAction::RunPause,
      .category = FooterCategory::Exec,
      .priority = FooterPriority::Core},
@@ -397,6 +397,10 @@ static const auto running_row2_entries = paused_row2_entries;
 namespace {
 
 [[nodiscard]] auto footer_entry_text(const FooterEntry& entry) -> std::string {
+    if (entry.action == TuiFooterAction::RunPause &&
+        std::string_view(entry.text).find("Pause") != std::string_view::npos) {
+        return entry.text;
+    }
     if (entry.action.has_value()) {
         return Keybindings::get_footer_text(key_action_for_footer(*entry.action));
     }

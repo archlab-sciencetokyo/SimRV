@@ -638,10 +638,10 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             add_row("Select a workbench preset to configure pane columns:");
             add_row("");
             const std::array<std::pair<const char*, const char*>, 4> presets = {
-                {{"1 / F1", "General Debug        [GPR, Stack, Trace, Console]"},
-                 {"2 / F2", "Microarchitecture    [Pipeline, Cache, Hazard, Console]"},
-                 {"3 / F3", "Trace & Execution    [GPR, Trace, Explain, Console]"},
-                 {"4 / F4", "Memory & Bus         [Stack, Cache, TLB, Bus]"}}};
+                {{"1 / Alt-1", "General Debug        [GPR, Stack, Trace, Console]"},
+                 {"2 / Alt-2", "Microarchitecture    [Pipeline, Cache, Hazard, Console]"},
+                 {"3 / Alt-3", "Trace & Execution    [GPR, Trace, Explain, Console]"},
+                 {"4 / Alt-4", "Memory & Interconnect[Stack, TLB/Cache, Bus]"}}};
             for (size_t i = 0; i < presets.size(); ++i) {
                 bool is_sel = (preset_cursor_ == static_cast<int>(i));
                 std::string line;
@@ -656,7 +656,7 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             add_row("");
             add_row(modals::build_modal_footer({{"[Enter / 1-4]", "Apply Preset"},
                                                 {"[Up/Down]", "Navigate"},
-                                                {"[Esc / q]", "Cancel"}}));
+                                                {"[Esc / q / F4]", "Cancel"}}));
             break;
         }
         case ModalType::Notice:

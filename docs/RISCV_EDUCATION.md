@@ -201,12 +201,19 @@ Description (Behavior):
 
 | Key | Context | Action |
 |:---|:---|:---|
-| `c` / `Ctrl-P` | Paused / Running | Run / Pause simulation loop |
-| `s` / `Space` | Paused | Single-step one instruction |
+| `F1` / `h` | All / Paused | Open Help & Keybindings reference modal |
+| `F2` / `,` / `Alt-S` | Paused | Open Simulator Settings modal (Mode, SMP, Scheduler, Diagnostics) |
+| `F3` / `r` / `Alt-R` | Paused | Cycle register tabs (GPR / FPR / VEC / CSR) |
+| `F4` | All | Open Workbench Layout Presets modal |
+| `F5` / `c` / `Ctrl-P` | Paused / Running | Run / Pause simulation loop |
+| `F6` / `s` / `Space` | Paused | Single-step one instruction |
+| `F7` | Paused | Switch active inspector to Trace & Execution page |
+| `F8` / `k` | Paused | Toggle PC breakpoint at current PC |
+| `F9` / `?` | Paused | Open Architecture Glossary modal at active topic |
+| `F10` / `q` / `Ctrl-Q` | All | Cleanly terminate simulation |
+| `Alt-1` .. `Alt-4` | All | Apply Workbench Layout Presets directly (1..4) |
 | `l` / `Alt-L` | Paused | Cycle left inspector tool tabs (Pipe / Cache / BP / Hazard / TLB / Bus / IO / Stats) |
-| `r` / `Alt-R` | Paused | Cycle register tabs (GPR / FPR / VEC / CSR) |
 | `o` / `Alt-O` | Paused | Open Binary & Disk Image Loader modal |
-| `,` / `Alt-S` | Paused | Open Simulator Settings modal (Mode, SMP, Scheduler, Diagnostics) |
 | `Alt-M` | Paused | Open MISA CSR / Extensions Configuration modal |
 | `y` | Paused | Open Cycle-Accurate Microarchitecture & Cache Config modal |
 | `i` | Paused | Open Memory Inspector modal |
@@ -214,10 +221,6 @@ Description (Behavior):
 | `g` | Paused | Show / hide the interactive Student Guide |
 | `Enter` | Paused, guide visible | Perform the Student Guide's suggested action |
 | `e` | Paused | Open / close the current instruction explanation |
-| `?` | Paused | Open the glossary at the active inspector's topic |
 | `x` | Paused | Export the configured inspection report |
-| `Ctrl-A` | All | Toggle input focus between guest UART/PTY and TUI controls |
-| `Tab` | All | Switch between right pane views (Guest Terminal / Log Buffer) |
-| `F1` / `h` | Paused | Open Help & Keybindings reference modal |
-| `q` / `Ctrl-Q` | All | Cleanly terminate simulation |
+| `Tab` | All | Focus next workbench column / right pane |
 | `Ctrl-R` | All | Soft-reboot guest simulation |

@@ -83,7 +83,15 @@ enum class TuiKey : uint8_t {
     F1 = 241,
     F2 = 242,
     F3 = 243,
-    F4 = 244
+    F4 = 244,
+    F5 = 245,
+    F6 = 246,
+    F7 = 247,
+    F8 = 248,
+    F9 = 249,
+    F10 = 250,
+    F11 = 251,
+    F12 = 252
 };
 
 }  // namespace simrv::tui

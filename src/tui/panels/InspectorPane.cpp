@@ -694,8 +694,8 @@ auto InspectorPane::render_row(int row_idx, int width) -> std::string {
 }
 
 auto InspectorPane::render_column_row(int row_idx, int width, int col_idx, size_t total_cols,
-                                      bool is_focused) -> std::string {
-    bool const is_multi = (total_cols > 2);
+                                      bool is_focused, bool force_column_header) -> std::string {
+    bool const is_multi = (total_cols > 2) || force_column_header;
     bool const is_secondary = (col_idx > 0);
 
     if (is_multi || is_secondary) {

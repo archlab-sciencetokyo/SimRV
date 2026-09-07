@@ -43,14 +43,15 @@ struct OverlayGeometry {
 };
 
 inline constexpr int kBaseColumnUnitWidth = 40;
+inline constexpr int kMultiColumnUnitWidth = 46;
 inline constexpr int kMinimumTerminalWidth = 40;
 inline constexpr int kMinimumTerminalHeight = 10;
 inline constexpr int kFrameChromeRows = 7;
 
 [[nodiscard]] constexpr auto max_supported_columns(int terminal_width) -> uint8_t {
-    if (terminal_width >= 165) return 4;
-    if (terminal_width >= 124) return 3;
-    if (terminal_width >= 82) return 2;
+    if (terminal_width >= 192) return 4;
+    if (terminal_width >= 144) return 3;
+    if (terminal_width >= 80) return 2;
     return 1;
 }
 
@@ -61,16 +62,16 @@ inline constexpr int kFrameChromeRows = 7;
         return {.widths = {full_width, 0, 0, 0}, .count = 1};
     }
 
-    if (layout == Layout::FourColumn && terminal_width >= 165) {
+    if (layout == Layout::FourColumn && terminal_width >= 192) {
         int const usable = std::max(0, terminal_width - 5);  // 3 inner dividers + 2 borders
-        int const c_left = std::clamp((usable * 22) / 100, kBaseColumnUnitWidth, 60);
+        int const c_left = std::clamp((usable * 22) / 100, kMultiColumnUnitWidth, 60);
         int const c3 = usable - (c_left * 3);
         return {.widths = {c_left, c_left, c_left, c3}, .count = 4};
     }
 
-    if ((layout == Layout::ThreeColumn || layout == Layout::FourColumn) && terminal_width >= 124) {
+    if ((layout == Layout::ThreeColumn || layout == Layout::FourColumn) && terminal_width >= 144) {
         int const usable = std::max(0, terminal_width - 4);  // 2 inner dividers + 2 borders
-        int const c_left = std::clamp((usable * 30) / 100, kBaseColumnUnitWidth, 60);
+        int const c_left = std::clamp((usable * 30) / 100, kMultiColumnUnitWidth, 60);
         int const c2 = usable - (c_left * 2);
         return {.widths = {c_left, c_left, c2, 0}, .count = 3};
     }
@@ -78,7 +79,7 @@ inline constexpr int kFrameChromeRows = 7;
     // Default 2-column Split
     int const split_width = std::max(0, terminal_width - 3);
     if (split_width <= 0) return {.widths = {0, 0, 0, 0}, .count = 0};
-    if (terminal_width < 75 && layout != Layout::Split) {
+    if (terminal_width < 80 && layout != Layout::Split) {
         return {.widths = {full_width, 0, 0, 0}, .count = 1};
     }
 

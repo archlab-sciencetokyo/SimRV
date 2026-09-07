@@ -54,7 +54,7 @@ void append_block_lines(std::vector<std::string>& lines, std::string_view block)
 
 [[nodiscard]] auto is_horizontal_rule(const std::string& row, const char* horiz) -> bool {
     const std::string plain = strip_ansi(row);
-    return plain.starts_with(horiz) && plain.ends_with(horiz);
+    return plain.size() >= 2 && plain.starts_with(horiz) && plain.ends_with(horiz);
 }
 
 }  // namespace
@@ -105,8 +105,7 @@ auto compose_multi_frame_lines(const FrameGeometry& frame, int terminal_width,
         }
 
         const bool last_rule = is_rule[col_widths.count - 1];
-        const char* right_border =
-            (col_widths.count == 1 && last_rule) ? (is_ansi ? "+" : "╢") : border_v;
+        const char* right_border = last_rule ? (is_ansi ? "+" : "╢") : border_v;
         line += std::format("{}{}\033[0m", kThemeBorder, right_border);
         lines.push_back(std::move(line));
     }
