@@ -55,10 +55,14 @@ def run_suite(benchmarks, simrv_bin, spike_bin, runs=3, limit=50000000, timeout=
             "--json", tmp_json
         ]
         if mode:
-            cmd.extend(["--simrv-arg", f"--mode {mode}"])
+            if mode in ("3stage", "5stage"):
+                cmd.extend(["--simrv-arg=--mode", "--simrv-arg=cycle-accurate",
+                            "--simrv-arg=--pipeline", f"--simrv-arg={mode}"])
+            else:
+                cmd.extend(["--simrv-arg=--mode", f"--simrv-arg={mode}"])
         if extra_args:
             for ea in extra_args:
-                cmd.extend(["--simrv-arg", ea])
+                cmd.append(f"--simrv-arg={ea}")
 
         try:
             res = subprocess.run(cmd, check=True)
@@ -121,7 +125,7 @@ def main():
     parser.add_argument("-e", "--limit", type=int, default=50000000, help="Instruction limit")
     parser.add_argument("--modes", nargs="+", default=[None], help="Modes to sweep across (e.g. fast detailed 3stage 5stage)")
     parser.add_argument("--baseline", help="Baseline JSON report to check for regressions")
-    parser.add_argument("--regression-threshold", type=float, default=0.03, help="Regression alert threshold (default: 0.03 = 3%)")
+    parser.add_argument("--regression-threshold", type=float, default=0.03, help="Regression alert threshold (default: 0.03 = 3%%)")
     parser.add_argument("--json", help="Path to save consolidated JSON report")
 
     args = parser.parse_args()
