@@ -75,7 +75,7 @@ auto InspectorPane::performance_row_count() const -> int {
 
 auto InspectorPane::performance_start_row(bool single_column) const -> int {
     if (single_column) return 32;
-    return page_ == TuiRegPage::PIPELINE ? 25 : 21;
+    return (page_ == TuiRegPage::PIPELINE || page_ == TuiRegPage::BUS) ? 25 : 21;
 }
 
 auto InspectorPane::render_machine_performance_stats(const simrv::core::CPU& cpu, int stats_row,

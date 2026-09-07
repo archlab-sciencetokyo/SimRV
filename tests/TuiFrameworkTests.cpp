@@ -1251,6 +1251,49 @@ void test_horizontal_scrolling() {
     expect(pane.get_horizontal_scroll_offset() == 0, "reset_horizontal_scroll clears offset");
 }
 
+void test_bus_inspector_and_tilelink_channels() {
+    using namespace simrv::memory;
+    simrv::core::Machine machine;
+
+    auto& bus = machine.memory().system_bus();
+    bus.record_transaction(TileLinkChannel::A, "AcquireBlock", 1, 0, 0x80001000, "NtoT");
+    bus.record_transaction(TileLinkChannel::B, "ProbeBlock", 1, 0, 0x80001000, "Hart 1 ToN");
+    bus.record_transaction(TileLinkChannel::C, "ProbeAckData", 1, 0, 0x80001000, "TtoN");
+    bus.record_transaction(TileLinkChannel::D, "GrantData", 1, 5, 0x80001000, "ToT");
+    bus.record_transaction(TileLinkChannel::E, "GrantAck", 0, 5, 0, "");
+
+    expect(bus.transaction_history().size() == 5, "bus recorded 5 transactions");
+
+    simrv::tui::InspectorPane pane(machine);
+    pane.set_page(simrv::tui::TuiRegPage::BUS);
+    pane.set_visible_rows(45);
+    pane.set_student_guide_enabled(false);
+
+    const int width = 88;
+    // Row 0 and 1 are tier 1 and tier 2 tab bars; logical_row 16 is row_idx 18
+    const std::string r16 = strip_ansi(pane.render_row(18, width));
+    expect(r16.find("TileLink-C Channels") != std::string::npos,
+           "row 18 contains TileLink-C channel section header");
+
+    const std::string r17 = strip_ansi(pane.render_row(19, width));
+    expect(r17.find("A(Req)") != std::string::npos && r17.find("B(Probe)") != std::string::npos,
+           "row 19 contains channel status indicators");
+
+    const std::string r18 = strip_ansi(pane.render_row(20, width));
+    expect(r18.find("Recent Bus Transactions") != std::string::npos,
+           "row 20 contains Recent Bus Transactions header");
+
+    const std::string r19 = strip_ansi(pane.render_row(21, width));
+    expect(r19.find("[E]") != std::string::npos && r19.find("GrantAck") != std::string::npos,
+           "row 21 contains latest recorded transaction (E GrantAck)");
+
+    // Test narrow column width formatting
+    const int narrow_width = 45;
+    const std::string narrow_r17 = strip_ansi(pane.render_row(19, narrow_width));
+    expect(narrow_r17.find("A:") != std::string::npos && narrow_r17.find("B:") != std::string::npos,
+           "narrow row 19 formats compact channel status");
+}
+
 }  // namespace
 
 int main() {
@@ -1277,6 +1320,7 @@ int main() {
     test_inspector_panels_traits_and_scoreboard();
     test_multicolumn_refinement();
     test_horizontal_scrolling();
+    test_bus_inspector_and_tilelink_channels();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;

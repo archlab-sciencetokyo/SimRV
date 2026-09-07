@@ -34,6 +34,18 @@ class TileLinkBus : public Bus {
         bool has_line_data = false;
     };
 
+    struct TlTransactionRecord {
+        Cycle cycle = 0;
+        TileLinkChannel channel = TileLinkChannel::A;
+        std::string opcode;
+        TlSourceId source = 0;
+        TlSinkId sink = 0;
+        Address address = 0;
+        std::string detail;
+    };
+
+    static constexpr size_t kMaxTransactionHistory = 32;
+
     explicit TileLinkBus(simrv::core::Machine& machine);
 
     void add_node(TileLinkNode* node);
@@ -75,6 +87,14 @@ class TileLinkBus : public Bus {
     [[nodiscard]] auto protocol_checker() const -> const TileLinkProtocolChecker& {
         return protocol_checker_;
     }
+    [[nodiscard]] auto protocol_checker() -> TileLinkProtocolChecker& { return protocol_checker_; }
+
+    [[nodiscard]] auto transaction_history() const -> const std::deque<TlTransactionRecord>& {
+        return transaction_history_;
+    }
+
+    void record_transaction(TileLinkChannel ch, std::string_view opcode, TlSourceId source,
+                            TlSinkId sink, Address address, std::string_view detail = {});
     [[nodiscard]] static constexpr auto ram_capabilities() -> TlManagerCapabilities {
         return kCoherentRamCapabilities;
     }
@@ -128,6 +148,7 @@ class TileLinkBus : public Bus {
     std::deque<TimedRequest> req_queue_;
     std::deque<TimedDBeat> d_queue_;
     std::unordered_map<TlSourceId, DAssembly> d_assemblies_;
+    std::deque<TlTransactionRecord> transaction_history_;
 };
 
 }  // namespace simrv::memory

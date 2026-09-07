@@ -232,6 +232,19 @@ class BaseCache {
         return simrv::memory::MesiState::Invalid;
     }
 
+    auto upgrade_line_state(Address base_addr, simrv::memory::MesiState new_state) -> bool {
+        const uint32_t set_idx = get_set_index(base_addr);
+        const Address tag = get_tag(base_addr);
+        const auto way_opt = find_way(set_idx, tag);
+        if (way_opt.has_value()) {
+            auto& line = sets_[set_idx][*way_opt];
+            line.state = new_state;
+            line.last_used = ++access_tick_;
+            return true;
+        }
+        return false;
+    }
+
     auto probe_line(Address base_addr, simrv::memory::MesiState target_state,
                     std::array<Byte, kLineBytes>* out_dirty_data = nullptr) -> bool {
         const uint32_t set_idx = get_set_index(base_addr);

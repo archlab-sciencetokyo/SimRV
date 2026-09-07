@@ -993,6 +993,53 @@ void test_tilelink_c_protocol_checker() {
     expect(permission_for(MesiState::Exclusive) == TlPermission::Trunk &&
                permission_for(MesiState::Modified) == TlPermission::Trunk,
            "MESI Exclusive and Modified map to TileLink Trunk");
+
+    // Channel B Probe checking
+    TlChannelB probe_good{.opcode = TlOpcodeB::ProbeBlock,
+                          .cap = TlCap::ToN,
+                          .size = kTlBlockSize,
+                          .source = 10,
+                          .address = 0x80000040};
+    expect(checker.accept_b(probe_good).has_value(), "checker accepts aligned block ProbeBlock");
+    expect(checker.outstanding_probes() == 1, "checker tracks outstanding probe");
+
+    TlChannelB probe_bad_align = probe_good;
+    probe_bad_align.address = 0x80000043;
+    expect(!checker.accept_b(probe_bad_align).has_value(),
+           "checker rejects unaligned probe address");
+
+    // Channel C ProbeAck completes probe
+    TlChannelC probe_ack{.opcode = TlOpcodeC::ProbeAckData,
+                         .report = TlReport::TtoN,
+                         .size = kTlBlockSize,
+                         .source = 10,
+                         .address = 0x80000040};
+    expect(checker.accept_c(probe_ack).has_value(), "checker accepts ProbeAckData");
+    expect(checker.outstanding_probes() == 0, "ProbeAck clears outstanding probe");
+
+    // Channel C Release and Channel D ReleaseAck
+    TlChannelC release_req{.opcode = TlOpcodeC::ReleaseData,
+                           .report = TlReport::TtoN,
+                           .size = kTlBlockSize,
+                           .source = 12,
+                           .address = 0x80000060};
+    expect(checker.accept_c(release_req).has_value(), "checker accepts valid ReleaseData");
+    expect(checker.outstanding_releases() == 1, "checker tracks outstanding release");
+    TlChannelD rel_ack{.opcode = TlOpcodeD::ReleaseAck, .size = kTlBlockSize, .source = 12};
+    expect(checker.accept_d(rel_ack).has_value(), "checker matches ReleaseAck to Release");
+    expect(checker.outstanding_releases() == 0, "ReleaseAck clears outstanding release");
+
+    // String conversion verification
+    expect(to_string(TlOpcodeA::AcquireBlock) == "AcquireBlock", "to_string(AcquireBlock)");
+    expect(to_string(TlOpcodeA::AcquirePerm) == "AcquirePerm", "to_string(AcquirePerm)");
+    expect(to_string(TlOpcodeB::ProbeBlock) == "ProbeBlock", "to_string(ProbeBlock)");
+    expect(to_string(TlOpcodeC::ProbeAckData) == "ProbeAckData", "to_string(ProbeAckData)");
+    expect(to_string(TlOpcodeD::GrantData) == "GrantData", "to_string(GrantData)");
+    expect(to_string(TlOpcodeE::GrantAck) == "GrantAck", "to_string(GrantAck)");
+    expect(to_string(MesiState::Modified) == "Modified", "to_string(Modified)");
+    expect(to_string(TlGrow::BtoT) == "BtoT", "to_string(BtoT)");
+    expect(to_string(TlCap::ToT) == "ToT", "to_string(ToT)");
+    expect(to_string(TlReport::TtoN) == "TtoN", "to_string(TtoN)");
 }
 
 void test_strong_semantic_types() {

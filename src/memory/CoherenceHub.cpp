@@ -11,7 +11,9 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/memory/TileLinkBus.hpp"
 
 namespace simrv::memory {
 
@@ -92,6 +94,9 @@ void CoherenceHub::probe_hart_dcache(HartId hart_id, const TlChannelB& probe_req
     if (hart_id >= machine_.num_harts()) {
         return;
     }
+    machine_.memory().system_bus().record_transaction(
+        TileLinkChannel::B, to_string(probe_req.opcode), probe_req.source, 0,
+        probe_req.address.raw(), std::format("Hart {} {}", hart_id.val, to_string(probe_req.cap)));
     auto& target_cpu = machine_.hart(hart_id);
     if (target_cpu.dcache.handle_probe(probe_req, probe_resp, dirty_data)) {
         stats_.probe_count++;
@@ -99,6 +104,9 @@ void CoherenceHub::probe_hart_dcache(HartId hart_id, const TlChannelB& probe_req
             stats_.writeback_count++;
         }
     }
+    machine_.memory().system_bus().record_transaction(
+        TileLinkChannel::C, to_string(probe_resp.opcode), probe_resp.source, 0,
+        probe_resp.address.raw(), to_string(probe_resp.report));
 }
 
 void CoherenceHub::probe_hart_icache(HartId hart_id, const TlChannelB& probe_req) {
@@ -109,6 +117,9 @@ void CoherenceHub::probe_hart_icache(HartId hart_id, const TlChannelB& probe_req
     TlChannelC ic_resp{};
     if (target_cpu.icache.handle_probe(probe_req, ic_resp)) {
         stats_.probe_count++;
+        machine_.memory().system_bus().record_transaction(
+            TileLinkChannel::C, to_string(ic_resp.opcode), ic_resp.source, 0, ic_resp.address.raw(),
+            to_string(ic_resp.report));
     }
 }
 
@@ -318,6 +329,32 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
     resp.denied = false;
     resp.corrupt = false;
     stats_.grant_count++;
+    return true;
+}
+
+auto CoherenceHub::handle_intent(const TlChannelA& req, TlChannelD& resp) -> bool {
+    const Address line_base = (req.address & ~(static_cast<Address>(kLineBytes - 1u))).raw();
+    stats_.prefetch_count++;
+
+    // Warm L3 cache if not present for valid memory addresses
+    std::array<Byte, kLineBytes> line_buf{};
+    MesiState l3_state = MesiState::Invalid;
+    if (!l3_cache_.lookup_line(line_base, line_buf, l3_state)) {
+        auto* dram_ptr = machine_.ram_data();
+        const auto geometry = machine_.memory_geometry();
+        if (dram_ptr != nullptr && geometry.contains(line_base, kLineBytes)) {
+            const Address offset = line_base - geometry.dram_base;
+            std::memcpy(line_buf.data(), dram_ptr + offset, kLineBytes);
+            l3_cache_.write_line(line_base, line_buf, MesiState::Exclusive);
+        }
+    }
+
+    resp.opcode = TlOpcodeD::HintAck;
+    resp.size = req.size;
+    resp.source = req.source;
+    resp.sink = 0;
+    resp.denied = false;
+    resp.corrupt = false;
     return true;
 }
 

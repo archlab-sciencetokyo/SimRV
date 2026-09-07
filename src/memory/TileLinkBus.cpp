@@ -38,6 +38,22 @@ struct SmpLockGuard {
 TileLinkBus::TileLinkBus(simrv::core::Machine& machine)
     : machine_(machine), coherence_hub_(machine) {}
 
+void TileLinkBus::record_transaction(TileLinkChannel ch, std::string_view opcode, TlSourceId source,
+                                     TlSinkId sink, Address address, std::string_view detail) {
+    if (transaction_history_.size() >= kMaxTransactionHistory) {
+        transaction_history_.pop_front();
+    }
+    transaction_history_.push_back(TlTransactionRecord{
+        .cycle = cycle_,
+        .channel = ch,
+        .opcode = std::string(opcode),
+        .source = source,
+        .sink = sink,
+        .address = address,
+        .detail = std::string(detail),
+    });
+}
+
 void TileLinkBus::add_node(TileLinkNode* node) { router_.register_device(node); }
 
 void TileLinkBus::configure_timing(uint32_t request_latency, uint32_t response_latency) {
@@ -52,6 +68,8 @@ auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
         simrv::log::warn("TileLink-C request rejected: {}", valid.error());
         return false;
     }
+    record_transaction(TileLinkChannel::A, to_string(req.opcode), req.source, 0, req.address.raw(),
+                       to_string(req.grow));
     req_queue_.push_back(
         TimedRequest{.payload = req, .submitted_cycle = cycle_, .sequence = next_sequence_++});
     return true;
@@ -91,7 +109,22 @@ void TileLinkBus::process_request(const TimedRequest& request) {
     if (req.opcode == TlOpcodeA::AcquireBlock || req.opcode == TlOpcodeA::AcquirePerm) {
         handled = coherence_hub_.handle_acquire(req, resp, response_line);
         has_line_data = req.opcode == TlOpcodeA::AcquireBlock && handled && !resp.failed();
+    } else if (req.opcode == TlOpcodeA::Intent) {
+        const size_t block_bytes = (size_t{1} << std::min<uint8_t>(req.size, kTlBlockSize));
+        if (machine_.memory_geometry().contains(req.address.raw(), block_bytes) &&
+            machine_.ram_data() != nullptr) {
+            handled = coherence_hub_.handle_intent(req, resp);
+        } else {
+            resp.opcode = TlOpcodeD::HintAck;
+            resp.denied = true;
+            handled = true;
+        }
     } else if (!valid_size) {
+        if (req.opcode == TlOpcodeA::PutFullData || req.opcode == TlOpcodeA::PutPartialData) {
+            resp.opcode = TlOpcodeD::AccessAck;
+        } else {
+            resp.opcode = TlOpcodeD::AccessAckData;
+        }
         resp.denied = true;
         handled = true;
     } else if (req.opcode == TlOpcodeA::Get) {
@@ -162,10 +195,7 @@ void TileLinkBus::process_request(const TimedRequest& request) {
             handled = true;
         }
     } else {
-        if (req.opcode == TlOpcodeA::Intent) {
-            resp.opcode = TlOpcodeD::HintAck;
-        } else if (req.opcode == TlOpcodeA::PutFullData ||
-                   req.opcode == TlOpcodeA::PutPartialData) {
+        if (req.opcode == TlOpcodeA::PutFullData || req.opcode == TlOpcodeA::PutPartialData) {
             resp.opcode = TlOpcodeD::AccessAck;
         } else {
             resp.opcode = TlOpcodeD::AccessAckData;
@@ -197,6 +227,8 @@ void TileLinkBus::process_request(const TimedRequest& request) {
             .beat_count = beat_count,
         });
     }
+    record_transaction(TileLinkChannel::D, to_string(resp.opcode), resp.source, resp.sink,
+                       req.address.raw(), resp.failed() ? "Denied" : to_string(resp.cap));
 }
 
 auto TileLinkBus::try_get_timed_response(TlSourceId source_id, TimedResponse& resp) -> bool {
@@ -310,11 +342,15 @@ auto TileLinkBus::acquire_block(const TlChannelA& req, TlChannelD& resp,
                                 std::array<Byte, CoherenceHub::kLineBytes>& line_data) -> bool {
     SmpLockGuard lock(bus_mutex_, machine_.configuration().execution.smp_multithreaded);
     if (const auto valid = protocol_checker_.accept_a(req); !valid) return false;
+    record_transaction(TileLinkChannel::A, to_string(req.opcode), req.source, 0, req.address.raw(),
+                       to_string(req.grow));
     const bool handled = coherence_hub_.handle_acquire(req, resp, line_data);
     if (!handled) {
         protocol_checker_.cancel(req.source);
         return false;
     }
+    record_transaction(TileLinkChannel::D, to_string(resp.opcode), resp.source, resp.sink,
+                       req.address.raw(), resp.failed() ? "Denied" : to_string(resp.cap));
     return protocol_checker_.accept_d(resp).has_value();
 }
 
@@ -326,7 +362,16 @@ auto TileLinkBus::acquire_perm(const TlChannelA& req, TlChannelD& resp) -> bool 
 auto TileLinkBus::release_line(const TlChannelC& req, TlChannelD& resp,
                                const std::array<Byte, CoherenceHub::kLineBytes>* data) -> bool {
     SmpLockGuard lock(bus_mutex_, machine_.configuration().execution.smp_multithreaded);
-    return coherence_hub_.handle_release(req, resp, data);
+    (void)protocol_checker_.accept_c(req);
+    record_transaction(TileLinkChannel::C, to_string(req.opcode), req.source, 0, req.address.raw(),
+                       to_string(req.report));
+    const bool handled = coherence_hub_.handle_release(req, resp, data);
+    if (handled) {
+        (void)protocol_checker_.accept_d(resp);
+        record_transaction(TileLinkChannel::D, to_string(resp.opcode), resp.source, resp.sink,
+                           req.address.raw());
+    }
+    return handled;
 }
 
 void TileLinkBus::mark_modified(Address line_base, HartId hart) {
@@ -336,6 +381,7 @@ void TileLinkBus::mark_modified(Address line_base, HartId hart) {
 
 void TileLinkBus::grant_ack(const TlChannelE& ack) {
     SmpLockGuard lock(bus_mutex_, machine_.configuration().execution.smp_multithreaded);
+    record_transaction(TileLinkChannel::E, to_string(ack.opcode), 0, ack.sink, 0);
     if (const auto valid = protocol_checker_.accept_e(ack); !valid) {
         simrv::log::warn("TileLink-C GrantAck violation: {}", valid.error());
         return;

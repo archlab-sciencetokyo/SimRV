@@ -603,7 +603,8 @@ auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows,
         render_width = std::max(width, kStackCanvasWidth);
     } else if (page_ == TuiRegPage::PIPELINE && width < kPipelineCanvasWidth) {
         render_width = kPipelineCanvasWidth;
-    } else if (page_ == TuiRegPage::BUS && width < kBusCanvasWidth) {
+    } else if (page_ == TuiRegPage::BUS && logical_row >= 18 && logical_row <= 24 &&
+               width < kBusCanvasWidth) {
         render_width = kBusCanvasWidth;
     } else if (page_ == TuiRegPage::EXPLAIN && width < kExplainCanvasWidth) {
         render_width = kExplainCanvasWidth;

@@ -18,11 +18,12 @@ auto TileLinkProtocolChecker::accept_a(const TlChannelA& request)
     }
     const bool coherent =
         request.opcode == TlOpcodeA::AcquireBlock || request.opcode == TlOpcodeA::AcquirePerm;
+    const bool intent = request.opcode == TlOpcodeA::Intent;
     if (coherent && request.size != kTlBlockSize) {
         return std::unexpected(
             std::format("A source {} acquire is not one cache block", request.source));
     }
-    if (!coherent && request.size > kTlBeatSize) {
+    if (!coherent && !intent && request.size > kTlBeatSize) {
         return std::unexpected(
             std::format("A source {} uncached transfer exceeds one beat", request.source));
     }
@@ -43,8 +44,54 @@ auto TileLinkProtocolChecker::accept_a(const TlChannelA& request)
     return {};
 }
 
+auto TileLinkProtocolChecker::accept_b(const TlChannelB& probe)
+    -> std::expected<void, std::string> {
+    if (probe.size > kTlBlockSize) {
+        return std::unexpected(std::format("B probe has illegal size {}", probe.size));
+    }
+    if ((probe.address.raw() & (kTlBlockBytes - 1u)) != 0) {
+        return std::unexpected(
+            std::format("B probe address {:#x} is not block-aligned", probe.address.raw()));
+    }
+    if (probe.opcode != TlOpcodeB::ProbeBlock && probe.opcode != TlOpcodeB::ProbePerm) {
+        return std::unexpected("B probe contains an illegal opcode");
+    }
+    active_probes_.insert(probe.address.raw());
+    return {};
+}
+
+auto TileLinkProtocolChecker::accept_c(const TlChannelC& response)
+    -> std::expected<void, std::string> {
+    if (response.size > kTlBlockSize) {
+        return std::unexpected(std::format("C response has illegal size {}", response.size));
+    }
+    if ((response.address.raw() & (kTlBlockBytes - 1u)) != 0) {
+        return std::unexpected(
+            std::format("C response address {:#x} is not block-aligned", response.address.raw()));
+    }
+    if (response.opcode == TlOpcodeC::Release || response.opcode == TlOpcodeC::ReleaseData) {
+        if (!releases_.emplace(response.source, response).second) {
+            return std::unexpected(
+                std::format("C release source {} was reused before ReleaseAck", response.source));
+        }
+    } else if (response.opcode == TlOpcodeC::ProbeAck ||
+               response.opcode == TlOpcodeC::ProbeAckData) {
+        active_probes_.erase(response.address.raw());
+    } else {
+        return std::unexpected("C response contains an illegal opcode");
+    }
+    return {};
+}
+
 auto TileLinkProtocolChecker::accept_d(const TlChannelD& response)
     -> std::expected<void, std::string> {
+    if (response.opcode == TlOpcodeD::ReleaseAck) {
+        auto rel_it = releases_.find(response.source);
+        if (rel_it != releases_.end()) {
+            releases_.erase(rel_it);
+            return {};
+        }
+    }
     const auto source = sources_.find(response.source);
     if (source == sources_.end()) {
         return std::unexpected(
@@ -103,6 +150,7 @@ auto TileLinkProtocolChecker::accept_e(const TlChannelE& acknowledgement)
 
 void TileLinkProtocolChecker::cancel(TlSourceId source) {
     sources_.erase(source);
+    releases_.erase(source);
     for (auto it = sinks_.begin(); it != sinks_.end();) {
         if (it->second == source) {
             it = sinks_.erase(it);
@@ -114,6 +162,8 @@ void TileLinkProtocolChecker::cancel(TlSourceId source) {
 
 void TileLinkProtocolChecker::reset() {
     sources_.clear();
+    releases_.clear();
+    active_probes_.clear();
     sinks_.clear();
 }
 

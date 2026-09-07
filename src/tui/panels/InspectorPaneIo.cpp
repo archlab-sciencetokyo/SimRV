@@ -22,7 +22,8 @@
 #include "simrv/device/pci/VirtioPciInput.hpp"
 #include "simrv/device/pci/VirtioPciNet.hpp"
 #include "simrv/device/pci/VirtioPciRng.hpp"
-#include "simrv/device/pci/VirtioPciSound.hpp"
+#include "simrv/memory/TileLinkBus.hpp"
+#include "simrv/memory/TileLinkProtocol.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
@@ -196,17 +197,39 @@ auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row
     }
     if (logical_row == 14) {
         const auto& c_stats = machine_.memory().system_bus().coherence_hub().stats();
+        if (width < 50) {
+            return format_to_width(
+                std::format(
+                    "  {}Acq:\033[0m {}{:<5}\033[0m │ {}Prb:\033[0m {}{:<5}\033[0m │ "
+                    "{}Grnt:\033[0m {}{}\033[0m",
+                    kThemeText, kThemeMint, simrv::util::format_with_commas(c_stats.acquire_count),
+                    kThemeText, kThemeSky, simrv::util::format_with_commas(c_stats.probe_count),
+                    kThemeText, kThemePeach, simrv::util::format_with_commas(c_stats.grant_count)),
+                width);
+        }
         return format_to_width(
-            std::format("  {}Acquire:\033[0m {}{:<7}\033[0m │ {}Probe:\033[0m {}{:<7}\033[0m │ "
-                        "{}Grant:\033[0m {}{}\033[0m",
-                        kThemeText, kThemeMint,
-                        simrv::util::format_with_commas(c_stats.acquire_count), kThemeText,
-                        kThemeSky, simrv::util::format_with_commas(c_stats.probe_count), kThemeText,
-                        kThemePeach, simrv::util::format_with_commas(c_stats.grant_count)),
+            std::format(
+                "  {}Acquire:\033[0m {}{:<7}\033[0m │ {}Probe:\033[0m {}{:<7}\033[0m │ "
+                "{}Grant:\033[0m {}{:<7}\033[0m │ {}Prefetch:\033[0m {}{}\033[0m",
+                kThemeText, kThemeMint, simrv::util::format_with_commas(c_stats.acquire_count),
+                kThemeText, kThemeSky, simrv::util::format_with_commas(c_stats.probe_count),
+                kThemeText, kThemePeach, simrv::util::format_with_commas(c_stats.grant_count),
+                kThemeText, kThemeVal, simrv::util::format_with_commas(c_stats.prefetch_count)),
             width);
     }
     if (logical_row == 15) {
         const auto& c_stats = machine_.memory().system_bus().coherence_hub().stats();
+        if (width < 50) {
+            return format_to_width(
+                std::format("  {}Rel:\033[0m {}{:<5}\033[0m │ {}Inv:\033[0m {}{:<5}\033[0m │ "
+                            "{}WB:\033[0m {}{}\033[0m",
+                            kThemeText, kThemeCoral,
+                            simrv::util::format_with_commas(c_stats.release_count), kThemeText,
+                            kThemeVal, simrv::util::format_with_commas(c_stats.invalidation_count),
+                            kThemeText, kThemePink,
+                            simrv::util::format_with_commas(c_stats.writeback_count)),
+                width);
+        }
         return format_to_width(
             std::format(
                 "  {}Release:\033[0m {}{:<7}\033[0m │ {}Inval:\033[0m {}{:<7}\033[0m │ "
@@ -215,6 +238,80 @@ auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row
                 kThemeText, kThemeVal, simrv::util::format_with_commas(c_stats.invalidation_count),
                 kThemeText, kThemePink, simrv::util::format_with_commas(c_stats.writeback_count)),
             width);
+    }
+    if (logical_row == 16) {
+        return section_line("TileLink-C Channels (A-E) & Fabric State", width);
+    }
+    if (logical_row == 17) {
+        auto const& bus = machine_.memory().system_bus();
+        auto const& checker = bus.protocol_checker();
+        if (width < 50) {
+            return format_to_width(
+                std::format("  {}A:\033[0m{}{}\033[0m │ {}B:\033[0m{}{}\033[0m │ "
+                            "{}C:\033[0m{}{}\033[0m │ {}D:\033[0m{}{}\033[0m │ "
+                            "{}E:\033[0m{}{}\033[0m",
+                            kThemeText, kThemeMint, checker.outstanding_sources(), kThemeText,
+                            kThemeSky, checker.outstanding_probes(), kThemeText, kThemeCoral,
+                            checker.outstanding_releases(), kThemeText, kThemePeach,
+                            bus.pending_responses(), kThemeText, kThemeVal,
+                            checker.outstanding_sinks()),
+                width);
+        }
+        return format_to_width(
+            std::format("  {}A(Req):\033[0m {}{:<3}\033[0m │ {}B(Probe):\033[0m {}{:<3}\033[0m │ "
+                        "{}C(Rel):\033[0m {}{:<3}\033[0m │ {}D(Resp):\033[0m {}{:<3}\033[0m │ "
+                        "{}E(Ack):\033[0m {}{}\033[0m",
+                        kThemeText, kThemeMint, checker.outstanding_sources(), kThemeText,
+                        kThemeSky, checker.outstanding_probes(), kThemeText, kThemeCoral,
+                        checker.outstanding_releases(), kThemeText, kThemePeach,
+                        bus.pending_responses(), kThemeText, kThemeVal,
+                        checker.outstanding_sinks()),
+            width);
+    }
+    if (logical_row == 18) {
+        return section_line("Recent Bus Transactions", width);
+    }
+    if (logical_row >= 19 && logical_row <= 24) {
+        auto const& history = machine_.memory().system_bus().transaction_history();
+        int const tx_index = static_cast<int>(history.size()) - 1 - (logical_row - 19);
+        if (tx_index >= 0 && tx_index < static_cast<int>(history.size())) {
+            auto const& tx = history[tx_index];
+            const char* ch_color = kThemeMint;
+            switch (tx.channel) {
+                case TileLinkChannel::A:
+                    ch_color = kThemeMint;
+                    break;
+                case TileLinkChannel::B:
+                    ch_color = kThemeSky;
+                    break;
+                case TileLinkChannel::C:
+                    ch_color = kThemeCoral;
+                    break;
+                case TileLinkChannel::D:
+                    ch_color = kThemePeach;
+                    break;
+                case TileLinkChannel::E:
+                    ch_color = kThemeVal;
+                    break;
+            }
+            std::string src_sink;
+            if (tx.channel == TileLinkChannel::A || tx.channel == TileLinkChannel::C) {
+                src_sink = std::format("src:{}", tx.source);
+            } else if (tx.channel == TileLinkChannel::D) {
+                src_sink = std::format("src:{} snk:{}", tx.source, tx.sink);
+            } else if (tx.channel == TileLinkChannel::E) {
+                src_sink = std::format("snk:{}", tx.sink);
+            }
+            std::string addr_str = (tx.address != 0) ? std::format("@{:#x}", tx.address) : "";
+            std::string detail_str = tx.detail.empty() ? "" : std::format("({})", tx.detail);
+
+            return format_to_width(
+                std::format("  \033[2m{:>6}\033[0m {}[{}]\033[0m {:<13} {:<10} {:<12} {}", tx.cycle,
+                            ch_color, memory::to_char(tx.channel), tx.opcode, src_sink, addr_str,
+                            detail_str),
+                width);
+        }
+        return format_to_width("  \033[2m-- idle --\033[0m", width);
     }
 
     return format_to_width("", width);

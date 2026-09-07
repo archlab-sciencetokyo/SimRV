@@ -38,6 +38,7 @@ struct CoherenceStats {
     Counter grant_count = 0;
     Counter invalidation_count = 0;
     Counter writeback_count = 0;
+    Counter prefetch_count = 0;
 };
 
 class CoherenceHub {
@@ -48,6 +49,8 @@ class CoherenceHub {
 
     auto handle_acquire(const TlChannelA& req, TlChannelD& resp,
                         std::array<Byte, kLineBytes>& line_buffer) -> bool;
+
+    auto handle_intent(const TlChannelA& req, TlChannelD& resp) -> bool;
 
     auto handle_release(const TlChannelC& req, TlChannelD& resp,
                         const std::array<Byte, kLineBytes>* release_data = nullptr) -> bool;

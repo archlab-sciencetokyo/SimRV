@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 
 #include "simrv/xlen/Types.hpp"
 
@@ -84,6 +85,134 @@ enum class TlPort : uint8_t { Data = 0, Instruction = 1 };
             return 'E';
     }
     return '?';
+}
+
+[[nodiscard]] constexpr auto to_string(TlOpcodeA op) noexcept -> std::string_view {
+    switch (op) {
+        case TlOpcodeA::PutFullData:
+            return "PutFullData";
+        case TlOpcodeA::PutPartialData:
+            return "PutPartialData";
+        case TlOpcodeA::ArithmeticData:
+            return "ArithmeticData";
+        case TlOpcodeA::LogicalData:
+            return "LogicalData";
+        case TlOpcodeA::Get:
+            return "Get";
+        case TlOpcodeA::Intent:
+            return "Intent";
+        case TlOpcodeA::AcquireBlock:
+            return "AcquireBlock";
+        case TlOpcodeA::AcquirePerm:
+            return "AcquirePerm";
+    }
+    return "UnknownA";
+}
+
+[[nodiscard]] constexpr auto to_string(TlOpcodeB op) noexcept -> std::string_view {
+    switch (op) {
+        case TlOpcodeB::ProbeBlock:
+            return "ProbeBlock";
+        case TlOpcodeB::ProbePerm:
+            return "ProbePerm";
+    }
+    return "UnknownB";
+}
+
+[[nodiscard]] constexpr auto to_string(TlOpcodeC op) noexcept -> std::string_view {
+    switch (op) {
+        case TlOpcodeC::ProbeAck:
+            return "ProbeAck";
+        case TlOpcodeC::ProbeAckData:
+            return "ProbeAckData";
+        case TlOpcodeC::Release:
+            return "Release";
+        case TlOpcodeC::ReleaseData:
+            return "ReleaseData";
+    }
+    return "UnknownC";
+}
+
+[[nodiscard]] constexpr auto to_string(TlOpcodeD op) noexcept -> std::string_view {
+    switch (op) {
+        case TlOpcodeD::AccessAck:
+            return "AccessAck";
+        case TlOpcodeD::AccessAckData:
+            return "AccessAckData";
+        case TlOpcodeD::HintAck:
+            return "HintAck";
+        case TlOpcodeD::Grant:
+            return "Grant";
+        case TlOpcodeD::GrantData:
+            return "GrantData";
+        case TlOpcodeD::ReleaseAck:
+            return "ReleaseAck";
+    }
+    return "UnknownD";
+}
+
+[[nodiscard]] constexpr auto to_string(TlOpcodeE op) noexcept -> std::string_view {
+    switch (op) {
+        case TlOpcodeE::GrantAck:
+            return "GrantAck";
+    }
+    return "UnknownE";
+}
+
+[[nodiscard]] constexpr auto to_string(MesiState state) noexcept -> std::string_view {
+    switch (state) {
+        case MesiState::Invalid:
+            return "Invalid";
+        case MesiState::Shared:
+            return "Shared";
+        case MesiState::Exclusive:
+            return "Exclusive";
+        case MesiState::Modified:
+            return "Modified";
+    }
+    return "Unknown";
+}
+
+[[nodiscard]] constexpr auto to_string(TlGrow grow) noexcept -> std::string_view {
+    switch (grow) {
+        case TlGrow::NtoB:
+            return "NtoB";
+        case TlGrow::NtoT:
+            return "NtoT";
+        case TlGrow::BtoT:
+            return "BtoT";
+    }
+    return "Unknown";
+}
+
+[[nodiscard]] constexpr auto to_string(TlCap cap) noexcept -> std::string_view {
+    switch (cap) {
+        case TlCap::ToT:
+            return "ToT";
+        case TlCap::ToB:
+            return "ToB";
+        case TlCap::ToN:
+            return "ToN";
+    }
+    return "Unknown";
+}
+
+[[nodiscard]] constexpr auto to_string(TlReport report) noexcept -> std::string_view {
+    switch (report) {
+        case TlReport::TtoT:
+            return "TtoT";
+        case TlReport::TtoB:
+            return "TtoB";
+        case TlReport::TtoN:
+            return "TtoN";
+        case TlReport::BtoB:
+            return "BtoB";
+        case TlReport::BtoN:
+            return "BtoN";
+        case TlReport::NtoN:
+            return "NtoN";
+    }
+    return "Unknown";
 }
 
 struct TlManagerCapabilities {

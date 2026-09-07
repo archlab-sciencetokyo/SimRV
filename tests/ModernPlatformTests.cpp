@@ -648,6 +648,128 @@ void test_modified_line_does_not_refill_stale_shared_data() {
     std::cout << "[PASS] test_modified_line_does_not_refill_stale_shared_data\n";
 }
 
+void test_tilelink_c_acquire_perm_upgrade() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    ConcreteMachine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.cpu.machine_ = &machine;
+    auto secondary = std::make_unique<simrv::core::CPU>();
+    secondary->machine_ = &machine;
+    secondary->state().mhartid = 1;
+    machine.secondary_harts_.push_back(std::move(secondary));
+    machine.memory().initialize_mmu();
+
+    const Address line = simrv::memory::kDramBaseAddress + 0x200;
+    const uint32_t original_val = 0xdeadbeef;
+    std::memcpy(ram.data() + 0x200, &original_val, sizeof(original_val));
+    auto& bus = machine.memory().system_bus();
+
+    // Hart 0 acquires line as Branch (Shared)
+    simrv::memory::TlChannelA acq0{};
+    acq0.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
+    acq0.grow = simrv::memory::TlGrow::NtoB;
+    acq0.source = 10;
+    acq0.hart = 0;
+    acq0.address = line;
+    acq0.size = simrv::memory::kTlBlockSize;
+    simrv::memory::TlChannelD resp0{};
+    std::array<Byte, simrv::memory::CoherenceHub::kLineBytes> data0{};
+    check(bus.acquire_block(acq0, resp0, data0));
+    bus.grant_ack(simrv::memory::TlChannelE{.sink = resp0.sink});
+    machine.hart(0).dcache.insert(line, data0.data(), simrv::memory::MesiState::Shared);
+
+    // Hart 1 acquires line as Branch (Shared)
+    simrv::memory::TlChannelA acq1 = acq0;
+    acq1.source = 11;
+    acq1.hart = 1;
+    simrv::memory::TlChannelD resp1{};
+    std::array<Byte, simrv::memory::CoherenceHub::kLineBytes> data1{};
+    check(bus.acquire_block(acq1, resp1, data1));
+    bus.grant_ack(simrv::memory::TlChannelE{.sink = resp1.sink});
+    machine.hart(1).dcache.insert(line, data1.data(), simrv::memory::MesiState::Shared);
+
+    // Verify directory state: Shared, sharers = 0b11
+    auto dir = bus.coherence_hub().get_directory_state(line);
+    check(dir.state == simrv::memory::MesiState::Shared);
+    check(dir.sharers_mask == 0b11U);
+
+    // Hart 0 upgrades from Branch to Trunk (BtoT) via AcquirePerm
+    simrv::memory::TlChannelA upg{};
+    upg.opcode = simrv::memory::TlOpcodeA::AcquirePerm;
+    upg.grow = simrv::memory::TlGrow::BtoT;
+    upg.source = 12;
+    upg.hart = 0;
+    upg.address = line;
+    upg.size = simrv::memory::kTlBlockSize;
+    simrv::memory::TlChannelD upg_resp{};
+    check(bus.acquire_perm(upg, upg_resp));
+    check(upg_resp.opcode == simrv::memory::TlOpcodeD::Grant);
+    check(upg_resp.cap == simrv::memory::TlCap::ToT);
+    bus.grant_ack(simrv::memory::TlChannelE{.sink = upg_resp.sink});
+
+    check(machine.hart(0).dcache.upgrade_line_state(line, simrv::memory::MesiState::Exclusive));
+    check(machine.hart(0).dcache.write(line, 0xcafebeef, 2));
+    bus.mark_modified(line, 0);
+
+    // Hart 1 should have been probed and invalidated by CoherenceHub during AcquirePerm
+    check(machine.hart(1).dcache.line_state(line) == simrv::memory::MesiState::Invalid);
+
+    // Verify directory state: Exclusive / Modified, sole sharer Hart 0
+    dir = bus.coherence_hub().get_directory_state(line);
+    check(dir.state == simrv::memory::MesiState::Modified);
+    check(dir.sharers_mask == 0b01U);
+    check(dir.owner_hart.has_value() && *dir.owner_hart == 0);
+
+    // Check transaction history contains recent transactions
+    check(!bus.transaction_history().empty());
+
+    std::cout << "[PASS] test_tilelink_c_acquire_perm_upgrade\n";
+}
+
+void test_tilelink_c_prefetch_intent() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    ConcreteMachine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.cpu.machine_ = &machine;
+    machine.memory().initialize_mmu();
+
+    const Address line = simrv::memory::kDramBaseAddress + 0x300;
+    const uint32_t val = 0x87654321;
+    std::memcpy(ram.data() + 0x300, &val, sizeof(val));
+    auto& bus = machine.memory().system_bus();
+
+    simrv::memory::TlChannelA intent{};
+    intent.opcode = simrv::memory::TlOpcodeA::Intent;
+    intent.intent = simrv::memory::TlIntent::PrefetchRead;
+    intent.source = 20;
+    intent.hart = 0;
+    intent.address = line;
+    intent.size = simrv::memory::kTlBlockSize;
+
+    check(bus.send_request(intent));
+    simrv::memory::TlChannelD resp{};
+    check(bus.get_response(intent.source, resp));
+    check(resp.opcode == simrv::memory::TlOpcodeD::HintAck);
+    check(!resp.failed());
+    check(bus.coherence_hub().stats().prefetch_count >= 1);
+
+    // Verify L3 cache now has line cached
+    std::array<Byte, simrv::memory::CoherenceHub::kLineBytes> l3_buf{};
+    simrv::memory::MesiState l3_state = simrv::memory::MesiState::Invalid;
+    check(bus.coherence_hub().l3_cache().lookup_line(line, l3_buf, l3_state));
+    uint32_t l3_val = 0;
+    std::memcpy(&l3_val, l3_buf.data(), sizeof(l3_val));
+    check(l3_val == val);
+
+    std::cout << "[PASS] test_tilelink_c_prefetch_intent\n";
+}
+
 void test_global_cycle_smp_pipeline_ordering() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
@@ -2266,6 +2388,8 @@ int main(int argc, char** argv) {
     test_timed_page_walk_transitions();
     test_timed_smp_coherence_ordering();
     test_modified_line_does_not_refill_stale_shared_data();
+    test_tilelink_c_acquire_perm_upgrade();
+    test_tilelink_c_prefetch_intent();
     test_global_cycle_smp_pipeline_ordering();
     test_global_cycle_timer_phase_ordering();
     test_ca_quantum_smp_batching();

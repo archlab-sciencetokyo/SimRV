@@ -1087,6 +1087,9 @@ auto InspectorPane::render_system_or_pipeline_extended(const simrv::core::CPU& c
     if (page_ == TuiRegPage::PIPELINE && logical_row >= 16 && logical_row <= 24) {
         return render_pipeline_stages(cpu, logical_row, col_width, right_width);
     }
+    if (page_ == TuiRegPage::BUS && logical_row >= 16 && logical_row <= 24) {
+        return render_io_stats(cpu, logical_row, col_width, right_width);
+    }
     if (!single_column && logical_row >= 16 && logical_row <= 20) {
         return render_system_state(cpu, logical_row, col_width, right_width);
     }

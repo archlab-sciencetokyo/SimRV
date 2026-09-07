@@ -449,14 +449,21 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             }
             const Address completed_line = transfer.address;
             transfer.reset();
-            if (timed.payload.failed() || !timed.has_line_data) {
+            const bool is_perm_grant =
+                timed.payload.opcode == TlOpcodeD::Grant && !timed.has_line_data;
+            if (timed.payload.failed() || (!timed.has_line_data && !is_perm_grant)) {
                 cpu.active_context().pending_exception = ExceptionCode::FaultStore;
                 cpu.active_context().pending_tval = v_addr;
                 return;
             }
-            cpu.dcache.insert(completed_line, timed.line_data.data(), mesi_for(timed.payload.cap));
-            release_evicted_line(mem.system_bus(), cpu.dcache,
-                                 static_cast<HartId>(cpu.state().mhartid), TlPort::Data);
+            if (is_perm_grant) {
+                cpu.dcache.upgrade_line_state(completed_line, mesi_for(timed.payload.cap));
+            } else {
+                cpu.dcache.insert(completed_line, timed.line_data.data(),
+                                  mesi_for(timed.payload.cap));
+                release_evicted_line(mem.system_bus(), cpu.dcache,
+                                     static_cast<HartId>(cpu.state().mhartid), TlPort::Data);
+            }
             TlChannelE ack{};
             ack.sink = timed.payload.sink;
             mem.system_bus().grant_ack(ack);
@@ -490,10 +497,11 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
                 // Not in Trunk state; acquire Trunk ownership via TL-C
                 const Address line_base =
                     addr & ~(static_cast<Address>(simrv::cache::DCache::kLineBytes - 1u));
-                std::array<Byte, simrv::cache::DCache::kLineBytes> line_data{};
+                const bool is_upgrade =
+                    (cpu.dcache.line_state(line_base) == simrv::memory::MesiState::Shared);
                 TlChannelA req{};
-                req.opcode = TlOpcodeA::AcquireBlock;
-                req.grow = TlGrow::NtoT;
+                req.opcode = is_upgrade ? TlOpcodeA::AcquirePerm : TlOpcodeA::AcquireBlock;
+                req.grow = is_upgrade ? TlGrow::BtoT : TlGrow::NtoT;
                 req.size = simrv::cache::DCache::kLineShift;
                 req.hart = static_cast<HartId>(cpu.state().mhartid);
                 req.source = make_tl_source(req.hart, TlPort::Data);
@@ -511,14 +519,26 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
                 }
 
                 TlChannelD resp{};
-                if (mem.system_bus().acquire_block(req, resp, line_data)) {
-                    cpu.dcache.insert(line_base, line_data.data(), mesi_for(resp.cap));
-                    release_evicted_line(mem.system_bus(), cpu.dcache,
-                                         static_cast<HartId>(cpu.state().mhartid), TlPort::Data);
-                    TlChannelE ack{};
-                    ack.sink = resp.sink;
-                    mem.system_bus().grant_ack(ack);
-                    cache_write_completed = cpu.dcache.write(addr, data, funct3);
+                if (is_upgrade) {
+                    if (mem.system_bus().acquire_perm(req, resp)) {
+                        cpu.dcache.upgrade_line_state(line_base, mesi_for(resp.cap));
+                        TlChannelE ack{};
+                        ack.sink = resp.sink;
+                        mem.system_bus().grant_ack(ack);
+                        cache_write_completed = cpu.dcache.write(addr, data, funct3);
+                    }
+                } else {
+                    std::array<Byte, simrv::cache::DCache::kLineBytes> line_data{};
+                    if (mem.system_bus().acquire_block(req, resp, line_data)) {
+                        cpu.dcache.insert(line_base, line_data.data(), mesi_for(resp.cap));
+                        release_evicted_line(mem.system_bus(), cpu.dcache,
+                                             static_cast<HartId>(cpu.state().mhartid),
+                                             TlPort::Data);
+                        TlChannelE ack{};
+                        ack.sink = resp.sink;
+                        mem.system_bus().grant_ack(ack);
+                        cache_write_completed = cpu.dcache.write(addr, data, funct3);
+                    }
                 }
             }
             if (cache_write_completed) {
