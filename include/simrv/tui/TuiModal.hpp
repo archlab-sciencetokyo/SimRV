@@ -35,8 +35,6 @@ enum class ModalType : uint8_t {
     Help,
     Glossary,
     Settings,
-    ConfigureMisa,
-    ConfigureSystem,
     ManageBreakpoints,
     Notice,
     PlatformChangeConfirm,
@@ -158,18 +156,6 @@ class TuiModal {
     void pop_settings_digit();
     void apply_settings_misa_profile(int profile_idx);
 
-    void move_misa_cursor(int delta);
-    void toggle_misa_at_cursor();
-    void toggle_misa_by_index(int index);
-    void apply_misa_profile(int profile_idx);
-
-    void move_sysconfig_cursor(int delta);
-    void adjust_sysconfig_at_cursor(int dir);
-    void toggle_sysconfig_at_cursor();
-    void toggle_sysconfig_by_index(int index);
-    void push_sysconfig_digit(char c);
-    void pop_sysconfig_digit();
-
     void move_bp_cursor(int delta);
     auto remove_bp_at_cursor(const std::function<void(const std::string&)>& set_status_override_cb)
         -> bool;
@@ -217,10 +203,6 @@ class TuiModal {
     int bp_cursor_ = 0;
     SettingsDraft settings_draft_;
     SettingsDraft pending_platform_draft_;
-    int misa_cursor_ = 0;
-    MisaDraft misa_draft_;
-    int sysconfig_cursor_ = 0;
-    SysConfigDraft sysconfig_draft_;
     int glossary_topic_ = 0;
     int glossary_scroll_ = 0;
     int preset_cursor_ = 0;

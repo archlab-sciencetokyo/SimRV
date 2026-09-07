@@ -52,7 +52,6 @@ class StatusBar : public TuiWidget {
         right_width_ = right;
     }
     void set_right_panel_mode(TuiRightPanelMode mode) { right_panel_mode_ = mode; }
-    void set_trace_enabled(bool enabled) { trace_enabled_ = enabled; }
 
     [[nodiscard]] auto is_pos_on_status_badge(int x, int width) const -> bool;
     [[nodiscard]] auto is_pos_on_right_panel_mode(int x) const -> bool;
@@ -66,7 +65,6 @@ class StatusBar : public TuiWidget {
    private:
     simrv::core::Machine& machine_;
     bool paused_ = true;
-    bool trace_enabled_ = false;
     std::string status_override_;
     TuiRegPage active_page_ = TuiRegPage::GPR;
     TuiLayout layout_ = TuiLayout::Split;

@@ -27,8 +27,6 @@ enum class KeyAction : uint8_t {
     SetSpeed,
     LoadBinary,
     Settings,
-    ConfigureSystem,
-    ConfigureMisa,
     Help,
     Quit,
     CycleLayout,
@@ -41,7 +39,6 @@ enum class KeyAction : uint8_t {
     ToggleLearn = ToggleStudentGuide,  // Compatibility alias for the former name.
     ActivateStudentGuide,
     ToggleExplain,
-    ToggleTrace,
     ExportInspection,
     SwitchHart,
     OpenGlossary,

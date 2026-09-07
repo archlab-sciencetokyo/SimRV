@@ -77,12 +77,6 @@ void TuiModal::open(ModalType type, InspectorPane* inspector_pane, uint64_t step
         case ModalType::Settings:
             modals::SettingsModal::open(settings_draft_, machine_);
             break;
-        case ModalType::ConfigureMisa:
-            modals::MisaModal::open(misa_draft_, misa_cursor_, machine_);
-            break;
-        case ModalType::ConfigureSystem:
-            modals::SystemConfigModal::open(sysconfig_draft_, sysconfig_cursor_, machine_);
-            break;
         default:
             break;
     }
@@ -128,48 +122,6 @@ void TuiModal::apply_settings_misa_profile(int profile_idx) {
     modals::SettingsModal::apply_misa_profile(settings_draft_, profile_idx);
 }
 
-void TuiModal::move_misa_cursor(int delta) {
-    input_.clear();
-    modals::MisaModal::move_cursor(misa_cursor_, delta);
-}
-
-void TuiModal::toggle_misa_at_cursor() { toggle_misa_by_index(misa_cursor_); }
-
-void TuiModal::toggle_misa_by_index(int index) {
-    modals::MisaModal::toggle_item(misa_draft_, index);
-}
-
-void TuiModal::apply_misa_profile(int profile_idx) {
-    modals::MisaModal::apply_profile(misa_draft_, profile_idx);
-}
-
-void TuiModal::move_sysconfig_cursor(int delta) {
-    input_.clear();
-    modals::SystemConfigModal::move_cursor(sysconfig_draft_, sysconfig_cursor_, delta);
-}
-
-void TuiModal::adjust_sysconfig_at_cursor(int dir) {
-    input_.clear();
-    modals::SystemConfigModal::adjust_setting(sysconfig_draft_, sysconfig_cursor_, dir);
-}
-
-void TuiModal::toggle_sysconfig_at_cursor() {
-    input_.clear();
-    modals::SystemConfigModal::toggle_setting(sysconfig_draft_, sysconfig_cursor_);
-}
-
-void TuiModal::toggle_sysconfig_by_index(int index) {
-    modals::SystemConfigModal::toggle_setting(sysconfig_draft_, index);
-}
-
-void TuiModal::push_sysconfig_digit(char c) {
-    modals::SystemConfigModal::push_digit(sysconfig_draft_, sysconfig_cursor_, input_, c);
-}
-
-void TuiModal::pop_sysconfig_digit() {
-    modals::SystemConfigModal::pop_digit(sysconfig_draft_, sysconfig_cursor_, input_);
-}
-
 void TuiModal::move_bp_cursor(int delta) {
     modals::BreakpointModal::move_cursor(bp_cursor_, delta, machine_);
 }
@@ -203,6 +155,7 @@ auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step
                       const std::function<void(TuiRegPage)>& set_reg_page_cb,
                       const std::function<void(const std::string&)>& set_status_override_cb,
                       const std::function<void()>& on_speed_changed_cb) -> bool {
+    (void)set_status_override_cb;
     bool result = false;
     ModalType current_modal = active_modal_;
     auto notice_cb = [this](const std::string& msg) { open_notice("MODAL NOTICE", msg, false); };
@@ -273,24 +226,6 @@ auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step
                 return true;
             }
         } break;
-        case ModalType::ConfigureMisa:
-            result = modals::MisaModal::submit(misa_draft_, machine_, set_status_override_cb);
-            if (result) {
-                open_notice("MISA CONFIGURATION SAVED",
-                            "CPU MISA extensions updated. Resetting simulator system...", false);
-                return true;
-            }
-            break;
-        case ModalType::ConfigureSystem:
-            result = modals::SystemConfigModal::submit(sysconfig_draft_, machine_);
-            if (result) {
-                open_notice(
-                    "MICROARCHITECTURE SAVED",
-                    "Pipeline & microarchitecture configuration saved and applied successfully.",
-                    false);
-                return true;
-            }
-            break;
         case ModalType::LayoutPresets:
             result = true;
             break;
@@ -339,7 +274,6 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
     bool is_glossary = (active_modal_ == ModalType::Glossary);
     bool is_wide_modal =
         (is_help || is_glossary || active_modal_ == ModalType::Settings ||
-         active_modal_ == ModalType::ConfigureMisa || active_modal_ == ModalType::ConfigureSystem ||
          active_modal_ == ModalType::Notice || active_modal_ == ModalType::PlatformChangeConfirm ||
          active_modal_ == ModalType::LayoutPresets);
     const int fallback_width = is_wide_modal ? 78 : 58;
@@ -352,12 +286,10 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
 
     int est_rows = (active_modal_ == ModalType::Settings && settings_draft_.active_tab == 0)
                        ? kGeneralSettingsContentRows
-                   : (active_modal_ == ModalType::ConfigureMisa)   ? 16
-                   : (active_modal_ == ModalType::ConfigureSystem) ? 22
-                   : (active_modal_ == ModalType::Glossary)        ? 26
-                   : (active_modal_ == ModalType::Help)            ? 24
-                   : (active_modal_ == ModalType::LayoutPresets)   ? 12
-                                                                   : 10;
+                   : (active_modal_ == ModalType::Glossary)      ? 26
+                   : (active_modal_ == ModalType::Help)          ? 24
+                   : (active_modal_ == ModalType::LayoutPresets) ? 12
+                                                                 : 10;
 
     OverlayGeometry overlay =
         calculate_overlay_geometry(term_width, term_height, maximum_width, est_rows);
@@ -416,9 +348,6 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
                         set_settings_tab(static_cast<uint8_t>(action));
                         return ModalClickResult::Handled;
                     }
-                    return action == 0 ? ModalClickResult::Submit : ModalClickResult::Closed;
-                case ModalType::ConfigureMisa:
-                case ModalType::ConfigureSystem:
                     return action == 0 ? ModalClickResult::Submit : ModalClickResult::Closed;
                 case ModalType::ManageBreakpoints: {
                     int last_control_row = 0;
@@ -525,25 +454,6 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
             return ModalClickResult::Handled;
         }
 
-        case ModalType::ConfigureSystem: {
-            int sys_idx = std::clamp(content_row - 1, 0, 15);
-            sysconfig_cursor_ = sys_idx;
-            if (rel_x > box_w / 2 + 10)
-                adjust_sysconfig_at_cursor(1);
-            else if (rel_x > box_w / 2)
-                adjust_sysconfig_at_cursor(-1);
-            else
-                toggle_sysconfig_at_cursor();
-            return ModalClickResult::Handled;
-        }
-
-        case ModalType::ConfigureMisa: {
-            int misa_idx = std::clamp(content_row - 1, 0, 10);
-            misa_cursor_ = misa_idx;
-            toggle_misa_at_cursor();
-            return ModalClickResult::Handled;
-        }
-
         case ModalType::Help:
             close();
             return ModalClickResult::Closed;
@@ -621,16 +531,6 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
         case ModalType::Settings:
             modals::SettingsModal::render(content_rows, add_row, settings_draft_, machine_);
             break;
-        case ModalType::ConfigureMisa:
-            modals::MisaModal::render(content_rows, add_row, misa_draft_, misa_cursor_, machine_);
-            break;
-        case ModalType::ConfigureSystem:
-            modals::SystemConfigModal::render(content_rows, add_row, sysconfig_draft_,
-                                              sysconfig_cursor_, input_);
-            add_row("");
-            add_row(modals::build_modal_footer(
-                {{"[Enter]", "Apply Configuration"}, {"[Esc / q]", "Cancel"}}));
-            break;
         case ModalType::Help:
             modals::HelpModal::render(content_rows, add_row, term_height, provisional_width);
             break;
@@ -707,12 +607,6 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             cursor_row = settings_draft_.active_tab == 0
                              ? general_setting_row(settings_draft_.tab_cursor[0])
                              : 3 + settings_draft_.tab_cursor[settings_draft_.active_tab];
-            break;
-        case ModalType::ConfigureMisa:
-            cursor_row = 2 + misa_cursor_;
-            break;
-        case ModalType::ConfigureSystem:
-            cursor_row = 3 + sysconfig_cursor_;
             break;
         case ModalType::ManageBreakpoints:
             cursor_row = 2 + bp_cursor_;

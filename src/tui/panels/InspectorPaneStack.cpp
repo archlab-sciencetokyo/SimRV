@@ -83,18 +83,9 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
 
     bool const is_16b_aligned = (sp % 16 == 0);
     if (logical_row == 0) {
-        int const viewport = std::max(1, width - 2);
-        int const first_col = get_horizontal_scroll_offset() + 1;
-        int const last_col = std::min(104, get_horizontal_scroll_offset() + viewport);
-        std::string title;
-        if (width >= 80) {
-            title = std::format("Stack Watch · cols {}-{}/104 ({})", first_col, last_col,
-                                is_16b_aligned ? "16B aligned" : "unaligned");
-        } else if (width >= 50) {
-            title = std::format("Stack (cols {}-{}/104)", first_col, last_col);
-        } else {
-            title = std::format("Stack ({}-{})", first_col, last_col);
-        }
+        std::string title = width >= 50 ? std::format("Stack Watch ({})",
+                                                      is_16b_aligned ? "16B aligned" : "unaligned")
+                                        : "Stack Watch";
         return section_line(title, width);
     }
     if (logical_row == 14) {

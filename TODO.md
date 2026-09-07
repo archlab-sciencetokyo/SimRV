@@ -194,3 +194,10 @@ The profile that informed this handover placed `CPU::run_ca_pipeline_cycle` firs
 followed by branch-predictor update, fetch/decompression/decode, and dependency
 resolution.  Repeat it after each isolated change; profile shape is evidence, not a
 substitute for the controlled benchmark gate above.
+
+
+# 09-07 follow-up
+
+- SMP is broken, hart 1 is not used by linux
+- Scrolling behavior in TUI is inconsistent, needs to be fixed
+- Especially horizontal scrolling needs to be revised

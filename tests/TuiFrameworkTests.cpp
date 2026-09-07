@@ -39,6 +39,10 @@ struct TuiTestAccess {
     }
     static auto modal(Tui& tui) -> TuiModal& { return tui.modal_; }
     static void set_cached_term_width(Tui& tui, int w) { tui.cached_term_width_ = w; }
+    static void drain_trace(Tui& tui) { tui.drain_trace_records(); }
+    static auto trace_rows(const Tui& tui) -> const std::vector<std::string>& {
+        return tui.trace_buffer_;
+    }
 };
 }  // namespace simrv::tui
 
@@ -164,15 +168,15 @@ void test_utf8_and_theme_helpers() {
            "overlay replacement preserves width when its edge crosses a wide character");
     expect(simrv::tui::make_repeated_string("═", 3) == "═══", "border repetition is exact");
 
-    simrv::tui::set_tui_theme(simrv::tui::TuiTheme::HighContrast);
+    simrv::tui::set_high_contrast(true);
     expect(simrv::tui::is_high_contrast(), "high-contrast theme updates shared state");
-    simrv::tui::set_tui_theme(simrv::tui::TuiTheme::Adaptive);
+    simrv::tui::set_high_contrast(false);
     expect(!simrv::tui::is_high_contrast(), "adaptive theme clears high contrast");
 }
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 34, "all key actions have registry entries");
+    expect(bindings.size() == 31, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
     std::set<char> claimed_chars;
     for (const auto& binding : bindings) {
@@ -242,10 +246,7 @@ void test_key_registry() {
         simrv::tui::TuiFooterAction::CycleLayout,
         simrv::tui::TuiFooterAction::ToggleStudentGuide,
         simrv::tui::TuiFooterAction::TogglePanel,
-        simrv::tui::TuiFooterAction::ToggleTrace,
         simrv::tui::TuiFooterAction::OpenSettings,
-        simrv::tui::TuiFooterAction::ConfigureMisa,
-        simrv::tui::TuiFooterAction::ConfigureSystem,
         simrv::tui::TuiFooterAction::ManageBreakpoints,
         simrv::tui::TuiFooterAction::Reboot,
         simrv::tui::TuiFooterAction::SwitchHart,
@@ -296,10 +297,6 @@ void test_key_registry() {
            "breakpoints are available without a debug-mode gate");
     expect(simrv::tui::Keybindings::is_available(KeyAction::InspectAddress, paused),
            "architectural memory inspection is always available while paused");
-    auto functional = paused;
-    functional.cycle_accurate = false;
-    expect(simrv::tui::Keybindings::is_available(KeyAction::ConfigureSystem, functional),
-           "system configuration is available in functional mode");
     auto modal = paused;
     modal.modal_active = true;
     expect(simrv::tui::Keybindings::is_available(KeyAction::Quit, modal),
@@ -447,8 +444,7 @@ void test_mirrored_modal_arrows() {
     using namespace simrv::tui;
     simrv::core::Machine machine;
     Tui tui(machine);
-    for (auto type : {ModalType::Glossary, ModalType::Settings, ModalType::ConfigureMisa,
-                      ModalType::ConfigureSystem, ModalType::ManageBreakpoints}) {
+    for (auto type : {ModalType::Glossary, ModalType::Settings, ModalType::ManageBreakpoints}) {
         for (std::string_view sequence :
              {"\033[A", "\033OA", "\033[B", "\033OB", "\033[C", "\033OC", "\033[D", "\033OD"}) {
             tui.open_modal(type);
@@ -465,12 +461,6 @@ void test_mirrored_modal_arrows() {
                     case ModalType::Settings:
                         reference.move_settings_cursor(direction);
                         break;
-                    case ModalType::ConfigureMisa:
-                        reference.move_misa_cursor(direction);
-                        break;
-                    case ModalType::ConfigureSystem:
-                        reference.move_sysconfig_cursor(direction);
-                        break;
                     case ModalType::ManageBreakpoints:
                         reference.move_bp_cursor(direction);
                         break;
@@ -484,12 +474,6 @@ void test_mirrored_modal_arrows() {
                         break;
                     case ModalType::Settings:
                         reference.adjust_setting_at_cursor(direction);
-                        break;
-                    case ModalType::ConfigureMisa:
-                        reference.toggle_misa_at_cursor();
-                        break;
-                    case ModalType::ConfigureSystem:
-                        reference.adjust_sysconfig_at_cursor(direction);
                         break;
                     default:
                         break;
@@ -1233,6 +1217,21 @@ void test_multicolumn_refinement() {
     expect(col0_forced.contains("[1: Pipeline Stages]"),
            "forced column 0 header renders column header");
 
+    // A column header occupies one row.  Its scroll marker therefore belongs
+    // on the final visible panel row, not one row above it.
+    pane.set_page(simrv::tui::TuiRegPage::GPR);
+    pane.set_visible_rows(10);
+    (void)pane.render_column_row(0, 40, 0, 4, true);
+    std::string const penultimate = pane.render_column_row(8, 40, 0, 4, true);
+    std::string const last = pane.render_column_row(9, 40, 0, 4, true);
+    expect(!strip_ansi(penultimate).contains("more lines below"),
+           "multi-column scroll marker does not consume the penultimate row");
+    expect(strip_ansi(last).contains("more lines below"),
+           "multi-column scroll marker occupies the final content row");
+    pane.scroll(1);
+    expect(pane.get_scroll_offset() == 1,
+           "multi-column primary pane scrolls after its one-row header");
+
     // 5. Layout presets in functional mode do not produce duplicate panels
     simrv::core::Machine fm_machine;
     simrv::tui::Tui fm_tui(fm_machine);
@@ -1264,54 +1263,68 @@ void test_multicolumn_refinement() {
 void test_horizontal_scrolling() {
     simrv::core::Machine machine;
     simrv::tui::InspectorPane pane(machine);
+    std::vector<std::string> trace = {
+        "0000000080000000 addi x1, x0, 1 -- deliberately wide trace row"};
+    pane.set_trace_buffer(&trace);
+    pane.set_visible_rows(30);
 
-    // Verify supports_horizontal_scroll for wide views
+    // Responsive presentation pages fit their assigned column and never expose horizontal scroll.
     pane.set_page(simrv::tui::TuiRegPage::PIPELINE);
-    expect(pane.supports_horizontal_scroll(), "PIPELINE supports horizontal scroll");
+    (void)pane.render_column_row(1, 40, 1, 3, true);
+    expect(!pane.supports_horizontal_scroll(), "PIPELINE wraps to its assigned column width");
 
     pane.set_page(simrv::tui::TuiRegPage::BUS);
-    expect(pane.supports_horizontal_scroll(), "BUS supports horizontal scroll");
+    (void)pane.render_column_row(1, 40, 1, 3, true);
+    expect(!pane.supports_horizontal_scroll(), "BUS fits its assigned column width");
 
     pane.set_page(simrv::tui::TuiRegPage::EXPLAIN);
-    expect(pane.supports_horizontal_scroll(), "EXPLAIN supports horizontal scroll");
+    (void)pane.render_column_row(1, 40, 1, 3, true);
+    expect(!pane.supports_horizontal_scroll(), "EXPLAIN wraps instead of scrolling horizontally");
 
     pane.set_page(simrv::tui::TuiRegPage::TRACE);
-    expect(pane.supports_horizontal_scroll(), "TRACE supports horizontal scroll");
-
-    // Scroll offset starts at 0
-    pane.set_page(simrv::tui::TuiRegPage::PIPELINE);
-    expect(pane.get_horizontal_scroll_offset() == 0, "initial horizontal scroll is 0");
-
-    // Scroll right by 8 in a narrow column (width=40)
     (void)pane.render_column_row(1, 40, 1, 3, true);
+    expect(pane.supports_horizontal_scroll(), "wide TRACE rows support horizontal scroll");
+
+    // Scroll offset starts at zero and is clamped by the trace viewport.
+    expect(pane.get_horizontal_scroll_offset() == 0, "initial horizontal scroll is 0");
     pane.scroll_horizontal(8);
     expect(pane.get_horizontal_scroll_offset() == 8, "scroll_horizontal(8) advances offset");
-
-    // Scroll further right
-    pane.scroll_horizontal(8);
-    expect(pane.get_horizontal_scroll_offset() == 16, "scroll_horizontal advances to 16");
-
-    // Scroll left
     pane.scroll_horizontal(-8);
-    expect(pane.get_horizontal_scroll_offset() == 8, "scroll_horizontal(-8) decreases offset");
+    expect(pane.get_horizontal_scroll_offset() == 0, "scroll_horizontal(-8) returns to start");
 
-    // Multi-column page switching preserves horizontal offset per page
+    // Changing to a wrapped page resets its horizontal state and cannot re-enable scrolling.
+    pane.scroll_horizontal(8);
     pane.set_page(simrv::tui::TuiRegPage::BUS);
-    expect(pane.get_horizontal_scroll_offset() == 0, "BUS starts at 0 offset");
-    (void)pane.render_column_row(1, 40, 1, 3, true);
+    expect(pane.get_horizontal_scroll_offset() == 0,
+           "wrapped pages reset their horizontal scroll state");
     pane.scroll_horizontal(12);
-    expect(pane.get_horizontal_scroll_offset() == 12, "BUS scrolls to 12");
+    expect(pane.get_horizontal_scroll_offset() == 0,
+           "wrapped pages ignore horizontal-scroll requests");
 
-    pane.set_page(simrv::tui::TuiRegPage::PIPELINE);
-    expect(pane.get_horizontal_scroll_offset() == 8,
-           "PIPELINE offset is preserved across page switch");
-
-    pane.set_page(simrv::tui::TuiRegPage::BUS);
-    expect(pane.get_horizontal_scroll_offset() == 12, "BUS offset is preserved across page switch");
-
-    // Reset horizontal scroll
+    pane.set_page(simrv::tui::TuiRegPage::TRACE);
     pane.reset_horizontal_scroll();
     expect(pane.get_horizontal_scroll_offset() == 0, "reset_horizontal_scroll clears offset");
+}
+
+void test_flight_recorder_merge_and_wraparound() {
+    simrv::core::Machine machine;
+    simrv::tui::Tui tui(machine);
+    tui.record_flight_instruction(0x1000, simrv::isa::Opcode::OpImm, simrv::isa::OperationId::ADDI,
+                                  1);
+    tui.record_flight_instruction(0x1004, simrv::isa::Opcode::OpImm, simrv::isa::OperationId::ADDI,
+                                  0);
+    simrv::tui::TuiTestAccess::drain_trace(tui);
+    const auto& rows = simrv::tui::TuiTestAccess::trace_rows(tui);
+    expect(rows.size() == 2 && rows[0].contains("[H1]") && rows[1].contains("[H0]"),
+           "flight recorder merges per-hart records by global retirement order");
+
+    for (size_t i = 0; i < simrv::tui::Tui::kTraceBufferSize + 4; ++i) {
+        tui.record_flight_instruction(0x2000 + i * 4, simrv::isa::Opcode::OpImm,
+                                      simrv::isa::OperationId::ADDI, 1);
+    }
+    simrv::tui::TuiTestAccess::drain_trace(tui);
+    expect(simrv::tui::TuiTestAccess::trace_rows(tui).size() == simrv::tui::Tui::kTraceBufferSize,
+           "flight recorder retains its bounded most-recent history");
 }
 
 void test_bus_inspector_and_tilelink_channels() {
@@ -1383,6 +1396,7 @@ int main() {
     test_inspector_panels_traits_and_scoreboard();
     test_multicolumn_refinement();
     test_horizontal_scrolling();
+    test_flight_recorder_merge_and_wraparound();
     test_bus_inspector_and_tilelink_channels();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";

@@ -851,6 +851,9 @@ void test_dynamic_fdt_generator() {
            "Linux defaults to the standard 16550 MMIO early console, not legacy SBI console");
     expect(fdt_text.find("earlycon=sbi") == std::string::npos,
            "generated FDT omits the legacy SBI early console selector");
+    expect(fdt_text.find("enable-method") != std::string::npos &&
+               fdt_text.find("riscv,sbi") != std::string::npos,
+           "every generated CPU advertises SBI HSM startup for Linux SMP");
 }
 
 void test_pmp_semantics() {

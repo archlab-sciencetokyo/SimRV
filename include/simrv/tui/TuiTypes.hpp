@@ -150,10 +150,7 @@ enum class TuiFooterAction : uint8_t {
     CycleTools,
     ToggleHelp,
     TogglePanel,
-    ToggleTrace,
     OpenSettings,
-    ConfigureMisa,
-    ConfigureSystem,
     Reboot,
     SwitchHart,
     ToggleTheme

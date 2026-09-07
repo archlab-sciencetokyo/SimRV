@@ -17,9 +17,7 @@ namespace simrv::tui {
 namespace {
 
 [[nodiscard]] auto use_basic_ansi_badges() -> bool {
-    return get_tui_theme() == TuiTheme::Adaptive || get_tui_theme() == TuiTheme::HighContrast ||
-           get_tui_theme() == TuiTheme::ClassicAnsi ||
-           get_active_theme_style() == TuiThemeStyle::ClassicAnsi;
+    return is_high_contrast() || get_active_theme_style() != TuiThemeStyle::SakuraPastel;
 }
 
 [[nodiscard]] auto header_badge(std::string_view text, const char* ansi_color,
@@ -27,11 +25,10 @@ namespace {
     return std::format("{} {} \033[0m", use_basic_ansi_badges() ? ansi_color : indexed_color, text);
 }
 
-[[nodiscard]] auto panel_mode_label(TuiRightPanelMode mode, int width, bool trace_enabled)
-    -> std::string {
+[[nodiscard]] auto panel_mode_label(TuiRightPanelMode mode, int width) -> std::string {
     if (mode == TuiRightPanelMode::Display) return width < 45 ? "Disp" : "Display";
     if (width < 45) return "Term";
-    return trace_enabled ? "Terminal Trace" : "Terminal";
+    return "Terminal";
 }
 
 [[nodiscard]] auto speed_control_label(const simrv::core::Machine& machine, uint64_t kips,
@@ -146,8 +143,7 @@ auto StatusBar::is_pos_on_right_panel_mode(int x) const -> bool {
 
     int const right_x0 = (layout_ == TuiLayout::Split) ? (left_width_ + 3) : 2;
     int const target_right_w = right_width_ > 0 ? right_width_ : 100;
-    std::string const mode_label =
-        panel_mode_label(right_panel_mode_, target_right_w, trace_enabled_);
+    std::string const mode_label = panel_mode_label(right_panel_mode_, target_right_w);
     int const x_start = right_x0 + 1;
     int const x_end = x_start + static_cast<int>(mode_label.length()) + 1;
 
@@ -164,8 +160,7 @@ auto StatusBar::is_pos_on_right_panel_attached(int x) const -> bool {
 
     int const right_x0 = (layout_ == TuiLayout::Split) ? (left_width_ + 3) : 2;
     int const target_right_w = right_width_ > 0 ? right_width_ : 100;
-    std::string const term_title =
-        panel_mode_label(right_panel_mode_, target_right_w, trace_enabled_);
+    std::string const term_title = panel_mode_label(right_panel_mode_, target_right_w);
     int const mode_len = static_cast<int>(term_title.length()) + 2;
 
     int const badge_start = right_x0 + 1 + mode_len + 1;
@@ -671,10 +666,7 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                                         : "\033[48;5;121m\033[38;5;232m RUNNING \033[0m";
             }
         } else if (status_badge == "\033[1;38;5;234;48;5;210m TRAPPED \033[0m" &&
-                   (get_tui_theme() == TuiTheme::HighContrast ||
-                    get_tui_theme() == TuiTheme::Adaptive ||
-                    get_tui_theme() == TuiTheme::ClassicAnsi ||
-                    get_active_theme_style() == TuiThemeStyle::ClassicAnsi)) {
+                   use_basic_ansi_badges()) {
             status_badge = "\033[1;41;37m TRAPPED \033[0m";
         }
         int const inner_w = std::max(0, width - 2);

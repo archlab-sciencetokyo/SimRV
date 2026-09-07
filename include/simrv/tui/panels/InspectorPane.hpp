@@ -53,7 +53,12 @@ class InspectorPane : public TuiWidget {
                                          bool is_focused, bool force_column_header = false)
         -> std::string;
     [[nodiscard]] auto render_column_header(int col_idx, const char* name, bool is_focused,
-                                            int width) const -> std::string;
+                                            int width, std::string_view key_hint = {}) const
+        -> std::string;
+
+    /// Return the next TuiRegPage when cycling through the current category group.
+    [[nodiscard]] auto next_page_for_slot(TuiRegPage current, bool cycle_accurate) const
+        -> TuiRegPage;
 
     void set_secondary_column_mode(bool secondary) { secondary_column_mode_ = secondary; }
     [[nodiscard]] auto is_secondary_column_mode() const noexcept -> bool {
@@ -135,6 +140,9 @@ class InspectorPane : public TuiWidget {
 
     [[nodiscard]] auto is_single_column(int width) const -> bool;
     [[nodiscard]] auto get_total_rows(int width) -> int;
+    void configure_current_viewport(int width);
+    [[nodiscard]] auto trace_content_width() const -> int;
+    [[nodiscard]] auto trace_total_columns() const -> int;
     [[nodiscard]] auto get_running_label_start_row() const -> int;
     [[nodiscard]] auto render_active_spinner(int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_registers_single_column(const simrv::core::ArchState& st,
@@ -254,6 +262,8 @@ class InspectorPane : public TuiWidget {
     int cache_inspect_set_ = 0;
     int cache_inspect_way_ = 0;
     bool secondary_column_mode_ = false;
+    // Column renderings use a one-line header, unlike the two-line tab strip.
+    bool column_header_mode_ = false;
 };
 
 }  // namespace simrv::tui

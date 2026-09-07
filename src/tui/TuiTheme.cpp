@@ -117,8 +117,6 @@ static const ThemeGlyphs kSakuraPastelGlyphs = {
 };
 
 TuiThemeStyle g_theme_style = TuiThemeStyle::ModernUnicode;
-TuiTheme g_tui_theme =
-    TuiTheme::Adaptive;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 auto get_theme_glyphs(TuiThemeStyle style) -> const ThemeGlyphs& {
     switch (style) {
@@ -136,18 +134,7 @@ auto get_active_theme_style() -> TuiThemeStyle { return g_theme_style; }
 
 void set_theme_style(TuiThemeStyle style) {
     g_theme_style = style;
-    switch (style) {
-        case TuiThemeStyle::ClassicAnsi:
-            set_tui_theme(TuiTheme::ClassicAnsi);
-            break;
-        case TuiThemeStyle::SakuraPastel:
-            set_tui_theme(TuiTheme::Sakura);
-            break;
-        case TuiThemeStyle::ModernUnicode:
-        default:
-            set_tui_theme(TuiTheme::Adaptive);
-            break;
-    }
+    set_high_contrast(g_high_contrast);
 }
 
 void cycle_theme_style() {
@@ -165,11 +152,27 @@ void cycle_theme_style() {
     }
 }
 
-auto set_tui_theme(TuiTheme theme) -> void {
-    g_tui_theme = theme;
-    switch (theme) {
-        case TuiTheme::ClassicAnsi:
-            g_high_contrast = false;
+namespace {
+
+void apply_theme_palette() {
+    if (g_high_contrast) {
+        g_theme_border = kContrastBorder;
+        g_theme_text = kContrastText;
+        g_theme_val = kContrastVal;
+        g_theme_muted = kContrastMuted;
+        g_theme_mint = kContrastMint;
+        g_theme_peach = kContrastPeach;
+        g_theme_coral = kContrastCoral;
+        g_theme_sky = kContrastSky;
+        g_theme_pink = kContrastPink;
+        g_theme_modal_bg = "\033[40m";
+        g_theme_palette = kHighContrastPalette;
+        g_theme_bg_palette = kHighContrastBgPalette;
+        return;
+    }
+
+    switch (g_theme_style) {
+        case TuiThemeStyle::ClassicAnsi:
             g_theme_border = kClassicAnsiBorder;
             g_theme_text = kClassicAnsiText;
             g_theme_val = kClassicAnsiVal;
@@ -183,23 +186,7 @@ auto set_tui_theme(TuiTheme theme) -> void {
             g_theme_palette = kHighContrastPalette;
             g_theme_bg_palette = kHighContrastBgPalette;
             break;
-        case TuiTheme::HighContrast:
-            g_high_contrast = true;
-            g_theme_border = kContrastBorder;
-            g_theme_text = kContrastText;
-            g_theme_val = kContrastVal;
-            g_theme_muted = kContrastMuted;
-            g_theme_mint = kContrastMint;
-            g_theme_peach = kContrastPeach;
-            g_theme_coral = kContrastCoral;
-            g_theme_sky = kContrastSky;
-            g_theme_pink = kContrastPink;
-            g_theme_modal_bg = "\033[40m";
-            g_theme_palette = kHighContrastPalette;
-            g_theme_bg_palette = kHighContrastBgPalette;
-            break;
-        case TuiTheme::Adaptive:
-            g_high_contrast = false;
+        case TuiThemeStyle::ModernUnicode:
             g_theme_border = kAdaptiveBorder;
             g_theme_text = kAdaptiveText;
             g_theme_val = kAdaptiveVal;
@@ -213,9 +200,8 @@ auto set_tui_theme(TuiTheme theme) -> void {
             g_theme_palette = kHighContrastPalette;
             g_theme_bg_palette = kHighContrastBgPalette;
             break;
-        case TuiTheme::Sakura:
+        case TuiThemeStyle::SakuraPastel:
         default:
-            g_high_contrast = false;
             g_theme_border = kSakuraBorderConst;
             g_theme_text = kSakuraTextConst;
             g_theme_val = kSakuraValConst;
@@ -232,14 +218,11 @@ auto set_tui_theme(TuiTheme theme) -> void {
     }
 }
 
-auto get_tui_theme() -> TuiTheme { return g_tui_theme; }
+}  // namespace
 
 auto set_high_contrast(bool enable) -> void {
-    if (enable) {
-        set_tui_theme(TuiTheme::HighContrast);
-    } else if (g_tui_theme == TuiTheme::HighContrast) {
-        set_tui_theme(TuiTheme::Adaptive);
-    }
+    g_high_contrast = enable;
+    apply_theme_palette();
 }
 
 auto is_high_contrast() -> bool { return g_high_contrast; }

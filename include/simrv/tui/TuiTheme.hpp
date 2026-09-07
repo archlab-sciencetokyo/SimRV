@@ -10,11 +10,8 @@
 
 namespace simrv::tui {
 
-// Theme Style Enum
+// The complete visual theme: glyphs and palette always change together.
 enum class TuiThemeStyle : std::uint8_t { ModernUnicode, ClassicAnsi, SakuraPastel };
-
-// Theme Enum for color palette mapping
-enum class TuiTheme : std::uint8_t { Adaptive, Sakura, HighContrast, ClassicAnsi };
 
 struct ThemeGlyphs {
     const char* top_left;
@@ -124,10 +121,7 @@ extern std::array<const char*, 16> g_theme_bg_palette;
 #define kThemePink g_theme_pink
 #define kThemeModalBg g_theme_modal_bg
 
-extern TuiTheme g_tui_theme;
-void set_tui_theme(TuiTheme theme);
-auto get_tui_theme() -> TuiTheme;
-
+// High contrast is an accessibility override, not a fourth theme choice.
 void set_high_contrast(bool enable);
 auto is_high_contrast() -> bool;
 

@@ -62,10 +62,6 @@ auto get_modal_metadata(ModalType type, bool is_notice_error, std::string_view n
             return {.title = " ARCHITECTURE GLOSSARY & CONCEPTS [?] ", .is_wide = true};
         case ModalType::Settings:
             return {.title = " SIMULATOR SETTINGS & CONFIGURATION ", .is_wide = true};
-        case ModalType::ConfigureMisa:
-            return {.title = " CONFIGURE CPU MISA & EXTENSIONS ", .is_wide = true};
-        case ModalType::ConfigureSystem:
-            return {.title = " PIPELINE & MICROARCHITECTURE CONFIGURATION ", .is_wide = true};
         case ModalType::Help:
             return {.title = " SIMULATOR KEYBOARD SHORTCUTS ", .is_wide = true};
         case ModalType::Notice:

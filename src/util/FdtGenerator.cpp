@@ -245,6 +245,9 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
         b.add_prop_string("compatible", "riscv");
         b.add_prop_string("device_type", "cpu");
         b.add_prop_u32("reg", h);
+        // Linux uses the SBI HSM extension to release secondary harts.  Without this
+        // declaration it enumerates the CPUs but has no DT-described enable path.
+        b.add_prop_string("enable-method", "riscv,sbi");
         b.add_prop_string("riscv,isa", (config.xlen == 64) ? "rv64imafdcbv" : "rv32imafdcbv");
         b.add_prop_string("riscv,isa-base", (config.xlen == 64) ? "rv64i" : "rv32i");
         b.add_prop_string_list(

@@ -326,8 +326,7 @@ void CPU::run_cycle(Machine& machine) {
             pipeline_sim.advance_cycle_fast(metrics);
         }
         const auto retired_pc = state_.pc;
-        if (ca_pipeline.retired_this_cycle && machine.tui_enabled() && machine.tui &&
-            machine.tui->is_trace_active()) {
+        if (ca_pipeline.retired_this_cycle && machine.tui_enabled() && machine.tui) {
             std::swap(pipeline_context, ca_pipeline.retired->context);
             record_trace_for_tui(machine);
             std::swap(pipeline_context, ca_pipeline.retired->context);
@@ -426,7 +425,7 @@ void CPU::run_cycle(Machine& machine) {
     tick_cycle_clock(machine);
 
     // Record trace logs for active debug TUI components.
-    if (machine.tui_enabled() && machine.tui && machine.tui->is_trace_active()) {
+    if (machine.tui_enabled() && machine.tui) {
         record_trace_for_tui(machine);
     }
 
@@ -486,6 +485,12 @@ void CPU::record_trace_for_tui(Machine& machine) {
     const auto rs1 = pipeline_context.rs1;
     const auto rs2 = pipeline_context.rs2;
 
+    if (!machine.tui->is_trace_active()) {
+        machine.tui->record_flight_instruction(pipeline_context.cpc.raw(), opcode, op_id,
+                                               static_cast<uint8_t>(state_.mhartid));
+        return;
+    }
+
     Register rd_val = 0;
     Register rs1_val = 0;
     Register rs2_val = 0;
@@ -512,9 +517,10 @@ void CPU::record_trace_for_tui(Machine& machine) {
         rs2_val = state_.regs.read(rs2);
     }
 
-    machine.tui->record_instruction(
-        pipeline_context.cpc.raw(), opcode, op_id, std::to_underlying(rd), rd_val,
-        std::to_underlying(rs1), rs1_val, std::to_underlying(rs2), rs2_val, pipeline_context.imm);
+    machine.tui->record_instruction(pipeline_context.cpc.raw(), opcode, op_id,
+                                    std::to_underlying(rd), rd_val, std::to_underlying(rs1),
+                                    rs1_val, std::to_underlying(rs2), rs2_val, pipeline_context.imm,
+                                    static_cast<uint8_t>(state_.mhartid));
 }
 
 void CPU::run_cycle_baremetal(Machine& machine) {
@@ -568,7 +574,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
                 clint_mmio.rtc_divider = 0;
                 evaluate_timer_interrupt();
             }
-            if (machine.tui_enabled() && machine.tui && machine.tui->is_trace_active()) {
+            if (machine.tui_enabled() && machine.tui) {
                 record_trace_for_tui(machine);
             }
             if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
@@ -619,7 +625,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
         clint_mmio.rtc_divider = 0;
         evaluate_timer_interrupt();
     }
-    if (machine.tui_enabled() && machine.tui && machine.tui->is_trace_active()) {
+    if (machine.tui_enabled() && machine.tui) {
         record_trace_for_tui(machine);
     }
 

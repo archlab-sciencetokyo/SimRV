@@ -9,15 +9,15 @@
 
 namespace simrv::tui {
 
-static const std::array<KeyBindingInfo, 34> kKeyBindings = {
+static const std::array<KeyBindingInfo, 31> kKeyBindings = {
     {{.action = KeyAction::Step,
-      .key_display = "[F6] / [s] / [Space]",
+      .key_display = "[F6] / [s]",
       .primary_char = 's',
       .alt_char = 'S',
       .footer_label = "[F6] Step",
       .help_label = "Step 1 instruction"},
      {.action = KeyAction::RunPause,
-      .key_display = "[F5] / [c] / [Space] / [Ctrl-P]",
+      .key_display = "[F5] / [c] / [Ctrl-P]",
       .primary_char = 'c',
       .alt_char = 'C',
       .footer_label = "[F5] Run",
@@ -94,18 +94,6 @@ static const std::array<KeyBindingInfo, 34> kKeyBindings = {
       .alt_char = ',',
       .footer_label = "[F2] Settings",
       .help_label = "Simulator Settings"},
-     {.action = KeyAction::ConfigureSystem,
-      .key_display = "[y]",
-      .primary_char = 'y',
-      .alt_char = 'Y',
-      .footer_label = "[y] SysConfig",
-      .help_label = "CA System Config"},
-     {.action = KeyAction::ConfigureMisa,
-      .key_display = "[Alt-m]",
-      .primary_char = '\0',
-      .alt_char = '\0',
-      .footer_label = "[Alt-m] MISA",
-      .help_label = "Configure MISA"},
      {.action = KeyAction::Help,
       .key_display = "[F1] / [h]",
       .primary_char = 'h',
@@ -146,7 +134,7 @@ static const std::array<KeyBindingInfo, 34> kKeyBindings = {
       .footer_label = "[l] Tools",
       .help_label = "Cycle Tool Tabs"},
      {.action = KeyAction::CycleRightPanel,
-      .key_display = "[p]",
+      .key_display = "[p] / click header",
       .primary_char = 'p',
       .alt_char = 'P',
       .footer_label = "[p] Panel",
@@ -171,12 +159,6 @@ static const std::array<KeyBindingInfo, 34> kKeyBindings = {
       .alt_char = 'E',
       .footer_label = "[e] Explain",
       .help_label = "Instruction Explainer"},
-     {.action = KeyAction::ToggleTrace,
-      .key_display = "[v]",
-      .primary_char = 'v',
-      .alt_char = 'V',
-      .footer_label = "[v] Trace",
-      .help_label = "Toggle Trace Logging"},
      {.action = KeyAction::ExportInspection,
       .key_display = "[x]",
       .primary_char = 'x',
@@ -283,8 +265,6 @@ auto Keybindings::unavailable_reason(KeyAction action, const ActionContext& cont
         case KeyAction::TogglePcBreakpoint:
         case KeyAction::InspectAddress:
         case KeyAction::Settings:
-        case KeyAction::ConfigureSystem:
-        case KeyAction::ConfigureMisa:
         case KeyAction::ToggleStudentGuide:
         case KeyAction::ActivateStudentGuide:
         case KeyAction::ExportInspection:
@@ -348,14 +328,8 @@ auto key_action_for_footer(TuiFooterAction action) -> KeyAction {
             return KeyAction::ToggleStudentGuide;
         case TuiFooterAction::TogglePanel:
             return KeyAction::CycleRightPanel;
-        case TuiFooterAction::ToggleTrace:
-            return KeyAction::ToggleTrace;
         case TuiFooterAction::OpenSettings:
             return KeyAction::Settings;
-        case TuiFooterAction::ConfigureMisa:
-            return KeyAction::ConfigureMisa;
-        case TuiFooterAction::ConfigureSystem:
-            return KeyAction::ConfigureSystem;
         case TuiFooterAction::ManageBreakpoints:
             return KeyAction::ManageBreakpoints;
         case TuiFooterAction::Reboot:

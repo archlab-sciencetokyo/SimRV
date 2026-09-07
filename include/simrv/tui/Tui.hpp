@@ -62,6 +62,7 @@ class Tui {
 
    public:
     static constexpr size_t kTraceBufferSize = 200;
+    static constexpr size_t kFlightRecorderHarts = 16;
     static constexpr uint64_t kDetailedExecutionMaxHz = 100;
     explicit Tui(simrv::core::Machine& machine);
     ~Tui();
@@ -169,19 +170,20 @@ class Tui {
         return workbench_slots_;
     }
     void set_workbench_slot_page(size_t slot_idx, TuiRegPage page);
+    /// Cycle the tool page for the given workbench slot (wraps within the slot's category group).
+    void cycle_slot_page(size_t slot_idx);
     [[nodiscard]] auto focused_page() const -> TuiRegPage;
 
     void cycle_reg_page();
     void cycle_tool_page();
     void set_reg_page(TuiRegPage page);
     void toggle_explain();
-    void toggle_high_contrast();
-    void toggle_sakura_theme();
     void cycle_right_panel_mode();
     void record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa::OperationId op_id,
                             uint8_t rd, Register rd_val, uint8_t rs1, Register rs1_val, uint8_t rs2,
-                            Register rs2_val, int64_t imm);
-    void toggle_trace_enabled();
+                            Register rs2_val, int64_t imm, uint8_t hart);
+    void record_flight_instruction(Register pc, simrv::isa::Opcode opcode,
+                                   simrv::isa::OperationId op_id, uint8_t hart);
     /// Export the selected hart's paused architectural state and recent trace as JSON.
     void export_inspection_report();
     /// Toggle the interactive Student Guide used while paused.
@@ -192,9 +194,6 @@ class Tui {
     // Source-compatible wrappers for the former "learn mode" API.
     void toggle_learn_mode() { toggle_student_guide(); }
     [[nodiscard]] auto is_learn_mode_enabled() const -> bool { return is_student_guide_enabled(); }
-    [[nodiscard]] auto is_trace_enabled() const -> bool {
-        return trace_enabled_.load(std::memory_order_relaxed);
-    }
     [[nodiscard]] auto is_trace_active() const -> bool {
         return trace_or_livetrace_active_.load(std::memory_order_relaxed);
     }
@@ -233,6 +232,8 @@ class Tui {
         Register rs2_val = 0;
         int64_t imm = 0;
         uint64_t sequence = 0;
+        uint8_t hart = 0;
+        bool detailed = false;
     };
 
     simrv::core::Machine& machine_;
@@ -265,7 +266,6 @@ class Tui {
     int terminal_rows_start_ = 0;
     std::vector<std::string> last_screen_lines_;
     std::atomic<bool> paused_{true};
-    std::atomic<bool> trace_enabled_{false};
     bool student_guide_enabled_{false};
     bool inspection_overwrite_armed_{false};
     std::vector<WorkbenchSlot> workbench_slots_{{TuiRegPage::GPR, 0}, {TuiRegPage::CONSOLE, 0}};
@@ -291,12 +291,13 @@ class Tui {
     std::chrono::microseconds runtime_duration_{0};
     std::chrono::steady_clock::time_point last_runtime_tick_{};
 
-    // Bounded trace ring. Tracing is detailed-mode-only, so producer/consumer synchronization
-    // stays outside the functional fast path.
-    std::array<TraceRecord, kTraceBufferSize> trace_record_buffer_{};
-    std::atomic<uint64_t> trace_write_seq_{0};
-    uint64_t rendered_trace_sequence_{0};
-    mutable std::mutex trace_mutex_;
+    struct FlightRing {
+        std::array<TraceRecord, kTraceBufferSize> records{};
+        std::atomic<uint64_t> write_sequence{0};
+    };
+    std::array<FlightRing, kFlightRecorderHarts> flight_rings_{};
+    std::atomic<uint64_t> flight_sequence_{0};
+    std::array<uint64_t, kFlightRecorderHarts> rendered_flight_sequences_{};
 
     // Dedicated UI render and input thread
     std::jthread ui_thread_;
@@ -338,13 +339,13 @@ class Tui {
     auto handle_alt_key(char key, uint8_t byte) -> bool;
     auto handle_arrow_key_sequence() -> bool;
     auto handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool;
-    bool handle_modal_settings_misa(ModalType mtype, uint8_t byte, TuiKey key);
-    bool handle_modal_sysconfig_bp(ModalType mtype, uint8_t byte, TuiKey key);
+    bool handle_modal_settings(ModalType mtype, uint8_t byte, TuiKey key);
+    bool handle_modal_breakpoint(ModalType mtype, uint8_t byte, TuiKey key);
     auto handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void;
     auto handle_debug_keyboard_input(TuiKey key) -> bool;
     bool handle_speed_keyboard_input(TuiKey key);
     bool handle_navigation_keyboard_input(uint8_t byte, TuiKey key);
-    auto handle_mouse_inspector(int x, int y, int b) -> void;
+    auto handle_mouse_inspector(int x, int y, int b, bool multi_column = false) -> void;
     void format_trace_inst(const TraceRecord& rec, const std::string& op_name, bool rd_fp,
                            bool rs1_fp, bool rs2_fp, std::string& inst_str,
                            std::string& side_effect);

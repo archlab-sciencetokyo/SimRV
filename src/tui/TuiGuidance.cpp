@@ -95,8 +95,8 @@ auto guidance_for_context(const GuidanceContext& context) -> PageGuidance {
             guidance = {"Pipeline hazards",
                         "RAW dependencies and structural conflicts can stall.",
                         "Forwarding helps only when a producer's result is available in time.",
-                        KeyAction::ConfigureSystem,
-                        "Review forwarding and latency configuration.",
+                        KeyAction::Settings,
+                        "Review forwarding and latency configuration in Settings.",
                         1};
             break;
         case TuiRegPage::BUS:
@@ -111,8 +111,8 @@ auto guidance_for_context(const GuidanceContext& context) -> PageGuidance {
             guidance = {"Execution trace",
                         "Trace records committed instruction history.",
                         "It connects control flow to visible architectural state changes.",
-                        KeyAction::ToggleTrace,
-                        "Enable tracing, then step or run briefly.",
+                        KeyAction::CycleToolPage,
+                        "Focus Trace while stepping or running briefly.",
                         0};
             break;
         case TuiRegPage::EXPLAIN:
@@ -156,8 +156,8 @@ auto guidance_for_context(const GuidanceContext& context) -> PageGuidance {
         } else if (is_control(context.operation)) {
             guidance.relationship =
                 std::format("{} can redirect the PC and discard sequential work.", name);
-            guidance.next_action = KeyAction::ToggleTrace;
-            guidance.next_hint = "Trace the taken path, then compare the next PC.";
+            guidance.next_action = KeyAction::CycleToolPage;
+            guidance.next_hint = "Open Trace, then compare the next PC.";
         }
     }
     if (context.page == TuiRegPage::CACHE && context.cache_misses > 0) {
