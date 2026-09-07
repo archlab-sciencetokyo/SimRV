@@ -53,7 +53,6 @@ struct TuiConfig {
     bool enabled = false;
     bool high_contrast = false;
     bool class_mode = false;
-    bool debug_diagnostics = false;
     double mouse_sensitivity = 1.0;
     std::string inspection_output;
 };
@@ -64,7 +63,6 @@ struct DebugConfig {
     bool lockstep_enabled = false;
     std::string spike_bin = "spike";
     std::string spike_elf;
-    bool debugmode = false;
     bool dlog_mode = false;
     bool traplog_mode = false;
     bool bp_trace = false;
@@ -122,6 +120,13 @@ struct MachineConfig {
         }
         if (files.disk_enabled && files.disk_path.empty()) {
             return std::unexpected("a disk path is required when disk support is enabled");
+        }
+        if (tui.enabled && debug.gdb_enabled) {
+            return std::unexpected("GDB remote debugging and the TUI are mutually exclusive");
+        }
+        if (debug.gdb_enabled && debug.lockstep_enabled) {
+            return std::unexpected(
+                "GDB remote debugging and Spike lockstep are mutually exclusive");
         }
         return {};
     }

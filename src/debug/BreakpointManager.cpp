@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cstring>
 #include <format>
 #include <vector>
@@ -16,14 +17,24 @@ namespace simrv::debug {
 
 namespace {
 
+auto numbered_register(std::string_view text) -> std::optional<RegId> {
+    if (text.size() < 2) return std::nullopt;
+    const auto digits = text.substr(1);
+    if (!std::ranges::all_of(digits, [](char c) { return c >= '0' && c <= '9'; }))
+        return std::nullopt;
+    unsigned index = 0;
+    const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), index);
+    if (error != std::errc{} || end != digits.data() + digits.size() || index >= 32)
+        return std::nullopt;
+    return static_cast<RegId>(index);
+}
+
 auto parse_gpr_reg(const std::string& str) -> std::optional<ParsedReg> {
-    if ((str.starts_with('x') || str.starts_with('r')) && str.size() > 1 &&
-        std::all_of(str.begin() + 1, str.end(), ::isdigit)) {
-        int idx = std::stoi(str.substr(1));
-        if (idx >= 0 && idx < 32) {
+    if (str.starts_with('x') || str.starts_with('r')) {
+        if (const auto index = numbered_register(str)) {
             return ParsedReg{.type = RegType::GPR,
-                             .index = static_cast<RegId>(idx),
-                             .canonical_name = std::format("x{}", idx)};
+                             .index = *index,
+                             .canonical_name = std::format("x{}", std::to_underlying(*index))};
         }
     }
     static constexpr std::array<const char*, 32> kGprAbi = {
@@ -44,13 +55,11 @@ auto parse_gpr_reg(const std::string& str) -> std::optional<ParsedReg> {
 }
 
 auto parse_fpr_reg(const std::string& str) -> std::optional<ParsedReg> {
-    if (str.starts_with('f') && str.size() > 1 &&
-        std::all_of(str.begin() + 1, str.end(), ::isdigit)) {
-        int idx = std::stoi(str.substr(1));
-        if (idx >= 0 && idx < 32) {
+    if (str.starts_with('f')) {
+        if (const auto index = numbered_register(str)) {
             return ParsedReg{.type = RegType::FPR,
-                             .index = static_cast<RegId>(idx),
-                             .canonical_name = std::format("f{}", idx)};
+                             .index = *index,
+                             .canonical_name = std::format("f{}", std::to_underlying(*index))};
         }
     }
     static constexpr std::array<const char*, 32> kFprAbi = {
@@ -68,13 +77,11 @@ auto parse_fpr_reg(const std::string& str) -> std::optional<ParsedReg> {
 }
 
 auto parse_vec_reg(const std::string& str) -> std::optional<ParsedReg> {
-    if (str.starts_with('v') && str.size() > 1 &&
-        std::all_of(str.begin() + 1, str.end(), ::isdigit)) {
-        int idx = std::stoi(str.substr(1));
-        if (idx >= 0 && idx < 32) {
+    if (str.starts_with('v')) {
+        if (const auto index = numbered_register(str)) {
             return ParsedReg{.type = RegType::VEC,
-                             .index = static_cast<RegId>(idx),
-                             .canonical_name = std::format("v{}", idx)};
+                             .index = *index,
+                             .canonical_name = std::format("v{}", std::to_underlying(*index))};
         }
     }
     return std::nullopt;
@@ -102,18 +109,30 @@ auto parse_register_name(std::string_view input) -> std::optional<ParsedReg> {
     return std::nullopt;
 }
 
-void BreakpointManager::add_pc_breakpoint(Address addr) {
+void BreakpointManager::add_pc_breakpoint(Address addr, BreakpointOwner owner) {
+    const auto exists = std::ranges::any_of(pc_breakpoint_records_, [addr, owner](const auto& bp) {
+        return bp.addr == addr && bp.owner == owner;
+    });
+    if (exists) return;
+    pc_breakpoint_records_.push_back(
+        PcBreakpoint{.id = next_breakpoint_id_++, .owner = owner, .addr = addr});
     pc_breakpoints_.insert(addr);
     update_active();
 }
 
-void BreakpointManager::remove_pc_breakpoint(Address addr) {
-    pc_breakpoints_.erase(addr);
+void BreakpointManager::remove_pc_breakpoint(Address addr, BreakpointOwner owner) {
+    std::erase_if(pc_breakpoint_records_,
+                  [addr, owner](const auto& bp) { return bp.addr == addr && bp.owner == owner; });
+    if (std::ranges::none_of(pc_breakpoint_records_,
+                             [addr](const auto& bp) { return bp.addr == addr; })) {
+        pc_breakpoints_.erase(addr);
+    }
     update_active();
 }
 
 void BreakpointManager::clear_pc_breakpoints() {
     pc_breakpoints_.clear();
+    pc_breakpoint_records_.clear();
     update_active();
 }
 
@@ -122,9 +141,15 @@ auto BreakpointManager::has_pc_breakpoint(Address addr) const -> bool {
 }
 
 void BreakpointManager::add_watchpoint(Address addr, size_t size, WatchType type,
-                                       const std::string& label) {
-    remove_watchpoint(addr);
-    watchpoints_.push_back(Watchpoint{.target = WatchTarget::Memory,
+                                       const std::string& label, BreakpointOwner owner) {
+    if (std::ranges::any_of(watchpoints_, [=](const auto& wp) {
+            return wp.target == WatchTarget::Memory && wp.addr == addr && wp.size == size &&
+                   wp.type == type && wp.owner == owner;
+        }))
+        return;
+    watchpoints_.push_back(Watchpoint{.id = next_watchpoint_id_++,
+                                      .owner = owner,
+                                      .target = WatchTarget::Memory,
                                       .addr = addr,
                                       .reg_type = RegType::GPR,
                                       .reg_index = RegId::Zero,
@@ -138,7 +163,9 @@ void BreakpointManager::add_watchpoint(Address addr, size_t size, WatchType type
 void BreakpointManager::add_reg_watchpoint(RegType reg_type, RegId reg_index,
                                            const std::string& reg_name) {
     remove_reg_watchpoint(reg_type, reg_index);
-    watchpoints_.push_back(Watchpoint{.target = WatchTarget::Register,
+    watchpoints_.push_back(Watchpoint{.id = next_watchpoint_id_++,
+                                      .owner = BreakpointOwner::Tui,
+                                      .target = WatchTarget::Register,
                                       .addr = 0,
                                       .reg_type = reg_type,
                                       .reg_index = reg_index,
@@ -156,11 +183,27 @@ void BreakpointManager::remove_watchpoint(Address addr) {
     update_active();
 }
 
+void BreakpointManager::remove_watchpoint(Address addr, BreakpointOwner owner) {
+    std::erase_if(watchpoints_, [addr, owner](const Watchpoint& wp) -> bool {
+        return wp.target == WatchTarget::Memory && wp.addr == addr && wp.owner == owner;
+    });
+    update_active();
+}
+
 void BreakpointManager::remove_watchpoint_by_index(size_t index) {
     if (index < watchpoints_.size()) {
         watchpoints_.erase(watchpoints_.begin() + static_cast<std::ptrdiff_t>(index));
         update_active();
     }
+}
+
+void BreakpointManager::remove_watchpoint(Address addr, size_t size, WatchType type,
+                                          BreakpointOwner owner) {
+    std::erase_if(watchpoints_, [=](const auto& wp) {
+        return wp.target == WatchTarget::Memory && wp.addr == addr && wp.size == size &&
+               wp.type == type && wp.owner == owner;
+    });
+    update_active();
 }
 
 void BreakpointManager::remove_reg_watchpoint(RegType reg_type, RegId reg_index) {
@@ -176,18 +219,33 @@ void BreakpointManager::clear_watchpoints() {
     update_active();
 }
 
-auto BreakpointManager::check_pc(Address pc) const -> std::optional<BreakpointHit> {
-    if (skip_once_pc_.has_value()) {
-        Address skipped_pc = *skip_once_pc_;
-        skip_once_pc_.reset();
-        if (skipped_pc == pc) {
+void BreakpointManager::clear_owner(BreakpointOwner owner) {
+    std::erase_if(pc_breakpoint_records_, [owner](const auto& bp) { return bp.owner == owner; });
+    pc_breakpoints_.clear();
+    for (const auto& bp : pc_breakpoint_records_) {
+        pc_breakpoints_.insert(bp.addr);
+    }
+    std::erase_if(watchpoints_,
+                  [owner](const Watchpoint& wp) -> bool { return wp.owner == owner; });
+    update_active();
+}
+
+auto BreakpointManager::check_pc(Address pc, HartId hart, Counter retired) const
+    -> std::optional<BreakpointHit> {
+    if (auto it = skipped_instructions_.find(hart.raw()); it != skipped_instructions_.end()) {
+        if (it->second == std::pair{pc, retired}) {
             return std::nullopt;
         }
+        skipped_instructions_.erase(it);
     }
     if (pc_breakpoints_.contains(pc)) {
-        return BreakpointHit{.reason = BreakpointHit::Reason::Breakpoint,
-                             .addr = pc,
-                             .description = std::format("Breakpoint hit at 0x{:08x}", pc)};
+        const auto record = std::ranges::find_if(pc_breakpoint_records_,
+                                                 [pc](const auto& bp) { return bp.addr == pc; });
+        return BreakpointHit{
+            .reason = BreakpointHit::Reason::Breakpoint,
+            .breakpoint_id = record != pc_breakpoint_records_.end() ? record->id : 0,
+            .addr = pc,
+            .description = std::format("Breakpoint hit at 0x{:08x}", pc)};
     }
     return std::nullopt;
 }
@@ -208,7 +266,8 @@ auto BreakpointManager::check_mem_write(Address paddr, size_t size) const
                 .reason = BreakpointHit::Reason::Watchpoint,
                 .addr = paddr,
                 .description = std::format("Watchpoint (Write) hit at 0x{:08x} ({})", paddr,
-                                           wp.label.empty() ? "write" : wp.label)};
+                                           wp.label.empty() ? "write" : wp.label),
+                .watch_type = wp.type};
         }
     }
     return std::nullopt;
@@ -224,7 +283,8 @@ auto BreakpointManager::check_mem_read(Address paddr, size_t size) const
                 .reason = BreakpointHit::Reason::Watchpoint,
                 .addr = paddr,
                 .description = std::format("Watchpoint (Read) hit at 0x{:08x} ({})", paddr,
-                                           wp.label.empty() ? "read" : wp.label)};
+                                           wp.label.empty() ? "read" : wp.label),
+                .watch_type = wp.type};
         }
     }
     return std::nullopt;

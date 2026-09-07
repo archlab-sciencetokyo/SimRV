@@ -103,7 +103,6 @@ struct SettingsDraft {
 
     // Tab 0: General / UI
     bool cycle_accurate = false;
-    bool debug_mode = false;
     bool high_contrast = false;
     bool class_mode = false;
     uint32_t tui_fps = 30;
@@ -112,7 +111,6 @@ struct SettingsDraft {
     bool traplog_mode = false;
     bool dlog_mode = false;
     bool lockstep_mode = false;
-    bool gdb_mode = false;
     uint32_t num_harts = 1;
     uint32_t smp_quantum = 1000;
     bool smp_multithreaded = false;

@@ -315,14 +315,6 @@ static const auto paused_row2_entries = std::to_array<FooterEntry>({
      .action = std::nullopt,
      .category = FooterCategory::Spacer,
      .priority = FooterPriority::Core},
-    {.text = "[d] Debug",
-     .action = TuiFooterAction::ToggleDebug,
-     .category = FooterCategory::Config,
-     .priority = FooterPriority::Core},
-    {.text = "  │  ",
-     .action = std::nullopt,
-     .category = FooterCategory::Separator,
-     .priority = FooterPriority::Core},
     {.text = "[i] Inspect",
      .action = TuiFooterAction::InspectMem,
      .category = FooterCategory::Inspect,
@@ -413,18 +405,12 @@ namespace {
 
 auto filter_footer_entries(std::span<const FooterEntry> entries, int inner_w, bool is_debug_mode,
                            bool is_smp) -> std::vector<FooterEntry> {
+    static_cast<void>(is_debug_mode);
     std::vector<FooterEntry> raw;
     raw.reserve(entries.size());
     for (const auto& e : entries) {
         if (!is_smp && e.action == TuiFooterAction::SwitchHart) {
             continue;
-        }
-        if (!is_debug_mode) {
-            if (e.category == FooterCategory::Debug) continue;
-            if (e.category == FooterCategory::Exec && e.action != TuiFooterAction::RunPause &&
-                e.action != TuiFooterAction::SetSpeed && e.action != TuiFooterAction::Step) {
-                continue;
-            }
         }
         raw.push_back(e);
     }
@@ -633,7 +619,7 @@ auto StatusBar::get_footer_action_at_col(int col, int row_idx, int terminal_widt
     -> std::optional<TuiFooterAction> {
     if (col < 0 || terminal_width < 2) return std::nullopt;
 
-    bool is_dbg = machine_.debug_diagnostics_enabled();
+    constexpr bool is_dbg = true;
     bool is_smp = machine_.num_harts() > 1;
     if (paused_) {
         if (row_idx == 0)
@@ -801,7 +787,7 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         // 2-Row Footer (Centered & Grouped)
         std::string footer_line1;
         std::string footer_line2;
-        bool is_dbg = machine_.debug_diagnostics_enabled();
+        constexpr bool is_dbg = true;
         bool is_smp = machine_.num_harts() > 1;
         if (paused_) {
             footer_line1 =

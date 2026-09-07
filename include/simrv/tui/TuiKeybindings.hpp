@@ -45,8 +45,7 @@ enum class KeyAction : uint8_t {
     ExportInspection,
     SwitchHart,
     OpenGlossary,
-    ToggleTheme,
-    ToggleDebug
+    ToggleTheme
 };
 
 enum class ActionCategory : uint8_t { Execution, Inspect, Navigate, Configure, Help };
@@ -56,7 +55,6 @@ struct ActionContext {
     bool modal_active = false;
     bool shutdown = false;
     bool image_loaded = false;
-    bool debug_mode = false;
     bool cycle_accurate = false;
     bool student_guide_enabled = false;
 };
@@ -72,7 +70,6 @@ struct KeyBindingInfo {
     bool allowed_running = false;
     bool allowed_in_modal = false;
     bool requires_image = false;
-    bool requires_debug = false;
     bool requires_cycle_accurate = false;
 };
 

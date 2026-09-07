@@ -35,6 +35,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         std::string_view const arg(argv[i]);
         if (arg == "--cli" || arg == "-c") {
             is_tui = false;
+        } else if (arg == "--gdb") {
+            is_tui = false;
         } else if (arg == "--tui" || arg == "-u") {
             is_tui = true;
         } else if (arg == "-h" || arg == "--help" || arg == "--version") {

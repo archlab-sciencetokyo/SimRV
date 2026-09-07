@@ -8,6 +8,7 @@
 
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Tracer.hpp"
+#include "simrv/debug/GdbStub.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
@@ -228,11 +229,20 @@ void CPU::run_cycle(Machine& machine) {
     if (machine.tui_enabled()) snapshot_lock.lock();
     if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
         prev_state_ = state_;
-        if (auto hit = machine.breakpoints.check_pc(state_.pc)) {
-            if (machine.tui) {
-                machine.breakpoints.set_skip_once_pc(state_.pc);
+        if (auto hit = machine.breakpoints.check_pc(
+                state_.pc, HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount)) {
+            if (machine.gdb_stub && machine.gdb_stub->is_connected()) {
+                machine.breakpoints.set_skip_once_pc(
+                    state_.pc, HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount);
+                machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap,
+                                   "swbreak:;");
+                return;
+            } else if (machine.tui) {
+                machine.breakpoints.set_skip_once_pc(
+                    state_.pc, HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount);
                 machine.tui->set_status_override(hit->description);
                 machine.tui->pause_loop();
+                return;
             }
         }
     }
@@ -336,7 +346,7 @@ void CPU::run_cycle(Machine& machine) {
         }
         return;
     }
-    if (machine.runtime_profile.is_instruction_fast()) {
+    if (machine.runtime_profile.is_instruction_fast() && !machine.breakpoints.has_any()) {
         // Mode 2: Cached fast-path functional execution (pre-decoded direct-lookup cache).
         // Bypasses pipeline orchestration and fetches from direct lookup cache if available.
         auto* cached = decode_cache.lookup(state_.pc);
@@ -422,7 +432,9 @@ void CPU::run_cycle(Machine& machine) {
 
     if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
         if (auto hit = machine.breakpoints.check_reg_changes(state_, prev_state_)) {
-            if (machine.tui) {
+            if (machine.gdb_stub && machine.gdb_stub->is_connected()) {
+                machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap);
+            } else if (machine.tui) {
                 machine.tui->set_status_override(hit->description);
                 machine.tui->pause_loop();
             }
@@ -451,7 +463,9 @@ SIMRV_ALWAYS_INLINE void CPU::tick_cycle_clock(Machine& machine, bool interrupt_
             ++clint_mmio.mtime;
             clint_mmio.rtc_divider = 0;
             evaluate_timer_interrupt();
-            if (simrv::compiler::unlikely(!machine.secondary_harts_.empty())) {
+            // Parallel harts evaluate their own interrupt state; hart 0 only publishes time.
+            if (simrv::compiler::unlikely(!machine.config.execution.smp_multithreaded &&
+                                          !machine.secondary_harts_.empty())) {
                 for (auto& sec : machine.secondary_harts_) {
                     if (sec->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
                         sec->evaluate_timer_interrupt();
@@ -508,17 +522,28 @@ void CPU::run_cycle_baremetal(Machine& machine) {
     if (machine.tui_enabled()) snapshot_lock.lock();
     if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
         prev_state_ = state_;
-        if (auto hit = machine.breakpoints.check_pc(state_.pc)) {
+        if (auto hit = machine.breakpoints.check_pc(
+                state_.pc, HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount)) {
+            if (machine.gdb_stub && machine.gdb_stub->is_connected()) {
+                machine.breakpoints.set_skip_once_pc(
+                    state_.pc, HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount);
+                machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap,
+                                   "swbreak:;");
+                return;
+            }
             if (machine.tui) {
+                machine.breakpoints.set_skip_once_pc(
+                    state_.pc, HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount);
                 machine.tui->set_status_override(hit->description);
                 machine.tui->pause_loop();
+                return;
             }
         }
     }
     pipeline_context.pending_exception = std::nullopt;
     pipeline_context.pending_tval = 0;
 
-    if (machine.runtime_profile.is_instruction_fast()) {
+    if (machine.runtime_profile.is_instruction_fast() && !machine.breakpoints.has_any()) {
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
             const bool copy_ctx = captures_tui_execution_detail(machine) ||
@@ -548,7 +573,9 @@ void CPU::run_cycle_baremetal(Machine& machine) {
             }
             if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
                 if (auto hit = machine.breakpoints.check_reg_changes(state_, prev_state_)) {
-                    if (machine.tui) {
+                    if (machine.gdb_stub && machine.gdb_stub->is_connected()) {
+                        machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap);
+                    } else if (machine.tui) {
                         machine.tui->set_status_override(hit->description);
                         machine.tui->pause_loop();
                     }
@@ -598,7 +625,9 @@ void CPU::run_cycle_baremetal(Machine& machine) {
 
     if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
         if (auto hit = machine.breakpoints.check_reg_changes(state_, prev_state_)) {
-            if (machine.tui) {
+            if (machine.gdb_stub && machine.gdb_stub->is_connected()) {
+                machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap);
+            } else if (machine.tui) {
                 machine.tui->set_status_override(hit->description);
                 machine.tui->pause_loop();
             }
@@ -607,6 +636,10 @@ void CPU::run_cycle_baremetal(Machine& machine) {
 }
 
 void CPU::run_memory_stage_baremetal(Machine& machine) {
+    if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
+        run_memory_stage(machine);
+        return;
+    }
     auto& ctx = pipeline_context;
     if (ctx.pending_exception.has_value()) {
         return;
@@ -1454,8 +1487,10 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
         } else {
             run_cycle_baremetal(machine);
         }
-        if (simrv::compiler::unlikely(machine.tohost != 0 || !machine.is_running() ||
-                                      (kPollPause && ((b & 0xFFu) == 0 && machine.is_paused())))) {
+        if (simrv::compiler::unlikely(
+                machine.tohost != 0 || !machine.is_running() ||
+                (kPollPause &&
+                 ((b & 0xFFu) == 0 && (machine.is_paused() || machine.debug_pause_requested()))))) {
             break;
         }
     }

@@ -506,10 +506,10 @@ auto Machine::initialize() -> int {
     if (debugger_enabled()) {
         try {
             gdb_stub = std::make_unique<simrv::debug::GdbStub>(debugger_port());
-            simrv::log::info("GDB stub listening on port {} — waiting for connection…",
-                             debugger_port());
-            gdb_stub->wait_for_connection();
-            simrv::log::info("GDB client connected");
+            execution_state_.store(ExecutionState::Paused, std::memory_order_release);
+            gdb_stub->start([this]() { notify_control_event(); });
+            simrv::log::info("GDB server listening on port {}; target paused",
+                             gdb_stub->bound_port());
         } catch (const std::exception& ex) {
             simrv::log::error("GDB stub init failed: {}", ex.what());
             return 1;

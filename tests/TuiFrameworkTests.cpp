@@ -30,6 +30,16 @@
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/CliParser.hpp"
 
+namespace simrv::tui {
+struct TuiTestAccess {
+    static auto arrow(Tui& tui, std::string_view sequence) -> bool {
+        tui.esc_buf_ = sequence;
+        return tui.handle_arrow_key_sequence();
+    }
+    static auto modal(Tui& tui) -> TuiModal& { return tui.modal_; }
+};
+}  // namespace simrv::tui
+
 namespace {
 
 auto failures = 0;
@@ -160,7 +170,7 @@ void test_utf8_and_theme_helpers() {
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 30, "all key actions have registry entries");
+    expect(bindings.size() == 29, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
     std::set<char> claimed_chars;
     for (const auto& binding : bindings) {
@@ -210,7 +220,6 @@ void test_key_registry() {
         simrv::tui::TuiFooterAction::Reboot,
         simrv::tui::TuiFooterAction::SwitchHart,
         simrv::tui::TuiFooterAction::ToggleTheme,
-        simrv::tui::TuiFooterAction::ToggleDebug,
     };
     for (const auto footer_action : footer_actions) {
         const auto key_action = simrv::tui::key_action_for_footer(footer_action);
@@ -230,8 +239,7 @@ void test_key_registry() {
     using simrv::tui::KeyAction;
     expect(!claimed_chars.contains('b') && !claimed_chars.contains('B'),
            "removed backstep keys remain unbound");
-    ActionContext paused{
-        .paused = true, .image_loaded = true, .debug_mode = true, .cycle_accurate = true};
+    ActionContext paused{.paused = true, .image_loaded = true, .cycle_accurate = true};
     expect(simrv::tui::Keybindings::is_available(KeyAction::Step, paused),
            "step is available for a paused loaded image");
     auto running = paused;
@@ -254,10 +262,10 @@ void test_key_registry() {
     expect(simrv::tui::Keybindings::unavailable_reason(KeyAction::InspectAddress, running) ==
                "Pause the simulator first",
            "disabled actions explain how to become available");
-    auto normal_mode = paused;
-    normal_mode.debug_mode = false;
-    expect(simrv::tui::Keybindings::is_available(KeyAction::InspectAddress, normal_mode),
-           "architectural memory inspection does not require debug diagnostics");
+    expect(simrv::tui::Keybindings::is_available(KeyAction::SetBreakpoint, paused),
+           "breakpoints are available without a debug-mode gate");
+    expect(simrv::tui::Keybindings::is_available(KeyAction::InspectAddress, paused),
+           "architectural memory inspection is always available while paused");
     auto functional = paused;
     functional.cycle_accurate = false;
     expect(simrv::tui::Keybindings::is_available(KeyAction::ConfigureSystem, functional),
@@ -308,19 +316,19 @@ void test_sysconfig_modal_modes() {
     settings_draft.smp_multithreaded = false;
     int s_cursor = 0;
 
-    SettingsModal::move_cursor(s_cursor, 4);
-    expect(s_cursor == 4, "Settings modal advances cursor to TUI Target Refresh Rate");
+    SettingsModal::move_cursor(s_cursor, 3);
+    expect(s_cursor == 3, "Settings modal advances cursor to TUI Target Refresh Rate");
 
-    SettingsModal::adjust_setting(settings_draft, 4, 1);
+    SettingsModal::adjust_setting(settings_draft, 3, 1);
     expect(settings_draft.tui_fps == 60, "Settings modal cycles TUI FPS to 60");
 
-    SettingsModal::adjust_setting(settings_draft, 5, 3);
+    SettingsModal::adjust_setting(settings_draft, 4, 3);
     expect(settings_draft.num_harts == 4, "Settings modal adjusts SMP active core count");
 
-    SettingsModal::adjust_setting(settings_draft, 6, 1);
+    SettingsModal::adjust_setting(settings_draft, 5, 1);
     expect(settings_draft.smp_multithreaded == true, "Settings modal toggles SMP worker threads");
 
-    SettingsModal::adjust_setting(settings_draft, 7, 1);
+    SettingsModal::adjust_setting(settings_draft, 6, 1);
     expect(settings_draft.smp_quantum == 2500, "Settings modal advances SMP quantum level");
 
     // Verify render text in IA mode contains disabled note for CA options
@@ -382,6 +390,90 @@ void test_page_guidance() {
     expect(empty_guidance.next_action == simrv::tui::KeyAction::LoadBinary &&
                empty_guidance.meaning.contains("No program"),
            "an empty classroom session guides the student into the program loader");
+}
+
+void test_cleanup_input_boundaries() {
+    for (const auto* option : {"--bht-size", "--bht-entries", "--btb-size", "--btb-entries",
+                               "--ras-size", "--ras-entries"}) {
+        for (const auto* value : {"0", "1", "0x20", "4294967295", "4294967296", "-1", "1x"}) {
+            std::array<std::string, 5> storage{"SimRV", option, value, "-m", "test.bin"};
+            std::array<char*, 5> args{storage[0].data(), storage[1].data(), storage[2].data(),
+                                      storage[3].data(), storage[4].data()};
+            const bool valid = std::string_view(value) == "1" ||
+                               std::string_view(value) == "0x20" ||
+                               std::string_view(value) == "4294967295";
+            expect(simrv::util::parse_command_line(args).has_value() == valid,
+                   "size parsing preserves numeric boundaries");
+        }
+    }
+    for (const auto* name : {"x0", "r31", "f31", "v31", "fp", " X 1 "})
+        expect(simrv::debug::parse_register_name(name).has_value(), "valid register spelling");
+    for (const auto* name : {"x32", "f32", "v32", "x-1", "v+1", "f99999999999999999999999"})
+        expect(!simrv::debug::parse_register_name(name),
+               "invalid register rejected without throwing");
+}
+
+void test_mirrored_modal_arrows() {
+    using namespace simrv::tui;
+    simrv::core::Machine machine;
+    Tui tui(machine);
+    for (auto type : {ModalType::Glossary, ModalType::Settings, ModalType::ConfigureMisa,
+                      ModalType::ConfigureSystem, ModalType::ManageBreakpoints}) {
+        for (std::string_view sequence :
+             {"\033[A", "\033OA", "\033[B", "\033OB", "\033[C", "\033OC", "\033[D", "\033OD"}) {
+            tui.open_modal(type);
+            TuiModal reference(machine);
+            reference.open(type, nullptr, tui.step_delay_us_.load());
+            const char key = sequence.back();
+            const int direction = key == 'A' || key == 'D' ? -1 : 1;
+            const bool vertical = key == 'A' || key == 'B';
+            if (vertical) {
+                switch (type) {
+                    case ModalType::Glossary:
+                        reference.scroll_glossary_content(2 * direction);
+                        break;
+                    case ModalType::Settings:
+                        reference.move_settings_cursor(direction);
+                        break;
+                    case ModalType::ConfigureMisa:
+                        reference.move_misa_cursor(direction);
+                        break;
+                    case ModalType::ConfigureSystem:
+                        reference.move_sysconfig_cursor(direction);
+                        break;
+                    case ModalType::ManageBreakpoints:
+                        reference.move_bp_cursor(direction);
+                        break;
+                    default:
+                        break;
+                }
+            } else {
+                switch (type) {
+                    case ModalType::Glossary:
+                        reference.move_glossary_topic(direction);
+                        break;
+                    case ModalType::Settings:
+                        reference.adjust_setting_at_cursor(direction);
+                        break;
+                    case ModalType::ConfigureMisa:
+                        reference.toggle_misa_at_cursor();
+                        break;
+                    case ModalType::ConfigureSystem:
+                        reference.adjust_sysconfig_at_cursor(direction);
+                        break;
+                    default:
+                        break;
+                }
+            }
+            const bool handled = TuiTestAccess::arrow(tui, sequence);
+            expect(handled == (vertical || type != ModalType::ManageBreakpoints),
+                   "arrow routing preserves modal handling");
+            std::vector<std::string> actual(40, std::string(120, ' ')), expected = actual;
+            TuiTestAccess::modal(tui).render_overlay(actual, 120, 40);
+            reference.render_overlay(expected, 120, 40);
+            expect(actual == expected, "mirrored arrows preserve modal state and rendering");
+        }
+    }
 }
 
 void test_classroom_cli_defaults() {
@@ -1044,6 +1136,8 @@ int main() {
     test_terminal_scrollback_and_selection();
     test_utf8_and_theme_helpers();
     test_key_registry();
+    test_cleanup_input_boundaries();
+    test_mirrored_modal_arrows();
     test_page_guidance();
     test_classroom_cli_defaults();
     test_inspection_report();

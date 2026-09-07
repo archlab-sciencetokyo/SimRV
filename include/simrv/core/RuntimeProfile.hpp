@@ -42,7 +42,6 @@ enum class InteractionMode : unsigned char { Cli, Tui };
 struct RuntimeProfile {
     ExecutionEngine engine = ExecutionEngine::InstructionFast;
     InteractionMode interaction = InteractionMode::Cli;
-    bool debug_diagnostics = false;
     bool tracing = false;
     bool lockstep = false;
     bool gdb = false;
@@ -59,8 +58,7 @@ struct RuntimeProfile {
         const bool fast_instruction_engine = is_fast_engine(engine) && is_instruction_mode();
         const bool sampled_tui_engine =
             engine == ExecutionEngine::InstructionObservable && interaction == InteractionMode::Tui;
-        return (fast_instruction_engine || sampled_tui_engine) && !debug_diagnostics && !tracing &&
-               !lockstep && !gdb;
+        return (fast_instruction_engine || sampled_tui_engine) && !tracing && !lockstep;
     }
     [[nodiscard]] constexpr auto fast_batch_quantum() const -> unsigned {
         return interaction == InteractionMode::Tui ? 2048U : 65536U;

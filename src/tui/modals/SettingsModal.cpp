@@ -26,7 +26,6 @@ void SettingsModal::open(SettingsDraft& draft, const simrv::core::Machine& machi
 
     // Tab 0: General
     draft.cycle_accurate = machine.runtime_profile.is_cycle_mode();
-    draft.debug_mode = machine.debug_diagnostics_enabled();
     draft.high_contrast = machine.high_contrast_enabled();
     draft.class_mode = machine.class_mode_enabled();
     draft.tui_fps = machine.tui_controller() ? machine.tui_controller()->target_fps() : 30;
@@ -35,7 +34,6 @@ void SettingsModal::open(SettingsDraft& draft, const simrv::core::Machine& machi
     draft.traplog_mode = machine.trap_log_enabled();
     draft.dlog_mode = machine.device_log_enabled();
     draft.lockstep_mode = machine.lockstep_enabled();
-    draft.gdb_mode = machine.debugger_enabled();
     draft.num_harts = machine.execution_config().num_harts;
     draft.smp_quantum = machine.execution_config().smp_quantum;
     draft.smp_multithreaded = machine.execution_config().smp_multithreaded;
@@ -59,7 +57,7 @@ void SettingsModal::set_tab(SettingsDraft& draft, uint8_t tab) { draft.active_ta
 void SettingsModal::move_cursor(SettingsDraft& draft, int delta) {
     switch (draft.active_tab) {
         case 0: {
-            constexpr int kNumSettings = 17;
+            constexpr int kNumSettings = 15;
             draft.tab_cursor[0] = (draft.tab_cursor[0] + delta + kNumSettings) % kNumSettings;
             break;
         }
@@ -75,7 +73,7 @@ void SettingsModal::move_cursor(SettingsDraft& draft, int delta) {
 }
 
 void SettingsModal::move_cursor(int& cursor, int delta) {
-    constexpr int kNumSettings = 17;
+    constexpr int kNumSettings = 15;
     cursor = (cursor + delta + kNumSettings) % kNumSettings;
 }
 
@@ -106,20 +104,12 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     draft.sys_config.cycle_accurate = draft.cycle_accurate;
                     break;
                 case 1:
-                    draft.debug_mode = !draft.debug_mode;
-                    if (draft.debug_mode) {
-                        draft.use_mix = true;
-                    } else {
-                        draft.use_mix = false;
-                    }
-                    break;
-                case 2:
                     draft.high_contrast = !draft.high_contrast;
                     break;
-                case 3:
+                case 2:
                     draft.class_mode = !draft.class_mode;
                     break;
-                case 4: {  // TUI Target Refresh Rate
+                case 3: {  // TUI Target Refresh Rate
                     static constexpr std::array<uint32_t, 4> kFpsOptions = {10, 15, 30, 60};
                     size_t curr_idx = 2;  // default 30
                     for (size_t f = 0; f < kFpsOptions.size(); ++f) {
@@ -136,15 +126,15 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     draft.tui_fps = kFpsOptions[curr_idx];
                     break;
                 }
-                case 5: {  // Active SMP Hart Count
+                case 4: {  // Active SMP Hart Count
                     int v = static_cast<int>(draft.num_harts) + dir;
                     draft.num_harts = static_cast<uint32_t>(std::clamp(v, 1, 16));
                     break;
                 }
-                case 6:  // SMP Threading Model
+                case 5:  // SMP Threading Model
                     draft.smp_multithreaded = !draft.smp_multithreaded;
                     break;
-                case 7: {  // SMP Scheduler Quantum (insns/slice)
+                case 6: {  // SMP Scheduler Quantum (insns/slice)
                     static constexpr std::array<uint32_t, 12> kQuantumLevels = {
                         10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 50000, 100000};
                     size_t curr = 6;  // default 1000
@@ -165,10 +155,10 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     }
                     break;
                 }
-                case 8:  // Platform Profile (0: PCIe, 1: MMIO)
+                case 7:  // Platform Profile (0: PCIe, 1: MMIO)
                     draft.platform_profile = static_cast<uint8_t>((draft.platform_profile + 1) % 2);
                     break;
-                case 9: {  // Physical RAM Capacity (MB)
+                case 8: {  // Physical RAM Capacity (MB)
                     static constexpr std::array<uint64_t, 8> kRamSizes = {32,  64,   128,  256,
                                                                           512, 1024, 2048, 4096};
                     size_t curr_idx = 3;  // default 256
@@ -186,7 +176,7 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     draft.dram_size_mb = kRamSizes[curr_idx];
                     break;
                 }
-                case 10:  // VirtIO Network Backend
+                case 9:  // VirtIO Network Backend
                     if (draft.net_mode == "user")
                         draft.net_mode = (dir > 0) ? "tap" : "none";
                     else if (draft.net_mode == "tap")
@@ -196,24 +186,21 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     else
                         draft.net_mode = (dir > 0) ? "user" : "socket";
                     break;
-                case 11:
+                case 10:
                     if (machine && machine->spike_binary().empty()) break;
                     draft.lockstep_mode = !draft.lockstep_mode;
                     break;
-                case 12:
-                    draft.gdb_mode = !draft.gdb_mode;
-                    break;
-                case 13:
+                case 11:
                     if (!draft.cycle_accurate) break;
                     draft.bp_trace = !draft.bp_trace;
                     break;
-                case 14:
+                case 12:
                     draft.use_mix = !draft.use_mix;
                     break;
-                case 15:
+                case 13:
                     draft.traplog_mode = !draft.traplog_mode;
                     break;
-                case 16:
+                case 14:
                     if (machine && machine->appmode_enabled()) break;
                     draft.dlog_mode = !draft.dlog_mode;
                     break;
@@ -261,7 +248,6 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
     machine.runtime_profile.interaction = simrv::core::InteractionMode::Tui;
     machine.runtime_profile.engine = simrv::core::select_execution_engine(
         draft.cycle_accurate, machine.runtime_profile.interaction);
-    machine.set_debug_diagnostics_enabled(draft.debug_mode);
     if (draft.high_contrast != machine.high_contrast_enabled()) {
         set_high_contrast(draft.high_contrast);
         machine.set_high_contrast_enabled(draft.high_contrast);
@@ -288,7 +274,6 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
     next.execution.smp_quantum = draft.smp_quantum;
     next.execution.smp_multithreaded = draft.smp_multithreaded;
     next.debug.lockstep_enabled = draft.lockstep_mode;
-    next.debug.gdb_enabled = draft.gdb_mode;
 
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
         machine.hart(hart).pipeline_sim.config.record_snapshots =
@@ -304,8 +289,7 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
         next.execution.smp_quantum != machine.execution_config().smp_quantum ||
         next.execution.smp_multithreaded != machine.execution_config().smp_multithreaded ||
         next.network.mode != machine.network_mode() ||
-        next.debug.lockstep_enabled != machine.lockstep_enabled() ||
-        next.debug.gdb_enabled != machine.debugger_enabled();
+        next.debug.lockstep_enabled != machine.lockstep_enabled();
 
     // 2. MISA Extensions
     uint64_t const new_misa = draft.misa.to_misa_val();
@@ -389,9 +373,6 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
             {.name = "Simulation Precision",
              .val = draft.cycle_accurate ? "\033[1;36m[Cycle-Accurate (CA)]\033[0m"
                                          : "\033[1;32m[Instruction-Accurate (IA)]\033[0m"},
-            {.name = "Debug Mode & Diagnostics",
-             .val = draft.debug_mode ? "\033[1;32m[ON (Diagnostics Active)]\033[0m"
-                                     : "\033[90m[OFF]\033[0m"},
             {.name = "Color Theme / Contrast",
              .val = draft.high_contrast ? "\033[1;33m[High Contrast B&W]\033[0m"
                                         : "\033[1;34m[Adaptive / Terminal Colors]\033[0m"},
@@ -414,8 +395,6 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
              .val = lockstep_disabled
                         ? "\033[90m[OFF (Requires --spike-bin)]\033[0m"
                         : (draft.lockstep_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m")},
-            {.name = "GDB Remote Debug Stub",
-             .val = draft.gdb_mode ? "\033[1;32m[ON (Port 1234)]\033[0m" : "\033[90m[OFF]\033[0m"},
             {.name = "Branch Prediction Log",
              .val = bp_disabled ? "\033[90m[OFF (Requires CA mode)]\033[0m"
                                 : (draft.bp_trace ? "\033[1;32m[ON (trace/bpred.txt)]\033[0m"
@@ -436,16 +415,16 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
         for (std::size_t i = 0; i < settings.size(); ++i) {
             if (i == 0) {
                 add_row_cb(build_section_divider("Simulation Engine & Visualization"));
-            } else if (i == 5) {
+            } else if (i == 4) {
                 add_row_cb("");
                 add_row_cb(build_section_divider("Symmetric Multiprocessing (SMP) Configuration"));
-            } else if (i == 8) {
+            } else if (i == 7) {
                 add_row_cb("");
                 add_row_cb(build_section_divider("Platform Profile & Peripheral Devices"));
-            } else if (i == 11) {
+            } else if (i == 10) {
                 add_row_cb("");
-                add_row_cb(build_section_divider("External Integrations & Debug Stubs"));
-            } else if (i == 13) {
+                add_row_cb(build_section_divider("External Integrations"));
+            } else if (i == 11) {
                 add_row_cb("");
                 add_row_cb(build_section_divider("Traces & Logging (Creates Text Files)"));
             }

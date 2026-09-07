@@ -18,7 +18,7 @@ structures, L1 I/D-caches, branch predictor, and execution pipeline model.
 | **Execution** | `Decoder`, `ExecuteUnit`, `PipelineSim` | Decode caching, integer/FP/vector execution, pipeline hazards, retirement |
 | **Memory & Coherence** | `Mmu`, `DCache`, `ICache`, `TileLinkBus` | Address translation, L1 caches, TileLink-C directory coherence with MESI protocol |
 | **Platform Devices** | `PcieRootComplex`, `VirtioDevice`, `Uart`, `AIA`, `Aclint` | PCIe ECAM/BARs, VirtIO MMIO/PCI, 16550A UART, CLINT/PLIC, ACLINT, and AIA (APLIC/IMSIC) |
-| **Debug & Tracing** | `Tracer`, `GdbServer`, `SpikeLockstep` | Structured architectural traces, GDB RSP remote debugging, Spike co-simulation |
+| **Debug & Tracing** | `Tracer`, `GdbStub`, `BreakpointManager`, `SpikeLockstep` | Structured traces, logical break/watchpoints, GDB RSP, Spike co-simulation |
 | **Presentation** | `Tui`, `TuiFrameRenderer`, `VirtualTerminal` | Multi-hart state visualizer, terminal console PTY, educational glossary & inspector |
 
 ## Execution Policies & Microarchitectures
@@ -43,6 +43,38 @@ Multi-hart configurations (`--smp <N>`) simulate symmetric multiprocessing:
 1. **Directory Coherence**: L1 caches participate in directory-based cache coherence implementing the MESI (Modified, Exclusive, Shared, Invalid) protocol over TileLink-C channels.
 2. **Interrupt Routing**: Core local interrupts (software/timer) are managed via CLINT or ACLINT (MTIME/MSWI). External platform interrupts are handled by PLIC or AIA (APLIC wire interrupts and IMSIC message-signaled interrupts).
 3. **Synchronization**: Atomic operations (LR/SC and AMOs) use a global reservation table and coherent bus transactions across harts.
+
+## Debugger ownership and synchronization
+
+The TUI and GDB are mutually exclusive frontends over machine-owned debug primitives. TUI debug
+actions are always available; GDB runs its blocking TCP accept/read loop on one `std::jthread` and
+passes parsed requests through a synchronized command/reply channel. Machine-facing debugger
+requests inspect or mutate architectural state, devices, execution state, and logical
+break/watchpoints only on the simulation thread after quiescing execution workers.
+Packet handlers return an explicit optional reply and connection disposition; only the transport
+worker frames and sends replies, including asynchronous stops while awaiting packet bytes.
+
+GDB uses all-stop semantics. Attach and startup hold all harts paused, stop events quiesce SMP
+workers, and a selected-hart single-step runs the normal execution model until that hart retires
+one instruction. An atomic control-event generation counter wakes paused simulation and dormant SMP
+workers without periodic sleeps. Fast IA execution observes control requests at bounded 256-
+instruction safe points; detailed and CA execution observe them every retirement or cycle.
+Bare-metal and OS runners share worker lifecycle coordination but retain their execution kernels.
+Step requests use a release/acquire handoff. Completion is acknowledged after worker quiescence and
+snapshot publication; synchronous callers use a predicate-based condition-variable wait with a real
+deadline. Parallel harts evaluate their own timer interrupt state instead of hart 0 mutating it.
+
+Breakpoint records have stable IDs and frontend ownership. Thus cleanup removes only GDB-owned
+logical breakpoints and watchpoints without rewriting guest instructions or disturbing TUI state.
+Detach resumes and retains the listener; an unexpected disconnect cleans GDB-owned state, leaves
+the target paused, and relistens.
+
+The native `gdb-stub` suite is labelled `gate;regress;debug;thread` and uses ephemeral ports with
+command/reply synchronization. Compare CLI throughput to a connected, running debugger with
+`python3 scripts/benchmark_gdb.py --simrv build/rv64-release/SimRV --runs 5 --json build/gdb-benchmark.json`.
+It interleaves five runs of each mode on one CPU and checks the median throughput against a 5%
+regression limit. `--trace-prefix build/gdb-syscalls` records a separate short syscall trace for
+confirming that socket activity stays on the server thread.
 
 ## CA timing and ordering
 

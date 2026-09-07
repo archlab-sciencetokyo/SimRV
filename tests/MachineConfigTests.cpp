@@ -40,6 +40,14 @@ auto main() -> int {
     invalid = defaults;
     invalid.isa.vlen = 48;
     expect(!invalid.validate().has_value(), "configuration rejects invalid VLEN");
+    invalid = defaults;
+    invalid.tui.enabled = true;
+    invalid.debug.gdb_enabled = true;
+    expect(!invalid.validate().has_value(), "configuration rejects TUI with GDB");
+    invalid = defaults;
+    invalid.debug.gdb_enabled = true;
+    invalid.debug.lockstep_enabled = true;
+    expect(!invalid.validate().has_value(), "configuration rejects GDB with lockstep");
     expect(defaults.validate().has_value(), "default configuration validates");
 
     simrv::core::MachineConfig applied{};
@@ -48,8 +56,7 @@ auto main() -> int {
     applied.execution.num_harts = 2;
     applied.execution.smp_quantum = 17;
     applied.execution.pipeline_type = simrv::pipeline::PipelineType::ThreeStage;
-    applied.tui.enabled = true;
-    applied.tui.debug_diagnostics = true;
+    applied.tui.enabled = false;
     applied.debug.gdb_enabled = true;
     applied.debug.gdb_port = 7777;
     applied.isa.vlen = 256;
@@ -65,8 +72,8 @@ auto main() -> int {
                machine.execution_config().smp_quantum == 17,
            "execution configuration is retained by the machine");
     expect(machine.execution_config().pipeline_type == simrv::pipeline::PipelineType::ThreeStage &&
-               machine.tui_enabled() && machine.debug_diagnostics_enabled(),
-           "pipeline and TUI configuration are projected through typed accessors");
+               !machine.tui_enabled(),
+           "pipeline and CLI configuration are projected through typed accessors");
     expect(machine.debugger_enabled() && machine.debugger_port() == 7777 &&
                machine.isa_config().vlen == 256,
            "debug and ISA configuration are projected through typed accessors");

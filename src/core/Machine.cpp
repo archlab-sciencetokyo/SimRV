@@ -91,10 +91,13 @@ class RunnerBase {
    public:
     ~RunnerBase() { stop_threads(); }
     void wait_for_quiescence() { wait_for_worker_quiescence(workers_in_cycle_); }
+    void stop(Machine& machine);
 
    protected:
+    void start_threads(Machine& machine, bool baremetal);
     void stop_threads() {
         workers_running_.store(false, std::memory_order_release);
+        if (machine_ != nullptr) machine_->notify_control_event();
         const auto self_id = std::this_thread::get_id();
         for (auto& thread : worker_threads_) {
             if (thread.joinable()) {
@@ -111,6 +114,7 @@ class RunnerBase {
     std::vector<std::jthread> worker_threads_;
     std::atomic<bool> workers_running_{false};
     std::atomic<uint32_t> workers_in_cycle_{0};
+    Machine* machine_ = nullptr;
 };
 
 /// Bare-metal and OS scheduling stay outside CPU's per-instruction fast path.  The selected
@@ -118,7 +122,6 @@ class RunnerBase {
 class BaremetalRunner : public RunnerBase {
    public:
     void start(Machine& machine);
-    void stop(Machine& machine);
     void prepare(Machine& machine);
     void execute(Machine& machine);
     [[nodiscard]] auto execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool;
@@ -128,7 +131,6 @@ class BaremetalRunner : public RunnerBase {
 class OsRunner : public RunnerBase {
    public:
     void start(Machine& machine);
-    void stop(Machine& machine);
     void prepare(Machine& machine);
     void execute(Machine& machine);
     [[nodiscard]] auto execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool;
@@ -476,13 +478,12 @@ void Machine::finalize_runner_cycle() {
 }
 
 auto Machine::fast_batch_policy() const -> std::optional<FastBatchPolicy> {
-    if (!runtime_profile.allows_fast_batch() || lockstep_enabled() || debugger_enabled() ||
+    if (!runtime_profile.allows_fast_batch() || is_stepping() || lockstep_enabled() ||
         branch_trace_enabled() || config.execution.strace != 0 || breakpoints.has_any()) {
         return std::nullopt;
     }
-    if (tui_enabled() &&
-        (!tui || tui->is_trace_active() ||
-         tui->step_delay_us_.load(std::memory_order_relaxed) != 0 || is_stepping())) {
+    if (tui_enabled() && (!tui || tui->is_trace_active() ||
+                          tui->step_delay_us_.load(std::memory_order_relaxed) != 0)) {
         return std::nullopt;
     }
     const bool captures_execution_detail = tui_enabled() && tui && tui->captures_execution_detail();
@@ -509,29 +510,40 @@ auto Machine::ca_batch_quantum() const noexcept -> uint32_t {
     return config.execution.smp_quantum;
 }
 
-void BaremetalRunner::start(Machine& machine) {
+void RunnerBase::start_threads(Machine& machine, bool baremetal) {
     if (!machine.config.execution.smp_multithreaded || machine.secondary_harts_.empty()) {
         return;
     }
     stop_threads();
+    machine_ = &machine;
     workers_running_.store(true, std::memory_order_release);
     for (size_t i = 0; i < machine.secondary_harts_.size(); ++i) {
-        worker_threads_.emplace_back([&machine, this, i](const std::stop_token& stop_token) {
+        worker_threads_.emplace_back([&machine, this, i,
+                                      baremetal](const std::stop_token& stop_token) {
             auto& hart = *machine.secondary_harts_[i];
             constexpr uint32_t kWorkerBatch = 64;
             while (!stop_token.stop_requested() && machine.is_running() &&
                    workers_running_.load(std::memory_order_relaxed)) {
-                if (hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                    continue;
-                }
-                if (machine.execution_state() != ExecutionState::Running) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                if (hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started ||
+                    machine.execution_state() != ExecutionState::Running ||
+                    machine.breakpoints.has_any() || machine.debug_pause_requested()) {
+                    const auto generation =
+                        machine.control_event_generation_.load(std::memory_order_acquire);
+                    if (!workers_running_.load(std::memory_order_acquire) ||
+                        stop_token.stop_requested() || !machine.is_running())
+                        break;
+                    if (hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started ||
+                        machine.execution_state() != ExecutionState::Running ||
+                        machine.breakpoints.has_any() || machine.debug_pause_requested()) {
+                        machine.control_event_generation_.wait(generation,
+                                                               std::memory_order_relaxed);
+                    }
                     continue;
                 }
                 for (uint32_t step = 0;
                      step < kWorkerBatch && machine.is_running() &&
                      machine.execution_state() == ExecutionState::Running &&
+                     !machine.breakpoints.has_any() && !machine.debug_pause_requested() &&
                      hart.hart_status.load(std::memory_order_relaxed) == HartStatus::Started;
                      ++step) {
                     workers_in_cycle_.fetch_add(1, std::memory_order_acq_rel);
@@ -546,8 +558,10 @@ void BaremetalRunner::start(Machine& machine) {
                     if (machine.runtime_profile.is_cycle_mode()) {
                         hart.evaluate_timer_interrupt();
                         hart.advance_ca_cycle(machine);
-                    } else {
+                    } else if (baremetal) {
                         hart.run_cycle_baremetal(machine);
+                    } else {
+                        hart.run_cycle(machine);
                     }
                     if (machine.tui_enabled() &&
                         (step + 1 == kWorkerBatch ||
@@ -563,7 +577,9 @@ void BaremetalRunner::start(Machine& machine) {
     }
 }
 
-void BaremetalRunner::stop(Machine& machine) {
+void BaremetalRunner::start(Machine& machine) { start_threads(machine, true); }
+
+void RunnerBase::stop(Machine& machine) {
     workers_running_.store(false, std::memory_order_release);
     for (auto& hart : machine.secondary_harts_) hart->hart_status.notify_all();
     machine.execution_state_.notify_all();
@@ -571,7 +587,7 @@ void BaremetalRunner::stop(Machine& machine) {
 }
 
 void BaremetalRunner::prepare(Machine& machine) {
-    if (!machine.config.execution.smp_multithreaded) {
+    if (!machine.config.execution.smp_multithreaded || machine.breakpoints.has_any()) {
         for (auto& hart : machine.secondary_harts_) {
             hart->pipeline_context.pending_exception = std::nullopt;
             hart->pipeline_context.pending_tval = 0;
@@ -582,8 +598,14 @@ void BaremetalRunner::prepare(Machine& machine) {
 }
 
 void BaremetalRunner::execute(Machine& machine) {
+    if (machine.config.execution.smp_multithreaded && !machine.is_stepping() &&
+        !machine.breakpoints.has_any() && machine.runtime_profile.is_instruction_mode()) {
+        machine.primary_hart().run_cycle_baremetal(machine);
+        return;
+    }
     if (machine.runtime_profile.is_cycle_mode()) {
-        if (machine.config.execution.smp_multithreaded && !machine.is_stepping()) {
+        if (machine.config.execution.smp_multithreaded && !machine.is_stepping() &&
+            !machine.breakpoints.has_any()) {
             machine.advance_ca_primary_cycle();
             return;
         }
@@ -600,7 +622,10 @@ void BaremetalRunner::execute(Machine& machine) {
     } else if (machine.lockstep() && machine.lockstep()->is_running()) {
         machine.primary_hart().run_cycle(machine);
     } else {
-        const uint32_t quantum = machine.config.execution.smp_quantum;
+        const uint32_t quantum =
+            (machine.is_stepping() || machine.debugger_enabled() || machine.breakpoints.has_any())
+                ? 1
+                : machine.config.execution.smp_quantum;
         if (machine.secondary_harts_.empty() || quantum <= 1) {
             machine.primary_hart().run_cycle_baremetal(machine);
             for (auto& hart : machine.secondary_harts_) {
@@ -627,6 +652,8 @@ void BaremetalRunner::execute(Machine& machine) {
 }
 
 auto BaremetalRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool {
+    if (!machine.secondary_harts_.empty() && !machine.config.execution.smp_multithreaded)
+        return false;
     const auto policy = machine.fast_batch_policy();
     if (!simrv::compiler::likely(policy.has_value())) return false;
     if (policy->has_instruction_limit) {
@@ -660,69 +687,10 @@ void BaremetalRunner::finalize(Machine& machine) {
     }
 }
 
-void OsRunner::start(Machine& machine) {
-    if (!machine.config.execution.smp_multithreaded || machine.secondary_harts_.empty()) {
-        return;
-    }
-    stop_threads();
-    workers_running_.store(true, std::memory_order_release);
-    for (size_t i = 0; i < machine.secondary_harts_.size(); ++i) {
-        worker_threads_.emplace_back([&machine, this, i](const std::stop_token& stop_token) {
-            auto& hart = *machine.secondary_harts_[i];
-            constexpr uint32_t kWorkerBatch = 64;
-            while (!stop_token.stop_requested() && machine.is_running() &&
-                   workers_running_.load(std::memory_order_relaxed)) {
-                if (hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                    continue;
-                }
-                if (machine.execution_state() != ExecutionState::Running) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
-                    continue;
-                }
-                for (uint32_t step = 0;
-                     step < kWorkerBatch && machine.is_running() &&
-                     machine.execution_state() == ExecutionState::Running &&
-                     hart.hart_status.load(std::memory_order_relaxed) == HartStatus::Started;
-                     ++step) {
-                    workers_in_cycle_.fetch_add(1, std::memory_order_acq_rel);
-                    if (machine.execution_state() != ExecutionState::Running) {
-                        workers_in_cycle_.fetch_sub(1, std::memory_order_acq_rel);
-                        workers_in_cycle_.notify_all();
-                        break;
-                    }
-                    g_secondary_runner_active = true;
-                    hart.pipeline_context.pending_exception = std::nullopt;
-                    hart.pipeline_context.pending_tval = 0;
-                    if (machine.runtime_profile.is_cycle_mode()) {
-                        hart.evaluate_timer_interrupt();
-                        hart.advance_ca_cycle(machine);
-                    } else {
-                        hart.run_cycle(machine);
-                    }
-                    if (machine.tui_enabled() &&
-                        (step + 1 == kWorkerBatch ||
-                         hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started)) {
-                        machine.publish_tui_execution_snapshot_for_hart(i + 1);
-                    }
-                    g_secondary_runner_active = false;
-                    workers_in_cycle_.fetch_sub(1, std::memory_order_acq_rel);
-                    workers_in_cycle_.notify_all();
-                }
-            }
-        });
-    }
-}
-
-void OsRunner::stop(Machine& machine) {
-    workers_running_.store(false, std::memory_order_release);
-    for (auto& hart : machine.secondary_harts_) hart->hart_status.notify_all();
-    machine.execution_state_.notify_all();
-    stop_threads();
-}
+void OsRunner::start(Machine& machine) { start_threads(machine, false); }
 
 void OsRunner::prepare(Machine& machine) {
-    if (!machine.config.execution.smp_multithreaded) {
+    if (!machine.config.execution.smp_multithreaded || machine.breakpoints.has_any()) {
         for (auto& hart : machine.secondary_harts_) {
             hart->pipeline_context.pending_exception = std::nullopt;
             hart->pipeline_context.pending_tval = 0;
@@ -743,8 +711,14 @@ void OsRunner::prepare(Machine& machine) {
 }
 
 void OsRunner::execute(Machine& machine) {
+    if (machine.config.execution.smp_multithreaded && !machine.is_stepping() &&
+        !machine.breakpoints.has_any() && machine.runtime_profile.is_instruction_mode()) {
+        machine.primary_hart().run_cycle(machine);
+        return;
+    }
     if (machine.runtime_profile.is_cycle_mode()) {
-        if (machine.config.execution.smp_multithreaded && !machine.is_stepping()) {
+        if (machine.config.execution.smp_multithreaded && !machine.is_stepping() &&
+            !machine.breakpoints.has_any()) {
             machine.advance_ca_primary_cycle();
             return;
         }
@@ -760,7 +734,10 @@ void OsRunner::execute(Machine& machine) {
         }
         return;
     }
-    const uint32_t quantum = machine.config.execution.smp_quantum;
+    const uint32_t quantum =
+        (machine.is_stepping() || machine.debugger_enabled() || machine.breakpoints.has_any())
+            ? 1
+            : machine.config.execution.smp_quantum;
     if (machine.secondary_harts_.empty() || quantum <= 1) {
         machine.primary_hart().run_cycle(machine);
         for (auto& hart : machine.secondary_harts_) {
@@ -805,7 +782,10 @@ auto OsRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool
             std::min<Counter>(batch_size, machine.config.execution.fincnt - cpu.e_icount));
     }
     const uint32_t quantum = std::min(batch_size, machine.secondary_harts_.empty() ? 4096u : 2048u);
-    for (uint32_t i = 0; i < quantum && machine.is_running(); ++i) cpu.run_cycle(machine);
+    for (uint32_t i = 0; i < quantum && machine.is_running(); ++i) {
+        cpu.run_cycle(machine);
+        if ((i & 255U) == 0 && (machine.is_paused() || machine.debug_pause_requested())) break;
+    }
     // Functional TUI batches do not enter the per-cycle finalizer, so surface pending UART RX at
     // the same explicit boundary that publishes the sampled UI snapshot.
     if (auto* uart = machine.uart_device(); uart && machine.tui_enabled()) {
@@ -902,26 +882,46 @@ auto Machine::is_paused() const -> bool {
            (tui_enabled() && tui && tui->is_paused());
 }
 
+void Machine::notify_control_event() noexcept {
+    control_event_generation_.fetch_add(1, std::memory_order_release);
+    control_event_generation_.notify_all();
+}
+
+auto Machine::debug_pause_requested() const noexcept -> bool {
+    return debug_halt_pending_.load(std::memory_order_acquire) ||
+           (gdb_stub && gdb_stub->pause_requested());
+}
+
+void Machine::acknowledge_step() {
+    {
+        const std::lock_guard lock(step_mutex_);
+        ++step_ack_count_;
+    }
+    step_cv_.notify_all();
+}
+
 void Machine::pause() {
     execution_state_.store(ExecutionState::Paused, std::memory_order_release);
-    step_ack_count_.fetch_add(1, std::memory_order_release);
-    step_ack_count_.notify_all();
     execution_state_.notify_all();
     for (auto& hart : secondary_harts_) hart->hart_status.notify_all();
+    notify_control_event();
     wait_for_runner_quiescence();
     if (tui_enabled()) publish_tui_execution_snapshot();
     if (tui_enabled() && tui) {
         tui->pause_loop();
     }
+    acknowledge_step();
 }
 
 void Machine::resume() {
     if (is_shutdown_) {
         return;
     }
+    debug_step_hart_.reset();
     execution_state_.store(ExecutionState::Running, std::memory_order_release);
     execution_state_.notify_all();
     for (auto& hart : secondary_harts_) hart->hart_status.notify_all();
+    notify_control_event();
     if (tui_enabled() && tui) {
         tui->unpause_loop();
     }
@@ -934,19 +934,90 @@ void Machine::step() {
     execution_state_.store(ExecutionState::Stepping, std::memory_order_release);
     execution_state_.notify_all();
     for (auto& hart : secondary_harts_) hart->hart_status.notify_all();
+    notify_control_event();
+}
+
+auto Machine::begin_debug_step(HartId hart) -> bool {
+    if (is_shutdown_ || hart.raw() >= num_harts()) return false;
+    if (this->hart(hart).hart_status.load(std::memory_order_acquire) != HartStatus::Started) {
+        return false;
+    }
+    debug_step_hart_ = hart;
+    debug_step_target_ = this->hart(hart).e_icount + 1;
+    execution_state_.store(ExecutionState::Stepping, std::memory_order_release);
+    execution_state_.notify_all();
+    notify_control_event();
+    return true;
+}
+
+void Machine::enqueue_debug_halt(PendingDebugHalt halt) {
+    {
+        const std::lock_guard lock(debug_halt_mutex_);
+        if (!pending_debug_halt_) pending_debug_halt_ = std::move(halt);
+        debug_halt_pending_.store(true, std::memory_order_release);
+    }
+    notify_control_event();
+}
+
+void Machine::debug_halt(HartId hart, GdbSignal signal, std::string reason) {
+    if ((!gdb_stub || !gdb_stub->is_connected()) && !tui_enabled()) return;
+    enqueue_debug_halt(
+        {.hart = hart, .signal = signal, .reason = std::move(reason), .description = {}});
+}
+
+void Machine::debug_watch_hit(HartId hart, GdbSignal signal, std::string reason,
+                              std::string description) {
+    enqueue_debug_halt({.hart = hart,
+                        .signal = signal,
+                        .reason = std::move(reason),
+                        .description = std::move(description),
+                        .waits_for_memory = true,
+                        .retirement_target = this->hart(hart).e_icount + 1});
+}
+
+void Machine::service_debug_halt() {
+    if (!debug_halt_pending_.load(std::memory_order_acquire)) return;
+
+    PendingDebugHalt halt;
+    {
+        const std::lock_guard lock(debug_halt_mutex_);
+        if (!pending_debug_halt_) return;
+        if (pending_debug_halt_->waits_for_memory) {
+            auto& target = hart(pending_debug_halt_->hart);
+            if (target.e_icount < pending_debug_halt_->retirement_target) return;
+            if (target.active_context().pending_exception.has_value()) {
+                pending_debug_halt_.reset();
+                debug_halt_pending_.store(false, std::memory_order_release);
+                return;
+            }
+        }
+        halt = std::move(*pending_debug_halt_);
+        pending_debug_halt_.reset();
+    }
+
+    if (tui_enabled() && tui && !halt.description.empty()) {
+        tui->set_status_override(halt.description);
+    }
+    pause();
+    {
+        const std::lock_guard lock(debug_halt_mutex_);
+        debug_halt_pending_.store(pending_debug_halt_.has_value(), std::memory_order_release);
+    }
+    if (gdb_stub && gdb_stub->is_connected()) {
+        gdb_stub->notify_stop(halt.hart, halt.signal, std::move(halt.reason));
+    }
 }
 
 void Machine::step_sync(std::chrono::milliseconds timeout) {
     if (is_shutdown_) {
         return;
     }
-    const uint64_t target_ack = step_ack_count_.load(std::memory_order_relaxed) + 1;
+    std::unique_lock lock(step_mutex_);
+    const auto target_ack = step_ack_count_ + 1;
     step();
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
-    while (step_ack_count_.load(std::memory_order_acquire) < target_ack && is_running() &&
-           std::chrono::steady_clock::now() < deadline) {
-        step_ack_count_.wait(target_ack - 1, std::memory_order_relaxed);
-    }
+    step_cv_.wait_for(lock, timeout, [&] {
+        return step_ack_count_ >= target_ack || !is_running() || is_stopped();
+    });
 }
 
 auto Machine::stop_reason_name(StopReason reason) noexcept -> std::string_view {
@@ -981,10 +1052,9 @@ void Machine::stop(StopReason reason) {
     stop_reason_ = reason;
     is_shutdown_ = true;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
-    step_ack_count_.fetch_add(1, std::memory_order_release);
-    step_ack_count_.notify_all();
     execution_state_.notify_all();
     for (auto& hart : secondary_harts_) hart->hart_status.notify_all();
+    notify_control_event();
     stop_runner();
     if (!tui_enabled()) {
         is_running_ = false;
@@ -992,6 +1062,7 @@ void Machine::stop(StopReason reason) {
     if (tui_enabled() && tui) {
         tui->pause_loop();
     }
+    acknowledge_step();
     publish_lifecycle_event(LifecycleEventKind::Stopped);
 }
 
@@ -1000,11 +1071,11 @@ void Machine::request_reboot() {
     reboot_requested = true;
     is_running_ = false;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
-    step_ack_count_.fetch_add(1, std::memory_order_release);
-    step_ack_count_.notify_all();
     execution_state_.notify_all();
     for (auto& hart : secondary_harts_) hart->hart_status.notify_all();
+    notify_control_event();
     stop_runner();
+    acknowledge_step();
     publish_lifecycle_event(LifecycleEventKind::RebootRequested);
 }
 
@@ -1014,11 +1085,11 @@ void Machine::request_exit(int status) {
     is_shutdown_ = true;
     is_running_ = false;
     execution_state_.store(ExecutionState::Stopped, std::memory_order_release);
-    step_ack_count_.fetch_add(1, std::memory_order_release);
-    step_ack_count_.notify_all();
     execution_state_.notify_all();
     for (auto& hart : secondary_harts_) hart->hart_status.notify_all();
+    notify_control_event();
     stop_runner();
+    acknowledge_step();
     publish_lifecycle_event(LifecycleEventKind::ExitRequested, status);
 }
 
@@ -1050,11 +1121,20 @@ void Machine::run() {
 
     while (is_running() &&
            execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
-        if (tui_enabled() && tui && tui->is_tui_paused() && !is_stepping()) {
-            tui->set_sim_thread_sleeping(true);
-            execution_state_.wait(ExecutionState::Paused, std::memory_order_relaxed);
-            if (execution_state_.load(std::memory_order_relaxed) == ExecutionState::Paused) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        if (gdb_stub) gdb_stub->service_pending(*this);
+        service_debug_halt();
+        if (gdb_stub && gdb_stub->pause_requested() && execution_state() == ExecutionState::Running)
+            pause();
+
+        if (execution_state() == ExecutionState::Paused && !is_stepping()) {
+            if (tui_enabled() && tui) tui->set_sim_thread_sleeping(true);
+            if (gdb_stub) gdb_stub->service_pending(*this);
+            if (execution_state() != ExecutionState::Paused) continue;
+
+            const auto generation = control_event_generation_.load(std::memory_order_acquire);
+            if (execution_state() == ExecutionState::Paused &&
+                (!gdb_stub || !gdb_stub->has_pending_commands())) {
+                control_event_generation_.wait(generation, std::memory_order_relaxed);
             }
             continue;
         }
@@ -1079,6 +1159,7 @@ void Machine::run() {
             if (!tui_enabled() && uart && !uart->is_input_thread_running()) {
                 uart->service_interrupts();
             }
+            if (gdb_stub) gdb_stub->service_pending(*this);
             continue;
         }
 
@@ -1101,23 +1182,31 @@ void Machine::run() {
             tui->on_cycle_completed();
         }
 
-        if (is_stepping()) {
+        service_debug_halt();
+
+        bool step_complete = is_stepping();
+        HartId completed_hart{0};
+        if (step_complete && debug_step_hart_.has_value()) {
+            completed_hart = *debug_step_hart_;
+            step_complete = hart(completed_hart).e_icount >= debug_step_target_;
+        }
+        if (step_complete) {
             execution_state_.store(ExecutionState::Paused, std::memory_order_release);
-            step_ack_count_.fetch_add(1, std::memory_order_release);
-            step_ack_count_.notify_all();
             execution_state_.notify_all();
+            notify_control_event();
             if (tui_enabled() && tui) {
                 tui->set_paused(true);
             }
+            if (debug_step_hart_.has_value() && gdb_stub) {
+                debug_step_hart_.reset();
+                gdb_stub->notify_stop(completed_hart, GdbSignal::SigTrap);
+            }
+            wait_for_runner_quiescence();
+            if (tui_enabled()) publish_tui_execution_snapshot();
+            acknowledge_step();
         }
 
-        if (gdb_stub && gdb_stub->is_connected()) {
-            if (gdb_stub->single_step()) {
-                gdb_stub->notify_breakpoint(*this);
-            } else {
-                gdb_stub->poll(*this);
-            }
-        }
+        if (gdb_stub) gdb_stub->service_pending(*this);
 
         if (!appmode_enabled() && spike_lockstep && spike_lockstep->is_running()) {
             spike_lockstep->compare_and_report(cpu.state(), cpu.pipeline_context.cpc.raw(),
@@ -1144,6 +1233,7 @@ void Machine::run() {
     if (uart && tui_enabled()) {
         uart->stop_pty();
     }
+    if (gdb_stub) gdb_stub->stop();
 }
 
 void Machine::finalize_cycle_tohost() {
@@ -1285,7 +1375,12 @@ void Machine::finalize_cycle_tohost() {
     }
 }
 
-Machine::~Machine() = default;
+Machine::~Machine() {
+    if (gdb_stub) gdb_stub->stop();
+    stop_runner();
+    // Destroy callbacks and runner objects while their Machine wake state is still alive.
+    runtime_.reset();
+}
 
 void Machine::advance_ca_global_cycle() {
     cpu.advance_ca_cycle(*this);

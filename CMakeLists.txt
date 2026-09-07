@@ -300,6 +300,12 @@ simrv_configure_native_test(simrv-machine-ownership-tests)
 add_test(NAME machine-ownership COMMAND simrv-machine-ownership-tests)
 set_tests_properties(machine-ownership PROPERTIES LABELS "gate;regress;core;ownership")
 
+add_executable(simrv-gdb-stub-tests tests/GdbStubTests.cpp)
+target_link_libraries(simrv-gdb-stub-tests PRIVATE simrv-runtime)
+simrv_configure_native_test(simrv-gdb-stub-tests)
+add_test(NAME gdb-stub COMMAND simrv-gdb-stub-tests)
+set_tests_properties(gdb-stub PROPERTIES LABELS "gate;regress;debug;thread" TIMEOUT 30)
+
 add_executable(simrv-modern-platform-tests
   tests/ModernPlatformTests.cpp
 )
@@ -338,6 +344,28 @@ set_tests_properties(cli-invalid-pipeline PROPERTIES
   WILL_FAIL TRUE
   LABELS "gate;regress;cli"
 )
+
+add_test(NAME cli-gdb-tui-conflict COMMAND $<TARGET_FILE:SimRV> --tui --gdb)
+set_tests_properties(cli-gdb-tui-conflict PROPERTIES
+  PASS_REGULAR_EXPRESSION "--gdb and --tui are mutually exclusive"
+  LABELS "gate;regress;cli;debug"
+)
+
+add_test(NAME cli-gdb-lockstep-conflict COMMAND $<TARGET_FILE:SimRV> --gdb --lockstep)
+set_tests_properties(cli-gdb-lockstep-conflict PROPERTIES
+  PASS_REGULAR_EXPRESSION "--gdb and --lockstep are mutually exclusive"
+  LABELS "gate;regress;cli;debug"
+)
+
+foreach(removed_debug_option IN ITEMS --debug-mode --debug -d -g --port -p -M -P -w -x)
+  string(MAKE_C_IDENTIFIER "${removed_debug_option}" removed_debug_test_suffix)
+  add_test(NAME "cli-removed-debug-option-${removed_debug_test_suffix}"
+    COMMAND $<TARGET_FILE:SimRV> "${removed_debug_option}")
+  set_tests_properties("cli-removed-debug-option-${removed_debug_test_suffix}" PROPERTIES
+    PASS_REGULAR_EXPRESSION "unknown option"
+    LABELS "gate;regress;cli;debug"
+  )
+endforeach()
 
 add_test(NAME release-metadata
   COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/release_check.py

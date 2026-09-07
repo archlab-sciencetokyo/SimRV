@@ -3,6 +3,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -140,19 +141,12 @@ class Machine final {
     [[nodiscard]] auto mouse_sensitivity() const noexcept -> double {
         return config.tui.mouse_sensitivity;
     }
-    [[nodiscard]] auto debug_diagnostics_enabled() const noexcept -> bool {
-        return config.tui.debug_diagnostics;
-    }
-    void set_debug_diagnostics_enabled(bool enabled) noexcept {
-        config.tui.debug_diagnostics = enabled;
-    }
     [[nodiscard]] auto high_contrast_enabled() const noexcept -> bool {
         return config.tui.high_contrast;
     }
     void set_high_contrast_enabled(bool enabled) noexcept { config.tui.high_contrast = enabled; }
     [[nodiscard]] auto class_mode_enabled() const noexcept -> bool { return config.tui.class_mode; }
     void set_class_mode_enabled(bool enabled) noexcept { config.tui.class_mode = enabled; }
-    [[nodiscard]] auto debugmode_enabled() const noexcept -> bool { return config.debug.debugmode; }
     [[nodiscard]] auto device_log_enabled() const noexcept -> bool {
         return config.debug.dlog_mode;
     }
@@ -246,7 +240,7 @@ class Machine final {
     void stop(StopReason reason = StopReason::ExternalStop);
     /// Get current atomic execution state.
     [[nodiscard]] auto execution_state() const -> ExecutionState {
-        return execution_state_.load(std::memory_order_relaxed);
+        return execution_state_.load(std::memory_order_acquire);
     }
     /// Check if machine execution is currently paused.
     [[nodiscard]] auto is_paused() const -> bool;
@@ -256,7 +250,7 @@ class Machine final {
     }
     /// Check if machine execution is in single-stepping state.
     [[nodiscard]] auto is_stepping() const -> bool {
-        return execution_state_.load(std::memory_order_relaxed) == ExecutionState::Stepping;
+        return execution_state() == ExecutionState::Stepping;
     }
     /// Pause machine execution.
     void pause();
@@ -266,6 +260,16 @@ class Machine final {
     void step();
     /// Request execution of a single instruction cycle and synchronously wait for completion.
     void step_sync(std::chrono::milliseconds timeout = std::chrono::milliseconds(500));
+    /// Begin an all-stop GDB step that completes when the selected hart retires once.
+    [[nodiscard]] auto begin_debug_step(HartId hart) -> bool;
+    /// Stop execution for a debugger event and publish an RSP stop reply.
+    void debug_halt(HartId hart, GdbSignal signal = GdbSignal::SigTrap, std::string reason = {});
+    /// Record a memory watchpoint and stop after the modeled access completes.
+    void debug_watch_hit(HartId hart, GdbSignal signal, std::string reason,
+                         std::string description);
+    /// Wake simulation and SMP workers after an external control-plane event.
+    void notify_control_event() noexcept;
+    [[nodiscard]] auto debug_pause_requested() const noexcept -> bool;
     /// Check if the simulation loop is running.
     [[nodiscard]] auto is_running() const -> bool {
         return is_running_.load(std::memory_order_relaxed);
@@ -452,6 +456,9 @@ class Machine final {
     void publish_tui_execution_snapshot_for_testing() noexcept { publish_tui_execution_snapshot(); }
     void start_runner_for_testing() { start_runner(); }
     void stop_runner_for_testing() { stop_runner(); }
+    void install_debugger_for_testing(std::unique_ptr<simrv::debug::GdbStub> debugger) {
+        gdb_stub = std::move(debugger);
+    }
 
    protected:
     [[nodiscard]] auto allocate_ram(size_t bytes) -> bool;
@@ -477,6 +484,7 @@ class Machine final {
     [[nodiscard]] auto fast_batch_policy() const -> std::optional<FastBatchPolicy>;
     [[nodiscard]] auto ca_batch_quantum() const noexcept -> uint32_t;
     void advance_ca_platform_cycle(bool synchronize_secondary_harts);
+    void service_debug_halt();
 
     mutable std::mutex staged_configuration_mutex_;
     std::optional<MachineConfig> staged_configuration_;
@@ -491,8 +499,26 @@ class Machine final {
     std::atomic<bool> is_running_ = true;  // Main-loop run flag.
     std::atomic<bool> runner_started_{false};
     std::atomic<ExecutionState> execution_state_{ExecutionState::Running};
-    std::atomic<uint64_t> step_ack_count_{0};
+    void acknowledge_step();
+    std::mutex step_mutex_;
+    std::condition_variable step_cv_;
+    uint64_t step_ack_count_ = 0;
+    std::atomic<uint64_t> control_event_generation_{0};
     std::atomic<uint32_t> runner_in_cycle_{0};
+    std::optional<HartId> debug_step_hart_;
+    Counter debug_step_target_ = 0;
+    struct PendingDebugHalt {
+        HartId hart{0};
+        GdbSignal signal = GdbSignal::SigTrap;
+        std::string reason;
+        std::string description;
+        bool waits_for_memory = false;
+        Counter retirement_target = 0;
+    };
+    void enqueue_debug_halt(PendingDebugHalt halt);
+    std::atomic<bool> debug_halt_pending_{false};
+    std::mutex debug_halt_mutex_;
+    std::optional<PendingDebugHalt> pending_debug_halt_;
     struct TuiSnapshotSlot {
         std::atomic<uint64_t> generation{0};
         std::atomic<Register> pc{0};
@@ -510,6 +536,7 @@ class Machine final {
     static constexpr size_t kMaxTuiSnapshotHarts = 64;
     std::array<TuiSnapshotSlot, kMaxTuiSnapshotHarts> tui_snapshots_{};
 
+    friend class RunnerBase;
     friend class BaremetalRunner;
     friend class OsRunner;
     friend class PlatformBuilder;

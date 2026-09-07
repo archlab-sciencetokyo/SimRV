@@ -11,6 +11,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
@@ -1055,9 +1056,19 @@ void CPU::execute_system(Machine& machine) {
                 }
 
                 if (!semihost_handled) {
-                    ctx.wb_data_csr = enum_mask(ExceptionCode::Breakpoint);
-                    ctx.pending_exception = ExceptionCode::Breakpoint;
-                    ctx.tkn = false;
+                    if (machine.debugger() && machine.debugger()->is_connected()) {
+                        // Native guest EBREAK remains an architectural trap, but GDB receives the
+                        // all-stop notification before execution resumes.
+                        ctx.wb_data_csr = enum_mask(ExceptionCode::Breakpoint);
+                        ctx.pending_exception = ExceptionCode::Breakpoint;
+                        ctx.tkn = false;
+                        machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap,
+                                           "swbreak:;");
+                    } else {
+                        ctx.wb_data_csr = enum_mask(ExceptionCode::Breakpoint);
+                        ctx.pending_exception = ExceptionCode::Breakpoint;
+                        ctx.tkn = false;
+                    }
                 }
                 break;
             }

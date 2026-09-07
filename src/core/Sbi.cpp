@@ -240,12 +240,14 @@ auto Sbi::handle_hsm(Word func_id) -> bool {
             target_cpu.state().regs.write(RegId::A1, opaque);
             target_cpu.hart_status.store(HartStatus::Started, std::memory_order_release);
             target_cpu.hart_status.notify_all();
+            cpu_.machine_->notify_control_event();
             sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
             return true;
         }
         case HsmFid::HartStop: {
             cpu_.hart_status.store(HartStatus::Stopped, std::memory_order_release);
             cpu_.hart_status.notify_all();
+            cpu_.machine_->notify_control_event();
             sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
             return true;
         }
@@ -262,6 +264,7 @@ auto Sbi::handle_hsm(Word func_id) -> bool {
         }
         case HsmFid::HartSuspend: {
             cpu_.hart_status.store(HartStatus::Suspended, std::memory_order_release);
+            cpu_.machine_->notify_control_event();
             sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
             return true;
         }

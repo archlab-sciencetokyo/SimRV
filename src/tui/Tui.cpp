@@ -148,6 +148,7 @@ void Tui::set_paused(bool p) {
             machine_.execution_state_.store(simrv::core::ExecutionState::Running,
                                             std::memory_order_release);
             machine_.execution_state_.notify_all();
+            machine_.notify_control_event();
         } else {
             if (last_runtime_tick_ != std::chrono::steady_clock::time_point{}) {
                 runtime_duration_ += std::chrono::duration_cast<std::chrono::microseconds>(
@@ -157,6 +158,7 @@ void Tui::set_paused(bool p) {
             machine_.execution_state_.store(simrv::core::ExecutionState::Paused,
                                             std::memory_order_release);
             machine_.execution_state_.notify_all();
+            machine_.notify_control_event();
             for (size_t hart = 1; hart < machine_.num_harts(); ++hart) {
                 machine_.hart(hart).hart_status.notify_all();
             }
@@ -1820,14 +1822,6 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
 }
 
 auto Tui::handle_debug_keyboard_input(TuiKey key) -> bool {
-    if (!machine_.debug_diagnostics_enabled()) {
-        modal_.open_notice("DEBUG MODE REQUIRED",
-                           "Debug features are disabled in Normal Mode.\n\nPlease enable TUI Debug "
-                           "Mode in Simulator Settings [,] first.",
-                           false);
-        render(true);
-        return true;
-    }
     switch (key) {
         case simrv::tui::TuiKey::Colon:
             open_modal(ModalType::SetBreakpoint);
@@ -2060,15 +2054,6 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
     // feature. Keep its input semantics aligned with the canonical keybinding registry.
     if (key == simrv::tui::TuiKey::i || key == simrv::tui::TuiKey::I) {
         open_modal(ModalType::InspectAddress);
-        return;
-    }
-
-    if (key == simrv::tui::TuiKey::CtrlD || key == simrv::tui::TuiKey::d ||
-        key == simrv::tui::TuiKey::D) {
-        machine_.set_debug_diagnostics_enabled(!machine_.debug_diagnostics_enabled());
-        set_status_override(
-            std::format("Debug Mode: {}", machine_.debug_diagnostics_enabled() ? "ON" : "OFF"));
-        trigger_immediate_render();
         return;
     }
 
@@ -2327,12 +2312,6 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             cycle_theme_style();
             render(true);
             break;
-        case TuiFooterAction::ToggleDebug:
-            machine_.set_debug_diagnostics_enabled(!machine_.debug_diagnostics_enabled());
-            set_status_override(
-                std::format("Debug Mode: {}", machine_.debug_diagnostics_enabled() ? "ON" : "OFF"));
-            render(true);
-            break;
     }
 }
 
@@ -2424,94 +2403,60 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             return true;
         }
     }
-    if (esc_buf_ == "\033[A" || esc_buf_ == "\033OA") {
+    const bool up = esc_buf_ == "\033[A" || esc_buf_ == "\033OA";
+    const bool down = esc_buf_ == "\033[B" || esc_buf_ == "\033OB";
+    const bool right = esc_buf_ == "\033[C" || esc_buf_ == "\033OC";
+    const bool left = esc_buf_ == "\033[D" || esc_buf_ == "\033OD";
+    if (up || down) {
+        const int direction = up ? -1 : 1;
         if (get_active_modal() == ModalType::Glossary) {
-            modal_.scroll_glossary_content(-2);
+            modal_.scroll_glossary_content(2 * direction);
             render(true);
             return true;
         }
         if (get_active_modal() == ModalType::Settings) {
-            modal_.move_settings_cursor(-1);
+            modal_.move_settings_cursor(direction);
             render(true);
             return true;
         }
         if (get_active_modal() == ModalType::ConfigureMisa) {
-            modal_.move_misa_cursor(-1);
+            modal_.move_misa_cursor(direction);
             render(true);
             return true;
         }
         if (get_active_modal() == ModalType::ConfigureSystem) {
-            modal_.move_sysconfig_cursor(-1);
+            modal_.move_sysconfig_cursor(direction);
             render(true);
             return true;
         }
         if (get_active_modal() == ModalType::ManageBreakpoints) {
-            modal_.move_bp_cursor(-1);
+            modal_.move_bp_cursor(direction);
             render(true);
             return true;
         }
         if (paused_ && inspector_pane_) {
             auto page = focused_page();
             if (page == TuiRegPage::CACHE) {
-                inspector_pane_->cycle_cache_way(-1);
+                inspector_pane_->cycle_cache_way(direction);
                 render(true);
                 return true;
             }
             if (page == TuiRegPage::DISASM) {
-                scroll(-1);
+                scroll(direction);
                 return true;
             }
-            scroll_inspector(-1);
+            scroll_inspector(direction);
             return true;
         }
-    } else if (esc_buf_ == "\033[B" || esc_buf_ == "\033OB") {
+    } else if (left || right) {
+        const int direction = left ? -1 : 1;
         if (get_active_modal() == ModalType::Glossary) {
-            modal_.scroll_glossary_content(2);
+            modal_.move_glossary_topic(direction);
             render(true);
             return true;
         }
         if (get_active_modal() == ModalType::Settings) {
-            modal_.move_settings_cursor(1);
-            render(true);
-            return true;
-        }
-        if (get_active_modal() == ModalType::ConfigureMisa) {
-            modal_.move_misa_cursor(1);
-            render(true);
-            return true;
-        }
-        if (get_active_modal() == ModalType::ConfigureSystem) {
-            modal_.move_sysconfig_cursor(1);
-            render(true);
-            return true;
-        }
-        if (get_active_modal() == ModalType::ManageBreakpoints) {
-            modal_.move_bp_cursor(1);
-            render(true);
-            return true;
-        }
-        if (paused_ && inspector_pane_) {
-            auto page = focused_page();
-            if (page == TuiRegPage::CACHE) {
-                inspector_pane_->cycle_cache_way(1);
-                render(true);
-                return true;
-            }
-            if (page == TuiRegPage::DISASM) {
-                scroll(1);
-                return true;
-            }
-            scroll_inspector(1);
-            return true;
-        }
-    } else if (esc_buf_ == "\033[C" || esc_buf_ == "\033OC") {
-        if (get_active_modal() == ModalType::Glossary) {
-            modal_.move_glossary_topic(1);
-            render(true);
-            return true;
-        }
-        if (get_active_modal() == ModalType::Settings) {
-            modal_.adjust_setting_at_cursor(1);
+            modal_.adjust_setting_at_cursor(direction);
             render(true);
             return true;
         }
@@ -2521,55 +2466,20 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             return true;
         }
         if (get_active_modal() == ModalType::ConfigureSystem) {
-            modal_.adjust_sysconfig_at_cursor(1);
+            modal_.adjust_sysconfig_at_cursor(direction);
             render(true);
             return true;
         }
         if (paused_ && inspector_pane_) {
             auto page = focused_page();
             if (page == TuiRegPage::CACHE) {
-                inspector_pane_->select_next_cache_set(1);
+                inspector_pane_->select_next_cache_set(direction);
                 render(true);
                 return true;
             }
             inspector_pane_->set_page(page);
             if (inspector_pane_->supports_horizontal_scroll()) {
-                inspector_pane_->scroll_horizontal(4);
-                render(true);
-                return true;
-            }
-        }
-    } else if (esc_buf_ == "\033[D" || esc_buf_ == "\033OD") {
-        if (get_active_modal() == ModalType::Glossary) {
-            modal_.move_glossary_topic(-1);
-            render(true);
-            return true;
-        }
-        if (get_active_modal() == ModalType::Settings) {
-            modal_.adjust_setting_at_cursor(-1);
-            render(true);
-            return true;
-        }
-        if (get_active_modal() == ModalType::ConfigureMisa) {
-            modal_.toggle_misa_at_cursor();
-            render(true);
-            return true;
-        }
-        if (get_active_modal() == ModalType::ConfigureSystem) {
-            modal_.adjust_sysconfig_at_cursor(-1);
-            render(true);
-            return true;
-        }
-        if (paused_ && inspector_pane_) {
-            auto page = focused_page();
-            if (page == TuiRegPage::CACHE) {
-                inspector_pane_->select_next_cache_set(-1);
-                render(true);
-                return true;
-            }
-            inspector_pane_->set_page(page);
-            if (inspector_pane_->supports_horizontal_scroll()) {
-                inspector_pane_->scroll_horizontal(-4);
+                inspector_pane_->scroll_horizontal(4 * direction);
                 render(true);
                 return true;
             }

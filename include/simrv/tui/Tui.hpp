@@ -58,6 +58,8 @@ class TerminalPane;
 class StatusBar;
 
 class Tui {
+    friend struct TuiTestAccess;
+
    public:
     static constexpr size_t kTraceBufferSize = 200;
     static constexpr uint64_t kDetailedExecutionMaxHz = 100;

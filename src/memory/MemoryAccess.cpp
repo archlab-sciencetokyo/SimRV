@@ -5,11 +5,13 @@
 #include "simrv/memory/MemoryAccess.hpp"
 
 #include <cstring>
+#include <format>
 #include <utility>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Pmp.hpp"
+#include "simrv/debug/GdbStub.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/Mmio.hpp"
@@ -71,6 +73,21 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                 (!is_lr) ? ExceptionCode::MisalignedStore : ExceptionCode::MisalignedLoad;
             cpu.active_context().pending_tval = v_addr;
             return 0;
+        }
+    }
+    if (simrv::compiler::unlikely(cpu.machine_->breakpoint_manager().has_any())) {
+        if (auto hit = cpu.machine_->breakpoint_manager().check_mem_read(v_addr, size_bytes)) {
+            if (cpu.machine_->debugger() && cpu.machine_->debugger()->is_connected()) {
+                cpu.machine_->debug_watch_hit(
+                    static_cast<HartId>(cpu.state().mhartid), GdbSignal::SigTrap,
+                    std::format("{}:{:x};",
+                                hit->watch_type == debug::WatchType::Access ? "awatch" : "rwatch",
+                                v_addr),
+                    hit->description);
+            } else if (cpu.machine_->tui_controller() != nullptr) {
+                cpu.machine_->debug_watch_hit(static_cast<HartId>(cpu.state().mhartid),
+                                              GdbSignal::SigTrap, {}, hit->description);
+            }
         }
     }
     if (simrv::compiler::unlikely(crosses_page || crosses_cache_line)) {
@@ -373,6 +390,21 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
             cpu.active_context().pending_exception = ExceptionCode::MisalignedStore;
             cpu.active_context().pending_tval = v_addr;
             return;
+        }
+    }
+    if (simrv::compiler::unlikely(cpu.machine_->breakpoint_manager().has_any())) {
+        if (auto hit = cpu.machine_->breakpoint_manager().check_mem_write(v_addr, size_bytes)) {
+            if (cpu.machine_->debugger() && cpu.machine_->debugger()->is_connected()) {
+                cpu.machine_->debug_watch_hit(
+                    static_cast<HartId>(cpu.state().mhartid), GdbSignal::SigTrap,
+                    std::format("{}:{:x};",
+                                hit->watch_type == debug::WatchType::Access ? "awatch" : "watch",
+                                v_addr),
+                    hit->description);
+            } else if (cpu.machine_->tui_controller() != nullptr) {
+                cpu.machine_->debug_watch_hit(static_cast<HartId>(cpu.state().mhartid),
+                                              GdbSignal::SigTrap, {}, hit->description);
+            }
         }
     }
     if (simrv::compiler::unlikely(crosses_page || crosses_cache_line)) {

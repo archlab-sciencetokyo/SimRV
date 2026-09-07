@@ -40,7 +40,7 @@ struct RuntimeOptions {
     bool tuimode = false;
     bool explicit_tui_mode = false;
     bool explicit_cli_mode = false;
-    bool debugmode = false;
+    bool verbose = false;
     bool dlog_mode = false;
     bool traplog_mode = false;
     bool use_disk = false;
@@ -67,7 +67,6 @@ struct RuntimeOptions {
     std::string spike_elf;
 
     std::string fn_cpuconfig;
-    bool debug_mode = false;
     uint64_t step_delay_us = 0;
     uint32_t explain_inst_val = 0;
     double mouse_sensitivity = 1.0;

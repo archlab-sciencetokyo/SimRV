@@ -327,11 +327,10 @@ auto InspectorPane::debug_state_row_count() const -> int {
 auto InspectorPane::render_perf_or_debug(const simrv::core::CPU& cpu, int logical_row, int width,
                                          bool single_column) -> std::string {
     int const total_logical_rows = get_total_rows(width);
-    int const debug_rows = machine_.debug_diagnostics_enabled() ? debug_state_row_count() : 0;
+    int const debug_rows = paused_ ? debug_state_row_count() : 0;
     int const adj_base_rows = total_logical_rows - debug_rows;
 
-    if (machine_.debug_diagnostics_enabled() && logical_row >= adj_base_rows &&
-        logical_row < total_logical_rows) {
+    if (paused_ && logical_row >= adj_base_rows && logical_row < total_logical_rows) {
         return render_debug_state(logical_row - adj_base_rows, width);
     }
 

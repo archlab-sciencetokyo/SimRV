@@ -16,7 +16,7 @@
 #include <cstring>
 #include <string>
 
-#include "simrv/debug/GdbStub.hpp"
+#include "simrv/util/UniqueFd.hpp"
 
 namespace simrv::device {
 
@@ -36,8 +36,8 @@ class PtyBridge {
         if (::openpty(&m_fd, &s_fd, name_buf, nullptr, nullptr) != 0) {
             return false;
         }
-        master_fd_ = debug::UniqueFd(m_fd);
-        slave_fd_ = debug::UniqueFd(s_fd);
+        master_fd_ = util::UniqueFd(m_fd);
+        slave_fd_ = util::UniqueFd(s_fd);
         slave_path_ = name_buf;
 
         // UART MMIO must never block waiting for an external terminal to drain output.
@@ -89,8 +89,8 @@ class PtyBridge {
     }
 
    private:
-    debug::UniqueFd master_fd_;
-    debug::UniqueFd slave_fd_;
+    util::UniqueFd master_fd_;
+    util::UniqueFd slave_fd_;
     std::string slave_path_;
     bool is_open_{false};
 };

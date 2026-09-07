@@ -122,6 +122,16 @@ auto parse_u32_required(std::span<char* const> args, std::size_t& index,
         });
 }
 
+auto parse_positive_size(std::span<char* const> args, std::size_t& index, std::string_view option,
+                         std::string_view label) -> std::expected<uint32_t, std::string> {
+    auto text = next_argument(args, index, option);
+    if (!text) return std::unexpected(text.error());
+    uint32_t value = 0;
+    if (!parse_u32_base0(*text, value) || value == 0)
+        return std::unexpected(std::format("invalid {} size '{}'", label, *text));
+    return value;
+}
+
 auto parse_trace_window(RuntimeOptions& options, std::span<char* const> args, std::size_t& index)
     -> std::expected<void, std::string> {
     return parse_scaled_required(args, index, "-t")
@@ -257,7 +267,7 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.fn_cpuconfig = std::string(*value);
         return true;
     }
-    if (arg == "--trap-log" || arg == "-P") {
+    if (arg == "--trap-log") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         options.fn_traplog = std::string(*value);
@@ -397,33 +407,21 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         return true;
     }
     if (arg == "--bht-size" || arg == "--bht-entries") {
-        auto value = next_argument(args, i, arg);
+        auto value = parse_positive_size(args, i, arg, "BHT");
         if (!value) return std::unexpected(value.error());
-        uint32_t val = 0;
-        if (!parse_u32_base0(*value, val) || val == 0) {
-            return std::unexpected(std::format("invalid BHT size '{}'", *value));
-        }
-        result.options.bht_size = val;
+        result.options.bht_size = *value;
         return true;
     }
     if (arg == "--btb-size" || arg == "--btb-entries") {
-        auto value = next_argument(args, i, arg);
+        auto value = parse_positive_size(args, i, arg, "BTB");
         if (!value) return std::unexpected(value.error());
-        uint32_t val = 0;
-        if (!parse_u32_base0(*value, val) || val == 0) {
-            return std::unexpected(std::format("invalid BTB size '{}'", *value));
-        }
-        result.options.btb_size = val;
+        result.options.btb_size = *value;
         return true;
     }
     if (arg == "--ras-size" || arg == "--ras-entries") {
-        auto value = next_argument(args, i, arg);
+        auto value = parse_positive_size(args, i, arg, "RAS");
         if (!value) return std::unexpected(value.error());
-        uint32_t val = 0;
-        if (!parse_u32_base0(*value, val) || val == 0) {
-            return std::unexpected(std::format("invalid RAS size '{}'", *value));
-        }
-        result.options.ras_size = val;
+        result.options.ras_size = *value;
         return true;
     }
     if (arg == "--smp" || arg == "-smp" || arg == "--cores") {
@@ -547,15 +545,11 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.explain_inst_val = raw_val;
         return true;
     }
-    if (arg == "-d" || arg == "--debug-mode") {
-        result.options.debug_mode = true;
-        return true;
-    }
-    if (arg == "--log-mmio" || arg == "-M") {
+    if (arg == "--log-mmio") {
         result.options.dlog_mode = true;
         return true;
     }
-    if (arg == "--instmix" || arg == "-x") {
+    if (arg == "--instmix") {
         result.options.use_mix = true;
         return true;
     }
@@ -564,23 +558,23 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
 
 auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
                                RuntimeOptions& options) -> std::expected<bool, std::string> {
-    if (arg == "--trace-bpred" || arg == "-w") {
+    if (arg == "--trace-bpred") {
         options.bp_trace = true;
         return true;
     }
-    if (arg == "-g" || arg == "-v" || arg == "--debug" || arg == "--verbose") {
-        options.debugmode = true;
+    if (arg == "-v" || arg == "--verbose") {
+        options.verbose = true;
         return true;
     }
     if (arg == "--gdb") {
         options.gdb_mode = true;
         return true;
     }
-    if (arg == "--gdb-port" || arg == "--port" || arg == "-p") {
+    if (arg == "--gdb-port") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         uint64_t port_val = 0;
-        if (!parse_scaled_u64(*value, port_val) || port_val == 0 || port_val > 65535) {
+        if (!parse_scaled_u64(*value, port_val) || port_val > 65535) {
             return std::unexpected(std::format("invalid GDB port value for {}", arg));
         }
         options.gdb_port = static_cast<uint16_t>(port_val);
@@ -616,12 +610,12 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
 }
 
 auto is_known_short_flag(char c) -> bool {
-    static constexpr std::string_view kShortFlags = "mkiDfcPsetlHrqIpbauGCdMxwgvBh";
+    static constexpr std::string_view kShortFlags = "mkiDfcsetlHrqIpbauGCvBh";
     return kShortFlags.find(c) != std::string_view::npos;
 }
 
 auto short_flag_takes_argument(char c) -> bool {
-    static constexpr std::string_view kArgFlags = "mkiDfcPsetlHrqIpb";
+    static constexpr std::string_view kArgFlags = "mkiDfcsetlHrqIpb";
     return kArgFlags.find(c) != std::string_view::npos;
 }
 
@@ -733,6 +727,17 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
         result.options.tuimode = (::isatty(STDIN_FILENO) != 0);
     }
 
+    if (result.options.gdb_mode) {
+        if (result.options.explicit_tui_mode) {
+            return std::unexpected("--gdb and --tui are mutually exclusive");
+        }
+        if (result.options.lockstep_mode) {
+            return std::unexpected("--gdb and --lockstep are mutually exclusive");
+        }
+        result.options.tuimode = false;
+        result.options.explicit_cli_mode = true;
+    }
+
     if (result.options.explicit_cli_mode && result.options.explicit_tui_mode) {
         return std::unexpected("--cli and --tui are mutually exclusive");
     }
@@ -766,7 +771,6 @@ auto resolve_runtime_profile(const RuntimeOptions& options) -> simrv::core::Runt
                 break;
         }
     }
-    profile.debug_diagnostics = options.debug_mode || options.debugmode;
     profile.tracing = options.bp_trace || options.trace_enabled || options.strace != 0 ||
                       options.trace_begin != std::numeric_limits<Counter>::max();
     profile.lockstep = options.lockstep_mode;
@@ -797,7 +801,6 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.tui.enabled = tuimode;
     cfg.tui.high_contrast = high_contrast;
     cfg.tui.class_mode = class_mode;
-    cfg.tui.debug_diagnostics = debug_mode;
     cfg.tui.mouse_sensitivity = mouse_sensitivity;
     cfg.tui.inspection_output = inspection_output;
 
@@ -806,11 +809,10 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.debug.lockstep_enabled = lockstep_mode;
     cfg.debug.spike_bin = spike_bin;
     cfg.debug.spike_elf = spike_elf;
-    cfg.debug.debugmode = debugmode;
     cfg.debug.dlog_mode = dlog_mode;
     cfg.debug.traplog_mode = traplog_mode;
     cfg.debug.bp_trace = bp_trace;
-    cfg.debug.use_mix = debug_mode ? true : use_mix;
+    cfg.debug.use_mix = use_mix;
 
     cfg.isa.isatest_tohost = isatest_tohost;
     cfg.isa.misa_profile = misa_profile_bits(effective_misa_profile(*this));
@@ -840,10 +842,9 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     // initializes derived runtime services and per-CPU state that depend on the live machine.
 
     machine->runtime_profile = resolve_runtime_profile(options);
-    simrv::log::info("Runtime profile: {} execution, {} interaction{}{}",
+    simrv::log::info("Runtime profile: {} execution, {} interaction{}",
                      machine->runtime_profile.execution_name(),
                      machine->runtime_profile.interaction_name(),
-                     machine->runtime_profile.debug_diagnostics ? ", diagnostics enabled" : "",
                      machine->runtime_profile.tracing ? ", tracing enabled" : "");
     const auto parsed_pipe = machine->configuration().execution.pipeline_type;
     const auto platform_name =
@@ -862,6 +863,11 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
                          options.disable_forwarding ? "disabled" : "enabled");
     }
     if (!options.fn_log.empty()) simrv::log::info("Developer log: {}", options.fn_log);
+    if (options.verbose) {
+        simrv::log::info("Runtime settings: harts={}, SMP threads={}, quantum={}, GDB={}, port={}",
+                         options.num_harts, options.smp_multithreaded, options.smp_quantum,
+                         options.gdb_mode, options.gdb_port);
+    }
     if (options.traplog_mode) simrv::log::info("Trap/SBI log: {}", options.fn_traplog);
 
     auto apply_config_to_cpu = [&](simrv::core::CPU& cpu) {
@@ -1048,10 +1054,8 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                "  {}-I, --dump-init {}{}<N>{}     Dump initial architectural and TLB state "
                "artifacts at cycle N\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout, "  {}-g, -v, --debug, --verbose{} Enable verbose debug logging output\n",
-               style(kBrightGreen), style(kReset));
     std::print(stdout,
-               "  {}-M, --log-mmio{}              Enable interactive disk/console MMIO transaction "
+               "  {}--log-mmio{}                  Enable interactive disk/console MMIO transaction "
                "logging\n",
                style(kBrightGreen), style(kReset));
     std::print(
@@ -1078,10 +1082,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
     // Debug / co-simulation
     std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Debug / co-simulation",
                style(kReset), style(kReset));
-    std::print(stdout, "  {}-g, --debug, -v{}            Enable debug logging in MMIO paths\n",
-               style(kBrightGreen), style(kReset));
-    std::print(stdout,
-               "  {}-d, --debug-mode{}            Enable TUI debug diagnostics panel/symbol view\n",
+    std::print(stdout, "  {}-v, --verbose{}              Enable verbose logging output\n",
                style(kBrightGreen), style(kReset));
     std::print(
         stdout,
@@ -1094,12 +1095,11 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBrightGreen), style(kReset));
     std::print(
         stdout,
-        "  {}--gdb{}                      Enable GDB RSP stub (waits for client before running)\n",
+        "  {}--gdb{}                      Start the GDB server in CLI mode with target paused\n",
         style(kBrightGreen), style(kReset));
-    std::print(
-        stdout,
-        "  {}-p, --port, --gdb-port {}{}<PORT>{} Override GDB stub listen port (default: 1234)\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--gdb-port {}{}<PORT>{}       Override GDB server port (default: 1234)\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(
         stdout,
         "  {}--lockstep{}         Enable Spike lockstep instruction-by-instruction verification\n",

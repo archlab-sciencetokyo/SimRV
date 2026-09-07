@@ -1,32 +1,21 @@
 /**
  * @file GdbStub.hpp
- * @brief GDB Remote Serial Protocol (RSP) stub for SimRV.
- *
- * Implements a minimal GDB RSP server over TCP so that a RISC-V-aware GDB
- * client can attach to a running simulation and:
- *   - Read/write integer and floating-point registers
- *   - Read/write physical memory
- *   - Single-step or continue execution
- *   - Insert/remove software breakpoints (EBREAK injection)
- *   - Receive SIGTRAP on breakpoint hits or Ctrl-C
- *
- * Usage:
- *   GdbStub stub(1234);
- *   stub.wait_for_connection();          // blocks until GDB connects
- *   // in run loop:
- *   stub.poll(machine);                  // non-blocking check for ^C / 'c'/'s'
- *   // when EBREAK or hw-breakpoint fires:
- *   stub.notify_breakpoint(machine);     // enters the blocking command loop
+ * @brief Event-driven GDB Remote Serial Protocol server for SimRV.
  */
 #pragma once
 
-#include <array>
+#include <atomic>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
-#include <unordered_map>
-#include <utility>
-#include <vector>
+#include <thread>
 
+#include "simrv/util/UniqueFd.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
@@ -35,41 +24,14 @@ class Machine;
 
 namespace simrv::debug {
 
-/**
- * @struct UniqueFd
- * @brief Lightweight RAII wrapper for POSIX file descriptors / sockets.
- */
-struct UniqueFd {
-    int fd = -1;
-    constexpr UniqueFd() noexcept = default;
-    constexpr explicit UniqueFd(int f) noexcept : fd(f) {}
-    ~UniqueFd();
-    UniqueFd(const UniqueFd&) = delete;
-    auto operator=(const UniqueFd&) -> UniqueFd& = delete;
-    UniqueFd(UniqueFd&& o) noexcept : fd(std::exchange(o.fd, -1)) {}
-    auto operator=(UniqueFd&& o) noexcept -> UniqueFd& {
-        if (this != &o) {
-            reset();
-            fd = std::exchange(o.fd, -1);
-        }
-        return *this;
-    }
-    void reset() noexcept;
-    [[nodiscard]] auto get() const noexcept -> int { return fd; }
-    [[nodiscard]] auto release() noexcept -> int { return std::exchange(fd, -1); }
-    [[nodiscard]] explicit operator bool() const noexcept { return fd >= 0; }
-};
+enum class GdbConnectionState : uint8_t { Stopped, Listening, Connected };
 
 /**
- * @class GdbStub
- * @brief GDB RSP server for a single-threaded RISC-V simulation.
+ * The server thread owns sockets and RSP framing. Machine-facing commands are queued and are
+ * executed by Machine::run() at safe points, keeping architectural state single-thread-owned.
  */
 class GdbStub {
    public:
-    /**
-     * @brief Create a GDB RSP stub that listens on the given TCP port.
-     * @param port TCP port to listen on (default 1234).
-     */
     explicit GdbStub(uint16_t port);
     ~GdbStub();
 
@@ -78,108 +40,104 @@ class GdbStub {
     GdbStub(GdbStub&&) = delete;
     auto operator=(GdbStub&&) -> GdbStub& = delete;
 
-    /** @brief Block until a GDB client connects. */
-    void wait_for_connection();
+    /// Start listening. wake_machine must wake a paused simulation safe-point loop.
+    void start(std::function<void()> wake_machine);
+    /// Stop the worker and wake any blocking socket operation.
+    void stop();
 
-    /** @return True when a GDB client is currently connected. */
-    [[nodiscard]] bool is_connected() const { return conn_fd_.get() >= 0; }
+    [[nodiscard]] auto state() const noexcept -> GdbConnectionState {
+        return state_.load(std::memory_order_acquire);
+    }
+    [[nodiscard]] auto is_connected() const noexcept -> bool {
+        return state() == GdbConnectionState::Connected;
+    }
+    [[nodiscard]] auto is_running() const noexcept -> bool {
+        return running_.load(std::memory_order_acquire);
+    }
+    [[nodiscard]] auto bound_port() const noexcept -> uint16_t { return port_; }
+    [[nodiscard]] auto has_pending_commands() const noexcept -> bool {
+        return pending_commands_.load(std::memory_order_acquire) != 0;
+    }
+    [[nodiscard]] auto pause_requested() const noexcept -> bool {
+        return pause_requested_.load(std::memory_order_acquire);
+    }
 
-    /**
-     * @brief Non-blocking poll: process any pending RSP packets.
-     *
-     * Returns immediately if no data is available.  Should be called from the
-     * main simulation loop.  When a 'c' (continue) packet has been processed,
-     * returns normally.  When a step packet arrives this function sets
-     * single_step_ and returns so the caller executes one `run_cycle()`.
-     */
-    void poll(simrv::core::Machine& machine);
+    /// Execute queued requests on the simulation thread.
+    void service_pending(simrv::core::Machine& machine);
 
-    /**
-     * @brief Notify GDB that execution has halted (breakpoint/EBREAK/single-step).
-     *
-     * Sends a SIGTRAP stop-reply and enters a blocking loop processing RSP
-     * commands until GDB sends a 'c' or 's' packet.
-     */
-    void notify_breakpoint(simrv::core::Machine& machine);
+    /// Publish an asynchronous all-stop notification from the simulation thread.
+    void notify_stop(HartId hart, GdbSignal signal = GdbSignal::SigTrap, std::string reason = {});
 
-    /** @return True if GDB requested single-step mode. */
-    [[nodiscard]] bool single_step() const { return single_step_; }
-
-   private:
-    // ---- TCP socket management ----
-    UniqueFd listen_fd_;
-    UniqueFd conn_fd_;
-    uint16_t port_;
-
-    // ---- RSP protocol state ----
-    bool single_step_ = false;
-    bool no_ack_mode_ = false;
-    HartId current_hart_{HartId{0}};
-
-    // Software breakpoint table: addr -> original 4-byte instruction
-    std::unordered_map<Address, Instruction> sw_breakpoints_;
-
-    // ---- RSP packet I/O ----
-    /** Send a formatted RSP packet (adds '$', checksum, '#'). */
-    void send_packet(const std::string& data);
-    /** Send a pre-computed packet string directly. */
-    void send_raw(const std::string& s);
-    /** Read one character from the connection; returns -1 on error/close. */
-    [[nodiscard]] auto recv_char() -> int;
-    /**
-     * @brief Read one complete RSP packet into `out`.
-     * @return true on success, false if connection closed or malformed.
-     */
-    [[nodiscard]] auto recv_packet(std::string& out) -> bool;
-
-    // ---- RSP command handlers ----
-    /**
-     * @brief Dispatch one RSP packet to the appropriate handler.
-     * @param pkt    Packet payload (without '$'/'#'/checksum).
-     * @param machine The current machine state.
-     * @return true if execution should resume (continue or detach), false to
-     *         keep processing commands.
-     */
-    [[nodiscard]] auto handle_packet(const std::string& pkt, simrv::core::Machine& machine) -> bool;
-
-    void handle_query(const std::string& pkt, simrv::core::Machine& machine);
-
-    /** 'g' — read all registers */
-    void cmd_read_registers(simrv::core::Machine& machine);
-    /** 'G' — write all registers */
-    void cmd_write_registers(const std::string& pkt, simrv::core::Machine& machine);
-    /** 'p n' — read single register */
-    void cmd_read_register(const std::string& pkt, simrv::core::Machine& machine);
-    /** 'P n=v' — write single register */
-    void cmd_write_register(const std::string& pkt, simrv::core::Machine& machine);
-    /** 'm addr,len' — read memory */
-    void cmd_read_memory(const std::string& pkt, simrv::core::Machine& machine);
-    /** 'M addr,len:data' — write memory */
-    void cmd_write_memory(const std::string& pkt, simrv::core::Machine& machine);
-    /** 'Z0,addr,4' — insert software breakpoint */
-    void cmd_insert_breakpoint(const std::string& pkt, simrv::core::Machine& machine);
-    /** 'z0,addr,4' — remove software breakpoint */
-    void cmd_remove_breakpoint(const std::string& pkt, simrv::core::Machine& machine);
-
-   public:
-    // ---- Public Utility (used by file-scope helpers in GdbStub.cpp) ----
-    /** Format a XLEN-wide register value as a little-endian hex string. */
     static auto reg_to_hex(Register val) -> std::string;
-    /** Parse a hex string as a little-endian XLEN-wide register value. */
-    static auto hex_to_reg(const std::string& s, std::size_t offset) -> Register;
-    /** Compute RSP checksum (sum of bytes mod 256). */
+    static auto hex_to_reg(const std::string& text, std::size_t offset) -> Register;
     static auto checksum(const std::string& data) -> uint8_t;
 
    private:
-    // ---- Private Utility ----
-    /** Close and reset the client connection socket. */
-    void close_connection();
+    enum class CommandKind : uint8_t { Attach, Packet, Disconnect };
+    enum class ConnectionDisposition : uint8_t { Keep, Close };
+    struct CommandResult {
+        std::optional<std::string> response;
+        ConnectionDisposition connection = ConnectionDisposition::Keep;
+    };
+    struct Command {
+        CommandKind kind = CommandKind::Packet;
+        std::string packet;
+        bool done = false;
+        CommandResult result;
+    };
 
-    // Number of registers in the GDB RISC-V target description:
-    // x0–x31 (32), pc (1), f0–f31 (32) each 64-bit
-    // For RV32: x-regs and pc are 32-bit, f-regs are 64-bit.
-    static constexpr std::size_t kNumIntRegs = 33;  // x0..x31 + pc
-    static constexpr std::size_t kNumFpRegs = 32;   // f0..f31
+    util::UniqueFd listen_fd_;
+    util::UniqueFd wake_fd_;
+    util::UniqueFd conn_fd_;
+    uint16_t port_ = 0;
+    std::atomic<int> connected_fd_{-1};
+    std::atomic<GdbConnectionState> state_{GdbConnectionState::Stopped};
+    std::atomic<bool> running_{false};
+    std::atomic<bool> pause_requested_{false};
+    std::atomic<bool> no_ack_mode_{false};
+    std::atomic<uint32_t> pending_commands_{0};
+    std::jthread worker_;
+    std::function<void()> wake_machine_;
+
+    std::mutex command_mutex_;
+    std::condition_variable command_cv_;
+    std::deque<std::shared_ptr<Command>> commands_;
+
+    std::mutex outbound_mutex_;
+    std::deque<std::string> outbound_packets_;
+
+    HartId current_hart_{HartId{0}};
+    std::string last_stop_reply_ = "T05thread:1;";
+
+    void worker_loop(const std::stop_token& stop_token);
+    [[nodiscard]] auto wait_for_client(const std::stop_token& stop_token) -> bool;
+    void connection_loop(const std::stop_token& stop_token);
+    void close_connection();
+    void signal_worker() noexcept;
+    void drain_worker_signal() noexcept;
+
+    [[nodiscard]] auto submit_command(CommandKind kind, std::string packet = {}) -> CommandResult;
+    void request_pause() noexcept;
+    void flush_outbound_packets();
+
+    [[nodiscard]] auto recv_char() -> int;
+    [[nodiscard]] auto recv_packet(std::string& out) -> bool;
+    [[nodiscard]] auto send_raw(const std::string& data) -> bool;
+    [[nodiscard]] auto send_packet_wire(const std::string& data) -> bool;
+
+    [[nodiscard]] auto handle_packet(const std::string& packet, simrv::core::Machine& machine)
+        -> CommandResult;
+    auto handle_query(const std::string& packet, simrv::core::Machine& machine) -> std::string;
+    auto handle_qxfer(const std::string& packet) -> std::string;
+    auto cmd_read_registers(simrv::core::Machine& machine) -> std::string;
+    auto cmd_write_registers(const std::string& packet, simrv::core::Machine& machine)
+        -> std::string;
+    auto cmd_read_register(const std::string& packet, simrv::core::Machine& machine) -> std::string;
+    auto cmd_write_register(const std::string& packet, simrv::core::Machine& machine)
+        -> std::string;
+    auto cmd_read_memory(const std::string& packet, simrv::core::Machine& machine) -> std::string;
+    auto cmd_write_memory(const std::string& packet, simrv::core::Machine& machine) -> std::string;
+    auto cmd_breakpoint(const std::string& packet, simrv::core::Machine& machine) -> std::string;
 };
 
 }  // namespace simrv::debug

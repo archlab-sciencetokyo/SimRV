@@ -17,6 +17,11 @@ The TUI is organized into a modular internal framework:
    - `TerminalPane`: Guest virtual terminal console, disassembly inspector, and Sixel display.
    - `StatusBar` and `Header`: Contextual hotkey legend, telemetry metrics, and hart selectors.
 
+Breakpoints, watchpoints, stepping, register/memory inspection, and breakpoint management are
+always available; they are not gated by a global debug mode. Extra diagnostic rows are shown when
+the machine is paused, stepping, or presenting a trap/breakpoint result. The GDB server is a
+separate CLI frontend and is therefore not exposed as a TUI setting.
+
 ## Input and Focus
 
 The dedicated UI thread exclusively owns stdin polling, escape-sequence parsing, terminal-size

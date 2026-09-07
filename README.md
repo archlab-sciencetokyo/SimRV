@@ -216,7 +216,10 @@ but does not redistribute them. Exact preparation commands, schemas, and output 
 ## Co-Simulation & Debugging
 
 ### GDB Remote Debugging
-SimRV includes a built-in GDB RSP server:
+SimRV includes an event-driven GDB RSP server. `--gdb` selects CLI mode, starts the target paused,
+and listens on port 1234 by default. Use `--gdb-port <PORT>` to choose another port. GDB and the
+interactive TUI are separate debugging frontends, so explicit `--tui --gdb` is rejected; GDB is
+also incompatible with Spike lockstep.
 
 ```bash
 # Start SimRV with GDB server on port 1234
@@ -225,6 +228,11 @@ SimRV includes a built-in GDB RSP server:
 # Connect from GDB in another terminal
 riscv64-unknown-elf-gdb hello.elf -ex "target remote :1234"
 ```
+
+The server uses all-stop multi-hart semantics. GDB breakpoints are logical (guest memory is not
+patched), disconnects leave the target paused and restart the listener, and `detach` removes
+GDB-owned breakpoints/watchpoints before resuming. In the TUI, breakpoints, watchpoints, stepping,
+and inspection are always available while paused—there is no separate debug-mode toggle.
 
 ### Spike Lockstep Co-Simulation
 Verify execution against Spike instruction-by-instruction:

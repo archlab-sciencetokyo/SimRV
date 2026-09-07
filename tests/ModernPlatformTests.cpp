@@ -103,12 +103,10 @@ void test_left_pane_runtime_summaries() {
           "running view keeps performance telemetry live");
     pane.set_paused(true);
 
-    machine.set_debug_diagnostics_enabled(true);
     check(row(26).contains("Debug") && row(27).contains("ELF sym") &&
               row(28).contains("breakpoints") && !row(28).contains("privilege"),
           "debug summary");
 
-    machine.set_debug_diagnostics_enabled(false);
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
     check(row(21).contains("Cycle Accurate") && row(27).contains("I-cache") &&
               row(28).contains("D-cache") && row(29).contains("limit"),
@@ -995,17 +993,8 @@ void test_tui_mode_sim_thread_multiple_step_sync() {
     machine.start_runner_for_testing();
     machine.pause();
 
-    // Run machine in background simulation thread
-    std::jthread sim_thread([&machine](const std::stop_token& stop_token) {
-        while (!stop_token.stop_requested() && machine.is_running()) {
-            if (machine.execution_state() == simrv::core::ExecutionState::Stepping) {
-                machine.advance_ca_global_cycle();
-                machine.pause();
-            } else if (machine.execution_state() == simrv::core::ExecutionState::Paused) {
-                std::this_thread::sleep_for(std::chrono::microseconds(50));
-            }
-        }
-    });
+    // Exercise the real simulation loop, including its dormant wait and completion publication.
+    std::jthread sim_thread([&machine] { machine.run(); });
 
     // Step 10 times synchronously
     for (int step = 0; step < 10; ++step) {
@@ -1013,6 +1002,9 @@ void test_tui_mode_sim_thread_multiple_step_sync() {
         machine.step_sync(std::chrono::milliseconds(1000));
         Counter after = machine.primary_hart().clint_mmio.mcycle;
         check(after == before + 1);
+        const auto snapshot = machine.tui_execution_snapshot();
+        check(snapshot.cycle_count == after);
+        check(snapshot.execution_state == simrv::core::ExecutionState::Paused);
     }
 
     machine.request_exit();
@@ -1022,6 +1014,25 @@ void test_tui_mode_sim_thread_multiple_step_sync() {
     }
     machine.stop_runner_for_testing();
     std::cout << "[PASS] test_tui_mode_sim_thread_multiple_step_sync\n";
+}
+
+void test_step_sync_timeout_and_shutdown() {
+    ConcreteMachine machine;
+    machine.pause();
+    const auto start = std::chrono::steady_clock::now();
+    machine.step_sync(std::chrono::milliseconds(20));
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    if (elapsed < std::chrono::milliseconds(20) || elapsed > std::chrono::seconds(2)) std::abort();
+
+    machine.pause();
+    std::jthread stopper([&] {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (!machine.is_stepping() && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::yield();
+        machine.request_exit();
+    });
+    machine.step_sync(std::chrono::seconds(5));
+    if (!machine.is_stopped()) std::abort();
 }
 
 void test_cycle_kernel_golden_load_use() {
@@ -2139,10 +2150,11 @@ void test_ia_multithreaded_smp_execution() {
         machine.hart(0).run_cycle(machine);
     }
 
-    // Wait briefly for all secondary harts to finish their 500 iterations
+    // Inspect only after worker quiescence; live architectural PCs are not atomic.
     auto start_time = std::chrono::steady_clock::now();
     bool all_finished = false;
     while (std::chrono::steady_clock::now() - start_time < std::chrono::seconds(3)) {
+        machine.pause();
         all_finished = true;
         for (size_t i = 1; i < kNumHarts; ++i) {
             if (machine.hart(i).state().pc < pc + 0x20) {
@@ -2151,7 +2163,8 @@ void test_ia_multithreaded_smp_execution() {
             }
         }
         if (all_finished) break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        machine.resume();
+        std::this_thread::yield();
     }
 
     machine.stop_runner_for_testing();
@@ -2259,6 +2272,7 @@ int main(int argc, char** argv) {
     test_ca_mt_smp_pause_and_snapshots();
     test_cycle_kernel_golden_forwarding();
     test_tui_mode_sim_thread_multiple_step_sync();
+    test_step_sync_timeout_and_shutdown();
     test_cycle_kernel_golden_load_use();
     test_cycle_kernel_golden_fp_dependencies();
     test_cycle_kernel_golden_data_refill();
