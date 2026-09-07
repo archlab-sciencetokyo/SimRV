@@ -9,83 +9,26 @@ namespace {
 
 using pipeline::CycleInstructionSlot;
 
-[[nodiscard]] auto is_control(const pipeline::PipelineContext& context) -> bool {
-    return context.opcode == isa::Opcode::Branch || context.opcode == isa::Opcode::Jal ||
-           context.opcode == isa::Opcode::Jalr;
-}
-
-[[nodiscard]] auto is_serializing(const pipeline::PipelineContext& context) -> bool {
-    const auto opcode = context.opcode;
-    const bool vector =
-        context.op_id >= isa::OperationId::VSETVLI && context.op_id <= isa::OperationId::VWSLL_VI;
-    return vector || pipeline::operation::is_serializing(context.op_id) ||
-           opcode == isa::Opcode::System || opcode == isa::Opcode::MiscMem;
-}
-
-[[nodiscard]] auto writes_integer(const pipeline::PipelineContext& context) -> bool {
-    if (context.rd == RegId::Zero) return false;
-    if (context.op_id != isa::UNKNOWN) {
-        return pipeline::operation::writes_integer(context.op_id);
-    }
-    switch (context.opcode) {
-        case isa::Opcode::Branch:
-        case isa::Opcode::Store:
-        case isa::Opcode::StoreFp:
-        case isa::Opcode::MiscMem:
-            return false;
-        default:
-            return !isa::is_destination_fp(context.opcode, context.op_id);
-    }
-}
-
-[[nodiscard]] auto integer_result_from_memory(const pipeline::PipelineContext& context) -> bool {
-    if (context.op_id != isa::UNKNOWN && pipeline::operation::is_load(context.op_id)) {
-        return pipeline::operation::writes_integer(context.op_id);
-    }
-    if (context.opcode == isa::Opcode::Load) return true;
-    return context.opcode == isa::Opcode::Amo &&
-           static_cast<isa::Funct5Amo>(context.funct5) != isa::Funct5Amo::Sc;
-}
-
-[[nodiscard]] auto has_integer_raw_dependency(const CycleInstructionSlot& consumer,
-                                              const CycleInstructionSlot& producer) -> bool {
+[[nodiscard]] inline auto has_integer_raw_dependency(const CycleInstructionSlot& consumer,
+                                                     const CycleInstructionSlot& producer) noexcept
+    -> bool {
     if (!consumer.valid || !producer.valid || !producer.writes_int ||
         producer.wb_dest == RegId::Zero)
         return false;
     const auto destination = producer.wb_dest;
-    const auto op = consumer.context.op_id;
-    const bool reads_r1 = (op != isa::UNKNOWN)
-                              ? pipeline::operation::is_rs1_int(op)
-                              : (pipeline::operation::reads_rs1(consumer.context.opcode) &&
-                                 !isa::is_rs1_fp(consumer.context.opcode, op));
-    const bool reads_r2 = (op != isa::UNKNOWN)
-                              ? pipeline::operation::is_rs2_int(op)
-                              : (pipeline::operation::reads_rs2(consumer.context.opcode) &&
-                                 !isa::is_rs2_fp(consumer.context.opcode, op));
-    return (reads_r1 && consumer.context.rs1 == destination) ||
-           (reads_r2 && consumer.context.rs2 == destination);
+    return (consumer.context.traits.reads_rs1_int && consumer.context.rs1 == destination) ||
+           (consumer.context.traits.reads_rs2_int && consumer.context.rs2 == destination);
 }
 
-[[nodiscard]] auto has_floating_raw_dependency(const CycleInstructionSlot& consumer,
-                                               const CycleInstructionSlot& producer) -> bool {
+[[nodiscard]] inline auto has_floating_raw_dependency(const CycleInstructionSlot& consumer,
+                                                      const CycleInstructionSlot& producer) noexcept
+    -> bool {
     if (!consumer.valid || !producer.valid || !producer.writes_fp) return false;
     const auto destination = producer.wb_dest;
-    const auto op = consumer.context.op_id;
-    const bool reads_r1 = (op != isa::UNKNOWN)
-                              ? pipeline::operation::is_rs1_fp(op)
-                              : (pipeline::operation::reads_rs1(consumer.context.opcode) &&
-                                 isa::is_rs1_fp(consumer.context.opcode, op));
-    const bool reads_r2 = (op != isa::UNKNOWN)
-                              ? pipeline::operation::is_rs2_fp(op)
-                              : (pipeline::operation::reads_rs2(consumer.context.opcode) &&
-                                 isa::is_rs2_fp(consumer.context.opcode, op));
     const RegId rs3 = static_cast<RegId>((consumer.context.ir >> 27U) & 0x1FU);
-    const bool reads_r3 =
-        (op != isa::UNKNOWN)
-            ? (pipeline::operation::is_rs3_fp(op) && rs3 == destination)
-            : (pipeline::operation::reads_rs3(consumer.context.opcode) && rs3 == destination);
-    return (reads_r1 && consumer.context.rs1 == destination) ||
-           (reads_r2 && consumer.context.rs2 == destination) || reads_r3;
+    return (consumer.context.traits.reads_rs1_fp && consumer.context.rs1 == destination) ||
+           (consumer.context.traits.reads_rs2_fp && consumer.context.rs2 == destination) ||
+           (consumer.context.traits.reads_rs3_fp && rs3 == destination);
 }
 
 [[nodiscard]] auto forwarded_integer(const CycleInstructionSlot& producer, RegId source)
@@ -162,18 +105,11 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         if (!has_integer_raw_dependency(consumer, producer)) return true;
         if (!pipeline_sim.config.enable_forwarding) return false;
         const auto destination = producer.wb_dest;
-        const auto op = consumer.context.op_id;
-        const bool reads_int_rs1 = (op != isa::UNKNOWN)
-                                       ? pipeline::operation::is_rs1_int(op)
-                                       : (pipeline::operation::reads_rs1(consumer.context.opcode) &&
-                                          !isa::is_rs1_fp(consumer.context.opcode, op));
-        const bool reads_int_rs2 = (op != isa::UNKNOWN)
-                                       ? pipeline::operation::is_rs2_int(op)
-                                       : (pipeline::operation::reads_rs2(consumer.context.opcode) &&
-                                          !isa::is_rs2_fp(consumer.context.opcode, op));
-        const bool source1_ready = !reads_int_rs1 || consumer.context.rs1 != destination ||
+        const bool source1_ready = !consumer.context.traits.reads_rs1_int ||
+                                   consumer.context.rs1 != destination ||
                                    forwarded_integer(producer, consumer.context.rs1).has_value();
-        const bool source2_ready = !reads_int_rs2 || consumer.context.rs2 != destination ||
+        const bool source2_ready = !consumer.context.traits.reads_rs2_int ||
+                                   consumer.context.rs2 != destination ||
                                    forwarded_integer(producer, consumer.context.rs2).has_value();
         return source1_ready && source2_ready;
     };
@@ -209,7 +145,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     if (active_context().pending_exception.has_value()) return false;
                     if (!execute_stage(machine)) return false;
                     writeback->executed = true;
-                    if (integer_result_from_memory(writeback->context)) {
+                    if (writeback->context.traits.is_mem_load) {
                         writeback->wb_valid = false;
                     } else if (writeback->writes_int && writeback->wb_dest != RegId::Zero) {
                         writeback->wb_val = (writeback->context.opcode == isa::Opcode::System &&
@@ -227,7 +163,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     if (!memory_stage(machine)) return false;
                     if (ca_state.waiting_for_interconnect) return false;
                     writeback->memory_complete = true;
-                    if (integer_result_from_memory(writeback->context)) {
+                    if (writeback->context.traits.is_mem_load) {
                         writeback->wb_val = writeback->context.mem_rdata;
                         writeback->wb_valid =
                             (writeback->writes_int && writeback->wb_dest != RegId::Zero);
@@ -279,7 +215,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 }
                 if (ca_state.waiting_for_interconnect) return;
                 memory->memory_complete = true;
-                if (integer_result_from_memory(memory->context)) {
+                if (memory->context.traits.is_mem_load) {
                     memory->wb_val = memory->context.mem_rdata;
                     memory->wb_valid = (memory->writes_int && memory->wb_dest != RegId::Zero);
                 }
@@ -306,7 +242,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 (void)run_with_context(*execute, [&] { return execute_stage(machine); });
                 state_.pc = saved_pc;
                 execute->executed = true;
-                if (integer_result_from_memory(execute->context)) {
+                if (execute->context.traits.is_mem_load) {
                     execute->wb_valid = false;
                 } else if (execute->writes_int && execute->wb_dest != RegId::Zero) {
                     execute->wb_val = (execute->context.opcode == isa::Opcode::System &&
@@ -316,7 +252,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     execute->wb_valid = true;
                 }
 
-                if (is_control(execute->context)) {
+                if (execute->context.traits.is_control) {
                     const Address sequential =
                         (execute->context.cpc + (execute->context.cinsn != 0u ? 2 : 4)).raw();
                     const Address target =
@@ -371,7 +307,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                         return execute_stage(machine);
                     });
                     decode->executed = true;
-                    if (integer_result_from_memory(decode->context)) {
+                    if (decode->context.traits.is_mem_load) {
                         decode->wb_valid = false;
                     } else if (decode->writes_int && decode->wb_dest != RegId::Zero) {
                         decode->wb_val = (decode->context.opcode == isa::Opcode::System &&
@@ -387,7 +323,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                         decode->remaining_latency =
                             latency_minus_one(pipeline_sim.config.div_latency);
                     }
-                    if (is_control(decode->context)) {
+                    if (decode->context.traits.is_control) {
                         const Address sequential =
                             (decode->context.cpc + (decode->context.cinsn != 0u ? 2 : 4)).raw();
                         const Address target =
@@ -498,19 +434,16 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             pipe.frontend_blocked = true;
         } else {
             decode_fields(machine);
-            fetch->serializing = is_serializing(fetch->context);
-            fetch->writes_int = writes_integer(fetch->context);
-            fetch->writes_fp =
-                (fetch->context.op_id != isa::UNKNOWN)
-                    ? pipeline::operation::writes_float(fetch->context.op_id)
-                    : isa::is_destination_fp(fetch->context.opcode, fetch->context.op_id);
+            fetch->serializing = fetch->context.traits.is_serializing;
+            fetch->writes_int = fetch->context.traits.writes_int;
+            fetch->writes_fp = fetch->context.traits.writes_fp;
             fetch->wb_dest = fetch->context.rd;
             fetch->wb_valid = false;
             fetch->wb_val = 0;
             const Address width = fetch->context.cinsn != 0u ? 2 : 4;
             const Address sequential = (fetch->context.cpc + width).raw();
 
-            if (is_control(fetch->context)) {
+            if (fetch->context.traits.is_control) {
                 fetch->prediction =
                     branch_predictor.predict(fetch->context.cpc.raw(), fetch->context);
                 if (fetch->prediction.predicted_taken && fetch->prediction.predicted_target != 0) {
