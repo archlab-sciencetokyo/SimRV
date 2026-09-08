@@ -36,9 +36,11 @@ struct SmpLockGuard {
 }  // namespace
 
 TileLinkBus::TileLinkBus(simrv::core::Machine& machine)
-    : machine_(machine),
-      coherence_hub_(machine),
-      smp_enabled_(machine.configuration().execution.smp_multithreaded) {}
+    : machine_(machine), coherence_hub_(machine) {}
+
+auto TileLinkBus::is_smp_enabled() const noexcept -> bool {
+    return machine_.configuration().execution.smp_multithreaded;
+}
 
 void TileLinkBus::record_transaction(TileLinkChannel ch, std::string_view opcode, TlSourceId source,
                                      TlSinkId sink, Address address, std::string_view detail) {
@@ -59,13 +61,13 @@ void TileLinkBus::record_transaction(TileLinkChannel ch, std::string_view opcode
 void TileLinkBus::add_node(TileLinkNode* node) { router_.register_device(node); }
 
 void TileLinkBus::configure_timing(uint32_t request_latency, uint32_t response_latency) {
-    SmpLockGuard lock(bus_mutex_, smp_enabled_);
+    SmpLockGuard lock(bus_mutex_, is_smp_enabled());
     request_latency_ = std::max(1u, request_latency);
     response_latency_ = std::max(1u, response_latency);
 }
 
 auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
-    SmpLockGuard lock(bus_mutex_, smp_enabled_);
+    SmpLockGuard lock(bus_mutex_, is_smp_enabled());
     if (const auto valid = protocol_checker_.accept_a(req); !valid) {
         simrv::log::warn("TileLink-C request rejected: {}", valid.error());
         return false;
@@ -78,7 +80,7 @@ auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
 }
 
 void TileLinkBus::advance_cycle() {
-    SmpLockGuard lock(bus_mutex_, smp_enabled_);
+    SmpLockGuard lock(bus_mutex_, is_smp_enabled());
     ++cycle_;
     if (!req_queue_.empty() && req_queue_.front().submitted_cycle + request_latency_ <= cycle_) {
         auto request = std::move(req_queue_.front());
@@ -234,12 +236,12 @@ void TileLinkBus::process_request(const TimedRequest& request) {
 }
 
 auto TileLinkBus::try_get_timed_response(TlSourceId source_id, TimedResponse& resp) -> bool {
-    SmpLockGuard lock(bus_mutex_, smp_enabled_);
+    SmpLockGuard lock(bus_mutex_, is_smp_enabled());
     return consume_d_beat(source_id, true, resp);
 }
 
 void TileLinkBus::cancel_source(TlSourceId source_id) {
-    SmpLockGuard lock(bus_mutex_, smp_enabled_);
+    SmpLockGuard lock(bus_mutex_, is_smp_enabled());
     std::erase_if(req_queue_, [source_id](const TimedRequest& request) {
         return request.payload.source == source_id;
     });
@@ -251,7 +253,7 @@ void TileLinkBus::cancel_source(TlSourceId source_id) {
 }
 
 auto TileLinkBus::get_response(TlSourceId source_id, TlChannelD& resp) -> bool {
-    SmpLockGuard lock(bus_mutex_, smp_enabled_);
+    SmpLockGuard lock(bus_mutex_, is_smp_enabled());
     // Functional engines use the transaction adapter and drain all constituent beats without
     // advancing simulated time. Cycle engines consume at most one ready beat per call.
     const auto pop_response = [&]() -> bool {
@@ -347,7 +349,7 @@ auto TileLinkBus::pending_responses() const noexcept -> size_t {
 
 auto TileLinkBus::acquire_block(const TlChannelA& req, TlChannelD& resp,
                                 std::array<Byte, CoherenceHub::kLineBytes>& line_data) -> bool {
-    SmpLockGuard lock(bus_mutex_, smp_enabled_);
+    SmpLockGuard lock(bus_mutex_, is_smp_enabled());
     if (const auto valid = protocol_checker_.accept_a(req); !valid) return false;
     record_transaction(TileLinkChannel::A, to_string(req.opcode), req.source, 0, req.address.raw(),
                        to_string(req.grow));
@@ -368,7 +370,7 @@ auto TileLinkBus::acquire_perm(const TlChannelA& req, TlChannelD& resp) -> bool 
 
 auto TileLinkBus::release_line(const TlChannelC& req, TlChannelD& resp,
                                const std::array<Byte, CoherenceHub::kLineBytes>* data) -> bool {
-    SmpLockGuard lock(bus_mutex_, smp_enabled_);
+    SmpLockGuard lock(bus_mutex_, is_smp_enabled());
     (void)protocol_checker_.accept_c(req);
     record_transaction(TileLinkChannel::C, to_string(req.opcode), req.source, 0, req.address.raw(),
                        to_string(req.report));
@@ -382,12 +384,12 @@ auto TileLinkBus::release_line(const TlChannelC& req, TlChannelD& resp,
 }
 
 void TileLinkBus::mark_modified(Address line_base, HartId hart) {
-    SmpLockGuard lock(bus_mutex_, smp_enabled_);
+    SmpLockGuard lock(bus_mutex_, is_smp_enabled());
     coherence_hub_.mark_modified(line_base, hart);
 }
 
 void TileLinkBus::grant_ack(const TlChannelE& ack) {
-    SmpLockGuard lock(bus_mutex_, smp_enabled_);
+    SmpLockGuard lock(bus_mutex_, is_smp_enabled());
     record_transaction(TileLinkChannel::E, to_string(ack.opcode), 0, ack.sink, 0);
     if (const auto valid = protocol_checker_.accept_e(ack); !valid) {
         simrv::log::warn("TileLink-C GrantAck violation: {}", valid.error());

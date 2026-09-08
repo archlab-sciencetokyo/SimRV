@@ -150,7 +150,7 @@ class TileLinkBus : public Bus {
     std::deque<TimedDBeat> d_queue_;
     simrv::util::SmallFlatMap<TlSourceId, DAssembly, 32> d_assemblies_;
     std::deque<TlTransactionRecord> transaction_history_;
-    bool smp_enabled_ = false;
+    [[nodiscard]] auto is_smp_enabled() const noexcept -> bool;
 };
 
 }  // namespace simrv::memory
