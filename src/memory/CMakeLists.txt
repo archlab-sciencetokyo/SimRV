@@ -6,6 +6,7 @@ simrv_add_component(simrv-memory
   MmioRouter.cpp
   MmioDevice.cpp
   Mmu.cpp
+  PageTableWalker.cpp
   TileLinkBus.cpp
   TileLinkProtocolChecker.cpp
   CoherenceHub.cpp

@@ -20,19 +20,19 @@ class MemorySubsystem;
  */
 class MemoryAccess {
    public:
-    static auto target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_addr,
+    static auto target_read(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v_addr,
                             Instruction funct3) -> Word;
-    static void target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_addr, Word wdata,
+    static void target_write(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v_addr, Word wdata,
                              Instruction funct3);
 
-    static auto loadInt(MemorySubsystem& mem, core::CPU& cpu, Address addr, isa::Funct3 funct3)
+    static auto loadInt(MemorySubsystem& mem, core::CPU& cpu, VirtAddr addr, isa::Funct3 funct3)
         -> Word;
-    static auto loadFp(MemorySubsystem& mem, core::CPU& cpu, Address addr, isa::Funct3 funct3)
+    static auto loadFp(MemorySubsystem& mem, core::CPU& cpu, VirtAddr addr, isa::Funct3 funct3)
         -> FloatingRegister;
 
-    static void storeInt(MemorySubsystem& mem, core::CPU& cpu, Address addr, Word data,
+    static void storeInt(MemorySubsystem& mem, core::CPU& cpu, VirtAddr addr, Word data,
                          isa::Funct3 funct3);
-    static void storeFp(MemorySubsystem& mem, core::CPU& cpu, Address addr, FloatingRegister data,
+    static void storeFp(MemorySubsystem& mem, core::CPU& cpu, VirtAddr addr, FloatingRegister data,
                         isa::Funct3 funct3);
 };
 
