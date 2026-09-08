@@ -83,3 +83,12 @@ GEMINI.md
 .stignore
 .stfolder
 *.sync-conflict-*
+
+# Standalone paper repository guard
+/paper/
+
+# Editor and OS artifacts
+*.swp
+*.swo
+*~
+.DS_Store
