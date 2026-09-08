@@ -93,13 +93,9 @@ void AclintMtimer::tick() {
     }
     const size_t total_harts = machine_->num_harts();
     for (size_t i = 0; i < total_harts && i < kMaxHarts; ++i) {
-        auto& hart = machine_->hart(HartId{static_cast<uint32_t>(i)});
         const uint64_t cmp = mtimecmp_[i].load(std::memory_order_relaxed);
-        if (mtime_ >= cmp) {
-            hart.state().mip |= enum_mask(core::MipBit::Mtip);
-        } else {
-            hart.state().mip &= ~enum_mask(core::MipBit::Mtip);
-        }
+        machine_->set_hart_irq(HartId{static_cast<uint32_t>(i)}, core::InterruptType::Timer,
+                               PrivilegeLevel::Machine, mtime_ >= cmp);
     }
 }
 
@@ -129,12 +125,9 @@ void AclintMswi::write32(Address offset, uint32_t val) {
         const uint32_t bit = val & 1U;
         msip_[hart_idx].store(bit, std::memory_order_relaxed);
         if (machine_ != nullptr && hart_idx < machine_->num_harts()) {
-            auto& hart = machine_->hart(HartId{static_cast<uint32_t>(hart_idx)});
-            if (bit != 0) {
-                hart.state().mip |= enum_mask(core::MipBit::Msip);
-            } else {
-                hart.state().mip &= ~enum_mask(core::MipBit::Msip);
-            }
+            machine_->set_hart_irq(HartId{static_cast<uint32_t>(hart_idx)},
+                                   core::InterruptType::Software, PrivilegeLevel::Machine,
+                                   bit != 0);
         }
     }
 }

@@ -138,7 +138,6 @@ void Imsic::update_hart(HartId hart_idx) {
     if (machine_ == nullptr || h >= machine_->num_harts() || h >= kMaxHarts) {
         return;
     }
-    auto& hart = machine_->hart(h);
     const auto& file = files_[h];
     const bool delivery = (file.eidelivery != 0);
     const uint64_t active = file.eip & file.eie;
@@ -151,13 +150,9 @@ void Imsic::update_hart(HartId hart_idx) {
         }
     }
 
-    const CSRValue irq_bit = (priv_ == Privilege::Machine) ? enum_mask(core::MipBit::Meip)
-                                                           : enum_mask(core::MipBit::Seip);
-    if (has_pending) {
-        hart.state().mip |= irq_bit;
-    } else {
-        hart.state().mip &= ~irq_bit;
-    }
+    const auto priv_level =
+        (priv_ == Privilege::Machine) ? PrivilegeLevel::Machine : PrivilegeLevel::Supervisor;
+    machine_->set_hart_irq(h, core::InterruptType::External, priv_level, has_pending);
 }
 
 // =========================================================================
@@ -329,12 +324,11 @@ void Aplic::update() {
                 const uint32_t tgt = target_[src];
                 const size_t hart_idx = (tgt >> 18) & 0x3fffU;
                 if (hart_idx < machine_->num_harts()) {
-                    auto& hart = machine_->hart(HartId{static_cast<uint32_t>(hart_idx)});
-                    if (priv_ == Privilege::Machine) {
-                        hart.state().mip |= enum_mask(core::MipBit::Meip);
-                    } else {
-                        hart.state().mip |= enum_mask(core::MipBit::Seip);
-                    }
+                    const auto priv_level = (priv_ == Privilege::Machine)
+                                                ? PrivilegeLevel::Machine
+                                                : PrivilegeLevel::Supervisor;
+                    machine_->set_hart_irq(HartId{static_cast<uint32_t>(hart_idx)},
+                                           core::InterruptType::External, priv_level, true);
                 }
             }
         }

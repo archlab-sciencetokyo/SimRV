@@ -16,6 +16,7 @@
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/InterruptController.hpp"
 #include "simrv/core/MachineConfig.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/core/Telemetry.hpp"
@@ -104,7 +105,7 @@ struct TuiExecutionSnapshot {
  * Machine is the simulator root object and drives the pipeline-cycle loop,
  * image loading, device wiring, tracing, and run termination checks.
  */
-class Machine final {
+class Machine final : public core::IInterruptController {
    private:
     class Runtime;
     std::unique_ptr<Runtime> runtime_;
@@ -328,7 +329,15 @@ class Machine final {
     [[nodiscard]] auto tui_execution_snapshot(size_t hart = 0) const noexcept
         -> TuiExecutionSnapshot;
     /// Platform capability used by built-in devices to publish an external interrupt level.
-    void set_platform_irq(IrqNumber irq, bool asserted = true);
+    void set_platform_irq(IrqNumber irq, bool asserted = true) override;
+    /// Architectural interrupt signal dispatched to a specific hart.
+    void set_hart_irq(HartId hart, InterruptType type, PrivilegeLevel priv, bool asserted) override;
+    [[nodiscard]] auto interrupt_controller() noexcept -> core::IInterruptController& {
+        return *this;
+    }
+    [[nodiscard]] auto interrupt_controller() const noexcept -> const core::IInterruptController& {
+        return *this;
+    }
     /// Read the shared platform timer without exposing the CPU ownership graph.
     [[nodiscard]] auto platform_time() const noexcept -> uint64_t;
     [[nodiscard]] auto rtc_device() noexcept -> simrv::Rtc*;

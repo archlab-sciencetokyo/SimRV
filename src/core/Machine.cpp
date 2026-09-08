@@ -211,6 +211,51 @@ void Machine::set_platform_irq(IrqNumber irq, bool asserted) {
     runtime_->primary_cpu.plic_set_irq(irq, asserted);
 }
 
+void Machine::set_hart_irq(HartId hart_id, InterruptType type, PrivilegeLevel priv, bool asserted) {
+    if (hart_id.val >= num_harts()) {
+        return;
+    }
+    auto& target_hart = hart(hart_id);
+    switch (type) {
+        case InterruptType::Timer:
+            if (priv == PrivilegeLevel::Machine) {
+                if (asserted) {
+                    target_hart.state().mip |= enum_mask(core::MipBit::Mtip);
+                } else {
+                    target_hart.state().mip &= ~enum_mask(core::MipBit::Mtip);
+                }
+            } else if (priv == PrivilegeLevel::Supervisor) {
+                target_hart.state().stip_timer = asserted;
+                target_hart.state().refresh_supervisor_pending();
+            }
+            break;
+        case InterruptType::Software:
+            if (priv == PrivilegeLevel::Machine) {
+                if (asserted) {
+                    target_hart.state().mip |= enum_mask(core::MipBit::Msip);
+                } else {
+                    target_hart.state().mip &= ~enum_mask(core::MipBit::Msip);
+                }
+            } else if (priv == PrivilegeLevel::Supervisor) {
+                target_hart.state().stip_software = asserted;
+                target_hart.state().refresh_supervisor_pending();
+            }
+            break;
+        case InterruptType::External:
+            if (priv == PrivilegeLevel::Machine) {
+                if (asserted) {
+                    target_hart.state().mip |= enum_mask(core::MipBit::Meip);
+                } else {
+                    target_hart.state().mip &= ~enum_mask(core::MipBit::Meip);
+                }
+            } else if (priv == PrivilegeLevel::Supervisor) {
+                target_hart.state().seip_external = asserted;
+                target_hart.state().refresh_supervisor_pending();
+            }
+            break;
+    }
+}
+
 auto Machine::platform_time() const noexcept -> uint64_t {
     return runtime_->primary_cpu.clint_mmio.mtime.load(std::memory_order_relaxed);
 }
