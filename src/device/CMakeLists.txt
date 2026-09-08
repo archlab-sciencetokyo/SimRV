@@ -1,4 +1,6 @@
 simrv_add_component(simrv-platform
+  Plic.cpp
+  Clint.cpp
   Aclint.cpp
   AIA.cpp
   Rtc.cpp
