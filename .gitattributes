@@ -1,0 +1,98 @@
+# ==============================================================================
+# Git Attributes for SimRV (RISC-V Full-System Simulator)
+# ==============================================================================
+
+# Default: Auto-detect text files and normalize line endings to LF
+* text=auto eol=lf
+
+# -----------------------------------------------------------------------------
+# C and C++ Source & Headers
+# -----------------------------------------------------------------------------
+*.c       text diff=cpp eol=lf
+*.h       text diff=cpp eol=lf
+*.cpp     text diff=cpp eol=lf
+*.hpp     text diff=cpp eol=lf
+*.cc      text diff=cpp eol=lf
+*.hh      text diff=cpp eol=lf
+*.cxx     text diff=cpp eol=lf
+*.hxx     text diff=cpp eol=lf
+*.inc     text diff=cpp eol=lf
+
+# -----------------------------------------------------------------------------
+# Assembly & Linker Scripts
+# -----------------------------------------------------------------------------
+*.s       text eol=lf
+*.S       text eol=lf
+*.asm     text eol=lf
+*.ld      text eol=lf
+*.lds     text eol=lf
+
+# -----------------------------------------------------------------------------
+# Build System & Presets
+# -----------------------------------------------------------------------------
+CMakeLists.txt      text eol=lf
+*.cmake             text eol=lf
+CMakePresets.json   text eol=lf
+CMakeUserPresets.json text eol=lf
+Makefile            text eol=lf
+*.mk                text eol=lf
+
+# -----------------------------------------------------------------------------
+# Python & Automation Tooling
+# -----------------------------------------------------------------------------
+*.py      text diff=python eol=lf
+*.sh      text eol=lf
+*.bash    text eol=lf
+
+# -----------------------------------------------------------------------------
+# Device Tree & Hardware Configurations
+# -----------------------------------------------------------------------------
+*.dts     text eol=lf
+*.dtsi    text eol=lf
+*.dtb     binary
+
+# -----------------------------------------------------------------------------
+# Documentation & Schemas
+# -----------------------------------------------------------------------------
+*.md      text diff=markdown eol=lf
+*.rst     text eol=lf
+*.txt     text eol=lf
+*.json    text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.toml    text eol=lf
+*.ini     text eol=lf
+*.cff     text eol=lf
+Doxyfile  text eol=lf
+
+# -----------------------------------------------------------------------------
+# Tooling & Linting Configs
+# -----------------------------------------------------------------------------
+.editorconfig   text eol=lf
+.clang-format   text eol=lf
+.clang-tidy     text eol=lf
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+
+# -----------------------------------------------------------------------------
+# Binary Formats (Guest Disk Images, ELFs, Binaries, Archives)
+# -----------------------------------------------------------------------------
+*.bin     binary
+*.elf     binary
+*.img     binary
+*.raw     binary
+*.ext4    binary
+*.iso     binary
+*.dump    text eol=lf
+
+# Media & Archives
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.ico     binary
+*.pdf     binary
+*.zip     binary
+*.tar     binary
+*.tar.gz  binary
+*.tgz     binary
+*.gz      binary
