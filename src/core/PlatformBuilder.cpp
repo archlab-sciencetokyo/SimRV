@@ -3,6 +3,7 @@
 
 #include <memory>
 
+#include "MachineRuntime.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/device/mmio/VirtioMmioBlock.hpp"
 #include "simrv/device/mmio/VirtioMmioConsole.hpp"
@@ -27,35 +28,39 @@ void PlatformBuilder::compose(Machine& machine) {
     const auto& disk_path = machine.config.files.disk_path;
 
     if (composition.pcie) {
-        machine.pcie = std::make_unique<simrv::device::PcieRootComplex>(
-            &machine, machine.aplic_s.get(), machine.imsic_s.get());
-        machine.pci_disk = std::make_shared<simrv::device::VirtioPciBlock>(disk_path);
-        machine.pci_console = std::make_shared<simrv::device::VirtioPciConsole>();
-        machine.pci_rng = std::make_shared<simrv::device::VirtioPciRng>();
-        machine.pci_gpu = std::make_shared<simrv::device::VirtioPciGpu>();
-        machine.pci_input = std::make_shared<simrv::device::VirtioPciInput>();
-        machine.pci_sound = std::make_shared<simrv::device::VirtioPciSound>();
-        machine.pci_net = std::make_shared<simrv::device::VirtioPciNet>();
+        machine.runtime_->pcie = std::make_unique<simrv::device::PcieRootComplex>(
+            &machine, machine.runtime_->aplic_s.get(), machine.runtime_->imsic_s.get());
+        machine.runtime_->pci_disk = std::make_shared<simrv::device::VirtioPciBlock>(disk_path);
+        machine.runtime_->pci_console = std::make_shared<simrv::device::VirtioPciConsole>();
+        machine.runtime_->pci_rng = std::make_shared<simrv::device::VirtioPciRng>();
+        machine.runtime_->pci_gpu = std::make_shared<simrv::device::VirtioPciGpu>();
+        machine.runtime_->pci_input = std::make_shared<simrv::device::VirtioPciInput>();
+        machine.runtime_->pci_sound = std::make_shared<simrv::device::VirtioPciSound>();
+        machine.runtime_->pci_net = std::make_shared<simrv::device::VirtioPciNet>();
         const std::array<std::shared_ptr<simrv::device::PciDevice>, 7> pci_devices = {
-            machine.pci_disk,  machine.pci_console, machine.pci_rng, machine.pci_gpu,
-            machine.pci_input, machine.pci_sound,   machine.pci_net,
+            machine.runtime_->pci_disk, machine.runtime_->pci_console, machine.runtime_->pci_rng,
+            machine.runtime_->pci_gpu,  machine.runtime_->pci_input,   machine.runtime_->pci_sound,
+            machine.runtime_->pci_net,
         };
         for (uint8_t slot = 1; slot <= pci_devices.size(); ++slot) {
-            machine.pcie->attach_device(0, slot, 0, pci_devices[slot - 1]);
+            machine.runtime_->pcie->attach_device(0, slot, 0, pci_devices[slot - 1]);
         }
     }
     if (composition.mmio) {
-        machine.mmio_disk =
+        machine.runtime_->mmio_disk =
             std::make_shared<simrv::device::VirtioMmioBlock>(0x10001000, 2, &machine, disk_path);
-        machine.mmio_console =
+        machine.runtime_->mmio_console =
             std::make_shared<simrv::device::VirtioMmioConsole>(0x10002000, 1, &machine);
-        machine.mmio_rng = std::make_shared<simrv::device::VirtioMmioRng>(0x10003000, 4, &machine);
-        machine.mmio_gpu = std::make_shared<simrv::device::VirtioMmioGpu>(0x10004000, 5, &machine);
-        machine.mmio_input =
+        machine.runtime_->mmio_rng =
+            std::make_shared<simrv::device::VirtioMmioRng>(0x10003000, 4, &machine);
+        machine.runtime_->mmio_gpu =
+            std::make_shared<simrv::device::VirtioMmioGpu>(0x10004000, 5, &machine);
+        machine.runtime_->mmio_input =
             std::make_shared<simrv::device::VirtioMmioInput>(0x10005000, 6, &machine);
-        machine.mmio_sound =
+        machine.runtime_->mmio_sound =
             std::make_shared<simrv::device::VirtioMmioSound>(0x10006000, 7, &machine);
-        machine.mmio_net = std::make_shared<simrv::device::VirtioMmioNet>(0x10007000, 8, &machine);
+        machine.runtime_->mmio_net =
+            std::make_shared<simrv::device::VirtioMmioNet>(0x10007000, 8, &machine);
     }
 }
 

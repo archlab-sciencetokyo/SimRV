@@ -704,8 +704,10 @@ auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows,
     }
 
     bool show_spinner = !paused_;
-    if (show_spinner && machine_.tui_controller()) {
-        uint64_t delay = machine_.tui_controller()->step_delay_us_.load(std::memory_order_relaxed);
+    if (show_spinner) {
+        uint64_t delay =
+            tui_ ? tui_->step_delay_us_.load(std::memory_order_relaxed)
+                 : (machine_.telemetry_sink() ? machine_.telemetry_sink()->step_delay_us() : 0);
         if (delay >= 10000) {
             show_spinner = false;
         }

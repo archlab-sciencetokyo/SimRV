@@ -28,7 +28,7 @@ void SettingsModal::open(SettingsDraft& draft, const simrv::core::Machine& machi
     draft.cycle_accurate = machine.runtime_profile.is_cycle_mode();
     draft.high_contrast = machine.high_contrast_enabled();
     draft.class_mode = machine.class_mode_enabled();
-    draft.tui_fps = machine.tui_controller() ? machine.tui_controller()->target_fps() : 30;
+    draft.tui_fps = machine.telemetry_sink() ? machine.telemetry_sink()->target_fps() : 30;
     draft.use_mix = machine.instruction_mix_enabled();
     draft.bp_trace = machine.branch_trace_enabled();
     draft.traplog_mode = machine.trap_log_enabled();
@@ -254,8 +254,8 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
         machine.set_high_contrast_enabled(draft.high_contrast);
     }
     machine.set_class_mode_enabled(draft.class_mode);
-    if (machine.tui_controller()) {
-        machine.tui_controller()->set_target_fps(draft.tui_fps);
+    if (machine.telemetry_sink()) {
+        machine.telemetry_sink()->set_target_fps(draft.tui_fps);
     }
 
     machine.set_instruction_mix_enabled(draft.use_mix);

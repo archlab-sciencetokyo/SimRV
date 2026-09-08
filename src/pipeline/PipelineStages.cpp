@@ -1139,12 +1139,7 @@ void CPU::execute_system(Machine& machine) {
                                                 buf_addr + i, static_cast<Instruction>(Funct3::Lb),
                                                 machine.ram_view()) &
                                             0xFF);
-                                        if (machine.tui_enabled() && machine.tui_controller()) {
-                                            machine.tui_controller()->handle_char_write(
-                                                static_cast<char>(ch));
-                                        } else {
-                                            (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
-                                        }
+                                        machine.console_write(static_cast<char>(ch));
                                     }
                                 }
                                 state_.regs.write(RegId::A0, 0);
@@ -1157,12 +1152,7 @@ void CPU::execute_system(Machine& machine) {
                                             arg_ptr, static_cast<Instruction>(Funct3::Lb),
                                             machine.ram_view()) &
                                         0xFF);
-                                    if (machine.tui_enabled() && machine.tui_controller()) {
-                                        machine.tui_controller()->handle_char_write(
-                                            static_cast<char>(ch));
-                                    } else {
-                                        (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
-                                    }
+                                    machine.console_write(static_cast<char>(ch));
                                 }
                                 state_.regs.write(RegId::A0, 0);
                                 break;
@@ -1177,12 +1167,7 @@ void CPU::execute_system(Machine& machine) {
                                                 machine.ram_view()) &
                                             0xFF);
                                         if (ch == 0) break;
-                                        if (machine.tui_enabled() && machine.tui_controller()) {
-                                            machine.tui_controller()->handle_char_write(
-                                                static_cast<char>(ch));
-                                        } else {
-                                            (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
-                                        }
+                                        machine.console_write(static_cast<char>(ch));
                                         ptr++;
                                     }
                                 }

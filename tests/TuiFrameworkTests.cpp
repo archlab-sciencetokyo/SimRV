@@ -600,24 +600,27 @@ void test_tui_running_state_synchronization() {
     simrv::core::MachineConfig config{};
     config.tui.enabled = true;
     simrv::core::Machine machine(config);
-    expect(machine.initialize() == 0, "machine initializes successfully with TUI enabled");
+    expect(machine.initialize().has_value(), "machine initializes successfully with TUI enabled");
+    auto tui = std::make_shared<simrv::tui::Tui>(machine);
+    machine.set_telemetry_sink(tui);
+    machine.set_console_sink(tui);
     expect(machine.execution_state() == simrv::core::ExecutionState::Paused,
            "machine starts in Paused state when TUI is enabled");
     expect(machine.is_paused(), "machine.is_paused() returns true on startup with TUI");
-    if (auto* tui = machine.tui_controller()) {
-        expect(tui->is_paused(), "tui.is_paused() is true on startup");
-        tui->set_paused(false);
-        expect(!tui->is_paused(), "tui.is_paused() is false after unpausing");
-        expect(machine.execution_state() == simrv::core::ExecutionState::Running,
-               "machine execution state is Running after unpausing TUI");
-        expect(!machine.is_paused(), "machine.is_paused() is false after unpausing");
+    expect(tui->is_paused(), "tui.is_paused() is true on startup");
+    tui->set_paused(false);
+    expect(!tui->is_paused(), "tui.is_paused() is false after unpausing");
+    expect(machine.execution_state() == simrv::core::ExecutionState::Running,
+           "machine execution state is Running after unpausing TUI");
+    expect(!machine.is_paused(), "machine.is_paused() is false after unpausing");
 
-        tui->set_paused(true);
-        expect(tui->is_paused(), "tui.is_paused() is true after pausing");
-        expect(machine.execution_state() == simrv::core::ExecutionState::Paused,
-               "machine execution state is Paused after pausing TUI");
-        expect(machine.is_paused(), "machine.is_paused() is true after pausing");
-    }
+    tui->set_paused(true);
+    expect(tui->is_paused(), "tui.is_paused() is true after pausing");
+    expect(machine.execution_state() == simrv::core::ExecutionState::Paused,
+           "machine execution state is Paused after pausing TUI");
+    expect(machine.is_paused(), "machine.is_paused() is true after pausing");
+    machine.set_telemetry_sink(nullptr);
+    machine.set_console_sink(nullptr);
 }
 
 void test_inspection_report() {

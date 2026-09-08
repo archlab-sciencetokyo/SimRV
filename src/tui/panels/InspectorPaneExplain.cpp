@@ -823,8 +823,10 @@ auto render_microarchitectural_profile(const simrv::pipeline::PipelineContext& c
 
 auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
     bool show_disabled = !paused_;
-    if (show_disabled && machine_.tui_controller()) {
-        uint64_t delay = machine_.tui_controller()->step_delay_us_.load(std::memory_order_relaxed);
+    if (show_disabled) {
+        uint64_t delay =
+            tui_ ? tui_->step_delay_us_.load(std::memory_order_relaxed)
+                 : (machine_.telemetry_sink() ? machine_.telemetry_sink()->step_delay_us() : 0);
         if (delay >= 10000) {
             show_disabled = false;
         }

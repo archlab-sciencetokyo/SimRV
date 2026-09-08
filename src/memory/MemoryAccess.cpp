@@ -84,7 +84,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, Address v_a
                                 hit->watch_type == debug::WatchType::Access ? "awatch" : "rwatch",
                                 v_addr),
                     hit->description);
-            } else if (cpu.machine_->tui_controller() != nullptr) {
+            } else if (cpu.machine_->tui_enabled()) {
                 cpu.machine_->debug_watch_hit(static_cast<HartId>(cpu.state().mhartid),
                                               GdbSignal::SigTrap, {}, hit->description);
             }
@@ -401,7 +401,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, Address v_
                                 hit->watch_type == debug::WatchType::Access ? "awatch" : "watch",
                                 v_addr),
                     hit->description);
-            } else if (cpu.machine_->tui_controller() != nullptr) {
+            } else if (cpu.machine_->tui_enabled()) {
                 cpu.machine_->debug_watch_hit(static_cast<HartId>(cpu.state().mhartid),
                                               GdbSignal::SigTrap, {}, hit->description);
             }

@@ -18,6 +18,8 @@ class Machine;
 
 namespace simrv::tui {
 
+class Tui;
+
 enum class HeaderAction : uint8_t {
     None,
     RunPause,
@@ -38,7 +40,8 @@ struct HeaderHitResult {
 
 class StatusBar : public TuiWidget {
    public:
-    explicit StatusBar(simrv::core::Machine& machine);
+    explicit StatusBar(simrv::core::Machine& machine, Tui* tui = nullptr);
+    void set_tui(Tui* tui) noexcept { tui_ = tui; }
 
     void set_paused(bool paused) { paused_ = paused; }
     void set_status_override(const std::string& status) { status_override_ = status; }
@@ -64,6 +67,7 @@ class StatusBar : public TuiWidget {
 
    private:
     simrv::core::Machine& machine_;
+    Tui* tui_ = nullptr;
     bool paused_ = true;
     std::string status_override_;
     TuiRegPage active_page_ = TuiRegPage::GPR;

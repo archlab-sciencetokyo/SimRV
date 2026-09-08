@@ -52,7 +52,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     const bool retain_retired_slot =
         pipeline_sim.config.record_snapshots &&
         (!machine.tui_enabled() ||
-         (machine.tui_controller() && machine.tui_controller()->captures_execution_detail()));
+         (machine.telemetry_sink() && machine.telemetry_sink()->captures_execution_detail()));
     pipe.retired_this_cycle = false;
     if (retain_retired_slot) pipe.retired->clear();
     pipe.data_hazard_stall = false;

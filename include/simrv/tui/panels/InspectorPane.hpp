@@ -42,7 +42,8 @@ inline constexpr std::array<const char*, 32> kFpRegNames = {
 
 class InspectorPane : public TuiWidget {
    public:
-    explicit InspectorPane(simrv::core::Machine& machine) : machine_(machine) {
+    explicit InspectorPane(simrv::core::Machine& machine, Tui* tui = nullptr)
+        : machine_(machine), tui_(tui) {
         cached_gpr_.fill(0);
         cached_fpr_.fill(0);
         cached_vec_.fill({});
@@ -267,6 +268,7 @@ class InspectorPane : public TuiWidget {
     bool secondary_column_mode_ = false;
     // Column renderings use a one-line header, unlike the two-line tab strip.
     bool column_header_mode_ = false;
+    Tui* tui_ = nullptr;
 };
 
 }  // namespace simrv::tui

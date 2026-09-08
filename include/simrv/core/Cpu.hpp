@@ -345,7 +345,9 @@ class CPU {
      * @param irq_num The interrupt request number.
      * @param state The state to write (1 for asserted, 0 for deasserted).
      */
-    void plic_set_irq(int irq_num, int state);
+    void plic_set_irq(IrqNumber irq_num, IrqLevel state);
+    void plic_set_irq(IrqNumber irq_num, bool asserted = true);
+    void plic_set_irq(IrqNumber irq_num, int state);
 
     /**
      * @brief Triggers an architectural exception or interrupt trap, transitioning privilege levels

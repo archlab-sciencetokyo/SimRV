@@ -14,7 +14,6 @@
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
-#include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -24,8 +23,8 @@ using namespace simrv::isa;
 
 namespace {
 SIMRV_ALWAYS_INLINE auto captures_tui_execution_detail(const Machine& machine) -> bool {
-    return machine.tui_enabled() && machine.tui_controller() &&
-           machine.tui_controller()->captures_execution_detail();
+    const auto sink = machine.telemetry_sink();
+    return sink && sink->captures_execution_detail();
 }
 
 SIMRV_ALWAYS_INLINE auto is_tohost_addr(const Machine& machine, Address addr) -> bool {
@@ -182,8 +181,16 @@ void CPU::sret() { TrapController::sret(state_); }
 
 void CPU::plic_update_mip() { InterruptController::updateMip(plic_mmio, state_); }
 
-void CPU::plic_set_irq(int irq_num, int state) {
-    InterruptController::setIrq(plic_mmio, irq_num, state);
+void CPU::plic_set_irq(IrqNumber irq_num, IrqLevel state) {
+    InterruptController::setIrq(plic_mmio, irq_num, state == IrqLevel::Asserted ? 1 : 0);
+}
+
+void CPU::plic_set_irq(IrqNumber irq_num, bool asserted) {
+    InterruptController::setIrq(plic_mmio, irq_num, asserted ? 1 : 0);
+}
+
+void CPU::plic_set_irq(IrqNumber irq_num, int state) {
+    InterruptController::setIrq(plic_mmio, irq_num, state != 0 ? 1 : 0);
 }
 
 void CPU::raise_exception(TrapCause cause, CSRValue tval) {
@@ -196,7 +203,7 @@ void CPU::evaluate_timer_interrupt() {
     bool is_supervisor_timer = false;
 
     if (machine_ != nullptr) {
-        auto& primary_clint = machine_->cpu.clint_mmio;
+        auto& primary_clint = machine_->primary_hart().clint_mmio;
         cur_mtime = primary_clint.mtime.load(std::memory_order_relaxed);
         const auto hid = static_cast<size_t>(state_.mhartid);
         if (hid == 0) {
@@ -229,21 +236,21 @@ void CPU::evaluate_timer_interrupt() {
 
 void CPU::run_cycle(Machine& machine) {
     const Counter retired_before = e_icount;
-    if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
+    if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         prev_state_ = state_;
-        if (auto hit = machine.breakpoints.check_pc(
+        if (auto hit = machine.breakpoint_manager().check_pc(
                 state_.pc, HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount)) {
-            if (machine.gdb_stub && machine.gdb_stub->is_connected()) {
-                machine.breakpoints.set_skip_once_pc(
+            if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
+                machine.breakpoint_manager().set_skip_once_pc(
                     state_.pc, HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount);
                 machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap,
                                    "swbreak:;");
                 return;
-            } else if (machine.tui) {
-                machine.breakpoints.set_skip_once_pc(
+            } else if (auto sink = machine.telemetry_sink()) {
+                machine.breakpoint_manager().set_skip_once_pc(
                     state_.pc, HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount);
-                machine.tui->set_status_override(hit->description);
-                machine.tui->pause_loop();
+                sink->set_status_override(hit->description);
+                sink->pause_loop();
                 return;
             }
         }
@@ -328,8 +335,7 @@ void CPU::run_cycle(Machine& machine) {
             pipeline_sim.advance_cycle_fast(metrics);
         }
         const auto retired_pc = state_.pc;
-        if (simrv::compiler::unlikely(ca_pipeline.retired_this_cycle && machine.tui_enabled() &&
-                                      machine.tui)) {
+        if (simrv::compiler::unlikely(ca_pipeline.retired_this_cycle && machine.telemetry_sink())) {
             std::swap(pipeline_context, ca_pipeline.retired->context);
             record_trace_for_tui(machine);
             std::swap(pipeline_context, ca_pipeline.retired->context);
@@ -349,7 +355,7 @@ void CPU::run_cycle(Machine& machine) {
         machine.record_retired_instructions(e_icount - retired_before);
         return;
     }
-    if (machine.runtime_profile.is_instruction_fast() && !machine.breakpoints.has_any()) {
+    if (machine.runtime_profile.is_instruction_fast() && !machine.breakpoint_manager().has_any()) {
         // Mode 2: Cached fast-path functional execution (pre-decoded direct-lookup cache).
         // Bypasses pipeline orchestration and fetches from direct lookup cache if available.
         auto* cached = decode_cache.lookup(state_.pc);
@@ -429,17 +435,17 @@ void CPU::run_cycle(Machine& machine) {
     tick_cycle_clock(machine);
 
     // Record trace logs for active debug TUI components.
-    if (machine.tui_enabled() && machine.tui) {
+    if (machine.telemetry_sink()) {
         record_trace_for_tui(machine);
     }
 
-    if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
-        if (auto hit = machine.breakpoints.check_reg_changes(state_, prev_state_)) {
-            if (machine.gdb_stub && machine.gdb_stub->is_connected()) {
+    if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
+        if (auto hit = machine.breakpoint_manager().check_reg_changes(state_, prev_state_)) {
+            if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
                 machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap);
-            } else if (machine.tui) {
-                machine.tui->set_status_override(hit->description);
-                machine.tui->pause_loop();
+            } else if (auto sink = machine.telemetry_sink()) {
+                sink->set_status_override(hit->description);
+                sink->pause_loop();
             }
         }
     }
@@ -469,30 +475,34 @@ SIMRV_ALWAYS_INLINE void CPU::tick_cycle_clock(Machine& machine, bool interrupt_
             evaluate_timer_interrupt();
             // Parallel harts evaluate their own interrupt state; hart 0 only publishes time.
             if (simrv::compiler::unlikely(!machine.config.execution.smp_multithreaded &&
-                                          !machine.secondary_harts_.empty())) {
-                for (auto& sec : machine.secondary_harts_) {
-                    if (sec->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
-                        sec->evaluate_timer_interrupt();
+                                          machine.num_harts() > 1)) {
+                for (size_t i = 1; i < machine.num_harts(); ++i) {
+                    auto& sec = machine.hart(i);
+                    if (sec.hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+                        sec.evaluate_timer_interrupt();
                     }
                 }
             }
         }
     } else {
-        clint_mmio.mtime = machine.cpu.clint_mmio.mtime.load(std::memory_order_relaxed);
+        clint_mmio.mtime = machine.primary_hart().clint_mmio.mtime.load(std::memory_order_relaxed);
     }
     if (interrupt_boundary) handle_cached_interrupts();
 }
 
 void CPU::record_trace_for_tui(Machine& machine) {
+    auto sink = machine.telemetry_sink();
+    if (!sink) return;
+
     const auto op_id = pipeline_context.op_id;
     const auto opcode = pipeline_context.opcode;
     const auto rd = pipeline_context.rd;
     const auto rs1 = pipeline_context.rs1;
     const auto rs2 = pipeline_context.rs2;
 
-    if (!machine.tui->is_trace_active()) {
-        machine.tui->record_flight_instruction(pipeline_context.cpc.raw(), opcode, op_id,
-                                               static_cast<uint8_t>(state_.mhartid));
+    if (!sink->is_trace_active()) {
+        sink->record_flight_instruction(pipeline_context.cpc.raw(), opcode, op_id,
+                                        static_cast<uint8_t>(state_.mhartid));
         return;
     }
 
@@ -522,30 +532,29 @@ void CPU::record_trace_for_tui(Machine& machine) {
         rs2_val = state_.regs.read(rs2);
     }
 
-    machine.tui->record_instruction(pipeline_context.cpc.raw(), opcode, op_id,
-                                    std::to_underlying(rd), rd_val, std::to_underlying(rs1),
-                                    rs1_val, std::to_underlying(rs2), rs2_val, pipeline_context.imm,
-                                    static_cast<uint8_t>(state_.mhartid));
+    sink->record_instruction(pipeline_context.cpc.raw(), opcode, op_id, std::to_underlying(rd),
+                             rd_val, std::to_underlying(rs1), rs1_val, std::to_underlying(rs2),
+                             rs2_val, pipeline_context.imm, static_cast<uint8_t>(state_.mhartid));
 }
 
 void CPU::run_cycle_baremetal(Machine& machine) {
     const Counter retired_before = e_icount;
-    if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
+    if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         prev_state_ = state_;
-        if (auto hit = machine.breakpoints.check_pc(
+        if (auto hit = machine.breakpoint_manager().check_pc(
                 state_.pc, HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount)) {
-            if (machine.gdb_stub && machine.gdb_stub->is_connected()) {
-                machine.breakpoints.set_skip_once_pc(
+            if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
+                machine.breakpoint_manager().set_skip_once_pc(
                     state_.pc, HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount);
                 machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap,
                                    "swbreak:;");
                 return;
             }
-            if (machine.tui) {
-                machine.breakpoints.set_skip_once_pc(
+            if (auto sink = machine.telemetry_sink()) {
+                machine.breakpoint_manager().set_skip_once_pc(
                     state_.pc, HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount);
-                machine.tui->set_status_override(hit->description);
-                machine.tui->pause_loop();
+                sink->set_status_override(hit->description);
+                sink->pause_loop();
                 return;
             }
         }
@@ -553,7 +562,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
     pipeline_context.pending_exception = std::nullopt;
     pipeline_context.pending_tval = 0;
 
-    if (machine.runtime_profile.is_instruction_fast() && !machine.breakpoints.has_any()) {
+    if (machine.runtime_profile.is_instruction_fast() && !machine.breakpoint_manager().has_any()) {
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
             const bool copy_ctx = captures_tui_execution_detail(machine) ||
@@ -578,16 +587,17 @@ void CPU::run_cycle_baremetal(Machine& machine) {
                 clint_mmio.rtc_divider = 0;
                 evaluate_timer_interrupt();
             }
-            if (machine.tui_enabled() && machine.tui) {
+            if (machine.telemetry_sink()) {
                 record_trace_for_tui(machine);
             }
-            if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
-                if (auto hit = machine.breakpoints.check_reg_changes(state_, prev_state_)) {
-                    if (machine.gdb_stub && machine.gdb_stub->is_connected()) {
+            if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
+                if (auto hit =
+                        machine.breakpoint_manager().check_reg_changes(state_, prev_state_)) {
+                    if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
                         machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap);
-                    } else if (machine.tui) {
-                        machine.tui->set_status_override(hit->description);
-                        machine.tui->pause_loop();
+                    } else if (auto sink = machine.telemetry_sink()) {
+                        sink->set_status_override(hit->description);
+                        sink->pause_loop();
                     }
                 }
             }
@@ -630,17 +640,17 @@ void CPU::run_cycle_baremetal(Machine& machine) {
         clint_mmio.rtc_divider = 0;
         evaluate_timer_interrupt();
     }
-    if (machine.tui_enabled() && machine.tui) {
+    if (machine.telemetry_sink()) {
         record_trace_for_tui(machine);
     }
 
-    if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
-        if (auto hit = machine.breakpoints.check_reg_changes(state_, prev_state_)) {
-            if (machine.gdb_stub && machine.gdb_stub->is_connected()) {
+    if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
+        if (auto hit = machine.breakpoint_manager().check_reg_changes(state_, prev_state_)) {
+            if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
                 machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap);
-            } else if (machine.tui) {
-                machine.tui->set_status_override(hit->description);
-                machine.tui->pause_loop();
+            } else if (auto sink = machine.telemetry_sink()) {
+                sink->set_status_override(hit->description);
+                sink->pause_loop();
             }
         }
     }
@@ -648,7 +658,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
 }
 
 void CPU::run_memory_stage_baremetal(Machine& machine) {
-    if (simrv::compiler::unlikely(machine.breakpoints.has_any())) {
+    if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         run_memory_stage(machine);
         return;
     }

@@ -110,12 +110,21 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             }
         }
 
-        const int init_result = sim_machine->initialize();
-        if (init_result != 0) {
-            return init_result;
+        const auto init_result = sim_machine->initialize();
+        if (!init_result) {
+            simrv::log::error("Machine initialization failed: {}", init_result.error());
+            return 1;
         }
 
         sim_machine->set_start_time(std::chrono::steady_clock::now());
+
+        std::shared_ptr<simrv::tui::Tui> tui;
+        if (sim_machine->tui_enabled()) {
+            tui = std::make_shared<simrv::tui::Tui>(*sim_machine);
+            sim_machine->set_telemetry_sink(tui);
+            sim_machine->set_console_sink(tui);
+            tui->initialize();
+        }
 
         std::unique_ptr<simrv::net::SimRvServer> ipc_server;
         if (parsed->options.server_mode) {

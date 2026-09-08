@@ -955,9 +955,8 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
         options.use_opensbi || !options.fn_dvtree.empty() || is_fw_payload;
 
     // Debug / co-simulation flags
-    if (machine->tui_controller() && options.step_delay_us > 0) {
-        machine->tui_controller()->step_delay_us_.store(options.step_delay_us,
-                                                        std::memory_order_relaxed);
+    if (machine->telemetry_sink() && options.step_delay_us > 0) {
+        machine->telemetry_sink()->set_step_delay_us(options.step_delay_us);
     }
 
     return {};

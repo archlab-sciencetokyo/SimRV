@@ -139,7 +139,7 @@ void Tui::set_paused(bool p) {
         return;
     }
     const bool cur_paused = paused_.load(std::memory_order_relaxed);
-    const auto cur_machine_state = machine_.execution_state_.load(std::memory_order_relaxed);
+    const auto cur_machine_state = machine_.execution_state();
     const auto target_machine_state =
         p ? simrv::core::ExecutionState::Paused : simrv::core::ExecutionState::Running;
     if (cur_paused != p || cur_machine_state != target_machine_state) {
@@ -149,25 +149,14 @@ void Tui::set_paused(bool p) {
             last_runtime_tick_ = std::chrono::steady_clock::now();
             last_speed_update_ = std::chrono::steady_clock::now();
             last_icount_ = machine_.primary_hart().e_icount;
-            machine_.execution_state_.store(simrv::core::ExecutionState::Running,
-                                            std::memory_order_release);
-            machine_.execution_state_.notify_all();
-            machine_.notify_control_event();
+            machine_.resume();
         } else {
             if (last_runtime_tick_ != std::chrono::steady_clock::time_point{}) {
                 runtime_duration_ += std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now() - last_runtime_tick_);
                 last_runtime_tick_ = {};
             }
-            machine_.execution_state_.store(simrv::core::ExecutionState::Paused,
-                                            std::memory_order_release);
-            machine_.execution_state_.notify_all();
-            machine_.notify_control_event();
-            for (size_t hart = 1; hart < machine_.num_harts(); ++hart) {
-                machine_.hart(hart).hart_status.notify_all();
-            }
-            machine_.wait_for_runner_quiescence();
-            machine_.publish_tui_execution_snapshot();
+            machine_.pause();
         }
         update_trace_active_cache();
         trigger_immediate_render();
@@ -175,14 +164,15 @@ void Tui::set_paused(bool p) {
 }
 
 void Tui::initialize() {
-    inspector_pane_ = std::make_unique<InspectorPane>(machine_);
+    inspector_pane_ = std::make_unique<InspectorPane>(machine_, this);
     inspector_pane_->set_mission_progress(&mission_);
     terminal_pane_ = std::make_unique<TerminalPane>();
-    status_bar_ = std::make_unique<StatusBar>(machine_);
+    status_bar_ = std::make_unique<StatusBar>(machine_, this);
 
     set_high_contrast(machine_.high_contrast_enabled());
-    machine_.execution_state_.store(simrv::core::ExecutionState::Paused, std::memory_order_release);
-    machine_.publish_tui_execution_snapshot();
+    if (!machine_.is_paused()) {
+        machine_.pause();
+    }
 
     machine_.primary_hart().pipeline_sim.config.record_snapshots = true;
     for (size_t h = 0; h < machine_.num_harts(); ++h) {
