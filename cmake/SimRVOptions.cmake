@@ -71,8 +71,8 @@ endfunction()
 function(simrv_configure_native_test target)
   simrv_apply_options(${target})
   target_include_directories(${target} PRIVATE
-    "${CMAKE_SOURCE_DIR}/include"
-    "${CMAKE_BINARY_DIR}/generated"
+    "${PROJECT_SOURCE_DIR}/include"
+    "${PROJECT_BINARY_DIR}/generated"
   )
 endfunction()
 

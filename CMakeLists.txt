@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.31)
 
-project(SimRV VERSION 3.0.0 LANGUAGES C CXX)
+project(SimRV
+  VERSION 3.0.0
+  DESCRIPTION "SimCore/RISC-V Functional Simulator"
+  HOMEPAGE_URL "https://github.com/archlab-sciencetokyo/SimRV"
+  LANGUAGES C CXX
+)
 
 include(CTest)
 option(SIMRV_ENABLE_TOOLING "Enable release, documentation, and formatting helper targets" OFF)
@@ -54,12 +59,12 @@ endif()
 
 message(STATUS "SimRV version: ${SIMRV_VERSION} (${SIMRV_GIT_BRANCH}@${SIMRV_GIT_SHA})")
 
-set(SIMRV_PROJECT_NAME "SimRV")
-set(SIMRV_PROJECT_DESCRIPTION "SimCore/RISC-V Functional Simulator")
+set(SIMRV_PROJECT_NAME "${PROJECT_NAME}")
+set(SIMRV_PROJECT_DESCRIPTION "${PROJECT_DESCRIPTION}")
 
 configure_file(
-  ${CMAKE_SOURCE_DIR}/include/simrv/core/BuildInfo.hpp.in
-  ${CMAKE_CURRENT_BINARY_DIR}/generated/simrv/core/BuildInfo.hpp
+  ${PROJECT_SOURCE_DIR}/include/simrv/core/BuildInfo.hpp.in
+  ${PROJECT_BINARY_DIR}/generated/simrv/core/BuildInfo.hpp
   @ONLY
 )
 
@@ -126,18 +131,18 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_L
 endif()
 
 # XLEN option (32 or 64) – compile-time selection
-option(SIMRV_XLEN "Target XLEN (32 or 64)" 32)
-set_property(CACHE SIMRV_XLEN PROPERTY STRINGS 32 64)
+set(SIMRV_XLEN "64" CACHE STRING "Target XLEN (32 or 64)")
+set_property(CACHE SIMRV_XLEN PROPERTY STRINGS "32" "64")
 if(NOT SIMRV_XLEN STREQUAL "32" AND NOT SIMRV_XLEN STREQUAL "64")
   message(FATAL_ERROR "SIMRV_XLEN must be 32 or 64 (got: ${SIMRV_XLEN})")
 endif()
-set(SIMRV_LINUX_IMAGES_DIR "${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}" CACHE PATH "Path to reproducible Linux test images")
+set(SIMRV_LINUX_IMAGES_DIR "${PROJECT_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}" CACHE PATH "Path to reproducible Linux test images")
 
 set(SIMRV_DRAM_SIZE_MB "256" CACHE STRING "DRAM size in megabytes (must be power of 2)")
 set(SIMRV_DISK_SIZE_MB "256" CACHE STRING "Disk size in megabytes")
 set(SIMRV_SPIKE_PATH "spike" CACHE STRING "Path to Spike binary for lockstep co-simulation (runtime default, not used at build time)")
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(SimRVOptions)
 
 add_subdirectory(src/pipeline)
@@ -151,9 +156,10 @@ add_subdirectory(src/net)
 add_subdirectory(src/core)
 
 add_executable(SimRV src/Main.cpp)
+add_executable(SimRV::cli ALIAS SimRV)
 target_include_directories(SimRV PRIVATE
-  include
-  ${CMAKE_CURRENT_BINARY_DIR}/generated
+  ${PROJECT_SOURCE_DIR}/include
+  ${PROJECT_BINARY_DIR}/generated
 )
 target_link_libraries(SimRV PRIVATE simrv-runtime)
 simrv_apply_options(SimRV)
@@ -803,10 +809,12 @@ endif()
 if(SIMRV_ENABLE_TOOLING)
 find_program(CLANG_FORMAT_BIN NAMES clang-format DOC "Path to clang-format tool")
 if(CLANG_FORMAT_BIN)
-  file(GLOB_RECURSE ALL_SOURCE_FILES
-    "${CMAKE_SOURCE_DIR}/src/*.cpp"
-    "${CMAKE_SOURCE_DIR}/src/*.hpp"
-    "${CMAKE_SOURCE_DIR}/include/*.hpp"
+  file(GLOB_RECURSE ALL_SOURCE_FILES CONFIGURE_DEPENDS
+    "${PROJECT_SOURCE_DIR}/src/*.cpp"
+    "${PROJECT_SOURCE_DIR}/src/*.hpp"
+    "${PROJECT_SOURCE_DIR}/include/*.hpp"
+    "${PROJECT_SOURCE_DIR}/tests/*.cpp"
+    "${PROJECT_SOURCE_DIR}/tests/*.hpp"
   )
 
   add_custom_target(format
@@ -827,7 +835,12 @@ if(CLANG_FORMAT_BIN)
 endif()
 endif()
 
-set(CPACK_PACKAGE_NAME "SimRV")
+set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
+set(CPACK_PACKAGE_VENDOR "archlab-sciencetokyo")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
+set(CPACK_PACKAGE_HOMEPAGE_URL "${PROJECT_HOMEPAGE_URL}")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_FILE_NAME "SimRV-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
+set(CPACK_RESOURCE_FILE_README "${PROJECT_SOURCE_DIR}/README.md")
 include(CPack)
