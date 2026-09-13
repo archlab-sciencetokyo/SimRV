@@ -13,15 +13,12 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Sbi.hpp"
 #include "simrv/core/TelemetrySink.hpp"
+#include "simrv/core/Tracer.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
-
-namespace {
-
-constexpr int kLogHexWidth = static_cast<int>(kXLenHexDigits);
 
 auto trap_cause_name(TrapCause cause) -> std::string {
     const bool is_interrupt = trap_is_interrupt(cause);
@@ -89,8 +86,6 @@ auto trap_cause_name(TrapCause cause) -> std::string {
     return tvec_base;
 }
 
-}  // namespace
-
 void TrapController::mret(ArchState& state) {
     CSRValue mstatus = state.mstatus;
     const CSRValue mpp = (mstatus & enum_mask(MstatusBit::Mpp)) >> 11;
@@ -156,25 +151,10 @@ void TrapController::raise_exception(CPU& cpu, TrapCause cause, CSRValue tval) {
     ArchState& state = cpu.state();
     const Address trap_pc = state.pc;
 
-    if (cpu.trap_log_stream != nullptr && cpu.trap_log_stream->is_open()) {
-        std::println(
-            *cpu.trap_log_stream,
-            "TRAP mtime={} cause={:0{}x} ({}) pc={:0{}x} priv={} ra={:0{}x} sp={:0{}x} tp={:0{}x} "
-            "a0={:0{}x} "
-            "a1={:0{}x} mtvec={:0{}x} stvec={:0{}x} mepc={:0{}x} sepc={:0{}x} satp={:0{}x} "
-            "tval={:0{}x}",
-            static_cast<Counter>(cpu.clint_mmio.mtime.load()), static_cast<uint64_t>(cause),
-            kLogHexWidth, trap_cause_name(cause), static_cast<uint64_t>(trap_pc), kLogHexWidth,
-            static_cast<unsigned>(state.priv), static_cast<uint64_t>(state.regs.read(RegId::Ra)),
-            kLogHexWidth, static_cast<uint64_t>(state.regs.read(RegId::Sp)), kLogHexWidth,
-            static_cast<uint64_t>(state.regs.read(RegId::Tp)), kLogHexWidth,
-            static_cast<uint64_t>(state.regs.read(RegId::A0)), kLogHexWidth,
-            static_cast<uint64_t>(state.regs.read(RegId::A1)), kLogHexWidth,
-            static_cast<uint64_t>(state.mtvec), kLogHexWidth, static_cast<uint64_t>(state.stvec),
-            kLogHexWidth, static_cast<uint64_t>(state.mepc), kLogHexWidth,
-            static_cast<uint64_t>(state.sepc), kLogHexWidth, static_cast<uint64_t>(state.satp),
-            kLogHexWidth, static_cast<uint64_t>(tval), kLogHexWidth);
-        cpu.trap_log_stream->flush();
+    if (cpu.machine_ != nullptr &&
+        simrv::compiler::unlikely(cpu.machine_->trace().is_trap_log_enabled())) {
+        cpu.machine_->trace().log_trap(cpu.clint_mmio.mtime.load(std::memory_order_relaxed), cause,
+                                       trap_pc, state.priv, state, tval);
     }
 
     if (cpu.sbi.handle_ecall(cause)) {

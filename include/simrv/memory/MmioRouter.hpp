@@ -14,6 +14,10 @@
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/xlen/Types.hpp"
 
+namespace simrv::core {
+class Tracer;
+}
+
 namespace simrv::memory {
 
 /**
@@ -25,6 +29,9 @@ class MmioRouter {
    public:
     MmioRouter() = default;
     ~MmioRouter() = default;
+
+    void set_tracer(simrv::core::Tracer* tracer) noexcept { tracer_ = tracer; }
+    [[nodiscard]] auto tracer() const noexcept -> simrv::core::Tracer* { return tracer_; }
 
     /**
      * @brief Register a device node with the MMIO router.
@@ -100,6 +107,7 @@ class MmioRouter {
     uint64_t mmio_read_count_ = 0;
     uint64_t mmio_write_count_ = 0;
     uint64_t bus_error_count_ = 0;
+    simrv::core::Tracer* tracer_ = nullptr;
 
     void rebuild_entries();
 };

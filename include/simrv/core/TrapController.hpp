@@ -15,6 +15,11 @@ class CPU;
 struct ArchState;
 
 /**
+ * @brief Return human-readable name of a RISC-V trap cause (interrupt or exception).
+ */
+[[nodiscard]] auto trap_cause_name(TrapCause cause) -> std::string;
+
+/**
  * @class TrapController
  * @brief Handles trap entry/return sequencing, exception delegation, and privilege verification.
  */

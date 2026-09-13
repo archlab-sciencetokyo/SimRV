@@ -9,6 +9,7 @@
 #include <string_view>
 
 #include "simrv/core/Logger.hpp"
+#include "simrv/core/Tracer.hpp"
 
 namespace simrv::memory {
 
@@ -201,6 +202,10 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
         }
         if (resp.failed()) {
             ++bus_error_count_;
+        } else if (tracer_ != nullptr && tracer_->is_dlog_enabled()) {
+            const Word data = is_write ? static_cast<Word>(req.data) : static_cast<Word>(resp.data);
+            tracer_->log_mmio(device->name(), req.address.raw(),
+                              static_cast<uint32_t>(request_bytes), data, is_write);
         }
     } else {
         resp.denied = true;

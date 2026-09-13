@@ -4,17 +4,21 @@
  */
 #include "simrv/core/Tracer.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <format>
 #include <fstream>
+#include <map>
 #include <ostream>
 #include <print>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
@@ -24,6 +28,7 @@
 #include "simrv/device/pci/VirtioPciConsole.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/Decoder.hpp"
+#include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/xlen/Constants.hpp"
@@ -33,14 +38,43 @@ namespace simrv::core {
 
 using namespace simrv::isa;
 
+namespace {
+
 constexpr auto D_TRACE_HEX_WIDTH = static_cast<int>(kXLenHexDigits);
 constexpr Counter D_TRACEPC_INTERVAL = 1000;
 
+auto categorize_operation(isa::OperationId op) noexcept -> std::string_view {
+    const auto op_info = pipeline::operation::info(op);
+    if (op_info.control == pipeline::operation::ControlFlowKind::Branch) return "Branch";
+    if (op_info.control == pipeline::operation::ControlFlowKind::Jump) return "Jump";
+    if (op_info.memory == pipeline::operation::MemoryAccessKind::Load) return "Load";
+    if (op_info.memory == pipeline::operation::MemoryAccessKind::Store) return "Store";
+    if (op_info.memory == pipeline::operation::MemoryAccessKind::Atomic) return "Atomic";
+    if (op_info.execution_class == pipeline::operation::ExecutionClass::Multiply ||
+        op_info.execution_class == pipeline::operation::ExecutionClass::DivideOrRemainder)
+        return "Mul/Div";
+    if (op_info.execution_class == pipeline::operation::ExecutionClass::FpAlu ||
+        op_info.execution_class == pipeline::operation::ExecutionClass::FpDivideOrSqrt)
+        return "Float";
+    if (op_info.operands.rd == pipeline::operation::RegBank::Vector ||
+        op_info.operands.rs1 == pipeline::operation::RegBank::Vector ||
+        op_info.operands.rs2 == pipeline::operation::RegBank::Vector)
+        return "Vector";
+    if (op_info.side_effects != pipeline::operation::SideEffectFlags::None) return "System/CSR";
+    return "Integer/ALU";
+}
+
+}  // namespace
+
 Tracer::Tracer(Machine& machine) : machine_(machine) {}
+
+Tracer::~Tracer() { flush_all(); }
 
 void Tracer::init_trace(bool trace_enabled) {
     fp_trace.close();
     if (trace_enabled) {
+        std::error_code ec;
+        std::filesystem::create_directories("trace", ec);
         fp_trace.clear();
         fp_trace.open("trace/trace.txt");
     }
@@ -49,6 +83,11 @@ void Tracer::init_trace(bool trace_enabled) {
 void Tracer::init_trap_log(bool traplog_mode, const std::string& fn_traplog) {
     fp_traplog.close();
     if (traplog_mode) {
+        std::error_code ec;
+        const std::filesystem::path path(fn_traplog);
+        if (path.has_parent_path()) {
+            std::filesystem::create_directories(path.parent_path(), ec);
+        }
         fp_traplog.clear();
         fp_traplog.open(fn_traplog, std::ios::out | std::ios::trunc);
     }
@@ -57,25 +96,122 @@ void Tracer::init_trap_log(bool traplog_mode, const std::string& fn_traplog) {
 void Tracer::init_dlog(bool dlog_mode) {
     fp_dlog.close();
     if (dlog_mode) {
+        std::error_code ec;
+        std::filesystem::create_directories("trace", ec);
         fp_dlog.clear();
-        fp_dlog.open("init_virtio.txt");
+        fp_dlog.open("trace/dlog.txt", std::ios::out | std::ios::trunc);
     }
+}
+
+auto Tracer::is_trace_enabled() const noexcept -> bool { return fp_trace.is_open(); }
+auto Tracer::is_trap_log_enabled() const noexcept -> bool { return fp_traplog.is_open(); }
+auto Tracer::is_dlog_enabled() const noexcept -> bool { return fp_dlog.is_open(); }
+
+void Tracer::flush_all() {
+    std::lock_guard lock(mutex_);
+    if (fp_trace.is_open()) fp_trace.flush();
+    if (fp_dlog.is_open()) fp_dlog.flush();
+    if (fp_traplog.is_open()) fp_traplog.flush();
+    if (fp_tracepc_.is_open()) fp_tracepc_.flush();
+    if (fp_bpred_.is_open()) fp_bpred_.flush();
+}
+
+void Tracer::log_mmio(std::string_view dev_name, Address addr, uint32_t size, Word data,
+                      bool is_write) {
+    if (!fp_dlog.is_open()) return;
+    const auto mtime = machine_.primary_hart().clint_mmio.mtime.load(std::memory_order_relaxed);
+    std::lock_guard lock(mutex_);
+    std::println(fp_dlog, "[mtime={:12}] [{:<16}] {:5} addr=0x{:0{}x} size={:2} data=0x{:0{}x}",
+                 mtime, dev_name, is_write ? "WRITE" : "READ", addr, kXLenHexDigits, size, data,
+                 size * 2);
+}
+
+void Tracer::log_trap(Counter mtime, TrapCause cause, Address trap_pc, PrivilegeLevel priv,
+                      const ArchState& state, CSRValue tval) {
+    if (!fp_traplog.is_open()) return;
+    constexpr int kLogHexWidth = static_cast<int>(kXLenHexDigits);
+    std::lock_guard lock(mutex_);
+    std::println(
+        fp_traplog,
+        "TRAP mtime={} cause={:0{}x} ({}) pc={:0{}x} priv={} ra={:0{}x} sp={:0{}x} tp={:0{}x} "
+        "a0={:0{}x} a1={:0{}x} mtvec={:0{}x} stvec={:0{}x} mepc={:0{}x} sepc={:0{}x} satp={:0{}x} "
+        "tval={:0{}x}",
+        mtime, static_cast<uint64_t>(cause), kLogHexWidth, trap_cause_name(cause),
+        static_cast<uint64_t>(trap_pc), kLogHexWidth, static_cast<unsigned>(priv),
+        static_cast<uint64_t>(state.regs.read(RegId::Ra)), kLogHexWidth,
+        static_cast<uint64_t>(state.regs.read(RegId::Sp)), kLogHexWidth,
+        static_cast<uint64_t>(state.regs.read(RegId::Tp)), kLogHexWidth,
+        static_cast<uint64_t>(state.regs.read(RegId::A0)), kLogHexWidth,
+        static_cast<uint64_t>(state.regs.read(RegId::A1)), kLogHexWidth,
+        static_cast<uint64_t>(state.mtvec), kLogHexWidth, static_cast<uint64_t>(state.stvec),
+        kLogHexWidth, static_cast<uint64_t>(state.mepc), kLogHexWidth,
+        static_cast<uint64_t>(state.sepc), kLogHexWidth, static_cast<uint64_t>(state.satp),
+        kLogHexWidth, static_cast<uint64_t>(tval), kLogHexWidth);
+}
+
+void Tracer::log_sbi(Counter mtime, unsigned cause, Word ext_id, Word func_id, Word a0, Word a1,
+                     Address pc) {
+    if (!fp_traplog.is_open()) return;
+    constexpr int kLogHexWidth = static_cast<int>(kXLenHexDigits);
+    std::lock_guard lock(mutex_);
+    std::println(fp_traplog,
+                 "__ SBI ecall mtime={} cause={} ext={:0{}x} fid={:0{}x} a0={:0{}x} a1={:0{}x} "
+                 "pc={:0{}x}",
+                 mtime, cause, static_cast<uint64_t>(ext_id), kLogHexWidth,
+                 static_cast<uint64_t>(func_id), kLogHexWidth, static_cast<uint64_t>(a0),
+                 kLogHexWidth, static_cast<uint64_t>(a1), kLogHexWidth, static_cast<uint64_t>(pc),
+                 kLogHexWidth);
 }
 
 void Tracer::dump_init_artifacts() {
     auto* cpu = &machine_.primary_hart();
     const auto ram = machine_.ram_view();
+    std::error_code ec;
+    std::filesystem::create_directories("trace", ec);
 
     {
         std::ofstream out("trace/init_mem.txt");
+        const auto dram_base = machine_.memory_geometry().dram_base;
         const auto dram_size = static_cast<uint64_t>(machine_.memory_geometry().dram_size);
-        for (Address i = 0; i < dram_size; ++i) {
-            out << std::hex
-                << static_cast<unsigned>(std::to_integer<uint8_t>(
-                       *ram.unchecked_ptr(machine_.memory_geometry().dram_base + i)))
-                << '\n';
+        constexpr uint64_t kBlockSize = 16;
+        bool skipping = false;
+
+        for (uint64_t offset = 0; offset < dram_size; offset += kBlockSize) {
+            const uint64_t current_len = std::min<uint64_t>(kBlockSize, dram_size - offset);
+            bool all_zero = true;
+            for (uint64_t b = 0; b < current_len; ++b) {
+                if (std::to_integer<uint8_t>(*ram.unchecked_ptr(dram_base + offset + b)) != 0) {
+                    all_zero = false;
+                    break;
+                }
+            }
+            if (all_zero) {
+                if (!skipping) {
+                    std::println(out, "*");
+                    skipping = true;
+                }
+                continue;
+            }
+            skipping = false;
+
+            std::print(out, "{:08x}: ", offset);
+            for (uint64_t b = 0; b < current_len; ++b) {
+                const uint8_t val =
+                    std::to_integer<uint8_t>(*ram.unchecked_ptr(dram_base + offset + b));
+                std::print(out, "{:02x}{}", val, (b == 7 ? "  " : " "));
+            }
+            for (uint64_t b = current_len; b < kBlockSize; ++b) {
+                std::print(out, "   {}", (b == 7 ? " " : ""));
+            }
+            std::print(out, " |");
+            for (uint64_t b = 0; b < current_len; ++b) {
+                const char ch = static_cast<char>(
+                    std::to_integer<uint8_t>(*ram.unchecked_ptr(dram_base + offset + b)));
+                out.put((ch >= 32 && ch <= 126) ? ch : '.');
+            }
+            std::println(out, "|");
         }
-        simrv::log::info("file init_mem.txt was generated after {} cycle",
+        simrv::log::info("file trace/init_mem.txt was generated after {} cycle(s)",
                          static_cast<Counter>(cpu->clint_mmio.mtime.load()));
     }
 
@@ -159,26 +295,86 @@ void Tracer::dump_init_artifacts() {
     write_32("platform.virtio_disk.isr      ", platform.disk_isr);
     write_64("platform.virtio_disk.capacity ", platform.disk_capacity_sectors);
 
-    simrv::log::info("file init_reg.txt was generated after {} cycle",
+    simrv::log::info("file trace/init_reg.txt was generated after {} cycle(s)",
                      static_cast<Counter>(cpu->clint_mmio.mtime.load()));
 }
 
 void Tracer::write_instruction_mix_report() {
+    std::error_code ec;
+    std::filesystem::create_directories("trace", ec);
     std::ofstream out("trace/instmix.txt");
     if (!out.is_open()) {
-        simrv::log::error("cannot open instmix.txt");
+        simrv::log::error("cannot open trace/instmix.txt");
         return;
     }
-    std::println(out, "INSTRUCTION MIX");
+
+    struct Entry {
+        std::string_view name;
+        std::string_view category;
+        uint64_t count;
+    };
+
+    std::vector<Entry> entries;
+    std::map<std::string_view, uint64_t> category_totals;
     uint64_t total = 0;
+
     for (auto const [i, count] : std::views::enumerate(machine_.primary_hart().e_instmix)) {
-        std::println(out, "{} : {:10}",
-                     simrv::pipeline::operation_name(static_cast<simrv::isa::OperationId>(i)),
-                     count);
+        if (count == 0) continue;
+        const auto op = static_cast<simrv::isa::OperationId>(i);
+        const auto name = simrv::pipeline::operation_name(op);
+        const auto category = categorize_operation(op);
+        entries.push_back({name, category, count});
+        category_totals[category] += count;
         total += count;
     }
-    std::println(out, "TOTAL      : {:10}", total);
-    simrv::log::info("file instmix.txt was generated after {} cycle",
+
+    std::ranges::sort(entries, [](const auto& a, const auto& b) {
+        if (a.count != b.count) return a.count > b.count;
+        return a.name < b.name;
+    });
+
+    std::println(
+        out, "================================================================================");
+    std::println(out, "                         INSTRUCTION MIX REPORT");
+    std::println(
+        out, "================================================================================");
+    std::println(out,
+                 " Rank  Instruction             Category              Count      Share  Cumul");
+    std::println(
+        out, "--------------------------------------------------------------------------------");
+
+    uint64_t cumulative = 0;
+    for (size_t rank = 0; rank < entries.size(); ++rank) {
+        const auto& e = entries[rank];
+        cumulative += e.count;
+        const double share =
+            total == 0 ? 0.0 : (static_cast<double>(e.count) * 100.0) / static_cast<double>(total);
+        const double cumul_pct =
+            total == 0 ? 0.0
+                       : (static_cast<double>(cumulative) * 100.0) / static_cast<double>(total);
+        std::println(out, "{:>5}  {:<22}  {:<16}  {:>12}  {:>5.2f}%  {:>5.2f}%", rank + 1, e.name,
+                     e.category, simrv::util::format_with_commas(e.count), share, cumul_pct);
+    }
+
+    std::println(
+        out, "--------------------------------------------------------------------------------");
+    std::println(out, " Total Instructions Retired: {:>16}",
+                 simrv::util::format_with_commas(total));
+    std::println(
+        out, "================================================================================\n");
+
+    std::println(out, "--- Category Summary ---");
+    std::vector<std::pair<std::string_view, uint64_t>> cat_sorted(category_totals.begin(),
+                                                                  category_totals.end());
+    std::ranges::sort(cat_sorted, [](const auto& a, const auto& b) { return a.second > b.second; });
+    for (const auto& [cat, cat_cnt] : cat_sorted) {
+        const double cat_share =
+            total == 0 ? 0.0 : (static_cast<double>(cat_cnt) * 100.0) / static_cast<double>(total);
+        std::println(out, "  {:<18} : {:>12}  ({:>5.2f}%)", cat,
+                     simrv::util::format_with_commas(cat_cnt), cat_share);
+    }
+
+    simrv::log::info("file trace/instmix.txt was generated after {} cycle(s)",
                      static_cast<Counter>(machine_.primary_hart().clint_mmio.mtime.load()));
 }
 
@@ -288,27 +484,33 @@ void Tracer::print_summary() {
     if (machine_.instruction_mix_enabled()) {
         write_instruction_mix_report();
     }
+    flush_all();
 }
 
 void Tracer::emit_periodic_pc_trace(Counter mtime, Register cpc) {
     if ((mtime % D_TRACEPC_INTERVAL) == 0) {
+        std::lock_guard lock(mutex_);
         if (!tracepc_opened_) {
             tracepc_opened_ = true;
+            std::error_code ec;
+            std::filesystem::create_directories("trace", ec);
             fp_tracepc_.open("trace/tracepc.txt");
-            simrv::log::info("generate trace file: tracepc.txt\n");
+            simrv::log::info("generate trace file: trace/tracepc.txt");
         }
         std::println(fp_tracepc_, "{:08} {:0{}x}", static_cast<int>(mtime / D_TRACEPC_INTERVAL),
                      cpc, D_TRACE_HEX_WIDTH);
-        fp_tracepc_.flush();
     }
 }
 
 void Tracer::emit_branch_prediction_trace(Counter mtime, Register cpc, Register jmp_pc,
                                           Opcode r_opcode, bool r_tkn) {
+    std::lock_guard lock(mutex_);
     if (!bpred_opened_) {
         bpred_opened_ = true;
+        std::error_code ec;
+        std::filesystem::create_directories("trace", ec);
         fp_bpred_.open("trace/bpred.txt");
-        simrv::log::info("generate trace file: bpred.txt\n");
+        simrv::log::info("generate trace file: trace/bpred.txt");
     }
 
     const auto opcode = r_opcode;
@@ -321,13 +523,13 @@ void Tracer::emit_branch_prediction_trace(Counter mtime, Register cpc, Register 
     std::println(fp_bpred_, "{:08} {:0{}x} {:0{}x} {} {} {} {}", static_cast<int>(mtime), cpc,
                  D_TRACE_HEX_WIDTH, targ, D_TRACE_HEX_WIDTH, ir_jb, static_cast<int>(r_tkn),
                  ir_jump, ir_branch);
-    fp_bpred_.flush();
 }
 
 void Tracer::write_trace_snapshot() {
     if (!fp_trace.is_open()) {
         return;
     }
+    std::lock_guard lock(mutex_);
     const auto& cpu = machine_.primary_hart();
     const auto& st = cpu.state();
 

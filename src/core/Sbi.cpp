@@ -13,6 +13,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/Tracer.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -489,15 +490,12 @@ auto Sbi::handle_ecall(TrapCause cause) -> bool {
     const Word ext_id = cpu_.state().regs.read(a7);
     const Word func_id = cpu_.state().regs.read(a6);
 
-    if (cpu_.trap_log_stream != nullptr && cpu_.trap_log_stream->is_open()) {
-        *cpu_.trap_log_stream << std::format(
-            "__ SBI ecall cause={} ext={:0{}x} fid={:0{}x} a0={:0{}x} a1={:0{}x} pc={:0{}x}\n",
-            static_cast<unsigned>(cause), static_cast<uint64_t>(ext_id), kLogHexWidth,
-            static_cast<uint64_t>(func_id), kLogHexWidth,
-            static_cast<uint64_t>(cpu_.state().regs.read(RegId::A0)), kLogHexWidth,
-            static_cast<uint64_t>(cpu_.state().regs.read(RegId::A1)), kLogHexWidth,
-            static_cast<uint64_t>(cpu_.state().pc), kLogHexWidth);
-        cpu_.trap_log_stream->flush();
+    if (cpu_.machine_ != nullptr &&
+        simrv::compiler::unlikely(cpu_.machine_->trace().is_trap_log_enabled())) {
+        cpu_.machine_->trace().log_sbi(cpu_.clint_mmio.mtime.load(std::memory_order_relaxed),
+                                       static_cast<unsigned>(cause), ext_id, func_id,
+                                       cpu_.state().regs.read(RegId::A0),
+                                       cpu_.state().regs.read(RegId::A1), cpu_.state().pc);
     }
 
     switch (static_cast<ExtId>(ext_id)) {
