@@ -40,7 +40,8 @@ class ReleaseToolTests(unittest.TestCase):
 
     def test_benchmark_modes_baremetal_command(self):
         args = types.SimpleNamespace(simrv="simrv", harts=4, os=False, disk=None, dtb=None,
-                                     image="guest.elf", limit=1234, tohost="0x80001000")
+                                     image="guest.elf", limit=1234, tohost="0x80001000",
+                                     smp_multithreaded=False)
         command = benchmark_modes.command(args, "cycle-accurate", "5stage", False)
         self.assertEqual(command.count("--baremetal"), 1)
         self.assertNotIn("--os", command)
@@ -51,7 +52,7 @@ class ReleaseToolTests(unittest.TestCase):
     def test_benchmark_modes_os_command(self):
         args = types.SimpleNamespace(simrv="simrv", harts=1, os=True, disk="root.img",
                                      dtb="virt.dtb", image="firmware.bin", limit=5678,
-                                     tohost=None)
+                                     tohost=None, smp_multithreaded=False)
         command = benchmark_modes.command(args, "fast", None, True)
         self.assertEqual(command.count("--os"), 1)
         self.assertNotIn("--baremetal", command)
