@@ -22,11 +22,11 @@ auto ICache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::T
     resp.report = simrv::memory::TlReport::NtoN;
 
     for (uint32_t w = 0; w < associativity(); ++w) {
-        auto& line = sets_[set_idx][w];
-        if (line.valid && line.tag == tag) {
-            resp.report = simrv::memory::report_for(line.state, req.cap);
-            line.state = simrv::memory::mesi_for(req.cap);
-            line.valid = line.state != simrv::memory::MesiState::Invalid;
+        auto& cache_line = line(set_idx, w);
+        if (cache_line.valid && cache_line.tag == tag) {
+            resp.report = simrv::memory::report_for(cache_line.state, req.cap);
+            cache_line.state = simrv::memory::mesi_for(req.cap);
+            cache_line.valid = cache_line.state != simrv::memory::MesiState::Invalid;
             return true;
         }
     }

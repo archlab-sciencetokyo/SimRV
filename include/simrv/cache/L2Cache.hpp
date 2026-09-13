@@ -26,9 +26,9 @@ class L2Cache : public BaseCache<2048, 32, 8> {
         const auto way_opt = find_way(set_idx, tag);
         if (way_opt.has_value()) {
             const uint32_t w = *way_opt;
-            auto& line = sets_[set_idx][w];
-            std::memcpy(out_data.data(), line.data.data(), kLineBytes);
-            line.last_used = ++access_tick_;
+            auto& cache_line = line(set_idx, w);
+            std::memcpy(out_data.data(), cache_line.data.data(), kLineBytes);
+            cache_line.last_used = ++access_tick_;
             ++hits_;
             last_access_was_hit_ = true;
             last_hit_way_ = w;

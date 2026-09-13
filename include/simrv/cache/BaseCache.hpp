@@ -9,6 +9,7 @@
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <mdspan>
 #include <optional>
 #include <utility>
 
@@ -50,6 +51,23 @@ class BaseCache {
         std::array<Byte, kLineBytes> data{};
     };
 
+    using CacheView = std::mdspan<CacheLine, std::dextents<uint32_t, 2>>;
+    using ConstCacheView = std::mdspan<const CacheLine, std::dextents<uint32_t, 2>>;
+
+    [[nodiscard]] constexpr auto cache_view() noexcept -> CacheView {
+        return CacheView(lines_.data(), active_sets_, active_ways_);
+    }
+    [[nodiscard]] constexpr auto cache_view() const noexcept -> ConstCacheView {
+        return ConstCacheView(lines_.data(), active_sets_, active_ways_);
+    }
+    [[nodiscard]] constexpr auto line(uint32_t set_idx, uint32_t way) noexcept -> CacheLine& {
+        return cache_view()[set_idx, way];
+    }
+    [[nodiscard]] constexpr auto line(uint32_t set_idx, uint32_t way) const noexcept
+        -> const CacheLine& {
+        return cache_view()[set_idx, way];
+    }
+
     BaseCache() = default;
 
     /// Configure the active BRAM-visible portion of the fixed maximum backing store.  Keeping
@@ -82,15 +100,15 @@ class BaseCache {
         ++access_tick_;
         const uint32_t set_idx = get_set_index(base_addr);
         const Address tag = get_tag(base_addr);
-        auto& set = sets_[set_idx];
-        CacheLine* victim = &set[0];
+        auto view = cache_view();
+        CacheLine* victim = &view[set_idx, 0];
         uint32_t victim_way = 0;
         bool found_exact_tag = false;
 
         for (uint32_t w = 0; w < active_ways_; ++w) {
-            auto& line = set[w];
-            if (line.valid && line.tag == tag) {
-                victim = &line;
+            auto& l = view[set_idx, w];
+            if (l.valid && l.tag == tag) {
+                victim = &l;
                 victim_way = w;
                 found_exact_tag = true;
                 break;
@@ -99,14 +117,14 @@ class BaseCache {
 
         if (!found_exact_tag) {
             for (uint32_t w = 0; w < active_ways_; ++w) {
-                auto& line = set[w];
-                if (!line.valid) {
-                    victim = &line;
+                auto& l = view[set_idx, w];
+                if (!l.valid) {
+                    victim = &l;
                     victim_way = w;
                     break;
                 }
-                if (line.last_used < victim->last_used) {
-                    victim = &line;
+                if (l.last_used < victim->last_used) {
+                    victim = &l;
                     victim_way = w;
                 }
             }
@@ -136,9 +154,7 @@ class BaseCache {
     }
 
     void flush(bool clear_stats = false) {
-        for (auto& set : sets_) {
-            std::ranges::fill(set, CacheLine{});
-        }
+        std::ranges::fill(lines_, CacheLine{});
         last_replaced_set_ = 0xFFFFFFFF;
         last_replaced_way_ = 0xFFFFFFFF;
         last_evicted_tag_ = ~Address{0};
@@ -172,39 +188,39 @@ class BaseCache {
 
     [[nodiscard]] auto is_line_valid(uint32_t set_idx, uint32_t way_idx) const -> bool {
         if (set_idx < active_sets_ && way_idx < active_ways_) {
-            return sets_[set_idx][way_idx].valid;
+            return line(set_idx, way_idx).valid;
         }
         return false;
     }
     [[nodiscard]] auto get_line_tag(uint32_t set_idx, uint32_t way_idx) const -> Address {
         if (set_idx < active_sets_ && way_idx < active_ways_) {
-            return sets_[set_idx][way_idx].tag;
+            return line(set_idx, way_idx).tag;
         }
         return ~Address{0};
     }
     [[nodiscard]] auto get_line_state(uint32_t set_idx, uint32_t way_idx) const
         -> simrv::memory::MesiState {
         if (set_idx < active_sets_ && way_idx < active_ways_) {
-            return sets_[set_idx][way_idx].state;
+            return line(set_idx, way_idx).state;
         }
         return simrv::memory::MesiState::Invalid;
     }
     [[nodiscard]] auto is_line_dirty(uint32_t set_idx, uint32_t way_idx) const -> bool {
         if (set_idx < active_sets_ && way_idx < active_ways_) {
-            return sets_[set_idx][way_idx].state == simrv::memory::MesiState::Modified;
+            return line(set_idx, way_idx).state == simrv::memory::MesiState::Modified;
         }
         return false;
     }
     [[nodiscard]] auto get_line_last_used(uint32_t set_idx, uint32_t way_idx) const -> uint64_t {
         if (set_idx < active_sets_ && way_idx < active_ways_) {
-            return sets_[set_idx][way_idx].last_used;
+            return line(set_idx, way_idx).last_used;
         }
         return 0;
     }
     [[nodiscard]] auto get_line_data(uint32_t set_idx, uint32_t way_idx) const
         -> const std::array<Byte, kLineBytes>* {
         if (set_idx < active_sets_ && way_idx < active_ways_) {
-            return &sets_[set_idx][way_idx].data;
+            return &line(set_idx, way_idx).data;
         }
         return nullptr;
     }
@@ -212,10 +228,10 @@ class BaseCache {
     [[nodiscard]] constexpr auto find_way(uint32_t set_idx, Address tag) const noexcept
         -> std::optional<uint32_t> {
         if (set_idx >= active_sets_) return std::nullopt;
-        const auto& set = sets_[set_idx];
+        auto view = cache_view();
         for (uint32_t w = 0; w < active_ways_; ++w) {
-            if (set[w].valid && set[w].tag == tag &&
-                set[w].state != simrv::memory::MesiState::Invalid) {
+            const auto& l = view[set_idx, w];
+            if (l.valid && l.tag == tag && l.state != simrv::memory::MesiState::Invalid) {
                 return w;
             }
         }
@@ -227,7 +243,7 @@ class BaseCache {
         const Address tag = get_tag(base_addr);
         const auto way_opt = find_way(set_idx, tag);
         if (way_opt.has_value()) {
-            return sets_[set_idx][*way_opt].state;
+            return line(set_idx, *way_opt).state;
         }
         return simrv::memory::MesiState::Invalid;
     }
@@ -237,9 +253,9 @@ class BaseCache {
         const Address tag = get_tag(base_addr);
         const auto way_opt = find_way(set_idx, tag);
         if (way_opt.has_value()) {
-            auto& line = sets_[set_idx][*way_opt];
-            line.state = new_state;
-            line.last_used = ++access_tick_;
+            auto& l = line(set_idx, *way_opt);
+            l.state = new_state;
+            l.last_used = ++access_tick_;
             return true;
         }
         return false;
@@ -249,15 +265,16 @@ class BaseCache {
                     std::array<Byte, kLineBytes>* out_dirty_data = nullptr) -> bool {
         const uint32_t set_idx = get_set_index(base_addr);
         const Address tag = get_tag(base_addr);
+        auto view = cache_view();
         for (uint32_t w = 0; w < active_ways_; ++w) {
-            auto& line = sets_[set_idx][w];
-            if (line.valid && line.tag == tag) {
-                if (line.state == simrv::memory::MesiState::Modified && out_dirty_data != nullptr) {
-                    std::memcpy(out_dirty_data->data(), line.data.data(), kLineBytes);
+            auto& l = view[set_idx, w];
+            if (l.valid && l.tag == tag) {
+                if (l.state == simrv::memory::MesiState::Modified && out_dirty_data != nullptr) {
+                    std::memcpy(out_dirty_data->data(), l.data.data(), kLineBytes);
                 }
-                line.state = target_state;
+                l.state = target_state;
                 if (target_state == simrv::memory::MesiState::Invalid) {
-                    line.valid = false;
+                    l.valid = false;
                 }
                 return true;
             }
@@ -270,7 +287,7 @@ class BaseCache {
     [[nodiscard]] auto last_hit_way() const -> uint32_t { return last_hit_way_; }
 
    protected:
-    std::array<std::array<CacheLine, kWays>, kNumSets> sets_{};
+    alignas(64) std::array<CacheLine, kNumLines> lines_{};
     uint64_t access_tick_ = 0;
     uint64_t hits_ = 0;
     uint64_t misses_ = 0;

@@ -20,21 +20,21 @@ auto DCache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::T
     const Address tag = get_tag(line_base);
 
     for (uint32_t w = 0; w < associativity(); ++w) {
-        auto& line = sets_[set_idx][w];
-        if (line.valid && line.tag == tag) {
-            const bool was_dirty = line.state == simrv::memory::MesiState::Modified;
+        auto& cache_line = line(set_idx, w);
+        if (cache_line.valid && cache_line.tag == tag) {
+            const bool was_dirty = cache_line.state == simrv::memory::MesiState::Modified;
             if (was_dirty) {
-                std::memcpy(dirty_data.data(), line.data.data(), kLineBytes);
+                std::memcpy(dirty_data.data(), cache_line.data.data(), kLineBytes);
                 resp.opcode = simrv::memory::TlOpcodeC::ProbeAckData;
             } else {
                 resp.opcode = simrv::memory::TlOpcodeC::ProbeAck;
             }
             resp.address = line_base;
-            resp.report = simrv::memory::report_for(line.state, req.cap);
+            resp.report = simrv::memory::report_for(cache_line.state, req.cap);
 
-            line.state = target_state;
+            cache_line.state = target_state;
             if (target_state == simrv::memory::MesiState::Invalid) {
-                line.valid = false;
+                cache_line.valid = false;
             }
             return true;
         }
