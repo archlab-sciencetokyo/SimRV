@@ -43,6 +43,18 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             is_tui = true;
         } else if (arg == "-h" || arg == "--help" || arg == "--version" || arg == "--license") {
             skip_banner = true;
+        } else if (arg == "-q" || arg == "--quiet") {
+            skip_banner = true;
+            simrv::log::set_level(simrv::log::Level::Warn);
+        } else if (arg == "-v" || arg == "--verbose") {
+            simrv::log::set_level(simrv::log::Level::Debug);
+        } else if (arg == "--log-level" && i + 1 < argc) {
+            if (auto lvl = simrv::log::parse_level(argv[i + 1])) {
+                simrv::log::set_level(*lvl);
+                if (*lvl > simrv::log::Level::Info) {
+                    skip_banner = true;
+                }
+            }
         }
     }
 
@@ -89,6 +101,10 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                                               !parsed->options.tuimode);
             case CliAction::Run:
                 break;
+        }
+
+        if (parsed->options.log_level.has_value()) {
+            simrv::log::set_level(*parsed->options.log_level);
         }
 
         if (!parsed->options.fn_log.empty() && !simrv::log::set_log_file(parsed->options.fn_log)) {

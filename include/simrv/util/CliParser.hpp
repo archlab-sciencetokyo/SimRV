@@ -2,12 +2,14 @@
 
 #include <expected>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Boot.hpp"
+#include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
 
@@ -48,6 +50,8 @@ struct RuntimeOptions {
     bool explicit_tui_mode = false;
     bool explicit_cli_mode = false;
     bool verbose = false;
+    bool quiet = false;
+    std::optional<simrv::log::Level> log_level;
     bool dlog_mode = false;
     bool traplog_mode = false;
     bool use_disk = false;
