@@ -84,7 +84,11 @@ class PtyBridge {
     auto read_from_master(uint8_t* buf, std::size_t max_len) -> ssize_t {
         if (!master_fd_ || max_len == 0) return 0;
         ssize_t n = ::read(master_fd_.get(), buf, max_len);
+#if defined(EWOULDBLOCK) && (EWOULDBLOCK != EAGAIN)
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return 0;
+#else
+        if (n < 0 && errno == EAGAIN) return 0;
+#endif
         return n;
     }
 
