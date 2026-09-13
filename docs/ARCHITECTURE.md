@@ -41,6 +41,7 @@ at the retirement boundary.
 
 In `--mode fast` (Instruction-Accurate), single-hart OS kernels and baremetal applications run via the
 `run_fast_os_batch` / `run_fast_baremetal_batch` acceleration engines:
+
 - **Batched Retirement & Telemetry**: Eliminates per-instruction atomic operations on machine-wide retirement
   counters, synchronizing only at chunk, decode miss, or batch boundaries.
 - **CLINT Chunking**: Architectural timebase (`mcycle`, `mtime`, and timer interrupt evaluations) updates in
@@ -56,6 +57,7 @@ In `--mode fast` (Instruction-Accurate), single-hart OS kernels and baremetal ap
 ## Multi-Hart SMP & TileLink-C Coherence
 
 Multi-hart configurations (`--smp <N>`, `N` from 1 through 16) simulate symmetric multiprocessing:
+
 1. **Directory Coherence**: L1 caches participate in directory-based cache coherence implementing the MESI (Modified, Exclusive, Shared, Invalid) protocol over TileLink-C channels.
 2. **Interrupt Routing**: Core local interrupts (software/timer) are managed via CLINT or ACLINT (MTIME/MSWI). External platform interrupts are handled by PLIC or AIA (APLIC wire interrupts and IMSIC message-signaled interrupts).
 3. **Synchronization**: Atomic operations (LR/SC and AMOs) use a global reservation table and coherent bus transactions across harts.
@@ -91,7 +93,7 @@ the target paused, and relistens.
 
 The native `gdb-stub` suite is labelled `gate;regress;debug;thread` and uses ephemeral ports with
 command/reply synchronization. Compare CLI throughput to a connected, running debugger with
-`python3 scripts/benchmark_gdb.py --simrv build/rv64-release/SimRV --runs 5 --json build/gdb-benchmark.json`.
+`python3 scripts/benchmark.py gdb --simrv build/rv64-release/SimRV --runs 5 --json build/gdb-benchmark.json`.
 It interleaves five runs of each mode on one CPU and checks the median throughput against a 5%
 regression limit. `--trace-prefix build/gdb-syscalls` records a separate short syscall trace for
 confirming that socket activity stays on the server thread.
@@ -147,7 +149,7 @@ Useful entry points are `src/Main.cpp`, `src/core/Machine.cpp`,
 Use the `rv32-release` or `rv64-release` CMake preset. The focused native gate
 is `ctest --test-dir build/rv64-release --output-on-failure -L gate`; some gate
 tests require external images or tools. Record CA performance with
-`scripts/benchmark-ca.sh`. Compare reports only on equivalent hosts, compilers,
+`scripts/benchmark.sh --ca`. Compare reports only on equivalent hosts, compilers,
 guest binaries, and instruction limits. On Linux laptops, set
 `SIMRV_CA_BENCH_AFFINITY=<cpu>` to pin the benchmark and reduce scheduling and
 thermal-frequency noise; allow a cooldown between long comparison runs.

@@ -24,8 +24,8 @@ def load(name: str, path: pathlib.Path):
 
 
 release_check = load("release_check", ROOT / "scripts/release_check.py")
-aggregate = load("aggregate_experiments", ROOT / "scripts/aggregate_experiments.py")
 benchmark = load("benchmark", ROOT / "scripts/benchmark.py")
+aggregate = benchmark
 benchmark_modes = load("benchmark_modes", ROOT / "scripts/benchmark_modes.py")
 
 
@@ -128,7 +128,7 @@ class ReleaseToolTests(unittest.TestCase):
             baseline, candidate = root / "base.json", root / "candidate.json"
             baseline.write_text(json.dumps(report(100.0)))
             candidate.write_text(json.dumps(report(50.0)))
-            result = subprocess.run([sys.executable, str(ROOT / "scripts/compare_benchmarks.py"),
+            result = subprocess.run([sys.executable, str(ROOT / "scripts/benchmark.py"), "compare",
                                      str(baseline), str(candidate)], check=False)
             self.assertEqual(result.returncode, 0)
 

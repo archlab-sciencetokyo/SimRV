@@ -7,9 +7,11 @@
 import argparse
 import csv
 import hashlib
+import html
 import json
 import math
 import os
+import pathlib
 import platform
 import re
 import statistics
@@ -980,7 +982,186 @@ def run_benchmark_single(
     }
 
 
+def load_compare_results(path: pathlib.Path | str) -> dict[str, float]:
+    p = pathlib.Path(path)
+    report = json.loads(p.read_text(encoding="utf-8"))
+    results = report.get("suite_results", [report])
+    speeds = {}
+    for result in results:
+        speed = result["simrv"]["stats"]["wall_speed"]["median"]
+        if speed > 0:
+            speeds[f"rv{result['xlen']}:{result['test_name']}"] = speed
+    return speeds
+
+load_results = load_compare_results
+
+
+def compare_main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="Compare SimRV benchmark evidence")
+    parser.add_argument("baseline", type=pathlib.Path)
+    parser.add_argument("candidate", type=pathlib.Path)
+    parser.add_argument("--minimum-geomean", type=float, default=5.0)
+    parser.add_argument("--maximum-regression", type=float, default=3.0)
+    parser.add_argument("--enforce", action="store_true", help="Return nonzero when supplied thresholds are exceeded")
+    args = parser.parse_args(argv)
+
+    baseline = load_compare_results(args.baseline)
+    candidate = load_compare_results(args.candidate)
+    names = sorted(baseline.keys() & candidate.keys())
+    if not names or set(baseline) != set(candidate):
+        missing = sorted(set(baseline) ^ set(candidate))
+        print(f"benchmark sets differ; unmatched: {missing}", file=sys.stderr)
+        return 2
+
+    ratios = []
+    failed = False
+    for name in names:
+        change = (candidate[name] / baseline[name] - 1.0) * 100.0
+        ratios.append(candidate[name] / baseline[name])
+        print(f"{name}: {change:+.2f}%")
+        if change < -args.maximum_regression:
+            print(f"  regression exceeds {args.maximum_regression:.2f}%", file=sys.stderr)
+            failed = True
+
+    geomean = (math.exp(sum(math.log(value) for value in ratios) / len(ratios)) - 1.0) * 100.0
+    print(f"geometric-mean change: {geomean:+.2f}%")
+    if geomean < args.minimum_geomean:
+        print(f"geometric mean is below {args.minimum_geomean:.2f}%", file=sys.stderr)
+        failed = True
+    if failed and not args.enforce:
+        print("threshold observations are informational (evidence-only policy)")
+    return 1 if failed and args.enforce else 0
+
+
+def load_aggregate_rows(paths: list[pathlib.Path | str]) -> list[dict]:
+    rows = []
+    for p in sorted(paths):
+        path = pathlib.Path(p)
+        report = json.loads(path.read_text(encoding="utf-8"))
+        for result in report.get("suite_results", [report]):
+            speeds = result["simrv"].get("runs_wall_speed_kips", [])
+            rows.append({"source": path.name, "xlen": result["xlen"], "workload": result["test_name"],
+                         "samples": len(speeds), "median_kips": statistics.median(speeds) if speeds else 0.0})
+    return sorted(rows, key=lambda row: (row["xlen"], row["workload"], row["source"]))
+
+load_rows = load_aggregate_rows
+
+
+def aggregate_main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="Deterministically aggregate benchmark JSON")
+    parser.add_argument("inputs", nargs="+", type=pathlib.Path)
+    parser.add_argument("--json", type=pathlib.Path, required=True)
+    parser.add_argument("--table", type=pathlib.Path, required=True)
+    parser.add_argument("--plot", type=pathlib.Path, required=True)
+    args = parser.parse_args(argv)
+
+    rows = load_aggregate_rows(args.inputs)
+    aggregate = {"schema_version": 1, "statistic": "median", "unit": "KIPS", "results": rows}
+    for path in (args.json, args.table, args.plot):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    args.json.write_text(json.dumps(aggregate, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    lines = ["| XLEN | Workload | Samples | Median KIPS |", "| ---: | --- | ---: | ---: |"]
+    lines.extend(f"| {r['xlen']} | {r['workload']} | {r['samples']} | {r['median_kips']:.3f} |" for r in rows)
+    args.table.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    width, row_height = 760, 26
+    maximum = max((r["median_kips"] for r in rows), default=1.0)
+    svg = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{50 + row_height * len(rows)}" viewBox="0 0 {width} {50 + row_height * len(rows)}">',
+           '<style>text{font:12px sans-serif}.title{font:bold 15px sans-serif}.bar{fill:#4c78a8}</style>',
+           '<text class="title" x="10" y="20">SimRV median throughput (KIPS)</text>']
+    for index, row in enumerate(rows):
+        y = 42 + index * row_height
+        label = html.escape(f"RV{row['xlen']} {row['workload']}")
+        bar = 450 * row["median_kips"] / maximum
+        svg.extend([f'<text x="10" y="{y + 12}">{label}</text>',
+                    f'<rect class="bar" x="210" y="{y}" width="{bar:.2f}" height="16"/>',
+                    f'<text x="{220 + bar:.2f}" y="{y + 12}">{row["median_kips"]:.3f}</text>'])
+    svg.append("</svg>")
+    args.plot.write_text("\n".join(svg) + "\n", encoding="utf-8")
+    return 0
+
+
+def gdb_main(argv: list[str]) -> int:
+    import selectors
+    import socket
+    import tempfile
+
+    def run_gdb_iter(binary, guest, instructions, debugger, trace=None):
+        command = ["stdbuf", "-oL", binary, "--cli", "--mode", "fast", "-m", str(guest),
+                   "--ram-size", "33554432", "--net", "none", "-e", str(instructions)]
+        if debugger:
+            command += ["--gdb", "--gdb-port", "0"]
+        if trace:
+            command = ["strace", "-ff", "-o", trace, "-e", "trace=network,poll,read,write"] + command
+        started = time.perf_counter()
+        process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT)
+        client = None
+        try:
+            if debugger:
+                selector = selectors.DefaultSelector()
+                selector.register(process.stdout, selectors.EVENT_READ)
+                output = b""
+                deadline = time.monotonic() + 10
+                while not (match := re.search(rb"GDB server listening on port (\d+)", output)):
+                    if not selector.select(max(0, deadline - time.monotonic())):
+                        raise RuntimeError("GDB listener readiness timed out")
+                    chunk = os.read(process.stdout.fileno(), 8192)
+                    if not chunk:
+                        raise RuntimeError(output.decode(errors="replace"))
+                    output += chunk
+                selector.close()
+                client = socket.create_connection(("127.0.0.1", int(match[1])), timeout=5)
+                client.sendall(b"$c#63")
+            output, _ = process.communicate(timeout=60)
+            if process.returncode:
+                raise RuntimeError(output.decode(errors="replace"))
+            return instructions / (time.perf_counter() - started)
+        finally:
+            if client:
+                client.close()
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+
+    parser = argparse.ArgumentParser(description="Compare paired CLI/GDB runs")
+    parser.add_argument("--simrv", default="build/rv64-release/SimRV")
+    parser.add_argument("--instructions", type=int, default=100_000_000)
+    parser.add_argument("--runs", type=int, default=5)
+    parser.add_argument("--json", type=pathlib.Path)
+    parser.add_argument("--trace-prefix", help="Record a separate short GDB syscall trace")
+    args = parser.parse_args(argv)
+    if hasattr(os, "sched_getaffinity"):
+        os.sched_setaffinity(0, {min(os.sched_getaffinity(0))})
+    with tempfile.TemporaryDirectory(prefix="simrv-gdb-bench-") as directory:
+        guest = pathlib.Path(directory) / "loop.bin"
+        guest.write_bytes(bytes.fromhex("938010006ff0dfff"))
+        samples = {"cli": [], "gdb": []}
+        for iteration in range(args.runs):
+            for name in (("cli", "gdb") if iteration % 2 == 0 else ("gdb", "cli")):
+                samples[name].append(run_gdb_iter(args.simrv, guest, args.instructions, name == "gdb"))
+        medians = {name: statistics.median(values) for name, values in samples.items()}
+        regression = 100 * (1 - medians["gdb"] / medians["cli"])
+        result = {"instructions": args.instructions, "runs": args.runs,
+                  "instructions_per_second": samples, "medians": medians,
+                  "regression_percent": regression, "passes_5_percent_limit": regression <= 5}
+        print(json.dumps(result, indent=2))
+        if args.json:
+            args.json.write_text(json.dumps(result, indent=2) + "\n")
+        if args.trace_prefix:
+            run_gdb_iter(args.simrv, guest, 1_000_000, True, args.trace_prefix)
+        return 0 if regression <= 5 else 1
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ("compare", "aggregate", "gdb"):
+        sub = sys.argv[1]
+        if sub == "compare":
+            sys.exit(compare_main(sys.argv[2:]))
+        elif sub == "aggregate":
+            sys.exit(aggregate_main(sys.argv[2:]))
+        elif sub == "gdb":
+            sys.exit(gdb_main(sys.argv[2:]))
+
     parser = argparse.ArgumentParser(
         description="SimRV & Spike Publication-Ready Benchmarking Suite"
     )

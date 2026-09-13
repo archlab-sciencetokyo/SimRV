@@ -53,8 +53,37 @@ while [[ $# -gt 0 ]]; do
             rm -rf "$BUILD_DIR" "$IMAGES_DIR"
             exit 0
             ;;
+        --clean-build)
+            print_step "Cleaning intermediate build directory ($BUILD_DIR) while preserving $IMAGES_DIR..."
+            rm -rf "$BUILD_DIR"
+            exit 0
+            ;;
+        --clean-old-kernels)
+            print_step "Pruning old kernel build trees in $BUILD_DIR..."
+            if [[ -d "$BUILD_DIR" ]]; then
+                find "$BUILD_DIR" -mindepth 1 -maxdepth 1 -type d -name "linux-*" ! -name "linux-${LINUX_VER}" -exec rm -rf {} +
+                print_info "Kept current kernel tree (linux-${LINUX_VER}) if present."
+            else
+                print_info "Build directory ($BUILD_DIR) does not exist."
+            fi
+            exit 0
+            ;;
+        -h|--help)
+            echo "Usage: $0 [options]"
+            echo "Options:"
+            echo "  --arch <rv64|rv32>              Target architecture (default: rv64)"
+            echo "  --libc <auto|musl|glibc>        C library selection (default: auto)"
+            echo "  --linux-version <ver>           Linux kernel version (default: 7.2.3)"
+            echo "  --cross-compile <prefix>        Cross compiler prefix"
+            echo "  --clean                         Clean build and images directories"
+            echo "  --clean-build                   Clean build directory while keeping images"
+            echo "  --clean-old-kernels             Prune older kernel trees, keeping current version"
+            echo "  -h, --help                      Show this help message"
+            exit 0
+            ;;
         *)
             print_error "Unknown option: $1"
+            echo "Run '$0 --help' for usage."
             exit 1
             ;;
     esac
@@ -190,19 +219,12 @@ fi
 
 # Compile custom Snake game
 print_step "Compiling custom Snake game..."
+SNAKE_SRC="$ROOT_DIR/examples/terminal/snake.c"
 if [[ "$ARCH" == "rv64" ]] && [[ -f "$INITRAMFS_DIR/lib/libc.musl-riscv64.so.1" ]]; then
-    "${CROSS_COMPILE}gcc" -O2 -march="${M_ARCH}" -mabi="${M_ABI}" -Wl,-dynamic-linker=/lib/ld-musl-riscv64.so.1 -nodefaultlibs "$SCRIPT_DIR/snake.c" "$INITRAMFS_DIR/lib/libc.musl-riscv64.so.1" -lgcc -o "$INITRAMFS_DIR/usr/bin/snake"
+    "${CROSS_COMPILE}gcc" -O2 -march="${M_ARCH}" -mabi="${M_ABI}" -Wl,-dynamic-linker=/lib/ld-musl-riscv64.so.1 -nodefaultlibs "$SNAKE_SRC" "$INITRAMFS_DIR/lib/libc.musl-riscv64.so.1" -lgcc -o "$INITRAMFS_DIR/usr/bin/snake"
 else
-    "${CROSS_COMPILE}gcc" -static -O2 -march="${M_ARCH}" -mabi="${M_ABI}" "$SCRIPT_DIR/snake.c" -o "$INITRAMFS_DIR/usr/bin/snake"
+    "${CROSS_COMPILE}gcc" -static -O2 -march="${M_ARCH}" -mabi="${M_ABI}" "$SNAKE_SRC" -o "$INITRAMFS_DIR/usr/bin/snake"
 fi
-
-# Install a small fallback for testing the platform power device directly.  Native
-# reboot(2)/poweroff remains the preferred path; this helper is useful when an
-# init system or kernel reset driver is unavailable.
-print_step "Compiling SimRV /dev/mem power helper..."
-mkdir -p "$INITRAMFS_DIR/usr/sbin"
-"${CROSS_COMPILE}gcc" -static -s -Os -Wall -Wextra -Werror -march="${M_ARCH}" -mabi="${M_ABI}" \
-    "$SCRIPT_DIR/simrv-power.c" -o "$INITRAMFS_DIR/usr/sbin/simrv-power"
 
 # Set up init script and inittab
 mkdir -p "$INITRAMFS_DIR/proc" "$INITRAMFS_DIR/sys" "$INITRAMFS_DIR/dev" "$INITRAMFS_DIR/etc" "$INITRAMFS_DIR/tmp"
@@ -465,8 +487,6 @@ if [[ "$XLEN" == "64" ]]; then
     print_step "Extracting Alpine Linux minirootfs into ext4 root disk..."
     tar -xf "$BUILD_DIR/sources/alpine-minirootfs-${ALPINE_VER}-riscv64.tar.gz" -C "$ROOTFS_DISK_DIR"
     mkdir -p "$ROOTFS_DISK_DIR/proc" "$ROOTFS_DISK_DIR/sys" "$ROOTFS_DISK_DIR/dev" "$ROOTFS_DISK_DIR/etc" "$ROOTFS_DISK_DIR/tmp" "$ROOTFS_DISK_DIR/run"
-    mkdir -p "$ROOTFS_DISK_DIR/usr/sbin"
-    cp "$INITRAMFS_DIR/usr/sbin/simrv-power" "$ROOTFS_DISK_DIR/usr/sbin/simrv-power"
     cat > "$ROOTFS_DISK_DIR/etc/inittab" <<'EOF'
 ttyS0::respawn:/sbin/getty -n -l /bin/sh 115200 ttyS0 vt100
 EOF

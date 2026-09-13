@@ -10,7 +10,7 @@ Requirements are Linux x86-64, CMake, Ninja, GCC 15+ or Clang 20+, Python 3.10+,
 cross-compiler, and enough space to build Linux, OpenSBI, Spike, and vector tests.
 
 ```bash
-python3 scripts/prepare_repro.py --build-vector-tests
+python3 scripts/reproduce.py --prepare --build-vector-tests
 ```
 
 Build Linux inputs separately for each XLEN. The script downloads the pinned source versions from
@@ -37,11 +37,11 @@ Required dependencies that are absent are reported as `unavailable` and make ful
 
 The experiment manifest records XLEN, MISA, VLEN, repetitions, warmups, timeouts, workloads, and
 output locations. Raw results are immutable inputs. Aggregate JSON, Markdown, and SVG files are
-regenerated deterministically with `scripts/aggregate_experiments.py`.
+regenerated deterministically with `scripts/benchmark.py aggregate`.
 
 ## Release bundle
 
-`scripts/package_repro.py` packages the manifest, schemas, scripts, source documentation, raw
+`python3 scripts/reproduce.py --package --output <path>` packages the manifest, schemas, scripts, source documentation, raw
 results, derived tables/figures, evidence, logs, checksums, and license metadata. Inspect the
 generated file list before publishing. The bundle deliberately excludes downloaded dependencies,
 guest images, and generated executables.

@@ -1,10 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <termios.h>
 #include <sys/select.h>
+#include <termios.h>
 #include <time.h>
+#include <unistd.h>
 
 #define WIDTH 40
 #define HEIGHT 20
@@ -13,7 +13,7 @@ struct termios orig_termios;
 
 void reset_terminal_mode() {
     tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios);
-    printf("\033[?25h"); // Show cursor
+    printf("\033[?25h");  // Show cursor
 }
 
 void set_conio_terminal_mode() {
@@ -23,7 +23,7 @@ void set_conio_terminal_mode() {
     memcpy(&new_termios, &orig_termios, sizeof(struct termios));
     cfmakeraw(&new_termios);
     tcsetattr(STDIN_FILENO, TCSANOW, &new_termios);
-    printf("\033[?25l"); // Hide cursor
+    printf("\033[?25l");  // Hide cursor
 }
 
 int kbhit() {
@@ -70,17 +70,21 @@ int main() {
         // Handle input
         if (kbhit()) {
             int ch = getch();
-            if (ch == 'q' || ch == 'Q' || ch == 3) { // 'q' or Ctrl-C
+            if (ch == 'q' || ch == 'Q' || ch == 3) {  // 'q' or Ctrl-C
                 break;
             }
             if ((ch == 'w' || ch == 'W') && dir_y != 1) {
-                dir_x = 0; dir_y = -1;
+                dir_x = 0;
+                dir_y = -1;
             } else if ((ch == 's' || ch == 'S') && dir_y != -1) {
-                dir_x = 0; dir_y = 1;
+                dir_x = 0;
+                dir_y = 1;
             } else if ((ch == 'a' || ch == 'A') && dir_x != 1) {
-                dir_x = -1; dir_y = 0;
+                dir_x = -1;
+                dir_y = 0;
             } else if ((ch == 'd' || ch == 'D') && dir_x != -1) {
-                dir_x = 1; dir_y = 0;
+                dir_x = 1;
+                dir_y = 0;
             }
         }
 
@@ -156,7 +160,7 @@ int main() {
         printf("Controls: WASD to Move, Q to Quit\r\n");
         fflush(stdout);
 
-        usleep(150000); // 150ms delay
+        usleep(150000);  // 150ms delay
     }
 
     printf("\033[H\033[JGame Over! Final Score: %d\r\n", score);

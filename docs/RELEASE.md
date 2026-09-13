@@ -66,7 +66,7 @@ Benchmark reports use an unmeasured warmup, at least five measured samples, medi
 and recorded host metadata. Compare a frozen baseline with a candidate:
 
 ```bash
-python3 scripts/compare_benchmarks.py baseline.json candidate.json
+python3 scripts/benchmark.py compare baseline.json candidate.json
 ```
 
 Performance is evidence-only: comparisons never block a release unless `--enforce` is explicitly
@@ -75,7 +75,7 @@ target as a correctness criterion. Results are comparable only on the same idle 
 build configuration, guest binaries, and instruction limits.
 
 Pass `--perf` to `scripts/benchmark.py` (or set `SIMRV_CA_BENCH_PERF=1` for
-`benchmark-ca.sh`) to add per-sample Linux host counters. Wall time remains the primary throughput
+`scripts/benchmark.sh --ca`) to add per-sample Linux host counters. Wall time remains the primary throughput
 measurement; host cycles, instructions, branches, and cache events are supplemental diagnostics.
 Reports retain perf's enabled time and running percentage, so multiplexed or unsupported counters
 can be identified rather than compared as if they were exact. For publication runs, pin the process
