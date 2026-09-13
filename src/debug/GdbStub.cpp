@@ -24,6 +24,7 @@
 #include <charconv>
 #include <cstring>
 #include <format>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 
@@ -640,16 +641,16 @@ auto get_target_xml() -> const std::string& {
             "zero", "ra", "sp", "gp", "tp",  "t0",  "t1", "t2", "s0", "s1", "a0",
             "a1",   "a2", "a3", "a4", "a5",  "a6",  "a7", "s2", "s3", "s4", "s5",
             "s6",   "s7", "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6"};
-        for (size_t i = 0; i < 32; ++i) {
+        for (const auto [i, name] : std::views::enumerate(kRegNames)) {
             s += std::format(
-                "    <reg name=\"{}\" bitsize=\"{}\" type=\"code_ptr\" regnum=\"{}\"/>\n",
-                kRegNames[i], bits, i);
+                "    <reg name=\"{}\" bitsize=\"{}\" type=\"code_ptr\" regnum=\"{}\"/>\n", name,
+                bits, i);
         }
         s += std::format("    <reg name=\"pc\" bitsize=\"{}\" type=\"code_ptr\" regnum=\"32\"/>\n",
                          bits);
         s += "  </feature>\n";
         s += "  <feature name=\"org.gnu.gdb.riscv.fpu\">\n";
-        for (size_t i = 0; i < 32; ++i) {
+        for (const auto i : std::views::iota(0u, 32u)) {
             s += std::format(
                 "    <reg name=\"f{}\" bitsize=\"64\" type=\"ieee_double\" regnum=\"{}\"/>\n", i,
                 33 + i);

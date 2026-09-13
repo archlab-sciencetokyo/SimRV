@@ -9,6 +9,7 @@
 #include <charconv>
 #include <cstring>
 #include <format>
+#include <ranges>
 #include <vector>
 
 #include "simrv/core/Cpu.hpp"
@@ -41,11 +42,11 @@ auto parse_gpr_reg(const std::string& str) -> std::optional<ParsedReg> {
         "zero", "ra", "sp", "gp", "tp",  "t0",  "t1", "t2", "s0", "s1", "a0",
         "a1",   "a2", "a3", "a4", "a5",  "a6",  "a7", "s2", "s3", "s4", "s5",
         "s6",   "s7", "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6"};
-    for (size_t i = 0; i < kGprAbi.size(); ++i) {
-        if (str == kGprAbi[i]) {
+    for (auto [i, abi_name] : std::views::enumerate(kGprAbi)) {
+        if (str == abi_name) {
             return ParsedReg{.type = RegType::GPR,
                              .index = static_cast<RegId>(i),
-                             .canonical_name = std::format("x{} ({})", i, kGprAbi[i])};
+                             .canonical_name = std::format("x{} ({})", i, abi_name)};
         }
     }
     if (str == "fp") {
@@ -66,11 +67,11 @@ auto parse_fpr_reg(const std::string& str) -> std::optional<ParsedReg> {
         "ft0", "ft1", "ft2", "ft3", "ft4",  "ft5",  "ft6", "ft7", "fs0",  "fs1", "fa0",
         "fa1", "fa2", "fa3", "fa4", "fa5",  "fa6",  "fa7", "fs2", "fs3",  "fs4", "fs5",
         "fs6", "fs7", "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11"};
-    for (size_t i = 0; i < kFprAbi.size(); ++i) {
-        if (str == kFprAbi[i]) {
+    for (auto [i, abi_name] : std::views::enumerate(kFprAbi)) {
+        if (str == abi_name) {
             return ParsedReg{.type = RegType::FPR,
                              .index = static_cast<RegId>(i),
-                             .canonical_name = std::format("f{} ({})", i, kFprAbi[i])};
+                             .canonical_name = std::format("f{} ({})", i, abi_name)};
         }
     }
     return std::nullopt;
@@ -332,13 +333,11 @@ auto BreakpointManager::check_reg_changes(const simrv::core::ArchState& state,
             case RegType::VEC: {
                 const auto& old_v = prev_state.regs.read_vector(wp.reg_index);
                 const auto& new_v = state.regs.read_vector(wp.reg_index);
-                bool vec_changed = false;
-                for (size_t i = 0; i < std::size(old_v.u64); ++i) {
-                    if (old_v.u64[i] != new_v.u64[i]) {
-                        vec_changed = true;
-                        break;
-                    }
-                }
+                const bool vec_changed = std::ranges::any_of(
+                    std::views::zip(old_v.u64, new_v.u64), [](const auto& pair) {
+                        const auto& [old_val, new_val] = pair;
+                        return old_val != new_val;
+                    });
                 if (vec_changed) {
                     return BreakpointHit{
                         .reason = BreakpointHit::Reason::Watchpoint,

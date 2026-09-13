@@ -6,9 +6,10 @@
 
 #include <atomic>
 #include <cstdint>
-#include <map>
+#include <flat_map>
+#include <flat_set>
 #include <optional>
-#include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -88,9 +89,9 @@ class BreakpointManager {
     [[nodiscard]] auto has_any() const -> bool { return active_.load(std::memory_order_acquire); }
     /// Check if a PC breakpoint is set at the given address
     [[nodiscard]] auto has_pc_breakpoint(Address addr) const -> bool;
-    /// Get the set of all active PC breakpoint addresses
-    [[nodiscard]] auto get_pc_breakpoints() const -> const std::set<Address>& {
-        return pc_breakpoints_;
+    /// Get the contiguous span of all active PC breakpoint addresses
+    [[nodiscard]] auto get_pc_breakpoints() const -> std::span<const Address> {
+        return std::span<const Address>(pc_breakpoints_.begin(), pc_breakpoints_.end());
     }
     /// Get stable-ID logical breakpoint records, including frontend ownership.
     [[nodiscard]] auto get_pc_breakpoint_records() const -> const std::vector<PcBreakpoint>& {
@@ -145,8 +146,8 @@ class BreakpointManager {
         active_.store(!pc_breakpoints_.empty() || !watchpoints_.empty(), std::memory_order_release);
     }
     std::atomic<bool> active_{false};
-    mutable std::map<uint32_t, std::pair<Address, Counter>> skipped_instructions_;
-    std::set<Address> pc_breakpoints_;
+    mutable std::flat_map<uint32_t, std::pair<Address, Counter>> skipped_instructions_;
+    std::flat_set<Address> pc_breakpoints_;
     std::vector<PcBreakpoint> pc_breakpoint_records_;
     std::vector<Watchpoint> watchpoints_;
     BreakpointId next_breakpoint_id_ = 1;

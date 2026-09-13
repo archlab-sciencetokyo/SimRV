@@ -20,7 +20,7 @@ namespace simrv::debug {
 namespace {
 
 template <typename Ehdr, typename Shdr, typename Sym, typename StTypeFunc>
-auto parse_elf_symbols(std::ifstream& fs, std::map<Address, std::string>& out_symbols,
+auto parse_elf_symbols(std::ifstream& fs, std::flat_map<Address, std::string>& out_symbols,
                        std::optional<Address>& out_entry, StTypeFunc get_type, SymbolLoadMode mode)
     -> bool {
     Ehdr ehdr{};
