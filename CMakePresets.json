@@ -47,14 +47,20 @@
         {
             "name": "rv32-release",
             "displayName": "RV32 Release (Ninja)",
-            "inherits": ["simrv-release", "simrv-rv32"],
+            "inherits": [
+                "simrv-release",
+                "simrv-rv32"
+            ],
             "binaryDir": "${sourceDir}/build/rv32-release",
             "cacheVariables": {}
         },
         {
             "name": "rv64-release",
             "displayName": "RV64 Release (Ninja)",
-            "inherits": ["simrv-release", "simrv-rv64"],
+            "inherits": [
+                "simrv-release",
+                "simrv-rv64"
+            ],
             "binaryDir": "${sourceDir}/build/rv64-release",
             "cacheVariables": {}
         },
@@ -101,14 +107,20 @@
         {
             "name": "rv32-debug",
             "displayName": "RV32 Debug (Ninja)",
-            "inherits": ["simrv-debug", "simrv-rv32"],
+            "inherits": [
+                "simrv-debug",
+                "simrv-rv32"
+            ],
             "binaryDir": "${sourceDir}/build/rv32-debug",
             "cacheVariables": {}
         },
         {
             "name": "rv64-debug",
             "displayName": "RV64 Debug (Ninja)",
-            "inherits": ["simrv-debug", "simrv-rv64"],
+            "inherits": [
+                "simrv-debug",
+                "simrv-rv64"
+            ],
             "binaryDir": "${sourceDir}/build/rv64-debug",
             "cacheVariables": {}
         },
@@ -249,7 +261,9 @@
         {
             "name": "rv64-release-package",
             "configurePreset": "rv64-release",
-            "generators": ["TGZ"]
+            "generators": [
+                "TGZ"
+            ]
         }
     ],
     "workflowPresets": [
@@ -257,46 +271,94 @@
             "name": "rv64-dev",
             "displayName": "RV64 developer workflow",
             "steps": [
-                {"type": "configure", "name": "rv64-debug"},
-                {"type": "build", "name": "rv64-debug"},
-                {"type": "test", "name": "rv64-dev"}
+                {
+                    "type": "configure",
+                    "name": "rv64-debug"
+                },
+                {
+                    "type": "build",
+                    "name": "rv64-debug"
+                },
+                {
+                    "type": "test",
+                    "name": "rv64-dev"
+                }
             ]
         },
         {
             "name": "rv32-gate",
             "displayName": "RV32 release gate",
             "steps": [
-                {"type": "configure", "name": "rv32-release"},
-                {"type": "build", "name": "rv32-release"},
-                {"type": "test", "name": "rv32-gate"}
+                {
+                    "type": "configure",
+                    "name": "rv32-release"
+                },
+                {
+                    "type": "build",
+                    "name": "rv32-release"
+                },
+                {
+                    "type": "test",
+                    "name": "rv32-gate"
+                }
             ]
         },
         {
             "name": "rv64-gate",
             "displayName": "RV64 release gate",
             "steps": [
-                {"type": "configure", "name": "rv64-release"},
-                {"type": "build", "name": "rv64-release"},
-                {"type": "test", "name": "rv64-gate"}
+                {
+                    "type": "configure",
+                    "name": "rv64-release"
+                },
+                {
+                    "type": "build",
+                    "name": "rv64-release"
+                },
+                {
+                    "type": "test",
+                    "name": "rv64-gate"
+                }
             ]
         },
         {
             "name": "rv64-quality",
             "displayName": "RV64 sanitizer quality gate",
             "steps": [
-                {"type": "configure", "name": "rv64-asan"},
-                {"type": "build", "name": "rv64-asan"},
-                {"type": "test", "name": "rv64-asan-gate"}
+                {
+                    "type": "configure",
+                    "name": "rv64-asan"
+                },
+                {
+                    "type": "build",
+                    "name": "rv64-asan"
+                },
+                {
+                    "type": "test",
+                    "name": "rv64-asan-gate"
+                }
             ]
         },
         {
             "name": "release-package",
             "displayName": "RV64 release package workflow",
             "steps": [
-                {"type": "configure", "name": "rv64-release"},
-                {"type": "build", "name": "rv64-release"},
-                {"type": "test", "name": "rv64-gate"},
-                {"type": "package", "name": "rv64-release-package"}
+                {
+                    "type": "configure",
+                    "name": "rv64-release"
+                },
+                {
+                    "type": "build",
+                    "name": "rv64-release"
+                },
+                {
+                    "type": "test",
+                    "name": "rv64-gate"
+                },
+                {
+                    "type": "package",
+                    "name": "rv64-release-package"
+                }
             ]
         }
     ]
