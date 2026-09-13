@@ -15,18 +15,21 @@ namespace simrv {
 auto Mmu::translate(VirtAddr v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
                     Word satp, unsigned xlen, bool update_access_bits,
                     const core::ArchState* arch_state) -> std::expected<PhysAddr, TrapCause> {
-    // Machine mode or MMU disabled: use physical addressing
+    // Machine mode or MMU disabled: use physical addressing directly
     if (priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(satp, xlen)) {
         return PhysAddr{v_addr.raw()};
     }
 
-    // Validate Sv39 / Sv48 canonical addresses for RV64
-    if (simrv::compiler::unlikely(!memory::PageTableWalker::is_canonical(v_addr, satp, xlen))) {
-        return std::unexpected(memory::PageTableWalker::page_fault_for(access));
-    }
+    auto check_canonical = [v_addr, satp, xlen, access]() -> std::expected<VirtAddr, TrapCause> {
+        if (simrv::compiler::unlikely(!memory::PageTableWalker::is_canonical(v_addr, satp, xlen))) {
+            return std::unexpected(memory::PageTableWalker::page_fault_for(access));
+        }
+        return v_addr;
+    };
 
-    // Translate through page tables
-    return walker_.walk(v_addr, access, priv, mstatus, satp, xlen, update_access_bits, arch_state);
+    return check_canonical().and_then([&](VirtAddr va) {
+        return walker_.walk(va, access, priv, mstatus, satp, xlen, update_access_bits, arch_state);
+    });
 }
 
 auto Mmu::page_walk(VirtAddr v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,

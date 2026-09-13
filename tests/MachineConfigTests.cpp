@@ -118,5 +118,36 @@ auto main() -> int {
     expect(event.instruction_count == 42 && event.exit_status == 7,
            "lifecycle telemetry preserves value fields");
 
+    // C++23 explicit object parameter (deducing this) builder chaining test
+    auto fluent = simrv::core::MachineConfig{}
+                      .with_harts(3)
+                      .with_dram_base(0x80000000)
+                      .with_dram_size(0x40000000)
+                      .with_appmode(false)
+                      .with_smp_quantum(42)
+                      .with_pipeline(simrv::pipeline::PipelineType::ThreeStage)
+                      .with_misa_xlen(64)
+                      .with_vlen(128)
+                      .with_binary("kernel.elf")
+                      .with_platform_profile(simrv::core::PlatformProfile::Mmio);
+
+    expect(fluent.execution.num_harts == 3, "builder sets num_harts on rvalue");
+    expect(fluent.memory.dram_base == 0x80000000 && fluent.memory.dram_size == 0x40000000,
+           "builder sets memory geometry on rvalue");
+    expect(!fluent.execution.appmode && fluent.execution.smp_quantum == 42,
+           "builder sets execution config on rvalue");
+    expect(fluent.execution.pipeline_type == simrv::pipeline::PipelineType::ThreeStage,
+           "builder sets pipeline type on rvalue");
+    expect(fluent.isa.misa_xlen == 64 && fluent.isa.vlen == 128,
+           "builder sets ISA config on rvalue");
+    expect(fluent.files.binary_path == "kernel.elf", "builder sets binary path on rvalue");
+    expect(fluent.platform_profile == simrv::core::PlatformProfile::Mmio,
+           "builder sets platform profile on rvalue");
+
+    // Lvalue chaining test
+    fluent.with_harts(5).with_smp_quantum(99);
+    expect(fluent.execution.num_harts == 5 && fluent.execution.smp_quantum == 99,
+           "builder chains on lvalue");
+
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

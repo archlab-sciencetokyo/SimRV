@@ -12,6 +12,7 @@
 #include <limits>
 #include <new>
 #include <print>
+#include <ranges>
 #include <span>
 #include <thread>
 #include <variant>
@@ -416,8 +417,8 @@ void Machine::publish_tui_execution_snapshot_for_hart(size_t hart_index) noexcep
     slot.instruction_count.store(source.e_icount, std::memory_order_relaxed);
     slot.timer_ticks.store(primary_hart().clint_mmio.mtime.load(std::memory_order_relaxed),
                            std::memory_order_relaxed);
-    for (size_t i = 0; i < packed_stats.size(); ++i) {
-        slot.ca_stats[i].store(packed_stats[i], std::memory_order_relaxed);
+    for (auto&& [ca, stat] : std::views::zip(slot.ca_stats, packed_stats)) {
+        ca.store(stat, std::memory_order_relaxed);
     }
     slot.icache_hits.store(source.icache.hit_count(), std::memory_order_relaxed);
     slot.icache_misses.store(source.icache.miss_count(), std::memory_order_relaxed);
@@ -449,8 +450,8 @@ auto Machine::tui_execution_snapshot(size_t hart_index) const noexcept -> TuiExe
         snapshot.instruction_count = slot.instruction_count.load(std::memory_order_relaxed);
         snapshot.timer_ticks = slot.timer_ticks.load(std::memory_order_relaxed);
         std::array<uint64_t, 9> packed_stats{};
-        for (size_t i = 0; i < packed_stats.size(); ++i) {
-            packed_stats[i] = slot.ca_stats[i].load(std::memory_order_relaxed);
+        for (auto&& [ca, stat] : std::views::zip(slot.ca_stats, packed_stats)) {
+            stat = ca.load(std::memory_order_relaxed);
         }
         snapshot.ca_stats = {
             .cycle_count = packed_stats[0],
@@ -1379,8 +1380,7 @@ Machine::~Machine() {
 void Machine::advance_ca_global_cycle() {
     primary_hart().advance_ca_cycle(*this);
     if (simrv::compiler::unlikely(!runtime_->secondary_harts.empty())) {
-        for (size_t i = 0; i < runtime_->secondary_harts.size(); ++i) {
-            auto& secondary = runtime_->secondary_harts[i];
+        for (const auto [i, secondary] : std::views::enumerate(runtime_->secondary_harts)) {
             if (secondary->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
                 secondary->advance_ca_cycle(*this);
             }

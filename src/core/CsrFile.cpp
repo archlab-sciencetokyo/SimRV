@@ -99,69 +99,51 @@ void CsrFile::setMstatus(CSRValue wdata) {
 }
 
 auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCode> {
+    auto require_fp = [this]() -> std::expected<void, ExceptionCode> {
+        if (!fp_accessible(cpu_.state())) {
+            return std::unexpected(ExceptionCode::IllegalInstruction);
+        }
+        return {};
+    };
+    auto require_vector = [this]() -> std::expected<void, ExceptionCode> {
+        if (!vector_accessible(cpu_.state())) {
+            return std::unexpected(ExceptionCode::IllegalInstruction);
+        }
+        return {};
+    };
+    auto require_rv32_counter = [this]() -> std::expected<void, ExceptionCode> {
+        if (cpu_.state().regs.xlen == 64) {
+            return std::unexpected(ExceptionCode::IllegalInstruction);
+        }
+        return {};
+    };
+
     CSRValue rcsr = 0;
     switch (addr) {
         case csr_addr(Csr::Fflags):
-            if (!fp_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            rcsr = cpu_.state().fcsr & kFflagsMask;
-            break;
+            return require_fp().transform([this]() { return cpu_.state().fcsr & kFflagsMask; });
         case csr_addr(Csr::Frm):
-            if (!fp_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            rcsr = (cpu_.state().fcsr >> kFrmShift) & kFrmMask;
-            break;
+            return require_fp().transform(
+                [this]() { return (cpu_.state().fcsr >> kFrmShift) & kFrmMask; });
         case csr_addr(Csr::Fcsr):
-            if (!fp_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            rcsr = cpu_.state().fcsr & kFcsrMask;
-            break;
+            return require_fp().transform([this]() { return cpu_.state().fcsr & kFcsrMask; });
         case csr_addr(Csr::Vstart):
-            if (!vector_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            rcsr = cpu_.state().vstart;
-            break;
+            return require_vector().transform([this]() { return cpu_.state().vstart; });
         case csr_addr(Csr::Vxsat):
-            if (!vector_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            rcsr = cpu_.state().vxsat;
-            break;
+            return require_vector().transform([this]() { return cpu_.state().vxsat; });
         case csr_addr(Csr::Vxrm):
-            if (!vector_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            rcsr = cpu_.state().vxrm;
-            break;
+            return require_vector().transform([this]() { return cpu_.state().vxrm; });
         case csr_addr(Csr::Vcsr):
-            if (!vector_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            rcsr = (cpu_.state().vxrm << 1) | cpu_.state().vxsat;
-            break;
+            return require_vector().transform(
+                [this]() { return (cpu_.state().vxrm << 1) | cpu_.state().vxsat; });
         case csr_addr(Csr::Vl):
-            if (!vector_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            rcsr = cpu_.state().vl;
-            break;
+            return require_vector().transform([this]() { return cpu_.state().vl; });
         case csr_addr(Csr::Vtype):
-            if (!vector_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            rcsr = cpu_.state().vtype;
-            break;
+            return require_vector().transform([this]() { return cpu_.state().vtype; });
         case csr_addr(Csr::Vlenb):
-            if (!vector_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
             // vlenb is the read-only architectural VLEN/8 constant for the current hart.
-            rcsr = cpu_.state().regs.vlen_bytes();
-            break;
+            return require_vector().transform(
+                [this]() { return static_cast<CSRValue>(cpu_.state().regs.vlen_bytes()); });
 
         case csr_addr(Csr::Sie):
             rcsr = cpu_.state().mie & cpu_.state().mideleg & interrupt_implemented_mask(true);
@@ -241,24 +223,17 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
 
         case csr_addr(Csr::Mcycleh):
         case csr_addr(Csr::Cycleh):
-            if (cpu_.state().regs.xlen == 64) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            rcsr = static_cast<CSRValue>(cpu_.clint_mmio.mcycle >> kHighWordShift);
-            break;
+            return require_rv32_counter().transform([this]() {
+                return static_cast<CSRValue>(cpu_.clint_mmio.mcycle >> kHighWordShift);
+            });
         case csr_addr(Csr::Minstreth):
         case csr_addr(Csr::Instreth):
-            if (cpu_.state().regs.xlen == 64) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            rcsr = static_cast<CSRValue>(cpu_.e_icount >> kHighWordShift);
-            break;
+            return require_rv32_counter().transform(
+                [this]() { return static_cast<CSRValue>(cpu_.e_icount >> kHighWordShift); });
         case csr_addr(Csr::Timeh):
-            if (cpu_.state().regs.xlen == 64) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            rcsr = static_cast<CSRValue>(cpu_.clint_mmio.mtime >> kHighWordShift);
-            break;
+            return require_rv32_counter().transform([this]() {
+                return static_cast<CSRValue>(cpu_.clint_mmio.mtime >> kHighWordShift);
+            });
 
         case csr_addr(Csr::Sstatus):
             rcsr = getMstatus(kMstatusSstatusReadMask);
@@ -333,6 +308,25 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
     const bool has_s = isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::S);
     const CSRValue interrupt_mask = interrupt_implemented_mask(has_s);
 
+    auto require_fp = [this]() -> std::expected<void, ExceptionCode> {
+        if (!fp_accessible(cpu_.state())) {
+            return std::unexpected(ExceptionCode::IllegalInstruction);
+        }
+        return {};
+    };
+    auto require_vector = [this]() -> std::expected<void, ExceptionCode> {
+        if (!vector_accessible(cpu_.state())) {
+            return std::unexpected(ExceptionCode::IllegalInstruction);
+        }
+        return {};
+    };
+    auto require_rv32_counter = [this]() -> std::expected<void, ExceptionCode> {
+        if (cpu_.state().regs.xlen == 64) {
+            return std::unexpected(ExceptionCode::IllegalInstruction);
+        }
+        return {};
+    };
+
     switch (addr) {
         case csr_addr(Csr::Mvendorid):
         case csr_addr(Csr::Marchid):
@@ -353,12 +347,12 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
             }
             break;
         case csr_addr(Csr::Mcycleh):
-            if (cpu_.state().regs.xlen == 64) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            cpu_.clint_mmio.mcycle = (cpu_.clint_mmio.mcycle & 0x00000000FFFFFFFFULL) |
-                                     (static_cast<uint64_t>(wdata) << 32);
-            break;
+            return require_rv32_counter().and_then(
+                [this, wdata]() -> std::expected<void, ExceptionCode> {
+                    cpu_.clint_mmio.mcycle = (cpu_.clint_mmio.mcycle & 0x00000000FFFFFFFFULL) |
+                                             (static_cast<uint64_t>(wdata) << 32);
+                    return {};
+                });
         case csr_addr(Csr::Minstret):
             if (cpu_.state().regs.xlen == 32) {
                 cpu_.e_icount =
@@ -368,84 +362,75 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
             }
             break;
         case csr_addr(Csr::Minstreth):
-            if (cpu_.state().regs.xlen == 64) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            cpu_.e_icount =
-                (cpu_.e_icount & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(wdata) << 32);
-            break;
+            return require_rv32_counter().and_then([this,
+                                                    wdata]() -> std::expected<void, ExceptionCode> {
+                cpu_.e_icount =
+                    (cpu_.e_icount & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(wdata) << 32);
+                return {};
+            });
 
         case csr_addr(Csr::Fflags):
-            if (!fp_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            cpu_.state().fcsr = (cpu_.state().fcsr & ~kFflagsMask) | (wdata & kFflagsMask);
-            cpu_.state().mstatus |= enum_mask(MstatusBit::Fs);
+            return require_fp().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
+                cpu_.state().fcsr = (cpu_.state().fcsr & ~kFflagsMask) | (wdata & kFflagsMask);
+                cpu_.state().mstatus |= enum_mask(MstatusBit::Fs);
 #if defined(__x86_64__) || defined(_M_X64)
-            _mm_setcsr(_mm_getcsr() & ~0x3fu);
+                _mm_setcsr(_mm_getcsr() & ~0x3fu);
 #endif
-            break;
+                return {};
+            });
         case csr_addr(Csr::Frm):
-            if (!fp_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            cpu_.state().fcsr =
-                (cpu_.state().fcsr & ~(kFrmMask << kFrmShift)) | ((wdata & kFrmMask) << kFrmShift);
-            cpu_.state().mstatus |= enum_mask(MstatusBit::Fs);
-            break;
+            return require_fp().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
+                cpu_.state().fcsr = (cpu_.state().fcsr & ~(kFrmMask << kFrmShift)) |
+                                    ((wdata & kFrmMask) << kFrmShift);
+                cpu_.state().mstatus |= enum_mask(MstatusBit::Fs);
+                return {};
+            });
         case csr_addr(Csr::Fcsr):
-            if (!fp_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            cpu_.state().fcsr = wdata & kFcsrMask;
-            cpu_.state().mstatus |= enum_mask(MstatusBit::Fs);
+            return require_fp().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
+                cpu_.state().fcsr = wdata & kFcsrMask;
+                cpu_.state().mstatus |= enum_mask(MstatusBit::Fs);
 #if defined(__x86_64__) || defined(_M_X64)
-            _mm_setcsr(_mm_getcsr() & ~0x3fu);
+                _mm_setcsr(_mm_getcsr() & ~0x3fu);
 #endif
-            break;
+                return {};
+            });
         case csr_addr(Csr::Vstart):
-            if (!vector_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            cpu_.state().vstart = wdata & cpu_.state().regs.vstart_mask();
-            cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
-            break;
+            return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
+                cpu_.state().vstart = wdata & cpu_.state().regs.vstart_mask();
+                cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+                return {};
+            });
         case csr_addr(Csr::Vxsat):
-            if (!vector_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            cpu_.state().vxsat = wdata & 1;
-            cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
-            break;
+            return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
+                cpu_.state().vxsat = wdata & 1;
+                cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+                return {};
+            });
         case csr_addr(Csr::Vxrm):
-            if (!vector_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            cpu_.state().vxrm = wdata & 3;
-            cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
-            break;
+            return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
+                cpu_.state().vxrm = wdata & 3;
+                cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+                return {};
+            });
         case csr_addr(Csr::Vcsr):
-            if (!vector_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            cpu_.state().vxrm = (wdata >> 1) & 3;
-            cpu_.state().vxsat = wdata & 1;
-            cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
-            break;
+            return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
+                cpu_.state().vxrm = (wdata >> 1) & 3;
+                cpu_.state().vxsat = wdata & 1;
+                cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+                return {};
+            });
         case csr_addr(Csr::Vl):
-            if (!vector_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            cpu_.state().vl = wdata;
-            cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
-            break;
+            return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
+                cpu_.state().vl = wdata;
+                cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+                return {};
+            });
         case csr_addr(Csr::Vtype):
-            if (!vector_accessible(cpu_.state())) {
-                return std::unexpected(ExceptionCode::IllegalInstruction);
-            }
-            cpu_.state().vtype = wdata;
-            cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
-            break;
+            return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
+                cpu_.state().vtype = wdata;
+                cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+                return {};
+            });
 
         case csr_addr(Csr::Stvec):
             cpu_.state().stvec = wdata & ~static_cast<CSRValue>(2);

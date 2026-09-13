@@ -202,7 +202,7 @@ class Tlb {
             case TlbAccessKind::DataWrite:
                 return data_w;
         }
-        __builtin_unreachable();
+        std::unreachable();
     }
 
     [[nodiscard]] constexpr auto select_lru(TlbAccessKind kind) noexcept
@@ -215,7 +215,7 @@ class Tlb {
             case TlbAccessKind::DataWrite:
                 return data_w_lru;
         }
-        __builtin_unreachable();
+        std::unreachable();
     }
 };
 

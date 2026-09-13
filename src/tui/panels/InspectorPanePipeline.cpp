@@ -377,9 +377,9 @@ auto get_active_forwarding_paths(const simrv::pipeline::PipelineSim& ps)
 
 }  // namespace
 
-// ═══════════════════════════════════════════════════════════════════════
+// ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 // Top-level dispatch
-// ═══════════════════════════════════════════════════════════════════════
+// ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 
 auto InspectorPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logical_row,
                                            int col_width, int right_width) -> std::string {
@@ -394,9 +394,9 @@ auto InspectorPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logi
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 // Cycle-Accurate mode
-// ═══════════════════════════════════════════════════════════════════════
+// ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 
 auto InspectorPane::render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu,
                                                           int logical_row, int col_width,
@@ -470,7 +470,8 @@ auto InspectorPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, 
             return section_line("Current Pipeline State (5-Stage)", width);
         case 1: {
             std::string diagram = std::format(
-                " [1;36mIF:{}\033[0m → \033[1;33mID:{}\033[0m → \033[1;32mEX:{}\033[0m → "
+                " [1;36mIF:{}\033[0m → \033[1;33mID:{}\033[0m → \033[1;32mEX:{}\033[0m "
+                "→ "
                 "\033[1;35mMEM:{}\033[0m → \033[1;34mWB:{}\033[0m",
                 short_op_name(ps.f_reg()), short_op_name(ps.d_reg()), short_op_name(ps.e_reg()),
                 short_op_name(ps.m_reg()), short_op_name(ps.w_reg()));
@@ -592,9 +593,9 @@ auto InspectorPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, 
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 // Functional (non-cycle-accurate) mode
-// ═══════════════════════════════════════════════════════════════════════
+// ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 
 auto InspectorPane::render_pipeline_stages_functional(const simrv::core::CPU& cpu, int logical_row,
                                                       int col_width, int right_width)
@@ -852,9 +853,9 @@ auto InspectorPane::render_pipeline_stages_functional_high(const simrv::core::CP
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 // Pipeline Execution Timeline (cycle-accurate mode, rows 0–8)
-// ═══════════════════════════════════════════════════════════════════════
+// ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 
 auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int logical_row,
                                              int width) -> std::string {
@@ -896,7 +897,7 @@ auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int lo
         for (auto const* stage : stages) {
             if (stage->valid && stage->pc != 0) {
                 InstRef ref{.inst_id = stage->inst_id, .pc = stage->pc, .op_id = stage->op_id};
-                if (std::ranges::find(active_insts, ref) == active_insts.end()) {
+                if (!std::ranges::contains(active_insts, ref)) {
                     active_insts.push_back(ref);
                 }
             }
@@ -1042,7 +1043,7 @@ auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> Register {
             for (auto const* stage : stages) {
                 if (stage->valid && stage->pc != 0) {
                     InstRef ref{.inst_id = stage->inst_id, .pc = stage->pc, .op_id = stage->op_id};
-                    if (std::ranges::find(active_insts, ref) == active_insts.end()) {
+                    if (!std::ranges::contains(active_insts, ref)) {
                         active_insts.push_back(ref);
                     }
                 }

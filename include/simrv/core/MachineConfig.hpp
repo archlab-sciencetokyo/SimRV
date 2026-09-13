@@ -9,6 +9,7 @@
 #include <expected>
 #include <limits>
 #include <string>
+#include <utility>
 
 #include "simrv/Define.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
@@ -134,6 +135,92 @@ struct MachineConfig {
                 "GDB remote debugging and Spike lockstep are mutually exclusive");
         }
         return {};
+    }
+
+    template <typename Self>
+    constexpr auto&& with_dram_base(this Self&& self, Address base) noexcept {
+        self.memory.dram_base = base;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_dram_size(this Self&& self, Address size) noexcept {
+        self.memory.dram_size = size;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_harts(this Self&& self, uint32_t count) noexcept {
+        self.execution.num_harts = count;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_appmode(this Self&& self, bool mode) noexcept {
+        self.execution.appmode = mode;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_smp_quantum(this Self&& self, uint32_t quantum) noexcept {
+        self.execution.smp_quantum = quantum;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_pipeline(this Self&& self, simrv::pipeline::PipelineType type) noexcept {
+        self.execution.pipeline_type = type;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_start_pc(this Self&& self, Address pc) noexcept {
+        self.execution.start_pc = pc;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_tui(this Self&& self, bool enabled) noexcept {
+        self.tui.enabled = enabled;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_gdb(this Self&& self, bool enabled, uint16_t port = 1234) noexcept {
+        self.debug.gdb_enabled = enabled;
+        self.debug.gdb_port = port;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_misa_xlen(this Self&& self, unsigned int xlen) noexcept {
+        self.isa.misa_xlen = xlen;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_vlen(this Self&& self, unsigned int vlen) noexcept {
+        self.isa.vlen = vlen;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_binary(this Self&& self, std::string path) {
+        self.files.binary_path = std::move(path);
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_disk(this Self&& self, std::string path) {
+        self.files.disk_path = std::move(path);
+        self.files.disk_enabled = !self.files.disk_path.empty();
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_platform_profile(this Self&& self, PlatformProfile profile) noexcept {
+        self.platform_profile = profile;
+        return std::forward<Self>(self);
     }
 };
 
