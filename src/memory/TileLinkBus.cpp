@@ -36,9 +36,7 @@ struct SmpLockGuard {
 }  // namespace
 
 TileLinkBus::TileLinkBus(simrv::core::Machine& machine)
-    : machine_(machine), coherence_hub_(machine) {
-    router_.set_tracer(&machine_.trace());
-}
+    : machine_(machine), coherence_hub_(machine) {}
 
 auto TileLinkBus::is_smp_enabled() const noexcept -> bool {
     return machine_.configuration().execution.smp_multithreaded;

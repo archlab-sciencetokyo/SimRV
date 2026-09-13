@@ -128,7 +128,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v_
     if (cpu.machine_->runtime_profile.is_instruction_mode() && !crosses_page) {
         if (!translation_enabled) {
             // Bypass soft TLB lookup if translation is disabled (direct DRAM access)
-            const Address eff_vaddr = v_addr.raw();
+            const Address eff_vaddr =
+                (active_xlen == 32) ? (v_addr.raw() & 0xFFFFFFFFULL) : v_addr.raw();
             if (simrv::compiler::likely(geometry.contains(eff_vaddr, size_bytes))) {
                 if (simrv::compiler::unlikely(!core::pmp::check_access(
                         cpu.state(), eff_vaddr, size_bytes, core::PmpAccessType::Read, eff_priv))) {
@@ -299,7 +300,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v_
         return simrv::memory::ram_read_fast(addr, funct3, cpu.machine_->ram_view());
     };
 
-    const Address eff_vaddr = v_addr.raw();
+    const Address eff_vaddr = (active_xlen == 32) ? (v_addr.raw() & 0xFFFFFFFFULL) : v_addr.raw();
 
     if (simrv::compiler::likely(!cpu.active_context().pending_exception.has_value()) &&
         simrv::compiler::likely(eff_priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(
@@ -612,7 +613,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v
     if (cpu.machine_->runtime_profile.is_instruction_mode() && !crosses_page) {
         if (!translation_enabled) {
             // Bypass soft TLB lookup if translation is disabled (direct DRAM access)
-            const Address eff_vaddr = v_addr.raw();
+            const Address eff_vaddr =
+                (active_xlen == 32) ? (v_addr.raw() & 0xFFFFFFFFULL) : v_addr.raw();
             if (simrv::compiler::likely(geometry.contains(eff_vaddr, size_bytes))) {
                 issue_write(eff_vaddr, wdata);
                 return;
@@ -634,7 +636,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v
         }
     }
 
-    const Address eff_vaddr = v_addr.raw();
+    const Address eff_vaddr = (active_xlen == 32) ? (v_addr.raw() & 0xFFFFFFFFULL) : v_addr.raw();
 
     if (simrv::compiler::likely(!cpu.active_context().pending_exception.has_value()) &&
         simrv::compiler::likely(eff_priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(

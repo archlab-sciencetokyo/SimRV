@@ -111,6 +111,7 @@ void RunnerBase::stop_threads() {
 
 Machine::Runtime::Runtime(Machine& machine, bool appmode)
     : tracer(machine), memory(machine), runner(std::in_place_type<BaremetalRunner>) {
+    memory.system_bus().router().set_tracer(&tracer);
     if (!appmode) {
         runner.emplace<OsRunner>();
     }

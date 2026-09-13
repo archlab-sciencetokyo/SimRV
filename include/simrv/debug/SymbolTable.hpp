@@ -4,7 +4,7 @@
  */
 #pragma once
 
-#include <flat_map>
+#include <map>
 #include <optional>
 #include <string>
 
@@ -58,7 +58,7 @@ class SymbolTable {
     [[nodiscard]] auto entry_point() const -> std::optional<Address> { return entry_point_; }
 
    private:
-    std::flat_map<Address, std::string> symbols_;
+    std::map<Address, std::string> symbols_;
     std::optional<Address> entry_point_;
 };
 
