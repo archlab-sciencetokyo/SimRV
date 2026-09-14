@@ -396,7 +396,7 @@ class CPU {
      * @param op Reference to the cached pre-decoded operation.
      */
     template <bool kCopyContext = false, bool kInstMix = false>
-    SIMRV_ALWAYS_INLINE void execute_cached_op_fast(Machine& machine, CachedOp& op);
+    void execute_cached_op_fast(Machine& machine, CachedOp& op);
 
     template <bool kCopyContext, bool kInstMix, bool kPollPause>
     SIMRV_ALWAYS_INLINE auto run_fast_baremetal_kernel(Machine& machine, uint32_t batch_size)

@@ -1080,6 +1080,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
         mem_rdata = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(op.funct3),
                                                  machine.ram_view());
     } else if (!try_fast_load(machine, mem_addr, op.funct3, mem_rdata)) {
+        op.copy_to(pipeline_context);
+        pipeline_context.mem_addr = mem_addr;
         mem_rdata =
             simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, mem_addr, op.funct3);
         if (pipeline_context.pending_exception.has_value()) {
@@ -1109,6 +1111,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
         simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(op.funct3),
                                       machine.ram_view());
     } else if (!try_fast_store(machine, mem_addr, op.funct3, rrs2)) {
+        op.copy_to(pipeline_context);
+        pipeline_context.mem_addr = mem_addr;
         simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, mem_addr, rrs2, op.funct3);
         if (pipeline_context.pending_exception.has_value()) {
             raise_exception(static_cast<TrapCause>(*pipeline_context.pending_exception),
@@ -1190,6 +1194,8 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         pipeline_context.pending_tval = 0;
     } else {
         pipeline_context.pending_exception = std::nullopt;
+        pipeline_context.opcode = op.opcode;
+        pipeline_context.funct5 = op.funct5;
     }
 
     if constexpr (kInstMix) {
@@ -1390,6 +1396,8 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
                 if (try_fast_load(machine, mem_addr, op.funct3, raw_val)) {
                     mem_rdata = raw_val;
                 } else {
+                    op.copy_to(pipeline_context);
+                    pipeline_context.mem_addr = mem_addr;
                     mem_rdata = simrv::memory::MemoryAccess::loadFp(machine.memory_, *this,
                                                                     mem_addr, op.funct3);
                     if (pipeline_context.pending_exception.has_value()) {
@@ -1420,6 +1428,8 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
                 simrv::memory::ram_write_fast(
                     mem_addr, fp_data, static_cast<Instruction>(op.funct3), machine.ram_view());
             } else if (!try_fast_store(machine, mem_addr, op.funct3, fp_data)) {
+                op.copy_to(pipeline_context);
+                pipeline_context.mem_addr = mem_addr;
                 simrv::memory::MemoryAccess::storeFp(machine.memory_, *this, mem_addr, fp_data,
                                                      op.funct3);
                 if (pipeline_context.pending_exception.has_value()) {

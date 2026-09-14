@@ -2407,6 +2407,67 @@ void test_smp_instruction_limit_is_machine_wide() {
     std::cout << "[PASS] test_smp_instruction_limit_is_machine_wide\n";
 }
 
+void test_load_after_amo_readonly_page() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    ConcreteMachine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.cpu.machine_ = &machine;
+    machine.cpu.reset();
+    machine.memory().initialize_mmu();
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+
+    constexpr Address pc = simrv::memory::kDramBaseAddress;
+    constexpr Address ro_page = pc + 0x2000;
+    constexpr Address root = pc + 0x1000;
+
+    constexpr uint32_t kMagicVal = 0x12345678;
+    std::memcpy(ram.data() + (ro_page - pc), &kMagicVal, sizeof(kMagicVal));
+
+    const Word root_ppn = root >> 12;
+    if constexpr (simrv::xlen::kIsXLen64) {
+        machine.cpu.state().satp = (Word{8} << 60) | root_ppn;
+    } else {
+        machine.cpu.state().satp = (Word{1} << 31) | root_ppn;
+    }
+    constexpr unsigned vpn_bits = simrv::xlen::kIsXLen64 ? 9 : 10;
+    constexpr unsigned level = simrv::xlen::kIsXLen64 ? 2 : 1;
+    const Word vpn = (ro_page >> (12 + level * vpn_bits)) & ((Word{1} << vpn_bits) - 1);
+    const Address pte_address = root + vpn * sizeof(Word);
+    const Word pte = ((pc >> 12) << 10) | enum_mask(simrv::PteFlag::V) |
+                     enum_mask(simrv::PteFlag::R) | enum_mask(simrv::PteFlag::A) |
+                     enum_mask(simrv::PteFlag::D);
+    std::memcpy(ram.data() + (pte_address - pc), &pte, sizeof(pte));
+
+    machine.cpu.state().priv = kPrivSupervisor;
+    machine.cpu.state().pc = pc;
+
+    // Simulate an earlier AMO instruction leaving Opcode::Amo in pipeline_context
+    machine.cpu.pipeline_context.opcode = simrv::isa::Opcode::Amo;
+    machine.cpu.pipeline_context.funct5 = simrv::isa::Funct5Amo::Swap;
+
+    // Execute a cached load from the read-only page with soft TLB flushed
+    simrv::core::CachedOp load_op{};
+    load_op.op_id = simrv::isa::OperationId::LW;
+    load_op.opcode = simrv::isa::Opcode::Load;
+    load_op.funct3 = simrv::isa::Funct3::Lw;
+    load_op.rd = RegId::A0;
+    load_op.rs1 = RegId::A1;
+    load_op.imm = 0;
+    load_op.len = 4;
+
+    machine.cpu.state().regs.write(RegId::A1, ro_page);
+    machine.cpu.soft_tlb_epoch++;
+
+    machine.cpu.execute_cached_op_fast<false, false>(machine, load_op);
+
+    check(!machine.cpu.pipeline_context.pending_exception.has_value());
+    check(machine.cpu.state().regs.read(RegId::A0) == kMagicVal);
+    std::cout << "[PASS] test_load_after_amo_readonly_page\n";
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -2460,6 +2521,7 @@ int main(int argc, char** argv) {
     test_ia_multithreaded_smp_execution();
     test_quantum_smp_baremetal_execution();
     test_smp_instruction_limit_is_machine_wide();
+    test_load_after_amo_readonly_page();
     std::cout << "All Modern Platform tests PASSED!\n";
     return 0;
 }
