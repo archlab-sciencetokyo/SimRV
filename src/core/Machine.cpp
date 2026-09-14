@@ -362,7 +362,13 @@ auto Machine::execute_runner_fast_batch(uint32_t batch_size) -> bool {
     const bool executed = std::visit(
         [this, batch_size](auto& runner) { return runner.execute_fast_batch(*this, batch_size); },
         runtime_->runner);
-    if (executed && tui_enabled()) publish_tui_execution_snapshot();
+    if (executed && tui_enabled()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now - last_tui_fast_batch_snapshot_ >= std::chrono::milliseconds(16)) {
+            last_tui_fast_batch_snapshot_ = now;
+            publish_tui_execution_snapshot();
+        }
+    }
     g_primary_runner_active = false;
     return executed;
 }

@@ -570,6 +570,7 @@ class Machine final {
     };
     static constexpr size_t kMaxTuiSnapshotHarts = 64;
     std::array<TuiSnapshotSlot, kMaxTuiSnapshotHarts> tui_snapshots_{};
+    std::chrono::steady_clock::time_point last_tui_fast_batch_snapshot_{};
 
     friend class RunnerBase;
     friend class BaremetalRunner;

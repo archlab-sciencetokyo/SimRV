@@ -357,8 +357,9 @@ void Tui::stop_ui_thread() {
 }
 
 void Tui::trigger_immediate_render() {
-    render_requested_.store(true, std::memory_order_release);
-    ui_cv_.notify_all();
+    if (!render_requested_.exchange(true, std::memory_order_acq_rel)) {
+        ui_cv_.notify_all();
+    }
 }
 
 void Tui::ui_render_loop(const std::stop_token& stop_token) {
