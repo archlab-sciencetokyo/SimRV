@@ -25,6 +25,7 @@
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/pci/PcieRootComplex.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/util/BenchmarkEvent.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
@@ -33,30 +34,6 @@ namespace {
 
 thread_local bool g_primary_runner_active = false;
 thread_local bool g_secondary_runner_active = false;
-
-constexpr uint16_t kScoreboardBusy = 1U;
-constexpr unsigned kScoreboardStageShift = 1U;
-constexpr unsigned kScoreboardLatencyShift = 4U;
-constexpr uint16_t kScoreboardForward = 1U << 12U;
-
-[[nodiscard]] auto pack_scoreboard_entry(const pipeline::Scoreboard& scoreboard,
-                                         pipeline::operation::RegBank bank, RegId reg) noexcept
-    -> uint16_t {
-    const auto entry = scoreboard.get_entry_data(bank, reg);
-    if (!entry) return 0;
-    const auto latency = std::min<uint32_t>(entry->latency, 0xFFU);
-    return static_cast<uint16_t>(
-        kScoreboardBusy | (static_cast<uint16_t>(entry->stage) << kScoreboardStageShift) |
-        (latency << kScoreboardLatencyShift) | (entry->can_forward ? kScoreboardForward : 0));
-}
-
-void unpack_scoreboard_entry(pipeline::Scoreboard& scoreboard, pipeline::operation::RegBank bank,
-                             RegId reg, uint16_t packed) noexcept {
-    if ((packed & kScoreboardBusy) == 0) return;
-    const auto stage = static_cast<pipeline::PipelineStage>((packed >> kScoreboardStageShift) & 7U);
-    const auto latency = static_cast<LatencyCycles>((packed >> kScoreboardLatencyShift) & 0xFFU);
-    scoreboard.reserve(bank, reg, stage, latency, (packed & kScoreboardForward) != 0);
-}
 
 void wait_for_worker_quiescence(std::atomic<uint32_t>& workers_in_cycle) {
     const uint32_t caller_activity = g_secondary_runner_active ? 1U : 0U;
@@ -349,7 +326,11 @@ void Machine::execute_runner_cycle() {
     }
     g_primary_runner_active = true;
     std::visit([this](auto& runner) { runner.execute(*this); }, runtime_->runner);
-    if (tui_enabled()) publish_tui_execution_snapshot();
+    publish_requested_tui_sample(0);
+    if (!config.execution.smp_multithreaded) {
+        for (size_t h = 1; h < num_harts(); ++h) publish_requested_tui_sample(h);
+    }
+    if (is_stepping()) publish_tui_execution_snapshot();
     g_primary_runner_active = false;
 }
 
@@ -362,11 +343,10 @@ auto Machine::execute_runner_fast_batch(uint32_t batch_size) -> bool {
     const bool executed = std::visit(
         [this, batch_size](auto& runner) { return runner.execute_fast_batch(*this, batch_size); },
         runtime_->runner);
-    if (executed && tui_enabled()) {
-        const auto now = std::chrono::steady_clock::now();
-        if (now - last_tui_fast_batch_snapshot_ >= std::chrono::milliseconds(16)) {
-            last_tui_fast_batch_snapshot_ = now;
-            publish_tui_execution_snapshot();
+    if (executed) {
+        publish_requested_tui_sample(0);
+        if (!config.execution.smp_multithreaded) {
+            for (size_t h = 1; h < num_harts(); ++h) publish_requested_tui_sample(h);
         }
     }
     g_primary_runner_active = false;
@@ -382,106 +362,86 @@ void Machine::publish_tui_execution_snapshot() noexcept {
     }
 }
 
+void Machine::publish_requested_tui_sample(size_t hart_index) noexcept {
+    const auto requested = tui_sample_requested_.load(std::memory_order_acquire);
+    if (hart_index >= num_harts() || hart_index >= tui_sample_published_.size() ||
+        tui_sample_published_[hart_index] == requested)
+        return;
+    publish_tui_execution_snapshot_for_hart(hart_index);
+    tui_sample_published_[hart_index] = requested;
+}
+
 void Machine::publish_tui_execution_snapshot_for_hart(size_t hart_index) noexcept {
     if (hart_index >= num_harts() || hart_index >= tui_snapshots_.size()) return;
-    auto& slot = tui_snapshots_[hart_index];
     const auto& source = hart(hart_index);
-    const auto stats = source.pipeline_sim.get_stats();
-    pipeline::Scoreboard scoreboard;
+    auto snapshot = std::make_shared<TuiExecutionSnapshot>();
+    snapshot->hart = hart_index;
+    snapshot->pc = source.state().pc;
+    snapshot->cycle_count = source.clint_mmio.mcycle;
+    snapshot->instruction_count = source.e_icount;
+    snapshot->timer_ticks = primary_hart().clint_mmio.mtime.load(std::memory_order_relaxed);
+    snapshot->ca_stats = source.pipeline_sim.get_stats();
+    snapshot->icache_hits = source.icache.hit_count();
+    snapshot->icache_misses = source.icache.miss_count();
+    snapshot->dcache_hits = source.dcache.hit_count();
+    snapshot->dcache_misses = source.dcache.miss_count();
+    snapshot->execution_state = execution_state();
     if (runtime_profile.is_cycle_mode()) {
-        const auto reserve_slot = [&scoreboard](const pipeline::CycleInstructionSlot* entry,
-                                                pipeline::PipelineStage stage) {
-            if (entry == nullptr || !entry->valid) return;
+        const auto reserve = [&](const pipeline::CycleInstructionSlot* entry,
+                                 pipeline::PipelineStage stage) {
+            if (!entry || !entry->valid) return;
             if (entry->writes_int && entry->wb_dest != RegId::Zero) {
-                scoreboard.reserve(pipeline::operation::RegBank::Integer, entry->wb_dest, stage,
-                                   static_cast<LatencyCycles>(entry->remaining_latency),
-                                   entry->wb_valid);
+                snapshot->scoreboard.reserve(
+                    pipeline::operation::RegBank::Integer, entry->wb_dest, stage,
+                    static_cast<LatencyCycles>(entry->remaining_latency), entry->wb_valid);
             } else if (entry->writes_fp) {
-                scoreboard.reserve(pipeline::operation::RegBank::Float, entry->wb_dest, stage,
-                                   static_cast<LatencyCycles>(entry->remaining_latency),
-                                   entry->wb_valid);
+                snapshot->scoreboard.reserve(
+                    pipeline::operation::RegBank::Float, entry->wb_dest, stage,
+                    static_cast<LatencyCycles>(entry->remaining_latency), entry->wb_valid);
             }
         };
-        reserve_slot(source.ca_pipeline.writeback, pipeline::PipelineStage::Writeback);
-        reserve_slot(source.ca_pipeline.memory, pipeline::PipelineStage::Memory);
-        reserve_slot(source.ca_pipeline.execute, pipeline::PipelineStage::Execute);
-        reserve_slot(source.ca_pipeline.decode, pipeline::PipelineStage::Decode);
+        reserve(source.ca_pipeline.writeback, pipeline::PipelineStage::Writeback);
+        reserve(source.ca_pipeline.memory, pipeline::PipelineStage::Memory);
+        reserve(source.ca_pipeline.execute, pipeline::PipelineStage::Execute);
+        reserve(source.ca_pipeline.decode, pipeline::PipelineStage::Decode);
     }
-    const std::array<uint64_t, 9> packed_stats = {
-        stats.cycle_count,       stats.stall_cycles,       stats.bubble_cycles,
-        stats.icache_stalls,     stats.dcache_stalls,      stats.tlb_stalls,
-        stats.structural_stalls, stats.data_hazard_stalls, stats.control_hazard_bubbles,
-    };
-    slot.generation.fetch_add(1, std::memory_order_acq_rel);
-    slot.pc.store(source.state().pc, std::memory_order_relaxed);
-    slot.cycle_count.store(source.clint_mmio.mcycle, std::memory_order_relaxed);
-    slot.instruction_count.store(source.e_icount, std::memory_order_relaxed);
-    slot.timer_ticks.store(primary_hart().clint_mmio.mtime.load(std::memory_order_relaxed),
-                           std::memory_order_relaxed);
-    for (auto&& [ca, stat] : std::views::zip(slot.ca_stats, packed_stats)) {
-        ca.store(stat, std::memory_order_relaxed);
-    }
-    slot.icache_hits.store(source.icache.hit_count(), std::memory_order_relaxed);
-    slot.icache_misses.store(source.icache.miss_count(), std::memory_order_relaxed);
-    slot.dcache_hits.store(source.dcache.hit_count(), std::memory_order_relaxed);
-    slot.dcache_misses.store(source.dcache.miss_count(), std::memory_order_relaxed);
-    for (size_t reg = 0; reg < 32; ++reg) {
-        const auto reg_id = static_cast<RegId>(reg);
-        slot.scoreboard[reg].store(
-            pack_scoreboard_entry(scoreboard, pipeline::operation::RegBank::Integer, reg_id),
-            std::memory_order_relaxed);
-        slot.scoreboard[32 + reg].store(
-            pack_scoreboard_entry(scoreboard, pipeline::operation::RegBank::Float, reg_id),
-            std::memory_order_relaxed);
-    }
-    slot.execution_state.store(execution_state_.load(std::memory_order_relaxed),
-                               std::memory_order_relaxed);
-    slot.generation.fetch_add(1, std::memory_order_release);
+    tui_snapshots_[hart_index].store(std::move(snapshot), std::memory_order_release);
 }
 
 auto Machine::tui_execution_snapshot(size_t hart_index) const noexcept -> TuiExecutionSnapshot {
-    TuiExecutionSnapshot snapshot{.hart = hart_index};
-    if (hart_index >= num_harts() || hart_index >= tui_snapshots_.size()) return snapshot;
-    const auto& slot = tui_snapshots_[hart_index];
-    while (true) {
-        const uint64_t before = slot.generation.load(std::memory_order_acquire);
-        if ((before & 1U) != 0) continue;
-        snapshot.pc = slot.pc.load(std::memory_order_relaxed);
-        snapshot.cycle_count = slot.cycle_count.load(std::memory_order_relaxed);
-        snapshot.instruction_count = slot.instruction_count.load(std::memory_order_relaxed);
-        snapshot.timer_ticks = slot.timer_ticks.load(std::memory_order_relaxed);
-        std::array<uint64_t, 9> packed_stats{};
-        for (auto&& [ca, stat] : std::views::zip(slot.ca_stats, packed_stats)) {
-            stat = ca.load(std::memory_order_relaxed);
-        }
-        snapshot.ca_stats = {
-            .cycle_count = packed_stats[0],
-            .stall_cycles = packed_stats[1],
-            .bubble_cycles = packed_stats[2],
-            .icache_stalls = packed_stats[3],
-            .dcache_stalls = packed_stats[4],
-            .tlb_stalls = packed_stats[5],
-            .structural_stalls = packed_stats[6],
-            .data_hazard_stalls = packed_stats[7],
-            .control_hazard_bubbles = packed_stats[8],
-        };
-        snapshot.icache_hits = slot.icache_hits.load(std::memory_order_relaxed);
-        snapshot.icache_misses = slot.icache_misses.load(std::memory_order_relaxed);
-        snapshot.dcache_hits = slot.dcache_hits.load(std::memory_order_relaxed);
-        snapshot.dcache_misses = slot.dcache_misses.load(std::memory_order_relaxed);
-        snapshot.scoreboard.reset();
-        for (size_t reg = 0; reg < 32; ++reg) {
-            const auto reg_id = static_cast<RegId>(reg);
-            unpack_scoreboard_entry(snapshot.scoreboard, pipeline::operation::RegBank::Integer,
-                                    reg_id, slot.scoreboard[reg].load(std::memory_order_relaxed));
-            unpack_scoreboard_entry(snapshot.scoreboard, pipeline::operation::RegBank::Float,
-                                    reg_id,
-                                    slot.scoreboard[32 + reg].load(std::memory_order_relaxed));
-        }
-        snapshot.execution_state = slot.execution_state.load(std::memory_order_relaxed);
-        const uint64_t after = slot.generation.load(std::memory_order_acquire);
-        if (before == after) return snapshot;
+    if (hart_index < tui_snapshots_.size()) {
+        if (auto snapshot = tui_snapshots_[hart_index].load(std::memory_order_acquire))
+            return *snapshot;
     }
+    return TuiExecutionSnapshot{.hart = hart_index};
+}
+
+void Machine::post_control(std::function<void(Machine&)> command) {
+    {
+        std::scoped_lock lock(control_mutex_);
+        control_commands_.push_back(std::move(command));
+        controls_pending_.store(true, std::memory_order_release);
+    }
+    notify_control_event();
+}
+
+void Machine::service_control_commands() {
+    std::deque<std::function<void(Machine&)>> commands;
+    {
+        std::scoped_lock lock(control_mutex_);
+        commands.swap(control_commands_);
+        controls_pending_.store(false, std::memory_order_release);
+    }
+    for (auto& command : commands) command(*this);
+}
+
+bool Machine::sampled_instruction_execution() const {
+    return runtime_profile.allows_fast_batch() && !is_stepping() && !lockstep_enabled() &&
+           !debugger_enabled() && !branch_trace_enabled() && config.execution.strace == 0 &&
+           config.execution.trace_begin == std::numeric_limits<Counter>::max() &&
+           !breakpoint_manager().has_any() &&
+           (!telemetry_sink_ || (!telemetry_sink_->captures_execution_detail() &&
+                                 telemetry_sink_->step_delay_us() == 0));
 }
 
 void Machine::finalize_runner_cycle() {
@@ -576,10 +536,9 @@ void RunnerBase::start_threads(Machine& machine, bool baremetal) {
                     } else {
                         hart.run_cycle(machine);
                     }
-                    if (machine.tui_enabled() &&
-                        (step + 1 == kWorkerBatch ||
-                         hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started)) {
-                        machine.publish_tui_execution_snapshot_for_hart(i + 1);
+                    if (step + 1 == kWorkerBatch ||
+                        hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started) {
+                        machine.publish_requested_tui_sample(i + 1);
                     }
                     g_secondary_runner_active = false;
                     workers_in_cycle_.fetch_sub(1, std::memory_order_acq_rel);
@@ -900,7 +859,7 @@ void Machine::pause() {
     for (auto& hart : runtime_->secondary_harts) hart->hart_status.notify_all();
     notify_control_event();
     wait_for_runner_quiescence();
-    if (tui_enabled()) publish_tui_execution_snapshot();
+    if (telemetry_sink_ || tui_enabled()) publish_tui_execution_snapshot();
     if (telemetry_sink_) {
         telemetry_sink_->pause_loop();
     }
@@ -919,6 +878,7 @@ void Machine::resume() {
     if (telemetry_sink_) {
         telemetry_sink_->unpause_loop();
     }
+    simrv::util::benchmark_event("resumed", retired_instruction_count());
 }
 
 void Machine::step() {
@@ -1050,7 +1010,8 @@ void Machine::stop(StopReason reason) {
     for (auto& hart : runtime_->secondary_harts) hart->hart_status.notify_all();
     notify_control_event();
     stop_runner();
-    if (!tui_enabled()) {
+    if (telemetry_sink_ || tui_enabled()) publish_tui_execution_snapshot();
+    if (!tui_enabled() && !persistent_control_) {
         is_running_ = false;
     }
     if (telemetry_sink_) {
@@ -1088,6 +1049,9 @@ void Machine::request_exit(int status) {
 }
 
 void Machine::run() {
+    if (platform_time() == 0 && runtime_->rtc) {
+        runtime_->rtc->sync_with_system_time();
+    }
     publish_lifecycle_event(LifecycleEventKind::Started);
     primary_hart().evaluate_timer_interrupt();
 
@@ -1104,7 +1068,7 @@ void Machine::run() {
     }
 
     // Start background stdin input thread for non-TUI mode
-    if (auto* uart = uart_device(); uart && !tui_enabled()) {
+    if (auto* uart = uart_device(); uart && !tui_enabled() && !persistent_control_) {
         uart->start_input_thread();
     }
 
@@ -1117,8 +1081,18 @@ void Machine::run() {
         }
     }
 
+    simrv::util::benchmark_event("ready", retired_instruction_count());
+    if (!is_paused()) simrv::util::benchmark_event("resumed", retired_instruction_count());
     while (is_running() &&
-           execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
+           (persistent_control_ ||
+            execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped)) {
+        service_control_commands();
+        if (!is_running()) break;
+        if (persistent_control_ && is_stopped()) {
+            const auto generation = control_event_generation_.load(std::memory_order_acquire);
+            if (!has_control_commands()) control_event_generation_.wait(generation);
+            continue;
+        }
         if (runtime_->gdb_stub) runtime_->gdb_stub->service_pending(*this);
         service_debug_halt();
         if (runtime_->gdb_stub && runtime_->gdb_stub->pause_requested() &&
@@ -1134,7 +1108,7 @@ void Machine::run() {
             if (execution_state() != ExecutionState::Paused) continue;
 
             const auto generation = control_event_generation_.load(std::memory_order_acquire);
-            if (execution_state() == ExecutionState::Paused &&
+            if (execution_state() == ExecutionState::Paused && !has_control_commands() &&
                 (!runtime_->gdb_stub || !runtime_->gdb_stub->has_pending_commands())) {
                 control_event_generation_.wait(generation, std::memory_order_relaxed);
             }
@@ -1155,8 +1129,13 @@ void Machine::run() {
                                               std::numeric_limits<Counter>::max() &&
                                           retired_instruction_count() >= config.execution.fincnt)) {
                 simrv::log::info("finished by -e option");
-                stop_reason_ = StopReason::InstructionLimit;
-                is_running_ = false;
+                if (persistent_control_) {
+                    stop(StopReason::InstructionLimit);
+                    simrv::util::benchmark_event("stopped", retired_instruction_count());
+                } else {
+                    stop_reason_ = StopReason::InstructionLimit;
+                    is_running_ = false;
+                }
             }
             if (auto* uart = uart_device();
                 !tui_enabled() && uart && !uart->is_input_thread_running()) {
@@ -1177,8 +1156,13 @@ void Machine::run() {
                                           std::numeric_limits<Counter>::max() &&
                                       retired_instruction_count() >= config.execution.fincnt)) {
             simrv::log::info("finished by -e option");
-            stop_reason_ = StopReason::InstructionLimit;
-            is_running_ = false;
+            if (persistent_control_) {
+                stop(StopReason::InstructionLimit);
+                simrv::util::benchmark_event("stopped", retired_instruction_count());
+            } else {
+                stop_reason_ = StopReason::InstructionLimit;
+                is_running_ = false;
+            }
         }
 
         if (telemetry_sink_) {
@@ -1205,8 +1189,12 @@ void Machine::run() {
                 runtime_->gdb_stub->notify_stop(completed_hart, GdbSignal::SigTrap);
             }
             wait_for_runner_quiescence();
-            if (tui_enabled()) publish_tui_execution_snapshot();
+            if (telemetry_sink_ || tui_enabled()) publish_tui_execution_snapshot();
             acknowledge_step();
+            if (step_completion_) {
+                auto completed = std::move(step_completion_);
+                completed(*this);
+            }
         }
 
         if (runtime_->gdb_stub) runtime_->gdb_stub->service_pending(*this);
@@ -1224,6 +1212,8 @@ void Machine::run() {
     }
 
     stop_runner();
+    if (telemetry_sink_ || tui_enabled()) publish_tui_execution_snapshot();
+    simrv::util::benchmark_event("stopped", retired_instruction_count());
 
     // Stop background TUI thread
     if (telemetry_sink_) {
@@ -1385,13 +1375,7 @@ void Machine::advance_ca_global_cycle() {
             if (secondary->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
                 secondary->advance_ca_cycle(*this);
             }
-            if (tui_enabled()) {
-                publish_tui_execution_snapshot_for_hart(i + 1);
-            }
         }
-    }
-    if (tui_enabled()) {
-        publish_tui_execution_snapshot_for_hart(0);
     }
 
     advance_ca_platform_cycle(true);

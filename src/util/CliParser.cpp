@@ -519,9 +519,12 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.mission = std::string(*value);
         return true;
     }
-    if (arg == "--server" || arg.starts_with("--server=")) {
+    if (arg == "--server" || arg.starts_with("--server=") || arg == "--listen-tui" ||
+        arg.starts_with("--listen-tui=")) {
         result.options.server_mode = true;
-        std::string_view ep = arg.starts_with("--server=") ? arg.substr(9) : "";
+        std::string_view ep = arg.starts_with("--server=")       ? arg.substr(9)
+                              : arg.starts_with("--listen-tui=") ? arg.substr(13)
+                                                                 : "";
         if (ep.empty() && i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
             args[i + 1][0] != '-') {
             ++i;

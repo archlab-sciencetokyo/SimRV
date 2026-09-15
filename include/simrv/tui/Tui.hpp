@@ -21,6 +21,7 @@
 #include "simrv/isa/Base.hpp"
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/tui/LogBuffer.hpp"
+#include "simrv/tui/TuiBackend.hpp"
 #include "simrv/tui/TuiInputRouter.hpp"
 #include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/TuiLayoutPolicy.hpp"
@@ -29,6 +30,7 @@
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
 #include "simrv/tui/panels/StatusBar.hpp"
+#include "simrv/util/UniqueFd.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
@@ -320,8 +322,12 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     std::atomic<bool> ui_running_{false};
     std::atomic<bool> render_requested_{false};
     std::atomic<bool> full_render_requested_{false};
-    std::condition_variable_any ui_cv_;
-    std::mutex ui_cv_mutex_;
+    std::shared_ptr<LocalTuiBackend> backend_;
+    simrv::util::UniqueFd ui_wake_;
+    bool frame_dirty_ = true;
+    std::array<uint8_t, 256> input_bytes_{};
+    size_t input_pos_ = 0;
+    size_t input_size_ = 0;
 
     // Thread-safe queues for decoupling writes from simulation
     std::string tx_buffer_;

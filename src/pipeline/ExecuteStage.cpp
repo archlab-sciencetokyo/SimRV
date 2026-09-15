@@ -282,7 +282,7 @@ void CPU::execute_system(Machine& machine) {
                 break;
             case Funct12Priv::Wfi: {
                 ctx.tkn = false;
-                if ((state_.mip & state_.mie) == 0) {
+                if (machine.appmode_enabled() && (state_.mip & state_.mie) == 0) {
                     const Counter cur_cmp = clint_mmio.mtimecmp.load(std::memory_order_relaxed);
                     if (cur_cmp > clint_mmio.mtime.load(std::memory_order_relaxed) &&
                         cur_cmp != std::numeric_limits<Counter>::max()) {

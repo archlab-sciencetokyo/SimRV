@@ -2,6 +2,9 @@
 """Benchmark SimRV execution profiles with repeatable warmup and sampling."""
 
 import argparse
+import hashlib
+import tempfile
+import shutil
 import errno
 import fcntl
 import json
@@ -27,6 +30,8 @@ def command(args, mode, pipeline, tui):
     result += ["--mode", mode]
     if pipeline:
         result += ["--pipeline", pipeline]
+    if args.smp_multithreaded:
+        result += ["--smp-multithreaded"]
     if args.harts > 1:
         result += ["--smp", str(args.harts)]
     if args.os:
@@ -48,129 +53,117 @@ def parse_speed(raw):
     return value * 1000.0 if match.group(2) == "MIPS" else value
 
 
-def run_cli(cmd, timeout):
+def run_session(cmd, timeout, columns=160, rows=48, tui=False, boot=False):
+    """Measure child events, not presentation labels or fixed startup sleeps."""
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
+    event_read, event_write = os.pipe2(os.O_NONBLOCK)
+    env = dict(os.environ, SIMRV_EVENT_FD=str(event_write))
     usage_before = resource.getrusage(resource.RUSAGE_CHILDREN)
-    started = time.perf_counter()
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                          timeout=timeout, check=False)
-    elapsed = time.perf_counter() - started
-    usage_after = resource.getrusage(resource.RUSAGE_CHILDREN)
-    if proc.returncode != 0:
-        raise RuntimeError(f"command failed ({proc.returncode}): {' '.join(cmd)}")
-    return {
-        "wall_seconds": elapsed,
-        "cpu_seconds": ((usage_after.ru_utime + usage_after.ru_stime) -
-                        (usage_before.ru_utime + usage_before.ru_stime)),
-        "sim_kips": parse_speed(proc.stdout),
-        "terminal_bytes": len(proc.stdout),
-        "frames": 0,
-        "changed_rows": 0,
-        "interaction_latency_ms": None,
-    }
+    started = time.monotonic()
+    proc = subprocess.Popen(cmd, stdin=slave, stdout=slave, stderr=slave,
+                            env=env, pass_fds=(event_write,))
+    os.close(slave)
+    os.close(event_write)
+    os.set_blocking(master, False)
+    output = bytearray()
+    events = {}
+    pending = b""
+    milestones = {}
+    shell_command_sent = False
+    deadline = started + timeout
+    try:
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select([master, event_read], [], [], 0.02)
+            for fd in ready:
+                try:
+                    chunk = os.read(fd, 65536)
+                except OSError as error:
+                    if error.errno not in (errno.EIO, errno.EAGAIN):
+                        raise
+                    chunk = b""
+                if fd == event_read:
+                    pending += chunk
+                    while b"\n" in pending:
+                        line, pending = pending.split(b"\n", 1)
+                        name, ns, retired = line.decode().split()
+                        events[name] = {"time": int(ns) / 1e9, "retired": int(retired)}
+                        if name == "ready" and tui:
+                            os.write(master, b"c")
+                else:
+                    output.extend(chunk)
+            if boot:
+                plain = ANSI_RE.sub(b"", bytes(output[-262144:]))
+                now = time.monotonic()
+                if b"Linux version" in plain:
+                    milestones.setdefault("kernel", now)
+                if b"~ #" in plain and not shell_command_sent:
+                    milestones["shell"] = now
+                    os.write(master, b'echo __SIMRV_BENCH_"OK__"\r')
+                    shell_command_sent = True
+                if b"__SIMRV_BENCH_OK__" in plain:
+                    milestones["command"] = now
+                    os.write(master, b"\x11")
+                    break
+            if proc.poll() is not None:
+                break
+        else:
+            raise TimeoutError(f"benchmark timed out: {' '.join(cmd)}")
+        if boot:
+            proc.wait(timeout=3)
+        else:
+            proc.wait(timeout=2)
+        if proc.returncode != 0:
+            raise RuntimeError(f"command failed ({proc.returncode}): {' '.join(cmd)}")
+        if "ready" not in events or "resumed" not in events:
+            raise RuntimeError("missing simulator-ready/resume acknowledgement")
+        if not boot and "stopped" not in events:
+            # Drain the event pipe after process exit, which can race the final select.
+            pending += os.read(event_read, 65536)
+            for line in pending.splitlines():
+                name, ns, retired = line.decode().split()
+                events[name] = {"time": int(ns) / 1e9, "retired": int(retired)}
+        finished = time.monotonic()
+        execution_end = milestones.get("command", events.get("stopped", {}).get("time"))
+        if execution_end is None:
+            raise RuntimeError("missing completion event")
+        resumed = events["resumed"]["time"]
+        usage_after = resource.getrusage(resource.RUSAGE_CHILDREN)
+        raw = bytes(output)
+        result = {
+            "wall_seconds": finished - started,
+            "initialization_seconds": events["ready"]["time"] - started,
+            "resume_latency_ms": (resumed - events["ready"]["time"]) * 1000,
+            "execution_seconds": execution_end - resumed,
+            "teardown_seconds": finished - execution_end,
+            "cpu_seconds": ((usage_after.ru_utime + usage_after.ru_stime) -
+                            (usage_before.ru_utime + usage_before.ru_stime)),
+            "sim_kips": parse_speed(raw),
+            "terminal_bytes": len(raw),
+            "frames": raw.count(b"\x1b[?25l"),
+            "changed_rows": len(re.findall(rb"\x1b\[\d+;1H", raw)),
+        }
+        result.update({f"{name}_seconds": stamp - resumed
+                       for name, stamp in milestones.items()})
+        return result
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+        os.close(master)
+        os.close(event_read)
+
+
+def run_cli(cmd, timeout):
+    return run_session(cmd, timeout)
 
 
 def run_tui(cmd, timeout, columns, rows, instruction_limit):
-    master, slave = pty.openpty()
-    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
-    usage_before = resource.getrusage(resource.RUSAGE_CHILDREN)
-    started = time.perf_counter()
-    proc = subprocess.Popen(cmd, stdin=slave, stdout=slave, stderr=slave, close_fds=True)
-    os.close(slave)
-    os.set_blocking(master, False)
-    output = bytearray()
-    run_sent_at = None
-    last_resume_at = None
-    first_frame_at = None
-    quit_sent = False
-    last_status = None
-    deadline = started + timeout
-    try:
-        while proc.poll() is None and time.perf_counter() < deadline:
-            now = time.perf_counter()
-            if run_sent_at is None and now - started >= 1.0:
-                os.write(master, b"\x10")
-                run_sent_at = now
-                last_resume_at = now
-            elif (run_sent_at is not None and last_status == "PAUSED" and
-                  now - (last_resume_at or run_sent_at) >= 0.25):
-                os.write(master, b"c")
-                last_resume_at = now
-            ready, _, _ = select.select([master], [], [], 0.02)
-            if ready:
-                try:
-                    chunk = os.read(master, 1 << 16)
-                except BlockingIOError:
-                    chunk = b""
-                except OSError as error:
-                    if error.errno != errno.EIO:
-                        raise
-                    chunk = b""
-                if chunk:
-                    output.extend(chunk)
-                    if run_sent_at is None and b"\x1b[?25l" in chunk:
-                        os.write(master, b"\x10")
-                        run_sent_at = time.perf_counter()
-                        last_resume_at = run_sent_at
-                        last_status = "PAUSED"
-                    elif run_sent_at is not None and first_frame_at is None and b"\x1b[?25l" in chunk:
-                        first_frame_at = time.perf_counter()
-                    latest_frame = bytes(output[output.rfind(b"\x1b[?25l"):])
-                    plain_frame = ANSI_RE.sub(b"", latest_frame)
-                    status = ("RUNNING" if b"RUNNING" in plain_frame else
-                              "PAUSED" if b"PAUSED" in plain_frame else None)
-                    if (run_sent_at is not None and status == "PAUSED" and
-                            (last_status != "PAUSED" or
-                             now - (last_resume_at or run_sent_at) >= 0.25)):
-                        os.write(master, b"c")
-                        last_resume_at = now
-                    if status is not None:
-                        last_status = status
-            if not quit_sent and b"finished by -e option" in output:
-                os.write(master, b"q")
-                quit_sent = True
-        if proc.poll() is None:
-            proc.terminate()
-            proc.wait(timeout=2)
-            tail = ANSI_RE.sub(b"", bytes(output[-2000:])).decode("utf-8", "replace")
-            raise TimeoutError(f"TUI benchmark timed out: {' '.join(cmd)}\n{tail}")
-        while True:
-            try:
-                chunk = os.read(master, 1 << 16)
-                if not chunk:
-                    break
-                output.extend(chunk)
-            except BlockingIOError:
-                break
-            except OSError as error:
-                if error.errno != errno.EIO:
-                    raise
-                break
-    finally:
-        try:
-            os.close(master)
-        except OSError:
-            pass
-    elapsed = time.perf_counter() - started
-    usage_after = resource.getrusage(resource.RUSAGE_CHILDREN)
-    raw = bytes(output)
-    if proc.returncode != 0:
-        raise RuntimeError(f"TUI command failed ({proc.returncode}): {' '.join(cmd)}")
-    execution_seconds = elapsed if run_sent_at is None else time.perf_counter() - run_sent_at
-    sim_kips = parse_speed(raw)
-    if sim_kips is None and execution_seconds > 0:
-        sim_kips = instruction_limit / execution_seconds / 1000.0
-    return {
-        "wall_seconds": elapsed,
-        "execution_seconds": execution_seconds,
-        "cpu_seconds": ((usage_after.ru_utime + usage_after.ru_stime) -
-                        (usage_before.ru_utime + usage_before.ru_stime)),
-        "sim_kips": sim_kips,
-        "terminal_bytes": len(raw),
-        "frames": raw.count(b"\x1b[?25l"),
-        "changed_rows": len(re.findall(rb"\x1b\[\d+;1H", raw)),
-        "interaction_latency_ms": ((first_frame_at - run_sent_at) * 1000.0
-                                   if first_frame_at and run_sent_at else None),
-    }
+    return run_session(cmd, timeout, columns, rows, tui=True)
 
 
 def summarize(samples):
@@ -193,7 +186,7 @@ def compare(report, baseline, threshold):
         previous = baseline.get("modes", {}).get(mode)
         if not previous:
             continue
-        metric = "execution_seconds" if mode.endswith("tui") else "wall_seconds"
+        metric = "execution_seconds"
         old = previous[metric]["median"]
         new = current[metric]["median"]
         noise = max(previous[metric].get("cv_percent", 0.0),
@@ -210,6 +203,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--simrv", default="./build/rv64-release/SimRV")
     parser.add_argument("--image", required=True)
+    parser.add_argument("--boot", action="store_true", help="measure Linux boot through a shell command")
+    parser.add_argument("--smp-multithreaded", action="store_true")
     parser.add_argument("--os", action="store_true", help="benchmark the Linux OS runner")
     parser.add_argument("--disk", help="Linux root disk image (required with --os)")
     parser.add_argument("--dtb", help="optional Linux device-tree blob")
@@ -227,6 +222,9 @@ def main():
     parser.add_argument("--baseline")
     parser.add_argument("--regression-threshold", type=float, default=0.03)
     args = parser.parse_args()
+    if args.boot:
+        args.os = True
+        args.limit = 10000000000
     if args.os and not args.disk:
         parser.error("--disk is required with --os")
     if not 1 <= args.harts <= 64:
@@ -247,24 +245,34 @@ def main():
     if unknown_modes:
         parser.error(f"unknown benchmark mode(s): {', '.join(sorted(unknown_modes))}")
     modes = tuple(mode for mode in available_modes if mode[0] in requested_modes)
-    report = {"schema": 2, "limit": args.limit, "harts": args.harts,
+    def digest(path):
+        with open(path, "rb") as source:
+            return hashlib.file_digest(source, "sha256").hexdigest()
+    report = {"schema": 3, "simrv_sha256": digest(args.simrv),
+              "image_sha256": digest(args.image),
+              "disk_sha256": digest(args.disk) if args.os else None,
+              "smp_multithreaded": args.smp_multithreaded, "limit": args.limit, "harts": args.harts,
               "terminal": [args.columns, args.rows], "modes": {}}
     for name, mode, pipeline, tui in modes:
         cmd = command(args, mode, pipeline, tui)
+        def sample():
+            with tempfile.TemporaryDirectory(prefix="simrv-benchmark-") as directory:
+                isolated = list(cmd)
+                if args.os:
+                    disk = os.path.join(directory, "root.img")
+                    subprocess.run(["cp", "--reflink=auto", "--sparse=always", args.disk, disk],
+                                   check=True)
+                    isolated[isolated.index("-D") + 1] = disk
+                return run_session(isolated, args.timeout, args.columns, args.rows,
+                                   tui=tui, boot=args.boot)
         for _ in range(args.warmup):
-            if tui:
-                run_tui(cmd, args.timeout, args.columns, args.rows, args.limit)
-            else:
-                run_cli(cmd, args.timeout)
-        samples = []
-        for _ in range(args.runs):
-            samples.append(run_tui(cmd, args.timeout, args.columns, args.rows, args.limit)
-                           if tui else run_cli(cmd, args.timeout))
+            sample()
+        samples = [sample() for _ in range(args.runs)]
         report["modes"][name] = summarize(samples)
         print(f"{name:7} {report['modes'][name]['wall_seconds']['median']:.4f}s median")
 
     if "fast-cli" in report["modes"] and "fast-tui" in report["modes"]:
-        cli_seconds = report["modes"]["fast-cli"]["wall_seconds"]["median"]
+        cli_seconds = report["modes"]["fast-cli"]["execution_seconds"]["median"]
         tui_seconds = report["modes"]["fast-tui"]["execution_seconds"]["median"]
         parity = cli_seconds / tui_seconds * 100.0 if tui_seconds else 0.0
         print(f"ia sampled-TUI throughput: {parity:.1f}% of CLI")

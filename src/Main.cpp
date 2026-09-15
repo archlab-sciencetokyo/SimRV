@@ -72,6 +72,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     std::optional<simrv::core::MachineConfig> staged_configuration;
     std::optional<simrv::core::RuntimeProfile> staged_runtime_profile;
 
+    std::shared_ptr<simrv::net::SimRvServer> ipc_server;
     bool keep_running = true;
     int final_exit_code = 0;
     while (keep_running) {
@@ -111,6 +112,11 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             option_error("cannot open log file: " + parsed->options.fn_log, 0);
         }
 
+        if (parsed->options.server_mode) {
+            parsed->options.tuimode = false;
+            is_tui = false;
+            simrv::log::set_tui_mode(false);
+        }
         auto machine_config = staged_configuration.value_or(parsed->options.to_machine_config());
         if (const auto valid = machine_config.validate(); !valid) {
             option_error(valid.error(), 0);
@@ -126,6 +132,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             }
         }
 
+        sim_machine->set_persistent_control(parsed->options.server_mode);
         const auto init_result = sim_machine->initialize();
         if (!init_result) {
             simrv::log::error("Machine initialization failed: {}", init_result.error());
@@ -142,23 +149,23 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             tui->initialize();
         }
 
-        std::unique_ptr<simrv::net::SimRvServer> ipc_server;
         if (parsed->options.server_mode) {
-            ipc_server = std::make_unique<simrv::net::SimRvServer>(*sim_machine,
-                                                                   parsed->options.server_endpoint);
-            sim_machine->set_telemetry_sink(std::shared_ptr<simrv::net::SimRvServer>(
-                ipc_server.get(), [](simrv::net::SimRvServer*) {}));
-            sim_machine->set_console_sink(std::shared_ptr<simrv::net::SimRvServer>(
-                ipc_server.get(), [](simrv::net::SimRvServer*) {}));
+            if (ipc_server)
+                ipc_server->bind(*sim_machine);
+            else
+                ipc_server = std::make_shared<simrv::net::SimRvServer>(
+                    *sim_machine, parsed->options.server_endpoint);
+            sim_machine->set_telemetry_sink(ipc_server);
+            sim_machine->set_console_sink(ipc_server);
             if (!ipc_server->start()) {
-                simrv::log::error("Failed to start IPC server daemon");
+                ipc_server->unbind();
                 return 1;
             }
         }
 
         // Initialize terminal in raw mode for simulator I/O.
         TerminalModeGuard terminal_mode;
-        if (!terminal_mode.enable_raw_mode()) {
+        if (!parsed->options.server_mode && !terminal_mode.enable_raw_mode()) {
             if (!is_tui) {
                 simrv::log::warn("Terminal raw mode setup failed; continuing in current mode");
             }
@@ -175,7 +182,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         }
 
         if (ipc_server) {
-            ipc_server->stop();
+            ipc_server->unbind();
         }
 
         if (sim_machine->reboot_requested) {

@@ -28,7 +28,7 @@ class Rtc : public memory::TileLinkNode {
     static constexpr Address kBaseAddress = static_cast<Address>(0x70000000u);
     static constexpr Address kSize = static_cast<Address>(0x00001000u);
     static constexpr Address kRtcOffset = static_cast<Address>(0x0u);
-    static constexpr uint32_t kRtcIrq = 3;
+    static constexpr uint32_t kRtcIrq = 11;
 
     [[nodiscard]] auto name() const -> const char* override { return "rtc"; }
     [[nodiscard]] auto base_address() const -> Address override { return kBaseAddress; }
@@ -43,6 +43,7 @@ class Rtc : public memory::TileLinkNode {
     simrv::core::Machine& machine_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     uint64_t base_epoch_ns_{0};
     uint64_t alarm_time_{0};
+    uint32_t latched_time_high_{0};
     bool alarm_enabled_{false};
     bool alarm_status_{false};
 };

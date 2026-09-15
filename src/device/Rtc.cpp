@@ -43,14 +43,15 @@ auto Rtc::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp
     const Address offset = (req.address - kBaseAddress).raw();
 
     if (!is_write) {
-        const uint64_t rtc_ns = current_time_ns();
-
         switch (offset) {
-            case kRtcOffset:  // TIME_LOW (0x00)
+            case kRtcOffset: {  // TIME_LOW (0x00)
+                const uint64_t rtc_ns = current_time_ns();
+                latched_time_high_ = static_cast<uint32_t>(rtc_ns >> 32);
                 resp.data = static_cast<Word>(rtc_ns & 0xffffffffULL);
                 break;
+            }
             case kRtcOffset + 4:  // TIME_HIGH (0x04)
-                resp.data = static_cast<Word>(rtc_ns >> 32);
+                resp.data = static_cast<Word>(latched_time_high_);
                 break;
             case 0x10:  // IRQ_ENABLED
                 resp.data = alarm_enabled_ ? 1 : 0;
@@ -64,13 +65,18 @@ auto Rtc::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp
         }
     } else {
         switch (offset) {
-            case kRtcOffset:  // TIME_LOW (0x00)
-                base_epoch_ns_ = (base_epoch_ns_ & 0xffffffff00000000ULL) | req.data;
+            case kRtcOffset: {  // TIME_LOW (0x00)
+                const uint64_t target = (current_time_ns() & 0xffffffff00000000ULL) |
+                                        (static_cast<uint64_t>(req.data) & 0xffffffffULL);
+                base_epoch_ns_ = target - (machine_.platform_time() * 100ULL);
                 break;
-            case kRtcOffset + 4:  // TIME_HIGH (0x04)
-                base_epoch_ns_ = (base_epoch_ns_ & 0x00000000ffffffffULL) |
-                                 (static_cast<uint64_t>(req.data) << 32);
+            }
+            case kRtcOffset + 4: {  // TIME_HIGH (0x04)
+                const uint64_t target = (current_time_ns() & 0x00000000ffffffffULL) |
+                                        (static_cast<uint64_t>(req.data) << 32);
+                base_epoch_ns_ = target - (machine_.platform_time() * 100ULL);
                 break;
+            }
             case 0x08:  // ALARM_LOW
                 alarm_time_ = (alarm_time_ & 0xffffffff00000000ULL) | req.data;
                 break;

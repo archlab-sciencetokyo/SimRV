@@ -8,7 +8,9 @@
 #include <cstdint>
 #include <cstring>
 #include <span>
+#include <stdexcept>
 #include <string_view>
+#include <vector>
 
 namespace simrv::net {
 
@@ -18,6 +20,10 @@ enum class ChannelId : uint8_t {
     Control = 0x00,
     Console = 0x01,
     Telemetry = 0x02,
+    Hello = 0x03,
+    Reply = 0x04,
+    Terminal = 0x05,
+    Lifecycle = 0x06,
 };
 
 namespace FrameFlags {
@@ -51,4 +57,42 @@ struct TelemetryPacket {
 
 static_assert(sizeof(FrameHeader) == 8, "FrameHeader must be exactly 8 bytes");
 
+}  // namespace simrv::net
+
+// Version 2 uses bounded little-endian fields, never host object layouts.
+namespace simrv::net {
+inline constexpr uint64_t kProtocolVersion = 2;
+inline constexpr size_t kMaxPayload = 1024 * 1024;
+inline void put_u64(std::vector<uint8_t>& out, uint64_t value) {
+    for (unsigned i = 0; i < 8; ++i) out.push_back(static_cast<uint8_t>(value >> (i * 8)));
+}
+inline auto get_u64(std::span<const uint8_t>& input) -> uint64_t {
+    if (input.size() < 8) throw std::runtime_error("truncated protocol field");
+    uint64_t value = 0;
+    for (unsigned i = 0; i < 8; ++i) value |= uint64_t(input[i]) << (i * 8);
+    input = input.subspan(8);
+    return value;
+}
+inline auto make_frame(ChannelId channel, std::span<const uint8_t> payload)
+    -> std::vector<uint8_t> {
+    if (payload.size() > kMaxPayload) throw std::runtime_error("oversized frame");
+    std::vector<uint8_t> out{0x52, 0x53, static_cast<uint8_t>(channel), 0};
+    for (unsigned i = 0; i < 4; ++i) out.push_back(static_cast<uint8_t>(payload.size() >> (i * 8)));
+    out.insert(out.end(), payload.begin(), payload.end());
+    return out;
+}
+inline bool take_frame(std::vector<uint8_t>& input, ChannelId& channel,
+                       std::vector<uint8_t>& payload) {
+    if (input.size() < 8) return false;
+    if (input[0] != 0x52 || input[1] != 0x53 || input[3] != 0)
+        throw std::runtime_error("invalid frame header");
+    size_t size = 0;
+    for (unsigned i = 0; i < 4; ++i) size |= size_t(input[4 + i]) << (i * 8);
+    if (size > kMaxPayload) throw std::runtime_error("oversized frame");
+    if (input.size() < size + 8) return false;
+    channel = static_cast<ChannelId>(input[2]);
+    payload.assign(input.begin() + 8, input.begin() + 8 + size);
+    input.erase(input.begin(), input.begin() + 8 + size);
+    return true;
+}
 }  // namespace simrv::net

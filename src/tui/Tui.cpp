@@ -4,6 +4,8 @@
  */
 #include "simrv/tui/Tui.hpp"
 
+#include <poll.h>
+#include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <termios.h>
@@ -65,7 +67,7 @@ extern "C" void emergency_terminal_restore() {
     std::fflush(stdout);
     if (g_tui_active) {
         const char* shutdown_seq =
-            "\033[0m\033[?1006l\033[?1000l\033[?25h\033[2J\033[H\033[?1049l\n";
+            "\033[0m\033[?1006l\033[?1002l\033[?1000l\033[?25h\033[2J\033[H\033[?1049l\n";
         (void)(::write(STDOUT_FILENO, shutdown_seq, std::strlen(shutdown_seq)) == 0);
         g_tui_active = false;
     }
@@ -78,7 +80,7 @@ static void handle_termination_signal(int sig) {
     if (g_tui_active) {
         using namespace std::string_view_literals;
         auto constexpr shutdown_seq =
-            "\033[0m\033[?1006l\033[?1000l\033[?25h\033[2J\033[H\033[?1049l\n"sv;
+            "\033[0m\033[?1006l\033[?1002l\033[?1000l\033[?25h\033[2J\033[H\033[?1049l\n"sv;
         (void)(::write(STDOUT_FILENO, shutdown_seq.data(), shutdown_seq.size()) == 0);
         g_tui_active = false;
     }
@@ -164,6 +166,7 @@ void Tui::set_paused(bool p) {
 }
 
 void Tui::initialize() {
+    backend_ = std::make_shared<LocalTuiBackend>(machine_);
     inspector_pane_ = std::make_unique<InspectorPane>(machine_, this);
     inspector_pane_->set_mission_progress(&mission_);
     terminal_pane_ = std::make_unique<TerminalPane>();
@@ -311,6 +314,7 @@ void Tui::initialize() {
 
 void Tui::shutdown() {
     stop_ui_thread();
+    if (backend_) backend_->detach();
     simrv::log::set_tui_callback(nullptr);
     emergency_terminal_restore();
 
@@ -325,6 +329,9 @@ void Tui::start_ui_thread() {
     if (ui_running_.load(std::memory_order_relaxed)) {
         return;
     }
+    ui_wake_.reset(eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC));
+    if (!ui_wake_) throw std::runtime_error("cannot create TUI wake descriptor");
+    machine_.request_tui_sample();
     ui_running_.store(true, std::memory_order_release);
     ui_thread_ =
         std::jthread([this](const std::stop_token& stop_token) { ui_render_loop(stop_token); });
@@ -335,7 +342,7 @@ void Tui::stop_ui_thread() {
         return;
     }
     ui_running_.store(false, std::memory_order_release);
-    ui_cv_.notify_all();
+    trigger_immediate_render();
     if (ui_thread_.joinable()) {
         ui_thread_.request_stop();
         if (ui_thread_.get_id() != std::this_thread::get_id()) {
@@ -347,58 +354,52 @@ void Tui::stop_ui_thread() {
 }
 
 void Tui::trigger_immediate_render() {
-    if (!render_requested_.exchange(true, std::memory_order_acq_rel)) {
-        ui_cv_.notify_all();
+    if (!render_requested_.exchange(true, std::memory_order_acq_rel) && ui_wake_) {
+        const uint64_t one = 1;
+        (void)::write(ui_wake_.get(), &one, sizeof(one));
     }
 }
 
 void Tui::ui_render_loop(const std::stop_token& stop_token) {
+    auto next_sample = std::chrono::steady_clock::now();
     while (!stop_token.stop_requested() && ui_running_.load(std::memory_order_relaxed)) {
+        render_requested_.store(false, std::memory_order_release);
         processing_ui_input_.store(true, std::memory_order_release);
         update();
         processing_ui_input_.store(false, std::memory_order_release);
-
+        const auto now = std::chrono::steady_clock::now();
+        const auto interval =
+            std::chrono::milliseconds(std::max(1u, 1000 / std::clamp(target_fps(), 1u, 120u)));
+        if (now >= next_sample) {
+            if (!is_paused() && backend_) backend_->request_sample();
+            next_sample = now + interval;
+        }
         const bool force = full_render_requested_.exchange(false, std::memory_order_acq_rel);
-        // Sampled frames must not chase the simulator's mutable register file. Only states
-        // promising instruction-precise inspection refresh the live register cache.
-        const bool detailed_frame = captures_execution_detail();
-        if (g_resized) {
-            update_cache();
-            render(true);
-        } else if (detailed_frame) {
-            update_cache();
-            render(force);
-        } else {
-            render(force);
+        if (is_paused() && (force || g_resized)) update_cache();
+        render(force);
+        const auto deadline = is_paused() && !frame_dirty_ ? now + std::chrono::milliseconds(200)
+                                                           : last_draw_time_ + interval;
+        const int timeout = static_cast<int>(
+            std::max<int64_t>(0, std::chrono::duration_cast<std::chrono::milliseconds>(
+                                     deadline - std::chrono::steady_clock::now())
+                                     .count()));
+        pollfd fds[] = {{STDIN_FILENO, POLLIN, 0}, {ui_wake_.get(), POLLIN, 0}};
+        (void)::poll(fds, 2, timeout);
+        if (fds[1].revents & POLLIN) {
+            uint64_t pending;
+            (void)::read(ui_wake_.get(), &pending, sizeof(pending));
         }
-
-        const bool is_sim_paused = is_paused();
-        const uint32_t target_fps = tui_target_fps_.load(std::memory_order_relaxed);
-        uint32_t active_fps = target_fps > 0 ? target_fps : 30;
-        if (!is_sim_paused && !machine_.runtime_profile.is_cycle_mode()) {
-            // Adaptively throttle to 15-20 FPS during heavy IA execution to prioritize simulation
-            // speed
-            active_fps = std::min(active_fps, 20u);
-        }
-        const auto sleep_dur = is_sim_paused
-                                   ? std::chrono::milliseconds(80)
-                                   : std::chrono::milliseconds(1000 / std::max(1u, active_fps));
-
-        std::unique_lock<std::mutex> lock(ui_cv_mutex_);
-        ui_cv_.wait_for(lock, sleep_dur, [this, &stop_token]() {
-            return stop_token.stop_requested() || !ui_running_.load(std::memory_order_relaxed) ||
-                   render_requested_.load(std::memory_order_relaxed);
-        });
-        render_requested_.store(false, std::memory_order_relaxed);
     }
 }
 
 void Tui::handle_char_write(char ch) {
+    bool notify = false;
     {
         std::scoped_lock lock(io_mutex_);
+        notify = tx_buffer_.empty();
         tx_buffer_.push_back(ch);
     }
-    trigger_immediate_render();
+    if (notify) trigger_immediate_render();
 }
 
 void Tui::print_log(const std::string& msg) {
@@ -622,6 +623,7 @@ void Tui::render(bool force) {
     }
     const bool has_tx = !local_tx.empty();
     const bool has_log = !local_log.empty();
+    frame_dirty_ = frame_dirty_ || has_tx || has_log;
 
     if (!local_tx.empty()) vt_.write_string(local_tx);
 
@@ -643,15 +645,14 @@ void Tui::render(bool force) {
 
     // A paused, unchanged frame has no sampled execution state to consume.  Input, logs,
     // resizes, explicit renders, and expiring status messages still invalidate it immediately.
-    if (!force && !resized && is_paused() && !has_tx && !has_log &&
+    if (!force && !resized && is_paused() && !frame_dirty_ &&
         !trace_or_livetrace_active_.load(std::memory_order_relaxed) && !status_expiring) {
         return;
     }
 
-    if (!force && !resized) {
-        bool const is_active = !paused_ || has_tx || has_log;
-        if ((is_active && elapsed_ms < 16) || (!is_active && elapsed_ms < 200)) return;
-    }
+    if (!force && !resized && elapsed_ms < std::max(1u, 1000 / std::clamp(target_fps(), 1u, 120u)))
+        return;
+    frame_dirty_ = false;
     last_draw_time_ = now;
     if (resized) g_resized = 0;
 
@@ -1724,22 +1725,15 @@ void Tui::adjust_inspector_width(int delta) {
 }
 
 auto Tui::poll_keyboard(uint8_t& byte_out) -> bool {
-    constexpr int stdin_fd = STDIN_FILENO;
-    fd_set read_fds;
-    struct timeval timeout{.tv_sec = 0, .tv_usec = 0};
-    FD_ZERO(&read_fds);
-    FD_SET(stdin_fd, &read_fds);
-    if (select(stdin_fd + 1, &read_fds, nullptr, nullptr, &timeout) <= 0) {
-        return false;
+    if (input_pos_ == input_size_) {
+        pollfd fd{STDIN_FILENO, POLLIN, 0};
+        if (::poll(&fd, 1, 0) <= 0 || !(fd.revents & POLLIN)) return false;
+        const auto count = ::read(STDIN_FILENO, input_bytes_.data(), input_bytes_.size());
+        if (count <= 0) return false;
+        input_pos_ = 0;
+        input_size_ = static_cast<size_t>(count);
     }
-    if (!FD_ISSET(stdin_fd, &read_fds)) {
-        return false;
-    }
-    uint8_t byte = 0;
-    if (::read(stdin_fd, &byte, 1) != 1) {
-        return false;
-    }
-    byte_out = byte;
+    byte_out = input_bytes_[input_pos_++];
     return true;
 }
 
@@ -2779,6 +2773,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
     int y = 0;
     if (parse_sgr_mouse(esc_buf_, button, x, y)) {
         if (esc_buf_.back() == 'm') {
+            // Button release — finalize any active selection drag.
             if (selection_.is_selecting) {
                 selection_.is_selecting = false;
                 if (selection_.start_x != selection_.end_x ||
@@ -2786,6 +2781,19 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                     copy_active_selection();
                 }
                 render(true);
+            }
+            return true;
+        }
+
+        // Motion event while button held (button | 32): update drag endpoint.
+        // These are generated by ?1002h (button-motion mode) and must be consumed
+        // here — never forwarded to the guest UART.
+        if (esc_buf_.back() == 'M' && (button & 32) != 0) {
+            if (selection_.is_selecting) {
+                selection_.end_x = x - 1;
+                selection_.end_y = y;
+                selection_.is_active = true;
+                render(false);
             }
             return true;
         }
@@ -2888,6 +2896,37 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                 }
                 return true;
             }
+        }
+
+        if (esc_buf_.back() == 'M' && button == 0 && y >= 4) {
+            // Start a new selection drag on left-button press in the content area.
+            selection_ = SelectionState{};
+            selection_.start_x = x - 1;
+            selection_.start_y = y;
+            selection_.end_x = x - 1;
+            selection_.end_y = y;
+            // Determine which pane the press landed in for the selection context.
+            struct winsize w_sel{};
+            ioctl(STDOUT_FILENO, TIOCGWINSZ, &w_sel);
+            int sel_w = w_sel.ws_col > 0 ? w_sel.ws_col : 80;
+            auto sel_cols = framework::multi_column_widths(sel_w, layout_, user_inspector_width_);
+            int cur_cx = 1;
+            SelectionPane sel_pane = SelectionPane::None;
+            for (size_t ci = 0; ci < sel_cols.count; ++ci) {
+                int cw = sel_cols.widths[ci];
+                if (x >= cur_cx && (x < cur_cx + cw + 1 || ci + 1 == sel_cols.count)) {
+                    if (ci < workbench_slots_.size() &&
+                        workbench_slots_[ci].page == TuiRegPage::CONSOLE) {
+                        sel_pane = SelectionPane::TerminalPane;
+                    } else {
+                        sel_pane = SelectionPane::InspectorPane;
+                    }
+                    break;
+                }
+                cur_cx += cw + 1;
+            }
+            selection_.pane = sel_pane;
+            selection_.is_selecting = true;
         }
 
         if (esc_buf_.back() == 'M') {

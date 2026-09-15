@@ -989,6 +989,7 @@ void test_ca_mt_smp_pause_and_snapshots() {
         }
     });
     const auto all_workers_started = [&] {
+        machine.request_tui_sample();
         for (size_t hart = 0; hart < kNumHarts; ++hart) {
             if (machine.tui_execution_snapshot(hart).cycle_count == 0) return false;
         }
@@ -1018,6 +1019,7 @@ void test_ca_mt_smp_pause_and_snapshots() {
     machine.stop_runner_for_testing();
     machine.resume();
     machine.start_runner_for_testing();
+    machine.request_tui_sample();
     const auto resume_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (machine.tui_execution_snapshot(1).cycle_count == paused_cycles[1] &&
            std::chrono::steady_clock::now() < resume_deadline) {

@@ -1,10 +1,10 @@
 #pragma once
-
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -364,6 +364,10 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto telemetry_sink() const noexcept -> std::shared_ptr<const ITelemetrySink> {
         return telemetry_sink_;
     }
+    // Sink ownership is fixed while runners are active.
+    [[nodiscard]] auto telemetry_sink_raw() const noexcept -> ITelemetrySink* {
+        return telemetry_sink_.get();
+    }
     void set_telemetry_sink(std::shared_ptr<ITelemetrySink> sink) noexcept {
         telemetry_sink_ = std::move(sink);
     }
@@ -407,6 +411,22 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto execute_fast_batch_for_testing(uint32_t batch_size) -> bool {
         return execute_runner_fast_batch(batch_size);
     }
+    // Commands execute between runner turns, including while paused or stopped in server mode.
+    void post_control(std::function<void(Machine&)> command);
+    void service_control_commands();
+    [[nodiscard]] bool has_control_commands() const noexcept {
+        return controls_pending_.load(std::memory_order_acquire);
+    }
+    void set_persistent_control(bool enabled) noexcept { persistent_control_ = enabled; }
+    [[nodiscard]] bool persistent_control() const noexcept { return persistent_control_; }
+    void complete_step_with(std::function<void(Machine&)> callback) {
+        step_completion_ = std::move(callback);
+    }
+    [[nodiscard]] bool sampled_instruction_execution() const;
+    void request_tui_sample() noexcept {
+        tui_sample_requested_.fetch_add(1, std::memory_order_release);
+    }
+    void publish_requested_tui_sample(size_t hart) noexcept;
     void publish_tui_execution_snapshot_for_testing() noexcept { publish_tui_execution_snapshot(); }
     void start_runner_for_testing() { start_runner(); }
     void stop_runner_for_testing() { stop_runner(); }
@@ -435,6 +455,11 @@ class Machine final : public core::IInterruptController {
     void advance_ca_platform_cycle(bool synchronize_secondary_harts);
     void service_debug_halt();
 
+    std::mutex control_mutex_;
+    std::deque<std::function<void(Machine&)>> control_commands_;
+    std::atomic<bool> controls_pending_{false};
+    bool persistent_control_ = false;
+    std::function<void(Machine&)> step_completion_;
     mutable std::mutex staged_configuration_mutex_;
     std::optional<MachineConfig> staged_configuration_;
     void publish_lifecycle_event(LifecycleEventKind kind, int exit_status = 0);
@@ -470,23 +495,12 @@ class Machine final : public core::IInterruptController {
     std::atomic<bool> debug_halt_pending_{false};
     std::mutex debug_halt_mutex_;
     std::optional<PendingDebugHalt> pending_debug_halt_;
-    struct TuiSnapshotSlot {
-        std::atomic<uint64_t> generation{0};
-        std::atomic<Register> pc{0};
-        std::atomic<Counter> cycle_count{0};
-        std::atomic<Counter> instruction_count{0};
-        std::atomic<Counter> timer_ticks{0};
-        std::array<std::atomic<uint64_t>, 9> ca_stats{};
-        std::atomic<uint64_t> icache_hits{0};
-        std::atomic<uint64_t> icache_misses{0};
-        std::atomic<uint64_t> dcache_hits{0};
-        std::atomic<uint64_t> dcache_misses{0};
-        std::array<std::atomic<uint16_t>, 64> scoreboard{};
-        std::atomic<ExecutionState> execution_state{ExecutionState::Stopped};
-    };
     static constexpr size_t kMaxTuiSnapshotHarts = 64;
-    std::array<TuiSnapshotSlot, kMaxTuiSnapshotHarts> tui_snapshots_{};
-    std::chrono::steady_clock::time_point last_tui_fast_batch_snapshot_{};
+    // Immutable snapshots: readers never spin on a running producer or read live registers.
+    std::array<std::atomic<std::shared_ptr<const TuiExecutionSnapshot>>, kMaxTuiSnapshotHarts>
+        tui_snapshots_{};
+    std::atomic<uint64_t> tui_sample_requested_{0};
+    std::array<uint64_t, kMaxTuiSnapshotHarts> tui_sample_published_{};
 
     friend class RunnerBase;
     friend class BaremetalRunner;
