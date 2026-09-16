@@ -13,6 +13,7 @@
 
 #include "simrv/Define.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 
 namespace simrv::core {
@@ -91,6 +92,8 @@ struct FilesConfig {
     std::string dvtree_path;
     std::string traplog_path;
     std::string cpuconfig_path;
+    std::string cfu_plugin_path;
+    std::string dump_dmem_path;
 };
 
 struct NetworkConfig {
@@ -105,6 +108,7 @@ struct MachineConfig {
     IsaConfig isa{};
     FilesConfig files{};
     NetworkConfig network{};
+    std::optional<simrv::pipeline::CpuModelProfile> cpu_model_profile{};
     unsigned disk_size_mb = SIMRV_DISK_SIZE_MB;
     PlatformProfile platform_profile = PlatformProfile::Pcie;
 

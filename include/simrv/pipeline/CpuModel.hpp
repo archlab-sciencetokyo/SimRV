@@ -18,7 +18,7 @@
 
 namespace simrv::pipeline {
 
-enum class CpuModelProfile : uint8_t { Tiny, Balanced, Performance, Custom };
+enum class CpuModelProfile : uint8_t { Tiny, Balanced, Performance, Custom, CfuProvingGround };
 
 struct L1CacheConfig {
     uint32_t capacity_bytes = 4096;
@@ -63,8 +63,8 @@ struct CpuModelConfig {
                 cache.capacity_bytes < cache.associativity * cache.line_bytes) {
                 return std::format("{} cache geometry has no complete set", name);
             }
-            if (cache.capacity_bytes > 16 * 1024) {
-                return std::format("{} cache exceeds the 16 KiB runtime FPGA cache backing", name);
+            if (cache.capacity_bytes > 32 * 1024) {
+                return std::format("{} cache exceeds the 32 KiB runtime FPGA cache backing", name);
             }
             const uint32_t sets = cache.capacity_bytes / (cache.associativity * cache.line_bytes);
             if (!power_of_two(sets)) {
@@ -106,6 +106,8 @@ struct CpuModelConfig {
             return "balanced";
         case CpuModelProfile::Performance:
             return "performance";
+        case CpuModelProfile::CfuProvingGround:
+            return "cfu-provingground";
         case CpuModelProfile::Custom:
             return "custom";
     }
@@ -117,6 +119,9 @@ struct CpuModelConfig {
     if (value == "tiny") return CpuModelProfile::Tiny;
     if (value == "balanced") return CpuModelProfile::Balanced;
     if (value == "performance") return CpuModelProfile::Performance;
+    if (value == "cfu-provingground" || value == "cfu_provingground" || value == "rvproc") {
+        return CpuModelProfile::CfuProvingGround;
+    }
     if (value == "custom") return CpuModelProfile::Custom;
     return std::nullopt;
 }
@@ -147,6 +152,22 @@ struct CpuModelConfig {
             result.pipeline.branch_predictor.type = BranchPredictorType::Tournament;
             result.instruction_cache = {16384, 4, 32, 1, 8};
             result.data_cache = result.instruction_cache;
+            break;
+        case CpuModelProfile::CfuProvingGround:
+            result.pipeline.pipeline_type = PipelineType::FiveStage;
+            result.pipeline.enable_forwarding = true;
+            result.pipeline.mul_latency = 2;
+            result.pipeline.div_latency = 34;
+            result.pipeline.branch_mispredict_penalty = 3;
+            result.pipeline.branch_predictor.type = BranchPredictorType::Bimodal;
+            result.pipeline.branch_predictor.btb_entries = 2048;
+            result.pipeline.branch_predictor.bht_entries = 2048;
+            result.pipeline.branch_predictor.enable_ras = false;
+            result.pipeline.branch_predictor.pc_shift = 2;
+            result.pipeline.branch_predictor.untagged_btb = true;
+            result.instruction_cache = {32768, 1, 32, 1, 1};
+            result.data_cache = {16384, 1, 32, 1, 1};
+            result.interconnect = {1, 1};
             break;
         case CpuModelProfile::Custom:
             result.profile = CpuModelProfile::Custom;

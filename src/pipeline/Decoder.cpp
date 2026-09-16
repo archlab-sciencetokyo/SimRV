@@ -485,6 +485,7 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "VWSLL_VX",
     "VWSLL_VI",
     "VCHECK",
+    "CFU",
     "UNKNOWN"};
 
 auto operation_name(isa::OperationId operation) noexcept -> std::string_view {
@@ -1625,7 +1626,7 @@ auto decoder(Instruction ir) -> OperationId {
         return decode_ext_v(funct3, funct7, ir);
     }
     if (op == Opcode::Custom0) {
-        return OperationId::VCHECK;
+        return OperationId::CFU;
     }
     if ((op == Opcode::Op || op == Opcode::Op32) && (funct7 == 0x01)) {
         return decode_ext_m(op, funct3);

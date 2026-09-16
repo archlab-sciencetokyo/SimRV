@@ -23,6 +23,10 @@ namespace simrv::pipeline::operation {
     return info(op).execution_class == ExecutionClass::FpAlu;
 }
 
+[[nodiscard]] constexpr auto is_cfu(isa::OperationId op) noexcept -> bool {
+    return info(op).execution_class == ExecutionClass::Cfu;
+}
+
 [[nodiscard]] constexpr auto rd_bank(isa::OperationId op) noexcept -> RegBank {
     return info(op).operands.rd;
 }
@@ -207,6 +211,7 @@ namespace simrv::pipeline::operation {
             op_id >= isa::OperationId::VSETVLI && op_id <= isa::OperationId::VWSLL_VI;
         dt.is_serializing = vector || is_serializing(op_id) || opcode == isa::Opcode::System ||
                             opcode == isa::Opcode::MiscMem;
+        dt.is_cfu = is_cfu(op_id);
     } else {
         const bool fp_dst = (opcode == isa::Opcode::LoadFp || opcode == isa::Opcode::MAdd ||
                              opcode == isa::Opcode::MSub || opcode == isa::Opcode::NMAdd ||

@@ -83,6 +83,9 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         ca_state.instruction_prefetch.reset();
         ca_state.instruction_walk.reset();
         pipe.frontend_blocked = false;
+        if (pipeline_sim.config.branch_mispredict_penalty > 1) {
+            pipe.control_recovery_bubbles = pipeline_sim.config.branch_mispredict_penalty - 1;
+        }
     };
     auto trap_at_retirement = [&](CycleInstructionSlot& slot) {
         const auto cause = slot.context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
@@ -145,7 +148,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     if (active_context().pending_exception.has_value()) return false;
                     if (!execute_stage(machine)) return false;
                     writeback->executed = true;
-                    if (writeback->context.traits.is_mem_load) {
+                    if (writeback->context.traits.is_mem_load || writeback->context.traits.is_cfu) {
                         writeback->wb_valid = false;
                     } else if (writeback->writes_int && writeback->wb_dest != RegId::Zero) {
                         writeback->wb_val = (writeback->context.opcode == isa::Opcode::System &&
@@ -165,6 +168,10 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     writeback->memory_complete = true;
                     if (writeback->context.traits.is_mem_load) {
                         writeback->wb_val = writeback->context.mem_rdata;
+                        writeback->wb_valid =
+                            (writeback->writes_int && writeback->wb_dest != RegId::Zero);
+                    } else if (writeback->context.traits.is_cfu) {
+                        writeback->wb_val = writeback->context.wb_data;
                         writeback->wb_valid =
                             (writeback->writes_int && writeback->wb_dest != RegId::Zero);
                     }
@@ -218,6 +225,9 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 if (memory->context.traits.is_mem_load) {
                     memory->wb_val = memory->context.mem_rdata;
                     memory->wb_valid = (memory->writes_int && memory->wb_dest != RegId::Zero);
+                } else if (memory->context.traits.is_cfu) {
+                    memory->wb_val = memory->context.wb_data;
+                    memory->wb_valid = (memory->writes_int && memory->wb_dest != RegId::Zero);
                 }
                 if (!success && !memory->context.pending_exception.has_value()) {
                     memory->context.pending_exception = ExceptionCode::FaultLoad;
@@ -242,7 +252,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 (void)run_with_context(*execute, [&] { return execute_stage(machine); });
                 state_.pc = saved_pc;
                 execute->executed = true;
-                if (execute->context.traits.is_mem_load) {
+                if (execute->context.traits.is_mem_load || execute->context.traits.is_cfu) {
                     execute->wb_valid = false;
                 } else if (execute->writes_int && execute->wb_dest != RegId::Zero) {
                     execute->wb_val = (execute->context.opcode == isa::Opcode::System &&
@@ -322,6 +332,9 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     } else if (pipeline::operation::is_divide_or_remainder(decode->context.op_id)) {
                         decode->remaining_latency =
                             latency_minus_one(pipeline_sim.config.div_latency);
+                    } else if (pipeline::operation::is_cfu(decode->context.op_id)) {
+                        decode->remaining_latency = latency_minus_one(cfu_unit.query_latency(
+                            decode->context.funct7, std::to_underlying(decode->context.funct3)));
                     }
                     if (decode->context.traits.is_control) {
                         const Address sequential =
@@ -393,6 +406,9 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 } else if (pipeline::operation::is_fp_alu(ex_slot->context.op_id)) {
                     ex_slot->remaining_latency =
                         latency_minus_one(pipeline_sim.config.fp_alu_latency);
+                } else if (pipeline::operation::is_cfu(ex_slot->context.op_id)) {
+                    ex_slot->remaining_latency = latency_minus_one(cfu_unit.query_latency(
+                        ex_slot->context.funct7, std::to_underlying(ex_slot->context.funct3)));
                 } else if (ex_slot->context.opcode == isa::Opcode::System) {
                     ex_slot->remaining_latency = pipeline_sim.config.csr_flush_penalty;
                 } else if (ex_slot->context.opcode == isa::Opcode::MiscMem) {
@@ -412,7 +428,9 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         fetch = pipe.fetch;
     }
 
-    if (!fetch->valid && !pipe.frontend_blocked) {
+    if (pipe.control_recovery_bubbles > 0) {
+        --pipe.control_recovery_bubbles;
+    } else if (!fetch->valid && !pipe.frontend_blocked) {
         const Register committed_pc = state_.pc;
         state_.pc = pipe.fetch_pc;
         active_context_ = &fetch->context;

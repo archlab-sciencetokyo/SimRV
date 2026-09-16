@@ -104,7 +104,7 @@ void BranchPredictor::reset() {
 }
 
 auto BranchPredictor::get_bht_index(Address pc, uint32_t ghr_val) const noexcept -> uint32_t {
-    const uint32_t pc_idx = static_cast<uint32_t>(pc >> 1);
+    const uint32_t pc_idx = static_cast<uint32_t>(pc >> config_.pc_shift);
     if (config_.type == BranchPredictorType::GShare) {
         return (pc_idx ^ ghr_val) & bht_mask_;
     }
@@ -192,9 +192,22 @@ auto BranchPredictor::predict(Address pc, const DecodedInstruction& inst) -> Bra
     }
 
     if (is_jal) {
-        pred.predicted_taken = true;
         pred.predicted_target = pc + static_cast<Address>(inst.imm);
-        pred.btb_hit = true;
+        if (config_.untagged_btb) {
+            const uint32_t btb_idx = static_cast<uint32_t>(pc >> config_.pc_shift) & btb_mask_;
+            const auto& entry = btb_[btb_idx];
+            pred.predicted_taken = entry.valid;
+            if (entry.valid) {
+                pred.predicted_target = entry.target;
+                pred.btb_hit = true;
+            } else {
+                pred.predicted_target = ret_addr;
+                pred.btb_hit = false;
+            }
+        } else {
+            pred.predicted_taken = true;
+            pred.btb_hit = true;
+        }
         if (pred.is_call && config_.enable_ras) {
             ras_push(ret_addr);
         }
@@ -215,9 +228,9 @@ auto BranchPredictor::predict(Address pc, const DecodedInstruction& inst) -> Bra
         }
         // Check BTB for JALR target
         if (config_.enable_btb && !btb_.empty()) {
-            const uint32_t btb_idx = static_cast<uint32_t>(pc >> 1) & btb_mask_;
+            const uint32_t btb_idx = static_cast<uint32_t>(pc >> config_.pc_shift) & btb_mask_;
             const auto& entry = btb_[btb_idx];
-            if (entry.valid && entry.tag == pc) {
+            if (entry.valid && (config_.untagged_btb || entry.tag == pc)) {
                 pred.predicted_target = entry.target;
                 pred.btb_hit = true;
                 return pred;
@@ -307,12 +320,19 @@ void BranchPredictor::update(const BranchFeedback& feedback) {
 
         // Update BTB if branch was taken
         if (feedback.actual_taken && config_.enable_btb && !btb_.empty()) {
-            const uint32_t btb_idx = static_cast<uint32_t>(feedback.pc >> 1) & btb_mask_;
+            const uint32_t btb_idx =
+                static_cast<uint32_t>(feedback.pc >> config_.pc_shift) & btb_mask_;
             btb_[btb_idx] =
                 BtbEntry{.tag = feedback.pc, .target = feedback.actual_target, .valid = true};
         }
     } else if (feedback.opcode == isa::Opcode::Jal) {
         ++stats_.direct_jumps;
+        if (config_.enable_btb && !btb_.empty()) {
+            const uint32_t btb_idx =
+                static_cast<uint32_t>(feedback.pc >> config_.pc_shift) & btb_mask_;
+            btb_[btb_idx] =
+                BtbEntry{.tag = feedback.pc, .target = feedback.actual_target, .valid = true};
+        }
     } else if (feedback.opcode == isa::Opcode::Jalr) {
         ++stats_.indirect_jumps;
         ++stats_.target_predictions;
@@ -334,7 +354,8 @@ void BranchPredictor::update(const BranchFeedback& feedback) {
 
         // Update BTB for indirect jump targets
         if (config_.enable_btb && !btb_.empty()) {
-            const uint32_t btb_idx = static_cast<uint32_t>(feedback.pc >> 1) & btb_mask_;
+            const uint32_t btb_idx =
+                static_cast<uint32_t>(feedback.pc >> config_.pc_shift) & btb_mask_;
             btb_[btb_idx] =
                 BtbEntry{.tag = feedback.pc, .target = feedback.actual_target, .valid = true};
         }

@@ -26,6 +26,7 @@ struct DependencyTraits {
     bool is_mem_load : 1 = false;
     bool is_control : 1 = false;
     bool is_serializing : 1 = false;
+    bool is_cfu : 1 = false;
 };
 
 /**

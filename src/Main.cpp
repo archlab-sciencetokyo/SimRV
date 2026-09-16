@@ -9,6 +9,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <print>
@@ -199,6 +200,33 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             final_exit_code = sim_machine->exit_code.load();
             if (!sim_machine->tui_enabled()) {
                 sim_machine->trace().print_summary();
+            }
+            if (!sim_machine->configuration().files.dump_dmem_path.empty()) {
+                std::ofstream out(sim_machine->configuration().files.dump_dmem_path);
+                if (out) {
+                    const auto ram = sim_machine->ram_view();
+                    constexpr ::Address kDmemBase = 0x10000000;
+                    for (size_t i = 0; i < 512; ++i) {
+                        const ::Address a = kDmemBase + i * 4;
+                        if (ram.contains(a, 4)) {
+                            const uint32_t val =
+                                static_cast<uint32_t>(
+                                    std::to_integer<uint8_t>(*ram.unchecked_ptr(a))) |
+                                (static_cast<uint32_t>(
+                                     std::to_integer<uint8_t>(*ram.unchecked_ptr(a + 1)))
+                                 << 8) |
+                                (static_cast<uint32_t>(
+                                     std::to_integer<uint8_t>(*ram.unchecked_ptr(a + 2)))
+                                 << 16) |
+                                (static_cast<uint32_t>(
+                                     std::to_integer<uint8_t>(*ram.unchecked_ptr(a + 3)))
+                                 << 24);
+                            std::println(out, "{:08x}", val);
+                        } else {
+                            std::println(out, "00000000");
+                        }
+                    }
+                }
             }
         }
     }

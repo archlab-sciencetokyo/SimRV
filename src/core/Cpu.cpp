@@ -1379,6 +1379,13 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
             wb_data = rrs1 ^ rrs2;
             break;
         }
+        case isa::CFU: {
+            const Register rrs2 = state_.regs.read(op.rs2);
+            wb_data = static_cast<Register>(
+                cfu_unit.execute(op.funct7, std::to_underlying(op.funct3),
+                                 static_cast<uint32_t>(rrs1), static_cast<uint32_t>(rrs2)));
+            break;
+        }
         case isa::SLL: {
             const Register rrs2 = state_.regs.read(op.rs2);
             wb_data = rrs1 << (rrs2 & simrv::xlen::xlen_shift_mask());

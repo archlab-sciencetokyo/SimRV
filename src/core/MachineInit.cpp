@@ -51,12 +51,15 @@ void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
     if (start_pc == simrv::boot::kStartPc || start_pc == 0) {
         Address entry = symbols.entry_point().value_or(
             symbols.lookup_name("_start").value_or(simrv::boot::kStartPc));
-        if (entry < simrv::memory::kDramBaseAddress) {
+        if (entry < simrv::memory::kDramBaseAddress &&
+            machine.configuration().cpu_model_profile !=
+                simrv::pipeline::CpuModelProfile::CfuProvingGround) {
             entry += simrv::memory::kDramBaseAddress;
         }
         start_pc = entry;
     }
-    machine.set_resolved_boot_state(start_pc, symbols.lookup_name("tohost"));
+    machine.set_resolved_boot_state(start_pc, symbols.lookup_name("tohost").or_else(
+                                                  [&] { return symbols.lookup_name("_tohost"); }));
     machine.primary_hart().state().pc = machine.resolved_start_pc();
     if (machine.primary_hart().state().regs.xlen == 32) {
         machine.primary_hart().state().pc = static_cast<Register>(
@@ -270,6 +273,18 @@ auto Machine::platform_status() const -> PlatformStatusSnapshot {
 }
 
 auto Machine::initialize() -> std::expected<void, std::string> {
+    if (config.cpu_model_profile.has_value()) {
+        auto model = simrv::pipeline::make_cpu_model_profile(*config.cpu_model_profile);
+        primary_hart().apply_cpu_model_config(model);
+        memory().system_bus().configure_timing(model.interconnect.request_latency,
+                                               model.interconnect.response_latency);
+        if (*config.cpu_model_profile == simrv::pipeline::CpuModelProfile::CfuProvingGround) {
+            config.memory.dram_base = 0x00000000;
+            if (config.memory.dram_size < 512 * 1024 * 1024) {
+                config.memory.dram_size = 512 * 1024 * 1024;
+            }
+        }
+    }
     if (!config.files.cpuconfig_path.empty()) {
         auto model = primary_hart().cpu_model_config;
         if (!simrv::core::load_cpu_config(config.files.cpuconfig_path, model)) {
@@ -281,6 +296,13 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         primary_hart().apply_cpu_model_config(model);
         memory().system_bus().configure_timing(model.interconnect.request_latency,
                                                model.interconnect.response_latency);
+    }
+    if (!config.files.cfu_plugin_path.empty()) {
+        if (!primary_hart().cfu_unit.load_plugin(config.files.cfu_plugin_path)) {
+            const std::string err = "Failed to load CFU plugin: " + config.files.cfu_plugin_path;
+            simrv::log::error("{}", err);
+            return std::unexpected(err);
+        }
     }
 
     runtime_->rtc = std::make_unique<simrv::Rtc>(*this);
@@ -432,6 +454,9 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             auto sec_cpu = std::make_unique<simrv::core::CPU>();
             sec_cpu->machine_ = this;
             sec_cpu->apply_cpu_model_config(primary_hart().cpu_model_config);
+            if (!config.files.cfu_plugin_path.empty()) {
+                sec_cpu->cfu_unit.load_plugin(config.files.cfu_plugin_path);
+            }
             sec_cpu->state().mhartid = i;
             sec_cpu->state().misa = initial_misa;
             sec_cpu->state().initialize_lower_xlen_fields();

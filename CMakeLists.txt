@@ -373,6 +373,18 @@ if(BUILD_TESTING)
   simrv_add_runtime_test(simrv-ipc-protocol-tests tests/IpcProtocolTests.cpp
                          ipc-protocol "gate;regress;ipc;net;thread")
 
+  add_library(test-cfu-plugin SHARED tests/TestCfuPlugin.cpp)
+  target_include_directories(test-cfu-plugin PRIVATE "${PROJECT_SOURCE_DIR}/include")
+  simrv_apply_options(test-cfu-plugin)
+
+  simrv_add_runtime_test(
+    simrv-cfu-provingground-tests tests/CfuProvingGroundTests.cpp
+    cfu-provingground "gate;regress;pipeline;cfu")
+  target_compile_definitions(
+    simrv-cfu-provingground-tests PRIVATE
+    TEST_CFU_PLUGIN_PATH="$<TARGET_FILE:test-cfu-plugin>")
+  add_dependencies(simrv-cfu-provingground-tests test-cfu-plugin)
+
   # Architectural equivalence is a first-class native gate.  The fixture
   # deliberately exercises functional execution and both CA pipelines while
   # excluding cache/cycle/UI observations.

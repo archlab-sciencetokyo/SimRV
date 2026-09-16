@@ -269,6 +269,18 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.fn_cpuconfig = std::string(*value);
         return true;
     }
+    if (arg == "--cfu-plugin") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.fn_cfu_plugin = std::string(*value);
+        return true;
+    }
+    if (arg == "--dump-dmem") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.fn_dump_dmem = std::string(*value);
+        return true;
+    }
     if (arg == "--trap-log" || arg == "--traplog") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -401,6 +413,19 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
                 std::format("unsupported pipeline '{}' (supported: 3stage, 5stage)", *value));
         }
         result.options.pipeline_type = std::string(*value);
+        return true;
+    }
+    if (arg == "--cpu-profile" || arg == "--profile") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        auto parsed = simrv::pipeline::parse_cpu_model_profile(*value);
+        if (!parsed) {
+            return std::unexpected(
+                std::format("unsupported CPU model profile '{}' (supported: tiny, balanced, "
+                            "performance, cfu-provingground, rvproc)",
+                            *value));
+        }
+        result.options.cpu_model_profile = *parsed;
         return true;
     }
     if (arg == "--bpred" || arg == "--bpred-type") {
@@ -901,6 +926,9 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.files.dvtree_path = fn_dvtree;
     cfg.files.traplog_path = fn_traplog;
     cfg.files.cpuconfig_path = fn_cpuconfig;
+    cfg.files.cfu_plugin_path = fn_cfu_plugin;
+    cfg.files.dump_dmem_path = fn_dump_dmem;
+    cfg.cpu_model_profile = cpu_model_profile;
 
     cfg.network.mode = net_mode;
     cfg.platform_profile = platform_profile;
@@ -946,6 +974,13 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     if (options.traplog_mode) simrv::log::info("Trap/SBI log: {}", options.fn_traplog);
 
     auto apply_config_to_cpu = [&](simrv::core::CPU& cpu) {
+        if (options.cpu_model_profile.has_value()) {
+            cpu.apply_cpu_model_config(
+                simrv::pipeline::make_cpu_model_profile(*options.cpu_model_profile));
+        }
+        if (!options.fn_cfu_plugin.empty()) {
+            cpu.cfu_unit.load_plugin(options.fn_cfu_plugin);
+        }
         cpu.pipeline_sim.config.pipeline_type = parsed_pipe;
         cpu.pipeline_sim.config.record_snapshots = machine->runtime_profile.records_cycle_history();
         cpu.pipeline_sim.config.enable_forwarding = !options.disable_forwarding;
@@ -1118,8 +1153,16 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(
         stdout,
-        "  {}--cpu-config {}{}<FILE>{}           Load microarchitectural latency configuration\n\n",
+        "  {}--cpu-config {}{}<FILE>{}           Load microarchitectural latency configuration\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--cpu-profile {}{}<PROFILE>{}       Microarchitectural preset: tiny, balanced, "
+               "performance, cfu-provingground\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--cfu-plugin {}{}<LIB.SO>{}         Load dynamic Custom Function Unit (CFU) "
+               "plugin\n\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
 
     // Logging & Tracing
     std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Logging and Tracing",

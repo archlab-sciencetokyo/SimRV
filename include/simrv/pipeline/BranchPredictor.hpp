@@ -42,6 +42,8 @@ struct BranchPredictorConfig {
     uint32_t ghr_bits = 10;
     bool enable_btb = true;
     bool enable_ras = true;
+    uint8_t pc_shift = 1;
+    bool untagged_btb = false;
 };
 
 /**

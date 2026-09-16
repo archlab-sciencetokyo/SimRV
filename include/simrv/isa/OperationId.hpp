@@ -498,6 +498,7 @@ enum OperationId : uint16_t {
     VWSLL_VX,
     VWSLL_VI,
     VCHECK,
+    CFU,
     /* Others */
     UNKNOWN,
     OperationIdCount

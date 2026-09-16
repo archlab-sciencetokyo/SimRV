@@ -52,6 +52,7 @@ struct WritebackEffects {
                opcode == isa::Opcode::Jal || opcode == isa::Opcode::Jalr ||
                opcode == isa::Opcode::Op || opcode == isa::Opcode::OpImm ||
                opcode == isa::Opcode::Op32 || opcode == isa::Opcode::OpImm32 ||
+               opcode == isa::Opcode::Custom0 ||
                (opcode == isa::Opcode::OpFp && context.int_wb_from_fp)) {
         integer.value = context.wb_data;
         integer.enabled = true;

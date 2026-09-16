@@ -3,6 +3,7 @@ simrv_add_component(simrv-execution
   ExecuteUnitB.cpp
   ExecuteUnitFloat.cpp
   ExecuteUnit.cpp
+  CfuUnit.cpp
   ExecuteUnitVector.cpp
   vector/VectorConfig.cpp
   vector/VectorMemory.cpp

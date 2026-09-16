@@ -14,6 +14,7 @@ enum class ExecutionClass : uint8_t {
     DivideOrRemainder,
     FpAlu,
     FpDivideOrSqrt,
+    Cfu,
 };
 
 enum class RegBank : uint8_t {
@@ -304,6 +305,8 @@ consteval auto generate_operation_info() {
     set_props({VMERGE_VIM, VADC_VIM, VMADC_VI, VMADC_VIM}, exec_def,
               {.rd = b_vec, .rs1 = b_none, .rs2 = b_vec, .rs3 = b_none}, mem_none, ctrl_none,
               side_serial);
+
+    set_props({CFU}, ExecutionClass::Cfu, {.rd = b_int, .rs1 = b_int, .rs2 = b_int, .rs3 = b_none});
 
     return info;
 }

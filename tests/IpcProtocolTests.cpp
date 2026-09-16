@@ -115,6 +115,7 @@ void test_client_server_socket_loopback() {
     // Send RPC pause
     assert(client.send_pause());
     for (int i = 0; i < 50 && !rpc_received.load(std::memory_order_acquire); ++i) {
+        machine.service_control_commands();
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     assert(rpc_received.load());

@@ -150,6 +150,9 @@ void CPU::execute_core(Machine& machine) {
             break;
         case Opcode::Custom0:
             ctx.tkn = false;
+            ctx.wb_data = static_cast<Register>(
+                cfu_unit.execute(ctx.funct7, std::to_underlying(ctx.funct3),
+                                 static_cast<uint32_t>(ctx.rrs1), static_cast<uint32_t>(ctx.rrs2)));
             break;
         case Opcode::MAdd:
         case Opcode::MSub:

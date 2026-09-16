@@ -1191,6 +1191,9 @@ auto get_description(OperationId op_id) -> std::pair<std::string_view, std::stri
         arr[VCHECK] = {"VCHECK",
                        "Vector Check Assertion. Validates vector registers or states for "
                        "debugging/test harness purposes."};
+        arr[CFU] = {"CFU",
+                    "Custom Function Unit instruction. Dispatches an application-specific "
+                    "accelerator operation on the CUSTOM_0 opcode space."};
 
         return arr;
     }();

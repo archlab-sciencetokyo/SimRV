@@ -476,6 +476,18 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v
             ack.sink = timed.payload.sink;
             mem.system_bus().grant_ack(ack);
         }
+        if (cpu.machine_->configuration().cpu_model_profile ==
+                simrv::pipeline::CpuModelProfile::CfuProvingGround &&
+            (addr == cpu.machine_->configuration().isa.isatest_tohost ||
+             (addr & 0x80000000ULL) != 0)) {
+            if (funct3 == static_cast<Instruction>(Funct3::Sw) &&
+                (data == 0x00020000ULL || (data & 1ULL) != 0)) {
+                cpu.machine_->tohost = data;
+            } else {
+                cpu.machine_->console_write(static_cast<char>(data & 0xFF));
+            }
+            return;
+        }
         const bool is_tohost_write = simrv::xlen::kIsXLen64
                                          ? (funct3 == static_cast<Instruction>(Funct3::Sw) ||
                                             funct3 == static_cast<Instruction>(Funct3::Sd))

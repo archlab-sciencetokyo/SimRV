@@ -21,6 +21,7 @@
 #include "simrv/core/Sbi.hpp"
 #include "simrv/core/StateControl.hpp"
 #include "simrv/core/Tlb.hpp"
+#include "simrv/execute/CfuUnit.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/memory/Bus.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
@@ -654,6 +655,7 @@ class CPU {
     ClintMmio clint_mmio;
     CsrFile csr_file;
     execute::ExecuteUnit execute_unit;
+    execute::CfuUnit cfu_unit;
     simrv::pipeline::PipelineContext pipeline_context;
     simrv::pipeline::PipelineContext* active_context_ = &pipeline_context;
     [[nodiscard]] constexpr auto& active_context() noexcept { return *active_context_; }

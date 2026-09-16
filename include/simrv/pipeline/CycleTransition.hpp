@@ -148,6 +148,7 @@ struct HartPipelineState {
     bool retired_this_cycle = false;
     bool data_hazard_stall = false;
     bool control_flush = false;
+    uint8_t control_recovery_bubbles = 0;
 
     [[nodiscard]] constexpr auto slot(PipelineStage s) noexcept -> CycleInstructionSlot& {
         return storage_[std::to_underlying(s)];
@@ -173,6 +174,7 @@ struct HartPipelineState {
         retired_this_cycle = other.retired_this_cycle;
         data_hazard_stall = other.data_hazard_stall;
         control_flush = other.control_flush;
+        control_recovery_bubbles = other.control_recovery_bubbles;
     }
 
     constexpr auto operator=(const HartPipelineState& other) noexcept -> HartPipelineState& {
@@ -190,6 +192,7 @@ struct HartPipelineState {
             retired_this_cycle = other.retired_this_cycle;
             data_hazard_stall = other.data_hazard_stall;
             control_flush = other.control_flush;
+            control_recovery_bubbles = other.control_recovery_bubbles;
         }
         return *this;
     }
