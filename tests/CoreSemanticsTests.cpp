@@ -222,6 +222,124 @@ void test_compressed_instruction_decode_and_flush() {
            "mstatus FS toggle flushes decode cache to invalidate cached execution legality");
 }
 
+void test_selective_tlb_and_decode_cache_flush() {
+    simrv::core::Machine machine;
+    auto& cpu = machine.hart(HartId{0});
+
+    // Setup entries for page A (0x1000) and page B (0x2000)
+    constexpr Address kPageA = 0x1000;
+    constexpr Address kPageB = 0x2000;
+    const Address vpnA = kPageA >> 12;
+    const Address vpnB = kPageB >> 12;
+    const size_t idxA = simrv::core::CPU::soft_tlb_index(vpnA);
+    const size_t idxB = simrv::core::CPU::soft_tlb_index(vpnB);
+
+    cpu.soft_tlb_read[idxA].set(vpnA, 0, PrivilegeLevel::Supervisor, cpu.soft_tlb_epoch, kPageA,
+                                nullptr);
+    cpu.soft_tlb_write[idxA].set(vpnA, 0, PrivilegeLevel::Supervisor, cpu.soft_tlb_epoch, kPageA,
+                                 nullptr);
+    cpu.soft_tlb_inst[idxA].set(vpnA, 0, PrivilegeLevel::Supervisor, cpu.soft_tlb_epoch, kPageA,
+                                nullptr);
+
+    cpu.soft_tlb_read[idxB].set(vpnB, 0, PrivilegeLevel::Supervisor, cpu.soft_tlb_epoch, kPageB,
+                                nullptr);
+    cpu.soft_tlb_write[idxB].set(vpnB, 0, PrivilegeLevel::Supervisor, cpu.soft_tlb_epoch, kPageB,
+                                 nullptr);
+    cpu.soft_tlb_inst[idxB].set(vpnB, 0, PrivilegeLevel::Supervisor, cpu.soft_tlb_epoch, kPageB,
+                                nullptr);
+
+    simrv::core::CachedOp copA{};
+    copA.cpc = VirtAddr{kPageA + 4};
+    copA.op_id = simrv::isa::ADDI;
+    copA.valid = true;
+    cpu.decode_cache.insert(copA.cpc, copA);
+
+    simrv::core::CachedOp copB{};
+    copB.cpc = VirtAddr{kPageB + 4};
+    copB.op_id = simrv::isa::ADDI;
+    copB.valid = true;
+    cpu.decode_cache.insert(copB.cpc, copB);
+
+    expect(cpu.soft_tlb_read[idxA].valid(cpu.soft_tlb_epoch),
+           "soft TLB read A is valid before flush");
+    expect(cpu.soft_tlb_read[idxB].valid(cpu.soft_tlb_epoch),
+           "soft TLB read B is valid before flush");
+    expect(cpu.decode_cache.lookup(copA.cpc) != nullptr, "decode cache A is valid before flush");
+    expect(cpu.decode_cache.lookup(copB.cpc) != nullptr, "decode cache B is valid before flush");
+
+    // Perform selective flush for Page A (match_all_vaddr = false, match_all_asid = true)
+    cpu.TLB_flush(false, kPageA, true, 0);
+
+    // Page A should be invalidated in soft TLB and decode cache
+    expect(!cpu.soft_tlb_read[idxA].valid(cpu.soft_tlb_epoch),
+           "selective flush invalidates soft TLB read A");
+    expect(!cpu.soft_tlb_write[idxA].valid(cpu.soft_tlb_epoch),
+           "selective flush invalidates soft TLB write A");
+    expect(!cpu.soft_tlb_inst[idxA].valid(cpu.soft_tlb_epoch),
+           "selective flush invalidates soft TLB inst A");
+    expect(cpu.decode_cache.lookup(copA.cpc) == nullptr,
+           "selective flush invalidates decode cache for Page A");
+
+    // Page B should STILL be valid!
+    expect(cpu.soft_tlb_read[idxB].valid(cpu.soft_tlb_epoch),
+           "selective flush preserves soft TLB read B");
+    expect(cpu.soft_tlb_write[idxB].valid(cpu.soft_tlb_epoch),
+           "selective flush preserves soft TLB write B");
+    expect(cpu.soft_tlb_inst[idxB].valid(cpu.soft_tlb_epoch),
+           "selective flush preserves soft TLB inst B");
+    expect(cpu.decode_cache.lookup(copB.cpc) != nullptr,
+           "selective flush preserves decode cache for Page B");
+
+    // Perform global TLB flush
+    cpu.TLB_flush();
+    expect(!cpu.soft_tlb_read[idxB].valid(cpu.soft_tlb_epoch),
+           "global flush invalidates soft TLB read B");
+    expect(cpu.decode_cache.lookup(copB.cpc) == nullptr,
+           "global flush invalidates decode cache for Page B");
+}
+
+void test_tlb_and_decode_cache_deduplication() {
+    // 1. TLB insert in-place update and empty way preference
+    simrv::core::Tlb tlb;
+    tlb.flush();
+    constexpr Address kVaddr = 0x80001000;
+    constexpr Address kPaddr1 = 0x10000000;
+    constexpr Address kPaddr2 = 0x20000000;
+    const auto set = simrv::core::Tlb::calc_set(kVaddr);
+
+    // Initial insert into empty set -> uses way 0
+    tlb.insert_data_r(kVaddr, kPaddr1, 0, PrivilegeLevel::Supervisor);
+    expect(tlb.data_r[set][0].valid && tlb.data_r[set][0].p_addr == kPaddr1,
+           "initial TLB insert populates first way");
+    expect(!tlb.data_r[set][1].valid, "second way remains empty");
+
+    // Re-inserting the same vpage updates in place, preserving second way empty
+    tlb.insert_data_r(kVaddr, kPaddr2, 0, PrivilegeLevel::Supervisor);
+    expect(tlb.data_r[set][0].valid && tlb.data_r[set][0].p_addr == kPaddr2,
+           "duplicate TLB insert updates in place without allocating new way");
+    expect(!tlb.data_r[set][1].valid, "second way remains empty after re-insert");
+
+    // 2. Decode cache in-place update
+    simrv::core::DecodeCache decode_cache;
+    decode_cache.flush();
+    simrv::core::CachedOp op1{};
+    op1.cpc = VirtAddr{kVaddr};
+    op1.op_id = simrv::isa::ADDI;
+    op1.imm = 10;
+    decode_cache.insert(kVaddr, op1);
+
+    auto* hit1 = decode_cache.lookup(kVaddr);
+    expect(hit1 != nullptr && hit1->imm == 10, "decode cache lookup finds initial op");
+
+    // Re-inserting the same PC updates the existing way without duplicating
+    simrv::core::CachedOp op2 = op1;
+    op2.imm = 20;
+    decode_cache.insert(kVaddr, op2);
+
+    auto* hit2 = decode_cache.lookup(kVaddr);
+    expect(hit2 != nullptr && hit2->imm == 20, "decode cache re-insert updates in place");
+}
+
 void test_runtime_ram_view() {
     std::array<Byte, 32> bytes{};
     constexpr Address kUpperDramBase = simrv::memory::kDramBaseAddress + simrv::memory::kDramSize;
@@ -1151,6 +1269,8 @@ int main() {
     test_unaligned_host_access();
     test_decode_cache_compact_round_robin();
     test_compressed_instruction_decode_and_flush();
+    test_selective_tlb_and_decode_cache_flush();
+    test_tlb_and_decode_cache_deduplication();
     test_runtime_ram_view();
     test_mmio_ranges();
     test_physical_range_validation();

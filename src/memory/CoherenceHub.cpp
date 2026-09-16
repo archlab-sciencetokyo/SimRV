@@ -427,4 +427,12 @@ void CoherenceHub::mark_modified(LineAddress line_base, HartId hart) {
     update_dir_entry(line_base, entry);
 }
 
+void CoherenceHub::clear() {
+    directory_.clear();
+    for (auto& entry : fast_cache_) entry = {};
+    pending_grants_.clear();
+    l3_cache_.flush(true);
+    stats_ = {};
+}
+
 }  // namespace simrv::memory

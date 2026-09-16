@@ -109,6 +109,24 @@ class DecodeCache {
     }
 
     /**
+     * @brief Invalidate all entries in the decode cache residing in a specific 4KB virtual page.
+     * @param vpage 4KB-aligned virtual page address.
+     */
+    void flush_page(Address vpage) {
+        const Address page_base = vpage & ~Address{0xFFF};
+        for (auto& set : sets_) {
+            if (set.ways[0].valid && ((set.ways[0].cpc.raw() & ~Address{0xFFF}) == page_base)) {
+                set.ways[0].valid = false;
+                set.ways[0].cpc = VirtAddr{~Register{0}};
+            }
+            if (set.ways[1].valid && ((set.ways[1].cpc.raw() & ~Address{0xFFF}) == page_base)) {
+                set.ways[1].valid = false;
+                set.ways[1].cpc = VirtAddr{~Register{0}};
+            }
+        }
+    }
+
+    /**
      * @brief Calculate the cache set index for a given program counter with bit-mixed XOR hashing.
      * @param pc Program counter address.
      * @return Cache set index in range [0, kNumSets - 1].
@@ -146,7 +164,18 @@ class DecodeCache {
     inline void insert(Register pc, const CachedOp& op) {
         const size_t set_idx = calc_set(pc);
         auto& set = sets_[set_idx];
-        const uint8_t way = !set.ways[0].valid ? 0 : (!set.ways[1].valid ? 1 : set.next_victim);
+        uint8_t way = 0;
+        if (set.ways[0].valid && set.ways[0].cpc == pc) {
+            way = 0;
+        } else if (set.ways[1].valid && set.ways[1].cpc == pc) {
+            way = 1;
+        } else if (!set.ways[0].valid) {
+            way = 0;
+        } else if (!set.ways[1].valid) {
+            way = 1;
+        } else {
+            way = set.next_victim;
+        }
         auto& entry = set.ways[way];
         entry = op;
         entry.cpc = VirtAddr{pc};

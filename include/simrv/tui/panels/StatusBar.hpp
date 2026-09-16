@@ -30,7 +30,8 @@ enum class HeaderAction : uint8_t {
     OpenSettings,
     OpenGlossary,
     ToggleTheme,
-    Reboot
+    Reboot,
+    ToggleMode
 };
 
 struct HeaderHitResult {
@@ -57,6 +58,7 @@ class StatusBar : public TuiWidget {
     void set_right_panel_mode(TuiRightPanelMode mode) { right_panel_mode_ = mode; }
 
     [[nodiscard]] auto is_pos_on_status_badge(int x, int width) const -> bool;
+    [[nodiscard]] auto is_pos_on_mode_badge(int x, int width) const -> bool;
     [[nodiscard]] auto is_pos_on_right_panel_mode(int x) const -> bool;
     [[nodiscard]] auto is_pos_on_right_panel_attached(int x) const -> bool;
     [[nodiscard]] auto get_header_action_at_col(int col, int terminal_width) const

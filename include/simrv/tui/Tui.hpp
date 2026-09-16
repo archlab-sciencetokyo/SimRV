@@ -228,6 +228,8 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
 
     /// Toggle the unified run/terminal-attachment state.
     void toggle_run_state();
+    /// Toggle execution mode (IA <-> CA) dynamically without reloading.
+    void toggle_execution_mode();
     [[nodiscard]] auto is_terminal_attached() const -> bool { return !is_paused(); }
 
     [[nodiscard]] auto selected_hart() const -> size_t { return selected_hart_; }

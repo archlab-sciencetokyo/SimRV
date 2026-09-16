@@ -75,6 +75,7 @@ class CoherenceHub {
 
     [[nodiscard]] auto get_directory_state(LineAddress line_base) const -> DirectoryEntry;
     [[nodiscard]] auto validate_directory() const -> std::expected<void, std::string>;
+    void clear();
 
    private:
     struct FastCacheEntry {

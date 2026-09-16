@@ -256,6 +256,16 @@ enum class HartStatus : uint8_t {
 
 class CPU {
    public:
+    /**
+     * @brief Compute the soft TLB slot index using bit-mixed XOR hashing to prevent power-of-two
+     * stride aliasing.
+     * @param vpn Virtual page number (vaddr >> 12).
+     * @return Slot index in range [0, 2047].
+     */
+    [[nodiscard]] static constexpr inline auto soft_tlb_index(Address vpn) noexcept -> size_t {
+        return static_cast<size_t>((vpn ^ (vpn >> 11)) & 2047u);
+    }
+
     std::atomic<HartStatus> hart_status{HartStatus::Started};
     /**
      * @brief Constructs a new CPU core, resetting GPRs, floating-point registers, and setting
@@ -382,6 +392,8 @@ class CPU {
      * @param machine Reference to the top-level machine orchestration unit.
      */
     void run_cycle_baremetal(Machine& machine);
+    void run_fast_cycle_miss(Machine& machine);
+    void run_cycle_baremetal_miss(Machine& machine);
     /// Advance architectural time by one deterministic global CA clock.
     void tick_cycle_clock(Machine& machine, bool interrupt_boundary = true);
 

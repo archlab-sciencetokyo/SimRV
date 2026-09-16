@@ -128,8 +128,9 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v_
     if (cpu.machine_->runtime_profile.is_instruction_mode() && !crosses_page) {
         if (!translation_enabled) {
             // Bypass soft TLB lookup if translation is disabled (direct DRAM access)
-            const Address eff_vaddr =
-                (active_xlen == 32) ? (v_addr.raw() & 0xFFFFFFFFULL) : v_addr.raw();
+            const Address eff_vaddr = (simrv::xlen::kIsXLen64 && active_xlen == 32)
+                                          ? (v_addr.raw() & 0xFFFFFFFFULL)
+                                          : v_addr.raw();
             if (simrv::compiler::likely(geometry.contains(eff_vaddr, size_bytes))) {
                 if (simrv::compiler::unlikely(!core::pmp::check_access(
                         cpu.state(), eff_vaddr, size_bytes, core::PmpAccessType::Read, eff_priv))) {
@@ -142,7 +143,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v_
             }
         } else {
             const Address vpn = v_addr.raw() >> 12;
-            const size_t tlb_idx = static_cast<size_t>(vpn) & 2047u;
+            const size_t tlb_idx = core::CPU::soft_tlb_index(vpn);
             const auto& entry = cpu.soft_tlb_read[tlb_idx];
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
@@ -150,8 +151,10 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v_
                     return simrv::memory::host_read_fast(
                         entry.host_ptr_base + (v_addr.raw() & 0xFFF), funct3);
                 }
-                return simrv::memory::ram_read_fast(entry.paddr_base + (v_addr.raw() & 0xFFF),
-                                                    funct3, cpu.machine_->ram_view());
+                const Address paddr = entry.paddr_base + (v_addr.raw() & 0xFFF);
+                if (simrv::compiler::likely(geometry.contains(paddr, size_bytes))) {
+                    return simrv::memory::ram_read_fast(paddr, funct3, cpu.machine_->ram_view());
+                }
             }
         }
     }
@@ -300,7 +303,9 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v_
         return simrv::memory::ram_read_fast(addr, funct3, cpu.machine_->ram_view());
     };
 
-    const Address eff_vaddr = (active_xlen == 32) ? (v_addr.raw() & 0xFFFFFFFFULL) : v_addr.raw();
+    const Address eff_vaddr = (simrv::xlen::kIsXLen64 && active_xlen == 32)
+                                  ? (v_addr.raw() & 0xFFFFFFFFULL)
+                                  : v_addr.raw();
 
     if (simrv::compiler::likely(!cpu.active_context().pending_exception.has_value()) &&
         simrv::compiler::likely(eff_priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(
@@ -356,8 +361,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v_
             return 0;
         }
         if (cpu.machine_->runtime_profile.is_instruction_mode() && geometry.contains(p_addr)) {
-            const size_t tlb_idx = (v_addr.raw() >> 12) & 2047;
             const Address vpn = v_addr.raw() >> 12;
+            const size_t tlb_idx = core::CPU::soft_tlb_index(vpn);
             Byte* host_base = cpu.machine_->ram_view().unchecked_ptr(p_addr & ~0xFFFULL);
             cpu.soft_tlb_read[tlb_idx].set(
                 vpn, translation_enabled ? static_cast<uint64_t>(current_asid) : ~uint64_t{0},
@@ -613,15 +618,16 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v
     if (cpu.machine_->runtime_profile.is_instruction_mode() && !crosses_page) {
         if (!translation_enabled) {
             // Bypass soft TLB lookup if translation is disabled (direct DRAM access)
-            const Address eff_vaddr =
-                (active_xlen == 32) ? (v_addr.raw() & 0xFFFFFFFFULL) : v_addr.raw();
+            const Address eff_vaddr = (simrv::xlen::kIsXLen64 && active_xlen == 32)
+                                          ? (v_addr.raw() & 0xFFFFFFFFULL)
+                                          : v_addr.raw();
             if (simrv::compiler::likely(geometry.contains(eff_vaddr, size_bytes))) {
                 issue_write(eff_vaddr, wdata);
                 return;
             }
         } else {
             const Address vpn = v_addr.raw() >> 12;
-            const size_t tlb_idx = static_cast<size_t>(vpn) & 2047u;
+            const size_t tlb_idx = core::CPU::soft_tlb_index(vpn);
             const auto& entry = cpu.soft_tlb_write[tlb_idx];
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
@@ -630,13 +636,20 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v
                                                    wdata, funct3);
                     return;
                 }
-                issue_write(entry.paddr_base + (v_addr.raw() & 0xFFF), wdata);
+                const Address paddr = entry.paddr_base + (v_addr.raw() & 0xFFF);
+                if (simrv::compiler::likely(geometry.contains(paddr, size_bytes))) {
+                    simrv::memory::ram_write_fast(paddr, wdata, funct3, cpu.machine_->ram_view());
+                    return;
+                }
+                issue_write(paddr, wdata);
                 return;
             }
         }
     }
 
-    const Address eff_vaddr = (active_xlen == 32) ? (v_addr.raw() & 0xFFFFFFFFULL) : v_addr.raw();
+    const Address eff_vaddr = (simrv::xlen::kIsXLen64 && active_xlen == 32)
+                                  ? (v_addr.raw() & 0xFFFFFFFFULL)
+                                  : v_addr.raw();
 
     if (simrv::compiler::likely(!cpu.active_context().pending_exception.has_value()) &&
         simrv::compiler::likely(eff_priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(
@@ -689,8 +702,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v
             return;
         }
         if (cpu.machine_->runtime_profile.is_instruction_mode() && geometry.contains(p_addr)) {
-            const size_t tlb_idx = (v_addr.raw() >> 12) & 2047;
             const Address vpn = v_addr.raw() >> 12;
+            const size_t tlb_idx = core::CPU::soft_tlb_index(vpn);
             Byte* host_base = cpu.machine_->ram_view().unchecked_ptr(p_addr & ~0xFFFULL);
             cpu.soft_tlb_write[tlb_idx].set(
                 vpn, translation_enabled ? static_cast<uint64_t>(current_asid) : ~uint64_t{0},

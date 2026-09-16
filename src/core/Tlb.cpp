@@ -29,22 +29,16 @@ void Tlb::flush_selective(const TlbFlushFilter& filter) {
     if (filter.vaddr) {
         const auto set = calc_set(*filter.vaddr);
         const Address vpage = calc_vpage(*filter.vaddr);
+        auto clear_match = [&](TLBEntry& entry) {
+            if (entry.valid && entry.v_addr == vpage &&
+                (!filter.asid || entry.asid == *filter.asid)) {
+                entry = TLBEntry{};
+            }
+        };
         for (int i = 0; i < 2; ++i) {
-            if (!filter.asid || inst_r[set][i].asid == *filter.asid) {
-                if (inst_r[set][i].v_addr == vpage) {
-                    inst_r[set][i] = TLBEntry{};
-                }
-            }
-            if (!filter.asid || data_r[set][i].asid == *filter.asid) {
-                if (data_r[set][i].v_addr == vpage) {
-                    data_r[set][i] = TLBEntry{};
-                }
-            }
-            if (!filter.asid || data_w[set][i].asid == *filter.asid) {
-                if (data_w[set][i].v_addr == vpage) {
-                    data_w[set][i] = TLBEntry{};
-                }
-            }
+            clear_match(inst_r[set][i]);
+            clear_match(data_r[set][i]);
+            clear_match(data_w[set][i]);
         }
         return;
     }
@@ -52,9 +46,12 @@ void Tlb::flush_selective(const TlbFlushFilter& filter) {
     if (filter.asid) {
         for (size_t s = 0; s < kNumSets; ++s) {
             for (int i = 0; i < 2; ++i) {
-                if (inst_r[s][i].asid == *filter.asid) inst_r[s][i] = TLBEntry{};
-                if (data_r[s][i].asid == *filter.asid) data_r[s][i] = TLBEntry{};
-                if (data_w[s][i].asid == *filter.asid) data_w[s][i] = TLBEntry{};
+                if (inst_r[s][i].valid && inst_r[s][i].asid == *filter.asid)
+                    inst_r[s][i] = TLBEntry{};
+                if (data_r[s][i].valid && data_r[s][i].asid == *filter.asid)
+                    data_r[s][i] = TLBEntry{};
+                if (data_w[s][i].valid && data_w[s][i].asid == *filter.asid)
+                    data_w[s][i] = TLBEntry{};
             }
         }
         return;

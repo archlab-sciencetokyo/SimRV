@@ -68,12 +68,13 @@ class Tlb {
     alignas(64) std::array<uint8_t, kNumSets> data_w_lru{};  ///< LRU bit per set for data_w
 
     /**
-     * @brief Compute the TLB set index for a given virtual address.
+     * @brief Compute the TLB set index for a given virtual address with bit-mixed hashing.
      * @param vaddr Virtual address.
      * @return Set index in range [0, kNumSets - 1].
      */
     [[nodiscard]] static constexpr inline auto calc_set(Address vaddr) noexcept -> TlbSetIndex {
-        return static_cast<TlbSetIndex>((vaddr >> 12) & (kNumSets - 1));
+        const Address vpn = vaddr >> 12;
+        return static_cast<TlbSetIndex>((vpn ^ (vpn >> 8)) & (kNumSets - 1));
     }
 
     /**
@@ -97,6 +98,34 @@ class Tlb {
     void flush_selective(const TlbFlushFilter& filter);
 
     /**
+     * @brief Fast templated TLB lookup by access kind.
+     * @tparam Kind Access kind (Instruction, DataRead, DataWrite).
+     * @param vaddr Virtual address.
+     * @param asid Address Space Identifier.
+     * @param priv Privilege level.
+     * @return Pointer to matching TLBEntry if hit, or nullptr on miss.
+     */
+    template <TlbAccessKind Kind>
+    [[nodiscard]] inline auto lookup(Address vaddr, Asid asid, PrivilegeLevel priv) -> TLBEntry* {
+        auto& table = select_table_static<Kind>();
+        auto& lru = select_lru_static<Kind>();
+        const auto set = calc_set(vaddr);
+        const Address vpage = calc_vpage(vaddr);
+        auto& set_entries = table[set];
+        if (simrv::compiler::likely(set_entries[0].valid && set_entries[0].v_addr == vpage &&
+                                    set_entries[0].asid == asid && set_entries[0].priv == priv)) {
+            lru[set] = 1;
+            return &set_entries[0];
+        }
+        if (set_entries[1].valid && set_entries[1].v_addr == vpage && set_entries[1].asid == asid &&
+            set_entries[1].priv == priv) {
+            lru[set] = 0;
+            return &set_entries[1];
+        }
+        return nullptr;
+    }
+
+    /**
      * @brief Unified TLB lookup by access kind.
      * @param kind Type of access (instruction, data read, data write).
      * @param vaddr Virtual address.
@@ -106,18 +135,57 @@ class Tlb {
      */
     [[nodiscard]] inline auto lookup(TlbAccessKind kind, Address vaddr, Asid asid,
                                      PrivilegeLevel priv) -> TLBEntry* {
-        auto& table = select_table(kind);
-        auto& lru = select_lru(kind);
+        switch (kind) {
+            case TlbAccessKind::Instruction:
+                return lookup<TlbAccessKind::Instruction>(vaddr, asid, priv);
+            case TlbAccessKind::DataRead:
+                return lookup<TlbAccessKind::DataRead>(vaddr, asid, priv);
+            case TlbAccessKind::DataWrite:
+                return lookup<TlbAccessKind::DataWrite>(vaddr, asid, priv);
+        }
+        std::unreachable();
+    }
+
+    /**
+     * @brief Fast templated TLB insert by access kind using LRU replacement.
+     * @tparam Kind Access kind (Instruction, DataRead, DataWrite).
+     * @param vaddr Virtual address.
+     * @param paddr Physical address.
+     * @param asid Address Space Identifier.
+     * @param priv Privilege level.
+     * @return Pointer to newly inserted TLBEntry.
+     */
+    template <TlbAccessKind Kind>
+    inline auto insert(Address vaddr, Address paddr, Asid asid, PrivilegeLevel priv) -> TLBEntry* {
+        auto& table = select_table_static<Kind>();
+        auto& lru = select_lru_static<Kind>();
         const auto set = calc_set(vaddr);
         const Address vpage = calc_vpage(vaddr);
-        for (int i = 0; i < 2; i++) {
-            auto& entry = table[set][i];
-            if (entry.valid && entry.asid == asid && entry.v_addr == vpage && entry.priv == priv) {
-                lru[set] = 1 - i;
-                return &entry;
-            }
+        const Address ppage = paddr & ~simrv::memory::kPageMask;
+        auto& set_entries = table[set];
+
+        if (set_entries[0].valid && set_entries[0].v_addr == vpage && set_entries[0].asid == asid &&
+            set_entries[0].priv == priv) {
+            set_entries[0].p_addr = ppage;
+            lru[set] = 1;
+            return &set_entries[0];
         }
-        return nullptr;
+        if (set_entries[1].valid && set_entries[1].v_addr == vpage && set_entries[1].asid == asid &&
+            set_entries[1].priv == priv) {
+            set_entries[1].p_addr = ppage;
+            lru[set] = 0;
+            return &set_entries[1];
+        }
+
+        const int way = !set_entries[0].valid ? 0 : (!set_entries[1].valid ? 1 : lru[set]);
+        auto& entry = set_entries[way];
+        entry.v_addr = vpage;
+        entry.p_addr = ppage;
+        entry.asid = asid;
+        entry.priv = priv;
+        entry.valid = true;
+        lru[set] = 1 - way;
+        return &entry;
     }
 
     /**
@@ -131,27 +199,25 @@ class Tlb {
      */
     inline auto insert(TlbAccessKind kind, Address vaddr, Address paddr, Asid asid,
                        PrivilegeLevel priv) -> TLBEntry* {
-        auto& table = select_table(kind);
-        auto& lru = select_lru(kind);
-        const auto set = calc_set(vaddr);
-        const int way = lru[set];
-        auto& entry = table[set][way];
-        entry.v_addr = calc_vpage(vaddr);
-        entry.p_addr = paddr & ~simrv::memory::kPageMask;
-        entry.asid = asid;
-        entry.priv = priv;
-        entry.valid = true;
-        lru[set] = 1 - way;
-        return &entry;
+        switch (kind) {
+            case TlbAccessKind::Instruction:
+                return insert<TlbAccessKind::Instruction>(vaddr, paddr, asid, priv);
+            case TlbAccessKind::DataRead:
+                return insert<TlbAccessKind::DataRead>(vaddr, paddr, asid, priv);
+            case TlbAccessKind::DataWrite:
+                return insert<TlbAccessKind::DataWrite>(vaddr, paddr, asid, priv);
+        }
+        std::unreachable();
     }
 
-    /// Inspect an instruction translation without updating replacement state or hit counters.
-    [[nodiscard]] constexpr auto peek_inst_r(Address vaddr, Asid asid,
-                                             PrivilegeLevel priv) const noexcept
+    /// Inspect a translation without updating replacement state or hit counters.
+    template <TlbAccessKind Kind>
+    [[nodiscard]] constexpr auto peek(Address vaddr, Asid asid, PrivilegeLevel priv) const noexcept
         -> const TLBEntry* {
+        const auto& table = select_table_static<Kind>();
         const auto set = calc_set(vaddr);
         const Address vpage = calc_vpage(vaddr);
-        for (const auto& entry : inst_r[set]) {
+        for (const auto& entry : table[set]) {
             if (entry.valid && entry.asid == asid && entry.v_addr == vpage && entry.priv == priv) {
                 return &entry;
             }
@@ -159,39 +225,94 @@ class Tlb {
         return nullptr;
     }
 
-    // --- Legacy forwarding wrappers (inline, zero-cost) ---
+    /// Inspect an instruction translation without updating replacement state or hit counters.
+    [[nodiscard]] constexpr auto peek_inst_r(Address vaddr, Asid asid,
+                                             PrivilegeLevel priv) const noexcept
+        -> const TLBEntry* {
+        return peek<TlbAccessKind::Instruction>(vaddr, asid, priv);
+    }
+
+    /// Inspect a data read translation without updating replacement state or hit counters.
+    [[nodiscard]] constexpr auto peek_data_r(Address vaddr, Asid asid,
+                                             PrivilegeLevel priv) const noexcept
+        -> const TLBEntry* {
+        return peek<TlbAccessKind::DataRead>(vaddr, asid, priv);
+    }
+
+    /// Inspect a data write translation without updating replacement state or hit counters.
+    [[nodiscard]] constexpr auto peek_data_w(Address vaddr, Asid asid,
+                                             PrivilegeLevel priv) const noexcept
+        -> const TLBEntry* {
+        return peek<TlbAccessKind::DataWrite>(vaddr, asid, priv);
+    }
+
+    // --- Direct forwarding wrappers (templated, zero-cost) ---
 
     [[nodiscard]] inline auto lookup_inst_r(Address vaddr, Asid asid, PrivilegeLevel priv)
         -> TLBEntry* {
-        return lookup(TlbAccessKind::Instruction, vaddr, asid, priv);
+        return lookup<TlbAccessKind::Instruction>(vaddr, asid, priv);
     }
 
     inline auto insert_inst_r(Address vaddr, Address paddr, Asid asid, PrivilegeLevel priv)
         -> TLBEntry* {
-        return insert(TlbAccessKind::Instruction, vaddr, paddr, asid, priv);
+        return insert<TlbAccessKind::Instruction>(vaddr, paddr, asid, priv);
     }
 
     [[nodiscard]] inline auto lookup_data_r(Address vaddr, Asid asid, PrivilegeLevel priv)
         -> TLBEntry* {
-        return lookup(TlbAccessKind::DataRead, vaddr, asid, priv);
+        return lookup<TlbAccessKind::DataRead>(vaddr, asid, priv);
     }
 
     inline auto insert_data_r(Address vaddr, Address paddr, Asid asid, PrivilegeLevel priv)
         -> TLBEntry* {
-        return insert(TlbAccessKind::DataRead, vaddr, paddr, asid, priv);
+        return insert<TlbAccessKind::DataRead>(vaddr, paddr, asid, priv);
     }
 
     [[nodiscard]] inline auto lookup_data_w(Address vaddr, Asid asid, PrivilegeLevel priv)
         -> TLBEntry* {
-        return lookup(TlbAccessKind::DataWrite, vaddr, asid, priv);
+        return lookup<TlbAccessKind::DataWrite>(vaddr, asid, priv);
     }
 
     inline auto insert_data_w(Address vaddr, Address paddr, Asid asid, PrivilegeLevel priv)
         -> TLBEntry* {
-        return insert(TlbAccessKind::DataWrite, vaddr, paddr, asid, priv);
+        return insert<TlbAccessKind::DataWrite>(vaddr, paddr, asid, priv);
     }
 
    private:
+    template <TlbAccessKind Kind>
+    [[nodiscard]] constexpr auto select_table_static() noexcept -> std::array<TLBSet, kNumSets>& {
+        if constexpr (Kind == TlbAccessKind::Instruction) {
+            return inst_r;
+        } else if constexpr (Kind == TlbAccessKind::DataRead) {
+            return data_r;
+        } else {
+            return data_w;
+        }
+    }
+
+    template <TlbAccessKind Kind>
+    [[nodiscard]] constexpr auto select_table_static() const noexcept
+        -> const std::array<TLBSet, kNumSets>& {
+        if constexpr (Kind == TlbAccessKind::Instruction) {
+            return inst_r;
+        } else if constexpr (Kind == TlbAccessKind::DataRead) {
+            return data_r;
+        } else {
+            return data_w;
+        }
+    }
+
+    template <TlbAccessKind Kind>
+    [[nodiscard]] constexpr auto select_lru_static() noexcept -> std::array<uint8_t, kNumSets>& {
+        if constexpr (Kind == TlbAccessKind::Instruction) {
+            return inst_r_lru;
+        } else if constexpr (Kind == TlbAccessKind::DataRead) {
+            return data_r_lru;
+        } else {
+            return data_w_lru;
+        }
+    }
+
     [[nodiscard]] constexpr auto select_table(TlbAccessKind kind) noexcept
         -> std::array<TLBSet, kNumSets>& {
         switch (kind) {

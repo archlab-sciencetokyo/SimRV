@@ -1842,6 +1842,74 @@ void test_cycle_policy_architectural_equivalence() {
     std::cout << "[PASS] test_cycle_policy_architectural_equivalence\n";
 }
 
+void test_dynamic_mode_switching_cache_behavior() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+
+    ConcreteMachine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.cpu.machine_ = &machine;
+    machine.cpu.reset();
+    machine.memory().initialize_mmu();
+
+    // Start in InstructionFast mode
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+    machine.cpu.pipeline_sim.config.pipeline_type = simrv::pipeline::PipelineType::FiveStage;
+
+    constexpr Address pc = simrv::memory::kDramBaseAddress;
+    constexpr Address data_address = pc + 0x100;
+    constexpr std::array<Instruction, 7> program = {
+        0x02a00093,  // addi  x1, x0, 42
+        0x00000117,  // auipc x2, 0
+        0x0fc10113,  // addi  x2, x2, 252 -> pc + 0x100
+        0x00112023,  // sw    x1, 0(x2)
+        0x00012183,  // lw    x3, 0(x2)
+        0x10500073,  // wfi
+        0xffdff06f,  // jal   x0, -4 (repeat cached WFI)
+    };
+    std::memcpy(ram.data(), program.data(), sizeof(program));
+    machine.cpu.state().pc = pc;
+
+    // Step 2 instructions in fast functional mode
+    machine.cpu.run_cycle(machine);
+    machine.cpu.run_cycle(machine);
+    check(machine.cpu.e_icount == 2);
+    check(machine.cpu.state().regs.read(RegId::Ra) == 42);
+    // In IA mode, dcache has not seen any accesses yet
+    check(machine.cpu.dcache.hit_count() == 0);
+    check(machine.cpu.dcache.miss_count() == 0);
+
+    // Switch dynamically to CycleObservable without reboot or reload!
+    machine.switch_execution_engine(simrv::core::ExecutionEngine::CycleObservable);
+    check(machine.runtime_profile.is_cycle_mode());
+    check(machine.cpu.pipeline_sim.config.record_snapshots);
+
+    // Step in cycle mode through addi, sw, and lw
+    uint32_t guard = 0;
+    while (machine.cpu.e_icount < 5 && guard++ < 256) {
+        machine.cpu.run_cycle(machine);
+        machine.memory().system_bus().advance_cycle();
+    }
+    check(machine.cpu.e_icount == 5);
+    check(machine.cpu.state().regs.read(RegId::Gp) == 42);
+    // In cycle mode, dcache must have recorded accesses!
+    check(machine.cpu.dcache.hit_count() + machine.cpu.dcache.miss_count() > 0);
+
+    Word mem_val = 0;
+    check(machine.cpu.dcache.read(data_address, mem_val,
+                                  static_cast<Instruction>(simrv::isa::Funct3::Lw)));
+    check(mem_val == 42);
+
+    // Switch dynamically back to InstructionFast without reload
+    machine.switch_execution_engine(simrv::core::ExecutionEngine::InstructionFast);
+    check(machine.runtime_profile.is_instruction_fast());
+    check(!machine.cpu.pipeline_sim.config.record_snapshots);
+
+    std::cout << "[PASS] test_dynamic_mode_switching_cache_behavior\n";
+}
+
 void test_instruction_policy_architectural_equivalence() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
@@ -2514,6 +2582,7 @@ int main(int argc, char** argv) {
     test_cycle_kernel_golden_precise_trap();
     test_cycle_kernel_golden_interrupt_boundary();
     test_cycle_policy_architectural_equivalence();
+    test_dynamic_mode_switching_cache_behavior();
     test_instruction_policy_architectural_equivalence();
     test_aclint();
     test_aia_aplic_and_imsic();

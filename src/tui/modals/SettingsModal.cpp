@@ -9,6 +9,7 @@
 #include <format>
 
 #include "simrv/core/Machine.hpp"
+#include "simrv/isa/Common.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiTheme.hpp"
@@ -247,8 +248,11 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
                            const std::function<void(TuiRegPage)>& set_reg_page_cb) -> bool {
     // 1. General & UI settings
     machine.runtime_profile.interaction = simrv::core::InteractionMode::Tui;
-    machine.runtime_profile.engine = simrv::core::select_execution_engine(
+    const auto target_engine = simrv::core::select_execution_engine(
         draft.cycle_accurate, machine.runtime_profile.interaction);
+    if (machine.runtime_profile.engine != target_engine) {
+        machine.switch_execution_engine(target_engine);
+    }
     if (draft.high_contrast != machine.high_contrast_enabled()) {
         set_high_contrast(draft.high_contrast);
         machine.set_high_contrast_enabled(draft.high_contrast);
@@ -296,7 +300,11 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
 
     // 2. MISA Extensions
     uint64_t const new_misa = draft.misa.to_misa_val();
-    if (machine.primary_hart().state().misa != new_misa || next.isa.vlen != draft.misa.vlen) {
+    const auto current_vlen = machine.isa_config().vlen ? machine.isa_config().vlen
+                                                        : machine.primary_hart().state().regs.vlen;
+    const auto current_misa = simrv::isa::misa_with_mxl(machine.primary_hart().state().misa);
+    if (machine.primary_hart().state().misa != 0 &&
+        (current_misa != new_misa || current_vlen != draft.misa.vlen)) {
         next.isa.misa_profile = new_misa;
         next.isa.misa_override = true;
         next.isa.misa_xlen = draft.misa.xlen_bits;

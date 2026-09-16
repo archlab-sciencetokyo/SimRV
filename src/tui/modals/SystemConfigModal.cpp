@@ -202,13 +202,6 @@ auto SystemConfigModal::submit(const SysConfigDraft& draft, simrv::core::Machine
     // Explicit field editing retains the named profile only while it remains an exact preset.
     model.profile = selected_profile;
     if (!model.validate()) return false;
-    auto staged_configuration = machine.configuration();
-    staged_configuration.execution.pipeline_type =
-        static_cast<simrv::pipeline::PipelineType>(draft.pipeline_type);
-    // A profile changes cache geometry as well as pipeline policy.  Applying only the latter
-    // left the live D-cache at its previous size/associativity until an unrelated rebuild.
-    // This stays local to the modal so the lightweight TUI framework test target does not need
-    // to link the full CPU execution implementation.
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
         auto& cpu = machine.hart(hart);
         cpu.cpu_model_config = model;
@@ -221,7 +214,7 @@ auto SystemConfigModal::submit(const SysConfigDraft& draft, simrv::core::Machine
         cpu.branch_predictor.configure(cpu.pipeline_sim.config.branch_predictor);
         cpu.branch_predictor.reset();
     }
-    (void)machine.stage_reconfiguration(std::move(staged_configuration));
+    machine.set_pipeline_type(static_cast<simrv::pipeline::PipelineType>(draft.pipeline_type));
     return true;
 }
 

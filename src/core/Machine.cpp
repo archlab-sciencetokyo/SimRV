@@ -24,6 +24,7 @@
 #include "simrv/device/Power.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/pci/PcieRootComplex.hpp"
+#include "simrv/memory/CoherenceHub.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/util/BenchmarkEvent.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -732,9 +733,9 @@ auto OsRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool
             batch_size, machine.config.execution.fincnt - machine.retired_instruction_count()));
     }
     const uint32_t quantum =
-        std::min(batch_size, machine.runtime_->secondary_harts.empty()
-                                 ? 4096u
-                                 : static_cast<uint32_t>(machine.config.execution.smp_quantum));
+        machine.runtime_->secondary_harts.empty()
+            ? batch_size
+            : std::min(batch_size, static_cast<uint32_t>(machine.config.execution.smp_quantum));
     cpu.run_fast_os_batch(machine, quantum, *policy);
     // Functional TUI batches do not enter the per-cycle finalizer, so surface pending UART RX at
     // the same explicit boundary that publishes the sampled UI snapshot.
@@ -795,6 +796,50 @@ void Machine::reset_state() {
         std::memory_order_release);
     execution_state_.notify_all();
     primary_hart().reset();
+}
+
+void Machine::switch_execution_engine(ExecutionEngine engine) {
+    if (runtime_profile.engine == engine) return;
+    if (runner_started_.load(std::memory_order_acquire) && is_running()) {
+        post_control([engine](Machine& m) { m.switch_execution_engine_sync(engine); });
+    } else {
+        switch_execution_engine_sync(engine);
+    }
+}
+
+void Machine::switch_execution_engine_sync(ExecutionEngine engine) {
+    if (runtime_profile.engine == engine) return;
+
+    const bool to_cycle = is_cycle_engine(engine);
+    for (size_t i = 0; i < num_harts(); ++i) {
+        auto& cpu = hart(i);
+        const auto hart_id = static_cast<HartId>(cpu.state().mhartid);
+        memory().system_bus().cancel_source(
+            simrv::memory::make_tl_source(hart_id, simrv::memory::TlPort::Instruction));
+        memory().system_bus().cancel_source(
+            simrv::memory::make_tl_source(hart_id, simrv::memory::TlPort::Data));
+        cpu.ca_pipeline.reset();
+        cpu.ca_state.reset_instruction();
+        if (to_cycle) {
+            cpu.icache.flush(true);
+            cpu.dcache.flush(true);
+            cpu.branch_predictor.configure(cpu.pipeline_sim.config.branch_predictor);
+            cpu.branch_predictor.reset();
+            cpu.pipeline_sim.config.record_snapshots = is_observable_engine(engine);
+        } else {
+            cpu.pipeline_sim.config.record_snapshots = false;
+            cpu.decode_cache.flush();
+        }
+    }
+
+    if (to_cycle) {
+        memory().system_bus().coherence_hub().clear();
+    }
+
+    runtime_profile.engine = engine;
+    publish_tui_execution_snapshot();
+
+    simrv::log::info("Switched execution mode to {}", runtime_profile.execution_name());
 }
 
 auto Machine::add_lifecycle_observer(LifecycleObserver observer) -> LifecycleObserverId {

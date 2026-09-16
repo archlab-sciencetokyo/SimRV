@@ -133,6 +133,18 @@ auto StatusBar::is_pos_on_status_badge(int x, int width) const -> bool {
     return (x >= x_start && x <= x_end);
 }
 
+auto StatusBar::is_pos_on_mode_badge(int x, int width) const -> bool {
+    int target_width = layout_ == TuiLayout::Split ? left_width_ : width - 2;
+    size_t const selected = tui_ ? tui_->selected_hart() : 0;
+    auto const header = make_left_header_layout(machine_, target_width, selected);
+    if (header.mode.empty()) return false;
+
+    int x_start = 2 + get_display_width(header.identity) + 3;
+    int x_end = x_start + get_display_width(header.mode) - 1;
+
+    return (x >= x_start && x <= x_end);
+}
+
 auto StatusBar::is_pos_on_right_panel_mode(int x) const -> bool {
     if (layout_ != TuiLayout::Split && layout_ != TuiLayout::FullRight) {
         return false;
@@ -172,6 +184,10 @@ auto StatusBar::is_pos_on_right_panel_attached(int x) const -> bool {
 
 auto StatusBar::get_header_action_at_col(int col, int terminal_width) const -> HeaderHitResult {
     if (col < 1 || terminal_width < 2) return {};
+
+    if (is_pos_on_mode_badge(col, terminal_width)) {
+        return {.action = HeaderAction::ToggleMode};
+    }
 
     if (is_pos_on_status_badge(col, terminal_width)) {
         return {.action = HeaderAction::RunPause};
@@ -282,6 +298,14 @@ static const auto paused_row1_entries = std::to_array<FooterEntry>({
 });
 
 static const auto paused_row2_entries = std::to_array<FooterEntry>({
+    {.text = "[v] Mode",
+     .action = TuiFooterAction::ToggleExecutionMode,
+     .category = FooterCategory::Config,
+     .priority = FooterPriority::Core},
+    {.text = "  ",
+     .action = std::nullopt,
+     .category = FooterCategory::Spacer,
+     .priority = FooterPriority::Core},
     {.text = "[F2] Settings",
      .action = TuiFooterAction::OpenSettings,
      .category = FooterCategory::Config,

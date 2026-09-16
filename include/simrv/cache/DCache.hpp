@@ -28,10 +28,8 @@ inline auto DCache::read(Address addr, Word& data, Instruction funct3) -> bool {
     const unsigned size_bytes = 1u << (funct3 & 0x3u);
     last_accessed_set_ = set_idx;
 
-    const auto way_opt = find_way(set_idx, tag);
-    if (simrv::compiler::likely(way_opt.has_value())) {
-        const uint32_t w = *way_opt;
-        auto& cache_line = line(set_idx, w);
+    const auto [w, cache_line] = find_matching_line(set_idx, tag);
+    if (simrv::compiler::likely(cache_line != nullptr)) {
         const uint32_t byte_offset = addr & (kLineBytes - 1u);
         if (simrv::compiler::unlikely(byte_offset + size_bytes > kLineBytes)) {
             ++misses_;
@@ -41,10 +39,10 @@ inline auto DCache::read(Address addr, Word& data, Instruction funct3) -> bool {
         }
 
         Word raw = 0;
-        std::memcpy(&raw, cache_line.data.data() + byte_offset, size_bytes);
+        std::memcpy(&raw, cache_line->data.data() + byte_offset, size_bytes);
         data = simrv::memory::extend_loaded_value(raw, static_cast<uint8_t>(funct3));
 
-        cache_line.last_used = ++access_tick_;
+        cache_line->last_used = ++access_tick_;
         ++hits_;
         last_access_was_hit_ = true;
         last_hit_way_ = w;
@@ -65,19 +63,17 @@ inline auto DCache::write(Address addr, Word data, Instruction funct3, bool* out
         const uint32_t set_idx = get_set_index(addr);
         const Address tag = get_tag(addr);
         last_accessed_set_ = set_idx;
-        const auto way_opt = find_way(set_idx, tag);
-        if (way_opt.has_value()) {
-            const uint32_t w = *way_opt;
-            auto& cache_line = line(set_idx, w);
+        const auto [w, cache_line] = find_matching_line(set_idx, tag);
+        if (cache_line != nullptr) {
             // Exclusive and Modified both carry TileLink Trunk permission.
-            if (cache_line.state == simrv::memory::MesiState::Exclusive ||
-                cache_line.state == simrv::memory::MesiState::Modified) {
+            if (cache_line->state == simrv::memory::MesiState::Exclusive ||
+                cache_line->state == simrv::memory::MesiState::Modified) {
                 if (out_first_write != nullptr) {
-                    *out_first_write = (cache_line.state == simrv::memory::MesiState::Exclusive);
+                    *out_first_write = (cache_line->state == simrv::memory::MesiState::Exclusive);
                 }
-                std::memcpy(cache_line.data.data() + byte_offset, &data, size_bytes);
-                cache_line.state = simrv::memory::MesiState::Modified;
-                cache_line.last_used = ++access_tick_;
+                std::memcpy(cache_line->data.data() + byte_offset, &data, size_bytes);
+                cache_line->state = simrv::memory::MesiState::Modified;
+                cache_line->last_used = ++access_tick_;
                 ++hits_;
                 last_access_was_hit_ = true;
                 last_hit_way_ = w;

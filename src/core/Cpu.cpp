@@ -7,6 +7,7 @@
 #include <atomic>
 
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/Pmp.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/device/Uart.hpp"
@@ -134,7 +135,13 @@ void CPU::TLB_flush() {
 }
 void CPU::TLB_flush(const core::TlbFlushFilter& filter) {
     tlb.flush_selective(filter);
-    decode_cache.flush();
+    if (!filter.vaddr && !filter.asid) {
+        decode_cache.flush();
+    } else if (filter.vaddr) {
+        decode_cache.flush_page(*filter.vaddr & ~Address{0xFFF});
+    } else {
+        decode_cache.flush();
+    }
     soft_tlb_flush_selective(filter);
 }
 
@@ -153,7 +160,46 @@ void CPU::soft_tlb_flush() {
     }
 }
 
-void CPU::soft_tlb_flush_selective(const core::TlbFlushFilter& /*filter*/) { soft_tlb_flush(); }
+void CPU::soft_tlb_flush_selective(const core::TlbFlushFilter& filter) {
+    if (!filter.vaddr && !filter.asid) {
+        soft_tlb_flush();
+        return;
+    }
+    if (filter.vaddr) {
+        const Address vpn = *filter.vaddr >> 12;
+        const size_t tlb_idx = soft_tlb_index(vpn);
+        auto invalidate_if_match = [&](SoftTlbEntry& entry) {
+            if (entry.valid(soft_tlb_epoch)) {
+                const uint64_t entry_vpn = (entry.tag >> 18) & 0xFFFFFFFFFFULL;
+                const uint64_t entry_asid = (entry.tag >> 2) & 0xFFFFu;
+                if (entry_vpn == (vpn & 0xFFFFFFFFFFULL) &&
+                    (!filter.asid || entry_asid == *filter.asid)) {
+                    entry.invalidate();
+                }
+            }
+        };
+        invalidate_if_match(soft_tlb_read[tlb_idx]);
+        invalidate_if_match(soft_tlb_write[tlb_idx]);
+        invalidate_if_match(soft_tlb_inst[tlb_idx]);
+        return;
+    }
+    if (filter.asid) {
+        auto invalidate_asid = [&](SoftTlbEntry& entry) {
+            if (entry.valid(soft_tlb_epoch)) {
+                const uint64_t entry_asid = (entry.tag >> 2) & 0xFFFFu;
+                if (entry_asid == *filter.asid) {
+                    entry.invalidate();
+                }
+            }
+        };
+        for (size_t i = 0; i < 2048; ++i) {
+            invalidate_asid(soft_tlb_read[i]);
+            invalidate_asid(soft_tlb_write[i]);
+            invalidate_asid(soft_tlb_inst[i]);
+        }
+        return;
+    }
+}
 
 auto CPU::get_mstatus(CSRValue mask) const -> CSRValue { return csr_file.getMstatus(mask); }
 
@@ -232,6 +278,56 @@ void CPU::evaluate_timer_interrupt() {
             state_.mip &= ~enum_mask(MipBit::Mtip);
     }
     state_.refresh_supervisor_pending();
+}
+
+void CPU::run_fast_cycle_miss(Machine& machine) {
+    const Counter retired_before = e_icount;
+    bool success = fetch_stage(machine, state_.pc) && decode_stage(machine);
+
+    if (success && !pipeline_context.pending_exception.has_value()) {
+        CachedOp op;
+        op.copy_from(pipeline_context);
+        decode_cache.insert(state_.pc, op);
+    }
+
+    if (success) {
+        if (simrv::compiler::likely(machine.appmode_enabled() && state_.priv == kPrivMachine &&
+                                    (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+            success = execute_stage(machine);
+            if (success) {
+                run_memory_stage_baremetal(machine);
+                success = !pipeline_context.pending_exception.has_value() &&
+                          writeback_stage(machine) && commit_stage(machine);
+            }
+        } else {
+            success = execute_stage(machine) && memory_stage(machine) && writeback_stage(machine) &&
+                      commit_stage(machine);
+        }
+    }
+
+    if (!success) {
+        const auto cause =
+            pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
+        raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
+    }
+
+    tick_cycle_clock(machine);
+
+    if (machine.telemetry_sink_raw()) {
+        record_trace_for_tui(machine);
+    }
+
+    if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
+        if (auto hit = machine.breakpoint_manager().check_reg_changes(state_, prev_state_)) {
+            if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
+                machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap);
+            } else if (auto sink = machine.telemetry_sink_raw()) {
+                sink->set_status_override(hit->description);
+                sink->pause_loop();
+            }
+        }
+    }
+    machine.record_retired_instructions(e_icount - retired_before);
 }
 
 void CPU::run_cycle(Machine& machine) {
@@ -379,37 +475,8 @@ void CPU::run_cycle(Machine& machine) {
                 execute_cached_op_fast<false, false>(machine, *cached);
             }
         } else {
-            // Decode cache miss: run basic functional stages sequentially and cache the decoded
-            // op.
-            bool success = fetch_stage(machine, state_.pc) && decode_stage(machine);
-
-            if (success && !pipeline_context.pending_exception.has_value()) {
-                CachedOp op;
-                op.copy_from(pipeline_context);
-                decode_cache.insert(state_.pc, op);
-            }
-
-            if (success) {
-                if (simrv::compiler::likely(machine.appmode_enabled() &&
-                                            state_.priv == kPrivMachine &&
-                                            (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
-                    success = execute_stage(machine);
-                    if (success) {
-                        run_memory_stage_baremetal(machine);
-                        success = !pipeline_context.pending_exception.has_value() &&
-                                  writeback_stage(machine) && commit_stage(machine);
-                    }
-                } else {
-                    success = execute_stage(machine) && memory_stage(machine) &&
-                              writeback_stage(machine) && commit_stage(machine);
-                }
-            }
-
-            if (!success) {
-                const auto cause =
-                    pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
-                raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
-            }
+            run_fast_cycle_miss(machine);
+            return;
         }
     } else {
         // Observable instruction mode uses the same semantic stages without coroutine state.
@@ -540,6 +607,59 @@ void CPU::record_trace_for_tui(Machine& machine) {
                              rs2_val, pipeline_context.imm, static_cast<uint8_t>(state_.mhartid));
 }
 
+void CPU::run_cycle_baremetal_miss(Machine& machine) {
+    const Counter retired_before = e_icount;
+    run_fetch_stage_baremetal(machine);
+    const bool success = !pipeline_context.pending_exception.has_value() && decode_stage(machine);
+
+    if (success && !pipeline_context.pending_exception.has_value()) {
+        CachedOp op;
+        op.copy_from(pipeline_context);
+        decode_cache.insert(state_.pc, op);
+    }
+
+    if (success) {
+        const bool rest_success =
+            execute_stage(machine) &&
+            (run_memory_stage_baremetal(machine),
+             !pipeline_context.pending_exception.has_value()) &&
+            writeback_stage(machine) &&
+            (run_commit_stage_baremetal(machine), !pipeline_context.pending_exception.has_value());
+        if (simrv::compiler::unlikely(!rest_success)) {
+            const auto cause =
+                pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
+            raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
+        }
+    } else {
+        const auto cause =
+            pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
+        raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
+    }
+
+    clint_mmio.mcycle++;
+    clint_mmio.rtc_divider++;
+    if (clint_mmio.rtc_divider == 10) {
+        clint_mmio.mtime++;
+        clint_mmio.rtc_divider = 0;
+        evaluate_timer_interrupt();
+    }
+    if (machine.telemetry_sink_raw()) {
+        record_trace_for_tui(machine);
+    }
+
+    if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
+        if (auto hit = machine.breakpoint_manager().check_reg_changes(state_, prev_state_)) {
+            if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
+                machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap);
+            } else if (auto sink = machine.telemetry_sink_raw()) {
+                sink->set_status_override(hit->description);
+                sink->pause_loop();
+            }
+        }
+    }
+    machine.record_retired_instructions(e_icount - retired_before);
+}
+
 void CPU::run_cycle_baremetal(Machine& machine) {
     const Counter retired_before = e_icount;
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
@@ -606,58 +726,13 @@ void CPU::run_cycle_baremetal(Machine& machine) {
             }
             machine.record_retired_instructions(e_icount - retired_before);
             return;
+        } else {
+            run_cycle_baremetal_miss(machine);
+            return;
         }
     }
 
-    run_fetch_stage_baremetal(machine);
-    const bool success = !pipeline_context.pending_exception.has_value() && decode_stage(machine);
-
-    if (success && !pipeline_context.pending_exception.has_value()) {
-        CachedOp op;
-        op.copy_from(pipeline_context);
-        decode_cache.insert(state_.pc, op);
-    }
-
-    if (success) {
-        const bool rest_success =
-            execute_stage(machine) &&
-            (run_memory_stage_baremetal(machine),
-             !pipeline_context.pending_exception.has_value()) &&
-            writeback_stage(machine) &&
-            (run_commit_stage_baremetal(machine), !pipeline_context.pending_exception.has_value());
-        if (simrv::compiler::unlikely(!rest_success)) {
-            const auto cause =
-                pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
-            raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
-        }
-    } else {
-        const auto cause =
-            pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
-        raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
-    }
-
-    clint_mmio.mcycle++;
-    clint_mmio.rtc_divider++;
-    if (clint_mmio.rtc_divider == 10) {
-        clint_mmio.mtime++;
-        clint_mmio.rtc_divider = 0;
-        evaluate_timer_interrupt();
-    }
-    if (machine.telemetry_sink_raw()) {
-        record_trace_for_tui(machine);
-    }
-
-    if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
-        if (auto hit = machine.breakpoint_manager().check_reg_changes(state_, prev_state_)) {
-            if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
-                machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap);
-            } else if (auto sink = machine.telemetry_sink_raw()) {
-                sink->set_status_override(hit->description);
-                sink->pause_loop();
-            }
-        }
-    }
-    machine.record_retired_instructions(e_icount - retired_before);
+    run_cycle_baremetal_miss(machine);
 }
 
 void CPU::run_memory_stage_baremetal(Machine& machine) {
@@ -1002,7 +1077,7 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
                                 simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
         const Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
         const Address vpn = mem_addr >> 12;
-        const size_t tlb_idx = vpn & 2047u;
+        const size_t tlb_idx = soft_tlb_index(vpn);
         const auto& entry = soft_tlb_read[tlb_idx];
         if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
             if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
@@ -1010,10 +1085,37 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
                                                         static_cast<Instruction>(funct3));
                 return true;
             }
-            out_val =
-                simrv::memory::ram_read_fast(entry.paddr_base + (mem_addr & 0xFFF),
-                                             static_cast<Instruction>(funct3), machine.ram_view());
-            return true;
+            Address const paddr = entry.paddr_base + (mem_addr & 0xFFF);
+            if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes))) {
+                out_val = simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(funct3),
+                                                       machine.ram_view());
+                return true;
+            }
+            return false;
+        }
+        TLBEntry* tlb_e = tlb.lookup_data_r(mem_addr, current_asid, eff_priv);
+        if (simrv::compiler::likely(tlb_e != nullptr)) {
+            Address const paddr = tlb_e->p_addr + (mem_addr & 0xFFF);
+            if (simrv::compiler::unlikely(!core::pmp::check_access(
+                    state_, paddr, size_bytes, core::PmpAccessType::Read, eff_priv))) {
+                return false;
+            }
+            Address const ppage = tlb_e->p_addr;
+            Byte* host_base = machine.ram_view().contains(ppage, 4096)
+                                  ? machine.ram_view().unchecked_ptr(ppage)
+                                  : nullptr;
+            if (host_base != nullptr) {
+                soft_tlb_read[tlb_idx].set(vpn, current_asid, eff_priv, soft_tlb_epoch, ppage,
+                                           host_base);
+                out_val = simrv::memory::host_read_fast(host_base + (mem_addr & 0xFFF),
+                                                        static_cast<Instruction>(funct3));
+                return true;
+            }
+            if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes))) {
+                out_val = simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(funct3),
+                                                       machine.ram_view());
+                return true;
+            }
         }
     } else {
         if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes))) {
@@ -1051,17 +1153,47 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
                                 simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
         const Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
         const Address vpn = mem_addr >> 12;
-        const size_t tlb_idx = vpn & 2047u;
+        const size_t tlb_idx = soft_tlb_index(vpn);
         const auto& entry = soft_tlb_write[tlb_idx];
         if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
             Address const paddr = entry.paddr_base + (mem_addr & 0xFFF);
+            if (simrv::compiler::unlikely(is_tohost_addr(machine, paddr))) {
+                return false;
+            }
             if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
                 simrv::memory::host_write_fast(entry.host_ptr_base + (mem_addr & 0xFFF), rrs2,
                                                static_cast<Instruction>(funct3));
                 return true;
             }
-            if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes) &&
-                                        !is_tohost_addr(machine, paddr))) {
+            if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes))) {
+                simrv::memory::ram_write_fast(paddr, rrs2, static_cast<Instruction>(funct3),
+                                              machine.ram_view());
+                return true;
+            }
+            return false;
+        }
+        TLBEntry* tlb_e = tlb.lookup_data_w(mem_addr, current_asid, eff_priv);
+        if (simrv::compiler::likely(tlb_e != nullptr)) {
+            Address const paddr = tlb_e->p_addr + (mem_addr & 0xFFF);
+            if (simrv::compiler::unlikely(is_tohost_addr(machine, paddr))) {
+                return false;
+            }
+            if (simrv::compiler::unlikely(!core::pmp::check_access(
+                    state_, paddr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
+                return false;
+            }
+            Address const ppage = tlb_e->p_addr;
+            Byte* host_base = machine.ram_view().contains(ppage, 4096)
+                                  ? machine.ram_view().unchecked_ptr(ppage)
+                                  : nullptr;
+            if (host_base != nullptr) {
+                soft_tlb_write[tlb_idx].set(vpn, current_asid, eff_priv, soft_tlb_epoch, ppage,
+                                            host_base);
+                simrv::memory::host_write_fast(host_base + (mem_addr & 0xFFF), rrs2,
+                                               static_cast<Instruction>(funct3));
+                return true;
+            }
+            if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes))) {
                 simrv::memory::ram_write_fast(paddr, rrs2, static_cast<Instruction>(funct3),
                                               machine.ram_view());
                 return true;
@@ -1528,7 +1660,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                 machine.record_retired_instructions(accumulated_retired);
                 accumulated_retired = 0;
             }
-            run_cycle_baremetal(machine);
+            run_cycle_baremetal_miss(machine);
         }
         if (simrv::compiler::unlikely(
                 machine.tohost != 0 || !machine.is_running() ||
@@ -1614,7 +1746,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
             }
         } else {
             flush_clint_and_retired();
-            run_cycle(machine);
+            run_fast_cycle_miss(machine);
         }
         if (simrv::compiler::unlikely(
                 machine.tohost != 0 || !machine.is_running() ||

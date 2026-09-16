@@ -960,6 +960,9 @@ void Tui::handle_mouse(int x, int y, int b) {
                 case HeaderAction::SetSpeed:
                     open_modal(ModalType::SetSpeed);
                     break;
+                case HeaderAction::ToggleMode:
+                    toggle_execution_mode();
+                    break;
                 case HeaderAction::None:
                 default:
                     break;
@@ -1480,6 +1483,16 @@ void Tui::toggle_run_state() {
         unpause_loop();
     else
         pause_loop();
+}
+
+void Tui::toggle_execution_mode() {
+    const bool was_cycle = machine_.runtime_profile.is_cycle_mode();
+    const auto target_engine = was_cycle ? simrv::core::ExecutionEngine::InstructionObservable
+                                         : simrv::core::ExecutionEngine::CycleObservable;
+    machine_.switch_execution_engine(target_engine);
+    set_status_override(was_cycle ? "Mode: Instruction-Accurate (IA)"
+                                  : "Mode: Cycle-Accurate (CA)");
+    render(true);
 }
 
 void Tui::write_guest_input(uint8_t byte) {
@@ -2139,6 +2152,10 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
             cycle_theme_style();
             render(true);
             return true;
+        case simrv::tui::TuiKey::v:
+        case simrv::tui::TuiKey::V:
+            toggle_execution_mode();
+            return true;
         case simrv::tui::TuiKey::p:
         case simrv::tui::TuiKey::P:
             cycle_right_panel_mode();
@@ -2516,6 +2533,9 @@ void Tui::execute_footer_action(TuiFooterAction action) {
         case TuiFooterAction::ToggleTheme:
             cycle_theme_style();
             render(true);
+            break;
+        case TuiFooterAction::ToggleExecutionMode:
+            toggle_execution_mode();
             break;
     }
 }

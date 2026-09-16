@@ -196,6 +196,9 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto execution_config() const noexcept -> const ExecutionConfig& {
         return config.execution;
     }
+    void set_pipeline_type(simrv::pipeline::PipelineType type) noexcept {
+        config.execution.pipeline_type = type;
+    }
     [[nodiscard]] auto isa_config() const noexcept -> const IsaConfig& { return config.isa; }
     [[nodiscard]] auto files_config() const noexcept -> const FilesConfig& { return config.files; }
     /// Stage an architectural reconfiguration. It is validated and only takes effect after reboot.
@@ -295,6 +298,9 @@ class Machine final : public core::IInterruptController {
     void remove_lifecycle_observer(LifecycleObserverId observer_id);
     /// Reset runtime state flags and CPU state.
     void reset_state();
+    /// Dynamically switch execution engine (e.g. IA <-> CA) without reloading/rebooting.
+    void switch_execution_engine(ExecutionEngine engine);
+    void switch_execution_engine_sync(ExecutionEngine engine);
 
     std::atomic<uint64_t> tohost{0};  // Host communication register (always 64-bit for HTIF).
     std::atomic<bool> reboot_requested = false;  // Reboot requested flag.

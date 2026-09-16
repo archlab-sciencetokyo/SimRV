@@ -47,7 +47,8 @@ enum class KeyAction : uint8_t {
     SelectPreset2,
     SelectPreset3,
     SelectPreset4,
-    OpenLayoutPresets
+    OpenLayoutPresets,
+    ToggleExecutionMode
 };
 
 enum class ActionCategory : uint8_t { Execution, Inspect, Navigate, Configure, Help };

@@ -176,7 +176,7 @@ void test_utf8_and_theme_helpers() {
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 31, "all key actions have registry entries");
+    expect(bindings.size() == 32, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
     std::set<char> claimed_chars;
     for (const auto& binding : bindings) {
@@ -251,6 +251,7 @@ void test_key_registry() {
         simrv::tui::TuiFooterAction::Reboot,
         simrv::tui::TuiFooterAction::SwitchHart,
         simrv::tui::TuiFooterAction::ToggleTheme,
+        simrv::tui::TuiFooterAction::ToggleExecutionMode,
     };
     for (const auto footer_action : footer_actions) {
         const auto key_action = simrv::tui::key_action_for_footer(footer_action);
@@ -368,6 +369,27 @@ void test_sysconfig_modal_modes() {
     expect(settings_machine.reboot_requested && staged_settings.has_value() &&
                staged_settings->execution.num_harts == 4,
            "Settings modal stages hart-count changes for reboot");
+
+    simrv::core::Machine live_mode_machine;
+    SettingsDraft mode_draft;
+    SettingsModal::open(mode_draft, live_mode_machine);
+    mode_draft.cycle_accurate = true;
+    mode_draft.sys_config.cycle_accurate = true;
+    expect(SettingsModal::submit(mode_draft, live_mode_machine, [](simrv::tui::TuiRegPage) {}),
+           "Settings modal accepts live switch to Cycle-Accurate mode");
+    expect(!live_mode_machine.reboot_requested,
+           "Switching to cycle-accurate mode in settings does NOT reboot the machine");
+    expect(live_mode_machine.runtime_profile.is_cycle_mode(),
+           "Machine runtime profile successfully updated to cycle-accurate mode");
+
+    mode_draft.cycle_accurate = false;
+    mode_draft.sys_config.cycle_accurate = false;
+    expect(SettingsModal::submit(mode_draft, live_mode_machine, [](simrv::tui::TuiRegPage) {}),
+           "Settings modal accepts live switch to Instruction-Accurate mode");
+    expect(!live_mode_machine.reboot_requested,
+           "Switching to instruction-accurate mode in settings does NOT reboot the machine");
+    expect(live_mode_machine.runtime_profile.is_instruction_mode(),
+           "Machine runtime profile successfully updated to instruction mode");
 
     // Verify render text in IA mode contains disabled note for CA options
     std::vector<std::string> rows;

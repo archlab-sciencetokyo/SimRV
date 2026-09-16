@@ -125,7 +125,7 @@ void CPU::run_fetch_stage(Machine& machine) {
     }
 }
 
-void CPU::fetch_address_translate(Machine& /*machine*/) {
+void CPU::fetch_address_translate(Machine& machine) {
     auto& ctx = active_context();
     Word w_padr1 = kWordAllOnes;
     Word w_padr2 = kWordAllOnes;
@@ -144,7 +144,7 @@ void CPU::fetch_address_translate(Machine& /*machine*/) {
         const Word current_asid = simrv::xlen::satp_asid(state_.satp, state_.regs.xlen);
 
         const Address vpn1 = w_vadr1 >> 12;
-        const size_t tlb_idx1 = static_cast<size_t>(vpn1) & 2047u;
+        const size_t tlb_idx1 = core::CPU::soft_tlb_index(vpn1);
         const auto& se1 = soft_tlb_inst[tlb_idx1];
         if (simrv::compiler::likely(se1.matches(vpn1, current_asid, state_.priv, soft_tlb_epoch))) {
             w_padr1 = se1.paddr_base + (w_vadr1 & simrv::memory::kPageMask);
@@ -152,8 +152,11 @@ void CPU::fetch_address_translate(Machine& /*machine*/) {
             TLBEntry* tlb_e1 = tlb.lookup_inst_r(w_vadr1, current_asid, state_.priv);
             if (tlb_e1) {
                 w_padr1 = tlb_e1->p_addr + (w_vadr1 & simrv::memory::kPageMask);
+                Byte* const host_base = machine.ram_view().contains(tlb_e1->p_addr, 4096)
+                                            ? machine.ram_view().unchecked_ptr(tlb_e1->p_addr)
+                                            : nullptr;
                 soft_tlb_inst[tlb_idx1].set(vpn1, current_asid, state_.priv, soft_tlb_epoch,
-                                            tlb_e1->p_addr, nullptr);
+                                            tlb_e1->p_addr, host_base);
             }
         }
 
@@ -163,7 +166,7 @@ void CPU::fetch_address_translate(Machine& /*machine*/) {
             }
         } else {
             const Address vpn2 = w_vadr2 >> 12;
-            const size_t tlb_idx2 = static_cast<size_t>(vpn2) & 2047u;
+            const size_t tlb_idx2 = core::CPU::soft_tlb_index(vpn2);
             const auto& se2 = soft_tlb_inst[tlb_idx2];
             if (simrv::compiler::likely(
                     se2.matches(vpn2, current_asid, state_.priv, soft_tlb_epoch))) {
@@ -172,8 +175,11 @@ void CPU::fetch_address_translate(Machine& /*machine*/) {
                 TLBEntry* tlb_e2 = tlb.lookup_inst_r(w_vadr2, current_asid, state_.priv);
                 if (tlb_e2) {
                     w_padr2 = tlb_e2->p_addr + (w_vadr2 & simrv::memory::kPageMask);
+                    Byte* const host_base = machine.ram_view().contains(tlb_e2->p_addr, 4096)
+                                                ? machine.ram_view().unchecked_ptr(tlb_e2->p_addr)
+                                                : nullptr;
                     soft_tlb_inst[tlb_idx2].set(vpn2, current_asid, state_.priv, soft_tlb_epoch,
-                                                tlb_e2->p_addr, nullptr);
+                                                tlb_e2->p_addr, host_base);
                 }
             }
         }
@@ -210,9 +216,15 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
             (*translate_res)
                 .and_then([&](PhysAddr phys) -> std::expected<void, TrapCause> {
                     w_padr = phys.raw();
-                    tlb.insert_inst_r(w_vadr, w_padr,
-                                      simrv::xlen::satp_asid(state_.satp, state_.regs.xlen),
-                                      state_.priv);
+                    const Word asid = simrv::xlen::satp_asid(state_.satp, state_.regs.xlen);
+                    tlb.insert_inst_r(w_vadr, w_padr, asid, state_.priv);
+                    const Address vpn = w_vadr >> 12;
+                    const Address page_base = w_padr & ~simrv::memory::kPageMask;
+                    Byte* const host_base = machine.ram_view().contains(page_base, 4096)
+                                                ? machine.ram_view().unchecked_ptr(page_base)
+                                                : nullptr;
+                    soft_tlb_inst[core::CPU::soft_tlb_index(vpn)].set(
+                        vpn, asid, state_.priv, soft_tlb_epoch, page_base, host_base);
                     return {};
                 })
                 .or_else([&](TrapCause error) -> std::expected<void, TrapCause> {
@@ -220,7 +232,6 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
                     ctx.pending_tval = w_vadr;
                     return {};
                 });
-        (void)chain_res;
     }
     *r_padr = w_padr;
 }

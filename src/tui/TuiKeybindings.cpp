@@ -9,7 +9,7 @@
 
 namespace simrv::tui {
 
-static const std::array<KeyBindingInfo, 31> kKeyBindings = {
+static const std::array<KeyBindingInfo, 32> kKeyBindings = {
     {{.action = KeyAction::Step,
       .key_display = "[F6] / [s]",
       .primary_char = 's',
@@ -226,6 +226,15 @@ static const std::array<KeyBindingInfo, 31> kKeyBindings = {
       .help_label = "Open Layout Presets Modal",
       .category = ActionCategory::Navigate,
       .allowed_running = true,
+      .allowed_in_modal = false},
+     {.action = KeyAction::ToggleExecutionMode,
+      .key_display = "[v]",
+      .primary_char = 'v',
+      .alt_char = 'V',
+      .footer_label = "[v] Mode",
+      .help_label = "Toggle Precision (IA / CA)",
+      .category = ActionCategory::Configure,
+      .allowed_running = true,
       .allowed_in_modal = false}}};
 
 auto Keybindings::get(KeyAction action) -> const KeyBindingInfo& {
@@ -338,6 +347,8 @@ auto key_action_for_footer(TuiFooterAction action) -> KeyAction {
             return KeyAction::SwitchHart;
         case TuiFooterAction::ToggleTheme:
             return KeyAction::ToggleTheme;
+        case TuiFooterAction::ToggleExecutionMode:
+            return KeyAction::ToggleExecutionMode;
     }
     throw std::out_of_range("unknown TUI footer action");
 }
