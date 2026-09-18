@@ -88,6 +88,7 @@ void CPU::apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config) 
     // boundary prevents partially-applied timing models from leaking into a live CA pipeline.
     cpu_model_config = config;
     pipeline_sim.config = config.pipeline;
+    cycle_counter_start_delay_ = pipeline_sim.config.cycle_counter_start_delay;
     // BaseCache has bounded 16 KiB / 8-way backing, enough for the shipped FPGA profiles.
     // A validated model is required to fit before this point.
     (void)icache.configure(config.instruction_cache.capacity_bytes,
@@ -117,6 +118,7 @@ void CPU::reset() {
     TLB_flush();
     e_icount = 0;
     e_ccount = 0;
+    cycle_counter_start_delay_ = pipeline_sim.config.cycle_counter_start_delay;
     e_instmix.fill(0);
     trace_history_head_ = 0;
     trace_history_size_ = 0;
@@ -532,7 +534,11 @@ void CPU::advance_ca_cycle(Machine& machine) {
 }
 
 SIMRV_ALWAYS_INLINE void CPU::tick_cycle_clock(Machine& machine, bool interrupt_boundary) {
-    ++clint_mmio.mcycle;
+    if (cycle_counter_start_delay_ != 0) {
+        --cycle_counter_start_delay_;
+    } else {
+        ++clint_mmio.mcycle;
+    }
     if (machine.runtime_profile.is_cycle_mode()) {
         if (interrupt_boundary) handle_cached_interrupts();
         return;

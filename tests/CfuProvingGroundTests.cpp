@@ -21,6 +21,7 @@
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
+#include "simrv/util/CliParser.hpp"
 #include "simrv/xlen/Types.hpp"
 
 #define TEST_CHECK(expr)                                                                     \
@@ -52,12 +53,15 @@ void test_cfu_provingground_profile() {
     TEST_CHECK(profile.pipeline.mul_latency == 2);
     TEST_CHECK(profile.pipeline.div_latency == 34);
     TEST_CHECK(profile.pipeline.branch_mispredict_penalty == 3);
+    TEST_CHECK(profile.pipeline.cycle_counter_start_delay == 2);
 
     // Bimodal branch predictor (2048 BTB entries, 2048 BHT entries, no RAS)
     TEST_CHECK(profile.pipeline.branch_predictor.type == BranchPredictorType::Bimodal);
     TEST_CHECK(profile.pipeline.branch_predictor.btb_entries == 2048);
     TEST_CHECK(profile.pipeline.branch_predictor.bht_entries == 2048);
     TEST_CHECK(!profile.pipeline.branch_predictor.enable_ras);
+    TEST_CHECK(profile.pipeline.branch_predictor.registered_btb_read);
+    TEST_CHECK(profile.pipeline.branch_predictor.bht_initial_state == 0);
 
     // On-chip BRAM memory models (32 KiB IMEM, 16 KiB DMEM, 1-cycle hit latency)
     TEST_CHECK(profile.instruction_cache.capacity_bytes == 32768);
@@ -269,6 +273,105 @@ void test_cfu_pipeline_hazard_timing() {
     }
 }
 
+void test_bram_prewarm_and_cli() {
+    std::cout << "[Test] BRAM pre-warm CLI options and cache population...\n";
+
+    // 1. CLI default for cfu-provingground: bram_prewarm is true
+    {
+        std::array<char*, 4> argv = {const_cast<char*>("SimRV"), const_cast<char*>("--tui"),
+                                     const_cast<char*>("--cpu-profile"),
+                                     const_cast<char*>("cfu-provingground")};
+        const auto res = simrv::util::parse_command_line(argv);
+        TEST_CHECK(res.has_value());
+        const auto cfg = res->options.to_machine_config();
+        TEST_CHECK(cfg.bram_prewarm);
+    }
+
+    // Explicit predictor overrides survive machine initialization/profile application.
+    {
+        std::array<char*, 6> argv = {
+            const_cast<char*>("SimRV"),         const_cast<char*>("--tui"),
+            const_cast<char*>("--cpu-profile"), const_cast<char*>("cfu-provingground"),
+            const_cast<char*>("--bpred"),       const_cast<char*>("none")};
+        const auto res = simrv::util::parse_command_line(argv);
+        TEST_CHECK(res.has_value());
+        const auto cfg = res->options.to_machine_config();
+        TEST_CHECK(cfg.branch_predictor_type == BranchPredictorType::Disabled);
+    }
+
+    // 2. CLI explicit override: --no-bram-prewarm
+    {
+        std::array<char*, 5> argv = {const_cast<char*>("SimRV"), const_cast<char*>("--tui"),
+                                     const_cast<char*>("--cpu-profile"),
+                                     const_cast<char*>("cfu-provingground"),
+                                     const_cast<char*>("--no-bram-prewarm")};
+        const auto res = simrv::util::parse_command_line(argv);
+        TEST_CHECK(res.has_value());
+        const auto cfg = res->options.to_machine_config();
+        TEST_CHECK(!cfg.bram_prewarm);
+    }
+
+    // 3. CLI explicit flag: --bram-prewarm for other profiles
+    {
+        std::array<char*, 5> argv = {const_cast<char*>("SimRV"), const_cast<char*>("--tui"),
+                                     const_cast<char*>("--cpu-profile"),
+                                     const_cast<char*>("balanced"),
+                                     const_cast<char*>("--bram-prewarm")};
+        const auto res = simrv::util::parse_command_line(argv);
+        TEST_CHECK(res.has_value());
+        const auto cfg = res->options.to_machine_config();
+        TEST_CHECK(cfg.bram_prewarm);
+    }
+
+    // 4. Test prewarm_bram_caches populates ICache and DCache without misses
+    {
+        simrv::core::Machine machine;
+        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+
+        auto& cpu = machine.primary_hart();
+        cpu.machine_ = &machine;
+        cpu.reset();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        const auto profile =
+            simrv::pipeline::make_cpu_model_profile(CpuModelProfile::CfuProvingGround);
+        cpu.pipeline_sim.config = profile.pipeline;
+        cpu.cpu_model_config = profile;
+
+        constexpr std::array<Instruction, 3> test_prog = {
+            0x00a00093,  // addi x1, x0, 10
+            0x01400113,  // addi x2, x0, 20
+            0x002081b3,  // add x3, x1, x2
+        };
+        const Address code_addr = machine.memory_geometry().dram_base;
+        std::memcpy(ram.data(), test_prog.data(), sizeof(test_prog));
+
+        constexpr uint32_t data_val = 0x12345678;
+        const Address data_addr = machine.memory_geometry().dram_base + 0x1000;
+        std::memcpy(ram.data() + (data_addr - machine.memory_geometry().dram_base), &data_val,
+                    sizeof(data_val));
+
+        machine.clear_loaded_segments();
+        machine.record_loaded_segment(code_addr, sizeof(test_prog), true);
+        machine.record_loaded_segment(data_addr, sizeof(data_val), false);
+
+        machine.prewarm_bram_caches();
+
+        // Verify ICache hit on the prewarmed code line
+        uint32_t fetched_inst = 0;
+        TEST_CHECK(cpu.icache.read(code_addr, fetched_inst));
+        TEST_CHECK(fetched_inst == test_prog[0]);
+        TEST_CHECK(cpu.icache.miss_count() == 0);
+
+        // Verify DCache hit on the prewarmed data line
+        Word read_data = 0;
+        TEST_CHECK(cpu.dcache.read(data_addr, read_data,
+                                   static_cast<Instruction>(simrv::isa::Funct3::Lw)));
+        TEST_CHECK(static_cast<uint32_t>(read_data) == data_val);
+        TEST_CHECK(cpu.dcache.miss_count() == 0);
+    }
+}
+
 }  // namespace
 
 auto main() -> int {
@@ -278,6 +381,7 @@ auto main() -> int {
     test_cfu_unit_default_execution();
     test_cfu_unit_plugin_loading();
     test_cfu_pipeline_hazard_timing();
+    test_bram_prewarm_and_cli();
     std::cout << "=== All CFU-ProvingGround Tests Passed Successfully ===\n";
     return 0;
 }

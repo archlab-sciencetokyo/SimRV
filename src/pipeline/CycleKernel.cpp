@@ -63,6 +63,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         pipe.fetch_pc = state_.pc;
         pipe.initialized = true;
     }
+    branch_predictor.latch_btb_read(pipe.fetch_pc);
 
     auto run_with_context = [&](CycleInstructionSlot& slot, auto&& operation) -> bool {
         active_context_ = &slot.context;
@@ -83,8 +84,11 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         ca_state.instruction_prefetch.reset();
         ca_state.instruction_walk.reset();
         pipe.frontend_blocked = false;
-        if (pipeline_sim.config.branch_mispredict_penalty > 1) {
-            pipe.control_recovery_bubbles = pipeline_sim.config.branch_mispredict_penalty - 1;
+        // Execute-stage resolution already consumes the redirect cycle and the next cycle
+        // refills IF. Add only the remaining bubbles needed to reach the configured total
+        // misprediction penalty.
+        if (pipeline_sim.config.branch_mispredict_penalty > 2) {
+            pipe.control_recovery_bubbles = pipeline_sim.config.branch_mispredict_penalty - 2;
         }
     };
     auto trap_at_retirement = [&](CycleInstructionSlot& slot) {
@@ -286,7 +290,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                         execute->context.tkn && (target != execute->prediction.predicted_target);
                     const bool mispredict = dir_mispredict || target_mispredict;
 
-                    if (mispredict || pipe.frontend_blocked) {
+                    if (mispredict) {
                         branch_predictor.restore_speculation(execute->prediction);
                         flush_to(target);
                     }
@@ -360,7 +364,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                             decode->context.tkn && (target != decode->prediction.predicted_target);
                         const bool mispredict = dir_mispredict || target_mispredict;
 
-                        if (mispredict || pipe.frontend_blocked) {
+                        if (mispredict) {
                             branch_predictor.restore_speculation(decode->prediction);
                             // The resolving instruction itself occupies the combined ID/EX stage.
                             // Only the younger fetch-stage instruction is squashed.

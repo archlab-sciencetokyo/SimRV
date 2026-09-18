@@ -109,6 +109,11 @@ struct MachineConfig {
     FilesConfig files{};
     NetworkConfig network{};
     std::optional<simrv::pipeline::CpuModelProfile> cpu_model_profile{};
+    std::optional<simrv::pipeline::BranchPredictorType> branch_predictor_type{};
+    uint32_t bht_entries = 0;
+    uint32_t btb_entries = 0;
+    uint32_t ras_entries = 0;
+    bool bram_prewarm = false;
     unsigned disk_size_mb = SIMRV_DISK_SIZE_MB;
     PlatformProfile platform_profile = PlatformProfile::Pcie;
 

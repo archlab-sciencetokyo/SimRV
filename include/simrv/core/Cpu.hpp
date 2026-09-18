@@ -686,8 +686,9 @@ class CPU {
     }
 
     // ========== Execution Metrics ==========
-    uint64_t e_icount{0};                                     // Total instruction count
-    Counter e_ccount = 0;                                     // Compressed instructions executed
+    uint64_t e_icount{0};  // Total instruction count
+    Counter e_ccount = 0;  // Compressed instructions executed
+    LatencyCycles cycle_counter_start_delay_ = 0;
     std::array<uint64_t, isa::OperationIdCount> e_instmix{};  // Instruction-mix statistics
 };
 

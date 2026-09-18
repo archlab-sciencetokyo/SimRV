@@ -215,6 +215,7 @@ struct HartPipelineState {
         retired_this_cycle = false;
         data_hazard_stall = false;
         control_flush = false;
+        control_recovery_bubbles = 0;
     }
 };
 

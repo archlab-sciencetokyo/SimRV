@@ -82,6 +82,7 @@ struct RuntimeOptions {
     std::optional<simrv::pipeline::CpuModelProfile> cpu_model_profile;
     std::string fn_cfu_plugin;
     std::string fn_dump_dmem;
+    std::optional<bool> bram_prewarm;
     uint64_t step_delay_us = 0;
     uint32_t explain_inst_val = 0;
     double mouse_sensitivity = 1.0;

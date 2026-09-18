@@ -27,6 +27,9 @@ constexpr uint8_t kWeaklyTaken = 2;
 }  // namespace
 
 auto parse_branch_predictor_type(std::string_view name) -> std::optional<BranchPredictorType> {
+    if (name == "none" || name == "off" || name == "disabled") {
+        return BranchPredictorType::Disabled;
+    }
     if (name == "static" || name == "always-not-taken" || name == "btfnt") {
         return BranchPredictorType::Static;
     }
@@ -44,6 +47,8 @@ auto parse_branch_predictor_type(std::string_view name) -> std::optional<BranchP
 
 auto to_string(BranchPredictorType type) noexcept -> std::string_view {
     switch (type) {
+        case BranchPredictorType::Disabled:
+            return "Disabled";
         case BranchPredictorType::Static:
             return "Static";
         case BranchPredictorType::Bimodal:
@@ -65,10 +70,10 @@ void BranchPredictor::configure(const BranchPredictorConfig& config) {
 
     const uint32_t bht_sz = std::bit_ceil(std::max(16u, config_.bht_entries));
     bht_mask_ = bht_sz - 1u;
-    bht_.assign(bht_sz, kWeaklyNotTaken);
+    bht_.assign(bht_sz, config_.bht_initial_state);
 
     if (config_.type == BranchPredictorType::Tournament) {
-        bimodal_bht_.assign(bht_sz, kWeaklyNotTaken);
+        bimodal_bht_.assign(bht_sz, config_.bht_initial_state);
         chooser_table_.assign(bht_sz, kWeaklyTaken);  // Bias slightly toward GShare initially
     } else {
         bimodal_bht_.clear();
@@ -92,15 +97,24 @@ void BranchPredictor::configure(const BranchPredictorConfig& config) {
 }
 
 void BranchPredictor::reset() {
-    std::fill(bht_.begin(), bht_.end(), kWeaklyNotTaken);
-    std::fill(bimodal_bht_.begin(), bimodal_bht_.end(), kWeaklyNotTaken);
+    std::fill(bht_.begin(), bht_.end(), config_.bht_initial_state);
+    std::fill(bimodal_bht_.begin(), bimodal_bht_.end(), config_.bht_initial_state);
     std::fill(chooser_table_.begin(), chooser_table_.end(), kWeaklyTaken);
     std::fill(btb_.begin(), btb_.end(), BtbEntry{});
+    registered_btb_entry_ = {};
+    registered_bht_counter_ = config_.bht_initial_state;
     std::fill(ras_.begin(), ras_.end(), 0);
     ghr_ = 0;
     ras_head_ = 0;
     ras_count_ = 0;
     stats_ = {};
+}
+
+void BranchPredictor::latch_btb_read(Address pc) {
+    if (!config_.registered_btb_read || btb_.empty() || bht_.empty()) return;
+    const uint32_t btb_idx = static_cast<uint32_t>(pc >> config_.pc_shift) & btb_mask_;
+    registered_btb_entry_ = btb_[btb_idx];
+    registered_bht_counter_ = bht_[get_bht_index(pc, ghr_)];
 }
 
 auto BranchPredictor::get_bht_index(Address pc, uint32_t ghr_val) const noexcept -> uint32_t {
@@ -113,10 +127,19 @@ auto BranchPredictor::get_bht_index(Address pc, uint32_t ghr_val) const noexcept
 
 auto BranchPredictor::predict_direction(Address pc, const DecodedInstruction& inst,
                                         uint32_t& bht_idx) -> bool {
+    if (config_.type == BranchPredictorType::Disabled) {
+        bht_idx = 0;
+        return false;
+    }
     if (config_.type == BranchPredictorType::Static) {
         // BTFNT: Backward Taken, Forward Not Taken
         bht_idx = 0;
         return inst.imm < 0;
+    }
+
+    if (config_.registered_btb_read && config_.type == BranchPredictorType::Bimodal) {
+        bht_idx = get_bht_index(pc, ghr_);
+        return is_taken_prediction(registered_bht_counter_);
     }
 
     if (config_.type == BranchPredictorType::Tournament) {
@@ -181,6 +204,12 @@ auto BranchPredictor::predict(Address pc, const DecodedInstruction& inst) -> Bra
     pred.is_jump = is_jal || is_jalr;
     pred.ghr_snapshot = ghr_;
 
+    if (config_.type == BranchPredictorType::Disabled) {
+        pred.predicted_taken = false;
+        pred.predicted_target = pc + (inst.cinsn != 0u ? 2 : 4);
+        return pred;
+    }
+
     const Address inst_len = (inst.cinsn != 0u ? 2 : 4);
     const Address ret_addr = pc + inst_len;
 
@@ -195,7 +224,7 @@ auto BranchPredictor::predict(Address pc, const DecodedInstruction& inst) -> Bra
         pred.predicted_target = pc + static_cast<Address>(inst.imm);
         if (config_.untagged_btb) {
             const uint32_t btb_idx = static_cast<uint32_t>(pc >> config_.pc_shift) & btb_mask_;
-            const auto& entry = btb_[btb_idx];
+            const auto& entry = config_.registered_btb_read ? registered_btb_entry_ : btb_[btb_idx];
             pred.predicted_taken = entry.valid;
             if (entry.valid) {
                 pred.predicted_target = entry.target;
@@ -244,7 +273,8 @@ auto BranchPredictor::predict(Address pc, const DecodedInstruction& inst) -> Bra
     // Conditional Branch
     pred.predicted_taken = predict_direction(pc, inst, pred.bht_index);
     if (pred.predicted_taken) {
-        pred.predicted_target = pc + static_cast<Address>(inst.imm);
+        pred.predicted_target = config_.registered_btb_read ? registered_btb_entry_.target
+                                                            : pc + static_cast<Address>(inst.imm);
     } else {
         pred.predicted_target = ret_addr;
     }
@@ -260,7 +290,8 @@ void BranchPredictor::update_direction(const BranchFeedback& feedback) {
     const bool actual_taken = feedback.actual_taken;
     const uint32_t bht_idx = feedback.prediction.bht_index;
 
-    if (config_.type == BranchPredictorType::Static) {
+    if (config_.type == BranchPredictorType::Disabled ||
+        config_.type == BranchPredictorType::Static) {
         return;
     }
 

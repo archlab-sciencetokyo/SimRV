@@ -28,6 +28,8 @@ using simrv::pipeline::BranchPredictorType;
 using simrv::pipeline::DecodedInstruction;
 
 void test_type_parsing() {
+    TEST_CHECK(simrv::pipeline::parse_branch_predictor_type("none") ==
+               BranchPredictorType::Disabled);
     TEST_CHECK(simrv::pipeline::parse_branch_predictor_type("static") ==
                BranchPredictorType::Static);
     TEST_CHECK(simrv::pipeline::parse_branch_predictor_type("bimodal") ==
@@ -39,6 +41,61 @@ void test_type_parsing() {
     TEST_CHECK(simrv::pipeline::parse_branch_predictor_type("tournament") ==
                BranchPredictorType::Tournament);
     TEST_CHECK(simrv::pipeline::parse_branch_predictor_type("invalid") == std::nullopt);
+}
+
+void test_disabled_predictor() {
+    BranchPredictorConfig config{.type = BranchPredictorType::Disabled};
+    BranchPredictor bp(config);
+
+    DecodedInstruction branch{};
+    branch.opcode = Opcode::Branch;
+    branch.imm = -16;
+    const auto branch_prediction = bp.predict(0x100, branch);
+    TEST_CHECK(branch_prediction.is_control);
+    TEST_CHECK(!branch_prediction.predicted_taken);
+    TEST_CHECK(branch_prediction.predicted_target == 0x104);
+
+    DecodedInstruction jump{};
+    jump.opcode = Opcode::Jal;
+    jump.imm = 64;
+    const auto jump_prediction = bp.predict(0x200, jump);
+    TEST_CHECK(jump_prediction.is_control);
+    TEST_CHECK(!jump_prediction.predicted_taken);
+    TEST_CHECK(jump_prediction.predicted_target == 0x204);
+}
+
+void test_registered_btb_read_latency() {
+    BranchPredictorConfig config{
+        .type = BranchPredictorType::Bimodal,
+        .bht_entries = 128,
+        .btb_entries = 64,
+        .ras_entries = 8,
+        .pc_shift = 2,
+        .untagged_btb = true,
+        .registered_btb_read = true,
+    };
+    BranchPredictor bp(config);
+
+    DecodedInstruction branch{};
+    branch.opcode = Opcode::Branch;
+    branch.imm = 12;
+    constexpr Address pc = 0x1000;
+
+    bp.latch_btb_read(pc);
+    const auto initial = bp.predict(pc, branch);
+    TEST_CHECK(!initial.predicted_taken);
+    bp.update({.pc = pc,
+               .actual_taken = true,
+               .actual_target = pc + 12,
+               .opcode = Opcode::Branch,
+               .prediction = initial});
+
+    // The registered output remains stale until the next modeled BRAM read edge.
+    TEST_CHECK(!bp.predict(pc, branch).predicted_taken);
+    bp.latch_btb_read(pc);
+    const auto updated = bp.predict(pc, branch);
+    TEST_CHECK(updated.predicted_taken);
+    TEST_CHECK(updated.predicted_target == pc + 12);
 }
 
 void test_static_predictor() {
@@ -313,6 +370,8 @@ void test_telemetry_stats() {
 
 int main() {
     test_type_parsing();
+    test_disabled_predictor();
+    test_registered_btb_read_latency();
     test_static_predictor();
     test_bimodal_transitions();
     test_gshare_and_history_restoration();

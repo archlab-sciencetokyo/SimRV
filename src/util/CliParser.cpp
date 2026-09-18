@@ -281,6 +281,14 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.fn_dump_dmem = std::string(*value);
         return true;
     }
+    if (arg == "--bram-prewarm") {
+        options.bram_prewarm = true;
+        return true;
+    }
+    if (arg == "--no-bram-prewarm") {
+        options.bram_prewarm = false;
+        return true;
+    }
     if (arg == "--trap-log" || arg == "--traplog") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -433,8 +441,8 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         if (!value) return std::unexpected(value.error());
         if (!pipeline::parse_branch_predictor_type(*value).has_value()) {
             return std::unexpected(
-                std::format("unsupported branch predictor '{}' (supported: static, bimodal, "
-                            "gshare, tournament)",
+                std::format("unsupported branch predictor '{}' (supported: none, static, "
+                            "bimodal, gshare, tournament)",
                             *value));
         }
         result.options.bpred_type = std::string(*value);
@@ -929,6 +937,17 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.files.cfu_plugin_path = fn_cfu_plugin;
     cfg.files.dump_dmem_path = fn_dump_dmem;
     cfg.cpu_model_profile = cpu_model_profile;
+    if (!bpred_type.empty()) {
+        cfg.branch_predictor_type = pipeline::parse_branch_predictor_type(bpred_type);
+    }
+    cfg.bht_entries = bht_size;
+    cfg.btb_entries = btb_size;
+    cfg.ras_entries = ras_size;
+    if (bram_prewarm.has_value()) {
+        cfg.bram_prewarm = *bram_prewarm;
+    } else if (cpu_model_profile == simrv::pipeline::CpuModelProfile::CfuProvingGround) {
+        cfg.bram_prewarm = true;
+    }
 
     cfg.network.mode = net_mode;
     cfg.platform_profile = platform_profile;
@@ -1142,8 +1161,8 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         "  {}--no-forwarding{}                 Disable operand forwarding in pipeline model\n",
         style(kBrightGreen), style(kReset));
     std::print(stdout,
-               "  {}--bpred {}{}<TYPE>{}                Branch predictor: static, bimodal, gshare, "
-               "tournament\n",
+               "  {}--bpred {}{}<TYPE>{}                Branch predictor: none, static, bimodal, "
+               "gshare, tournament\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout, "  {}--bht-size {}{}<N>{}                Branch history table entry count\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
@@ -1161,8 +1180,12 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--cfu-plugin {}{}<LIB.SO>{}         Load dynamic Custom Function Unit (CFU) "
-               "plugin\n\n",
+               "plugin\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--bram-prewarm / --no-bram-prewarm{} Pre-warm L1 caches from loaded ELF for "
+               "0-latency BRAM parity (default: auto for cfu-provingground)\n\n",
+               style(kBrightGreen), style(kReset));
 
     // Logging & Tracing
     std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Logging and Tracing",

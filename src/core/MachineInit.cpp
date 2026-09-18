@@ -68,7 +68,11 @@ void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
 }
 
 void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view,
-                         const char* image_name, bool tuimode) {
+                         const char* image_name, bool tuimode,
+                         simrv::core::Machine* machine = nullptr) {
+    if (machine != nullptr) {
+        machine->clear_loaded_segments();
+    }
     Byte* const ram = ram_view.data();
     const auto capacity = static_cast<std::size_t>(ram_view.size());
     if (ram == nullptr || capacity == 0) {
@@ -148,6 +152,11 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                                         static_cast<std::streamsize>(
                                             copy_bytes))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
                                     loaded_segment = true;
+                                    if (machine != nullptr) {
+                                        const bool is_exec = (phdr.p_flags & 0x1) != 0;
+                                        machine->record_loaded_segment(paddr, phdr.p_memsz,
+                                                                       is_exec);
+                                    }
                                     if (phdr.p_memsz > phdr.p_filesz &&
                                         (dest_offset + phdr.p_filesz) < capacity) {
                                         const size_t bss_bytes = std::min<size_t>(
@@ -194,6 +203,11 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                                         static_cast<std::streamsize>(
                                             copy_bytes))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
                                     loaded_segment = true;
+                                    if (machine != nullptr) {
+                                        const bool is_exec = (phdr.p_flags & 0x1) != 0;
+                                        machine->record_loaded_segment(paddr, phdr.p_memsz,
+                                                                       is_exec);
+                                    }
                                     if (phdr.p_memsz > phdr.p_filesz &&
                                         (dest_offset + phdr.p_filesz) < capacity) {
                                         const size_t bss_bytes = std::min<size_t>(
@@ -219,6 +233,10 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                 simrv::log::error("{} image file {} read failed", image_name, file_path);
                 std::exit(EXIT_FAILURE);
             }
+            if (machine != nullptr) {
+                machine->record_loaded_segment(ram_view.base(), std::min(file_size, capacity),
+                                               true);
+            }
         }
     } else {
         if (file_size > capacity) {
@@ -231,6 +249,9 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                          file_size))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
             simrv::log::error("Failed to read {} image {}", image_name, file_path);
             std::exit(EXIT_FAILURE);
+        }
+        if (machine != nullptr) {
+            machine->record_loaded_segment(ram_view.base(), std::min(file_size, capacity), true);
         }
     }
 }
@@ -275,6 +296,18 @@ auto Machine::platform_status() const -> PlatformStatusSnapshot {
 auto Machine::initialize() -> std::expected<void, std::string> {
     if (config.cpu_model_profile.has_value()) {
         auto model = simrv::pipeline::make_cpu_model_profile(*config.cpu_model_profile);
+        if (config.branch_predictor_type.has_value()) {
+            model.pipeline.branch_predictor.type = *config.branch_predictor_type;
+        }
+        if (config.bht_entries != 0) {
+            model.pipeline.branch_predictor.bht_entries = config.bht_entries;
+        }
+        if (config.btb_entries != 0) {
+            model.pipeline.branch_predictor.btb_entries = config.btb_entries;
+        }
+        if (config.ras_entries != 0) {
+            model.pipeline.branch_predictor.ras_entries = config.ras_entries;
+        }
         primary_hart().apply_cpu_model_config(model);
         memory().system_bus().configure_timing(model.interconnect.request_latency,
                                                model.interconnect.response_latency);
@@ -438,7 +471,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     }
     primary_hart().TLB_flush();
 
-    load_image_into_ram(config.files.binary_path, ram_view(), "memory", tui_enabled());
+    load_image_into_ram(config.files.binary_path, ram_view(), "memory", tui_enabled(), this);
     symbol_table().load_from_elf(
         config.debug.spike_elf.empty() ? config.files.binary_path : config.debug.spike_elf, true,
         runtime_profile.interaction == InteractionMode::Tui
@@ -482,6 +515,10 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             sec_cpu->TLB_flush();
             runtime_->secondary_harts.push_back(std::move(sec_cpu));
         }
+    }
+
+    if (config.bram_prewarm) {
+        prewarm_bram_caches();
     }
 
     // If launched without a binary in TUI mode, skip image-dependent init —

@@ -20,10 +20,11 @@ namespace simrv::pipeline {
  * @brief Selectable branch prediction algorithms.
  */
 enum class BranchPredictorType : uint8_t {
-    Static = 0,     ///< Always Not-Taken / BTFNT
-    Bimodal = 1,    ///< 2-bit saturating counter table
-    GShare = 2,     ///< Global history XOR PC into 2-bit counters
-    Tournament = 3  ///< Hybrid chooser selecting between Bimodal and GShare
+    Static = 0,      ///< Always Not-Taken / BTFNT
+    Bimodal = 1,     ///< 2-bit saturating counter table
+    GShare = 2,      ///< Global history XOR PC into 2-bit counters
+    Tournament = 3,  ///< Hybrid chooser selecting between Bimodal and GShare
+    Disabled = 4     ///< Always fetch sequentially; all taken control transfers mispredict
 };
 
 [[nodiscard]] auto parse_branch_predictor_type(std::string_view name)
@@ -44,6 +45,13 @@ struct BranchPredictorConfig {
     bool enable_ras = true;
     uint8_t pc_shift = 1;
     bool untagged_btb = false;
+    /// Model a synchronous block-RAM lookup. The cycle kernel latches the read address before
+    /// redirect resolution, matching predictors whose output changes on the following edge.
+    bool registered_btb_read = false;
+    /// Initial 2-bit saturating counter value loaded into every BHT entry on reset.
+    /// 0 = Strongly Not Taken (matches CFU-Proving-Ground / RVProc RTL `initial btb[i]=0`).
+    /// 1 = Weakly Not Taken (default for all other profiles).
+    uint8_t bht_initial_state = 1;
 };
 
 /**
@@ -163,6 +171,7 @@ class BranchPredictor {
         return predict(pc.raw(), inst);
     }
     void update(const BranchFeedback& feedback);
+    void latch_btb_read(Address pc);
     void restore_speculation(const BranchPrediction& prediction);
 
     [[nodiscard]] auto stats() const noexcept -> const BranchPredictorStats& { return stats_; }
@@ -202,6 +211,8 @@ class BranchPredictor {
     // BTB
     std::vector<BtbEntry> btb_{};
     uint32_t btb_mask_ = 0;
+    BtbEntry registered_btb_entry_{};
+    uint8_t registered_bht_counter_ = 0;
 
     // RAS
     std::vector<Address> ras_{};

@@ -221,12 +221,21 @@ class Machine final : public core::IInterruptController {
      * @return std::expected<void, std::string> on success or diagnostic error string.
      */
     auto initialize() -> std::expected<void, std::string>;
-    /**
-     * @brief Load a program binary image dynamically into simulator DRAM and reset CPU state.
-     * @param filepath Path to the program binary image.
-     * @return std::expected<void, std::string> on success or diagnostic error string.
-     */
     auto load_program_binary(const std::string& filepath) -> std::expected<void, std::string>;
+    struct LoadedMemorySegment {
+        Address paddr = 0;
+        size_t size = 0;
+        bool is_executable = false;
+    };
+    void record_loaded_segment(Address paddr, size_t size, bool is_executable) {
+        loaded_segments_.push_back({paddr, size, is_executable});
+    }
+    void clear_loaded_segments() noexcept { loaded_segments_.clear(); }
+    [[nodiscard]] auto loaded_segments() const noexcept -> const std::vector<LoadedMemorySegment>& {
+        return loaded_segments_;
+    }
+    void prewarm_bram_caches();
+
     /// Load a disk image into the virtio disk device (may be called from TUI modal).
     /// @param filepath Path to the disk image file.
     /// @return std::expected<void, std::string> on success or diagnostic error string.
@@ -507,6 +516,7 @@ class Machine final : public core::IInterruptController {
         tui_snapshots_{};
     std::atomic<uint64_t> tui_sample_requested_{0};
     std::array<uint64_t, kMaxTuiSnapshotHarts> tui_sample_published_{};
+    std::vector<LoadedMemorySegment> loaded_segments_{};
 
     friend class RunnerBase;
     friend class BaremetalRunner;

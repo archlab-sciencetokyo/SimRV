@@ -796,6 +796,9 @@ void Machine::reset_state() {
         std::memory_order_release);
     execution_state_.notify_all();
     primary_hart().reset();
+    if (config.bram_prewarm) {
+        prewarm_bram_caches();
+    }
 }
 
 void Machine::switch_execution_engine(ExecutionEngine engine) {
@@ -834,12 +837,80 @@ void Machine::switch_execution_engine_sync(ExecutionEngine engine) {
 
     if (to_cycle) {
         memory().system_bus().coherence_hub().clear();
+        if (config.bram_prewarm) {
+            prewarm_bram_caches();
+        }
     }
 
     runtime_profile.engine = engine;
     publish_tui_execution_snapshot();
 
     simrv::log::info("Switched execution mode to {}", runtime_profile.execution_name());
+}
+
+void Machine::prewarm_bram_caches() {
+    auto ram = ram_view();
+    if (ram.data() == nullptr || ram.size() == 0) return;
+
+    for (size_t h = 0; h < num_harts(); ++h) {
+        auto& cpu = hart(h);
+
+        if (!loaded_segments_.empty()) {
+            for (const auto& seg : loaded_segments_) {
+                if (seg.is_executable) {
+                    constexpr Address kLineBytes = simrv::cache::ICache::kLineBytes;
+                    const Address start = seg.paddr & ~(kLineBytes - 1u);
+                    Address end = (seg.paddr + seg.size + kLineBytes - 1u) & ~(kLineBytes - 1u);
+                    const size_t max_bytes = cpu.icache.capacity_bytes();
+                    if (end > start + max_bytes) {
+                        end = start + max_bytes;
+                    }
+                    for (Address addr = start; addr < end; addr += kLineBytes) {
+                        if (ram.contains(addr, kLineBytes)) {
+                            cpu.icache.insert(addr, ram.unchecked_ptr(addr),
+                                              simrv::memory::MesiState::Exclusive);
+                        }
+                    }
+                } else {
+                    constexpr Address kLineBytes = simrv::cache::DCache::kLineBytes;
+                    const Address start = seg.paddr & ~(kLineBytes - 1u);
+                    Address end = (seg.paddr + seg.size + kLineBytes - 1u) & ~(kLineBytes - 1u);
+                    const size_t max_bytes = cpu.dcache.capacity_bytes();
+                    if (end > start + max_bytes) {
+                        end = start + max_bytes;
+                    }
+                    for (Address addr = start; addr < end; addr += kLineBytes) {
+                        if (ram.contains(addr, kLineBytes)) {
+                            cpu.dcache.insert(addr, ram.unchecked_ptr(addr),
+                                              simrv::memory::MesiState::Exclusive);
+                        }
+                    }
+                }
+            }
+        } else {
+            // Fallback: pre-warm IMEM range into ICache and DMEM range into DCache
+            const Address dram_base = ram.base();
+            constexpr Address kILineBytes = simrv::cache::ICache::kLineBytes;
+            const Address i_end = dram_base + cpu.icache.capacity_bytes();
+            for (Address addr = dram_base; addr < i_end; addr += kILineBytes) {
+                if (ram.contains(addr, kILineBytes)) {
+                    cpu.icache.insert(addr, ram.unchecked_ptr(addr),
+                                      simrv::memory::MesiState::Exclusive);
+                }
+            }
+
+            constexpr Address kDLineBytes = simrv::cache::DCache::kLineBytes;
+            const Address dmem_base =
+                ram.contains(0x10000000ULL, kDLineBytes) ? 0x10000000ULL : dram_base;
+            const Address d_end = dmem_base + cpu.dcache.capacity_bytes();
+            for (Address addr = dmem_base; addr < d_end; addr += kDLineBytes) {
+                if (ram.contains(addr, kDLineBytes)) {
+                    cpu.dcache.insert(addr, ram.unchecked_ptr(addr),
+                                      simrv::memory::MesiState::Exclusive);
+                }
+            }
+        }
+    }
 }
 
 auto Machine::add_lifecycle_observer(LifecycleObserver observer) -> LifecycleObserverId {

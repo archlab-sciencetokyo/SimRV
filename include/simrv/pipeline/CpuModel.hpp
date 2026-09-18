@@ -159,12 +159,16 @@ struct CpuModelConfig {
             result.pipeline.mul_latency = 2;
             result.pipeline.div_latency = 34;
             result.pipeline.branch_mispredict_penalty = 3;
+            // RVProc's registered reset deassertion delays mcycle by two pipeline clocks.
+            result.pipeline.cycle_counter_start_delay = 2;
             result.pipeline.branch_predictor.type = BranchPredictorType::Bimodal;
             result.pipeline.branch_predictor.btb_entries = 2048;
             result.pipeline.branch_predictor.bht_entries = 2048;
             result.pipeline.branch_predictor.enable_ras = false;
             result.pipeline.branch_predictor.pc_shift = 2;
             result.pipeline.branch_predictor.untagged_btb = true;
+            result.pipeline.branch_predictor.registered_btb_read = true;
+            result.pipeline.branch_predictor.bht_initial_state = 0;
             result.instruction_cache = {32768, 1, 32, 1, 1};
             result.data_cache = {16384, 1, 32, 1, 1};
             result.interconnect = {1, 1};
