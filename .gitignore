@@ -50,6 +50,8 @@ isa_logs/
 regression_logs/
 release-report.json
 benchmark-modes.json
+benchmark-*.json
+benchmark-*.md
 Testing/
 repro/results/
 Makefrag

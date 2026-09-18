@@ -90,6 +90,8 @@ def get_tool_path(tool_name, env_var, prefix):
     for name in [
         f"riscv64-unknown-elf-{tool_name}",
         f"riscv32-unknown-elf-{tool_name}",
+        f"riscv64-linux-gnu-{tool_name}",
+        f"riscv32-linux-gnu-{tool_name}",
         tool_name,
     ]:
         w = which(name)
