@@ -302,7 +302,8 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
     uint64_t const new_misa = draft.misa.to_misa_val();
     const auto current_vlen = machine.isa_config().vlen ? machine.isa_config().vlen
                                                         : machine.primary_hart().state().regs.vlen;
-    const auto current_misa = simrv::isa::misa_with_mxl(machine.primary_hart().state().misa);
+    const auto current_misa = simrv::isa::misa_with_mxl(machine.primary_hart().state().misa,
+                                                        machine.primary_hart().state().regs.xlen);
     if (machine.primary_hart().state().misa != 0 &&
         (current_misa != new_misa || current_vlen != draft.misa.vlen)) {
         next.isa.misa_profile = new_misa;

@@ -22,7 +22,8 @@ enum class CliAction : uint8_t {
     ShowLicense,
     ExplainInstruction,
     Attach,
-    DumpCpuModel
+    DumpCpuModel,
+    ValidateCpuModel
 };
 enum class RequestedExecutionMode : uint8_t { Fast, Detailed, CycleAccurate };
 

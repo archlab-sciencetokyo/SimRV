@@ -476,8 +476,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v
             ack.sink = timed.payload.sink;
             mem.system_bus().grant_ack(ack);
         }
-        if (cpu.machine_->configuration().cpu_model_profile ==
-                simrv::pipeline::CpuModelProfile::CfuProvingGround &&
+        if ((cpu.cpu_model_config.name == "cfu-provingground" ||
+             cpu.cpu_model_config.name == "rvproc") &&
             (addr == cpu.machine_->configuration().isa.isatest_tohost ||
              (addr & 0x80000000ULL) != 0)) {
             if (funct3 == static_cast<Instruction>(Funct3::Sw) &&

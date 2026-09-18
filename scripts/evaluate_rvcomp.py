@@ -214,6 +214,9 @@ def extract_number(pattern, text):
 def main():
     parser = argparse.ArgumentParser(description="Evaluate RVComp RTL vs SimRV Cycle Parity")
     parser.add_argument('--out', type=str, default=None, help='Output path for JSON results')
+    parser.add_argument('--cpu-profile', type=str, default="rvcomp", help='CPU profile name (default: rvcomp)')
+    parser.add_argument('--cpu-config', type=str, default=None, help='Path to custom .cfg model file')
+    parser.add_argument('--simrv-bin', type=str, default=None, help='Explicit path to SimRV executable')
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[1]
@@ -221,9 +224,12 @@ def main():
     if not rvcomp_dir.exists():
         rvcomp_dir = repo_root.parent / "RVComp"
 
-    simrv_bin = repo_root / "build/rv32-release/SimRV"
-    if not simrv_bin.exists():
-        simrv_bin = repo_root / "build/rv64-release/SimRV"
+    if args.simrv_bin:
+        simrv_bin = Path(args.simrv_bin)
+    else:
+        simrv_bin = repo_root / "build/rv32-release/SimRV"
+        if not simrv_bin.exists():
+            simrv_bin = repo_root / "build/rv64-release/SimRV"
     if not simrv_bin.exists():
         raise RuntimeError(f"SimRV binary not found under build/rv32-release or build/rv64-release")
 
@@ -284,8 +290,12 @@ def main():
         rtl_div_stall = extract_number(r'===> div stall\s*:\s*(\d+)', rtl_out)
         rtl_core_est_cycle = extract_number(r'===> total estimate cycle\s*:\s*(\d+)', rtl_out)
 
-        # 4. Run SimRV in cycle-accurate mode with --cpu-profile rvcomp
-        simrv_cmd = f"{simrv_bin} --cli --ca -m {elf_path.resolve()} -H 0x80000000 --cpu-profile rvcomp"
+        # 4. Run SimRV in cycle-accurate mode
+        if args.cpu_config:
+            model_arg = f"--cpu-config {Path(args.cpu_config).resolve()}"
+        else:
+            model_arg = f"--cpu-profile {args.cpu_profile}"
+        simrv_cmd = f"{simrv_bin} --cli --ca -m {elf_path.resolve()} -H 0x80000000 {model_arg}"
         simrv_out = run_cmd(simrv_cmd, cwd=repo_root)
 
         simrv_cycles = extract_number(r'Elapsed cycles \(clocks\)\s*:\s*[\d\.]*K?\s*\(([0-9,]+)\)', simrv_out)

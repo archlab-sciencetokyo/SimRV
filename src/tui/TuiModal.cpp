@@ -92,6 +92,13 @@ void TuiModal::open_save_cpu_config() {
     input_ = std::format("configs/models/{}.cfg", name);
 }
 
+void TuiModal::open_load_cpu_config() {
+    active_modal_ = ModalType::LoadCpuConfig;
+    rendered_box_width_ = 0;
+    const auto& name = machine_.primary_hart().cpu_model_config.name;
+    input_ = name.empty() ? "configs/models/rvcomp.cfg" : name;
+}
+
 void TuiModal::cycle_settings_tab(int delta) {
     input_.clear();
     modals::SettingsModal::cycle_tab(settings_draft_, delta);
@@ -278,6 +285,20 @@ auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step
                 return false;
             }
         }
+        case ModalType::LoadCpuConfig: {
+            bool success = modals::LoadModal::submit(
+                ModalType::LoadCpuConfig, input_, false, machine_, staged_binary_path_,
+                staged_mode_change_, staged_target_appmode_, set_status_override_cb);
+            if (success) {
+                open_notice("CPU MODEL LOADED", std::format("Loaded configuration from {}", input_),
+                            false);
+                return true;
+            } else {
+                open_notice("LOAD FAILED", std::format("Failed to load CPU model '{}'", input_),
+                            true);
+                return false;
+            }
+        }
         default:
             break;
     }
@@ -437,6 +458,7 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
                 case ModalType::LoadBinary:
                 case ModalType::LayoutPresets:
                 case ModalType::SaveCpuConfig:
+                case ModalType::LoadCpuConfig:
                     return action == 0 ? ModalClickResult::Submit : ModalClickResult::Closed;
                 case ModalType::Help:
                 case ModalType::None:
@@ -651,6 +673,9 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             content_rows.push_back("");
             content_rows.push_back(
                 modals::build_modal_footer({{"[Enter]", "Save"}, {"[Esc]", "Cancel"}}));
+            break;
+        case ModalType::LoadCpuConfig:
+            modals::LoadModal::render(ModalType::LoadCpuConfig, content_rows, input_, false, "");
             break;
         default:
             break;

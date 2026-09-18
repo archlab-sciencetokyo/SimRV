@@ -468,6 +468,9 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             fetch->wb_dest = fetch->context.rd;
             fetch->wb_valid = false;
             fetch->wb_val = 0;
+            if (cpu_model_config.instruction_cache.hit_latency > 1) {
+                fetch->remaining_latency = cpu_model_config.instruction_cache.hit_latency - 1;
+            }
             const Address width = fetch->context.cinsn != 0u ? 2 : 4;
             const Address sequential = (fetch->context.cpc + width).raw();
 

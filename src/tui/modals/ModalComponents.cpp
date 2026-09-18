@@ -74,6 +74,8 @@ auto get_modal_metadata(ModalType type, bool is_notice_error, std::string_view n
             return {.title = " WORKBENCH LAYOUT PRESETS ", .is_wide = true};
         case ModalType::SaveCpuConfig:
             return {.title = " SAVE CPU MODEL CONFIGURATION (.cfg) ", .is_wide = false};
+        case ModalType::LoadCpuConfig:
+            return {.title = " LOAD CPU MODEL CONFIGURATION (.cfg) ", .is_wide = false};
         case ModalType::None:
         default:
             return {.title = "", .is_wide = false};

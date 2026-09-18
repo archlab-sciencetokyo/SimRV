@@ -7,6 +7,8 @@
 #include <filesystem>
 #include <format>
 
+#include "simrv/core/Cpu.hpp"
+#include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
@@ -21,6 +23,9 @@ void LoadModal::open(ModalType type, std::string& input, bool& load_appmode,
         load_appmode = machine.appmode_enabled();
     } else if (type == ModalType::LoadDiskImage) {
         input = machine.disk_path();
+    } else if (type == ModalType::LoadCpuConfig) {
+        const auto& path = machine.primary_hart().cpu_model_config.name;
+        input = path.empty() ? "configs/models/rvcomp.cfg" : path;
     }
 }
 
@@ -77,6 +82,33 @@ auto LoadModal::submit(ModalType type, const std::string& input, bool load_appmo
             set_status_override_cb("Loaded binary and disk image. Resetting system...");
         }
         return true;
+    } else if (type == ModalType::LoadCpuConfig) {
+        if (input.empty()) {
+            if (set_status_override_cb) {
+                set_status_override_cb("No CPU configuration path specified");
+            }
+            return false;
+        }
+        const auto resolved = simrv::core::resolve_cpu_model_path(input);
+        const auto target_path = resolved.value_or(input);
+        simrv::pipeline::CpuModelConfig loaded{};
+        if (!simrv::core::load_cpu_config(target_path, loaded)) {
+            if (set_status_override_cb) {
+                set_status_override_cb(
+                    std::format("Failed to load CPU model '{}' (check architecture)", input));
+            }
+            return false;
+        }
+        for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
+            auto& cpu = machine.hart(hart);
+            cpu.apply_cpu_model_config(loaded);
+        }
+        machine.set_pipeline_type(loaded.pipeline.pipeline_type);
+        if (set_status_override_cb) {
+            set_status_override_cb(
+                std::format("CPU MODEL LOADED: {} ({})", loaded.name, target_path));
+        }
+        return true;
     }
     return false;
 }
@@ -106,6 +138,18 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
         content_rows.push_back("");
         content_rows.push_back(
             build_modal_footer({{"[Enter]", "Load (empty to skip)"}, {"[Esc]", "Skip Disk"}}));
+    } else if (type == ModalType::LoadCpuConfig) {
+        build_text_input_rows(content_rows,
+                              "Enter CPU model filepath (.cfg) or preset name:", input,
+                              "e.g. configs/models/rvcomp.cfg, cfu-provingground, balanced");
+        content_rows.push_back("");
+        content_rows.push_back(
+            std::format("  {}Canonical directory: configs/models/\033[0m", kThemeMuted));
+        content_rows.push_back(
+            std::format("  {}Built-in presets: tiny, balanced, performance\033[0m", kThemeMuted));
+        content_rows.push_back("");
+        content_rows.push_back(
+            build_modal_footer({{"[Enter]", "Load Model"}, {"[Esc]", "Cancel"}}));
     }
 }
 

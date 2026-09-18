@@ -52,8 +52,8 @@ void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
         Address entry = symbols.entry_point().value_or(
             symbols.lookup_name("_start").value_or(simrv::boot::kStartPc));
         if (entry < simrv::memory::kDramBaseAddress &&
-            machine.configuration().cpu_model_profile !=
-                simrv::pipeline::CpuModelProfile::CfuProvingGround) {
+            machine.primary_hart().cpu_model_config.name != "cfu-provingground" &&
+            machine.primary_hart().cpu_model_config.name != "rvproc") {
             entry += simrv::memory::kDramBaseAddress;
         }
         start_pc = entry;
@@ -316,12 +316,12 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         primary_hart().apply_cpu_model_config(model);
         memory().system_bus().configure_timing(model.interconnect.request_latency,
                                                model.interconnect.response_latency);
-        if (*config.cpu_model_profile == simrv::pipeline::CpuModelProfile::CfuProvingGround) {
+        if (model.name == "cfu-provingground" || model.name == "rvproc") {
             config.memory.dram_base = 0x00000000;
             if (config.memory.dram_size < 512 * 1024 * 1024) {
                 config.memory.dram_size = 512 * 1024 * 1024;
             }
-        } else if (*config.cpu_model_profile == simrv::pipeline::CpuModelProfile::RvComp) {
+        } else if (model.name == "rvcomp") {
             config.memory.dram_base = 0x80000000;
             if (config.memory.dram_size < 512 * 1024 * 1024) {
                 config.memory.dram_size = 512 * 1024 * 1024;
@@ -339,6 +339,17 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         primary_hart().apply_cpu_model_config(model);
         memory().system_bus().configure_timing(model.interconnect.request_latency,
                                                model.interconnect.response_latency);
+        if (model.name == "cfu-provingground" || model.name == "rvproc") {
+            config.memory.dram_base = 0x00000000;
+            if (config.memory.dram_size < 512 * 1024 * 1024) {
+                config.memory.dram_size = 512 * 1024 * 1024;
+            }
+        } else if (model.name == "rvcomp") {
+            config.memory.dram_base = 0x80000000;
+            if (config.memory.dram_size < 512 * 1024 * 1024) {
+                config.memory.dram_size = 512 * 1024 * 1024;
+            }
+        }
     }
     if (!config.files.cfu_plugin_path.empty()) {
         if (!primary_hart().cfu_unit.load_plugin(config.files.cfu_plugin_path)) {
@@ -436,12 +447,15 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         return isa::MisaProfile::GCBV;
     };
 
+    const unsigned int model_xlen = primary_hart().cpu_model_config.supported_xlen;
+    const unsigned int target_xlen = (model_xlen != 0) ? model_xlen : simrv::xlen::kXLenBits;
     CSRValue initial_misa = isa::misa_with_mxl(
         config.isa.misa_override ? config.isa.misa_profile
-                                 : isa::misa_profile_bits(effective_misa_profile()));
+                                 : isa::misa_profile_bits(effective_misa_profile()),
+        target_xlen);
     config.isa.misa_profile = initial_misa;
     if constexpr (simrv::xlen::kIsXLen64) {
-        bool is_32bit = false;
+        bool is_32bit = (target_xlen == 32);
         if (config.isa.misa_override && config.isa.misa_xlen == 32) {
             is_32bit = true;
         } else if (!config.isa.misa_override || config.isa.misa_xlen == 0) {

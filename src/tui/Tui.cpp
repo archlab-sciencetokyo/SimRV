@@ -1801,6 +1801,12 @@ auto Tui::handle_modal_settings(ModalType mtype, uint8_t byte, TuiKey key) -> bo
                 render(true);
                 return true;
             }
+            if (modal_.get_settings_draft().active_tab == 2 &&
+                modal_.get_settings_draft().tab_cursor[2] == 14) {
+                modal_.open_load_cpu_config();
+                render(true);
+                return true;
+            }
             submit_modal();
         } else if (key == simrv::tui::TuiKey::Tab) {
             modal_.cycle_settings_tab(1);
@@ -1821,10 +1827,20 @@ auto Tui::handle_modal_settings(ModalType mtype, uint8_t byte, TuiKey key) -> bo
                 render(true);
                 return true;
             }
+            if (modal_.get_settings_draft().active_tab == 2 &&
+                modal_.get_settings_draft().tab_cursor[2] == 14) {
+                modal_.open_load_cpu_config();
+                render(true);
+                return true;
+            }
             modal_.toggle_setting_at_cursor();
             render(true);
         } else if ((byte == 's' || byte == 'S') && modal_.get_settings_draft().active_tab == 2) {
             modal_.open_save_cpu_config();
+            render(true);
+            return true;
+        } else if ((byte == 'l' || byte == 'L') && modal_.get_settings_draft().active_tab == 2) {
+            modal_.open_load_cpu_config();
             render(true);
             return true;
         } else if (byte == 'p' || byte == 'P') {

@@ -98,7 +98,10 @@ void CPU::apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config) 
     ca_pipeline.reset();
     branch_predictor.configure(pipeline_sim.config.branch_predictor);
     branch_predictor.reset();
-    state_.misa = isa::misa_with_mxl(isa::misa_profile_bits(config.misa_profile));
+    const unsigned int target_xlen =
+        (config.supported_xlen != 0) ? config.supported_xlen : simrv::xlen::kXLenBits;
+    state_.misa = isa::misa_with_mxl(isa::misa_profile_bits(config.misa_profile), target_xlen);
+    state_.initialize_lower_xlen_fields();
 }
 
 void CPU::reset() {

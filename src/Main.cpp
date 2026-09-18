@@ -129,6 +129,63 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 }
                 std::exit(0);
             }
+            case CliAction::ValidateCpuModel: {
+                std::string target = parsed->options.dump_cpu_model_profile;
+                if (target.empty()) {
+                    simrv::log::error("No CPU model path specified to validate.");
+                    std::exit(1);
+                }
+                auto resolved = simrv::core::resolve_cpu_model_path(target);
+                std::string path_str = resolved.value_or(target);
+                if (!std::filesystem::exists(path_str)) {
+                    std::println(std::cerr,
+                                 "\033[1;31m[ERROR]\033[0m CPU config file not found: '{}'",
+                                 target);
+                    std::exit(1);
+                }
+                simrv::pipeline::CpuModelConfig cfg{};
+                if (!simrv::core::parse_cpu_config(path_str, cfg)) {
+                    std::println(std::cerr,
+                                 "\033[1;31m[INVALID]\033[0m Syntax or parse error reading '{}'",
+                                 path_str);
+                    std::exit(1);
+                }
+                std::println("\033[1;34m=== Validating CPU Model Configuration: {} ===\033[0m",
+                             path_str);
+                std::println("  Model Name      : {}", cfg.name.empty() ? "(unnamed)" : cfg.name);
+                std::println("  Description     : {}",
+                             cfg.description.empty() ? "(none)" : cfg.description);
+                std::println("  Required XLEN   : {}",
+                             cfg.supported_xlen == 0 ? "Any (RV32 or RV64)"
+                                                     : std::format("RV{}", cfg.supported_xlen));
+                std::println("  Simulator XLEN  : RV{}", simrv::xlen::kXLenBits);
+                std::println("  MISA Profile    : {}",
+                             simrv::core::detail::misa_profile_name(cfg.misa_profile));
+                std::println("  Pipeline Type   : {}",
+                             simrv::pipeline::pipeline_type_name(cfg.pipeline.pipeline_type));
+                std::println("  Branch Predictor: {}",
+                             simrv::pipeline::to_string(cfg.pipeline.branch_predictor.type));
+                std::println(
+                    "  ICache Geometry : {} KiB, {} B line, {}-way (hit: {} cyc, miss: {} cyc)",
+                    cfg.instruction_cache.capacity_bytes / 1024, cfg.instruction_cache.line_bytes,
+                    cfg.instruction_cache.associativity, cfg.instruction_cache.hit_latency,
+                    cfg.instruction_cache.miss_latency);
+                std::println(
+                    "  DCache Geometry : {} KiB, {} B line, {}-way (hit: {} cyc, miss: {} cyc)",
+                    cfg.data_cache.capacity_bytes / 1024, cfg.data_cache.line_bytes,
+                    cfg.data_cache.associativity, cfg.data_cache.hit_latency,
+                    cfg.data_cache.miss_latency);
+
+                auto res = cfg.validate();
+                if (!res.has_value()) {
+                    std::println(std::cerr, "\033[1;31m[INVALID]\033[0m {}", res.error());
+                    std::exit(1);
+                }
+                std::println(
+                    "\033[1;32m[VALID]\033[0m CPU model configuration is fully valid and "
+                    "compatible with this simulator.");
+                std::exit(0);
+            }
             case CliAction::Run:
                 break;
         }

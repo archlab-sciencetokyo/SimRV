@@ -11,6 +11,7 @@
 #include "simrv/cache/BaseCache.hpp"
 #include "simrv/cache/ICache.hpp"
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/execute/CfuUnit.hpp"
@@ -41,17 +42,33 @@ using simrv::pipeline::BranchPredictorType;
 using simrv::pipeline::CpuModelProfile;
 using simrv::pipeline::PipelineType;
 
-void test_cfu_provingground_profile() {
-    std::cout << "[Test] CpuModelProfile::CfuProvingGround validation & config...\n";
+auto load_cfu_provingground_profile() -> simrv::pipeline::CpuModelConfig {
+    const auto path = simrv::core::resolve_cpu_model_path("cfu-provingground");
+    TEST_CHECK(path.has_value());
+    simrv::pipeline::CpuModelConfig profile{};
+    TEST_CHECK(simrv::core::parse_cpu_config(*path, profile));
+    return profile;
+}
 
-    const auto profile = simrv::pipeline::make_cpu_model_profile(CpuModelProfile::CfuProvingGround);
+void test_cfu_provingground_profile() {
+    std::cout << "[Test] cfu-provingground config from configs/models/cfu-provingground.cfg...\n";
+
+    const auto profile = load_cfu_provingground_profile();
+    TEST_CHECK(profile.name == "cfu-provingground");
+    TEST_CHECK(profile.supported_xlen == 32);
+
+    const auto path = simrv::core::resolve_cpu_model_path("cfu-provingground");
+    TEST_CHECK(path.has_value());
+
+    simrv::pipeline::CpuModelConfig loaded{};
+    TEST_CHECK(simrv::core::load_cpu_config(*path, loaded));
     TEST_CHECK(profile.validate().has_value());
 
     // 5-stage in-order core
     TEST_CHECK(profile.pipeline.pipeline_type == PipelineType::FiveStage);
     TEST_CHECK(profile.pipeline.enable_forwarding);
-    TEST_CHECK(profile.pipeline.mul_latency == 2);
-    TEST_CHECK(profile.pipeline.div_latency == 34);
+    TEST_CHECK(profile.pipeline.mul_latency == 3);
+    TEST_CHECK(profile.pipeline.div_latency == 18);
     TEST_CHECK(profile.pipeline.branch_mispredict_penalty == 3);
     TEST_CHECK(profile.pipeline.cycle_counter_start_delay == 2);
 
@@ -70,14 +87,6 @@ void test_cfu_provingground_profile() {
     TEST_CHECK(profile.data_cache.capacity_bytes == 16384);
     TEST_CHECK(profile.data_cache.associativity == 1);
     TEST_CHECK(profile.data_cache.hit_latency == 1);
-
-    // Profile string parsing and names
-    TEST_CHECK(simrv::pipeline::parse_cpu_model_profile("cfu-provingground") ==
-               CpuModelProfile::CfuProvingGround);
-    TEST_CHECK(simrv::pipeline::parse_cpu_model_profile("rvproc") ==
-               CpuModelProfile::CfuProvingGround);
-    TEST_CHECK(simrv::pipeline::cpu_model_profile_name(CpuModelProfile::CfuProvingGround) ==
-               "cfu-provingground");
 }
 
 void test_cfu_instruction_decode_and_traits() {
@@ -184,7 +193,7 @@ void test_cfu_pipeline_hazard_timing() {
     // 1. Back-to-back dependent instruction:
     // In CFU-ProvingGround (RVProc), CFU output is registered at EX/MEM.
     // Back-to-back dependency causes a 1-cycle Decode hazard stall.
-    {
+    if constexpr (!simrv::xlen::kIsXLen64) {
         simrv::core::Machine machine;
         const Address pc = machine.memory_geometry().dram_base;
         std::vector<Byte> ram(1024 * 1024, Byte{0});
@@ -194,8 +203,7 @@ void test_cfu_pipeline_hazard_timing() {
         cpu.machine_ = &machine;
         cpu.reset();
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
-        const auto profile =
-            simrv::pipeline::make_cpu_model_profile(CpuModelProfile::CfuProvingGround);
+        const auto profile = load_cfu_provingground_profile();
         cpu.pipeline_sim.config = profile.pipeline;
         cpu.cpu_model_config = profile;
 
@@ -237,7 +245,7 @@ void test_cfu_pipeline_hazard_timing() {
         0x0000006f,  // jal x0, 0
     };
 
-    {
+    if constexpr (!simrv::xlen::kIsXLen64) {
         simrv::core::Machine machine;
         const Address pc = machine.memory_geometry().dram_base;
         std::vector<Byte> ram(1024 * 1024, Byte{0});
@@ -247,8 +255,7 @@ void test_cfu_pipeline_hazard_timing() {
         cpu.machine_ = &machine;
         cpu.reset();
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
-        const auto profile =
-            simrv::pipeline::make_cpu_model_profile(CpuModelProfile::CfuProvingGround);
+        const auto profile = load_cfu_provingground_profile();
         cpu.pipeline_sim.config = profile.pipeline;
         cpu.cpu_model_config = profile;
 
@@ -324,7 +331,7 @@ void test_bram_prewarm_and_cli() {
     }
 
     // 4. Test prewarm_bram_caches populates ICache and DCache without misses
-    {
+    if constexpr (!simrv::xlen::kIsXLen64) {
         simrv::core::Machine machine;
         std::vector<Byte> ram(1024 * 1024, Byte{0});
         machine.set_ram_for_testing(ram.data(), ram.size());
@@ -333,8 +340,7 @@ void test_bram_prewarm_and_cli() {
         cpu.machine_ = &machine;
         cpu.reset();
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
-        const auto profile =
-            simrv::pipeline::make_cpu_model_profile(CpuModelProfile::CfuProvingGround);
+        const auto profile = load_cfu_provingground_profile();
         cpu.pipeline_sim.config = profile.pipeline;
         cpu.cpu_model_config = profile;
 

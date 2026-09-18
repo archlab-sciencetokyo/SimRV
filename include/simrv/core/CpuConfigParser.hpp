@@ -84,19 +84,19 @@ inline auto parse_misa_profile_string(std::string_view val)
 inline auto misa_profile_name(simrv::isa::MisaProfile profile) -> std::string_view {
     switch (profile) {
         case simrv::isa::MisaProfile::I:
-            return "rv32i";
+            return "i";
         case simrv::isa::MisaProfile::IM:
-            return "rv32im";
+            return "im";
         case simrv::isa::MisaProfile::IMA:
-            return "rv32ima";
+            return "ima";
         case simrv::isa::MisaProfile::IMAC:
-            return "rv32imac";
+            return "imac";
         case simrv::isa::MisaProfile::GC:
-            return "rv32gc";
+            return "gc";
         case simrv::isa::MisaProfile::GCBV:
-            return "rv32gcbv";
+            return "gcbv";
     }
-    return "rv32gcbv";
+    return "gcbv";
 }
 
 }  // namespace detail
@@ -179,8 +179,10 @@ inline auto resolve_cpu_model_path(std::string_view name_or_path) -> std::option
 
 /**
  * @brief Parse CPU model configuration from text stream supporting sections and flat keys.
+ *
+ * Performs syntactic and model parsing without enforcing simulator architecture validation.
  */
-inline auto load_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuModelConfig& config)
+inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuModelConfig& config)
     -> bool {
     enum class Section {
         Global,
@@ -251,12 +253,17 @@ inline auto load_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMod
                 continue;
             }
             if (key == "name" || key == "model_name") {
+                config.name = std::string(val_str);
                 const auto parsed = simrv::pipeline::parse_cpu_model_profile(val_str);
                 if (parsed.has_value()) {
                     config.profile = *parsed;
                 } else {
                     config.profile = simrv::pipeline::CpuModelProfile::Custom;
                 }
+                continue;
+            }
+            if (key == "xlen" || key == "supported_xlen") {
+                config.supported_xlen = static_cast<uint8_t>(std::stoul(std::string(val_str)));
                 continue;
             }
             if (key == "misa" || key == "isa" || key == "misa_profile") {
@@ -266,15 +273,23 @@ inline auto load_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMod
                 } else {
                     simrv::log::warn("Unknown MISA profile '{}'", val_str);
                 }
+                const auto unquoted = detail::unquote(val_str);
+                if (unquoted.starts_with("rv32") || unquoted.starts_with("RV32")) {
+                    if (config.supported_xlen == 0) config.supported_xlen = 32;
+                } else if (unquoted.starts_with("rv64") || unquoted.starts_with("RV64")) {
+                    if (config.supported_xlen == 0) config.supported_xlen = 64;
+                }
                 continue;
             }
             if (key == "description") {
-                continue;  // Descriptive field
+                config.description = std::string(val_str);
+                continue;
             }
 
             // Explicit overrides mark profile as custom unless matched
-            if (config.profile != simrv::pipeline::CpuModelProfile::CfuProvingGround &&
-                config.profile != simrv::pipeline::CpuModelProfile::RvComp) {
+            if (config.profile != simrv::pipeline::CpuModelProfile::Tiny &&
+                config.profile != simrv::pipeline::CpuModelProfile::Balanced &&
+                config.profile != simrv::pipeline::CpuModelProfile::Performance) {
                 config.profile = simrv::pipeline::CpuModelProfile::Custom;
             }
 
@@ -511,7 +526,48 @@ inline auto load_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMod
         }
     }
 
-    if (const auto valid = config.validate(); !valid) {
+    return true;
+}
+
+/**
+ * @brief Parse CPU configuration from an in-memory string without validation against machine XLEN.
+ */
+inline auto parse_cpu_config_string(std::string_view content,
+                                    simrv::pipeline::CpuModelConfig& config) -> bool {
+    std::istringstream stream{std::string(content)};
+    return parse_cpu_config_stream(stream, config);
+}
+
+/**
+ * @brief Parse CPU configuration from a filesystem path without validation against machine XLEN.
+ */
+inline auto parse_cpu_config(const std::filesystem::path& path,
+                             simrv::pipeline::CpuModelConfig& config) -> bool {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        return false;
+    }
+    return parse_cpu_config_stream(file, config);
+}
+
+/**
+ * @brief Parse CPU configuration from a string path without validation against machine XLEN.
+ */
+inline auto parse_cpu_config(const std::string& path, simrv::pipeline::CpuModelConfig& config)
+    -> bool {
+    return parse_cpu_config(std::filesystem::path(path), config);
+}
+
+/**
+ * @brief Load CPU configuration from a stream and validate against the current simulator.
+ */
+inline auto load_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuModelConfig& config)
+    -> bool {
+    if (!parse_cpu_config_stream(stream, config)) {
+        return false;
+    }
+    const auto valid = config.validate();
+    if (!valid) {
         simrv::log::warn("Invalid CPU configuration: {}", valid.error());
         return false;
     }
@@ -519,10 +575,10 @@ inline auto load_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMod
 }
 
 /**
- * @brief Load CPU configuration from a file path.
+ * @brief Load CPU configuration from a filesystem path and validate against the current simulator.
  */
-inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuModelConfig& config)
-    -> bool {
+inline auto load_cpu_config(const std::filesystem::path& path,
+                            simrv::pipeline::CpuModelConfig& config) -> bool {
     std::ifstream file(path);
     if (!file.is_open()) {
         return false;
@@ -531,7 +587,16 @@ inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuModelCo
 }
 
 /**
- * @brief Load CPU configuration from an in-memory string.
+ * @brief Load CPU configuration from a string path and validate against the current simulator.
+ */
+inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuModelConfig& config)
+    -> bool {
+    return load_cpu_config(std::filesystem::path(path), config);
+}
+
+/**
+ * @brief Load CPU configuration from an in-memory string and validate against the current
+ * simulator.
  */
 inline auto load_cpu_config_string(std::string_view content,
                                    simrv::pipeline::CpuModelConfig& config) -> bool {
@@ -542,12 +607,17 @@ inline auto load_cpu_config_string(std::string_view content,
 /**
  * @brief Compatibility entry point for callers that only need pipeline timing.
  */
-inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuConfig& config) -> bool {
+inline auto load_cpu_config(const std::filesystem::path& path, simrv::pipeline::CpuConfig& config)
+    -> bool {
     simrv::pipeline::CpuModelConfig model{};
     model.pipeline = config;
     if (!load_cpu_config(path, model)) return false;
     config = model.pipeline;
     return true;
+}
+
+inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuConfig& config) -> bool {
+    return load_cpu_config(std::filesystem::path(path), config);
 }
 
 /**
@@ -557,13 +627,20 @@ inline void serialize_cpu_config(const simrv::pipeline::CpuModelConfig& config, 
                                  std::string_view model_name = "",
                                  std::string_view description = "") {
     const auto name =
-        model_name.empty() ? simrv::pipeline::cpu_model_profile_name(config.profile) : model_name;
+        model_name.empty()
+            ? (config.name.empty() ? simrv::pipeline::cpu_model_profile_name(config.profile)
+                                   : std::string_view(config.name))
+            : model_name;
 
     out << "# SimRV CPU Model Configuration\n";
     out << "[cpu]\n";
     out << "name = \"" << name << "\"\n";
-    if (!description.empty()) {
-        out << "description = \"" << description << "\"\n";
+    const auto desc = description.empty() ? config.description : std::string(description);
+    if (!desc.empty()) {
+        out << "description = \"" << desc << "\"\n";
+    }
+    if (config.supported_xlen != 0) {
+        out << "xlen = " << static_cast<unsigned int>(config.supported_xlen) << "\n";
     }
     out << "misa = \"" << detail::misa_profile_name(config.misa_profile) << "\"\n";
     out << "\n";

@@ -64,7 +64,7 @@ SimRV looks for CPU model configuration files in the canonical `configs/models/`
 2. **Path with Extension**: If `<TARGET>.cfg` exists, it is loaded.
 3. **Canonical Project Folder**: SimRV checks `./configs/models/<TARGET>.cfg`.
 4. **Environment Variable**: SimRV checks `$SIMRV_CONFIG_DIR/models/<TARGET>.cfg` or `$SIMRV_CONFIG_DIR/<TARGET>.cfg`.
-5. **Built-In Fallback**: If no file is found, SimRV falls back to minimal compiled defaults (`tiny`, `balanced`, `performance`, `cfu-provingground`, `rvcomp`).
+5. **Built-In Fallback**: If no file is found, SimRV falls back to minimal compiled generic defaults (`tiny`, `balanced`, `performance`).
 
 ---
 
@@ -79,7 +79,8 @@ SimRV CPU model configurations follow a clean INI/TOML sectioned format with sup
 [cpu]
 name = "rvcomp"
 description = "Archlab RVComp 5-stage educational RISC-V processor"
-misa = "rv32ima"
+xlen = 32
+misa = "ima"
 
 [pipeline]
 type = "five-stage"
@@ -135,7 +136,8 @@ response_latency = 1
 | :--- | :--- | :--- | :--- |
 | `name` | string | `"custom"` | Identifier for the CPU model profile. |
 | `description` | string | `""` | Human-readable documentation of the core architecture. |
-| `misa` | string | `"rv32gcbv"` | Target ISA profile: `rv32i`, `rv32im`, `rv32ima`, `rv32imac`, `rv32gc`, `rv32gcbv` (or 64-bit variants). |
+| `xlen` | integer | `0` | Supported machine XLEN: `32` (RV32-only), `64` (RV64-only), or `0` (supports both RV32 and RV64 targets). Verified on startup against simulator build. |
+| `misa` | string | `"gcbv"` | Target ISA extension profile: `gcbv`, `imac`, `ima`, `gc`, `im`, `i`. Setting extension names without `rv32`/`rv64` prefix allows the model to support both 32-bit and 64-bit simulator targets. Explicit `rv32*` and `rv64*` targets are also accepted. |
 
 ### `[pipeline]` Section
 
@@ -187,15 +189,30 @@ response_latency = 1
 
 ---
 
-## 5. Canonical Included Presets
+## 5. Built-In Generic Presets vs. Model Configs
 
-SimRV ships with five authoritative presets located in `configs/models/`:
+SimRV distinguishes between **compiled-in generic presets** and **hardware-specific `.cfg` models**:
 
-1. **`rvcomp.cfg`**: Calibrated to the Archlab RVComp 5-stage SystemVerilog processor. Features 34-cycle non-restoring divider, 2-cycle multiplier, untagged 512-entry BTB, 8192-entry BHT with weak-not-taken reset state (`2'b01`), 4-cycle branch mispredict penalty, and 4-cycle L1 D-Cache hit latency.
-2. **`cfu-provingground.cfg`**: Calibrated to Tokyo Tech Archlab's CFU-ProvingGround FPGA core (RVProc). Features registered BTB reads (1-cycle branch prediction bubble), reset counter delay of 2 cycles, and custom function unit (CFU) hardware interface.
-3. **`tiny.cfg`**: Compact 3-stage in-order embedded microcontroller profile without operand forwarding and with static branch prediction.
-4. **`balanced.cfg`**: Standard 5-stage core with bimodal branch prediction, integer forwarding, and balanced 4 KiB 2-way L1 caches.
-5. **`performance.cfg`**: Aggressive 5-stage core with 4096-entry GShare predictor, low execution penalties, and 16 KiB 4-way L1 caches.
+### Compiled-In Generic Presets
+
+Generic presets are compiled directly into the simulator runtime so no external files are required, keeping the project and configuration directories clean:
+
+1. **`balanced`** (default): Standard 5-stage core with bimodal branch prediction, integer forwarding, and balanced 4 KiB 2-way L1 caches. Works for both RV32 and RV64.
+2. **`tiny`**: Compact 3-stage in-order embedded microcontroller profile without operand forwarding and with static branch prediction. Works for both RV32 and RV64.
+3. **`performance`**: Aggressive 5-stage core with 4096-entry GShare predictor, low execution penalties, and 16 KiB 4-way L1 caches. Works for both RV32 and RV64.
+
+To scaffold or inspect any generic preset as an editable `.cfg`, use:
+
+```bash
+SimRV --dump-cpu-model balanced my_balanced.cfg
+```
+
+### Hardware-Specific Models (`configs/models/`)
+
+The `configs/models/` folder contains authoritative configurations calibrated to specific hardware/FPGA processor RTL:
+
+1. **`rvcomp.cfg`**: Calibrated to the Archlab RVComp 5-stage SystemVerilog processor (`xlen = 32`, `misa = "ima"`). Features 34-cycle non-restoring divider, 2-cycle multiplier, untagged 512-entry BTB, 8192-entry BHT with weak-not-taken reset state (`2'b01`), 4-cycle branch mispredict penalty, and 4-cycle L1 D-Cache hit latency.
+2. **`cfu-provingground.cfg`**: Calibrated to Tokyo Tech Archlab's CFU-ProvingGround FPGA core (RVProc, `xlen = 32`, `misa = "im"`). Features registered BTB reads (1-cycle branch prediction bubble), reset counter delay of 2 cycles, and custom function unit (CFU) hardware interface.
 
 ---
 
@@ -216,3 +233,13 @@ To calibrate SimRV to an external RTL core:
    ```
 
    Compare instruction counts, core cycle estimates, and cache stalls against Verilator simulation logs.
+
+4. **Automated Microarchitecture Calibration Optimizer**:
+
+   SimRV provides `scripts/tune_cpu_model.py` to systematically calibrate any CPU `.cfg` against Verilator RTL logs across an evaluation benchmark suite:
+
+   ```bash
+   python3 scripts/tune_cpu_model.py --config configs/models/rvcomp.cfg --apply
+   ```
+
+   The tuner performs multi-parameter coordinate descent across interconnect latencies, cache capacities, and hit/miss timing, optimizing Mean Absolute Percentage Error (MAPE). For RVComp, this automated calibration reduced simulation error against RTL from **41.78% MAPE down to 2.39% MAPE**.

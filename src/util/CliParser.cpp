@@ -458,17 +458,19 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         if (resolved.has_value()) {
             result.options.fn_cpuconfig = *resolved;
             simrv::pipeline::CpuModelConfig loaded{};
-            if (simrv::core::load_cpu_config(*resolved, loaded)) {
-                result.options.cpu_model_profile = loaded.profile;
-                return true;
+            if (!simrv::core::load_cpu_config(*resolved, loaded)) {
+                return std::unexpected(
+                    std::format("failed to load CPU model configuration from '{}'", *resolved));
             }
+            result.options.cpu_model_profile = loaded.profile;
+            return true;
         }
         auto parsed = simrv::pipeline::parse_cpu_model_profile(*value);
         if (!parsed) {
-            return std::unexpected(
-                std::format("unsupported CPU model profile '{}' (supported: tiny, balanced, "
-                            "performance, cfu-provingground, rvproc, rvcomp, or path to .cfg)",
-                            *value));
+            return std::unexpected(std::format(
+                "unsupported CPU model profile '{}' (supported presets: tiny, balanced, "
+                "performance, or path/name of model .cfg)",
+                *value));
         }
         result.options.cpu_model_profile = *parsed;
         return true;
@@ -686,6 +688,14 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
                 result.options.dump_cpu_model_output = args[i];
             }
         }
+        return true;
+    }
+    if (arg == "--validate-cpu-config" || arg == "--check-cpu-model" ||
+        arg == "--verify-cpu-model") {
+        result.action = CliAction::ValidateCpuModel;
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        result.options.dump_cpu_model_profile = std::string(*value);
         return true;
     }
     return false;
@@ -1006,8 +1016,8 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.ras_entries = ras_size;
     if (bram_prewarm.has_value()) {
         cfg.bram_prewarm = *bram_prewarm;
-    } else if (cpu_model_profile == simrv::pipeline::CpuModelProfile::CfuProvingGround ||
-               cpu_model_profile == simrv::pipeline::CpuModelProfile::RvComp) {
+    } else if (fn_cpuconfig.find("cfu-provingground") != std::string::npos ||
+               fn_cpuconfig.find("rvproc") != std::string::npos) {
         cfg.bram_prewarm = true;
     }
 
@@ -1118,7 +1128,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
            result.action != CliAction::ExplainInstruction && result.action != CliAction::ShowHelp &&
            result.action != CliAction::ShowVersion && result.action != CliAction::ShowLicense &&
            result.action != CliAction::Attach && !result.options.attach_mode &&
-           result.action != CliAction::DumpCpuModel;
+           result.action != CliAction::DumpCpuModel && result.action != CliAction::ValidateCpuModel;
 }
 
 [[noreturn]] auto usage(std::string_view prog_name, int status) -> void {
@@ -1238,9 +1248,19 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         "  {}--cpu-config {}{}<FILE>{}           Load microarchitectural latency configuration\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
-               "  {}--cpu-profile {}{}<PROFILE>{}       Microarchitectural preset: tiny, balanced, "
-               "performance, cfu-provingground, rvcomp\n",
+               "  {}--cpu-profile {}{}<PROFILE>{}       Microarchitectural preset (tiny, balanced, "
+               "performance) or model (.cfg)\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--dump-cpu-model {}{}<MODEL> [FILE]{} Dump CPU configuration to .cfg format\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--scaffold-cpu-model {}{}[FILE]{}   Generate starter CPU model template\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(
+        stdout,
+        "  {}--validate-cpu-config {}{}<FILE>{}  Validate and lint CPU model configuration\n",
+        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--cfu-plugin {}{}<LIB.SO>{}         Load dynamic Custom Function Unit (CFU) "
                "plugin\n",

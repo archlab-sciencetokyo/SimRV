@@ -12,11 +12,13 @@
 #include <expected>
 #include <format>
 #include <optional>
+#include <string>
 #include <string_view>
 
 #include "simrv/isa/Base.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
+#include "simrv/xlen/Types.hpp"
 
 namespace simrv::pipeline {
 
@@ -25,8 +27,6 @@ enum class CpuModelProfile : uint8_t {
     Balanced,
     Performance,
     Custom,
-    CfuProvingGround,
-    RvComp
 };
 
 struct L1CacheConfig {
@@ -45,6 +45,9 @@ struct InterconnectTiming {
 struct CpuModelConfig {
     CpuModelProfile profile = CpuModelProfile::Balanced;
     isa::MisaProfile misa_profile = isa::MisaProfile::GCBV;
+    std::string name = "balanced";
+    std::string description{};
+    uint8_t supported_xlen = 0;  // 0 = any/both 32 and 64, 32 = RV32 only, 64 = RV64 only
     CpuConfig pipeline{};
     L1CacheConfig instruction_cache{};
     L1CacheConfig data_cache{};
@@ -52,6 +55,16 @@ struct CpuModelConfig {
     bool enable_idle_spans = true;
 
     [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
+        if (supported_xlen != 0 && supported_xlen != 32 && supported_xlen != 64) {
+            return std::unexpected(
+                std::format("CPU model '{}' specifies unsupported XLEN={} (expected 32 or 64)",
+                            name.empty() ? "custom" : name, supported_xlen));
+        }
+        if (supported_xlen == 64 && simrv::xlen::kXLenBits == 32) {
+            return std::unexpected(
+                std::format("CPU model '{}' requires XLEN=64 (this simulator build is RV32)",
+                            name.empty() ? "custom" : name));
+        }
         const auto valid_cache = [](const L1CacheConfig& cache,
                                     std::string_view name) -> std::optional<std::string> {
             const auto power_of_two = [](uint32_t value) {
@@ -116,10 +129,6 @@ struct CpuModelConfig {
             return "balanced";
         case CpuModelProfile::Performance:
             return "performance";
-        case CpuModelProfile::CfuProvingGround:
-            return "cfu-provingground";
-        case CpuModelProfile::RvComp:
-            return "rvcomp";
         case CpuModelProfile::Custom:
             return "custom";
     }
@@ -131,12 +140,6 @@ struct CpuModelConfig {
     if (value == "tiny") return CpuModelProfile::Tiny;
     if (value == "balanced") return CpuModelProfile::Balanced;
     if (value == "performance") return CpuModelProfile::Performance;
-    if (value == "cfu-provingground" || value == "cfu_provingground" || value == "rvproc") {
-        return CpuModelProfile::CfuProvingGround;
-    }
-    if (value == "rvcomp" || value == "rv-comp") {
-        return CpuModelProfile::RvComp;
-    }
     if (value == "custom") return CpuModelProfile::Custom;
     return std::nullopt;
 }
@@ -144,8 +147,10 @@ struct CpuModelConfig {
 [[nodiscard]] inline auto make_cpu_model_profile(CpuModelProfile profile) -> CpuModelConfig {
     CpuModelConfig result{};
     result.profile = profile;
+    result.name = std::string(cpu_model_profile_name(profile));
     switch (profile) {
         case CpuModelProfile::Tiny:
+            result.description = "Minimal 3-stage microcontroller core";
             result.misa_profile = isa::MisaProfile::IMAC;
             result.pipeline.pipeline_type = PipelineType::ThreeStage;
             result.pipeline.enable_forwarding = false;
@@ -155,6 +160,7 @@ struct CpuModelConfig {
             result.data_cache = result.instruction_cache;
             break;
         case CpuModelProfile::Balanced:
+            result.description = "Default balanced 5-stage general-purpose core";
             result.misa_profile = isa::MisaProfile::GCBV;
             result.pipeline.pipeline_type = PipelineType::FiveStage;
             result.pipeline.enable_forwarding = true;
@@ -163,6 +169,7 @@ struct CpuModelConfig {
             result.data_cache = result.instruction_cache;
             break;
         case CpuModelProfile::Performance:
+            result.description = "High-throughput 5-stage core with aggressive prediction";
             result.misa_profile = isa::MisaProfile::GCBV;
             result.pipeline.pipeline_type = PipelineType::FiveStage;
             result.pipeline.enable_forwarding = true;
@@ -170,47 +177,6 @@ struct CpuModelConfig {
             result.pipeline.branch_predictor.type = BranchPredictorType::Tournament;
             result.instruction_cache = {16384, 4, 32, 1, 8};
             result.data_cache = result.instruction_cache;
-            break;
-        case CpuModelProfile::CfuProvingGround:
-            result.misa_profile = isa::MisaProfile::IM;
-            result.pipeline.pipeline_type = PipelineType::FiveStage;
-            result.pipeline.enable_forwarding = true;
-            result.pipeline.mul_latency = 2;
-            result.pipeline.div_latency = 34;
-            result.pipeline.branch_mispredict_penalty = 3;
-            // RVProc's registered reset deassertion delays mcycle by two pipeline clocks.
-            result.pipeline.cycle_counter_start_delay = 2;
-            result.pipeline.branch_predictor.type = BranchPredictorType::Bimodal;
-            result.pipeline.branch_predictor.btb_entries = 2048;
-            result.pipeline.branch_predictor.bht_entries = 2048;
-            result.pipeline.branch_predictor.enable_ras = false;
-            result.pipeline.branch_predictor.pc_shift = 2;
-            result.pipeline.branch_predictor.untagged_btb = true;
-            result.pipeline.branch_predictor.registered_btb_read = true;
-            result.pipeline.branch_predictor.bht_initial_state = 0;
-            result.instruction_cache = {32768, 1, 32, 1, 1};
-            result.data_cache = {16384, 1, 32, 1, 1};
-            result.interconnect = {1, 1};
-            break;
-        case CpuModelProfile::RvComp:
-            result.misa_profile = isa::MisaProfile::IMA;
-            result.pipeline.pipeline_type = PipelineType::FiveStage;
-            result.pipeline.enable_forwarding = true;
-            result.pipeline.mul_latency = 2;
-            result.pipeline.div_latency = 34;
-            result.pipeline.branch_mispredict_penalty = 4;
-            result.pipeline.cycle_counter_start_delay = 0;
-            result.pipeline.branch_predictor.type = BranchPredictorType::Bimodal;
-            result.pipeline.branch_predictor.btb_entries = 512;
-            result.pipeline.branch_predictor.bht_entries = 8192;
-            result.pipeline.branch_predictor.enable_ras = false;
-            result.pipeline.branch_predictor.pc_shift = 2;
-            result.pipeline.branch_predictor.untagged_btb = true;
-            result.pipeline.branch_predictor.registered_btb_read = false;
-            result.pipeline.branch_predictor.bht_initial_state = 1;
-            result.instruction_cache = {16384, 1, 32, 1, 1};
-            result.data_cache = {16384, 1, 32, 4, 1};
-            result.interconnect = {1, 1};
             break;
         case CpuModelProfile::Custom:
             result.profile = CpuModelProfile::Custom;

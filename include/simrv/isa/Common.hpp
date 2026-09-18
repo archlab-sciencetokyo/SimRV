@@ -148,11 +148,15 @@ constexpr auto misa_profile_bits(MisaProfile profile) -> CSRValue {
  * @brief Computes the MXL (Machine XLEN) field mask to write to MISA bits [XLEN-1 : XLEN-2].
  * @return CSRValue containing the MXL value for either RV32 (01) or RV64 (10).
  */
-constexpr auto misa_mxl_field() -> CSRValue {
+constexpr auto misa_mxl_field(unsigned int target_xlen = simrv::xlen::kXLenBits) -> CSRValue {
     if constexpr (sizeof(CSRValue) == 4) {
         // MXL=01 for RV32 in bits [31:30]
         return static_cast<CSRValue>(1u << 30);
     } else if constexpr (sizeof(CSRValue) == 8) {
+        if (target_xlen == 32) {
+            // MXL=01 for RV32 execution mode on RV64 in bits [63:62]
+            return static_cast<CSRValue>(1ull << 62);
+        }
         // MXL=10 for RV64 in bits [63:62]
         return static_cast<CSRValue>(2ull << 62);
     } else {
@@ -164,10 +168,19 @@ constexpr auto misa_mxl_field() -> CSRValue {
  * @brief Integrates the target MXL field into an extensions mask to construct a valid MISA CSR
  * value.
  * @param misa_extensions The mask of enabled extensions.
+ * @param target_xlen Architecture register width (32 or 64, defaults to simulator build XLEN).
  * @return Combined CSRValue containing both extensions and MXL configuration.
  */
-constexpr auto misa_with_mxl(CSRValue misa_extensions) -> CSRValue {
-    return misa_extensions | misa_mxl_field();
+constexpr auto misa_with_mxl(CSRValue misa_extensions,
+                             unsigned int target_xlen = simrv::xlen::kXLenBits) -> CSRValue {
+    if constexpr (sizeof(CSRValue) == 4) {
+        return (misa_extensions & ~(static_cast<CSRValue>(3u) << 30)) | misa_mxl_field(target_xlen);
+    } else if constexpr (sizeof(CSRValue) == 8) {
+        return (misa_extensions & ~(static_cast<CSRValue>(3ull) << 62)) |
+               misa_mxl_field(target_xlen);
+    } else {
+        return misa_extensions | misa_mxl_field(target_xlen);
+    }
 }
 
 /** Default advertised target; V remains subject to the qualification limits documented separately.

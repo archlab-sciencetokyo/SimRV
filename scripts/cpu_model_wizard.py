@@ -12,7 +12,8 @@ from pathlib import Path
 TEMPLATES = {
     "tiny": {
         "description": "Minimal 3-stage microcontroller core",
-        "misa": "rv32imac",
+        "xlen": 0,
+        "misa": "imac",
         "pipeline_type": "three-stage",
         "enable_forwarding": False,
         "mul_latency": 3,
@@ -49,7 +50,8 @@ TEMPLATES = {
     },
     "balanced": {
         "description": "Default balanced 5-stage general-purpose core",
-        "misa": "rv32gcbv",
+        "xlen": 0,
+        "misa": "gcbv",
         "pipeline_type": "five-stage",
         "enable_forwarding": True,
         "mul_latency": 3,
@@ -86,7 +88,8 @@ TEMPLATES = {
     },
     "performance": {
         "description": "High-throughput 5-stage core with aggressive prediction",
-        "misa": "rv32gcbv",
+        "xlen": 0,
+        "misa": "gcbv",
         "pipeline_type": "five-stage",
         "enable_forwarding": True,
         "mul_latency": 1,
@@ -123,7 +126,8 @@ TEMPLATES = {
     },
     "rvcomp": {
         "description": "Archlab RVComp 5-stage educational RISC-V processor",
-        "misa": "rv32ima",
+        "xlen": 32,
+        "misa": "ima",
         "pipeline_type": "five-stage",
         "enable_forwarding": True,
         "mul_latency": 2,
@@ -160,7 +164,8 @@ TEMPLATES = {
     },
     "cfu-provingground": {
         "description": "Tokyo Tech Archlab CFU-ProvingGround FPGA processor",
-        "misa": "rv32im",
+        "xlen": 32,
+        "misa": "im",
         "pipeline_type": "five-stage",
         "enable_forwarding": True,
         "mul_latency": 3,
@@ -205,6 +210,10 @@ def render_cfg(name: str, cfg: dict) -> str:
         "[cpu]",
         f'name = "{name}"',
         f'description = "{cfg["description"]}"',
+    ]
+    if cfg.get("xlen", 0):
+        lines.append(f'xlen = {cfg["xlen"]}')
+    lines.extend([
         f'misa = "{cfg["misa"]}"',
         "",
         "[pipeline]",
@@ -250,7 +259,7 @@ def render_cfg(name: str, cfg: dict) -> str:
         f'request_latency = {cfg["interconnect_req"]}',
         f'response_latency = {cfg["interconnect_resp"]}',
         ""
-    ]
+    ])
     return "\n".join(lines)
 
 def prompt_val(prompt: str, default):
@@ -270,7 +279,8 @@ def run_interactive(base_template: str, name: str) -> tuple[str, dict]:
 
     name = prompt_val("Model identifier (name)", name)
     cfg["description"] = prompt_val("Description", cfg["description"])
-    cfg["misa"] = prompt_val("MISA profile (rv32i, rv32im, rv32ima, rv32imac, rv32gc, rv32gcbv)", cfg["misa"])
+    cfg["xlen"] = prompt_val("Supported XLEN (32, 64, or 0 for both)", cfg.get("xlen", 0))
+    cfg["misa"] = prompt_val("MISA profile (e.g. gcbv, imac, ima, gc, im, i)", cfg["misa"])
 
     print("\n--- Pipeline & Execution Latencies ---")
     cfg["pipeline_type"] = prompt_val("Pipeline type (five-stage, three-stage)", cfg["pipeline_type"])
@@ -307,7 +317,111 @@ TEMPLATE_ALIASES = {
 
 def resolve_template(tpl: str) -> str:
     tpl_lower = tpl.lower()
-    return TEMPLATE_ALIASES.get(tpl_lower, tpl_lower)
+def is_power_of_two(n: int) -> bool:
+    return n > 0 and (n & (n - 1)) == 0
+
+def validate_cfg(path: Path) -> bool:
+    if not path.exists():
+        print(f"\033[1;31m[ERROR]\033[0m File not found: {path}", file=sys.stderr)
+        return False
+
+    import configparser
+    cp = configparser.ConfigParser()
+    try:
+        cp.read(path, encoding="utf-8")
+    except Exception as e:
+        print(f"\033[1;31m[ERROR]\033[0m Syntax error in {path}: {e}", file=sys.stderr)
+        return False
+
+    errors = []
+    warnings = []
+
+    # Check [cpu]
+    if "cpu" not in cp:
+        errors.append("Missing required section [cpu]")
+    else:
+        name = cp["cpu"].get("name", "").strip('"\'')
+        if not name:
+            errors.append("[cpu] 'name' is required and cannot be empty")
+        xlen_str = cp["cpu"].get("xlen", "0")
+        try:
+            xlen = int(xlen_str)
+            if xlen not in (0, 32, 64):
+                errors.append(f"[cpu] invalid xlen={xlen} (must be 0, 32, or 64)")
+        except ValueError:
+            errors.append(f"[cpu] invalid integer for xlen: '{xlen_str}'")
+
+        misa = cp["cpu"].get("misa", "").strip('"\'').lower()
+        valid_misa = {"i", "im", "ima", "imac", "gc", "gcbv", "rv32i", "rv32im", "rv32ima", "rv32imac", "rv32gc", "rv32gcbv", "rv64i", "rv64im", "rv64ima", "rv64imac", "rv64gc", "rv64gcbv"}
+        if misa and misa not in valid_misa:
+            warnings.append(f"[cpu] unrecognized misa profile '{misa}'")
+
+    # Check [pipeline]
+    if "pipeline" in cp:
+        pipe_type = cp["pipeline"].get("type", "").strip('"\'').lower()
+        if pipe_type and pipe_type not in ("three-stage", "five-stage", "dual-issue", "3-stage", "5-stage"):
+            errors.append(f"[pipeline] unknown pipeline type '{pipe_type}'")
+        for lat_key in ("mul_latency", "div_latency"):
+            if lat_key in cp["pipeline"]:
+                try:
+                    val = int(cp["pipeline"][lat_key])
+                    if val < 1:
+                        errors.append(f"[pipeline] {lat_key} must be >= 1 (got {val})")
+                except ValueError:
+                    errors.append(f"[pipeline] {lat_key} must be an integer")
+
+    # Check [branch_predictor]
+    if "branch_predictor" in cp:
+        bp_type = cp["branch_predictor"].get("type", "").strip('"\'').lower()
+        if bp_type and bp_type not in ("none", "static", "bimodal", "gshare", "tournament"):
+            errors.append(f"[branch_predictor] unknown type '{bp_type}'")
+        for ent_key in ("btb_entries", "bht_entries"):
+            if ent_key in cp["branch_predictor"]:
+                try:
+                    val = int(cp["branch_predictor"][ent_key])
+                    if not is_power_of_two(val):
+                        warnings.append(f"[branch_predictor] {ent_key}={val} is not a power of two")
+                except ValueError:
+                    errors.append(f"[branch_predictor] {ent_key} must be an integer")
+
+    # Check caches
+    for cache_sec in ("instruction_cache", "data_cache"):
+        if cache_sec in cp:
+            sec = cp[cache_sec]
+            if "capacity_bytes" in sec:
+                try:
+                    cap = int(sec["capacity_bytes"])
+                    if cap > 0 and not is_power_of_two(cap):
+                        warnings.append(f"[{cache_sec}] capacity_bytes={cap} is not a power of two")
+                except ValueError:
+                    errors.append(f"[{cache_sec}] capacity_bytes must be an integer")
+            if "line_bytes" in sec:
+                try:
+                    line = int(sec["line_bytes"])
+                    if line < 16 or not is_power_of_two(line):
+                        errors.append(f"[{cache_sec}] line_bytes={line} must be a power of two >= 16")
+                except ValueError:
+                    errors.append(f"[{cache_sec}] line_bytes must be an integer")
+            if "hit_latency" in sec:
+                try:
+                    hit = int(sec["hit_latency"])
+                    if hit < 1:
+                        errors.append(f"[{cache_sec}] hit_latency must be >= 1")
+                except ValueError:
+                    errors.append(f"[{cache_sec}] hit_latency must be an integer")
+
+    print(f"\033[1;34m=== Validating CPU Model Configuration: {path} ===\033[0m")
+    for w in warnings:
+        print(f"  \033[1;33m[WARNING]\033[0m {w}")
+    for e in errors:
+        print(f"  \033[1;31m[ERROR]\033[0m   {e}")
+
+    if errors:
+        print(f"\n\033[1;31m[FAILED]\033[0m {len(errors)} error(s) found in {path.name}", file=sys.stderr)
+        return False
+    else:
+        print(f"\n\033[1;32m[PASSED]\033[0m {path.name} is valid.")
+        return True
 
 def main():
     parser = argparse.ArgumentParser(description="SimRV CPU Model Scaffolding & Wizard")
@@ -318,7 +432,12 @@ def main():
     parser.add_argument("--output", "-o", default="", help="Output .cfg file path")
     parser.add_argument("--non-interactive", action="store_true", help="Generate directly from template without prompts")
     parser.add_argument("--list-templates", action="store_true", help="List available template presets")
+    parser.add_argument("--validate", "-v", default="", help="Validate an existing .cfg CPU model file")
     args = parser.parse_args()
+
+    if args.validate:
+        valid = validate_cfg(Path(args.validate))
+        sys.exit(0 if valid else 1)
 
     if args.list_templates:
         print("Available base templates:")

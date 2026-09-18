@@ -33,12 +33,17 @@ void test_resolve_cpu_model_path() {
     TEST_CHECK(rvcomp_res.has_value());
     TEST_CHECK(rvcomp_res->ends_with("rvcomp.cfg"));
 
-    const auto balanced_res = simrv::core::resolve_cpu_model_path("balanced");
-    TEST_CHECK(balanced_res.has_value());
-    TEST_CHECK(balanced_res->ends_with("balanced.cfg"));
+    const auto cfu_res = simrv::core::resolve_cpu_model_path("cfu-provingground");
+    TEST_CHECK(cfu_res.has_value());
+    TEST_CHECK(cfu_res->ends_with("cfu-provingground.cfg"));
 
-    const auto direct_res = simrv::core::resolve_cpu_model_path("configs/models/tiny.cfg");
+    const auto direct_res = simrv::core::resolve_cpu_model_path("configs/models/rvcomp.cfg");
     TEST_CHECK(direct_res.has_value());
+
+    // Generic presets are compiled-in defaults, not config files
+    const auto balanced_res = simrv::core::resolve_cpu_model_path("balanced");
+    TEST_CHECK(!balanced_res.has_value());
+    TEST_CHECK(simrv::pipeline::parse_cpu_model_profile("balanced") == CpuModelProfile::Balanced);
 
     const auto nonexistent = simrv::core::resolve_cpu_model_path("non_existent_core_profile_xyz");
     TEST_CHECK(!nonexistent.has_value());
@@ -50,14 +55,18 @@ void test_load_canonical_rvcomp_cfg() {
     TEST_CHECK(path.has_value());
 
     simrv::pipeline::CpuModelConfig config{};
-    const bool ok = simrv::core::load_cpu_config(*path, config);
+    const bool ok = simrv::core::parse_cpu_config(*path, config);
     TEST_CHECK(ok);
 
-    const auto valid = config.validate();
-    TEST_CHECK(valid.has_value());
-
-    TEST_CHECK(config.profile == CpuModelProfile::RvComp);
+    TEST_CHECK(config.name == "rvcomp");
+    TEST_CHECK(config.supported_xlen == 32);
+    TEST_CHECK(config.profile == CpuModelProfile::Custom);
     TEST_CHECK(config.misa_profile == MisaProfile::IMA);
+
+    simrv::pipeline::CpuModelConfig loaded{};
+    TEST_CHECK(simrv::core::load_cpu_config(*path, loaded));
+    TEST_CHECK(config.validate().has_value());
+
     TEST_CHECK(config.pipeline.pipeline_type == PipelineType::FiveStage);
     TEST_CHECK(config.pipeline.enable_forwarding == true);
     TEST_CHECK(config.pipeline.mul_latency == 2);
@@ -73,10 +82,11 @@ void test_load_canonical_rvcomp_cfg() {
     TEST_CHECK(bp.registered_btb_read == false);
     TEST_CHECK(bp.bht_initial_state == 1);
 
-    TEST_CHECK(config.instruction_cache.capacity_bytes == 16384);
+    TEST_CHECK(config.instruction_cache.capacity_bytes == 1024);
     TEST_CHECK(config.instruction_cache.associativity == 1);
     TEST_CHECK(config.instruction_cache.line_bytes == 32);
     TEST_CHECK(config.instruction_cache.hit_latency == 1);
+    TEST_CHECK(config.instruction_cache.miss_latency == 64);
 
     TEST_CHECK(config.data_cache.capacity_bytes == 16384);
     TEST_CHECK(config.data_cache.associativity == 1);
@@ -90,11 +100,17 @@ void test_load_canonical_cfu_provingground_cfg() {
     TEST_CHECK(path.has_value());
 
     simrv::pipeline::CpuModelConfig config{};
-    const bool ok = simrv::core::load_cpu_config(*path, config);
+    const bool ok = simrv::core::parse_cpu_config(*path, config);
     TEST_CHECK(ok);
 
-    TEST_CHECK(config.profile == CpuModelProfile::CfuProvingGround);
+    TEST_CHECK(config.name == "cfu-provingground");
+    TEST_CHECK(config.supported_xlen == 32);
+    TEST_CHECK(config.profile == CpuModelProfile::Custom);
     TEST_CHECK(config.misa_profile == MisaProfile::IM);
+
+    simrv::pipeline::CpuModelConfig loaded{};
+    TEST_CHECK(simrv::core::load_cpu_config(*path, loaded));
+    TEST_CHECK(config.validate().has_value());
     TEST_CHECK(config.pipeline.pipeline_type == PipelineType::FiveStage);
     TEST_CHECK(config.pipeline.mul_latency == 3);
     TEST_CHECK(config.pipeline.div_latency == 18);
@@ -126,10 +142,12 @@ void test_serialize_and_roundtrip() {
     TEST_CHECK(text.find("div_latency = 22") != std::string::npos);
     TEST_CHECK(text.find("branch_mispredict_penalty = 6") != std::string::npos);
     TEST_CHECK(text.find("bht_initial_state = 2") != std::string::npos);
+    TEST_CHECK(text.find("misa = \"gcbv\"") != std::string::npos);
 
     simrv::pipeline::CpuModelConfig reloaded{};
     const bool ok = simrv::core::load_cpu_config_string(text, reloaded);
     TEST_CHECK(ok);
+    TEST_CHECK(reloaded.misa_profile == MisaProfile::GCBV);
     TEST_CHECK(reloaded.pipeline.mul_latency == 5);
     TEST_CHECK(reloaded.pipeline.div_latency == 22);
     TEST_CHECK(reloaded.pipeline.branch_mispredict_penalty == 6);
@@ -157,12 +175,42 @@ void test_save_cpu_config_file() {
     std::filesystem::remove(temp_file, ec);
 }
 
+void test_xlen_compatibility_rules() {
+    std::cout << "[Test] test_xlen_compatibility_rules...\n";
+    auto base = simrv::pipeline::make_cpu_model_profile(CpuModelProfile::Tiny);
+
+    // 1. Any model with supported_xlen = 0 is neutral and validates on both RV32 and RV64
+    base.supported_xlen = 0;
+    TEST_CHECK(base.validate().has_value());
+
+    // 2. 32-bit model validates on both RV32 and RV64 builds
+    base.supported_xlen = 32;
+    TEST_CHECK(base.validate().has_value());
+
+    // 3. 64-bit model validates on RV64, but is rejected on RV32 build
+    base.supported_xlen = 64;
+    if constexpr (!simrv::xlen::kIsXLen64) {
+        const auto res = base.validate();
+        TEST_CHECK(!res.has_value());
+        TEST_CHECK(res.error().find("requires XLEN=64") != std::string::npos);
+    } else {
+        TEST_CHECK(base.validate().has_value());
+    }
+
+    // 4. Invalid XLEN values are rejected on all builds
+    base.supported_xlen = 16;
+    const auto err16 = base.validate();
+    TEST_CHECK(!err16.has_value());
+    TEST_CHECK(err16.error().find("specifies unsupported XLEN=16") != std::string::npos);
+}
+
 int main() {
     test_resolve_cpu_model_path();
     test_load_canonical_rvcomp_cfg();
     test_load_canonical_cfu_provingground_cfg();
     test_serialize_and_roundtrip();
     test_save_cpu_config_file();
+    test_xlen_compatibility_rules();
     std::cout << "All CpuModelLoader tests passed!\n";
     return 0;
 }

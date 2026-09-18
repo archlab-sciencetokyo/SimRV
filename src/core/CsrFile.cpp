@@ -206,7 +206,7 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
                                           cpu_.state().misa, isa::IsaExtension::S));
             break;
         case csr_addr(Csr::Misa):
-            rcsr = isa::misa_with_mxl(cpu_.state().misa);
+            rcsr = isa::misa_with_mxl(cpu_.state().misa, cpu_.state().regs.xlen);
             break;
 
         case csr_addr(Csr::Mcycle):
