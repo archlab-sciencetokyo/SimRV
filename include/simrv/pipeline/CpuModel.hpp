@@ -14,11 +14,20 @@
 #include <optional>
 #include <string_view>
 
+#include "simrv/isa/Base.hpp"
+#include "simrv/isa/Common.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 
 namespace simrv::pipeline {
 
-enum class CpuModelProfile : uint8_t { Tiny, Balanced, Performance, Custom, CfuProvingGround };
+enum class CpuModelProfile : uint8_t {
+    Tiny,
+    Balanced,
+    Performance,
+    Custom,
+    CfuProvingGround,
+    RvComp
+};
 
 struct L1CacheConfig {
     uint32_t capacity_bytes = 4096;
@@ -35,6 +44,7 @@ struct InterconnectTiming {
 
 struct CpuModelConfig {
     CpuModelProfile profile = CpuModelProfile::Balanced;
+    isa::MisaProfile misa_profile = isa::MisaProfile::GCBV;
     CpuConfig pipeline{};
     L1CacheConfig instruction_cache{};
     L1CacheConfig data_cache{};
@@ -108,6 +118,8 @@ struct CpuModelConfig {
             return "performance";
         case CpuModelProfile::CfuProvingGround:
             return "cfu-provingground";
+        case CpuModelProfile::RvComp:
+            return "rvcomp";
         case CpuModelProfile::Custom:
             return "custom";
     }
@@ -122,6 +134,9 @@ struct CpuModelConfig {
     if (value == "cfu-provingground" || value == "cfu_provingground" || value == "rvproc") {
         return CpuModelProfile::CfuProvingGround;
     }
+    if (value == "rvcomp" || value == "rv-comp") {
+        return CpuModelProfile::RvComp;
+    }
     if (value == "custom") return CpuModelProfile::Custom;
     return std::nullopt;
 }
@@ -131,6 +146,7 @@ struct CpuModelConfig {
     result.profile = profile;
     switch (profile) {
         case CpuModelProfile::Tiny:
+            result.misa_profile = isa::MisaProfile::IMAC;
             result.pipeline.pipeline_type = PipelineType::ThreeStage;
             result.pipeline.enable_forwarding = false;
             result.pipeline.branch_predictor.type = BranchPredictorType::Static;
@@ -139,6 +155,7 @@ struct CpuModelConfig {
             result.data_cache = result.instruction_cache;
             break;
         case CpuModelProfile::Balanced:
+            result.misa_profile = isa::MisaProfile::GCBV;
             result.pipeline.pipeline_type = PipelineType::FiveStage;
             result.pipeline.enable_forwarding = true;
             result.pipeline.branch_predictor.type = BranchPredictorType::Bimodal;
@@ -146,6 +163,7 @@ struct CpuModelConfig {
             result.data_cache = result.instruction_cache;
             break;
         case CpuModelProfile::Performance:
+            result.misa_profile = isa::MisaProfile::GCBV;
             result.pipeline.pipeline_type = PipelineType::FiveStage;
             result.pipeline.enable_forwarding = true;
             result.pipeline.enable_instruction_prefetch = true;
@@ -154,6 +172,7 @@ struct CpuModelConfig {
             result.data_cache = result.instruction_cache;
             break;
         case CpuModelProfile::CfuProvingGround:
+            result.misa_profile = isa::MisaProfile::IM;
             result.pipeline.pipeline_type = PipelineType::FiveStage;
             result.pipeline.enable_forwarding = true;
             result.pipeline.mul_latency = 2;
@@ -171,6 +190,26 @@ struct CpuModelConfig {
             result.pipeline.branch_predictor.bht_initial_state = 0;
             result.instruction_cache = {32768, 1, 32, 1, 1};
             result.data_cache = {16384, 1, 32, 1, 1};
+            result.interconnect = {1, 1};
+            break;
+        case CpuModelProfile::RvComp:
+            result.misa_profile = isa::MisaProfile::IMA;
+            result.pipeline.pipeline_type = PipelineType::FiveStage;
+            result.pipeline.enable_forwarding = true;
+            result.pipeline.mul_latency = 2;
+            result.pipeline.div_latency = 34;
+            result.pipeline.branch_mispredict_penalty = 4;
+            result.pipeline.cycle_counter_start_delay = 0;
+            result.pipeline.branch_predictor.type = BranchPredictorType::Bimodal;
+            result.pipeline.branch_predictor.btb_entries = 512;
+            result.pipeline.branch_predictor.bht_entries = 8192;
+            result.pipeline.branch_predictor.enable_ras = false;
+            result.pipeline.branch_predictor.pc_shift = 2;
+            result.pipeline.branch_predictor.untagged_btb = true;
+            result.pipeline.branch_predictor.registered_btb_read = true;
+            result.pipeline.branch_predictor.bht_initial_state = 0;
+            result.instruction_cache = {16384, 1, 32, 1, 1};
+            result.data_cache = {16384, 1, 32, 4, 1};
             result.interconnect = {1, 1};
             break;
         case CpuModelProfile::Custom:

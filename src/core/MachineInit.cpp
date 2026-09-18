@@ -316,6 +316,11 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             if (config.memory.dram_size < 512 * 1024 * 1024) {
                 config.memory.dram_size = 512 * 1024 * 1024;
             }
+        } else if (*config.cpu_model_profile == simrv::pipeline::CpuModelProfile::RvComp) {
+            config.memory.dram_base = 0x80000000;
+            if (config.memory.dram_size < 512 * 1024 * 1024) {
+                config.memory.dram_size = 512 * 1024 * 1024;
+            }
         }
     }
     if (!config.files.cpuconfig_path.empty()) {
@@ -405,8 +410,13 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         linux_boot ? static_cast<Address>(effective_dram_size - static_cast<size_t>(0x00100000U))
                    : simrv::boot::kInitDataAddress;
 
-    CSRValue initial_misa =
-        isa::misa_with_mxl(config.isa.misa_override ? config.isa.misa_profile : isa::kMisaDefault);
+    CSRValue initial_misa = isa::misa_with_mxl(
+        config.isa.misa_override ? config.isa.misa_profile
+        : config.cpu_model_profile.has_value()
+            ? isa::misa_profile_bits(
+                  pipeline::make_cpu_model_profile(*config.cpu_model_profile).misa_profile)
+            : isa::kMisaDefault);
+    config.isa.misa_profile = initial_misa;
     if constexpr (simrv::xlen::kIsXLen64) {
         bool is_32bit = false;
         if (config.isa.misa_override && config.isa.misa_xlen == 32) {

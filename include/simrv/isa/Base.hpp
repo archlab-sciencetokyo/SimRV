@@ -132,6 +132,8 @@ enum class IsaExtension : uint8_t {
  */
 enum class MisaProfile : uint8_t {
     I,     ///< RV32I / RV64I base integer only
+    IM,    ///< Integer, Multiply/Divide
+    IMA,   ///< Integer, Multiply/Divide, Atomic, Supervisor, User
     IMAC,  ///< Integer, Multiply/Divide, Atomic, and Compressed
     GC,    ///< General Purpose (IMAFD) + Compressed (equivalent to RV32GC or RV64GC)
     GCBV,  ///< SimRV target profile: GC plus ratified B and V extension bits

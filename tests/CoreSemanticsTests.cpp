@@ -584,8 +584,28 @@ void test_satp_modes() {
 }
 
 void test_named_misa_profiles() {
+    const CSRValue im = simrv::isa::misa_profile_bits(simrv::isa::MisaProfile::IM);
+    const CSRValue ima = simrv::isa::misa_profile_bits(simrv::isa::MisaProfile::IMA);
     const CSRValue gc = simrv::isa::misa_profile_bits(simrv::isa::MisaProfile::GC);
     const CSRValue gcbv = simrv::isa::misa_profile_bits(simrv::isa::MisaProfile::GCBV);
+
+    expect(simrv::isa::misa_has_extension(im, simrv::isa::IsaExtension::I) &&
+               simrv::isa::misa_has_extension(im, simrv::isa::IsaExtension::M),
+           "the named IM profile includes I and M");
+    expect(!simrv::isa::misa_has_extension(im, simrv::isa::IsaExtension::A) &&
+               !simrv::isa::misa_has_extension(im, simrv::isa::IsaExtension::C),
+           "the named IM profile does not include A or C");
+
+    expect(simrv::isa::misa_has_extension(ima, simrv::isa::IsaExtension::I) &&
+               simrv::isa::misa_has_extension(ima, simrv::isa::IsaExtension::M) &&
+               simrv::isa::misa_has_extension(ima, simrv::isa::IsaExtension::A) &&
+               simrv::isa::misa_has_extension(ima, simrv::isa::IsaExtension::S) &&
+               simrv::isa::misa_has_extension(ima, simrv::isa::IsaExtension::U),
+           "the named IMA profile includes I, M, A, S, U");
+    expect(!simrv::isa::misa_has_extension(ima, simrv::isa::IsaExtension::C) &&
+               !simrv::isa::misa_has_extension(ima, simrv::isa::IsaExtension::F),
+           "the named IMA profile does not include C or F");
+
     expect(simrv::isa::misa_has_extension(gc, simrv::isa::IsaExtension::C),
            "the named GC profile includes compressed instructions");
     expect(!simrv::isa::misa_has_extension(gc, simrv::isa::IsaExtension::B) &&

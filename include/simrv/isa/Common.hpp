@@ -123,6 +123,12 @@ constexpr auto misa_profile_bits(MisaProfile profile) -> CSRValue {
     switch (profile) {
         case MisaProfile::I:
             return misa_extension_bit(IsaExtension::I);
+        case MisaProfile::IM:
+            return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M);
+        case MisaProfile::IMA:
+            return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
+                   misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::S) |
+                   misa_extension_bit(IsaExtension::U);
         case MisaProfile::IMAC:
             return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
                    misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::C);

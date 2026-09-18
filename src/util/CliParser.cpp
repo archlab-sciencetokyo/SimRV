@@ -166,6 +166,12 @@ auto parse_misa_profile(std::string_view value) -> std::expected<ParsedMisa, std
     if (iequals(value, "i")) {
         return ParsedMisa{.profile = MisaProfile::I, .xlen = 0};
     }
+    if (iequals(value, "im")) {
+        return ParsedMisa{.profile = MisaProfile::IM, .xlen = 0};
+    }
+    if (iequals(value, "ima")) {
+        return ParsedMisa{.profile = MisaProfile::IMA, .xlen = 0};
+    }
     if (iequals(value, "imac")) {
         return ParsedMisa{.profile = MisaProfile::IMAC, .xlen = 0};
     }
@@ -187,6 +193,22 @@ auto parse_misa_profile(std::string_view value) -> std::expected<ParsedMisa, std
     } else if (iequals(value, "rv64i")) {
         parsed_xlen = 64;
         profile = MisaProfile::I;
+        valid = true;
+    } else if (iequals(value, "rv32im")) {
+        parsed_xlen = 32;
+        profile = MisaProfile::IM;
+        valid = true;
+    } else if (iequals(value, "rv64im")) {
+        parsed_xlen = 64;
+        profile = MisaProfile::IM;
+        valid = true;
+    } else if (iequals(value, "rv32ima")) {
+        parsed_xlen = 32;
+        profile = MisaProfile::IMA;
+        valid = true;
+    } else if (iequals(value, "rv64ima")) {
+        parsed_xlen = 64;
+        profile = MisaProfile::IMA;
         valid = true;
     } else if (iequals(value, "rv32imac")) {
         parsed_xlen = 32;
@@ -223,10 +245,11 @@ auto parse_misa_profile(std::string_view value) -> std::expected<ParsedMisa, std
     }
 
     const auto xlen_suffix = simrv::xlen::kIsXLen64 ? "64" : "32";
-    auto supported = std::format("i, imac, gc, gcbv, rv{}i, rv{}imac, rv{}gc, rv{}gcbv",
-                                 xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix);
+    auto supported = std::format(
+        "i, im, ima, imac, gc, gcbv, rv{}i, rv{}im, rv{}ima, rv{}imac, rv{}gc, rv{}gcbv",
+        xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix);
     if constexpr (simrv::xlen::kIsXLen64) {
-        supported += ", rv32i, rv32imac, rv32gc, rv32gcbv";
+        supported += ", rv32i, rv32im, rv32ima, rv32imac, rv32gc, rv32gcbv";
     }
     return std::unexpected(
         std::format("unsupported MISA profile '{}' (supported: {})", value, supported));
@@ -235,6 +258,9 @@ auto parse_misa_profile(std::string_view value) -> std::expected<ParsedMisa, std
 auto effective_misa_profile(const RuntimeOptions& options) -> MisaProfile {
     if (options.misa_override) {
         return options.misa_profile;
+    }
+    if (options.cpu_model_profile.has_value()) {
+        return pipeline::make_cpu_model_profile(*options.cpu_model_profile).misa_profile;
     }
     return MisaProfile::GCBV;
 }
@@ -430,7 +456,7 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         if (!parsed) {
             return std::unexpected(
                 std::format("unsupported CPU model profile '{}' (supported: tiny, balanced, "
-                            "performance, cfu-provingground, rvproc)",
+                            "performance, cfu-provingground, rvproc, rvcomp)",
                             *value));
         }
         result.options.cpu_model_profile = *parsed;
@@ -924,7 +950,10 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
 
     cfg.isa.isatest_tohost = isatest_tohost;
     cfg.isa.misa_profile = misa_profile_bits(effective_misa_profile(*this));
-    cfg.isa.misa_override = misa_override;
+    cfg.isa.misa_override =
+        misa_override ||
+        (cpu_model_profile.has_value() &&
+         pipeline::make_cpu_model_profile(*cpu_model_profile).misa_profile != MisaProfile::GCBV);
     cfg.isa.misa_xlen = misa_xlen;
     cfg.isa.vlen = vlen;
 
@@ -945,7 +974,8 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.ras_entries = ras_size;
     if (bram_prewarm.has_value()) {
         cfg.bram_prewarm = *bram_prewarm;
-    } else if (cpu_model_profile == simrv::pipeline::CpuModelProfile::CfuProvingGround) {
+    } else if (cpu_model_profile == simrv::pipeline::CpuModelProfile::CfuProvingGround ||
+               cpu_model_profile == simrv::pipeline::CpuModelProfile::RvComp) {
         cfg.bram_prewarm = true;
     }
 
@@ -1176,7 +1206,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--cpu-profile {}{}<PROFILE>{}       Microarchitectural preset: tiny, balanced, "
-               "performance, cfu-provingground\n",
+               "performance, cfu-provingground, rvcomp\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--cfu-plugin {}{}<LIB.SO>{}         Load dynamic Custom Function Unit (CFU) "
@@ -1184,7 +1214,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--bram-prewarm / --no-bram-prewarm{} Pre-warm L1 caches from loaded ELF for "
-               "0-latency BRAM parity (default: auto for cfu-provingground)\n\n",
+               "0-latency BRAM parity (default: auto for cfu-provingground and rvcomp)\n\n",
                style(kBrightGreen), style(kReset));
 
     // Logging & Tracing

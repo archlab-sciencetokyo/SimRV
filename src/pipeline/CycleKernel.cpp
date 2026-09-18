@@ -298,6 +298,12 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             }
             std::swap(pipe.memory, pipe.execute);
             pipe.execute->invalidate();
+            if (pipe.memory->valid &&
+                (pipe.memory->context.traits.is_mem_load ||
+                 pipeline::operation::is_store(pipe.memory->context.op_id)) &&
+                cpu_model_config.data_cache.hit_latency > 1) {
+                pipe.memory->remaining_latency = cpu_model_config.data_cache.hit_latency - 1;
+            }
         }
     }
 

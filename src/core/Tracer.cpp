@@ -460,6 +460,12 @@ void Tracer::print_summary() {
         simrv::log::info("L1D hits / misses        : {:>12} / {}",
                          format_with_commas(machine_.primary_hart().dcache.hit_count()),
                          format_with_commas(machine_.primary_hart().dcache.miss_count()));
+        const auto& bp_stats = machine_.primary_hart().branch_predictor.stats();
+        if (bp_stats.direction_predictions > 0) {
+            simrv::log::info("Branch hits / misses     : {:>12} / {}",
+                             format_with_commas(bp_stats.direction_hits),
+                             format_with_commas(bp_stats.direction_misses));
+        }
         const auto& bus = machine_.memory().system_bus();
         simrv::log::info("Bus reads / writes       : {:>12} / {}",
                          format_with_commas(bus.read_count()),
