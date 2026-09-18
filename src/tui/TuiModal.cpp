@@ -10,6 +10,7 @@
 #include <numeric>
 #include <string_view>
 
+#include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/TuiLayoutPolicy.hpp"
 #include "simrv/tui/TuiTheme.hpp"
@@ -80,6 +81,15 @@ void TuiModal::open(ModalType type, InspectorPane* inspector_pane, uint64_t step
         default:
             break;
     }
+}
+
+void TuiModal::open_save_cpu_config() {
+    active_modal_ = ModalType::SaveCpuConfig;
+    rendered_box_width_ = 0;
+    const auto profile =
+        static_cast<simrv::pipeline::CpuModelProfile>(settings_draft_.sys_config.profile);
+    const auto name = simrv::pipeline::cpu_model_profile_name(profile);
+    input_ = std::format("configs/models/{}.cfg", name);
 }
 
 void TuiModal::cycle_settings_tab(int delta) {
@@ -229,6 +239,45 @@ auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step
         case ModalType::LayoutPresets:
             result = true;
             break;
+        case ModalType::SaveCpuConfig: {
+            if (input_.empty()) return false;
+            std::string path = input_;
+            if (!path.ends_with(".cfg") && !path.ends_with(".ini")) {
+                path += ".cfg";
+            }
+            auto model = machine_.primary_hart().cpu_model_config;
+            const auto selected_profile =
+                static_cast<simrv::pipeline::CpuModelProfile>(settings_draft_.sys_config.profile);
+            if (selected_profile != simrv::pipeline::CpuModelProfile::Custom) {
+                model = simrv::pipeline::make_cpu_model_profile(selected_profile);
+            }
+            model.pipeline.pipeline_type = static_cast<simrv::pipeline::PipelineType>(
+                settings_draft_.sys_config.pipeline_type);
+            model.pipeline.mul_latency = settings_draft_.sys_config.mul_latency;
+            model.pipeline.div_latency = settings_draft_.sys_config.div_latency;
+            model.pipeline.fp_alu_latency = settings_draft_.sys_config.fp_alu_latency;
+            model.pipeline.fp_div_latency = settings_draft_.sys_config.fp_div_latency;
+            model.pipeline.csr_flush_penalty = settings_draft_.sys_config.csr_flush_penalty;
+            model.pipeline.fence_flush_penalty = settings_draft_.sys_config.fence_flush_penalty;
+            model.pipeline.enable_forwarding = settings_draft_.sys_config.enable_forwarding;
+            model.pipeline.branch_predictor.type =
+                static_cast<simrv::pipeline::BranchPredictorType>(
+                    settings_draft_.sys_config.bpred_type);
+            model.pipeline.branch_predictor.bht_entries = settings_draft_.sys_config.bht_entries;
+            model.pipeline.branch_predictor.btb_entries = settings_draft_.sys_config.btb_entries;
+            model.pipeline.branch_predictor.ras_entries = settings_draft_.sys_config.ras_entries;
+
+            const std::string model_name = std::filesystem::path(path).stem().string();
+            if (simrv::core::save_cpu_config(path, model, model_name)) {
+                open_notice("CPU MODEL SAVED", std::format("Configuration saved to {}", path),
+                            false);
+                return true;
+            } else {
+                open_notice("SAVE FAILED", std::format("Cannot write configuration to {}", path),
+                            true);
+                return false;
+            }
+        }
         default:
             break;
     }
@@ -387,6 +436,7 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
                 case ModalType::InspectAddress:
                 case ModalType::LoadBinary:
                 case ModalType::LayoutPresets:
+                case ModalType::SaveCpuConfig:
                     return action == 0 ? ModalClickResult::Submit : ModalClickResult::Closed;
                 case ModalType::Help:
                 case ModalType::None:
@@ -595,6 +645,13 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                                                 {"[D / Space]", "Discard Change"},
                                                 {"[Esc / q]", "Cancel"}}));
         } break;
+        case ModalType::SaveCpuConfig:
+            modals::build_text_input_rows(content_rows,
+                                          "Enter Configuration Path or Name:", input_);
+            content_rows.push_back("");
+            content_rows.push_back(
+                modals::build_modal_footer({{"[Enter]", "Save"}, {"[Esc]", "Cancel"}}));
+            break;
         default:
             break;
     }

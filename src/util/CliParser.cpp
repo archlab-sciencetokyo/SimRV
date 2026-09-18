@@ -14,6 +14,7 @@
 #include <span>
 #include <string>
 
+#include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
@@ -289,10 +290,11 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.appmode = false;
         return true;
     }
-    if (arg == "--cpu-config") {
+    if (arg == "--cpu-config" || arg == "--cpu-model-file" || arg == "--model-file") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
-        options.fn_cpuconfig = std::string(*value);
+        const auto resolved = simrv::core::resolve_cpu_model_path(*value);
+        options.fn_cpuconfig = resolved.value_or(std::string(*value));
         return true;
     }
     if (arg == "--cfu-plugin") {
@@ -452,11 +454,20 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
     if (arg == "--cpu-profile" || arg == "--profile") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
+        const auto resolved = simrv::core::resolve_cpu_model_path(*value);
+        if (resolved.has_value()) {
+            result.options.fn_cpuconfig = *resolved;
+            simrv::pipeline::CpuModelConfig loaded{};
+            if (simrv::core::load_cpu_config(*resolved, loaded)) {
+                result.options.cpu_model_profile = loaded.profile;
+                return true;
+            }
+        }
         auto parsed = simrv::pipeline::parse_cpu_model_profile(*value);
         if (!parsed) {
             return std::unexpected(
                 std::format("unsupported CPU model profile '{}' (supported: tiny, balanced, "
-                            "performance, cfu-provingground, rvproc, rvcomp)",
+                            "performance, cfu-provingground, rvproc, rvcomp, or path to .cfg)",
                             *value));
         }
         result.options.cpu_model_profile = *parsed;
@@ -654,6 +665,27 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
     }
     if (arg == "--instmix") {
         result.options.use_mix = true;
+        return true;
+    }
+    if (arg == "--dump-cpu-model" || arg == "--export-cpu-model" || arg == "--scaffold-cpu-model") {
+        result.action = CliAction::DumpCpuModel;
+        if (arg == "--scaffold-cpu-model") {
+            result.options.dump_cpu_model_profile = "balanced";
+            if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
+                args[i + 1][0] != '-') {
+                ++i;
+                result.options.dump_cpu_model_output = args[i];
+            }
+        } else {
+            auto value = next_argument(args, i, arg);
+            if (!value) return std::unexpected(value.error());
+            result.options.dump_cpu_model_profile = std::string(*value);
+            if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
+                args[i + 1][0] != '-') {
+                ++i;
+                result.options.dump_cpu_model_output = args[i];
+            }
+        }
         return true;
     }
     return false;
@@ -1085,7 +1117,8 @@ auto needs_memory_image(const ParseResult& result) -> bool {
     return result.options.fn_memimg.empty() && !result.options.tuimode &&
            result.action != CliAction::ExplainInstruction && result.action != CliAction::ShowHelp &&
            result.action != CliAction::ShowVersion && result.action != CliAction::ShowLicense &&
-           result.action != CliAction::Attach && !result.options.attach_mode;
+           result.action != CliAction::Attach && !result.options.attach_mode &&
+           result.action != CliAction::DumpCpuModel;
 }
 
 [[noreturn]] auto usage(std::string_view prog_name, int status) -> void {

@@ -38,7 +38,8 @@ enum class ModalType : uint8_t {
     ManageBreakpoints,
     Notice,
     PlatformChangeConfirm,
-    LayoutPresets
+    LayoutPresets,
+    SaveCpuConfig
 };
 
 struct SysConfigDraft {
@@ -175,6 +176,11 @@ class TuiModal {
 
     void open_notice(const std::string& title, const std::string& message, bool is_error = false);
     void open_platform_confirm(const SettingsDraft& draft);
+    void open_save_cpu_config();
+    [[nodiscard]] auto get_settings_draft() const -> const SettingsDraft& {
+        return settings_draft_;
+    }
+    [[nodiscard]] auto get_settings_draft() -> SettingsDraft& { return settings_draft_; }
     [[nodiscard]] auto get_pending_platform_draft() const -> const SettingsDraft& {
         return pending_platform_draft_;
     }

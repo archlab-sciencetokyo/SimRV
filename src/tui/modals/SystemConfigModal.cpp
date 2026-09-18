@@ -15,7 +15,7 @@ namespace simrv::tui::modals {
 
 namespace {
 
-constexpr int kSettingCount = 13;
+constexpr int kSettingCount = 14;
 
 void assign_pipeline(SysConfigDraft& draft, const simrv::pipeline::CpuModelConfig& model) {
     const auto& cfg = model.pipeline;
@@ -265,6 +265,7 @@ void SystemConfigModal::render(std::vector<std::string>& content_rows,
         {"RAS capacity", entries(draft.ras_entries, 11)},
         {"FPGA core profile", std::string(simrv::pipeline::cpu_model_profile_name(
                                   static_cast<simrv::pipeline::CpuModelProfile>(draft.profile)))},
+        {"Save configuration", "\033[1;32m[S] Export to .cfg...\033[0m"},
     });
     add_row(build_section_divider("Authoritative CA Policy", kThemeMint));
     for (size_t i = 0; i < settings.size(); ++i) {

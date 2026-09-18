@@ -27,6 +27,7 @@ Launch `SimRV` normally (or pass `--tui`) to explore an image with the interacti
 ```
 
 ### Prerequisites
+
 - **Clang 20+** or **GCC 15+** (required for the C++23 baseline). For current validation,
   prefer stable Clang 21+ and GCC 15+; use GCC 16+ once supplied by the host distribution.
 - **CMake 3.31+** & **Ninja**
@@ -45,6 +46,7 @@ cmake --build --preset rv32-release
 
 Native-host and compiler-specific presets are also available. The native-host preset pins Clang
 and enables host-specific code generation:
+
 ```bash
 cmake --preset rv64-native-release && cmake --build --preset rv64-native-release
 cmake --preset rv64-clang-release && cmake --build --preset rv64-clang-release
@@ -52,26 +54,31 @@ cmake --preset rv64-gcc-release && cmake --build --preset rv64-gcc-release
 ```
 
 Repeatable analysis presets are also available:
+
 ```bash
 cmake --preset rv64-asan && cmake --build --preset rv64-asan
 cmake --preset rv64-tidy && cmake --build --preset rv64-tidy
 ```
+
 If a host ccache wrapper has no writable cache, prefix configure and build commands with
 `CCACHE_DISABLE=1`.
 
 ### Run
 
 Run a baremetal binary in interactive TUI mode (Default):
+
 ```bash
 ./build/rv64-release/SimRV -b -m img/hello.bin
 ```
 
 Run headless in CLI-only mode:
+
 ```bash
 ./build/rv64-release/SimRV -b -m img/hello.bin --cli
 ```
 
 Select execution mode across fast, detailed, or cycle-accurate microarchitectures:
+
 ```bash
 # Fast functional execution
 ./build/rv64-release/SimRV -b -m img/hello.bin --mode fast --cli
@@ -89,12 +96,24 @@ Mirror configuration, diagnostics, termination, cache, bus, and performance summ
 ./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --cli --log-file run.log
 ```
 
+Load custom or preset CPU microarchitecture models (see [CPU Models Guide](docs/CPU_MODELS.md)):
+
+```bash
+# Load a predefined CPU model (searches configs/models/ or custom path)
+./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --cpu-profile rvcomp --cli
+
+# Generate a scaffold model configuration with the wizard
+python3 scripts/cpu_model_wizard.py --name my_core --template five-stage
+```
+
 Run Linux OS image with disk & devicetree:
+
 ```bash
 ./build/rv64-release/SimRV --os -m linux-images/rv64/fw_payload.bin -D linux-images/rv64/root.img -f linux-images/rv64/devicetree.dtb --cli
 ```
 
 Override MISA profile or Vector register length (VLEN):
+
 ```bash
 # Select the explicit RV64GCBV target profile and a 512-bit VLEN
 ./build/rv64-release/SimRV -m img/vector.bin --misa rv64gcbv --vlen 512
@@ -196,6 +215,7 @@ ctest --test-dir build/rv32-release --output-on-failure -L gate
 ```
 
 ### ISA Test Suite
+
 For running the `riscv-tests` suite, set `RISCV_TESTS_DIR`:
 
 ```bash
@@ -221,6 +241,7 @@ but does not redistribute them. Exact preparation commands, schemas, and output 
 ## Co-Simulation & Debugging
 
 ### GDB Remote Debugging
+
 SimRV includes an event-driven GDB RSP server. `--gdb` selects CLI mode, starts the target paused,
 and listens on port 1234 by default. Use `--gdb-port <PORT>` to choose another port. GDB and the
 interactive TUI are separate debugging frontends, so explicit `--tui --gdb` is rejected; GDB is
@@ -240,6 +261,7 @@ GDB-owned breakpoints/watchpoints before resuming. In the TUI, breakpoints, watc
 and inspection are always available while paused—there is no separate debug-mode toggle.
 
 ### Spike Lockstep Co-Simulation
+
 Verify execution against Spike instruction-by-instruction:
 
 ```bash
@@ -271,6 +293,7 @@ Pre-compiled standalone binaries (`SimRV`) are available under GitHub Releases f
 - `scripts/`: Regression, ISA testing, and Linux image build helpers
 - `docs/`: Focused architecture, user, contributor, compliance, and release guides
 - `CHANGELOG.md`: Version release log
+- `docs/CPU_MODELS.md`: CPU model configuration framework, parameters, wizard, and RTL calibration
 - `docs/RELEASE.md`: 2.0 support contract, validation matrix, and publishing checklist
 - `docs/TUI.md`: TUI input focus, rendering layers, and test coverage
 - `repro/`: Research-companion scripts and reproducibility instructions

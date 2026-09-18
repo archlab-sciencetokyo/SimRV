@@ -27,19 +27,22 @@ constexpr uint8_t kWeaklyTaken = 2;
 }  // namespace
 
 auto parse_branch_predictor_type(std::string_view name) -> std::optional<BranchPredictorType> {
-    if (name == "none" || name == "off" || name == "disabled") {
+    std::string lower(name);
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (lower == "none" || lower == "off" || lower == "disabled") {
         return BranchPredictorType::Disabled;
     }
-    if (name == "static" || name == "always-not-taken" || name == "btfnt") {
+    if (lower == "static" || lower == "always-not-taken" || lower == "btfnt") {
         return BranchPredictorType::Static;
     }
-    if (name == "bimodal" || name == "2bit" || name == "local") {
+    if (lower == "bimodal" || lower == "2bit" || lower == "local" || lower.starts_with("bimodal")) {
         return BranchPredictorType::Bimodal;
     }
-    if (name == "gshare") {
+    if (lower == "gshare") {
         return BranchPredictorType::GShare;
     }
-    if (name == "tournament" || name == "hybrid") {
+    if (lower == "tournament" || lower == "hybrid") {
         return BranchPredictorType::Tournament;
     }
     return std::nullopt;

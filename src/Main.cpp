@@ -10,6 +10,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <fstream>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <print>
@@ -19,6 +20,7 @@
 
 #include "simrv/Define.hpp"
 #include "simrv/core/BuildInfo.hpp"
+#include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/net/Client.hpp"
@@ -101,6 +103,32 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             case CliAction::Attach:
                 return simrv::net::run_client(parsed->options.attach_endpoint,
                                               !parsed->options.tuimode);
+            case CliAction::DumpCpuModel: {
+                simrv::pipeline::CpuModelConfig cfg{};
+                std::string target = parsed->options.dump_cpu_model_profile;
+                if (target.empty()) target = "balanced";
+                if (auto resolved = simrv::core::resolve_cpu_model_path(target)) {
+                    (void)simrv::core::load_cpu_config(*resolved, cfg);
+                } else if (auto p = simrv::pipeline::parse_cpu_model_profile(target)) {
+                    cfg = simrv::pipeline::make_cpu_model_profile(*p);
+                } else {
+                    cfg = simrv::pipeline::make_cpu_model_profile(
+                        simrv::pipeline::CpuModelProfile::Balanced);
+                }
+                if (!parsed->options.dump_cpu_model_output.empty()) {
+                    if (!simrv::core::save_cpu_config(parsed->options.dump_cpu_model_output, cfg,
+                                                      target)) {
+                        simrv::log::error("Failed to write CPU model to {}",
+                                          parsed->options.dump_cpu_model_output);
+                        std::exit(1);
+                    }
+                    std::println("Wrote CPU model configuration to {}",
+                                 parsed->options.dump_cpu_model_output);
+                } else {
+                    simrv::core::serialize_cpu_config(cfg, std::cout, target);
+                }
+                std::exit(0);
+            }
             case CliAction::Run:
                 break;
         }

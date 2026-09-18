@@ -50,8 +50,8 @@ void test_rvcomp_profile_validation() {
     TEST_CHECK(profile.pipeline.branch_predictor.enable_ras == false);
     TEST_CHECK(profile.pipeline.branch_predictor.pc_shift == 2);
     TEST_CHECK(profile.pipeline.branch_predictor.untagged_btb == true);
-    TEST_CHECK(profile.pipeline.branch_predictor.registered_btb_read == true);
-    TEST_CHECK(profile.pipeline.branch_predictor.bht_initial_state == 0);
+    TEST_CHECK(profile.pipeline.branch_predictor.registered_btb_read == false);
+    TEST_CHECK(profile.pipeline.branch_predictor.bht_initial_state == 1);
 
     TEST_CHECK(profile.instruction_cache.capacity_bytes == 16384);
     TEST_CHECK(profile.instruction_cache.associativity == 1);

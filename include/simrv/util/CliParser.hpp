@@ -21,7 +21,8 @@ enum class CliAction : uint8_t {
     ShowVersion,
     ShowLicense,
     ExplainInstruction,
-    Attach
+    Attach,
+    DumpCpuModel
 };
 enum class RequestedExecutionMode : uint8_t { Fast, Detailed, CycleAccurate };
 
@@ -80,6 +81,8 @@ struct RuntimeOptions {
 
     std::string fn_cpuconfig;
     std::optional<simrv::pipeline::CpuModelProfile> cpu_model_profile;
+    std::string dump_cpu_model_profile;
+    std::string dump_cpu_model_output;
     std::string fn_cfu_plugin;
     std::string fn_dump_dmem;
     std::optional<bool> bram_prewarm;

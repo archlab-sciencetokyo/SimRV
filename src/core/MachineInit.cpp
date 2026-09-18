@@ -296,6 +296,11 @@ auto Machine::platform_status() const -> PlatformStatusSnapshot {
 auto Machine::initialize() -> std::expected<void, std::string> {
     if (config.cpu_model_profile.has_value()) {
         auto model = simrv::pipeline::make_cpu_model_profile(*config.cpu_model_profile);
+        const auto profile_name =
+            simrv::pipeline::cpu_model_profile_name(*config.cpu_model_profile);
+        if (const auto resolved = simrv::core::resolve_cpu_model_path(profile_name)) {
+            (void)simrv::core::load_cpu_config(*resolved, model);
+        }
         if (config.branch_predictor_type.has_value()) {
             model.pipeline.branch_predictor.type = *config.branch_predictor_type;
         }
@@ -410,12 +415,30 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         linux_boot ? static_cast<Address>(effective_dram_size - static_cast<size_t>(0x00100000U))
                    : simrv::boot::kInitDataAddress;
 
+    auto effective_misa_profile = [&]() -> isa::MisaProfile {
+        if (!config.files.cpuconfig_path.empty()) {
+            simrv::pipeline::CpuModelConfig cfg{};
+            if (simrv::core::load_cpu_config(config.files.cpuconfig_path, cfg)) {
+                return cfg.misa_profile;
+            }
+        }
+        if (config.cpu_model_profile.has_value()) {
+            const auto profile_name =
+                simrv::pipeline::cpu_model_profile_name(*config.cpu_model_profile);
+            if (const auto resolved = simrv::core::resolve_cpu_model_path(profile_name)) {
+                simrv::pipeline::CpuModelConfig cfg{};
+                if (simrv::core::load_cpu_config(*resolved, cfg)) {
+                    return cfg.misa_profile;
+                }
+            }
+            return pipeline::make_cpu_model_profile(*config.cpu_model_profile).misa_profile;
+        }
+        return isa::MisaProfile::GCBV;
+    };
+
     CSRValue initial_misa = isa::misa_with_mxl(
         config.isa.misa_override ? config.isa.misa_profile
-        : config.cpu_model_profile.has_value()
-            ? isa::misa_profile_bits(
-                  pipeline::make_cpu_model_profile(*config.cpu_model_profile).misa_profile)
-            : isa::kMisaDefault);
+                                 : isa::misa_profile_bits(effective_misa_profile()));
     config.isa.misa_profile = initial_misa;
     if constexpr (simrv::xlen::kIsXLen64) {
         bool is_32bit = false;

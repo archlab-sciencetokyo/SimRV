@@ -1795,6 +1795,12 @@ auto Tui::handle_modal_settings(ModalType mtype, uint8_t byte, TuiKey key) -> bo
         if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
             close_modal();
         } else if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+            if (modal_.get_settings_draft().active_tab == 2 &&
+                modal_.get_settings_draft().tab_cursor[2] == 13) {
+                modal_.open_save_cpu_config();
+                render(true);
+                return true;
+            }
             submit_modal();
         } else if (key == simrv::tui::TuiKey::Tab) {
             modal_.cycle_settings_tab(1);
@@ -1809,8 +1815,18 @@ auto Tui::handle_modal_settings(ModalType mtype, uint8_t byte, TuiKey key) -> bo
             modal_.set_settings_tab(2);
             render(true);
         } else if (byte == ' ') {
+            if (modal_.get_settings_draft().active_tab == 2 &&
+                modal_.get_settings_draft().tab_cursor[2] == 13) {
+                modal_.open_save_cpu_config();
+                render(true);
+                return true;
+            }
             modal_.toggle_setting_at_cursor();
             render(true);
+        } else if ((byte == 's' || byte == 'S') && modal_.get_settings_draft().active_tab == 2) {
+            modal_.open_save_cpu_config();
+            render(true);
+            return true;
         } else if (byte == 'p' || byte == 'P') {
             modal_.apply_settings_misa_profile(0);
             render(true);

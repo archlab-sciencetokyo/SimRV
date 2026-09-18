@@ -206,8 +206,8 @@ struct CpuModelConfig {
             result.pipeline.branch_predictor.enable_ras = false;
             result.pipeline.branch_predictor.pc_shift = 2;
             result.pipeline.branch_predictor.untagged_btb = true;
-            result.pipeline.branch_predictor.registered_btb_read = true;
-            result.pipeline.branch_predictor.bht_initial_state = 0;
+            result.pipeline.branch_predictor.registered_btb_read = false;
+            result.pipeline.branch_predictor.bht_initial_state = 1;
             result.instruction_cache = {16384, 1, 32, 1, 1};
             result.data_cache = {16384, 1, 32, 4, 1};
             result.interconnect = {1, 1};

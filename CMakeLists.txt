@@ -389,6 +389,10 @@ if(BUILD_TESTING)
   simrv_add_runtime_test(simrv-rvcomp-tests tests/RvCompTests.cpp rvcomp
                          "gate;regress;pipeline;rvcomp")
 
+  simrv_add_runtime_test(
+    simrv-cpu-model-loader-tests tests/CpuModelLoaderTests.cpp cpu-model-loader
+    "gate;regress;pipeline;model")
+
   # Architectural equivalence is a first-class native gate.  The fixture
   # deliberately exercises functional execution and both CA pipelines while
   # excluding cache/cycle/UI observations.
