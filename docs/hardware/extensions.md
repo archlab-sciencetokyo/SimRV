@@ -11,7 +11,7 @@ linear integration path through define → decode → execute → state → TUI.
 ## 1. Register the Extension and Opcodes
 
 All core ISA definitions and shared constants live in
-[`include/simrv/Define.hpp`](../../include/simrv/Define.hpp).
+[`include/simrv/Define.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/Define.hpp).
 
 1. **Extension Bit:** Add your extension to the `IsaExtension` enum
    (e.g., `V = 21` for Vector).
@@ -39,8 +39,8 @@ All core ISA definitions and shared constants live in
 
 Instruction decoding logic lives in:
 
-- [`include/simrv/pipeline/Decoder.hpp`](../../include/simrv/pipeline/Decoder.hpp) — field extraction helpers
-- [`src/pipeline/Decoder.cpp`](../../src/pipeline/Decoder.cpp) — master decode switch
+- [`include/simrv/pipeline/Decoder.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/pipeline/Decoder.hpp) — field extraction helpers
+- [`src/pipeline/Decoder.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/pipeline/Decoder.cpp) — master decode switch
 
 Steps:
 
@@ -61,9 +61,9 @@ Steps:
 
 Execution routing happens in the Execute stage:
 
-- [`src/execute/ExecuteUnit.cpp`](../../src/execute/ExecuteUnit.cpp) — routing hub
-- [`src/execute/ExecuteUnitInt.cpp`](../../src/execute/ExecuteUnitInt.cpp) — integer ops
-- [`src/execute/ExecuteUnitFloat.cpp`](../../src/execute/ExecuteUnitFloat.cpp) — FP ops
+- [`src/execute/ExecuteUnit.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnit.cpp) — routing hub
+- [`src/execute/ExecuteUnitInt.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitInt.cpp) — integer ops
+- [`src/execute/ExecuteUnitFloat.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitFloat.cpp) — FP ops
 
 Steps:
 
@@ -86,16 +86,16 @@ If the extension requires new architectural state (e.g., 32 vector registers of
 variable length):
 
 1. **Types:** Define new register identifiers and associated types in
-   [`include/simrv/xlen/Types.hpp`](../../include/simrv/xlen/Types.hpp).
+   [`include/simrv/xlen/Types.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/xlen/Types.hpp).
 
 2. **State Storage:** Add state arrays or structs to `ArchState` inside
-   [`include/simrv/core/Cpu.hpp`](../../include/simrv/core/Cpu.hpp) (embedded in `CPU`
+   [`include/simrv/core/Cpu.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/core/Cpu.hpp) (embedded in `CPU`
    via `state_`).
 
 3. **Control and Status Registers (CSRs):**
    - Add new CSR addresses to the `Csr` enum in `Define.hpp`.
    - Implement read/write behavior, access control, and illegal-instruction guards in
-     [`src/core/CsrFile.cpp`](../../src/core/CsrFile.cpp).
+     [`src/core/CsrFile.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/core/CsrFile.cpp).
 
 ---
 
@@ -107,7 +107,7 @@ appear correctly:
 
 1. **Mnemonic and Assembly Rep:** Add entries to `InstructionExplainer::get_mnemonic()`
    and `get_assembly_repr()` in
-   [`src/util/InstructionExplainer.cpp`](../../src/util/InstructionExplainer.cpp).
+   [`src/util/InstructionExplainer.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/util/InstructionExplainer.cpp).
 
 2. **Description:** Add a short educational description to `get_description()`.
    Include the ISA extension name in the description so users can identify which
@@ -127,8 +127,8 @@ To maintain full observability:
 
 2. **TUI Register & Subsystem Panes:** The TUI is split into modular components under `src/tui/panels/`:
    - If you add new architectural state (e.g., vector registers), update
-     [`src/tui/panels/InspectorPaneRegs.cpp`](../../src/tui/panels/InspectorPaneRegs.cpp) or create a dedicated panel view. Add a new view type in
-     [`include/simrv/tui/panels/InspectorPane.hpp`](../../include/simrv/tui/panels/InspectorPane.hpp) and wire it into the pane cycler.
+     [`src/tui/panels/InspectorPaneRegs.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/tui/panels/InspectorPaneRegs.cpp) or create a dedicated panel view. Add a new view type in
+     [`include/simrv/tui/panels/InspectorPane.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/tui/panels/InspectorPane.hpp) and wire it into the pane cycler.
    - Use the centralized theme helpers from `TuiTheme.hpp` — never hardcode raw ANSI escape sequences.
 
 ---

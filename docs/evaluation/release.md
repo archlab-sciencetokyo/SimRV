@@ -1,6 +1,6 @@
 # SimRV 3.0 Release Guide
 
-The authoritative release contract is [`release/release-manifest.json`](../../release/release-manifest.json).
+The authoritative release contract is [`release/release-manifest.json`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/release/release-manifest.json).
 SimRV 3.0 officially supports Linux x86-64 hosts using GCC 16+ or Clang 22+, with separate
 RV32GCBV and RV64GCBV binaries. Spike lockstep and the GDB server are optional features.
 
@@ -86,7 +86,7 @@ to one physical core and keep the CPU governor, kernel, perf event set, and host
 The manifest enumerates the authoritative matrix. Native regression, advertised ISA, vector,
 Linux/PTy lifecycle, sanitizer, and packaging suites must all be present and pass with zero skips.
 External inputs are pinned but not redistributed; their observed revisions are stored in the
-evidence report. See [`../../repro/README.md`](../../repro/README.md) for the clean-checkout workflow.
+evidence report. See [`repro/README.md`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/repro/README.md) for the clean-checkout workflow.
 
 ## Publishing
 

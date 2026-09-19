@@ -13,7 +13,7 @@ SimRV supports full Linux OS boot as part of its integration validation gate. Yo
 
 Pre-built images for both RV32 and RV64 should be placed under
 `linux-images/rv32/` and `linux-images/rv64/` respectively. The
-[`build-linux-image.sh`](../../scripts/build-linux-image.sh) script automates
+[`build-linux-image.sh`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/scripts/build-linux-image.sh) script automates
 building them from source.
 
 ---

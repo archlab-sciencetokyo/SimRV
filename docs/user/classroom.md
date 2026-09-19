@@ -98,7 +98,7 @@ non-contiguous bit positions. This is a deliberate hardware engineering decision
 SimRV loads ELF executables directly, including loadable segments, BSS, entry-point, and symbol
 information. It also accepts raw flat binaries. See the
 [bare-metal guide](baremetal.md) for toolchain, startup, linker-script, C, and assembly setup;
-the reusable programs under [`examples/isa/`](../../examples/isa/) provide compact starting points.
+the reusable programs under [`examples/isa/`](https://github.com/archlab-sciencetokyo/SimRV/tree/dev/examples/isa/) provide compact starting points.
 
 ```bash
 # Student-facing mode: start paused with the interactive Student Guide visible
@@ -126,8 +126,8 @@ the reusable programs under [`examples/isa/`](../../examples/isa/) provide compa
   classroom command.
 
 Guest programs can write to the 16550A UART to place prompts, intermediate values, or questions in
-the TUI virtual terminal. The [`uart-output.S`](../../examples/isa/uart-output.S) example is a minimal
-source-only implementation; [`uart-input-echo.S`](../../examples/isa/uart-input-echo.S) also accepts
+the TUI virtual terminal. The [`uart-output.S`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/examples/isa/uart-output.S) example is a minimal
+source-only implementation; [`uart-input-echo.S`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/examples/isa/uart-input-echo.S) also accepts
 student input. The example catalog additionally covers load widths, loops, M/A/C/D extensions, and
 architectural counters. Build all of them with `make -C examples/isa XLEN=64` or `XLEN=32`.
 
