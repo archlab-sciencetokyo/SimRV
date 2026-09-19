@@ -1,6 +1,6 @@
 # SimRV 3.0 Release Guide
 
-The authoritative release contract is [`release/release-manifest.json`](../release/release-manifest.json).
+The authoritative release contract is [`release/release-manifest.json`](../../release/release-manifest.json).
 SimRV 3.0 officially supports Linux x86-64 hosts using GCC 16+ or Clang 22+, with separate
 RV32GCBV and RV64GCBV binaries. Spike lockstep and the GDB server are optional features.
 
@@ -30,7 +30,7 @@ has a documented qualification gap. These labels are not RISC-V certification cl
 > eliminate state-copy overhead and streamline the replacement execution kernels.
 
 The detailed architectural boundary and known deviations are in
-[RISC-V compliance scope](RISCV_COMPLIANCE.md). The release manifest controls when prose and
+[RISC-V compliance scope](../architecture/compliance.md). The release manifest controls when prose and
 machine-readable requirements disagree.
 
 ## Local release validation
@@ -86,7 +86,7 @@ to one physical core and keep the CPU governor, kernel, perf event set, and host
 The manifest enumerates the authoritative matrix. Native regression, advertised ISA, vector,
 Linux/PTy lifecycle, sanitizer, and packaging suites must all be present and pass with zero skips.
 External inputs are pinned but not redistributed; their observed revisions are stored in the
-evidence report. See [`../repro/README.md`](../repro/README.md) for the clean-checkout workflow.
+evidence report. See [`../../repro/README.md`](../../repro/README.md) for the clean-checkout workflow.
 
 ## Publishing
 

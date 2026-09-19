@@ -277,9 +277,9 @@ simrv-benchmark --suite realworld --latex-table
 
 ### Detailed Architecture & Extension Guides
 
-- [System Architecture](ARCHITECTURE.md)
-- [Bare-Metal Guide](BAREMETAL_GUIDE.md)
-- [CPU Model Configuration Reference](CPU_MODELS.md)
-- [RTL Parity Verification Guide](RTL_PARITY.md)
-- [TileLink-C Profile & Cache Coherence](TILELINK_C_PROFILE.md)
-- [RISC-V Compliance Scope](RISCV_COMPLIANCE.md)
+- [System Architecture](../architecture/overview.md)
+- [Bare-Metal Guide](baremetal.md)
+- [CPU Model Configuration Reference](../hardware/models.md)
+- [RTL Parity Verification Guide](../hardware/rtl_parity.md)
+- [TileLink-C Profile & Cache Coherence](../architecture/tilelink.md)
+- [RISC-V Compliance Scope](../architecture/compliance.md)

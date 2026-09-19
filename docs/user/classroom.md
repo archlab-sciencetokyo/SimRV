@@ -96,8 +96,8 @@ non-contiguous bit positions. This is a deliberate hardware engineering decision
 
 SimRV loads ELF executables directly, including loadable segments, BSS, entry-point, and symbol
 information. It also accepts raw flat binaries. See the
-[bare-metal guide](BAREMETAL_GUIDE.md) for toolchain, startup, linker-script, C, and assembly setup;
-the reusable programs under [`examples/isa/`](../examples/isa/) provide compact starting points.
+[bare-metal guide](baremetal.md) for toolchain, startup, linker-script, C, and assembly setup;
+the reusable programs under [`examples/isa/`](../../examples/isa/) provide compact starting points.
 
 ```bash
 # Student-facing mode: start paused with the interactive Student Guide visible
@@ -113,15 +113,20 @@ the reusable programs under [`examples/isa/`](../examples/isa/) provide compact 
 
 ### Teacher-friendly interaction points
 
-ELF symbols make planned pauses possible without a SimRV-specific source format. Add a global label
-at a useful observation point, press `:` in the paused TUI, and enter the label name; continuing then
-pauses before that address. `ebreak` retains its architectural meaning and raises a breakpoint
-exception, so it remains suitable for trap/debugger exercises rather than acting as a hidden
-classroom command.
+- Step through execution until the first branch, then inspect the instruction mnemonic, raw hex
+  encoding, and branch target in the Student Guide.
+- Ask students to determine which architectural register should change before advancing past an
+  ALU instruction, then verify the change in the Register File.
+- Introduce memory operations: observe when memory accesses read or write guest state and how the
+  bus activity panel reflects peripheral transactions.
+- Use `--inspection-output <path>` to capture machine state at key execution milestones;
+  students can submit these JSON snapshots as lab evidence. A reference script is provided in
+  `scripts/` to validate student inspection files against a golden run without relying on an ad-hoc
+  classroom command.
 
 Guest programs can write to the 16550A UART to place prompts, intermediate values, or questions in
-the TUI virtual terminal. The [`uart-output.S`](../examples/isa/uart-output.S) example is a minimal
-source-only implementation; [`uart-input-echo.S`](../examples/isa/uart-input-echo.S) also accepts
+the TUI virtual terminal. The [`uart-output.S`](../../examples/isa/uart-output.S) example is a minimal
+source-only implementation; [`uart-input-echo.S`](../../examples/isa/uart-input-echo.S) also accepts
 student input. The example catalog additionally covers load widths, loops, M/A/C/D extensions, and
 architectural counters. Build all of them with `make -C examples/isa XLEN=64` or `XLEN=32`.
 

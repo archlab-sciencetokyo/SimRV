@@ -1,14 +1,13 @@
 # SimRV: Dual-Width Explainable RISC-V System Simulator
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/archlab-sciencetokyo/SimRV/main/docs/assets/logo.png" alt="SimRV Logo" width="180" onerror="this.style.display='none'"/>
-</p>
-
-<p align="center">
   <strong>An explainable, dual-width (RV32 / RV64) RISC-V architectural simulator with an interactive terminal workbench (TUI), cycle-accurate microarchitectural modeling, hardware RTL parity verification, and full-system SMP Linux emulation.</strong>
 </p>
 
 <p align="center">
+  <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=dev" alt="C/C++ CI"/></a>
+  <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml/badge.svg?branch=dev" alt="Docs CI"/></a>
+  <a href="https://archlab-sciencetokyo.github.io/SimRV/"><img src="https://img.shields.io/badge/docs-GitHub_Pages-blue.svg" alt="Documentation"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/releases"><img src="https://img.shields.io/badge/version-3.0.0--alpha.4-blue.svg" alt="SimRV Version"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/></a>
   <img src="https://img.shields.io/badge/C%2B%2B-23-purple.svg" alt="C++23"/>
@@ -21,16 +20,16 @@
 ## Key Highlights
 
 === "Full-System Linux SMP"
-    SimRV boots un-modified RISC-V Linux kernels and OpenSBI across **2 to 16 SMP cores** using dynamic Flattened Device Tree (FDT) synthesis. It features VirtIO block storage, 16550A UART, CLINT/ACLINT timers, and PLIC/AIA interrupt controllers, achieving **40+ MIPS** simulation speed on multi-core Linux boots.
+    SimRV boots un-modified RISC-V Linux kernels and OpenSBI across **2 to 16 SMP cores** using dynamic Flattened Device Tree (FDT) synthesis. It features VirtIO block storage, 16550A UART, CLINT/ACLINT timers, and PLIC/AIA interrupt controllers.
 
 === "Cycle-Accurate Modeling"
     Features inlined per-cycle transition kernels for **3-stage** and **5-stage** pipelines with an authoritative hardware register scoreboard (tracking INT, FP, and Vector dependencies), configurable branch predictors (Bimodal, GShare, Tournament), and multi-level L1/L2/L3 MESI directory cache coherence.
 
 === "Hardware RTL Parity"
-    Validated bit-for-bit against physical Verilog implementations (such as CFU-Proving-Ground RVProc and Archlab RVComp) through Verilator. SimRV matches cycle-by-cycle retirement traces and hardware performance counters while running **20× to 50× faster than software RTL simulation**.
+    Validated bit-for-bit against physical Verilog implementations (such as CFU-Proving-Ground RVProc and Archlab RVComp) through Verilator. SimRV matches cycle-by-cycle retirement traces and hardware performance counters.
 
-=== "Interactive TUI & Classroom"
-    Interactive split-screen terminal monitor displaying live register files, pipeline stages, cache tags, hazard graphs, disassembly explainers, and an interactive Linux PTY console. Includes a structured classroom mission mode for computer architecture education.
+=== "Interactive TUI & Education"
+    Interactive split-screen terminal monitor displaying live register files, pipeline stages, cache tags, hazard graphs, disassembly explainers, and an interactive Linux PTY console. Includes student guidance and instruction-level explanation.
 
 ---
 
@@ -138,9 +137,9 @@ SimRV requires a modern C++23 compiler (**Clang 22+** or **GCC 16+**), **CMake 3
 If you use SimRV in your academic research, please cite:
 
 ```bibtex
-@software{simrv2026,
-  author = {Trunk, Lennart and Kise, Kenji},
+@software{simrv,
   title = {{SimRV: A Dual-Width Explainable RISC-V System Simulator}},
+  author = {{SimRV Contributors}},
   url = {https://github.com/archlab-sciencetokyo/SimRV},
   version = {3.0.0-alpha.4},
   year = {2026}

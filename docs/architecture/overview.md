@@ -3,7 +3,7 @@
 SimRV is a C++23 RISC-V simulator for RV32 and RV64 targets. It runs baremetal
 images and full Linux OS configurations through fast functional instruction execution,
 detailed state simulation, or cycle-accurate microarchitectural modeling. ISA qualification
-claims and known gaps are maintained in [RISC-V compliance scope](RISCV_COMPLIANCE.md).
+claims and known gaps are maintained in [RISC-V compliance scope](compliance.md).
 
 ## Runtime Structure
 

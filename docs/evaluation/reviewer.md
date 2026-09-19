@@ -97,34 +97,34 @@ Verify that dynamic multi-core Linux boots cleanly and concurrently executes acr
   -s 20000000
 ```
 
-Notice that instructions retire evenly across harts (e.g. 5.00M per core for 4 harts) and simulation speed exceeds **40 MIPS**.
+Notice that instructions retire evenly across harts (e.g. 5.00M per core for 4 harts).
 
 ---
 
-## 3. Simulator Performance Comparison
+## 3. Simulator Architectural Design Comparison
 
-The following table summarizes empirical simulation throughput measured on an x86_64 host (Intel Core i9 / AMD Zen 4):
+| Simulator | Simulation Fidelity | Pipeline & Hazards | Cache / Memory Hierarchy | SMP Linux Support |
+| :--- | :--- | :--- | :--- | :--- |
+| **Verilator (RTL)** | Cycle-exact Verilog netlist | Exact wires | Exact BRAM / bus | Yes (Slow) |
+| **gem5 (Detailed/O3)** | Out-of-order cycle-approximate | Full ROB / Rename | Ruby / Classic | Yes |
+| **gem5 (Minor/In-Order)** | In-order cycle-approximate | Staged pipeline | Cache models | Yes |
+| **SimRV (CA Mode)** | In-order cycle-accurate | 3/5-stage, Scoreboard | MESI directory hub | Yes (Fast SMP) |
+| **Spike** | Architectural reference | None | None | Basic HTIF |
+| **SimRV (`--mode fast`)** | Architectural functional | None | None | Full VirtIO + SBI |
 
-| Simulator | Simulation Fidelity | Host Throughput (MIPS) | Pipeline & Hazards | Cache / Memory Hierarchy | SMP Linux Support |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Verilator (RTL)** | Cycle-exact Verilog netlist | **0.05 – 0.2 MIPS** | Exact wires | Exact BRAM / bus | Very slow |
-| **gem5 (Detailed/O3)** | Out-of-order cycle-approximate | **0.1 – 0.3 MIPS** | Full ROB / Rename | Ruby / Classic | Yes |
-| **gem5 (Minor/In-Order)** | In-order cycle-approximate | **0.3 – 0.8 MIPS** | Staged pipeline | Cache models | Yes |
-| **SimRV (CA Mode)** | In-order cycle-accurate | **3.0 – 6.0 MIPS** | 3/5-stage, Scoreboard | MESI directory hub | **Yes (Fast SMP)** |
-| **Spike** | Architectural reference | **15 – 25 MIPS** | ❌ None | ❌ None | Basic HTIF |
-| **SimRV (`--mode fast`)** | Architectural functional | **100 – 125 MIPS** | ❌ None | ❌ None | Full VirtIO + SBI |
+### Architectural Design Principles
 
-### Why is SimRV CA 5× to 15× Faster than gem5?
-
-1. **Inlined Transition Kernels vs. Dynamic Event Queues**:
-   - `gem5` dispatches every cycle, stage tick, and packet through dynamic priority queues with heavy virtual method calls and memory allocations.
-   - `SimRV` advances pipeline stages via a flat, monolithic cycle transition kernel with zero-copy pointer swaps between stages.
+1. **Inlined Transition Kernels**:
+   - Pipeline stages advance via flat cycle transition kernels with zero-copy state transitions between stages.
 2. **Bitmask Register Scoreboard**:
    - Integer, floating-point, and vector RAW/WAW hazard checking is evaluated using compact bitwise masks rather than dynamic token graphs.
 3. **Compile-Time Word Specialization**:
-   - `SIMRV_XLEN` is fixed at compile time (32 or 64), eliminating runtime word-width branching and enabling full LTO and auto-vectorization.
-4. **Branchless Host Execution**:
-   - 2D lookup tables for branch predictor saturating counters, instruction traits, and opcode tables eliminate host CPU branch mispredictions.
+   - `SIMRV_XLEN` is fixed at compile time (32 or 64), eliminating runtime word-width branching and enabling full compiler optimization.
+4. **Empirical Benchmarking**:
+   - Simulation throughput depends heavily on host CPU microarchitecture, compiler optimization levels, and guest workload characteristics. Users and reviewers are encouraged to record local baseline measurements on their own hardware using the bundled benchmark tooling:
+     ```bash
+     python3 scripts/benchmark.py --binary build/rv64-release/SimRV
+     ```
 
 ---
 
@@ -133,9 +133,9 @@ The following table summarizes empirical simulation throughput measured on an x8
 If you reference SimRV in peer-reviewed publications, please cite the software release:
 
 ```bibtex
-@software{simrv2026,
-  author = {Trunk, Lennart and Kise, Kenji},
+@software{simrv,
   title = {{SimRV: A Dual-Width Explainable RISC-V System Simulator}},
+  author = {{SimRV Contributors}},
   url = {https://github.com/archlab-sciencetokyo/SimRV},
   version = {3.0.0-alpha.4},
   year = {2026}

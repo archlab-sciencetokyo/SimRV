@@ -1,6 +1,6 @@
 site_name: SimRV
 site_description: An explainable, dual-width (RV32 / RV64) RISC-V architectural simulator with interactive TUI, cycle-accurate modeling, hardware RTL parity, and full-system Linux emulation.
-site_author: Lennart Trunk, Kenji Kise
+site_author: SimRV Contributors
 site_url: https://archlab-sciencetokyo.github.io/SimRV/
 repo_name: archlab-sciencetokyo/SimRV
 repo_url: https://github.com/archlab-sciencetokyo/SimRV
@@ -60,6 +60,9 @@ markdown_extensions:
   - tables
   - attr_list
   - md_in_html
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - def_list
   - pymdownx.arithmatex:
       generic: true
@@ -75,7 +78,7 @@ nav:
       - Interactive TUI Workbench: user/tui.md
       - Bare-Metal & Embedded: user/baremetal.md
       - Full-System Linux & SMP: user/linux.md
-      - Classroom & Student Missions: user/classroom.md
+      - Student Reference Guide: user/classroom.md
   - Architecture:
       - System & Pipeline Overview: architecture/overview.md
       - Memory & TileLink-C Coherence: architecture/tilelink.md
