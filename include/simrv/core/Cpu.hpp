@@ -661,6 +661,10 @@ class CPU {
     simrv::pipeline::PipelineContext* active_context_ = &pipeline_context;
     [[nodiscard]] constexpr auto& active_context() noexcept { return *active_context_; }
     [[nodiscard]] constexpr const auto& active_context() const noexcept { return *active_context_; }
+    [[nodiscard]] constexpr auto& scoreboard() noexcept { return ca_pipeline.scoreboard; }
+    [[nodiscard]] constexpr const auto& scoreboard() const noexcept {
+        return ca_pipeline.scoreboard;
+    }
     simrv::cache::ICache icache;
     simrv::cache::DCache dcache;
     simrv::cache::TimingCacheHierarchy instruction_cache_timing;

@@ -262,8 +262,8 @@ simrv-benchmark --suite realworld --latex-table
 
 ### Common Questions
 
-- **Q: How does keyboard input routing work between Linux and the TUI?**  
-  *A:* Keyboard input routes automatically based on execution state: while running, keystrokes are delivered directly to the guest terminal; while paused (via `[Space]` or `Ctrl-P`), keystrokes control simulator inspection and navigation.
+- **Q: How does keyboard input routing work between Linux and the TUI?**
+  *A:* Keyboard input routes automatically based on execution state: while running, keystrokes are delivered directly to the guest terminal; while paused (via `F5` or `Ctrl-P`), keystrokes control simulator inspection and navigation.
 
 - **Q: Why does headless CLI mode finish without displaying the TUI?**
   *A:* The `--cli` flag enforces non-interactive headless operation. To see the graphical TUI workbench, run `SimRV` without `--cli`.

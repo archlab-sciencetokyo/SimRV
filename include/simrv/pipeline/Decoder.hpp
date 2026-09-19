@@ -163,4 +163,51 @@ extern const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCo
 /// Return a stable mnemonic for an operation, including invalid enum values.
 [[nodiscard]] auto operation_name(isa::OperationId operation) noexcept -> std::string_view;
 
+namespace operation {
+
+/**
+ * @brief Unpack raw instruction fields, immediates, and dependency traits into a
+ * DecodedInstruction context.
+ */
+inline void unpack_instruction(DecodedInstruction& ctx, Instruction ir,
+                               isa::OperationId op_id) noexcept {
+    const Decoder dec(ir);
+    const auto op = dec.opcode();
+
+    ctx.ir = ir;
+    ctx.op_id = op_id;
+    ctx.opcode = static_cast<isa::Opcode>(op);
+    ctx.rd = dec.rd();
+    ctx.rs1 = dec.rs1();
+    ctx.rs2 = dec.rs2();
+    ctx.funct3 = static_cast<isa::Funct3>(dec.funct3());
+    ctx.funct5 = static_cast<isa::Funct5Amo>((ir >> 27) & 0x1F);
+    ctx.funct7 = dec.funct7();
+    ctx.funct12 = (ir >> 20);
+
+    switch (op) {
+        case isa::Opcode::Lui:
+        case isa::Opcode::Auipc:
+            ctx.imm = dec.imm_u();
+            break;
+        case isa::Opcode::Jal:
+            ctx.imm = dec.imm_j();
+            break;
+        case isa::Opcode::Branch:
+            ctx.imm = dec.imm_b();
+            break;
+        case isa::Opcode::Store:
+        case isa::Opcode::StoreFp:
+            ctx.imm = dec.imm_s();
+            break;
+        default:
+            ctx.imm = dec.imm_i();
+            break;
+    }
+
+    ctx.traits = make_dependency_traits(op_id, ctx.opcode, ctx.rd, std::to_underlying(ctx.funct5));
+}
+
+}  // namespace operation
+
 }  // namespace simrv::pipeline

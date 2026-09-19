@@ -8,42 +8,7 @@
 
 namespace simrv::core {
 
-namespace {
-
 using pipeline::CycleInstructionSlot;
-
-[[nodiscard]] inline auto has_integer_raw_dependency(const CycleInstructionSlot& consumer,
-                                                     const CycleInstructionSlot& producer) noexcept
-    -> bool {
-    if (!consumer.valid || !producer.valid || !producer.writes_int ||
-        producer.wb_dest == RegId::Zero)
-        return false;
-    const auto destination = producer.wb_dest;
-    return (consumer.context.traits.reads_rs1_int && consumer.context.rs1 == destination) ||
-           (consumer.context.traits.reads_rs2_int && consumer.context.rs2 == destination);
-}
-
-[[nodiscard]] inline auto has_floating_raw_dependency(const CycleInstructionSlot& consumer,
-                                                      const CycleInstructionSlot& producer) noexcept
-    -> bool {
-    if (!consumer.valid || !producer.valid || !producer.writes_fp) return false;
-    const auto destination = producer.wb_dest;
-    const RegId rs3 = static_cast<RegId>((consumer.context.ir >> 27U) & 0x1FU);
-    return (consumer.context.traits.reads_rs1_fp && consumer.context.rs1 == destination) ||
-           (consumer.context.traits.reads_rs2_fp && consumer.context.rs2 == destination) ||
-           (consumer.context.traits.reads_rs3_fp && rs3 == destination);
-}
-
-[[nodiscard]] auto forwarded_integer(const CycleInstructionSlot& producer, RegId source)
-    -> std::optional<Register> {
-    if (!producer.valid || !producer.wb_valid || source == RegId::Zero ||
-        producer.wb_dest != source) {
-        return std::nullopt;
-    }
-    return producer.wb_val;
-}
-
-}  // namespace
 
 void CPU::run_ca_pipeline_cycle(Machine& machine) {
     auto& pipe = ca_pipeline;
@@ -119,39 +84,17 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         pipe.fetch_pc = state_.pc;
         pipe.initialized = true;
     };
-    auto can_resolve_dependency = [&](const CycleInstructionSlot& consumer,
-                                      const CycleInstructionSlot& producer) {
-        // FP execute helpers currently consume the architectural FP register file directly.
-        // Keep FP dependencies interlocked until retirement rather than forwarding a value into
-        // an interface that cannot consume it. Integer forwarding remains unchanged.
-        if (has_floating_raw_dependency(consumer, producer)) return false;
-        if (!has_integer_raw_dependency(consumer, producer)) return true;
-        if (!pipeline_sim.config.enable_forwarding) return false;
-        const auto destination = producer.wb_dest;
-        const bool source1_ready = !consumer.context.traits.reads_rs1_int ||
-                                   consumer.context.rs1 != destination ||
-                                   forwarded_integer(producer, consumer.context.rs1).has_value();
-        const bool source2_ready = !consumer.context.traits.reads_rs2_int ||
-                                   consumer.context.rs2 != destination ||
-                                   forwarded_integer(producer, consumer.context.rs2).has_value();
-        return source1_ready && source2_ready;
-    };
     auto apply_forwarding = [&](pipeline::PipelineContext& consumer) {
         if (!pipeline_sim.config.enable_forwarding) return;
-        // M is younger than W and therefore wins if both target the same register.
-        if (const auto value = forwarded_integer(*pipe.writeback, consumer.rs1)) {
-            consumer.rrs1 = *value;
+        if (consumer.traits.reads_rs1_int && consumer.rs1 != RegId::Zero &&
+            pipe.scoreboard.can_forward(pipeline::operation::RegBank::Integer, consumer.rs1)) {
+            consumer.rrs1 = pipe.scoreboard.get_forwarded_value(
+                pipeline::operation::RegBank::Integer, consumer.rs1);
         }
-        if (const auto value = forwarded_integer(*pipe.writeback, consumer.rs2)) {
-            consumer.rrs2 = *value;
-        }
-        if (!three_stage) {
-            if (const auto value = forwarded_integer(*pipe.memory, consumer.rs1)) {
-                consumer.rrs1 = *value;
-            }
-            if (const auto value = forwarded_integer(*pipe.memory, consumer.rs2)) {
-                consumer.rrs2 = *value;
-            }
+        if (consumer.traits.reads_rs2_int && consumer.rs2 != RegId::Zero &&
+            pipe.scoreboard.can_forward(pipeline::operation::RegBank::Integer, consumer.rs2)) {
+            consumer.rrs2 = pipe.scoreboard.get_forwarded_value(
+                pipeline::operation::RegBank::Integer, consumer.rs2);
         }
     };
 
@@ -329,12 +272,12 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         }
     }
 
-    // Decode waits for unresolved producers. This is conservative no-forwarding behavior;
-    // forwarding is added by replacing these stalls with typed producer values.
+    // Decode waits for unresolved producers using the register scoreboard.
+    pipe.sync_scoreboard(/*include_decode=*/false);
     auto* decode = pipe.decode;
     if (decode->valid && !pipe.execute->valid) {
-        const bool hazard = !can_resolve_dependency(*decode, *pipe.memory) ||
-                            !can_resolve_dependency(*decode, *pipe.writeback);
+        const bool hazard =
+            pipe.scoreboard.has_raw_hazard(decode->context, pipeline_sim.config.enable_forwarding);
         pipe.data_hazard_stall = hazard;
         const bool serial_wait =
             decode->serializing && (pipe.memory->valid || pipe.writeback->valid);
@@ -541,6 +484,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         }
         active_context_ = &pipeline_context;
     }
+    pipe.sync_scoreboard();
 }
 
 }  // namespace simrv::core

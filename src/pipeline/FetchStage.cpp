@@ -706,40 +706,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
         ctx.op_id = op_id;
         ctx.cinsn = w_compressed ? 1U : 0U;
 
-        simrv::pipeline::Decoder dec(w_ir_tmp);
-        const auto op = dec.opcode();
-
-        ctx.opcode = static_cast<Opcode>(op);
-        ctx.rd = dec.rd();
-        ctx.rs1 = dec.rs1();
-        ctx.rs2 = dec.rs2();
-        ctx.funct3 = static_cast<Funct3>(dec.funct3());
-        ctx.funct5 = static_cast<Funct5Amo>((w_ir_tmp >> 27) & 0x1F);
-        ctx.funct7 = dec.funct7();
-        ctx.funct12 = (w_ir_tmp >> 20);
-
-        switch (op) {
-            case Opcode::Lui:
-            case Opcode::Auipc:
-                ctx.imm = dec.imm_u();
-                break;
-            case Opcode::Jal:
-                ctx.imm = dec.imm_j();
-                break;
-            case Opcode::Branch:
-                ctx.imm = dec.imm_b();
-                break;
-            case Opcode::Store:
-            case Opcode::StoreFp:
-                ctx.imm = dec.imm_s();
-                break;
-            default:
-                ctx.imm = dec.imm_i();
-                break;
-        }
-
-        ctx.traits = pipeline::operation::make_dependency_traits(op_id, ctx.opcode, ctx.rd,
-                                                                 std::to_underlying(ctx.funct5));
+        pipeline::operation::unpack_instruction(ctx, w_ir_tmp, op_id);
     } else {
         ctx.pending_exception = ExceptionCode::IllegalInstruction;
         ctx.pending_tval = ctx.ir_org;

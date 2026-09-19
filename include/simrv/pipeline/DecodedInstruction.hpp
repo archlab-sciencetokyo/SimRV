@@ -6,9 +6,6 @@
 
 #include <optional>
 
-#include "simrv/Define.hpp"
-#include "simrv/xlen/Types.hpp"
-
 namespace simrv::pipeline {
 
 /**
@@ -23,11 +20,20 @@ struct DependencyTraits {
     bool reads_rs3_fp : 1 = false;
     bool writes_int : 1 = false;
     bool writes_fp : 1 = false;
+    bool writes_vec : 1 = false;
     bool is_mem_load : 1 = false;
+    bool is_mem_store : 1 = false;
     bool is_control : 1 = false;
     bool is_serializing : 1 = false;
     bool is_cfu : 1 = false;
 };
+
+}  // namespace simrv::pipeline
+
+#include "simrv/Define.hpp"
+#include "simrv/xlen/Types.hpp"
+
+namespace simrv::pipeline {
 
 /**
  * @struct DecodedInstruction

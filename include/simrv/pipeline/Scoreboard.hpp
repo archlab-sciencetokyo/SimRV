@@ -32,6 +32,7 @@ class Scoreboard {
         PipelineStage stage{PipelineStage::Execute};
         LatencyCycles latency{0};
         bool can_forward{false};
+        Register forwarded_value{0};
     };
 
     static constexpr size_t kNumIntRegisters = 32;
@@ -45,13 +46,15 @@ class Scoreboard {
     }
 
     constexpr void reserve(operation::RegBank bank, RegId reg, PipelineStage stage,
-                           LatencyCycles latency = 0, bool can_forward = false) noexcept {
+                           LatencyCycles latency = 0, bool can_forward = false,
+                           Register forwarded_value = 0) noexcept {
         auto* entry = get_entry(bank, reg);
         if (entry != nullptr) {
             entry->busy = true;
             entry->stage = stage;
             entry->latency = latency;
             entry->can_forward = can_forward;
+            entry->forwarded_value = forwarded_value;
         }
     }
 
@@ -72,6 +75,12 @@ class Scoreboard {
         -> bool {
         const auto* entry = get_entry(bank, reg);
         return entry != nullptr && entry->busy && entry->can_forward;
+    }
+
+    [[nodiscard]] constexpr auto get_forwarded_value(operation::RegBank bank,
+                                                     RegId reg) const noexcept -> Register {
+        const auto* entry = get_entry(bank, reg);
+        return (entry != nullptr && entry->busy && entry->can_forward) ? entry->forwarded_value : 0;
     }
 
     [[nodiscard]] constexpr auto get_stage(operation::RegBank bank, RegId reg) const noexcept
@@ -96,6 +105,74 @@ class Scoreboard {
             return *entry;
         }
         return std::nullopt;
+    }
+
+    [[nodiscard]] constexpr auto has_raw_hazard(const DecodedInstruction& consumer,
+                                                bool forwarding_enabled) const noexcept -> bool {
+        const auto& traits = consumer.traits;
+
+        // Integer RAW dependencies
+        if (traits.reads_rs1_int && consumer.rs1 != RegId::Zero) {
+            if (is_busy(operation::RegBank::Integer, consumer.rs1)) {
+                if (!forwarding_enabled ||
+                    !can_forward(operation::RegBank::Integer, consumer.rs1)) {
+                    return true;
+                }
+            }
+        }
+        if (traits.reads_rs2_int && consumer.rs2 != RegId::Zero) {
+            if (is_busy(operation::RegBank::Integer, consumer.rs2)) {
+                if (!forwarding_enabled ||
+                    !can_forward(operation::RegBank::Integer, consumer.rs2)) {
+                    return true;
+                }
+            }
+        }
+
+        // Floating-point RAW dependencies (conservative: stall until retired and released)
+        if (traits.reads_rs1_fp) {
+            if (is_busy(operation::RegBank::Float, consumer.rs1)) {
+                return true;
+            }
+        }
+        if (traits.reads_rs2_fp) {
+            if (is_busy(operation::RegBank::Float, consumer.rs2)) {
+                return true;
+            }
+        }
+        if (traits.reads_rs3_fp) {
+            const RegId rs3 = static_cast<RegId>((consumer.ir >> 27U) & 0x1FU);
+            if (is_busy(operation::RegBank::Float, rs3)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    template <typename PipelineStateLike>
+    constexpr void sync_from_pipeline(const PipelineStateLike& pipe,
+                                      bool include_decode = true) noexcept {
+        reset();
+        auto reserve_slot = [this](const auto* slot, PipelineStage stage) {
+            if (!slot || !slot->valid) return;
+            if (slot->writes_int && slot->wb_dest != RegId::Zero) {
+                reserve(operation::RegBank::Integer, slot->wb_dest, stage, slot->remaining_latency,
+                        slot->wb_valid, slot->wb_val);
+            } else if (slot->writes_fp) {
+                reserve(operation::RegBank::Float, slot->wb_dest, stage, slot->remaining_latency,
+                        slot->wb_valid);
+            }
+        };
+        // Process oldest stage to youngest stage:
+        // Writeback -> Memory -> Execute -> (Decode if requested)
+        // Younger stage overwrites reservation for the same register
+        reserve_slot(pipe.writeback, PipelineStage::Writeback);
+        reserve_slot(pipe.memory, PipelineStage::Memory);
+        reserve_slot(pipe.execute, PipelineStage::Execute);
+        if (include_decode) {
+            reserve_slot(pipe.decode, PipelineStage::Decode);
+        }
     }
 
     constexpr void flush_from_stage(PipelineStage stage) noexcept {

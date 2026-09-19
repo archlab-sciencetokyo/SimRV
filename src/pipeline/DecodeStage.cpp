@@ -36,40 +36,7 @@ void CPU::decode_fields(Machine& /*machine*/) {
         return;
     }
 
-    simrv::pipeline::Decoder dec(ctx.ir);
-    const auto op = dec.opcode();
-
-    ctx.opcode = static_cast<Opcode>(op);
-    ctx.rd = dec.rd();
-    ctx.rs1 = dec.rs1();
-    ctx.rs2 = dec.rs2();
-    ctx.funct3 = static_cast<Funct3>(dec.funct3());
-    ctx.funct5 = static_cast<Funct5Amo>((ctx.ir >> 27) & 0x1F);
-    ctx.funct7 = dec.funct7();
-    ctx.funct12 = (ctx.ir >> 20);
-
-    switch (op) {
-        case Opcode::Lui:
-        case Opcode::Auipc:
-            ctx.imm = dec.imm_u();
-            break;
-        case Opcode::Jal:
-            ctx.imm = dec.imm_j();
-            break;
-        case Opcode::Branch:
-            ctx.imm = dec.imm_b();
-            break;
-        case Opcode::Store:
-        case Opcode::StoreFp:
-            ctx.imm = dec.imm_s();
-            break;
-        default:
-            ctx.imm = dec.imm_i();
-            break;
-    }
-
-    ctx.traits = pipeline::operation::make_dependency_traits(ctx.op_id, ctx.opcode, ctx.rd,
-                                                             std::to_underlying(ctx.funct5));
+    pipeline::operation::unpack_instruction(ctx, ctx.ir, ctx.op_id);
 }
 
 void CPU::fetch_operands(Machine& /*machine*/) {

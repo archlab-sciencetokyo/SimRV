@@ -156,6 +156,7 @@ struct HartPipelineState {
     bool control_flush = false;
     uint8_t control_recovery_bubbles = 0;
     LatencyCycles frontend_refill_stall = 0;
+    Scoreboard scoreboard{};
 
     [[nodiscard]] constexpr auto slot(PipelineStage s) noexcept -> CycleInstructionSlot& {
         return storage_[std::to_underlying(s)];
@@ -163,6 +164,10 @@ struct HartPipelineState {
     [[nodiscard]] constexpr auto slot(PipelineStage s) const noexcept
         -> const CycleInstructionSlot& {
         return storage_[std::to_underlying(s)];
+    }
+
+    constexpr void sync_scoreboard(bool include_decode = true) noexcept {
+        scoreboard.sync_from_pipeline(*this, include_decode);
     }
 
     constexpr HartPipelineState() noexcept = default;
@@ -183,6 +188,7 @@ struct HartPipelineState {
         control_flush = other.control_flush;
         control_recovery_bubbles = other.control_recovery_bubbles;
         frontend_refill_stall = other.frontend_refill_stall;
+        scoreboard = other.scoreboard;
     }
 
     constexpr auto operator=(const HartPipelineState& other) noexcept -> HartPipelineState& {
@@ -202,6 +208,7 @@ struct HartPipelineState {
             control_flush = other.control_flush;
             control_recovery_bubbles = other.control_recovery_bubbles;
             frontend_refill_stall = other.frontend_refill_stall;
+            scoreboard = other.scoreboard;
         }
         return *this;
     }
@@ -209,6 +216,7 @@ struct HartPipelineState {
     constexpr void flush_younger() noexcept {
         fetch->invalidate();
         decode->invalidate();
+        scoreboard.flush_from_stage(PipelineStage::Decode);
     }
     constexpr void reset() noexcept {
         for (auto& slot : storage_) slot.clear();
@@ -226,6 +234,7 @@ struct HartPipelineState {
         control_flush = false;
         control_recovery_bubbles = 0;
         frontend_refill_stall = 0;
+        scoreboard.reset();
     }
 };
 

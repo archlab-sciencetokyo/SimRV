@@ -230,6 +230,60 @@ void test_cycle_kernel_bit_for_bit_hazard_stall_counters() {
     TEST_CHECK(stalls_3s_nofwd == 0);
 }
 
+void test_cycle_kernel_fp_hazard_stall_counters() {
+    // Verifies FP conservative hazard stalls in cycle simulation:
+    // 1: addi     x1, x0, 2
+    // 2: fcvt.s.w f1, x1        (reads x1 int, produces f1)
+    // 3: fadd.s   f2, f1, f1    (RAW on f1 - stalls until fcvt.s.w retires)
+    // 4: fadd.s   f3, f1, f2    (RAW on f2 and f1 - stalls until fadd.s retires)
+    // 5: jal      x0, 0
+    constexpr std::array<Instruction, 5> program = {
+        0x00200093,  // addi    x1, x0, 2
+        0xd20080d3,  // fcvt.s.w f1, x1
+        0x00108153,  // fadd.s  f2, f1, f1
+        0x002081d3,  // fadd.s  f3, f1, f2
+        0x0000006f,  // jal     x0, 0
+    };
+
+    const auto run_model = [&](simrv::pipeline::PipelineType type, bool forwarding) {
+        simrv::core::Machine machine;
+        const Address pc = machine.memory_geometry().dram_base;
+        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        auto& cpu = machine.primary_hart();
+        cpu.machine_ = &machine;
+        cpu.reset();
+        cpu.state().mstatus |= (3ULL << 13);  // FS = Dirty
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        cpu.pipeline_sim.config.pipeline_type = type;
+        cpu.pipeline_sim.config.enable_forwarding = forwarding;
+
+        std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
+        std::memcpy(line.data(), program.data(), sizeof(program));
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
+        cpu.state().pc = pc;
+
+        uint32_t cycles = 0;
+        while (cpu.e_icount < 4 && cycles < 64) {
+            cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+            ++cycles;
+        }
+        TEST_CHECK(cpu.e_icount == 4);
+        return std::make_pair(cycles, cpu.pipeline_sim.data_hazard_stalls());
+    };
+
+    // 5-stage: FP RAW dependencies stall until Writeback retirement
+    const auto [cycles_5s, stalls_5s] = run_model(simrv::pipeline::PipelineType::FiveStage, true);
+    TEST_CHECK(cycles_5s > 0);
+    TEST_CHECK(stalls_5s > 0);
+
+    // 3-stage:
+    const auto [cycles_3s, stalls_3s] = run_model(simrv::pipeline::PipelineType::ThreeStage, true);
+    TEST_CHECK(cycles_3s > 0);
+}
+
 }  // namespace
 
 int main() {
@@ -241,6 +295,7 @@ int main() {
     test_cross_bank_conversion_hazards();
     test_pipeline_sim_hazard_events();
     test_cycle_kernel_bit_for_bit_hazard_stall_counters();
+    test_cycle_kernel_fp_hazard_stall_counters();
     std::cout << "=== All Pipeline Hazard Tests Passed Successfully ===\n";
     return 0;
 }

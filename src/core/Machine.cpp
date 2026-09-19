@@ -388,23 +388,7 @@ void Machine::publish_tui_execution_snapshot_for_hart(size_t hart_index) noexcep
     snapshot->dcache_misses = source.dcache.miss_count();
     snapshot->execution_state = execution_state();
     if (runtime_profile.is_cycle_mode()) {
-        const auto reserve = [&](const pipeline::CycleInstructionSlot* entry,
-                                 pipeline::PipelineStage stage) {
-            if (!entry || !entry->valid) return;
-            if (entry->writes_int && entry->wb_dest != RegId::Zero) {
-                snapshot->scoreboard.reserve(
-                    pipeline::operation::RegBank::Integer, entry->wb_dest, stage,
-                    static_cast<LatencyCycles>(entry->remaining_latency), entry->wb_valid);
-            } else if (entry->writes_fp) {
-                snapshot->scoreboard.reserve(
-                    pipeline::operation::RegBank::Float, entry->wb_dest, stage,
-                    static_cast<LatencyCycles>(entry->remaining_latency), entry->wb_valid);
-            }
-        };
-        reserve(source.ca_pipeline.writeback, pipeline::PipelineStage::Writeback);
-        reserve(source.ca_pipeline.memory, pipeline::PipelineStage::Memory);
-        reserve(source.ca_pipeline.execute, pipeline::PipelineStage::Execute);
-        reserve(source.ca_pipeline.decode, pipeline::PipelineStage::Decode);
+        snapshot->scoreboard.sync_from_pipeline(source.ca_pipeline, /*include_decode=*/true);
     }
     tui_snapshots_[hart_index].store(std::move(snapshot), std::memory_order_release);
 }

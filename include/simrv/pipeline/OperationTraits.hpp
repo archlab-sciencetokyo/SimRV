@@ -198,6 +198,7 @@ namespace simrv::pipeline::operation {
     if (op_id != isa::UNKNOWN) {
         dt.writes_int = writes_integer(op_id) && (rd != RegId::Zero);
         dt.writes_fp = writes_float(op_id);
+        dt.writes_vec = writes_vector(op_id);
         dt.reads_rs1_int = is_rs1_int(op_id);
         dt.reads_rs2_int = is_rs2_int(op_id);
         dt.reads_rs1_fp = is_rs1_fp(op_id);
@@ -206,6 +207,7 @@ namespace simrv::pipeline::operation {
         const bool is_amo_load = (is_atomic(op_id) && op_id != isa::OperationId::SC_W &&
                                   op_id != isa::OperationId::SC_D);
         dt.is_mem_load = (is_load(op_id) || is_amo_load) && dt.writes_int;
+        dt.is_mem_store = is_store(op_id) || (is_atomic(op_id) && !is_load(op_id));
         dt.is_control = is_control(op_id);
         const bool vector =
             op_id >= isa::OperationId::VSETVLI && op_id <= isa::OperationId::VWSLL_VI;
@@ -244,6 +246,7 @@ namespace simrv::pipeline::operation {
         dt.is_mem_load = (opcode == isa::Opcode::Load) ||
                          (opcode == isa::Opcode::Amo &&
                           static_cast<isa::Funct5Amo>(funct5) != isa::Funct5Amo::Sc);
+        dt.is_mem_store = (opcode == isa::Opcode::Store || opcode == isa::Opcode::StoreFp);
         dt.is_control = (opcode == isa::Opcode::Branch || opcode == isa::Opcode::Jal ||
                          opcode == isa::Opcode::Jalr);
         dt.is_serializing = (opcode == isa::Opcode::System || opcode == isa::Opcode::MiscMem);
