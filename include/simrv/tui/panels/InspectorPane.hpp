@@ -147,6 +147,7 @@ class InspectorPane : public TuiWidget {
     void configure_current_viewport(int width);
     [[nodiscard]] auto trace_content_width() const -> int;
     [[nodiscard]] auto trace_total_columns() const -> int;
+    [[nodiscard]] auto content_total_columns(int width) const -> int;
     [[nodiscard]] auto get_running_label_start_row() const -> int;
     [[nodiscard]] auto render_active_spinner(int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_registers_single_column(const simrv::core::ArchState& st,

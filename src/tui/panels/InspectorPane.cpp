@@ -128,8 +128,10 @@ void InspectorPane::set_page(TuiRegPage page) {
         if (page == TuiRegPage::CACHE) page = TuiRegPage::STACK;
         if (page == TuiRegPage::BPRED || page == TuiRegPage::HAZARD) page = TuiRegPage::PIPELINE;
     }
-    page_ = page;
-    if (page_ != TuiRegPage::TRACE) current_scroll_view().reset_x();
+    if (page_ != page) {
+        page_ = page;
+        current_scroll_view().reset_x();
+    }
 }
 
 void InspectorPane::set_selected_hart(size_t hart) {
@@ -189,14 +191,25 @@ auto InspectorPane::trace_total_columns() const -> int {
     return total;
 }
 
+auto InspectorPane::content_total_columns(int width) const -> int {
+    switch (page_) {
+        case TuiRegPage::TRACE:
+            return trace_total_columns();
+        case TuiRegPage::VEC:
+            return std::max(width, 96);
+        default:
+            return width;
+    }
+}
+
 void InspectorPane::configure_current_viewport(int width) {
     width = std::max(1, width);
     const int total_rows =
         (page_ == TuiRegPage::EXPLAIN) ? static_cast<int>(get_explain_rows(width).size())
         : (page_ == TuiRegPage::TRACE) ? static_cast<int>(trace_buffer_ ? trace_buffer_->size() : 0)
                                        : get_total_rows(width);
-    const int total_cols = page_ == TuiRegPage::TRACE ? trace_total_columns() : width;
-    const int viewport_width = page_ == TuiRegPage::TRACE ? std::max(1, width - 2) : width;
+    const int total_cols = content_total_columns(width);
+    const int viewport_width = (total_cols > width) ? std::max(1, width - 2) : width;
     current_scroll_view().set_geometry(total_rows, get_visible_content_rows(), total_cols,
                                        viewport_width);
 }
@@ -717,7 +730,7 @@ auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows,
         if (page_ != TuiRegPage::PIPELINE && page_ != TuiRegPage::EXPLAIN) {
             res = style_inline_separators(std::move(res));
         }
-        if (page_ == TuiRegPage::TRACE && (sv.offset_x() > 0 || sv.can_scroll_right())) {
+        if (sv.offset_x() > 0 || sv.can_scroll_right()) {
             return sv.format_horizontal_row(res, width);
         }
         return format_to_width(res, width);
@@ -836,7 +849,8 @@ void InspectorPane::scroll_horizontal(int columns) {
 }
 
 auto InspectorPane::supports_horizontal_scroll() const -> bool {
-    return page_ == TuiRegPage::TRACE && trace_total_columns() > trace_content_width();
+    const auto& bounds = current_scroll_view().bounds();
+    return bounds.total_cols > bounds.viewport_width;
 }
 
 void InspectorPane::scroll_log(int lines) {
