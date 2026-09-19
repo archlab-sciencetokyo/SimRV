@@ -23,6 +23,6 @@ external dependency is provisioned. These labels are not RISC-V certification cl
 | Other hosts/toolchains | Unsupported | Community use only; no 2.0 release qualification |
 
 The detailed architectural contract and known deviations are maintained in
-[`RISCV_COMPLIANCE.md`](RISCV_COMPLIANCE.md). Machine-readable requirements are maintained in
+[`architecture/compliance.md`](architecture/compliance.md). Machine-readable requirements are maintained in
 `release/release-manifest.json`; when prose and the manifest disagree, the manifest controls the
 release gate and the prose must be corrected.
