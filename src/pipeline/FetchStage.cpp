@@ -212,26 +212,27 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
             machine, VirtAddr{w_vadr}, PteAccess::Code, state_.priv, state_.regs.xlen,
             simrv::memory::TlPort::Instruction, ca_state.instruction_walk);
         if (!translate_res.has_value()) return;
-        auto chain_res =
-            (*translate_res)
-                .and_then([&](PhysAddr phys) -> std::expected<void, TrapCause> {
-                    w_padr = phys.raw();
-                    const Word asid = simrv::xlen::satp_asid(state_.satp, state_.regs.xlen);
-                    tlb.insert_inst_r(w_vadr, w_padr, asid, state_.priv);
-                    const Address vpn = w_vadr >> 12;
-                    const Address page_base = w_padr & ~simrv::memory::kPageMask;
-                    Byte* const host_base = machine.ram_view().contains(page_base, 4096)
-                                                ? machine.ram_view().unchecked_ptr(page_base)
-                                                : nullptr;
-                    soft_tlb_inst[core::CPU::soft_tlb_index(vpn)].set(
-                        vpn, asid, state_.priv, soft_tlb_epoch, page_base, host_base);
-                    return {};
-                })
-                .or_else([&](TrapCause error) -> std::expected<void, TrapCause> {
-                    ctx.pending_exception = static_cast<ExceptionCode>(error);
-                    ctx.pending_tval = w_vadr;
-                    return {};
-                });
+        static_cast<void>((*translate_res)
+                              .and_then([&](PhysAddr phys) -> std::expected<void, TrapCause> {
+                                  w_padr = phys.raw();
+                                  const Word asid =
+                                      simrv::xlen::satp_asid(state_.satp, state_.regs.xlen);
+                                  tlb.insert_inst_r(w_vadr, w_padr, asid, state_.priv);
+                                  const Address vpn = w_vadr >> 12;
+                                  const Address page_base = w_padr & ~simrv::memory::kPageMask;
+                                  Byte* const host_base =
+                                      machine.ram_view().contains(page_base, 4096)
+                                          ? machine.ram_view().unchecked_ptr(page_base)
+                                          : nullptr;
+                                  soft_tlb_inst[core::CPU::soft_tlb_index(vpn)].set(
+                                      vpn, asid, state_.priv, soft_tlb_epoch, page_base, host_base);
+                                  return {};
+                              })
+                              .or_else([&](TrapCause error) -> std::expected<void, TrapCause> {
+                                  ctx.pending_exception = static_cast<ExceptionCode>(error);
+                                  ctx.pending_tval = w_vadr;
+                                  return {};
+                              }));
     }
     *r_padr = w_padr;
 }

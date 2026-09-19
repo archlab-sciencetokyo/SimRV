@@ -64,7 +64,6 @@ constexpr Word kSpecVersion_2_0 = 0x02000000U;
 constexpr Word kImplId_SimRV = 0x53494DU;
 constexpr Word kImplVersion = 0x1U;
 constexpr unsigned kWord32Shift = 32u;
-constexpr auto kLogHexWidth = static_cast<int>(kXLenHexDigits);
 
 }  // namespace
 

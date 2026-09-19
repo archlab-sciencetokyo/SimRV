@@ -8,20 +8,13 @@ namespace simrv::pipeline {
 
 namespace {
 
-constexpr uint8_t kSaturatingMax = 3;  // Strongly Taken
-constexpr uint8_t kWeaklyNotTaken = 1;
 constexpr uint8_t kWeaklyTaken = 2;
 
 constexpr std::array<uint8_t, 4> kSaturateUp = {1, 2, 3, 3};
-constexpr std::array<uint8_t, 4> kSaturateDown = {0, 0, 1, 2};
 constexpr std::array<std::array<uint8_t, 4>, 2> kSaturateTable = {{{0, 0, 1, 2}, {1, 2, 3, 3}}};
 
 [[nodiscard]] constexpr auto saturate_up(uint8_t val) noexcept -> uint8_t {
     return kSaturateUp[val & 0x3];
-}
-
-[[nodiscard]] constexpr auto saturate_down(uint8_t val) noexcept -> uint8_t {
-    return kSaturateDown[val & 0x3];
 }
 
 [[nodiscard]] constexpr auto saturate(uint8_t val, bool taken) noexcept -> uint8_t {
