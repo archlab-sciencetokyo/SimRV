@@ -12,12 +12,20 @@ constexpr uint8_t kSaturatingMax = 3;  // Strongly Taken
 constexpr uint8_t kWeaklyNotTaken = 1;
 constexpr uint8_t kWeaklyTaken = 2;
 
+constexpr std::array<uint8_t, 4> kSaturateUp = {1, 2, 3, 3};
+constexpr std::array<uint8_t, 4> kSaturateDown = {0, 0, 1, 2};
+constexpr std::array<std::array<uint8_t, 4>, 2> kSaturateTable = {{{0, 0, 1, 2}, {1, 2, 3, 3}}};
+
 [[nodiscard]] constexpr auto saturate_up(uint8_t val) noexcept -> uint8_t {
-    return (val < kSaturatingMax) ? static_cast<uint8_t>(val + 1) : kSaturatingMax;
+    return kSaturateUp[val & 0x3];
 }
 
 [[nodiscard]] constexpr auto saturate_down(uint8_t val) noexcept -> uint8_t {
-    return (val > 0) ? static_cast<uint8_t>(val - 1) : 0;
+    return kSaturateDown[val & 0x3];
+}
+
+[[nodiscard]] constexpr auto saturate(uint8_t val, bool taken) noexcept -> uint8_t {
+    return kSaturateTable[taken ? 1 : 0][val & 0x3];
 }
 
 [[nodiscard]] constexpr auto is_taken_prediction(uint8_t counter) noexcept -> bool {
@@ -312,14 +320,13 @@ auto BranchPredictor::predict(Address pc, const DecodedInstruction& inst) -> Bra
 }
 
 void BranchPredictor::update_direction(const BranchFeedback& feedback) {
-    const Address pc = feedback.pc;
-    const bool actual_taken = feedback.actual_taken;
-    const uint32_t bht_idx = feedback.prediction.bht_index;
-
     if (config_.type == BranchPredictorType::Disabled ||
         config_.type == BranchPredictorType::Static) {
         return;
     }
+
+    const Address pc = feedback.pc;
+    const bool actual_taken = feedback.actual_taken;
 
     if (config_.type == BranchPredictorType::Tournament) {
         const uint32_t gshare_idx =
@@ -331,24 +338,20 @@ void BranchPredictor::update_direction(const BranchFeedback& feedback) {
 
         // Update chooser table if one predictor was right and the other was wrong
         if (gshare_pred != bimodal_pred) {
-            if (gshare_pred == actual_taken) {
-                chooser_table_[gshare_idx] = saturate_up(chooser_table_[gshare_idx]);
-            } else {
-                chooser_table_[gshare_idx] = saturate_down(chooser_table_[gshare_idx]);
-            }
+            chooser_table_[gshare_idx] =
+                saturate(chooser_table_[gshare_idx], gshare_pred == actual_taken);
         }
 
         // Train both underlying predictors
-        bht_[gshare_idx] =
-            actual_taken ? saturate_up(bht_[gshare_idx]) : saturate_down(bht_[gshare_idx]);
-        bimodal_bht_[bimodal_idx] = actual_taken ? saturate_up(bimodal_bht_[bimodal_idx])
-                                                 : saturate_down(bimodal_bht_[bimodal_idx]);
+        bht_[gshare_idx] = saturate(bht_[gshare_idx], actual_taken);
+        bimodal_bht_[bimodal_idx] = saturate(bimodal_bht_[bimodal_idx], actual_taken);
         return;
     }
 
     // Standard Bimodal / GShare
+    const uint32_t bht_idx = feedback.prediction.bht_index;
     if (bht_idx < bht_.size()) {
-        bht_[bht_idx] = actual_taken ? saturate_up(bht_[bht_idx]) : saturate_down(bht_[bht_idx]);
+        bht_[bht_idx] = saturate(bht_[bht_idx], actual_taken);
     }
 }
 
@@ -367,11 +370,8 @@ void BranchPredictor::update(const BranchFeedback& feedback) {
         ++stats_.direction_predictions;
 
         const bool dir_match = (feedback.actual_taken == feedback.prediction.predicted_taken);
-        if (dir_match) {
-            ++stats_.direction_hits;
-        } else {
-            ++stats_.direction_misses;
-        }
+        stats_.direction_hits += dir_match ? 1 : 0;
+        stats_.direction_misses += dir_match ? 0 : 1;
 
         update_direction(feedback);
 
@@ -403,18 +403,12 @@ void BranchPredictor::update(const BranchFeedback& feedback) {
         ++stats_.target_predictions;
 
         const bool target_match = (feedback.actual_target == feedback.prediction.predicted_target);
-        if (target_match) {
-            ++stats_.target_hits;
-        } else {
-            ++stats_.target_misses;
-        }
+        stats_.target_hits += target_match ? 1 : 0;
+        stats_.target_misses += target_match ? 0 : 1;
 
         if (feedback.prediction.is_return && feedback.prediction.ras_hit) {
-            if (target_match) {
-                ++stats_.ras_hits;
-            } else {
-                ++stats_.ras_misses;
-            }
+            stats_.ras_hits += target_match ? 1 : 0;
+            stats_.ras_misses += target_match ? 0 : 1;
         }
 
         // Update BTB for indirect jump targets
