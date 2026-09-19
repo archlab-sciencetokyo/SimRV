@@ -6,7 +6,7 @@ do not automatically permit bundling their binaries or workloads with SimRV.
 
 ## Prepare
 
-Requirements are Linux x86-64, CMake, Ninja, GCC 15+ or Clang 20+, Python 3.10+, Git, Go, a RISC-V
+Requirements are Linux x86-64, CMake, Ninja, GCC 16+ or Clang 22+, Python 3.10+, Git, Go, a RISC-V
 cross-compiler, and enough space to build Linux, OpenSBI, Spike, and vector tests.
 
 ```bash

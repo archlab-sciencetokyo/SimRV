@@ -320,7 +320,7 @@ auto run_client(std::string_view endpoint, bool cli_mode) -> int {
         }
     } restore{terminal, saved};
     write_terminal("\033[?1049h\033[2J");
-    bool done = false, focus_guest = true, editing = false;
+    bool done = false, editing = false;
     std::string command, escape;
     uint32_t selected_hart = 0;
     int last_width = 0, last_height = 0;
@@ -351,6 +351,7 @@ auto run_client(std::string_view endpoint, bool cli_mode) -> int {
         auto view = client.view();
         const bool paused = view.harts.empty() ||
                             view.harts.front().execution_state != core::ExecutionState::Running;
+        const bool focus_guest = !paused;
         bool input_changed = false;
         pollfd fds[] = {{STDIN_FILENO, POLLIN, 0}, {client.notification_fd(), POLLIN, 0}};
         (void)::poll(fds, 2, 10);
@@ -375,10 +376,6 @@ auto run_client(std::string_view endpoint, bool cli_mode) -> int {
                 }
                 if (ch == 18) {
                     submit(tui::BackendCommand::Reboot);
-                    continue;
-                }
-                if (ch == 1) {
-                    focus_guest = !focus_guest;
                     continue;
                 }
                 if (!escape.empty() || ch == '\033') {
@@ -487,9 +484,8 @@ auto run_client(std::string_view endpoint, bool cli_mode) -> int {
                 lines.push_back(tui::framework::fit_to_width(left, left_width - 1) + "|" +
                                 tui::framework::fit_to_width(right, width - left_width));
             }
-            lines.push_back(
-                editing ? ":" + command
-                        : "Ctrl-P Pause/Resume | s Step | r Registers | : Command | Ctrl-A Focus");
+            lines.push_back(editing ? ":" + command
+                                    : "Ctrl-P Pause/Resume | s Step | r Registers | : Command");
             lines.emplace_back("F10 / Ctrl-Q Detach (guest keeps its state) | Ctrl-R Reboot");
         } else
             lines = std::move(console);

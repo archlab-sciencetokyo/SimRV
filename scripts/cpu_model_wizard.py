@@ -458,7 +458,12 @@ def main():
         name, cfg = run_interactive(tpl_key, name)
 
     content = render_cfg(name, cfg)
-    out_path = Path(args.output) if args.output else Path("configs/models") / f"{name}.cfg"
+    if args.output:
+        out_path = Path(args.output)
+    elif Path("configs/models").is_dir():
+        out_path = Path("configs/models") / f"{name}.cfg"
+    else:
+        out_path = Path(f"{name}.cfg")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(content, encoding="utf-8")
     print(f"\n[+] Successfully wrote CPU model configuration to: {out_path.resolve()}")

@@ -2312,8 +2312,7 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
         if (handle_debug_keyboard_input(key)) return;
     }
 
-    if (key == simrv::tui::TuiKey::s || key == simrv::tui::TuiKey::S ||
-        key == simrv::tui::TuiKey::Space) {
+    if (key == simrv::tui::TuiKey::s || key == simrv::tui::TuiKey::S) {
         if (machine_.binary_path().empty() && machine_.primary_hart().state().pc == 0) {
             modal_.open_notice(
                 "NO PROGRAM LOADED",

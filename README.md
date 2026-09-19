@@ -28,8 +28,7 @@ Launch `SimRV` normally (or pass `--tui`) to explore an image with the interacti
 
 ### Prerequisites
 
-- **Clang 20+** or **GCC 15+** (required for the C++23 baseline). For current validation,
-  prefer stable Clang 21+ and GCC 15+; use GCC 16+ once supplied by the host distribution.
+- **Clang 22+** or **GCC 16+** (required for the C++23 baseline).
 - **CMake 3.31+** & **Ninja**
 
 ### Build
@@ -169,7 +168,6 @@ second explicit export action. See the [educational reference](docs/RISCV_EDUCAT
 | `[?]` | Open glossary at the active inspector topic |
 | `[v]` | Toggle execution trace capture |
 | `[x]` | Export configured inspection report while paused |
-| `[Ctrl-A]` | Toggle input focus between guest UART/PTY and TUI navigation |
 | `[Tab]` | Cycle right pane view (Guest Terminal / Log Buffer) |
 | `[F1]` / `[h]` | Display online help shortcuts |
 | `[Esc]` | Close active modal |

@@ -1291,6 +1291,10 @@ def main():
             simrv_bin = simrv_64
         elif is_executable(simrv_32):
             simrv_bin = simrv_32
+        elif which("SimRV"):
+            simrv_bin = which("SimRV")
+        elif is_executable(os.path.join(os.path.dirname(os.path.abspath(__file__)), "SimRV")):
+            simrv_bin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SimRV")
         else:
             simrv_bin = os.path.join(root_dir, "SimRV")
 

@@ -7,8 +7,8 @@
     "os": "Linux",
     "architecture": "x86_64",
     "compilers": {
-      "gcc": "15+",
-      "clang": "20+"
+      "gcc": "16+",
+      "clang": "22+"
     }
   },
   "guest_profiles": [

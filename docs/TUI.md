@@ -29,10 +29,10 @@ updates, and drawing. Simulation threads enqueue guest UART bytes and request a 
 read stdin or render directly. This prevents concurrent consumers from dropping guest keystrokes or
 splitting ANSI control sequences.
 
-When the guest terminal is focused and running, ordinary bytes—including carriage return and
+When the guest is running, ordinary bytes—including carriage return and
 newline—are delivered directly to the platform UART (`ttyS0`). `Ctrl-P` pauses and `Ctrl-Q` quits.
-`[Ctrl-A]` (`KeyAction::ToggleTerminalFocus`) toggles keyboard input focus between the guest terminal PTY/UART
-and TUI navigation controls. While paused, keys control TUI navigation. An active modal
+Keyboard input focus is automatically linked to simulation state: while running, input routes
+directly to the guest terminal; while paused, keys control TUI navigation and inspection. An active modal
 receives input before navigation, except global `Ctrl-R` reboot and `Ctrl-Q` quit. These controls
 remain available after guest shutdown and wake the stopped simulation loop for clean teardown or
 restart. The optional VirtIO console is a separate device and does not

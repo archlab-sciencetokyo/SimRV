@@ -10,8 +10,8 @@ This repository uses a lightweight integration flow:
 
 All changes reach protected branches through pull requests. Do not push directly to `dev` or
 `main`; require passing checks and review, then delete the source branch after merge. Use
-`release/<version>` only for coordinated release qualification such as
-`release/3.0.0-alpha.1`—publishing still requires an explicit immutable version tag.
+`release/<version>` (e.g., `release/3.0.0-alpha.3`) for coordinated release qualification and PR delivery
+to `dev`. Do not push tags or publish releases until all qualification matrix checks are green.
 
 ## Typical Workflow
 
@@ -24,7 +24,7 @@ git pull
 git checkout -b feature/<topic>
 ```
 
-2. Commit small logical changes and keep your branch current. Rebase a private branch, or merge
+1. Commit small logical changes and keep your branch current. Rebase a private branch, or merge
    `origin/dev` when the branch is already shared:
 
 ```bash
@@ -33,12 +33,12 @@ git rebase origin/dev
 # Shared branch alternative: git merge --no-ff origin/dev
 ```
 
-3. Open a pull request into dev.
+1. Open a pull request into dev.
 
-4. After review and required CI pass, squash-merge or rebase-merge into `dev` and delete the
+2. After review and required CI pass, squash-merge or rebase-merge into `dev` and delete the
    short-lived branch.
 
-5. For releases, open a pull request from dev into main.
+3. For releases, open a pull request from dev into main.
 
 ## Commit Guidance
 

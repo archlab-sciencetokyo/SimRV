@@ -59,6 +59,8 @@ Makefrag
 # Generated documentation (source Markdown remains tracked)
 docs/*
 !docs/*.md
+!docs/man/
+!docs/man/*
 docs/api/
 docs/NOTEBOOKLM_SUMMARY.md
 docs/ORIGINALITY.md

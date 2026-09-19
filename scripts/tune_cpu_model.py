@@ -91,10 +91,20 @@ def main():
     parser.add_argument("--quick", action="store_true", help="Perform a quick focused calibration sweep")
     args = parser.parse_args()
 
+    import shutil
+
     repo_root = Path(__file__).resolve().parents[1]
-    base_cfg_path = (repo_root / args.base_config).resolve() if not Path(args.base_config).is_absolute() else Path(args.base_config)
-    if not base_cfg_path.exists():
-        print(f"Error: Base config not found: {base_cfg_path}", file=sys.stderr)
+    base_cfg_candidate = Path(args.base_config)
+    if base_cfg_candidate.is_absolute() and base_cfg_candidate.exists():
+        base_cfg_path = base_cfg_candidate
+    elif (Path.cwd() / base_cfg_candidate).exists():
+        base_cfg_path = (Path.cwd() / base_cfg_candidate).resolve()
+    elif (repo_root / base_cfg_candidate).exists():
+        base_cfg_path = (repo_root / base_cfg_candidate).resolve()
+    elif (Path(__file__).resolve().parent.parent / "share" / "SimRV" / "models" / base_cfg_candidate.name).exists():
+        base_cfg_path = (Path(__file__).resolve().parent.parent / "share" / "SimRV" / "models" / base_cfg_candidate.name).resolve()
+    else:
+        print(f"Error: Base config not found: {args.base_config}", file=sys.stderr)
         sys.exit(1)
 
     eval_json_path = (repo_root / args.eval_json).resolve() if not Path(args.eval_json).is_absolute() else Path(args.eval_json)
@@ -122,9 +132,15 @@ def main():
     if args.simrv_bin:
         simrv_bin = Path(args.simrv_bin).resolve()
     else:
-        simrv_bin = repo_root / "build/rv64-release/SimRV"
-        if not simrv_bin.exists():
-            simrv_bin = repo_root / "build/rv32-release/SimRV"
+        candidates = [
+            repo_root / "build/rv64-release/SimRV",
+            repo_root / "build/rv32-release/SimRV",
+            Path(__file__).resolve().parent / "SimRV",
+        ]
+        which_simrv = shutil.which("SimRV")
+        if which_simrv:
+            candidates.append(Path(which_simrv))
+        simrv_bin = next((c for c in candidates if c.exists()), candidates[0])
     if not simrv_bin.exists():
         print(f"Error: SimRV binary not found at {simrv_bin}", file=sys.stderr)
         sys.exit(1)

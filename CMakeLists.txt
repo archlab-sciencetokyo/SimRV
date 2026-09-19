@@ -180,14 +180,20 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
   endif()
 endif()
 
-# GCC 15 is the minimum supported GNU toolchain. It is the GNU baseline
-# validated for this C++23 codebase; use a current Clang release when GNU 15+ is
-# unavailable.
+# GCC 16 is the minimum supported GNU toolchain. It is the GNU baseline
+# validated for this C++23 codebase; use Clang 22+ when GNU 16+ is unavailable.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION
-                                            VERSION_LESS 15)
+                                            VERSION_LESS 16)
   message(
     FATAL_ERROR
-      "GCC 15 or newer is required (found ${CMAKE_CXX_COMPILER_VERSION})")
+      "GCC 16 or newer is required (found ${CMAKE_CXX_COMPILER_VERSION})")
+endif()
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION
+                                              VERSION_LESS 22)
+  message(
+    FATAL_ERROR
+      "Clang 22 or newer is required (found ${CMAKE_CXX_COMPILER_VERSION})")
 endif()
 
 # XLEN option (32 or 64) – compile-time selection
@@ -966,6 +972,39 @@ install(
   DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/schemas
   FILES_MATCHING
   PATTERN "*.json")
+
+install(
+  PROGRAMS scripts/cpu_model_wizard.py
+  DESTINATION ${CMAKE_INSTALL_BINDIR}
+  RENAME simrv-cpu-wizard)
+install(
+  PROGRAMS scripts/tune_cpu_model.py
+  DESTINATION ${CMAKE_INSTALL_BINDIR}
+  RENAME simrv-tune)
+install(
+  PROGRAMS scripts/evaluate_rtl_parity.py
+  DESTINATION ${CMAKE_INSTALL_BINDIR}
+  RENAME simrv-parity)
+install(
+  PROGRAMS scripts/benchmark.py
+  DESTINATION ${CMAKE_INSTALL_BINDIR}
+  RENAME simrv-benchmark)
+
+install(
+  DIRECTORY scripts/rtl_parity/
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/scripts/rtl_parity
+  FILES_MATCHING
+  PATTERN "*.py")
+
+install(
+  DIRECTORY configs/models/
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/models
+  FILES_MATCHING
+  PATTERN "*.cfg")
+
+install(FILES docs/USER_GUIDE.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
+
+install(FILES docs/man/simrv.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
 
 configure_package_config_file(
   cmake/SimRVConfig.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfig.cmake"

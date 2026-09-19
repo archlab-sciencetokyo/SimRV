@@ -1177,10 +1177,10 @@ auto needs_memory_image(const ParseResult& result) -> bool {
     // Architecture & Hardware
     std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Architecture and Hardware",
                style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}-j, --harts, --smp {}{}<N>{}        Active SMP core count (1 to 16, default: 1)\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}-j, --harts, --smp {}{}<N>{}        Active core count (1 to 16, default: 1; "
+               "SMP: 2 to 16)\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(
         stdout,
         "  {}--smp-quantum {}{}<N>{}             Round-robin quantum in cycles (default: 100)\n",

@@ -2,7 +2,21 @@
 """Target-driven RTL/SimRV parity evaluator."""
 
 import argparse
+from pathlib import Path
 import sys
+
+# Ensure rtl_parity package is resolvable both in-tree and when installed as a standalone binary
+_here = Path(__file__).resolve().parent
+for _candidate in (
+    _here,
+    _here / "rtl_parity",
+    _here.parent / "share" / "SimRV" / "scripts",
+    _here.parent / "scripts",
+):
+    if (_candidate / "rtl_parity").is_dir():
+        if str(_candidate) not in sys.path:
+            sys.path.insert(0, str(_candidate))
+        break
 
 from rtl_parity import get_target, iter_targets
 

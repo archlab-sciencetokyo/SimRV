@@ -1,0 +1,108 @@
+.TH SIMRV 1 "September 2026" "SimRV 3.0" "User Commands"
+.SH NAME
+simrv \- Dual-width explainable RISC-V architectural simulator and TUI workbench
+.SH SYNOPSIS
+.B SimRV
+[\fB\-\-cli\fR]
+[\fB\-\-ca\fR|\fB\-\-ia\fR]
+[\fB\-m\fR \fIelf_file\fR]
+[\fB\-s\fR \fIsteps\fR]
+[\fB\-\-cpu\-profile\fR \fIcfg_file\fR]
+[\fIoptions\fR...]
+.SH DESCRIPTION
+.B SimRV
+is an explainable, dual-width (RV32 / RV64) RISC-V architectural simulator featuring an interactive terminal workbench (TUI), cycle-accurate microarchitectural modeling, hardware RTL parity verification, and full-system SMP Linux emulation.
+.PP
+When invoked without arguments or with an ELF file, \fBSimRV\fR launches the interactive TUI workbench by default. Pass \fB\-\-cli\fR for headless batch or scripted execution.
+.SH OPTIONS
+.SS "Execution Interface"
+.TP
+.BR \-c ", " \-\-cli
+Force headless command-line execution (disables the TUI workbench).
+.TP
+.BR \-\-tui
+Force interactive terminal user interface workbench (default).
+.SS "Simulation Engine & Microarchitecture"
+.TP
+.BR \-\-ca
+Select cycle-accurate pipeline simulation kernel.
+.TP
+.BR \-\-ia
+Select high-speed instruction-accurate simulation kernel.
+.TP
+.BR \-p ", " \-\-pipeline " " \fItype\fR
+Select pipeline microarchitecture target (\fBthree-stage\fR, \fBfive-stage\fR, or \fBdual-issue\fR).
+.TP
+.BR \-\-cpu\-profile " " \fIpath.cfg\fR
+Load a human-editable CPU microarchitecture profile (.cfg).
+.TP
+.BR \-s ", " \-e ", " \-\-steps " " \fIN\fR
+Stop simulation after \fIN\fR total instructions have retired across all harts.
+.SS "Memory & Kernel Loading"
+.TP
+.BR \-m ", " \-\-memory " " \fIfile.elf\fR
+Load a bare-metal ELF binary into guest physical memory.
+.TP
+.BR \-H ", " \-\-tohost " " \fIaddr\fR
+Specify physical address of the \fBtohost\fR communication symbol.
+.TP
+.BR \-\-kernel " " \fIpath\fR
+Load Linux kernel binary image (full-system mode).
+.TP
+.BR \-\-disk " " \fIpath.img\fR
+Attach virtual disk image via VirtIO Block device.
+.TP
+.BR \-\-smp " " \fIN\fR
+Configure number of active SMP harts (2 to 16; default: 1 for single-hart).
+.TP
+.BR \-\-ram " " \fIMB\fR
+Configure guest RAM capacity in megabytes (default: 2048 MB).
+.SS "Debugging & Tracing"
+.TP
+.BR \-\-trace
+Write architectural execution trace to \fItrace/trace.txt\fR.
+.TP
+.BR \-\-tracepc
+Write PC instruction stream to \fItrace/tracepc.txt\fR.
+.TP
+.BR \-\-gdb
+Start GDB Remote Serial Protocol (RSP) target server.
+.TP
+.BR \-\-gdb\-port " " \fIport\fR
+Specify TCP port for GDB RSP server (default: 1234).
+.SS "General Information"
+.TP
+.BR \-v ", " \-\-version
+Print simulator version and build metadata.
+.TP
+.BR \-h ", " \-\-help
+Print command-line options and exit.
+.SH TUI WORKBENCH KEYBINDINGS
+.TP
+.BR [Space]
+Pause or resume simulation execution. Input routes to the guest terminal while running and to TUI navigation while paused.
+.TP
+.BR [n] ", " [F3]
+Step execution by one machine cycle across all harts.
+.TP
+.BR [r]
+Run simulation continuously.
+.TP
+.BR [Tab]
+Cycle active visualizer tabs (Regs, Cache, TLB, Pipeline, Hazards, Explainer).
+.TP
+.BR [q]
+Quit the simulator.
+.SH SEE ALSO
+.BR simrv\-cpu\-wizard (1),
+.BR simrv\-tune (1),
+.BR simrv\-parity (1),
+.BR simrv\-benchmark (1)
+.PP
+Full documentation is available at: \fI/usr/local/share/doc/SimRV/USER_GUIDE.md\fR or online at:
+.UR https://github.com/archlab-sciencetokyo/SimRV
+.UE
+.SH AUTHORS
+Developed by the ArchLab team at Science Tokyo (formerly Tokyo Institute of Technology).
+.SH COPYRIGHT
+Copyright \(co 2024-2026 ArchLab @ ScienceTokyo. Released under the MIT License.

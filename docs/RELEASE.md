@@ -1,7 +1,7 @@
 # SimRV 3.0 Release Guide
 
 The authoritative release contract is [`release/release-manifest.json`](../release/release-manifest.json).
-SimRV 3.0 officially supports Linux x86-64 hosts using GCC 15+ or Clang 20+, with separate
+SimRV 3.0 officially supports Linux x86-64 hosts using GCC 16+ or Clang 22+, with separate
 RV32GCBV and RV64GCBV binaries. Spike lockstep and the GDB server are optional features.
 
 ## Support and qualification boundary
@@ -23,7 +23,7 @@ has a documented qualification gap. These labels are not RISC-V certification cl
 | TUI Framework & Modals | Supported | Native UI framework tests and Linux PTY interaction |
 | GDB RSP | Optional | Debug integration; not a complete protocol promise |
 | Spike lockstep | Optional dependency | Reference evidence when Spike is provisioned |
-| Linux x86-64 host | Supported | GCC 15+ and Clang 20+ release matrix |
+| Linux x86-64 host | Supported | GCC 16+ and Clang 22+ release matrix |
 
 > [!NOTE]
 > Rollback snapshots and reverse stepping are not part of SimRV 3.0. They were removed to

@@ -91,9 +91,9 @@ For the interactive UART example:
   -m /tmp/simrv-isa-rv64/uart-input-echo.elf --class
 ```
 
-Press `c` to run. Type into the guest terminal when prompted; `Ctrl-A` switches input focus between
-the guest UART and TUI controls. End the line with Enter, then pause and inspect `a0` for the number
-of echoed characters.
+Press `c` to run. Type into the guest terminal when prompted; while running, input routes directly
+to the guest UART. End the line with Enter, then pause (press `c` or `Space`) to return input focus
+to TUI controls and inspect `a0` for the number of echoed characters.
 
 ## Adapting examples for a class
 
