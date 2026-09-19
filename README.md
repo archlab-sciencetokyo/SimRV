@@ -7,11 +7,8 @@ timing, memory-system behavior, and interactive architecture education. It provi
 cycle-accurate modes for the **RV64GCBV** and **RV32GCBV** implementation targets, plus a TUI,
 guest stack analysis, cache inspectors, configurable MISA state, and a small virtual platform.
 
-The intended audience is computer-architecture researchers, students, and simulator developers.
-SimRV is suitable for reproducible experiments and teaching when the documented model matches the
-research question. It is not RISC-V certified, a production hypervisor, or a security boundary.
-The `GCBV` names are implementation targets; floating-point RMM arithmetic and parts of RVV 1.0
-remain qualification gaps documented in [the compliance scope](docs/RISCV_COMPLIANCE.md).
+SimRV is not RISC-V certified. `RV32GCBV` and `RV64GCBV` are implementation targets; see the
+[compliance scope](docs/architecture/compliance.md) for verified coverage and known gaps.
 
 ---
 
@@ -45,6 +42,35 @@ Run headless in CLI-only mode:
 ./build/rv64-release/SimRV -b -m img/hello.bin -c
 ```
 
+Select execution mode across fast, detailed, or cycle-accurate microarchitectures:
+
+```bash
+# Fast functional execution
+./build/rv64-release/SimRV -b -m img/hello.bin --mode fast --cli
+
+# Cycle-accurate five-stage pipeline execution
+./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --cli
+
+# Choose the three-stage educational pipeline.
+./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --pipeline 3stage --cli
+```
+
+Mirror configuration, diagnostics, termination, cache, bus, and performance summaries to a log:
+
+```bash
+./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --cli --log-file run.log
+```
+
+Load custom or preset CPU microarchitecture models (see [CPU Models Guide](docs/hardware/models.md)):
+
+```bash
+# Load a predefined CPU model (searches configs/models/ or custom path)
+./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --cpu-profile rvcomp --cli
+
+# Generate a scaffold model configuration with the wizard
+python3 scripts/cpu_model_wizard.py --name my_core --template five-stage
+```
+
 Run Linux OS image with disk & devicetree:
 ```bash
 ./build/rv64-release/SimRV --os -m linux-images/rv64/fw_payload.bin -D linux-images/rv64/root.bin -f linux-images/rv64/devicetree.dtb
@@ -61,6 +87,29 @@ Override MISA profile or Vector register length (VLEN):
 ## Interactive TUI Split-Screen Monitor
 
 SimRV includes a rich terminal user interface (TUI) for hardware inspection, step-by-step instruction execution, and educational visualization.
+
+### Classroom integration
+
+SimRV accepts ordinary RISC-V ELF files and needs no course-specific lesson format. Instructors can
+use the same command across exercises; `--class` starts the TUI paused with the interactive Student
+Guide visible, while students remain free to inspect any subsystem.
+
+```bash
+./build/rv64-release/SimRV --tui --baremetal -m exercise.elf --class \
+  --inspection-output inspection.json
+```
+
+The optional external `control-flow-calls.mission` lesson turns the Student Guide into a local
+sequence of branch, loop, call, return, and ABI observations. Build the supplied example first,
+then pass the lesson path to `--class --mission`. Missions do not collect identity or grading data,
+and students remain free to use the normal TUI controls.
+
+Students can load (`o`), step (`s`), inspect (`r`/`l`), explain (`e`), open the relevant glossary
+topic (`?`), and trace (`v`) without changing the workload. The Student Guide proposes a
+context-sensitive next action; `Enter` performs it and `g` shows or hides the guide. Pressing `x`
+while paused writes the configured, schema-versioned inspection report; existing files require a
+second explicit export action. See the [educational reference](docs/user/classroom.md),
+[bare-metal guide](docs/user/baremetal.md), and [source-first ISA examples](examples/isa/).
 
 ### Key Shortcuts
 
@@ -89,7 +138,7 @@ SimRV includes a rich terminal user interface (TUI) for hardware inspection, ste
 
 Both RV32GCBV and RV64GCBV instruction sets are supported.
 
-See [RISC-V compliance scope](docs/RISCV_COMPLIANCE.md) for the precise architectural boundary,
+See [RISC-V compliance scope](docs/architecture/compliance.md) for the precise architectural boundary,
 SBI/OpenSBI distinction, and the evidence required before treating a feature as verified. The
 profile names are implementation targets and do not by themselves claim RISC-V certification.
 The cross-subsystem qualification status is summarized in the [2.0 support matrix](docs/SUPPORT_MATRIX.md).
@@ -188,8 +237,9 @@ Pre-compiled standalone binaries (`SimRV`) are available under GitHub Releases f
 - `scripts/`: Regression, ISA testing, and Linux image build helpers
 - `docs/`: Architecture and design notes (`docs/ARCHITECTURE.md`, `docs/BAREMETAL_GUIDE.md`)
 - `CHANGELOG.md`: Version release log
-- `docs/RELEASE.md`: 2.0 support contract, validation matrix, and publishing checklist
-- `docs/TUI.md`: TUI input focus, rendering layers, and test coverage
+- `docs/hardware/models.md`: CPU model configuration framework, parameters, wizard, and RTL calibration
+- `docs/evaluation/release.md`: 2.0 support contract, validation matrix, and publishing checklist
+- `docs/user/tui.md`: TUI input focus, rendering layers, and test coverage
 - `repro/`: Versioned experiment manifest and research-companion instructions
 - `release/schemas/`: Machine-readable release and experiment interfaces
 

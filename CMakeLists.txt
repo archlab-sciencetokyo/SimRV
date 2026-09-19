@@ -95,6 +95,8 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_L
   message(FATAL_ERROR "GCC 15 or newer is required (found ${CMAKE_CXX_COMPILER_VERSION})")
 endif()
 
+
+
 # XLEN option (32 or 64) – compile-time selection
 option(SIMRV_XLEN "Target XLEN (32 or 64)" 32)
 set_property(CACHE SIMRV_XLEN PROPERTY STRINGS 32 64)
@@ -765,6 +767,9 @@ install(DIRECTORY schemas/
   DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/schemas
   FILES_MATCHING PATTERN "*.json"
 )
+install(FILES docs/user/index.md DESTINATION ${CMAKE_INSTALL_DOCDIR} RENAME USER_GUIDE.md)
+
+install(FILES docs/man/simrv.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
 
 configure_package_config_file(
   cmake/SimRVConfig.cmake.in
