@@ -1,8 +1,6 @@
 # SimRV: Dual-Width Explainable RISC-V System Simulator
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/archlab-sciencetokyo/SimRV/main/docs/assets/logo.png" alt="SimRV Logo" width="180" onerror="this.style.display='none'"/>
-</p>
+
 
 <p align="center">
   <strong>An explainable, dual-width (RV32 / RV64) RISC-V research simulator with an interactive terminal workbench (TUI), cycle-accurate in-order pipeline modeling, cache hierarchy inspection, and full-system Linux OS emulation.</strong>

@@ -1,8 +1,6 @@
 # SimRV: Dual-Width Explainable RISC-V System Simulator
 
-<p align="center">
-  <a href="https://archlab-sciencetokyo.github.io/SimRV/"><img src="https://raw.githubusercontent.com/archlab-sciencetokyo/SimRV/main/docs/assets/logo.png" alt="SimRV Logo" width="160" onerror="this.style.display='none'"/></a>
-</p>
+
 
 <p align="center">
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=main" alt="C/C++ CI"/></a>
