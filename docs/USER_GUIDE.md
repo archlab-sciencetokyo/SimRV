@@ -36,8 +36,8 @@ SimRV simulates standard 32-bit and 64-bit RISC-V systems:
 
 ### Prerequisites
 
-- Modern C++23 compiler: **Clang 20+** or **GCC 15+**
-- Build tools: **CMake 3.31+**, **Ninja**, **mold** (recommended for ultra-fast linking)
+- Modern C++23 compiler: **Clang 22+** or **GCC 16+**
+- Build tools: **CMake 3.31+**, **Ninja**, **mold** (recommended for fast linking)
 - Python: **Python 3.10+** (for utility tools and test suites)
 
 ### Building from Source

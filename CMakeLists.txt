@@ -132,7 +132,7 @@ if(NOT "cxx_std_23" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
 endif()
 
 option(SIMRV_PREFER_MOLD
-       "Prefer mold linker for ultra-fast links when available" ON)
+       "Prefer mold linker for fast links when available" ON)
 option(SIMRV_PREFER_LLD "Prefer lld for Clang links when available" ON)
 
 set(SIMRV_LINKER_NAME "system")
@@ -141,7 +141,7 @@ if(SIMRV_PREFER_MOLD)
   if(SIMRV_MOLD_EXECUTABLE)
     add_link_options($<$<LINK_LANGUAGE:CXX>:-fuse-ld=mold>)
     set(SIMRV_LINKER_NAME "mold")
-    message(STATUS "Ultra-fast linking enabled with mold.")
+    message(STATUS "Fast linking enabled with mold.")
   endif()
 endif()
 
