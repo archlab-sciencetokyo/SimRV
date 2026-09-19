@@ -1,7 +1,5 @@
 # SimRV: Dual-Width Explainable RISC-V System Simulator
 
-
-
 <p align="center">
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=main" alt="C/C++ CI"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml/badge.svg?branch=main" alt="Docs CI"/></a>
@@ -26,11 +24,11 @@ Explore the full documentation, guides, and specifications online at **[archlab-
   <tr>
     <td width="50%" valign="top">
       <h3>📖 <a href="https://archlab-sciencetokyo.github.io/SimRV/user/">User Guide</a></h3>
-      <p>CLI flags, interactive TUI controls, hotkeys, execution modes, and educational classroom missions.</p>
+      <p>CLI flags, interactive TUI controls, hotkeys, execution modes, and student architecture guide.</p>
       <ul>
         <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/">Quickstart & CLI Flags</a> (<a href="docs/user/index.md">source</a>)</li>
         <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/tui/">TUI Controls & Keybindings</a> (<a href="docs/user/tui.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/classroom/">Classroom Missions</a> (<a href="docs/user/classroom.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/classroom/">Student Reference Guide</a> (<a href="docs/user/classroom.md">source</a>)</li>
       </ul>
     </td>
     <td width="50%" valign="top">

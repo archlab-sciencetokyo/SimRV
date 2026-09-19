@@ -78,7 +78,7 @@ nav:
       - Interactive TUI Workbench: user/tui.md
       - Bare-Metal & Embedded: user/baremetal.md
       - Full-System Linux Boot: user/linux.md
-      - Classroom & Student Guide: user/classroom.md
+      - Student Architecture Guide: user/classroom.md
   - Architecture:
       - System & Pipeline Overview: architecture/overview.md
       - ISA Compliance & Boundaries: architecture/compliance.md
