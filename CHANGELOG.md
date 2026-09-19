@@ -3,27 +3,28 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [v3.0.0-alpha.4] — 2026-09-19
 
-### Interactive education
+This alpha release delivers dynamic SMP multi-hart Linux boot and device tree synthesis, an authoritative hardware register scoreboard, complete CLI/tooling installation with man pages, responsive TUI horizontal scrolling overhaul, and branchless branch predictor acceleration.
 
-- Replaced the static guidance strip with a contextual, opt-in Student Guide, added reusable
-  source-first ISA examples, and added versioned JSON inspection-report export.
-- Removed the internal cache study sessions and their committed binary artifacts.
+### SMP & System Architecture
 
-### Performance
+- Dynamically generated Flattened Device Tree (FDT) topology for arbitrary SMP core counts (2 to 16 harts), creating CPU nodes, CLINT software/timer interrupt mappings, and PLIC context controllers on the fly.
+- Updated secondary hart initialization to dynamically coordinate with OpenSBI HSM loops (`Started` under OpenSBI, `Stopped` under direct-SBI) and synchronized architectural vector configuration (`vlen`).
+- Verified clean multi-core Linux kernel boots and concurrent multi-hart userland scheduling.
 
-- Compacted the per-hart decode cache, removed lookup-time replacement writes, and specialized
-  fixed-width unaligned host-memory accesses.
-- Moved TUI-only pipeline scoreboard state into frame-sampled inspector snapshots, leaving
-  headless execution free of presentation work.
-- Applied bounded cycle batching to single-hart cycle-accurate execution while preserving
-  per-cycle device, breakpoint, trace, debugger, and stepping semantics.
+### Pipeline Microarchitecture & Telemetry
 
-### Developer tooling
+- Implemented an authoritative hardware register scoreboard tracking inflight functional unit dependencies across INT, FP, and Vector pipelines.
+- Unified instruction unpacking into `DecodedInstruction` to guarantee structural parity across microarchitectural pipelines.
+- Accelerated the cycle-accurate branch predictor update path using branchless saturating counter lookup tables and branchless statistic accounting.
 
-- Pinned the native-host release preset to Clang, corrected OS benchmark command construction,
-  and updated developer instructions to the current CMake and CTest gates.
+### User Interface & Packaging
+
+- Completed the user packaging suite (`make install`) including documentation, developer headers, sample lesson missions, and man page (`simrv.1`).
+- Overhauled the TUI Inspector pane with responsive horizontal viewport panning, dynamic width calculations, and per-page scroll state isolation.
+- Refined TUI keybindings and modal navigation for seamless pause/run state transitions and guest terminal input routing.
+- Updated host compiler requirements to modern C++23 standards (Clang 22+ and GCC 16+).
 
 ## [v3.0.0-alpha.3] — 2026-09-19
 

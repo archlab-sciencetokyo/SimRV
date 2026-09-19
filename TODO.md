@@ -1,6 +1,6 @@
 # SimRV 3.0 alpha handoff
 
-Branch: `release/3.0.0-alpha.3`
+Branch: `release/3.0.0-alpha.4`
 PR: <https://github.com/archlab-sciencetokyo/SimRV/pull/26> (target: `dev`)
 Latest functional commit: `8a24c2c refactor(decoder): index fused operations by opcode`
 
