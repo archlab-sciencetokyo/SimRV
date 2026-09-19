@@ -1,14 +1,70 @@
-# SimRV
+# SimRV: Dual-Width Explainable RISC-V System Simulator
 
-[![C/C++ CI](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=dev)](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml)
+<p align="center">
+  <a href="https://archlab-sciencetokyo.github.io/SimRV/"><img src="https://raw.githubusercontent.com/archlab-sciencetokyo/SimRV/main/docs/assets/logo.png" alt="SimRV Logo" width="160" onerror="this.style.display='none'"/></a>
+</p>
 
-SimRV is a C++23 research simulator for studying RISC-V functional behavior, in-order pipeline
-timing, memory-system behavior, and interactive architecture education. It provides functional and
-cycle-accurate modes for the **RV64GCBV** and **RV32GCBV** implementation targets, plus a TUI,
-guest stack analysis, cache inspectors, configurable MISA state, and a small virtual platform.
+<p align="center">
+  <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=main" alt="C/C++ CI"/></a>
+  <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml/badge.svg?branch=main" alt="Docs CI"/></a>
+  <a href="https://archlab-sciencetokyo.github.io/SimRV/"><img src="https://img.shields.io/badge/docs-GitHub_Pages-blue.svg" alt="Documentation"/></a>
+  <a href="https://github.com/archlab-sciencetokyo/SimRV/releases"><img src="https://img.shields.io/badge/version-2.0.2-blue.svg" alt="SimRV Version"/></a>
+  <a href="https://github.com/archlab-sciencetokyo/SimRV/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/></a>
+  <img src="https://img.shields.io/badge/C%2B%2B-23-purple.svg" alt="C++23"/>
+  <img src="https://img.shields.io/badge/architecture-RV32%20%7C%20RV64-orange.svg" alt="Architecture"/>
+</p>
 
-SimRV is not RISC-V certified. `RV32GCBV` and `RV64GCBV` are implementation targets; see the
-[compliance scope](docs/architecture/compliance.md) for verified coverage and known gaps.
+SimRV is an explainable, dual-width (RV32 / RV64) RISC-V research simulator featuring an interactive terminal workbench (TUI), cycle-accurate in-order pipeline modeling, cache hierarchy inspection, and full-system Linux OS emulation. It provides functional and cycle-accurate modes for compile-time fixed **RV64GCBV** and **RV32GCBV** implementation targets.
+
+SimRV is not RISC-V certified. `RV32GCBV` and `RV64GCBV` are implementation targets; see the [compliance scope](docs/architecture/compliance.md) for verified coverage and known gaps.
+
+---
+
+## Documentation
+
+Explore the full documentation, guides, and specifications online at **[archlab-sciencetokyo.github.io/SimRV](https://archlab-sciencetokyo.github.io/SimRV/)**:
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>📖 <a href="https://archlab-sciencetokyo.github.io/SimRV/user/">User Guide</a></h3>
+      <p>CLI flags, interactive TUI controls, hotkeys, execution modes, and educational classroom missions.</p>
+      <ul>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/">Quickstart & CLI Flags</a> (<a href="docs/user/index.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/tui/">TUI Controls & Keybindings</a> (<a href="docs/user/tui.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/classroom/">Classroom Missions</a> (<a href="docs/user/classroom.md">source</a>)</li>
+      </ul>
+    </td>
+    <td width="50%" valign="top">
+      <h3>⚙️ <a href="https://archlab-sciencetokyo.github.io/SimRV/architecture/overview/">Architecture & Compliance</a></h3>
+      <p>Core execution units, 6-stage in-order pipeline, cache hierarchy, MMU translation, and verified ISA scope.</p>
+      <ul>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/architecture/overview/">Architectural Overview</a> (<a href="docs/architecture/overview.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/architecture/compliance/">RISC-V Compliance Scope</a> (<a href="docs/architecture/compliance.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/hardware/extensions/">Extension Implementation</a> (<a href="docs/hardware/extensions.md">source</a>)</li>
+      </ul>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>🐧 <a href="https://archlab-sciencetokyo.github.io/SimRV/user/linux/">Bare-Metal & Linux</a></h3>
+      <p>Bare-metal firmware, memory maps, MMIO peripherals (16550A UART, CLINT, PLIC, VirtIO block), and Linux OS boot.</p>
+      <ul>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/baremetal/">Bare-Metal Development</a> (<a href="docs/user/baremetal.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/linux/">Booting Full-System Linux</a> (<a href="docs/user/linux.md">source</a>)</li>
+      </ul>
+    </td>
+    <td width="50%" valign="top">
+      <h3>🛠️ <a href="https://archlab-sciencetokyo.github.io/SimRV/dev/contributing/">Development & Verification</a></h3>
+      <p>Developer standards, dual-architecture CTest validation gates, Spike lockstep co-simulation, and release qualification.</p>
+      <ul>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/contributing/">Contributing Standards</a> (<a href="docs/dev/contributing.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/evaluation/reviewer/">Artifact Evaluation Guide</a> (<a href="docs/evaluation/reviewer.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/evaluation/release/">Release Governance</a> (<a href="docs/evaluation/release.md">source</a>)</li>
+      </ul>
+    </td>
+  </tr>
+</table>
 
 ---
 

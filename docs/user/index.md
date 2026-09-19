@@ -9,7 +9,7 @@ SimRV is an explainable, dual-width (RV32 / RV64) RISC-V research simulator with
 SimRV simulates standard 32-bit and 64-bit RISC-V architectures:
 
 - **ISA Support**: RV32GCBV / RV64GCBV (Base Integer `I`/`E`, Standard Multiply/Divide `M`, Atomic `A`, Single/Double Floating Point `F`/`D`, Compressed `C`, Bit Manipulation `B`, and Vector 1.0 `V`).
-- **Privilege & System Architecture**: Machine (M), Supervisor (S), and User (U) privilege modes with Physical Memory Protection (PMP), Sv32 / Sv39 MMU page translation, CLINT timer and software interrupts, and PLIC interrupt routing.
+- **Privilege & System Architecture**: Machine (M), Supervisor (S), and User (U) privilege modes, Sv32 / Sv39 MMU page translation, CLINT timer and software interrupts, and PLIC interrupt routing.
 - **Microarchitectural Modeling**: Cycle-accurate 5-stage in-order pipeline execution kernel modeling instruction latency, data hazard stalls, register forwarding, branch prediction (Bimodal, 2-level adaptive, RAS, BTB), and multi-way L1 instruction and data cache hierarchies.
 - **Interactive TUI Workbench**: Educational split-screen monitor displaying live register files, pipeline stages, cache lines, hazard graphs, disassembly explainers, and an interactive Linux PTY console.
 - **Hardware Peripherals**: 16550A UART serial console, VirtIO block storage, Real-Time Clock (RTC), CLINT, and PLIC.

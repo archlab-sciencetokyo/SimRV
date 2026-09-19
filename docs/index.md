@@ -22,7 +22,7 @@
 ## Key Highlights
 
 === "Explainable Dual-Width Architecture"
-    SimRV provides compile-time fixed 32-bit and 64-bit simulator targets (**RV32GCBV** and **RV64GCBV**). It supports Base Integer (`I`/`E`), Multiply/Divide (`M`), Atomics (`A`), Single/Double Floating Point (`F`/`D`), Compressed (`C`), Bit Manipulation (`B`), and Vector 1.0 (`V`) extensions with Physical Memory Protection (PMP) and Sv32/Sv39 virtual memory translation.
+    SimRV provides compile-time fixed 32-bit and 64-bit simulator targets (**RV32GCBV** and **RV64GCBV**). It supports Base Integer (`I`/`E`), Multiply/Divide (`M`), Atomics (`A`), Single/Double Floating Point (`F`/`D`), Compressed (`C`), Bit Manipulation (`B`), and Vector 1.0 (`V`) extensions with Sv32/Sv39 virtual memory translation.
 
 === "Cycle-Accurate Pipeline Timing"
     Features a cycle-accurate in-order pipeline execution kernel modeling instruction latency, data hazard stalls, forwarding paths, branch prediction (Bimodal, 2-level adaptive, RAS, and BTB), and multi-way L1 instruction and data cache hierarchies.
@@ -106,7 +106,7 @@ SimRV requires a modern C++23 compiler (**Clang 20+** or **GCC 14+**), **CMake 3
 
     ---
 
-    Core execution units, pipeline modeling, cache hierarchy, MMU, PMP, and [ISA compliance scope](architecture/compliance.md).
+    Core execution units, pipeline modeling, cache hierarchy, MMU, and [ISA compliance scope](architecture/compliance.md).
 
 - :material-memory:{ .lg .middle } **[Bare-Metal & Linux](user/baremetal.md)**
 

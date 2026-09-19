@@ -12,7 +12,7 @@ SimRV 2.0 provides:
    - **Functional Fast Mode (`--ia`)**: Fast instruction-accurate emulation with full VirtIO device and Linux OS support.
    - **Cycle-Accurate Mode (`--ca`)**: Detailed in-order pipeline simulation modeling 5-stage hazard stalls, forwarding, and cache hierarchies.
 2. **Dual-Architecture Conformance**:
-   - Strict compile-time fixed dual-target qualification for both **RV32GCBV** and **RV64GCBV** with Physical Memory Protection (PMP) and Sv32/Sv39 virtual memory translation.
+   - Strict compile-time fixed dual-target qualification for both **RV32GCBV** and **RV64GCBV** with Sv32/Sv39 virtual memory translation.
 3. **Full-System Linux Emulation**:
    - Boots un-modified OpenSBI/BBL and Linux kernels with VirtIO block storage, 16550A UART, CLINT timer, and PLIC interrupt controller.
 4. **Co-Simulation Verification**:
@@ -103,6 +103,7 @@ The following table summarizes architectural capabilities and simulation trade-o
    - Staging buffers and hazard resolution are tightly coupled within contiguous CPU state without indirect pointer indirection.
 4. **Empirical Benchmarking**:
    - Absolute wall-clock execution time and throughput depend heavily on host CPU microarchitecture, compiler optimization levels (such as LTO), host memory bandwidth, and guest workload characteristics. Users and reviewers are encouraged to record local baseline measurements on their own hardware using the bundled benchmark tooling:
+
      ```bash
      python3 scripts/benchmark.py --binary build/rv64-release/SimRV
      ```

@@ -10,15 +10,15 @@ SimRV follows a strict separation between public header declarations (`include/s
 
 ```text
 include/simrv/ | src/
-├── core/         # Machine, CPU, ArchState, CSR registers, MMU, PMP, traps
+├── core/         # Machine, CPU, ArchState, CSR registers, MMU, traps, state control
 ├── execute/      # ALU, Multiplier/Divider, FPU, Vector execution units
-├── pipeline/     # CycleKernel, Fetch, Decode, Scoreboard, BranchPredictor
-├── memory/       # Physical memory, RamView, TileLink bus interconnect
-├── cache/        # L1/L2/L3 cache hierarchies, CoherenceHub, MESI protocol
-├── device/       # CLINT, PLIC, AIA, 16550A UART, VirtIO (block/net/rng), PCIe
-├── tui/          # TUI framework, ScrollView, InspectorPane, TerminalPane, Modals
-├── debug/        # GDB RSP server, Tracer, Instruction explainer
-└── util/         # CLI parser, FDT generator, CPU model loader
+├── pipeline/     # In-order 6-stage pipeline (Fetch, Decode, Execute, Memory, Commit), Decoder
+├── memory/       # Physical memory, MMU page table walker, MMIO router, TileLink bus
+├── cache/        # L1 instruction & data cache hierarchy (ICache, DCache)
+├── device/       # CLINT, PLIC, 16550A UART, VirtIO block, Console, Framebuffer, Power
+├── tui/          # TUI framework, panels, modals, frame renderer, themes
+├── debug/        # GDB RSP server, Spike lockstep co-simulation, SymbolTable, Breakpoints
+└── util/         # CLI argument parser, instruction hazard explainer
 ```
 
 ---
@@ -67,9 +67,9 @@ clang-format --dry-run --Werror $(find include src tests -name "*.cpp" -o -name 
    - Use `simrv::log::info`, `simrv::log::warn`, and `simrv::log::error` from `simrv/core/Logger.hpp` for console and TUI messages.
    - **Never** write raw `std::cout`, `std::cerr`, or `printf` calls inside core simulation logic.
    - Use `simrv::core::Tracer` for architectural simulation artifacts in `trace/` (`trace.txt`, `traplog.txt`, `bpred.txt`, `instmix.txt`).
-4. **Physical Memory Protection (PMP)**:
-   - PMP access permissions are centralized in `simrv::core::pmp::check_access` and evaluated across all memory requests: instruction fetch, load/store execution, and hardware page table walks.
-   - Any modification to PMP CSRs must call `cpu_.state().refresh_pmp_status()` and flush translation buffers (`cpu_.TLB_flush()`).
+4. **Privileged CSR & Memory Emulation**:
+   - Privilege levels span Machine (M), Supervisor (S), and User (U) modes with Sv32 / Sv39 page table translation.
+   - Unimplemented PMP CSRs are safely hardwired to zero per privileged specification to maintain compatibility with guest firmware (e.g. OpenSBI) probes.
 
 ---
 
