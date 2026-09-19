@@ -25,6 +25,31 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Pinned the native-host release preset to Clang, corrected OS benchmark command construction,
   and updated developer instructions to the current CMake and CTest gates.
 
+## [v3.0.0-alpha.3] — 2026-09-19
+
+This alpha release introduces the modular RTL parity framework, exact cycle parity validation against physical RTL designs, human-editable CPU model profiles, and automated pipeline tuning utilities.
+
+### RTL Parity & Validation Framework
+
+- Implemented a reusable, modular RTL parity framework under `scripts/rtl_parity/` with dynamic target registry support.
+- Achieved exact cycle-level execution parity against CFU-Proving-Ground RVProc.
+- Added automated RTL parity evaluation harness (`scripts/evaluate_rtl_parity.py`) with customizable trace format parsing and cycle-by-cycle comparison.
+- Added comprehensive documentation for RTL parity methodology, trace extraction, and target registration in `docs/RTL_PARITY.md`.
+
+### CPU Model Configuration & Calibration
+
+- Introduced human-editable JSON configuration profiles under `models/` validated against `schemas/cpu-model.schema.json`.
+- Implemented `scripts/cpu_model_wizard.py` for interactive CLI CPU model creation and validation.
+- Added `scripts/tune_cpu_model.py` for automated parameter search and calibration of pipeline stage latencies and penalties.
+- Enabled export and inspection of active CPU model profiles directly from the TUI workbench.
+- Supported 32-bit CPU model configurations on RV64 platforms with dynamic MISA synchronization.
+
+### Execution Engine & Concurrency Hardening
+
+- Resolved TSan race conditions during concurrent multi-hart TUI telemetry and snapshot publication.
+- Unified bare-metal and OS runner quiescence wait loops and scoped runner activity accounting.
+- Hardened SMP worker thread lifecycle and quantum scheduling synchronization.
+
 ## [v3.0.0-alpha.2] — 2026-09-01
 
 This alpha release delivers comprehensive strong domain typing, code reduction, and modernization across all major architectural subsystems (Core, Memory, Execution, Platform, Debug, and Pipeline).
@@ -114,6 +139,7 @@ Alpha prerelease introducing full **Multi-Hart Symmetric Multiprocessing (SMP)**
 - **Direct-Mapped Inline Directory Cache**: $O(1)$ fast cache path for directory state lookups and dirty writeback management.
 - **TUI Visual Inspection**: Real-time MESI cache line state tags (`[M]`, `[E]`, `[S]`, `[I]`) in the Cache Inspector and TileLink-C channel metric counters in the Bus/IO panel.
 - **Dynamic Device Tree Multi-Hart Generation**: Automatic phandle-isolated CPU node and interrupt controller generation supporting multi-core Linux boot.
+
 ## [v2.0.2] — 2026-08-28
 
 Maintenance release ensuring side-effect-free instruction explanation in the TUI left pane to prevent spurious ICache hits during tool tab navigation.
@@ -208,6 +234,7 @@ OS lifecycle control, MMIO safety, and TUI/UART stability ahead of v2.0.0.
 Release candidate 8 for v2.0.0. Focuses on CMake user presets modularization, scrubbing hardcoded workspace paths, floating-point rounding precision under Clang, dual-architecture `riscv-tests` integration, and repository documentation polish.
 
 ### Build System & Developer Presets
+
 - **Preset Modularization**:
   - Reverted `CMakePresets.json` to general, portable presets without hardcoded compiler binaries.
   - Added local-only `CMakeUserPresets.json` (gitignored) for developer-specific Clang/GCC configuration (`CMAKE_C_COMPILER` and `CMAKE_CXX_COMPILER`).
@@ -215,11 +242,13 @@ Release candidate 8 for v2.0.0. Focuses on CMake user presets modularization, sc
   - Added `-frounding-math` compiler flag check to preserve floating-point rounding mode semantics (`std::fesetround`) and exception raising under Clang `-O3` / ThinLTO optimization passes.
 
 ### Test Automation & ISA Verification
+
 - **Dual-Architecture `riscv-tests` Integration**:
   - Built 64-bit (`make`) and 32-bit (`make XLEN=32`) `riscv-tests` test suites in `../../tests/riscv-tests`.
   - Achieved 100% CTest gate pass rate (230 test cases) across both `rv64-release` and `rv32-release` targets.
 
 ### Repository Polish & Cleanups
+
 - **Hardcoded Path Scrubbing**:
   - Replaced absolute `/home/archlab/` paths in `scripts/run_benchmarks.py` with dynamic `TESTS_DIR` path resolution relative to `script_dir`.
   - Fixed hardcoded absolute file link to `LICENSE` in `README.md`.
@@ -234,6 +263,7 @@ Release candidate 8 for v2.0.0. Focuses on CMake user presets modularization, sc
 Release candidate 6 for v2.0.0. Focuses on atomic state synchronization, $O(1)$ TLB generation epoch flushes, selective hardware/soft TLB invalidation, deterministic CLINT timer integration, devicetree syscon-poweroff standard bindings, and post-shutdown execution retention.
 
 ### Performance & Cache / TLB Optimizations
+
 - **$O(1)$ Soft TLB Generation Epoch Flushing**:
   - Replaced $O(N)$ 4096-entry memory loops during `soft_tlb_flush()` with a single-instruction `++soft_tlb_epoch` generation increment.
 - **Selective Hardware & Soft TLB Invalidation**:
@@ -244,11 +274,13 @@ Release candidate 6 for v2.0.0. Focuses on atomic state synchronization, $O(1)$ 
   - Replaced bounds-checked `.at()` array accesses with direct subscript indexing across `BaseCache`, `ICache`, and `DCache`.
 
 ### State Atomization & Synchronization
+
 - **Lock-Free Execution State Machine**:
   - Atomized `ExecutionState` and cross-thread shared state (`tohost`, `mtime`, `mtimecmp`, `e_icount`) with `std::atomic<T>`.
   - Eliminates data races and torn 32-bit reads across simulation, TUI rendering, and GDB control threads.
 
 ### Devices & Devicetree Standard Compliance
+
 - **Deterministic CLINT MMIO Time Advancement**:
   - Derived simulated clock time strictly from `clint_mmio.mtime`, guaranteeing deterministic cycle progress and freezing time advancement during simulation pause.
 - **Standard Devicetree Syscon Poweroff & Reboot Bindings**:
@@ -256,6 +288,7 @@ Release candidate 6 for v2.0.0. Focuses on atomic state synchronization, $O(1)$ 
   - Recompiled `linux-images/rv64/devicetree.dtb` and `linux-images/rv32/devicetree.dtb` for native OpenSBI `sifive_test` / `syscon-poweroff` reset driver parsing.
 
 ### TUI & System Lifecycle UX
+
 - **Post-Shutdown Execution Safety & Window Retention**:
   - Halting or shutting down the guest system (`poweroff` / `halt`) pauses execution and renders `[SHUTDOWN]` badge while keeping the TUI window open for full inspection of registers, memory, stats, and logs.
   - Prohibits stepping or unpausing from a shut-down state, presenting a clear guidance modal (`"SYSTEM SHUTDOWN - Please reboot [Ctrl-R], load [o], or quit [q]"`).
@@ -269,6 +302,7 @@ Release candidate 6 for v2.0.0. Focuses on atomic state synchronization, $O(1)$ 
 Release candidate 3 for v2.0.0. Focuses on TUI keybinding centralization, Notice Modals UX enhancement, automatic reboot on post-shutdown resume, and licensing compliance.
 
 ### TUI & Visualizers
+
 - **Centralized TUI Keybindings Registry (`TuiKeybindings`)**:
   - Centralized all key action mappings, footer labels, and online help definitions in `TuiKeybindings.hpp` / `TuiKeybindings.cpp`.
   - Re-assigned intuitive, semantic hotkeys: `[n]` for Next step, `[b]` for Backstep, `[m]` for Manage Break/Watchpoints, `[i]` for Inspect Memory, `[w]` for Set Watchpoint, and `[:]`/`[k]` for PC Breakpoint.
@@ -282,6 +316,7 @@ Release candidate 3 for v2.0.0. Focuses on TUI keybinding centralization, Notice
   - Re-enabled execution on `perform_backstep()` when stepping backward out of shutdown state.
 
 ### License & Documentation
+
 - **MIT License & Third-Party Notices**:
   - Added repository `LICENSE` file under the MIT License (Copyright (c) 2024-2026 ArchLab @ ScienceTokyo).
   - Included third-party software notices for TinySoundFont (`tsf.h`, MIT License) and TinyMidiLoader (`tml.h`, zlib License).
@@ -294,6 +329,7 @@ Release candidate 3 for v2.0.0. Focuses on TUI keybinding centralization, Notice
 Release candidate 2 for v2.0.0. Focuses on TUI UX refinements, pipeline execution timeline correctness, hardware Sixel capability detection, and compiler prerequisite updates.
 
 ### TUI & Visualizers
+
 - **Pipeline Execution Timeline Overhaul**:
   - Assigned a unique 64-bit dynamic instruction sequence ID (`inst_id`) to stage registers and cycle snapshots.
   - Fixed a stage merging bug where instructions in a loop (sharing the same static PC) merged across iterations, producing repeating stage artifacts like `WB ID EX MEM WB ID EX MEM WB`.
@@ -312,6 +348,7 @@ Release candidate 2 for v2.0.0. Focuses on TUI UX refinements, pipeline executio
   - Performance counters now accumulate accurately throughout guest execution and only reset on explicit machine reset/reboot.
 
 ### Build & Documentation
+
 - **Compiler Prerequisites**: Updated minimum compiler requirements in `README.md` to Clang 20+ and GCC 14+ for complete C++23 standard library compatibility.
 - **Release Assets Note**: Added guidance in `README.md` noting that GitHub release packed binaries contain standalone executables without supplementary test scripts or images.
 
@@ -323,6 +360,7 @@ Release candidate for v2.0.0. All major features are complete; this cycle focuse
 on inspector polish, correctness fixes, and CLI normalization.
 
 ### TUI Inspectors
+
 - **Cache inspector**: per-way hit/miss markers (`◄ HIT` / `◄ MISS ▸ REPLACED`)
   now correctly annotate only the exact hit way using `last_hit_way` tracking;
   `[Cache:IC]` / `[Cache:DC]` tab click now correctly toggles IC ↔ DC (duplicate
@@ -331,18 +369,20 @@ on inspector polish, correctness fixes, and CLI normalization.
   to the MISA configuration modal; displayed on row 8; applied to `s_vlen` at reboot
 - **MMIO/Bus inspector**: live VirtIO status flags, IRQ state, Virtqueue 0 ring
   physical addresses (Desc / Avail / Used), UART NS16550A settings
-- **Hazard inspector**: aligned stage labels (`IF `, `ID `, `EX `, `WB `) for
+- **Hazard inspector**: aligned stage labels (`IF`, `ID`, `EX`, `WB`) for
   uniform column layout
 - **TLB, BP, Bus pages**: clamped to 36–46 visible characters per row; removed
   overflow that was clipping text on narrow terminals
 
 ### CLI
+
 - `--vlen <N>` / `--vector-len <N>`: VLEN can now be set from the command line;
   the non-standard `-VLEN` alias has been replaced with `--vector-len`
 - Debug mode (`-d`) no longer implicitly enables branch prediction trace output;
   use `--trace-bpred` explicitly
 
 ### Bug Fixes
+
 - Stack inspector clicks no longer pollute the Explainer target PC
   (`explain_pc_` is now separate from `inspect_addr_`)
 
@@ -351,6 +391,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 ## [v2.0.0-beta.36] — 2026-07-30
 
 ### TUI
+
 - Cache section headers and `[Cache:IC]` / `[Cache:DC]` tab entries toggle between
   ICache and DCache inspector views
 - Regs tab click cycles GPR → FPR → VEC → GPR
@@ -360,6 +401,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 ## [v2.0.0-beta.34] — 2026-07-29
 
 ### TUI
+
 - Machine settings (cycle-accurate mode, debug mode, MISA profile, theme) persist
   across simulator reloads and binary hot-swaps
 
@@ -368,6 +410,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 ## [v2.0.0-beta.33] — 2026-07-29
 
 ### TUI — Cache Inspector
+
 - Individual Way cursor navigation inside cache sets
 - Full 32-byte hex + ASCII cache line data inspection for the selected way
 
@@ -376,6 +419,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 ## [v2.0.0-beta.32] — 2026-07-28
 
 ### TUI — Cache Inspector
+
 - Interactive cache Set inspector with set selection (`j`/`k`), way selection
   (`0`–`3`, `w`), and a live set occupancy map
 - Replacement tracking: last-evicted tag, last-replaced set/way displayed
@@ -386,6 +430,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 ## [v2.0.0-beta.31] — 2026-07-27
 
 ### Performance & TUI
+
 - Optimized rendering throughput in high-speed simulation
 - Cache inspector tab hidden in high-performance (IA) mode
 - Debug keybindings hidden from status bar footer in normal mode
@@ -395,6 +440,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 ## [v2.0.0-beta.30] — 2026-07-26
 
 ### TUI
+
 - **MISA CSR modal** (`Alt-M`): configure ISA extensions (A/B/C/D/F/M/V/S/U) and
   XLEN mode interactively with draft preview and quick presets (Base / IMAC / GC)
 - Settings modal options are mode-aware (CA vs IA)
@@ -404,9 +450,11 @@ on inspector polish, correctness fixes, and CLI normalization.
 ## [v2.0.0-beta.27] — 2026-07-25
 
 ### ISA — RVV
+
 - Fixed several RVV vector memory and permute bugs
 
 ### TUI
+
 - Interactive binary loading modal: browse and reload `.bin` images at runtime
 - Disambiguated conflicting key bindings
 
@@ -415,6 +463,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 ## [v2.0.0-beta.26] — 2026-07-24
 
 ### TUI — Pipeline Inspector
+
 - Reworked pipeline page layout for improved student readability
 - Cleaner stage-slot display with stall/bubble indicators
 
@@ -423,6 +472,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 ## [v2.0.0-beta.25] — 2026-07-23
 
 ### TUI — Education Tools
+
 - Overhauled pipeline visualizer with colour-coded in-flight instruction slots
 - Modularized `TuiModal` into separate per-modal handler files
 
@@ -431,6 +481,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 ## [v2.0.0-beta.24] — 2026-07-22
 
 ### TUI
+
 - Simulation speed configurable by target frequency (Hz) via `[f]` key
 
 ---
@@ -438,6 +489,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 ## [v2.0.0-beta.22] — 2026-07-21
 
 ### TUI
+
 - Grouped register tabs (GPR / FPR / VEC) under a single `Regs` tab entry
 - `[l]` / `Alt-L` cycles through tool inspector tabs
 - Cache page column alignment fixed across all themes
@@ -447,6 +499,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 ## [v2.0.0-beta.19] — 2026-07-20
 
 ### TUI — Log & Trace
+
 - Execution log and instruction trace views integrated into the LeftPane tab system
 - Refactored pane class hierarchy to support pluggable inspector panels
 
@@ -455,6 +508,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 ## [v2.0.0-beta.17] — 2026-07-18
 
 ### TUI — Educational Visualizers
+
 - Guest stack inspector with symbol-resolved frame layout
 - Cache heatmap with set occupancy heat levels
 - Data forwarding path diagram with active forwarding highlight
@@ -464,6 +518,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 ## [v2.0.0-beta.15] — 2026-07-17
 
 ### TUI — Instruction Explainer
+
 - Complete FP (F/D) explanations: rounding modes, NaN semantics, exception flags
 - Complete RVV (V) explanations: LMUL, SEW, VLEN, element group layout
 - Fixed vector register multi-word display formatting for VLEN > 64
@@ -473,6 +528,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 ## [v2.0.0-beta.10] — 2026-07-10
 
 ### Cycle-Accurate Core
+
 - Pipeline data hazard analysis (RAW / WAW / WAR) in the instruction explainer
 - Control hazard detection with branch misprediction penalty annotation
 
@@ -481,6 +537,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 ## [v2.0.0-beta.7] — 2026-07-07
 
 ### Architecture
+
 - High-performance (IA) vs cycle-accurate (CA) simulation modes selectable at runtime
 - Modularized CLI argument parsing into logical groups
 - ISA test suite consolidated under the standard baremetal `appmode` runner
@@ -490,6 +547,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 ## [v2.0.0-beta.1] — 2026-07-01
 
 ### Foundation
+
 - XLEN abstraction layer: unified RV32/RV64 register and CSR handling
 - Interactive TUI split-screen monitor with mouse and keyboard support
 - OpenSBI boot support for supervisor-mode Linux images

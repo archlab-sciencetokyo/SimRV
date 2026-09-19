@@ -1,7 +1,7 @@
 # SimRV 3.0 alpha handoff
 
-Branch: `release/3.0.0-alpha.2`
-PR: https://github.com/archlab-sciencetokyo/SimRV/pull/26 (target: `dev`)
+Branch: `release/3.0.0-alpha.3`
+PR: <https://github.com/archlab-sciencetokyo/SimRV/pull/26> (target: `dev`)
 Latest functional commit: `8a24c2c refactor(decoder): index fused operations by opcode`
 
 Do not create a tag or GitHub release. Keep the PR as the delivery vehicle until all
@@ -194,7 +194,6 @@ The profile that informed this handover placed `CPU::run_ca_pipeline_cycle` firs
 followed by branch-predictor update, fetch/decompression/decode, and dependency
 resolution.  Repeat it after each isolated change; profile shape is evidence, not a
 substitute for the controlled benchmark gate above.
-
 
 # 09-07 follow-up
 

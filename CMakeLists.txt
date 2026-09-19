@@ -20,7 +20,7 @@ if(BUILD_TESTING OR SIMRV_ENABLE_TOOLING)
   set(PYTHON_BIN "${Python3_EXECUTABLE}")
 endif()
 
-set(SIMRV_VERSION "3.0.0-alpha.2")
+set(SIMRV_VERSION "3.0.0-alpha.3")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -469,7 +469,8 @@ if(BUILD_TESTING)
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/ReleaseToolTests.py)
   set_tests_properties(release-tools PROPERTIES LABELS "gate;regress;release")
   add_test(NAME rtl-parity-tools
-           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RtlParityToolTests.py)
+           COMMAND ${PYTHON_BIN}
+                   ${CMAKE_SOURCE_DIR}/tests/RtlParityToolTests.py)
   set_tests_properties(rtl-parity-tools PROPERTIES LABELS
                                                    "gate;regress;pipeline")
 
