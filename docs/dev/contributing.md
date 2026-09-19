@@ -25,7 +25,7 @@ include/simrv/ | src/
 
 ## 2. Build Environment & CMake Presets
 
-SimRV requires a modern C++23 compiler (**Clang 22+** or **GCC 16+**), **CMake 3.31+**, and **Ninja**.
+SimRV requires a modern C++23 compiler (**Clang 20+** or **GCC 14+**), **CMake 3.20+**, and **Ninja**.
 
 ### Preset Workflows
 
@@ -89,7 +89,7 @@ SimRV development follows strict branch hygiene defined in `.agents/rules/branch
 
 ### Release Qualification Branches
 
-- **Naming**: Strictly follow `release/<semver>` (e.g., `release/3.0.0-alpha.4`).
+- **Naming**: Strictly follow `release/<semver>` (e.g., `release/2.0.2`).
 - **Release Metadata Bumps**: Version bumps across `CMakeLists.txt`, `release/release-manifest.json`, `CITATION.cff`, `CHANGELOG.md`, and `TODO.md` must be committed directly to the release branch with message:
   `chore(release): bump version to <version> and update release metadata`
 - **Delivery Vehicle**: Use the PR targeting `dev` as the delivery tracking vehicle. **Do not create Git tags or publish GitHub releases** until all CI matrix jobs are green and merged.

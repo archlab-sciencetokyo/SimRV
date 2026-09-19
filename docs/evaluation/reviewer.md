@@ -1,22 +1,22 @@
 # Reviewer & Artifact Evaluation Guide
 
-This guide is intended for artifact evaluation reviewers, conference referees, and research evaluators seeking to independently inspect, benchmark, and reproduce the claims and results of **SimRV 3.0**.
+This guide is intended for artifact evaluation reviewers, conference referees, and research evaluators seeking to independently inspect, benchmark, and reproduce the claims and results of **SimRV 2.0**.
 
 ---
 
 ## 1. Executive Summary of Research Claims
 
-SimRV provides:
+SimRV 2.0 provides:
 
-1. **High-Throughput Simulation Speed**:
-   - **Functional Fast Mode**: 100 – 125 MIPS with full VirtIO device and SMP Linux support.
-   - **Cycle-Accurate Mode**: 3.0 – 6.0 MIPS modeling 5-stage pipelines, scoreboards, and cache hierarchies—**5× to 15× faster than gem5 Minor/In-Order**.
-2. **Hardware RTL Parity**:
-   - Validated cycle-by-cycle retirement trace parity against physical Verilog hardware (CFU-Proving-Ground and Archlab RVComp) via Verilator at **20× to 50× faster execution speeds**.
-3. **Full-System SMP Linux Emulation**:
-   - Boots un-modified OpenSBI and Linux kernels dynamically across **2 to 16 cores** (`--smp <N>`), generating the Flattened Device Tree topology, CLINT timers, and PLIC interrupt controllers dynamically.
-4. **Dual-Architecture Conformance**:
+1. **Simulation Execution Modes**:
+   - **Functional Fast Mode (`--ia`)**: Fast instruction-accurate emulation with full VirtIO device and Linux OS support.
+   - **Cycle-Accurate Mode (`--ca`)**: Detailed in-order pipeline simulation modeling 5-stage hazard stalls, forwarding, and cache hierarchies.
+2. **Dual-Architecture Conformance**:
    - Strict compile-time fixed dual-target qualification for both **RV32GCBV** and **RV64GCBV** with Physical Memory Protection (PMP) and Sv32/Sv39 virtual memory translation.
+3. **Full-System Linux Emulation**:
+   - Boots un-modified OpenSBI/BBL and Linux kernels with VirtIO block storage, 16550A UART, CLINT timer, and PLIC interrupt controller.
+4. **Co-Simulation Verification**:
+   - Built-in lockstep verification against the official Spike reference simulator (`--lockstep`) and GDB Remote Serial Protocol support (`--gdb`).
 
 ---
 
@@ -38,13 +38,13 @@ cmake --build --preset rv32-release -j$(nproc)
 
 ### Step 2: Automated Release Qualification Gates
 
-SimRV enforces a 40-test qualification gate across both architectures. Run the dual gates:
+SimRV enforces an automated qualification gate across both architectures. Run the dual gates:
 
 ```bash
-# Run 40/40 RV64 gate tests
+# Run RV64 gate tests
 ctest --test-dir build/rv64-release --output-on-failure -L gate
 
-# Run 40/40 RV32 gate tests
+# Run RV32 gate tests
 ctest --test-dir build/rv32-release --output-on-failure -L gate
 
 # Run release metadata conformance check
@@ -56,75 +56,56 @@ python3 scripts/release_check.py --binary build/rv64-release/SimRV
 To execute the automated end-to-end reproducibility workflow that verifies clean checkouts, license audits, architectural boundaries, and package consumers:
 
 ```bash
+python3 scripts/reproduce.py --mode quick
+```
+
+For full multi-compiler qualification across GCC and Clang:
+
+```bash
 python3 scripts/reproduce.py --mode full --output repro/results
 ```
 
-### Step 4: Hardware RTL Parity Verification
+### Step 4: Full-System Linux Boot Verification
 
-SimRV includes automated evaluation adapters comparing physical RTL designs against SimRV cycle-accurate models:
-
-```bash
-# List available RTL parity targets
-python3 scripts/evaluate_rtl_parity.py --list-targets
-```
-
-To run parity verification against a local checkout of CFU-Proving-Ground or RVComp:
+Verify that Linux boots cleanly to the user login shell:
 
 ```bash
-python3 scripts/evaluate_rtl_parity.py cfu-pg \
-  --cfu-dir ../CFU-Proving-Ground \
-  --simrv-bin build/rv32-release/SimRV \
-  --trace-dir build/cfu_pg_parity_traces
-```
-
-### Step 5: Multi-Hart SMP Linux Boot Verification
-
-Verify that dynamic multi-core Linux boots cleanly and concurrently executes across multiple harts:
-
-```bash
-# Boot 2-hart SMP Linux for 20 million instructions
-./build/rv64-release/SimRV --cli --smp 2 \
+# Boot RV64 Linux in headless CLI mode
+./build/rv64-release/SimRV --os --cli \
   -m linux-images/rv64/fw_payload.bin \
-  --dtb dynamic \
-  -D linux-images/rv64/root.img \
-  -s 20000000
-
-# Boot 4-hart SMP Linux for 20 million instructions
-./build/rv64-release/SimRV --cli --smp 4 \
-  -m linux-images/rv64/fw_payload.bin \
-  --dtb dynamic \
-  -D linux-images/rv64/root.img \
+  -D linux-images/rv64/root.bin \
+  -f linux-images/rv64/devicetree.dtb \
   -s 20000000
 ```
-
-Notice that instructions retire evenly across harts (e.g. 5.00M per core for 4 harts) and simulation speed exceeds **40 MIPS**.
 
 ---
 
-## 3. Simulator Performance Comparison
+## 3. Architectural Feature Matrix & Design Trade-offs
 
-The following table summarizes empirical simulation throughput measured on an x86_64 host (Intel Core i9 / AMD Zen 4):
+The following table summarizes architectural capabilities and simulation trade-offs across common RISC-V research environments:
 
-| Simulator | Simulation Fidelity | Host Throughput (MIPS) | Pipeline & Hazards | Cache / Memory Hierarchy | SMP Linux Support |
+| Simulator | Execution Paradigm | Pipeline & Hazards | Cache / Memory Hierarchy | Full Linux Support | Live TUI Inspection |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Verilator (RTL)** | Cycle-exact Verilog netlist | **0.05 – 0.2 MIPS** | Exact wires | Exact BRAM / bus | Very slow |
-| **gem5 (Detailed/O3)** | Out-of-order cycle-approximate | **0.1 – 0.3 MIPS** | Full ROB / Rename | Ruby / Classic | Yes |
-| **gem5 (Minor/In-Order)** | In-order cycle-approximate | **0.3 – 0.8 MIPS** | Staged pipeline | Cache models | Yes |
-| **SimRV (CA Mode)** | In-order cycle-accurate | **3.0 – 6.0 MIPS** | 3/5-stage, Scoreboard | MESI directory hub | **Yes (Fast SMP)** |
-| **Spike** | Architectural reference | **15 – 25 MIPS** | ❌ None | ❌ None | Basic HTIF |
-| **SimRV (`--mode fast`)** | Architectural functional | **100 – 125 MIPS** | ❌ None | ❌ None | Full VirtIO + SBI |
+| **gem5 (Detailed/O3)** | Out-of-order cycle-approximate | Full ROB / Rename | Ruby / Classic | Yes | ❌ Post-mortem trace |
+| **gem5 (Minor/In-Order)** | In-order cycle-approximate | Staged pipeline | Cache models | Yes | ❌ Post-mortem trace |
+| **SimRV (`--ca`)** | In-order cycle-accurate | 5-stage, Hazards, Forwarding | L1 I/D Cache | Yes | Live split-screen TUI |
+| **SimRV (`--ia`)** | Architectural functional | ❌ None | ❌ None | Yes | Live split-screen TUI |
+| **Spike** | Architectural reference | ❌ None | ❌ None | Basic HTIF | ❌ Command-line only |
 
-### Why is SimRV CA 5× to 15× Faster than gem5?
+### Architectural Design Principles
 
 1. **Inlined Transition Kernels vs. Dynamic Event Queues**:
-   - `gem5` dispatches every cycle, stage tick, and packet through dynamic priority queues with heavy virtual method calls and memory allocations.
+   - Simulation frameworks like `gem5` dispatch every cycle, stage tick, and packet through dynamic priority event queues.
    - `SimRV` advances pipeline stages via a flat, monolithic cycle transition kernel with zero-copy pointer swaps between stages.
-2. **Bitmask Register Scoreboard**:
-   - Integer, floating-point, and vector RAW/WAW hazard checking is evaluated using compact bitwise masks rather than dynamic token graphs.
-3. **Compile-Time Word Specialization**:
-   - `SIMRV_XLEN` is fixed at compile time (32 or 64), eliminating runtime word-width branching and enabling full LTO and auto-vectorization.
-4. **Branchless Host Execution**:
-   - 2D lookup tables for branch predictor saturating counters, instruction traits, and opcode tables eliminate host CPU branch mispredictions.
+2. **Compile-Time Word Specialization**:
+   - `SIMRV_XLEN` is fixed at compile time (32 or 64), eliminating runtime word-width branching and enabling full link-time optimization (LTO) and compiler auto-vectorization.
+3. **Dedicated Forwarding & Hazard Evaluation**:
+   - Staging buffers and hazard resolution are tightly coupled within contiguous CPU state without indirect pointer indirection.
+4. **Empirical Benchmarking**:
+   - Absolute wall-clock execution time and throughput depend heavily on host CPU microarchitecture, compiler optimization levels (such as LTO), host memory bandwidth, and guest workload characteristics. Users and reviewers are encouraged to record local baseline measurements on their own hardware using the bundled benchmark tooling:
+     ```bash
+     python3 scripts/benchmark.py --binary build/rv64-release/SimRV
+     ```
 
 ---
 
@@ -137,7 +118,7 @@ If you reference SimRV in peer-reviewed publications, please cite the software r
   author = {Trunk, Lennart and Kise, Kenji},
   title = {{SimRV: A Dual-Width Explainable RISC-V System Simulator}},
   url = {https://github.com/archlab-sciencetokyo/SimRV},
-  version = {3.0.0-alpha.4},
+  version = {2.0.2},
   year = {2026}
 }
 ```

@@ -15,6 +15,7 @@ SimRV is not RISC-V certified. `RV32GCBV` and `RV64GCBV` are implementation targ
 ## Quick Start
 
 ### Build Prerequisites
+
 - **Clang 20+** (default in CMake presets) or **GCC 14+** (required for full C++23 feature support)
 - **CMake 3.20+** & **Ninja**
 
@@ -33,50 +34,29 @@ cmake --build --preset rv32-release
 ### Running Applications
 
 Run a baremetal binary in interactive TUI mode (Default):
+
 ```bash
 ./build/rv64-release/SimRV -b -m img/hello.bin
 ```
 
 Run headless in CLI-only mode:
-```bash
-./build/rv64-release/SimRV -b -m img/hello.bin -c
-```
-
-Select execution mode across fast, detailed, or cycle-accurate microarchitectures:
 
 ```bash
 # Fast functional execution
-./build/rv64-release/SimRV -b -m img/hello.bin --mode fast --cli
+./build/rv64-release/SimRV -b -m img/hello.bin --cli
 
 # Cycle-accurate five-stage pipeline execution
-./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --cli
-
-# Choose the three-stage educational pipeline.
-./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --pipeline 3stage --cli
-```
-
-Mirror configuration, diagnostics, termination, cache, bus, and performance summaries to a log:
-
-```bash
-./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --cli --log-file run.log
-```
-
-Load custom or preset CPU microarchitecture models (see [CPU Models Guide](docs/hardware/models.md)):
-
-```bash
-# Load a predefined CPU model (searches configs/models/ or custom path)
-./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --cpu-profile rvcomp --cli
-
-# Generate a scaffold model configuration with the wizard
-python3 scripts/cpu_model_wizard.py --name my_core --template five-stage
+./build/rv64-release/SimRV -b -m img/hello.bin --ca --cli
 ```
 
 Run Linux OS image with disk & devicetree:
+
 ```bash
 ./build/rv64-release/SimRV --os -m linux-images/rv64/fw_payload.bin -D linux-images/rv64/root.bin -f linux-images/rv64/devicetree.dtb
 ```
 
 Override MISA profile or Vector register length (VLEN):
+
 ```bash
 # Select the explicit RV64GCBV target profile and a 512-bit VLEN
 ./build/rv64-release/SimRV -m img/vector.bin --misa rv64gcbv --vlen 512
@@ -86,30 +66,7 @@ Override MISA profile or Vector register length (VLEN):
 
 ## Interactive TUI Split-Screen Monitor
 
-SimRV includes a rich terminal user interface (TUI) for hardware inspection, step-by-step instruction execution, and educational visualization.
-
-### Classroom integration
-
-SimRV accepts ordinary RISC-V ELF files and needs no course-specific lesson format. Instructors can
-use the same command across exercises; `--class` starts the TUI paused with the interactive Student
-Guide visible, while students remain free to inspect any subsystem.
-
-```bash
-./build/rv64-release/SimRV --tui --baremetal -m exercise.elf --class \
-  --inspection-output inspection.json
-```
-
-The optional external `control-flow-calls.mission` lesson turns the Student Guide into a local
-sequence of branch, loop, call, return, and ABI observations. Build the supplied example first,
-then pass the lesson path to `--class --mission`. Missions do not collect identity or grading data,
-and students remain free to use the normal TUI controls.
-
-Students can load (`o`), step (`s`), inspect (`r`/`l`), explain (`e`), open the relevant glossary
-topic (`?`), and trace (`v`) without changing the workload. The Student Guide proposes a
-context-sensitive next action; `Enter` performs it and `g` shows or hides the guide. Pressing `x`
-while paused writes the configured, schema-versioned inspection report; existing files require a
-second explicit export action. See the [educational reference](docs/user/classroom.md),
-[bare-metal guide](docs/user/baremetal.md), and [source-first ISA examples](examples/isa/).
+SimRV includes a rich terminal user interface (TUI) for hardware inspection, step-by-step instruction execution, and educational visualization. See the [educational reference](docs/user/classroom.md), [bare-metal guide](docs/user/baremetal.md), and [TUI guide](docs/user/tui.md).
 
 ### Key Shortcuts
 
@@ -170,6 +127,7 @@ ctest --test-dir build/rv32-release --output-on-failure -L gate
 ```
 
 ### ISA Test Suite
+
 For running the `riscv-tests` suite, set `RISCV_TESTS_DIR`:
 
 ```bash
@@ -195,6 +153,7 @@ but does not redistribute them. Exact preparation commands, schemas, and output 
 ## Co-Simulation & Debugging
 
 ### GDB Remote Debugging
+
 SimRV includes a built-in GDB RSP server:
 
 ```bash
@@ -206,6 +165,7 @@ riscv64-unknown-elf-gdb hello.elf -ex "target remote :1234"
 ```
 
 ### Spike Lockstep Co-Simulation
+
 Verify execution against Spike instruction-by-instruction:
 
 ```bash
@@ -235,9 +195,8 @@ Pre-compiled standalone binaries (`SimRV`) are available under GitHub Releases f
 - `src/`: Core implementation C++ units
 - `include/simrv/`: Simulator headers & public API
 - `scripts/`: Regression, ISA testing, and Linux image build helpers
-- `docs/`: Architecture and design notes (`docs/ARCHITECTURE.md`, `docs/BAREMETAL_GUIDE.md`)
+- `docs/`: Architecture and design notes (`docs/architecture/overview.md`, `docs/user/baremetal.md`)
 - `CHANGELOG.md`: Version release log
-- `docs/hardware/models.md`: CPU model configuration framework, parameters, wizard, and RTL calibration
 - `docs/evaluation/release.md`: 2.0 support contract, validation matrix, and publishing checklist
 - `docs/user/tui.md`: TUI input focus, rendering layers, and test coverage
 - `repro/`: Versioned experiment manifest and research-companion instructions

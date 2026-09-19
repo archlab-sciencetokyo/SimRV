@@ -1,20 +1,18 @@
-# SimRV 3.0 User Guide
+# SimRV 2.0 User Guide
 
-SimRV is an explainable, dual-width (RV32 / RV64) RISC-V architectural simulator with an interactive terminal workbench (TUI), cycle-accurate microarchitectural modeling, hardware RTL parity verification, and full-system SMP Linux emulation.
+SimRV is an explainable, dual-width (RV32 / RV64) RISC-V research simulator with an interactive terminal workbench (TUI), cycle-accurate in-order pipeline modeling, cache hierarchy inspection, and full-system Linux OS emulation.
 
 ---
 
-
 ## 1. Architecture & Features Overview
 
-SimRV simulates standard 32-bit and 64-bit RISC-V systems:
+SimRV simulates standard 32-bit and 64-bit RISC-V architectures:
 
 - **ISA Support**: RV32GCBV / RV64GCBV (Base Integer `I`/`E`, Standard Multiply/Divide `M`, Atomic `A`, Single/Double Floating Point `F`/`D`, Compressed `C`, Bit Manipulation `B`, and Vector 1.0 `V`).
-- **Privilege & System Architecture**: Machine (M), Supervisor (S), and User (U) privilege modes with PMP (Physical Memory Protection), Sv32 / Sv39 MMU page translation, CLINT / ACLINT timer and software interrupts, and PLIC / AIA (APLIC/IMSIC) interrupt routing.
-- **Microarchitectural Modeling**: Per-cycle transition kernels for three-stage, five-stage, and dual-issue pipelines with configurable branch prediction (static, bimodal, 2-level adaptive, RAS, BTB) and multi-level L1/L2/L3 cache hierarchies.
-- **Multi-Hart Coherence**: TileLink-C directory-based coherence hubs modeling MESI protocols for SMP configurations (2 to 16 harts).
-- **RTL Parity Framework**: Cycle-accurate equivalence validation against physical Verilog / Verilator RTL designs.
-- **Interactive TUI**: Educational split-screen monitor displaying register banks, pipeline slots, cache lines, hazard graphs, disassembly explainers, and an interactive Linux PTY terminal.
+- **Privilege & System Architecture**: Machine (M), Supervisor (S), and User (U) privilege modes with Physical Memory Protection (PMP), Sv32 / Sv39 MMU page translation, CLINT timer and software interrupts, and PLIC interrupt routing.
+- **Microarchitectural Modeling**: Cycle-accurate 5-stage in-order pipeline execution kernel modeling instruction latency, data hazard stalls, register forwarding, branch prediction (Bimodal, 2-level adaptive, RAS, BTB), and multi-way L1 instruction and data cache hierarchies.
+- **Interactive TUI Workbench**: Educational split-screen monitor displaying live register files, pipeline stages, cache lines, hazard graphs, disassembly explainers, and an interactive Linux PTY console.
+- **Hardware Peripherals**: 16550A UART serial console, VirtIO block storage, Real-Time Clock (RTC), CLINT, and PLIC.
 
 ---
 
@@ -22,13 +20,13 @@ SimRV simulates standard 32-bit and 64-bit RISC-V systems:
 
 ### Prerequisites
 
-- Modern C++23 compiler: **Clang 22+** or **GCC 16+**
-- Build tools: **CMake 3.31+**, **Ninja**, **mold** (recommended for fast linking)
+- Modern C++23 compiler: **Clang 20+** or **GCC 14+**
+- Build tools: **CMake 3.20+**, **Ninja**
 - Python: **Python 3.10+** (for utility tools and test suites)
 
 ### Building from Source
 
-SimRV requires using standard CMake presets:
+SimRV requires configuring and building with standard CMake presets:
 
 ```bash
 # Clone repository
@@ -49,37 +47,39 @@ The resulting simulator executable is located at `build/rv64-release/SimRV` (or 
 ### Installing System-Wide
 
 ```bash
-# Install SimRV binary, tools, models, schemas, and documentation
+# Install SimRV binary, headers, and documentation
 sudo cmake --install build/rv64-release --prefix /usr/local
 ```
 
 Installed files include:
 
-- Executables: `/usr/local/bin/SimRV`, `/usr/local/bin/simrv-cpu-wizard`, `/usr/local/bin/simrv-tune`, `/usr/local/bin/simrv-parity`, `/usr/local/bin/simrv-benchmark`
-- CPU Model Templates: `/usr/local/share/SimRV/models/`
-- JSON Schemas: `/usr/local/share/SimRV/schemas/`
-- Documentation & Man Page: `/usr/local/share/doc/SimRV/USER_GUIDE.md`, `/usr/local/share/man/man1/simrv.1`
+- Executable: `/usr/local/bin/SimRV`
+- C++ Headers: `/usr/local/include/simrv/`
+- License Notices: `/usr/local/share/licenses/SimRV/`
 
 ---
 
 ## 3. Command-Line Interface (CLI)
 
-By default, launching `SimRV` without arguments launches the interactive TUI workbench. For non-interactive batch scripts or automated testing, provide `--cli`.
+By default, launching `SimRV` launches the interactive TUI workbench. For non-interactive batch scripts or automated testing, provide `--cli`.
 
 ### Common Invocations
 
 ```bash
-# Run a bare-metal ELF binary in fast headless CLI mode
-SimRV --cli -m program.elf
+# Run a bare-metal binary in interactive TUI mode (Default)
+./build/rv64-release/SimRV -b -m img/hello.bin
 
-# Run in cycle-accurate (CA) mode with step limit
-SimRV --cli --ca -m program.elf -s 1000000
+# Run in fast headless CLI mode
+./build/rv64-release/SimRV -b -m img/hello.bin --cli
 
-# Load a custom CPU model profile
-SimRV --cli --ca --cpu-profile configs/models/rvcomp.cfg -m program.elf
+# Run in cycle-accurate (CA) mode with a step limit
+./build/rv64-release/SimRV -b -m img/hello.bin --ca --cli -s 1000000
 
-# Launch TUI workbench with loaded binary
-SimRV -m program.elf
+# Boot Linux OS with root filesystem and device tree
+./build/rv64-release/SimRV --os \
+  -m linux-images/rv64/fw_payload.bin \
+  -D linux-images/rv64/root.bin \
+  -f linux-images/rv64/devicetree.dtb
 ```
 
 ### Key CLI Options
@@ -87,18 +87,23 @@ SimRV -m program.elf
 | Option | Description |
 | :--- | :--- |
 | `-c, --cli` | Force headless command-line execution (disables TUI). |
-| `--tui` | Force interactive TUI workbench (default). |
-| `-m, --memory <file.elf>` | Load ELF executable into guest memory. |
-| `--ca` | Select cycle-accurate pipeline simulation kernel. |
+| `-u, --tui` | Force interactive TUI workbench (default). |
+| `-m, --image <file>` | Load binary or ELF executable into guest memory. |
+| `-b, --baremetal` | Run in freestanding bare-metal application mode. |
+| `--os` | Run in full-system OS mode (Linux / OpenSBI). |
+| `-D, --disk <file>` | Attach virtual block storage disk image. |
+| `-f, --fdt <file>` | Provide Device Tree Blob (DTB) path. |
+| `--ca, -C` | Select cycle-accurate pipeline simulation kernel. |
 | `--ia` | Select fast instruction-accurate simulation mode. |
-| `-s, -e, --steps <N>` | Evaluate machine-wide instruction limit across all harts before stopping. |
-| `--cpu-profile <path.cfg>` | Load human-editable CPU microarchitecture profile. |
-| `-p, --pipeline <type>` | Pipeline microarchitecture target (`three-stage`, `five-stage`, `dual-issue`). |
-| `-H, --tohost <addr>` | Specify physical address of `tohost` communication symbol for tests. |
+| `-s, -e, --steps <N>` | Evaluate instruction limit before stopping simulation. |
+| `-H, --tohost-addr <addr>` | Specify physical address of `tohost` communication symbol. |
+| `--misa <string>` | Override MISA extension string (e.g. `rv64gcbv`). |
+| `--vlen <bits>` | Specify Vector register bit width (e.g. `128`, `256`, `512`). |
 | `--trace` | Write architectural instruction trace to `trace/trace.txt`. |
 | `--tracepc` | Write PC stream trace to `trace/tracepc.txt`. |
-| `--gdb` | Start GDB Remote Serial Protocol (RSP) server. |
+| `--gdb` | Start GDB Remote Serial Protocol (RSP) debug server. |
 | `--gdb-port <port>` | Set GDB RSP TCP listener port (default: 1234). |
+| `--lockstep` | Enable Spike lockstep co-simulation verification. |
 | `-v, --version` | Display version and build information. |
 | `-h, --help` | Show full command-line help message. |
 
@@ -106,166 +111,119 @@ SimRV -m program.elf
 
 ## 4. Interactive TUI Workbench
 
-The SimRV TUI provides an educational visual inspection environment for architecture students and hardware engineers.
+The SimRV TUI provides an educational visual inspection environment for architecture researchers and students.
 
-```
-┌─ SimRV 3.0 ─────────────────────────────────────────── [Hart 0: RUNNING] ─┐
+```text
+┌─ SimRV 2.0 ─────────────────────────────────────────── [RUNNING] ─┐
 │ [Regs] [Cache] [TLB] [Pipeline] [Hazards] [Explainer] │ Guest Terminal PTY │
 │                                                      │                    │
-│ PC: 0x80000000   ra: 0x00000000   sp: 0x80010000     │ Linux version 7.2  │
+│ PC: 0x80000000   ra: 0x00000000   sp: 0x80010000     │ Linux version 6.6  │
 │ IF: [0x80000020] addi a0, a0, 1                      │ buildroot login:   │
 │ ID: [0x8000001c] lw   a1, 0(sp)                      │                    │
 │ EX: [0x80000018] mul  a2, a1, a0                     │                    │
 │ MEM:[0x80000014] sw   s0, 4(sp)                      │                    │
 │ WB: [0x80000010] addi sp, sp, -16                    │                    │
 ├──────────────────────────────────────────────────────┴────────────────────┤
-│ [F1:Help] [F2:Load] [F5:Run] [F6:Step] [F8:Break] [Alt-M:MISA] [F4:Presets]
+│ [s:Step] [c:Run] [b:Back] [o:Load] [,:Config] [Alt-M:MISA] [?:Help]
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Focus & Input Navigation
+### Key Shortcuts
 
-- **Input Focus**: Keyboard input is automatically linked to simulation state: when running, input routes directly to the guest terminal (PTY / UART); when paused, keystrokes control TUI navigation and inspector panels.
-- **`[Tab]` / `[Shift-Tab]`**: Switch active sub-views within the left inspector pane.
-- **`[F5]` / `[c]` / `[Ctrl-P]`**: Run / Pause simulation execution.
-- **`[F6]` / `[s]`**: Step one cycle machine-wide across all harts.
-- **`[q]` / `[Ctrl-C]`**: Quit simulator.
-
-### Visualizer Panes
-
-1. **Registers (`Regs`)**: Real-time display of integer registers (`x0`–`x31`), floating-point registers (`f0`–`f31`), and vector registers (`v0`–`v31`).
-2. **Pipeline View**: In-flight stage slots (`IF`, `ID`, `EX`, `MEM`, `WB`) annotated with instruction mnemonic, data hazard stalls, and branch mispredict bubbles.
-3. **Cache Inspector**: Multi-way cache visualization for ICache and DCache, showing set indices, tags, hit/miss markers, and MESI line state flags (`[M]`, `[E]`, `[S]`, `[I]`).
-4. **Instruction Explainer**: Architectural breakdown of the current instruction, explaining bitfields, immediate decoding, register operands, IEEE-754 FP flags, or vector group configurations.
-5. **Memory & Stack**: Guest memory hex viewer and call stack frame resolution.
+| Hotkey | Action |
+| :--- | :--- |
+| `[s]` / `[Space]` | Single instruction step |
+| `[c]` / `[Ctrl-P]` | Run / Pause simulation loop |
+| `[b]` | Step back 1 instruction (Rollback tracking) |
+| `[o]` / `[Alt-O]` | Open Binary / Disk image loader modal |
+| `[,]` / `[Alt-S]` | Simulator Settings modal (CA/IA mode, rollback, logging) |
+| `[Alt-M]` | Configure MISA CSR modal (Extensions A/B/C/D/F/M/V/S/U & VLEN) |
+| `[y]` | Cycle-Accurate System Config modal |
+| `[i]` | Memory inspector modal |
+| `[m]` | Manage breakpoints and watchpoints |
+| `[l]` / `[Alt-L]` | Cycle tool inspector tab (Pipe / Cache / BP / Hazard / TLB / Bus) |
+| `[r]` / `[Alt-R]` | Cycle register tab (GPR / FPR / VEC) |
+| `[g]` | Toggle guided inspection hints while paused |
+| `[Tab]` | Cycle TUI layout |
+| `[F1]` / `[h]` / `[?]` | Display online help shortcuts |
+| `[Esc]` | Close active modal |
 
 ---
 
 ## 5. Bare-Metal & Embedded Simulation
 
-SimRV can execute freestanding bare-metal ELFs compiled with standard RISC-V GCC or Clang toolchains.
+SimRV executes freestanding bare-metal programs compiled with standard RISC-V GCC or Clang toolchains.
 
 ```bash
-# Run baremetal ELF with standard tohost exit reporting
-SimRV --cli -m build/my_program.elf -H 0x80001000
+# Run baremetal binary with standard tohost exit reporting
+./build/rv64-release/SimRV -b -m img/hello.bin -H 0x80001000 --cli
 ```
 
-### Hardware Peripherals Emulated
-
-- **16550A UART**: Serial I/O mapped at base address `0x10000000`.
-- **CLINT**: Core Local Interruptor at base address `0x02000000` providing `mtime` and `mtimecmp` registers (10 MHz timebase).
-- **PLIC**: Platform-Level Interrupt Controller at base address `0x0c000000` supporting priority thresholds and interrupt claims.
+For complete linker scripts, startup assembly, and MMIO peripheral maps, refer to the [Bare-Metal Guide](baremetal.md).
 
 ---
 
 ## 6. Full-System Linux Emulation
 
-SimRV boots full Linux distributions with OpenSBI and dynamic device-tree generation.
+SimRV boots full Linux distributions with OpenSBI and device-tree hardware descriptions:
 
 ```bash
-# Launch Linux with OpenSBI and root filesystem image
-SimRV --kernel linux-images/Image \
-      --disk linux-images/root.img \
-      --smp 2
+# Launch Linux with root filesystem and device tree
+./build/rv64-release/SimRV --os \
+  -m linux-images/rv64/fw_payload.bin \
+  -D linux-images/rv64/root.bin \
+  -f linux-images/rv64/devicetree.dtb
 ```
 
-### Full-System CLI Options
-
-- `--kernel <Image>`: Linux kernel image.
-- `--disk <root.img>`: Ext4 root filesystem image (attached as `/dev/vda` via VirtIO Block).
-- `--smp <2..16>`: Number of active SMP harts (default is 1 for single-hart execution).
-- `--dtb <virt.dtb>`: Optional custom Device Tree Blob (SimRV automatically synthesizes a device tree if omitted).
-- `--ram <MB>`: Guest RAM capacity in megabytes (default: 2048 MB).
+For image building instructions and prebuilt configurations, refer to the [Linux Build Guide](linux.md).
 
 ---
 
-## 7. CPU Model Profiles & Microarchitecture Tuning
+## 7. Co-Simulation & Debugging
 
-SimRV allows defining custom processor pipelines and timing parameters in human-editable `.cfg` files.
+### Spike Lockstep Co-Simulation
 
-### Interactive Model Wizard (`simrv-cpu-wizard`)
-
-Create and customize microarchitectural models interactively:
+Validate execution correctness instruction-by-instruction against the official Spike reference simulator:
 
 ```bash
-# Run interactive CLI wizard
-simrv-cpu-wizard
-
-# Generate from a template directly
-simrv-cpu-wizard --template rvcomp --name my_core --output configs/models/my_core.cfg
-
-# Validate configuration syntax against schema
-simrv-cpu-wizard --validate configs/models/my_core.cfg
+./build/rv64-release/SimRV -b -m img/hello.bin --lockstep --cli
 ```
 
-### Automatic Model Calibration (`simrv-tune`)
+### GDB Remote Serial Protocol (RSP)
 
-Automatically calibrate pipeline execution latencies, branch penalties, and cache configurations against RTL or hardware execution traces:
+Connect standard GDB to debug guest execution:
 
 ```bash
-simrv-tune --base-config configs/models/rvcomp.cfg --apply
+# Terminal 1: Launch SimRV with GDB RSP listener
+./build/rv64-release/SimRV -b -m program.elf --gdb --gdb-port 1234 --cli
+
+# Terminal 2: Connect GDB
+riscv64-unknown-elf-gdb program.elf -ex "target remote :1234"
 ```
 
 ---
 
-## 8. RTL Parity Verification
+## 8. Benchmarking & Reproducibility
 
-The RTL parity framework (`simrv-parity`) validates that SimRV cycle-accurate pipeline models produce identical cycle counts and execution behavior compared to physical RTL designs.
-
-```bash
-# List available RTL targets
-simrv-parity --list-targets
-
-# Run parity checks against CFU Proving Ground RVProc
-simrv-parity cfu-pg --benchmark all
-
-# Run parity checks against RVComp core
-simrv-parity rvcomp --quick
-```
-
-For more details on registering new hardware RTL targets, refer to [RTL Parity Verification](../hardware/rtl_parity.md).
-
----
-
-## 9. Benchmarking Suite
-
-The `simrv-benchmark` suite measures simulation throughput (KIPS/MIPS), memory footprint (RSS), and compares results against Spike or previous SimRV versions.
+Evaluate local simulation performance and verify clean-checkout reproducibility:
 
 ```bash
-# Run standard realworld benchmarks
-simrv-benchmark --suite realworld
+# Run release benchmark suite
+python3 scripts/benchmark.py --binary build/rv64-release/SimRV
 
-# Compare performance against Spike
-simrv-benchmark --suite realworld --spike $(which spike) --output results.json
-
-# Generate LaTeX performance comparison table
-simrv-benchmark --suite realworld --latex-table
+# Run full reproducibility validation workflow
+python3 scripts/reproduce.py --mode quick
 ```
 
 ---
 
-## 10. Troubleshooting & Reference
-
-### Common Questions
-
-- **Q: How does keyboard input routing work between Linux and the TUI?**
-  *A:* Keyboard input routes automatically based on execution state: while running, keystrokes are delivered directly to the guest terminal; while paused (via `F5` or `Ctrl-P`), keystrokes control simulator inspection and navigation.
-
-- **Q: Why does headless CLI mode finish without displaying the TUI?**
-  *A:* The `--cli` flag enforces non-interactive headless operation. To see the graphical TUI workbench, run `SimRV` without `--cli`.
-
-- **Q: Where are instruction traces written when passing `--trace`?**
-  *A:* Traces are saved in the `trace/` directory relative to your working directory (`trace/trace.txt`, `trace/tracepc.txt`).
-
-- **Q: How can I connect GDB to debug a running binary?**
-  *A:* Launch SimRV with `--gdb --cli -m program.elf`, then in another terminal run:
-  `riscv64-unknown-elf-gdb program.elf -ex "target remote :1234"`
-
-### Detailed Architecture & Extension Guides
+## 9. Detailed Reference Guides
 
 - [System Architecture](../architecture/overview.md)
-- [Bare-Metal Guide](baremetal.md)
-- [CPU Model Configuration Reference](../hardware/models.md)
-- [RTL Parity Verification Guide](../hardware/rtl_parity.md)
-- [TileLink-C Profile & Cache Coherence](../architecture/tilelink.md)
+- [Bare-Metal Programming Guide](baremetal.md)
+- [Terminal UI Architecture](tui.md)
+- [Linux Image Building](linux.md)
+- [Student Educational Reference](classroom.md)
 - [RISC-V Compliance Scope](../architecture/compliance.md)
+- [Custom ISA Extensions](../hardware/extensions.md)
+- [Release Qualification & Contract](../evaluation/release.md)
