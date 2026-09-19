@@ -38,6 +38,7 @@ All core ISA definitions and shared constants live in
 ## 2. Decode the Instruction
 
 Instruction decoding logic lives in:
+
 - [`include/simrv/pipeline/Decoder.hpp`](../../include/simrv/pipeline/Decoder.hpp) — field extraction helpers
 - [`src/pipeline/Decoder.cpp`](../../src/pipeline/Decoder.cpp) — master decode switch
 
@@ -59,6 +60,7 @@ Steps:
 ## 3. Implement Execution Logic
 
 Execution routing happens in the Execute stage:
+
 - [`src/execute/ExecuteUnit.cpp`](../../src/execute/ExecuteUnit.cpp) — routing hub
 - [`src/execute/ExecuteUnitInt.cpp`](../../src/execute/ExecuteUnitInt.cpp) — integer ops
 - [`src/execute/ExecuteUnitFloat.cpp`](../../src/execute/ExecuteUnitFloat.cpp) — FP ops

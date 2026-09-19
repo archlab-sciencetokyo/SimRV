@@ -92,37 +92,37 @@ SimRV requires a modern C++23 compiler (**Clang 22+** or **GCC 16+**), **CMake 3
 
 <div class="grid cards" markdown>
 
--   :material-book-open-page-variant:{ .lg .middle } __[User Guide](user/index.md)__
+- :material-book-open-page-variant:{ .lg .middle } **[User Guide](user/index.md)**
 
     ---
 
     CLI options, TUI navigation, keybindings, bare-metal programs, and Linux boot options.
 
--   :material-chip:{ .lg .middle } __[System Architecture](architecture/overview.md)__
+- :material-chip:{ .lg .middle } **[System Architecture](architecture/overview.md)**
 
     ---
 
     Detailed design of the execution units, TileLink-C cache coherence, MMU, and scoreboard.
 
--   :material-tune-vertical:{ .lg .middle } __[CPU Models & Tuning](hardware/models.md)__
+- :material-tune-vertical:{ .lg .middle } **[CPU Models & Tuning](hardware/models.md)**
 
     ---
 
     Human-editable `.cfg` processor profiles, pipeline calibration, and tuning with `simrv-tune`.
 
--   :material-check-decagram:{ .lg .middle } __[RTL Parity Verification](hardware/rtl_parity.md)__
+- :material-check-decagram:{ .lg .middle } **[RTL Parity Verification](hardware/rtl_parity.md)**
 
     ---
 
     Framework for cycle-by-cycle retirement trace comparison against physical Verilog designs.
 
--   :material-clipboard-check-outline:{ .lg .middle } __[Reviewer & Evaluation Guide](evaluation/reviewer.md)__
+- :material-clipboard-check-outline:{ .lg .middle } **[Reviewer & Evaluation Guide](evaluation/reviewer.md)**
 
     ---
 
     Artifact evaluation checklist, reproducibility commands, simulator speed comparisons, and BibTeX citations.
 
--   :material-code-braces:{ .lg .middle } __[Developer & Contributing](dev/contributing.md)__
+- :material-code-braces:{ .lg .middle } **[Developer & Contributing](dev/contributing.md)**
 
     ---
 

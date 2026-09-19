@@ -15,7 +15,7 @@ response matching, and sink lifetime rules.
 Cache policy is Illinois MESI:
 
 | MESI cache state | TileLink permission |
-|---|---|
+| --- | --- |
 | Invalid | None |
 | Shared | Branch |
 | Exclusive (clean) | Trunk |

@@ -122,6 +122,7 @@ Notice that instructions retire evenly across harts (e.g. 5.00M per core for 4 h
    - `SIMRV_XLEN` is fixed at compile time (32 or 64), eliminating runtime word-width branching and enabling full compiler optimization.
 4. **Empirical Benchmarking**:
    - Simulation throughput depends heavily on host CPU microarchitecture, compiler optimization levels, and guest workload characteristics. Users and reviewers are encouraged to record local baseline measurements on their own hardware using the bundled benchmark tooling:
+
      ```bash
      python3 scripts/benchmark.py --binary build/rv64-release/SimRV
      ```

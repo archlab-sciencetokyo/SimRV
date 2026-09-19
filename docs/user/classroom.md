@@ -19,7 +19,7 @@ to zero; the others are general read/write registers. In RV32 each register hold
 a 32-bit value; in RV64 each holds a 64-bit value.
 
 | Register | ABI Name | Role / Description | Saver |
-|:---|:---|:---|:---|
+| :--- | :--- | :--- | :--- |
 | **`x0`** | `zero` | Hardwired to zero (writes ignored, reads always return 0) | — |
 | **`x1`** | `ra` | Return Address — stores the link address for function calls | Caller |
 | **`x2`** | `sp` | Stack Pointer — points to the current top of the stack | Callee |
@@ -35,6 +35,7 @@ a 32-bit value; in RV64 each holds a 64-bit value.
 | **`x28` – `x31`** | `t3` – `t6` | Temporary Registers 3–6 | Caller |
 
 > [!NOTE]
+>
 > - **Caller-saved** registers (`ra`, `t0`–`t6`, `a0`–`a7`) can be overwritten by
 >   a called function. The caller must save them on the stack before any call if
 >   they are needed afterward.
@@ -48,7 +49,7 @@ When the Single (F) or Double (D) precision extensions are enabled, RISC-V
 provides 32 floating-point registers (`f0` through `f31`).
 
 | Register | ABI Name | Role / Description | Saver |
-|:---|:---|:---|:---|
+| :--- | :--- | :--- | :--- |
 | **`f0` – `f7`** | `ft0` – `ft7` | FP Temporaries 0–7 | Caller |
 | **`f8` – `f9`** | `fs0` – `fs1` | FP Saved Registers 0–1 | Callee |
 | **`f10` – `f11`** | `fa0` – `fa1` | FP Arguments 0–1 / Return Values 0–1 | Caller |
@@ -143,11 +144,13 @@ Use `--explain-inst <HEX>` to disassemble, decode, and print the step-by-step
 reconstruction of any instruction hex value.
 
 #### Example: Explaining an ADD instruction
+
 ```bash
 ./build/rv32-release/SimRV --explain-inst 0x00B502B3
 ```
 
 **Output:**
+
 ```
 === SimRV Educational Instruction Explainer ===
 
@@ -187,9 +190,11 @@ Description (Behavior):
 ### Interactive TUI Mode
 
 1. Run your binary on SimRV:
+
    ```bash
    ./build/rv32-release/SimRV --tui --baremetal -m program.elf --class
    ```
+
 2. The simulation starts paused (`[PAUSED]`). Press `c` to unpause and run continuously, or press `s` / `Space` to single-step instructions.
 3. Press `l` to cycle tool views, `r` to cycle register views, or `e` to open the instruction explainer.
 4. The EXPLAIN pane displays:
@@ -205,7 +210,7 @@ Description (Behavior):
 ### TUI Keybindings Reference
 
 | Key | Context | Action |
-|:---|:---|:---|
+| :--- | :--- | :--- |
 | `F1` / `h` | All / Paused | Open Help & Keybindings reference modal |
 | `F2` / `,` / `Alt-S` | Paused | Open Simulator Settings modal (Mode, SMP, Scheduler, Diagnostics) |
 | `F3` / `r` / `Alt-R` | Paused | Cycle register tabs (GPR / FPR / VEC / CSR) |
