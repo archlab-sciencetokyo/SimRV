@@ -200,6 +200,24 @@ auto BranchPredictor::predict(Address pc, const DecodedInstruction& inst) -> Bra
 
     pred.is_control = is_branch || is_jal || is_jalr;
     if (!pred.is_control) {
+        if (config_.predict_non_control && config_.type == BranchPredictorType::Bimodal &&
+            config_.enable_btb && config_.untagged_btb) {
+            pred.bht_index = get_bht_index(pc, ghr_);
+            const auto& entry =
+                config_.registered_btb_read
+                    ? registered_btb_entry_
+                    : btb_[static_cast<uint32_t>(pc >> config_.pc_shift) & btb_mask_];
+            const uint8_t counter =
+                config_.registered_btb_read ? registered_bht_counter_ : bht_[pred.bht_index];
+            if (entry.valid && is_taken_prediction(counter)) {
+                pred.is_control = true;
+                pred.is_branch = true;
+                pred.predicted_taken = true;
+                pred.predicted_target = entry.target;
+                pred.btb_hit = true;
+                pred.false_control_alias = true;
+            }
+        }
         return pred;
     }
 
@@ -227,9 +245,14 @@ auto BranchPredictor::predict(Address pc, const DecodedInstruction& inst) -> Bra
         pred.predicted_target = pc + static_cast<Address>(inst.imm);
         if (config_.untagged_btb) {
             const uint32_t btb_idx = static_cast<uint32_t>(pc >> config_.pc_shift) & btb_mask_;
-            const auto& entry = config_.registered_btb_read ? registered_btb_entry_ : btb_[btb_idx];
-            pred.predicted_taken = entry.valid;
-            if (entry.valid) {
+            const auto& entry = config_.registered_btb_read && !config_.jump_uses_current_btb
+                                    ? registered_btb_entry_
+                                    : btb_[btb_idx];
+            const auto counter = config_.registered_btb_read ? registered_bht_counter_
+                                                             : bht_[get_bht_index(pc, ghr_)];
+            pred.predicted_taken = entry.valid && (!config_.jump_uses_direction_counter ||
+                                                   is_taken_prediction(counter));
+            if (pred.predicted_taken) {
                 pred.predicted_target = entry.target;
                 pred.btb_hit = true;
             } else {
@@ -352,6 +375,10 @@ void BranchPredictor::update(const BranchFeedback& feedback) {
 
         update_direction(feedback);
 
+        if (feedback.prediction.false_control_alias) {
+            return;
+        }
+
         // Update BTB if branch was taken
         if (feedback.actual_taken && config_.enable_btb && !btb_.empty()) {
             const uint32_t btb_idx =
@@ -361,6 +388,10 @@ void BranchPredictor::update(const BranchFeedback& feedback) {
         }
     } else if (feedback.opcode == isa::Opcode::Jal) {
         ++stats_.direct_jumps;
+        if (config_.jump_uses_direction_counter && !bht_.empty()) {
+            const auto index = get_bht_index(feedback.pc, feedback.prediction.ghr_snapshot);
+            bht_[index] = saturate_up(bht_[index]);
+        }
         if (config_.enable_btb && !btb_.empty()) {
             const uint32_t btb_idx =
                 static_cast<uint32_t>(feedback.pc >> config_.pc_shift) & btb_mask_;

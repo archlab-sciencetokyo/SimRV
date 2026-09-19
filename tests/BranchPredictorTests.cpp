@@ -366,6 +366,48 @@ void test_telemetry_stats() {
     TEST_CHECK(st.overall_accuracy() == 100.0);
 }
 
+void test_untagged_btb_false_control_alias() {
+    BranchPredictorConfig config{
+        .type = BranchPredictorType::Bimodal,
+        .bht_entries = 16,
+        .btb_entries = 16,
+        .ras_entries = 4,
+        .enable_btb = true,
+        .enable_ras = false,
+        .pc_shift = 2,
+        .untagged_btb = true,
+        .predict_non_control = true,
+    };
+    BranchPredictor bp(config);
+
+    DecodedInstruction branch{};
+    branch.opcode = Opcode::Branch;
+    branch.imm = 12;
+    constexpr Address branch_pc = 0x1000;
+    auto cold = bp.predict(branch_pc, branch);
+    bp.update({.pc = branch_pc,
+               .actual_taken = true,
+               .actual_target = branch_pc + 12,
+               .opcode = Opcode::Branch,
+               .prediction = cold});
+
+    DecodedInstruction add{};
+    add.opcode = Opcode::Op;
+    constexpr Address alias_pc = branch_pc + (16 << 2);
+    const auto alias = bp.predict(alias_pc, add);
+    TEST_CHECK(alias.is_control);
+    TEST_CHECK(alias.false_control_alias);
+    TEST_CHECK(alias.predicted_taken);
+    TEST_CHECK(alias.predicted_target == branch_pc + 12);
+
+    bp.update({.pc = alias_pc,
+               .actual_taken = false,
+               .actual_target = alias_pc + 4,
+               .opcode = Opcode::Op,
+               .prediction = alias});
+    TEST_CHECK(!bp.predict(alias_pc, add).predicted_taken);
+}
+
 }  // namespace
 
 int main() {
@@ -378,6 +420,7 @@ int main() {
     test_ras_call_and_return();
     test_btb_indirect_jump_caching();
     test_telemetry_stats();
+    test_untagged_btb_false_control_alias();
     std::cout << "All BranchPredictor tests passed successfully!\n";
     return 0;
 }

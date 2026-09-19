@@ -493,17 +493,30 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v
                                             funct3 == static_cast<Instruction>(Funct3::Sd))
                                          : (funct3 == static_cast<Instruction>(Funct3::Sw));
         if (simrv::compiler::unlikely(is_tohost_write)) {
+            auto publish_host_write = [&](uint64_t value) {
+                if (cpu.machine_->runtime_profile.is_cycle_mode() &&
+                    cpu.pipeline_sim.config.host_interface_latency != 0) {
+                    cpu.ca_state.pending_host_value = value;
+                    const auto phase_period = cpu.pipeline_sim.config.host_interface_phase_period;
+                    const auto phase_delay =
+                        phase_period == 0 ? 0 : cpu.pipeline_sim.cycle_count() % phase_period;
+                    cpu.ca_state.host_write_remaining =
+                        cpu.pipeline_sim.config.host_interface_latency + phase_delay - 1;
+                    cpu.ca_state.host_write_pending = true;
+                } else {
+                    cpu.machine_->tohost = value;
+                }
+            };
             if (addr == cpu.machine_->configuration().isa.isatest_tohost || addr == 0x80001000 ||
                 addr == 0x40008000) {
-                cpu.machine_->tohost =
-                    simrv::xlen::kIsXLen64
-                        ? data
-                        : ((cpu.machine_->tohost & 0xFFFFFFFF00000000ULL) | data);
+                publish_host_write(simrv::xlen::kIsXLen64
+                                       ? data
+                                       : ((cpu.machine_->tohost & 0xFFFFFFFF00000000ULL) | data));
             } else if (!simrv::xlen::kIsXLen64 &&
                        (addr == cpu.machine_->configuration().isa.isatest_tohost + 4 ||
                         addr == 0x80001004 || addr == 0x40008004)) {
-                cpu.machine_->tohost = (cpu.machine_->tohost & 0x00000000FFFFFFFFULL) |
-                                       (static_cast<uint64_t>(data) << 32);
+                publish_host_write((cpu.machine_->tohost & 0x00000000FFFFFFFFULL) |
+                                   (static_cast<uint64_t>(data) << 32));
             }
         }
         if (cpu.machine_->runtime_profile.is_instruction_mode() &&

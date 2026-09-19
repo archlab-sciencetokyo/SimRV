@@ -1,3 +1,6 @@
+#include <cstdlib>
+#include <print>
+
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
@@ -59,6 +62,19 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     pipe.control_flush = false;
     ca_state.retired_this_cycle = false;
     ca_state.waiting_for_interconnect = false;
+    if (ca_state.host_write_pending) {
+        if (ca_state.host_write_remaining > 0) {
+            --ca_state.host_write_remaining;
+        } else {
+            machine.tohost = ca_state.pending_host_value;
+            ca_state.host_write_pending = false;
+        }
+        return;
+    }
+    if (pipe.frontend_refill_stall > 0) {
+        --pipe.frontend_refill_stall;
+        return;
+    }
     if (!pipe.initialized) {
         pipe.fetch_pc = state_.pc;
         pipe.initialized = true;
@@ -197,6 +213,12 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 return;
             }
             const bool was_serializing = writeback->serializing;
+            static const bool retire_trace = std::getenv("SIMRV_RETIRE_TRACE") != nullptr;
+            if (retire_trace) {
+                std::println(stderr, "CYCLETRACE cycle={} inst={} pc={:08x} ir={:08x}",
+                             pipeline_sim.cycle_count(), e_icount, writeback->context.cpc.raw(),
+                             writeback->context.ir);
+            }
             if (retain_retired_slot) *pipe.retired = *writeback;
             writeback->invalidate();
             pipe.retired_this_cycle = true;
@@ -266,7 +288,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     execute->wb_valid = true;
                 }
 
-                if (execute->context.traits.is_control) {
+                if (execute->context.traits.is_control || execute->prediction.false_control_alias) {
                     const Address sequential =
                         (execute->context.cpc + (execute->context.cinsn != 0u ? 2 : 4)).raw();
                     const Address target =
@@ -346,7 +368,8 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                         decode->remaining_latency = latency_minus_one(cfu_unit.query_latency(
                             decode->context.funct7, std::to_underlying(decode->context.funct3)));
                     }
-                    if (decode->context.traits.is_control) {
+                    if (decode->context.traits.is_control ||
+                        decode->prediction.false_control_alias) {
                         const Address sequential =
                             (decode->context.cpc + (decode->context.cinsn != 0u ? 2 : 4)).raw();
                         const Address target =
@@ -468,13 +491,32 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             fetch->wb_dest = fetch->context.rd;
             fetch->wb_valid = false;
             fetch->wb_val = 0;
-            if (cpu_model_config.instruction_cache.hit_latency > 1) {
+            if (instruction_cache_timing.enabled()) {
+                const auto access =
+                    instruction_cache_timing.access(fetch->context.cpc.raw(), ca_state.icache_miss);
+                const auto refill_wait = access.latency > 0 ? access.latency - 1 : 0;
+                if (!access.hit &&
+                    cpu_model_config.instruction_front_cache.freeze_pipeline_on_refill) {
+                    pipe.frontend_refill_stall = refill_wait;
+                    fetch->remaining_latency = 0;
+                } else {
+                    fetch->remaining_latency = refill_wait;
+                }
+                static const bool cache_trace = std::getenv("SIMRV_CACHE_TRACE") != nullptr;
+                if (cache_trace && (!access.hit || ca_state.icache_miss)) {
+                    std::println(stderr,
+                                 "CACHETRACE cycle={} pc={:08x} hit={} level={} backing_miss={} "
+                                 "latency={}",
+                                 pipeline_sim.cycle_count(), fetch->context.cpc.raw(), access.hit,
+                                 access.hit_level, ca_state.icache_miss, access.latency);
+                }
+            } else if (cpu_model_config.instruction_cache.hit_latency > 1) {
                 fetch->remaining_latency = cpu_model_config.instruction_cache.hit_latency - 1;
             }
             const Address width = fetch->context.cinsn != 0u ? 2 : 4;
             const Address sequential = (fetch->context.cpc + width).raw();
 
-            if (fetch->context.traits.is_control) {
+            if (fetch->context.traits.is_control || branch_predictor.config().predict_non_control) {
                 fetch->prediction =
                     branch_predictor.predict(fetch->context.cpc.raw(), fetch->context);
                 if (fetch->prediction.predicted_taken && fetch->prediction.predicted_target != 0) {

@@ -68,7 +68,7 @@ void test_cfu_provingground_profile() {
     TEST_CHECK(profile.pipeline.pipeline_type == PipelineType::FiveStage);
     TEST_CHECK(profile.pipeline.enable_forwarding);
     TEST_CHECK(profile.pipeline.mul_latency == 3);
-    TEST_CHECK(profile.pipeline.div_latency == 18);
+    TEST_CHECK(profile.pipeline.div_latency == 36);
     TEST_CHECK(profile.pipeline.branch_mispredict_penalty == 3);
     TEST_CHECK(profile.pipeline.cycle_counter_start_delay == 2);
 
@@ -77,6 +77,9 @@ void test_cfu_provingground_profile() {
     TEST_CHECK(profile.pipeline.branch_predictor.btb_entries == 2048);
     TEST_CHECK(profile.pipeline.branch_predictor.bht_entries == 2048);
     TEST_CHECK(!profile.pipeline.branch_predictor.enable_ras);
+    TEST_CHECK(profile.pipeline.branch_predictor.predict_non_control);
+    TEST_CHECK(profile.pipeline.branch_predictor.jump_uses_direction_counter);
+    TEST_CHECK(profile.pipeline.branch_predictor.jump_uses_current_btb);
     TEST_CHECK(profile.pipeline.branch_predictor.registered_btb_read);
     TEST_CHECK(profile.pipeline.branch_predictor.bht_initial_state == 0);
 

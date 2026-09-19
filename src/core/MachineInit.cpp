@@ -314,8 +314,10 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             model.pipeline.branch_predictor.ras_entries = config.ras_entries;
         }
         primary_hart().apply_cpu_model_config(model);
-        memory().system_bus().configure_timing(model.interconnect.request_latency,
-                                               model.interconnect.response_latency);
+        memory().system_bus().configure_timing(
+            model.interconnect.request_latency, model.interconnect.response_latency,
+            model.interconnect.data_request_latency, model.interconnect.data_response_latency,
+            model.interconnect.startup_data_response_latency);
         if (model.name == "cfu-provingground" || model.name == "rvproc") {
             config.memory.dram_base = 0x00000000;
             if (config.memory.dram_size < 512 * 1024 * 1024) {
@@ -337,8 +339,10 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             return std::unexpected(err);
         }
         primary_hart().apply_cpu_model_config(model);
-        memory().system_bus().configure_timing(model.interconnect.request_latency,
-                                               model.interconnect.response_latency);
+        memory().system_bus().configure_timing(
+            model.interconnect.request_latency, model.interconnect.response_latency,
+            model.interconnect.data_request_latency, model.interconnect.data_response_latency,
+            model.interconnect.startup_data_response_latency);
         if (model.name == "cfu-provingground" || model.name == "rvproc") {
             config.memory.dram_base = 0x00000000;
             if (config.memory.dram_size < 512 * 1024 * 1024) {

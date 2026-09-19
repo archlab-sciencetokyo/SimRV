@@ -10,75 +10,9 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
-import sys
 
-BENCHMARKS = {
-    'arithmetic_loop': '''
-int main(void) {
-    int a = 1;
-    int b = 2;
-    for (int i = 0; i < 100; i++) {
-        a = (a * 3) + b;
-        b = a ^ (b << 1);
-    }
-    return a + b;
-}
-''',
-    'raw_hazard_chain': '''
-int main(void) {
-    register int v = 42;
-    for (int i = 0; i < 100; i++) {
-        asm volatile (
-            "add %[v], %[v], %[i]\\n"
-            "sub %[v], %[v], %[i]\\n"
-            "add %[v], %[v], %[i]\\n"
-            "sub %[v], %[v], %[i]\\n"
-            : [v] "+r" (v) : [i] "r" (i)
-        );
-    }
-    return v;
-}
-''',
-    'branch_dense': '''
-int main(void) {
-    int s = 0;
-    for (int i = 0; i < 100; i++) {
-        if (i % 2 == 0) {
-            s += i;
-        } else {
-            s -= i;
-        }
-    }
-    return s;
-}
-''',
-    'mul_div_suite': '''
-int main(void) {
-    int a = 12345;
-    int b = 67;
-    int s = 0;
-    for (int i = 1; i <= 20; i++) {
-        s += (a * i) / (b + i);
-    }
-    return s;
-}
-''',
-    'load_store_array': '''
-int arr[64];
-int main(void) {
-    for (int i = 0; i < 64; i++) {
-        arr[i] = i * 3 + 1;
-    }
-    int sum = 0;
-    for (int i = 0; i < 64; i++) {
-        sum += arr[i];
-    }
-    return sum;
-}
-'''
-}
+from rtl_parity.common import BENCHMARKS, compare_retirement_traces, extract_number, get_toolchain
 
 CRT0_SRC = '''/*
  * SPDX-License-Identifier: MIT
@@ -183,46 +117,66 @@ SECTIONS
 '''
 
 
-def run_cmd(cmd, cwd=None):
+def run_cmd(cmd, cwd=None, extra_env=None):
     env = os.environ.copy()
-    extra_paths = [
-        "/var/archlab-modules/verilator/5.046/bin",
-        "/var/archlab-modules/riscv-gnu-toolchain/2026.08.27/bin",
-    ]
-    env["PATH"] = ":".join([p for p in extra_paths if os.path.exists(p)] + [env.get("PATH", "")])
-    if os.path.exists("/var/archlab-modules/gcc/16.2.0/lib64"):
-        env["LD_LIBRARY_PATH"] = "/var/archlab-modules/gcc/16.2.0/lib64:" + env.get("LD_LIBRARY_PATH", "")
+    if extra_env:
+        env.update(extra_env)
     res = subprocess.run(cmd, shell=True, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
     if res.returncode != 0:
         raise RuntimeError(f"Command failed ({res.returncode}): {cmd}\nOutput:\n{res.stdout}")
     return res.stdout
 
 
-def get_toolchain():
-    for gcc in ["riscv32-linux-gnu-gcc", "riscv32-unknown-elf-gcc", "riscv64-linux-gnu-gcc", "riscv64-unknown-elf-gcc"]:
-        if shutil.which(gcc):
-            prefix = gcc[:-3]
-            return gcc, f"{prefix}objcopy", f"{prefix}objdump"
-    raise RuntimeError("No suitable RISC-V toolchain found in PATH")
+def analyze_rtl_ifu_trace(rtl_out):
+    pattern = re.compile(
+        r'^IFUTRACE cycle=(\d+) pc=([0-9a-fA-F]+).*'
+        r'arvalid=(\d+).*rvalid=(\d+)',
+        re.MULTILINE,
+    )
+    outstanding = []
+    completed = []
+    for match in pattern.finditer(rtl_out):
+        cycle, pc, arvalid, rvalid = match.groups()
+        cycle = int(cycle)
+        if int(arvalid):
+            outstanding.append((cycle, int(pc, 16)))
+        if int(rvalid) and outstanding:
+            request_cycle, request_pc = outstanding.pop(0)
+            completed.append({
+                'pc': f'0x{request_pc:08x}',
+                'request_cycle': request_cycle,
+                'response_cycle': cycle,
+                'response_latency': cycle - request_cycle,
+            })
+
+    latencies = [event['response_latency'] for event in completed]
+    return {
+        'requests': len(completed) + len(outstanding),
+        'completed_requests': len(completed),
+        'incomplete_requests': len(outstanding),
+        'response_latency_min': min(latencies) if latencies else None,
+        'response_latency_max': max(latencies) if latencies else None,
+        'response_latency_mean': round(sum(latencies) / len(latencies), 2) if latencies else None,
+        'first_completed_requests': completed[:4],
+    }
 
 
-def extract_number(pattern, text):
-    m = re.search(pattern, text)
-    return int(m.group(1).replace(',', '')) if m else None
-
-
-def main():
+def main(arguments=None):
     parser = argparse.ArgumentParser(description="Evaluate RVComp RTL vs SimRV Cycle Parity")
     parser.add_argument('--out', type=str, default=None, help='Output path for JSON results')
     parser.add_argument('--cpu-profile', type=str, default="rvcomp", help='CPU profile name (default: rvcomp)')
     parser.add_argument('--cpu-config', type=str, default=None, help='Path to custom .cfg model file')
     parser.add_argument('--simrv-bin', type=str, default=None, help='Explicit path to SimRV executable')
-    args = parser.parse_args()
+    parser.add_argument('--rvcomp-dir', type=str, default=os.environ.get('RVCOMP_DIR'),
+                        help='RVComp checkout (default: $RVCOMP_DIR or sibling ../RVComp)')
+    parser.add_argument('--rvcomp-bin', type=str, default=None,
+                        help='Explicit RVComp Verilator executable')
+    parser.add_argument('--trace-dir', type=str, default=None,
+                        help='Write RTL/SimRV retirement traces and report first divergence')
+    args = parser.parse_args(arguments)
 
     repo_root = Path(__file__).resolve().parents[1]
-    rvcomp_dir = Path("/home/ren/workspace/lab/tools/RVComp")
-    if not rvcomp_dir.exists():
-        rvcomp_dir = repo_root.parent / "RVComp"
+    rvcomp_dir = Path(args.rvcomp_dir).expanduser() if args.rvcomp_dir else repo_root.parent / "RVComp"
 
     if args.simrv_bin:
         simrv_bin = Path(args.simrv_bin)
@@ -233,7 +187,7 @@ def main():
     if not simrv_bin.exists():
         raise RuntimeError(f"SimRV binary not found under build/rv32-release or build/rv64-release")
 
-    rvcom_bin = rvcomp_dir / "obj_dir/rvcom"
+    rvcom_bin = Path(args.rvcomp_bin).expanduser() if args.rvcomp_bin else rvcomp_dir / "obj_dir/rvcom"
     if not rvcom_bin.exists():
         raise RuntimeError(f"RVComp Verilator simulator binary not found at {rvcom_bin}")
 
@@ -276,15 +230,21 @@ def main():
         run_cmd(f"awk '{{if(NR%2){{buf=$0}}else{{print $0 buf; buf=\"\"}}}}' {hex64_path} > {hex128_path}", cwd=work_dir)
 
         # 3. Run RVComp RTL Verilator
-        rvcom_cmd = f"{rvcom_bin} +mem_file={hex128_path.resolve()} +max_cycles=10000000"
+        parity_trace = " +parity_trace" if args.trace_dir else ""
+        rvcom_cmd = f"{rvcom_bin} +mem_file={hex128_path.resolve()} +max_cycles=10000000{parity_trace}"
         rtl_out = run_cmd(rvcom_cmd, cwd=rvcomp_dir)
 
         rtl_minstret = extract_number(r'===> minstret\s*:\s*(\d+)', rtl_out)
         rtl_mcycle = extract_number(r'===> mcycle\s*:\s*(\d+)', rtl_out)
+        rtl_tohost_mcycle = extract_number(r'TOHOST_LOW mcycle=(\d+)', rtl_out)
+        rtl_tohost_minstret = extract_number(r'TOHOST_LOW mcycle=\d+ minstret=(\d+)', rtl_out)
         rtl_br_hit = extract_number(r'===> branch hit\s*:\s*(\d+)', rtl_out)
         rtl_br_miss = extract_number(r'===> branch miss\s*:\s*(\d+)', rtl_out)
         rtl_br_penalty = extract_number(r'===> branch miss penalty total\s*:\s*(\d+)', rtl_out)
         rtl_ifu_stall = extract_number(r'===> ifu stall\s*:\s*(\d+)', rtl_out)
+        rtl_l0_miss = extract_number(r'===> L0 icache miss\s*:\s*(\d+)', rtl_out)
+        rtl_l1i_miss = extract_number(r'===> L1 icache miss\s*:\s*(\d+)', rtl_out)
+        rtl_l2_miss = extract_number(r'===> L2 cache miss\s*:\s*(\d+)', rtl_out)
         rtl_lsu_stall = extract_number(r'===> lsu stall\s*:\s*(\d+)', rtl_out)
         rtl_mul_stall = extract_number(r'===> mul stall\s*:\s*(\d+)', rtl_out)
         rtl_div_stall = extract_number(r'===> div stall\s*:\s*(\d+)', rtl_out)
@@ -296,35 +256,67 @@ def main():
         else:
             model_arg = f"--cpu-profile {args.cpu_profile}"
         simrv_cmd = f"{simrv_bin} --cli --ca -m {elf_path.resolve()} -H 0x80000000 {model_arg}"
-        simrv_out = run_cmd(simrv_cmd, cwd=repo_root)
+        simrv_out = run_cmd(
+            simrv_cmd,
+            cwd=repo_root,
+            extra_env={'SIMRV_RETIRE_TRACE': '1', 'SIMRV_CACHE_TRACE': '1'}
+            if args.trace_dir else None,
+        )
 
         simrv_cycles = extract_number(r'Elapsed cycles \(clocks\)\s*:\s*[\d\.]*K?\s*\(([0-9,]+)\)', simrv_out)
         simrv_insts = extract_number(r'Executed instructions\s*:\s*[\d\.]*K?\s*\(([0-9,]+)\)', simrv_out)
         simrv_raw_stalls = extract_number(r'-\s*Data RAW Stalls\s*:\s*([0-9,]+)', simrv_out)
         simrv_ctrl_bubbles = extract_number(r'-\s*Control Bubbles\s*:\s*(\d+)', simrv_out)
+        simrv_l0_fills = len(re.findall(r'^CACHETRACE .*hit=false', simrv_out, re.MULTILINE))
+        simrv_backing_fills = len(
+            re.findall(r'^CACHETRACE .*backing_miss=true', simrv_out, re.MULTILINE)
+        )
+        rtl_ifu_trace = analyze_rtl_ifu_trace(rtl_out)
 
-        # In crt0.S, SimRV halts upon the 32-bit sw tohost (8000000c).
-        # Verilator continues for 3 more instructions: auipc, sw tohost+4, unimp (80000018).
-        # We report both raw and aligned parity:
-        inst_delta = rtl_minstret - simrv_insts if (rtl_minstret and simrv_insts) else None
+        # SimRV stops while executing the low-word HTIF store. The instrumented RTL
+        # testbench reports its counters at that same store; its retirement counter
+        # includes the store itself while SimRV's does not.
+        rtl_reference_cycles = rtl_tohost_mcycle or rtl_mcycle
+        rtl_reference_insts = rtl_tohost_minstret or rtl_minstret
+        inst_delta = rtl_reference_insts - simrv_insts if (rtl_reference_insts and simrv_insts) else None
 
-        # Compare core execution cycles (RTL core estimate vs SimRV elapsed cycles)
-        cycle_delta = abs(simrv_cycles - rtl_core_est_cycle) if (simrv_cycles and rtl_core_est_cycle) else None
-        cycle_err_pct = round(cycle_delta / rtl_core_est_cycle * 100, 2) if (cycle_delta is not None and rtl_core_est_cycle) else 0.0
+        measured_cycle_delta = simrv_cycles - rtl_reference_cycles if (simrv_cycles and rtl_reference_cycles) else None
+        measured_cycle_err_pct = round(abs(measured_cycle_delta) / rtl_reference_cycles * 100, 2) if (measured_cycle_delta is not None and rtl_reference_cycles) else 0.0
+        estimate_cycle_delta = simrv_cycles - rtl_core_est_cycle if (simrv_cycles and rtl_core_est_cycle) else None
+        estimate_cycle_err_pct = round(abs(estimate_cycle_delta) / rtl_core_est_cycle * 100, 2) if (estimate_cycle_delta is not None and rtl_core_est_cycle) else 0.0
 
         print(f"  RTL Verilator : {rtl_minstret} insts, {rtl_core_est_cycle} core cycles (mcycle: {rtl_mcycle}, branch miss: {rtl_br_miss}, ifu_stall: {rtl_ifu_stall}, lsu_stall: {rtl_lsu_stall}, mul_stall: {rtl_mul_stall}, div_stall: {rtl_div_stall})")
         print(f"  SimRV (rvcomp): {simrv_insts} insts, {simrv_cycles} cycles (raw stalls: {simrv_raw_stalls}, ctrl bubbles: {simrv_ctrl_bubbles})")
-        print(f"  Alignment     : inst delta = {inst_delta} (HTIF shutdown handshake: 3), cycle delta = {cycle_delta} ({cycle_err_pct}% error)")
+        estimate_offset = rtl_core_est_cycle - rtl_mcycle
+        print(f"  HTIF checkpoint: RTL {rtl_reference_insts} insts / {rtl_reference_cycles} cycles; inst delta = {inst_delta} (store retirement: 1), cycle delta = {measured_cycle_delta:+d} ({measured_cycle_err_pct}% error)")
+        print(f"  Diagnostics   : estimate delta = {estimate_cycle_delta:+d} ({estimate_cycle_err_pct}% error), final RTL estimate offset = {estimate_offset}")
+
+        trace_comparison = None
+        if args.trace_dir:
+            trace_dir = Path(args.trace_dir)
+            trace_dir.mkdir(parents=True, exist_ok=True)
+            (trace_dir / f'{name}.rtl.log').write_text(rtl_out)
+            (trace_dir / f'{name}.simrv.log').write_text(simrv_out)
+            trace_comparison = compare_retirement_traces(rtl_out, simrv_out)
+            trace_comparison['rtl_ifu'] = rtl_ifu_trace
+            trace_comparison['simrv_l0_fills'] = simrv_l0_fills
+            trace_comparison['simrv_backing_fills'] = simrv_backing_fills
+            print(f"  Trace          : {trace_comparison}")
 
         results[name] = {
             'rtl_verilator': {
                 'minstret': rtl_minstret,
                 'mcycle': rtl_mcycle,
+                'tohost_mcycle': rtl_tohost_mcycle,
+                'tohost_minstret': rtl_tohost_minstret,
                 'core_estimate_cycle': rtl_core_est_cycle,
                 'branch_hit': rtl_br_hit,
                 'branch_miss': rtl_br_miss,
                 'branch_miss_penalty': rtl_br_penalty,
                 'ifu_stall': rtl_ifu_stall,
+                'l0_icache_miss': rtl_l0_miss,
+                'l1_icache_miss': rtl_l1i_miss,
+                'l2_cache_miss': rtl_l2_miss,
                 'lsu_stall': rtl_lsu_stall,
                 'mul_stall': rtl_mul_stall,
                 'div_stall': rtl_div_stall
@@ -333,13 +325,21 @@ def main():
                 'executed_instructions': simrv_insts,
                 'elapsed_cycles': simrv_cycles,
                 'data_raw_stalls': simrv_raw_stalls,
-                'control_bubbles': simrv_ctrl_bubbles
+                'control_bubbles': simrv_ctrl_bubbles,
+                'l0_timing_fills': simrv_l0_fills,
+                'backing_fills': simrv_backing_fills,
             },
             'comparison': {
                 'instruction_delta': inst_delta,
-                'cycle_delta': cycle_delta,
-                'cycle_error_percent': cycle_err_pct,
-                'parity_confirmed': (inst_delta == 3 and cycle_err_pct < 5.0)
+                'measured_cycle_delta': measured_cycle_delta,
+                'measured_cycle_error_percent': measured_cycle_err_pct,
+                'estimate_cycle_delta': estimate_cycle_delta,
+                'estimate_cycle_error_percent': estimate_cycle_err_pct,
+                'rtl_estimate_offset': estimate_offset,
+                'instruction_parity_at_tohost': (inst_delta == 1),
+                'exact_cycle_parity': (measured_cycle_delta == 0),
+                'parity_confirmed': (inst_delta == 1 and measured_cycle_delta == 0),
+                'retirement_trace': trace_comparison,
             }
         }
 
@@ -347,7 +347,8 @@ def main():
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(results, indent=2))
     print(f"\n[+] Saved parity evaluation results to {out_path}")
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

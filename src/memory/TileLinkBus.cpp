@@ -60,10 +60,16 @@ void TileLinkBus::record_transaction(TileLinkChannel ch, std::string_view opcode
 
 void TileLinkBus::add_node(TileLinkNode* node) { router_.register_device(node); }
 
-void TileLinkBus::configure_timing(uint32_t request_latency, uint32_t response_latency) {
+void TileLinkBus::configure_timing(uint32_t request_latency, uint32_t response_latency,
+                                   uint32_t data_request_latency, uint32_t data_response_latency,
+                                   uint32_t startup_data_response_latency) {
     SmpLockGuard lock(bus_mutex_, is_smp_enabled());
     request_latency_ = std::max(1u, request_latency);
     response_latency_ = std::max(1u, response_latency);
+    data_request_latency_ = data_request_latency == 0 ? request_latency_ : data_request_latency;
+    data_response_latency_ = data_response_latency == 0 ? response_latency_ : data_response_latency;
+    startup_data_response_latency_ = startup_data_response_latency;
+    data_response_count_ = 0;
 }
 
 auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
@@ -74,15 +80,20 @@ auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
     }
     record_transaction(TileLinkChannel::A, to_string(req.opcode), req.source, 0, req.address.raw(),
                        to_string(req.grow));
+    const bool data_port = (req.source & 1u) == static_cast<TlSourceId>(TlPort::Data);
     req_queue_.push_back(
-        TimedRequest{.payload = req, .submitted_cycle = cycle_, .sequence = next_sequence_++});
+        TimedRequest{.payload = req,
+                     .submitted_cycle = cycle_,
+                     .request_latency = data_port ? data_request_latency_ : request_latency_,
+                     .sequence = next_sequence_++});
     return true;
 }
 
 void TileLinkBus::advance_cycle() {
     SmpLockGuard lock(bus_mutex_, is_smp_enabled());
     ++cycle_;
-    if (!req_queue_.empty() && req_queue_.front().submitted_cycle + request_latency_ <= cycle_) {
+    if (!req_queue_.empty() &&
+        req_queue_.front().submitted_cycle + req_queue_.front().request_latency <= cycle_) {
         auto request = std::move(req_queue_.front());
         req_queue_.pop_front();
         process_request(request);
@@ -216,6 +227,12 @@ void TileLinkBus::process_request(const TimedRequest& request) {
         resp.denied = true;
     }
     const uint8_t beat_count = has_line_data ? kTlBlockBytes / kTlBeatBytes : 1;
+    const bool data_port = (req.source & 1u) == static_cast<TlSourceId>(TlPort::Data);
+    const uint32_t response_latency =
+        data_port && data_response_count_ == 0 && startup_data_response_latency_ != 0
+            ? startup_data_response_latency_
+            : (data_port ? data_response_latency_ : response_latency_);
+    if (data_port) ++data_response_count_;
     for (uint8_t beat = 0; beat < beat_count; ++beat) {
         TlChannelD payload = resp;
         if (has_line_data) {
@@ -225,7 +242,7 @@ void TileLinkBus::process_request(const TimedRequest& request) {
             .payload = payload,
             // A latency of one exposes the first beat in the request-completion cycle. Each
             // following beat occupies its own D-channel transfer cycle.
-            .ready_cycle = cycle_ + response_latency_ - 1 + beat,
+            .ready_cycle = cycle_ + response_latency - 1 + beat,
             .sequence = request.sequence,
             .beat_index = beat,
             .beat_count = beat_count,

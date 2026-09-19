@@ -94,6 +94,17 @@ void CPU::apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config) 
     (void)icache.configure(config.instruction_cache.capacity_bytes,
                            config.instruction_cache.associativity);
     (void)dcache.configure(config.data_cache.capacity_bytes, config.data_cache.associativity);
+    const simrv::cache::TimingLevelConfig instruction_level{
+        .capacity_bytes = config.instruction_front_cache.capacity_bytes,
+        .associativity = config.instruction_front_cache.associativity,
+        .line_bytes = config.instruction_front_cache.line_bytes,
+        .hit_latency = config.instruction_front_cache.hit_latency,
+        .refill_latency = config.instruction_front_cache.refill_latency,
+    };
+    instruction_cache_timing.configure(
+        std::span<const simrv::cache::TimingLevelConfig>(&instruction_level, 1),
+        config.instruction_front_cache.backing_refill_latency,
+        config.instruction_front_cache.startup_refill_latencies);
     ca_state.reset_instruction();
     ca_pipeline.reset();
     branch_predictor.configure(pipeline_sim.config.branch_predictor);
@@ -137,6 +148,7 @@ void CPU::TLB_flush() {
     decode_cache.flush();
     icache.flush();
     dcache.flush();
+    instruction_cache_timing.flush();
     soft_tlb_flush();
 }
 void CPU::TLB_flush(const core::TlbFlushFilter& filter) {

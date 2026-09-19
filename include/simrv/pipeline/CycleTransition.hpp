@@ -70,6 +70,9 @@ struct HartCycleState {
     DataTransferState data_transfer{};
     TimedPageWalkState instruction_walk{};
     TimedPageWalkState data_walk{};
+    uint64_t pending_host_value = 0;
+    LatencyCycles host_write_remaining = 0;
+    bool host_write_pending = false;
 
     constexpr void reset_instruction() noexcept {
         stage = CycleStage::Fetch;
@@ -85,6 +88,9 @@ struct HartCycleState {
         data_transfer.reset();
         instruction_walk.reset();
         data_walk.reset();
+        pending_host_value = 0;
+        host_write_remaining = 0;
+        host_write_pending = false;
     }
 };
 
@@ -149,6 +155,7 @@ struct HartPipelineState {
     bool data_hazard_stall = false;
     bool control_flush = false;
     uint8_t control_recovery_bubbles = 0;
+    LatencyCycles frontend_refill_stall = 0;
 
     [[nodiscard]] constexpr auto slot(PipelineStage s) noexcept -> CycleInstructionSlot& {
         return storage_[std::to_underlying(s)];
@@ -175,6 +182,7 @@ struct HartPipelineState {
         data_hazard_stall = other.data_hazard_stall;
         control_flush = other.control_flush;
         control_recovery_bubbles = other.control_recovery_bubbles;
+        frontend_refill_stall = other.frontend_refill_stall;
     }
 
     constexpr auto operator=(const HartPipelineState& other) noexcept -> HartPipelineState& {
@@ -193,6 +201,7 @@ struct HartPipelineState {
             data_hazard_stall = other.data_hazard_stall;
             control_flush = other.control_flush;
             control_recovery_bubbles = other.control_recovery_bubbles;
+            frontend_refill_stall = other.frontend_refill_stall;
         }
         return *this;
     }
@@ -216,6 +225,7 @@ struct HartPipelineState {
         data_hazard_stall = false;
         control_flush = false;
         control_recovery_bubbles = 0;
+        frontend_refill_stall = 0;
     }
 };
 

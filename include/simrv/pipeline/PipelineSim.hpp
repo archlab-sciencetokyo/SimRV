@@ -102,6 +102,8 @@ struct CpuConfig {
     LatencyCycles fence_flush_penalty = 4;
     LatencyCycles branch_mispredict_penalty = 2;
     LatencyCycles cycle_counter_start_delay = 0;
+    LatencyCycles host_interface_latency = 0;
+    LatencyCycles host_interface_phase_period = 0;
     bool enable_forwarding = true;
     bool enable_instruction_prefetch = false;
     bool record_snapshots = false;

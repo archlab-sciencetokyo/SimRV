@@ -86,7 +86,7 @@ misa = "ima"
 type = "five-stage"
 enable_forwarding = true
 mul_latency = 2
-div_latency = 34
+div_latency = 35
 fp_alu_latency = 4
 fp_div_latency = 16
 branch_mispredict_penalty = 4
@@ -104,6 +104,7 @@ pc_shift = 2
 enable_btb = true
 enable_ras = false
 untagged_btb = true
+predict_non_control = true
 registered_btb_read = false
 bht_initial_state = 1
 
@@ -151,6 +152,8 @@ response_latency = 1
 | `fp_div_latency` | uint | `16` | Latency of floating-point division and square root operations. |
 | `branch_mispredict_penalty` | uint | `3` | Recovery flush penalty in cycles when a branch is mispredicted. |
 | `cycle_counter_start_delay` | uint | `0` | Delay in clock cycles before the `mcycle` counter starts incrementing after reset deassertion. |
+| `host_interface_latency` | uint | `0` | Completion latency for cycle-mode writes to the HTIF/tohost interface. Zero publishes the write immediately. |
+| `host_interface_phase_period` | uint | `0` | Optional transport phase period. A write issued at phase `p` adds `p` cycles, modeling a phase-aligned host interface. |
 | `csr_flush_penalty` | uint | `3` | Pipeline stall/drain penalty when executing serializing CSR instructions. |
 | `fence_flush_penalty` | uint | `4` | Pipeline stall/drain penalty when executing `FENCE` or `FENCE.I`. |
 
@@ -167,6 +170,9 @@ response_latency = 1
 | `enable_btb` | bool | `true` | Enables branch target caching. |
 | `enable_ras` | bool | `true` | Enables Return Address Stack. |
 | `untagged_btb` | bool | `false` | When true, BTB entries omit tag checks, indexing solely via lower PC bits. |
+| `predict_non_control` | bool | `false` | When true, an untagged BTB may redirect a non-control instruction on an aliased taken entry, matching predictors that access every fetch PC. |
+| `jump_uses_direction_counter` | bool | `false` | Require the BTB direction counter to predict a direct jump taken. Use this for unified BTB/PHT designs that do not special-case `JAL`. |
+| `jump_uses_current_btb` | bool | `false` | Use the current-PC BTB entry for direct jumps even when conditional predictions consume a registered BTB output. |
 | `registered_btb_read` | bool | `false` | Set to true if BTB output takes 1 cycle to latch, inserting a 1-cycle bubble on predicted taken branches. |
 | `bht_initial_state` | uint | `0` | Initial 2-bit counter value: `0` (Strongly Not Taken), `1` (Weakly Not Taken), `2` (Weakly Taken), `3` (Strongly Taken). |
 
@@ -180,12 +186,27 @@ response_latency = 1
 | `hit_latency` | uint | `1` | Cache access latency on hit in clock cycles. |
 | `miss_latency` | uint | `10` | Penalty added on cache miss during line fill request. |
 
+An optional `[instruction_front_cache]` section adds a tag-only timing level in
+front of the coherent instruction cache. It accepts `capacity_bytes`,
+`associativity`, `line_bytes`, `hit_latency`, `refill_latency`, and
+`backing_refill_latency`. The underlying timing engine supports ordered inclusive
+levels with independent geometry and latency, while architectural data remains
+owned by the coherent cache. `startup_refill_latencies` may contain a quoted,
+comma-separated latency sequence for simulations that begin with partially warm
+hardware state. `freeze_pipeline_on_refill` models blocking in-order frontends
+whose outstanding fetch prevents every pipeline stage from advancing. This
+permits small L0 lines and frontend-owned request timing without changing the
+coherent fabric's transfer size.
+
 ### `[interconnect]` Section
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `request_latency` | uint | `1` | Latency from CPU master issue to crossbar/device request arrival. |
 | `response_latency` | uint | `1` | Latency for slave response/acknowledgment transfer back to CPU. |
+| `data_request_latency` | uint | `0` | Optional data-port request override; zero inherits `request_latency`. |
+| `data_response_latency` | uint | `0` | Optional data-port response override; zero inherits `response_latency`. |
+| `startup_data_response_latency` | uint | `0` | Optional response latency for the first data-port transaction after reset; later responses use `data_response_latency`. |
 
 ---
 
@@ -211,7 +232,7 @@ SimRV --dump-cpu-model balanced my_balanced.cfg
 
 The `configs/models/` folder contains authoritative configurations calibrated to specific hardware/FPGA processor RTL:
 
-1. **`rvcomp.cfg`**: Calibrated to the Archlab RVComp 5-stage SystemVerilog processor (`xlen = 32`, `misa = "ima"`). Features 34-cycle non-restoring divider, 2-cycle multiplier, untagged 512-entry BTB, 8192-entry BHT with weak-not-taken reset state (`2'b01`), 4-cycle branch mispredict penalty, and 4-cycle L1 D-Cache hit latency.
+1. **`rvcomp.cfg`**: Calibrated to the Archlab RVComp 5-stage SystemVerilog processor (`xlen = 32`, `misa = "ima"`). Features a 34-stall-cycle non-restoring divider (`div_latency = 35` because SimRV includes the issue cycle), 2-cycle multiplier, untagged 512-entry BTB, 8192-entry BHT with weak-not-taken reset state (`2'b01`), 4-cycle branch mispredict penalty, and 4-cycle L1 D-Cache hit latency.
 2. **`cfu-provingground.cfg`**: Calibrated to Tokyo Tech Archlab's CFU-ProvingGround FPGA core (RVProc, `xlen = 32`, `misa = "im"`). Features registered BTB reads (1-cycle branch prediction bubble), reset counter delay of 2 cycles, and custom function unit (CFU) hardware interface.
 
 ---
@@ -229,17 +250,29 @@ To calibrate SimRV to an external RTL core:
 3. **Verify via Evaluation Tooling**:
 
    ```bash
-   python3 scripts/evaluate_rvcomp.py
+   python3 scripts/evaluate_rvcomp.py --rvcomp-dir ../RVComp \
+     --trace-dir build/rvcomp_traces
    ```
 
-   Compare instruction counts, core cycle estimates, and cache stalls against Verilator simulation logs.
+   Compare instruction counts, measured RTL `mcycle`, derived component estimates, and cache stalls
+   against Verilator simulation logs. The evaluator reports measured and estimated cycle deltas
+   separately; only a zero measured-cycle delta is exact parity.
+
+   The evaluator uses the RISC-V tools already on `PATH`; it does not assume a
+   site-specific toolchain directory. `--rvcomp-bin` can select a prebuilt RTL
+   simulator when the default `../RVComp/obj_dir/rvcom` is not appropriate.
 
 4. **Automated Microarchitecture Calibration Optimizer**:
 
    SimRV provides `scripts/tune_cpu_model.py` to systematically calibrate any CPU `.cfg` against Verilator RTL logs across an evaluation benchmark suite:
 
    ```bash
-   python3 scripts/tune_cpu_model.py --config configs/models/rvcomp.cfg --apply
+   python3 scripts/tune_cpu_model.py --base-config configs/models/rvcomp.cfg --apply
    ```
 
-   The tuner performs multi-parameter coordinate descent across interconnect latencies, cache capacities, and hit/miss timing, optimizing Mean Absolute Percentage Error (MAPE). For RVComp, this automated calibration reduced simulation error against RTL from **41.78% MAPE down to 2.39% MAPE**.
+   The tuner performs multi-parameter coordinate descent across interconnect latencies, cache
+   capacities, and hit/miss timing, optimizing Mean Absolute Percentage Error (MAPE) against the
+   measured RTL `mcycle`. The current hierarchy-aware configuration measures **0.96% MAPE** across the five
+   evaluation kernels. The previously reported **2.39%** used the RTL testbench's derived
+   `minstret + stall counters` estimate, which is consistently 33 cycles above measured `mcycle`
+   for these kernels and must not be presented as exact cycle parity.

@@ -15,6 +15,7 @@
 #include "simrv/Define.hpp"
 #include "simrv/cache/DCache.hpp"
 #include "simrv/cache/ICache.hpp"
+#include "simrv/cache/TimingCache.hpp"
 #include "simrv/core/CsrFile.hpp"
 #include "simrv/core/DecodeCache.hpp"
 #include "simrv/core/RegisterFile.hpp"
@@ -662,6 +663,7 @@ class CPU {
     [[nodiscard]] constexpr const auto& active_context() const noexcept { return *active_context_; }
     simrv::cache::ICache icache;
     simrv::cache::DCache dcache;
+    simrv::cache::TimingCacheHierarchy instruction_cache_timing;
     sbi::Sbi sbi;
     std::ofstream* trap_log_stream = nullptr;
     bool use_opensbi = false;

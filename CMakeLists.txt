@@ -468,6 +468,10 @@ if(BUILD_TESTING)
   add_test(NAME release-tools
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/ReleaseToolTests.py)
   set_tests_properties(release-tools PROPERTIES LABELS "gate;regress;release")
+  add_test(NAME rtl-parity-tools
+           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RtlParityToolTests.py)
+  set_tests_properties(rtl-parity-tools PROPERTIES LABELS
+                                                   "gate;regress;pipeline")
 
   # Optional App/Linux smoke tests
   if(DEFINED ENV{SIMRV_APP_IMG})

@@ -45,6 +45,12 @@ struct BranchPredictorConfig {
     bool enable_ras = true;
     uint8_t pc_shift = 1;
     bool untagged_btb = false;
+    /// Consult the direction table and untagged BTB before decode. This permits aliases to
+    /// redirect ordinary instructions, matching RTL predictors that cannot oracle-filter the
+    /// lookup using the decoded opcode.
+    bool predict_non_control = false;
+    bool jump_uses_direction_counter = false;
+    bool jump_uses_current_btb = false;
     /// Model a synchronous block-RAM lookup. The cycle kernel latches the read address before
     /// redirect resolution, matching predictors whose output changes on the following edge.
     bool registered_btb_read = false;
@@ -70,6 +76,7 @@ struct BranchPrediction {
     GlobalHistory ghr_snapshot = 0;
     bool btb_hit = false;
     bool ras_hit = false;
+    bool false_control_alias = false;
 
     [[nodiscard]] constexpr auto direction() const noexcept -> BranchDirection {
         return predicted_taken ? BranchDirection::Taken : BranchDirection::NotTaken;

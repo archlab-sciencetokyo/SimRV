@@ -7,6 +7,7 @@
  */
 #pragma once
 
+#include <algorithm>
 #include <bit>
 #include <cstdint>
 #include <expected>
@@ -14,6 +15,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "simrv/isa/Base.hpp"
 #include "simrv/isa/Common.hpp"
@@ -37,9 +39,23 @@ struct L1CacheConfig {
     LatencyCycles miss_latency = 12;
 };
 
+struct FrontCacheConfig {
+    uint32_t capacity_bytes = 0;
+    uint32_t associativity = 1;
+    uint32_t line_bytes = 16;
+    LatencyCycles hit_latency = 1;
+    LatencyCycles refill_latency = 1;
+    LatencyCycles backing_refill_latency = 1;
+    std::vector<LatencyCycles> startup_refill_latencies{};
+    bool freeze_pipeline_on_refill = false;
+};
+
 struct InterconnectTiming {
     LatencyCycles request_latency = 1;
     LatencyCycles response_latency = 1;
+    LatencyCycles data_request_latency = 0;
+    LatencyCycles data_response_latency = 0;
+    LatencyCycles startup_data_response_latency = 0;
 };
 
 struct CpuModelConfig {
@@ -51,6 +67,7 @@ struct CpuModelConfig {
     CpuConfig pipeline{};
     L1CacheConfig instruction_cache{};
     L1CacheConfig data_cache{};
+    FrontCacheConfig instruction_front_cache{};
     InterconnectTiming interconnect{};
     bool enable_idle_spans = true;
 
@@ -108,6 +125,29 @@ struct CpuModelConfig {
         if (instruction_cache.line_bytes != data_cache.line_bytes) {
             return std::unexpected(
                 "instruction and data caches must use one shared coherent line size");
+        }
+        if (instruction_front_cache.capacity_bytes != 0) {
+            const auto& cache = instruction_front_cache;
+            if (!std::has_single_bit(cache.capacity_bytes) ||
+                !std::has_single_bit(cache.associativity) ||
+                !std::has_single_bit(cache.line_bytes) ||
+                cache.capacity_bytes < cache.associativity * cache.line_bytes ||
+                cache.capacity_bytes % (cache.associativity * cache.line_bytes) != 0 ||
+                !std::has_single_bit(cache.capacity_bytes /
+                                     (cache.associativity * cache.line_bytes))) {
+                return std::unexpected(
+                    "instruction front-cache geometry must form power-of-two sets");
+            }
+            if (cache.hit_latency == 0 || cache.refill_latency == 0 ||
+                cache.backing_refill_latency == 0) {
+                return std::unexpected(
+                    "instruction front-cache latencies must be at least one cycle");
+            }
+            if (std::ranges::any_of(cache.startup_refill_latencies,
+                                    [](LatencyCycles latency) { return latency == 0; })) {
+                return std::unexpected(
+                    "instruction front-cache startup refill latencies must be at least one cycle");
+            }
         }
         if (interconnect.request_latency == 0 || interconnect.response_latency == 0) {
             return std::unexpected(

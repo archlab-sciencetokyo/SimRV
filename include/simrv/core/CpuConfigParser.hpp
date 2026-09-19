@@ -189,6 +189,7 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
         Cpu,
         Pipeline,
         BranchPredictor,
+        InstructionFrontCache,
         InstructionCache,
         DataCache,
         Interconnect
@@ -220,6 +221,10 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                        detail::iequals(sec_name, "icache") ||
                        detail::iequals(sec_name, "cache.instruction")) {
                 current_section = Section::InstructionCache;
+            } else if (detail::iequals(sec_name, "instruction_front_cache") ||
+                       detail::iequals(sec_name, "l0_instruction_cache") ||
+                       detail::iequals(sec_name, "l0_icache")) {
+                current_section = Section::InstructionFrontCache;
             } else if (detail::iequals(sec_name, "data_cache") ||
                        detail::iequals(sec_name, "dcache") ||
                        detail::iequals(sec_name, "cache.data")) {
@@ -339,6 +344,16 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                     static_cast<uint32_t>(std::stoul(std::string(val_str)));
                 continue;
             }
+            if (key == "host_interface_latency") {
+                config.pipeline.host_interface_latency =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
+            if (key == "host_interface_phase_period") {
+                config.pipeline.host_interface_phase_period =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                continue;
+            }
             if (key == "csr_flush_penalty") {
                 config.pipeline.csr_flush_penalty =
                     static_cast<uint32_t>(std::stoul(std::string(val_str)));
@@ -409,6 +424,24 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                 }
                 continue;
             }
+            if (key == "predict_non_control") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.pipeline.branch_predictor.predict_non_control = *b;
+                }
+                continue;
+            }
+            if (key == "jump_uses_direction_counter") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.pipeline.branch_predictor.jump_uses_direction_counter = *b;
+                }
+                continue;
+            }
+            if (key == "jump_uses_current_btb") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.pipeline.branch_predictor.jump_uses_current_btb = *b;
+                }
+                continue;
+            }
             if (key == "registered_btb_read") {
                 if (const auto b = detail::parse_bool(val_str); b.has_value()) {
                     config.pipeline.branch_predictor.registered_btb_read = *b;
@@ -417,7 +450,50 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
             }
 
             // 4. Cache settings
-            if (current_section == Section::InstructionCache) {
+            if (current_section == Section::InstructionFrontCache) {
+                auto& cache = config.instruction_front_cache;
+                if (key == "capacity_bytes" || key == "capacity") {
+                    cache.capacity_bytes = static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "associativity" || key == "ways") {
+                    cache.associativity = static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "line_bytes" || key == "line_size") {
+                    cache.line_bytes = static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "hit_latency") {
+                    cache.hit_latency = static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "refill_latency" || key == "miss_latency") {
+                    cache.refill_latency = static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "backing_refill_latency") {
+                    cache.backing_refill_latency =
+                        static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
+                if (key == "startup_refill_latencies") {
+                    cache.startup_refill_latencies.clear();
+                    std::istringstream values(std::string(detail::unquote(val_str)));
+                    std::string value;
+                    while (std::getline(values, value, ',')) {
+                        cache.startup_refill_latencies.push_back(
+                            static_cast<uint32_t>(std::stoul(value)));
+                    }
+                    continue;
+                }
+                if (key == "freeze_pipeline_on_refill") {
+                    if (const auto value = detail::parse_bool(val_str); value.has_value()) {
+                        cache.freeze_pipeline_on_refill = *value;
+                    }
+                    continue;
+                }
+            } else if (current_section == Section::InstructionCache) {
                 if (key == "capacity_bytes" || key == "capacity") {
                     config.instruction_cache.capacity_bytes =
                         static_cast<uint32_t>(std::stoul(std::string(val_str)));
@@ -513,6 +589,16 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
             } else if (key == "interconnect_response_latency" ||
                        (current_section == Section::Interconnect && key == "response_latency")) {
                 config.interconnect.response_latency =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "data_request_latency" && current_section == Section::Interconnect) {
+                config.interconnect.data_request_latency =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "data_response_latency" && current_section == Section::Interconnect) {
+                config.interconnect.data_response_latency =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (key == "startup_data_response_latency" &&
+                       current_section == Section::Interconnect) {
+                config.interconnect.startup_data_response_latency =
                     static_cast<uint32_t>(std::stoul(std::string(val_str)));
             } else if (key == "enable_idle_spans") {
                 if (const auto b = detail::parse_bool(val_str); b.has_value()) {
@@ -658,6 +744,8 @@ inline void serialize_cpu_config(const simrv::pipeline::CpuModelConfig& config, 
     out << "fp_div_latency = " << config.pipeline.fp_div_latency << "\n";
     out << "branch_mispredict_penalty = " << config.pipeline.branch_mispredict_penalty << "\n";
     out << "cycle_counter_start_delay = " << config.pipeline.cycle_counter_start_delay << "\n";
+    out << "host_interface_latency = " << config.pipeline.host_interface_latency << "\n";
+    out << "host_interface_phase_period = " << config.pipeline.host_interface_phase_period << "\n";
     out << "csr_flush_penalty = " << config.pipeline.csr_flush_penalty << "\n";
     out << "fence_flush_penalty = " << config.pipeline.fence_flush_penalty << "\n";
     out << "\n";
@@ -688,6 +776,10 @@ inline void serialize_cpu_config(const simrv::pipeline::CpuModelConfig& config, 
     out << "enable_btb = " << (bp.enable_btb ? "true" : "false") << "\n";
     out << "enable_ras = " << (bp.enable_ras ? "true" : "false") << "\n";
     out << "untagged_btb = " << (bp.untagged_btb ? "true" : "false") << "\n";
+    out << "predict_non_control = " << (bp.predict_non_control ? "true" : "false") << "\n";
+    out << "jump_uses_direction_counter = " << (bp.jump_uses_direction_counter ? "true" : "false")
+        << "\n";
+    out << "jump_uses_current_btb = " << (bp.jump_uses_current_btb ? "true" : "false") << "\n";
     out << "registered_btb_read = " << (bp.registered_btb_read ? "true" : "false") << "\n";
     out << "bht_initial_state = " << static_cast<unsigned int>(bp.bht_initial_state) << "\n";
     out << "\n";
@@ -700,6 +792,30 @@ inline void serialize_cpu_config(const simrv::pipeline::CpuModelConfig& config, 
     out << "miss_latency = " << config.instruction_cache.miss_latency << "\n";
     out << "\n";
 
+    if (config.instruction_front_cache.capacity_bytes != 0) {
+        out << "[instruction_front_cache]\n";
+        out << "capacity_bytes = " << config.instruction_front_cache.capacity_bytes << "\n";
+        out << "associativity = " << config.instruction_front_cache.associativity << "\n";
+        out << "line_bytes = " << config.instruction_front_cache.line_bytes << "\n";
+        out << "hit_latency = " << config.instruction_front_cache.hit_latency << "\n";
+        out << "refill_latency = " << config.instruction_front_cache.refill_latency << "\n";
+        out << "backing_refill_latency = " << config.instruction_front_cache.backing_refill_latency
+            << "\n";
+        out << "freeze_pipeline_on_refill = "
+            << (config.instruction_front_cache.freeze_pipeline_on_refill ? "true" : "false")
+            << "\n";
+        if (!config.instruction_front_cache.startup_refill_latencies.empty()) {
+            out << "startup_refill_latencies = \"";
+            for (size_t index = 0;
+                 index < config.instruction_front_cache.startup_refill_latencies.size(); ++index) {
+                if (index != 0) out << ',';
+                out << config.instruction_front_cache.startup_refill_latencies[index];
+            }
+            out << "\"\n";
+        }
+        out << "\n";
+    }
+
     out << "[data_cache]\n";
     out << "capacity_bytes = " << config.data_cache.capacity_bytes << "\n";
     out << "associativity = " << config.data_cache.associativity << "\n";
@@ -711,6 +827,16 @@ inline void serialize_cpu_config(const simrv::pipeline::CpuModelConfig& config, 
     out << "[interconnect]\n";
     out << "request_latency = " << config.interconnect.request_latency << "\n";
     out << "response_latency = " << config.interconnect.response_latency << "\n";
+    if (config.interconnect.data_request_latency != 0) {
+        out << "data_request_latency = " << config.interconnect.data_request_latency << "\n";
+    }
+    if (config.interconnect.data_response_latency != 0) {
+        out << "data_response_latency = " << config.interconnect.data_response_latency << "\n";
+    }
+    if (config.interconnect.startup_data_response_latency != 0) {
+        out << "startup_data_response_latency = "
+            << config.interconnect.startup_data_response_latency << "\n";
+    }
 }
 
 /**

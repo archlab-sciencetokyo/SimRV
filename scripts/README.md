@@ -15,6 +15,7 @@ This directory contains development, benchmarking, release verification, and Lin
   - `aggregate`: Aggregates multi-run and multi-host benchmark experiment JSON outputs into statistical summaries.
   - `gdb`: Paired execution benchmarking comparing baseline CLI speed against remote GDB RSP step latency.
 - **`benchmark_modes.py`**: Microarchitecture and simulation mode sweeps (`fast`, `detailed`, `cycle-accurate`, `three-stage`, `dual-issue`, `five-stage`).
+- **`evaluate_rtl_parity.py`**: Adapter-driven RTL/SimRV architectural and cycle-parity runner. Reusable target adapters and trace utilities live in `rtl_parity/`.
 
 ### 2. Release Qualification & Reproducibility
 

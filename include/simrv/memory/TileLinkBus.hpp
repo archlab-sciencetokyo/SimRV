@@ -51,7 +51,9 @@ class TileLinkBus : public Bus {
 
     void add_node(TileLinkNode* node);
     /// Set fixed ready/valid-style transport delays for CA. Both values are at least one cycle.
-    void configure_timing(uint32_t request_latency, uint32_t response_latency);
+    void configure_timing(uint32_t request_latency, uint32_t response_latency,
+                          uint32_t data_request_latency = 0, uint32_t data_response_latency = 0,
+                          uint32_t startup_data_response_latency = 0);
     [[nodiscard]] auto request_latency() const noexcept -> uint32_t { return request_latency_; }
     [[nodiscard]] auto response_latency() const noexcept -> uint32_t { return response_latency_; }
 
@@ -114,6 +116,7 @@ class TileLinkBus : public Bus {
     struct TimedRequest {
         TlChannelA payload{};
         Cycle submitted_cycle = 0;
+        uint32_t request_latency = 1;
         uint64_t sequence = 0;
     };
 
@@ -146,6 +149,10 @@ class TileLinkBus : public Bus {
     uint64_t next_sequence_ = 0;
     uint32_t request_latency_ = 1;
     uint32_t response_latency_ = 1;
+    uint32_t data_request_latency_ = 1;
+    uint32_t data_response_latency_ = 1;
+    uint32_t startup_data_response_latency_ = 0;
+    uint64_t data_response_count_ = 0;
     std::deque<TimedRequest> req_queue_;
     std::deque<TimedDBeat> d_queue_;
     simrv::util::SmallFlatMap<TlSourceId, DAssembly, 32> d_assemblies_;

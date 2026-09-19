@@ -63,7 +63,10 @@ def evaluate_config(simrv_bin: Path, cfg_path: Path, benchmarks_dir: Path, rtl_t
             return {"error": sim.get("error", "Failed to get cycles"), "mape": float("inf")}
 
         sim_cycles = sim["cycles"]
-        rtl_cycles = target.get("core_estimate_cycle") or target.get("mcycle")
+        # Tune against the RTL harness's measured elapsed counter. The derived
+        # core estimate is useful for component diagnosis, but is not a clock.
+        rtl_cycles = (target.get("tohost_mcycle") or target.get("mcycle") or
+                      target.get("core_estimate_cycle"))
         delta = abs(sim_cycles - rtl_cycles)
         err_pct = (delta / rtl_cycles) * 100.0 if rtl_cycles else 0.0
 
@@ -107,6 +110,7 @@ def main():
         rtl_data = item.get("rtl_verilator", {})
         rtl_targets[name] = {
             "mcycle": rtl_data.get("mcycle"),
+            "tohost_mcycle": rtl_data.get("tohost_mcycle"),
             "core_estimate_cycle": rtl_data.get("core_estimate_cycle", rtl_data.get("mcycle"))
         }
 

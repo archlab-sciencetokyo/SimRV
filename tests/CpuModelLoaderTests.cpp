@@ -70,8 +70,10 @@ void test_load_canonical_rvcomp_cfg() {
     TEST_CHECK(config.pipeline.pipeline_type == PipelineType::FiveStage);
     TEST_CHECK(config.pipeline.enable_forwarding == true);
     TEST_CHECK(config.pipeline.mul_latency == 2);
-    TEST_CHECK(config.pipeline.div_latency == 34);
+    TEST_CHECK(config.pipeline.div_latency == 35);
     TEST_CHECK(config.pipeline.branch_mispredict_penalty == 4);
+    TEST_CHECK(config.pipeline.host_interface_latency == 21);
+    TEST_CHECK(config.pipeline.host_interface_phase_period == 2);
 
     const auto& bp = config.pipeline.branch_predictor;
     TEST_CHECK(bp.type == BranchPredictorType::Bimodal);
@@ -79,14 +81,21 @@ void test_load_canonical_rvcomp_cfg() {
     TEST_CHECK(bp.bht_entries == 8192);
     TEST_CHECK(bp.pc_shift == 2);
     TEST_CHECK(bp.untagged_btb == true);
+    TEST_CHECK(bp.predict_non_control == true);
+    TEST_CHECK(bp.jump_uses_direction_counter == false);
+    TEST_CHECK(bp.jump_uses_current_btb == false);
     TEST_CHECK(bp.registered_btb_read == false);
     TEST_CHECK(bp.bht_initial_state == 1);
 
-    TEST_CHECK(config.instruction_cache.capacity_bytes == 1024);
+    TEST_CHECK(config.instruction_cache.capacity_bytes == 16384);
     TEST_CHECK(config.instruction_cache.associativity == 1);
     TEST_CHECK(config.instruction_cache.line_bytes == 32);
     TEST_CHECK(config.instruction_cache.hit_latency == 1);
-    TEST_CHECK(config.instruction_cache.miss_latency == 64);
+    TEST_CHECK(config.instruction_cache.miss_latency == 1);
+    TEST_CHECK(config.instruction_front_cache.capacity_bytes == 1024);
+    TEST_CHECK(config.instruction_front_cache.line_bytes == 16);
+    TEST_CHECK(config.instruction_front_cache.freeze_pipeline_on_refill);
+    TEST_CHECK(config.interconnect.startup_data_response_latency == 27);
 
     TEST_CHECK(config.data_cache.capacity_bytes == 16384);
     TEST_CHECK(config.data_cache.associativity == 1);
@@ -113,7 +122,7 @@ void test_load_canonical_cfu_provingground_cfg() {
     TEST_CHECK(config.validate().has_value());
     TEST_CHECK(config.pipeline.pipeline_type == PipelineType::FiveStage);
     TEST_CHECK(config.pipeline.mul_latency == 3);
-    TEST_CHECK(config.pipeline.div_latency == 18);
+    TEST_CHECK(config.pipeline.div_latency == 36);
     TEST_CHECK(config.pipeline.branch_mispredict_penalty == 3);
     TEST_CHECK(config.pipeline.cycle_counter_start_delay == 2);
 
@@ -121,6 +130,9 @@ void test_load_canonical_cfu_provingground_cfg() {
     TEST_CHECK(bp.type == BranchPredictorType::Bimodal);
     TEST_CHECK(bp.btb_entries == 2048);
     TEST_CHECK(bp.bht_entries == 2048);
+    TEST_CHECK(bp.predict_non_control == true);
+    TEST_CHECK(bp.jump_uses_direction_counter == true);
+    TEST_CHECK(bp.jump_uses_current_btb == true);
     TEST_CHECK(bp.registered_btb_read == true);
     TEST_CHECK(bp.bht_initial_state == 0);
 }
