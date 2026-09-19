@@ -18,8 +18,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 EXPERIMENT = json.loads((ROOT / "repro/experiment-manifest.json").read_text())
 MANIFEST = json.loads((ROOT / "release/release-manifest.json").read_text())
 STATIC_MEMBERS = [
-    "CITATION.cff", "LICENSE", "README.md", "SECURITY.md", "docs/RELEASE.md",
-    "docs/RISCV_COMPLIANCE.md", "repro/README.md", "repro/experiment-manifest.json"
+    "CITATION.cff", "LICENSE", "README.md", "SECURITY.md", "docs/evaluation/release.md",
+    "docs/architecture/compliance.md", "repro/README.md", "repro/experiment-manifest.json"
 ]
 
 

@@ -56,12 +56,9 @@ Testing/
 repro/results/
 Makefrag
 
-# Generated documentation (source Markdown remains tracked)
-docs/*
-!docs/*.md
-!docs/man/
-!docs/man/*
+# Generated documentation & sites (source Markdown remains tracked)
 docs/api/
+site/
 docs/NOTEBOOKLM_SUMMARY.md
 docs/ORIGINALITY.md
 docs/simrv_performance_optimizations.md

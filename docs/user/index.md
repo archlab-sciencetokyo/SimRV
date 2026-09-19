@@ -237,7 +237,7 @@ simrv-parity cfu-pg --benchmark all
 simrv-parity rvcomp --quick
 ```
 
-For more details on registering new hardware RTL targets, refer to [docs/RTL_PARITY.md](RTL_PARITY.md).
+For more details on registering new hardware RTL targets, refer to [RTL Parity Verification](../hardware/rtl_parity.md).
 
 ---
 

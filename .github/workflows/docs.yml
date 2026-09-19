@@ -2,14 +2,16 @@ name: Documentation
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, 'release/**']
     paths:
       - 'docs/**'
+      - 'mkdocs.yml'
       - '.github/workflows/docs.yml'
   pull_request:
     branches: [main, dev]
     paths:
       - 'docs/**'
+      - 'mkdocs.yml'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -25,7 +27,7 @@ concurrency:
 jobs:
   build-docs:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -38,18 +40,11 @@ jobs:
       - name: Install MkDocs dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip install mkdocs mkdocs-material
+          pip install mkdocs mkdocs-material pymdown-extensions
 
       - name: Build documentation site
         run: |
-          mkdir -p site
-          # If mkdocs.yml exists, build via mkdocs; otherwise copy markdown docs
-          if [ -f mkdocs.yml ]; then
-            mkdocs build
-          else
-            cp -r docs site/
-            cp README.md site/index.md
-          fi
+          mkdocs build --strict
 
       - name: Upload GitHub Pages artifact
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'

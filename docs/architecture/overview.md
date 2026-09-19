@@ -140,9 +140,9 @@ docs/           User, contributor, compliance, and release documentation
 
 Useful entry points are `src/Main.cpp`, `src/core/Machine.cpp`,
 `src/core/Cpu.cpp`, and `src/pipeline/CycleKernel.cpp`. See
-[TUI architecture](TUI.md), [bare-metal development](BAREMETAL_GUIDE.md),
-[Linux image building](LINUX_IMAGE_BUILD.md), and
-[extension development](EXTENSION_GUIDE.md) for focused workflows.
+[TUI architecture](../user/tui.md), [bare-metal development](../user/baremetal.md),
+[Linux image building](../user/linux.md), and
+[extension development](../hardware/extensions.md) for focused workflows.
 
 ## Build and validation
 

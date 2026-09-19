@@ -15,7 +15,7 @@
     "RV32GCBV",
     "RV64GCBV"
   ],
-  "compliance_scope": "docs/RISCV_COMPLIANCE.md",
+  "compliance_scope": "docs/architecture/compliance.md",
   "optional_features": [
     "Spike lockstep",
     "GDB RSP"

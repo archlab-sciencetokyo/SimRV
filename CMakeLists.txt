@@ -131,8 +131,7 @@ if(NOT "cxx_std_23" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
   )
 endif()
 
-option(SIMRV_PREFER_MOLD
-       "Prefer mold linker for fast links when available" ON)
+option(SIMRV_PREFER_MOLD "Prefer mold linker for fast links when available" ON)
 option(SIMRV_PREFER_LLD "Prefer lld for Clang links when available" ON)
 
 set(SIMRV_LINKER_NAME "system")
@@ -1004,7 +1003,7 @@ install(
   FILES_MATCHING
   PATTERN "*.cfg")
 
-install(FILES docs/USER_GUIDE.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
+install(FILES docs/user/index.md DESTINATION ${CMAKE_INSTALL_DOCDIR} RENAME USER_GUIDE.md)
 
 install(FILES docs/man/simrv.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
 

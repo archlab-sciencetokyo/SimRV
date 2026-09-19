@@ -7,7 +7,7 @@ instruction and cycle execution, RV32/RV64 targets, Linux support, and an intera
 inspecting pipelines, caches, memory, and architectural state.
 
 SimRV is not RISC-V certified. `RV32GCBV` and `RV64GCBV` are implementation targets; see the
-[compliance scope](docs/RISCV_COMPLIANCE.md) for verified coverage and known gaps.
+[compliance scope](docs/architecture/compliance.md) for verified coverage and known gaps.
 
 ---
 
@@ -95,7 +95,7 @@ Mirror configuration, diagnostics, termination, cache, bus, and performance summ
 ./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --cli --log-file run.log
 ```
 
-Load custom or preset CPU microarchitecture models (see [CPU Models Guide](docs/CPU_MODELS.md)):
+Load custom or preset CPU microarchitecture models (see [CPU Models Guide](docs/hardware/models.md)):
 
 ```bash
 # Load a predefined CPU model (searches configs/models/ or custom path)
@@ -144,8 +144,8 @@ Students can load (`o`), step (`s`), inspect (`r`/`l`), explain (`e`), open the 
 topic (`?`), and trace (`v`) without changing the workload. The Student Guide proposes a
 context-sensitive next action; `Enter` performs it and `g` shows or hides the guide. Pressing `x`
 while paused writes the configured, schema-versioned inspection report; existing files require a
-second explicit export action. See the [educational reference](docs/RISCV_EDUCATION.md),
-[bare-metal guide](docs/BAREMETAL_GUIDE.md), and [source-first ISA examples](examples/isa/).
+second explicit export action. See the [educational reference](docs/user/classroom.md),
+[bare-metal guide](docs/user/baremetal.md), and [source-first ISA examples](examples/isa/).
 
 ### Key Shortcuts
 
@@ -178,13 +178,13 @@ second explicit export action. See the [educational reference](docs/RISCV_EDUCAT
 
 RV32GCBV and RV64GCBV are implementation-target names, not complete conformance claims.
 
-See [RISC-V compliance scope](docs/RISCV_COMPLIANCE.md) for the precise architectural boundary,
-the [TileLink-C profile](docs/TILELINK_C_PROFILE.md) for protocol/coherence scope, and the
-[3.0 migration guide](docs/MIGRATION.md) for intentional host-interface breakage.
+See [RISC-V compliance scope](docs/architecture/compliance.md) for the precise architectural boundary,
+the [TileLink-C profile](docs/architecture/tilelink.md) for protocol/coherence scope, and the
+[3.0 migration guide](docs/dev/migration.md) for intentional host-interface breakage.
 SBI/OpenSBI distinction, and the evidence required before treating a feature as verified. The
 profile names are implementation targets and do not by themselves claim RISC-V certification.
 The cross-subsystem qualification status is summarized in the
-[release support boundary](docs/RELEASE.md#support-and-qualification-boundary).
+[release support boundary](docs/evaluation/release.md#support-and-qualification-boundary).
 
 | Extension | Status | Description & Features |
 | --- | --- | --- |
@@ -291,9 +291,9 @@ Pre-compiled standalone binaries (`SimRV`) are available under GitHub Releases f
 - `scripts/`: Regression, ISA testing, and Linux image build helpers
 - `docs/`: Focused architecture, user, contributor, compliance, and release guides
 - `CHANGELOG.md`: Version release log
-- `docs/CPU_MODELS.md`: CPU model configuration framework, parameters, wizard, and RTL calibration
-- `docs/RELEASE.md`: 2.0 support contract, validation matrix, and publishing checklist
-- `docs/TUI.md`: TUI input focus, rendering layers, and test coverage
+- `docs/hardware/models.md`: CPU model configuration framework, parameters, wizard, and RTL calibration
+- `docs/evaluation/release.md`: 2.0/3.0 support contract, validation matrix, and publishing checklist
+- `docs/user/tui.md`: TUI input focus, rendering layers, and test coverage
 - `repro/`: Research-companion scripts and reproducibility instructions
 - `release/`: Release metadata, evidence schemas, and publishing inputs
 
