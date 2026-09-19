@@ -1,6 +1,6 @@
 site_name: SimRV
 site_description: An explainable, dual-width (RV32 / RV64) RISC-V architectural simulator with interactive TUI, cycle-accurate in-order modeling, and full-system Linux emulation.
-site_author: Lennart Trunk, Kenji Kise
+site_author: SimRV Contributors
 site_url: https://archlab-sciencetokyo.github.io/SimRV/
 repo_name: archlab-sciencetokyo/SimRV
 repo_url: https://github.com/archlab-sciencetokyo/SimRV

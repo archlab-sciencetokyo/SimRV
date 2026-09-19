@@ -29,7 +29,7 @@ applications, real-time operating systems (e.g., μT-Kernel 3.0), and full Linux
 All devices are MMIO-backed and attached through `Machine`:
 
 | Component | Header | Description |
-|:---|:---|:---|
+| :--- | :--- | :--- |
 | `Console` | `device/Console.hpp` | VirtIO-style console (MMIO ring buffer) |
 | `Disk` | `device/Disk.hpp` | VirtIO block device for root filesystem |
 | `Uart` | `device/Uart.hpp` | 16550-compatible UART serial port |
@@ -53,7 +53,7 @@ plus `InterruptController` helpers for PLIC line bookkeeping.
 ## Execution Helpers (Thin Wrappers)
 
 | Class | Source | Role |
-|:---|:---|:---|
+| :--- | :--- | :--- |
 | `CsrFile` | `core/CsrFile.cpp` | CSR read/write, access control, mstatus side effects |
 | `Tlb` | `core/Tlb.cpp` | Hardware TLB state and flush behavior |
 | `Sbi` | `core/Sbi.cpp` | Optional direct supervisor-ECALL SBI environment when guest M-mode firmware is absent |
@@ -72,7 +72,7 @@ making class boundaries explicit.
 The CPU pipeline is a 6-stage in-order functional model:
 
 | # | Stage | Method | Description |
-|:---|:---|:---|:---|
+| :--- | :--- | :--- | :--- |
 | 1 | **IF** | `run_fetch_stage` | Address translation (SV32/SV39), I-cache lookup, decompression (RVC) |
 | 2 | **ID** | `run_decode_stage` | Instruction field decode (opcode, rd/rs, funct, imm), operand capture |
 | 3 | **EX** | `run_execute_stage` | ALU, branch, CSR, FP operations |
@@ -81,6 +81,7 @@ The CPU pipeline is a 6-stage in-order functional model:
 | 6 | **Commit** | `run_commit_stage` | Control-flow updates, trap/interrupt handling, tohost checks |
 
 **Execution paths:**
+
 - **Standard path**: Full pipeline via `CPU::run_cycle()`.
 - **Baremetal path**: Optimized hot path (`run_cycle_baremetal`) bypassing TUI
   overhead, used when TUI is inactive.
@@ -93,7 +94,7 @@ The CPU pipeline is a 6-stage in-order functional model:
 ## Debug and Co-Simulation
 
 | Component | Source | Description |
-|:---|:---|:---|
+| :--- | :--- | :--- |
 | `GdbStub` | `debug/GdbStub.cpp` | GDB RSP server (TCP, port 1234 default) |
 | `SpikeLockstep` | `debug/SpikeLockstep.cpp` | Instruction-level lockstep co-simulation vs. Spike |
 | `SymbolTable` | `debug/SymbolTable.cpp` | ELF symbol lookup for PC→symbol name resolution |
@@ -108,7 +109,7 @@ The TUI provides an ANSI-based split-screen monitor during simulation.
 **Component files** (`src/tui/`, `include/simrv/tui/`):
 
 | File | Role |
-|:---|:---|
+| :--- | :--- |
 | `Tui.cpp` | Top-level TUI orchestrator, layout management, keybindings, rendering loop |
 | `LeftPane.cpp` | Left panel container managing registers, stack, pipeline state, stats, and explainer (EXPLAIN page) |
 | `LeftPanePipeline.cpp` | Cycle-accurate & functional pipeline stages rendering |
@@ -124,6 +125,7 @@ The TUI provides an ANSI-based split-screen monitor during simulation.
 **Register pages:** GPR → FPR → PIPELINE, cycled with `R`; `E` toggles EXPLAIN directly.
 
 **Themes** (toggled with `H`/`T`):
+
 - `Adaptive` (default): Standard ANSI SGR codes, adapts to terminal theme.
 - `Sakura`: 256-color pastel palette.
 - `HighContrast`: Bold ANSI primary colors.
@@ -133,7 +135,7 @@ The TUI provides an ANSI-based split-screen monitor during simulation.
 ## ISA Support
 
 | Extension | Status |
-|:---|:---|
+| :--- | :--- |
 | RV32I / RV64I | ✅ Full |
 | M (Multiply/Divide) | ✅ Full |
 | A (Atomics) | ✅ Full |
@@ -155,7 +157,7 @@ XLEN is a **compile-time** selection via `SIMRV_XLEN` (32 or 64). There is no ru
 **CMake presets** (`CMakePresets.json`):
 
 | Preset | Target | Build Dir |
-|:---|:---|:---|
+| :--- | :--- | :--- |
 | `rv32-release` | RV32GC Release | `build/rv32-release/` |
 | `rv64-release` | RV64GC Release | `build/rv64-release/` |
 | `rv32-debug` | RV32GC Debug | `build/rv32-debug/` |
@@ -164,7 +166,7 @@ XLEN is a **compile-time** selection via `SIMRV_XLEN` (32 or 64). There is no ru
 **Validation gates** (CMake targets):
 
 | Target | Covers |
-|:---|:---|
+| :--- | :--- |
 | `isa-gate` | Full RV32/64GC ISA test suite |
 | `integration-gate` | All gate-labeled tests (regression, app, linux, ISA) |
 | `lockstep-gate` | Spike instruction-level lockstep (requires `spike` in PATH) |
@@ -209,6 +211,7 @@ docs/                  Architecture, extension, build, and education guides
 SimRV codebase metrics are monitored using static analysis tools (`lizard`). The following statistics represent the current snapshot of the C++23 source code (extracted via `scripts/code_metrics.py`):
 
 ### Global Metrics
+
 - **Total C++ Source & Header Files:** 168
 - **Total Non-Comment Code Lines (NLOC):** 35,429
 - **Average Function NLOC:** 26.56
@@ -216,8 +219,9 @@ SimRV codebase metrics are monitored using static analysis tools (`lizard`). The
 - **Function Count:** 1,334
 
 ### Subsystem Breakdown
+
 | Subsystem / Directory | Description | Files | NLOC | Functions | Avg CCN | Avg NLOC |
-|:---|:---|:---|:---|:---|:---|:---|
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `src/tui` / `include/simrv/tui` | Modular TUI panes, modals, Sixel rendering & Virtual Terminal | 50 | 10,207 | 350 | 7.91 | 29.2 |
 | `src/execute` / `include/simrv/execute` | Vector, floating-point, integer execution units & ISA headers | 21 | 6,355 | 213 | 8.65 | 29.8 |
 | `src/core` / `include/simrv/core` | Architectural state, CPU, SBI, CSRs & Machine orchestration | 30 | 5,825 | 239 | 6.35 | 24.4 |
@@ -229,11 +233,11 @@ SimRV codebase metrics are monitored using static analysis tools (`lizard`). The
 | Top-Level Entrypoint | Main simulation runner and CLI interface (`src/Main.cpp`) | 4 | 430 | 10 | 9.00 | 43.0 |
 
 ### Top Complexity Hotspots
+
 The cyclomatic complexity (CCN) hot-spots in the simulator correspond to flat declarative dispatch tables:
+
 1. `simrv::pipeline::decode_ext_v_range2` (in `Decoder.cpp`) - **CCN: 124**, NLOC: 161 (Vector range 2 opcode decoder)
 2. `simrv::execute::ExecuteUnit::execute_vector` (in `ExecuteUnitVector.cpp`) - **CCN: 118**, NLOC: 159 (Vector operation execution dispatcher)
 3. `simrv::util::get_operand_hazard_info` (in `InstructionExplainer.cpp`) - **CCN: 108**, NLOC: 145 (Instruction operand dependency analysis)
 4. `simrv::pipeline::decode_ext_v_range1` (in `Decoder.cpp`) - **CCN: 105**, NLOC: 140 (Vector range 1 opcode decoder)
 5. `simrv::tui::VirtualTerminal::execute_csi_command` (in `VirtualTerminal.hpp`) - **CCN: 92**, NLOC: 146 (TUI virtual terminal CSI escape sequence parser)
-
-For academic presentation details, complexity tier distributions, and LaTeX table export, see `docs/PAPER_COMPANION.md`.

@@ -9,11 +9,12 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=main" alt="C/C++ CI"/></a>
+  <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml/badge.svg?branch=main" alt="Docs CI"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/releases"><img src="https://img.shields.io/badge/version-2.0.2-blue.svg" alt="SimRV Version"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/></a>
   <img src="https://img.shields.io/badge/C%2B%2B-23-purple.svg" alt="C++23"/>
-  <img src="https://img.shields.io/badge/architecture-RV32GCBV%20%7C%20RV64GCBV-orange.svg" alt="Architecture"/>
-  <img src="https://img.shields.io/badge/OS-Linux%20Full--System-brightgreen.svg" alt="Linux OS"/>
+  <img src="https://img.shields.io/badge/architecture-RV32%20%7C%20RV64-orange.svg" alt="Architecture"/>
 </p>
 
 ---
@@ -91,45 +92,33 @@ SimRV requires a modern C++23 compiler (**Clang 20+** or **GCC 14+**), **CMake 3
 
 ---
 
-## Documentation Navigation
+## Documentation
 
 <div class="grid cards" markdown>
 
--   :material-book-open-page-variant:{ .lg .middle } __[User Guide](user/index.md)__
+- :material-book-open-page-variant:{ .lg .middle } **[User Guide](user/index.md)**
 
     ---
 
-    CLI options, TUI navigation, hotkeys, bare-metal development, and Linux boot options.
+    Quickstart, CLI flags, interactive TUI controls, hotkeys, and execution modes.
 
--   :material-chip:{ .lg .middle } __[System Architecture](architecture/overview.md)__
-
-    ---
-
-    Detailed design of the core execution units, memory subsystem, MMU, PMP, and pipeline modeling.
-
--   :material-shield-check:{ .lg .middle } __[ISA Compliance Scope](architecture/compliance.md)__
+- :material-chip:{ .lg .middle } **[Architecture & Compliance](architecture/overview.md)**
 
     ---
 
-    Detailed architectural specification boundary, verified ISA coverage, and known qualification gaps.
+    Core execution units, pipeline modeling, cache hierarchy, MMU, PMP, and [ISA compliance scope](architecture/compliance.md).
 
--   :material-puzzle:{ .lg .middle } __[Custom Extensions Guide](hardware/extensions.md)__
-
-    ---
-
-    Step-by-step workflow for integrating custom RISC-V instructions into the decode, execute, and TUI subsystems.
-
--   :material-clipboard-check-outline:{ .lg .middle } __[Reviewer & Evaluation Guide](evaluation/reviewer.md)__
+- :material-memory:{ .lg .middle } **[Bare-Metal & Linux](user/baremetal.md)**
 
     ---
 
-    Artifact evaluation checklist, dual-architecture reproducibility commands, and BibTeX citations.
+    [Bare-metal development](user/baremetal.md), memory map, peripheral MMIO, and [booting full-system Linux](user/linux.md).
 
--   :material-code-braces:{ .lg .middle } __[Developer & Contributing](dev/contributing.md)__
+- :material-code-braces:{ .lg .middle } **[Development & Verification](dev/contributing.md)**
 
     ---
 
-    Subsystem organization, C++23 standards, gate regression suites, and release qualification workflows.
+    Contributing standards, CTest gate suites, [reviewer reproduction guide](evaluation/reviewer.md), and [release qualification](evaluation/release.md).
 
 </div>
 
@@ -140,9 +129,9 @@ SimRV requires a modern C++23 compiler (**Clang 20+** or **GCC 14+**), **CMake 3
 If you use SimRV in your academic research, please cite:
 
 ```bibtex
-@software{simrv2026,
-  author = {Trunk, Lennart and Kise, Kenji},
+@software{simrv,
   title = {{SimRV: A Dual-Width Explainable RISC-V System Simulator}},
+  author = {{SimRV Contributors}},
   url = {https://github.com/archlab-sciencetokyo/SimRV},
   version = {2.0.2},
   year = {2026}

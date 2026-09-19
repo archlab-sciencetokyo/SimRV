@@ -114,9 +114,9 @@ The following table summarizes architectural capabilities and simulation trade-o
 If you reference SimRV in peer-reviewed publications, please cite the software release:
 
 ```bibtex
-@software{simrv2026,
-  author = {Trunk, Lennart and Kise, Kenji},
+@software{simrv,
   title = {{SimRV: A Dual-Width Explainable RISC-V System Simulator}},
+  author = {{SimRV Contributors}},
   url = {https://github.com/archlab-sciencetokyo/SimRV},
   version = {2.0.2},
   year = {2026}

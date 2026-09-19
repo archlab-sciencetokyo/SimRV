@@ -59,7 +59,6 @@ site/
 docs/NOTEBOOKLM_SUMMARY.md
 docs/ORIGINALITY.md
 docs/simrv_performance_optimizations.md
-docs/PAPER_COMPANION.md
 trace/
 log/
 .clangd

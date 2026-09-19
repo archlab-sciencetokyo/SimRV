@@ -176,7 +176,7 @@ Lockstep is a verification workflow for reproducible experiments, not an
 interactive TUI feature. Use a caller-supplied Spike built for the same XLEN
 and ISA profile as the image under test; `--spike-bin` selects a non-default
 binary and `--spike-elf` selects its comparison image. Keep the command line,
-Spike revision, image hash, and SimRV revision with paper evidence. Lockstep
+Spike revision, image hash, and SimRV revision with experimental evidence. Lockstep
 and GDB are intentionally mutually exclusive.
 
 ---
@@ -211,4 +211,4 @@ SimRV is licensed under the [MIT License](LICENSE).
 ## Citation
 
 If you use SimRV in academic work, please cite the metadata in
-[`CITATION.cff`](CITATION.cff), which credits Lennart Trunk and Prof. Kenji Kise.
+[`CITATION.cff`](CITATION.cff).
