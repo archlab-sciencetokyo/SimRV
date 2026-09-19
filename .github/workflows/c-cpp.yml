@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     container:
-      image: fedora:42
+      image: fedora:44
 
     strategy:
       fail-fast: false
@@ -137,7 +137,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     container:
-      image: fedora:42
+      image: fedora:44
     steps:
     - uses: actions/checkout@v6
       with:
@@ -177,7 +177,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     container:
-      image: fedora:42
+      image: fedora:44
     steps:
     - uses: actions/checkout@v6
     - name: Install build tools

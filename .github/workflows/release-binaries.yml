@@ -21,7 +21,7 @@ jobs:
     permissions:
       contents: write
     container:
-      image: fedora:42
+      image: fedora:44
 
     strategy:
       fail-fast: false
@@ -152,7 +152,7 @@ jobs:
     permissions:
       contents: write
     container:
-      image: fedora:42
+      image: fedora:44
     steps:
       - uses: actions/checkout@v6
       - name: Install documentation tools
@@ -184,7 +184,7 @@ jobs:
     permissions:
       contents: write
     container:
-      image: fedora:42
+      image: fedora:44
     steps:
       - uses: actions/checkout@v6
       - name: Install Python
