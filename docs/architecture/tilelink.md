@@ -27,5 +27,5 @@ cached copies before host-memory access. Clean and dirty evictions issue Release
 receive ReleaseAck.
 
 Qualification claims are tracked separately: RISC-V architectural evidence belongs in
-[RISCV_COMPLIANCE.md](RISCV_COMPLIANCE.md), while this document describes only the declared
+[compliance.md](compliance.md), while this document describes only the declared
 TileLink-C profile and MESI policy.

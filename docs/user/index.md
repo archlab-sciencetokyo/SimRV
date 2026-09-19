@@ -4,20 +4,6 @@ SimRV is an explainable, dual-width (RV32 / RV64) RISC-V architectural simulator
 
 ---
 
-## Table of Contents
-
-1. [Architecture & Features Overview](#1-architecture--features-overview)
-2. [Installation & Quickstart](#2-installation--quickstart)
-3. [Command-Line Interface (CLI)](#3-command-line-interface-cli)
-4. [Interactive TUI Workbench](#4-interactive-tui-workbench)
-5. [Bare-Metal & Embedded Simulation](#5-bare-metal--embedded-simulation)
-6. [Full-System Linux Emulation](#6-full-system-linux-emulation)
-7. [CPU Model Profiles & Microarchitecture Tuning](#7-cpu-model-profiles--microarchitecture-tuning)
-8. [RTL Parity Verification](#8-rtl-parity-verification)
-9. [Benchmarking Suite](#9-benchmarking-suite)
-10. [Troubleshooting & Reference](#10-troubleshooting--reference)
-
----
 
 ## 1. Architecture & Features Overview
 
@@ -277,9 +263,9 @@ simrv-benchmark --suite realworld --latex-table
 
 ### Detailed Architecture & Extension Guides
 
-- [System Architecture](ARCHITECTURE.md)
-- [Bare-Metal Guide](BAREMETAL_GUIDE.md)
-- [CPU Model Configuration Reference](CPU_MODELS.md)
-- [RTL Parity Verification Guide](RTL_PARITY.md)
-- [TileLink-C Profile & Cache Coherence](TILELINK_C_PROFILE.md)
-- [RISC-V Compliance Scope](RISCV_COMPLIANCE.md)
+- [System Architecture](../architecture/overview.md)
+- [Bare-Metal Guide](baremetal.md)
+- [CPU Model Configuration Reference](../hardware/models.md)
+- [RTL Parity Verification Guide](../hardware/rtl_parity.md)
+- [TileLink-C Profile & Cache Coherence](../architecture/tilelink.md)
+- [RISC-V Compliance Scope](../architecture/compliance.md)

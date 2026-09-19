@@ -90,3 +90,8 @@ nav:
   - Development & Contributing:
       - Developer Guide & Standards: dev/contributing.md
       - Version Migration (2.x to 3.0): dev/migration.md
+
+not_in_nav: |
+  SUPPORT_MATRIX.md
+  STUDY_SESSION_CACHE.md
+  STUDY_SESSION_CACHE_JA.md

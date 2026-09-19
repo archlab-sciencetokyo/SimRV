@@ -236,4 +236,4 @@ The cyclomatic complexity (CCN) hot-spots in the simulator correspond to flat de
 4. `simrv::pipeline::decode_ext_v_range1` (in `Decoder.cpp`) - **CCN: 105**, NLOC: 140 (Vector range 1 opcode decoder)
 5. `simrv::tui::VirtualTerminal::execute_csi_command` (in `VirtualTerminal.hpp`) - **CCN: 92**, NLOC: 146 (TUI virtual terminal CSI escape sequence parser)
 
-For academic presentation details, complexity tier distributions, and LaTeX table export, see [`docs/PAPER_COMPANION.md`](PAPER_COMPANION.md).
+For academic presentation details, complexity tier distributions, and LaTeX table export, see `docs/PAPER_COMPANION.md`.

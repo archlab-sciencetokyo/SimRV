@@ -1,6 +1,6 @@
 # SimRV 2.0 Release Guide
 
-The authoritative release contract is [`release/release-manifest.json`](../release/release-manifest.json).
+The authoritative release contract is `release/release-manifest.json`.
 SimRV 2.0 officially supports Linux x86-64 hosts using GCC 14+ or Clang 20+, with separate
 RV32GCBV and RV64GCBV binaries. Spike lockstep and the GDB server are optional features.
 
@@ -43,7 +43,7 @@ build configuration, guest binaries, and instruction limits.
 The manifest enumerates the authoritative matrix. Native regression, advertised ISA, vector,
 Linux/PTy lifecycle, sanitizer, and packaging suites must all be present and pass with zero skips.
 External inputs are pinned but not redistributed; their observed revisions are stored in the
-evidence report. See [`../repro/README.md`](../repro/README.md) for the clean-checkout workflow.
+evidence report. See `repro/README.md` for the clean-checkout workflow.
 
 ## Publishing
 
