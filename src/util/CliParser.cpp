@@ -1112,8 +1112,10 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
 
     const bool is_fw_payload = (options.fn_memimg.find("fw_payload") != std::string::npos ||
                                 options.fn_memimg.find("opensbi") != std::string::npos);
-    machine->primary_hart().use_opensbi =
-        options.use_opensbi || !options.fn_dvtree.empty() || is_fw_payload;
+    const bool opensbi_active = options.use_opensbi || !options.fn_dvtree.empty() || is_fw_payload;
+    for (size_t h = 0; h < machine->num_harts(); ++h) {
+        machine->hart(h).use_opensbi = opensbi_active;
+    }
 
     // Debug / co-simulation flags
     if (machine->telemetry_sink() && options.step_delay_us > 0) {

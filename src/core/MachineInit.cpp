@@ -543,11 +543,19 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             }
             sec_cpu->state().mhartid = i;
             sec_cpu->state().misa = initial_misa;
+            sec_cpu->state().regs.vlen = config.isa.vlen ? config.isa.vlen : 256;
             sec_cpu->state().initialize_lower_xlen_fields();
-            // OpenSBI owns HSM for Linux boots.  Secondary harts must execute its M-mode wait
-            // loop so its IPI can release them into the Linux entry point; a stopped simulator
-            // hart cannot observe that firmware event.
-            const bool sec_started = appmode_enabled() || linux_boot;
+            // When OpenSBI firmware is active, secondary harts must execute its M-mode wait
+            // loop so its IPI can release them into the Linux entry point. When direct-SBI is
+            // active, secondary harts must start Stopped so Sbi::handle_hsm(HartStart) can claim
+            // and launch them.
+            const bool is_fw_payload =
+                (config.files.binary_path.find("fw_payload") != std::string::npos ||
+                 config.files.binary_path.find("opensbi") != std::string::npos);
+            const bool opensbi_active =
+                primary_hart().use_opensbi || !config.files.dvtree_path.empty() || is_fw_payload;
+            sec_cpu->use_opensbi = opensbi_active;
+            const bool sec_started = appmode_enabled() || (linux_boot && opensbi_active);
             sec_cpu->hart_status.store(sec_started ? HartStatus::Started : HartStatus::Stopped,
                                        std::memory_order_relaxed);
             for (std::size_t r = 0; r < 32; ++r) {
@@ -580,7 +588,12 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     }
 
     if (linux_boot) {
-        if (!config.files.dvtree_path.empty()) {
+        const bool is_explicit_custom_dtb = !config.files.dvtree_path.empty() &&
+                                            config.files.dvtree_path != "dynamic" &&
+                                            config.files.dvtree_path != "NONE" &&
+                                            !(config.execution.num_harts > 1 &&
+                                              config.files.dvtree_path.ends_with("devicetree.dtb"));
+        if (is_explicit_custom_dtb) {
             if (dtb_offset >= effective_dram_size) {
                 simrv::log::error("device-tree load offset is outside DRAM");
                 return std::unexpected("device-tree load offset is outside DRAM");

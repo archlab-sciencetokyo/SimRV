@@ -52,7 +52,7 @@ def main():
     mem_img = os.environ.get("SIMRV_LINUX_MEM_IMG", os.path.join(images_dir, "fw_payload.bin"))
     disk_img_default = os.path.join(images_dir, "root.img") if os.path.exists(os.path.join(images_dir, "root.img")) else os.path.join(images_dir, "root.bin")
     disk_img = os.environ.get("SIMRV_LINUX_DISK_IMG", disk_img_default)
-    dtb_img = os.environ.get("SIMRV_LINUX_DTB", os.path.join(images_dir, "devicetree.dtb"))
+    dtb_img = os.environ.get("SIMRV_LINUX_DTB", "dynamic")
     timeout_secs = int(os.environ.get("SIMRV_TEST_TIMEOUT", "90"))
     expected_cpus = int(os.environ.get("SIMRV_TEST_EXPECT_CPUS", "0"))
     if expected_cpus < 0:
