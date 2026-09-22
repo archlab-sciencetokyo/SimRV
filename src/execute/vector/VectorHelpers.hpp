@@ -92,6 +92,11 @@ inline void set_group_element(core::RegisterFile& regs, RegId base_reg, uint32_t
 }
 
 // Standard templates for vector ALU operations
+template <typename T>
+constexpr auto integer_scalar(Register value) -> T {
+    return static_cast<T>(static_cast<SignedWord>(value));
+}
+
 template <typename T, typename Op>
 inline void perform_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl,
                        Op op) {
@@ -109,7 +114,7 @@ template <typename T, typename Op>
 inline void perform_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl,
                        Op op) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    T val1 = static_cast<T>(rs1_val);
+    T val1 = integer_scalar<T>(rs1_val);
 
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
@@ -152,7 +157,7 @@ inline void perform_compare_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId
                                uint32_t vl, Op op) {
     auto& dest = cpu.state().regs.read_vector(rd);
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    T val1 = static_cast<T>(rs1_val);
+    T val1 = integer_scalar<T>(rs1_val);
 
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!is_element_active(mask_reg, i, vm)) continue;
@@ -324,26 +329,26 @@ template <typename T_dest, typename T_src>
 inline T_dest round_and_clip(T_src v, uint32_t d, uint32_t vxrm, bool& saturated) {
     T_src rounded = v;
     if (d > 0) {
-        T_src mask = (static_cast<T_src>(1) << d) - 1;
-        T_src round_bit = static_cast<T_src>(1) << (d - 1);
-        T_src fractional = v & mask;
+        using Unsigned = std::make_unsigned_t<T_src>;
+        const Unsigned mask = (Unsigned{1} << d) - 1;
+        const Unsigned round_bit = Unsigned{1} << (d - 1);
+        const Unsigned fractional = static_cast<Unsigned>(v) & mask;
+        const T_src shifted = v >> d;
 
         switch (vxrm) {
             case 0:  // rnu
-                rounded = (v + round_bit) >> d;
+                rounded = shifted + static_cast<T_src>(fractional >= round_bit);
                 break;
             case 1:  // rne
-                if (fractional == round_bit) {
-                    rounded = (v >> d) + ((v >> d) & 1);
-                } else {
-                    rounded = (v + round_bit) >> d;
-                }
+                rounded = shifted +
+                          static_cast<T_src>(fractional > round_bit || (fractional == round_bit &&
+                                                                        (shifted & T_src{1}) != 0));
                 break;
             case 2:  // rdown
-                rounded = v >> d;
+                rounded = shifted;
                 break;
             case 3:  // rod
-                rounded = (v >> d) | (fractional != 0 ? 1 : 0);
+                rounded = shifted | static_cast<T_src>(fractional != 0);
                 break;
             default:
                 break;

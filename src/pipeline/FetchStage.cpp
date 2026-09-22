@@ -633,12 +633,8 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
                                                     ctx.ir_org, state_.current_xlen() == 64)
                                               : ctx.ir_org;
 
-    bool is_valid = true;
-    if (simrv::compiler::unlikely(machine.configuration().isa.misa_profile != kMisaDefault)) {
-        is_valid = instruction_enabled_by_misa(state_.misa, w_ir_tmp, w_compressed);
-    }
-
     const isa::OperationId op_id = simrv::pipeline::decoder(w_ir_tmp);
+    bool is_valid = instruction_enabled_by_misa(state_.misa, op_id, w_compressed);
     if (simrv::compiler::unlikely(op_id == isa::UNKNOWN)) {
         if (!machine.tui_enabled()) {
             simrv::log::warn("[DECODER] Unknown instruction: PC=0x{:x}, HEX=0x{:x}", state_.pc,

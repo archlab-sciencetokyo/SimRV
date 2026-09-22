@@ -234,6 +234,27 @@ void test_scoreboard() {
     TEST_CHECK(!sb.is_busy(RegBank::Float, fa0));
 }
 
+void test_vector_operand_traits() {
+    for (const auto op : {OperationId::VSEXT_VF2, OperationId::VFSQRT_V, OperationId::VFWCVT_F_X_V,
+                          OperationId::VFNCVT_F_F_W, OperationId::VIOTA_M, OperationId::VMV4R_V}) {
+        TEST_CHECK(writes_vector(op));
+        TEST_CHECK(!reads_rs1(op));
+        TEST_CHECK(rs2_bank(op) == RegBank::Vector);
+    }
+    TEST_CHECK(writes_vector(OperationId::VID_V));
+    TEST_CHECK(!reads_rs1(OperationId::VID_V));
+    TEST_CHECK(!reads_rs2(OperationId::VID_V));
+    TEST_CHECK(writes_integer(OperationId::VMV_X_S));
+    TEST_CHECK(!reads_rs1(OperationId::VMV_X_S));
+    TEST_CHECK(rs2_bank(OperationId::VMV_X_S) == RegBank::Vector);
+    TEST_CHECK(writes_float(OperationId::VFMV_F_S));
+    TEST_CHECK(!reads_rs1(OperationId::VFMV_F_S));
+    TEST_CHECK(rs2_bank(OperationId::VFMV_F_S) == RegBank::Vector);
+    TEST_CHECK(writes_vector(OperationId::VMV_S_X));
+    TEST_CHECK(rs1_bank(OperationId::VMV_S_X) == RegBank::Integer);
+    TEST_CHECK(!reads_rs2(OperationId::VMV_S_X));
+}
+
 }  // namespace
 
 int main() {
@@ -241,6 +262,7 @@ int main() {
     test_floating_point_traits();
     test_common_isa_helpers();
     test_scoreboard();
+    test_vector_operand_traits();
     std::cout << "OperationTraitsTests passed successfully.\n";
     return 0;
 }

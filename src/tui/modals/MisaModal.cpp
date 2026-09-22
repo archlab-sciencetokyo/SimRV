@@ -124,8 +124,8 @@ void MisaModal::toggle_item(MisaDraft& draft, int index) {
             draft.ext_v = !draft.ext_v;
             break;
         case 8: {
-            // Cycle VLEN through powers of 2: 32 → 64 → 128 → 256 → 512 → 1024 → 32
-            static constexpr std::array<unsigned, 6> kVlenChoices = {32, 64, 128, 256, 512, 1024};
+            // The full V extension requires at least Zvl128b.
+            static constexpr std::array<unsigned, 4> kVlenChoices = {128, 256, 512, 1024};
             auto it = std::find(kVlenChoices.begin(), kVlenChoices.end(), draft.vlen);
             if (it == kVlenChoices.end() || std::next(it) == kVlenChoices.end()) {
                 draft.vlen = kVlenChoices.front();

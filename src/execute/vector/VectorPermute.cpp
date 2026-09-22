@@ -7,6 +7,57 @@ namespace simrv::execute {
 
 namespace {
 
+uint32_t vector_vlmax(const core::CPU& cpu, uint32_t sew) {
+    const uint32_t encoded_lmul = static_cast<uint32_t>(cpu.state().vtype) & 0x7U;
+    if (encoded_lmul <= 3U) {
+        return (cpu.state().regs.vlen << encoded_lmul) / sew;
+    }
+    if (encoded_lmul >= 5U) {
+        return cpu.state().regs.vlen / (sew << (8U - encoded_lmul));
+    }
+    return 0;
+}
+
+uint64_t scalar_fp_bits(const core::CPU& cpu, uint64_t bits, uint32_t sew) {
+    if (sew == 32 && isa::misa_has_extension(cpu.state().misa, isa::IsaExtension::D) &&
+        (bits & simrv::xlen::kF32BoxerBits) != simrv::xlen::kF32BoxerBits) {
+        return simrv::xlen::kF32Qnan;
+    }
+    return bits;
+}
+
+template <typename T, typename Index>
+void execute_vrgather_vector(core::CPU& cpu, RegId rd, RegId index_reg, RegId rs2, bool vm,
+                             uint32_t vl, uint32_t vlmax) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    std::vector<T> source(vlmax);
+    std::vector<Index> indices(vl);
+    for (uint32_t i = 0; i < vlmax; ++i) {
+        source[i] = vector::get_group_element<T>(cpu.state().regs, rs2, i);
+    }
+    for (uint32_t i = 0; i < vl; ++i) {
+        indices[i] = vector::get_group_element<Index>(cpu.state().regs, index_reg, i);
+    }
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+        if (!vector::is_element_active(mask_reg, i, vm)) continue;
+        const uint64_t index = indices[i];
+        vector::set_group_element<T>(cpu.state().regs, rd, i, index < vlmax ? source[index] : T{0});
+    }
+}
+
+template <typename T>
+void execute_vrgather_scalar(core::CPU& cpu, RegId rd, uint64_t index, RegId rs2, bool vm,
+                             uint32_t vl, uint32_t vlmax) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const T value = index < vlmax ? vector::get_group_element<T>(cpu.state().regs, rs2,
+                                                                 static_cast<uint32_t>(index))
+                                  : T{0};
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+        if (!vector::is_element_active(mask_reg, i, vm)) continue;
+        vector::set_group_element<T>(cpu.state().regs, rd, i, value);
+    }
+}
+
 // Whole register move helper
 void execute_vmv_whole(core::CPU& cpu, RegId rd, RegId rs2, uint32_t nr, uint32_t sew) {
     uint32_t total_bytes = nr * cpu.state().regs.vlen_bytes();
@@ -41,7 +92,7 @@ void execute_vcompress(core::CPU& cpu, RegId rd, RegId rs2, RegId rs1, uint32_t 
 
 // Vector Slide Up
 template <typename T>
-void execute_vslideup(core::CPU& cpu, RegId rd, uint32_t offset, RegId rs2, bool vm, uint32_t vl) {
+void execute_vslideup(core::CPU& cpu, RegId rd, uint64_t offset, RegId rs2, bool vm, uint32_t vl) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
 
     std::vector<T> src_vals(vl);
@@ -49,34 +100,36 @@ void execute_vslideup(core::CPU& cpu, RegId rd, uint32_t offset, RegId rs2, bool
         src_vals[i] = vector::get_group_element<T>(cpu.state().regs, rs2, i);
     }
 
-    for (uint32_t i = std::max(offset, static_cast<uint32_t>(cpu.state().vstart)); i < vl; i++) {
-        if (!vector::is_element_active(mask_reg, i, vm)) continue;
-        T val = src_vals[i - offset];
-        vector::set_group_element<T>(cpu.state().regs, rd, i, val);
+    for (uint64_t i = std::max(offset, static_cast<uint64_t>(cpu.state().vstart)); i < vl; i++) {
+        if (!vector::is_element_active(mask_reg, static_cast<uint32_t>(i), vm)) continue;
+        T val = src_vals[static_cast<size_t>(i - offset)];
+        vector::set_group_element<T>(cpu.state().regs, rd, static_cast<uint32_t>(i), val);
     }
 }
 
 // Vector Slide Down
 template <typename T>
-void execute_vslidedown(core::CPU& cpu, RegId rd, uint32_t offset, RegId rs2, bool vm,
+void execute_vslidedown(core::CPU& cpu, RegId rd, uint64_t offset, RegId rs2, bool vm,
                         uint32_t vl) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const uint32_t vlmax = vector_vlmax(cpu, sizeof(T) * 8U);
 
-    std::vector<T> src_vals(vl);
-    for (uint32_t i = 0; i < vl; i++) {
+    std::vector<T> src_vals(vlmax);
+    for (uint32_t i = 0; i < vlmax; i++) {
         src_vals[i] = vector::get_group_element<T>(cpu.state().regs, rs2, i);
     }
 
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
-        T val = (i + offset < vl) ? src_vals[i + offset] : 0;
+        T val =
+            offset < vlmax && i < vlmax - offset ? src_vals[static_cast<size_t>(i + offset)] : T{0};
         vector::set_group_element<T>(cpu.state().regs, rd, i, val);
     }
 }
 
 // Vector Slide 1 Down
 template <typename T>
-void execute_vslide1down(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm,
+void execute_vslide1down(core::CPU& cpu, RegId rd, FloatingRegister rs1_val, RegId rs2, bool vm,
                          uint32_t vl) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
     T scalar = static_cast<T>(rs1_val);
@@ -98,7 +151,7 @@ void execute_vslide1down(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, 
 
 // Vector Slide 1 Up
 template <typename T>
-void execute_vslide1up(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm,
+void execute_vslide1up(core::CPU& cpu, RegId rd, FloatingRegister rs1_val, RegId rs2, bool vm,
                        uint32_t vl) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
     T scalar = static_cast<T>(rs1_val);
@@ -131,14 +184,20 @@ void execute_vmerge_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, uint32_t 
 }
 
 template <typename T>
-void execute_vmerge_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, uint32_t vl) {
+void execute_vmerge_scalar(core::CPU& cpu, RegId rd, T val1, RegId rs2, uint32_t vl) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    T val1 = static_cast<T>(rs1_val);
 
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         bool mask_bit = vector::is_element_active(mask_reg, i, false);
         T val = mask_bit ? val1 : vector::get_group_element<T>(cpu.state().regs, rs2, i);
         vector::set_group_element<T>(cpu.state().regs, rd, i, val);
+    }
+}
+
+template <typename T>
+void execute_vfmv_v_f(core::CPU& cpu, RegId rd, uint64_t bits, uint32_t vl) {
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+        vector::set_group_element<T>(cpu.state().regs, rd, i, static_cast<T>(bits));
     }
 }
 
@@ -183,6 +242,7 @@ bool execute_vector_permute_scalar(core::CPU& cpu, isa::OperationId op_id, RegId
             return true;
         }
         case isa::OperationId::VMV_S_X: {
+            if (cpu.state().vl == 0 || cpu.state().vstart != 0) return true;
             Register val = cpu.state().regs.read(rs1);
             if (sew == 8)
                 vector::set_group_element<uint8_t>(cpu.state().regs, rd, 0,
@@ -194,7 +254,9 @@ bool execute_vector_permute_scalar(core::CPU& cpu, isa::OperationId op_id, RegId
                 vector::set_group_element<uint32_t>(cpu.state().regs, rd, 0,
                                                     static_cast<uint32_t>(val));
             else
-                vector::set_group_element<uint64_t>(cpu.state().regs, rd, 0, val);
+                vector::set_group_element<uint64_t>(
+                    cpu.state().regs, rd, 0,
+                    static_cast<uint64_t>(static_cast<int64_t>(static_cast<SignedWord>(val))));
             return true;
         }
         case isa::OperationId::VFMV_F_S: {
@@ -212,7 +274,8 @@ bool execute_vector_permute_scalar(core::CPU& cpu, isa::OperationId op_id, RegId
             return true;
         }
         case isa::OperationId::VFMV_S_F: {
-            uint64_t val = cpu.state().regs.read_fp(rs1);
+            if (cpu.state().vl == 0 || cpu.state().vstart != 0) return true;
+            uint64_t val = scalar_fp_bits(cpu, cpu.state().regs.read_fp(rs1), sew);
             if (sew == 16)
                 vector::set_group_element<uint16_t>(cpu.state().regs, rd, 0,
                                                     static_cast<uint16_t>(val));
@@ -232,14 +295,24 @@ bool execute_vector_permute_merge(core::CPU& cpu, isa::OperationId op_id, RegId 
                                   RegId rs2, uint32_t vl, uint32_t sew, Register rs1_val,
                                   int32_t simm5) {
     switch (op_id) {
-        case isa::OperationId::VFMERGE_VFM: {
-            uint64_t val = cpu.state().regs.read_fp(rs1);
+        case isa::OperationId::VFMERGE_VFM:
+        case isa::OperationId::VFMV_V_F: {
+            uint64_t val = scalar_fp_bits(cpu, cpu.state().regs.read_fp(rs1), sew);
+            if (op_id == isa::OperationId::VFMV_V_F) {
+                if (sew == 16)
+                    execute_vfmv_v_f<uint16_t>(cpu, rd, val, vl);
+                else if (sew == 32)
+                    execute_vfmv_v_f<uint32_t>(cpu, rd, val, vl);
+                else if (sew == 64)
+                    execute_vfmv_v_f<uint64_t>(cpu, rd, val, vl);
+                return true;
+            }
             if (sew == 16)
-                execute_vmerge_vx<uint16_t>(cpu, rd, val, rs2, vl);
+                execute_vmerge_scalar<uint16_t>(cpu, rd, static_cast<uint16_t>(val), rs2, vl);
             else if (sew == 32)
-                execute_vmerge_vx<uint32_t>(cpu, rd, val, rs2, vl);
+                execute_vmerge_scalar<uint32_t>(cpu, rd, static_cast<uint32_t>(val), rs2, vl);
             else if (sew == 64)
-                execute_vmerge_vx<uint64_t>(cpu, rd, val, rs2, vl);
+                execute_vmerge_scalar<uint64_t>(cpu, rd, val, rs2, vl);
             return true;
         }
         case isa::OperationId::VMERGE_VVM:
@@ -254,13 +327,17 @@ bool execute_vector_permute_merge(core::CPU& cpu, isa::OperationId op_id, RegId 
             return true;
         case isa::OperationId::VMERGE_VXM:
             if (sew == 8)
-                execute_vmerge_vx<uint8_t>(cpu, rd, rs1_val, rs2, vl);
+                execute_vmerge_scalar<uint8_t>(cpu, rd, vector::integer_scalar<uint8_t>(rs1_val),
+                                               rs2, vl);
             else if (sew == 16)
-                execute_vmerge_vx<uint16_t>(cpu, rd, rs1_val, rs2, vl);
+                execute_vmerge_scalar<uint16_t>(cpu, rd, vector::integer_scalar<uint16_t>(rs1_val),
+                                                rs2, vl);
             else if (sew == 32)
-                execute_vmerge_vx<uint32_t>(cpu, rd, rs1_val, rs2, vl);
+                execute_vmerge_scalar<uint32_t>(cpu, rd, vector::integer_scalar<uint32_t>(rs1_val),
+                                                rs2, vl);
             else
-                execute_vmerge_vx<uint64_t>(cpu, rd, rs1_val, rs2, vl);
+                execute_vmerge_scalar<uint64_t>(cpu, rd, vector::integer_scalar<uint64_t>(rs1_val),
+                                                rs2, vl);
             return true;
         case isa::OperationId::VMERGE_VIM:
             if (sew == 8)
@@ -361,28 +438,38 @@ bool execute_vector_permute_mv(core::CPU& cpu, isa::OperationId op_id, RegId rd,
     }
 }
 
-bool execute_vector_permute_slide1(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs2,
-                                   bool vm, uint32_t vl, uint32_t sew, Register rs1_val) {
+bool execute_vector_permute_slide1(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
+                                   RegId rs2, bool vm, uint32_t vl, uint32_t sew,
+                                   Register rs1_val) {
+    const bool fp =
+        op_id == isa::OperationId::VFSLIDE1UP_VF || op_id == isa::OperationId::VFSLIDE1DOWN_VF;
+    FloatingRegister scalar_val = vector::integer_scalar<uint64_t>(rs1_val);
+    if (fp) {
+        scalar_val = scalar_fp_bits(cpu, cpu.state().regs.read_fp(rs1), sew);
+    }
     switch (op_id) {
         case isa::OperationId::VSLIDE1UP_VX:
+        case isa::OperationId::VFSLIDE1UP_VF: {
             if (sew == 8)
-                execute_vslide1up<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+                execute_vslide1up<uint8_t>(cpu, rd, scalar_val, rs2, vm, vl);
             else if (sew == 16)
-                execute_vslide1up<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+                execute_vslide1up<uint16_t>(cpu, rd, scalar_val, rs2, vm, vl);
             else if (sew == 32)
-                execute_vslide1up<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+                execute_vslide1up<uint32_t>(cpu, rd, scalar_val, rs2, vm, vl);
             else
-                execute_vslide1up<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl);
+                execute_vslide1up<uint64_t>(cpu, rd, scalar_val, rs2, vm, vl);
             return true;
+        }
         case isa::OperationId::VSLIDE1DOWN_VX:
+        case isa::OperationId::VFSLIDE1DOWN_VF:
             if (sew == 8)
-                execute_vslide1down<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
+                execute_vslide1down<uint8_t>(cpu, rd, scalar_val, rs2, vm, vl);
             else if (sew == 16)
-                execute_vslide1down<uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
+                execute_vslide1down<uint16_t>(cpu, rd, scalar_val, rs2, vm, vl);
             else if (sew == 32)
-                execute_vslide1down<uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
+                execute_vslide1down<uint32_t>(cpu, rd, scalar_val, rs2, vm, vl);
             else
-                execute_vslide1down<uint64_t>(cpu, rd, rs1_val, rs2, vm, vl);
+                execute_vslide1down<uint64_t>(cpu, rd, scalar_val, rs2, vm, vl);
             return true;
         default:
             return false;
@@ -394,7 +481,7 @@ bool execute_vector_permute_slidedown_up(core::CPU& cpu, isa::OperationId op_id,
                                          Register rs1_val, int32_t simm5) {
     switch (op_id) {
         case isa::OperationId::VSLIDEDOWN_VX: {
-            auto offset = static_cast<uint32_t>(rs1_val);
+            auto offset = static_cast<uint64_t>(rs1_val);
             if (sew == 8)
                 execute_vslidedown<uint8_t>(cpu, rd, offset, rs2, vm, vl);
             else if (sew == 16)
@@ -418,7 +505,7 @@ bool execute_vector_permute_slidedown_up(core::CPU& cpu, isa::OperationId op_id,
             return true;
         }
         case isa::OperationId::VSLIDEUP_VX: {
-            auto offset = static_cast<uint32_t>(rs1_val);
+            auto offset = static_cast<uint64_t>(rs1_val);
             if (sew == 8)
                 execute_vslideup<uint8_t>(cpu, rd, offset, rs2, vm, vl);
             else if (sew == 16)
@@ -446,6 +533,46 @@ bool execute_vector_permute_slidedown_up(core::CPU& cpu, isa::OperationId op_id,
     }
 }
 
+template <typename T>
+bool execute_vector_permute_gather_typed(core::CPU& cpu, isa::OperationId op_id, RegId rd,
+                                         RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t vlmax,
+                                         Register rs1_val, int32_t simm5) {
+    switch (op_id) {
+        case isa::OperationId::VRGATHER_VV:
+            execute_vrgather_vector<T, T>(cpu, rd, rs1, rs2, vm, vl, vlmax);
+            return true;
+        case isa::OperationId::VRGATHEREI16_VV:
+            execute_vrgather_vector<T, uint16_t>(cpu, rd, rs1, rs2, vm, vl, vlmax);
+            return true;
+        case isa::OperationId::VRGATHER_VX:
+            execute_vrgather_scalar<T>(cpu, rd, static_cast<uint64_t>(rs1_val), rs2, vm, vl, vlmax);
+            return true;
+        case isa::OperationId::VRGATHER_VI:
+            execute_vrgather_scalar<T>(cpu, rd, static_cast<uint32_t>(simm5) & 0x1FU, rs2, vm, vl,
+                                       vlmax);
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool execute_vector_permute_gather(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
+                                   RegId rs2, bool vm, uint32_t vl, uint32_t sew, Register rs1_val,
+                                   int32_t simm5) {
+    const uint32_t vlmax = vector_vlmax(cpu, sew);
+    if (sew == 8)
+        return execute_vector_permute_gather_typed<uint8_t>(cpu, op_id, rd, rs1, rs2, vm, vl, vlmax,
+                                                            rs1_val, simm5);
+    if (sew == 16)
+        return execute_vector_permute_gather_typed<uint16_t>(cpu, op_id, rd, rs1, rs2, vm, vl,
+                                                             vlmax, rs1_val, simm5);
+    if (sew == 32)
+        return execute_vector_permute_gather_typed<uint32_t>(cpu, op_id, rd, rs1, rs2, vm, vl,
+                                                             vlmax, rs1_val, simm5);
+    return execute_vector_permute_gather_typed<uint64_t>(cpu, op_id, rd, rs1, rs2, vm, vl, vlmax,
+                                                         rs1_val, simm5);
+}
+
 }  // namespace
 
 void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id, RegId rd,
@@ -455,8 +582,10 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
     if (execute_vector_permute_merge(cpu, op_id, rd, rs1, rs2, vl, sew, rs1_val, simm5)) return;
     if (execute_vector_permute_vid(cpu, op_id, rd, rs1, rs2, vm, vl, sew)) return;
     if (execute_vector_permute_mv(cpu, op_id, rd, rs1, rs2, vl, sew, rs1_val, simm5)) return;
-    if (execute_vector_permute_slide1(cpu, op_id, rd, rs2, vm, vl, sew, rs1_val)) return;
+    if (execute_vector_permute_slide1(cpu, op_id, rd, rs1, rs2, vm, vl, sew, rs1_val)) return;
     if (execute_vector_permute_slidedown_up(cpu, op_id, rd, rs2, vm, vl, sew, rs1_val, simm5))
+        return;
+    if (execute_vector_permute_gather(cpu, op_id, rd, rs1, rs2, vm, vl, sew, rs1_val, simm5))
         return;
 }
 

@@ -11,6 +11,50 @@ namespace simrv::execute {
 
 namespace {
 
+__extension__ using SignedDoubleWord = __int128;
+__extension__ using UnsignedDoubleWord = unsigned __int128;
+
+template <typename T>
+auto multiply_high_unsigned(T lhs, T rhs) -> T {
+    constexpr auto kBits = sizeof(T) * 8U;
+    if constexpr (sizeof(T) < sizeof(uint64_t)) {
+        return static_cast<T>((static_cast<uint64_t>(lhs) * static_cast<uint64_t>(rhs)) >> kBits);
+    } else {
+        return static_cast<T>(
+            (static_cast<UnsignedDoubleWord>(lhs) * static_cast<UnsignedDoubleWord>(rhs)) >> kBits);
+    }
+}
+
+template <typename T>
+auto multiply_high_signed(T lhs, T rhs) -> T {
+    using S = std::make_signed_t<T>;
+    constexpr auto kBits = sizeof(T) * 8U;
+    if constexpr (sizeof(T) < sizeof(uint64_t)) {
+        const auto product =
+            static_cast<int64_t>(static_cast<S>(lhs)) * static_cast<int64_t>(static_cast<S>(rhs));
+        return static_cast<T>(static_cast<uint64_t>(product) >> kBits);
+    } else {
+        const auto product = static_cast<SignedDoubleWord>(static_cast<S>(lhs)) *
+                             static_cast<SignedDoubleWord>(static_cast<S>(rhs));
+        return static_cast<T>(static_cast<UnsignedDoubleWord>(product) >> kBits);
+    }
+}
+
+template <typename T>
+auto multiply_high_signed_unsigned(T signed_lhs, T unsigned_rhs) -> T {
+    using S = std::make_signed_t<T>;
+    constexpr auto kBits = sizeof(T) * 8U;
+    if constexpr (sizeof(T) < sizeof(uint64_t)) {
+        const auto product =
+            static_cast<int64_t>(static_cast<S>(signed_lhs)) * static_cast<int64_t>(unsigned_rhs);
+        return static_cast<T>(static_cast<uint64_t>(product) >> kBits);
+    } else {
+        const auto product = static_cast<SignedDoubleWord>(static_cast<S>(signed_lhs)) *
+                             static_cast<SignedDoubleWord>(unsigned_rhs);
+        return static_cast<T>(static_cast<UnsignedDoubleWord>(product) >> kBits);
+    }
+}
+
 // Helpers for carry/borrow calculation
 template <typename T>
 bool calc_carry_out(T val2, T val1, bool carry_in) {
@@ -154,7 +198,7 @@ void execute_vsbc_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, uint32_t vl
 template <typename T>
 void execute_vsbc_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, uint32_t vl) {
     const auto& v0 = cpu.state().regs.read_vector(RegId::Zero);
-    T val1 = static_cast<T>(rs1_val);
+    T val1 = vector::integer_scalar<T>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
         bool borrow_in = vector::get_mask_bit(v0, i);
@@ -179,7 +223,7 @@ void execute_vwadd_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, u
 template <typename T_dest, typename T_src>
 void execute_vwadd_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    T_src val1 = static_cast<T_src>(rs1_val);
+    T_src val1 = vector::integer_scalar<T_src>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T_src val2 = vector::get_group_element<T_src>(cpu.state().regs, rs2, i);
@@ -203,7 +247,7 @@ void execute_vwadd_wv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, u
 template <typename T_dest, typename T_src>
 void execute_vwadd_wx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    T_src val1 = static_cast<T_src>(rs1_val);
+    T_src val1 = vector::integer_scalar<T_src>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T_dest val2 = vector::get_group_element<T_dest>(cpu.state().regs, rs2, i);
@@ -228,7 +272,7 @@ void execute_vwsub_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, u
 template <typename T_dest, typename T_src>
 void execute_vwsub_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    T_src val1 = static_cast<T_src>(rs1_val);
+    T_src val1 = vector::integer_scalar<T_src>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T_src val2 = vector::get_group_element<T_src>(cpu.state().regs, rs2, i);
@@ -332,7 +376,7 @@ void execute_vnsra_wi(core::CPU& cpu, RegId rd, uint32_t uimm5, RegId rs2, bool 
 template <typename T_dest, typename T_src>
 void execute_vwsub_wx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    T_src val1 = static_cast<T_src>(rs1_val);
+    T_src val1 = vector::integer_scalar<T_src>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T_dest val2 = vector::get_group_element<T_dest>(cpu.state().regs, rs2, i);
@@ -358,7 +402,7 @@ template <typename T_dest, typename T_src_signed, typename T_src_unsigned>
 void execute_vwmulsu_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm,
                         uint32_t vl) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    T_src_unsigned val1 = static_cast<T_src_unsigned>(rs1_val);
+    T_src_unsigned val1 = vector::integer_scalar<T_src_unsigned>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T_src_signed val2 = vector::get_group_element<T_src_signed>(cpu.state().regs, rs2, i);
@@ -370,6 +414,7 @@ void execute_vwmulsu_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, b
 // Widening Reduction Sum
 template <typename T_dest, typename T_src>
 void execute_vwredsum_vs(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl) {
+    if (vl == 0) return;
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
     T_dest sum = vector::get_group_element<T_dest>(cpu.state().regs, rs1, 0);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
@@ -381,16 +426,17 @@ void execute_vwredsum_vs(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm
 }
 
 // Vector Single-Width Integer Sum Reduction
-template <typename T>
-void execute_vredsum_vs(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl) {
-    T sum = vector::get_group_element<T>(cpu.state().regs, rs1, 0);
+template <typename T, typename Op>
+void execute_vred_vs(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, Op op) {
+    if (vl == 0) return;
+    T result = vector::get_group_element<T>(cpu.state().regs, rs1, 0);
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T val = vector::get_group_element<T>(cpu.state().regs, rs2, i);
-        sum += val;
+        result = op(result, val);
     }
-    vector::set_group_element<T>(cpu.state().regs, rd, 0, sum);
+    vector::set_group_element<T>(cpu.state().regs, rd, 0, result);
 }
 
 // Vector Widening Integer Multiply (Vector-Vector)
@@ -410,7 +456,7 @@ void execute_vwmul_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, u
 template <typename T_dest, typename T_src>
 void execute_vwmul_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    auto val1 = static_cast<T_dest>(static_cast<T_src>(rs1_val));
+    auto val1 = static_cast<T_dest>(vector::integer_scalar<T_src>(rs1_val));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         auto val2 = static_cast<T_dest>(vector::get_group_element<T_src>(cpu.state().regs, rs2, i));
@@ -446,7 +492,7 @@ template <typename T>
 void perform_mac_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl,
                     bool overwrite_acc, bool subtract) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    T val1 = static_cast<T>(rs1_val);
+    T val1 = vector::integer_scalar<T>(rs1_val);
 
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -486,7 +532,7 @@ template <typename T_dest, typename T_src1, typename T_src2>
 void perform_widening_mac_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm,
                              uint32_t vl, bool subtract = false) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    auto val1 = static_cast<T_src1>(rs1_val);
+    auto val1 = vector::integer_scalar<T_src1>(rs1_val);
 
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -707,7 +753,7 @@ template <typename T>
 void execute_vmadc_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl) {
     const auto& v0 = cpu.state().regs.read_vector(RegId::Zero);
     auto& dest_reg = cpu.state().regs.read_vector(rd);
-    T val1 = static_cast<T>(rs1_val);
+    T val1 = vector::integer_scalar<T>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
         bool carry_in = !vm && vector::get_mask_bit(v0, i);
@@ -746,7 +792,7 @@ template <typename T>
 void execute_vmsbc_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl) {
     const auto& v0 = cpu.state().regs.read_vector(RegId::Zero);
     auto& dest_reg = cpu.state().regs.read_vector(rd);
-    T val1 = static_cast<T>(rs1_val);
+    T val1 = vector::integer_scalar<T>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
         bool borrow_in = !vm && vector::get_mask_bit(v0, i);
@@ -771,7 +817,7 @@ void execute_vadc_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, uint32_t vl
 template <typename T>
 void execute_vadc_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, uint32_t vl) {
     const auto& v0 = cpu.state().regs.read_vector(RegId::Zero);
-    T val1 = static_cast<T>(rs1_val);
+    T val1 = vector::integer_scalar<T>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
         bool carry_in = vector::get_mask_bit(v0, i);
@@ -939,12 +985,32 @@ void dispatch_cmp_vi(core::CPU& cpu, RegId rd, int32_t simm5, RegId rs2, bool vm
             cpu, rd, simm5, rs2, vm, vl, std::forward<Fn>(fn));
 }
 
+template <typename T, typename Fn>
+void dispatch_reduction(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl,
+                        uint32_t sew, Fn&& fn) {
+    if (sew == 8)
+        execute_vred_vs<std::conditional_t<std::is_signed_v<T>, int8_t, uint8_t>>(
+            cpu, rd, rs1, rs2, vm, vl, std::forward<Fn>(fn));
+    else if (sew == 16)
+        execute_vred_vs<std::conditional_t<std::is_signed_v<T>, int16_t, uint16_t>>(
+            cpu, rd, rs1, rs2, vm, vl, std::forward<Fn>(fn));
+    else if (sew == 32)
+        execute_vred_vs<std::conditional_t<std::is_signed_v<T>, int32_t, uint32_t>>(
+            cpu, rd, rs1, rs2, vm, vl, std::forward<Fn>(fn));
+    else
+        execute_vred_vs<std::conditional_t<std::is_signed_v<T>, int64_t, uint64_t>>(
+            cpu, rd, rs1, rs2, vm, vl, std::forward<Fn>(fn));
+}
+
 bool execute_vector_int_arith(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
                               RegId rs2, bool vm, uint32_t vl, uint32_t sew, Register rs1_val,
                               int32_t simm5) {
     auto add_f = []<typename T>(T a, T b) -> T { return a + b; };
     auto sub_f = []<typename T>(T a, T b) -> T { return a - b; };
     auto mul_f = []<typename T>(T a, T b) -> T { return a * b; };
+    auto mulh_f = []<typename T>(T a, T b) -> T { return multiply_high_signed(a, b); };
+    auto mulhu_f = []<typename T>(T a, T b) -> T { return multiply_high_unsigned(a, b); };
+    auto mulhsu_f = []<typename T>(T a, T b) -> T { return multiply_high_signed_unsigned(a, b); };
     auto div_f = []<typename T>(T a, T b) -> T {
         using S = std::make_signed_t<T>;
         if (b == 0) return static_cast<T>(-1);
@@ -952,6 +1018,16 @@ bool execute_vector_int_arith(core::CPU& cpu, isa::OperationId op_id, RegId rd, 
         return static_cast<T>(static_cast<S>(a) / static_cast<S>(b));
     };
     auto divu_f = []<typename T>(T a, T b) -> T { return b == 0 ? static_cast<T>(-1) : a / b; };
+    auto rem_f = []<typename T>(T a, T b) -> T {
+        using S = std::make_signed_t<T>;
+        if (b == 0) return a;
+        if (static_cast<S>(a) == std::numeric_limits<S>::min() && static_cast<S>(b) == -1) {
+            return 0;
+        }
+        return static_cast<T>(static_cast<S>(a) % static_cast<S>(b));
+    };
+    auto remu_f = []<typename T>(T a, T b) -> T { return b == 0 ? a : a % b; };
+    auto rsub_f = []<typename T>(T a, T b) -> T { return b - a; };
     auto minu_f = []<typename T>(T a, T b) -> T { return std::min(a, b); };
     auto min_f = []<typename T>(T a, T b) -> T {
         using S = std::make_signed_t<T>;
@@ -979,11 +1055,35 @@ bool execute_vector_int_arith(core::CPU& cpu, isa::OperationId op_id, RegId rd, 
         case isa::OperationId::VSUB_VX:
             dispatch_vx(cpu, rd, rs1_val, rs2, vm, vl, sew, sub_f);
             return true;
+        case isa::OperationId::VRSUB_VX:
+            dispatch_vx(cpu, rd, rs1_val, rs2, vm, vl, sew, rsub_f);
+            return true;
+        case isa::OperationId::VRSUB_VI:
+            dispatch_vi(cpu, rd, simm5, rs2, vm, vl, sew, rsub_f);
+            return true;
         case isa::OperationId::VMUL_VV:
             dispatch_vv(cpu, rd, rs1, rs2, vm, vl, sew, mul_f);
             return true;
         case isa::OperationId::VMUL_VX:
             dispatch_vx(cpu, rd, rs1_val, rs2, vm, vl, sew, mul_f);
+            return true;
+        case isa::OperationId::VMULH_VV:
+            dispatch_vv(cpu, rd, rs1, rs2, vm, vl, sew, mulh_f);
+            return true;
+        case isa::OperationId::VMULH_VX:
+            dispatch_vx(cpu, rd, rs1_val, rs2, vm, vl, sew, mulh_f);
+            return true;
+        case isa::OperationId::VMULHU_VV:
+            dispatch_vv(cpu, rd, rs1, rs2, vm, vl, sew, mulhu_f);
+            return true;
+        case isa::OperationId::VMULHU_VX:
+            dispatch_vx(cpu, rd, rs1_val, rs2, vm, vl, sew, mulhu_f);
+            return true;
+        case isa::OperationId::VMULHSU_VV:
+            dispatch_vv(cpu, rd, rs1, rs2, vm, vl, sew, mulhsu_f);
+            return true;
+        case isa::OperationId::VMULHSU_VX:
+            dispatch_vx(cpu, rd, rs1_val, rs2, vm, vl, sew, mulhsu_f);
             return true;
         case isa::OperationId::VDIV_VV:
             dispatch_vv(cpu, rd, rs1, rs2, vm, vl, sew, div_f);
@@ -996,6 +1096,18 @@ bool execute_vector_int_arith(core::CPU& cpu, isa::OperationId op_id, RegId rd, 
             return true;
         case isa::OperationId::VDIVU_VX:
             dispatch_vx(cpu, rd, rs1_val, rs2, vm, vl, sew, divu_f);
+            return true;
+        case isa::OperationId::VREM_VV:
+            dispatch_vv(cpu, rd, rs1, rs2, vm, vl, sew, rem_f);
+            return true;
+        case isa::OperationId::VREM_VX:
+            dispatch_vx(cpu, rd, rs1_val, rs2, vm, vl, sew, rem_f);
+            return true;
+        case isa::OperationId::VREMU_VV:
+            dispatch_vv(cpu, rd, rs1, rs2, vm, vl, sew, remu_f);
+            return true;
+        case isa::OperationId::VREMU_VX:
+            dispatch_vx(cpu, rd, rs1_val, rs2, vm, vl, sew, remu_f);
             return true;
         case isa::OperationId::VMIN_VV:
             dispatch_vv(cpu, rd, rs1, rs2, vm, vl, sew, min_f);
@@ -1294,11 +1406,11 @@ bool execute_vector_int_mac(core::CPU& cpu, isa::OperationId op_id, RegId rd, Re
         case isa::OperationId::VMACC_VV:
         case isa::OperationId::VMADD_VV:
         case isa::OperationId::VNMSAC_VV:
-        case isa::OperationId::VNSUB_VV: {
+        case isa::OperationId::VNMSUB_VV: {
             bool overwrite_acc =
                 (op_id == isa::OperationId::VMACC_VV || op_id == isa::OperationId::VNMSAC_VV);
             bool subtract =
-                (op_id == isa::OperationId::VNMSAC_VV || op_id == isa::OperationId::VNSUB_VV);
+                (op_id == isa::OperationId::VNMSAC_VV || op_id == isa::OperationId::VNMSUB_VV);
             if (sew == 8)
                 perform_mac_vv<uint8_t>(cpu, rd, rs1, rs2, vm, vl, overwrite_acc, subtract);
             else if (sew == 16)
@@ -1312,11 +1424,11 @@ bool execute_vector_int_mac(core::CPU& cpu, isa::OperationId op_id, RegId rd, Re
         case isa::OperationId::VMACC_VX:
         case isa::OperationId::VMADD_VX:
         case isa::OperationId::VNMSAC_VX:
-        case isa::OperationId::VNSUB_VX: {
+        case isa::OperationId::VNMSUB_VX: {
             bool overwrite_acc =
                 (op_id == isa::OperationId::VMACC_VX || op_id == isa::OperationId::VNMSAC_VX);
             bool subtract =
-                (op_id == isa::OperationId::VNMSAC_VX || op_id == isa::OperationId::VNSUB_VX);
+                (op_id == isa::OperationId::VNMSAC_VX || op_id == isa::OperationId::VNMSUB_VX);
             if (sew == 8)
                 perform_mac_vx<uint8_t>(cpu, rd, rs1_val, rs2, vm, vl, overwrite_acc, subtract);
             else if (sew == 16)
@@ -1394,16 +1506,37 @@ bool execute_vector_int_mac(core::CPU& cpu, isa::OperationId op_id, RegId rd, Re
 bool execute_vector_int_widening_arith(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
                                        RegId rs2, bool vm, uint32_t vl, uint32_t sew,
                                        Register rs1_val) {
+    auto sum_f = []<typename T>(T a, T b) -> T { return a + b; };
+    auto and_f = []<typename T>(T a, T b) -> T { return a & b; };
+    auto or_f = []<typename T>(T a, T b) -> T { return a | b; };
+    auto xor_f = []<typename T>(T a, T b) -> T { return a ^ b; };
+    auto min_f = []<typename T>(T a, T b) -> T { return std::min(a, b); };
+    auto max_f = []<typename T>(T a, T b) -> T { return std::max(a, b); };
+
     switch (op_id) {
         case isa::OperationId::VREDSUM_VS:
-            if (sew == 8)
-                execute_vredsum_vs<uint8_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 16)
-                execute_vredsum_vs<uint16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 32)
-                execute_vredsum_vs<uint32_t>(cpu, rd, rs1, rs2, vm, vl);
-            else
-                execute_vredsum_vs<uint64_t>(cpu, rd, rs1, rs2, vm, vl);
+            dispatch_reduction<uint8_t>(cpu, rd, rs1, rs2, vm, vl, sew, sum_f);
+            return true;
+        case isa::OperationId::VREDAND_VS:
+            dispatch_reduction<uint8_t>(cpu, rd, rs1, rs2, vm, vl, sew, and_f);
+            return true;
+        case isa::OperationId::VREDOR_VS:
+            dispatch_reduction<uint8_t>(cpu, rd, rs1, rs2, vm, vl, sew, or_f);
+            return true;
+        case isa::OperationId::VREDXOR_VS:
+            dispatch_reduction<uint8_t>(cpu, rd, rs1, rs2, vm, vl, sew, xor_f);
+            return true;
+        case isa::OperationId::VREDMINU_VS:
+            dispatch_reduction<uint8_t>(cpu, rd, rs1, rs2, vm, vl, sew, min_f);
+            return true;
+        case isa::OperationId::VREDMIN_VS:
+            dispatch_reduction<int8_t>(cpu, rd, rs1, rs2, vm, vl, sew, min_f);
+            return true;
+        case isa::OperationId::VREDMAXU_VS:
+            dispatch_reduction<uint8_t>(cpu, rd, rs1, rs2, vm, vl, sew, max_f);
+            return true;
+        case isa::OperationId::VREDMAX_VS:
+            dispatch_reduction<int8_t>(cpu, rd, rs1, rs2, vm, vl, sew, max_f);
             return true;
 
         case isa::OperationId::VWMUL_VV:
@@ -1917,20 +2050,24 @@ bool execute_vector_int_mask_bitmanip(core::CPU& cpu, isa::OperationId op_id, Re
 
 }  // namespace
 
-void ExecuteUnit::execute_vector_integer(core::CPU& cpu, isa::OperationId op_id, RegId rd,
+auto ExecuteUnit::execute_vector_integer(core::CPU& cpu, isa::OperationId op_id, RegId rd,
                                          RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew,
-                                         Register rs1_val, int32_t simm5) {
-    if (execute_vector_int_arith(cpu, op_id, rd, rs1, rs2, vm, vl, sew, rs1_val, simm5)) return;
+                                         Register rs1_val, int32_t simm5) -> bool {
+    if (execute_vector_int_arith(cpu, op_id, rd, rs1, rs2, vm, vl, sew, rs1_val, simm5))
+        return true;
     if (execute_vector_int_logic_shifts(cpu, op_id, rd, rs1, rs2, vm, vl, sew, rs1_val, simm5))
-        return;
-    if (execute_vector_int_cmp(cpu, op_id, rd, rs1, rs2, vm, vl, sew, rs1_val, simm5)) return;
+        return true;
+    if (execute_vector_int_cmp(cpu, op_id, rd, rs1, rs2, vm, vl, sew, rs1_val, simm5)) return true;
     if (execute_vector_int_narrow_shifts(cpu, op_id, rd, rs1, rs2, vm, vl, sew, rs1_val, simm5))
-        return;
-    if (execute_vector_int_mac(cpu, op_id, rd, rs1, rs2, vm, vl, sew, rs1_val, simm5)) return;
-    if (execute_vector_int_widening_arith(cpu, op_id, rd, rs1, rs2, vm, vl, sew, rs1_val)) return;
-    if (execute_vector_int_carry_ext(cpu, op_id, rd, rs1, rs2, vm, vl, sew, rs1_val, simm5)) return;
+        return true;
+    if (execute_vector_int_mac(cpu, op_id, rd, rs1, rs2, vm, vl, sew, rs1_val, simm5)) return true;
+    if (execute_vector_int_widening_arith(cpu, op_id, rd, rs1, rs2, vm, vl, sew, rs1_val))
+        return true;
+    if (execute_vector_int_carry_ext(cpu, op_id, rd, rs1, rs2, vm, vl, sew, rs1_val, simm5))
+        return true;
     if (execute_vector_int_mask_bitmanip(cpu, op_id, rd, rs1, rs2, vm, vl, sew, rs1_val, simm5))
-        return;
+        return true;
+    return false;
 }
 
 }  // namespace simrv::execute

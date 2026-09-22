@@ -12,10 +12,12 @@ void execute_vector_config(core::CPU& cpu, isa::OperationId op_id, Instruction i
                            RegId rs1, RegId rs2);
 
 void execute_vector_memory(core::CPU& cpu, memory::MemorySubsystem& mem, isa::OperationId op_id,
-                           RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew);
+                           RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew,
+                           uint32_t nfields, uint32_t field_registers);
 
-void execute_vector_integer(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1, RegId rs2,
-                            bool vm, uint32_t vl, uint32_t sew, Register rs1_val, int32_t simm5);
+[[nodiscard]] auto execute_vector_integer(core::CPU& cpu, isa::OperationId op_id, RegId rd,
+                                          RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew,
+                                          Register rs1_val, int32_t simm5) -> bool;
 
 void execute_vector_fixed_point(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
                                 RegId rs2, bool vm, uint32_t vl, uint32_t sew, Register rs1_val,

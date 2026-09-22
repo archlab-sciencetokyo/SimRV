@@ -47,6 +47,15 @@ auto main() -> int {
     invalid.isa.vlen = 48;
     expect(!invalid.validate().has_value(), "configuration rejects invalid VLEN");
     invalid = defaults;
+    invalid.isa.vlen = 64;
+    expect(!invalid.validate().has_value(), "full V rejects VLEN below 128 bits");
+    invalid = defaults;
+    invalid.isa.vlen = 192;
+    expect(!invalid.validate().has_value(), "configuration rejects non-power-of-two VLEN");
+    invalid = defaults;
+    invalid.isa.vlen = 128;
+    expect(invalid.validate().has_value(), "configuration accepts minimum full-V VLEN");
+    invalid = defaults;
     invalid.tui.enabled = true;
     invalid.debug.gdb_enabled = true;
     expect(!invalid.validate().has_value(), "configuration rejects TUI with GDB");

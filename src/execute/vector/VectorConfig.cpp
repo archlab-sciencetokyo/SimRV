@@ -71,6 +71,25 @@ void ExecuteUnit::execute_vector_config(core::CPU& cpu, isa::OperationId op_id, 
         final_vtype = raw_vtype & 0xFFu;
         auto const vlmax = (cpu.state().regs.vlen * lmul_num) / (req_sew * lmul_den);
 
+        if (op_id != isa::OperationId::VSETIVLI && rs1 == RegId::Zero && rd == RegId::Zero) {
+            const VtypeView old_view{.raw = cpu.state().vtype,
+                                     .xlen = static_cast<uint8_t>(cpu.state().regs.xlen)};
+            const uint32_t old_lmul = old_view.lmul_field();
+            uint32_t old_vlmax = 0;
+            if (!old_view.vill()) {
+                if (old_lmul <= 3) {
+                    old_vlmax = (cpu.state().regs.vlen << old_lmul) / old_view.sew_bits();
+                } else {
+                    old_vlmax = cpu.state().regs.vlen / (old_view.sew_bits() << (8U - old_lmul));
+                }
+            }
+            if (old_vlmax != vlmax) {
+                cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
+                cpu.active_context().pending_tval = ir;
+                return;
+            }
+        }
+
         if (op_id == isa::OperationId::VSETIVLI) {
             uint32_t const uimm = (ir >> 15) & 0x1F;
             new_vl = std::min(uimm, vlmax);
@@ -82,7 +101,8 @@ void ExecuteUnit::execute_vector_config(core::CPU& cpu, isa::OperationId op_id, 
                     new_vl = vlmax;
                 }
             } else {
-                new_vl = std::min(static_cast<uint32_t>(cpu.state().regs.read(rs1)), vlmax);
+                new_vl =
+                    static_cast<uint32_t>(std::min<uint64_t>(cpu.state().regs.read(rs1), vlmax));
             }
         }
     }

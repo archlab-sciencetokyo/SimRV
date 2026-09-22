@@ -930,12 +930,12 @@ auto get_description(OperationId op_id) -> std::pair<std::string_view, std::stri
         arr[VNMSAC_VX] = {"VNMSAC.VX",
                           "Vector-Scalar Negative Multiply-Accumulate. Multiplies scalar rs1 and "
                           "vector rs2, subtracts product from vector register rd."};
-        arr[VNSUB_VV] = {"VNSUB.VV",
-                         "Vector Negative Multiply-Add. Multiplies vector registers rs1 and rd, "
-                         "subtracts product from vector register rs2."};
-        arr[VNSUB_VX] = {"VNSUB.VX",
-                         "Vector-Scalar Negative Multiply-Add. Multiplies scalar rs1 and vector "
-                         "rd, subtracts product from vector register rs2."};
+        arr[VNMSUB_VV] = {"VNMSUB.VV",
+                          "Vector Negative Multiply-Add. Multiplies vector registers rs1 and rd, "
+                          "subtracts product from vector register rs2."};
+        arr[VNMSUB_VX] = {"VNMSUB.VX",
+                          "Vector-Scalar Negative Multiply-Add. Multiplies scalar rs1 and vector "
+                          "rd, subtracts product from vector register rs2."};
         arr[VWMACCU_VV] = {
             "VWMACCU.VV",
             "Vector Widening Unsigned Multiply-Accumulate. Multiplies unsigned vector registers "

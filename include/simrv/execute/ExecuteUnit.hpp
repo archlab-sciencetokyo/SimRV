@@ -81,11 +81,13 @@ class ExecuteUnit {
 
     static void execute_vector_memory(core::CPU& cpu, memory::MemorySubsystem& mem,
                                       isa::OperationId op_id, RegId rd, RegId rs1, RegId rs2,
-                                      bool vm, uint32_t vl, uint32_t sew);
+                                      bool vm, uint32_t vl, uint32_t sew, uint32_t nfields,
+                                      uint32_t field_registers);
 
-    static void execute_vector_integer(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
-                                       RegId rs2, bool vm, uint32_t vl, uint32_t sew,
-                                       Register rs1_val, int32_t simm5);
+    [[nodiscard]] static auto execute_vector_integer(core::CPU& cpu, isa::OperationId op_id,
+                                                     RegId rd, RegId rs1, RegId rs2, bool vm,
+                                                     uint32_t vl, uint32_t sew, Register rs1_val,
+                                                     int32_t simm5) -> bool;
 
     static void execute_vector_fixed_point(core::CPU& cpu, isa::OperationId op_id, RegId rd,
                                            RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew,

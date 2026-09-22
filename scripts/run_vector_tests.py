@@ -7,6 +7,7 @@ import subprocess
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import multiprocessing
+import tempfile
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate, compile, and run vector tests for SimRV.")
@@ -18,7 +19,10 @@ def parse_args():
     parser.add_argument("--work-dir", required=True, help="Path to directory for generated/compiled artifacts")
     parser.add_argument("--vector-tests-dir", required=True, help="Checked-out chipsalliance/riscv-vector-tests directory")
     parser.add_argument("--vlen", type=int, default=256, help="Vector register length used by generated tests")
-    parser.add_argument("--jobs", type=int, default=multiprocessing.cpu_count(), help="Number of parallel jobs to run")
+    parser.add_argument("--jobs", type=int, default=min(4, multiprocessing.cpu_count()), help="Number of parallel jobs to run")
+    parser.add_argument("--pattern", default=".*", help="Generator instruction-name regex")
+    parser.add_argument("--generator", help="Prebuilt vector test generator")
+    parser.add_argument("--configs-dir", help="Generator configs directory (default: configs/v)")
     return parser.parse_args()
 
 def run_cmd(cmd, shell=False, cwd=None):
@@ -52,10 +56,10 @@ def compile_and_run_test(test_ctx):
 
     # Arch and ABI configuration
     if xlen == 64:
-        vec_arch = "rv64gcv_zfh_zvfh_zvbb_zvbc"
+        vec_arch = "rv64gcv"
         vec_abi = "lp64d"
     else:
-        vec_arch = "rv32gcv_zfh_zvfh_zvbb_zvbc"
+        vec_arch = "rv32gcv"
         vec_abi = "ilp32d"
 
     # 1. Compile
@@ -114,30 +118,27 @@ def compile_and_run_test(test_ctx):
 
 def main():
     args = parse_args()
+    args.work_dir = os.path.abspath(args.work_dir)
+    os.makedirs(args.work_dir, exist_ok=True)
+    run_dir = tempfile.mkdtemp(prefix="vector-run-", dir=args.work_dir)
 
     vector_tests_dir = os.path.abspath(args.vector_tests_dir)
-    generator_path = os.path.join(vector_tests_dir, "bin", "riscv-vector-tests-generator")
-    configs_path = os.path.join(vector_tests_dir, "configs")
+    generator_path = args.generator or os.path.join(vector_tests_dir, "bin", "riscv-vector-tests-generator")
+    if not os.path.exists(generator_path) and not args.generator:
+        generator_path = os.path.join(os.path.abspath(args.work_dir), "riscv-vector-tests-generator")
+    configs_path = os.path.abspath(args.configs_dir) if args.configs_dir else os.path.join(vector_tests_dir, "configs", "v")
 
     if not os.path.exists(generator_path):
         gen_src_dir = os.path.join(vector_tests_dir, "generator")
         if os.path.exists(gen_src_dir):
-            os.makedirs(os.path.dirname(generator_path), exist_ok=True)
             gen_env = os.environ.copy()
-            gen_env["CC"] = "/usr/bin/gcc"
-            gen_env["CGO_ENABLED"] = "1"
-            subprocess.run(["go", "build", "-o", generator_path, "."], cwd=vector_tests_dir, env=gen_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            res = subprocess.run(["go", "build", "-o", generator_path, "."], cwd=vector_tests_dir, env=gen_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if res.returncode != 0:
+                print(f"Failed to build vector test generator: {res.stderr}")
 
     if not os.path.exists(generator_path):
         print(f"Error: Vector test generator not found at '{generator_path}'")
         sys.exit(1)
-
-    try:
-        os.chmod(generator_path, 0o755)
-    except Exception:
-        pass
-
-    os.makedirs(args.work_dir, exist_ok=True)
 
     # 1. Run Generator
     print("Generating vector assembly files...", flush=True)
@@ -146,66 +147,20 @@ def main():
         "-XLEN", str(args.xlen),
         "-VLEN", str(args.vlen),
         "-configs", configs_path,
-        "-stage1output", args.work_dir,
-        "-march", "gcv_zvbb_zvbc"
+        "-stage1output", run_dir,
+        "-march", "gcv",
+        "-pattern", args.pattern
     ]
     try:
-        res = run_cmd(gen_cmd)
+        res = run_cmd(gen_cmd, cwd=run_dir)
     except Exception:
         res = None
 
     if res is None or res.returncode != 0:
-        go_gen_cmd = [
-            "go", "run", ".",
-            "-XLEN", str(args.xlen),
-            "-VLEN", str(args.vlen),
-            "-configs", configs_path,
-            "-stage1output", args.work_dir,
-            "-march", "gcv_zvbb_zvbc"
-        ]
-        res = run_cmd(go_gen_cmd, cwd=args.vector_tests_dir)
-        if res.returncode != 0:
-            print(f"Failed to generate vector tests: {res.stderr}")
-            sys.exit(1)
+        print(f"Failed to generate vector tests: {res.stderr if res else 'generator could not start'}")
+        sys.exit(1)
 
-    # Load supported operation IDs from OperationId.hpp
-    supported_ops = set()
-    op_header_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "include", "simrv", "isa", "OperationId.hpp")
-    if os.path.exists(op_header_path):
-        with open(op_header_path, "r") as f:
-            for line in f:
-                # Find words starting with V followed by uppercase letters, numbers, or underscores
-                for m in re.finditer(r"\b(V[A-Z0-9_]+)\b", line):
-                    supported_ops.add(m.group(1))
-    else:
-        print(f"Warning: OperationId.hpp not found at {op_header_path}", flush=True)
-
-    s_files = glob.glob(os.path.join(args.work_dir, "*.S"))
-    
-    # Filter out segment load/stores, fault-only-first tests, unsupported instructions, and float e16 tests (since Zfh is unsupported)
-    filtered_s_files = []
-    for f in s_files:
-        basename = os.path.basename(f)
-        if "seg" in basename or "ff" in basename:
-            continue
-        # Check for float e16 tests (Zfh is unsupported)
-        if basename.startswith("vf"):
-            try:
-                with open(f, "r") as s_file:
-                    content = s_file.read()
-                    if "SEW: e16" in content:
-                        continue
-            except Exception:
-                pass
-        # Extract instruction name before the first '-'
-        m = re.match(r"^([a-z0-9_]+)-", basename)
-        if m:
-            insn_name = m.group(1).upper()
-            if insn_name in supported_ops:
-                filtered_s_files.append(f)
-        else:
-            filtered_s_files.append(f)
-    s_files = filtered_s_files
+    s_files = glob.glob(os.path.join(run_dir, "*.S"))
 
     if not s_files:
         print("No generated assembly (.S) files found!")
@@ -246,7 +201,7 @@ def main():
             "objcopy": objcopy_bin,
             "nm": nm_bin,
             "simrv": args.simrv,
-            "work_dir": args.work_dir,
+            "work_dir": run_dir,
             "xlen": args.xlen,
             "vector_tests_dir": vector_tests_dir,
         })

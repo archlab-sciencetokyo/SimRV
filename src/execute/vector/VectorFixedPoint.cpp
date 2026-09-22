@@ -5,6 +5,66 @@ namespace simrv::execute {
 
 namespace {
 
+__extension__ using SignedDoubleWord = __int128;
+
+template <typename T>
+using AverageWide = std::conditional_t<
+    sizeof(T) == 1, int16_t,
+    std::conditional_t<sizeof(T) == 2, int32_t,
+                       std::conditional_t<sizeof(T) == 4, int64_t, SignedDoubleWord>>>;
+
+template <typename Wide>
+auto round_average(Wide value, uint32_t vxrm) -> Wide {
+    const Wide shifted = value >> 1;
+    const bool discarded = (value & Wide{1}) != 0;
+    switch (vxrm & 0x3U) {
+        case 0:  // rnu: round to nearest, ties up
+            return shifted + static_cast<Wide>(discarded);
+        case 1:  // rne: round to nearest, ties to even
+            return shifted + static_cast<Wide>(discarded && ((shifted & Wide{1}) != 0));
+        case 2:  // rdn: truncate (round down)
+            return shifted;
+        case 3:  // rod: round to odd
+            return shifted | static_cast<Wide>(discarded);
+        default:
+            return shifted;
+    }
+}
+
+template <typename T, bool Subtract>
+auto average_element(T lhs, T rhs, uint32_t vxrm) -> T {
+    using Wide = AverageWide<T>;
+    const Wide wide_lhs = static_cast<Wide>(lhs);
+    const Wide wide_rhs = static_cast<Wide>(rhs);
+    const Wide exact = Subtract ? wide_lhs - wide_rhs : wide_lhs + wide_rhs;
+    return static_cast<T>(round_average(exact, vxrm));
+}
+
+template <typename T, bool Subtract>
+void execute_average_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+        if (!vector::is_element_active(mask_reg, i, vm)) continue;
+        const T lhs = vector::get_group_element<T>(cpu.state().regs, rs2, i);
+        const T rhs = vector::get_group_element<T>(cpu.state().regs, rs1, i);
+        vector::set_group_element<T>(cpu.state().regs, rd, i,
+                                     average_element<T, Subtract>(lhs, rhs, cpu.state().vxrm));
+    }
+}
+
+template <typename T, bool Subtract>
+void execute_average_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm,
+                        uint32_t vl) {
+    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const T rhs = vector::integer_scalar<T>(rs1_val);
+    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+        if (!vector::is_element_active(mask_reg, i, vm)) continue;
+        const T lhs = vector::get_group_element<T>(cpu.state().regs, rs2, i);
+        vector::set_group_element<T>(cpu.state().regs, rd, i,
+                                     average_element<T, Subtract>(lhs, rhs, cpu.state().vxrm));
+    }
+}
+
 // Saturating Add/Sub signed/unsigned
 template <typename T, typename Op>
 void execute_vsadd_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl, Op op) {
@@ -26,7 +86,7 @@ template <typename T, typename Op>
 void execute_vsadd_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl,
                       Op op) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    T val1 = static_cast<T>(rs1_val);
+    T val1 = vector::integer_scalar<T>(rs1_val);
     bool saturated = false;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -78,7 +138,7 @@ template <typename T>
 void execute_vsmul_vx(core::CPU& cpu, RegId rd, Register rs1_val, RegId rs2, bool vm, uint32_t vl,
                       uint32_t vxrm) {
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    T val1 = static_cast<T>(rs1_val);
+    T val1 = vector::integer_scalar<T>(rs1_val);
     bool saturated = false;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -285,6 +345,48 @@ void execute_vssub_family(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegI
     }
 }
 
+void execute_average_family(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1, RegId rs2,
+                            bool vm, uint32_t vl, uint32_t sew, Register rs1_val) {
+    const bool is_unsigned =
+        op_id == isa::OperationId::VAADDU_VV || op_id == isa::OperationId::VAADDU_VX ||
+        op_id == isa::OperationId::VASUBU_VV || op_id == isa::OperationId::VASUBU_VX;
+    const bool subtract =
+        op_id == isa::OperationId::VASUBU_VV || op_id == isa::OperationId::VASUBU_VX ||
+        op_id == isa::OperationId::VASUB_VV || op_id == isa::OperationId::VASUB_VX;
+    const bool scalar = op_id == isa::OperationId::VAADDU_VX ||
+                        op_id == isa::OperationId::VAADD_VX ||
+                        op_id == isa::OperationId::VASUBU_VX || op_id == isa::OperationId::VASUB_VX;
+
+    dispatch_sew_type(sew, [&]<size_t Bits>() {
+        using Signed = std::conditional_t<
+            Bits == 8, int8_t,
+            std::conditional_t<Bits == 16, int16_t,
+                               std::conditional_t<Bits == 32, int32_t, int64_t>>>;
+        using Unsigned = std::make_unsigned_t<Signed>;
+        if (is_unsigned) {
+            if (scalar) {
+                if (subtract)
+                    execute_average_vx<Unsigned, true>(cpu, rd, rs1_val, rs2, vm, vl);
+                else
+                    execute_average_vx<Unsigned, false>(cpu, rd, rs1_val, rs2, vm, vl);
+            } else if (subtract) {
+                execute_average_vv<Unsigned, true>(cpu, rd, rs1, rs2, vm, vl);
+            } else {
+                execute_average_vv<Unsigned, false>(cpu, rd, rs1, rs2, vm, vl);
+            }
+        } else if (scalar) {
+            if (subtract)
+                execute_average_vx<Signed, true>(cpu, rd, rs1_val, rs2, vm, vl);
+            else
+                execute_average_vx<Signed, false>(cpu, rd, rs1_val, rs2, vm, vl);
+        } else if (subtract) {
+            execute_average_vv<Signed, true>(cpu, rd, rs1, rs2, vm, vl);
+        } else {
+            execute_average_vv<Signed, false>(cpu, rd, rs1, rs2, vm, vl);
+        }
+    });
+}
+
 void execute_vsshr_family(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1, RegId rs2,
                           bool vm, uint32_t vl, uint32_t sew, Register rs1_val, int32_t simm5) {
     uint32_t vxrm = cpu.state().vxrm;
@@ -384,22 +486,22 @@ void execute_vnclip_family(core::CPU& cpu, isa::OperationId op_id, RegId rd, Reg
 
     if (sew == 8) {
         if (is_unsigned)
-            execute_vnclip<uint8_t, int16_t>(cpu, rd, rs1, rs2, vm, vl, is_vx, is_vi, rs1_val,
-                                             simm5);
+            execute_vnclip<uint8_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl, is_vx, is_vi, rs1_val,
+                                              simm5);
         else
             execute_vnclip<int8_t, int16_t>(cpu, rd, rs1, rs2, vm, vl, is_vx, is_vi, rs1_val,
                                             simm5);
     } else if (sew == 16) {
         if (is_unsigned)
-            execute_vnclip<uint16_t, int32_t>(cpu, rd, rs1, rs2, vm, vl, is_vx, is_vi, rs1_val,
-                                              simm5);
+            execute_vnclip<uint16_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl, is_vx, is_vi, rs1_val,
+                                               simm5);
         else
             execute_vnclip<int16_t, int32_t>(cpu, rd, rs1, rs2, vm, vl, is_vx, is_vi, rs1_val,
                                              simm5);
     } else {
         if (is_unsigned)
-            execute_vnclip<uint32_t, int64_t>(cpu, rd, rs1, rs2, vm, vl, is_vx, is_vi, rs1_val,
-                                              simm5);
+            execute_vnclip<uint32_t, uint64_t>(cpu, rd, rs1, rs2, vm, vl, is_vx, is_vi, rs1_val,
+                                               simm5);
         else
             execute_vnclip<int32_t, int64_t>(cpu, rd, rs1, rs2, vm, vl, is_vx, is_vi, rs1_val,
                                              simm5);
@@ -419,6 +521,11 @@ void ExecuteUnit::execute_vector_fixed_point(core::CPU& cpu, isa::OperationId op
 
     if (op_id >= isa::OperationId::VSADD_VV && op_id <= isa::OperationId::VSADDU_VI) {
         execute_vsadd_family(cpu, op_id, rd, rs1, rs2, vm, vl, sew, rs1_val, simm5);
+        return;
+    }
+
+    if (op_id >= isa::OperationId::VAADDU_VV && op_id <= isa::OperationId::VASUB_VX) {
+        execute_average_family(cpu, op_id, rd, rs1, rs2, vm, vl, sew, rs1_val);
         return;
     }
 

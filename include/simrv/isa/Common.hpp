@@ -263,6 +263,180 @@ constexpr auto instruction_enabled_by_misa(CSRValue misa, Instruction ir, bool c
     return misa_has_extension(misa, required_extension_for_instruction(ir, compressed));
 }
 
+/** Resolve all MISA bits required by a decoded operation.
+ *
+ * Raw opcode classification cannot distinguish scalar B operations from I/M, nor the Zvbb/Zvbc
+ * operations currently represented by SimRV's B profile bit. Keep this operation-aware resolver at
+ * the decode boundary so extension-disabled instructions never reach execution.
+ */
+constexpr auto required_misa_extensions(OperationId op_id, bool compressed = false) -> CSRValue {
+    const CSRValue compressed_requirement =
+        compressed ? misa_extension_bit(IsaExtension::C) : CSRValue{0};
+
+    const auto op = std::to_underlying(op_id);
+    const auto in_range = [op](OperationId first, OperationId last) {
+        return op >= std::to_underlying(first) && op <= std::to_underlying(last);
+    };
+
+    if (in_range(OperationId::MUL, OperationId::REMUW)) {
+        return compressed_requirement | misa_extension_bit(IsaExtension::M);
+    }
+    if (in_range(OperationId::LR_W, OperationId::AMOMAXU_D)) {
+        return compressed_requirement | misa_extension_bit(IsaExtension::A);
+    }
+    if (in_range(OperationId::FLW, OperationId::FCVT_S_LU)) {
+        return compressed_requirement | misa_extension_bit(IsaExtension::F);
+    }
+    if (in_range(OperationId::FLD, OperationId::FCVT_D_LU)) {
+        return compressed_requirement | misa_extension_bit(IsaExtension::F) |
+               misa_extension_bit(IsaExtension::D);
+    }
+    if (in_range(OperationId::SH1ADD, OperationId::PACKW)) {
+        return compressed_requirement | misa_extension_bit(IsaExtension::B);
+    }
+    if (in_range(OperationId::VSETVLI, OperationId::VWSLL_VI)) {
+        CSRValue required = compressed_requirement | misa_extension_bit(IsaExtension::V);
+        switch (op_id) {
+            case OperationId::VFADD_VV:
+            case OperationId::VFSLIDE1UP_VF:
+            case OperationId::VFSLIDE1DOWN_VF:
+            case OperationId::VFADD_VF:
+            case OperationId::VFSUB_VV:
+            case OperationId::VFSUB_VF:
+            case OperationId::VFRSUB_VF:
+            case OperationId::VFMUL_VV:
+            case OperationId::VFMUL_VF:
+            case OperationId::VFDIV_VV:
+            case OperationId::VFDIV_VF:
+            case OperationId::VFRDIV_VF:
+            case OperationId::VFSQRT_V:
+            case OperationId::VFRSQRT7_V:
+            case OperationId::VFREC7_V:
+            case OperationId::VFCLASS_V:
+            case OperationId::VFCVT_XU_F_V:
+            case OperationId::VFCVT_X_F_V:
+            case OperationId::VFCVT_F_XU_V:
+            case OperationId::VFCVT_F_X_V:
+            case OperationId::VFCVT_RTZ_XU_F_V:
+            case OperationId::VFCVT_RTZ_X_F_V:
+            case OperationId::VFWCVT_XU_F_V:
+            case OperationId::VFWCVT_X_F_V:
+            case OperationId::VFWCVT_F_XU_V:
+            case OperationId::VFWCVT_F_X_V:
+            case OperationId::VFWCVT_F_F_V:
+            case OperationId::VFWCVT_RTZ_XU_F_V:
+            case OperationId::VFWCVT_RTZ_X_F_V:
+            case OperationId::VFNCVT_XU_F_W:
+            case OperationId::VFNCVT_X_F_W:
+            case OperationId::VFNCVT_F_XU_W:
+            case OperationId::VFNCVT_F_X_W:
+            case OperationId::VFNCVT_F_F_W:
+            case OperationId::VFNCVT_ROD_F_F_W:
+            case OperationId::VFNCVT_RTZ_XU_F_W:
+            case OperationId::VFNCVT_RTZ_X_F_W:
+            case OperationId::VFSGNJ_VV:
+            case OperationId::VFSGNJ_VF:
+            case OperationId::VFSGNJN_VV:
+            case OperationId::VFSGNJN_VF:
+            case OperationId::VFSGNJX_VV:
+            case OperationId::VFSGNJX_VF:
+            case OperationId::VFMIN_VV:
+            case OperationId::VFMIN_VF:
+            case OperationId::VFMAX_VV:
+            case OperationId::VFMAX_VF:
+            case OperationId::VMFEQ_VV:
+            case OperationId::VMFEQ_VF:
+            case OperationId::VMFNE_VV:
+            case OperationId::VMFNE_VF:
+            case OperationId::VMFLT_VV:
+            case OperationId::VMFLT_VF:
+            case OperationId::VMFLE_VV:
+            case OperationId::VMFLE_VF:
+            case OperationId::VMFGT_VF:
+            case OperationId::VMFGE_VF:
+            case OperationId::VFMADD_VV:
+            case OperationId::VFMADD_VF:
+            case OperationId::VFNMADD_VV:
+            case OperationId::VFNMADD_VF:
+            case OperationId::VFMSUB_VV:
+            case OperationId::VFMSUB_VF:
+            case OperationId::VFNMSUB_VV:
+            case OperationId::VFNMSUB_VF:
+            case OperationId::VFMACC_VV:
+            case OperationId::VFMACC_VF:
+            case OperationId::VFNMACC_VV:
+            case OperationId::VFNMACC_VF:
+            case OperationId::VFMSAC_VV:
+            case OperationId::VFMSAC_VF:
+            case OperationId::VFNMSAC_VV:
+            case OperationId::VFNMSAC_VF:
+            case OperationId::VFMV_F_S:
+            case OperationId::VFMV_S_F:
+            case OperationId::VFMERGE_VFM:
+            case OperationId::VFMV_V_F:
+            case OperationId::VFREDUSUM_VS:
+            case OperationId::VFREDOSUM_VS:
+            case OperationId::VFREDMIN_VS:
+            case OperationId::VFREDMAX_VS:
+            case OperationId::VFWREDUSUM_VS:
+            case OperationId::VFWREDOSUM_VS:
+            case OperationId::VFWADD_VV:
+            case OperationId::VFWADD_VF:
+            case OperationId::VFWSUB_VV:
+            case OperationId::VFWSUB_VF:
+            case OperationId::VFWADD_WV:
+            case OperationId::VFWADD_WF:
+            case OperationId::VFWSUB_WV:
+            case OperationId::VFWSUB_WF:
+            case OperationId::VFWMUL_VV:
+            case OperationId::VFWMUL_VF:
+            case OperationId::VFWMACC_VV:
+            case OperationId::VFWMACC_VF:
+            case OperationId::VFWNMACC_VV:
+            case OperationId::VFWNMACC_VF:
+            case OperationId::VFWMSAC_VV:
+            case OperationId::VFWMSAC_VF:
+            case OperationId::VFWNMSAC_VV:
+            case OperationId::VFWNMSAC_VF:
+                required |= misa_extension_bit(IsaExtension::F);
+                break;
+            case OperationId::VANDN_VV:
+            case OperationId::VANDN_VX:
+            case OperationId::VROL_VV:
+            case OperationId::VROL_VX:
+            case OperationId::VROR_VV:
+            case OperationId::VROR_VX:
+            case OperationId::VROR_VI:
+            case OperationId::VCLZ_V:
+            case OperationId::VCTZ_V:
+            case OperationId::VCPOP_V:
+            case OperationId::VBREV_V:
+            case OperationId::VBREV8_V:
+            case OperationId::VREV8_V:
+            case OperationId::VCLMUL_VV:
+            case OperationId::VCLMUL_VX:
+            case OperationId::VCLMULH_VV:
+            case OperationId::VCLMULH_VX:
+            case OperationId::VWSLL_VV:
+            case OperationId::VWSLL_VX:
+            case OperationId::VWSLL_VI:
+                required |= misa_extension_bit(IsaExtension::B);
+                break;
+            default:
+                break;
+        }
+        return required;
+    }
+    return compressed_requirement | misa_extension_bit(IsaExtension::I);
+}
+
+/** Verify the complete extension requirement of an already decoded instruction. */
+constexpr auto instruction_enabled_by_misa(CSRValue misa, OperationId op_id,
+                                           bool compressed = false) -> bool {
+    const CSRValue required = required_misa_extensions(op_id, compressed);
+    return required != 0 && (misa & required) == required;
+}
+
 /**
  * @brief Checks if the instruction's destination register (rd) is a floating-point register.
  * @param opcode The instruction opcode.
@@ -407,6 +581,10 @@ constexpr auto requires_rv64(OperationId op_id) -> bool {
         case OperationId::FCVT_D_LU:
         case OperationId::FMV_X_D:
         case OperationId::FMV_D_X:
+        case OperationId::VLUXEI64_V:
+        case OperationId::VLOXEI64_V:
+        case OperationId::VSUXEI64_V:
+        case OperationId::VSOXEI64_V:
             return true;
         default:
             return false;

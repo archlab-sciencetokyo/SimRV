@@ -399,9 +399,9 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         if (!parse_u32_base0(*value, val)) {
             return std::unexpected(std::format("invalid numeric value for {}", arg));
         }
-        if (val < 32 || val > 1024 || (val & (val - 1)) != 0) {
+        if (val < 128 || val > 1024 || (val & (val - 1)) != 0) {
             return std::unexpected(
-                std::format("VLEN must be a power of 2 between 32 and 1024 (got: {})", val));
+                std::format("VLEN must be a power of 2 between 128 and 1024 (got: {})", val));
         }
         result.options.vlen = val;
         return true;
@@ -1200,7 +1200,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset), xlen_suffix,
                xlen_suffix, xlen_suffix, xlen_suffix);
     std::print(stdout,
-               "  {}--vlen {}{}<BITS>{}                 Vector register length VLEN (32-1024; "
+               "  {}--vlen {}{}<BITS>{}                 Vector register length VLEN (128-1024; "
                "default: 256)\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(

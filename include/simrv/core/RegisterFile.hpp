@@ -56,7 +56,7 @@ class RegisterFile {
     };
 
     unsigned xlen = 64;
-    /// Architectural VLEN in bits; configured to a power of two in the supported 32–1024 range.
+    /// Architectural VLEN in bits; configured to a power of two in the supported 128–1024 range.
     unsigned vlen = 256;
 
     /// Value exposed by the read-only RISC-V Vector `vlenb` CSR.
