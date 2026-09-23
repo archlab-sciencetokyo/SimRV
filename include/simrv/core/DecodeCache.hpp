@@ -33,6 +33,7 @@ struct CachedOp {
     Funct7 funct7 = 0;
     simrv::pipeline::DependencyTraits traits{};
     uint8_t len = 4;
+    uint8_t mem_size = 0;
     bool valid = false;
 
     constexpr void copy_from(const simrv::pipeline::DecodedInstruction& decoded) noexcept {
@@ -52,6 +53,9 @@ struct CachedOp {
         funct7 = decoded.funct7;
         traits = decoded.traits;
         len = decoded.cinsn ? 2 : 4;
+        mem_size = (decoded.traits.is_mem_load || decoded.traits.is_mem_store)
+                       ? static_cast<uint8_t>(1u << (static_cast<unsigned>(decoded.funct3) & 0x3u))
+                       : 0;
     }
 
     constexpr void copy_to(simrv::pipeline::DecodedInstruction& decoded) const noexcept {

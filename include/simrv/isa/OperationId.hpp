@@ -663,6 +663,15 @@ constexpr OperationId kOpRangeRv32dBegin = FLD;
 /// @brief End of RV32D double-precision float instruction IDs
 constexpr OperationId kOpRangeRv32dEnd = FCVT_D_LU;
 
+/// @brief Start of RVV 1.0 vector instruction IDs
+constexpr OperationId kOpRangeVectorBegin = VSETVLI;
+/// @brief End of RVV 1.0 vector instruction IDs
+constexpr OperationId kOpRangeVectorEnd = VWSLL_VI;
+
+[[nodiscard]] constexpr auto is_vector_op(OperationId op_id) noexcept -> bool {
+    return op_id >= kOpRangeVectorBegin && op_id <= kOpRangeVectorEnd;
+}
+
 /// @brief Unified count of all valid simulator operations
 constexpr size_t kOperationIdCount = static_cast<size_t>(OperationIdCount);
 

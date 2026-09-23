@@ -1,4 +1,8 @@
+#include <cstring>
+
 #include "VectorHelpers.hpp"
+#include "simrv/core/Machine.hpp"
+#include "simrv/core/Pmp.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
@@ -7,10 +11,119 @@ namespace simrv::execute {
 
 namespace {
 
+[[nodiscard]] inline auto is_tohost_addr_range(core::CPU& cpu, Address paddr,
+                                               uint32_t size) noexcept -> bool {
+    const Address th = (cpu.machine_ != nullptr) ? cpu.machine_->isa_test_tohost() : 0;
+    return (th != 0 && paddr < th + 8 && paddr + size > th) ||
+           (paddr < 0x80001008ULL && paddr + size > 0x80001000ULL) ||
+           (paddr < 0x40008008ULL && paddr + size > 0x40008000ULL);
+}
+
+[[nodiscard]] auto get_direct_host_memory_for_range(core::CPU& cpu, Address base_addr,
+                                                    uint32_t total_bytes, bool is_write) -> Byte* {
+    if (total_bytes == 0 || cpu.machine_ == nullptr) return nullptr;
+    auto& machine = *cpu.machine_;
+    if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
+        return nullptr;
+    }
+    const bool single_page = ((base_addr >> 12) == ((base_addr + total_bytes - 1) >> 12));
+    if (!single_page) return nullptr;
+
+    const bool m_mode_flat = (cpu.state().priv == kPrivMachine &&
+                              (cpu.state().mstatus & enum_mask(core::MstatusBit::Mprv)) == 0);
+    if (m_mode_flat) {
+        if (simrv::compiler::likely(machine.memory_geometry().contains(base_addr, total_bytes) &&
+                                    machine.ram_view().contains(base_addr, total_bytes))) {
+            const auto acc_type = is_write ? core::PmpAccessType::Write : core::PmpAccessType::Read;
+            if (simrv::compiler::likely(core::pmp::check_access(cpu.state(), base_addr, total_bytes,
+                                                                acc_type, kPrivMachine))) {
+                if (is_write &&
+                    simrv::compiler::unlikely(is_tohost_addr_range(cpu, base_addr, total_bytes))) {
+                    return nullptr;
+                }
+                return machine.ram_view().unchecked_ptr(base_addr);
+            }
+        }
+        return nullptr;
+    }
+
+    const unsigned active_xlen = cpu.effective_data_xlen();
+    Address lookup_addr = base_addr;
+    if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
+    const unsigned page_offset = lookup_addr & 0xFFFu;
+    if (page_offset + total_bytes > 4096u) return nullptr;
+
+    if (simrv::compiler::likely(
+            simrv::xlen::satp_translation_enabled(cpu.state().satp, active_xlen))) {
+        const PrivilegeLevel eff_priv = cpu.effective_data_privilege();
+        const Word current_asid = simrv::xlen::satp_asid(cpu.state().satp, active_xlen);
+        const Address vpn = lookup_addr >> 12;
+        const size_t tlb_idx = core::CPU::soft_tlb_index(vpn);
+        if (is_write) {
+            const auto& entry = cpu.soft_tlb_write[tlb_idx];
+            if (simrv::compiler::likely(
+                    entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
+                if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
+                    Address paddr = entry.paddr_base + page_offset;
+                    if (simrv::compiler::unlikely(is_tohost_addr_range(cpu, paddr, total_bytes))) {
+                        return nullptr;
+                    }
+                    return entry.host_ptr_base + page_offset;
+                }
+            }
+        } else {
+            const auto& entry = cpu.soft_tlb_read[tlb_idx];
+            if (simrv::compiler::likely(
+                    entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
+                if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
+                    return entry.host_ptr_base + page_offset;
+                }
+            }
+        }
+    } else {
+        if (simrv::compiler::likely(machine.memory_geometry().contains(lookup_addr, total_bytes) &&
+                                    machine.ram_view().contains(lookup_addr, total_bytes))) {
+            const auto acc_type = is_write ? core::PmpAccessType::Write : core::PmpAccessType::Read;
+            if (simrv::compiler::likely(core::pmp::check_access(cpu.state(), lookup_addr,
+                                                                total_bytes, acc_type,
+                                                                cpu.effective_data_privilege()))) {
+                if (is_write && simrv::compiler::unlikely(
+                                    is_tohost_addr_range(cpu, lookup_addr, total_bytes))) {
+                    return nullptr;
+                }
+                return machine.ram_view().unchecked_ptr(lookup_addr);
+            }
+        }
+    }
+
+    return nullptr;
+}
+
 // Whole vector load helper
 void execute_vl_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd,
                       Register base_addr, uint32_t nr, uint32_t element_bytes) {
     const uint32_t vlen_bytes = cpu.state().regs.vlen_bytes();
+    const uint32_t total_bytes = nr * vlen_bytes;
+    if (cpu.state().vstart == 0 && total_bytes > 0) {
+        if (element_bytes == 8 && !simrv::xlen::kIsXLen64) {
+            if ((base_addr & 7) != 0) {
+                cpu.active_context().pending_exception = ExceptionCode::MisalignedLoad;
+                cpu.active_context().pending_tval = base_addr;
+                cpu.state().vstart = 0;
+                return;
+            }
+        }
+        Byte* host_src = get_direct_host_memory_for_range(cpu, base_addr, total_bytes, false);
+        if (host_src != nullptr) {
+            for (uint32_t r = 0; r < nr; ++r) {
+                const auto reg_idx = static_cast<RegId>((static_cast<uint32_t>(rd) + r) % 32);
+                auto& vreg = cpu.state().regs.read_vector(reg_idx);
+                std::memcpy(vreg.u8.data(), host_src + r * vlen_bytes, vlen_bytes);
+            }
+            return;
+        }
+    }
+
     const uint32_t elements = nr * vlen_bytes / element_bytes;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < elements; ++i) {
         const Address addr = base_addr + i * element_bytes;
@@ -54,7 +167,26 @@ void execute_vl_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId
 // Whole vector store helper
 void execute_vs_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3,
                       Register base_addr, uint32_t nr) {
-    uint32_t total_bytes = nr * cpu.state().regs.vlen_bytes();
+    const uint32_t vlen_bytes = cpu.state().regs.vlen_bytes();
+    const uint32_t total_bytes = nr * vlen_bytes;
+    if (cpu.state().vstart == 0 && total_bytes > 0) {
+        Byte* host_dst = get_direct_host_memory_for_range(cpu, base_addr, total_bytes, true);
+        if (host_dst != nullptr) {
+            for (uint32_t r = 0; r < nr; ++r) {
+                const auto reg_idx = static_cast<RegId>((static_cast<uint32_t>(vs3) + r) % 32);
+                const auto& vreg = cpu.state().regs.read_vector(reg_idx);
+                std::memcpy(host_dst + r * vlen_bytes, vreg.u8.data(), vlen_bytes);
+            }
+            if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
+                                          cpu.machine_->num_harts() > 1 &&
+                                          mem.reservation_table().may_have_reservations())) {
+                mem.reservation_table().invalidate_matching(
+                    base_addr, static_cast<HartId>(cpu.state().mhartid));
+            }
+            return;
+        }
+    }
+
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < total_bytes; i++) {
         Address addr = base_addr + i;
         uint32_t reg_idx = (static_cast<uint32_t>(vs3) + (i / cpu.state().regs.vlen_bytes())) % 32;
@@ -75,6 +207,39 @@ template <typename T>
 void execute_vle(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd, Register base_addr,
                  bool vm, uint32_t vl, uint32_t nfields, uint32_t field_registers,
                  isa::Funct3 mem_f3, bool fault_only_first = false) {
+    if (vm && nfields == 1 && !fault_only_first && cpu.state().vstart == 0 && vl > 0) {
+        if constexpr (sizeof(T) == 8 && !simrv::xlen::kIsXLen64) {
+            if ((base_addr & 7) != 0) {
+                cpu.active_context().pending_exception = ExceptionCode::MisalignedLoad;
+                cpu.active_context().pending_tval = base_addr;
+                cpu.state().vstart = 0;
+                return;
+            }
+        }
+        const uint32_t total_bytes = vl * sizeof(T);
+        Byte* host_src = get_direct_host_memory_for_range(cpu, base_addr, total_bytes, false);
+        if (host_src != nullptr) {
+            uint32_t remaining = vl;
+            uint32_t elem_idx = 0;
+            uint32_t byte_offset = 0;
+            const uint32_t elems_per_reg = cpu.state().regs.vlen_bytes() / sizeof(T);
+            while (remaining > 0) {
+                const uint32_t reg_offset = elem_idx / elems_per_reg;
+                const uint32_t in_reg = elem_idx % elems_per_reg;
+                const uint32_t chunk = std::min(remaining, elems_per_reg - in_reg);
+                const auto actual_reg =
+                    static_cast<RegId>((std::to_underlying(rd) + reg_offset) & 0x1F);
+                auto& vreg = cpu.state().regs.read_vector(actual_reg);
+                std::memcpy(&vreg.u8[in_reg * sizeof(T)], host_src + byte_offset,
+                            chunk * sizeof(T));
+                elem_idx += chunk;
+                byte_offset += chunk * sizeof(T);
+                remaining -= chunk;
+            }
+            return;
+        }
+    }
+
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
 
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
@@ -129,6 +294,13 @@ void execute_vle(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd, 
 void execute_vlm(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd, Register base_addr,
                  uint32_t vl) {
     const uint32_t evl = (vl + 7) / 8;
+    if (cpu.state().vstart == 0 && evl > 0) {
+        Byte* host_src = get_direct_host_memory_for_range(cpu, base_addr, evl, false);
+        if (host_src != nullptr) {
+            std::memcpy(cpu.state().regs.read_vector(rd).u8.data(), host_src, evl);
+            return;
+        }
+    }
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < evl; ++i) {
         const auto value =
             simrv::memory::MemoryAccess::loadInt(mem, cpu, base_addr + i, isa::Funct3::Lbu);
@@ -143,6 +315,19 @@ void execute_vlm(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId rd, 
 void execute_vsm(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3, Register base_addr,
                  uint32_t vl) {
     const uint32_t evl = (vl + 7) / 8;
+    if (cpu.state().vstart == 0 && evl > 0) {
+        Byte* host_dst = get_direct_host_memory_for_range(cpu, base_addr, evl, true);
+        if (host_dst != nullptr) {
+            std::memcpy(host_dst, cpu.state().regs.read_vector(vs3).u8.data(), evl);
+            if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
+                                          cpu.machine_->num_harts() > 1 &&
+                                          mem.reservation_table().may_have_reservations())) {
+                mem.reservation_table().invalidate_matching(
+                    base_addr, static_cast<HartId>(cpu.state().mhartid));
+            }
+            return;
+        }
+    }
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < evl; ++i) {
         const auto value = vector::get_group_element<uint8_t>(cpu.state().regs, vs3, i);
         simrv::memory::MemoryAccess::storeInt(mem, cpu, base_addr + i, value, isa::Funct3::Sb);
@@ -158,6 +343,45 @@ template <typename T>
 void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3, Register base_addr,
                  bool vm, uint32_t vl, uint32_t nfields, uint32_t field_registers,
                  isa::Funct3 mem_f3) {
+    if (vm && nfields == 1 && cpu.state().vstart == 0 && vl > 0) {
+        if constexpr (sizeof(T) == 8 && !simrv::xlen::kIsXLen64) {
+            if ((base_addr & 7) != 0) {
+                cpu.active_context().pending_exception = ExceptionCode::MisalignedStore;
+                cpu.active_context().pending_tval = base_addr;
+                cpu.state().vstart = 0;
+                return;
+            }
+        }
+        const uint32_t total_bytes = vl * sizeof(T);
+        Byte* host_dst = get_direct_host_memory_for_range(cpu, base_addr, total_bytes, true);
+        if (host_dst != nullptr) {
+            uint32_t remaining = vl;
+            uint32_t elem_idx = 0;
+            uint32_t byte_offset = 0;
+            const uint32_t elems_per_reg = cpu.state().regs.vlen_bytes() / sizeof(T);
+            while (remaining > 0) {
+                const uint32_t reg_offset = elem_idx / elems_per_reg;
+                const uint32_t in_reg = elem_idx % elems_per_reg;
+                const uint32_t chunk = std::min(remaining, elems_per_reg - in_reg);
+                const auto source_reg =
+                    static_cast<RegId>((std::to_underlying(vs3) + reg_offset) & 0x1F);
+                const auto& vreg = cpu.state().regs.read_vector(source_reg);
+                std::memcpy(host_dst + byte_offset, &vreg.u8[in_reg * sizeof(T)],
+                            chunk * sizeof(T));
+                elem_idx += chunk;
+                byte_offset += chunk * sizeof(T);
+                remaining -= chunk;
+            }
+            if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
+                                          cpu.machine_->num_harts() > 1 &&
+                                          mem.reservation_table().may_have_reservations())) {
+                mem.reservation_table().invalidate_matching(
+                    base_addr, static_cast<HartId>(cpu.state().mhartid));
+            }
+            return;
+        }
+    }
+
     const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
 
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {

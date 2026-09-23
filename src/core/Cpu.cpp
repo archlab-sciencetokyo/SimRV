@@ -1239,14 +1239,45 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
         pipeline_context.mem_addr = mem_addr;
     }
     Register mem_rdata = 0;
-    const unsigned size_bytes = access_size_for_funct3(op.funct3);
+    const unsigned size_bytes = op.mem_size ? op.mem_size : access_size_for_funct3(op.funct3);
     if (simrv::compiler::likely(state_.priv == kPrivMachine &&
-                                (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0 &&
-                                is_aligned_for_funct3(mem_addr, op.funct3) &&
-                                machine.memory_geometry().contains(mem_addr, size_bytes))) {
-        mem_rdata = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(op.funct3),
-                                                 machine.ram_view());
-    } else if (!try_fast_load(machine, mem_addr, op.funct3, mem_rdata)) {
+                                (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+        if (simrv::compiler::likely(is_aligned_for_funct3(mem_addr, op.funct3) &&
+                                    machine.memory_geometry().contains(mem_addr, size_bytes))) {
+            mem_rdata = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(op.funct3),
+                                                     machine.ram_view());
+            state_.regs.write_branchless(op.rd, mem_rdata);
+            advance_cached_pc(op);
+            return true;
+        }
+    } else {
+        const unsigned active_xlen = effective_data_xlen();
+        Address lookup_addr = mem_addr;
+        if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
+        const unsigned page_offset = lookup_addr & 0xFFFu;
+        if (simrv::compiler::likely(
+                is_aligned_for_funct3(lookup_addr, op.funct3) &&
+                page_offset + size_bytes <= 4096u &&
+                simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
+            const PrivilegeLevel eff_priv = effective_data_privilege();
+            const Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
+            const Address vpn = lookup_addr >> 12;
+            const size_t tlb_idx = soft_tlb_index(vpn);
+            const auto& entry = soft_tlb_read[tlb_idx];
+            if (simrv::compiler::likely(
+                    entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
+                if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
+                    mem_rdata = simrv::memory::host_read_fast(entry.host_ptr_base + page_offset,
+                                                              static_cast<Instruction>(op.funct3));
+                    state_.regs.write_branchless(op.rd, mem_rdata);
+                    advance_cached_pc(op);
+                    return true;
+                }
+            }
+        }
+    }
+
+    if (!try_fast_load(machine, mem_addr, op.funct3, mem_rdata)) {
         op.copy_to(pipeline_context);
         pipeline_context.mem_addr = mem_addr;
         mem_rdata =
@@ -1269,15 +1300,60 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
     if (simrv::compiler::unlikely(machine.tui_enabled() || machine.branch_trace_enabled())) {
         pipeline_context.mem_addr = mem_addr;
     }
-    const unsigned size_bytes = access_size_for_funct3(op.funct3);
+    const unsigned size_bytes = op.mem_size ? op.mem_size : access_size_for_funct3(op.funct3);
     if (simrv::compiler::likely(state_.priv == kPrivMachine &&
-                                (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0 &&
-                                is_aligned_for_funct3(mem_addr, op.funct3) &&
-                                machine.memory_geometry().contains(mem_addr, size_bytes) &&
-                                !is_tohost_addr(machine, mem_addr))) {
-        simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(op.funct3),
-                                      machine.ram_view());
-    } else if (!try_fast_store(machine, mem_addr, op.funct3, rrs2)) {
+                                (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+        if (simrv::compiler::likely(is_aligned_for_funct3(mem_addr, op.funct3) &&
+                                    machine.memory_geometry().contains(mem_addr, size_bytes) &&
+                                    !is_tohost_addr(machine, mem_addr))) {
+            simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(op.funct3),
+                                          machine.ram_view());
+            state_.reserved = 0;
+            if (simrv::compiler::unlikely(
+                    machine.num_harts() > 1 &&
+                    machine.memory_.reservation_table().may_have_reservations())) {
+                machine.memory_.reservation_table().invalidate_matching(
+                    mem_addr, static_cast<HartId>(state_.mhartid));
+            }
+            advance_cached_pc(op);
+            return true;
+        }
+    } else {
+        const unsigned active_xlen = effective_data_xlen();
+        Address lookup_addr = mem_addr;
+        if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
+        const unsigned page_offset = lookup_addr & 0xFFFu;
+        if (simrv::compiler::likely(
+                is_aligned_for_funct3(lookup_addr, op.funct3) &&
+                page_offset + size_bytes <= 4096u &&
+                simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
+            const PrivilegeLevel eff_priv = effective_data_privilege();
+            const Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
+            const Address vpn = lookup_addr >> 12;
+            const size_t tlb_idx = soft_tlb_index(vpn);
+            const auto& entry = soft_tlb_write[tlb_idx];
+            if (simrv::compiler::likely(
+                    entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
+                if (simrv::compiler::likely(
+                        entry.host_ptr_base != nullptr &&
+                        !is_tohost_addr(machine, entry.paddr_base + page_offset))) {
+                    simrv::memory::host_write_fast(entry.host_ptr_base + page_offset, rrs2,
+                                                   static_cast<Instruction>(op.funct3));
+                    state_.reserved = 0;
+                    if (simrv::compiler::unlikely(
+                            machine.num_harts() > 1 &&
+                            machine.memory_.reservation_table().may_have_reservations())) {
+                        machine.memory_.reservation_table().invalidate_matching(
+                            entry.paddr_base + page_offset, static_cast<HartId>(state_.mhartid));
+                    }
+                    advance_cached_pc(op);
+                    return true;
+                }
+            }
+        }
+    }
+
+    if (!try_fast_store(machine, mem_addr, op.funct3, rrs2)) {
         op.copy_to(pipeline_context);
         pipeline_context.mem_addr = mem_addr;
         simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, mem_addr, rrs2, op.funct3);
@@ -1559,13 +1635,42 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
             Address const mem_addr = rrs1 + op.imm;
             FloatingRegister mem_rdata = 0;
             const unsigned size_bytes = (op.funct3 == isa::Funct3::Fld) ? 8u : 4u;
+            bool loaded = false;
             if (simrv::compiler::likely(state_.priv == kPrivMachine &&
-                                        (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0 &&
-                                        is_aligned_for_funct3(mem_addr, op.funct3) &&
-                                        machine.memory_geometry().contains(mem_addr, size_bytes))) {
-                mem_rdata = simrv::memory::ram_read_fast(
-                    mem_addr, static_cast<Instruction>(op.funct3), machine.ram_view());
+                                        (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+                if (simrv::compiler::likely(
+                        is_aligned_for_funct3(mem_addr, op.funct3) &&
+                        machine.memory_geometry().contains(mem_addr, size_bytes))) {
+                    mem_rdata = simrv::memory::ram_read_fast(
+                        mem_addr, static_cast<Instruction>(op.funct3), machine.ram_view());
+                    loaded = true;
+                }
             } else {
+                const unsigned active_xlen = effective_data_xlen();
+                Address lookup_addr = mem_addr;
+                if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
+                const unsigned page_offset = lookup_addr & 0xFFFu;
+                if (simrv::compiler::likely(
+                        is_aligned_for_funct3(lookup_addr, op.funct3) &&
+                        page_offset + size_bytes <= 4096u &&
+                        simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
+                    const PrivilegeLevel eff_priv = effective_data_privilege();
+                    const Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
+                    const Address vpn = lookup_addr >> 12;
+                    const size_t tlb_idx = soft_tlb_index(vpn);
+                    const auto& entry = soft_tlb_read[tlb_idx];
+                    if (simrv::compiler::likely(
+                            entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
+                        if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
+                            mem_rdata =
+                                simrv::memory::host_read_fast(entry.host_ptr_base + page_offset,
+                                                              static_cast<Instruction>(op.funct3));
+                            loaded = true;
+                        }
+                    }
+                }
+            }
+            if (!loaded) {
                 Word raw_val = 0;
                 if (try_fast_load(machine, mem_addr, op.funct3, raw_val)) {
                     mem_rdata = raw_val;
@@ -1595,21 +1700,54 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
             Address const mem_addr = rrs1 + op.imm;
             FloatingRegister const fp_data = state_.regs.read_fp(op.rs2);
             const unsigned size_bytes = (op.funct3 == isa::Funct3::Fsd) ? 8u : 4u;
+            bool stored = false;
             if (simrv::compiler::likely(state_.priv == kPrivMachine &&
-                                        (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0 &&
-                                        is_aligned_for_funct3(mem_addr, op.funct3) &&
-                                        machine.memory_geometry().contains(mem_addr, size_bytes))) {
-                simrv::memory::ram_write_fast(
-                    mem_addr, fp_data, static_cast<Instruction>(op.funct3), machine.ram_view());
-            } else if (!try_fast_store(machine, mem_addr, op.funct3, fp_data)) {
-                op.copy_to(pipeline_context);
-                pipeline_context.mem_addr = mem_addr;
-                simrv::memory::MemoryAccess::storeFp(machine.memory_, *this, mem_addr, fp_data,
-                                                     op.funct3);
-                if (pipeline_context.pending_exception.has_value()) {
-                    raise_exception(static_cast<TrapCause>(*pipeline_context.pending_exception),
-                                    pipeline_context.pending_tval);
-                    return;
+                                        (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+                if (simrv::compiler::likely(
+                        is_aligned_for_funct3(mem_addr, op.funct3) &&
+                        machine.memory_geometry().contains(mem_addr, size_bytes))) {
+                    simrv::memory::ram_write_fast(
+                        mem_addr, fp_data, static_cast<Instruction>(op.funct3), machine.ram_view());
+                    stored = true;
+                }
+            } else {
+                const unsigned active_xlen = effective_data_xlen();
+                Address lookup_addr = mem_addr;
+                if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
+                const unsigned page_offset = lookup_addr & 0xFFFu;
+                if (simrv::compiler::likely(
+                        is_aligned_for_funct3(lookup_addr, op.funct3) &&
+                        page_offset + size_bytes <= 4096u &&
+                        simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
+                    const PrivilegeLevel eff_priv = effective_data_privilege();
+                    const Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
+                    const Address vpn = lookup_addr >> 12;
+                    const size_t tlb_idx = soft_tlb_index(vpn);
+                    const auto& entry = soft_tlb_write[tlb_idx];
+                    if (simrv::compiler::likely(
+                            entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
+                        if (simrv::compiler::likely(
+                                entry.host_ptr_base != nullptr &&
+                                !is_tohost_addr(machine, entry.paddr_base + page_offset))) {
+                            simrv::memory::host_write_fast(entry.host_ptr_base + page_offset,
+                                                           fp_data,
+                                                           static_cast<Instruction>(op.funct3));
+                            stored = true;
+                        }
+                    }
+                }
+            }
+            if (!stored) {
+                if (!try_fast_store(machine, mem_addr, op.funct3, fp_data)) {
+                    op.copy_to(pipeline_context);
+                    pipeline_context.mem_addr = mem_addr;
+                    simrv::memory::MemoryAccess::storeFp(machine.memory_, *this, mem_addr, fp_data,
+                                                         op.funct3);
+                    if (pipeline_context.pending_exception.has_value()) {
+                        raise_exception(static_cast<TrapCause>(*pipeline_context.pending_exception),
+                                        pipeline_context.pending_tval);
+                        return;
+                    }
                 }
             }
             advance_cached_pc(op);
@@ -1657,6 +1795,22 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         // bypassing it in a cached idle loop can leave an OS waiting past a pending timer IRQ.
         // ---- Everything else: fallback to full pipeline stages ----
         default:
+            if (simrv::isa::is_vector_op(op.op_id)) {
+                if constexpr (!kCopyContext) {
+                    op.copy_to(pipeline_context);
+                    pipeline_context.tlb_miss = false;
+                    pipeline_context.pending_tval = 0;
+                }
+                execute::ExecuteUnit::execute_vector(*this, machine, op.op_id, op.ir);
+                state_.mstatus |= enum_mask(MstatusBit::Vs);
+                if (simrv::compiler::unlikely(pipeline_context.pending_exception.has_value())) {
+                    raise_exception(static_cast<TrapCause>(*pipeline_context.pending_exception),
+                                    pipeline_context.pending_tval);
+                    return;
+                }
+                advance_cached_pc(op);
+                return;
+            }
             if constexpr (!kCopyContext) {
                 op.copy_to(pipeline_context);
                 pipeline_context.tlb_miss = false;
