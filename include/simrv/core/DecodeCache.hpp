@@ -13,6 +13,19 @@
 namespace simrv::core {
 
 /**
+ * @enum FastMemClass
+ * @brief Precomputed memory access category for accelerated cache dispatch.
+ */
+enum class FastMemClass : uint8_t {
+    None = 0,
+    IntLoadSigned,
+    IntLoadUnsigned,
+    IntStore,
+    FpLoad,
+    FpStore,
+};
+
+/**
  * @struct CachedOp
  * @brief Compact decoded instruction payload used by the fast execution path.
  */
@@ -24,6 +37,7 @@ struct CachedOp {
     Instruction cinsn = 0;
     isa::OperationId op_id = isa::UNKNOWN;
     Funct12 funct12 = 0;
+    simrv::pipeline::DependencyTraits traits{};
     isa::Opcode opcode = static_cast<isa::Opcode>(0);
     RegId rd = RegId::Zero;
     RegId rs1 = RegId::Zero;
@@ -31,9 +45,10 @@ struct CachedOp {
     isa::Funct3 funct3 = static_cast<isa::Funct3>(0);
     isa::Funct5Amo funct5 = static_cast<isa::Funct5Amo>(0);
     Funct7 funct7 = 0;
-    simrv::pipeline::DependencyTraits traits{};
-    uint8_t len = 4;
+    FastMemClass mem_class = FastMemClass::None;
     uint8_t mem_size = 0;
+    uint8_t align_mask = 0;
+    uint8_t len = 4;
     bool valid = false;
 
     constexpr void copy_from(const simrv::pipeline::DecodedInstruction& decoded) noexcept {
@@ -53,9 +68,29 @@ struct CachedOp {
         funct7 = decoded.funct7;
         traits = decoded.traits;
         len = decoded.cinsn ? 2 : 4;
-        mem_size = (decoded.traits.is_mem_load || decoded.traits.is_mem_store)
-                       ? static_cast<uint8_t>(1u << (static_cast<unsigned>(decoded.funct3) & 0x3u))
-                       : 0;
+        if (decoded.traits.is_mem_load) {
+            mem_size = static_cast<uint8_t>(1u << (static_cast<unsigned>(decoded.funct3) & 0x3u));
+            align_mask = static_cast<uint8_t>(mem_size - 1u);
+            if (decoded.traits.writes_fp) {
+                mem_class = FastMemClass::FpLoad;
+            } else if ((static_cast<unsigned>(decoded.funct3) & 0x4u) != 0) {
+                mem_class = FastMemClass::IntLoadUnsigned;
+            } else {
+                mem_class = FastMemClass::IntLoadSigned;
+            }
+        } else if (decoded.traits.is_mem_store) {
+            mem_size = static_cast<uint8_t>(1u << (static_cast<unsigned>(decoded.funct3) & 0x3u));
+            align_mask = static_cast<uint8_t>(mem_size - 1u);
+            if (decoded.traits.reads_rs2_fp) {
+                mem_class = FastMemClass::FpStore;
+            } else {
+                mem_class = FastMemClass::IntStore;
+            }
+        } else {
+            mem_size = 0;
+            align_mask = 0;
+            mem_class = FastMemClass::None;
+        }
     }
 
     constexpr void copy_to(simrv::pipeline::DecodedInstruction& decoded) const noexcept {

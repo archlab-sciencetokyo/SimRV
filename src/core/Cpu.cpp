@@ -1243,10 +1243,11 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
         pipeline_context.mem_addr = mem_addr;
     }
     Register mem_rdata = 0;
-    const unsigned size_bytes = op.mem_size ? op.mem_size : access_size_for_funct3(op.funct3);
+    const unsigned size_bytes = op.mem_size;
+    const Address align_mask = op.align_mask;
     if (simrv::compiler::likely(state_.priv == kPrivMachine &&
                                 (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
-        if (simrv::compiler::likely(is_aligned_for_funct3(mem_addr, op.funct3) &&
+        if (simrv::compiler::likely((mem_addr & align_mask) == 0 &&
                                     machine.memory_geometry().contains(mem_addr, size_bytes))) {
             mem_rdata = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(op.funct3),
                                                      machine.ram_view());
@@ -1260,8 +1261,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
         if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
         const unsigned page_offset = lookup_addr & 0xFFFu;
         if (simrv::compiler::likely(
-                is_aligned_for_funct3(lookup_addr, op.funct3) &&
-                page_offset + size_bytes <= 4096u &&
+                (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
                 simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
             const PrivilegeLevel eff_priv = effective_data_privilege();
             const Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
@@ -1304,10 +1304,11 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
     if (simrv::compiler::unlikely(machine.tui_enabled() || machine.branch_trace_enabled())) {
         pipeline_context.mem_addr = mem_addr;
     }
-    const unsigned size_bytes = op.mem_size ? op.mem_size : access_size_for_funct3(op.funct3);
+    const unsigned size_bytes = op.mem_size;
+    const Address align_mask = op.align_mask;
     if (simrv::compiler::likely(state_.priv == kPrivMachine &&
                                 (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
-        if (simrv::compiler::likely(is_aligned_for_funct3(mem_addr, op.funct3) &&
+        if (simrv::compiler::likely((mem_addr & align_mask) == 0 &&
                                     machine.memory_geometry().contains(mem_addr, size_bytes) &&
                                     !is_tohost_addr(machine, mem_addr))) {
             simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(op.funct3),
@@ -1328,8 +1329,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
         if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
         const unsigned page_offset = lookup_addr & 0xFFFu;
         if (simrv::compiler::likely(
-                is_aligned_for_funct3(lookup_addr, op.funct3) &&
-                page_offset + size_bytes <= 4096u &&
+                (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
                 simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
             const PrivilegeLevel eff_priv = effective_data_privilege();
             const Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
@@ -1638,12 +1638,13 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         case isa::FLD: {
             Address const mem_addr = rrs1 + op.imm;
             FloatingRegister mem_rdata = 0;
-            const unsigned size_bytes = (op.funct3 == isa::Funct3::Fld) ? 8u : 4u;
+            const unsigned size_bytes = op.mem_size;
+            const Address align_mask = op.align_mask;
             bool loaded = false;
             if (simrv::compiler::likely(state_.priv == kPrivMachine &&
                                         (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
                 if (simrv::compiler::likely(
-                        is_aligned_for_funct3(mem_addr, op.funct3) &&
+                        (mem_addr & align_mask) == 0 &&
                         machine.memory_geometry().contains(mem_addr, size_bytes))) {
                     mem_rdata = simrv::memory::ram_read_fast(
                         mem_addr, static_cast<Instruction>(op.funct3), machine.ram_view());
@@ -1655,8 +1656,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
                 if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
                 const unsigned page_offset = lookup_addr & 0xFFFu;
                 if (simrv::compiler::likely(
-                        is_aligned_for_funct3(lookup_addr, op.funct3) &&
-                        page_offset + size_bytes <= 4096u &&
+                        (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
                         simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
                     const PrivilegeLevel eff_priv = effective_data_privilege();
                     const Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
@@ -1703,12 +1703,13 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         case isa::FSD: {
             Address const mem_addr = rrs1 + op.imm;
             FloatingRegister const fp_data = state_.regs.read_fp(op.rs2);
-            const unsigned size_bytes = (op.funct3 == isa::Funct3::Fsd) ? 8u : 4u;
+            const unsigned size_bytes = op.mem_size;
+            const Address align_mask = op.align_mask;
             bool stored = false;
             if (simrv::compiler::likely(state_.priv == kPrivMachine &&
                                         (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
                 if (simrv::compiler::likely(
-                        is_aligned_for_funct3(mem_addr, op.funct3) &&
+                        (mem_addr & align_mask) == 0 &&
                         machine.memory_geometry().contains(mem_addr, size_bytes))) {
                     simrv::memory::ram_write_fast(
                         mem_addr, fp_data, static_cast<Instruction>(op.funct3), machine.ram_view());
@@ -1720,8 +1721,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
                 if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
                 const unsigned page_offset = lookup_addr & 0xFFFu;
                 if (simrv::compiler::likely(
-                        is_aligned_for_funct3(lookup_addr, op.funct3) &&
-                        page_offset + size_bytes <= 4096u &&
+                        (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
                         simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
                     const PrivilegeLevel eff_priv = effective_data_privilege();
                     const Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);

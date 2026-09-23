@@ -179,6 +179,49 @@ void test_decode_cache_compact_round_robin() {
     cache.flush();
     expect(cache.lookup(second_pc) == nullptr && cache.lookup(third_pc) == nullptr,
            "decode cache flush invalidates every way");
+
+    static_assert(sizeof(simrv::core::CachedOp) <= (sizeof(Address) == 8 ? 48 : 40),
+                  "CachedOp must maintain a compact footprint");
+
+    // Fast memory precomputed attributes
+    simrv::pipeline::DecodedInstruction load_inst{};
+    load_inst.traits.is_mem_load = true;
+    load_inst.funct3 = simrv::isa::Funct3::Lw;
+    simrv::core::CachedOp load_op{};
+    load_op.copy_from(load_inst);
+    expect(load_op.mem_class == simrv::core::FastMemClass::IntLoadSigned,
+           "LW classified as IntLoadSigned");
+    expect(load_op.mem_size == 4, "LW mem_size is 4");
+    expect(load_op.align_mask == 3, "LW align_mask is 3");
+
+    simrv::pipeline::DecodedInstruction lbu_inst{};
+    lbu_inst.traits.is_mem_load = true;
+    lbu_inst.funct3 = simrv::isa::Funct3::Lbu;
+    simrv::core::CachedOp lbu_op{};
+    lbu_op.copy_from(lbu_inst);
+    expect(lbu_op.mem_class == simrv::core::FastMemClass::IntLoadUnsigned,
+           "LBU classified as IntLoadUnsigned");
+    expect(lbu_op.mem_size == 1, "LBU mem_size is 1");
+    expect(lbu_op.align_mask == 0, "LBU align_mask is 0");
+
+    simrv::pipeline::DecodedInstruction store_inst{};
+    store_inst.traits.is_mem_store = true;
+    store_inst.funct3 = simrv::isa::Funct3::Sd;
+    simrv::core::CachedOp store_op{};
+    store_op.copy_from(store_inst);
+    expect(store_op.mem_class == simrv::core::FastMemClass::IntStore, "SD classified as IntStore");
+    expect(store_op.mem_size == 8, "SD mem_size is 8");
+    expect(store_op.align_mask == 7, "SD align_mask is 7");
+
+    simrv::pipeline::DecodedInstruction fld_inst{};
+    fld_inst.traits.is_mem_load = true;
+    fld_inst.traits.writes_fp = true;
+    fld_inst.funct3 = simrv::isa::Funct3::Fld;
+    simrv::core::CachedOp fld_op{};
+    fld_op.copy_from(fld_inst);
+    expect(fld_op.mem_class == simrv::core::FastMemClass::FpLoad, "FLD classified as FpLoad");
+    expect(fld_op.mem_size == 8, "FLD mem_size is 8");
+    expect(fld_op.align_mask == 7, "FLD align_mask is 7");
 }
 
 void test_compressed_instruction_decode_and_flush() {
