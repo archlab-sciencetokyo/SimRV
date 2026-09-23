@@ -70,21 +70,42 @@ auto ScrollView::format_horizontal_row(std::string_view raw_line, int width) con
 }
 
 auto ScrollView::header_summary(std::string_view base_title) const -> std::string {
-    if (bounds_.total_rows <= bounds_.viewport_height) {
+    std::string v_info;
+    if (bounds_.total_rows > bounds_.viewport_height) {
+        const int above = bounds_.remaining_above();
+        const int below = bounds_.remaining_below();
+        if (above > 0 && below > 0) {
+            v_info = std::format("▲ {} above · ▼ {} below", above, below);
+        } else if (above > 0) {
+            v_info = std::format("▲ {} above", above);
+        } else if (below > 0) {
+            v_info = std::format("▼ {} below", below);
+        }
+    }
+
+    std::string h_info;
+    if (bounds_.total_cols > bounds_.viewport_width && bounds_.viewport_width > 0) {
+        const int left = bounds_.remaining_left();
+        const int right = bounds_.remaining_right();
+        if (left > 0 && right > 0) {
+            h_info = std::format("◀ {} left · ▶ {} right", left, right);
+        } else if (left > 0) {
+            h_info = std::format("◀ {} left", left);
+        } else if (right > 0) {
+            h_info = std::format("▶ {} right", right);
+        }
+    }
+
+    if (v_info.empty() && h_info.empty()) {
         return std::string(base_title);
     }
-    const int above = bounds_.remaining_above();
-    const int below = bounds_.remaining_below();
-    if (above > 0 && below > 0) {
-        return std::format("{} (▲ {} above · ▼ {} below)", base_title, above, below);
+    if (!v_info.empty() && !h_info.empty()) {
+        return std::format("{} ({} · {})", base_title, v_info, h_info);
     }
-    if (above > 0) {
-        return std::format("{} (▲ {} above)", base_title, above);
+    if (!v_info.empty()) {
+        return std::format("{} ({})", base_title, v_info);
     }
-    if (below > 0) {
-        return std::format("{} (▼ {} below)", base_title, below);
-    }
-    return std::string(base_title);
+    return std::format("{} ({})", base_title, h_info);
 }
 
 }  // namespace simrv::tui::framework

@@ -1389,22 +1389,27 @@ void test_horizontal_scrolling() {
     simrv::core::Machine machine;
     simrv::tui::InspectorPane pane(machine);
     std::vector<std::string> trace = {
-        "0000000080000000 addi x1, x0, 1 -- deliberately wide trace row"};
+        "0000000080000000 addi x1, x0, 1 -- deliberately wide trace row with extended mnemonic and "
+        "operands"};
     pane.set_trace_buffer(&trace);
     pane.set_visible_rows(30);
 
-    // Responsive presentation pages fit their assigned column and never expose horizontal scroll.
+    // Inspector pages exceeding column width now consistently expose horizontal scrolling.
     pane.set_page(simrv::tui::TuiRegPage::PIPELINE);
     (void)pane.render_column_row(1, 40, 1, 3, true);
-    expect(!pane.supports_horizontal_scroll(), "PIPELINE wraps to its assigned column width");
+    expect(pane.supports_horizontal_scroll(), "PIPELINE on 40-col pane supports horizontal scroll");
 
-    pane.set_page(simrv::tui::TuiRegPage::BUS);
+    pane.set_page(simrv::tui::TuiRegPage::CACHE);
     (void)pane.render_column_row(1, 40, 1, 3, true);
-    expect(!pane.supports_horizontal_scroll(), "BUS fits its assigned column width");
+    expect(pane.supports_horizontal_scroll(), "CACHE on 40-col pane supports horizontal scroll");
+
+    pane.set_page(simrv::tui::TuiRegPage::STACK);
+    (void)pane.render_column_row(1, 40, 1, 3, true);
+    expect(pane.supports_horizontal_scroll(), "STACK on 40-col pane supports horizontal scroll");
 
     pane.set_page(simrv::tui::TuiRegPage::EXPLAIN);
     (void)pane.render_column_row(1, 40, 1, 3, true);
-    expect(!pane.supports_horizontal_scroll(), "EXPLAIN wraps instead of scrolling horizontally");
+    expect(pane.supports_horizontal_scroll(), "EXPLAIN on 40-col pane supports horizontal scroll");
 
     pane.set_page(simrv::tui::TuiRegPage::TRACE);
     (void)pane.render_column_row(1, 40, 1, 3, true);
@@ -1417,18 +1422,52 @@ void test_horizontal_scrolling() {
     pane.scroll_horizontal(-8);
     expect(pane.get_horizontal_scroll_offset() == 0, "scroll_horizontal(-8) returns to start");
 
-    // Changing to a wrapped page resets its horizontal state and cannot re-enable scrolling.
+    // Directional scroll indicators appear on overflowing content
+    pane.set_page(simrv::tui::TuiRegPage::PIPELINE);
+    auto const row_unscrolled = pane.render_row(2, 40);
+    expect(row_unscrolled.find("►") != std::string::npos ||
+               row_unscrolled.find("▶") != std::string::npos,
+           "overflowing row renders right directional indicator");
+
     pane.scroll_horizontal(8);
-    pane.set_page(simrv::tui::TuiRegPage::BUS);
+    auto const row_scrolled = pane.render_row(2, 40);
+    expect(
+        row_scrolled.find("◄") != std::string::npos || row_scrolled.find("◀") != std::string::npos,
+        "scrolled row renders left directional indicator");
+
+    // Switching page resets horizontal state
+    pane.set_page(simrv::tui::TuiRegPage::GPR);
     expect(pane.get_horizontal_scroll_offset() == 0,
-           "wrapped pages reset their horizontal scroll state");
-    pane.scroll_horizontal(12);
-    expect(pane.get_horizontal_scroll_offset() == 0,
-           "wrapped pages ignore horizontal-scroll requests");
+           "switching page resets horizontal scroll state");
 
     pane.set_page(simrv::tui::TuiRegPage::TRACE);
     pane.reset_horizontal_scroll();
     expect(pane.get_horizontal_scroll_offset() == 0, "reset_horizontal_scroll clears offset");
+}
+
+void test_stack_vertical_scrolling() {
+    simrv::core::Machine machine;
+    std::array<Byte, 4096> backing{};
+    machine.set_ram_for_testing(backing.data(), backing.size());
+    machine.memory().initialize_mmu();
+
+    auto& cpu = machine.primary_hart();
+    cpu.state().regs.write(simrv::RegId::Sp, 0x80000400);
+
+    simrv::tui::InspectorPane pane(machine);
+    pane.set_page(simrv::tui::TuiRegPage::STACK);
+    pane.set_visible_rows(25);
+
+    auto addr_unscrolled = pane.get_stack_addr_at_row(7);
+    expect(addr_unscrolled.has_value() && *addr_unscrolled == 0x80000400,
+           "unscrolled stack center row maps to base sp");
+
+    pane.scroll(2);
+    expect(pane.get_scroll_offset() == 2, "vertical scroll advances scroll offset");
+
+    auto addr_scrolled = pane.get_stack_addr_at_row(7);
+    expect(addr_scrolled.has_value() && *addr_scrolled == 0x80000400,
+           "get_stack_addr_at_row with logical row 7 returns base sp without double offset");
 }
 
 void test_flight_recorder_merge_and_wraparound() {
@@ -1599,6 +1638,7 @@ int main() {
     test_inspector_panels_traits_and_scoreboard();
     test_multicolumn_refinement();
     test_horizontal_scrolling();
+    test_stack_vertical_scrolling();
     test_flight_recorder_merge_and_wraparound();
     test_bus_inspector_and_tilelink_channels();
     test_inspector_vector_csr_rows();

@@ -98,6 +98,14 @@ int main() {
     auto const summary = sv.header_summary("Trace");
     expect(summary.find("above") != std::string::npos && summary.find("below") != std::string::npos,
            "header summary formats scroll indicator with counts");
+    expect(summary.find("right") != std::string::npos,
+           "header summary formats horizontal remaining indicator");
+
+    sv.scroll_x(10);
+    auto const summary_2d = sv.header_summary("Trace");
+    expect(summary_2d.find("left") != std::string::npos &&
+               summary_2d.find("right") != std::string::npos,
+           "header summary formats both left and right horizontal indicators");
 
     ScrollView hsv;
     hsv.set_geometry(10, 5, 100, 20);

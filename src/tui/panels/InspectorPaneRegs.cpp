@@ -362,7 +362,15 @@ auto InspectorPane::get_register_value_at_row(int logical_row, int col_x, int pa
         if (logical_row >= 0 && logical_row < 32) reg = logical_row;
     } else {
         if (logical_row >= 0 && logical_row < 16) {
-            reg = (col_x < pane_width / 2) ? logical_row : (logical_row + 16);
+            int const total_cols = content_total_columns(pane_width);
+            int const render_width = std::max(pane_width, total_cols);
+            int const col_width = render_width / 2;
+            const auto& sv = current_scroll_view();
+            int content_x = col_x;
+            if (sv.offset_x() > 0 || sv.can_scroll_right()) {
+                content_x = col_x + sv.offset_x() - 1;
+            }
+            reg = (content_x < col_width) ? logical_row : (logical_row + 16);
         }
     }
 

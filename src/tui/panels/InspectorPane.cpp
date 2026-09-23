@@ -193,10 +193,33 @@ auto InspectorPane::trace_total_columns() const -> int {
 
 auto InspectorPane::content_total_columns(int width) const -> int {
     switch (page_) {
-        case TuiRegPage::TRACE:
-            return trace_total_columns();
+        case TuiRegPage::GPR:
+        case TuiRegPage::FPR: {
+            bool const single = is_single_column(width);
+            if (single) {
+                int const min_single = (sizeof(Register) > 4) ? 40 : 32;
+                return std::max(width, min_single);
+            }
+            int const min_double = (sizeof(Register) > 4) ? 78 : 64;
+            return std::max(width, min_double);
+        }
         case TuiRegPage::VEC:
             return std::max(width, 96);
+        case TuiRegPage::PIPELINE:
+        case TuiRegPage::BPRED:
+        case TuiRegPage::HAZARD:
+            return std::max(width, 92);
+        case TuiRegPage::CACHE:
+            return std::max(width, 84);
+        case TuiRegPage::STACK:
+            return std::max(width, 92);
+        case TuiRegPage::TLB:
+        case TuiRegPage::BUS:
+            return width;
+        case TuiRegPage::TRACE:
+            return trace_total_columns();
+        case TuiRegPage::EXPLAIN:
+            return std::max(width, 76);
         default:
             return width;
     }
@@ -686,14 +709,15 @@ auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows,
     int const content_row_idx = row_idx - header_rows;
     int const logical_row = content_row_idx + sv.offset_y();
 
-    int const render_width = width;
+    int const total_cols = content_total_columns(width);
+    int const render_width = std::max(width, total_cols);
 
     if (page_ == TuiRegPage::TRACE || page_ == TuiRegPage::EXPLAIN) {
         return sv.render_row(
             content_row_idx, width,
-            [this, render_width](framework::RowIndex r, framework::ColumnIndex, int w) {
+            [this, render_width](framework::RowIndex r, framework::ColumnIndex, int) {
                 if (page_ == TuiRegPage::TRACE) {
-                    return render_trace_row(r, w);
+                    return render_trace_row(r, render_width);
                 }
                 auto explain_rows = get_explain_rows(render_width);
                 if (r >= 0 && r < static_cast<int>(explain_rows.size())) {
@@ -746,10 +770,10 @@ auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows,
                 const int stats_row = logical_row - stats_start;
                 if (!machine_.runtime_profile.is_cycle_mode()) {
                     return finish_row(render_sampled_machine_performance_stats(
-                        machine_.tui_execution_snapshot(), stats_row, width));
+                        machine_.tui_execution_snapshot(), stats_row, render_width));
                 }
                 return finish_row(render_cycle_accurate_stats(
-                    machine_.tui_execution_snapshot(selected_hart_), stats_row, width));
+                    machine_.tui_execution_snapshot(selected_hart_), stats_row, render_width));
             }
         }
         // High-speed UI frames use only a stable execution snapshot and cached pane state.
@@ -844,15 +868,17 @@ void InspectorPane::scroll(int lines) {
 }
 
 void InspectorPane::scroll_horizontal(int columns) {
-    if (!supports_horizontal_scroll()) return;
     int const width = last_width_ > 0 ? last_width_ : 60;
     configure_current_viewport(width);
+    if (!supports_horizontal_scroll()) return;
     current_scroll_view().scroll_x(columns);
 }
 
 auto InspectorPane::supports_horizontal_scroll() const -> bool {
-    const auto& bounds = current_scroll_view().bounds();
-    return bounds.total_cols > bounds.viewport_width;
+    int const width = last_width_ > 0 ? last_width_ : 60;
+    const int total_cols = content_total_columns(width);
+    const int viewport_width = (total_cols > width) ? std::max(1, width - 2) : width;
+    return total_cols > viewport_width;
 }
 
 void InspectorPane::scroll_log(int lines) {

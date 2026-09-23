@@ -136,9 +136,9 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
     }
 
     // logical_row ranges from 1 to 13 (inclusive). 13 elements.
-    // Center it around base_addr (word_offset = 0 at logical_row = 7) plus vertical scroll offset.
-    const int scroll_offset = current_scroll_view().offset_y();
-    const int word_offset = (logical_row - 7) + scroll_offset;
+    // Center it around base_addr (word_offset = 0 at logical_row = 7).
+    // Note: logical_row already incorporates vertical scroll offset from ScrollView.
+    const int word_offset = logical_row - 7;
     Register target_vaddr = aligned_base + static_cast<Register>(word_offset * word_size);
     if (xlen == 32) {
         target_vaddr &= 0xFFFFFFFFULL;
@@ -256,9 +256,8 @@ auto InspectorPane::get_stack_addr_at_row(int logical_row) const -> std::optiona
     const Register base = is_custom_memory_inspect() ? inspect_addr_ : st.regs.read(RegId::Sp);
     if (base == 0) return std::nullopt;
     const int word_size = static_cast<int>(st.regs.xlen) / 8;
-    const int scroll_offset = current_scroll_view().offset_y();
     if (logical_row >= 1 && logical_row <= 13) {
-        const int word_offset = (logical_row - 7) + scroll_offset;
+        const int word_offset = logical_row - 7;
         return base + static_cast<Register>(word_offset * word_size);
     }
     return std::nullopt;
