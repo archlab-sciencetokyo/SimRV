@@ -924,6 +924,75 @@ void test_vector_mask_and_fault_only_first_memory() {
     }
 }
 
+void test_vector_bulk_memory_operations() {
+    simrv::core::Machine machine;
+    std::array<Byte, 8192> backing{};
+    machine.set_ram_for_testing(backing.data(), backing.size());
+    machine.memory().initialize_mmu();
+    auto& cpu = machine.hart(0);
+    auto& regs = cpu.state().regs;
+    const auto ram = machine.ram_view();
+
+    constexpr auto vd = static_cast<RegId>(2);
+    constexpr auto vs = static_cast<RegId>(4);
+    constexpr auto base_reg = static_cast<RegId>(10);
+    const auto memory_ir = [](RegId vector_reg, RegId rs1) {
+        return static_cast<Instruction>((std::to_underlying(rs1) << 15U) |
+                                        (std::to_underlying(vector_reg) << 7U) | (1U << 25U));
+    };
+
+    // 1. Bulk vle8 / vse8 within a single page
+    cpu.state().vtype = 0;  // SEW=8, LMUL=1
+    cpu.state().vl = 16;
+    cpu.state().vstart = 0;
+    regs.write(base_reg, ram.base() + 0x100);
+    for (uint32_t i = 0; i < 16; ++i) {
+        ram.data()[0x100 + i] = Byte{static_cast<uint8_t>(0xA0 + i)};
+    }
+    simrv::execute::ExecuteUnit::execute_vector(
+        cpu, machine.memory(), simrv::isa::OperationId::VLE8_V, memory_ir(vd, base_reg));
+    for (uint32_t i = 0; i < 16; ++i) {
+        expect(regs.read_vector(vd).u8[i] == static_cast<uint8_t>(0xA0 + i),
+               "bulk vle8 transfers elements accurately");
+    }
+
+    // Modify vector register vd and write back via bulk vse8
+    for (uint32_t i = 0; i < 16; ++i) {
+        regs.read_vector(vd).u8[i] = static_cast<uint8_t>(0x50 + i);
+    }
+    regs.write(base_reg, ram.base() + 0x200);
+    simrv::execute::ExecuteUnit::execute_vector(
+        cpu, machine.memory(), simrv::isa::OperationId::VSE8_V, memory_ir(vd, base_reg));
+    for (uint32_t i = 0; i < 16; ++i) {
+        expect(ram.data()[0x200 + i] == Byte{static_cast<uint8_t>(0x50 + i)},
+               "bulk vse8 stores elements accurately to RAM");
+    }
+
+    // 2. Cross-page fallback test: buffer spanning 4096-byte boundary (e.g. 0xFF8..0x1008)
+    regs.write(base_reg, ram.base() + 0xFF8);
+    for (uint32_t i = 0; i < 16; ++i) {
+        ram.data()[0xFF8 + i] = Byte{static_cast<uint8_t>(0x70 + i)};
+    }
+    simrv::execute::ExecuteUnit::execute_vector(
+        cpu, machine.memory(), simrv::isa::OperationId::VLE8_V, memory_ir(vs, base_reg));
+    for (uint32_t i = 0; i < 16; ++i) {
+        expect(regs.read_vector(vs).u8[i] == static_cast<uint8_t>(0x70 + i),
+               "page-crossing vle8 falls back seamlessly and transfers correctly");
+    }
+
+    // 3. Whole-register load/store bulk test
+    regs.write(base_reg, ram.base() + 0x300);
+    for (uint32_t i = 0; i < regs.vlen_bytes(); ++i) {
+        ram.data()[0x300 + i] = Byte{static_cast<uint8_t>(0x10 + (i & 0x7F))};
+    }
+    simrv::execute::ExecuteUnit::execute_vector(
+        cpu, machine.memory(), simrv::isa::OperationId::VL1RE8_V, memory_ir(vd, base_reg));
+    for (uint32_t i = 0; i < regs.vlen_bytes(); ++i) {
+        expect(regs.read_vector(vd).u8[i] == static_cast<uint8_t>(0x10 + (i & 0x7F)),
+               "bulk vl1re8 accurately transfers whole register");
+    }
+}
+
 void test_vector_integer_remainder_and_reverse_subtract() {
     simrv::core::Machine machine;
     auto& cpu = machine.hart(0);
@@ -3015,6 +3084,7 @@ int main() {
     test_vector_exception_propagation_and_status();
     test_vector_compute_register_group_legality();
     test_vector_mask_and_fault_only_first_memory();
+    test_vector_bulk_memory_operations();
     test_vector_integer_remainder_and_reverse_subtract();
     test_vector_gather();
     test_vector_configuration_large_avl();

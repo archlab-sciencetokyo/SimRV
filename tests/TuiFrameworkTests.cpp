@@ -1494,6 +1494,41 @@ void test_bus_inspector_and_tilelink_channels() {
            "narrow row 19 formats compact channel status");
 }
 
+void test_inspector_vector_csr_rows() {
+    simrv::core::Machine machine;
+    simrv::tui::InspectorPane pane(machine);
+    pane.set_page(simrv::tui::TuiRegPage::VEC);
+    pane.set_visible_rows(30);
+
+    auto& cpu = machine.hart(0);
+    cpu.state().vl = 16;
+    cpu.state().vtype = 0;  // SEW=8, LMUL=1
+    cpu.state().vstart = 2;
+    cpu.state().vxrm = 1;
+    cpu.state().vxsat = 0;
+
+    const int width = 80;
+    const std::string r16 = strip_ansi(pane.render_row(18, width));
+    expect(r16.find("Vector Control & Status") != std::string::npos,
+           "row 16 contains Vector Control & Status header");
+
+    const std::string r17 = strip_ansi(pane.render_row(19, width));
+    expect(r17.find("vl") != std::string::npos && r17.find("vtype") != std::string::npos,
+           "row 17 displays vl and vtype");
+
+    const std::string r18 = strip_ansi(pane.render_row(20, width));
+    expect(r18.find("vstart") != std::string::npos && r18.find("vlenb") != std::string::npos,
+           "row 18 displays vstart and vlenb");
+
+    const std::string r19 = strip_ansi(pane.render_row(21, width));
+    expect(r19.find("vxrm") != std::string::npos && r19.find("vxsat") != std::string::npos,
+           "row 19 displays vxrm and vxsat");
+
+    const std::string r20 = strip_ansi(pane.render_row(22, width));
+    expect(r20.find("vta/vma") != std::string::npos && r20.find("vill") != std::string::npos,
+           "row 20 displays vta/vma and vill");
+}
+
 }  // namespace
 
 int main() {
@@ -1523,6 +1558,7 @@ int main() {
     test_horizontal_scrolling();
     test_flight_recorder_merge_and_wraparound();
     test_bus_inspector_and_tilelink_channels();
+    test_inspector_vector_csr_rows();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;
