@@ -16,7 +16,7 @@ General Availability (GA) release.
 - [x] **Precomputed Fast-Memory Access Classes**:
   - Classify memory accesses directly in `CachedOp` at decode time (direct-RAM, MMIO/tohost, alignment, translation guards).
   - Fast-track direct host-pointer access in integer/FP load and store paths without multi-branch qualification checks per instruction.
-- [ ] **Decode Cache Footprint & Dispatch Optimization**:
+- [x] **Decode Cache Footprint & Dispatch Optimization**:
   - Optimize memory layout of `CachedOp` to reduce per-entry footprint across L1/L2 host cache hierarchies.
   - Streamline the dense opcode dispatch table across fast-path and cycle-accurate fetch/decompress stages.
 - [ ] **TUI Differential Rendering Throttling**:
