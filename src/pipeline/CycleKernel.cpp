@@ -235,7 +235,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     const Address sequential =
                         (execute->context.cpc + (execute->context.cinsn != 0u ? 2 : 4)).raw();
                     const Address target =
-                        execute->context.tkn ? execute->context.jmp_pc : sequential;
+                        execute->context.tkn ? execute->context.jmp_pc.raw() : sequential;
 
                     const simrv::pipeline::BranchFeedback feedback{
                         .pc = execute->context.cpc.raw(),
@@ -316,7 +316,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                         const Address sequential =
                             (decode->context.cpc + (decode->context.cinsn != 0u ? 2 : 4)).raw();
                         const Address target =
-                            decode->context.tkn ? decode->context.jmp_pc : sequential;
+                            decode->context.tkn ? decode->context.jmp_pc.raw() : sequential;
 
                         const simrv::pipeline::BranchFeedback feedback{
                             .pc = decode->context.cpc.raw(),

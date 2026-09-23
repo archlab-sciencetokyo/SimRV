@@ -64,7 +64,7 @@ namespace {
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
                 if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
-                    Address paddr = entry.paddr_base + page_offset;
+                    Address paddr = (entry.paddr_base + page_offset).raw();
                     if (simrv::compiler::unlikely(is_tohost_addr_range(cpu, paddr, total_bytes))) {
                         return nullptr;
                     }

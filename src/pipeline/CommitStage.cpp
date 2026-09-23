@@ -130,11 +130,11 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
             const Word alignment_mask = has_c ? 1u : 3u;
             if ((ctx.jmp_pc & alignment_mask) != 0) {
                 ctx.pending_exception = ExceptionCode::MisalignedFetch;
-                ctx.pending_tval = ctx.jmp_pc;
+                ctx.pending_tval = ctx.jmp_pc.raw();
                 raise_exception(std::to_underlying(*ctx.pending_exception), ctx.pending_tval);
                 return;
             }
-            state_.pc = ctx.jmp_pc;
+            state_.pc = ctx.jmp_pc.raw();
         } else {
             state_.pc = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
         }
@@ -233,11 +233,11 @@ void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
             const Word alignment_mask = has_c ? 1u : 3u;
             if ((ctx.jmp_pc & alignment_mask) != 0) {
                 ctx.pending_exception = ExceptionCode::MisalignedFetch;
-                ctx.pending_tval = ctx.jmp_pc;
+                ctx.pending_tval = ctx.jmp_pc.raw();
                 raise_exception(std::to_underlying(*ctx.pending_exception), ctx.pending_tval);
                 return;
             }
-            state_.pc = ctx.jmp_pc;
+            state_.pc = ctx.jmp_pc.raw();
         } else {
             state_.pc = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
         }

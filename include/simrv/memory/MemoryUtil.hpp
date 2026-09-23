@@ -174,11 +174,19 @@ inline auto ram_read_fast(Address addr, Instruction funct3, RamView ram) -> Word
     return host_read_fast(ram.unchecked_ptr(addr), funct3);
 }
 
+inline auto ram_read_fast(PhysAddr addr, Instruction funct3, RamView ram) -> Word {
+    return host_read_fast(ram.unchecked_ptr(addr), funct3);
+}
+
 // ========== Fast RAM Write Operations ==========
 
 /// Fast inline RAM write. The caller validates the address against its RamView.
 /// Supports: SB (1 byte), SH (2 bytes), SW (4 bytes), SD (8 bytes on RV64)
 inline void ram_write_fast(Address addr, Word wdata, Instruction funct3, RamView ram) {
+    host_write_fast(ram.unchecked_ptr(addr), wdata, funct3);
+}
+
+inline void ram_write_fast(PhysAddr addr, Word wdata, Instruction funct3, RamView ram) {
     host_write_fast(ram.unchecked_ptr(addr), wdata, funct3);
 }
 

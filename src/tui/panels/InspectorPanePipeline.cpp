@@ -72,6 +72,9 @@ auto hex_val(Register v) -> std::string {
     }
 }
 
+auto hex_val(VirtAddr v) -> std::string { return hex_val(v.raw()); }
+auto hex_val(PhysAddr p) -> std::string { return hex_val(p.raw()); }
+
 auto privilege_name(PrivilegeLevel privilege) -> const char* {
     switch (privilege) {
         case PrivilegeLevel::Machine:
@@ -470,7 +473,8 @@ auto InspectorPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, 
             return section_line("Current Pipeline State (5-Stage)", width);
         case 1: {
             std::string diagram = std::format(
-                " [1;36mIF:{}\033[0m → \033[1;33mID:{}\033[0m → \033[1;32mEX:{}\033[0m "
+                " [1;36mIF:{}\033[0m → \033[1;33mID:{}\033[0m → "
+                "\033[1;32mEX:{}\033[0m "
                 "→ "
                 "\033[1;35mMEM:{}\033[0m → \033[1;34mWB:{}\033[0m",
                 short_op_name(ps.f_reg()), short_op_name(ps.d_reg()), short_op_name(ps.e_reg()),

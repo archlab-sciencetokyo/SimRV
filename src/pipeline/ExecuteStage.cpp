@@ -59,15 +59,15 @@ void CPU::execute_core(Machine& machine) {
         case Opcode::Jal:
             ctx.tkn = true;
             ctx.wb_data = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
-            ctx.jmp_pc = (ctx.cpc + ctx.imm).raw();
+            ctx.jmp_pc = ctx.cpc + ctx.imm;
             break;
         case Opcode::Jalr:
             ctx.tkn = true;
             ctx.wb_data = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
-            ctx.jmp_pc = (ctx.rrs1 + ctx.imm) & ~static_cast<Register>(1);
+            ctx.jmp_pc = VirtAddr{(ctx.rrs1 + ctx.imm) & ~static_cast<Register>(1)};
             if (state_.regs.xlen == 32) {
-                ctx.jmp_pc =
-                    static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc)));
+                ctx.jmp_pc = VirtAddr{static_cast<Register>(
+                    static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc.raw())))};
             }
             break;
         case Opcode::Op:
@@ -112,10 +112,10 @@ void CPU::execute_core(Machine& machine) {
         case Opcode::Branch:
             ctx.tkn =
                 execute::ExecuteUnit::branchTaken(ctx.rrs1, ctx.rrs2, ctx.funct3, state_.regs.xlen);
-            ctx.jmp_pc = (ctx.cpc + ctx.imm).raw();
+            ctx.jmp_pc = ctx.cpc + ctx.imm;
             if (state_.regs.xlen == 32) {
-                ctx.jmp_pc =
-                    static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc)));
+                ctx.jmp_pc = VirtAddr{static_cast<Register>(
+                    static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc.raw())))};
             }
             break;
         case Opcode::Amo:
@@ -256,7 +256,7 @@ void CPU::execute_system(Machine& machine) {
                         }
 
                         ctx.tkn = true;
-                        ctx.jmp_pc = state_.pc + 8;
+                        ctx.jmp_pc = VirtAddr{state_.pc + 8};
                     }
                 }
 
@@ -281,7 +281,7 @@ void CPU::execute_system(Machine& machine) {
             case Funct12Priv::Sret:
             case Funct12Priv::Mret:
                 ctx.tkn = true;
-                ctx.jmp_pc = ctx.rcsr;
+                ctx.jmp_pc = VirtAddr{ctx.rcsr};
                 break;
             case Funct12Priv::Wfi: {
                 ctx.tkn = false;

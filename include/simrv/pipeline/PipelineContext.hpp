@@ -25,8 +25,8 @@ struct StageError {
  */
 struct PipelineContext : public DecodedInstruction {
     // IF stage transient values
-    Address padr1 = 0;
-    Address padr2 = 0;
+    PhysAddr padr1{0};
+    PhysAddr padr2{0};
 
     // OF stage operands
     Register rrs1 = 0;
@@ -36,7 +36,7 @@ struct PipelineContext : public DecodedInstruction {
 
     // EX1 stage results and controls
     bool tkn = false;
-    Register jmp_pc = 0;
+    VirtAddr jmp_pc{0};
     Address mem_addr = 0;
     Register wb_data = 0;
     CSRValue wb_data_csr = 0;

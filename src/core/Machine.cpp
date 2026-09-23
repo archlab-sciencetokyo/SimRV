@@ -747,8 +747,9 @@ void OsRunner::finalize(Machine& machine) {
         if (simrv::compiler::unlikely(trace_window)) machine.trace().write_trace_snapshot();
         if (simrv::compiler::unlikely(machine.branch_trace_enabled()))
             machine.trace().emit_branch_prediction_trace(
-                cpu.clint_mmio.mtime, cpu.pipeline_context.cpc.raw(), cpu.pipeline_context.jmp_pc,
-                cpu.pipeline_context.opcode, cpu.pipeline_context.tkn);
+                cpu.clint_mmio.mtime, cpu.pipeline_context.cpc.raw(),
+                cpu.pipeline_context.jmp_pc.raw(), cpu.pipeline_context.opcode,
+                cpu.pipeline_context.tkn);
         machine.finalize_cycle_tohost();
     }
     if (simrv::compiler::unlikely(

@@ -33,6 +33,10 @@ SIMRV_ALWAYS_INLINE auto is_tohost_addr(const Machine& machine, Address addr) ->
            (addr - 0x40008000ULL < 8);
 }
 
+SIMRV_ALWAYS_INLINE auto is_tohost_addr(const Machine& machine, PhysAddr addr) -> bool {
+    return is_tohost_addr(machine, addr.raw());
+}
+
 template <typename T, typename Op>
 auto atomic_update(std::atomic_ref<T>& atomic_mem, Op&& op) -> T {
     T old_val = atomic_mem.load(std::memory_order_relaxed);
@@ -421,7 +425,7 @@ void CPU::run_cycle(Machine& machine) {
                                     .is_branch = slot.context.opcode == Opcode::Branch,
                                     .is_jump = slot.context.opcode == Opcode::Jal ||
                                                slot.context.opcode == Opcode::Jalr,
-                                    .target_pc = slot.context.jmp_pc},
+                                    .target_pc = slot.context.jmp_pc.raw()},
                     .remaining_latency = slot.remaining_latency,
                     .valid = slot.valid,
                     .stalled = stalled,
@@ -1008,7 +1012,7 @@ namespace {
 SIMRV_ALWAYS_INLINE void CPU::execute_cached_jal(CachedOp& op) {
     Register const next_pc = state_.pc + op.len;
     pipeline_context.tkn = true;
-    pipeline_context.jmp_pc = state_.pc + op.imm;
+    pipeline_context.jmp_pc = VirtAddr{state_.pc + op.imm};
     if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, next_pc);
     }
@@ -1016,7 +1020,7 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_jal(CachedOp& op) {
     const Word alignment_mask = has_c ? 1u : 3u;
     if ((pipeline_context.jmp_pc & alignment_mask) != 0) {
         raise_exception(static_cast<TrapCause>(ExceptionCode::MisalignedFetch),
-                        pipeline_context.jmp_pc);
+                        pipeline_context.jmp_pc.raw());
         return;
     }
     commit_cached_branch_target(op, pipeline_context.jmp_pc);
@@ -1025,10 +1029,10 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_jal(CachedOp& op) {
 SIMRV_ALWAYS_INLINE void CPU::execute_cached_jalr(CachedOp& op, Register rrs1) {
     Register const next_pc = state_.pc + op.len;
     pipeline_context.tkn = true;
-    pipeline_context.jmp_pc = (rrs1 + op.imm) & ~static_cast<Register>(1);
+    pipeline_context.jmp_pc = VirtAddr{(rrs1 + op.imm) & ~static_cast<Register>(1)};
     if (state_.regs.xlen == 32) {
-        pipeline_context.jmp_pc = static_cast<Register>(
-            static_cast<int64_t>(static_cast<int32_t>(pipeline_context.jmp_pc)));
+        pipeline_context.jmp_pc = VirtAddr{static_cast<Register>(
+            static_cast<int64_t>(static_cast<int32_t>(pipeline_context.jmp_pc.raw())))};
     }
     if (op.rd != RegId::Zero) {
         state_.regs.write(op.rd, next_pc);
@@ -1037,7 +1041,7 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_jalr(CachedOp& op, Register rrs1) {
     const Word alignment_mask = has_c ? 1u : 3u;
     if ((pipeline_context.jmp_pc & alignment_mask) != 0) {
         raise_exception(static_cast<TrapCause>(ExceptionCode::MisalignedFetch),
-                        pipeline_context.jmp_pc);
+                        pipeline_context.jmp_pc.raw());
         return;
     }
     commit_cached_branch_target(op, pipeline_context.jmp_pc);
@@ -1069,7 +1073,7 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_branch(CachedOp& op, Register rrs1,
             break;
     }
     pipeline_context.tkn = tkn;
-    Register const target_pc = tkn ? (state_.pc + op.imm) : (state_.pc + op.len);
+    VirtAddr const target_pc = tkn ? VirtAddr{state_.pc + op.imm} : VirtAddr{state_.pc + op.len};
     commit_cached_branch_target(op, target_pc);
 }
 
@@ -1107,7 +1111,7 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
                                                         static_cast<Instruction>(funct3));
                 return true;
             }
-            Address const paddr = entry.paddr_base + (mem_addr & 0xFFF);
+            PhysAddr const paddr = entry.paddr_base + (mem_addr & 0xFFF);
             if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes))) {
                 out_val = simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(funct3),
                                                        machine.ram_view());
@@ -1178,7 +1182,7 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
         const size_t tlb_idx = soft_tlb_index(vpn);
         const auto& entry = soft_tlb_write[tlb_idx];
         if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
-            Address const paddr = entry.paddr_base + (mem_addr & 0xFFF);
+            PhysAddr const paddr = entry.paddr_base + (mem_addr & 0xFFF);
             if (simrv::compiler::unlikely(is_tohost_addr(machine, paddr))) {
                 return false;
             }

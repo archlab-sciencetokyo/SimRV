@@ -195,10 +195,14 @@ class BranchPredictor {
         bool valid = false;
     };
 
-    [[nodiscard]] auto predict_direction(Address pc, const DecodedInstruction& inst,
-                                         uint32_t& bht_idx) -> bool;
-    void update_direction(const BranchFeedback& feedback);
-    [[nodiscard]] auto get_bht_index(Address pc, uint32_t ghr_val) const noexcept -> uint32_t;
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto predict_direction(Address pc,
+                                                             const DecodedInstruction& inst,
+                                                             uint32_t& bht_idx) -> bool;
+    SIMRV_ALWAYS_INLINE void update_direction(const BranchFeedback& feedback);
+    SIMRV_ALWAYS_INLINE void update_btb(Address pc, Address target) noexcept;
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto get_bht_index(Address pc,
+                                                         uint32_t ghr_val) const noexcept
+        -> uint32_t;
 
     void ras_push(Address return_addr);
     auto ras_pop() -> std::optional<Address>;

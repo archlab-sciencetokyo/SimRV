@@ -147,7 +147,7 @@ void CPU::fetch_address_translate(Machine& machine) {
         const size_t tlb_idx1 = core::CPU::soft_tlb_index(vpn1);
         const auto& se1 = soft_tlb_inst[tlb_idx1];
         if (simrv::compiler::likely(se1.matches(vpn1, current_asid, state_.priv, soft_tlb_epoch))) {
-            w_padr1 = se1.paddr_base + (w_vadr1 & simrv::memory::kPageMask);
+            w_padr1 = (se1.paddr_base + (w_vadr1 & simrv::memory::kPageMask)).raw();
         } else {
             TLBEntry* tlb_e1 = tlb.lookup_inst_r(w_vadr1, current_asid, state_.priv);
             if (tlb_e1) {
@@ -170,7 +170,7 @@ void CPU::fetch_address_translate(Machine& machine) {
             const auto& se2 = soft_tlb_inst[tlb_idx2];
             if (simrv::compiler::likely(
                     se2.matches(vpn2, current_asid, state_.priv, soft_tlb_epoch))) {
-                w_padr2 = se2.paddr_base + (w_vadr2 & simrv::memory::kPageMask);
+                w_padr2 = (se2.paddr_base + (w_vadr2 & simrv::memory::kPageMask)).raw();
             } else {
                 TLBEntry* tlb_e2 = tlb.lookup_inst_r(w_vadr2, current_asid, state_.priv);
                 if (tlb_e2) {
@@ -184,8 +184,8 @@ void CPU::fetch_address_translate(Machine& machine) {
             }
         }
     }
-    ctx.padr1 = w_padr1;
-    ctx.padr2 = w_padr2;
+    ctx.padr1 = PhysAddr{w_padr1};
+    ctx.padr2 = PhysAddr{w_padr2};
 }
 
 void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
@@ -194,8 +194,8 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
         return;
     }
 
-    Word w_padr = (state == 1) ? ctx.padr1 : ctx.padr2;
-    Word* r_padr = (state == 1) ? &ctx.padr1 : &ctx.padr2;
+    PhysAddr w_padr = (state == 1) ? ctx.padr1 : ctx.padr2;
+    PhysAddr* r_padr = (state == 1) ? &ctx.padr1 : &ctx.padr2;
     Word const w_vadr = (state == 1) ? state_.pc : state_.pc + 2;
     if (w_padr == kWordAllOnes) {
         ctx.tlb_miss = true;
@@ -214,12 +214,12 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
         if (!translate_res.has_value()) return;
         static_cast<void>((*translate_res)
                               .and_then([&](PhysAddr phys) -> std::expected<void, TrapCause> {
-                                  w_padr = phys.raw();
+                                  w_padr = phys;
                                   const Word asid =
                                       simrv::xlen::satp_asid(state_.satp, state_.regs.xlen);
-                                  tlb.insert_inst_r(w_vadr, w_padr, asid, state_.priv);
+                                  tlb.insert_inst_r(w_vadr, w_padr.raw(), asid, state_.priv);
                                   const Address vpn = w_vadr >> 12;
-                                  const Address page_base = w_padr & ~simrv::memory::kPageMask;
+                                  const PhysAddr page_base = w_padr & ~simrv::memory::kPageMask;
                                   Byte* const host_base =
                                       machine.ram_view().contains(page_base, 4096)
                                           ? machine.ram_view().unchecked_ptr(page_base)
@@ -326,7 +326,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
     if (simrv::compiler::likely(machine.memory_geometry().contains(ctx.padr1, sizeof(uint16_t)) &&
                                 machine.memory_geometry().contains(ctx.padr2, sizeof(uint16_t)))) {
         const Address line_base =
-            ctx.padr1 & ~(static_cast<Address>(simrv::cache::ICache::kLineBytes - 1u));
+            (ctx.padr1 & ~(static_cast<Address>(simrv::cache::ICache::kLineBytes - 1u))).raw();
         const bool refill_in_progress = machine.runtime_profile.is_cycle_mode() &&
                                         ca_state.instruction_fill.active &&
                                         ca_state.instruction_fill.line_base == line_base;
@@ -367,11 +367,11 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
         };
 
         const bool single_line = (ctx.padr2 == ctx.padr1 + 2) &&
-                                 ((ctx.padr1 & (simrv::cache::ICache::kLineBytes - 1u)) <=
+                                 ((ctx.padr1.raw() & (simrv::cache::ICache::kLineBytes - 1u)) <=
                                   (simrv::cache::ICache::kLineBytes - 4u));
         if (single_line) {
             uint32_t w_data = 0;
-            if (!refill_in_progress && icache.read(ctx.padr1, w_data)) {
+            if (!refill_in_progress && icache.read(ctx.padr1.raw(), w_data)) {
                 trigger_prefetch(line_base);
                 if ((w_data & 0x3) != 0x3) {
                     ctx.ir_org = w_data & 0xFFFF;
@@ -414,7 +414,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                     fill.reset();
                     trigger_prefetch(line_base);
 
-                    const auto byte_offset = static_cast<size_t>(ctx.padr1 - line_base);
+                    const auto byte_offset = static_cast<size_t>(ctx.padr1.raw() - line_base);
                     std::memcpy(&w_data, timed.line_data.data() + byte_offset, sizeof(w_data));
                     if ((w_data & 0x3) != 0x3) {
                         ctx.ir_org = w_data & 0xFFFF;
@@ -456,7 +456,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             icache.insert(line_base, line_data.data(), simrv::memory::mesi_for(resp.cap));
             release_instruction_eviction(machine, *this);
             machine.memory_.system_bus().grant_ack(simrv::memory::TlChannelE{.sink = resp.sink});
-            const auto byte_offset = static_cast<size_t>(ctx.padr1 - line_base);
+            const auto byte_offset = static_cast<size_t>(ctx.padr1.raw() - line_base);
             std::memcpy(&w_data, line_data.data() + byte_offset, sizeof(w_data));
             if ((w_data & 0x3) != 0x3) {
                 ctx.ir_org = w_data & 0xFFFF;
@@ -466,15 +466,15 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             return;
         }
 
-        auto fetch_halfword = [&](Address paddr, Address vaddr) -> std::optional<uint16_t> {
+        auto fetch_halfword = [&](PhysAddr paddr, Address vaddr) -> std::optional<uint16_t> {
             uint16_t h_data = 0;
             const Address h_line_base =
-                paddr & ~(static_cast<Address>(simrv::cache::ICache::kLineBytes - 1u));
+                (paddr & ~(static_cast<Address>(simrv::cache::ICache::kLineBytes - 1u))).raw();
             const bool h_refill_in_progress = machine.runtime_profile.is_cycle_mode() &&
                                               ca_state.instruction_fill.active &&
                                               ca_state.instruction_fill.line_base == h_line_base;
 
-            if (!h_refill_in_progress && icache.read16(paddr, h_data)) {
+            if (!h_refill_in_progress && icache.read16(paddr.raw(), h_data)) {
                 trigger_prefetch(h_line_base);
                 return h_data;
             }
@@ -513,7 +513,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                     fill.reset();
                     trigger_prefetch(h_line_base);
 
-                    const auto byte_offset = static_cast<size_t>(paddr - h_line_base);
+                    const auto byte_offset = static_cast<size_t>(paddr.raw() - h_line_base);
                     std::memcpy(&h_data, timed.line_data.data() + byte_offset, sizeof(h_data));
                     return h_data;
                 }
@@ -549,7 +549,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             icache.insert(h_line_base, line_data.data(), simrv::memory::mesi_for(resp.cap));
             release_instruction_eviction(machine, *this);
             machine.memory_.system_bus().grant_ack(simrv::memory::TlChannelE{.sink = resp.sink});
-            const auto byte_offset = static_cast<size_t>(paddr - h_line_base);
+            const auto byte_offset = static_cast<size_t>(paddr.raw() - h_line_base);
             std::memcpy(&h_data, line_data.data() + byte_offset, sizeof(h_data));
             return h_data;
         };
@@ -577,7 +577,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
         req_l.hart = static_cast<HartId>(state_.mhartid);
         req_l.source =
             simrv::memory::make_tl_source(req_l.hart, simrv::memory::TlPort::Instruction);
-        req_l.address = ctx.padr1;
+        req_l.address = ctx.padr1.raw();
         machine.memory_.system_bus().send_request(req_l);
         simrv::memory::TlChannelD resp_l{};
         if (!machine.memory_.system_bus().get_response(req_l.source, resp_l) || resp_l.failed()) {
@@ -603,7 +603,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 req_h.hart = static_cast<HartId>(state_.mhartid);
                 req_h.source =
                     simrv::memory::make_tl_source(req_h.hart, simrv::memory::TlPort::Instruction);
-                req_h.address = ctx.padr2;
+                req_h.address = ctx.padr2.raw();
                 machine.memory_.system_bus().send_request(req_h);
                 simrv::memory::TlChannelD resp_h{};
                 if (!machine.memory_.system_bus().get_response(req_h.source, resp_h) ||
@@ -723,8 +723,9 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
     if (!check_fetch_alignment(state_, ctx)) return;
     ctx.cpc = state_.pc;
 
-    ctx.padr1 = (state_.regs.xlen == 32) ? (state_.pc & 0xFFFFFFFFULL) : state_.pc;
-    ctx.padr2 = (state_.regs.xlen == 32) ? ((state_.pc + 2) & 0xFFFFFFFFULL) : (state_.pc + 2);
+    ctx.padr1 = PhysAddr{(state_.regs.xlen == 32) ? (state_.pc & 0xFFFFFFFFULL) : state_.pc};
+    ctx.padr2 =
+        PhysAddr{(state_.regs.xlen == 32) ? ((state_.pc + 2) & 0xFFFFFFFFULL) : (state_.pc + 2)};
 
     // Fast path: DRAM physical fetch — valid only while the MMU has never been
     // enabled.  The latch is set once on the first satp write that activates

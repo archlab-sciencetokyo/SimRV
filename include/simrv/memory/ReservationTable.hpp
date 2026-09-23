@@ -121,6 +121,10 @@ class ReservationTable {
         }
     }
 
+    void invalidate_matching(PhysAddr addr, std::optional<HartId> store_origin = std::nullopt) {
+        invalidate_matching(addr.raw(), store_origin);
+    }
+
     /**
      * @brief Clear active reservation for a specific Hart.
      * @param hart Hart ID whose reservation to invalidate.

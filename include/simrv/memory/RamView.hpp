@@ -44,8 +44,15 @@ class RamView {
         -> bool {
         return data_ != nullptr && address_range_contains(base_, size_, address, bytes);
     }
+    [[nodiscard]] constexpr auto contains(PhysAddr address, size_t bytes = 1) const noexcept
+        -> bool {
+        return contains(address.raw(), bytes);
+    }
     [[nodiscard]] constexpr auto unchecked_ptr(Address address) const noexcept -> Byte* {
         return data_ + (address - base_);
+    }
+    [[nodiscard]] constexpr auto unchecked_ptr(PhysAddr address) const noexcept -> Byte* {
+        return unchecked_ptr(address.raw());
     }
 
    private:

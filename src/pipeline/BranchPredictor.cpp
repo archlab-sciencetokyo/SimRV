@@ -10,18 +10,19 @@ namespace {
 
 constexpr uint8_t kWeaklyTaken = 2;
 
-constexpr std::array<uint8_t, 4> kSaturateUp = {1, 2, 3, 3};
-constexpr std::array<std::array<uint8_t, 4>, 2> kSaturateTable = {{{0, 0, 1, 2}, {1, 2, 3, 3}}};
+constexpr std::array<uint8_t, 8> kSaturateFlat = {0, 0, 1, 2, 1, 2, 3, 3};
 
-[[nodiscard]] constexpr auto saturate_up(uint8_t val) noexcept -> uint8_t {
-    return kSaturateUp[val & 0x3];
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto saturate_up(uint8_t val) noexcept -> uint8_t {
+    return kSaturateFlat[4 | (val & 0x3)];
 }
 
-[[nodiscard]] constexpr auto saturate(uint8_t val, bool taken) noexcept -> uint8_t {
-    return kSaturateTable[taken ? 1 : 0][val & 0x3];
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto saturate(uint8_t val, bool taken) noexcept
+    -> uint8_t {
+    return kSaturateFlat[(static_cast<unsigned>(taken) << 2) | (val & 0x3)];
 }
 
-[[nodiscard]] constexpr auto is_taken_prediction(uint8_t counter) noexcept -> bool {
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto is_taken_prediction(uint8_t counter) noexcept
+    -> bool {
     return (counter & 0x2) != 0;
 }
 
@@ -312,6 +313,13 @@ auto BranchPredictor::predict(Address pc, const DecodedInstruction& inst) -> Bra
     return pred;
 }
 
+void BranchPredictor::update_btb(Address pc, Address target) noexcept {
+    if (config_.enable_btb && !btb_.empty()) {
+        const uint32_t btb_idx = static_cast<uint32_t>(pc >> config_.pc_shift) & btb_mask_;
+        btb_[btb_idx] = BtbEntry{.tag = pc, .target = target, .valid = true};
+    }
+}
+
 void BranchPredictor::update_direction(const BranchFeedback& feedback) {
     if (config_.type == BranchPredictorType::Disabled ||
         config_.type == BranchPredictorType::Static) {
@@ -343,7 +351,7 @@ void BranchPredictor::update_direction(const BranchFeedback& feedback) {
 
     // Standard Bimodal / GShare
     const uint32_t bht_idx = feedback.prediction.bht_index;
-    if (bht_idx < bht_.size()) {
+    if (simrv::compiler::likely(bht_idx < bht_.size())) {
         bht_[bht_idx] = saturate(bht_[bht_idx], actual_taken);
     }
 }
@@ -363,8 +371,8 @@ void BranchPredictor::update(const BranchFeedback& feedback) {
         ++stats_.direction_predictions;
 
         const bool dir_match = (feedback.actual_taken == feedback.prediction.predicted_taken);
-        stats_.direction_hits += dir_match ? 1 : 0;
-        stats_.direction_misses += dir_match ? 0 : 1;
+        stats_.direction_hits += dir_match;
+        stats_.direction_misses += !dir_match;
 
         update_direction(feedback);
 
@@ -373,11 +381,8 @@ void BranchPredictor::update(const BranchFeedback& feedback) {
         }
 
         // Update BTB if branch was taken
-        if (feedback.actual_taken && config_.enable_btb && !btb_.empty()) {
-            const uint32_t btb_idx =
-                static_cast<uint32_t>(feedback.pc >> config_.pc_shift) & btb_mask_;
-            btb_[btb_idx] =
-                BtbEntry{.tag = feedback.pc, .target = feedback.actual_target, .valid = true};
+        if (feedback.actual_taken) {
+            update_btb(feedback.pc, feedback.actual_target);
         }
     } else if (feedback.opcode == isa::Opcode::Jal) {
         ++stats_.direct_jumps;
@@ -385,32 +390,22 @@ void BranchPredictor::update(const BranchFeedback& feedback) {
             const auto index = get_bht_index(feedback.pc, feedback.prediction.ghr_snapshot);
             bht_[index] = saturate_up(bht_[index]);
         }
-        if (config_.enable_btb && !btb_.empty()) {
-            const uint32_t btb_idx =
-                static_cast<uint32_t>(feedback.pc >> config_.pc_shift) & btb_mask_;
-            btb_[btb_idx] =
-                BtbEntry{.tag = feedback.pc, .target = feedback.actual_target, .valid = true};
-        }
+        update_btb(feedback.pc, feedback.actual_target);
     } else if (feedback.opcode == isa::Opcode::Jalr) {
         ++stats_.indirect_jumps;
         ++stats_.target_predictions;
 
         const bool target_match = (feedback.actual_target == feedback.prediction.predicted_target);
-        stats_.target_hits += target_match ? 1 : 0;
-        stats_.target_misses += target_match ? 0 : 1;
+        stats_.target_hits += target_match;
+        stats_.target_misses += !target_match;
 
         if (feedback.prediction.is_return && feedback.prediction.ras_hit) {
-            stats_.ras_hits += target_match ? 1 : 0;
-            stats_.ras_misses += target_match ? 0 : 1;
+            stats_.ras_hits += target_match;
+            stats_.ras_misses += !target_match;
         }
 
         // Update BTB for indirect jump targets
-        if (config_.enable_btb && !btb_.empty()) {
-            const uint32_t btb_idx =
-                static_cast<uint32_t>(feedback.pc >> config_.pc_shift) & btb_mask_;
-            btb_[btb_idx] =
-                BtbEntry{.tag = feedback.pc, .target = feedback.actual_target, .valid = true};
-        }
+        update_btb(feedback.pc, feedback.actual_target);
     }
 }
 

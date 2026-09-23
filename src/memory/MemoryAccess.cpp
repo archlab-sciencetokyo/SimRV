@@ -151,7 +151,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v_
                     return simrv::memory::host_read_fast(
                         entry.host_ptr_base + (v_addr.raw() & 0xFFF), funct3);
                 }
-                const Address paddr = entry.paddr_base + (v_addr.raw() & 0xFFF);
+                const PhysAddr paddr = entry.paddr_base + (v_addr.raw() & 0xFFF);
                 if (simrv::compiler::likely(geometry.contains(paddr, size_bytes))) {
                     return simrv::memory::ram_read_fast(paddr, funct3, cpu.machine_->ram_view());
                 }
@@ -661,12 +661,12 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v
                                                    wdata, funct3);
                     return;
                 }
-                const Address paddr = entry.paddr_base + (v_addr.raw() & 0xFFF);
+                const PhysAddr paddr = entry.paddr_base + (v_addr.raw() & 0xFFF);
                 if (simrv::compiler::likely(geometry.contains(paddr, size_bytes))) {
                     simrv::memory::ram_write_fast(paddr, wdata, funct3, cpu.machine_->ram_view());
                     return;
                 }
-                issue_write(paddr, wdata);
+                issue_write(paddr.raw(), wdata);
                 return;
             }
         }

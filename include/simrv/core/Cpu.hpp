@@ -211,7 +211,7 @@ struct alignas(32) SoftTlbEntry {
     static constexpr uint64_t kInvalidTag = ~uint64_t{0};
 
     uint64_t tag = kInvalidTag;     ///< Packed VPN | ASID | priv; kInvalidTag when empty (8 bytes)
-    Address paddr_base = 0;         ///< Physical page base (paddr & ~0xFFF) (8 bytes)
+    PhysAddr paddr_base{0};         ///< Physical page base (paddr & ~0xFFF) (8 bytes)
     Byte* host_ptr_base = nullptr;  ///< Direct host pointer base (nullptr = use paddr) (8 bytes)
     uint32_t epoch = 0;             ///< TLB generation epoch (4 bytes)
     uint32_t reserved = 0;          ///< Padding to 32 bytes (4 bytes)
@@ -229,7 +229,7 @@ struct alignas(32) SoftTlbEntry {
     }
 
     void set(uint64_t vpn, uint64_t asid, PrivilegeLevel priv, uint32_t current_epoch,
-             Address paddr_base_in, Byte* host_ptr_base_in) noexcept {
+             PhysAddr paddr_base_in, Byte* host_ptr_base_in) noexcept {
         tag = make_tag(vpn, asid, priv);
         epoch = current_epoch;
         paddr_base = paddr_base_in;
@@ -593,8 +593,8 @@ class CPU {
     }
 
     /// Set PC to target_pc, update instruction counters, sign-extend PC, and process interrupts.
-    SIMRV_ALWAYS_INLINE void commit_cached_branch_target(const CachedOp& op, Register target_pc) {
-        state_.pc = target_pc;
+    SIMRV_ALWAYS_INLINE void commit_cached_branch_target(const CachedOp& op, VirtAddr target_pc) {
+        state_.pc = target_pc.raw();
         e_icount++;
         if (op.cinsn) e_ccount++;
         pc_sign_extend();
