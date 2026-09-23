@@ -25,6 +25,9 @@ General Availability (GA) release.
 
 ### 2. TUI & Interactive Features
 
+- [x] **Live Memory Contents Inspection & Dual-Mode Watch**:
+  - Display actual memory contents (formatted hex word, raw bytes, ASCII character box, and resolved symbol annotations) in the Memory/Stack inspector.
+  - Support dual-mode memory inspection via Address modal (custom 64-bit/32-bit address navigation with live stack pointer fallback on `sp` / `0`).
 - [ ] **2D & Horizontal Viewport Scrolling Revision**:
   - Unify 2D scrolling behavior in `framework::ScrollView` across all inspector tabs (Pipeline, Cache, Disassembly, Memory).
   - Fix clipping and horizontal column alignment issues when rendering wide disassembly and multi-hart register matrices.
