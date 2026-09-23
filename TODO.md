@@ -32,7 +32,7 @@ General Availability (GA) release.
 
 ### 3. Branch & Typing Integration
 
-- [ ] **Merge `perf/strong-types-and-bpred-opt` into `dev`**:
+- [x] **Merge `perf/strong-types-and-bpred-opt` into `dev`**:
   - Land strongly-typed `PhysAddr`, `VirtAddr`, and `SoftTlbEntry` interfaces across pipeline and memory modules.
   - Finalize flat saturating counter array and branchless statistics updates in `BranchPredictor`.
 
