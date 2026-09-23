@@ -1,202 +1,86 @@
-# SimRV 3.0 alpha handoff
+# SimRV 3.0.0 Release Roadmap
 
-Branch: `release/3.0.0-alpha.4`
-PR: <https://github.com/archlab-sciencetokyo/SimRV/pull/26> (target: `dev`)
-Latest functional commit: `8a24c2c refactor(decoder): index fused operations by opcode`
+This document outlines the strategic implementation roadmap, feature deliverables,
+performance milestones, and architectural cleanup tasks leading up to the SimRV 3.0.0
+General Availability (GA) release.
 
-Do not create a tag or GitHub release. Keep the PR as the delivery vehicle until all
-required qualification checks are green.
+---
 
-## Immediate release blocker: TSan snapshot race
+## Milestone 1: 3.0.0-beta.2 — Performance Acceleration & TUI Hardening
 
-The current GitHub Actions run is `33397053244`. The `thread-sanitizer` job failed;
-the RV32/RV64 build and quality jobs were still pending when this handoff was written.
+**Target Window**: October 2026  
+**Primary Goals**: Eliminate remaining hot-path execution bottlenecks, complete branch predictor optimizations, and polish interactive TUI 2D navigation.
 
-TSan reports a race between:
+### 1. Performance Optimizations
+- [ ] **Precomputed Fast-Memory Access Classes**:
+  - Classify memory accesses directly in `CachedOp` at decode time (direct-RAM, MMIO/tohost, alignment, translation guards).
+  - Fast-track direct host-pointer access in integer/FP load and store paths without multi-branch qualification checks per instruction.
+- [ ] **Decode Cache Footprint & Dispatch Optimization**:
+  - Optimize memory layout of `CachedOp` to reduce per-entry footprint across L1/L2 host cache hierarchies.
+  - Streamline the dense opcode dispatch table across fast-path and cycle-accurate fetch/decompress stages.
+- [ ] **TUI Differential Rendering Throttling**:
+  - Throttle updates for non-visible or off-screen inspector sub-views during continuous execution.
+  - Minimize ANSI terminal escape sequence generation during high-speed stepping or headless execution bursts.
 
-- `PipelineSim::get_stats()` read from
-  `Machine::publish_tui_execution_snapshot_for_hart()`
-- `PipelineSim::update_stats()` write from an MT-SMP CA worker's
-  `CPU::advance_ca_cycle()`
+### 2. TUI & Interactive Features
+- [ ] **2D & Horizontal Viewport Scrolling Revision**:
+  - Unify 2D scrolling behavior in `framework::ScrollView` across all inspector tabs (Pipeline, Cache, Disassembly, Memory).
+  - Fix clipping and horizontal column alignment issues when rendering wide disassembly and multi-hart register matrices.
+  - Provide explicit scroll indicators (`▲`, `▼`, `◀`, `▶`) when content overflows pane boundaries.
 
-The issue is architectural: a TUI snapshot must never read a hart's live pipeline,
-cache, or CPU counters from another execution thread. The existing atomic snapshot
-slot only protects TUI readers; it does not make the source-state copy safe.
+### 3. Branch & Typing Integration
+- [ ] **Merge `perf/strong-types-and-bpred-opt` into `dev`**:
+  - Land strongly-typed `PhysAddr`, `VirtAddr`, and `SoftTlbEntry` interfaces across pipeline and memory modules.
+  - Finalize flat saturating counter array and branchless statistics updates in `BranchPredictor`.
 
-Implemented locally (pending TSan certification):
+---
 
-1. Each CPU now owns `tui_snapshot_mutex`, acquired only while TUI telemetry is
-   enabled.
-2. `CPU::run_cycle()` and `CPU::run_cycle_baremetal()` hold their hart's lock for
-   the architectural/pipeline transition.
-3. `publish_tui_execution_snapshot_for_hart()` holds that same hart's lock while
-   copying live state to the atomic display slot.
+## Milestone 2: 3.0.0-rc.1 — Feature Freeze, Linux SMP Certification & Code Modernization
 
-This preserves parallel execution across harts and keeps headless execution lock-free,
-while preventing a snapshot from observing a concurrent transition of the same hart.
-The patch passed the RV64 strict release focused suite. Rebuild `build/tsan` with GCC
-and run:
+**Target Window**: November 2026  
+**Primary Goals**: Freeze architectural interfaces, certify Linux multi-hart SMP operation, and enforce clean modern C++23 standards.
 
-`TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1 ctest --test-dir build/tsan --output-on-failure -L thread`.
+### 1. Interface & Feature Freeze
+- [ ] **CLI & Configuration Stability**:
+  - Lock all CLI options, execution profiles (`--mode fast|detailed|cycle-accurate`), and pipeline targets (`3stage`, `5stage`, `dual-issue`).
+  - Freeze CPU model and machine configuration JSON schemas (`release/schemas/`).
 
-Files to inspect:
+### 2. Linux Multi-Hart SMP Certification
+- [ ] **Guest Secondary Hart Utilization**:
+  - Certify that secondary harts (`hart 1..N`) are actively scheduled and utilized by guest Linux.
+  - Verify `/proc/cpuinfo` hart enumeration, OpenSBI HSM wait/start loops, and TileLink IPI delivery.
+  - Implement guest-level affinity verification tests (`taskset`) within the PTY regression harness (`scripts/test_linux_pty.py`).
 
-- `src/core/Machine.cpp`: `publish_tui_execution_snapshot*`, runner activity and
-  worker loops.
-- `src/pipeline/PipelineSim.cpp` / `include/simrv/pipeline/PipelineSim.hpp`:
-  `get_stats()` and `update_stats()`.
-- `tests/ModernPlatformTests.cpp`: `test_ca_mt_smp_pause_and_snapshots`.
+### 3. Domain Strong Typing Audit
+- [ ] **Complete Strong Typing Across Subsystems**:
+  - Introduce and enforce dedicated domain types for CSR addresses (`CSRAddress`), privilege modes (`PrivilegeMode`), and memory transfer access sizes.
+  - Replace remaining primitive integer types (`uint64_t`, `uint32_t`, `unsigned long`) in core execution logic with explicit domain aliases (`Word`, `Address`, `Register`, `TrapCause`).
 
-## Completed in the current branch
+### 4. Legacy 2.x Deprecation & Architecture Hygiene
+- [ ] **Purge 2.x Remnants**:
+  - Audit codebase for obsolete comments, dead configurations, and removed rollback/reverse-stepping hooks.
+  - Modernize buffer interfaces to use `std::span` rather than raw pointer and length pairs.
+  - Verify strict adherence to architecture layer boundaries (`include/simrv/` public interfaces vs `src/` private implementations).
 
-- SimRV is versioned as `3.0.0-alpha.2`; the branch and draft PR target `dev`.
-- CA/SMP TUI pause waits for primary and secondary runner quiescence.
-- TUI step now uses `Machine::step()` and the CA runner, so it steps all harts once.
-- Vector and FMA decoder dispatch uses checked dense decode tables; the remaining
-  vector whole-register move path is an explicit secondary-field legality decoder.
-- FMA dispatch indexes its checked table directly by the encoded opcode and format,
-  with no separate opcode-to-row selection switch.
-- Core decoder regressions cover legal and reserved FMA formats and whole-register
-  vector group encodings.
-- Fixed the Clang unused-constant warning in `BranchPredictor`.
-- Fixed `test_global_cycle_timer_phase_ordering` so it checks relative rather than
-  assumed-reset cycle counts in every build type.
-- Corrected VirtIO sound's device type to 25, yielding modern PCI device ID `0x1059`.
-- Hardened SMP test startup/resume waits with two-second deadlines; ASan/UBSan
-  modern-platform passed five consecutive runs with leak detection disabled.
-- Consolidated the identical Baremetal/OS worker-quiescence wait loops into one
-  self-worker-aware helper, so pause/shutdown semantics cannot drift between runners.
-- Added an RAII activity-counter guard for primary runner cycles and fast batches, ensuring every
-  exit path decrements and wakes quiescence waiters while retaining the established runner-flag
-  ordering.
+---
 
-## Local qualification already completed
+## Milestone 3: 3.0.0 GA — Qualification, Documentation & General Availability
 
-- RV64 strict Clang release build and focused gate tests pass:
-  `core-semantics`, `modern-platform`, `pipeline-models`, `tui-framework`.
-- ASan/UBSan focused suites pass with `ASAN_OPTIONS=detect_leaks=0`.
-- This workspace cannot run LeakSanitizer with `detect_leaks=1` because its process
-  wrapper uses ptrace; GitHub CI remains the authoritative leak-enabled run.
+**Target Window**: December 2026  
+**Primary Goals**: Full multi-compiler release qualification, updated documentation, and official delivery PR qualification.
 
-## Next refactor after alpha qualification is green
+### 1. Documentation & Visual Assets
+- [ ] **Architecture & Mission Documentation**:
+  - Update `README.md` and `docs/` architecture overviews with 3.0 multi-hart and TileLink-C cache coherence topologies.
+  - Update classroom mission files and student guidance manuals to match 3.0 TUI layouts and inspector controls.
 
-Implement decoded-instruction metadata before changing pipeline behavior.
-
-1. Add a compact trait record adjacent to `OperationInfo`: source operands used
-   (`rs1`, `rs2`, `rs3`), source/destination register banks, destination presence,
-   memory access kind, and control-flow/CSR side effects.
-2. Replace duplicated opcode classification switches in the hazard, retirement,
-   trace, and instruction-explainer paths with those traits.
-3. Build a register-bank-aware scoreboard from the traits. Preserve current integer
-   forwarding; begin with conservative FP availability through retirement.
-4. Add three- and five-stage regressions for FP load/use, FP-to-integer conversion,
-   FP stores, and FMA `rs3` dependencies before relaxing any stalls.
-
-Avoid a broad execution rewrite until the metadata is proven by those regressions.
-
-## Before declaring alpha qualification complete
-
-- All PR checks must be green, including TSan and ASan/UBSan.
-- Re-run RV32 and RV64 release gates and ISA suites after the TSan fix.
-- Keep no compatibility aliases for removed 2.x rollback/reverse stepping or pipeline
-  modes.
-- Do not tag or publish; advance to an RC only after alpha feedback and a clean
-  required-suite record.
-
-## Performance follow-up handover (September 2026)
-
-### Landed and qualified locally
-
-- The fast decode cache is now a compact, two-way 2,048-set cache with a maximum
-  RV64 footprint of 256 KiB per hart.  It uses invalid-way-first insertion and
-  insertion-only round-robin replacement; lookups no longer write cache metadata.
-- Integrated the micro-op decode cache into the cycle-accurate (CA) pipeline's
-  fetch stage (`CPU::run_fetch_stage`). Cache hits skip full RVC decompression
-  (`decompressInstruction`) and decoder dispatch, reconstructing the per-slot
-  `PipelineContext` while preserving mode-specific legality checks.
-- Precomputed pipeline dependency traits: integrated compile-time metadata traits
-  from `OperationTraits.hpp` (`is_rs1_int`, `is_rs2_int`, `is_rs1_fp`, `is_rs2_fp`,
-  `is_rs3_fp`, `writes_integer`, `writes_float`, `is_serializing`) into
-  `CycleKernel.cpp` hazard detection, source readiness checks, and slot classification.
-  Added bit-for-bit cycle and data-hazard stall counter tests in `PipelineHazardTests.cpp`
-  verifying identical behavior across 3-stage and 5-stage models.
-- Hardened cache flush safety on CSR writes: `mstatus` writes affecting `FS`,
-  `VS`, or effective `XLEN` (`SXL`/`UXL`) now trigger a `CPU::TLB_flush()`
-  and decode cache invalidation, preventing stale execution privileges.
-- Compressed instruction definitions and decompressor modernized: introduced
-  strongly-typed `Q0Op`, `Q1Op`, and `Q2Op` enums in `include/simrv/isa/Compressed.hpp`
-  matching RISC-V Compressed ISA specification tables, added `c_rs1_p()` accessor,
-  and replaced raw literals in `Decoder.cpp`.
-- Added regression tests in `CoreSemanticsTests.cpp` covering RVC decompression
-  legality, canonical `C.NOP` / `C.ADDI` expansion, `c_rs1_p` consistency, and
-  `mstatus.FS` decode cache invalidation.
-- Host-memory fast loads and stores use fixed-width unaligned helpers.  RV32
-  `funct3 == 3` is correctly a four-byte operation rather than an unsafe eight-byte
-  access through a four-byte word.
-- The presentation-only CPU scoreboard moved into the published TUI execution
-  snapshot.  Headless execution does not construct scoreboard presentation data.
-- `rv64-native-release` is explicitly Clang-backed and benchmark command generation
-  emits exactly one execution selector (`--os` or `--baremetal`).
-- RV32 and RV64 CTest gate suites both passed locally (19/19 each), as did the
-  Clang native-release preset configuration and build.
-
-### Controlled benchmark record
-
-Two warmups and seven measured runs were used for each sample.  The following
-measurements are useful baselines for follow-up changes; retain only changes that
-preserve architectural and cycle-model counters and do not regress any mode by more
-than 3%.
-
-| Workload / mode | Before median wall time | After median wall time |
-| --- | ---: | ---: |
-| CoreMark, fast, 20M instructions | 0.11358 s | 0.08658 s |
-| aha-mont, fast | 0.00501 s | 0.00467 s |
-| aha-mont, detailed | 0.02794 s | 0.02439 s |
-| aha-mont, CA 3-stage | 1.09867 s | 1.07198 s |
-| aha-mont, CA 5-stage | 1.32372 s | 1.29341 s |
-
-CoreMark therefore improved by about 31% in median wall-throughput (176.1 to
-231.0 M instructions/s).  Do not compare these values across different hosts or
-toolchains; repeat the same controlled workflow instead.
-
-### Completed & ongoing performance work
-
-1. **L1 Instruction Stream Prefetching.** (Completed) Implemented configurable hardware next-line / stream
-   prefetching for `ICache` in CA mode (`enable_instruction_prefetch` in `CpuConfig` & `CpuModelConfig`)
-   using TileLink non-blocking prefetch intents (`TlIntent::PrefetchRead`) and pipeline flush cancellation.
-2. **Extended Benchmark Suite Harness.** (Completed) Enhanced `scripts/run_benchmarks.py` with multi-mode
-   sweeping (`--modes fast detailed 3stage 5stage`), baseline JSON tracking, and automated regression alerts (> 3%).
-3. **Slim branch-predictor update without changing statistics.** Predictor update
-   is about 8% of the sampled CA host CPU time.  Separate unavoidable predictor state
-   mutation from optional accounting only if every existing visible counter, decision,
-   and training event stays unchanged.  Benchmark both branch-heavy and straight-line
-   programs; do not trade trace/TUI observability for speed by default.
-4. **Further cached fast-memory specialization.** Fast-mode cached loads are about
-   11% and stores about 3% of sampled host CPU time.  Investigate a direct-RAM path
-   only after proving its guards cover alignment, MMIO/tohost, address translation,
-   privilege, traps, and dynamically changed machine configuration.  Prefer a
-   per-operation precomputed access class over adding another broad execution switch.
-
-### Useful reproduction commands
-
-Use `simrv-benchmark` skill guidance for the current official measurement procedure.
-For a focused local profile, build `rv64-release` and run:
-
-```bash
-perf record -q -o /tmp/simrv-cycle-perf.data -e cpu-clock --call-graph dwarf -- \
-  ./build/rv64-release/SimRV --cli --baremetal \
-  -m ../../tests/riscv-tests/benchmarks/aha-mont64.riscv -e 10000000 \
-  --mode cycle-accurate --pipeline 5stage
-perf report -i /tmp/simrv-cycle-perf.data --no-children
-```
-
-The profile that informed this handover placed `CPU::run_ca_pipeline_cycle` first,
-followed by branch-predictor update, fetch/decompression/decode, and dependency
-resolution.  Repeat it after each isolated change; profile shape is evidence, not a
-substitute for the controlled benchmark gate above.
-
-# 09-07 follow-up
-
-- SMP is broken, hart 1 is not used by linux
-- Scrolling behavior in TUI is inconsistent, needs to be fixed
-- Especially horizontal scrolling needs to be revised
+### 2. Multi-Compiler & Matrix Qualification
+- [ ] **Full Release Qualification Matrix**:
+  - Clean builds and 100% gate pass across:
+    - RV64 / RV32 release presets (`rv64-release`, `rv32-release`).
+    - Clang 22+ and GCC 16+ native release presets.
+    - ThreadSanitizer (`tsan`), AddressSanitizer (`asan`), and UndefinedBehaviorSanitizer (`ubsan`).
+    - Full Linux boot and PTY lifecycle regression suites (`linux-boot-pty`, `linux-ia-quantum-smp-pty`).
+- [ ] **Release Manifest Finalization**:
+  - Update `release/release-manifest.json`, `CITATION.cff`, and write final `CHANGELOG.md` entry for `[v3.0.0]`.
+  - Validate release artifacts with `scripts/release_check.py`.
