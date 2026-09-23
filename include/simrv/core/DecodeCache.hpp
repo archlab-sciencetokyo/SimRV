@@ -33,44 +33,52 @@ struct CachedOp {
     VirtAddr cpc{0};
     ImmValue imm = 0;
     Instruction ir = 0;
-    Instruction ir_org = 0;
-    Instruction cinsn = 0;
+    uint16_t cinsn = 0;
     isa::OperationId op_id = isa::UNKNOWN;
-    Funct12 funct12 = 0;
     simrv::pipeline::DependencyTraits traits{};
-    isa::Opcode opcode = static_cast<isa::Opcode>(0);
     RegId rd = RegId::Zero;
     RegId rs1 = RegId::Zero;
     RegId rs2 = RegId::Zero;
     isa::Funct3 funct3 = static_cast<isa::Funct3>(0);
-    isa::Funct5Amo funct5 = static_cast<isa::Funct5Amo>(0);
-    Funct7 funct7 = 0;
-    FastMemClass mem_class = FastMemClass::None;
-    uint8_t mem_size = 0;
-    uint8_t align_mask = 0;
-    uint8_t len = 4;
-    bool valid = false;
+    FastMemClass mem_class : 4 = FastMemClass::None;
+    uint8_t mem_size : 4 = 0;
+    bool valid : 1 = false;
+    uint8_t next_victim : 1 = 0;
+    uint8_t reserved : 6 = 0;
+
+    [[nodiscard]] constexpr auto len() const noexcept -> uint8_t { return cinsn ? 2u : 4u; }
+    [[nodiscard]] constexpr auto align_mask() const noexcept -> uint8_t {
+        return static_cast<uint8_t>(mem_size ? (mem_size - 1u) : 0u);
+    }
+    [[nodiscard]] constexpr auto opcode() const noexcept -> isa::Opcode {
+        return static_cast<isa::Opcode>(ir & 0x7Fu);
+    }
+    [[nodiscard]] constexpr auto funct7() const noexcept -> Funct7 {
+        return static_cast<Funct7>((ir >> 25u) & 0x7Fu);
+    }
+    [[nodiscard]] constexpr auto funct5() const noexcept -> isa::Funct5Amo {
+        return static_cast<isa::Funct5Amo>((ir >> 27u) & 0x1Fu);
+    }
+    [[nodiscard]] constexpr auto funct12() const noexcept -> Funct12 {
+        return static_cast<Funct12>(ir >> 20u);
+    }
+    [[nodiscard]] constexpr auto ir_org() const noexcept -> Instruction {
+        return cinsn ? static_cast<Instruction>(cinsn) : ir;
+    }
 
     constexpr void copy_from(const simrv::pipeline::DecodedInstruction& decoded) noexcept {
         cpc = decoded.cpc;
         imm = decoded.imm;
         ir = decoded.ir;
-        ir_org = decoded.ir_org;
-        cinsn = decoded.cinsn;
+        cinsn = static_cast<uint16_t>(decoded.cinsn);
         op_id = decoded.op_id;
-        funct12 = decoded.funct12;
-        opcode = decoded.opcode;
         rd = decoded.rd;
         rs1 = decoded.rs1;
         rs2 = decoded.rs2;
         funct3 = decoded.funct3;
-        funct5 = decoded.funct5;
-        funct7 = decoded.funct7;
         traits = decoded.traits;
-        len = decoded.cinsn ? 2 : 4;
         if (decoded.traits.is_mem_load) {
             mem_size = static_cast<uint8_t>(1u << (static_cast<unsigned>(decoded.funct3) & 0x3u));
-            align_mask = static_cast<uint8_t>(mem_size - 1u);
             if (decoded.traits.writes_fp) {
                 mem_class = FastMemClass::FpLoad;
             } else if ((static_cast<unsigned>(decoded.funct3) & 0x4u) != 0) {
@@ -80,7 +88,6 @@ struct CachedOp {
             }
         } else if (decoded.traits.is_mem_store) {
             mem_size = static_cast<uint8_t>(1u << (static_cast<unsigned>(decoded.funct3) & 0x3u));
-            align_mask = static_cast<uint8_t>(mem_size - 1u);
             if (decoded.traits.reads_rs2_fp) {
                 mem_class = FastMemClass::FpStore;
             } else {
@@ -88,7 +95,6 @@ struct CachedOp {
             }
         } else {
             mem_size = 0;
-            align_mask = 0;
             mem_class = FastMemClass::None;
         }
     }
@@ -99,17 +105,17 @@ struct CachedOp {
         decoded.pending_tval = 0;
         decoded.pending_exception = std::nullopt;
         decoded.ir = ir;
-        decoded.ir_org = ir_org;
+        decoded.ir_org = ir_org();
         decoded.cinsn = cinsn;
         decoded.op_id = op_id;
-        decoded.funct7 = funct7;
-        decoded.funct12 = funct12;
-        decoded.opcode = opcode;
+        decoded.funct7 = funct7();
+        decoded.funct12 = funct12();
+        decoded.opcode = opcode();
         decoded.rd = rd;
         decoded.rs1 = rs1;
         decoded.rs2 = rs2;
         decoded.funct3 = funct3;
-        decoded.funct5 = funct5;
+        decoded.funct5 = funct5();
         decoded.traits = traits;
     }
 };
@@ -119,9 +125,9 @@ struct CachedOp {
  * @brief 2-way set-associative cache for pre-decoded instructions to bypass fetch/decode stages.
  *
  * Indexed by XOR-hash of PC (`((pc >> 1) ^ (pc >> 13)) & kSetMask`), caching 4096 decoded
- * instructions (2048 2-way sets) with 64-byte set alignment for cache locality and 1-bit
- * round-robin replacement. Lookup hits are read-only so the hottest path does not dirty cache
- * metadata.
+ * instructions (2048 2-way sets) with 64-byte set alignment matching exactly one host L1 D-cache
+ * line and 1-bit round-robin replacement. Lookup hits are read-only so the hottest path does not
+ * dirty cache metadata.
  */
 class DecodeCache {
    public:
@@ -131,7 +137,13 @@ class DecodeCache {
 
     struct alignas(64) CacheSet {
         std::array<CachedOp, 2> ways{};
-        uint8_t next_victim = 0;
+
+        [[nodiscard]] constexpr auto next_victim() const noexcept -> uint8_t {
+            return ways[0].next_victim;
+        }
+        constexpr void set_next_victim(uint8_t v) noexcept {
+            ways[0].next_victim = static_cast<uint8_t>(v & 0x1u);
+        }
     };
 
     /**
@@ -143,7 +155,7 @@ class DecodeCache {
             set.ways[0].cpc = VirtAddr{~Register{0}};
             set.ways[1].valid = false;
             set.ways[1].cpc = VirtAddr{~Register{0}};
-            set.next_victim = 0;
+            set.set_next_victim(0);
         }
     }
 
@@ -213,14 +225,13 @@ class DecodeCache {
         } else if (!set.ways[1].valid) {
             way = 1;
         } else {
-            way = set.next_victim;
+            way = set.next_victim();
         }
         auto& entry = set.ways[way];
         entry = op;
         entry.cpc = VirtAddr{pc};
-        entry.len = op.cinsn ? 2 : 4;
         entry.valid = true;
-        set.next_victim = static_cast<uint8_t>(1U - way);
+        set.set_next_victim(static_cast<uint8_t>(1U - way));
     }
     inline void insert(VirtAddr pc, const CachedOp& op) { insert(pc.raw(), op); }
 
@@ -228,7 +239,8 @@ class DecodeCache {
     std::array<CacheSet, kNumSets> sets_{};
 };
 
-static_assert(sizeof(DecodeCache::CacheSet) <= 128);
-static_assert(sizeof(DecodeCache) <= 256 * 1024);
+static_assert(sizeof(CachedOp) == (sizeof(Address) == 8 ? 32 : 24));
+static_assert(sizeof(DecodeCache::CacheSet) == 64);
+static_assert(sizeof(DecodeCache) == 128 * 1024);
 
 }  // namespace simrv::core

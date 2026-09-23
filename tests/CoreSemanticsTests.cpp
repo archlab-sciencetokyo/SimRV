@@ -134,26 +134,33 @@ void test_decode_cache_compact_round_robin() {
     decoded.rs1 = static_cast<RegId>(1);
     decoded.rs2 = static_cast<RegId>(2);
     decoded.funct3 = simrv::isa::Funct3::Beq;
-    decoded.funct7 = 0x7F;
-    decoded.funct12 = 0x123;
-    decoded.funct5 = static_cast<simrv::isa::Funct5Amo>(7);
+    decoded.funct7 = static_cast<Funct7>((decoded.ir >> 25) & 0x7F);
+    decoded.funct12 = static_cast<Funct12>(decoded.ir >> 20);
+    decoded.funct5 = static_cast<simrv::isa::Funct5Amo>((decoded.ir >> 27) & 0x1F);
 
     simrv::core::CachedOp first{};
     first.copy_from(decoded);
     cache.insert(decoded.cpc, first);
     auto* hit = cache.lookup(decoded.cpc);
-    expect(hit != nullptr && hit->len == 4, "decode cache returns an inserted operation");
+    expect(hit != nullptr && hit->len() == 4, "decode cache returns an inserted operation");
     simrv::pipeline::DecodedInstruction restored{};
     hit->copy_to(restored);
-    expect(restored.cpc == decoded.cpc && restored.imm == decoded.imm &&
-               restored.ir == decoded.ir && restored.ir_org == decoded.ir_org &&
-               restored.cinsn == decoded.cinsn && restored.op_id == decoded.op_id &&
-               restored.opcode == decoded.opcode && restored.rd == decoded.rd &&
-               restored.rs1 == decoded.rs1 && restored.rs2 == decoded.rs2 &&
-               restored.funct3 == decoded.funct3 && restored.funct5 == decoded.funct5 &&
-               restored.funct7 == decoded.funct7 && restored.funct12 == decoded.funct12 &&
-               restored.pending_tval == 0 && !restored.pending_exception.has_value(),
-           "compact decode entries reconstruct the decoded context");
+    expect(restored.cpc == decoded.cpc, "cpc match");
+    expect(restored.imm == decoded.imm, "imm match");
+    expect(restored.ir == decoded.ir, "ir match");
+    expect(restored.ir_org == decoded.ir_org, "ir_org match");
+    expect(restored.cinsn == decoded.cinsn, "cinsn match");
+    expect(restored.op_id == decoded.op_id, "op_id match");
+    expect(restored.opcode == decoded.opcode, "opcode match");
+    expect(restored.rd == decoded.rd, "rd match");
+    expect(restored.rs1 == decoded.rs1, "rs1 match");
+    expect(restored.rs2 == decoded.rs2, "rs2 match");
+    expect(restored.funct3 == decoded.funct3, "funct3 match");
+    expect(restored.funct5 == decoded.funct5, "funct5 match");
+    expect(restored.funct7 == decoded.funct7, "funct7 match");
+    expect(restored.funct12 == decoded.funct12, "funct12 match");
+    expect(restored.pending_tval == 0, "pending_tval match");
+    expect(!restored.pending_exception.has_value(), "pending_exception match");
 
     const Register first_pc = decoded.cpc.raw();
     Register second_pc = first_pc + 2;
@@ -169,7 +176,7 @@ void test_decode_cache_compact_round_robin() {
     simrv::core::CachedOp compressed = first;
     compressed.cinsn = 1;
     cache.insert(second_pc, compressed);
-    expect(cache.lookup(second_pc) != nullptr && cache.lookup(second_pc)->len == 2,
+    expect(cache.lookup(second_pc) != nullptr && cache.lookup(second_pc)->len() == 2,
            "decode cache records compressed instruction length");
     expect(cache.lookup(first_pc) != nullptr, "lookup hits do not disturb replacement state");
     cache.insert(third_pc, first);
@@ -180,8 +187,12 @@ void test_decode_cache_compact_round_robin() {
     expect(cache.lookup(second_pc) == nullptr && cache.lookup(third_pc) == nullptr,
            "decode cache flush invalidates every way");
 
-    static_assert(sizeof(simrv::core::CachedOp) <= (sizeof(Address) == 8 ? 48 : 40),
-                  "CachedOp must maintain a compact footprint");
+    static_assert(sizeof(simrv::core::CachedOp) <= (sizeof(Address) == 8 ? 32 : 24),
+                  "CachedOp must maintain a 32-byte (RV64) / 24-byte (RV32) compact footprint");
+    static_assert(sizeof(simrv::core::DecodeCache::CacheSet) <= 64,
+                  "CacheSet must match single 64-byte host cache line");
+    static_assert(sizeof(simrv::core::DecodeCache) <= 128 * 1024,
+                  "DecodeCache total footprint must be 128KB");
 
     // Fast memory precomputed attributes
     simrv::pipeline::DecodedInstruction load_inst{};
@@ -192,7 +203,7 @@ void test_decode_cache_compact_round_robin() {
     expect(load_op.mem_class == simrv::core::FastMemClass::IntLoadSigned,
            "LW classified as IntLoadSigned");
     expect(load_op.mem_size == 4, "LW mem_size is 4");
-    expect(load_op.align_mask == 3, "LW align_mask is 3");
+    expect(load_op.align_mask() == 3, "LW align_mask is 3");
 
     simrv::pipeline::DecodedInstruction lbu_inst{};
     lbu_inst.traits.is_mem_load = true;
@@ -202,7 +213,7 @@ void test_decode_cache_compact_round_robin() {
     expect(lbu_op.mem_class == simrv::core::FastMemClass::IntLoadUnsigned,
            "LBU classified as IntLoadUnsigned");
     expect(lbu_op.mem_size == 1, "LBU mem_size is 1");
-    expect(lbu_op.align_mask == 0, "LBU align_mask is 0");
+    expect(lbu_op.align_mask() == 0, "LBU align_mask is 0");
 
     simrv::pipeline::DecodedInstruction store_inst{};
     store_inst.traits.is_mem_store = true;
@@ -211,7 +222,7 @@ void test_decode_cache_compact_round_robin() {
     store_op.copy_from(store_inst);
     expect(store_op.mem_class == simrv::core::FastMemClass::IntStore, "SD classified as IntStore");
     expect(store_op.mem_size == 8, "SD mem_size is 8");
-    expect(store_op.align_mask == 7, "SD align_mask is 7");
+    expect(store_op.align_mask() == 7, "SD align_mask is 7");
 
     simrv::pipeline::DecodedInstruction fld_inst{};
     fld_inst.traits.is_mem_load = true;
@@ -221,7 +232,7 @@ void test_decode_cache_compact_round_robin() {
     fld_op.copy_from(fld_inst);
     expect(fld_op.mem_class == simrv::core::FastMemClass::FpLoad, "FLD classified as FpLoad");
     expect(fld_op.mem_size == 8, "FLD mem_size is 8");
-    expect(fld_op.align_mask == 7, "FLD align_mask is 7");
+    expect(fld_op.align_mask() == 7, "FLD align_mask is 7");
 }
 
 void test_compressed_instruction_decode_and_flush() {

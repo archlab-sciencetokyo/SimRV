@@ -38,10 +38,8 @@ using simrv::isa::InstFormat;
 
 namespace {
 
-// ???????????????????????????????????????????????????????????????????????
 // ───────────────────────────────────────────────────────────────────────
 // Shared helpers
-// ???????????????????????????????????????????????????????????????????????
 // ───────────────────────────────────────────────────────────────────────
 
 auto reg_name(RegId r) -> std::string {
@@ -139,19 +137,14 @@ auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx) -> std::s
     const std::string_view op_name = simrv::pipeline::operation_name(ctx.op_id);
 
     if (is_load_opcode(opc)) {
-        return std::format(" {}Computation : {}Memory[{} + {}] ? {}\033[0m", kThemeText, kThemeMint,
+        return std::format(" {}Computation : {}Memory[{} + {}] → {}\033[0m", kThemeText, kThemeMint,
                            hex_val(ctx.rrs1), ctx.imm, hex_val(ctx.mem_rdata));
-        return std::format(" {}Computation : {}Memory[{} + {}] → {}\033[0m", kThemeText,
-                           kThemeMint, hex_val(ctx.rrs1), ctx.imm, hex_val(ctx.mem_rdata));
     }
     if (is_store_opcode(opc)) {
-        return std::format(" {}Computation : {}{} ? Memory[{} + {}]\033[0m", kThemeText, kThemeMint,
+        return std::format(" {}Computation : {}{} → Memory[{} + {}]\033[0m", kThemeText, kThemeMint,
                            hex_val(ctx.rrs2), hex_val(ctx.rrs1), ctx.imm);
-        return std::format(" {}Computation : {}{} → Memory[{} + {}]\033[0m", kThemeText,
-                           kThemeMint, hex_val(ctx.rrs2), hex_val(ctx.rrs1), ctx.imm);
     }
     if (is_branch_opcode(opc)) {
-        return std::format(" {}Computation : {}Compare {} vs {} ? {}\033[0m", kThemeText,
         return std::format(" {}Computation : {}Compare {} vs {} → {}\033[0m", kThemeText,
                            kThemeMint, hex_val(ctx.rrs1), hex_val(ctx.rrs2),
                            ctx.tkn ? "Taken" : "Not Taken");
@@ -183,7 +176,6 @@ auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx) -> std::s
             return std::format(" {}Computation : {}Breakpoint (trap to debugger)\033[0m",
                                kThemeText, kThemePeach);
         }
-        return std::format(" {}Computation : {}CSR operation ? {}\033[0m", kThemeText, kThemeMint,
         return std::format(" {}Computation : {}CSR operation → {}\033[0m", kThemeText, kThemeMint,
                            hex_val(ctx.wb_data));
     }
@@ -196,7 +188,6 @@ auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx) -> std::s
     // Show: operand1 <op> operand2 = result
     InstFormat fmt = simrv::isa::get_instruction_format(opc);
     if (fmt == InstFormat::R4 || pipeline::operation::reads_rs3(ctx.op_id)) {
-        return std::format(" {}Computation : {}{} * {} � rs3 = {} [FMA 3-op]\033[0m", kThemeText,
         return std::format(" {}Computation : {}{} * {} ± rs3 = {} [FMA 3-op]\033[0m", kThemeText,
                            kThemeMint, hex_val(ctx.rrs1), hex_val(ctx.rrs2), hex_val(ctx.wb_data));
     }
@@ -224,14 +215,12 @@ auto get_mem_stage_desc(const simrv::pipeline::PipelineContext& ctx)
         return {std::format("Store [{}]", hex_val(ctx.mem_addr)),
                 std::format("Data: {}", hex_val(ctx.mem_wdata))};
     }
-    return {"None (not a load/store)", "�"};
     return {"None (not a load/store)", "—"};
 }
 
 /// Format the Source 2 description based on instruction format.
 auto get_src2_desc(const simrv::pipeline::PipelineContext& ctx, InstFormat fmt) -> std::string {
     if (fmt == InstFormat::I || fmt == InstFormat::U || fmt == InstFormat::J) {
-        return std::format("(none � uses imm)");
         return std::format("(none — uses imm)");
     }
     if (fmt == InstFormat::S) {
@@ -244,14 +233,11 @@ auto get_src2_desc(const simrv::pipeline::PipelineContext& ctx, InstFormat fmt) 
         std::string name = is_fp ? fp_reg_name(ctx.rs2) : reg_name(ctx.rs2);
         return std::format("{} = {}", name, hex_val(ctx.rrs2));
     }
-    return "�";
     return "—";
 }
 
-// ???????????????????????????????????????????????????????????????????????
 // ───────────────────────────────────────────────────────────────────────
 // Cycle-accurate helpers
-// ???????????????????????????????????????????????????????????????????????
 // ───────────────────────────────────────────────────────────────────────
 
 auto has_stage_raw_hazard(const simrv::pipeline::PipelineSim& ps,
@@ -299,10 +285,8 @@ auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem,
                          : (srcs.size() == 1 ? srcs[0] : std::format("{}, {}", srcs[0], srcs[1]));
         if (reg.writes_reg && reg.rd != static_cast<RegId>(0)) {
             if (!src_str.empty()) {
-                ops_info = std::format(" \033[90m[{} ? {}]\033[0m", src_str, reg_name(reg.rd));
                 ops_info = std::format(" \033[90m[{} → {}]\033[0m", src_str, reg_name(reg.rd));
             } else {
-                ops_info = std::format(" \033[90m[? {}]\033[0m", reg_name(reg.rd));
                 ops_info = std::format(" \033[90m[→ {}]\033[0m", reg_name(reg.rd));
             }
         } else if (!src_str.empty()) {
@@ -372,20 +356,17 @@ auto get_active_forwarding_paths(const simrv::pipeline::PipelineSim& ps)
 
         if (e.valid && e.writes_reg && e.rd == rs) {
             if (e.remaining_latency == 0) {
-                paths.push_back(std::format("EX?ID ({})", rs_label));
                 paths.push_back(std::format("EX→ID ({})", rs_label));
                 return;
             }
         }
         if (m.valid && m.writes_reg && m.rd == rs) {
             if (m.remaining_latency == 0) {
-                paths.push_back(std::format("MEM?ID ({})", rs_label));
                 paths.push_back(std::format("MEM→ID ({})", rs_label));
                 return;
             }
         }
         if (w.valid && w.writes_reg && w.rd == rs) {
-            paths.push_back(std::format("WB?ID ({})", rs_label));
             paths.push_back(std::format("WB→ID ({})", rs_label));
             return;
         }
@@ -399,10 +380,8 @@ auto get_active_forwarding_paths(const simrv::pipeline::PipelineSim& ps)
 
 }  // namespace
 
-// ???????????????????????????????????????????????????????????????????????
 // ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 // Top-level dispatch
-// ???????????????????????????????????????????????????????????????????????
 // ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 
 auto InspectorPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logical_row,
@@ -418,17 +397,14 @@ auto InspectorPane::render_pipeline_stages(const simrv::core::CPU& cpu, int logi
     }
 }
 
-// ???????????????????????????????????????????????????????????????????????
 // ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 // Cycle-Accurate mode
-// ???????????????????????????????????????????????????????????????????????
 // ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 
 auto InspectorPane::render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu,
                                                           int logical_row, int col_width,
                                                           int right_width) -> std::string {
     // Adjusted row index relative to the start of the non-timeline area.
-    // Timeline occupies rows 0�8, so stage details begin at row 9.
     // Timeline occupies rows 0–8, so stage details begin at row 9.
     int const val = logical_row - 9;
     if (val >= 0 && val <= 6) {
@@ -453,7 +429,6 @@ auto InspectorPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, 
                 return section_line("3-Stage Embedded Core (Ibex/E21)", width);
             case 1: {
                 std::string diagram = std::format(
-                    " [1;36mIF:{}\033[0m ? \033[1;32mID/EX:{}\033[0m ? "
                     " [1;36mIF:{}\033[0m → \033[1;32mID/EX:{}\033[0m → "
                     "\033[1;34mMEM/WB:{}\033[0m",
                     short_op_name(ps.f_reg()), short_op_name(ps.e_reg()),
@@ -498,11 +473,8 @@ auto InspectorPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, 
             return section_line("Current Pipeline State (5-Stage)", width);
         case 1: {
             std::string diagram = std::format(
-                " [1;36mIF:{}\033[0m ? \033[1;33mID:{}\033[0m ? "
                 " [1;36mIF:{}\033[0m → \033[1;33mID:{}\033[0m → "
                 "\033[1;32mEX:{}\033[0m "
-                "? "
-                "\033[1;35mMEM:{}\033[0m ? \033[1;34mWB:{}\033[0m",
                 "→ "
                 "\033[1;35mMEM:{}\033[0m → \033[1;34mWB:{}\033[0m",
                 short_op_name(ps.f_reg()), short_op_name(ps.d_reg()), short_op_name(ps.e_reg()),
@@ -625,10 +597,8 @@ auto InspectorPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, 
     }
 }
 
-// ???????????????????????????????????????????????????????????????????????
 // ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 // Functional (non-cycle-accurate) mode
-// ???????????????????????????????????????????????????????????????????????
 // ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 
 auto InspectorPane::render_pipeline_stages_functional(const simrv::core::CPU& cpu, int logical_row,
@@ -655,7 +625,6 @@ auto InspectorPane::render_pipeline_stages_functional_low(const simrv::core::CPU
                            col_width + right_width);
 }
 
-// Rows 0�7: Current Instruction overview + IF stage + ID stage header
 // Rows 0–7: Current Instruction overview + IF stage + ID stage header
 auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::core::CPU& cpu,
                                                                 int logical_row, int col_width,
@@ -730,7 +699,6 @@ auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::cor
                                std::format("0x{:08x}", ctx.ir_org), kThemeVal, col_width,
                                right_width, 10);
         case 5: {
-            std::string comp_str = is_compressed ? "Yes ? decompressed" : "No";
             std::string comp_str = is_compressed ? "Yes → decompressed" : "No";
             return render_pair("Compressed", comp_str, kThemeVal, "Phys Addr", hex_val(ctx.padr1),
                                kThemeVal, col_width, right_width, 10);
@@ -743,8 +711,8 @@ auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::cor
             std::string op_str = std::format("{} ({})", op_name, isa_ext);
             bool is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
             std::string dst_str = (fmt == InstFormat::S || fmt == InstFormat::B)
-                ? "(none � no dest)" ? "(none — no dest)"
-                                     : (is_dst_fp ? fp_reg_name(ctx.rd) : reg_with_x(ctx.rd));
+                                      ? "(none — no dest)"
+                                      : (is_dst_fp ? fp_reg_name(ctx.rd) : reg_with_x(ctx.rd));
             return render_pair("Operation", op_str, kThemeVal, "Dest Reg", dst_str, kThemeMint,
                                col_width, right_width, 10);
         }
@@ -753,7 +721,6 @@ auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::cor
     }
 }
 
-// Rows 8�15: Source operands + EX stage + MEM stage + WB header
 // Rows 8–15: Source operands + EX stage + MEM stage + WB header
 auto InspectorPane::render_pipeline_stages_functional_low_part2(const simrv::core::CPU& cpu,
                                                                 int logical_row, int col_width,
@@ -795,20 +762,16 @@ auto InspectorPane::render_pipeline_stages_functional_low_part2(const simrv::cor
         case 10:
             return format_to_width(get_computation_desc(ctx), width);
         case 11: {
-            std::string branch_str = is_branch_opcode(ctx.opcode)
-                ? (ctx.tkn ? std::format("{}Yes ? {}\033[0m", kThemePeach, hex_val(ctx.jmp_pc))
-                           : std::format("{}No (fall through)\033[0m", kThemeMint))
-                      ? (ctx.tkn
-                             ? std::format("{}Yes → {}\033[0m", kThemePeach, hex_val(ctx.jmp_pc))
-                             : std::format("{}No (fall through)\033[0m", kThemeMint))
-                      : "No";
+            std::string branch_str =
+                is_branch_opcode(ctx.opcode)
+                    ? (ctx.tkn ? std::format("{}Yes → {}\033[0m", kThemePeach, hex_val(ctx.jmp_pc))
+                               : std::format("{}No (fall through)\033[0m", kThemeMint))
+                    : "No";
             std::string jump_str = (ctx.opcode == Opcode::Jal || ctx.opcode == Opcode::Jalr)
                                        ? hex_val(ctx.jmp_pc)
-                                       : "�";
                                        : "—";
-                                       return render_pair("Branch?", branch_str, kThemeVal,
-                                                          "Jump PC", jump_str, kThemeMint,
-                                                          col_width, right_width, 10);
+            return render_pair("Branch?", branch_str, kThemeVal, "Jump PC", jump_str, kThemeMint,
+                               col_width, right_width, 10);
         }
 
         // MEM (Memory Access)
@@ -831,7 +794,6 @@ auto InspectorPane::render_pipeline_stages_functional_low_part2(const simrv::cor
                  wr_fmt == InstFormat::J || wr_fmt == InstFormat::R4);
             std::string dst_str =
                 has_dest ? (is_dst_fp ? fp_reg_name(ctx.rd) : reg_with_x(ctx.rd)) : "(none)";
-            std::string result_str = has_dest ? hex_val(ctx.wb_data) : "�";
             std::string result_str = has_dest ? hex_val(ctx.wb_data) : "—";
             if (ctx.fp_wb_enable) {
                 result_str = std::format("0x{:016x} (FP)", ctx.fp_wb_data);
@@ -844,7 +806,6 @@ auto InspectorPane::render_pipeline_stages_functional_low_part2(const simrv::cor
     }
 }
 
-// Rows 16�19: Exception / trap info + end marker
 // Rows 16–19: Exception / trap info + end marker
 auto InspectorPane::render_pipeline_stages_functional_high(const simrv::core::CPU& cpu,
                                                            int logical_row, int col_width,
@@ -872,7 +833,6 @@ auto InspectorPane::render_pipeline_stages_functional_high(const simrv::core::CP
                                    hex_val(ctx.pending_tval), kThemeVal, col_width, right_width,
                                    10);
             }
-            return render_pair("Exception", "None", kThemeMint, "Trap Value", "�", kThemeVal,
             return render_pair("Exception", "None", kThemeMint, "Trap Value", "—", kThemeVal,
                                col_width, right_width, 10);
         }
@@ -897,9 +857,6 @@ auto InspectorPane::render_pipeline_stages_functional_high(const simrv::core::CP
     }
 }
 
-// ???????????????????????????????????????????????????????????????????????
-// Pipeline Execution Timeline (cycle-accurate mode, rows 0�8)
-// ???????????????????????????????????????????????????????????????????????
 // ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 // Pipeline Execution Timeline (cycle-accurate mode, rows 0–8)
 // ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
@@ -915,7 +872,6 @@ auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int lo
 
     if (history.empty()) {
         if (logical_row == 1) {
-            return format_to_width(std::format(" {}No cycle history yet � step the simulator to "
             return format_to_width(std::format(" {}No cycle history yet — step the simulator to "
                                                "see instructions flow.\033[0m",
                                                kThemeMuted),
@@ -1056,10 +1012,8 @@ auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int lo
 
     if (logical_row == 7) {
         if (ps.config.pipeline_type == simrv::pipeline::PipelineType::ThreeStage) {
-            return section_line("IF ? ID/EX ? MEM/WB   (* = Stalled)", width);
             return section_line("IF → ID/EX → MEM/WB   (* = Stalled)", width);
         }
-        return section_line("IF ? ID ? EX ? MEM ? WB   (* = Stalled)", width);
         return section_line("IF → ID → EX → MEM → WB   (* = Stalled)", width);
     }
 

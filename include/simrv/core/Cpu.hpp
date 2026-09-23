@@ -583,9 +583,9 @@ class CPU {
         }
     }
 
-    /// Advance PC by op.len, update instruction counters, sign-extend PC, and process interrupts.
+    /// Advance PC by op.len(), update instruction counters, sign-extend PC, and process interrupts.
     SIMRV_ALWAYS_INLINE void advance_cached_pc(const CachedOp& op) {
-        state_.pc += op.len;
+        state_.pc += op.len();
         e_icount++;
         if (op.cinsn) e_ccount++;
         pc_sign_extend();

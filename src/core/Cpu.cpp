@@ -1010,7 +1010,7 @@ namespace {
 }  // namespace
 
 SIMRV_ALWAYS_INLINE void CPU::execute_cached_jal(CachedOp& op) {
-    Register const next_pc = state_.pc + op.len;
+    Register const next_pc = state_.pc + op.len();
     pipeline_context.tkn = true;
     pipeline_context.jmp_pc = VirtAddr{state_.pc + op.imm};
     if (op.rd != RegId::Zero) {
@@ -1027,7 +1027,7 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_jal(CachedOp& op) {
 }
 
 SIMRV_ALWAYS_INLINE void CPU::execute_cached_jalr(CachedOp& op, Register rrs1) {
-    Register const next_pc = state_.pc + op.len;
+    Register const next_pc = state_.pc + op.len();
     pipeline_context.tkn = true;
     pipeline_context.jmp_pc = VirtAddr{(rrs1 + op.imm) & ~static_cast<Register>(1)};
     if (state_.regs.xlen == 32) {
@@ -1073,7 +1073,7 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_branch(CachedOp& op, Register rrs1,
             break;
     }
     pipeline_context.tkn = tkn;
-    VirtAddr const target_pc = tkn ? VirtAddr{state_.pc + op.imm} : VirtAddr{state_.pc + op.len};
+    VirtAddr const target_pc = tkn ? VirtAddr{state_.pc + op.imm} : VirtAddr{state_.pc + op.len()};
     commit_cached_branch_target(op, target_pc);
 }
 
@@ -1244,7 +1244,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
     }
     Register mem_rdata = 0;
     const unsigned size_bytes = op.mem_size;
-    const Address align_mask = op.align_mask;
+    const Address align_mask = op.align_mask();
     if (simrv::compiler::likely(state_.priv == kPrivMachine &&
                                 (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
         if (simrv::compiler::likely((mem_addr & align_mask) == 0 &&
@@ -1305,7 +1305,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
         pipeline_context.mem_addr = mem_addr;
     }
     const unsigned size_bytes = op.mem_size;
-    const Address align_mask = op.align_mask;
+    const Address align_mask = op.align_mask();
     if (simrv::compiler::likely(state_.priv == kPrivMachine &&
                                 (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
         if (simrv::compiler::likely((mem_addr & align_mask) == 0 &&
@@ -1441,8 +1441,6 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         pipeline_context.pending_tval = 0;
     } else {
         pipeline_context.pending_exception = std::nullopt;
-        pipeline_context.opcode = op.opcode;
-        pipeline_context.funct5 = op.funct5;
     }
 
     if constexpr (kInstMix) {
@@ -1484,7 +1482,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         case isa::CFU: {
             const Register rrs2 = state_.regs.read(op.rs2);
             wb_data = static_cast<Register>(
-                cfu_unit.execute(op.funct7, std::to_underlying(op.funct3),
+                cfu_unit.execute(op.funct7(), std::to_underlying(op.funct3),
                                  static_cast<uint32_t>(rrs1), static_cast<uint32_t>(rrs2)));
             break;
         }
@@ -1639,7 +1637,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
             Address const mem_addr = rrs1 + op.imm;
             FloatingRegister mem_rdata = 0;
             const unsigned size_bytes = op.mem_size;
-            const Address align_mask = op.align_mask;
+            const Address align_mask = op.align_mask();
             bool loaded = false;
             if (simrv::compiler::likely(state_.priv == kPrivMachine &&
                                         (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
@@ -1704,7 +1702,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
             Address const mem_addr = rrs1 + op.imm;
             FloatingRegister const fp_data = state_.regs.read_fp(op.rs2);
             const unsigned size_bytes = op.mem_size;
-            const Address align_mask = op.align_mask;
+            const Address align_mask = op.align_mask();
             bool stored = false;
             if (simrv::compiler::likely(state_.priv == kPrivMachine &&
                                         (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
@@ -1769,7 +1767,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
             const Word rs3 = (op.ir >> 27) & 0x1F;
             const Word fmt = (op.ir >> 25) & 0x3;
             auto res = execute::ExecuteUnit::fusedFp(
-                op.opcode, fmt, std::to_underlying(op.rs1), std::to_underlying(op.rs2), rs3,
+                op.opcode(), fmt, std::to_underlying(op.rs1), std::to_underlying(op.rs2), rs3,
                 enum_mask(op.funct3), state_.regs.fp_data_ptr(), state_.fcsr);
             if (res.fp_wb_enable) {
                 state_.regs.write_fp(op.rd, res.fp_wb_data);
@@ -1786,9 +1784,9 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         case isa::FMUL_S:
         case isa::FDIV_D:
         case isa::FDIV_S: {
-            auto res = execute::ExecuteUnit::opFp(op.funct7, op.funct3, std::to_underlying(op.rs1),
-                                                  std::to_underlying(op.rs2), rrs1,
-                                                  state_.regs.fp_data_ptr(), state_.fcsr);
+            auto res = execute::ExecuteUnit::opFp(
+                op.funct7(), op.funct3, std::to_underlying(op.rs1), std::to_underlying(op.rs2),
+                rrs1, state_.regs.fp_data_ptr(), state_.fcsr);
             if (res.fp_wb_enable) {
                 state_.regs.write_fp(op.rd, res.fp_wb_data);
             }

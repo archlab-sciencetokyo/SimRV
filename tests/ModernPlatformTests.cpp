@@ -2522,12 +2522,11 @@ void test_load_after_amo_readonly_page() {
     // Execute a cached load from the read-only page with soft TLB flushed
     simrv::core::CachedOp load_op{};
     load_op.op_id = simrv::isa::OperationId::LW;
-    load_op.opcode = simrv::isa::Opcode::Load;
+    load_op.ir = 0x00002503;  // lw a0, 0(a1)
     load_op.funct3 = simrv::isa::Funct3::Lw;
     load_op.rd = RegId::A0;
     load_op.rs1 = RegId::A1;
     load_op.imm = 0;
-    load_op.len = 4;
 
     machine.cpu.state().regs.write(RegId::A1, ro_page);
     machine.cpu.soft_tlb_epoch++;

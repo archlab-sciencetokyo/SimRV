@@ -1945,24 +1945,21 @@ auto decompressInstruction(Instruction ir, bool is_rv64) -> Instruction {
         return ir;
     }
 
-    const uint32_t quadrant = ir & 0x3;
     const uint32_t op = dec.c_op();
-
-    const uint32_t rs1_rd = std::to_underlying(dec.c_rs1_rd());
-    const uint32_t rs2 = std::to_underlying(dec.c_rs2());
-    const uint32_t rs1_p = std::to_underlying(dec.c_rs1_rd_p());
-    const uint32_t rs2_p = std::to_underlying(dec.c_rs2_p());
-
-    if (quadrant == 0x0) {
-        return decompress_q0(ir, is_rv64, op, rs1_p, rs2_p);
+    switch (ir & 0x3) {
+        case 0x0:
+            return decompress_q0(ir, is_rv64, op, std::to_underlying(dec.c_rs1_rd_p()),
+                                 std::to_underlying(dec.c_rs2_p()));
+        case 0x1:
+            return decompress_q1(ir, is_rv64, op, std::to_underlying(dec.c_rs1_rd()),
+                                 std::to_underlying(dec.c_rs1_rd_p()),
+                                 std::to_underlying(dec.c_rs2_p()));
+        case 0x2:
+            return decompress_q2(ir, is_rv64, op, std::to_underlying(dec.c_rs1_rd()),
+                                 std::to_underlying(dec.c_rs2()));
+        default:
+            return 0;
     }
-    if (quadrant == 0x1) {
-        return decompress_q1(ir, is_rv64, op, rs1_rd, rs1_p, rs2_p);
-    }
-    if (quadrant == 0x2) {
-        return decompress_q2(ir, is_rv64, op, rs1_rd, rs2);
-    }
-    return 0;
 }
 
 }  // namespace simrv::pipeline
