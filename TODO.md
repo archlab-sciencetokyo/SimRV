@@ -13,7 +13,7 @@ General Availability (GA) release.
 
 ### 1. Performance Optimizations
 
-- [ ] **Precomputed Fast-Memory Access Classes**:
+- [x] **Precomputed Fast-Memory Access Classes**:
   - Classify memory accesses directly in `CachedOp` at decode time (direct-RAM, MMIO/tohost, alignment, translation guards).
   - Fast-track direct host-pointer access in integer/FP load and store paths without multi-branch qualification checks per instruction.
 - [ ] **Decode Cache Footprint & Dispatch Optimization**:
