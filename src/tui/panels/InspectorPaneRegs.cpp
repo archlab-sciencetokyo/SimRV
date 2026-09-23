@@ -14,6 +14,7 @@
 #include "simrv/pipeline/Scoreboard.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
+#include "simrv/xlen/Types.hpp"
 
 namespace simrv::tui {
 
@@ -281,6 +282,71 @@ auto InspectorPane::render_registers_or_pipeline(const simrv::core::CPU& cpu,
                     return render_stack_frame(cpu, logical_row, col_width, right_width);
                 default:
                     break;
+            }
+        } else if (page_ == TuiRegPage::VEC && logical_row >= 16 && logical_row < 21) {
+            if (logical_row == 16) {
+                return section_line("Vector Control & Status", width);
+            }
+            ::VtypeView const vt{st.vtype, static_cast<uint8_t>(st.regs.xlen)};
+            if (logical_row == 17) {
+                std::string const sew_str = vt.vill() ? "ill" : std::format("e{}", vt.sew_bits());
+                std::string const lmul_str = vt.vill() ? "ill" : [&]() {
+                    switch (vt.vlmul()) {
+                        case ::Vlmul::LMUL_1:
+                            return "m1";
+                        case ::Vlmul::LMUL_2:
+                            return "m2";
+                        case ::Vlmul::LMUL_4:
+                            return "m4";
+                        case ::Vlmul::LMUL_8:
+                            return "m8";
+                        case ::Vlmul::LMUL_F2:
+                            return "mf2";
+                        case ::Vlmul::LMUL_F4:
+                            return "mf4";
+                        case ::Vlmul::LMUL_F8:
+                            return "mf8";
+                        default:
+                            return "res";
+                    }
+                }();
+                std::string const vtype_summary =
+                    vt.vill() ? "vill"
+                              : std::format("0x{:x} ({}, {})", st.vtype, sew_str, lmul_str);
+                return render_pair("vl", std::format("{}", st.vl), kThemeMint, "vtype",
+                                   vtype_summary, vt.vill() ? kThemePeach : kThemeSky, col_width,
+                                   right_width, 6);
+            }
+            if (logical_row == 18) {
+                return render_pair("vstart", std::format("{}", st.vstart), kThemeMint, "vlenb",
+                                   std::format("{} ({}b)", st.regs.vlen_bytes(), st.regs.vlen),
+                                   kThemeSky, col_width, right_width, 6);
+            }
+            if (logical_row == 19) {
+                std::string const vxrm_str = [&]() {
+                    switch (st.vxrm & 3) {
+                        case 0:
+                            return "0 (rnu)";
+                        case 1:
+                            return "1 (rne)";
+                        case 2:
+                            return "2 (rdn)";
+                        case 3:
+                            return "3 (rod)";
+                        default:
+                            return "0";
+                    }
+                }();
+                return render_pair(
+                    "vxrm", vxrm_str, kThemeMint, "vxsat", std::format("{}", st.vxsat),
+                    (st.vxsat != 0) ? kThemePeach : kThemeSky, col_width, right_width, 6);
+            }
+            if (logical_row == 20) {
+                std::string const vta_str = (vt.vta() == ::Vta::Agnostic) ? "ta" : "tu";
+                std::string const vma_str = (vt.vma() == ::Vma::Agnostic) ? "ma" : "mu";
+                return render_pair("vta/vma", std::format("{}/{}", vta_str, vma_str), kThemeMint,
+                                   "vill", vt.vill() ? "1 (illegal)" : "0 (ok)",
+                                   vt.vill() ? kThemePeach : kThemeSky, col_width, right_width, 6);
             }
         }
     }
