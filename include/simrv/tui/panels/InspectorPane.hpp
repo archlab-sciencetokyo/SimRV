@@ -100,6 +100,10 @@ class InspectorPane : public TuiWidget {
     [[nodiscard]] auto get_log_scroll_offset() const -> int;
     void set_inspect_addr(Register addr) { inspect_addr_ = addr; }
     [[nodiscard]] auto get_inspect_addr() const -> Register { return inspect_addr_; }
+    void reset_inspect_addr() noexcept { inspect_addr_ = 0; }
+    [[nodiscard]] auto is_custom_memory_inspect() const noexcept -> bool {
+        return inspect_addr_ != 0;
+    }
     void set_explain_pc(Register pc) { explain_pc_ = pc; }
     [[nodiscard]] auto get_explain_pc() const -> Register { return explain_pc_; }
     void set_trace_buffer(const std::vector<std::string>* trace_buf) { trace_buffer_ = trace_buf; }

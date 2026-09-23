@@ -25,6 +25,14 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
     -> bool {
     if (input.empty()) return false;
 
+    if (input == "sp" || input == "SP" || input == "0" || input == "0x0") {
+        if (inspector_pane) {
+            inspector_pane->reset_inspect_addr();
+        }
+        set_status_override_cb("Reset memory view to Stack Watch (sp)");
+        return true;
+    }
+
     Address addr = 0;
     bool ok = false;
     if (input.starts_with("0x") || input.starts_with("0X")) {
@@ -54,7 +62,7 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
 }
 
 void AddressModal::render(std::vector<std::string>& content_rows, const std::string& input) {
-    build_text_input_rows(content_rows, "Enter Target Address (hex) or Symbol:", input);
+    build_text_input_rows(content_rows, "Enter Address (hex), Symbol, or 'sp' to reset:", input);
     content_rows.push_back("");
     content_rows.push_back(build_modal_footer({{"[Enter]", "Inspect"}, {"[Esc]", "Cancel"}}));
 }

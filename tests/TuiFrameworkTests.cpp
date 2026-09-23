@@ -23,6 +23,7 @@
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
 #include "simrv/tui/framework/Layout.hpp"
+#include "simrv/tui/modals/AddressModal.hpp"
 #include "simrv/tui/modals/GlossaryModal.hpp"
 #include "simrv/tui/modals/HelpModal.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
@@ -1529,6 +1530,48 @@ void test_inspector_vector_csr_rows() {
            "row 20 displays vta/vma and vill");
 }
 
+void test_memory_inspector_and_custom_address() {
+    simrv::core::Machine machine;
+    std::array<Byte, 4096> backing{};
+    machine.set_ram_for_testing(backing.data(), backing.size());
+    machine.memory().initialize_mmu();
+
+    const char text[] = "SimRV2026!";
+    std::memcpy(backing.data(), text, sizeof(text));
+
+    simrv::tui::InspectorPane pane(machine);
+    pane.set_page(simrv::tui::TuiRegPage::STACK);
+    pane.set_visible_rows(25);
+
+    const int width = 80;
+
+    // 1. Default: inspect_addr_ is 0, pane is in Stack Watch mode
+    expect(!pane.is_custom_memory_inspect(), "default inspect mode is not custom memory");
+    const std::string stack_title = strip_ansi(pane.render_row(2, width));
+    expect(stack_title.find("Stack") != std::string::npos, "default title contains Stack");
+
+    // 2. Set custom address
+    const Address target_addr = 0x80000000;
+    pane.set_inspect_addr(target_addr);
+    expect(pane.is_custom_memory_inspect(), "custom memory inspect is active");
+    const std::string mem_title = strip_ansi(pane.render_row(2, width));
+    expect(mem_title.find("Memory Watch") != std::string::npos,
+           "custom title contains Memory Watch");
+
+    // Render center row (row_idx 9 corresponds to logical_row 7, word_offset 0)
+    const std::string center_row = strip_ansi(pane.render_row(9, width));
+    expect(center_row.find("target") != std::string::npos, "center row shows target marker");
+    expect(center_row.find("SimR") != std::string::npos,
+           "center row displays ASCII memory preview");
+
+    // 3. Test AddressModal reset input
+    std::string reset_cmd = "sp";
+    std::string status_msg;
+    auto cb = [&](const std::string& msg) { status_msg = msg; };
+    bool const ok = simrv::tui::modals::AddressModal::submit(reset_cmd, machine, &pane, cb);
+    expect(ok && !pane.is_custom_memory_inspect(), "submitting 'sp' resets custom memory inspect");
+}
+
 }  // namespace
 
 int main() {
@@ -1559,6 +1602,7 @@ int main() {
     test_flight_recorder_merge_and_wraparound();
     test_bus_inspector_and_tilelink_channels();
     test_inspector_vector_csr_rows();
+    test_memory_inspector_and_custom_address();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;

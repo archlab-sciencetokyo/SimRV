@@ -321,7 +321,8 @@ auto InspectorPane::render_tab_bar_tier2(int width) const -> std::string {
             break;
         }
         case TuiCategoryGroup::Memory: {
-            tabs.push_back({.page = TuiRegPage::STACK, .name = "Stack"});
+            tabs.push_back({.page = TuiRegPage::STACK,
+                            .name = is_custom_memory_inspect() ? "Memory" : "Stack"});
             if (machine_.runtime_profile.is_cycle_mode()) {
                 std::string cache_name = (cache_inspect_type_ == 0) ? "Cache:IC" : "Cache:DC";
                 tabs.push_back({.page = TuiRegPage::CACHE, .name = cache_name});
@@ -441,7 +442,8 @@ auto InspectorPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPa
                 break;
             }
             case TuiCategoryGroup::Memory: {
-                tabs.push_back({.page = TuiRegPage::STACK, .name = "Stack"});
+                tabs.push_back({.page = TuiRegPage::STACK,
+                                .name = is_custom_memory_inspect() ? "Memory" : "Stack"});
                 if (machine_.runtime_profile.is_cycle_mode()) {
                     std::string cache_name = (cache_inspect_type_ == 0) ? "Cache:IC" : "Cache:DC";
                     tabs.push_back({.page = TuiRegPage::CACHE, .name = cache_name});
