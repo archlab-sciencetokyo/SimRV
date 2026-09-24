@@ -60,7 +60,7 @@ void Uart::start_input_thread() {
                 continue;
             }
 
-            if (byte == 17) {  // Ctrl-Q → stop simulation
+            if (byte == 17) {  // Ctrl-Q -> stop simulation
                 machine_.is_running_ = false;
                 return;
             }

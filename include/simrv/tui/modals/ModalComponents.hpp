@@ -57,7 +57,7 @@ auto align_modal_control_row(std::string row, int inner_width) -> std::string;
 auto layout_modal_control_row(std::string row, int inner_width) -> framework::RenderedControl;
 
 /**
- * @brief Formats a styled section category divider banner, e.g. "── ISA Extensions ──".
+ * @brief Formats a styled section category divider banner, e.g. "-- ISA Extensions --".
  */
 auto build_section_divider(std::string_view title, std::string_view color = kThemeText)
     -> std::string;

@@ -623,7 +623,7 @@ class CPU {
     static constexpr std::size_t kTraceHistoryCapacity = 50;
     std::array<TraceHistoryEntry, kTraceHistoryCapacity> trace_history_buf_{};
     std::size_t trace_history_head_ = 0;  ///< Next write position (wraps around)
-    std::size_t trace_history_size_ = 0;  ///< Number of valid entries (≤ capacity)
+    std::size_t trace_history_size_ = 0;  ///< Number of valid entries (<= capacity)
 
     /// Provides a read-only view over trace history in chronological order.
     /// Returned as a vector for backward compatibility with TUI consumers.

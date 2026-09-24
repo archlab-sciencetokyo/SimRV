@@ -284,10 +284,10 @@ auto InspectorPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_
         case 12:
         case 13:
         case 14: {
-            constexpr int kSetsPerRow = 6;
-            constexpr int kVisibleSets = 3 * kSetsPerRow;
-            int const base_set = (cache_inspect_set_ / kVisibleSets) * kVisibleSets +
-                                 (logical_row - 12) * kSetsPerRow;
+            int const sets_per_row = std::max(2, std::min(6, (width - 4) / 13));
+            int const visible_sets = 3 * sets_per_row;
+            int const base_set = (cache_inspect_set_ / visible_sets) * visible_sets +
+                                 (logical_row - 12) * sets_per_row;
             bool is_ic = (cache_inspect_type_ == 0);
             const auto& target_cache =
                 is_ic ? static_cast<const simrv::cache::BaseCache<1024, 32, 8>&>(ic)
@@ -295,7 +295,7 @@ auto InspectorPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_
 
             std::string sets_row;
             for (int s = base_set;
-                 s < base_set + kSetsPerRow && s < static_cast<int>(target_cache.set_count());
+                 s < base_set + sets_per_row && s < static_cast<int>(target_cache.set_count());
                  ++s) {
                 bool const is_selected = (s == cache_inspect_set_);
                 bool const is_last = (static_cast<uint32_t>(s) == target_cache.last_accessed_set());

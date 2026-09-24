@@ -44,7 +44,7 @@ namespace {
         return hz >= 1000.0 ? std::format("SPEED {:.0f}kHz", hz / 1000.0)
                             : std::format("SPEED {:.0f}Hz", hz);
     }
-    if (paused) return width < 60 ? "STEP" : "PAUSED";
+    if (paused) return width < 60 ? "STEP" : "MAX";
     return width < 60 ? std::format("{:.1f}M", static_cast<double>(kips) / 1000.0)
                       : std::format("{:.1f} MIPS", static_cast<double>(kips) / 1000.0);
 }
@@ -117,9 +117,9 @@ StatusBar::StatusBar(simrv::core::Machine& machine, Tui* tui) : machine_(machine
 void StatusBar::update_kips(uint64_t current_kips) { kips_ = current_kips; }
 
 auto StatusBar::is_pos_on_status_badge(int x, int width) const -> bool {
-    int target_width = layout_ == TuiLayout::Split ? left_width_ : width - 2;
+    int const inner_w = std::max(0, width - 2);
     size_t const selected = tui_ ? tui_->selected_hart() : 0;
-    auto const header = make_left_header_layout(machine_, target_width, selected);
+    auto const header = make_left_header_layout(machine_, inner_w / 2, selected);
     std::string status_text = paused_ ? " PAUSED " : " RUNNING ";
     if (!status_override_.empty()) {
         status_text = status_override_;
@@ -134,9 +134,9 @@ auto StatusBar::is_pos_on_status_badge(int x, int width) const -> bool {
 }
 
 auto StatusBar::is_pos_on_mode_badge(int x, int width) const -> bool {
-    int target_width = layout_ == TuiLayout::Split ? left_width_ : width - 2;
+    int const inner_w = std::max(0, width - 2);
     size_t const selected = tui_ ? tui_->selected_hart() : 0;
-    auto const header = make_left_header_layout(machine_, target_width, selected);
+    auto const header = make_left_header_layout(machine_, inner_w / 2, selected);
     if (header.mode.empty()) return false;
 
     int x_start = 2 + get_display_width(header.identity) + 3;
@@ -214,7 +214,7 @@ auto StatusBar::get_header_action_at_col(int col, int terminal_width) const -> H
         const auto& slots = tui_->get_workbench_slots();
         TuiRegPage const page = tui_->focused_page();
         const char* page_name = get_page_name(page);
-        if (inner_w < 70) {
+        if (inner_w < 88) {
             focus_label = std::format("P{}: {}", focused_slot + 1, page_name);
         } else if (slots.size() > 1) {
             focus_label = std::format("PANE {}/{}: {}", focused_slot + 1, slots.size(), page_name);
@@ -225,7 +225,9 @@ auto StatusBar::get_header_action_at_col(int col, int terminal_width) const -> H
     if (hit_badge(focus_label)) return {.action = HeaderAction::ToggleAttached};
 
     if (machine_.num_harts() > 1) {
-        std::string const hart_label = std::format("HART {}/{}", selected, machine_.num_harts());
+        std::string const hart_label =
+            (inner_w < 88) ? std::format("H{}/{}", selected, machine_.num_harts())
+                           : std::format("HART {}/{}", selected, machine_.num_harts());
         if (hit_badge(hart_label)) {
             return {.action = HeaderAction::SelectHart,
                     .hart_index = (selected + 1) % machine_.num_harts()};
@@ -711,7 +713,7 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             const auto& slots = tui_->get_workbench_slots();
             TuiRegPage const page = tui_->focused_page();
             const char* page_name = get_page_name(page);
-            if (inner_w < 70) {
+            if (inner_w < 88) {
                 focus_label = std::format("P{}: {}", focused_slot + 1, page_name);
             } else if (slots.size() > 1) {
                 focus_label =
@@ -726,7 +728,8 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
 
         if (machine_.num_harts() > 1) {
             std::string const hart_label =
-                std::format("HART {}/{}", selected, machine_.num_harts());
+                (inner_w < 88) ? std::format("H{}/{}", selected, machine_.num_harts())
+                               : std::format("HART {}/{}", selected, machine_.num_harts());
             mode_prefix += " " + header_badge(hart_label, "\033[45;37m", "\033[48;5;183;38;5;232m");
         }
         std::string const speed_label =
@@ -745,11 +748,26 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             std::string const metric_sep = std::format(" {}·\033[0m ", kThemeMuted);
 
             if (machine_.runtime_profile.is_cycle_mode()) {
-                mid_text =
-                    std::format("Cycles {}{}Inst {}{}CPI {:.2f}", format_metric_count(cycles),
-                                metric_sep, format_metric_count(icount), metric_sep, cpi);
+                if (inner_w >= 105) {
+                    mid_text =
+                        std::format("Cycles {}{}Inst {}{}CPI {:.2f}", format_metric_count(cycles),
+                                    metric_sep, format_metric_count(icount), metric_sep, cpi);
+                } else if (inner_w >= 85) {
+                    mid_text =
+                        std::format("Cyc {}{}Inst {}{}CPI {:.2f}", format_metric_count(cycles),
+                                    metric_sep, format_metric_count(icount), metric_sep, cpi);
+                } else if (inner_w >= 70) {
+                    mid_text = std::format("{} cyc{}{} inst", format_metric_count(cycles),
+                                           metric_sep, format_metric_count(icount));
+                } else {
+                    mid_text = std::format("{} inst", format_metric_count(icount));
+                }
             } else {
-                mid_text = std::format("Instructions {}", format_metric_count(icount));
+                if (inner_w >= 85) {
+                    mid_text = std::format("Instructions {}", format_metric_count(icount));
+                } else {
+                    mid_text = std::format("{} inst", format_metric_count(icount));
+                }
             }
         }
 

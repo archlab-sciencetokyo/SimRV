@@ -727,7 +727,7 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
     ctx.padr2 =
         PhysAddr{(state_.regs.xlen == 32) ? ((state_.pc + 2) & 0xFFFFFFFFULL) : (state_.pc + 2)};
 
-    // Fast path: DRAM physical fetch — valid only while the MMU has never been
+    // Fast path: DRAM physical fetch - valid only while the MMU has never been
     // enabled.  The latch is set once on the first satp write that activates
     // translation, so the branch predictor sees this as "not taken" for nearly
     // all cycles of a physical-only run and switches to "always taken" after

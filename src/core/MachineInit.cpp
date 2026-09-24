@@ -580,7 +580,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         prewarm_bram_caches();
     }
 
-    // If launched without a binary in TUI mode, skip image-dependent init —
+    // If launched without a binary in TUI mode, skip image-dependent init --
     // the TUI will open the LoadBinary modal and call load_program_binary() later.
     if (config.files.binary_path.empty() && tui_enabled()) {
         execution_state_.store(ExecutionState::Paused, std::memory_order_release);

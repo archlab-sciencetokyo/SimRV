@@ -51,7 +51,7 @@ static int g_passed = 0;
     } while (false)
 
 // ---------------------------------------------------------------------------
-// RspClient — loopback TCP client for RSP protocol
+// RspClient - loopback TCP client for RSP protocol
 // ---------------------------------------------------------------------------
 
 class RspClient {
@@ -150,7 +150,7 @@ class RspClient {
 };
 
 // ---------------------------------------------------------------------------
-// StubHarness — manages stub lifecycle + poll loop for a single test
+// StubHarness - manages stub lifecycle + poll loop for a single test
 // ---------------------------------------------------------------------------
 
 struct StubHarness {

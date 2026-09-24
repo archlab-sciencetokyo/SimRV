@@ -10,12 +10,12 @@
 #include "common.h"
 
 /* ---------- page-table storage ---------------------------------------- */
-__attribute__((aligned(16384))) uint64_t gstage_root_pt[2048];   /* SV39x4 root */
-__attribute__((aligned(4096)))  uint64_t gstage_l1_pt[512];
-__attribute__((aligned(4096)))  uint64_t gstage_l0_pt[512];
+__attribute__((aligned(16384))) uint64_t gstage_root_pt[2048]; /* SV39x4 root */
+__attribute__((aligned(4096))) uint64_t gstage_l1_pt[512];
+__attribute__((aligned(4096))) uint64_t gstage_l0_pt[512];
 
 /* ---------- test data ------------------------------------------------- */
-volatile uint32_t test_var   = 0x12345678;
+volatile uint32_t test_var = 0x12345678;
 volatile uint64_t result_val = 0;
 volatile uint64_t trap_cause = 0;
 
@@ -39,7 +39,7 @@ void run_vs_test(uint64_t gpa, uint64_t hgatp_val) {
         "or   t1, t1, t2\n\t"
         "csrw mstatus, t1\n\t"
 
-        /* ---- 4. Set mepc → VS-mode code (label 2f) ---- */
+        /* ---- 4. Set mepc -> VS-mode code (label 2f) ---- */
         "la   t0, 2f\n\t"
         "csrw mepc, t0\n\t"
 
@@ -68,8 +68,7 @@ void run_vs_test(uint64_t gpa, uint64_t hgatp_val) {
         "csrw mstatus, t1\n\t"
         : "+r"(gpa)
         : "r"(hgatp_val)
-        : "t0", "t1", "t2", "memory"
-    );
+        : "t0", "t1", "t2", "memory");
     result_val = gpa;
 }
 
@@ -79,29 +78,31 @@ int main(void) {
 
     /* clear page tables */
     for (int i = 0; i < 2048; i++) gstage_root_pt[i] = 0;
-    for (int i = 0; i < 512;  i++) { gstage_l1_pt[i] = 0; gstage_l0_pt[i] = 0; }
+    for (int i = 0; i < 512; i++) {
+        gstage_l1_pt[i] = 0;
+        gstage_l0_pt[i] = 0;
+    }
 
-    /* Identity-map 0x80000000–0xBFFFFFFF (code/data region, 1 GiB superpage) */
+    /* Identity-map 0x80000000-0xBFFFFFFF (code/data region, 1 GiB superpage) */
     gstage_root_pt[2] = (0x80000ULL << 10) | 0xDF;
 
-    /* Map GPA 0xC0000000-page → HPA of test_var (3-level walk) */
+    /* Map GPA 0xC0000000-page -> HPA of test_var (3-level walk) */
     gstage_root_pt[3] = (((uint64_t)gstage_l1_pt >> 12) << 10) | 0x1;
-    gstage_l1_pt[0]   = (((uint64_t)gstage_l0_pt >> 12) << 10) | 0x1;
-    gstage_l0_pt[0]   = (((uint64_t)&test_var >> 12) << 10) | 0xDF;
+    gstage_l1_pt[0] = (((uint64_t)gstage_l0_pt >> 12) << 10) | 0x1;
+    gstage_l0_pt[0] = (((uint64_t)&test_var >> 12) << 10) | 0xDF;
 
     /* hgatp: Mode=8 (SV39x4), VMID=1, PPN */
-    uint64_t root_ppn  = (uint64_t)gstage_root_pt >> 12;
+    uint64_t root_ppn = (uint64_t)gstage_root_pt >> 12;
     uint64_t hgatp_val = (8ULL << 60) | (1ULL << 44) | root_ppn;
 
     uint64_t page_offset = (uint64_t)&test_var & 0xFFF;
-    printf("hgatp=0x%lx  test_var HPA=0x%lx  page_offset=0x%lx\n",
-           hgatp_val, (uint64_t)&test_var, page_offset);
+    printf("hgatp=0x%lx  test_var HPA=0x%lx  page_offset=0x%lx\n", hgatp_val, (uint64_t)&test_var,
+           page_offset);
 
     /* Load from GPA 0xC0000000 + page_offset (same intra-page offset as test_var) */
     run_vs_test(0xC0000000ULL | page_offset, hgatp_val);
 
-    printf("trap_cause=0x%lx  result_val=0x%lx (expected 0x12345678)\n",
-           trap_cause, result_val);
+    printf("trap_cause=0x%lx  result_val=0x%lx (expected 0x12345678)\n", trap_cause, result_val);
 
     if (result_val == 0x12345678 && trap_cause == 0x3) {
         puts("PASS simrv_h_mmu");

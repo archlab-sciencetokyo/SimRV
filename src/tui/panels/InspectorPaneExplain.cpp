@@ -157,7 +157,7 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
                           const std::string& theme) -> std::string {
         std::string row = std::format(" {}", theme);
         for (auto const& c : cols) {
-            row += std::format("\xe2\x94\x82\033[0m", theme);  // │ (themed) + reset for cell text
+            row += std::format("\xe2\x94\x82\033[0m", theme);  // | (themed) + reset for cell text
             std::string cell;
             switch (row_kind) {
                 case 0:
@@ -177,7 +177,7 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
             row += std::string(static_cast<std::size_t>(lpad), ' ');
             row += cell;
             row += std::string(static_cast<std::size_t>(rpad), ' ');
-            row += theme;  // re-apply theme before the next │ separator
+            row += theme;  // re-apply theme before the next | separator
         }
         row += std::format("\xe2\x94\x82\033[0m", theme);
         return row;
@@ -186,7 +186,7 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
     // Reusable box builder
     auto build_box = [&](std::vector<Col> raw_cols) {
         auto cols = make_cols(std::move(raw_cols));
-        // top border ┌─┬─┐
+        // top border
         {
             std::string row = std::format(" {}\xe2\x94\x8c", kThemeBorder);
             for (std::size_t i = 0; i < cols.size(); ++i) {
@@ -198,7 +198,7 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
         }
         rows.push_back(format_to_width(content_row(cols, 0, kThemeBorder), width));
         rows.push_back(format_to_width(content_row(cols, 1, kThemeBorder), width));
-        // mid border ├─┼─┤
+        // mid border
         {
             std::string row = std::format(" {}\xe2\x94\x9c", kThemeBorder);
             for (std::size_t i = 0; i < cols.size(); ++i) {
@@ -209,7 +209,7 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
             rows.push_back(format_to_width(row, width));
         }
         rows.push_back(format_to_width(content_row(cols, 2, kThemeBorder), width));
-        // bottom border └─┴─┘
+        // bottom border
         {
             std::string row = std::format(" {}\xe2\x94\x94", kThemeBorder);
             for (std::size_t i = 0; i < cols.size(); ++i) {

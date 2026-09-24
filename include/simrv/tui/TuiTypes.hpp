@@ -119,7 +119,7 @@ struct WorkbenchSlot {
 [[nodiscard]] constexpr auto get_category_name(TuiCategoryGroup group) -> const char* {
     switch (group) {
         case TuiCategoryGroup::Regs:
-            return "Register Files";
+            return "Registers";
         case TuiCategoryGroup::Memory:
             return "Memory";
         case TuiCategoryGroup::Pipeline:

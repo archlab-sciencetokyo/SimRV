@@ -192,7 +192,7 @@ auto SpikeLockstep::read_line() -> std::string {
         std::array<char, 4096> tmp{};
         const ssize_t n = ::read(spike_stderr_, tmp.data(), tmp.size());
         if (n <= 0) {
-            // EOF or error — return whatever is buffered
+            // EOF or error - return whatever is buffered
             std::string remainder = std::move(line_buf_);
             line_buf_.clear();
             return record_and_return(remainder);

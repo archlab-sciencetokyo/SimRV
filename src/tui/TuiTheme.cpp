@@ -396,7 +396,7 @@ static auto get_esc_seq_len(const std::string& str, std::size_t start) -> std::s
         return i - start;
     }
     if (c == 'P' || c == ']' || c == '_' || c == '^') {
-        // DCS (Sixel graphics), OSC, APC, PM sequences — terminated by ST (\033\) or BEL (\007)
+        // DCS (Sixel graphics), OSC, APC, PM sequences - terminated by ST (\033\) or BEL (\007)
         i++;
         while (i < str.length()) {
             if (str[i] == '\007') {

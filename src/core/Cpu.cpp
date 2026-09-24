@@ -1447,7 +1447,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         e_instmix[static_cast<std::size_t>(op.op_id)]++;
     }
 
-    // 3. Execute, Memory, Writeback, Commit — single flat op_id dispatch (no double switch).
+    // 3. Execute, Memory, Writeback, Commit - single flat op_id dispatch (no double switch).
     // ALU arms compute wb_data and break to the shared writeback tail below the switch.
     // Non-ALU arms (branches, jumps, loads, stores, fallback) handle their own commit and return.
     Register wb_data = 0;
@@ -1822,7 +1822,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
             return;
     }
 
-    // Shared writeback tail — only ALU arms (those that break) reach here.
+    // Shared writeback tail - only ALU arms (those that break) reach here.
     // Branchless GPR write: write rd unconditionally, then re-zero x0.
     state_.regs.write_branchless(op.rd, wb_data);
     advance_cached_pc(op);
@@ -1994,7 +1994,7 @@ template auto CPU::run_fast_os_kernel<true, true, false>(Machine&, uint32_t) -> 
 template auto CPU::run_fast_os_kernel<true, true, true>(Machine&, uint32_t) -> uint32_t;
 
 void CPU::push_trace_history(Address pc, Instruction inst, const std::string& symbol) {
-    // O(1) ring buffer write — no heap allocation, no shifting
+    // O(1) ring buffer write - no heap allocation, no shifting
     trace_history_buf_[trace_history_head_] = TraceHistoryEntry{pc, inst, symbol};
     trace_history_head_ = (trace_history_head_ + 1) % kTraceHistoryCapacity;
     if (trace_history_size_ < kTraceHistoryCapacity) {

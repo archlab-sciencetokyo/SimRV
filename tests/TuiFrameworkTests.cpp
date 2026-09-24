@@ -30,6 +30,8 @@
 #include "simrv/tui/modals/SettingsModal.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
+#include "simrv/tui/panels/StatusBar.hpp"
+#include "simrv/tui/panels/TerminalPane.hpp"
 #include "simrv/util/CliParser.hpp"
 
 namespace simrv::tui {
@@ -43,6 +45,11 @@ struct TuiTestAccess {
     static void drain_trace(Tui& tui) { tui.drain_trace_records(); }
     static auto trace_rows(const Tui& tui) -> const std::vector<std::string>& {
         return tui.trace_buffer_;
+    }
+    static void init_panes(Tui& tui, simrv::core::Machine& machine) {
+        tui.status_bar_ = std::make_unique<StatusBar>(machine, &tui);
+        tui.inspector_pane_ = std::make_unique<InspectorPane>(machine, &tui);
+        tui.terminal_pane_ = std::make_unique<TerminalPane>();
     }
 };
 }  // namespace simrv::tui
@@ -1367,7 +1374,7 @@ void test_multicolumn_refinement() {
     expect(f4_slots[0].page != f4_slots[1].page,
            "preset 4 slots 0 and 1 have distinct pages in functional mode");
 
-    // 6. Multi-column right border junction connects with ╢ on horizontal rule
+    // 6. Multi-column right border junction connects on horizontal rule
     const auto geom = simrv::tui::calculate_frame_geometry(120, 20, simrv::tui::TuiLayout::Split);
     simrv::tui::framework::ColumnWidths col_widths{.widths = {30, 30, 0, 0}, .count = 2};
     std::string header = simrv::tui::format_to_width("h0", 63) + "\n" +
@@ -1443,6 +1450,24 @@ void test_horizontal_scrolling() {
     pane.set_page(simrv::tui::TuiRegPage::TRACE);
     pane.reset_horizontal_scroll();
     expect(pane.get_horizontal_scroll_offset() == 0, "reset_horizontal_scroll clears offset");
+
+    // Standard pane widths (80 cols) fit content inside without horizontal scrolling
+    pane.set_page(simrv::tui::TuiRegPage::PIPELINE);
+    (void)pane.render_column_row(1, 80, 1, 3, true);
+    expect(!pane.supports_horizontal_scroll(),
+           "PIPELINE on 80-col pane fits inside without scroll");
+
+    pane.set_page(simrv::tui::TuiRegPage::CACHE);
+    (void)pane.render_column_row(1, 80, 1, 3, true);
+    expect(!pane.supports_horizontal_scroll(), "CACHE on 80-col pane fits inside without scroll");
+
+    pane.set_page(simrv::tui::TuiRegPage::STACK);
+    (void)pane.render_column_row(1, 80, 1, 3, true);
+    expect(!pane.supports_horizontal_scroll(), "STACK on 80-col pane fits inside without scroll");
+
+    pane.set_page(simrv::tui::TuiRegPage::GPR);
+    (void)pane.render_column_row(1, 80, 1, 3, true);
+    expect(!pane.supports_horizontal_scroll(), "GPR on 80-col pane fits inside without scroll");
 }
 
 void test_stack_vertical_scrolling() {
@@ -1611,6 +1636,120 @@ void test_memory_inspector_and_custom_address() {
     expect(ok && !pane.is_custom_memory_inspect(), "submitting 'sp' resets custom memory inspect");
 }
 
+void test_responsive_labels_and_header() {
+    simrv::core::Machine machine;
+    simrv::tui::StatusBar bar(machine);
+    bar.set_paused(true);
+
+    // 1. On standard 80-column terminal, header line fits within inner_w (78)
+    std::string const header_80 = strip_ansi(bar.render_row(0, 80));
+    expect(header_80.find("STEP") != std::string::npos,
+           "speed badge displays STEP when paused in compact 80-col mode");
+    expect(header_80.find("PAUSED  [PAUSED]") == std::string::npos,
+           "no duplicate PAUSED badges in header");
+
+    // Check that each rendered line in header_80 is exactly 80 columns wide
+    size_t line_start = 0;
+    while (line_start < header_80.size()) {
+        size_t next_newline = header_80.find('\n', line_start);
+        if (next_newline == std::string::npos) next_newline = header_80.size();
+        std::string line = header_80.substr(line_start, next_newline - line_start);
+        if (!line.empty()) {
+            expect(simrv::tui::get_display_width(line) == 80,
+                   "header line exactly matches 80 columns without truncation");
+        }
+        line_start = next_newline + 1;
+    }
+
+    // 2. On wide 130-column terminal, full metrics and MAX speed format
+    std::string const header_130 = strip_ansi(bar.render_row(0, 130));
+    expect(header_130.find("MAX") != std::string::npos,
+           "wide header displays MAX speed badge when paused");
+    expect(header_130.find("Instructions") != std::string::npos,
+           "wide header displays full Instructions label");
+
+    // 3. Cache Set Occupancy Map dynamic wrapping
+    simrv::tui::InspectorPane pane(machine);
+    pane.set_page(simrv::tui::TuiRegPage::CACHE);
+    pane.set_visible_rows(25);
+    std::string const cache_row_narrow = strip_ansi(pane.render_row(14, 50));
+    expect(simrv::tui::get_display_width(cache_row_narrow) == 50,
+           "narrow cache occupancy row fits inside 50-col width");
+
+    std::string const cache_row_wide = strip_ansi(pane.render_row(14, 88));
+    expect(simrv::tui::get_display_width(cache_row_wide) == 88,
+           "wide cache occupancy row fits inside 88-col width");
+
+    // 4. Mode badge click area must be strictly on row 2 (not border row 1 or divider row 3)
+    simrv::tui::Tui tui(machine);
+    simrv::tui::TuiTestAccess::init_panes(tui, machine);
+    const bool was_cycle = machine.runtime_profile.is_cycle_mode();
+    expect(bar.is_pos_on_mode_badge(11, 80), "col 11 is on mode badge at 80 cols");
+
+    // Row 1 (top border) click should not toggle execution mode
+    tui.handle_mouse(11, 1, 0);
+    expect(machine.runtime_profile.is_cycle_mode() == was_cycle,
+           "clicking row 1 border does not toggle execution mode");
+
+    // Row 3 (divider) click should not toggle execution mode
+    tui.handle_mouse(11, 3, 0);
+    expect(machine.runtime_profile.is_cycle_mode() == was_cycle,
+           "clicking row 3 divider does not toggle execution mode");
+
+    // Row 2 (actual header text) click must toggle execution mode
+    tui.handle_mouse(11, 2, 0);
+    expect(machine.runtime_profile.is_cycle_mode() != was_cycle,
+           "clicking row 2 mode badge toggles execution mode");
+
+    // 5. Tier 1 / Tier 2 Tab Labels and Responsive Pipeline Layout
+    pane.set_page(simrv::tui::TuiRegPage::PIPELINE);
+    std::string const tier1 = strip_ansi(pane.render_row(0, 60));
+    expect(tier1.find("Registers") != std::string::npos, "tier 1 displays Registers");
+    expect(tier1.find("Register Files") == std::string::npos,
+           "tier 1 replaces verbose Register Files");
+
+    std::string const tier2 = strip_ansi(pane.render_row(1, 60));
+    expect(tier2.find("Stages") != std::string::npos,
+           "tier 2 displays Stages subtab under Pipeline");
+
+    // Dynamic column balancing & computation line on standard 56-col pane
+    auto& ctx = machine.primary_hart().pipeline_context;
+    ctx.opcode = simrv::isa::Opcode::Store;
+    ctx.op_id = simrv::isa::OperationId::SD;
+    ctx.rs1 = static_cast<RegId>(5);  // t0
+    if constexpr (sizeof(Register) > 4) {
+        ctx.rrs1 = 0xffffffffd60ef000ULL;
+        ctx.rrs2 = 0xffffffd60ff00000ULL;
+        ctx.mem_addr = 0xffffffffd60ef000ULL;
+        ctx.mem_wdata = 0xffffffd60ff00000ULL;
+    } else {
+        ctx.rrs1 = 0xd60ef000U;
+        ctx.rrs2 = 0x0ff00000U;
+        ctx.mem_addr = 0xd60ef000U;
+        ctx.mem_wdata = 0x0ff00000U;
+    }
+    ctx.imm = 0;
+
+    std::string const comp_row = strip_ansi(pane.render_row(12, 56));
+    expect(comp_row.find('+') == std::string::npos,
+           "computation row in 56-col pane does not truncate with +");
+
+    std::string const mem_row = strip_ansi(pane.render_row(15, 56));
+    expect(mem_row.find("Data: Data:") == std::string::npos,
+           "MEM stage row does not duplicate Data label");
+
+    // 6. Pipeline horizontal scrolling on typical 56-col pane
+    (void)pane.render_row(2, 56);
+    expect(pane.supports_horizontal_scroll(),
+           "PIPELINE on 56-col pane supports horizontal scrolling");
+
+    // 7. Live scrolling updates immediately without waiting for a click
+    tui.scroll(3);
+    expect(tui.get_scroll_offset() == 3, "live scrolling updates scroll offset immediately");
+    tui.reset_scroll();
+    expect(tui.get_scroll_offset() == 0, "live reset_scroll clears offset immediately");
+}
+
 }  // namespace
 
 int main() {
@@ -1643,6 +1782,7 @@ int main() {
     test_bus_inspector_and_tilelink_channels();
     test_inspector_vector_csr_rows();
     test_memory_inspector_and_custom_address();
+    test_responsive_labels_and_header();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;

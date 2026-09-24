@@ -96,8 +96,44 @@ auto InspectorPane::make_field(const std::string& label, const std::string& valu
 auto InspectorPane::render_pair(const std::string& l1, const std::string& v1, const char* c1,
                                 const std::string& l2, const std::string& v2, const char* c2,
                                 int col_width, int right_width, int label_pad) -> std::string {
-    return format_to_width(make_field(l1, v1, c1, label_pad), col_width) +
-           format_to_width(make_field(l2, v2, c2, label_pad), right_width);
+    int const total_width = col_width + right_width;
+    std::string f1 = make_field(l1, v1, c1, label_pad);
+    std::string f2 = make_field(l2, v2, c2, label_pad);
+    int d1 = get_display_width(f1);
+    int d2 = get_display_width(f2);
+
+    // If total width can accommodate both fields with reduced padding, try compact padding
+    if (d1 + d2 > total_width && label_pad > 0) {
+        int compact_pad = std::max(0, label_pad - 4);
+        std::string cf1 = make_field(l1, v1, c1, compact_pad);
+        std::string cf2 = make_field(l2, v2, c2, compact_pad);
+        int cd1 = get_display_width(cf1);
+        int cd2 = get_display_width(cf2);
+        if (cd1 + cd2 <= total_width || (cd1 + cd2 < d1 + d2)) {
+            f1 = std::move(cf1);
+            f2 = std::move(cf2);
+            d1 = cd1;
+            d2 = cd2;
+        }
+    }
+
+    // Dynamic column balancing: borrow unused space from the narrower column
+    int w1 = col_width;
+    int w2 = right_width;
+    if (d1 + d2 <= total_width) {
+        if (d1 > w1) {
+            w1 = d1;
+            w2 = total_width - w1;
+        } else if (d2 > w2) {
+            w2 = d2;
+            w1 = total_width - w2;
+        }
+    } else if (d1 + d2 > 0) {
+        w1 = std::clamp((d1 * total_width) / (d1 + d2), 1, total_width - 1);
+        w2 = total_width - w1;
+    }
+
+    return format_to_width(f1, w1) + format_to_width(f2, w2);
 }
 
 auto InspectorPane::get_running_label_start_row() const -> int { return 0; }
@@ -197,29 +233,44 @@ auto InspectorPane::content_total_columns(int width) const -> int {
         case TuiRegPage::FPR: {
             bool const single = is_single_column(width);
             if (single) {
-                int const min_single = (sizeof(Register) > 4) ? 40 : 32;
+                int const min_single = (sizeof(Register) > 4) ? 32 : 24;
                 return std::max(width, min_single);
             }
-            int const min_double = (sizeof(Register) > 4) ? 78 : 64;
+            int const min_double = (sizeof(Register) > 4) ? 60 : 44;
             return std::max(width, min_double);
         }
-        case TuiRegPage::VEC:
-            return std::max(width, 96);
-        case TuiRegPage::PIPELINE:
-        case TuiRegPage::BPRED:
-        case TuiRegPage::HAZARD:
-            return std::max(width, 92);
-        case TuiRegPage::CACHE:
-            return std::max(width, 84);
-        case TuiRegPage::STACK:
-            return std::max(width, 92);
-        case TuiRegPage::TLB:
-        case TuiRegPage::BUS:
-            return width;
+        case TuiRegPage::VEC: {
+            int const min_vec = 44;
+            return std::max(width, min_vec);
+        }
+        case TuiRegPage::PIPELINE: {
+            int const min_pipe = (sizeof(Register) > 4) ? 68 : 60;
+            return std::max(width, min_pipe);
+        }
+        case TuiRegPage::BPRED: {
+            int const min_bp = 54;
+            return std::max(width, min_bp);
+        }
+        case TuiRegPage::HAZARD: {
+            int const min_hz = 52;
+            return std::max(width, min_hz);
+        }
+        case TuiRegPage::CACHE: {
+            int const min_cache = 62;
+            return std::max(width, min_cache);
+        }
+        case TuiRegPage::STACK: {
+            int const min_stack = (sizeof(Register) > 4) ? 50 : 44;
+            return std::max(width, min_stack);
+        }
+        case TuiRegPage::EXPLAIN: {
+            int const min_explain = 52;
+            return std::max(width, min_explain);
+        }
         case TuiRegPage::TRACE:
             return trace_total_columns();
-        case TuiRegPage::EXPLAIN:
-            return std::max(width, 76);
+        case TuiRegPage::TLB:
+        case TuiRegPage::BUS:
         default:
             return width;
     }
@@ -263,7 +314,11 @@ auto layout_tabs_equally(const std::vector<TabSlot>& slots, int available_width)
     }
     constexpr int kTabGap = 2;
     int const num_gaps = static_cast<int>(slots.size()) - 1;
-    int raw_w = total_item_w + num_gaps * kTabGap;
+    int tab_gap = kTabGap;
+    if (num_gaps > 0 && total_item_w + num_gaps * kTabGap > available_width) {
+        tab_gap = 1;
+    }
+    int raw_w = total_item_w + num_gaps * tab_gap;
     int left_pad = std::max(0, (available_width - raw_w) / 2);
 
     std::string out;
@@ -275,8 +330,8 @@ auto layout_tabs_equally(const std::vector<TabSlot>& slots, int available_width)
 
     for (size_t i = 0; i < slots.size(); ++i) {
         if (i > 0) {
-            out.append(kTabGap, ' ');
-            cur_col += kTabGap;
+            out.append(static_cast<std::size_t>(tab_gap), ' ');
+            cur_col += tab_gap;
         }
         spans.push_back({.start_col = cur_col,
                          .width = slots[i].display_width,
@@ -294,6 +349,59 @@ auto layout_tabs_equally(const std::vector<TabSlot>& slots, int available_width)
     return {out, spans};
 }
 
+auto get_tier1_group_name(TuiCategoryGroup grp, int width) -> std::string_view {
+    if (width < 44) {
+        if (grp == TuiCategoryGroup::Regs) return "Regs";
+        if (grp == TuiCategoryGroup::Pipeline) return "Pipe";
+    }
+    return get_category_name(grp);
+}
+
+auto get_tier1_group_center(TuiCategoryGroup grp, int width) -> int {
+    constexpr std::array<TuiCategoryGroup, 4> kGroups = {
+        TuiCategoryGroup::Regs, TuiCategoryGroup::Memory, TuiCategoryGroup::Pipeline,
+        TuiCategoryGroup::Tools};
+    std::vector<TabSlot> slots;
+    slots.reserve(4);
+    for (auto g : kGroups) {
+        auto const name = get_tier1_group_name(g, width);
+        slots.push_back({.text = "",
+                         .display_width = static_cast<int>(name.length()) + 2,
+                         .grp = g,
+                         .page = std::nullopt});
+    }
+    auto [_, spans] = layout_tabs_equally(slots, width);
+    for (const auto& span : spans) {
+        if (span.grp == grp) {
+            return span.start_col + span.width / 2;
+        }
+    }
+    return width / 2;
+}
+
+auto layout_tier2_tabs(const std::vector<TabSlot>& slots, int available_width,
+                       TuiCategoryGroup active_grp, int tier1_center)
+    -> std::pair<std::string, std::vector<ComputedTabSpan>> {
+    if (slots.empty()) return {"", {}};
+    if (slots.size() == 1) {
+        int tab_w = slots[0].display_width;
+        int left_pad =
+            std::clamp(tier1_center - tab_w / 2, 0, std::max(0, available_width - tab_w));
+        std::string out;
+        out.append(static_cast<std::size_t>(left_pad), ' ');
+        out += slots[0].text;
+        if (get_display_width(out) < available_width) {
+            out.append(static_cast<std::size_t>(available_width - get_display_width(out)), ' ');
+        } else if (get_display_width(out) > available_width) {
+            out = format_to_width(out, available_width);
+        }
+        std::vector<ComputedTabSpan> spans = {
+            {.start_col = left_pad, .width = tab_w, .grp = active_grp, .page = slots[0].page}};
+        return {out, spans};
+    }
+    return layout_tabs_equally(slots, available_width);
+}
+
 }  // namespace
 
 auto InspectorPane::render_tab_bar_tier1(int width) const -> std::string {
@@ -305,7 +413,7 @@ auto InspectorPane::render_tab_bar_tier1(int width) const -> std::string {
     std::vector<TabSlot> slots;
     slots.reserve(4);
     for (auto grp : kGroups) {
-        const char* name = get_category_name(grp);
+        auto const name = get_tier1_group_name(grp, width);
         std::string text;
         if (grp == current_grp) {
             text = std::format("\033[1;7m {} \033[0m", name);
@@ -313,7 +421,7 @@ auto InspectorPane::render_tab_bar_tier1(int width) const -> std::string {
             text = std::format(" {}{}\033[0m ", kThemeMuted, name);
         }
         slots.push_back({.text = text,
-                         .display_width = static_cast<int>(std::strlen(name)) + 2,
+                         .display_width = static_cast<int>(name.length()) + 2,
                          .grp = grp,
                          .page = std::nullopt});
     }
@@ -355,7 +463,7 @@ auto InspectorPane::render_tab_bar_tier2(int width) const -> std::string {
             break;
         }
         case TuiCategoryGroup::Pipeline: {
-            tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Pipe"});
+            tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Stages"});
             if (machine_.runtime_profile.is_cycle_mode()) {
                 tabs.push_back({.page = TuiRegPage::BPRED, .name = "BPred"});
                 tabs.push_back({.page = TuiRegPage::HAZARD, .name = "Hazard"});
@@ -384,7 +492,8 @@ auto InspectorPane::render_tab_bar_tier2(int width) const -> std::string {
                          .page = t.page});
     }
 
-    return layout_tabs_equally(slots, width).first;
+    int const tier1_center = get_tier1_group_center(grp, width);
+    return layout_tier2_tabs(slots, width, grp, tier1_center).first;
 }
 
 auto InspectorPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPage> {
@@ -398,9 +507,9 @@ auto InspectorPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPa
         std::vector<TabSlot> slots;
         slots.reserve(4);
         for (auto grp : kGroups) {
-            const char* name = get_category_name(grp);
+            auto const name = get_tier1_group_name(grp, width);
             slots.push_back({.text = "",
-                             .display_width = static_cast<int>(std::strlen(name)) + 2,
+                             .display_width = static_cast<int>(name.length()) + 2,
                              .grp = grp,
                              .page = std::nullopt});
         }
@@ -476,7 +585,7 @@ auto InspectorPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPa
                 break;
             }
             case TuiCategoryGroup::Pipeline: {
-                tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Pipe"});
+                tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Stages"});
                 if (machine_.runtime_profile.is_cycle_mode()) {
                     tabs.push_back({.page = TuiRegPage::BPRED, .name = "BPred"});
                     tabs.push_back({.page = TuiRegPage::HAZARD, .name = "Hazard"});
@@ -499,7 +608,8 @@ auto InspectorPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPa
                              .page = t.page});
         }
 
-        auto const [_, spans] = layout_tabs_equally(slots, width);
+        int const tier1_center = get_tier1_group_center(grp, width);
+        auto const [_, spans] = layout_tier2_tabs(slots, width, grp, tier1_center);
         for (const auto& span : spans) {
             if (col >= span.start_col && col < span.start_col + span.width) {
                 return span.page;

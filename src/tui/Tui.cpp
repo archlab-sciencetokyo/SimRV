@@ -466,8 +466,7 @@ void Tui::render_update_speed(std::chrono::steady_clock::time_point now) {
 }
 
 auto Tui::get_terminal_pane_start_line(int num_rows) const -> int {
-    int total_lines =
-        vt_.get_scrollback_size() + vt_.get_cursor_y() + (vt_.get_cursor_x() > 0 ? 1 : 0);
+    int total_lines = vt_.get_scrollback_size() + vt_.get_cursor_y() + 1;
     int end_exclusive = std::max(0, total_lines - scroll_offset_);
     return std::max(0, end_exclusive - num_rows);
 }
@@ -748,6 +747,34 @@ void Tui::render(bool force) {
         layout_ == TuiLayout::Split) {
         render_draw_sixel(inspector_width, terminal_width, num_rows, update_cmds);
         update_cmds += std::format("\033[{};1H", term_height);
+    } else if (panel_mode == TuiRightPanelMode::Terminal && !modal_.is_active()) {
+        std::optional<size_t> console_slot_idx;
+        for (size_t c = 0; c < workbench_slots_.size() && c < col_widths.count; ++c) {
+            if (workbench_slots_[c].page == TuiRegPage::CONSOLE) {
+                console_slot_idx = c;
+                break;
+            }
+        }
+        if (console_slot_idx.has_value()) {
+            size_t const c_idx = *console_slot_idx;
+            int col_start_x = 2;
+            for (size_t c = 0; c < c_idx; ++c) {
+                col_start_x += col_widths.widths[c] + 1;
+            }
+            int const target_x = std::clamp(col_start_x + vt_.get_cursor_x(), col_start_x,
+                                            col_start_x + col_widths.widths[c_idx] - 1);
+            int const cursor_abs_line = vt_.get_scrollback_size() + vt_.get_cursor_y();
+            int const start_line = get_terminal_pane_start_line(term_content_rows);
+            int const line_offset = cursor_abs_line - start_line;
+            if (line_offset >= 0 && line_offset < term_content_rows) {
+                int const content_start_y = (col_widths.count > 2) ? 5 : 4;
+                int const target_y = content_start_y + line_offset;
+                update_cmds += std::format("\033[{};{}H", target_y, target_x);
+                if (!paused_ && vt_.is_cursor_visible()) {
+                    update_cmds += "\033[?25h";
+                }
+            }
+        }
     }
 
     write_all(STDOUT_FILENO, update_cmds);
@@ -941,32 +968,11 @@ void Tui::handle_mouse(int x, int y, int b) {
     }
 
     if (y < 4) {
-        // Header clicks
-        if (b == 0 && status_bar_) {
+        // Header clicks: row 2 is the actual header text row; rows 1 and 3 are top border and
+        // divider
+        if (b == 0 && status_bar_ && y == 2) {
             auto hit = status_bar_->get_header_action_at_col(x, term_width);
-            switch (hit.action) {
-                case HeaderAction::RunPause:
-                    toggle_run_state();
-                    break;
-                case HeaderAction::TogglePanelMode:
-                    cycle_right_panel_mode();
-                    break;
-                case HeaderAction::ToggleAttached:
-                    focus_next_slot();
-                    break;
-                case HeaderAction::SelectHart:
-                    select_next_hart();
-                    break;
-                case HeaderAction::SetSpeed:
-                    open_modal(ModalType::SetSpeed);
-                    break;
-                case HeaderAction::ToggleMode:
-                    toggle_execution_mode();
-                    break;
-                case HeaderAction::None:
-                default:
-                    break;
-            }
+            execute_header_action(hit);
         }
         return;
     }
@@ -1687,11 +1693,15 @@ void Tui::scroll(int lines) {
         scroll_offset_ = 0;
     }
     render();
+    frame_dirty_ = true;
+    render(true);
 }
 
 void Tui::reset_scroll() {
     scroll_offset_ = 0;
     render();
+    frame_dirty_ = true;
+    render(true);
 }
 
 void Tui::scroll_inspector(int lines) {
@@ -1699,6 +1709,8 @@ void Tui::scroll_inspector(int lines) {
         inspector_pane_->set_page(focused_page());
         inspector_pane_->scroll(lines);
         render();
+        frame_dirty_ = true;
+        render(true);
     }
 }
 
@@ -1707,6 +1719,8 @@ void Tui::reset_scroll_inspector() {
         inspector_pane_->set_page(focused_page());
         inspector_pane_->reset_scroll();
         render();
+        frame_dirty_ = true;
+        render(true);
     }
 }
 
@@ -2418,6 +2432,9 @@ void Tui::execute_header_action(HeaderHitResult hit) {
                 pause_loop();
             }
             break;
+        case HeaderAction::ToggleMode:
+            toggle_execution_mode();
+            break;
         case HeaderAction::SelectHart:
             if (machine_.num_harts() > 1) {
                 selected_hart_ = hit.hart_index % machine_.num_harts();
@@ -2653,13 +2670,18 @@ auto Tui::handle_alt_key(char key, uint8_t byte) -> bool {
 
 auto Tui::handle_arrow_key_sequence() -> bool {
     if (esc_buf_ == "\033[1;2C" || esc_buf_ == "\033[1;2D") {
-        if (!is_modal_active() && inspector_pane_ &&
-            inspector_pane_->supports_horizontal_scroll()) {
-            inspector_pane_->scroll_horizontal(esc_buf_.back() == 'C' ? 8 : -8);
-            render(true);
-            return true;
+        if (!is_modal_active() && inspector_pane_) {
+            inspector_pane_->set_page(focused_page());
+            if (inspector_pane_->supports_horizontal_scroll()) {
+                inspector_pane_->scroll_horizontal(esc_buf_.back() == 'C' ? 8 : -8);
+                frame_dirty_ = true;
+                render(true);
+                return true;
+            }
         }
+        return true;
     }
+
     const bool up = esc_buf_ == "\033[A" || esc_buf_ == "\033OA";
     const bool down = esc_buf_ == "\033[B" || esc_buf_ == "\033OB";
     const bool right = esc_buf_ == "\033[C" || esc_buf_ == "\033OC";
@@ -2722,6 +2744,7 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             inspector_pane_->set_page(page);
             if (inspector_pane_->supports_horizontal_scroll()) {
                 inspector_pane_->scroll_horizontal(4 * direction);
+                frame_dirty_ = true;
                 render(true);
                 return true;
             }
@@ -2824,7 +2847,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
     int y = 0;
     if (parse_sgr_mouse(esc_buf_, button, x, y)) {
         if (esc_buf_.back() == 'm') {
-            // Button release — finalize any active selection drag.
+            // Button release - finalize any active selection drag.
             if (selection_.is_selecting) {
                 selection_.is_selecting = false;
                 if (selection_.start_x != selection_.end_x ||
@@ -2838,7 +2861,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
 
         // Motion event while button held (button | 32): update drag endpoint.
         // These are generated by ?1002h (button-motion mode) and must be consumed
-        // here — never forwarded to the guest UART.
+        // here - never forwarded to the guest UART.
         if (esc_buf_.back() == 'M' && (button & 32) != 0) {
             if (selection_.is_selecting) {
                 selection_.end_x = x - 1;
