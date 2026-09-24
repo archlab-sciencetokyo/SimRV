@@ -3,6 +3,35 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.0.0-beta.1] — 2026-09-24
+
+This first beta release of SimRV 3.0 concludes Milestone 1: Performance Acceleration & TUI Hardening. It delivers unified inlined fast memory access, RVV 1.0 high-throughput bulk memory transfers, branch predictor optimizations, 2D viewport navigation overhaul, vector register and CSR status inspection, differential TUI line rendering with execution burst throttling, and full dual-architecture gate qualification across RV64 and RV32.
+
+### Execution Engine & Memory Performance
+
+- Implemented unified inlined fast memory engine: precomputed access sizes in `CachedOp` at decode time and inlined direct SoftTLB host-pointer translation alongside M-mode direct-RAM accesses in integer load/store paths (`execute_cached_load`/`execute_cached_store`) and floating-point fast paths (`FLW`/`FLD`/`FSW`/`FSD`).
+- Added direct fast opcode dispatch in `CPU::execute_cached_op_fast` for RVV 1.0 vector instructions, avoiding fallback into the multi-stage pipeline simulation model during fast-mode execution.
+- Accelerated unit-stride vector memory operations (`vle*`, `vse*`, `vl*re*`, `vs*re*`, `vlm`, `vsm`) with page-bounded bulk contiguous memory transfers (`std::memcpy`), guarded by memory geometry, watchpoint checks, and PMP permissions, with transparent element-by-element fallback for page crossings and faults.
+- Streamlined `CachedOp` footprint and dispatch tables across fast-path and cycle-accurate fetch and decompression stages.
+
+### Branch Predictor & Strong Types
+
+- Optimized branch predictor tables using branchless two-bit saturation updates and fast return address stack (RAS) lookups.
+- Strengthened type safety with dedicated domain aliases for architectural registers, addresses, and instruction traits.
+
+### User Interface & Interactive Navigation
+
+- Implemented true differential rendering in `Tui::render()`, skipping unchanged screen lines, tracking cursor motion, suppressing empty frame generation, and throttling UI refreshes during continuous high-speed stepping bursts.
+- Throttled non-visible detailed execution sub-views (Pipeline, Hazard, Branch Predictor, Disassembly, Explain, Trace) during fast continuous execution, minimizing simulator hot-path overhead.
+- Overhauled 2D scrolling in `framework::ScrollView` across all inspector tabs with responsive viewport clipping, scroll overflow markers (`▲`, `▼`, `◀`, `▶`), and live scroll update synchronization.
+- Enhanced the TUI Register Inspector (`TuiRegPage::VEC` double-column view) to display vector control and status registers: `vl`, `vtype` (with decoded `vsew` and `vlmul`), `vstart`, `vlenb` (with `vlen`), `vxrm`, `vxsat`, `vta/vma`, and `vill`.
+
+### Verification & Quality Assurance
+
+- Validated full dual-architecture gate suites: 100% pass rate across RV64 (40/40) and RV32 (40/40) release gates.
+- Added comprehensive semantic regressions for bulk vector memory operations and TUI differential rendering throttling.
+- Verified Linux kernel boot stability on fast-mode PTY (`linux-boot-pty`) and multi-hart SMP (`linux-ia-quantum-smp-pty`).
+
 ## [v3.0.0-alpha.4] — 2026-09-19
 
 This alpha release delivers dynamic SMP multi-hart Linux boot and device tree synthesis, an authoritative hardware register scoreboard, complete CLI/tooling installation with man pages, responsive TUI horizontal scrolling overhaul, and branchless branch predictor acceleration.

@@ -1,3 +1,14 @@
+# SimRV 3.0 beta handoff
+
+Branch: `release/3.0.0-beta.1`
+Target: `dev`
+Latest functional commit: `26f1c1f perf(tui): implement differential rendering and execution throttling`
+
+Do not create a tag or GitHub release. Keep the PR as the delivery vehicle until all
+required qualification checks are green.
+
+---
+
 # SimRV 3.0.0 Release Roadmap
 
 This document outlines the strategic implementation roadmap, feature deliverables,
