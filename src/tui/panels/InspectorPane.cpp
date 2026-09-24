@@ -717,10 +717,16 @@ auto InspectorPane::render_column_header(int col_idx, const char* name, bool is_
     const bool is_ansi = (style == TuiThemeStyle::ClassicAnsi);
     const char* horiz = is_ansi ? "-" : "─";
 
+    std::string_view effective_hint = key_hint;
+    if (effective_hint.empty() && is_focused) {
+        effective_hint = "[Ctrl-W] Tool";
+    }
+
     std::string badge;
     if (is_focused) {
-        badge = is_ansi ? std::format(" [{}: {}] ", col_idx + 1, name)
-                        : std::format(" \033[1;7m [{}: {}] \033[0m", col_idx + 1, name);
+        badge = is_ansi ? std::format(" [{}: {}] v ", col_idx + 1, name)
+                        : std::format(" \033[1;7m [{}: {}] \033[0m\033[1;36m▼\033[0m", col_idx + 1,
+                                      name);
     } else {
         badge = is_ansi ? std::format(" [{}: {}] ", col_idx + 1, name)
                         : std::format(" {}{}[{}: {}]\033[0m ", kThemeMuted, is_focused ? "► " : "",
@@ -729,9 +735,9 @@ auto InspectorPane::render_column_header(int col_idx, const char* name, bool is_
 
     // Append the key hint when there's enough room (minimum ~10 chars for the hint itself).
     std::string hint_str;
-    if (!key_hint.empty() && width >= 30) {
-        hint_str = is_ansi ? std::format(" {} ", key_hint)
-                           : std::format(" {}{}\033[0m ", kThemeMuted, key_hint);
+    if (!effective_hint.empty() && width >= 30) {
+        hint_str = is_ansi ? std::format(" {} ", effective_hint)
+                           : std::format(" {}{}\033[0m ", kThemeMuted, effective_hint);
     }
 
     int const badge_w = get_display_width(badge);

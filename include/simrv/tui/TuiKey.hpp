@@ -19,6 +19,7 @@ enum class TuiKey : uint8_t {
     CtrlP = 16,
     CtrlQ = 17,
     CtrlR = 18,
+    CtrlW = 23,
     Space = 32,  // ' '
     BackTab = 254,
     a = 'a',
@@ -80,6 +81,8 @@ enum class TuiKey : uint8_t {
     Dot = '.',
     LeftBracket = '[',
     RightBracket = ']',
+    Less = '<',
+    Greater = '>',
     F1 = 241,
     F2 = 242,
     F3 = 243,

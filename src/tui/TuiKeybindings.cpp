@@ -9,7 +9,7 @@
 
 namespace simrv::tui {
 
-static const std::array<KeyBindingInfo, 32> kKeyBindings = {
+static const std::array<KeyBindingInfo, 35> kKeyBindings = {
     {{.action = KeyAction::Step,
       .key_display = "[F6] / [s]",
       .primary_char = 's',
@@ -235,6 +235,33 @@ static const std::array<KeyBindingInfo, 32> kKeyBindings = {
       .help_label = "Toggle Precision (IA / CA)",
       .category = ActionCategory::Configure,
       .allowed_running = true,
+      .allowed_in_modal = false},
+     {.action = KeyAction::OpenToolPicker,
+      .key_display = "[Ctrl-W] / click header",
+      .primary_char = '\0',
+      .alt_char = '\0',
+      .footer_label = "[Ctrl-W] Tool",
+      .help_label = "Select Column Tool View",
+      .category = ActionCategory::Navigate,
+      .allowed_running = false,
+      .allowed_in_modal = false},
+     {.action = KeyAction::MoveColumnLeft,
+      .key_display = "[<] / [Alt-Left]",
+      .primary_char = '<',
+      .alt_char = '<',
+      .footer_label = "[<] Move Left",
+      .help_label = "Move Focused Column Left",
+      .category = ActionCategory::Navigate,
+      .allowed_running = false,
+      .allowed_in_modal = false},
+     {.action = KeyAction::MoveColumnRight,
+      .key_display = "[>] / [Alt-Right]",
+      .primary_char = '>',
+      .alt_char = '>',
+      .footer_label = "[>] Move Right",
+      .help_label = "Move Focused Column Right",
+      .category = ActionCategory::Navigate,
+      .allowed_running = false,
       .allowed_in_modal = false}}};
 
 auto Keybindings::get(KeyAction action) -> const KeyBindingInfo& {
@@ -349,6 +376,12 @@ auto key_action_for_footer(TuiFooterAction action) -> KeyAction {
             return KeyAction::ToggleTheme;
         case TuiFooterAction::ToggleExecutionMode:
             return KeyAction::ToggleExecutionMode;
+        case TuiFooterAction::OpenToolPicker:
+            return KeyAction::OpenToolPicker;
+        case TuiFooterAction::MoveColumnLeft:
+            return KeyAction::MoveColumnLeft;
+        case TuiFooterAction::MoveColumnRight:
+            return KeyAction::MoveColumnRight;
     }
     throw std::out_of_range("unknown TUI footer action");
 }

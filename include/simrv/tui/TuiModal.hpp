@@ -39,6 +39,7 @@ enum class ModalType : uint8_t {
     Notice,
     PlatformChangeConfirm,
     LayoutPresets,
+    ToolPicker,
     SaveCpuConfig,
     LoadCpuConfig
 };
@@ -175,6 +176,14 @@ class TuiModal {
     }
     [[nodiscard]] auto get_preset_cursor() const -> int { return preset_cursor_; }
 
+    void open_tool_picker(int slot_idx, TuiRegPage current_page);
+    void move_tool_picker_cursor(int delta);
+    void set_tool_picker_cursor(int cursor);
+    void cycle_tool_picker_slot(int num_slots);
+    [[nodiscard]] auto get_tool_picker_slot() const -> int { return tool_picker_slot_; }
+    [[nodiscard]] auto get_tool_picker_cursor() const -> int { return tool_picker_cursor_; }
+    [[nodiscard]] auto get_selected_tool_page() const -> TuiRegPage;
+
     void open_notice(const std::string& title, const std::string& message, bool is_error = false);
     void open_platform_confirm(const SettingsDraft& draft);
     void open_save_cpu_config();
@@ -214,6 +223,9 @@ class TuiModal {
     int glossary_topic_ = 0;
     int glossary_scroll_ = 0;
     int preset_cursor_ = 0;
+    int tool_picker_slot_ = 0;
+    int tool_picker_cursor_ = 0;
+    TuiRegPage tool_picker_current_page_ = TuiRegPage::GPR;
     bool load_appmode_ = true;  // Toggle for App (baremetal) vs OS (Linux) mode in LoadBinary modal
     std::string staged_binary_path_;
     bool staged_mode_change_ = false;

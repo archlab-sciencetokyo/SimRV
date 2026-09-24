@@ -168,6 +168,13 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
         render(true);
     }
     void submit_modal() {
+        if (modal_.get_type() == ModalType::ToolPicker) {
+            auto const page = modal_.get_selected_tool_page();
+            auto const target_slot = static_cast<size_t>(modal_.get_tool_picker_slot());
+            set_workbench_slot_page(target_slot, page);
+            close_modal();
+            return;
+        }
         modal_.submit(
             inspector_pane_.get(), step_delay_us_, [this](TuiRegPage page) { set_reg_page(page); },
             [this](const std::string& status) { set_status_override(status); },
@@ -203,6 +210,10 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void set_workbench_slot_page(size_t slot_idx, TuiRegPage page);
     /// Cycle the tool page for the given workbench slot (wraps within the slot's category group).
     void cycle_slot_page(size_t slot_idx);
+    void open_tool_picker(size_t slot_idx);
+    void swap_workbench_slots(size_t slot_a, size_t slot_b);
+    void move_focused_column_left();
+    void move_focused_column_right();
     [[nodiscard]] auto focused_page() const -> TuiRegPage;
 
     void cycle_reg_page();

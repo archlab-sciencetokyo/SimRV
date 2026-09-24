@@ -154,7 +154,10 @@ enum class TuiFooterAction : uint8_t {
     Reboot,
     SwitchHart,
     ToggleTheme,
-    ToggleExecutionMode
+    ToggleExecutionMode,
+    OpenToolPicker,
+    MoveColumnLeft,
+    MoveColumnRight
 };
 
 }  // namespace simrv::tui

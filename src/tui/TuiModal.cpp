@@ -25,6 +25,7 @@
 #include "simrv/tui/modals/SettingsModal.hpp"
 #include "simrv/tui/modals/StepModal.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
+#include "simrv/tui/modals/ToolPickerModal.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 
 namespace simrv::tui {
@@ -162,6 +163,43 @@ auto TuiModal::remove_bp_at_cursor(
     return removed;
 }
 
+void TuiModal::open_tool_picker(int slot_idx, TuiRegPage current_page) {
+    active_modal_ = ModalType::ToolPicker;
+    tool_picker_slot_ = std::max(0, slot_idx);
+    tool_picker_current_page_ = current_page;
+    tool_picker_cursor_ = 0;
+    const auto& list = modals::ToolPickerModal::all_tools();
+    for (size_t i = 0; i < list.size(); ++i) {
+        if (list[i].page == current_page) {
+            tool_picker_cursor_ = static_cast<int>(i);
+            break;
+        }
+    }
+}
+
+void TuiModal::move_tool_picker_cursor(int delta) {
+    const int count = static_cast<int>(modals::ToolPickerModal::total_tool_count());
+    if (count <= 0) return;
+    tool_picker_cursor_ = (tool_picker_cursor_ + delta) % count;
+    if (tool_picker_cursor_ < 0) tool_picker_cursor_ += count;
+}
+
+void TuiModal::set_tool_picker_cursor(int cursor) {
+    const int count = static_cast<int>(modals::ToolPickerModal::total_tool_count());
+    if (count <= 0) return;
+    tool_picker_cursor_ = std::clamp(cursor, 0, count - 1);
+}
+
+void TuiModal::cycle_tool_picker_slot(int num_slots) {
+    if (num_slots <= 0) return;
+    tool_picker_slot_ = (tool_picker_slot_ + 1) % num_slots;
+}
+
+auto TuiModal::get_selected_tool_page() const -> TuiRegPage {
+    auto page = modals::ToolPickerModal::tool_at_index(static_cast<size_t>(tool_picker_cursor_));
+    return page.value_or(TuiRegPage::GPR);
+}
+
 void TuiModal::close() {
     active_modal_ = ModalType::None;
     rendered_box_width_ = 0;
@@ -244,6 +282,7 @@ auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step
             }
         } break;
         case ModalType::LayoutPresets:
+        case ModalType::ToolPicker:
             result = true;
             break;
         case ModalType::SaveCpuConfig: {
@@ -345,7 +384,7 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
     bool is_wide_modal =
         (is_help || is_glossary || active_modal_ == ModalType::Settings ||
          active_modal_ == ModalType::Notice || active_modal_ == ModalType::PlatformChangeConfirm ||
-         active_modal_ == ModalType::LayoutPresets);
+         active_modal_ == ModalType::LayoutPresets || active_modal_ == ModalType::ToolPicker);
     const int fallback_width = is_wide_modal ? 78 : 58;
     const bool has_rendered_geometry = rendered_box_width_ > 0 &&
                                        rendered_term_width_ == term_width &&
@@ -358,6 +397,7 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
                        ? kGeneralSettingsContentRows
                    : (active_modal_ == ModalType::Glossary)      ? 26
                    : (active_modal_ == ModalType::Help)          ? 24
+                   : (active_modal_ == ModalType::ToolPicker)    ? 22
                    : (active_modal_ == ModalType::LayoutPresets) ? 12
                                                                  : 10;
 
@@ -461,6 +501,7 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
                 case ModalType::LoadCpuConfig:
                     return action == 0 ? ModalClickResult::Submit : ModalClickResult::Closed;
                 case ModalType::Help:
+                case ModalType::ToolPicker:
                 case ModalType::None:
                     return ModalClickResult::Handled;
             }
@@ -534,6 +575,13 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
             int sel = content_row - 2;
             if (sel >= 0 && sel <= 3) {
                 preset_cursor_ = sel;
+                return ModalClickResult::Submit;
+            }
+            return ModalClickResult::Handled;
+        }
+
+        case ModalType::ToolPicker: {
+            if (content_row >= 2) {
                 return ModalClickResult::Submit;
             }
             return ModalClickResult::Handled;
@@ -629,6 +677,12 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             add_row(modals::build_modal_footer({{"[Enter / 1-4]", "Apply Preset"},
                                                 {"[Up/Down]", "Navigate"},
                                                 {"[Esc / q / F4]", "Cancel"}}));
+            break;
+        }
+        case ModalType::ToolPicker: {
+            modals::ToolPickerModal::render(content_rows, add_row, tool_picker_slot_,
+                                            tool_picker_cursor_, tool_picker_current_page_,
+                                            term_height, provisional_width);
             break;
         }
         case ModalType::Notice:

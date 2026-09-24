@@ -34,6 +34,7 @@
 #include "simrv/tui/TuiGuidance.hpp"
 #include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/modals/ToolPickerModal.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/tui/panels/StatusBar.hpp"
 #include "simrv/tui/panels/TerminalPane.hpp"
@@ -702,7 +703,11 @@ void Tui::render(bool force) {
     if (workbench_slots_.size() != col_widths.count && col_widths.count > 0) {
         sync_workbench_slots();
     }
-    int const term_content_rows = (col_widths.count > 2) ? std::max(1, num_rows - 1) : num_rows;
+    const bool multi_headers =
+        (col_widths.count > 2) || (col_widths.count == 2 && workbench_slots_.size() >= 2 &&
+                                   (workbench_slots_[1].page != TuiRegPage::CONSOLE ||
+                                    workbench_slots_[0].page == TuiRegPage::CONSOLE));
+    int const term_content_rows = multi_headers ? std::max(1, num_rows - 1) : num_rows;
 
     int total = (panel_mode == TuiRightPanelMode::Terminal) ? vt_.get_lines_count() : 0;
     scroll_offset_ = std::min(scroll_offset_, std::max(0, total - term_content_rows));
@@ -713,17 +718,14 @@ void Tui::render(bool force) {
     std::vector<std::string> new_lines = compose_multi_frame_lines(
         frame, term_width, col_widths, status_bar_->render_row(0, term_width),
         status_bar_->render_row(1, term_width),
-        [this, total_cols = col_widths.count, panel_mode](size_t col_idx, int row,
-                                                          int width) -> std::string {
+        [this, total_cols = col_widths.count, panel_mode, multi_headers](size_t col_idx, int row,
+                                                                         int width) -> std::string {
             if (col_idx < workbench_slots_.size()) {
                 const auto page = workbench_slots_[col_idx].page;
                 const bool is_focused = (col_idx == focused_slot_index_);
-                const bool has_multi_inspectors =
-                    (total_cols > 2) || (total_cols == 2 && workbench_slots_.size() >= 2 &&
-                                         workbench_slots_[1].page != TuiRegPage::CONSOLE);
 
                 if (page == TuiRegPage::CONSOLE) {
-                    if (total_cols > 2) {
+                    if (multi_headers) {
                         if (row == 0) {
                             return inspector_pane_->render_column_header(
                                 static_cast<int>(col_idx),
@@ -736,8 +738,7 @@ void Tui::render(bool force) {
                 }
                 inspector_pane_->set_page(page);
                 return inspector_pane_->render_column_row(row, width, static_cast<int>(col_idx),
-                                                          total_cols, is_focused,
-                                                          has_multi_inspectors);
+                                                          total_cols, is_focused, multi_headers);
             }
             return "";
         });
@@ -1088,11 +1089,17 @@ void Tui::handle_mouse(int x, int y, int b) {
             }
             return;
         }
+        const bool col_has_header =
+            (col_widths.count > 2) || (col_widths.count == 2 && workbench_slots_.size() >= 2 &&
+                                       (workbench_slots_[1].page != TuiRegPage::CONSOLE ||
+                                        workbench_slots_[0].page == TuiRegPage::CONSOLE));
+
+        if (b == 0 && y == 4 && col_has_header) {
+            open_tool_picker(clicked_col);
+            return;
+        }
+
         if (page == TuiRegPage::CONSOLE) {
-            if (col_widths.count > 2 && b == 0 && y == 4) {
-                cycle_slot_page(clicked_col);
-                return;
-            }
             if (b == 0) {
                 render(false);
             }
@@ -1101,10 +1108,6 @@ void Tui::handle_mouse(int x, int y, int b) {
 
         if (clicked_col < workbench_slots_.size()) {
             inspector_pane_->set_page(workbench_slots_[clicked_col].page);
-        }
-        if (col_widths.count > 2 && b == 0 && y == 4) {
-            cycle_slot_page(clicked_col);
-            return;
         }
         handle_mouse_inspector(col_local_x + 2, y, b, col_widths.count > 2);
     }
@@ -1383,6 +1386,54 @@ void Tui::cycle_slot_page(size_t slot_idx) {
     auto const next = inspector_pane_->next_page_for_slot(workbench_slots_[slot_idx].page,
                                                           machine_.runtime_profile.is_cycle_mode());
     set_workbench_slot_page(slot_idx, next);
+}
+
+void Tui::open_tool_picker(size_t slot_idx) {
+    if (workbench_slots_.empty()) return;
+    if (slot_idx >= workbench_slots_.size()) slot_idx = 0;
+    focused_slot_index_ = slot_idx;
+    modal_.open_tool_picker(static_cast<int>(slot_idx), workbench_slots_[slot_idx].page);
+    render(true);
+}
+
+void Tui::swap_workbench_slots(size_t slot_a, size_t slot_b) {
+    if (slot_a >= workbench_slots_.size() || slot_b >= workbench_slots_.size() ||
+        slot_a == slot_b) {
+        return;
+    }
+    std::swap(workbench_slots_[slot_a], workbench_slots_[slot_b]);
+    if (inspector_pane_) {
+        inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
+    }
+    update_trace_active_cache();
+    set_status_override(std::format("Swapped Column {} and Column {}", slot_a + 1, slot_b + 1));
+    render(true);
+}
+
+void Tui::move_focused_column_left() {
+    if (workbench_slots_.size() <= 1 || focused_slot_index_ == 0) return;
+    const size_t prev = focused_slot_index_ - 1;
+    std::swap(workbench_slots_[focused_slot_index_], workbench_slots_[prev]);
+    focused_slot_index_ = prev;
+    if (inspector_pane_) {
+        inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
+    }
+    update_trace_active_cache();
+    set_status_override(std::format("Moved Column to Position {}", focused_slot_index_ + 1));
+    render(true);
+}
+
+void Tui::move_focused_column_right() {
+    if (workbench_slots_.size() <= 1 || focused_slot_index_ + 1 >= workbench_slots_.size()) return;
+    const size_t next = focused_slot_index_ + 1;
+    std::swap(workbench_slots_[focused_slot_index_], workbench_slots_[next]);
+    focused_slot_index_ = next;
+    if (inspector_pane_) {
+        inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
+    }
+    update_trace_active_cache();
+    set_status_override(std::format("Moved Column to Position {}", focused_slot_index_ + 1));
+    render(true);
 }
 
 auto Tui::focused_page() const -> TuiRegPage {
@@ -2103,6 +2154,30 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         }
         return true;
     }
+    if (mtype == ModalType::ToolPicker) {
+        if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
+            close_modal();
+            return true;
+        }
+        if (key == simrv::tui::TuiKey::Tab) {
+            modal_.cycle_tool_picker_slot(static_cast<int>(workbench_slots_.size()));
+            render(true);
+            return true;
+        }
+        if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline || byte == ' ') {
+            submit_modal();
+            return true;
+        }
+        char acc = static_cast<char>(std::tolower(byte));
+        auto found_page = modals::ToolPickerModal::find_by_accelerator(acc);
+        if (found_page.has_value()) {
+            auto const target_slot = static_cast<size_t>(modal_.get_tool_picker_slot());
+            set_workbench_slot_page(target_slot, *found_page);
+            close_modal();
+            return true;
+        }
+        return true;
+    }
 
     if (key == simrv::tui::TuiKey::F10) {
         machine_.request_exit();
@@ -2325,7 +2400,28 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         case simrv::tui::TuiKey::N:
             select_next_hart();
             return true;
+        case simrv::tui::TuiKey::CtrlW:
+            open_tool_picker(focused_slot_index_);
+            return true;
+        case simrv::tui::TuiKey::Less:
+            move_focused_column_left();
+            return true;
+        case simrv::tui::TuiKey::Greater:
+            move_focused_column_right();
+            return true;
         default:
+            if (byte == '<') {
+                move_focused_column_left();
+                return true;
+            }
+            if (byte == '>') {
+                move_focused_column_right();
+                return true;
+            }
+            if (byte == 0x17) {
+                open_tool_picker(focused_slot_index_);
+                return true;
+            }
             if (byte == '1') {
                 set_reg_page(TuiRegPage::GPR);
                 return true;
@@ -2680,6 +2776,15 @@ void Tui::execute_footer_action(TuiFooterAction action) {
         case TuiFooterAction::ToggleExecutionMode:
             toggle_execution_mode();
             break;
+        case TuiFooterAction::OpenToolPicker:
+            open_tool_picker(focused_slot_index_);
+            break;
+        case TuiFooterAction::MoveColumnLeft:
+            move_focused_column_left();
+            break;
+        case TuiFooterAction::MoveColumnRight:
+            move_focused_column_right();
+            break;
     }
 }
 
@@ -2708,6 +2813,12 @@ auto Tui::handle_alt_key(char key, uint8_t byte) -> bool {
             return true;
         case '4':
             apply_layout_preset(LayoutPreset::MemoryInterconnect);
+            return true;
+        case '<':
+            move_focused_column_left();
+            return true;
+        case '>':
+            move_focused_column_right();
             return true;
         case 'p':
         case 'P':
@@ -2764,6 +2875,15 @@ auto Tui::handle_alt_key(char key, uint8_t byte) -> bool {
 }
 
 auto Tui::handle_arrow_key_sequence() -> bool {
+    if (esc_buf_ == "\033[1;3D" || esc_buf_ == "\033\033[D") {
+        move_focused_column_left();
+        return true;
+    }
+    if (esc_buf_ == "\033[1;3C" || esc_buf_ == "\033\033[C") {
+        move_focused_column_right();
+        return true;
+    }
+
     if (esc_buf_ == "\033[1;2C" || esc_buf_ == "\033[1;2D") {
         if (!is_modal_active() && inspector_pane_) {
             inspector_pane_->set_page(focused_page());
@@ -2783,6 +2903,11 @@ auto Tui::handle_arrow_key_sequence() -> bool {
     const bool left = esc_buf_ == "\033[D" || esc_buf_ == "\033OD";
     if (up || down) {
         const int direction = up ? -1 : 1;
+        if (get_active_modal() == ModalType::ToolPicker) {
+            modal_.move_tool_picker_cursor(direction);
+            render(true);
+            return true;
+        }
         if (get_active_modal() == ModalType::Glossary) {
             modal_.scroll_glossary_content(2 * direction);
             render(true);
@@ -2819,6 +2944,11 @@ auto Tui::handle_arrow_key_sequence() -> bool {
         }
     } else if (left || right) {
         const int direction = left ? -1 : 1;
+        if (get_active_modal() == ModalType::ToolPicker) {
+            modal_.cycle_tool_picker_slot(static_cast<int>(workbench_slots_.size()));
+            render(true);
+            return true;
+        }
         if (get_active_modal() == ModalType::Glossary) {
             modal_.move_glossary_topic(direction);
             render(true);

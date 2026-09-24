@@ -28,6 +28,7 @@ simrv_add_component(simrv-tui
   modals/SettingsModal.cpp
   modals/SystemConfigModal.cpp
   modals/StepModal.cpp
+  modals/ToolPickerModal.cpp
   panels/InspectorPane.cpp
   panels/InspectorPaneRegs.cpp
   panels/InspectorPanePipeline.cpp

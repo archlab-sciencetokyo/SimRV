@@ -29,6 +29,7 @@
 #include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/tui/modals/SettingsModal.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
+#include "simrv/tui/modals/ToolPickerModal.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/tui/panels/StatusBar.hpp"
 #include "simrv/tui/panels/TerminalPane.hpp"
@@ -201,7 +202,7 @@ void test_utf8_and_theme_helpers() {
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 32, "all key actions have registry entries");
+    expect(bindings.size() == 35, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
     std::set<char> claimed_chars;
     for (const auto& binding : bindings) {
@@ -1853,6 +1854,102 @@ void test_tui_differential_rendering_and_throttling() {
     expect(!tui.is_trace_active(), "trace capture becomes inactive when TRACE is replaced");
 }
 
+void test_multi_column_workbench_tools_and_swapping() {
+    // 1. ToolPickerModal catalog and accelerator lookup
+    const auto& tools = simrv::tui::modals::ToolPickerModal::all_tools();
+    expect(tools.size() == 13, "tool picker provides 13 selectable workbench tools");
+    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('g') ==
+               simrv::tui::TuiRegPage::GPR,
+           "accelerator 'g' maps to GPR");
+    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('f') ==
+               simrv::tui::TuiRegPage::FPR,
+           "accelerator 'f' maps to FPR");
+    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('v') ==
+               simrv::tui::TuiRegPage::VEC,
+           "accelerator 'v' maps to VEC");
+    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('s') ==
+               simrv::tui::TuiRegPage::STACK,
+           "accelerator 's' maps to STACK");
+    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('c') ==
+               simrv::tui::TuiRegPage::CACHE,
+           "accelerator 'c' maps to CACHE");
+    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('m') ==
+               simrv::tui::TuiRegPage::TLB,
+           "accelerator 'm' maps to TLB");
+    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('b') ==
+               simrv::tui::TuiRegPage::BUS,
+           "accelerator 'b' maps to BUS");
+    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('p') ==
+               simrv::tui::TuiRegPage::PIPELINE,
+           "accelerator 'p' maps to PIPELINE");
+    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('d') ==
+               simrv::tui::TuiRegPage::BPRED,
+           "accelerator 'd' maps to BPRED");
+    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('z') ==
+               simrv::tui::TuiRegPage::HAZARD,
+           "accelerator 'z' maps to HAZARD");
+    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('x') ==
+               simrv::tui::TuiRegPage::TRACE,
+           "accelerator 'x' maps to TRACE");
+    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('e') ==
+               simrv::tui::TuiRegPage::EXPLAIN,
+           "accelerator 'e' maps to EXPLAIN");
+    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('t') ==
+               simrv::tui::TuiRegPage::CONSOLE,
+           "accelerator 't' maps to CONSOLE");
+    expect(!simrv::tui::modals::ToolPickerModal::find_by_accelerator('q').has_value(),
+           "accelerator 'q' is not bound to a tool (reserved for exit/close)");
+
+    // 2. Tui workbench slot swapping and movement
+    simrv::core::Machine machine;
+    simrv::tui::Tui tui(machine);
+    simrv::tui::TuiTestAccess::init_panes(tui, machine);
+    simrv::tui::TuiTestAccess::set_cached_term_width(tui, 120);
+    simrv::tui::TuiTestAccess::set_cached_term_height(tui, 30);
+    tui.apply_layout_preset(simrv::tui::LayoutPreset::GeneralDebug);
+
+    const auto& slots = tui.get_workbench_slots();
+    expect(slots.size() >= 2, "workbench has at least 2 slots in debug preset");
+    expect(slots[0].page == simrv::tui::TuiRegPage::GPR, "slot 0 is GPR");
+    expect(slots[1].page == simrv::tui::TuiRegPage::CONSOLE, "slot 1 is CONSOLE");
+
+    // Swap slots: slot 0 becomes CONSOLE, slot 1 becomes GPR
+    tui.swap_workbench_slots(0, 1);
+    expect(slots[0].page == simrv::tui::TuiRegPage::CONSOLE, "slot 0 is now CONSOLE after swap");
+    expect(slots[1].page == simrv::tui::TuiRegPage::GPR, "slot 1 is now GPR after swap");
+
+    // Move focused column right/left
+    expect(tui.focused_slot() == 0, "focus starts at slot 0");
+    tui.move_focused_column_right();
+    expect(tui.focused_slot() == 1, "focused slot moves to 1");
+    expect(slots[0].page == simrv::tui::TuiRegPage::GPR, "GPR is back at slot 0");
+    expect(slots[1].page == simrv::tui::TuiRegPage::CONSOLE, "CONSOLE is back at slot 1");
+
+    // Boundary check: cannot move right past the end
+    tui.move_focused_column_right();
+    expect(tui.focused_slot() == 1, "focused slot stays at 1 at right boundary");
+
+    // Move left back to 0
+    tui.move_focused_column_left();
+    expect(tui.focused_slot() == 0, "focused slot moved back to 0");
+    expect(slots[0].page == simrv::tui::TuiRegPage::CONSOLE, "CONSOLE moved back to slot 0");
+
+    // 3. Tool picker modal invocation and submission
+    tui.open_tool_picker(0);
+    expect(tui.is_modal_active(), "tool picker modal is active");
+    expect(tui.get_active_modal() == simrv::tui::ModalType::ToolPicker,
+           "active modal is ToolPicker");
+
+    auto& modal = simrv::tui::TuiTestAccess::modal(tui);
+    expect(modal.get_tool_picker_slot() == 0, "modal targets slot 0");
+    modal.set_tool_picker_cursor(4);  // index 4 is CACHE
+    expect(modal.get_selected_tool_page() == simrv::tui::TuiRegPage::CACHE,
+           "cursor at index 4 selects CACHE");
+    tui.submit_modal();
+    expect(!tui.is_modal_active(), "modal is closed after submit");
+    expect(slots[0].page == simrv::tui::TuiRegPage::CACHE, "slot 0 page updated to CACHE");
+}
+
 }  // namespace
 
 int main() {
@@ -1887,6 +1984,7 @@ int main() {
     test_memory_inspector_and_custom_address();
     test_responsive_labels_and_header();
     test_tui_differential_rendering_and_throttling();
+    test_multi_column_workbench_tools_and_swapping();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;
