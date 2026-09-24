@@ -37,6 +37,7 @@
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/tui/panels/StatusBar.hpp"
 #include "simrv/tui/panels/TerminalPane.hpp"
+#include "simrv/util/FormatUtil.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::tui {
@@ -551,8 +552,15 @@ void Tui::render_build_lines(int inspector_width, int terminal_width, int num_ro
         }
     }
 
-    int const log_width = std::max(10, inspector_width - 2);
-    std::vector<std::string> log_lines = log_buffer_.get_wrapped_lines(log_width, 100);
+    bool const log_visible = (num_rows >= 15 && !workbench_slots_.empty() &&
+                              workbench_slots_[0].page != TuiRegPage::EXPLAIN &&
+                              workbench_slots_[0].page != TuiRegPage::TRACE);
+    if (log_visible) {
+        int const log_width = std::max(10, inspector_width - 2);
+        inspector_pane_->set_log_lines(log_buffer_.get_wrapped_lines(log_width, 100));
+    } else {
+        inspector_pane_->set_log_lines({});
+    }
 
     inspector_pane_->set_selected_hart(selected_hart_);
     inspector_pane_->set_kips(kips_);
@@ -563,7 +571,6 @@ void Tui::render_build_lines(int inspector_width, int terminal_width, int num_ro
     inspector_pane_->set_visible_rows(num_rows);
     inspector_pane_->set_active_runtime(static_cast<double>(runtime_duration_.count()) / 1000000.0);
     inspector_pane_->set_trace_buffer(&trace_buffer_);
-    inspector_pane_->set_log_lines(std::move(log_lines));
     inspector_pane_->refresh_execution_snapshot();
     terminal_pane_->set_lines(lines_to_draw_);
     terminal_pane_->set_scroll_offset(scroll_offset_);
@@ -604,7 +611,7 @@ void Tui::render_draw_sixel(int inspector_width, int terminal_width, int num_row
 }
 
 void Tui::render(bool force) {
-    if (ui_running_.load(std::memory_order_acquire) &&
+    if (ui_running_.load(std::memory_order_acquire) && ui_thread_.joinable() &&
         (std::this_thread::get_id() != ui_thread_.get_id() ||
          processing_ui_input_.load(std::memory_order_acquire))) {
         if (force) full_render_requested_.store(true, std::memory_order_release);
@@ -646,11 +653,21 @@ void Tui::render(bool force) {
     // resizes, explicit renders, and expiring status messages still invalidate it immediately.
     if (!force && !resized && is_paused() && !frame_dirty_ &&
         !trace_or_livetrace_active_.load(std::memory_order_relaxed) && !status_expiring) {
+        render_stats_.suppressed_frames++;
         return;
     }
 
-    if (!force && !resized && elapsed_ms < std::max(1u, 1000 / std::clamp(target_fps(), 1u, 120u)))
+    const auto min_interval_ms = std::max(1u, 1000 / std::clamp(target_fps(), 1u, 120u));
+    if (ui_running_.load(std::memory_order_relaxed) && !resized && !status_expiring &&
+        elapsed_ms < min_interval_ms) {
+        frame_dirty_ = true;
+        render_stats_.throttled_frames++;
         return;
+    }
+    if (!force && !resized && elapsed_ms < min_interval_ms) {
+        render_stats_.suppressed_frames++;
+        return;
+    }
     frame_dirty_ = false;
     last_draw_time_ = now;
     if (resized) g_resized = 0;
@@ -661,9 +678,13 @@ void Tui::render(bool force) {
 
     if (cached_term_width_ <= 0 || cached_term_height_ <= 0 || resized) {
         struct winsize w{};
-        ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-        cached_term_width_ = w.ws_col;
-        cached_term_height_ = w.ws_row;
+        if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0 && w.ws_row > 0) {
+            cached_term_width_ = w.ws_col;
+            cached_term_height_ = w.ws_row;
+        } else {
+            if (cached_term_width_ <= 0) cached_term_width_ = 80;
+            if (cached_term_height_ <= 0) cached_term_height_ = 24;
+        }
     }
     int const term_width = cached_term_width_;
     int const term_height = cached_term_height_;
@@ -723,30 +744,54 @@ void Tui::render(bool force) {
         });
     modal_.render_overlay(new_lines, term_width, term_height);
 
-    std::string update_cmds = "\033[?25l";
+    const bool geometry_changed = (last_screen_lines_.size() != new_lines.size());
+    const bool is_full_redraw = geometry_changed || resized || full_screen_redraw_requested_;
+    full_screen_redraw_requested_ = false;
+
+    std::string update_cmds;
     update_cmds.reserve(static_cast<std::size_t>(term_width) * new_lines.size() / 2);
-    if (force || last_screen_lines_.size() != new_lines.size()) {
-        update_cmds += "\033[H";
+
+    if (is_full_redraw) {
+        update_cmds += "\033[?25l\033[H";
         for (size_t i = 0; i < new_lines.size(); ++i) {
             update_cmds += std::format("\033[{};1H{}", i + 1, new_lines[i]);
+            render_stats_.lines_drawn++;
         }
         last_screen_lines_ = new_lines;
+        render_stats_.full_redraws++;
     } else {
+        bool any_line_changed = false;
         for (size_t i = 0; i < new_lines.size(); ++i) {
             if (sixel_supported_ && panel_mode == TuiRightPanelMode::Display &&
                 layout_ == TuiLayout::Split && i >= 3 && i < 3 + static_cast<size_t>(num_rows))
                 continue;
             if (new_lines[i] != last_screen_lines_[i]) {
+                if (!any_line_changed) {
+                    update_cmds += "\033[?25l";
+                    any_line_changed = true;
+                }
                 update_cmds += std::format("\033[{};1H{}", i + 1, new_lines[i]);
                 last_screen_lines_[i] = new_lines[i];
+                render_stats_.lines_drawn++;
+            } else {
+                render_stats_.lines_skipped++;
             }
         }
+        if (any_line_changed) {
+            render_stats_.differential_redraws++;
+        }
     }
+
+    int target_cursor_x = -1;
+    int target_cursor_y = -1;
+    bool target_cursor_visible = false;
 
     if (sixel_supported_ && panel_mode == TuiRightPanelMode::Display &&
         layout_ == TuiLayout::Split) {
         render_draw_sixel(inspector_width, terminal_width, num_rows, update_cmds);
-        update_cmds += std::format("\033[{};1H", term_height);
+        target_cursor_y = term_height;
+        target_cursor_x = 1;
+        target_cursor_visible = false;
     } else if (panel_mode == TuiRightPanelMode::Terminal && !modal_.is_active()) {
         std::optional<size_t> console_slot_idx;
         for (size_t c = 0; c < workbench_slots_.size() && c < col_widths.count; ++c) {
@@ -768,13 +813,38 @@ void Tui::render(bool force) {
             int const line_offset = cursor_abs_line - start_line;
             if (line_offset >= 0 && line_offset < term_content_rows) {
                 int const content_start_y = (col_widths.count > 2) ? 5 : 4;
-                int const target_y = content_start_y + line_offset;
-                update_cmds += std::format("\033[{};{}H", target_y, target_x);
+                target_cursor_y = content_start_y + line_offset;
+                target_cursor_x = target_x;
                 if (!paused_ && vt_.is_cursor_visible()) {
-                    update_cmds += "\033[?25h";
+                    target_cursor_visible = true;
                 }
             }
         }
+    }
+
+    const bool cursor_changed =
+        (target_cursor_x != last_cursor_x_ || target_cursor_y != last_cursor_y_ ||
+         target_cursor_visible != last_cursor_visible_);
+
+    if (cursor_changed || is_full_redraw || !update_cmds.empty()) {
+        if (target_cursor_x > 0 && target_cursor_y > 0) {
+            update_cmds += std::format("\033[{};{}H", target_cursor_y, target_cursor_x);
+            if (target_cursor_visible) {
+                update_cmds += "\033[?25h";
+            } else {
+                update_cmds += "\033[?25l";
+            }
+        } else {
+            update_cmds += "\033[?25l";
+        }
+        last_cursor_x_ = target_cursor_x;
+        last_cursor_y_ = target_cursor_y;
+        last_cursor_visible_ = target_cursor_visible;
+    }
+
+    if (update_cmds.empty()) {
+        render_stats_.suppressed_frames++;
+        return;
     }
 
     write_all(STDOUT_FILENO, update_cmds);
@@ -1507,10 +1577,25 @@ void Tui::write_guest_input(uint8_t byte) {
     }
 }
 
+auto Tui::is_page_visible(TuiRegPage page) const noexcept -> bool {
+    if (!workbench_slots_.empty()) {
+        for (const auto& slot : workbench_slots_) {
+            if (slot.page == page) return true;
+        }
+        return false;
+    }
+    return inspector_pane_ && inspector_pane_->get_page() == page;
+}
+
 void Tui::update_trace_active_cache() {
-    const bool trace_page_focused = focused_slot_index_ < workbench_slots_.size() &&
-                                    workbench_slots_[focused_slot_index_].page == TuiRegPage::TRACE;
-    trace_or_livetrace_active_.store(trace_page_focused, std::memory_order_release);
+    const bool trace_visible = is_page_visible(TuiRegPage::TRACE);
+    trace_or_livetrace_active_.store(trace_visible, std::memory_order_release);
+
+    const bool detail_visible =
+        trace_visible || is_page_visible(TuiRegPage::PIPELINE) ||
+        is_page_visible(TuiRegPage::HAZARD) || is_page_visible(TuiRegPage::BPRED) ||
+        is_page_visible(TuiRegPage::DISASM) || is_page_visible(TuiRegPage::EXPLAIN);
+    pipeline_or_detail_visible_.store(detail_visible, std::memory_order_release);
 }
 
 void Tui::record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa::OperationId op_id,

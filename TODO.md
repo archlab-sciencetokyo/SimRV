@@ -19,7 +19,7 @@ General Availability (GA) release.
 - [x] **Decode Cache Footprint & Dispatch Optimization**:
   - Optimize memory layout of `CachedOp` to reduce per-entry footprint across L1/L2 host cache hierarchies.
   - Streamline the dense opcode dispatch table across fast-path and cycle-accurate fetch/decompress stages.
-- [ ] **TUI Differential Rendering Throttling**:
+- [x] **TUI Differential Rendering Throttling**:
   - Throttle updates for non-visible or off-screen inspector sub-views during continuous execution.
   - Minimize ANSI terminal escape sequence generation during high-speed stepping or headless execution bursts.
 

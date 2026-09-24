@@ -47,6 +47,10 @@ class InspectorPane : public TuiWidget {
         cached_gpr_.fill(0);
         cached_fpr_.fill(0);
         cached_vec_.fill({});
+        cached_left_rows_.fill("");
+        for (auto& rows : cached_page_rows_) {
+            rows.fill("");
+        }
     }
     ~InspectorPane() override = default;
 
@@ -245,7 +249,8 @@ class InspectorPane : public TuiWidget {
     std::array<uint64_t, 32> cached_fpr_{};
     std::array<simrv::core::VectorRegister, 32> cached_vec_{};
     simrv::pipeline::Scoreboard projected_scoreboard_{};
-    std::array<std::string, 80> cached_left_rows_;
+    std::array<std::array<std::string, 80>, 16> cached_page_rows_{};
+    std::array<std::string, 80> cached_left_rows_{};
     int last_width_ = 0;
 
     uint64_t kips_ = 0;

@@ -95,6 +95,18 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
         return paused_.load(std::memory_order_relaxed);
     }
 
+    struct RenderStats {
+        uint64_t full_redraws = 0;
+        uint64_t differential_redraws = 0;
+        uint64_t lines_drawn = 0;
+        uint64_t lines_skipped = 0;
+        uint64_t throttled_frames = 0;
+        uint64_t suppressed_frames = 0;
+    };
+    [[nodiscard]] auto render_stats() const noexcept -> const RenderStats& { return render_stats_; }
+    void request_full_screen_redraw() noexcept { full_screen_redraw_requested_ = true; }
+    [[nodiscard]] auto is_page_visible(TuiRegPage page) const noexcept -> bool;
+
     void set_paused(bool p) override;
     [[nodiscard]] auto is_paused() const -> bool override {
         return paused_.load(std::memory_order_relaxed);
@@ -102,9 +114,12 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     /// Rich per-instruction state is useful while stopped or deliberately stepped slowly.  At
     /// higher rates the UI renders sampled state instead, keeping the simulator hot path lean.
     [[nodiscard]] auto captures_execution_detail() const -> bool override {
-        return is_trace_active() || is_paused() ||
-               step_delay_us_.load(std::memory_order_relaxed) >=
-                   (1'000'000U / kDetailedExecutionMaxHz);
+        if (is_paused() || is_trace_active()) return true;
+        if (step_delay_us_.load(std::memory_order_relaxed) >=
+            (1'000'000U / kDetailedExecutionMaxHz)) {
+            return pipeline_or_detail_visible_.load(std::memory_order_relaxed);
+        }
+        return false;
     }
     [[nodiscard]] auto step_delay_us() const -> uint64_t override {
         return step_delay_us_.load(std::memory_order_relaxed);
@@ -295,10 +310,16 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     std::atomic<TuiRightPanelMode> right_panel_mode_{TuiRightPanelMode::Terminal};
     std::atomic<uint64_t> current_instruction_count_{0};
     std::atomic<bool> trace_or_livetrace_active_{false};
+    std::atomic<bool> pipeline_or_detail_visible_{false};
     bool render_in_progress_{false};
     std::string status_override_;
     std::chrono::steady_clock::time_point status_override_expires_at_{};
     int scroll_offset_{0};
+    int last_cursor_x_{-1};
+    int last_cursor_y_{-1};
+    bool last_cursor_visible_{false};
+    bool full_screen_redraw_requested_{true};
+    RenderStats render_stats_{};
     SelectionState selection_;
     std::chrono::steady_clock::time_point last_speed_update_{std::chrono::steady_clock::now()};
     uint64_t last_icount_ = 0;

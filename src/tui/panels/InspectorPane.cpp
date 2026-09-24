@@ -147,6 +147,12 @@ auto InspectorPane::render_active_spinner(int logical_row, int width) -> std::st
         return format_to_width(std::string(static_cast<std::size_t>(left_padding), ' ') + banner,
                                width);
     }
+    const auto p_idx = static_cast<std::size_t>(page_) % cached_page_rows_.size();
+    if (logical_row >= 0 &&
+        static_cast<std::size_t>(logical_row) < cached_page_rows_[p_idx].size()) {
+        const auto& cached = cached_page_rows_[p_idx].at(static_cast<std::size_t>(logical_row));
+        if (!cached.empty()) return cached;
+    }
     if (logical_row >= 0 && static_cast<std::size_t>(logical_row) < cached_left_rows_.size()) {
         return cached_left_rows_.at(static_cast<std::size_t>(logical_row));
     }
@@ -175,6 +181,9 @@ void InspectorPane::set_selected_hart(size_t hart) {
         selected_hart_ = hart % machine_.num_harts();
     } else {
         selected_hart_ = 0;
+    }
+    for (auto& rows : cached_page_rows_) {
+        rows.fill("");
     }
     cached_left_rows_.fill("");
     update_cache();
@@ -808,8 +817,15 @@ auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows,
     }
 
     int const max_content_rows = get_visible_content_rows();
+    int const total_cols = content_total_columns(width);
+    int const render_width = std::max(width, total_cols);
+
+    std::vector<std::string> explain_rows;
+    if (page_ == TuiRegPage::EXPLAIN) {
+        explain_rows = get_explain_rows(render_width);
+    }
     int const total_logical_rows =
-        (page_ == TuiRegPage::EXPLAIN) ? static_cast<int>(get_explain_rows(width).size())
+        (page_ == TuiRegPage::EXPLAIN) ? static_cast<int>(explain_rows.size())
         : (page_ == TuiRegPage::TRACE) ? static_cast<int>(trace_buffer_ ? trace_buffer_->size() : 0)
                                        : get_total_rows(width);
 
@@ -819,22 +835,18 @@ auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows,
     int const content_row_idx = row_idx - header_rows;
     int const logical_row = content_row_idx + sv.offset_y();
 
-    int const total_cols = content_total_columns(width);
-    int const render_width = std::max(width, total_cols);
-
     if (page_ == TuiRegPage::TRACE || page_ == TuiRegPage::EXPLAIN) {
-        return sv.render_row(
-            content_row_idx, width,
-            [this, render_width](framework::RowIndex r, framework::ColumnIndex, int) {
-                if (page_ == TuiRegPage::TRACE) {
-                    return render_trace_row(r, render_width);
-                }
-                auto explain_rows = get_explain_rows(render_width);
-                if (r >= 0 && r < static_cast<int>(explain_rows.size())) {
-                    return explain_rows.at(static_cast<std::size_t>(r));
-                }
-                return std::string{};
-            });
+        return sv.render_row(content_row_idx, width,
+                             [this, render_width, &explain_rows](framework::RowIndex r,
+                                                                 framework::ColumnIndex, int) {
+                                 if (page_ == TuiRegPage::TRACE) {
+                                     return render_trace_row(r, render_width);
+                                 }
+                                 if (r >= 0 && r < static_cast<int>(explain_rows.size())) {
+                                     return explain_rows.at(static_cast<std::size_t>(r));
+                                 }
+                                 return std::string{};
+                             });
     }
 
     if (sv.can_scroll_up() && content_row_idx == 0) {
@@ -891,6 +903,10 @@ auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows,
     }
 
     std::string res = finish_row(get_row_uncached(logical_row, render_width));
+    const auto p_idx = static_cast<std::size_t>(page_) % cached_page_rows_.size();
+    if (static_cast<std::size_t>(logical_row) < cached_page_rows_[p_idx].size()) {
+        cached_page_rows_[p_idx].at(static_cast<std::size_t>(logical_row)) = res;
+    }
     if (static_cast<std::size_t>(logical_row) < cached_left_rows_.size()) {
         cached_left_rows_.at(static_cast<std::size_t>(logical_row)) = res;
     }

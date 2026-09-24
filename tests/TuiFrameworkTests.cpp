@@ -42,6 +42,7 @@ struct TuiTestAccess {
     }
     static auto modal(Tui& tui) -> TuiModal& { return tui.modal_; }
     static void set_cached_term_width(Tui& tui, int w) { tui.cached_term_width_ = w; }
+    static void set_cached_term_height(Tui& tui, int h) { tui.cached_term_height_ = h; }
     static void drain_trace(Tui& tui) { tui.drain_trace_records(); }
     static auto trace_rows(const Tui& tui) -> const std::vector<std::string>& {
         return tui.trace_buffer_;
@@ -51,6 +52,16 @@ struct TuiTestAccess {
         tui.inspector_pane_ = std::make_unique<InspectorPane>(machine, &tui);
         tui.terminal_pane_ = std::make_unique<TerminalPane>();
     }
+    static void set_last_draw_time(Tui& tui, std::chrono::steady_clock::time_point t) {
+        tui.last_draw_time_ = t;
+    }
+    static void set_ui_running(Tui& tui, bool r) {
+        tui.ui_running_.store(r, std::memory_order_relaxed);
+    }
+    static auto last_screen_lines(const Tui& tui) -> const std::vector<std::string>& {
+        return tui.last_screen_lines_;
+    }
+    static void update_cache(Tui& tui) { tui.update_cache(); }
 };
 }  // namespace simrv::tui
 
@@ -1750,6 +1761,92 @@ void test_responsive_labels_and_header() {
     expect(tui.get_scroll_offset() == 0, "live reset_scroll clears offset immediately");
 }
 
+void test_tui_differential_rendering_and_throttling() {
+    using namespace simrv::tui;
+    using namespace simrv::core;
+
+    Machine machine(MachineConfig{.execution = {.appmode = true}, .tui = {.enabled = true}});
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.primary_hart().reset();
+
+    constexpr Instruction addi_inst = 0x00100093;  // addi x1, x0, 1
+    std::memcpy(ram.data(), &addi_inst, sizeof(addi_inst));
+    machine.primary_hart().state().pc = simrv::memory::kDramBaseAddress;
+
+    Tui tui(machine);
+    TuiTestAccess::init_panes(tui, machine);
+    TuiTestAccess::set_cached_term_width(tui, 120);
+    TuiTestAccess::set_cached_term_height(tui, 30);
+
+    // Initial render must perform a full redraw to establish baseline screen geometry
+    tui.render(true);
+    const auto& stats = tui.render_stats();
+    expect(stats.full_redraws == 1, "initial render performs exactly 1 full redraw");
+    expect(stats.lines_drawn > 0, "initial render draws screen lines");
+    expect(stats.differential_redraws == 0, "initial render has 0 differential redraws");
+
+    const uint64_t initial_drawn = stats.lines_drawn;
+
+    // Single step instruction
+    machine.step_sync();
+    TuiTestAccess::update_cache(tui);
+    tui.render(true);
+
+    // Differential rendering should now engage: only changed lines are drawn, unchanged lines are
+    // skipped
+    expect(stats.differential_redraws == 1,
+           "stepping triggers a differential redraw rather than full redraw");
+    expect(stats.full_redraws == 1, "no additional full redraw occurred during single step");
+    expect(stats.lines_skipped > 0, "differential render skips unchanged screen lines");
+    expect(stats.lines_drawn - initial_drawn < initial_drawn,
+           "differential render draws fewer lines than a full screen");
+
+    // Identical frame render without state change should be suppressed
+    const uint64_t drawn_before_suppress = stats.lines_drawn;
+    tui.render(false);
+    expect(stats.suppressed_frames > 0, "identical frame with no changes is suppressed");
+    expect(stats.lines_drawn == drawn_before_suppress, "suppressed frame draws 0 lines");
+
+    // High-speed execution burst throttling: when UI thread is running, rapid renders (<
+    // min_interval) throttle
+    TuiTestAccess::set_ui_running(tui, true);
+    TuiTestAccess::set_last_draw_time(tui, std::chrono::steady_clock::now());
+    tui.set_target_fps(30);  // 33ms interval
+
+    // Immediate render attempt within interval should be throttled
+    tui.render(true);
+    expect(stats.throttled_frames == 1,
+           "render within frame interval throttles to minimize ANSI generation");
+
+    // When interval elapses, next render should proceed
+    TuiTestAccess::set_last_draw_time(
+        tui, std::chrono::steady_clock::now() - std::chrono::milliseconds(50));
+    tui.render(true);
+    expect(stats.throttled_frames == 1, "render after interval expiration is not throttled");
+
+    TuiTestAccess::set_ui_running(tui, false);
+
+    // Sub-view visibility throttling during continuous execution
+    // Default slots: slot 0 = GPR, slot 1 = CONSOLE
+    expect(!tui.is_page_visible(TuiRegPage::TRACE),
+           "TRACE is not visible in default workbench layout");
+    expect(!tui.is_trace_active(), "trace capture is inactive when TRACE tab is not visible");
+    expect(!tui.is_page_visible(TuiRegPage::PIPELINE),
+           "PIPELINE is not visible in default workbench layout");
+
+    // Setting slot 1 to TRACE activates trace tracking
+    tui.set_workbench_slot_page(1, TuiRegPage::TRACE);
+    expect(tui.is_page_visible(TuiRegPage::TRACE), "TRACE is visible after slot page assignment");
+    expect(tui.is_trace_active(), "trace capture becomes active when TRACE tab is visible");
+
+    // Setting slot 1 to PIPELINE updates detail visibility
+    tui.set_workbench_slot_page(1, TuiRegPage::PIPELINE);
+    expect(tui.is_page_visible(TuiRegPage::PIPELINE),
+           "PIPELINE is visible after slot page assignment");
+    expect(!tui.is_trace_active(), "trace capture becomes inactive when TRACE is replaced");
+}
+
 }  // namespace
 
 int main() {
@@ -1783,6 +1880,7 @@ int main() {
     test_inspector_vector_csr_rows();
     test_memory_inspector_and_custom_address();
     test_responsive_labels_and_header();
+    test_tui_differential_rendering_and_throttling();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;
