@@ -6,7 +6,7 @@ General Availability (GA) release.
 
 ---
 
-## Milestone 1: 3.0.0-beta.2 — Performance Acceleration & TUI Hardening
+## Milestone 1: 3.0.0-beta.1 — Performance Acceleration & TUI Hardening
 
 **Target Window**: October 2026
 **Primary Goals**: Eliminate remaining hot-path execution bottlenecks, complete branch predictor optimizations, and polish interactive TUI 2D navigation.
