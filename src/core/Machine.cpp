@@ -776,6 +776,7 @@ void Machine::reset_state() {
     retired_instruction_count_.store(0, std::memory_order_relaxed);
     last_tui_check_cycles_ = 0;
     last_tui_update_ = {};
+    reset_realtime_anchor();
     execution_state_.store(
         tui_enabled() || debugger_enabled() ? ExecutionState::Paused : ExecutionState::Running,
         std::memory_order_release);
@@ -971,6 +972,7 @@ void Machine::resume() {
     if (is_shutdown_) {
         return;
     }
+    reset_realtime_anchor();
     debug_step_hart_.reset();
     execution_state_.store(ExecutionState::Running, std::memory_order_release);
     execution_state_.notify_all();
@@ -1184,6 +1186,8 @@ void Machine::run() {
 
     simrv::util::benchmark_event("ready", retired_instruction_count());
     if (!is_paused()) simrv::util::benchmark_event("resumed", retired_instruction_count());
+    reset_realtime_anchor();
+    bool was_paused = false;
     while (is_running() &&
            (persistent_control_ ||
             execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped)) {
@@ -1201,6 +1205,7 @@ void Machine::run() {
             pause();
 
         if (is_paused() && !is_stepping()) {
+            was_paused = true;
             if (execution_state() != ExecutionState::Paused) {
                 execution_state_.store(ExecutionState::Paused, std::memory_order_release);
             }
@@ -1214,6 +1219,10 @@ void Machine::run() {
                 control_event_generation_.wait(generation, std::memory_order_relaxed);
             }
             continue;
+        }
+        if (was_paused) {
+            was_paused = false;
+            reset_realtime_anchor();
         }
         if (telemetry_sink_) {
             telemetry_sink_->set_sim_thread_sleeping(false);
@@ -1243,6 +1252,7 @@ void Machine::run() {
                 uart->service_interrupts();
             }
             if (runtime_->gdb_stub) runtime_->gdb_stub->service_pending(*this);
+            pace_realtime();
             continue;
         }
 
@@ -1310,6 +1320,7 @@ void Machine::run() {
                 stop(StopReason::LockstepDivergence);
             }
         }
+        pace_realtime();
     }
 
     stop_runner();
@@ -1330,6 +1341,53 @@ void Machine::run() {
         uart->stop_pty();
     }
     if (runtime_->gdb_stub) runtime_->gdb_stub->stop();
+}
+
+void Machine::reset_realtime_anchor() noexcept {
+    realtime_anchor_host_ = std::chrono::steady_clock::now();
+    realtime_anchor_mtime_ = platform_time();
+    last_pace_check_mtime_ = realtime_anchor_mtime_;
+}
+
+void Machine::set_realtime_pacing_enabled(bool enabled) noexcept {
+    config.execution.realtime_pacing = enabled;
+    reset_realtime_anchor();
+}
+
+void Machine::pace_realtime() noexcept {
+    if (!config.execution.realtime_pacing || is_stepping()) {
+        return;
+    }
+    const uint64_t cur_mtime = platform_time();
+    if (cur_mtime < realtime_anchor_mtime_) {
+        reset_realtime_anchor();
+        return;
+    }
+    // 1 mtime tick = 100 ns (10 MHz timebase). Check pacing every 1 ms of virtual time (10,000
+    // ticks).
+    constexpr uint64_t kPaceIntervalTicks = 10'000;
+    if (cur_mtime < last_pace_check_mtime_ + kPaceIntervalTicks) {
+        return;
+    }
+    last_pace_check_mtime_ = cur_mtime;
+
+    const auto now = std::chrono::steady_clock::now();
+    const auto sim_elapsed_ns = static_cast<int64_t>((cur_mtime - realtime_anchor_mtime_) * 100);
+    const auto host_elapsed_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now - realtime_anchor_host_).count();
+
+    const int64_t lead_ns = sim_elapsed_ns - host_elapsed_ns;
+
+    if (lead_ns >= 1'000'000) {  // Simulation is ahead of host time by >= 1 ms
+        // Sleep to throttle down to host wall-clock time; cap each sleep slice at 20 ms
+        // so external events (quit, pause, terminal input) remain immediately responsive.
+        const auto sleep_ns = std::min<int64_t>(lead_ns, 20'000'000);
+        std::this_thread::sleep_for(std::chrono::nanoseconds(sleep_ns));
+    } else if (lead_ns < -50'000'000) {  // Lagging behind host time by > 50 ms
+        // Re-anchor baseline so simulation does not burst-speed catch up.
+        realtime_anchor_host_ = now;
+        realtime_anchor_mtime_ = cur_mtime;
+    }
 }
 
 void Machine::console_write(char ch) {

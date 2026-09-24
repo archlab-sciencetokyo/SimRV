@@ -52,6 +52,7 @@ struct ExecutionConfig {
     Counter trace_end = std::numeric_limits<Counter>::max();
     Counter enabletimer = std::numeric_limits<Counter>::max();
     Counter memimg_cycle = std::numeric_limits<Counter>::max();
+    bool realtime_pacing = false;
 };
 
 struct TuiConfig {
@@ -230,6 +231,12 @@ struct MachineConfig {
     template <typename Self>
     constexpr auto&& with_platform_profile(this Self&& self, PlatformProfile profile) noexcept {
         self.platform_profile = profile;
+        return std::forward<Self>(self);
+    }
+
+    template <typename Self>
+    constexpr auto&& with_realtime_pacing(this Self&& self, bool enabled) noexcept {
+        self.execution.realtime_pacing = enabled;
         return std::forward<Self>(self);
     }
 };

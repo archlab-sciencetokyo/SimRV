@@ -4,6 +4,7 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/MachineConfig.hpp"
 #include "simrv/core/Telemetry.hpp"
+#include "simrv/util/CliParser.hpp"
 
 namespace {
 
@@ -154,9 +155,55 @@ auto main() -> int {
            "builder sets platform profile on rvalue");
 
     // Lvalue chaining test
-    fluent.with_harts(5).with_smp_quantum(99);
-    expect(fluent.execution.num_harts == 5 && fluent.execution.smp_quantum == 99,
-           "builder chains on lvalue");
+    fluent.with_harts(5).with_smp_quantum(99).with_realtime_pacing(true);
+    expect(fluent.execution.num_harts == 5 && fluent.execution.smp_quantum == 99 &&
+               fluent.execution.realtime_pacing,
+           "builder chains on lvalue including realtime pacing");
+
+    // Real-time pacing machine accessors and pacing control
+    expect(!machine.is_realtime_pacing_enabled(),
+           "machine starts with default realtime pacing false");
+    machine.set_realtime_pacing_enabled(true);
+    expect(machine.is_realtime_pacing_enabled(), "set_realtime_pacing_enabled enables pacing");
+    machine.pace_realtime();
+    machine.set_realtime_pacing_enabled(false);
+    expect(!machine.is_realtime_pacing_enabled(), "set_realtime_pacing_enabled disables pacing");
+
+    // Real-time pacing CLI option parsing tests
+    {
+        std::array<std::string, 4> rt_args_str = {"SimRV", "-R", "-m", "guest.bin"};
+        std::array<char*, 4> rt_args = {rt_args_str[0].data(), rt_args_str[1].data(),
+                                        rt_args_str[2].data(), rt_args_str[3].data()};
+        auto parsed = simrv::util::parse_command_line(rt_args);
+        expect(parsed.has_value() && parsed->options.realtime_pacing,
+               "-R flag enables realtime pacing option");
+        if (parsed) {
+            auto cfg = parsed->options.to_machine_config();
+            expect(cfg.execution.realtime_pacing, "-R enables realtime pacing in MachineConfig");
+        }
+    }
+    {
+        std::array<std::string, 4> rt_long_str = {"SimRV", "--realtime", "-m", "guest.bin"};
+        std::array<char*, 4> rt_long = {rt_long_str[0].data(), rt_long_str[1].data(),
+                                        rt_long_str[2].data(), rt_long_str[3].data()};
+        auto parsed = simrv::util::parse_command_line(rt_long);
+        expect(parsed.has_value() && parsed->options.realtime_pacing,
+               "--realtime flag enables realtime pacing option");
+    }
+    {
+        std::array<std::string, 5> no_rt_str = {"SimRV", "--tui", "--no-realtime", "-m",
+                                                "guest.bin"};
+        std::array<char*, 5> no_rt = {no_rt_str[0].data(), no_rt_str[1].data(), no_rt_str[2].data(),
+                                      no_rt_str[3].data(), no_rt_str[4].data()};
+        auto parsed = simrv::util::parse_command_line(no_rt);
+        expect(parsed.has_value() && !parsed->options.realtime_pacing,
+               "--no-realtime flag disables realtime pacing option");
+        if (parsed) {
+            auto cfg = parsed->options.to_machine_config();
+            expect(!cfg.execution.realtime_pacing,
+                   "--no-realtime overrides TUI default in MachineConfig");
+        }
+    }
 
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -51,6 +51,8 @@ struct RuntimeOptions {
     bool tuimode = false;
     bool explicit_tui_mode = false;
     bool explicit_cli_mode = false;
+    bool realtime_pacing = false;
+    bool explicit_realtime_mode = false;
     bool verbose = false;
     bool quiet = false;
     std::optional<simrv::log::Level> log_level;

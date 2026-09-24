@@ -158,6 +158,10 @@ class Machine final : public core::IInterruptController {
     void set_trap_log_enabled(bool enabled) noexcept { config.debug.traplog_mode = enabled; }
     void set_device_log_enabled(bool enabled) noexcept { config.debug.dlog_mode = enabled; }
     [[nodiscard]] auto appmode_enabled() const noexcept -> bool { return config.execution.appmode; }
+    [[nodiscard]] auto is_realtime_pacing_enabled() const noexcept -> bool {
+        return config.execution.realtime_pacing;
+    }
+    void set_realtime_pacing_enabled(bool enabled) noexcept;
     [[nodiscard]] auto binary_path() const noexcept -> const std::string& {
         return config.files.binary_path;
     }
@@ -242,6 +246,10 @@ class Machine final : public core::IInterruptController {
     auto load_disk_image(const std::string& filepath) -> std::expected<void, std::string>;
     /// Execute the main simulation loop until termination criteria are met.
     void run();
+    /// Reset host and virtual time reference points for real-time pacing.
+    void reset_realtime_anchor() noexcept;
+    /// Throttle simulation loop execution to match host wall-clock time.
+    void pace_realtime() noexcept;
     /// Advance every runnable hart and the shared platform by exactly one CA global cycle.
     void advance_ca_global_cycle();
     /// Advance hart 0 and the shared platform while CA secondary workers run independently.
@@ -484,6 +492,9 @@ class Machine final : public core::IInterruptController {
 
     uint64_t last_tui_check_cycles_ = 0;
     std::chrono::steady_clock::time_point last_tui_update_{};
+    std::chrono::steady_clock::time_point realtime_anchor_host_{};
+    uint64_t realtime_anchor_mtime_ = 0;
+    uint64_t last_pace_check_mtime_ = 0;
 
     std::atomic<bool> is_running_ = true;  // Main-loop run flag.
     std::shared_ptr<ITelemetrySink> telemetry_sink_{};

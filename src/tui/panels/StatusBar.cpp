@@ -44,6 +44,10 @@ namespace {
         return hz >= 1000.0 ? std::format("SPEED {:.0f}kHz", hz / 1000.0)
                             : std::format("SPEED {:.0f}Hz", hz);
     }
+    if (machine.is_realtime_pacing_enabled()) {
+        if (paused) return width < 60 ? "STEP" : "REALTIME (1x)";
+        return width < 60 ? "1x RT" : "REALTIME (1x)";
+    }
     if (paused) return width < 60 ? "STEP" : "MAX";
     return width < 60 ? std::format("{:.1f}M", static_cast<double>(kips) / 1000.0)
                       : std::format("{:.1f} MIPS", static_cast<double>(kips) / 1000.0);

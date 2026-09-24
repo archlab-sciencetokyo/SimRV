@@ -377,6 +377,16 @@ auto parse_execution_options(std::string_view arg, std::span<char* const> args, 
         options.memimg = *value;
         return true;
     }
+    if (arg == "-R" || arg == "--realtime") {
+        options.realtime_pacing = true;
+        options.explicit_realtime_mode = true;
+        return true;
+    }
+    if (arg == "--no-realtime") {
+        options.realtime_pacing = false;
+        options.explicit_realtime_mode = true;
+        return true;
+    }
     return false;
 }
 
@@ -777,7 +787,7 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
 }
 
 auto is_known_short_flag(char c) -> bool {
-    static constexpr std::string_view kShortFlags = "mDfcsetlHrIbujvqjh";
+    static constexpr std::string_view kShortFlags = "mDfcsetlHrIbujvqjhR";
     return kShortFlags.find(c) != std::string_view::npos;
 }
 
@@ -969,6 +979,11 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.execution.num_harts = num_harts;
     cfg.execution.smp_quantum = smp_quantum;
     cfg.execution.smp_multithreaded = smp_multithreaded;
+    if (explicit_realtime_mode) {
+        cfg.execution.realtime_pacing = realtime_pacing;
+    } else {
+        cfg.execution.realtime_pacing = tuimode && (fincnt == std::numeric_limits<Counter>::max());
+    }
     if (auto parsed = pipeline::parse_pipeline_type(pipeline_type)) {
         cfg.execution.pipeline_type = *parsed;
     }
@@ -1223,6 +1238,14 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         stdout,
         "  {}-t, -l, --timer {}{}<N>{}           Enable CLINT timer interrupt after N cycles\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(
+        stdout,
+        "  {}-R, --realtime{}                  Throttle simulation to match host real-time (1:1)\n",
+        style(kBrightGreen), style(kReset));
+    std::print(
+        stdout,
+        "  {}--no-realtime{}                   Disable real-time pacing (run at maximum speed)\n",
+        style(kBrightGreen), style(kReset));
     std::print(
         stdout,
         "  {}--mode {}{}<MODE>{}                 Engine: fast, detailed, or cycle-accurate\n",
