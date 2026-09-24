@@ -154,6 +154,12 @@ void test_terminal_scrollback_and_selection() {
     terminal.write_string("\033c");
     expect(terminal.get_cursor_x() == 0 && terminal.get_cursor_y() == 0,
            "terminal reset restores the cursor origin");
+
+    simrv::tui::SelectionState sel{};
+    expect(sel.start_x == -1 && sel.end_x == -1, "selection starts uninitialized");
+    expect(sel.col_start_x == 2, "default column start x is 2");
+    expect(sel.content_start_y == 4, "default content start y is 4");
+    expect(!sel.is_active && !sel.is_selecting, "selection is inactive by default");
 }
 
 void test_utf8_and_theme_helpers() {

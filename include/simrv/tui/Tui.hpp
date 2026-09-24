@@ -49,6 +49,10 @@ enum class SelectionPane : uint8_t { None, InspectorPane, TerminalPane };
 
 struct SelectionState {
     SelectionPane pane = SelectionPane::None;
+    size_t col_idx = 0;
+    int col_start_x = 2;
+    int content_start_y = 4;
+    int pane_width = 80;
     int start_x = -1;
     int start_y = -1;
     int end_x = -1;

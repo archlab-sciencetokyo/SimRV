@@ -488,8 +488,6 @@ void Tui::render_build_lines(int inspector_width, int terminal_width, int num_ro
             int total = vt_.get_lines_count();
             int start = get_terminal_pane_start_line(num_rows);
             int end_exclusive = std::min(total, start + num_rows);
-            int cursor_abs_line = vt_.get_scrollback_size() + vt_.get_cursor_y();
-            bool is_live = (scroll_offset_ == 0);
 
             // Terminal output is parsed in guest-sized chunks. Reuse complete ANSI rows when a
             // frame observes the same chunk and geometry; selections intentionally bypass this
@@ -502,8 +500,9 @@ void Tui::render_build_lines(int inspector_width, int terminal_width, int num_ro
             if (reuse_terminal_rows) {
                 lines_to_draw_ = terminal_rows_cache_;
             } else {
-                int vt_sel_start = start + (selection_.start_y - 4);
-                int vt_sel_end = start + (selection_.end_y - 4);
+                int const content_start_y = selection_.content_start_y;
+                int vt_sel_start = start + (selection_.start_y - content_start_y);
+                int vt_sel_end = start + (selection_.end_y - content_start_y);
                 int sx1 = selection_.start_x;
                 int sx2 = selection_.end_x;
                 if (vt_sel_start > vt_sel_end || (vt_sel_start == vt_sel_end && sx1 > sx2)) {
@@ -512,7 +511,7 @@ void Tui::render_build_lines(int inspector_width, int terminal_width, int num_ro
                 }
 
                 for (int i = start; i < end_exclusive; ++i) {
-                    bool draw_cursor = is_live && (i == cursor_abs_line) && vt_.is_cursor_visible();
+                    bool draw_cursor = false;
                     int sel_start_x = -1;
                     int sel_end_x = -1;
                     if (selection_.is_active && selection_.pane == SelectionPane::TerminalPane) {
@@ -592,8 +591,8 @@ void Tui::render_draw_sixel(int inspector_width, int terminal_width, int num_row
         for (int i = 0; i < num_rows; ++i) {
             std::string left = inspector_pane_->render_row(i, inspector_width);
             if (selection_.is_active && selection_.pane == SelectionPane::InspectorPane) {
-                int sy1 = selection_.start_y - 4;
-                int sy2 = selection_.end_y - 4;
+                int sy1 = selection_.start_y - selection_.content_start_y;
+                int sy2 = selection_.end_y - selection_.content_start_y;
                 int sx1 = selection_.start_x;
                 int sx2 = selection_.end_x;
                 if (sy1 > sy2 || (sy1 == sy2 && sx1 > sx2)) {
@@ -752,7 +751,7 @@ void Tui::render(bool force) {
     update_cmds.reserve(static_cast<std::size_t>(term_width) * new_lines.size() / 2);
 
     if (is_full_redraw) {
-        update_cmds += "\033[?25l\033[H";
+        update_cmds += "\033[H";
         for (size_t i = 0; i < new_lines.size(); ++i) {
             update_cmds += std::format("\033[{};1H{}", i + 1, new_lines[i]);
             render_stats_.lines_drawn++;
@@ -766,10 +765,7 @@ void Tui::render(bool force) {
                 layout_ == TuiLayout::Split && i >= 3 && i < 3 + static_cast<size_t>(num_rows))
                 continue;
             if (new_lines[i] != last_screen_lines_[i]) {
-                if (!any_line_changed) {
-                    update_cmds += "\033[?25l";
-                    any_line_changed = true;
-                }
+                any_line_changed = true;
                 update_cmds += std::format("\033[{};1H{}", i + 1, new_lines[i]);
                 last_screen_lines_[i] = new_lines[i];
                 render_stats_.lines_drawn++;
@@ -822,24 +818,28 @@ void Tui::render(bool force) {
         }
     }
 
-    const bool cursor_changed =
-        (target_cursor_x != last_cursor_x_ || target_cursor_y != last_cursor_y_ ||
-         target_cursor_visible != last_cursor_visible_);
+    const bool cursor_pos_changed =
+        (target_cursor_x != last_cursor_x_ || target_cursor_y != last_cursor_y_);
+    const bool cursor_vis_changed = (target_cursor_visible != last_cursor_visible_);
 
-    if (cursor_changed || is_full_redraw || !update_cmds.empty()) {
-        if (target_cursor_x > 0 && target_cursor_y > 0) {
-            update_cmds += std::format("\033[{};{}H", target_cursor_y, target_cursor_x);
-            if (target_cursor_visible) {
-                update_cmds += "\033[?25h";
-            } else {
-                update_cmds += "\033[?25l";
-            }
+    if (cursor_vis_changed || is_full_redraw) {
+        if (target_cursor_visible) {
+            update_cmds += "\033[?25h";
         } else {
             update_cmds += "\033[?25l";
         }
+        last_cursor_visible_ = target_cursor_visible;
+    }
+
+    if (target_cursor_x > 0 && target_cursor_y > 0) {
+        if (cursor_pos_changed || is_full_redraw || !update_cmds.empty()) {
+            update_cmds += std::format("\033[{};{}H", target_cursor_y, target_cursor_x);
+            last_cursor_x_ = target_cursor_x;
+            last_cursor_y_ = target_cursor_y;
+        }
+    } else {
         last_cursor_x_ = target_cursor_x;
         last_cursor_y_ = target_cursor_y;
-        last_cursor_visible_ = target_cursor_visible;
     }
 
     if (update_cmds.empty()) {
@@ -847,7 +847,12 @@ void Tui::render(bool force) {
         return;
     }
 
-    write_all(STDOUT_FILENO, update_cmds);
+    std::string frame_output;
+    frame_output.reserve(update_cmds.size() + 16);
+    frame_output += "\033[?2026h";
+    frame_output += update_cmds;
+    frame_output += "\033[?2026l";
+    write_all(STDOUT_FILENO, frame_output);
 }
 
 void Tui::handle_mouse_inspector(int x, int y, int b, bool multi_column) {
@@ -991,14 +996,14 @@ void Tui::copy_active_selection() {
 
     if (selection_.pane == SelectionPane::TerminalPane && terminal_pane_) {
         int start_line = get_terminal_pane_start_line(cached_num_rows_);
-        int start_r = start_line + (selection_.start_y - 4);
-        int end_r = start_line + (selection_.end_y - 4);
+        int start_r = start_line + (selection_.start_y - selection_.content_start_y);
+        int end_r = start_line + (selection_.end_y - selection_.content_start_y);
         text = vt_.get_text_in_range(start_r, selection_.start_x, end_r, selection_.end_x);
     } else if (selection_.pane == SelectionPane::InspectorPane && inspector_pane_) {
-        int start_r = selection_.start_y - 4;
-        int end_r = selection_.end_y - 4;
+        int start_r = selection_.start_y - selection_.content_start_y;
+        int end_r = selection_.end_y - selection_.content_start_y;
         text = inspector_pane_->get_text_in_range(start_r, selection_.start_x, end_r,
-                                                  selection_.end_x, pane_width_cached_);
+                                                  selection_.end_x, selection_.pane_width);
     }
 
     if (!text.empty()) {
@@ -1083,9 +1088,14 @@ void Tui::handle_mouse(int x, int y, int b) {
             }
             return;
         }
-        if (page == TuiRegPage::CONSOLE && b == 0 && y >= 6) {
-            // Console click
-            render(true);
+        if (page == TuiRegPage::CONSOLE) {
+            if (col_widths.count > 2 && b == 0 && y == 4) {
+                cycle_slot_page(clicked_col);
+                return;
+            }
+            if (b == 0) {
+                render(false);
+            }
             return;
         }
 
@@ -2949,7 +2959,9 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         // here - never forwarded to the guest UART.
         if (esc_buf_.back() == 'M' && (button & 32) != 0) {
             if (selection_.is_selecting) {
-                selection_.end_x = x - 1;
+                int local_end_x = std::clamp(x - selection_.col_start_x, 0,
+                                             std::max(0, selection_.pane_width - 1));
+                selection_.end_x = local_end_x;
                 selection_.end_y = y;
                 selection_.is_active = true;
                 render(false);
@@ -3059,21 +3071,23 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
 
         if (esc_buf_.back() == 'M' && button == 0 && y >= 4) {
             // Start a new selection drag on left-button press in the content area.
-            selection_ = SelectionState{};
-            selection_.start_x = x - 1;
-            selection_.start_y = y;
-            selection_.end_x = x - 1;
-            selection_.end_y = y;
-            // Determine which pane the press landed in for the selection context.
             struct winsize w_sel{};
             ioctl(STDOUT_FILENO, TIOCGWINSZ, &w_sel);
             int sel_w = w_sel.ws_col > 0 ? w_sel.ws_col : 80;
             auto sel_cols = framework::multi_column_widths(sel_w, layout_, user_inspector_width_);
+            size_t sel_col_idx = 0;
             int cur_cx = 1;
+            int col_local_x = 0;
+            int col_w = (sel_cols.count > 0) ? sel_cols.widths[0] : sel_w;
+            int col_start_x = 2;
             SelectionPane sel_pane = SelectionPane::None;
             for (size_t ci = 0; ci < sel_cols.count; ++ci) {
                 int cw = sel_cols.widths[ci];
                 if (x >= cur_cx && (x < cur_cx + cw + 1 || ci + 1 == sel_cols.count)) {
+                    sel_col_idx = ci;
+                    col_w = cw;
+                    col_start_x = cur_cx + 1;
+                    col_local_x = std::clamp(x - col_start_x, 0, std::max(0, cw - 1));
                     if (ci < workbench_slots_.size() &&
                         workbench_slots_[ci].page == TuiRegPage::CONSOLE) {
                         sel_pane = SelectionPane::TerminalPane;
@@ -3084,7 +3098,17 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                 }
                 cur_cx += cw + 1;
             }
+            selection_ = SelectionState{};
             selection_.pane = sel_pane;
+            selection_.col_idx = sel_col_idx;
+            selection_.col_start_x = col_start_x;
+            selection_.content_start_y =
+                (sel_cols.count > 2 && sel_pane == SelectionPane::TerminalPane) ? 5 : 4;
+            selection_.pane_width = col_w;
+            selection_.start_x = col_local_x;
+            selection_.start_y = y;
+            selection_.end_x = col_local_x;
+            selection_.end_y = y;
             selection_.is_selecting = true;
         }
 
