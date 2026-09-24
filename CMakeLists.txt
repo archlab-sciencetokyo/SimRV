@@ -113,6 +113,7 @@ option(
 option(SIMRV_X86_64_V3_BASELINE
        "Use the x86-64-v3 ISA baseline for non-native x86-64 Release builds" ON)
 option(SIMRV_PREFER_LLD "Prefer lld for Clang links when available" ON)
+option(SIMRV_USE_LIBCXX "Use LLVM libc++ standard library with Clang" OFF)
 set(SIMRV_VECTOR_TESTS_DIR
     ""
     CACHE PATH "Path to a built chipsalliance/riscv-vector-tests checkout")

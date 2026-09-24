@@ -320,13 +320,13 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             model.interconnect.startup_data_response_latency);
         if (model.name == "cfu-provingground" || model.name == "rvproc") {
             config.memory.dram_base = 0x00000000;
-            if (config.memory.dram_size < 512 * 1024 * 1024) {
-                config.memory.dram_size = 512 * 1024 * 1024;
+            if (config.memory.dram_size < Address{512} * 1024 * 1024) {
+                config.memory.dram_size = Address{512} * 1024 * 1024;
             }
         } else if (model.name == "rvcomp") {
             config.memory.dram_base = 0x80000000;
-            if (config.memory.dram_size < 512 * 1024 * 1024) {
-                config.memory.dram_size = 512 * 1024 * 1024;
+            if (config.memory.dram_size < Address{512} * 1024 * 1024) {
+                config.memory.dram_size = Address{512} * 1024 * 1024;
             }
         }
     }
@@ -345,13 +345,13 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             model.interconnect.startup_data_response_latency);
         if (model.name == "cfu-provingground" || model.name == "rvproc") {
             config.memory.dram_base = 0x00000000;
-            if (config.memory.dram_size < 512 * 1024 * 1024) {
-                config.memory.dram_size = 512 * 1024 * 1024;
+            if (config.memory.dram_size < Address{512} * 1024 * 1024) {
+                config.memory.dram_size = Address{512} * 1024 * 1024;
             }
         } else if (model.name == "rvcomp") {
             config.memory.dram_base = 0x80000000;
-            if (config.memory.dram_size < 512 * 1024 * 1024) {
-                config.memory.dram_size = 512 * 1024 * 1024;
+            if (config.memory.dram_size < Address{512} * 1024 * 1024) {
+                config.memory.dram_size = Address{512} * 1024 * 1024;
             }
         }
     }
@@ -370,7 +370,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         execution_state_.store(ExecutionState::Paused, std::memory_order_release);
     }
     const auto ram = ram_view();
-    const size_t effective_dram_size = static_cast<size_t>(ram.size());
+    const auto effective_dram_size = static_cast<size_t>(ram.size());
     config.memory.dram_size = static_cast<Address>(effective_dram_size);
     if (!allocate_ram(effective_dram_size)) {
         const std::string err =

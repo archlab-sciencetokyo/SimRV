@@ -38,7 +38,7 @@ SIMRV_ALWAYS_INLINE auto is_tohost_addr(const Machine& machine, PhysAddr addr) -
 }
 
 template <typename T, typename Op>
-auto atomic_update(std::atomic_ref<T>& atomic_mem, Op&& op) -> T {
+auto atomic_update(std::atomic_ref<T>& atomic_mem, const Op& op) -> T {
     T old_val = atomic_mem.load(std::memory_order_relaxed);
     while (!atomic_mem.compare_exchange_weak(old_val, op(old_val), std::memory_order_acq_rel,
                                              std::memory_order_relaxed)) {
@@ -157,9 +157,7 @@ void CPU::TLB_flush() {
 }
 void CPU::TLB_flush(const core::TlbFlushFilter& filter) {
     tlb.flush_selective(filter);
-    if (!filter.vaddr && !filter.asid) {
-        decode_cache.flush();
-    } else if (filter.vaddr) {
+    if (filter.vaddr) {
         decode_cache.flush_page(*filter.vaddr & ~Address{0xFFF});
     } else {
         decode_cache.flush();
@@ -1805,7 +1803,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
                 }
                 execute::ExecuteUnit::execute_vector(*this, machine, op.op_id, op.ir);
                 state_.mstatus |= enum_mask(MstatusBit::Vs);
-                if (simrv::compiler::unlikely(pipeline_context.pending_exception.has_value())) {
+                if (pipeline_context.pending_exception.has_value()) {
                     raise_exception(static_cast<TrapCause>(*pipeline_context.pending_exception),
                                     pipeline_context.pending_tval);
                     return;
@@ -1995,7 +1993,8 @@ template auto CPU::run_fast_os_kernel<true, true, true>(Machine&, uint32_t) -> u
 
 void CPU::push_trace_history(Address pc, Instruction inst, const std::string& symbol) {
     // O(1) ring buffer write - no heap allocation, no shifting
-    trace_history_buf_[trace_history_head_] = TraceHistoryEntry{pc, inst, symbol};
+    trace_history_buf_[trace_history_head_] =
+        TraceHistoryEntry{.pc = pc, .inst = inst, .symbol = symbol};
     trace_history_head_ = (trace_history_head_ + 1) % kTraceHistoryCapacity;
     if (trace_history_size_ < kTraceHistoryCapacity) {
         trace_history_size_++;

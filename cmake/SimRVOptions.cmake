@@ -22,6 +22,15 @@ if(SIMRV_WARNINGS_AS_ERRORS)
   endif()
 endif()
 
+if(SIMRV_USE_LIBCXX)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
+    target_compile_options(simrv-project-options INTERFACE -stdlib=libc++)
+    target_link_options(simrv-project-options INTERFACE -stdlib=libc++)
+  else()
+    message(FATAL_ERROR "SIMRV_USE_LIBCXX is only supported when compiling with Clang")
+  endif()
+endif()
+
 if(SIMRV_ENABLE_ASAN
    OR SIMRV_ENABLE_UBSAN
    OR SIMRV_ENABLE_TSAN)

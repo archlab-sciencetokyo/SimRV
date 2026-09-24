@@ -92,6 +92,20 @@
             }
         },
         {
+            "name": "rv64-clang-libcxx-release",
+            "displayName": "RV64 Release with Clang and LLVM libc++ (Ninja)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/rv64-clang-libcxx-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "SIMRV_XLEN": "64",
+                "SIMRV_USE_LIBCXX": "ON"
+            }
+        },
+        {
             "name": "rv64-gcc-release",
             "displayName": "RV64 Release with GCC (Ninja)",
             "generator": "Ninja",
@@ -169,6 +183,10 @@
         {
             "name": "rv64-clang-release",
             "configurePreset": "rv64-clang-release"
+        },
+        {
+            "name": "rv64-clang-libcxx-release",
+            "configurePreset": "rv64-clang-libcxx-release"
         },
         {
             "name": "rv64-gcc-release",

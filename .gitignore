@@ -65,7 +65,7 @@ docs/simrv_performance_optimizations.md
 docs/PAPER_COMPANION.md
 trace/
 log/
-.clangd
+.clangd/
 
 # Framebuffer screenshots
 screenshot.ppm

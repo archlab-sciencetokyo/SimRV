@@ -1,0 +1,9 @@
+CompileFlags:
+  CompilationDatabase: build/rv64-clang-release
+  Remove:
+    - -fmodules-ts
+    - -fmodule-mapper=*
+    - -fdeps-format=*
+    - -Wlogical-op
+    - -Wduplicated-branches
+    - -Wduplicated-cond

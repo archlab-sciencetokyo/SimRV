@@ -183,8 +183,7 @@ auto Machine::ram_data() noexcept -> Byte* { return runtime_->ram.data(); }
 auto Machine::ram_data() const noexcept -> const Byte* { return runtime_->ram.data(); }
 
 auto Machine::ram_view() const noexcept -> simrv::memory::RamView {
-    return simrv::memory::RamView(runtime_->ram.data(), config.memory.dram_base,
-                                  config.memory.dram_size);
+    return {runtime_->ram.data(), config.memory.dram_base, config.memory.dram_size};
 }
 
 void Machine::set_platform_irq(IrqNumber irq, bool asserted) {
@@ -301,7 +300,11 @@ void Machine::stop_runner() {
     if (!runner_started_.exchange(false, std::memory_order_acq_rel)) {
         return;
     }
-    std::visit([this](auto& runner) { runner.stop(*this); }, runtime_->runner);
+    if (auto* baremetal = std::get_if<BaremetalRunner>(&runtime_->runner)) {
+        baremetal->stop(*this);
+    } else if (auto* os = std::get_if<OsRunner>(&runtime_->runner)) {
+        os->stop(*this);
+    }
 }
 
 void Machine::wait_for_runner_quiescence() {
@@ -620,9 +623,10 @@ void BaremetalRunner::execute(Machine& machine) {
 }
 
 auto BaremetalRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool {
-    const auto policy = machine.fast_batch_policy();
-    if (!simrv::compiler::likely(policy.has_value())) return false;
-    if (policy->has_instruction_limit) {
+    const auto opt_policy = machine.fast_batch_policy();
+    if (!opt_policy.has_value()) return false;
+    const auto& policy = *opt_policy;
+    if (policy.has_instruction_limit) {
         if (machine.retired_instruction_count() >= machine.config.execution.fincnt) {
             machine.stop(Machine::StopReason::InstructionLimit);
             return true;
@@ -634,12 +638,12 @@ auto BaremetalRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) 
         machine.runtime_->secondary_harts.empty()
             ? batch_size
             : std::min(batch_size, static_cast<uint32_t>(machine.config.execution.smp_quantum));
-    machine.primary_hart().run_fast_baremetal_batch(machine, quantum, *policy);
+    machine.primary_hart().run_fast_baremetal_batch(machine, quantum, policy);
     for (auto& sec : machine.runtime_->secondary_harts) {
         if (!machine.is_running()) break;
         if (sec->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
             uint32_t sec_batch = quantum;
-            if (policy->has_instruction_limit) {
+            if (policy.has_instruction_limit) {
                 if (machine.retired_instruction_count() >= machine.config.execution.fincnt) {
                     machine.stop(Machine::StopReason::InstructionLimit);
                     break;
@@ -648,7 +652,7 @@ auto BaremetalRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) 
                     sec_batch,
                     machine.config.execution.fincnt - machine.retired_instruction_count()));
             }
-            sec->run_fast_baremetal_batch(machine, sec_batch, *policy);
+            sec->run_fast_baremetal_batch(machine, sec_batch, policy);
         }
     }
     return true;
@@ -665,11 +669,12 @@ void BaremetalRunner::finalize(Machine& machine) {
         simrv::log::info("finished by -e option");
         machine.stop(Machine::StopReason::InstructionLimit);
     }
-    if (auto* uart = machine.uart_device(); uart && machine.tui_enabled()) {
-        uart->service_interrupts();
-    } else if (uart && !uart->is_input_thread_running() &&
-               simrv::compiler::unlikely((machine.primary_hart().clint_mmio.mtime & 8191) == 0)) {
-        uart->service_interrupts();
+    if (auto* uart = machine.uart_device(); uart) {
+        if (machine.tui_enabled() ||
+            (!uart->is_input_thread_running() &&
+             simrv::compiler::unlikely((machine.primary_hart().clint_mmio.mtime & 8191) == 0))) {
+            uart->service_interrupts();
+        }
     }
 }
 
@@ -900,14 +905,14 @@ void Machine::prewarm_bram_caches() {
 }
 
 auto Machine::add_lifecycle_observer(LifecycleObserver observer) -> LifecycleObserverId {
-    std::lock_guard lock(lifecycle_observer_mutex_);
+    std::scoped_lock lock(lifecycle_observer_mutex_);
     const auto id = next_lifecycle_observer_id_++;
     lifecycle_observers_.emplace_back(id, std::move(observer));
     return id;
 }
 
 void Machine::remove_lifecycle_observer(LifecycleObserverId observer_id) {
-    std::lock_guard lock(lifecycle_observer_mutex_);
+    std::scoped_lock lock(lifecycle_observer_mutex_);
     std::erase_if(lifecycle_observers_,
                   [observer_id](const auto& entry) { return entry.first == observer_id; });
 }
@@ -915,7 +920,7 @@ void Machine::remove_lifecycle_observer(LifecycleObserverId observer_id) {
 void Machine::publish_lifecycle_event(LifecycleEventKind kind, int exit_status) {
     std::vector<LifecycleObserver> observers;
     {
-        std::lock_guard lock(lifecycle_observer_mutex_);
+        std::scoped_lock lock(lifecycle_observer_mutex_);
         observers.reserve(lifecycle_observers_.size());
         for (const auto& [_, observer] : lifecycle_observers_) {
             observers.push_back(observer);
@@ -949,7 +954,7 @@ auto Machine::debug_pause_requested() const noexcept -> bool {
 
 void Machine::acknowledge_step() {
     {
-        const std::lock_guard lock(step_mutex_);
+        const std::scoped_lock lock(step_mutex_);
         ++step_ack_count_;
     }
     step_cv_.notify_all();
@@ -1009,7 +1014,7 @@ auto Machine::begin_debug_step(HartId hart) -> bool {
 
 void Machine::enqueue_debug_halt(PendingDebugHalt halt) {
     {
-        const std::lock_guard lock(debug_halt_mutex_);
+        const std::scoped_lock lock(debug_halt_mutex_);
         if (!pending_debug_halt_) pending_debug_halt_ = std::move(halt);
         debug_halt_pending_.store(true, std::memory_order_release);
     }
@@ -1037,18 +1042,19 @@ void Machine::service_debug_halt() {
 
     PendingDebugHalt halt;
     {
-        const std::lock_guard lock(debug_halt_mutex_);
-        if (!pending_debug_halt_) return;
-        if (pending_debug_halt_->waits_for_memory) {
-            auto& target = hart(pending_debug_halt_->hart);
-            if (target.e_icount < pending_debug_halt_->retirement_target) return;
+        const std::scoped_lock lock(debug_halt_mutex_);
+        if (!pending_debug_halt_.has_value()) return;
+        auto& pending = *pending_debug_halt_;
+        if (pending.waits_for_memory) {
+            auto& target = hart(pending.hart);
+            if (target.e_icount < pending.retirement_target) return;
             if (target.active_context().pending_exception.has_value()) {
                 pending_debug_halt_.reset();
                 debug_halt_pending_.store(false, std::memory_order_release);
                 return;
             }
         }
-        halt = std::move(*pending_debug_halt_);
+        halt = std::move(pending);
         pending_debug_halt_.reset();
     }
 
@@ -1057,7 +1063,7 @@ void Machine::service_debug_halt() {
     }
     pause();
     {
-        const std::lock_guard lock(debug_halt_mutex_);
+        const std::scoped_lock lock(debug_halt_mutex_);
         debug_halt_pending_.store(pending_debug_halt_.has_value(), std::memory_order_release);
     }
     if (runtime_->gdb_stub && runtime_->gdb_stub->is_connected()) {
@@ -1521,7 +1527,12 @@ void Machine::finalize_cycle_tohost() {
 }
 
 Machine::~Machine() {
-    if (runtime_->gdb_stub) runtime_->gdb_stub->stop();
+    if (runtime_ && runtime_->gdb_stub) {
+        try {
+            runtime_->gdb_stub->stop();
+        } catch (...) {  // NOLINT(bugprone-empty-catch)
+        }
+    }
     stop_runner();
     // Destroy callbacks and runner objects while their Machine wake state is still alive.
     runtime_.reset();

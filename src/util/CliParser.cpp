@@ -482,7 +482,7 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
                 "performance, or path/name of model .cfg)",
                 *value));
         }
-        result.options.cpu_model_profile = *parsed;
+        result.options.cpu_model_profile = parsed;
         return true;
     }
     if (arg == "--bpred" || arg == "--bpred-type") {
@@ -722,7 +722,7 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
                 "unsupported log level '{}' (supported: trace, debug, info, warn, error, off)",
                 *value));
         }
-        options.log_level = *level;
+        options.log_level = level;
         return true;
     }
     if (arg == "-q" || arg == "--quiet") {
@@ -1060,11 +1060,11 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
         options.platform_profile == simrv::core::PlatformProfile::Pcie   ? "pcie"
         : options.platform_profile == simrv::core::PlatformProfile::Mmio ? "mmio"
                                                                          : "hybrid";
-    simrv::log::info(
-        "Run configuration: RV{}, {}-mode, {} hart(s), {} platform, {} MiB RAM",
-        simrv::xlen::kXLenBits, options.appmode ? "bare-metal" : "OS", options.num_harts,
-        platform_name,
-        (options.dram_size != 0 ? options.dram_size : simrv::memory::kDramSize) / (1024 * 1024));
+    simrv::log::info("Run configuration: RV{}, {}-mode, {} hart(s), {} platform, {} MiB RAM",
+                     simrv::xlen::kXLenBits, options.appmode ? "bare-metal" : "OS",
+                     options.num_harts, platform_name,
+                     (options.dram_size != 0 ? options.dram_size : simrv::memory::kDramSize) /
+                         (1024ULL * 1024ULL));
     simrv::log::info("Guest image: {}", options.fn_memimg.empty() ? "<none>" : options.fn_memimg);
     if (machine->runtime_profile.is_cycle_mode()) {
         simrv::log::info("CA policy: {} pipeline, forwarding {}",
