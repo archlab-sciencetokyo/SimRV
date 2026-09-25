@@ -723,8 +723,8 @@ auto InspectorPane::has_tool_menu(TuiRegPage page) const -> bool {
 }
 
 auto InspectorPane::render_column_header(int col_idx, const char* name, bool is_focused, int width,
-                                         std::string_view key_hint, bool has_menu) const
-    -> std::string {
+                                         std::string_view key_hint, bool has_menu,
+                                         bool can_close) const -> std::string {
     const auto style = get_active_theme_style();
     const bool is_ansi = (style == TuiThemeStyle::ClassicAnsi);
     const char* horiz = is_ansi ? "-" : "─";
@@ -750,11 +750,16 @@ auto InspectorPane::render_column_header(int col_idx, const char* name, bool is_
                                       col_idx + 1, name);
     }
 
-    // Append the key hint when there's enough room (minimum ~10 chars for the hint itself).
+    // Append the key hint and close button when there's enough room.
     std::string hint_str;
     if (!effective_hint.empty() && width >= 30) {
         hint_str = is_ansi ? std::format(" {} ", effective_hint)
                            : std::format(" {}{}\033[0m ", kThemeMuted, effective_hint);
+    }
+    if (can_close && width >= 30) {
+        std::string const close_badge =
+            is_ansi ? "[x] " : "\033[90m[\033[1;31m×\033[0;90m]\033[0m ";
+        hint_str += close_badge;
     }
 
     int const badge_w = get_display_width(badge);
@@ -949,15 +954,16 @@ auto InspectorPane::render_row(int row_idx, int width) -> std::string {
 
 auto InspectorPane::render_column_row(int row_idx, int width, int col_idx, size_t total_cols,
                                       bool is_focused, bool force_column_header) -> std::string {
-    bool const is_multi = (total_cols > 2) || force_column_header;
+    bool const is_multi = (total_cols >= 2) || force_column_header;
     bool const is_secondary = (col_idx > 0);
     column_header_mode_ = is_multi || is_secondary;
 
     if (is_multi || is_secondary) {
         if (row_idx == 0) {
             bool const has_menu = has_tool_menu(page_);
+            bool const can_close = (total_cols > 1);
             return render_column_header(col_idx, get_page_name(page_), is_focused, width, "",
-                                        has_menu);
+                                        has_menu, can_close);
         }
         return render_row_internal(row_idx, width, /*header_rows=*/1, is_secondary);
     }

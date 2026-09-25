@@ -200,7 +200,12 @@ auto StatusBar::get_header_action_at_col(int col, int terminal_width) const -> H
     int const inner_w = std::max(0, terminal_width - 2);
     size_t const selected = tui_ ? tui_->selected_hart() : 0;
     auto const left_header = make_left_header_layout(machine_, inner_w / 2, selected);
-    int left_w = get_display_width(left_header.identity) + 3;
+    int identity_w = get_display_width(left_header.identity);
+    if (col >= 1 && col <= identity_w) {
+        return {.action = HeaderAction::LoadBinary};
+    }
+
+    int left_w = identity_w + 3;
     if (!left_header.mode.empty()) left_w += get_display_width(left_header.mode) + 3;
     left_w += get_display_width(paused_ ? " PAUSED " : " RUNNING ") + 3;
 
@@ -211,22 +216,6 @@ auto StatusBar::get_header_action_at_col(int col, int terminal_width) const -> H
         cursor = end + 2;
         return col >= start && col <= end;
     };
-
-    std::string focus_label;
-    if (tui_) {
-        size_t const focused_slot = tui_->focused_slot();
-        const auto& slots = tui_->get_workbench_slots();
-        TuiRegPage const page = tui_->focused_page();
-        const char* page_name = get_page_name(page);
-        if (inner_w < 88) {
-            focus_label = std::format("P{}: {}", focused_slot + 1, page_name);
-        } else if (slots.size() > 1) {
-            focus_label = std::format("PANE {}/{}: {}", focused_slot + 1, slots.size(), page_name);
-        } else {
-            focus_label = std::format("PANE: {}", page_name);
-        }
-    }
-    if (hit_badge(focus_label)) return {.action = HeaderAction::ToggleAttached};
 
     if (machine_.num_harts() > 1) {
         std::string const hart_label =
@@ -281,7 +270,31 @@ static const auto paused_row1_entries = std::to_array<FooterEntry>({
      .action = std::nullopt,
      .category = FooterCategory::Separator,
      .priority = FooterPriority::Core},
-    {.text = "[:] Breakpoint",
+    {.text = "[Ctrl-W] Tool",
+     .action = TuiFooterAction::OpenToolPicker,
+     .category = FooterCategory::Config,
+     .priority = FooterPriority::Core},
+    {.text = "  ",
+     .action = std::nullopt,
+     .category = FooterCategory::Spacer,
+     .priority = FooterPriority::Core},
+    {.text = "[Tab] Col",
+     .action = TuiFooterAction::FocusNextPane,
+     .category = FooterCategory::Config,
+     .priority = FooterPriority::Core},
+    {.text = "  ",
+     .action = std::nullopt,
+     .category = FooterCategory::Spacer,
+     .priority = FooterPriority::Extended},
+    {.text = "[<>] Move",
+     .action = TuiFooterAction::MoveColumnRight,
+     .category = FooterCategory::Config,
+     .priority = FooterPriority::Extended},
+    {.text = "  │  ",
+     .action = std::nullopt,
+     .category = FooterCategory::Separator,
+     .priority = FooterPriority::Core},
+    {.text = "[:] Break",
      .action = TuiFooterAction::SetBreakpoint,
      .category = FooterCategory::Debug,
      .priority = FooterPriority::Core},
@@ -289,7 +302,7 @@ static const auto paused_row1_entries = std::to_array<FooterEntry>({
      .action = std::nullopt,
      .category = FooterCategory::Spacer,
      .priority = FooterPriority::Extended},
-    {.text = "[w] Watchpoint",
+    {.text = "[w] Watch",
      .action = TuiFooterAction::SetWatchpoint,
      .category = FooterCategory::Debug,
      .priority = FooterPriority::Extended},
@@ -312,41 +325,17 @@ static const auto paused_row2_entries = std::to_array<FooterEntry>({
      .action = std::nullopt,
      .category = FooterCategory::Spacer,
      .priority = FooterPriority::Core},
-    {.text = "[F2] Settings",
-     .action = TuiFooterAction::OpenSettings,
+    {.text = "[Ctrl-N] Add",
+     .action = TuiFooterAction::AddColumn,
      .category = FooterCategory::Config,
      .priority = FooterPriority::Core},
     {.text = "  ",
      .action = std::nullopt,
      .category = FooterCategory::Spacer,
      .priority = FooterPriority::Core},
-    {.text = "[F1] Help",
-     .action = TuiFooterAction::ToggleHelp,
+    {.text = "[Ctrl-X] Close",
+     .action = TuiFooterAction::CloseColumn,
      .category = FooterCategory::Config,
-     .priority = FooterPriority::Core},
-    {.text = "  ",
-     .action = std::nullopt,
-     .category = FooterCategory::Spacer,
-     .priority = FooterPriority::Core},
-    {.text = "[t] Theme",
-     .action = TuiFooterAction::ToggleTheme,
-     .category = FooterCategory::Config,
-     .priority = FooterPriority::Core},
-    {.text = "  ",
-     .action = std::nullopt,
-     .category = FooterCategory::Spacer,
-     .priority = FooterPriority::Core},
-    {.text = "[i] Inspect",
-     .action = TuiFooterAction::InspectMem,
-     .category = FooterCategory::Inspect,
-     .priority = FooterPriority::Core},
-    {.text = "  ",
-     .action = std::nullopt,
-     .category = FooterCategory::Spacer,
-     .priority = FooterPriority::Core},
-    {.text = "[g] Guide",
-     .action = TuiFooterAction::ToggleStudentGuide,
-     .category = FooterCategory::Inspect,
      .priority = FooterPriority::Core},
     {.text = "  │  ",
      .action = std::nullopt,
@@ -360,18 +349,42 @@ static const auto paused_row2_entries = std::to_array<FooterEntry>({
      .action = std::nullopt,
      .category = FooterCategory::Spacer,
      .priority = FooterPriority::Core},
-    {.text = "[o] Load",
-     .action = TuiFooterAction::LoadBinary,
-     .category = FooterCategory::Sys,
+    {.text = "[F2] Settings",
+     .action = TuiFooterAction::OpenSettings,
+     .category = FooterCategory::Config,
      .priority = FooterPriority::Core},
     {.text = "  ",
      .action = std::nullopt,
      .category = FooterCategory::Spacer,
      .priority = FooterPriority::Core},
+    {.text = "[F1] Help",
+     .action = TuiFooterAction::ToggleHelp,
+     .category = FooterCategory::Config,
+     .priority = FooterPriority::Core},
+    {.text = "  │  ",
+     .action = std::nullopt,
+     .category = FooterCategory::Separator,
+     .priority = FooterPriority::Extended},
+    {.text = "[t] Theme",
+     .action = TuiFooterAction::ToggleTheme,
+     .category = FooterCategory::Config,
+     .priority = FooterPriority::Extended},
+    {.text = "  ",
+     .action = std::nullopt,
+     .category = FooterCategory::Spacer,
+     .priority = FooterPriority::Extended},
+    {.text = "[o] Load",
+     .action = TuiFooterAction::LoadBinary,
+     .category = FooterCategory::Sys,
+     .priority = FooterPriority::Extended},
+    {.text = "  ",
+     .action = std::nullopt,
+     .category = FooterCategory::Spacer,
+     .priority = FooterPriority::Extended},
     {.text = "[Ctrl-R] Reboot",
      .action = TuiFooterAction::Reboot,
      .category = FooterCategory::Sys,
-     .priority = FooterPriority::Core},
+     .priority = FooterPriority::Extended},
     {.text = "  ",
      .action = std::nullopt,
      .category = FooterCategory::Spacer,
@@ -399,7 +412,23 @@ static const auto running_row1_entries = std::to_array<FooterEntry>({
      .action = std::nullopt,
      .category = FooterCategory::Separator,
      .priority = FooterPriority::Core},
-    {.text = "[:] Breakpoint",
+    {.text = "[Ctrl-W] Tool",
+     .action = TuiFooterAction::OpenToolPicker,
+     .category = FooterCategory::Config,
+     .priority = FooterPriority::Core},
+    {.text = "  ",
+     .action = std::nullopt,
+     .category = FooterCategory::Spacer,
+     .priority = FooterPriority::Core},
+    {.text = "[Tab] Col",
+     .action = TuiFooterAction::FocusNextPane,
+     .category = FooterCategory::Config,
+     .priority = FooterPriority::Core},
+    {.text = "  │  ",
+     .action = std::nullopt,
+     .category = FooterCategory::Separator,
+     .priority = FooterPriority::Core},
+    {.text = "[:] Break",
      .action = TuiFooterAction::SetBreakpoint,
      .category = FooterCategory::Debug,
      .priority = FooterPriority::Core},
@@ -407,7 +436,7 @@ static const auto running_row1_entries = std::to_array<FooterEntry>({
      .action = std::nullopt,
      .category = FooterCategory::Spacer,
      .priority = FooterPriority::Extended},
-    {.text = "[w] Watchpoint",
+    {.text = "[w] Watch",
      .action = TuiFooterAction::SetWatchpoint,
      .category = FooterCategory::Debug,
      .priority = FooterPriority::Extended},
@@ -710,25 +739,7 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         }
         left_info += "   " + status_badge;
 
-        // Build Focused Panel Badge (replacing attached/detached)
-        std::string focus_label;
-        if (tui_) {
-            size_t const focused_slot = tui_->focused_slot();
-            const auto& slots = tui_->get_workbench_slots();
-            TuiRegPage const page = tui_->focused_page();
-            const char* page_name = get_page_name(page);
-            if (inner_w < 88) {
-                focus_label = std::format("P{}: {}", focused_slot + 1, page_name);
-            } else if (slots.size() > 1) {
-                focus_label =
-                    std::format("PANE {}/{}: {}", focused_slot + 1, slots.size(), page_name);
-            } else {
-                focus_label = std::format("PANE: {}", page_name);
-            }
-        }
-        std::string const focus_badge =
-            header_badge(focus_label, "\033[44;37m", "\033[48;5;69;38;5;231m");
-        std::string mode_prefix = " " + focus_badge;
+        std::string mode_prefix;
 
         if (machine_.num_harts() > 1) {
             std::string const hart_label =

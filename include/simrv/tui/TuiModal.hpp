@@ -167,6 +167,10 @@ class TuiModal {
     void set_glossary_topic(int topic);
     void scroll_glossary_content(int delta);
 
+    void scroll_help(int delta);
+    void reset_help_scroll() { help_scroll_ = 0; }
+    void handle_wheel(int delta);
+
     void move_preset_cursor(int delta) {
         preset_cursor_ = std::clamp(preset_cursor_ + delta, 0, 3);
     }
@@ -224,6 +228,7 @@ class TuiModal {
     SettingsDraft pending_platform_draft_;
     int glossary_topic_ = 0;
     int glossary_scroll_ = 0;
+    mutable int help_scroll_ = 0;
     int preset_cursor_ = 0;
     int tool_picker_slot_ = 0;
     int tool_picker_cursor_ = 0;

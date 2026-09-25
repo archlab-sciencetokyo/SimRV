@@ -60,7 +60,8 @@ class InspectorPane : public TuiWidget {
         -> std::string;
     [[nodiscard]] auto render_column_header(int col_idx, const char* name, bool is_focused,
                                             int width, std::string_view key_hint = {},
-                                            bool has_menu = true) const -> std::string;
+                                            bool has_menu = true, bool can_close = false) const
+        -> std::string;
     [[nodiscard]] auto has_tool_menu(TuiRegPage page) const -> bool;
 
     /// Return the next TuiRegPage when cycling through the current category group.

@@ -51,7 +51,9 @@ enum class KeyAction : uint8_t {
     ToggleExecutionMode,
     OpenToolPicker,
     MoveColumnLeft,
-    MoveColumnRight
+    MoveColumnRight,
+    AddColumn,
+    CloseColumn
 };
 
 enum class ActionCategory : uint8_t { Execution, Inspect, Navigate, Configure, Help };

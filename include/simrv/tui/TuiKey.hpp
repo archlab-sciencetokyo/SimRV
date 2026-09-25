@@ -9,6 +9,7 @@
 namespace simrv::tui {
 
 enum class TuiKey : uint8_t {
+    CtrlA = 1,
     CtrlB = 2,
     CtrlC = 3,
     CtrlD = 4,
@@ -16,10 +17,12 @@ enum class TuiKey : uint8_t {
     Newline = 10,  // '\n'
     CtrlL = 12,
     Enter = 13,  // '\r'
+    CtrlN = 14,
     CtrlP = 16,
     CtrlQ = 17,
     CtrlR = 18,
     CtrlW = 23,
+    CtrlX = 24,
     Space = 32,  // ' '
     BackTab = 254,
     a = 'a',

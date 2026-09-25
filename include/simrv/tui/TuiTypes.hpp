@@ -157,7 +157,11 @@ enum class TuiFooterAction : uint8_t {
     ToggleExecutionMode,
     OpenToolPicker,
     MoveColumnLeft,
-    MoveColumnRight
+    MoveColumnRight,
+    AddColumn,
+    CloseColumn,
+    FocusNextPane,
+    FocusPrevPane
 };
 
 }  // namespace simrv::tui

@@ -31,7 +31,8 @@ enum class HeaderAction : uint8_t {
     OpenGlossary,
     ToggleTheme,
     Reboot,
-    ToggleMode
+    ToggleMode,
+    LoadBinary
 };
 
 struct HeaderHitResult {

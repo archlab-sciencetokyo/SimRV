@@ -55,6 +55,13 @@ inline constexpr int kFrameChromeRows = 7;
     return 1;
 }
 
+[[nodiscard]] constexpr auto min_width_for_columns(uint8_t count) -> int {
+    if (count <= 1) return 40;
+    if (count == 2) return 80;
+    if (count == 3) return 144;
+    return 192;
+}
+
 [[nodiscard]] constexpr auto multi_column_widths(int terminal_width, Layout layout,
                                                  int requested_left = -1) -> ColumnWidths {
     int const full_width = std::max(0, terminal_width - 2);

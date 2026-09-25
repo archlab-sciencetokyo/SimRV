@@ -214,6 +214,9 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void swap_workbench_slots(size_t slot_a, size_t slot_b);
     void move_focused_column_left();
     void move_focused_column_right();
+    auto add_workbench_column() -> bool;
+    auto close_focused_column() -> bool;
+    auto close_column(size_t slot_idx) -> bool;
     [[nodiscard]] auto focused_page() const -> TuiRegPage;
 
     void cycle_reg_page();

@@ -79,6 +79,9 @@ void TuiModal::open(ModalType type, InspectorPane* inspector_pane, uint64_t step
         case ModalType::Settings:
             modals::SettingsModal::open(settings_draft_, machine_);
             break;
+        case ModalType::Help:
+            reset_help_scroll();
+            break;
         default:
             break;
     }
@@ -366,6 +369,33 @@ void TuiModal::set_glossary_topic(int topic) {
 
 void TuiModal::scroll_glossary_content(int delta) {
     modals::GlossaryModal::scroll_content(glossary_scroll_, delta, 30);
+}
+
+void TuiModal::scroll_help(int delta) { help_scroll_ = std::max(0, help_scroll_ + delta); }
+
+void TuiModal::handle_wheel(int delta) {
+    switch (active_modal_) {
+        case ModalType::Help:
+            scroll_help(delta * 2);
+            break;
+        case ModalType::Glossary:
+            scroll_glossary_content(delta * 2);
+            break;
+        case ModalType::Settings:
+            move_settings_cursor(delta);
+            break;
+        case ModalType::ManageBreakpoints:
+            move_bp_cursor(delta);
+            break;
+        case ModalType::LayoutPresets:
+            move_preset_cursor(delta);
+            break;
+        case ModalType::ToolPicker:
+            move_tool_picker_cursor(delta);
+            break;
+        default:
+            break;
+    }
 }
 
 void TuiModal::open_notice(const std::string& title, const std::string& message, bool is_error) {
@@ -807,7 +837,12 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
     const int visible_rows = overlay.visible_content_rows;
     int scroll_start = 0;
     if (total_rows > visible_rows) {
-        scroll_start = std::clamp(cursor_row - visible_rows / 2, 0, total_rows - visible_rows);
+        if (active_modal_ == ModalType::Help) {
+            scroll_start = std::clamp(help_scroll_, 0, total_rows - visible_rows);
+            help_scroll_ = scroll_start;
+        } else {
+            scroll_start = std::clamp(cursor_row - visible_rows / 2, 0, total_rows - visible_rows);
+        }
     }
 
     // Render Box Top Border
@@ -815,7 +850,13 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
         std::string title_fmt =
             std::format("\033[1m{}{}\033[0m{}{}", kThemeMint, title, kThemeBorder, m_bg);
         int title_len = get_display_width(title);
-        int dash_len = inner_w - title_len;
+        std::string up_badge;
+        int up_badge_len = 0;
+        if (scroll_start > 0) {
+            up_badge = " \033[1;33m▲ more\033[0m ";
+            up_badge_len = get_display_width(up_badge);
+        }
+        int dash_len = inner_w - title_len - up_badge_len;
         if (dash_len < 0) dash_len = 0;
         int left_dash = dash_len / 2;
         int right_dash = dash_len - left_dash;
@@ -825,10 +866,10 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
         bool const classic = std::string_view(glyphs.top_left) == "+";
         std::string_view const top_left = classic ? "+" : "┌";
         std::string_view const top_right = classic ? "+" : "┐";
-        std::string top_border =
-            std::format("{}{}{}{}{}{}{}{}{}\033[0m", kThemeBorder, m_bg, top_left,
-                        make_repeated_string(glyphs.horiz, left_dash), title_fmt, kThemeBorder,
-                        make_repeated_string(glyphs.horiz, right_dash), top_right, "\033[0m");
+        std::string top_border = std::format(
+            "{}{}{}{}{}{}{}{}{}{}\033[0m", kThemeBorder, m_bg, top_left,
+            make_repeated_string(glyphs.horiz, left_dash), title_fmt, up_badge, kThemeBorder,
+            make_repeated_string(glyphs.horiz, right_dash), top_right, "\033[0m");
 
         lines.at(static_cast<std::size_t>(start_y)) =
             overlay_string(lines.at(static_cast<std::size_t>(start_y)), top_border, start_x, box_w);
@@ -880,9 +921,29 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
         bool const classic = std::string_view(glyphs.bot_left) == "+";
         std::string_view const bot_left = classic ? "+" : "└";
         std::string_view const bot_right = classic ? "+" : "┘";
-        std::string bot_border =
-            std::format("{}{}{}{}{}{}\033[0m", kThemeBorder, m_bg, bot_left,
-                        make_repeated_string(glyphs.horiz, inner_w), bot_right, "\033[0m");
+        std::string bot_border;
+        if (total_rows > visible_rows && scroll_start + visible_rows < total_rows) {
+            int more_below = total_rows - (scroll_start + visible_rows);
+            std::string down_badge = std::format(" \033[1;33m▼ {} more below\033[0m ", more_below);
+            int down_badge_len = get_display_width(down_badge);
+            int rem_dash = inner_w - down_badge_len;
+            if (rem_dash > 0) {
+                int left_d = rem_dash / 2;
+                int right_d = rem_dash - left_d;
+                bot_border = std::format("{}{}{}{}{}{}{}{}\033[0m", kThemeBorder, m_bg, bot_left,
+                                         make_repeated_string(glyphs.horiz, left_d), down_badge,
+                                         kThemeBorder, make_repeated_string(glyphs.horiz, right_d),
+                                         bot_right);
+            } else {
+                bot_border =
+                    std::format("{}{}{}{}{}{}\033[0m", kThemeBorder, m_bg, bot_left,
+                                make_repeated_string(glyphs.horiz, inner_w), bot_right, "\033[0m");
+            }
+        } else {
+            bot_border =
+                std::format("{}{}{}{}{}{}\033[0m", kThemeBorder, m_bg, bot_left,
+                            make_repeated_string(glyphs.horiz, inner_w), bot_right, "\033[0m");
+        }
         lines.at(static_cast<std::size_t>(bot_y)) =
             overlay_string(lines.at(static_cast<std::size_t>(bot_y)), bot_border, start_x, box_w);
     }

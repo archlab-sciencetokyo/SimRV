@@ -703,10 +703,7 @@ void Tui::render(bool force) {
     if (workbench_slots_.size() != col_widths.count && col_widths.count > 0) {
         sync_workbench_slots();
     }
-    const bool multi_headers =
-        (col_widths.count > 2) || (col_widths.count == 2 && workbench_slots_.size() >= 2 &&
-                                   (workbench_slots_[1].page != TuiRegPage::CONSOLE ||
-                                    workbench_slots_[0].page == TuiRegPage::CONSOLE));
+    const bool multi_headers = (col_widths.count >= 2);
     int const term_content_rows = multi_headers ? std::max(1, num_rows - 1) : num_rows;
 
     int console_width = terminal_width;
@@ -738,7 +735,7 @@ void Tui::render(bool force) {
                             return inspector_pane_->render_column_header(
                                 static_cast<int>(col_idx),
                                 (panel_mode == TuiRightPanelMode::Display) ? "Display" : "Console",
-                                is_focused, width, "", true);
+                                is_focused, width, "", true, total_cols > 1);
                         }
                         return terminal_pane_->render_row(row - 1, width);
                     }
@@ -1100,12 +1097,14 @@ void Tui::handle_mouse(int x, int y, int b) {
             }
             return;
         }
-        const bool col_has_header =
-            (col_widths.count > 2) || (col_widths.count == 2 && workbench_slots_.size() >= 2 &&
-                                       (workbench_slots_[1].page != TuiRegPage::CONSOLE ||
-                                        workbench_slots_[0].page == TuiRegPage::CONSOLE));
+        const bool col_has_header = (col_widths.count >= 2);
 
         if (b == 0 && y == 4 && col_has_header) {
+            if (col_widths.count > 1 && col_widths.widths[clicked_col] >= 30 &&
+                col_local_x >= col_widths.widths[clicked_col] - 5) {
+                close_column(clicked_col);
+                return;
+            }
             if (clicked_col == previous_focused_slot) {
                 bool has_menu = true;
                 if (clicked_col < workbench_slots_.size()) {
@@ -1462,6 +1461,108 @@ void Tui::move_focused_column_right() {
     set_status_override(std::format("Moved Column to Position {}", focused_slot_index_ + 1));
     render(true);
 }
+
+auto Tui::add_workbench_column() -> bool {
+    if (workbench_slots_.size() >= 4) {
+        set_status_override("Maximum columns reached (4 columns max)");
+        render(true);
+        return false;
+    }
+
+    const size_t target_count = workbench_slots_.size() + 1;
+    const int req_width = framework::min_width_for_columns(static_cast<uint8_t>(target_count));
+
+    winsize w{};
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+    int const term_width =
+        (cached_term_width_ > 0) ? cached_term_width_ : (w.ws_col > 0 ? w.ws_col : 80);
+
+    if (term_width < req_width) {
+        set_status_override(
+            std::format("Terminal too narrow for {} columns (needs {} cols, current is {})",
+                        target_count, req_width, term_width));
+        render(true);
+        return false;
+    }
+
+    const std::array<TuiRegPage, 7> candidates = {
+        TuiRegPage::CONSOLE, TuiRegPage::STACK, TuiRegPage::TRACE, TuiRegPage::PIPELINE,
+        TuiRegPage::DISASM,  TuiRegPage::CACHE, TuiRegPage::GPR};
+    TuiRegPage new_page = TuiRegPage::CONSOLE;
+    for (auto c : candidates) {
+        bool already_used = false;
+        for (const auto& slot : workbench_slots_) {
+            if (slot.page == c) {
+                already_used = true;
+                break;
+            }
+        }
+        if (!already_used) {
+            new_page = c;
+            break;
+        }
+    }
+
+    workbench_slots_.push_back({new_page, 0});
+    if (target_count == 2) {
+        layout_ = TuiLayout::Split;
+    } else if (target_count == 3) {
+        layout_ = TuiLayout::ThreeColumn;
+    } else if (target_count == 4) {
+        layout_ = TuiLayout::FourColumn;
+    }
+
+    focused_slot_index_ = workbench_slots_.size() - 1;
+    if (inspector_pane_ && new_page != TuiRegPage::CONSOLE) {
+        inspector_pane_->set_page(new_page);
+    }
+    update_trace_active_cache();
+    set_status_override(
+        std::format("Added Column {}: {}", workbench_slots_.size(), get_page_name(new_page)));
+    render(true);
+    return true;
+}
+
+auto Tui::close_column(size_t slot_idx) -> bool {
+    if (workbench_slots_.size() <= 1) {
+        set_status_override("Cannot close the last remaining column");
+        render(true);
+        return false;
+    }
+    if (slot_idx >= workbench_slots_.size()) {
+        return false;
+    }
+
+    const auto closed_page = workbench_slots_[slot_idx].page;
+    workbench_slots_.erase(workbench_slots_.begin() + slot_idx);
+
+    const size_t rem = workbench_slots_.size();
+    if (rem == 1) {
+        layout_ = (workbench_slots_[0].page == TuiRegPage::CONSOLE) ? TuiLayout::FullRight
+                                                                    : TuiLayout::FullLeft;
+    } else if (rem == 2) {
+        layout_ = TuiLayout::Split;
+    } else if (rem == 3) {
+        layout_ = TuiLayout::ThreeColumn;
+    }
+
+    if (focused_slot_index_ >= workbench_slots_.size()) {
+        focused_slot_index_ = workbench_slots_.size() - 1;
+    } else if (focused_slot_index_ > slot_idx) {
+        focused_slot_index_--;
+    }
+
+    if (inspector_pane_ && workbench_slots_[focused_slot_index_].page != TuiRegPage::CONSOLE) {
+        inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
+    }
+    update_trace_active_cache();
+    set_status_override(
+        std::format("Closed Column {} ({})", slot_idx + 1, get_page_name(closed_page)));
+    render(true);
+    return true;
+}
+
+auto Tui::close_focused_column() -> bool { return close_column(focused_slot_index_); }
 
 auto Tui::focused_page() const -> TuiRegPage {
     if (focused_slot_index_ < workbench_slots_.size()) {
@@ -2131,6 +2232,29 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         }
         return true;
     }
+    if (mtype == ModalType::Help) {
+        if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q' ||
+            key == simrv::tui::TuiKey::QuestionMark || key == simrv::tui::TuiKey::F1) {
+            close_modal();
+            return true;
+        }
+        if (byte == 'j' || byte == 'J') {
+            modal_.scroll_help(1);
+            render(true);
+            return true;
+        }
+        if (byte == 'k' || byte == 'K') {
+            modal_.scroll_help(-1);
+            render(true);
+            return true;
+        }
+        if (byte == ' ' || key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+            modal_.scroll_help(5);
+            render(true);
+            return true;
+        }
+        return true;
+    }
     if (mtype == ModalType::PlatformChangeConfirm) {
         if (byte == 'r' || byte == 'R' || key == simrv::tui::TuiKey::Enter ||
             key == simrv::tui::TuiKey::Newline) {
@@ -2216,10 +2340,6 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         close_modal();
     } else if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline)
         submit_modal();
-    else if (get_active_modal() == ModalType::Help &&
-             (key == simrv::tui::TuiKey::h || key == simrv::tui::TuiKey::H ||
-              key == simrv::tui::TuiKey::QuestionMark || key == simrv::tui::TuiKey::F1))
-        close_modal();
     else if (get_active_modal() == ModalType::LoadBinary && byte == 9) {
         modal_.toggle_load_mode();
         render(true);
@@ -2312,6 +2432,13 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
             return true;
         case simrv::tui::TuiKey::CtrlL:
             cycle_layout();
+            return true;
+        case simrv::tui::TuiKey::CtrlA:
+        case simrv::tui::TuiKey::CtrlN:
+            add_workbench_column();
+            return true;
+        case simrv::tui::TuiKey::CtrlX:
+            close_focused_column();
             return true;
         case simrv::tui::TuiKey::F1:
             if (get_active_modal() == ModalType::Help)
@@ -2447,6 +2574,14 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
             }
             if (byte == 0x17) {
                 open_tool_picker(focused_slot_index_);
+                return true;
+            }
+            if (byte == 0x01 || byte == 0x0e) {
+                add_workbench_column();
+                return true;
+            }
+            if (byte == 0x18) {
+                close_focused_column();
                 return true;
             }
             if (byte == '1') {
@@ -2812,6 +2947,18 @@ void Tui::execute_footer_action(TuiFooterAction action) {
         case TuiFooterAction::MoveColumnRight:
             move_focused_column_right();
             break;
+        case TuiFooterAction::AddColumn:
+            add_workbench_column();
+            break;
+        case TuiFooterAction::CloseColumn:
+            close_focused_column();
+            break;
+        case TuiFooterAction::FocusNextPane:
+            focus_next_slot();
+            break;
+        case TuiFooterAction::FocusPrevPane:
+            focus_prev_slot();
+            break;
     }
 }
 
@@ -2846,6 +2993,16 @@ auto Tui::handle_alt_key(char key, uint8_t byte) -> bool {
             return true;
         case '>':
             move_focused_column_right();
+            return true;
+        case 'n':
+        case 'N':
+        case 'a':
+        case 'A':
+            add_workbench_column();
+            return true;
+        case 'x':
+        case 'X':
+            close_focused_column();
             return true;
         case 'p':
         case 'P':
@@ -2930,6 +3087,11 @@ auto Tui::handle_arrow_key_sequence() -> bool {
     const bool left = esc_buf_ == "\033[D" || esc_buf_ == "\033OD";
     if (up || down) {
         const int direction = up ? -1 : 1;
+        if (get_active_modal() == ModalType::Help) {
+            modal_.scroll_help(direction);
+            render(true);
+            return true;
+        }
         if (get_active_modal() == ModalType::ToolPicker) {
             modal_.move_tool_picker_cursor(direction);
             render(true);
@@ -3002,6 +3164,11 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             }
         }
     } else if (esc_buf_ == "\033[5~") {
+        if (get_active_modal() == ModalType::Help) {
+            modal_.scroll_help(-10);
+            render(true);
+            return true;
+        }
         if (get_active_modal() == ModalType::Glossary) {
             modal_.scroll_glossary_content(-5);
             render(true);
@@ -3014,6 +3181,11 @@ auto Tui::handle_arrow_key_sequence() -> bool {
         }
         return true;
     } else if (esc_buf_ == "\033[6~") {
+        if (get_active_modal() == ModalType::Help) {
+            modal_.scroll_help(10);
+            render(true);
+            return true;
+        }
         if (get_active_modal() == ModalType::Glossary) {
             modal_.scroll_glossary_content(5);
             render(true);
@@ -3126,8 +3298,13 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             return true;
         }
 
-        if (esc_buf_.back() == 'M' && (button == 0 || button == 1 || button == 2)) {
-            if (is_modal_active()) {
+        if (is_modal_active()) {
+            if (esc_buf_.back() == 'M') {
+                if (button == 64 || button == 65) {
+                    modal_.handle_wheel(button == 64 ? -1 : 1);
+                    render(true);
+                    return true;
+                }
                 if (button == 0) {
                     struct winsize w_m{};
                     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w_m);
@@ -3151,8 +3328,8 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                     }
                     render(true);
                 }
-                return true;
             }
+            return true;
         }
         if (esc_buf_.back() == 'M' && button == 0 && y == 2) {
             struct winsize w{};

@@ -64,6 +64,17 @@ struct TuiTestAccess {
     }
     static auto inspector(Tui& tui) -> InspectorPane* { return tui.inspector_pane_.get(); }
     static void update_cache(Tui& tui) { tui.update_cache(); }
+    static auto status_override(const Tui& tui) -> const std::string& {
+        return tui.status_override_;
+    }
+    static auto workbench_slots(const Tui& tui) -> const std::vector<WorkbenchSlot>& {
+        return tui.workbench_slots_;
+    }
+    static auto layout(const Tui& tui) -> TuiLayout { return tui.layout_; }
+    static auto status_bar(const Tui& tui) -> StatusBar* { return tui.status_bar_.get(); }
+    static auto handle_modal_key(Tui& tui, uint8_t byte, TuiKey key) -> bool {
+        return tui.handle_modal_keyboard_input(byte, key);
+    }
 };
 }  // namespace simrv::tui
 
@@ -203,7 +214,7 @@ void test_utf8_and_theme_helpers() {
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 35, "all key actions have registry entries");
+    expect(bindings.size() == 37, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
     std::set<char> claimed_chars;
     for (const auto& binding : bindings) {
@@ -279,6 +290,10 @@ void test_key_registry() {
         simrv::tui::TuiFooterAction::SwitchHart,
         simrv::tui::TuiFooterAction::ToggleTheme,
         simrv::tui::TuiFooterAction::ToggleExecutionMode,
+        simrv::tui::TuiFooterAction::AddColumn,
+        simrv::tui::TuiFooterAction::CloseColumn,
+        simrv::tui::TuiFooterAction::FocusNextPane,
+        simrv::tui::TuiFooterAction::FocusPrevPane,
     };
     for (const auto footer_action : footer_actions) {
         const auto key_action = simrv::tui::key_action_for_footer(footer_action);
@@ -2026,6 +2041,159 @@ void test_multi_column_workbench_tools_and_swapping() {
            "pipeline row fits in 46 columns without horizontal scroll overflow marker");
 }
 
+void test_multi_column_panel_management_and_modal_usability() {
+    simrv::core::Machine machine;
+    simrv::tui::Tui tui(machine);
+    simrv::tui::TuiTestAccess::init_panes(tui, machine);
+
+    // 1. Top status bar rendering: verify PANE 1/2 badge is removed
+    auto* status_bar = simrv::tui::TuiTestAccess::status_bar(tui);
+    expect(status_bar != nullptr, "status bar is initialized");
+    std::string header_row = status_bar->render_row(0, 120);
+    expect(header_row.find("PANE 1/") == std::string::npos,
+           "status bar row 0 does not contain PANE 1/ badge");
+    expect(header_row.find("PANE 2/") == std::string::npos,
+           "status bar row 0 does not contain PANE 2/ badge");
+
+    // Click on SimRV title should map to LoadBinary
+    auto act = status_bar->get_header_action_at_col(2, 120);
+    expect(act.action == simrv::tui::HeaderAction::LoadBinary,
+           "clicking SimRV title triggers LoadBinary action");
+
+    // Status bar footer reorganization
+    std::string footer_screen = status_bar->render_row(1, 120);  // row_idx 1 is Footer block
+    expect(strip_ansi(footer_screen).find("Ctrl-W Tool") != std::string::npos,
+           "footer contains Ctrl-W Tool");
+    expect(strip_ansi(footer_screen).find("Tab") != std::string::npos, "footer contains Tab");
+    expect(strip_ansi(footer_screen).find("Ctrl-N Add") != std::string::npos,
+           "footer contains Ctrl-N Add");
+    expect(strip_ansi(footer_screen).find("Ctrl-X Close") != std::string::npos,
+           "footer contains Ctrl-X Close");
+
+    // 2. Uniform 2-column header and close button [×]
+    simrv::tui::TuiTestAccess::set_cached_term_width(tui, 120);
+    simrv::tui::TuiTestAccess::set_cached_term_height(tui, 30);
+    tui.render(true);
+
+    auto const& slots = simrv::tui::TuiTestAccess::workbench_slots(tui);
+    expect(slots.size() == 2, "initial layout has 2 slots");
+    auto* inspector = simrv::tui::TuiTestAccess::inspector(tui);
+    std::string col0_hdr = inspector->render_column_header(0, "GPR", true, 58, "", false, true);
+    expect(strip_ansi(col0_hdr).find("[×]") != std::string::npos ||
+               strip_ansi(col0_hdr).find("[x]") != std::string::npos,
+           "column 0 header has [×] close button when can_close is true");
+    std::string col1_hdr =
+        inspector->render_column_header(1, "Console", false, 58, "", false, true);
+    expect(strip_ansi(col1_hdr).find("[×]") != std::string::npos ||
+               strip_ansi(col1_hdr).find("[x]") != std::string::npos,
+           "column 1 header has [×] close button when can_close is true");
+
+    // 3. Adding columns with add_workbench_column() and size warning toast
+    // Attempting to add 3rd column when width is narrow (100 < 144)
+    simrv::tui::TuiTestAccess::set_cached_term_width(tui, 100);
+    bool added = tui.add_workbench_column();
+    expect(!added, "cannot add 3rd column when width is less than 144");
+    expect(simrv::tui::TuiTestAccess::status_override(tui).find("Terminal too narrow") !=
+               std::string::npos,
+           "status override reports terminal too narrow for 3 columns");
+
+    // Now expand terminal to 160 cols (>= 144) and add column
+    simrv::tui::TuiTestAccess::set_cached_term_width(tui, 160);
+    added = tui.add_workbench_column();
+    expect(added, "successfully added 3rd column at 160 width");
+    expect(slots.size() == 3, "slot count is now 3");
+
+    // Attempting to add 4th column when width is narrow (180 < 192)
+    simrv::tui::TuiTestAccess::set_cached_term_width(tui, 180);
+    added = tui.add_workbench_column();
+    expect(!added, "cannot add 4th column when width is less than 192");
+    expect(simrv::tui::TuiTestAccess::status_override(tui).find("Terminal too narrow") !=
+               std::string::npos,
+           "status override reports terminal too narrow for 4 columns");
+
+    // Expand terminal to 220 cols (>= 192) and add 4th column
+    simrv::tui::TuiTestAccess::set_cached_term_width(tui, 220);
+    added = tui.add_workbench_column();
+    expect(added, "successfully added 4th column at 220 width");
+    expect(slots.size() == 4, "slot count is now 4");
+
+    // Attempting to add 5th column exceeds maximum
+    added = tui.add_workbench_column();
+    expect(!added, "cannot add 5th column beyond maximum 4 columns");
+    expect(simrv::tui::TuiTestAccess::status_override(tui).find("Maximum columns reached") !=
+               std::string::npos,
+           "status override reports maximum columns reached");
+
+    // 4. Closing columns: close_focused_column() and [×] click
+    // Close 4th column
+    bool closed = tui.close_focused_column();
+    expect(closed, "successfully closed column 4");
+    expect(slots.size() == 3, "slot count is now 3");
+
+    // Close column 2 via close_column
+    closed = tui.close_column(2);
+    expect(closed, "successfully closed column 2");
+    expect(slots.size() == 2, "slot count is now 2");
+
+    // Close column 1 via close_column
+    closed = tui.close_column(1);
+    expect(closed, "successfully closed column 1");
+    expect(slots.size() == 1, "slot count is now 1");
+
+    // Attempting to close the last surviving column must fail with warning
+    closed = tui.close_column(0);
+    expect(!closed, "cannot close the last remaining column");
+    expect(simrv::tui::TuiTestAccess::status_override(tui).find("Cannot close the last") !=
+               std::string::npos,
+           "status override reports cannot close last remaining column");
+
+    // Restore to 2 columns for mouse testing
+    simrv::tui::TuiTestAccess::set_cached_term_width(tui, 120);
+    tui.add_workbench_column();
+    expect(slots.size() == 2, "restored to 2 columns");
+    tui.render(true);
+
+    // Click [×] on column 1 header (x ~ 118, y = 4)
+    tui.handle_mouse(118, 4, 0);
+    expect(slots.size() == 1, "clicking [×] button on column 1 closed column 1");
+
+    // 5. Modal mouse wheel isolation and HelpModal scrolling
+    tui.open_modal(simrv::tui::ModalType::Help);
+    expect(tui.is_modal_active(), "help modal is active");
+    auto& modal = simrv::tui::TuiTestAccess::modal(tui);
+
+    // Initial help render at 80x24: verify bottom border shows overflow indicator
+    std::vector<std::string> overlay_lines(24, std::string(80, ' '));
+    modal.render_overlay(overlay_lines, 80, 24);
+    std::string rendered_overlay;
+    for (const auto& l : overlay_lines) rendered_overlay += l + '\n';
+    expect(rendered_overlay.find("▼") != std::string::npos,
+           "bottom border displays overflow indicator when help exceeds viewport");
+
+    // Test wheel down on modal
+    modal.handle_wheel(1);
+    std::vector<std::string> scrolled_lines(24, std::string(80, ' '));
+    modal.render_overlay(scrolled_lines, 80, 24);
+    std::string scrolled_overlay;
+    for (const auto& l : scrolled_lines) scrolled_overlay += l + '\n';
+    expect(scrolled_overlay.find("▲ more") != std::string::npos,
+           "top border displays ▲ more indicator after scrolling down");
+
+    // Test keyboard scrolling in help modal: j / k
+    simrv::tui::TuiTestAccess::handle_modal_key(tui, 'j', simrv::tui::TuiKey::j);
+    simrv::tui::TuiTestAccess::handle_modal_key(tui, 'k', simrv::tui::TuiKey::k);
+
+    // Test arrow key scrolling
+    simrv::tui::TuiTestAccess::arrow(tui, "\033[B");   // Down
+    simrv::tui::TuiTestAccess::arrow(tui, "\033[A");   // Up
+    simrv::tui::TuiTestAccess::arrow(tui, "\033[6~");  // PgDn
+    simrv::tui::TuiTestAccess::arrow(tui, "\033[5~");  // PgUp
+
+    // Close help modal with 'q'
+    simrv::tui::TuiTestAccess::handle_modal_key(tui, 'q', simrv::tui::TuiKey::q);
+    expect(!tui.is_modal_active(), "help modal closed with 'q'");
+}
+
 }  // namespace
 
 int main() {
@@ -2061,6 +2229,7 @@ int main() {
     test_responsive_labels_and_header();
     test_tui_differential_rendering_and_throttling();
     test_multi_column_workbench_tools_and_swapping();
+    test_multi_column_panel_management_and_modal_usability();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;
