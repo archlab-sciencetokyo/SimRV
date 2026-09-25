@@ -219,8 +219,8 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     auto close_column(size_t slot_idx) -> bool;
     [[nodiscard]] auto focused_page() const -> TuiRegPage;
 
-    void cycle_reg_page();
-    void cycle_tool_page();
+    void cycle_reg_page(bool reverse = false);
+    void cycle_tool_page(bool reverse = false);
     void set_reg_page(TuiRegPage page);
     void toggle_explain();
     void cycle_right_panel_mode();

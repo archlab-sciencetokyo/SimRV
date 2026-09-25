@@ -184,7 +184,7 @@ class TuiModal {
     void move_tool_picker_cursor(int delta);
     void set_tool_picker_cursor(int cursor);
     void set_tool_picker_slot(int slot);
-    void cycle_tool_picker_slot(int num_slots = 0);
+    void cycle_tool_picker_slot(int num_slots = 0, int direction = 1);
     [[nodiscard]] auto get_tool_picker_slot() const -> int { return tool_picker_slot_; }
     [[nodiscard]] auto get_tool_picker_cursor() const -> int { return tool_picker_cursor_; }
     [[nodiscard]] auto get_tool_picker_num_slots() const -> int { return tool_picker_num_slots_; }

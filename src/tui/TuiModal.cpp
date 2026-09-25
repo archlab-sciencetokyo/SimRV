@@ -198,10 +198,11 @@ void TuiModal::set_tool_picker_slot(int slot) {
     tool_picker_slot_ = std::clamp(slot, 0, std::max(0, tool_picker_num_slots_ - 1));
 }
 
-void TuiModal::cycle_tool_picker_slot(int num_slots) {
+void TuiModal::cycle_tool_picker_slot(int num_slots, int direction) {
     int const total = (num_slots > 0) ? num_slots : tool_picker_num_slots_;
     if (total <= 0) return;
-    tool_picker_slot_ = (tool_picker_slot_ + 1) % total;
+    int const step = (direction >= 0) ? 1 : (total - 1);
+    tool_picker_slot_ = (tool_picker_slot_ + step) % total;
 }
 
 auto TuiModal::get_selected_tool_page() const -> TuiRegPage {

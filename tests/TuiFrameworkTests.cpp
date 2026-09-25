@@ -2080,10 +2080,12 @@ void test_multi_column_panel_management_and_modal_usability() {
     expect(strip_ansi(footer_screen).find("Ctrl-W Tool") != std::string::npos,
            "footer contains Ctrl-W Tool");
     expect(strip_ansi(footer_screen).find("Tab") != std::string::npos, "footer contains Tab");
-    expect(strip_ansi(footer_screen).find("Ctrl-N Add") != std::string::npos,
-           "footer contains Ctrl-N Add");
-    expect(strip_ansi(footer_screen).find("Ctrl-X Close") != std::string::npos,
-           "footer contains Ctrl-X Close");
+    expect(strip_ansi(footer_screen).find("Ctrl-N Add Panel") != std::string::npos,
+           "footer contains Ctrl-N Add Panel");
+    expect(strip_ansi(footer_screen).find("Ctrl-X Close Panel") != std::string::npos,
+           "footer contains Ctrl-X Close Panel");
+    expect(strip_ansi(footer_screen).find("Move L") != std::string::npos, "footer contains Move L");
+    expect(strip_ansi(footer_screen).find("Move R") != std::string::npos, "footer contains Move R");
 
     // 2. Uniform 2-column header and close button [×]
     simrv::tui::TuiTestAccess::set_cached_term_width(tui, 120);
@@ -2237,6 +2239,60 @@ void test_multi_column_panel_management_and_modal_usability() {
     // Close help modal with 'q'
     simrv::tui::TuiTestAccess::handle_modal_key(tui, 'q', simrv::tui::TuiKey::q);
     expect(!tui.is_modal_active(), "help modal closed with 'q'");
+
+    // 6. Shift-Tab and Ctrl-Left/Right directional column navigation
+    tui.add_workbench_column();
+    expect(slots.size() == 2, "workbench has 2 columns");
+    simrv::tui::TuiTestAccess::set_focused_slot(tui, 0);
+    expect(tui.focused_slot() == 0, "focus starts at slot 0");
+
+    // Ctrl-Right (\033[1;5C): focus next slot
+    simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[1;5C");
+    expect(tui.focused_slot() == 1, "Ctrl-Right moved focus to slot 1");
+
+    // Shift-Tab (\033[Z): focus prev slot (reverse direction)
+    simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[Z");
+    expect(tui.focused_slot() == 0, "Shift-Tab moved focus back to slot 0");
+
+    // Ctrl-Left (\033[1;5D): focus prev slot with wraparound
+    simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[1;5D");
+    expect(tui.focused_slot() == 1, "Ctrl-Left wrapped focus to slot 1");
+
+    // Reverse cycling: r vs R (registers), l vs L (tools)
+    tui.set_workbench_slot_page(1, simrv::tui::TuiRegPage::GPR);
+    tui.cycle_reg_page(true);
+    expect(slots[1].page != simrv::tui::TuiRegPage::GPR,
+           "reverse cycle_reg_page moved away from GPR");
+    tui.cycle_reg_page(false);
+    expect(slots[1].page == simrv::tui::TuiRegPage::GPR,
+           "forward cycle_reg_page moved back to GPR");
+
+    tui.cycle_tool_page(true);
+    expect(slots[1].page == simrv::tui::TuiRegPage::CONSOLE ||
+               slots[1].page == simrv::tui::TuiRegPage::EXPLAIN,
+           "reverse cycle_tool_page moved to Tools group");
+
+    // Shift-Tab inside ToolPickerModal
+    tui.open_tool_picker(0);
+    expect(tui.is_modal_active(), "tool picker modal is active");
+    expect(modal.get_tool_picker_slot() == 0, "tool picker slot is 0");
+    simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[Z");
+    expect(modal.get_tool_picker_slot() == 1,
+           "Shift-Tab in ToolPicker cycled slot in reverse to 1");
+    simrv::tui::TuiTestAccess::handle_modal_key(tui, '\t', simrv::tui::TuiKey::Tab);
+    expect(modal.get_tool_picker_slot() == 0, "Tab in ToolPicker cycled slot forward to 0");
+    tui.close_modal();
+
+    // Shift-Tab inside SettingsModal
+    tui.open_modal(simrv::tui::ModalType::Settings);
+    expect(tui.is_modal_active(), "settings modal is active");
+    expect(modal.get_settings_draft().active_tab == 0, "settings starts at tab 0");
+    simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[Z");
+    expect(modal.get_settings_draft().active_tab == 2,
+           "Shift-Tab in Settings cycled tab in reverse to 2");
+    simrv::tui::TuiTestAccess::handle_modal_key(tui, '\t', simrv::tui::TuiKey::Tab);
+    expect(modal.get_settings_draft().active_tab == 0, "Tab in Settings cycled tab forward to 0");
+    tui.close_modal();
 }
 
 }  // namespace
