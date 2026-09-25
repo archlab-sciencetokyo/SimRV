@@ -115,12 +115,6 @@ static const auto kKeyBindings =
                                     .alt_char = 'Q',
                                     .footer_label = "[F10] Quit",
                                     .help_label = "Quit Simulator"},
-                                   {.action = KeyAction::CycleLayout,
-                                    .key_display = "[Ctrl-L]",
-                                    .primary_char = '\0',
-                                    .alt_char = '\0',
-                                    .footer_label = "[Ctrl-L] Layout",
-                                    .help_label = "Cycle Workbench Layout"},
                                    {.action = KeyAction::CycleRegPage,
                                     .key_display = "[F3] / [r] (fwd) / [R] (rev)",
                                     .primary_char = 'r',
@@ -376,7 +370,7 @@ auto key_action_for_footer(TuiFooterAction action) -> KeyAction {
         case TuiFooterAction::Quit:
             return KeyAction::Quit;
         case TuiFooterAction::CycleLayout:
-            return KeyAction::CycleLayout;
+            return KeyAction::OpenLayoutPresets;
         case TuiFooterAction::ToggleStudentGuide:
             return KeyAction::ToggleStudentGuide;
         case TuiFooterAction::TogglePanel:

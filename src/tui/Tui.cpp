@@ -2562,9 +2562,6 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         case simrv::tui::TuiKey::BackTab:
             focus_prev_slot();
             return true;
-        case simrv::tui::TuiKey::CtrlL:
-            cycle_layout();
-            return true;
         case simrv::tui::TuiKey::CtrlA:
         case simrv::tui::TuiKey::CtrlN:
             add_workbench_column();

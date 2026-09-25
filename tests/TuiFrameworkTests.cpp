@@ -89,6 +89,9 @@ struct TuiTestAccess {
     }
     static auto selection(const Tui& tui) -> const SelectionState& { return tui.selection_; }
     static void set_focused_slot(Tui& tui, size_t slot) { tui.focused_slot_index_ = slot; }
+    static auto handle_nav_key(Tui& tui, uint8_t byte, TuiKey key) -> bool {
+        return tui.handle_navigation_keyboard_input(byte, key);
+    }
 };
 }  // namespace simrv::tui
 
@@ -228,7 +231,7 @@ void test_utf8_and_theme_helpers() {
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 37, "all key actions have registry entries");
+    expect(bindings.size() == 36, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
     std::set<char> claimed_chars;
     for (const auto& binding : bindings) {
@@ -295,7 +298,6 @@ void test_key_registry() {
         simrv::tui::TuiFooterAction::ToggleHelp,
         simrv::tui::TuiFooterAction::RunPause,
         simrv::tui::TuiFooterAction::Quit,
-        simrv::tui::TuiFooterAction::CycleLayout,
         simrv::tui::TuiFooterAction::ToggleStudentGuide,
         simrv::tui::TuiFooterAction::TogglePanel,
         simrv::tui::TuiFooterAction::OpenSettings,
@@ -2086,6 +2088,8 @@ void test_multi_column_panel_management_and_modal_usability() {
            "footer contains Ctrl-X Close Panel");
     expect(strip_ansi(footer_screen).find("Move L") != std::string::npos, "footer contains Move L");
     expect(strip_ansi(footer_screen).find("Move R") != std::string::npos, "footer contains Move R");
+    expect(strip_ansi(footer_screen).find("Ctrl-L") == std::string::npos,
+           "footer does not contain Ctrl-L");
 
     // 2. Uniform 2-column header and close button [×]
     simrv::tui::TuiTestAccess::set_cached_term_width(tui, 120);
@@ -2293,6 +2297,13 @@ void test_multi_column_panel_management_and_modal_usability() {
     simrv::tui::TuiTestAccess::handle_modal_key(tui, '\t', simrv::tui::TuiKey::Tab);
     expect(modal.get_settings_draft().active_tab == 0, "Tab in Settings cycled tab forward to 0");
     tui.close_modal();
+
+    // Verify Ctrl-L is removed from navigation handling
+    const auto layout_before = simrv::tui::TuiTestAccess::layout(tui);
+    const bool handled_ctrl_l =
+        simrv::tui::TuiTestAccess::handle_nav_key(tui, 12, simrv::tui::TuiKey::CtrlL);
+    expect(!handled_ctrl_l, "Ctrl-L is not handled as a navigation command");
+    expect(simrv::tui::TuiTestAccess::layout(tui) == layout_before, "Ctrl-L did not cycle layout");
 }
 
 }  // namespace
