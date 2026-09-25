@@ -65,6 +65,52 @@ auto ToolPickerModal::tool_at_index(size_t index) -> std::optional<TuiRegPage> {
     return std::nullopt;
 }
 
+auto ToolPickerModal::tool_index_at_row(int content_row) -> std::optional<size_t> {
+    switch (content_row) {
+        case 3:
+            return 0;  // GPR
+        case 4:
+            return 1;  // FPR
+        case 5:
+            return 2;  // VEC
+        case 7:
+            return 3;  // STACK
+        case 8:
+            return 4;  // CACHE
+        case 9:
+            return 5;  // TLB
+        case 10:
+            return 6;  // BUS
+        case 12:
+            return 7;  // PIPELINE
+        case 13:
+            return 8;  // BPRED
+        case 14:
+            return 9;  // HAZARD
+        case 16:
+            return 10;  // TRACE
+        case 17:
+            return 11;  // EXPLAIN
+        case 18:
+            return 12;  // CONSOLE
+        default:
+            return std::nullopt;
+    }
+}
+
+auto ToolPickerModal::row_for_tool_index(size_t index) -> int {
+    static constexpr std::array<int, 13> kRows = {
+        3,  4,  5,       // GPR, FPR, VEC
+        7,  8,  9,  10,  // STACK, CACHE, TLB, BUS
+        12, 13, 14,      // PIPELINE, BPRED, HAZARD
+        16, 17, 18       // TRACE, EXPLAIN, CONSOLE
+    };
+    if (index < kRows.size()) {
+        return kRows[index];
+    }
+    return 3;
+}
+
 auto ToolPickerModal::find_by_accelerator(char c) -> std::optional<TuiRegPage> {
     const char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     for (const auto& item : tools_registry()) {
@@ -78,10 +124,21 @@ auto ToolPickerModal::find_by_accelerator(char c) -> std::optional<TuiRegPage> {
 void ToolPickerModal::render(std::vector<std::string>& /*content_rows*/,
                              const std::function<void(const std::string&)>& add_row_cb,
                              int slot_idx, int cursor, TuiRegPage current_page, int /*term_height*/,
-                             int /*box_w*/) {
-    add_row_cb(std::format("Assign a tool or view to Column {} (currently: {}):", slot_idx + 1,
+                             int /*box_w*/, int num_slots) {
+    // Row 0: Column selection tab bar
+    static constexpr std::array<std::string_view, 4> kTabLabels = {"Column 1", "Column 2",
+                                                                   "Column 3", "Column 4"};
+    int const effective_slots = std::clamp(num_slots, 1, 4);
+    std::vector<std::string_view> tabs;
+    tabs.reserve(static_cast<size_t>(effective_slots));
+    for (int s = 0; s < effective_slots; ++s) {
+        tabs.push_back(kTabLabels.at(static_cast<size_t>(s)));
+    }
+    add_row_cb(build_modal_tab_bar(tabs, static_cast<size_t>(slot_idx)));
+
+    // Row 1: Target slot description
+    add_row_cb(std::format(" Assign a tool to Column {} (currently: {}):", slot_idx + 1,
                            get_page_name(current_page)));
-    add_row_cb("");
 
     const auto& tools = tools_registry();
     TuiCategoryGroup current_grp = static_cast<TuiCategoryGroup>(99);
@@ -90,7 +147,6 @@ void ToolPickerModal::render(std::vector<std::string>& /*content_rows*/,
         const auto& tool = tools[i];
         if (tool.group != current_grp) {
             current_grp = tool.group;
-            if (i > 0) add_row_cb("");
             std::string group_title;
             switch (current_grp) {
                 case TuiCategoryGroup::Regs:
@@ -125,10 +181,12 @@ void ToolPickerModal::render(std::vector<std::string>& /*content_rows*/,
         }
     }
 
+    // Row 19: Blank spacing row
     add_row_cb("");
-    add_row_cb(build_modal_footer({{"[Enter / a-z]", "Assign Tool"},
+    // Row 20: Clickable footer action row
+    add_row_cb(build_modal_footer({{"[Enter / Click]", "Assign Tool"},
                                    {"[Up/Down]", "Navigate"},
-                                   {"[Tab]", "Target Next Col"},
+                                   {"[Tab / Click]", "Target Col"},
                                    {"[Esc / q]", "Cancel"}}));
 }
 

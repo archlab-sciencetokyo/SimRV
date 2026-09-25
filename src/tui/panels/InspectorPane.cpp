@@ -253,6 +253,10 @@ auto InspectorPane::content_total_columns(int width) const -> int {
             return std::max(width, min_vec);
         }
         case TuiRegPage::PIPELINE: {
+            if (column_header_mode_ || secondary_column_mode_) {
+                int const min_pipe = (sizeof(Register) > 4) ? 46 : 44;
+                return std::max(width, min_pipe);
+            }
             int const min_pipe = (sizeof(Register) > 4) ? 68 : 60;
             return std::max(width, min_pipe);
         }
@@ -711,22 +715,35 @@ auto InspectorPane::render_guidance_row(int row_idx, int width) -> std::string {
     }
 }
 
+auto InspectorPane::has_tool_menu(TuiRegPage page) const -> bool {
+    if (page == TuiRegPage::PIPELINE && !machine_.runtime_profile.is_cycle_mode()) {
+        return false;
+    }
+    return true;
+}
+
 auto InspectorPane::render_column_header(int col_idx, const char* name, bool is_focused, int width,
-                                         std::string_view key_hint) const -> std::string {
+                                         std::string_view key_hint, bool has_menu) const
+    -> std::string {
     const auto style = get_active_theme_style();
     const bool is_ansi = (style == TuiThemeStyle::ClassicAnsi);
     const char* horiz = is_ansi ? "-" : "─";
 
     std::string_view effective_hint = key_hint;
-    if (effective_hint.empty() && is_focused) {
+    if (effective_hint.empty() && is_focused && has_menu) {
         effective_hint = "[Ctrl-W] Tool";
     }
 
     std::string badge;
     if (is_focused) {
-        badge = is_ansi ? std::format(" [{}: {}] v ", col_idx + 1, name)
-                        : std::format(" \033[1;7m [{}: {}] \033[0m\033[1;36m▼\033[0m", col_idx + 1,
-                                      name);
+        if (has_menu) {
+            badge = is_ansi ? std::format(" [{}: {}] v ", col_idx + 1, name)
+                            : std::format(" \033[1;7m [{}: {}] \033[0m\033[1;36m▼\033[0m",
+                                          col_idx + 1, name);
+        } else {
+            badge = is_ansi ? std::format(" [{}: {}] ", col_idx + 1, name)
+                            : std::format(" \033[1;7m [{}: {}] \033[0m", col_idx + 1, name);
+        }
     } else {
         badge = is_ansi ? std::format(" [{}: {}] ", col_idx + 1, name)
                         : std::format(" {}{}[{}: {}]\033[0m ", kThemeMuted, is_focused ? "► " : "",
@@ -938,7 +955,9 @@ auto InspectorPane::render_column_row(int row_idx, int width, int col_idx, size_
 
     if (is_multi || is_secondary) {
         if (row_idx == 0) {
-            return render_column_header(col_idx, get_page_name(page_), is_focused, width);
+            bool const has_menu = has_tool_menu(page_);
+            return render_column_header(col_idx, get_page_name(page_), is_focused, width, "",
+                                        has_menu);
         }
         return render_row_internal(row_idx, width, /*header_rows=*/1, is_secondary);
     }

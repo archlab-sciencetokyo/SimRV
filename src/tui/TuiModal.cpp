@@ -163,9 +163,10 @@ auto TuiModal::remove_bp_at_cursor(
     return removed;
 }
 
-void TuiModal::open_tool_picker(int slot_idx, TuiRegPage current_page) {
+void TuiModal::open_tool_picker(int slot_idx, TuiRegPage current_page, int num_slots) {
     active_modal_ = ModalType::ToolPicker;
-    tool_picker_slot_ = std::max(0, slot_idx);
+    tool_picker_num_slots_ = std::max(1, num_slots);
+    tool_picker_slot_ = std::clamp(slot_idx, 0, tool_picker_num_slots_ - 1);
     tool_picker_current_page_ = current_page;
     tool_picker_cursor_ = 0;
     const auto& list = modals::ToolPickerModal::all_tools();
@@ -190,9 +191,14 @@ void TuiModal::set_tool_picker_cursor(int cursor) {
     tool_picker_cursor_ = std::clamp(cursor, 0, count - 1);
 }
 
+void TuiModal::set_tool_picker_slot(int slot) {
+    tool_picker_slot_ = std::clamp(slot, 0, std::max(0, tool_picker_num_slots_ - 1));
+}
+
 void TuiModal::cycle_tool_picker_slot(int num_slots) {
-    if (num_slots <= 0) return;
-    tool_picker_slot_ = (tool_picker_slot_ + 1) % num_slots;
+    int const total = (num_slots > 0) ? num_slots : tool_picker_num_slots_;
+    if (total <= 0) return;
+    tool_picker_slot_ = (tool_picker_slot_ + 1) % total;
 }
 
 auto TuiModal::get_selected_tool_page() const -> TuiRegPage {
@@ -501,8 +507,28 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
                 case ModalType::LoadCpuConfig:
                     return action == 0 ? ModalClickResult::Submit : ModalClickResult::Closed;
                 case ModalType::Help:
-                case ModalType::ToolPicker:
                 case ModalType::None:
+                    return ModalClickResult::Handled;
+                case ModalType::ToolPicker:
+                    if (control_row.content_row == 0) {
+                        set_tool_picker_slot(static_cast<int>(action));
+                        return ModalClickResult::Handled;
+                    }
+                    if (action == 0) {
+                        return ModalClickResult::Submit;
+                    }
+                    if (action == 1) {
+                        move_tool_picker_cursor(1);
+                        return ModalClickResult::Handled;
+                    }
+                    if (action == 2) {
+                        cycle_tool_picker_slot();
+                        return ModalClickResult::Handled;
+                    }
+                    if (action == 3) {
+                        close();
+                        return ModalClickResult::Closed;
+                    }
                     return ModalClickResult::Handled;
             }
         }
@@ -581,7 +607,9 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
         }
 
         case ModalType::ToolPicker: {
-            if (content_row >= 2) {
+            auto const tool_idx = modals::ToolPickerModal::tool_index_at_row(content_row);
+            if (tool_idx.has_value()) {
+                tool_picker_cursor_ = static_cast<int>(*tool_idx);
                 return ModalClickResult::Submit;
             }
             return ModalClickResult::Handled;
@@ -682,7 +710,7 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
         case ModalType::ToolPicker: {
             modals::ToolPickerModal::render(content_rows, add_row, tool_picker_slot_,
                                             tool_picker_cursor_, tool_picker_current_page_,
-                                            term_height, provisional_width);
+                                            term_height, provisional_width, tool_picker_num_slots_);
             break;
         }
         case ModalType::Notice:
@@ -746,6 +774,10 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             break;
         case ModalType::ManageBreakpoints:
             cursor_row = 2 + bp_cursor_;
+            break;
+        case ModalType::ToolPicker:
+            cursor_row = modals::ToolPickerModal::row_for_tool_index(
+                static_cast<size_t>(tool_picker_cursor_));
             break;
         default:
             cursor_row = 0;

@@ -62,6 +62,7 @@ struct TuiTestAccess {
     static auto last_screen_lines(const Tui& tui) -> const std::vector<std::string>& {
         return tui.last_screen_lines_;
     }
+    static auto inspector(Tui& tui) -> InspectorPane* { return tui.inspector_pane_.get(); }
     static void update_cache(Tui& tui) { tui.update_cache(); }
 };
 }  // namespace simrv::tui
@@ -1948,6 +1949,81 @@ void test_multi_column_workbench_tools_and_swapping() {
     tui.submit_modal();
     expect(!tui.is_modal_active(), "modal is closed after submit");
     expect(slots[0].page == simrv::tui::TuiRegPage::CACHE, "slot 0 page updated to CACHE");
+
+    // 4. ToolPickerModal row mapping and clickable selection
+    expect(simrv::tui::modals::ToolPickerModal::tool_index_at_row(3) == 0,
+           "row 3 maps to tool 0 (GPR)");
+    expect(simrv::tui::modals::ToolPickerModal::tool_index_at_row(7) == 3,
+           "row 7 maps to tool 3 (STACK)");
+    expect(simrv::tui::modals::ToolPickerModal::tool_index_at_row(12) == 7,
+           "row 12 maps to tool 7 (PIPELINE)");
+    expect(simrv::tui::modals::ToolPickerModal::tool_index_at_row(16) == 10,
+           "row 16 maps to tool 10 (TRACE)");
+    expect(simrv::tui::modals::ToolPickerModal::tool_index_at_row(18) == 12,
+           "row 18 maps to tool 12 (CONSOLE)");
+    expect(!simrv::tui::modals::ToolPickerModal::tool_index_at_row(2).has_value(),
+           "row 2 is category banner, maps to no tool");
+    expect(simrv::tui::modals::ToolPickerModal::row_for_tool_index(0) == 3,
+           "tool 0 (GPR) is at row 3");
+    expect(simrv::tui::modals::ToolPickerModal::row_for_tool_index(7) == 12,
+           "tool 7 (PIPELINE) is at row 12");
+    expect(simrv::tui::modals::ToolPickerModal::row_for_tool_index(10) == 16,
+           "tool 10 (TRACE) is at row 16");
+
+    // Interactive clicking inside ToolPickerModal
+    tui.open_tool_picker(0);
+    std::vector<std::string> overlay_lines(30, std::string(120, ' '));
+    modal.render_overlay(overlay_lines, 120, 30);
+    // TRACE (tool index 10) is at content row 16; terminal Y: start_y (3) + 1 (border) + 16
+    // (content) + 1 (1-indexed) = 21
+    auto click_res = modal.handle_click(60, 21, 120, 30);
+    expect(click_res == simrv::tui::TuiModal::ModalClickResult::Submit,
+           "clicking tool row submits selection");
+    expect(modal.get_tool_picker_cursor() == 10, "cursor updated to TRACE (index 10)");
+    tui.submit_modal();
+    expect(slots[0].page == simrv::tui::TuiRegPage::TRACE, "slot 0 assigned to TRACE via click");
+
+    // 5. Column header click policy: first click focuses, second click opens menu
+    // Slot 0 is TRACE, slot 1 is CONSOLE. Focus is currently at slot 0.
+    expect(tui.focused_slot() == 0, "focus starts at slot 0");
+
+    // First click on column 1 header (x=80, y=4):
+    tui.handle_mouse(80, 4, 0);
+    expect(tui.focused_slot() == 1, "first click on column 1 header focuses column 1");
+    expect(!tui.is_modal_active(), "first click on unfocused column does not open tool picker");
+
+    // Second click on column 1 header (which is now focused):
+    tui.handle_mouse(80, 4, 0);
+    expect(tui.is_modal_active(), "second click on already focused column opens tool picker");
+    expect(modal.get_tool_picker_slot() == 1, "modal targets column 1");
+    tui.close_modal();
+
+    // 6. Pipeline menu suppression in functional mode
+    tui.set_workbench_slot_page(0, simrv::tui::TuiRegPage::PIPELINE);
+    tui.handle_mouse(10, 6, 0);  // click in body of slot 0 to focus it
+    expect(tui.focused_slot() == 0, "slot 0 is focused");
+
+    auto* inspector = simrv::tui::TuiTestAccess::inspector(tui);
+    expect(inspector != nullptr, "inspector pane is initialized");
+    expect(!inspector->has_tool_menu(simrv::tui::TuiRegPage::PIPELINE),
+           "pipeline panel in functional mode has no tool menu");
+
+    std::string hdr = inspector->render_column_header(0, "Pipeline", true, 46, "", false);
+    expect(hdr.find("▼") == std::string::npos,
+           "dropdown affordance is omitted when has_menu is false");
+    expect(hdr.find("[Ctrl-W]") == std::string::npos,
+           "tool hint is omitted when has_menu is false");
+
+    // Click on focused pipeline header when only stages tool is available:
+    tui.handle_mouse(10, 4, 0);
+    expect(!tui.is_modal_active(),
+           "clicking header of pipeline panel in functional mode does not open menu");
+
+    // 7. Pipeline panel width check (fits within 46 columns without false horizontal scroll
+    // overflow)
+    std::string pipe_row = inspector->render_column_row(1, 46, 0, 3, true, true);
+    expect(pipe_row.find("►") == std::string::npos,
+           "pipeline row fits in 46 columns without horizontal scroll overflow marker");
 }
 
 }  // namespace

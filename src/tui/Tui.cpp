@@ -709,10 +709,18 @@ void Tui::render(bool force) {
                                     workbench_slots_[0].page == TuiRegPage::CONSOLE));
     int const term_content_rows = multi_headers ? std::max(1, num_rows - 1) : num_rows;
 
+    int console_width = terminal_width;
+    for (size_t c = 0; c < workbench_slots_.size() && c < col_widths.count; ++c) {
+        if (workbench_slots_[c].page == TuiRegPage::CONSOLE) {
+            console_width = col_widths.widths[c];
+            break;
+        }
+    }
+
     int total = (panel_mode == TuiRightPanelMode::Terminal) ? vt_.get_lines_count() : 0;
     scroll_offset_ = std::min(scroll_offset_, std::max(0, total - term_content_rows));
 
-    render_build_lines(inspector_width, terminal_width, term_content_rows, panel_mode);
+    render_build_lines(inspector_width, console_width, term_content_rows, panel_mode);
     lock.unlock();
 
     std::vector<std::string> new_lines = compose_multi_frame_lines(
@@ -730,7 +738,7 @@ void Tui::render(bool force) {
                             return inspector_pane_->render_column_header(
                                 static_cast<int>(col_idx),
                                 (panel_mode == TuiRightPanelMode::Display) ? "Display" : "Console",
-                                is_focused, width);
+                                is_focused, width, "", true);
                         }
                         return terminal_pane_->render_row(row - 1, width);
                     }
@@ -809,7 +817,7 @@ void Tui::render(bool force) {
             int const start_line = get_terminal_pane_start_line(term_content_rows);
             int const line_offset = cursor_abs_line - start_line;
             if (line_offset >= 0 && line_offset < term_content_rows) {
-                int const content_start_y = (col_widths.count > 2) ? 5 : 4;
+                int const content_start_y = multi_headers ? 5 : 4;
                 target_cursor_y = content_start_y + line_offset;
                 target_cursor_x = target_x;
                 if (!paused_ && vt_.is_cursor_visible()) {
@@ -1018,7 +1026,8 @@ void Tui::handle_mouse(int x, int y, int b) {
 
     struct winsize w{};
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-    int const term_width = w.ws_col > 0 ? w.ws_col : 80;
+    int const term_width =
+        (cached_term_width_ > 0) ? cached_term_width_ : (w.ws_col > 0 ? w.ws_col : 80);
 
     auto const col_widths =
         framework::multi_column_widths(term_width, layout_, user_inspector_width_);
@@ -1038,7 +1047,9 @@ void Tui::handle_mouse(int x, int y, int b) {
         cur_x += cw + 1;
     }
 
-    if (b == 0 && clicked_col < workbench_slots_.size()) {
+    const size_t previous_focused_slot = focused_slot_index_;
+
+    if (b == 0 && clicked_col < workbench_slots_.size() && y != 4) {
         focused_slot_index_ = clicked_col;
         update_trace_active_cache();
     }
@@ -1095,7 +1106,22 @@ void Tui::handle_mouse(int x, int y, int b) {
                                         workbench_slots_[0].page == TuiRegPage::CONSOLE));
 
         if (b == 0 && y == 4 && col_has_header) {
-            open_tool_picker(clicked_col);
+            if (clicked_col == previous_focused_slot) {
+                bool has_menu = true;
+                if (clicked_col < workbench_slots_.size()) {
+                    has_menu = inspector_pane_->has_tool_menu(workbench_slots_[clicked_col].page);
+                }
+                if (has_menu) {
+                    open_tool_picker(clicked_col);
+                }
+            } else {
+                focused_slot_index_ = clicked_col;
+                if (clicked_col < workbench_slots_.size()) {
+                    inspector_pane_->set_page(workbench_slots_[clicked_col].page);
+                }
+                update_trace_active_cache();
+                render(true);
+            }
             return;
         }
 
@@ -1392,7 +1418,8 @@ void Tui::open_tool_picker(size_t slot_idx) {
     if (workbench_slots_.empty()) return;
     if (slot_idx >= workbench_slots_.size()) slot_idx = 0;
     focused_slot_index_ = slot_idx;
-    modal_.open_tool_picker(static_cast<int>(slot_idx), workbench_slots_[slot_idx].page);
+    modal_.open_tool_picker(static_cast<int>(slot_idx), workbench_slots_[slot_idx].page,
+                            static_cast<int>(workbench_slots_.size()));
     render(true);
 }
 

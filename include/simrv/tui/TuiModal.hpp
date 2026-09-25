@@ -176,12 +176,14 @@ class TuiModal {
     }
     [[nodiscard]] auto get_preset_cursor() const -> int { return preset_cursor_; }
 
-    void open_tool_picker(int slot_idx, TuiRegPage current_page);
+    void open_tool_picker(int slot_idx, TuiRegPage current_page, int num_slots = 3);
     void move_tool_picker_cursor(int delta);
     void set_tool_picker_cursor(int cursor);
-    void cycle_tool_picker_slot(int num_slots);
+    void set_tool_picker_slot(int slot);
+    void cycle_tool_picker_slot(int num_slots = 0);
     [[nodiscard]] auto get_tool_picker_slot() const -> int { return tool_picker_slot_; }
     [[nodiscard]] auto get_tool_picker_cursor() const -> int { return tool_picker_cursor_; }
+    [[nodiscard]] auto get_tool_picker_num_slots() const -> int { return tool_picker_num_slots_; }
     [[nodiscard]] auto get_selected_tool_page() const -> TuiRegPage;
 
     void open_notice(const std::string& title, const std::string& message, bool is_error = false);
@@ -225,6 +227,7 @@ class TuiModal {
     int preset_cursor_ = 0;
     int tool_picker_slot_ = 0;
     int tool_picker_cursor_ = 0;
+    int tool_picker_num_slots_ = 3;
     TuiRegPage tool_picker_current_page_ = TuiRegPage::GPR;
     bool load_appmode_ = true;  // Toggle for App (baremetal) vs OS (Linux) mode in LoadBinary modal
     std::string staged_binary_path_;
