@@ -25,12 +25,6 @@ namespace {
     return std::format("{} {} \033[0m", use_basic_ansi_badges() ? ansi_color : indexed_color, text);
 }
 
-[[nodiscard]] auto panel_mode_label(TuiRightPanelMode mode, int width) -> std::string {
-    if (mode == TuiRightPanelMode::Display) return width < 45 ? "Disp" : "Display";
-    if (width < 45) return "Term";
-    return "Terminal";
-}
-
 [[nodiscard]] auto speed_control_label(const simrv::core::Machine& machine, const Tui* tui,
                                        uint64_t kips, bool paused, int width) -> std::string {
     uint64_t const delay =
@@ -149,42 +143,9 @@ auto StatusBar::is_pos_on_mode_badge(int x, int width) const -> bool {
     return (x >= x_start && x <= x_end);
 }
 
-auto StatusBar::is_pos_on_right_panel_mode(int x) const -> bool {
-    if (layout_ != TuiLayout::Split && layout_ != TuiLayout::FullRight) {
-        return false;
-    }
+auto StatusBar::is_pos_on_right_panel_mode(int /*x*/) const -> bool { return false; }
 
-    int const right_x0 = (layout_ == TuiLayout::Split) ? (left_width_ + 3) : 2;
-    int const target_right_w = right_width_ > 0 ? right_width_ : 100;
-    std::string const mode_label = panel_mode_label(right_panel_mode_, target_right_w);
-    int const x_start = right_x0 + 1;
-    int const x_end = x_start + static_cast<int>(mode_label.length()) + 1;
-
-    return x >= x_start && x <= x_end;
-}
-
-auto StatusBar::is_pos_on_right_panel_attached(int x) const -> bool {
-    if (right_panel_mode_ != TuiRightPanelMode::Terminal) {
-        return false;
-    }
-    if (layout_ != TuiLayout::Split && layout_ != TuiLayout::FullRight) {
-        return false;
-    }
-
-    int const right_x0 = (layout_ == TuiLayout::Split) ? (left_width_ + 3) : 2;
-    int const target_right_w = right_width_ > 0 ? right_width_ : 100;
-    std::string const term_title = panel_mode_label(right_panel_mode_, target_right_w);
-    int const mode_len = static_cast<int>(term_title.length()) + 2;
-
-    int const badge_start = right_x0 + 1 + mode_len + 1;
-    const bool attached = tui_ && tui_->is_terminal_attached();
-    std::string const focus_label_text =
-        target_right_w < 45 ? (attached ? "ON" : "OFF") : (attached ? "ATTACHED" : "DETACHED");
-    int const badge_len = static_cast<int>(focus_label_text.length()) + 2;
-    int const badge_end = badge_start + badge_len - 1;
-
-    return (x >= badge_start && x <= badge_end);
-}
+auto StatusBar::is_pos_on_right_panel_attached(int /*x*/) const -> bool { return false; }
 
 auto StatusBar::get_header_action_at_col(int col, int terminal_width) const -> HeaderHitResult {
     if (col < 1 || terminal_width < 2) return {};

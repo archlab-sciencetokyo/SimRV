@@ -408,7 +408,8 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     auto handle_debug_keyboard_input(TuiKey key) -> bool;
     bool handle_speed_keyboard_input(TuiKey key);
     bool handle_navigation_keyboard_input(uint8_t byte, TuiKey key);
-    auto handle_mouse_inspector(int x, int y, int b, bool multi_column = false) -> void;
+    auto handle_mouse_inspector(int x, int y, int b, bool multi_column = false,
+                                bool is_secondary = false, int col_width = 0) -> void;
     void format_trace_inst(const TraceRecord& rec, const std::string& op_name, bool rd_fp,
                            bool rs1_fp, bool rs2_fp, std::string& inst_str,
                            std::string& side_effect);

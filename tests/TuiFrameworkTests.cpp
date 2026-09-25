@@ -75,6 +75,20 @@ struct TuiTestAccess {
     static auto handle_modal_key(Tui& tui, uint8_t byte, TuiKey key) -> bool {
         return tui.handle_modal_keyboard_input(byte, key);
     }
+    static void inject_input(Tui& tui, std::string_view input) {
+        tui.input_size_ = std::min(input.size(), tui.input_bytes_.size());
+        tui.input_pos_ = 0;
+        std::copy_n(input.data(), tui.input_size_, tui.input_bytes_.data());
+    }
+    static auto consume_control_seq(Tui& tui, std::string_view seq) -> bool {
+        if (!seq.empty() && seq[0] == '\x1b') {
+            inject_input(tui, seq.substr(1));
+            return tui.consume_control_sequence(static_cast<uint8_t>(seq[0]));
+        }
+        return false;
+    }
+    static auto selection(const Tui& tui) -> const SelectionState& { return tui.selection_; }
+    static void set_focused_slot(Tui& tui, size_t slot) { tui.focused_slot_index_ = slot; }
 };
 }  // namespace simrv::tui
 
@@ -2045,6 +2059,7 @@ void test_multi_column_panel_management_and_modal_usability() {
     simrv::core::Machine machine;
     simrv::tui::Tui tui(machine);
     simrv::tui::TuiTestAccess::init_panes(tui, machine);
+    tui.close_modal();
 
     // 1. Top status bar rendering: verify PANE 1/2 badge is removed
     auto* status_bar = simrv::tui::TuiTestAccess::status_bar(tui);
@@ -2150,8 +2165,38 @@ void test_multi_column_panel_management_and_modal_usability() {
     // Restore to 2 columns for mouse testing
     simrv::tui::TuiTestAccess::set_cached_term_width(tui, 120);
     tui.add_workbench_column();
+    // 5. Two-panel click areas: row 4 column header, row 5 content, selection start
     expect(slots.size() == 2, "restored to 2 columns");
-    tui.render(true);
+    tui.set_workbench_slot_page(0, simrv::tui::TuiRegPage::GPR);
+    tui.set_workbench_slot_page(1, simrv::tui::TuiRegPage::CONSOLE);
+    simrv::tui::TuiTestAccess::set_focused_slot(tui, 1);
+    expect(tui.focused_slot() == 1, "column 1 is initially focused");
+
+    // Click on column 0 row 4:
+    // First click should focus column 0 without opening modal or cycling tabs
+    tui.handle_mouse(10, 4, 0);
+    expect(tui.focused_slot() == 0, "click on column 0 row 4 focuses column 0");
+    expect(!tui.is_modal_active(), "first click on column 0 does not open modal");
+    expect(slots[0].page == simrv::tui::TuiRegPage::GPR, "slot 0 remains GPR (not cycled as tab)");
+
+    // Second click on column 0 row 4 (already focused): should open tool picker
+    tui.handle_mouse(10, 4, 0);
+    expect(tui.is_modal_active(), "second click on column 0 row 4 opens tool picker");
+    expect(simrv::tui::TuiTestAccess::modal(tui).get_type() == simrv::tui::ModalType::ToolPicker,
+           "opened tool picker modal");
+    tui.close_modal();
+
+    // Click on column 0 row 5 (content row 0): start selection drag
+    simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[<0;10;5M");
+    const auto& sel = simrv::tui::TuiTestAccess::selection(tui);
+    expect(sel.content_start_y == 5, "selection content_start_y is 5 in 2-panel mode");
+    expect(slots[0].page == simrv::tui::TuiRegPage::GPR, "row 5 click does not alter GPR page");
+    tui.clear_selection();
+
+    // Click on column 0 row 5 content: verify row 5 does not alter GPR page
+    tui.handle_mouse(10, 5, 0);
+    expect(slots[0].page == simrv::tui::TuiRegPage::GPR,
+           "handle_mouse row 5 content preserves page");
 
     // Click [×] on column 1 header (x ~ 118, y = 4)
     tui.handle_mouse(118, 4, 0);

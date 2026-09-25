@@ -861,48 +861,61 @@ void Tui::render(bool force) {
     write_all(STDOUT_FILENO, frame_output);
 }
 
-void Tui::handle_mouse_inspector(int x, int y, int b, bool multi_column) {
+void Tui::handle_mouse_inspector(int x, int y, int b, bool multi_column, bool is_secondary,
+                                 int col_width) {
     constexpr int kLogAreaHeight = 6;
     winsize w{};
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-    int const term_height = w.ws_row > 0 ? w.ws_row : 24;
+    int const term_height =
+        (cached_term_height_ > 0) ? cached_term_height_ : (w.ws_row > 0 ? w.ws_row : 24);
     int const num_rows = std::max(1, term_height - 5);
     int const log_start_y = 4 + (num_rows - kLogAreaHeight);
-    bool const has_log_area =
-        (inspector_pane_ && num_rows >= 15 && inspector_pane_->get_page() != TuiRegPage::EXPLAIN &&
-         inspector_pane_->get_page() != TuiRegPage::TRACE);
+    bool const has_log_area = (!is_secondary && inspector_pane_ && num_rows >= 15 &&
+                               inspector_pane_->get_page() != TuiRegPage::EXPLAIN &&
+                               inspector_pane_->get_page() != TuiRegPage::TRACE);
 
-    if (b == 0 && !multi_column) {
+    if (b == 0) {
         if (has_log_area && y == log_start_y) {
             inspector_pane_->reset_log_scroll();
             render(true);
             return;
         }
-        if (y == 4) {
-            int const col = x - 2;
-            if (col < 0) return;
-            auto tab = inspector_pane_->get_tab_at(0, col);
-            if (tab.has_value()) {
-                set_reg_page(*tab);
-            }
-        } else if (y == 5) {
-            int const col = x - 2;
-            if (col < 0) return;
-            auto tab = inspector_pane_->get_tab_at(1, col);
-            if (tab.has_value()) {
-                if (*tab == TuiRegPage::CACHE && inspector_pane_->get_page() == TuiRegPage::CACHE) {
-                    inspector_pane_->toggle_cache_inspect_type();
-                    render(true);
-                    return;
+        if (has_log_area && y > log_start_y) {
+            return;
+        }
+
+        if (!multi_column) {
+            if (y == 4) {
+                int const col = x - 2;
+                if (col < 0) return;
+                auto tab = inspector_pane_->get_tab_at(0, col);
+                if (tab.has_value()) {
+                    set_reg_page(*tab);
                 }
-                inspector_pane_->set_previous_page(inspector_pane_->get_page());
-                set_reg_page(*tab);
-            }
-        } else if (y >= 6) {
-            if (has_log_area && y >= log_start_y) {
                 return;
             }
-            int logical_row = (y - 6) + inspector_pane_->get_scroll_offset();
+            if (y == 5) {
+                int const col = x - 2;
+                if (col < 0) return;
+                auto tab = inspector_pane_->get_tab_at(1, col);
+                if (tab.has_value()) {
+                    if (*tab == TuiRegPage::CACHE &&
+                        inspector_pane_->get_page() == TuiRegPage::CACHE) {
+                        inspector_pane_->toggle_cache_inspect_type();
+                        render(true);
+                        return;
+                    }
+                    inspector_pane_->set_previous_page(inspector_pane_->get_page());
+                    set_reg_page(*tab);
+                }
+                return;
+            }
+        }
+
+        const int content_start_y = multi_column ? 5 : 6;
+        if (y >= content_start_y) {
+            int const target_width = (col_width > 0) ? col_width : pane_width_cached_;
+            int logical_row = (y - content_start_y) + inspector_pane_->get_scroll_offset();
             auto page = inspector_pane_->get_page();
             if (page == TuiRegPage::CACHE) {
                 if (logical_row == 0 || logical_row == 4) {
@@ -923,7 +936,7 @@ void Tui::handle_mouse_inspector(int x, int y, int b, bool multi_column) {
                 }
             } else if (page == TuiRegPage::GPR || page == TuiRegPage::FPR) {
                 auto reg_val =
-                    inspector_pane_->get_register_value_at_row(logical_row, x, pane_width_cached_);
+                    inspector_pane_->get_register_value_at_row(logical_row, x, target_width);
                 if (reg_val.has_value()) {
                     inspector_pane_->set_inspect_addr(*reg_val);
                     open_modal(ModalType::InspectAddress);
@@ -1134,7 +1147,10 @@ void Tui::handle_mouse(int x, int y, int b) {
         if (clicked_col < workbench_slots_.size()) {
             inspector_pane_->set_page(workbench_slots_[clicked_col].page);
         }
-        handle_mouse_inspector(col_local_x + 2, y, b, col_widths.count > 2);
+        const bool is_multi = (col_widths.count >= 2);
+        const bool is_secondary = (clicked_col > 0);
+        const int col_width = col_widths.widths[clicked_col];
+        handle_mouse_inspector(col_local_x + 2, y, b, is_multi, is_secondary, col_width);
     }
 }
 
@@ -3308,8 +3324,10 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                 if (button == 0) {
                     struct winsize w_m{};
                     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w_m);
-                    int term_wm = w_m.ws_col > 0 ? w_m.ws_col : 80;
-                    int term_hm = w_m.ws_row > 0 ? w_m.ws_row : 24;
+                    int term_wm = (cached_term_width_ > 0) ? cached_term_width_
+                                                           : (w_m.ws_col > 0 ? w_m.ws_col : 80);
+                    int term_hm = (cached_term_height_ > 0) ? cached_term_height_
+                                                            : (w_m.ws_row > 0 ? w_m.ws_row : 24);
                     auto res = modal_.handle_click(x, y, term_wm, term_hm);
                     if (res == TuiModal::ModalClickResult::Closed) {
                         close_modal();
@@ -3334,7 +3352,8 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         if (esc_buf_.back() == 'M' && button == 0 && y == 2) {
             struct winsize w{};
             ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-            int term_w = w.ws_col > 0 ? w.ws_col : 80;
+            int term_w =
+                (cached_term_width_ > 0) ? cached_term_width_ : (w.ws_col > 0 ? w.ws_col : 80);
             if (status_bar_) {
                 auto hit = status_bar_->get_header_action_at_col(x, term_w);
                 if (hit.action != HeaderAction::None) {
@@ -3349,10 +3368,6 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                     } else {
                         pause_loop();
                     }
-                } else if (status_bar_->is_pos_on_right_panel_attached(x)) {
-                    toggle_run_state();
-                } else if (status_bar_->is_pos_on_right_panel_mode(x)) {
-                    cycle_right_panel_mode();
                 }
             }
             return true;
@@ -3360,8 +3375,10 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
 
         struct winsize w_footer{};
         ioctl(STDOUT_FILENO, TIOCGWINSZ, &w_footer);
-        int term_w = w_footer.ws_col > 0 ? w_footer.ws_col : 80;
-        int term_h = w_footer.ws_row > 0 ? w_footer.ws_row : 24;
+        int term_w = (cached_term_width_ > 0) ? cached_term_width_
+                                              : (w_footer.ws_col > 0 ? w_footer.ws_col : 80);
+        int term_h = (cached_term_height_ > 0) ? cached_term_height_
+                                               : (w_footer.ws_row > 0 ? w_footer.ws_row : 24);
 
         if (esc_buf_.back() == 'M' && button == 0 && (y == term_h - 2 || y == term_h - 1)) {
             int col = x - 2;
@@ -3377,9 +3394,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
 
         auto const mouse_columns =
             framework::multi_column_widths(term_w, layout_, user_inspector_width_);
-        bool const has_tab_bar =
-            mouse_columns.count == 1 || (mouse_columns.count == 2 && workbench_slots_.size() >= 2 &&
-                                         workbench_slots_[1].page == TuiRegPage::CONSOLE);
+        bool const has_tab_bar = (mouse_columns.count == 1);
         if (esc_buf_.back() == 'M' && button == 0 && has_tab_bar && (y == 4 || y == 5)) {
             int pane_w = get_pane_width();
             if (x >= 2 && x <= pane_w + 1) {
@@ -3407,7 +3422,8 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             // Start a new selection drag on left-button press in the content area.
             struct winsize w_sel{};
             ioctl(STDOUT_FILENO, TIOCGWINSZ, &w_sel);
-            int sel_w = w_sel.ws_col > 0 ? w_sel.ws_col : 80;
+            int sel_w = (cached_term_width_ > 0) ? cached_term_width_
+                                                 : (w_sel.ws_col > 0 ? w_sel.ws_col : 80);
             auto sel_cols = framework::multi_column_widths(sel_w, layout_, user_inspector_width_);
             size_t sel_col_idx = 0;
             int cur_cx = 1;
@@ -3437,7 +3453,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             selection_.col_idx = sel_col_idx;
             selection_.col_start_x = col_start_x;
             selection_.content_start_y =
-                (sel_cols.count > 2 && sel_pane == SelectionPane::TerminalPane) ? 5 : 4;
+                (sel_cols.count >= 2) ? 5 : (sel_pane == SelectionPane::TerminalPane ? 4 : 6);
             selection_.pane_width = col_w;
             selection_.start_x = col_local_x;
             selection_.start_y = y;
