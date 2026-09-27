@@ -11,8 +11,8 @@ import tarfile
 import tempfile
 import unittest
 
-
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
 
 
 def load(name: str, path: pathlib.Path):
@@ -24,9 +24,57 @@ def load(name: str, path: pathlib.Path):
 
 release_check = load("release_check", ROOT / "scripts/release_check.py")
 aggregate = load("aggregate_experiments", ROOT / "scripts/aggregate_experiments.py")
+metadata = load("experiment_metadata", ROOT / "scripts/experiment_metadata.py")
+benchmark = load("benchmark", ROOT / "scripts/benchmark.py")
 
 
 class ReleaseToolTests(unittest.TestCase):
+    def test_configuration_fingerprint_is_stable(self):
+        first = {"xlen": 64, "isa": "rv64gc", "vlen": 256}
+        second = {"vlen": 256, "isa": "rv64gc", "xlen": 64}
+        first_json, first_id = metadata.configuration_fingerprint(first)
+        second_json, second_id = metadata.configuration_fingerprint(second)
+        self.assertEqual(first_json, second_json)
+        self.assertEqual(first_id, second_id)
+        self.assertEqual(len(first_id), 16)
+
+    def test_version_probe_falls_back_to_help_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = pathlib.Path(directory) / "tool"
+            executable.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$1\" = --version ]; then exit 1; fi\n"
+                "echo 'tool help provenance' >&2\n"
+                "exit 1\n"
+            )
+            executable.chmod(0o755)
+            self.assertEqual(metadata.command_version(str(executable)), "tool help provenance")
+
+    def test_experiment_manifest_configuration_is_explicit(self):
+        manifest = json.loads((ROOT / "repro/experiment-manifest.json").read_text())
+        for configuration in manifest["configurations"]:
+            self.assertIn(configuration["execution_mode"], ("high-performance", "cycle-accurate"))
+            self.assertIsInstance(configuration["simrv_args"], list)
+
+    def test_benchmark_commands_use_same_isa_and_limit(self):
+        simrv = benchmark.simrv_benchmark_command(
+            "SimRV", "guest.elf", "rv64gcbv", 256, "high-performance", 1234,
+            "0x80001000", []
+        )
+        spike = benchmark.spike_benchmark_command("spike", "guest.elf", "rv64gcbv", 1234)
+        self.assertEqual(simrv[simrv.index("--isa") + 1], "rv64gcbv")
+        self.assertIn("--instructions=1234", spike)
+        self.assertEqual(simrv[-2:], ["-e", "1234"])
+
+    def test_benchmark_commands_support_guest_completion(self):
+        simrv = benchmark.simrv_benchmark_command(
+            "SimRV", "guest.elf", "rv64gc", None, "cycle-accurate", 0,
+            "0x80001000", []
+        )
+        spike = benchmark.spike_benchmark_command("spike", "guest.elf", "rv64gc", 0)
+        self.assertNotIn("-e", simrv)
+        self.assertFalse(any(arg.startswith("--instructions=") for arg in spike))
+
     def test_checked_in_metadata(self):
         manifest = json.loads((ROOT / "release/release-manifest.json").read_text())
         release_check.verify_metadata(manifest)

@@ -7,7 +7,6 @@ import pathlib
 import subprocess
 import sys
 
-
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 EXPERIMENT = json.loads((ROOT / "repro/experiment-manifest.json").read_text())
 MANIFEST = json.loads((ROOT / "release/release-manifest.json").read_text())
@@ -78,6 +77,9 @@ def main() -> None:
                      "--spike", args.spike, "--suite", "realworld",
                      "--runs", str(EXPERIMENT["repetitions"]), "--warmups", str(EXPERIMENT["warmups"]),
                      "--timeout", str(EXPERIMENT["timeout_seconds"]),
+                     "--isa", configuration["isa"], "--vlen", str(configuration["vlen"]),
+                     "--execution-mode", configuration["execution_mode"],
+                     *[f"--simrv-arg={arg}" for arg in configuration.get("simrv_args", [])],
                      "--riscv-tests-dir", str(args.riscv_tests_dir.resolve()), "--json", str(raw)])
 
     if args.mode == "full":
@@ -96,7 +98,6 @@ def main() -> None:
                  "--arch", "64", "--compiler", "gcc", "--suite", suite, "--output", str(output)])
             reports.append(output)
 
-        aggregate = EXPERIMENT["outputs"]
         raw_reports = sorted((args.output / "raw").glob("*.json"))
         run([sys.executable, "scripts/aggregate_experiments.py", *map(str, raw_reports),
              "--json", str(args.output / "aggregate.json"), "--table", str(args.output / "table.md"),

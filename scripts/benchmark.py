@@ -17,6 +17,8 @@ import sys
 import time
 from shutil import which
 
+from experiment_metadata import experiment_provenance
+
 REALWORLD_BENCHMARKS = [
     "coremark",
     "dhrystone",
@@ -59,6 +61,8 @@ def get_tool_path(tool_name, env_var, prefix):
     for name in [
         f"riscv64-unknown-elf-{tool_name}",
         f"riscv32-unknown-elf-{tool_name}",
+        f"riscv64-linux-gnu-{tool_name}",
+        f"riscv32-linux-gnu-{tool_name}",
         tool_name,
     ]:
         w = which(name)
@@ -72,15 +76,15 @@ def resolve_tohost(elf_path, nm_tool):
         return None
     try:
         res = subprocess.run(
-            [nm_tool, "-g", elf_path], capture_output=True, text=True, timeout=5
+            [nm_tool, "-g", elf_path], capture_output=True, text=True, timeout=5, check=False
         )
         for line in res.stdout.splitlines():
             parts = line.split()
             if len(parts) >= 3 and parts[2] == "tohost":
                 addr = parts[0].lstrip("0")
                 return f"0x{addr}" if addr else "0x0"
-    except Exception:
-        pass
+    except (OSError, subprocess.SubprocessError):
+        return None
     return None
 
 
@@ -91,8 +95,8 @@ def detect_elf_xlen(elf_path):
                 header = f.read(5)
                 if len(header) >= 5 and header[:4] == b"\x7fELF":
                     return 64 if header[4] == 2 else 32
-        except Exception:
-            pass
+        except OSError:
+            return None
     return None
 
 
@@ -103,14 +107,14 @@ def detect_xlen(simrv_bin, elf_path=None):
 
     try:
         result = subprocess.run(
-            [simrv_bin, "--version"], capture_output=True, text=True, timeout=5
+            [simrv_bin, "--version"], capture_output=True, text=True, timeout=5, check=False
         )
         if "RV64" in result.stdout:
             return 64
         elif "RV32" in result.stdout:
             return 32
-    except Exception:
-        pass
+    except (OSError, subprocess.SubprocessError):
+        return 64 if "rv64" in simrv_bin.lower() else 32
     if "rv64" in simrv_bin.lower():
         return 64
     return 32
@@ -190,6 +194,25 @@ def calculate_geomean(values):
     if not valid:
         return 0.0
     return math.exp(sum(math.log(v) for v in valid) / len(valid))
+
+
+def simrv_benchmark_command(simrv, workload, isa, vlen, execution_mode, limit,
+                            tohost, extra_args):
+    command = [simrv, "--cli", f"--{execution_mode}", *extra_args, "--isa", isa]
+    if vlen is not None:
+        command.extend(["--vlen", str(vlen)])
+    command.extend(["-m", workload, "-b", "-H", tohost])
+    if limit > 0:
+        command.extend(["-e", str(limit)])
+    return command
+
+
+def spike_benchmark_command(spike, workload, isa, limit):
+    command = [spike, f"--isa={isa}"]
+    if limit > 0:
+        command.append(f"--instructions={limit}")
+    command.append(workload)
+    return command
 
 
 def format_instrs(insts):
@@ -455,9 +478,7 @@ def generate_latex_table(suite_results, filepath):
         name = res["test_name"].replace("_", r"\_")
         insts = format_instrs(res["instructions"])
         s_time = res["simrv"]["stats"]["time"]["mean"]
-        s_ci = res["simrv"]["stats"]["time"]["ci95"]
         sp_time = res["spike"]["stats"]["time"]["mean"]
-        sp_ci = res["spike"]["stats"]["time"]["ci95"]
         s_mips = res["simrv"]["stats"]["wall_speed"]["mean"] / 1000.0
         s_rss = res["simrv"]["stats"].get("rss", {}).get("mean", 0.0)
         sp_rss = res["spike"]["stats"].get("rss", {}).get("mean", 0.0)
@@ -620,6 +641,9 @@ def run_benchmark_single(
     objcopy_tool,
     isa_override,
     warmups,
+    simrv_args,
+    vlen,
+    execution_mode,
 ):
     # Resolve ELF path
     elf_path = test_target
@@ -658,7 +682,7 @@ def run_benchmark_single(
         subprocess.run(
             [objcopy_tool, "-O", "binary", elf_path, bin_path], check=True
         )
-    except Exception as e:
+    except (OSError, subprocess.CalledProcessError) as e:
         print(f"ERROR: objcopy conversion failed: {e}", file=sys.stderr)
         return None
 
@@ -675,6 +699,11 @@ def run_benchmark_single(
 
     xlen = detect_xlen(simrv_bin, elf_path)
     isa = isa_override or f"rv{xlen}gc"
+
+    simrv_base_cmd = simrv_benchmark_command(
+        simrv_bin, elf_path, isa, vlen, execution_mode, limit, tohost_addr, simrv_args
+    )
+    spike_base_cmd = spike_benchmark_command(spike_bin, elf_path, isa, limit) if spike_bin else None
 
     simrv_times = []
     simrv_sim_times = []
@@ -693,11 +722,12 @@ def run_benchmark_single(
 
     for _ in range(warmups):
         warmup = subprocess.run(
-            [simrv_bin, "--cli", "-m", elf_path, "-e", str(limit), "-b", "-H", tohost_addr],
+            simrv_base_cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=timeout,
             stdin=subprocess.DEVNULL,
+            check=False,
         )
         if warmup.returncode != 0:
             print(f"  [ERROR] SimRV warmup failed on {test_basename}", file=sys.stderr)
@@ -706,17 +736,7 @@ def run_benchmark_single(
     # SimRV runs
     for i in range(1, runs + 1):
         log_file = os.path.join(log_dir, f"bench_simrv_{test_basename}_{i}.log")
-        simrv_cmd = [
-            simrv_bin,
-            "--cli",
-            "-m",
-            elf_path,
-            "-e",
-            str(limit),
-            "-b",
-            "-H",
-            tohost_addr,
-        ]
+        simrv_cmd = list(simrv_base_cmd)
         if has_time_wrapper:
             simrv_cmd = ["/usr/bin/time", "-f", "__MAX_RSS_KB__:%M"] + simrv_cmd
 
@@ -728,6 +748,7 @@ def run_benchmark_single(
                 text=True,
                 timeout=timeout,
                 stdin=subprocess.DEVNULL,
+                check=False,
             )
             end_t = time.perf_counter()
 
@@ -777,7 +798,7 @@ def run_benchmark_single(
 
     if spike_available:
         for i in range(1, runs + 1):
-            spike_cmd = [spike_bin, f"--isa={isa}", elf_path]
+            spike_cmd = list(spike_base_cmd)
             if has_time_wrapper:
                 spike_cmd = ["/usr/bin/time", "-f", "__MAX_RSS_KB__:%M"] + spike_cmd
 
@@ -788,6 +809,7 @@ def run_benchmark_single(
                     capture_output=True,
                     timeout=timeout,
                     stdin=subprocess.DEVNULL,
+                    check=False,
                 )
                 end_t = time.perf_counter()
                 if res.returncode != 0:
@@ -841,12 +863,30 @@ def run_benchmark_single(
         "rss": calculate_stats(spike_rss),
     }
 
+    configuration = {
+        "xlen": xlen,
+        "isa": isa,
+        "vlen": vlen,
+        "execution_mode": execution_mode,
+        "simrv_args": list(simrv_args),
+        "instruction_limit": limit,
+        "tohost": tohost_addr,
+    }
+    provenance = experiment_provenance(
+        root=root_dir, simrv=simrv_bin, spike=spike_bin if spike_available else None,
+        workload=elf_path, configuration=configuration, simrv_command=simrv_base_cmd,
+        spike_command=spike_base_cmd if spike_available else None,
+    )
+
     return {
+        "schema_version": 1,
         "test_name": test_basename,
         "runs": runs,
         "instructions": simrv_instrs,
         "xlen": xlen,
         "spike_isa": isa,
+        "configuration_fingerprint": provenance["configuration_fingerprint"],
+        "provenance": provenance,
         "simrv": {
             "runs_time": simrv_times,
             "runs_sim_speed_kips": simrv_speeds,
@@ -914,6 +954,15 @@ def main():
     )
     parser.add_argument("--csv", help="Path to export raw CSV benchmark report")
     parser.add_argument("--isa", help="Override Spike ISA string (e.g. rv64gc)")
+    parser.add_argument(
+        "--simrv-arg", action="append", default=[], metavar="ARG",
+        help="Additional SimRV argument; repeat for architecture-study parameters",
+    )
+    parser.add_argument("--vlen", type=int, help="Vector register length recorded and passed to SimRV")
+    parser.add_argument(
+        "--execution-mode", choices=("high-performance", "cycle-accurate"),
+        default="high-performance", help="Explicit SimRV fidelity mode",
+    )
 
     args = parser.parse_args()
 
@@ -999,6 +1048,9 @@ def main():
             objcopy_tool,
             args.isa,
             args.warmups,
+            args.simrv_arg,
+            args.vlen,
+            args.execution_mode,
         )
         if result:
             suite_results.append(result)
