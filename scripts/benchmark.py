@@ -48,13 +48,26 @@ def sha256_file(path):
 
 
 def command_version(executable):
-    try:
-        result = subprocess.run(
-            [executable, "--version"], capture_output=True, text=True, timeout=5, check=False
-        )
-        return (result.stdout or result.stderr).strip().splitlines()[0]
-    except (OSError, subprocess.TimeoutExpired, IndexError):
+    if not executable:
         return "unknown"
+    probes = ([executable, "--version"], [executable, "--help"])
+    fallback = "unknown"
+    for command in probes:
+        try:
+            result = subprocess.run(
+                command, capture_output=True, text=True, timeout=5, check=False
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        output = (result.stdout or result.stderr).strip().splitlines()
+        if not output:
+            continue
+        first_line = output[0].strip()
+        if result.returncode == 0:
+            return first_line
+        if fallback == "unknown" and "unrecognized option" not in first_line.lower():
+            fallback = first_line
+    return fallback
 
 
 def repository_revision(root_dir):
@@ -701,6 +714,99 @@ def generate_csv_report(suite_results, filepath):
     print(f"CSV report written to: {filepath}")
 
 
+
+def aggregate_perf_counters(runs: list) -> dict:
+    """Aggregate per-run perf stat counter dicts into mean/min/max per event."""
+    if not runs:
+        return {}
+    result = {}
+    all_events = {k for r in runs for k in r}
+    for event in sorted(all_events):
+        vals = [
+            r[event]["value"]
+            for r in runs
+            if event in r and isinstance(r[event].get("value"), (int, float))
+        ]
+        if not vals:
+            continue
+        result[event] = {
+            "mean": statistics.mean(vals),
+            "min": min(vals),
+            "max": max(vals),
+            "n": len(vals),
+        }
+    return result
+
+
+def check_stopping_policy_match(simrv_args, spike_args):
+    """Return (simrv_limit, spike_limit, mismatch_bool).
+
+    Emits a WARNING to stderr when both engines are given explicit instruction
+    limits that differ, which would make wall-time comparisons invalid.
+    """
+    simrv_limit = None
+    args_list = list(simrv_args)
+    for i, a in enumerate(args_list):
+        if a in ("-e", "--steps", "-s") and i + 1 < len(args_list):
+            try:
+                simrv_limit = int(args_list[i + 1])
+            except ValueError:
+                pass
+    spike_limit = None
+    for a in (spike_args or []):
+        if a.startswith("--instructions="):
+            try:
+                spike_limit = int(a.split("=", 1)[1])
+            except ValueError:
+                pass
+    mismatch = (
+        simrv_limit is not None
+        and spike_limit is not None
+        and simrv_limit != spike_limit
+    )
+    if mismatch:
+        print(
+            f"WARNING: stopping-policy mismatch — SimRV -e {simrv_limit:,}, "
+            f"Spike --instructions={spike_limit:,}. "
+            "Wall-time comparison is not meaningful.",
+            file=sys.stderr,
+        )
+    return simrv_limit, spike_limit, mismatch
+
+
+def parse_event_pipe_data(raw: bytes) -> dict:
+    """Parse SIMRV_EVENT_FD pipe bytes into a dict of {name: value}.
+
+    Each line has the format: ``<name> <ns_timestamp> <value>``
+    Returns the *last* value seen for each event name (later events overwrite).
+    """
+    events: dict = {}
+    for line in raw.decode("utf-8", errors="ignore").splitlines():
+        parts = line.split()
+        if len(parts) == 3:
+            name, _ts, raw_val = parts
+            try:
+                events[name] = int(raw_val)
+            except ValueError:
+                pass
+    return events
+
+
+def simrv_benchmark_command(simrv_bin, simrv_args, elf_path, limit, tohost_addr, isa):
+    command = [simrv_bin, "--cli", *simrv_args, "--isa", isa, "-m", elf_path, "-b", "-H", tohost_addr]
+    if limit > 0:
+        command.extend(["-e", str(limit)])
+    return command
+
+
+def spike_benchmark_command(spike_bin, elf_path, limit, isa):
+    command = [spike_bin, f"--isa={isa}"]
+    if limit > 0:
+        command.append(f"--instructions={limit}")
+    command.append(elf_path)
+    return command
+
+
 def run_benchmark_single(
     test_target,
     simrv_bin,
@@ -768,7 +874,7 @@ def run_benchmark_single(
     # The caller may be comparing compiler builds or an out-of-tree binary.  Do not replace an
     # explicit --simrv selection with the in-tree default based on the guest ELF's XLEN.
     xlen = detect_xlen(simrv_bin, elf_path)
-    isa = isa_override or f"rv{xlen}gc"
+    isa = isa_override or f"rv{xlen}gc_zicsr_zifencei_zicntr"
 
     simrv_times = []
     simrv_sim_times = []
@@ -777,6 +883,7 @@ def run_benchmark_single(
     simrv_host_counters = []
     simrv_instrs = None
     simrv_cycles = None
+    simrv_event_data: list[dict] = []  # per-run SIMRV_EVENT_FD pipe payloads
 
     has_time_wrapper = os.path.isfile("/usr/bin/time") and os.access(
         "/usr/bin/time", os.X_OK
@@ -786,10 +893,27 @@ def run_benchmark_single(
     print(f"  SimRV binary : {simrv_bin} (RV{xlen})")
     print(f"  ELF path     : {elf_path}")
     print(f"  Tohost addr  : {tohost_addr}")
+    print(f"  ISA contract : {isa}")
+    print(f"  Stop policy  : {'full guest completion' if limit == 0 else f'{limit:,} instructions'}")
+
+    simrv_base_cmd = simrv_benchmark_command(
+        simrv_bin, simrv_args, elf_path, limit, tohost_addr, isa
+    )
+    spike_available = spike_bin and (is_executable(spike_bin) or which(spike_bin))
+    spike_base_cmd = (
+        spike_benchmark_command(spike_bin, elf_path, limit, isa)
+        if spike_available
+        else None
+    )
+
+    # Warn immediately if the two engines will use different stopping limits.
+    _simrv_limit, _spike_limit, stopping_policy_mismatch = check_stopping_policy_match(
+        simrv_base_cmd, spike_base_cmd
+    )
 
     for _ in range(warmups):
         warmup = subprocess.run(
-            [simrv_bin, "--cli", *simrv_args, "-m", elf_path, "-e", str(limit), "-b", "-H", tohost_addr],
+            simrv_base_cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=timeout,
@@ -798,51 +922,102 @@ def run_benchmark_single(
         if warmup.returncode != 0:
             print(f"  [ERROR] SimRV warmup failed on {test_basename}", file=sys.stderr)
             return None
+        if spike_base_cmd:
+            spike_warmup = subprocess.run(
+                spike_base_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=timeout,
+                stdin=subprocess.DEVNULL,
+            )
+            if spike_warmup.returncode != 0:
+                detail = spike_warmup.stderr.decode("utf-8", errors="ignore").strip()
+                print(
+                    f"  [ERROR] Spike preflight failed on {test_basename} "
+                    f"(code {spike_warmup.returncode}): {detail}",
+                    file=sys.stderr,
+                )
+                return None
 
-    # SimRV runs
+    # SimRV runs — use Popen so we can open the SIMRV_EVENT_FD benchmark pipe.
+    import threading
     for i in range(1, runs + 1):
         log_file = os.path.join(log_dir, f"bench_simrv_{test_basename}_{i}.log")
-        simrv_cmd = [
-            simrv_bin,
-            "--cli",
-            *simrv_args,
-            "-m",
-            elf_path,
-            "-e",
-            str(limit),
-            "-b",
-            "-H",
-            tohost_addr,
-        ]
+        simrv_cmd = list(simrv_base_cmd)
         perf_output = os.path.join(log_dir, f"bench_simrv_{test_basename}_{i}.perf.csv")
         simrv_cmd = wrap_measured_command(
             simrv_cmd, perf_bin, perf_events, perf_output, has_time_wrapper
         )
 
+        event_r, event_w = os.pipe()
+        run_env = {**os.environ, "SIMRV_EVENT_FD": str(event_w)}
+
+        # Drain the pipe read end in a background thread to avoid blocking the writer.
+        event_chunks: list[bytes] = []
+
+        def _drain_pipe(fd: int, chunks: list) -> None:
+            try:
+                while True:
+                    chunk = os.read(fd, 4096)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+            except OSError:
+                pass
+            finally:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+        drain_thread = threading.Thread(
+            target=_drain_pipe, args=(event_r, event_chunks), daemon=True
+        )
+        drain_thread.start()
+
         start_t = time.perf_counter()
+        proc = None
         try:
-            res = subprocess.run(
+            proc = subprocess.Popen(
                 simrv_cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 stdin=subprocess.DEVNULL,
+                env=run_env,
+                pass_fds=(event_w,),
             )
+            os.close(event_w)  # write end belongs to the child; close our copy
+            event_w = -1
+            try:
+                stdout_bytes, stderr_bytes = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.communicate()
+                drain_thread.join(timeout=2)
+                print(
+                    f"  [ERROR] SimRV timed out on {test_basename} (iter {i})",
+                    file=sys.stderr,
+                )
+                return None
             end_t = time.perf_counter()
+            drain_thread.join(timeout=2)
+
+            stdout_str = stdout_bytes.decode("utf-8", errors="ignore")
+            stderr_str = stderr_bytes.decode("utf-8", errors="ignore")
 
             with open(log_file, "w") as lf:
-                lf.write(res.stdout)
-                lf.write(res.stderr)
+                lf.write(stdout_str)
+                lf.write(stderr_str)
 
-            if res.returncode != 0:
+            if proc.returncode != 0:
                 print(
-                    f"  [ERROR] SimRV failed on {test_basename} (code {res.returncode}). Log: {log_file}",
+                    f"  [ERROR] SimRV failed on {test_basename} (code {proc.returncode}). Log: {log_file}",
                     file=sys.stderr,
                 )
                 return None
 
             insts, cycles, kips, sim_time = parse_simrv_output(
-                res.stdout + "\n" + res.stderr
+                stdout_str + "\n" + stderr_str
             )
             if kips is None:
                 print(
@@ -851,11 +1026,15 @@ def run_benchmark_single(
                 )
                 return None
 
-            rss_match = re.search(r"__MAX_RSS_KB__:(\d+)", res.stderr)
+            rss_match = re.search(r"__MAX_RSS_KB__:(\d+)", stderr_str)
             if rss_match:
                 simrv_rss.append(int(rss_match.group(1)) / 1024.0)
             if perf_bin:
                 simrv_host_counters.append(parse_perf_stat(perf_output))
+
+            raw_pipe = b"".join(event_chunks)
+            if raw_pipe:
+                simrv_event_data.append(parse_event_pipe_data(raw_pipe))
 
             elapsed = end_t - start_t
             simrv_times.append(elapsed)
@@ -871,17 +1050,31 @@ def run_benchmark_single(
                 file=sys.stderr,
             )
             return None
+        except OSError as error:
+            print(
+                f"  [ERROR] Could not launch SimRV on {test_basename} (iter {i}): {error}",
+                file=sys.stderr,
+            )
+            return None
+        finally:
+            if event_w >= 0:
+                try:
+                    os.close(event_w)
+                except OSError:
+                    pass
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+                proc.communicate()
+            drain_thread.join(timeout=2)
 
     # Spike runs
     spike_times = []
     spike_speeds = []
     spike_rss = []
     spike_host_counters = []
-    spike_available = spike_bin and (is_executable(spike_bin) or which(spike_bin))
-
     if spike_available:
         for i in range(1, runs + 1):
-            spike_cmd = [spike_bin, f"--isa={isa}", elf_path]
+            spike_cmd = list(spike_base_cmd)
             perf_output = os.path.join(log_dir, f"bench_spike_{test_basename}_{i}.perf.csv")
             spike_cmd = wrap_measured_command(
                 spike_cmd, perf_bin, perf_events, perf_output, has_time_wrapper
@@ -949,6 +1142,13 @@ def run_benchmark_single(
         "rss": calculate_stats(spike_rss),
     }
 
+    # Derive decode-cache hit rate from last run's event pipe (basis points → fraction).
+    decode_cache_hit_rate: float | None = None
+    if simrv_event_data:
+        last_ev = simrv_event_data[-1]
+        if "decode_cache_hit_rate" in last_ev:
+            decode_cache_hit_rate = last_ev["decode_cache_hit_rate"] / 10000.0
+
     return {
         "test_name": test_basename,
         "workload_path": os.path.realpath(elf_path),
@@ -959,19 +1159,25 @@ def run_benchmark_single(
         "instructions": simrv_instrs,
         "simulated_cycles": simrv_cycles,
         "xlen": xlen,
+        "isa": isa,
         "spike_isa": isa,
         "simrv_args": list(simrv_args),
         "simrv_binary_sha256": sha256_file(simrv_bin),
-        "simrv_version": command_version(simrv_bin),
+        "simrv_version": command_version(simrv_bin),       # kept for backwards compat
+        "simulator_version": command_version(simrv_bin),   # canonical name
+        "spike_version": command_version(spike_bin) if spike_available and spike_bin else None,
         "simrv_revision": repository_revision(root_dir),
         "compiler": command_version(os.environ.get("CXX", "c++")),
         "host": platform.platform(),
+        "stopping_policy_mismatch": stopping_policy_mismatch,
         "simrv": {
             "runs_time": simrv_times,
             "runs_sim_speed_kips": simrv_speeds,
             "runs_wall_speed_kips": simrv_wall_speeds,
             "runs_rss_mb": simrv_rss,
             "host_counters": simrv_host_counters,
+            "host_perf": aggregate_perf_counters(simrv_host_counters),
+            "decode_cache_hit_rate": decode_cache_hit_rate,
             "stats": simrv_stats,
         },
         "spike": {
@@ -979,6 +1185,7 @@ def run_benchmark_single(
             "runs_wall_speed_kips": spike_speeds,
             "runs_rss_mb": spike_rss,
             "host_counters": spike_host_counters,
+            "host_perf": aggregate_perf_counters(spike_host_counters),
             "stats": spike_stats,
         },
     }
@@ -1006,6 +1213,22 @@ def compare_main(argv: list[str]) -> int:
     parser.add_argument("--maximum-regression", type=float, default=3.0)
     parser.add_argument("--enforce", action="store_true", help="Return nonzero when supplied thresholds are exceeded")
     args = parser.parse_args(argv)
+
+    # Warn when either report was produced with a stopping-policy mismatch.
+    for label, path in (("baseline", args.baseline), ("candidate", args.candidate)):
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            results = raw.get("suite_results", [raw])
+            for res in results:
+                if res.get("stopping_policy_mismatch"):
+                    print(
+                        f"WARNING: {label} '{path.name}' contains a stopping-policy mismatch "
+                        f"for '{res.get('test_name', '?')}'. "
+                        "Wall-time comparison may be invalid.",
+                        file=sys.stderr,
+                    )
+        except Exception:
+            pass
 
     baseline = load_compare_results(args.baseline)
     candidate = load_compare_results(args.candidate)
@@ -1198,8 +1421,8 @@ def main():
         "-e",
         "--limit",
         type=int,
-        default=20000000,
-        help="Instruction limit cap per run",
+        default=0,
+        help="Symmetric instruction cap for SimRV and Spike (default: 0, run to completion)",
     )
     parser.add_argument(
         "--timeout", type=int, default=30, help="Run timeout in seconds"
@@ -1234,6 +1457,19 @@ def main():
         "--perf-events",
         default="task-clock,cycles,instructions,branches,branch-misses,cache-references,cache-misses",
         help="Comma-separated perf events used with --perf",
+    )
+    parser.add_argument(
+        "--cv-gate",
+        type=float,
+        default=5.0,
+        metavar="PCT",
+        help="Print a WARNING when wall-time CV exceeds PCT%% (default: 5.0). "
+             "Use --enforce-cv to make this a hard failure.",
+    )
+    parser.add_argument(
+        "--enforce-cv",
+        action="store_true",
+        help="Exit with code 1 when any result exceeds --cv-gate",
     )
 
     args = parser.parse_args()
@@ -1409,6 +1645,34 @@ def main():
         with open(args.json, "w") as jf:
             json.dump(report_data, jf, indent=2)
         print(f"JSON report written to: {args.json}")
+
+    # CV gate: check wall-time coefficient of variation across all results.
+    cv_failed = False
+    for res in suite_results:
+        cv = res.get("simrv", {}).get("stats", {}).get("time", {}).get("cv", 0.0)
+        name = res.get("test_name", "?")
+        if cv > args.cv_gate:
+            print(
+                f"WARNING: CV gate exceeded — {name} wall-time CV {cv:.2f}% > "
+                f"{args.cv_gate:.1f}% threshold. "
+                "Run on an idle host with a pinned CPU governor before profiling.",
+                file=sys.stderr,
+            )
+            cv_failed = True
+        else:
+            print(f"  CV check passed: {name} wall-time CV {cv:.2f}% ≤ {args.cv_gate:.1f}%")
+
+    # Summarise any stopping-policy mismatches detected during runs.
+    mismatched = [r["test_name"] for r in suite_results if r.get("stopping_policy_mismatch")]
+    if mismatched:
+        print(
+            f"WARNING: stopping-policy mismatch in {len(mismatched)} result(s): "
+            f"{', '.join(mismatched)}. SimRV vs Spike comparisons are not meaningful.",
+            file=sys.stderr,
+        )
+
+    if cv_failed and args.enforce_cv:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

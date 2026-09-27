@@ -11,6 +11,7 @@ import tarfile
 import tempfile
 import types
 import unittest
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -30,6 +31,62 @@ benchmark_modes = load("benchmark_modes", ROOT / "scripts/benchmark_modes.py")
 
 
 class ReleaseToolTests(unittest.TestCase):
+    def test_benchmark_commands_share_isa_and_symmetric_limit(self):
+        isa = "rv64gc_zicsr_zifencei_zicntr"
+        simrv = benchmark.simrv_benchmark_command(
+            "SimRV", ["--quiet"], "guest.elf", 1234, "0x80001000", isa
+        )
+        spike = benchmark.spike_benchmark_command("spike", "guest.elf", 1234, isa)
+        self.assertIn("--isa", simrv)
+        self.assertEqual(simrv[simrv.index("--isa") + 1], isa)
+        self.assertEqual(spike[1], f"--isa={isa}")
+        self.assertEqual(simrv[-2:], ["-e", "1234"])
+        self.assertIn("--instructions=1234", spike)
+
+    def test_benchmark_commands_default_to_guest_completion(self):
+        isa = "rv64gc_zicsr_zifencei_zicntr"
+        simrv = benchmark.simrv_benchmark_command(
+            "SimRV", [], "guest.elf", 0, "0x80001000", isa
+        )
+        spike = benchmark.spike_benchmark_command("spike", "guest.elf", 0, isa)
+        self.assertNotIn("-e", simrv)
+        self.assertFalse(any(arg.startswith("--instructions=") for arg in spike))
+
+    def test_stopping_policy_uses_complete_commands(self):
+        simrv = benchmark.simrv_benchmark_command(
+            "SimRV", [], "guest.elf", 1234, "0x80001000", "rv64gc"
+        )
+        spike = benchmark.spike_benchmark_command("spike", "guest.elf", 1234, "rv64gc")
+        self.assertEqual(benchmark.check_stopping_policy_match(simrv, spike), (1234, 1234, False))
+
+        spike[-2] = "--instructions=4321"
+        self.assertEqual(benchmark.check_stopping_policy_match(simrv, spike), (1234, 4321, True))
+
+    def test_event_pipe_parser_uses_last_valid_value(self):
+        raw = b"decode_cache_hit_rate 10 9990\nmalformed\nmetric 11 nope\ndecode_cache_hit_rate 12 9998\n"
+        self.assertEqual(benchmark.parse_event_pipe_data(raw), {"decode_cache_hit_rate": 9998})
+
+    def test_perf_counter_aggregation_skips_unavailable_values(self):
+        runs = [
+            {"task-clock": {"value": 10.0}, "cycles": {"value": None}},
+            {"task-clock": {"value": 14.0}},
+        ]
+        self.assertEqual(
+            benchmark.aggregate_perf_counters(runs),
+            {"task-clock": {"mean": 12.0, "min": 10.0, "max": 14.0, "n": 2}},
+        )
+
+    def test_command_version_falls_back_to_help(self):
+        responses = [
+            subprocess.CompletedProcess([], 1, "", "spike: unrecognized option --version\n"),
+            subprocess.CompletedProcess([], 0, "Spike RISC-V ISA Simulator 1.1.1-dev\n", ""),
+        ]
+        with mock.patch.object(benchmark.subprocess, "run", side_effect=responses) as run:
+            self.assertEqual(
+                benchmark.command_version("spike"), "Spike RISC-V ISA Simulator 1.1.1-dev"
+            )
+        self.assertEqual(run.call_args_list[1].args[0], ["spike", "--help"])
+
     def test_native_release_preset_pins_clang(self):
         presets = json.loads((ROOT / "CMakePresets.json").read_text())
         native = next(item for item in presets["configurePresets"]

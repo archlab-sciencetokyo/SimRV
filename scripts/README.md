@@ -10,7 +10,7 @@ This directory contains development, benchmarking, release verification, and Lin
 
 - **`benchmark.sh`**: Primary shell runner for fast single-binary runs and cycle-accurate benchmarking (`--ca`). Wraps `benchmark.py`.
 - **`benchmark.py`**: Unified publication benchmark framework and analysis tool:
-  - Default / `run`: Measures execution speed, Spike differential speedups, and host Linux `perf` events (`--perf`).
+  - Default / `run`: Measures execution speed, Spike differential speedups, and host Linux `perf` events (`--perf`). It passes one explicit ISA contract to both simulators and runs to guest completion by default; `--limit` applies the same safety cap to both.
   - `compare`: Compares two JSON benchmark reports, computing geometric mean changes and regressions against thresholds.
   - `aggregate`: Aggregates multi-run and multi-host benchmark experiment JSON outputs into statistical summaries.
   - `gdb`: Paired execution benchmarking comparing baseline CLI speed against remote GDB RSP step latency.

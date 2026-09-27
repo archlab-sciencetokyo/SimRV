@@ -12,7 +12,7 @@ if [[ ! -x "$SIMRV_BIN" && -x "./build/rv32-release/SimRV" ]]; then
 fi
 
 BENCH_ITERS="${SIMRV_BENCH_ITERS:-5}"
-BENCH_LIMIT="${SIMRV_BENCH_LIMIT:-20000000}"
+BENCH_LIMIT="${SIMRV_BENCH_LIMIT:-0}"
 BENCH_TIMEOUT="${SIMRV_BENCH_TIMEOUT:-30}"
 BENCH_TEST_NAME="${SIMRV_BENCH_TEST:-dhrystone}"
 BENCH_TOHOST_ADDR="${SIMRV_BENCH_TOHOST:-}"
@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
       echo "  SIMRV_BIN                  Path to SimRV executable (default: auto-detected)"
       echo "  SIMRV_BENCH_TEST           Benchmark test name/path (default: dhrystone)"
       echo "  SIMRV_BENCH_ITERS          Number of runs (default: 5)"
-      echo "  SIMRV_BENCH_LIMIT          Instruction limit (default: 20000000)"
+      echo "  SIMRV_BENCH_LIMIT          Symmetric instruction cap (default: 0, full completion)"
       echo "  SIMRV_BENCH_TIMEOUT        Timeout in seconds (default: 30)"
       echo "  SIMRV_CA_BENCH_PERF=1      Enable host Linux perf hardware counters"
       exit 0
