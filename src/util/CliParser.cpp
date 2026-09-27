@@ -421,8 +421,8 @@ auto parse_execution_options(std::string_view arg, std::span<char* const> args, 
 
 auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
                         ParseResult& result) -> std::expected<bool, std::string> {
-    if (arg == "--misa") {
-        auto value = next_argument(args, i, "--misa");
+    if (arg == "--isa" || arg == "--misa") {
+        auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         auto parsed_misa = parse_misa_profile(*value);
         if (!parsed_misa) return std::unexpected(parsed_misa.error());
@@ -924,10 +924,12 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(
         stdout,
-        "  {}--misa {}{}<PROFILE>{}      Select CPU MISA profile: rv{}i | rv{}imac | rv{}gc | "
+        "  {}--isa {}{}<PROFILE>{}       Select CPU ISA profile: rv{}i | rv{}imac | rv{}gc | "
         "rv{}gcbv\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset), xlen_suffix,
         xlen_suffix, xlen_suffix, xlen_suffix);
+    std::print(stdout, "  {}--misa <PROFILE>{}          Compatibility alias for --isa\n",
+               style(kBrightBlack), style(kReset));
     std::print(stdout,
                "  {}--vlen {}{}<N>{}              Set vector register length in bits (32–1024, "
                "power of 2; default: 256)\n\n",

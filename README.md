@@ -111,7 +111,7 @@ Override MISA profile or Vector register length (VLEN):
 
 ```bash
 # Select the explicit RV64GCBV target profile and a 512-bit VLEN
-./build/rv64-release/SimRV -m img/vector.bin --misa rv64gcbv --vlen 512
+./build/rv64-release/SimRV -m img/vector.bin --isa rv64gcbv --vlen 512
 ```
 
 ---

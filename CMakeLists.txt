@@ -339,6 +339,11 @@ set_tests_properties(cli-help PROPERTIES
   PASS_REGULAR_EXPRESSION "Usage:"
   LABELS "gate;regress;cli"
 )
+add_test(NAME cli-help-isa COMMAND $<TARGET_FILE:SimRV> -h)
+set_tests_properties(cli-help-isa PROPERTIES
+  PASS_REGULAR_EXPRESSION "--isa"
+  LABELS "gate;regress;cli"
+)
 
 add_test(NAME cli-invalid-option COMMAND $<TARGET_FILE:SimRV> -Z)
 set_tests_properties(cli-invalid-option PROPERTIES
