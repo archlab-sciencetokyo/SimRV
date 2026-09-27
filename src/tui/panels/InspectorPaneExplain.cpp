@@ -16,6 +16,7 @@
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
+#include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/InstructionExplainer.hpp"

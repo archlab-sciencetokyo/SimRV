@@ -13,6 +13,7 @@
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiGuidance.hpp"
 #include "simrv/tui/TuiMission.hpp"
 #include "simrv/tui/TuiTheme.hpp"

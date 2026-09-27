@@ -132,6 +132,26 @@ struct WorkbenchSlot {
 
 enum class TuiRightPanelMode : uint8_t { Terminal, Display };
 
+enum class HeaderAction : uint8_t {
+    None,
+    RunPause,
+    SetSpeed,
+    SelectHart,
+    TogglePanelMode,
+    ToggleAttached,
+    OpenSettings,
+    OpenGlossary,
+    ToggleTheme,
+    Reboot,
+    ToggleMode,
+    LoadBinary
+};
+
+struct HeaderHitResult {
+    HeaderAction action = HeaderAction::None;
+    size_t hart_index = 0;
+};
+
 enum class TuiFooterAction : uint8_t {
     Step,
     RunPause,

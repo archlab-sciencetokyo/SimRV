@@ -15,6 +15,7 @@
 #include "simrv/pipeline/Scoreboard.hpp"
 #include "simrv/tui/InspectionReport.hpp"
 #include "simrv/tui/LogBuffer.hpp"
+#include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiFrameRenderer.hpp"
 #include "simrv/tui/TuiGuidance.hpp"
 #include "simrv/tui/TuiInputRouter.hpp"

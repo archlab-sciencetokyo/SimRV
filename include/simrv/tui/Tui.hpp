@@ -7,12 +7,15 @@
 #include <array>
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <csignal>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <stop_token>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -21,15 +24,11 @@
 #include "simrv/isa/Base.hpp"
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/tui/LogBuffer.hpp"
-#include "simrv/tui/TuiBackend.hpp"
-#include "simrv/tui/TuiInputRouter.hpp"
 #include "simrv/tui/TuiKey.hpp"
-#include "simrv/tui/TuiLayoutPolicy.hpp"
 #include "simrv/tui/TuiMission.hpp"
 #include "simrv/tui/TuiModal.hpp"
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
-#include "simrv/tui/panels/StatusBar.hpp"
 #include "simrv/util/UniqueFd.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -64,6 +63,7 @@ struct SelectionState {
 class InspectorPane;
 class TerminalPane;
 class StatusBar;
+class LocalTuiBackend;
 
 class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     friend struct TuiTestAccess;

@@ -6,15 +6,19 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "simrv/core/RegisterFile.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"
-#include "simrv/tui/Tui.hpp"
+#include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/TuiWidget.hpp"
 #include "simrv/tui/framework/ScrollView.hpp"
+#include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -25,6 +29,7 @@ struct TuiExecutionSnapshot;
 
 namespace simrv::tui {
 
+class Tui;
 struct PageGuidance;
 class MissionProgress;
 

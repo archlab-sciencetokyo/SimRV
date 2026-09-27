@@ -20,26 +20,6 @@ namespace simrv::tui {
 
 class Tui;
 
-enum class HeaderAction : uint8_t {
-    None,
-    RunPause,
-    SetSpeed,
-    SelectHart,
-    TogglePanelMode,
-    ToggleAttached,
-    OpenSettings,
-    OpenGlossary,
-    ToggleTheme,
-    Reboot,
-    ToggleMode,
-    LoadBinary
-};
-
-struct HeaderHitResult {
-    HeaderAction action = HeaderAction::None;
-    size_t hart_index = 0;
-};
-
 class StatusBar : public TuiWidget {
    public:
     explicit StatusBar(simrv::core::Machine& machine, Tui* tui = nullptr);
