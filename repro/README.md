@@ -9,6 +9,13 @@ do not automatically permit bundling their binaries or workloads with SimRV.
 Requirements are Linux x86-64, CMake, Ninja, GCC 16+ or Clang 22+, Python 3.10+, Git, Go, a RISC-V
 cross-compiler, and enough space to build Linux, OpenSBI, Spike, and vector tests.
 
+Install the locked Python development tools and validate the checked-in manifests:
+
+```bash
+uv sync --dev
+uv run --frozen python scripts/validate_schemas.py
+```
+
 ```bash
 python3 scripts/reproduce.py --prepare --build-vector-tests
 ```
@@ -35,9 +42,15 @@ Quick mode validates metadata and locally configured regression tests. Full mode
 RV32/RV64 builds and required correctness suites, then runs configured performance workloads.
 Required dependencies that are absent are reported as `unavailable` and make full evidence fail.
 
-The experiment manifest records XLEN, MISA, VLEN, repetitions, warmups, timeouts, workloads, and
-output locations. Raw results are immutable inputs. Aggregate JSON, Markdown, and SVG files are
-regenerated deterministically with `scripts/benchmark.py aggregate`.
+The experiment manifest records XLEN, ISA, VLEN, execution mode, simulator arguments, repetitions,
+warmups, timeouts, workloads, and output locations. Raw results are immutable inputs. Aggregate
+JSON, Markdown, and SVG files are regenerated deterministically with `scripts/benchmark.py
+aggregate`.
+
+Each raw benchmark result includes a stable configuration fingerprint, exact SimRV and Spike
+commands, binary and workload SHA-256 digests, simulator versions, repository revision, and host
+identity. The fingerprint uses only the architectural and stopping configuration, allowing results
+from different hosts to be grouped without discarding provenance.
 
 ## Release bundle
 
