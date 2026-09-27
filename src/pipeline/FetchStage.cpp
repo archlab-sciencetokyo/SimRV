@@ -723,9 +723,10 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
     if (!check_fetch_alignment(state_, ctx)) return;
     ctx.cpc = state_.pc;
 
-    ctx.padr1 = PhysAddr{(state_.regs.xlen == 32) ? (state_.pc & 0xFFFFFFFFULL) : state_.pc};
-    ctx.padr2 =
-        PhysAddr{(state_.regs.xlen == 32) ? ((state_.pc + 2) & 0xFFFFFFFFULL) : (state_.pc + 2)};
+    ctx.padr1 = PhysAddr{
+        static_cast<Word>((state_.regs.xlen == 32) ? (state_.pc & 0xFFFFFFFFULL) : state_.pc)};
+    ctx.padr2 = PhysAddr{static_cast<Word>(
+        (state_.regs.xlen == 32) ? ((state_.pc + 2) & 0xFFFFFFFFULL) : (state_.pc + 2))};
 
     // Fast path: DRAM physical fetch - valid only while the MMU has never been
     // enabled.  The latch is set once on the first satp write that activates
