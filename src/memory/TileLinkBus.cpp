@@ -36,11 +36,9 @@ struct SmpLockGuard {
 }  // namespace
 
 TileLinkBus::TileLinkBus(simrv::core::Machine& machine)
-    : machine_(machine), coherence_hub_(machine) {}
-
-auto TileLinkBus::is_smp_enabled() const noexcept -> bool {
-    return machine_.configuration().execution.smp_multithreaded;
-}
+    : machine_(machine),
+      coherence_hub_(machine),
+      is_smp_enabled_(machine.configuration().execution.smp_multithreaded) {}
 
 void TileLinkBus::record_transaction(TileLinkChannel ch, std::string_view opcode, TlSourceId source,
                                      TlSinkId sink, Address address, std::string_view detail) {
@@ -86,16 +84,18 @@ auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
                      .submitted_cycle = cycle_,
                      .request_latency = data_port ? data_request_latency_ : request_latency_,
                      .sequence = next_sequence_++});
+    has_pending_requests_ = true;
     return true;
 }
 
-void TileLinkBus::advance_cycle() {
-    SmpLockGuard lock(bus_mutex_, is_smp_enabled());
+void TileLinkBus::advance_cycle_slow() {
+    SmpLockGuard lock(bus_mutex_, is_smp_enabled_);
     ++cycle_;
     if (!req_queue_.empty() &&
         req_queue_.front().submitted_cycle + req_queue_.front().request_latency <= cycle_) {
         auto request = std::move(req_queue_.front());
         req_queue_.pop_front();
+        has_pending_requests_ = !req_queue_.empty();
         process_request(request);
     }
 }
@@ -258,10 +258,11 @@ auto TileLinkBus::try_get_timed_response(TlSourceId source_id, TimedResponse& re
 }
 
 void TileLinkBus::cancel_source(TlSourceId source_id) {
-    SmpLockGuard lock(bus_mutex_, is_smp_enabled());
+    SmpLockGuard lock(bus_mutex_, is_smp_enabled_);
     std::erase_if(req_queue_, [source_id](const TimedRequest& request) {
         return request.payload.source == source_id;
     });
+    has_pending_requests_ = !req_queue_.empty();
     std::erase_if(d_queue_, [source_id](const TimedDBeat& response) {
         return response.payload.source == source_id;
     });

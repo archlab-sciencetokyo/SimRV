@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -28,11 +29,11 @@ enum class PipelineStage : uint8_t {
 class Scoreboard {
    public:
     struct Entry {
-        bool busy{false};
-        PipelineStage stage{PipelineStage::Execute};
-        LatencyCycles latency{0};
-        bool can_forward{false};
         Register forwarded_value{0};
+        LatencyCycles latency{0};
+        PipelineStage stage{PipelineStage::Execute};
+        bool busy{false};
+        bool can_forward{false};
     };
 
     static constexpr size_t kNumIntRegisters = 32;
@@ -40,53 +41,124 @@ class Scoreboard {
     static constexpr size_t kNumVecRegisters = 32;
 
     constexpr void reset() noexcept {
-        int_registers_.fill(Entry{});
-        fp_registers_.fill(Entry{});
-        vec_registers_.fill(Entry{});
+        while (int_busy_mask_ != 0) {
+            const auto idx = std::countr_zero(int_busy_mask_);
+            int_registers_[idx] = Entry{};
+            int_busy_mask_ &= int_busy_mask_ - 1;
+        }
+        while (fp_busy_mask_ != 0) {
+            const auto idx = std::countr_zero(fp_busy_mask_);
+            fp_registers_[idx] = Entry{};
+            fp_busy_mask_ &= fp_busy_mask_ - 1;
+        }
+        while (vec_busy_mask_ != 0) {
+            const auto idx = std::countr_zero(vec_busy_mask_);
+            vec_registers_[idx] = Entry{};
+            vec_busy_mask_ &= vec_busy_mask_ - 1;
+        }
     }
 
     constexpr void reserve(operation::RegBank bank, RegId reg, PipelineStage stage,
                            LatencyCycles latency = 0, bool can_forward = false,
                            Register forwarded_value = 0) noexcept {
-        auto* entry = get_entry(bank, reg);
-        if (entry != nullptr) {
-            entry->busy = true;
-            entry->stage = stage;
-            entry->latency = latency;
-            entry->can_forward = can_forward;
-            entry->forwarded_value = forwarded_value;
+        const auto index = static_cast<size_t>(reg);
+        switch (bank) {
+            case operation::RegBank::Integer:
+                if (index == 0 || index >= kNumIntRegisters) return;
+                int_busy_mask_ |= (1U << index);
+                int_registers_[index] = Entry{
+                    .forwarded_value = forwarded_value,
+                    .latency = latency,
+                    .stage = stage,
+                    .busy = true,
+                    .can_forward = can_forward,
+                };
+                return;
+            case operation::RegBank::Float:
+                if (index >= kNumFpRegisters) return;
+                fp_busy_mask_ |= (1U << index);
+                fp_registers_[index] = Entry{
+                    .forwarded_value = forwarded_value,
+                    .latency = latency,
+                    .stage = stage,
+                    .busy = true,
+                    .can_forward = can_forward,
+                };
+                return;
+            case operation::RegBank::Vector:
+                if (index >= kNumVecRegisters) return;
+                vec_busy_mask_ |= (1U << index);
+                vec_registers_[index] = Entry{
+                    .forwarded_value = forwarded_value,
+                    .latency = latency,
+                    .stage = stage,
+                    .busy = true,
+                    .can_forward = can_forward,
+                };
+                return;
+            default:
+                return;
         }
     }
 
     constexpr void release(operation::RegBank bank, RegId reg) noexcept {
-        auto* entry = get_entry(bank, reg);
-        if (entry != nullptr) {
-            *entry = Entry{};
+        const auto index = static_cast<size_t>(reg);
+        switch (bank) {
+            case operation::RegBank::Integer:
+                if (index == 0 || index >= kNumIntRegisters) return;
+                int_busy_mask_ &= ~(1U << index);
+                int_registers_[index] = Entry{};
+                return;
+            case operation::RegBank::Float:
+                if (index >= kNumFpRegisters) return;
+                fp_busy_mask_ &= ~(1U << index);
+                fp_registers_[index] = Entry{};
+                return;
+            case operation::RegBank::Vector:
+                if (index >= kNumVecRegisters) return;
+                vec_busy_mask_ &= ~(1U << index);
+                vec_registers_[index] = Entry{};
+                return;
+            default:
+                return;
         }
     }
 
     [[nodiscard]] constexpr auto is_busy(operation::RegBank bank, RegId reg) const noexcept
         -> bool {
-        const auto* entry = get_entry(bank, reg);
-        return entry != nullptr && entry->busy;
+        const auto index = static_cast<size_t>(reg);
+        switch (bank) {
+            case operation::RegBank::Integer:
+                return (index > 0 && index < kNumIntRegisters) &&
+                       ((int_busy_mask_ & (1U << index)) != 0);
+            case operation::RegBank::Float:
+                return (index < kNumFpRegisters) && ((fp_busy_mask_ & (1U << index)) != 0);
+            case operation::RegBank::Vector:
+                return (index < kNumVecRegisters) && ((vec_busy_mask_ & (1U << index)) != 0);
+            default:
+                return false;
+        }
     }
 
     [[nodiscard]] constexpr auto can_forward(operation::RegBank bank, RegId reg) const noexcept
         -> bool {
+        if (!is_busy(bank, reg)) return false;
         const auto* entry = get_entry(bank, reg);
-        return entry != nullptr && entry->busy && entry->can_forward;
+        return entry != nullptr && entry->can_forward;
     }
 
     [[nodiscard]] constexpr auto get_forwarded_value(operation::RegBank bank,
                                                      RegId reg) const noexcept -> Register {
+        if (!is_busy(bank, reg)) return 0;
         const auto* entry = get_entry(bank, reg);
-        return (entry != nullptr && entry->busy && entry->can_forward) ? entry->forwarded_value : 0;
+        return (entry != nullptr && entry->can_forward) ? entry->forwarded_value : 0;
     }
 
     [[nodiscard]] constexpr auto get_stage(operation::RegBank bank, RegId reg) const noexcept
         -> std::optional<PipelineStage> {
+        if (!is_busy(bank, reg)) return std::nullopt;
         const auto* entry = get_entry(bank, reg);
-        if (entry != nullptr && entry->busy) {
+        if (entry != nullptr) {
             return entry->stage;
         }
         return std::nullopt;
@@ -94,14 +166,16 @@ class Scoreboard {
 
     [[nodiscard]] constexpr auto get_latency(operation::RegBank bank, RegId reg) const noexcept
         -> LatencyCycles {
+        if (!is_busy(bank, reg)) return 0;
         const auto* entry = get_entry(bank, reg);
-        return (entry != nullptr && entry->busy) ? entry->latency : 0;
+        return (entry != nullptr) ? entry->latency : 0;
     }
 
     [[nodiscard]] constexpr auto get_entry_data(operation::RegBank bank, RegId reg) const noexcept
         -> std::optional<Entry> {
+        if (!is_busy(bank, reg)) return std::nullopt;
         const auto* entry = get_entry(bank, reg);
-        if (entry != nullptr && entry->busy) {
+        if (entry != nullptr) {
             return *entry;
         }
         return std::nullopt;
@@ -176,20 +250,28 @@ class Scoreboard {
     }
 
     constexpr void flush_from_stage(PipelineStage stage) noexcept {
-        const auto flush_bank = [stage](auto& array) {
-            for (auto& entry : array) {
-                if (entry.busy &&
-                    static_cast<uint8_t>(entry.stage) <= static_cast<uint8_t>(stage)) {
+        const auto flush_bank = [stage](auto& array, uint32_t& mask) {
+            uint32_t cur = mask;
+            while (cur != 0) {
+                const auto idx = std::countr_zero(cur);
+                auto& entry = array[idx];
+                if (static_cast<uint8_t>(entry.stage) <= static_cast<uint8_t>(stage)) {
                     entry = Entry{};
+                    mask &= ~(1U << idx);
                 }
+                cur &= cur - 1;
             }
         };
-        flush_bank(int_registers_);
-        flush_bank(fp_registers_);
-        flush_bank(vec_registers_);
+        flush_bank(int_registers_, int_busy_mask_);
+        flush_bank(fp_registers_, fp_busy_mask_);
+        flush_bank(vec_registers_, vec_busy_mask_);
     }
 
    private:
+    uint32_t int_busy_mask_{0};
+    uint32_t fp_busy_mask_{0};
+    uint32_t vec_busy_mask_{0};
+
     std::array<Entry, kNumIntRegisters> int_registers_{};
     std::array<Entry, kNumFpRegisters> fp_registers_{};
     std::array<Entry, kNumVecRegisters> vec_registers_{};

@@ -69,10 +69,18 @@ class TileLinkBus : public Bus {
     void cancel_source(TlSourceId source_id);
 
     /// Advance deterministic arbitration by one interconnect clock.
-    void advance_cycle();
+    SIMRV_ALWAYS_INLINE void advance_cycle() noexcept {
+        if (simrv::compiler::likely(!has_pending_requests_ && !is_smp_enabled_)) {
+            ++cycle_;
+            return;
+        }
+        advance_cycle_slow();
+    }
+    void advance_cycle_slow();
     [[nodiscard]] auto cycle() const noexcept -> Cycle { return cycle_; }
     [[nodiscard]] auto pending_requests() const noexcept -> size_t { return req_queue_.size(); }
     [[nodiscard]] auto pending_responses() const noexcept -> size_t;
+    void set_smp_enabled(bool enabled) noexcept { is_smp_enabled_ = enabled; }
 
     auto acquire_block(const TlChannelA& req, TlChannelD& resp,
                        std::array<Byte, CoherenceHub::kLineBytes>& line_data) -> bool;
@@ -153,11 +161,13 @@ class TileLinkBus : public Bus {
     uint32_t data_response_latency_ = 1;
     uint32_t startup_data_response_latency_ = 0;
     uint64_t data_response_count_ = 0;
+    bool has_pending_requests_ = false;
+    bool is_smp_enabled_ = false;
     std::deque<TimedRequest> req_queue_;
     std::deque<TimedDBeat> d_queue_;
     simrv::util::SmallFlatMap<TlSourceId, DAssembly, 32> d_assemblies_;
     std::deque<TlTransactionRecord> transaction_history_;
-    [[nodiscard]] auto is_smp_enabled() const noexcept -> bool;
+    [[nodiscard]] auto is_smp_enabled() const noexcept -> bool { return is_smp_enabled_; }
 };
 
 }  // namespace simrv::memory

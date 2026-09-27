@@ -299,9 +299,21 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto retired_instruction_count() const noexcept -> Counter {
         return retired_instruction_count_.load(std::memory_order_relaxed);
     }
+    [[nodiscard]] auto is_smp_enabled() const noexcept -> bool {
+        return config.execution.smp_multithreaded;
+    }
+
     /// Publish retired instructions from a hart; used by execution engines and safe for MT-SMP.
     void record_retired_instructions(Counter count) noexcept {
-        retired_instruction_count_.fetch_add(count, std::memory_order_relaxed);
+        if (simrv::compiler::likely(count != 0)) {
+            if (simrv::compiler::likely(!config.execution.smp_multithreaded)) {
+                retired_instruction_count_.store(
+                    retired_instruction_count_.load(std::memory_order_relaxed) + count,
+                    std::memory_order_relaxed);
+            } else {
+                retired_instruction_count_.fetch_add(count, std::memory_order_relaxed);
+            }
+        }
     }
     /// Request system reboot.
     void request_reboot();

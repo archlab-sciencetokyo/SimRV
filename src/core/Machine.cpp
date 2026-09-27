@@ -106,6 +106,7 @@ void Machine::apply_configuration(MachineConfig machine_config) {
     config = std::move(machine_config);
     resolved_start_pc_ = config.execution.start_pc;
     resolved_isatest_tohost_ = config.isa.isatest_tohost;
+    memory_.system_bus().set_smp_enabled(config.execution.smp_multithreaded);
     if (tui_enabled() || debugger_enabled()) {
         execution_state_.store(ExecutionState::Paused, std::memory_order_release);
     }
@@ -564,12 +565,16 @@ void RunnerBase::execute_ca_batch(Machine& machine) {
         return;
     }
     const uint32_t quantum = machine.ca_batch_quantum();
+    const auto fincnt = machine.config.execution.fincnt;
     for (uint32_t cycle = 0; cycle < quantum && machine.is_running(); ++cycle) {
-        if (cycle != 0 && machine.execution_state() != ExecutionState::Running) break;
+        if (simrv::compiler::unlikely(cycle != 0 &&
+                                      machine.execution_state() != ExecutionState::Running)) {
+            break;
+        }
         machine.advance_ca_global_cycle();
-        if (machine.tohost != 0 ||
-            (machine.config.execution.fincnt != std::numeric_limits<Counter>::max() &&
-             machine.retired_instruction_count() >= machine.config.execution.fincnt)) {
+        if (simrv::compiler::unlikely(machine.tohost != 0 ||
+                                      (fincnt != std::numeric_limits<Counter>::max() &&
+                                       machine.retired_instruction_count() >= fincnt))) {
             break;
         }
     }

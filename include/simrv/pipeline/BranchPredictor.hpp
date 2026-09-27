@@ -83,6 +83,8 @@ struct BranchPrediction {
     }
 };
 
+inline constexpr BranchPrediction kDefaultBranchPrediction{};
+
 /**
  * @struct BranchFeedback
  * @brief Resolution outcome sent from Execute/Decode stage to train the predictor.
@@ -95,12 +97,28 @@ struct BranchFeedback {
     isa::OperationId op_id = isa::OperationId::UNKNOWN;
     RegId rd = static_cast<RegId>(0);
     RegId rs1 = static_cast<RegId>(0);
-    BranchPrediction prediction{};
+    const BranchPrediction& prediction = kDefaultBranchPrediction;
 
     [[nodiscard]] constexpr auto direction() const noexcept -> BranchDirection {
         return actual_taken ? BranchDirection::Taken : BranchDirection::NotTaken;
     }
 };
+
+inline constexpr std::array<uint8_t, 8> kSaturateFlat = {0, 0, 1, 2, 1, 2, 3, 3};
+
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto saturate_up(uint8_t val) noexcept -> uint8_t {
+    return kSaturateFlat[4 | (val & 0x3)];
+}
+
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto saturate(uint8_t val, bool taken) noexcept
+    -> uint8_t {
+    return kSaturateFlat[(static_cast<unsigned>(taken) << 2) | (val & 0x3)];
+}
+
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto is_taken_prediction(uint8_t counter) noexcept
+    -> bool {
+    return (counter & 0x2) != 0;
+}
 
 /**
  * @struct BranchPredictorStats
@@ -167,6 +185,12 @@ struct BranchPredictorStats {
  */
 class BranchPredictor {
    public:
+    struct BtbEntry {
+        Address tag = 0;
+        Address target = 0;
+        bool valid = false;
+    };
+
     BranchPredictor();
     explicit BranchPredictor(const BranchPredictorConfig& config);
 
@@ -177,7 +201,6 @@ class BranchPredictor {
     [[nodiscard]] auto predict(VirtAddr pc, const DecodedInstruction& inst) -> BranchPrediction {
         return predict(pc.raw(), inst);
     }
-    void update(const BranchFeedback& feedback);
     void latch_btb_read(Address pc);
     void restore_speculation(const BranchPrediction& prediction);
 
@@ -188,21 +211,112 @@ class BranchPredictor {
     [[nodiscard]] auto ras_peek() const noexcept -> std::optional<Address>;
     [[nodiscard]] auto bht_distribution() const noexcept -> std::array<size_t, 4>;
 
-   private:
-    struct BtbEntry {
-        Address tag = 0;
-        Address target = 0;
-        bool valid = false;
-    };
+    SIMRV_ALWAYS_INLINE void update_btb(Address pc, Address target) noexcept {
+        if (config_.enable_btb && !btb_.empty()) {
+            const uint32_t btb_idx = static_cast<uint32_t>(pc >> config_.pc_shift) & btb_mask_;
+            btb_[btb_idx] = BtbEntry{.tag = pc, .target = target, .valid = true};
+        }
+    }
 
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto get_bht_index(Address pc,
+                                                         uint32_t ghr_val) const noexcept
+        -> uint32_t {
+        const uint32_t pc_idx = static_cast<uint32_t>(pc >> config_.pc_shift);
+        if (config_.type == BranchPredictorType::GShare) {
+            return (pc_idx ^ ghr_val) & bht_mask_;
+        }
+        return pc_idx & bht_mask_;
+    }
+
+    SIMRV_ALWAYS_INLINE void update_direction(const BranchFeedback& feedback) {
+        if (config_.type == BranchPredictorType::Disabled ||
+            config_.type == BranchPredictorType::Static) {
+            return;
+        }
+
+        const Address pc = feedback.pc;
+        const bool actual_taken = feedback.actual_taken;
+
+        if (simrv::compiler::unlikely(config_.type == BranchPredictorType::Tournament)) {
+            const uint32_t gshare_idx =
+                (static_cast<uint32_t>(pc >> 1) ^ feedback.prediction.ghr_snapshot) & bht_mask_;
+            const uint32_t bimodal_idx = static_cast<uint32_t>(pc >> 1) & bht_mask_;
+
+            const bool gshare_pred = is_taken_prediction(bht_[gshare_idx]);
+            const bool bimodal_pred = is_taken_prediction(bimodal_bht_[bimodal_idx]);
+
+            if (gshare_pred != bimodal_pred) {
+                chooser_table_[gshare_idx] =
+                    saturate(chooser_table_[gshare_idx], gshare_pred == actual_taken);
+            }
+
+            bht_[gshare_idx] = saturate(bht_[gshare_idx], actual_taken);
+            bimodal_bht_[bimodal_idx] = saturate(bimodal_bht_[bimodal_idx], actual_taken);
+            return;
+        }
+
+        const uint32_t bht_idx = feedback.prediction.bht_index;
+        if (simrv::compiler::likely(bht_idx < bht_.size())) {
+            bht_[bht_idx] = saturate(bht_[bht_idx], actual_taken);
+        }
+    }
+
+    SIMRV_ALWAYS_INLINE void update(const BranchFeedback& feedback) {
+        if (!feedback.prediction.is_control) {
+            return;
+        }
+
+        ++stats_.total_branches;
+
+        if (feedback.prediction.is_call) ++stats_.function_calls;
+        if (feedback.prediction.is_return) ++stats_.function_returns;
+
+        if (feedback.prediction.is_branch) {
+            ++stats_.conditional_branches;
+            ++stats_.direction_predictions;
+
+            const bool dir_match = (feedback.actual_taken == feedback.prediction.predicted_taken);
+            stats_.direction_hits += dir_match;
+            stats_.direction_misses += !dir_match;
+
+            update_direction(feedback);
+
+            if (feedback.prediction.false_control_alias) {
+                return;
+            }
+
+            if (feedback.actual_taken) {
+                update_btb(feedback.pc, feedback.actual_target);
+            }
+        } else if (feedback.opcode == isa::Opcode::Jal) {
+            ++stats_.direct_jumps;
+            if (config_.jump_uses_direction_counter && !bht_.empty()) {
+                const auto index = get_bht_index(feedback.pc, feedback.prediction.ghr_snapshot);
+                bht_[index] = saturate_up(bht_[index]);
+            }
+            update_btb(feedback.pc, feedback.actual_target);
+        } else if (feedback.opcode == isa::Opcode::Jalr) {
+            ++stats_.indirect_jumps;
+            ++stats_.target_predictions;
+
+            const bool target_match =
+                (feedback.actual_target == feedback.prediction.predicted_target);
+            stats_.target_hits += target_match;
+            stats_.target_misses += !target_match;
+
+            if (feedback.prediction.is_return && feedback.prediction.ras_hit) {
+                stats_.ras_hits += target_match;
+                stats_.ras_misses += !target_match;
+            }
+
+            update_btb(feedback.pc, feedback.actual_target);
+        }
+    }
+
+   private:
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto predict_direction(Address pc,
                                                              const DecodedInstruction& inst,
                                                              uint32_t& bht_idx) -> bool;
-    SIMRV_ALWAYS_INLINE void update_direction(const BranchFeedback& feedback);
-    SIMRV_ALWAYS_INLINE void update_btb(Address pc, Address target) noexcept;
-    [[nodiscard]] SIMRV_ALWAYS_INLINE auto get_bht_index(Address pc,
-                                                         uint32_t ghr_val) const noexcept
-        -> uint32_t;
 
     void ras_push(Address return_addr);
     auto ras_pop() -> std::optional<Address>;

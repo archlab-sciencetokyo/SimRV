@@ -469,7 +469,9 @@ void CPU::run_cycle(Machine& machine) {
             ca_state.instruction_walk.reset();
             ca_state.data_walk.reset();
         }
-        machine.record_retired_instructions(e_icount - retired_before);
+        if (ca_pipeline.retired_this_cycle) {
+            machine.record_retired_instructions(e_icount - retired_before);
+        }
         return;
     }
     if ((machine.runtime_profile.is_instruction_fast() ||
