@@ -9,11 +9,24 @@
     {"id": "rv32", "xlen": 32, "isa": "rv32gcbv", "vlen": 256, "preset": "rv32-release", "execution_mode": "high-performance", "simrv_args": []},
     {"id": "rv64", "xlen": 64, "isa": "rv64gcbv", "vlen": 256, "preset": "rv64-release", "execution_mode": "high-performance", "simrv_args": []}
   ],
-  "correctness_suites": ["regress", "isa", "vector", "linux"],
   "performance": {
     "policy": "evidence-only",
-    "workloads": ["dhrystone", "median", "memcpy", "mm", "multiply", "qsort", "rsort", "spmv", "towers", "vvadd"],
+    "configurations": ["rv64"],
+    "bootstrap_resamples": 10000,
+    "confidence": 0.95,
+    "maximum_cv_percent": 5.0,
+    "maximum_regression_percent": 3.0,
+    "minimum_geomean_percent": 0.0,
+    "workloads": [
+      {"id": "coremark-20m", "target": "coremark", "instruction_limit": 20000000},
+      {"id": "coremark-200m", "target": "coremark", "instruction_limit": 200000000},
+      {"id": "coremark-full", "target": "coremark", "instruction_limit": 0},
+      {"id": "dhrystone-20m", "target": "dhrystone", "instruction_limit": 20000000},
+      {"id": "qsort-20m", "target": "qsort", "instruction_limit": 20000000},
+      {"id": "memcpy-20m", "target": "memcpy", "instruction_limit": 20000000},
+      {"id": "spmv-20m", "target": "spmv", "instruction_limit": 20000000}
+    ],
     "reference": "spike"
   },
-  "outputs": {"raw": "results/raw", "aggregate": "results/aggregate.json", "table": "results/table.md", "plot": "results/throughput.svg"}
+  "outputs": {"raw": "raw", "aggregate": "aggregate.json", "table": "table.md", "plot": "throughput.svg", "comparison": "comparison.json", "evidence": "evidence.json", "index": "index.json"}
 }

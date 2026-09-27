@@ -6,13 +6,25 @@ import gzip
 import hashlib
 import json
 import pathlib
+import subprocess
 import tarfile
-
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MANIFEST = json.loads((ROOT / "release/release-manifest.json").read_text())
-STATIC = ["CITATION.cff", "LICENSE", "README.md", "SECURITY.md", "docs/RELEASE.md",
-          "docs/RISCV_COMPLIANCE.md", "repro/README.md", "repro/experiment-manifest.json"]
+STATIC = ["CITATION.cff", "LICENSE", "README.md", "SECURITY.md", "pyproject.toml", "uv.lock",
+          ".python-version", "docs/evaluation/release.md", "docs/architecture/compliance.md",
+          "repro/README.md", "repro/experiment-manifest.json"]
+
+
+def source_members() -> list[tuple[pathlib.Path, pathlib.Path]]:
+    """Package the complete tracked source tree, with a documented fallback outside Git."""
+    try:
+        result = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True,
+                                check=True, timeout=10)
+        names = [name.decode() for name in result.stdout.split(b"\0") if name]
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
+        names = STATIC
+    return [(ROOT / name, pathlib.Path(name)) for name in names]
 
 
 def main() -> None:
@@ -21,9 +33,7 @@ def main() -> None:
     parser.add_argument("--output", type=pathlib.Path)
     args = parser.parse_args()
     output = args.output or ROOT / f"SimRV-repro-v{MANIFEST['version']}.tar.gz"
-    members = [(ROOT / path, pathlib.Path(path)) for path in STATIC]
-    members += [(path, path.relative_to(ROOT)) for path in sorted((ROOT / "release/schemas").glob("*.json"))]
-    members += [(path, path.relative_to(ROOT)) for path in sorted((ROOT / "scripts").glob("*.py"))]
+    members = source_members()
     if args.results.is_dir():
         members += [(path, pathlib.Path("results") / path.relative_to(args.results))
                     for path in sorted(args.results.rglob("*")) if path.is_file()]
@@ -31,16 +41,16 @@ def main() -> None:
     if missing:
         raise SystemExit(f"missing reproduction inputs: {missing}")
     output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("wb") as raw:
-        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
-            with tarfile.open(fileobj=compressed, mode="w") as archive:
-                for path, arcname in sorted(set(members), key=lambda item: str(item[1])):
-                    info = archive.gettarinfo(str(path), arcname=str(arcname))
-                    info.uid = info.gid = 0
-                    info.uname = info.gname = ""
-                    info.mtime = 0
-                    with path.open("rb") as source:
-                        archive.addfile(info, source)
+    with (output.open("wb") as raw,
+          gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
+          tarfile.open(fileobj=compressed, mode="w") as archive):
+        for path, arcname in sorted(set(members), key=lambda item: str(item[1])):
+            info = archive.gettarinfo(str(path), arcname=str(arcname))
+            info.uid = info.gid = 0
+            info.uname = info.gname = ""
+            info.mtime = 0
+            with path.open("rb") as source:
+                archive.addfile(info, source)
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
     output.with_suffix(output.suffix + ".sha256").write_text(f"{digest}  {output.name}\n", encoding="utf-8")
     print(output)

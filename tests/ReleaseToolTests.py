@@ -26,6 +26,8 @@ release_check = load("release_check", ROOT / "scripts/release_check.py")
 aggregate = load("aggregate_experiments", ROOT / "scripts/aggregate_experiments.py")
 metadata = load("experiment_metadata", ROOT / "scripts/experiment_metadata.py")
 benchmark = load("benchmark", ROOT / "scripts/benchmark.py")
+comparison = load("compare_benchmarks", ROOT / "scripts/compare_benchmarks.py")
+reproduce = load("reproduce", ROOT / "scripts/reproduce.py")
 
 
 class ReleaseToolTests(unittest.TestCase):
@@ -52,9 +54,15 @@ class ReleaseToolTests(unittest.TestCase):
 
     def test_experiment_manifest_configuration_is_explicit(self):
         manifest = json.loads((ROOT / "repro/experiment-manifest.json").read_text())
+        configuration_ids = {item["id"] for item in manifest["configurations"]}
         for configuration in manifest["configurations"]:
             self.assertIn(configuration["execution_mode"], ("high-performance", "cycle-accurate"))
             self.assertIsInstance(configuration["simrv_args"], list)
+        self.assertLessEqual(set(manifest["performance"]["configurations"]), configuration_ids)
+        workload_ids = [item["id"] for item in manifest["performance"]["workloads"]]
+        self.assertEqual(len(workload_ids), len(set(workload_ids)))
+        self.assertIn(0, [item["instruction_limit"]
+                          for item in manifest["performance"]["workloads"]])
 
     def test_benchmark_commands_use_same_isa_and_limit(self):
         simrv = benchmark.simrv_benchmark_command(
@@ -127,6 +135,25 @@ class ReleaseToolTests(unittest.TestCase):
             second = aggregate.load_rows([source])
             self.assertEqual(first, second)
             self.assertEqual(first[0]["median_kips"], 2.0)
+            self.assertEqual(first[0]["median_kips_ci"], second[0]["median_kips_ci"])
+
+    def test_manifest_drives_one_benchmark_command_per_workload(self):
+        configuration = {"id": "rv64", "xlen": 64, "isa": "rv64gc", "vlen": 256,
+                         "execution_mode": "high-performance", "simrv_args": ["--quiet"]}
+        workload = {"id": "dhrystone-20m", "target": "dhrystone",
+                    "instruction_limit": 20_000_000}
+        command = reproduce.benchmark_command(configuration, workload, pathlib.Path("SimRV"),
+                                              "spike", pathlib.Path("tests"), pathlib.Path("raw.json"))
+        self.assertEqual(command[command.index("--test") + 1], "dhrystone")
+        self.assertEqual(command[command.index("--limit") + 1], "20000000")
+        self.assertIn("--simrv-arg=--quiet", command)
+
+    def test_aggregate_baseline_comparison(self):
+        report = comparison.compare({"rv64:demo": 100.0}, {"rv64:demo": 98.0}, -3.0, 3.0)
+        self.assertTrue(report["passed"])
+        self.assertAlmostEqual(report["results"][0]["change_percent"], -2.0)
+        failed = comparison.compare({"rv64:demo": 100.0}, {"rv64:demo": 90.0}, 0.0, 3.0)
+        self.assertFalse(failed["passed"])
 
     def test_compare_is_evidence_only_by_default(self):
         def report(speed):

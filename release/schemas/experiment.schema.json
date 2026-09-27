@@ -3,7 +3,7 @@
   "$id": "https://github.com/archlab-sciencetokyo/SimRV/release/schemas/experiment.schema.json",
   "title": "SimRV experiment manifest",
   "type": "object",
-  "required": ["schema_version", "name", "repetitions", "warmups", "timeout_seconds", "configurations", "correctness_suites", "performance", "outputs"],
+  "required": ["schema_version", "name", "repetitions", "warmups", "timeout_seconds", "configurations", "performance", "outputs"],
   "properties": {
     "schema_version": {"const": 1}, "name": {"type": "string"},
     "repetitions": {"type": "integer", "minimum": 1}, "warmups": {"type": "integer", "minimum": 0},
@@ -25,8 +25,37 @@
         "additionalProperties": false
       }
     },
-    "correctness_suites": {"type": "array", "minItems": 1, "items": {"type": "string"}},
-    "performance": {"type": "object", "required": ["policy", "workloads", "reference"]},
-    "outputs": {"type": "object", "required": ["raw", "aggregate", "table", "plot"]}
+    "performance": {
+      "type": "object",
+      "required": ["policy", "configurations", "bootstrap_resamples", "confidence", "maximum_cv_percent", "maximum_regression_percent", "minimum_geomean_percent", "workloads", "reference"],
+      "properties": {
+        "policy": {"enum": ["evidence-only", "enforced"]},
+        "configurations": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+        "bootstrap_resamples": {"type": "integer", "minimum": 1},
+        "confidence": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+        "maximum_cv_percent": {"type": "number", "minimum": 0},
+        "maximum_regression_percent": {"type": "number", "minimum": 0},
+        "minimum_geomean_percent": {"type": "number"},
+        "workloads": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "required": ["id", "target", "instruction_limit"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "target": {"type": "string", "minLength": 1},
+              "instruction_limit": {"type": "integer", "minimum": 0}
+            },
+            "additionalProperties": false
+          }
+        },
+        "reference": {"const": "spike"}
+      },
+      "additionalProperties": false
+    },
+    "outputs": {
+      "type": "object",
+      "required": ["raw", "aggregate", "table", "plot", "comparison", "evidence", "index"],
+      "additionalProperties": {"type": "string", "minLength": 1}
+    }
   }
 }

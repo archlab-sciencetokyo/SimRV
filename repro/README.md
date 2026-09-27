@@ -34,13 +34,41 @@ and obtain it from the URL recorded in the release manifest.
 ## Run
 
 ```bash
-python3 scripts/reproduce.py --mode quick --output repro/results
-python3 scripts/reproduce.py --mode full --output repro/results
+uv run --frozen python scripts/reproduce.py --mode quick --output repro/results
+uv run --frozen python scripts/reproduce.py --mode full --output repro/results \
+  --riscv-tests-dir /path/to/riscv-tests \
+  --vector-tests-dir /path/to/riscv-vector-tests \
+  --spike /path/to/spike
 ```
 
 Quick mode validates metadata and locally configured regression tests. Full mode performs clean
 RV32/RV64 builds and required correctness suites, then runs configured performance workloads.
 Required dependencies that are absent are reported as `unavailable` and make full evidence fail.
+
+The full command implements the six artifact stages:
+
+1. Validate the experiment/release manifests and pinned metadata.
+2. Build GCC and Clang RV32/RV64 configurations and collect correctness evidence.
+3. Run exactly the performance configurations and workloads declared in the experiment manifest.
+4. Generate deterministic bootstrap confidence intervals, a Markdown table, and an SVG plot.
+5. Optionally compare against a frozen aggregate baseline with the declared regression policy.
+6. Merge and verify evidence, write an index, and create a deterministic source-and-results archive
+   plus SHA-256 checksum.
+
+To include the optional baseline comparison:
+
+```bash
+uv run --frozen python scripts/reproduce.py --mode full --output repro/results \
+  --riscv-tests-dir /path/to/riscv-tests \
+  --vector-tests-dir /path/to/riscv-vector-tests \
+  --spike /path/to/spike \
+  --baseline /path/to/frozen-baseline-aggregate.json
+```
+
+By default the archive is `SimRV-paper-artifact.tar.gz`. Use `--archive PATH` to select the
+submission filename, or `--no-package` while developing the experiment. Performance thresholds are
+evidence-only unless the manifest policy is changed to `enforced`; correctness failures always stop
+the workflow.
 
 The experiment manifest records XLEN, ISA, VLEN, execution mode, simulator arguments, repetitions,
 warmups, timeouts, workloads, and output locations. Raw results are immutable inputs. Aggregate
@@ -52,6 +80,11 @@ commands, binary and workload SHA-256 digests, simulator versions, repository re
 identity. The fingerprint uses only the architectural and stopping configuration, allowing results
 from different hosts to be grouped without discarding provenance. `--isa` is the canonical
 simulator option; `--misa` remains a compatibility alias for older main-branch commands.
+
+The archive contains the complete Git-tracked source tree, locked Python environment, manifests,
+schemas, raw measurements, derived outputs, correctness evidence, and artifact index. Downloaded
+toolchains, Spike, test suites, and Linux images are not redistributed; their pinned revisions and
+local provenance remain recorded.
 
 ## Release bundle
 
