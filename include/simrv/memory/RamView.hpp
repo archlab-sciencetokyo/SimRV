@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstddef>
+#include <span>
 
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -36,10 +37,15 @@ class RamView {
     constexpr RamView() = default;
     constexpr RamView(Byte* data, Address base, Address size)
         : data_(data), base_(base), size_(size) {}
+    constexpr RamView(std::span<Byte> storage, Address base = kDramBaseAddress)
+        : data_(storage.data()), base_(base), size_(static_cast<Address>(storage.size())) {}
 
     [[nodiscard]] constexpr auto data() const noexcept -> Byte* { return data_; }
     [[nodiscard]] constexpr auto base() const noexcept -> Address { return base_; }
     [[nodiscard]] constexpr auto size() const noexcept -> Address { return size_; }
+    [[nodiscard]] constexpr auto span() const noexcept -> std::span<Byte> {
+        return {data_, static_cast<std::size_t>(size_)};
+    }
     [[nodiscard]] constexpr auto contains(Address address, size_t bytes = 1) const noexcept
         -> bool {
         return data_ != nullptr && address_range_contains(base_, size_, address, bytes);

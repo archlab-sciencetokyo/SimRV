@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -413,6 +414,9 @@ class Machine final : public core::IInterruptController {
 
     /// Internal test support for deterministic component fixtures. Not part of the SDK contract.
     void set_ram_for_testing(Byte* ram, size_t size) noexcept;
+    void set_ram_for_testing(std::span<Byte> ram) noexcept {
+        set_ram_for_testing(ram.data(), ram.size());
+    }
     void set_tui_enabled_for_testing(bool enabled) noexcept { config.tui.enabled = enabled; }
     void set_smp_parallel_for_testing(bool enabled) noexcept {
         config.execution.smp_multithreaded = enabled;

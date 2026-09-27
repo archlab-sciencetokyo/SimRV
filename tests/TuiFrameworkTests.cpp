@@ -1214,7 +1214,8 @@ void test_modal_components() {
 void test_instruction_explainer_is_side_effect_free() {
     simrv::core::Machine machine;
     std::vector<Byte> ram(1024 * 1024, Byte{0});
-    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.set_ram_for_testing(ram);
+    expect(machine.ram_view().span().size() == ram.size(), "RamView span matches backing size");
     auto& cpu = machine.primary_hart();
     cpu.machine_ = &machine;
     cpu.reset();
