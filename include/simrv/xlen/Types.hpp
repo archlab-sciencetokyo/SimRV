@@ -329,6 +329,9 @@ constexpr auto operator>=(PrivilegeLevel lhs, PrivilegeLevel rhs) -> bool {
     return std::to_underlying(lhs) >= std::to_underlying(rhs);
 }
 
+/// Domain alias representing RISC-V architectural privilege modes.
+using PrivilegeMode = PrivilegeLevel;
+
 /**
  * @struct PhysAddr
  * @brief Strong zero-overhead semantic wrapper representing physical memory addresses.
@@ -785,6 +788,8 @@ using ::FpRegId;
 using ::FRegId;
 using ::HartId;
 using ::PhysAddr;
+using ::PrivilegeLevel;
+using ::PrivilegeMode;
 using ::RegId;
 using ::RegisterIdentifier;
 using ::StrongAddress;
@@ -798,6 +803,8 @@ using ::FpRegId;
 using ::FRegId;
 using ::HartId;
 using ::PhysAddr;
+using ::PrivilegeLevel;
+using ::PrivilegeMode;
 using ::RegId;
 using ::RegisterIdentifier;
 using ::StrongAddress;
