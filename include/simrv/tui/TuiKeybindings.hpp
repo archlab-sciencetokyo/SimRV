@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/TuiTypes.hpp"
 
 namespace simrv::tui {

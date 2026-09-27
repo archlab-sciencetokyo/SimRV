@@ -4,7 +4,6 @@
  */
 #pragma once
 
-#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -14,6 +13,7 @@
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/framework/Types.hpp"
 #include "simrv/xlen/Helpers.hpp"
+#include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
 class Machine;
