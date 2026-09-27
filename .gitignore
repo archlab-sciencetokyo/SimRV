@@ -45,6 +45,7 @@ perf*.data*
 # Generated benchmark/test outputs
 .bench_tmp/
 .cache/
+.venv/
 .isa_tmp/
 isa_logs/
 regression_logs/

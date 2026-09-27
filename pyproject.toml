@@ -1,0 +1,30 @@
+[project]
+name = "simrv-research-tools"
+version = "0.1.0"
+description = "Reproducibility and evaluation tools for SimRV"
+requires-python = ">=3.10"
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "jsonschema>=4.26,<5",
+  "matplotlib>=3.9,<3.11",
+  "numpy>=2.1,<2.3",
+  "pandas>=2.2,<3",
+  "psutil>=7.1,<8",
+  "pyperf>=2.9,<3",
+  "pytest>=8.3,<9",
+  "ruff>=0.12,<1",
+  "scipy>=1.14,<1.16",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["*Tests.py", "test_*.py"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.uv]
+package = false
