@@ -10,7 +10,7 @@ SimRV provides:
 
 1. **High-Throughput Simulation Speed**:
    - **Functional Fast Mode**: 100 – 125 MIPS with full VirtIO device and SMP Linux support.
-   - **Cycle-Accurate Mode**: 3.0 – 6.0 MIPS modeling 5-stage pipelines, scoreboards, and cache hierarchies—**5× to 15× faster than gem5 Minor/In-Order**.
+   - **Cycle-Accurate Mode**: 15.0 – 18.0 MIPS modeling 5-stage pipelines, scoreboards, and cache hierarchies—**15× to 40× faster than gem5 Minor/In-Order**.
 2. **Hardware RTL Parity**:
    - Validated cycle-by-cycle retirement trace parity against physical Verilog hardware (CFU-Proving-Ground and Archlab RVComp) via Verilator at **20× to 50× faster execution speeds**.
 3. **Full-System SMP Linux Emulation**:
